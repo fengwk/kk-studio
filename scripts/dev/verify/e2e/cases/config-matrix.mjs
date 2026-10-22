@@ -40,12 +40,14 @@ for (const row of modelConfigMatrix()) {
       assert(sharedProviderName, 'matrix provider missing; ensure matrix.model.setup_provider runs first')
       const body = row.rawBody
         ? {
+            kind: 'MODEL',
             providerName: sharedProviderName,
             name: `mx-${row.id}-${cid().slice(0, 4)}`,
             modelId: `wire-${row.id}`,
             description: row.title,
           }
         : {
+            kind: 'MODEL',
             providerName: sharedProviderName,
             name: `mx-${row.id}-${cid().slice(0, 4)}`,
             modelId: `wire-${row.id}`,
@@ -61,7 +63,7 @@ for (const row of modelConfigMatrix()) {
         // cleanup model immediately to keep list small
         await ctx.call(
           'DELETE',
-          `/api/ai/catalog/models/${encodeURIComponent(model.providerName)}/${encodeURIComponent(model.name)}?expectedVersion=${encodeURIComponent(model.version)}`,
+          `/api/ai/catalog/models/${encodeURIComponent(model.name)}?expectedVersion=${encodeURIComponent(model.version)}`,
         )
       } else {
         const err = await expectHttpError(() => ctx.call('POST', '/api/ai/catalog/models', body), {
@@ -107,6 +109,7 @@ registerCase({
     ctx.vars.agentMatrixProviderName = providerName
     ctx.vars.agentMatrixProviderExpectedVersion = String(provider.version)
     const { json: mCreate } = await ctx.call('POST', '/api/ai/catalog/models', {
+      kind: 'MODEL',
       providerName,
       name: `agent-matrix-model-${cid().slice(0, 4)}`,
       modelId: 'wire-agent-matrix',
@@ -114,7 +117,7 @@ registerCase({
       config: baseModelConfig(),
     })
     const model = envelopeData(mCreate)
-    sharedModelRefForAgent = `${model.providerName}/${model.name}`
+    sharedModelRefForAgent = model.name
     sharedModelVersionForAgent = String(model.version)
     ctx.vars.agentMatrixModel = sharedModelRefForAgent
   },
@@ -185,12 +188,9 @@ registerCase({
       // ignore list failures
     }
     if (sharedModelRefForAgent) {
-      const separator = sharedModelRefForAgent.indexOf('/')
-      const providerName = sharedModelRefForAgent.slice(0, separator)
-      const modelName = sharedModelRefForAgent.slice(separator + 1)
       await ctx.call(
         'DELETE',
-        `/api/ai/catalog/models/${encodeURIComponent(providerName)}/${encodeURIComponent(modelName)}?expectedVersion=${encodeURIComponent(sharedModelVersionForAgent)}`,
+        `/api/ai/catalog/models/${encodeURIComponent(sharedModelRefForAgent)}?expectedVersion=${encodeURIComponent(sharedModelVersionForAgent)}`,
       )
       sharedModelRefForAgent = null
       sharedModelVersionForAgent = null

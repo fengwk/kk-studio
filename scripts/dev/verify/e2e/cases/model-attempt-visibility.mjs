@@ -70,6 +70,7 @@ registerCase({
       assert(provider?.name && provider?.version, JSON.stringify(providerResponse.json))
 
       const modelResponse = await ctx.call('POST', '/api/ai/catalog/models', {
+        kind: 'MODEL',
         providerName: provider.name,
         name: `e2e-model-attempt-${suffix}`,
         modelId: `wire-attempt-${suffix}`,
@@ -91,12 +92,12 @@ registerCase({
         name: `e2e-agent-attempt-${suffix}`,
         description: 'Local model attempt visibility E2E agent.',
         systemPrompt: 'Reply with the exact mock response. Do not call tools.',
-        model: `${model.providerName}/${model.name}`,
+        model: model.name,
         variant: 'default',
         config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
       })
       agent = envelopeData(agentResponse.json)
-      assert(agent?.name && agent.model === `${model.providerName}/${model.name}`, JSON.stringify(agentResponse.json))
+      assert(agent?.name && agent.model === model.name, JSON.stringify(agentResponse.json))
 
       chat = await createChat(ctx, {
         title: `e2e-attempt-visibility-${suffix}`,
@@ -113,7 +114,7 @@ registerCase({
         threadId: createdThreadId,
         rootSettings: branchSettingsOf(
           { name: `e2e-attempt-missing-${suffix}` },
-          { providerName: model.providerName, modelName: model.name, variant: 'default' },
+          { modelName: model.name, variant: 'default' },
         ),
         yoloEnabled: false,
         commands: [userMessageCommand(`materialize ${suffix}`, cid())],
@@ -144,7 +145,7 @@ registerCase({
               commands: [
                 setAgentCommand(agent.name, cid()),
                 setModelCommand(
-                  { providerName: model.providerName, modelName: model.name, variant: 'default' },
+                  { modelName: model.name, variant: 'default' },
                   cid(),
                 ),
                 userMessageCommand(initialMarker, cid()),
@@ -326,10 +327,10 @@ registerCase({
         }
       })
       await cleanup('model', cleanupErrors, async () => {
-        if (model?.providerName && model?.name) {
+        if (model?.name) {
           await ctx.call(
             'DELETE',
-            `/api/ai/catalog/models/${encodeURIComponent(model.providerName)}/${encodeURIComponent(model.name)}?expectedVersion=${encodeURIComponent(model.version)}`,
+            `/api/ai/catalog/models/${encodeURIComponent(model.name)}?expectedVersion=${encodeURIComponent(model.version)}`,
           )
         }
       })

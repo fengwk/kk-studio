@@ -1,19 +1,24 @@
 /** 可复用的合法请求体与配置矩阵行定义。 */
 
+/**
+ * 完整价格定义：基础费率 + 有序覆盖/倍率规则。
+ *
+ * <p>所有价格与倍率在 wire 上都是十进制字符串；普通缺价由服务端归一化为 0，reasoning=null 表示跟随
+ * output。测试默认使用可直接读回的完整定义，而不是省略 base 或伪造 unpriced 状态。
+ */
 export function basePricing(overrides = {}) {
   return {
-    currency: 'USD',
-    pricingTier: 'default',
-    serviceTier: 'default',
-    serviceTierMultiplier: 1,
-    version: 'v1',
-    inputPerMillionTokens: 1,
-    outputPerMillionTokens: 2,
-    cacheReadPerMillionTokens: 0,
-    cacheWritePerMillionTokens: 0,
-    cacheWriteLongPerMillionTokens: 0,
-    reasoningPerMillionTokens: 0,
-    ...overrides,
+    base: {
+      input: '1',
+      output: '2',
+      cacheRead: '0',
+      cacheWrite: '0',
+      cacheWriteByTtl: {},
+      reasoning: null,
+      ...(overrides.base ?? {}),
+    },
+    overrides: overrides.overrides ?? [],
+    multipliers: overrides.multipliers ?? [],
   }
 }
 
@@ -84,6 +89,38 @@ export function modelConfigMatrix() {
       ok: true,
       title: '最小合法 config',
       build: () => good(),
+    },
+    {
+      id: 'valid.pricing_rules',
+      ok: true,
+      title: 'base/overrides/multipliers 十进制字符串',
+      build: () =>
+        baseModelConfig({
+          pricing: basePricing({
+            base: {
+              input: '1.25',
+              output: '2.5',
+              cacheRead: '0.5',
+              cacheWrite: '1',
+              cacheWriteByTtl: { 3600: '1.5' },
+              reasoning: null,
+            },
+            overrides: [
+              {
+                id: 'long-context',
+                when: { context: { gt: 100000 } },
+                rates: { input: '2', reasoning: null },
+              },
+            ],
+            multipliers: [
+              {
+                id: 'batch-tier',
+                when: { serviceTier: ['batch'] },
+                factors: { input: '0.5', output: '0.5' },
+              },
+            ],
+          }),
+        }),
     },
     {
       id: 'valid.reasoning_variants',
@@ -171,12 +208,20 @@ export function modelConfigMatrix() {
       build: () => baseModelConfig({ limit: { context: 100, output: 200 } }),
     },
     {
-      id: 'invalid.blank_currency',
+      id: 'invalid.pricing_numeric',
       ok: false,
       expectStatus: 400,
-      messageIncludes: /currency|pricing/i,
-      title: 'pricing.currency 空白',
-      build: () => baseModelConfig({ pricing: basePricing({ currency: ' ' }) }),
+      messageIncludes: /price|decimal|pricing/i,
+      title: '价格必须是十进制字符串而非 JSON 数值',
+      build: () => baseModelConfig({ pricing: basePricing({ base: { input: 1 } }) }),
+    },
+    {
+      id: 'invalid.pricing_negative',
+      ok: false,
+      expectStatus: 400,
+      messageIncludes: /negative|pricing|input/i,
+      title: '价格为负',
+      build: () => baseModelConfig({ pricing: basePricing({ base: { output: '-1' } }) }),
     },
     {
       id: 'invalid.empty_modalities',

@@ -92,6 +92,7 @@ registerCase({
       provider = envelopeData(providerResponse.json)
       assert(provider?.name && provider?.version, JSON.stringify(providerResponse.json))
       const modelResponse = await ctx.call('POST', '/api/ai/catalog/models', {
+        kind: 'MODEL',
         providerName: provider.name,
         name: `e2e-model-queue-${suffix}`,
         modelId: `wire-queue-${suffix}`,
@@ -111,13 +112,13 @@ registerCase({
         name: `e2e-agent-queue-${suffix}`,
         description: 'Local queued command batch E2E agent.',
         systemPrompt: 'Reply with the exact mock response. Do not call tools.',
-        model: `${model.providerName}/${model.name}`,
+        model: model.name,
         variant: 'default',
         config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
       })
       agent = envelopeData(agentResponse.json)
       assert(
-        agent?.name && agent.model === `${model.providerName}/${model.name}`,
+        agent?.name && agent.model === model.name,
         JSON.stringify(agentResponse.json),
       )
       chat = await createChat(ctx, {
@@ -132,7 +133,6 @@ registerCase({
         sessionId,
         threadId: tid,
         rootSettings: branchSettingsOf(agent, {
-          providerName: model.providerName,
           modelName: model.name,
           variant: 'default',
         }),
@@ -344,12 +344,10 @@ registerCase({
         }
       })
       await cleanup('model', cleanupErrors, async () => {
-        if (model?.providerName && model?.name) {
+        if (model?.name) {
           await ctx.call(
             'DELETE',
-            `/api/ai/catalog/models/${encodeURIComponent(
-              model.providerName,
-            )}/${encodeURIComponent(model.name)}?expectedVersion=${encodeURIComponent(
+            `/api/ai/catalog/models/${encodeURIComponent(model.name)}?expectedVersion=${encodeURIComponent(
               model.version,
             )}`,
           )
