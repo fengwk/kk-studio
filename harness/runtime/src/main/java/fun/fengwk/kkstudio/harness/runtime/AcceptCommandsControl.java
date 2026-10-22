@@ -463,12 +463,7 @@ final class AcceptCommandsControl {
     // 票据请求（带父）由统一 spawn 在写前校验为恰一条末尾 user-like；此处保留既有 THREAD target 的形状规则。
     SpawnTickets.admit(tx, ticket, false);
     Instant now = tx.now();
-    Session session =
-        tx.findSession(thread.sessionId())
-            .orElseThrow(
-                () ->
-                    new IllegalStateException(
-                        "session " + thread.sessionId() + " disappeared while thread existed"));
+    Session session = tx.findSession(thread.sessionId()).orElseThrow();
     List<NewThreadCommand> prepared = preflight.prepare(tx, session, commands);
     requirePreflightShape(commands, prepared);
     long nextSeq = thread.nextCommandSequence();
@@ -519,7 +514,7 @@ final class AcceptCommandsControl {
         tx,
         new AcceptedCommands(
             session,
-            requireRootEntry(tx, session.id()),
+            tx.findRootEntry(session.id()).orElseThrow(),
             advanced,
             List.copyOf(userCommands),
             false,
@@ -573,11 +568,7 @@ final class AcceptCommandsControl {
     }
     List<UUID> sortedSessionIds = sessionIds.stream().sorted(UuidOrder.COMPARATOR).toList();
     for (UUID sessionId : sortedSessionIds) {
-      tx.lockSessionForKeyShare(sessionId)
-          .orElseThrow(
-              () ->
-                  new IllegalStateException(
-                      "session " + sessionId + " disappeared while thread existed"));
+      tx.lockSessionForKeyShare(sessionId).orElseThrow();
     }
     List<UUID> sortedThreadIds = allThreadIds.stream().sorted(UuidOrder.COMPARATOR).toList();
     Map<UUID, ThreadState> lockedThreads = new HashMap<>();
@@ -602,12 +593,7 @@ final class AcceptCommandsControl {
       List<NewThreadCommand> requests,
       AcceptancePreflight preflight,
       Instant now) {
-    Session session =
-        tx.findSession(thread.sessionId())
-            .orElseThrow(
-                () ->
-                    new IllegalStateException(
-                        "session " + thread.sessionId() + " disappeared while thread existed"));
+    Session session = tx.findSession(thread.sessionId()).orElseThrow();
     List<NewThreadCommand> prepared = preflight.prepare(tx, session, requests);
     requirePreflightShape(requests, prepared);
     List<ThreadCommand> inserted = new ArrayList<>(prepared.size());
@@ -631,7 +617,12 @@ final class AcceptCommandsControl {
     tx.updateThread(advanced);
     tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()));
     return new AcceptedCommands(
-        session, requireRootEntry(tx, session.id()), advanced, List.copyOf(inserted), false, false);
+        session,
+        tx.findRootEntry(session.id()).orElseThrow(),
+        advanced,
+        List.copyOf(inserted),
+        false,
+        false);
   }
 
   /**
@@ -659,11 +650,7 @@ final class AcceptCommandsControl {
               + immutable.sessionId()
               + ")");
     }
-    tx.lockSessionForKeyShare(immutable.sessionId())
-        .orElseThrow(
-            () ->
-                new IllegalStateException(
-                    "session " + immutable.sessionId() + " disappeared while thread existed"));
+    tx.lockSessionForKeyShare(immutable.sessionId()).orElseThrow();
     ThreadState thread =
         tx.lockThread(threadId)
             .orElseThrow(
@@ -710,14 +697,14 @@ final class AcceptCommandsControl {
                 + " must start at sequence 1 and be contiguous in the request order");
       }
     }
-    Session session =
-        tx.findSession(sessionId)
-            .orElseThrow(
-                () ->
-                    new IllegalStateException(
-                        "session " + sessionId + " disappeared while thread existed"));
+    Session session = tx.findSession(sessionId).orElseThrow();
     return new AcceptedCommands(
-        session, requireRootEntry(tx, sessionId), thread, List.copyOf(ordered), true, false);
+        session,
+        tx.findRootEntry(sessionId).orElseThrow(),
+        thread,
+        List.copyOf(ordered),
+        true,
+        false);
   }
 
   /**
@@ -788,15 +775,10 @@ final class AcceptCommandsControl {
                 + " are not contiguous in the request order");
       }
     }
-    Session session =
-        tx.findSession(thread.sessionId())
-            .orElseThrow(
-                () ->
-                    new IllegalStateException(
-                        "session " + thread.sessionId() + " disappeared while thread existed"));
+    Session session = tx.findSession(thread.sessionId()).orElseThrow();
     return new AcceptedCommands(
         session,
-        requireRootEntry(tx, thread.sessionId()),
+        tx.findRootEntry(thread.sessionId()).orElseThrow(),
         thread,
         List.copyOf(ordered),
         true,
@@ -848,14 +830,6 @@ final class AcceptCommandsControl {
       return payload.message();
     }
     return ((CustomMessageCommandPayload) command.payload()).message();
-  }
-
-  private static Entry requireRootEntry(HarnessStore.Transaction tx, UUID sessionId) {
-    return tx.findRootEntry(sessionId)
-        .orElseThrow(
-            () ->
-                new IllegalStateException(
-                    "root entry for session " + sessionId + " disappeared while session existed"));
   }
 
   private static void requirePreflightShape(

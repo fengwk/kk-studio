@@ -43,14 +43,8 @@ public class PostgresqlCanvasStore implements CanvasStore {
     CanvasDocumentDO document = new CanvasDocumentDO();
     document.setId(canvasId);
     document.setTitle(title);
-    if (documentStore.insert(document) != 1) {
-      throw new IllegalStateException("insert canvas document failed");
-    }
-    CanvasDocumentDO persisted =
-        documentStore
-            .findById(canvasId)
-            .orElseThrow(
-                () -> new IllegalStateException("canvas document disappeared after insert"));
+    documentStore.insert(document);
+    CanvasDocumentDO persisted = documentStore.findById(canvasId).orElseThrow();
     notifier.revisionChanged(canvasId, persisted.getRevision());
     return toDomain(persisted);
   }

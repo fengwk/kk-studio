@@ -220,12 +220,7 @@ public final class HarnessRuntime {
                   .toList();
           List<ThreadState> locked = new ArrayList<>(lockOrder.size());
           for (UUID id : lockOrder) {
-            locked.add(
-                tx.lockThread(id)
-                    .orElseThrow(
-                        () ->
-                            new IllegalStateException(
-                                "thread " + id + " disappeared while locking its execution tree")));
+            locked.add(tx.lockThread(id).orElseThrow());
           }
           ThreadContextProbe probe = new ThreadContextProbe();
           List<ThreadSnapshot> snapshots = new ArrayList<>(locked.size());

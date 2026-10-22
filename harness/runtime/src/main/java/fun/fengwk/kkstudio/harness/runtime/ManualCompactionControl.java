@@ -251,24 +251,14 @@ final class ManualCompactionControl {
   /** 按 Session KEY SHARE -&gt; Thread FOR UPDATE 获取一致 Thread，避免后续 Entry 外键锁与 Session 深删除形成逆序。 */
   private static ThreadState lockThreadWithSession(HarnessStore.Transaction tx, UUID threadId) {
     ThreadTreeLocks.lockForThread(tx, threadId);
-    ThreadState immutable =
+    ThreadState thread =
         tx.findThread(threadId)
             .orElseThrow(
                 () ->
                     new HarnessRuntimeNotFoundException("thread " + threadId + " does not exist"));
-    tx.lockSessionForKeyShare(immutable.sessionId())
-        .orElseThrow(
-            () -> new HarnessRuntimeNotFoundException("thread " + threadId + " does not exist"));
-    ThreadState locked =
-        tx.lockThread(threadId)
-            .orElseThrow(
-                () ->
-                    new HarnessRuntimeNotFoundException("thread " + threadId + " does not exist"));
-    if (!locked.sessionId().equals(immutable.sessionId())) {
-      throw new IllegalStateException(
-          "thread " + threadId + " relocated while acquiring its session lock");
-    }
-    return locked;
+    // 树锁内 Thread 不会被删除，其 Session 由外键保证存在。
+    tx.lockSessionForKeyShare(thread.sessionId()).orElseThrow();
+    return tx.lockThread(threadId).orElseThrow();
   }
 
   /** queued 快照中是否存在消息或系统通知（两者都能触发下一轮 INPUT）；SET_* 不构成用户需求。 */
