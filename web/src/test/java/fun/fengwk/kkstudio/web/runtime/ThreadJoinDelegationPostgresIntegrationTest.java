@@ -127,7 +127,7 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
 
   private static final BranchSettings SETTINGS =
       new BranchSettings(
-          "default-assistant", new ModelSelection("stub", "acceptance-stub", "default"), null);
+          "default-assistant", new ModelSelection("acceptance-stub", "default"), null);
 
   private static final String AGENT = "default-assistant";
 

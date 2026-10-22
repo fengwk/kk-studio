@@ -35,6 +35,7 @@ export interface SystemSettingsAiRuntimeDraft {
   subagentMaxTotalConcurrency: DraftNumericField
   subagentMaxTurns: DraftNumericField
   modelHttpRetryStatusCodes: (number | string)[]
+  modelCatalogSource: string
 }
 
 export interface SystemSettingsEnvironmentDraft {
@@ -172,6 +173,7 @@ function aiRuntimeToDraft(
     modelHttpRetryStatusCodes: Array.isArray(dto.modelHttpRetryStatusCodes)
       ? [...dto.modelHttpRetryStatusCodes]
       : [],
+    modelCatalogSource: dto.modelCatalogSource,
   }
 }
 
@@ -234,6 +236,7 @@ export function assembleSettingsUpdate(
       modelHttpRetryStatusCodes: assembleHttpStatusList(
         draft.aiRuntime.modelHttpRetryStatusCodes,
       ),
+      modelCatalogSource: draft.aiRuntime.modelCatalogSource,
     },
     environment: {
       maxResourceBytes: requiredLong(draft.environment.maxResourceBytes),

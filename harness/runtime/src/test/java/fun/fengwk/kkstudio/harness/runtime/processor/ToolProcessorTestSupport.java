@@ -311,13 +311,16 @@ final class ToolProcessorTestSupport {
                     turnStartEntryId,
                     userMessagePayload(),
                     NOW.plusMillis(2)));
+            ModelSelection actualSelection =
+                ModelSelection.model(modelRequest.model().modelName(), modelRequest.variant().id());
             tx.insertEntry(
                 new Entry(
                     assistantEntryId,
                     sessionId,
                     userEntryId,
                     new HistoryPayloadMapper()
-                        .assistantPayload(response, modelRequest.toolBindings()),
+                        .assistantPayload(
+                            response, modelRequest.toolBindings(), actualSelection, NOW),
                     NOW.plusMillis(3)));
             tx.insertThread(
                 new ThreadState(
@@ -446,13 +449,16 @@ final class ToolProcessorTestSupport {
                   turnStartEntryId,
                   userMessagePayload(),
                   now.plusMillis(2)));
+          ModelSelection actualSelection =
+              ModelSelection.model(modelRequest.model().modelName(), modelRequest.variant().id());
           tx.insertEntry(
               new Entry(
                   assistantEntryId,
                   sessionId,
                   userEntryId,
                   new HistoryPayloadMapper()
-                      .assistantPayload(response, modelRequest.toolBindings()),
+                      .assistantPayload(
+                          response, modelRequest.toolBindings(), actualSelection, now),
                   now.plusMillis(3)));
           tx.insertThread(
               new ThreadState(
@@ -724,7 +730,7 @@ final class ToolProcessorTestSupport {
   }
 
   private static BranchSettings branchSettings() {
-    return new BranchSettings("agent", new ModelSelection("provider", "model", "v1"), null);
+    return new BranchSettings("agent", ModelSelection.model("model", "v1"), null);
   }
 
   private static EntryPayload userMessagePayload() {
@@ -752,7 +758,7 @@ final class ToolProcessorTestSupport {
         "",
         calls,
         calls.isEmpty() ? GenerationStopReason.COMPLETE : GenerationStopReason.COMPLETE,
-        new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
+        new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L),
         "req-1",
         null,
         "{}");

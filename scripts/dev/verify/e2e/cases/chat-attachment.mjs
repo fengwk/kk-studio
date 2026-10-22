@@ -18,7 +18,7 @@ import {
   threadTarget,
   waitForQuiescentThread,
 } from '../lib/harness.mjs'
-import { baseModelConfig } from '../lib/fixtures.mjs'
+import { baseModelConfig, encodePathTail } from '../lib/fixtures.mjs'
 import { getCase, registerCase } from '../lib/registry.mjs'
 
 /**
@@ -48,7 +48,6 @@ registerCase({
     const rootSettings = branchSettingsOf(
       { name: `e2e-attachment-missing-${cid().slice(0, 8)}` },
       {
-        providerName: 'minimax',
         modelName: 'MiniMax-M2.7',
         variant: 'default',
       },
@@ -290,6 +289,7 @@ registerCase({
       model = envelopeData(
         (
           await ctx.call('POST', '/api/models', {
+            kind: 'MODEL',
             providerName: provider.name,
             name: `e2e-model-image-${suffix}`,
             modelId: `wire-image-${suffix}`,
@@ -312,7 +312,7 @@ registerCase({
             name: `e2e-agent-image-${suffix}`,
             description: 'Agent starts with one environment-independent tool.',
             systemPrompt: 'Complete without calling tools.',
-            model: `${model.providerName}/${model.name}`,
+            model: model.name,
             variant: 'default',
             config: {
               tools: ['get_goal'],
@@ -342,7 +342,6 @@ registerCase({
         rootSettings: branchSettingsOf(
           agent,
           {
-            providerName: model.providerName,
             modelName: model.name,
             variant: 'default',
           },
@@ -499,10 +498,10 @@ registerCase({
         )
       })
       await cleanup('model', cleanupErrors, async () => {
-        if (!model?.providerName || !model?.name) return
+        if (!model?.name) return
         await ctx.call(
           'DELETE',
-          `/api/models/${encodeURIComponent(model.providerName)}/${encodeURIComponent(model.name)}?expectedVersion=${encodeURIComponent(model.version)}`,
+          `/api/models/${encodePathTail(model.name)}?expectedVersion=${encodeURIComponent(model.version)}`,
         )
       })
       await cleanup('provider', cleanupErrors, async () => {

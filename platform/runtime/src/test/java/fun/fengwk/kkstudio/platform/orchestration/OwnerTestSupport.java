@@ -41,7 +41,7 @@ public abstract class OwnerTestSupport extends PostgresSpringTestSupport {
     return id;
   }
 
-  /** 建一个最小合法 AgentDefinition（含 provider/model）并返回 Agent 自然名称。 */
+  /** 建一个最小合法 AgentDefinition（引用全局 MODEL 名称）并返回 Agent 自然名称。 */
   protected String agentDefinition() {
     String suffix = uuid().toString().substring(0, 8);
     String providerName = "prov-" + suffix;
@@ -53,16 +53,14 @@ public abstract class OwnerTestSupport extends PostgresSpringTestSupport {
         providerName,
         uuid());
     jdbc.update(
-        "insert into agent_model (provider_name, name, model_id, config)"
-            + " values (?, ?, ?, '{}'::jsonb)",
-        providerName,
+        "insert into agent_model (name, kind, provider_name, model_id, config)"
+            + " values (?, 'MODEL', ?, ?, '{}'::jsonb)",
         modelName,
+        providerName,
         "wire-" + suffix);
     jdbc.update(
-        "insert into agent_definition (name, model_provider_name, model_name, config)"
-            + " values (?, ?, ?, '{}'::jsonb)",
+        "insert into agent_definition (name, model_name, config)" + " values (?, ?, '{}'::jsonb)",
         agentName,
-        providerName,
         modelName);
     return agentName;
   }

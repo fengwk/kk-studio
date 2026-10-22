@@ -277,9 +277,8 @@ export interface ThreadModelRequestDebugData {
   kind: string
   generatedAt: number
   model: {
-    providerName: string
     modelName: string
-    variant: string
+    variant?: string | null
   }
   environmentName: string | null
   systemInstruction: string

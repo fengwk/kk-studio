@@ -29,6 +29,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -308,7 +309,7 @@ class ExecutionConcurrentDeletionTest {
         "",
         List.of(),
         GenerationStopReason.COMPLETE,
-        new ModelUsage(1, 1, 0, 0, 0, 0, 2),
+        new ModelUsage(1, 1, 0, 0, Map.of(), 0L, 2L),
         "req-1",
         null,
         "{}");

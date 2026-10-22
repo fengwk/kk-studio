@@ -18,6 +18,7 @@ import type {
 
 const model: AgentModelDTO = {
   providerName: 'provider',
+  kind: 'MODEL',
   name: 'model',
   modelId: 'model',
   description: null,
@@ -25,17 +26,9 @@ const model: AgentModelDTO = {
     limit: { context: 32_000, output: 4_000 },
     abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
     pricing: {
-      currency: 'USD',
-      pricingTier: 'default',
-      serviceTier: 'default',
-      serviceTierMultiplier: 1,
-      version: 'v1',
-      inputPerMillionTokens: 0,
-      outputPerMillionTokens: 0,
-      cacheReadPerMillionTokens: 0,
-      cacheWritePerMillionTokens: 0,
-      cacheWriteLongPerMillionTokens: 0,
-      reasoningPerMillionTokens: 0,
+      base: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0', cacheWriteByTtl: {}, reasoning: null },
+      overrides: [],
+      multipliers: [],
     },
     defaultVariant: 'default',
     variants: [{ id: 'default' }],
@@ -48,7 +41,7 @@ const model: AgentModelDTO = {
 const modelWithoutDefaultVariant: AgentModelDTO = {
   ...model,
   config: {
-    ...model.config,
+    ...model.config!,
     defaultVariant: '',
     variants: [],
   },
@@ -70,7 +63,7 @@ function agent(
     description: null,
     systemPrompt: null,
     type: 'USER',
-    model: 'provider/model',
+    model: 'model',
     variant: null,
     config: {
       inheritParentEnvironment: true,
@@ -93,7 +86,7 @@ function draftWith(
 ): BranchDraft {
   return {
     agentName: 'assistant',
-    model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+    model: { modelName: 'MiniMax', variant: 'default' },
     environmentName: null,
     yoloEnabled: false,
     ...overrides,
@@ -152,7 +145,7 @@ describe('BranchDraft materialization failures', () => {
   it('preserves existing draft environment when switching Agent and does not overwrite with Chat fallback', () => {
     const existing: BranchDraft = {
       agentName: 'assistant',
-      model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+      model: { modelName: 'MiniMax', variant: 'default' },
       environmentName: 'existing-env',
       yoloEnabled: false,
     }
@@ -184,7 +177,7 @@ describe('BranchDraft conversion and diff semantics', () => {
   function createSettings(): HarnessBranchSettingsDTO {
     return {
       agentName: 'assistant',
-      model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+      model: { modelName: 'MiniMax', variant: 'default' },
       environmentName: null,
       goal: null,
     }
@@ -194,7 +187,7 @@ describe('BranchDraft conversion and diff semantics', () => {
     const draft = branchDraftFromBranchSettings(createSettings(), true)
     expect(draft).toEqual({
       agentName: 'assistant',
-      model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+      model: { modelName: 'MiniMax', variant: 'default' },
       environmentName: null,
       yoloEnabled: true,
     })
@@ -221,7 +214,7 @@ describe('BranchDraft conversion and diff semantics', () => {
     // 存在已有 draft 时切换 agent 保持已选 environmentName 不变
     const existing = draftWith({
       environmentName: 'my-custom-env',
-      model: { providerName: 'provider', modelName: 'model', variant: 'default' },
+      model: { modelName: 'model', variant: 'default' },
     })
     const switched = materializeAgentBranchDraft(rootAgent, [model], existing)
     expect(switched?.environmentName).toBe('my-custom-env')
@@ -229,7 +222,7 @@ describe('BranchDraft conversion and diff semantics', () => {
     // 即使 existing 的 model 处于未就绪/空状态，environmentName 依然保留
     const existingEmptyModel = draftWith({
       environmentName: 'preserved-env',
-      model: { providerName: '', modelName: '', variant: '' },
+      model: { modelName: '', variant: '' },
     })
     const switchedFromEmpty = materializeAgentBranchDraft(rootAgent, [model], existingEmptyModel)
     expect(switchedFromEmpty?.environmentName).toBe('preserved-env')
@@ -242,29 +235,29 @@ describe('BranchDraft conversion and diff semantics', () => {
       providerName: 'anthropic',
       name: 'claude',
       config: {
-        ...model.config,
+        ...model.config!,
         defaultVariant: 'v1',
         variants: [{ id: 'v1' }, { id: 'v2' }],
       },
     }
 
-    it('updates provider and model to match the target agent', () => {
+    it('updates model to match the target agent', () => {
       const claudeAgent: AgentDefinitionDTO = {
         ...agent([], [], []),
         name: 'claude-agent',
-        model: 'anthropic/claude',
+        model: 'claude',
         variant: null,
       }
       const existing = draftWith({
         agentName: 'assistant',
-        model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+        model: { modelName: 'MiniMax', variant: 'default' },
         environmentName: 'env-1',
         yoloEnabled: true,
       })
       const result = materializeAgentBranchDraft(claudeAgent, [model, claudeModel], existing)
       expect(result).toEqual({
         agentName: 'claude-agent',
-        model: { providerName: 'anthropic', modelName: 'claude', variant: 'v1' },
+        model: { modelName: 'claude', variant: 'v1' },
         environmentName: 'env-1',
         yoloEnabled: true,
       })
@@ -274,12 +267,11 @@ describe('BranchDraft conversion and diff semantics', () => {
       const explicitVariantAgent: AgentDefinitionDTO = {
         ...agent([], [], []),
         name: 'claude-v2',
-        model: 'anthropic/claude',
+        model: 'claude',
         variant: 'v2',
       }
       const result = materializeAgentBranchDraft(explicitVariantAgent, [model, claudeModel], null)
       expect(result?.model).toEqual({
-        providerName: 'anthropic',
         modelName: 'claude',
         variant: 'v2',
       })
@@ -289,12 +281,11 @@ describe('BranchDraft conversion and diff semantics', () => {
       const defaultVariantAgent: AgentDefinitionDTO = {
         ...agent([], [], []),
         name: 'claude-default',
-        model: 'anthropic/claude',
+        model: 'claude',
         variant: null,
       }
       const result = materializeAgentBranchDraft(defaultVariantAgent, [model, claudeModel], null)
       expect(result?.model).toEqual({
-        providerName: 'anthropic',
         modelName: 'claude',
         variant: 'v1',
       })
@@ -304,13 +295,13 @@ describe('BranchDraft conversion and diff semantics', () => {
       const agentV1: AgentDefinitionDTO = {
         ...agent([], [], []),
         name: 'agent-v1',
-        model: 'anthropic/claude',
+        model: 'claude',
         variant: 'v1',
       }
       const agentV2: AgentDefinitionDTO = {
         ...agent([], [], []),
         name: 'agent-v2',
-        model: 'anthropic/claude',
+        model: 'claude',
         variant: 'v2',
       }
       const initial = materializeAgentBranchDraft(agentV1, [claudeModel], null)
@@ -318,7 +309,6 @@ describe('BranchDraft conversion and diff semantics', () => {
 
       const switched = materializeAgentBranchDraft(agentV2, [claudeModel], initial)
       expect(switched?.model).toEqual({
-        providerName: 'anthropic',
         modelName: 'claude',
         variant: 'v2',
       })
@@ -329,14 +319,13 @@ describe('BranchDraft conversion and diff semantics', () => {
       const rootAgent = agent([], [], [])
       const existing = draftWith({
         agentName: 'root',
-        model: { providerName: 'custom-provider', modelName: 'custom-model', variant: 'custom' },
+        model: { modelName: 'custom-model', variant: 'custom' },
         environmentName: 'prod',
         yoloEnabled: true,
       })
       const reselected = materializeAgentBranchDraft(rootAgent, [model], existing)
       expect(reselected?.model).toEqual({
-        providerName: 'provider',
-        modelName: 'model',
+                modelName: 'model',
         variant: 'default',
       })
       expect(reselected?.environmentName).toBe('prod')
@@ -363,7 +352,7 @@ describe('BranchDraft conversion and diff semantics', () => {
 
       const agentWithInvalidVariant: AgentDefinitionDTO = {
         ...agent([], [], []),
-        model: 'provider/model',
+        model: 'model',
         variant: 'non-existent-variant',
       }
       expect(materializeAgentBranchDraft(agentWithInvalidVariant, [model], draftWith())).toBeNull()
@@ -388,13 +377,13 @@ describe('BranchDraft conversion and diff semantics', () => {
 
     const modelChanged = buildBranchDiffCommands(
       draftWith(),
-      draftWith({ model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'pro' } }),
+      draftWith({ model: { modelName: 'MiniMax', variant: 'pro' } }),
       ids,
     )
     expect(modelChanged).toEqual([{
       type: 'SET_MODEL',
       idempotencyKey: 'cid-2',
-      model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'pro' },
+      model: { modelName: 'MiniMax', variant: 'pro' },
     }])
   })
 
@@ -440,7 +429,7 @@ describe('BranchDraft conversion and diff semantics', () => {
       draftWith({ environmentName: 'old-env' }),
       draftWith({
         agentName: 'coder',
-        model: { providerName: 'other', modelName: 'Other', variant: 'v2' },
+        model: { modelName: 'Other', variant: 'v2' },
         environmentName: 'new-env',
         yoloEnabled: true,
       }),
@@ -466,12 +455,12 @@ describe('projectPendingTarget setting projection', () => {
     const base = draftWith()
     const projected = projectPendingTarget(base, [
       queuedSettingCommand('2', 'SET_MODEL', {
-        model: { providerName: 'other', modelName: 'Other', variant: 'v2' },
+        model: { modelName: 'Other', variant: 'v2' },
       }),
       queuedSettingCommand('1', 'SET_AGENT', { agentName: 'coder' }),
     ])
     expect(projected.agentName).toBe('coder')
-    expect(projected.model).toEqual({ providerName: 'other', modelName: 'Other', variant: 'v2' })
+    expect(projected.model).toEqual({ modelName: 'Other', variant: 'v2' })
   })
 
   it('ignores non-SET_ and non-QUEUED commands while keeping base values', () => {
@@ -501,8 +490,7 @@ describe('projectPendingTarget setting projection', () => {
       queuedSettingCommand('1', 'SET_MODEL', { model: { modelName: 'New' } }),
     ])
     expect(projected.model).toEqual({
-      providerName: 'minimax',
-      modelName: 'New',
+            modelName: 'New',
       variant: 'default',
     })
   })

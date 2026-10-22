@@ -666,8 +666,7 @@ class HistoryEntryPayloadTest {
   }
 
   private static final BranchSettings SETTINGS =
-      new BranchSettings(
-          "coding", new ModelSelection("anthropic", "claude-sonnet", "default"), null);
+      new BranchSettings("coding", ModelSelection.model("claude-sonnet", "default"), null);
   private static final Instant TIME = Instant.ofEpochSecond(1000L);
 
   private static AgentMessage user(String text) {
@@ -687,13 +686,12 @@ class HistoryEntryPayloadTest {
   }
 
   private static AssistantMessageMetadata metadata(GenerationStopReason reason) {
-    ModelUsage usage = new ModelUsage(1L, 1L, 0L, 0L, 0L, 0L, 2L);
+    ModelUsage usage = new ModelUsage(1L, 1L, 0L, 0L, Map.of(), 0L, 2L);
     ModelCost cost =
         new ModelCost(
             "USD",
             BigDecimal.ONE,
             BigDecimal.ONE,
-            BigDecimal.ZERO,
             BigDecimal.ZERO,
             BigDecimal.ZERO,
             BigDecimal.ZERO,

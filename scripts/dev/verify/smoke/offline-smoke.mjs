@@ -197,15 +197,9 @@ async function createStubCatalog({ jsonCall }) {
     modelCallIdleTimeoutMillis: 120_000,
   })
   assert.equal(stub.configured, true, JSON.stringify(stub))
-  const zero = {
-    inputPerMillionTokens: 0,
-    outputPerMillionTokens: 0,
-    cacheReadPerMillionTokens: 0,
-    cacheWritePerMillionTokens: 0,
-    cacheWriteLongPerMillionTokens: 0,
-    reasoningPerMillionTokens: 0,
-  }
+  // 缺省 pricing 由服务端归一为完整零价格定义。
   await jsonCall('POST', '/api/models', {
+    kind: 'MODEL',
     providerName: 'stub',
     name: 'acceptance-stub',
     modelId: 'acceptance-stub',
@@ -213,14 +207,6 @@ async function createStubCatalog({ jsonCall }) {
     config: {
       limit: { context: 128000, output: 4096 },
       abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
-      pricing: {
-        currency: 'USD',
-        pricingTier: 'default',
-        serviceTier: 'default',
-        serviceTierMultiplier: 1,
-        version: 'v1',
-        ...zero,
-      },
       defaultVariant: 'default',
       variants: [{ id: 'default' }],
     },
@@ -229,7 +215,7 @@ async function createStubCatalog({ jsonCall }) {
     name: 'default-assistant',
     description: 'offline smoke stub agent',
     systemPrompt: 'You are the offline smoke assistant.',
-    model: 'stub/acceptance-stub',
+    model: 'acceptance-stub',
     variant: 'default',
     config: { tools: [], skills: [], subagents: [] },
   })

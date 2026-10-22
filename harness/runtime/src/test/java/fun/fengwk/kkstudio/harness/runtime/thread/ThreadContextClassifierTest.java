@@ -893,7 +893,7 @@ class ThreadContextClassifierTest {
   }
 
   private static ModelUsage usage() {
-    return new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L);
+    return new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L);
   }
 
   private static ModelCost cost() {
@@ -904,12 +904,11 @@ class ThreadContextClassifierTest {
         BigDecimal.ZERO,
         BigDecimal.ZERO,
         BigDecimal.ZERO,
-        BigDecimal.ZERO,
         BigDecimal.ZERO);
   }
 
   private static BranchSettings branchSettings() {
-    return new BranchSettings("agent", new ModelSelection("provider", "model", "v1"), null);
+    return new BranchSettings("agent", ModelSelection.model("model", "v1"), null);
   }
 
   private static List<String> callIds(List<ToolCallMessageContent> calls) {

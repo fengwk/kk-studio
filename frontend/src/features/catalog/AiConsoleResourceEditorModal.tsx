@@ -1,8 +1,8 @@
 import type { FormEventHandler } from 'react'
 import { Button } from '@/shared/ui/controls/Button'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
-import { AgentForm, ModelForm, ProviderForm } from '@/features/catalog/AiResourceForms'
-import type { AgentDraft, ModelDraft, ProviderDraft, ResourceModal } from '@/features/catalog/ai-console-types'
+import { AgentForm, ModelForm, ModelGroupForm, ProviderForm } from '@/features/catalog/AiResourceForms'
+import type { AgentDraft, ModelDraft, ModelGroupDraft, ProviderDraft, ResourceModal } from '@/features/catalog/ai-console-types'
 import type { ResourceFieldKey } from '@/features/catalog/ai-resource-form-validation'
 import { resourceTitle } from '@/features/catalog/catalog-utils'
 import type { AgentModelView } from '@/features/catalog/AgentModelView'
@@ -25,6 +25,7 @@ export function ResourceEditorModal({
   skillsError = null,
   providerDraft,
   modelDraft,
+  modelGroupDraft,
   agentDraft,
   pending,
   formError = '',
@@ -32,6 +33,8 @@ export function ResourceEditorModal({
   onClose,
   onProviderDraftChange,
   onModelDraftChange,
+  onModelGroupDraftChange,
+  onModelCreateKindChange,
   onAgentDraftChange,
   onSubmit,
 }: {
@@ -45,6 +48,7 @@ export function ResourceEditorModal({
   skillsError?: unknown
   providerDraft: ProviderDraft
   modelDraft: ModelDraft
+  modelGroupDraft: ModelGroupDraft
   agentDraft: AgentDraft
   pending: boolean
   formError?: string
@@ -52,6 +56,8 @@ export function ResourceEditorModal({
   onClose: () => void
   onProviderDraftChange: (draft: ProviderDraft) => void
   onModelDraftChange: (draft: ModelDraft) => void
+  onModelGroupDraftChange: (draft: ModelGroupDraft) => void
+  onModelCreateKindChange: (kind: 'MODEL' | 'GROUP') => void
   onAgentDraftChange: (draft: AgentDraft) => void
   onSubmit: FormEventHandler<HTMLFormElement>
 }) {
@@ -84,13 +90,46 @@ export function ResourceEditorModal({
             />
           )}
           {modal.kind === 'model' && (
-            <ModelForm
-              draft={modelDraft}
-              mode={modal.mode}
-              providers={providers}
-              fieldErrors={fieldErrors}
-              onChange={onModelDraftChange}
-            />
+            <>
+              {modal.mode === 'create' ? (
+                <div className="model-kind-tabs" role="tablist" aria-label={t('ai.catalog.form.modelKind')}>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={modal.resourceKind === 'MODEL'}
+                    className={modal.resourceKind === 'MODEL' ? 'is-selected' : undefined}
+                    onClick={() => onModelCreateKindChange('MODEL')}
+                  >
+                    {t('ai.catalog.resourceType.model')}
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={modal.resourceKind === 'GROUP'}
+                    className={modal.resourceKind === 'GROUP' ? 'is-selected' : undefined}
+                    onClick={() => onModelCreateKindChange('GROUP')}
+                  >
+                    {t('ai.catalog.resourceType.modelGroup')}
+                  </button>
+                </div>
+              ) : null}
+              {modal.resourceKind === 'GROUP' ? (
+                <ModelGroupForm
+                  draft={modelGroupDraft}
+                  models={models}
+                  fieldErrors={fieldErrors}
+                  onChange={onModelGroupDraftChange}
+                />
+              ) : (
+                <ModelForm
+                  draft={modelDraft}
+                  mode={modal.mode}
+                  providers={providers}
+                  fieldErrors={fieldErrors}
+                  onChange={onModelDraftChange}
+                />
+              )}
+            </>
           )}
           {modal.kind === 'agent' && (
             <AgentForm

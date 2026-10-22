@@ -39,6 +39,7 @@ export function makeSettingsDto(overrides: { version?: string } = {}): SystemSet
       subagentMaxTotalConcurrency: 0,
       subagentMaxTurns: 50,
       modelHttpRetryStatusCodes: [...DEFAULT_MODEL_HTTP_RETRY_STATUS_CODES],
+      modelCatalogSource: 'models_dev_v2',
     },
     environment: {
       maxResourceBytes: DEFAULT_MAX_RESOURCE_BYTES,
@@ -229,6 +230,28 @@ export function makeSettingsSchema(): SystemSettingsSchemaDTO {
                 min: 400,
                 max: 599,
                 options: null,
+              },
+            ],
+          },
+          {
+            key: 'aiRuntime.modelCatalog',
+            labelKey: 'settings.section.aiRuntime.modelCatalog.title',
+            descriptionKey: 'settings.section.aiRuntime.modelCatalog.description',
+            restartRequired: false,
+            applyTiming: 'NEXT_HTTP_REQUEST',
+            fields: [
+              {
+                path: 'aiRuntime.modelCatalogSource',
+                labelKey: 'settings.field.aiRuntime.modelCatalogSource',
+                hintKey: 'settings.field.aiRuntime.modelCatalogSource.hint',
+                type: 'ENUM',
+                nullable: false,
+                min: null,
+                max: null,
+                options: [
+                  { value: 'models_dev_v2', labelKey: 'settings.option.modelCatalogSource.modelsDevV2' },
+                  { value: 'models_dev_v1', labelKey: 'settings.option.modelCatalogSource.modelsDevV1' },
+                ],
               },
             ],
           },

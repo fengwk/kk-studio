@@ -55,7 +55,7 @@ class AgentTaskServiceTest {
   private static final Instant NOW = Instant.parse("2026-10-20T00:00:00Z");
   private static final String HASH = "a".repeat(64);
   private static final BranchSettings SETTINGS =
-      new BranchSettings("worker", new ModelSelection("provider", "model", "v1"), null);
+      new BranchSettings("worker", ModelSelection.model("model", "v1"), null);
 
   private HarnessRuntime runtime;
   private AgentTaskService service;

@@ -36,7 +36,7 @@ function rootThread(overrides: Record<string, unknown> = {}) {
     executionControl: 'RUNNABLE',
     branchSettings: {
       agentName: 'assistant',
-      model: { providerName: 'minimax', modelName: 'VeryLongModelName', variant: 'default' },
+      model: { modelName: 'VeryLongModelName', variant: 'default' },
       environmentName: null,
     },
     createTime: 1790812800,
@@ -79,7 +79,7 @@ function treeNodes() {
       parentThreadId: null,
       name: '根 Thread',
       agentName: 'assistant',
-      model: { providerName: 'minimax', modelName: 'VeryLongModelName', variant: 'default' },
+      model: { modelName: 'VeryLongModelName', variant: 'default' },
       status: 'IDLE',
       processing: false,
       turnCount: 1,
@@ -92,7 +92,7 @@ function treeNodes() {
       parentThreadId: ROOT_ID,
       name: 'worker child',
       agentName: 'coder',
-      model: { providerName: 'minimax', modelName: 'VeryLongModelName', variant: 'default' },
+      model: { modelName: 'VeryLongModelName', variant: 'default' },
       status: 'MODEL_STREAM',
       processing: true,
       turnCount: 2,
@@ -411,7 +411,7 @@ test('a child thread address mounts no composer at all', async ({ page }) => {
   await page.goto(`${HARNESS_URL}?scenario=thread-child`)
 
   await expect(page.getByRole('heading', { name: 'worker child', level: 1 })).toBeVisible()
-  await expect(page.locator('.chat-workspace-header .workspace-view-identity')).toContainText('minimax/VeryLongModelName')
+  await expect(page.locator('.chat-workspace-header .workspace-view-identity')).toContainText('VeryLongModelName')
   await expect(page.getByText('只读查看')).toHaveCount(0)
   const backToRoot = await expectBackEntryOnTop(page, '回到父 agent', 'link')
   await expect(backToRoot).toBeVisible()
@@ -484,12 +484,12 @@ test('recognizes SETTINGS once and uses the same model label in the footer', asy
   // 安全点立即展示变更；后续相同回合快照不重复，底栏文字与提示同源。
   const rootSettings = {
     agentName: 'assistant',
-    model: { providerName: 'minimax', modelName: 'VeryLongModelName', variant: 'default' },
+    model: { modelName: 'VeryLongModelName', variant: 'default' },
     environmentName: null,
   }
   const changedSettings = {
     agentName: 'researcher',
-    model: { providerName: 'xai', modelName: 'grok-4.7', variant: 'xhigh' },
+    model: { modelName: 'grok-4.7', variant: 'xhigh' },
     environmentName: null,
     goal: null,
   }
@@ -558,7 +558,7 @@ test('recognizes SETTINGS once and uses the same model label in the footer', asy
   await expect(page.getByRole('alert')).toHaveCount(0)
 
   const agentChange = page.getByText('Agent 改为 researcher', { exact: true })
-  const modelChange = page.getByText('模型改为 xai/grok-4.7 (xhigh)', { exact: true })
+  const modelChange = page.getByText('模型改为 grok-4.7 (xhigh)', { exact: true })
   await expect(agentChange).toBeVisible()
   await expect(agentChange).toHaveCount(1)
   await expect(modelChange).toBeVisible()
@@ -566,8 +566,8 @@ test('recognizes SETTINGS once and uses the same model label in the footer', asy
 
   const modelControl = page.locator('.thread-composer-model-control')
   await expect(modelControl).toBeVisible()
-  await expect(modelControl).toHaveText('xai/grok-4.7 (xhigh)')
-  await expect(modelControl).toHaveAttribute('title', 'xai/grok-4.7 (xhigh)')
+  await expect(modelControl).toHaveText('grok-4.7 (xhigh)')
+  await expect(modelControl).toHaveAttribute('title', 'grok-4.7 (xhigh)')
 
   rootEntries.push({
     entryId: 'entry-next-turn',
@@ -583,6 +583,6 @@ test('recognizes SETTINGS once and uses the same model label in the footer', asy
   await expect(agentChange).toHaveCount(1)
   await expect(modelChange).toHaveCount(1)
   await expect(page.getByText(/未识别 Entry|未知条目/)).toHaveCount(0)
-  await expect(modelControl).toHaveText('xai/grok-4.7 (xhigh)')
+  await expect(modelControl).toHaveText('grok-4.7 (xhigh)')
   await page.screenshot({ path: testInfo.outputPath('settings-model-label.png'), fullPage: true })
 })

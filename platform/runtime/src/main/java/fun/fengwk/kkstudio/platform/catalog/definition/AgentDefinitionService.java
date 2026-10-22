@@ -9,6 +9,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelDefaultVariantResolver;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
@@ -25,7 +26,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionType;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.ModelRef;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 
 import java.util.Objects;
 
@@ -42,6 +43,7 @@ public class AgentDefinitionService {
   private static final String MODEL_RESOURCE = "agent_model";
   private static final int NAME_MAX_LENGTH = 64;
   private static final int VARIANT_MAX_LENGTH = 64;
+  private static final int MODEL_NAME_MAX_LENGTH = 128;
 
   private final AgentDefinitionRepository repository;
   private final AgentDefinitionReferenceResolver referenceResolver;
@@ -77,12 +79,12 @@ public class AgentDefinitionService {
   public AgentDefinitionDTO createAgent(AgentDefinitionCreateDTO createDTO) {
     String name = createDTO == null ? null : createDTO.getName();
     rejectReservedName(name);
-    ModelRef modelRef = parseModelRef(createDTO == null ? null : createDTO.getModel(), true);
-    referenceResolver.requireModelForUpdate(modelRef.providerName(), modelRef.modelName());
+    String modelName = parseModelName(createDTO == null ? null : createDTO.getModel(), true);
+    AgentModel model = referenceResolver.requireModelForUpdate(modelName);
     Mutation mutation = mutation(name, createDTO, true);
     AgentDefinition definition =
         mutation.applyTo(AgentDefinition.builder().type(AgentDefinitionType.USER)).build();
-    validateVariant(modelRef, definition.variant());
+    validateSelection(model, definition.variant());
     AgentDefinitionConfigDTO config = configCodec.decode(definition.configJson());
     validateConfig(config);
     referenceResolver.requireReferencedLifecycles(config.getSkills(), config.getTools());
@@ -114,14 +116,13 @@ public class AgentDefinitionService {
     ensureExpectedVersion(current, rawExpected, expected);
     // 内置 Agent 允许显式未配置模型；用户 Agent 仍要求模型。
     boolean modelRequired = current.type() != AgentDefinitionType.BUILTIN;
-    ModelRef modelRef = parseModelRef(updateDTO.getModel(), modelRequired);
-    if (modelRef != null) {
-      referenceResolver.requireModelForUpdate(modelRef.providerName(), modelRef.modelName());
-    }
+    String modelName = parseModelName(updateDTO.getModel(), modelRequired);
+    AgentModel model =
+        modelName == null ? null : referenceResolver.requireModelForUpdate(modelName);
     AgentDefinition definition =
         mutation(current.name(), updateDTO, modelRequired).applyTo(current.toBuilder()).build();
-    if (modelRef != null) {
-      validateVariant(modelRef, definition.variant());
+    if (model != null) {
+      validateSelection(model, definition.variant());
     }
     AgentDefinitionConfigDTO config = configCodec.decode(definition.configJson());
     validateConfig(config);
@@ -190,10 +191,7 @@ public class AgentDefinitionService {
     dto.setType(definition.type());
     dto.setDescription(definition.description());
     dto.setSystemPrompt(definition.systemPrompt());
-    dto.setModel(
-        definition.modelProviderName() == null
-            ? null
-            : new ModelRef(definition.modelProviderName(), definition.modelName()).toString());
+    dto.setModel(definition.modelName());
     dto.setVariant(definition.variant());
     dto.setConfig(configCodec.decode(definition.configJson()));
     dto.setVersion(CatalogVersions.format(definition.version()));
@@ -210,17 +208,22 @@ public class AgentDefinitionService {
     }
   }
 
-  /** {@code required} 为 false 时 null/空白表示内置 Agent 的显式未配置模型，返回 null；其余情况严格解析。 */
-  private static ModelRef parseModelRef(String raw, boolean required) {
+  /** {@code required} 为 false 时 null/空白表示内置 Agent 的显式未配置模型，返回 null；逻辑模型名不得包含首尾空白。 */
+  private static String parseModelName(String raw, boolean required) {
     if (!required && (raw == null || raw.isBlank())) {
       return null;
     }
-    try {
-      return ModelRef.parse(raw);
-    } catch (IllegalArgumentException error) {
-      throw new AiValidationException(
-          RESOURCE, "model must identify providerName/modelName", error);
+    if (raw == null || raw.isBlank()) {
+      throw new AiValidationException(RESOURCE, "model must not be blank");
     }
+    if (!raw.equals(raw.strip())) {
+      throw new AiValidationException(RESOURCE, "model must not contain surrounding whitespace");
+    }
+    if (raw.length() > MODEL_NAME_MAX_LENGTH) {
+      throw new AiValidationException(
+          RESOURCE, "model must be <= " + MODEL_NAME_MAX_LENGTH + " characters");
+    }
+    return raw;
   }
 
   private static void rejectReservedName(String name) {
@@ -235,13 +238,19 @@ public class AgentDefinitionService {
     }
   }
 
-  private void validateVariant(ModelRef modelRef, String variant) {
-    if (variant != null && !variant.isBlank()) {
-      try {
-        variantResolver.resolve(modelRef.providerName(), modelRef.modelName(), variant);
-      } catch (IllegalArgumentException error) {
-        throw new AiValidationException(RESOURCE, error.getMessage(), error);
-      }
+  /** 单 MODEL 的显式 Variant 必须由其 config 声明；GROUP 没有组级 Variant。 */
+  private void validateSelection(AgentModel model, String variant) {
+    if (variant == null || variant.isBlank()) {
+      return;
+    }
+    if (model.kind() == AgentModelKind.GROUP) {
+      throw new AiValidationException(
+          RESOURCE, "variant must be blank when the selected model is a GROUP");
+    }
+    try {
+      variantResolver.resolve(model.name(), variant);
+    } catch (IllegalArgumentException error) {
+      throw new AiValidationException(RESOURCE, error.getMessage(), error);
     }
   }
 
@@ -272,12 +281,12 @@ public class AgentDefinitionService {
     if (normalizedName.indexOf('/') >= 0) {
       throw new AiValidationException(RESOURCE, RESOURCE + " name must not contain '/'");
     }
-    ModelRef modelRef = parseModelRef(properties.getModel(), modelRequired);
+    String modelName = parseModelName(properties.getModel(), modelRequired);
     String description = editableSupport.trimToNull(properties.getDescription());
     String systemPrompt = editableSupport.trimToNull(properties.getSystemPrompt());
-    // null/blank = 不覆盖；runtime/thread 应用时解析 model.defaultVariant。
+    // null/blank = 不覆盖；runtime/thread 应用时解析 model.defaultVariant（GROUP 必须为 null）。
     String variant = editableSupport.trimToNull(properties.getVariant());
-    if (modelRef == null && variant != null) {
+    if (modelName == null && variant != null) {
       throw new AiValidationException(RESOURCE, RESOURCE + " variant requires a configured model");
     }
     editableSupport.validateMaxLength(RESOURCE, "name", normalizedName, NAME_MAX_LENGTH);
@@ -292,21 +301,13 @@ public class AgentDefinitionService {
     } catch (IllegalArgumentException error) {
       throw new AiValidationException(RESOURCE, error.getMessage(), error);
     }
-    return new Mutation(
-        normalizedName,
-        description,
-        systemPrompt,
-        modelRef == null ? null : modelRef.providerName(),
-        modelRef == null ? null : modelRef.modelName(),
-        variant,
-        configJson);
+    return new Mutation(normalizedName, description, systemPrompt, modelName, variant, configJson);
   }
 
   private record Mutation(
       String name,
       String description,
       String systemPrompt,
-      String modelProviderName,
       String modelName,
       String variant,
       String configJson) {
@@ -316,7 +317,6 @@ public class AgentDefinitionService {
           .name(name)
           .description(description)
           .systemPrompt(systemPrompt)
-          .modelProviderName(modelProviderName)
           .modelName(modelName)
           .variant(variant)
           .configJson(configJson);

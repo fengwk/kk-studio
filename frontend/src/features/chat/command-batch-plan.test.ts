@@ -14,7 +14,7 @@ import type { HarnessBranchSettingsDTO, HarnessThreadDTO } from '@/shared/api/ge
 function settings(overrides: Partial<HarnessBranchSettingsDTO> = {}): HarnessBranchSettingsDTO {
   return {
     agentName: 'assistant',
-    model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+    model: { modelName: 'MiniMax', variant: 'default' },
     environmentName: null,
     goal: null,
     ...overrides,
@@ -45,7 +45,7 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
 function draftOf(overrides: Partial<BranchDraft> = {}): BranchDraft {
   return {
     agentName: 'assistant',
-    model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+    model: { modelName: 'MiniMax', variant: 'default' },
     environmentName: null,
     yoloEnabled: false,
     ...overrides,
@@ -96,7 +96,7 @@ describe('command batch replay identity', () => {
       effectiveBase: draftOf(),
       draft: draftOf({
         agentName: 'coder',
-        model: { providerName: 'openai', modelName: 'GPT-5', variant: 'v2' },
+        model: { modelName: 'GPT-5', variant: 'v2' },
       }),
     })
     expect(batch.request.commands.map((command) => command.type)).toEqual([

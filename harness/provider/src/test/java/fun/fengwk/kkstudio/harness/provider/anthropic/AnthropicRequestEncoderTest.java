@@ -63,6 +63,7 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Stream;
@@ -1389,7 +1390,7 @@ class AnthropicRequestEncoderTest {
             "",
             List.of(),
             GenerationStopReason.LENGTH,
-            new ModelUsage(10, 15, 0, 0, 0, 0, 25),
+            new ModelUsage(10, 15, 0, 0, Map.of(), 0L, 25L),
             "msg_len_1",
             null,
             "{}",

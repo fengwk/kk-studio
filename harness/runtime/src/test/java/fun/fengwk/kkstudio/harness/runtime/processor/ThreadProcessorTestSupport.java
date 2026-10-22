@@ -423,11 +423,14 @@ final class ThreadProcessorTestSupport {
             null);
     // live attached fixture：assistant Entry 必须由同一 frozen request + ProviderResponse 经 mapper 生成，
     // 与 validateAttached 的完整 payload 校验保持一致。
+    ModelSelection selection =
+        ModelSelection.model(requestSpec.model().modelName(), requestSpec.variant().id());
     UUID assistantEntryId =
         insertAssistantPayload(
             store,
             turn,
-            new HistoryPayloadMapper().assistantPayload(response, requestSpec.toolBindings()));
+            new HistoryPayloadMapper()
+                .assistantPayload(response, requestSpec.toolBindings(), selection, NOW));
     if (modelStatus == ModelInvocationStatus.SUCCEEDED) {
       transitionModel(store, modelId, m -> m.attachResultEntry(assistantEntryId, NOW));
     }
@@ -495,11 +498,14 @@ final class ThreadProcessorTestSupport {
             requestSpec,
             response,
             null);
+    ModelSelection selection =
+        ModelSelection.model(requestSpec.model().modelName(), requestSpec.variant().id());
     UUID assistantEntryId =
         insertAssistantPayload(
             store,
             turn,
-            new HistoryPayloadMapper().assistantPayload(response, requestSpec.toolBindings()));
+            new HistoryPayloadMapper()
+                .assistantPayload(response, requestSpec.toolBindings(), selection, NOW));
     transitionModel(store, modelId, m -> m.attachResultEntry(assistantEntryId, NOW));
     return new SeededToolPhase(modelId, assistantEntryId);
   }
@@ -707,7 +713,10 @@ final class ThreadProcessorTestSupport {
                 model.resultEntryId(),
                 model.failedAttempts(),
                 model.createdAt(),
-                updatedAt));
+                updatedAt,
+                model.providerReplayState(),
+                model.groupProgress(),
+                model.requestedAt()));
   }
 
   /** 通过 Store validator 合法推进 ToolInvocation.updatedAt，保持 invocation 事实不变。 */
@@ -786,7 +795,7 @@ final class ThreadProcessorTestSupport {
   // -----------------------------------------------------------------------------------------------
 
   static BranchSettings branchSettings() {
-    return new BranchSettings("agent", new ModelSelection("provider", "model", "v1"), null);
+    return new BranchSettings("agent", ModelSelection.model("model", "v1"), null);
   }
 
   /** Resolver 成功后的 INPUT TurnStart：owner 为创建 Thread，contextWindow 已冻结。 */
@@ -885,7 +894,7 @@ final class ThreadProcessorTestSupport {
     return new ModelRequestSpec(
         ProviderType.OPENAI,
         new UUID(0L, 1L),
-        modelDescriptor(settings.model().providerName(), settings.model().modelName()),
+        modelDescriptor("provider", settings.model().modelName()),
         new ModelVariant(settings.model().variant()),
         1024,
         "Test system instruction.",
@@ -903,7 +912,7 @@ final class ThreadProcessorTestSupport {
     return new ModelRequestSpec(
         ProviderType.OPENAI,
         new UUID(0L, 1L),
-        modelDescriptor(model.providerName(), model.modelName()),
+        modelDescriptor("provider", model.modelName()),
         new ModelVariant(model.variant()),
         1024,
         "Test system instruction.",
@@ -913,7 +922,7 @@ final class ThreadProcessorTestSupport {
   }
 
   static ModelRequestSpec compactionRequest(CompactionPreparation preparation) {
-    return compactionRequest(new ModelSelection("provider", "compactor-model", "v1"));
+    return compactionRequest(ModelSelection.model("compactor-model", "v1"));
   }
 
   /**
@@ -1072,13 +1081,12 @@ final class ThreadProcessorTestSupport {
   }
 
   private static ModelUsage usage() {
-    return new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L);
+    return new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L);
   }
 
   private static ModelCost cost() {
     return new ModelCost(
         "USD",
-        BigDecimal.ZERO,
         BigDecimal.ZERO,
         BigDecimal.ZERO,
         BigDecimal.ZERO,
@@ -1189,7 +1197,7 @@ final class ThreadProcessorTestSupport {
       if (autoConsistent) {
         // 按 candidate path 的最终 branch 事实自动构造一致 spec；压缩 turn 按冻结 preparation 构造 CompactionResolved。
         if (preparation != null) {
-          ModelSelection compactorModel = new ModelSelection("provider", "compactor-model", "v1");
+          ModelSelection compactorModel = ModelSelection.model("compactor-model", "v1");
           return new TurnResolver.CompactionResolved(
               compactorModel,
               4096L,

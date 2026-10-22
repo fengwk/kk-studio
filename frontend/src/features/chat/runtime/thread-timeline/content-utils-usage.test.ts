@@ -25,16 +25,16 @@ function usage(overrides: Partial<TurnUsage> = {}): TurnUsage {
 }
 
 describe('content-utils usage & speed & cache calculations', () => {
-  // 验证缓存命中率公式：cacheRead / (input + cacheRead + cacheWrite含long)
-  // 分母为 0 时返回 null，展示为 "—" 而非假 0
+  // 验证缓存命中率公式：cacheRead / (input + cacheRead + cacheWrite)
+  // 函数只返回未取整的百分数；两位小数由展示层统一处理。分母为 0 时返回 null。
   describe('calculateCacheHitRate', () => {
     it('returns null when denominator is 0', () => {
       expect(calculateCacheHitRate({ input: 0, cacheRead: 0, cacheWrite: 0 })).toBeNull()
     })
 
-    it('calculates correct rounded percentage when denominator is positive', () => {
-      expect(calculateCacheHitRate({ input: 200, cacheRead: 100, cacheWrite: 100 })).toBe(25)
-      expect(calculateCacheHitRate({ input: 1, cacheRead: 1, cacheWrite: 1 })).toBe(33)
+    it('calculates the unrounded percentage when denominator is positive', () => {
+      expect(calculateCacheHitRate({ input: 200, cacheRead: 100, cacheWrite: 100 })).toBeCloseTo(25)
+      expect(calculateCacheHitRate({ input: 1, cacheRead: 1, cacheWrite: 1 })).toBeCloseTo(100 / 3)
     })
   })
 
@@ -258,20 +258,27 @@ describe('content-utils usage & speed & cache calculations', () => {
         decodeTokens: 50,
         decodeDurationMillis: 1000,
       })
-      expect(text).toBe('↑100 · ↓50 · R50 · W0 · $0.005 · cache 33% · 50 tok/s')
+      expect(text).toBe('↑100 · ↓50 · R50 · W0 · $0.005 · cache 33.33% · 50 tok/s')
+    })
+
+    it('formats a quarter cache hit rate with two decimals', () => {
+      expect(formatTurnUsageText({
+        input: 150, output: 50, cacheRead: 50, cacheWrite: 0,
+        cost: { currency: 'USD', amount: '0.005' },
+      })).toBe('↑150 · ↓50 · R50 · W0 · $0.005 · cache 25.00% · 0 tok/s')
     })
 
     it('defaults missing metrics to zero without assuming a currency', () => {
       expect(formatTurnUsageText({
         input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: null,
-      })).toBe('↑0 · ↓0 · R0 · W0 · 0 · cache 0% · 0 tok/s')
+      })).toBe('↑0 · ↓0 · R0 · W0 · 0 · cache 0.00% · 0 tok/s')
     })
 
     it('keeps the same fields when only cache write has usage', () => {
       expect(formatTurnUsageText({
         input: 100, output: 50, cacheRead: 0, cacheWrite: 20,
         cost: { currency: 'USD', amount: '0.005' },
-      })).toBe('↑100 · ↓50 · R0 · W20 · $0.005 · cache 0% · 0 tok/s')
+      })).toBe('↑100 · ↓50 · R0 · W20 · $0.005 · cache 0.00% · 0 tok/s')
     })
   })
 })

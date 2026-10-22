@@ -33,6 +33,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -44,7 +45,7 @@ class CompactionFileSectionsTest {
 
   private static final Instant BASE = Instant.ofEpochSecond(1000L);
   private static final BranchSettings SETTINGS =
-      new BranchSettings("agent", new ModelSelection("provider", "model", "v1"), null);
+      new BranchSettings("agent", ModelSelection.model("model", "v1"), null);
 
   @Test
   void extractsReadWriteAndEditWithModifiedWinningOverRead() {
@@ -281,7 +282,8 @@ class CompactionFileSectionsTest {
               new MessagePayload(
                   new AgentMessage(AgentMessageRole.ASSISTANT, contents),
                   new AssistantMessageMetadata(
-                      GenerationStopReason.COMPLETE, new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L)),
+                      GenerationStopReason.COMPLETE,
+                      new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L)),
                   null),
               BASE));
       return cur;

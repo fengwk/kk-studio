@@ -36,7 +36,7 @@
 | Backend | `http://127.0.0.1:18080`，`SPRING_PROFILES_ACTIVE=e2e` |
 | Frontend | `http://127.0.0.1:5173` |
 | 工作目录 | `runtime/dev`，可由 `DEV_WORK_DIR` 覆盖 |
-| Backend log / JAR | `runtime/dev/backend.log`、`web/target/kk-studio-web-1.1.3.jar` |
+| Backend log / JAR | `runtime/dev/backend.log`、`web/target/kk-studio-web-2.0.0.jar` |
 
 `start` 会先执行 stop 流程、检查端口占用、按需用 Maven 打包 Backend、按需安装前端依赖，等
 Backend API ready 后再启动 Vite；`restart` 等价于 `stop` 后再 `start`，`logs` 与 `tail` 接受可选
@@ -365,8 +365,10 @@ Canvas 的 UI 页面用例同时检查创建取消零写入、已有卡零创建
 离线 `canvas-library` harness 进一步覆盖提交中围栏、失败保留输入和窄屏布局。
 
 Catalog 的免费 L1 模型生命周期用例覆盖 `protocolOptionsJson` 在创建、读取、更新中的文本保真，
-包括大整数与高精度小数；配置矩阵覆盖非法 JSON、重复键和非字符串 token 的拒绝。
-这些用例只操作测试 Catalog，不调用真实模型；执行仍需可用的隔离 Backend、数据库与 S3。
+包括大整数与高精度小数；`crud.model_group.lifecycle` 用一个 Group roundtrip 固定全局逻辑名、
+有序成员、`fallbackStatusCodes`、`cooldownSeconds` 与只读派生 config。配置矩阵覆盖非法 JSON、
+重复键、非字符串 token、非法 pricing 数值与负价拒绝。这些用例只操作测试 Catalog，不调用真实模型；
+执行仍需可用的隔离 Backend、数据库与 S3。
 
 Provider 级 `modelHttpRetryStatusCodes` 覆盖由 `crud.provider.http_retry_override` 固定：请求省略该字段保留原值，
 显式 `null` 清除覆盖（继承系统 `aiRuntime.modelHttpRetryStatusCodes` 名单），空数组 `[]` 表示该 Provider 不自动重试
@@ -580,7 +582,8 @@ export TEST_OPENAI_API_KEY="$CPA_API_KEY"
 Runner 只读取导出的 `TEST_*`，不直接读取 `CPA_*`。
 
 对应模型固定为 `google/gemini-3.8-flash`、`openai/gpt-5.6-luna`、
-`minimax-anthropic/MiniMax-M3` 和 `deepseek/deepseek-v4.1-flash`，不会静默换 provider/model。OpenAI
+`minimax-anthropic/MiniMax-M3` 和 `deepseek/deepseek-v4.1-flash`；这些是 Provider 与 wire modelId
+的固定组合，逻辑模型名以 seed 定义为准，不会静默改 provider 或 modelId。OpenAI
 与 DeepSeek 的 Base URL 会去掉尾部斜杠并补齐 `/v1`；Gemini 与 MiniMax Anthropic 只去尾部斜杠。
 
 同步通过 backend API 写入 E2E database 中对应的 seed Provider row，credential 不进入 seed

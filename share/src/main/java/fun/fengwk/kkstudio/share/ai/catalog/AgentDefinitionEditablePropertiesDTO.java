@@ -19,10 +19,10 @@ public class AgentDefinitionEditablePropertiesDTO {
   /** 可空系统提示词；null/空白视为清除。 */
   private @Nullable String systemPrompt;
 
-  /** 必填模型引用，序列化形式为 {@code providerName/modelName}；provider 与 model 必须已存在。 */
+  /** 必填全局逻辑模型名（MODEL 或 GROUP）；内置 Agent 可为空表示显式未配置。 */
   private @Nullable String model;
 
-  /** 可空模型变体 id（≤64 字符）；null/空白表示不覆盖，运行时回退解析 model config 的 defaultVariant。 */
+  /** 可空单模型 Variant id（≤64 字符）；null/空白表示不覆盖，运行时回退解析 model config 的 defaultVariant；GROUP 必须为空。 */
   private @Nullable String variant;
 
   /** 必填结构化执行配置（tools/skills/subagents/inheritParentEnvironment），经严格 codec 校验后持久化为 config JSONB。 */

@@ -175,7 +175,7 @@ class ConfigSyncParserTest {
         "providers:\n"
             + provider("p", "openai")
             + "models:\n"
-            + "  - providerName: p\n"
+            + "  - kind: MODEL\n    providerName: p\n"
             + "    name: m\n"
             + "    modelId: gpt\n"
             + VALID_MODEL_CONFIG
@@ -185,7 +185,7 @@ class ConfigSyncParserTest {
     assertTrue(document.models().isEmpty());
     assertTrue(
         document.skipped().stream()
-            .anyMatch(skip -> "models".equals(skip.getKind()) && "p/m".equals(skip.getName())));
+            .anyMatch(skip -> "models".equals(skip.getKind()) && "m".equals(skip.getName())));
   }
 
   @Test
@@ -193,7 +193,7 @@ class ConfigSyncParserTest {
     String yaml =
         "agents:\n"
             + "  - name: a\n"
-            + "    model: p/m\n"
+            + "    model: m\n"
             + "    config:\n"
             + "      tools: []\n"
             + "      skills: []\n"
@@ -240,11 +240,11 @@ class ConfigSyncParserTest {
         "providers:\n"
             + provider("p", "openai")
             + "models:\n"
-            + "  - providerName: p\n"
+            + "  - kind: MODEL\n    providerName: p\n"
             + "    name: m\n"
             + "    modelId: gpt\n"
             + VALID_MODEL_CONFIG
-            + "  - providerName: p\n"
+            + "  - kind: MODEL\n    providerName: p\n"
             + "    name: m\n"
             + "    modelId: gpt2\n"
             + VALID_MODEL_CONFIG;
@@ -303,7 +303,7 @@ class ConfigSyncParserTest {
         "providers:\n"
             + provider("p", "openai")
             + "models:\n"
-            + "  - providerName: p\n"
+            + "  - kind: MODEL\n    providerName: p\n"
             + "    name: m\n"
             + "    modelId: gpt\n"
             + VALID_MODEL_CONFIG;
@@ -330,7 +330,7 @@ class ConfigSyncParserTest {
             "providers:\n"
                 + provider("p", "openai")
                 + "models:\n"
-                + "  - providerName: p\n"
+                + "  - kind: MODEL\n    providerName: p\n"
                 + "    name: m\n"
                 + "    modelId: gpt\n"
                 + VALID_MODEL_CONFIG
@@ -341,7 +341,7 @@ class ConfigSyncParserTest {
         parser.parse(
             "agents:\n"
                 + "  - name: a\n"
-                + "    model: p/m\n"
+                + "    model: m\n"
                 + "    config:\n"
                 + "      tools: []\n"
                 + "      skills: []\n"
@@ -385,7 +385,7 @@ class ConfigSyncParserTest {
         "providers:\n"
             + provider("p", "openai")
             + "models:\n"
-            + "  - providerName: p\n"
+            + "  - kind: MODEL\n    providerName: p\n"
             + "    name: m\n"
             + "    modelId: gpt\n"
             + "    config:\n"
@@ -411,33 +411,34 @@ class ConfigSyncParserTest {
                 "providers:\n"
                     + provider("p", "openai")
                     + "models:\n"
-                    + "  - providerName: p\n"
+                    + "  - kind: MODEL\n    providerName: p\n"
                     + "    name: m\n"
                     + "    modelId: ''\n"
                     + "    config: {}\n"
                     + "    bogus: 1\n"));
   }
 
+  /** 意图：Agent 的 model 是全局名称，不再携带 provider 分隔符。 */
   @Test
-  void agentModelRefWithoutSeparatorIsAHardError() {
-    assertThrows(
-        AiValidationException.class,
-        () ->
-            parser.parse(
-                "agents:\n"
-                    + "  - name: a\n"
-                    + "    model: bad\n"
-                    + "    config:\n"
-                    + "      tools: []\n"
-                    + "      skills: []\n"
-                    + "      subagents: []\n"));
+  void agentModelRefUsesGlobalModelName() {
+    ConfigSyncParser.ParsedDocument document =
+        parser.parse(
+            "agents:\n"
+                + "  - name: a\n"
+                + "    model: bad\n"
+                + "    config:\n"
+                + "      tools: []\n"
+                + "      skills: []\n"
+                + "      subagents: []\n");
+
+    assertEquals("bad", document.agents().get(0).modelName());
   }
 
   @Test
   void agentConfigMustBeAnObject() {
     assertThrows(
         AiValidationException.class,
-        () -> parser.parse("agents:\n  - name: a\n    model: p/m\n    config: []\n"));
+        () -> parser.parse("agents:\n  - name: a\n    model: m\n    config: []\n"));
   }
 
   /** 测试意图：内置 Agent 的保留名称在导入期是硬冲突，文件不能覆盖或降级系统持有的定义。 */
@@ -449,7 +450,7 @@ class ConfigSyncParserTest {
             parser.parse(
                 "agents:\n"
                     + "  - name: Compaction\n"
-                    + "    model: p/m\n"
+                    + "    model: m\n"
                     + "    config:\n"
                     + "      tools: []\n"
                     + "      skills: []\n"
@@ -464,7 +465,7 @@ class ConfigSyncParserTest {
             "agents:\n"
                 + "  - name: a\n"
                 + "    type: BUILTIN\n"
-                + "    model: p/m\n"
+                + "    model: m\n"
                 + "    config:\n"
                 + "      tools: []\n"
                 + "      skills: []\n"

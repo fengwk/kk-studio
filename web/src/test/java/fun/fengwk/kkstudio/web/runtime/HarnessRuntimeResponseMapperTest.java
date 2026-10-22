@@ -100,7 +100,6 @@ class HarnessRuntimeResponseMapperTest {
     assertEquals(id(2).toString(), node.getParentThreadId());
     assertEquals(parent.thread().name(), node.getName());
     assertEquals(parent.entryPath().baseSettings().agentName(), node.getAgentName());
-    assertEquals("openai", node.getModel().getProviderName());
     assertEquals("gpt-5", node.getModel().getModelName());
     assertEquals("IDLE", node.getStatus());
     assertFalse(node.isProcessing());
@@ -189,7 +188,6 @@ class HarnessRuntimeResponseMapperTest {
     assertEquals(dto.getThreadId(), dto.getRootThreadId());
     assertTrue(dto.isYoloEnabled());
     assertEquals("default-assistant", dto.getBranchSettings().getAgentName());
-    assertEquals("openai", dto.getBranchSettings().getModel().getProviderName());
     assertEquals("gpt-5", dto.getBranchSettings().getModel().getModelName());
     assertEquals("default", dto.getBranchSettings().getModel().getVariant());
     // Environment 引用投影为 nullable name（该 fixture 未选择环境）。

@@ -39,7 +39,7 @@ tree 锁只用于结构或跨 Thread 的写操作（spawn、Stop、删除、fork
 
 | 类型 | 语义 |
 | --- | --- |
-| `ROOT` | 唯一根，保存初始 [`BranchSettings`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/entry/BranchSettings.java)：agent、`ModelSelection`、可空的 Environment name 与用户 [`GoalSetting`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/entry/GoalSetting.java) |
+| `ROOT` | 唯一根，保存初始 [`BranchSettings`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/entry/BranchSettings.java)：agent、`ModelSelection`（全局 `modelName` + 可空 `variant`）、可空的 Environment name 与用户 [`GoalSetting`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/entry/GoalSetting.java) |
 | `TURN_START` | 打开回合，冻结完整 settings、模型回退时的实际型号 `fallbackModel`、owner Thread、启动原因（`INPUT` / `CONTINUATION` / `COMPACTION` / `STOP`）与解析出的上下文窗口和输出预算 |
 | `MESSAGE` | USER / ASSISTANT / TOOL 消息；只有 ASSISTANT 消息可以携带 `providerReplayState` |
 | `CUSTOM_MESSAGE` | 可信调用方注入的消息 |

@@ -187,6 +187,7 @@ class PostgresqlHarnessSchemaTest {
             "harness_entry.provider_replay_state",
             "harness_model_invocation.error",
             "harness_model_invocation.failed_attempts",
+            "harness_model_invocation.group_execution",
             "harness_model_invocation.provider_replay_state",
             "harness_model_invocation.request_spec",
             "harness_model_invocation.result",

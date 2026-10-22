@@ -45,7 +45,7 @@ describe('agentService', () => {
 
   /**
    * 测试意图：验证 Provider、Model 和 Agent 的增删改端点，
-   * 特别验证 Model 的 PUT/DELETE 端点规范化为 /models/{providerName}/{modelName}。
+   * 特别验证 Model 的 PUT/DELETE 端点规范化为 /models/{modelName}。
    */
   it('maps provider, model and agent mutations to name-based CRUD endpoints', async () => {
     const client = createClient()
@@ -60,6 +60,7 @@ describe('agentService', () => {
     }
     const modelBody: AgentModelCreateDTO = {
       providerName: 'minimax',
+      kind: 'MODEL',
       name: 'MiniMax-M2.7',
       modelId: 'wire-minimax',
       description: null,
@@ -67,18 +68,10 @@ describe('agentService', () => {
         limit: { context: 128000, output: 8192 },
         abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
         pricing: {
-          currency: 'USD',
-          pricingTier: 'default',
-          serviceTier: 'default',
-          serviceTierMultiplier: 1,
-          version: 'v1',
-          inputPerMillionTokens: 0,
-          outputPerMillionTokens: 0,
-          cacheReadPerMillionTokens: 0,
-          cacheWritePerMillionTokens: 0,
-          cacheWriteLongPerMillionTokens: 0,
-          reasoningPerMillionTokens: 0,
-        },
+      base: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0', cacheWriteByTtl: {}, reasoning: null },
+      overrides: [],
+      multipliers: [],
+    },
         defaultVariant: 'default',
         variants: [{ id: 'default' }],
       },
@@ -87,7 +80,7 @@ describe('agentService', () => {
       name: 'default-assistant',
       description: null,
       systemPrompt: null,
-      model: 'minimax/MiniMax-M2.7',
+      model: 'MiniMax-M2.7',
       variant: 'default',
       config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
     }
@@ -97,6 +90,7 @@ describe('agentService', () => {
       expectedVersion: '7',
     }
     const updateModelBody: AgentModelUpdateDTO = {
+      kind: 'MODEL',
       name: 'MiniMax-M2.7-renamed',
       modelId: 'wire-minimax',
       description: null,
@@ -105,18 +99,10 @@ describe('agentService', () => {
         limit: { context: 128000, output: 8192 },
         abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
         pricing: {
-          currency: 'USD',
-          pricingTier: 'default',
-          serviceTier: 'default',
-          serviceTierMultiplier: 1,
-          version: 'v1',
-          inputPerMillionTokens: 0,
-          outputPerMillionTokens: 0,
-          cacheReadPerMillionTokens: 0,
-          cacheWritePerMillionTokens: 0,
-          cacheWriteLongPerMillionTokens: 0,
-          reasoningPerMillionTokens: 0,
-        },
+      base: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0', cacheWriteByTtl: {}, reasoning: null },
+      overrides: [],
+      multipliers: [],
+    },
         defaultVariant: 'fast',
         variants: [{ id: 'fast' }],
       },
@@ -125,7 +111,7 @@ describe('agentService', () => {
       description: 'updated',
       expectedVersion: '9',
       systemPrompt: null,
-      model: 'minimax/MiniMax-M2.7',
+      model: 'MiniMax-M2.7',
       variant: 'default',
       config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
     }
@@ -134,8 +120,8 @@ describe('agentService', () => {
     await service.updateProvider('minimax', updateProviderBody)
     await service.deleteProvider('minimax', '8')
     await service.createModel(modelBody)
-    await service.updateModel('minimax', 'vendor/MiniMax M2.7', updateModelBody)
-    await service.deleteModel('minimax', 'vendor/MiniMax M2.7', '10')
+    await service.updateModel('vendor/MiniMax M2.7', updateModelBody)
+    await service.deleteModel('vendor/MiniMax M2.7', '10')
     await service.createAgent(agentBody)
     await service.updateAgent('default-assistant', updateAgentBody)
     await service.deleteAgent('default-assistant', '11')
@@ -144,8 +130,8 @@ describe('agentService', () => {
     expect(client.put).toHaveBeenNthCalledWith(1, '/providers/minimax', updateProviderBody)
     expect(client.delete).toHaveBeenNthCalledWith(1, '/providers/minimax', { params: { expectedVersion: '8' } })
     expect(client.post).toHaveBeenNthCalledWith(2, '/models', modelBody)
-    expect(client.put).toHaveBeenNthCalledWith(2, '/models/minimax/vendor/MiniMax%20M2.7', updateModelBody)
-    expect(client.delete).toHaveBeenNthCalledWith(2, '/models/minimax/vendor/MiniMax%20M2.7', { params: { expectedVersion: '10' } })
+    expect(client.put).toHaveBeenNthCalledWith(2, '/models/vendor/MiniMax%20M2.7', updateModelBody)
+    expect(client.delete).toHaveBeenNthCalledWith(2, '/models/vendor/MiniMax%20M2.7', { params: { expectedVersion: '10' } })
     expect(client.post).toHaveBeenNthCalledWith(3, '/agents', agentBody)
     expect(client.put).toHaveBeenNthCalledWith(3, '/agents/default-assistant', updateAgentBody)
     expect(client.delete).toHaveBeenNthCalledWith(3, '/agents/default-assistant', { params: { expectedVersion: '11' } })

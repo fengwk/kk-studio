@@ -138,7 +138,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
 
   private static final BranchSettings SETTINGS =
       new BranchSettings(
-          "default-assistant", new ModelSelection("stub", "acceptance-stub", "default"), null);
+          "default-assistant", new ModelSelection("acceptance-stub", "default"), null);
 
   private static final String AGENT = "default-assistant";
   private static final String HASH = "a".repeat(64);
@@ -1061,15 +1061,6 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     String callId = "call-" + toolName;
     ModelRequestSpec requestSpec = requestSpec(binding);
     ProviderResponse response = toolCallResponse(callId, toolName, argumentsJson);
-    UUID assistantEntryId = tx.nextId();
-    tx.insertEntry(
-        new Entry(
-            assistantEntryId,
-            sessionId,
-            userEntryId,
-            new HistoryPayloadMapper().assistantPayload(response, requestSpec.toolBindings()),
-            now));
-
     UUID modelId = tx.nextId();
     ModelInvocation model =
         new ModelInvocation(
@@ -1087,11 +1078,27 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
             List.of(),
             now,
             now);
+    ModelInvocation running = model.markRunning(now);
+    // 结果 Entry 必须精确等于按执行事实重放的 assistant payload：实际型号与请求起始时间来自 RUNNING 调用。
+    UUID assistantEntryId = tx.nextId();
+    tx.insertEntry(
+        new Entry(
+            assistantEntryId,
+            sessionId,
+            userEntryId,
+            new HistoryPayloadMapper()
+                .assistantPayload(
+                    response,
+                    requestSpec.toolBindings(),
+                    running.actualSelection(),
+                    running.requestedAt()),
+            now));
+
     tx.insertModelInvocation(model);
-    tx.updateModelInvocation(model.markRunning(now));
-    tx.updateModelInvocation(model.markRunning(now).succeed(response, now));
+    tx.updateModelInvocation(running);
+    tx.updateModelInvocation(running.succeed(response, now));
     tx.updateModelInvocation(
-        model.markRunning(now).succeed(response, now).attachResultEntry(assistantEntryId, now));
+        running.succeed(response, now).attachResultEntry(assistantEntryId, now));
 
     UUID toolId = tx.nextId();
     ToolInvocation ready =
@@ -1200,7 +1207,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
         "",
         List.of(new ProviderToolCall(callId, toolName, argumentsJson)),
         GenerationStopReason.COMPLETE,
-        new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
+        new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L),
         null,
         null,
         null);

@@ -14,7 +14,6 @@ export function buildOfflineChatBatchRequest({
   commandId,
   marker,
   agentName = 'default-assistant',
-  providerName = 'stub',
   modelName = 'acceptance-stub',
   variant = 'default',
   ...unexpected
@@ -31,7 +30,7 @@ export function buildOfflineChatBatchRequest({
       threadId,
       rootSettings: {
         agentName,
-        model: { providerName, modelName, variant },
+        model: { modelName, variant },
         environmentName: null,
       },
       yoloEnabled: false,

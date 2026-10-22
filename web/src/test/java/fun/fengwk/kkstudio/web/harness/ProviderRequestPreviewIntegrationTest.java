@@ -691,7 +691,7 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
   private static List<NewThreadCommand> draftCommands(UserMessageCommandPayload message) {
     return List.of(
         new NewThreadCommand(
-            new SetModelCommandPayload(new ModelSelection("stub", "acceptance-stub", "default")),
+            new SetModelCommandPayload(new ModelSelection("acceptance-stub", "default")),
             UUID.randomUUID()),
         new NewThreadCommand(message, UUID.randomUUID()));
   }
@@ -702,7 +702,7 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
 
   private static BranchSettings settings() {
     return new BranchSettings(
-        "default-assistant", new ModelSelection("stub", "acceptance-stub", "default"), null);
+        "default-assistant", new ModelSelection("acceptance-stub", "default"), null);
   }
 
   private UUID createChat(String title) {

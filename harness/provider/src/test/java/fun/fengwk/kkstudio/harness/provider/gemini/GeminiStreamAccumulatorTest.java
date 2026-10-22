@@ -565,7 +565,7 @@ class GeminiStreamAccumulatorTest {
     assertNotNull(usage);
     assertEquals(20L, usage.inputTokens(), "promptTokenCount(100) - cached(80) = 20");
     assertEquals(80L, usage.cacheReadTokens());
-    assertEquals(25L, usage.outputTokens());
+    assertEquals(35L, usage.outputTokens(), "candidates plus thoughts");
     assertEquals(10L, usage.reasoningTokens());
     assertEquals(125L, usage.providerTotalTokens());
 
@@ -596,14 +596,14 @@ class GeminiStreamAccumulatorTest {
     ProviderResponse response = accumulator.finish().response();
     assertEquals(1_000_000_000L, response.usage().inputTokens());
     assertEquals(3_000_000_000L, response.usage().cacheReadTokens());
-    assertEquals(3_500_000_000L, response.usage().outputTokens());
+    assertEquals(6_700_000_000L, response.usage().outputTokens());
     assertEquals(3_200_000_000L, response.usage().reasoningTokens());
     assertEquals(7_500_000_000L, response.usage().providerTotalTokens());
     assertEquals("flex", response.serviceTier());
     assertEquals(MAPPER.readTree(latest), MAPPER.readTree(response.rawUsageJson()));
   }
 
-  /** 测试意图：坏类型、负数、超出 long 上限及无效 serviceTier 都不能经宽松 asInt 转换进入 usage。 */
+  /** 测试意图：坏类型、负数、超出 long 上限及无效 serviceTier 都不能进入 usage；可选计数显式 null 保持 unknown。 */
   @Test
   void rejectsMalformedKnownUsageValues() {
     for (String value : List.of("null", "\"bad\"", "[]")) {
@@ -622,7 +622,11 @@ class GeminiStreamAccumulatorTest {
             "candidatesTokenCount",
             "thoughtsTokenCount",
             "totalTokenCount")) {
-      for (String value : List.of("null", "\"1\"", "1.5", "true", "-1", "9223372036854775808")) {
+      List<String> malformed =
+          field.equals("thoughtsTokenCount") || field.equals("totalTokenCount")
+              ? List.of("\"1\"", "1.5", "true", "-1", "9223372036854775808")
+              : List.of("null", "\"1\"", "1.5", "true", "-1", "9223372036854775808");
+      for (String value : malformed) {
         GeminiStreamAccumulator accumulator =
             new GeminiStreamAccumulator(request, descriptor, bridge);
         ProviderException error =
@@ -661,8 +665,8 @@ class GeminiStreamAccumulatorTest {
     assertEquals(0L, response.usage().inputTokens());
     assertEquals(3L, response.usage().cacheReadTokens());
     assertEquals(0L, response.usage().outputTokens());
-    assertEquals(0L, response.usage().reasoningTokens());
-    assertEquals(0L, response.usage().providerTotalTokens());
+    assertNull(response.usage().reasoningTokens());
+    assertNull(response.usage().providerTotalTokens());
     assertNull(response.serviceTier());
     assertEquals(
         MAPPER.readTree("{\"cachedContentTokenCount\":3}"),

@@ -112,12 +112,12 @@ describe('thread status formatting', () => {
       },
     }, t).segments.find((segment) => segment.key === 'usage')
 
-    expect(usage?.text).toBe('↑30 · ↓9 · R14 · W17 · $0.5 · cache 23% · 18 tok/s')
+    expect(usage?.text).toBe('↑30 · ↓9 · R14 · W17 · $0.5 · cache 22.95% · 18 tok/s')
     expect(usage?.title).toBe(
       [
         '无缓存输入：30 tokens；输出：9 tokens；推理：4 tokens',
         '缓存读取：14 tokens；缓存写入：17 tokens',
-        '估算费用：$0.5；缓存命中率：23%；生成速度：18 tok/s',
+        '估算费用：$0.5；缓存命中率：22.95%；生成速度：18 tok/s',
       ].join('\n'),
     )
     expect(usage?.title).not.toContain('累计')
@@ -129,7 +129,7 @@ describe('thread status formatting', () => {
       branchUsage: { ...EMPTY_USAGE, contextInputTokens: 0 },
     }, t).segments.find((segment) => segment.key === 'usage')
 
-    expect(usage?.text).toBe('↑0 · ↓0 · R0 · W0 · 0 · cache 0% · 0 tok/s')
+    expect(usage?.text).toBe('↑0 · ↓0 · R0 · W0 · 0 · cache 0.00% · 0 tok/s')
     expect(usage?.title).toContain('估算费用：暂无数据；缓存命中率：暂无数据；生成速度：暂无数据')
   })
 
@@ -166,7 +166,7 @@ describe('turn usage details', () => {
     expect(title.split('\n')).toEqual([
       '无缓存输入：1200 tokens；输出：340 tokens；推理：7 tokens',
       '缓存读取：0 tokens；缓存写入：0 tokens',
-      '估算费用：$0.0012；缓存命中率：0%；生成速度：347 tok/s',
+      '估算费用：$0.0012；缓存命中率：0.00%；生成速度：347 tok/s',
     ])
     // 紧凑图例（↑↓R W $ cache tok/s）不参与 hover 读数。
     expect(title).not.toContain('↑')
@@ -178,7 +178,16 @@ describe('turn usage details', () => {
       t,
     )
 
-    expect(title).toContain('估算费用：暂无数据；缓存命中率：0%；生成速度：暂无数据')
+    expect(title).toContain('估算费用：暂无数据；缓存命中率：0.00%；生成速度：暂无数据')
     expect(title).not.toContain('$0')
+  })
+
+  it('formats a quarter cache hit rate with two decimals', () => {
+    const title = formatUsageDetails(
+      { ...usage, input: 150, cacheRead: 50, cacheWrite: 0 },
+      t,
+    )
+
+    expect(title).toContain('缓存命中率：25.00%；')
   })
 })

@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /** ModelGateway public contract：execution key、admission 三态、终态三态与 value validation。 */
@@ -114,7 +115,7 @@ class ModelGatewayTest {
                             null,
                             List.of(),
                             GenerationStopReason.COMPLETE,
-                            new ModelUsage(1L, 1L, 0L, 0L, 0L, 0L, 2L),
+                            new ModelUsage(1L, 1L, 0L, 0L, Map.of(), 0L, 2L),
                             null,
                             null,
                             null),

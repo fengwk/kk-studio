@@ -77,7 +77,7 @@ class ModelRequestMaterializerTest {
   private static final UUID OWNER = id(1L);
   private static final Instant T0 = Instant.parse("2026-08-01T00:00:00Z");
   private static final BranchSettings SETTINGS =
-      new BranchSettings("agent", new ModelSelection("provider", "model", "v1"), null);
+      new BranchSettings("agent", ModelSelection.model("model", "v1"), null);
   private static final ModelRequestMaterializer MATERIALIZER = new ModelRequestMaterializer();
   private static final ModelRequestSpecJsonCodec CODEC = new ModelRequestSpecJsonCodec();
 
@@ -364,7 +364,8 @@ class ModelRequestMaterializerTest {
                             "read a.txt",
                             "dev"))),
                 new AssistantMessageMetadata(
-                    GenerationStopReason.COMPLETE, new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L)),
+                    GenerationStopReason.COMPLETE,
+                    new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L)),
                 null)));
     entries.add(
         entry(
@@ -620,7 +621,7 @@ class ModelRequestMaterializerTest {
     return new MessagePayload(
         new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent(text))),
         new AssistantMessageMetadata(
-            GenerationStopReason.COMPLETE, new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L)),
+            GenerationStopReason.COMPLETE, new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L)),
         null);
   }
 

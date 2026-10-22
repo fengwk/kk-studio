@@ -220,7 +220,7 @@ function turnStart(startEntryId: string, reason: string, phase: string): Harness
     reason,
     settings: {
       agentName: 'coder',
-      model: { providerName: 'p', modelName: 'm', variant: 'high' },
+      model: { modelName: 'm', variant: 'high' },
       environmentName: null,
     },
     ownerThreadId: 'thread-1',
@@ -229,7 +229,7 @@ function turnStart(startEntryId: string, reason: string, phase: string): Harness
     compaction: {
       phase,
       trigger: 'THRESHOLD',
-      executionModel: { providerName: 'p', modelName: 'm', variant: 'high' },
+      executionModel: { modelName: 'm', variant: 'high' },
       cutEntryId: 'cut-1',
       turnPrefixStartEntryId: phase === 'FULL' ? null : 'prefix-1',
       historyCompactionEntryId: null,

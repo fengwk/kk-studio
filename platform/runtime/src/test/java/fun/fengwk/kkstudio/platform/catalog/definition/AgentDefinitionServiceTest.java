@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderDTO;
 
@@ -40,9 +41,11 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
   public void shouldPersistGlobalStructuredDefinition() {
     String suffix = Long.toString(System.nanoTime());
     AgentProviderDTO provider = provider("agent-provider-" + suffix);
-    AgentModelDTO model = model(provider.getName(), "agent-model-" + suffix);
+    AgentModelDTO model = model(provider.getName(), "vendor/agent model-" + suffix);
     String name = "agent-definition-" + suffix;
-    String modelRef = provider.getName() + "/" + model.getName();
+    String modelRef = model.getName();
+    assertEquals("vendor/agent model-" + suffix, modelRef);
+    assertEquals(AgentModelKind.MODEL, model.getKind());
 
     AgentDefinitionDTO definition = agentDefinitionService.createAgent(agent(modelRef, name));
     assertEquals(modelRef, definition.getModel());
@@ -54,9 +57,7 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
     assertThrows(
         AiDuplicateException.class,
         () -> agentDefinitionService.createAgent(agent(modelRef, name)));
-    assertThrows(
-        AiInUseException.class,
-        () -> agentModelService.deleteModel(provider.getName(), model.getName(), "0"));
+    assertThrows(AiInUseException.class, () -> agentModelService.deleteModel(model.getName(), "0"));
 
     AgentDefinitionUpdateDTO update = new AgentDefinitionUpdateDTO();
     update.setDescription("updated");
@@ -89,7 +90,7 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
     agentDefinitionService.deleteAgent(name, recreated.getVersion());
     assertThrows(
         AiResourceNotFoundException.class, () -> agentDefinitionService.deleteAgent(name, "0"));
-    agentModelService.deleteModel(provider.getName(), model.getName(), model.getVersion());
+    agentModelService.deleteModel(model.getName(), model.getVersion());
     agentProviderService.deleteProvider(provider.getName(), provider.getVersion());
   }
 
@@ -98,7 +99,7 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
     String suffix = Long.toString(System.nanoTime());
     AgentProviderDTO provider = provider("subagent-provider-" + suffix);
     AgentModelDTO model = model(provider.getName(), "subagent-model-" + suffix);
-    String modelRef = provider.getName() + "/" + model.getName();
+    String modelRef = model.getName();
     AgentDefinitionDTO child =
         agentDefinitionService.createAgent(agent(modelRef, "subagent-child-" + suffix));
     AgentDefinitionCreateDTO parentCreate = agent(modelRef, "subagent-parent-" + suffix);
@@ -137,7 +138,7 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
                 .orElseThrow();
         agentDefinitionService.deleteAgent(current.getName(), current.getVersion());
       }
-      agentModelService.deleteModel(provider.getName(), model.getName(), model.getVersion());
+      agentModelService.deleteModel(model.getName(), model.getVersion());
       agentProviderService.deleteProvider(provider.getName(), provider.getVersion());
     }
   }
@@ -148,7 +149,7 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
     String suffix = Long.toString(System.nanoTime());
     AgentProviderDTO provider = provider("recursive-provider-" + suffix);
     AgentModelDTO model = model(provider.getName(), "recursive-model-" + suffix);
-    String modelRef = provider.getName() + "/" + model.getName();
+    String modelRef = model.getName();
     String selfName = "recursive-self-" + suffix;
     String leftName = "recursive-left-" + suffix;
     String rightName = "recursive-right-" + suffix;
@@ -192,7 +193,7 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
 
     agentDefinitionService.deleteAgent(rightName, right.getVersion());
     agentDefinitionService.deleteAgent(leftName, left.getVersion());
-    agentModelService.deleteModel(provider.getName(), model.getName(), model.getVersion());
+    agentModelService.deleteModel(model.getName(), model.getVersion());
     agentProviderService.deleteProvider(provider.getName(), provider.getVersion());
   }
 
@@ -201,7 +202,7 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
     String suffix = Long.toString(System.nanoTime());
     AgentProviderDTO provider = provider("agent-variant-provider-" + suffix);
     AgentModelDTO model = model(provider.getName(), "agent-variant-model-" + suffix);
-    String modelRef = provider.getName() + "/" + model.getName();
+    String modelRef = model.getName();
     AgentDefinitionCreateDTO invalid = agent(modelRef, "agent-invalid-variant-" + suffix);
     invalid.setVariant("missing");
 
@@ -223,7 +224,7 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
           () -> agentDefinitionService.updateAgent(created.getName(), invalidUpdate));
     } finally {
       agentDefinitionService.deleteAgent(created.getName(), created.getVersion());
-      agentModelService.deleteModel(provider.getName(), model.getName(), model.getVersion());
+      agentModelService.deleteModel(model.getName(), model.getVersion());
       agentProviderService.deleteProvider(provider.getName(), provider.getVersion());
     }
   }
@@ -234,8 +235,8 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
     AgentProviderDTO provider = provider("agent-rebind-provider-" + suffix);
     AgentModelDTO original = model(provider.getName(), "agent-rebind-original-" + suffix);
     AgentModelDTO next = model(provider.getName(), "agent-rebind-next-" + suffix);
-    String originalRef = provider.getName() + "/" + original.getName();
-    String nextRef = provider.getName() + "/" + next.getName();
+    String originalRef = original.getName();
+    String nextRef = next.getName();
     AgentDefinitionDTO definition =
         agentDefinitionService.createAgent(agent(originalRef, "agent-rebind-" + suffix));
     try {
@@ -252,7 +253,7 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
 
       AgentDefinitionUpdateDTO missing = new AgentDefinitionUpdateDTO();
       missing.setDescription(updated.getDescription());
-      missing.setModel(provider.getName() + "/missing-" + suffix);
+      missing.setModel("missing-" + suffix);
       missing.setConfig(updated.getConfig());
       missing.setExpectedVersion(updated.getVersion());
       assertThrows(
@@ -261,8 +262,8 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
       definition = updated;
     } finally {
       agentDefinitionService.deleteAgent(definition.getName(), definition.getVersion());
-      agentModelService.deleteModel(provider.getName(), next.getName(), next.getVersion());
-      agentModelService.deleteModel(provider.getName(), original.getName(), original.getVersion());
+      agentModelService.deleteModel(next.getName(), next.getVersion());
+      agentModelService.deleteModel(original.getName(), original.getVersion());
       agentProviderService.deleteProvider(provider.getName(), provider.getVersion());
     }
   }
@@ -276,6 +277,7 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
 
   private AgentModelDTO model(String providerName, String name) {
     AgentModelCreateDTO dto = new AgentModelCreateDTO();
+    dto.setKind(AgentModelKind.MODEL);
     dto.setProviderName(providerName);
     dto.setName(name);
     executable(dto);

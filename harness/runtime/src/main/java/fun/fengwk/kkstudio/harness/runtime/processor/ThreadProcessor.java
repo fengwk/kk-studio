@@ -29,6 +29,8 @@ import fun.fengwk.kkstudio.harness.runtime.history.SettingsPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelGroupExecution;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelGroupProgress;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
@@ -846,7 +848,9 @@ public final class ThreadProcessor {
               null,
               List.of(),
               now,
-              now));
+              now,
+              null,
+              groupProgress(invocationSpec)));
       if (tx.lockClaimedWork(claim).isEmpty()) {
         throw new ClaimLostSignal();
       }
@@ -905,6 +909,13 @@ public final class ThreadProcessor {
     }
   }
 
+  private static ModelGroupProgress groupProgress(ModelRequestSpec spec) {
+    ModelGroupExecution group = spec.groupExecution();
+    return group == null
+        ? null
+        : new ModelGroupProgress(group.groupName(), group.groupVersion(), 0, 0);
+  }
+
   /** 只有普通 INPUT 把输入水位推进到冻结 cutoff；CONTINUATION / COMPACTION 不推进，保留尚待接纳通知的原始尾部。 */
   private static long nextWatermark(TurnPlan plan, ThreadState thread) {
     if (plan.reason() == TurnStartReason.INPUT) {
@@ -961,10 +972,10 @@ public final class ThreadProcessor {
     ModelSelection executed =
         resolvedSpec == null
             ? null
-            : new ModelSelection(
-                resolvedSpec.model().providerName(),
-                resolvedSpec.model().modelName(),
-                resolvedSpec.variant().id());
+            : resolvedSpec.groupExecution() != null
+                ? ModelSelection.group(resolvedSpec.groupExecution().groupName())
+                : ModelSelection.model(
+                    resolvedSpec.model().modelName(), resolvedSpec.variant().id());
     return new Entry(
         entry.id(),
         entry.sessionId(),

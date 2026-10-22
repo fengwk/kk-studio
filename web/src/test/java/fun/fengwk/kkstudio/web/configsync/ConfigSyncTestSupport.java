@@ -33,6 +33,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelInputModality;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelLimitDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelRateSetDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelVariantDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
@@ -168,17 +169,16 @@ public abstract class ConfigSyncTestSupport extends WebPostgresTestSupport {
     abilities.setInputModalities(List.of(AgentModelInputModality.TEXT));
 
     AgentModelPricingDTO pricing = new AgentModelPricingDTO();
-    pricing.setCurrency("USD");
-    pricing.setPricingTier("default");
-    pricing.setServiceTier("default");
-    pricing.setServiceTierMultiplier(new BigDecimal("1"));
-    pricing.setVersion("v1");
-    pricing.setInputPerMillionTokens(new BigDecimal(inputPrice));
-    pricing.setOutputPerMillionTokens(new BigDecimal("2.5"));
-    pricing.setCacheReadPerMillionTokens(BigDecimal.ZERO);
-    pricing.setCacheWritePerMillionTokens(BigDecimal.ZERO);
-    pricing.setCacheWriteLongPerMillionTokens(BigDecimal.ZERO);
-    pricing.setReasoningPerMillionTokens(BigDecimal.ZERO);
+    AgentModelRateSetDTO base = new AgentModelRateSetDTO();
+    base.setInput(new BigDecimal(inputPrice));
+    base.setOutput(new BigDecimal("2.5"));
+    base.setCacheRead(BigDecimal.ZERO);
+    base.setCacheWrite(BigDecimal.ZERO);
+    base.setCacheWriteByTtl(Map.of());
+    base.setReasoning(null);
+    pricing.setBase(base);
+    pricing.setOverrides(List.of());
+    pricing.setMultipliers(List.of());
 
     AgentModelVariantDTO variant = new AgentModelVariantDTO();
     variant.setId("default");

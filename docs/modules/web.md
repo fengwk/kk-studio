@@ -51,7 +51,7 @@ health、资源下载和 WebSocket 使用各自传输形式。公开路由如下
 | family | 路径 | 用途 |
 | --- | --- | --- |
 | Health | `/healthz` | 存活探针 |
-| Catalog | `/api/providers|models|agents|tools` | Provider/Model/Agent CRUD、工具候选、Provider 远端模型 ID（`providers/{name}/remote-models`）；变更使用 expectedVersion |
+| Catalog | `/api/providers|models|agents|tools|model-defaults` | Provider/MODEL/GROUP/Agent CRUD、工具候选、Provider 远端模型 ID（`providers/{name}/remote-models`）、新建模型的目录默认参数候选（`model-defaults`）；Model 的 PUT/DELETE 为 `/models/{*modelName}`，名称可含斜杠；变更使用 expectedVersion |
 | Skill | `/api/skill-packages` | CRUD、check、exact commit update |
 | MCP | `/api/mcp-servers` | name-keyed CRUD、显式 no-store config、同步 discover |
 | Plugin | `/api/plugins` | 安全投影、auth/prepare、auth/complete、删除 auth；`{pluginId}/connection-check` 按 expected 坐标执行一次显式只读连接检查 |
@@ -105,9 +105,9 @@ Thread 控制面按认证、资源权限与请求格式收紧，不再按 Thread
 
 ### 请求诊断与预览
 
-`GET /api/threads/{threadId}/tree` 返回该 Thread 所属执行树的节点列表。字段只有 `threadId`、显式可空的 `parentThreadId`、`name`、`agentName`、`model`（`providerName` / `modelName` / `variant`）、`status`、`processing`、`turnCount`、`toolCallCount` 和显式可空的 `outcome`。它不返回 Entry、Command 或 Tool 参数与结果。非法 UUID 为 400，缺失 Thread 为 404。任意节点返回同一真实根的完整树，顺序为 `createdAt` 再 UUID。
+`GET /api/threads/{threadId}/tree` 返回该 Thread 所属执行树的节点列表。字段只有 `threadId`、显式可空的 `parentThreadId`、`name`、`agentName`、`model`（`modelName` / 可空 `variant`）、`status`、`processing`、`turnCount`、`toolCallCount` 和显式可空的 `outcome`。它不返回 Entry、Command 或 Tool 参数与结果。非法 UUID 为 400，缺失 Thread 为 404。任意节点返回同一真实根的完整树，顺序为 `createdAt` 再 UUID。
 
-`POST /api/threads/{threadId}/model-request-debug` 以 UI 当前草稿 `{model, environmentName}`（`model` 必填、`environmentName` 可空，null 表示未选 Environment）在真实 Thread snapshot 上做一次只读规划，返回下一次结构化预览与可空的活动冻结请求；每个 subagent 另带当前配置声明 `tools` / `skills` / `subagents` / `configurationJson`。冻结请求始终按原始 snapshot 与原路径物化，与草稿选择无关；全程排除 credential 和 Base64，不写库、不发请求。
+`POST /api/threads/{threadId}/model-request-debug` 以 UI 当前草稿 `{model, environmentName}`（`model` 为必填的 `{modelName, variant?}` 逻辑选择，`environmentName` 可空，null 表示未选 Environment）在真实 Thread snapshot 上做一次只读规划，返回下一次结构化预览与可空的活动冻结请求；每个 subagent 另带当前配置声明 `tools` / `skills` / `subagents` / `configurationJson`。冻结请求始终按原始 snapshot 与原路径物化，与草稿选择无关；全程排除 credential 和 Base64，不写库、不发请求。
 
 请求预览有三个只读入口：`POST /api/threads/{threadId}/provider-request-preview`（owner-free 续写面，
 带精确 head/sequence）、`POST /api/sessions/{sessionId}/provider-request-preview`（本地分支草稿，

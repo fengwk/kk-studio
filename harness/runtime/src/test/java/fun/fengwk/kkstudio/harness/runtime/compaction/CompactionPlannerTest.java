@@ -45,6 +45,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.VideoMessageContent;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -55,8 +56,7 @@ import java.util.UUID;
 class CompactionPlannerTest {
   private static final UUID OWNER_THREAD_ID = new UUID(0L, 1L);
 
-  private static final ModelSelection SETTINGS_MODEL =
-      new ModelSelection("provider", "model", "v1");
+  private static final ModelSelection SETTINGS_MODEL = ModelSelection.model("model", "v1");
   private static final CompactionConfig CONFIG = new CompactionConfig(20_000);
   private static final Instant BASE = Instant.ofEpochSecond(1000L);
 
@@ -133,7 +133,8 @@ class CompactionPlannerTest {
                         video,
                         resource)),
                 new AssistantMessageMetadata(
-                    GenerationStopReason.COMPLETE, new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L)),
+                    GenerationStopReason.COMPLETE,
+                    new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L)),
                 null),
             BASE);
     Entry tool =
@@ -932,7 +933,7 @@ class CompactionPlannerTest {
               new MessagePayload(
                   new AgentMessage(AgentMessageRole.ASSISTANT, contents),
                   new AssistantMessageMetadata(
-                      stopReason, new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L)),
+                      stopReason, new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L)),
                   null),
               BASE));
       return this;
@@ -952,7 +953,8 @@ class CompactionPlannerTest {
               new MessagePayload(
                   new AgentMessage(AgentMessageRole.ASSISTANT, contents),
                   new AssistantMessageMetadata(
-                      GenerationStopReason.COMPLETE, new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L)),
+                      GenerationStopReason.COMPLETE,
+                      new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L)),
                   null),
               BASE));
       return this;

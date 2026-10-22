@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
@@ -33,6 +34,8 @@ class ModelInvocationTest {
         attempt,
         "partial-" + attempt,
         "",
+        ModelSelection.model("model", "v1"),
+        null,
         new ModelInvocationError(ProviderErrorKind.TRANSIENT, "failure-" + attempt),
         failedAt,
         failedAt.plusSeconds(1));
@@ -267,6 +270,8 @@ class ModelInvocationTest {
             2,
             "partial-2",
             "",
+            ModelSelection.model("model", "v1"),
+            null,
             new ModelInvocationError(ProviderErrorKind.TRANSIENT, "failure-2"),
             first.retryAt(),
             first.retryAt().plusSeconds(1));
@@ -280,6 +285,8 @@ class ModelInvocationTest {
             2,
             "partial-2",
             "",
+            ModelSelection.model("model", "v1"),
+            null,
             new ModelInvocationError(ProviderErrorKind.TRANSIENT, "failure-2"),
             first.retryAt().minusMillis(1),
             first.retryAt());

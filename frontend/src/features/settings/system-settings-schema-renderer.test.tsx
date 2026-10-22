@@ -38,6 +38,7 @@ function renderRenderer(ui: ReactNode) {
 function catalogModel(): AgentModelDTO {
   return {
     providerName: 'minimax',
+    kind: 'MODEL',
     name: 'MiniMax',
     modelId: 'minimax-model-id',
     description: null,
@@ -45,18 +46,10 @@ function catalogModel(): AgentModelDTO {
       limit: { context: 128000, output: 8192 },
       abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
       pricing: {
-        currency: 'USD',
-        pricingTier: 'default',
-        serviceTier: 'default',
-        serviceTierMultiplier: 1,
-        version: 'v1',
-        inputPerMillionTokens: 0,
-        outputPerMillionTokens: 0,
-        cacheReadPerMillionTokens: 0,
-        cacheWritePerMillionTokens: 0,
-        cacheWriteLongPerMillionTokens: 0,
-        reasoningPerMillionTokens: 0,
-      },
+      base: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0', cacheWriteByTtl: {}, reasoning: null },
+      overrides: [],
+      multipliers: [],
+    },
       defaultVariant: 'default',
       variants: [{ id: 'default' }, { id: 'fast' }],
     },
@@ -124,6 +117,7 @@ describe('system settings schema renderer', () => {
       'aiRuntime.subagentMaxTotalConcurrency',
       'aiRuntime.subagentMaxTurns',
       'aiRuntime.modelHttpRetryStatusCodes',
+      'aiRuntime.modelCatalogSource',
     ])
     // 顺序与 server schema 一致。
     expect(paths![0]).toBe('aiRuntime.retryMaxRetries')

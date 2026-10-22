@@ -93,6 +93,8 @@ class HistoryEntryPayloadJsonCodecTest {
     EntryPayload attemptFailure =
         new ModelAttemptFailurePayload(
             new ModelAttemptSnapshot(1, 7, "partial", "thinking"),
+            ModelSelection.model("model", "v1"),
+            null,
             new AssistantError("TRANSIENT", "down"),
             Instant.parse("2026-01-01T00:00:02Z"));
     EntryPayload error =
@@ -170,7 +172,7 @@ class HistoryEntryPayloadJsonCodecTest {
         "{\"message\":{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"text\",\"text\":\"answer\"}]},"
             + "\"assistantMetadata\":{\"stopReason\":\"COMPLETE\",\"usage\":{\"inputTokens\":1,"
             + "\"outputTokens\":1,\"cacheReadTokens\":0,\"cacheWriteTokens\":0,"
-            + "\"cacheWriteLongTokens\":0,\"reasoningTokens\":0,\"providerTotalTokens\":2}},"
+            + "\"cacheWriteByTtl\":{},\"reasoningTokens\":0,\"providerTotalTokens\":2}},"
             + "\"toolResultMetadata\":null}";
     MessagePayload legacyPayload = (MessagePayload) CODEC.decode(EntryType.MESSAGE, legacy);
     assertNull(legacyPayload.assistantMetadata().decodeDurationMillis());
@@ -183,10 +185,29 @@ class HistoryEntryPayloadJsonCodecTest {
         "{\"message\":{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"text\",\"text\":\"answer\"}]},"
             + "\"assistantMetadata\":{\"stopReason\":\"COMPLETE\",\"usage\":{\"inputTokens\":1,"
             + "\"outputTokens\":1,\"cacheReadTokens\":0,\"cacheWriteTokens\":0,"
-            + "\"cacheWriteLongTokens\":0,\"reasoningTokens\":0,\"providerTotalTokens\":2},"
+            + "\"cacheWriteByTtl\":{},\"reasoningTokens\":0,\"providerTotalTokens\":2},"
             + "\"decodeDurationMillis\":1234},\"toolResultMetadata\":null}",
         CODEC.encode(timed));
     assertEquals(timed, CODEC.decode(EntryType.MESSAGE, CODEC.encode(timed)));
+  }
+
+  /** 测试意图：真实执行模型、请求起始时间与 Provider service tier 必须随 assistant metadata 无损冻结。 */
+  @Test
+  void roundTripsActualModelRequestedAtAndResponseServiceTier() {
+    AssistantMessageMetadata metadata =
+        new AssistantMessageMetadata(
+            GenerationStopReason.COMPLETE,
+            new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L),
+            null,
+            ModelSelection.model("actual-model", "high"),
+            Instant.parse("2026-01-01T00:00:05Z"),
+            "priority");
+    MessagePayload payload = new MessagePayload(assistant("answer"), metadata, null);
+
+    MessagePayload decoded =
+        (MessagePayload) CODEC.decode(EntryType.MESSAGE, CODEC.encode(payload));
+
+    assertEquals(metadata, decoded.assistantMetadata());
   }
 
   /** 测试意图：人工输入回执随结果迁入 Entry 元数据后必须可无损往返，并作为 runtime 元数据显式编码（不写进业务 details）。 */
@@ -316,7 +337,7 @@ class HistoryEntryPayloadJsonCodecTest {
     String suffix = ",\"toolResultMetadata\":null}";
     String base =
         "{\"stopReason\":\"COMPLETE\",\"usage\":{\"inputTokens\":1,\"outputTokens\":1,"
-            + "\"cacheReadTokens\":0,\"cacheWriteTokens\":0,\"cacheWriteLongTokens\":0,"
+            + "\"cacheReadTokens\":0,\"cacheWriteTokens\":0,\"cacheWriteByTtl\":{},"
             + "\"reasoningTokens\":0,\"providerTotalTokens\":2}";
 
     assertEquals(
@@ -370,12 +391,12 @@ class HistoryEntryPayloadJsonCodecTest {
   void encodesCanonicalFieldOrder() {
     assertEquals(
         "{\"settings\":{\"agentName\":\"coding\",\"model\":{"
-            + "\"providerName\":\"anthropic\",\"modelName\":\"claude-sonnet\",\"variant\":\"default\"}"
+            + "\"modelName\":\"claude-sonnet\",\"variant\":\"default\"}"
             + ",\"environmentName\":null,\"goal\":null}}",
         CODEC.encode(new RootPayload(settings())));
     assertEquals(
         "{\"reason\":\"INPUT\",\"settings\":{\"agentName\":\"coding\",\"model\":{"
-            + "\"providerName\":\"anthropic\",\"modelName\":\"claude-sonnet\",\"variant\":\"default\"}"
+            + "\"modelName\":\"claude-sonnet\",\"variant\":\"default\"}"
             + ",\"environmentName\":null,\"goal\":null},"
             + "\"ownerThreadId\":\""
             + OWNER_THREAD_ID
@@ -412,11 +433,15 @@ class HistoryEntryPayloadJsonCodecTest {
         CODEC.encode(new MessagePayload(user("hi"), null, null)));
     assertEquals(
         "{\"attempt\":{\"attempt\":1,\"sequence\":7,\"text\":\"partial\",\"thinking\":\"\"},"
+            + "\"model\":{\"modelName\":\"model\",\"variant\":\"v1\"},"
+            + "\"requestedAt\":null,"
             + "\"error\":{\"code\":\"TRANSIENT\",\"message\":\"down\"},"
             + "\"retryAt\":\"2026-01-01T00:00:02Z\"}",
         CODEC.encode(
             new ModelAttemptFailurePayload(
                 new ModelAttemptSnapshot(1, 7, "partial", ""),
+                ModelSelection.model("model", "v1"),
+                null,
                 new AssistantError("TRANSIENT", "down"),
                 Instant.parse("2026-01-01T00:00:02Z"))));
     assertEquals(
@@ -431,7 +456,7 @@ class HistoryEntryPayloadJsonCodecTest {
   /** 模型回退的 turn 记录实际调用的型号；settings 保持 Thread 自己的设置。 */
   @Test
   void roundTripsTurnStartFallbackModelAndRejectsInvalidShapes() {
-    ModelSelection fallback = new ModelSelection("openai", "gpt-5", "default");
+    ModelSelection fallback = ModelSelection.model("gpt-5", "default");
     TurnStartPayload resolved =
         new TurnStartPayload(
             TurnStartReason.INPUT, settings(), OWNER_THREAD_ID, 4096, 1024, null, fallback);
@@ -556,10 +581,10 @@ class HistoryEntryPayloadJsonCodecTest {
             CODEC.decode(
                 EntryType.ROOT,
                 "{\"settings\":{\"agentName\":\"a\",\"model\":{"
-                    + "\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"},"
+                    + "\"modelName\":\"m\",\"variant\":\"v\"},"
                     + "\"environmentName\":null,"
                     + "\"settings\":{\"agentName\":\"b\",\"model\":{"
-                    + "\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"},"
+                    + "\"modelName\":\"m\",\"variant\":\"v\"},"
                     + "\"environmentName\":null}}"));
     assertThrows(
         IllegalArgumentException.class, () -> CODEC.decode(EntryType.ROOT, "{\"settings\":{}} {}"));
@@ -574,14 +599,14 @@ class HistoryEntryPayloadJsonCodecTest {
             CODEC.decode(
                 EntryType.ROOT,
                 "{\"settings\":{\"agentName\":\"a\",\"model\":{"
-                    + "\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"}}}"));
+                    + "\"modelName\":\"m\",\"variant\":\"v\"}}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
                 EntryType.ROOT,
                 "{\"settings\":{\"agentName\":\"a\",\"model\":{"
-                    + "\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"}"
+                    + "\"modelName\":\"m\",\"variant\":\"v\"}"
                     + ",\"environmentName\":\" \"}}"));
     assertThrows(
         IllegalArgumentException.class,
@@ -589,7 +614,7 @@ class HistoryEntryPayloadJsonCodecTest {
             CODEC.decode(
                 EntryType.ROOT,
                 "{\"settings\":{\"agentName\":\"a\",\"model\":{"
-                    + "\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"}"
+                    + "\"modelName\":\"m\",\"variant\":\"v\"}"
                     + ",\"environmentName\":\"env/a\"}}"));
     assertThrows(
         IllegalArgumentException.class,
@@ -597,7 +622,7 @@ class HistoryEntryPayloadJsonCodecTest {
             CODEC.decode(
                 EntryType.ROOT,
                 "{\"settings\":{\"agentName\":\"a\",\"model\":{"
-                    + "\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"}"
+                    + "\"modelName\":\"m\",\"variant\":\"v\"}"
                     + ",\"environmentName\":5}}"));
     // 正例：canonical 环境名往返，且 null 与文本都会被精确保留。
     assertEquals(
@@ -622,7 +647,7 @@ class HistoryEntryPayloadJsonCodecTest {
         CODEC.decode(EntryType.ROOT, CODEC.encode(new RootPayload(settings()))));
 
     String base =
-        "\"agentName\":\"a\",\"model\":{\"providerName\":\"p\",\"modelName\":\"m\","
+        "\"agentName\":\"a\",\"model\":{\"modelName\":\"m\","
             + "\"variant\":\"v\"},\"environmentName\":null";
     // 缺失 goal 字段（旧 shape）拒绝。
     assertThrows(
@@ -657,7 +682,7 @@ class HistoryEntryPayloadJsonCodecTest {
             CODEC.decode(
                 EntryType.ROOT,
                 "{\"settings\":{\"agentName\":\"a\",\"model\":{"
-                    + "\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"},"
+                    + "\"modelName\":\"m\",\"variant\":\"v\"},"
                     + "\"environmentName\":null,\"goal\":null},\"subagentContext\":null}"));
     assertThrows(IllegalArgumentException.class, () -> CODEC.decode(EntryType.ROOT, "{}"));
     assertThrows(IllegalArgumentException.class, () -> CODEC.decode(EntryType.ROOT, "[]"));
@@ -669,7 +694,7 @@ class HistoryEntryPayloadJsonCodecTest {
             CODEC.decode(
                 EntryType.TURN_START,
                 "{\"reason\":5,\"settings\":{\"agentName\":\"a\","
-                    + "\"model\":{\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"}}"));
+                    + "\"model\":{\"modelName\":\"m\",\"variant\":\"v\"}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -683,7 +708,7 @@ class HistoryEntryPayloadJsonCodecTest {
             CODEC.decode(
                 EntryType.TURN_START,
                 "{\"reason\":\"INPUT\",\"settings\":{\"agentName\":5,"
-                    + "\"model\":{\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"}}"));
+                    + "\"model\":{\"modelName\":\"m\",\"variant\":\"v\"}}"));
     // 旧 workspacePath 字段已整体删除：携带它（无论字符串还是数字）一律严格拒绝。
     assertThrows(
         IllegalArgumentException.class,
@@ -691,7 +716,7 @@ class HistoryEntryPayloadJsonCodecTest {
             CODEC.decode(
                 EntryType.TURN_START,
                 "{\"reason\":\"INPUT\",\"settings\":{\"workspacePath\":\"../outside\","
-                    + "\"agentName\":\"a\",\"model\":{\"providerName\":\"p\",\"modelName\":\"m\","
+                    + "\"agentName\":\"a\",\"model\":{\"modelName\":\"m\","
                     + "\"variant\":\"v\"}}"));
     assertThrows(
         IllegalArgumentException.class,
@@ -699,14 +724,14 @@ class HistoryEntryPayloadJsonCodecTest {
             CODEC.decode(
                 EntryType.TURN_START,
                 "{\"reason\":\"INPUT\",\"settings\":{\"workspacePath\":5,"
-                    + "\"agentName\":\"a\",\"model\":{\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"}}"));
+                    + "\"agentName\":\"a\",\"model\":{\"modelName\":\"m\",\"variant\":\"v\"}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
                 EntryType.TURN_START,
                 "{\"reason\":\"INPUT\",\"settings\":{\"agentName\":\" \","
-                    + "\"model\":{\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"}}"));
+                    + "\"model\":{\"modelName\":\"m\",\"variant\":\"v\"}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -1251,7 +1276,7 @@ class HistoryEntryPayloadJsonCodecTest {
   private static String rootSettingsWith(String reasonField) {
     return reasonField
         + "\"settings\":{\"agentName\":\"a\","
-        + "\"model\":{\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\"}}";
+        + "\"model\":{\"modelName\":\"m\",\"variant\":\"v\"}}";
   }
 
   private static String turnEndWith(String prefix) {
@@ -1275,7 +1300,7 @@ class HistoryEntryPayloadJsonCodecTest {
   }
 
   private static AssistantMessageMetadata metadata(GenerationStopReason reason) {
-    ModelUsage usage = new ModelUsage(1L, 1L, 0L, 0L, 0L, 0L, 2L);
+    ModelUsage usage = new ModelUsage(1L, 1L, 0L, 0L, Map.of(), 0L, 2L);
     return new AssistantMessageMetadata(reason, usage);
   }
 
@@ -1286,8 +1311,7 @@ class HistoryEntryPayloadJsonCodecTest {
   }
 
   private static BranchSettings settings() {
-    return new BranchSettings(
-        "coding", new ModelSelection("anthropic", "claude-sonnet", "default"), null);
+    return new BranchSettings("coding", ModelSelection.model("claude-sonnet", "default"), null);
   }
 
   /** CUSTOM entry 的 data 自由 JSON number 以 BigDecimal 保留精度，1e309/1e-324 不得失真。 */

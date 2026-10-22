@@ -132,7 +132,7 @@ class IssueThreadExecutionTest {
     UUID threadId = UUID.randomUUID();
     UUID head = UUID.randomUUID();
     BranchSettings settings =
-        new BranchSettings("worker", new ModelSelection("provider", "model", "v1"), null);
+        new BranchSettings("worker", ModelSelection.model("model", "v1"), null);
     NewThreadCommand input =
         new NewThreadCommand(
             new CustomMessageCommandPayload(AgentMessage.user("work")), UUID.randomUUID());

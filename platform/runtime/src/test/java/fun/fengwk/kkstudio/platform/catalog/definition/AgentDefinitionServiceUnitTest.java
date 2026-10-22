@@ -27,6 +27,7 @@ import tools.jackson.databind.json.JsonMapper;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelDefaultVariantResolver;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.catalog.tool.TestRuntimeToolCatalogSource;
@@ -41,6 +42,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionType;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 
 import java.sql.SQLException;
@@ -65,6 +67,8 @@ class AgentDefinitionServiceUnitTest {
     resolver = mock(AgentDefinitionReferenceResolver.class);
     variants = mock(AgentModelDefaultVariantResolver.class);
     pluginAgentDependencies = mock(PluginAgentDependencies.class);
+    when(resolver.requireModelForUpdate(any()))
+        .thenAnswer(invocation -> model(invocation.getArgument(0), AgentModelKind.MODEL));
     service =
         new AgentDefinitionService(
             repository,
@@ -77,21 +81,20 @@ class AgentDefinitionServiceUnitTest {
             pluginAgentDependencies);
   }
 
-  /** 创建持久化规范化的能力列表与 model 引用；更新保持名称身份并改写模型与 variant。 */
+  /** 创建持久化规范化的能力列表与全局 model 名；更新保持名称身份并改写模型与 variant。 */
   @Test
   void persistsCanonicalConfigurationAndKeepsIdentity() throws Exception {
     AgentDefinition created =
         createAndCapture(
             create(
                 "agent",
-                "provider/model",
+                "model",
                 config(List.of(), List.of(skillRef("tools", "java"), skillRef("tools", "dev"))),
                 null));
     AgentDefinitionConfigDTO stored =
         objectMapper.readValue(created.configJson(), AgentDefinitionConfigDTO.class);
     assertEquals(List.of(skillRef("tools", "java"), skillRef("tools", "dev")), stored.getSkills());
     assertEquals(AgentDefinitionType.USER, created.type());
-    assertEquals("provider", created.modelProviderName());
     assertEquals("model", created.modelName());
 
     AgentDefinition current = definition();
@@ -101,7 +104,7 @@ class AgentDefinitionServiceUnitTest {
     when(repository.getByName("agent")).thenReturn(current);
     AgentDefinitionUpdateDTO update = update("0");
     update.setDescription("updated");
-    update.setModel("other-provider/other-model");
+    update.setModel("vendor/other model");
     update.setVariant("quality");
     service.updateAgent("agent", update);
 
@@ -110,11 +113,10 @@ class AgentDefinitionServiceUnitTest {
     AgentDefinition updated = captor.getValue();
     assertEquals("agent", updated.name());
     assertEquals("updated", updated.description());
-    assertEquals("other-provider", updated.modelProviderName());
-    assertEquals("other-model", updated.modelName());
+    assertEquals("vendor/other model", updated.modelName());
     assertEquals("quality", updated.variant());
-    verify(resolver).requireModelForUpdate("other-provider", "other-model");
-    verify(variants).resolve("other-provider", "other-model", "quality");
+    verify(resolver).requireModelForUpdate("vendor/other model");
+    verify(variants).resolve("vendor/other model", "quality");
   }
 
   /** 非 canonical 能力名、缺字段与超限输入在写入前确定性拒绝；description 为 text 不截断。 */
@@ -128,7 +130,7 @@ class AgentDefinitionServiceUnitTest {
                     "agent",
                     create(
                         "agent",
-                        "provider/model",
+                        "model",
                         config(
                             List.of(),
                             List.of(skillRef("tools", "java"), skillRef("tools", "java"))),
@@ -141,8 +143,7 @@ class AgentDefinitionServiceUnitTest {
             AiValidationException.class,
             () ->
                 service.validateImport(
-                    "agent",
-                    create("agent", "provider/model", config(List.of(" read "), List.of()), null)));
+                    "agent", create("agent", "model", config(List.of(" read "), List.of()), null)));
     assertEquals(
         "agent definition config tools must contain valid model-visible tool names:  read ",
         tool.getMessage());
@@ -152,49 +153,59 @@ class AgentDefinitionServiceUnitTest {
           AiValidationException.class,
           () ->
               service.validateImport(
-                  invalidName, create(invalidName, "provider/model", emptyConfig(), null)));
+                  invalidName, create(invalidName, "model", emptyConfig(), null)));
     }
     assertThrows(AiValidationException.class, () -> service.validateImport("agent", null));
     assertThrows(
         AiValidationException.class,
-        () -> service.validateImport(null, create(null, "provider/model", emptyConfig(), null)));
+        () -> service.validateImport(null, create(null, "model", emptyConfig(), null)));
     assertThrows(
         AiValidationException.class,
         () -> service.validateImport("agent", create("agent", null, emptyConfig(), null)));
+    for (String invalidModel : List.of(" model ", "m".repeat(129))) {
+      assertThrows(
+          AiValidationException.class,
+          () ->
+              service.validateImport("agent", create("agent", invalidModel, emptyConfig(), null)));
+    }
     assertThrows(
         AiValidationException.class,
-        () -> service.validateImport("agent", create("agent", "no-slash", emptyConfig(), null)));
-    assertThrows(
-        AiValidationException.class,
-        () -> service.validateImport("agent", create("agent", "provider/model", null, null)));
+        () -> service.validateImport("agent", create("agent", "model", null, null)));
 
-    AgentDefinitionCreateDTO longDescription =
-        create("agent", "provider/model", emptyConfig(), null);
+    AgentDefinitionCreateDTO longDescription = create("agent", "model", emptyConfig(), null);
     longDescription.setDescription("d".repeat(4096));
     AgentDefinition created = createAndCapture(longDescription);
     assertEquals("d".repeat(4096), created.description());
     assertNull(created.variant());
   }
 
-  /** 非法 model ref、variant 或执行配置在写入前包装为校验错误；null 请求同样确定性拒绝。 */
+  /** 非法 model 名、variant、组级 variant 或执行配置在写入前包装为校验错误；null 请求同样确定性拒绝。 */
   @Test
   void wrapsInvalidReferencesAsValidationErrors() {
-    AgentDefinitionCreateDTO badRef = create("agent", "no-slash", emptyConfig(), null);
+    AgentDefinitionCreateDTO badRef = create("agent", " model", emptyConfig(), null);
     assertThrows(AiValidationException.class, () -> service.createAgent(badRef));
     assertThrows(AiValidationException.class, () -> service.createAgent(null));
 
-    when(variants.resolve("provider", "model", "bad-variant"))
+    when(variants.resolve("model", "bad-variant"))
         .thenThrow(new IllegalArgumentException("unknown variant: bad-variant"));
     assertThrows(
         AiValidationException.class,
-        () -> service.createAgent(create("agent", "provider/model", emptyConfig(), "bad-variant")));
+        () -> service.createAgent(create("agent", "model", emptyConfig(), "bad-variant")));
+
+    when(resolver.requireModelForUpdate("group")).thenReturn(model("group", AgentModelKind.GROUP));
+    AiValidationException groupVariant =
+        assertThrows(
+            AiValidationException.class,
+            () -> service.createAgent(create("agent", "group", emptyConfig(), "default")));
+    assertEquals(
+        "variant must be blank when the selected model is a GROUP", groupVariant.getMessage());
+    verify(variants, never()).resolve(eq("group"), any());
 
     assertThrows(
         AiValidationException.class,
         () ->
             service.createAgent(
-                create(
-                    "agent", "provider/model", config(List.of("no-such-tool"), List.of()), null)));
+                create("agent", "model", config(List.of("no-such-tool"), List.of()), null)));
     verify(repository, never()).create(any());
   }
 
@@ -202,7 +213,7 @@ class AgentDefinitionServiceUnitTest {
   @Test
   void validatesCurrentSkillReferencesOnCreateAndUpdate() {
     SkillRefDTO skillRef = skillRef("tools", "dev");
-    createAndCapture(create("agent", "provider/model", config(List.of(), List.of(skillRef)), null));
+    createAndCapture(create("agent", "model", config(List.of(), List.of(skillRef)), null));
     verify(resolver).requireReferencedLifecycles(List.of(skillRef), List.of());
     verify(resolver).requireSubagentsForCreate("agent", List.of());
 
@@ -220,7 +231,7 @@ class AgentDefinitionServiceUnitTest {
   /** 仓库写入失败：重复为 409、外键缺失为 404、非外键完整性错误原样抛出，CAS 落空重读后为 404 或版本冲突。 */
   @Test
   void classifiesFailedRepositoryMutations() {
-    AgentDefinitionCreateDTO create = create("agent", "provider/model", emptyConfig(), null);
+    AgentDefinitionCreateDTO create = create("agent", "model", emptyConfig(), null);
     when(repository.create(any())).thenReturn(false);
     assertThrows(IllegalStateException.class, () -> service.createAgent(create));
     when(repository.create(any())).thenThrow(new DuplicateKeyException("duplicate"));
@@ -262,7 +273,7 @@ class AgentDefinitionServiceUnitTest {
   void staleVersionWinsOverModelValidation() {
     when(resolver.requireAgent("agent")).thenReturn(definition().toBuilder().version(1L).build());
     assertThrows(AiVersionConflictException.class, () -> service.updateAgent("agent", update("0")));
-    verify(resolver, never()).requireModelForUpdate(any(), any());
+    verify(resolver, never()).requireModelForUpdate(any());
     verify(repository, never()).updateByName(any(), anyLong());
   }
 
@@ -303,16 +314,12 @@ class AgentDefinitionServiceUnitTest {
   @Test
   void builtinAgentsKeepSystemOwnedIdentity() {
     AgentDefinitionCreateDTO reserved =
-        create(BuiltinAgentDefinitions.COMPACTION_NAME, "provider/model", emptyConfig(), null);
+        create(BuiltinAgentDefinitions.COMPACTION_NAME, "model", emptyConfig(), null);
     assertThrows(AiDuplicateException.class, () -> service.createAgent(reserved));
     verify(repository, never()).create(any());
 
     AgentDefinition builtin =
-        definition().toBuilder()
-            .type(AgentDefinitionType.BUILTIN)
-            .modelProviderName(null)
-            .modelName(null)
-            .build();
+        definition().toBuilder().type(AgentDefinitionType.BUILTIN).modelName(null).build();
     when(resolver.requireAgentForUpdate("agent")).thenReturn(builtin);
     assertThrows(AiInUseException.class, () -> service.deleteAgent("agent", "0"));
     verify(repository, never()).deleteByName(any(), anyLong());
@@ -325,8 +332,8 @@ class AgentDefinitionServiceUnitTest {
     unconfigured.setModel(null);
     AgentDefinitionDTO dto = service.updateAgent("agent", unconfigured);
     assertNull(dto.getModel());
-    verify(resolver, never()).requireModelForUpdate(any(), any());
-    verify(variants, never()).resolve(any(), any(), any());
+    verify(resolver, never()).requireModelForUpdate(any());
+    verify(variants, never()).resolve(any(), any());
 
     unconfigured.setVariant("default");
     assertThrows(AiValidationException.class, () -> service.updateAgent("agent", unconfigured));
@@ -339,21 +346,18 @@ class AgentDefinitionServiceUnitTest {
     AgentDefinitionUpdateDTO update = update("0");
     update.setModel(null);
     assertThrows(AiValidationException.class, () -> service.updateAgent("agent", update));
-    verify(resolver, never()).requireModelForUpdate(any(), any());
+    verify(resolver, never()).requireModelForUpdate(any());
     verify(repository, never()).updateByName(any(), anyLong());
   }
 
-  /** DTO 投影：model 引用合成为 provider/model，未配置模型时为 null。 */
+  /** DTO 投影：model 为全局模型名，未配置模型时为 null。 */
   @Test
   void projectsDefinitionToDto() {
     AgentDefinitionDTO dto = service.toDto(definition());
     assertEquals("agent", dto.getName());
-    assertEquals("provider/model", dto.getModel());
+    assertEquals("model", dto.getModel());
     assertEquals("0", dto.getVersion());
-    assertNull(
-        service
-            .toDto(definition().toBuilder().modelProviderName(null).modelName(null).build())
-            .getModel());
+    assertNull(service.toDto(definition().toBuilder().modelName(null).build()).getModel());
   }
 
   private AgentDefinition createAndCapture(AgentDefinitionCreateDTO create) {
@@ -373,11 +377,14 @@ class AgentDefinitionServiceUnitTest {
     return AgentDefinition.builder()
         .name("agent")
         .type(AgentDefinitionType.USER)
-        .modelProviderName("provider")
         .modelName("model")
         .configJson(EMPTY_CONFIG)
         .version(0L)
         .build();
+  }
+
+  private static AgentModel model(String name, AgentModelKind kind) {
+    return AgentModel.builder().name(name).kind(kind).version(0L).build();
   }
 
   private static AgentDefinitionCreateDTO create(
@@ -392,7 +399,7 @@ class AgentDefinitionServiceUnitTest {
 
   private static AgentDefinitionUpdateDTO update(String version) {
     AgentDefinitionUpdateDTO update = new AgentDefinitionUpdateDTO();
-    update.setModel("provider/model");
+    update.setModel("model");
     update.setConfig(emptyConfig());
     update.setExpectedVersion(version);
     return update;

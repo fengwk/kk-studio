@@ -191,14 +191,14 @@ class HarnessRuntimeDtoContractTest {
     HarnessBranchSettingsDTO explicitNull =
         MAPPER.readValue(
             """
-            {"agentName":"assistant","model":{"providerName":"p","modelName":"m","variant":"v"},
+            {"agentName":"assistant","model":{"modelName":"m","variant":"v"},
              "environmentName":null}
             """,
             HarnessBranchSettingsDTO.class);
     HarnessBranchSettingsDTO missing =
         MAPPER.readValue(
             """
-            {"agentName":"assistant","model":{"providerName":"p","modelName":"m","variant":"v"}}
+            {"agentName":"assistant","model":{"modelName":"m","variant":"v"}}
             """,
             HarnessBranchSettingsDTO.class);
 
@@ -274,7 +274,6 @@ class HarnessRuntimeDtoContractTest {
     node.setName("root-thread");
     node.setAgentName("default-assistant");
     HarnessModelSelectionDTO model = new HarnessModelSelectionDTO();
-    model.setProviderName("openai");
     model.setModelName("gpt-5");
     model.setVariant("default");
     node.setModel(model);
@@ -331,7 +330,17 @@ class HarnessRuntimeDtoContractTest {
             MAPPER.readValue(
                 """
                 {"type":"SET_MODEL","idempotencyKey":"00000000-0000-0000-0000-000000000001",
-                 "model":{"providerName":"p","modelName":"m","variant":"v","unknown":true}}
+                 "model":{"modelName":"m","variant":"v","unknown":true}}
+                """,
+                HarnessCommandCreateDTO.class));
+    // 统一 ModelSelection 已移除 providerName；旧字段必须作为未知字段严格拒绝。
+    assertThrows(
+        Exception.class,
+        () ->
+            MAPPER.readValue(
+                """
+                {"type":"SET_MODEL","idempotencyKey":"00000000-0000-0000-0000-000000000005",
+                 "model":{"providerName":"p","modelName":"m","variant":"v"}}
                 """,
                 HarnessCommandCreateDTO.class));
     assertThrows(
@@ -626,14 +635,14 @@ class HarnessRuntimeDtoContractTest {
     HarnessBranchSettingsDTO cleared =
         MAPPER.readValue(
             """
-            {"agentName":"assistant","model":{"providerName":"p","modelName":"m","variant":"v"},
+            {"agentName":"assistant","model":{"modelName":"m","variant":"v"},
              "environmentName":null,"goal":null}
             """,
             HarnessBranchSettingsDTO.class);
     HarnessBranchSettingsDTO set =
         MAPPER.readValue(
             """
-            {"agentName":"assistant","model":{"providerName":"p","modelName":"m","variant":"v"},
+            {"agentName":"assistant","model":{"modelName":"m","variant":"v"},
              "environmentName":null,
              "goal":{"id":"00000000-0000-0000-0000-00000000002a","text":"ship it"}}
             """,
@@ -648,7 +657,7 @@ class HarnessRuntimeDtoContractTest {
         () ->
             MAPPER.readValue(
                 """
-                {"agentName":"assistant","model":{"providerName":"p","modelName":"m","variant":"v"},
+                {"agentName":"assistant","model":{"modelName":"m","variant":"v"},
                  "environmentName":null,
                  "goal":{"id":"00000000-0000-0000-0000-00000000002a","text":"ship it","extra":1}}
                 """,

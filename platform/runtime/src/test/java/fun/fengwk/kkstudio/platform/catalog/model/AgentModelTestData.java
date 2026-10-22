@@ -8,11 +8,13 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelInputModality;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelLimitDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelRateSetDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelVariantDTO;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /** CRUD 测试共享的完整模型配置（不完整的模型现已被拒绝）。 */
 public final class AgentModelTestData {
@@ -43,17 +45,16 @@ public final class AgentModelTestData {
     config.setAbilities(abilities);
 
     AgentModelPricingDTO pricing = new AgentModelPricingDTO();
-    pricing.setCurrency("USD");
-    pricing.setPricingTier(pricingTier);
-    pricing.setServiceTier("default");
-    pricing.setServiceTierMultiplier(BigDecimal.ONE);
-    pricing.setVersion(pricingVersion);
-    pricing.setInputPerMillionTokens(BigDecimal.ZERO);
-    pricing.setOutputPerMillionTokens(BigDecimal.ZERO);
-    pricing.setCacheReadPerMillionTokens(BigDecimal.ZERO);
-    pricing.setCacheWritePerMillionTokens(BigDecimal.ZERO);
-    pricing.setCacheWriteLongPerMillionTokens(BigDecimal.ZERO);
-    pricing.setReasoningPerMillionTokens(BigDecimal.ZERO);
+    AgentModelRateSetDTO base = new AgentModelRateSetDTO();
+    base.setInput(BigDecimal.ZERO);
+    base.setOutput(BigDecimal.ZERO);
+    base.setCacheRead(BigDecimal.ZERO);
+    base.setCacheWrite(BigDecimal.ZERO);
+    base.setCacheWriteByTtl(Map.of());
+    base.setReasoning(BigDecimal.ZERO);
+    pricing.setBase(base);
+    pricing.setOverrides(List.of());
+    pricing.setMultipliers(List.of());
     config.setPricing(pricing);
 
     List<AgentModelVariantDTO> variants = new ArrayList<>();

@@ -1,48 +1,20 @@
 package fun.fengwk.kkstudio.share.ai.catalog;
 
 import lombok.Data;
-import org.jspecify.annotations.Nullable;
 
-import java.math.BigDecimal;
 import java.util.List;
 
-/** Agent 模型携带的定价快照，用于每次调用的确定性成本计算。 */
+/**
+ * 完整模型价格定义：基础费率、按顺序应用的覆盖规则和按顺序应用的倍率规则。
+ *
+ * <p>所有 decimal 在 wire 上都是十进制字符串；未提供普通价格按 0、未提供倍率按 1、reasoning 缺省继承输出。
+ */
 @Data
 public class AgentModelPricingDTO {
 
-  /** 必填非空白货币代码（惯例为 ISO 4217 代码，如 {@code USD}）。 */
-  private String currency;
+  private AgentModelRateSetDTO base;
 
-  /** 必填非空白定价档位标识（pricing tier）。 */
-  private String pricingTier;
+  private List<AgentModelPricingOverrideDTO> overrides;
 
-  /** 必填非空白服务档位标识（service tier）。 */
-  private String serviceTier;
-
-  /** 必填正数 BigDecimal：服务档位倍率。 */
-  private BigDecimal serviceTierMultiplier;
-
-  /** 必填非空白定价版本标识。 */
-  private String version;
-
-  /** 每百万输入 Token 价格（非负 BigDecimal）。 */
-  private BigDecimal inputPerMillionTokens;
-
-  /** 每百万输出 Token 价格（非负 BigDecimal）。 */
-  private BigDecimal outputPerMillionTokens;
-
-  /** 每百万缓存读取（命中）Token 价格（非负 BigDecimal）。 */
-  private BigDecimal cacheReadPerMillionTokens;
-
-  /** 每百万缓存写入 Token 价格（非负 BigDecimal）。 */
-  private BigDecimal cacheWritePerMillionTokens;
-
-  /** 每百万长期缓存写入 Token 价格（非负 BigDecimal）。 */
-  private BigDecimal cacheWriteLongPerMillionTokens;
-
-  /** 每百万 reasoning Token 价格（非负 BigDecimal）。 */
-  private BigDecimal reasoningPerMillionTokens;
-
-  /** 可空：按顺序匹配的条件价格（分时段、长上下文档位），第一条满足的规则替换上述分项单价，最多 16 条。 */
-  private @Nullable List<AgentModelPricingRuleDTO> rules;
+  private List<AgentModelPricingMultiplierDTO> multipliers;
 }

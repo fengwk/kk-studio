@@ -77,14 +77,15 @@ class FlywayAutoConfigurationIntegrationTest {
         assertEquals(
             0L, unexpectedMigration.getLong(1), "only the canonical V1 migration is known");
       }
-      try (ResultSet modelIdColumn =
+      // model_id 只对 MODEL 行必填（GROUP 行为 null），由 kind 形状约束而不是列级 NOT NULL 保证。
+      try (ResultSet modelShape =
           st.executeQuery(
-              "select count(*) from information_schema.columns"
+              "select count(*) from information_schema.table_constraints"
                   + " where table_schema = 'public'"
                   + " and table_name = 'agent_model'"
-                  + " and column_name = 'model_id' and is_nullable = 'NO'")) {
-        assertTrue(modelIdColumn.next());
-        assertEquals(1L, modelIdColumn.getLong(1), "V1 must declare the required model_id column");
+                  + " and constraint_name = 'ck_agent_model_shape'")) {
+        assertTrue(modelShape.next());
+        assertEquals(1L, modelShape.getLong(1), "V1 must enforce the MODEL/GROUP row shape");
       }
       try (ResultSet seed =
           st.executeQuery(
@@ -122,9 +123,9 @@ class FlywayAutoConfigurationIntegrationTest {
                   + " and table_name <> 'flyway_schema_history'")) {
         assertTrue(businessTables.next());
         assertEquals(
-            43L,
+            44L,
             businessTables.getLong(1),
-            "the canonical V1 baseline must expose exactly 43 business tables");
+            "the canonical V1 baseline must expose exactly 44 business tables");
       }
       try (ResultSet clusterNode =
           st.executeQuery(

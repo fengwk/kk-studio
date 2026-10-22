@@ -351,7 +351,7 @@ class OpenAiChatStreamAccumulatorTest {
     assertEquals(5, usage.outputTokens());
     assertEquals(2, usage.cacheReadTokens());
     assertEquals(0, usage.cacheWriteTokens());
-    assertEquals(0, usage.reasoningTokens());
+    assertNull(usage.reasoningTokens());
     assertEquals(15, usage.totalTokens());
     assertEquals(15, usage.categorizedTokens());
 
@@ -447,7 +447,7 @@ class OpenAiChatStreamAccumulatorTest {
     // 验证 usage
     ModelUsage usage = completion.response().usage();
     assertEquals(20, usage.inputTokens());
-    assertEquals(2, usage.outputTokens()); // 10 - 8
+    assertEquals(10, usage.outputTokens()); // completion includes reasoning tokens
     assertEquals(8, usage.reasoningTokens());
 
     // 验证 replay payload 保真了 reasoning_content 与 reasoning_details
@@ -1130,8 +1130,8 @@ class OpenAiChatStreamAccumulatorTest {
     ModelUsage usage = completion.response().usage();
     assertEquals(15L, usage.inputTokens());
     assertEquals(25L, usage.outputTokens());
-    // 关键断言：缺失 total_tokens 时严格置 0，不合成 40
-    assertEquals(0L, usage.providerTotalTokens());
+    // 关键断言：缺失 total_tokens 时保持 unknown，不合成 40
+    assertNull(usage.providerTotalTokens());
     assertEquals(0L, usage.totalTokens());
     assertEquals(40L, usage.categorizedTokens());
 

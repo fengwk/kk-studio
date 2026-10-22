@@ -24,7 +24,7 @@ public class HarnessBranchSettingsDTO {
   /** 必填 Agent definition 名（canonical text，≤128 字符）。 */
   private String agentName;
 
-  /** 必填 provider/model/variant 选择（三项均非空白）。 */
+  /** 必填模型选择：全局逻辑模型名 + 单 Model 的可选 Variant（模型组为 null）。 */
   private HarnessModelSelectionDTO model;
 
   /**

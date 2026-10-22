@@ -4,9 +4,11 @@ import { emptyAgentDraft } from '@/features/catalog/ai-agent-draft-codec'
 import type {
   AgentDraft,
   ModelDraft,
+  ModelGroupDraft,
   ProviderDraft,
   ResourceModal,
 } from '@/features/catalog/ai-console-types'
+import { emptyModelGroupDraft } from '@/features/catalog/ai-model-group-draft-codec'
 import { emptyModelDraft } from '@/features/catalog/ai-model-draft-codec'
 import {
   validateResourceDraft,
@@ -50,12 +52,14 @@ function validate(
   overrides: {
     providerDraft?: ProviderDraft
     modelDraft?: ModelDraft
+    modelGroupDraft?: ModelGroupDraft
     agentDraft?: AgentDraft
   } = {},
 ) {
   return validateResourceDraft(modal, {
     providerDraft: overrides.providerDraft ?? provider(),
     modelDraft: overrides.modelDraft ?? model(),
+    modelGroupDraft: overrides.modelGroupDraft ?? emptyModelGroupDraft(),
     agentDraft: overrides.agentDraft ?? agent(),
   })
 }
@@ -111,8 +115,8 @@ describe('ai-resource-form-validation additional branches', () => {
   it.each([
     { kind: 'provider', mode: 'create' },
     { kind: 'provider', mode: 'edit', name: 'provider' },
-    { kind: 'model', mode: 'create' },
-    { kind: 'model', mode: 'edit', providerName: 'minimax', name: 'model' },
+    { kind: 'model', mode: 'create', resourceKind: 'MODEL' },
+    { kind: 'model', mode: 'edit', resourceKind: 'MODEL', name: 'model' },
     { kind: 'agent', mode: 'create', type: 'USER' },
     { kind: 'agent', mode: 'edit', name: 'agent', type: 'USER' },
   ] as ResourceModal[])('accepts a complete $kind $mode body', (modal) => {
@@ -123,7 +127,7 @@ describe('ai-resource-form-validation additional branches', () => {
   it('keeps blank reasoning effort as the protocol default and preserves explicit effort', () => {
     const withBlankEffort = model({ reasoning: true })
     const blankResult = validate(
-      { kind: 'model', mode: 'create' },
+      { kind: 'model', mode: 'create', resourceKind: 'MODEL' },
       { modelDraft: withBlankEffort },
     )
     expect(blankResult.ok).toBe(true)
@@ -135,7 +139,7 @@ describe('ai-resource-form-validation additional branches', () => {
     })
     expect(
       validate(
-        { kind: 'model', mode: 'edit', providerName: 'minimax', name: 'model', expectedVersion: '1' },
+        { kind: 'model', mode: 'edit', resourceKind: 'MODEL', name: 'model', expectedVersion: '1' },
         { modelDraft: withExplicitEffort },
       ).ok,
     ).toBe(true)
@@ -146,7 +150,7 @@ describe('ai-resource-form-validation additional branches', () => {
     // toUserFacingErrorMessage 将 "inputModalities ... duplicate" 翻译为输入类型文案，
     // 但 mapError 无任何规则命中该原文（/modality/ 不匹配复数 inputModalities），落到 general。
     const result = validate(
-      { kind: 'model', mode: 'create' },
+      { kind: 'model', mode: 'create', resourceKind: 'MODEL' },
       { modelDraft: model({ inputModalities: ['TEXT', 'IMAGE', 'TEXT'] }) },
     )
     expect(result.ok).toBe(false)
@@ -157,7 +161,7 @@ describe('ai-resource-form-validation additional branches', () => {
     // 空白 variant id 在 codec 序列化时被拒绝（variant 2 id is required），
     // mapError 将其同时映射到 variants 与 defaultVariant。
     const result = validate(
-      { kind: 'model', mode: 'create' },
+      { kind: 'model', mode: 'create', resourceKind: 'MODEL' },
       {
         modelDraft: model({
           defaultVariant: 'valid',
@@ -173,12 +177,11 @@ describe('ai-resource-form-validation additional branches', () => {
     expect(result.fields.defaultVariant).toBe('请至少添加一个 Variant，并填写 ID')
   })
 
-  it('rejects an empty pricing currency', () => {
-    // 空币种在 codec 序列化时被拒绝（currency must not be blank），
-    // mapError 的 pricing 规则命中 "must not be blank" 之外的 currency 原文。
+  it('rejects an invalid base input rate', () => {
+    const base = model().pricing.base
     const result = validate(
-      { kind: 'model', mode: 'create' },
-      { modelDraft: model({ pricing: { ...model().pricing, currency: '' } }) },
+      { kind: 'model', mode: 'create', resourceKind: 'MODEL' },
+      { modelDraft: model({ pricing: { ...model().pricing, base: { ...base, input: '' } } }) },
     )
     expect(result.ok).toBe(false)
     expect(result.fields.pricing).toBe('请检查价格：填写 0 或正数即可')
@@ -190,9 +193,9 @@ describe('ai-resource-form-validation additional branches', () => {
     [model({ maxOutputTokens: '999999' }), 'maxOutputTokens'],
     [model({ modelId: '   ' }), 'modelId'],
     [model({ reasoning: true, variants: [{ ...model().variants[0]!, reasoningEffort: 'a'.repeat(65) }] }), 'variants'],
-    [model({ pricing: { ...model().pricing, inputPerMillionTokens: '-1' } }), 'pricing'],
+    [model({ pricing: { ...model().pricing, base: { ...model().pricing.base, input: '-1' } } }), 'pricing'],
   ] as Array<[ModelDraft, string]>)('maps invalid model body %# to %s', (modelDraft, field) => {
-    const result = validate({ kind: 'model', mode: 'create' }, { modelDraft })
+    const result = validate({ kind: 'model', mode: 'create', resourceKind: 'MODEL' }, { modelDraft })
     expect(result.ok).toBe(false)
     expect(result.fields).toHaveProperty(field)
   })

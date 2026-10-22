@@ -1160,11 +1160,24 @@ final class HarnessRuntimeTestSupport {
       Instant createdAt,
       ModelRequestSpec requestSpec,
       ProviderResponse response) {
+    return mappedAssistantEntry(id, sessionId, parentId, createdAt, requestSpec, response, T2);
+  }
+
+  static Entry mappedAssistantEntry(
+      UUID id,
+      UUID sessionId,
+      UUID parentId,
+      Instant createdAt,
+      ModelRequestSpec requestSpec,
+      ProviderResponse response,
+      Instant requestedAt) {
     return new Entry(
         id,
         sessionId,
         parentId,
-        new HistoryPayloadMapper().assistantPayload(response, requestSpec.toolBindings()),
+        new HistoryPayloadMapper()
+            .assistantPayload(
+                response, requestSpec.toolBindings(), actualSelection(requestSpec), requestedAt),
         createdAt);
   }
 
@@ -1192,7 +1205,7 @@ final class HarnessRuntimeTestSupport {
   }
 
   static BranchSettings settings() {
-    return new BranchSettings("agent", new ModelSelection("provider", "model", "v1"), null);
+    return new BranchSettings("agent", ModelSelection.model("model", "v1"), null);
   }
 
   static ModelRequestSpec modelRequest() {
@@ -1231,13 +1244,12 @@ final class HarnessRuntimeTestSupport {
   }
 
   private static ModelUsage usage() {
-    return new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L);
+    return new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L);
   }
 
   private static ModelCost cost() {
     return new ModelCost(
         "USD",
-        BigDecimal.ZERO,
         BigDecimal.ZERO,
         BigDecimal.ZERO,
         BigDecimal.ZERO,
@@ -1311,5 +1323,13 @@ final class HarnessRuntimeTestSupport {
   /** Stop 结果为 replay（幂等重放既有 STOPPED 事实）。 */
   static void assertReplayed(StopResult result) {
     assertTrue(result.replayed());
+  }
+
+  private static ModelSelection actualSelection(ModelRequestSpec requestSpec) {
+    if (requestSpec.groupExecution() == null) {
+      return ModelSelection.model(requestSpec.model().modelName(), requestSpec.variant().id());
+    }
+    var member = requestSpec.groupExecution().members().getFirst();
+    return ModelSelection.model(member.model().modelName(), member.variant().id());
   }
 }

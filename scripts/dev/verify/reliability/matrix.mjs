@@ -20,6 +20,7 @@ export const MAX_HARD_COST_USD = 5
 export const WRITE_PROOF_PATH = '.reliability-write-proof.txt'
 export const WRITE_PROOF_MARKER = 'RELIABILITY_WRITE_PROOF_V1'
 
+// modelName 是 Agent / ModelSelection 使用的全局逻辑模型名；ref 仅作为报告中的可读 provider 标签。
 export const MODELS = Object.freeze([
   Object.freeze({
     key: 'm27',
@@ -31,8 +32,8 @@ export const MODELS = Object.freeze([
   Object.freeze({
     key: 'm3',
     providerName: PROVIDER_NAME,
-    modelName: 'MiniMax-M3',
-    ref: 'minimax/MiniMax-M3',
+    modelName: 'MiniMax-M3-Responses',
+    ref: 'minimax/MiniMax-M3-Responses',
     variant: VARIANT,
   }),
 ])

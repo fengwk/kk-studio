@@ -10,6 +10,8 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 
+import java.util.Map;
+
 /** CompactionPayload 只持久化非空 summaryText 与可选的真实模型输出 metadata；其它执行元数据由 enclosing turn 派生。 */
 class CompactionPayloadTest {
 
@@ -25,7 +27,7 @@ class CompactionPayloadTest {
     // 正式模型输出携带原始 provider metadata。
     AssistantMessageMetadata metadata =
         new AssistantMessageMetadata(
-            GenerationStopReason.COMPLETE, new ModelUsage(3L, 4L, 0L, 0L, 0L, 0L, 7L), 12L);
+            GenerationStopReason.COMPLETE, new ModelUsage(3L, 4L, 0L, 0L, Map.of(), 0L, 7L), 12L);
     assertEquals(metadata, new CompactionPayload("summary", metadata).assistantMetadata());
   }
 

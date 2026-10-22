@@ -45,6 +45,7 @@ const IMAGE = 'postgres:17.10'
 const BUSINESS_TABLES = [
   'agent_definition',
   'agent_model',
+  'agent_model_group_cooldown',
   'agent_provider',
   'canvas_command_dedup',
   'canvas_document',
@@ -637,7 +638,7 @@ function main() {
   if (!existsSync(probes) || !statSync(probes).isFile()) {
     throw new Error(`missing shared contract probes: ${PROBE_FILE}`)
   }
-  if (BUSINESS_TABLES.length !== 43 || TARGET_TABLES.length !== 17) {
+  if (BUSINESS_TABLES.length !== 44 || TARGET_TABLES.length !== 17) {
     throw new Error('the declared inventory must keep its fixed business and target table counts')
   }
   // Re-derive the inventory from the baseline DDL: a table added to (or removed from) the

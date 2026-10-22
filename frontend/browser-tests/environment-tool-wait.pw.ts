@@ -42,7 +42,7 @@ for (const scenario of ['pane-root', 'pane-child']) {
             nextCommandSequence: '1', version: '1', status: 'TOOL_READY', processing: true,
             executionControl: 'RUNNABLE',
             branchSettings: { agentName: 'assistant',
-              model: { providerName: 'minimax', modelName: 'VeryLongModelName', variant: 'default' },
+              model: { modelName: 'VeryLongModelName', variant: 'default' },
               environmentName: null, goal: null },
             createTime: now / 1000, updateTime: now / 1000,
           },
@@ -80,7 +80,7 @@ for (const scenario of ['pane-root', 'pane-child']) {
         data = [ROOT, CHILD].map((threadId) => ({
           threadId, parentThreadId: threadId === ROOT ? null : ROOT,
           name: threadId === ROOT ? '等待工具 Thread' : 'worker',
-          agentName: 'assistant', model: { providerName: 'minimax', modelName: 'VeryLongModelName', variant: 'default' },
+          agentName: 'assistant', model: { modelName: 'VeryLongModelName', variant: 'default' },
           status: 'IDLE', processing: false, turnCount: 1, toolCallCount: 1,
           outcome: null, updateTime: now / 1000,
         }))

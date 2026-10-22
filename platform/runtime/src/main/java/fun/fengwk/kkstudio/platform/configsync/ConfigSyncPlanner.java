@@ -10,6 +10,7 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelDefaultVariantResolver;
+import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelGroupConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
@@ -24,6 +25,8 @@ import fun.fengwk.kkstudio.platform.plugin.service.PluginAgentDependencies;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsVersions;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelGroupDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncRef;
@@ -66,6 +69,7 @@ public final class ConfigSyncPlanner {
   private final McpServerRepository mcpServerRepository;
   private final RuntimeToolCatalogSource toolCatalogSource;
   private final AgentModelRuntimeConfigParser configParser;
+  private final AgentModelGroupConfigCodec groupConfigCodec;
   private final PluginAgentDependencies pluginAgentDependencies;
 
   /** 读取快照后按 ParsedDocument 构建可写入计划。 */
@@ -108,34 +112,93 @@ public final class ConfigSyncPlanner {
       imported.add(ConfigSyncRefs.ref(ConfigSyncKind.PROVIDERS, spec.name()));
     }
 
-    Map<String, AgentModelConfigDTO> availableModels = new LinkedHashMap<>();
+    Map<String, ModelAvailability> availableModels = new LinkedHashMap<>();
     for (var model : snapshot.models()) {
-      String key = ConfigSyncRefs.modelName(model.providerName(), model.name());
-      if (!skippedModels.contains(key) && availableProviders.contains(model.providerName())) {
+      String key = model.name();
+      if (skippedModels.contains(key)) {
+        continue;
+      }
+      if (model.kind() == AgentModelKind.MODEL) {
+        if (!availableProviders.contains(model.providerName())) {
+          continue;
+        }
         // 快照中未被文件覆盖的 Model 以 DB config 为准；解码失败与写入路径一致地硬拒绝。
-        availableModels.put(key, configParser.decode(model.configJson()));
+        availableModels.put(
+            key,
+            new ModelAvailability(
+                key,
+                AgentModelKind.MODEL,
+                configParser.decode(model.configJson()),
+                null,
+                model.providerName()));
+      } else {
+        availableModels.put(
+            key,
+            new ModelAvailability(
+                key,
+                AgentModelKind.GROUP,
+                null,
+                groupConfigCodec.decode(model.groupConfigJson()),
+                null));
       }
     }
-    List<ConfigSyncParser.ModelSpec> models = new ArrayList<>();
+    Map<String, ConfigSyncParser.ModelSpec> candidateModels = new LinkedHashMap<>();
     for (ConfigSyncParser.ModelSpec spec : document.models()) {
-      String key = ConfigSyncRefs.modelName(spec.providerName(), spec.name());
-      if (!availableProviders.contains(spec.providerName())) {
+      String key = spec.name();
+      AgentModelKind kind = spec.properties().getKind();
+      if (kind == AgentModelKind.MODEL
+          && !availableProviders.contains(spec.properties().getProviderName())) {
         skipped.add(
             new ConfigSyncSkipped(
                 ConfigSyncKind.MODELS.wireValue(),
                 key,
-                "missing provider: " + spec.providerName()));
+                "missing provider: " + spec.properties().getProviderName()));
         skippedModels.add(key);
         availableModels.remove(key);
         continue;
       }
-      // 文件内同名 Model 覆盖快照 config：预检查按导入后将生效的配置判定。
-      availableModels.put(key, spec.properties().getConfig());
-      models.add(spec);
-      imported.add(ConfigSyncRefs.ref(ConfigSyncKind.MODELS, key));
+      // 文件内同名 Model 覆盖快照：预检查按导入后将生效的配置判定。
+      availableModels.put(
+          key,
+          new ModelAvailability(
+              key,
+              kind,
+              spec.properties().getConfig(),
+              spec.properties().getGroup(),
+              spec.properties().getProviderName()));
+      candidateModels.put(key, spec);
     }
 
-    // 模型池就绪后、外部准备前：Agent 显式 variant 必须由导入后将生效的 Model config 声明。
+    // 组只能引用可用的 MODEL；任一成员缺失或 Variant 未声明时移除该组，依赖它的 Agent 随池判定被 skip。
+    boolean modelPoolChanged = true;
+    while (modelPoolChanged) {
+      modelPoolChanged = false;
+      for (Map.Entry<String, ModelAvailability> entry : availableModels.entrySet()) {
+        String reason = groupUnsatisfiedReason(entry.getValue(), availableModels);
+        if (reason == null) {
+          continue;
+        }
+        skipped.add(
+            new ConfigSyncSkipped(ConfigSyncKind.MODELS.wireValue(), entry.getKey(), reason));
+        skippedModels.add(entry.getKey());
+        availableModels.remove(entry.getKey());
+        modelPoolChanged = true;
+        break;
+      }
+    }
+    // 写入顺序先 MODEL 后 GROUP：同一次导入中的组必须能看到已插入的成员行。
+    List<ConfigSyncParser.ModelSpec> models = new ArrayList<>();
+    for (AgentModelKind kind : List.of(AgentModelKind.MODEL, AgentModelKind.GROUP)) {
+      for (ConfigSyncParser.ModelSpec spec : candidateModels.values()) {
+        if (!availableModels.containsKey(spec.name()) || spec.properties().getKind() != kind) {
+          continue;
+        }
+        models.add(spec);
+        imported.add(ConfigSyncRefs.model(spec.name()));
+      }
+    }
+
+    // 模型池就绪后、外部准备前：Agent 显式 variant 必须由导入后将生效的 Model config 声明，GROUP 不得带 variant。
     rejectUnknownAgentModelVariants(document.agents(), availableModels);
 
     Map<String, SkillPackage> existingPackages = new LinkedHashMap<>();
@@ -302,9 +365,9 @@ public final class ConfigSyncPlanner {
     // 系统内置 Agent 不在可导入条目里，但确实存在：作为已满足的依赖进入池，插件与 Agent 的引用都可解析。
     agentPool.addAll(snapshot.builtinAgentNames());
     document.agents().forEach(spec -> agentPool.add(spec.name()));
-    boolean changed = true;
-    while (changed) {
-      changed = false;
+    boolean agentPoolChanged = true;
+    while (agentPoolChanged) {
+      agentPoolChanged = false;
       for (ConfigSyncParser.AgentSpec spec : document.agents()) {
         if (!agentPool.contains(spec.name())) {
           continue;
@@ -319,7 +382,7 @@ public final class ConfigSyncPlanner {
                 toolCatalog)
             != null) {
           agentPool.remove(spec.name());
-          changed = true;
+          agentPoolChanged = true;
         }
       }
     }
@@ -414,26 +477,62 @@ public final class ConfigSyncPlanner {
    * <p>错误消息只带安全条目名，不回显 raw variant、Model 配置或 cause。
    */
   private static void rejectUnknownAgentModelVariants(
-      List<ConfigSyncParser.AgentSpec> agents, Map<String, AgentModelConfigDTO> availableModels) {
+      List<ConfigSyncParser.AgentSpec> agents, Map<String, ModelAvailability> availableModels) {
     for (ConfigSyncParser.AgentSpec spec : agents) {
       String variant = spec.properties().getVariant();
+      ModelAvailability model = availableModels.get(spec.modelName());
+      if (model == null) {
+        continue;
+      }
       if (variant == null || variant.isBlank()) {
         continue;
       }
-      AgentModelConfigDTO config =
-          availableModels.get(ConfigSyncRefs.modelName(spec.providerName(), spec.modelName()));
-      if (config == null) {
-        continue;
+      if (model.kind() == AgentModelKind.GROUP) {
+        throw new AiValidationException(
+            RESOURCE, "agent references a model group with variant: " + spec.name());
       }
       try {
         AgentModelDefaultVariantResolver.resolveConfiguredVariant(
-            spec.providerName(), spec.modelName(), variant, config);
+            spec.modelName(), variant, model.config());
       } catch (IllegalArgumentException error) {
         throw new AiValidationException(
             RESOURCE, "agent references unknown model variant: " + spec.name());
       }
     }
   }
+
+  /** 非组的可用性恒为满足；组要求每个成员都是当前池中的 MODEL 且 Variant 已声明。 */
+  private static String groupUnsatisfiedReason(
+      ModelAvailability model, Map<String, ModelAvailability> availableModels) {
+    if (model.kind() == AgentModelKind.MODEL) {
+      return null;
+    }
+    for (var member : model.group().getMembers()) {
+      ModelAvailability target = availableModels.get(member.getModelName());
+      if (target == null) {
+        return "missing group member: " + member.getModelName();
+      }
+      if (target.kind() != AgentModelKind.MODEL) {
+        return "group member is not a model: " + member.getModelName();
+      }
+      if (member.getVariant() != null && !member.getVariant().isBlank()) {
+        try {
+          AgentModelDefaultVariantResolver.resolveConfiguredVariant(
+              member.getModelName(), member.getVariant(), target.config());
+        } catch (IllegalArgumentException error) {
+          return "group member references unknown variant: " + member.getModelName();
+        }
+      }
+    }
+    return null;
+  }
+
+  private record ModelAvailability(
+      String name,
+      AgentModelKind kind,
+      AgentModelConfigDTO config,
+      AgentModelGroupDTO group,
+      String providerName) {}
 
   private static Set<String> skippedNames(List<ConfigSyncSkipped> skipped, ConfigSyncKind kind) {
     Set<String> names = new LinkedHashSet<>();
@@ -469,7 +568,7 @@ public final class ConfigSyncPlanner {
       Map<String, Set<String>> availableMcpTools,
       Set<String> knownMcpToolNames,
       RuntimeToolCatalog toolCatalog) {
-    String modelKey = ConfigSyncRefs.modelName(spec.providerName(), spec.modelName());
+    String modelKey = spec.modelName();
     if (!availableModelKeys.contains(modelKey)) {
       return "missing model: " + modelKey;
     }

@@ -1638,10 +1638,10 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
         insert into harness_model_invocation (
             id, thread_id, turn_start_entry_id, request_head_entry_id, request_spec, status, attempt,
             stream_checkpoint, result, error, result_entry_id, failed_attempts, created_at, updated_at,
-            provider_replay_state
+            provider_replay_state, group_execution, requested_at
         ) values (
             ?, ?, ?, ?, cast(? as jsonb), ?, ?, cast(? as jsonb), cast(? as jsonb),
-            cast(? as jsonb), ?, cast(? as jsonb), ?, ?, cast(? as jsonb)
+            cast(? as jsonb), ?, cast(? as jsonb), ?, ?, cast(? as jsonb), cast(? as jsonb), ?
         )
         """,
         invocation.id(),
@@ -1658,7 +1658,11 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
         PostgresqlHarnessRows.JSON.write(invocation.failedAttempts(), "modelAttemptFailures"),
         PostgresqlHarnessRows.timestamp(invocation.createdAt()),
         PostgresqlHarnessRows.timestamp(invocation.updatedAt()),
-        encodeModelProviderReplayState(invocation));
+        encodeModelProviderReplayState(invocation),
+        encodeGroupExecution(invocation),
+        invocation.status() == ModelInvocationStatus.READY
+            ? null
+            : PostgresqlHarnessRows.timestamp(invocation.createdAt()));
     lock(lockKey);
   }
 
@@ -1691,7 +1695,9 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
                 result_entry_id = ?,
                 failed_attempts = cast(? as jsonb),
                 updated_at = ?,
-                provider_replay_state = cast(? as jsonb)
+                provider_replay_state = cast(? as jsonb),
+                group_execution = cast(? as jsonb),
+                requested_at = ?
             where id = ?
             """,
             invocation.status().name(),
@@ -1703,6 +1709,10 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
             PostgresqlHarnessRows.JSON.write(invocation.failedAttempts(), "modelAttemptFailures"),
             PostgresqlHarnessRows.timestamp(invocation.updatedAt()),
             encodeModelProviderReplayState(invocation),
+            encodeGroupExecution(invocation),
+            invocation.requestedAt() == null
+                ? null
+                : PostgresqlHarnessRows.timestamp(invocation.requestedAt()),
             invocation.id());
     requireSingleUpdate(updated, "model invocation", invocation.id());
   }
@@ -1711,6 +1721,82 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     return invocation.providerReplayState() == null
         ? null
         : PostgresqlHarnessRows.PROVIDER_REPLAY_STATES.encode(invocation.providerReplayState());
+  }
+
+  private static String encodeGroupExecution(ModelInvocation invocation) {
+    return invocation.groupProgress() == null
+        ? null
+        : PostgresqlHarnessRows.JSON.write(invocation.groupProgress(), "groupExecution");
+  }
+
+  @Override
+  public boolean isGroupMemberCooling(
+      String groupName, long groupVersion, String memberModelName, String memberVariant) {
+    Instant now = now();
+    return queryOne(
+            """
+            select exists (
+                select 1
+                from agent_model_group_cooldown c
+                join agent_model m on m.name = c.group_name
+                where c.group_name = ?
+                  and c.member_model_name = ?
+                  and c.member_variant = ?
+                  and c.group_version = ?
+                  and m.version = ?
+                  and c.cooldown_until > ?
+            )
+            """,
+            (rs, rowNumber) -> rs.getBoolean(1),
+            groupName,
+            memberModelName,
+            memberVariant,
+            groupVersion,
+            groupVersion,
+            PostgresqlHarnessRows.timestamp(now))
+        .orElse(false);
+  }
+
+  @Override
+  public void freezeGroupMember(
+      String groupName,
+      long groupVersion,
+      String memberModelName,
+      String memberVariant,
+      Instant cooldownUntil) {
+    Instant now = now();
+    // 与组配置写入共用 agent_model 行锁：先锁定当前版本，旧版本 callback 不得写入/延长新配置的冷却。
+    Long currentVersion =
+        queryOne(
+                "select version from agent_model where name = ? for share",
+                (rs, rowNumber) -> rs.getLong(1),
+                groupName)
+            .orElse(null);
+    if (currentVersion == null || currentVersion != groupVersion) {
+      return;
+    }
+    update(
+        """
+        insert into agent_model_group_cooldown (
+            group_name, member_model_name, member_variant, group_version, cooldown_until,
+            created_at, updated_at
+        )
+        values (?, ?, ?, ?, ?, ?, ?)
+        on conflict (group_name, member_model_name, member_variant) do update
+        set cooldown_until = greatest(
+                agent_model_group_cooldown.cooldown_until,
+                excluded.cooldown_until),
+            group_version = excluded.group_version,
+            updated_at = excluded.updated_at
+        where agent_model_group_cooldown.group_version = excluded.group_version
+        """,
+        groupName,
+        memberModelName,
+        memberVariant,
+        groupVersion,
+        PostgresqlHarnessRows.timestamp(cooldownUntil),
+        PostgresqlHarnessRows.timestamp(now),
+        PostgresqlHarnessRows.timestamp(now));
   }
 
   @Override

@@ -92,7 +92,7 @@ export function SubagentTreePanel({ tree, currentThreadId, onClose }: {
                 {outcome ? t(`ai.runtime.agentTree.outcome.${outcome}`) : formatThreadStatusLabel(node.status, t)}
               </span>
               <span>{t('ai.runtime.agentTree.counts', { turns: node.turnCount, tools: node.toolCallCount })}</span>
-              <span>{formatModelLabel(node.model.providerName, node.model.modelName, node.model.variant)}</span>
+              <span>{formatModelLabel(node.model.modelName, node.model.variant)}</span>
             </ThreadLink>
           </li>
         })}

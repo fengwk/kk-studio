@@ -4,14 +4,18 @@ import static fun.fengwk.kkstudio.harness.runtime.invocation.codec.InvocationCod
 import static fun.fengwk.kkstudio.harness.runtime.invocation.codec.InvocationCodecTestFixtures.hostModelRequest;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelGroupExecution;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelGroupMemberExecution;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.ProviderProtocolOptions;
 import fun.fengwk.kkstudio.harness.runtime.model.codec.ModelDescriptorJsonCodec;
@@ -55,6 +59,59 @@ class ModelRequestSpecJsonCodecTest {
     assertThrows(
         UnsupportedOperationException.class,
         () -> codec.decode(expected).toolBindings().add(requestSpec.toolBindings().getFirst()));
+  }
+
+  // 测试意图: 组版本与每个成员的 Provider/generation/descriptor/variant 必须完整冻结并严格 round-trip，
+  // 成员切换只派生顶层执行身份，组快照本身不变。
+  @Test
+  void roundTripsFrozenGroupExecutionAndSelectsMemberWithoutMutatingGroup() {
+    ModelRequestSpec single = hostModelRequest();
+    ModelGroupMemberExecution first =
+        new ModelGroupMemberExecution(
+            single.providerType(),
+            single.providerConnectionGenerationId(),
+            single.model(),
+            single.variant());
+    ModelGroupMemberExecution second =
+        new ModelGroupMemberExecution(
+            single.providerType(),
+            single.providerConnectionGenerationId(),
+            new ModelDescriptor(
+                single.model().providerName(),
+                "second-model",
+                "second-model-id",
+                single.model().inputModalities(),
+                single.model().tools(),
+                single.model().reasoning()),
+            new ModelVariant("v2"));
+    ModelGroupExecution group =
+        new ModelGroupExecution("fallback-group", 9L, List.of(first, second), Set.of(429, 503), 45);
+    ModelRequestSpec spec =
+        new ModelRequestSpec(
+            first.providerType(),
+            first.providerConnectionGenerationId(),
+            first.model(),
+            first.variant(),
+            single.outputTokens(),
+            single.systemInstruction(),
+            single.toolBindings(),
+            single.subagentBindings(),
+            single.cacheControl(),
+            group);
+
+    String encoded = codec.encode(spec);
+    ModelRequestSpec decoded = codec.decode(encoded);
+    assertEquals(spec, decoded);
+    assertEquals("second-model", decoded.forMember(1).model().modelName());
+    assertEquals("v2", decoded.forMember(1).variant().id());
+    assertEquals(group.groupName(), decoded.groupExecution().groupName());
+    assertEquals(group.groupVersion(), decoded.groupExecution().groupVersion());
+    assertEquals(group.members(), decoded.groupExecution().members());
+    assertEquals(
+        group.fallbackStatusCodes().stream().sorted().toList(),
+        decoded.groupExecution().fallbackStatusCodes().stream().sorted().toList());
+    assertEquals(group.cooldownSeconds(), decoded.groupExecution().cooldownSeconds());
+    assertSame(decoded.groupExecution(), decoded.forMember(1).groupExecution());
   }
 
   @Test

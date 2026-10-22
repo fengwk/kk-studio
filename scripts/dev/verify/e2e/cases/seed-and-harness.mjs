@@ -38,7 +38,7 @@ import {
   waitForDurableMessages,
   waitForQuiescentThread,
 } from '../lib/harness.mjs'
-import { baseModelConfig, canonicalSeedCatalog } from '../lib/fixtures.mjs'
+import { baseModelConfig, canonicalSeedCatalog, encodePathTail } from '../lib/fixtures.mjs'
 import { registerCase, getCase } from '../lib/registry.mjs'
 import { REPO_ROOT } from '../../../lib/repo-root.mjs'
 
@@ -56,7 +56,7 @@ registerCase({
   id: 'seed.structured_model_config',
   level: 'L1',
   title: 'Model 公开契约与 Pi 默认目录一致',
-  docs: 'GET /api/models：按 providerName/name 完整匹配 Pi 0.82.1 快照与公开字段集合；种子持久化形态的 variant 省略 protocolOptionsJson，公开契约返回 canonical 字符串（null/空 ≡ "{}"）',
+  docs: 'GET /api/models：按全局逻辑名完整匹配 Pi 0.82.1 快照与公开字段集合；种子持久化形态的 variant 省略 protocolOptionsJson，公开契约返回 canonical 字符串（null/空 ≡ "{}"）',
   async run(ctx) {
     const { json } = await ctx.call('GET', '/api/models?pageNumber=1&pageSize=50')
     const models = pageResults(json)
@@ -87,10 +87,10 @@ registerCase({
     for (const model of models) {
       assertExactFields(
         model,
-        ['providerName', 'name', 'modelId', 'description', 'config', 'version', 'createTime', 'updateTime'],
+        ['name', 'kind', 'providerName', 'modelId', 'description', 'config', 'group', 'version', 'createTime', 'updateTime'],
         'AgentModelDTO',
       )
-      assert(model.providerName && model.name, JSON.stringify(model))
+      assert(model.kind === 'MODEL' && model.providerName && model.name, JSON.stringify(model))
       assert(model.config?.defaultVariant, JSON.stringify(model.config))
       assert(
         Array.isArray(model.config?.variants) && model.config.variants.length > 0,
@@ -368,6 +368,7 @@ registerCase({
       assert(provider?.name && provider?.version, JSON.stringify(providerResponse.json))
 
       const modelResponse = await ctx.call('POST', '/api/models', {
+        kind: 'MODEL',
         providerName: provider.name,
         name: `e2e-model-preview-${suffix}`,
         modelId: `wire-preview-${suffix}`,
@@ -384,13 +385,13 @@ registerCase({
         name: `e2e-agent-preview-${suffix}`,
         description: 'Local readonly preview E2E agent.',
         systemPrompt: 'Reply with a short deterministic acknowledgement.',
-        model: `${model.providerName}/${model.name}`,
+        model: model.name,
         variant: 'default',
         config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
       })
       agent = envelopeData(agentResponse.json)
       assert(
-        agent?.name && agent.model === `${model.providerName}/${model.name}`,
+        agent?.name && agent.model === model.name,
         JSON.stringify(agentResponse.json),
       )
 
@@ -406,7 +407,6 @@ registerCase({
         sessionId,
         threadId: tid,
         rootSettings: branchSettingsOf(agent, {
-          providerName: model.providerName,
           modelName: model.name,
           variant: 'default',
         }),
@@ -602,12 +602,10 @@ registerCase({
         }
       })
       await cleanup('model', async () => {
-        if (model?.providerName && model?.name) {
+        if (model?.name) {
           await ctx.call(
             'DELETE',
-            `/api/models/${encodeURIComponent(
-              model.providerName,
-            )}/${encodeURIComponent(model.name)}?expectedVersion=${encodeURIComponent(
+            `/api/models/${encodePathTail(model.name)}?expectedVersion=${encodeURIComponent(
               model.version,
             )}`,
           )
@@ -2002,7 +2000,6 @@ registerCase({
       setAgentCommand(missingAgentName, cid()),
       setModelCommand(
         {
-          providerName: modelSelection.providerName,
           modelName: modelSelection.modelName,
           variant: modelSelection.variant,
         },
@@ -2043,7 +2040,6 @@ registerCase({
     const expectedSettings = {
       agentName: missingAgentName,
       model: {
-        providerName: modelSelection.providerName,
         modelName: modelSelection.modelName,
         variant: modelSelection.variant,
       },
@@ -2212,7 +2208,6 @@ registerCase({
               type: 'SET_MODEL',
               idempotencyKey: cid(),
               model: {
-                providerName: modelSelection.providerName,
                 modelName: modelSelection.modelName,
                 variant: modelSelection.variant,
               },
@@ -2417,10 +2412,10 @@ registerCase({
       '/api/models?pageNumber=1&pageSize=1',
     )
     const model = pageResults(json)[0]
-    assert(model?.providerName && model?.name && model?.config?.defaultVariant, JSON.stringify(model))
+    assert(model?.kind === 'MODEL' && model?.providerName && model?.name && model?.config?.defaultVariant, JSON.stringify(model))
     assertExactFields(
       model,
-      ['providerName', 'name', 'modelId', 'description', 'config', 'version', 'createTime', 'updateTime'],
+      ['name', 'kind', 'providerName', 'modelId', 'description', 'config', 'group', 'version', 'createTime', 'updateTime'],
       'AgentModelDTO',
     )
   },
@@ -2439,17 +2434,13 @@ function deriveSessionName(text) {
   return [...collapsed].slice(0, 40).join('')
 }
 
-/** 由 seed Agent + seed Model 构造 branchSettings.model 引用（只切第一个 '/'，保留 model name 内 '/'）。 */
+/** 由 seed Agent + seed Model 构造 branchSettings.model 引用；model 是全局逻辑名。 */
 function modelSelectionOf(ctx) {
   const agent = ctx.vars.agent
   const model = ctx.vars.seedModel
-  const separator = String(agent.model || '').indexOf('/')
-  assert(separator > 0, `agent.model must be provider/model: ${JSON.stringify(agent)}`)
-  const providerName = String(agent.model).slice(0, separator)
-  const modelName = String(agent.model).slice(separator + 1)
-  assert(providerName && modelName, `agent.model must be provider/model: ${JSON.stringify(agent)}`)
+  const modelName = String(agent.model || '')
+  assert(modelName, `agent.model must be a logical model name: ${JSON.stringify(agent)}`)
   return {
-    providerName,
     modelName,
     variant: agent.variant || model.config.defaultVariant,
   }
@@ -2464,19 +2455,15 @@ async function resolveAnyCatalogTarget(ctx) {
     (await ctx.call('GET', '/api/models?pageNumber=1&pageSize=50')).json,
   )
   for (const agent of agents) {
-    const separator = String(agent.model || '').indexOf('/')
-    if (separator <= 0) continue
-    const providerName = String(agent.model).slice(0, separator)
-    const modelName = String(agent.model).slice(separator + 1)
-    const model = models.find(
-      (candidate) => candidate.providerName === providerName && candidate.name === modelName,
-    )
+    const modelName = String(agent.model || '')
+    if (!modelName) continue
+    const model = models.find((candidate) => candidate.name === modelName)
     if (!model) continue
     const variant = agent.variant || model.config?.defaultVariant
     if (!variant) continue
     return {
       agent,
-      model: { providerName, modelName, variant },
+      model: { modelName, variant },
     }
   }
   throw new Error(

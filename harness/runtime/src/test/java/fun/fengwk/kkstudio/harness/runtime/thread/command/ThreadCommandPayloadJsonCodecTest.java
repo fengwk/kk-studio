@@ -23,8 +23,7 @@ import java.util.UUID;
 class ThreadCommandPayloadJsonCodecTest {
 
   private static final String LEGACY_WORKSPACE_PATH = "123e4567-e89b-12d3-a456-426614174000";
-  private static final ModelSelection MODEL =
-      new ModelSelection("anthropic", "claude-sonnet", "default");
+  private static final ModelSelection MODEL = ModelSelection.model("claude-sonnet", "default");
   private final ThreadCommandPayloadJsonCodec codec = new ThreadCommandPayloadJsonCodec();
 
   @Test
@@ -52,8 +51,7 @@ class ThreadCommandPayloadJsonCodecTest {
     assertFalse(userJson.contains("USER_MESSAGE"));
 
     assertEquals(
-        "{\"model\":{\"providerName\":\"anthropic\",\"modelName\":\"claude-sonnet\","
-            + "\"variant\":\"default\"}}",
+        "{\"model\":{\"modelName\":\"claude-sonnet\",\"variant\":\"default\"}}",
         codec.encode(new SetModelCommandPayload(MODEL)));
     assertEquals("{\"agentName\":\"coding\"}", codec.encode(new SetAgentCommandPayload("coding")));
     // SET_ENVIRONMENT 的 environmentName 必须显式存在：null 表示解除环境选择，不能省略。
@@ -153,7 +151,7 @@ class ThreadCommandPayloadJsonCodecTest {
         () ->
             codec.decode(
                 ThreadCommandType.SET_MODEL,
-                "{\"model\":{\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\",\"workspacePath\":null}}"));
+                "{\"model\":{\"modelName\":\"m\",\"variant\":\"v\",\"workspacePath\":null}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -164,7 +162,7 @@ class ThreadCommandPayloadJsonCodecTest {
         () -> codec.decode(ThreadCommandType.USER_MESSAGE, "{\"message\":[]}"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> codec.decode(ThreadCommandType.SET_MODEL, "{\"model\":{\"providerName\":\"p\"}}"));
+        () -> codec.decode(ThreadCommandType.SET_MODEL, "{\"model\":{\"modelName\":\"m\"}}"));
     assertThrows(
         IllegalArgumentException.class,
         () -> codec.decode(ThreadCommandType.SET_MODEL, "{\"model\":[\"p\"]}"));
@@ -173,13 +171,20 @@ class ThreadCommandPayloadJsonCodecTest {
         () ->
             codec.decode(
                 ThreadCommandType.SET_MODEL,
-                "{\"model\":{\"providerName\":\" p\",\"modelName\":\"m\",\"variant\":\"v\"}}"));
+                "{\"model\":{\"modelName\":\" m\",\"variant\":\"v\"}}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             codec.decode(
                 ThreadCommandType.SET_MODEL,
-                "{\"model\":{\"providerName\":\"p\",\"modelName\":\"m\",\"variant\":\"v\",\"extra\":1}}"));
+                "{\"model\":{\"modelName\":\"m\",\"variant\":\"v\",\"extra\":1}}"));
+    // Logical model selection rejects provider identity even on an otherwise valid shape.
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                ThreadCommandType.SET_MODEL,
+                "{\"model\":{\"modelName\":\"m\",\"variant\":\"v\",\"providerName\":\"p\"}}"));
   }
 
   @Test

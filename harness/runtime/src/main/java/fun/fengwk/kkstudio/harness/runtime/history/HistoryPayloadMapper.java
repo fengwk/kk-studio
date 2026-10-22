@@ -5,6 +5,7 @@ import fun.fengwk.kkstudio.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.common.result.ResultContent;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
@@ -24,6 +25,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -63,6 +65,15 @@ public final class HistoryPayloadMapper {
    * 名在响应持久化前已写入 ProviderToolCall）。
    */
   public MessagePayload assistantPayload(ProviderResponse response, List<ToolBinding> bindings) {
+    return assistantPayload(response, bindings, null, null);
+  }
+
+  /** 成功响应携带真实执行 ModelSelection 与请求起始时间；serviceTier 只取 Provider 报告值。 */
+  public MessagePayload assistantPayload(
+      ProviderResponse response,
+      List<ToolBinding> bindings,
+      ModelSelection model,
+      Instant requestedAt) {
     Objects.requireNonNull(response, "response");
     Objects.requireNonNull(bindings, "bindings");
     List<AgentMessageContent> contents = new ArrayList<>();
@@ -101,7 +112,12 @@ public final class HistoryPayloadMapper {
     return new MessagePayload(
         new AgentMessage(AgentMessageRole.ASSISTANT, contents),
         new AssistantMessageMetadata(
-            response.stopReason(), response.usage(), response.decodeDurationMillis()),
+            response.stopReason(),
+            response.usage(),
+            response.decodeDurationMillis(),
+            model,
+            requestedAt,
+            response.serviceTier()),
         null);
   }
 

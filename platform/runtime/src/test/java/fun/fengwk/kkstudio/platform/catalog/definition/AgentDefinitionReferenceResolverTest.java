@@ -41,7 +41,7 @@ class AgentDefinitionReferenceResolverTest {
 
     assertThrows(AiResourceNotFoundException.class, () -> resolver.requireAgent("missing"));
     assertThrows(
-        AiResourceNotFoundException.class, () -> resolver.requireModel("provider", "missing"));
+        AiResourceNotFoundException.class, () -> resolver.requireModelForUpdate("missing"));
   }
 
   @Test

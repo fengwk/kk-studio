@@ -25,7 +25,7 @@ V1 写入单行 SystemSettings 默认聚合；Java 解码与 profile 默认契�
 
 | 区域 | 表与事实 | 语义事实源 |
 | --- | --- | --- |
-| Catalog | agent_provider/model/definition、skill_package | [Platform Catalog](platform.md#catalog) |
+| Catalog | agent_provider、agent_model（MODEL/GROUP 共用名称空间）、agent_model_group_cooldown、agent_definition、skill_package | [Platform Catalog](platform.md#catalog) |
 | Plugin | plugin_configuration：每个 Plugin 的当前普通配置与修订；plugin_credential：凭据载荷、状态、refresh lease；plugin_auth_attempt：待完成的交互式认证 | [Plugin 配置存储](platform.md#plugin-配置存储)、[Plugin credential](platform.md#plugin-credential) |
 | MCP | mcp_server、mcp_tool：配置与原子发现快照 | [Platform MCP](platform.md#mcp-server-与运行时工具目录) |
 | Environment | environment、environment_connection：注册与环境路由租约、保存的安装设置（`install_config`）、宿主/Skill 投影；cluster_node：App 节点内部 IDE 路由 origin 与心跳租约 | [Environment](harness-environment.md) |
@@ -60,7 +60,10 @@ Issue 同时保持工作阶段、控制暂停和 Run 执行状态；同 Issue �
 阶段预算按 Issue/state，Work 为每 Issue 一个 durable 邮箱。
 Harness 命令按 sequence 与 idempotencyKey 唯一，Thread 持有 `execution_control`（`RUNNABLE`/`STOPPED`）与 `input_through_sequence` 输入水位；Join 固定 `terminal_entry_id`/`final_answer_entry_id` 回执与交付坐标；Stop 在 `thread_stop_receipt` 按 `(thread_id, stop_request_id)` 保存逐 Thread 回执。
 同一 Session 的执行根（`parent_thread_id IS NULL`）按规范化后的名称精确唯一，部分唯一索引 `uk_harness_thread_root_name` 裁决并发创建与重命名；冲突返回 HTTP 409、reason `THREAD_NAME_CONFLICT`。跨 Session 或子代理同名不受此约束，精确创建重放仍返回已有身份，不再次插入。
-Work lease 成对，required_environment_id 非空仅适用于 TOOL。Harness 的 Entry `payload` jsonb 保存 assistant 用量（`stopReason` / `usage` / 可选 `decodeDurationMillis`）与压缩摘要等事实，schema 不设金额或价格列；费用由应用在读取时按当前 catalog 现算。
+Work lease 成对，required_environment_id 非空仅适用于 TOOL。Fill First 模型组的有序成员保存在 `agent_model.group_config`，成员 Variant、立即降级状态码与
+固定冷却秒数由应用 codec 校验；`agent_model_group_cooldown` 只保存 `(组, 成员模型, 成员 Variant)`
+的冷却截止时间和写入时的组版本。组配置变更使旧版本冷却不再参与选择。组本身没有价格列，
+费用按实际执行的单模型配置读取。Harness 的 Entry `payload` jsonb 保存 assistant 用量（`stopReason` / `usage` / 可选 `decodeDurationMillis`）与压缩摘要等事实，schema 不设金额或价格列；费用由应用在读取时按当前 catalog 现算。
 `environment.install_config` 只允许 NULL 或 JSON object；数据库只兜底这一形状，字段结构与取值由
 应用 codec 在读写时校验，非法的历史行会在读取时失败而不是被宽容读出。
 

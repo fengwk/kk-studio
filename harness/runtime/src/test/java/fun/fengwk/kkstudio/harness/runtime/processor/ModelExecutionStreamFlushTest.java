@@ -634,7 +634,18 @@ class ModelExecutionStreamFlushTest {
               ModelInvocationError error =
                   new ModelInvocationError(ProviderErrorKind.TRANSIENT, "superseded");
               model =
-                  model.retryReady(new ModelAttemptFailure(1, 0L, "", "", error, NOW, NOW), NOW);
+                  model.retryReady(
+                      new ModelAttemptFailure(
+                          1,
+                          0L,
+                          "",
+                          "",
+                          ModelSelection.model("model", "v1"),
+                          null,
+                          error,
+                          NOW,
+                          NOW),
+                      NOW);
               tx.updateModelInvocation(model);
               model = model.markRunning(NOW);
               tx.updateModelInvocation(model);
@@ -1401,7 +1412,7 @@ class ModelExecutionStreamFlushTest {
   }
 
   private static ModelUsage usage() {
-    return new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L);
+    return new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L);
   }
 
   /** 测试用 native replay state：CONTINUE 等非撤下终态必须原样保留它（FILTERED 不保留）。 */
@@ -1416,7 +1427,6 @@ class ModelExecutionStreamFlushTest {
   private static ModelCost cost() {
     return new ModelCost(
         "USD",
-        BigDecimal.ZERO,
         BigDecimal.ZERO,
         BigDecimal.ZERO,
         BigDecimal.ZERO,
@@ -1546,7 +1556,7 @@ class ModelExecutionStreamFlushTest {
   }
 
   private static BranchSettings branchSettings() {
-    return new BranchSettings("agent", new ModelSelection("provider", "model", "v1"), null);
+    return new BranchSettings("agent", ModelSelection.model("model", "v1"), null);
   }
 
   private record Baseline(UUID sessionId, UUID rootEntryId, UUID turnStartEntryId, UUID threadId) {}

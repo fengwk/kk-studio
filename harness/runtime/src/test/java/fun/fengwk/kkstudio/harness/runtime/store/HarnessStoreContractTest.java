@@ -75,6 +75,8 @@ class HarnessStoreContractTest {
               "findModelInvocationByTurn",
               "insertModelInvocation",
               "updateModelInvocation",
+              "isGroupMemberCooling",
+              "freezeGroupMember",
               "findToolInvocation",
               "lockToolInvocation",
               "loadToolInvocationsByAssistantEntryId",

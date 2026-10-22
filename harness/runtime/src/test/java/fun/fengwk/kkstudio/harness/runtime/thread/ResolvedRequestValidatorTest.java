@@ -44,7 +44,7 @@ import java.util.UUID;
 /** 直接校验 Resolver 结果与 candidate path 的机械契约，覆盖正常 turn 和环境边界。 */
 class ResolvedRequestValidatorTest {
   private static final BranchSettings SETTINGS =
-      new BranchSettings("agent", new ModelSelection("provider", "model", "v1"), null);
+      new BranchSettings("agent", ModelSelection.model("model", "v1"), null);
   private static final EnvironmentId ENV_BINDING =
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
   private static final EnvironmentId OTHER_ENVIRONMENT_ID =
@@ -161,7 +161,7 @@ class ResolvedRequestValidatorTest {
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         new ModelDescriptor(
-            model.providerName(),
+            "provider",
             model.modelName(),
             model.modelName(),
             Set.of(ModelInputModality.TEXT),

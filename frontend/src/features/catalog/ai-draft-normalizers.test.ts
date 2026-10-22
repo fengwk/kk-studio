@@ -24,17 +24,9 @@ function modelConfig(overrides: Partial<AgentModelConfigDTO> = {}): AgentModelCo
     limit: { context: 128000, output: 8192 },
     abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
     pricing: {
-      currency: 'USD',
-      pricingTier: 'default',
-      serviceTier: 'default',
-      serviceTierMultiplier: 1,
-      version: 'v1',
-      inputPerMillionTokens: 0,
-      outputPerMillionTokens: 0,
-      cacheReadPerMillionTokens: 0,
-      cacheWritePerMillionTokens: 0,
-      cacheWriteLongPerMillionTokens: 0,
-      reasoningPerMillionTokens: 0,
+      base: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0', cacheWriteByTtl: {}, reasoning: null },
+      overrides: [],
+      multipliers: [],
     },
     defaultVariant: 'default',
     variants: [{ id: 'default' }],
@@ -45,6 +37,7 @@ function modelConfig(overrides: Partial<AgentModelConfigDTO> = {}): AgentModelCo
 function model(overrides: Partial<AgentModelDTO>): AgentModelDTO {
   return {
     providerName: 'minimax',
+    kind: 'MODEL',
     name: 'MiniMax-M2.7',
     modelId: 'minimax-m2.7',
     description: null,
@@ -121,7 +114,7 @@ describe('ai-draft-normalizers', () => {
       {
         ...emptyAgentDraft(),
         name: 'assistant',
-        model: 'anthropic/Claude-Sonnet-4.5',
+        model: 'Claude-Sonnet-4.5',
         variant: 'missing',
       },
       [
@@ -156,7 +149,7 @@ describe('ai-draft-normalizers', () => {
     const draft: AgentDraft = {
       ...emptyAgentDraft(),
       name: 'assistant',
-      model: 'minimax/MiniMax-M2.7',
+      model: 'MiniMax-M2.7',
       variant: 'default',
     }
     const models = [
@@ -178,8 +171,8 @@ describe('ai-draft-normalizers', () => {
       }),
     ]
 
-    expect(applyAgentModelSelection(draft, 'anthropic/Claude-Sonnet-4.5', models)).toMatchObject({
-      model: 'anthropic/Claude-Sonnet-4.5',
+    expect(applyAgentModelSelection(draft, 'Claude-Sonnet-4.5', models)).toMatchObject({
+      model: 'Claude-Sonnet-4.5',
       variant: '',
     })
     expect(applyAgentModelSelection(draft, 'unknown', models)).toMatchObject({
@@ -225,12 +218,12 @@ describe('ai-draft-normalizers', () => {
       model({ providerName: 'anthropic', name: 'Claude-Sonnet-4.5', config: modelConfig({ defaultVariant: 'creative', variants: [{ id: 'creative' }] }) }),
     ]
 
-    const preferred = normalizeCreateAgentDraftSelection(draft, models, 'anthropic/Claude-Sonnet-4.5')
-    expect(preferred.model).toBe('anthropic/Claude-Sonnet-4.5')
+    const preferred = normalizeCreateAgentDraftSelection(draft, models, 'Claude-Sonnet-4.5')
+    expect(preferred.model).toBe('Claude-Sonnet-4.5')
     expect(preferred.variant).toBe('')
 
     const fallback = normalizeCreateAgentDraftSelection(draft, models)
-    expect(fallback.model).toBe('minimax/MiniMax-M2.7')
+    expect(fallback.model).toBe('MiniMax-M2.7')
     expect(fallback.variant).toBe('')
 
     const empty = normalizeCreateAgentDraftSelection(draft, [])
@@ -240,7 +233,7 @@ describe('ai-draft-normalizers', () => {
   it('keeps the current Agent model and variant when the model is off-page', () => {
     const draft: AgentDraft = {
       ...emptyAgentDraft(),
-      model: 'loaded/old-model',
+      model: 'old-model',
       variant: 'persisted-override',
     }
     const unrelatedModel = model({
@@ -254,14 +247,14 @@ describe('ai-draft-normalizers', () => {
 
     const result = normalizeAgentDraftDefaultVariant(draft, [unrelatedModel])
 
-    expect(result.model).toBe('loaded/old-model')
+    expect(result.model).toBe('old-model')
     expect(result.variant).toBe('persisted-override')
   })
 
   it('clears an invalid variant override when the selected model is loaded', () => {
     const draft: AgentDraft = {
       ...emptyAgentDraft(),
-      model: 'original/original-model',
+      model: 'original-model',
       variant: 'unrelated-variant',
     }
     const originalModel = model({
@@ -283,7 +276,7 @@ describe('ai-draft-normalizers', () => {
 
     const result = normalizeAgentDraftDefaultVariant(draft, [unrelatedModel, originalModel])
 
-    expect(result.model).toBe('original/original-model')
+    expect(result.model).toBe('original-model')
     expect(result.variant).toBe('')
   })
 })

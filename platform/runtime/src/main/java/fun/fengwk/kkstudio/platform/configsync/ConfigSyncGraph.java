@@ -7,6 +7,7 @@ import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefini
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
+import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelGroupConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
@@ -14,6 +15,7 @@ import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.plugin.service.PluginAgentDependencies;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncRef;
@@ -41,12 +43,15 @@ public final class ConfigSyncGraph {
   private static final String RESOURCE = "config_sync";
 
   private final AgentDefinitionConfigCodec agentConfigCodec;
+  private final AgentModelGroupConfigCodec modelGroupConfigCodec;
   private final PluginAgentDependencies pluginAgentDependencies;
 
   public ConfigSyncGraph(
       AgentDefinitionConfigCodec agentConfigCodec,
+      AgentModelGroupConfigCodec modelGroupConfigCodec,
       PluginAgentDependencies pluginAgentDependencies) {
     this.agentConfigCodec = agentConfigCodec;
+    this.modelGroupConfigCodec = modelGroupConfigCodec;
     this.pluginAgentDependencies = pluginAgentDependencies;
   }
 
@@ -63,9 +68,7 @@ public final class ConfigSyncGraph {
       edges.put(providerRef(provider), List.of());
     }
     for (AgentModel model : snapshot.models()) {
-      edges.put(
-          ConfigSyncRefs.model(model.providerName(), model.name()),
-          List.of(ConfigSyncRefs.ref(ConfigSyncKind.PROVIDERS, model.providerName())));
+      edges.put(ConfigSyncRefs.model(model.name()), modelDependencies(model));
     }
     for (AgentDefinition agent : snapshot.agents()) {
       edges.put(agentRef(agent), agentDependencies(agent, toolServer, builtinAgentNames));
@@ -92,9 +95,7 @@ public final class ConfigSyncGraph {
   public List<ConfigSyncRef> allRefs(ConfigSyncSnapshot snapshot) {
     List<ConfigSyncRef> refs = new ArrayList<>();
     snapshot.providers().forEach(provider -> refs.add(providerRef(provider)));
-    snapshot
-        .models()
-        .forEach(model -> refs.add(ConfigSyncRefs.model(model.providerName(), model.name())));
+    snapshot.models().forEach(model -> refs.add(ConfigSyncRefs.model(model.name())));
     snapshot.agents().forEach(agent -> refs.add(agentRef(agent)));
     snapshot.skillPackages().forEach(pkg -> refs.add(skillRef(pkg)));
     snapshot.environments().forEach(env -> refs.add(environmentRef(env)));
@@ -174,11 +175,24 @@ public final class ConfigSyncGraph {
     return List.copyOf(result);
   }
 
+  /** MODEL 直接依赖 Provider；GROUP 依赖各成员 Model，组版本与运行态冷却不进依赖图。 */
+  private List<ConfigSyncRef> modelDependencies(AgentModel model) {
+    if (model.kind() == AgentModelKind.MODEL) {
+      return List.of(ConfigSyncRefs.ref(ConfigSyncKind.PROVIDERS, model.providerName()));
+    }
+    Set<ConfigSyncRef> deps = new LinkedHashSet<>();
+    modelGroupConfigCodec
+        .decode(model.groupConfigJson())
+        .getMembers()
+        .forEach(member -> deps.add(ConfigSyncRefs.model(member.getModelName())));
+    return List.copyOf(deps);
+  }
+
   /** Agent 引用的 subagent：系统内置 Agent 已由系统满足，绝不作为 portable 依赖输出。 */
   private List<ConfigSyncRef> agentDependencies(
       AgentDefinition agent, Map<String, String> toolServer, Set<String> builtinAgentNames) {
     Set<ConfigSyncRef> deps = new LinkedHashSet<>();
-    deps.add(ConfigSyncRefs.model(agent.modelProviderName(), agent.modelName()));
+    deps.add(ConfigSyncRefs.model(agent.modelName()));
     AgentDefinitionConfigDTO config = agentConfigCodec.decode(agent.configJson());
     if (config.getSkills() != null) {
       for (SkillRefDTO skill : config.getSkills()) {

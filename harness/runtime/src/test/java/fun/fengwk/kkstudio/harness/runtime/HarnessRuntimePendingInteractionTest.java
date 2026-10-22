@@ -139,7 +139,13 @@ class HarnessRuntimePendingInteractionTest {
           UUID assistantEntryId = tx.nextId();
           tx.insertEntry(
               mappedAssistantEntry(
-                  assistantEntryId, sessionId, userEntryId, createdAt, requestSpec, response));
+                  assistantEntryId,
+                  sessionId,
+                  userEntryId,
+                  createdAt,
+                  requestSpec,
+                  response,
+                  createdAt));
           UUID modelId = tx.nextId();
           ModelInvocation model =
               modelInvocationWithRequest(

@@ -2,7 +2,6 @@ import { ResourceCardLayout } from '@/features/catalog/AiResourceCardLayout'
 import { Badge } from '@/shared/ui/data/Badge'
 import {
   formatModelLabel,
-  modelRef,
   type AgentModelView,
 } from '@/features/catalog/AgentModelView'
 import { translate, useI18n } from '@/shared/i18n'
@@ -21,14 +20,17 @@ function formatEffectiveModel(
   if (!modelRefValue) {
     return translate('ai.catalog.card.modelUnconfigured')
   }
-  const label = model ? modelRef(model) : modelRefValue
+  const label = model?.name || modelRefValue
+  if (model?.kind === 'GROUP') {
+    return label
+  }
   const override = variantOverride?.trim()
   if (override) {
-    return formatModelLabel(null, label, override)
+    return formatModelLabel(label, override)
   }
-  const defaultVariant = model?.config.defaultVariant.trim()
+  const defaultVariant = model?.config?.defaultVariant?.trim()
   return defaultVariant
-    ? `${formatModelLabel(null, label, defaultVariant)}${translate('ai.catalog.card.modelDefaultSuffix')}`
+    ? `${formatModelLabel(label, defaultVariant)}${translate('ai.catalog.card.modelDefaultSuffix')}`
     : `${label} · ${translate('ai.catalog.card.unknownVariant')}`
 }
 
@@ -47,7 +49,7 @@ export function AgentResourceCard({
 }) {
   const { t } = useI18n()
   const modelRefValue = (agent.model ?? '').trim()
-  const model = models.find((item) => modelRef(item) === modelRefValue)
+  const model = models.find((item) => item.name === modelRefValue)
   const effectiveModel = formatEffectiveModel(model, modelRefValue, agent.variant ?? null)
   const tools = agent.config.tools
   const skillTags = (agent.config.skills ?? []).map((s) => `${s.packageName} / ${s.name}`)

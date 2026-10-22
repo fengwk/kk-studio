@@ -65,8 +65,7 @@ public final class HarnessRuntimeTestFixtures {
   private HarnessRuntimeTestFixtures() {}
 
   public static BranchSettings settings() {
-    return new BranchSettings(
-        "default-assistant", new ModelSelection("openai", "gpt-5", "default"), null);
+    return new BranchSettings("default-assistant", new ModelSelection("gpt-5", "default"), null);
   }
 
   public static Entry rootEntry() {
@@ -249,7 +248,7 @@ public final class HarnessRuntimeTestFixtures {
   }
 
   public static ModelUsage usage() {
-    return new ModelUsage(11, 7, 5, 3, 2, 13, 47);
+    return new ModelUsage(11, 20, 5, 3, Map.of(3600L, 3L), 13L, 47L);
   }
 
   public static ProviderResponse toolCallResponse() {

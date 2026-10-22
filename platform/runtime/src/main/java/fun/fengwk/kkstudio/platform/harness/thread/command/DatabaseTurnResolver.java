@@ -24,6 +24,8 @@ import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelGroupExecution;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelGroupMemberExecution;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
@@ -31,6 +33,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAcces
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccessMode;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
@@ -46,6 +49,7 @@ import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefin
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
+import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelGroupConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser.ParsedAgentModelConfig;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
@@ -66,6 +70,9 @@ import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.platform.harness.task.CurrentEnvironmentContext;
 import fun.fengwk.kkstudio.platform.harness.task.SkillPromptEntry;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelGroupDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelGroupMemberDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 
 import java.time.Clock;
@@ -74,9 +81,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
-import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
-import java.util.function.Function;
 
 /**
  * 生产 Platform 的 {@link TurnResolver}：把 candidate {@link EntryPath} 的最新 branch settings 解析为冻结的
@@ -110,6 +116,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
   private final AgentProviderRepository providerRepository;
   private final AgentDefinitionConfigCodec agentConfigCodec;
   private final AgentModelRuntimeConfigParser modelConfigParser;
+  private final AgentModelGroupConfigCodec groupConfigCodec;
   private final ProviderFactories providerFactories;
   private final RuntimeToolCatalogSource toolCatalogSource;
   private final EnvironmentRegistry environmentRegistry;
@@ -127,6 +134,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
       AgentProviderRepository providerRepository,
       AgentDefinitionConfigCodec agentConfigCodec,
       AgentModelRuntimeConfigParser modelConfigParser,
+      AgentModelGroupConfigCodec groupConfigCodec,
       ProviderFactories providerFactories,
       RuntimeToolCatalogSource toolCatalogSource,
       EnvironmentRegistry environmentRegistry,
@@ -142,6 +150,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
     this.providerRepository = Objects.requireNonNull(providerRepository, "providerRepository");
     this.agentConfigCodec = Objects.requireNonNull(agentConfigCodec, "agentConfigCodec");
     this.modelConfigParser = Objects.requireNonNull(modelConfigParser, "modelConfigParser");
+    this.groupConfigCodec = Objects.requireNonNull(groupConfigCodec, "groupConfigCodec");
     this.providerFactories = Objects.requireNonNull(providerFactories, "providerFactories");
     this.toolCatalogSource = Objects.requireNonNull(toolCatalogSource, "toolCatalogSource");
     this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
@@ -267,15 +276,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
             "agent not found: " + settings.agentName());
     AgentDefinitionConfigDTO agentConfig = decodeAgentConfig(agent);
 
-    ResolvedModel resolvedModel = resolveModel(settings.model(), agent);
-    ModelSelection selection = resolvedModel.selection();
-    AgentProvider provider = resolvedModel.provider();
-    ProviderType providerType = resolvedModel.providerType();
-    UUID providerConnectionGenerationId = resolvedModel.connectionGenerationId();
-    AgentModel model = resolvedModel.model();
-    ParsedAgentModelConfig parsedModel = resolvedModel.parsed();
-    ModelVariant variant = resolvedModel.variant();
-    ProviderFactory providerFactory = resolvedModel.factory();
+    ResolvedSelection resolved = resolveSelection(settings.model(), agent);
+    MemberRuntime first = resolved.members().getFirst();
 
     // Environment 只由 branch settings 的可空 environmentName 决定：Issue Run 在启动时已显式 SET_ENVIRONMENT，
     // 运行时不再按 Issue/阶段反查或覆写。
@@ -290,29 +292,13 @@ public final class DatabaseTurnResolver implements TurnResolver {
     PlannedTools tools = resolveTools(lease, environmentId, environmentName, toolNames);
     List<ToolBinding> toolBindings = tools.bindings();
 
-    if (!toolBindings.isEmpty() && !parsedModel.tools()) {
-      throw rejection(
-          "model does not support tools: "
-              + selection.providerName()
-              + "/"
-              + selection.modelName());
-    }
-    if (variant.reasoningEffort() != null && !parsedModel.reasoning()) {
-      throw rejection(
-          "model does not support reasoning: "
-              + selection.providerName()
-              + "/"
-              + selection.modelName());
+    for (MemberRuntime member : resolved.members()) {
+      if (!toolBindings.isEmpty() && !member.parsed().tools()) {
+        throw rejection("model does not support tools: " + member.modelName());
+      }
+      requireReasoningSupport(member);
     }
 
-    ModelDescriptor descriptor =
-        new ModelDescriptor(
-            selection.providerName(),
-            selection.modelName(),
-            model.modelId(),
-            parsedModel.inputModalities(),
-            parsedModel.tools(),
-            parsedModel.reasoning());
     String systemInstruction =
         systemInstruction(
             agent.systemPrompt(),
@@ -321,30 +307,36 @@ public final class DatabaseTurnResolver implements TurnResolver {
             subagentBindings,
             path,
             lease.harnessCatalog());
-    int contextWindow = contextWindow(parsedModel);
+    int contextWindow = resolved.contextWindow();
+    long estimatedInputTokens = CompactionPlanner.estimateRequestTokens(path, systemInstruction);
+    // 组内每个成员都必须容纳这次请求：输出预算取所有成员可提供预算的最小值。
     int outputTokens =
-        outputTokens(
-            parsedModel,
-            contextWindow,
-            CompactionPlanner.estimateRequestTokens(path, systemInstruction));
+        resolved.members().stream()
+            .mapToInt(
+                member ->
+                    outputTokens(
+                        member.parsed(), contextWindow(member.parsed()), estimatedInputTokens))
+            .min()
+            .orElseThrow();
     ProviderCacheControl cacheControl =
         usesCompactionAgentCacheHint(settings)
             ? ProviderCacheControl.none()
             : ProviderCacheControl.session(
                 promptCacheRetention(
-                    providerFactory, provider.configJson(), selection.providerName()),
+                    first.factory(), first.provider().configJson(), first.provider().name()),
                 sessionId.toString());
     return new LiveTurnPlan.Planned(
         new ModelRequestSpec(
-            providerType,
-            providerConnectionGenerationId,
-            descriptor,
-            variant,
+            first.providerType(),
+            first.providerConnectionGenerationId(),
+            resolved.descriptor(),
+            first.variant(),
             outputTokens,
             systemInstruction,
             toolBindings,
             subagentBindings,
-            cacheControl),
+            cacheControl,
+            resolved.group()),
         contextWindow,
         tools.candidates(),
         skills);
@@ -361,100 +353,160 @@ public final class DatabaseTurnResolver implements TurnResolver {
   }
 
   /**
-   * Environment 只由当前 branch settings 的可空 name 决定：null 表示未选择环境；非 null 时按全局唯一且不可变的 name 查 Environment
-   * 并取内部路由身份，缺失时确定性拒绝规划。
-   */
-  /**
-   * 解析本 turn 实际调用的模型：Thread 设置的模型可用时使用它；不可用（Provider 或 Model 已删除、改名）时改用当前 Agent 的默认模型；二者都不可用时拒绝本
+   * 解析本 turn 实际调用的逻辑模型（MODEL 或 GROUP）：Thread 设置的模型存在时使用它；已从 catalog 移除时改用当前 Agent 的默认模型；二者都不可用时拒绝本
    * turn。
    *
-   * <p>Thread 设置不被改写：默认模型恢复或重新绑定后，下一 turn 立即生效。variant 优先沿用原设置；目标模型没有该 variant 时，原模型改用自身的默认
-   * variant，回退模型依次取 Agent 声明的 variant 与模型自身的默认 variant。只对模型回退，Agent 与 Environment 失效一律停止。
+   * <p>Thread 设置不被改写：默认模型恢复或重新绑定后，下一 turn 立即生效。单 Model 的 variant 优先沿用原设置；目标模型没有该 variant
+   * 时，原模型改用自身的默认 variant，回退模型依次取 Agent 声明的 variant 与模型自身的默认 variant。只对模型回退，Agent 与 Environment
+   * 失效一律停止。
    */
-  private ResolvedModel resolveModel(ModelSelection requested, AgentDefinition agent) {
-    Optional<ResolvedModel> direct =
-        findModel(
-            requested.providerName(),
-            requested.modelName(),
-            parsed ->
-                findVariant(parsed, requested.variant()) != null
-                    ? requested.variant()
-                    : parsed.defaultVariant());
-    if (direct.isPresent()) {
-      return direct.get();
+  private ResolvedSelection resolveSelection(ModelSelection requested, AgentDefinition agent) {
+    AgentModel model = modelRepository.getByName(requested.modelName());
+    if (model != null) {
+      return resolveLogical(model, requested.variant(), null);
     }
-    String defaultProvider = agent.modelProviderName();
     String defaultModel = agent.modelName();
-    boolean hasDistinctDefault =
-        defaultProvider != null
-            && defaultModel != null
-            && !(defaultProvider.equals(requested.providerName())
-                && defaultModel.equals(requested.modelName()));
-    Optional<ResolvedModel> fallback =
-        hasDistinctDefault
-            ? findModel(
-                defaultProvider,
-                defaultModel,
-                parsed -> {
-                  if (findVariant(parsed, requested.variant()) != null) {
-                    return requested.variant();
-                  }
-                  if (agent.variant() != null && findVariant(parsed, agent.variant()) != null) {
-                    return agent.variant();
-                  }
-                  return parsed.defaultVariant();
-                })
-            : Optional.empty();
-    return fallback.orElseThrow(
-        () ->
-            rejection(
-                "model "
-                    + requested.providerName()
-                    + "/"
-                    + requested.modelName()
-                    + " and the agent default model are both unavailable; bind an available model"));
+    AgentModel fallback =
+        defaultModel == null || defaultModel.equals(requested.modelName())
+            ? null
+            : modelRepository.getByName(defaultModel);
+    if (fallback == null) {
+      throw rejection(
+          "model "
+              + requested.modelName()
+              + " and the agent default model are both unavailable; bind an available model");
+    }
+    return resolveLogical(fallback, requested.variant(), agent.variant());
   }
 
-  /** 按名字查找模型；Provider 或 Model 不存在、或选定 variant 不存在时返回空。Provider 配置缺失属于配置错误，直接拒绝。 */
-  private Optional<ResolvedModel> findModel(
-      String providerName,
-      String modelName,
-      Function<ParsedAgentModelConfig, String> variantChoice) {
-    AgentProvider provider = providerRepository.getByName(providerName);
-    AgentModel model =
-        provider == null ? null : modelRepository.getByProviderNameAndName(providerName, modelName);
-    if (model == null) {
-      return Optional.empty();
+  /**
+   * 单 Model 按偏好依次取第一个由 config 声明的 variant（{@code preferredVariant}、{@code secondaryVariant}、默认
+   * variant）；GROUP 没有组级 variant，一次性冻结组版本与有序成员。
+   */
+  private ResolvedSelection resolveLogical(
+      AgentModel model, String preferredVariant, String secondaryVariant) {
+    if (model.kind() == AgentModelKind.GROUP) {
+      if (preferredVariant != null) {
+        throw rejection("model group must not select a variant: " + model.name());
+      }
+      return resolveGroup(model);
     }
     ParsedAgentModelConfig parsed = parseModel(model);
-    ModelVariant variant = findVariant(parsed, variantChoice.apply(parsed));
-    if (variant == null) {
-      return Optional.empty();
+    String variantName =
+        findVariant(parsed, preferredVariant) != null
+            ? preferredVariant
+            : findVariant(parsed, secondaryVariant) != null
+                ? secondaryVariant
+                : parsed.defaultVariant();
+    MemberRuntime member = resolveMember(model, variantName);
+    return new ResolvedSelection(
+        member.descriptor(), contextWindow(member.parsed()), List.of(member), null);
+  }
+
+  /** 冻结组版本、有序成员及其 Provider/连接代际/Descriptor/Variant：组能力取成员输入模态的交集、上下文取最小值，成员切换绝不重新读取 Catalog。 */
+  private ResolvedSelection resolveGroup(AgentModel groupModel) {
+    AgentModelGroupDTO group = groupConfigCodec.decode(groupModel.groupConfigJson());
+    List<MemberRuntime> members = new ArrayList<>(group.getMembers().size());
+    List<ModelGroupMemberExecution> executions = new ArrayList<>(group.getMembers().size());
+    Set<ModelInputModality> modalities = null;
+    int contextWindow = Integer.MAX_VALUE;
+    for (AgentModelGroupMemberDTO member : group.getMembers()) {
+      AgentModel memberModel =
+          require(
+              modelRepository.getByName(member.getModelName()),
+              "group member model not found: " + member.getModelName());
+      if (memberModel.kind() != AgentModelKind.MODEL) {
+        throw rejection("group member is not a single model: " + member.getModelName());
+      }
+      MemberRuntime runtime = resolveMember(memberModel, member.getVariant());
+      members.add(runtime);
+      executions.add(
+          new ModelGroupMemberExecution(
+              runtime.providerType(),
+              runtime.providerConnectionGenerationId(),
+              runtime.descriptor(),
+              runtime.variant()));
+      if (modalities == null) {
+        modalities = new LinkedHashSet<>(runtime.descriptor().inputModalities());
+      } else {
+        modalities.retainAll(runtime.descriptor().inputModalities());
+      }
+      contextWindow = Math.min(contextWindow, contextWindow(runtime.parsed()));
     }
+    if (modalities == null || modalities.isEmpty()) {
+      throw rejection("model group members have no common input modality: " + groupModel.name());
+    }
+    ModelDescriptor first = members.getFirst().descriptor();
+    ModelDescriptor groupDescriptor =
+        new ModelDescriptor(
+            first.providerName(),
+            groupModel.name(),
+            first.modelId(),
+            modalities,
+            first.tools(),
+            first.reasoning());
+    ModelGroupExecution execution =
+        new ModelGroupExecution(
+            groupModel.name(),
+            groupModel.version(),
+            executions,
+            new LinkedHashSet<>(group.getFallbackStatusCodes()),
+            group.getCooldownSeconds());
+    return new ResolvedSelection(groupDescriptor, contextWindow, members, execution);
+  }
+
+  /** 解析单 Model 的执行身份；{@code variantName} 必须由该 Model 的 config 声明。 */
+  private MemberRuntime resolveMember(AgentModel model, String variantName) {
+    AgentProvider provider =
+        require(
+            providerRepository.getByName(model.providerName()),
+            "provider not found: " + model.providerName());
     ProviderType providerType = provider.providerType();
     if (providerType == null) {
       throw rejection("provider type must not be null");
     }
-    UUID connectionGenerationId =
+    UUID providerConnectionGenerationId =
         require(
             provider.connectionGenerationId(),
             "provider connection generation id must not be null");
     ProviderFactory factory =
         require(
             providerFactories.lookup(providerType).orElse(null),
-            "provider factory not found for " + providerName + " (" + providerType + ")");
-    return Optional.of(
-        new ResolvedModel(
-            new ModelSelection(providerName, modelName, variant.id()),
-            provider,
-            providerType,
-            connectionGenerationId,
-            model,
-            parsed,
-            variant,
-            factory));
+            "provider factory not found for " + provider.name() + " (" + providerType + ")");
+    ParsedAgentModelConfig parsed = parseModel(model);
+    ModelVariant variant = findVariant(parsed, variantName);
+    if (variant == null) {
+      throw rejection("model variant not found: " + model.name() + " variant=" + variantName);
+    }
+    ModelDescriptor descriptor =
+        new ModelDescriptor(
+            model.providerName(),
+            model.name(),
+            model.modelId(),
+            parsed.inputModalities(),
+            parsed.tools(),
+            parsed.reasoning());
+    return new MemberRuntime(
+        model.name(),
+        provider,
+        providerType,
+        providerConnectionGenerationId,
+        factory,
+        parsed,
+        descriptor,
+        variant);
   }
 
+  private static void requireReasoningSupport(MemberRuntime member) {
+    if (member.variant().reasoningEffort() != null && !member.parsed().reasoning()) {
+      throw rejection("model does not support reasoning: " + member.modelName());
+    }
+  }
+
+  /**
+   * Environment 只由当前 branch settings 的可空 name 决定：null 表示未选择环境；非 null 时按全局唯一且不可变的 name 查 Environment
+   * 并取内部路由身份，缺失时确定性拒绝规划。
+   */
   private Environment resolveEnvironment(String environmentName) {
     if (environmentName == null) {
       return null;
@@ -467,7 +519,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
   }
 
   /**
-   * 压缩 resolver 路径：只按 preparation 的 executionModel 查找 provider/model/variant 构造请求——不查 Agent system
+   * 压缩 resolver 路径：只按 preparation 的 executionModel 查找模型、Provider 与 Variant 构造请求——不查 Agent system
    * prompt、不查 contributors、零 tool/skill、不做 environment 可用性查找、不启用 cache（{@code
    * ProviderCacheControl.none()}）。切分事实由 candidate path 的 compaction TURN_START 持有，不复制进 spec；输出预算按当前
    * config 与 removedPrefixTokens 现算。
@@ -478,50 +530,25 @@ public final class DatabaseTurnResolver implements TurnResolver {
         require(
             agentDefinitionRepository.getByName(compactionAgentName),
             "agent not found: " + compactionAgentName);
-    if (agent.modelProviderName() == null || agent.modelName() == null) {
+    if (agent.modelName() == null) {
       throw rejection("compaction agent has no configured model");
     }
-    AgentProvider provider =
-        require(
-            providerRepository.getByName(agent.modelProviderName()),
-            "provider not found: " + agent.modelProviderName());
-    ProviderType providerType = provider.providerType();
-    if (providerType == null) {
-      throw rejection("provider type must not be null");
-    }
-    UUID providerConnectionGenerationId =
-        require(
-            provider.connectionGenerationId(),
-            "provider connection generation id must not be null");
     AgentModel model =
         require(
-            modelRepository.getByProviderNameAndName(agent.modelProviderName(), agent.modelName()),
-            "model not found: " + agent.modelProviderName() + "/" + agent.modelName());
-    ParsedAgentModelConfig parsedModel = parseModel(model);
-    String variantName =
-        agent.variant() != null && !agent.variant().isBlank()
-            ? agent.variant()
-            : parsedModel.defaultVariant();
-    ModelVariant variant = findVariant(parsedModel, variantName);
-    if (variant == null) {
-      throw rejection(
-          "model variant not found: "
-              + agent.modelProviderName()
-              + "/"
-              + agent.modelName()
-              + " variant="
-              + variantName);
-    }
-    if (variant.reasoningEffort() != null && !parsedModel.reasoning()) {
-      throw rejection(
-          "model does not support reasoning: "
-              + agent.modelProviderName()
-              + "/"
-              + agent.modelName());
+            modelRepository.getByName(agent.modelName()), "model not found: " + agent.modelName());
+    ResolvedSelection resolved = resolveLogical(model, agent.variant(), null);
+    for (MemberRuntime member : resolved.members()) {
+      requireReasoningSupport(member);
     }
     ModelSelection compactorModel =
-        new ModelSelection(agent.modelProviderName(), agent.modelName(), variant.id());
-    int maxOutputTokens = outputTokens(parsedModel);
+        resolved.group() == null
+            ? ModelSelection.model(model.name(), resolved.members().getFirst().variant().id())
+            : ModelSelection.group(model.name());
+    int maxOutputTokens =
+        resolved.members().stream()
+            .mapToInt(member -> outputTokens(member.parsed()))
+            .min()
+            .orElseThrow();
     long outputBudget =
         compactionConfigProvider
             .compactionConfig()
@@ -529,12 +556,11 @@ public final class DatabaseTurnResolver implements TurnResolver {
     if (outputBudget <= 0L || outputBudget > Integer.MAX_VALUE) {
       throw rejection("compaction output budget must be a positive int, got " + outputBudget);
     }
-    int contextWindow = contextWindow(parsedModel);
     BranchSettings childSettings =
         new BranchSettings(
             compactionAgentName, compactorModel, parentPath.baseSettings().environmentName(), null);
     return new TurnResolver.CompactionResolved(
-        compactorModel, outputBudget, contextWindow, maxOutputTokens, childSettings);
+        compactorModel, outputBudget, resolved.contextWindow(), maxOutputTokens, childSettings);
   }
 
   /** model config limit.context 必须是可表示的正 int；否则确定性拒绝。 */
@@ -881,15 +907,23 @@ public final class DatabaseTurnResolver implements TurnResolver {
   }
 
   /** 一次工具规划的全部事实：冻结进 spec 的 SENT bindings 与「SENT 在前、FILTERED 在后」的完整候选投影。 */
-  private record ResolvedModel(
-      ModelSelection selection,
+  /** 一个单 Model 的已解析执行身份；模型组的每个成员各有一份。 */
+  private record MemberRuntime(
+      String modelName,
       AgentProvider provider,
       ProviderType providerType,
-      UUID connectionGenerationId,
-      AgentModel model,
+      UUID providerConnectionGenerationId,
+      ProviderFactory factory,
       ParsedAgentModelConfig parsed,
-      ModelVariant variant,
-      ProviderFactory factory) {}
+      ModelDescriptor descriptor,
+      ModelVariant variant) {}
+
+  /** 逻辑模型的解析结果：单 Model 只有一个成员且 {@code group} 为 null；模型组按序列出全部成员与冻结的组执行快照。 */
+  private record ResolvedSelection(
+      ModelDescriptor descriptor,
+      int contextWindow,
+      List<MemberRuntime> members,
+      ModelGroupExecution group) {}
 
   private record PlannedTools(
       List<ToolBinding> bindings, List<LiveTurnPlan.CandidateTool> candidates) {}

@@ -433,7 +433,7 @@ class StudioHarnessCommandBatchControllerTest {
             [{
               "type":"SET_MODEL",
               "idempotencyKey":"00000000-0000-0000-0000-000000000021",
-              "model":{"providerName":"openai","modelName":"gpt-5","variant":"default"}
+              "model":{"modelName":"gpt-5","variant":"default"}
             },
             {
               "type":"SET_AGENT",
@@ -706,7 +706,7 @@ class StudioHarnessCommandBatchControllerTest {
     return """
         {
           "agentName":"default-assistant",
-          "model":{"providerName":"openai","modelName":"gpt-5","variant":"default"},
+          "model":{"modelName":"gpt-5","variant":"default"},
           "environmentName":null
         }
         """;

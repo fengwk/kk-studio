@@ -156,7 +156,6 @@ class StudioHarnessProviderRequestPreviewControllerTest {
         payloads.stream().map(view -> view.payload().type()).toList());
     SetModelCommandPayload setModel =
         assertInstanceOf(SetModelCommandPayload.class, payloads.get(0).payload());
-    assertEquals("stub", setModel.model().providerName());
     assertEquals("acceptance-stub", setModel.model().modelName());
     assertTrue(
         payloads.get(0).requestHash().matches("[0-9a-f]{64}"),
@@ -350,7 +349,7 @@ class StudioHarnessProviderRequestPreviewControllerTest {
         [{
           "type":"SET_MODEL",
           "idempotencyKey":"%s",
-          "model":{"providerName":"stub","modelName":"acceptance-stub","variant":"default"}
+          "model":{"modelName":"acceptance-stub","variant":"default"}
         },
         {
           "type":"USER_MESSAGE",

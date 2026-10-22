@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { canonicalSeedCatalog } from '../lib/fixtures.mjs'
+import { canonicalSeedCatalog, encodePathTail } from '../lib/fixtures.mjs'
 
 /**
  * 测试意图：`seed.structured_model_config` 用公开 API 输出比对种子目录。种子资源是持久化形态（variant 允许省略
@@ -62,4 +62,9 @@ test('canonical seed catalog does not mutate its input', () => {
   const snapshot = JSON.stringify(input)
   canonicalSeedCatalog(input)
   assert.equal(JSON.stringify(input), snapshot)
+})
+
+test('encodePathTail keeps slash segments and encodes spaces', () => {
+  // 模型名是单一全局身份但可包含斜杠；路径 tail 必须保留层级分隔，只编码每段中的空格等保留字符。
+  assert.equal(encodePathTail('vendor/My Model'), 'vendor/My%20Model')
 })

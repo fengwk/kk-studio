@@ -17,7 +17,7 @@ const GRANDCHILD_ID = 'a2000000-0000-4000-8000-0000000000d1'
 const SESSION_ID = 'b2000000-0000-4000-8000-0000000000b1'
 const HARNESS_URL = '/browser-tests/chat-branch-harness.html'
 const rootPayload = JSON.stringify({ settings: {
-  agentName: 'assistant', model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+  agentName: 'assistant', model: { modelName: 'MiniMax', variant: 'default' },
   environmentName: null, goal: null,
 } })
 
@@ -115,7 +115,7 @@ function thread(headEntryId = 'entry-3', options: { busy?: boolean } = {}) {
     executionControl: 'RUNNABLE',
     branchSettings: {
       agentName: 'assistant',
-      model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+      model: { modelName: 'MiniMax', variant: 'default' },
       environmentName: null,
     },
     createTime: 1790812800,
@@ -220,7 +220,7 @@ async function installChatApi(
               name: 'assistant',
               description: '通用助手',
               systemPrompt: null,
-              model: 'minimax/MiniMax',
+              model: 'MiniMax',
               variant: 'default',
               config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
               version: '1',
@@ -243,6 +243,7 @@ async function installChatApi(
             results: [
               {
                 providerName: 'minimax',
+                kind: 'MODEL',
                 name: 'MiniMax',
                 modelId: 'MiniMax-upstream',
                 description: null,
@@ -252,11 +253,10 @@ async function installChatApi(
                   defaultVariant: 'default',
                   variants: [{ id: 'default' }, { id: 'deep', reasoningEffort: 'high' }],
                   pricing: {
-                    currency: 'USD', pricingTier: 'default', serviceTier: 'default', serviceTierMultiplier: 1,
-                    version: '1', inputPerMillionTokens: 1, outputPerMillionTokens: 1,
-                    cacheReadPerMillionTokens: 1, cacheWritePerMillionTokens: 1,
-                    cacheWriteLongPerMillionTokens: 1, reasoningPerMillionTokens: 1,
-                  },
+      base: { input: '1', output: '1', cacheRead: '1', cacheWrite: '1', cacheWriteByTtl: {}, reasoning: null },
+      overrides: [],
+      multipliers: [],
+    },
                 },
                 version: '1',
                 createTime: null,
@@ -265,6 +265,7 @@ async function installChatApi(
               {
                 // 单 variant 模型：一次点击即完成选择（无需进入二级 variant 菜单）。
                 providerName: 'minimax',
+                kind: 'MODEL',
                 name: 'Echo',
                 modelId: 'Echo-upstream',
                 description: null,
@@ -274,11 +275,10 @@ async function installChatApi(
                   defaultVariant: 'default',
                   variants: [{ id: 'default' }],
                   pricing: {
-                    currency: 'USD', pricingTier: 'default', serviceTier: 'default', serviceTierMultiplier: 1,
-                    version: '1', inputPerMillionTokens: 1, outputPerMillionTokens: 1,
-                    cacheReadPerMillionTokens: 1, cacheWritePerMillionTokens: 1,
-                    cacheWriteLongPerMillionTokens: 1, reasoningPerMillionTokens: 1,
-                  },
+      base: { input: '1', output: '1', cacheRead: '1', cacheWrite: '1', cacheWriteByTtl: {}, reasoning: null },
+      overrides: [],
+      multipliers: [],
+    },
                 },
                 version: '1',
                 createTime: null,
@@ -343,7 +343,7 @@ async function installChatApi(
           parentThreadId: grandchild ? CHILD_ID : THREAD_ID,
           yoloPolicy: { mode: 'FOLLOW', rootThreadId: THREAD_ID },
           branchSettings: { ...boundThread.branchSettings, agentName: grandchild ? 'researcher' : 'worker',
-            model: { providerName: 'minimax', modelName: 'MiniMax', variant: grandchild ? 'deep' : 'default' } },
+            model: { modelName: 'MiniMax', variant: grandchild ? 'deep' : 'default' } },
         },
         entries: [
           ...entryList.filter((entry) => entry.entryId !== 'entry-sibling'),
@@ -906,7 +906,7 @@ for (const [layout, width] of [['split-3', 1440], ['grid-4', 360], ['grid-4', 32
     await page.keyboard.press('Enter')
     const header = page.locator('.chat-workspace-header')
     await expect(header.getByText('main', { exact: true })).toHaveCount(0)
-    await expect(header.locator('.workspace-view-identity')).toHaveText('researcher · minimax/MiniMax (deep)')
+    await expect(header.locator('.workspace-view-identity')).toHaveText('researcher · MiniMax (deep)')
     await expect(source.locator('.chat-pane-layer:not([hidden]) .thread-composer')).toHaveCount(0)
     const childLog = source.locator('.chat-pane-layer:not([hidden])').getByRole('log')
     await expect(childLog).toContainText('Scroll marker 23')
@@ -927,7 +927,7 @@ for (const [layout, width] of [['split-3', 1440], ['grid-4', 360], ['grid-4', 32
     recorded.completeGrandchild()
     await expect(childLog).toContainText('Background completion persisted')
     await expect.poll(() => recorded.treeReads).toBeGreaterThan(treeReads)
-    await expect(header.locator('.workspace-view-identity')).toHaveText('researcher · minimax/MiniMax (deep)')
+    await expect(header.locator('.workspace-view-identity')).toHaveText('researcher · MiniMax (deep)')
     await expect(source.locator('.chat-pane-layer:not([hidden]) .thread-composer')).toHaveCount(0)
     await expect(page.locator('.agent-pane-thread-heading:visible')).toHaveCount(0)
     await expect(header.getByRole('button', { name: '关闭 Debug', exact: true })).toHaveCount(0)
@@ -939,7 +939,7 @@ for (const [layout, width] of [['split-3', 1440], ['grid-4', 360], ['grid-4', 32
     await expect.poll(() => childLog.evaluate((element) => element.scrollTop)).toBe(childScroll)
     await header.getByRole('button', { name: '回到父 agent' }).click()
     await expect(header).toContainText('direct parent')
-    await expect(header.locator('.workspace-view-identity')).toHaveText('worker · minimax/MiniMax (default)')
+    await expect(header.locator('.workspace-view-identity')).toHaveText('worker · MiniMax (default)')
     await header.getByRole('button', { name: '回到父 agent' }).click()
     await expect(sourceEditor).toBeVisible()
     await expect(sourceEditor).toContainText('root source draft')
@@ -966,7 +966,7 @@ test('busy thread settings selection submits a standalone SET batch and shows th
   const modelControl = page.getByRole('button', { name: 'Model 与 Variant' }).first()
   await expect(modelControl).toBeVisible()
   await modelControl.click()
-  await page.getByRole('option', { name: 'minimax/Echo' }).click()
+  await page.getByRole('option', { name: 'Echo' }).click()
 
   await expect.poll(() => recorded.commandBatches.length).toBe(1)
   const batch = recorded.commandBatches[0] as {

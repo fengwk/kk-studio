@@ -10,6 +10,7 @@ import type {
   AgentProviderCreateDTO,
   AgentProviderDTO,
   AgentProviderUpdateDTO,
+  ModelCatalogPageDTO,
   SkillPackageCheckDTO,
   SkillPackageCreateDTO,
   SkillPackageDTO,
@@ -46,26 +47,34 @@ export function createAgentService(client: HttpClient = apiClient) {
       client.post('/models', data),
 
     updateModel: (
-      providerName: string,
       modelName: string,
       data: AgentModelUpdateDTO,
     ): Promise<AgentModelDTO> =>
-      client.put(
-        `/models/${encodeURIComponent(providerName)}/${encodePathTail(modelName)}`,
-        data,
-      ),
+      client.put(`/models/${encodePathTail(modelName)}`, data),
 
     deleteModel: (
-      providerName: string,
       modelName: string,
       expectedVersion: string,
     ): Promise<void> =>
-      client.delete(
-        `/models/${encodeURIComponent(providerName)}/${encodePathTail(modelName)}`,
-        {
-          params: { expectedVersion },
+      client.delete(`/models/${encodePathTail(modelName)}`, {
+        params: { expectedVersion },
+      }),
+
+    listModelDefaults: (
+      query = '',
+      cursor?: string | null,
+      pageSize = 20,
+    ): Promise<ModelCatalogPageDTO> =>
+      client.get('/model-defaults', {
+        params: {
+          ...(query.trim() ? { query: query.trim() } : {}),
+          ...(cursor ? { cursor } : {}),
+          pageSize,
         },
-      ),
+      }),
+
+    refreshModelDefaults: (): Promise<ModelCatalogPageDTO> =>
+      client.post('/model-defaults/refresh', {}),
 
     listAgents: (pageNumber = 1, pageSize = 50): Promise<PageResult<AgentDefinitionDTO>> =>
       client.get('/agents', { params: { pageNumber, pageSize } }),

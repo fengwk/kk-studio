@@ -65,6 +65,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -594,11 +595,10 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
 
     seedCommand(fixture.store, childId, new UserMessageCommandPayload(userMessage("initial")));
 
-    ModelUsage usage = new ModelUsage(10L, 20L, 0L, 0L, 0L, 0L, 30L);
+    ModelUsage usage = new ModelUsage(10L, 20L, 0L, 0L, Map.of(), 0L, 30L);
     ModelCost cost =
         new ModelCost(
             "USD",
-            BigDecimal.ZERO,
             BigDecimal.ZERO,
             BigDecimal.ZERO,
             BigDecimal.ZERO,

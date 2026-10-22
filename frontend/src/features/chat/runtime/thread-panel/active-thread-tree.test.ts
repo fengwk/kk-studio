@@ -16,7 +16,7 @@ function node(
     parentThreadId,
     name: threadId,
     agentName: 'assistant',
-    model: { providerName: 'p', modelName: 'm', variant: 'default' },
+    model: { modelName: 'm', variant: 'default' },
     status: 'IDLE',
     processing: false,
     turnCount: 1,

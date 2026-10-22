@@ -34,7 +34,7 @@ interface PreviewRequest {
     commands: Array<{
       type: string
       contents?: Array<{ type: string; text?: string }>
-      model?: { providerName: string; modelName: string; variant: string }
+      model?: { modelName: string; variant?: string | null }
     }>
   }
 }
@@ -43,7 +43,7 @@ interface PreviewRequest {
 interface DebugRequest {
   kind: 'debug'
   body: {
-    model: { providerName: string; modelName: string; variant: string }
+    model: { modelName: string; variant?: string | null }
     environmentName: string | null
   }
 }
@@ -69,7 +69,7 @@ function threadSnapshot(cursor: Cursor, entries: unknown[] = []) {
         executionControl: 'RUNNABLE',
         branchSettings: {
           agentName: 'assistant',
-          model: { providerName: 'minimax', modelName: 'minimax-m2.7', variant: 'default' },
+          model: { modelName: 'minimax-m2.7', variant: 'default' },
           environmentName: 'dev-node',
           goal: null,
         },
@@ -93,7 +93,7 @@ function modelRequestDebug(draft?: DebugRequest['body']) {
     data: {
       kind: 'NEXT_REQUEST_PREVIEW',
       generatedAt: '2026-10-02T00:00:00.000Z',
-      model: draft?.model ?? { providerName: 'minimax', modelName: 'minimax-m2.7', variant: 'default' },
+      model: draft?.model ?? { modelName: 'minimax-m2.7', variant: 'default' },
       environmentName: draft ? draft.environmentName : 'dev-node',
       systemInstruction:
         'You are a precise coding assistant. Keep instructions deterministic and inspect before editing.',
@@ -263,7 +263,7 @@ async function installPreviewApiMock(
       if (path === '/api/agents') {
         const results = options.agentSelection ? ['coder', 'broken-agent'].map((name) => ({
           name,
-          model: name === 'coder' ? 'anthropic/Claude' : 'missing/model',
+          model: name === 'coder' ? 'Claude' : 'missing-model',
           variant: 'fast',
           config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
           version: '1',
@@ -276,6 +276,7 @@ async function installPreviewApiMock(
       if (path === '/api/models') {
         const results = options.agentSelection ? [{
           providerName: 'anthropic',
+          kind: 'MODEL',
           name: 'Claude',
           config: {
             limit: { context: 200000, output: 4096 },
@@ -461,7 +462,7 @@ test.describe('Debug Inspect Actions Real React Browser Regression', () => {
     await expect.poll(() => recorded.filter((request) => request.kind === 'debug').length).toBeGreaterThan(0)
     const debugRequest = recorded.find((request): request is DebugRequest => request.kind === 'debug')
     expect(debugRequest?.body).toEqual({
-      model: { providerName: 'anthropic', modelName: 'Claude', variant: 'fast' },
+      model: { modelName: 'Claude', variant: 'fast' },
       environmentName: 'dev-node',
     })
     // 选择 Agent / 进入 Debug 都不提交命令批次。

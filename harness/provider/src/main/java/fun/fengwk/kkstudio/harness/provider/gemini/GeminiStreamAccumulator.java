@@ -29,6 +29,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
@@ -156,9 +157,15 @@ final class GeminiStreamAccumulator {
   private void updateUsage(JsonNode usageNode) {
     long promptTokens = optionalTokenCount(usageNode, "promptTokenCount");
     long output = optionalTokenCount(usageNode, "candidatesTokenCount");
-    long providerTotal = optionalTokenCount(usageNode, "totalTokenCount");
+    Long providerTotal =
+        usageNode.has("totalTokenCount") && !usageNode.get("totalTokenCount").isNull()
+            ? optionalTokenCount(usageNode, "totalTokenCount")
+            : null;
     long cached = optionalTokenCount(usageNode, "cachedContentTokenCount");
-    long reasoning = optionalTokenCount(usageNode, "thoughtsTokenCount");
+    Long reasoning =
+        usageNode.has("thoughtsTokenCount") && !usageNode.get("thoughtsTokenCount").isNull()
+            ? optionalTokenCount(usageNode, "thoughtsTokenCount")
+            : null;
     long ordinaryInput = promptTokens >= cached ? promptTokens - cached : 0L;
     String tier = null;
     if (usageNode.has("serviceTier")) {
@@ -170,8 +177,10 @@ final class GeminiStreamAccumulator {
       tier = value.stringValue();
     }
 
+    // Gemini candidatesTokenCount 不含 thoughts；内部输出总量包含 reasoning，避免重复计费。
+    long outputTotal = Math.addExact(output, reasoning == null ? 0L : reasoning);
     this.latestUsage =
-        new ModelUsage(ordinaryInput, output, cached, 0L, 0L, reasoning, providerTotal);
+        new ModelUsage(ordinaryInput, outputTotal, cached, 0L, Map.of(), reasoning, providerTotal);
 
     this.serviceTier = tier;
     this.rawUsageJson = usageNode.toString();
@@ -520,7 +529,9 @@ final class GeminiStreamAccumulator {
     }
 
     ModelUsage usage =
-        this.latestUsage != null ? this.latestUsage : new ModelUsage(0L, 0L, 0L, 0L, 0L, 0L, 0L);
+        this.latestUsage != null
+            ? this.latestUsage
+            : new ModelUsage(0L, 0L, 0L, 0L, Map.of(), null, null);
 
     ProviderResponse response =
         new ProviderResponse(

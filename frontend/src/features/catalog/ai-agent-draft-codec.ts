@@ -1,6 +1,5 @@
 import type { AgentDefinitionEditablePropertiesDTO } from '@/shared/api/contracts/ai-catalog'
 import type { AgentDraft } from '@/features/catalog/ai-console-types'
-import { modelRef } from '@/features/catalog/AgentModelView'
 import { trimToNull } from '@/features/catalog/ai-resource-draft-primitives'
 import { translate } from '@/shared/i18n'
 import type {
@@ -88,7 +87,7 @@ export function emptyAgentDraft(model?: AgentModelDTO): AgentDraft {
     name: '',
     description: '',
     systemPrompt: '',
-    model: model ? modelRef(model) : '',
+    model: model?.name ?? '',
     // 空值 = 不覆盖；runtime 使用 model.defaultVariant。
     variant: '',
     inheritParentEnvironment: true,

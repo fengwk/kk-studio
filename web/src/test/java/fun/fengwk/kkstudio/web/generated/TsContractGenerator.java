@@ -21,6 +21,9 @@ import tools.jackson.databind.introspect.BeanPropertyDefinition;
 import tools.jackson.databind.introspect.ClassIntrospector;
 import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelRatePatchDTOSerializer;
+import fun.fengwk.kkstudio.share.ai.catalog.DecimalStringSerializer;
+
 import java.lang.annotation.Annotation;
 import java.lang.reflect.AnnotatedType;
 import java.lang.reflect.Field;
@@ -60,7 +63,8 @@ import java.util.regex.Pattern;
  * </ul>
  *
  * <p>任何会改变写出形态的定制（类级或属性级序列化器、格式化、unwrapped、any getter、契约包外的对象类型）都固定失败，绝不回退成 {@code
- * any}。定制反序列化器只允许收紧输入，必须接受属性声明的形态。
+ * any}。例外只有两张显式白名单：只写出 JSON 字符串的属性级序列化器（属性或元素投影为 {@code string}），以及只省略未声明字段的类级序列化器（全部属性投影为可选）。
+ * 定制反序列化器只允许收紧输入，必须接受属性声明的形态。
  */
 final class TsContractGenerator {
 
@@ -110,6 +114,13 @@ final class TsContractGenerator {
 
   private static final List<String> JSON_FORMAT_MEMBERS =
       List.of("shape", "pattern", "locale", "timezone", "lenient", "with", "without");
+
+  /** 只写出 JSON 字符串的属性级序列化器：价格 decimal 写作普通十进制字符串。 */
+  private static final Set<Class<?>> STRING_SERIALIZERS = Set.of(DecimalStringSerializer.class);
+
+  /** 写出属性与类型不变、只省略未声明字段的类级序列化器：任何属性都可能缺省。 */
+  private static final Set<Class<?>> PRESENCE_SERIALIZERS =
+      Set.of(AgentModelRatePatchDTOSerializer.class);
 
   private static final String HEADER =
       """
@@ -406,6 +417,9 @@ final class TsContractGenerator {
     Direction primaryView = direction == Direction.REQUEST ? Direction.REQUEST : Direction.RESPONSE;
     BeanDescription bean = introspect(type, primaryView);
     requireSupportedShape(type, bean);
+    JsonSerialize classSerializer = bean.getClassInfo().getAnnotation(JsonSerialize.class);
+    boolean presenceSerialized =
+        classSerializer != null && PRESENCE_SERIALIZERS.contains(classSerializer.using());
     Set<String> visible = new LinkedHashSet<>();
     List<TsProperty> properties = new ArrayList<>();
     for (BeanPropertyDefinition property : bean.findProperties()) {
@@ -420,10 +434,17 @@ final class TsContractGenerator {
       JavaType javaType = declaredType(property);
       boolean nullable = !javaType.isPrimitive() && isNullable(property);
       boolean optional =
-          nullable
-              && (direction == Direction.REQUEST
-                  || inclusion(bean, property) != JsonInclude.Include.ALWAYS);
-      properties.add(new TsProperty(name, tsType(javaType, direction), optional, nullable));
+          presenceSerialized
+              || nullable
+                  && (direction == Direction.REQUEST
+                      || inclusion(bean, property) != JsonInclude.Include.ALWAYS);
+      String stringType = stringSerializedType(property, javaType);
+      properties.add(
+          new TsProperty(
+              name,
+              stringType != null ? stringType : tsType(javaType, direction),
+              optional,
+              nullable));
     }
     if (direction == Direction.BOTH) {
       Set<String> reverse = new LinkedHashSet<>();
@@ -476,7 +497,9 @@ final class TsContractGenerator {
   private void requireSupportedShape(Class<?> type, BeanDescription bean) {
     AnnotatedClass classInfo = bean.getClassInfo();
     JsonSerialize classSerializer = classInfo.getAnnotation(JsonSerialize.class);
-    if (classSerializer != null && !isDefaultAnnotation(classSerializer, JSON_SERIALIZE_MEMBERS)) {
+    if (classSerializer != null
+        && !isDefaultAnnotation(classSerializer, JSON_SERIALIZE_MEMBERS)
+        && !isAllowlisted(classSerializer, PRESENCE_SERIALIZERS)) {
       throw new IllegalStateException(javaName(type) + " declares a class-level @JsonSerialize");
     }
     JsonFormat classFormat = classInfo.getAnnotation(JsonFormat.class);
@@ -494,7 +517,9 @@ final class TsContractGenerator {
   private void requireSupportedProperty(Class<?> type, BeanPropertyDefinition property) {
     for (AnnotatedMember member : members(property)) {
       JsonSerialize serializer = member.getAnnotation(JsonSerialize.class);
-      if (serializer != null && !isDefaultAnnotation(serializer, JSON_SERIALIZE_MEMBERS)) {
+      if (serializer != null
+          && !isDefaultAnnotation(serializer, JSON_SERIALIZE_MEMBERS)
+          && !isAllowlisted(serializer, STRING_SERIALIZERS)) {
         throw new IllegalStateException(
             javaName(type) + "." + property.getName() + " declares a custom @JsonSerialize");
       }
@@ -508,6 +533,45 @@ final class TsContractGenerator {
             javaName(type) + "." + property.getName() + " declares @JsonUnwrapped");
       }
     }
+  }
+
+  /** 白名单序列化器只能经 {@code using}/{@code contentUsing} 声明，其余成员保持默认。 */
+  private static boolean isAllowlisted(JsonSerialize serializer, Set<Class<?>> allowlist) {
+    List<String> customized = new ArrayList<>(2);
+    if (allowlist.contains(serializer.using())) {
+      customized.add("using");
+    }
+    if (allowlist.contains(serializer.contentUsing())) {
+      customized.add("contentUsing");
+    }
+    List<String> rest = new ArrayList<>(JSON_SERIALIZE_MEMBERS);
+    rest.removeAll(customized);
+    return !customized.isEmpty() && isDefaultAnnotation(serializer, rest);
+  }
+
+  /** 白名单字符串序列化器改写后的 TS 类型：标量为 {@code string}，集合与 Map 改写元素；未声明时为 null。 */
+  private static @Nullable String stringSerializedType(
+      BeanPropertyDefinition property, JavaType type) {
+    for (AnnotatedMember member : members(property)) {
+      JsonSerialize serializer = member.getAnnotation(JsonSerialize.class);
+      if (serializer == null) {
+        continue;
+      }
+      if (STRING_SERIALIZERS.contains(serializer.using())) {
+        return "string";
+      }
+      if (STRING_SERIALIZERS.contains(serializer.contentUsing())) {
+        if (type.isMapLikeType() && type.getKeyType().getRawClass() == String.class) {
+          return "Record<string, string>";
+        }
+        if (type.isArrayType() || type.isCollectionLikeType()) {
+          return "string[]";
+        }
+        throw new IllegalStateException(
+            property.getName() + " declares contentUsing on a non-container type: " + type);
+      }
+    }
+    return null;
   }
 
   private static boolean isDefaultAnnotation(Annotation annotation, List<String> members) {

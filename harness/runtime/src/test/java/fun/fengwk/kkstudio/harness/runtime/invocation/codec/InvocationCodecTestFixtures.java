@@ -23,7 +23,6 @@ import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec;
 
-import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -132,18 +131,6 @@ final class InvocationCodecTestFixtures {
   }
 
   private static ModelPricing pricing() {
-    return new ModelPricing(
-        "USD",
-        "standard",
-        "standard",
-        BigDecimal.ONE,
-        "1",
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        List.of());
+    return ModelPricing.ZERO;
   }
 }

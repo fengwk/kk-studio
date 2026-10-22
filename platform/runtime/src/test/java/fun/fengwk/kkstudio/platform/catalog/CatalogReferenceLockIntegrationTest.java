@@ -32,6 +32,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderDTO;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerCreateDTO;
@@ -560,6 +561,7 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
     provider.setProviderType("openai");
     AgentProviderDTO createdProvider = providerService.createProvider(provider);
     AgentModelCreateDTO model = new AgentModelCreateDTO();
+    model.setKind(AgentModelKind.MODEL);
     model.setProviderName(createdProvider.getName());
     model.setName("model-" + suffix);
     executable(model);
@@ -629,11 +631,11 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
     }
 
     private String ref() {
-      return provider.getName() + "/" + model.getName();
+      return model.getName();
     }
 
     private void delete() {
-      modelService.deleteModel(provider.getName(), model.getName(), model.getVersion());
+      modelService.deleteModel(model.getName(), model.getVersion());
       providerService.deleteProvider(provider.getName(), provider.getVersion());
     }
   }

@@ -4,8 +4,7 @@ export {
 } from '@/features/catalog/ai-resource-draft-codecs'
 export {
   formatModelLabel,
-  formatModelRef,
-  modelRef,
+  isGroupModel,
   toAgentModelViews,
   type AgentModelView,
 } from '@/features/catalog/AgentModelView'

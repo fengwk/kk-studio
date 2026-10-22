@@ -191,7 +191,7 @@ test('test intent: the NEW_SESSION batch carries no workspace field and the owne
     // environmentName 是 nullable 快照字段，null 表示未选择 Environment。
     rootSettings: {
       agentName: 'default-assistant',
-      model: { providerName: 'stub', modelName: 'acceptance-stub', variant: 'default' },
+      model: { modelName: 'acceptance-stub', variant: 'default' },
       environmentName: null,
     },
     yoloEnabled: false,

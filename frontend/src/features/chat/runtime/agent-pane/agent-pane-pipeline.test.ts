@@ -25,7 +25,7 @@ import type { HarnessThreadDTO } from '@/shared/api/generated/contracts'
 
 const baseDraft: BranchDraft = {
   agentName: 'assistant',
-  model: { providerName: 'provider', modelName: 'model', variant: 'default' },
+  model: { modelName: 'model', variant: 'default' },
   environmentName: null,
   yoloEnabled: false,
 }
@@ -45,7 +45,7 @@ const thread: HarnessThreadDTO = {
   executionControl: 'RUNNABLE',
   branchSettings: {
     agentName: 'assistant',
-    model: { providerName: 'provider', modelName: 'model', variant: 'default' },
+    model: { modelName: 'model', variant: 'default' },
     environmentName: null,
     goal: null,
   },

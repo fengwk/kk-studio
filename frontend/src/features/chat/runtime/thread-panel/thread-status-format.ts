@@ -136,7 +136,7 @@ export function formatUsageDetails(usage: TurnUsage, t: TranslateFn): string {
     }),
     t('ai.runtime.status.usageCostDetail', {
       cost: cost ?? noData,
-      cache: cacheHitRate != null ? `${cacheHitRate}%` : noData,
+      cache: cacheHitRate != null ? `${cacheHitRate.toFixed(2)}%` : noData,
       speed: speed != null ? `${speed} tok/s` : noData,
     }),
   ].join('\n')

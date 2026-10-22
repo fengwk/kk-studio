@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.json.StrictJson;
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelAttemptFailure;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.StreamCheckpoint;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInputReceipt;
@@ -108,18 +109,21 @@ class InvocationValueJsonTest {
   }
 
   @Test
-  void attemptFailuresKeepMillisecondInstantsAndRetryableErrors() {
+  void attemptFailuresKeepMillisecondInstantsAndRejectDedicatedTerminalErrors() {
     ModelAttemptFailure failure =
         new ModelAttemptFailure(
             1,
             7,
             "partial",
             "thinking",
+            ModelSelection.model("model", "v1"),
+            null,
             new ModelInvocationError(ProviderErrorKind.TRANSIENT, "provider unavailable"),
             Instant.parse("2026-01-01T00:00:00.123Z"),
             Instant.parse("2026-01-01T00:00:02.123Z"));
     String json =
         "[{\"attempt\":1,\"sequence\":7,\"text\":\"partial\",\"thinking\":\"thinking\","
+            + "\"model\":{\"modelName\":\"model\",\"variant\":\"v1\"},\"requestedAt\":null,"
             + "\"error\":{\"kind\":\"TRANSIENT\",\"message\":\"provider unavailable\","
             + "\"httpStatus\":null},"
             + "\"failedAt\":\"2026-01-01T00:00:00.123Z\","
@@ -130,7 +134,8 @@ class InvocationValueJsonTest {
         List.of(failure), JSON.readList(json, ModelAttemptFailure.class, "modelAttemptFailures"));
     for (String invalid :
         new String[] {
-          json.replace("\"TRANSIENT\"", "\"AUTHENTICATION\""),
+          json.replace("\"TRANSIENT\"", "\"OVERFLOW\""),
+          json.replace("\"TRANSIENT\"", "\"CANCELLED\""),
           json.replace("2026-01-01T00:00:02.123Z", "2025-12-31T23:59:59.123Z"),
           json.replace("2026-01-01T00:00:00.123Z", "2026-01-01T00:00:00.123456Z")
         }) {

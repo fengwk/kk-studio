@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelService;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelDefaultVariantResolver;
+import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelGroupConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderConfigurationCodec;
@@ -55,8 +56,10 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelAbilitiesDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelInputModality;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelLimitDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelRateSetDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelVariantDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
@@ -83,6 +86,8 @@ final class ConfigSyncFixtures {
       new AgentDefinitionConfigCodec(MAPPER);
   static final AgentModelRuntimeConfigParser MODEL_CONFIG_PARSER =
       new AgentModelRuntimeConfigParser(MAPPER);
+  static final AgentModelGroupConfigCodec GROUP_CONFIG_CODEC =
+      new AgentModelGroupConfigCodec(MAPPER);
   static final AgentProviderConfigurationCodec PROVIDER_CONFIG_CODEC =
       new AgentProviderConfigurationCodec(MAPPER);
   private static final AgentEditableSupport EDITABLE_SUPPORT = new AgentEditableSupport(MAPPER);
@@ -101,7 +106,8 @@ final class ConfigSyncFixtures {
           mock(AgentModelRepository.class),
           mock(AgentProviderRepository.class),
           EDITABLE_SUPPORT,
-          MODEL_CONFIG_PARSER);
+          MODEL_CONFIG_PARSER,
+          GROUP_CONFIG_CODEC);
 
   /** 真实 {@code AgentDefinitionService.validateImport}：纯静态校验，仓储与引用解析以 mock 占位。 */
   static final AgentDefinitionService AGENT_SERVICE =
@@ -148,17 +154,16 @@ final class ConfigSyncFixtures {
     abilities.setReasoning(false);
     abilities.setInputModalities(List.of(AgentModelInputModality.TEXT));
     AgentModelPricingDTO pricing = new AgentModelPricingDTO();
-    pricing.setCurrency("USD");
-    pricing.setPricingTier("t");
-    pricing.setServiceTier("s");
-    pricing.setServiceTierMultiplier(BigDecimal.ONE);
-    pricing.setVersion("v");
-    pricing.setInputPerMillionTokens(BigDecimal.ZERO);
-    pricing.setOutputPerMillionTokens(BigDecimal.ZERO);
-    pricing.setCacheReadPerMillionTokens(BigDecimal.ZERO);
-    pricing.setCacheWritePerMillionTokens(BigDecimal.ZERO);
-    pricing.setCacheWriteLongPerMillionTokens(BigDecimal.ZERO);
-    pricing.setReasoningPerMillionTokens(BigDecimal.ZERO);
+    AgentModelRateSetDTO base = new AgentModelRateSetDTO();
+    base.setInput(BigDecimal.ZERO);
+    base.setOutput(BigDecimal.ZERO);
+    base.setCacheRead(BigDecimal.ZERO);
+    base.setCacheWrite(BigDecimal.ZERO);
+    base.setCacheWriteByTtl(Map.of());
+    base.setReasoning(null);
+    pricing.setBase(base);
+    pricing.setOverrides(List.of());
+    pricing.setMultipliers(List.of());
     AgentModelVariantDTO variant = new AgentModelVariantDTO();
     variant.setId("default");
     AgentModelConfigDTO config = new AgentModelConfigDTO();
@@ -216,23 +221,20 @@ final class ConfigSyncFixtures {
   }
 
   static AgentModel model(String providerName, String name, AgentModelConfigDTO config) {
-    AgentModel model =
-        AgentModel.builder()
-            .providerName(providerName)
-            .name(name)
-            .modelId("gpt-4")
-            .configJson(MODEL_CONFIG_PARSER.encode(config))
-            .version(0L)
-            .build();
-    return model;
+    return AgentModel.builder()
+        .kind(AgentModelKind.MODEL)
+        .providerName(providerName)
+        .name(name)
+        .modelId("gpt-4")
+        .configJson(MODEL_CONFIG_PARSER.encode(config))
+        .version(0L)
+        .build();
   }
 
-  static AgentDefinition agent(
-      String name, String providerName, String modelName, AgentDefinitionConfigDTO config) {
+  static AgentDefinition agent(String name, String modelName, AgentDefinitionConfigDTO config) {
     AgentDefinition agent =
         AgentDefinition.builder()
             .name(name)
-            .modelProviderName(providerName)
             .modelName(modelName)
             .configJson(AGENT_CONFIG_CODEC.encode(config))
             .version(0L)
@@ -465,7 +467,7 @@ final class ConfigSyncFixtures {
     }
   }
 
-  /** 通用「Provider p + Model p/m」文档基座；具体测试再追加 mcpServers/agents 等段落。 */
+  /** 通用「Provider p + Model m」文档基座；具体测试再追加 mcpServers/agents 等段落。 */
   static String providerAndModelYaml() {
     return "providers:\n  - name: p\n    providerType: openai\n" + resourceYaml("model-entry.yaml");
   }

@@ -5,15 +5,11 @@ import org.springframework.stereotype.Component;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 
 import java.util.Objects;
 
-/**
- * 解析 Agent 或 Thread 的生效 model variant。
- *
- * <p>空 override 表示“使用 model 配置的 {@code defaultVariant}”。配置的默认值与非空 override 都必须指向当前 Model config
- * 中声明的某个 Variant。
- */
+/** 解析 Agent 或 Thread 的生效单 Model Variant；模型组没有组级 Variant。 */
 @Component
 public class AgentModelDefaultVariantResolver {
 
@@ -27,40 +23,34 @@ public class AgentModelDefaultVariantResolver {
     this.configParser = Objects.requireNonNull(configParser, "configParser");
   }
 
-  public String resolve(String providerName, String modelName, String overrideVariant) {
-    if (providerName == null || providerName.isBlank()) {
-      throw new IllegalArgumentException("providerName must not be blank");
-    }
+  public String resolve(String modelName, String overrideVariant) {
     if (modelName == null || modelName.isBlank()) {
       throw new IllegalArgumentException("modelName must not be blank");
     }
-    AgentModel model = agentModelRepository.getByProviderNameAndName(providerName, modelName);
+    AgentModel model = agentModelRepository.getByName(modelName);
     if (model == null) {
-      throw new IllegalArgumentException("unknown agent model: " + providerName + "/" + modelName);
+      throw new IllegalArgumentException("unknown agent model: " + modelName);
+    }
+    if (model.kind() != AgentModelKind.MODEL) {
+      throw new IllegalArgumentException("model group has no variant: " + modelName);
     }
     AgentModelConfigDTO config = configParser.decode(model.configJson());
-    return resolveConfiguredVariant(providerName, modelName, overrideVariant, config);
+    return resolveConfiguredVariant(modelName, overrideVariant, config);
   }
 
   /**
    * 纯 variant 解析：空 override 使用 {@code defaultVariant}，非空 override 与 defaultVariant 都必须由 {@code
    * config} 声明。
-   *
-   * <p>这是运行时解析与配置同步预检查共用的唯一规则；调用方负责先取得 {@code config}（DB 或文件中将生效的模型配置）。
-   *
-   * @throws IllegalArgumentException override 指向 config 未声明的 variant
-   * @throws IllegalStateException override 为空且 config 未声明 defaultVariant
    */
   public static String resolveConfiguredVariant(
-      String providerName, String modelName, String overrideVariant, AgentModelConfigDTO config) {
+      String modelName, String overrideVariant, AgentModelConfigDTO config) {
     Objects.requireNonNull(config, "config");
     String variant = trimToNull(overrideVariant);
     if (variant == null) {
       variant = config.getDefaultVariant();
     }
     if (variant == null || variant.isBlank()) {
-      throw new IllegalStateException(
-          "model defaultVariant missing: " + providerName + "/" + modelName);
+      throw new IllegalStateException("model defaultVariant missing: " + modelName);
     }
     String effectiveVariant = variant.trim();
     boolean declared =
@@ -68,12 +58,7 @@ public class AgentModelDefaultVariantResolver {
             .anyMatch(candidate -> effectiveVariant.equals(candidate.getId()));
     if (!declared) {
       throw new IllegalArgumentException(
-          "unknown agent model variant: model="
-              + providerName
-              + "/"
-              + modelName
-              + ", variant="
-              + effectiveVariant);
+          "unknown agent model variant: model=" + modelName + ", variant=" + effectiveVariant);
     }
     return effectiveVariant;
   }

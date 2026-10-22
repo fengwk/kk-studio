@@ -8,6 +8,9 @@ import org.jspecify.annotations.Nullable;
 import tools.jackson.databind.annotation.JsonSerialize;
 import tools.jackson.databind.ser.std.ToStringSerializer;
 
+import fun.fengwk.kkstudio.share.ai.catalog.DecimalStringSerializer;
+
+import java.math.BigDecimal;
 import java.net.URI;
 import java.time.Instant;
 import java.util.List;
@@ -60,6 +63,12 @@ public final class FixtureDTO {
 
     record Square(int side) implements Shape {}
   }
+
+  /** 白名单字符串序列化器：价格 decimal 写作十进制字符串，属性与 Map 元素都改写为 string。 */
+  public record Priced(
+      @JsonSerialize(using = DecimalStringSerializer.class) BigDecimal price,
+      @JsonSerialize(contentUsing = DecimalStringSerializer.class) Map<String, BigDecimal> tiers,
+      BigDecimal plain) {}
 
   /** 定制序列化改变了 wire 形态。 */
   public record Custom(@JsonSerialize(using = ToStringSerializer.class) Integer value) {}

@@ -12,7 +12,7 @@ setLocale('zh-CN')
 const node = (threadId: string, parentThreadId: string | null, agentName: string, processing = false, outcome: string | null = null): ActiveThreadTreeNode => ({
   threadId, parentThreadId, agentName, name: 'main', processing, outcome,
   updateTime: 1774958400, status: processing ? 'MODEL_RUNNING' : 'IDLE',
-  model: { providerName: 'provider', modelName: 'Known-model', variant: 'default' },
+  model: { modelName: 'Known-model', variant: 'default' },
   turnCount: 7, toolCallCount: 12,
 })
 export function Harness() {

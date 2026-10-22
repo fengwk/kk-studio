@@ -22,22 +22,22 @@ insert into agent_provider (
 );
 
 insert into agent_model (
-    provider_name, name, model_id, description, config,
+    name, kind, provider_name, model_id, description, config,
     created_at, updated_at, version
 ) values (
-    'stub', 'acceptance-stub', 'acceptance-stub',
+    'acceptance-stub', 'MODEL', 'stub', 'acceptance-stub',
     'Local deterministic model for development and acceptance tests.',
-    '{"limit":{"context":32768,"output":4096},"abilities":{"tools":true,"reasoning":false,"inputModalities":["TEXT"]},"defaultVariant":"default","variants":[{"id":"default"}],"pricing":{"currency":"USD","pricingTier":"acceptance","serviceTier":"default","serviceTierMultiplier":1,"version":"acceptance-v1","inputPerMillionTokens":0,"outputPerMillionTokens":0,"cacheReadPerMillionTokens":0,"cacheWritePerMillionTokens":0,"cacheWriteLongPerMillionTokens":0,"reasoningPerMillionTokens":0}}',
+    '{"limit":{"context":32768,"output":4096},"abilities":{"tools":true,"reasoning":false,"inputModalities":["TEXT"]},"pricing":{"base":{"input":"0","output":"0","cacheRead":"0","cacheWrite":"0","cacheWriteByTtl":{},"reasoning":"0"},"overrides":[],"multipliers":[]},"defaultVariant":"default","variants":[{"id":"default"}]}',
     current_timestamp, current_timestamp, 0
 );
 
 insert into agent_definition (
-    name, description, system_prompt, model_provider_name, model_name, variant, config,
+    name, description, system_prompt, model_name, variant, config,
     created_at, updated_at, version
 ) values (
     'default-assistant', 'Acceptance stub agent for local studio pages.',
     'You are the local acceptance stub assistant for kk-studio.',
-    'stub', 'acceptance-stub', 'default',
+    'acceptance-stub', 'default',
     '{"tools":[],"skills":[],"subagents":[],"inheritParentEnvironment":true}',
     current_timestamp, current_timestamp, 0
 );

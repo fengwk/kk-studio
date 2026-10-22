@@ -174,7 +174,7 @@ class SessionDeletionOrchestratorIntegrationTest extends WebPostgresTestSupport 
 
   private static BranchSettings settings() {
     return new BranchSettings(
-        "default-assistant", new ModelSelection("stub", "acceptance-stub", "default"), null);
+        "default-assistant", new ModelSelection("acceptance-stub", "default"), null);
   }
 
   private UUID createChat(String title) {

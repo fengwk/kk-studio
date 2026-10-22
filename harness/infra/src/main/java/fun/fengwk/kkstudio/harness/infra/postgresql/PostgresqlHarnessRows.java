@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolApprovalJsonCode
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolBindingJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolEffectBatchJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelAttemptFailure;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelGroupProgress;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.StreamCheckpoint;
@@ -287,7 +288,11 @@ final class PostgresqlHarnessRows {
               instant(resultSet, "created_at"),
               instant(resultSet, "updated_at"),
               decodeNullable(
-                  resultSet.getString("provider_replay_state"), PROVIDER_REPLAY_STATES::decode));
+                  resultSet.getString("provider_replay_state"), PROVIDER_REPLAY_STATES::decode),
+              decodeNullable(
+                  resultSet.getString("group_execution"),
+                  json -> JSON.read(json, ModelGroupProgress.class, "groupExecution")),
+              nullableInstant(resultSet, "requested_at"));
 
   static final RowMapper<ToolInvocation> TOOL_INVOCATION =
       (resultSet, rowNumber) ->

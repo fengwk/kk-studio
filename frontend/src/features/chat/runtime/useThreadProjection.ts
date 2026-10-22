@@ -108,11 +108,7 @@ function resolveRuntimeLabels(
   models: AgentModelView[],
 ) {
   const settings = thread?.branchSettings
-  const model = models.find(
-    (item) =>
-      item.providerName === settings?.model.providerName
-      && item.name === settings?.model.modelName,
-  )
+  const model = models.find((item) => item.name === settings?.model.modelName)
   const contextWindow = extractContextWindow(model)
   const environmentName = settings?.environmentName ?? null
   return {

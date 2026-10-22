@@ -101,7 +101,7 @@ export function projectActiveThreadTree(nodes: readonly ActiveThreadTreeNode[]):
 function signature(node: ActiveThreadTreeNode): string {
   return JSON.stringify([
     node.threadId, node.parentThreadId, node.updateTime, node.name, node.agentName,
-    node.model.providerName, node.model.modelName, node.model.variant,
+    node.model.modelName, node.model.variant,
     node.status, node.processing, node.turnCount, node.toolCallCount, node.outcome,
   ])
 }

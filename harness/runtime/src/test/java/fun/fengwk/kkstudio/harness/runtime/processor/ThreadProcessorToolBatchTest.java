@@ -42,6 +42,7 @@ import fun.fengwk.kkstudio.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.common.result.BinaryResultContent;
 import fun.fengwk.kkstudio.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
@@ -255,13 +256,15 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
             tx -> {
               var thread = tx.lockThread(turn.threadId()).orElseThrow();
               UUID id = tx.nextId();
+              ModelSelection selection =
+                  ModelSelection.model(requestSpec.model().modelName(), requestSpec.variant().id());
               tx.insertEntry(
                   new Entry(
                       id,
                       turn.sessionId(),
                       turn.userEntryId(),
                       new HistoryPayloadMapper()
-                          .assistantPayload(response, requestSpec.toolBindings()),
+                          .assistantPayload(response, requestSpec.toolBindings(), selection, NOW),
                       NOW,
                       replayState));
               tx.updateThread(thread.advanceHead(id, NOW));
