@@ -12,10 +12,8 @@ import java.util.List;
  * <pre>
  * limit:        { context: positive int, output: positive int &lt;= context }
  * abilities:    { tools: boolean, reasoning: boolean, inputModalities: non-empty list }
- * pricing:      { currency, pricingTier, serviceTier, serviceTierMultiplier, version,
- *                inputPerMillionTokens, outputPerMillionTokens, cacheReadPerMillionTokens,
- *                cacheWritePerMillionTokens, cacheWriteLongPerMillionTokens,
- *                reasoningPerMillionTokens }
+ * pricing:      { base: { input, output, cacheRead, cacheWrite, cacheWriteByTtl, reasoning },
+ *                overrides: [], multipliers: [] }，可缺省并归一为完整零定义
  * defaultVariant: existing variant id
  * variants:     non-empty list with at least {@code id} (optional reasoningEffort)
  * </pre>
@@ -31,7 +29,7 @@ public class AgentModelConfigDTO {
   /** 必填能力声明：tools/reasoning 必填，inputModalities 非空且去重。 */
   private AgentModelAbilitiesDTO abilities;
 
-  /** 必填定价快照，用于每次调用的确定性成本计算。 */
+  /** 定价定义；可缺省，单 Model parser 会归一为完整零定义（reasoning 缺省仍继承 output）。 */
   private AgentModelPricingDTO pricing;
 
   /** 必填默认变体 id：非空白、无环绕空白，且必须匹配 {@code variants[].id}。 */
