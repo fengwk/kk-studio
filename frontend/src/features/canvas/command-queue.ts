@@ -1,12 +1,4 @@
 import { ApiError } from '@/shared/api/client'
-import type {
-  ApplyCanvasCommandsRequestDTO,
-  CanvasCommandDTO,
-  CanvasConflictDTO,
-  CanvasPatchDTO,
-  CanvasSnapshotDTO,
-  UUIDString,
-} from '@/shared/api/contracts/studio'
 import {
   getCanvas,
   postCanvasCommands,
@@ -22,6 +14,13 @@ import {
   type CanvasPendingOperationStore,
 } from '@/features/canvas/canvas-operation-storage'
 import { applyEntityPatch } from '@/features/canvas/entity-patch'
+import type {
+  ApplyCanvasCommandsRequestDTO,
+  CanvasCommandDTO,
+  CanvasConflictDTO,
+  CanvasPatchDTO,
+  CanvasSnapshotDTO,
+} from '@/shared/api/generated/contracts'
 
 export class CanvasCommandConflictError extends Error {
   readonly snapshot: CanvasSnapshotDTO
@@ -57,7 +56,7 @@ export interface CanvasCommandQueueOptions {
   initialSnapshot: CanvasSnapshotDTO
   apply?: typeof postCanvasCommands
   refetch?: typeof getCanvas
-  createCommandId?: () => UUIDString
+  createCommandId?: () => string
   onSnapshot?: (snapshot: CanvasSnapshotDTO) => void
   /** 冻结操作的持久化存储；未提供时按 canvasId + 编辑会话使用 IndexedDB operation store。 */
   operationStore?: CanvasPendingOperationStore
@@ -91,7 +90,7 @@ export interface CanvasCommandRecoveryResult {
  * - 响应 revision 与本地快照存在缺口时，绝不假装增量 patch 完整，必须重取权威快照。
  */
 interface CanvasPendingPayload {
-  idempotencyKey: UUIDString
+  idempotencyKey: string
   commands: CanvasCommandDTO[]
   ack: CanvasDraftAck[]
   createdAt: number
@@ -107,7 +106,7 @@ export class CanvasCommandQueue {
   private blockedError: Error | null = null
   private readonly apply: typeof postCanvasCommands
   private readonly refetch: typeof getCanvas
-  private readonly createCommandId: () => UUIDString
+  private readonly createCommandId: () => string
   private readonly onSnapshot?: (snapshot: CanvasSnapshotDTO) => void
   private readonly store: CanvasPendingOperationStore
   private readonly userId: string
@@ -115,7 +114,7 @@ export class CanvasCommandQueue {
   private readonly onDraftAcks?: (acks: CanvasDraftAck[]) => Promise<void>
 
   constructor(
-    private readonly canvasId: UUIDString,
+    private readonly canvasId: string,
     options: CanvasCommandQueueOptions,
   ) {
     this.snapshot = options.initialSnapshot

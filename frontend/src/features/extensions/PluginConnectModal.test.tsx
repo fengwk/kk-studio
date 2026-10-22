@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PluginConnectModal } from './PluginConnectModal'
 import { pluginsService } from '@/shared/api/plugins-service'
 import { setLocale } from '@/shared/i18n'
-import type { PluginDTO } from '@/shared/api/contracts/ai-plugin'
+import type { PluginDTO } from '@/shared/api/generated/contracts'
 
 vi.mock('@/shared/api/plugins-service', () => ({
   pluginsService: { prepareAuth: vi.fn(), completeAuth: vi.fn() },

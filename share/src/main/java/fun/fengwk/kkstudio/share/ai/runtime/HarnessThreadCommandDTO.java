@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.share.ai.runtime;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
+import org.jspecify.annotations.Nullable;
 
 import java.time.Instant;
 
@@ -33,7 +34,7 @@ public class HarnessThreadCommandDTO {
 
   /** 取消时间（UTC Instant）：仅 CANCELLED 状态非 null（{@code @JsonInclude(ALWAYS)}）。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private Instant cancelledAt;
+  private @Nullable Instant cancelledAt;
 
   /** 命令入队时间（UTC Instant）。 */
   private Instant createTime;

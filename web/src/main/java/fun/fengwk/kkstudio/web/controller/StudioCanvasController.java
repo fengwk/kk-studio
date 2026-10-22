@@ -145,7 +145,8 @@ public class StudioCanvasController {
     errorContext.put("type", "about:blank");
     errorContext.put("title", "Canvas command conflict");
     errorContext.put("detail", "command prerequisites are stale; no write was applied");
-    errorContext.put("conflicts", conflicts);
+    // 数组保留元素的静态类型，判别值 kind 才会随类型信息写出；List 在无类型上下文里会丢失它。
+    errorContext.put("conflicts", conflicts.toArray(CanvasConflictDTO[]::new));
     ImmutableResolvedConventionErrorCode errorCode =
         new ImmutableResolvedConventionErrorCode(
             HttpStatus.CONFLICT.value(),

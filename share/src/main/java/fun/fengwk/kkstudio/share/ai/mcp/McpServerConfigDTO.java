@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.share.ai.mcp;
 
 import lombok.Data;
 import lombok.ToString;
+import org.jspecify.annotations.Nullable;
 
 import java.util.Map;
 
@@ -25,5 +26,5 @@ public class McpServerConfigDTO {
   private String url;
 
   /** 自定义请求 header（保留原始 {@code ${VAR}} 占位符，不回显解析后的凭据）。 */
-  @ToString.Exclude private Map<String, String> headers;
+  @ToString.Exclude private @Nullable Map<String, String> headers;
 }

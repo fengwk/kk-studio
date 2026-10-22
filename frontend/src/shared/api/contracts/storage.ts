@@ -1,25 +1,8 @@
-import type { BackendDateTime } from '@/shared/api/contracts/base'
-
 /**
  * 共享存储上传的媒体类别。媒体类型（mediaType）负责精确分类；mediaKind 是
  * 客户端与存储层之间的粗粒度路由/限制键。
  */
 export type StorageMediaKind = 'image' | 'video' | 'audio' | 'file'
-
-/**
- * 上传预留请求：`POST /api/storage/uploads`。
- *
- * 服务端按 filename/mediaType/sizeBytes/sha256 预留对象并返回 upload 句柄；
- * 响应绝不暴露 bucket/key，客户端也不能提交对象 key。mediaKind 只是客户端的
- * 本地 UI 分类/限制键，不属于 wire 契约。
- */
-export interface StorageUploadReserveRequestDTO {
-  filename: string
-  mediaType: string
-  /** 规范十进制字符串或 JS number；客户端始终使用整数字节数。 */
-  sizeBytes: number
-  sha256: string
-}
 
 /** 直传签名（PENDING 预留携带）：客户端按 method/url/headers PUT 对象字节，随后 complete。 */
 export interface StoragePresignedPutDTO {
@@ -47,29 +30,24 @@ export type StorageUploadDTO =
       state: 'PENDING'
       blobId: string | null
       presignedPut: StoragePresignedPutDTO
-      expiresAt: BackendDateTime
+      expiresAt: number
     }
   | {
       id: string
       state: 'READY'
       blobId: string
       presignedPut: null
-      expiresAt: BackendDateTime
+      expiresAt: number
     }
 
 /**
- * 渲染期 blob URL：`POST /api/storage/blobs/{blobId}/download-url`
- * 与 `POST /api/storage/blobs/{blobId}/preview-url`。只在资源实际渲染
- * （预览/下载）时才调用，避免为未展示的资源提前换取 URL。
+ * 渲染期 blob URL 的解码结果（download-url / preview-url）：只在资源实际预览或下载时换取。
+ * 原件端点给出权威 mediaType 与 sizeBytes（wire 为 Java long 十进制字符串，解码为安全整数）；
+ * preview 端点二者为 null。
  */
-export interface StoragePresignedUrlDTO {
+export interface StorageBlobUrl {
   url: string
-  expiresAt: BackendDateTime
-  /** 原件端点返回的权威 Blob 媒体类型；preview 端点可省略。 */
-  mediaType?: string | null
-  /**
-   * 原件端点返回的权威 Blob 字节数；preview 端点可省略。
-   * wire 是 Java long 的 decimal string|null，由 storage-service adapter 归一化为 number|null。
-   */
-  sizeBytes?: number | null
+  mediaType: string | null
+  sizeBytes: number | null
 }
+

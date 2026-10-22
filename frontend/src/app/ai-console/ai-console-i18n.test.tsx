@@ -11,11 +11,11 @@ import { ResourceEditorModal } from '@/features/catalog/AiConsoleResourceEditorM
 import { emptyAgentDraft } from '@/features/catalog/ai-agent-draft-codec'
 import { emptyModelDraft } from '@/features/catalog/ai-model-draft-codec'
 import { emptyProviderDraft } from '@/features/catalog/ai-provider-draft-codec'
-import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import { environmentService } from '@/shared/api/environment-service'
 import { setLocale, translate } from '@/shared/i18n'
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
+import type { AgentDefinitionDTO } from '@/shared/api/generated/contracts'
 
 vi.mock('@/shared/api/environment-service', () => ({
   environmentService: {
@@ -39,8 +39,8 @@ const agent: AgentDefinitionDTO = {
     subagents: [],
   },
   version: '1',
-  createTime: '2026-09-27T10:00:00Z',
-  updateTime: '2026-09-27T10:00:00Z',
+  createTime: 1790503200,
+  updateTime: 1790503200,
 }
 
 beforeEach(() => {

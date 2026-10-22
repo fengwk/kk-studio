@@ -19,7 +19,7 @@ vi.mock('@/shared/api/system-settings-service', () => ({
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {
     listTools: vi.fn(async () => []),
-    listModels: vi.fn(async () => ({ pageNumber: 1, pageSize: 50, totalCount: 0, results: [] })),
+    listModels: vi.fn(async () => ({ pageNumber: 1, pageSize: 50, totalCount: '0', results: [] })),
   },
 }))
 

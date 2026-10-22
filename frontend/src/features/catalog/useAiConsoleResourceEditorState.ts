@@ -17,10 +17,7 @@ import {
   normalizeModelDraftDefaultVariant,
 } from '@/features/catalog/ai-draft-normalizers'
 import type { AgentModelView } from '@/features/catalog/AgentModelView'
-import type {
-  AgentDefinitionDTO,
-  AgentProviderDTO,
-} from '@/shared/api/contracts/ai-catalog'
+import type { AgentDefinitionDTO, AgentProviderDTO } from '@/shared/api/generated/contracts'
 
 export function useAiConsoleResourceEditorState({
   providers,

@@ -1,19 +1,19 @@
 import { apiClient, type HttpClient } from '@/shared/api/client'
-import type {
-  PluginAuthCompleteRequestDTO,
-  PluginAuthPrepareDTO,
-  PluginAuthPrepareRequestDTO,
-  PluginConfigurationUpdateRequestDTO,
-  PluginConnectionCheckRequestDTO,
-  PluginConnectionCheckResult,
-  PluginDTO,
-} from '@/shared/api/contracts/ai-plugin'
 import {
   decodePluginAuthPrepareDTO,
   decodePluginConnectionCheckDTO,
   decodePluginDTO,
   decodePluginList,
 } from '@/shared/api/ai-plugin-codec'
+import type {
+  PluginAuthCompleteRequestDTO,
+  PluginAuthPrepareDTO,
+  PluginAuthPrepareRequestDTO,
+  PluginConfigurationUpdateRequestDTO,
+  PluginConnectionCheckDTO,
+  PluginConnectionCheckRequestDTO,
+  PluginDTO,
+} from '@/shared/api/generated/contracts'
 
 export function createPluginsService(client: HttpClient = apiClient) {
   return {
@@ -70,7 +70,7 @@ export function createPluginsService(client: HttpClient = apiClient) {
     checkConnection: async (
       pluginId: string,
       data: PluginConnectionCheckRequestDTO,
-    ): Promise<PluginConnectionCheckResult> => {
+    ): Promise<PluginConnectionCheckDTO> => {
       const resp = await client.post<unknown>(
         `/plugins/${encodeURIComponent(pluginId)}/connection-check`,
         data,

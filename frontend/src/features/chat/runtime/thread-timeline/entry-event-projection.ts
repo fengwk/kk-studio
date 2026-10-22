@@ -1,10 +1,10 @@
-import type { HarnessSessionEntryDTO } from '@/shared/api/contracts/ai-runtime'
 import type {
   EntryEventDialogueMessage,
   EntryEventKind,
 } from '@/features/chat/runtime/thread-timeline-types'
 import { formatModelLabel } from '@/features/catalog'
 import { translate } from '@/shared/i18n'
+import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 
 export type SettingsSnapshot = {
   agentName: string

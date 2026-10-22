@@ -1,11 +1,10 @@
 import { ApiError } from '@/shared/api/client'
 import type {
   InteractionDTO,
-  InteractionOwnerDTO,
   InteractionPageDTO,
   InteractionType,
 } from '@/shared/api/contracts/ai-interaction'
-import type { InstantTimestamp } from '@/shared/api/contracts/base'
+import type { InteractionOwnerDTO } from '@/shared/api/generated/contracts'
 
 /**
  * Interaction wire codec：把 `GET /interactions` 的 envelope.data 严格解码为类型化 DTO。
@@ -99,15 +98,12 @@ function requireInteractionType(value: unknown, path: string): InteractionType {
   return value as InteractionType
 }
 
-/** HTTP Jackson 将 Instant 编码为 epoch seconds 数字（可带小数），也接受明确的 ISO 时刻。 */
-function requireBackendDateTime(value: unknown, path: string): InstantTimestamp {
-  if (typeof value === 'string' && Number.isFinite(Date.parse(value))) {
-    return value
-  }
+/** HTTP Jackson 将 Instant 编码为 epoch seconds 数字（可带小数）。 */
+function requireInstant(value: unknown, path: string): number {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return value
   }
-  throw invalidPayload(`${path} must be epoch seconds or an ISO date-time string`)
+  throw invalidPayload(`${path} must be epoch seconds`)
 }
 
 function decodeOwner(value: unknown, path: string): InteractionOwnerDTO {
@@ -132,7 +128,7 @@ function decodeItem(value: unknown, path: string): InteractionDTO {
   const record = requireRecord(value, path)
   const type = requireInteractionType(record.type, `${path}.type`)
   const rootThreadId = requireUuid(record.rootThreadId, `${path}.rootThreadId`)
-  const createTime = requireBackendDateTime(record.createTime, `${path}.createTime`)
+  const createTime = requireInstant(record.createTime, `${path}.createTime`)
   const owner = decodeOwner(record.owner, `${path}.owner`)
   const interactionId = requireRequiredNullableString(record.interactionId, `${path}.interactionId`)
   const status = requireRequiredNullableString(record.status, `${path}.status`)
@@ -229,6 +225,6 @@ export function decodeInteractionPage(value: unknown): InteractionPageDTO {
     throw invalidPayload('page.total must be non-negative')
   }
   const freshnessAt = record.freshnessAt === null
-    ? null : requireBackendDateTime(record.freshnessAt, 'page.freshnessAt')
+    ? null : requireInstant(record.freshnessAt, 'page.freshnessAt')
   return { items, nextCursor, total, freshnessAt }
 }

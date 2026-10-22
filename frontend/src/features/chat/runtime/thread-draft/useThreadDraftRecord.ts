@@ -15,8 +15,8 @@ import {
   type ThreadDraftRecord,
 } from '@/features/chat/runtime/thread-draft-store'
 import { hasMessageContent, partsKey, type ComposerPart } from '@/features/chat/composer/composer-parts'
-import type { HarnessStoppedThreadReceiptDTO } from '@/shared/api/contracts/ai-runtime'
 import { translate, useI18n } from '@/shared/i18n'
+import type { HarnessStoppedThreadReceiptDTO } from '@/shared/api/generated/contracts'
 
 interface ThreadDraftRecordInput {
   threadId: string

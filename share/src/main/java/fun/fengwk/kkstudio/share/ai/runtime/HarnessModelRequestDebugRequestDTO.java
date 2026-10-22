@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.share.ai.runtime;
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonSetter;
 import lombok.Data;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Model Request Debug 的请求预览入参：以 UI 当前草稿选择为输入，在真实 Thread snapshot 上做一次只读规划。
@@ -18,7 +19,7 @@ public class HarnessModelRequestDebugRequestDTO {
   private HarnessModelSelectionDTO model;
 
   /** 草稿 Environment 名；null 表示未选择 Environment。 */
-  private String environmentName;
+  private @Nullable String environmentName;
 
   @JsonSetter("environmentName")
   public void setEnvironmentName(Object value) {

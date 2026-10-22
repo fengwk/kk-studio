@@ -8,7 +8,8 @@ import {
   isForkBoundary,
   type HistoryTreeRow,
 } from '@/features/chat/history-tree'
-import type { EntryType, HarnessSessionEntryDTO } from '@/shared/api/contracts/ai-runtime'
+import type { EntryType } from '@/shared/api/contracts/ai-runtime'
+import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 
 const SESSION_ID = 'session-1'
 
@@ -24,7 +25,8 @@ function entry(
     parentEntryId: options.parentEntryId ?? null,
     entryType,
     payloadJson: JSON.stringify(options.payload ?? {}),
-    createTime: null,
+    createTime: 0,
+    usageCost: null,
   }
 }
 

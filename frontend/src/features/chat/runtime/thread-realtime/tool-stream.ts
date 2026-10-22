@@ -1,6 +1,3 @@
-import type {
-  ToolInvocationDTO,
-} from '@/shared/api/contracts/ai-runtime'
 import { isCanonicalUuid } from '@/shared/lib/uuid'
 import {
   getString,
@@ -8,9 +5,9 @@ import {
   isPositiveInteger,
   isRecord,
   stringifyJson,
-  timestampString,
   toEpochMillis,
 } from '@/features/chat/runtime/thread-realtime/realtime-values'
+import type { ToolInvocationDTO } from '@/shared/api/generated/contracts'
 
 export interface RealtimeToolPartial {
   threadId: string
@@ -130,7 +127,8 @@ export function snapshotToolStream(
     toolCallId: invocation.toolCallId,
     text: '',
     error: false,
-    createdAt: timestampString(invocation.updateTime) || timestampString(invocation.createTime),
+    // HTTP 快照不携带流事件时间；之后的实时事件按各自的 createdAt 排序。
+    createdAt: '',
   }
   const result = parseToolResultPayload(invocation.resultJson)
   if (result != null) {

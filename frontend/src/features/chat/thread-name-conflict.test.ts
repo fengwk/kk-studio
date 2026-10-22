@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { hasThreadNameConflict } from './thread-name-conflict'
 import type { PaneTarget } from '@/features/chat/runtime/agent-pane'
-import type { RuntimeThreadSummaryDTO } from '@/shared/api/contracts/ai-runtime'
+import type { HarnessThreadSummaryDTO } from '@/shared/api/generated/contracts'
 
-const summary: RuntimeThreadSummaryDTO = {
-  threadId: 'root', parentThreadId: null, name: 'main', createdAt: null, updatedAt: null,
+const summary: HarnessThreadSummaryDTO = {
+  threadId: 'root', parentThreadId: null, name: 'main', createdAt: 0, updatedAt: 0,
   status: 'IDLE', processing: false,
   model: { providerName: 'p', modelName: 'm', variant: 'v' }, headMessagePreview: null,
 }

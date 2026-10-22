@@ -11,7 +11,7 @@ import type {
   AgentDefinitionDTO,
   SkillPackageDTO,
   ToolCatalogEntryDTO,
-} from '@/shared/api/contracts/ai-catalog'
+} from '@/shared/api/generated/contracts'
 
 function agent(name: string, description: string | null): AgentDefinitionDTO {
   return {
@@ -23,8 +23,8 @@ function agent(name: string, description: string | null): AgentDefinitionDTO {
     variant: null,
     config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
     version: '1',
-    createTime: null,
-    updateTime: null,
+    createTime: 0,
+    updateTime: 0,
   }
 }
 
@@ -45,23 +45,13 @@ function skillPackage(
     checkStatus: 'UP_TO_DATE',
     skills,
     version: '1',
-    createTime: '2026-07-20T00:00:00.000Z',
-    updateTime: '2026-07-20T01:00:00.000Z',
+    createTime: 1784505600,
+    updateTime: 1784509200,
   }
 }
 
-function tool(
-  name: string,
-  description: string,
-  environmentRequired = false,
-  environmentId: string | null = null,
-): ToolCatalogEntryDTO {
-  return {
-    name,
-    description,
-    environmentRequired,
-    environmentId,
-  }
+function tool(name: string, description: string): ToolCatalogEntryDTO {
+  return { name, description }
 }
 
 describe('agent-capability-candidates', () => {

@@ -11,12 +11,7 @@ import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { pluginsService } from '@/shared/api/plugins-service'
 import { isConflictError } from '@/shared/api/client'
 import { useI18n } from '@/shared/i18n'
-import type {
-  PluginConfigurationUpdateRequestDTO,
-  PluginDTO,
-  PluginSecretPatchDTO,
-  PluginSecretPatchOperation,
-} from '@/shared/api/contracts/ai-plugin'
+import type { PluginSecretPatchOperation } from '@/shared/api/contracts/ai-plugin'
 import {
   appendStrictJsonArrayItem,
   isValidJsonIntegerLiteral,
@@ -33,6 +28,11 @@ import { parsePluginValuesSchema } from './plugin-schema'
 import { SchemaElementRenderer, type PluginSchemaEditor } from './SchemaElementRenderer'
 import type { JSONPath } from 'jsonc-parser'
 import './plugin-config.css'
+import type {
+  PluginConfigurationUpdateRequestDTO,
+  PluginDTO,
+  PluginSecretPatchDTO,
+} from '@/shared/api/generated/contracts'
 
 interface PluginConfigModalProps {
   plugin: PluginDTO

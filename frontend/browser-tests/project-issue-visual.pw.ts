@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Locator } from './fixture'
-import type { IssueDetailDTO } from '@/features/projects/types'
+import type { IssueDetailDTO } from '@/shared/api/generated/contracts'
 
 const PROJECT = 'a0000000-0000-0000-0000-000000000001'
 const ISSUE = 'a0000000-0000-0000-0000-000000000002'

@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.share.ai.catalog;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
+import org.jspecify.annotations.Nullable;
 
 import java.time.Instant;
 
@@ -16,17 +17,17 @@ public class AgentDefinitionDTO {
   private AgentDefinitionType type;
 
   /** 可空描述（text，无长度上限）。 */
-  private String description;
+  private @Nullable String description;
 
   /** 可空系统提示词。 */
-  private String systemPrompt;
+  private @Nullable String systemPrompt;
 
   /** 当前绑定的模型引用，序列化形式为 {@code providerName/modelName}；未配置模型的内置 Agent 显式序列化为 {@code null}，与字段缺失区分。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String model;
+  private @Nullable String model;
 
   /** 当前生效的模型变体 id；null 表示未显式指定（运行时解析 model config 的 defaultVariant）。 */
-  private String variant;
+  private @Nullable String variant;
 
   /** 结构化执行配置（tools/skills/subagents/inheritParentEnvironment），来自持久化的 config JSONB 列。 */
   private AgentDefinitionConfigDTO config;

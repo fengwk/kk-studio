@@ -1,5 +1,8 @@
 import { expect, test, type Page } from '@playwright/test'
-import type { EnvironmentCardDTO, EnvironmentInstallConfigDTO } from '../src/shared/api/contracts/ai-environment'
+import type {
+  EnvironmentCardDTO,
+  EnvironmentInstallConfigDTO,
+} from '@/shared/api/generated/contracts'
 
 // 全量 layout 回归也会收集本文件，剪贴板读写权限由本文件自持，不依赖专属 install 配置。
 test.use({ permissions: ['clipboard-read', 'clipboard-write'] })
@@ -13,7 +16,7 @@ const initialConfig: EnvironmentInstallConfigDTO = {
 
 async function api(page: Page) {
   let card: EnvironmentCardDTO = { id: 'env-1', name: 'host-one', version: '7', status: 'OFFLINE', ready: false,
-    statusExpiresAt: null, lastSeen: null, capabilities: [], createTime: '', updateTime: '', installConfig: initialConfig }
+    statusExpiresAt: null, lastSeen: null, capabilities: [], createTime: 0, updateTime: 0, installConfig: initialConfig }
   let conflict = false
   const calls: string[] = []
   await page.route('**/api/environments**', async route => {
@@ -404,7 +407,7 @@ test('keeps event history out of the card and inside the management modal', asyn
   ]
   const card: EnvironmentCardDTO = {
     id: 'env-1', name: 'recovered-box', version: '1', status: 'READY', ready: true,
-    statusExpiresAt: null, lastSeen: '2026-07-20T00:01:00.000Z', capabilities: [], createTime: '', updateTime: '',
+    statusExpiresAt: null, lastSeen: 1784505660, capabilities: [], createTime: 0, updateTime: 0,
   }
   await page.route('**/api/environments**', async route => {
     const path = new URL(route.request().url()).pathname

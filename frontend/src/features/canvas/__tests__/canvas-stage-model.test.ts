@@ -11,7 +11,7 @@ import type {
   Resource,
   ResourceNode,
 } from '@/features/canvas/domain'
-import type { CanvasFunctionDefinitionDTO } from '@/shared/api/contracts/studio'
+import type { CanvasFunctionDefinitionDTO } from '@/shared/api/generated/contracts'
 
 const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
 const GROUP_ID = 'c4d5e6f7-8a9b-4c0d-8e1f-2a3b4c5d6e7f'

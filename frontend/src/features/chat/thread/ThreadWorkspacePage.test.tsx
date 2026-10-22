@@ -10,14 +10,14 @@ import { chatService } from '@/shared/api/chat-service'
 import { environmentService } from '@/shared/api/environment-service'
 import { harnessService } from '@/shared/api/harness-service'
 import { interactionService } from '@/shared/api/interaction-service'
+import { createTextPart } from '@/features/chat/composer/composer-parts'
+import { saveThreadDraftParts } from '@/features/chat/runtime/thread-draft-store'
+import { setLocale } from '@/shared/i18n'
 import type {
   HarnessSessionEntryDTO,
   HarnessThreadDTO,
   HarnessThreadSnapshotDTO,
-} from '@/shared/api/contracts/ai-runtime'
-import { createTextPart } from '@/features/chat/composer/composer-parts'
-import { saveThreadDraftParts } from '@/features/chat/runtime/thread-draft-store'
-import { setLocale } from '@/shared/i18n'
+} from '@/shared/api/generated/contracts'
 
 const CHILD_THREAD_ID = '00000000-0000-0000-0000-000000000999'
 const OTHER_CHILD_THREAD_ID = '00000000-0000-0000-0000-000000000998'
@@ -94,8 +94,8 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
       environmentName: null,
       goal: null,
     },
-    createTime: '2026-07-28T10:00:00Z',
-    updateTime: '2026-07-28T10:00:00Z',
+    createTime: 1785232800,
+    updateTime: 1785232800,
     ...overrides,
   }
 }
@@ -120,7 +120,8 @@ function snapshotWithPendingTool(targetThreadId: string): HarnessThreadSnapshotD
         ],
       },
     }),
-    createTime: '2026-07-28T10:00:01Z',
+    createTime: 1785232801,
+    usageCost: null,
   }
 
   return {
@@ -153,8 +154,8 @@ function snapshotWithPendingTool(targetThreadId: string): HarnessThreadSnapshotD
         }),
         resultJson: null,
         errorJson: null,
-        createTime: '2026-07-28T10:00:01Z',
-        updateTime: '2026-07-28T10:00:01Z',
+        createTime: 1785232801,
+        updateTime: 1785232801,
       },
     ],
     modelInvocation: null,
@@ -217,7 +218,8 @@ function userEntry(text: string, entryId: string): HarnessSessionEntryDTO {
     payloadJson: JSON.stringify({
       message: { role: 'USER', contents: [{ type: 'text', text }] },
     }),
-    createTime: '2026-07-28T10:00:00Z',
+    createTime: 1785232800,
+    usageCost: null,
   }
 }
 
@@ -250,7 +252,7 @@ function snapshotFor(
             message: { role: 'USER', contents: [{ type: 'text', text: 'parent queued' }] },
           }),
           cancelledAt: null,
-          createTime: '2026-07-28T10:00:02Z',
+          createTime: 1785232802,
         }],
     toolInvocations: [],
     ...overrides,
@@ -261,11 +263,11 @@ describe('ThreadWorkspacePage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     setLocale('zh-CN')
-    vi.mocked(agentService.listAgents).mockResolvedValue({ pageNumber: 1, pageSize: 50, totalCount: 0, results: [] })
+    vi.mocked(agentService.listAgents).mockResolvedValue({ pageNumber: 1, pageSize: 50, totalCount: '0', results: [] })
     vi.mocked(agentService.listModels).mockResolvedValue({
       pageNumber: 1,
       pageSize: 50,
-      totalCount: 1,
+      totalCount: '1',
       results: [{
         providerName: 'minimax',
         name: 'MiniMax',
@@ -291,25 +293,26 @@ describe('ThreadWorkspacePage', () => {
           variants: [{ id: 'default' }],
         },
         version: '0',
-        createTime: null,
-        updateTime: null,
+        createTime: 0,
+        updateTime: 0,
       }],
     })
     vi.mocked(harnessService.acceptThreadCommandBatch).mockResolvedValue({
-      session: { sessionId: 'session-1', name: 'Session', createdAt: null },
+      session: { sessionId: 'session-1', name: 'Session', createdAt: 0 },
       rootEntry: {
         entryId: 'root',
         sessionId: 'session-1',
         parentEntryId: null,
         entryType: 'ROOT',
         payloadJson: '{}',
-        createTime: null,
+        createTime: 0,
+        usageCost: null,
       },
       thread: thread(),
       acceptedCommands: [],
       replayed: false,
     })
-    vi.mocked(agentService.listProviders).mockResolvedValue({ pageNumber: 1, pageSize: 50, totalCount: 0, results: [] })
+    vi.mocked(agentService.listProviders).mockResolvedValue({ pageNumber: 1, pageSize: 50, totalCount: '0', results: [] })
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([])
     vi.mocked(harnessService.decideApproval).mockResolvedValue(snapshotWithPendingTool(CHILD_THREAD_ID).toolInvocations[0])
     vi.mocked(interactionService.listInteractions).mockResolvedValue({
@@ -439,7 +442,7 @@ describe('ThreadWorkspacePage', () => {
         environmentId: null,
         environmentName: null,
         waitingCount: null,
-        createTime: '2026-07-28T10:00:01Z',
+        createTime: 1785232801,
       }],
       nextCursor: null,
       total: 1,

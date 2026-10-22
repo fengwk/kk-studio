@@ -6,6 +6,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.jspecify.annotations.Nullable;
 
 /** IssueRun 完整执行事实 DTO。 */
 @Data
@@ -20,7 +21,7 @@ public class IssueRunDTO {
   private String state;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String agentName;
+  private @Nullable String agentName;
 
   private String sessionId;
   private String threadId;
@@ -28,25 +29,25 @@ public class IssueRunDTO {
   private String startEntryId;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String endEntryId;
+  private @Nullable String endEntryId;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String finalAnswerEntryId;
+  private @Nullable String finalAnswerEntryId;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String nextState;
+  private @Nullable String nextState;
 
   private String observedActivitySequence;
   private String remainingExecutionMs;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String error;
+  private @Nullable String error;
 
   private String version;
   private String startedAt;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String endedAt;
+  private @Nullable String endedAt;
 
   @JsonAnySetter
   public void rejectUnknownField(String name, Object value) {

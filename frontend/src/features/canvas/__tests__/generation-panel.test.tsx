@@ -8,10 +8,7 @@ import type { CanvasSnapshot, ResourceNode } from '@/features/canvas/domain'
 import type { CanvasGenerationPanelAnchor } from '@/features/canvas/CanvasGenerationPanel'
 import type { CanvasController } from '@/features/canvas/useCanvasController'
 import type { CanvasFunctionConfig } from '@/features/canvas/types'
-import type {
-  CanvasFunctionDefinitionDTO,
-  UUIDString,
-} from '@/shared/api/contracts/studio'
+import type { CanvasFunctionDefinitionDTO } from '@/shared/api/generated/contracts'
 
 vi.mock('@/shared/api/studio-service', () => ({
   getCanvasResourceOriginalUrl: vi.fn(),
@@ -23,11 +20,11 @@ vi.mock('@/shared/api/studio-service', () => ({
   })),
 }))
 
-const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f' as UUIDString
-const NODE_SINGLE = '00000000-0000-4000-8000-000000000002' as UUIDString
-const NODE_VIDEO = '00000000-0000-4000-8000-000000000003' as UUIDString
-const NODE_SECOND = '00000000-0000-4000-8000-000000000004' as UUIDString
-const NODE_TARGET = '00000000-0000-4000-8000-000000000009' as UUIDString
+const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
+const NODE_SINGLE = '00000000-0000-4000-8000-000000000002'
+const NODE_VIDEO = '00000000-0000-4000-8000-000000000003'
+const NODE_SECOND = '00000000-0000-4000-8000-000000000004'
+const NODE_TARGET = '00000000-0000-4000-8000-000000000009'
 
 const FUNCTION_VERSION = { definitionFingerprint: '0'.repeat(64) }
 
@@ -114,7 +111,7 @@ function changeSelect(label: string, option: string) {
 }
 
 function resourceNode(
-  id: UUIDString,
+  id: string,
   name: string,
   kind: 'IMAGE' | 'VIDEO',
 ): ResourceNode {
@@ -125,7 +122,7 @@ function resourceNode(
     transform: { x: 0, y: 0, width: 320, height: 260 },
     groupId: null,
     resources: [{
-      id: `${id}-r0` as UUIDString,
+      id: `${id}-r0`,
       canvasId: CANVAS_ID,
       ownerNodeId: id,
       resourceIndex: 0,
@@ -383,7 +380,7 @@ describe('Canvas generic generation panel', () => {
 
     const running = renderPanel({
       nodeId: NODE_TARGET,
-      requestId: 'c9c9c9c9-9999-4999-8999-999999999991' as UUIDString,
+      requestId: 'c9c9c9c9-9999-4999-8999-999999999991',
       status: 'RUNNING',
       stage: 'GENERATING',
       error: null,
@@ -395,7 +392,7 @@ describe('Canvas generic generation panel', () => {
 
     renderPanel({
       nodeId: NODE_TARGET,
-      requestId: 'c9c9c9c9-9999-4999-8999-999999999992' as UUIDString,
+      requestId: 'c9c9c9c9-9999-4999-8999-999999999992',
       status: 'FAILED',
       stage: 'FAILED',
       error: 'provider failed',
@@ -415,7 +412,7 @@ describe('Canvas generic generation panel', () => {
 
     const ready = renderPanel({
       nodeId: NODE_TARGET,
-      requestId: 'c9c9c9c9-9999-4999-8999-999999999990' as UUIDString,
+      requestId: 'c9c9c9c9-9999-4999-8999-999999999990',
       status: 'READY',
       stage: 'QUEUED',
       error: null,
@@ -428,7 +425,7 @@ describe('Canvas generic generation panel', () => {
 
     const running = renderPanel({
       nodeId: NODE_TARGET,
-      requestId: 'c9c9c9c9-9999-4999-8999-999999999991' as UUIDString,
+      requestId: 'c9c9c9c9-9999-4999-8999-999999999991',
       status: 'RUNNING',
       stage: 'GENERATING',
       error: null,
@@ -440,7 +437,7 @@ describe('Canvas generic generation panel', () => {
 
     const failed = renderPanel({
       nodeId: NODE_TARGET,
-      requestId: 'c9c9c9c9-9999-4999-8999-999999999992' as UUIDString,
+      requestId: 'c9c9c9c9-9999-4999-8999-999999999992',
       status: 'FAILED',
       stage: 'FAILED',
       error: 'boom',
@@ -452,7 +449,7 @@ describe('Canvas generic generation panel', () => {
 
     const cancelled = renderPanel({
       nodeId: NODE_TARGET,
-      requestId: 'c9c9c9c9-9999-4999-8999-999999999993' as UUIDString,
+      requestId: 'c9c9c9c9-9999-4999-8999-999999999993',
       status: 'CANCELLED',
       stage: 'CANCELLED',
       error: null,
@@ -580,7 +577,7 @@ describe('Canvas generic generation panel', () => {
   it('disables model, enum, and number controls while a run is in progress', async () => {
     const view = renderPanel({
       nodeId: NODE_TARGET,
-      requestId: 'c9c9c9c9-9999-4999-8999-999999999991' as UUIDString,
+      requestId: 'c9c9c9c9-9999-4999-8999-999999999991',
       status: 'RUNNING',
       stage: 'GENERATING',
       error: null,
@@ -596,7 +593,7 @@ describe('Canvas generic generation panel', () => {
   it('shows the succeeded status and prefers a distinct stage label in the footer', () => {
     const view = renderPanel({
       nodeId: NODE_TARGET,
-      requestId: 'c9c9c9c9-9999-4999-8999-999999999991' as UUIDString,
+      requestId: 'c9c9c9c9-9999-4999-8999-999999999991',
       status: 'SUCCEEDED',
       stage: 'GENERATING',
       error: null,
@@ -611,7 +608,7 @@ describe('Canvas generic generation panel', () => {
   it('falls back to the status label when the run stage equals the status', () => {
     const view = renderPanel({
       nodeId: NODE_TARGET,
-      requestId: 'c9c9c9c9-9999-4999-8999-999999999991' as UUIDString,
+      requestId: 'c9c9c9c9-9999-4999-8999-999999999991',
       status: 'SUCCEEDED',
       stage: 'SUCCEEDED',
       error: null,

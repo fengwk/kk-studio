@@ -1,4 +1,4 @@
-import type { ProjectWorkflowDTO, ProjectWorkflowStateDTO } from './types'
+import type { ProjectWorkflowDTO, ProjectWorkflowStateDTO } from '@/shared/api/generated/contracts'
 
 /** 固定保留状态：必须存在，且不能配置 Agent/Environment/指令/额度，也不能停用。 */
 export const RESERVED_STATE_CODES = ['INIT', 'BLOCKED', 'DONE'] as const
@@ -87,7 +87,7 @@ export function toDraftStates(workflow: ProjectWorkflowDTO | null | undefined): 
   }))
 }
 
-/** 编辑草稿 → 整份 workflow DTO；未配置的可选字段留空，保留状态不携带业务字段。 */
+/** 编辑草稿 → 整份 workflow DTO；未配置的可选字段与保留状态的业务字段为 null。 */
 export function buildWorkflowDTO(states: WorkflowDraftState[]): ProjectWorkflowDTO {
   return {
     states: states.map<ProjectWorkflowStateDTO>((state) => {
@@ -97,6 +97,10 @@ export function buildWorkflowDTO(states: WorkflowDraftState[]): ProjectWorkflowD
       const dto: ProjectWorkflowStateDTO = {
         state: code,
         name: state.name.trim(),
+        agent: null,
+        environment: null,
+        instructions: null,
+        maxRuns: null,
         enabled: state.enabled,
         next: state.next.map((target) => target.trim()),
       }

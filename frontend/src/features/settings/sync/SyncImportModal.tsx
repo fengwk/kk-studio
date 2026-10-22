@@ -3,17 +3,17 @@ import { Button } from '@/shared/ui/controls/Button'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { useI18n } from '@/shared/i18n'
 import { configSyncService } from '@/shared/api/config-sync-service'
-import type {
-  ConfigSyncImportCheckDTO,
-  ConfigSyncImportResponseDTO,
-  ConfigSyncKind,
-} from '@/shared/api/contracts/config-sync'
 import {
   CONFIG_SYNC_KIND_ORDER,
   configSyncErrorMessage,
   configSyncImportMode,
   configSyncKindLabelKey,
 } from '@/features/settings/sync/config-sync-utils'
+import type {
+  ConfigSyncImportCheckDTO,
+  ConfigSyncImportResultDTO,
+  ConfigSyncKind,
+} from '@/shared/api/generated/contracts'
 
 interface SyncImportModalProps {
   fileName: string
@@ -42,7 +42,7 @@ export function SyncImportModal({
   const { t } = useI18n()
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [result, setResult] = useState<ConfigSyncImportResponseDTO | null>(null)
+  const [result, setResult] = useState<ConfigSyncImportResultDTO | null>(null)
 
   const mode = configSyncImportMode(preview)
   const kindLabel = (kind: string): string =>
@@ -216,7 +216,7 @@ function ImportResult({
   settingsDirty,
   onReloadSettings,
 }: {
-  result: ConfigSyncImportResponseDTO
+  result: ConfigSyncImportResultDTO
   kindLabel: (kind: string) => string
   settingsDirty: boolean
   onReloadSettings: () => void

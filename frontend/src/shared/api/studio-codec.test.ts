@@ -10,16 +10,13 @@ import {
   decodeCanvasSnapshot,
   isCanvasFunctionVersion,
 } from '@/shared/api/studio-codec'
-import type {
-  CanvasDocumentDTO,
-  UUIDString,
-} from '@/shared/api/contracts/studio'
+import type { CanvasDocumentDTO } from '@/shared/api/generated/contracts'
 
-const ID: UUIDString = '11111111-1111-4111-8111-111111111111'
-const CANVAS_ID: UUIDString = '22222222-2222-4222-8222-222222222222'
-const NODE_ID: UUIDString = '33333333-3333-4333-8333-333333333333'
-const GROUP_ID: UUIDString = '44444444-4444-4444-8444-444444444444'
-const REQUEST_ID: UUIDString = '55555555-5555-4555-8555-555555555555'
+const ID: string = '11111111-1111-4111-8111-111111111111'
+const CANVAS_ID: string = '22222222-2222-4222-8222-222222222222'
+const NODE_ID: string = '33333333-3333-4333-8333-333333333333'
+const GROUP_ID: string = '44444444-4444-4444-8444-444444444444'
+const REQUEST_ID: string = '55555555-5555-4555-8555-555555555555'
 
 function documentPayload(): CanvasDocumentDTO {
   return {
@@ -117,7 +114,7 @@ describe('studio codec', () => {
     expect(document).toEqual(documentPayload())
 
     const snapshot = decodeCanvasSnapshot(snapshotPayload())
-    expect(snapshot.nodes[0]?.resources[0]?.sizeBytes).toBe(12)
+    expect(snapshot.nodes[0]?.resources[0]?.sizeBytes).toBe('12')
     expect(snapshot.nodes[0]?.transform).toEqual({ x: 1, y: 2, width: 100, height: 80 })
     expect(snapshot.groups[0]?.id).toBe(GROUP_ID)
     expect(snapshot.references[0]).toEqual(referencePayload())

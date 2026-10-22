@@ -1,11 +1,11 @@
 import { apiClient, type HttpClient } from '@/shared/api/client'
 import type {
-  ConfigSyncExportResponseDTO,
+  ConfigSyncExportDTO,
   ConfigSyncImportCheckDTO,
-  ConfigSyncImportResponseDTO,
+  ConfigSyncImportResultDTO,
   ConfigSyncInventoryDTO,
   ConfigSyncRef,
-} from '@/shared/api/contracts/config-sync'
+} from '@/shared/api/generated/contracts'
 
 /**
  * 配置同步读写面：
@@ -21,14 +21,14 @@ export function createConfigSyncService(client: HttpClient = apiClient) {
     getInventory: (): Promise<ConfigSyncInventoryDTO> =>
       client.get<ConfigSyncInventoryDTO>('/settings/sync'),
 
-    exportConfig: (items: ConfigSyncRef[]): Promise<ConfigSyncExportResponseDTO> =>
-      client.post<ConfigSyncExportResponseDTO>('/settings/sync/export', { items }),
+    exportConfig: (items: ConfigSyncRef[]): Promise<ConfigSyncExportDTO> =>
+      client.post<ConfigSyncExportDTO>('/settings/sync/export', { items }),
 
     checkImport: (yaml: string): Promise<ConfigSyncImportCheckDTO> =>
       client.post<ConfigSyncImportCheckDTO>('/settings/sync/import/check', { yaml }),
 
-    importConfig: (yaml: string, allowPartial = false): Promise<ConfigSyncImportResponseDTO> =>
-      client.post<ConfigSyncImportResponseDTO>('/settings/sync/import', { yaml, allowPartial }),
+    importConfig: (yaml: string, allowPartial = false): Promise<ConfigSyncImportResultDTO> =>
+      client.post<ConfigSyncImportResultDTO>('/settings/sync/import', { yaml, allowPartial }),
   }
 }
 

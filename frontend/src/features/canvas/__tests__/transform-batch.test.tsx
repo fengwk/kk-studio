@@ -4,15 +4,15 @@ import {
   useCanvasTransformBatch,
   type CanvasTransformBatchActions,
 } from '@/features/canvas/transform-batch'
-import type { CanvasCommandDTO, CanvasSnapshotDTO, UUIDString } from '@/shared/api/contracts/studio'
 import type { CanvasDraftAck } from '@/features/canvas/canvas-operation-storage'
+import type { CanvasCommandDTO, CanvasSnapshotDTO } from '@/shared/api/generated/contracts'
 
 type ExecuteCommandsMock = Mock<(commands: CanvasCommandDTO[], ack?: CanvasDraftAck[]) => Promise<unknown>>
 
-const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f' as UUIDString
-const NODE_A = 'aaaaaaaa-0000-4000-8000-000000000001' as UUIDString
-const NODE_B = 'aaaaaaaa-0000-4000-8000-000000000002' as UUIDString
-const GROUP_G = 'bbbbbbbb-0000-4000-8000-000000000004' as UUIDString
+const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
+const NODE_A = 'aaaaaaaa-0000-4000-8000-000000000001'
+const NODE_B = 'aaaaaaaa-0000-4000-8000-000000000002'
+const GROUP_G = 'bbbbbbbb-0000-4000-8000-000000000004'
 
 function snapshot(): CanvasSnapshotDTO {
   return {

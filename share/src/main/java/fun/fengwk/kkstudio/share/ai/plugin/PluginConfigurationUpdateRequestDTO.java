@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.share.ai.plugin;
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import lombok.Data;
 import lombok.ToString;
+import org.jspecify.annotations.Nullable;
 import tools.jackson.databind.annotation.JsonDeserialize;
 
 import java.util.Map;
@@ -27,7 +28,7 @@ public class PluginConfigurationUpdateRequestDTO {
   private String valuesJson;
 
   /** 秘密字段补丁：字段名到单字段操作；省略的字段按 KEEP 处理。整个补丁不进入 {@code toString}。 */
-  @ToString.Exclude private Map<String, PluginSecretPatchDTO> secretPatch;
+  @ToString.Exclude private @Nullable Map<String, PluginSecretPatchDTO> secretPatch;
 
   @JsonAnySetter
   public void rejectUnknownField(String fieldName, Object ignoredValue) {

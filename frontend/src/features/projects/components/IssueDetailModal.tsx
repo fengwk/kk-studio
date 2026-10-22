@@ -40,7 +40,6 @@ import { Dialog } from '@/shared/ui/overlays/Dialog'
 import type { IssueActionKind } from '../pending-action-sidecar'
 import type { ProjectsApi } from '../projects-api'
 import { projectsApi } from '../projects-api'
-import type { IssueEvidenceDTO, ProjectWorkflowDTO } from '../types'
 import { MAX_RUNS, parseMaxRuns } from '../workflow-draft'
 import { DeleteIssueDialog, ResetBudgetDialog, TextActionDialog } from './issue-detail/IssueActionDialogs'
 import { IssueAlerts } from './issue-detail/IssueAlerts'
@@ -56,6 +55,7 @@ import { calculateFileSha256, mergeEvidences } from './issue-detail/evidence-fil
 import { useIssueActionRunner } from './issue-detail/useIssueActionRunner'
 import { useKeyedRequest } from './issue-detail/useKeyedRequest'
 import './issue-detail-alerts.css'
+import type { IssueEvidenceDTO, ProjectWorkflowDTO } from '@/shared/api/generated/contracts'
 
 export interface IssueDetailModalProps {
   isOpen: boolean

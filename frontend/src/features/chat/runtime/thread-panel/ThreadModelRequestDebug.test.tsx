@@ -17,7 +17,7 @@ import { setLocale } from '@/shared/i18n'
 function sampleDebug(overrides: Partial<ThreadModelRequestDebugData> = {}): ThreadModelRequestDebugData {
   return {
     kind: 'NEXT_REQUEST_PREVIEW',
-    generatedAt: '2026-09-21T00:00:00.000Z',
+    generatedAt: 1789948800,
     model: { providerName: 'minimax', modelName: 'MiniMax-M2.7', variant: 'default' },
     environmentName: 'dev-node',
     systemInstruction: 'System prompt content with instructions',
@@ -774,7 +774,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
         bodyByteSize: 12,
         bodyJson: '{"model":"gpt-4o"}',
         sourceHeadEntryId: 'entry-head-1',
-        generatedAt: '2026-09-27T05:00:00Z',
+        generatedAt: 1790485200,
         notice: null,
       }
 

@@ -3,7 +3,7 @@ import { useI18n } from '@/shared/i18n'
 import { Button } from '@/shared/ui/controls/Button'
 import { Badge } from '@/shared/ui/data/Badge'
 import { EmptyState } from '@/shared/ui/feedback/EmptyState'
-import type { IssueDetailDTO } from '../../types'
+import type { IssueDetailDTO } from '@/shared/api/generated/contracts'
 
 type Issue = IssueDetailDTO['issue']
 

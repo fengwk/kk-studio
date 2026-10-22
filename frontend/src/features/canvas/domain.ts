@@ -1,18 +1,21 @@
-import type {
-  CanvasFunctionRunStatus,
-  CanvasReferenceDTO,
-  CanvasResourceDTO,
-  CanvasResourceKind,
-  CanvasSnapshotDTO,
-  CanvasTransformDTO,
-  UUIDString,
+import {
+  CANVAS_FUNCTION_RUN_STATUSES,
+  CANVAS_RESOURCE_KINDS,
+  type CanvasFunctionRunStatus,
+  type CanvasResourceKind,
 } from '@/shared/api/contracts/studio'
 import type { CanvasRevision } from '@/shared/api/contracts/base'
 import { isCanonicalUuid } from '@/shared/lib/uuid'
 import { resourceNodeSize } from '@/features/canvas/resource-node-size'
+import type {
+  CanvasReferenceDTO,
+  CanvasResourceDTO,
+  CanvasSnapshotDTO,
+  CanvasTransformDTO,
+} from '@/shared/api/generated/contracts'
 
 export interface CanvasDocument {
-  id: UUIDString
+  id: string
   title: string
   revision: CanvasRevision
   createdAt: string
@@ -20,9 +23,9 @@ export interface CanvasDocument {
 }
 
 export interface Resource {
-  id: UUIDString
-  canvasId: UUIDString
-  ownerNodeId: UUIDString
+  id: string
+  canvasId: string
+  ownerNodeId: string
   resourceIndex: number
   blobId: string | null
   name: string
@@ -42,8 +45,8 @@ export interface Function {
 }
 
 export interface Run {
-  nodeId: UUIDString
-  requestId: UUIDString
+  nodeId: string
+  requestId: string
   status: CanvasFunctionRunStatus
   stage: string
   error: string | null
@@ -51,27 +54,27 @@ export interface Run {
 }
 
 export interface ResourceNode {
-  id: UUIDString
-  canvasId: UUIDString
+  id: string
+  canvasId: string
   name: string
   transform: CanvasTransformDTO
-  groupId: UUIDString | null
+  groupId: string | null
   resources: Resource[]
   function: Function | null
   run: Run | null
 }
 
 export interface Group {
-  id: UUIDString
-  canvasId: UUIDString
+  id: string
+  canvasId: string
   title: string
   transform: CanvasTransformDTO
 }
 
 export interface Reference {
-  canvasId: UUIDString
-  sourceNodeId: UUIDString
-  targetNodeId: UUIDString
+  canvasId: string
+  sourceNodeId: string
+  targetNodeId: string
   index: number
 }
 
@@ -103,7 +106,7 @@ export function scanArgsForReferences(obj: unknown, onRef: (nodeId: string, inde
   }
 }
 
-export function deriveReferencesFromNodes(nodes: Array<{ id: UUIDString; canvasId: UUIDString; function?: Function | null }>): Reference[] {
+export function deriveReferencesFromNodes(nodes: Array<{ id: string; canvasId: string; function?: Function | null }>): Reference[] {
   const refs: Reference[] = []
   for (const node of nodes) {
     if (!node.function?.args) {
@@ -112,7 +115,7 @@ export function deriveReferencesFromNodes(nodes: Array<{ id: UUIDString; canvasI
     scanArgsForReferences(node.function.args, (sourceNodeId, index) => {
       refs.push({
         canvasId: node.canvasId,
-        sourceNodeId: sourceNodeId as UUIDString,
+        sourceNodeId: sourceNodeId,
         targetNodeId: node.id,
         index,
       })
@@ -131,7 +134,7 @@ export function projectCanvasSnapshot(snapshot: CanvasSnapshotDTO): CanvasSnapsh
         name: node.function.name,
         args: node.function.args ?? {},
       } : null,
-      run: node.run ? { ...node.run } : null,
+      run: node.run ? { ...node.run, status: runStatus(node.run.status) } : null,
     }
     return {
       ...projected,
@@ -173,12 +176,32 @@ export function projectCanvasResource(resource: CanvasResourceDTO): Resource {
     blobId: resource.blobId,
     name: resource.name,
     textContent: resource.textContent,
-    kind: resource.kind,
+    kind: resourceKind(resource.kind),
     mediaType: resource.mediaType,
-    sizeBytes: resource.sizeBytes,
+    sizeBytes: decimalLong(resource.sizeBytes),
     width: resource.width,
     height: resource.height,
-    durationMs: resource.durationMs,
+    durationMs: decimalLong(resource.durationMs),
     createdAt: resource.createdAt,
   }
+}
+
+/** wire 只承诺字符串；领域模型只接受已知的资源类型。 */
+function resourceKind(value: string): CanvasResourceKind {
+  if (!(CANVAS_RESOURCE_KINDS as readonly string[]).includes(value)) {
+    throw new Error(`unknown canvas resource kind: ${value}`)
+  }
+  return value as CanvasResourceKind
+}
+
+function runStatus(value: string): CanvasFunctionRunStatus {
+  if (!(CANVAS_FUNCTION_RUN_STATUSES as readonly string[]).includes(value)) {
+    throw new Error(`unknown canvas function run status: ${value}`)
+  }
+  return value as CanvasFunctionRunStatus
+}
+
+/** Java Long 以十进制字符串传输；解码器已保证它在安全整数范围内。 */
+function decimalLong(value: string | null): number | null {
+  return value === null ? null : Number(value)
 }

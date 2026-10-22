@@ -15,11 +15,6 @@ import {
   type CommandBatchPlan,
 } from '@/features/chat/command-batch-plan'
 import type { ComposerPart } from '@/features/chat/composer/composer-parts'
-import type {
-  HarnessThreadCommandDTO,
-  HarnessThreadDTO,
-  HarnessThreadSnapshotDTO,
-} from '@/shared/api/contracts/ai-runtime'
 import type { ThreadProjection } from '@/features/chat/runtime/useThreadProjection'
 import {
   useAgentThreadController,
@@ -33,6 +28,11 @@ import {
   presentConflict,
   type ConflictPresentation,
 } from '@/shared/conflict/conflict-presenter'
+import type {
+  HarnessThreadCommandDTO,
+  HarnessThreadDTO,
+  HarnessThreadSnapshotDTO,
+} from '@/shared/api/generated/contracts'
 
 /**
  * 面板本地 branch draft：从持久化的 Thread snapshot 初始化，面板本地编辑，

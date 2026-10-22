@@ -1,4 +1,4 @@
-import type { HarnessSessionEntryDTO } from '@/shared/api/contracts/ai-runtime'
+import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 
 /** A draft must have one closed Session path. Never render or replay a partial prefix. */
 export function threadDraftPath(

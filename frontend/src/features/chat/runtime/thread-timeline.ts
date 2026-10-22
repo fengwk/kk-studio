@@ -1,6 +1,6 @@
 export { buildThreadTimeline } from '@/features/chat/runtime/thread-timeline-builder'
-import type { HarnessThreadDTO } from '@/shared/api/contracts/ai-runtime'
 import type { ThreadTimeline } from '@/features/chat/runtime/thread-timeline-types'
+import type { HarnessThreadDTO } from '@/shared/api/generated/contracts'
 
 /**
  * 工作状态使用派生的 Thread status/processing 以及待处理的 QUEUED 命令。

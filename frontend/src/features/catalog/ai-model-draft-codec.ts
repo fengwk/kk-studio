@@ -9,17 +9,17 @@ import {
   numberToNull,
   trimToNull,
 } from '@/features/catalog/ai-resource-draft-primitives'
+import type { AgentModelEditablePropertiesDTO } from '@/shared/api/contracts/ai-catalog'
 import type {
   AgentModelConfigDTO,
   AgentModelCreateDTO,
   AgentModelDTO,
-  AgentModelEditablePropertiesDTO,
   AgentModelInputModality,
   AgentModelPricingDTO,
   AgentModelPricingRuleDTO,
   AgentModelPricingWindowDTO,
   AgentModelVariantDTO,
-} from '@/shared/api/contracts/ai-catalog'
+} from '@/shared/api/generated/contracts'
 
 const AGENT_MODEL_MODALITIES: AgentModelInputModality[] = [
   'TEXT',
@@ -358,7 +358,7 @@ function pricingRuleFromDraft(draft: PricingRuleDraft, path: string): AgentModel
   }
   return {
     timeWindow,
-    minContextTokens,
+    minContextTokens: minContextTokens === null ? null : String(minContextTokens),
     inputPerMillionTokens: requireNonNegativeNumber(draft.inputPerMillionTokens, `${path}.inputPerMillionTokens`),
     outputPerMillionTokens: requireNonNegativeNumber(draft.outputPerMillionTokens, `${path}.outputPerMillionTokens`),
     cacheReadPerMillionTokens: requireNonNegativeNumber(draft.cacheReadPerMillionTokens, `${path}.cacheReadPerMillionTokens`),

@@ -9,22 +9,11 @@ import { setLocale } from '@/shared/i18n'
 setLocale('zh-CN')
 
 // Both selectors use their production item builders and renderers, without a backend.
+// Wire Instants are epoch seconds; the fractional value keeps sub-second precision.
 const dates = [
-  { id: 'instant', value: '2026-10-08T13:15:00Z' },
-  { id: 'offset', value: '2026-10-08T21:15:00+08:00' },
-  { id: 'cross-day', value: '2026-10-08T01:15:00Z' },
-  { id: 'wall-clock', value: '2026-10-08T13:15:00' },
-  { id: 'empty', value: null },
-  { id: 'invalid', value: 'not-a-date' },
-]
-const chatDates = [
-  ...dates,
-  { id: 'seconds', value: Date.parse('2026-10-08T13:15:00Z') / 1000 },
-  { id: 'milliseconds', value: Date.parse('2026-10-08T13:15:00Z') },
-]
-const selectorDates = [
-  ...dates,
-  { id: 'array', value: [2026, 10, 8, 13, 15] },
+  { id: 'instant', value: Date.parse('2026-10-08T13:15:00Z') / 1000 },
+  { id: 'cross-day', value: Date.parse('2026-10-08T01:15:00Z') / 1000 },
+  { id: 'fractional', value: Date.parse('2026-10-08T13:15:42.250Z') / 1000 },
 ]
 
 export function Harness() {
@@ -33,7 +22,7 @@ export function Harness() {
       <main style={{ padding: 16, maxWidth: 700, margin: '0 auto' }}>
         <section data-testid="chats">
           <h1>Chat</h1>
-          {chatDates.map(({ id, value }) => (
+          {dates.map(({ id, value }) => (
             <div key={id} data-testid={`chat-${id}`} style={{ marginBottom: 8 }}>
               <ChatCard
                 chat={{
@@ -49,7 +38,7 @@ export function Harness() {
         <section data-testid="sessions">
           <SelectionPanel
             title="Session"
-            items={selectorDates.map(({ id, value }) => sessionSelectionItem({
+            items={dates.map(({ id, value }) => sessionSelectionItem({
               sessionId: id, name: id, createdAt: value, lastActivityAt: value,
               firstMessagePreview: null, threadCount: 1,
             }))}
@@ -60,7 +49,7 @@ export function Harness() {
         <section data-testid="threads">
           <SelectionPanel
             title="Thread"
-            items={selectorDates.map(({ id, value }) => threadSelectionItem({
+            items={dates.map(({ id, value }) => threadSelectionItem({
               threadId: id, name: id, parentThreadId: null, createdAt: value,
               updatedAt: value, status: 'IDLE', processing: false,
               model: { providerName: 'offline', modelName: 'offline', variant: 'default' },

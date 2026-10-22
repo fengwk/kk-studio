@@ -18,11 +18,10 @@ import { isBoundTarget, samePaneTarget } from '@/features/chat/runtime/agent-pan
 import { createUuid, isCanonicalUuid } from '@/shared/lib/uuid'
 import { IdeOverlayPanel, type IdeCommandAction, type ResolvedEnvironmentInfo } from '@/features/environment/ide/IdeOverlayPanel'
 import type { AgentPaneCapabilities, AgentPaneDefaults, BranchRequestInput, PaneReport } from '@/features/chat/runtime/root-thread/types'
-import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import type { AgentRuntimeOwnerDTO } from '@/shared/api/contracts/ai-runtime'
-import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import type { PaneTarget } from '@/features/chat/runtime/agent-pane'
 import '@/features/chat/runtime/child-thread-view.css'
+import type { AgentDefinitionDTO, EnvironmentCardDTO } from '@/shared/api/generated/contracts'
 
 export type { AgentPaneCapabilities, AgentPaneDefaults, BranchRequestInput, PaneReport }
 

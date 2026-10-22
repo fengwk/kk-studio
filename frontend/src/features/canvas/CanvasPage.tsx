@@ -6,7 +6,6 @@ import { CanvasLibraryView } from '@/features/canvas/CanvasLibraryView'
 import { CanvasOverlays } from '@/features/canvas/CanvasOverlays'
 import { CanvasRuntimeProvider, useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
 import { isCanonicalUuid } from '@/shared/lib/uuid'
-import type { UUIDString } from '@/shared/api/contracts/studio'
 import '@/features/canvas/canvas.css'
 
 function CanvasPageBody() {
@@ -30,7 +29,7 @@ export function CanvasPage() {
   if (canvasId !== undefined && !isCanonicalUuid(canvasId)) {
     return <Navigate to="/canvas" replace />
   }
-  const initialCanvasId = canvasId as UUIDString | undefined
+  const initialCanvasId = canvasId as string | undefined
 
   return (
     <QueryClientProvider client={queryClient}>

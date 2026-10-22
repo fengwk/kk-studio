@@ -11,11 +11,13 @@ import { environmentService } from '@/shared/api/environment-service'
 import { harnessService } from '@/shared/api/harness-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
-import type { HarnessThreadDTO } from '@/shared/api/contracts/ai-runtime'
-import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
-import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import { shouldDeferToBlockingModal } from '@/shared/ui/blocking-overlay'
 import '@/features/chat/chat-workspace.css'
+import type {
+  AgentDefinitionDTO,
+  EnvironmentCardDTO,
+  HarnessThreadDTO,
+} from '@/shared/api/generated/contracts'
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 

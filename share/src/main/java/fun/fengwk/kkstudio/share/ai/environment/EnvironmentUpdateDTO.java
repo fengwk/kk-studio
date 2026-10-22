@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.share.ai.environment;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
+import org.jspecify.annotations.Nullable;
 
 import java.time.Instant;
 
@@ -20,7 +21,7 @@ public class EnvironmentUpdateDTO {
 
   /** 仅失败时返回；有界、去敏。 */
   @JsonInclude(JsonInclude.Include.NON_NULL)
-  private String error;
+  private @Nullable String error;
 
   private Instant createdAt;
   private Instant updatedAt;

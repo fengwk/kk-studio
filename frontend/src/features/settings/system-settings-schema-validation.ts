@@ -6,9 +6,9 @@ import {
 import type {
   SystemSettingsSchemaApplyTiming,
   SystemSettingsSchemaDTO,
-  SystemSettingsSchemaField,
+  SystemSettingsSchemaFieldDTO,
   SystemSettingsSchemaFieldType,
-} from '@/shared/api/contracts/system-settings'
+} from '@/shared/api/generated/contracts'
 
 const FIELD_TYPES = new Set<SystemSettingsSchemaFieldType>([
   'BOOLEAN',
@@ -91,7 +91,7 @@ export function validateSystemSettingsSchema(
 }
 
 function validateField(
-  field: SystemSettingsSchemaField,
+  field: SystemSettingsSchemaFieldDTO,
   draft: SystemSettingsSectionsDraft,
   paths: Set<string>,
 ): string | null {

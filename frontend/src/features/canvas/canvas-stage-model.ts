@@ -1,7 +1,7 @@
 import type { CanvasSnapshot, Group, ResourceNode } from '@/features/canvas/domain'
 import { groupIdFromFlowId } from '@/features/canvas/projection'
 import { functionSupportsReferences } from '@/features/canvas/generation'
-import type { CanvasFunctionDefinitionDTO } from '@/shared/api/contracts/studio'
+import type { CanvasFunctionDefinitionDTO } from '@/shared/api/generated/contracts'
 
 export type ContextMenuTarget =
   | { kind: 'resource'; node: ResourceNode; model: CanvasFunctionDefinitionDTO | null }

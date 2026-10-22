@@ -6,7 +6,7 @@ import {
   toEditableAgentUpdate,
 } from '@/features/catalog/ai-agent-draft-codec'
 import type { AgentDraft } from '@/features/catalog/ai-console-types'
-import type { AgentDefinitionDTO, AgentModelDTO } from '@/shared/api/contracts/ai-catalog'
+import type { AgentDefinitionDTO, AgentModelDTO } from '@/shared/api/generated/contracts'
 
 function model(): AgentModelDTO {
   return {
@@ -34,8 +34,8 @@ function model(): AgentModelDTO {
       variants: [{ id: 'quality' }],
     },
     version: '1',
-    createTime: null,
-    updateTime: null,
+    createTime: 0,
+    updateTime: 0,
   }
 }
 
@@ -110,8 +110,8 @@ describe('ai-agent-draft-codec', () => {
         subagents: [' writer ', ''],
       },
       version: '1',
-      createTime: null,
-      updateTime: null,
+      createTime: 0,
+      updateTime: 0,
     }
 
     expect(toAgentDraft(agent)).toEqual({
@@ -231,8 +231,8 @@ describe('ai-agent-draft-codec', () => {
         subagents: [],
       },
       version: '1',
-      createTime: null,
-      updateTime: null,
+      createTime: 0,
+      updateTime: 0,
     }
     const trueDraft = toAgentDraft(trueAgent)
     expect(trueDraft.inheritParentEnvironment).toBe(true)
@@ -268,8 +268,8 @@ describe('ai-agent-draft-codec', () => {
         subagents: [],
       },
       version: '1',
-      createTime: null,
-      updateTime: null,
+      createTime: 0,
+      updateTime: 0,
     }
 
     // 未配置模型投影为空字符串，绝不回退到父/第一个 model。

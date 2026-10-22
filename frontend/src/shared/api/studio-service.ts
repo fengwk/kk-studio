@@ -7,6 +7,7 @@ import {
   decodeCanvasPatch,
   decodeCanvasSnapshot,
 } from '@/shared/api/studio-codec'
+import { getLocale, translate } from '@/shared/i18n'
 import type {
   ApplyCanvasCommandsRequestDTO,
   CanvasDocumentDTO,
@@ -19,9 +20,7 @@ import type {
   CanvasPresignedUrlDTO,
   CanvasSnapshotDTO,
   CreateCanvasRequestDTO,
-  UUIDString,
-} from '@/shared/api/contracts/studio'
-import { getLocale, translate } from '@/shared/i18n'
+} from '@/shared/api/generated/contracts'
 
 export interface CanvasRequestOptions {
   signal?: AbortSignal
@@ -44,7 +43,7 @@ export function createCanvas(
 }
 
 export function deleteCanvas(
-  canvasId: UUIDString,
+  canvasId: string,
   options?: CanvasRequestOptions,
 ): Promise<void> {
   return canvasRequest(`/canvases/${canvasId}`, {
@@ -54,7 +53,7 @@ export function deleteCanvas(
 }
 
 export function getCanvas(
-  canvasId: UUIDString,
+  canvasId: string,
   options?: CanvasRequestOptions,
 ): Promise<CanvasSnapshotDTO> {
   return canvasRequest(`/canvases/${canvasId}`, { signal: options?.signal }, decodeCanvasSnapshot)
@@ -65,7 +64,7 @@ export function getCanvas(
  * 响应通过本地 reducer 直接应用；重复/过期 patch 会被忽略。
  */
 export function postCanvasCommands(
-  canvasId: UUIDString,
+  canvasId: string,
   request: ApplyCanvasCommandsRequestDTO,
   options?: CanvasRequestOptions,
 ): Promise<CanvasPatchDTO> {
@@ -88,8 +87,8 @@ export function listCanvasFunctions(
 }
 
 export function getCanvasResourceOriginalUrl(
-  canvasId: UUIDString,
-  resourceId: UUIDString,
+  canvasId: string,
+  resourceId: string,
   options?: CanvasRequestOptions,
 ): Promise<CanvasPresignedUrlDTO> {
   return canvasRequest(`/canvases/${canvasId}/resources/${resourceId}/download-url`, {
@@ -99,8 +98,8 @@ export function getCanvasResourceOriginalUrl(
 }
 
 export function getCanvasResourcePreviewUrl(
-  canvasId: UUIDString,
-  resourceId: UUIDString,
+  canvasId: string,
+  resourceId: string,
   options?: CanvasRequestOptions,
 ): Promise<CanvasPresignedUrlDTO> {
   return canvasRequest(`/canvases/${canvasId}/resources/${resourceId}/preview-url`, {
@@ -110,8 +109,8 @@ export function getCanvasResourcePreviewUrl(
 }
 
 export function startCanvasFunctionRun(
-  canvasId: UUIDString,
-  nodeId: UUIDString,
+  canvasId: string,
+  nodeId: string,
   request: CanvasFunctionRunRequestDTO,
   options?: CanvasRequestOptions,
 ): Promise<CanvasFunctionRunDTO> {
@@ -123,8 +122,8 @@ export function startCanvasFunctionRun(
 }
 
 export function getCanvasFunctionRun(
-  canvasId: UUIDString,
-  nodeId: UUIDString,
+  canvasId: string,
+  nodeId: string,
   options?: CanvasRequestOptions,
 ): Promise<CanvasFunctionRunDTO> {
   return canvasRequest(`/canvases/${canvasId}/nodes/${nodeId}/function-run`, {
@@ -133,8 +132,8 @@ export function getCanvasFunctionRun(
 }
 
 export function cancelCanvasFunctionRun(
-  canvasId: UUIDString,
-  nodeId: UUIDString,
+  canvasId: string,
+  nodeId: string,
   request: CanvasFunctionCancelRequestDTO,
   options?: CanvasRequestOptions,
 ): Promise<CanvasFunctionRunDTO> {
@@ -146,8 +145,8 @@ export function cancelCanvasFunctionRun(
 }
 
 export function resolveCanvasFunctionRun(
-  canvasId: UUIDString,
-  nodeId: UUIDString,
+  canvasId: string,
+  nodeId: string,
   request: CanvasFunctionUnknownResolutionDTO,
   options?: CanvasRequestOptions,
 ): Promise<CanvasFunctionRunDTO> {

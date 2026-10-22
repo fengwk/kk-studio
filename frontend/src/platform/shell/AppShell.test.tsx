@@ -423,7 +423,7 @@ describe('AppShell interactions pending badge and navigation behaviors', () => {
           environmentId: null,
           environmentName: null,
           waitingCount: null,
-          createTime: '2026-01-01T00:00:00Z',
+          createTime: 1767225600,
         },
       ],
       nextCursor: null,

@@ -1,13 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
 import type { QueryClient } from '@tanstack/react-query'
 import { ApiError } from '@/shared/api/client'
-import type {
-  CanvasFunctionRunDTO,
-  CanvasFunctionRunRequestDTO,
-  CanvasFunctionVersionDTO,
-  CanvasSnapshotDTO,
-  UUIDString,
-} from '@/shared/api/contracts/studio'
 import { isCanvasFunctionVersion } from '@/shared/api/studio-codec'
 import {
   cancelCanvasFunctionRun,
@@ -16,11 +9,17 @@ import {
   startCanvasFunctionRun,
 } from '@/shared/api/studio-service'
 import { queryKeys } from '@/shared/lib/query-keys'
+import type {
+  CanvasFunctionRunDTO,
+  CanvasFunctionRunRequestDTO,
+  CanvasFunctionVersionDTO,
+  CanvasSnapshotDTO,
+} from '@/shared/api/generated/contracts'
 
 const PENDING_RUN_STORAGE_PREFIX = 'kkstudio.canvas.pending-run:'
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
-export function isCanonicalUUID(value: unknown): value is UUIDString {
+export function isCanonicalUUID(value: unknown): value is string {
   return typeof value === 'string' && UUID_REGEX.test(value)
 }
 
@@ -60,10 +59,10 @@ function getLocalStorageSafe(): Storage | null {
 }
 
 export interface PendingFunctionRunAttempt {
-  canvasId: UUIDString
-  nodeId: UUIDString
+  canvasId: string
+  nodeId: string
   request: CanvasFunctionRunRequestDTO
-  basisRequestId: UUIDString | null
+  basisRequestId: string | null
   createdAt: number
 }
 
@@ -291,17 +290,17 @@ function isTerminalClientError(error: unknown): boolean {
 }
 
 export interface FunctionRunActions {
-  startFunctionRun: (nodeId: UUIDString) => Promise<void>
-  cancelFunctionRun: (nodeId: UUIDString, requestId: UUIDString) => Promise<void>
+  startFunctionRun: (nodeId: string) => Promise<void>
+  cancelFunctionRun: (nodeId: string, requestId: string) => Promise<void>
   resolveFunctionRun: (
-    nodeId: UUIDString,
-    requestId: UUIDString,
+    nodeId: string,
+    requestId: string,
     resolution: 'RESUME' | 'FAILED' | 'CANCELLED',
     verification: string,
   ) => Promise<void>
-  discardPendingRun: (nodeId: UUIDString, expectedRaw: string) => boolean
+  discardPendingRun: (nodeId: string, expectedRaw: string) => boolean
   localPendingErrors: Record<string, { message: string; raw: string | null }>
-  isNodeInFlight: (nodeId: UUIDString) => boolean
+  isNodeInFlight: (nodeId: string) => boolean
 }
 
 /**
@@ -314,12 +313,12 @@ export interface FunctionRunActions {
  * 重放只原样沿用持久化请求，绝不用最新目录版本替换。
  */
 export function useCanvasFunctionRun(options: {
-  canvasId: UUIDString | null
+  canvasId: string | null
   queryClient: QueryClient
   setToast: (toast: string) => void
-  flushFunctionConfig: (nodeId: UUIDString) => Promise<void>
+  flushFunctionConfig: (nodeId: string) => Promise<void>
   /** 解析该节点当前将被执行函数在用户所见目录中的版本；缺失时返回 null。 */
-  resolveFunctionVersion: (nodeId: UUIDString) => CanvasFunctionVersionDTO | null
+  resolveFunctionVersion: (nodeId: string) => CanvasFunctionVersionDTO | null
 }): FunctionRunActions {
   const { canvasId, queryClient, setToast, flushFunctionConfig, resolveFunctionVersion } = options
   const inFlightNodesRef = useRef(new Set<string>())
@@ -327,11 +326,11 @@ export function useCanvasFunctionRun(options: {
     Record<string, { message: string; raw: string | null }>
   >({})
 
-  const isNodeInFlight = useCallback((nodeId: UUIDString): boolean => {
+  const isNodeInFlight = useCallback((nodeId: string): boolean => {
     return inFlightNodesRef.current.has(nodeId)
   }, [])
 
-  const discardPendingRun = useCallback((nodeId: UUIDString, expectedRaw: string): boolean => {
+  const discardPendingRun = useCallback((nodeId: string, expectedRaw: string): boolean => {
     // 1. 禁止在 flight 时 discard
     if (!canvasId || inFlightNodesRef.current.has(nodeId)) {
       return false
@@ -356,7 +355,7 @@ export function useCanvasFunctionRun(options: {
     }
   }, [canvasId, setToast])
 
-  const publishRun = useCallback((run: CanvasFunctionRunDTO, basisRequestId: UUIDString | null) => {
+  const publishRun = useCallback((run: CanvasFunctionRunDTO, basisRequestId: string | null) => {
     if (!canvasId) {
       return
     }
@@ -370,7 +369,7 @@ export function useCanvasFunctionRun(options: {
   }, [canvasId, queryClient])
 
   /** 捕获该 node 当前缓存的 run.requestId（可 null）作为本地投影的 CAS basis。 */
-  const readBasisRequestId = useCallback((nodeId: UUIDString): UUIDString | null => {
+  const readBasisRequestId = useCallback((nodeId: string): string | null => {
     if (!canvasId) {
       return null
     }
@@ -378,7 +377,7 @@ export function useCanvasFunctionRun(options: {
     return current?.nodes.find((node) => node.id === nodeId)?.run?.requestId ?? null
   }, [canvasId, queryClient])
 
-  const startFunctionRun = useCallback(async (nodeId: UUIDString) => {
+  const startFunctionRun = useCallback(async (nodeId: string) => {
     if (!canvasId || inFlightNodesRef.current.has(nodeId)) {
       return
     }
@@ -475,7 +474,7 @@ export function useCanvasFunctionRun(options: {
           canvasId,
           nodeId,
           request: {
-            requestId: crypto.randomUUID() as UUIDString,
+            requestId: crypto.randomUUID(),
             // 只使用点击瞬间复制的副本：绝不在 flush 之后重新读取目录版本。
             expectedVersion: clickedVersion,
           },
@@ -533,8 +532,8 @@ export function useCanvasFunctionRun(options: {
   }, [canvasId, flushFunctionConfig, publishRun, queryClient, readBasisRequestId, resolveFunctionVersion, setToast])
 
   const cancelFunctionRun = useCallback(async (
-    nodeId: UUIDString,
-    requestId?: UUIDString,
+    nodeId: string,
+    requestId?: string,
   ) => {
     const targetRequestId = requestId ?? readBasisRequestId(nodeId)
     if (!canvasId || !targetRequestId || inFlightNodesRef.current.has(nodeId)) {
@@ -553,8 +552,8 @@ export function useCanvasFunctionRun(options: {
   }, [canvasId, publishRun, readBasisRequestId, setToast])
 
   const resolveFunctionRun = useCallback(async (
-    nodeId: UUIDString,
-    requestId: UUIDString,
+    nodeId: string,
+    requestId: string,
     resolution: 'RESUME' | 'FAILED' | 'CANCELLED',
     verification: string,
   ) => {
@@ -598,7 +597,7 @@ export function useCanvasFunctionRun(options: {
 export function patchSnapshotRun(
   snapshot: CanvasSnapshotDTO | undefined,
   run: CanvasFunctionRunDTO,
-  basisRequestId: UUIDString | null,
+  basisRequestId: string | null,
 ): CanvasSnapshotDTO | undefined {
   if (!snapshot) {
     return snapshot

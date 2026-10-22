@@ -6,7 +6,7 @@ import '@/styles.css'
 import '@/features/canvas/canvas.css'
 import { CanvasLibraryView } from '@/features/canvas/CanvasLibraryView'
 import { setLocale } from '@/shared/i18n'
-import type { CanvasDocumentDTO } from '@/shared/api/contracts/studio'
+import type { CanvasDocumentDTO } from '@/shared/api/generated/contracts'
 
 /**
  * Canvas 库的真实浏览器回归：挂载真正的 CanvasLibraryView（含 react-query、react-router 与

@@ -6,6 +6,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.jspecify.annotations.Nullable;
 
 /** Project Snapshot 中的 Issue 投影条目 DTO。 */
 @Data
@@ -17,7 +18,7 @@ public class ProjectIssueSnapshotDTO {
   private IssueDTO issue;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private IssueRunSummaryDTO currentOrLatestRun;
+  private @Nullable IssueRunSummaryDTO currentOrLatestRun;
 
   @JsonAnySetter
   public void rejectUnknownField(String name, Object value) {

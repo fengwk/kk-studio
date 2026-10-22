@@ -7,7 +7,7 @@ import { setLocale } from '@/shared/i18n'
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { IdeLifecycleProvider } from '@/features/environment/ide/IdeLifecycleProvider'
 import { AgentPane } from '@/features/chat/runtime/AgentPane'
-import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
+import type { AgentDefinitionDTO } from '@/shared/api/generated/contracts'
 
 setLocale('zh-CN')
 
@@ -54,8 +54,8 @@ const router = createMemoryRouter([{
                 subagents: [],
               },
               version: '1',
-              createTime: '2026-10-01T00:00:00Z',
-              updateTime: '2026-10-01T00:00:00Z',
+              createTime: 1790812800,
+              updateTime: 1790812800,
             },
             ...['coder', 'broken-agent'].map((name): AgentDefinitionDTO => ({
               name,
@@ -66,8 +66,8 @@ const router = createMemoryRouter([{
               variant: 'fast',
               config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
               version: '1',
-              createTime: '2026-10-01T00:00:00Z',
-              updateTime: '2026-10-01T00:00:00Z',
+              createTime: 1790812800,
+              updateTime: 1790812800,
             })),
           ]}
         />

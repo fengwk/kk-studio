@@ -2,7 +2,7 @@ import { AlertCircle, Clock, RotateCcw, ShieldAlert, XCircle } from 'lucide-reac
 import { Badge } from '@/shared/ui/data/Badge'
 import { useI18n } from '@/shared/i18n'
 import { Button } from '@/shared/ui/controls/Button'
-import type { ProjectIssueSnapshotDTO } from '../types'
+import type { ProjectIssueSnapshotDTO } from '@/shared/api/generated/contracts'
 
 export interface IssueCardProps {
   item: ProjectIssueSnapshotDTO

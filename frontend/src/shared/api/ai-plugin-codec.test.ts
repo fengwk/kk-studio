@@ -17,9 +17,9 @@ describe('ai-plugin-codec', () => {
     },
     status: 'CONNECTED',
     region: 'CN',
-    expiresAt: '2026-10-01T12:00:00Z',
-    nextRefreshAt: '2026-09-25T12:00:00Z',
-    lastRefreshedAt: '2026-09-01T12:00:00Z',
+    expiresAt: 1790856000,
+    nextRefreshAt: 1790337600,
+    lastRefreshedAt: 1788264000,
     lastRefreshError: null,
     configuration: {
       revision: '5',
@@ -214,9 +214,9 @@ describe('ai-plugin-codec', () => {
       status: 'REAUTH_REQUIRED',
       lastRefreshError: 'provider rejected the stored static key',
     }).lastRefreshError).toBe('provider rejected the stored static key')
-    for (const expiresAt of [true, {}, Infinity, NaN, 'not-a-time']) {
+    for (const expiresAt of [true, {}, Infinity, NaN, 'not-a-time', '2026-10-01T12:00:00Z']) {
       expect(() => decodePluginDTO({ ...sampleDeepLinkDTO, expiresAt }))
-        .toThrowError(/epoch seconds or an ISO date-time string/)
+        .toThrowError(/must be epoch seconds/)
     }
   })
 
@@ -248,11 +248,6 @@ describe('ai-plugin-codec', () => {
 
   it('decodes connection check dimensions and checkedAt without rescaling the wire value', () => {
     expect(decodePluginConnectionCheckDTO(connectionCheckDTO)).toEqual(connectionCheckDTO)
-    // 检查时刻也接受既有 HTTP Instant 的 ISO 语义，但绝不擅自按毫秒重算。
-    expect(decodePluginConnectionCheckDTO({
-      ...connectionCheckDTO,
-      checkedAt: '2026-03-01T12:00:00Z',
-    }).checkedAt).toBe('2026-03-01T12:00:00Z')
   })
 
   it('rejects unknown, missing, non-contract or overflowing connection check payloads', () => {
@@ -280,7 +275,7 @@ describe('ai-plugin-codec', () => {
     expect(() => decodePluginConnectionCheckDTO({ ...connectionCheckDTO, checkedAt: null }))
       .toThrowError(/checkedAt must not be null/)
     expect(() => decodePluginConnectionCheckDTO({ ...connectionCheckDTO, checkedAt: 'yesterday' }))
-      .toThrowError(/epoch seconds or an ISO date-time string/)
+      .toThrowError(/must be epoch seconds/)
   })
 
   it('rejects a zero applied revision', () => {

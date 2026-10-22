@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.share.ai.catalog;
 
 import lombok.Data;
+import org.jspecify.annotations.Nullable;
 
 import java.time.Instant;
 
@@ -18,7 +19,7 @@ public class AgentModelDTO {
   private String modelId;
 
   /** 可空描述（text，无长度上限）。 */
-  private String description;
+  private @Nullable String description;
 
   /** 完整结构化可执行配置（limit/abilities/pricing/defaultVariant/variants）。 */
   private AgentModelConfigDTO config;

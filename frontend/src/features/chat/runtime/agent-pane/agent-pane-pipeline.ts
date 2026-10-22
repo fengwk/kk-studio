@@ -1,10 +1,8 @@
 import type {
-  AgentCommandBatchRequestDTO,
   AgentRuntimeOwnerDTO,
-  HarnessBranchSettingsDTO,
+  HarnessCommandBatchDTO,
   HarnessCommandCreateDTO,
-  HarnessThreadDTO,
-  ThreadCommandBatchRequestDTO,
+  HarnessThreadCommandBatchDTO,
 } from '@/shared/api/contracts/ai-runtime'
 import {
   buildBranchDiffCommands,
@@ -23,6 +21,7 @@ import {
   samePaneTarget,
   type PaneTarget,
 } from '@/features/chat/runtime/agent-pane/pane-target'
+import type { HarnessBranchSettingsDTO, HarnessThreadDTO } from '@/shared/api/generated/contracts'
 
 /**
  * 只有容器创建（NEW_SESSION / NEW_THREAD）需要产品 owner；既有 Thread 的发送、Goal、
@@ -53,7 +52,7 @@ export interface GoalAcceptanceBuildInput {
 export interface FrozenCommandBatchRequest {
   owner: AgentRuntimeOwnerDTO
   target: PaneTarget
-  request: AgentCommandBatchRequestDTO
+  request: HarnessCommandBatchDTO
   branchDraft: BranchDraft
   composerParts: ComposerPart[]
   identity: string
@@ -113,7 +112,7 @@ export function buildAcceptanceRequest(input: AcceptanceBuildInput): FrozenComma
           message,
         ]
   const target = buildCreationTarget(input.target, input.draft)
-  const request: AgentCommandBatchRequestDTO = {
+  const request: HarnessCommandBatchDTO = {
     owner: { ...input.owner },
     target,
     commands,
@@ -152,7 +151,7 @@ export function buildGoalAcceptanceRequest(input: GoalAcceptanceBuildInput): Fro
           goalCommand,
         ]
   const target = buildCreationTarget(input.target, input.draft)
-  const request: AgentCommandBatchRequestDTO = {
+  const request: HarnessCommandBatchDTO = {
     owner: { ...input.owner },
     target,
     commands,
@@ -189,7 +188,7 @@ export function isCursorFreeThreadBatch(commands: HarnessCommandCreateDTO[]): bo
 export function buildThreadCommandBatchRequest(
   thread: HarnessThreadDTO,
   commands: HarnessCommandCreateDTO[],
-): ThreadCommandBatchRequestDTO {
+): HarnessThreadCommandBatchDTO {
   if (isCursorFreeThreadBatch(commands)) {
     return { commands }
   }

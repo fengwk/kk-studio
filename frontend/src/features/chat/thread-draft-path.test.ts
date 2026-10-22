@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { threadDraftPath } from './thread-draft-path'
-import type { EntryType, HarnessSessionEntryDTO } from '@/shared/api/contracts/ai-runtime'
+import type { EntryType } from '@/shared/api/contracts/ai-runtime'
+import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 
 const entry = (entryId: string, parentEntryId: string | null, entryType: EntryType = 'MESSAGE'): HarnessSessionEntryDTO => ({
-  entryId, parentEntryId, entryType, sessionId: 'session', payloadJson: '{}', createTime: null,
+  entryId, parentEntryId, entryType, sessionId: 'session', payloadJson: '{}', createTime: 0,
+  usageCost: null,
 })
 
 describe('closed Thread draft prefix', () => {

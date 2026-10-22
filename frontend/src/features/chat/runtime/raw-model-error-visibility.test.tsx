@@ -1,10 +1,5 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import type {
-  HarnessSessionEntryDTO,
-  ModelAttemptFailureDTO,
-  ModelInvocationDTO,
-} from '@/shared/api/contracts/ai-runtime'
 import { buildThreadEventTimeline } from '@/features/chat/runtime/thread-events'
 import { buildThreadTimeline } from '@/features/chat/runtime/thread-timeline-builder'
 import type {
@@ -14,6 +9,11 @@ import { AssistantMessageBlock } from '@/features/chat/runtime/thread-panel/mess
 import { ModelAttemptFailureMessageBlock } from '@/features/chat/runtime/thread-panel/messages/ModelAttemptFailureMessageBlock'
 import { ThreadEventDetail } from '@/features/chat/runtime/thread-panel/ThreadEventDetail'
 import { translate } from '@/shared/i18n'
+import type {
+  HarnessSessionEntryDTO,
+  ModelAttemptFailureDTO,
+  ModelInvocationDTO,
+} from '@/shared/api/generated/contracts'
 
 /** 供应商原始多行 JSON 错误（HTTP <status>\n<body> 格式，>128 字符）。 */
 const RAW_VENDOR_ERROR_BODY = [
@@ -61,7 +61,8 @@ function sessionEntry(
     sessionId: 'session-1',
     entryType,
     payloadJson: JSON.stringify(payload),
-    createTime: '2026-09-15T12:00:00Z',
+    createTime: 1789473600,
+    usageCost: null,
     ...overrides,
   }
 }
@@ -142,8 +143,8 @@ describe('raw model error visibility (所见即所得：真实错误不脱敏、
         thinking: 'reasoning',
         errorCode: 'PROVIDER_ERROR',
         errorMessage: RAW_VENDOR_ERROR_BODY,
-        failedAt: '2026-09-15T12:00:00Z',
-        retryAt: '2026-09-15T12:00:05Z',
+        failedAt: 1789473600,
+        retryAt: 1789473605,
       }
 
       const timeline = buildThreadTimeline([], [], [], null, null, [failureDto])
@@ -286,8 +287,8 @@ describe('raw model error visibility (所见即所得：真实错误不脱敏、
         thinking: '',
         errorCode: 'RATE_LIMIT',
         errorMessage: RAW_VENDOR_ERROR_BODY,
-        failedAt: '2026-09-15T12:00:00Z',
-        retryAt: '2026-09-15T12:00:05Z',
+        failedAt: 1789473600,
+        retryAt: 1789473605,
       }
 
       const records = buildThreadEventTimeline({
@@ -324,8 +325,8 @@ describe('raw model error visibility (所见即所得：真实错误不脱敏、
           message: RAW_VENDOR_ERROR_BODY,
         }),
         resultEntryId: null,
-        createTime: '2026-09-15T12:00:00Z',
-        updateTime: '2026-09-15T12:00:01Z',
+        createTime: 1789473600,
+        updateTime: 1789473601,
       }
 
       const records = buildThreadEventTimeline({

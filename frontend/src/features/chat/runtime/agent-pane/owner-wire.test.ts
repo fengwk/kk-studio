@@ -3,7 +3,7 @@ import { buildAcceptanceRequest } from '@/features/chat/runtime/agent-pane/agent
 import { buildGoalBatchPlan, buildMessageBatchPlan } from '@/features/chat/command-batch-plan'
 import { createTextPart } from '@/features/chat/composer/composer-parts'
 import { harnessService } from '@/shared/api/harness-service'
-import type { HarnessThreadDTO } from '@/shared/api/contracts/ai-runtime'
+import type { HarnessThreadDTO } from '@/shared/api/generated/contracts'
 
 const captured = vi.hoisted(() => [] as Array<{ url: string; data: string }>)
 
@@ -44,8 +44,8 @@ const thread: HarnessThreadDTO = {
   processing: false,
   executionControl: 'RUNNABLE',
   branchSettings: { agentName: 'coder', model: draft.model, environmentName: null, goal: null },
-  createTime: null,
-  updateTime: null,
+  createTime: 0,
+  updateTime: 0,
 }
 
 /** Reads the serialized request captured by the adapter, failing loudly on a missing entry. */

@@ -12,12 +12,11 @@ import {
   startCanvasFunctionRun,
 } from '@/shared/api/studio-service'
 import { ApiError } from '@/shared/api/client'
-import type { UUIDString } from '@/shared/api/contracts/studio'
 
-const ID: UUIDString = '11111111-1111-4111-8111-111111111111'
-const CANVAS_ID: UUIDString = '22222222-2222-4222-8222-222222222222'
-const NODE_ID: UUIDString = '33333333-3333-4333-8333-333333333333'
-const REQUEST_ID: UUIDString = '55555555-5555-4555-8555-555555555555'
+const ID: string = '11111111-1111-4111-8111-111111111111'
+const CANVAS_ID: string = '22222222-2222-4222-8222-222222222222'
+const NODE_ID: string = '33333333-3333-4333-8333-333333333333'
+const REQUEST_ID: string = '55555555-5555-4555-8555-555555555555'
 /** 目录版本夹具：start 必须回传同形状 expectedVersion，cancel 只发 requestId。 */
 const FUNCTION_VERSION = { definitionFingerprint: 'e'.repeat(64) }
 

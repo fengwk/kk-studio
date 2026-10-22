@@ -1,10 +1,10 @@
+import type { AgentProviderType } from '@/shared/api/contracts/ai-catalog'
+import type { CatalogVersion } from '@/shared/api/contracts/base'
 import type {
   AgentDefinitionType,
   AgentModelInputModality,
-  AgentProviderType,
   SkillRefDTO,
-} from '@/shared/api/contracts/ai-catalog'
-import type { CatalogVersion } from '@/shared/api/contracts/base'
+} from '@/shared/api/generated/contracts'
 
 export interface ProviderDraft {
   name: string
@@ -121,5 +121,3 @@ export type ResourceModal =
       expectedVersion: CatalogVersion
     }
 
-export const providerTypes = ['openai', 'openai_responses', 'anthropic', 'google'] as const satisfies
-  readonly AgentProviderType[]

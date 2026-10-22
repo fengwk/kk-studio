@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.share.ai.plugin;
 
 import lombok.Data;
+import org.jspecify.annotations.Nullable;
 
 import java.util.Map;
 
@@ -17,7 +18,7 @@ import java.util.Map;
 public class PluginConfigurationDTO {
 
   /** 该投影对应的配置修订（canonical 非负十进制字符串）；尚无历史时为 null。 */
-  private String revision;
+  private @Nullable String revision;
 
   /** 该修订的普通值 canonical JSON 文本。 */
   private String valuesJson;

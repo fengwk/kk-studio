@@ -11,7 +11,8 @@ import {
 } from '@/features/chat/runtime/thread-panel/thread-commands'
 import { createTextPart, createAttachmentPart } from '@/features/chat/composer/composer-parts'
 import type { BranchDraft } from '@/features/chat/branch-draft'
-import type { AgentRuntimeOwnerDTO, HarnessThreadDTO } from '@/shared/api/contracts/ai-runtime'
+import type { AgentRuntimeOwnerDTO } from '@/shared/api/contracts/ai-runtime'
+import type { HarnessThreadDTO } from '@/shared/api/generated/contracts'
 
 const baseDraft: BranchDraft = {
   agentName: 'assistant',
@@ -38,8 +39,8 @@ const mockThread: HarnessThreadDTO = {
     environmentName: null,
     goal: { id: 'existing-goal-id', text: 'Existing goal text' },
   },
-  createTime: '2026-09-24T10:00:00Z',
-  updateTime: '2026-09-24T10:00:00Z',
+  createTime: 1790244000,
+  updateTime: 1790244000,
 }
 
 describe('AgentPane Goal pipeline and owner-free command availability', () => {

@@ -44,25 +44,13 @@ import { environmentService } from '@/shared/api/environment-service'
 import { interactionService } from '@/shared/api/interaction-service'
 import { ApiError } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
-import type { AgentDefinitionDTO, AgentModelDTO } from '@/shared/api/contracts/ai-catalog'
 import type {
   ApprovalInteractionDTO,
   InteractionDTO,
   InteractionPageDTO,
 } from '@/shared/api/contracts/ai-interaction'
-import type { StoragePresignedUrlDTO } from '@/shared/api/contracts/storage'
-import type {
-  AgentRuntimeOwnerDTO,
-  HarnessModelRequestDebugDTO,
-  HarnessSessionDTO,
-  HarnessSessionEntryDTO,
-  HarnessThreadDTO,
-  HarnessThreadSnapshotDTO,
-  HarnessThreadStopResultDTO,
-  ProviderRequestPreviewDTO,
-  ToolInvocationDTO,
-} from '@/shared/api/contracts/ai-runtime'
-import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
+import type { StorageBlobUrl } from '@/shared/api/contracts/storage'
+import type { AgentRuntimeOwnerDTO } from '@/shared/api/contracts/ai-runtime'
 import type { ThreadCommand } from '@/features/chat/runtime/thread-panel/thread-commands'
 import {
   loadThreadDraft,
@@ -71,6 +59,19 @@ import {
 import { queryKeys } from '@/shared/lib/query-keys'
 import { setLocale } from '@/shared/i18n'
 import { createMockIDBFactory } from '@/features/canvas/__tests__/mock-idb'
+import type {
+  AgentDefinitionDTO,
+  AgentModelDTO,
+  EnvironmentCardDTO,
+  HarnessModelRequestDebugDTO,
+  HarnessProviderRequestPreviewDTO,
+  HarnessSessionDTO,
+  HarnessSessionEntryDTO,
+  HarnessThreadDTO,
+  HarnessThreadSnapshotDTO,
+  HarnessThreadStopResultDTO,
+  ToolInvocationDTO,
+} from '@/shared/api/generated/contracts'
 
 const CHAT_ID = 'chat-1'
 const THREAD_ID = '11111111-2222-4333-8444-555555555555'
@@ -160,14 +161,14 @@ const { fakeStorage } = vi.hoisted(() => {
     state: 'PENDING' as const,
     blobId: null,
     presignedPut: { method: 'PUT' as const, url: 'https://storage.test/put', headers: {} },
-    expiresAt: null,
+    expiresAt: 0,
   }))
   const completeUpload = vi.fn(async (uploadId: string) => ({
     id: uploadId,
     state: 'READY' as const,
     blobId: `blob-${uploadId}`,
     presignedPut: null,
-    expiresAt: null,
+    expiresAt: 0,
   }))
   const deleteUpload = vi.fn(async () => undefined)
   const uploadFile = vi.fn(async () => undefined)
@@ -180,9 +181,8 @@ const { fakeStorage } = vi.hoisted(() => {
       getBlobDownloadUrl: vi.fn(
         async (
           _blobId: string,
-        ): Promise<StoragePresignedUrlDTO> => ({
+        ): Promise<StorageBlobUrl> => ({
           url: 'https://storage.test/blob',
-          expiresAt: null,
           mediaType: 'application/octet-stream',
           sizeBytes: 128,
         }),
@@ -190,7 +190,7 @@ const { fakeStorage } = vi.hoisted(() => {
       getBlobPreviewUrl: vi.fn(
         async (
           _blobId: string,
-        ): Promise<StoragePresignedUrlDTO | null> => null,
+        ): Promise<StorageBlobUrl | null> => null,
       ),
     },
   }
@@ -261,8 +261,8 @@ const agents: AgentDefinitionDTO[] = [{
   variant: 'default',
   config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
   version: '0',
-  createTime: null,
-  updateTime: null,
+  createTime: 0,
+  updateTime: 0,
 }]
 
 const models: AgentModelDTO[] = [{
@@ -290,8 +290,8 @@ const models: AgentModelDTO[] = [{
     variants: [{ id: 'default' }],
   },
   version: '0',
-  createTime: null,
-  updateTime: null,
+  createTime: 0,
+  updateTime: 0,
 }]
 
 function thread(
@@ -318,8 +318,8 @@ function thread(
       environmentName: null,
       goal: null,
     },
-    createTime: null,
-    updateTime: null,
+    createTime: 0,
+    updateTime: 0,
     ...rest,
   }
 }
@@ -349,14 +349,15 @@ function acceptedResponse(currentThread = thread()) {
     parentEntryId: null,
     entryType: 'ROOT',
     payloadJson: '{}',
-    createTime: null,
+    createTime: 0,
+    usageCost: null,
   }
   return {
     session: {
       sessionId: currentThread.sessionId,
       /** Session 名称（服务端权威必填非空）。 */
       name: currentThread.name,
-      createdAt: null,
+      createdAt: 0,
     },
     rootEntry,
     thread: currentThread,
@@ -385,13 +386,13 @@ beforeEach(() => {
   vi.mocked(agentService.listAgents).mockResolvedValue({
     pageNumber: 1,
     pageSize: 50,
-    totalCount: agents.length,
+    totalCount: String(agents.length),
     results: agents,
   })
   vi.mocked(agentService.listModels).mockResolvedValue({
     pageNumber: 1,
     pageSize: 50,
-    totalCount: models.length,
+    totalCount: String(models.length),
     results: models,
   })
   vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot())
@@ -413,7 +414,7 @@ beforeEach(() => {
   vi.mocked(harnessService.renameSession).mockImplementation(async (sessionId, data) => ({
     sessionId,
     name: data.name,
-    createdAt: null,
+    createdAt: 0,
   }))
   vi.mocked(harnessService.renameThread).mockImplementation(async (threadId, data) =>
     thread({ threadId, name: data.name }),
@@ -472,7 +473,7 @@ function approvalInteraction(threadId: string): ApprovalInteractionDTO {
     environmentId: null,
     environmentName: null,
     waitingCount: null,
-    createTime: '2026-07-28T10:00:01Z',
+    createTime: 1785232801,
   }
 }
 
@@ -481,7 +482,8 @@ describe('AgentPane orchestration', () => {
     entryId: 'draft-root', sessionId: 'session-1', parentEntryId: null, entryType: 'ROOT',
     payloadJson: JSON.stringify({ settings: {
       agentName: 'assistant', model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' }, environmentName: null,
-    } }), createTime: null,
+    } }), createTime: 0,
+    usageCost: null,
   }
   const historyMessage: HarnessSessionEntryDTO = {
     ...historyRoot, entryId: 'draft-message', parentEntryId: 'draft-root', entryType: 'MESSAGE',
@@ -565,12 +567,12 @@ describe('AgentPane orchestration', () => {
   it('selects an existing Thread through the picker and keeps inline rename cancellation local', async () => {
     const user = userEvent.setup()
     vi.mocked(chatService.listChatSessions).mockResolvedValue([{
-      sessionId: 'session-1', name: 'Session One', createdAt: null, lastActivityAt: null,
+      sessionId: 'session-1', name: 'Session One', createdAt: 0, lastActivityAt: 0,
       firstMessagePreview: null, threadCount: 1,
     }])
     vi.mocked(harnessService.listSessionThreads).mockResolvedValue([{
       threadId: THREAD_ID, parentThreadId: null, name: 'thread-name',
-      createdAt: null, updatedAt: null, status: 'IDLE', processing: false,
+      createdAt: 0, updatedAt: 0, status: 'IDLE', processing: false,
       model: thread().branchSettings.model, headMessagePreview: null,
     }])
     renderPane({ type: 'CHAT', chatId: CHAT_ID })
@@ -592,7 +594,7 @@ describe('AgentPane orchestration', () => {
     const user = userEvent.setup()
     localStorage.setItem(`kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`, JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }))
     vi.mocked(chatService.listChatSessions).mockResolvedValue([{
-      sessionId: 'session-1', name: 'Parent Session', createdAt: null, lastActivityAt: null,
+      sessionId: 'session-1', name: 'Parent Session', createdAt: 0, lastActivityAt: 0,
       firstMessagePreview: null, threadCount: 1,
     }])
     renderPane({ type: 'CHAT', chatId: CHAT_ID })
@@ -685,7 +687,8 @@ describe('AgentPane orchestration', () => {
     const user = userEvent.setup()
     vi.mocked(harnessService.listSessionEntries).mockResolvedValue([{
       entryId: 'entry-1', sessionId: 'session-1', parentEntryId: null,
-      entryType: 'ROOT', payloadJson: '{}', createTime: null,
+      entryType: 'ROOT', payloadJson: '{}', createTime: 0,
+      usageCost: null,
     }])
     localStorage.setItem(
       `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
@@ -973,7 +976,8 @@ describe('AgentPane orchestration', () => {
       parentEntryId: null,
       entryType: 'ROOT',
       payloadJson: '{}',
-      createTime: null,
+      createTime: 0,
+      usageCost: null,
     }
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
       snapshot(thread(), { entries: [rootEntry] }),
@@ -1002,8 +1006,8 @@ describe('AgentPane orchestration', () => {
       lastSeen: null,
       capabilities: [],
       version: '1',
-      createTime: null,
-      updateTime: null,
+      createTime: 0,
+      updateTime: 0,
     }])
     const composer = await screen.findByLabelText('给 AI 发送消息')
 
@@ -1034,8 +1038,8 @@ describe('AgentPane orchestration', () => {
     vi.mocked(chatService.listChatSessions).mockResolvedValue([{
       sessionId: 'session-1',
       name: 'Session Name',
-      createdAt: null,
-      lastActivityAt: null,
+      createdAt: 0,
+      lastActivityAt: 0,
       firstMessagePreview: 'first',
       threadCount: 1,
     }])
@@ -1043,8 +1047,8 @@ describe('AgentPane orchestration', () => {
       threadId: THREAD_ID,
       name: 'Thread Name',
       parentThreadId: null,
-      createdAt: null,
-      updatedAt: null,
+      createdAt: 0,
+      updatedAt: 0,
       status: 'IDLE',
       processing: false,
       model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
@@ -1085,7 +1089,8 @@ describe('AgentPane orchestration', () => {
         parentEntryId: null,
         entryType: 'ROOT',
         payloadJson: '{}',
-        createTime: null,
+        createTime: 0,
+        usageCost: null,
       },
       {
         entryId: 'entry-2',
@@ -1093,7 +1098,8 @@ describe('AgentPane orchestration', () => {
         parentEntryId: 'entry-1',
         entryType: 'TURN_END',
         payloadJson: JSON.stringify({ status: 'TURN_END', turnId: 'turn-2' }),
-        createTime: null,
+        createTime: 0,
+        usageCost: null,
       },
       {
         entryId: 'entry-3',
@@ -1101,7 +1107,8 @@ describe('AgentPane orchestration', () => {
         parentEntryId: 'entry-2',
         entryType: 'MESSAGE',
         payloadJson: JSON.stringify({ message: { role: 'AGENT', contents: [] } }),
-        createTime: null,
+        createTime: 0,
+        usageCost: null,
       },
     ])
     const before = localStorage.getItem(targetKey)
@@ -1223,8 +1230,8 @@ describe('AgentPane orchestration', () => {
       threadId,
       parentThreadId: null,
       name,
-      createdAt: null,
-      updatedAt: null,
+      createdAt: 0,
+      updatedAt: 0,
       status: 'MODEL_STREAMING' as const,
       processing: true,
       model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
@@ -1236,8 +1243,8 @@ describe('AgentPane orchestration', () => {
     vi.mocked(chatService.listChatSessions).mockResolvedValue([{
       sessionId: 'session-1',
       name: 'session',
-      createdAt: null,
-      lastActivityAt: null,
+      createdAt: 0,
+      lastActivityAt: 0,
       firstMessagePreview: null,
       threadCount: 1,
     }])
@@ -1311,8 +1318,8 @@ describe('AgentPane orchestration', () => {
     act(() => hook.result.current.selectSession({
       sessionId: 'empty-session',
       name: 'Empty Session',
-      createdAt: null,
-      lastActivityAt: null,
+      createdAt: 0,
+      lastActivityAt: 0,
       firstMessagePreview: '',
       threadCount: 0,
     }))
@@ -1320,8 +1327,8 @@ describe('AgentPane orchestration', () => {
     act(() => hook.result.current.selectSession({
       sessionId: 'threaded-session',
       name: 'Threaded Session',
-      createdAt: null,
-      lastActivityAt: null,
+      createdAt: 0,
+      lastActivityAt: 0,
       firstMessagePreview: '',
       threadCount: 1,
     }))
@@ -1352,7 +1359,8 @@ describe('AgentPane orchestration', () => {
           model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
         },
       }),
-      createTime: null,
+      createTime: 0,
+      usageCost: null,
     }))
     expect(hook.result.current.target).toEqual(targetBeforeFork)
     act(() => hook.result.current.requestBranchFromEntry({
@@ -1361,7 +1369,8 @@ describe('AgentPane orchestration', () => {
       parentEntryId: null,
       entryType: 'ROOT',
       payloadJson: JSON.stringify({ settings: {} }),
-      createTime: null,
+      createTime: 0,
+      usageCost: null,
     }))
     await hook.result.current.refreshPaneProjection()
   })
@@ -1450,8 +1459,8 @@ describe('AgentPane orchestration', () => {
     expect(sessionSelectionItem({
       sessionId: 'session-fallback',
       name: 'Named Session',
-      createdAt: null,
-      lastActivityAt: null,
+      createdAt: 0,
+      lastActivityAt: 0,
       firstMessagePreview: 'preview text',
       threadCount: 0,
     })).toMatchObject({
@@ -1463,8 +1472,8 @@ describe('AgentPane orchestration', () => {
       threadId: THREAD_ID,
       parentThreadId: null,
       name: 'Named Thread',
-      createdAt: null,
-      updatedAt: null,
+      createdAt: 0,
+      updatedAt: 0,
       status: 'IDLE',
       processing: false,
       model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
@@ -1478,8 +1487,8 @@ describe('AgentPane orchestration', () => {
     expect(sessionSelectionItem({
       sessionId: 'session-fallback',
       name: 'Session With Preview',
-      createdAt: null,
-      lastActivityAt: null,
+      createdAt: 0,
+      lastActivityAt: 0,
       firstMessagePreview: 'some other preview',
       threadCount: 0,
     }).title).toBe('Session With Preview')
@@ -1501,8 +1510,8 @@ describe('AgentPane orchestration', () => {
     vi.mocked(chatService.listChatSessions).mockResolvedValue([{
         sessionId: 'session-1',
         name: 'Session 1',
-        createdAt: null,
-        lastActivityAt: null,
+        createdAt: 0,
+        lastActivityAt: 0,
         firstMessagePreview: 'session-1',
         threadCount: 1,
       }])
@@ -1669,8 +1678,8 @@ describe('AgentPane orchestration', () => {
     vi.mocked(chatService.listChatSessions).mockResolvedValue([{
       sessionId: 'session-1',
       name: 'session',
-      createdAt: null,
-      lastActivityAt: null,
+      createdAt: 0,
+      lastActivityAt: 0,
       firstMessagePreview: null,
       threadCount: 2,
     }])
@@ -1680,8 +1689,8 @@ describe('AgentPane orchestration', () => {
       name: 'thread B',
       status: 'IDLE',
       processing: false,
-      createdAt: null,
-      updatedAt: null,
+      createdAt: 0,
+      updatedAt: 0,
       model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
       headMessagePreview: null,
     }])
@@ -1765,13 +1774,14 @@ describe('AgentPane orchestration', () => {
       parentEntryId: null,
       entryType: 'ROOT',
       payloadJson: '{}',
-      createTime: null,
+      createTime: 0,
+      usageCost: null,
     }])
     vi.mocked(chatService.listChatSessions).mockResolvedValue([{
       sessionId: 'session-1',
       name: 'original session',
-      createdAt: null,
-      lastActivityAt: null,
+      createdAt: 0,
+      lastActivityAt: 0,
       firstMessagePreview: 'entry-1',
       threadCount: 1,
     }])
@@ -1803,8 +1813,8 @@ describe('AgentPane orchestration', () => {
     vi.mocked(chatService.listChatSessions).mockImplementation(async () => [{
       sessionId: 'session-1',
       name: canonicalName,
-      createdAt: null,
-      lastActivityAt: null,
+      createdAt: 0,
+      lastActivityAt: 0,
       firstMessagePreview: 'preview',
       threadCount: 1,
     }])
@@ -1813,7 +1823,7 @@ describe('AgentPane orchestration', () => {
       return {
         sessionId,
         name: canonicalName,
-        createdAt: null,
+        createdAt: 0,
       }
     })
     renderPane({ type: 'CHAT', chatId: CHAT_ID })
@@ -1897,8 +1907,8 @@ describe('AgentPane orchestration', () => {
     vi.mocked(chatService.listChatSessions).mockImplementation(async () => [{
       sessionId: 'session-1',
       name: canonicalName,
-      createdAt: null,
-      lastActivityAt: null,
+      createdAt: 0,
+      lastActivityAt: 0,
       firstMessagePreview: 'preview',
       threadCount: 1,
     }])
@@ -1928,7 +1938,7 @@ describe('AgentPane orchestration', () => {
 
     // PUT 返回权威名称：面板关闭、picker 行立即展示服务端规范化名称。
     canonicalName = 'RENAMED SESSION'
-    resolveRename({ sessionId: 'session-1', name: canonicalName, createdAt: null })
+    resolveRename({ sessionId: 'session-1', name: canonicalName, createdAt: 0 })
     await waitFor(() =>
       expect(screen.queryByRole('region', { name: '重命名 Session' })).not.toBeInTheDocument())
     expect(await screen.findByRole('region', { name: '选择 Session' })).toBeInTheDocument()
@@ -1940,8 +1950,8 @@ describe('AgentPane orchestration', () => {
     vi.mocked(chatService.listChatSessions).mockResolvedValue([{
       sessionId: 'session-1',
       name: 'session one',
-      createdAt: null,
-      lastActivityAt: null,
+      createdAt: 0,
+      lastActivityAt: 0,
       firstMessagePreview: 'preview',
       threadCount: 1,
     }])
@@ -1949,8 +1959,8 @@ describe('AgentPane orchestration', () => {
       threadId: THREAD_ID,
       parentThreadId: null,
       name: 'thread one',
-      createdAt: null,
-      updatedAt: null,
+      createdAt: 0,
+      updatedAt: 0,
       status: 'IDLE',
       processing: false,
       model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
@@ -2010,7 +2020,7 @@ describe('AgentPane orchestration', () => {
             message: { role: 'USER', contents: [{ type: 'text', text: '排队中' }] },
           }),
           cancelledAt: null,
-          createTime: null,
+          createTime: 0,
         }],
       },
     ))
@@ -2095,7 +2105,8 @@ describe('AgentPane orchestration', () => {
       parentEntryId: null,
       entryType: 'ROOT',
       payloadJson: '{}',
-      createTime: null,
+      createTime: 0,
+      usageCost: null,
     }))
   })
 
@@ -2385,7 +2396,7 @@ describe('TURN_END 绑定与 Debug 只读退出', () => {
   function modelRequestDebug(): HarnessModelRequestDebugDTO {
     return {
       kind: 'NEXT_REQUEST_PREVIEW',
-      generatedAt: '2026-09-27T05:00:00Z',
+      generatedAt: 1790485200,
       model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
       environmentName: null,
       systemInstruction: 'system prompt',
@@ -2438,7 +2449,8 @@ describe('TURN_END 绑定与 Debug 只读退出', () => {
       parentEntryId: 'entry-1',
       entryType: 'TURN_END',
       payloadJson: JSON.stringify({ outcome: 'COMPLETED' }),
-      createTime: null,
+      createTime: 0,
+      usageCost: null,
     }))
     // 关键契约：传下去的是 TURN_END Entry id（sourceLabel 是绑定分支名，身份未加载时为 null）。
     expect(onRequestBranch).toHaveBeenCalledWith(expect.objectContaining({
@@ -2468,7 +2480,8 @@ describe('TURN_END 绑定与 Debug 只读退出', () => {
             environmentName: null,
           },
         }),
-        createTime: null,
+        createTime: 0,
+        usageCost: null,
       },
       {
         entryId: 'entry-user-1',
@@ -2478,7 +2491,8 @@ describe('TURN_END 绑定与 Debug 只读退出', () => {
         payloadJson: JSON.stringify({
           message: { role: 'USER', contents: [{ type: 'text', text: 'first prompt' }] },
         }),
-        createTime: null,
+        createTime: 0,
+        usageCost: null,
       },
       {
         entryId: 'entry-turn-end-1',
@@ -2486,7 +2500,8 @@ describe('TURN_END 绑定与 Debug 只读退出', () => {
         parentEntryId: 'entry-user-1',
         entryType: 'TURN_END',
         payloadJson: JSON.stringify({ turnStartEntryId: 'entry-root', outcome: 'COMPLETED', continueModel: false }),
-        createTime: null,
+        createTime: 0,
+        usageCost: null,
       },
     ])
     renderPane()
@@ -2604,7 +2619,8 @@ describe('branchDraftFromEntry and branchDraftFromEntryPath environment replay',
       parentEntryId,
       entryType: 'MESSAGE',
       payloadJson: JSON.stringify(payload),
-      createTime: '2026-01-01T00:00:00Z',
+      createTime: 1767225600,
+      usageCost: null,
     }
   }
 
@@ -2681,13 +2697,13 @@ describe('branchDraftFromEntry and branchDraftFromEntryPath environment replay',
       status: 'READY',
       statusExpiresAt: null,
       ready: true,
-      lastSeen: '2026-09-19T00:00:00.000Z',
+      lastSeen: 1789776000,
       capabilities: [],
       userName: null,
       homeDirectory: null,
       version: '1',
-      createTime: '2026-09-19T00:00:00.000Z',
-      updateTime: '2026-09-19T00:00:00.000Z',
+      createTime: 1789776000,
+      updateTime: 1789776000,
     }
 
     // 1. unbound 面板：未知环境名称显示 unavailable
@@ -2800,7 +2816,7 @@ describe('branchDraftFromEntry and branchDraftFromEntryPath environment replay',
     expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
   })
 
-function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): ProviderRequestPreviewDTO {
+function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = {}): HarnessProviderRequestPreviewDTO {
   return {
     kind: 'DRAFT_REQUEST_PREVIEW',
     providerType: 'OPENAI',
@@ -2808,7 +2824,7 @@ function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): Pr
     bodyByteSize: 120,
     bodyJson: '{"messages":[{"role":"user","content":"draft"}]}',
     sourceHeadEntryId: 'head-1',
-    generatedAt: '2026-09-27T05:00:00Z',
+    generatedAt: 1790485200,
     ...overrides,
   }
 }
@@ -2825,7 +2841,8 @@ function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): Pr
           parentEntryId: null,
           entryType: 'ROOT',
           payloadJson: '{}',
-          createTime: null,
+          createTime: 0,
+          usageCost: null,
         },
         {
           entryId: BRANCH_START_ENTRY_ID,
@@ -2833,7 +2850,8 @@ function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): Pr
           parentEntryId: 'entry-root',
           entryType: 'TURN_END',
           payloadJson: JSON.stringify({ outcome: 'COMPLETED' }),
-          createTime: null,
+          createTime: 0,
+          usageCost: null,
         },
       ]
     }
@@ -2981,8 +2999,8 @@ function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): Pr
       act(() => result.current.control.selectSession({
         sessionId: 'session-1',
         name: 'session-1',
-        createdAt: null,
-        lastActivityAt: null,
+        createdAt: 0,
+        lastActivityAt: 0,
         firstMessagePreview: null,
         threadCount: 1,
       }))
@@ -3088,7 +3106,8 @@ function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): Pr
           parentEntryId: null,
           entryType: 'MESSAGE',
           payloadJson: '{}',
-          createTime: null,
+          createTime: 0,
+          usageCost: null,
         })
       })
       expect(result.current.error).toBe('当前模式不支持分支切换或分叉')
@@ -3097,8 +3116,8 @@ function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): Pr
         result.current.selectSession({
           sessionId: 's-1',
           name: 'Session 1',
-          createdAt: null,
-          lastActivityAt: null,
+          createdAt: 0,
+          lastActivityAt: 0,
           firstMessagePreview: null,
           threadCount: 1,
         })
@@ -3113,8 +3132,8 @@ function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): Pr
           status: 'IDLE',
           processing: false,
           model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
-          createdAt: null,
-          updatedAt: null,
+          createdAt: 0,
+          updatedAt: 0,
           headMessagePreview: null,
         })
       })
@@ -3665,8 +3684,8 @@ function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): Pr
         variants: [{ id: 'v1' }, { id: 'fast' }],
       },
       version: '0',
-      createTime: null,
-      updateTime: null,
+      createTime: 0,
+      updateTime: 0,
     }
 
     const coderAgent: AgentDefinitionDTO = {
@@ -3678,8 +3697,8 @@ function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): Pr
       variant: 'fast',
       config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
       version: '0',
-      createTime: null,
-      updateTime: null,
+      createTime: 0,
+      updateTime: 0,
     }
 
     const brokenAgent: AgentDefinitionDTO = {
@@ -3691,8 +3710,8 @@ function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): Pr
       variant: null,
       config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
       version: '0',
-      createTime: null,
-      updateTime: null,
+      createTime: 0,
+      updateTime: 0,
     }
 
     // 两类入口均需先验证完整预设；拒绝选择不得清空正文、附件或关闭选择面板。
@@ -3700,13 +3719,13 @@ function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): Pr
       vi.mocked(agentService.listAgents).mockResolvedValue({
         pageNumber: 1,
         pageSize: 50,
-        totalCount: 3,
+        totalCount: '3',
         results: [agents[0]!, coderAgent, brokenAgent],
       })
       vi.mocked(agentService.listModels).mockResolvedValue({
         pageNumber: 1,
         pageSize: 50,
-        totalCount: 2,
+        totalCount: '2',
         results: [models[0]!, claudeModel],
       })
 
@@ -3782,13 +3801,13 @@ function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): Pr
       vi.mocked(agentService.listAgents).mockResolvedValue({
         pageNumber: 1,
         pageSize: 50,
-        totalCount: 2,
+        totalCount: '2',
         results: [agents[0]!, coderAgent],
       })
       vi.mocked(agentService.listModels).mockResolvedValue({
         pageNumber: 1,
         pageSize: 50,
-        totalCount: 2,
+        totalCount: '2',
         results: [models[0]!, claudeModel],
       })
 
@@ -4054,7 +4073,7 @@ describe('AgentPane root control mounting', () => {
       environmentId: null, requiredEnvironmentId: 'frozen-env', waitingForEnvironment: false,
       requiredEnvironmentName: 'archlinux', environmentWaitFreshnessAt: null,
       argumentsJson: '{"command":"pwd"}', approvalJson: null, resultJson: null, errorJson: null,
-      createTime: null, updateTime: null,
+      createTime: 0, updateTime: 0,
     }
   }
 
@@ -4379,26 +4398,28 @@ describe('AgentPane root control mounting', () => {
           ],
         },
       }),
-      createTime: '2026-07-28T10:00:00Z',
+      createTime: 1785232800,
+      usageCost: null,
     })
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot(thread(), {
       entries: [resourceEntry('user-blob-1', 'blob-1'), resourceEntry('user-blob-2', 'blob-2')],
     }))
 
-    const defaultDownload = async (_blobId: string = ''): Promise<StoragePresignedUrlDTO> => ({
+    const defaultDownload = async (_blobId: string = ''): Promise<StorageBlobUrl> => ({
       url: 'https://storage.test/blob',
-      expiresAt: null,
+      mediaType: null,
+      sizeBytes: null,
     })
     fakeStorage.getBlobDownloadUrl.mockImplementation(async (blobId: string) => {
       if (blobId === 'blob-1') {
-        return { url: 'https://storage.test/blob-1', mediaType: 'image/png', sizeBytes: 128, expiresAt: null }
+        return { url: 'https://storage.test/blob-1', mediaType: 'image/png', sizeBytes: 128 }
       }
       // 第二个资源解析直接失败：适配层必须吞掉失败并退化为无预览。
       throw new Error('blob-2 unavailable')
     })
     fakeStorage.getBlobPreviewUrl.mockImplementation(async (blobId: string) => (
       blobId === 'blob-1'
-        ? { url: 'https://storage.test/preview-1', mediaType: 'image/png', sizeBytes: 128, expiresAt: null }
+        ? { url: 'https://storage.test/preview-1', mediaType: 'image/png', sizeBytes: 128 }
         : (() => { throw new Error('blob-2 unavailable') })()
     ))
 
@@ -4435,7 +4456,7 @@ describe('AgentPane root control mounting', () => {
           message: { role: 'USER', contents: [{ type: 'text', text: '排队中的输入' }] },
         }),
         cancelledAt: null,
-        createTime: '2026-07-28T10:00:00Z',
+        createTime: 1785232800,
       }],
     }))
 
@@ -4536,7 +4557,8 @@ describe('AgentPane root control mounting', () => {
       parentEntryId: null,
       entryType: 'ROOT',
       payloadJson: '{}',
-      createTime: null,
+      createTime: 0,
+      usageCost: null,
     }])
     vi.mocked(harnessService.acceptCommandBatch).mockResolvedValue(
       acceptedResponse(threadFixture(NEW_ROOT_ID, { name: '新分支根' })),
@@ -4615,7 +4637,8 @@ describe('AgentPane root control mounting', () => {
         payloadJson: JSON.stringify({
           message: { role: 'USER', contents: [{ type: 'text', text: '已有历史' }] },
         }),
-        createTime: '2026-07-28T09:00:00Z',
+        createTime: 1785229200,
+        usageCost: null,
       }],
     })
     view.client.setQueryData(queryKeys.threads.snapshot(NEW_ROOT_ID), cached)
@@ -4684,8 +4707,8 @@ describe('AgentPane root control mounting', () => {
       ready: true,
       status: 'READY',
       version: '1',
-      createTime: '2026-10-01T00:00:00Z',
-      updateTime: '2026-10-01T00:00:00Z',
+      createTime: 1790812800,
+      updateTime: 1790812800,
       capabilities: [],
       statusExpiresAt: null,
       lastSeen: null,
@@ -4757,8 +4780,8 @@ describe('AgentPane root control mounting', () => {
       ready: true,
       status: 'READY',
       version: '1',
-      createTime: '2026-10-01T00:00:00Z',
-      updateTime: '2026-10-01T00:00:00Z',
+      createTime: 1790812800,
+      updateTime: 1790812800,
       capabilities: [],
       statusExpiresAt: null,
       lastSeen: null,
@@ -4770,8 +4793,8 @@ describe('AgentPane root control mounting', () => {
       ready: true,
       status: 'READY',
       version: '1',
-      createTime: '2026-10-01T00:00:00Z',
-      updateTime: '2026-10-01T00:00:00Z',
+      createTime: 1790812800,
+      updateTime: 1790812800,
       capabilities: [],
       statusExpiresAt: null,
       lastSeen: null,

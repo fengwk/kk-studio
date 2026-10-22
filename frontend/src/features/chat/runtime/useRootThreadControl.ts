@@ -20,9 +20,7 @@ import {
 } from '@/features/chat/composer/composer-draft'
 import { hasBlockingModal } from '@/shared/ui/blocking-overlay'
 import type { ConflictPresentation } from '@/shared/conflict/conflict-presenter'
-import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import type { AgentRuntimeOwnerDTO } from '@/shared/api/contracts/ai-runtime'
-import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import {
   parseGoalProgress,
   type BranchGoalProgressResult,
@@ -61,6 +59,7 @@ import type {
   RenameKind,
   RenameTarget,
 } from '@/features/chat/runtime/root-thread/types'
+import type { AgentDefinitionDTO, EnvironmentCardDTO } from '@/shared/api/generated/contracts'
 
 export interface UseRootThreadControlOptions {
   owner?: AgentRuntimeOwnerDTO

@@ -1,10 +1,10 @@
 import { apiClient, type HttpClient } from '@/shared/api/client'
 import { decodeInteractionPage } from '@/shared/api/ai-interaction-codec'
+import type { InteractionPageDTO } from '@/shared/api/contracts/ai-interaction'
 import type {
   HarnessToolInputDTO,
   HarnessToolInputResultDTO,
-  InteractionPageDTO,
-} from '@/shared/api/contracts/ai-interaction'
+} from '@/shared/api/generated/contracts'
 
 export class InteractionService {
   private readonly client: HttpClient

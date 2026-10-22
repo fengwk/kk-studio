@@ -9,16 +9,17 @@ import { queryKeys } from '@/shared/lib/query-keys'
 import { agentService } from '@/shared/api/agent-service'
 import { harnessService } from '@/shared/api/harness-service'
 import { ApiError } from '@/shared/api/client'
+import type { HarnessCommandCreateDTO } from '@/shared/api/contracts/ai-runtime'
 import type {
-  AgentCommandBatchResponseDTO,
+  AgentDefinitionDTO,
+  AgentModelDTO,
+  HarnessAcceptedCommandsDTO,
   HarnessBranchSettingsDTO,
-  HarnessCommandCreateDTO,
   HarnessModelSelectionDTO,
   HarnessThreadCommandDTO,
   HarnessThreadDTO,
   HarnessThreadSnapshotDTO,
-} from '@/shared/api/contracts/ai-runtime'
-import type { AgentDefinitionDTO, AgentModelDTO } from '@/shared/api/contracts/ai-catalog'
+} from '@/shared/api/generated/contracts'
 
 const THREAD_ID = '11111111-2222-4333-8444-555555555555'
 const THREAD_ID_2 = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
@@ -91,8 +92,8 @@ function threadFixture(
     processing: false,
     executionControl: 'RUNNABLE',
     branchSettings: branchSettings(),
-    createTime: '2026-01-01T00:00:00Z',
-    updateTime: '2026-01-02T00:00:00Z',
+    createTime: 1767225600,
+    updateTime: 1767312000,
     ...rest,
   }
 }
@@ -128,7 +129,7 @@ function queuedSettingCommand(
     idempotencyKey: `queued-${sequence}`,
     payloadJson: JSON.stringify(payload),
     cancelledAt: null,
-    createTime: null,
+    createTime: 0,
   }
 }
 
@@ -167,23 +168,24 @@ function acceptedSettingCommand(
     idempotencyKey: command.idempotencyKey,
     payloadJson: JSON.stringify(acceptedCommandPayload(command)),
     cancelledAt: null,
-    createTime: null,
+    createTime: 0,
   }
 }
 
 function acceptedResponse(
   thread: HarnessThreadDTO,
   commands: HarnessCommandCreateDTO[],
-): AgentCommandBatchResponseDTO {
+): HarnessAcceptedCommandsDTO {
   return {
-    session: { sessionId: thread.sessionId, name: 'session-name', createdAt: null },
+    session: { sessionId: thread.sessionId, name: 'session-name', createdAt: 0 },
     rootEntry: {
       entryId: 'e-root',
       sessionId: thread.sessionId,
       parentEntryId: null,
       entryType: 'ROOT',
       payloadJson: '{}',
-      createTime: null,
+      createTime: 0,
+      usageCost: null,
     },
     thread,
     acceptedCommands: commands.map((command, index) =>
@@ -202,8 +204,8 @@ const agents: AgentDefinitionDTO[] = [
     variant: 'default',
     config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
     version: '0',
-    createTime: null,
-    updateTime: null,
+    createTime: 0,
+    updateTime: 0,
   },
   {
     name: 'coder',
@@ -219,8 +221,8 @@ const agents: AgentDefinitionDTO[] = [
       subagents: [],
     },
     version: '0',
-    createTime: null,
-    updateTime: null,
+    createTime: 0,
+    updateTime: 0,
   },
   {
     name: 'writer',
@@ -236,8 +238,8 @@ const agents: AgentDefinitionDTO[] = [
       subagents: [],
     },
     version: '0',
-    createTime: null,
-    updateTime: null,
+    createTime: 0,
+    updateTime: 0,
   },
   {
     name: 'broken-model-agent',
@@ -248,8 +250,8 @@ const agents: AgentDefinitionDTO[] = [
     variant: 'default',
     config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
     version: '0',
-    createTime: null,
-    updateTime: null,
+    createTime: 0,
+    updateTime: 0,
   },
   {
     name: 'broken-variant-agent',
@@ -260,8 +262,8 @@ const agents: AgentDefinitionDTO[] = [
     variant: 'nonexistent-variant',
     config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
     version: '0',
-    createTime: null,
-    updateTime: null,
+    createTime: 0,
+    updateTime: 0,
   },
 ]
 
@@ -290,8 +292,8 @@ const claudeModelEntry: AgentModelDTO = {
     variants: [{ id: 'v1' }, { id: 'fast' }],
   },
   version: '0',
-  createTime: null,
-  updateTime: null,
+  createTime: 0,
+  updateTime: 0,
 }
 
 const modelEntry: AgentModelDTO = {
@@ -319,8 +321,8 @@ const modelEntry: AgentModelDTO = {
     variants: [{ id: 'default' }],
   },
   version: '0',
-  createTime: null,
-  updateTime: null,
+  createTime: 0,
+  updateTime: 0,
 }
 
 function clientWrapper(client: QueryClient) {
@@ -358,13 +360,13 @@ describe('useBoundBranchPanel', () => {
     vi.mocked(agentService.listAgents).mockResolvedValue({
       pageNumber: 1,
       pageSize: 50,
-      totalCount: agents.length,
+      totalCount: String(agents.length),
       results: agents,
     })
     vi.mocked(agentService.listModels).mockResolvedValue({
       pageNumber: 1,
       pageSize: 50,
-      totalCount: 2,
+      totalCount: '2',
       results: [modelEntry, claudeModelEntry],
     })
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
@@ -1186,13 +1188,13 @@ describe('useBoundBranchPanel', () => {
       vi.mocked(agentService.listAgents).mockResolvedValue({
         pageNumber: 1,
         pageSize: 50,
-        totalCount: agents.length,
+        totalCount: String(agents.length),
         results: agents,
       })
       vi.mocked(agentService.listModels).mockResolvedValue({
         pageNumber: 1,
         pageSize: 50,
-        totalCount: 2,
+        totalCount: '2',
         results: [modelEntry, claudeModelEntry],
       })
       vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
@@ -1228,8 +1230,8 @@ describe('useBoundBranchPanel', () => {
     const releases: Array<() => void> = []
     const calls: Array<{
       commands: string[]
-      headEntryId: string | undefined
-      nextCommandSequence: string | undefined
+      headEntryId: string | null | undefined
+      nextCommandSequence: string | null | undefined
     }> = []
     let version = 0
     vi.mocked(harnessService.acceptThreadCommandBatch).mockImplementation((threadId, request) => {
@@ -1240,7 +1242,7 @@ describe('useBoundBranchPanel', () => {
         headEntryId: request.expectedHeadEntryId,
         nextCommandSequence: request.expectedNextCommandSequence,
       })
-      return new Promise<AgentCommandBatchResponseDTO>((resolve) => {
+      return new Promise<HarnessAcceptedCommandsDTO>((resolve) => {
         releases.push(() =>
           resolve(
             acceptedResponse(
@@ -1384,7 +1386,7 @@ describe('useBoundBranchPanel', () => {
       ))
     let release: (() => void) | null = null
     vi.mocked(harnessService.acceptThreadCommandBatch).mockImplementation((threadId, request) =>
-      new Promise<AgentCommandBatchResponseDTO>((resolve) => {
+      new Promise<HarnessAcceptedCommandsDTO>((resolve) => {
         release = () =>
           resolve(
             acceptedResponse(busyThreadFixture(threadId, { version: '1' }), request.commands),
@@ -1451,7 +1453,7 @@ describe('useBoundBranchPanel', () => {
       calls.push({ threadId, commands: request.commands.map((command) => command.type) })
       if (threadId === THREAD_ID) {
         // Thread A 的提交悬停在途，期间用户重绑到 Thread B 并产生更新选择。
-        return new Promise<AgentCommandBatchResponseDTO>((resolve) => {
+        return new Promise<HarnessAcceptedCommandsDTO>((resolve) => {
           releaseA = () =>
             resolve(
               acceptedResponse(busyThreadFixture(threadId, { version: '1' }), request.commands),

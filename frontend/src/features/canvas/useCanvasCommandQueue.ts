@@ -11,13 +11,12 @@ import {
   CanvasQueueBlockedError,
 } from '@/features/canvas/command-queue'
 import type { CanvasLocalState } from '@/features/canvas/types'
+import { queryKeys } from '@/shared/lib/query-keys'
 import type {
   CanvasCommandDTO,
   CanvasConflictDTO,
   CanvasSnapshotDTO,
-  UUIDString,
-} from '@/shared/api/contracts/studio'
-import { queryKeys } from '@/shared/lib/query-keys'
+} from '@/shared/api/generated/contracts'
 
 const REPLAY_CONFLICT_MESSAGE = '部分未确认操作因服务端内容已变化而未能自动重放，请检查最新内容。'
 const REPLAY_FAILED_MESSAGE = '部分未确认操作未能自动重放，请检查网络后重试。'
@@ -26,11 +25,11 @@ const RECOVERY_FAILED_MESSAGE = '待确认操作恢复失败，请检查网络�
 interface CommandQueueInput {
   scope: CanvasScope
   queryClient: QueryClient
-  canvasId: UUIDString | null
+  canvasId: string | null
   view: CanvasLocalState['view']
   snapshot: CanvasSnapshotDTO | undefined
   ackDurableDraftsForScope: (
-    canvasId: UUIDString,
+    canvasId: string,
     editingSessionId: string,
     epoch: number,
     acks: CanvasDraftAck[],

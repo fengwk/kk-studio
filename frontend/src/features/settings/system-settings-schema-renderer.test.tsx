@@ -15,8 +15,7 @@ import {
   type SystemSettingsSectionsDraft,
 } from '@/features/settings/system-settings-draft'
 import { agentService } from '@/shared/api/agent-service'
-import type { AgentModelDTO } from '@/shared/api/contracts/ai-catalog'
-import type { SystemSettingsSchemaDTO } from '@/shared/api/contracts/system-settings'
+import type { AgentModelDTO, SystemSettingsSchemaDTO } from '@/shared/api/generated/contracts'
 
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {
@@ -62,8 +61,8 @@ function catalogModel(): AgentModelDTO {
       variants: [{ id: 'default' }, { id: 'fast' }],
     },
     version: '1',
-    createTime: '2026-09-27T10:00:00Z',
-    updateTime: '2026-09-27T10:00:00Z',
+    createTime: 1790503200,
+    updateTime: 1790503200,
   }
 }
 
@@ -79,7 +78,7 @@ describe('system settings schema renderer', () => {
     vi.mocked(agentService.listModels).mockResolvedValue({
       pageNumber: 1,
       pageSize: 50,
-      totalCount: 1,
+      totalCount: '1',
       results: [catalogModel()],
     })
   })

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 用真实 HTTP Jackson mapper 重新生成前端稳定传输契约。会写文件，提交前必须人工审阅 diff；
+# 用真实 HTTP Jackson mapper 重新生成前端传输契约。会写文件，提交前必须人工审阅 diff；
 # 日常校验用 read-only 的 check.sh（mvn verify 也执行同一 check）。
 set -euo pipefail
 
@@ -27,7 +27,7 @@ fi
 
 cd "$REPO_ROOT"
 exec env JAVA_HOME="$JDK21" mvn -q -pl web -am \
-  -Dtest=StableTsContractArtifactTest \
+  -Dtest=TsContractArtifactTest \
   -Dsurefire.failIfNoSpecifiedTests=false \
   -Dkkstudio.contract.generation.update=true \
   test

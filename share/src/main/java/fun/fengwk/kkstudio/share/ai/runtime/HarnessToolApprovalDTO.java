@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.share.ai.runtime;
 
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import lombok.Data;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Tool 审批决策请求。
@@ -18,7 +19,7 @@ public class HarnessToolApprovalDTO {
   private String decisionId;
 
   /** 可空自由文本审批理由（≤1024 字符）。 */
-  private String reason;
+  private @Nullable String reason;
 
   @JsonAnySetter
   public void rejectUnknownField(String name, Object value) {

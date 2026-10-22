@@ -8,11 +8,8 @@ import {
 import type { AgentModelView } from '@/features/catalog/AgentModelView'
 import { useAiConsoleResourceController } from '@/features/catalog/useAiConsoleResourceController'
 import type { AiConsoleResourceQueryEnabled } from '@/features/catalog/useAiConsoleResourceQueries'
-import type {
-  AgentDefinitionDTO,
-  AgentProviderDTO,
-} from '@/shared/api/contracts/ai-catalog'
 import { useI18n } from '@/shared/i18n'
+import type { AgentDefinitionDTO, AgentProviderDTO } from '@/shared/api/generated/contracts'
 
 export type CatalogPageScope = 'agents' | 'models' | 'providers'
 

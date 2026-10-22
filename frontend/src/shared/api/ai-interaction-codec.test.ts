@@ -66,6 +66,7 @@ describe('interaction wire union', () => {
     { ...page([]), freshnessAt: undefined },
     { ...page([]), nextCursor: undefined },
     { ...page([environment]), items: [{ ...environment, createTime: [2026, 10, 8] }] },
+    { ...page([environment]), items: [{ ...environment, createTime: '2026-10-08T00:00:00Z' }] },
   ])('fails closed on malformed page %#', (value) => {
     expect(() => decodeInteractionPage(value)).toThrow()
   })

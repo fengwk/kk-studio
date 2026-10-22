@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import type { EntryType, HarnessSessionEntryDTO } from '@/shared/api/contracts/ai-runtime'
+import type { EntryType } from '@/shared/api/contracts/ai-runtime'
 import { buildThreadTimeline } from '@/features/chat/runtime/thread-timeline-builder'
 import { aggregateEntryUsage } from '@/features/chat/runtime/thread-timeline/turn-usage'
+import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 
 /**
  * Turn usage 矩阵：usage 绝不紧跟 Assistant，必须在相应 TURN_END 之后投影为
@@ -17,7 +18,7 @@ function entry(
   entryId: string,
   entryType: EntryType,
   payload: Record<string, unknown>,
-  createTime = '2026-07-28T10:00:00Z',
+  createTime = 1785232800,
 ): HarnessSessionEntryDTO {
   return {
     entryId,
@@ -26,6 +27,7 @@ function entry(
     entryType,
     payloadJson: JSON.stringify(payload),
     createTime,
+    usageCost: null,
   }
 }
 

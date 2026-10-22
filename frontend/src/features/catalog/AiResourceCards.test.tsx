@@ -5,7 +5,7 @@ import { AgentResourceCard } from '@/features/catalog/AiAgentResourceCard'
 import type { AgentModelView } from '@/features/catalog/AgentModelView'
 import { ModelResourceCard } from '@/features/catalog/AiModelResourceCard'
 import { ProviderResourceCard } from '@/features/catalog/AiProviderResourceCard'
-import type { AgentDefinitionDTO, AgentProviderDTO } from '@/shared/api/contracts/ai-catalog'
+import type { AgentDefinitionDTO, AgentProviderDTO } from '@/shared/api/generated/contracts'
 
 function model(overrides: Partial<AgentModelView> = {}): AgentModelView {
   return {
@@ -33,8 +33,8 @@ function model(overrides: Partial<AgentModelView> = {}): AgentModelView {
       variants: [{ id: 'quality' }, { id: 'fast' }, { id: 'cheap' }, { id: 'debug' }],
     },
     version: '1',
-    createTime: null,
-    updateTime: null,
+    createTime: 0,
+    updateTime: 0,
     ...overrides,
   }
 }
@@ -54,8 +54,8 @@ function agent(overrides: Partial<AgentDefinitionDTO> = {}): AgentDefinitionDTO 
       subagents: ['writer'],
     },
     version: '1',
-    createTime: null,
-    updateTime: null,
+    createTime: 0,
+    updateTime: 0,
     ...overrides,
   }
 }
@@ -67,11 +67,11 @@ function provider(overrides: Partial<AgentProviderDTO> = {}): AgentProviderDTO {
     providerType: 'openai',
     baseUrl: 'https://api.example.test',
     configured: true,
-    modelCallTimeoutMillis: 180000,
-    modelCallIdleTimeoutMillis: 1500,
+    modelCallTimeoutMillis: '180000',
+    modelCallIdleTimeoutMillis: '1500',
     version: '1',
-    createTime: null,
-    updateTime: null,
+    createTime: 0,
+    updateTime: 0,
     modelHttpRetryStatusCodes: null,
     ...overrides,
   }

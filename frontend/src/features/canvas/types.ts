@@ -1,12 +1,11 @@
-import type {
-  CanvasFunctionDefinitionDTO,
-  CanvasTransformDTO,
-  UUIDString,
-} from '@/shared/api/contracts/studio'
 import type { StoredCanvasViewport } from '@/features/canvas/viewport-storage'
 import type { Group, ResourceNode } from '@/features/canvas/domain'
 
 import type { CanvasNodeDraft } from '@/features/canvas/canvas-drafts'
+import type {
+  CanvasFunctionDefinitionDTO,
+  CanvasTransformDTO,
+} from '@/shared/api/generated/contracts'
 
 export type CanvasView = 'library' | 'editor'
 export type AddMenuAction =
@@ -18,17 +17,17 @@ export type AddMenuAction =
   | 'video-function'
 
 export interface CanvasLinkSelection {
-  sourceNodeId: UUIDString
-  targetNodeId: UUIDString
+  sourceNodeId: string
+  targetNodeId: string
 }
 
 export type CanvasTextEditorState =
   | { mode: 'create'; nodeId: null; name: string; markdown: string }
-  | { mode: 'edit'; nodeId: UUIDString; name: string; markdown: string }
+  | { mode: 'edit'; nodeId: string; name: string; markdown: string }
 
 export interface CanvasLocalState {
   view: CanvasView
-  canvasId: UUIDString | null
+  canvasId: string | null
   selectedIds: string[]
   selectedLinks: CanvasLinkSelection[]
   positionDrafts: Record<string, { x: number; y: number }>
@@ -52,7 +51,7 @@ export interface CanvasNodeCallbacks {
 
 export interface CanvasResourceReference {
   type: 'resource'
-  nodeId: UUIDString
+  nodeId: string
   index: number
 }
 
@@ -65,7 +64,7 @@ export interface CanvasFunctionConfig {
 }
 
 export interface PendingFunctionConfig {
-  nodeId: UUIDString
+  nodeId: string
   functionName: string
   config: CanvasFunctionConfig
 }

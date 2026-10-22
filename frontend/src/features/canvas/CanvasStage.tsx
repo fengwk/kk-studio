@@ -31,7 +31,6 @@ import {
   MIN_CANVAS_ZOOM,
 } from '@/features/canvas/viewport-storage'
 import { preserveCanvasWorldCenter } from '@/features/canvas/viewport-framing'
-import type { UUIDString } from '@/shared/api/contracts/studio'
 import { useI18n } from '@/shared/i18n'
 
 const INITIAL_FIT = { padding: 0.18, maxZoom: 1.6, duration: 0 }
@@ -333,8 +332,8 @@ function StageInner() {
     setSelection(
       nodeIds,
       params.edges.map((edge) => ({
-        sourceNodeId: edge.source as UUIDString,
-        targetNodeId: edge.target as UUIDString,
+        sourceNodeId: edge.source,
+        targetNodeId: edge.target,
       })),
     )
     handleSelectionChangeMenu(nodeIds)
@@ -408,7 +407,7 @@ function StageInner() {
                   item.sourceNodeId === edge.source && item.targetNodeId === edge.target
                 ))
                 if (hasRef) {
-                  deleteLink(edge.source as UUIDString, edge.target as UUIDString)
+                  deleteLink(edge.source, edge.target)
                 }
               }
             }}

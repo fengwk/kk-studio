@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.share.ai.environment;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
+import org.jspecify.annotations.Nullable;
 
 import java.time.Instant;
 import java.util.List;
@@ -11,11 +12,11 @@ import java.util.List;
 public class EnvironmentCardDTO {
   private String id;
   private String name;
-  private EnvironmentInstallConfigDTO installConfig;
+  private @Nullable EnvironmentInstallConfigDTO installConfig;
 
   /** 仅在 create 响应与 rotate-token 响应中返回刚生成的新值；正常列表和详情查询始终为 null， 按需读取当前值走只读 token 端点。 */
   @JsonInclude(JsonInclude.Include.NON_NULL)
-  private String registrationToken;
+  private @Nullable String registrationToken;
 
   /** 当前连接状态：CONNECTING / READY / OFFLINE（租约或心跳窗口已过期的连接派生为 OFFLINE）。 */
   private String status;
@@ -29,38 +30,38 @@ public class EnvironmentCardDTO {
    * <p>它是同一连接行事实的只读时间投影（不是被持久化的过期状态）：服务端读取时用同一时钟派生，浏览器只按它安排一次回读。
    */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private Instant statusExpiresAt;
+  private @Nullable Instant statusExpiresAt;
 
   /** 最近活跃时间。 */
-  private Instant lastSeen;
+  private @Nullable Instant lastSeen;
 
   /** 最近一次被接受的 READY 宿主 OS wire 值：windows/wsl/linux/macos；从未 READY 时为 null。 */
-  private String operatingSystem;
+  private @Nullable String operatingSystem;
 
   /** 最近一次被接受的 READY 宿主 IANA 时区 ID；从未 READY 时为 null。 */
-  private String timeZone;
+  private @Nullable String timeZone;
 
   /** 最近一次被接受的 READY 宿主 Daemon 进程用户；从未 READY 时为 null。仅用于展示，不是 cwd 或默认 workdir。 */
-  private String userName;
+  private @Nullable String userName;
 
   /** 最近一次被接受的 READY 宿主进程用户 canonical HOME；从未 READY 时为 null。仅用于展示，不是默认 workdir。 */
-  private String homeDirectory;
+  private @Nullable String homeDirectory;
 
   /** 最近一次被接受的 READY 宿主备注；从未 READY 时为 null。 */
-  private String note;
+  private @Nullable String note;
 
   /**
    * 最近一次被接受的 READY 上报的实际 Daemon 构建版本（JAR manifest {@code Implementation-Version}，未打包时为 {@code
    * development}）；从未 READY 时为 null。它与下方 CAS {@code version} 是两个不同事实：前者是运行中的二进制版本，后者是配置行的乐观锁版本。
    */
-  private String daemonVersion;
+  private @Nullable String daemonVersion;
 
   /**
    * 该 Environment 最近一次受管 Daemon 更新操作（含终态）；从未发起更新时为 null。
    *
    * <p>它是持久事实投影：卡片只在有更新历史时携带，避免为每个 Environment 引入额外端点轮询。
    */
-  private EnvironmentUpdateDTO update;
+  private @Nullable EnvironmentUpdateDTO update;
 
   /** 支持的原子能力列表。 */
   private List<LiveEnvironmentCapabilityDTO> capabilities;

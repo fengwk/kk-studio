@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.share.ai.runtime;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
+import org.jspecify.annotations.Nullable;
 
 import java.time.Instant;
 
@@ -18,7 +19,7 @@ public class HarnessThreadTreeNodeDTO {
 
   /** 不可变执行父 Thread；根节点为 null。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String parentThreadId;
+  private @Nullable String parentThreadId;
 
   /** 服务端权威展示名。 */
   private String name;
@@ -43,7 +44,7 @@ public class HarnessThreadTreeNodeDTO {
 
   /** 仅 IDLE 且当前 head 为 TURN_END 时的 outcome；其它为 null。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String outcome;
+  private @Nullable String outcome;
 
   /** Thread 最后更新时间（UTC Instant）。 */
   private Instant updateTime;

@@ -7,7 +7,7 @@ import {
 } from '@/features/canvas/canvas-stage-model'
 import type { CanvasSnapshot } from '@/features/canvas/domain'
 import type { CanvasFlowNode } from '@/features/canvas/projection'
-import type { CanvasFunctionDefinitionDTO } from '@/shared/api/contracts/studio'
+import type { CanvasFunctionDefinitionDTO } from '@/shared/api/generated/contracts'
 
 export interface CanvasStageContextMenuApi {
   contextMenu: CanvasContextMenuState | null

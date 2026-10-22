@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.share.ai.skill;
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import lombok.Data;
 import lombok.ToString;
+import org.jspecify.annotations.Nullable;
 
 /**
  * {@code POST /api/skill-packages} 请求体：创建 Package 并发布当时的 branch HEAD。
@@ -17,7 +18,7 @@ public class SkillPackageCreateDTO {
   private String packageName;
 
   /** 可空 package 描述；null/空白视为未填写。 */
-  private String description;
+  private @Nullable String description;
 
   /** Git repository URL：必须带 scheme 且不得内嵌 userinfo。 */
   private String repositoryUrl;
@@ -26,7 +27,7 @@ public class SkillPackageCreateDTO {
   private String branch;
 
   /** 可空私有仓库访问令牌（PAT）：省略或 null 表示匿名访问；非空值加密保存，绝不回显、绝不进入日志或模型上下文。 */
-  @ToString.Exclude private String token;
+  @ToString.Exclude private @Nullable String token;
 
   @JsonAnySetter
   public void rejectUnknownField(String fieldName, Object ignoredValue) {

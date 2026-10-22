@@ -7,7 +7,8 @@ import { ToolMessageBlock } from '@/features/chat/runtime/thread-panel/messages/
 import { ApprovalCard } from '@/features/chat/runtime/interactions/ApprovalCard'
 import type { DialogueMessage, ToolDialogueMessage } from '@/features/chat/runtime/thread-timeline-types'
 import { buildThreadTimeline } from '@/features/chat/runtime/thread-timeline'
-import type { EntryType, HarnessSessionEntryDTO, ToolInvocationDTO } from '@/shared/api/contracts/ai-runtime'
+import type { EntryType } from '@/shared/api/contracts/ai-runtime'
+import type { HarnessSessionEntryDTO, ToolInvocationDTO } from '@/shared/api/generated/contracts'
 
 function wrapper({ children }: { children: ReactNode }) {
   const queryClient = new QueryClient({
@@ -429,7 +430,8 @@ describe('真实 AgentMessageJsonCodec 历史生命周期与真实组件验收�
       parentEntryId: null,
       entryType,
       payloadJson: JSON.stringify(payload),
-      createTime: '2026-10-19T10:00:00Z',
+      createTime: 1792404000,
+      usageCost: null,
     }
   }
 
@@ -462,8 +464,8 @@ describe('真实 AgentMessageJsonCodec 历史生命周期与真实组件验收�
       approvalJson: null,
       resultJson: null,
       errorJson: null,
-      createTime: '2026-10-19T10:00:00Z',
-      updateTime: '2026-10-19T10:00:00Z',
+      createTime: 1792404000,
+      updateTime: 1792404000,
       ...overrides,
     }
   }

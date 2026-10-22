@@ -10,16 +10,6 @@ import * as draftStorageModule from '@/features/canvas/canvas-draft-storage'
 import { loadCanvasOperations } from '@/features/canvas/canvas-operation-storage'
 import { createMockIDBFactory } from './mock-idb'
 import type { CanvasNodeDraft } from '@/features/canvas/canvas-drafts'
-import type {
-  ApplyCanvasCommandsRequestDTO,
-  CanvasCommandDTO,
-  CanvasFunctionRunDTO,
-  CanvasPatchDTO,
-  CanvasResourceDTO,
-  CanvasResourceInputDTO,
-  CanvasSnapshotDTO,
-  UUIDString,
-} from '@/shared/api/contracts/studio'
 import {
   cancelCanvasFunctionRun,
   getCanvas,
@@ -30,22 +20,31 @@ import {
 } from '@/shared/api/studio-service'
 import { ApiError } from '@/shared/api/client'
 import { storageService } from '@/shared/api/storage-service'
+import type {
+  ApplyCanvasCommandsRequestDTO,
+  CanvasCommandDTO,
+  CanvasFunctionRunDTO,
+  CanvasPatchDTO,
+  CanvasResourceDTO,
+  CanvasResourceInputDTO,
+  CanvasSnapshotDTO,
+} from '@/shared/api/generated/contracts'
 
-const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f' as UUIDString
-const NODE_NOTE = 'aaaaaaaa-0000-4000-8000-000000000002' as UUIDString
-const NODE_FN = 'aaaaaaaa-0000-4000-8000-000000000003' as UUIDString
-const NODE_IMG = 'aaaaaaaa-0000-4000-8000-000000000005' as UUIDString
-const GROUP_A = 'bbbbbbbb-0000-4000-8000-000000000004' as UUIDString
-const RES_NOTE = 'cccccccc-0000-4000-8000-000000000020' as UUIDString
-const RES_OUTPUT = 'cccccccc-0000-4000-8000-000000000030' as UUIDString
-const RES_IMG = 'cccccccc-0000-4000-8000-000000000050' as UUIDString
-const UPLOAD_ID = 'dddddddd-0000-4000-8000-000000000009' as UUIDString
-const REQUEST_STARTED = 'eeeeeeee-0000-4000-8000-000000000001' as UUIDString
-const REQUEST_CURRENT = 'eeeeeeee-0000-4000-8000-000000000002' as UUIDString
-const REQUEST_OLD = 'eeeeeeee-0000-4000-8000-000000000003' as UUIDString
-const REQUEST_NEW = 'eeeeeeee-0000-4000-8000-000000000004' as UUIDString
-const BLOB_OUTPUT = 'ffffffff-0000-4000-8000-000000000001' as UUIDString
-const BLOB_IMAGE = 'ffffffff-0000-4000-8000-000000000002' as UUIDString
+const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
+const NODE_NOTE = 'aaaaaaaa-0000-4000-8000-000000000002'
+const NODE_FN = 'aaaaaaaa-0000-4000-8000-000000000003'
+const NODE_IMG = 'aaaaaaaa-0000-4000-8000-000000000005'
+const GROUP_A = 'bbbbbbbb-0000-4000-8000-000000000004'
+const RES_NOTE = 'cccccccc-0000-4000-8000-000000000020'
+const RES_OUTPUT = 'cccccccc-0000-4000-8000-000000000030'
+const RES_IMG = 'cccccccc-0000-4000-8000-000000000050'
+const UPLOAD_ID = 'dddddddd-0000-4000-8000-000000000009'
+const REQUEST_STARTED = 'eeeeeeee-0000-4000-8000-000000000001'
+const REQUEST_CURRENT = 'eeeeeeee-0000-4000-8000-000000000002'
+const REQUEST_OLD = 'eeeeeeee-0000-4000-8000-000000000003'
+const REQUEST_NEW = 'eeeeeeee-0000-4000-8000-000000000004'
+const BLOB_OUTPUT = 'ffffffff-0000-4000-8000-000000000001'
+const BLOB_IMAGE = 'ffffffff-0000-4000-8000-000000000002'
 const { FAKE_SHA256 } = vi.hoisted(() => ({ FAKE_SHA256: 'a'.repeat(64) }))
 
 /** 目录版本夹具：同 epoch 下定义指纹不同，代表目录已推进到新版本。 */
@@ -178,7 +177,7 @@ function snapshot(revision: number | string = 0): CanvasSnapshotDTO {
         textContent: 'note',
         kind: 'TEXT',
         mediaType: 'text/markdown',
-        sizeBytes: 4,
+        sizeBytes: '4',
         width: null,
         height: null,
         durationMs: null,
@@ -202,7 +201,7 @@ function snapshot(revision: number | string = 0): CanvasSnapshotDTO {
         textContent: null,
         kind: 'IMAGE',
         mediaType: 'image/png',
-        sizeBytes: 3,
+        sizeBytes: '3',
         width: null,
         height: null,
         durationMs: null,
@@ -233,7 +232,7 @@ function snapshot(revision: number | string = 0): CanvasSnapshotDTO {
         textContent: null,
         kind: 'IMAGE',
         mediaType: 'image/png',
-        sizeBytes: 3,
+        sizeBytes: '3',
         width: null,
         height: null,
         durationMs: null,
@@ -275,7 +274,7 @@ function diffPatch(snapshotValue: CanvasSnapshotDTO): CanvasPatchDTO {
 
 function materializeResource(
   current: CanvasSnapshotDTO,
-  nodeId: UUIDString,
+  nodeId: string,
   input: CanvasResourceInputDTO,
   index: number,
 ): CanvasResourceDTO {
@@ -297,7 +296,7 @@ function materializeResource(
     textContent: input.kind === 'TEXT' ? input.textContent : null,
     kind: input.kind === 'BLOB' ? 'IMAGE' : 'TEXT',
     mediaType: input.kind === 'BLOB' ? 'image/png' : 'text/plain',
-    sizeBytes: 100,
+    sizeBytes: '100',
     width: null,
     height: null,
     durationMs: null,
@@ -333,9 +332,9 @@ function applyCommandBatch(current: CanvasSnapshotDTO, commands: CanvasCommandDT
           materializeResource(current, command.nodeId, resource, index)),
       } : n)
     } else if (command.type === 'SET_NODE_FUNCTION') {
-      nodes = nodes.map((n) => n.id === command.nodeId ? { ...n, function: command.function } : n)
+      nodes = nodes.map((n) => n.id === command.nodeId ? { ...n, function: command.function ?? null } : n)
     } else if (command.type === 'SET_NODE_GROUP') {
-      nodes = nodes.map((n) => n.id === command.nodeId ? { ...n, groupId: command.groupId } : n)
+      nodes = nodes.map((n) => n.id === command.nodeId ? { ...n, groupId: command.groupId ?? null } : n)
     } else if (command.type === 'UPDATE_NODE_TRANSFORM') {
       nodes = nodes.map((n) => n.id === command.nodeId ? { ...n, transform: command.transform } : n)
     } else if (command.type === 'CREATE_GROUP') {
@@ -427,7 +426,7 @@ describe('useCanvasController real snapshot runtime', () => {
         url: 'https://s3.example/upload',
         headers: { 'If-None-Match': '*' },
       },
-      expiresAt: '2026-08-10T00:15:00Z',
+      expiresAt: 1786320900,
     })
     vi.mocked(storageService.uploadFile).mockResolvedValue()
     vi.mocked(storageService.completeUpload).mockResolvedValue({
@@ -435,7 +434,7 @@ describe('useCanvasController real snapshot runtime', () => {
       state: 'READY',
       blobId: 'blob-upload',
       presignedPut: null,
-      expiresAt: '2026-08-10T00:15:00Z',
+      expiresAt: 1786320900,
     })
     vi.mocked(startCanvasFunctionRun).mockResolvedValue({
       nodeId: NODE_FN,
@@ -851,18 +850,18 @@ describe('useCanvasController real snapshot runtime', () => {
 
   it('allocates unique aliases from the command queue snapshot across rapid creates and uploads', async () => {
     vi.mocked(storageService.reserveUpload).mockResolvedValue({
-      id: 'eeeeeeee-0000-4000-8000-000000000090' as UUIDString,
+      id: 'eeeeeeee-0000-4000-8000-000000000090',
       state: 'READY',
-      blobId: 'blob-existing' as UUIDString,
+      blobId: 'blob-existing',
       presignedPut: null,
-      expiresAt: '2026-08-10T00:15:00Z',
+      expiresAt: 1786320900,
     })
     vi.mocked(storageService.completeUpload).mockImplementation(async (uploadId) => ({
       id: uploadId,
       state: 'READY',
-      blobId: 'blob-dedup' as UUIDString,
+      blobId: 'blob-dedup',
       presignedPut: null,
-      expiresAt: '2026-08-10T00:15:00Z',
+      expiresAt: 1786320900,
     }))
 
     const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
@@ -1172,16 +1171,16 @@ describe('useCanvasController real snapshot runtime', () => {
     terminal.nodes = terminal.nodes.map((node) => node.id === NODE_FN ? {
       ...node,
       resources: [{
-        id: 'ffffffff-0000-4000-8000-000000000031' as UUIDString,
+        id: 'ffffffff-0000-4000-8000-000000000031',
         canvasId: CANVAS_ID,
         ownerNodeId: NODE_FN,
         resourceIndex: 0,
-        blobId: 'blob-new-output' as UUIDString,
+        blobId: 'blob-new-output',
         name: 'new-output.png',
         textContent: null,
         kind: 'IMAGE',
         mediaType: 'image/png',
-        sizeBytes: 4,
+        sizeBytes: '4',
         width: null,
         height: null,
         durationMs: null,
@@ -1489,7 +1488,7 @@ describe('useCanvasController real snapshot runtime', () => {
   it.each(['RUNNING', 'FAILED'] as const)(
     'recovers a lost start response from the matching server run in %s state',
     async (status) => {
-      let submittedRequestId: UUIDString = REQUEST_STARTED
+      let submittedRequestId: string = REQUEST_STARTED
       vi.mocked(startCanvasFunctionRun).mockImplementation(async (_canvasId, _nodeId, request) => {
         submittedRequestId = request.requestId
         throw new Error('start response lost')
@@ -2095,7 +2094,7 @@ describe('useCanvasController real snapshot runtime', () => {
     // 测试意图：验证存在同 nodeId 的两个画布 CANVAS_A 和 CANVAS_B，
     // CANVAS_A 提交操作在途时切换到 CANVAS_B 并产生同 nodeId 的新草稿，
     // CANVAS_A 的迟到 ACK 响应仅清理 CANVAS_A 的持久草稿，绝不误删或回滚 CANVAS_B 的内存与持久草稿。
-    const CANVAS_B = '99999999-4b9f-4c5d-9e6f-1a2b3c4d5e6f' as UUIDString
+    const CANVAS_B = '99999999-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
     const snapshotB: CanvasSnapshotDTO = {
       ...snapshot(0),
       document: { ...snapshot(0).document, id: CANVAS_B },

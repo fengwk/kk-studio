@@ -2,11 +2,10 @@ import type { ReactNode } from 'react'
 import { ChevronRight, MessageSquare, Pencil, Trash2 } from 'lucide-react'
 import { useNavigate } from 'react-router'
 import { formatBackendDate } from '@/features/chat/chat-utils'
-import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
-import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
 import { useI18n } from '@/shared/i18n'
 import { ResourceCard } from '@/shared/ui/cards/ResourceCard'
 import { Button } from '@/shared/ui/controls/Button'
+import type { AgentDefinitionDTO, ChatDTO } from '@/shared/api/generated/contracts'
 
 export function ChatCard({
   chat,

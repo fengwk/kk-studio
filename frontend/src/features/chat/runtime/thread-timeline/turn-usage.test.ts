@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { HarnessSessionEntryDTO } from '@/shared/api/contracts/ai-runtime'
 import { aggregateEntryUsage } from '@/features/chat/runtime/thread-timeline/turn-usage'
+import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 
 /**
  * aggregateEntryUsage 只从全部 Entry 事实（ASSISTANT assistantMetadata + usageCost 读取投影）派生，
@@ -22,7 +22,7 @@ function assistantEntry(
       message: { role: 'ASSISTANT', contents: [{ type: 'text', text: 'ok' }] },
       ...(Object.keys(usage).length > 0 ? { assistantMetadata: { usage } } : {}),
     }),
-    createTime: '2026-07-28T10:00:00Z',
+    createTime: 1785232800,
     usageCost: usageCost ?? null,
   }
 }
@@ -34,7 +34,8 @@ function otherEntry(entryId: string, entryType: HarnessSessionEntryDTO['entryTyp
     parentEntryId: null,
     entryType,
     payloadJson: JSON.stringify({ reason: 'USER_MESSAGE' }),
-    createTime: '2026-07-28T09:59:00Z',
+    createTime: 1785232740,
+    usageCost: null,
   }
 }
 
@@ -53,7 +54,7 @@ function compactionEntry(
       summaryText: 'summarized',
       assistantMetadata: usage == null ? null : { stopReason: 'COMPLETE', usage },
     }),
-    createTime: '2026-07-28T10:00:00Z',
+    createTime: 1785232800,
     usageCost: usageCost ?? null,
   }
 }

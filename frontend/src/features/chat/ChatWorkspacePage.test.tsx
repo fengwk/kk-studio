@@ -10,14 +10,15 @@ import { agentService } from '@/shared/api/agent-service'
 import { chatService } from '@/shared/api/chat-service'
 import { environmentService } from '@/shared/api/environment-service'
 import { harnessService } from '@/shared/api/harness-service'
+import { setLocale } from '@/shared/i18n'
 import type {
-  AgentCommandBatchResponseDTO,
+  AgentDefinitionDTO,
+  AgentModelDTO,
+  HarnessAcceptedCommandsDTO,
   HarnessSessionEntryDTO,
   HarnessThreadDTO,
   HarnessThreadSnapshotDTO,
-} from '@/shared/api/contracts/ai-runtime'
-import type { AgentDefinitionDTO, AgentModelDTO } from '@/shared/api/contracts/ai-catalog'
-import { setLocale } from '@/shared/i18n'
+} from '@/shared/api/generated/contracts'
 
 const CHAT_ID = 'chat-1'
 const THREAD_ID = '11111111-2222-4333-8444-555555555555'
@@ -79,8 +80,8 @@ const assistantAgent: AgentDefinitionDTO = {
   variant: 'default',
   config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
   version: '0',
-  createTime: null,
-  updateTime: null,
+  createTime: 0,
+  updateTime: 0,
 }
 
 const model: AgentModelDTO = {
@@ -108,8 +109,8 @@ const model: AgentModelDTO = {
     variants: [{ id: 'default' }],
   },
   version: '0',
-  createTime: null,
-  updateTime: null,
+  createTime: 0,
+  updateTime: 0,
 }
 
 function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
@@ -132,8 +133,8 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
       environmentName: null,
       goal: null,
     },
-    createTime: null,
-    updateTime: null,
+    createTime: 0,
+    updateTime: 0,
     ...overrides,
   }
 }
@@ -152,17 +153,18 @@ function snapshot(currentThread = thread()): HarnessThreadSnapshotDTO {
   }
 }
 
-function acceptedResponse(currentThread = thread()): AgentCommandBatchResponseDTO {
+function acceptedResponse(currentThread = thread()): HarnessAcceptedCommandsDTO {
   const rootEntry: HarnessSessionEntryDTO = {
     entryId: 'root-1',
     sessionId: currentThread.sessionId,
     parentEntryId: null,
     entryType: 'ROOT',
     payloadJson: '{}',
-    createTime: null,
+    createTime: 0,
+    usageCost: null,
   }
   return {
-    session: { sessionId: currentThread.sessionId, name: 'Session', createdAt: null },
+    session: { sessionId: currentThread.sessionId, name: 'Session', createdAt: 0 },
     rootEntry,
     thread: currentThread,
     acceptedCommands: [],
@@ -181,26 +183,26 @@ beforeEach(() => {
     environmentName: null,
     yoloEnabled: false,
     version: '1',
-    createTime: null,
-    updateTime: null,
+    createTime: 0,
+    updateTime: 0,
   })
   vi.mocked(agentService.listAgents).mockResolvedValue({
     pageNumber: 1,
     pageSize: 50,
-    totalCount: 1,
+    totalCount: '1',
     results: [assistantAgent],
   })
   vi.mocked(agentService.listModels).mockResolvedValue({
     pageNumber: 1,
     pageSize: 50,
-    totalCount: 1,
+    totalCount: '1',
     results: [model],
   })
   vi.mocked(chatService.listChatSessions).mockResolvedValue([{
     sessionId: 'session-1',
     name: 'Session One',
-    createdAt: null,
-    lastActivityAt: null,
+    createdAt: 0,
+    lastActivityAt: 0,
     firstMessagePreview: null,
     threadCount: 1,
   }])
@@ -400,7 +402,7 @@ describe('ChatWorkspacePage', () => {
     // 不切换目标且不消费 URL query
     const user = userEvent.setup()
     let resolveBatch!: () => void
-    const pendingPromise = new Promise<AgentCommandBatchResponseDTO>((resolve) => {
+    const pendingPromise = new Promise<HarnessAcceptedCommandsDTO>((resolve) => {
       resolveBatch = () => resolve(acceptedResponse())
     })
 
@@ -455,8 +457,8 @@ describe('ChatWorkspacePage', () => {
       environmentName: null,
       yoloEnabled: false,
       version: '1',
-      createTime: null,
-      updateTime: null,
+      createTime: 0,
+      updateTime: 0,
     }))
 
     // chat-B 预先存好 grid-4 布局
@@ -531,7 +533,8 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     parentEntryId: null,
     entryType: 'ROOT',
     payloadJson: '{}',
-    createTime: null,
+    createTime: 0,
+    usageCost: null,
   }
   const TURN_END_ENTRY: HarnessSessionEntryDTO = {
     entryId: 'entry-2',
@@ -539,7 +542,8 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     parentEntryId: 'entry-1',
     entryType: 'TURN_END',
     payloadJson: JSON.stringify({ outcome: 'COMPLETED' }),
-    createTime: null,
+    createTime: 0,
+    usageCost: null,
   }
   const MESSAGE_ENTRY: HarnessSessionEntryDTO = {
     entryId: 'entry-3',
@@ -549,7 +553,8 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     payloadJson: JSON.stringify({
       message: { role: 'USER', contents: [{ type: 'text', text: 'hello' }] },
     }),
-    createTime: null,
+    createTime: 0,
+    usageCost: null,
   }
 
   function paneTargetKey(paneId: string) {
@@ -664,7 +669,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     const user = userEvent.setup()
     const summary = {
       threadId: 'subagent', parentThreadId: null as string | null, name: 'duplicate',
-      createdAt: null, updatedAt: null, status: 'IDLE', processing: false,
+      createdAt: 0, updatedAt: 0, status: 'IDLE', processing: false,
       model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' }, headMessagePreview: null,
     }
     vi.mocked(harnessService.listSessionThreads).mockResolvedValue([summary])
@@ -831,7 +836,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     if (scenario === 'root' || scenario === 'subagent') {
       vi.mocked(harnessService.listSessionThreads).mockResolvedValue([{
         threadId: 'existing', parentThreadId: scenario === 'root' ? null : 'parent', name: 'duplicate',
-        createdAt: null, updatedAt: null, status: 'IDLE', processing: false,
+        createdAt: 0, updatedAt: 0, status: 'IDLE', processing: false,
         model: thread().branchSettings.model, headMessagePreview: null,
       }])
     }
@@ -953,8 +958,8 @@ describe('ChatWorkspacePage 新建分支路由', () => {
         ready: true,
         status: 'READY',
         version: '1',
-        createTime: '2026-10-01T00:00:00Z',
-        updateTime: '2026-10-01T00:00:00Z',
+        createTime: 1790812800,
+        updateTime: 1790812800,
         capabilities: [],
         statusExpiresAt: null,
         lastSeen: null,
@@ -1020,8 +1025,8 @@ describe('ChatWorkspacePage 新建分支路由', () => {
         ready: true,
         status: 'READY',
         version: '1',
-        createTime: '2026-10-01T00:00:00Z',
-        updateTime: '2026-10-01T00:00:00Z',
+        createTime: 1790812800,
+        updateTime: 1790812800,
         capabilities: [],
         statusExpiresAt: null,
         lastSeen: null,

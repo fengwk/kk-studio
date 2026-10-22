@@ -78,7 +78,7 @@ describe('BranchGoalPanel', () => {
         status: 'complete',
         reason: 'Successfully satisfied all acceptance criteria',
         reportedAt: '2026-09-24T12:00:00Z',
-        createTime: '2026-09-24T12:00:00Z',
+        createTime: 1790251200,
       },
       stale: null,
     }
@@ -107,7 +107,7 @@ describe('BranchGoalPanel', () => {
         status: 'complete',
         reason: 'Old report',
         reportedAt: '2026-09-24T10:00:00Z',
-        createTime: '2026-09-24T10:00:00Z',
+        createTime: 1790244000,
       },
     }
 

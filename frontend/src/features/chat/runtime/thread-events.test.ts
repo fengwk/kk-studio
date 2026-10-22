@@ -1,11 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type {
-  EntryType,
-  HarnessSessionEntryDTO,
-  ModelAttemptFailureDTO,
-  ModelInvocationDTO,
-  ToolInvocationDTO,
-} from '@/shared/api/contracts/ai-runtime'
+import type { EntryType } from '@/shared/api/contracts/ai-runtime'
 import {
   buildThreadEventTimeline,
   eventStatusText,
@@ -14,6 +8,12 @@ import {
 import type {
   RealtimeModelStream,
 } from '@/features/chat/runtime/thread-realtime/model-stream'
+import type {
+  HarnessSessionEntryDTO,
+  ModelAttemptFailureDTO,
+  ModelInvocationDTO,
+  ToolInvocationDTO,
+} from '@/shared/api/generated/contracts'
 
 /**
  * Event 投影矩阵（冻结方案）：每个 durable Entry 恰好一条 ThreadEventRecord；
@@ -26,7 +26,7 @@ function entry(
   entryId: string,
   entryType: EntryType,
   payload: Record<string, unknown>,
-  createTime = '2026-07-28T10:00:00Z',
+  createTime = 1785232800,
 ): HarnessSessionEntryDTO {
   return {
     entryId,
@@ -35,6 +35,7 @@ function entry(
     entryType,
     payloadJson: JSON.stringify(payload),
     createTime,
+    usageCost: null,
   }
 }
 
@@ -58,8 +59,8 @@ function modelInvocation(status: string, attempt: number, overrides: Partial<Mod
     resultJson: null,
     errorJson: null,
     resultEntryId: null,
-    createTime: '2026-07-28T10:00:00Z',
-    updateTime: '2026-07-28T10:00:00Z',
+    createTime: 1785232800,
+    updateTime: 1785232800,
     ...overrides,
   }
 }
@@ -75,8 +76,8 @@ function attemptFailure(overrides: Partial<ModelAttemptFailureDTO> = {}): ModelA
     thinking: 'partial thinking',
     errorCode: 'TRANSIENT',
     errorMessage: 'try later',
-    failedAt: '2026-07-28T10:00:00Z',
-    retryAt: '2026-07-28T10:00:05Z',
+    failedAt: 1785232800,
+    retryAt: 1785232805,
     ...overrides,
   }
 }
@@ -101,8 +102,8 @@ function toolInvocation(overrides: Partial<ToolInvocationDTO> = {}): ToolInvocat
     approvalJson: null,
     resultJson: null,
     errorJson: null,
-    createTime: '2026-07-28T10:00:00Z',
-    updateTime: '2026-07-28T10:00:00Z',
+    createTime: 1785232800,
+    updateTime: 1785232800,
     ...overrides,
   }
 }
@@ -770,41 +771,28 @@ describe('buildThreadEventTimeline', () => {
     ).toBe('call-1')
   })
 
-  it('compares active failure timestamps across string, number, array, and invalid forms', () => {
+  it('orders same-attempt failures by failedAt and keeps the earliest active overlay', () => {
     const entries = [
       entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
       entry('assistant-1', 'MESSAGE', messagePayload('ASSISTANT', [{ type: 'text', text: 'ok' }])),
     ]
-    // 数组不属于当前 Instant wire 契约；仅在运行时边界注入以验证旧数据容错。
-    const legacyFailure = attemptFailure({ attempt: 2, sequence: '7' })
-    Reflect.set(legacyFailure, 'failedAt', [2026, 7, 28, 10, 0, 0])
-    Reflect.set(legacyFailure, 'retryAt', [2026, 7, 28])
     const failures = [
-      // 数字时间戳（epoch millis）：走得比字符串/数组都小（L745 数字分支）。
-      attemptFailure({ attempt: 2, sequence: '5', failedAt: 1, retryAt: 2 }),
-      // 字符串时间戳：数值上排在数字之后。
-      attemptFailure({ attempt: 2, sequence: '6', failedAt: '2026-07-28T10:00:00Z' }),
-      // 数组时间戳（[y,m,d,...]）：按数组首元素数值参与比较（L751-753）。
-      legacyFailure,
-      // 无法解析的字符串：按 0 参与比较，始终排最前（L754 fallback）。
-      attemptFailure({ attempt: 2, sequence: '8', failedAt: 'not-a-date' }),
-      // null 时间戳：同样按 0 处理（L754 fallback），与无法解析的字符串并列。
-      attemptFailure({ attempt: 2, sequence: '9', failedAt: null, retryAt: null }),
+      attemptFailure({ attempt: 2, sequence: '6', failedAt: 1785232800 }),
+      attemptFailure({ attempt: 2, sequence: '5', failedAt: 1785232700.5, retryAt: 1785232701 }),
+      attemptFailure({ attempt: 2, sequence: '7', failedAt: 1785232900 }),
     ]
     const events = build(entries, {
       modelAttemptFailures: failures,
       modelInvocation: modelInvocation('RUNNING', 3),
     })
-    // 同 attempt 按 failedAt 稳定排序：不可解析/空值最先，其次数字、字符串、数组。
-    // attempt 相同 → 5 个失败共享同一 identity，只保留一条活跃 overlay（去重语义）。
+    // attempt 相同 → 三个失败共享同一 identity，只保留 failedAt 最早的一条活跃 overlay。
     const attemptFailures = events.filter((event) => event.source === 'attempt-failure')
     expect(attemptFailures.map((event) => event.id)).toEqual([
       'active:attempt-failure:model-1:2',
     ])
-    // 去重保留的是排序后第一条（failedAt 不可解析、时间戳按 0 处理的那条）。
     expect(
       attemptFailures[0]!.details.find((row) => row.label === '序号')!.value,
-    ).toBe('8')
+    ).toBe('5')
   })
 
   it('keeps the full compact payload JSON in the summary and leaves overflow to CSS', () => {

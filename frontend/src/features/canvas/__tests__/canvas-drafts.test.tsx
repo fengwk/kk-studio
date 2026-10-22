@@ -15,13 +15,12 @@ import {
 import { onCanvasStorageError } from '@/features/canvas/canvas-local-store'
 import { createMockIDBFactory } from './mock-idb'
 import type { ResourceNode } from '@/features/canvas/domain'
-import type { UUIDString } from '@/shared/api/contracts/studio'
 
-const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f' as UUIDString
-const NODE_A = 'aaaaaaaa-1111-4111-8111-111111111111' as UUIDString
-const NODE_B = 'aaaaaaaa-2222-4222-8222-222222222222' as UUIDString
+const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
+const NODE_A = 'aaaaaaaa-1111-4111-8111-111111111111'
+const NODE_B = 'aaaaaaaa-2222-4222-8222-222222222222'
 
-function sampleNode(id: UUIDString): ResourceNode {
+function sampleNode(id: string): ResourceNode {
   return {
     id,
     canvasId: CANVAS_ID,
@@ -29,7 +28,7 @@ function sampleNode(id: UUIDString): ResourceNode {
     transform: { x: 10, y: 20, width: 320, height: 260 },
     groupId: null,
     resources: [{
-      id: 'res-1' as UUIDString,
+      id: 'res-1',
       canvasId: CANVAS_ID,
       ownerNodeId: id,
       resourceIndex: 0,

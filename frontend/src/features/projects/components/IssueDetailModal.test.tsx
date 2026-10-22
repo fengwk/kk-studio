@@ -3,7 +3,6 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { IssueDetailModal } from './IssueDetailModal'
 import type { ProjectsApi } from '../projects-api'
-import type { IssueDetailDTO, ProjectWorkflowDTO } from '../types'
 import type { StorageService } from '@/shared/api/storage-service'
 import type { StorageUploadDTO } from '@/shared/api/contracts/storage'
 import { ApiError } from '@/shared/api/client'
@@ -13,6 +12,7 @@ import {
   pendingActionStorageKey,
   storePendingAction,
 } from '../pending-action-sidecar'
+import type { IssueDetailDTO, ProjectWorkflowDTO } from '@/shared/api/generated/contracts'
 
 function renderModal(ui: React.ReactElement, client?: QueryClient) {
   const queryClient = client ?? new QueryClient({
@@ -155,7 +155,7 @@ describe('IssueDetailModal', () => {
     state: 'READY',
     blobId: 'mock-blob-id',
     presignedPut: null,
-    expiresAt: '2026-09-20T12:00:00Z',
+    expiresAt: 1789905600,
   }
 
   const createMockStorageService = (): StorageService => ({
@@ -548,7 +548,7 @@ describe('IssueDetailModal', () => {
 
   const mockWorkflow: ProjectWorkflowDTO = {
     states: [
-      { state: 'IN_PROGRESS', name: '进行中', next: ['REVIEW'] },
+      { state: 'IN_PROGRESS', name: '进行中', next: ['REVIEW'], agent: null, environment: null, instructions: null, maxRuns: null },
     ],
   }
 

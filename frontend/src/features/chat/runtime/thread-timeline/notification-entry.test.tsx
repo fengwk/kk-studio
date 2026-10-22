@@ -8,7 +8,7 @@ import type { EntryEventDialogueMessage } from '@/features/chat/runtime/thread-t
 import type {
   HarnessSessionEntryDTO,
   HarnessThreadCommandDTO,
-} from '@/shared/api/contracts/ai-runtime'
+} from '@/shared/api/generated/contracts'
 
 /** NOTIFICATION Entry：message 是标准 USER AgentMessage，只作为 runtime 上下文事实。 */
 function notificationEntry(
@@ -27,7 +27,8 @@ function notificationEntry(
       sourceThreadId: 'child-thread-1',
       message: { role: 'USER', contents: [{ type: 'text', text }] },
     }),
-    createTime: '2026-07-28T10:00:00Z',
+    createTime: 1785232800,
+    usageCost: null,
   }
 }
 
@@ -40,7 +41,8 @@ function userEntry(text: string, entryId: string): HarnessSessionEntryDTO {
     payloadJson: JSON.stringify({
       message: { role: 'USER', contents: [{ type: 'text', text }] },
     }),
-    createTime: '2026-07-28T10:00:00Z',
+    createTime: 1785232800,
+    usageCost: null,
   }
 }
 
@@ -64,7 +66,7 @@ function queuedCommand(
           message: { role: 'USER', contents: [{ type: 'text', text }] },
         }),
     cancelledAt: null,
-    createTime: '2026-07-28T10:00:01Z',
+    createTime: 1785232801,
   }
 }
 

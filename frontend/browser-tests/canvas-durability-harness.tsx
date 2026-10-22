@@ -10,22 +10,18 @@ import {
   resetEditingSessionForTests,
 } from '@/features/canvas/canvas-editing-session'
 import { onCanvasStorageError } from '@/features/canvas/canvas-local-store'
-import type {
-  CanvasCommandDTO,
-  CanvasSnapshotDTO,
-  UUIDString,
-} from '@/shared/api/contracts/studio'
+import type { CanvasCommandDTO, CanvasSnapshotDTO } from '@/shared/api/generated/contracts'
 
 const SESSION_STORAGE_KEY = 'kkstudio.canvas.editingSessionId'
-const DEFAULT_CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f' as UUIDString
+const DEFAULT_CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
 
 export interface CanvasDurabilityRecordedCall {
-  idempotencyKey: UUIDString
+  idempotencyKey: string
   commands: CanvasCommandDTO[]
 }
 
 export interface CanvasDurabilityBuildOptions {
-  canvasId?: UUIDString
+  canvasId?: string
   initialRevision?: string
 }
 
@@ -49,8 +45,8 @@ export interface CanvasDurabilityHarnessApi {
   calls: () => CanvasDurabilityRecordedCall[]
   clearCalls: () => void
   listPersistedOperations: (
-    canvasId?: UUIDString,
-  ) => Promise<Array<{ id: string; idempotencyKey: UUIDString; commands: CanvasCommandDTO[]; sequence: number }>>
+    canvasId?: string,
+  ) => Promise<Array<{ id: string; idempotencyKey: string; commands: CanvasCommandDTO[]; sequence: number }>>
   getStorageErrors: () => string[]
   hasStorageError: () => boolean
   clearStorageErrors: () => void
@@ -63,7 +59,7 @@ declare global {
 }
 
 let queue: CanvasCommandQueue | null = null
-let currentCanvasId: UUIDString = DEFAULT_CANVAS_ID
+let currentCanvasId: string = DEFAULT_CANVAS_ID
 let currentRevision = '1'
 let currentMode: 'ok' | 'network-error' = 'ok'
 let recordedCalls: CanvasDurabilityRecordedCall[] = []
@@ -73,7 +69,7 @@ onCanvasStorageError((err) => {
   storageErrors.push(err.name || err.message)
 })
 
-function buildAuthoritativeSnapshot(canvasId: UUIDString, revision: string): CanvasSnapshotDTO {
+function buildAuthoritativeSnapshot(canvasId: string, revision: string): CanvasSnapshotDTO {
   return {
     document: {
       id: canvasId,
@@ -218,8 +214,8 @@ async function recover(): Promise<{
 }
 
 async function listPersistedOperations(
-  canvasId?: UUIDString,
-): Promise<Array<{ id: string; idempotencyKey: UUIDString; commands: CanvasCommandDTO[]; sequence: number }>> {
+  canvasId?: string,
+): Promise<Array<{ id: string; idempotencyKey: string; commands: CanvasCommandDTO[]; sequence: number }>> {
   const cid = canvasId ?? currentCanvasId
   const store = createCanvasOperationStore(cid)
   const list = await store.list()

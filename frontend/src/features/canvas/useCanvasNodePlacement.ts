@@ -2,7 +2,7 @@ import { useCallback, useRef } from 'react'
 import { currentCanvasSnapshot, type CanvasScope } from '@/features/canvas/canvas-controller-scope'
 import { normalizeNodeAlias, uniqueNodeAlias } from '@/features/canvas/node-alias'
 import { CANVAS_SINGLE_RESOURCE_NODE_SIZE } from '@/features/canvas/resource-node-size'
-import type { CanvasSnapshotDTO, CanvasTransformDTO } from '@/shared/api/contracts/studio'
+import type { CanvasSnapshotDTO, CanvasTransformDTO } from '@/shared/api/generated/contracts'
 
 const NODE_SIZE: CanvasTransformDTO = {
   x: 120,

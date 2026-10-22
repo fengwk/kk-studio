@@ -6,6 +6,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.jspecify.annotations.Nullable;
 
 /**
  * 修改项目请求 DTO。
@@ -21,10 +22,10 @@ public class UpdateProjectRequestDTO {
   private String expectedVersion;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String title;
+  private @Nullable String title;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String description;
+  private @Nullable String description;
 
   @JsonAnySetter
   public void rejectUnknownField(String name, Object value) {

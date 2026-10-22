@@ -6,6 +6,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.jspecify.annotations.Nullable;
 
 import java.util.List;
 
@@ -20,19 +21,19 @@ public class ProjectWorkflowStateDTO {
   private String name;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String agent;
+  private @Nullable String agent;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String environment;
+  private @Nullable String environment;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String instructions;
+  private @Nullable String instructions;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String maxRuns;
+  private @Nullable String maxRuns;
 
-  private Boolean enabled;
-  private List<String> next;
+  private @Nullable Boolean enabled;
+  private @Nullable List<String> next;
 
   @JsonAnySetter
   public void rejectUnknownField(String name, Object value) {

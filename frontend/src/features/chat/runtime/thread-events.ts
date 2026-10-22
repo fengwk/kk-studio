@@ -1,9 +1,3 @@
-import type {
-  HarnessSessionEntryDTO,
-  ModelAttemptFailureDTO,
-  ModelInvocationDTO,
-  ToolInvocationDTO,
-} from '@/shared/api/contracts/ai-runtime'
 import { asRecord, getRecordList, getString, parsePayload } from '@/features/chat/runtime/payload-json'
 import type {
   RealtimeModelStream,
@@ -23,6 +17,12 @@ import type {
   TurnUsage,
 } from '@/features/chat/runtime/thread-timeline-types'
 import { translate } from '@/shared/i18n'
+import type {
+  HarnessSessionEntryDTO,
+  ModelAttemptFailureDTO,
+  ModelInvocationDTO,
+  ToolInvocationDTO,
+} from '@/shared/api/generated/contracts'
 
 /**
  * Event 投影的独立模型：不依赖 DialogueMessage 与 transcript 渲染。
@@ -300,7 +300,7 @@ export function buildThreadEventTimeline(
   }
 
   const orderedFailures = [...modelAttemptFailures].sort(
-    (left, right) => left.attempt - right.attempt || compareTimestamp(left.failedAt, right.failedAt),
+    (left, right) => left.attempt - right.attempt || left.failedAt - right.failedAt,
   )
   const seenFailures = new Set<string>()
   for (const failure of orderedFailures) {
@@ -955,20 +955,3 @@ function scalarText(value: unknown): string {
   return typeof value === 'number' ? String(value) : getString(value)
 }
 
-function compareTimestamp(left: DialogueTimestamp, right: DialogueTimestamp): number {
-  return timestampValue(left) - timestampValue(right)
-}
-
-function timestampValue(value: DialogueTimestamp): number {
-  if (typeof value === 'number') {
-    return value
-  }
-  if (typeof value === 'string') {
-    const parsed = Date.parse(value)
-    return Number.isFinite(parsed) ? parsed : 0
-  }
-  if (Array.isArray(value)) {
-    return value.length > 0 && typeof value[0] === 'number' ? value[0] : 0
-  }
-  return 0
-}

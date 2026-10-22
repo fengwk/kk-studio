@@ -3,12 +3,12 @@ import { useRef, useState, type ChangeEvent } from 'react'
 import { useI18n } from '@/shared/i18n'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { configSyncService } from '@/shared/api/config-sync-service'
-import type { ConfigSyncImportCheckDTO } from '@/shared/api/contracts/config-sync'
 import { configSyncErrorMessage } from '@/features/settings/sync/config-sync-utils'
 import { SyncExportModal } from '@/features/settings/sync/SyncExportModal'
 import { SyncImportModal } from '@/features/settings/sync/SyncImportModal'
 import { Button } from '@/shared/ui/controls/Button'
 import { StateBlock } from '@/shared/ui/feedback/StateBlock'
+import type { ConfigSyncImportCheckDTO } from '@/shared/api/generated/contracts'
 
 interface SyncTabProps {
   reloadSettings: () => void

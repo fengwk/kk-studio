@@ -10,7 +10,6 @@
  * - IndexedDB 不可用时绝不宣称已落盘，内存回退仅用于当前标签页会话并必须告警。
  */
 
-import type { CanvasCommandDTO, UUIDString } from '@/shared/api/contracts/studio'
 import {
   buildSessionKey,
   CanvasStorageUnavailableError,
@@ -25,6 +24,7 @@ import {
   getEditingSessionId,
   isSessionReloading,
 } from '@/features/canvas/canvas-editing-session'
+import type { CanvasCommandDTO } from '@/shared/api/generated/contracts'
 
 const DB_NAME = 'kkstudio.canvas.operations'
 const DB_VERSION = 1
@@ -49,7 +49,7 @@ export interface CanvasPendingOperation {
   editingSessionId: string
   /** 复合检索索引：`${userId}:${canvasId}:${editingSessionId}` */
   sessionKey: string
-  idempotencyKey: UUIDString
+  idempotencyKey: string
   /** 冻结的命令批次（含顺序），重放时原样提交 */
   commands: CanvasCommandDTO[]
   /** ACK 时需按 operation/generation 精准清除的草稿范围 */
@@ -264,7 +264,7 @@ function compareSequence(left: CanvasPendingOperation, right: CanvasPendingOpera
  * 构建绑定到特定画布 / 会话的待确认操作存储。
  */
 export function createCanvasOperationStore(
-  canvasId: UUIDString,
+  canvasId: string,
   options?: CanvasLocalStoreOptions,
 ): CanvasPendingOperationStore {
   const scope = resolveScope(canvasId, options)
@@ -283,10 +283,10 @@ export function createCanvasOperationStore(
 
 /** 构造一个尚未落盘的新操作记录；id / 顺序由队列在入队瞬间确定。 */
 export function buildPendingOperation(input: {
-  canvasId: UUIDString
+  canvasId: string
   userId: string
   editingSessionId: string
-  idempotencyKey: UUIDString
+  idempotencyKey: string
   commands: CanvasCommandDTO[]
   ack?: CanvasDraftAck[]
   sequence: number

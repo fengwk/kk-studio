@@ -1,4 +1,5 @@
 import { apiClient, type HttpClient } from '@/shared/api/client'
+import type { PageResult } from '@/shared/api/contracts/base'
 import type {
   AgentDefinitionCreateDTO,
   AgentDefinitionDTO,
@@ -15,8 +16,7 @@ import type {
   SkillPackageEditDTO,
   SkillPackagePublishDTO,
   ToolCatalogEntryDTO,
-} from '@/shared/api/contracts/ai-catalog'
-import type { PageResult } from '@/shared/api/contracts/base'
+} from '@/shared/api/generated/contracts'
 
 function encodePathTail(value: string): string {
   return value.split('/').map(encodeURIComponent).join('/')

@@ -6,6 +6,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.jspecify.annotations.Nullable;
 
 /** 暂停 Issue 请求 DTO。 */
 @Data
@@ -19,7 +20,7 @@ public class PauseIssueRequestDTO {
   private String reason;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String detail;
+  private @Nullable String detail;
 
   @JsonAnySetter
   public void rejectUnknownField(String name, Object value) {

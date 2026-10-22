@@ -6,6 +6,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.jspecify.annotations.Nullable;
 
 /** 追加 Issue Activity 请求 DTO。 */
 @Data
@@ -18,7 +19,7 @@ public class AppendIssueActivityRequestDTO {
   private String requestKey;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String kind;
+  private @Nullable String kind;
 
   private String body;
 

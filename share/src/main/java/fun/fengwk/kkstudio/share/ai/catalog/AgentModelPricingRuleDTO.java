@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.share.ai.catalog;
 
 import lombok.Data;
+import org.jspecify.annotations.Nullable;
 
 import java.math.BigDecimal;
 
@@ -9,10 +10,10 @@ import java.math.BigDecimal;
 public class AgentModelPricingRuleDTO {
 
   /** 可空：生效时段。 */
-  private AgentModelPricingWindowDTO timeWindow;
+  private @Nullable AgentModelPricingWindowDTO timeWindow;
 
   /** 可空正整数：请求提示 token（输入加缓存读写）达到该值时生效。 */
-  private Long minContextTokens;
+  private @Nullable Long minContextTokens;
 
   private BigDecimal inputPerMillionTokens;
 

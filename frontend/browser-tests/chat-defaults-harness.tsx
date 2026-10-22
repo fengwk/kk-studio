@@ -8,9 +8,11 @@ import { queryKeys } from '@/shared/lib/query-keys'
 import { CreateChatModal } from '@/features/chat/CreateChatModal'
 import { ChatCard } from '@/features/chat/ChatCard'
 import { ResourceGrid } from '@/shared/ui/cards/ResourceGrid'
-import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
-import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
-import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
+import type {
+  AgentDefinitionDTO,
+  ChatDTO,
+  EnvironmentCardDTO,
+} from '@/shared/api/generated/contracts'
 
 const params = new URLSearchParams(window.location.search)
 const initialLocale = params.get('locale') === 'en-US' ? 'en-US' : 'zh-CN'
@@ -31,8 +33,8 @@ const testAgents: AgentDefinitionDTO[] = [
       subagents: [],
     },
     version: '1',
-    createTime: '2026-10-01T00:00:00Z',
-    updateTime: '2026-10-01T00:00:00Z',
+    createTime: 1790812800,
+    updateTime: 1790812800,
   },
 ]
 
@@ -43,11 +45,11 @@ const initialEnvironments: EnvironmentCardDTO[] = [
     status: 'ONLINE',
     ready: true,
     statusExpiresAt: null,
-    lastSeen: '2026-10-01T00:00:00Z',
+    lastSeen: 1790812800,
     capabilities: [],
     version: '1',
-    createTime: '2026-10-01T00:00:00Z',
-    updateTime: '2026-10-01T00:00:00Z',
+    createTime: 1790812800,
+    updateTime: 1790812800,
   },
   {
     id: 'env-ubuntu',
@@ -55,11 +57,11 @@ const initialEnvironments: EnvironmentCardDTO[] = [
     status: 'ONLINE',
     ready: true,
     statusExpiresAt: null,
-    lastSeen: '2026-10-01T00:00:00Z',
+    lastSeen: 1790812800,
     capabilities: [],
     version: '1',
-    createTime: '2026-10-01T00:00:00Z',
-    updateTime: '2026-10-01T00:00:00Z',
+    createTime: 1790812800,
+    updateTime: 1790812800,
   },
 ]
 
@@ -146,8 +148,8 @@ export function ChatDefaultsHarnessApp() {
       yoloEnabled: true,
       environmentName: 'docker-node',
       version: '1',
-      createTime: '2026-10-01T00:00:00Z',
-      updateTime: '2026-10-01T00:00:00Z',
+      createTime: 1790812800,
+      updateTime: 1790812800,
     },
     {
       id: 'chat-safe-null',
@@ -156,8 +158,8 @@ export function ChatDefaultsHarnessApp() {
       yoloEnabled: false,
       environmentName: null,
       version: '2',
-      createTime: '2026-10-02T00:00:00Z',
-      updateTime: '2026-10-02T00:00:00Z',
+      createTime: 1790899200,
+      updateTime: 1790899200,
     },
   ], [])
 

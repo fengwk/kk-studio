@@ -7,6 +7,7 @@ import lombok.AccessLevel;
 import lombok.Data;
 import lombok.Setter;
 import lombok.ToString;
+import org.jspecify.annotations.Nullable;
 
 /**
  * {@code PUT /api/skill-packages/{packageName}} 请求体：只编辑可编辑字段。
@@ -21,7 +22,7 @@ public class SkillPackageEditDTO {
   private String expectedVersion;
 
   /** 新的可空 package 描述；null/空白视为未填写。 */
-  private String description;
+  private @Nullable String description;
 
   /** 新的检查来源 branch；只影响后续检查，不改变已发布内容。 */
   private String branch;
@@ -33,7 +34,7 @@ public class SkillPackageEditDTO {
    */
   @Setter(AccessLevel.NONE)
   @ToString.Exclude
-  private String token;
+  private @Nullable String token;
 
   /** 请求体是否显式携带了 {@code token} 字段（区分省略与显式 null）。 */
   @JsonIgnore

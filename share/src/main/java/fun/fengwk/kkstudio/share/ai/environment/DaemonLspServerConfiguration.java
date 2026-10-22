@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.share.ai.environment;
 
 import lombok.Data;
+import org.jspecify.annotations.Nullable;
 
 import java.util.List;
 
@@ -8,7 +9,7 @@ import java.util.List;
 @Data
 public class DaemonLspServerConfiguration {
   private List<String> command;
-  private List<String> extensions;
-  private List<String> rootMarkers;
-  private List<String> firstMatchMarkers;
+  private @Nullable List<String> extensions;
+  private @Nullable List<String> rootMarkers;
+  private @Nullable List<String> firstMatchMarkers;
 }

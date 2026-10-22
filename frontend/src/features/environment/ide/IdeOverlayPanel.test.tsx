@@ -10,8 +10,8 @@ import {
 } from '@/features/environment/ide/IdeOverlayPanel'
 import { validateIdeEntryUrl } from '@/features/environment/ide/ide-url'
 import { environmentService } from '@/shared/api/environment-service'
-import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import { IdeLifecycleProvider } from '@/features/environment/ide/IdeLifecycleProvider'
+import type { EnvironmentCardDTO } from '@/shared/api/generated/contracts'
 
 function TestRouter({ children }: { children: ReactNode }) {
   const [ctx] = useState(() => {
@@ -97,8 +97,8 @@ describe('IdeOverlayPanel', () => {
       ready: true,
       status: 'READY',
       version: '1',
-      createTime: '2026-10-01T00:00:00Z',
-      updateTime: '2026-10-01T00:00:00Z',
+      createTime: 1790812800,
+      updateTime: 1790812800,
       capabilities: [],
       statusExpiresAt: null,
       lastSeen: null,
@@ -110,8 +110,8 @@ describe('IdeOverlayPanel', () => {
       ready: false,
       status: 'OFFLINE',
       version: '1',
-      createTime: '2026-10-01T00:00:00Z',
-      updateTime: '2026-10-01T00:00:00Z',
+      createTime: 1790812800,
+      updateTime: 1790812800,
       capabilities: [],
       statusExpiresAt: null,
       lastSeen: null,
@@ -122,8 +122,8 @@ describe('IdeOverlayPanel', () => {
       ready: true,
       status: 'READY',
       version: '1',
-      createTime: '2026-10-01T00:00:00Z',
-      updateTime: '2026-10-01T00:00:00Z',
+      createTime: 1790812800,
+      updateTime: 1790812800,
       capabilities: [],
       statusExpiresAt: null,
       lastSeen: null,

@@ -1,8 +1,8 @@
 import { useMemo } from 'react'
 import { Badge } from '@/shared/ui/data/Badge'
 import { useI18n } from '@/shared/i18n'
-import type { ProjectIssueSnapshotDTO, ProjectWorkflowDTO } from '../types'
 import { IssueCard } from './IssueCard'
+import type { ProjectIssueSnapshotDTO, ProjectWorkflowDTO } from '@/shared/api/generated/contracts'
 
 export interface IssueBoardProps {
   workflow?: ProjectWorkflowDTO

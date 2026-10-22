@@ -49,7 +49,7 @@ export function useAgentThreadQueries(threadId: string) {
   const hasEnvironmentTools = environmentTools.length > 0
   const deadlines = environmentTools.flatMap((invocation) => {
     const at = invocation.environmentWaitFreshnessAt
-    return at == null ? [] : [typeof at === 'number' ? at * 1000 : Date.parse(at)]
+    return at == null ? [] : [at * 1000]
   })
   const earliest = deadlines.length > 0 ? Math.min(...deadlines) / 1000 : null
   useReadModelFreshnessRecheck(queryKeys.threads.snapshot(threadId), earliest)

@@ -90,8 +90,8 @@ describe('projectsApi', () => {
     vi.mocked(mockClient.put).mockResolvedValueOnce({ ...mockProject, version: '2' })
     const workflow = {
       states: [
-        { state: 'INIT', name: 'Start', next: ['DONE'] },
-        { state: 'DONE', name: 'Finish' },
+        { state: 'INIT', name: 'Start', agent: null, environment: null, instructions: null, maxRuns: null, next: ['DONE'] },
+        { state: 'DONE', name: 'Finish', agent: null, environment: null, instructions: null, maxRuns: null },
       ],
     }
     const res = await api.updateWorkflow(mockProject.id, {

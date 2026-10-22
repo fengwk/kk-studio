@@ -1,4 +1,4 @@
-import type { AgentModelDTO } from '@/shared/api/contracts/ai-catalog'
+import type { AgentModelDTO } from '@/shared/api/generated/contracts'
 
 /**
  * {@link AgentModelDTO} 的客户端投影，补充了 console 需要的展示字段，但 wire 格式刻意省略这些字段。

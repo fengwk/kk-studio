@@ -6,17 +6,13 @@ import {
   validateUploadFile,
   type HashFile,
 } from '@/features/chat/composer'
-import type {
-  CanvasCommandDTO,
-  CanvasTransformDTO,
-  UUIDString,
-} from '@/shared/api/contracts/studio'
 import { storageService, type StorageService } from '@/shared/api/storage-service'
+import type { CanvasCommandDTO, CanvasTransformDTO } from '@/shared/api/generated/contracts'
 
 const canvasUploadHasher = createWorkerHasher()
 
 export interface CanvasUploadPipelineOptions {
-  canvasId: UUIDString | null
+  canvasId: string | null
   storageService?: StorageService
   hashFile?: HashFile
   executeCommands: (commands: CanvasCommandDTO[]) => Promise<unknown>
@@ -123,11 +119,11 @@ export function useCanvasUploadPipeline(options: CanvasUploadPipelineOptions): C
       // 最终命令失败不删除已完成的句柄：它可能已被服务端资源引用，
       // 交由存储过期回收；绝不删除已消费（complete）的句柄。
       const alias = reserveNodeAlias(file.name)
-      const blobId = (completed.blobId ?? uploadId) as UUIDString
+      const blobId = (completed.blobId ?? uploadId)
       try {
         await executeCommands([{
           type: 'CREATE_NODE',
-          nodeId: crypto.randomUUID() as UUIDString,
+          nodeId: crypto.randomUUID(),
           name: alias,
           transform: nextTransform(),
           resources: [{

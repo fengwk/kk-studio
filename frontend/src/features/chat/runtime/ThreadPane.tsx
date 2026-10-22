@@ -13,11 +13,11 @@ import {
 import { useBoundThreadPanelLabels } from '@/features/chat/runtime/useBoundThreadPanelViews'
 import type { ThreadProjection } from '@/features/chat/runtime/useThreadProjection'
 import { storageService } from '@/shared/api/storage-service'
-import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import type { EnvironmentStatusIdentity } from '@/features/chat/runtime/thread-panel/thread-status-format'
 import type { TurnUsage } from '@/features/chat/runtime/thread-timeline-types'
 import { useI18n } from '@/shared/i18n'
 import { toolExecutionState } from '@/features/chat/runtime/thread-panel/messages/tool-message-view'
+import type { EnvironmentCardDTO } from '@/shared/api/generated/contracts'
 
 /** 只读 Footer facts；缺失字段整段省略。 */
 export interface ThreadPaneLabels {

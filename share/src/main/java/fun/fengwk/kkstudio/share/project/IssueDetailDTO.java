@@ -6,6 +6,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.jspecify.annotations.Nullable;
 
 import java.util.List;
 
@@ -20,15 +21,15 @@ public class IssueDetailDTO {
   private List<IssueActivityDTO> activities;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String nextActivityCursor;
+  private @Nullable String nextActivityCursor;
 
   private List<IssueRunDTO> runs;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private IssueRunDTO currentRun;
+  private @Nullable IssueRunDTO currentRun;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private IssueRunDTO latestRun;
+  private @Nullable IssueRunDTO latestRun;
 
   private List<IssueStageBudgetDTO> stageBudgets;
   private List<IssueAgentThreadDTO> agentThreads;

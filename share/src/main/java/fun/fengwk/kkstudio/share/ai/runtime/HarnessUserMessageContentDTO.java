@@ -7,6 +7,7 @@ import lombok.AccessLevel;
 import lombok.Data;
 import lombok.Getter;
 import lombok.Setter;
+import org.jspecify.annotations.Nullable;
 
 /**
  * USER_MESSAGE 的结构化内容单元。
@@ -25,42 +26,42 @@ public class HarnessUserMessageContentDTO {
   private String type;
 
   /** 仅 TEXT 使用。 */
-  private String text;
+  private @Nullable String text;
 
   @Getter(AccessLevel.NONE)
   @Setter(AccessLevel.NONE)
   private boolean textFieldPresent;
 
   /** 仅 ATTACHMENT 使用：READY 上传的 canonical UUID string。 */
-  private String uploadId;
+  private @Nullable String uploadId;
 
   @Getter(AccessLevel.NONE)
   @Setter(AccessLevel.NONE)
   private boolean uploadIdFieldPresent;
 
   /** 仅 RESOURCE 使用：目标 Session 已拥有的 blob id。 */
-  private String blobId;
+  private @Nullable String blobId;
 
   @Getter(AccessLevel.NONE)
   @Setter(AccessLevel.NONE)
   private boolean blobIdFieldPresent;
 
   /** 仅 RESOURCE 使用：durable 展示名称。 */
-  private String name;
+  private @Nullable String name;
 
   @Getter(AccessLevel.NONE)
   @Setter(AccessLevel.NONE)
   private boolean nameFieldPresent;
 
   /** 仅 RESOURCE 使用：可空的小型文本预览。 */
-  private String preview;
+  private @Nullable String preview;
 
   @Getter(AccessLevel.NONE)
   @Setter(AccessLevel.NONE)
   private boolean previewFieldPresent;
 
   /** 仅 ATTACHMENT / RESOURCE 使用：图片输入档位（720P / 1080P / ORIGINAL）；缺省即平台默认 720P。 */
-  private String imageTier;
+  private @Nullable String imageTier;
 
   @Getter(AccessLevel.NONE)
   @Setter(AccessLevel.NONE)

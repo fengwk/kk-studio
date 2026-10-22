@@ -1,11 +1,11 @@
 import { apiClient, type HttpClient } from '@/shared/api/client'
+import type { PageResult } from '@/shared/api/contracts/base'
 import type {
   McpServerConfigDTO,
   McpServerCreateDTO,
   McpServerDTO,
   McpServerUpdateDTO,
-} from '@/shared/api/contracts/ai-mcp'
-import type { PageResult } from '@/shared/api/contracts/base'
+} from '@/shared/api/generated/contracts'
 
 export function createMcpServerService(client: HttpClient = apiClient) {
   return {

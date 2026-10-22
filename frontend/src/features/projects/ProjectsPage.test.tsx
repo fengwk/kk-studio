@@ -4,8 +4,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ApiError } from '@/shared/api/client'
 import { ProjectsPage } from './ProjectsPage'
 import type { ProjectsApi } from './projects-api'
-import type { ProjectDTO } from './types'
 import { invalidateProjectQueries } from './projects-invalidation'
+import type { ProjectDTO } from '@/shared/api/generated/contracts'
 
 function renderProjectsPage(ui: React.ReactElement, client?: QueryClient) {
   const queryClient = client ?? new QueryClient({
@@ -27,9 +27,9 @@ describe('ProjectsPage', () => {
       description: 'First project for testing',
       workflow: {
         states: [
-          { state: 'INIT', name: '待开始', next: ['DONE'] },
-          { state: 'BLOCKED', name: '业务阻塞' },
-          { state: 'DONE', name: '完成' },
+          { state: 'INIT', name: '待开始', next: ['DONE'], agent: null, environment: null, instructions: null, maxRuns: null },
+          { state: 'BLOCKED', name: '业务阻塞', agent: null, environment: null, instructions: null, maxRuns: null },
+          { state: 'DONE', name: '完成', agent: null, environment: null, instructions: null, maxRuns: null },
         ],
       },
       yoloEnabled: true,
@@ -45,9 +45,9 @@ describe('ProjectsPage', () => {
       description: 'Second project',
       workflow: {
         states: [
-          { state: 'INIT', name: '待开始', next: ['DONE'] },
-          { state: 'BLOCKED', name: '业务阻塞' },
-          { state: 'DONE', name: '完成' },
+          { state: 'INIT', name: '待开始', next: ['DONE'], agent: null, environment: null, instructions: null, maxRuns: null },
+          { state: 'BLOCKED', name: '业务阻塞', agent: null, environment: null, instructions: null, maxRuns: null },
+          { state: 'DONE', name: '完成', agent: null, environment: null, instructions: null, maxRuns: null },
         ],
       },
       yoloEnabled: false,
@@ -135,9 +135,9 @@ describe('ProjectsPage', () => {
       description: 'Brand new project',
       workflow: {
         states: [
-          { state: 'INIT', name: '待开始', next: ['DONE'] },
-          { state: 'BLOCKED', name: '业务阻塞' },
-          { state: 'DONE', name: '完成' },
+          { state: 'INIT', name: '待开始', next: ['DONE'], agent: null, environment: null, instructions: null, maxRuns: null },
+          { state: 'BLOCKED', name: '业务阻塞', agent: null, environment: null, instructions: null, maxRuns: null },
+          { state: 'DONE', name: '完成', agent: null, environment: null, instructions: null, maxRuns: null },
         ],
       },
       yoloEnabled: true,

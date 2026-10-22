@@ -5,8 +5,8 @@ import {
   type CanvasUploadPipelineOptions,
 } from '@/features/canvas/canvas-upload'
 import { uniqueNodeAlias } from '@/features/canvas/node-alias'
-import type { CanvasCommandDTO } from '@/shared/api/contracts/studio'
 import type { StorageUploadDTO } from '@/shared/api/contracts/storage'
+import type { CanvasCommandDTO } from '@/shared/api/generated/contracts'
 
 const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
 const UPLOAD_ID = 'dddddddd-0000-4000-8000-000000000009'
@@ -15,7 +15,7 @@ const PENDING_PUT = {
   url: 'https://s3.example/upload',
   headers: { 'If-None-Match': '*' },
 }
-const EXPIRES_AT = '2026-08-10T00:15:00Z'
+const EXPIRES_AT = 1786320900
 
 function pendingReservation(id: string = UPLOAD_ID): StorageUploadDTO {
   return {

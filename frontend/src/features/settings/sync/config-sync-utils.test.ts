@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import type { ConfigSyncItem } from '@/shared/api/contracts/config-sync'
 import {
   CONFIG_SYNC_GROUPS,
   CONFIG_SYNC_KIND_ORDER,
@@ -10,6 +9,7 @@ import {
   configSyncScopeRefs,
   computeExportScope,
 } from '@/features/settings/sync/config-sync-utils'
+import type { ConfigSyncItem } from '@/shared/api/generated/contracts'
 
 function item(
   kind: ConfigSyncItem['kind'],

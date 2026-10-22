@@ -1,7 +1,3 @@
-import type {
-  ModelAttemptFailureDTO,
-  ModelInvocationDTO,
-} from '@/shared/api/contracts/ai-runtime'
 import {
   getString,
   hasOnlyFields,
@@ -10,12 +6,12 @@ import {
   isPositiveInteger,
   isRecord,
   nullableString,
-  timestampString,
   toEpochMillis,
 } from '@/features/chat/runtime/thread-realtime/realtime-values'
 import {
   parseToolErrorText,
 } from '@/features/chat/runtime/thread-realtime/tool-stream'
+import type { ModelAttemptFailureDTO, ModelInvocationDTO } from '@/shared/api/generated/contracts'
 
 export interface RealtimeToolCallDraft {
   index: number
@@ -428,7 +424,8 @@ export function snapshotModelStream(
     text: '',
     thinking: '',
     toolCalls: [],
-    createdAt: timestampString(invocation.updateTime) || timestampString(invocation.createTime),
+    // HTTP 快照不携带流事件时间；之后的实时事件按各自的 createdAt 排序。
+    createdAt: '',
   }
   const resultJson = invocation.resultJson
   if (resultJson != null && resultJson.trim()) {

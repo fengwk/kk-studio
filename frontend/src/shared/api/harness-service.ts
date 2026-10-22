@@ -1,28 +1,29 @@
 import { apiClient, type HttpClient } from '@/shared/api/client'
 import type {
-  AgentCommandBatchRequestDTO,
-  AgentCommandBatchResponseDTO,
-  HarnessSessionEntryDTO,
-  HarnessSessionDTO,
-  HarnessSessionRenameDTO,
+  HarnessCommandBatchDTO,
+  HarnessThreadCommandBatchDTO,
+} from '@/shared/api/contracts/ai-runtime'
+import type {
+  HarnessAcceptedCommandsDTO,
   HarnessModelRequestDebugDTO,
   HarnessModelRequestDebugRequestDTO,
+  HarnessNameUpdateDTO,
+  HarnessProviderRequestPreviewDTO,
+  HarnessSessionDTO,
+  HarnessSessionEntryDTO,
+  HarnessThreadCompactDTO,
+  HarnessThreadCompactResultDTO,
   HarnessThreadDTO,
-  HarnessThreadRenameDTO,
   HarnessThreadSnapshotDTO,
-  HarnessThreadTreeNodeDTO,
   HarnessThreadStopDTO,
-  HarnessStreamCatchupRequestDTO,
   HarnessThreadStopResultDTO,
+  HarnessThreadStreamCatchupDTO,
+  HarnessThreadSummaryDTO,
+  HarnessThreadTreeNodeDTO,
   HarnessThreadYoloUpdateDTO,
   HarnessToolApprovalDTO,
-  ManualCompactionRequestDTO,
-  ManualCompactionResponseDTO,
-  ProviderRequestPreviewDTO,
-  RuntimeThreadSummaryDTO,
-  ThreadCommandBatchRequestDTO,
   ToolInvocationDTO,
-} from '@/shared/api/contracts/ai-runtime'
+} from '@/shared/api/generated/contracts'
 
 /**
  * Harness runtime 客户端调用统一收敛：
@@ -44,8 +45,8 @@ import type {
 export function createHarnessService(client: HttpClient = apiClient) {
   return {
     acceptCommandBatch: (
-      data: AgentCommandBatchRequestDTO,
-    ): Promise<AgentCommandBatchResponseDTO> =>
+      data: HarnessCommandBatchDTO,
+    ): Promise<HarnessAcceptedCommandsDTO> =>
       client.post('/command-batches', data),
 
     /**
@@ -54,14 +55,14 @@ export function createHarnessService(client: HttpClient = apiClient) {
      */
     acceptThreadCommandBatch: (
       threadId: string,
-      data: ThreadCommandBatchRequestDTO,
-    ): Promise<AgentCommandBatchResponseDTO> =>
+      data: HarnessThreadCommandBatchDTO,
+    ): Promise<HarnessAcceptedCommandsDTO> =>
       client.post(
         `/threads/${encodeURIComponent(threadId)}/command-batches`,
         data,
       ),
 
-    listSessionThreads: (sessionId: string): Promise<RuntimeThreadSummaryDTO[]> =>
+    listSessionThreads: (sessionId: string): Promise<HarnessThreadSummaryDTO[]> =>
       client.get(`/sessions/${encodeURIComponent(sessionId)}/threads`),
 
     listSessionEntries: (sessionId: string): Promise<HarnessSessionEntryDTO[]> =>
@@ -69,7 +70,7 @@ export function createHarnessService(client: HttpClient = apiClient) {
 
     renameSession: (
       sessionId: string,
-      data: HarnessSessionRenameDTO,
+      data: HarnessNameUpdateDTO,
     ): Promise<HarnessSessionDTO> =>
       client.put(`/sessions/${encodeURIComponent(sessionId)}/name`, data),
 
@@ -79,20 +80,20 @@ export function createHarnessService(client: HttpClient = apiClient) {
     /** 202 只表示 best-effort 请求被接受；客户端不得据此推断 owner 在线或 checkpoint 已推进。 */
     requestStreamCatchup: (
       threadId: string,
-      data: HarnessStreamCatchupRequestDTO,
+      data: HarnessThreadStreamCatchupDTO,
     ): Promise<void> =>
       client.post(`/threads/${encodeURIComponent(threadId)}/stream-catchup`, data),
 
     getThreadTree: (threadId: string): Promise<HarnessThreadTreeNodeDTO[]> =>
       client.get(`/threads/${encodeURIComponent(threadId)}/tree`),
 
-    renameThread: (threadId: string, data: HarnessThreadRenameDTO): Promise<HarnessThreadDTO> =>
+    renameThread: (threadId: string, data: HarnessNameUpdateDTO): Promise<HarnessThreadDTO> =>
       client.put(`/threads/${encodeURIComponent(threadId)}/name`, data),
 
     compactThread: (
       threadId: string,
-      data: ManualCompactionRequestDTO,
-    ): Promise<ManualCompactionResponseDTO> =>
+      data: HarnessThreadCompactDTO,
+    ): Promise<HarnessThreadCompactResultDTO> =>
       client.post(`/threads/${encodeURIComponent(threadId)}/compact`, data),
 
     getModelRequestDebug: (
@@ -104,7 +105,7 @@ export function createHarnessService(client: HttpClient = apiClient) {
     previewHistoricalRequest: (
       sessionId: string,
       entryId: string,
-    ): Promise<ProviderRequestPreviewDTO> =>
+    ): Promise<HarnessProviderRequestPreviewDTO> =>
       client.get(
         `/sessions/${encodeURIComponent(sessionId)}/entries/${encodeURIComponent(entryId)}/provider-request-preview`,
       ),

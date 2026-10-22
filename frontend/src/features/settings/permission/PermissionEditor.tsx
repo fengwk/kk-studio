@@ -12,7 +12,6 @@ import {
 } from '@/features/settings/permission-utils'
 import type { PermissionGroupDraft } from '@/features/settings/system-settings-draft'
 import { agentService } from '@/shared/api/agent-service'
-import type { SystemSettingsSchemaOption } from '@/shared/api/contracts/system-settings'
 import { useI18n } from '@/shared/i18n'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { Button } from '@/shared/ui/controls/Button'
@@ -20,6 +19,7 @@ import { IconButton } from '@/shared/ui/controls/IconButton'
 import { Select } from '@/shared/ui/controls/Select'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 import { StateBlock } from '@/shared/ui/feedback/StateBlock'
+import type { SystemSettingsSchemaOptionDTO } from '@/shared/api/generated/contracts'
 
 /**
  * 保序 permission 规则编辑器（模型可见 tool name + 该 tool 下有序规则数组）。
@@ -36,7 +36,7 @@ export function PermissionEditor({
 }: {
   groups: PermissionGroupDraft[]
   onChange: (next: PermissionGroupDraft[]) => void
-  options: SystemSettingsSchemaOption[]
+  options: SystemSettingsSchemaOptionDTO[]
 }) {
   const { t } = useI18n()
   const toolsQuery = useQuery({
@@ -149,9 +149,7 @@ export function PermissionEditor({
                       }))}
                       onChange={(action) =>
                         onChange(
-                          updateRule(groups, groupIndex, ruleIndex, {
-                            action: action as PermissionGroupDraft['rules'][number]['action'],
-                          }),
+                          updateRule(groups, groupIndex, ruleIndex, { action }),
                         )
                       }
                     />

@@ -1,3 +1,6 @@
+import { agentService } from '@/shared/api/agent-service'
+import { queryKeys } from '@/shared/lib/query-keys'
+import { useInvalidateMutation } from '@/shared/lib/useInvalidateMutation'
 import type {
   AgentDefinitionCreateDTO,
   AgentDefinitionUpdateDTO,
@@ -5,10 +8,7 @@ import type {
   AgentModelUpdateDTO,
   AgentProviderCreateDTO,
   AgentProviderUpdateDTO,
-} from '@/shared/api/contracts/ai-catalog'
-import { agentService } from '@/shared/api/agent-service'
-import { queryKeys } from '@/shared/lib/query-keys'
-import { useInvalidateMutation } from '@/shared/lib/useInvalidateMutation'
+} from '@/shared/api/generated/contracts'
 
 export function useAiConsoleResourceMutations({
   onResourceSaved,

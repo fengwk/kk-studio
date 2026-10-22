@@ -13,17 +13,16 @@ import {
   getCanvasResourceOriginalUrl,
   getCanvasResourcePreviewUrl,
 } from '@/shared/api/studio-service'
-import type { UUIDString } from '@/shared/api/contracts/studio'
 
 vi.mock('@/shared/api/studio-service', () => ({
   getCanvasResourceOriginalUrl: vi.fn(),
   getCanvasResourcePreviewUrl: vi.fn(),
 }))
 
-const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f' as UUIDString
-const NODE_ID = '00000000-0000-4000-8000-000000000002' as UUIDString
-const RES_ID = '00000000-0000-4000-8000-000000000020' as UUIDString
-const BLOB_ASSET = 'ffffffff-0000-4000-8000-000000000001' as UUIDString
+const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
+const NODE_ID = '00000000-0000-4000-8000-000000000002'
+const RES_ID = '00000000-0000-4000-8000-000000000020'
+const BLOB_ASSET = 'ffffffff-0000-4000-8000-000000000001'
 
 let intersectionCallback: IntersectionObserverCallback
 const observe = vi.fn()

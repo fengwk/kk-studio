@@ -7,8 +7,8 @@ import { harnessService } from '@/shared/api/harness-service'
 import type {
   HarnessModelRequestDebugDTO,
   HarnessModelRequestDebugRequestDTO,
-  ProviderRequestPreviewDTO,
-} from '@/shared/api/contracts/ai-runtime'
+  HarnessProviderRequestPreviewDTO,
+} from '@/shared/api/generated/contracts'
 
 vi.mock('@/shared/api/harness-service', () => ({
   harnessService: {
@@ -185,7 +185,7 @@ describe('useHistoricalRequestPreview', () => {
     return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   }
 
-  function samplePreview(): ProviderRequestPreviewDTO {
+  function samplePreview(): HarnessProviderRequestPreviewDTO {
     return {
       kind: 'HISTORICAL_REQUEST_PREVIEW',
       providerType: 'openai',
@@ -193,7 +193,7 @@ describe('useHistoricalRequestPreview', () => {
       bodyByteSize: 12,
       bodyJson: '{}',
       sourceHeadEntryId: 'head-1',
-      generatedAt: '2026-09-21T00:00:00.000Z',
+      generatedAt: 1789948800,
       notice: 'reconstructed under current definitions',
     }
   }
@@ -287,11 +287,11 @@ describe('request source fences', () => {
 
   it.each(['session', 'view', 'entry', 'dismiss'])('rejects late historical results after %s changes', async (change) => {
     const { wrapper } = setup()
-    const preview: ProviderRequestPreviewDTO = {
+    const preview: HarnessProviderRequestPreviewDTO = {
       kind: 'HISTORICAL_REQUEST_PREVIEW', providerType: 'OPENAI', modelName: 'm',
-      bodyByteSize: 2, bodyJson: '{}', sourceHeadEntryId: 'head', generatedAt: 'now',
+      bodyByteSize: 2, bodyJson: '{}', sourceHeadEntryId: 'head', generatedAt: 1790504400,
     }
-    let finish!: (value: ProviderRequestPreviewDTO) => void
+    let finish!: (value: HarnessProviderRequestPreviewDTO) => void
     vi.mocked(harnessService.previewHistoricalRequest)
       .mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
       .mockResolvedValue({ ...preview, bodyJson: '{"new":true}' })

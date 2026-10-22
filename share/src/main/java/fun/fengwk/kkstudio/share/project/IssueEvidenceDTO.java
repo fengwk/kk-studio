@@ -6,6 +6,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.jspecify.annotations.Nullable;
 
 /** Issue 公开证据传输对象。 */
 @Data
@@ -17,13 +18,13 @@ public class IssueEvidenceDTO {
   private String issueId;
   private String blobId;
   private String uri;
-  private String name;
+  private @Nullable String name;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String actorAgentName;
+  private @Nullable String actorAgentName;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String runId;
+  private @Nullable String runId;
 
   private String createdAt;
 

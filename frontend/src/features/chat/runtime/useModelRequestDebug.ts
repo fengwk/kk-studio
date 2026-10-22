@@ -2,12 +2,12 @@ import { useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { harnessService } from '@/shared/api/harness-service'
 import { queryKeys } from '@/shared/lib/query-keys'
+import type { ThreadModelRequestDebugData } from '@/features/chat/runtime/thread-timeline-types'
 import type {
   HarnessModelRequestDebugDTO,
   HarnessModelRequestDebugRequestDTO,
-  ProviderRequestPreviewDTO,
-} from '@/shared/api/contracts/ai-runtime'
-import type { ThreadModelRequestDebugData } from '@/features/chat/runtime/thread-timeline-types'
+  HarnessProviderRequestPreviewDTO,
+} from '@/shared/api/generated/contracts'
 
 /**
  * 仅在 Debug 视图启用。进入 `/debug` 拉取一次，并跟随当前 Thread 快照的调用身份 / phase /
@@ -103,7 +103,7 @@ export function useHistoricalRequestPreview(
 
   const entryId = selection?.entryId ?? null
   const enabled = Boolean(activeSession) && lastIdentity === identity && selection != null
-  const query = useQuery<ProviderRequestPreviewDTO>({
+  const query = useQuery<HarnessProviderRequestPreviewDTO>({
     queryKey: [
       ...queryKeys.sessions.historicalRequestPreview(activeSession ?? '', entryId ?? ''),
       identityKey,

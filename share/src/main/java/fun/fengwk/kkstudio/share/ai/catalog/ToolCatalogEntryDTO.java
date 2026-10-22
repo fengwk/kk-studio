@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.share.ai.catalog;
 
 import lombok.Data;
+import org.jspecify.annotations.Nullable;
 
 /** 可离线选择的工具 catalog 条目。 */
 @Data
@@ -13,8 +14,8 @@ public class ToolCatalogEntryDTO {
   private String description;
 
   /** Tool 与 Environment 的关系，取 {@link EnvironmentSupportDTO} 的名字。 */
-  private EnvironmentSupportDTO environmentSupport;
+  private @Nullable EnvironmentSupportDTO environmentSupport;
 
   /** 精确要求的目标 Environment UUID（canonical UUID 文本）；只接受任意已绑定 Environment 时为 null。 */
-  private String requiredEnvironmentId;
+  private @Nullable String requiredEnvironmentId;
 }

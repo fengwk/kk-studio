@@ -3,8 +3,8 @@ import { renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import { agentService } from '@/shared/api/agent-service'
-import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import { fetchAllCatalogAgentNames, useCatalogAgentNames } from './useCatalogAgentNames'
+import type { AgentDefinitionDTO } from '@/shared/api/generated/contracts'
 
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {
@@ -34,13 +34,13 @@ describe('useCatalogAgentNames and fetchAllCatalogAgentNames', () => {
     vi.mocked(agentService.listAgents)
       .mockResolvedValueOnce({
         results: page1Agents as AgentDefinitionDTO[],
-        totalCount: 65,
+        totalCount: '65',
         pageNumber: 1,
         pageSize: 50,
       })
       .mockResolvedValueOnce({
         results: page2Agents as AgentDefinitionDTO[],
-        totalCount: 65,
+        totalCount: '65',
         pageNumber: 2,
         pageSize: 50,
       })
@@ -66,7 +66,7 @@ describe('useCatalogAgentNames and fetchAllCatalogAgentNames', () => {
     // 测试意图：验证 Hook 正确合并 catalog 中的 Agent 以及历史已分配但已从 catalog 下线的 stale Agent，且不会静默丢失
     vi.mocked(agentService.listAgents).mockResolvedValueOnce({
       results: [{ name: 'catalog-agent-b' }, { name: 'catalog-agent-a' }] as AgentDefinitionDTO[],
-      totalCount: 2,
+      totalCount: '2',
       pageNumber: 1,
       pageSize: 50,
     })

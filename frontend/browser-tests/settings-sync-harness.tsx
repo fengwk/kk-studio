@@ -4,12 +4,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import '@/styles.css'
 import { useI18n, setLocale } from '@/shared/i18n'
 import { configSyncService } from '@/shared/api/config-sync-service'
-import type {
-  ConfigSyncImportCheckDTO,
-  ConfigSyncItem,
-} from '@/shared/api/contracts/config-sync'
 import { SyncTab } from '@/features/settings/sync/SyncTab'
 import { Button } from '@/shared/ui/controls/Button'
+import type { ConfigSyncImportCheckDTO, ConfigSyncItem } from '@/shared/api/generated/contracts'
 
 declare global {
   interface Window {

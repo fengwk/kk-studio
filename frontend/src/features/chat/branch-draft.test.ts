@@ -8,15 +8,13 @@ import {
   materializeBlankBranchDraft,
   projectPendingTarget,
 } from '@/features/chat/branch-draft'
+import type { BranchDraft } from '@/features/chat/branch-draft'
 import type {
   AgentDefinitionDTO,
   AgentModelDTO,
-} from '@/shared/api/contracts/ai-catalog'
-import type {
   HarnessBranchSettingsDTO,
   HarnessThreadCommandDTO,
-} from '@/shared/api/contracts/ai-runtime'
-import type { BranchDraft } from '@/features/chat/branch-draft'
+} from '@/shared/api/generated/contracts'
 
 const model: AgentModelDTO = {
   providerName: 'provider',
@@ -43,8 +41,8 @@ const model: AgentModelDTO = {
     variants: [{ id: 'default' }],
   },
   version: '1',
-  createTime: '2026-08-09T00:00:00Z',
-  updateTime: '2026-08-09T00:00:00Z',
+  createTime: 1786233600,
+  updateTime: 1786233600,
 }
 
 const modelWithoutDefaultVariant: AgentModelDTO = {
@@ -81,8 +79,8 @@ function agent(
       subagents,
     },
     version: '1',
-    createTime: '2026-08-09T00:00:00Z',
-    updateTime: '2026-08-09T00:00:00Z',
+    createTime: 1786233600,
+    updateTime: 1786233600,
   }
 }
 
@@ -115,7 +113,7 @@ function queuedSettingCommand(
     idempotencyKey: `queued-${sequence}`,
     payloadJson: JSON.stringify(payload),
     cancelledAt: null,
-    createTime: null,
+    createTime: 0,
   }
 }
 

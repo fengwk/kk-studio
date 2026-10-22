@@ -19,8 +19,6 @@ import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import { mcpServerService } from '@/shared/api/mcp-server-service'
-import type { McpServerDTO } from '@/shared/api/contracts/ai-mcp'
-import type { InstantTimestamp } from '@/shared/api/contracts/base'
 import { AiNavigation } from '@/app/ai-console/AiNavigation'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n, type AppLocale } from '@/shared/i18n'
@@ -32,6 +30,7 @@ import {
   validateMcpUrl,
   validateTimeoutMillis,
 } from './mcp-utils'
+import type { McpServerDTO } from '@/shared/api/generated/contracts'
 
 function formatDateTime24(date: Date, locale: AppLocale): string {
   return date.toLocaleString(locale, {
@@ -43,35 +42,6 @@ function formatDateTime24(date: Date, locale: AppLocale): string {
     second: '2-digit',
     hour12: false,
   })
-}
-
-function toEpochMillis(value: unknown): number | null {
-  if (value == null || value === '') {
-    return null
-  }
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return Math.abs(value) < 100_000_000_000 ? value * 1000 : value
-  }
-  const raw = String(value).trim()
-  if (!raw) {
-    return null
-  }
-  if (/^-?\d+(\.\d+)?$/.test(raw)) {
-    const num = Number(raw)
-    if (Number.isFinite(num)) {
-      return Math.abs(num) < 100_000_000_000 ? num * 1000 : num
-    }
-  }
-  const parsed = Date.parse(raw)
-  return Number.isFinite(parsed) ? parsed : null
-}
-
-function formatIsoTime(value: InstantTimestamp | undefined, locale: AppLocale): string {
-  const millis = toEpochMillis(value)
-  if (millis == null) {
-    return value ? String(value) : ''
-  }
-  return formatDateTime24(new Date(millis), locale)
 }
 
 interface CreateModalState {
@@ -252,9 +222,8 @@ export function McpServersPage() {
         }
         const rawHeaders = config.headers ?? {}
         const headersText = Object.keys(rawHeaders).length > 0 ? JSON.stringify(rawHeaders, null, 2) : ''
-        const enabled = config.enabled ?? server.enabled
-        const timeoutMillis =
-          Number(config.timeoutMillis ?? server.timeoutMillis) || DEFAULT_TIMEOUT_MILLIS
+        const enabled = server.enabled
+        const timeoutMillis = Number(server.timeoutMillis) || DEFAULT_TIMEOUT_MILLIS
         const loadedConfig = {
           url: config.url ?? '',
           headers: rawHeaders,
@@ -456,7 +425,7 @@ export function McpServersPage() {
               onClick={handleOpenCreate}
             />
           {servers.map((server: McpServerDTO) => {
-            const updateTime = formatIsoTime(server.updateTime, locale)
+            const updateTime = formatDateTime24(new Date(server.updateTime * 1000), locale)
 
             const statusLabel =
               server.discoveryStatus === 'AVAILABLE'

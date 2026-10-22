@@ -10,7 +10,7 @@ import { emptyModelDraft } from '@/features/catalog/ai-model-draft-codec'
 import type { ModelDraft } from '@/features/catalog/ai-console-types'
 import { SkillPackagesPage } from '@/features/catalog/skills/SkillPackagesPage'
 import { agentService } from '@/shared/api/agent-service'
-import type { SkillPackageDTO } from '@/shared/api/contracts/ai-catalog'
+import type { SkillPackageDTO } from '@/shared/api/generated/contracts'
 
 setLocale('zh-CN')
 
@@ -31,8 +31,8 @@ const SAMPLE_PACKAGES: SkillPackageDTO[] = [
       { name: 'bash', description: 'bash execution' },
     ],
     version: '1',
-    createTime: '2026-07-20T00:00:00.000Z',
-    updateTime: '2026-07-20T01:00:00.000Z',
+    createTime: 1784505600,
+    updateTime: 1784509200,
   },
   {
     packageName: 'browser-skills',
@@ -42,13 +42,13 @@ const SAMPLE_PACKAGES: SkillPackageDTO[] = [
     hasToken: true,
     currentCommit: '2222222222222222222222222222222222222222',
     observedHeadCommit: '3333333333333333333333333333333333333333',
-    headCheckedAt: '2026-07-20T02:00:00.000Z',
+    headCheckedAt: 1784512800,
     headCheckError: null,
     checkStatus: 'UPDATE_AVAILABLE',
     skills: [{ name: 'opencli', description: 'browser cli' }],
     version: '2',
-    createTime: '2026-07-20T00:00:00.000Z',
-    updateTime: '2026-07-20T02:00:00.000Z',
+    createTime: 1784505600,
+    updateTime: 1784512800,
   },
   {
     packageName: 'diagnostics-kit',
@@ -58,13 +58,13 @@ const SAMPLE_PACKAGES: SkillPackageDTO[] = [
     hasToken: false,
     currentCommit: '4444444444444444444444444444444444444444',
     observedHeadCommit: null,
-    headCheckedAt: '2026-07-20T03:00:00.000Z',
+    headCheckedAt: 1784516400,
     headCheckError: 'fatal: repository not reachable',
     checkStatus: 'CHECK_FAILED',
     skills: [],
     version: '1',
-    createTime: '2026-07-20T00:00:00.000Z',
-    updateTime: '2026-07-20T03:00:00.000Z',
+    createTime: 1784505600,
+    updateTime: 1784516400,
   },
 ]
 
@@ -106,12 +106,12 @@ export function ModelFormDemo() {
             providerType: 'openai',
             baseUrl: null,
             configured: true,
-            modelCallTimeoutMillis: 1800000,
-            modelCallIdleTimeoutMillis: 120000,
+            modelCallTimeoutMillis: '1800000',
+            modelCallIdleTimeoutMillis: '120000',
             modelHttpRetryStatusCodes: null,
             version: '1',
-            createTime: '',
-            updateTime: '',
+            createTime: 0,
+            updateTime: 0,
           },
         ]}
         onChange={setDraft}

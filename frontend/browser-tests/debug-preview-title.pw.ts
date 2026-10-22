@@ -73,8 +73,8 @@ function threadSnapshot(cursor: Cursor, entries: unknown[] = []) {
           environmentName: 'dev-node',
           goal: null,
         },
-        createTime: '2026-10-01T00:00:00Z',
-        updateTime: '2026-10-01T00:00:00Z',
+        createTime: 1790812800,
+        updateTime: 1790812800,
       },
       entries,
       queuedCommands: [],
@@ -269,7 +269,7 @@ async function installPreviewApiMock(
           version: '1',
         })) : []
         await route.fulfill({
-          json: { status: 200, data: { pageNumber: 1, pageSize: 50, totalCount: results.length, results } },
+          json: { status: 200, data: { pageNumber: 1, pageSize: 50, totalCount: String(results.length), results } },
         })
         return
       }
@@ -286,7 +286,7 @@ async function installPreviewApiMock(
           version: '1',
         }] : []
         await route.fulfill({
-          json: { status: 200, data: { pageNumber: 1, pageSize: 50, totalCount: results.length, results } },
+          json: { status: 200, data: { pageNumber: 1, pageSize: 50, totalCount: String(results.length), results } },
         })
         return
       }
@@ -368,7 +368,7 @@ test('owner-free bound thread renders a NOTIFICATION entry as a system card', as
       sourceThreadId,
       message: { role: 'USER', contents: [{ type: 'text', text: receipt }] },
     }),
-    createTime: '2026-10-01T00:00:05Z',
+    createTime: 1790812805,
   }
   const recorded = await installPreviewApiMock(page, { cursor: () => INITIAL_CURSOR, entries: [notificationEntry] })
   const writes: string[] = []

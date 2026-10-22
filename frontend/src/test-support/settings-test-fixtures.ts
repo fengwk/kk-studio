@@ -1,7 +1,4 @@
-import type {
-  SystemSettingsDTO,
-  SystemSettingsSchemaDTO,
-} from '@/shared/api/contracts/system-settings'
+import type { SystemSettingsDTO, SystemSettingsSchemaDTO } from '@/shared/api/generated/contracts'
 
 /**
  * 平台环境与资源默认字节上限：16 MiB (16777216)。
@@ -77,8 +74,8 @@ export function makeSettingsDto(overrides: { version?: string } = {}): SystemSet
       postgresqlWorkReconnectBackoffMillis: '1000',
     },
     version: overrides.version ?? '0',
-    createTime: '2026-01-01T00:00:00Z',
-    updateTime: '2026-01-01T00:00:00Z',
+    createTime: 1767225600,
+    updateTime: 1767225600,
   }
 }
 

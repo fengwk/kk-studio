@@ -30,7 +30,6 @@ import { isNetworkUnknownError } from '../pending-action-sidecar'
 import { useCatalogAgentNames } from '../useCatalogAgentNames'
 import type { ProjectsApi } from '../projects-api'
 import { projectsApi } from '../projects-api'
-import type { ProjectDTO, ProjectSnapshotDTO } from '../types'
 import {
   buildWorkflowDTO,
   createDraftState,
@@ -44,6 +43,7 @@ import {
   workflowErrorParams,
   type WorkflowDraftState,
 } from '../workflow-draft'
+import type { ProjectDTO, ProjectSnapshotDTO } from '@/shared/api/generated/contracts'
 
 export interface EditProjectModalProps {
   isOpen: boolean

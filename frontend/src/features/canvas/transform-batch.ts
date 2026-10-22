@@ -7,8 +7,7 @@ import type {
   CanvasCommandDTO,
   CanvasSnapshotDTO,
   CanvasTransformDTO,
-  UUIDString,
-} from '@/shared/api/contracts/studio'
+} from '@/shared/api/generated/contracts'
 
 /** 拖拽结束后聚合 transform 批次提交的防抖窗口。 */
 const TRANSFORM_FLUSH_DEBOUNCE_MS = 180
@@ -32,10 +31,10 @@ export interface CanvasTransformBatchActions {
 }
 
 interface PendingBatch {
-  nodeTransforms: Map<UUIDString, { transform: CanvasTransformDTO; expectedTransform?: CanvasTransformDTO | null }>
-  groupMoves: Map<UUIDString, { position: { x: number; y: number }; expectedTransform?: CanvasTransformDTO | null }>
+  nodeTransforms: Map<string, { transform: CanvasTransformDTO; expectedTransform?: CanvasTransformDTO | null }>
+  groupMoves: Map<string, { position: { x: number; y: number }; expectedTransform?: CanvasTransformDTO | null }>
   /** 每个被移动 node 的显式决策：拖出所属组 → groupId；拖回组内/无组 → null。 */
-  ungroups: Map<UUIDString, UUIDString | null>
+  ungroups: Map<string, string | null>
 }
 
 interface SubmittedBatch extends PendingBatch {
@@ -187,7 +186,7 @@ export function useCanvasTransformBatch(options: CanvasTransformBatchOptions): C
             x: update.transform.x,
             y: update.transform.y,
           }
-          const nodeId = update.id as UUIDString
+          const nodeId = update.id
           const node = snapshot.nodes.find((item) => item.id === nodeId)
           pendingNodeTransformsRef.current.set(nodeId, {
             transform: update.transform,

@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.share.ai.plugin;
 
 import lombok.Data;
+import org.jspecify.annotations.Nullable;
 
 import java.time.Instant;
 import java.util.List;
@@ -27,28 +28,28 @@ public class PluginDTO {
   private String version;
 
   /** 认证交互类型；Plugin 不提供认证时为 null。 */
-  private PluginAuthKindDTO authKind;
+  private @Nullable PluginAuthKindDTO authKind;
 
   /**
    * 认证状态投影，取 {@code NOT_CONNECTED / CONNECTED / REFRESH_FAILED / REFRESH_UNCERTAIN /
    * REAUTH_REQUIRED}：{@code NOT_CONNECTED} 表示尚无可用认证。
    */
-  private String status;
+  private @Nullable String status;
 
   /** 当前凭据的 region；无凭据或静态密钥时为 null。 */
-  private String region;
+  private @Nullable String region;
 
   /** access token 到期时间；无凭据或静态密钥时为 null。 */
-  private Instant expiresAt;
+  private @Nullable Instant expiresAt;
 
   /** 下一次自动刷新时间；无凭据或静态密钥时为 null。 */
-  private Instant nextRefreshAt;
+  private @Nullable Instant nextRefreshAt;
 
   /** 最近一次成功刷新时间；从未成功刷新时为 null。 */
-  private Instant lastRefreshedAt;
+  private @Nullable Instant lastRefreshedAt;
 
   /** 最近一次刷新失败的有界去敏错误；成功时为 null。 */
-  private String lastRefreshError;
+  private @Nullable String lastRefreshError;
 
   /** 权威 catalog 当前 desired 配置的普通值、schema 与秘密录入状态投影；本节点实际应用的坐标另见 {@code applied*}。 */
   private PluginConfigurationDTO configuration;
@@ -57,7 +58,7 @@ public class PluginDTO {
   private String desiredRevision;
 
   /** 本节点运行实例构建时的配置修订（canonical 非负十进制字符串）。 */
-  private String appliedRevision;
+  private @Nullable String appliedRevision;
 
   /** 本节点已应用实例是否声明显式只读连接检查能力；按已应用实例的能力如实投影，绝不按 pluginId 硬编码。 */
   private boolean connectionCheckSupported;
@@ -69,5 +70,5 @@ public class PluginDTO {
   private List<String> canvasFunctionNames;
 
   /** 已保存但尚未在本节点应用时的固定去敏说明；已应用时为 null。 */
-  private String applicationError;
+  private @Nullable String applicationError;
 }

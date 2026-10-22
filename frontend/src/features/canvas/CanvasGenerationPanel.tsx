@@ -34,8 +34,7 @@ import { useI18n } from '@/shared/i18n'
 import type {
   CanvasFunctionDefinitionDTO,
   CanvasTransformDTO,
-  UUIDString,
-} from '@/shared/api/contracts/studio'
+} from '@/shared/api/generated/contracts'
 
 export interface CanvasGenerationPanelAnchor {
   node: CanvasTransformDTO
@@ -353,7 +352,7 @@ export function CanvasGenerationPanel({
     }
   }
 
-  function removeReference(nodeId: UUIDString, index: number) {
+  function removeReference(nodeId: string, index: number) {
     const key = referenceKey(nodeId, index)
     const nextRefs = config.references.filter((ref) => referenceKey(ref.nodeId, ref.index) !== key)
     updateConfig({ ...config, references: nextRefs })

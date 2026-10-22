@@ -6,9 +6,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { PermissionEditor } from '@/features/settings/permission/PermissionEditor'
 import type { PermissionGroupDraft } from '@/features/settings/system-settings-draft'
 import { agentService } from '@/shared/api/agent-service'
-import type { ToolCatalogEntryDTO } from '@/shared/api/contracts/ai-catalog'
-import type { SystemSettingsSchemaOption } from '@/shared/api/contracts/system-settings'
 import { chooseSelectOption } from '@/test-support/chooseSelectOption'
+import type {
+  SystemSettingsSchemaOptionDTO,
+  ToolCatalogEntryDTO,
+} from '@/shared/api/generated/contracts'
 
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {
@@ -17,19 +19,14 @@ vi.mock('@/shared/api/agent-service', () => ({
   },
 }))
 
-const PERMISSION_OPTIONS: SystemSettingsSchemaOption[] = [
+const PERMISSION_OPTIONS: SystemSettingsSchemaOptionDTO[] = [
   { value: 'allow', labelKey: 'settings.permission.action.allow' },
   { value: 'ask', labelKey: 'settings.permission.action.ask' },
   { value: 'deny', labelKey: 'settings.permission.action.deny' },
 ]
 
 function tool(name: string): ToolCatalogEntryDTO {
-  return {
-    name,
-    description: `${name} tool`,
-    environmentRequired: false,
-    environmentId: null,
-  }
+  return { name, description: `${name} tool` }
 }
 
 function Harness({ initial }: { initial: PermissionGroupDraft[] }) {

@@ -1,7 +1,7 @@
-import type { HarnessSessionEntryDTO } from '@/shared/api/contracts/ai-runtime'
 import { asRecord, getRecordList, getString, parsePayload } from '@/features/chat/runtime/payload-json'
 import { FORK_NOTICE_TEXT } from '@/features/chat/runtime/thread-timeline/entry-event-projection'
 import { translate } from '@/shared/i18n'
+import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 
 /**
  * Entry 行的语义分类。它只服务历史树的图标与无障碍标签，不携带执行状态，

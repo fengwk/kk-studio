@@ -11,7 +11,7 @@ import { pluginsService } from '@/shared/api/plugins-service'
 import type {
   PluginConfigurationUpdateRequestDTO,
   PluginDTO,
-} from '@/shared/api/contracts/ai-plugin'
+} from '@/shared/api/generated/contracts'
 
 vi.mock('@/shared/api/plugins-service', () => ({
   pluginsService: { updateConfiguration: vi.fn() },

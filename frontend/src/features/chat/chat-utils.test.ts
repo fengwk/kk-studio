@@ -7,7 +7,7 @@ import {
   mergeChatList,
   preferNewerChat,
 } from '@/features/chat/chat-utils'
-import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
+import type { ChatDTO } from '@/shared/api/generated/contracts'
 
 function chat(overrides: Partial<ChatDTO> = {}): ChatDTO {
   return {
@@ -17,17 +17,10 @@ function chat(overrides: Partial<ChatDTO> = {}): ChatDTO {
     environmentName: null,
     yoloEnabled: false,
     version: '1',
-    createTime: '2026-06-20T02:00:00',
-    updateTime: '2026-06-20T02:00:00',
+    createTime: 1781920800,
+    updateTime: 1781920800,
     ...overrides,
   }
-}
-
-/** 注入历史或畸形时间值，正常 fixture 仍遵守当前 wire 契约。 */
-function chatWithUntrustedTime(time: unknown, overrides: Partial<ChatDTO>): ChatDTO {
-  const fixture = chat(overrides)
-  Reflect.set(fixture, 'createTime', time)
-  return fixture
 }
 
 describe('compareCatalogVersions', () => {
@@ -124,8 +117,8 @@ describe('mergeChatIntoList', () => {
 describe('filterChats', () => {
   it('filters by title and keeps the server order for equal timestamps', () => {
     const chats = [
-      chat({ id: '2', title: 'beta', createTime: '2026-06-21T00:00:00' }),
-      chat({ id: '10', title: 'alpha', createTime: '2026-06-21T00:00:00' }),
+      chat({ id: '2', title: 'beta', createTime: 1782000000 }),
+      chat({ id: '10', title: 'alpha', createTime: 1782000000 }),
     ]
     // numeric-aware id tie-break: '10' is newer than '2'
     expect(filterChats(chats, '')).toMatchObject([{ id: '10' }, { id: '2' }])
@@ -136,26 +129,16 @@ describe('filterChats', () => {
 
   it('sorts by the extracted timestamp before falling back to the id tie-break', () => {
     const chats = [
-      chat({ id: '1', title: 'old', createTime: '2026-06-20T00:00:00' }),
-      chat({ id: '2', title: 'new', createTime: '2026-06-22T00:00:00' }),
+      chat({ id: '1', title: 'old', createTime: 1781913600 }),
+      chat({ id: '2', title: 'new', createTime: 1782086400 }),
     ]
     expect(filterChats(chats, '').map((item) => item.title)).toEqual(['new', 'old'])
   })
 
-  it('handles invalid timestamp shapes by falling back to the id tie-break', () => {
-    const chats = [
-      chat({ id: '2', title: 'a', createTime: null }),
-      chat({ id: '10', title: 'b', createTime: 'not-a-date' }),
-      chatWithUntrustedTime([], { id: '3', title: 'c' }),
-    ]
-    // invalid times sort as 0; the remaining array order is then fixed by the id tie-break
-    expect(filterChats(chats, '').map((item) => item.id)).toEqual(['10', '3', '2'])
-  })
-
   it('treats the empty title as a searchable value', () => {
     const chats = [
-      chat({ id: '1', title: '', createTime: '2026-06-20T00:00:00' }),
-      chat({ id: '2', title: null, createTime: '2026-06-20T00:00:00' }),
+      chat({ id: '1', title: '', createTime: 1781913600 }),
+      chat({ id: '2', title: null, createTime: 1781913600 }),
     ]
     // both nullish titles match any search; the title fallback branch is exercised
     expect(filterChats(chats, '')).toHaveLength(2)
@@ -163,55 +146,14 @@ describe('filterChats', () => {
   })
 })
 
-describe('backendTimeValue', () => {
-  it('sorts by the full date-time array with defaults for missing parts', () => {
-    const chats = [
-      chatWithUntrustedTime([2026, 6, 21, 1, 2, 3], { id: 'array-full', title: 'a' }),
-      chatWithUntrustedTime([2026], { id: 'array-partial', title: 'b' }),
-    ]
-    // full parts and defaulted (year, 1, 1) parts both produce comparable UTC sort keys
-    expect(filterChats(chats, '').map((item) => item.id)).toEqual(['array-full', 'array-partial'])
-  })
-
-  it('sorts by the raw numeric timestamp value', () => {
-    const chats = [
-      chat({ id: 'low', title: 'a', createTime: 1234 }),
-      chat({ id: 'high', title: 'b', createTime: 5678 }),
-    ]
-    expect(filterChats(chats, '').map((item) => item.id)).toEqual(['high', 'low'])
-  })
-
-  it('coerces non-numeric array parts to defaults and falls back to the id tie-break', () => {
-    const chats = [
-      // month/day NaN coerce through (month || 1)/(day || 1); year NaN yields a non-finite Date.UTC result
-      chatWithUntrustedTime(['x', 6, 21], { id: 'a1', title: 'a' }),
-      chatWithUntrustedTime([2026, 'x', 'y'], { id: 'a2', title: 'b' }),
-    ]
-    // both compute a zero sort key, so the numeric-aware id tie-break decides
-    expect(filterChats(chats, '').map((item) => item.id)).toEqual(['a2', 'a1'])
-  })
-})
-
 describe('formatBackendDate', () => {
-  it('formats date-time arrays with 1-based month and zero-padded fields', () => {
-    expect(formatBackendDate([2026, 6, 5, 9, 7, 30])).toBe('2026-06-05 09:07')
-    expect(formatBackendDate([2026])).toBe('2026-01-01 00:00')
-  })
-
-  it('returns a placeholder for empty and invalid dates without throwing', () => {
-    expect(formatBackendDate(null)).toBe('-')
-    expect(formatBackendDate([])).toBe('-')
-    expect(formatBackendDate([Number.NaN])).toBe('-')
-    expect(formatBackendDate([2026, Number.NaN])).toBe('-')
-    expect(formatBackendDate([2026, 13])).toBe('-')
-    expect(formatBackendDate('')).toBe('-')
-    expect(formatBackendDate('not-a-date')).toBe('-')
+  it('returns a placeholder for non-finite values without throwing', () => {
     expect(formatBackendDate(Number.NaN)).toBe('-')
     expect(formatBackendDate(Number.POSITIVE_INFINITY)).toBe('-')
     expect(formatBackendDate(1e20)).toBe('-')
   })
 
-  it('formats equivalent instants in local time independently of the host timezone', () => {
+  it('formats epoch seconds in local time independently of the host timezone', () => {
     // Intl is an independent local-time oracle; fixed timezone browser cases cover the wire paths.
     const milliseconds = Date.parse('2026-10-08T13:15:00Z')
     const parts = new Intl.DateTimeFormat('en-CA', {
@@ -220,17 +162,8 @@ describe('formatBackendDate', () => {
     }).formatToParts(milliseconds)
     const fields = Object.fromEntries(parts.map(({ type, value }) => [type, value]))
     const expected = `${fields.year}-${fields.month}-${fields.day} ${fields.hour}:${fields.minute}`
-    expect(formatBackendDate(0)).toBe('-')
-    for (const value of [
-      milliseconds / 1000, milliseconds, '2026-10-08T13:15:00Z',
-      '2026-10-08T21:15:00+08:00', '2026-10-08T09:15:00-0400',
-    ]) {
-      expect(formatBackendDate(value)).toBe(expected)
-    }
-  })
-
-  it('preserves local wall-clock strings without timezone conversion', () => {
-    expect(formatBackendDate('2026-06-20T02:01:00')).toBe('2026-06-20 02:01')
-    expect(formatBackendDate('2026-06-20 02:01:00')).toBe('2026-06-20 02:01')
+    expect(formatBackendDate(milliseconds / 1000)).toBe(expected)
+    // fractional seconds keep the same minute
+    expect(formatBackendDate(milliseconds / 1000 + 0.25)).toBe(expected)
   })
 })

@@ -44,7 +44,7 @@ it('renders environment waits read-only without approval or questionnaire action
 it('renders and submits a long questionnaire without truncating questions, options or answers', async () => {
   const submit = vi.spyOn(interactionService, 'submitToolInput').mockResolvedValue({
     threadId: 'th-1', interactionId: 'int-long', submissionId: 'sub-long',
-    actor: 'local-user', acceptedAt: '2026-09-27T00:00:00Z', materialized: false,
+    actor: 'local-user', acceptedAt: 1790467200, materialized: false,
   })
   const item: InputInteractionDTO = {
     type: 'INPUT', status: 'WAITING_INPUT', rootThreadId: 'root',

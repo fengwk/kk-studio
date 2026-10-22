@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.share.ai.interaction;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
+import org.jspecify.annotations.Nullable;
 
 import java.time.Instant;
 
@@ -30,18 +31,18 @@ public class InteractionDTO {
 
   /** 人工等待条目的原始 ToolInvocation 主键；环境等待条目没有可操作主键，为 null。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String interactionId;
+  private @Nullable String interactionId;
 
   /** 人工等待条目的等待状态（{@code WAITING_INPUT} / {@code WAITING_APPROVAL}）；环境等待条目为 null。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String status;
+  private @Nullable String status;
 
   /** 来源 Tool invocation 所在 Thread，保留原始调用来源，不替代为根；环境等待条目为 null。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String threadId;
+  private @Nullable String threadId;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String sessionId;
+  private @Nullable String sessionId;
 
   /** 来源所属执行树的真实根 Thread：后代来源也指向同一根，永远非空；{@code threadId} 自身即根时与其相等。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
@@ -50,28 +51,28 @@ public class InteractionDTO {
   private InteractionOwnerDTO owner;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String toolCallId;
+  private @Nullable String toolCallId;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String toolName;
+  private @Nullable String toolName;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String argumentsJson;
+  private @Nullable String argumentsJson;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String approvalJson;
+  private @Nullable String approvalJson;
 
   /** 环境等待条目的冻结所需环境；非环境条目为 null。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String environmentId;
+  private @Nullable String environmentId;
 
   /** 环境等待条目的环境展示名称；非环境条目为 null。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String environmentName;
+  private @Nullable String environmentName;
 
   /** 环境等待条目的组内待领取调用数；非环境条目为 null。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private Integer waitingCount;
+  private @Nullable Integer waitingCount;
 
   /** 人工等待为原始调用创建时间；环境等待为组内最早调用的创建时间（排序/游标代表）。 */
   private Instant createTime;

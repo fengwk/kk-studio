@@ -11,12 +11,12 @@ import type { CanvasFlowNode } from '@/features/canvas/projection'
 import {
   useCanvasStageContextMenu,
 } from '@/features/canvas/useCanvasStageContextMenu'
-import type { CanvasFunctionDefinitionDTO, UUIDString } from '@/shared/api/contracts/studio'
+import type { CanvasFunctionDefinitionDTO } from '@/shared/api/generated/contracts'
 
-const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f' as UUIDString
-const GROUP_ID = 'c4d5e6f7-8a9b-4c0d-8e1f-2a3b4c5d6e7f' as UUIDString
-const NODE_A = '9f1e6d2a-3b4c-4d5e-8f6a-7b8c9d0e1f2a' as UUIDString
-const NODE_B = 'a2b3c4d5-6e7f-4a8b-9c0d-1e2f3a4b5c6d' as UUIDString
+const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
+const GROUP_ID = 'c4d5e6f7-8a9b-4c0d-8e1f-2a3b4c5d6e7f'
+const NODE_A = '9f1e6d2a-3b4c-4d5e-8f6a-7b8c9d0e1f2a'
+const NODE_B = 'a2b3c4d5-6e7f-4a8b-9c0d-1e2f3a4b5c6d'
 
 const transform = { x: 0, y: 0, width: 320, height: 260 }
 
@@ -81,7 +81,7 @@ function snapshot(overrides: Partial<CanvasSnapshot> = {}): CanvasSnapshot {
 }
 
 function flowNode(id: string, dataKind: 'resource' | 'group' = 'resource'): CanvasFlowNode {
-  const nodeId = (id.startsWith('group:') ? id.slice(6) : id) as UUIDString
+  const nodeId = (id.startsWith('group:') ? id.slice(6) : id)
   return {
     id,
     type: dataKind,

@@ -10,12 +10,12 @@ import {
   toEditableAgent,
   toEditableAgentUpdate,
 } from '@/features/catalog/ai-agent-draft-codec'
+import type { AgentModelView } from '@/features/catalog/AgentModelView'
 import type {
   AgentDefinitionDTO,
   AgentModelConfigDTO,
   SkillPackageDTO,
-} from '@/shared/api/contracts/ai-catalog'
-import type { AgentModelView } from '@/features/catalog/AgentModelView'
+} from '@/shared/api/generated/contracts'
 
 const baseConfig: AgentModelConfigDTO = {
   limit: { context: 128000, output: 8192 },
@@ -45,8 +45,8 @@ function modelWithVariants(): AgentModelView {
     description: null,
     config: baseConfig,
     version: '1',
-    createTime: null,
-    updateTime: null,
+    createTime: 0,
+    updateTime: 0,
   }
 }
 
@@ -67,8 +67,8 @@ function skillPackage(
     checkStatus: 'UP_TO_DATE',
     skills,
     version: '1',
-    createTime: '2026-07-20T00:00:00.000Z',
-    updateTime: '2026-07-20T01:00:00.000Z',
+    createTime: 1784505600,
+    updateTime: 1784509200,
   }
 }
 
@@ -82,8 +82,8 @@ function agentDefinition(name: string, description: string | null): AgentDefinit
     variant: null,
     config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
     version: '1',
-    createTime: null,
-    updateTime: null,
+    createTime: 0,
+    updateTime: 0,
   }
 }
 
@@ -128,18 +128,8 @@ describe('AgentForm current contracts', () => {
           models={[modelWithVariants()]}
           skills={skills}
           toolCatalog={[
-            {
-              name: 'bash',
-              description: longDescription,
-              environmentRequired: false,
-              environmentId: null,
-            },
-            {
-              name: 'lsp',
-              description: 'lsp',
-              environmentRequired: true,
-              environmentId: null,
-            },
+            { name: 'bash', description: longDescription },
+            { name: 'lsp', description: 'lsp', environmentSupport: 'REQUIRED' },
           ]}
           onChange={setDraft}
         />

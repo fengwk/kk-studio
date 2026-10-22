@@ -5,13 +5,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { CanvasPage } from '@/features/canvas/CanvasPage'
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
-import type { CanvasDocumentDTO, CanvasSnapshotDTO } from '@/shared/api/contracts/studio'
 import {
   createCanvas,
   getCanvas,
   listCanvases,
 } from '@/shared/api/studio-service'
 import { setLocale } from '@/shared/i18n'
+import type { CanvasDocumentDTO, CanvasSnapshotDTO } from '@/shared/api/generated/contracts'
 
 const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
 

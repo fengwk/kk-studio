@@ -16,7 +16,6 @@ import { MetaMessageBlock } from '@/features/chat/runtime/thread-panel/messages/
 import { MessageList } from '@/features/chat/runtime/thread-panel/messages/MessageList'
 import { EntryBranchContext } from '@/features/chat/runtime/thread-panel/entry-branch-context'
 import { buildThreadTimeline } from '@/features/chat/runtime/thread-timeline-builder'
-import type { HarnessSessionEntryDTO } from '@/shared/api/contracts/ai-runtime'
 import { Button } from '@/shared/ui/controls/Button'
 import { formatTurnUsageText } from '@/features/chat/runtime/thread-timeline/content-utils'
 import type {
@@ -24,6 +23,7 @@ import type {
   TextDialogueMessage,
   TurnUsage,
 } from '@/features/chat/runtime/thread-timeline-types'
+import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 
 setLocale('zh-CN')
 
@@ -258,7 +258,8 @@ function TurnUsageHarness() {
       sessionId: 'usage-session',
       parentEntryId: entries.at(-1)?.entryId ?? null,
       payloadJson: JSON.stringify(payload),
-      createTime: '2026-07-28T10:00:00Z',
+      createTime: 1785232800,
+      usageCost: null,
     })
   }
   const settings = {

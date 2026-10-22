@@ -8,7 +8,10 @@ import { environmentService } from '@/shared/api/environment-service'
 import { copyTextToClipboard } from './clipboard'
 import { ApiError } from '@/shared/api/client'
 import { chooseSelectOption } from '@/test-support/chooseSelectOption'
-import type { EnvironmentCardDTO, EnvironmentInstallConfigDTO } from '@/shared/api/contracts/ai-environment'
+import type {
+  EnvironmentCardDTO,
+  EnvironmentInstallConfigDTO,
+} from '@/shared/api/generated/contracts'
 
 vi.mock('@/shared/api/environment-service', () => ({
   environmentService: {
@@ -34,7 +37,7 @@ const savedNormalized: EnvironmentInstallConfigDTO = {
 }
 const card: EnvironmentCardDTO = {
   id: 'env-1', name: 'box', version: '7', status: 'OFFLINE', ready: false, statusExpiresAt: null,
-  lastSeen: null, capabilities: [], createTime: '', updateTime: '', installConfig: saved,
+  lastSeen: null, capabilities: [], createTime: 0, updateTime: 0, installConfig: saved,
 }
 const copyButton = () => screen.getByRole('button', { name: '保存并复制安装命令' })
 const origin = () => screen.getByRole('textbox', { name: 'Studio 地址' })
@@ -63,7 +66,7 @@ describe('EnvironmentInstallModal', () => {
     vi.mocked(environmentService.getEnvironment).mockResolvedValue(card)
     vi.mocked(environmentService.saveInstallConfig).mockResolvedValue({ ...card, version: '8' })
     vi.mocked(environmentService.createInstallCode).mockResolvedValue({
-      code: "short-code'汉字", expiresAt: '2026-10-05T09:05:00.000Z',
+      code: "short-code'汉字", expiresAt: 1791191100,
     })
     vi.mocked(copyTextToClipboard).mockResolvedValue(true)
   })
@@ -153,7 +156,7 @@ describe('EnvironmentInstallModal', () => {
       ...card, version: '9', registrationToken: 'rotated-long-token',
     })
     vi.mocked(environmentService.createInstallCode).mockResolvedValue({
-      code: 'fresh-code', expiresAt: '2026-10-05T09:10:00.000Z',
+      code: 'fresh-code', expiresAt: 1791191400,
     })
     await user.click(copyButton())
     await waitFor(() => expect(copyTextToClipboard).toHaveBeenCalledTimes(2))
@@ -191,7 +194,7 @@ describe('EnvironmentInstallModal', () => {
     const user = userEvent.setup()
     const metadata = deferred<EnvironmentCardDTO>()
     const save = deferred<EnvironmentCardDTO>()
-    const code = deferred<{ code: string; expiresAt: string }>()
+    const code = deferred<{ code: string; expiresAt: number }>()
     const clipboard = deferred<boolean>()
     if (phase === 'metadata') vi.mocked(environmentService.getEnvironment).mockReturnValue(metadata.promise)
     if (phase === 'save') vi.mocked(environmentService.saveInstallConfig).mockReturnValue(save.promise)
@@ -211,7 +214,7 @@ describe('EnvironmentInstallModal', () => {
     view.unmount()
     await act(async () => {
       metadata.resolve(card); save.resolve(card)
-      code.resolve({ code: 'short-code', expiresAt: '2026-10-05T09:05:00Z' }); clipboard.resolve(true)
+      code.resolve({ code: 'short-code', expiresAt: 1791191100 }); clipboard.resolve(true)
     })
     if (phase === 'save' || phase === 'metadata') expect(copyTextToClipboard).not.toHaveBeenCalled()
     if (phase === 'code') expect(copyTextToClipboard).not.toHaveBeenCalled()

@@ -2,7 +2,6 @@ import { useQueryClient } from '@tanstack/react-query'
 import { AlertCircle, Check, RotateCw, X } from 'lucide-react'
 import { useMemo } from 'react'
 import { isConflictError } from '@/shared/api/client'
-import type { HarnessToolInputResultDTO } from '@/shared/api/contracts/ai-interaction'
 import { interactionService } from '@/shared/api/interaction-service'
 import { useI18n } from '@/shared/i18n'
 import { queryKeys } from '@/shared/lib/query-keys'
@@ -20,6 +19,7 @@ import {
   parseQuestionnaire,
 } from './questionnaire-parser'
 import './interaction-cards.css'
+import type { HarnessToolInputResultDTO } from '@/shared/api/generated/contracts'
 
 export interface QuestionnaireCardProps {
   interactionId: string

@@ -6,13 +6,13 @@ import {
   useCatalogPageController,
   type CatalogPageScope,
 } from '@/features/catalog/useCatalogPageController'
+import { agentService } from '@/shared/api/agent-service'
+import { environmentService } from '@/shared/api/environment-service'
 import type {
   AgentDefinitionDTO,
   AgentModelDTO,
   AgentProviderDTO,
-} from '@/shared/api/contracts/ai-catalog'
-import { agentService } from '@/shared/api/agent-service'
-import { environmentService } from '@/shared/api/environment-service'
+} from '@/shared/api/generated/contracts'
 
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {
@@ -192,7 +192,7 @@ function page<T>(results: T[]) {
   return {
     pageNumber: 1,
     pageSize: 50,
-    totalCount: results.length,
+    totalCount: String(results.length),
     results,
   }
 }
@@ -204,11 +204,11 @@ function provider(): AgentProviderDTO {
     providerType: 'openai',
     baseUrl: 'http://stub.local/v1',
     configured: true,
-    modelCallTimeoutMillis: 1800000,
-    modelCallIdleTimeoutMillis: 120000,
+    modelCallTimeoutMillis: '1800000',
+    modelCallIdleTimeoutMillis: '120000',
     version: '1',
-    createTime: null,
-    updateTime: null,
+    createTime: 0,
+    updateTime: 0,
     modelHttpRetryStatusCodes: null,
   }
 }
@@ -239,8 +239,8 @@ function model(): AgentModelDTO {
       variants: [{ id: 'default' }],
     },
     version: '1',
-    createTime: null,
-    updateTime: null,
+    createTime: 0,
+    updateTime: 0,
   }
 }
 
@@ -259,7 +259,7 @@ function agent(): AgentDefinitionDTO {
       subagents: [],
     },
     version: '1',
-    createTime: null,
-    updateTime: null,
+    createTime: 0,
+    updateTime: 0,
   }
 }

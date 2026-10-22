@@ -9,8 +9,8 @@ import { ApplicationEventProvider } from '@/shared/app-events'
 import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
 import { setLocale } from '@/shared/i18n'
 import { projectsApi } from '@/features/projects/projects-api'
-import type { IssueDetailDTO } from '@/features/projects/types'
 import { InteractionsPage } from './InteractionsPage'
+import type { IssueDetailDTO } from '@/shared/api/generated/contracts'
 
 const mockedNavigate = vi.fn()
 vi.mock('react-router', async () => {
@@ -115,7 +115,7 @@ describe('InteractionsPage', () => {
           environmentId: null,
           environmentName: null,
           waitingCount: null,
-          createTime: '2026-09-27T10:06:00Z',
+          createTime: 1790503560,
         },
       ],
       nextCursor: null,
@@ -186,7 +186,7 @@ describe('InteractionsPage', () => {
           environmentId: null,
           environmentName: null,
           waitingCount: null,
-          createTime: '2026-09-27T10:00:00Z',
+          createTime: 1790503200,
         },
         {
           type: 'APPROVAL',
@@ -211,7 +211,7 @@ describe('InteractionsPage', () => {
           environmentId: null,
           environmentName: null,
           waitingCount: null,
-          createTime: '2026-09-27T10:05:00Z',
+          createTime: 1790503500,
         },
       ],
       nextCursor: null,
@@ -278,8 +278,8 @@ describe('InteractionsPage', () => {
       approvalJson: '{"decision":"ALLOWED"}',
       resultJson: null,
       errorJson: null,
-      createTime: '2026-09-27T10:05:00Z',
-      updateTime: '2026-09-27T10:06:00Z',
+      createTime: 1790503500,
+      updateTime: 1790503560,
     })
     fireEvent.click(screen.getByRole('button', { name: '允许' }))
     await waitFor(() => expect(screen.queryByText('write')).not.toBeInTheDocument())
@@ -315,7 +315,7 @@ describe('InteractionsPage', () => {
           environmentId: null,
           environmentName: null,
           waitingCount: null,
-          createTime: '2026-09-27T10:00:00Z',
+          createTime: 1790503200,
         },
       ],
       nextCursor: null,
@@ -345,7 +345,7 @@ describe('InteractionsPage', () => {
             {
               type: 'ENVIRONMENT_WAIT',
               rootThreadId: 'root-th-env',
-              createTime: '2026-09-27T10:00:00Z',
+              createTime: 1790503200,
               interactionId: null,
               status: null,
               threadId: null,
@@ -390,7 +390,7 @@ describe('InteractionsPage', () => {
               environmentId: null,
               environmentName: null,
               waitingCount: null,
-              createTime: '2026-09-27T10:00:00Z',
+              createTime: 1790503200,
             },
           ],
           nextCursor: 'cursor-2',
@@ -426,7 +426,7 @@ describe('InteractionsPage', () => {
             environmentId: null,
             environmentName: null,
             waitingCount: null,
-            createTime: '2026-09-27T10:00:00Z',
+            createTime: 1790503200,
           },
         ],
         nextCursor: null,

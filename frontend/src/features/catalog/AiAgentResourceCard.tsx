@@ -5,8 +5,8 @@ import {
   modelRef,
   type AgentModelView,
 } from '@/features/catalog/AgentModelView'
-import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import { translate, useI18n } from '@/shared/i18n'
+import type { AgentDefinitionDTO } from '@/shared/api/generated/contracts'
 
 /**
  * Agent 展示实际生效的 model + variant：显式 override 优先，否则使用 model 的 defaultVariant。model 未加载且没有
@@ -48,7 +48,7 @@ export function AgentResourceCard({
   const { t } = useI18n()
   const modelRefValue = (agent.model ?? '').trim()
   const model = models.find((item) => modelRef(item) === modelRefValue)
-  const effectiveModel = formatEffectiveModel(model, modelRefValue, agent.variant)
+  const effectiveModel = formatEffectiveModel(model, modelRefValue, agent.variant ?? null)
   const tools = agent.config.tools
   const skillTags = (agent.config.skills ?? []).map((s) => `${s.packageName} / ${s.name}`)
   const subagents = agent.config.subagents

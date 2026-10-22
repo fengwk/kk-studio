@@ -8,15 +8,14 @@ import type {
   CanvasCommandDTO,
   CanvasFunctionDefinitionDTO,
   CanvasSnapshotDTO,
-  UUIDString,
-} from '@/shared/api/contracts/studio'
+} from '@/shared/api/generated/contracts'
 
 interface ReferenceLinksInput {
   scope: CanvasScope
   snapshot: CanvasSnapshotDTO | undefined
   models: CanvasFunctionDefinitionDTO[] | undefined
   executeCommands: (commands: CanvasCommandDTO[], ack?: CanvasDraftAck[]) => Promise<CanvasSnapshotDTO>
-  flushFunctionConfig: (nodeId: UUIDString) => Promise<unknown>
+  flushFunctionConfig: (nodeId: string) => Promise<unknown>
   setToast: (toast: string) => void
 }
 
@@ -37,7 +36,7 @@ export function useCanvasReferenceLinks({
 
   /** 用新的引用数组同时更新本地函数草稿（若存在）并提交命令。 */
   const commitReferences = useCallback(async (
-    targetNodeId: UUIDString,
+    targetNodeId: string,
     target: NonNullable<CanvasSnapshotDTO['nodes'][number]>,
     currentArgs: Record<string, unknown> | undefined,
     references: CanvasResourceReference[],
@@ -57,7 +56,7 @@ export function useCanvasReferenceLinks({
     }]).catch(() => undefined)
   }, [draftsRef, executeCommands, scope])
 
-  const createLink = useCallback(async (sourceNodeId: UUIDString, targetNodeId: UUIDString) => {
+  const createLink = useCallback(async (sourceNodeId: string, targetNodeId: string) => {
     await flushFunctionConfig(targetNodeId).catch(() => undefined)
 
     const current = currentCanvasSnapshot(scope, snapshot)
@@ -108,7 +107,7 @@ export function useCanvasReferenceLinks({
     ])
   }, [commitReferences, draftsRef, flushFunctionConfig, models, scope, setToast, snapshot])
 
-  const deleteLink = useCallback(async (sourceNodeId: UUIDString, targetNodeId: UUIDString) => {
+  const deleteLink = useCallback(async (sourceNodeId: string, targetNodeId: string) => {
     await flushFunctionConfig(targetNodeId).catch(() => undefined)
 
     const target = currentCanvasSnapshot(scope, snapshot)?.nodes.find((n) => n.id === targetNodeId)

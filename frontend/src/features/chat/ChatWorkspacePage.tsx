@@ -26,9 +26,6 @@ import {
 import { agentService } from '@/shared/api/agent-service'
 import { chatService } from '@/shared/api/chat-service'
 import { environmentService } from '@/shared/api/environment-service'
-import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
-import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
-import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
 import { Select } from '@/shared/ui/controls/Select'
@@ -38,6 +35,11 @@ import { ThreadPresentationActions } from '@/features/chat/runtime/ThreadPresent
 import type { ThreadPresentation } from '@/features/chat/runtime/thread-presentation'
 import { shouldDeferToBlockingModal } from '@/shared/ui/blocking-overlay'
 import '@/features/chat/chat-workspace.css'
+import type {
+  AgentDefinitionDTO,
+  ChatDTO,
+  EnvironmentCardDTO,
+} from '@/shared/api/generated/contracts'
 
 const LAYOUTS: Array<{ value: ChatLayout; label: string }> = [
   { value: 'single', label: '1' },

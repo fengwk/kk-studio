@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.share.ai.interaction;
 
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import lombok.Data;
+import org.jspecify.annotations.Nullable;
 
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessRequestFormatException;
 
@@ -22,9 +23,9 @@ public class HarnessToolInputDTO {
 
   private String submissionId;
 
-  private Boolean declined;
+  private @Nullable Boolean declined;
 
-  private List<List<String>> answers;
+  private @Nullable List<List<String>> answers;
 
   @JsonAnySetter
   public void rejectUnknownField(String name, Object value) {

@@ -1,4 +1,4 @@
-import type { InstantTimestamp } from '@/shared/api/contracts/base'
+import type { InteractionOwnerDTO } from '@/shared/api/generated/contracts'
 
 /**
  * 待处理 Interaction 的条目类型。
@@ -7,19 +7,6 @@ import type { InstantTimestamp } from '@/shared/api/contracts/base'
  * - `ENVIRONMENT_WAIT`：按 `(真实执行根, 所需环境)` 聚合的只读环境等待，没有任何允许/拒绝/作答操作。
  */
 export type InteractionType = 'INPUT' | 'APPROVAL' | 'ENVIRONMENT_WAIT'
-
-/**
- * 待处理 Interaction 的产品来源：Chat、Issue+Agent，或没有产品页面的独立 Agent 任务（控制器/插件发起）。
- */
-export interface InteractionOwnerDTO {
-  type: 'CHAT' | 'ISSUE_AGENT' | 'AGENT_TASK'
-  chatId: string | null
-  chatTitle: string | null
-  issueId: string | null
-  issueTitle: string | null
-  agentName: string | null
-  rootThreadName: string | null
-}
 
 /**
  * 一个待处理 Interaction 的稳定投影，由 `type` 区分人工等待与环境等待。
@@ -32,7 +19,7 @@ export interface InteractionOwnerDTO {
 interface InteractionSource {
   rootThreadId: string
   owner: InteractionOwnerDTO
-  createTime: InstantTimestamp
+  createTime: number
 }
 
 interface ManualInteraction extends InteractionSource {
@@ -83,39 +70,11 @@ export type InteractionDTO =
 /** 可操作的人工等待：有原始调用主键与来源 Thread，可直接回写提交/审批。 */
 export type ManualInteractionDTO = InputInteractionDTO | ApprovalInteractionDTO
 
-/**
- * 待处理 Interaction 的一页稳定分页结果。
- *
- * `total` 是同一过滤条件下的真实可见待处理总数（与 `nextCursor` 指向的分页位置无关），
- * 供全局待处理角标直接读取，不需要客户端自行累加或维护台账。
- */
+/** 一页待处理 Interaction：条目为上方的判别联合。 */
 export interface InteractionPageDTO {
   items: InteractionDTO[]
   nextCursor: string | null
   total: number
-  /** 时间驱动的最早可能变更时刻，供单次对账；无此类时刻时为 null。 */
-  freshnessAt: InstantTimestamp
+  freshnessAt: number | null
 }
 
-/**
- * 一次人工输入（ask_user 问卷）提交请求体。
- * 客户端由服务端认证上下文提取 principal，严禁携带 actor 字段。
- */
-export interface HarnessToolInputDTO {
-  threadId: string
-  submissionId: string
-  declined?: boolean
-  answers?: string[][]
-}
-
-/**
- * 人工输入提交被接受（或精确重放）后的权威回执视图。
- */
-export interface HarnessToolInputResultDTO {
-  threadId: string
-  interactionId: string
-  submissionId: string
-  actor: string
-  acceptedAt: string
-  materialized: boolean
-}

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import type { HarnessSessionEntryDTO } from '@/shared/api/contracts/ai-runtime'
 import { projectDurableEntry } from '@/features/chat/runtime/thread-timeline/entry-projection'
 import type { DialogueMessage } from '@/features/chat/runtime/thread-timeline-types'
 import { setLocale } from '@/shared/i18n'
+import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 
 const settings = {
   agentName: 'coder',
@@ -17,7 +17,8 @@ function turnStart(fallbackModel: unknown): HarnessSessionEntryDTO {
     parentEntryId: 'root-1',
     entryType: 'TURN_START',
     payloadJson: JSON.stringify({ reason: 'INPUT', settings, fallbackModel }),
-    createTime: '2026-10-19T00:00:00Z',
+    createTime: 1792368000,
+    usageCost: null,
   }
 }
 

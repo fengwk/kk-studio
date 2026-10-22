@@ -6,12 +6,13 @@ import { buildThreadTimeline } from '@/features/chat/runtime/thread-timeline'
 import { transcriptStreamRevision } from '@/features/chat/runtime/transcript-reading'
 import { useChatTranscriptAutoScroll } from '@/features/chat/runtime/useChatTranscriptAutoScroll'
 import { setLocale } from '@/shared/i18n'
-import type { EntryType, HarnessSessionEntryDTO } from '@/shared/api/contracts/ai-runtime'
+import type { EntryType } from '@/shared/api/contracts/ai-runtime'
 import {
   FULL_COMPACTION_SUMMARY,
   LONG_COMPACTION_SUMMARY,
   UNSAFE_COMPACTION_SUMMARY,
 } from '@/test-support/resources/compaction-summary'
+import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 
 setLocale('zh-CN')
 
@@ -28,7 +29,8 @@ function entry(
     parentEntryId: null,
     entryType,
     payloadJson: JSON.stringify(payload),
-    createTime: '2026-01-01T00:00:00Z',
+    createTime: 1767225600,
+    usageCost: null,
   }
 }
 

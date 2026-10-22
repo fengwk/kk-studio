@@ -1,13 +1,13 @@
 import { normalizeThreadName } from '@/features/chat/thread-name'
 import type { PaneTarget } from '@/features/chat/runtime/agent-pane'
-import type { RuntimeThreadSummaryDTO } from '@/shared/api/contracts/ai-runtime'
+import type { HarnessThreadSummaryDTO } from '@/shared/api/generated/contracts'
 
 /** Only execution roots and uncommitted drafts occupy the user Thread namespace. */
 export function hasThreadNameConflict(
   name: string,
   sessionId: string,
   destinationPaneId: string,
-  threads: RuntimeThreadSummaryDTO[],
+  threads: HarnessThreadSummaryDTO[],
   localTargets: Record<string, PaneTarget>,
 ): boolean {
   const normalized = normalizeThreadName(name)

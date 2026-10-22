@@ -8,7 +8,7 @@ describe('mcpServerService', () => {
    */
   it('pages servers via GET /mcp-servers', async () => {
     const client = createMockHttpClient()
-    client.get.mockResolvedValue({ pageNumber: 1, pageSize: 50, totalCount: 0, results: [] })
+    client.get.mockResolvedValue({ pageNumber: 1, pageSize: 50, totalCount: '0', results: [] })
     const service = createMcpServerService(client)
     await service.pageServers(1, 20)
     expect(client.get).toHaveBeenCalledWith('/mcp-servers', {

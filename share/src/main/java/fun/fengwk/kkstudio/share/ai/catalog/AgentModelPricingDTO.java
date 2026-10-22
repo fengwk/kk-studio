@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.share.ai.catalog;
 
 import lombok.Data;
+import org.jspecify.annotations.Nullable;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -43,5 +44,5 @@ public class AgentModelPricingDTO {
   private BigDecimal reasoningPerMillionTokens;
 
   /** 可空：按顺序匹配的条件价格（分时段、长上下文档位），第一条满足的规则替换上述分项单价，最多 16 条。 */
-  private List<AgentModelPricingRuleDTO> rules;
+  private @Nullable List<AgentModelPricingRuleDTO> rules;
 }

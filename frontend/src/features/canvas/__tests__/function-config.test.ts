@@ -1,8 +1,8 @@
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useFunctionConfigSync } from '@/features/canvas/function-config'
-import type { CanvasCommandDTO, CanvasSnapshotDTO, UUIDString } from '@/shared/api/contracts/studio'
 import type { CanvasDraftAck } from '@/features/canvas/canvas-operation-storage'
+import type { CanvasCommandDTO, CanvasSnapshotDTO } from '@/shared/api/generated/contracts'
 
 describe('useFunctionConfigSync', () => {
   beforeEach(() => {
@@ -16,8 +16,8 @@ describe('useFunctionConfigSync', () => {
   it('debounces network sync by 320ms while immediately invoking onImmediateDraft', async () => {
     const executeCommands = vi.fn(async () => undefined)
     let gen = 0
-    const onImmediateDraft = vi.fn((_nodeId: UUIDString) => ++gen)
-    const nodeId = 'node-1' as UUIDString
+    const onImmediateDraft = vi.fn((_nodeId: string) => ++gen)
+    const nodeId = 'node-1'
 
     const { result } = renderHook(() =>
       useFunctionConfigSync({
@@ -74,7 +74,7 @@ describe('useFunctionConfigSync', () => {
     const executeCommands = vi.fn(async (_commands: CanvasCommandDTO[], _acks?: CanvasDraftAck[]) => undefined)
     let gen = 0
     const onImmediateDraft = vi.fn(() => ++gen)
-    const nodeId = '00000000-0000-4000-8000-000000000002' as UUIDString
+    const nodeId = '00000000-0000-4000-8000-000000000002'
 
     const { result } = renderHook(() =>
       useFunctionConfigSync({
@@ -126,7 +126,7 @@ describe('useFunctionConfigSync', () => {
 
   it('flushFunctionConfig flushes immediately and cancels pending timer', async () => {
     const executeCommands = vi.fn(async (_commands: CanvasCommandDTO[], _acks?: CanvasDraftAck[]) => undefined)
-    const nodeId = '00000000-0000-4000-8000-000000000003' as UUIDString
+    const nodeId = '00000000-0000-4000-8000-000000000003'
 
     const mockSnapshot: CanvasSnapshotDTO = {
       document: {
@@ -192,7 +192,7 @@ describe('useFunctionConfigSync', () => {
 
   it('resetPending clears pending timers and pending drafts without executing commands', async () => {
     const executeCommands = vi.fn(async () => undefined)
-    const nodeId = 'node-4' as UUIDString
+    const nodeId = 'node-4'
 
     const { result } = renderHook(() =>
       useFunctionConfigSync({

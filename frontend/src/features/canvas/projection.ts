@@ -6,10 +6,7 @@ import type {
   CanvasLinkSelection,
   CanvasNodeCallbacks,
 } from '@/features/canvas/types'
-import type {
-  CanvasFunctionDefinitionDTO,
-  UUIDString,
-} from '@/shared/api/contracts/studio'
+import type { CanvasFunctionDefinitionDTO } from '@/shared/api/generated/contracts'
 
 export type CanvasFlowNode = Node<CanvasFlowNodeData, 'resource' | 'group'>
 export type CanvasFlowEdge = Edge
@@ -116,7 +113,7 @@ export function groupFlowId(groupId: string): string {
  * 从 flow id 解码 group UUID。UUID 不含 ':'，前缀切片是安全的；
  * 非 canonical UUID 后缀一律拒绝。
  */
-export function groupIdFromFlowId(flowId: string): UUIDString | null {
+export function groupIdFromFlowId(flowId: string): string | null {
   const groupId = flowId.startsWith('group:') ? flowId.slice('group:'.length) : ''
-  return isCanonicalUuid(groupId) ? groupId as UUIDString : null
+  return isCanonicalUuid(groupId) ? groupId : null
 }

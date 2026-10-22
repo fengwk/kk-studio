@@ -38,7 +38,7 @@ function pendingUpload(
         'content-length': '128',
       },
     },
-    expiresAt: '2026-08-12T00:00:00Z',
+    expiresAt: 1786492800,
     ...overrides,
   }
 }
@@ -49,7 +49,7 @@ function readyUpload(id: string): StorageUploadDTO {
     state: 'READY',
     blobId: 'blob-1',
     presignedPut: null,
-    expiresAt: '2026-08-12T00:00:00Z',
+    expiresAt: 1786492800,
   }
 }
 
@@ -121,11 +121,11 @@ describe('storage-service', () => {
     expect(post).toHaveBeenCalledWith('/storage/blobs/blob-1/preview-url')
   })
 
-  it('accepts missing and numeric sizeBytes and keeps null', async () => {
+  it('decodes missing sizeBytes as null', async () => {
     const { client, post } = fakeClient()
     const service = createStorageService(client)
     post.mockResolvedValueOnce({ url: 'https://s3.test/a', expiresAt: '2026-08-12T00:00:00Z' })
-      .mockResolvedValueOnce({ url: 'https://s3.test/b', expiresAt: '2026-08-12T00:00:00Z', sizeBytes: 9 })
+      .mockResolvedValueOnce({ url: 'https://s3.test/b', expiresAt: '2026-08-12T00:00:00Z', sizeBytes: '9' })
 
     await expect(service.getBlobDownloadUrl('blob-1')).resolves.toMatchObject({ sizeBytes: null })
     await expect(service.getBlobPreviewUrl('blob-1')).resolves.toMatchObject({ sizeBytes: 9 })
@@ -134,7 +134,7 @@ describe('storage-service', () => {
   it('fails closed on unsafe or malformed sizeBytes instead of silent zero', async () => {
     const { client, post } = fakeClient()
     const service = createStorageService(client)
-    const invalid = ['9007199254740993', '-1', '01', 'abc', 1.5, Number.NaN]
+    const invalid = ['9007199254740993', '-1', '01', 'abc', 9, 1.5, Number.NaN]
     for (const sizeBytes of invalid) {
       post.mockResolvedValueOnce({ url: 'https://s3.test/x', expiresAt: '2026-08-12T00:00:00Z', sizeBytes })
       await expect(service.getBlobDownloadUrl('blob-1')).rejects.toMatchObject({

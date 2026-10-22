@@ -3,9 +3,9 @@ import { createConfigSyncService } from '@/shared/api/config-sync-service'
 import { createMockHttpClient } from '@/test-support/mock-http-client'
 import type {
   ConfigSyncImportCheckDTO,
-  ConfigSyncImportResponseDTO,
+  ConfigSyncImportResultDTO,
   ConfigSyncInventoryDTO,
-} from '@/shared/api/contracts/config-sync'
+} from '@/shared/api/generated/contracts'
 
 function createClient() {
   return createMockHttpClient()
@@ -45,7 +45,7 @@ describe('configSyncService', () => {
 
   it('maps import to POST /settings/sync/import with {yaml, allowPartial}', async () => {
     const client = createClient()
-    const response: ConfigSyncImportResponseDTO = {
+    const response: ConfigSyncImportResultDTO = {
       imported: [{ kind: 'providers', name: 'openai' }],
       skipped: [{ kind: 'agents', name: 'broken', reason: 'unsupported tool' }],
     }

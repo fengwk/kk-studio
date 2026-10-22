@@ -1,6 +1,5 @@
 import { hashKey, useQueryClient, type QueryClient, type QueryKey } from '@tanstack/react-query'
 import { useEffect } from 'react'
-import type { InstantTimestamp } from '@/shared/api/contracts/base'
 
 /** 服务端给出的失效时刻只是上界：稍微越过再回读，避免与服务端时钟在边界上竞争。 */
 const FRESHNESS_RECHECK_SLACK_MS = 250
@@ -55,17 +54,12 @@ function createCoordinator(queryClient: QueryClient, queryKey: QueryKey) {
  */
 export function useReadModelFreshnessRecheck(
   queryKey: QueryKey,
-  freshnessAt: InstantTimestamp | null | undefined,
+  freshnessAt: number | null | undefined,
 ): void {
   const queryClient = useQueryClient()
   const scope = hashKey(queryKey)
-  // InstantTimestamp 在 wire 上是 epoch seconds 数字，字符串形式按 ISO 时刻解析；两者都归一到毫秒。
-  const deadline =
-    freshnessAt == null
-      ? null
-      : typeof freshnessAt === 'number'
-        ? freshnessAt * 1000
-        : Date.parse(freshnessAt)
+  // 服务端 Instant 是 epoch 秒，归一到毫秒。
+  const deadline = freshnessAt == null ? null : freshnessAt * 1000
   useEffect(() => {
     if (deadline == null || !Number.isFinite(deadline)) {
       return

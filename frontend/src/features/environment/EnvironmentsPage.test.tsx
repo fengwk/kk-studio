@@ -4,10 +4,10 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { EnvironmentsPage } from '@/features/environment/EnvironmentsPage'
 import { environmentService } from '@/shared/api/environment-service'
-import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import { ApiError } from '@/shared/api/client'
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
+import type { EnvironmentCardDTO } from '@/shared/api/generated/contracts'
 
 vi.mock('@/shared/api/environment-service', () => ({
   environmentService: {
@@ -52,8 +52,8 @@ function environment(overrides: Partial<EnvironmentCardDTO>): EnvironmentCardDTO
     userName: null,
     homeDirectory: null,
     version: '1',
-    createTime: '2026-07-20T00:00:00.000Z',
-    updateTime: '2026-07-20T00:00:00.000Z',
+    createTime: 1784505600,
+    updateTime: 1784505600,
     ...overrides,
   }
 }
@@ -102,13 +102,13 @@ describe('EnvironmentsPage', () => {
         homeDirectory: '/home/dev',
         status: 'READY',
         ready: true,
-        statusExpiresAt: '2026-07-20T01:03:03.000Z',
-        lastSeen: '2026-07-20T01:02:03.000Z',
+        statusExpiresAt: 1784509383,
+        lastSeen: 1784509323,
         capabilities: [{ id: 'process.exec', version: '2' }],
         daemonVersion: '1.2.3',
         version: '1',
-        createTime: '2026-07-20T00:00:00.000Z',
-        updateTime: '2026-07-20T00:00:00.000Z',
+        createTime: 1784505600,
+        updateTime: 1784505600,
       },
       {
         id: 'env-2',
@@ -118,12 +118,12 @@ describe('EnvironmentsPage', () => {
         status: 'READY',
         ready: false,
         statusExpiresAt: null,
-        lastSeen: '2026-07-19T00:00:00.000Z',
+        lastSeen: 1784419200,
         capabilities: [],
         daemonVersion: 'development',
         version: '1',
-        createTime: '2026-07-19T00:00:00.000Z',
-        updateTime: '2026-07-19T00:00:00.000Z',
+        createTime: 1784419200,
+        updateTime: 1784419200,
       },
       {
         id: 'env-3',
@@ -132,12 +132,12 @@ describe('EnvironmentsPage', () => {
         homeDirectory: null,
         status: 'CONNECTING',
         ready: false,
-        statusExpiresAt: '2026-07-20T00:01:00.000Z',
+        statusExpiresAt: 1784505660,
         lastSeen: null,
         capabilities: [],
         version: '1',
-        createTime: '2026-07-20T00:00:00.000Z',
-        updateTime: '2026-07-20T00:00:00.000Z',
+        createTime: 1784505600,
+        updateTime: 1784505600,
       },
     ])
     renderPage()
@@ -228,8 +228,8 @@ describe('EnvironmentsPage', () => {
       userName: null,
       homeDirectory: null,
       version: '1',
-      createTime: '2026-07-20T00:00:00.000Z',
-      updateTime: '2026-07-20T00:00:00.000Z',
+      createTime: 1784505600,
+      updateTime: 1784505600,
     })
     const clipboard = installClipboard()
     const { queryClient } = renderPage()
@@ -309,8 +309,8 @@ describe('EnvironmentsPage', () => {
           operationId: 'op-1',
           targetVersion: '1.3.0',
           phase: 'PENDING',
-          createdAt: '2026-10-09T00:00:00.000Z',
-          updatedAt: '2026-10-09T00:00:00.000Z',
+          createdAt: 1791504000,
+          updatedAt: 1791504000,
         },
         version: '1',
       }),
@@ -341,8 +341,8 @@ describe('EnvironmentsPage', () => {
           operationId: 'op-run',
           targetVersion: '1.3.0',
           phase: 'RUNNING',
-          createdAt: '2026-10-09T00:00:00.000Z',
-          updatedAt: '2026-10-09T00:00:01.000Z',
+          createdAt: 1791504000,
+          updatedAt: 1791504001,
         },
       }),
       environment({
@@ -352,8 +352,8 @@ describe('EnvironmentsPage', () => {
           operationId: 'op-unk',
           targetVersion: '1.3.0',
           phase: 'UNKNOWN',
-          createdAt: '2026-10-09T00:00:00.000Z',
-          updatedAt: '2026-10-09T00:00:02.000Z',
+          createdAt: 1791504000,
+          updatedAt: 1791504002,
         },
       }),
       environment({
@@ -364,8 +364,8 @@ describe('EnvironmentsPage', () => {
           targetVersion: '1.3.0',
           phase: 'FAILED',
           error: 'checksum mismatch',
-          createdAt: '2026-10-09T00:00:00.000Z',
-          updatedAt: '2026-10-09T00:00:03.000Z',
+          createdAt: 1791504000,
+          updatedAt: 1791504003,
         },
       }),
       environment({
@@ -375,8 +375,8 @@ describe('EnvironmentsPage', () => {
           operationId: 'op-ok',
           targetVersion: '1.3.0',
           phase: 'SUCCEEDED',
-          createdAt: '2026-10-09T00:00:00.000Z',
-          updatedAt: '2026-10-09T00:00:04.000Z',
+          createdAt: 1791504000,
+          updatedAt: 1791504004,
         },
       }),
     ])
@@ -478,18 +478,15 @@ describe('EnvironmentsPage', () => {
     expect(screen.getByText('创建环境')).toBeInTheDocument()
   })
 
-  it('formats numeric epoch lastSeen as seconds and milliseconds and falls back to raw text', async () => {
+  it('formats epoch-second lastSeen, including fractional seconds', async () => {
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([
       environment({ id: 'env-id-sec', name: 'seconds-box', lastSeen: 1750000000 }),
-      environment({ id: 'env-id-mil', name: 'millis-box', lastSeen: 1750000000000 }),
-      environment({ id: 'env-id-raw', name: 'raw-box', lastSeen: 'not-a-date' }),
+      environment({ id: 'env-id-frac', name: 'fraction-box', lastSeen: 1750000000.5 }),
     ])
     renderPage()
 
     expect(await screen.findByText('seconds-box')).toBeInTheDocument()
-    expect(screen.getAllByText(/最近活动 · /).length).toBe(3)
     expect(screen.getAllByText(/最近活动 · 2025\/06\/15/)).toHaveLength(2)
-    expect(screen.getByText('最近活动 · not-a-date')).toBeInTheDocument()
   })
 
   it('truncates tag rows to three chips and shows the +N remainder', async () => {
@@ -621,13 +618,13 @@ describe('EnvironmentsPage', () => {
     ])
     vi.mocked(environmentService.listEnvironmentEvents).mockResolvedValue([
       {
-        time: '2026-07-20T00:00:00.000Z',
+        time: 1784505600,
         level: 'WARN',
         type: 'DISCONNECTED',
         message: 'daemon connection lost',
       },
       {
-        time: '2026-07-20T00:01:00.000Z',
+        time: 1784505660,
         level: 'INFO',
         type: 'READY',
         message: 'environment ready',
@@ -659,8 +656,8 @@ describe('EnvironmentsPage', () => {
     try {
       vi.setSystemTime(new Date('2026-07-20T00:00:00.000Z'))
       vi.mocked(environmentService.listEnvironments).mockResolvedValue([
-        environment({ id: 'env-1', name: 'later-box', statusExpiresAt: '2026-07-20T00:01:00.000Z' }),
-        environment({ id: 'env-2', name: 'sooner-box', statusExpiresAt: '2026-07-20T00:00:10.000Z' }),
+        environment({ id: 'env-1', name: 'later-box', statusExpiresAt: 1784505660 }),
+        environment({ id: 'env-2', name: 'sooner-box', statusExpiresAt: 1784505610 }),
       ])
       renderPage()
       await flushUntil(() => screen.queryByText('later-box') != null)
@@ -690,13 +687,10 @@ describe('EnvironmentsPage', () => {
   })
 
   /**
-   * 测试意图：后端 StrictJackson 把 statusExpiresAt 写成数字时间戳（epoch 秒，可带小数）时，
-   * 页面必须按真实截止点排一次回读；ISO、数字毫秒与数字 epoch 秒三种 wire 形态行为一致。
+   * 测试意图：后端把 statusExpiresAt 写成 epoch 秒（可带小数），页面必须按真实截止点排一次回读。
    */
   it.each([
-    ['ISO 字符串', '2026-07-20T00:00:10.250Z'],
-    ['数字毫秒', 1784505610250],
-    ['数字 epoch 秒（带小数）', 1784505610.25],
+    ['带小数 epoch 秒', 1784505610.25],
   ])('rechecks once at the lease deadline served as %s and never polls', async (_label, statusExpiresAt) => {
     vi.useFakeTimers()
     try {
@@ -746,8 +740,8 @@ describe('EnvironmentsPage', () => {
    * 数字 epoch 秒形态同样如此，否则毫秒/秒混淆会让旧截止点立即触发一次回读。
    */
   it.each([
-    ['ISO 字符串', '2026-07-20T00:00:10.000Z', '2026-07-20T00:01:10.000Z'],
-    ['数字 epoch 秒', 1784505610, 1784505670],
+    ['整数 epoch 秒', 1784505610, 1784505670],
+    ['带小数 epoch 秒', 1784505610.5, 1784505670.5],
   ])('cancels and rearms the deadline when a committed change renews the lease (%s)', async (_label, initial, renewed) => {
     vi.useFakeTimers()
     try {
@@ -801,7 +795,7 @@ describe('EnvironmentsPage', () => {
     try {
       vi.setSystemTime(new Date('2026-07-20T00:00:00.000Z'))
       vi.mocked(environmentService.listEnvironments).mockResolvedValue([
-        environment({ id: 'env-1', name: 'dying-box', statusExpiresAt: '2026-07-20T00:00:10.000Z' }),
+        environment({ id: 'env-1', name: 'dying-box', statusExpiresAt: 1784505610 }),
       ])
       renderPage()
       await flushUntil(() => screen.queryByText('dying-box') != null)
@@ -838,7 +832,7 @@ describe('EnvironmentsPage', () => {
     try {
       vi.setSystemTime(new Date('2026-07-20T00:00:00.000Z'))
       vi.mocked(environmentService.listEnvironments).mockResolvedValue([
-        environment({ id: 'env-1', name: 'local-dev', statusExpiresAt: '2026-07-20T00:00:10.000Z' }),
+        environment({ id: 'env-1', name: 'local-dev', statusExpiresAt: 1784505610 }),
       ])
       const { view } = renderPage()
       await flushUntil(() => screen.queryByText('local-dev') != null)

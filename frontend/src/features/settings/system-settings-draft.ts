@@ -1,16 +1,13 @@
-import type {
-  PermissionAction,
-  SystemSettingsSectionsDTO,
-  SystemSettingsUpdateDTO,
-} from '@/shared/api/contracts/system-settings'
+import type { SystemSettingsSectionsDTO } from '@/shared/api/contracts/system-settings'
 import { assembleHttpStatusCodeList, IntegerListValidationError } from '@/shared/lib/integer-list'
+import type { SystemSettingsUpdateDTO } from '@/shared/api/generated/contracts'
 
 /** 前端 draft 的共享数字/文本基元。 */
 export type DraftNumericField = string
 
 export interface PermissionRuleDraft {
   pattern: string
-  action: PermissionAction
+  action: string
 }
 
 /** 保序的 tool 权限分组：模型可见 tool name 或全局通配符 `*` + 该 key 下的有序规则数组。 */
@@ -28,7 +25,7 @@ export interface SystemSettingsToolDraft {
 
 export interface SystemSettingsAiRuntimeDraft {
   retryMaxRetries: DraftNumericField
-  retryBackoffStrategy: 'FIXED' | 'EXPONENTIAL'
+  retryBackoffStrategy: string
   retryBaseDelayMillis: DraftNumericField
   retryMaxDelayMillis: DraftNumericField
   compactionKeepRecentTokens: DraftNumericField
@@ -185,7 +182,7 @@ export function assembleSettingsUpdate(
 ): SystemSettingsUpdateDTO {
   const permissionEntries = new Map<
     string,
-    { pattern: string; action: PermissionAction }[]
+    PermissionRuleDraft[]
   >()
   for (const group of draft.tool.permission) {
     const tool = group.tool.trim()

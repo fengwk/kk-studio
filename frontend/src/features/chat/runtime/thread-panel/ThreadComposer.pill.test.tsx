@@ -49,7 +49,7 @@ function fakeStorage(overrides: {
             state: 'PENDING' as const,
             blobId: null,
             presignedPut: { method: 'PUT' as const, url: `https://s3.test/${id}`, headers: {} },
-            expiresAt: null,
+            expiresAt: 0,
           }
       reservations.set(result.id, request)
       return result
@@ -67,12 +67,12 @@ function fakeStorage(overrides: {
       state: 'READY',
       blobId: `blob-${uploadId}`,
       presignedPut: null,
-      expiresAt: null,
+      expiresAt: 0,
     }
   })
   const deleteUpload = vi.fn(async () => undefined)
-  const getBlobDownloadUrl = vi.fn(async () => ({ url: 'https://s3.test/orig', expiresAt: null }))
-  const getBlobPreviewUrl = vi.fn(async () => ({ url: 'https://s3.test/prev', expiresAt: null }))
+  const getBlobDownloadUrl = vi.fn(async () => ({ url: 'https://s3.test/orig', mediaType: null, sizeBytes: null }))
+  const getBlobPreviewUrl = vi.fn(async () => ({ url: 'https://s3.test/prev', mediaType: null, sizeBytes: null }))
   const uploadFile = vi.fn(async () => {
     if (uploadFailures > 0) {
       uploadFailures -= 1
@@ -467,7 +467,7 @@ describe('ThreadComposer attachment pills', () => {
         state: 'READY',
         blobId: 'blob-existing',
         presignedPut: null,
-        expiresAt: null,
+        expiresAt: 0,
       }),
     })
     render(<Harness service={service} />)

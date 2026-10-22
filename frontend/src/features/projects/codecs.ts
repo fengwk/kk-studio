@@ -1,11 +1,11 @@
 import { ApiError } from '@/shared/api/client'
+import type { IssuePauseReason } from './types'
 import type {
   IssueActivityDTO,
   IssueAgentThreadDTO,
-  IssueDTO,
   IssueDetailDTO,
+  IssueDTO,
   IssueEvidenceDTO,
-  IssuePauseReason,
   IssueRunDTO,
   IssueRunSummaryDTO,
   IssueStageBudgetDTO,
@@ -14,7 +14,7 @@ import type {
   ProjectSnapshotDTO,
   ProjectWorkflowDTO,
   ProjectWorkflowStateDTO,
-} from './types'
+} from '@/shared/api/generated/contracts'
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const DECIMAL_LONG_REGEX = /^(0|[1-9][0-9]*)$/
