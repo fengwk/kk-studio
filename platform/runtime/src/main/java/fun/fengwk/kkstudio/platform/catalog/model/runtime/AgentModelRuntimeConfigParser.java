@@ -405,8 +405,7 @@ public final class AgentModelRuntimeConfigParser {
     AgentModelPricingTimeConditionDTO time = condition.getTime();
     if (time != null) {
       String timePath = path + ".time";
-      LocalTime start = parseTime(time.getStart(), timePath + ".start");
-      LocalTime end = parseTime(time.getEnd(), timePath + ".end");
+      TimeBounds bounds = parseTimeBounds(time.getStart(), time.getEnd(), timePath);
       requireNonBlank(time.getTimezone(), timePath + ".timezone");
       ZoneId timezone;
       try {
@@ -419,7 +418,10 @@ public final class AgentModelRuntimeConfigParser {
         throw invalid(timePath + ".weekdays must not exceed 7 values");
       }
       ensureCondition(
-          () -> new ModelPricingCondition.TimeWindow(start, end, timezone, weekdays), timePath);
+          () ->
+              new ModelPricingCondition.TimeWindow(
+                  bounds.start(), bounds.end(), timezone, weekdays),
+          timePath);
     }
     validateConditionList(condition.getAll(), path + ".all", depth);
     validateConditionList(condition.getAny(), path + ".any", depth);
@@ -463,6 +465,30 @@ public final class AgentModelRuntimeConfigParser {
       throw invalid(path + " must be HH:mm");
     }
   }
+
+  /**
+   * Wire 时间窗左闭右开；全天必须显式写成 00:00-24:00，并在内部规范为 00:00-00:00。 不接受 start=24:00，也不接受 start=end（含
+   * 00:00-00:00）被误读为全天。
+   */
+  private static TimeBounds parseTimeBounds(String startValue, String endValue, String path) {
+    if ("24:00".equals(startValue)) {
+      throw invalid(path + ".start must be before 24:00");
+    }
+    LocalTime start = parseTime(startValue, path + ".start");
+    if ("24:00".equals(endValue)) {
+      if (!start.equals(LocalTime.MIDNIGHT)) {
+        throw invalid(path + ".end 24:00 requires start 00:00");
+      }
+      return new TimeBounds(start, LocalTime.MIDNIGHT);
+    }
+    LocalTime end = parseTime(endValue, path + ".end");
+    if (start.equals(end)) {
+      throw invalid(path + ".start and end must differ; use 00:00-24:00 for all day");
+    }
+    return new TimeBounds(start, end);
+  }
+
+  private record TimeBounds(LocalTime start, LocalTime end) {}
 
   private static long parseTtl(String value, String path) {
     try {
@@ -678,10 +704,12 @@ public final class AgentModelRuntimeConfigParser {
     ModelPricingCondition.TimeWindow time = null;
     AgentModelPricingTimeConditionDTO timeDto = condition.getTime();
     if (timeDto != null) {
+      TimeBounds bounds =
+          parseTimeBounds(timeDto.getStart(), timeDto.getEnd(), "config.pricing.condition.time");
       time =
           new ModelPricingCondition.TimeWindow(
-              parseTime(timeDto.getStart(), "config.pricing.condition.time.start"),
-              parseTime(timeDto.getEnd(), "config.pricing.condition.time.end"),
+              bounds.start(),
+              bounds.end(),
               ZoneId.of(timeDto.getTimezone()),
               timeDto.getWeekdays());
     }
@@ -697,7 +725,10 @@ public final class AgentModelRuntimeConfigParser {
 
   private static List<ModelPricingCondition> toConditions(
       List<AgentModelPricingConditionDTO> conditions) {
-    if (conditions == null || conditions.isEmpty()) {
+    if (conditions == null) {
+      return null;
+    }
+    if (conditions.isEmpty()) {
       return List.of();
     }
     List<ModelPricingCondition> result = new ArrayList<>(conditions.size());

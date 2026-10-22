@@ -26,6 +26,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -126,6 +127,69 @@ class AgentModelRuntimeConfigParserTest {
                         "\"overrides\":[{\"id\":\"lt-only\",\"when\":"
                             + "{\"date\":{\"lt\":\"2026-08-18\"}},"
                             + "\"rates\":{\"input\":\"1\"}}],\"multipliers\":[]")));
+  }
+
+  /** 显式空 any/serviceTier 的 presence 必须跨 decode/encode 保留，不能被折叠为缺省。 */
+  @Test
+  void preservesExplicitEmptyAnyAndServiceTier() {
+    String config =
+        validConfig()
+            .replace(
+                "\"overrides\":[],\"multipliers\":[]",
+                "\"overrides\":[{\"id\":\"empty\",\"when\":"
+                    + "{\"any\":[],\"serviceTier\":[]},\"rates\":{\"input\":\"1\"}}],"
+                    + "\"multipliers\":[]");
+
+    var when = parser.decode(config).getPricing().getOverrides().get(0).getWhen();
+    assertNotNull(when.getAny());
+    assertTrue(when.getAny().isEmpty());
+    assertNotNull(when.getServiceTier());
+    assertTrue(when.getServiceTier().isEmpty());
+
+    String encoded = parser.encode(parser.decode(config));
+    assertTrue(encoded.contains("\"any\":[]"), encoded);
+    assertTrue(encoded.contains("\"serviceTier\":[]"), encoded);
+
+    var parsed = parser.parse(encoded).pricing().overrides().get(0).when();
+    assertNotNull(parsed.any());
+    assertTrue(parsed.any().isEmpty());
+    assertNotNull(parsed.serviceTier());
+    assertTrue(parsed.serviceTier().isEmpty());
+  }
+
+  /** wire 全天只接受 00:00-24:00；内部规范为 00:00-00:00，编码保持 24:00。 */
+  @Test
+  void acceptsAllDayTimeAndKeepsCanonicalEnd24() {
+    String config = configWithTime("00:00", "24:00");
+
+    var time = parser.parse(config).pricing().overrides().get(0).when().time();
+    assertEquals(LocalTime.MIDNIGHT, time.start());
+    assertEquals(LocalTime.MIDNIGHT, time.end());
+    assertTrue(time.allDay());
+
+    String encoded = parser.encode(parser.decode(config));
+    assertTrue(encoded.contains("\"end\":\"24:00\""), encoded);
+  }
+
+  /** 拒绝 start=24:00，以及把相同起止（含 00:00-00:00）静默当成全天。 */
+  @Test
+  void rejectsInvalidAllDayTimeForms() {
+    assertInvalid(configWithTime("24:00", "24:00"), ".start must be before 24:00");
+    assertInvalid(configWithTime("00:00", "00:00"), ".start and end must differ");
+    assertInvalid(configWithTime("10:00", "10:00"), ".start and end must differ");
+    assertInvalid(configWithTime("10:00", "24:00"), ".end 24:00 requires start 00:00");
+  }
+
+  private String configWithTime(String start, String end) {
+    return validConfig()
+        .replace(
+            "\"overrides\":[],\"multipliers\":[]",
+            "\"overrides\":[{\"id\":\"time\",\"when\":{\"time\":{\"start\":\""
+                + start
+                + "\",\"end\":\""
+                + end
+                + "\",\"timezone\":\"UTC\",\"weekdays\":[1]}},"
+                + "\"rates\":{\"input\":\"2\"}}],\"multipliers\":[]");
   }
 
   /** off 是显式关闭语义，绝不与 null（协议默认）静默映射。 */
