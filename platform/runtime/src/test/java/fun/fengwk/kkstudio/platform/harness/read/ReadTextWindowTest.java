@@ -21,7 +21,7 @@ import java.util.regex.Pattern;
 
 /**
  * 受管文本读取适配器的契约测试：受管文本与本地 {@code fs.read} 必须同契约，而窗口状态机由共享核心 {@link
- * fun.fengwk.kkstudio.harness.common.text.TextReadWindow} 提供（其自身行为由 common 侧测试守护）。
+ * fun.fengwk.kkstudio.platform.harness.read.TextReadWindow} 提供（其自身行为由 common 侧测试守护）。
  *
  * <p>本类覆盖适配器职责：严格 UTF-8 解码、首个字符 BOM 剥离、参数校验、扫描超时/中断与 IO 失败的映射，以及受管入口的端到端窗口结果，包括空范围、 60000
  * 码点正文预算、截断元数据与“续读位置可无损重构全部源内容”。

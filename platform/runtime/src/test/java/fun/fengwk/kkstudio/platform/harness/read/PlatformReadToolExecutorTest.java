@@ -24,9 +24,9 @@ import org.mockito.ArgumentCaptor;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
-import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
-import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
-import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
+import fun.fengwk.kkstudio.common.resource.ResourceRef;
+import fun.fengwk.kkstudio.common.result.ResourceResultContent;
+import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.contributor.api.BoundEnvironment;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionContext;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;

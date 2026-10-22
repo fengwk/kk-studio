@@ -5,10 +5,10 @@ import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.canvas.CanvasJson;
-import fun.fengwk.kkstudio.canvas.CanvasJson.JsonObject;
-import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
-import fun.fengwk.kkstudio.harness.common.json.JsonValues;
+import fun.fengwk.kkstudio.canvas.function.CanvasJson;
+import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonObject;
+import fun.fengwk.kkstudio.canvas.function.CanvasResourceKind;
+import fun.fengwk.kkstudio.common.json.JsonValues;
 
 import java.io.IOException;
 import java.io.InputStream;

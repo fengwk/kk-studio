@@ -21,37 +21,30 @@
             <groupId>tools.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
         </dependency>
+        <!-- MCP client 与传输实现，只由 catalog.mcp.client 使用。 -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-mcp</artifactId>
+        </dependency>
+        <!--
+            Jackson 2 只用于 MCP SDK 边界：McpToolResultExtractor 的签名固定接收
+            com.fasterxml.jackson.databind.JsonNode，因此只有 McpResultExtractor 直接依赖它。
+        -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
             <artifactId>kk-studio-share</artifactId>
         </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
-            <artifactId>kk-studio-canvas-core</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>fun.fengwk.kk-studio</groupId>
-            <artifactId>kk-studio-canvas-plugin-api</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>fun.fengwk.kk-studio</groupId>
-            <artifactId>kk-studio-project</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>fun.fengwk.kk-studio</groupId>
-            <artifactId>kk-studio-harness-tool</artifactId>
+            <artifactId>kk-studio-harness-runtime</artifactId>
         </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
             <artifactId>kk-studio-harness-environment</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>fun.fengwk.kk-studio</groupId>
-            <artifactId>kk-studio-harness-environment-server</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>fun.fengwk.kk-studio</groupId>
-            <artifactId>kk-studio-harness-runtime</artifactId>
         </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
@@ -60,11 +53,6 @@
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
             <artifactId>kk-studio-schema</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>fun.fengwk.kk-studio</groupId>
-            <artifactId>kk-studio-canvas-infra</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -81,15 +69,7 @@
         </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
-            <artifactId>kk-studio-harness-common</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>fun.fengwk.kk-studio</groupId>
-            <artifactId>kk-studio-harness-contributor-api</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>fun.fengwk.kk-studio</groupId>
-            <artifactId>kk-studio-harness-builtin</artifactId>
+            <artifactId>kk-studio-common</artifactId>
         </dependency>
         <dependency>
             <groupId>org.eclipse.jgit</groupId>
@@ -98,10 +78,6 @@
         <dependency>
             <groupId>org.yaml</groupId>
             <artifactId>snakeyaml</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>fun.fengwk.kk-studio</groupId>
-            <artifactId>kk-studio-harness-mcp</artifactId>
         </dependency>
         <dependency>
             <groupId>fun.fengwk.convention4j</groupId>
@@ -167,6 +143,15 @@
             <plugin>
                 <artifactId>maven-jar-plugin</artifactId>
                 <version>3.4.2</version>
+                <executions>
+                    <!-- Spring/PostgreSQL 测试基座供上层应用模块（Canvas、Project）的集成测试复用。 -->
+                    <execution>
+                        <id>platform-test-support</id>
+                        <goals>
+                            <goal>test-jar</goal>
+                        </goals>
+                    </execution>
+                </executions>
                 <configuration>
                     <archive>
                         <manifestEntries>
@@ -189,6 +174,19 @@
                         <configuration>
                             <rules>
                                 <rule>
+                                    <element>PACKAGE</element>
+                                    <includes>
+                                        <include>fun.fengwk.kkstudio.platform.catalog.mcp.client</include>
+                                    </includes>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.90</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                                <rule>
                                     <element>CLASS</element>
                                     <includes>
                                         <include>fun.fengwk.kkstudio.platform.catalog.mcp.McpToolNameNormalizer</include>
@@ -205,6 +203,8 @@
                                     <element>CLASS</element>
                                     <includes>
                                         <include>fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentDaemonGateway</include>
+                                        <include>fun.fengwk.kkstudio.platform.harness.read.TextReadWindow</include>
+                                        <include>fun.fengwk.kkstudio.platform.settings.HttpProxySelector*</include>
                                         <include>fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver</include>
                                         <include>fun.fengwk.kkstudio.platform.harness.model.ProviderResourceMaterializer*</include>
                                         <include>fun.fengwk.kkstudio.platform.harness.model.ProviderInlineBlobReader*</include>
@@ -270,7 +270,6 @@
                                         <include>fun.fengwk.kkstudio.platform.plugin.service.PluginManagementService*</include>
                                         <include>fun.fengwk.kkstudio.platform.plugin.service.PluginContextFactory</include>
                                         <include>fun.fengwk.kkstudio.platform.plugin.service.PluginSecretPatch</include>
-                                        <include>fun.fengwk.kkstudio.platform.canvas.function.PluginCanvasFunctionCatalogSource*</include>
                                     </includes>
                                     <limits>
                                         <limit>

@@ -16,8 +16,8 @@ import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
 import org.eclipse.jgit.treewalk.TreeWalk;
 import org.springframework.context.annotation.DependsOn;
 
-import fun.fengwk.kkstudio.harness.common.skill.SkillNames;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillNames;
 
 import java.io.IOException;
 import java.net.URI;

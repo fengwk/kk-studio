@@ -3,13 +3,13 @@ package fun.fengwk.kkstudio.platform.plugin;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.harness.common.json.BoundedJsonWriter;
-import fun.fengwk.kkstudio.harness.common.schema.ArraySchema;
-import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
-import fun.fengwk.kkstudio.harness.common.schema.InputValidator;
-import fun.fengwk.kkstudio.harness.common.schema.ObjectSchema;
-import fun.fengwk.kkstudio.harness.common.schema.SchemaElement;
-import fun.fengwk.kkstudio.harness.common.schema.SchemaJsonCodec;
+import fun.fengwk.kkstudio.common.json.BoundedJsonWriter;
+import fun.fengwk.kkstudio.common.schema.ArraySchema;
+import fun.fengwk.kkstudio.common.schema.InputSchema;
+import fun.fengwk.kkstudio.common.schema.InputValidator;
+import fun.fengwk.kkstudio.common.schema.ObjectSchema;
+import fun.fengwk.kkstudio.common.schema.SchemaElement;
+import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
 
 import java.util.LinkedHashMap;
 import java.util.Map;

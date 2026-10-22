@@ -10,7 +10,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.node.JsonNodeFactory;
 
-import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;

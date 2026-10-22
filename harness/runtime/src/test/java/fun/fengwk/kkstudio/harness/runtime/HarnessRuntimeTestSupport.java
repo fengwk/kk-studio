@@ -4,11 +4,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
-import fun.fengwk.kkstudio.harness.common.schema.ArraySchema;
-import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
-import fun.fengwk.kkstudio.harness.common.schema.ObjectSchema;
-import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
+import fun.fengwk.kkstudio.common.result.TextResultContent;
+import fun.fengwk.kkstudio.common.schema.ArraySchema;
+import fun.fengwk.kkstudio.common.schema.InputSchema;
+import fun.fengwk.kkstudio.common.schema.ObjectSchema;
+import fun.fengwk.kkstudio.common.schema.StringSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;

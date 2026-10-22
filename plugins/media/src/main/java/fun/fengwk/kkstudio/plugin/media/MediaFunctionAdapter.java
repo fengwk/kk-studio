@@ -1,9 +1,5 @@
 package fun.fengwk.kkstudio.plugin.media;
 
-import fun.fengwk.kkstudio.canvas.CanvasJson;
-import fun.fengwk.kkstudio.canvas.CanvasJson.JsonNumber;
-import fun.fengwk.kkstudio.canvas.CanvasJson.JsonObject;
-import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionExecutionContext;
@@ -11,6 +7,10 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenReference;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionResourceStream;
+import fun.fengwk.kkstudio.canvas.function.CanvasJson;
+import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonNumber;
+import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonObject;
+import fun.fengwk.kkstudio.canvas.function.CanvasResourceKind;
 
 import javax.imageio.ImageIO;
 

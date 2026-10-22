@@ -10,8 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
-import fun.fengwk.kkstudio.harness.common.tool.ToolErrorGuidance;
+import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
@@ -33,6 +32,7 @@ import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.ToolErrorGuidance;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;

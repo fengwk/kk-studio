@@ -4,12 +4,12 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import fun.fengwk.kkstudio.common.resource.ResourceRef;
+import fun.fengwk.kkstudio.common.result.TextResultContent;
+import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.builtin.BuiltinHarnessContributor;
 import fun.fengwk.kkstudio.harness.builtin.environment.ReadTool;
 import fun.fengwk.kkstudio.harness.builtin.environment.ReadToolExecutor;
-import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
-import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
-import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;

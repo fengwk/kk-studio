@@ -23,29 +23,13 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
- * 守护 platform 与 framework-free Harness runtime API 的组合/应用边界：platform 提供应用能力与 Port 适配，不依赖 infra/web
- * 下游模块；web 是唯一组合根，platform 不能成为 Spring Boot 启动入口。
+ * 守护 platform 的组合边界：web 是唯一组合根，platform 不能成为 Spring Boot 启动入口，也不加载 trusted JAR；模块依赖方向由仓库检查 {@code
+ * scripts/dev/verify/repository/check.mjs} 统一校验。
  */
 class PlatformArchitectureTest {
-
-  /** platform main 源码禁止直接 import 的下游模块包前缀。 */
-  private static final List<String> FORBIDDEN_IMPORT_PREFIXES =
-      List.of(
-          "fun.fengwk.kkstudio.harness.infra.",
-          "fun.fengwk.kkstudio.canvas.infra.",
-          "fun.fengwk.kkstudio.web.");
-
-  /** platform/pom.xml 完全禁止声明的组合根模块：platform 永远不是启动入口。 */
-  private static final List<String> FORBIDDEN_POM_ARTIFACTS = List.of("kk-studio-web");
-
-  /** 只允许 test scope 声明的下游基础设施模块：主产物不得依赖它们，测试可用真实实现做集成覆盖。 */
-  private static final List<String> TEST_SCOPED_POM_ARTIFACTS =
-      List.of("kk-studio-harness-infra", "kk-studio-canvas-infra");
 
   /** trusted JAR 发现和 classloader 生命周期只属于 web 组合根。 */
   private static final List<String> FORBIDDEN_TRUSTED_CONTRIBUTOR_REFERENCES =
@@ -56,15 +40,11 @@ class PlatformArchitectureTest {
           "kk-studio.harness.contributors.directory",
           "KK_STUDIO_TRUSTED_CONTRIBUTOR_DIRECTORY");
 
-  /**
-   * platform 不是组合根：main 源码禁止 import framework 基础设施与 web；pom 不得声明 web，infra 实现只能在 test scope
-   * 声明（主产物不依赖 infra，集成测试可用真实实现）。
-   */
+  /** platform 不是组合根：不得成为 Spring Boot 启动入口，trusted JAR 发现与 classloader 生命周期只属于 web。 */
   @Test
-  void platformNeverDependsOnInfraOrWeb() throws IOException {
+  void platformIsNeitherBootMainNorContributorLoader() throws IOException {
     Path main = locatePlatformMainJava();
     List<String> violations = new ArrayList<>();
-    List<String> bootMainViolations = new ArrayList<>();
     try (Stream<Path> paths = Files.walk(main)) {
       List<Path> javaFiles = paths.filter(c -> c.toString().endsWith(".java")).toList();
       for (Path path : javaFiles) {
@@ -72,22 +52,7 @@ class PlatformArchitectureTest {
           String trimmed = line.trim();
           if (trimmed.startsWith("@SpringBootApplication")
               || trimmed.startsWith("SpringApplication.run(")) {
-            bootMainViolations.add(relative(main, path) + ": " + trimmed);
-          }
-          if (!trimmed.startsWith("import ")) {
-            for (String forbidden : FORBIDDEN_TRUSTED_CONTRIBUTOR_REFERENCES) {
-              if (line.contains(forbidden)) {
-                violations.add(
-                    relative(main, path) + ": forbidden trusted contributor reference " + line);
-              }
-            }
-            continue;
-          }
-          String imported = normalizeImport(trimmed);
-          for (String prefix : FORBIDDEN_IMPORT_PREFIXES) {
-            if (imported.startsWith(prefix)) {
-              violations.add(relative(main, path) + ": " + trimmed);
-            }
+            violations.add(relative(main, path) + ": boot main " + trimmed);
           }
           for (String forbidden : FORBIDDEN_TRUSTED_CONTRIBUTOR_REFERENCES) {
             if (line.contains(forbidden)) {
@@ -98,32 +63,9 @@ class PlatformArchitectureTest {
         }
       }
     }
-
-    Path pom = locatePlatformPom(main);
-    String pomText = Files.readString(pom, StandardCharsets.UTF_8);
-    for (String artifactId : FORBIDDEN_POM_ARTIFACTS) {
-      assertFalse(
-          pomText.contains("<artifactId>" + artifactId + "</artifactId>"),
-          "platform/pom.xml must not declare " + artifactId);
-    }
-    assertTrue(
-        pomText.contains("<artifactId>kk-studio-harness-common</artifactId>"),
-        "platform/pom.xml must declare kk-studio-harness-common");
-    assertTrue(
-        pomText.contains("<artifactId>kk-studio-harness-provider</artifactId>"),
-        "platform/pom.xml must declare kk-studio-harness-provider");
-    for (String artifactId : TEST_SCOPED_POM_ARTIFACTS) {
-      assertDeclaredOnlyInTestScope(pomText, artifactId);
-    }
-
     assertTrue(
         violations.isEmpty(),
         () -> "Platform boundary violations:\n" + String.join("\n", violations));
-    assertTrue(
-        bootMainViolations.isEmpty(),
-        () ->
-            "Platform must not become a Spring Boot main:\n"
-                + String.join("\n", bootMainViolations));
   }
 
   /**
@@ -148,23 +90,6 @@ class PlatformArchitectureTest {
   }
 
   /** 下游基础设施实现只能以 test scope 被声明：主产物不依赖 infra，测试可用真实 PostgreSQL 实现做集成覆盖（如 Session 深删除的外键契约）。 */
-  private static void assertDeclaredOnlyInTestScope(String pomText, String artifactId) {
-    Matcher matcher =
-        Pattern.compile("<dependency>(.*?)</dependency>", Pattern.DOTALL).matcher(pomText);
-    int declarations = 0;
-    while (matcher.find()) {
-      String dependency = matcher.group(1);
-      if (!dependency.contains("<artifactId>" + artifactId + "</artifactId>")) {
-        continue;
-      }
-      declarations++;
-      assertTrue(
-          dependency.contains("<scope>test</scope>"),
-          "platform may depend on " + artifactId + " only in test scope");
-    }
-    assertEquals(1, declarations, "platform must declare exactly one " + artifactId);
-  }
-
   private static String normalizeImport(String importLine) {
     String imported = importLine.substring("import ".length()).replace(";", "").trim();
     if (imported.startsWith("static ")) {
@@ -194,29 +119,14 @@ class PlatformArchitectureTest {
     throw new IllegalStateException("cannot locate platform main sources from " + cwd);
   }
 
-  private static Path locatePlatformPom(Path mainJava) {
-    Path moduleRoot = mainJava.getParent().getParent().getParent();
-    Path pom = moduleRoot.resolve("pom.xml");
-    if (Files.isRegularFile(pom)) {
-      return pom;
-    }
-    Path cwd = Path.of("").toAbsolutePath().normalize();
-    Path reactorPom = cwd.resolve("platform/runtime/pom.xml");
-    if (Files.isRegularFile(reactorPom)) {
-      return reactorPom;
-    }
-    throw new IllegalStateException(
-        "cannot locate platform/runtime/pom.xml from " + mainJava + " or " + cwd);
-  }
-
   private static final Set<String> REQUIRED_LANGCHAIN_DECLARATIONS =
       Set.of(
           "pom.xml|dependencyManagement|dev.langchain4j|langchain4j-bom",
-          "harness/mcp/pom.xml|dependencies|dev.langchain4j|langchain4j-mcp");
+          "platform/runtime/pom.xml|dependencies|dev.langchain4j|langchain4j-mcp");
 
   /**
-   * 全仓 POM 架构守卫：LangChain4j 依赖仅允许由 harness/mcp 适配器直接声明 langchain4j-mcp，并由根 POM 管理版本；任何其他
-   * artifact、模块或上下文声明都会被拦截。
+   * 全仓 POM 架构守卫：LangChain4j 依赖仅允许由 platform-runtime（MCP client）直接声明 langchain4j-mcp，并由根 POM
+   * 管理版本；任何其他 artifact、模块或上下文声明都会被拦截。
    */
   @Test
   void reactorDeclaresNoDisallowedLangChainDependencies() {
@@ -282,19 +192,19 @@ class PlatformArchitectureTest {
     List<DeclaredDependency> duplicated =
         List.of(
             new DeclaredDependency(
-                "harness/mcp/pom.xml",
+                "platform/runtime/pom.xml",
                 "dependencies",
                 "dev.langchain4j",
                 "langchain4j-mcp",
                 "1.19.0"),
             new DeclaredDependency(
-                "harness/mcp/pom.xml",
+                "platform/runtime/pom.xml",
                 "dependencies",
                 "dev.langchain4j",
                 "langchain4j-mcp",
                 "1.19.0"),
             new DeclaredDependency(
-                "harness/mcp/pom.xml",
+                "platform/runtime/pom.xml",
                 "dependencies",
                 "dev.langchain4j",
                 "langchain4j-mcp",
@@ -329,9 +239,9 @@ class PlatformArchitectureTest {
                 "dev.langchain4j",
                 "langchain4j-open-ai",
                 "1.19.0"),
-            // 在非 harness/mcp 模块中引入 MCP
+            // 在 MCP client 之外的模块中引入 MCP
             new DeclaredDependency(
-                "harness/tool/pom.xml",
+                "harness/runtime/pom.xml",
                 "dependencies",
                 "dev.langchain4j",
                 "langchain4j-mcp",
@@ -355,7 +265,7 @@ class PlatformArchitectureTest {
     assertEquals(4, violations.size());
     assertTrue(violations.get(0).contains("platform/pom.xml"));
     assertTrue(violations.get(0).contains("langchain4j-open-ai"));
-    assertTrue(violations.get(1).contains("harness/tool/pom.xml"));
+    assertTrue(violations.get(1).contains("harness/runtime/pom.xml"));
     assertTrue(violations.get(1).contains("langchain4j-mcp"));
     assertTrue(violations.get(2).contains("share/pom.xml"));
     assertTrue(violations.get(2).contains("io.github.langchain4j"));
@@ -489,14 +399,17 @@ class PlatformArchitectureTest {
     assertTrue(violations.stream().anyMatch(v -> v.contains("profile[test-profile]/dependencies")));
   }
 
-  /** 生产代码源码 import 守卫：全仓所有模块的 main 源码中，{@code dev.langchain4j.*} 只允许出现在 harness/mcp 的协议适配器包中。 */
+  /**
+   * 生产代码源码 import 守卫：全仓所有模块的 main 源码中，{@code dev.langchain4j.*} 只允许出现在 platform 的 MCP client 包中。
+   */
   @Test
-  void productionSourcesImportLangChainOnlyInHarnessMcp() throws IOException {
+  void productionSourcesImportLangChainOnlyInMcpClient() throws IOException {
     Path root = locateReactorRoot();
     List<Path> poms = enumerateReactorPoms(root);
     List<String> violations = new ArrayList<>();
 
-    String allowedPrefix = "harness/mcp/src/main/java/fun/fengwk/kkstudio/harness/mcp/";
+    String allowedPrefix =
+        "platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/mcp/client/";
 
     for (Path pom : poms) {
       Path moduleDir = pom.getParent();
@@ -529,7 +442,7 @@ class PlatformArchitectureTest {
     assertTrue(
         violations.isEmpty(),
         () ->
-            "LangChain4j imports found outside allowed harness/mcp boundary ("
+            "LangChain4j imports found outside the MCP client boundary ("
                 + allowedPrefix
                 + "):\n"
                 + String.join("\n", violations));
@@ -556,7 +469,7 @@ class PlatformArchitectureTest {
         violations.add(
             String.format(
                 "disallowed LangChain4j dependency in %s (%s): %s:%s (LangChain4j is restricted to"
-                    + " harness/mcp adapter 'dev.langchain4j:langchain4j-mcp' and root"
+                    + " platform MCP client 'dev.langchain4j:langchain4j-mcp' and root"
                     + " 'dev.langchain4j:langchain4j-bom' version management)",
                 dep.modulePath(), dep.context(), dep.groupId(), dep.artifactId()));
       }
@@ -579,7 +492,7 @@ class PlatformArchitectureTest {
         && "langchain4j-bom".equals(dep.artifactId())) {
       return true;
     }
-    if ("harness/mcp/pom.xml".equals(dep.modulePath())
+    if ("platform/runtime/pom.xml".equals(dep.modulePath())
         && "dependencies".equals(dep.context())
         && "dev.langchain4j".equals(dep.groupId())
         && "langchain4j-mcp".equals(dep.artifactId())) {

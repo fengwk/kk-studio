@@ -9,8 +9,8 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.harness.common.json.BoundedJsonWriter;
-import fun.fengwk.kkstudio.harness.common.json.JsonValues;
+import fun.fengwk.kkstudio.common.json.BoundedJsonWriter;
+import fun.fengwk.kkstudio.common.json.JsonValues;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;

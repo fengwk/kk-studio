@@ -115,8 +115,21 @@ Thread 控制面按认证、资源权限与请求格式收紧，不再按 Thread
 （历史模型输出，按该输出记录时间重建）。它们只读检查 READY 附件、复用正式规划/物化/编码器，
 不消费上传、不推进游标、不调用 transport；历史入口接受普通 assistant 输出，并对父 COMPACTION 结果通过冻结 child join 的 finalAnswer 前缀重建压缩子最后一次调用，结果不等于原始发送字节。
 `kind` 为 `DRAFT_REQUEST_PREVIEW` 或 `HISTORICAL_REQUEST_PREVIEW`，`bodyJson` 只代表点击时快照、
-不等于原始发送字节。`PREVIEW_*` reason 区分 stale cursor、queued、busy、compaction、attachment、
-planning、provider、unsupported（冻结压缩子执行无法可靠定位，或 adapter 无预览能力）与 encoding 拒绝；客户端按 reason 恢复。
+不等于原始发送字节。当前事实不允许精确预览时返回 409，客户端只按稳定的 `errors.reason` 恢复，不解析描述文本：
+
+| `errors.reason` | 拒绝事实 |
+| --- | --- |
+| `PREVIEW_STALE_CURSOR` | head 或命令序号与当前快照不一致；重新读取快照后用新游标请求 |
+| `PREVIEW_QUEUED_COMMANDS` | 尚有排队命令 |
+| `PREVIEW_THREAD_BUSY` | 当前上下文不是空闲输入边界 |
+| `PREVIEW_COMPACTION_REQUIRED` | 下一步必定为自动压缩 |
+| `PREVIEW_ATTACHMENT_NOT_READY` | 附件上传未就绪或不可用 |
+| `PREVIEW_PLANNING_FAILED` | 草稿无法规划 |
+| `PREVIEW_PROVIDER_UNAVAILABLE` | 当前 Provider 无法解析，包括连接 generation 漂移 |
+| `PREVIEW_UNSUPPORTED` | 冻结压缩子执行无法可靠定位，或 adapter 无请求体预览能力 |
+| `PREVIEW_ENCODING_FAILED` | 请求体编码失败 |
+
+规划详情、连接凭据与异常原因链不进入错误响应；请求形状或归属错误仍为 400，缺失 Thread 为 404。
 
 Canvas commands 返回 patch，Function start 返回 202。
 UNKNOWN resolve 要求 resolution 与非空 verification；Issue UNKNOWN 同样要求人工核查说明。
@@ -203,8 +216,7 @@ Oversize realtime 事件不在通知里携带正文：owner 把完整 canonical 
 委托 DaemonEndpoint 管理会话。DaemonOutboundSender 每连接一个发送线程，
 非阻塞递交返回 ACCEPTED/BUSY/CLOSED，限制 frame、bytes 和 send timeout。
 必须协商 permessage-deflate，缺失以 1010 关闭。
-协议与会话裁决分别见 [Harness Environment](harness-environment.md)、
-[Harness Environment Server](harness-environment-server.md)。
+协议与会话裁决见 [Harness Environment](harness-environment.md)。
 
 ## 启动与静态分发
 
@@ -229,4 +241,4 @@ HTTP mapper/advice、owner 事务、Snapshot、ack-before-event、bounded sender
 执行命令和 E2E 分类见 [开发与测试](../operations/development-and-testing.md)。
 
 上级：[系统设计](../system-design.md)。相关文档：[Platform](platform.md)、[Share](share.md)、
-[Harness Infra](harness-infra.md)、[Canvas Infra](canvas-infra.md)、[Frontend](frontend.md)。
+[Harness Infra](harness-infra.md)、[Canvas](canvas.md)、[IDE](ide.md)、[Frontend](frontend.md)。

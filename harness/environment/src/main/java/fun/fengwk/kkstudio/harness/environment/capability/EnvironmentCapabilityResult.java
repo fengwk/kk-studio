@@ -1,11 +1,11 @@
 package fun.fengwk.kkstudio.harness.environment.capability;
 
-import fun.fengwk.kkstudio.harness.common.json.JsonValues;
-import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
-import fun.fengwk.kkstudio.harness.common.result.BinaryResultContent;
-import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
-import fun.fengwk.kkstudio.harness.common.result.ResultContent;
-import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
+import fun.fengwk.kkstudio.common.json.JsonValues;
+import fun.fengwk.kkstudio.common.resource.ResourceRef;
+import fun.fengwk.kkstudio.common.result.BinaryResultContent;
+import fun.fengwk.kkstudio.common.result.JsonResultContent;
+import fun.fengwk.kkstudio.common.result.ResultContent;
+import fun.fengwk.kkstudio.common.result.TextResultContent;
 
 import java.util.List;
 import java.util.Objects;

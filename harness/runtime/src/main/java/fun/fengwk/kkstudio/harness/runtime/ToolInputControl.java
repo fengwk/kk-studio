@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
-import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
+import fun.fengwk.kkstudio.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException.Reason;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;

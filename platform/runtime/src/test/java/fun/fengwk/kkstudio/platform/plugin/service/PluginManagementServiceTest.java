@@ -18,11 +18,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
-import fun.fengwk.kkstudio.canvas.CanvasJson;
-import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
+import fun.fengwk.kkstudio.canvas.function.CanvasJson;
+import fun.fengwk.kkstudio.canvas.function.CanvasResourceKind;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;

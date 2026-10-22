@@ -4,8 +4,8 @@ import lombok.extern.slf4j.Slf4j;
 import tools.jackson.databind.JsonNode;
 
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
-import fun.fengwk.kkstudio.harness.common.json.JsonValues;
-import fun.fengwk.kkstudio.harness.common.schema.SchemaJsonCodec;
+import fun.fengwk.kkstudio.common.json.JsonValues;
+import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;

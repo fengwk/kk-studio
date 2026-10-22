@@ -22,14 +22,14 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonIdeStreamCodec;
-import fun.fengwk.kkstudio.harness.environment.daemon.IdeAction;
-import fun.fengwk.kkstudio.harness.environment.daemon.IdeCommand;
-import fun.fengwk.kkstudio.harness.environment.daemon.IdeReply;
-import fun.fengwk.kkstudio.harness.environment.daemon.IdeStreamCreditWindow;
-import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServer;
-import fun.fengwk.kkstudio.harness.environment.server.IdeRequest;
-import fun.fengwk.kkstudio.harness.environment.server.IdeSessionIdentity;
+import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
+import fun.fengwk.kkstudio.ide.IdeCommandTransport;
+import fun.fengwk.kkstudio.ide.IdeRequest;
+import fun.fengwk.kkstudio.ide.protocol.DaemonIdeStreamCodec;
+import fun.fengwk.kkstudio.ide.protocol.IdeAction;
+import fun.fengwk.kkstudio.ide.protocol.IdeCommand;
+import fun.fengwk.kkstudio.ide.protocol.IdeReply;
+import fun.fengwk.kkstudio.ide.protocol.IdeStreamCreditWindow;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 import java.net.InetAddress;
@@ -58,7 +58,7 @@ class IdeReverseStreamEndpointIntegrationTest extends WebPostgresTestSupport {
 
   @LocalServerPort private int port;
 
-  @MockitoBean private EnvironmentDaemonServer endpoint;
+  @MockitoBean private IdeCommandTransport endpoint;
 
   @Autowired private IdeBrowserSessionRegistry sessions;
 
@@ -67,9 +67,9 @@ class IdeReverseStreamEndpointIntegrationTest extends WebPostgresTestSupport {
   /** 20 MiB 响应体经真实反向 WS 传输；credit 窗口只有 256 KiB，因此 ACK 往返必须真实生效。 */
   @Test
   void streamsTwentyMiBBodyThroughRealReverseWebSocket() throws Exception {
-    IdeSessionIdentity identity =
-        new IdeSessionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
-    when(endpoint.ideSessionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
+    DaemonConnectionIdentity identity =
+        new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
+    when(endpoint.connectionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
     FakeDaemon daemon = new FakeDaemon();
     when(endpoint.requestIde(eq(ENVIRONMENT), any()))
         .thenAnswer(
@@ -306,7 +306,8 @@ class IdeReverseStreamEndpointIntegrationTest extends WebPostgresTestSupport {
   }
 
   /** bootstrap 消费的真实前置：先由真实 OPEN_VIEW 授权视图，再消费一次性票据换 cookie。 */
-  private String openSession(IdeSessionIdentity identity, String viewId, String workspacePath) {
+  private String openSession(
+      DaemonConnectionIdentity identity, String viewId, String workspacePath) {
     sessions.viewOpened(identity, viewId, workspacePath);
     return sessions.open(identity, viewId, workspacePath);
   }

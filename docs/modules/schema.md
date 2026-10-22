@@ -30,7 +30,7 @@ V1 写入单行 SystemSettings 默认聚合；Java 解码与 profile 默认契�
 | MCP | mcp_server、mcp_tool：配置与原子发现快照 | [Platform MCP](platform.md#mcp-server-与运行时工具目录) |
 | Environment | environment、environment_connection：注册与环境路由租约、保存的安装设置（`install_config`）、宿主/Skill 投影；cluster_node：App 节点内部 IDE 路由 origin 与心跳租约 | [Environment](harness-environment.md) |
 | Chat | chat、chat_session：owner 关系 | [Platform](platform.md#命令接受产品归属与派发) |
-| Canvas | canvas_document/group/node/resource、function_run、command_dedup、function_resource_pin | [Canvas Core](canvas-core.md)、[Canvas Infra](canvas-infra.md) |
+| Canvas | canvas_document/group/node/resource、function_run、command_dedup、function_resource_pin | [Canvas](canvas.md) |
 | Project | project、project_issue 与 agent_thread/stage_budget/run/activity/evidence | [Project](project.md) |
 | Harness | harness_session/entry/thread/thread_command/model_invocation/tool_invocation/thread_join/thread_stop_receipt | [Harness Runtime](harness-runtime.md)、[Harness Infra](harness-infra.md) |
 | Durable Work | durable_work：全部后台调度（THREAD/MODEL/TOOL/ISSUE/CANVAS_RUN）共用的 mailbox | [Durable Work](work.md) |
@@ -100,4 +100,4 @@ UUID、行版本、连接和执行状态不随配置文件恢复，完整运行�
 验证依赖 scope 与 profile 入口。命令和数据库测试基座见 [开发与测试](../operations/development-and-testing.md)。
 
 上级：[系统设计](../system-design.md)。相关文档：[Platform](platform.md)、[Web](web.md)、
-[Canvas Infra](canvas-infra.md)、[Harness Infra](harness-infra.md)、[Project](project.md)。
+[Canvas](canvas.md)、[Harness Infra](harness-infra.md)、[Project](project.md)。

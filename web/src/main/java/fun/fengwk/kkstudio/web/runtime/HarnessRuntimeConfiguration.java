@@ -44,9 +44,12 @@ import fun.fengwk.kkstudio.harness.runtime.retry.ModelHttpErrorPolicyProvider;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
+import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
+import fun.fengwk.kkstudio.platform.catalog.tool.PluginRuntimeToolCatalogSource;
+import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodePresence;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
@@ -64,6 +67,7 @@ import fun.fengwk.kkstudio.platform.harness.realtime.HarnessStreamCatchupService
 import fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver;
 import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugService;
 import fun.fengwk.kkstudio.platform.plugin.PluginProperties;
+import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRuntime;
 import fun.fengwk.kkstudio.platform.plugin.resource.PluginResourceGateway;
 import fun.fengwk.kkstudio.platform.plugin.resource.StoragePluginResourceGateway;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
@@ -139,6 +143,13 @@ public class HarnessRuntimeConfiguration {
       PluginProperties properties) {
     return new StoragePluginResourceGateway(
         harnessStore, sessionBlobRefManager, storageBlobManager, storageUploadService, properties);
+  }
+
+  /** Harness 工具目录：插件快照的 Contributor 工具加 MCP 动态工具，每次租用冻结为一份不可变目录。 */
+  @Bean
+  public RuntimeToolCatalogSource runtimeToolCatalogSource(
+      PluginCatalogRuntime pluginCatalogRuntime, McpToolCatalog mcpToolCatalog) {
+    return new PluginRuntimeToolCatalogSource(pluginCatalogRuntime, mcpToolCatalog);
   }
 
   @Bean

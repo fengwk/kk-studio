@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.plugin.comfyui;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.harness.common.json.JsonValues;
+import fun.fengwk.kkstudio.common.json.JsonValues;
 
 import java.util.List;
 import java.util.Objects;

@@ -13,9 +13,9 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
-import fun.fengwk.kkstudio.harness.common.json.JsonValues;
-import fun.fengwk.kkstudio.harness.common.schema.ArraySchema;
-import fun.fengwk.kkstudio.harness.common.schema.ObjectSchema;
+import fun.fengwk.kkstudio.common.json.JsonValues;
+import fun.fengwk.kkstudio.common.schema.ArraySchema;
+import fun.fengwk.kkstudio.common.schema.ObjectSchema;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfigSchema;

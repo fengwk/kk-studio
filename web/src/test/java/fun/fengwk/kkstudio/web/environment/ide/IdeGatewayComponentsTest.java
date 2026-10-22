@@ -18,7 +18,7 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.environment.server.IdeSessionIdentity;
+import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
 
 import java.security.SecureRandom;
 import java.time.Clock;
@@ -50,7 +50,8 @@ class IdeGatewayComponentsTest {
     MutableClock clock = new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
     IdeBrowserSessionRegistry sessions =
         new IdeBrowserSessionRegistry(new SecureRandom(), clock, Duration.ofMinutes(5));
-    IdeSessionIdentity identity = new IdeSessionIdentity(ENV, "instance", UUID.randomUUID());
+    DaemonConnectionIdentity identity =
+        new DaemonConnectionIdentity(ENV, "instance", UUID.randomUUID());
     String view = UUID.randomUUID().toString();
 
     // 未知 cookie 必须是「未命中」而不是 NPE。
@@ -81,7 +82,8 @@ class IdeGatewayComponentsTest {
     MutableClock clock = new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
     IdeBrowserSessionRegistry sessions =
         new IdeBrowserSessionRegistry(new SecureRandom(), clock, Duration.ofMinutes(30));
-    IdeSessionIdentity identity = new IdeSessionIdentity(ENV, "instance", UUID.randomUUID());
+    DaemonConnectionIdentity identity =
+        new DaemonConnectionIdentity(ENV, "instance", UUID.randomUUID());
 
     String firstView = UUID.randomUUID().toString();
     String secondView = UUID.randomUUID().toString();
@@ -96,7 +98,8 @@ class IdeGatewayComponentsTest {
     assertTrue(sessions.lookup(first).orElseThrow().authorizesWorkspace("/managed/one"));
 
     // 别的代际不可见。
-    IdeSessionIdentity otherGeneration = new IdeSessionIdentity(ENV, "instance", UUID.randomUUID());
+    DaemonConnectionIdentity otherGeneration =
+        new DaemonConnectionIdentity(ENV, "instance", UUID.randomUUID());
     String otherView = UUID.randomUUID().toString();
     sessions.viewOpened(otherGeneration, otherView, "/managed/three");
     String otherCookie = sessions.open(otherGeneration, otherView, "/managed/three");
@@ -119,7 +122,8 @@ class IdeGatewayComponentsTest {
     MutableClock clock = new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
     IdeBrowserSessionRegistry sessions =
         new IdeBrowserSessionRegistry(new SecureRandom(), clock, Duration.ofMinutes(30));
-    IdeSessionIdentity identity = new IdeSessionIdentity(ENV, "instance", UUID.randomUUID());
+    DaemonConnectionIdentity identity =
+        new DaemonConnectionIdentity(ENV, "instance", UUID.randomUUID());
     String view = UUID.randomUUID().toString();
 
     // 未经 OPEN_VIEW 的票据不得建立任何会话。
@@ -142,7 +146,8 @@ class IdeGatewayComponentsTest {
     MutableClock clock = new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
     IdeBrowserSessionRegistry sessions =
         new IdeBrowserSessionRegistry(new SecureRandom(), clock, Duration.ofMinutes(30));
-    IdeSessionIdentity identity = new IdeSessionIdentity(ENV, "instance", UUID.randomUUID());
+    DaemonConnectionIdentity identity =
+        new DaemonConnectionIdentity(ENV, "instance", UUID.randomUUID());
     int views = 32;
     ExecutorService pool = Executors.newFixedThreadPool(8);
     try {
@@ -175,7 +180,8 @@ class IdeGatewayComponentsTest {
     MutableClock clock = new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
     IdeBrowserSessionRegistry sessions =
         new IdeBrowserSessionRegistry(new SecureRandom(), clock, Duration.ofMinutes(30));
-    IdeSessionIdentity identity = new IdeSessionIdentity(ENV, "instance", UUID.randomUUID());
+    DaemonConnectionIdentity identity =
+        new DaemonConnectionIdentity(ENV, "instance", UUID.randomUUID());
     for (int index = 0; index < IdeBrowserSessionRegistry.MAX_VIEWS_PER_GENERATION; index++) {
       sessions.viewOpened(identity, UUID.randomUUID().toString(), "/managed/" + index);
     }

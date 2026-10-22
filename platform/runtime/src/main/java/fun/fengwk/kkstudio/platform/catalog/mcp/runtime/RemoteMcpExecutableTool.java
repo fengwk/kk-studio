@@ -2,19 +2,11 @@ package fun.fengwk.kkstudio.platform.catalog.mcp.runtime;
 
 import lombok.extern.slf4j.Slf4j;
 
-import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
+import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
-import fun.fengwk.kkstudio.harness.mcp.McpCancellationToken;
-import fun.fengwk.kkstudio.harness.mcp.McpCancelledException;
-import fun.fengwk.kkstudio.harness.mcp.McpClient;
-import fun.fengwk.kkstudio.harness.mcp.McpClientFactory;
-import fun.fengwk.kkstudio.harness.mcp.McpDeadline;
-import fun.fengwk.kkstudio.harness.mcp.McpTimeoutException;
-import fun.fengwk.kkstudio.harness.mcp.McpToolCallResult;
-import fun.fengwk.kkstudio.harness.mcp.RemoteMcpConfig;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpConfigParser;
@@ -22,6 +14,14 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.McpDiscoveryStatus;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
+import fun.fengwk.kkstudio.platform.catalog.mcp.client.McpCancellationToken;
+import fun.fengwk.kkstudio.platform.catalog.mcp.client.McpCancelledException;
+import fun.fengwk.kkstudio.platform.catalog.mcp.client.McpClient;
+import fun.fengwk.kkstudio.platform.catalog.mcp.client.McpClientFactory;
+import fun.fengwk.kkstudio.platform.catalog.mcp.client.McpDeadline;
+import fun.fengwk.kkstudio.platform.catalog.mcp.client.McpTimeoutException;
+import fun.fengwk.kkstudio.platform.catalog.mcp.client.McpToolCallResult;
+import fun.fengwk.kkstudio.platform.catalog.mcp.client.RemoteMcpConfig;
 
 import java.util.List;
 import java.util.Map;

@@ -4,8 +4,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.environment.server.IdeSessionIdentity;
-import fun.fengwk.kkstudio.platform.environment.ide.IdeViewAuthorizationListener;
+import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
+import fun.fengwk.kkstudio.ide.IdeViewAuthorizationListener;
 
 import java.security.SecureRandom;
 import java.time.Clock;
@@ -50,7 +50,7 @@ import java.util.UUID;
 public final class IdeBrowserSessionRegistry implements IdeViewAuthorizationListener {
 
   /** 一个浏览器 IDE 会话：绑定代际，并给出该代际当前的受管 workspace 授权视图。 */
-  public record Session(IdeSessionIdentity identity, Set<String> authorizedWorkspaces) {
+  public record Session(DaemonConnectionIdentity identity, Set<String> authorizedWorkspaces) {
 
     public Session {
       identity = Objects.requireNonNull(identity, "identity");
@@ -111,7 +111,7 @@ public final class IdeBrowserSessionRegistry implements IdeViewAuthorizationList
    * @return 该代际的 cookie 值
    * @throws IllegalStateException 该代际/视图未被真实视图事件授权，或 ticket 的 workspace 与授权不一致
    */
-  public String open(IdeSessionIdentity identity, String viewId, String workspacePath) {
+  public String open(DaemonConnectionIdentity identity, String viewId, String workspacePath) {
     Objects.requireNonNull(identity, "identity");
     Objects.requireNonNull(viewId, "viewId");
     Objects.requireNonNull(workspacePath, "workspacePath");
@@ -202,7 +202,7 @@ public final class IdeBrowserSessionRegistry implements IdeViewAuthorizationList
 
   /** 真实视图已创建：授权其受管 workspace（同一代际下的多面板/多 workspace 共享一个 cookie）。 */
   @Override
-  public void viewOpened(IdeSessionIdentity identity, String viewId, String workspacePath) {
+  public void viewOpened(DaemonConnectionIdentity identity, String viewId, String workspacePath) {
     Objects.requireNonNull(identity, "identity");
     Objects.requireNonNull(viewId, "viewId");
     Objects.requireNonNull(workspacePath, "workspacePath");
@@ -225,7 +225,7 @@ public final class IdeBrowserSessionRegistry implements IdeViewAuthorizationList
 
   /** 真实视图已关闭：立即撤销其受管 workspace 授权（未消费的 bootstrap ticket 由调用方一并 revoke）。 */
   @Override
-  public void viewClosed(IdeSessionIdentity identity, String viewId) {
+  public void viewClosed(DaemonConnectionIdentity identity, String viewId) {
     Objects.requireNonNull(identity, "identity");
     Objects.requireNonNull(viewId, "viewId");
     synchronized (lock) {
@@ -244,7 +244,7 @@ public final class IdeBrowserSessionRegistry implements IdeViewAuthorizationList
   }
 
   /** 某代际当前的视图授权数量（诊断/测试）。 */
-  int viewCount(IdeSessionIdentity identity) {
+  int viewCount(DaemonConnectionIdentity identity) {
     Objects.requireNonNull(identity, "identity");
     synchronized (lock) {
       GenerationState state = generations.get(new Generation(identity));
@@ -266,5 +266,5 @@ public final class IdeBrowserSessionRegistry implements IdeViewAuthorizationList
     private final Map<String, String> views = new LinkedHashMap<>();
   }
 
-  private record Generation(IdeSessionIdentity identity) {}
+  private record Generation(DaemonConnectionIdentity identity) {}
 }

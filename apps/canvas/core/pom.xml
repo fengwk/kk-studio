@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>fun.fengwk.kk-studio</groupId>
+        <artifactId>kk-studio-parent</artifactId>
+        <version>1.1.3</version>
+        <relativePath>../../../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>kk-studio-canvas-core</artifactId>
+
+    <dependencies>
+        <dependency>
+            <groupId>fun.fengwk.kk-studio</groupId>
+            <artifactId>kk-studio-platform-plugin-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>fun.fengwk.kk-studio</groupId>
+            <artifactId>kk-studio-common</artifactId>
+        </dependency>
+        <!-- 严格解析/规范序列化的唯一基底：只用 Jackson 3 core/stream，不引入 Spring 或 databind。 -->
+        <dependency>
+            <groupId>tools.jackson.core</groupId>
+            <artifactId>jackson-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

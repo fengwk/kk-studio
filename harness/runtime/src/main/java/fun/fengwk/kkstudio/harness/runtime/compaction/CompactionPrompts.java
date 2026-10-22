@@ -6,8 +6,8 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.cfg.JsonNodeFeature;
 import tools.jackson.databind.json.JsonMapper;
 
-import fun.fengwk.kkstudio.harness.common.prompt.PromptTemplate;
-import fun.fengwk.kkstudio.harness.common.prompt.PromptTemplateLoader;
+import fun.fengwk.kkstudio.harness.prompt.PromptTemplate;
+import fun.fengwk.kkstudio.harness.prompt.PromptTemplateLoader;
 import fun.fengwk.kkstudio.harness.runtime.history.ToolResultModelContents;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;

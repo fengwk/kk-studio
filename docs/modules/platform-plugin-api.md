@@ -1,16 +1,32 @@
-# Platform Plugin API 模块
+# Platform Plugin API
 
-`platform-plugin-api` 定义插件壳：安装身份、配置与认证声明，以及配置后的运行实例。运行实例按需贡献独立的 Harness / Canvas SPI，并通过作用域上下文使用宿主凭据与资源端口。[Platform](platform.md) 的 runtime 叶负责宿主实现，[Web](web.md) 负责完整应用装配；插件不编译依赖宿主实现。
+`platform-plugin-api` 是插件看到的全部宿主契约：安装身份、配置与认证声明、配置后的运行实例，以及实例可以贡献的两类能力——Harness Contributor（见 [Harness Runtime](harness-runtime.md#contributor-与目录)）与本模块定义的 Canvas Function SPI。实例通过作用域上下文使用宿主凭据与资源端口。[Platform](platform.md) 负责宿主实现，[Canvas](canvas.md) 执行 Function，[Web](web.md) 负责完整应用装配。
 
-模块只依赖 [Harness Common](harness-common.md)、[Harness Contributor API](harness-contributor-api.md)、[Canvas Plugin API](canvas-plugin-api.md) 与 Jackson 3 值模型（见 [`pom.xml`](../../platform/plugin-api/pom.xml)）。[`PluginApiArchitectureTest`](../../platform/plugin-api/src/test/java/fun/fengwk/kkstudio/platform/plugin/PluginApiArchitectureTest.java) 锁定该依赖集合，并禁止 Spring、数据库、HTTP 客户端与 Platform runtime 实现进入本模块。
+模块只依赖 [Common](common.md)、[Harness Runtime](harness-runtime.md) 的 Contributor / Tool 契约与 Jackson 3 值模型（见 [`pom.xml`](../../platform/plugin-api/pom.xml)）。插件源码只能 import 本模块、Contributor / Tool 契约与 Common；这条边界与模块依赖方向一起由仓库检查 [`check.mjs`](../../scripts/dev/verify/repository/check.mjs) 校验。
 
 ## 定义与配置实例
 
 [`StudioPlugin`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/StudioPlugin.java) 是安装期定义，由插件 JAR 的 auto-configuration 注册。它声明唯一 [`PluginDescriptor`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginDescriptor.java)（pluginId、展示名、代码版本）、配置 Schema、认证形态，并通过 `configure(config, context)` 构建 [`PluginInstance`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginInstance.java)。
 
-实例分别返回冻结的 Harness Contributor 与 Canvas Adapter 列表，两域都可为空；实例只关闭自己创建的资源，不关闭注入的共享客户端或宿主端口。插件贡献不另注册为 Spring bean，因此一个定义只产生一份配置实例和能力来源。Mavis 的 enabled 配置控制是否贡献工具，启用实例保留完整工具集合。
+实例分别返回冻结的 Harness Contributor 与 Canvas Function Adapter 列表，两域都可为空；实例只关闭自己创建的资源，不关闭注入的共享客户端或宿主端口。插件贡献不另注册为 Spring bean，因此一个定义只产生一份配置实例和能力来源。Mavis 的 enabled 配置控制是否贡献工具，启用实例保留完整工具集合。
 
 [`StudioPluginRegistry`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/StudioPluginRegistry.java) 是当前 classpath 的安装目录：构造期按 `pluginId` 升序冻结全部 `StudioPlugin`，重复身份即启动失败；目录构造完成后不可变，没有运行时安装或刷新入口。
+
+## Canvas Function SPI
+
+Canvas Function 是插件向 [Canvas](canvas.md) 贡献的显式执行能力。SPI 只描述函数长什么样、Run 冻结了什么、adapter 能做什么；Run 的调度、持久化与资源挂接由 Canvas 应用负责。
+
+宿主在快照装配时用 [`CanvasFunctionCatalog.from(...)`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionCatalog.java) 把内置 adapter 与插件实例的 adapter 冻结成唯一目录：每个 adapter 的 `enabled()`、`unavailableReason()`、`functions()` 各读取一次；function name 重复即失败，集合按字典序排列；enabled adapter 不得声明 unavailable reason，disabled adapter 必须有非空原因。每项目录暴露版本身份 `definitionFingerprint`：按固定字段顺序对完整定义（name、description、argsSchema、outputs、referencePolicy）取 64 位小写 SHA-256，与对象键序、集合顺序无关，只随定义内容变化。
+
+[`CanvasFunctionAdapter`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionAdapter.java) 提供 `functions/enabled/unavailableReason/preflight/submit/execute/cancel`。[`CanvasFunctionDefinition`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionDefinition.java) 声明小写 canonical token 形式的 `name`、`description`、[`CanvasFunctionArgsSchema`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionArgsSchema.java)、输出计划与 [`CanvasFunctionReferencePolicy`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionReferencePolicy.java)：
+
+- 输出计划是 1..8 个 [`CanvasFunctionOutputSpec`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionOutputSpec.java) 槽位，每个槽位声明 `kind`（`TEXT|IMAGE|VIDEO|AUDIO`，见 [`CanvasResourceKind`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasResourceKind.java)）与可选显式资源名：`TEXT` 以内联文本发布，其余以 Blob 发布；显式名在函数内唯一，缺省名由节点名加类型后缀推导。
+- 参数 schema 是严格 JSON Schema 子集：根必须是 object，每层 object 都显式 `additionalProperties: false`；关键字支持 `type/description/properties/required/additionalProperties/enum/default/minimum/maximum/items/minItems/maxItems`，类型支持 `object|string|integer|number|boolean|array|resourceReference`；嵌套深度上限 8，array 必须声明 `items` 且 `maxItems <= 32`。
+- 参数与 schema 都用 [`CanvasJson`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasJson.java) 表示：严格解析（拒绝重复键、尾随内容与超限嵌套）与规范序列化，JSON 语义相等的值得到相同文本，`MAX_LENGTH` 约束原文长度。
+
+Run 启动时冻结的事实写在 [`CanvasFunctionFrozenRun`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionFrozenRun.java)：canvas/node 身份、保存完整函数定义的 [`CanvasFunctionBinding`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionBinding.java)、args、引用 manifest、按槽位预分配的 [`CanvasFunctionFrozenOutput`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionFrozenOutput.java)、[`CanvasFunctionSubmitState`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionSubmitState.java)、stage 与 adapter state。[`CanvasFunctionFrozenReference`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionFrozenReference.java) 保存启动瞬间的 source node、resource、blob 身份与权威媒体事实，图中的引用关系或源资源之后的变化不会改写它们。
+
+Adapter 两阶段执行：`submit` 提交外部异步任务并返回初始状态；`execute` 查询并按计划顺序物化输出、返回 `run.outputResourceIds()`。[`CanvasFunctionExecutionContext`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionExecutionContext.java) 只给最小能力：`checkpoint(stage, adapterState)`、`isRunning()`、只读冻结原件的 `openOriginal`/`presignOriginal`，以及只接受计划内槽位的 `materializeOutput`（媒体 Blob）与 `materializeTextOutput`（内联文本）；槽位身份或类型与冻结计划不一致时立即拒绝。外部结果无法确认时抛 [`CanvasFunctionUnknownException`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionUnknownException.java)，Run 转入人工决议而不是重试提交。adapter 看不到数据库、对象 key 或 pin 表。
 
 ## 配置与认证声明
 
@@ -60,4 +76,4 @@
 
 ---
 
-上级：[系统设计](../system-design.md)。相关文档：[Platform](platform.md)、[Web](web.md)、[Harness Common](harness-common.md)。
+上级：[系统设计](../system-design.md)。相关文档：[Platform](platform.md)、[Canvas](canvas.md)、[Harness Runtime](harness-runtime.md)、[Web](web.md)。

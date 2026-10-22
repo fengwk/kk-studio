@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.ResourceLock;
 import software.amazon.awssdk.services.s3.S3Client;
 
-import fun.fengwk.kkstudio.harness.common.network.HttpProxySelector;
+import fun.fengwk.kkstudio.platform.settings.HttpProxySelector;
 import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageConfiguration;
 import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
 

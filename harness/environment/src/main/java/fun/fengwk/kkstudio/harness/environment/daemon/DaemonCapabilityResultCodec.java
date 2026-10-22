@@ -12,13 +12,13 @@ import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.harness.common.json.BoundedJsonWriter;
-import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
-import fun.fengwk.kkstudio.harness.common.result.BinaryResultContent;
-import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
-import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
-import fun.fengwk.kkstudio.harness.common.result.ResultContent;
-import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
+import fun.fengwk.kkstudio.common.json.BoundedJsonWriter;
+import fun.fengwk.kkstudio.common.resource.ResourceRef;
+import fun.fengwk.kkstudio.common.result.BinaryResultContent;
+import fun.fengwk.kkstudio.common.result.JsonResultContent;
+import fun.fengwk.kkstudio.common.result.ResourceResultContent;
+import fun.fengwk.kkstudio.common.result.ResultContent;
+import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 
 import java.io.IOException;

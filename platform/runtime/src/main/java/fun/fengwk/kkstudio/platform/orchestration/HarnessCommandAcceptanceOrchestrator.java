@@ -30,16 +30,11 @@ import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
-import fun.fengwk.kkstudio.project.model.Issue;
-import fun.fengwk.kkstudio.project.model.IssueAgentThread;
-import fun.fengwk.kkstudio.project.model.Project;
-import fun.fengwk.kkstudio.project.repo.IssueAgentThreadRepository;
-import fun.fengwk.kkstudio.project.repo.IssueRepository;
-import fun.fengwk.kkstudio.project.repo.ProjectRepository;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -71,9 +66,7 @@ public class HarnessCommandAcceptanceOrchestrator {
 
   private final ChatSessionRepository chatSessionRepository;
   private final ChatRepository chatRepository;
-  private final ProjectRepository projectRepository;
-  private final IssueRepository issueRepository;
-  private final IssueAgentThreadRepository issueAgentThreadRepository;
+  private final ObjectProvider<IssueAgentOwnership> issueAgentOwnership;
   private final ObjectProvider<HarnessStore> stores;
   private final ObjectProvider<HarnessRuntime> runtimes;
   private final StorageUploadService uploadService;
@@ -83,9 +76,7 @@ public class HarnessCommandAcceptanceOrchestrator {
   public HarnessCommandAcceptanceOrchestrator(
       ChatSessionRepository chatSessionRepository,
       ChatRepository chatRepository,
-      ProjectRepository projectRepository,
-      IssueRepository issueRepository,
-      IssueAgentThreadRepository issueAgentThreadRepository,
+      ObjectProvider<IssueAgentOwnership> issueAgentOwnership,
       ObjectProvider<HarnessStore> stores,
       ObjectProvider<HarnessRuntime> runtimes,
       StorageUploadService uploadService,
@@ -94,10 +85,7 @@ public class HarnessCommandAcceptanceOrchestrator {
     this.chatSessionRepository =
         Objects.requireNonNull(chatSessionRepository, "chatSessionRepository");
     this.chatRepository = Objects.requireNonNull(chatRepository, "chatRepository");
-    this.projectRepository = Objects.requireNonNull(projectRepository, "projectRepository");
-    this.issueRepository = Objects.requireNonNull(issueRepository, "issueRepository");
-    this.issueAgentThreadRepository =
-        Objects.requireNonNull(issueAgentThreadRepository, "issueAgentThreadRepository");
+    this.issueAgentOwnership = Objects.requireNonNull(issueAgentOwnership, "issueAgentOwnership");
     this.stores = Objects.requireNonNull(stores, "stores");
     this.runtimes = Objects.requireNonNull(runtimes, "runtimes");
     this.uploadService = Objects.requireNonNull(uploadService, "uploadService");
@@ -164,9 +152,9 @@ public class HarnessCommandAcceptanceOrchestrator {
         requireTargetOwnership(owner, target);
       }
       case OwnerRef.IssueAgent issueAgent -> {
-        IssueAgentThread binding = lockIssueAndReadBinding(issueAgent);
+        Optional<UUID> boundThread = requireIssueAgentOwnership().lockForAcceptance(issueAgent);
         if (target instanceof AcceptCommandsTarget.NewRootSession newRootSession) {
-          requireBindingAllowsNewSession(binding, newRootSession);
+          requireBindingAllowsNewSession(boundThread, newRootSession);
         }
         requireTargetOwnership(owner, target);
       }
@@ -212,8 +200,8 @@ public class HarnessCommandAcceptanceOrchestrator {
    * Thread（绑定不可重绑）。
    */
   private static void requireBindingAllowsNewSession(
-      IssueAgentThread binding, AcceptCommandsTarget.NewRootSession newRootSession) {
-    if (binding != null && !binding.threadId().equals(newRootSession.threadId())) {
+      Optional<UUID> boundThread, AcceptCommandsTarget.NewRootSession newRootSession) {
+    if (boundThread.isPresent() && !boundThread.get().equals(newRootSession.threadId())) {
       throw new IllegalArgumentException("Issue agent is already bound to a different thread");
     }
   }
@@ -231,36 +219,6 @@ public class HarnessCommandAcceptanceOrchestrator {
   }
 
   /**
-   * Issue+Agent owner 按 {@code Project SHARE -> Issue UPDATE} 锁序锁定产品层级，并读取稳定 Thread 绑定。
-   *
-   * <p>Project/Issue 缺失或已归档都确定性拒绝；绑定允许为空，仅表示该身份尚未完成首次接受：此时只有全新 NEW_SESSION（目标 Session
-   * 尚不存在）能通过，且调用方必须在接受后于同一物理事务内写入绑定（设计 §7.1）。
-   */
-  private IssueAgentThread lockIssueAndReadBinding(OwnerRef.IssueAgent owner) {
-    Issue issue = issueRepository.getById(owner.issueId());
-    if (issue == null) {
-      throw new IllegalArgumentException("Issue owner does not exist");
-    }
-    UUID projectId = issue.getProjectId();
-    Project project = projectRepository.lockForKeyShare(projectId);
-    if (project == null) {
-      throw new IllegalArgumentException("Project owner does not exist");
-    }
-    if (project.isArchived()) {
-      throw new IllegalArgumentException("Cannot accept commands for archived project");
-    }
-    Issue lockedIssue = issueRepository.lockById(issue.getId());
-    if (lockedIssue == null || !lockedIssue.getProjectId().equals(projectId)) {
-      throw new IllegalArgumentException("Issue owner hierarchy is inconsistent");
-    }
-    if (lockedIssue.isArchived()) {
-      throw new IllegalArgumentException("Cannot accept commands for archived issue");
-    }
-    return issueAgentThreadRepository.findByIssueIdAndAgentName(
-        lockedIssue.getId(), owner.agentName());
-  }
-
-  /**
    * 归属校验：目标 Session 必须已由该 owner 持有。
    *
    * <p>Issue+Agent 的 Session 只能由稳定 Thread 解析，绑定缺失或 Thread 不可解析都 fail closed，不能凭 sessionId 猜归属。
@@ -274,10 +232,8 @@ public class HarnessCommandAcceptanceOrchestrator {
         }
       }
       case OwnerRef.IssueAgent issueAgent -> {
-        IssueAgentThread binding =
-            issueAgentThreadRepository.findByIssueIdAndAgentName(
-                issueAgent.issueId(), issueAgent.agentName());
-        if (binding == null || !sessionId.equals(boundSessionId(binding))) {
+        Optional<UUID> boundThread = requireIssueAgentOwnership().findBoundThread(issueAgent);
+        if (boundThread.isEmpty() || !sessionId.equals(boundSessionId(boundThread.get()))) {
           throw new IllegalArgumentException("Session ownership is inconsistent");
         }
       }
@@ -285,9 +241,9 @@ public class HarnessCommandAcceptanceOrchestrator {
   }
 
   /** 由稳定绑定解析其 Thread 的 Session；Thread 不可解析说明归属事实已不一致，失败而不是回退。 */
-  private UUID boundSessionId(IssueAgentThread binding) {
+  private UUID boundSessionId(UUID threadId) {
     return requireStore()
-        .transaction(tx -> tx.findThread(binding.threadId()).map(ThreadState::sessionId))
+        .transaction(tx -> tx.findThread(threadId).map(ThreadState::sessionId))
         .orElseThrow(() -> new IllegalArgumentException("Issue agent thread does not exist"));
   }
 
@@ -405,5 +361,13 @@ public class HarnessCommandAcceptanceOrchestrator {
       throw new IllegalStateException("harness store is not available in this deployment");
     }
     return store;
+  }
+
+  private IssueAgentOwnership requireIssueAgentOwnership() {
+    IssueAgentOwnership ownership = issueAgentOwnership.getIfAvailable();
+    if (ownership == null) {
+      throw new IllegalStateException("Issue agent owners require the Project application");
+    }
+    return ownership;
   }
 }

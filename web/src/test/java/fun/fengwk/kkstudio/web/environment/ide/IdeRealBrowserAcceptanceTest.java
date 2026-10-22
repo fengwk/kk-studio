@@ -22,7 +22,7 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.platform.environment.ide.EnvironmentIdeService;
+import fun.fengwk.kkstudio.ide.EnvironmentIdeService;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeOpenViewDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;

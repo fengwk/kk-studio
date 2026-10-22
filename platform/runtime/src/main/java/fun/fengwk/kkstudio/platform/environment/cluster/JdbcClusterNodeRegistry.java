@@ -112,7 +112,7 @@ public class JdbcClusterNodeRegistry implements ClusterNodeRegistry {
   }
 
   @Override
-  public Optional<ClusterIdeOwnerRoute> route(EnvironmentId environmentId) {
+  public Optional<ClusterOwnerRoute> route(EnvironmentId environmentId) {
     if (environmentId == null) {
       return Optional.empty();
     }
@@ -129,7 +129,7 @@ public class JdbcClusterNodeRegistry implements ClusterNodeRegistry {
     OwnerRow row = rows.get(0);
     if (row.localOwner()) {
       // 本地路由同样由连接行 READY + 未过期租约确认，不因本节点身份绕过。
-      return Optional.of(ClusterIdeOwnerRoute.local(localNodeId));
+      return Optional.of(ClusterOwnerRoute.local(localNodeId));
     }
     if (!properties.remoteRoutingConfigured()) {
       // 缺少共享秘密时无法对远端签名，明确不可用，绝不回退到请求 Host。
@@ -139,7 +139,7 @@ public class JdbcClusterNodeRegistry implements ClusterNodeRegistry {
       return Optional.empty();
     }
     return parseOrigin(row.internalUrl())
-        .map(origin -> ClusterIdeOwnerRoute.remote(row.ownerNodeId(), origin));
+        .map(origin -> ClusterOwnerRoute.remote(row.ownerNodeId(), origin));
   }
 
   /** 以当前时间建立/刷新本节点注册行；只有多节点配置存在时由生命周期调用。 */

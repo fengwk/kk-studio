@@ -9,15 +9,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.canvas.CanvasJson;
-import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionExecutionContext;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
-import fun.fengwk.kkstudio.harness.common.schema.BooleanSchema;
-import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.canvas.function.CanvasJson;
+import fun.fengwk.kkstudio.canvas.function.CanvasResourceKind;
+import fun.fengwk.kkstudio.common.schema.BooleanSchema;
+import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;

@@ -5,7 +5,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
-import fun.fengwk.kkstudio.harness.common.skill.SkillNames;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitCache;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitException;

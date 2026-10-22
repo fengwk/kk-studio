@@ -36,10 +36,7 @@ import fun.fengwk.kkstudio.platform.chat.repo.ChatSessionRepository;
 import fun.fengwk.kkstudio.platform.chat.service.model.Chat;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
-import fun.fengwk.kkstudio.project.model.Issue;
-import fun.fengwk.kkstudio.project.model.IssueAgentThread;
-import fun.fengwk.kkstudio.project.repo.IssueAgentThreadRepository;
-import fun.fengwk.kkstudio.project.repo.IssueRepository;
+import fun.fengwk.kkstudio.platform.orchestration.IssueAgentOwnership;
 import fun.fengwk.kkstudio.share.ai.interaction.InteractionDTO;
 import fun.fengwk.kkstudio.share.ai.interaction.InteractionOwnerDTO;
 import fun.fengwk.kkstudio.share.ai.interaction.InteractionPageDTO;
@@ -60,8 +57,8 @@ class InteractionQueryServiceTest {
 
   private ChatSessionRepository chatSessionRepository;
   private ChatRepository chatRepository;
-  private IssueAgentThreadRepository issueAgentThreadRepository;
-  private IssueRepository issueRepository;
+  private IssueAgentOwnership issueAgentOwnership;
+  private ObjectProvider<IssueAgentOwnership> issueAgentOwnerships;
   private EnvironmentRepository environmentRepository;
   private ObjectProvider<HarnessRuntime> runtimes;
   private HarnessRuntime runtime;
@@ -72,8 +69,9 @@ class InteractionQueryServiceTest {
   void setUp() {
     chatSessionRepository = mock(ChatSessionRepository.class);
     chatRepository = mock(ChatRepository.class);
-    issueAgentThreadRepository = mock(IssueAgentThreadRepository.class);
-    issueRepository = mock(IssueRepository.class);
+    issueAgentOwnership = mock(IssueAgentOwnership.class);
+    issueAgentOwnerships = mock(ObjectProvider.class);
+    when(issueAgentOwnerships.getIfAvailable()).thenReturn(issueAgentOwnership);
     environmentRepository = mock(EnvironmentRepository.class);
     runtimes = mock(ObjectProvider.class);
     runtime = mock(HarnessRuntime.class);
@@ -86,8 +84,7 @@ class InteractionQueryServiceTest {
         new InteractionQueryService(
             chatSessionRepository,
             chatRepository,
-            issueAgentThreadRepository,
-            issueRepository,
+            issueAgentOwnerships,
             environmentRepository,
             runtimes);
   }
@@ -190,13 +187,12 @@ class InteractionQueryServiceTest {
     when(chat.getTitle()).thenReturn("deploy chat");
     when(chatRepository.getById(id(1001))).thenReturn(chat);
     when(chatSessionRepository.findBySessionId(sessionId2)).thenReturn(null);
-    when(issueAgentThreadRepository.findByThreadId(threadId2))
-        .thenReturn(new IssueAgentThread(id(2001), "planner", threadId2));
-    Issue issue = mock(Issue.class);
-    when(issue.getTitle()).thenReturn("fix the pipeline");
-    when(issueRepository.getById(id(2001))).thenReturn(issue);
+    when(issueAgentOwnership.findBoundRoot(threadId2))
+        .thenReturn(
+            Optional.of(
+                new IssueAgentOwnership.BoundRoot(id(2001), "planner", "fix the pipeline")));
     when(chatSessionRepository.findBySessionId(sessionId3)).thenReturn(null);
-    when(issueAgentThreadRepository.findByThreadId(threadId3)).thenReturn(null);
+    when(issueAgentOwnership.findBoundRoot(threadId3)).thenReturn(Optional.empty());
 
     when(runtime.listPendingInteractions(Instant.EPOCH, ZERO_UUID, 10))
         .thenReturn(new PendingInteractionPage(List.of(row1, row2, row3), false));
@@ -244,9 +240,9 @@ class InteractionQueryServiceTest {
     assertNull(dto2.getOwner().getChatId());
     assertNull(dto2.getOwner().getChatTitle());
 
-    // 展示名按请求缓存：同一根的 Chat 标题只从仓储补齐一次，不逐卡回读。
+    // 展示名按请求缓存：同一根的 Chat 标题与 Issue 归属只解析一次，不逐卡回读。
     verify(chatRepository, times(1)).getById(id(1001));
-    verify(issueRepository, times(1)).getById(id(2001));
+    verify(issueAgentOwnership, times(1)).findBoundRoot(threadId2);
   }
 
   /**
@@ -374,9 +370,9 @@ class InteractionQueryServiceTest {
     stubRoot(id(2));
     stubRoot(id(4));
     when(chatSessionRepository.findBySessionId(id(1))).thenReturn(null);
-    when(issueAgentThreadRepository.findByThreadId(id(2))).thenReturn(null);
+    when(issueAgentOwnership.findBoundRoot(id(2))).thenReturn(Optional.empty());
     when(chatSessionRepository.findBySessionId(id(3))).thenReturn(null);
-    when(issueAgentThreadRepository.findByThreadId(id(4))).thenReturn(null);
+    when(issueAgentOwnership.findBoundRoot(id(4))).thenReturn(Optional.empty());
 
     // row3 可见 (Chat)
     stubRoot(id(6));
@@ -385,8 +381,8 @@ class InteractionQueryServiceTest {
     // row4 可见 (IssueAgent)
     stubRoot(id(8));
     when(chatSessionRepository.findBySessionId(id(7))).thenReturn(null);
-    when(issueAgentThreadRepository.findByThreadId(id(8)))
-        .thenReturn(new IssueAgentThread(id(800), "coder", id(8)));
+    when(issueAgentOwnership.findBoundRoot(id(8)))
+        .thenReturn(Optional.of(new IssueAgentOwnership.BoundRoot(id(800), "coder", null)));
 
     // row5 可见 (Chat)
     stubRoot(id(10));
@@ -437,7 +433,7 @@ class InteractionQueryServiceTest {
     // row2 不可见
     stubRoot(id(4));
     when(chatSessionRepository.findBySessionId(id(3))).thenReturn(null);
-    when(issueAgentThreadRepository.findByThreadId(id(4))).thenReturn(null);
+    when(issueAgentOwnership.findBoundRoot(id(4))).thenReturn(Optional.empty());
 
     // row3 可见 (Chat)
     stubRoot(id(6));
@@ -523,7 +519,7 @@ class InteractionQueryServiceTest {
     when(chatSessionRepository.findBySessionId(id(1))).thenReturn(new ChatSession(id(1), id(100)));
     stubRoot(id(4));
     when(chatSessionRepository.findBySessionId(id(3))).thenReturn(null);
-    when(issueAgentThreadRepository.findByThreadId(id(4))).thenReturn(null);
+    when(issueAgentOwnership.findBoundRoot(id(4))).thenReturn(Optional.empty());
     stubRoot(id(6));
     when(chatSessionRepository.findBySessionId(id(5))).thenReturn(new ChatSession(id(5), id(300)));
     stubRoot(id(8));
@@ -776,7 +772,7 @@ class InteractionQueryServiceTest {
             1);
     stubRootSession(rootThreadId, sessionId);
     when(chatSessionRepository.findBySessionId(sessionId)).thenReturn(null);
-    when(issueAgentThreadRepository.findByThreadId(rootThreadId)).thenReturn(null);
+    when(issueAgentOwnership.findBoundRoot(rootThreadId)).thenReturn(Optional.empty());
 
     when(runtime.listPendingInteractions(Instant.EPOCH, ZERO_UUID, 1))
         .thenReturn(new PendingInteractionPage(List.of(), false));
@@ -812,7 +808,7 @@ class InteractionQueryServiceTest {
     when(snapshot.entryPath()).thenReturn(entryPath);
     when(runtime.getThreadSnapshot(rootThreadId)).thenReturn(snapshot);
     when(chatSessionRepository.findBySessionId(sessionId)).thenReturn(null);
-    when(issueAgentThreadRepository.findByThreadId(rootThreadId)).thenReturn(null);
+    when(issueAgentOwnership.findBoundRoot(rootThreadId)).thenReturn(Optional.empty());
     when(runtime.listPendingInteractions(Instant.EPOCH, ZERO_UUID, 5))
         .thenReturn(new PendingInteractionPage(List.of(approval), false));
     stubEnvironmentPage(Instant.EPOCH, ZERO_UUID, 5, List.of(), false);
@@ -838,60 +834,33 @@ class InteractionQueryServiceTest {
         NullPointerException.class,
         () ->
             new InteractionQueryService(
+                null, chatRepository, issueAgentOwnerships, environmentRepository, runtimes));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new InteractionQueryService(
+                chatSessionRepository,
                 null,
-                chatRepository,
-                issueAgentThreadRepository,
-                issueRepository,
+                issueAgentOwnerships,
                 environmentRepository,
                 runtimes));
     assertThrows(
         NullPointerException.class,
         () ->
             new InteractionQueryService(
-                chatSessionRepository,
-                null,
-                issueAgentThreadRepository,
-                issueRepository,
-                environmentRepository,
-                runtimes));
+                chatSessionRepository, chatRepository, null, environmentRepository, runtimes));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new InteractionQueryService(
+                chatSessionRepository, chatRepository, issueAgentOwnerships, null, runtimes));
     assertThrows(
         NullPointerException.class,
         () ->
             new InteractionQueryService(
                 chatSessionRepository,
                 chatRepository,
-                null,
-                issueRepository,
-                environmentRepository,
-                runtimes));
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new InteractionQueryService(
-                chatSessionRepository,
-                chatRepository,
-                issueAgentThreadRepository,
-                null,
-                environmentRepository,
-                runtimes));
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new InteractionQueryService(
-                chatSessionRepository,
-                chatRepository,
-                issueAgentThreadRepository,
-                issueRepository,
-                null,
-                runtimes));
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new InteractionQueryService(
-                chatSessionRepository,
-                chatRepository,
-                issueAgentThreadRepository,
-                issueRepository,
+                issueAgentOwnerships,
                 environmentRepository,
                 null));
   }

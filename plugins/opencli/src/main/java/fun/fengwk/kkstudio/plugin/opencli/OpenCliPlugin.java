@@ -3,11 +3,11 @@ package fun.fengwk.kkstudio.plugin.opencli;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
-import fun.fengwk.kkstudio.harness.common.schema.BooleanSchema;
-import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
-import fun.fengwk.kkstudio.harness.common.schema.IntegerSchema;
-import fun.fengwk.kkstudio.harness.common.schema.ObjectSchema;
-import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
+import fun.fengwk.kkstudio.common.schema.BooleanSchema;
+import fun.fengwk.kkstudio.common.schema.InputSchema;
+import fun.fengwk.kkstudio.common.schema.IntegerSchema;
+import fun.fengwk.kkstudio.common.schema.ObjectSchema;
+import fun.fengwk.kkstudio.common.schema.StringSchema;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthHandler;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;

@@ -1,0 +1,205 @@
+package fun.fengwk.kkstudio.harness.tool.codec;
+
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
+
+import fun.fengwk.kkstudio.common.schema.InputSchema;
+import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
+import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+
+import java.time.Duration;
+import java.util.Locale;
+import java.util.Objects;
+import java.util.Set;
+
+/**
+ * 严格、deterministic 的 {@link ToolDescriptor} JSON 编解码。
+ *
+ * <p>Descriptor 只描述模型可见的工具契约，不携带执行路由；input schema 的规范编解码委托唯一权威 {@link SchemaJsonCodec}。
+ */
+public final class ToolDescriptorJsonCodec {
+
+  private static final ObjectMapper MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .build();
+  private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
+  private static final SchemaJsonCodec SCHEMA_CODEC = new SchemaJsonCodec();
+
+  public ToolDescriptorJsonCodec() {}
+
+  /** 把单个 descriptor 编码为 deterministic canonical JSON 文本。 */
+  public String encode(ToolDescriptor descriptor) {
+    Objects.requireNonNull(descriptor, "descriptor");
+    return write(encodeNode(descriptor));
+  }
+
+  /** 把单个 descriptor 编码为 deterministic canonical {@link ObjectNode}；String API 委派此方法。 */
+  public ObjectNode encodeNode(ToolDescriptor descriptor) {
+    Objects.requireNonNull(descriptor, "descriptor");
+    ObjectNode node = NODES.objectNode();
+    writeDescriptor(node, descriptor);
+    return node;
+  }
+
+  /** 解码单个 canonical descriptor JSON 文本；任何非法结构抛 {@link IllegalArgumentException}。 */
+  public ToolDescriptor decode(String json) {
+    if (json == null) {
+      throw new IllegalArgumentException("json must not be null");
+    }
+    JsonNode root;
+    try {
+      root = MAPPER.readTree(json);
+    } catch (JacksonException error) {
+      throw new IllegalArgumentException("malformed tool descriptor JSON", error);
+    }
+    // Jackson 3 对空/纯空白输入返回 MissingNode；两种形态都在解码入口统一拒绝。
+    if (root == null || root.isMissingNode()) {
+      throw new IllegalArgumentException("tool descriptor JSON must not be empty");
+    }
+    return decodeNode(root);
+  }
+
+  /** 从任意 {@link JsonNode} 解码 descriptor；非对象节点抛 {@link IllegalArgumentException}。 */
+  public ToolDescriptor decodeNode(JsonNode value) {
+    Objects.requireNonNull(value, "value");
+    return readDescriptor(value);
+  }
+
+  private static void writeDescriptor(ObjectNode target, ToolDescriptor descriptor) {
+    target.put("name", descriptor.name());
+    target.put("description", descriptor.description());
+    target.put("rendererKey", descriptor.rendererKey());
+    target.put("sideEffect", descriptor.sideEffect().name());
+    target.put("defaultTimeoutMillis", descriptor.defaultTimeout().toMillis());
+    target.set("inputSchema", SCHEMA_CODEC.encodeNode(descriptor.inputSchema()));
+  }
+
+  private static String write(ObjectNode node) {
+    try {
+      return MAPPER.writeValueAsString(node);
+    } catch (JacksonException error) {
+      throw new IllegalStateException("cannot encode tool descriptor JSON", error);
+    }
+  }
+
+  private static ToolDescriptor readDescriptor(JsonNode node) {
+    ObjectNode obj = requiredObject(node, "descriptor");
+    Set<String> allowed =
+        Set.of(
+            "name",
+            "description",
+            "rendererKey",
+            "sideEffect",
+            "defaultTimeoutMillis",
+            "inputSchema");
+    rejectUnknownFields(obj, allowed, "descriptor");
+    String name = requiredText(obj, "name", "descriptor");
+    String description = requiredText(obj, "description", "descriptor");
+    String rendererKey = requiredText(obj, "rendererKey", "descriptor");
+    ToolSideEffect sideEffect = readSideEffect(obj);
+    long defaultTimeoutMillis = requiredNonNegativeLong(obj, "defaultTimeoutMillis", "descriptor");
+    JsonNode inputSchemaNode = requiredField(obj, "inputSchema", "descriptor");
+    InputSchema inputSchema = SCHEMA_CODEC.decodeNode(inputSchemaNode, "descriptor inputSchema");
+    return constructDescriptor(
+        name,
+        description,
+        rendererKey,
+        inputSchema,
+        sideEffect,
+        Duration.ofMillis(defaultTimeoutMillis));
+  }
+
+  private static ToolDescriptor constructDescriptor(
+      String name,
+      String description,
+      String rendererKey,
+      InputSchema inputSchema,
+      ToolSideEffect sideEffect,
+      Duration defaultTimeout) {
+    try {
+      return new ToolDescriptor(
+          name, description, rendererKey, inputSchema, sideEffect, defaultTimeout);
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException(
+          "descriptor validation failed for " + name + ": " + error.getMessage(), error);
+    }
+  }
+
+  private static ToolSideEffect readSideEffect(ObjectNode obj) {
+    String value = requiredText(obj, "sideEffect", "descriptor");
+    try {
+      return ToolSideEffect.valueOf(value);
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException("descriptor unknown sideEffect: " + value, error);
+    }
+  }
+
+  private static long requiredNonNegativeLong(ObjectNode obj, String field, String context) {
+    JsonNode value = obj.get(field);
+    if (value == null
+        || !value.isIntegralNumber()
+        || !value.canConvertToLong()
+        || value.longValue() < 0) {
+      throw new IllegalArgumentException(
+          context + " '" + field + "' must be a non-negative long integer");
+    }
+    return value.longValue();
+  }
+
+  private static void rejectUnknownFields(ObjectNode node, Set<String> allowed, String context) {
+    for (String name : node.propertyNames()) {
+      if (!allowed.contains(name)) {
+        throw new IllegalArgumentException(context + " unknown field: '" + name + "'");
+      }
+    }
+  }
+
+  private static JsonNode requiredField(JsonNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (value == null || value.isNull()) {
+      throw new IllegalArgumentException(context + " must declare '" + field + "'");
+    }
+    return value;
+  }
+
+  private static String requiredText(JsonNode node, String field, String context) {
+    String value = optionalText(node, field, context);
+    if (value == null || value.isBlank()) {
+      throw new IllegalArgumentException(context + " '" + field + "' must be a non-blank string");
+    }
+    return value;
+  }
+
+  private static String optionalText(JsonNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (value == null || value.isNull()) {
+      return null;
+    }
+    if (!value.isString()) {
+      throw new IllegalArgumentException(context + " '" + field + "' must be a string");
+    }
+    return value.stringValue();
+  }
+
+  private static ObjectNode requiredObject(JsonNode node, String context) {
+    if (node == null || node.isNull()) {
+      throw new IllegalArgumentException(context + " must be a JSON object");
+    }
+    if (!node.isObject()) {
+      throw new IllegalArgumentException(
+          context
+              + " must be a JSON object but was "
+              + node.getNodeType().name().toLowerCase(Locale.ROOT));
+    }
+    return (ObjectNode) node;
+  }
+}

@@ -8,10 +8,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.environment.daemon.IdeHeader;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterIdeOwnerRoute;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalClient;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalPaths;
+import fun.fengwk.kkstudio.ide.cluster.IdeClusterClient;
+import fun.fengwk.kkstudio.ide.cluster.IdeInternalPaths;
+import fun.fengwk.kkstudio.ide.protocol.IdeHeader;
+import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -49,13 +49,13 @@ public final class IdeRemoteDataPlaneForwarder {
 
   private static final int MAX_FORWARDED_HEADERS = 64;
 
-  private final ClusterInternalClient clusterInternalClient;
+  private final IdeClusterClient clusterInternalClient;
   private final IdeGatewayProperties properties;
   private final HttpClient httpClient;
 
   @Autowired
   public IdeRemoteDataPlaneForwarder(
-      ClusterInternalClient clusterInternalClient, IdeGatewayProperties properties) {
+      IdeClusterClient clusterInternalClient, IdeGatewayProperties properties) {
     this(
         clusterInternalClient,
         properties,
@@ -66,7 +66,7 @@ public final class IdeRemoteDataPlaneForwarder {
   }
 
   IdeRemoteDataPlaneForwarder(
-      ClusterInternalClient clusterInternalClient,
+      IdeClusterClient clusterInternalClient,
       IdeGatewayProperties properties,
       HttpClient httpClient) {
     this.clusterInternalClient =
@@ -81,13 +81,13 @@ public final class IdeRemoteDataPlaneForwarder {
    * @param rawPathAndQuery 浏览器原始 path（含 query）
    */
   void forwardHttp(
-      ClusterIdeOwnerRoute owner,
+      ClusterOwnerRoute owner,
       EnvironmentId environmentId,
       String rawPathAndQuery,
       HttpServletRequest request,
       HttpServletResponse response)
       throws IOException {
-    String canonicalPath = ClusterInternalPaths.dataHttpPath(environmentId, rawPathAndQuery);
+    String canonicalPath = IdeInternalPaths.dataHttpPath(environmentId, rawPathAndQuery);
     URI target;
     try {
       target = owner.internalUrl().resolve(canonicalPath);

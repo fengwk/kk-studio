@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.platform.harness.tool.gateway;
 
-import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
+import fun.fengwk.kkstudio.common.resource.ResourceRef;
 
 /** 在 Harness 锁外把已验证的工具资源准备为可消费引用。 */
 public interface ToolResourceStager {

@@ -8,7 +8,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.platform.environment.ide.EnvironmentIdeServiceImpl;
+import fun.fengwk.kkstudio.ide.EnvironmentIdeServiceImpl;
 
 import java.io.IOException;
 import java.util.Objects;

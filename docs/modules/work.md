@@ -24,7 +24,7 @@ reschedule(claim, delay) -> 释放租约，下一次处理推迟 delay；有新 
 
 ## 使用方
 
-- [`DurableWorkQueue`](../../work/src/main/java/fun/fengwk/kkstudio/work/DurableWorkQueue.java) 是某一种 target type 的队列视图。Project 注册 `issueWorkQueue`（`ISSUE`），Canvas 注册 `canvasRunWorkQueue`（`CANVAS_RUN`），各自的 dispatcher 复用 [`BoundedWorkDispatcher`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/concurrent/BoundedWorkDispatcher.java) 做有界 handoff。
+- [`DurableWorkQueue`](../../work/src/main/java/fun/fengwk/kkstudio/work/DurableWorkQueue.java) 是某一种 target type 的队列视图。Project 注册 `issueWorkQueue`（`ISSUE`），Canvas 注册 `canvasRunWorkQueue`（`CANVAS_RUN`），各自的 dispatcher 复用 [`BoundedWorkDispatcher`](../../common/src/main/java/fun/fengwk/kkstudio/common/concurrent/BoundedWorkDispatcher.java) 做有界 handoff。
 - Harness 的 Work 嵌在 Runtime 的强类型事务里，需要锁序校验与环境亲和性，因此由 [Harness Infra](harness-infra.md#work-的-claim--lease--wake) 用自己的语句读写同一张表，语义与本模块一致。
 - 请求、完成与重排在调用方已有事务时加入，否则自开短事务，保证事实与提示一起提交。
 

@@ -13,9 +13,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
-import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
-import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
+import fun.fengwk.kkstudio.common.resource.ResourceRef;
+import fun.fengwk.kkstudio.common.result.ResourceResultContent;
+import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;

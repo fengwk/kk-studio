@@ -8,13 +8,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.mcp.McpCancellationToken;
-import fun.fengwk.kkstudio.harness.mcp.McpClient;
-import fun.fengwk.kkstudio.harness.mcp.McpDeadline;
-import fun.fengwk.kkstudio.harness.mcp.McpToolCallResult;
-import fun.fengwk.kkstudio.harness.mcp.McpToolDefinition;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
+import fun.fengwk.kkstudio.platform.catalog.mcp.client.McpCancellationToken;
+import fun.fengwk.kkstudio.platform.catalog.mcp.client.McpClient;
+import fun.fengwk.kkstudio.platform.catalog.mcp.client.McpDeadline;
+import fun.fengwk.kkstudio.platform.catalog.mcp.client.McpToolCallResult;
+import fun.fengwk.kkstudio.platform.catalog.mcp.client.McpToolDefinition;
 import fun.fengwk.kkstudio.platform.catalog.mcp.discovery.McpToolDiscovery;
 
 import java.util.List;

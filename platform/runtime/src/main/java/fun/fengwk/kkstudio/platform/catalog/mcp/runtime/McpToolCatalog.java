@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.platform.catalog.mcp.runtime;
 
-import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
-import fun.fengwk.kkstudio.harness.common.schema.SchemaJsonCodec;
+import fun.fengwk.kkstudio.common.schema.InputSchema;
+import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributionId;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;

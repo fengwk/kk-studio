@@ -35,6 +35,8 @@ import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyProvider;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.platform.catalog.tool.PluginRuntimeToolCatalogSource;
+import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessDispatcherProperties;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugService;
@@ -123,6 +125,7 @@ class HarnessRuntimeConfigurationTest {
   @Autowired private ModelRequestDebugService modelRequestDebugService;
   @Autowired private HarnessWorkDispatcher harnessWorkDispatcher;
   @Autowired private HarnessDispatcherProperties harnessDispatcherProperties;
+  @Autowired private RuntimeToolCatalogSource runtimeToolCatalogSource;
   @Autowired private ApplicationContext applicationContext;
 
   @Autowired
@@ -148,8 +151,8 @@ class HarnessRuntimeConfigurationTest {
   private ExecutorService workerExecutor;
 
   @Autowired
-  @Qualifier("harnessModelFlushExecutor")
-  private ExecutorService flushExecutor;
+  @Qualifier("harnessModelExecutionExecutor")
+  private ExecutorService modelExecutionExecutor;
 
   @Autowired
   @Qualifier("harnessProcessorScheduler")
@@ -173,6 +176,7 @@ class HarnessRuntimeConfigurationTest {
     assertNotNull(modelRequestDebugService);
     assertNotNull(harnessWorkDispatcher);
     assertNotNull(harnessDispatcherProperties);
+    assertInstanceOf(PluginRuntimeToolCatalogSource.class, runtimeToolCatalogSource);
     assertEquals(7, harnessDispatcherProperties.getMaxDispatchTasks());
     assertEquals(Duration.ofSeconds(45), harnessDispatcherProperties.getLeaseDuration());
     assertEquals(Duration.ofSeconds(2), harnessDispatcherProperties.getPollInterval());
@@ -243,16 +247,16 @@ class HarnessRuntimeConfigurationTest {
   }
 
   @Test
-  void flushExecutorRunsOnVirtualThread() throws Exception {
+  void modelExecutionExecutorRunsOnVirtualThread() throws Exception {
     AtomicBoolean isVirtual = new AtomicBoolean();
     CountDownLatch latch = new CountDownLatch(1);
-    flushExecutor.execute(
+    modelExecutionExecutor.execute(
         () -> {
           isVirtual.set(Thread.currentThread().isVirtual());
           latch.countDown();
         });
     assertTrue(latch.await(5, TimeUnit.SECONDS));
-    assertTrue(isVirtual.get(), "flush executor must use virtual threads");
+    assertTrue(isVirtual.get(), "model execution executor must use virtual threads");
   }
 
   @Test

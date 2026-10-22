@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.platform.harness.read;
 
-import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
+import fun.fengwk.kkstudio.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;

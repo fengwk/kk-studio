@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.platform.plugin;
 
-import fun.fengwk.kkstudio.harness.common.json.JsonValues;
+import fun.fengwk.kkstudio.common.json.JsonValues;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore;
 
 import java.nio.charset.StandardCharsets;

@@ -25,13 +25,13 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.common.schema.InputSchema;
+import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.harness.builtin.BuiltinHarnessContributor;
 import fun.fengwk.kkstudio.harness.builtin.environment.ReadTool;
 import fun.fengwk.kkstudio.harness.builtin.environment.ReadToolExecutor;
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfig;
 import fun.fengwk.kkstudio.harness.builtin.subagent.TaskTool;
-import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
-import fun.fengwk.kkstudio.harness.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.harness.contributor.api.ContextFragment;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
@@ -134,13 +134,8 @@ import fun.fengwk.kkstudio.platform.harness.model.DatabaseProviderResolutionServ
 import fun.fengwk.kkstudio.platform.harness.model.ProviderResolutionService.ResolvedExecution;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderResourceMaterializer;
 import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
-import fun.fengwk.kkstudio.platform.project.tool.IssueTransitionService;
-import fun.fengwk.kkstudio.platform.project.tool.IssueTransitionTool;
-import fun.fengwk.kkstudio.platform.project.tool.ProjectHarnessContributor;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
-import fun.fengwk.kkstudio.project.turn.ProjectRunScope;
-import fun.fengwk.kkstudio.project.turn.ProjectRunScopeJsonCodec;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 
@@ -165,6 +160,11 @@ import java.util.function.Consumer;
  * Variant 请求预设、语义化消息投影、缓存终结与基础设施异常透传。
  */
 class DatabaseTurnResolverTest {
+
+  private static final String BUSINESS_CONTRIBUTOR = "business";
+  private static final String BUSINESS_CUSTOM_TYPE = "run";
+  private static final String BUSINESS_TOOL = "business_transition";
+  private static final String BUSINESS_CONTEXT_HEADING = "# Business Context";
 
   /** 内置 Compaction Agent 在 catalog 中配置的 system prompt：历史压缩预览必须读同一份事实。 */
   private static final String COMPACTION_SYSTEM_PROMPT = "compaction catalog system prompt";
@@ -1197,7 +1197,7 @@ class DatabaseTurnResolverTest {
     // 规划为冻结 ToolBinding（而不是 PLANNING_FAILED / tool-not-found）；可用性只留到调用期 fail closed。
     // 同一 Agent 的兄弟工具（同一不可用 server 下的另一个工具，以及静态工具 read）不受影响。
     HarnessCatalog staticCatalog =
-        HarnessCatalog.from(List.of(defaultBuiltinContributor(), defaultProjectContributor()));
+        HarnessCatalog.from(List.of(defaultBuiltinContributor(), defaultBusinessContributor()));
 
     for (McpDiscoveryStatus status : McpDiscoveryStatus.values()) {
       for (boolean enabled : List.of(true, false)) {
@@ -1954,8 +1954,8 @@ class DatabaseTurnResolverTest {
         List.of(new Entry(id(1), SESSION_ID, null, new RootPayload(settings), NOW)));
   }
 
-  /** ROOT 之后追加一条 {@code project/run} 冻结 contributor state，模拟接受 Run 时写入的 branch state。 */
-  private static EntryPath customStatePath(BranchSettings settings, String runScopeJson) {
+  /** ROOT 之后追加一条业务 contributor 冻结的 custom state，模拟接受业务任务时写入的 branch state。 */
+  private static EntryPath customStatePath(BranchSettings settings, String stateJson) {
     return new EntryPath(
         List.of(
             new Entry(id(1), SESSION_ID, null, new RootPayload(settings), NOW),
@@ -1963,11 +1963,7 @@ class DatabaseTurnResolverTest {
                 id(2),
                 SESSION_ID,
                 id(1),
-                new CustomEntryPayload(
-                    ProjectRunScope.CONTRIBUTOR_ID,
-                    ProjectRunScope.CUSTOM_TYPE,
-                    ProjectRunScope.SCHEMA_VERSION,
-                    runScopeJson),
+                new CustomEntryPayload(BUSINESS_CONTRIBUTOR, BUSINESS_CUSTOM_TYPE, 1, stateJson),
                 NOW)));
   }
 
@@ -2188,9 +2184,29 @@ class DatabaseTurnResolverTest {
     return new BuiltinHarnessContributor(readTool, dummyTask);
   }
 
-  static ProjectHarnessContributor defaultProjectContributor() {
-    return new ProjectHarnessContributor(
-        new IssueTransitionTool(mock(IssueTransitionService.class)));
+  /** 业务 contributor 替身：一个可显式选择、无需环境的工具，加上只从本 branch 冻结 custom state 渲染的上下文 projector。 */
+  static HarnessContributor defaultBusinessContributor() {
+    Tool tool = mock(Tool.class);
+    when(tool.descriptor()).thenReturn(hostDescriptor(BUSINESS_TOOL));
+    when(tool.requirements()).thenReturn(ToolRequirements.none());
+    return HarnessContributor.of(
+        new ContributorDescriptor(
+            new ContributorId(BUSINESS_CONTRIBUTOR), "Business", "1", Set.of()),
+        registrar -> {
+          registrar.registerCustomEntryType("business.run", BUSINESS_CUSTOM_TYPE);
+          registrar.registerContextProjector(
+              "business.run.context",
+              branch ->
+                  branch
+                      .latestCustomEntry(BUSINESS_CUSTOM_TYPE)
+                      .map(
+                          state ->
+                              List.of(
+                                  new ContextFragment(
+                                      BUSINESS_CONTEXT_HEADING + "\n" + state.dataJson())))
+                      .orElse(List.of()));
+          registrar.registerTool("business.transition", tool, ToolVisibility.SELECTABLE, 0);
+        });
   }
 
   private static List<String> toolNames(List<ToolBinding> bindings) {
@@ -2625,74 +2641,53 @@ class DatabaseTurnResolverTest {
     assertNull(clearedTools.get(1).environmentId());
   }
 
-  /** 一次 DESIGN Run 的冻结快照：业务身份由接受方冻结到 branch state，运行时不再反查 Thread 归属。 */
-  private static ProjectRunScope runScope() {
-    return new ProjectRunScope(
-        id(900),
-        id(901),
-        id(902),
-        THREAD_ID,
-        7L,
-        "fix the issue",
-        "acceptance description",
-        "DESIGN",
-        "设计",
-        "完成可交付方案",
-        List.of("REVIEW"),
-        "assistant",
-        true);
-  }
-
-  /** 测试意图：业务工具不再由运行时按 owner 注入；Agent 配置显式声明 issue_transition 即可获得该受控工具。 */
+  /** 测试意图：业务工具不由运行时按 owner 注入；Agent 配置显式声明业务工具即可获得该受控工具。 */
   @Test
-  void agentCanExplicitlySelectIssueTransitionTool() {
-    Fixture fixture = new Fixture(List.of("read", IssueTransitionTool.NAME), List.of(), List.of());
+  void agentCanExplicitlySelectBusinessTool() {
+    Fixture fixture = new Fixture(List.of("read", BUSINESS_TOOL), List.of(), List.of());
 
     ModelRequestSpec spec = fixture.resolved(fixture.path(settings("default")));
 
-    assertEquals(List.of("read", IssueTransitionTool.NAME), toolNames(spec.toolBindings()));
+    assertEquals(List.of("read", BUSINESS_TOOL), toolNames(spec.toolBindings()));
     ToolBinding transition = spec.toolBindings().get(1);
     assertEquals(EnvironmentSupport.NONE, transition.environmentSupport());
     assertNull(transition.environmentId());
     assertNull(transition.environmentName());
   }
 
-  /** 测试意图：没有声明业务工具的普通 Thread 绝不获得 Project 工具与 Project 上下文（注入面只由 Agent 配置与 branch state 决定）。 */
+  /** 测试意图：没有声明业务工具的普通 Thread 绝不获得业务工具与业务上下文（注入面只由 Agent 配置与 branch state 决定）。 */
   @Test
-  void ordinaryThreadNeverReceivesProjectToolOrContext() {
+  void ordinaryThreadNeverReceivesBusinessToolOrContext() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
 
     ModelRequestSpec spec = fixture.resolved(fixture.path(settings("default")));
 
     assertEquals(List.of(), spec.toolBindings());
-    assertFalse(spec.systemInstruction().contains("# Issue Agent Context"));
+    assertFalse(spec.systemInstruction().contains(BUSINESS_CONTEXT_HEADING));
   }
 
   /**
-   * 测试意图：Issue 上下文只来自本 branch 冻结的 {@code project/run} contributor state，由上下文 projector 渲染；没有冻结状态的
-   * 普通 branch 不注入任何 Issue 上下文。运行时因此不需要知道 Thread 属于哪个 Issue。
+   * 测试意图：业务上下文只来自本 branch 冻结的 contributor state，由上下文 projector 渲染；没有冻结状态的普通 branch 不注入任何业务
+   * 上下文。运行时因此不需要知道 Thread 属于哪个业务对象。
    */
   @Test
-  void issueContextComesFromFrozenBranchStateOnly() {
+  void businessContextComesFromFrozenBranchStateOnly() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
-    ProjectRunScope scope = runScope();
 
     ModelRequestSpec frozen =
-        fixture.resolved(
-            customStatePath(settings("default"), new ProjectRunScopeJsonCodec().encode(scope)));
+        fixture.resolved(customStatePath(settings("default"), "{\"runId\":\"run-7\"}"));
 
     assertTrue(
-        frozen.systemInstruction().contains("# Issue Agent Context"), frozen.systemInstruction());
-    assertTrue(frozen.systemInstruction().contains("run_id: " + scope.runId()));
-    assertTrue(frozen.systemInstruction().contains("stage: DESIGN (设计)"));
+        frozen.systemInstruction().contains(BUSINESS_CONTEXT_HEADING), frozen.systemInstruction());
+    assertTrue(frozen.systemInstruction().contains("{\"runId\":\"run-7\"}"));
 
     ModelRequestSpec ordinary = fixture.resolved(fixture.path(settings("default")));
-    assertFalse(ordinary.systemInstruction().contains("# Issue Agent Context"));
+    assertFalse(ordinary.systemInstruction().contains(BUSINESS_CONTEXT_HEADING));
   }
 
   /**
-   * 测试意图：唯一系统指令按确定性顺序串联——Agent 正文 → Environment → Contributor fragment；Issue 上下文作为 Contributor
-   * fragment 与通用 projector 片段一起按注册顺序拼接，普通 branch 上 Project 段落整体省略。
+   * 测试意图：唯一系统指令按确定性顺序串联——Agent 正文 → Environment → Contributor fragment；业务上下文作为 Contributor fragment
+   * 与通用 projector 片段一起按注册顺序拼接，普通 branch 上业务段落整体省略。
    */
   @Test
   void contributorFragmentsAppendedInDeterministicOrder() {
@@ -2707,7 +2702,7 @@ class DatabaseTurnResolverTest {
         HarnessCatalog.from(
             List.of(
                 defaultBuiltinContributor(),
-                defaultProjectContributor(),
+                defaultBusinessContributor(),
                 contributorWithProjector));
 
     Fixture fixture =
@@ -2740,24 +2735,23 @@ class DatabaseTurnResolverTest {
     int contributorAt = instruction.indexOf("contributor-fragment-text");
     assertEquals(0, agentAt);
     assertTrue(contributorAt > agentAt, instruction);
-    assertFalse(instruction.contains("# Issue Agent Context"));
+    assertFalse(instruction.contains(BUSINESS_CONTEXT_HEADING));
   }
 
   /** 测试意图：Catalog 缺失 Agent 显式声明的业务工具时 fail-closed，不静默少一个受控工具。 */
   @Test
-  void rejectsWhenCatalogIsMissingDeclaredIssueTransitionTool() {
-    HarnessCatalog catalogWithoutProjectTools =
+  void rejectsWhenCatalogIsMissingDeclaredBusinessTool() {
+    HarnessCatalog catalogWithoutBusinessTools =
         HarnessCatalog.from(List.of(defaultBuiltinContributor()));
     Fixture fixture =
-        new Fixture(
-            List.of(IssueTransitionTool.NAME), List.of(), List.of(), catalogWithoutProjectTools);
+        new Fixture(List.of(BUSINESS_TOOL), List.of(), List.of(), catalogWithoutBusinessTools);
 
     TurnResolver.Rejected rejected = fixture.rejected(fixture.path(settings("default")));
     assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejected.error().code());
-    assertEquals("tool not found: issue_transition", rejected.error().message());
+    assertEquals("tool not found: " + BUSINESS_TOOL, rejected.error().message());
   }
 
-  /** 测试意图：Agent 仍不能声明 INTERNAL 工具；只有 SELECTABLE 贡献（如显式的 issue_transition）才能被选择。 */
+  /** 测试意图：Agent 仍不能声明 INTERNAL 工具；只有 SELECTABLE 贡献（如显式的业务工具）才能被选择。 */
   @Test
   void rejectsInternalToolDeclaredByAgent() {
     // 工具标识符遵循 lowercase dotted/dashed 约定，因此内部工具用 dashed 名声明后仍必须被拒绝。
@@ -3206,7 +3200,7 @@ class DatabaseTurnResolverTest {
       } else {
         List<HarnessContributor> contributors = new ArrayList<>();
         contributors.add(defaultBuiltinContributor());
-        contributors.add(defaultProjectContributor());
+        contributors.add(defaultBusinessContributor());
 
         if (!hostDescriptors.isEmpty()) {
           contributors.add(

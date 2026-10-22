@@ -9,13 +9,13 @@
     <packaging>pom</packaging>
 
     <modules>
+        <module>common</module>
         <module>share</module>
         <module>schema</module>
         <module>work</module>
-        <module>canvas</module>
-        <module>project</module>
         <module>harness</module>
         <module>platform</module>
+        <module>apps</module>
         <module>plugins</module>
         <module>web</module>
     </modules>
@@ -143,27 +143,12 @@
             </dependency>
             <dependency>
                 <groupId>fun.fengwk.kk-studio</groupId>
-                <artifactId>kk-studio-canvas-plugin-api</artifactId>
-                <version>${kk-studio.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>fun.fengwk.kk-studio</groupId>
                 <artifactId>kk-studio-canvas-infra</artifactId>
                 <version>${kk-studio.version}</version>
             </dependency>
             <dependency>
                 <groupId>fun.fengwk.kk-studio</groupId>
-                <artifactId>kk-studio-harness-common</artifactId>
-                <version>${kk-studio.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>fun.fengwk.kk-studio</groupId>
-                <artifactId>kk-studio-harness-mcp</artifactId>
-                <version>${kk-studio.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>fun.fengwk.kk-studio</groupId>
-                <artifactId>kk-studio-harness-tool</artifactId>
+                <artifactId>kk-studio-common</artifactId>
                 <version>${kk-studio.version}</version>
             </dependency>
             <dependency>
@@ -173,22 +158,7 @@
             </dependency>
             <dependency>
                 <groupId>fun.fengwk.kk-studio</groupId>
-                <artifactId>kk-studio-harness-environment-server</artifactId>
-                <version>${kk-studio.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>fun.fengwk.kk-studio</groupId>
                 <artifactId>kk-studio-harness-runtime</artifactId>
-                <version>${kk-studio.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>fun.fengwk.kk-studio</groupId>
-                <artifactId>kk-studio-harness-contributor-api</artifactId>
-                <version>${kk-studio.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>fun.fengwk.kk-studio</groupId>
-                <artifactId>kk-studio-harness-builtin</artifactId>
                 <version>${kk-studio.version}</version>
             </dependency>
             <dependency>
@@ -224,6 +194,11 @@
             <dependency>
                 <groupId>fun.fengwk.kk-studio</groupId>
                 <artifactId>kk-studio-project</artifactId>
+                <version>${kk-studio.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>fun.fengwk.kk-studio</groupId>
+                <artifactId>kk-studio-ide</artifactId>
                 <version>${kk-studio.version}</version>
             </dependency>
             <dependency>

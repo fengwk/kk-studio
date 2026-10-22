@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.platform.plugin.resource;
 
-import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
+import fun.fengwk.kkstudio.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableException;
 
 import java.net.URI;

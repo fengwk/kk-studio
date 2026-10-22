@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.platform.plugin.service;
 
-import fun.fengwk.kkstudio.harness.common.hash.Sha256;
+import fun.fengwk.kkstudio.common.hash.Sha256;
 
 import java.security.SecureRandom;
 import java.util.Base64;

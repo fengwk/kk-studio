@@ -239,8 +239,8 @@ find . -path '*/target/site/jacoco/index.html' -print
 
 ### Fat JAR
 
-根 POM 的 reactor 当前是 [`share`](../../share)、[`schema`](../../schema)、[`canvas`](../../canvas)、
-[`project`](../../project)、[`harness`](../../harness)、[`platform`](../../platform)、
+根 POM 的 reactor 当前是 [`common`](../../common)、[`share`](../../share)、[`schema`](../../schema)、
+[`work`](../../work)、[`harness`](../../harness)、[`platform`](../../platform)、[`apps`](../../apps)、
 [`plugins`](../../plugins)、[`web`](../../web)。需要可运行产物时：
 
 ```bash

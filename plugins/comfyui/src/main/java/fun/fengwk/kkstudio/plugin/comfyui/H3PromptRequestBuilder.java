@@ -1,11 +1,11 @@
 package fun.fengwk.kkstudio.plugin.comfyui;
 
-import fun.fengwk.kkstudio.canvas.CanvasJson;
-import fun.fengwk.kkstudio.canvas.CanvasJson.JsonNumber;
-import fun.fengwk.kkstudio.canvas.CanvasJson.JsonObject;
-import fun.fengwk.kkstudio.canvas.CanvasJson.JsonText;
-import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
+import fun.fengwk.kkstudio.canvas.function.CanvasJson;
+import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonNumber;
+import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonObject;
+import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonText;
+import fun.fengwk.kkstudio.canvas.function.CanvasResourceKind;
 import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptContent;
 
 import java.io.IOException;

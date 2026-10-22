@@ -19,12 +19,12 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterIdeOwnerRoute;
+import fun.fengwk.kkstudio.ide.EnvironmentIdeServiceImpl;
+import fun.fengwk.kkstudio.ide.cluster.IdeInternalPaths;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthenticationException;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalPaths;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
-import fun.fengwk.kkstudio.platform.environment.ide.EnvironmentIdeServiceImpl;
+import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.error.AiDomainException;
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
@@ -49,10 +49,10 @@ import java.util.Map;
  */
 @Slf4j
 @RestController
-@RequestMapping(ClusterInternalPaths.INTERNAL_IDE_PREFIX + "/{environmentId}")
+@RequestMapping(IdeInternalPaths.INTERNAL_IDE_PREFIX + "/{environmentId}")
 public class ClusterEnvironmentIdeInternalController {
 
-  private static final int MAX_METADATA_BODY_BYTES = ClusterInternalPaths.MAX_METADATA_BODY_BYTES;
+  private static final int MAX_METADATA_BODY_BYTES = IdeInternalPaths.MAX_METADATA_BODY_BYTES;
 
   /** viewId 的路径约束：只匹配规范 UUID 形状，避免把同前缀下的其它内部子资源（如反向数据端点 {@code /reverse}）误判为 viewId 并返回 405。 */
   private static final String VIEW_ID =
@@ -144,7 +144,7 @@ public class ClusterEnvironmentIdeInternalController {
 
   private void requireLocalOwner(EnvironmentId environmentId) {
     boolean local =
-        clusterNodeRegistry.route(environmentId).filter(ClusterIdeOwnerRoute::local).isPresent();
+        clusterNodeRegistry.route(environmentId).filter(ClusterOwnerRoute::local).isPresent();
     if (!local) {
       throw new AiEnvironmentIdeUnavailableException(
           "internal IDE request does not match this node's READY owner route");

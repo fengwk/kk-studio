@@ -16,13 +16,13 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import fun.fengwk.kkstudio.harness.common.network.HttpProxySelector;
 import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRuntime;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.plugin.service.PluginContextFactory;
+import fun.fengwk.kkstudio.platform.settings.HttpProxySelector;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 import javax.sql.DataSource;

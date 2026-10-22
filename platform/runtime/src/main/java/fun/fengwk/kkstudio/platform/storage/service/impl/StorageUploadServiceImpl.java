@@ -11,7 +11,7 @@ import org.springframework.util.Assert;
 import org.springframework.util.MimeTypeUtils;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 
-import fun.fengwk.kkstudio.harness.common.hash.Sha256;
+import fun.fengwk.kkstudio.common.hash.Sha256;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.storage.S3ObjectMetadata;

@@ -21,8 +21,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatSessionRepository;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.project.model.IssueAgentThread;
-import fun.fengwk.kkstudio.project.repo.IssueAgentThreadRepository;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionSummaryDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSummaryDTO;
@@ -46,19 +44,18 @@ public class HarnessOwnerQueryService {
 
   private final ChatRepository chatRepository;
   private final ChatSessionRepository chatSessionRepository;
-  private final IssueAgentThreadRepository issueAgentThreadRepository;
+  private final ObjectProvider<IssueAgentOwnership> issueAgentOwnership;
   private final ObjectProvider<HarnessRuntime> runtimes;
 
   public HarnessOwnerQueryService(
       ChatRepository chatRepository,
       ChatSessionRepository chatSessionRepository,
-      IssueAgentThreadRepository issueAgentThreadRepository,
+      ObjectProvider<IssueAgentOwnership> issueAgentOwnership,
       ObjectProvider<HarnessRuntime> runtimes) {
     this.chatRepository = Objects.requireNonNull(chatRepository, "chatRepository");
     this.chatSessionRepository =
         Objects.requireNonNull(chatSessionRepository, "chatSessionRepository");
-    this.issueAgentThreadRepository =
-        Objects.requireNonNull(issueAgentThreadRepository, "issueAgentThreadRepository");
+    this.issueAgentOwnership = Objects.requireNonNull(issueAgentOwnership, "issueAgentOwnership");
     this.runtimes = Objects.requireNonNull(runtimes, "runtimes");
   }
 
@@ -86,12 +83,11 @@ public class HarnessOwnerQueryService {
    * <p>绑定缺失或 Thread 不可解析都是确定性失败，不能回退为“空列表”或枚举同 Session 的其他 Thread。
    */
   private List<HarnessSessionSummaryDTO> listIssueAgentSessions(OwnerRef.IssueAgent owner) {
-    IssueAgentThread binding =
-        issueAgentThreadRepository.findByIssueIdAndAgentName(owner.issueId(), owner.agentName());
-    if (binding == null) {
-      throw new AiResourceNotFoundException("issue_agent_thread");
-    }
-    UUID sessionId = requireRuntime().getThreadSnapshot(binding.threadId()).thread().sessionId();
+    UUID threadId =
+        requireIssueAgentOwnership()
+            .findBoundThread(owner)
+            .orElseThrow(() -> new AiResourceNotFoundException("issue_agent_thread"));
+    UUID sessionId = requireRuntime().getThreadSnapshot(threadId).thread().sessionId();
     return listSessionSummaries(List.of(sessionId));
   }
 
@@ -264,5 +260,13 @@ public class HarnessOwnerQueryService {
       throw new IllegalStateException("harness runtime is not available in this deployment");
     }
     return runtime;
+  }
+
+  private IssueAgentOwnership requireIssueAgentOwnership() {
+    IssueAgentOwnership ownership = issueAgentOwnership.getIfAvailable();
+    if (ownership == null) {
+      throw new IllegalStateException("Issue agent owners require the Project application");
+    }
+    return ownership;
   }
 }

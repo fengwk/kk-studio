@@ -18,14 +18,14 @@ import org.springframework.web.socket.server.support.DefaultHandshakeHandler;
 import org.springframework.web.socket.server.support.WebSocketHttpRequestHandler;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.environment.daemon.IdeHeader;
-import fun.fengwk.kkstudio.harness.environment.server.IdeCommandTransport;
-import fun.fengwk.kkstudio.harness.environment.server.IdeSessionIdentity;
-import fun.fengwk.kkstudio.harness.environment.server.IdeStreamPairingRegistry;
-import fun.fengwk.kkstudio.harness.environment.server.IdeStreamTicketService;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterIdeOwnerRoute;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalClient;
+import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
+import fun.fengwk.kkstudio.ide.IdeCommandTransport;
+import fun.fengwk.kkstudio.ide.cluster.IdeClusterClient;
+import fun.fengwk.kkstudio.ide.protocol.IdeHeader;
+import fun.fengwk.kkstudio.ide.stream.IdeStreamPairingRegistry;
+import fun.fengwk.kkstudio.ide.stream.IdeStreamTicketService;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
+import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -54,7 +54,7 @@ public final class IdeBrowserWebSocketGateway {
   private final IdeGatewayProperties properties;
   private final IdeBrowserSessionRegistry sessions;
   private final ClusterNodeRegistry clusterNodeRegistry;
-  private final ClusterInternalClient clusterInternalClient;
+  private final IdeClusterClient clusterInternalClient;
   private final WebSocketClient webSocketClient;
   private final Map<String, IdeBrowserStreamSession> active = new ConcurrentHashMap<>();
 
@@ -68,7 +68,7 @@ public final class IdeBrowserWebSocketGateway {
       IdeGatewayProperties properties,
       IdeBrowserSessionRegistry sessions,
       ClusterNodeRegistry clusterNodeRegistry,
-      ClusterInternalClient clusterInternalClient,
+      IdeClusterClient clusterInternalClient,
       WebSocketClient webSocketClient) {
     this.transport = Objects.requireNonNull(transport, "transport");
     this.streamTickets = Objects.requireNonNull(streamTickets, "streamTickets");
@@ -111,7 +111,7 @@ public final class IdeBrowserWebSocketGateway {
       response.sendError(HttpServletResponse.SC_FORBIDDEN);
       return;
     }
-    Optional<ClusterIdeOwnerRoute> route = clusterNodeRegistry.route(environmentId);
+    Optional<ClusterOwnerRoute> route = clusterNodeRegistry.route(environmentId);
     AbstractWebSocketHandler handler;
     if (route.isPresent() && !route.get().local()) {
       // 非 owner：cookie/代际由 owner 校验；本节点只做原生分段桥接。
@@ -175,7 +175,7 @@ public final class IdeBrowserWebSocketGateway {
 
   private boolean generationCurrent(
       EnvironmentId environmentId, IdeBrowserSessionRegistry.Session session) {
-    Optional<IdeSessionIdentity> current = transport.ideSessionIdentity(environmentId);
+    Optional<DaemonConnectionIdentity> current = transport.connectionIdentity(environmentId);
     return current.isPresent() && current.get().equals(session.identity());
   }
 
@@ -272,7 +272,7 @@ public final class IdeBrowserWebSocketGateway {
   /** 非 owner 的浏览器连接侧：把浏览器 partial 帧透传给 owner 的内部 WS，并回传 owner 的分段。 */
   private final class RemoteBridgeHandler extends AbstractWebSocketHandler {
 
-    private final ClusterIdeOwnerRoute owner;
+    private final ClusterOwnerRoute owner;
     private final EnvironmentId environmentId;
     private final String rawPathAndQuery;
     private final List<IdeHeader> headers;
@@ -280,7 +280,7 @@ public final class IdeBrowserWebSocketGateway {
     private volatile IdeRemoteBrowserBridge bridge;
 
     private RemoteBridgeHandler(
-        ClusterIdeOwnerRoute owner,
+        ClusterOwnerRoute owner,
         EnvironmentId environmentId,
         String rawPathAndQuery,
         HttpServletRequest request) {

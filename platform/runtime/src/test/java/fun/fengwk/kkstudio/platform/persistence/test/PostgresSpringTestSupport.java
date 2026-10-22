@@ -12,9 +12,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
-import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionDispatcher;
 import fun.fengwk.kkstudio.platform.PlatformTestApplication;
 import fun.fengwk.kkstudio.platform.storage.StorageMaintenance;
 
@@ -44,8 +42,6 @@ public abstract class PostgresSpringTestSupport {
 
   @Autowired(required = false)
   private StorageMaintenance storageMaintenance;
-
-  @MockitoBean private CanvasFunctionDispatcher canvasFunctionDispatcher;
 
   static {
     // SystemSettingsSnapshot 作为共享启动快照，在上下文创建期读取一次 system_setting 默认行；任何 Spring 测试上下文加载前

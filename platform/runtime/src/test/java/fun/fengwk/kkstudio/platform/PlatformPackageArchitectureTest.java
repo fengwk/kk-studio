@@ -21,7 +21,6 @@ class PlatformPackageArchitectureTest {
     assertEquals(
         Set.of(
             "agenttask",
-            "canvas",
             "catalog",
             "chat",
             "configsync",
@@ -32,7 +31,6 @@ class PlatformPackageArchitectureTest {
             "orchestration",
             "persistence",
             "plugin",
-            "project",
             "settings",
             "storage"),
         directDirectoryNames(platformRoot));

@@ -16,15 +16,11 @@
     <dependencies>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
-            <artifactId>kk-studio-harness-common</artifactId>
+            <artifactId>kk-studio-common</artifactId>
         </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
-            <artifactId>kk-studio-harness-contributor-api</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>fun.fengwk.kk-studio</groupId>
-            <artifactId>kk-studio-canvas-plugin-api</artifactId>
+            <artifactId>kk-studio-harness-runtime</artifactId>
         </dependency>
         <dependency>
             <groupId>tools.jackson.core</groupId>
@@ -55,6 +51,8 @@
                                     <element>CLASS</element>
                                     <includes>
                                         <include>fun.fengwk.kkstudio.platform.plugin.*</include>
+                                        <include>fun.fengwk.kkstudio.canvas.function.CanvasFunctionBinding</include>
+                                        <include>fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun</include>
                                     </includes>
                                     <limits>
                                         <limit>

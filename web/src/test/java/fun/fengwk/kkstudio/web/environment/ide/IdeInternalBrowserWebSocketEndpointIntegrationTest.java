@@ -26,16 +26,16 @@ import org.springframework.web.socket.client.standard.StandardWebSocketClient;
 import org.springframework.web.socket.handler.AbstractWebSocketHandler;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonIdeStreamCodec;
-import fun.fengwk.kkstudio.harness.environment.daemon.IdeAction;
-import fun.fengwk.kkstudio.harness.environment.daemon.IdeCommand;
-import fun.fengwk.kkstudio.harness.environment.daemon.IdeReply;
-import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServer;
-import fun.fengwk.kkstudio.harness.environment.server.IdeRequest;
-import fun.fengwk.kkstudio.harness.environment.server.IdeSessionIdentity;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterIdeOwnerRoute;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalClient;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalPaths;
+import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
+import fun.fengwk.kkstudio.ide.IdeCommandTransport;
+import fun.fengwk.kkstudio.ide.IdeRequest;
+import fun.fengwk.kkstudio.ide.cluster.IdeClusterClient;
+import fun.fengwk.kkstudio.ide.cluster.IdeInternalPaths;
+import fun.fengwk.kkstudio.ide.protocol.DaemonIdeStreamCodec;
+import fun.fengwk.kkstudio.ide.protocol.IdeAction;
+import fun.fengwk.kkstudio.ide.protocol.IdeCommand;
+import fun.fengwk.kkstudio.ide.protocol.IdeReply;
+import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.environment.cluster.JdbcClusterNodeRegistry;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
@@ -80,13 +80,13 @@ class IdeInternalBrowserWebSocketEndpointIntegrationTest extends WebPostgresTest
 
   @LocalServerPort private int port;
 
-  @MockitoBean private EnvironmentDaemonServer endpoint;
+  @MockitoBean private IdeCommandTransport endpoint;
 
   @Autowired private IdeBrowserSessionRegistry sessions;
 
   @Autowired private IdeGatewayProperties gatewayProperties;
 
-  @Autowired private ClusterInternalClient clusterInternalClient;
+  @Autowired private IdeClusterClient clusterInternalClient;
 
   @Autowired private JdbcClusterNodeRegistry nodeRegistry;
 
@@ -102,7 +102,7 @@ class IdeInternalBrowserWebSocketEndpointIntegrationTest extends WebPostgresTest
               CompletableFuture<IdeReply> reply = new CompletableFuture<>();
               reply.complete(IdeReply.ok(null, null, null));
               return new IdeRequest(
-                  new IdeSessionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID()),
+                  new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID()),
                   UUID.randomUUID(),
                   reply);
             });
@@ -113,8 +113,7 @@ class IdeInternalBrowserWebSocketEndpointIntegrationTest extends WebPostgresTest
             "X-KK-Cluster-Nonce", "n",
             "X-KK-Cluster-Signature", "forged");
 
-    String response =
-        upgradeProbe(ClusterInternalPaths.dataWsPath(ENVIRONMENT, "/ws/echo"), forged);
+    String response = upgradeProbe(IdeInternalPaths.dataWsPath(ENVIRONMENT, "/ws/echo"), forged);
 
     assertFalse(response.startsWith("HTTP/1.1 101"), "forged HMAC must not upgrade: " + response);
     assertEquals(0, opens.get(), "unauthenticated handshake must not reach the data plane");
@@ -132,16 +131,16 @@ class IdeInternalBrowserWebSocketEndpointIntegrationTest extends WebPostgresTest
               CompletableFuture<IdeReply> reply = new CompletableFuture<>();
               reply.complete(IdeReply.ok(null, null, null));
               return new IdeRequest(
-                  new IdeSessionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID()),
+                  new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID()),
                   UUID.randomUUID(),
                   reply);
             });
-    String path = ClusterInternalPaths.dataWsPath(ENVIRONMENT, "/ws/echo");
+    String path = IdeInternalPaths.dataWsPath(ENVIRONMENT, "/ws/echo");
     Map<String, String> authHeaders =
         clusterInternalClient.signHeaders(
             "GET",
             path,
-            ClusterIdeOwnerRoute.remote(
+            ClusterOwnerRoute.remote(
                 nodeRegistry.localNodeId(), URI.create("http://localhost:" + port)));
 
     String response = upgradeProbe(path, authHeaders);
@@ -185,9 +184,9 @@ class IdeInternalBrowserWebSocketEndpointIntegrationTest extends WebPostgresTest
   @Test
   void completesInternalHandshakeAndEchoesThroughDaemon() throws Exception {
     registerReadyOwner();
-    IdeSessionIdentity identity =
-        new IdeSessionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
-    when(endpoint.ideSessionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
+    DaemonConnectionIdentity identity =
+        new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
+    when(endpoint.connectionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
     EchoDaemon daemon = new EchoDaemon();
     when(endpoint.requestIde(eq(ENVIRONMENT), any()))
         .thenAnswer(
@@ -201,12 +200,12 @@ class IdeInternalBrowserWebSocketEndpointIntegrationTest extends WebPostgresTest
             });
     String cookie = openSession(identity, UUID.randomUUID().toString(), "/home/dev/project");
 
-    String path = ClusterInternalPaths.dataWsPath(ENVIRONMENT, "/ws/echo");
+    String path = IdeInternalPaths.dataWsPath(ENVIRONMENT, "/ws/echo");
     Map<String, String> authHeaders =
         clusterInternalClient.signHeaders(
             "GET",
             path,
-            ClusterIdeOwnerRoute.remote(
+            ClusterOwnerRoute.remote(
                 nodeRegistry.localNodeId(), URI.create("http://localhost:" + port)));
     WebSocketHttpHeaders headers = new WebSocketHttpHeaders();
     headers.add("Cookie", gatewayProperties.requireSessionCookieName() + "=" + cookie);
@@ -344,7 +343,8 @@ class IdeInternalBrowserWebSocketEndpointIntegrationTest extends WebPostgresTest
   }
 
   /** bootstrap 消费的真实前置：先由真实 OPEN_VIEW 授权视图，再消费一次性票据换 cookie。 */
-  private String openSession(IdeSessionIdentity identity, String viewId, String workspacePath) {
+  private String openSession(
+      DaemonConnectionIdentity identity, String viewId, String workspacePath) {
     sessions.viewOpened(identity, viewId, workspacePath);
     return sessions.open(identity, viewId, workspacePath);
   }

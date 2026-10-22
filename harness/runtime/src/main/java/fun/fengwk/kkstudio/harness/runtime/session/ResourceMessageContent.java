@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.session;
 
-import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
+import fun.fengwk.kkstudio.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.harness.runtime.model.ImageInputTier;
 
 import java.util.Objects;

@@ -87,7 +87,7 @@ services:
     volumes:
       - ./mock/server.mjs:/mock/server.mjs:ro
       - ${CANVAS_TEST_MOCK_ROUTES:-./mock/routes.json}:/config/routes.json:ro
-      - ../../platform/runtime/src/test/resources/fun/fengwk/kkstudio/platform/canvas/resource:/fixtures:ro
+      - ../../platform/runtime/src/test/resources/fun/fengwk/kkstudio/platform/storage/media:/fixtures:ro
     healthcheck:
       test:
         - CMD
@@ -124,9 +124,9 @@ services:
       KK_STUDIO_STORAGE_S3_BUCKET: canvas-test
       KK_STUDIO_STORAGE_S3_ACCESS_KEY: canvas-test
       KK_STUDIO_STORAGE_S3_SECRET_KEY: canvas-test-only
-      KK_STUDIO_CANVAS_RESOURCE_FFPROBE_BINARY: ffprobe
-      KK_STUDIO_CANVAS_RESOURCE_FFMPEG_BINARY: ffmpeg
-      KK_STUDIO_CANVAS_RESOURCE_TEMP_DIR: /tmp
+      KK_STUDIO_STORAGE_MEDIA_FFPROBE_BINARY: ffprobe
+      KK_STUDIO_STORAGE_MEDIA_FFMPEG_BINARY: ffmpeg
+      KK_STUDIO_STORAGE_MEDIA_TEMP_DIR: /tmp
       KK_STUDIO_CANVAS_FUNCTION_FAKE_ENABLED: "true"
     ports:
       - "127.0.0.1:${CANVAS_TEST_APP_PORT:-18088}:8080"

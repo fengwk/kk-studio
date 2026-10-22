@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.platform.harness.read;
 
-import fun.fengwk.kkstudio.harness.common.text.TextReadWindow;
 import fun.fengwk.kkstudio.platform.storage.ReadDeadline;
 
 import java.io.ByteArrayInputStream;

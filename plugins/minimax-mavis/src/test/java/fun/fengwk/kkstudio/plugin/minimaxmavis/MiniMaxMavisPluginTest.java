@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
-import fun.fengwk.kkstudio.harness.common.schema.BooleanSchema;
+import fun.fengwk.kkstudio.common.schema.BooleanSchema;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginDescriptor;
 

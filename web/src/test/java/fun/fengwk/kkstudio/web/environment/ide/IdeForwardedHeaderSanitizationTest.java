@@ -9,7 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.environment.daemon.IdeHeader;
+import fun.fengwk.kkstudio.ide.protocol.IdeHeader;
 
 import java.util.ArrayList;
 import java.util.List;

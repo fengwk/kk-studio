@@ -2,7 +2,7 @@
 
 `harness-provider` 用 JDK 21 `HttpClient` 实现四种模型协议，以有界增量解析器读取 SSE，将正常结束、安全过滤、截断与连接故障收敛为 Runtime 能消费的中立结果。它还负责原生推理回放，并把运行时冻结的 `ProviderCacheControl` 映射为各协议 prompt cache wire 字段；错误只做分类，保留上游诊断正文。
 
-生产依赖为 [`harness-runtime`](harness-runtime.md) 的协议类型与 Jackson 3（`tools.jackson.core:jackson-databind`）；凭据、HttpClient 与 Watchdog 调度器由 [Platform](platform.md) 注入。依赖声明见 [`pom.xml`](../../harness/provider/pom.xml)，[`ProviderModuleArchitectureTest`](../../harness/provider/src/test/java/fun/fengwk/kkstudio/harness/provider/ProviderModuleArchitectureTest.java) 校验 import 与 POM。Platform 使用 HTTP/1.1、Redirect.NEVER，HttpClient 内部 executor 复用受管虚拟线程。
+生产依赖为 [`harness-runtime`](harness-runtime.md) 的协议类型与 Jackson 3（`tools.jackson.core:jackson-databind`）；凭据、HttpClient 与 Watchdog 调度器由 [Platform](platform.md) 注入。依赖声明见 [`pom.xml`](../../harness/provider/pom.xml)，方向由仓库检查 [`check.mjs`](../../scripts/dev/verify/repository/check.mjs) 校验。Platform 使用 HTTP/1.1、Redirect.NEVER，HttpClient 内部 executor 复用受管虚拟线程。
 
 ## 传输层
 
@@ -186,7 +186,7 @@ baseUrl 必须是不含 user-info、query、fragment 的 http(s) 地址。非 2x
 - 自由 JSON 数值与 JSON null 契约：四个协议各自的 `*PrecisionRegressionTest` 用真实 encoder / accumulator 锁定「工具 schema 与原生 opaque item / part / block 的数值以 `BigDecimal` 穿过 encoder / stream / replay（`1e309` / `1e-324` / 高精度小数 / 尾零保真）」、「opaque 槽位坐标（Chat 数组条目 `index`、Responses 未知 item `output_index`）在大整数下各自独立、合法 `0` 索引不受影响，其中 Responses 用例经生产 SSE 入口 `handleEvent` 与真实 `OpenAiResponsesRequestEncoder` 复核」与「JSON null 回落协议默认、必需字段 fail closed」，[`ProviderProtocolOptionsJsonTest.java`](../../harness/provider/src/test/java/fun/fengwk/kkstudio/harness/provider/ProviderProtocolOptionsJsonTest.java) 锁定 canonical 选项的高精度与尾零归一。
 - 上游映射：各 UpstreamTestManifestTest 校验资源目录的 manifest（例如 [`transport`](../../harness/provider/src/test/resources/fun/fengwk/kkstudio/harness/provider/transport/upstream-test-manifest.json)）。PORTED 经反射校验目标类、方法与测试注解，并验证声明 fixture 的存在和格式；PASSED 是静态元数据，目标执行结果须运行测试确认。OUT_OF_SCOPE 给出范围原因，真实凭据项另记执行状态。反射映射、fixture 声明、离线测试与真实上游执行分别提供不同证据；维护规则见各协议资源 README。
 
-覆盖率契约：本模块 POM 绑定 JaCoCo `check` 到 `verify`，对四个协议的 Encoder / Accumulator / Adapter / Hasher / Mapper、跨协议共享的 `ProviderStreamBridge`、`ProviderSseCall` 与传输核心要求行覆盖率不低于 0.90，被检查类清单以 [`harness/provider/pom.xml`](../../harness/provider/pom.xml) 为准；运行命令与门禁含义见 [开发与测试](../operations/development-and-testing.md)。依赖方向与 POM 守卫见 [`ProviderModuleArchitectureTest.java`](../../harness/provider/src/test/java/fun/fengwk/kkstudio/harness/provider/ProviderModuleArchitectureTest.java)，它同时要求根包共享组件（`ProviderStreamBridge`、`ProviderErrorHelper`、`ProviderProtocolOptionsJson`、`RequestBodySizeGuard`）不携带被禁止的框架注解或接口。
+覆盖率契约：本模块 POM 绑定 JaCoCo `check` 到 `verify`，对四个协议的 Encoder / Accumulator / Adapter / Hasher / Mapper、跨协议共享的 `ProviderStreamBridge`、`ProviderSseCall` 与传输核心要求行覆盖率不低于 0.90，被检查类清单以 [`harness/provider/pom.xml`](../../harness/provider/pom.xml) 为准；运行命令与门禁含义见 [开发与测试](../operations/development-and-testing.md)。模块只依赖 `harness-runtime`，因此任何组件都无法携带框架注解。
 
 ---
 

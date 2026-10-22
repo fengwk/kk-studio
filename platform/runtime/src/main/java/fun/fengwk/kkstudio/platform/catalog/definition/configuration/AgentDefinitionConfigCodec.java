@@ -10,8 +10,8 @@ import tools.jackson.databind.cfg.CoercionAction;
 import tools.jackson.databind.cfg.CoercionInputShape;
 import tools.jackson.databind.type.LogicalType;
 
-import fun.fengwk.kkstudio.harness.common.skill.SkillNames;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillNames;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 

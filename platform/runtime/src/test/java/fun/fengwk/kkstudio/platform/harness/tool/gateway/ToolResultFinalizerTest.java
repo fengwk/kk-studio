@@ -9,13 +9,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.resource.ResourceRef;
+import fun.fengwk.kkstudio.common.result.BinaryResultContent;
+import fun.fengwk.kkstudio.common.result.JsonResultContent;
+import fun.fengwk.kkstudio.common.result.ResourceResultContent;
+import fun.fengwk.kkstudio.common.result.TextArtifactMetadata;
+import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.builtin.environment.ReadTool;
-import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
-import fun.fengwk.kkstudio.harness.common.result.BinaryResultContent;
-import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
-import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
-import fun.fengwk.kkstudio.harness.common.result.TextArtifactMetadata;
-import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
 

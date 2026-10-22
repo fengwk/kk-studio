@@ -18,9 +18,9 @@ import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
-import fun.fengwk.kkstudio.harness.common.json.JsonValues;
-import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
-import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
+import fun.fengwk.kkstudio.common.json.JsonValues;
+import fun.fengwk.kkstudio.common.schema.InputSchema;
+import fun.fengwk.kkstudio.common.schema.StringSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;

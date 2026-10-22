@@ -25,40 +25,34 @@ Canvas 使用 Function SPI 执行具体能力。两者通过 Storage Blob 保存
 flowchart LR
     Browser["Browser<br/>frontend"]
     Web["web<br/>HTTP / WebSocket / lifecycle"]
+    Apps["Apps<br/>Canvas / Project / IDE"]
+    Plugins["Plugins<br/>tools / functions"]
     PlatformApi["platform-plugin-api<br/>plugin SPI contracts"]
-    PlatformRuntime["platform-runtime<br/>application services / adapters"]
-    Harness["Harness<br/>Runtime / Provider / Contributor"]
-    Plugins["Plugins<br/>auto-configuration / tools / functions"]
+    PlatformRuntime["platform-runtime<br/>catalog / chat / storage / environment / gateways"]
     Infra["Harness Infra<br/>Store / Work / Realtime"]
-    Canvas["Canvas<br/>Core / Infra / Function"]
-    Project["Project<br/>Issue / Run / Controller"]
+    Harness["Harness kernel<br/>Runtime / Provider / Environment"]
+    Common["common<br/>value contracts"]
     PG[("PostgreSQL<br/>durable facts")]
     S3[("S3<br/>attachment and media bytes")]
     Provider["Model Provider"]
     Daemon["Environment Daemon<br/>host capabilities"]
 
     Browser -->|REST + events| Web
+    Web --> Apps
     Web --> PlatformRuntime
-    Web --> PlatformApi
-    Web --> Harness
     Web --> Infra
-    Web --> Canvas
-    Web --> Project
-    Web --> Plugins
+    Web -->|runtime| Plugins
+    Apps --> PlatformRuntime
     Plugins --> PlatformApi
-    Plugins -->|ComfyUI host services| PlatformRuntime
-    Plugins --> Harness
-    Plugins --> Canvas
     PlatformRuntime --> PlatformApi
+    PlatformApi --> Harness
     PlatformRuntime --> Harness
-    PlatformRuntime --> Canvas
-    PlatformRuntime --> Project
-    Project --> Harness
+    Infra --> Harness
+    Harness --> Common
+    Apps --> PG
     PlatformRuntime --> PG
     PlatformRuntime --> S3
     Infra --> PG
-    Canvas --> PG
-    Project --> PG
     Harness --> Provider
     Web <-->|compressed WebSocket| Daemon
     Daemon -->|presigned PUT| S3
@@ -66,24 +60,24 @@ flowchart LR
 ```
 
 [`web`](modules/web.md) 是生产 Spring Boot composition root，装配 HTTP、WebSocket、
-Worker 与生命周期。领域契约和状态机位于内层，数据库、主机、网络和产品适配位于外层：
+Worker 与生命周期。依赖只由外向内：应用依赖平台，平台依赖 Harness 内核，内核只依赖 Common；
+平台需要应用参与的地方由平台定义 SPI、应用实现，平台从不依赖应用：
 
 ```text
-frontend -> web -> platform-runtime
-web -> platform-plugin-api
-web -(runtime)-> selected plugins -> platform-plugin-api / harness-contributor-api / canvas-plugin-api / canvas-core
-comfyui -> platform-plugin-api / canvas-plugin-api / harness-common（标准 ComfyUI HTTP 与冻结工作流）
-web -> canvas-infra -> canvas-plugin-api -> canvas-core
-web -> project -> harness-runtime
-web -> harness-infra -> harness-runtime -> harness-tool / harness-environment
-platform-runtime -> platform-plugin-api
-platform-runtime -> Canvas / Harness contracts / harness-mcp
-platform-runtime -> project（实现宿主端口）
+frontend -> web
+web -> 应用：canvas-infra -> canvas-core、project、ide
+应用 -> platform-runtime -> platform-plugin-api
+web -(runtime)-> 选定插件 -> platform-plugin-api
+platform-plugin-api -> harness-runtime（Tool / Contributor 契约）
+platform-runtime -> harness-provider -> harness-runtime -> harness-environment -> common
+web -> harness-infra -> harness-runtime
+canvas-infra / project / harness-infra -> work（共享调度邮箱）
 daemon -> harness-environment（通过 wire 协议消费共享契约）
 ```
 
-根 [`pom.xml`](../pom.xml) 聚合 `share`、`schema`、`canvas`、`project`、`harness`、
-`platform`、`plugins` 和 `web`；前端是独立 Node/Vite 工程。模块职责与依赖约束见
+根 [`pom.xml`](../pom.xml) 聚合 `common`、`share`、`schema`、`work`、`harness`、`platform`、
+`apps`、`plugins` 和 `web`；前端是独立 Node/Vite 工程。允许的模块依赖由仓库检查
+[`check.mjs`](../scripts/dev/verify/repository/check.mjs) 守护，模块职责见
 [文档导航](README.md#按代码区域理解系统)。公共 DTO 与严格 JSON wire 见
 [Share](modules/share.md)，数据库关系与约束见 [Schema](modules/schema.md)。
 
@@ -188,16 +182,14 @@ Plugin 通过 Spring Boot auto-configuration 注册安装定义；配置实例�
 - `HarnessContributor`：工具、自定义历史类型与上下文投影，使用 Harness 的执行和结果契约。
 - `CanvasFunctionAdapter`：Function 定义与执行，由 Canvas Runtime 管理输入冻结、租约和发布。
 
-当前 Plugin 包括 MiniMax Mavis、Canvas Media 与 Canvas ComfyUI。Plugin 与应用同进程，
-拥有相同 JVM 权限，部署者须信任其代码。Mavis 的配置实例拥有工具与执行器，
-不另注册 Contributor bean；Canvas Media 与 Canvas ComfyUI 提供直接 Adapter。
+Plugin 与应用同进程，拥有相同 JVM 权限，部署者须信任其代码。
 Web 将插件实例和内置贡献一次聚合为完整 `PluginCatalogSnapshot`，校验依赖与名称后
 提供同一快照中的 HarnessCatalog / CanvasFunctionCatalog；失败候选统一释放资源。
 Contributor 契约和 Plugin 装配见
-[Contributor API](modules/harness-contributor-api.md)、[Platform Plugin API](modules/platform-plugin-api.md)
+[Harness Runtime](modules/harness-runtime.md#contributor-与目录)、[Platform Plugin API](modules/platform-plugin-api.md)
 和 [Platform](modules/platform.md)。
 MCP 由 Backend 使用 Streamable HTTP 发现和执行，调用预算与取消见
-[Harness MCP](modules/harness-mcp.md)。
+[Platform](modules/platform.md#mcp-client)。
 
 ## 持久执行链
 
@@ -294,7 +286,7 @@ Model 与 Tool 还经过节点内有界 admission。容量不足在打开 Provid
 多 App 节点共享 PostgreSQL 与 Blob Storage，route、mailbox、Work 与通知经数据库
 协调。数据库不可达时停止依赖 ownership 的准入与写回。租约围栏保护内部状态；
 外部执行结果须由确定响应、查询或人工核实确认。实现见
-[Harness Infra](modules/harness-infra.md)、[Canvas Infra](modules/canvas-infra.md)
+[Harness Infra](modules/harness-infra.md)、[Canvas](modules/canvas.md)
 与 [Project](modules/project.md)。
 
 ## 浏览器读取与主机数据路径
@@ -326,9 +318,8 @@ Environment 按数据类型使用四条路径：
 | Daemon Skill 安装 | 同步人工确认的 commit；安装一致后提供本地 Skill 路径 |
 | Blob 数据面 | Backend 分配预签名 PUT，Daemon 直接流式上传 S3 |
 
-协议、路由租约与主机执行分别见 [Harness Environment](modules/harness-environment.md)、
-[Environment Server](modules/harness-environment-server.md)和
-[Environment Daemon](modules/daemon.md)。
+协议与路由租约见 [Harness Environment](modules/harness-environment.md)，主机执行见
+[Environment Daemon](modules/daemon.md)；同源 IDE 的命令通道与反向数据流见 [IDE](modules/ide.md)。
 
 ## 部署与安全条件
 

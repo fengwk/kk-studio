@@ -10,11 +10,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatSessionRepository;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
-import fun.fengwk.kkstudio.project.model.Issue;
-import fun.fengwk.kkstudio.project.model.IssueAgentThread;
-import fun.fengwk.kkstudio.project.repo.IssueAgentThreadRepository;
-import fun.fengwk.kkstudio.project.repo.IssueRepository;
-import fun.fengwk.kkstudio.project.repo.ProjectRepository;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -39,27 +34,20 @@ public class SessionDeletionOrchestrator {
 
   private final ChatSessionRepository chatSessionRepository;
   private final ChatRepository chatRepository;
-  private final ProjectRepository projectRepository;
-  private final IssueRepository issueRepository;
-  private final IssueAgentThreadRepository issueAgentThreadRepository;
+  private final ObjectProvider<IssueAgentOwnership> issueAgentOwnership;
   private final ObjectProvider<HarnessStore> stores;
   private final SessionBlobRefManager refManager;
 
   public SessionDeletionOrchestrator(
       ChatSessionRepository chatSessionRepository,
       ChatRepository chatRepository,
-      ProjectRepository projectRepository,
-      IssueRepository issueRepository,
-      IssueAgentThreadRepository issueAgentThreadRepository,
+      ObjectProvider<IssueAgentOwnership> issueAgentOwnership,
       ObjectProvider<HarnessStore> stores,
       SessionBlobRefManager refManager) {
     this.chatSessionRepository =
         Objects.requireNonNull(chatSessionRepository, "chatSessionRepository");
     this.chatRepository = Objects.requireNonNull(chatRepository, "chatRepository");
-    this.projectRepository = Objects.requireNonNull(projectRepository, "projectRepository");
-    this.issueRepository = Objects.requireNonNull(issueRepository, "issueRepository");
-    this.issueAgentThreadRepository =
-        Objects.requireNonNull(issueAgentThreadRepository, "issueAgentThreadRepository");
+    this.issueAgentOwnership = Objects.requireNonNull(issueAgentOwnership, "issueAgentOwnership");
     this.stores = Objects.requireNonNull(stores, "stores");
     this.refManager = Objects.requireNonNull(refManager, "refManager");
   }
@@ -125,34 +113,18 @@ public class SessionDeletionOrchestrator {
         }
         yield chatSessionRepository.listSessionIds(chat.chatId());
       }
-      case OwnerRef.IssueAgent issueAgent -> lockIssueAgentAndListSessionIds(issueAgent);
+        // Issue+Agent 的锁序与接受路径一致（Project 排他 -&gt; Issue 排他 -&gt; 读稳定绑定）；绑定缺失即无归属可删。
+      case OwnerRef.IssueAgent issueAgent -> requireIssueAgentOwnership()
+          .lockForDeletion(issueAgent)
+          .map(threadId -> List.of(boundThreadSessionId(threadId)))
+          .orElse(List.of());
     };
   }
 
-  /** Issue+Agent 深删除的锁序与接受路径一致：Project 排他 -&gt; Issue 排他 -&gt; 读稳定绑定。绑定行缺失即无归属可删。 */
-  private List<UUID> lockIssueAgentAndListSessionIds(OwnerRef.IssueAgent owner) {
-    Issue issue = issueRepository.getById(owner.issueId());
-    if (issue == null) {
-      return List.of();
-    }
-    if (projectRepository.lockById(issue.getProjectId()) == null) {
-      return List.of();
-    }
-    if (issueRepository.lockById(owner.issueId()) == null) {
-      return List.of();
-    }
-    IssueAgentThread binding =
-        issueAgentThreadRepository.findByIssueIdAndAgentName(owner.issueId(), owner.agentName());
-    if (binding == null) {
-      return List.of();
-    }
-    return List.of(boundThreadSessionId(binding));
-  }
-
   /** 由稳定绑定解析其 Thread 的 Session；Thread 不可解析说明归属事实已不一致，失败而不是静默跳过删除。 */
-  private UUID boundThreadSessionId(IssueAgentThread binding) {
+  private UUID boundThreadSessionId(UUID threadId) {
     return requireStore()
-        .transaction(tx -> tx.findThread(binding.threadId()).map(ThreadState::sessionId))
+        .transaction(tx -> tx.findThread(threadId).map(ThreadState::sessionId))
         .orElseThrow(
             () -> new IllegalStateException("Issue agent thread disappeared before deletion"));
   }
@@ -242,8 +214,7 @@ public class SessionDeletionOrchestrator {
   private void deleteRelation(OwnerRef owner, UUID sessionId) {
     switch (owner) {
       case OwnerRef.Chat chat -> chatSessionRepository.deleteBySessionId(sessionId);
-      case OwnerRef.IssueAgent issueAgent -> issueAgentThreadRepository.deleteByIssueIdAndAgentName(
-          issueAgent.issueId(), issueAgent.agentName());
+      case OwnerRef.IssueAgent issueAgent -> requireIssueAgentOwnership().deleteBinding(issueAgent);
     }
   }
 
@@ -254,5 +225,13 @@ public class SessionDeletionOrchestrator {
           "harness store is not available; cannot deep delete owner sessions");
     }
     return store;
+  }
+
+  private IssueAgentOwnership requireIssueAgentOwnership() {
+    IssueAgentOwnership ownership = issueAgentOwnership.getIfAvailable();
+    if (ownership == null) {
+      throw new IllegalStateException("Issue agent owners require the Project application");
+    }
+    return ownership;
   }
 }

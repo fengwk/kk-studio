@@ -101,20 +101,19 @@ test('run-agent-matrix contract: accepted snapshot assertions enforce the canoni
   )
 })
 
-test('accepted Thread requires an enabled root policy and an explicit null Goal', () => {
-  // 查询快照必须区分根策略与创建请求的 boolean，并完整投影未设置的 Goal。
+test('accepted Thread requires an enabled root YOLO switch and an explicit null Goal', () => {
+  // 查询快照必须投影执行根自指与显式开启的 YOLO 开关，并完整投影未设置的 Goal。
   const chat = fakeChat()
   const model = fakeModel()
   const accepted = acceptedEnvelope(chat, model)
-  for (const policy of [
-    undefined,
-    { mode: 'DISABLE', rootThreadId: null },
-    { mode: 'FOLLOW', rootThreadId: cid() },
-    { mode: 'ENABLE', rootThreadId: cid() },
+  for (const corrupt of [
+    (thread) => delete thread.yoloEnabled,
+    (thread) => (thread.yoloEnabled = false),
+    (thread) => (thread.rootThreadId = cid()),
+    (thread) => delete thread.rootThreadId,
   ]) {
     const invalid = structuredClone(accepted)
-    invalid.thread.yoloPolicy = policy
-    invalid.thread.yoloEnabled = true
+    corrupt(invalid.thread)
     assert.throws(() => assertThreadSettings(invalid, fakeCase(model), chat.agentName))
   }
 
@@ -169,7 +168,8 @@ function acceptedEnvelope(chat, model) {
       nextCommandSequence: '2',
       version: '1',
       parentThreadId: null,
-      yoloPolicy: { mode: 'ENABLE', rootThreadId: null },
+      rootThreadId: threadId,
+      yoloEnabled: true,
       branchSettings: { ...branchSettingsOf(fakeAgent(), model), goal: null },
       status: 'PROCESSING',
       processing: true,

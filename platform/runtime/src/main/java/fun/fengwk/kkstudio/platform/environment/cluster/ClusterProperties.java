@@ -10,7 +10,7 @@ import java.util.Locale;
 import java.util.Optional;
 
 /**
- * 跨节点 IDE 路由的部署配置。
+ * 跨节点路由（实时追帧与 IDE）的部署配置。
  *
  * <p>{@code internal-url} 是本实例对其他节点可达的 HTTP(S) origin；{@code secret} 是内部认证的共享 HMAC 秘密。两者都缺省时为单节点
  * 部署：只做本地交付，不注册也不接受跨节点路由。任一节点缺少所需配置时对应路由明确不可用，绝不从请求 Host 推断内部地址，也绝不把秘密写入 URL、日志或 DTO。

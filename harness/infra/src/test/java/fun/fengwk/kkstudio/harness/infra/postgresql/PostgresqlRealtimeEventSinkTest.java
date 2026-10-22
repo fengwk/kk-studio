@@ -12,7 +12,7 @@ import org.springframework.jdbc.UncategorizedSQLException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.PreparedStatementCallback;
 
-import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
+import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.infra.realtime.RealtimePayloadBuffer;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;

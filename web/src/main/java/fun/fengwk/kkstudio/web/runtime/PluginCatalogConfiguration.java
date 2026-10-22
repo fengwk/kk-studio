@@ -6,8 +6,8 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.DependsOn;
 
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
+import fun.fengwk.kkstudio.canvas.infra.platform.PluginCanvasFunctionCatalogSource;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
-import fun.fengwk.kkstudio.platform.canvas.function.PluginCanvasFunctionCatalogSource;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRuntime;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRepository;

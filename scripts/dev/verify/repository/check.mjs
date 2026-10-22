@@ -35,22 +35,16 @@ const docsRoot = path.join(repositoryRoot, 'docs')
 
 const moduleDocuments = [
   'builtin-tools-design.md',
-  'canvas-core.md',
-  'canvas-infra.md',
-  'canvas-plugin-api.md',
+  'canvas.md',
+  'common.md',
   'daemon.md',
   'frontend-design-language.md',
   'frontend.md',
-  'harness-builtin.md',
-  'harness-common.md',
-  'harness-contributor-api.md',
   'harness-environment.md',
-  'harness-environment-server.md',
   'harness-infra.md',
-  'harness-mcp.md',
   'harness-provider.md',
   'harness-runtime.md',
-  'harness-tool.md',
+  'ide.md',
   'platform.md',
   'platform-plugin-api.md',
   'project.md',
@@ -82,16 +76,17 @@ const markdownSurfaces = [
 const checkableTopLevels = new Set([
   'AGENTS.md',
   'README.md',
-  'canvas',
+  'apps',
+  'common',
   'deploy',
   'frontend',
   'harness',
   'platform',
-  'project',
   'schema',
   'scripts',
   'share',
   'web',
+  'work',
   'checkstyle.xml',
   'lombok.config',
   'pom.xml',
@@ -436,124 +431,188 @@ function extractPomModules(pomRelativePath) {
   )
 }
 
-function checkRepositoryStructure() {
-  const legitimatePromptPackage = path.join(
-    repositoryRoot,
-    'harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/prompt',
-  )
-  if (!existsSync(legitimatePromptPackage)) {
-    addError(
-      `expected shared prompt package missing: ${relativeFromRoot(legitimatePromptPackage)}`,
-    )
-  }
-
-  const expectedRootModules = [
-    'share',
-    'schema',
-    'work',
-    'canvas',
-    'project',
-    'harness',
-    'platform',
-    'plugins',
-    'web',
-  ]
-  const rootPomPath = path.join(repositoryRoot, 'pom.xml')
-  if (existsSync(rootPomPath)) {
-    const actualRootModules = extractPomModules('pom.xml')
-    if (JSON.stringify(actualRootModules) !== JSON.stringify(expectedRootModules)) {
-      addError(
-        `pom.xml modules mismatch: expected [${expectedRootModules.join(', ')}], found [${actualRootModules.join(', ')}]`,
-      )
-    }
-    for (const moduleName of expectedRootModules) {
-      const moduleDir = path.join(repositoryRoot, moduleName)
-      if (!existsSync(moduleDir)) {
-        addError(`missing root module directory: ${moduleName}`)
-      }
-    }
-  }
-
-  const expectedHarnessModules = [
+/**
+ * Maven 模块与分层：apps -> platform -> harness -> common。表中是每个模块允许声明的内部生产依赖（artifactId 去掉
+ * `kk-studio-` 前缀，test scope 不受限）；platform 与 harness 从不依赖 apps，web 是唯一组合根（`null`）。
+ */
+const moduleDependencies = {
+  common: [],
+  schema: [],
+  share: [],
+  work: [],
+  'harness/environment': ['common'],
+  'harness/runtime': ['common', 'harness-environment'],
+  'harness/provider': ['harness-runtime'],
+  'harness/infra': ['common', 'work', 'harness-environment', 'harness-runtime'],
+  'platform/plugin-api': ['common', 'harness-runtime'],
+  'platform/runtime': [
     'common',
-    'mcp',
-    'tool',
-    'environment',
-    'environment-server',
-    'runtime',
-    'provider',
-    'contributor-api',
-    'builtin',
-    'infra',
-  ]
-  const harnessRoot = path.join(repositoryRoot, 'harness')
-  if (existsSync(harnessRoot)) {
-    const actualHarnessDirectories = readdirSync(harnessRoot, { withFileTypes: true })
-      // Dot-prefixed directories are local IDE/tool metadata, not repository modules.
-      .filter(
-        (entry) =>
-          entry.isDirectory() && entry.name !== 'target' && !entry.name.startsWith('.'),
-      )
-      .map((entry) => entry.name)
-      .sort()
-    const expectedHarnessDirectories = [...expectedHarnessModules].sort()
-    if (
-      JSON.stringify(actualHarnessDirectories) !== JSON.stringify(expectedHarnessDirectories)
-    ) {
-      addError(
-        `harness directories mismatch: expected [${expectedHarnessDirectories.join(', ')}], found [${actualHarnessDirectories.join(', ')}]`,
-      )
+    'share',
+    'harness-environment',
+    'harness-runtime',
+    'harness-provider',
+    'platform-plugin-api',
+  ],
+  'apps/canvas/core': ['common', 'platform-plugin-api'],
+  'apps/canvas/infra': ['common', 'work', 'canvas-core', 'platform-plugin-api', 'platform-runtime'],
+  'apps/project': ['common', 'work', 'harness-runtime', 'platform-runtime'],
+  'apps/ide': ['common', 'share', 'harness-environment', 'platform-runtime'],
+  'plugins/comfyui': ['common', 'platform-plugin-api'],
+  'plugins/media': ['common', 'platform-plugin-api'],
+  'plugins/minimax-mavis': ['common', 'harness-runtime', 'platform-plugin-api'],
+  'plugins/opencli': ['common', 'harness-runtime', 'platform-plugin-api'],
+  web: null,
+}
+
+/** 插件只经平台插件 SPI 接触宿主：Harness contributor/tool 契约、Canvas Function SPI 与共享值类型。 */
+const pluginImportPrefixes = [
+  'fun.fengwk.kkstudio.platform.plugin.',
+  'fun.fengwk.kkstudio.canvas.function.',
+  'fun.fengwk.kkstudio.harness.contributor.api.',
+  'fun.fengwk.kkstudio.harness.tool.',
+  'fun.fengwk.kkstudio.common.',
+]
+
+/** 内核里的 SPI 与内置工具包只依赖契约，绝不触碰 runtime 内部实现。 */
+const kernelContractPackages = ['tool', 'contributor', 'builtin', 'prompt']
+
+function pomDependencies(pomRelativePath) {
+  const source = read(pomRelativePath).replace(/<!--[\s\S]*?-->/gu, '')
+  const block = source.match(/<dependencies>([\s\S]*?)<\/dependencies>/u)
+  if (!block) {
+    return []
+  }
+  return [...block[1].matchAll(/<dependency>([\s\S]*?)<\/dependency>/gu)].map((match) => {
+    const tag = (name) => match[1].match(new RegExp(`<${name}>\\s*([^<\\s]+)\\s*</${name}>`, 'u'))?.[1]
+    return {
+      groupId: tag('groupId'),
+      artifactId: tag('artifactId'),
+      scope: tag('scope') ?? 'compile',
+    }
+  })
+}
+
+function javaImports(directory) {
+  return walkFiles(directory)
+    .filter((filePath) => filePath.endsWith('.java'))
+    .flatMap((filePath) =>
+      [...read(relativeFromRoot(filePath)).matchAll(/^\s*import\s+(?:static\s+)?([\w.*]+)\s*;/gmu)].map(
+        (match) => ({ file: relativeFromRoot(filePath), imported: match[1] }),
+      ),
+    )
+}
+
+function checkModuleBoundaries() {
+  const modulePaths = Object.keys(moduleDependencies)
+  const aggregators = new Map()
+  for (const modulePath of modulePaths) {
+    const parent = path.posix.dirname(modulePath)
+    const key = parent === '.' ? '' : parent
+    aggregators.set(key, [...(aggregators.get(key) ?? []), path.posix.basename(modulePath)])
+    for (let ancestor = key; ancestor !== ''; ) {
+      const above = path.posix.dirname(ancestor)
+      const aboveKey = above === '.' ? '' : above
+      const name = path.posix.basename(ancestor)
+      if (!(aggregators.get(aboveKey) ?? []).includes(name)) {
+        aggregators.set(aboveKey, [...(aggregators.get(aboveKey) ?? []), name])
+      }
+      ancestor = aboveKey
     }
   }
-
-  const harnessPomPath = path.join(repositoryRoot, 'harness/pom.xml')
-  if (existsSync(harnessPomPath)) {
-    const actualHarnessModules = extractPomModules('harness/pom.xml')
-    if (JSON.stringify(actualHarnessModules) !== JSON.stringify(expectedHarnessModules)) {
+  for (const [aggregator, expected] of aggregators) {
+    const pomPath = aggregator === '' ? 'pom.xml' : `${aggregator}/pom.xml`
+    if (!existsSync(path.join(repositoryRoot, pomPath))) {
+      addError(`missing aggregator POM: ${pomPath}`)
+      continue
+    }
+    const actual = extractPomModules(pomPath)
+    if (JSON.stringify([...actual].sort()) !== JSON.stringify([...expected].sort())) {
       addError(
-        `harness/pom.xml modules mismatch: expected [${expectedHarnessModules.join(', ')}], found [${actualHarnessModules.join(', ')}]`,
+        `${pomPath} modules mismatch: expected [${[...expected].sort().join(', ')}], found [${[...actual].sort().join(', ')}]`,
       )
     }
-    for (const moduleName of expectedHarnessModules) {
-      const moduleDir = path.join(repositoryRoot, 'harness', moduleName)
-      if (!existsSync(moduleDir)) {
-        addError(`missing harness module directory: harness/${moduleName}`)
+    // 聚合目录下不允许遗留未声明的模块目录（根目录另有前端、脚本与部署目录，只校验 modules 声明）。
+    if (aggregator !== '') {
+      const directories = readdirSync(path.join(repositoryRoot, aggregator), { withFileTypes: true })
+        .filter(
+          (entry) =>
+            entry.isDirectory() &&
+            entry.name !== 'target' &&
+            entry.name !== 'src' &&
+            !entry.name.startsWith('.'),
+        )
+        .map((entry) => entry.name)
+        .sort()
+      if (JSON.stringify(directories) !== JSON.stringify([...expected].sort())) {
+        addError(
+          `${aggregator} directories mismatch: expected [${[...expected].sort().join(', ')}], found [${directories.join(', ')}]`,
+        )
       }
     }
   }
 
-  // plugins 只聚合构建期可选 Plugin；发行物包含哪些 Plugin 由 web 的 runtime dependency 决定。
-  const expectedPluginsModules = ['minimax-mavis', 'opencli', 'media', 'comfyui']
-  const pluginsRoot = path.join(repositoryRoot, 'plugins')
-  if (existsSync(pluginsRoot)) {
-    const actualPluginsDirectories = readdirSync(pluginsRoot, { withFileTypes: true })
-      .filter(
-        (entry) =>
-          entry.isDirectory() && entry.name !== 'target' && !entry.name.startsWith('.'),
-      )
-      .map((entry) => entry.name)
-      .sort()
-    const expectedPluginsDirectories = [...expectedPluginsModules].sort()
-    if (JSON.stringify(actualPluginsDirectories) !== JSON.stringify(expectedPluginsDirectories)) {
-      addError(
-        `plugins directories mismatch: expected [${expectedPluginsDirectories.join(', ')}], found [${actualPluginsDirectories.join(', ')}]`,
-      )
+  for (const [modulePath, allowed] of Object.entries(moduleDependencies)) {
+    const pomPath = `${modulePath}/pom.xml`
+    if (!existsSync(path.join(repositoryRoot, pomPath))) {
+      addError(`missing module POM: ${pomPath}`)
+      continue
+    }
+    for (const dependency of pomDependencies(pomPath)) {
+      if (dependency.groupId !== 'fun.fengwk.kk-studio' || dependency.scope === 'test') {
+        continue
+      }
+      const name = dependency.artifactId.replace(/^kk-studio-/u, '')
+      if (allowed === null) {
+        if ((name.startsWith('plugin-') || name === 'schema') && dependency.scope !== 'runtime') {
+          addError(`${pomPath}: ${dependency.artifactId} must use runtime scope`)
+        }
+        continue
+      }
+      if (!allowed.includes(name)) {
+        addError(`${pomPath}: ${modulePath} must not depend on ${dependency.artifactId}`)
+      }
     }
   }
 
-  const pluginsPomPath = path.join(repositoryRoot, 'plugins/pom.xml')
-  if (existsSync(pluginsPomPath)) {
-    const actualPluginsModules = extractPomModules('plugins/pom.xml')
-    if (JSON.stringify(actualPluginsModules) !== JSON.stringify(expectedPluginsModules)) {
-      addError(
-        `plugins/pom.xml modules mismatch: expected [${expectedPluginsModules.join(', ')}], found [${actualPluginsModules.join(', ')}]`,
-      )
-    }
-    for (const moduleName of expectedPluginsModules) {
-      const moduleDir = path.join(repositoryRoot, 'plugins', moduleName)
-      if (!existsSync(moduleDir)) {
-        addError(`missing plugins module directory: plugins/${moduleName}`)
+  for (const modulePath of modulePaths.filter((value) => value.startsWith('plugins/'))) {
+    const pluginPackage = `fun.fengwk.kkstudio.plugin.${path.posix.basename(modulePath).replaceAll('-', '')}.`
+    for (const { file, imported } of javaImports(path.join(repositoryRoot, modulePath, 'src/main/java'))) {
+      if (
+        imported.startsWith('fun.fengwk.kkstudio.') &&
+        !imported.startsWith(pluginPackage) &&
+        !pluginImportPrefixes.some((prefix) => imported.startsWith(prefix))
+      ) {
+        addError(`${file}: plugins may only import the platform plugin SPI, found ${imported}`)
       }
+    }
+  }
+
+  for (const contractPackage of kernelContractPackages) {
+    const directory = path.join(
+      repositoryRoot,
+      'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness',
+      contractPackage,
+    )
+    for (const { file, imported } of javaImports(directory)) {
+      if (imported.startsWith('fun.fengwk.kkstudio.harness.runtime.')) {
+        addError(`${file}: kernel contract packages must not import runtime internals (${imported})`)
+      }
+    }
+  }
+
+  // runtime 只经 HarnessCatalog 使用内置工具，不直接依赖 builtin 实现。
+  for (const { file, imported } of javaImports(
+    path.join(repositoryRoot, 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime'),
+  )) {
+    if (imported.startsWith('fun.fengwk.kkstudio.harness.builtin.')) {
+      addError(`${file}: runtime must reach builtin tools only through the catalog (${imported})`)
+    }
+  }
+
+  // web 测试只能经运行时反射接触 opencli，保证发行物可以不带该 Plugin。
+  for (const { file, imported } of javaImports(path.join(repositoryRoot, 'web/src/test/java'))) {
+    if (imported.startsWith('fun.fengwk.kkstudio.plugin.opencli.')) {
+      addError(`${file}: forbidden compile import of opencli plugin class; use runtime reflection`)
     }
   }
 }
@@ -588,18 +647,14 @@ function checkNoHarnessModuleDocs() {
   }
 }
 
-const harnessProductionModules = [
-  'common',
-  'mcp',
-  'tool',
-  'contributor-api',
-  'builtin',
-  'environment',
-  'environment-server',
-  'runtime',
-  'provider',
-  'infra',
-]
+/** 内核与 Common：每个生产包都必须有带 Javadoc 的 package-info，并在模块文档的包架构表中占一行。 */
+const packageDocumentedModules = {
+  common: 'docs/modules/common.md',
+  'harness/environment': 'docs/modules/harness-environment.md',
+  'harness/runtime': 'docs/modules/harness-runtime.md',
+  'harness/provider': 'docs/modules/harness-provider.md',
+  'harness/infra': 'docs/modules/harness-infra.md',
+}
 
 function walkJavaSourceDirectories(directory) {
   if (!existsSync(directory)) {
@@ -614,8 +669,8 @@ function walkJavaSourceDirectories(directory) {
   })
 }
 
-function harnessProductionPackages(moduleName) {
-  const srcMainJava = path.join(repositoryRoot, 'harness', moduleName, 'src/main/java')
+function productionPackages(modulePath) {
+  const srcMainJava = path.join(repositoryRoot, modulePath, 'src/main/java')
   if (!existsSync(srcMainJava)) {
     return []
   }
@@ -648,9 +703,9 @@ function harnessProductionPackages(moduleName) {
   })
 }
 
-function checkHarnessPackageInfo() {
-  for (const moduleName of harnessProductionModules) {
-    for (const { dir, name: expectedPackageName } of harnessProductionPackages(moduleName)) {
+function checkPackageInfo() {
+  for (const modulePath of Object.keys(packageDocumentedModules)) {
+    for (const { dir, name: expectedPackageName } of productionPackages(modulePath)) {
       const packageInfoPath = path.join(dir, 'package-info.java')
       const relativePackageInfoPath = relativeFromRoot(packageInfoPath)
 
@@ -697,9 +752,8 @@ function levelTwoSection(source, title) {
   return lines.slice(start + 1, next < 0 ? lines.length : next).join('\n')
 }
 
-function checkHarnessPackageArchitectureDocs() {
-  for (const moduleName of harnessProductionModules) {
-    const docPath = `docs/modules/harness-${moduleName}.md`
+function checkPackageArchitectureDocs() {
+  for (const [modulePath, docPath] of Object.entries(packageDocumentedModules)) {
     const section = levelTwoSection(read(docPath), '包架构')
     if (section === null) {
       addError(`${docPath}: missing '## 包架构' section`)
@@ -708,7 +762,7 @@ function checkHarnessPackageArchitectureDocs() {
     if (!/^\|\s*(?:包名|包路径)\s*\|/mu.test(section)) {
       addError(`${docPath}: package architecture section must contain a package table`)
     }
-    for (const { name: packageName } of harnessProductionPackages(moduleName)) {
+    for (const { name: packageName } of productionPackages(modulePath)) {
       const displayNames = [
         packageName,
         packageName.replace('fun.fengwk.kkstudio.harness.', ''),
@@ -753,60 +807,15 @@ function checkEnvironmentRouteDocs() {
   }
 }
 
-function checkPluginsDependencyGuards() {
-  const opencliPomPath = path.join(repositoryRoot, 'plugins/opencli/pom.xml')
-  if (existsSync(opencliPomPath)) {
-    const forbiddenHostArtifacts = new Set([
-      'kk-studio-platform-runtime',
-      'kk-studio-share',
-      'kk-studio-web',
-      'kk-studio-harness-runtime',
-      'kk-studio-harness-provider',
-      'kk-studio-harness-environment',
-      'kk-studio-harness-environment-server',
-      'kk-studio-harness-builtin',
-      'kk-studio-harness-infra',
-      'kk-studio-project',
-      'kk-studio-canvas-infra',
-    ])
-    const pomContent = read(relativeFromRoot(opencliPomPath))
-    for (const depMatch of pomContent.matchAll(/<dependency>([\s\S]*?)<\/dependency>/gu)) {
-      const depBlock = depMatch[1]
-      const artifactMatch = depBlock.match(/<artifactId>\s*([^<\s]+)\s*<\/artifactId>/u)
-      if (artifactMatch && forbiddenHostArtifacts.has(artifactMatch[1])) {
-        addError(
-          `plugins/opencli/pom.xml: forbidden host implementation dependency ${artifactMatch[1]}`,
-        )
-      }
-    }
-  }
-
-  const webTestRoot = path.join(repositoryRoot, 'web/src/test/java')
-  if (existsSync(webTestRoot)) {
-    for (const filePath of walkFiles(webTestRoot)) {
-      if (!filePath.endsWith('.java')) {
-        continue
-      }
-      const source = read(relativeFromRoot(filePath))
-      if (/^\s*import\s+(?:static\s+)?fun\.fengwk\.kkstudio\.plugin\.opencli\./mu.test(source)) {
-        addError(
-          `${relativeFromRoot(filePath)}: forbidden compile import of opencli plugin class; use runtime reflection`,
-        )
-      }
-    }
-  }
-}
-
 checkFixedLayout()
 checkHeadings()
 checkLinks()
 checkInlineSourcePaths()
 checkForbiddenReferencesAndTerms()
-checkRepositoryStructure()
-checkPluginsDependencyGuards()
+checkModuleBoundaries()
 checkNoHarnessModuleDocs()
-checkHarnessPackageInfo()
-checkHarnessPackageArchitectureDocs()
+checkPackageInfo()
+checkPackageArchitectureDocs()
 checkEnvironmentRouteDocs()
 
 if (errors.length > 0) {

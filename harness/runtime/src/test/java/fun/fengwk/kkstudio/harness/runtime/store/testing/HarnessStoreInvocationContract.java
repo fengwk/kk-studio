@@ -40,8 +40,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.node.JsonNodeFactory;
 
-import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
-import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
+import fun.fengwk.kkstudio.common.result.JsonResultContent;
+import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;

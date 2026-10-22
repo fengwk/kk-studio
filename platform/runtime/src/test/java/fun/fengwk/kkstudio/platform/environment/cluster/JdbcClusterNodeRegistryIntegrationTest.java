@@ -106,7 +106,7 @@ class JdbcClusterNodeRegistryIntegrationTest extends PostgresSchemaSupport {
   void localReadyOwnerRoutesLocalButStillRequiresTheLease() {
     seedConnection(NODE_A, "READY", "{}", NOW.plusSeconds(60));
 
-    Optional<ClusterIdeOwnerRoute> route = registry(NODE_A, SECRET).route(ENV);
+    Optional<ClusterOwnerRoute> route = registry(NODE_A, SECRET).route(ENV);
 
     assertTrue(route.isPresent());
     assertTrue(route.get().local());
@@ -137,7 +137,7 @@ class JdbcClusterNodeRegistryIntegrationTest extends PostgresSchemaSupport {
     seedConnection(NODE_B, "READY", "{}", NOW.plusSeconds(60));
     seedNode(NODE_B, NODE_B_URL, NOW.plusSeconds(60));
 
-    Optional<ClusterIdeOwnerRoute> route = registry(NODE_A, SECRET).route(ENV);
+    Optional<ClusterOwnerRoute> route = registry(NODE_A, SECRET).route(ENV);
 
     assertTrue(route.isPresent());
     assertFalse(route.get().local());
@@ -198,7 +198,7 @@ class JdbcClusterNodeRegistryIntegrationTest extends PostgresSchemaSupport {
         .params(NODE_B, NODE_B_URL)
         .update();
 
-    Optional<ClusterIdeOwnerRoute> route = registry(NODE_A, SECRET).route(ENV);
+    Optional<ClusterOwnerRoute> route = registry(NODE_A, SECRET).route(ENV);
     assertTrue(route.isPresent());
     assertFalse(route.get().local());
 

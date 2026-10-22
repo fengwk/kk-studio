@@ -15,16 +15,15 @@ import org.springframework.context.annotation.AnnotationConfigApplicationContext
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import fun.fengwk.kkstudio.canvas.CanvasFunctionCatalogSource;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalogSource;
-import fun.fengwk.kkstudio.harness.common.network.HttpProxySelector;
-import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.canvas.infra.platform.PluginCanvasFunctionCatalogSource;
+import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
-import fun.fengwk.kkstudio.platform.canvas.function.PluginCanvasFunctionCatalogSource;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfigSchema;
@@ -38,6 +37,7 @@ import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogSnapshot;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.plugin.service.PluginContextFactory;
+import fun.fengwk.kkstudio.platform.settings.HttpProxySelector;
 
 import java.net.ProxySelector;
 import java.util.List;

@@ -13,10 +13,10 @@ import org.springframework.web.socket.client.WebSocketClient;
 import org.springframework.web.socket.handler.AbstractWebSocketHandler;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.environment.daemon.IdeHeader;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterIdeOwnerRoute;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalClient;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalPaths;
+import fun.fengwk.kkstudio.ide.cluster.IdeClusterClient;
+import fun.fengwk.kkstudio.ide.cluster.IdeInternalPaths;
+import fun.fengwk.kkstudio.ide.protocol.IdeHeader;
+import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
 
 import java.io.IOException;
 import java.net.URI;
@@ -70,8 +70,8 @@ final class IdeRemoteBrowserBridge {
   private record BinaryFrame(byte[] payload, boolean last) implements Frame {}
 
   private final WebSocketClient webSocketClient;
-  private final ClusterInternalClient clusterInternalClient;
-  private final ClusterIdeOwnerRoute owner;
+  private final IdeClusterClient clusterInternalClient;
+  private final ClusterOwnerRoute owner;
   private final EnvironmentId environmentId;
   private final String rawPathAndQuery;
   private final List<IdeHeader> forwardedHeaders;
@@ -88,8 +88,8 @@ final class IdeRemoteBrowserBridge {
 
   IdeRemoteBrowserBridge(
       WebSocketClient webSocketClient,
-      ClusterInternalClient clusterInternalClient,
-      ClusterIdeOwnerRoute owner,
+      IdeClusterClient clusterInternalClient,
+      ClusterOwnerRoute owner,
       EnvironmentId environmentId,
       String rawPathAndQuery,
       List<IdeHeader> forwardedHeaders,
@@ -113,7 +113,7 @@ final class IdeRemoteBrowserBridge {
 
   /** 建立到 owner 的内部 WS，并把 owner 侧的每个分段直接回传给浏览器。 */
   void start() {
-    String canonicalPath = ClusterInternalPaths.dataWsPath(environmentId, rawPathAndQuery);
+    String canonicalPath = IdeInternalPaths.dataWsPath(environmentId, rawPathAndQuery);
     URI target;
     try {
       target = internalWebSocketUri(owner.internalUrl(), canonicalPath);

@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.environment.daemon;
 
-import fun.fengwk.kkstudio.harness.common.json.JsonValues;
+import fun.fengwk.kkstudio.common.json.JsonValues;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 
 import java.util.Objects;

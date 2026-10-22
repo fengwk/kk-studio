@@ -2,11 +2,11 @@ package fun.fengwk.kkstudio.plugin.comfyui;
 
 import tools.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.canvas.CanvasJson.JsonObject;
-import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionOutputSpec;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
+import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonObject;
+import fun.fengwk.kkstudio.canvas.function.CanvasResourceKind;
 
 import java.util.HashSet;
 import java.util.List;

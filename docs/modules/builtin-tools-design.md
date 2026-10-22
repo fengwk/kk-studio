@@ -99,4 +99,4 @@ Work 通知只降低延迟，周期 claim 扫描兜底进程重启和通知丢�
 
 ## 实现与验证
 
-技术实现和验证分别参考 [Daemon](daemon.md)、[Builtin](harness-builtin.md)、[Runtime](harness-runtime.md) 和 [开发与测试](../operations/development-and-testing.md)。
+技术实现和验证分别参考 [Daemon](daemon.md)、[Harness Runtime](harness-runtime.md#内置工具) 和 [开发与测试](../operations/development-and-testing.md)。
