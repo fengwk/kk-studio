@@ -12,7 +12,7 @@ function fixture(reasons = ['PREVIEW_STALE_CURSOR', 'PREVIEW_PLANNING_FAILED']) 
   let previews = 0
   const ctx = {
     vars: {
-      agent: { name: 'fixture-agent', model: 'fixture-provider/fixture-model', variant: 'default' },
+      agent: { name: 'fixture-agent', model: 'fixture-model', variant: 'default' },
       seedModel: { config: { defaultVariant: 'default' } },
     },
     async call(method, path, body) {
@@ -130,7 +130,7 @@ function modelRequestDebugFixture() {
   const agent = {
     name: 'fixture-agent',
     type: 'USER',
-    model: 'fixture-provider/fixture-model',
+    model: 'fixture-model',
     variant: 'default',
   }
   const model = {
@@ -266,7 +266,6 @@ test('model request debug case executes the draft wire and read-only invariants'
   assert.ok(debugPosts.length >= 1)
   const draft = debugPosts[0].body
   assert.deepEqual(draft.model, {
-    providerName: 'fixture-provider',
     modelName: 'fixture-model',
     variant: 'default',
   })

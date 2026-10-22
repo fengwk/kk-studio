@@ -863,7 +863,7 @@ test('委派子 Thread 必须指回发起父且 ROOT payload 只有 settings', (
   const rootPayload = JSON.stringify({
     settings: {
       agentName: 'default-assistant',
-      model: { providerName: 'p', modelName: 'm', variant: 'v' },
+      model: { modelName: 'm', variant: 'v' },
       environmentName: null,
     },
   })

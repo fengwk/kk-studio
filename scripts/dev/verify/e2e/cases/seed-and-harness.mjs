@@ -38,7 +38,7 @@ import {
   waitForDurableMessages,
   waitForQuiescentThread,
 } from '../lib/harness.mjs'
-import { baseModelConfig, canonicalSeedCatalog } from '../lib/fixtures.mjs'
+import { baseModelConfig, canonicalSeedCatalog, encodePathTail } from '../lib/fixtures.mjs'
 import { registerCase, getCase } from '../lib/registry.mjs'
 import { REPO_ROOT } from '../../../lib/repo-root.mjs'
 
@@ -605,7 +605,7 @@ registerCase({
         if (model?.name) {
           await ctx.call(
             'DELETE',
-            `/api/ai/catalog/models/${encodeURIComponent(model.name)}?expectedVersion=${encodeURIComponent(
+            `/api/ai/catalog/models/${encodePathTail(model.name)}?expectedVersion=${encodeURIComponent(
               model.version,
             )}`,
           )

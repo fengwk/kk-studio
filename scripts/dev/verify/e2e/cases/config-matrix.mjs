@@ -2,6 +2,7 @@ import { assert, envelopeData, expectHttpError, cid } from '../lib/http.mjs'
 import {
   agentConfigMatrix,
   baseModelConfig,
+  encodePathTail,
   modelConfigMatrix,
   providerCreateBody,
 } from '../lib/fixtures.mjs'
@@ -63,7 +64,7 @@ for (const row of modelConfigMatrix()) {
         // cleanup model immediately to keep list small
         await ctx.call(
           'DELETE',
-          `/api/ai/catalog/models/${encodeURIComponent(model.name)}?expectedVersion=${encodeURIComponent(model.version)}`,
+          `/api/ai/catalog/models/${encodePathTail(model.name)}?expectedVersion=${encodeURIComponent(model.version)}`,
         )
       } else {
         const err = await expectHttpError(() => ctx.call('POST', '/api/ai/catalog/models', body), {
@@ -190,7 +191,7 @@ registerCase({
     if (sharedModelRefForAgent) {
       await ctx.call(
         'DELETE',
-        `/api/ai/catalog/models/${encodeURIComponent(sharedModelRefForAgent)}?expectedVersion=${encodeURIComponent(sharedModelVersionForAgent)}`,
+        `/api/ai/catalog/models/${encodePathTail(sharedModelRefForAgent)}?expectedVersion=${encodeURIComponent(sharedModelVersionForAgent)}`,
       )
       sharedModelRefForAgent = null
       sharedModelVersionForAgent = null

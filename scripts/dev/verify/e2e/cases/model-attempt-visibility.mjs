@@ -16,7 +16,7 @@ import {
   waitForModelTextDeltaAfterEventSubscribed,
   waitForQuiescentThread,
 } from '../lib/harness.mjs'
-import { baseModelConfig } from '../lib/fixtures.mjs'
+import { baseModelConfig, encodePathTail } from '../lib/fixtures.mjs'
 import { registerCase } from '../lib/registry.mjs'
 
 const PARTIAL_TEXT = 'E2E_FAILED_ATTEMPT_PARTIAL'
@@ -330,7 +330,7 @@ registerCase({
         if (model?.name) {
           await ctx.call(
             'DELETE',
-            `/api/ai/catalog/models/${encodeURIComponent(model.name)}?expectedVersion=${encodeURIComponent(model.version)}`,
+            `/api/ai/catalog/models/${encodePathTail(model.name)}?expectedVersion=${encodeURIComponent(model.version)}`,
           )
         }
       })
