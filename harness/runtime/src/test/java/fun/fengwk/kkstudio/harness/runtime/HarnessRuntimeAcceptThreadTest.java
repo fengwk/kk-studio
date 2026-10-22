@@ -415,7 +415,7 @@ class HarnessRuntimeAcceptThreadTest {
 
   private static NewThreadCommand setModelCommand(UUID idempotencyKey) {
     return new NewThreadCommand(
-        new SetModelCommandPayload(new ModelSelection("provider", "model", "v1")), idempotencyKey);
+        new SetModelCommandPayload(ModelSelection.model("model", "v1")), idempotencyKey);
   }
 
   private static ThreadJoinRequest rootTicket(UUID invocationId) {

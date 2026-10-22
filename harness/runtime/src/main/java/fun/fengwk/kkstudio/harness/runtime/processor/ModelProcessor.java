@@ -7,6 +7,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelAttemptFailure;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelGroupProgress;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestMaterializer;
@@ -210,9 +211,9 @@ public final class ModelProcessor implements AutoCloseable {
             dispatched.threadId(),
             proposedAttempt,
             dispatched.compactionChild(),
-            dispatched.request().toolBindings(),
+            actualRequest(dispatched).toolBindings(),
             config,
-            dispatched.request().model().providerName(),
+            actualRequest(dispatched).model().providerName(),
             clock,
             scheduler,
             heartbeatWorker,
@@ -295,8 +296,8 @@ public final class ModelProcessor implements AutoCloseable {
               new ModelGateway.Execution(
                   invocationId,
                   proposedAttempt,
-                  dispatched.request().providerType(),
-                  dispatched.request().providerConnectionGenerationId(),
+                  actualRequest(dispatched).providerType(),
+                  actualRequest(dispatched).providerConnectionGenerationId(),
                   providerRequest),
               execution);
     } catch (RuntimeException failure) {
@@ -386,24 +387,66 @@ public final class ModelProcessor implements AutoCloseable {
     tx.updateThread(thread.touchVersion(now));
     // ModelInvocation 必须挂在真实 TURN_START 上的不变量断言：压缩子身份不再从 TURN_START payload 推导（父压缩 turn
     // 不产生 ModelInvocation），但仍拒绝引用缺失 / 类型错误的 turn start。
+    UUID invocationId = model.id();
+    UUID turnStartEntryId = model.turnStartEntryId();
     Entry turnStart =
-        tx.findEntry(model.turnStartEntryId())
+        tx.findEntry(turnStartEntryId)
             .orElseThrow(
                 () ->
                     new IllegalStateException(
                         "model invocation "
-                            + model.id()
+                            + invocationId
                             + " references missing turn start "
-                            + model.turnStartEntryId()));
+                            + turnStartEntryId));
     if (!(turnStart.payload() instanceof TurnStartPayload)) {
       throw new IllegalStateException(
           "model invocation " + model.id() + " turnStartEntryId does not reference a TURN_START");
+    }
+    ModelGroupProgress progress = model.groupProgress();
+    var group = model.requestSpec().groupExecution();
+    if (group != null) {
+      if (progress == null || progress.groupVersion() != group.groupVersion()) {
+        throw new IllegalStateException("group invocation is missing matching durable progress");
+      }
+      int index = progress.memberIndex();
+      while (index < group.members().size()
+          && tx.isGroupMemberCooling(
+              group.groupName(),
+              group.groupVersion(),
+              group.members().get(index).model().modelName(),
+              group.members().get(index).variant().id(),
+              now)) {
+        index++;
+      }
+      if (index >= group.members().size()) {
+        tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
+        if (tx.lockClaimedWork(claim, now).isEmpty()) {
+          throw new ClaimLostSignal();
+        }
+        // 全是本地候选选择失败：不伪装成上游调用错误，也不进入普通重试预算。
+        tx.updateModelInvocation(
+            model.fail(
+                new ModelInvocationError(
+                    ProviderErrorKind.INVALID_REQUEST,
+                    "no available model in group: " + group.groupName()),
+                now));
+        tx.updateThread(thread.touchVersion(now));
+        tx.completeWork(claim, now);
+        return new Prepare.Terminated();
+      }
+      if (index != progress.memberIndex()) {
+        progress = new ModelGroupProgress(progress.groupName(), progress.groupVersion(), index, 0);
+        model = model.withGroupProgress(progress, now);
+        tx.updateModelInvocation(model);
+        tx.updateThread(thread.touchVersion(now));
+      }
     }
     return new Prepare.Dispatched(
         thread.id(),
         model.requestHeadEntryId(),
         model.attempt(),
         model.requestSpec(),
+        progress,
         CompactionChildScope.isCompactionChild(tx, thread.id()));
   }
 
@@ -418,7 +461,18 @@ public final class ModelProcessor implements AutoCloseable {
               }
               return tx.loadEntryPath(dispatched.requestHeadEntryId());
             });
-    return materializer.materialize(path, dispatched.request());
+    return materializer.materialize(path, actualRequest(dispatched));
+  }
+
+  /** 组调用按 durable 成员游标派生本次真实执行身份；普通调用原样返回冻结 spec。 */
+  private static ModelRequestSpec actualRequest(Prepare.Dispatched dispatched) {
+    if (dispatched.request().groupExecution() == null) {
+      return dispatched.request();
+    }
+    if (dispatched.groupProgress() == null) {
+      throw new IllegalStateException("group invocation is missing durable group progress");
+    }
+    return dispatched.request().forMember(dispatched.groupProgress().memberIndex());
   }
 
   private static String messageOrClass(RuntimeException error, String fallback) {
@@ -658,6 +712,7 @@ public final class ModelProcessor implements AutoCloseable {
         UUID requestHeadEntryId,
         int attempt,
         ModelRequestSpec request,
+        ModelGroupProgress groupProgress,
         boolean compactionChild)
         implements Prepare {}
 

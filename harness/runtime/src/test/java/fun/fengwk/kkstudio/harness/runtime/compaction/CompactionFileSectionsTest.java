@@ -44,7 +44,7 @@ class CompactionFileSectionsTest {
 
   private static final Instant BASE = Instant.ofEpochSecond(1000L);
   private static final BranchSettings SETTINGS =
-      new BranchSettings("agent", new ModelSelection("provider", "model", "v1"), null);
+      new BranchSettings("agent", ModelSelection.model("model", "v1"), null);
 
   @Test
   void extractsReadWriteAndEditWithModifiedWinningOverRead() {

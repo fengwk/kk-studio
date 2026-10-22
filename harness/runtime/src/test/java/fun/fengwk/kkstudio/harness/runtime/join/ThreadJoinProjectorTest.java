@@ -66,7 +66,7 @@ class ThreadJoinProjectorTest {
   private static final String VALID_HASH =
       "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
   private static final BranchSettings SETTINGS =
-      new BranchSettings("assistant", new ModelSelection("provider", "model", "default"), null);
+      new BranchSettings("assistant", ModelSelection.model("model", "default"), null);
   private static final Instant T0 = Instant.parse("2026-01-01T00:00:00Z");
   private static final Instant T1 = Instant.parse("2026-01-01T00:00:01Z");
   private static final Instant T2 = Instant.parse("2026-01-01T00:00:02Z");

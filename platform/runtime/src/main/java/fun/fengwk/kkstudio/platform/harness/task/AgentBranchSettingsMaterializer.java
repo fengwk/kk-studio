@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfi
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser.ParsedAgentModelConfig;
 import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 
 import java.util.Objects;
 
@@ -77,16 +78,22 @@ public final class AgentBranchSettingsMaterializer {
 
   private BranchSettings materialize(
       String agentName, AgentDefinition agent, String environmentName) {
-    if (agent.getModelProviderName() == null || agent.getModelName() == null) {
+    if (agent.getModelName() == null) {
       // 未配置模型的内置 Agent（如 compaction）不能被普通调用当作路由来源：明确拒绝，不猜测或回退。
       throw new IllegalArgumentException("agent model is not configured: " + agentName);
     }
-    AgentModel model =
-        modelRepository.getByProviderNameAndName(
-            agent.getModelProviderName(), agent.getModelName());
+    AgentModel model = modelRepository.getByName(agent.getModelName());
     if (model == null) {
-      throw new IllegalArgumentException(
-          "subagent model not found: " + agent.getModelProviderName() + "/" + agent.getModelName());
+      throw new IllegalArgumentException("subagent model not found: " + agent.getModelName());
+    }
+    if (model.getKind() == AgentModelKind.GROUP) {
+      // 组没有组级 Variant；具体成员 Variant 在 Runtime 冻结的成员快照中解析。
+      if (agent.getVariant() != null && !agent.getVariant().isBlank()) {
+        throw new IllegalArgumentException(
+            "subagent model group must not select a variant: " + agentName);
+      }
+      return new BranchSettings(
+          agent.getName(), ModelSelection.group(agent.getModelName()), environmentName);
     }
     ParsedAgentModelConfig parsed;
     try {
@@ -108,8 +115,6 @@ public final class AgentBranchSettingsMaterializer {
                 new IllegalArgumentException(
                     "subagent model variant not found: " + agentName + " variant=" + variantName));
     return new BranchSettings(
-        agent.getName(),
-        new ModelSelection(agent.getModelProviderName(), agent.getModelName(), variantName),
-        environmentName);
+        agent.getName(), ModelSelection.model(agent.getModelName(), variantName), environmentName);
   }
 }

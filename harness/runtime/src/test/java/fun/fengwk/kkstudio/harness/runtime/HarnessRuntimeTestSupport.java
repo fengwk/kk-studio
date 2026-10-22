@@ -1198,7 +1198,9 @@ final class HarnessRuntimeTestSupport {
         id,
         sessionId,
         parentId,
-        new HistoryPayloadMapper().assistantPayload(response, requestSpec.toolBindings()),
+        new HistoryPayloadMapper()
+            .assistantPayload(
+                response, requestSpec.toolBindings(), actualSelection(requestSpec), null),
         createdAt);
   }
 
@@ -1226,7 +1228,7 @@ final class HarnessRuntimeTestSupport {
   }
 
   static BranchSettings settings() {
-    return new BranchSettings("agent", new ModelSelection("provider", "model", "v1"), null);
+    return new BranchSettings("agent", ModelSelection.model("model", "v1"), null);
   }
 
   static ModelRequestSpec modelRequest() {
@@ -1348,5 +1350,13 @@ final class HarnessRuntimeTestSupport {
   /** Stop 结果为 replay（幂等重放既有 STOPPED 事实）。 */
   static void assertReplayed(StopResult result) {
     assertTrue(result.replayed());
+  }
+
+  private static ModelSelection actualSelection(ModelRequestSpec requestSpec) {
+    if (requestSpec.groupExecution() == null) {
+      return ModelSelection.model(requestSpec.model().modelName(), requestSpec.variant().id());
+    }
+    var member = requestSpec.groupExecution().members().getFirst();
+    return ModelSelection.model(member.model().modelName(), member.variant().id());
   }
 }

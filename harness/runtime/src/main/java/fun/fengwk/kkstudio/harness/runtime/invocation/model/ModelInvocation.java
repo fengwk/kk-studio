@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.invocation.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
@@ -38,7 +39,9 @@ public record ModelInvocation(
     List<ModelAttemptFailure> failedAttempts,
     Instant createdAt,
     Instant updatedAt,
-    @JsonIgnore ProviderReplayState providerReplayState) {
+    @JsonIgnore ProviderReplayState providerReplayState,
+    @JsonIgnore ModelGroupProgress groupProgress,
+    Instant requestedAt) {
 
   public ModelInvocation {
     Objects.requireNonNull(id, "id");
@@ -97,6 +100,78 @@ public record ModelInvocation(
       UUID resultEntryId,
       List<ModelAttemptFailure> failedAttempts,
       Instant createdAt,
+      Instant updatedAt,
+      ProviderReplayState providerReplayState) {
+    this(
+        id,
+        threadId,
+        turnStartEntryId,
+        requestHeadEntryId,
+        requestSpec,
+        status,
+        attempt,
+        streamCheckpoint,
+        result,
+        error,
+        resultEntryId,
+        failedAttempts,
+        createdAt,
+        updatedAt,
+        providerReplayState,
+        null);
+  }
+
+  public ModelInvocation(
+      UUID id,
+      UUID threadId,
+      UUID turnStartEntryId,
+      UUID requestHeadEntryId,
+      ModelRequestSpec requestSpec,
+      ModelInvocationStatus status,
+      int attempt,
+      StreamCheckpoint streamCheckpoint,
+      ProviderResponse result,
+      ModelInvocationError error,
+      UUID resultEntryId,
+      List<ModelAttemptFailure> failedAttempts,
+      Instant createdAt,
+      Instant updatedAt,
+      ProviderReplayState providerReplayState,
+      ModelGroupProgress groupProgress) {
+    this(
+        id,
+        threadId,
+        turnStartEntryId,
+        requestHeadEntryId,
+        requestSpec,
+        status,
+        attempt,
+        streamCheckpoint,
+        result,
+        error,
+        resultEntryId,
+        failedAttempts,
+        createdAt,
+        updatedAt,
+        providerReplayState,
+        groupProgress,
+        null);
+  }
+
+  public ModelInvocation(
+      UUID id,
+      UUID threadId,
+      UUID turnStartEntryId,
+      UUID requestHeadEntryId,
+      ModelRequestSpec requestSpec,
+      ModelInvocationStatus status,
+      int attempt,
+      StreamCheckpoint streamCheckpoint,
+      ProviderResponse result,
+      ModelInvocationError error,
+      UUID resultEntryId,
+      List<ModelAttemptFailure> failedAttempts,
+      Instant createdAt,
       Instant updatedAt) {
     this(
         id,
@@ -113,7 +188,59 @@ public record ModelInvocation(
         failedAttempts,
         createdAt,
         updatedAt,
+        null,
         null);
+  }
+
+  /** 本次真实执行的逻辑选择：组取 durable 成员游标对应成员，单模型取冻结 descriptor/variant。 */
+  public ModelSelection actualSelection() {
+    if (requestSpec.groupExecution() == null) {
+      return ModelSelection.model(requestSpec.model().modelName(), requestSpec.variant().id());
+    }
+    if (groupProgress == null
+        || groupProgress.memberIndex() >= requestSpec.groupExecution().members().size()) {
+      throw new IllegalStateException("group invocation has invalid durable progress");
+    }
+    ModelGroupMemberExecution member =
+        requestSpec.groupExecution().members().get(groupProgress.memberIndex());
+    return ModelSelection.model(member.model().modelName(), member.variant().id());
+  }
+
+  /** 在保持当前状态事实不变的前提下更新 durable 组进度；只允许与同一事务内的状态推进组合使用。 */
+  public ModelInvocation withGroupProgress(ModelGroupProgress progress, Instant now) {
+    if (requestSpec.groupExecution() == null) {
+      throw new IllegalArgumentException("group progress requires a group request spec");
+    }
+    Objects.requireNonNull(progress, "progress");
+    if (!progress.groupName().equals(requestSpec.groupExecution().groupName())) {
+      throw new IllegalArgumentException("group progress must reference the frozen group");
+    }
+    if (progress.memberIndex() >= requestSpec.groupExecution().members().size()
+        && status != ModelInvocationStatus.FAILED
+        && status != ModelInvocationStatus.SUCCEEDED) {
+      throw new IllegalArgumentException("group progress exhausted all members");
+    }
+    ModelInvocation next =
+        new ModelInvocation(
+            id,
+            threadId,
+            turnStartEntryId,
+            requestHeadEntryId,
+            requestSpec,
+            status,
+            attempt,
+            streamCheckpoint,
+            result,
+            error,
+            resultEntryId,
+            failedAttempts,
+            createdAt,
+            effectiveMutationTime(now),
+            providerReplayState,
+            progress,
+            requestedAt);
+    validateTransition(this, next);
+    return next;
   }
 
   /**
@@ -146,6 +273,53 @@ public record ModelInvocation(
     }
     requireCheckpointTransition(stored, next);
     requireFailedAttemptsTransition(stored, next);
+    requireGroupProgressTransition(stored, next);
+    requireRequestedAtTransition(stored, next);
+  }
+
+  /** 每次确认启动都记录该次真实请求起始时间；其他转换不得改写。 */
+  private static void requireRequestedAtTransition(ModelInvocation stored, ModelInvocation next) {
+    if (Objects.equals(stored.requestedAt(), next.requestedAt())) {
+      return;
+    }
+    if (next.requestedAt() == null
+        || next.status() != ModelInvocationStatus.RUNNING
+        || stored.status() != ModelInvocationStatus.DISPATCHING) {
+      throw new IllegalArgumentException(
+          "requestedAt may only change on a confirmed RUNNING start");
+    }
+  }
+
+  /** 组进度只能单调推进；跨成员时成员内尝试数归零，换配置版本绝不允许。 */
+  private static void requireGroupProgressTransition(ModelInvocation stored, ModelInvocation next) {
+    ModelGroupProgress before = stored.groupProgress();
+    ModelGroupProgress after = next.groupProgress();
+    if (Objects.equals(before, after)) {
+      return;
+    }
+    ModelGroupExecution group = stored.requestSpec().groupExecution();
+    if (group == null || before == null || after == null) {
+      throw new IllegalArgumentException("group progress cannot be introduced or removed");
+    }
+    if (next.status() != ModelInvocationStatus.READY) {
+      throw new IllegalArgumentException("group progress may only change on a READY retry");
+    }
+    if (!before.groupName().equals(after.groupName())
+        || before.groupVersion() != after.groupVersion()
+        || !after.groupName().equals(group.groupName())
+        || after.groupVersion() != group.groupVersion()) {
+      throw new IllegalArgumentException("group progress must stay on the frozen group version");
+    }
+    if (after.memberIndex() < before.memberIndex()) {
+      throw new IllegalArgumentException("group member index must not regress");
+    }
+    if (after.memberIndex() == before.memberIndex()) {
+      if (after.memberAttempts() < before.memberAttempts()) {
+        throw new IllegalArgumentException("member attempts must not regress");
+      }
+    } else if (after.memberAttempts() != 0) {
+      throw new IllegalArgumentException("a new group member must start with zero member attempts");
+    }
   }
 
   private static void requireStableIdentity(ModelInvocation stored, ModelInvocation next) {
@@ -329,6 +503,11 @@ public record ModelInvocation(
         stored.status() == ModelInvocationStatus.DISPATCHING
             && next.status() == ModelInvocationStatus.READY
             && next.attempt() == Math.addExact(stored.attempt(), 1);
+    boolean groupAdvance =
+        confirmedRetry
+            && stored.groupProgress() != null
+            && next.groupProgress() != null
+            && next.groupProgress().memberIndex() > stored.groupProgress().memberIndex();
     if (!confirmedRetry && !dispatchRetry) {
       if (!storedFailures.equals(nextFailures)) {
         throw new IllegalArgumentException("failedAttempts may only change on a retry transition");
@@ -350,7 +529,7 @@ public record ModelInvocation(
       throw new IllegalArgumentException(
           "failed attempt must equal the attempt consumed by this retry");
     }
-    if (!appended.error().retryCandidate()) {
+    if (!appended.error().retryCandidate() && !groupAdvance) {
       throw new IllegalArgumentException("failed attempt requires a retryable error");
     }
   }
@@ -389,15 +568,74 @@ public record ModelInvocation(
 
   /** DISPATCHING -&gt; RUNNING：Gateway 已确认启动；attempt 恰好 +1。 */
   public ModelInvocation markRunning(Instant now) {
-    return withState(
-        ModelInvocationStatus.RUNNING,
-        Math.addExact(attempt, 1),
+    ModelInvocation running =
+        withState(
+            ModelInvocationStatus.RUNNING,
+            Math.addExact(attempt, 1),
+            null,
+            null,
+            null,
+            null,
+            failedAttempts,
+            now);
+    Instant requested = now;
+    return new ModelInvocation(
+        id,
+        threadId,
+        turnStartEntryId,
+        requestHeadEntryId,
+        requestSpec,
+        running.status(),
+        running.attempt(),
+        running.streamCheckpoint(),
+        running.result(),
+        running.error(),
+        running.resultEntryId(),
+        running.failedAttempts(),
+        running.createdAt(),
+        running.updatedAt(),
+        running.providerReplayState(),
+        running.groupProgress(),
+        requested);
+  }
+
+  /**
+   * 组内当前成员失败且不得再普通重试时，记录审计并推进到下一成员。失败可不满足普通 retry 候选（例如确定性
+   * AUTHENTICATION/BILLING）；组降级是独立语义，但仍只追加一条真实 attempt 审计。
+   */
+  public ModelInvocation advanceGroupReady(
+      ModelAttemptFailure failure, ModelGroupProgress progress, Instant now) {
+    Objects.requireNonNull(failure, "failure");
+    Objects.requireNonNull(progress, "progress");
+    if (status != ModelInvocationStatus.RUNNING) {
+      throw new IllegalArgumentException("advanceGroupReady requires RUNNING status");
+    }
+    if (failure.attempt() != attempt) {
+      throw new IllegalArgumentException(
+          "failed attempt must equal the current invocation attempt");
+    }
+    if (groupProgress == null || progress.memberIndex() <= groupProgress.memberIndex()) {
+      throw new IllegalArgumentException("advanceGroupReady requires a later group member");
+    }
+    List<ModelAttemptFailure> nextFailures = new ArrayList<>(failedAttempts);
+    nextFailures.add(failure);
+    return new ModelInvocation(
+        id,
+        threadId,
+        turnStartEntryId,
+        requestHeadEntryId,
+        requestSpec,
+        ModelInvocationStatus.READY,
+        attempt,
         null,
         null,
         null,
         null,
-        failedAttempts,
-        now);
+        nextFailures,
+        createdAt,
+        effectiveMutationTime(now),
+        null,
+        progress);
   }
 
   /** RUNNING -&gt; READY：记录一次瞬态失败后从头重新调度；attempt 保持已确认，安全 checkpoint 被丢弃。 */
@@ -630,7 +868,9 @@ public record ModelInvocation(
             failedAttempts,
             createdAt,
             effectiveMutationTime(now),
-            providerReplayState);
+            providerReplayState,
+            groupProgress,
+            requestedAt);
     validateTransition(this, next);
     return next;
   }

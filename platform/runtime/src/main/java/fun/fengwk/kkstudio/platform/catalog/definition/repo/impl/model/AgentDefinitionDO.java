@@ -10,7 +10,6 @@ public class AgentDefinitionDO {
   private String type;
   private String description;
   private String systemPrompt;
-  private String modelProviderName;
   private String modelName;
   private String variant;
   private String configJson;

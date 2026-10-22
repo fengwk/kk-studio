@@ -22,16 +22,7 @@ public class AgentDefinition {
   /** 系统提示词，可选；映射 text 列。 */
   private String systemPrompt;
 
-  /**
-   * 绑定的 Model provider 名称；与 {@link #modelName} 组成复合外键引用 {@code agent_model}。USER 必填；未配置模型的内置 Agent
-   * 两列同为 null。
-   */
-  private String modelProviderName;
-
-  /**
-   * 绑定的 Model 名称；与 {@link #modelProviderName} 组成复合外键引用 {@code agent_model}。USER 必填；未配置模型的内置 Agent
-   * 两列同为 null。
-   */
+  /** 绑定的全局逻辑模型名；外键引用 {@code agent_model.name}。USER 必填；未配置模型的内置 Agent 为 null。 */
   private String modelName;
 
   /** 可选 Variant 覆盖；null/空表示不覆盖，运行时解析为 Model 配置的 defaultVariant。 */

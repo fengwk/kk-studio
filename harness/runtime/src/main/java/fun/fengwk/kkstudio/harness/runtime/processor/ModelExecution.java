@@ -4,6 +4,8 @@ import lombok.extern.slf4j.Slf4j;
 
 import fun.fengwk.kkstudio.harness.runtime.ThreadTreeLocks;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelAttemptFailure;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelGroupExecution;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelGroupProgress;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.StreamCheckpoint;
@@ -44,6 +46,7 @@ import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
+import java.util.function.Supplier;
 
 /**
  * 一次 claim 的进程内 Model execution：Gateway Listener 回调门控缓冲、所有权围栏与 lease heartbeat。
@@ -986,6 +989,14 @@ final class ModelExecution implements ModelGateway.Listener {
 
   private Applied finishFailureLocked(ModelInvocationError error, List<Publish> publishes) {
     cancelBatchTimerLocked();
+    Applied groupApplied = safeTerminal(() -> commitGroupFailure(error));
+    if (groupApplied != null) {
+      if (groupApplied == Applied.RETRY || groupApplied == Applied.TERMINAL) {
+        batchItems.clear();
+        batchPayloadBytes = 0;
+      }
+      return groupApplied;
+    }
     InvocationRetryDecision decision =
         InvocationRetryDecision.decide(
             config.retryPolicyProvider().retryPolicy(), isRetryable(error), attempt);
@@ -1248,6 +1259,125 @@ final class ModelExecution implements ModelGateway.Listener {
       return Applied.LOST;
     } finally {
       drainLock.unlock();
+    }
+  }
+
+  /**
+   * 组失败的唯一推进事务：普通重试、立即降级、普通重试耗尽、冻结与成员推进、最终失败全部在同一事务中确认。
+   *
+   * <p>返回 null 表示当前 invocation 不是模型组，调用方继续既有单 Model 路径；返回 LOST 表示所有权/状态围栏失败。
+   */
+  private Applied commitGroupFailure(ModelInvocationError error) {
+    Instant leaseNow = clock.instant();
+    return store.transaction(
+        tx -> {
+          ThreadTreeLocks.lockForThread(tx, threadId);
+          ThreadState thread = tx.lockThread(threadId).orElse(null);
+          if (thread == null) {
+            return Applied.LOST;
+          }
+          ModelInvocation model = tx.lockModelInvocation(invocationId).orElse(null);
+          if (model == null || tx.lockClaimedWork(claim, leaseNow).isEmpty()) {
+            return Applied.LOST;
+          }
+          if (model.status() != ModelInvocationStatus.RUNNING || model.attempt() != attempt) {
+            return Applied.LOST;
+          }
+          ModelGroupExecution group = model.requestSpec().groupExecution();
+          if (group == null) {
+            return null;
+          }
+          ModelGroupProgress progress = model.groupProgress();
+          if (progress == null
+              || progress.memberIndex() >= group.members().size()
+              || progress.groupVersion() != group.groupVersion()) {
+            throw new IllegalStateException("invalid durable group progress");
+          }
+          // 取消与上下文溢出保持原有专用语义；本地规划/配置错误不会进入本回调。UNKNOWN 也从不经过该普通失败路径。
+          boolean retryable = isRetryable(error);
+          InvocationRetryDecision retryDecision =
+              retryable
+                  ? InvocationRetryDecision.decide(
+                      config.retryPolicyProvider().retryPolicy(),
+                      true,
+                      progress.memberAttempts() + 1)
+                  : null;
+          ModelGroupFailureDecider.Action action =
+              ModelGroupFailureDecider.decide(
+                  error, group, retryable, retryDecision != null && retryDecision.retry());
+          if (action == ModelGroupFailureDecider.Action.DEDICATED_TERMINAL) {
+            return null;
+          }
+          Instant failedAt = durableFailedAt(leaseNow, thread, model);
+          Instant retryAt = failedAt;
+          ModelAttemptFailure failure =
+              new ModelAttemptFailure(
+                  attempt,
+                  lastSafeSequence,
+                  accumulator.text(),
+                  accumulator.thinking(),
+                  error,
+                  failedAt,
+                  retryAt);
+
+          if (action == ModelGroupFailureDecider.Action.RETRY_CURRENT) {
+            Instant delayedRetryAt = failedAt.plus(retryDecision.delay());
+            ModelAttemptFailure delayedFailure =
+                new ModelAttemptFailure(
+                    attempt,
+                    lastSafeSequence,
+                    accumulator.text(),
+                    accumulator.thinking(),
+                    error,
+                    failedAt,
+                    delayedRetryAt);
+            tx.updateModelInvocation(
+                model
+                    .retryReady(delayedFailure, failedAt)
+                    .withGroupProgress(progress.retryCurrent(), failedAt));
+            tx.updateThread(thread.touchVersion(failedAt));
+            tx.rescheduleWork(claim, leaseNow, Duration.between(leaseNow, delayedRetryAt));
+            return Applied.RETRY;
+          }
+
+          if (group.cooldownSeconds() > 0) {
+            var member = group.members().get(progress.memberIndex());
+            tx.freezeGroupMember(
+                group.groupName(),
+                group.groupVersion(),
+                member.model().modelName(),
+                member.variant().id(),
+                failedAt.plusSeconds(group.cooldownSeconds()),
+                failedAt);
+          }
+          int nextIndex = progress.memberIndex() + 1;
+          if (nextIndex < group.members().size()) {
+            ModelGroupProgress next =
+                new ModelGroupProgress(progress.groupName(), progress.groupVersion(), nextIndex, 0);
+            tx.updateModelInvocation(model.advanceGroupReady(failure, next, failedAt));
+            tx.updateThread(thread.touchVersion(failedAt));
+            // 降级到下一成员不等待：立即重新调度同一逻辑 invocation，cursor 已在同事务推进。
+            tx.rescheduleWork(claim, leaseNow, Duration.ofMillis(1));
+            return Applied.RETRY;
+          }
+          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId), failedAt);
+          tx.updateModelInvocation(model.fail(error, failedAt));
+          tx.updateThread(thread.touchVersion(failedAt));
+          tx.completeWork(claim, failedAt);
+          return Applied.TERMINAL;
+        });
+  }
+
+  /** 组失败事务失败时返回 null 以回退既有单 Model 路径；成功时给出 Applied。 */
+  private Applied safeTerminal(Supplier<Applied> action) {
+    try {
+      return action.get();
+    } catch (RuntimeException failure) {
+      log.warn(
+          "cannot persist model group terminal/retry for {}: {}",
+          invocationId,
+          ProcessorExceptions.describe(failure));
+      return Applied.LOST;
     }
   }
 

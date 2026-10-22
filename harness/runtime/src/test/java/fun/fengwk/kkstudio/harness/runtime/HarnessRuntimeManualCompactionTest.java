@@ -256,7 +256,7 @@ class HarnessRuntimeManualCompactionTest {
     seedCommand(
         configFixture.store,
         configBaseline.threadId(),
-        new SetModelCommandPayload(new ModelSelection("provider", "model-b", "v2")));
+        new SetModelCommandPayload(ModelSelection.model("model-b", "v2")));
     configFixture.resolver.results.add(rejection());
     long configVersion = thread(configFixture.store, configBaseline.threadId()).version();
     configFixture.runtime.compactThread(
