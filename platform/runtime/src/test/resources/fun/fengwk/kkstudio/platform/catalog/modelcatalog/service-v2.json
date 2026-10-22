@@ -1,0 +1,17 @@
+{
+  "gamma": {
+    "id": "gamma",
+    "models": {
+      "g2": { "id": "g2", "cost": { "text": { "input": { "price": 2 }, "output": { "price": 4 } } } },
+      "g1": { "id": "g1", "cost": { "text": { "input": { "price": 1 }, "output": { "price": 2 } } } }
+    }
+  },
+  "delta": {
+    "id": "delta",
+    "models": {
+      "d3": { "id": "d3", "cost": { "text": { "input": { "price": 3 }, "output": { "price": 6 } } } },
+      "d1": { "id": "d1", "cost": { "text": { "input": { "price": 1 }, "output": { "price": 2 } } } },
+      "d2": { "id": "d2", "cost": { "text": { "input": { "price": 2 }, "output": { "price": 4 } } } }
+    }
+  }
+}
