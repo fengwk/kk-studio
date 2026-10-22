@@ -923,8 +923,7 @@ class HarnessRuntimeJoinAcceptanceTest {
         new NewThreadCommand(new SetAgentCommandPayload("worker"), TestIds.id(5003));
     NewThreadCommand setModel =
         new NewThreadCommand(
-            new SetModelCommandPayload(new ModelSelection("provider", "model", "v1")),
-            TestIds.id(5004));
+            new SetModelCommandPayload(ModelSelection.model("model", "v1")), TestIds.id(5004));
 
     assertSpawnRejected(List.of(first, second));
     assertSpawnRejected(List.of(setAgent));

@@ -81,8 +81,8 @@ class AgentDefinitionRepositoryIntegrationTest {
         .update();
     jdbcClient
         .sql(
-            "insert into agent_model (provider_name, name, model_id, config)"
-                + " values (:provider, :model, :modelId, '{}'::jsonb)")
+            "insert into agent_model (name, kind, provider_name, model_id, config)"
+                + " values (:model, 'MODEL', :provider, :modelId, '{}'::jsonb)")
         .param("provider", providerName)
         .param("model", modelName)
         .param("modelId", "wire-" + id)
@@ -93,7 +93,6 @@ class AgentDefinitionRepositoryIntegrationTest {
                 AgentDefinition.builder()
                     .name(name)
                     .type(AgentDefinitionType.USER)
-                    .modelProviderName(providerName)
                     .modelName(modelName)
                     .configJson(configJson)
                     .build()))

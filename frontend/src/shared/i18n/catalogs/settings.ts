@@ -815,6 +815,30 @@ export const settingsCatalog = {
     'en-US': 'HTTP errors matching this list retry within existing attempt and backoff budgets. Unlisted HTTP errors fail directly. Takes effect on next invocation.',
     'zh-CN': '匹配此列表的 HTTP 错误在现有重试次数与退避预算内自动重试；未列出的 HTTP 错误直接失败。下次调用生效。',
   },
+  'settings.section.aiRuntime.modelCatalog.title': {
+    'en-US': 'Model catalog',
+    'zh-CN': '模型目录',
+  },
+  'settings.section.aiRuntime.modelCatalog.description': {
+    'en-US': 'Choose where default parameters for new models come from. Takes effect the next time the catalog loads.',
+    'zh-CN': '选择新建模型时默认参数的来源。下次加载目录时生效。',
+  },
+  'settings.field.aiRuntime.modelCatalogSource': {
+    'en-US': 'Catalog source',
+    'zh-CN': '目录来源',
+  },
+  'settings.field.aiRuntime.modelCatalogSource.hint': {
+    'en-US': 'Candidates come only from the selected source.',
+    'zh-CN': '候选只来自所选来源。',
+  },
+  'settings.option.modelCatalogSource.modelsDevV2': {
+    'en-US': 'models.dev v2',
+    'zh-CN': 'models.dev v2',
+  },
+  'settings.option.modelCatalogSource.modelsDevV1': {
+    'en-US': 'models.dev v1',
+    'zh-CN': 'models.dev v1',
+  },
 
   // --- Tools & Permissions ---
   'settings.section.tool.description': {

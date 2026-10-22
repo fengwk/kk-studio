@@ -112,6 +112,7 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
+import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelGroupConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser.ParsedAgentModelConfig;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
@@ -137,9 +138,9 @@ import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 
-import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -203,11 +204,10 @@ class DatabaseTurnResolverTest {
   @Test
   void resolvesExactBranchModelReferencesWithoutFallback() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
-    // Agent 自带的 provider/model/variant 引用是旧数据，绝不能被读取。
-    fixture.editAgent(agent -> agent.modelProviderName("old-provider"));
+    // Agent 自带的 model/variant 引用是旧数据，绝不能被读取。
     fixture.editAgent(agent -> agent.modelName("old-model"));
     fixture.editAgent(agent -> agent.variant("old-variant"));
-    when(fixture.providers.getByName("old-provider")).thenReturn(null);
+    when(fixture.models.getByName("old-model")).thenReturn(null);
     TurnResolver.Resolved resolved = fixture.resolvedResult(fixture.path(settings("custom")), null);
     ModelRequestSpec requestSpec = resolved.spec();
 
@@ -241,9 +241,8 @@ class DatabaseTurnResolverTest {
   void unavailableThreadModelFallsBackToTheAgentDefaultModel() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
     fixture.missingModel();
-    ModelSelection backup = new ModelSelection("backup-provider", "backup-model", "default");
-    fixture.addModel(backup, Fixture.parsedModel());
-    fixture.editAgent(agent -> agent.modelProviderName("backup-provider"));
+    ModelSelection backup = ModelSelection.model("backup-model", "default");
+    fixture.addModel("backup-provider", backup, Fixture.parsedModel());
     fixture.editAgent(agent -> agent.modelName("backup-model"));
 
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("custom")));
@@ -259,21 +258,17 @@ class DatabaseTurnResolverTest {
   void rejectsWhenThreadAndAgentDefaultModelsAreBothUnavailable() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
     fixture.missingModel();
-    fixture.editAgent(agent -> agent.modelProviderName("backup-provider"));
     fixture.editAgent(agent -> agent.modelName("backup-model"));
 
     assertEquals(
-        "model provider/model and the agent default model are both unavailable;"
-            + " bind an available model",
+        "model model and the agent default model are both unavailable; bind an available model",
         fixture.rejected(fixture.path(settings("default"))).error().message());
 
     fixture = new Fixture(List.of(), List.of(), List.of());
     fixture.missingModel();
-    fixture.editAgent(agent -> agent.modelProviderName("provider"));
     fixture.editAgent(agent -> agent.modelName("model"));
     assertEquals(
-        "model provider/model and the agent default model are both unavailable;"
-            + " bind an available model",
+        "model model and the agent default model are both unavailable; bind an available model",
         fixture.rejected(fixture.path(settings("default"))).error().message());
   }
 
@@ -308,8 +303,7 @@ class DatabaseTurnResolverTest {
     fixture = new Fixture(List.of(), List.of(), List.of());
     fixture.missingProvider();
     assertEquals(
-        "model provider/model and the agent default model are both unavailable;"
-            + " bind an available model",
+        "provider not found: provider",
         fixture.rejected(fixture.path(settings("default"))).error().message());
 
     fixture = new Fixture(List.of(), List.of(), List.of());
@@ -359,7 +353,7 @@ class DatabaseTurnResolverTest {
 
     TurnResolver.Rejected rejected = fixture.rejected(fixture.path(settings("default")));
 
-    assertEquals("model does not support tools: provider/model", rejected.error().message());
+    assertEquals("model does not support tools: model", rejected.error().message());
   }
 
   @Test
@@ -545,8 +539,7 @@ class DatabaseTurnResolverTest {
     assertEquals(ENV_A, requestSpec.toolBindings().getFirst().environmentId());
 
     BranchSettings missingName =
-        new BranchSettings(
-            "assistant", new ModelSelection("provider", "model", "default"), ENV_MISSING_NAME);
+        new BranchSettings("assistant", new ModelSelection("model", "default"), ENV_MISSING_NAME);
     TurnResolver.Rejected rejected = fixture.rejected(fixture.path(missingName));
     assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejected.error().code());
     assertEquals("environment not found: " + ENV_MISSING_NAME, rejected.error().message());
@@ -575,9 +568,7 @@ class DatabaseTurnResolverTest {
             .resolved(
                 matching.path(
                     new BranchSettings(
-                        "assistant",
-                        new ModelSelection("provider", "model", "default"),
-                        ENV_B_NAME)))
+                        "assistant", new ModelSelection("model", "default"), ENV_B_NAME)))
             .toolBindings()
             .getFirst()
             .environmentId());
@@ -674,8 +665,7 @@ class DatabaseTurnResolverTest {
     LiveTurnPlan.Planned custom =
         fixture.plannedWithSettings(
             path,
-            new BranchSettings(
-                "assistant", new ModelSelection("provider", "model", "custom"), ENV_A_NAME));
+            new BranchSettings("assistant", new ModelSelection("model", "custom"), ENV_A_NAME));
     assertEquals("custom", custom.spec().variant().id());
 
     // 规划只读：path 的 base settings 与最初完全一致，Draft 绝不写回 EntryPath。
@@ -692,9 +682,7 @@ class DatabaseTurnResolverTest {
             .rejected(
                 fixture.path(
                     new BranchSettings(
-                        "assistant",
-                        new ModelSelection("provider", "model", "default"),
-                        ENV_MISSING_NAME)))
+                        "assistant", new ModelSelection("model", "default"), ENV_MISSING_NAME)))
             .error()
             .message());
   }
@@ -763,8 +751,7 @@ class DatabaseTurnResolverTest {
     fixture.readyEnvironment(ENV_A, List.of("dev-a"));
     fixture.readyEnvironment(ENV_B, List.of("dev-b"));
     BranchSettings settings =
-        new BranchSettings(
-            "assistant", new ModelSelection("provider", "model", "default"), ENV_B_NAME);
+        new BranchSettings("assistant", new ModelSelection("model", "default"), ENV_B_NAME);
 
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings));
 
@@ -1049,7 +1036,7 @@ class DatabaseTurnResolverTest {
     fixture = new Fixture(List.of(), List.of(), List.of());
     fixture.modelSupportsReasoning(false);
     assertEquals(
-        "model does not support reasoning: provider/model",
+        "model does not support reasoning: model",
         fixture.rejected(fixture.path(settings("custom"))).error().message());
 
     // reasoningEffort 为 null 的 variant 即使模型不支持 reasoning 也合法。
@@ -1596,7 +1583,7 @@ class DatabaseTurnResolverTest {
             ProviderType.OPENAI,
             PromptCacheRetention.SHORT,
             true);
-    ModelSelection compactor = new ModelSelection("provider", "model", "default");
+    ModelSelection compactor = new ModelSelection("model", "default");
     fixture.compactionAgent(compactor);
     BranchSettings compactorSettings = new BranchSettings("Compaction", compactor, ENV_A_NAME);
 
@@ -1661,8 +1648,8 @@ class DatabaseTurnResolverTest {
             true);
     fixture.editProvider(
         provider -> provider.configJson(configJson).baseUrl("https://example.invalid/v1"));
-    AgentModel model = fixture.models.getByProviderNameAndName("provider", "model");
-    when(fixture.models.getByProviderNameAndName("provider", "model"))
+    AgentModel model = fixture.models.getByName("model");
+    when(fixture.models.getByName("model"))
         .thenReturn(model.toBuilder().modelId("gpt-5.6").build());
     ProviderFactory factory = fixture.resolverProviderFactory();
     when(factory.promptCacheRetention(any())).thenReturn(PromptCacheRetention.SHORT);
@@ -1852,8 +1839,7 @@ class DatabaseTurnResolverTest {
     // 显式业务 Rejection 是确定性规划结果，不是可重试的 SQL / 基础设施失败。
     Fixture deterministic = new Fixture(List.of("read"), List.of(), List.of());
     BranchSettings missingEnvironment =
-        new BranchSettings(
-            "assistant", new ModelSelection("provider", "model", "default"), ENV_MISSING_NAME);
+        new BranchSettings("assistant", ModelSelection.model("model", "default"), ENV_MISSING_NAME);
     TurnResolver.Rejected rejected = deterministic.rejected(deterministic.path(missingEnvironment));
     assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejected.error().code());
     assertTrue(rejected.error().message().startsWith("environment not found:"));
@@ -1940,13 +1926,12 @@ class DatabaseTurnResolverTest {
 
   /** BranchSettings 冻结 agent/model 与可空 environmentName；解析出的 EnvironmentId 只能来自该 name。 */
   private static BranchSettings settings(String variant) {
-    return new BranchSettings(
-        "assistant", new ModelSelection("provider", "model", variant), ENV_A_NAME);
+    return new BranchSettings("assistant", new ModelSelection("model", variant), ENV_A_NAME);
   }
 
   /** 未选择 Environment 的 branch：环境工具仍需声明并可规划，调用时才失败。 */
   private static BranchSettings unboundSettings(String variant) {
-    return new BranchSettings("assistant", new ModelSelection("provider", "model", variant), null);
+    return new BranchSettings("assistant", new ModelSelection("model", variant), null);
   }
 
   private static EntryPath rootPath(BranchSettings settings) {
@@ -1997,7 +1982,8 @@ class DatabaseTurnResolverTest {
                     new AgentMessage(
                         AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("reply"))),
                     new AssistantMessageMetadata(
-                        GenerationStopReason.COMPLETE, new ModelUsage(1L, 1L, 0L, 0L, 0L, 0L, 2L)),
+                        GenerationStopReason.COMPLETE,
+                        new ModelUsage(1L, 1L, 0L, 0L, Map.of(), 0L, 2L)),
                     null),
                 NOW.plusSeconds(3)),
             new Entry(
@@ -2156,6 +2142,8 @@ class DatabaseTurnResolverTest {
                 id(3),
                 new ModelAttemptFailurePayload(
                     new ModelAttemptSnapshot(1, 4, "retry-only-secret", ""),
+                    settings.model(),
+                    NOW.plusSeconds(1),
                     new AssistantError("TRANSIENT", "provider unavailable"),
                     NOW.plusSeconds(2)),
                 NOW),
@@ -2224,19 +2212,7 @@ class DatabaseTurnResolverTest {
   }
 
   private static ModelPricing pricing() {
-    return new ModelPricing(
-        "USD",
-        "standard",
-        "default",
-        BigDecimal.ONE,
-        "v1",
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        List.of());
+    return ModelPricing.ZERO;
   }
 
   @Test
@@ -2393,9 +2369,9 @@ class DatabaseTurnResolverTest {
   @Test
   void compactionResolvesFromCompactionAgentAndDoesNotInheritParentModel() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
-    ModelSelection compactorModel =
-        new ModelSelection("fallback-provider", "fallback-model", "fallback");
+    ModelSelection compactorModel = new ModelSelection("fallback-model", "fallback");
     fixture.addModel(
+        "fallback-provider",
         compactorModel,
         new ParsedAgentModelConfig(
             8192,
@@ -2409,7 +2385,7 @@ class DatabaseTurnResolverTest {
     fixture.compactionAgent(compactorModel);
     when(fixture.providers.getByName("provider"))
         .thenThrow(new AssertionError("compaction must not resolve branch settings.model"));
-    when(fixture.models.getByProviderNameAndName("provider", "model"))
+    when(fixture.models.getByName("model"))
         .thenThrow(new AssertionError("compaction must not resolve branch settings.model"));
 
     List<AgentMessage> messages =
@@ -2446,7 +2422,7 @@ class DatabaseTurnResolverTest {
     when(fixture.providers.getByName("provider"))
         .thenThrow(
             new AssertionError("a COMPACTION parent turn must not resolve the provider catalog"));
-    when(fixture.models.getByProviderNameAndName("provider", "model"))
+    when(fixture.models.getByName("model"))
         .thenThrow(
             new AssertionError("a COMPACTION parent turn must not resolve the model catalog"));
 
@@ -2776,7 +2752,7 @@ class DatabaseTurnResolverTest {
   @Test
   void compactionResolvesToCompactionResolvedWithoutToolsOrParentSpec() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
-    ModelSelection compactorModel = new ModelSelection("provider", "model", "default");
+    ModelSelection compactorModel = new ModelSelection("model", "default");
     fixture.compactionAgent(compactorModel);
 
     List<AgentMessage> messages =
@@ -2920,7 +2896,7 @@ class DatabaseTurnResolverTest {
         new MessagePayload(
             new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent(text))),
             new AssistantMessageMetadata(
-                GenerationStopReason.COMPLETE, new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L)),
+                GenerationStopReason.COMPLETE, new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L)),
             null),
         NOW);
   }
@@ -2986,6 +2962,8 @@ class DatabaseTurnResolverTest {
         mock(AgentDefinitionConfigCodec.class);
     private final AgentModelRuntimeConfigParser modelConfigParser =
         mock(AgentModelRuntimeConfigParser.class);
+    private final AgentModelGroupConfigCodec groupConfigCodec =
+        mock(AgentModelGroupConfigCodec.class);
     private final EnvironmentRegistry environmentRegistry = mock(EnvironmentRegistry.class);
     private final SkillPromptPathResolver skillPromptPathResolver =
         new SkillPromptPathResolver(environmentRegistry);
@@ -3142,12 +3120,13 @@ class DatabaseTurnResolverTest {
 
       AgentModel model =
           AgentModel.builder()
+              .kind(AgentModelKind.MODEL)
               .providerName("provider")
               .name("model")
               .modelId("wire-model")
               .configJson("model-config")
               .build();
-      when(models.getByProviderNameAndName("provider", "model")).thenReturn(model);
+      when(models.getByName("model")).thenReturn(model);
 
       List<SkillRefDTO> skillRefs = new ArrayList<>();
       for (String skill : skills) {
@@ -3249,6 +3228,7 @@ class DatabaseTurnResolverTest {
               providers,
               agentConfigCodec,
               modelConfigParser,
+              groupConfigCodec,
               new ProviderFactories(factories),
               toolCatalogSource,
               environmentRegistry,
@@ -3288,26 +3268,27 @@ class DatabaseTurnResolverTest {
       editProvider(builder.build());
     }
 
-    private void addModel(ModelSelection selection, ParsedAgentModelConfig parsedModel) {
+    private void addModel(
+        String providerName, ModelSelection selection, ParsedAgentModelConfig parsedModel) {
       AgentProvider fallbackProvider =
           AgentProvider.builder()
-              .name(selection.providerName())
+              .name(providerName)
               .providerType(ProviderType.OPENAI)
               .connectionGenerationId(new UUID(0L, 43L))
               .version(0L)
               .build();
-      when(providers.getByName(selection.providerName())).thenReturn(fallbackProvider);
+      when(providers.getByName(providerName)).thenReturn(fallbackProvider);
 
-      String configJson = selection.providerName() + "-config";
+      String configJson = providerName + "-config";
       AgentModel fallbackModel =
           AgentModel.builder()
-              .providerName(selection.providerName())
+              .kind(AgentModelKind.MODEL)
+              .providerName(providerName)
               .name(selection.modelName())
               .modelId(selection.modelName())
               .configJson(configJson)
               .build();
-      when(models.getByProviderNameAndName(selection.providerName(), selection.modelName()))
-          .thenReturn(fallbackModel);
+      when(models.getByName(selection.modelName())).thenReturn(fallbackModel);
       when(modelConfigParser.parse(configJson)).thenReturn(parsedModel);
     }
 
@@ -3326,7 +3307,7 @@ class DatabaseTurnResolverTest {
     }
 
     private void missingModel() {
-      when(models.getByProviderNameAndName("provider", "model")).thenReturn(null);
+      when(models.getByName("model")).thenReturn(null);
     }
 
     private void failAgentLookup(RuntimeException error) {
@@ -3338,7 +3319,7 @@ class DatabaseTurnResolverTest {
     }
 
     private void failModelLookup(RuntimeException error) {
-      when(models.getByProviderNameAndName("provider", "model")).thenThrow(error);
+      when(models.getByName("model")).thenThrow(error);
     }
 
     private void failAgentConfig(RuntimeException error) {
@@ -3450,10 +3431,7 @@ class DatabaseTurnResolverTest {
               .systemPrompt(COMPACTION_SYSTEM_PROMPT)
               .configJson("agent-config");
       if (selection != null) {
-        compaction
-            .modelProviderName(selection.providerName())
-            .modelName(selection.modelName())
-            .variant(selection.variant());
+        compaction.modelName(selection.modelName()).variant(selection.variant());
       }
       when(agents.getByName("Compaction")).thenReturn(compaction.build());
     }

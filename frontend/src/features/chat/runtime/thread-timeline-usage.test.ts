@@ -48,7 +48,7 @@ function assistant(
 function turnStart(id = 'turn-1', reason = 'USER_MESSAGE'): HarnessSessionEntryDTO {
   return entry(id, 'TURN_START', { reason, settings: {
     agentName: 'coding',
-    model: { providerName: 'p', modelName: 'm', variant: 'default' },
+    model: { modelName: 'm', variant: 'default' },
     environmentName: null,
   } })
 }

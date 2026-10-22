@@ -74,7 +74,7 @@ class ModelAttemptMaterializationTest {
   private static final EnvironmentId ENVIRONMENT =
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
   private static final BranchSettings SETTINGS =
-      new BranchSettings("agent", new ModelSelection("provider", "model", "v1"), null);
+      new BranchSettings("agent", ModelSelection.model("model", "v1"), null);
 
   @Test
   void acceptsExactFailedAttemptAndTerminalPartial() {
@@ -490,7 +490,7 @@ class ModelAttemptMaterializationTest {
                         List.of(
                             new ToolCallMessageContent("call-1", "bash", "bash", "{}"),
                             new ToolCallMessageContent("call-2", "bash", "bash", "{}"))),
-                    new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage()),
+                    assistantMetadata(GenerationStopReason.COMPLETE),
                     null),
                 T2));
     assertThrows(
@@ -568,7 +568,7 @@ class ModelAttemptMaterializationTest {
                     List.of(
                         new ToolCallMessageContent("call-1", "bash", "bash", "{}"),
                         new TextMessageContent("unexpected text"))),
-                new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage()),
+                assistantMetadata(GenerationStopReason.COMPLETE),
                 null));
     // metadata 差异：tool call 相同但 stop reason / usage 不同。
     Entry metadataDrifted =
@@ -580,7 +580,7 @@ class ModelAttemptMaterializationTest {
                 new AgentMessage(
                     AgentMessageRole.ASSISTANT,
                     List.of(new ToolCallMessageContent("call-1", "bash", "bash", "{}"))),
-                new AssistantMessageMetadata(GenerationStopReason.LENGTH, usage()),
+                assistantMetadata(GenerationStopReason.LENGTH),
                 null));
     // renderer 差异：冻结 binding 的 rendererKey=bash，head 却使用 fallback renderer=tool。
     Entry rendererDrifted =
@@ -592,7 +592,7 @@ class ModelAttemptMaterializationTest {
                 new AgentMessage(
                     AgentMessageRole.ASSISTANT,
                     List.of(new ToolCallMessageContent("call-1", "bash", "tool", "{}"))),
-                new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage()),
+                assistantMetadata(GenerationStopReason.COMPLETE),
                 null));
     for (Entry drifted : List.of(textDrifted, metadataDrifted, rendererDrifted)) {
       assertThrows(
@@ -641,7 +641,7 @@ class ModelAttemptMaterializationTest {
                     List.of(
                         new ToolCallMessageContent("call-1", "bash", "bash", "{}"),
                         new TextMessageContent("unexpected text"))),
-                new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage()),
+                assistantMetadata(GenerationStopReason.COMPLETE),
                 null));
     Entry metadataDrifted =
         assistantToolMessageAt(
@@ -652,7 +652,7 @@ class ModelAttemptMaterializationTest {
                 new AgentMessage(
                     AgentMessageRole.ASSISTANT,
                     List.of(new ToolCallMessageContent("call-1", "bash", "bash", "{}"))),
-                new AssistantMessageMetadata(GenerationStopReason.LENGTH, usage()),
+                assistantMetadata(GenerationStopReason.LENGTH),
                 null));
     Entry rendererDrifted =
         assistantToolMessageAt(
@@ -663,7 +663,7 @@ class ModelAttemptMaterializationTest {
                 new AgentMessage(
                     AgentMessageRole.ASSISTANT,
                     List.of(new ToolCallMessageContent("call-1", "bash", "tool", "{}"))),
-                new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage()),
+                assistantMetadata(GenerationStopReason.COMPLETE),
                 null));
     for (Entry drifted : List.of(textDrifted, metadataDrifted, rendererDrifted)) {
       assertThrows(
@@ -753,6 +753,8 @@ class ModelAttemptMaterializationTest {
         3,
         "retry partial",
         "retry thinking",
+        ModelSelection.model("model", "v1"),
+        null,
         new ModelInvocationError(ProviderErrorKind.TRANSIENT, "temporary outage"),
         T3,
         T4);
@@ -767,6 +769,8 @@ class ModelAttemptMaterializationTest {
         new ModelAttemptFailurePayload(
             new ModelAttemptSnapshot(
                 failure.attempt(), failure.sequence(), text, failure.thinking()),
+            failure.model(),
+            failure.requestedAt(),
             new AssistantError(failure.error().kind().name(), failure.error().message()),
             failure.retryAt()),
         createdAt);
@@ -919,6 +923,8 @@ class ModelAttemptMaterializationTest {
             1,
             "retry partial",
             "retry thinking",
+            ModelSelection.model("model", "v1"),
+            null,
             new ModelInvocationError(ProviderErrorKind.TRANSIENT, "temporary outage"),
             T3,
             T4);
@@ -935,8 +941,14 @@ class ModelAttemptMaterializationTest {
         new AgentMessage(
             AgentMessageRole.ASSISTANT,
             List.of(new ToolCallMessageContent("call-1", "bash", "bash", "{}"))),
-        new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage()),
+        assistantMetadata(GenerationStopReason.COMPLETE),
         null);
+  }
+
+  private static AssistantMessageMetadata assistantMetadata(GenerationStopReason stopReason) {
+    // Direct terminal fixtures have no confirmed RUNNING timestamp or provider-reported tier.
+    return new AssistantMessageMetadata(
+        stopReason, usage(), null, ModelSelection.model("model", "v1"), null, null);
   }
 
   /** call-1 的 assistant head，允许自定义完整 payload（供 payload 漂移场景）。 */
@@ -1007,17 +1019,7 @@ class ModelAttemptMaterializationTest {
   }
 
   private static Entry assistantToolMessage(UUID entryId, UUID parentId) {
-    return new Entry(
-        entryId,
-        id(100L),
-        parentId,
-        new MessagePayload(
-            new AgentMessage(
-                AgentMessageRole.ASSISTANT,
-                List.of(new ToolCallMessageContent("call-1", "bash", "bash", "{}"))),
-            new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage()),
-            null),
-        T2);
+    return new Entry(entryId, id(100L), parentId, assistantToolPayload(), T2);
   }
 
   private static ProviderResponse toolResponse() {
@@ -1038,13 +1040,12 @@ class ModelAttemptMaterializationTest {
   }
 
   private static ModelUsage usage() {
-    return new ModelUsage(1, 1, 0, 0, 0, 0, 2);
+    return new ModelUsage(1, 1, 0, 0, Map.of(), 0L, 2L);
   }
 
   private static ModelCost cost() {
     return new ModelCost(
         "USD",
-        BigDecimal.ZERO,
         BigDecimal.ZERO,
         BigDecimal.ZERO,
         BigDecimal.ZERO,

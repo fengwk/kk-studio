@@ -53,8 +53,7 @@ function modelSelection(
   overrides: Partial<HarnessModelSelectionDTO> = {},
 ): HarnessModelSelectionDTO {
   return {
-    providerName: 'minimax',
-    modelName: 'MiniMax',
+        modelName: 'MiniMax',
     variant: 'default',
     ...overrides,
   }
@@ -200,7 +199,7 @@ const agents: AgentDefinitionDTO[] = [
     description: null,
     systemPrompt: null,
     type: 'USER',
-    model: 'minimax/MiniMax',
+    model: 'MiniMax',
     variant: 'default',
     config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
     version: '0',
@@ -212,7 +211,7 @@ const agents: AgentDefinitionDTO[] = [
     description: null,
     systemPrompt: null,
     type: 'USER',
-    model: 'minimax/MiniMax',
+    model: 'MiniMax',
     variant: 'default',
     config: {
       inheritParentEnvironment: true,
@@ -229,7 +228,7 @@ const agents: AgentDefinitionDTO[] = [
     description: null,
     systemPrompt: null,
     type: 'USER',
-    model: 'anthropic/Claude',
+    model: 'Claude',
     variant: 'fast',
     config: {
       inheritParentEnvironment: true,
@@ -246,7 +245,7 @@ const agents: AgentDefinitionDTO[] = [
     description: null,
     systemPrompt: null,
     type: 'USER',
-    model: 'nonexistent/model',
+    model: 'nonexistent-model',
     variant: 'default',
     config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
     version: '0',
@@ -258,7 +257,7 @@ const agents: AgentDefinitionDTO[] = [
     description: null,
     systemPrompt: null,
     type: 'USER',
-    model: 'minimax/MiniMax',
+    model: 'MiniMax',
     variant: 'nonexistent-variant',
     config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
     version: '0',
@@ -269,6 +268,7 @@ const agents: AgentDefinitionDTO[] = [
 
 const claudeModelEntry: AgentModelDTO = {
   providerName: 'anthropic',
+  kind: 'MODEL',
   name: 'Claude',
   modelId: 'anthropic/Claude',
   description: null,
@@ -276,17 +276,9 @@ const claudeModelEntry: AgentModelDTO = {
     limit: { context: 200000, output: 4096 },
     abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
     pricing: {
-      currency: 'USD',
-      pricingTier: 'default',
-      serviceTier: 'default',
-      serviceTierMultiplier: 1,
-      version: 'v1',
-      inputPerMillionTokens: 0,
-      outputPerMillionTokens: 0,
-      cacheReadPerMillionTokens: 0,
-      cacheWritePerMillionTokens: 0,
-      cacheWriteLongPerMillionTokens: 0,
-      reasoningPerMillionTokens: 0,
+      base: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0', cacheWriteByTtl: {}, reasoning: null },
+      overrides: [],
+      multipliers: [],
     },
     defaultVariant: 'v1',
     variants: [{ id: 'v1' }, { id: 'fast' }],
@@ -298,6 +290,7 @@ const claudeModelEntry: AgentModelDTO = {
 
 const modelEntry: AgentModelDTO = {
   providerName: 'minimax',
+  kind: 'MODEL',
   name: 'MiniMax',
   modelId: 'minimax/MiniMax',
   description: null,
@@ -305,17 +298,9 @@ const modelEntry: AgentModelDTO = {
     limit: { context: 128000, output: 8192 },
     abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
     pricing: {
-      currency: 'USD',
-      pricingTier: 'default',
-      serviceTier: 'default',
-      serviceTierMultiplier: 1,
-      version: 'v1',
-      inputPerMillionTokens: 0,
-      outputPerMillionTokens: 0,
-      cacheReadPerMillionTokens: 0,
-      cacheWritePerMillionTokens: 0,
-      cacheWriteLongPerMillionTokens: 0,
-      reasoningPerMillionTokens: 0,
+      base: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0', cacheWriteByTtl: {}, reasoning: null },
+      overrides: [],
+      multipliers: [],
     },
     defaultVariant: 'default',
     variants: [{ id: 'default' }],
@@ -429,13 +414,13 @@ describe('useBoundBranchPanel', () => {
       expect(result.current.selectAgent('coder')).toBe(true)
       expect(result.current.selectAgent('missing')).toBe(false)
       result.current.setYoloEnabled(true)
-      result.current.selectModel({ providerName: 'openai', modelName: 'GPT-5', variant: 'v2' })
+      result.current.selectModel({ modelName: 'GPT-5', variant: 'v2' })
       result.current.selectEnvironment('dev-env')
     })
 
     expect(result.current.draft).toEqual({
       agentName: 'coder',
-      model: { providerName: 'openai', modelName: 'GPT-5', variant: 'v2' },
+      model: { modelName: 'GPT-5', variant: 'v2' },
       environmentName: 'dev-env',
       yoloEnabled: true,
     })
@@ -483,7 +468,7 @@ describe('useBoundBranchPanel', () => {
 
     expect(result.current.draft).toEqual({
       agentName: 'writer',
-      model: { providerName: 'anthropic', modelName: 'Claude', variant: 'fast' },
+      model: { modelName: 'Claude', variant: 'fast' },
       environmentName: 'existing-env',
       yoloEnabled: true,
     })
@@ -502,7 +487,7 @@ describe('useBoundBranchPanel', () => {
     ])
     expect(batch.commands[0]).toMatchObject({ agentName: 'writer' })
     expect(batch.commands[1]).toMatchObject({
-      model: { providerName: 'anthropic', modelName: 'Claude', variant: 'fast' },
+      model: { modelName: 'Claude', variant: 'fast' },
     })
   })
 
@@ -534,7 +519,7 @@ describe('useBoundBranchPanel', () => {
 
     await waitFor(() => expect(result.current.branchState).not.toBeNull())
     act(() => {
-      result.current.selectModel({ providerName: 'custom', modelName: 'CustomModel', variant: 'v1' })
+      result.current.selectModel({ modelName: 'CustomModel', variant: 'v1' })
     })
     expect(result.current.draft?.model.modelName).toBe('CustomModel')
 
@@ -543,8 +528,7 @@ describe('useBoundBranchPanel', () => {
       expect(result.current.selectAgent('assistant')).toBe(true)
     })
     expect(result.current.draft?.model).toEqual({
-      providerName: 'minimax',
-      modelName: 'MiniMax',
+            modelName: 'MiniMax',
       variant: 'default',
     })
   })
@@ -882,7 +866,7 @@ describe('useBoundBranchPanel', () => {
                 yoloEnabled: true,
                 branchSettings: branchSettings({
                   agentName: 'assistant2',
-                  model: modelSelection({ providerName: 'anthropic', modelName: 'Claude', variant: 'v1' }),
+                  model: modelSelection({ modelName: 'Claude', variant: 'v1' }),
                 }),
               }),
             )
@@ -909,7 +893,7 @@ describe('useBoundBranchPanel', () => {
     // 旧 Thread 的 draft 编辑绝不泄漏：draft 完全来自新 snapshot，且恢复干净。
     expect(result.current.draft).toEqual({
       agentName: 'assistant2',
-      model: { providerName: 'anthropic', modelName: 'Claude', variant: 'v1' },
+      model: { modelName: 'Claude', variant: 'v1' },
       environmentName: null,
       yoloEnabled: true,
     })
@@ -969,7 +953,7 @@ describe('useBoundBranchPanel', () => {
             yoloEnabled: true,
             branchSettings: branchSettings({
               agentName: 'assistant2',
-              model: modelSelection({ providerName: 'anthropic', modelName: 'Claude', variant: 'v1' }),
+              model: modelSelection({ modelName: 'Claude', variant: 'v1' }),
             }),
           }),
         ),
@@ -978,7 +962,7 @@ describe('useBoundBranchPanel', () => {
     await waitFor(() => expect(result.current.draft?.agentName).toBe('assistant2'))
     expect(result.current.draft).toEqual({
       agentName: 'assistant2',
-      model: { providerName: 'anthropic', modelName: 'Claude', variant: 'v1' },
+      model: { modelName: 'Claude', variant: 'v1' },
       environmentName: null,
       yoloEnabled: true,
     })
@@ -1144,7 +1128,7 @@ describe('useBoundBranchPanel', () => {
     })
     expect(result.current.draft).toEqual({
       agentName: 'fresh',
-      model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+      model: { modelName: 'MiniMax', variant: 'default' },
       environmentName: null,
       yoloEnabled: true,
     })
@@ -1263,7 +1247,7 @@ describe('useBoundBranchPanel', () => {
 
     act(() => {
       result.current.selectAgent('writer')
-      result.current.selectModel({ providerName: 'openai', modelName: 'GPT-5', variant: 'v2' })
+      result.current.selectModel({ modelName: 'GPT-5', variant: 'v2' })
     })
     // 串行且合并：第二个请求必须等第一个返回后才发出（latest intent 只保留最后目标）。
     expect(calls).toHaveLength(1)
@@ -1367,7 +1351,7 @@ describe('useBoundBranchPanel', () => {
     await waitFor(() => expect(result.current.branchState).not.toBeNull())
 
     act(() => {
-      result.current.selectModel({ providerName: 'openai', modelName: 'GPT-5', variant: 'v2' })
+      result.current.selectModel({ modelName: 'GPT-5', variant: 'v2' })
     })
     await waitFor(() => expect(harnessService.getThreadSnapshot).toHaveBeenCalled())
 
@@ -1486,7 +1470,7 @@ describe('useBoundBranchPanel', () => {
 
     // 新 Thread 上的更新选择绝不能因 drain 被占用而丢失。
     act(() => {
-      result.current.selectModel({ providerName: 'openai', modelName: 'GPT-5', variant: 'v2' })
+      result.current.selectModel({ modelName: 'GPT-5', variant: 'v2' })
     })
     await act(async () => {
       releaseA!()

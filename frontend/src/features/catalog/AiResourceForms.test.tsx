@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it } from 'vitest'
 import type { AgentDraft, ModelDraft, ProviderDraft } from '@/features/catalog/ai-console-types'
+import { emptyModelGroupDraft } from '@/features/catalog/ai-model-group-draft-codec'
 import { emptyModelDraft } from '@/features/catalog/ai-model-draft-codec'
 import { validateResourceDraft } from '@/features/catalog/ai-resource-form-validation'
 import { toEditableProvider, toEditableProviderUpdate } from '@/features/catalog/ai-provider-draft-codec'
@@ -83,6 +84,7 @@ describe('AiResourceForms', () => {
         {
           providerDraft: currentDraft,
           modelDraft: emptyModelDraft(),
+          modelGroupDraft: emptyModelGroupDraft(),
           agentDraft: {
             name: '',
             description: '',
@@ -188,7 +190,7 @@ describe('AiResourceForms', () => {
     expect(screen.getByLabelText('Reasoning')).toBeChecked()
     expect(screen.getByLabelText('TEXT')).toBeChecked()
     expect(screen.queryByText('Capabilities')).not.toBeInTheDocument()
-    expect(screen.getByText(/币种固定 USD/)).toBeInTheDocument()
+    expect(screen.getByText(/USD \/ 百万 tokens/)).toBeInTheDocument()
     expect(screen.getByLabelText('Reasoning Effort 1')).toBeInTheDocument()
     expect(screen.getByText('思考强度')).toBeInTheDocument()
     // 空值即协议默认：思考强度不强必填，默认空
@@ -498,12 +500,12 @@ describe('AiResourceForms', () => {
     const inputPrice = screen.getByLabelText('Input USD per million tokens')
     await user.clear(inputPrice)
     await user.type(inputPrice, '1.2.3')
-    expect(inputPrice).toHaveValue(1.23)
+    expect(inputPrice).toHaveValue('1.23')
 
     const outputPrice = screen.getByLabelText('Output USD per million tokens')
     await user.clear(outputPrice)
     await user.type(outputPrice, '4.5.6')
-    expect(outputPrice).toHaveValue(4.56)
+    expect(outputPrice).toHaveValue('4.56')
   })
 
   it('avoids duplicate generated variant ids and keeps the final variant undeletable', async () => {
@@ -604,10 +606,10 @@ describe('AiResourceForms', () => {
 
     expect(screen.getByRole('button', { name: '使用第一个 Model 填充默认配置' })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '使用第一个 Model 填充默认配置' }))
-    expect(screen.getByLabelText('Default Model')).toHaveAttribute('data-value', 'minimax/MiniMax-M2.7')
+    expect(screen.getByLabelText('Default Model')).toHaveAttribute('data-value', 'MiniMax-M2.7')
     expect(screen.getByLabelText('Default Variant Override')).toHaveAttribute('data-value', '')
 
-    await selectFormOption(user, 'Default Model', 'anthropic/Claude-Sonnet-4.5')
+    await selectFormOption(user, 'Default Model', 'Claude-Sonnet-4.5')
     expect(screen.getByLabelText('Default Variant Override')).toHaveAttribute('data-value', '')
     expect(screen.getByText('暂无候选 Tools')).toBeInTheDocument()
   })
@@ -728,6 +730,7 @@ function AgentFormHarness() {
       models={[
         {
           providerName: 'minimax',
+          kind: 'MODEL',
           name: 'MiniMax-M2.7',
           modelId: 'minimax-m2.7',
           description: null,
@@ -735,18 +738,10 @@ function AgentFormHarness() {
             limit: { context: 128000, output: 8192 },
             abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
             pricing: {
-              currency: 'USD',
-              pricingTier: 'default',
-              serviceTier: 'default',
-              serviceTierMultiplier: 1,
-              version: 'v1',
-              inputPerMillionTokens: 0,
-              outputPerMillionTokens: 0,
-              cacheReadPerMillionTokens: 0,
-              cacheWritePerMillionTokens: 0,
-              cacheWriteLongPerMillionTokens: 0,
-              reasoningPerMillionTokens: 0,
-            },
+      base: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0', cacheWriteByTtl: {}, reasoning: null },
+      overrides: [],
+      multipliers: [],
+    },
             defaultVariant: 'default',
             variants: [{ id: 'default' }],
           },
@@ -756,6 +751,7 @@ function AgentFormHarness() {
         },
         {
           providerName: 'anthropic',
+          kind: 'MODEL',
           name: 'Claude-Sonnet-4.5',
           modelId: 'claude-sonnet-4.5',
           description: null,
@@ -763,18 +759,10 @@ function AgentFormHarness() {
             limit: { context: 200000, output: 16000 },
             abilities: { tools: false, reasoning: true, inputModalities: ['TEXT'] },
             pricing: {
-              currency: 'USD',
-              pricingTier: 'default',
-              serviceTier: 'default',
-              serviceTierMultiplier: 1,
-              version: 'v1',
-              inputPerMillionTokens: 0,
-              outputPerMillionTokens: 0,
-              cacheReadPerMillionTokens: 0,
-              cacheWritePerMillionTokens: 0,
-              cacheWriteLongPerMillionTokens: 0,
-              reasoningPerMillionTokens: 0,
-            },
+      base: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0', cacheWriteByTtl: {}, reasoning: null },
+      overrides: [],
+      multipliers: [],
+    },
             defaultVariant: 'creative',
             variants: [{ id: 'creative' }, { id: 'precise' }],
           },

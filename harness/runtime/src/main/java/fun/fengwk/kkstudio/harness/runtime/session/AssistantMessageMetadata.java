@@ -1,8 +1,10 @@
 package fun.fengwk.kkstudio.harness.runtime.session;
 
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 
+import java.time.Instant;
 import java.util.Objects;
 
 /**
@@ -15,7 +17,12 @@ import java.util.Objects;
  * 报告的事实：可选且可空，缺失或 null 表示无可信流计时（例如非流式响应、重试前的失败尝试或旧历史记录）。
  */
 public record AssistantMessageMetadata(
-    GenerationStopReason stopReason, ModelUsage usage, Long decodeDurationMillis) {
+    GenerationStopReason stopReason,
+    ModelUsage usage,
+    Long decodeDurationMillis,
+    ModelSelection model,
+    Instant requestedAt,
+    String responseServiceTier) {
 
   public AssistantMessageMetadata {
     stopReason = Objects.requireNonNull(stopReason, "stopReason");
@@ -23,6 +30,14 @@ public record AssistantMessageMetadata(
     if (decodeDurationMillis != null && decodeDurationMillis < 0) {
       throw new IllegalArgumentException("decodeDurationMillis must be null or non-negative");
     }
+    if (responseServiceTier != null && responseServiceTier.isBlank()) {
+      throw new IllegalArgumentException("responseServiceTier must be null or non-blank");
+    }
+  }
+
+  public AssistantMessageMetadata(
+      GenerationStopReason stopReason, ModelUsage usage, Long decodeDurationMillis) {
+    this(stopReason, usage, decodeDurationMillis, null, null, null);
   }
 
   /** 无可信流计时的 Provider 元数据快照。 */

@@ -218,7 +218,7 @@ class StudioHarnessSessionProviderRequestPreviewControllerTest {
                       "type":"USER_MESSAGE","idempotencyKey":"%s","contents":[{"type":"TEXT","text":"hi"}]
                     },{
                       "type":"SET_MODEL","idempotencyKey":"%s",
-                      "model":{"providerName":"stub","modelName":"acceptance-stub","variant":"default"}
+                      "model":{"modelName":"acceptance-stub","variant":"default"}
                     }]}
                     """
                         .formatted(START_ENTRY_ID, USER_MESSAGE_KEY, SET_MODEL_KEY)))
@@ -324,7 +324,7 @@ class StudioHarnessSessionProviderRequestPreviewControllerTest {
         [{
           "type":"SET_MODEL",
           "idempotencyKey":"%s",
-          "model":{"providerName":"stub","modelName":"acceptance-stub","variant":"default"}
+          "model":{"modelName":"acceptance-stub","variant":"default"}
         },
         {
           "type":"USER_MESSAGE",

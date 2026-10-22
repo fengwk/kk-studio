@@ -61,7 +61,7 @@ Plugin 投影遵循同一边界：`PluginDTO` 只有安装元数据、region、�
 
 | 包 | 当前 wire |
 | --- | --- |
-| [ai.catalog](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/catalog/) | Provider、Model、Agent、ModelRef、Tool catalog |
+| [ai.catalog](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/catalog/) | Provider、MODEL/GROUP、Agent、Tool catalog |
 | [ai.skill](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/skill/) | Git Skill Package、branch 更新检查、exact commit 发布与派生 Skill 列表 |
 | [ai.mcp](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/mcp/) | MCP Server 安全投影、显式配置 DTO 与显式 HTTP 创建/更新请求 |
 | [ai.plugin](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/plugin/) | 已安装构建期 Plugin、安全认证状态、续期运维投影与 prepare/complete 请求和响应 |
@@ -96,11 +96,15 @@ Work 冻结路由，`requiredEnvironmentName` 沿此身份读取环境目录，�
 
 - 未知字段、重复 JSON 键、错误的 union `type`/`op`、非 canonical UUID 或非规范数字都在 wire 边界失败，不会进入领域服务。
 - required-nullable 字段即使为 `null` 也必须序列化，避免客户端把「未返回」当成「无值」。
-- durable 版本与序号在 wire 上永远是十进字符串；`ModelRef` 是 `providerName/modelName`，只在第一个 `/` 处分割，因此模型名本身可以包含斜杠而 provider 名不能。
+- durable 版本与序号在 wire 上永远是十进字符串；模型身份统一为全局逻辑 `modelName`，MODEL 与
+  GROUP 共用同一名称空间，名称可以包含斜杠。选择只携带 `{modelName, variant?}`；GROUP 的
+  `variant` 必须为 null，成员 Variant 写在组配置内。不再使用 provider/model 拼接作为身份。
+- 模型价格统一为 `{base, overrides, multipliers}`，金额与倍率都是十进制字符串；普通缺价按 0、
+  缺倍率按 1、`reasoning: null` 继承 output，没有 currency 或 `unpriced` 概念。
 - Tool catalog 与 Debug 使用同一个 `environmentSupport = NONE | OPTIONAL | REQUIRED` 枚举，不用两个布尔字段组合出非法状态；Skill 引用精确为 `{packageName, name}`。
 - Canvas 连线与引用从 Function args 派生为只读投影；CanvasSnapshotDTO 包含 document、nodes、groups、references，CanvasPatchDTO 携带被接受的 revision 及节点/分组变化。
 - 命令 batch 只表达已解析的边界值；集合是否可变由具体 DTO 与调用方契约决定。创建型 batch 携带 owner 与 target，owner-free 续写面以 path `threadId` + 精确 cursor 定位且不携带二者。
-- 费用不是 durable wire：Entry 的 `payloadJson` 与 `assistantMetadata` 只保存真实用量（`stopReason` / `usage` / 可选 `decodeDurationMillis`），不保存金额或单价；`usageCost` 在读取时按当前 catalog 现算，未计价显式为 null。
+- 费用不是 durable wire：Entry 的 `payloadJson` 与 `assistantMetadata` 只保存真实用量（`stopReason` / `usage` / 可选 `decodeDurationMillis`），不保存金额或单价；`usageCost` 在读取时按当前 catalog 现算，模型已删除或无法解析时显式为 null。
 - Stop 回执以 `(threadId, stopRequestId)` 为身份并逐 Thread 输出；可恢复人工输入只含 `USER_MESSAGE` / `GOAL`。取消的 `CUSTOM_MESSAGE` 与配置命令只计入取消数量；`NOTIFICATION` 保留为历史，不计入取消数量。
 - 常规 DTO 不回显 credential、secret 或对象存储内部标识；配置同步的显式 YAML 导出包含所需凭据，响应禁止缓存。Blob URL 由服务端按请求重新签发，断连或过期后客户端重新读取 Snapshot/URL。
 
@@ -118,7 +122,7 @@ Work 冻结路由，`requiredEnvironmentName` 沿此身份读取环境目录，�
 | Canvas | [canvas/](../../share/src/test/java/fun/fengwk/kkstudio/share/canvas/) | [`CanvasDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/canvas/CanvasDtoContractTest.java)：十进 revision、required-nullable 发射、独立 document 字段、派生引用投影，以及与 Core 一致的 11 个 typed command |
 | Harness Runtime | [ai/runtime/](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/runtime/) | [`HarnessRuntimeDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/runtime/HarnessRuntimeDtoContractTest.java)：严格字段、字符串游标与 nullable 发射 |
 | Project | [project/](../../share/src/test/java/fun/fengwk/kkstudio/share/project/) | [`ProjectDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/project/ProjectDtoContractTest.java)：Project/Issue wire 的严格字段、decimal version 与全包 33 个 DTO 字段集合精确匹配 |
-| Catalog | [ai/catalog/](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/catalog/) | [`ModelRefTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/catalog/ModelRefTest.java)：canonical 身份解析；[`ToolCatalogDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/catalog/ToolCatalogDtoContractTest.java)：工具目录契约 |
+| Catalog | [ai/catalog/](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/catalog/) | [`AgentModelPricingDtoJsonTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/catalog/AgentModelPricingDtoJsonTest.java)：pricing 十进制 wire；[`ToolCatalogDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/catalog/ToolCatalogDtoContractTest.java)：工具目录契约 |
 | Storage | [storage/](../../share/src/test/java/fun/fengwk/kkstudio/share/storage/) | [`StorageDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/storage/StorageDtoContractTest.java)：upload/presign 的 nullable 字段与请求侧 `sizeBytes` 类型 |
 | Settings | [systemsettings/](../../share/src/test/java/fun/fengwk/kkstudio/share/systemsettings/) | [`SystemSettingsDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/systemsettings/SystemSettingsDtoContractTest.java)：每一层嵌套的未知字段拒绝与秘密字段扫描 |
 | Chat、MCP、Environment、Plugin、Skill | [ai/chat/](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/chat/)、[ai/mcp/](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/mcp/)、[ai/environment/](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/environment/)、[ai/plugin/](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/plugin/)、[ai/skill/](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/skill/) | [`ChatDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/chat/ChatDtoContractTest.java)、[`McpServerDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/mcp/McpServerDtoContractTest.java)、[`EnvironmentDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/environment/EnvironmentDtoContractTest.java)、[`PluginDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/plugin/PluginDtoContractTest.java)、[`SkillPackageDtoContractTest.java`](../../share/src/test/java/fun/fengwk/kkstudio/share/ai/skill/SkillPackageDtoContractTest.java) |

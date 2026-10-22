@@ -802,7 +802,7 @@ class InteractionQueryServiceTest {
     when(thread.spawnTrigger()).thenReturn(SpawnTrigger.CONTROLLER);
     EntryPath entryPath = mock(EntryPath.class);
     when(entryPath.baseSettings())
-        .thenReturn(new BranchSettings("worker", new ModelSelection("p", "m", "v1"), null));
+        .thenReturn(new BranchSettings("worker", ModelSelection.model("m", "v1"), null));
     ThreadSnapshot snapshot = mock(ThreadSnapshot.class);
     when(snapshot.thread()).thenReturn(thread);
     when(snapshot.entryPath()).thenReturn(entryPath);

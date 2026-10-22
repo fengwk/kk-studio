@@ -96,40 +96,65 @@ create table agent_provider (
     constraint ck_agent_provider_version_nonneg check (version >= 0)
 );
 
+-- 单 Model 与 Model Group 共享唯一逻辑名称空间：name 是全局主键，kind 决定其余列的形状。
 create table agent_model (
-    provider_name   varchar(64)   not null,
-    name            varchar(128)  not null,
-    model_id        varchar(256)  not null,
+    name            varchar(128)  primary key,
+    kind            varchar(16)   not null,
+    provider_name   varchar(64),
+    model_id        varchar(256),
     description     text,
-    config          jsonb         not null,
+    config          jsonb,
+    group_config    jsonb,
     created_at      timestamptz(3) not null default current_timestamp,
     updated_at      timestamptz(3) not null default current_timestamp,
     version         bigint        not null default 0,
-    constraint pk_agent_model primary key (provider_name, name),
     constraint ck_agent_model_name check (
         name !~ '^[[:space:]]'
         and name !~ '[[:space:]]$'
         and char_length(name) > 0
     ),
+    constraint ck_agent_model_kind check (kind in ('MODEL', 'GROUP')),
     constraint ck_agent_model_model_id check (
-        model_id !~ '^[[:space:]]'
-        and model_id !~ '[[:space:]]$'
-        and char_length(model_id) > 0
+        model_id is null or (
+            model_id !~ '^[[:space:]]'
+            and model_id !~ '[[:space:]]$'
+            and char_length(model_id) > 0
+        )
     ),
     constraint fk_agent_model_provider foreign key (provider_name)
-        references agent_provider (name),
+        references agent_provider (name) on update cascade,
+    constraint ck_agent_model_shape check (
+        (kind = 'MODEL'
+            and provider_name is not null
+            and model_id is not null
+            and config is not null
+            and group_config is null)
+        or (kind = 'GROUP'
+            and provider_name is null
+            and model_id is null
+            and config is null
+            and group_config is not null)
+    ),
+    constraint ck_agent_model_group_config_object check (
+        group_config is null or jsonb_typeof(group_config) = 'object'
+    ),
     constraint ck_agent_model_version_nonneg check (version >= 0)
 );
 
+comment on column agent_model.name is
+    '全局唯一逻辑模型名；单 Model 与 Model Group 共用同一名称空间';
+comment on column agent_model.kind is
+    'MODEL 或 GROUP；决定 provider/model/config 与 group_config 的互斥形状';
 comment on column agent_model.model_id is
-    '发往上游 Provider 的真实 wire 模型标识：非空白、无环绕空白、≤256；与逻辑身份 (provider_name, name) 独立且不唯一';
+    'MODEL 发往上游 Provider 的真实 wire 模型标识：非空白、无环绕空白、≤256；与逻辑 name 独立且不唯一；GROUP 为 null';
+comment on column agent_model.group_config is
+    'GROUP 的有序成员、立即降级 HTTP 状态码与固定冷却秒数；MODEL 为 null';
 
 create table agent_definition (
     name            varchar(64)   primary key,
     type            varchar(16)   not null default 'USER',
     description     text,
     system_prompt   text,
-    model_provider_name varchar(64),
     model_name      varchar(128),
     variant         varchar(64),
     config          jsonb         not null,
@@ -142,12 +167,9 @@ create table agent_definition (
         and char_length(name) > 0
         and position('/' in name) = 0
     ),
-    constraint fk_agent_definition_model foreign key (model_provider_name, model_name)
-        references agent_model (provider_name, name),
+    constraint fk_agent_definition_model foreign key (model_name)
+        references agent_model (name) on update cascade,
     constraint ck_agent_definition_type check (type in ('USER', 'BUILTIN')),
-    constraint ck_agent_definition_model_pair check (
-        (model_provider_name is null) = (model_name is null)
-    ),
     constraint ck_agent_definition_variant_requires_model check (
         variant is null or model_name is not null
     ),
@@ -158,7 +180,33 @@ create table agent_definition (
 );
 
 create index idx_agent_definition_model
-    on agent_definition (model_provider_name, model_name);
+    on agent_definition (model_name);
+
+-- 组内成员冷却：只按 (组, 成员引用) 隔离；group_version 使旧配置的冷却与旧在途 callback 失效。
+create table agent_model_group_cooldown (
+    group_name          varchar(128)  not null,
+    member_model_name   varchar(128)  not null,
+    member_variant      varchar(64)   not null,
+    group_version       bigint        not null,
+    cooldown_until      timestamptz(3) not null,
+    created_at          timestamptz(3) not null default current_timestamp,
+    updated_at          timestamptz(3) not null default current_timestamp,
+    constraint pk_agent_model_group_cooldown
+        primary key (group_name, member_model_name, member_variant),
+    constraint fk_agent_model_group_cooldown_group foreign key (group_name)
+        references agent_model (name) on update cascade on delete cascade,
+    constraint fk_agent_model_group_cooldown_member foreign key (member_model_name)
+        references agent_model (name) on update cascade,
+    constraint ck_agent_model_group_cooldown_variant check (
+        member_variant = btrim(member_variant) and char_length(member_variant) > 0
+    ),
+    constraint ck_agent_model_group_cooldown_version_nonneg check (group_version >= 0)
+);
+
+comment on table agent_model_group_cooldown is
+    'Model Group 组内成员固定冷却截止时间；PostgreSQL 共享、按组配置版本隔离，到期自然失效';
+comment on column agent_model_group_cooldown.group_version is
+    '写入时冻结的组配置版本；组配置变更后旧版本冷却不再参与选择';
 
 -- -----------------------------------------------------------------------------
 -- Platform 全局 Skill Package
@@ -805,7 +853,7 @@ insert into system_setting (id, config) values (
     1,
     '{
       "advanced":{"applicationEventHeartbeatIntervalMillis":20000,"applicationEventMaxBytes":2097152,"applicationEventQueueCapacity":512,"applicationEventSendTimeoutMillis":10000,"modelDispatchBusyFallbackDelayMillis":1000,"postgresqlWorkNotificationPollMillis":5000,"postgresqlWorkReconnectBackoffMillis":1000,"processorHeartbeatIntervalMillis":10000,"processorLeaseDurationMillis":30000,"resourceMaxBytes":16777216,"threadResolveFailureDelayMillis":1000,"toolDispatchBusyFallbackDelayMillis":1000,"toolPreflightFailureDelayMillis":1000},
-      "aiRuntime":{"compactionKeepRecentTokens":20000,"modelHttpRetryStatusCodes":[408,429,500,502,503,504],"retryBackoffStrategy":"EXPONENTIAL","retryBaseDelayMillis":2000,"retryMaxDelayMillis":60000,"retryMaxRetries":3,"subagentMaxConcurrency":10,"subagentMaxDepth":2,"subagentMaxTotalConcurrency":0,"subagentMaxTurns":50},
+      "aiRuntime":{"compactionKeepRecentTokens":20000,"modelCatalogSource":"models_dev_v2","modelHttpRetryStatusCodes":[408,429,500,502,503,504],"retryBackoffStrategy":"EXPONENTIAL","retryBaseDelayMillis":2000,"retryMaxDelayMillis":60000,"retryMaxRetries":3,"subagentMaxConcurrency":10,"subagentMaxDepth":2,"subagentMaxTotalConcurrency":0,"subagentMaxTurns":50},
       "environment":{"heartbeatTimeoutMillis":60000,"maxResourceBytes":16777216},
       "network":{"noProxyHosts":"localhost,127.*,::1"},
       "storageMedia":{"canvasMediaProcessTimeoutMillis":30000,"s3PresignDefaultExpiresSeconds":1800,"s3PresignMaxExpiresSeconds":3600,"temporaryResourceCleanupIntervalSeconds":1800,"temporaryResourceTtlSeconds":259200,"thumbnailMaxDimension":512,"thumbnailQuality":80,"uploadExpiresSeconds":86400},
@@ -1090,6 +1138,10 @@ create table harness_model_invocation (
     error jsonb check (error is null or jsonb_typeof(error) = 'object'),
     result_entry_id uuid,
     failed_attempts jsonb not null check (jsonb_typeof(failed_attempts) = 'array'),
+    group_execution jsonb check (
+        group_execution is null or jsonb_typeof(group_execution) = 'object'
+    ),
+    requested_at timestamptz(3),
     created_at timestamptz(3) not null,
     updated_at timestamptz(3) not null,
     provider_replay_state jsonb,
@@ -1139,6 +1191,8 @@ comment on column harness_model_invocation.result is 'terminal 成功结果（JS
 comment on column harness_model_invocation.error is 'terminal 失败错误（JSON object，与 result 互斥）';
 comment on column harness_model_invocation.result_entry_id is '结果 Entry（Assistant/AssistantError/AssistantAborted/COMPACTION），全局唯一';
 comment on column harness_model_invocation.failed_attempts is '由 retry policy 驱动的 append-only TRANSIENT 失败 attempt 历史（JSON array）';
+comment on column harness_model_invocation.group_execution is 'Model Group 当前成员游标与该成员普通重试计数（JSON object，单 Model 为 null）';
+comment on column harness_model_invocation.requested_at is '当前已确认 Provider 调用的发起时间；成功历史 metadata 记录实际请求时刻';
 comment on column harness_model_invocation.created_at is '创建时间（毫秒精度）';
 comment on column harness_model_invocation.updated_at is '最后更新时间（毫秒精度）';
 comment on column harness_model_invocation.provider_replay_state is 'Provider native terminal replay 状态（JSON object，仅未物化结果的 SUCCEEDED 状态，可空）';

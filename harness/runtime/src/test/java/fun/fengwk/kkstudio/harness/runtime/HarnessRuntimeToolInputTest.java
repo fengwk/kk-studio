@@ -896,7 +896,7 @@ class HarnessRuntimeToolInputTest {
           UUID assistantEntryId = tx.nextId();
           tx.insertEntry(
               mappedAssistantEntry(
-                  assistantEntryId, stale.sessionId(), userEntryId, T3, requestSpec, response));
+                  assistantEntryId, stale.sessionId(), userEntryId, T3, requestSpec, response, T3));
           UUID modelId = tx.nextId();
           ModelInvocation model =
               modelInvocationWithRequest(

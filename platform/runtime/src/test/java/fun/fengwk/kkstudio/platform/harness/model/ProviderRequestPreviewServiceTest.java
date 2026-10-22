@@ -94,6 +94,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -114,12 +115,12 @@ class ProviderRequestPreviewServiceTest {
 
   /** 阈值压缩触发事实：90_002 + 可见尾部 token 必然越过 softThreshold(CONTEXT_WINDOW)。 */
   private static final ModelUsage OVER_THRESHOLD_USAGE =
-      new ModelUsage(90_000L, 2L, 0L, 0L, 0L, 0L, 90_002L);
+      new ModelUsage(90_000L, 2L, 0L, 0L, Map.of(), 0L, 90_002L);
 
   private static final ModelUsage BELOW_THRESHOLD_USAGE =
-      new ModelUsage(1_000L, 2L, 0L, 0L, 0L, 0L, 1_002L);
+      new ModelUsage(1_000L, 2L, 0L, 0L, Map.of(), 0L, 1_002L);
   private static final BranchSettings SETTINGS =
-      new BranchSettings("agent", new ModelSelection("provider", "model", "v1"), null);
+      new BranchSettings("agent", new ModelSelection("model", "v1"), null);
 
   private static final UUID SESSION_ID = id(1L);
   private static final UUID THREAD_ID = id(2L);
@@ -161,8 +162,7 @@ class ProviderRequestPreviewServiceTest {
   private static final UUID CHILD_LATER_ASSISTANT_ID = id(54L);
   private static final UUID CHILD_LATER_END_ID = id(55L);
   private static final int COMPACTION_OUTPUT_BUDGET = 4_096;
-  private static final ModelSelection COMPACTION_MODEL =
-      new ModelSelection("provider", "compactor", "v1");
+  private static final ModelSelection COMPACTION_MODEL = ModelSelection.model("compactor", "v1");
   private static final BranchSettings CHILD_SETTINGS =
       new BranchSettings("Compaction", COMPACTION_MODEL, null);
   private static final byte[] BODY = "{\"model\":\"wire-model\"}".getBytes(StandardCharsets.UTF_8);
@@ -1310,7 +1310,7 @@ class ProviderRequestPreviewServiceTest {
   private static NewThreadCommand setting(ThreadCommandKind kind) {
     return switch (kind) {
       case SET_MODEL -> new NewThreadCommand(
-          new SetModelCommandPayload(new ModelSelection("provider", "model", "v1")), id(201L));
+          new SetModelCommandPayload(new ModelSelection("model", "v1")), id(201L));
       case SET_AGENT -> new NewThreadCommand(new SetAgentCommandPayload("agent"), id(202L));
     };
   }

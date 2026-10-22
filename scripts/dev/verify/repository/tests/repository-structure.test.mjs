@@ -602,6 +602,7 @@ const CORE_STATE_ENUMS = [
       'INVALID_REQUEST',
       'INVALID_RESPONSE',
       'CANCELLED',
+      'NO_AVAILABLE_MODEL',
     ],
   },
   {

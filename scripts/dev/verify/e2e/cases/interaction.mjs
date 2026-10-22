@@ -19,7 +19,7 @@ import {
   userMessageCommand,
   waitForQuiescentThread,
 } from '../lib/harness.mjs'
-import { baseModelConfig } from '../lib/fixtures.mjs'
+import { baseModelConfig, encodePathTail } from '../lib/fixtures.mjs'
 import { registerCase } from '../lib/registry.mjs'
 
 const UUID_TEXT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
@@ -257,6 +257,7 @@ registerCase({
       assert(provider?.name && provider?.version, JSON.stringify(providerResponse.json))
 
       const modelResponse = await ctx.call('POST', '/api/models', {
+        kind: 'MODEL',
         providerName: provider.name,
         name: `e2e-model-interaction-${suffix}`,
         modelId: `wire-interaction-${suffix}`,
@@ -274,7 +275,7 @@ registerCase({
         name: `e2e-agent-interaction-${suffix}`,
         description: 'Local pending input E2E agent.',
         systemPrompt: 'Ask the user with ask_user, then report the accepted answer.',
-        model: `${model.providerName}/${model.name}`,
+        model: model.name,
         variant: 'default',
         // ask_user 是内置 SELECTABLE 工具：只有显式声明的 Agent 才把问卷工具暴露给模型。
         config: { tools: ['ask_user'], skills: [], subagents: [], inheritParentEnvironment: true },
@@ -300,7 +301,6 @@ registerCase({
         sessionId,
         threadId: createdThreadId,
         rootSettings: branchSettingsOf(agent, {
-          providerName: model.providerName,
           modelName: model.name,
           variant: 'default',
         }),
@@ -544,10 +544,10 @@ registerCase({
         }
       })
       await cleanup('model', async () => {
-        if (model?.providerName && model?.name) {
+        if (model?.name) {
           await ctx.call(
             'DELETE',
-            `/api/models/${encodeURIComponent(model.providerName)}/${encodeURIComponent(model.name)}?expectedVersion=${encodeURIComponent(model.version)}`,
+            `/api/models/${encodePathTail(model.name)}?expectedVersion=${encodeURIComponent(model.version)}`,
           )
         }
       })

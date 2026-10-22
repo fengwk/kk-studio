@@ -69,10 +69,10 @@ function fakeStorage() {
 const hashFile: HashFile = vi.fn(async () => 'a'.repeat(64))
 
 const MODEL_SETTINGS: ThreadComposerSettingsInput = {
-  model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+  model: { modelName: 'MiniMax', variant: 'default' },
   models: [
     {
-      providerName: 'minimax',
+      kind: 'MODEL',
       name: 'MiniMax',
       config: {
         defaultVariant: 'default',

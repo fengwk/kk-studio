@@ -19,8 +19,9 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelEditablePropertiesDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelGroupDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderEditablePropertiesDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.ModelRef;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallConfigDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncSkipped;
@@ -247,32 +248,46 @@ public final class ConfigSyncParser {
 
   private ModelSpec parseModel(
       Entry entry, List<ConfigSyncSkipped> skipped, List<String> declared) {
-    String providerName = entry.reqName("providerName");
     String name = entry.reqName("name");
-    String key = ConfigSyncRefs.modelName(providerName, name);
-    declared.add(key);
-    String modelId = entry.reqString("modelId");
-    String description = entry.optString("description");
-    Object configNode = requireObject(entry, "config");
-    List<String> removed = new ArrayList<>();
-    Object cleanedConfig =
-        yaml.removeUnknownProperties(
-            AgentModelConfigDTO.class, configNode, entry.path + ".config", removed);
+    declared.add(name);
+    String kindText = entry.reqString("kind");
+    AgentModelKind kind;
+    try {
+      kind = AgentModelKind.valueOf(kindText);
+    } catch (IllegalArgumentException error) {
+      throw new AiValidationException(RESOURCE, entry.path + ".kind must be MODEL or GROUP");
+    }
     AgentModelEditablePropertiesDTO properties = new AgentModelEditablePropertiesDTO();
     properties.setName(name);
-    properties.setModelId(modelId);
-    properties.setDescription(description);
-    properties.setConfig(
-        yaml.convert(cleanedConfig, AgentModelConfigDTO.class, entry.path + ".config"));
-    // 先用写入路径校验 known 字段（含嵌套 config 缺必填/非法值），未知字段不能绕过硬错误。
-    validateEntry(ConfigSyncKind.MODELS, key, () -> modelService.validateImport(name, properties));
-    if (skipUnknown(entry, ConfigSyncKind.MODELS, key, skipped)) {
+    properties.setKind(kind);
+    properties.setDescription(entry.optString("description"));
+    List<String> removed = new ArrayList<>();
+    if (kind == AgentModelKind.MODEL) {
+      properties.setProviderName(entry.reqName("providerName"));
+      properties.setModelId(entry.reqString("modelId"));
+      Object configNode = requireObject(entry, "config");
+      Object cleanedConfig =
+          yaml.removeUnknownProperties(
+              AgentModelConfigDTO.class, configNode, entry.path + ".config", removed);
+      properties.setConfig(
+          yaml.convert(cleanedConfig, AgentModelConfigDTO.class, entry.path + ".config"));
+    } else {
+      Object groupNode = requireObject(entry, "group");
+      Object cleanedGroup =
+          yaml.removeUnknownProperties(
+              AgentModelGroupDTO.class, groupNode, entry.path + ".group", removed);
+      properties.setGroup(
+          yaml.convert(cleanedGroup, AgentModelGroupDTO.class, entry.path + ".group"));
+    }
+    // 先用写入路径校验 known 字段（含嵌套 config/group 缺必填/非法值），未知字段不能绕过硬错误。
+    validateEntry(ConfigSyncKind.MODELS, name, () -> modelService.validateImport(name, properties));
+    if (skipUnknown(entry, ConfigSyncKind.MODELS, name, skipped)) {
       return null;
     }
-    if (reportUnknownConfig(removed, ConfigSyncKind.MODELS, key, skipped)) {
+    if (reportUnknownConfig(removed, ConfigSyncKind.MODELS, name, skipped)) {
       return null;
     }
-    return new ModelSpec(providerName, name, properties);
+    return new ModelSpec(name, properties);
   }
 
   private AgentSpec parseAgent(
@@ -286,14 +301,7 @@ public final class ConfigSyncParser {
     declared.add(name);
     String description = entry.optString("description");
     String systemPrompt = entry.optString("systemPrompt");
-    String model = entry.reqString("model");
-    ModelRef modelRef;
-    try {
-      modelRef = ModelRef.parse(model);
-    } catch (IllegalArgumentException error) {
-      throw new AiValidationException(
-          RESOURCE, entry.path + ".model must be providerName/modelName");
-    }
+    String modelName = entry.reqString("model");
     String variant = entry.optString("variant");
     Object configNode = requireObject(entry, "config");
     List<String> removed = new ArrayList<>();
@@ -303,7 +311,7 @@ public final class ConfigSyncParser {
     AgentDefinitionEditablePropertiesDTO properties = new AgentDefinitionEditablePropertiesDTO();
     properties.setDescription(description);
     properties.setSystemPrompt(systemPrompt);
-    properties.setModel(model);
+    properties.setModel(modelName);
     properties.setVariant(variant);
     properties.setConfig(
         yaml.convert(cleanedConfig, AgentDefinitionConfigDTO.class, entry.path + ".config"));
@@ -315,7 +323,7 @@ public final class ConfigSyncParser {
     if (reportUnknownConfig(removed, ConfigSyncKind.AGENTS, name, skipped)) {
       return null;
     }
-    return new AgentSpec(name, modelRef.providerName(), modelRef.modelName(), properties);
+    return new AgentSpec(name, modelName, properties);
   }
 
   private SkillSpec parseSkillPackage(
@@ -513,14 +521,10 @@ public final class ConfigSyncParser {
 
   public record ProviderSpec(String name, AgentProviderEditablePropertiesDTO properties) {}
 
-  public record ModelSpec(
-      String providerName, String name, AgentModelEditablePropertiesDTO properties) {}
+  public record ModelSpec(String name, AgentModelEditablePropertiesDTO properties) {}
 
   public record AgentSpec(
-      String name,
-      String providerName,
-      String modelName,
-      AgentDefinitionEditablePropertiesDTO properties) {}
+      String name, String modelName, AgentDefinitionEditablePropertiesDTO properties) {}
 
   public record SkillSpec(
       String packageName,

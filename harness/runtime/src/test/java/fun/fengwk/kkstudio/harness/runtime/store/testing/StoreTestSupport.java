@@ -254,7 +254,7 @@ final class StoreTestSupport {
         "",
         calls,
         calls.isEmpty() ? GenerationStopReason.COMPLETE : GenerationStopReason.COMPLETE,
-        new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
+        new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L),
         "req-1",
         null,
         "{}");
@@ -616,7 +616,7 @@ final class StoreTestSupport {
   }
 
   static BranchSettings branchSettings() {
-    return new BranchSettings("agent", new ModelSelection("provider", "model", "v1"), null);
+    return new BranchSettings("agent", ModelSelection.model("model", "v1"), null);
   }
 
   static ModelRequestSpec modelRequest() {
@@ -670,7 +670,7 @@ final class StoreTestSupport {
         "",
         List.of(new ProviderToolCall(toolCallId, "ask_user", ASK_USER_QUESTIONNAIRE)),
         GenerationStopReason.COMPLETE,
-        new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
+        new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L),
         "req-1",
         null,
         "{}");
@@ -678,7 +678,14 @@ final class StoreTestSupport {
 
   /** SUCCEEDED assistant payload：由同一 request/response 经 mapper 机械派生（strict attach 校验要求全等）。 */
   static MessagePayload mappedAssistant(ModelRequestSpec requestSpec, ProviderResponse response) {
-    return new HistoryPayloadMapper().assistantPayload(response, requestSpec.toolBindings());
+    return mappedAssistant(requestSpec, response, T2);
+  }
+
+  static MessagePayload mappedAssistant(
+      ModelRequestSpec requestSpec, ProviderResponse response, Instant requestedAt) {
+    return new HistoryPayloadMapper()
+        .assistantPayload(
+            response, requestSpec.toolBindings(), actualSelection(requestSpec), requestedAt);
   }
 
   static ToolCall toolCall(String toolCallId) {
@@ -690,7 +697,8 @@ final class StoreTestSupport {
   }
 
   private static AssistantMessageMetadata assistantMetadata(GenerationStopReason stopReason) {
-    return new AssistantMessageMetadata(stopReason, new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L));
+    return new AssistantMessageMetadata(
+        stopReason, new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L));
   }
 
   private static ModelInvocationError modelError() {
@@ -756,5 +764,13 @@ final class StoreTestSupport {
         new InputSchema("arguments", Map.of(), Set.of(), false),
         ToolSideEffect.READ_ONLY,
         Duration.ofSeconds(30));
+  }
+
+  private static ModelSelection actualSelection(ModelRequestSpec requestSpec) {
+    if (requestSpec.groupExecution() == null) {
+      return ModelSelection.model(requestSpec.model().modelName(), requestSpec.variant().id());
+    }
+    var member = requestSpec.groupExecution().members().getFirst();
+    return ModelSelection.model(member.model().modelName(), member.variant().id());
   }
 }

@@ -171,10 +171,11 @@ PaneTarget 有四种状态：`NEW_SESSION_DRAFT`（尚无 Session/Thread）、
 配置差异按 SET_AGENT → SET_MODEL → SET_ENVIRONMENT
 前缀发送。忙碌 Thread 的选择立即作为 standalone SET-only 批提交并显示“待生效”，空闲/未创建/停止保留本地草稿随下一条输入提交；YOLO 走独立控制入口。顶栏面包屑显示当前 pane 的 Chat → Session → 分支身份；
 根面板与草稿 pane 不再渲染自身标题。工作区内只读子代理同样不渲染第二层标题栏或只读 badge，
-其真实身份（agent 名称与 `provider/model (variant)`；默认 main
+其真实身份（agent 名称与 `modelName (variant)`；默认 main
 不作为独立身份）与只读动作直接汇入工作区顶栏，并提供返回直属父 Agent 入口。
 模型与变体组合统一使用括号格式，包括输入区底栏及其提示、设置变更记录、执行树和 Agent 卡片；
-变体来自实际选择，不换算为 reasoningEffort。模型引用和单独选择模型的选项仍使用 `provider/model`。
+变体来自实际选择，不换算为 reasoningEffort。模型引用和单独选择模型的选项都使用全局逻辑
+`modelName`，不拼接 `providerName`；名称本身可以包含斜杠。GROUP 选择不带组级 Variant。
 
 对话按持久 ROOT、SETTINGS 与普通 TURN_START 的设置快照计算 Agent、模型及环境变更。
 回合间的 SETTINGS 成为最新 head 时立即展示变化；后续相同快照不重复展示。
@@ -273,13 +274,13 @@ attempt。UNKNOWN 展示人工核查入口，执行与 pin 契约见 [Canvas](ca
 ## 用量与状态 Footer
 
 Footer 的 token 与费用只取 Entry 的读取投影事实：费用只来自 `usageCost` 投影，绝不从 assistant
-metadata 自行定价；durable 用量按当前 catalog 价格现算，不写回历史，无法定价时保留 null。
+metadata 自行定价；durable 用量按当前 catalog 价格现算，不写回历史，模型已删除或无法解析时保留 null。
 金额先用精确十进制求和，再统一四舍五入到最多 6 位小数并去掉尾随 0；精确值落在 (0, 0.000001)
 时显示 `<$0.000001`，精确 0 才是 `$0`。上下文占用只使用最近一次模型调用的输入估计
 （input + cacheRead + cacheWrite），绝不用分支累计量替代。
-摘要固定保留 `↑input · ↓output · RcacheRead · WcacheWrite · cost · cache N% · X tok/s`
-全部字段，R/W 为零时也不省略。缺失的上下文估计、费用、缓存比例与速率默认显示 `0`，
-费用未计量时不假定币种；hover 仍明确区分未计量与真实零值，展示默认值不写入统计事实。
+摘要固定保留 `↑input · ↓output · RcacheRead · WcacheWrite · cost · cache N.NN% · X tok/s`
+全部字段，R/W 为零时也不省略。缺失的上下文估计、费用与速率默认显示 `0`，缓存比例默认显示
+`0.00%`，费用未计量时不假定币种；hover 仍明确区分未计量与真实零值，展示默认值不写入统计事实。
 单行保留全部事实并由 CSS 省略，hover 给出环境、上下文与用量三组完整数字（含推理与缓存分项），
 措辞统一为“未缓存输入 / 输出 / 推理 / 缓存命中率”等全称。累计口径覆盖全部 Entry，
 包括正常对话里不投影的压缩回合；它与对话内已关闭 TURN_END 的回合 footer 是两件事。
@@ -293,6 +294,10 @@ Provider → Model → Agent → Chat 的首次使用引导并链接到对应页
 新建 Model 时可从已保存的 Provider 拉取上游模型 ID 作为 Model ID 候选，Name 默认跟随 Model ID，
 上游失败时就地展示状态与原因。
 Agent 目录按读 DTO 的 `type` 展示 `USER` / `BUILTIN` 徽标：内置定义的名称与删除受保护，编辑表单允许其模型留空（未配置），用户创建的 Agent 仍要求模型。
+Model 目录在同一列表中区分 `MODEL` 与 `GROUP`，二者共用全局逻辑名称空间；Group 表单按顺序维护
+Fill First 成员，并编辑 `fallbackStatusCodes`（HTTP 400–599，可为空）与 `cooldownSeconds`
+（非负，0 表示仅本次降级）。单模型表单编辑 `modelId`、limit、abilities、variants 与结构化
+pricing；金额输入按十进制字符串提交，不引入 currency 或 unpriced 开关。
 MCP Card 消费安全投影，编辑时读取 no-store 配置并用 generation fence 保护迟到响应。
 Skill Check 只更新候选，用户确认 exact commit 后 Update 发布。
 Environment 管理面展示宿主事实与有界运维事件窗口，并提供“安装 / 覆盖”与“卸载”入口：安装弹窗

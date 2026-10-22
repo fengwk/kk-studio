@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderDTO;
 
@@ -85,15 +86,14 @@ class CatalogParentLockIntegrationTest extends PostgresSpringTestSupport {
 
       modelCreation.get(5, TimeUnit.SECONDS);
       providerDeletion.get(5, TimeUnit.SECONDS);
-      assertNotNull(
-          modelRepository.getByProviderNameAndName(provider.getName(), modelCreate.getName()));
+      assertNotNull(modelRepository.getByName(modelCreate.getName()));
       assertNotNull(providerRepository.getByName(provider.getName()));
     } finally {
       releaseChildTransaction.countDown();
       executor.shutdownNow();
     }
     AgentModelDTO model = createdModel.get();
-    modelService.deleteModel(provider.getName(), model.getName(), model.getVersion());
+    modelService.deleteModel(model.getName(), model.getVersion());
     providerService.deleteProvider(provider.getName(), provider.getVersion());
   }
 
@@ -104,8 +104,7 @@ class CatalogParentLockIntegrationTest extends PostgresSpringTestSupport {
         providerService.createProvider(provider("lock-agent-provider-" + suffix));
     AgentModelDTO model =
         modelService.createModel(model(provider.getName(), "lock-agent-model-" + suffix));
-    AgentDefinitionCreateDTO agentCreate =
-        agent(provider.getName() + "/" + model.getName(), "lock-agent-" + suffix);
+    AgentDefinitionCreateDTO agentCreate = agent(model.getName(), "lock-agent-" + suffix);
     AtomicReference<AgentDefinitionDTO> createdAgent = new AtomicReference<>();
     CountDownLatch childCreated = new CountDownLatch(1);
     CountDownLatch releaseChildTransaction = new CountDownLatch(1);
@@ -118,9 +117,7 @@ class CatalogParentLockIntegrationTest extends PostgresSpringTestSupport {
               () ->
                   transaction.executeWithoutResult(
                       status -> {
-                        assertNotNull(
-                            modelRepository.getByProviderNameAndNameForUpdate(
-                                provider.getName(), model.getName()));
+                        assertNotNull(modelRepository.getByNameForUpdate(model.getName()));
                         createdAgent.set(definitionService.createAgent(agentCreate));
                         childCreated.countDown();
                         await(releaseChildTransaction);
@@ -133,9 +130,7 @@ class CatalogParentLockIntegrationTest extends PostgresSpringTestSupport {
                 deleteStarted.countDown();
                 assertThrows(
                     AiInUseException.class,
-                    () ->
-                        modelService.deleteModel(
-                            provider.getName(), model.getName(), model.getVersion()));
+                    () -> modelService.deleteModel(model.getName(), model.getVersion()));
                 return null;
               });
       assertTrue(deleteStarted.await(5, TimeUnit.SECONDS));
@@ -144,13 +139,13 @@ class CatalogParentLockIntegrationTest extends PostgresSpringTestSupport {
       agentCreation.get(5, TimeUnit.SECONDS);
       modelDeletion.get(5, TimeUnit.SECONDS);
       assertNotNull(definitionRepository.getByName(createdAgent.get().getName()));
-      assertNotNull(modelRepository.getByProviderNameAndName(provider.getName(), model.getName()));
+      assertNotNull(modelRepository.getByName(model.getName()));
     } finally {
       releaseChildTransaction.countDown();
       executor.shutdownNow();
     }
     definitionService.deleteAgent(createdAgent.get().getName(), createdAgent.get().getVersion());
-    modelService.deleteModel(provider.getName(), model.getName(), model.getVersion());
+    modelService.deleteModel(model.getName(), model.getVersion());
     providerService.deleteProvider(provider.getName(), provider.getVersion());
   }
 
@@ -161,7 +156,7 @@ class CatalogParentLockIntegrationTest extends PostgresSpringTestSupport {
         providerService.createProvider(provider("cross-agent-provider-" + suffix));
     AgentModelDTO model =
         modelService.createModel(model(provider.getName(), "cross-agent-model-" + suffix));
-    String modelRef = provider.getName() + "/" + model.getName();
+    String modelRef = model.getName();
     AgentDefinitionDTO createdAlpha =
         definitionService.createAgent(agent(modelRef, "cross-alpha-" + suffix));
     AgentDefinitionDTO createdOmega =
@@ -199,7 +194,7 @@ class CatalogParentLockIntegrationTest extends PostgresSpringTestSupport {
       start.countDown();
       executor.shutdownNow();
     }
-    modelService.deleteModel(provider.getName(), model.getName(), model.getVersion());
+    modelService.deleteModel(model.getName(), model.getVersion());
     providerService.deleteProvider(provider.getName(), provider.getVersion());
   }
 
@@ -212,6 +207,7 @@ class CatalogParentLockIntegrationTest extends PostgresSpringTestSupport {
 
   private AgentModelCreateDTO model(String providerName, String name) {
     AgentModelCreateDTO create = new AgentModelCreateDTO();
+    create.setKind(AgentModelKind.MODEL);
     create.setProviderName(providerName);
     create.setName(name);
     executable(create);

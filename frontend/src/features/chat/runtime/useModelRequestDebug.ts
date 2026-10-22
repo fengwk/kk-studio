@@ -43,9 +43,8 @@ export function useModelRequestDebug(
     ? null
     : {
         model: {
-          providerName: request.model.providerName,
           modelName: request.model.modelName,
-          variant: request.model.variant,
+          variant: request.model.variant ?? null,
         },
         environmentName: request.environmentName ?? null,
       }

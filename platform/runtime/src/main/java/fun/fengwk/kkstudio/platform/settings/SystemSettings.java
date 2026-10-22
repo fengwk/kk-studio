@@ -5,6 +5,7 @@ import fun.fengwk.kkstudio.harness.runtime.permission.PermissionKeyValidator;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.harness.runtime.retry.ModelHttpErrorPolicy;
+import fun.fengwk.kkstudio.share.ai.catalog.ModelCatalogSource;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -112,7 +113,8 @@ public record SystemSettings(
       int subagentMaxConcurrency,
       int subagentMaxTotalConcurrency,
       int subagentMaxTurns,
-      List<Integer> modelHttpRetryStatusCodes) {
+      List<Integer> modelHttpRetryStatusCodes,
+      ModelCatalogSource modelCatalogSource) {
 
     public static final AiRuntime DEFAULT =
         new AiRuntime(
@@ -125,7 +127,8 @@ public record SystemSettings(
             10,
             0,
             50,
-            ModelHttpErrorPolicy.DEFAULT_RETRY_STATUS_CODES);
+            ModelHttpErrorPolicy.DEFAULT_RETRY_STATUS_CODES,
+            ModelCatalogSource.MODELS_DEV_V2);
 
     public AiRuntime {
       SystemSettingsValidation.requireNonNegativeInt(retryMaxRetries, "aiRuntime.retryMaxRetries");
@@ -153,6 +156,8 @@ public record SystemSettings(
                   Objects.requireNonNull(
                       modelHttpRetryStatusCodes, "aiRuntime.modelHttpRetryStatusCodes"))
               .retryStatusCodes();
+      modelCatalogSource =
+          Objects.requireNonNull(modelCatalogSource, "aiRuntime.modelCatalogSource");
     }
   }
 

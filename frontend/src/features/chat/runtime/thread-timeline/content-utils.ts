@@ -399,7 +399,7 @@ export function parseAssistantUsage(
 
 /**
  * 估算缓存命中率：cacheRead / (input + cacheRead + cacheWrite)。
- * 分母为 0 时返回 null，摘要默认显示 0%。
+ * 返回未取整的百分数，展示层统一保留两位小数；分母为 0 时返回 null，摘要默认显示 0.00%。
  */
 export function calculateCacheHitRate(usage: {
   input: number
@@ -410,7 +410,7 @@ export function calculateCacheHitRate(usage: {
   if (denominator <= 0) {
     return null
   }
-  return Math.round((usage.cacheRead / denominator) * 100)
+  return (usage.cacheRead / denominator) * 100
 }
 
 /**
@@ -491,8 +491,8 @@ export function mergeTurnUsage(existing: TurnUsage, next: TurnUsage): TurnUsage 
 
 /**
  * Turn usage 摘要文本（Conversation TurnSummary、Event TURN_END 与 Footer 共用）：
- * `↑input · ↓output · RcacheRead · WcacheWrite · cost · cache N% · X tok/s`。
- * 所有统计项固定保留；无缓存比例、测速样本或定价时默认显示 0，
+ * `↑input · ↓output · RcacheRead · WcacheWrite · cost · cache N.NN% · X tok/s`。
+ * 所有统计项固定保留；无缓存比例、测速样本或定价时默认显示 0，缓存比例保留两位小数，
  * 不为缺失定价假定币种。默认值仅用于展示，不写入 usage facts。
  * 统计项分隔符统一为 U+00B7，Footer 只在其外层使用 U+2223 分组，不覆盖本函数。
  */
@@ -513,7 +513,7 @@ export function formatTurnUsageText(usage: {
   ]
   parts.push(formatUsageCost(usage.cost) ?? '0')
   const cacheHitRate = calculateCacheHitRate(usage)
-  parts.push(`cache ${cacheHitRate ?? 0}%`)
+  parts.push(`cache ${(cacheHitRate ?? 0).toFixed(2)}%`)
   const speed = calculateDecodeTokensPerSecond(usage)
   parts.push(`${speed ?? 0} tok/s`)
   return parts.join(' · ')

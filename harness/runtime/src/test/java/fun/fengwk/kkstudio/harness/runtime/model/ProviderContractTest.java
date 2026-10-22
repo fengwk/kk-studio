@@ -28,6 +28,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderVideoBlock;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /** Provider message、流增量和完整响应的结构化契约测试。 */
 class ProviderContractTest {
@@ -160,7 +161,7 @@ class ProviderContractTest {
   /** 完整响应必须携带非空 usage/cost，并原样保留由 Turn Engine 校验的结束原因。 */
   @Test
   void requiresCompleteResponseAccountingAndPreservesStopReason() {
-    ModelUsage usage = new ModelUsage(1, 2, 0, 0, 0, 0, 3);
+    ModelUsage usage = new ModelUsage(1, 2, 0, 0, Map.of(), 0L, 3L);
     ModelCost cost = zeroCost();
     assertThrows(
         NullPointerException.class,
@@ -186,7 +187,7 @@ class ProviderContractTest {
   /** rawUsageJson 必须为合法 JSON object 或 array，仅 null 规范化为 "{}"。 */
   @Test
   void rawUsageJsonMustBeValidJsonObjectOrArray() {
-    ModelUsage usage = new ModelUsage(1, 1, 0, 0, 0, 0, 2);
+    ModelUsage usage = new ModelUsage(1, 1, 0, 0, Map.of(), 0L, 2L);
     ModelCost cost = zeroCost();
 
     assertEquals(
@@ -231,7 +232,6 @@ class ProviderContractTest {
   private static ModelCost zeroCost() {
     return new ModelCost(
         "USD",
-        BigDecimal.ZERO,
         BigDecimal.ZERO,
         BigDecimal.ZERO,
         BigDecimal.ZERO,

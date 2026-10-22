@@ -1,8 +1,10 @@
 package fun.fengwk.kkstudio.platform.catalog.model.runtime;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -15,7 +17,10 @@ import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.module.SimpleModule;
 
 import fun.fengwk.kkstudio.harness.provider.ProviderProtocolOptionsJson;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.ProviderProtocolOptions;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser.ParsedAgentModelConfig;
@@ -23,7 +28,8 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
-import java.util.Collections;
+import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -34,7 +40,7 @@ class AgentModelRuntimeConfigParserTest {
   private final AgentModelRuntimeConfigParser parser =
       new AgentModelRuntimeConfigParser(JsonMapper.builder().build());
 
-  /** 每个可执行字段（含 6 个独立价格）都经严格解析保留下来；variant 只保留 id、reasoningEffort 与原生协议选项。 */
+  /** 定价段落按完整定义解析：基础费率与 TTL 价格精确保留，不再存在旧 6 个扁平价格字段。 */
   @Test
   void parsesCompleteRuntimeModelWithoutTokenBasedPriceInference() {
     var parsed = parser.parse(validConfig());
@@ -47,17 +53,16 @@ class AgentModelRuntimeConfigParserTest {
     assertTrue(parsed.reasoning());
     assertEquals("quality", parsed.defaultVariant());
     assertEquals(List.of(new ModelVariant("quality", "high")), parsed.variants());
-    assertEquals("USD", parsed.pricing().currency());
-    assertEquals("batch", parsed.pricing().pricingTier());
-    assertEquals("priority", parsed.pricing().serviceTier());
-    assertEquals(new BigDecimal("1.25"), parsed.pricing().serviceTierMultiplier());
-    assertEquals("2026-07-16", parsed.pricing().version());
-    assertEquals(new BigDecimal("1.1"), parsed.pricing().inputPerMillionTokens());
-    assertEquals(new BigDecimal("2.2"), parsed.pricing().outputPerMillionTokens());
-    assertEquals(new BigDecimal("0.3"), parsed.pricing().cacheReadPerMillionTokens());
-    assertEquals(new BigDecimal("0.4"), parsed.pricing().cacheWritePerMillionTokens());
-    assertEquals(new BigDecimal("0.5"), parsed.pricing().cacheWriteLongPerMillionTokens());
-    assertEquals(new BigDecimal("3.6"), parsed.pricing().reasoningPerMillionTokens());
+    var pricing = parsed.pricing();
+    assertEquals(new BigDecimal("1.1"), pricing.base().input());
+    assertEquals(new BigDecimal("2.2"), pricing.base().output());
+    assertEquals(new BigDecimal("0.3"), pricing.base().cacheRead());
+    assertEquals(new BigDecimal("0.4"), pricing.base().cacheWrite());
+    assertEquals(new BigDecimal("0.5"), pricing.base().cacheWriteRate(300));
+    assertEquals(new BigDecimal("0.4"), pricing.base().cacheWriteRate(3600));
+    assertEquals(new BigDecimal("3.6"), pricing.base().reasoning());
+    assertEquals(List.of(), pricing.overrides());
+    assertEquals(List.of(), pricing.multipliers());
   }
 
   /** 类型化 DTO 来回往返：decode -> encode -> parse 得到相同的 runtime 快照。 */
@@ -66,9 +71,131 @@ class AgentModelRuntimeConfigParserTest {
     AgentModelConfigDTO decoded = parser.decode(validConfig());
     String encoded = parser.encode(decoded);
     var parsed = parser.parse(encoded);
-    assertEquals("USD", parsed.pricing().currency());
+    assertEquals(new BigDecimal("1.1"), parsed.pricing().base().input());
     assertEquals("quality", parsed.defaultVariant());
     assertEquals(List.of(new ModelVariant("quality", "high")), parsed.variants());
+  }
+
+  /** 条件与规则按顺序解析；日期允许单侧缺省，显式 reasoning:null 与未声明 reasoning 保持不同语义。 */
+  @Test
+  void parsesOrderedRulesAndPreservesExplicitReasoningNull() {
+    String config =
+        validConfig()
+            .replace(
+                "\"overrides\":[],\"multipliers\":[]",
+                "\"overrides\":["
+                    + "{\"id\":\"gte-only\",\"when\":{\"date\":{\"gte\":\"2026-08-17\"}},"
+                    + "\"rates\":{\"input\":\"2\"}},"
+                    + "{\"id\":\"reset-reasoning\",\"when\":{},"
+                    + "\"rates\":{\"reasoning\":null}}],"
+                    + "\"multipliers\":[{\"id\":\"priority\","
+                    + "\"when\":{\"serviceTier\":[\"priority\"]},"
+                    + "\"factors\":{\"input\":\"1.5\"}}]");
+
+    var parsed = parser.parse(config);
+    var overrides = parsed.pricing().overrides();
+    assertEquals(2, overrides.size());
+    assertEquals("gte-only", overrides.get(0).id());
+    assertEquals(LocalDate.of(2026, 8, 17), overrides.get(0).when().date().gte());
+    assertNull(overrides.get(0).when().date().lt());
+    assertFalse(overrides.get(0).rates().modifiesReasoning());
+    assertTrue(overrides.get(1).rates().modifiesReasoning());
+    assertNull(overrides.get(1).rates().reasoning());
+    assertEquals("priority", parsed.pricing().multipliers().get(0).id());
+    assertEquals(new BigDecimal("1.5"), parsed.pricing().multipliers().get(0).factors().input());
+
+    String encoded = parser.encode(parser.decode(config));
+    var roundTripped = parser.parse(encoded).pricing().overrides();
+    assertFalse(roundTripped.get(0).rates().modifiesReasoning());
+    assertTrue(roundTripped.get(1).rates().modifiesReasoning());
+  }
+
+  /** 日期边界同时存在时必须可满足；单侧边界合法。 */
+  @Test
+  void rejectsInvertedDateRangeAndAcceptsOneSidedBounds() {
+    assertInvalid(
+        validConfig()
+            .replace(
+                "\"overrides\":[],\"multipliers\":[]",
+                "\"overrides\":[{\"id\":\"bad\",\"when\":{\"date\":"
+                    + "{\"gte\":\"2026-08-18\",\"lt\":\"2026-08-18\"}},"
+                    + "\"rates\":{\"input\":\"1\"}}],\"multipliers\":[]"),
+        "date.gte must be before date.lt");
+    assertDoesNotThrow(
+        () ->
+            parser.parse(
+                validConfig()
+                    .replace(
+                        "\"overrides\":[],\"multipliers\":[]",
+                        "\"overrides\":[{\"id\":\"lt-only\",\"when\":"
+                            + "{\"date\":{\"lt\":\"2026-08-18\"}},"
+                            + "\"rates\":{\"input\":\"1\"}}],\"multipliers\":[]")));
+  }
+
+  /** 显式空 any/serviceTier 的 presence 必须跨 decode/encode 保留，不能被折叠为缺省。 */
+  @Test
+  void preservesExplicitEmptyAnyAndServiceTier() {
+    String config =
+        validConfig()
+            .replace(
+                "\"overrides\":[],\"multipliers\":[]",
+                "\"overrides\":[{\"id\":\"empty\",\"when\":"
+                    + "{\"any\":[],\"serviceTier\":[]},\"rates\":{\"input\":\"1\"}}],"
+                    + "\"multipliers\":[]");
+
+    var when = parser.decode(config).getPricing().getOverrides().get(0).getWhen();
+    assertNotNull(when.getAny());
+    assertTrue(when.getAny().isEmpty());
+    assertNotNull(when.getServiceTier());
+    assertTrue(when.getServiceTier().isEmpty());
+
+    String encoded = parser.encode(parser.decode(config));
+    assertTrue(encoded.contains("\"any\":[]"), encoded);
+    assertTrue(encoded.contains("\"serviceTier\":[]"), encoded);
+
+    var parsed = parser.parse(encoded).pricing().overrides().get(0).when();
+    assertNotNull(parsed.any());
+    assertTrue(parsed.any().isEmpty());
+    assertNotNull(parsed.serviceTier());
+    assertTrue(parsed.serviceTier().isEmpty());
+  }
+
+  /** wire end=24:00 可配任意合法 start；00:00-24:00 保留 canonical wire，22:00-24:00 表达当日终点。 */
+  @Test
+  void acceptsAllDayAndEndOfDayTimeAndKeepsCanonicalEnd24() {
+    String allDay = configWithTime("00:00", "24:00");
+    var allDayTime = parser.parse(allDay).pricing().overrides().get(0).when().time();
+    assertEquals(LocalTime.MIDNIGHT, allDayTime.start());
+    assertEquals(LocalTime.MIDNIGHT, allDayTime.end());
+    assertTrue(allDayTime.allDay());
+    assertTrue(parser.encode(parser.decode(allDay)).contains("\"end\":\"24:00\""));
+
+    String late = configWithTime("22:00", "24:00");
+    var lateTime = parser.parse(late).pricing().overrides().get(0).when().time();
+    assertEquals(LocalTime.of(22, 0), lateTime.start());
+    assertEquals(LocalTime.MIDNIGHT, lateTime.end());
+    assertFalse(lateTime.allDay());
+    assertTrue(parser.encode(parser.decode(late)).contains("\"end\":\"24:00\""));
+  }
+
+  /** 拒绝 start=24:00，以及把相同起止（含 00:00-00:00）静默当成全天。 */
+  @Test
+  void rejectsInvalidAllDayTimeForms() {
+    assertInvalid(configWithTime("24:00", "24:00"), ".start must be before 24:00");
+    assertInvalid(configWithTime("00:00", "00:00"), ".start and end must differ");
+    assertInvalid(configWithTime("10:00", "10:00"), ".start and end must differ");
+  }
+
+  private String configWithTime(String start, String end) {
+    return validConfig()
+        .replace(
+            "\"overrides\":[],\"multipliers\":[]",
+            "\"overrides\":[{\"id\":\"time\",\"when\":{\"time\":{\"start\":\""
+                + start
+                + "\",\"end\":\""
+                + end
+                + "\",\"timezone\":\"UTC\",\"weekdays\":[1]}},"
+                + "\"rates\":{\"input\":\"2\"}}],\"multipliers\":[]");
   }
 
   /** off 是显式关闭语义，绝不与 null（协议默认）静默映射。 */
@@ -379,9 +506,8 @@ class AgentModelRuntimeConfigParserTest {
         validConfig().replace("\"reasoningEffort\":\"high\"", "\"reasoningEffort\":\"   \""),
         "reasoningEffort must not be blank");
     assertInvalid(
-        validConfig()
-            .replace("\"reasoningPerMillionTokens\":3.6", "\"reasoningPerMillionTokens\":null"),
-        "reasoningPerMillionTokens");
+        validConfig().replace("\"reasoning\":\"3.6\"", "\"reasoning\":\"-1\""),
+        "reasoning must not be negative");
     assertInvalid(
         validConfig().replace("[\"TEXT\",\"IMAGE\"]", "[\"UNKNOWN\"]"), "inputModalities[0]");
   }
@@ -407,62 +533,13 @@ class AgentModelRuntimeConfigParserTest {
         validConfig().replace("\"defaultVariant\":\"quality\"", "\"defaultVariant\":\"missing\""),
         "defaultVariant must match");
     assertInvalid(
-        validConfig().replace("\"serviceTierMultiplier\":1.25", "\"serviceTierMultiplier\":0"),
-        "serviceTierMultiplier must be positive");
-    assertInvalid(
-        validConfig().replace("\"inputPerMillionTokens\":1.1", "\"inputPerMillionTokens\":-1"),
-        "inputPerMillionTokens must not be negative");
+        validConfig().replace("\"input\":\"1.1\"", "\"input\":\"-1\""),
+        "input must not be negative");
     assertInvalid(
         validConfig()
             .replace(
                 "\"reasoningEffort\":\"high\"", "\"reasoningEffort\":\"" + "a".repeat(65) + "\""),
         "reasoningEffort must not exceed 64 characters");
-  }
-
-  /** 条件价格随配置往返；时段、门槛与单价都按与基础价格同一套规则校验，错误指出具体规则下标。 */
-  @Test
-  void parsesAndValidatesPricingRules() {
-    String rule =
-        "{\"timeWindow\":{\"timeZone\":\"Asia/Shanghai\",\"start\":\"00:30\",\"end\":\"08:30\"},\"minContextTokens\":null,\"inputPerMillionTokens\":0.5,\"outputPerMillionTokens\":1,\"cacheReadPerMillionTokens\":0.1,\"cacheWritePerMillionTokens\":0,\"cacheWriteLongPerMillionTokens\":0,\"reasoningPerMillionTokens\":1}";
-    var parsed = parser.parse(withPricingRules(validConfig(), rule));
-    assertEquals(1, parsed.pricing().rules().size());
-    assertEquals(new BigDecimal("0.5"), parsed.pricing().rules().get(0).inputPerMillionTokens());
-    assertEquals("Asia/Shanghai", parsed.pricing().rules().get(0).timeWindow().zone().getId());
-
-    assertInvalid(
-        withPricingRules(validConfig(), rule.replace("Asia/Shanghai", "Mars/Base")),
-        "rules[0].timeWindow.timeZone must be an IANA time zone");
-    assertInvalid(
-        withPricingRules(validConfig(), rule.replace("08:30", "8:30")),
-        "rules[0].timeWindow.end must be HH:mm");
-    assertInvalid(
-        withPricingRules(validConfig(), rule.replace("08:30", "00:30")),
-        "rules[0].timeWindow start and end must differ");
-    assertInvalid(
-        withPricingRules(
-            validConfig(),
-            rule.replace(
-                "\"timeWindow\":{\"timeZone\":\"Asia/Shanghai\",\"start\":\"00:30\",\"end\":\"08:30\"}",
-                "\"timeWindow\":null")),
-        "rules[0] needs a timeWindow or minContextTokens");
-    assertInvalid(
-        withPricingRules(
-            validConfig(), rule.replace("\"minContextTokens\":null", "\"minContextTokens\":0")),
-        "rules[0].minContextTokens must be positive");
-    assertInvalid(
-        withPricingRules(
-            validConfig(),
-            rule.replace("\"inputPerMillionTokens\":0.5", "\"inputPerMillionTokens\":-1")),
-        "rules[0].inputPerMillionTokens must not be negative");
-    assertInvalid(
-        withPricingRules(validConfig(), String.join(",", Collections.nCopies(17, rule))),
-        "rules must not exceed 16 entries");
-  }
-
-  private static String withPricingRules(String config, String rules) {
-    return config.replace(
-        "\"reasoningPerMillionTokens\":3.6}",
-        "\"reasoningPerMillionTokens\":3.6,\"rules\":[" + rules + "]}");
   }
 
   /**
@@ -494,11 +571,9 @@ class AgentModelRuntimeConfigParserTest {
         "{\"limit\":{\"context\":1,\"output\":1},\"abilities\":{\"tools\":true,"
             + "\"reasoning\":true,\"inputModalities\":[\"TEXT\"]},"
             + "\"defaultVariant\":\"x\",\"variants\":[],\"pricing\":{"
-            + "\"currency\":\"USD\",\"pricingTier\":\"x\",\"serviceTier\":\"x\","
-            + "\"serviceTierMultiplier\":1,\"version\":\"v\",\"inputPerMillionTokens\":0,"
-            + "\"outputPerMillionTokens\":0,\"cacheReadPerMillionTokens\":0,"
-            + "\"cacheWritePerMillionTokens\":0,\"cacheWriteLongPerMillionTokens\":0,"
-            + "\"reasoningPerMillionTokens\":0}}",
+            + "\"base\":{\"input\":\"0\",\"output\":\"0\",\"cacheRead\":\"0\","
+            + "\"cacheWrite\":\"0\",\"cacheWriteByTtl\":{},\"reasoning\":null},"
+            + "\"overrides\":[],\"multipliers\":[]}}",
         "config.variants must not be empty");
   }
 
@@ -515,9 +590,9 @@ class AgentModelRuntimeConfigParserTest {
         "surrounding whitespace");
   }
 
-  /** 类型化 DTO 形式拒绝 null 和损坏的子结构；部分子结构会以明确方式失败。 */
+  /** 类型化 DTO 形式拒绝损坏的必填子结构；缺失 pricing 按零定义归一，而不是继续拒绝。 */
   @Test
-  void rejectsInvalidTypedConfigDirectly() {
+  void validatesTypedConfigAndNormalizesMissingPricing() {
     AgentModelConfigDTO base = parser.decode(validConfig());
     assertNotNull(base);
     AgentModelConfigDTO missingLimit = copy(base, c -> c.setLimit(null));
@@ -534,21 +609,76 @@ class AgentModelRuntimeConfigParserTest {
         abilitiesError.getMessage());
 
     AgentModelConfigDTO missingPricing = copy(base, c -> c.setPricing(null));
-    IllegalArgumentException pricingError =
-        assertThrows(IllegalArgumentException.class, () -> parser.parse(missingPricing));
-    assertTrue(
-        pricingError.getMessage().contains("config.pricing is required"),
-        pricingError.getMessage());
+    assertEquals(ModelPricing.ZERO, parser.parse(missingPricing).pricing());
 
-    AgentModelConfigDTO zeroMultiplier =
-        copy(base, c -> c.getPricing().setServiceTierMultiplier(BigDecimal.ZERO));
+    AgentModelConfigDTO negativeInput =
+        copy(base, c -> c.getPricing().getBase().setInput(new BigDecimal("-1")));
     IllegalArgumentException multiplierError =
-        assertThrows(IllegalArgumentException.class, () -> parser.parse(zeroMultiplier));
+        assertThrows(IllegalArgumentException.class, () -> parser.parse(negativeInput));
     assertTrue(
-        multiplierError
-            .getMessage()
-            .contains("config.pricing.serviceTierMultiplier must be positive"),
+        multiplierError.getMessage().contains("config.pricing.base.input must not be negative"),
         multiplierError.getMessage());
+  }
+
+  /** 缺失 pricing、缺失 base 普通价格与显式全零定义得到相同 canonical DTO 与零成本。 */
+  @Test
+  void normalizesMissingPricingToCanonicalZeroDefinition() {
+    AgentModelConfigDTO missing = parser.decode(configWithoutPricing());
+    AgentModelConfigDTO partial = parser.decode(configWithPricing("{\"base\":{}}"));
+    AgentModelConfigDTO explicit = parser.decode(configWithPricing(EXPLICIT_ZERO_PRICING));
+
+    assertCanonicalZero(missing);
+    assertCanonicalZero(partial);
+    assertEquals(explicit.getPricing(), missing.getPricing());
+    assertEquals(explicit.getPricing(), partial.getPricing());
+
+    String encoded = parser.encode(missing);
+    assertTrue(encoded.contains("\"pricing\":{\"base\":{"), encoded);
+    assertTrue(encoded.contains("\"input\":\"0\""), encoded);
+    assertTrue(encoded.contains("\"output\":\"0\""), encoded);
+    assertTrue(encoded.contains("\"cacheRead\":\"0\""), encoded);
+    assertTrue(encoded.contains("\"cacheWrite\":\"0\""), encoded);
+    assertTrue(encoded.contains("\"cacheWriteByTtl\":{}"), encoded);
+    assertTrue(encoded.contains("\"overrides\":[]"), encoded);
+    assertTrue(encoded.contains("\"multipliers\":[]"), encoded);
+
+    ModelUsage usage = new ModelUsage(1_000_000, 1_000_000, 0, 0, Map.of(), null, null);
+    assertEquals(
+        ModelCost.zero(), ModelCost.calculate(parser.parse(missing).pricing(), usage, null, null));
+    assertEquals(
+        ModelCost.zero(), ModelCost.calculate(parser.parse(explicit).pricing(), usage, null, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> parser.decode(configWithPricing("{\"base\":{\"input\":1.1}}")));
+  }
+
+  private static void assertCanonicalZero(AgentModelConfigDTO config) {
+    var pricing = config.getPricing();
+    assertNotNull(pricing);
+    assertNotNull(pricing.getBase());
+    assertEquals(BigDecimal.ZERO, pricing.getBase().getInput());
+    assertEquals(BigDecimal.ZERO, pricing.getBase().getOutput());
+    assertEquals(BigDecimal.ZERO, pricing.getBase().getCacheRead());
+    assertEquals(BigDecimal.ZERO, pricing.getBase().getCacheWrite());
+    assertEquals(Map.of(), pricing.getBase().getCacheWriteByTtl());
+    assertNull(pricing.getBase().getReasoning());
+    assertNotNull(pricing.getOverrides());
+    assertTrue(pricing.getOverrides().isEmpty());
+    assertNotNull(pricing.getMultipliers());
+    assertTrue(pricing.getMultipliers().isEmpty());
+  }
+
+  private String configWithPricing(String pricingJson) {
+    String base = configWithoutPricing();
+    return base.substring(0, base.length() - 1) + ",\"pricing\":" + pricingJson + "}";
+  }
+
+  private String configWithoutPricing() {
+    return "{\"limit\":{\"context\":128000,\"output\":8192},"
+        + "\"abilities\":{\"tools\":true,\"reasoning\":true,"
+        + "\"inputModalities\":[\"TEXT\",\"IMAGE\"]},"
+        + "\"defaultVariant\":\"quality\","
+        + "\"variants\":[{\"id\":\"quality\",\"reasoningEffort\":\"high\"}]}";
   }
 
   private static AgentModelConfigDTO copy(
@@ -573,6 +703,10 @@ class AgentModelRuntimeConfigParserTest {
   /** canonical variant wire：只含 id 与 reasoningEffort。 */
   private static final String VARIANT_JSON =
       "\"variants\":[{\"id\":\"quality\",\"reasoningEffort\":\"high\"}],";
+
+  private static final String EXPLICIT_ZERO_PRICING =
+      "{\"base\":{\"input\":\"0\",\"output\":\"0\",\"cacheRead\":\"0\",\"cacheWrite\":\"0\","
+          + "\"cacheWriteByTtl\":{},\"reasoning\":null},\"overrides\":[],\"multipliers\":[]}";
 
   /** 厂商原生协议选项 fixture：覆盖嵌套 object、数组、布尔、小数与超出 Integer 范围的整数。 */
   private static final String PROTOCOL_OPTIONS_JSON =
@@ -622,12 +756,9 @@ class AgentModelRuntimeConfigParserTest {
         + "\"inputModalities\":[\"TEXT\",\"IMAGE\"]},"
         + "\"defaultVariant\":\"quality\","
         + VARIANT_JSON
-        + "\"pricing\":{\"currency\":\"USD\",\"pricingTier\":\"batch\","
-        + "\"serviceTier\":\"priority\",\"serviceTierMultiplier\":1.25,"
-        + "\"version\":\"2026-07-16\",\"inputPerMillionTokens\":1.1,"
-        + "\"outputPerMillionTokens\":2.2,\"cacheReadPerMillionTokens\":0.3,"
-        + "\"cacheWritePerMillionTokens\":0.4,"
-        + "\"cacheWriteLongPerMillionTokens\":0.5,"
-        + "\"reasoningPerMillionTokens\":3.6}}";
+        + "\"pricing\":{\"base\":{\"input\":\"1.1\",\"output\":\"2.2\","
+        + "\"cacheRead\":\"0.3\",\"cacheWrite\":\"0.4\","
+        + "\"cacheWriteByTtl\":{\"300\":\"0.5\"},\"reasoning\":\"3.6\"},"
+        + "\"overrides\":[],\"multipliers\":[]}}";
   }
 }

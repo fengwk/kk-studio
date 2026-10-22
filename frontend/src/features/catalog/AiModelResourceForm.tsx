@@ -1,10 +1,12 @@
+import { useState } from 'react'
 import type { ModelDraft, VariantDraft } from '@/features/catalog/ai-console-types'
 import { variantOptionsFromDraft } from '@/features/catalog/ai-draft-normalizers'
-import { sanitizeDecimalInput } from '@/shared/lib/numeric-input'
 import type { ResourceFieldKey } from '@/features/catalog/ai-resource-form-validation'
 import { VariantListEditor } from '@/features/catalog/AiVariantListEditor'
-import { PricingRuleEditor } from '@/features/catalog/AiPricingRuleEditor'
-import { PRICING_UNIT_FIELDS, type PriceField } from '@/features/catalog/ai-pricing-fields'
+import { ModelPricingEditor } from '@/features/catalog/AiModelPricingEditor'
+import { ModelCatalogPicker } from '@/features/catalog/AiModelCatalogPicker'
+import { applyCatalogCandidate } from '@/features/catalog/ai-model-catalog-apply'
+import { Button } from '@/shared/ui/controls/Button'
 import { Checkbox } from '@/shared/ui/controls/Checkbox'
 import { NumberInput } from '@/shared/ui/controls/NumberInput'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
@@ -38,6 +40,7 @@ export function ModelForm({
   loadRemoteModelIds?: (providerName: string) => Promise<string[]>
 }) {
   const { t } = useI18n()
+  const [catalogOpen, setCatalogOpen] = useState(false)
   const variantOptions = variantOptionsFromDraft(draft.variants)
   const providerUnavailable =
     mode === 'edit' &&
@@ -86,16 +89,6 @@ export function ModelForm({
   /** Reasoning 只切换能力开关；空思考强度表示不覆盖协议默认，不自动补全。 */
   function setReasoning(enabled: boolean) {
     onChange({ ...draft, reasoning: enabled })
-  }
-
-  function updatePricing(field: PriceField, value: string) {
-    onChange({
-      ...draft,
-      pricing: {
-        ...draft.pricing,
-        [field]: value,
-      },
-    })
   }
 
   return (
@@ -163,6 +156,26 @@ export function ModelForm({
           placeholder={t('ai.catalog.form.modelDescriptionPlaceholder')}
         />
       </label>
+
+      <div className="catalog-picker-launcher">
+        <Button
+          variant="inline"
+          aria-expanded={catalogOpen}
+          onClick={() => setCatalogOpen((current) => !current)}
+        >
+          {catalogOpen
+            ? t('ai.catalog.catalog.hide')
+            : t('ai.catalog.catalog.open')}
+        </Button>
+      </div>
+      {catalogOpen ? (
+        <ModelCatalogPicker
+          onApply={(candidate) => {
+            onChange(applyCatalogCandidate(draft, candidate))
+            setCatalogOpen(false)
+          }}
+        />
+      ) : null}
 
       <section className="structured-section" aria-labelledby="model-limit-heading">
         <div className="structured-section-head">
@@ -242,52 +255,12 @@ export function ModelForm({
         ) : null}
       </fieldset>
 
-      <section
-        className={`structured-section${fieldErrors.pricing ? ' is-error' : ''}`}
-        aria-labelledby="model-pricing-heading"
-      >
-        <div className="structured-section-head">
-          <h3 id="model-pricing-heading">{t('ai.catalog.form.pricing')}</h3>
-        </div>
-        <p className="inline-hint">{t('ai.catalog.form.priceHint')}</p>
-        <div className="form-grid-2">
-          {PRICING_UNIT_FIELDS.map(({ field, labelKey }) => {
-            const label = t(labelKey)
-            return (
-            <label className="form-group" key={field}>
-              <FieldLabel required>{label}</FieldLabel>
-              <div className="price-input">
-                <span className="price-affix" aria-hidden="true">
-                  $
-                </span>
-                <TextInput
-                  type="number"
-                  invalid={Boolean(fieldErrors.pricing)}
-                  inputMode="decimal"
-                  min={0}
-                  step="any"
-                  value={draft.pricing[field]}
-                  onChange={(event) =>
-                    updatePricing(field, sanitizeDecimalInput(event.target.value))
-                  }
-                  placeholder="0"
-                  required
-                  aria-label={t('ai.catalog.form.priceAriaLabel', { label })}
-                />
-                <span className="price-suffix" aria-hidden="true">
-                  {t('ai.catalog.form.priceSuffix')}
-                </span>
-              </div>
-            </label>
-            )
-          })}
-        </div>
-        <PricingRuleEditor
-          rules={draft.pricing.rules}
-          onChange={(rules) => onChange({ ...draft, pricing: { ...draft.pricing, rules } })}
-        />
-        {fieldErrors.pricing ? <span className="field-error">{fieldErrors.pricing}</span> : null}
-      </section>
+      <ModelPricingEditor
+        pricing={draft.pricing}
+        invalid={Boolean(fieldErrors.pricing)}
+        onChange={(pricing) => onChange({ ...draft, pricing })}
+      />
+      {fieldErrors.pricing ? <span className="field-error">{fieldErrors.pricing}</span> : null}
 
       <label className={`form-group${fieldErrors.defaultVariant ? ' is-error' : ''}`}>
         <FieldLabel required>{t('ai.catalog.form.defaultVariant')}</FieldLabel>

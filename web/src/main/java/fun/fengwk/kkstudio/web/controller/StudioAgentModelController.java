@@ -20,7 +20,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelUpdateDTO;
 
-/** model 全局 CRUD API。 */
+/** 统一 Model / Model Group CRUD API；逻辑名称可包含斜杠。 */
 @AllArgsConstructor
 @RequestMapping("/api/models")
 @RestController
@@ -40,29 +40,21 @@ public class StudioAgentModelController {
     return Results.created(agentModelService.createModel(createDTO));
   }
 
-  @PutMapping("/{providerName}/{modelNameHead}/{*modelNameTail}")
+  @PutMapping("/{*modelName}")
   public Result<AgentModelDTO> updateModel(
-      @PathVariable("providerName") String providerName,
-      @PathVariable("modelNameHead") String modelNameHead,
-      @PathVariable("modelNameTail") String modelNameTail,
-      @RequestBody AgentModelUpdateDTO updateDTO) {
-    return Results.ok(
-        agentModelService.updateModel(
-            providerName, combineModelName(modelNameHead, modelNameTail), updateDTO));
+      @PathVariable("modelName") String modelName, @RequestBody AgentModelUpdateDTO updateDTO) {
+    return Results.ok(agentModelService.updateModel(stripLeadingSlash(modelName), updateDTO));
   }
 
-  @DeleteMapping("/{providerName}/{modelNameHead}/{*modelNameTail}")
+  @DeleteMapping("/{*modelName}")
   public Result<Void> deleteModel(
-      @PathVariable("providerName") String providerName,
-      @PathVariable("modelNameHead") String modelNameHead,
-      @PathVariable("modelNameTail") String modelNameTail,
+      @PathVariable("modelName") String modelName,
       @RequestParam("expectedVersion") String expectedVersion) {
-    agentModelService.deleteModel(
-        providerName, combineModelName(modelNameHead, modelNameTail), expectedVersion);
+    agentModelService.deleteModel(stripLeadingSlash(modelName), expectedVersion);
     return Results.noContent();
   }
 
-  private static String combineModelName(String modelNameHead, String modelNameTail) {
-    return modelNameHead + modelNameTail;
+  private static String stripLeadingSlash(String modelName) {
+    return modelName != null && modelName.startsWith("/") ? modelName.substring(1) : modelName;
   }
 }

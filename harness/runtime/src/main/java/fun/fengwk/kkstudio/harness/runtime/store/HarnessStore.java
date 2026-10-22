@@ -384,6 +384,21 @@ public interface HarnessStore {
      */
     void updateModelInvocation(ModelInvocation invocation);
 
+    /** 当前组版本内该成员在事务时间 {@link #now()} 是否仍在冷却。组版本不一致（配置已变更）或截止时间已到都返回 false；只读，不改变状态。 */
+    boolean isGroupMemberCooling(
+        String groupName, long groupVersion, String memberModelName, String memberVariant);
+
+    /**
+     * 以「较晚截止时间胜出」写入成员冷却，并仅当 {@code agent_model.version == groupVersion} 时生效。旧版本在途 callback
+     * 无法为新配置写入或延长冷却；调用方必须在写入 ModelInvocation 进度的同一事务内调用。
+     */
+    void freezeGroupMember(
+        String groupName,
+        long groupVersion,
+        String memberModelName,
+        String memberVariant,
+        Instant cooldownUntil);
+
     /** 按 id 读取 ToolInvocation；不存在返回 {@link Optional#empty()}。 */
     Optional<ToolInvocation> findToolInvocation(UUID id);
 

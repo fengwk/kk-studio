@@ -64,7 +64,7 @@ abstract class HarnessStoreDeletionContract {
             store, baseline.sessionId(), baseline.turnStartEntryId(), userMessagePayload());
     UUID assistantEntryId =
         insertChildEntry(
-            store, baseline.sessionId(), userEntryId, mappedAssistant(request, response));
+            store, baseline.sessionId(), userEntryId, mappedAssistant(request, response, T1));
     UUID modelId = id(100L);
     UUID toolId = id(101L);
     WorkTarget threadWork = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());

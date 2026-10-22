@@ -39,6 +39,11 @@ class TsContractGeneratorTest {
     FixtureDTO.Shape shape() {
       throw new UnsupportedOperationException();
     }
+
+    @GetMapping("/priced")
+    FixtureDTO.Priced priced() {
+      throw new UnsupportedOperationException();
+    }
   }
 
   static final class CustomSerializerController {
@@ -78,6 +83,20 @@ class TsContractGeneratorTest {
           id: string
           kinds: FixtureKind[]
           scores: Record<string, number>
+        }
+        """);
+  }
+
+  /** 测试意图：白名单字符串序列化器把 BigDecimal 属性与 Map 元素写作 string；未声明序列化器的 BigDecimal 仍是 number。 */
+  @Test
+  void allowlistedStringSerializersRewriteTheWireType() {
+    assertContains(
+        generate(ContractController.class),
+        """
+        export interface FixturePriced {
+          price: string
+          tiers: Record<string, string>
+          plain: number
         }
         """);
   }

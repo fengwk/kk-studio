@@ -103,12 +103,12 @@ test('ui-smoke 必须引用共享契约且杜绝硬编码裸露的 MiniMax 供�
   // 3. 校验关键派生用法存在
   assert.match(
     content,
-    /const\s+REAL_UI_MODEL_ID\s*=\s*`\$\{REAL_UI_MODEL\.providerName\}\/\$\{REAL_UI_MODEL\.modelName\}`/,
-    'ui-smoke.mjs must derive REAL_UI_MODEL_ID from providerName and modelName',
+    /const\s+REAL_UI_MODEL_ID\s*=\s*REAL_UI_MODEL\.modelName/,
+    'ui-smoke.mjs must use the logical model name as REAL_UI_MODEL_ID',
   )
   assert.match(
     content,
-    /const\s+REAL_UI_MODEL_SELECTOR_LABEL\s*=\s*`\$\{REAL_UI_MODEL_ID\} · \$\{REAL_UI_MODEL\.variant\}`/,
-    'ui-smoke.mjs must derive selector label with variant',
+    /const\s+REAL_UI_MODEL_SELECTOR_LABEL\s*=\s*`\$\{REAL_UI_MODEL_ID\} \(\$\{REAL_UI_MODEL\.variant\}\)`/,
+    'ui-smoke.mjs must derive selector label as model name with variant',
   )
 })

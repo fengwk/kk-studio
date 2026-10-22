@@ -5,24 +5,30 @@ import org.jspecify.annotations.Nullable;
 
 import java.time.Instant;
 
-/** Agent 模型的公开表示，携带一份结构化可执行 {@link #config}。 */
+/** 统一 Agent 模型资源：单 MODEL 与 MODEL GROUP 共享唯一的全局逻辑名称空间。 */
 @Data
 public class AgentModelDTO {
 
-  /** 所属 Provider 名（资源身份的一部分）。 */
-  private String providerName;
-
-  /** 模型逻辑名（与 providerName 共同构成资源身份；支持重命名）。 */
+  /** 全局唯一逻辑名称（主键）；单 Model 与模型组不可重名。 */
   private String name;
 
-  /** 发往上游 Provider 的真实模型标识；与 {@link #name} 独立且不唯一。 */
-  private String modelId;
+  /** 资源类型。 */
+  private AgentModelKind kind;
 
-  /** 可空描述（text，无长度上限）。 */
+  /** 可空描述。 */
   private @Nullable String description;
 
-  /** 完整结构化可执行配置（limit/abilities/pricing/defaultVariant/variants）。 */
-  private AgentModelConfigDTO config;
+  /** MODEL 所属 Provider 名；GROUP 为 null。 */
+  private @Nullable String providerName;
+
+  /** MODEL 发往上游的真实模型标识；GROUP 为 null。 */
+  private @Nullable String modelId;
+
+  /** MODEL 的结构化可执行配置；GROUP 为 null，组价格/能力以成员为准。 */
+  private @Nullable AgentModelConfigDTO config;
+
+  /** GROUP 的有序成员、立即降级状态码与固定冷却秒数；MODEL 为 null。 */
+  private @Nullable AgentModelGroupDTO group;
 
   /** 非负十进制字符串版本号；客户端每次更新时必须回传。 */
   private String version;

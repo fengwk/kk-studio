@@ -38,6 +38,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -50,11 +51,11 @@ class ManualCompactionLifecycleRegressionTest {
   private static final Instant NOW = Instant.parse("2026-07-01T00:00:00Z");
   private static final int CONTEXT_WINDOW = 100_000;
   private static final int MAX_OUTPUT_TOKENS = 16_384;
-  private static final ModelUsage USAGE = new ModelUsage(50_000L, 2L, 0L, 0L, 0L, 0L, 50_002L);
+  private static final ModelUsage USAGE =
+      new ModelUsage(50_000L, 2L, 0L, 0L, Map.of(), 0L, 50_002L);
   private static final ModelCost COST =
       new ModelCost(
           "USD",
-          BigDecimal.ZERO,
           BigDecimal.ZERO,
           BigDecimal.ZERO,
           BigDecimal.ZERO,

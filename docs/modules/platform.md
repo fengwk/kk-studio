@@ -70,9 +70,21 @@ durable 快照，到期后同 version 重新 GET 会自然变化，无额外持�
 
 ## Catalog
 
-Provider 与 Agent 以不可变 `name` 寻址；Model 以 `(providerName, name)` 寻址，允许改名。
-变更携带 `expectedVersion`。Model 重命名在同一事务内插入新行、更新 Agent 引用、删除旧行，
-任何 CAS 或引用校验失败整体回滚。删除前校验入边，数据库外键提供并发兜底。
+Provider 与 Agent 以不可变 `name` 寻址。MODEL 与 MODEL GROUP 共用全局唯一的逻辑 `name`
+命名空间：MODEL 另以 `providerName` 指向 Provider，并用独立的 `modelId` 保存发往上游的 wire
+模型标识；GROUP 只保存有序成员、`fallbackStatusCodes` 与 `cooldownSeconds`，不得携带
+`providerName`、`modelId` 或模型 `config`。两类资源都通过 `/api/models` 创建和查询，
+PUT/DELETE 使用 `/api/models/{*modelName}`；名称可以包含斜杠，客户端必须把逻辑名作为
+路径 tail 按 `/` 分段编码，保留层级分隔。变更携带 `expectedVersion`。PUT 通过请求体 `name` 支持改名，同一事务更新
+引用，任何 CAS、类型变更或引用校验失败整体回滚。删除 MODEL 前校验 Agent 与 GROUP 入边，
+删除 GROUP 前校验 Agent 入边，数据库外键提供并发兜底。
+
+GROUP 的成员顺序就是 Fill First 顺序，成员只能是 MODEL 且其 Variant 必须已在该 MODEL 声明；
+禁止重复成员和嵌套组。`fallbackStatusCodes` 是必需但可为空的 HTTP 400–599 集合，元素去重；
+`cooldownSeconds` 是必需的非负整数，0 表示仅本次逻辑调用继续下一成员、不写跨调用冷却。
+冻结的组版本隔离成员列表与冷却状态，调用开始后的组更新不混入本次调用。GROUP 的公开
+`config` 只是成员能力的只读派生摘要：上下文/输出取最小值（输出再受上下文约束），工具与推理
+能力取与、输入模态取交集；它不包含组级 pricing、variants 或 defaultVariant。
 Agent 被其它 Agent 的 subagents、插件普通配置或未归档 Project 的工作流阶段引用时不能删除；Chat 只按名称软引用 Agent，
 删除后其下一回合确定性失败，同名重建即恢复。
 
@@ -83,8 +95,13 @@ Provider credential 在显式写入口接收，常规响应给出安全投影；
 模型列表（[`ProviderModelDiscovery`](../../harness/provider/src/main/java/fun/fengwk/kkstudio/harness/provider/ProviderModelDiscovery.java)），
 返回去重排序的模型 ID，只用于添加模型时预填，不写入 Catalog；请求不在数据库事务内，缺少 baseUrl 为校验错误，
 上游不可达或非 2xx 返回 502 `upstream_failed`，detail 带上游状态与截断正文。
-Model 配置保存 limit、abilities、variants、pricing 和 default variant。pricing 可带最多 16 条按顺序匹配的条件价格
-`rules`：每条限定每天的时段（IANA 时区下 `[start, end)`，可跨越午夜）和/或最小上下文 token，并给出完整的六项单价。
+MODEL 配置保存 limit、abilities、variants、pricing 和 default variant。
+`pricing` 固定为 `{base, overrides, multipliers}`：所有价格与倍率在 wire 上都是十进制字符串，
+单位固定为 USD / 每百万 token；普通基础价缺省归一为 0，倍率缺省为 1，`reasoning: null`
+表示继承最终 output 价。`overrides` 与 `multipliers` 按数组顺序应用，规则 id 必须唯一；
+条件对象同层字段为 AND，支持 `all` / `any` / `not`、context token 边界、service tier、UTC 日期
+与时区时间段。覆盖规则只写入非 null 字段，显式 `reasoning: null` 恢复继承；倍率规则逐字段
+缩放，未列出的字段不变。
 Agent 配置保存工具名、`SkillRef(packageName, name)`、subagents 与 `inheritParentEnvironment`
 （默认 true）；工具候选和 Skill 引用在写入时校验。
 

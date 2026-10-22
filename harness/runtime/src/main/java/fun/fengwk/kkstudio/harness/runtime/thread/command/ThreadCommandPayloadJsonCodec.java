@@ -58,8 +58,7 @@ public final class ThreadCommandPayloadJsonCodec {
   private static final Set<String> SET_CONTRIBUTOR_STATE_FIELDS = orderedSet("state");
   private static final Set<String> CONTRIBUTOR_STATE_FIELDS =
       orderedSet("contributorId", "customType", "schemaVersion", "data");
-  private static final Set<String> MODEL_SELECTION_FIELDS =
-      orderedSet("providerName", "modelName", "variant");
+  private static final Set<String> MODEL_SELECTION_FIELDS = orderedSet("modelName", "variant");
 
   private static final AgentMessageJsonCodec MESSAGE_CODEC = new AgentMessageJsonCodec();
 
@@ -212,7 +211,6 @@ public final class ThreadCommandPayloadJsonCodec {
 
   private static ObjectNode encodeModelSelection(ModelSelection selection) {
     ObjectNode node = NODES.objectNode();
-    node.put("providerName", selection.providerName());
     node.put("modelName", selection.modelName());
     node.put("variant", selection.variant());
     return node;
@@ -286,10 +284,13 @@ public final class ThreadCommandPayloadJsonCodec {
   private static ModelSelection decodeModelSelection(JsonNode value) {
     ObjectNode node = requireObject(value, "SET_MODEL.model");
     requireExactFields(node, MODEL_SELECTION_FIELDS, "SET_MODEL.model");
+    JsonNode variant = node.get("variant");
+    if (!variant.isNull() && !variant.isString()) {
+      throw new IllegalArgumentException("SET_MODEL.model.variant must be text or null");
+    }
     return new ModelSelection(
-        canonicalText(node, "providerName", "SET_MODEL.model"),
         canonicalText(node, "modelName", "SET_MODEL.model"),
-        canonicalText(node, "variant", "SET_MODEL.model"));
+        variant.isNull() ? null : canonicalText(node, "variant", "SET_MODEL.model"));
   }
 
   private static NotificationCommandPayload decodeNotification(JsonNode value) {

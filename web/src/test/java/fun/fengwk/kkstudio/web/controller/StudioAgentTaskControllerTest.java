@@ -42,7 +42,7 @@ import java.util.UUID;
 class StudioAgentTaskControllerTest {
 
   private static final BranchSettings SETTINGS =
-      new BranchSettings("worker", new ModelSelection("provider", "model", "v1"), null);
+      new BranchSettings("worker", ModelSelection.model("model", "v1"), null);
   private static final UUID TICKET_ID = UUID.fromString("00000000-0000-0000-0000-0000000000a1");
   private static final UUID THREAD_ID = UUID.fromString("00000000-0000-0000-0000-0000000000a2");
 

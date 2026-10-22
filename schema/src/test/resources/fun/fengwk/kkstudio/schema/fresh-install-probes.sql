@@ -76,10 +76,28 @@ select pg_temp.rejects('cluster node lease must be after last_seen',
 
 insert into agent_provider (name, provider_type, base_url, config, connection_generation_id)
     values ('fixture', 'openai', 'https://example.invalid', '{}', pg_temp.uid(9999));
-insert into agent_model (provider_name, name, model_id, config)
-    values ('fixture', 'fixture', 'fixture', '{}');
-insert into agent_definition (name, model_provider_name, model_name, config)
-    values ('designer', 'fixture', 'fixture', '{}'), ('reviewer', 'fixture', 'fixture', '{}');
+insert into agent_model (name, kind, provider_name, model_id, config)
+    values ('fixture', 'MODEL', 'fixture', 'fixture', '{}');
+insert into agent_definition (name, model_name, config)
+    values ('designer', 'fixture', '{}'), ('reviewer', 'fixture', '{}');
+
+-- 名称是跨 MODEL/GROUP 的全局主键；MODEL/GROUP 字段形状由数据库约束保证。
+select pg_temp.rejects('agent model name is globally unique',
+    $$insert into agent_model(name,kind,provider_name,model_id,config)
+      values('fixture','MODEL','fixture','other','{}')$$,
+    '23505', 'agent_model_pkey');
+select pg_temp.rejects('model kind requires provider and wire model',
+    $$insert into agent_model(name,kind,config) values('probe-model','MODEL','{}')$$,
+    '23514', 'ck_agent_model_shape');
+select pg_temp.rejects('group kind must not carry single model fields',
+    $$insert into agent_model(name,kind,provider_name,group_config)
+      values('probe-group','GROUP','fixture','{}')$$,
+    '23514', 'ck_agent_model_shape');
+insert into agent_model (name, kind, group_config) values ('probe-group', 'GROUP', '{}');
+select pg_temp.assert_true('group kind accepts only group config',
+    (select group_config is not null and config is null
+        from agent_model
+        where name = 'probe-group' and kind = 'GROUP'));
 
 -- Catalog ownership and explicit unconfigured built-in models are database facts.
 select pg_temp.assert_true('user agent is the default ownership',
@@ -87,20 +105,14 @@ select pg_temp.assert_true('user agent is the default ownership',
 insert into agent_definition (name, type, config)
     values ('probe-builtin', 'BUILTIN', '{}');
 select pg_temp.assert_true('built-in agent accepts an unconfigured model',
-    (select model_provider_name is null and model_name is null and variant is null
+    (select model_name is null and variant is null
         from agent_definition where name = 'probe-builtin'));
 select pg_temp.rejects('unknown agent ownership is rejected',
-    $$insert into agent_definition(name,type,model_provider_name,model_name,config)
-      values('probe-unknown','ROOT','fixture','fixture','{}')$$,
-    '23514', 'ck_agent_definition_type');
-select pg_temp.rejects('agent model pair rejects provider only',
-    $$insert into agent_definition(name,type,model_provider_name,config)
-      values('probe-provider','BUILTIN','fixture','{}')$$,
-    '23514', 'ck_agent_definition_model_pair');
-select pg_temp.rejects('agent model pair rejects model only',
     $$insert into agent_definition(name,type,model_name,config)
-      values('probe-model','BUILTIN','fixture','{}')$$,
-    '23514', 'ck_agent_definition_model_pair');
+      values('probe-unknown','ROOT','fixture','{}')$$,
+    '23514', 'ck_agent_definition_type');
+select pg_temp.assert_true('agent binds a globally unique model name',
+    (select model_name = 'fixture' from agent_definition where name = 'designer'));
 select pg_temp.rejects('agent variant requires a model',
     $$insert into agent_definition(name,type,variant,config)
       values('probe-variant','BUILTIN','default','{}')$$,

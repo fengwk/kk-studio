@@ -2,7 +2,9 @@ import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 
 import {
+  MODELS,
   TOOL_NAMES,
+  VARIANT,
   WRITE_PROOF,
   WRITE_PROOF_MARKER,
   WRITE_PROOF_META,
@@ -157,7 +159,9 @@ export function writeSummaryAndReport({
   lines.push(`- Started: \`${startedAt}\``)
   lines.push(`- Finished: \`${finishedAt}\``)
   lines.push(`- Environment: \`${args.daemonEnv}\``)
-  lines.push(`- Models: \`minimax/MiniMax-M2.7\`, \`minimax/MiniMax-M3\`; variant \`high\``)
+  lines.push(
+    `- Models: ${MODELS.map((model) => `\`${model.ref}\``).join(', ')}; variant \`${VARIANT}\``,
+  )
   lines.push(`- Model-visible tool names: \`${TOOL_NAMES.join(', ')}\``)
   lines.push(`- Cost cap: USD ${formatCost(args.maxCostUsd)}; incurred: USD ${formatCost(usage.costTotal)}`)
   lines.push(
@@ -218,7 +222,7 @@ export function writeSummaryAndReport({
   lines.push('')
   lines.push('| Model | Assistant metadata rows | Input | Output | Cache read | Cache write | Reasoning | Cost |')
   lines.push('| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |')
-  for (const model of ['minimax/MiniMax-M2.7', 'minimax/MiniMax-M3']) {
+  for (const model of MODELS.map((candidate) => candidate.ref)) {
     const metrics = modelUsage[model] ?? aggregateUsage([])
     lines.push(
       `| \`${model}\` | ${metrics.assistantMessages} | ${metrics.inputTokens} | ${metrics.outputTokens} | ${metrics.cacheReadTokens} | ${metrics.cacheWriteTokens + metrics.cacheWriteLongTokens} | ${metrics.reasoningTokens} | $${formatCost(metrics.costTotal)} |`,

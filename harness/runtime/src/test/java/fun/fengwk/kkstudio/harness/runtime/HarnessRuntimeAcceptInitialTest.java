@@ -434,7 +434,7 @@ class HarnessRuntimeAcceptInitialTest {
                 List.of(
                     setAgent(TestIds.id(2)),
                     new NewThreadCommand(
-                        new SetModelCommandPayload(new ModelSelection("acme", "gpt-x", "default")),
+                        new SetModelCommandPayload(ModelSelection.model("gpt-x", "default")),
                         TestIds.id(3)),
                     new NewThreadCommand(new SetEnvironmentCommandPayload("local"), TestIds.id(5)),
                     userMessageCommand(TestIds.id(4), "hi"))),
@@ -450,8 +450,7 @@ class HarnessRuntimeAcceptInitialTest {
                     TestIds.id(123),
                     List.of(
                         new NewThreadCommand(
-                            new SetModelCommandPayload(
-                                new ModelSelection("acme", "gpt-x", "default")),
+                            new SetModelCommandPayload(ModelSelection.model("gpt-x", "default")),
                             TestIds.id(2)),
                         setAgent(TestIds.id(1)),
                         userMessageCommand(TestIds.id(3), "hi"))),
@@ -468,8 +467,7 @@ class HarnessRuntimeAcceptInitialTest {
                         new NewThreadCommand(
                             new SetEnvironmentCommandPayload("local"), TestIds.id(2)),
                         new NewThreadCommand(
-                            new SetModelCommandPayload(
-                                new ModelSelection("acme", "gpt-x", "default")),
+                            new SetModelCommandPayload(ModelSelection.model("gpt-x", "default")),
                             TestIds.id(3)),
                         userMessageCommand(TestIds.id(1), "hi"))),
                 AcceptancePreflight.IDENTITY));

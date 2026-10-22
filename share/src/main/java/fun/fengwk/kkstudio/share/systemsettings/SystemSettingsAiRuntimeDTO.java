@@ -35,6 +35,9 @@ public class SystemSettingsAiRuntimeDTO {
 
   private List<Integer> modelHttpRetryStatusCodes;
 
+  /** 模型目录来源：models_dev_v1 / models_dev_v2；新初始化默认 models_dev_v2。 */
+  private String modelCatalogSource;
+
   @JsonAnySetter
   public void rejectUnknownField(String name, Object value) {
     throw new IllegalArgumentException("unknown system settings aiRuntime field: " + name);

@@ -198,10 +198,7 @@ final class DispatcherTestSupport {
           // binding，使 assistant ToolCall renderer 与 ToolInvocation binding 全等。
           ModelRequestSpec requestSpec = tooledRequest();
           ProviderResponse response = toolResponse();
-          tx.insertEntry(
-              assistantEntry(assistantEntryId, sessionId, userEntryId, requestSpec, response));
-          tx.insertThread(thread(threadId, sessionId, turnStartEntryId));
-          tx.insertModelInvocation(
+          ModelInvocation ready =
               new ModelInvocation(
                   modelId,
                   threadId,
@@ -216,7 +213,12 @@ final class DispatcherTestSupport {
                   null,
                   List.of(),
                   NOW,
-                  NOW));
+                  NOW);
+          tx.insertEntry(
+              assistantEntry(
+                  assistantEntryId, sessionId, userEntryId, ready.markRunning(NOW), response));
+          tx.insertThread(thread(threadId, sessionId, turnStartEntryId));
+          tx.insertModelInvocation(ready);
           ModelInvocation current = tx.lockModelInvocation(modelId).orElseThrow();
           tx.updateModelInvocation(current.markRunning(NOW));
           current = tx.lockModelInvocation(modelId).orElseThrow();
@@ -611,17 +613,19 @@ final class DispatcherTestSupport {
         NOW);
   }
 
+  /** 结果 Entry 必须精确等于按执行事实重放的 payload：实际型号与请求起始时间取自 RUNNING 调用。 */
   private static Entry assistantEntry(
-      UUID id,
-      UUID sessionId,
-      UUID parentId,
-      ModelRequestSpec requestSpec,
-      ProviderResponse response) {
+      UUID id, UUID sessionId, UUID parentId, ModelInvocation running, ProviderResponse response) {
     return new Entry(
         id,
         sessionId,
         parentId,
-        new HistoryPayloadMapper().assistantPayload(response, requestSpec.toolBindings()),
+        new HistoryPayloadMapper()
+            .assistantPayload(
+                response,
+                running.requestSpec().toolBindings(),
+                running.actualSelection(),
+                running.requestedAt()),
         NOW);
   }
 
@@ -646,7 +650,7 @@ final class DispatcherTestSupport {
   }
 
   private static BranchSettings branchSettings() {
-    return new BranchSettings("agent", new ModelSelection("provider", "model", "v1"), null);
+    return new BranchSettings("agent", ModelSelection.model("model", "v1"), null);
   }
 
   private static ModelRequestSpec modelRequest() {
@@ -683,7 +687,7 @@ final class DispatcherTestSupport {
         "",
         List.of(new ProviderToolCall("call-1", "bash", "{}")),
         GenerationStopReason.COMPLETE,
-        new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
+        new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L),
         "req-1",
         null,
         "{}");

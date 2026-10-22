@@ -9,6 +9,7 @@ import { CreateChatModal } from '@/features/chat/CreateChatModal'
 import { EnvironmentsPage } from '@/features/environment/EnvironmentsPage'
 import { ResourceEditorModal } from '@/features/catalog/AiConsoleResourceEditorModal'
 import { emptyAgentDraft } from '@/features/catalog/ai-agent-draft-codec'
+import { emptyModelGroupDraft } from '@/features/catalog/ai-model-group-draft-codec'
 import { emptyModelDraft } from '@/features/catalog/ai-model-draft-codec'
 import { emptyProviderDraft } from '@/features/catalog/ai-provider-draft-codec'
 import { environmentService } from '@/shared/api/environment-service'
@@ -134,11 +135,14 @@ describe('AI i18n live-switch contracts', () => {
         models={[]}
         providerDraft={emptyProviderDraft()}
         modelDraft={emptyModelDraft()}
+        modelGroupDraft={emptyModelGroupDraft()}
         agentDraft={emptyAgentDraft()}
         pending={false}
         onClose={() => undefined}
         onProviderDraftChange={() => undefined}
         onModelDraftChange={() => undefined}
+        onModelGroupDraftChange={() => undefined}
+        onModelCreateKindChange={() => undefined}
         onAgentDraftChange={() => undefined}
         onSubmit={(event) => event.preventDefault()}
       />,

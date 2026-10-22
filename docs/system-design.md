@@ -88,7 +88,7 @@ Catalog 把连接、模型能力与行为定义分开：
 | 配置 | 决定什么 |
 | --- | --- |
 | Provider | 上游协议、连接、凭据与超时 |
-| Model | 真实模型 ID、上下文与输出限制、能力、Variant 和价格 |
+| Model | 单个 MODEL 的上游 wire 模型 ID、能力、Variant 与价格；GROUP 的有序 Fill First 成员、降级状态码与冷却 |
 | Agent | System Prompt、默认 Model、Tools、Skills 与可委派的 Agent |
 | Environment | 主机身份、Daemon 连接与能力 |
 | BranchSettings | 当前分支选择的 Agent、Model、Environment 与用户 Goal |
@@ -98,10 +98,15 @@ Catalog 把连接、模型能力与行为定义分开：
 ```text
 BranchSettings
 ├── agentName
-├── model = providerName + modelName + variant
+├── model = modelName + variant?
 ├── environmentName?
 └── goal? = id + text
 ```
+
+Model 与 Model Group 共用全局唯一逻辑名称空间；`modelName` 只寻址该名称，单模型的可选
+`variant` 来自同一资源。组没有组级 Variant：成员顺序就是 Fill First 选择顺序，命中
+`fallbackStatusCodes` 或普通重试耗尽后按组配置降级，`cooldownSeconds = 0` 只影响本次逻辑调用。
+组本身没有价格，费用按实际执行的单模型计算。
 
 Root 保存初始设置，每个普通 TurnStart 冻结该回合设置。设置命令在下一轮归约为完整
 快照，fork 沿目标 Entry 的父链恢复当时设置。每轮再从 Catalog 解析当前 Agent 能力和
@@ -235,7 +240,8 @@ attempt 与 Work ownership，提交后发布 realtime。审批和 `ask_user` 是
 [Harness Provider](modules/harness-provider.md)。
 
 模型输出把真实 `usage`（连同 stop reason 与可选流式计时）作为 durable 事实随 assistant Entry 保存，
-金额不是 durable 事实：读取时按当前 catalog pricing 用精确十进制现算，压缩输出按其冻结的执行模型计价。
+金额不是 durable 事实：读取时按当前 catalog pricing 用精确十进制现算，压缩输出按其冻结的执行模型计价；
+模型组按本次实际执行的成员计价。
 
 ### Canvas Function 与 Project Run
 

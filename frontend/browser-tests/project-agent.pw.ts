@@ -107,7 +107,7 @@ function createThreadSnapshot() {
         executionControl: 'RUNNABLE',
         branchSettings: {
           agentName: 'architect',
-          model: { providerName: 'minimax', modelName: 'MiniMax-M2.7', variant: 'default' },
+          model: { modelName: 'MiniMax-M2.7', variant: 'default' },
           environmentName: null,
           goal: null,
         },
@@ -124,7 +124,7 @@ function createThreadSnapshot() {
           payloadJson: JSON.stringify({
             settings: {
               agentName: 'architect',
-              model: { providerName: 'minimax', modelName: 'MiniMax-M2.7', variant: 'default' },
+              model: { modelName: 'MiniMax-M2.7', variant: 'default' },
               environmentName: null,
               goal: null,
             },
@@ -330,11 +330,11 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
     // 容器标题承载 Issue 身份，设置入口展示绑定 Thread 的模型。
     await expect(dock.locator('.project-agent-dock-title')).toHaveText('Design DB schema')
     await expect(dock.getByRole('button', { name: 'Model 与 Variant' }))
-      .toHaveText('minimax/MiniMax-M2.7 (default)')
+      .toHaveText('MiniMax-M2.7 (default)')
     await expect(dock.getByText('梳理鉴权模块的现有边界')).toBeVisible()
     // ROOT 必须解析成会话开始的配置事实，而不是「配置快照不可解析」兜底。
     await expect(dock.getByText(
-      '会话开始 · Agent: architect · 模型: minimax/MiniMax-M2.7 (default) · 环境: 无',
+      '会话开始 · Agent: architect · 模型: MiniMax-M2.7 (default) · 环境: 无',
     )).toBeVisible()
     await expect(dock.getByText('配置快照不可解析')).toHaveCount(0)
     await expect(dock.getByText('待处理交互加载失败', { exact: true })).toHaveCount(0)

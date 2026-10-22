@@ -94,6 +94,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -105,7 +106,7 @@ import java.util.concurrent.ScheduledExecutorService;
 class PostgresqlCompactionChildTest {
 
   private static final ModelUsage OVER_THRESHOLD_USAGE =
-      new ModelUsage(90_000L, 2L, 0L, 0L, 0L, 0L, 90_002L);
+      new ModelUsage(90_000L, 2L, 0L, 0L, Map.of(), 0L, 90_002L);
   private static final int CONTEXT_WINDOW = 100_000;
   private static final int MAX_OUTPUT_TOKENS = 16_384;
 
@@ -140,7 +141,7 @@ class PostgresqlCompactionChildTest {
     TurnResolver resolver =
         (threadId, path, preparation) -> {
           if (preparation != null) {
-            ModelSelection compactorModel = new ModelSelection("provider", "compactor-model", "v1");
+            ModelSelection compactorModel = ModelSelection.model("compactor-model", "v1");
             return new TurnResolver.CompactionResolved(
                 compactorModel,
                 4096L,
@@ -326,7 +327,7 @@ class PostgresqlCompactionChildTest {
     assertNotNull(compactionPayload.assistantMetadata());
     assertEquals(GenerationStopReason.COMPLETE, compactionPayload.assistantMetadata().stopReason());
     assertEquals(
-        new ModelUsage(100L, 20L, 0L, 0L, 0L, 0L, 120L),
+        new ModelUsage(100L, 20L, 0L, 0L, Map.of(), 0L, 120L),
         compactionPayload.assistantMetadata().usage());
 
     Entry turnEndEntry = parentPathFinal.entries().get(11);
@@ -816,7 +817,7 @@ class PostgresqlCompactionChildTest {
                               new TextMessageContent("working"))),
                       new AssistantMessageMetadata(
                           GenerationStopReason.COMPLETE,
-                          new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L)),
+                          new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L)),
                       null),
                   T1));
           tx.insertEntry(
@@ -926,7 +927,7 @@ class PostgresqlCompactionChildTest {
         "",
         List.of(),
         stopReason,
-        new ModelUsage(100L, 20L, 0L, 0L, 0L, 0L, 120L),
+        new ModelUsage(100L, 20L, 0L, 0L, Map.of(), 0L, 120L),
         "req-compaction-child",
         null,
         "{}");
@@ -1025,7 +1026,7 @@ class PostgresqlCompactionChildTest {
                                   "historical assistant " + "a".repeat(50_000)))),
                       new AssistantMessageMetadata(
                           GenerationStopReason.COMPLETE,
-                          new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L)),
+                          new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L)),
                       null),
                   T1));
           tx.insertEntry(
@@ -1194,7 +1195,7 @@ class PostgresqlCompactionChildTest {
                   "",
                   List.of(),
                   GenerationStopReason.COMPLETE,
-                  new ModelUsage(100L, 20L, 0L, 0L, 0L, 0L, 120L),
+                  new ModelUsage(100L, 20L, 0L, 0L, Map.of(), 0L, 120L),
                   "req-compaction-child",
                   null,
                   "{}");
@@ -1242,7 +1243,7 @@ class PostgresqlCompactionChildTest {
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         new ModelDescriptor(
-            settings.model().providerName(),
+            "provider",
             settings.model().modelName(),
             settings.model().modelName(),
             Set.of(ModelInputModality.TEXT),

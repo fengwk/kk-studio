@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { toUserFacingErrorMessage } from '@/shared/lib/user-facing-error'
+import { emptyModelGroupDraft } from '@/features/catalog/ai-model-group-draft-codec'
 import { emptyModelDraft } from '@/features/catalog/ai-model-draft-codec'
 import type { ModelDraft, ProviderDraft } from '@/features/catalog/ai-console-types'
 import {
@@ -45,10 +46,11 @@ function providerDraft(): ProviderDraft {
 describe('ai-resource-form-validation', () => {
   it('rejects a model draft with a blank provider', () => {
     const result = validateResourceDraft(
-      { kind: 'model', mode: 'create' },
+      { kind: 'model', mode: 'create', resourceKind: 'MODEL' },
       {
         providerDraft: { ...providerDraft(), name: '' },
         modelDraft: draft({ providerName: '   ' }),
+        modelGroupDraft: emptyModelGroupDraft(),
         agentDraft: { ...EMPTY_AGENT_DRAFT },
       },
     )
@@ -58,10 +60,11 @@ describe('ai-resource-form-validation', () => {
 
   it('rejects a model draft with a blank name', () => {
     const result = validateResourceDraft(
-      { kind: 'model', mode: 'create' },
+      { kind: 'model', mode: 'create', resourceKind: 'MODEL' },
       {
         providerDraft: providerDraft(),
         modelDraft: draft({ name: '   ' }),
+        modelGroupDraft: emptyModelGroupDraft(),
         agentDraft: { ...EMPTY_AGENT_DRAFT },
       },
     )
@@ -71,10 +74,11 @@ describe('ai-resource-form-validation', () => {
 
   it('rejects empty input modalities', () => {
     const result = validateResourceDraft(
-      { kind: 'model', mode: 'create' },
+      { kind: 'model', mode: 'create', resourceKind: 'MODEL' },
       {
         providerDraft: providerDraft(),
         modelDraft: draft({ inputModalities: [] }),
+        modelGroupDraft: emptyModelGroupDraft(),
         agentDraft: { ...EMPTY_AGENT_DRAFT },
       },
     )
@@ -84,7 +88,7 @@ describe('ai-resource-form-validation', () => {
 
   it('rejects a defaultVariant that does not exist', () => {
     const result = validateResourceDraft(
-      { kind: 'model', mode: 'create' },
+      { kind: 'model', mode: 'create', resourceKind: 'MODEL' },
       {
         providerDraft: providerDraft(),
         modelDraft: draft({
@@ -104,6 +108,7 @@ describe('ai-resource-form-validation', () => {
             },
           ],
         }),
+        modelGroupDraft: emptyModelGroupDraft(),
         agentDraft: { ...EMPTY_AGENT_DRAFT },
       },
     )
@@ -114,7 +119,7 @@ describe('ai-resource-form-validation', () => {
   /** Reasoning 开启时全部 variant 的空思考强度仍然合法：空值表示不覆盖协议默认。 */
   it('accepts empty reasoning effort as the protocol default when reasoning is enabled', () => {
     const result = validateResourceDraft(
-      { kind: 'model', mode: 'create' },
+      { kind: 'model', mode: 'create', resourceKind: 'MODEL' },
       {
         providerDraft: providerDraft(),
         modelDraft: draft({
@@ -128,6 +133,7 @@ describe('ai-resource-form-validation', () => {
             },
           ],
         }),
+        modelGroupDraft: emptyModelGroupDraft(),
         agentDraft: { ...EMPTY_AGENT_DRAFT },
       },
     )
@@ -143,10 +149,11 @@ describe('ai-resource-form-validation', () => {
     })
     const snapshot = JSON.stringify(modelDraft)
     const result = validateResourceDraft(
-      { kind: 'model', mode: 'create' },
+      { kind: 'model', mode: 'create', resourceKind: 'MODEL' },
       {
         providerDraft: providerDraft(),
         modelDraft,
+        modelGroupDraft: emptyModelGroupDraft(),
         agentDraft: { ...EMPTY_AGENT_DRAFT },
       },
     )
@@ -182,7 +189,7 @@ describe('ai-resource-form-validation', () => {
   describe('protocolOptions form validation', () => {
     it('accepts valid protocolOptions JSON object on create', () => {
       const result = validateResourceDraft(
-        { kind: 'model', mode: 'create' },
+        { kind: 'model', mode: 'create', resourceKind: 'MODEL' },
         {
           providerDraft: providerDraft(),
           modelDraft: draft({
@@ -195,6 +202,7 @@ describe('ai-resource-form-validation', () => {
               },
             ],
           }),
+          modelGroupDraft: emptyModelGroupDraft(),
           agentDraft: { ...EMPTY_AGENT_DRAFT },
         },
       )
@@ -205,7 +213,7 @@ describe('ai-resource-form-validation', () => {
     it('rejects invalid protocolOptions JSON and surfaces localized variant-specific error', () => {
       setLocale('zh-CN')
       const result = validateResourceDraft(
-        { kind: 'model', mode: 'create' },
+        { kind: 'model', mode: 'create', resourceKind: 'MODEL' },
         {
           providerDraft: providerDraft(),
           modelDraft: draft({
@@ -219,6 +227,7 @@ describe('ai-resource-form-validation', () => {
               },
             ],
           }),
+          modelGroupDraft: emptyModelGroupDraft(),
           agentDraft: { ...EMPTY_AGENT_DRAFT },
         },
       )
@@ -231,7 +240,7 @@ describe('ai-resource-form-validation', () => {
     it('rejects non-object root (array/scalar/null) with localized variant-specific error', () => {
       setLocale('zh-CN')
       const result = validateResourceDraft(
-        { kind: 'model', mode: 'create' },
+        { kind: 'model', mode: 'create', resourceKind: 'MODEL' },
         {
           providerDraft: providerDraft(),
           modelDraft: draft({
@@ -245,6 +254,7 @@ describe('ai-resource-form-validation', () => {
               },
             ],
           }),
+          modelGroupDraft: emptyModelGroupDraft(),
           agentDraft: { ...EMPTY_AGENT_DRAFT },
         },
       )
@@ -257,7 +267,7 @@ describe('ai-resource-form-validation', () => {
     it('validates protocolOptions even when model reasoning is disabled', () => {
       setLocale('zh-CN')
       const result = validateResourceDraft(
-        { kind: 'model', mode: 'create' },
+        { kind: 'model', mode: 'create', resourceKind: 'MODEL' },
         {
           providerDraft: providerDraft(),
           modelDraft: draft({
@@ -272,6 +282,7 @@ describe('ai-resource-form-validation', () => {
               },
             ],
           }),
+          modelGroupDraft: emptyModelGroupDraft(),
           agentDraft: { ...EMPTY_AGENT_DRAFT },
         },
       )
@@ -301,6 +312,7 @@ describe('ai-resource-form-validation', () => {
         {
           providerDraft: { ...providerDraft(), name: 'valid-provider', modelHttpRetryStatusCodes: null },
           modelDraft: draft(),
+          modelGroupDraft: emptyModelGroupDraft(),
           agentDraft: { ...EMPTY_AGENT_DRAFT },
         },
       )
@@ -312,6 +324,7 @@ describe('ai-resource-form-validation', () => {
         {
           providerDraft: { ...providerDraft(), name: 'valid-provider', modelHttpRetryStatusCodes: [] },
           modelDraft: draft(),
+          modelGroupDraft: emptyModelGroupDraft(),
           agentDraft: { ...EMPTY_AGENT_DRAFT },
         },
       )
@@ -327,6 +340,7 @@ describe('ai-resource-form-validation', () => {
             modelHttpRetryStatusCodes: [408, 429, 500, 502, 503, 504],
           },
           modelDraft: draft(),
+          modelGroupDraft: emptyModelGroupDraft(),
           agentDraft: { ...EMPTY_AGENT_DRAFT },
         },
       )
@@ -340,6 +354,7 @@ describe('ai-resource-form-validation', () => {
         {
           providerDraft: { ...providerDraft(), name: 'valid-provider', modelHttpRetryStatusCodes: [200] },
           modelDraft: draft(),
+          modelGroupDraft: emptyModelGroupDraft(),
           agentDraft: { ...EMPTY_AGENT_DRAFT },
         },
       )
@@ -351,6 +366,7 @@ describe('ai-resource-form-validation', () => {
         {
           providerDraft: { ...providerDraft(), name: 'valid-provider', modelHttpRetryStatusCodes: [429, 'xyz'] },
           modelDraft: draft(),
+          modelGroupDraft: emptyModelGroupDraft(),
           agentDraft: { ...EMPTY_AGENT_DRAFT },
         },
       )
@@ -362,6 +378,7 @@ describe('ai-resource-form-validation', () => {
         {
           providerDraft: { ...providerDraft(), name: 'valid-provider', modelHttpRetryStatusCodes: [429, 429] },
           modelDraft: draft(),
+          modelGroupDraft: emptyModelGroupDraft(),
           agentDraft: { ...EMPTY_AGENT_DRAFT },
         },
       )

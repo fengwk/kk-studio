@@ -21,6 +21,7 @@ import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefini
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 
 /** 按最新 Agent/Model catalog 为子 Agent 物化 branch settings。 */
 class AgentBranchSettingsMaterializerTest {
@@ -50,7 +51,6 @@ class AgentBranchSettingsMaterializerTest {
     AgentDefinition agent =
         AgentDefinition.builder()
             .name(agentName)
-            .modelProviderName("openai")
             .modelName("gpt-x")
             .variant(variant)
             .configJson(
@@ -62,12 +62,13 @@ class AgentBranchSettingsMaterializerTest {
 
     AgentModel model =
         AgentModel.builder()
+            .kind(AgentModelKind.MODEL)
             .providerName("openai")
             .name("gpt-x")
             .modelId("gpt-x-wire")
             .configJson(modelConfigJson)
             .build();
-    when(modelRepository.getByProviderNameAndName("openai", "gpt-x")).thenReturn(model);
+    when(modelRepository.getByName("gpt-x")).thenReturn(model);
   }
 
   /** 最新 catalog 的 Agent/model/variant 物化：默认 variant 由 model catalog 提供。 */
@@ -79,7 +80,7 @@ class AgentBranchSettingsMaterializerTest {
 
     // branch settings 只冻结 Agent 与 model selection：环境与目录都不进入历史。
     assertEquals("alpha", settings.agentName());
-    assertEquals(new ModelSelection("openai", "gpt-x", "quality"), settings.model());
+    assertEquals(new ModelSelection("gpt-x", "quality"), settings.model());
     // root/普通调用没有父调用，environmentName 恒为 null。
     assertNull(settings.environmentName());
   }
@@ -92,7 +93,7 @@ class AgentBranchSettingsMaterializerTest {
     BranchSettings inherited = materializer.materializeSubagent("alpha", "env-a");
 
     assertEquals("env-a", inherited.environmentName());
-    assertEquals(new ModelSelection("openai", "gpt-x", "quality"), inherited.model());
+    assertEquals(new ModelSelection("gpt-x", "quality"), inherited.model());
 
     stub("beta", null, validModelConfig(), false);
     BranchSettings isolated = materializer.materializeSubagent("beta", "env-a");
@@ -115,7 +116,7 @@ class AgentBranchSettingsMaterializerTest {
 
     BranchSettings settings = materializer.materialize("alpha");
 
-    assertEquals(new ModelSelection("openai", "gpt-x", "fast"), settings.model());
+    assertEquals(new ModelSelection("gpt-x", "fast"), settings.model());
   }
 
   /** Agent 缺失、model 缺失、variant 缺失与非法配置都以稳定 IllegalArgumentException 失败。 */
@@ -127,11 +128,11 @@ class AgentBranchSettingsMaterializerTest {
     assertTrue(missingAgent.getMessage().contains("subagent not found: ghost"));
 
     stub("alpha", null, validModelConfig());
-    when(modelRepository.getByProviderNameAndName("openai", "gpt-x")).thenReturn(null);
+    when(modelRepository.getByName("gpt-x")).thenReturn(null);
     IllegalArgumentException missingModel =
         assertThrows(IllegalArgumentException.class, () -> materializer.materialize("alpha"));
     assertTrue(
-        missingModel.getMessage().contains("subagent model not found: openai/gpt-x"),
+        missingModel.getMessage().contains("subagent model not found: gpt-x"),
         missingModel.getMessage());
 
     stub("alpha", "ghost-variant", validModelConfig());
@@ -161,7 +162,6 @@ class AgentBranchSettingsMaterializerTest {
     AgentDefinition broken =
         AgentDefinition.builder()
             .name("broken")
-            .modelProviderName("openai")
             .modelName("gpt-x")
             .configJson("{\"tools\":[]}")
             .build();
@@ -205,12 +205,8 @@ class AgentBranchSettingsMaterializerTest {
         + "\"defaultVariant\":\"quality\","
         + "\"variants\":[{\"id\":\"quality\",\"reasoningEffort\":\"high\"},"
         + "{\"id\":\"fast\",\"reasoningEffort\":\"off\"}],"
-        + "\"pricing\":{\"currency\":\"USD\",\"pricingTier\":\"batch\","
-        + "\"serviceTier\":\"priority\",\"serviceTierMultiplier\":1.25,"
-        + "\"version\":\"2026-07-16\",\"inputPerMillionTokens\":1.1,"
-        + "\"outputPerMillionTokens\":2.2,\"cacheReadPerMillionTokens\":0.3,"
-        + "\"cacheWritePerMillionTokens\":0.4,"
-        + "\"cacheWriteLongPerMillionTokens\":0.5,"
-        + "\"reasoningPerMillionTokens\":3.6}}";
+        + "\"pricing\":{\"base\":{\"input\":\"1.1\",\"output\":\"2.2\","
+        + "\"cacheRead\":\"0.3\",\"cacheWrite\":\"0.4\",\"reasoning\":\"3.6\"},"
+        + "\"overrides\":[],\"multipliers\":[]}}";
   }
 }

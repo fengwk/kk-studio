@@ -368,10 +368,7 @@ public final class HarnessRuntimeRequestMapper {
 
   private static ModelSelection toModelSelection(HarnessModelSelectionDTO dto) {
     requireNonNull(dto, "model");
-    return new ModelSelection(
-        requireText(dto.getProviderName(), "model.providerName"),
-        requireText(dto.getModelName(), "model.modelName"),
-        requireText(dto.getVariant(), "model.variant"));
+    return new ModelSelection(requireText(dto.getModelName(), "model.modelName"), dto.getVariant());
   }
 
   /**

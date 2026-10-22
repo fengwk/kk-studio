@@ -17,6 +17,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCallDiagnostic;
 
 import java.util.List;
+import java.util.Map;
 
 /** ModelStreamAccumulator 直接单元测试：text/thinking 累积、prefix/gap reconcile 与 tool-call fragment 校验。 */
 class ModelStreamAccumulatorTest {
@@ -196,7 +197,7 @@ class ModelStreamAccumulatorTest {
         thinking,
         calls,
         calls.isEmpty() ? GenerationStopReason.COMPLETE : GenerationStopReason.COMPLETE,
-        new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
+        new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L),
         "req-1",
         null,
         null);
@@ -344,7 +345,7 @@ class ModelStreamAccumulatorTest {
             "",
             List.of(completeCall),
             GenerationStopReason.LENGTH,
-            new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
+            new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L),
             null,
             null,
             "{}",
@@ -379,7 +380,7 @@ class ModelStreamAccumulatorTest {
             "",
             List.of(completeCall),
             GenerationStopReason.LENGTH,
-            new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
+            new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L),
             null,
             null,
             "{}",
@@ -408,7 +409,7 @@ class ModelStreamAccumulatorTest {
             "",
             List.of(),
             GenerationStopReason.LENGTH,
-            new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
+            new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L),
             null,
             null,
             "{}",
@@ -433,7 +434,7 @@ class ModelStreamAccumulatorTest {
             "",
             List.of(),
             GenerationStopReason.LENGTH,
-            new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
+            new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L),
             null,
             null,
             "{}",
@@ -459,7 +460,7 @@ class ModelStreamAccumulatorTest {
             "",
             List.of(),
             GenerationStopReason.FILTERED,
-            new ModelUsage(10L, 5L, 0L, 0L, 0L, 0L, 15L),
+            new ModelUsage(10L, 5L, 0L, 0L, Map.of(), 0L, 15L),
             null,
             null,
             "{}",

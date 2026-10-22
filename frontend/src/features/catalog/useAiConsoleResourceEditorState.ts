@@ -8,7 +8,13 @@ import {
   editProviderEditorPlan,
 } from '@/features/catalog/ai-resource-editor-open-plans'
 import type { ResourceEditorPlan } from '@/features/catalog/ai-resource-editor-plan-types'
-import type { AgentDraft, ModelDraft, ProviderDraft, ResourceModal } from '@/features/catalog/ai-console-types'
+import type {
+  AgentDraft,
+  ModelDraft,
+  ModelGroupDraft,
+  ProviderDraft,
+  ResourceModal,
+} from '@/features/catalog/ai-console-types'
 import {
   normalizeAgentDraftDefaultVariant,
   normalizeCreateAgentDraftSelection,
@@ -31,6 +37,9 @@ export function useAiConsoleResourceEditorState({
   const [resourceModal, setResourceModal] = useState<ResourceModal | null>(null)
   const [providerDraft, setProviderDraft] = useState<ProviderDraft>(() => createProviderEditorPlan().providerDraft)
   const [modelDraft, setModelDraft] = useState<ModelDraft>(() => createModelEditorPlan([]).modelDraft)
+  const [modelGroupDraft, setModelGroupDraft] = useState<ModelGroupDraft>(
+    () => createModelEditorPlan([]).modelGroupDraft,
+  )
   const [agentDraft, setAgentDraft] = useState<AgentDraft>(() => createAgentEditorPlan([]).agentDraft)
 
   useEffect(() => {
@@ -42,7 +51,7 @@ export function useAiConsoleResourceEditorState({
       setModelDraft((currentDraft) => {
         const normalizedProvider =
           resourceModal.mode === 'edit'
-            ? normalizeEditModelDraftProvider(currentDraft, resourceModal.providerName)
+            ? normalizeEditModelDraftProvider(currentDraft, currentDraft.providerName)
             : normalizeCreateModelDraftProvider(currentDraft, providers)
         return normalizeModelDraftDefaultVariant(normalizedProvider)
       })
@@ -73,6 +82,7 @@ export function useAiConsoleResourceEditorState({
     }
     if (plan.kind === 'model') {
       setModelDraft(plan.modelDraft)
+      setModelGroupDraft(plan.modelGroupDraft)
       return
     }
     setAgentDraft(plan.agentDraft)
@@ -82,17 +92,26 @@ export function useAiConsoleResourceEditorState({
     resourceModal,
     providerDraft,
     modelDraft,
+    modelGroupDraft,
     agentDraft,
     onProviderDraftChange: setProviderDraft,
     onModelDraftChange: setModelDraft,
+    onModelGroupDraftChange: setModelGroupDraft,
     onAgentDraftChange: setAgentDraft,
     closeResourceModal,
     openCreateProvider: () => applyResourceEditorPlan(createProviderEditorPlan()),
     openEditProvider: (providerName: string) =>
       applyResourceEditorPlan(editProviderEditorPlan(providers, providerName)),
     openCreateModel: () => applyResourceEditorPlan(createModelEditorPlan(providers)),
-    openEditModel: (providerName: string, modelName: string) =>
-      applyResourceEditorPlan(editModelEditorPlan(models, providerName, modelName)),
+    openEditModel: (modelName: string) =>
+      applyResourceEditorPlan(editModelEditorPlan(models, modelName)),
+    /** 仅创建态切换 Tab；两份草稿都保留在 state 中。 */
+    selectModelCreateKind: (resourceKind: 'MODEL' | 'GROUP') =>
+      setResourceModal((current) =>
+        current && current.kind === 'model' && current.mode === 'create'
+          ? { ...current, resourceKind }
+          : current,
+      ),
     openCreateAgent: () => applyResourceEditorPlan(createAgentEditorPlan(models)),
     openEditAgent: (agentName: string) =>
       applyResourceEditorPlan(editAgentEditorPlan(agents, models, agentName)),

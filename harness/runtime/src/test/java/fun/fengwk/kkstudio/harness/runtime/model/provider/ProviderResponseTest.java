@@ -10,11 +10,12 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 /** 验证 ProviderResponse 对 toolCallDiagnostics 的不变量校验（非空、唯一性、连续可解释性与 stopReason 约束）。 */
 class ProviderResponseTest {
 
-  private static final ModelUsage USAGE = new ModelUsage(1, 1, 0, 0, 0, 0, 2);
+  private static final ModelUsage USAGE = new ModelUsage(1, 1, 0, 0, Map.of(), 0L, 2L);
 
   @Test
   void acceptsValidCompleteAndDiagnosticOutcomes() {

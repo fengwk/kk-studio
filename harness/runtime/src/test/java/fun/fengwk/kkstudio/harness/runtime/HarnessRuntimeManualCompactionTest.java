@@ -57,6 +57,7 @@ import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /** HarnessRuntime 手动压缩入口：availability 与单事务 candidate 构造 / resolve / 提交。 */
@@ -65,11 +66,11 @@ class HarnessRuntimeManualCompactionTest {
   private static final Instant NOW = Instant.parse("2026-07-01T00:00:00Z");
   private static final int CONTEXT_WINDOW = 100_000;
   private static final int MAX_OUTPUT_TOKENS = 16_384;
-  private static final ModelUsage USAGE = new ModelUsage(50_000L, 2L, 0L, 0L, 0L, 0L, 50_002L);
+  private static final ModelUsage USAGE =
+      new ModelUsage(50_000L, 2L, 0L, 0L, Map.of(), 0L, 50_002L);
   private static final ModelCost COST =
       new ModelCost(
           "USD",
-          BigDecimal.ZERO,
           BigDecimal.ZERO,
           BigDecimal.ZERO,
           BigDecimal.ZERO,
@@ -289,7 +290,7 @@ class HarnessRuntimeManualCompactionTest {
     seedCommand(
         configFixture.store,
         configBaseline.threadId(),
-        new SetModelCommandPayload(new ModelSelection("provider", "model-b", "v2")));
+        new SetModelCommandPayload(ModelSelection.model("model-b", "v2")));
     configFixture.resolver.results.add(rejection());
     long configVersion = thread(configFixture.store, configBaseline.threadId()).version();
     configFixture.runtime.compactThread(

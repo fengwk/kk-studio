@@ -45,6 +45,7 @@ import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.CompactionPayload;
@@ -87,6 +88,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.UnaryOperator;
@@ -153,7 +155,7 @@ public abstract class HarnessStoreInvocationContract {
             assistantEntryId,
             baseline.sessionId(),
             userEntryId,
-            mappedAssistant(requestSpec, response),
+            mappedAssistant(requestSpec, response, T2),
             T2,
             replayState);
 
@@ -335,6 +337,8 @@ public abstract class HarnessStoreInvocationContract {
             7,
             "partial",
             "thinking",
+            ModelSelection.model("model", "v1"),
+            null,
             new ModelInvocationError(ProviderErrorKind.TRANSIENT, "provider unavailable"),
             T3,
             T4);
@@ -580,7 +584,7 @@ public abstract class HarnessStoreInvocationContract {
             store, baseline.sessionId(), baseline.turnStartEntryId(), userMessagePayload());
     UUID assistantEntryId =
         insertChildEntry(
-            store, baseline.sessionId(), userEntryId, mappedAssistant(requestSpec, response));
+            store, baseline.sessionId(), userEntryId, mappedAssistant(requestSpec, response, T1));
     UUID toolResultEntryId =
         insertChildEntry(
             store,
@@ -1272,6 +1276,8 @@ public abstract class HarnessStoreInvocationContract {
                                   0,
                                   "",
                                   "",
+                                  ModelSelection.model("model", "v1"),
+                                  null,
                                   new ModelInvocationError(
                                       ProviderErrorKind.TRANSIENT, "provider unavailable"),
                                   T1,
@@ -1679,7 +1685,7 @@ public abstract class HarnessStoreInvocationContract {
             store, baseline.sessionId(), baseline.turnStartEntryId(), userMessagePayload());
     UUID assistantEntryId =
         insertChildEntry(
-            store, baseline.sessionId(), userEntryId, mappedAssistant(requestSpec, response));
+            store, baseline.sessionId(), userEntryId, mappedAssistant(requestSpec, response, T1));
     insertTerminalModel(
         TestIds.id(1),
         baseline.threadId(),
@@ -1768,7 +1774,7 @@ public abstract class HarnessStoreInvocationContract {
             store, baseline.sessionId(), baseline.turnStartEntryId(), userMessagePayload());
     UUID assistantEntryId =
         insertChildEntry(
-            store, baseline.sessionId(), userEntryId, mappedAssistant(requestSpec, response));
+            store, baseline.sessionId(), userEntryId, mappedAssistant(requestSpec, response, T1));
     insertTerminalModel(
         TestIds.id(1),
         baseline.threadId(),
@@ -1896,7 +1902,7 @@ public abstract class HarnessStoreInvocationContract {
             store, baseline.sessionId(), baseline.turnStartEntryId(), userMessagePayload());
     UUID assistantEntryId =
         insertChildEntry(
-            store, baseline.sessionId(), userEntryId, mappedAssistant(requestSpec, response));
+            store, baseline.sessionId(), userEntryId, mappedAssistant(requestSpec, response, T1));
     insertTerminalModel(
         TestIds.id(1),
         baseline.threadId(),
@@ -2518,7 +2524,7 @@ public abstract class HarnessStoreInvocationContract {
         "",
         List.of(),
         GenerationStopReason.COMPLETE,
-        new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
+        new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L),
         "req-1",
         null,
         "{}");
@@ -2532,7 +2538,7 @@ public abstract class HarnessStoreInvocationContract {
         "",
         List.of(new ProviderToolCall(toolCallId, "bash", argumentsJson)),
         GenerationStopReason.COMPLETE,
-        new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
+        new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L),
         "req-1",
         null,
         "{}");
@@ -2679,7 +2685,10 @@ public abstract class HarnessStoreInvocationContract {
             store, baseline2.sessionId(), baseline2.turnStartEntryId(), userMessagePayload());
     UUID assistantEntryId2 =
         insertChildEntry(
-            store, baseline2.sessionId(), userEntryId2, mappedAssistant(requestSpec2, response2));
+            store,
+            baseline2.sessionId(),
+            userEntryId2,
+            mappedAssistant(requestSpec2, response2, T0));
     insertTerminalModel(
         TestIds.id(2),
         baseline2.threadId(),

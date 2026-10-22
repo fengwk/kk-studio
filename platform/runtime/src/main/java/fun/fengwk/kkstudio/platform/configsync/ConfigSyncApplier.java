@@ -103,18 +103,16 @@ public class ConfigSyncApplier {
 
   private void applyModels(List<ConfigSyncParser.ModelSpec> models) {
     for (ConfigSyncParser.ModelSpec spec : models) {
-      AgentModel existing =
-          modelRepository.getByProviderNameAndName(spec.providerName(), spec.name());
+      AgentModel existing = modelRepository.getByName(spec.name());
       if (existing == null) {
         AgentModelCreateDTO create = new AgentModelCreateDTO();
         copyModel(spec.properties(), create);
-        create.setProviderName(spec.providerName());
         modelService.createModel(create);
       } else {
         AgentModelUpdateDTO update = new AgentModelUpdateDTO();
         copyModel(spec.properties(), update);
         update.setExpectedVersion(CatalogVersions.format(existing.version()));
-        modelService.updateModel(spec.providerName(), spec.name(), update);
+        modelService.updateModel(spec.name(), update);
       }
     }
   }
@@ -189,9 +187,12 @@ public class ConfigSyncApplier {
   private static void copyModel(
       AgentModelEditablePropertiesDTO source, AgentModelEditablePropertiesDTO target) {
     target.setName(source.getName());
+    target.setKind(source.getKind());
+    target.setProviderName(source.getProviderName());
     target.setModelId(source.getModelId());
     target.setDescription(source.getDescription());
     target.setConfig(source.getConfig());
+    target.setGroup(source.getGroup());
   }
 
   private static AgentDefinitionCreateDTO buildAgentCreate(ConfigSyncParser.AgentSpec spec) {

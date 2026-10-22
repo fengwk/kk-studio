@@ -77,7 +77,6 @@ class StrictJacksonConfigurationTest {
           JsonMapper mapper = context.getBean(JsonMapper.class);
 
           HarnessModelSelectionDTO model = new HarnessModelSelectionDTO();
-          model.setProviderName("anthropic");
           model.setModelName("claude-3-5-sonnet");
           model.setVariant("default");
 
@@ -88,7 +87,6 @@ class StrictJacksonConfigurationTest {
           // 完整快照要求 environmentName 总是显式出现：全局 NON_NULL 必须被 @JsonInclude(ALWAYS) 覆盖。
           String expectedWithNullEnvironment =
               "{\"agentName\":\"code-assistant\",\"model\":{"
-                  + "\"providerName\":\"anthropic\","
                   + "\"modelName\":\"claude-3-5-sonnet\","
                   + "\"variant\":\"default\"},"
                   + "\"environmentName\":null,\"goal\":null}";
@@ -97,7 +95,6 @@ class StrictJacksonConfigurationTest {
           settings.setEnvironmentName("local");
           String expectedWithEnvironment =
               "{\"agentName\":\"code-assistant\",\"model\":{"
-                  + "\"providerName\":\"anthropic\","
                   + "\"modelName\":\"claude-3-5-sonnet\","
                   + "\"variant\":\"default\"},"
                   + "\"environmentName\":\"local\",\"goal\":null}";
@@ -120,7 +117,7 @@ class StrictJacksonConfigurationTest {
               () ->
                   mapper.readValue(
                       "{\"workspacePath\":\"/workspace/project\",\"agentName\":\"code-assistant\","
-                          + "\"model\":{\"providerName\":\"anthropic\",\"modelName\":"
+                          + "\"model\":{\"modelName\":"
                           + "\"claude-3-5-sonnet\",\"variant\":\"default\"},"
                           + "\"environmentName\":null}",
                       HarnessBranchSettingsDTO.class));

@@ -299,10 +299,10 @@ describe('ThreadComposer and commands', () => {
         onSubmit={vi.fn()}
         onCommand={vi.fn()}
         settings={{
-          model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'high' },
+          model: { modelName: 'MiniMax', variant: 'high' },
           models: [
             {
-              providerName: 'minimax',
+              kind: 'MODEL',
               name: 'MiniMax',
               config: {
                 defaultVariant: 'default',
@@ -326,7 +326,7 @@ describe('ThreadComposer and commands', () => {
     expect(dock?.querySelector('.thread-dock-controls')).not.toBeNull()
     expect(screen.getByRole('button', { name: '权限模式' })).toHaveTextContent('Default')
     expect(screen.getByRole('button', { name: 'Model 与 Variant' })).toHaveTextContent(
-      'minimax/MiniMax (high)',
+      'MiniMax (high)',
     )
   })
 
@@ -343,10 +343,10 @@ describe('ThreadComposer and commands', () => {
         onSubmit={vi.fn()}
         onCommand={vi.fn()}
         settings={{
-          model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+          model: { modelName: 'MiniMax', variant: 'default' },
           models: [
             {
-              providerName: 'minimax',
+              kind: 'MODEL',
               name: 'MiniMax',
               config: {
                 defaultVariant: 'default',
@@ -354,7 +354,7 @@ describe('ThreadComposer and commands', () => {
               },
             },
             {
-              providerName: 'openai',
+              kind: 'MODEL',
               name: 'gpt',
               config: {
                 defaultVariant: 'fast',
@@ -380,13 +380,12 @@ describe('ThreadComposer and commands', () => {
     const search = screen.getByRole('searchbox', { name: '搜索模型' })
     expect(search).toHaveFocus()
     await user.type(search, 'gpt')
-    expect(screen.queryByRole('option', { name: 'minimax/MiniMax' })).not.toBeInTheDocument()
-    await user.click(screen.getByRole('option', { name: 'openai/gpt' }))
+    expect(screen.queryByRole('option', { name: 'MiniMax' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('option', { name: 'gpt' }))
     expect(screen.getByRole('listbox', { name: 'Variant 选项' })).toBeInTheDocument()
     await user.click(screen.getByRole('option', { name: 'quality' }))
     expect(onModelChange).toHaveBeenCalledWith({
-      providerName: 'openai',
-      modelName: 'gpt',
+            modelName: 'gpt',
       variant: 'quality',
     })
   })
@@ -402,10 +401,10 @@ describe('ThreadComposer and commands', () => {
         onSubmit={vi.fn()}
         onCommand={vi.fn()}
         settings={{
-          model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+          model: { modelName: 'MiniMax', variant: 'default' },
           models: [
             {
-              providerName: 'minimax',
+              kind: 'MODEL',
               name: 'MiniMax',
               config: {
                 defaultVariant: 'default',

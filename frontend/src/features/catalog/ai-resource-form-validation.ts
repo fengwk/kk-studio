@@ -1,10 +1,16 @@
 import { toUserFacingErrorMessage } from '@/shared/lib/user-facing-error'
-import type { AgentDraft, ModelDraft, ProviderDraft, ResourceModal } from '@/features/catalog/ai-console-types'
+import type {
+  AgentDraft,
+  ModelDraft,
+  ModelGroupDraft,
+  ProviderDraft,
+  ResourceModal,
+} from '@/features/catalog/ai-console-types'
 import {
   toEditableAgent,
   toEditableAgentUpdate,
   toEditableModel,
-  toEditableModelUpdate,
+  toEditableModelGroup,
   toEditableProvider,
   toEditableProviderUpdate,
 } from '@/features/catalog/ai-resource-draft-codecs'
@@ -21,6 +27,9 @@ export type ResourceFieldKey =
   | 'variants'
   | 'defaultVariant'
   | 'pricing'
+  | 'group'
+  | 'fallbackStatusCodes'
+  | 'cooldownSeconds'
   | 'model'
   | 'variant'
   | 'tools'
@@ -62,7 +71,10 @@ function mapError(error: unknown): ResourceFormValidationResult {
   if (/modality/i.test(raw)) {
     return { ok: false, message, fields: { inputModalities: message } }
   }
-  if (/pricing|PerMillion|number|negative/i.test(raw)) {
+  if (/group\.members|fallbackStatusCodes|cooldownSeconds/i.test(raw)) {
+    return { ok: false, message, fields: { group: message } }
+  }
+  if (/pricing|rate|condition|decimal|number|negative/i.test(raw)) {
     return { ok: false, message, fields: { pricing: message } }
   }
   if (/providerName/i.test(raw)) {
@@ -96,6 +108,7 @@ export function validateResourceDraft(
   drafts: {
     providerDraft: ProviderDraft
     modelDraft: ModelDraft
+    modelGroupDraft: ModelGroupDraft
     agentDraft: AgentDraft
   },
 ): ResourceFormValidationResult {
@@ -117,6 +130,29 @@ export function validateResourceDraft(
     }
 
     if (modal.kind === 'model') {
+      if (modal.resourceKind === 'GROUP') {
+        const groupDraft = drafts.modelGroupDraft
+        if (!groupDraft.name.trim()) {
+          return {
+            ok: false,
+            message: translate('ai.catalog.validation.modelName'),
+            fields: { name: translate('ai.catalog.validation.name') },
+          }
+        }
+        if (groupDraft.members.length === 0) {
+          return {
+            ok: false,
+            message: translate('ai.catalog.validation.groupMembers'),
+            fields: { group: translate('ai.catalog.validation.groupMembers') },
+          }
+        }
+        try {
+          toEditableModelGroup(groupDraft)
+        } catch (error) {
+          return mapError(error)
+        }
+        return { ok: true, message: '', fields: {} }
+      }
       const modelDraft = drafts.modelDraft
       const ids = modelDraft.variants.map((variant) => variant.id.trim()).filter(Boolean)
       if (ids.length === 0) {
@@ -156,11 +192,7 @@ export function validateResourceDraft(
         }
       }
 
-      if (modal.mode === 'edit') {
-        toEditableModelUpdate(modelDraft)
-      } else {
-        toEditableModel(modelDraft)
-      }
+      toEditableModel(modelDraft)
       return { ok: true, message: '', fields: {} }
     }
 

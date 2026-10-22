@@ -242,7 +242,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
   }
 
   private MessagePayload assistantMessage(AgentMessageContent... contents) {
-    ModelUsage usage = new ModelUsage(0, 0, 0, 0, 0, 0, 0);
+    ModelUsage usage = new ModelUsage(0, 0, 0, 0, Map.of(), 0L, 0L);
     AssistantMessageMetadata metadata =
         new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage);
     return new MessagePayload(

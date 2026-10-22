@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.platform.configsync;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncRef;
 
-/** 配置同步引用构造工具，统一 Model 的 {@code providerName/modelName} 身份。 */
+/** 配置同步引用构造工具：Model 使用全局逻辑 name。 */
 public final class ConfigSyncRefs {
 
   private ConfigSyncRefs() {}
@@ -12,11 +12,7 @@ public final class ConfigSyncRefs {
     return new ConfigSyncRef(kind, name);
   }
 
-  public static ConfigSyncRef model(String providerName, String modelName) {
-    return ref(ConfigSyncKind.MODELS, modelName(providerName, modelName));
-  }
-
-  public static String modelName(String providerName, String modelName) {
-    return providerName + "/" + modelName;
+  public static ConfigSyncRef model(String modelName) {
+    return ref(ConfigSyncKind.MODELS, modelName);
   }
 }

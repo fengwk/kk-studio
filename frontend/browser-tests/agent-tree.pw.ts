@@ -16,7 +16,7 @@ function treeNodes(turnCount = 3) {
       parentThreadId: THREAD_ID,
       name: 'Stopped Sibling',
       agentName: 'reviewer',
-      model: { providerName: 'anthropic', modelName: LONG_MODEL, variant: 'fast' },
+      model: { modelName: LONG_MODEL, variant: 'fast' },
       status: 'IDLE',
       processing: false,
       turnCount: 1,
@@ -29,7 +29,7 @@ function treeNodes(turnCount = 3) {
       parentThreadId: CHILD_ID,
       name: 'Grand Worker',
       agentName: 'coder',
-      model: { providerName: 'minimax', modelName: 'MiniMax-M2', variant: 'default' },
+      model: { modelName: 'MiniMax-M2', variant: 'default' },
       status: 'MODEL_RUNNING',
       processing: true,
       turnCount: 4,
@@ -42,7 +42,7 @@ function treeNodes(turnCount = 3) {
       parentThreadId: THREAD_ID,
       name: 'Child Planner',
       agentName: 'planner',
-      model: { providerName: 'minimax', modelName: 'MiniMax-M2', variant: 'default' },
+      model: { modelName: 'MiniMax-M2', variant: 'default' },
       status: 'TOOL_WAITING_APPROVAL',
       processing: true,
       turnCount,
@@ -55,7 +55,7 @@ function treeNodes(turnCount = 3) {
       parentThreadId: null,
       name: 'Preview Thread',
       agentName: 'assistant',
-      model: { providerName: 'minimax', modelName: 'minimax-m2.7', variant: 'default' },
+      model: { modelName: 'minimax-m2.7', variant: 'default' },
       // 本地状态：根自己空闲，不递归投影子树忙碌。
       status: 'IDLE',
       processing: false,
@@ -90,7 +90,7 @@ function threadDto(
     executionControl: 'RUNNABLE',
     branchSettings: {
       agentName: 'assistant',
-      model: { providerName: 'minimax', modelName: 'minimax-m2.7', variant: 'default' },
+      model: { modelName: 'minimax-m2.7', variant: 'default' },
       environmentName: 'dev-node',
       goal: null,
     },
@@ -182,7 +182,7 @@ async function expectNoHorizontalOverflow(widget: ReturnType<Page['getByRole']>)
  */
 async function expectBoundRootIdentity(page: Page) {
   await expect(page.getByRole('button', { name: 'Model 与 Variant' }))
-    .toHaveText('minimax/minimax-m2.7 (default)')
+    .toHaveText('minimax-m2.7 (default)')
   await expect(page.getByRole('button', { name: '环境' })).toHaveText('dev-node')
 }
 

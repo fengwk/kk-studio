@@ -9,10 +9,12 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 
+import java.util.Map;
+
 /** AssistantMessageMetadata 只承载 stopReason/usage 与可空非负的流式生成计时。 */
 class AssistantMessageMetadataTest {
 
-  private static final ModelUsage USAGE = new ModelUsage(1, 1, 0, 0, 0, 0, 2);
+  private static final ModelUsage USAGE = new ModelUsage(1, 1, 0, 0, Map.of(), 0L, 2L);
 
   /** 两参构造不携带计时：decodeDurationMillis 归一化为 null（无可信流计时）。 */
   @Test

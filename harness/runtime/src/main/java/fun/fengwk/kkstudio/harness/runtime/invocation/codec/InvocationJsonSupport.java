@@ -135,6 +135,23 @@ final class InvocationJsonSupport {
     return value.intValue();
   }
 
+  static int nonNegativeInt(ObjectNode node, String field, String context) {
+    JsonNode value = required(node, field, context);
+    if (!value.isIntegralNumber() || !value.canConvertToInt() || value.intValue() < 0) {
+      throw new IllegalArgumentException(context + "." + field + " must be a non-negative integer");
+    }
+    return value.intValue();
+  }
+
+  static long nonNegativeLong(ObjectNode node, String field, String context) {
+    JsonNode value = required(node, field, context);
+    if (!value.isIntegralNumber() || !value.canConvertToLong() || value.longValue() < 0) {
+      throw new IllegalArgumentException(
+          context + "." + field + " must be a non-negative long integer");
+    }
+    return value.longValue();
+  }
+
   static <E extends Enum<E>> E nullableEnum(
       ObjectNode node, String field, Class<E> enumType, String context) {
     String value = nullableText(node, field, context);

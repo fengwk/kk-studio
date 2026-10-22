@@ -116,10 +116,10 @@ class OpenAiResponsesStreamAccumulatorTest {
     assertEquals("resp_123", resp.requestId());
     assertEquals("default", resp.serviceTier());
 
-    // 验证用量归一化：60 普通输入, 30 普通输出, 30 cached, 10 cacheWrite, 20 reasoning, 150 total
+    // 验证用量归一化：60 普通输入, 50 输出（含 20 reasoning）, 30 cached, 10 cacheWrite, 150 total
     ModelUsage usage = resp.usage();
     assertEquals(60L, usage.inputTokens());
-    assertEquals(30L, usage.outputTokens());
+    assertEquals(50L, usage.outputTokens());
     assertEquals(30L, usage.cacheReadTokens());
     assertEquals(10L, usage.cacheWriteTokens());
     assertEquals(20L, usage.reasoningTokens());
@@ -451,12 +451,12 @@ class OpenAiResponsesStreamAccumulatorTest {
 
     ModelUsage usage = resp.usage();
     assertEquals(25L, usage.inputTokens());
-    assertEquals(15L, usage.outputTokens());
+    assertEquals(20L, usage.outputTokens());
     assertEquals(10L, usage.cacheReadTokens());
     assertEquals(5L, usage.cacheWriteTokens());
     assertEquals(5L, usage.reasoningTokens());
-    // 关键：缺失 total_tokens 时严格为 0，不合成 60
-    assertEquals(0L, usage.providerTotalTokens());
+    // 关键：缺失 total_tokens 时保持 unknown，不合成 60
+    assertNull(usage.providerTotalTokens());
     assertEquals(0L, usage.totalTokens());
     assertEquals(60L, usage.categorizedTokens());
 
@@ -605,10 +605,10 @@ class OpenAiResponsesStreamAccumulatorTest {
     ModelUsage usage = resp.usage();
     assertEquals(80L, usage.inputTokens());
     assertEquals(40L, usage.outputTokens());
-    assertEquals(0L, usage.providerTotalTokens(), "total_tokens must be reset to 0L");
+    assertNull(usage.providerTotalTokens(), "total_tokens must be reset to unknown");
     assertEquals(0L, usage.cacheReadTokens(), "cached_tokens must be reset to 0L");
     assertEquals(0L, usage.cacheWriteTokens(), "cache_write_tokens must be reset to 0L");
-    assertEquals(0L, usage.reasoningTokens(), "reasoning_tokens must be reset to 0L");
+    assertNull(usage.reasoningTokens(), "reasoning_tokens must be reset to unknown");
 
     // rawUsageJson 保留快照 2
     JsonNode rawUsage = MAPPER.readTree(resp.rawUsageJson());
@@ -657,7 +657,7 @@ class OpenAiResponsesStreamAccumulatorTest {
 
     ProviderResponse resp = accumulator.response();
     assertEquals("{}", resp.rawUsageJson());
-    assertEquals(0L, resp.usage().providerTotalTokens());
+    assertNull(resp.usage().providerTotalTokens());
   }
 
   /** 意图：验证 COMPLETE 终态下工具调用如果参数为空或未闭合，严禁合成 {}，严格抛出 INVALID_RESPONSE。 */
@@ -956,10 +956,10 @@ class OpenAiResponsesStreamAccumulatorTest {
     ModelUsage usage = resp.usage();
     assertEquals(0L, usage.inputTokens());
     assertEquals(0L, usage.outputTokens());
-    assertEquals(0L, usage.providerTotalTokens());
+    assertNull(usage.providerTotalTokens());
     assertEquals(0L, usage.cacheReadTokens());
     assertEquals(0L, usage.cacheWriteTokens());
-    assertEquals(0L, usage.reasoningTokens());
+    assertNull(usage.reasoningTokens());
     assertEquals("{}", resp.rawUsageJson());
   }
 

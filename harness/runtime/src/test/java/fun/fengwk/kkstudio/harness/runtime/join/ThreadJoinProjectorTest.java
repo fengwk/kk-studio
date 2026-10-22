@@ -45,6 +45,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayl
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -67,7 +68,7 @@ class ThreadJoinProjectorTest {
   private static final String VALID_HASH =
       "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
   private static final BranchSettings SETTINGS =
-      new BranchSettings("assistant", new ModelSelection("provider", "model", "default"), null);
+      new BranchSettings("assistant", ModelSelection.model("model", "default"), null);
   private static final Instant T0 = Instant.parse("2026-01-01T00:00:00Z");
   private static final Instant T1 = Instant.parse("2026-01-01T00:00:01Z");
   private static final Instant T2 = Instant.parse("2026-01-01T00:00:02Z");
@@ -1628,7 +1629,8 @@ class ThreadJoinProjectorTest {
   }
 
   private static AssistantMessageMetadata assistantMetadata(GenerationStopReason stopReason) {
-    return new AssistantMessageMetadata(stopReason, new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L));
+    return new AssistantMessageMetadata(
+        stopReason, new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L));
   }
 
   private static MessagePayload assistantPayload(String text) {

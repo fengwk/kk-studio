@@ -24,6 +24,7 @@ import { assertProviderExecutionBoundary } from './lib/provider-boundary.mjs'
 import { missingUiCapabilities } from './lib/ui-capabilities.mjs'
 import { MINIMAX_ANTHROPIC_M3 } from './lib/real-models.mjs'
 import { createDurationTimer } from './lib/time.mjs'
+import { encodePathTail } from './lib/fixtures.mjs'
 import {
   assertReadOnlyZeroFooter,
   waitForSettledAssistantText,
@@ -46,8 +47,8 @@ const PI_MODEL_NAMES = JSON.parse(
   ),
 ).map((model) => model.name)
 const REAL_UI_MODEL = MINIMAX_ANTHROPIC_M3
-const REAL_UI_MODEL_ID = `${REAL_UI_MODEL.providerName}/${REAL_UI_MODEL.modelName}`
-const REAL_UI_MODEL_SELECTOR_LABEL = `${REAL_UI_MODEL_ID} · ${REAL_UI_MODEL.variant}`
+const REAL_UI_MODEL_ID = REAL_UI_MODEL.modelName
+const REAL_UI_MODEL_SELECTOR_LABEL = `${REAL_UI_MODEL_ID} (${REAL_UI_MODEL.variant})`
 
 function parseArgs(argv) {
   const args = {
@@ -109,9 +110,8 @@ async function apiDeleteByName(backendUrl, resource, name) {
       + `?expectedVersion=${encodeURIComponent(hit.version)}`
   } else if (resource === 'models') {
     deletePath =
-      `${resourcePath}?providerName=${encodeURIComponent(hit.providerName)}`
-      + `&modelName=${encodeURIComponent(hit.name)}`
-      + `&expectedVersion=${encodeURIComponent(hit.version)}`
+      `${resourcePath}/${encodePathTail(hit.name)}`
+      + `?expectedVersion=${encodeURIComponent(hit.version)}`
   } else {
     deletePath =
       `${resourcePath}/${encodeURIComponent(hit.name)}`
@@ -126,10 +126,7 @@ async function requireRealMiniMaxM3(backendUrl, modelDef = MINIMAX_ANTHROPIC_M3)
   const { json: providersJson } = await apiJson(backendUrl, 'GET', '/api/providers?pageNumber=1&pageSize=50')
   const models = modelsJson?.data?.results || []
   const providers = providersJson?.data?.results || []
-  const model = models.find(
-    (candidate) =>
-      candidate.providerName === modelDef.providerName && candidate.name === modelDef.modelName,
-  )
+  const model = models.find((candidate) => candidate.name === modelDef.modelName)
   const provider = providers.find((candidate) => candidate.name === model?.providerName)
   assert(
     provider?.name === modelDef.providerName
@@ -139,7 +136,7 @@ async function requireRealMiniMaxM3(backendUrl, modelDef = MINIMAX_ANTHROPIC_M3)
       && provider.baseUrl.trim().length > 0
       && model?.name === modelDef.modelName
       && model.config?.variants?.some((variant) => variant.id === modelDef.variant),
-    `real UI test requires configured ${modelDef.providerName}/${modelDef.modelName} with variant ${modelDef.variant}`,
+    `real UI test requires model ${modelDef.modelName} on configured provider ${modelDef.providerName} with variant ${modelDef.variant}`,
   )
 }
 

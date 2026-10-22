@@ -121,7 +121,7 @@ class IssueRunServiceImplTest {
     Issue issue = issue();
     Project project = project();
     BranchSettings settings =
-        new BranchSettings("worker", new ModelSelection("provider", "model", "default"), null);
+        new BranchSettings("worker", ModelSelection.model("model", "default"), null);
     AtomicReference<IssueRun> inserted = new AtomicReference<>();
     Entry rootEntry = mock(Entry.class);
     UUID rootEntryId = UUID.randomUUID();

@@ -161,7 +161,6 @@ public class HarnessOwnerQueryService {
     dto.setProcessing(status.isProcessing());
     var selection = snapshot.entryPath().baseSettings().model();
     HarnessModelSelectionDTO model = new HarnessModelSelectionDTO();
-    model.setProviderName(selection.providerName());
     model.setModelName(selection.modelName());
     model.setVariant(selection.variant());
     dto.setModel(model);

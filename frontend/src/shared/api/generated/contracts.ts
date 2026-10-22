@@ -74,30 +74,47 @@ export interface AgentModelAbilitiesDTO {
 export interface AgentModelConfigDTO {
   limit: AgentModelLimitDTO
   abilities: AgentModelAbilitiesDTO
-  pricing: AgentModelPricingDTO
-  defaultVariant: string
+  pricing?: AgentModelPricingDTO | null
+  defaultVariant?: string | null
   variants: AgentModelVariantDTO[]
 }
 
 /** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentModelCreateDTO */
 export interface AgentModelCreateDTO {
   name: string
-  modelId: string
+  kind: AgentModelKind
   description?: string | null
-  config: AgentModelConfigDTO
-  providerName: string
+  providerName?: string | null
+  modelId?: string | null
+  config?: AgentModelConfigDTO | null
+  group?: AgentModelGroupDTO | null
 }
 
 /** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentModelDTO */
 export interface AgentModelDTO {
-  providerName: string
   name: string
-  modelId: string
+  kind: AgentModelKind
   description?: string | null
-  config: AgentModelConfigDTO
+  providerName?: string | null
+  modelId?: string | null
+  config?: AgentModelConfigDTO | null
+  group?: AgentModelGroupDTO | null
   version: string
   createTime: number
   updateTime: number
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentModelGroupDTO */
+export interface AgentModelGroupDTO {
+  members: AgentModelGroupMemberDTO[]
+  fallbackStatusCodes: number[]
+  cooldownSeconds: number
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentModelGroupMemberDTO */
+export interface AgentModelGroupMemberDTO {
+  modelName: string
+  variant: string
 }
 
 /** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentModelInputModality */
@@ -116,53 +133,114 @@ export const AGENT_MODEL_INPUT_MODALITY_VALUES: readonly AgentModelInputModality
   'DOCUMENT',
 ]
 
+/** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind */
+export type AgentModelKind =
+  | 'MODEL'
+  | 'GROUP'
+
+export const AGENT_MODEL_KIND_VALUES: readonly AgentModelKind[] = [
+  'MODEL',
+  'GROUP',
+]
+
 /** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentModelLimitDTO */
 export interface AgentModelLimitDTO {
   context: number
   output: number
 }
 
+/** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingConditionDTO */
+export interface AgentModelPricingConditionDTO {
+  context?: AgentModelPricingContextConditionDTO | null
+  serviceTier?: string[] | null
+  date?: AgentModelPricingDateConditionDTO | null
+  time?: AgentModelPricingTimeConditionDTO | null
+  all?: AgentModelPricingConditionDTO[] | null
+  any?: AgentModelPricingConditionDTO[] | null
+  not?: AgentModelPricingConditionDTO | null
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingContextConditionDTO */
+export interface AgentModelPricingContextConditionDTO {
+  gt?: number | null
+  gte?: number | null
+  lt?: number | null
+  lte?: number | null
+}
+
 /** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingDTO */
 export interface AgentModelPricingDTO {
-  currency: string
-  pricingTier: string
-  serviceTier: string
-  serviceTierMultiplier: number
-  version: string
-  inputPerMillionTokens: number
-  outputPerMillionTokens: number
-  cacheReadPerMillionTokens: number
-  cacheWritePerMillionTokens: number
-  cacheWriteLongPerMillionTokens: number
-  reasoningPerMillionTokens: number
-  rules?: AgentModelPricingRuleDTO[] | null
+  base: AgentModelRateSetDTO
+  overrides: AgentModelPricingOverrideDTO[]
+  multipliers: AgentModelPricingMultiplierDTO[]
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingRuleDTO */
-export interface AgentModelPricingRuleDTO {
-  timeWindow?: AgentModelPricingWindowDTO | null
-  minContextTokens?: string | null
-  inputPerMillionTokens: number
-  outputPerMillionTokens: number
-  cacheReadPerMillionTokens: number
-  cacheWritePerMillionTokens: number
-  cacheWriteLongPerMillionTokens: number
-  reasoningPerMillionTokens: number
+/** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingDateConditionDTO */
+export interface AgentModelPricingDateConditionDTO {
+  gte?: string | null
+  lt?: string | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingWindowDTO */
-export interface AgentModelPricingWindowDTO {
-  timeZone: string
+/** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingFactorsDTO */
+export interface AgentModelPricingFactorsDTO {
+  input?: string | null
+  output?: string | null
+  cacheRead?: string | null
+  cacheWrite?: string | null
+  reasoning?: string | null
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingMultiplierDTO */
+export interface AgentModelPricingMultiplierDTO {
+  id: string
+  when: AgentModelPricingConditionDTO
+  factors: AgentModelPricingFactorsDTO
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingOverrideDTO */
+export interface AgentModelPricingOverrideDTO {
+  id: string
+  when: AgentModelPricingConditionDTO
+  rates: AgentModelRatePatchDTO
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingTimeConditionDTO */
+export interface AgentModelPricingTimeConditionDTO {
   start: string
   end: string
+  timezone: string
+  weekdays?: number[] | null
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentModelRatePatchDTO */
+export interface AgentModelRatePatchDTO {
+  input?: string | null
+  output?: string | null
+  cacheRead?: string | null
+  cacheWrite?: string | null
+  cacheWriteByTtl?: Record<string, string> | null
+  reasoning?: string | null
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentModelRateSetDTO */
+export interface AgentModelRateSetDTO {
+  input: string
+  output: string
+  cacheRead: string
+  cacheWrite: string
+  cacheWriteByTtl: Record<string, string>
+  reasoning?: string | null
 }
 
 /** Java：fun.fengwk.kkstudio.share.ai.catalog.AgentModelUpdateDTO */
 export interface AgentModelUpdateDTO {
   name: string
-  modelId: string
+  kind: AgentModelKind
   description?: string | null
-  config: AgentModelConfigDTO
+  providerName?: string | null
+  modelId?: string | null
+  config?: AgentModelConfigDTO | null
+  group?: AgentModelGroupDTO | null
   expectedVersion: string
 }
 
@@ -1020,9 +1098,8 @@ export interface HarnessModelRequestDebugToolDTO {
 
 /** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO */
 export interface HarnessModelSelectionDTO {
-  providerName: string
   modelName: string
-  variant: string
+  variant?: string | null
 }
 
 /** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessNameUpdateDTO */
@@ -1437,6 +1514,55 @@ export interface ModelAttemptFailureDTO {
   retryAt: number
 }
 
+/** Java：fun.fengwk.kkstudio.share.ai.catalog.ModelCatalogPageDTO */
+export interface ModelCatalogPageDTO {
+  source: ModelCatalogSource
+  generation: string
+  fetchedAt?: number | null
+  loading: boolean
+  error?: string | null
+  items: ModelDefaultCandidateDTO[]
+  nextCursor?: string | null
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.catalog.ModelCatalogSource */
+export type ModelCatalogSource =
+  | 'models_dev_v1'
+  | 'models_dev_v2'
+
+export const MODEL_CATALOG_SOURCE_VALUES: readonly ModelCatalogSource[] = [
+  'models_dev_v1',
+  'models_dev_v2',
+]
+
+/** Java：fun.fengwk.kkstudio.share.ai.catalog.ModelDefaultAbilitiesDTO */
+export interface ModelDefaultAbilitiesDTO {
+  tools?: boolean | null
+  reasoning?: boolean | null
+  inputModalities?: AgentModelInputModality[] | null
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.catalog.ModelDefaultCandidateDTO */
+export interface ModelDefaultCandidateDTO {
+  id: string
+  provider: string
+  modelId: string
+  name: string
+  limit?: ModelDefaultLimitDTO | null
+  abilities: ModelDefaultAbilitiesDTO
+  pricing?: AgentModelPricingDTO | null
+  variants?: AgentModelVariantDTO[] | null
+  defaultVariant?: string | null
+  supportIssues: string[]
+  pricingSupported: boolean
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.catalog.ModelDefaultLimitDTO */
+export interface ModelDefaultLimitDTO {
+  context?: number | null
+  output?: number | null
+}
+
 /** Java：fun.fengwk.kkstudio.share.ai.runtime.ModelInvocationDTO */
 export interface ModelInvocationDTO {
   id: string
@@ -1807,6 +1933,7 @@ export interface SystemSettingsAiRuntimeDTO {
   subagentMaxTotalConcurrency: number
   subagentMaxTurns: number
   modelHttpRetryStatusCodes: number[]
+  modelCatalogSource: string
 }
 
 /** Java：fun.fengwk.kkstudio.share.systemsettings.SystemSettingsDTO */

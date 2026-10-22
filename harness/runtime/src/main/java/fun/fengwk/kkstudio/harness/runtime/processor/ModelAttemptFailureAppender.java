@@ -48,6 +48,8 @@ public final class ModelAttemptFailureAppender {
     return new ModelAttemptFailurePayload(
         new ModelAttemptSnapshot(
             failure.attempt(), failure.sequence(), failure.text(), failure.thinking()),
+        failure.model(),
+        failure.requestedAt(),
         new AssistantError(failure.error().kind().name(), failure.error().message()),
         failure.retryAt());
   }

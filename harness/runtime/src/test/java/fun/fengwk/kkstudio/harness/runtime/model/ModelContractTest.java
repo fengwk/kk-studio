@@ -15,6 +15,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import java.math.BigDecimal;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /** 模型描述、用量与成本公共契约测试。 */
@@ -100,24 +101,22 @@ class ModelContractTest {
     assertThrows(IllegalArgumentException.class, () -> new ModelVariant("default", "a".repeat(65)));
   }
 
-  /** 不同 Provider 用量类别必须分别按其适用单价计费。 */
+  /** 不同 Provider 用量类别必须分别按其适用单价计费；output 总量包含 reasoning，独立 reasoning 价只影响其子集。 */
   @Test
   void calculatesCostForEveryUsageCategory() {
     ModelPricing pricing =
         new ModelPricing(
-            "USD",
-            "tier-1",
-            "default",
-            BigDecimal.ONE,
-            "v1",
-            new BigDecimal("2"),
-            new BigDecimal("4"),
-            new BigDecimal("0.5"),
-            new BigDecimal("3"),
-            new BigDecimal("3.5"),
-            new BigDecimal("6"),
+            new ModelPricing.RateSet(
+                new BigDecimal("2"),
+                new BigDecimal("4"),
+                new BigDecimal("0.5"),
+                new BigDecimal("3"),
+                Map.of(),
+                new BigDecimal("6")),
+            List.of(),
             List.of());
-    ModelUsage usage = new ModelUsage(800_000, 500_000, 200_000, 100_000, 0, 300_000, 1_900_000);
+    ModelUsage usage =
+        new ModelUsage(800_000, 800_000, 200_000, 100_000, Map.of(), 300_000L, 1_900_000L);
 
     ModelCost cost = ModelCost.calculate(pricing, usage);
 
@@ -128,7 +127,6 @@ class ModelContractTest {
     assertEquals(new BigDecimal("2"), cost.output());
     assertEquals(new BigDecimal("0.1"), cost.cacheRead());
     assertEquals(new BigDecimal("0.3"), cost.cacheWrite());
-    assertEquals(0, BigDecimal.ZERO.compareTo(cost.cacheWriteLong()));
     assertEquals(new BigDecimal("1.8"), cost.reasoning());
     assertEquals(new BigDecimal("5.8"), cost.total());
   }
@@ -138,19 +136,16 @@ class ModelContractTest {
   void keepsExactMicroCostWithoutPerCategoryRounding() {
     ModelPricing pricing =
         new ModelPricing(
-            "USD",
-            "tier-1",
-            "default",
-            BigDecimal.ONE,
-            "v1",
-            new BigDecimal("0.000000000001"),
-            BigDecimal.ZERO,
-            new BigDecimal("0.000000000001"),
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
-            BigDecimal.ZERO,
+            new ModelPricing.RateSet(
+                new BigDecimal("0.000000000001"),
+                BigDecimal.ZERO,
+                new BigDecimal("0.000000000001"),
+                BigDecimal.ZERO,
+                Map.of(),
+                null),
+            List.of(),
             List.of());
-    ModelUsage usage = new ModelUsage(1, 0, 1, 0, 0, 0, 2);
+    ModelUsage usage = new ModelUsage(1, 0, 1, 0, Map.of(), 0L, 2L);
 
     ModelCost cost = ModelCost.calculate(pricing, usage);
 
@@ -173,31 +168,35 @@ class ModelContractTest {
                 BigDecimal.ZERO,
                 BigDecimal.ZERO,
                 BigDecimal.ZERO,
-                BigDecimal.ZERO,
                 new BigDecimal("1.5")));
   }
 
   /** 任一负用量都会破坏成本计算，必须在公共边界拒绝。 */
   @Test
   void rejectsNegativeUsageCategory() {
-    assertThrows(IllegalArgumentException.class, () -> new ModelUsage(1, 1, -1, 0, 0, 0, 1));
-    assertThrows(IllegalArgumentException.class, () -> new ModelUsage(1, 1, 1, 1, 1, 1, -1));
+    assertThrows(
+        IllegalArgumentException.class, () -> new ModelUsage(1, 1, -1, 0, Map.of(), 0L, 1L));
+    assertThrows(
+        IllegalArgumentException.class, () -> new ModelUsage(1, 1, 1, 1, Map.of(), 1L, -1L));
+    assertThrows(
+        IllegalArgumentException.class, () -> new ModelUsage(1, 1, 0, 1, Map.of(300L, 2L), 0L, 3L));
   }
 
-  /** categorizedTokens 必须按 addExact 累加前六类。 */
+  /** categorizedTokens 只累加互斥的输入/输出/缓存读写；reasoning 已包含在 output 中，绝不重复相加。 */
   @Test
-  void categorizedTokensSumsExactlyTheFirstSixCategories() {
-    ModelUsage usage = new ModelUsage(1, 2, 3, 4, 5, 6, 100);
+  void categorizedTokensSumsOnlyMutuallyExclusiveCategories() {
+    ModelUsage usage = new ModelUsage(1, 6, 3, 4, Map.of(), 6L, 100L);
 
-    assertEquals(21, usage.categorizedTokens());
+    assertEquals(14, usage.categorizedTokens());
     assertEquals(100, usage.totalTokens());
-    assertEquals(79, usage.totalTokens() - usage.categorizedTokens());
+    assertEquals(0, usage.nonReasoningOutputTokens());
+    assertEquals(86, usage.totalTokens() - usage.categorizedTokens());
   }
 
   /** categorizedTokens 在 Long 溢出时必须 fail fast。 */
   @Test
   void categorizedTokensRejectsOverflow() {
-    ModelUsage usage = new ModelUsage(Long.MAX_VALUE, 1, 0, 0, 0, 0, 1);
+    ModelUsage usage = new ModelUsage(Long.MAX_VALUE, 1, 0, 0, Map.of(), 0L, 1L);
 
     assertThrows(ArithmeticException.class, usage::categorizedTokens);
   }
@@ -205,99 +204,90 @@ class ModelContractTest {
   /** cacheHit 只看 cacheReadTokens 是否大于 0，不在本 domain 计算命中率。 */
   @Test
   void cacheHitReturnsBooleanFromCacheReadTokens() {
-    assertFalse(new ModelUsage(1, 1, 0, 1, 0, 0, 3).cacheHit());
-    assertTrue(new ModelUsage(1, 1, 1, 1, 0, 0, 4).cacheHit());
+    assertFalse(new ModelUsage(1, 1, 0, 1, Map.of(), 0L, 3L).cacheHit());
+    assertTrue(new ModelUsage(1, 1, 1, 1, Map.of(), 0L, 4L).cacheHit());
   }
 
-  /** multiplier 在每个分项上独立应用并全链路精确计算；total 恒等于精确分项之和。 */
+  /** multiplier 在指定分项上独立应用并全链路精确计算；total 恒等于精确分项之和。 */
   @Test
-  void calculatesCostWithTierMultiplierOnEachCategory() {
+  void calculatesCostWithMultiplierOnEachCategory() {
     ModelPricing pricing =
         new ModelPricing(
-            "USD",
-            "tier-1",
-            "priority",
-            new BigDecimal("1.5"),
-            "v1",
-            new BigDecimal("2"),
-            new BigDecimal("4"),
-            new BigDecimal("0.5"),
-            new BigDecimal("3"),
-            new BigDecimal("3.5"),
-            new BigDecimal("6"),
-            List.of());
-    ModelUsage usage = new ModelUsage(800_000, 500_000, 200_000, 100_000, 0, 300_000, 1_900_000);
+            new ModelPricing.RateSet(
+                new BigDecimal("2"),
+                new BigDecimal("4"),
+                new BigDecimal("0.5"),
+                new BigDecimal("3"),
+                Map.of(),
+                new BigDecimal("6")),
+            List.of(),
+            List.of(
+                new ModelPricing.Multiplier(
+                    "priority",
+                    ModelPricingCondition.ALWAYS,
+                    new ModelPricing.Factors(
+                        new BigDecimal("1.5"),
+                        new BigDecimal("1.5"),
+                        new BigDecimal("1.5"),
+                        new BigDecimal("1.5"),
+                        new BigDecimal("1.5")))));
+    ModelUsage usage =
+        new ModelUsage(800_000, 800_000, 200_000, 100_000, Map.of(), 300_000L, 1_900_000L);
 
     ModelCost cost = ModelCost.calculate(pricing, usage);
 
-    assertEquals(new BigDecimal("2.40"), cost.input());
+    assertEquals(new BigDecimal("2.4"), cost.input());
     assertEquals(new BigDecimal("3.0"), cost.output());
     assertEquals(new BigDecimal("0.15"), cost.cacheRead());
     assertEquals(new BigDecimal("0.45"), cost.cacheWrite());
-    assertEquals(new BigDecimal("0.00"), cost.cacheWriteLong());
-    assertEquals(new BigDecimal("2.70"), cost.reasoning());
+    assertEquals(new BigDecimal("2.7"), cost.reasoning());
     assertEquals(new BigDecimal("8.70"), cost.total());
     BigDecimal sum =
         cost.input()
             .add(cost.output())
             .add(cost.cacheRead())
             .add(cost.cacheWrite())
-            .add(cost.cacheWriteLong())
             .add(cost.reasoning());
     assertEquals(0, cost.total().compareTo(sum));
   }
 
-  /** pricing snapshot 必须拒绝空字符串或非正 multiplier。 */
+  /** pricing snapshot 必须拒绝负价、重复规则 id 与非正 TTL。 */
   @Test
-  void pricingRejectsBlankMetadataAndNonPositiveMultiplier() {
+  void pricingRejectsInvalidBaseAndRules() {
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ModelPricing(
-                "USD",
-                "",
-                "default",
-                BigDecimal.ONE,
-                "v1",
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
+                new ModelPricing.RateSet(
+                    new BigDecimal("-1"),
+                    BigDecimal.ZERO,
+                    BigDecimal.ZERO,
+                    BigDecimal.ZERO,
+                    Map.of(),
+                    null),
+                List.of(),
                 List.of()));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ModelPricing(
-                "USD",
-                "tier-1",
-                "default",
-                BigDecimal.ZERO,
-                "v1",
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
+                new ModelPricing.RateSet(
+                    BigDecimal.ZERO,
+                    BigDecimal.ZERO,
+                    BigDecimal.ZERO,
+                    BigDecimal.ZERO,
+                    Map.of(0L, BigDecimal.ONE),
+                    null),
+                List.of(),
                 List.of()));
+    ModelPricing.Override override =
+        new ModelPricing.Override(
+            "same",
+            ModelPricingCondition.ALWAYS,
+            new ModelPricing.RatePatch(null, null, null, null, null, null, false));
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            new ModelPricing(
-                "USD",
-                "tier-1",
-                "default",
-                new BigDecimal("-1"),
-                "v1",
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
-                List.of()));
+        () -> new ModelPricing(ModelPricing.RateSet.ZERO, List.of(override, override), List.of()));
   }
 
   /** ProviderCacheControl 只保留 retention 与 session key：NONE 时 key 必须为空/null，非 NONE 时 key 必须非空白。 */

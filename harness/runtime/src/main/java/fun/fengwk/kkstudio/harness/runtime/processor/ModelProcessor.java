@@ -6,6 +6,8 @@ import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelAttemptFailure;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelGroupExecution;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelGroupProgress;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestMaterializer;
@@ -230,9 +232,9 @@ public final class ModelProcessor implements AutoCloseable {
             dispatched.threadId(),
             Math.addExact(dispatched.attempt(), 1),
             dispatched.ownerSettledSummary(),
-            dispatched.request().toolBindings(),
+            actualRequest(dispatched).toolBindings(),
             config,
-            dispatched.request().model().providerName(),
+            actualRequest(dispatched).model().providerName(),
             clock,
             scheduler,
             heartbeatWorker,
@@ -305,8 +307,8 @@ public final class ModelProcessor implements AutoCloseable {
               new ModelGateway.Execution(
                   invocationId,
                   Math.addExact(dispatched.attempt(), 1),
-                  dispatched.request().providerType(),
-                  dispatched.request().providerConnectionGenerationId(),
+                  actualRequest(dispatched).providerType(),
+                  actualRequest(dispatched).providerConnectionGenerationId(),
                   providerRequest));
     } catch (RuntimeException failure) {
       // 契约：admit 抛异常表示尚未占用任何名额也未发出请求，按兜底延迟重排。
@@ -418,6 +420,31 @@ public final class ModelProcessor implements AutoCloseable {
       ThreadState thread,
       ModelInvocation model,
       Instant now) {
+    ModelGroupExecution group = model.requestSpec().groupExecution();
+    ModelGroupProgress progress = model.groupProgress();
+    int memberIndex = 0;
+    if (group != null) {
+      if (progress == null || progress.groupVersion() != group.groupVersion()) {
+        throw new IllegalStateException("group invocation is missing matching durable progress");
+      }
+      memberIndex = firstAvailableMember(tx, group, progress.memberIndex());
+      if (memberIndex >= group.members().size()) {
+        // 全是本地候选选择失败：不伪装成上游调用错误，也不进入普通重试预算。THREAD Work 先于 MODEL Work 加锁。
+        tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()));
+        if (tx.lockClaimedWork(claim).isEmpty()) {
+          throw new ClaimLostSignal();
+        }
+        tx.updateModelInvocation(
+            model.fail(
+                new ModelInvocationError(
+                    ProviderErrorKind.NO_AVAILABLE_MODEL,
+                    "no available model in group: " + group.groupName()),
+                now));
+        tx.updateThread(thread.touchVersion(now));
+        tx.completeWork(claim);
+        return new Prepare.Terminated();
+      }
+    }
     Optional<Work> claimed = tx.lockClaimedWork(claim);
     if (claimed.isEmpty()) {
       return new Prepare.Lost();
@@ -444,12 +471,35 @@ public final class ModelProcessor implements AutoCloseable {
     boolean ownerSettledSummary =
         tx.loadIncompleteJoins(thread.id()).stream()
             .anyMatch(join -> join.delivery() == JoinDelivery.SETTLE_OWNER_TURN);
+    if (group != null && memberIndex != progress.memberIndex()) {
+      // 跳过冷却成员：新游标在运行前落库，执行身份与审计都来自该成员。
+      progress =
+          new ModelGroupProgress(progress.groupName(), progress.groupVersion(), memberIndex, 0);
+      tx.updateModelInvocation(model.withGroupProgress(progress, now));
+      tx.updateThread(thread.touchVersion(now));
+    }
     return new Prepare.Dispatched(
         thread.id(),
         model.requestHeadEntryId(),
         model.attempt(),
         model.requestSpec(),
+        progress,
         ownerSettledSummary);
+  }
+
+  /** 从 {@code fromIndex} 起第一个当前不在冷却的成员下标；全部冷却时返回成员数。 */
+  private static int firstAvailableMember(
+      HarnessStore.Transaction tx, ModelGroupExecution group, int fromIndex) {
+    int index = fromIndex;
+    while (index < group.members().size()
+        && tx.isGroupMemberCooling(
+            group.groupName(),
+            group.groupVersion(),
+            group.members().get(index).model().modelName(),
+            group.members().get(index).variant().id())) {
+      index++;
+    }
+    return index;
   }
 
   /** 在 MODEL claim 仍 owned 期间加载不可变 basis EntryPath，并纯重建内存 ProviderRequest。 */
@@ -462,7 +512,18 @@ public final class ModelProcessor implements AutoCloseable {
               }
               return tx.loadEntryPath(dispatched.requestHeadEntryId());
             });
-    return materializer.materialize(path, dispatched.request());
+    return materializer.materialize(path, actualRequest(dispatched));
+  }
+
+  /** 组调用按 durable 成员游标派生本次真实执行身份；普通调用原样返回冻结 spec。 */
+  private static ModelRequestSpec actualRequest(Prepare.Dispatched dispatched) {
+    if (dispatched.request().groupExecution() == null) {
+      return dispatched.request();
+    }
+    if (dispatched.groupProgress() == null) {
+      throw new IllegalStateException("group invocation is missing durable group progress");
+    }
+    return dispatched.request().forMember(dispatched.groupProgress().memberIndex());
   }
 
   private static String messageOrClass(RuntimeException error, String fallback) {
@@ -484,17 +545,32 @@ public final class ModelProcessor implements AutoCloseable {
       ThreadState thread,
       ModelInvocation model,
       Instant now) {
+    ModelGroupExecution group = model.requestSpec().groupExecution();
+    ModelGroupProgress groupProgress = model.groupProgress();
+    if (group != null
+        && (groupProgress == null
+            || groupProgress.groupVersion() != group.groupVersion()
+            || groupProgress.memberIndex() >= group.members().size())) {
+      throw new IllegalStateException("group invocation is missing matching durable progress");
+    }
     ModelInvocationError error =
         new ModelInvocationError(
             ProviderErrorKind.TRANSIENT,
             "model work lease expired; provider outcome cannot be confirmed");
+    // 组恢复只消耗当前成员的尝试预算，绝不因结果未知自动冻结或降级到下一成员。
+    int budgetAttempt =
+        group == null ? model.attempt() : Math.addExact(groupProgress.memberAttempts(), 1);
     InvocationRetryDecision decision =
         InvocationRetryDecision.decide(
-            config.retryPolicyProvider().retryPolicy(), true, model.attempt());
+            config.retryPolicyProvider().retryPolicy(), true, budgetAttempt);
     if (decision.retry()) {
       Instant retryAt = now.plus(decision.delay());
-      tx.updateModelInvocation(
-          model.retryReady(attemptFailure(model, model.attempt(), error, now, retryAt), now));
+      ModelInvocation retried =
+          model.retryReady(attemptFailure(model, model.attempt(), error, now, retryAt), now);
+      if (group != null) {
+        retried = retried.withGroupProgress(groupProgress.retryCurrent(), now);
+      }
+      tx.updateModelInvocation(retried);
       tx.updateThread(thread.touchVersion(now));
       if (tx.lockClaimedWork(claim).isEmpty()) {
         throw new ClaimLostSignal();
@@ -507,7 +583,12 @@ public final class ModelProcessor implements AutoCloseable {
     if (tx.lockClaimedWork(claim).isEmpty()) {
       throw new ClaimLostSignal();
     }
-    tx.updateModelInvocation(model.fail(error, now));
+    // 组的恢复失败同样计入当前成员的失败审计；仍停留在原成员，且不冻结、不降级。
+    tx.updateModelInvocation(
+        group == null
+            ? model.fail(error, now)
+            : model.failAfterAttempt(
+                error, attemptFailure(model, model.attempt(), error, now, now), now));
     tx.updateThread(thread.touchVersion(now));
     tx.completeWork(claim);
     return new Prepare.Terminated();
@@ -526,6 +607,8 @@ public final class ModelProcessor implements AutoCloseable {
         checkpoint == null ? 0L : checkpoint.sequence(),
         checkpoint == null ? "" : checkpoint.text(),
         checkpoint == null ? "" : checkpoint.thinking(),
+        model.actualSelection(),
+        model.requestedAt(),
         error,
         failedAt,
         retryAt);
@@ -616,12 +699,16 @@ public final class ModelProcessor implements AutoCloseable {
     /** 失联恢复已按策略回到 READY 并重排 MODEL Work：不启动 Provider，不 request THREAD wake。 */
     record Retry() implements Prepare {}
 
-    /** 已冻结的 dispatch：{@code ownerSettledSummary} 来自本线程当前有效未完成票据的 SETTLE_OWNER_TURN 交付方式，不查询祖先。 */
+    /**
+     * 已冻结的 dispatch：{@code groupProgress} 是模型组本次运行的 durable 成员游标（单模型为 null）；{@code
+     * ownerSettledSummary} 来自本线程当前有效未完成票据的 SETTLE_OWNER_TURN 交付方式，不查询祖先。
+     */
     record Dispatched(
         UUID threadId,
         UUID requestHeadEntryId,
         int attempt,
         ModelRequestSpec request,
+        ModelGroupProgress groupProgress,
         boolean ownerSettledSummary)
         implements Prepare {}
 

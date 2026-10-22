@@ -28,11 +28,15 @@ test('CLI keeps the frozen eight-case MiniMax-only matrix', () => {
   )
   assert.deepEqual(
     MODELS.map((model) => model.ref),
-    ['minimax/MiniMax-M2.7', 'minimax/MiniMax-M3'],
+    ['minimax/MiniMax-M2.7', 'minimax/MiniMax-M3-Responses'],
+  )
+  assert.deepEqual(
+    MODELS.map((model) => model.modelName),
+    ['MiniMax-M2.7', 'MiniMax-M3-Responses'],
   )
   assert.ok(CASES.every((testCase) => testCase.model.variant === VARIANT))
   assert.match(formatCaseList(), /m27-pi-investigate/)
-  assert.match(formatCaseList(), /minimax\/MiniMax-M3/)
+  assert.match(formatCaseList(), /minimax\/MiniMax-M3-Responses/)
 })
 
 test('CLI parses repeated --only and runner options deterministically', () => {

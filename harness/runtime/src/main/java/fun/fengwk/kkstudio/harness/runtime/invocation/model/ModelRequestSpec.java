@@ -34,7 +34,31 @@ public record ModelRequestSpec(
     String systemInstruction,
     List<ToolBinding> toolBindings,
     List<SubagentBinding> subagentBindings,
-    ProviderCacheControl cacheControl) {
+    ProviderCacheControl cacheControl,
+    ModelGroupExecution groupExecution) {
+
+  public ModelRequestSpec(
+      ProviderType providerType,
+      UUID providerConnectionGenerationId,
+      ModelDescriptor model,
+      ModelVariant variant,
+      int outputTokens,
+      String systemInstruction,
+      List<ToolBinding> toolBindings,
+      List<SubagentBinding> subagentBindings,
+      ProviderCacheControl cacheControl) {
+    this(
+        providerType,
+        providerConnectionGenerationId,
+        model,
+        variant,
+        outputTokens,
+        systemInstruction,
+        toolBindings,
+        subagentBindings,
+        cacheControl,
+        null);
+  }
 
   public ModelRequestSpec {
     providerType = Objects.requireNonNull(providerType, "providerType");
@@ -51,9 +75,34 @@ public record ModelRequestSpec(
     toolBindings = List.copyOf(Objects.requireNonNull(toolBindings, "toolBindings"));
     subagentBindings = List.copyOf(Objects.requireNonNull(subagentBindings, "subagentBindings"));
     cacheControl = Objects.requireNonNull(cacheControl, "cacheControl");
+    if (groupExecution != null && groupExecution.members().isEmpty()) {
+      throw new IllegalArgumentException("groupExecution must carry members");
+    }
     requireUniqueToolBindings(toolBindings);
     requireUniqueSubagentNames(subagentBindings);
     requireConsistentEnvironments(toolBindings);
+  }
+
+  /** 模型组在指定 durable 成员游标处应使用的执行快照；顶层字段被替换为该成员的真实身份。 */
+  public ModelRequestSpec forMember(int memberIndex) {
+    if (groupExecution == null) {
+      throw new IllegalArgumentException("request spec is not a model group");
+    }
+    if (memberIndex < 0 || memberIndex >= groupExecution.members().size()) {
+      throw new IllegalArgumentException("memberIndex is outside the frozen group members");
+    }
+    ModelGroupMemberExecution member = groupExecution.members().get(memberIndex);
+    return new ModelRequestSpec(
+        member.providerType(),
+        member.providerConnectionGenerationId(),
+        member.model(),
+        member.variant(),
+        outputTokens,
+        systemInstruction,
+        toolBindings,
+        subagentBindings,
+        cacheControl,
+        groupExecution);
   }
 
   private static void requireUniqueToolBindings(List<ToolBinding> toolBindings) {

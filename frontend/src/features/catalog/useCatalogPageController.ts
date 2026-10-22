@@ -104,13 +104,9 @@ export function useCatalogPageController(scope: CatalogPageScope) {
       deletePending: resourceController.modelDeletePending,
       onCreate: resourceController.openCreateModel,
       onEdit: (model: AgentModelView) =>
-        resourceController.openEditModel(model.providerName, model.name),
+        resourceController.openEditModel(model.name),
       onDelete: (model: AgentModelView) =>
-        resourceController.deleteModel(
-          model.providerName,
-          model.name,
-          model.version,
-        ),
+        resourceController.deleteModel(model.name, model.version),
     },
     providerPanelProps: {
       providers,

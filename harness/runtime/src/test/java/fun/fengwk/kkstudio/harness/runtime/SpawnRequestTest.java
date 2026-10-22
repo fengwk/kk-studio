@@ -32,7 +32,7 @@ class SpawnRequestTest {
   private static final UUID HEAD = id(4);
   private static final UUID TICKET = id(5);
   private static final BranchSettings SETTINGS =
-      new BranchSettings("agent", new ModelSelection("provider", "model", "v1"), null);
+      new BranchSettings("agent", ModelSelection.model("model", "v1"), null);
 
   @Test
   void acceptsNewRootChildSettleAndContinuationTickets() {

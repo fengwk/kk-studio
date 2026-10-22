@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
+import fun.fengwk.kkstudio.share.ai.catalog.ModelCatalogSource;
 
 import java.lang.reflect.RecordComponent;
 import java.util.ArrayList;
@@ -37,6 +38,7 @@ class SystemSettingsTest {
         List.of(new PermissionRule("*", PermissionAction.ASK)),
         defaults.tool().permission().get("bash"));
     assertEquals(false, defaults.tool().permission().containsKey("read"));
+    assertEquals(ModelCatalogSource.MODELS_DEV_V2, defaults.aiRuntime().modelCatalogSource());
     assertEquals(5_000L, defaults.tool().modelGatewayBusyRetryMillis());
     assertEquals(1_000L, defaults.tool().toolGatewayBusyRetryMillis());
     assertEquals(5_000L, defaults.tool().toolGatewayOverloadRetryMillis());
@@ -141,7 +143,8 @@ class SystemSettingsTest {
                 base.subagentMaxConcurrency(),
                 base.subagentMaxTotalConcurrency(),
                 base.subagentMaxTurns(),
-                base.modelHttpRetryStatusCodes()));
+                base.modelHttpRetryStatusCodes(),
+                base.modelCatalogSource()));
   }
 
   @Test
@@ -160,7 +163,8 @@ class SystemSettingsTest {
                 base.subagentMaxConcurrency(),
                 base.subagentMaxTotalConcurrency(),
                 base.subagentMaxTurns(),
-                base.modelHttpRetryStatusCodes()));
+                base.modelHttpRetryStatusCodes(),
+                base.modelCatalogSource()));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -174,7 +178,8 @@ class SystemSettingsTest {
                 base.subagentMaxConcurrency(),
                 -1,
                 base.subagentMaxTurns(),
-                base.modelHttpRetryStatusCodes()));
+                base.modelHttpRetryStatusCodes(),
+                base.modelCatalogSource()));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -188,7 +193,8 @@ class SystemSettingsTest {
                 base.subagentMaxConcurrency(),
                 base.subagentMaxTotalConcurrency(),
                 0,
-                base.modelHttpRetryStatusCodes()));
+                base.modelHttpRetryStatusCodes(),
+                base.modelCatalogSource()));
   }
 
   @Test
@@ -214,7 +220,8 @@ class SystemSettingsTest {
                 base.subagentMaxConcurrency(),
                 base.subagentMaxTotalConcurrency(),
                 base.subagentMaxTurns(),
-                List.of())
+                List.of(),
+                base.modelCatalogSource())
             .modelHttpRetryStatusCodes());
     for (List<Integer> invalid :
         List.of(Arrays.asList(429, null), List.of(399), List.of(600), List.of(429, 429))) {
@@ -231,7 +238,8 @@ class SystemSettingsTest {
                   base.subagentMaxConcurrency(),
                   base.subagentMaxTotalConcurrency(),
                   base.subagentMaxTurns(),
-                  invalid));
+                  invalid,
+                  base.modelCatalogSource()));
     }
   }
 

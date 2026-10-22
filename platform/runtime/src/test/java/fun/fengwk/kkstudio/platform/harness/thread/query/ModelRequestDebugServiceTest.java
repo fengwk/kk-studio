@@ -76,6 +76,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Stream;
@@ -103,7 +104,7 @@ class ModelRequestDebugServiceTest {
 
   /** 草稿 model / environment：与 branch settings 不同，用来证明顶层字段只来自本次请求。 */
   private static final ModelSelection DRAFT_MODEL =
-      new ModelSelection("draft-provider", "draft-model", "draft-variant");
+      new ModelSelection("draft-model", "draft-variant");
 
   private static final String DRAFT_ENV = "env-c";
 
@@ -152,7 +153,6 @@ class ModelRequestDebugServiceTest {
     assertEquals("NEXT_REQUEST_PREVIEW", debug.getKind());
     assertEquals(NOW, debug.getGeneratedAt());
     // model / environment 只来自草稿选择；没有活动 Invocation 时冻结视图为 null。
-    assertEquals("draft-provider", debug.getModel().getProviderName());
     assertEquals("draft-model", debug.getModel().getModelName());
     assertEquals("draft-variant", debug.getModel().getVariant());
     assertEquals(DRAFT_ENV, debug.getEnvironmentName());
@@ -235,7 +235,7 @@ class ModelRequestDebugServiceTest {
     assertEquals(GOAL, draft.goal());
     // EntryPath 与真实 base settings 完全未被草稿覆写。
     assertEquals(branchSettings(), snapshot.entryPath().baseSettings());
-    assertEquals("provider", snapshot.entryPath().baseSettings().model().providerName());
+    assertEquals("model", snapshot.entryPath().baseSettings().model().modelName());
     assertEquals("env-b", snapshot.entryPath().baseSettings().environmentName());
   }
 
@@ -282,7 +282,6 @@ class ModelRequestDebugServiceTest {
     assertNull(debug.getCacheControl());
     assertNull(debug.getFrozenInvocation());
     // 顶层草稿选择与生成时间不因 planning 失败而丢失。
-    assertEquals("draft-provider", debug.getModel().getProviderName());
     assertEquals(DRAFT_ENV, debug.getEnvironmentName());
     // 规划失败时不读取任何 subagent definition，不静默伪造配置。
     verifyNoMoreInteractions(agentDefinitionRepository);
@@ -340,9 +339,7 @@ class ModelRequestDebugServiceTest {
     String secondFrozen =
         service
             .getModelRequestDebug(
-                THREAD_ID,
-                new ModelSelection("other-provider", "other-model", "other-variant"),
-                null)
+                THREAD_ID, new ModelSelection("other-model", "other-variant"), null)
             .getFrozenInvocation()
             .getRequestJson();
     assertEquals(firstFrozen, secondFrozen);
@@ -546,7 +543,7 @@ class ModelRequestDebugServiceTest {
       return new MessagePayload(
           message,
           new AssistantMessageMetadata(
-              GenerationStopReason.COMPLETE, new ModelUsage(1, 1, 0, 0, 0, 0, 2), null),
+              GenerationStopReason.COMPLETE, new ModelUsage(1, 1, 0, 0, Map.of(), 0L, 2L), null),
           null);
     }
     return new MessagePayload(message, null, null);
@@ -573,8 +570,7 @@ class ModelRequestDebugServiceTest {
   }
 
   private static BranchSettings branchSettings() {
-    return new BranchSettings(
-        "assistant", new ModelSelection("provider", "model", "default"), "env-b", GOAL);
+    return new BranchSettings("assistant", new ModelSelection("model", "default"), "env-b", GOAL);
   }
 
   /** 成功共享规划：SENT 候选在前、FILTERED 候选在后，附 Skill 交付事实、subagent 与 cache control。 */

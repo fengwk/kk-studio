@@ -314,8 +314,8 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
         .update();
     jdbcClient
         .sql(
-            "insert into agent_model (provider_name, name, model_id, config)"
-                + " values (:provider, :name, :modelId, '{}'::jsonb)")
+            "insert into agent_model (kind, provider_name, name, model_id, config)"
+                + " values ('MODEL', :provider, :name, :modelId, '{}'::jsonb)")
         .param("provider", MODEL_PROVIDER)
         .param("name", MODEL_NAME)
         .param("modelId", "synthetic-model")
@@ -328,7 +328,6 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
             .name(name)
             .type(AgentDefinitionType.USER)
             .systemPrompt("prompt " + name)
-            .modelProviderName(MODEL_PROVIDER)
             .modelName(MODEL_NAME)
             .configJson(
                 "{\"tools\":[],\"skills\":[],\"subagents\":[],\"inheritParentEnvironment\":true}")

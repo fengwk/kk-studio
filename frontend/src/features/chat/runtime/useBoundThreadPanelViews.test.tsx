@@ -22,7 +22,7 @@ vi.mock('@/shared/api/harness-service', () => ({
 
 const DEBUG: HarnessModelRequestDebugDTO = {
   kind: 'NEXT_REQUEST_PREVIEW', generatedAt: 1790504400,
-  model: { providerName: 'p', modelName: 'm', variant: 'default' },
+  model: { modelName: 'm', variant: 'default' },
   environmentName: null, systemInstruction: 'prompt', tools: [], skills: [], subagents: [],
   cacheControl: null, planningError: null,
   frozenInvocation: { kind: 'FROZEN_INVOCATION', requestJson: '{"model":"first"}' },
@@ -135,8 +135,8 @@ it('passes composer draft model and environment to debug and ignores stale respo
 
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const controller = boundController()
-  const draftModelA = { providerName: 'minimax', modelName: 'MiniMax-M2.7', variant: 'default' }
-  const draftModelB = { providerName: 'anthropic', modelName: 'claude-sonnet', variant: 'thinking' }
+  const draftModelA = { modelName: 'MiniMax-M2.7', variant: 'default' }
+  const draftModelB = { modelName: 'claude-sonnet', variant: 'thinking' }
 
   const { result, rerender } = renderHook(
     ({ debugSettings }) => useBoundThreadPanelViews('thread', controller, { debugSettings }),

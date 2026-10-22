@@ -44,7 +44,6 @@ public class BuiltinAgentLifecycleIntegrationTest extends PostgresSpringTestSupp
     AgentDefinition first = definitionRepository.getByName(COMPACTION);
     assertNotNull(first);
     assertEquals(AgentDefinitionType.BUILTIN, first.type());
-    assertNull(first.modelProviderName());
     assertNull(first.modelName());
     assertNull(first.variant());
     assertEquals(BuiltinAgentPrompts.compactionSummarizationSystemPrompt(), first.systemPrompt());

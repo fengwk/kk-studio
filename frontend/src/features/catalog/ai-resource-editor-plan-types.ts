@@ -1,4 +1,4 @@
-import type { AgentDraft, ModelDraft, ProviderDraft, ResourceModal } from '@/features/catalog/ai-console-types'
+import type { AgentDraft, ModelDraft, ModelGroupDraft, ProviderDraft, ResourceModal } from '@/features/catalog/ai-console-types'
 import type {
   AgentDefinitionCreateDTO,
   AgentDefinitionUpdateDTO,
@@ -18,6 +18,7 @@ export type ResourceEditorPlan =
       kind: 'model'
       modal: Extract<ResourceModal, { kind: 'model' }>
       modelDraft: ModelDraft
+      modelGroupDraft: ModelGroupDraft
     }
   | {
       kind: 'agent'
@@ -45,7 +46,6 @@ export type ResourceSubmitPlan =
   | {
       kind: 'model'
       mode: 'edit'
-      providerName: string
       name: string
       data: AgentModelUpdateDTO
     }

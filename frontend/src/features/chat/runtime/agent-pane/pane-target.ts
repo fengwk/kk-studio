@@ -89,11 +89,15 @@ function isOwner(value: unknown): value is AgentRuntimeOwnerDTO {
 }
 
 function isModelSelection(value: unknown): value is HarnessModelSelectionDTO {
-  return isRecord(value)
-    && hasExactKeys(value, ['providerName', 'modelName', 'variant'])
-    && nonBlank(value.providerName)
-    && nonBlank(value.modelName)
-    && nonBlank(value.variant)
+  if (!isRecord(value) || !nonBlank(value.modelName)) {
+    return false
+  }
+  const keys = Object.keys(value)
+  if (!keys.every((key) => key === 'modelName' || key === 'variant')) {
+    return false
+  }
+  // 组显式使用 null/缺省 variant；单 Model 的 variant 若出现必须是非空白字符串。
+  return value.variant === undefined || value.variant === null || nonBlank(value.variant)
 }
 
 function isGoalSetting(value: unknown): value is HarnessGoalSettingDTO {
