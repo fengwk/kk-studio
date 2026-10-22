@@ -6,11 +6,11 @@ import org.springframework.web.socket.config.annotation.EnableWebSocket;
 import org.springframework.web.socket.config.annotation.WebSocketConfigurer;
 import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry;
 
-import fun.fengwk.kkstudio.harness.environment.server.IdeCommandTransport;
-import fun.fengwk.kkstudio.harness.environment.server.IdeStreamPairingRegistry;
-import fun.fengwk.kkstudio.harness.environment.server.IdeStreamTicketService;
+import fun.fengwk.kkstudio.ide.IdeCommandTransport;
+import fun.fengwk.kkstudio.ide.cluster.IdeInternalPaths;
+import fun.fengwk.kkstudio.ide.stream.IdeStreamPairingRegistry;
+import fun.fengwk.kkstudio.ide.stream.IdeStreamTicketService;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthentication;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalPaths;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
 
 /**
@@ -79,10 +79,10 @@ public class IdeGatewayWebSocketConfiguration implements WebSocketConfigurer {
   public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
     registry.addHandler(publicHandler, IdeGatewayProperties.STREAM_PATH + "/*");
     registry
-        .addHandler(internalHandler, ClusterInternalPaths.INTERNAL_IDE_PREFIX + "/*/reverse")
+        .addHandler(internalHandler, IdeInternalPaths.INTERNAL_IDE_PREFIX + "/*/reverse")
         .addInterceptors(internalHandshakeInterceptor);
     registry
-        .addHandler(internalBrowserHandler, ClusterInternalPaths.INTERNAL_IDE_PREFIX + "/*/ws")
+        .addHandler(internalBrowserHandler, IdeInternalPaths.INTERNAL_IDE_PREFIX + "/*/ws")
         .addInterceptors(internalBrowserHandshakeInterceptor);
   }
 }

@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.platform.plugin.resource;
 
 import lombok.extern.slf4j.Slf4j;
 
-import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
+import fun.fengwk.kkstudio.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableException;

@@ -1,0 +1,216 @@
+package fun.fengwk.kkstudio.harness.builtin.subagent;
+
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
+
+import fun.fengwk.kkstudio.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.builtin.BuiltinHistoryRenderers;
+import fun.fengwk.kkstudio.harness.contributor.api.Tool;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolHistoryRenderer;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
+import fun.fengwk.kkstudio.harness.tool.ToolCall;
+import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.ToolErrorGuidance;
+import fun.fengwk.kkstudio.harness.tool.ToolErrorGuidance.ExecutionFact;
+import fun.fengwk.kkstudio.harness.tool.ToolResult;
+import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+
+import java.time.Duration;
+import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.function.Consumer;
+
+/**
+ * 以普通 durable Harness Thread 运行隔离 Subagent 的内部 {@code task} 工具适配器。
+ *
+ * <p>本工具只有「持久接受」一个阶段：把 arguments 归一化为 {@link SubagentTaskRequest} 交给 {@link
+ * SubagentRunner}，接受成功后立即用一次 tool_result 回执英文自然语言接受正文（首行 {@code Task accepted. thread_id:
+ * <uuid>.}，并说明异步完成/失败/取消、独立工作/让出与继续方式），然后 结束。它不再等待子任务终态，也不再有第二个 tool_result；子执行结清后由运行时把结果作为父 Thread
+ * 的一条独立消息交付。
+ *
+ * <p>参数被拒或 Runner 抛异常都收敛为错误结果，绝不抛出。
+ */
+public final class TaskTool implements Tool {
+
+  public static final String NAME = "task";
+  public static final String RENDERER_KEY = "task";
+
+  /** task 失败的统一下一步：明确列继续既有子线程所需的 thread_id/subagent_type/prompt，不构成重试倾向建议。 */
+  private static final String TASK_CONTINUATION_NEXT_ACTION =
+      "Call task with subagent_type and prompt; add the subagent's thread_id to continue an"
+          + " existing subagent";
+
+  private static final ToolDescriptor DESCRIPTOR =
+      new ToolDescriptor(
+          NAME,
+          SubagentPrompts.taskToolDescription(),
+          RENDERER_KEY,
+          SubagentPrompts.taskInputSchema(),
+          ToolSideEffect.NON_IDEMPOTENT,
+          Duration.ZERO);
+
+  private final SubagentRunner runner;
+  private final ObjectMapper objectMapper;
+
+  public TaskTool(SubagentRunner runner) {
+    this(runner, JsonMapper.builder().build());
+  }
+
+  public TaskTool(SubagentRunner runner, ObjectMapper objectMapper) {
+    this.runner = Objects.requireNonNull(runner, "runner");
+    this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
+  }
+
+  @Override
+  public ToolDescriptor descriptor() {
+    return DESCRIPTOR;
+  }
+
+  /** 历史动作：委派给了哪个子代理；thread_id / max_turns / prompt 由结果表达，不属于动作语义。 */
+  @Override
+  public Optional<ToolHistoryRenderer> historyRenderer() {
+    return Optional.of(BuiltinHistoryRenderers.task());
+  }
+
+  @Override
+  public ToolOutcome execute(ToolExecutionRequest request, Consumer<ToolResult> progress) {
+    Objects.requireNonNull(request, "request");
+    if (request.context() == null) {
+      throw new IllegalArgumentException("task requires durable ToolExecutionContext");
+    }
+    String callId = request.call().id();
+    SubagentTaskRequest taskRequest;
+    try {
+      taskRequest =
+          parseArguments(
+              request.context().invocationId(), request.context().threadId(), request.call());
+    } catch (TaskRejectedException rejected) {
+      // 参数被拒是派发前确定性结果：父线程保留，明确未执行并给出继续参数。
+      return ToolOutcome.withoutEffects(
+          error(
+              callId,
+              ToolErrorGuidance.message(
+                  rejected.getMessage(),
+                  ExecutionFact.NOT_EXECUTED,
+                  TASK_CONTINUATION_NEXT_ACTION)));
+    }
+    try {
+      SubagentTaskAcceptance acceptance = runner.accept(taskRequest);
+      return ToolOutcome.withoutEffects(accepted(callId, taskRequest.subagentType(), acceptance));
+    } catch (RuntimeException failure) {
+      // 接受是原子持久操作：提交结果不确定时绝不能声称「未创建」。
+      return ToolOutcome.withoutEffects(
+          error(
+              callId,
+              ToolErrorGuidance.message(
+                  message(failure), ExecutionFact.UNCERTAIN, TASK_CONTINUATION_NEXT_ACTION)));
+    }
+  }
+
+  private SubagentTaskRequest parseArguments(
+      UUID invocationId, UUID parentThreadId, ToolCall call) {
+    JsonNode value;
+    try {
+      value = objectMapper.readTree(call.argumentsJson() == null ? "{}" : call.argumentsJson());
+    } catch (JacksonException error) {
+      throw reject("task arguments are not valid JSON");
+    }
+    if (!(value instanceof ObjectNode node)) {
+      throw reject("task arguments must be a JSON object");
+    }
+    String subagentType = requiredText(node, "subagent_type");
+    String prompt = requiredText(node, "prompt");
+    Integer maxTurns = null;
+    JsonNode maxTurnsNode = node.get("max_turns");
+    if (maxTurnsNode != null && !maxTurnsNode.isNull()) {
+      if (!maxTurnsNode.isIntegralNumber() || !maxTurnsNode.canConvertToInt()) {
+        throw reject("max_turns must be a positive integer");
+      }
+      maxTurns = maxTurnsNode.intValue();
+      if (maxTurns < 1) {
+        throw reject("max_turns must be a positive integer");
+      }
+    }
+    UUID threadId = optionalUuid(node, "thread_id");
+    return new SubagentTaskRequest(
+        invocationId, parentThreadId, prompt, subagentType, maxTurns, threadId);
+  }
+
+  /** {@code thread_id} 若给出必须是规范 UUID 文本（大小写与格式逐字一致），用于继续既有子 Thread。 */
+  private static UUID optionalUuid(ObjectNode node, String field) {
+    JsonNode value = node.get(field);
+    if (value == null || value.isNull()) {
+      return null;
+    }
+    if (!value.isString()) {
+      throw reject(field + " must be a canonical UUID string");
+    }
+    String raw = value.stringValue();
+    UUID parsed;
+    try {
+      parsed = UUID.fromString(raw);
+    } catch (IllegalArgumentException error) {
+      throw reject(field + " must be a canonical UUID string");
+    }
+    if (!parsed.toString().equals(raw)) {
+      throw reject(field + " must be a canonical UUID string");
+    }
+    return parsed;
+  }
+
+  private static String requiredText(ObjectNode node, String field) {
+    JsonNode value = node.get(field);
+    if (value == null || !value.isString() || value.stringValue().isBlank()) {
+      throw reject(field + " is required");
+    }
+    String text = value.stringValue();
+    if (field.equals("subagent_type")) {
+      if (!text.equals(text.strip())) {
+        throw reject("subagent_type must not contain surrounding whitespace");
+      }
+      return text;
+    }
+    return text.strip();
+  }
+
+  private ToolResult accepted(
+      String callId, String subagentType, SubagentTaskAcceptance acceptance) {
+    String text = SubagentTaskMessages.accepted(acceptance.childThreadId(), acceptance.replaced());
+    ObjectNode details = objectMapper.createObjectNode();
+    details.put("kind", "task.accepted");
+    // details 与即时回执表达同一份事实：thread_id / status 与 text 一致，其余是 UI 需要的会话与幂等元数据。
+    details.put("thread_id", acceptance.childThreadId().toString());
+    details.put("status", "accepted");
+    details.put("session_id", acceptance.childSessionId().toString());
+    details.put("subagent_type", subagentType);
+    details.put("replayed", acceptance.replayed());
+    details.put("replaced", acceptance.replaced());
+    return new ToolResult(callId, List.of(new TextResultContent(text)), false, details.toString());
+  }
+
+  private static ToolResult error(String callId, String message) {
+    String detail = message == null || message.isBlank() ? "tool execution failed" : message;
+    return new ToolResult(callId, List.of(new TextResultContent(detail)), true, "{}");
+  }
+
+  private static String message(Throwable error) {
+    String detail = error.getMessage();
+    return detail == null || detail.isBlank() ? error.getClass().getSimpleName() : detail;
+  }
+
+  private static TaskRejectedException reject(String message) {
+    return new TaskRejectedException(message);
+  }
+
+  private static final class TaskRejectedException extends RuntimeException {
+    private TaskRejectedException(String message) {
+      super(message);
+    }
+  }
+}

@@ -13,12 +13,12 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
-import fun.fengwk.kkstudio.harness.mcp.McpCancellationToken;
-import fun.fengwk.kkstudio.harness.mcp.McpClient;
-import fun.fengwk.kkstudio.harness.mcp.McpClientFactory;
-import fun.fengwk.kkstudio.harness.mcp.McpDeadline;
-import fun.fengwk.kkstudio.harness.mcp.McpToolDefinition;
-import fun.fengwk.kkstudio.harness.mcp.RemoteMcpConfig;
+import fun.fengwk.kkstudio.platform.catalog.mcp.client.McpCancellationToken;
+import fun.fengwk.kkstudio.platform.catalog.mcp.client.McpClient;
+import fun.fengwk.kkstudio.platform.catalog.mcp.client.McpClientFactory;
+import fun.fengwk.kkstudio.platform.catalog.mcp.client.McpDeadline;
+import fun.fengwk.kkstudio.platform.catalog.mcp.client.McpToolDefinition;
+import fun.fengwk.kkstudio.platform.catalog.mcp.client.RemoteMcpConfig;
 
 import java.io.IOException;
 import java.io.OutputStream;

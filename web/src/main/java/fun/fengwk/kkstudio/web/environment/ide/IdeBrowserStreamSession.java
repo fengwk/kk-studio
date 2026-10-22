@@ -11,20 +11,20 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityBusyException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilitySendUncertainException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonIdeStreamCodec;
-import fun.fengwk.kkstudio.harness.environment.daemon.IdeAction;
-import fun.fengwk.kkstudio.harness.environment.daemon.IdeCommand;
-import fun.fengwk.kkstudio.harness.environment.daemon.IdeHeader;
-import fun.fengwk.kkstudio.harness.environment.daemon.IdeStreamBinaryFrame;
-import fun.fengwk.kkstudio.harness.environment.daemon.IdeStreamControlFrame;
-import fun.fengwk.kkstudio.harness.environment.daemon.IdeStreamMode;
-import fun.fengwk.kkstudio.harness.environment.server.IdeCommandTransport;
-import fun.fengwk.kkstudio.harness.environment.server.IdeRequest;
-import fun.fengwk.kkstudio.harness.environment.server.IdeSessionIdentity;
-import fun.fengwk.kkstudio.harness.environment.server.IdeStreamPairingException;
-import fun.fengwk.kkstudio.harness.environment.server.IdeStreamPairingRegistry;
-import fun.fengwk.kkstudio.harness.environment.server.IdeStreamRelay;
-import fun.fengwk.kkstudio.harness.environment.server.IdeStreamTicketService;
+import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
+import fun.fengwk.kkstudio.ide.IdeCommandTransport;
+import fun.fengwk.kkstudio.ide.IdeRequest;
+import fun.fengwk.kkstudio.ide.protocol.DaemonIdeStreamCodec;
+import fun.fengwk.kkstudio.ide.protocol.IdeAction;
+import fun.fengwk.kkstudio.ide.protocol.IdeCommand;
+import fun.fengwk.kkstudio.ide.protocol.IdeHeader;
+import fun.fengwk.kkstudio.ide.protocol.IdeStreamBinaryFrame;
+import fun.fengwk.kkstudio.ide.protocol.IdeStreamControlFrame;
+import fun.fengwk.kkstudio.ide.protocol.IdeStreamMode;
+import fun.fengwk.kkstudio.ide.stream.IdeStreamPairingException;
+import fun.fengwk.kkstudio.ide.stream.IdeStreamPairingRegistry;
+import fun.fengwk.kkstudio.ide.stream.IdeStreamRelay;
+import fun.fengwk.kkstudio.ide.stream.IdeStreamTicketService;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -496,7 +496,7 @@ final class IdeBrowserStreamSession {
       IdeCommandTransport transport,
       EnvironmentId environmentId,
       IdeBrowserSessionRegistry.Session session) {
-    Optional<IdeSessionIdentity> current = transport.ideSessionIdentity(environmentId);
+    Optional<DaemonConnectionIdentity> current = transport.connectionIdentity(environmentId);
     return current.isPresent() && current.get().equals(session.identity());
   }
 

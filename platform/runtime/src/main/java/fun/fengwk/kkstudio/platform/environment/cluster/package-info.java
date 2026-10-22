@@ -10,11 +10,10 @@
  *   <li>{@link fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthentication} 为内部
  *       HTTP/WS 请求提供 HMAC 头签名与校验（绑定 method、canonical requestPath、目标实例 UUID、timestamp、nonce 与 30s
  *       重放窗口）。
- *   <li>{@link fun.fengwk.kkstudio.platform.environment.cluster.ClusterEnvironmentIdeService} 是既有
- *       {@code EnvironmentIdeService} 的组合实现：本地 owner 直接委托本地 delegate，远端 owner 最多一次认证 HTTP
- *       转发，绝不自动重放。
- *   <li>{@link fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalClient} 只是小 metadata
- *       JSON 的简洁客户端， 不承载大字节数据；反向数据面（HTTP/WS 逐 exchange）由 gateway 宿主自行流式实现并复用本包的头签名。
+ *   <li>{@link fun.fengwk.kkstudio.ide.cluster.ClusterEnvironmentIdeService} 是既有 {@code
+ *       EnvironmentIdeService} 的组合实现：本地 owner 直接委托本地 delegate，远端 owner 最多一次认证 HTTP 转发，绝不自动重放。
+ *   <li>{@link fun.fengwk.kkstudio.ide.cluster.IdeClusterClient} 只是小 metadata JSON 的简洁客户端，
+ *       不承载大字节数据；反向数据面（HTTP/WS 逐 exchange）由 gateway 宿主自行流式实现并复用本包的头签名。
  * </ul>
  *
  * <p>约定：内部 HTTP raw path 作为 URL query（{@code /internal/environment-ide/{env}/http?path=<URLEncoded

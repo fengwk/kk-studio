@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.environment.daemon;
 
-import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
+import fun.fengwk.kkstudio.common.resource.ResourceRef;
 
 import java.io.IOException;
 

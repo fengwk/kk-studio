@@ -14,7 +14,7 @@ import org.springframework.jdbc.UncategorizedSQLException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.PreparedStatementCallback;
 
-import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
+import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlRealtimeEventSink;
 import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlRealtimeEventSource;
@@ -23,10 +23,10 @@ import fun.fengwk.kkstudio.harness.infra.realtime.RealtimeBus;
 import fun.fengwk.kkstudio.harness.infra.realtime.RealtimePayloadBuffer;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterIdeOwnerRoute;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthenticationException;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalPaths;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
+import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterRealtimePayloadClient;
 import fun.fengwk.kkstudio.platform.environment.cluster.HmacClusterInternalAuthentication;
 
@@ -321,7 +321,7 @@ class RealtimePayloadClusterRoundTripTest {
   private record Registry(URI ownerOrigin) implements ClusterNodeRegistry {
 
     @Override
-    public Optional<ClusterIdeOwnerRoute> route(EnvironmentId environmentId) {
+    public Optional<ClusterOwnerRoute> route(EnvironmentId environmentId) {
       return Optional.empty();
     }
 

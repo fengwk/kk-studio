@@ -28,19 +28,11 @@
         </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
-            <artifactId>kk-studio-canvas-core</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>fun.fengwk.kk-studio</groupId>
-            <artifactId>kk-studio-canvas-plugin-api</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>fun.fengwk.kk-studio</groupId>
             <artifactId>kk-studio-platform-plugin-api</artifactId>
         </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
-            <artifactId>kk-studio-harness-common</artifactId>
+            <artifactId>kk-studio-common</artifactId>
         </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>

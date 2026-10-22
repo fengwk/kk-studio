@@ -15,7 +15,7 @@ import java.util.UUID;
 public interface ClusterNodeRegistry {
 
   /** 返回当前可单跳交付该 Environment IDE 元数据的 owner 路由；不可路由时返回空。 */
-  Optional<ClusterIdeOwnerRoute> route(EnvironmentId environmentId);
+  Optional<ClusterOwnerRoute> route(EnvironmentId environmentId);
 
   /**
    * 返回指定节点实例当前未过期租约注册的可达内部 origin。

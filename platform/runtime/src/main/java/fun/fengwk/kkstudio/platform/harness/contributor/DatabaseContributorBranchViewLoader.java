@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.platform.harness.contributor;
 
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
@@ -16,7 +15,6 @@ import java.util.UUID;
  * loadBranchSettings}，因此工具执行绝不物化完整 EntryPath。
  */
 @Component
-@ConditionalOnBean(HarnessStore.class)
 public class DatabaseContributorBranchViewLoader implements ContributorBranchViewLoader {
 
   private final HarnessStore store;

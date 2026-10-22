@@ -2,10 +2,6 @@ package fun.fengwk.kkstudio.plugin.opencli;
 
 import lombok.extern.slf4j.Slf4j;
 
-import fun.fengwk.kkstudio.canvas.CanvasJson;
-import fun.fengwk.kkstudio.canvas.CanvasJson.JsonObject;
-import fun.fengwk.kkstudio.canvas.CanvasJson.JsonText;
-import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionExecutionContext;
@@ -13,6 +9,10 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenReference;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionUnknownException;
+import fun.fengwk.kkstudio.canvas.function.CanvasJson;
+import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonObject;
+import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonText;
+import fun.fengwk.kkstudio.canvas.function.CanvasResourceKind;
 import fun.fengwk.kkstudio.plugin.opencli.OpenCliHubClient.Execution;
 import fun.fengwk.kkstudio.plugin.opencli.OpenCliHubClient.ExecutionResource;
 import fun.fengwk.kkstudio.plugin.opencli.OpenCliHubClient.ExecutionStatus;

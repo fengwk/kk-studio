@@ -1,15 +1,15 @@
 package fun.fengwk.kkstudio.platform.catalog.mcp.discovery;
 
-import fun.fengwk.kkstudio.harness.mcp.McpCancellationToken;
-import fun.fengwk.kkstudio.harness.mcp.McpClient;
-import fun.fengwk.kkstudio.harness.mcp.McpClientFactory;
-import fun.fengwk.kkstudio.harness.mcp.McpDeadline;
-import fun.fengwk.kkstudio.harness.mcp.McpToolDefinition;
-import fun.fengwk.kkstudio.harness.mcp.RemoteMcpConfig;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpConfigParser;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpToolNameNormalizer;
+import fun.fengwk.kkstudio.platform.catalog.mcp.client.McpCancellationToken;
+import fun.fengwk.kkstudio.platform.catalog.mcp.client.McpClient;
+import fun.fengwk.kkstudio.platform.catalog.mcp.client.McpClientFactory;
+import fun.fengwk.kkstudio.platform.catalog.mcp.client.McpDeadline;
+import fun.fengwk.kkstudio.platform.catalog.mcp.client.McpToolDefinition;
+import fun.fengwk.kkstudio.platform.catalog.mcp.client.RemoteMcpConfig;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 
 import java.time.Duration;

@@ -2,8 +2,9 @@
 
 `platform-runtime` 组合领域端口与外部设施，为 Web 提供 Catalog、Chat、Interaction、Storage、
 Environment、Settings 和 Harness 产品用例。它负责跨资源事务、实时配置解析和执行网关；
-执行状态机见 [Harness Runtime](harness-runtime.md)，Canvas 事务见
-[Canvas Infra](canvas-infra.md)，Issue 工作流见 [Project](project.md)。
+执行状态机见 [Harness Runtime](harness-runtime.md)。
+[Canvas](canvas.md)、[Project](project.md) 与 [IDE](ide.md) 是建立在平台之上的应用，平台从不依赖它们；
+平台需要应用参与的地方由平台定义 SPI、应用实现（见[命令接受、产品归属与派发](#命令接受产品归属与派发)）。
 构建期 Plugin 的纯 SPI、凭据与资源端口契约独立在 [Platform Plugin API](platform-plugin-api.md)。
 
 [`PlatformAutoConfiguration`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/PlatformAutoConfiguration.java)
@@ -22,18 +23,18 @@ PostgreSQL 保存业务事实，内存 registry、执行句柄和通知承担可
 | [catalog](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog) | Provider/Model/Agent、Git Skill Package、MCP Server/Tool 的名称寻址与 CAS；每个实体一个包，只有 record、`JdbcClient` Repository（SQL、行锁与 CAS）和 Service（校验、引用保护与 DTO 投影）三件 |
 | [harness/model](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/model) | Provider 解析、资源物化、Model admission 与流式网关 |
 | [catalog/tool](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/tool) | `RuntimeToolCatalog` 聚合静态与 MCP 工具，提供工具目录查询 |
+| [catalog/mcp/client](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/mcp/client) | MCP Streamable HTTP client：单一 deadline、调用级取消与结果映射 |
 | [harness/tool](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/tool) | 执行网关校验冻结绑定并终态化结果 |
 | [harness/thread/command](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/thread/command) | `DatabaseTurnResolver` 按当前 branch 的 Agent、Model、Environment 规划 live turn，不反查 Thread 归属 |
 | [harness/realtime](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/realtime) | 流式追帧：durable 快照 + active owner attempt fence，本地优先、跨节点单次严格 envelope |
 | [harness/task](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/task) | Prompt 拼接与子 Agent 分支设置 |
-| [harness/read](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/read) | Skill URI、Session 授权 Blob 文本与本地路径路由 |
-| [orchestration](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/orchestration) | Chat、Issue+Agent owner 的命令接受、Session 查询与深删除 |
+| [harness/read](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/read) | Skill URI、Session 授权 Blob 文本、本地路径路由与文本窗口 |
+| [agenttask](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/agenttask) | 子代理与独立任务的票据接受、观察与停止 |
+| [orchestration](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/orchestration) | Chat 与 Issue Agent owner 的命令接受、Session 查询与深删除；Issue Agent 归属经 `IssueAgentOwnership` SPI 由 Project 提供 |
 | [interaction](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/interaction) | 人工输入/审批与只读环境等待的统一投影、人工提交 |
-| [project/adapter](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/project/adapter)、[project/tool](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/project/tool) | Project 宿主端口、Issue Agent 角色解析与 `issue_transition` |
-| [storage](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/storage) | 上传、Blob owner 引用、S3 与耐久对象清理 |
+| [storage](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/storage) | 上传、Blob owner 引用、S3、媒体探针与预览、耐久对象清理 |
 | [environment](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/environment) | Card、注册令牌、路由租约、宿主信息和 Skill 同步 |
 | [plugin](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/plugin) | PluginProperties、安全管理面、凭据存储/刷新与资源传输实现；纯 SPI 契约见 [Platform Plugin API](platform-plugin-api.md) |
-| [canvas](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/canvas) | Function 输出物化、Blob 访问与媒体处理适配 |
 | [settings](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/settings) | 全局设置、严格 codec、编辑 schema、版本快照与运行时现读的全局代理装配 |
 | [configsync](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/configsync) | 八类配置的 YAML 读写、依赖闭包与原子导入 |
 
@@ -117,12 +118,11 @@ URL 与 headers 仅在显式配置查询中以 `no-store` 返回，变量占位�
 原子替换该 server 的工具行；失败保留整批旧目录，Agent 引用保护仍生效。
 
 [`RuntimeToolCatalogConfiguration`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/tool/RuntimeToolCatalogConfiguration.java)
-发布 `RuntimeToolCatalogSource` 与动态 `McpToolCatalog`。每次租用钉住 `PluginCatalogRuntime`
-的当前快照，同时一次读取 MCP 的 planning 与 selectable 事实，冻结为不可变目录；后续查找不再读库。
+发布动态 `McpToolCatalog`，Web 组合根把它与 `PluginCatalogRuntime` 组合为唯一的 `RuntimeToolCatalogSource`。
+每次租用钉住插件运行时的当前快照，同时一次读取 MCP 的 planning 与 selectable 事实，冻结为不可变目录；后续查找不再读库。
 重复模型可见工具名使查询失败关闭。MCP 可选面要求 server enabled 且 AVAILABLE；
 查找面按已持久化工具行返回定义，调用前再复验 server 状态与归属。
 远端 MCP 工具使用 `EnvironmentSupport.NONE`、`NON_IDEMPOTENT`，deadline 覆盖初始化和调用。
-客户端行为见 [Harness MCP](harness-mcp.md)。
 
 执行网关从当前租用取回 binding 冻结的工具，逐项校验完整定义、贡献身份与 requirements，
 不会按当前同名工具替换旧执行语义。工具所属插件已停用或移除时，调用以确定性失败返回模型：
@@ -131,11 +131,36 @@ URL 与 headers 仅在显式配置查询中以 `no-store` 返回，变量占位�
 准入后，目录租用与并发租约只在终态决议提交之后、工具执行体返回（或抛出）之后释放；
 取消表现为对执行线程的 interrupt，不会提前回收仍被访问的插件实例。取消先于执行体开始时不会调用工具。
 
+### MCP client
+
+[`catalog/mcp/client`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/mcp/client/) 把 LangChain4j 的 Streamable HTTP client
+适配为平台自有的配置、工具定义与结果，供发现与执行共用，公共签名不出现 SDK 类型。
+[`McpClientFactory`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/mcp/client/McpClientFactory.java) 是唯一构造入口：
+固定 client protocol version，关闭 SDK 的工具列表缓存、变更订阅与健康检查，每个 client 都不复用远端状态；
+初始化在独立线程完成，超时、构建失败或交接竞态都不会留下半开的连接。
+
+预算只有一个：[`McpDeadline`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/mcp/client/McpDeadline.java)
+保存绝对截止时刻，同一实例依次交给 factory 与 `listTools` / `callTool`，初始化花掉的时间从后续阶段扣除，没有无预算的形式。
+[`McpCancellationToken`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/mcp/client/McpCancellationToken.java)
+只结束本次本地等待（取消该调用的 worker 并中断其线程），绝不关闭共享 client。每个 client 至多 64 个真实 worker，
+交接不排队，池满或已关闭时立即抛 `McpException`，不挂起调用方。
+
+失败分两类：工具自身以错误结束映射为可读的 `McpToolCallResult.errorText`；只有连接或协议失败才抛
+`McpException`、`McpTimeoutException` 或 `McpCancelledException`，上层据此决定保留还是重建 client。
+[`McpResultExtractor`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/mcp/client/McpResultExtractor.java)
+把 MCP content 映射为 Common 的内容单元，是唯一的 Jackson 2 边界（SDK 签名固定），文本、图片与扩展内容都按单条与单次响应预算有界写出；
+入参要求严格 JSON object，重复键或尾随内容在本地拒绝，不交给服务端偶然实现。
+[`RemoteMcpConfig`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/mcp/client/RemoteMcpConfig.java)
+的 `toString` 只输出 URL 长度与 header 数量，因为 URL 可能内嵌凭证。
+
 ## 命令接受、产品归属与派发
 
 [`HarnessCommandAcceptanceOrchestrator`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/orchestration/HarnessCommandAcceptanceOrchestrator.java)
 在同一物理事务内完成命令接受：`accept` 只服务 `NEW_SESSION` / `NEW_THREAD` / `NEW_FORKED_SESSION` 创建型 owner batch（owner 授权 + Session 归属 + READY 附件引用转移；`NEW_FORKED_SESSION` 还要求 owner 持有来源 Thread 所属 Session，Issue agent 会话一律拒绝）；`acceptOnThread` 服务既有 Thread 的 owner-free 续写（path threadId + 精确 cursor），只做附件物化与目标 Session 归属校验，不按 owner 伪造或拒绝。精确重放仍执行创建型 owner 授权，但复用已接受事实。接受使用 owner KEY SHARE，深删除使用排他锁并按 Owner → Session → Thread 清理 Harness 与 Blob 引用。
 
+平台对 Issue Agent 的全部感知收敛在 [`IssueAgentOwnership`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/orchestration/IssueAgentOwnership.java) SPI：
+Project 应用实现它，负责在调用方事务内锁定 Project → Issue 层级、读写 `(issueId, agentName) -> threadId` 绑定，并按执行根解析 Issue 归属。
+显式的 Issue Agent 操作在没有实现时失败关闭；按执行根发现交互时视为没有 Issue 根。
 Issue+Agent 的命令由 Issue 业务工作流拥有，公共 batch 端点拒绝 `ISSUE_AGENT` owner。Run 接受时显式提交 Agent/Model/Environment、`project`/`run` contributor state 与末尾任务输入；后续 turn 直接从冻结的 branch scope 取得 Run 身份，不再反查 Thread 归属。`issue_transition` 在业务锁内校验冻结 scope 的 Run/Issue/阶段/版本与调用 Thread 身份。问卷和审批复用 Runtime 的等待行，由 Interaction service 加入产品来源与人工操作者。
 
 Runtime 在 Gateway 本地准入通过后，于自己的 lease 所有权短事务内持久 `READY -> RUNNING`，提交之后才执行 Provider / Tool 调用，不反查 owner、Issue 归属或阶段等产品事实，也不存在产品侧派发门禁。需要终止在途 Run 时由业务显式调用 Stop；工具权限、preflight / 审批 / YOLO 与 Gateway 容量准入仍在各自边界生效。
@@ -164,7 +189,7 @@ Tool 网关按完整冻结定义、贡献归属和 requirements 复验目录；�
 类型与字节不符直接失败。媒体模态在 TOOL 与 USER 位置都不支持时对全部模态显式失败；仅 USER 普通内容位置的非图片保留说明文本回退。
 原生推理回放与协议请求上限见 [Harness Provider](harness-provider.md)。
 
-统一 `read` 按 path 路由。受管 Blob 必须由本次 Thread 所属 Session 持有引用；权威 MIME 为 `image/*`/`audio/*`/`video/*`/`application/pdf` 时走媒体路径：在读取任何内容前，用本次调用冻结的模型模态声明、adapter 合法位置与 MIME 及内联预算校验，不支持则明确失败；通过后返回指向同一已授权 Blob 的真实媒体（不是上传成功文本），由 Provider 物化进模型。读取预算覆盖 S3 握手和响应体，流式窗口见 [Harness Common](harness-common.md#字符流窗口)。本地路径交给 BoundEnvironment，URI 路径拒绝 workdir。
+统一 `read` 按 path 路由。受管 Blob 必须由本次 Thread 所属 Session 持有引用；权威 MIME 为 `image/*`/`audio/*`/`video/*`/`application/pdf` 时走媒体路径：在读取任何内容前，用本次调用冻结的模型模态声明、adapter 合法位置与 MIME 及内联预算校验，不支持则明确失败；通过后返回指向同一已授权 Blob 的真实媒体（不是上传成功文本），由 Provider 物化进模型。读取预算覆盖 S3 握手和响应体。本地文件与受管 Blob 共用 [`TextReadWindow`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/read/TextReadWindow.java)：`offset` 与 `column_offset` 从 1 起，至多 2000 行、60000 个码点，扫描到 EOF 以给出准确的截断结论，但只保留窗口正文；NUL、畸形代理对与解码错误按看似二进制拒绝。本地路径交给 BoundEnvironment，URI 路径拒绝 workdir。
 
 结构化 Debug 区分 `NEXT_REQUEST_PREVIEW` 与活动 `FROZEN_INVOCATION`，排除 credential
 与 Base64 正文。请求预览有三个只读入口（既有 Thread 续写、本地分支草稿、历史模型输出），
@@ -194,6 +219,10 @@ retain/release 加入调用方事务；引用减至零时切为 DELETING，后�
 失败短重试，成功低频再次删除。它提供迟到写入后的最终清理；对象存储写入本身仍可能发生，
 该保证不是存储侧写入围栏。
 
+[`storage/media`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/storage/media/) 在上传确认后用 ffprobe 补充权威媒体事实、
+用 ffmpeg 生成 webp 预览；探针失败时退回 HEAD 元数据，非媒体内容的上传契约不受影响。可执行文件与临时目录由
+`kk-studio.storage.media` 配置。
+
 Tool 结果先经过无副作用 plan 与硬限校验，再外部化 Binary/Resource。
 普通文本内联预算 50 KiB / 2000 行，可信内置 read 为 320 KiB / 2020 行。
 history materializer 在 mandatory transaction 中锁 READY upload、复验权威媒体事实、
@@ -210,7 +239,7 @@ JAR manifest，未打包时为 `development`），断线保留最后已接受的
 Skill 同步结果按 owner/lease fence 写回，运维窗口保存有界、去敏事件。
 
 Platform 适配注册、租约和资源票据；会话代际、在途调用和重连裁决由
-[Harness Environment Server](harness-environment-server.md) 拥有。
+[Harness Environment](harness-environment.md) 拥有。
 同实例重连依赖 Gateway 在途记录和 Daemon 进程内 journal；新实例接管使旧调用进入
 结果不确定，恢复保证止于这两个进程内记录的生命周期。
 
@@ -246,9 +275,7 @@ Platform 适配注册、租约和资源票据；会话代际、在途调用和�
 管理面投影把数据库中的 desired 修订与本节点快照的 applied 修订一起报告，二者不一致时附带应用说明；
 数据库提交提示不代表所有节点已经应用。
 
-`PluginCanvasFunctionCatalogSource` 把租用绑定到同一运行期。函数绑定冻结完整定义；
-尚未提交外部任务的 Run 只在当前同名函数定义完全一致时执行，否则以「函数已不可用或定义已变化，请重新启动」失败，
-不按新定义执行旧输入；已提交的 Run 只需同名函数仍存在以继续查询结果。失败即释放租用，关闭幂等。
+Canvas 应用经自己的租用适配消费同一份快照里的 Function 目录，冻结绑定与定义变化的处理见 [Canvas](canvas.md#宿主适配)。
 
 ### 新增 Plugin
 
@@ -256,7 +283,7 @@ Platform 适配注册、租约和资源票据；会话代际、在途调用和�
 [`pom.xml`](../../pom.xml) 管理版本。实现安装定义与配置实例，Schema 是普通值和默认值的唯一来源；
 用单一 Boot 自动配置入口注册定义，实例拥有自己的资源与生命周期，工具在 Runtime 提供的执行线程上阻塞执行；
 网络访问与凭据读取在调用期执行，插件只能通过 scoped Context 读取本插件凭据。
-工具按 [Contributor API](harness-contributor-api.md#扩展一个-contributor) 注册，
+工具按 [Contributor 契约](harness-runtime.md#contributor-与目录) 注册，
 声明真实 side effect、timeout 和 EnvironmentSupport。最后在 Web 中选择 runtime 依赖，
 验证 bean 装配、工具 schema、去敏、失败/取消/超时与资源预算。
 
@@ -297,21 +324,7 @@ MiniMax Mavis 使用固定 CN/EN origin，以 capability catalog 验证 callback
 未验签 JWT claim 仅约束本地期限。静态工具 schema 保持稳定，调用期解析当前 endpoint。
 生成类为 NON_IDEMPOTENT，不确定结果保留失败而停止自动重放；部分批量结果逐项表达。
 
-## Canvas 媒体与 Function 适配
-
-Platform 提供 Blob facts、原件流、presign、输出物化和 Blob 释放适配。
-媒体输出在 `stage` 前后分别执行短事务，按 document → run 加锁，复验
-`canvasId/nodeId/requestId/leaseToken` 对应当前 RUNNING owner，且租约在取得行锁后
-按数据库 `clock_timestamp()` 判定未过期。读流与 S3 stage 不持有数据库锁；
-幂等查询也必须先通过 owner 校验。后置事务插入无 owner Resource、写 OUTPUT pin、
-转移 upload 引用；旧 attempt 或事务失败会 best-effort 清理未消费 staged upload，
-上传过期回收作为兜底。TEXT 输出内联且有长度上限。整组成功挂接、pin 生命周期和 UNKNOWN
-决议见 [Canvas Infra](canvas-infra.md)。
-
-Platform 仅提供内置 fake adapter；本地 `image.crop` 由 Media 插件提供（默认启用，停用后该函数不再进入目录），ComfyUI/H3 以及 OpenCLI（`gpt-image-2` 与 Seedance 四函数）均由构建期 Plugin 提供。
-Function Catalog 随插件快照一起替换，运行期以租用对外提供：任务启动时冻结完整函数定义，
-`submit` 记录外部任务身份，`execute` 在同一份租用上查询同一任务并物化预分配槽位；
-尚未提交的任务遇到定义变化直接失败，已提交的任务继续按同名函数查询结果。
+## OpenCLI 插件
 
 OpenCLI 作为独立构建期 Plugin，每次 HTTP send 前解析局部单 Bearer 凭据并冻结单调时钟 deadline，同一预算覆盖握手和完整响应体读取，
 不会随 read 重置。资源响应要求正数 Content-Length 与 metadata size 一致，并在读流时
@@ -322,7 +335,7 @@ EOF、失败和显式 close 均注销 watchdog。客户端拿到流后负责关�
 远端 body、status、URL/header 以及底层 IO/Jackson/URI 异常的 message/cause/suppressed
 都不进入公开异常与诊断日志，诊断只记录受控阶段与异常类型。
 
-### OpenCLI 插件配置与凭据契约
+### 配置与凭据契约
 
 OpenCLI 的配置完全归属于插件：受控 schema 声明字段、结构与默认值，配置模型校验取值区间和跨字段必填关系。
 管理面与配置同步按同一份 schema 读写，未声明的字段一律被拒绝。使用者只需要关心三类输入：
@@ -394,11 +407,14 @@ null 表示强制直连；`noProxyHosts` 为逗号分隔绕过规则，默认 `l
 | `kk-studio.harness.execution-admission` | model/tool/skill-sync 本机并发 |
 | `kk-studio.harness.runtime` | worker 开关与 Resource 根 |
 | `kk-studio.catalog.skill` | Git Skill cache 根（`cache-root`） |
-| `kk-studio.project.controller` | Issue dispatcher、worker、预算和调谐节奏 |
 | `kk-studio.storage` | S3 端点/凭据/bucket、maintenance 与对象清理 |
+| `kk-studio.storage.media` | ffprobe/ffmpeg 可执行文件与临时目录 |
 | `kk-studio.plugins` | 认证尝试有效期、refresh 与远端媒体预算 |
-| `kk-studio.canvas` | ffmpeg/ffprobe、本地路径和 Function runtime |
+| `kk-studio.cluster` | 节点注册与节点间内部认证 |
 | `kk-studio.harness.environment-gateway` | Daemon 帧、出站队列和发送预算，由 Web 拥有 |
+
+应用模块各自拥有部署参数：`kk-studio.project.controller` 属于 [Project](project.md)，`kk-studio.canvas.function.runtime`
+属于 [Canvas](canvas.md#部署参数)，`kk-studio.harness.ide-gateway` 属于 Web 的同源 IDE 网关。
 
 默认值和完整字段以对应配置类及
 [`SystemSettings`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/settings/SystemSettings.java)
@@ -408,9 +424,9 @@ null 表示强制直连；`noProxyHosts` 为逗号分隔绕过规则，默认 `l
 
 [`platform/runtime/src/test`](../../platform/runtime/src/test/java/fun/fengwk/kkstudio/platform) 按上述子域组织：
 架构测试检查依赖方向，Catalog/Settings 检查 CAS 与 codec，
-orchestration/Project 检查 owner 事务与锁序，gateway 检查 admission、门控和终态，
+orchestration 检查 owner 事务与锁序，gateway 检查 admission、门控和终态，
 storage 检查引用转移、对象清理与回滚，environment 检查路由围栏与同步。
 真实设施测试基座、执行命令和覆盖率入口见 [开发与测试](../operations/development-and-testing.md)。
 
 上级：[系统设计](../system-design.md)。相关文档：[Web](web.md)、[Share](share.md)、
-[Schema](schema.md)、[Harness Runtime](harness-runtime.md)、[Canvas Core](canvas-core.md)。
+[Schema](schema.md)、[Harness Runtime](harness-runtime.md)、[Canvas](canvas.md)、[Project](project.md)、[IDE](ide.md)。

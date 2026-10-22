@@ -14,7 +14,7 @@ import java.util.function.Supplier;
  * <p>委托 {@link HttpResponse.BodySubscribers#ofByteArray()} 累积字节，同时按到达字节数真正计数；超过上限立即取消订阅并让
  * completion 异常完成。调用方仍须用总超时覆盖 body 读取，本类不提供无界读取路径。异常消息由调用方提供，避免网络层泄漏业务内容。
  */
-final class BoundedBodySubscriber implements HttpResponse.BodySubscriber<byte[]> {
+public final class BoundedBodySubscriber implements HttpResponse.BodySubscriber<byte[]> {
 
   private final HttpResponse.BodySubscriber<byte[]> delegate =
       HttpResponse.BodySubscribers.ofByteArray();
@@ -24,7 +24,7 @@ final class BoundedBodySubscriber implements HttpResponse.BodySubscriber<byte[]>
   private long received;
   private Flow.Subscription subscription;
 
-  BoundedBodySubscriber(long maxBytes, Supplier<RuntimeException> overflow) {
+  public BoundedBodySubscriber(long maxBytes, Supplier<RuntimeException> overflow) {
     if (maxBytes <= 0) {
       throw new IllegalArgumentException("maxBytes must be positive");
     }
@@ -42,7 +42,7 @@ final class BoundedBodySubscriber implements HttpResponse.BodySubscriber<byte[]>
             });
   }
 
-  CompletableFuture<byte[]> bodyFuture() {
+  public CompletableFuture<byte[]> bodyFuture() {
     return body;
   }
 
@@ -80,7 +80,7 @@ final class BoundedBodySubscriber implements HttpResponse.BodySubscriber<byte[]>
     delegate.onComplete();
   }
 
-  void cancel() {
+  public void cancel() {
     Flow.Subscription current = subscription;
     if (current != null) {
       current.cancel();

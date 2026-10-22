@@ -14,15 +14,9 @@
     <packaging>pom</packaging>
 
     <modules>
-        <module>common</module>
-        <module>mcp</module>
-        <module>tool</module>
         <module>environment</module>
-        <module>environment-server</module>
         <module>runtime</module>
         <module>provider</module>
-        <module>contributor-api</module>
-        <module>builtin</module>
         <module>infra</module>
     </modules>
 </project>

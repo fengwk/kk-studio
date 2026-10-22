@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.platform.plugin;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.harness.common.json.JsonValues;
+import fun.fengwk.kkstudio.common.json.JsonValues;
 
 import java.nio.charset.StandardCharsets;
 

@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.platform.settings;
 
-import fun.fengwk.kkstudio.harness.common.network.HttpProxySelector;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionKeyValidator;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;

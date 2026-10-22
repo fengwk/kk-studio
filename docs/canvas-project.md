@@ -15,9 +15,8 @@ Run           -> 一次执行记录      # 冻结身份与历史区间
 ```
 
 本文按使用顺序说明编辑、运行和交接，再给出数据关系与生命周期。全局依赖与执行模型见
-[系统设计](system-design.md)；具体领域契约见 [Canvas Core](modules/canvas-core.md)、
-[Canvas Plugin API](modules/canvas-plugin-api.md)、
-[Canvas Infra](modules/canvas-infra.md)和 [Project](modules/project.md)。
+[系统设计](system-design.md)；具体领域契约见 [Canvas](modules/canvas.md)、
+[Platform Plugin API](modules/platform-plugin-api.md#canvas-function-spi)和 [Project](modules/project.md)。
 
 ## Canvas：组织内容与引用
 
@@ -84,7 +83,7 @@ Function 保存为 `{name,args}`，具体函数声明参数 Schema、输入限�
 多命令批全部验证后原子提交，冲突返回受影响对象和服务端值。不同节点及不同语义组可
 独立编辑；Function 参数整体比较，以保留参数之间的约束。数据库短事务排序提交，
 上传和函数调用在事务外执行。命令类型与冲突载荷见
-[Canvas Core](modules/canvas-core.md#typed-command-与并发语义)。
+[Canvas](modules/canvas.md#typed-command-与并发语义)。
 
 浏览器按三层状态展示：
 
@@ -168,7 +167,7 @@ UNKNOWN，保留必要 pin 并退出自动调度。人工核查记录依据后�
 
 UNKNOWN 的取消与删除要求先完成核实。租约围栏防止旧 Worker 发布结果，外部是否执行
 由查询或人工核查确认；取消请求的接受与外部取消成功分别判断。持久执行契约见
-[Canvas Infra](modules/canvas-infra.md)。
+[Canvas](modules/canvas.md#function-run)。
 
 ## Project：配置阶段与 Agent 分工
 
@@ -419,7 +418,7 @@ Project 和 Issue，再锁已有预算、Run、绑定及 Harness Session/Thread�
 Issue Work 是“重新检查当前 Issue”的 durable mailbox。Worker 领取后重读阶段、门禁、
 Thread 与 Run，回写复验 claim 和 Run 坐标。`wake_version` 在请求唤醒时递增，
 防止旧 claim 完成时吞掉新唤醒；轮询发现遗漏通知。调度与收尾实现见
-[Project](modules/project.md)，Canvas Worker 见 [Canvas Infra](modules/canvas-infra.md)。
+[Project](modules/project.md)，Canvas Worker 见 [Canvas](modules/canvas.md#领取执行与终态)。
 
 ### 归档与删除
 
@@ -438,9 +437,8 @@ Thread 与 Run，回写复验 claim 和 Run 坐标。`wake_version` 在请求唤
 
 ## 开发与验证入口
 
-修改 Canvas 命令先读 [Canvas Core](modules/canvas-core.md)，Function 契约读
-[Canvas Plugin API](modules/canvas-plugin-api.md)，数据库发布与 Worker 读
-[Canvas Infra](modules/canvas-infra.md)；修改阶段、预算和交接读
+修改 Canvas 命令、数据库发布与 Worker 读 [Canvas](modules/canvas.md)，Function 契约读
+[Platform Plugin API](modules/platform-plugin-api.md#canvas-function-spi)；修改阶段、预算和交接读
 [Project](modules/project.md)，产品宿主编排读 [Platform](modules/platform.md)；
 浏览器草稿与问答卡片读 [Frontend](modules/frontend.md)。
 

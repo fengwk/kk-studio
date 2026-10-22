@@ -12,7 +12,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.platform.environment.ide.EnvironmentIdeService;
+import fun.fengwk.kkstudio.ide.EnvironmentIdeService;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeChangeDirectoryDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeOpenViewDTO;

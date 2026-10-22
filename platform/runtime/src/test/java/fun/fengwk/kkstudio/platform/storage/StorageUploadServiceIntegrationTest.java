@@ -1446,7 +1446,7 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
   private static byte[] tinyPng() throws IOException {
     try (InputStream input =
         StorageUploadServiceIntegrationTest.class.getResourceAsStream(
-            "/fun/fengwk/kkstudio/platform/canvas/resource/tiny.png")) {
+            "/fun/fengwk/kkstudio/platform/storage/media/tiny.png")) {
       assertNotNull(input);
       return input.readAllBytes();
     }

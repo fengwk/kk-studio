@@ -1,8 +1,8 @@
 package fun.fengwk.kkstudio.plugin.minimaxmavis;
 
-import fun.fengwk.kkstudio.harness.common.json.JsonValues;
-import fun.fengwk.kkstudio.harness.common.schema.BooleanSchema;
-import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.common.json.JsonValues;
+import fun.fengwk.kkstudio.common.schema.BooleanSchema;
+import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthHandler;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;

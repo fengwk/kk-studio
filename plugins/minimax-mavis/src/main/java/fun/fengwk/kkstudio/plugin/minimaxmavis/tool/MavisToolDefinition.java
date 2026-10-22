@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.plugin.minimaxmavis.tool;
 
-import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.plugin.minimaxmavis.MavisCapability;
 
 import java.util.Objects;

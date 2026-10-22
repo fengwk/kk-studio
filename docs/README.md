@@ -29,42 +29,41 @@
 
 | 文档 | 回答的问题 |
 | --- | --- |
-| [Harness Runtime](modules/harness-runtime.md) | Session、Entry Tree、Thread、Invocation、Work 和 Processor 如何组成 Agent Loop？ |
+| [Harness Runtime](modules/harness-runtime.md) | Session、Entry Tree、Thread、Invocation、Work 和 Processor 如何推进 Agent？Tool、Contributor 与内置工具约定什么契约？ |
 | [Harness Infra](modules/harness-infra.md) | Runtime 状态如何映射到 PostgreSQL，并通过 claim、lease 和 realtime 恢复？ |
 | [Harness Provider](modules/harness-provider.md) | 模型请求、SSE、reasoning replay 和上游错误如何处理？ |
-| [Harness Tool](modules/harness-tool.md) | Tool 的身份、定义、调用、校验和结果采用什么统一契约？ |
-| [Harness Contributor API](modules/harness-contributor-api.md) | Builtin 与 Plugin 的 Contributor 如何在启动时注册并冻结为 catalog？ |
-| [Harness Builtin](modules/harness-builtin.md) | 内置工具、Goal、Skill 和 Subagent 如何接入 Contributor 模型？ |
 | [内置工具与异步委派](modules/builtin-tools-design.md) | 文件窗口读取、LSP 生命周期和持久异步 task 使用什么统一契约？ |
-| [Harness Common](modules/harness-common.md) | Prompt、严格 JSON、ResourceRef、ResultContent 与 InputSchema 共享哪些值契约？ |
-| [Harness MCP](modules/harness-mcp.md) | 无状态 MCP client 如何处理总预算、取消与结果映射？ |
+| [Common](modules/common.md) | 严格 JSON、ResourceRef、ResultContent 与 InputSchema 共享哪些值契约？ |
 
 ### Environment 与主机能力
 
 | 文档 | 回答的问题 |
 | --- | --- |
-| [Harness Environment](modules/harness-environment.md) | Environment 身份、能力目录和 protocol v1 如何定义？ |
-| [Environment Server](modules/harness-environment-server.md) | Backend 如何管理 Daemon 会话、route lease、调用所有权和上传票据？ |
+| [Harness Environment](modules/harness-environment.md) | Environment 身份、能力目录与 protocol v1 如何定义？Backend 如何管理 Daemon 会话、route lease、调用所有权和上传票据？ |
 | [Environment Daemon](modules/daemon.md) | 独立主机进程如何执行文件、命令、LSP 与二进制上传？ |
 
-### Canvas 与数据契约
+### 平台
 
 | 文档 | 回答的问题 |
 | --- | --- |
-| [Canvas Core](modules/canvas-core.md) | Graph 聚合、typed command、版本和 Function 运行态如何定义？ |
-| [Canvas Plugin API](modules/canvas-plugin-api.md) | Function adapter、Catalog、codec 端口与冻结运行计划约定什么契约？ |
-| [Canvas Infra](modules/canvas-infra.md) | Graph 如何持久化，Function run 如何 claim、heartbeat 和终结？ |
+| [Platform](modules/platform.md) | Catalog、Plugin、Chat、Storage、Environment、MCP 与外部系统如何编排？ |
+| [Platform Plugin API](modules/platform-plugin-api.md) | 构建期 Plugin 与宿主共享哪些纯 SPI、Canvas Function SPI、凭据与资源端口契约？ |
 | [Schema](modules/schema.md) | 唯一 Flyway baseline、表关系、seed 与数据库约束是什么？ |
 | [Durable Work](modules/work.md) | 后台调度如何共用一张 mailbox 表、数据库时钟租约与唤醒通道？ |
-| [Project](modules/project.md) | 配置化阶段、Issue 预算、稳定 Agent Thread 与 Run 如何调度和交接？ |
 | [Share](modules/share.md) | 浏览器与服务端共享的 DTO 和 JSON wire 如何保持严格、稳定？ |
 
-### 应用边界
+### 应用
 
 | 文档 | 回答的问题 |
 | --- | --- |
-| [Platform](modules/platform.md) | Catalog、Plugin、Chat、Project、Storage、Environment 与外部系统如何编排？ |
-| [Platform Plugin API](modules/platform-plugin-api.md) | 构建期 Plugin 与宿主共享哪些纯 SPI、凭据与资源端口契约？ |
+| [Canvas](modules/canvas.md) | Graph 聚合、typed command 与 Function run 如何定义、持久化和终结？ |
+| [Project](modules/project.md) | 配置化阶段、Issue 预算、稳定 Agent Thread 与 Run 如何调度和交接？ |
+| [IDE](modules/ide.md) | 同源 code-server 视图如何经 Daemon 命令通道与反向数据流打开和转发？ |
+
+### 组合根与前端
+
+| 文档 | 回答的问题 |
+| --- | --- |
 | [Web](modules/web.md) | Spring Boot composition root 如何按 Maven dependency 装配可选 Plugin、HTTP、WebSocket、Worker 和生命周期？ |
 | [Frontend](modules/frontend.md) | 浏览器如何把 durable Snapshot 与 lossy realtime 合并为可恢复体验？ |
 | [Thread 控制与展示](modules/thread-control-and-presentation.md) | 根人工控制、子代理只读、交互归属与消息阅读如何协作？ |

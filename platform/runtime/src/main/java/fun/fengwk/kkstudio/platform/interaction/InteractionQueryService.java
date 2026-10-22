@@ -18,10 +18,7 @@ import fun.fengwk.kkstudio.platform.chat.repo.ChatSessionRepository;
 import fun.fengwk.kkstudio.platform.chat.service.model.Chat;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
-import fun.fengwk.kkstudio.project.model.Issue;
-import fun.fengwk.kkstudio.project.model.IssueAgentThread;
-import fun.fengwk.kkstudio.project.repo.IssueAgentThreadRepository;
-import fun.fengwk.kkstudio.project.repo.IssueRepository;
+import fun.fengwk.kkstudio.platform.orchestration.IssueAgentOwnership;
 import fun.fengwk.kkstudio.share.ai.interaction.InteractionDTO;
 import fun.fengwk.kkstudio.share.ai.interaction.InteractionOwnerDTO;
 import fun.fengwk.kkstudio.share.ai.interaction.InteractionPageDTO;
@@ -62,24 +59,20 @@ public class InteractionQueryService {
 
   private final ChatSessionRepository chatSessionRepository;
   private final ChatRepository chatRepository;
-  private final IssueAgentThreadRepository issueAgentThreadRepository;
-  private final IssueRepository issueRepository;
+  private final ObjectProvider<IssueAgentOwnership> issueAgentOwnership;
   private final EnvironmentRepository environmentRepository;
   private final InteractionRootResolver rootResolver;
 
   public InteractionQueryService(
       ChatSessionRepository chatSessionRepository,
       ChatRepository chatRepository,
-      IssueAgentThreadRepository issueAgentThreadRepository,
-      IssueRepository issueRepository,
+      ObjectProvider<IssueAgentOwnership> issueAgentOwnership,
       EnvironmentRepository environmentRepository,
       ObjectProvider<HarnessRuntime> runtimes) {
     this.chatSessionRepository =
         Objects.requireNonNull(chatSessionRepository, "chatSessionRepository");
     this.chatRepository = Objects.requireNonNull(chatRepository, "chatRepository");
-    this.issueAgentThreadRepository =
-        Objects.requireNonNull(issueAgentThreadRepository, "issueAgentThreadRepository");
-    this.issueRepository = Objects.requireNonNull(issueRepository, "issueRepository");
+    this.issueAgentOwnership = Objects.requireNonNull(issueAgentOwnership, "issueAgentOwnership");
     this.environmentRepository =
         Objects.requireNonNull(environmentRepository, "environmentRepository");
     this.rootResolver = new InteractionRootResolver(runtimes);
@@ -294,7 +287,6 @@ public class InteractionQueryService {
     private final Map<UUID, Optional<InteractionOwnerDTO>> ownerByRootThread = new HashMap<>();
     private final Map<UUID, ThreadSnapshot> rootSnapshotByRootThread = new HashMap<>();
     private final Map<UUID, String> chatTitleById = new HashMap<>();
-    private final Map<UUID, String> issueTitleById = new HashMap<>();
     private final Map<String, String> environmentNameById = new HashMap<>();
 
     private QueryContext(HarnessRuntime runtime, UUID filterRootThreadId) {
@@ -369,13 +361,16 @@ public class InteractionQueryService {
         owner.setRootThreadName(rootThreadName(rootThreadId));
         return Optional.of(owner);
       }
-      IssueAgentThread binding = issueAgentThreadRepository.findByThreadId(rootThreadId);
-      if (binding != null) {
+      // 没有 Project 应用就没有 Issue+Agent 归属的执行根。
+      Optional<IssueAgentOwnership.BoundRoot> issueRoot =
+          Optional.ofNullable(issueAgentOwnership.getIfAvailable())
+              .flatMap(ownership -> ownership.findBoundRoot(rootThreadId));
+      if (issueRoot.isPresent()) {
         InteractionOwnerDTO owner = new InteractionOwnerDTO();
         owner.setType("ISSUE_AGENT");
-        owner.setIssueId(binding.issueId().toString());
-        owner.setIssueTitle(issueTitle(binding.issueId()));
-        owner.setAgentName(binding.agentName());
+        owner.setIssueId(issueRoot.get().issueId().toString());
+        owner.setIssueTitle(issueRoot.get().issueTitle());
+        owner.setAgentName(issueRoot.get().agentName());
         owner.setRootThreadName(rootThreadName(rootThreadId));
         return Optional.of(owner);
       }
@@ -401,19 +396,6 @@ public class InteractionQueryService {
       String title = chat == null ? null : chat.getTitle();
       if (title != null) {
         chatTitleById.put(chatId, title);
-      }
-      return title;
-    }
-
-    private String issueTitle(UUID issueId) {
-      String cached = issueTitleById.get(issueId);
-      if (cached != null) {
-        return cached;
-      }
-      Issue issue = issueRepository.getById(issueId);
-      String title = issue == null ? null : issue.getTitle();
-      if (title != null) {
-        issueTitleById.put(issueId, title);
       }
       return title;
     }

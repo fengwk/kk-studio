@@ -11,11 +11,11 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalogSource;
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunException;
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionService;
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionUnknownResolution;
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionVersion;
+import fun.fengwk.kkstudio.canvas.CanvasFunctionCatalogSource;
+import fun.fengwk.kkstudio.canvas.CanvasFunctionRunException;
+import fun.fengwk.kkstudio.canvas.CanvasFunctionService;
+import fun.fengwk.kkstudio.canvas.CanvasFunctionUnknownResolution;
+import fun.fengwk.kkstudio.canvas.CanvasFunctionVersion;
 import fun.fengwk.kkstudio.share.canvas.CanvasFunctionCancelRequestDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasFunctionDefinitionDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasFunctionRunDTO;

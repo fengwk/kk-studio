@@ -9,14 +9,14 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.canvas.CanvasJson;
-import fun.fengwk.kkstudio.canvas.CanvasJson.JsonArray;
-import fun.fengwk.kkstudio.canvas.CanvasJson.JsonBool;
-import fun.fengwk.kkstudio.canvas.CanvasJson.JsonNull;
-import fun.fengwk.kkstudio.canvas.CanvasJson.JsonNumber;
-import fun.fengwk.kkstudio.canvas.CanvasJson.JsonObject;
-import fun.fengwk.kkstudio.canvas.CanvasJson.JsonText;
-import fun.fengwk.kkstudio.harness.common.json.JsonValues;
+import fun.fengwk.kkstudio.canvas.function.CanvasJson;
+import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonArray;
+import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonBool;
+import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonNull;
+import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonNumber;
+import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonObject;
+import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonText;
+import fun.fengwk.kkstudio.common.json.JsonValues;
 
 import java.math.BigDecimal;
 import java.util.LinkedHashMap;

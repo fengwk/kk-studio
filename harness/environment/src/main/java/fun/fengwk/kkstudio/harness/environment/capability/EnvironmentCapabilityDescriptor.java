@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.environment.capability;
 
-import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.common.schema.InputSchema;
 
 import java.time.Duration;
 import java.util.Objects;

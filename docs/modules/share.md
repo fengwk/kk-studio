@@ -2,7 +2,7 @@
 
 `share` 集中定义后端 API 的 JSON 形状：请求体、响应体、枚举、sealed union 与 Jackson 注解。客户端与 HTTP mapper 依赖这些字段名、可空性和游标类型。生产依赖为 `jackson-annotations` 与 `jackson-databind`（见 [`share/pom.xml`](../../share/pom.xml)），契约测试可独立运行。
 
-DTO 表达 HTTP 请求与投影。领域到 DTO 的转换在 [Web](web.md) 的 [`WebDtoMapper`](../../web/src/main/java/fun/fengwk/kkstudio/web/mapper/WebDtoMapper.java)，version CAS、幂等、引用计数与调度由 [Platform](platform.md)、[Canvas Core](canvas-core.md)、[Canvas Infra](canvas-infra.md) 与 [Project](project.md) 维护。
+DTO 表达 HTTP 请求与投影。领域到 DTO 的转换在 [Web](web.md) 的 [`WebDtoMapper`](../../web/src/main/java/fun/fengwk/kkstudio/web/mapper/WebDtoMapper.java)，version CAS、幂等、引用计数与调度由 [Platform](platform.md)、[Canvas](canvas.md) 与 [Project](project.md) 维护。
 
 ## 严格 JSON 边界
 
@@ -12,7 +12,7 @@ DTO 表达 HTTP 请求与投影。领域到 DTO 的转换在 [Web](web.md) 的 [
 { "type": "CREATE_NODE", "nodeId": "...", "name": "说明", "transform": { "x": 0, "y": 0, "width": 200, "height": 100 }, "function": null, "resources": [{ "kind": "TEXT", "name": "说明.txt", "textContent": "内容" }] }
 ```
 
-[`CanvasCommandDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/canvas/CanvasCommandDTO.java) 的 11 个子类型与 [canvas-core](canvas-core.md) 的 `CanvasCommand` 一一对应：`CREATE_NODE`、`RENAME_NODE`、`SET_NODE_RESOURCES`、`SET_NODE_FUNCTION`、`SET_NODE_GROUP`、`DELETE_NODE`、`UPDATE_NODE_TRANSFORM`、`CREATE_GROUP`、`RENAME_GROUP`、`UPDATE_GROUP_TRANSFORM`、`DELETE_GROUP`。每条命令只修改一个语义组，前置条件携带编辑起点的旧值（旧名称、旧资源 id 列表、旧 Function `{name,args}` 或旧几何基线）。Patch 用 `op` discriminator 表达 `UPSERT` / `REMOVE`，节点与分组实体各自独立，整图只前进一个被接受的 `revision`。
+[`CanvasCommandDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/canvas/CanvasCommandDTO.java) 的 11 个子类型与 [Canvas](canvas.md#typed-command-与并发语义) 的 `CanvasCommand` 一一对应：`CREATE_NODE`、`RENAME_NODE`、`SET_NODE_RESOURCES`、`SET_NODE_FUNCTION`、`SET_NODE_GROUP`、`DELETE_NODE`、`UPDATE_NODE_TRANSFORM`、`CREATE_GROUP`、`RENAME_GROUP`、`UPDATE_GROUP_TRANSFORM`、`DELETE_GROUP`。每条命令只修改一个语义组，前置条件携带编辑起点的旧值（旧名称、旧资源 id 列表、旧 Function `{name,args}` 或旧几何基线）。Patch 用 `op` discriminator 表达 `UPSERT` / `REMOVE`，节点与分组实体各自独立，整图只前进一个被接受的 `revision`。
 
 字符串到 UUID 与数字的解析属于 HTTP 边界：[`WebDtoMapper.parseUuid`](../../web/src/main/java/fun/fengwk/kkstudio/web/mapper/WebDtoMapper.java) 与 [`ProjectDtoMapper.parseUuid`](../../web/src/main/java/fun/fengwk/kkstudio/web/project/ProjectDtoMapper.java) 要求 canonical UUID 文本（`UUID.toString()` 的往返必须一致），[`HarnessRuntimeRequestMapper`](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/HarnessRuntimeRequestMapper.java) 与 Project 的 `parseNonNegativeLong` 只接受 canonical decimal（`0|[1-9]\d*`，向上另有 `[1-9]\d*` 的正数形态）且必须能放进 `long`；共享层只承载解析后的值，整数形态的实体 id 在 wire 上永远不出现。
 
@@ -106,7 +106,7 @@ Work 冻结路由，`requiredEnvironmentName` 沿此身份读取环境目录，�
 
 ## 从哪里改
 
-- 改 Canvas wire：[share/canvas/](../../share/src/main/java/fun/fengwk/kkstudio/share/canvas/)，同时改 [core 的 `CanvasCommand`](canvas-core.md)（若命令集合变化）、[`WebDtoMapper`](../../web/src/main/java/fun/fengwk/kkstudio/web/mapper/WebDtoMapper.java) 的映射 switch（编译器会强制穷尽）与 [frontend](frontend.md) 的 [shared/api/contracts](../../frontend/src/shared/api/contracts) 类型。
+- 改 Canvas wire：[share/canvas/](../../share/src/main/java/fun/fengwk/kkstudio/share/canvas/)，同时改 [Canvas 的 `CanvasCommand`](canvas.md#typed-command-与并发语义)（若命令集合变化）、[`WebDtoMapper`](../../web/src/main/java/fun/fengwk/kkstudio/web/mapper/WebDtoMapper.java) 的映射 switch（编译器会强制穷尽）与 [frontend](frontend.md) 的 [shared/api/contracts](../../frontend/src/shared/api/contracts) 类型。
 - 改 Project wire：[share/project/](../../share/src/main/java/fun/fengwk/kkstudio/share/project/)，同时同步 Web Controller、`ProjectDtoMapper` 与前端 [features/projects/types.ts](../../frontend/src/features/projects/types.ts) 及 codec。
 - 改某个领域的输出去敏或字段可见性：先在对应 DTO 上加注解，再补该领域的 `*DtoContractTest`；`SystemSettingsDtoContractTest`、`CanvasDtoContractTest` 与 `ProjectDtoContractTest` 的字段清单是这类改动的直接守卫。
 - 判断一个字段该不该进 share：它是否出现在 HTTP 请求/响应上。领域内部的值、数据库列、S3 key 一律不进。
@@ -125,4 +125,4 @@ Work 冻结路由，`requiredEnvironmentName` 沿此身份读取环境目录，�
 
 ---
 
-上级：[系统设计](../system-design.md)。相关文档：[Canvas Core](canvas-core.md)、[Schema](schema.md)、[Web](web.md)、[Platform](platform.md)、[Project](project.md)。
+上级：[系统设计](../system-design.md)。相关文档：[Canvas](canvas.md)、[Schema](schema.md)、[Web](web.md)、[Platform](platform.md)、[Project](project.md)。

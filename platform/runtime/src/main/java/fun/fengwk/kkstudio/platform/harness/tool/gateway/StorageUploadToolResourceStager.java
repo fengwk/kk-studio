@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.platform.harness.tool.gateway;
 
-import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
+import fun.fengwk.kkstudio.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 
 import java.io.ByteArrayInputStream;

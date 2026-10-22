@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.platform.settings;
 
-import fun.fengwk.kkstudio.harness.common.network.HttpProxySelector;
-
 import java.io.IOException;
 import java.net.Proxy;
 import java.net.ProxySelector;

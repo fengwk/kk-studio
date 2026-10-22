@@ -19,7 +19,6 @@ import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
-import fun.fengwk.kkstudio.harness.common.network.HttpProxySelector;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
@@ -32,6 +31,7 @@ import fun.fengwk.kkstudio.platform.plugin.persistence.PluginCredentialRepositor
 import fun.fengwk.kkstudio.platform.plugin.service.PluginAgentDependencies;
 import fun.fengwk.kkstudio.platform.plugin.service.PluginConfigurationService;
 import fun.fengwk.kkstudio.platform.plugin.service.PluginContextFactory;
+import fun.fengwk.kkstudio.platform.settings.HttpProxySelector;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 import javax.sql.DataSource;

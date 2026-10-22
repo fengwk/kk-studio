@@ -36,7 +36,7 @@ function moduleOf(fqcn) {
     return 'web'
   }
   if (fqcn.startsWith('fun.fengwk.kkstudio.canvas.')) {
-    return 'canvas/infra'
+    return 'apps/canvas/infra'
   }
   if (fqcn.startsWith('fun.fengwk.kkstudio.harness.')) {
     return 'harness/infra'

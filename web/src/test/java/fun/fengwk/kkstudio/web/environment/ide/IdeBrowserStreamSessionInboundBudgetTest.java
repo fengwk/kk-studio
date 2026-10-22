@@ -10,10 +10,10 @@ import org.junit.jupiter.api.Test;
 import org.springframework.web.socket.WebSocketSession;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.environment.server.IdeCommandTransport;
-import fun.fengwk.kkstudio.harness.environment.server.IdeSessionIdentity;
-import fun.fengwk.kkstudio.harness.environment.server.IdeStreamPairingRegistry;
-import fun.fengwk.kkstudio.harness.environment.server.IdeStreamTicketService;
+import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
+import fun.fengwk.kkstudio.ide.IdeCommandTransport;
+import fun.fengwk.kkstudio.ide.stream.IdeStreamPairingRegistry;
+import fun.fengwk.kkstudio.ide.stream.IdeStreamTicketService;
 
 import java.util.List;
 import java.util.Set;
@@ -73,7 +73,7 @@ class IdeBrowserStreamSessionInboundBudgetTest {
   private static IdeBrowserStreamSession newSession() {
     IdeBrowserSessionRegistry.Session generation =
         new IdeBrowserSessionRegistry.Session(
-            new IdeSessionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID()),
+            new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID()),
             Set.of("/home/dev/project"));
     IdeStreamDeps deps =
         new IdeStreamDeps(

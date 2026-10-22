@@ -1,8 +1,8 @@
 package fun.fengwk.kkstudio.web.environment.ide;
 
-import fun.fengwk.kkstudio.harness.environment.server.IdeCommandTransport;
-import fun.fengwk.kkstudio.harness.environment.server.IdeStreamPairingRegistry;
-import fun.fengwk.kkstudio.harness.environment.server.IdeStreamTicketService;
+import fun.fengwk.kkstudio.ide.IdeCommandTransport;
+import fun.fengwk.kkstudio.ide.stream.IdeStreamPairingRegistry;
+import fun.fengwk.kkstudio.ide.stream.IdeStreamTicketService;
 
 import java.util.Objects;
 

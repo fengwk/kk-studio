@@ -17,7 +17,7 @@ import software.amazon.awssdk.services.s3.model.HeadBucketRequest;
 import software.amazon.awssdk.services.s3.model.HeadBucketResponse;
 import software.amazon.awssdk.services.s3.model.NoSuchBucketException;
 
-import fun.fengwk.kkstudio.harness.common.network.HttpProxySelector;
+import fun.fengwk.kkstudio.platform.settings.HttpProxySelector;
 import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageConfiguration;
 import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
 

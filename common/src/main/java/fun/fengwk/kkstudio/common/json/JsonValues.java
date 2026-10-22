@@ -1,0 +1,104 @@
+package fun.fengwk.kkstudio.common.json;
+
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
+import tools.jackson.databind.json.JsonMapper;
+
+import java.util.Objects;
+
+/**
+ * 严格 JSON 值与对象校验与读取门禁。
+ *
+ * <p>启用 {@link StreamReadFeature#STRICT_DUPLICATE_DETECTION} 与 {@link
+ * DeserializationFeature#FAIL_ON_TRAILING_TOKENS}，在边界严格拒绝重复字段与尾随 token。
+ */
+public final class JsonValues {
+
+  private static final ObjectMapper OBJECT_MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          // JSON number 按 BigDecimal 读回，避免 1e-324 / 1e309 在 double 中变成 0 或 Infinity。
+          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+          .build();
+
+  private JsonValues() {}
+
+  /**
+   * 确保文本非空白且是有效严格 JSON，返回原始文本。
+   *
+   * @throws IllegalArgumentException 文本为 null、空白、存在重复字段/尾随 token 或非合法 JSON 时
+   */
+  public static String requireValidJson(String json) {
+    if (json == null || json.isBlank()) {
+      throw new IllegalArgumentException("json must not be blank");
+    }
+    readTree(json);
+    return json;
+  }
+
+  /**
+   * 确保文本是有效的顶层 JSON object；null 或空白文本规范化为 {@code "{}"}。
+   *
+   * @throws IllegalArgumentException 文本非合法 JSON、存在重复字段/尾随 token 或顶层不是 JSON object 时
+   */
+  public static String requireJsonObject(String json) {
+    return requireJsonObject(json, "json");
+  }
+
+  /**
+   * 确保文本是有效的顶层 JSON object，并使用指定字段名构造异常；null 或空白文本规范化为 {@code "{}"}。
+   *
+   * @throws IllegalArgumentException 文本非合法 JSON、存在重复字段/尾随 token 或顶层不是 JSON object 时
+   */
+  public static String requireJsonObject(String json, String name) {
+    Objects.requireNonNull(name, "name");
+    String normalized = json == null || json.isBlank() ? "{}" : json;
+    JsonNode node = readTree(normalized);
+    if (!node.isObject()) {
+      throw new IllegalArgumentException(name + " must be a JSON object");
+    }
+    return normalized;
+  }
+
+  /**
+   * 解析非空严格 JSON 文本为 {@link JsonNode}。
+   *
+   * <p>Jackson 3 对空/纯空白输入返回 {@link JsonNode#isMissingNode() MissingNode} 而非 {@code null}，因此这里显式拒绝
+   * missing 节点；JSON 字面量 {@code null} 解析为合法的 {@code NullNode}，不属于 missing。
+   *
+   * @throws IllegalArgumentException 文本为 null、空白、非合法 JSON 或包含重复字段/尾随内容时
+   */
+  public static JsonNode readTree(String json) {
+    if (json == null) {
+      throw new IllegalArgumentException("json must not be null");
+    }
+    try {
+      JsonNode node = OBJECT_MAPPER.readTree(json);
+      if (node == null || node.isMissingNode()) {
+        throw new IllegalArgumentException("json must not be blank");
+      }
+      return node;
+    } catch (JacksonException error) {
+      throw new IllegalArgumentException("json must be valid", error);
+    }
+  }
+
+  /**
+   * 将 {@link JsonNode} 序列化为紧凑 JSON 文本。
+   *
+   * @throws IllegalStateException 无法序列化时
+   */
+  public static String write(JsonNode node) {
+    Objects.requireNonNull(node, "node");
+    try {
+      return OBJECT_MAPPER.writeValueAsString(node);
+    } catch (JacksonException error) {
+      throw new IllegalStateException("cannot encode JSON node", error);
+    }
+  }
+}

@@ -15,6 +15,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -64,12 +65,6 @@ import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
-import fun.fengwk.kkstudio.project.model.Issue;
-import fun.fengwk.kkstudio.project.model.IssueAgentThread;
-import fun.fengwk.kkstudio.project.model.Project;
-import fun.fengwk.kkstudio.project.repo.IssueAgentThreadRepository;
-import fun.fengwk.kkstudio.project.repo.IssueRepository;
-import fun.fengwk.kkstudio.project.repo.ProjectRepository;
 
 import java.time.Instant;
 import java.util.List;
@@ -98,7 +93,6 @@ class HarnessCommandAcceptanceOrchestratorTest {
   private static final UUID ENTRY_ID = id(7);
   private static final UUID UPLOAD_ID = id(8);
   private static final UUID BLOB_ID = id(9);
-  private static final UUID PROJECT_ID = id(10);
   private static final UUID ISSUE_ID = id(11);
   private static final UUID SOURCE_THREAD_ID = id(40);
   private static final UUID NEW_SESSION_ID = id(41);
@@ -108,15 +102,16 @@ class HarnessCommandAcceptanceOrchestratorTest {
   private static final UUID FOREIGN_BLOB_ID = id(45);
   private static final String AGENT_NAME = "executor";
   private static final OwnerRef CHAT_OWNER = new OwnerRef.Chat(CHAT_ID);
-  private static final OwnerRef ISSUE_AGENT_OWNER = new OwnerRef.IssueAgent(ISSUE_ID, AGENT_NAME);
+  private static final OwnerRef.IssueAgent ISSUE_AGENT =
+      new OwnerRef.IssueAgent(ISSUE_ID, AGENT_NAME);
+  private static final OwnerRef ISSUE_AGENT_OWNER = ISSUE_AGENT;
   private static final BranchSettings SETTINGS =
       new BranchSettings("assistant", new ModelSelection("provider", "model", "default"), null);
 
   private ChatSessionRepository chatSessionRepository;
   private ChatRepository chatRepository;
-  private ProjectRepository projectRepository;
-  private IssueRepository issueRepository;
-  private IssueAgentThreadRepository issueAgentThreadRepository;
+  private IssueAgentOwnership issueAgentOwnership;
+  private ObjectProvider<IssueAgentOwnership> issueAgentOwnerships;
   private ObjectProvider<HarnessStore> stores;
   private ObjectProvider<HarnessRuntime> runtimes;
   private HarnessStore store;
@@ -126,9 +121,6 @@ class HarnessCommandAcceptanceOrchestratorTest {
   private SessionBlobRefManager refManager;
   private StorageBlobManager blobManager;
   private AcceptedCommands accepted;
-  private IssueAgentThread binding;
-  private Project project;
-  private Issue issue;
   private HarnessCommandAcceptanceOrchestrator service;
 
   @BeforeEach
@@ -136,9 +128,8 @@ class HarnessCommandAcceptanceOrchestratorTest {
   void setUp() {
     chatSessionRepository = mock(ChatSessionRepository.class);
     chatRepository = mock(ChatRepository.class);
-    projectRepository = mock(ProjectRepository.class);
-    issueRepository = mock(IssueRepository.class);
-    issueAgentThreadRepository = mock(IssueAgentThreadRepository.class);
+    issueAgentOwnership = mock(IssueAgentOwnership.class);
+    issueAgentOwnerships = mock(ObjectProvider.class);
     stores = mock(ObjectProvider.class);
     runtimes = mock(ObjectProvider.class);
     store = mock(HarnessStore.class);
@@ -160,20 +151,9 @@ class HarnessCommandAcceptanceOrchestratorTest {
     when(transaction.findSession(any())).thenReturn(Optional.empty());
     when(chatRepository.lockForKeyShare(CHAT_ID)).thenReturn(mock(Chat.class));
 
-    binding = new IssueAgentThread(ISSUE_ID, AGENT_NAME, THREAD_ID);
-    project = mock(Project.class);
-    when(project.getId()).thenReturn(PROJECT_ID);
-    when(project.isArchived()).thenReturn(false);
-    when(projectRepository.lockForKeyShare(PROJECT_ID)).thenReturn(project);
-
-    issue = mock(Issue.class);
-    when(issue.getId()).thenReturn(ISSUE_ID);
-    when(issue.getProjectId()).thenReturn(PROJECT_ID);
-    when(issue.isArchived()).thenReturn(false);
-    when(issueRepository.getById(ISSUE_ID)).thenReturn(issue);
-    when(issueRepository.lockById(ISSUE_ID)).thenReturn(issue);
-    when(issueAgentThreadRepository.findByIssueIdAndAgentName(ISSUE_ID, AGENT_NAME))
-        .thenReturn(binding);
+    when(issueAgentOwnerships.getIfAvailable()).thenReturn(issueAgentOwnership);
+    when(issueAgentOwnership.lockForAcceptance(ISSUE_AGENT)).thenReturn(Optional.of(THREAD_ID));
+    when(issueAgentOwnership.findBoundThread(ISSUE_AGENT)).thenReturn(Optional.of(THREAD_ID));
 
     when(runtime.acceptCommands(any(), any())).thenReturn(accepted);
 
@@ -181,9 +161,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
         new HarnessCommandAcceptanceOrchestrator(
             chatSessionRepository,
             chatRepository,
-            projectRepository,
-            issueRepository,
-            issueAgentThreadRepository,
+            issueAgentOwnerships,
             stores,
             runtimes,
             uploadService,
@@ -216,8 +194,8 @@ class HarnessCommandAcceptanceOrchestratorTest {
     assertEquals("hello", ((TextMessageContent) mapped.message().contents().getFirst()).text());
     verify(chatSessionRepository).insert(SESSION_ID, CHAT_ID);
 
-    when(issueAgentThreadRepository.findByIssueIdAndAgentName(ISSUE_ID, AGENT_NAME))
-        .thenReturn(null);
+    when(issueAgentOwnership.lockForAcceptance(ISSUE_AGENT)).thenReturn(Optional.empty());
+    when(issueAgentOwnership.findBoundThread(ISSUE_AGENT)).thenReturn(Optional.empty());
     AcceptCommandsCommand agentCommand = newSession(OTHER_THREAD_ID, user);
     AcceptancePreflight agentPreflight = acceptAndCapturePreflight(ISSUE_AGENT_OWNER, agentCommand);
     List<NewThreadCommand> agentPrepared =
@@ -226,7 +204,6 @@ class HarnessCommandAcceptanceOrchestratorTest {
 
     assertEquals(1, agentPrepared.size());
     assertEquals(user.idempotencyKey(), agentPrepared.getFirst().idempotencyKey());
-    verify(issueAgentThreadRepository, never()).insert(any());
     verify(chatSessionRepository, times(1)).insert(any(), any());
   }
 
@@ -278,7 +255,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
 
     verify(runtime, never()).acceptCommands(any(), any());
     verify(chatRepository, never()).lockForKeyShare(any());
-    verify(issueAgentThreadRepository, never()).findByIssueIdAndAgentName(any(), any());
+    verifyNoInteractions(issueAgentOwnership);
   }
 
   /** owner-free 既有 Thread 接受在同一事务内物化 USER_MESSAGE 附件，但不解锁也不改写任何 owner 归属事实。 */
@@ -307,9 +284,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
     verify(refManager).retainRef(SESSION_ID, BLOB_ID);
     verify(uploadService).delete(UPLOAD_ID);
     verify(chatRepository, never()).lockForKeyShare(any());
-    verify(issueRepository, never()).getById(any());
-    verify(projectRepository, never()).lockForKeyShare(any());
-    verify(issueAgentThreadRepository, never()).findByIssueIdAndAgentName(any(), any());
+    verifyNoInteractions(issueAgentOwnership);
   }
 
   /** acceptOnThread 只接受既有的 THREAD target；创建语义必须走 owner-aware 入口。 */
@@ -321,18 +296,17 @@ class HarnessCommandAcceptanceOrchestratorTest {
     verify(runtime, never()).acceptCommands(any(), any());
   }
 
-  /** Issue+Agent 授权严格按 Project SHARE -> Issue UPDATE -> 稳定绑定读取的顺序加锁。 */
+  /** Issue+Agent 授权先锁定产品层级并读取稳定绑定，再进入 Runtime 接受。 */
   @Test
-  void issueAgentAcceptanceLocksProjectThenIssueThenBinding() {
+  void issueAgentAcceptanceLocksOwnerHierarchyBeforeRuntime() {
     service.accept(ISSUE_AGENT_OWNER, newSession(THREAD_ID, user(new TextMessageContent("work"))));
 
-    InOrder lockOrder = inOrder(projectRepository, issueRepository, issueAgentThreadRepository);
-    lockOrder.verify(projectRepository).lockForKeyShare(PROJECT_ID);
-    lockOrder.verify(issueRepository).lockById(ISSUE_ID);
-    lockOrder.verify(issueAgentThreadRepository).findByIssueIdAndAgentName(ISSUE_ID, AGENT_NAME);
+    InOrder order = inOrder(issueAgentOwnership, runtime);
+    order.verify(issueAgentOwnership).lockForAcceptance(ISSUE_AGENT);
+    order.verify(runtime).acceptCommands(any(), any());
   }
 
-  /** owner 行缺失、层级不一致或已归档时必须在 Runtime 接受之前确定性拒绝。 */
+  /** owner 行缺失、层级不一致或已归档（由 owner 锁定拒绝）时必须在 Runtime 接受之前确定性拒绝。 */
   @Test
   void rejectsMissingOrArchivedOwnerHierarchyBeforeRuntimeAcceptance() {
     AcceptCommandsCommand command = newSession(THREAD_ID, user(new TextMessageContent("denied")));
@@ -340,33 +314,8 @@ class HarnessCommandAcceptanceOrchestratorTest {
     when(chatRepository.lockForKeyShare(CHAT_ID)).thenReturn(null);
     assertThrows(IllegalArgumentException.class, () -> service.accept(CHAT_OWNER, command));
 
-    when(issueRepository.getById(ISSUE_ID)).thenReturn(null);
-    assertThrows(IllegalArgumentException.class, () -> service.accept(ISSUE_AGENT_OWNER, command));
-
-    when(issueRepository.getById(ISSUE_ID)).thenReturn(issue);
-    when(projectRepository.lockForKeyShare(PROJECT_ID)).thenReturn(null);
-    assertThrows(IllegalArgumentException.class, () -> service.accept(ISSUE_AGENT_OWNER, command));
-
-    Project archivedProject = mock(Project.class);
-    when(archivedProject.getId()).thenReturn(PROJECT_ID);
-    when(archivedProject.isArchived()).thenReturn(true);
-    when(projectRepository.lockForKeyShare(PROJECT_ID)).thenReturn(archivedProject);
-    assertThrows(IllegalArgumentException.class, () -> service.accept(ISSUE_AGENT_OWNER, command));
-
-    when(projectRepository.lockForKeyShare(PROJECT_ID)).thenReturn(project);
-    Issue archivedIssue = mock(Issue.class);
-    when(archivedIssue.getId()).thenReturn(ISSUE_ID);
-    when(archivedIssue.getProjectId()).thenReturn(PROJECT_ID);
-    when(archivedIssue.isArchived()).thenReturn(true);
-    when(issueRepository.getById(ISSUE_ID)).thenReturn(archivedIssue);
-    when(issueRepository.lockById(ISSUE_ID)).thenReturn(archivedIssue);
-    assertThrows(IllegalArgumentException.class, () -> service.accept(ISSUE_AGENT_OWNER, command));
-
-    Issue foreignIssue = mock(Issue.class);
-    when(foreignIssue.getId()).thenReturn(ISSUE_ID);
-    when(foreignIssue.getProjectId()).thenReturn(id(12));
-    when(issueRepository.getById(ISSUE_ID)).thenReturn(foreignIssue);
-    when(issueRepository.lockById(ISSUE_ID)).thenReturn(foreignIssue);
+    when(issueAgentOwnership.lockForAcceptance(ISSUE_AGENT))
+        .thenThrow(new IllegalArgumentException("Cannot accept commands for archived issue"));
     assertThrows(IllegalArgumentException.class, () -> service.accept(ISSUE_AGENT_OWNER, command));
 
     verify(runtime, never()).acceptCommands(any(), any());
@@ -375,8 +324,8 @@ class HarnessCommandAcceptanceOrchestratorTest {
   /** 同一 Session 只属于其稳定绑定的 Issue+Agent：未绑定身份不能借 NEW_THREAD 接管该 Session。 */
   @Test
   void rejectsIssueAgentNewThreadOnUnownedSession() {
-    when(issueAgentThreadRepository.findByIssueIdAndAgentName(ISSUE_ID, AGENT_NAME))
-        .thenReturn(null);
+    when(issueAgentOwnership.lockForAcceptance(ISSUE_AGENT)).thenReturn(Optional.empty());
+    when(issueAgentOwnership.findBoundThread(ISSUE_AGENT)).thenReturn(Optional.empty());
 
     AcceptCommandsCommand onSession =
         new AcceptCommandsCommand(
@@ -402,8 +351,8 @@ class HarnessCommandAcceptanceOrchestratorTest {
         () -> service.accept(CHAT_OWNER, newSession(THREAD_ID, user(new TextMessageContent("x")))));
 
     // Issue+Agent 不能接管 Chat 已持有的 Session（本身份尚未绑定）。
-    when(issueAgentThreadRepository.findByIssueIdAndAgentName(ISSUE_ID, AGENT_NAME))
-        .thenReturn(null);
+    when(issueAgentOwnership.lockForAcceptance(ISSUE_AGENT)).thenReturn(Optional.empty());
+    when(issueAgentOwnership.findBoundThread(ISSUE_AGENT)).thenReturn(Optional.empty());
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -423,8 +372,6 @@ class HarnessCommandAcceptanceOrchestratorTest {
                 ISSUE_AGENT_OWNER,
                 newSession(OTHER_THREAD_ID, user(new TextMessageContent("rebind")))));
 
-    assertEquals(
-        binding, issueAgentThreadRepository.findByIssueIdAndAgentName(ISSUE_ID, AGENT_NAME));
     verify(runtime, never()).acceptCommands(any(), any());
   }
 
@@ -449,8 +396,6 @@ class HarnessCommandAcceptanceOrchestratorTest {
         () ->
             chatPreflight.prepare(
                 transaction, new Session(SESSION_ID, "session", NOW), chatCommand.commands()));
-
-    verify(issueAgentThreadRepository, never()).insert(any());
   }
 
   /** Issue+Agent Thread 的 Goal 不再由产品入口拒绝：绑定 Session 内允许设置或清除 Branch Goal。 */
@@ -643,16 +588,15 @@ class HarnessCommandAcceptanceOrchestratorTest {
 
   @Test
   void rejectsNullDependenciesAndNullOwner() {
-    // 强依赖验证：各 Repository、Store、Runtime、Upload service、Session ref manager 与 Blob manager 必须非空注入。
+    // 强依赖验证：各 Repository、owner provider、Store、Runtime、Upload service、Session ref manager 与 Blob
+    // manager 必须非空注入。
     assertThrows(
         NullPointerException.class,
         () ->
             new HarnessCommandAcceptanceOrchestrator(
                 null,
                 chatRepository,
-                projectRepository,
-                issueRepository,
-                issueAgentThreadRepository,
+                issueAgentOwnerships,
                 stores,
                 runtimes,
                 uploadService,
@@ -664,9 +608,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
             new HarnessCommandAcceptanceOrchestrator(
                 chatSessionRepository,
                 chatRepository,
-                projectRepository,
-                issueRepository,
-                issueAgentThreadRepository,
+                issueAgentOwnerships,
                 stores,
                 runtimes,
                 null,
@@ -678,9 +620,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
             new HarnessCommandAcceptanceOrchestrator(
                 chatSessionRepository,
                 chatRepository,
-                projectRepository,
-                issueRepository,
-                issueAgentThreadRepository,
+                issueAgentOwnerships,
                 stores,
                 runtimes,
                 uploadService,

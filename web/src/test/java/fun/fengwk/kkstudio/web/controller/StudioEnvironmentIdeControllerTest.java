@@ -29,14 +29,14 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.environment.daemon.IdeCommand;
-import fun.fengwk.kkstudio.harness.environment.daemon.IdeReply;
-import fun.fengwk.kkstudio.harness.environment.server.IdeCommandTransport;
-import fun.fengwk.kkstudio.harness.environment.server.IdeRequest;
-import fun.fengwk.kkstudio.harness.environment.server.IdeSessionIdentity;
-import fun.fengwk.kkstudio.platform.environment.ide.EnvironmentIdeService;
-import fun.fengwk.kkstudio.platform.environment.ide.EnvironmentIdeServiceImpl;
-import fun.fengwk.kkstudio.platform.environment.ide.InMemoryIdeBootstrapTicketService;
+import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
+import fun.fengwk.kkstudio.ide.EnvironmentIdeService;
+import fun.fengwk.kkstudio.ide.EnvironmentIdeServiceImpl;
+import fun.fengwk.kkstudio.ide.IdeCommandTransport;
+import fun.fengwk.kkstudio.ide.IdeRequest;
+import fun.fengwk.kkstudio.ide.InMemoryIdeBootstrapTicketService;
+import fun.fengwk.kkstudio.ide.protocol.IdeCommand;
+import fun.fengwk.kkstudio.ide.protocol.IdeReply;
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeChangeDirectoryDTO;
@@ -334,7 +334,9 @@ class StudioEnvironmentIdeControllerTest {
               ideCommand.directory(),
               "/daemon/workspaces/" + ideCommand.viewId()));
       return new IdeRequest(
-          new IdeSessionIdentity(environmentId, DAEMON_INSTANCE, LEASE), UUID.randomUUID(), reply);
+          new DaemonConnectionIdentity(environmentId, DAEMON_INSTANCE, LEASE),
+          UUID.randomUUID(),
+          reply);
     }
 
     @Override
@@ -343,7 +345,7 @@ class StudioEnvironmentIdeControllerTest {
     }
 
     @Override
-    public Optional<IdeSessionIdentity> ideSessionIdentity(EnvironmentId environmentId) {
+    public Optional<DaemonConnectionIdentity> connectionIdentity(EnvironmentId environmentId) {
       return Optional.empty();
     }
   }

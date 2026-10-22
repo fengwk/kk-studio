@@ -8,12 +8,12 @@ import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.AbstractWebSocketHandler;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.environment.server.IdeCommandTransport;
-import fun.fengwk.kkstudio.harness.environment.server.IdeSessionIdentity;
-import fun.fengwk.kkstudio.harness.environment.server.IdeStreamPairingRegistry;
-import fun.fengwk.kkstudio.harness.environment.server.IdeStreamTicketService;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterIdeOwnerRoute;
+import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
+import fun.fengwk.kkstudio.ide.IdeCommandTransport;
+import fun.fengwk.kkstudio.ide.stream.IdeStreamPairingRegistry;
+import fun.fengwk.kkstudio.ide.stream.IdeStreamTicketService;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
+import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
 
 import java.nio.ByteBuffer;
 import java.util.Map;
@@ -72,7 +72,7 @@ public final class IdeInternalReverseWebSocketHandler extends AbstractWebSocketH
       reject(session, "internal reverse ticket is unknown, consumed or expired");
       return;
     }
-    Optional<IdeSessionIdentity> current = transport.ideSessionIdentity(environmentId);
+    Optional<DaemonConnectionIdentity> current = transport.connectionIdentity(environmentId);
     if (current.isEmpty() || !current.get().equals(consumed.get().identity())) {
       reject(session, "internal reverse ticket generation is no longer current");
       return;
@@ -116,7 +116,7 @@ public final class IdeInternalReverseWebSocketHandler extends AbstractWebSocketH
   }
 
   private boolean owns(EnvironmentId environmentId) {
-    return clusterNodeRegistry.route(environmentId).filter(ClusterIdeOwnerRoute::local).isPresent();
+    return clusterNodeRegistry.route(environmentId).filter(ClusterOwnerRoute::local).isPresent();
   }
 
   private void offer(WebSocketSession session, IdeStreamPeer.Inbound frame) throws Exception {

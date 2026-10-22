@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.orchestration;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -25,12 +26,6 @@ import fun.fengwk.kkstudio.platform.chat.repo.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatSessionRepository;
 import fun.fengwk.kkstudio.platform.chat.service.model.Chat;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
-import fun.fengwk.kkstudio.project.model.Issue;
-import fun.fengwk.kkstudio.project.model.IssueAgentThread;
-import fun.fengwk.kkstudio.project.model.Project;
-import fun.fengwk.kkstudio.project.repo.IssueAgentThreadRepository;
-import fun.fengwk.kkstudio.project.repo.IssueRepository;
-import fun.fengwk.kkstudio.project.repo.ProjectRepository;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -46,10 +41,10 @@ import java.util.function.Function;
 /**
  * owner 深删除编排的单元契约：锁序、闭包范围、relation 顺序与 fail-safe 回滚。
  *
- * <p>测试意图：真实 PG 上的外键/FK 行为由 {@code SessionDeletionOrchestratorPostgresTest} 覆盖；本测试用内存模型表达 Harness
- * Store 的 Thread/Session 图，固定锁序（Owner -&gt; Tree -&gt; Session -&gt; Thread）、以 Session 为单位推进的删除闭包（含
- * task 子 Session 与其中的无父 root fork）、归属行先于 harness Thread/Session 删除、blob 引用释放，以及「存在 Run 引用绑定/Thread
- * 时删除被 RESTRICT 拒绝且不产生半删状态」的 fail closed 行为。
+ * <p>测试意图：真实 PG 上的外键/FK 行为由 Project 模块的 {@code SessionDeletionIntegrationTest} 覆盖；本测试用内存模型表达
+ * Harness Store 的 Thread/Session 图，固定锁序（Owner -&gt; Tree -&gt; Session -&gt; Thread）、以 Session
+ * 为单位推进的删除闭包（含 task 子 Session 与其中的无父 root fork）、归属行先于 harness Thread/Session 删除、blob 引用释放，以及「存在 Run
+ * 引用绑定/Thread 时删除被 RESTRICT 拒绝且不产生半删状态」的 fail closed 行为。
  */
 class SessionDeletionOrchestratorTest {
 
@@ -64,24 +59,21 @@ class SessionDeletionOrchestratorTest {
   private static final UUID THREAD_FORK = id(55);
   private static final UUID BLOB_1 = id(50);
   private static final UUID BLOB_2 = id(60);
-  private static final UUID PROJECT_ID = id(70);
   private static final UUID ISSUE_ID = id(90);
   private static final String AGENT_NAME = "executor";
   private static final OwnerRef CHAT_OWNER = new OwnerRef.Chat(CHAT_ID);
-  private static final OwnerRef ISSUE_AGENT_OWNER = new OwnerRef.IssueAgent(ISSUE_ID, AGENT_NAME);
+  private static final OwnerRef.IssueAgent ISSUE_AGENT =
+      new OwnerRef.IssueAgent(ISSUE_ID, AGENT_NAME);
+  private static final OwnerRef ISSUE_AGENT_OWNER = ISSUE_AGENT;
 
   private ChatSessionRepository chatSessionRepository;
   private ChatRepository chatRepository;
-  private ProjectRepository projectRepository;
-  private IssueRepository issueRepository;
-  private IssueAgentThreadRepository issueAgentThreadRepository;
+  private IssueAgentOwnership issueAgentOwnership;
+  private ObjectProvider<IssueAgentOwnership> issueAgentOwnerships;
   private ObjectProvider<HarnessStore> stores;
   private HarnessStore store;
   private HarnessStore.Transaction transaction;
   private SessionBlobRefManager refManager;
-  private IssueAgentThread binding;
-  private Project project;
-  private Issue issue;
   private SessionDeletionOrchestrator service;
 
   /** 内存模型：Session -> Thread、Thread -> 直接子 Thread，以及当前仍存在的 Session/Thread。 */
@@ -96,9 +88,8 @@ class SessionDeletionOrchestratorTest {
   void setUp() {
     chatSessionRepository = mock(ChatSessionRepository.class);
     chatRepository = mock(ChatRepository.class);
-    projectRepository = mock(ProjectRepository.class);
-    issueRepository = mock(IssueRepository.class);
-    issueAgentThreadRepository = mock(IssueAgentThreadRepository.class);
+    issueAgentOwnership = mock(IssueAgentOwnership.class);
+    issueAgentOwnerships = mock(ObjectProvider.class);
     stores = mock(ObjectProvider.class);
     store = mock(HarnessStore.class);
     transaction = mock(HarnessStore.Transaction.class);
@@ -133,28 +124,12 @@ class SessionDeletionOrchestratorTest {
 
     when(chatRepository.lockById(CHAT_ID)).thenReturn(mock(Chat.class));
 
-    binding = new IssueAgentThread(ISSUE_ID, AGENT_NAME, THREAD_1);
-    project = mock(Project.class);
-    when(project.getId()).thenReturn(PROJECT_ID);
-    when(projectRepository.lockById(PROJECT_ID)).thenReturn(project);
-
-    issue = mock(Issue.class);
-    when(issue.getId()).thenReturn(ISSUE_ID);
-    when(issue.getProjectId()).thenReturn(PROJECT_ID);
-    when(issueRepository.getById(ISSUE_ID)).thenReturn(issue);
-    when(issueRepository.lockById(ISSUE_ID)).thenReturn(issue);
-    when(issueAgentThreadRepository.findByIssueIdAndAgentName(ISSUE_ID, AGENT_NAME))
-        .thenReturn(binding);
+    when(issueAgentOwnerships.getIfAvailable()).thenReturn(issueAgentOwnership);
+    when(issueAgentOwnership.lockForDeletion(ISSUE_AGENT)).thenReturn(Optional.of(THREAD_1));
 
     service =
         new SessionDeletionOrchestrator(
-            chatSessionRepository,
-            chatRepository,
-            projectRepository,
-            issueRepository,
-            issueAgentThreadRepository,
-            stores,
-            refManager);
+            chatSessionRepository, chatRepository, issueAgentOwnerships, stores, refManager);
   }
 
   @Test
@@ -187,7 +162,7 @@ class SessionDeletionOrchestratorTest {
     blobOrder.verify(refManager).releaseRef(SESSION_1, BLOB_1);
     verify(chatSessionRepository).deleteBySessionId(SESSION_1);
     verify(chatSessionRepository).deleteBySessionId(SESSION_2);
-    verifyNoInteractions(issueAgentThreadRepository);
+    verifyNoInteractions(issueAgentOwnership);
   }
 
   @Test
@@ -198,16 +173,10 @@ class SessionDeletionOrchestratorTest {
 
     service.deleteSessionsByOwner(ISSUE_AGENT_OWNER);
 
-    InOrder lockOrder = inOrder(projectRepository, issueRepository, issueAgentThreadRepository);
-    lockOrder.verify(projectRepository).lockById(PROJECT_ID);
-    lockOrder.verify(issueRepository).lockById(ISSUE_ID);
-    lockOrder.verify(issueAgentThreadRepository).findByIssueIdAndAgentName(ISSUE_ID, AGENT_NAME);
-
     InOrder deleteOrder =
-        inOrder(issueAgentThreadRepository, transaction, refManager, chatSessionRepository);
-    deleteOrder
-        .verify(issueAgentThreadRepository)
-        .deleteByIssueIdAndAgentName(ISSUE_ID, AGENT_NAME);
+        inOrder(issueAgentOwnership, transaction, refManager, chatSessionRepository);
+    deleteOrder.verify(issueAgentOwnership).lockForDeletion(ISSUE_AGENT);
+    deleteOrder.verify(issueAgentOwnership).deleteBinding(ISSUE_AGENT);
     deleteOrder.verify(transaction).lockThread(THREAD_1);
     deleteOrder.verify(transaction).deleteJoinsForThreads(List.of(THREAD_1));
     deleteOrder.verify(transaction).deleteThreads(List.of(THREAD_1));
@@ -230,7 +199,7 @@ class SessionDeletionOrchestratorTest {
     verify(transaction, never()).deleteEntries(SESSION_1);
     verify(transaction).deleteEntries(SESSION_2);
     verify(transaction).deleteSession(SESSION_2);
-    verifyNoInteractions(issueAgentThreadRepository);
+    verifyNoInteractions(issueAgentOwnership);
   }
 
   @Test
@@ -283,20 +252,8 @@ class SessionDeletionOrchestratorTest {
     when(chatRepository.lockById(CHAT_ID)).thenReturn(null);
     service.deleteSessionsByOwner(CHAT_OWNER);
 
-    when(issueRepository.getById(ISSUE_ID)).thenReturn(null);
-    service.deleteSessionsByOwner(ISSUE_AGENT_OWNER);
-
-    when(issueRepository.getById(ISSUE_ID)).thenReturn(issue);
-    when(projectRepository.lockById(PROJECT_ID)).thenReturn(null);
-    service.deleteSessionsByOwner(ISSUE_AGENT_OWNER);
-
-    when(projectRepository.lockById(PROJECT_ID)).thenReturn(project);
-    when(issueRepository.lockById(ISSUE_ID)).thenReturn(null);
-    service.deleteSessionsByOwner(ISSUE_AGENT_OWNER);
-
-    when(issueRepository.lockById(ISSUE_ID)).thenReturn(issue);
-    when(issueAgentThreadRepository.findByIssueIdAndAgentName(ISSUE_ID, AGENT_NAME))
-        .thenReturn(null);
+    // Issue+Agent owner 不存在或尚未绑定时 lockForDeletion 为空。
+    when(issueAgentOwnership.lockForDeletion(ISSUE_AGENT)).thenReturn(Optional.empty());
     service.deleteSessionsByOwner(ISSUE_AGENT_OWNER);
 
     verifyNoInteractions(chatSessionRepository, store, refManager);
@@ -342,8 +299,9 @@ class SessionDeletionOrchestratorTest {
   @Test
   void runReferencedBindingFailsClosedWithoutDeletingHarnessFacts() {
     putSession(SESSION_1, thread(THREAD_1, SESSION_1));
-    when(issueAgentThreadRepository.deleteByIssueIdAndAgentName(ISSUE_ID, AGENT_NAME))
-        .thenThrow(new DataIntegrityViolationException("referenced by project_issue_run"));
+    doThrow(new DataIntegrityViolationException("referenced by project_issue_run"))
+        .when(issueAgentOwnership)
+        .deleteBinding(ISSUE_AGENT);
 
     assertThrows(
         DataIntegrityViolationException.class,
@@ -364,24 +322,12 @@ class SessionDeletionOrchestratorTest {
         NullPointerException.class,
         () ->
             new SessionDeletionOrchestrator(
-                null,
-                chatRepository,
-                projectRepository,
-                issueRepository,
-                issueAgentThreadRepository,
-                stores,
-                refManager));
+                null, chatRepository, issueAgentOwnerships, stores, refManager));
     assertThrows(
         NullPointerException.class,
         () ->
             new SessionDeletionOrchestrator(
-                chatSessionRepository,
-                chatRepository,
-                projectRepository,
-                issueRepository,
-                issueAgentThreadRepository,
-                stores,
-                null));
+                chatSessionRepository, chatRepository, issueAgentOwnerships, stores, null));
     assertThrows(NullPointerException.class, () -> service.deleteSessionsByOwner(null));
   }
 

@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.harness.runtime.processor;
 
-import fun.fengwk.kkstudio.harness.common.tool.ToolErrorGuidance;
-import fun.fengwk.kkstudio.harness.common.tool.ToolErrorGuidance.ExecutionFact;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
@@ -10,6 +8,8 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.ToolErrorGuidance;
+import fun.fengwk.kkstudio.harness.tool.ToolErrorGuidance.ExecutionFact;
 
 import java.util.ArrayList;
 import java.util.List;

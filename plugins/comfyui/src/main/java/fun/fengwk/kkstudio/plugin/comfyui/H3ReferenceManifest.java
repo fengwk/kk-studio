@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.plugin.comfyui;
 
-import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenReference;
+import fun.fengwk.kkstudio.canvas.function.CanvasResourceKind;
 
 import java.util.ArrayList;
 import java.util.List;

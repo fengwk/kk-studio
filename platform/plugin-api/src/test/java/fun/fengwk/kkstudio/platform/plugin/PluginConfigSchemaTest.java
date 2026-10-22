@@ -6,16 +6,16 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
 
-import fun.fengwk.kkstudio.harness.common.json.JsonValues;
-import fun.fengwk.kkstudio.harness.common.schema.ArraySchema;
-import fun.fengwk.kkstudio.harness.common.schema.BooleanSchema;
-import fun.fengwk.kkstudio.harness.common.schema.EnumSchema;
-import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
-import fun.fengwk.kkstudio.harness.common.schema.IntegerSchema;
-import fun.fengwk.kkstudio.harness.common.schema.NumberSchema;
-import fun.fengwk.kkstudio.harness.common.schema.ObjectSchema;
-import fun.fengwk.kkstudio.harness.common.schema.SchemaElement;
-import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
+import fun.fengwk.kkstudio.common.json.JsonValues;
+import fun.fengwk.kkstudio.common.schema.ArraySchema;
+import fun.fengwk.kkstudio.common.schema.BooleanSchema;
+import fun.fengwk.kkstudio.common.schema.EnumSchema;
+import fun.fengwk.kkstudio.common.schema.InputSchema;
+import fun.fengwk.kkstudio.common.schema.IntegerSchema;
+import fun.fengwk.kkstudio.common.schema.NumberSchema;
+import fun.fengwk.kkstudio.common.schema.ObjectSchema;
+import fun.fengwk.kkstudio.common.schema.SchemaElement;
+import fun.fengwk.kkstudio.common.schema.StringSchema;
 
 import java.math.BigDecimal;
 import java.util.List;

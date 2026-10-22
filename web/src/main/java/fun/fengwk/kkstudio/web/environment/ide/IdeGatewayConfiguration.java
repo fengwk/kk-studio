@@ -7,10 +7,10 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.web.socket.client.WebSocketClient;
 import org.springframework.web.socket.client.standard.StandardWebSocketClient;
 
-import fun.fengwk.kkstudio.harness.environment.server.IdeStreamPairingRegistry;
-import fun.fengwk.kkstudio.harness.environment.server.IdeStreamTicketService;
-import fun.fengwk.kkstudio.harness.environment.server.InMemoryIdeStreamTicketService;
-import fun.fengwk.kkstudio.platform.environment.ide.IdeBootstrapTicketService;
+import fun.fengwk.kkstudio.ide.IdeBootstrapTicketService;
+import fun.fengwk.kkstudio.ide.stream.IdeStreamPairingRegistry;
+import fun.fengwk.kkstudio.ide.stream.IdeStreamTicketService;
+import fun.fengwk.kkstudio.ide.stream.InMemoryIdeStreamTicketService;
 
 import java.util.Map;
 

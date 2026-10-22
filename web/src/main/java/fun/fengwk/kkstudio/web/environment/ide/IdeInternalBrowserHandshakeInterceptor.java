@@ -7,13 +7,13 @@ import org.springframework.web.socket.WebSocketHandler;
 import org.springframework.web.socket.server.HandshakeInterceptor;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.environment.server.IdeCommandTransport;
-import fun.fengwk.kkstudio.harness.environment.server.IdeSessionIdentity;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterIdeOwnerRoute;
+import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
+import fun.fengwk.kkstudio.ide.IdeCommandTransport;
+import fun.fengwk.kkstudio.ide.cluster.IdeInternalPaths;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthenticationException;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalPaths;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
+import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.web.environment.cluster.ClusterInternalRequests;
 
 import java.net.URI;
@@ -103,12 +103,12 @@ final class IdeInternalBrowserHandshakeInterceptor implements HandshakeIntercept
   }
 
   private boolean local(EnvironmentId environmentId) {
-    return clusterNodeRegistry.route(environmentId).filter(ClusterIdeOwnerRoute::local).isPresent();
+    return clusterNodeRegistry.route(environmentId).filter(ClusterOwnerRoute::local).isPresent();
   }
 
   private boolean generationCurrent(
       EnvironmentId environmentId, IdeBrowserSessionRegistry.Session session) {
-    Optional<IdeSessionIdentity> current = transport.ideSessionIdentity(environmentId);
+    Optional<DaemonConnectionIdentity> current = transport.connectionIdentity(environmentId);
     return current.isPresent() && current.get().equals(session.identity());
   }
 
@@ -146,7 +146,7 @@ final class IdeInternalBrowserHandshakeInterceptor implements HandshakeIntercept
     if (path == null) {
       return Optional.empty();
     }
-    String prefix = ClusterInternalPaths.INTERNAL_IDE_PREFIX + "/";
+    String prefix = IdeInternalPaths.INTERNAL_IDE_PREFIX + "/";
     if (!path.startsWith(prefix)) {
       return Optional.empty();
     }
@@ -165,7 +165,7 @@ final class IdeInternalBrowserHandshakeInterceptor implements HandshakeIntercept
     if (query == null || query.isEmpty()) {
       return null;
     }
-    String prefix = ClusterInternalPaths.PATH_PARAMETER + "=";
+    String prefix = IdeInternalPaths.PATH_PARAMETER + "=";
     for (String pair : query.split("&")) {
       if (pair.startsWith(prefix)) {
         return URLDecoder.decode(pair.substring(prefix.length()), StandardCharsets.UTF_8);

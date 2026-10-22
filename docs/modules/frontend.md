@@ -240,7 +240,7 @@ RUNNING、SUCCEEDED、FAILED、CANCELLED 与 UNKNOWN。只有 RUNNING 使用 spi
 Thread 处于等待审批时活动条显示“等待审批”；实际工具等待环境且没有其他执行中调用时显示真实环境等待，
 不与工具行相矛盾，Footer 不重复解释等待原因。通用执行文案为中文“执行中”、英文“Working...”。
 `/goal` 维护用户目标，进度按当前 goalId 展示；工具契约见
-[Harness Builtin](harness-builtin.md#goal用户拥有的目标与-agent-进度声明)。
+[Harness Runtime](harness-runtime.md#内置工具)。
 
 ## Canvas 编辑与上传
 
@@ -263,7 +263,7 @@ bfcache 恢复时复验 scope 所有权，活标签冲突触发安全 reload。
 Function 配置使用扁平 args，资源引用为 `{type:'resource',nodeId,index}`。
 复杂 prompt/references 使用完整 JSON 编辑模式；连线前 flush 目标 Function config。
 Run 提交前冻结 requestId 与请求：4xx 确定拒绝清理记录，408/429、5xx 或网络断开保留原
-attempt。UNKNOWN 展示人工核查入口，执行与 pin 契约见 [Canvas Infra](canvas-infra.md)。
+attempt。UNKNOWN 展示人工核查入口，执行与 pin 契约见 [Canvas](canvas.md#function-run)。
 
 上传共用 Worker SHA-256 → reserve → PENDING PUT 或 READY 去重 → complete → 命令消费。
 每个 await 后校验 batch epoch；切换目标或卸载作废整批。已完成上传由服务端过期回收。
@@ -364,4 +364,4 @@ Vitest/jsdom 测试与实现就近组织，Canvas 集成用例在 feature 的测
 构建、lint、coverage 和 E2E 的命令与分类见 [开发与测试](../operations/development-and-testing.md)。
 
 上级：[系统设计](../system-design.md)。相关文档：[Share](share.md)、[Web](web.md)、
-[Canvas Core](canvas-core.md)、[Project](project.md)。
+[Canvas](canvas.md)、[Project](project.md)。

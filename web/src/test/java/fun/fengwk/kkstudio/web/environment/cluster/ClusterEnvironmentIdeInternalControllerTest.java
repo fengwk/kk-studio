@@ -18,11 +18,11 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterIdeOwnerRoute;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalPaths;
+import fun.fengwk.kkstudio.ide.EnvironmentIdeServiceImpl;
+import fun.fengwk.kkstudio.ide.cluster.IdeInternalPaths;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
+import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.environment.cluster.HmacClusterInternalAuthentication;
-import fun.fengwk.kkstudio.platform.environment.ide.EnvironmentIdeServiceImpl;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
 
 import java.net.URI;
@@ -68,7 +68,7 @@ class ClusterEnvironmentIdeInternalControllerTest {
   void missingAuthenticationIsRejectedBeforeAnyLocalSideEffect() throws Exception {
     mockMvc
         .perform(
-            post(ClusterInternalPaths.viewsPath(ENV))
+            post(IdeInternalPaths.viewsPath(ENV))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(openViewBody()))
         .andExpect(status().isUnauthorized());
@@ -79,11 +79,11 @@ class ClusterEnvironmentIdeInternalControllerTest {
   @Test
   void wrongAuthenticationTargetIsRejectedBeforeAnyLocalSideEffect() throws Exception {
     Map<String, String> headers =
-        authentication.sign("POST", ClusterInternalPaths.viewsPath(ENV), NODE_A);
+        authentication.sign("POST", IdeInternalPaths.viewsPath(ENV), NODE_A);
 
     mockMvc
         .perform(
-            post(ClusterInternalPaths.viewsPath(ENV))
+            post(IdeInternalPaths.viewsPath(ENV))
                 .headers(mockHeaders(headers))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(openViewBody()))
@@ -95,12 +95,11 @@ class ClusterEnvironmentIdeInternalControllerTest {
   void requestForAnotherNodeOwnerIsRejectedBeforeAnyLocalSideEffect() throws Exception {
     Map<String, String> headers = validHeaders();
     when(clusterNodeRegistry.route(ENV))
-        .thenReturn(
-            Optional.of(ClusterIdeOwnerRoute.remote(NODE_A, URI.create("http://a.internal"))));
+        .thenReturn(Optional.of(ClusterOwnerRoute.remote(NODE_A, URI.create("http://a.internal"))));
 
     mockMvc
         .perform(
-            post(ClusterInternalPaths.viewsPath(ENV))
+            post(IdeInternalPaths.viewsPath(ENV))
                 .headers(mockHeaders(headers))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(openViewBody()))
@@ -111,12 +110,11 @@ class ClusterEnvironmentIdeInternalControllerTest {
   @Test
   void authenticatedNonOwnerWithOversizedBodyIsRejectedBeforeBodyIsRead() throws Exception {
     when(clusterNodeRegistry.route(ENV))
-        .thenReturn(
-            Optional.of(ClusterIdeOwnerRoute.remote(NODE_A, URI.create("http://a.internal"))));
+        .thenReturn(Optional.of(ClusterOwnerRoute.remote(NODE_A, URI.create("http://a.internal"))));
 
     mockMvc
         .perform(
-            post(ClusterInternalPaths.viewsPath(ENV))
+            post(IdeInternalPaths.viewsPath(ENV))
                 .headers(mockHeaders(validHeaders()))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"pad\":\"" + "a".repeat(20 * 1024) + "\"}"))
@@ -127,8 +125,7 @@ class ClusterEnvironmentIdeInternalControllerTest {
   @Test
   void authenticatedLocalOwnerDelegatesAndReturnsTheViewDto() throws Exception {
     Map<String, String> headers = validHeaders();
-    when(clusterNodeRegistry.route(ENV))
-        .thenReturn(Optional.of(ClusterIdeOwnerRoute.local(NODE_B)));
+    when(clusterNodeRegistry.route(ENV)).thenReturn(Optional.of(ClusterOwnerRoute.local(NODE_B)));
     EnvironmentIdeViewDTO dto = new EnvironmentIdeViewDTO();
     dto.setViewId(VIEW);
     dto.setEnvironmentId(ENV.toString());
@@ -137,7 +134,7 @@ class ClusterEnvironmentIdeInternalControllerTest {
 
     mockMvc
         .perform(
-            post(ClusterInternalPaths.viewsPath(ENV))
+            post(IdeInternalPaths.viewsPath(ENV))
                 .headers(mockHeaders(headers))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(openViewBody()))
@@ -152,7 +149,7 @@ class ClusterEnvironmentIdeInternalControllerTest {
   void unauthenticatedOversizedBodyIsRejectedWithoutParsingOrSideEffects() throws Exception {
     mockMvc
         .perform(
-            post(ClusterInternalPaths.viewsPath(ENV))
+            post(IdeInternalPaths.viewsPath(ENV))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"pad\":\"" + "a".repeat(20 * 1024) + "\"}"))
         .andExpect(status().isUnauthorized());
@@ -169,7 +166,7 @@ class ClusterEnvironmentIdeInternalControllerTest {
 
     mockMvc
         .perform(
-            post(ClusterInternalPaths.viewsPath(ENV))
+            post(IdeInternalPaths.viewsPath(ENV))
                 .headers(headers)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(openViewBody()))
@@ -179,12 +176,11 @@ class ClusterEnvironmentIdeInternalControllerTest {
 
   @Test
   void authenticatedOversizedBodyIsRejectedWithPayloadTooLarge() throws Exception {
-    when(clusterNodeRegistry.route(ENV))
-        .thenReturn(Optional.of(ClusterIdeOwnerRoute.local(NODE_B)));
+    when(clusterNodeRegistry.route(ENV)).thenReturn(Optional.of(ClusterOwnerRoute.local(NODE_B)));
 
     mockMvc
         .perform(
-            post(ClusterInternalPaths.viewsPath(ENV))
+            post(IdeInternalPaths.viewsPath(ENV))
                 .headers(mockHeaders(validHeaders()))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"pad\":\"" + "a".repeat(20 * 1024) + "\"}"))
@@ -194,12 +190,11 @@ class ClusterEnvironmentIdeInternalControllerTest {
 
   @Test
   void authenticatedMalformedBodyIsRejectedWithBadRequest() throws Exception {
-    when(clusterNodeRegistry.route(ENV))
-        .thenReturn(Optional.of(ClusterIdeOwnerRoute.local(NODE_B)));
+    when(clusterNodeRegistry.route(ENV)).thenReturn(Optional.of(ClusterOwnerRoute.local(NODE_B)));
 
     mockMvc
         .perform(
-            post(ClusterInternalPaths.viewsPath(ENV))
+            post(IdeInternalPaths.viewsPath(ENV))
                 .headers(mockHeaders(validHeaders()))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{not-json"))
@@ -209,12 +204,11 @@ class ClusterEnvironmentIdeInternalControllerTest {
 
   @Test
   void authenticatedUnknownFieldBodyIsRejectedWithBadRequest() throws Exception {
-    when(clusterNodeRegistry.route(ENV))
-        .thenReturn(Optional.of(ClusterIdeOwnerRoute.local(NODE_B)));
+    when(clusterNodeRegistry.route(ENV)).thenReturn(Optional.of(ClusterOwnerRoute.local(NODE_B)));
 
     mockMvc
         .perform(
-            post(ClusterInternalPaths.viewsPath(ENV))
+            post(IdeInternalPaths.viewsPath(ENV))
                 .headers(mockHeaders(validHeaders()))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"viewId\":\"" + VIEW + "\",\"directory\":\"/d\",\"extra\":1}"))
@@ -223,7 +217,7 @@ class ClusterEnvironmentIdeInternalControllerTest {
   }
 
   private Map<String, String> validHeaders() {
-    return authentication.sign("POST", ClusterInternalPaths.viewsPath(ENV), NODE_B);
+    return authentication.sign("POST", IdeInternalPaths.viewsPath(ENV), NODE_B);
   }
 
   private static HttpHeaders mockHeaders(Map<String, String> headers) {

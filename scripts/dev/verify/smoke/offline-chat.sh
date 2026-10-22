@@ -221,7 +221,7 @@ main().catch((error) => {
 if [[ "$WITH_APP" == "true" ]]; then
   step "Checking global Blob upload, Canvas consumption, Function runs, signed media GET, and offline Chat"
   CANVAS_TEST_APP_URL="http://127.0.0.1:${CANVAS_TEST_APP_PORT:-18088}" \
-  CANVAS_TEST_IMAGE_FIXTURE="$REPO_ROOT/platform/runtime/src/test/resources/fun/fengwk/kkstudio/platform/canvas/resource/tiny.png" \
+  CANVAS_TEST_IMAGE_FIXTURE="$REPO_ROOT/platform/runtime/src/test/resources/fun/fengwk/kkstudio/platform/storage/media/tiny.png" \
     node "$SCRIPT_DIR/offline-smoke.mjs"
 fi
 

@@ -46,27 +46,26 @@ import org.springframework.web.socket.server.support.WebSocketHttpRequestHandler
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonIdeStreamCodec;
-import fun.fengwk.kkstudio.harness.environment.daemon.IdeAction;
-import fun.fengwk.kkstudio.harness.environment.daemon.IdeCommand;
-import fun.fengwk.kkstudio.harness.environment.daemon.IdeHeader;
-import fun.fengwk.kkstudio.harness.environment.daemon.IdeReply;
-import fun.fengwk.kkstudio.harness.environment.daemon.IdeStreamCreditWindow;
-import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServer;
-import fun.fengwk.kkstudio.harness.environment.server.IdeCommandTransport;
-import fun.fengwk.kkstudio.harness.environment.server.IdeRequest;
-import fun.fengwk.kkstudio.harness.environment.server.IdeSessionIdentity;
-import fun.fengwk.kkstudio.harness.environment.server.IdeStreamPairingRegistry;
-import fun.fengwk.kkstudio.harness.environment.server.InMemoryIdeStreamTicketService;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterIdeOwnerRoute;
+import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
+import fun.fengwk.kkstudio.ide.IdeBootstrapTicketService;
+import fun.fengwk.kkstudio.ide.IdeCommandTransport;
+import fun.fengwk.kkstudio.ide.IdeRequest;
+import fun.fengwk.kkstudio.ide.InMemoryIdeBootstrapTicketService;
+import fun.fengwk.kkstudio.ide.cluster.IdeClusterClient;
+import fun.fengwk.kkstudio.ide.cluster.IdeInternalPaths;
+import fun.fengwk.kkstudio.ide.protocol.DaemonIdeStreamCodec;
+import fun.fengwk.kkstudio.ide.protocol.IdeAction;
+import fun.fengwk.kkstudio.ide.protocol.IdeCommand;
+import fun.fengwk.kkstudio.ide.protocol.IdeHeader;
+import fun.fengwk.kkstudio.ide.protocol.IdeReply;
+import fun.fengwk.kkstudio.ide.protocol.IdeStreamCreditWindow;
+import fun.fengwk.kkstudio.ide.stream.IdeStreamPairingRegistry;
+import fun.fengwk.kkstudio.ide.stream.InMemoryIdeStreamTicketService;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthentication;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalClient;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalPaths;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
+import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.environment.cluster.HmacClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.environment.cluster.JdbcClusterNodeRegistry;
-import fun.fengwk.kkstudio.platform.environment.ide.IdeBootstrapTicketService;
-import fun.fengwk.kkstudio.platform.environment.ide.InMemoryIdeBootstrapTicketService;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 import java.io.File;
@@ -132,7 +131,7 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
 
   @LocalServerPort private int ownerPort;
 
-  @MockitoBean private EnvironmentDaemonServer endpoint;
+  @MockitoBean private IdeCommandTransport endpoint;
 
   @Autowired private IdeBrowserSessionRegistry sessions;
 
@@ -160,9 +159,9 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
   void forwardsTwentyMiBHttpThroughNonOwnerOrigin() throws Exception {
     startForwarderNode(nodeRegistry.localNodeId(), ownerPort);
     registerReadyOwner(nodeRegistry.localNodeId());
-    IdeSessionIdentity identity =
-        new IdeSessionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
-    when(endpoint.ideSessionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
+    DaemonConnectionIdentity identity =
+        new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
+    when(endpoint.connectionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
     NodePeer node = new NodePeer();
     AtomicInteger opens = new AtomicInteger();
     when(endpoint.requestIde(eq(ENVIRONMENT), any()))
@@ -209,9 +208,9 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
   void forwardsBootstrapAndReusesGenerationCookie() throws Exception {
     startForwarderNode(nodeRegistry.localNodeId(), ownerPort);
     registerReadyOwner(nodeRegistry.localNodeId());
-    IdeSessionIdentity identity =
-        new IdeSessionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
-    when(endpoint.ideSessionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
+    DaemonConnectionIdentity identity =
+        new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
+    when(endpoint.connectionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
 
     String firstView = UUID.randomUUID().toString();
     String secondView = UUID.randomUUID().toString();
@@ -251,9 +250,9 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
   void forwardsBrowserWebSocketThroughNonOwnerOrigin() throws Exception {
     startForwarderNode(nodeRegistry.localNodeId(), ownerPort);
     registerReadyOwner(nodeRegistry.localNodeId());
-    IdeSessionIdentity identity =
-        new IdeSessionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
-    when(endpoint.ideSessionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
+    DaemonConnectionIdentity identity =
+        new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
+    when(endpoint.connectionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
     WsNodeDaemon node = new WsNodeDaemon(true);
     when(endpoint.requestIde(eq(ENVIRONMENT), any()))
         .thenAnswer(
@@ -311,9 +310,9 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
   void uploadsTwentyMiBSingleBrowserBinaryThroughNonOwnerOrigin() throws Exception {
     startForwarderNode(nodeRegistry.localNodeId(), ownerPort);
     registerReadyOwner(nodeRegistry.localNodeId());
-    IdeSessionIdentity identity =
-        new IdeSessionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
-    when(endpoint.ideSessionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
+    DaemonConnectionIdentity identity =
+        new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
+    when(endpoint.connectionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
     WsNodeDaemon node = new WsNodeDaemon(false);
     AtomicInteger opens = new AtomicInteger();
     when(endpoint.requestIde(eq(ENVIRONMENT), any()))
@@ -370,9 +369,9 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
   void streamsTwentyMiBDaemonBinaryToBrowserThroughNonOwnerOrigin() throws Exception {
     startForwarderNode(nodeRegistry.localNodeId(), ownerPort);
     registerReadyOwner(nodeRegistry.localNodeId());
-    IdeSessionIdentity identity =
-        new IdeSessionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
-    when(endpoint.ideSessionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
+    DaemonConnectionIdentity identity =
+        new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
+    when(endpoint.connectionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
     WsNodeDaemon node = new WsNodeDaemon(false);
     when(endpoint.requestIde(eq(ENVIRONMENT), any()))
         .thenAnswer(
@@ -407,9 +406,9 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
   void streamsUtf8TextSplittingCodepointsThroughNonOwnerOrigin() throws Exception {
     startForwarderNode(nodeRegistry.localNodeId(), ownerPort);
     registerReadyOwner(nodeRegistry.localNodeId());
-    IdeSessionIdentity identity =
-        new IdeSessionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
-    when(endpoint.ideSessionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
+    DaemonConnectionIdentity identity =
+        new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
+    when(endpoint.connectionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
     WsNodeDaemon node = new WsNodeDaemon(false);
     when(endpoint.requestIde(eq(ENVIRONMENT), any()))
         .thenAnswer(
@@ -446,9 +445,9 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
   void leaseCloseActivelyClosesBrowserWebSocketThroughNonOwnerOrigin() throws Exception {
     startForwarderNode(nodeRegistry.localNodeId(), ownerPort);
     registerReadyOwner(nodeRegistry.localNodeId());
-    IdeSessionIdentity identity =
-        new IdeSessionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
-    when(endpoint.ideSessionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
+    DaemonConnectionIdentity identity =
+        new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
+    when(endpoint.connectionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
     WsNodeDaemon node = new WsNodeDaemon(true);
     when(endpoint.requestIde(eq(ENVIRONMENT), any()))
         .thenAnswer(
@@ -751,12 +750,12 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
               CompletableFuture<IdeReply> reply = new CompletableFuture<>();
               reply.complete(IdeReply.ok(null, null, null));
               return new IdeRequest(
-                  new IdeSessionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID()),
+                  new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID()),
                   UUID.randomUUID(),
                   reply);
             });
 
-    String path = ClusterInternalPaths.dataHttpPath(ENVIRONMENT, "/workspace/secret.txt");
+    String path = IdeInternalPaths.dataHttpPath(ENVIRONMENT, "/workspace/secret.txt");
     HttpResponse<String> response =
         HttpClient.newHttpClient()
             .send(
@@ -785,13 +784,13 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
               CompletableFuture<IdeReply> reply = new CompletableFuture<>();
               reply.complete(IdeReply.ok(null, null, null));
               return new IdeRequest(
-                  new IdeSessionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID()),
+                  new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID()),
                   UUID.randomUUID(),
                   reply);
             });
-    IdeSessionIdentity identity =
-        new IdeSessionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
-    when(endpoint.ideSessionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
+    DaemonConnectionIdentity identity =
+        new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
+    when(endpoint.connectionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
     String cookie = openSession(identity, UUID.randomUUID().toString(), "/home/dev/project");
 
     OkHttpClient browser = localhostClient();
@@ -817,9 +816,11 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
   void rejectsStaleLeaseGeneration() throws Exception {
     startForwarderNode(nodeRegistry.localNodeId(), ownerPort);
     registerReadyOwner(nodeRegistry.localNodeId());
-    IdeSessionIdentity stale = new IdeSessionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
-    IdeSessionIdentity current = new IdeSessionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
-    when(endpoint.ideSessionIdentity(ENVIRONMENT)).thenReturn(Optional.of(current));
+    DaemonConnectionIdentity stale =
+        new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
+    DaemonConnectionIdentity current =
+        new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
+    when(endpoint.connectionIdentity(ENVIRONMENT)).thenReturn(Optional.of(current));
     AtomicInteger opens = new AtomicInteger();
     when(endpoint.requestIde(eq(ENVIRONMENT), any()))
         .thenAnswer(
@@ -854,9 +855,9 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
   void doesNotReplayWhenDaemonPeerDisconnects() throws Exception {
     startForwarderNode(nodeRegistry.localNodeId(), ownerPort);
     registerReadyOwner(nodeRegistry.localNodeId());
-    IdeSessionIdentity identity =
-        new IdeSessionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
-    when(endpoint.ideSessionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
+    DaemonConnectionIdentity identity =
+        new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
+    when(endpoint.connectionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
     NodePeer node = new NodePeer();
     node.disconnectAfterBytes = 1024 * 1024;
     AtomicInteger opens = new AtomicInteger();
@@ -998,16 +999,15 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
     ClusterInternalAuthentication authentication =
         new HmacClusterInternalAuthentication(
             SECRET, UUID.randomUUID(), Clock.systemUTC(), Duration.ofSeconds(30), 1024);
-    ClusterInternalClient client =
-        new ClusterInternalClient(
+    IdeClusterClient client =
+        new IdeClusterClient(
             HttpClient.newHttpClient(), JsonMapper.builder().build(), authentication);
     ClusterNodeRegistry remoteRegistry =
         new ClusterNodeRegistry() {
           @Override
-          public Optional<ClusterIdeOwnerRoute> route(EnvironmentId environmentId) {
+          public Optional<ClusterOwnerRoute> route(EnvironmentId environmentId) {
             return Optional.of(
-                ClusterIdeOwnerRoute.remote(
-                    ownerNodeId, URI.create("http://localhost:" + ownerPort)));
+                ClusterOwnerRoute.remote(ownerNodeId, URI.create("http://localhost:" + ownerPort)));
           }
 
           @Override
@@ -1112,7 +1112,7 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
       public void abandonIde(UUID invocationId) {}
 
       @Override
-      public Optional<IdeSessionIdentity> ideSessionIdentity(EnvironmentId environmentId) {
+      public Optional<DaemonConnectionIdentity> connectionIdentity(EnvironmentId environmentId) {
         return Optional.empty();
       }
     };
@@ -1490,7 +1490,8 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
   }
 
   /** bootstrap 消费的真实前置：先由真实 OPEN_VIEW 授权视图，再消费一次性票据换 cookie。 */
-  private String openSession(IdeSessionIdentity identity, String viewId, String workspacePath) {
+  private String openSession(
+      DaemonConnectionIdentity identity, String viewId, String workspacePath) {
     caseLeases.add(identity.leaseToken());
     sessions.viewOpened(identity, viewId, workspacePath);
     return sessions.open(identity, viewId, workspacePath);

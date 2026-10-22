@@ -9,7 +9,7 @@ import org.springframework.core.io.ClassPathResource;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
-import fun.fengwk.kkstudio.harness.common.json.JsonValues;
+import fun.fengwk.kkstudio.common.json.JsonValues;
 import fun.fengwk.kkstudio.share.canvas.CanvasFunctionCancelRequestDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasFunctionRunRequestDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasFunctionVersionDTO;

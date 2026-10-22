@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.platform.plugin.testing;
 
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
-import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfigSchema;
 import fun.fengwk.kkstudio.platform.plugin.PluginInstance;

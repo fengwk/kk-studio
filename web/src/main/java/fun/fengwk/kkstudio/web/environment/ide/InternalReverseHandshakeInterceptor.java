@@ -6,11 +6,11 @@ import org.springframework.web.socket.WebSocketHandler;
 import org.springframework.web.socket.server.HandshakeInterceptor;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterIdeOwnerRoute;
+import fun.fengwk.kkstudio.ide.cluster.IdeInternalPaths;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthenticationException;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalPaths;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
+import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
 
 import java.net.URI;
 import java.util.Map;
@@ -53,10 +53,7 @@ final class InternalReverseHandshakeInterceptor implements HandshakeInterceptor 
       return false;
     }
     boolean local =
-        clusterNodeRegistry
-            .route(environmentId.get())
-            .filter(ClusterIdeOwnerRoute::local)
-            .isPresent();
+        clusterNodeRegistry.route(environmentId.get()).filter(ClusterOwnerRoute::local).isPresent();
     if (!local) {
       return false;
     }
@@ -91,7 +88,7 @@ final class InternalReverseHandshakeInterceptor implements HandshakeInterceptor 
     if (path == null) {
       return Optional.empty();
     }
-    String prefix = ClusterInternalPaths.INTERNAL_IDE_PREFIX + "/";
+    String prefix = IdeInternalPaths.INTERNAL_IDE_PREFIX + "/";
     if (!path.startsWith(prefix)) {
       return Optional.empty();
     }

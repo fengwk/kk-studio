@@ -40,14 +40,13 @@ import fun.fengwk.kkstudio.platform.chat.repo.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatSessionRepository;
 import fun.fengwk.kkstudio.platform.chat.service.model.Chat;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.project.model.IssueAgentThread;
-import fun.fengwk.kkstudio.project.repo.IssueAgentThreadRepository;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionSummaryDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSummaryDTO;
 
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -70,7 +69,7 @@ class HarnessOwnerQueryServiceTest {
 
   private ChatRepository chatRepository;
   private ChatSessionRepository chatSessionRepository;
-  private IssueAgentThreadRepository issueAgentThreadRepository;
+  private IssueAgentOwnership issueAgentOwnership;
   private ObjectProvider<HarnessRuntime> runtimes;
   private HarnessRuntime runtime;
   private HarnessOwnerQueryService service;
@@ -80,13 +79,15 @@ class HarnessOwnerQueryServiceTest {
   void setUp() {
     chatRepository = mock(ChatRepository.class);
     chatSessionRepository = mock(ChatSessionRepository.class);
-    issueAgentThreadRepository = mock(IssueAgentThreadRepository.class);
+    issueAgentOwnership = mock(IssueAgentOwnership.class);
+    ObjectProvider<IssueAgentOwnership> issueAgentOwnerships = mock(ObjectProvider.class);
+    when(issueAgentOwnerships.getIfAvailable()).thenReturn(issueAgentOwnership);
     runtimes = mock(ObjectProvider.class);
     runtime = mock(HarnessRuntime.class);
     when(runtimes.getIfAvailable()).thenReturn(runtime);
     service =
         new HarnessOwnerQueryService(
-            chatRepository, chatSessionRepository, issueAgentThreadRepository, runtimes);
+            chatRepository, chatSessionRepository, issueAgentOwnerships, runtimes);
   }
 
   /** owner 无法定位时必须确定性失败，不能枚举 Session 或读取任何 Harness 事实。 */
@@ -181,8 +182,8 @@ class HarnessOwnerQueryServiceTest {
     String agentName = "executor";
     UUID threadId = id(31);
     UUID sessionId = id(32);
-    when(issueAgentThreadRepository.findByIssueIdAndAgentName(issueId, agentName))
-        .thenReturn(new IssueAgentThread(issueId, agentName, threadId));
+    when(issueAgentOwnership.findBoundThread(new OwnerRef.IssueAgent(issueId, agentName)))
+        .thenReturn(Optional.of(threadId));
     ThreadState thread = thread(threadId, sessionId, id(33), T0, T1);
     when(runtime.getThreadSnapshot(threadId))
         .thenReturn(
@@ -213,8 +214,8 @@ class HarnessOwnerQueryServiceTest {
     UUID issueId = id(40);
     String agentName = "executor";
     UUID threadId = id(41);
-    when(issueAgentThreadRepository.findByIssueIdAndAgentName(issueId, agentName))
-        .thenReturn(new IssueAgentThread(issueId, agentName, threadId));
+    when(issueAgentOwnership.findBoundThread(new OwnerRef.IssueAgent(issueId, agentName)))
+        .thenReturn(Optional.of(threadId));
     when(runtime.getThreadSnapshot(threadId))
         .thenThrow(new HarnessRuntimeNotFoundException("thread " + threadId + " does not exist"));
 

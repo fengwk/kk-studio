@@ -1,8 +1,8 @@
 package fun.fengwk.kkstudio.harness.environment.capability;
 
-import fun.fengwk.kkstudio.harness.common.json.JsonValues;
-import fun.fengwk.kkstudio.harness.common.schema.InputNormalizer;
-import fun.fengwk.kkstudio.harness.common.schema.InputValidator;
+import fun.fengwk.kkstudio.common.json.JsonValues;
+import fun.fengwk.kkstudio.common.schema.InputNormalizer;
+import fun.fengwk.kkstudio.common.schema.InputValidator;
 
 import java.util.Objects;
 

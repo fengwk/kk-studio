@@ -1,0 +1,414 @@
+package fun.fengwk.kkstudio.harness.contributor.api;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import org.junit.jupiter.api.Test;
+
+import fun.fengwk.kkstudio.common.result.TextResultContent;
+import fun.fengwk.kkstudio.common.schema.InputSchema;
+import fun.fengwk.kkstudio.common.schema.IntegerSchema;
+import fun.fengwk.kkstudio.common.schema.StringSchema;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityId;
+import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
+import fun.fengwk.kkstudio.harness.tool.ToolCall;
+import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.ToolResult;
+import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
+
+import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
+import java.util.function.Consumer;
+
+/** Contributor API 统一定义、Tool 契约、执行请求与上下文测试。 */
+class HarnessContractTest {
+
+  private static final ContributorId CID = new ContributorId("goal");
+  private static final InputSchema SCHEMA =
+      new InputSchema(
+          "Test schema",
+          Map.of(
+              "path", new StringSchema(null),
+              "offset", new IntegerSchema(null)),
+          Set.of("path"),
+          false);
+  private static final ToolDescriptor DESCRIPTOR =
+      new ToolDescriptor(
+          "test_tool",
+          "A test tool",
+          "test_tool",
+          SCHEMA,
+          ToolSideEffect.READ_ONLY,
+          Duration.ofSeconds(30));
+
+  /** 验证 ContributionId 校验规则、字典序比较与字符串格式化。 */
+  @Test
+  void contributionIdValidatesAndCompares() {
+    ContributionId c1 = new ContributionId(CID, "create");
+    ContributionId c2 = new ContributionId(CID, "create");
+    ContributionId c3 = new ContributionId(CID, "delete");
+    ContributionId c4 = new ContributionId(new ContributorId("alpha"), "create");
+
+    assertEquals("goal:create", c1.toString());
+    assertEquals(c1, c2);
+    assertEquals(c1.hashCode(), c2.hashCode());
+    assertTrue(c1.compareTo(c3) < 0);
+    assertTrue(c1.compareTo(c4) > 0);
+
+    assertThrows(NullPointerException.class, () -> new ContributionId(null, "create"));
+    assertThrows(NullPointerException.class, () -> new ContributionId(CID, null));
+    assertThrows(IllegalArgumentException.class, () -> new ContributionId(CID, "Create"));
+    assertThrows(IllegalArgumentException.class, () -> new ContributionId(CID, "create_goal"));
+  }
+
+  /** 验证 ContributorDescriptor 依赖校验，包括拒绝自依赖与自动排序。 */
+  @Test
+  void contributorDescriptorValidatesRequires() {
+    ContributorDescriptor desc =
+        new ContributorDescriptor(
+            CID, "Goal Contributor", "1.0.0", Set.of(new ContributorId("core")));
+    assertEquals(CID, desc.id());
+    assertEquals("Goal Contributor", desc.name());
+    assertEquals("1.0.0", desc.version());
+    assertEquals(Set.of(new ContributorId("core")), desc.requires());
+
+    assertThrows(
+        NullPointerException.class, () -> new ContributorDescriptor(null, "Name", "1.0", Set.of()));
+    assertThrows(
+        IllegalArgumentException.class, () -> new ContributorDescriptor(CID, "", "1.0", Set.of()));
+    assertThrows(
+        IllegalArgumentException.class, () -> new ContributorDescriptor(CID, "Name", "", Set.of()));
+    assertThrows(
+        NullPointerException.class, () -> new ContributorDescriptor(CID, "Name", "1.0", null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new ContributorDescriptor(CID, "Name", "1.0", Set.of(CID)));
+  }
+
+  /** 验证 StateDeclaration 校验 canonical customType 与模式非空。 */
+  @Test
+  void stateDeclarationValidates() {
+    StateDeclaration decl = new StateDeclaration("goal-state", StateMode.WRITE);
+    assertEquals("goal-state", decl.customType());
+    assertEquals(StateMode.WRITE, decl.mode());
+
+    assertThrows(NullPointerException.class, () -> new StateDeclaration(null, StateMode.READ));
+    assertThrows(NullPointerException.class, () -> new StateDeclaration("state", null));
+    assertThrows(
+        IllegalArgumentException.class, () -> new StateDeclaration("State", StateMode.READ));
+    assertThrows(
+        IllegalArgumentException.class, () -> new StateDeclaration("goal_state", StateMode.READ));
+  }
+
+  /**
+   * 验证 ToolRequirements 的环境关系声明、状态访问集合校验与非法组合 fail closed。
+   *
+   * <p>环境关系是封闭三态：{@code NONE} 工具不参与环境绑定，{@code OPTIONAL} 工具在无环境时仍可执行，只有 {@code REQUIRED} 才允许携带精确的
+   * {@code requiredEnvironmentId}。
+   */
+  @Test
+  void toolRequirementsValidatesAndEnforcesUniqueness() {
+    ToolRequirements none = ToolRequirements.none();
+    assertEquals(EnvironmentSupport.NONE, none.environmentSupport());
+    assertNull(none.requiredEnvironmentId());
+    assertTrue(none.stateAccesses().isEmpty());
+
+    ToolRequirements optional = ToolRequirements.optionalEnvironment();
+    assertEquals(EnvironmentSupport.OPTIONAL, optional.environmentSupport());
+    assertNull(optional.requiredEnvironmentId());
+
+    ToolRequirements env = ToolRequirements.environment();
+    assertEquals(EnvironmentSupport.REQUIRED, env.environmentSupport());
+    assertNull(env.requiredEnvironmentId());
+    assertTrue(env.stateAccesses().isEmpty());
+
+    EnvironmentId pinned = EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
+    ToolRequirements pinnedEnv = ToolRequirements.environment(pinned);
+    assertEquals(EnvironmentSupport.REQUIRED, pinnedEnv.environmentSupport());
+    assertEquals(pinned, pinnedEnv.requiredEnvironmentId());
+
+    StateDeclaration read = new StateDeclaration("state.read", StateMode.READ);
+    StateDeclaration write = new StateDeclaration("state.write", StateMode.WRITE);
+    ToolRequirements custom = new ToolRequirements(EnvironmentSupport.NONE, List.of(read, write));
+    assertEquals(EnvironmentSupport.NONE, custom.environmentSupport());
+    assertEquals(List.of(read, write), custom.stateAccesses());
+
+    // requiredEnvironmentId 只对 REQUIRED 有意义：NONE/OPTIONAL 携带精确环境身份必须被拒绝
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new ToolRequirements(EnvironmentSupport.NONE, pinned, List.of()));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new ToolRequirements(EnvironmentSupport.OPTIONAL, pinned, List.of()));
+
+    // 拒绝重复 customType
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ToolRequirements(
+                EnvironmentSupport.NONE,
+                List.of(
+                    new StateDeclaration("state", StateMode.READ),
+                    new StateDeclaration("state", StateMode.WRITE))));
+
+    // 拒绝 null
+    assertThrows(
+        NullPointerException.class, () -> new ToolRequirements((EnvironmentSupport) null, null));
+    assertThrows(
+        NullPointerException.class, () -> new ToolRequirements(EnvironmentSupport.NONE, null));
+  }
+
+  /** 验证 ToolOutcome 成功携带 effects、error 拒绝 effects、以及 withoutEffects 工厂。 */
+  @Test
+  void toolOutcomeValidatesErrorAndEffects() {
+    ToolResult successResult =
+        new ToolResult("call-1", List.of(new TextResultContent("done")), false, "{}");
+    ToolResult errorResult = ToolResult.error("call-1", "failed");
+    AppendCustomEntry entry = new AppendCustomEntry("state", 1, "{}");
+
+    ToolOutcome outcomeWithEffects = new ToolOutcome(successResult, List.of(entry));
+    assertEquals(successResult, outcomeWithEffects.result());
+    assertEquals(List.of(entry), outcomeWithEffects.customEntries());
+
+    ToolOutcome outcomeWithoutEffects = ToolOutcome.withoutEffects(successResult);
+    assertTrue(outcomeWithoutEffects.customEntries().isEmpty());
+
+    // error 结果不允许携带 custom entries effects
+    assertThrows(
+        IllegalArgumentException.class, () -> new ToolOutcome(errorResult, List.of(entry)));
+
+    // error 结果在无 effects 时合法
+    ToolOutcome validError = ToolOutcome.withoutEffects(errorResult);
+    assertTrue(validError.result().error());
+    assertTrue(validError.customEntries().isEmpty());
+
+    assertThrows(NullPointerException.class, () -> new ToolOutcome(null, List.of()));
+    assertThrows(NullPointerException.class, () -> new ToolOutcome(successResult, null));
+  }
+
+  /** 验证 ToolExecutionContext 构造、重载与完整非空校验。 */
+  @Test
+  void toolExecutionContextValidatesNonNull() {
+    UUID invocationId = UUID.randomUUID();
+    UUID threadId = UUID.randomUUID();
+    Instant now = Instant.now();
+    BranchView view = new DummyBranchView();
+    BoundEnvironment env = new DummyBoundEnvironment();
+
+    ToolExecutionContext ctxWithEnv =
+        new ToolExecutionContext(invocationId, threadId, now, view, env);
+    assertEquals(invocationId, ctxWithEnv.invocationId());
+    assertEquals(threadId, ctxWithEnv.threadId());
+    assertEquals(now, ctxWithEnv.executedAt());
+    assertEquals(view, ctxWithEnv.branch());
+    assertTrue(ctxWithEnv.environment().isPresent());
+    assertEquals(env, ctxWithEnv.environment().get());
+
+    ToolExecutionContext ctxWithoutEnv =
+        new ToolExecutionContext(invocationId, threadId, now, view);
+    assertFalse(ctxWithoutEnv.environment().isPresent());
+
+    // 完整非空校验
+    assertThrows(
+        NullPointerException.class,
+        () -> new ToolExecutionContext(null, threadId, now, view, Optional.empty()));
+    assertThrows(
+        NullPointerException.class,
+        () -> new ToolExecutionContext(invocationId, null, now, view, Optional.empty()));
+    assertThrows(
+        NullPointerException.class,
+        () -> new ToolExecutionContext(invocationId, threadId, null, view, Optional.empty()));
+    assertThrows(
+        NullPointerException.class,
+        () -> new ToolExecutionContext(invocationId, threadId, now, null, Optional.empty()));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new ToolExecutionContext(
+                invocationId, threadId, now, view, (Optional<BoundEnvironment>) null));
+  }
+
+  /** 验证 BoundEnvironment 执行窄能力契约。 */
+  @Test
+  void boundEnvironmentContract() {
+    DummyBoundEnvironment env = new DummyBoundEnvironment();
+    assertEquals("11111111-1111-1111-1111-111111111111", env.environmentId().toString());
+
+    EnvironmentCapabilityDescriptor cap =
+        new EnvironmentCapabilityDescriptor(
+            new EnvironmentCapabilityId("fs.read"), "1.0", SCHEMA, Duration.ofSeconds(10));
+    ToolExecutionRequest req =
+        new ToolExecutionRequest(
+            DESCRIPTOR, new ToolCall("call-1", "test_tool", "{\"path\":\"a.txt\"}"), Duration.ZERO);
+    ToolResult result = env.execute(cap, req, partial -> {});
+    assertEquals("call-1", result.toolCallId());
+  }
+
+  /**
+   * 验证 ToolExecutionRequest 参数静默归一化，以及 timeout 是已解析值原样保存、不做二次回落。
+   *
+   * <p>默认 Tool 的 {@link Tool#resolveTimeout} 只返回 descriptor.defaultTimeout()，因此 0 与显式值都按原样进入请求。
+   */
+  @Test
+  void toolExecutionRequestNormalizesAndKeepsResolvedTimeout() {
+    ToolCall rawCall =
+        new ToolCall("call-1", "test_tool", "{\"offset\":\"20\",\"path\":\"README.md\"}");
+    ToolExecutionRequest request = new ToolExecutionRequest(DESCRIPTOR, rawCall, Duration.ZERO);
+
+    // 校验 call 已被归一化：整数字符串转为 integer
+    assertEquals("{\"offset\":20,\"path\":\"README.md\"}", request.call().argumentsJson());
+    // strict Provider 为原可选字段填入 null 时，执行请求把它等价为缺省。
+    ToolExecutionRequest nullOptionalRequest =
+        new ToolExecutionRequest(
+            DESCRIPTOR,
+            new ToolCall("call-2", "test_tool", "{\"offset\":null,\"path\":\"README.md\"}"),
+            Duration.ZERO);
+    assertEquals("{\"path\":\"README.md\"}", nullOptionalRequest.call().argumentsJson());
+    // timeout 是执行前解析完成的唯一结果：请求原样保存，0 表示没有 deadline。
+    assertEquals(Duration.ZERO, request.timeout());
+    assertEquals(
+        Duration.ofSeconds(5),
+        new ToolExecutionRequest(DESCRIPTOR, rawCall, Duration.ofSeconds(5)).timeout());
+
+    // 默认 resolveTimeout 只返回 definition 默认值，不读取 arguments。
+    Tool defaultTimeoutTool = tool(DESCRIPTOR, ToolRequirements.none());
+    assertEquals(Duration.ofSeconds(30), defaultTimeoutTool.resolveTimeout(rawCall));
+
+    // 拒绝负数超时
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new ToolExecutionRequest(DESCRIPTOR, rawCall, Duration.ofSeconds(-1)));
+  }
+
+  /** 构造仅覆盖 descriptor/requirements 的匿名 Tool，用于验证默认 SPI 行为。 */
+  private static Tool tool(ToolDescriptor descriptor, ToolRequirements requirements) {
+    return new Tool() {
+      @Override
+      public ToolDescriptor descriptor() {
+        return descriptor;
+      }
+
+      @Override
+      public ToolRequirements requirements() {
+        return requirements;
+      }
+
+      @Override
+      public ToolOutcome execute(ToolExecutionRequest request, Consumer<ToolResult> progress) {
+        return dummyOutcome();
+      }
+    };
+  }
+
+  /** 验证 ToolContribution 单一 record 构造与契约校验（descriptor 与 requirements 一致性）。 */
+  @Test
+  void toolContributionValidatesDescriptorAndRequirements() {
+    ContributionId id = new ContributionId(CID, "my-tool");
+    AgentToolDefinition definition = new AgentToolDefinition(DESCRIPTOR, ToolVisibility.SELECTABLE);
+    ToolRequirements requirements = ToolRequirements.none();
+
+    Tool matchingTool =
+        new Tool() {
+          @Override
+          public ToolDescriptor descriptor() {
+            return DESCRIPTOR;
+          }
+
+          @Override
+          public ToolRequirements requirements() {
+            return requirements;
+          }
+
+          @Override
+          public ToolOutcome execute(ToolExecutionRequest request, Consumer<ToolResult> progress) {
+            return dummyOutcome();
+          }
+        };
+
+    ToolContribution contribution =
+        new ToolContribution(id, definition, matchingTool, requirements, 10);
+    assertEquals(id, contribution.id());
+    assertEquals(definition, contribution.definition());
+    assertEquals(matchingTool, contribution.tool());
+    assertEquals(requirements, contribution.requirements());
+    assertEquals(10, contribution.priority());
+
+    // descriptor 不匹配抛异常
+    Tool mismatchedDescriptorTool =
+        new Tool() {
+          @Override
+          public ToolDescriptor descriptor() {
+            return new ToolDescriptor(
+                "other", "other tool", "other", SCHEMA, ToolSideEffect.READ_ONLY, Duration.ZERO);
+          }
+
+          @Override
+          public ToolRequirements requirements() {
+            return requirements;
+          }
+
+          @Override
+          public ToolOutcome execute(ToolExecutionRequest request, Consumer<ToolResult> progress) {
+            return dummyOutcome();
+          }
+        };
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new ToolContribution(id, definition, mismatchedDescriptorTool, requirements, 0));
+
+    // requirements 不匹配抛异常
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ToolContribution(id, definition, matchingTool, ToolRequirements.environment(), 0));
+  }
+
+  private static ToolOutcome dummyOutcome() {
+    return ToolOutcome.withoutEffects(
+        new ToolResult("call-1", List.of(new TextResultContent("ok")), false, "{}"));
+  }
+
+  private static final class DummyBranchView implements BranchView {
+    @Override
+    public List<CustomStateSnapshot> customEntries(String customType) {
+      return List.of();
+    }
+
+    @Override
+    public Optional<CustomStateSnapshot> latestCustomEntry(String customType) {
+      return Optional.empty();
+    }
+
+    @Override
+    public Optional<GoalSnapshot> goal() {
+      return Optional.empty();
+    }
+  }
+
+  private static final class DummyBoundEnvironment implements BoundEnvironment {
+    @Override
+    public EnvironmentId environmentId() {
+      return EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
+    }
+
+    @Override
+    public ToolResult execute(
+        EnvironmentCapabilityDescriptor capability,
+        ToolExecutionRequest request,
+        Consumer<ToolResult> progress) {
+      return dummyOutcome().result();
+    }
+  }
+}

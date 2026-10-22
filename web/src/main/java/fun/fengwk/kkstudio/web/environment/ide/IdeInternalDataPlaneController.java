@@ -12,11 +12,11 @@ import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterIdeOwnerRoute;
+import fun.fengwk.kkstudio.ide.cluster.IdeInternalPaths;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthenticationException;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalPaths;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
+import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.web.environment.cluster.ClusterInternalRequests;
 
@@ -52,9 +52,7 @@ public final class IdeInternalDataPlaneController {
 
   @RequestMapping(
       value =
-          ClusterInternalPaths.INTERNAL_IDE_PREFIX
-              + "/{environmentId}"
-              + ClusterInternalPaths.HTTP_SUFFIX,
+          IdeInternalPaths.INTERNAL_IDE_PREFIX + "/{environmentId}" + IdeInternalPaths.HTTP_SUFFIX,
       method = {
         RequestMethod.GET,
         RequestMethod.POST,
@@ -90,7 +88,7 @@ public final class IdeInternalDataPlaneController {
 
   /** 原始 path 必须存在；缺失即 fail-closed（认证通过也不放行）。 */
   private static String requirePathParameter(HttpServletRequest request) {
-    String rawPathAndQuery = request.getParameter(ClusterInternalPaths.PATH_PARAMETER);
+    String rawPathAndQuery = request.getParameter(IdeInternalPaths.PATH_PARAMETER);
     if (rawPathAndQuery == null || rawPathAndQuery.isEmpty() || !rawPathAndQuery.startsWith("/")) {
       throw new AiValidationException("environment", "internal IDE path is invalid");
     }
@@ -99,7 +97,7 @@ public final class IdeInternalDataPlaneController {
 
   private void requireLocalOwner(EnvironmentId environmentId) {
     boolean local =
-        clusterNodeRegistry.route(environmentId).filter(ClusterIdeOwnerRoute::local).isPresent();
+        clusterNodeRegistry.route(environmentId).filter(ClusterOwnerRoute::local).isPresent();
     if (!local) {
       throw new AiValidationException(
           "environment", "internal IDE request does not match this node's READY owner route");

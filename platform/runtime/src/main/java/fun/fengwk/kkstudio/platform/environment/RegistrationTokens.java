@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.platform.environment;
 
-import fun.fengwk.kkstudio.harness.common.hash.Sha256;
+import fun.fengwk.kkstudio.common.hash.Sha256;
 
 import java.util.UUID;
 import java.util.regex.Pattern;

@@ -460,6 +460,5 @@ Daemon 自身 CLI 只有 `--config <绝对路径>`（及 `--check-config <绝对
 没有公开开关；工具执行超时由调用方提供，不是 Daemon 安装配置。
 
 上级：[系统设计](../system-design.md)。协议与执行实现：[Environment Daemon](../modules/daemon.md)、
-[Harness Environment](../modules/harness-environment.md)、
-[Harness Environment Server](../modules/harness-environment-server.md)。容器内运行见
+[Harness Environment](../modules/harness-environment.md)。容器内运行见
 [部署与运行](deployment.md)，开发验证见[开发与测试](development-and-testing.md)。

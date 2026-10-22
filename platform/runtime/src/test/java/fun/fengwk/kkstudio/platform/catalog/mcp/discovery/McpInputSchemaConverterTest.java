@@ -9,14 +9,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.common.schema.ArraySchema;
-import fun.fengwk.kkstudio.harness.common.schema.BooleanSchema;
-import fun.fengwk.kkstudio.harness.common.schema.EnumSchema;
-import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
-import fun.fengwk.kkstudio.harness.common.schema.IntegerSchema;
-import fun.fengwk.kkstudio.harness.common.schema.NumberSchema;
-import fun.fengwk.kkstudio.harness.common.schema.ObjectSchema;
-import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
+import fun.fengwk.kkstudio.common.schema.ArraySchema;
+import fun.fengwk.kkstudio.common.schema.BooleanSchema;
+import fun.fengwk.kkstudio.common.schema.EnumSchema;
+import fun.fengwk.kkstudio.common.schema.InputSchema;
+import fun.fengwk.kkstudio.common.schema.IntegerSchema;
+import fun.fengwk.kkstudio.common.schema.NumberSchema;
+import fun.fengwk.kkstudio.common.schema.ObjectSchema;
+import fun.fengwk.kkstudio.common.schema.StringSchema;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 
 import java.util.List;

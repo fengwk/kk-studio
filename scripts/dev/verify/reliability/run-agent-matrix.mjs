@@ -36,7 +36,7 @@ import {
 } from './report.mjs'
 import { assert, envelopeData, httpJson, pageResults, cid } from '../e2e/lib/http.mjs'
 import {
-  assertRootYoloPolicy,
+  assertRootYoloEnabled,
   branchSettingsOf,
   chatOwner,
   createChat,
@@ -599,7 +599,7 @@ export function assertThreadSettings(accepted, testCase, agentName) {
     Number(thread.version) >= 1,
     `Thread version must be at least 1: ${JSON.stringify(thread)}`,
   )
-  assertRootYoloPolicy(thread, true)
+  assertRootYoloEnabled(thread, true)
   assert(thread.branchSettings?.agentName === agentName, 'Thread Agent mismatch')
   assert(
     JSON.stringify(thread.branchSettings?.model)

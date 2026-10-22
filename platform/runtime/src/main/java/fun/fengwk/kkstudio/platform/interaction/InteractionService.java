@@ -9,11 +9,7 @@ import fun.fengwk.kkstudio.harness.runtime.ToolApprovalCommand;
 import fun.fengwk.kkstudio.harness.runtime.ToolInputAcceptance;
 import fun.fengwk.kkstudio.harness.runtime.ToolInputSubmissionCommand;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
-import fun.fengwk.kkstudio.project.model.Issue;
-import fun.fengwk.kkstudio.project.model.IssueAgentThread;
-import fun.fengwk.kkstudio.project.repo.IssueAgentThreadRepository;
-import fun.fengwk.kkstudio.project.repo.IssueRepository;
-import fun.fengwk.kkstudio.project.repo.ProjectRepository;
+import fun.fengwk.kkstudio.platform.orchestration.IssueAgentOwnership;
 
 import java.util.Objects;
 import java.util.UUID;
@@ -33,21 +29,14 @@ import java.util.UUID;
 @Service
 public class InteractionService {
 
-  private final IssueAgentThreadRepository issueAgentThreadRepository;
-  private final IssueRepository issueRepository;
-  private final ProjectRepository projectRepository;
+  private final ObjectProvider<IssueAgentOwnership> issueAgentOwnership;
   private final InteractionRootResolver rootResolver;
 
   /** 创建统一交互写入口。 */
   public InteractionService(
-      IssueAgentThreadRepository issueAgentThreadRepository,
-      IssueRepository issueRepository,
-      ProjectRepository projectRepository,
+      ObjectProvider<IssueAgentOwnership> issueAgentOwnership,
       ObjectProvider<HarnessRuntime> runtimes) {
-    this.issueAgentThreadRepository =
-        Objects.requireNonNull(issueAgentThreadRepository, "issueAgentThreadRepository");
-    this.issueRepository = Objects.requireNonNull(issueRepository, "issueRepository");
-    this.projectRepository = Objects.requireNonNull(projectRepository, "projectRepository");
+    this.issueAgentOwnership = Objects.requireNonNull(issueAgentOwnership, "issueAgentOwnership");
     this.rootResolver = new InteractionRootResolver(runtimes);
   }
 
@@ -83,22 +72,11 @@ public class InteractionService {
    * <p>Project/Issue 行在绑定仍存在时缺失或层级不一致属于产品归属事实损坏，fail closed 而不是退化成无产品锁的写入。
    */
   private void lockProductScope(UUID threadId) {
-    IssueAgentThread binding =
-        issueAgentThreadRepository.findByThreadId(rootResolver.requireRootId(threadId));
-    if (binding == null) {
-      return;
-    }
-    Issue issue = issueRepository.getById(binding.issueId());
-    if (issue == null) {
-      throw new IllegalStateException("Issue owner does not exist");
-    }
-    UUID projectId = issue.getProjectId();
-    if (projectRepository.lockForKeyShare(projectId) == null) {
-      throw new IllegalStateException("Project owner does not exist");
-    }
-    Issue lockedIssue = issueRepository.lockById(issue.getId());
-    if (lockedIssue == null || !lockedIssue.getProjectId().equals(projectId)) {
-      throw new IllegalStateException("Issue owner hierarchy is inconsistent");
+    UUID rootThreadId = rootResolver.requireRootId(threadId);
+    IssueAgentOwnership ownership = issueAgentOwnership.getIfAvailable();
+    // 没有 Project 应用就没有 Issue+Agent 归属的执行根。
+    if (ownership != null) {
+      ownership.lockRootForInteraction(rootThreadId);
     }
   }
 

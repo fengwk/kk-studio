@@ -3,9 +3,9 @@ package fun.fengwk.kkstudio.platform.harness.thread.command;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Component;
 
+import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.harness.builtin.environment.ReadTool;
 import fun.fengwk.kkstudio.harness.builtin.subagent.TaskTool;
-import fun.fengwk.kkstudio.harness.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
 import fun.fengwk.kkstudio.harness.contributor.api.ContextFragment;
 import fun.fengwk.kkstudio.harness.contributor.api.ContextProjectorContribution;

@@ -3,8 +3,6 @@ package fun.fengwk.kkstudio.platform.interaction;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.Mockito.clearInvocations;
-import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -12,7 +10,6 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.InOrder;
 import org.springframework.beans.factory.ObjectProvider;
 
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
@@ -27,12 +24,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatSessionRepository;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
-import fun.fengwk.kkstudio.project.model.Issue;
-import fun.fengwk.kkstudio.project.model.IssueAgentThread;
-import fun.fengwk.kkstudio.project.model.Project;
-import fun.fengwk.kkstudio.project.repo.IssueAgentThreadRepository;
-import fun.fengwk.kkstudio.project.repo.IssueRepository;
-import fun.fengwk.kkstudio.project.repo.ProjectRepository;
+import fun.fengwk.kkstudio.platform.orchestration.IssueAgentOwnership;
 import fun.fengwk.kkstudio.share.ai.interaction.InteractionDTO;
 import fun.fengwk.kkstudio.share.ai.interaction.InteractionPageDTO;
 
@@ -44,7 +36,7 @@ import java.util.UUID;
 /**
  * 根归属一致性：查询与提交/审批对同一点代来源必须解析出同一真实执行根。
  *
- * <p>本测试刻意让查询与写入共享同一 Runtime stub 与仓储 stub：同一点代来源只有一个根，查询据此投影 owner、写入据此加产品锁，谁都不能自行发明根。
+ * <p>本测试刻意让查询与写入共享同一 Runtime stub 与 owner stub：同一点代来源只有一个根，查询据此投影 owner、写入据此加产品锁，谁都不能自行发明根。
  */
 class InteractionRootAttributionConsistencyTest {
 
@@ -55,10 +47,8 @@ class InteractionRootAttributionConsistencyTest {
   }
 
   private ChatSessionRepository chatSessionRepository;
-  private IssueAgentThreadRepository issueAgentThreadRepository;
+  private IssueAgentOwnership issueAgentOwnership;
   private EnvironmentRepository environmentRepository;
-  private IssueRepository issueRepository;
-  private ProjectRepository projectRepository;
   private ObjectProvider<HarnessRuntime> runtimes;
   private HarnessRuntime runtime;
   private InteractionQueryService queryService;
@@ -68,10 +58,10 @@ class InteractionRootAttributionConsistencyTest {
   @SuppressWarnings("unchecked")
   void setUp() {
     chatSessionRepository = mock(ChatSessionRepository.class);
-    issueAgentThreadRepository = mock(IssueAgentThreadRepository.class);
+    issueAgentOwnership = mock(IssueAgentOwnership.class);
+    ObjectProvider<IssueAgentOwnership> issueAgentOwnerships = mock(ObjectProvider.class);
+    when(issueAgentOwnerships.getIfAvailable()).thenReturn(issueAgentOwnership);
     environmentRepository = mock(EnvironmentRepository.class);
-    issueRepository = mock(IssueRepository.class);
-    projectRepository = mock(ProjectRepository.class);
     runtimes = mock(ObjectProvider.class);
     runtime = mock(HarnessRuntime.class);
 
@@ -82,13 +72,10 @@ class InteractionRootAttributionConsistencyTest {
         new InteractionQueryService(
             chatSessionRepository,
             mock(ChatRepository.class),
-            issueAgentThreadRepository,
-            issueRepository,
+            issueAgentOwnerships,
             environmentRepository,
             runtimes);
-    interactionService =
-        new InteractionService(
-            issueAgentThreadRepository, issueRepository, projectRepository, runtimes);
+    interactionService = new InteractionService(issueAgentOwnerships, runtimes);
   }
 
   /** 测试意图：同一后代来源的根归属在查询与提交间一致——查询按根的 Issue 绑定投影 owner，提交按同一根的绑定加产品锁，两个入口对同一后代各调用一次同源根解析。 */
@@ -98,11 +85,10 @@ class InteractionRootAttributionConsistencyTest {
     UUID rootThreadId = id(101);
     UUID rootSessionId = id(400);
     UUID issueId = id(200);
-    UUID projectId = id(300);
 
     when(runtime.findRootThreadId(childThreadId)).thenReturn(Optional.of(rootThreadId));
-    IssueAgentThread binding = new IssueAgentThread(issueId, "coder", rootThreadId);
-    when(issueAgentThreadRepository.findByThreadId(rootThreadId)).thenReturn(binding);
+    when(issueAgentOwnership.findBoundRoot(rootThreadId))
+        .thenReturn(Optional.of(new IssueAgentOwnership.BoundRoot(issueId, "coder", "issue")));
 
     // 查询：后代行先按根定位，再经根快照取得根 Session，最后按根 Thread 绑定解析 owner。
     ThreadState rootThread = mock(ThreadState.class);
@@ -136,27 +122,18 @@ class InteractionRootAttributionConsistencyTest {
     assertEquals(rootThreadId.toString(), dto.getRootThreadId());
     assertEquals(issueId.toString(), dto.getOwner().getIssueId());
 
-    // 提交：同一点代来源的产品锁同样按根绑定解析出根 Issue 的层级。
-    when(issueRepository.getById(issueId))
-        .thenReturn(Issue.builder().id(issueId).projectId(projectId).build());
-    when(projectRepository.lockForKeyShare(projectId)).thenReturn(mock(Project.class));
-    when(issueRepository.lockById(issueId))
-        .thenReturn(Issue.builder().id(issueId).projectId(projectId).build());
+    // 提交：同一点代来源的产品锁同样按根解析。
     ToolInputSubmissionCommand command =
         new ToolInputSubmissionCommand(
             childThreadId, id(102), id(103), "alice", false, List.of(List.of("ans")));
     when(runtime.submitToolInput(any(ToolInputSubmissionCommand.class)))
         .thenReturn(mock(ToolInputAcceptance.class));
 
-    clearInvocations(issueRepository, projectRepository);
     interactionService.submitInput(command);
 
     // 两个入口对同一后代各做一次同源根解析，命中同一真实根；提交按该根加产品锁。
     verify(runtime, times(2)).findRootThreadId(childThreadId);
-    InOrder lockOrder = inOrder(projectRepository, issueRepository);
-    lockOrder.verify(issueRepository).getById(issueId);
-    lockOrder.verify(projectRepository).lockForKeyShare(projectId);
-    lockOrder.verify(issueRepository).lockById(issueId);
-    lockOrder.verifyNoMoreInteractions();
+    verify(issueAgentOwnership).findBoundRoot(rootThreadId);
+    verify(issueAgentOwnership).lockRootForInteraction(rootThreadId);
   }
 }

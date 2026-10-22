@@ -9,23 +9,23 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityBusyException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilitySendUncertainException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonIdeStreamCodec;
-import fun.fengwk.kkstudio.harness.environment.daemon.IdeAction;
-import fun.fengwk.kkstudio.harness.environment.daemon.IdeCommand;
-import fun.fengwk.kkstudio.harness.environment.daemon.IdeHeader;
-import fun.fengwk.kkstudio.harness.environment.daemon.IdeStreamBinaryFrame;
-import fun.fengwk.kkstudio.harness.environment.daemon.IdeStreamControlFrame;
-import fun.fengwk.kkstudio.harness.environment.daemon.IdeStreamMode;
-import fun.fengwk.kkstudio.harness.environment.server.IdeCommandTransport;
-import fun.fengwk.kkstudio.harness.environment.server.IdeRequest;
-import fun.fengwk.kkstudio.harness.environment.server.IdeSessionIdentity;
-import fun.fengwk.kkstudio.harness.environment.server.IdeStreamPairingException;
-import fun.fengwk.kkstudio.harness.environment.server.IdeStreamPairingRegistry;
-import fun.fengwk.kkstudio.harness.environment.server.IdeStreamRelay;
-import fun.fengwk.kkstudio.harness.environment.server.IdeStreamTicketService;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterIdeOwnerRoute;
+import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
+import fun.fengwk.kkstudio.ide.IdeBootstrapTicketService;
+import fun.fengwk.kkstudio.ide.IdeCommandTransport;
+import fun.fengwk.kkstudio.ide.IdeRequest;
+import fun.fengwk.kkstudio.ide.protocol.DaemonIdeStreamCodec;
+import fun.fengwk.kkstudio.ide.protocol.IdeAction;
+import fun.fengwk.kkstudio.ide.protocol.IdeCommand;
+import fun.fengwk.kkstudio.ide.protocol.IdeHeader;
+import fun.fengwk.kkstudio.ide.protocol.IdeStreamBinaryFrame;
+import fun.fengwk.kkstudio.ide.protocol.IdeStreamControlFrame;
+import fun.fengwk.kkstudio.ide.protocol.IdeStreamMode;
+import fun.fengwk.kkstudio.ide.stream.IdeStreamPairingException;
+import fun.fengwk.kkstudio.ide.stream.IdeStreamPairingRegistry;
+import fun.fengwk.kkstudio.ide.stream.IdeStreamRelay;
+import fun.fengwk.kkstudio.ide.stream.IdeStreamTicketService;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
-import fun.fengwk.kkstudio.platform.environment.ide.IdeBootstrapTicketService;
+import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -273,7 +273,7 @@ public final class IdeGatewayDataPlane {
       return;
     }
     IdeBootstrapTicketService.Ticket ticket = consumed.get();
-    Optional<IdeSessionIdentity> current = transport.ideSessionIdentity(environmentId);
+    Optional<DaemonConnectionIdentity> current = transport.connectionIdentity(environmentId);
     if (current.isEmpty() || !current.get().equals(ticket.identity())) {
       sendError(response, HttpServletResponse.SC_GONE);
       return;
@@ -335,7 +335,7 @@ public final class IdeGatewayDataPlane {
       HttpServletRequest request,
       HttpServletResponse response)
       throws IOException {
-    Optional<ClusterIdeOwnerRoute> route = clusterNodeRegistry.route(environmentId);
+    Optional<ClusterOwnerRoute> route = clusterNodeRegistry.route(environmentId);
     if (route.isEmpty() || route.get().local()) {
       return false;
     }
@@ -371,7 +371,7 @@ public final class IdeGatewayDataPlane {
 
   private boolean generationCurrent(
       EnvironmentId environmentId, IdeBrowserSessionRegistry.Session session) {
-    Optional<IdeSessionIdentity> current = transport.ideSessionIdentity(environmentId);
+    Optional<DaemonConnectionIdentity> current = transport.connectionIdentity(environmentId);
     return current.isPresent() && current.get().equals(session.identity());
   }
 

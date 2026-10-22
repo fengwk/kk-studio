@@ -1,0 +1,206 @@
+package fun.fengwk.kkstudio.common.resource;
+
+import java.nio.CharBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
+import java.nio.charset.StandardCharsets;
+import java.util.Objects;
+import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+/**
+ * 不可变的规范 Resource URI 引用。
+ *
+ * <p>只允许 {@code data} / {@code https} / {@code http} / {@code blob-upload} / {@code kkstudio} 五种
+ * scheme；构造时执行全部 域约束与规范校验（含 data URI 解码与 size/sha 验证），保证 codec 反序列化与直接构造得到同样的严格结果。
+ *
+ * <p>{@code blob-upload:<uploadId>} 是 Environment Daemon 上传的瞬时引用：字节已由 Daemon 直传对象存储，Platform 只持有 全局
+ * Blob 上传行 id。它必须携带非空 size/sha，并且只在一个 Tool 调用终态到 durable history 插入之间短暂存在。
+ *
+ * <p>{@code kkstudio:/resources/<blobId>} 是 Platform 已授权 Session 资源的 durable 引用：字节已在全局对象存储且已由当前
+ * Session 引用，消费方只能按 Session 引用权限与 Blob 状态核验后复用同一 blob，绝不重新上传或解引用为 URL。它同样必须携带非空 size/sha。
+ *
+ * <p>非 base64 data 载荷使用 frozen 表示：percent 解码后按字节重新编码并精确相等——原始 ASCII 只能是 RFC unreserved 与原始 {@code
+ * '/'}，其余任何可表示字节都必须是大写 {@code %XX}（原始逗号/分号/冒号/问号/井号被拒绝，其编码形式被接受； 编码 slash/NUL
+ * 仍被全局规则禁止）；无法按此规则表示的字节只能走 {@code ;base64,} 形式。
+ */
+public record ResourceRef(String uri, String mediaType, String name, Long size, String sha256) {
+
+  /** URI 的 UTF-8 字节上限；data URI 在解码载荷前即适用。 */
+  public static final int MAX_URI_UTF8_BYTES = 131072;
+
+  /** data URI 解码后的字节上限。 */
+  public static final int MAX_DATA_DECODED_BYTES = 65536;
+
+  /** mediaType 的 ASCII 字节上限。 */
+  public static final int MAX_MEDIA_TYPE_ASCII_BYTES = 255;
+
+  /** name 的 UTF-8 字节上限。 */
+  public static final int MAX_NAME_UTF8_BYTES = 512;
+
+  /** ResourceResultContent preview 的 UTF-8 字节上限。 */
+  public static final int MAX_PREVIEW_UTF8_BYTES = 16384;
+
+  private static final Pattern MEDIA_TYPE_PATTERN =
+      Pattern.compile("[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+");
+  private static final Pattern SHA256_PATTERN = Pattern.compile("[0-9a-f]{64}");
+
+  /** {@code blob-upload} scheme 名。 */
+  public static final String BLOB_UPLOAD_SCHEME = "blob-upload";
+
+  /** 完整 {@code blob-upload:<uploadId>} 形态：scheme + 规范小写 UUID，无任何其它成分。 */
+  private static final Pattern BLOB_UPLOAD_PATTERN =
+      Pattern.compile(
+          BLOB_UPLOAD_SCHEME + ":([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})");
+
+  /** 平台 Session 资源 scheme 名：指向已授权、durable 的全局 Blob。 */
+  public static final String SESSION_RESOURCE_SCHEME = "kkstudio";
+
+  /** 规范 Session 资源前缀。 */
+  public static final String SESSION_RESOURCE_URI_PREFIX = "kkstudio:/resources/";
+
+  /** 完整 {@code kkstudio:/resources/<canonical-uuid>} 形态：固定前缀加规范小写 UUID，无任何其它成分。 */
+  private static final Pattern SESSION_RESOURCE_PATTERN =
+      Pattern.compile(
+          "kkstudio:/resources/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})");
+
+  public ResourceRef {
+    if (uri == null) {
+      throw new IllegalArgumentException("uri must not be null");
+    }
+    if (mediaType == null || !MEDIA_TYPE_PATTERN.matcher(mediaType).matches()) {
+      throw new IllegalArgumentException(
+          "mediaType must be canonical lowercase type/subtype without parameters");
+    }
+    if (mediaType.length() > MAX_MEDIA_TYPE_ASCII_BYTES) {
+      throw new IllegalArgumentException(
+          "mediaType must not exceed " + MAX_MEDIA_TYPE_ASCII_BYTES + " ASCII bytes");
+    }
+    if (name != null) {
+      if (name.isBlank()) {
+        throw new IllegalArgumentException("name must not be blank");
+      }
+      if (name.codePoints().anyMatch(Character::isISOControl)) {
+        throw new IllegalArgumentException("name must not contain control characters");
+      }
+      if (utf8Length(name, "name") > MAX_NAME_UTF8_BYTES) {
+        throw new IllegalArgumentException(
+            "name must not exceed " + MAX_NAME_UTF8_BYTES + " UTF-8 bytes");
+      }
+    }
+    if (size != null && size < 0) {
+      throw new IllegalArgumentException("size must not be negative");
+    }
+    if (sha256 != null && !SHA256_PATTERN.matcher(sha256).matches()) {
+      throw new IllegalArgumentException("sha256 must be 64 lowercase hex digits");
+    }
+    // URI 校验（含 data 解码与 size/sha 验证）；data URI 返回解码字节，其余返回 null。
+    ResourceUriValidator.validate(uri, mediaType, size, sha256);
+  }
+
+  /** 构造规范 {@code blob-upload:<uploadId>} 瞬态引用 URI。 */
+  public static String blobUploadUri(UUID uploadId) {
+    return BLOB_UPLOAD_SCHEME + ":" + Objects.requireNonNull(uploadId, "uploadId");
+  }
+
+  /**
+   * 严格解析 {@code blob-upload:<uploadId>} 引用，返回其全局上传 id；不是该 scheme 时返回 {@code null}。
+   *
+   * <p>只有完整且规范的形态（scheme、单个冒号、规范小写 UUID、无其余字符）才被识别：任何近似但非法的形态（大写 UUID、多余成分、空上传 id）都在这里 返回 {@code
+   * null}，需要拒绝时由调用方按自己的协议语义报错，而不是被误判为有效引用。
+   */
+  public static UUID blobUploadId(String uri) {
+    if (uri == null) {
+      return null;
+    }
+    Matcher matcher = BLOB_UPLOAD_PATTERN.matcher(uri);
+    if (!matcher.matches()) {
+      return null;
+    }
+    try {
+      return UUID.fromString(matcher.group(1));
+    } catch (IllegalArgumentException error) {
+      return null;
+    }
+  }
+
+  /** 本引用是否为 {@code blob-upload} 瞬态引用。 */
+  public UUID blobUploadId() {
+    return blobUploadId(uri);
+  }
+
+  /** 构造规范 {@code kkstudio:/resources/<blobId>} Session 资源引用 URI。 */
+  public static String sessionResourceUri(UUID blobId) {
+    return SESSION_RESOURCE_URI_PREFIX + Objects.requireNonNull(blobId, "blobId");
+  }
+
+  /**
+   * 严格解析 {@code kkstudio:/resources/<blobId>} 引用，返回其 blob id；不是该规范形态时返回 {@code null}。
+   *
+   * <p>只有完整且规范的形态才被识别：任何近似但非法的形态都在这里返回 {@code null}，需要拒绝时由调用方按自己的协议语义报错，而不是被误判为有效引用。
+   */
+  public static UUID sessionBlobId(String uri) {
+    if (uri == null) {
+      return null;
+    }
+    Matcher matcher = SESSION_RESOURCE_PATTERN.matcher(uri);
+    if (!matcher.matches()) {
+      return null;
+    }
+    try {
+      return UUID.fromString(matcher.group(1));
+    } catch (IllegalArgumentException error) {
+      return null;
+    }
+  }
+
+  /** 本引用是否为 {@code kkstudio:/resources/<blobId>} Session 资源引用。 */
+  public UUID sessionBlobId() {
+    return sessionBlobId(uri);
+  }
+
+  /** 严格计算 UTF-8 字节数；拒绝 Java String 中未配对的代理项，避免静默替换后突破协议边界。 */
+  public static int utf8Length(String value, String name) {
+    try {
+      return StandardCharsets.UTF_8
+          .newEncoder()
+          .onMalformedInput(CodingErrorAction.REPORT)
+          .onUnmappableCharacter(CodingErrorAction.REPORT)
+          .encode(CharBuffer.wrap(value))
+          .remaining();
+    } catch (CharacterCodingException error) {
+      throw new IllegalArgumentException(name + " must be valid Unicode", error);
+    }
+  }
+
+  /**
+   * 精确计算 UTF-8 字节数但不超过 {@code maxBytes}：一旦累计超过上限立即停止扫描并返回当前计数（必然 ≥ {@code maxBytes} +
+   * 1），全程不分配完整编码缓冲。与 {@link #utf8Length} 相同的严格代理项语义。
+   */
+  public static int utf8LengthUpTo(String value, String name, int maxBytes) {
+    if (maxBytes < 0) {
+      throw new IllegalArgumentException("maxBytes must not be negative");
+    }
+    int count = 0;
+    for (int index = 0; index < value.length() && count <= maxBytes; index++) {
+      char c = value.charAt(index);
+      if (c < 0x80) {
+        count++;
+      } else if (c < 0x800) {
+        count += 2;
+      } else if (Character.isHighSurrogate(c)) {
+        if (index + 1 >= value.length() || !Character.isLowSurrogate(value.charAt(index + 1))) {
+          throw new IllegalArgumentException(name + " must be valid Unicode");
+        }
+        count += 4;
+        index++;
+      } else if (Character.isLowSurrogate(c)) {
+        throw new IllegalArgumentException(name + " must be valid Unicode");
+      } else {
+        count += 3;
+      }
+    }
+    return count;
+  }
+}

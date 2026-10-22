@@ -15,22 +15,22 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonIdeStreamCodec;
-import fun.fengwk.kkstudio.harness.environment.daemon.IdeAction;
-import fun.fengwk.kkstudio.harness.environment.daemon.IdeCommand;
-import fun.fengwk.kkstudio.harness.environment.daemon.IdeHeader;
-import fun.fengwk.kkstudio.harness.environment.daemon.IdeReply;
-import fun.fengwk.kkstudio.harness.environment.daemon.IdeStreamControlFrame;
-import fun.fengwk.kkstudio.harness.environment.server.IdeCommandTransport;
-import fun.fengwk.kkstudio.harness.environment.server.IdeRequest;
-import fun.fengwk.kkstudio.harness.environment.server.IdeSessionIdentity;
-import fun.fengwk.kkstudio.harness.environment.server.IdeStreamPairingRegistry;
-import fun.fengwk.kkstudio.harness.environment.server.InMemoryIdeStreamTicketService;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterIdeOwnerRoute;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalClient;
+import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
+import fun.fengwk.kkstudio.ide.IdeBootstrapTicketService;
+import fun.fengwk.kkstudio.ide.IdeCommandTransport;
+import fun.fengwk.kkstudio.ide.IdeRequest;
+import fun.fengwk.kkstudio.ide.InMemoryIdeBootstrapTicketService;
+import fun.fengwk.kkstudio.ide.cluster.IdeClusterClient;
+import fun.fengwk.kkstudio.ide.protocol.DaemonIdeStreamCodec;
+import fun.fengwk.kkstudio.ide.protocol.IdeAction;
+import fun.fengwk.kkstudio.ide.protocol.IdeCommand;
+import fun.fengwk.kkstudio.ide.protocol.IdeHeader;
+import fun.fengwk.kkstudio.ide.protocol.IdeReply;
+import fun.fengwk.kkstudio.ide.protocol.IdeStreamControlFrame;
+import fun.fengwk.kkstudio.ide.stream.IdeStreamPairingRegistry;
+import fun.fengwk.kkstudio.ide.stream.InMemoryIdeStreamTicketService;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
-import fun.fengwk.kkstudio.platform.environment.ide.IdeBootstrapTicketService;
-import fun.fengwk.kkstudio.platform.environment.ide.InMemoryIdeBootstrapTicketService;
+import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -76,12 +76,12 @@ class IdeGatewayDataPlaneTest {
     final IdeBrowserSessionRegistry sessions =
         new IdeBrowserSessionRegistry(new SecureRandom(), Clock.systemUTC(), Duration.ofHours(1));
     final IdeBootstrapTicketService bootstrap = new InMemoryIdeBootstrapTicketService();
-    final IdeSessionIdentity identity = new IdeSessionIdentity(ENV, INSTANCE, LEASE);
+    final DaemonConnectionIdentity identity = new DaemonConnectionIdentity(ENV, INSTANCE, LEASE);
     final FakeTransport transport = new FakeTransport(pairings);
     final ClusterNodeRegistry clusterNodeRegistry =
         new ClusterNodeRegistry() {
           @Override
-          public Optional<ClusterIdeOwnerRoute> route(EnvironmentId environmentId) {
+          public Optional<ClusterOwnerRoute> route(EnvironmentId environmentId) {
             return Optional.empty();
           }
 
@@ -100,7 +100,7 @@ class IdeGatewayDataPlaneTest {
             bootstrap,
             clusterNodeRegistry,
             new IdeRemoteDataPlaneForwarder(
-                mock(ClusterInternalClient.class), properties, mock(HttpClient.class)));
+                mock(IdeClusterClient.class), properties, mock(HttpClient.class)));
 
     Harness() {
       transport.identity = identity;
@@ -344,7 +344,7 @@ class IdeGatewayDataPlaneTest {
   void rejectsWhenGenerationChanged() throws Exception {
     Harness harness = new Harness();
     String cookie = harness.sessionCookie();
-    harness.transport.identity = new IdeSessionIdentity(ENV, INSTANCE, UUID.randomUUID());
+    harness.transport.identity = new DaemonConnectionIdentity(ENV, INSTANCE, UUID.randomUUID());
     MockHttpServletRequest request = new MockHttpServletRequest("GET", "/");
     request.setCookies(new Cookie(harness.properties.requireSessionCookieName(), cookie));
     MockHttpServletResponse response = new MockHttpServletResponse();
@@ -449,8 +449,8 @@ class IdeGatewayDataPlaneTest {
   void rejectsSessionCookieFromDifferentEnvironment() throws Exception {
     Harness harness = new Harness();
     EnvironmentId foreignEnv = EnvironmentId.parse("22222222-2222-2222-2222-222222222222");
-    IdeSessionIdentity foreignIdentity =
-        new IdeSessionIdentity(foreignEnv, "instance", UUID.randomUUID());
+    DaemonConnectionIdentity foreignIdentity =
+        new DaemonConnectionIdentity(foreignEnv, "instance", UUID.randomUUID());
     String foreignView = UUID.randomUUID().toString();
     harness.sessions.viewOpened(foreignIdentity, foreignView, "/managed/workspace");
     String foreignCookie =
@@ -694,7 +694,7 @@ class IdeGatewayDataPlaneTest {
   private static final class FakeTransport implements IdeCommandTransport {
 
     final IdeStreamPairingRegistry<IdeStreamPeer> pairings;
-    volatile IdeSessionIdentity identity;
+    volatile DaemonConnectionIdentity identity;
     volatile Supplier<IdeStreamPeer> peerFactory = () -> new ScriptedPeer(0, List.of());
     volatile boolean pairOnRequest = true;
     final AtomicReference<IdeCommand> lastCommand = new AtomicReference<>();
@@ -722,7 +722,7 @@ class IdeGatewayDataPlaneTest {
     }
 
     @Override
-    public Optional<IdeSessionIdentity> ideSessionIdentity(EnvironmentId environmentId) {
+    public Optional<DaemonConnectionIdentity> connectionIdentity(EnvironmentId environmentId) {
       return Optional.of(identity);
     }
   }

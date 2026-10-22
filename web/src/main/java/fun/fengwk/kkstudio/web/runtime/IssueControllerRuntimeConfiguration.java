@@ -30,7 +30,7 @@ import java.util.concurrent.TimeUnit;
  * fail-fast 单线程 drain executor 与 bounded AbortPolicy worker executor。
  */
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties({IssueControllerProperties.class, HarnessRuntimeProperties.class})
+@EnableConfigurationProperties(HarnessRuntimeProperties.class)
 public class IssueControllerRuntimeConfiguration {
 
   /** fail-fast 单线程 drain executor：串行执行 drain，拒绝时同步抛错。 */

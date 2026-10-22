@@ -1,6 +1,6 @@
 # Environment Daemon
 
-Environment Daemon 是目标宿主上的独立 Node.js 进程，把 Platform 的原子能力调用落到文件系统、进程与本地工具链。网络连接只是消息管道：同一 Daemon 进程断线重连，不会重启已受理的执行。安装与三平台管理见 [Environment Daemon 安装与运行](../operations/environment-daemon.md)；共享契约见 [Harness Environment](harness-environment.md)，服务端会话见 [Harness Environment Server](harness-environment-server.md)。
+Environment Daemon 是目标宿主上的独立 Node.js 进程，把 Platform 的原子能力调用落到文件系统、进程与本地工具链。网络连接只是消息管道：同一 Daemon 进程断线重连，不会重启已受理的执行。安装与三平台管理见 [Environment Daemon 安装与运行](../operations/environment-daemon.md)；共享契约与服务端会话见 [Harness Environment](harness-environment.md)。
 
 模块运行在 Node.js 24 运行时之上，依赖 `ajv`、`diff`、`ignore`、`isomorphic-git`、`koffi`、`picomatch`、`re2-wasm`、`tar`、`vscode-jsonrpc`、`ws` 等生产依赖。官方发行归档内置冻结的 code-server 运行时（Node 24.x 与 code-server），不依赖宿主全局安装 Node 或 JDK 运行时；外部语言服务器与 Bash 由宿主提供。
 
@@ -103,4 +103,4 @@ Daemon 拥有独立的 Node.js 工程与测试套件：
 
 多平台 CI 由 [.github/workflows/daemon-ci.yml](../../.github/workflows/daemon-ci.yml) 守卫，覆盖 Linux (amd64/arm64)、macOS (arm64/amd64) 与 Windows (amd64) 五大目标环境。发行归档由 [`scripts/daemon/prepare-release.sh`](../../scripts/daemon/prepare-release.sh) 暂存，并由 [`scripts/daemon/smoke-archive.sh`](../../scripts/daemon/smoke-archive.sh) 与 [`scripts/daemon/smoke-archive.ps1`](../../scripts/daemon/smoke-archive.ps1) 验证自足运行能力。
 
-上级：[系统设计](../system-design.md)。相关文档：[Harness Environment](harness-environment.md)、[Harness Environment Server](harness-environment-server.md)、[Harness MCP](harness-mcp.md)、[Environment Daemon 安装与运行](../operations/environment-daemon.md)。
+上级：[系统设计](../system-design.md)。相关文档：[Harness Environment](harness-environment.md)、[Environment Daemon 安装与运行](../operations/environment-daemon.md)。

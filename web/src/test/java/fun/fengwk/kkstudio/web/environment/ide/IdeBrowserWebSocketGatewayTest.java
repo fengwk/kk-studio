@@ -10,11 +10,11 @@ import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.web.socket.client.standard.StandardWebSocketClient;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.environment.server.IdeCommandTransport;
-import fun.fengwk.kkstudio.harness.environment.server.IdeSessionIdentity;
-import fun.fengwk.kkstudio.harness.environment.server.IdeStreamPairingRegistry;
-import fun.fengwk.kkstudio.harness.environment.server.InMemoryIdeStreamTicketService;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalClient;
+import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
+import fun.fengwk.kkstudio.ide.IdeCommandTransport;
+import fun.fengwk.kkstudio.ide.cluster.IdeClusterClient;
+import fun.fengwk.kkstudio.ide.stream.IdeStreamPairingRegistry;
+import fun.fengwk.kkstudio.ide.stream.InMemoryIdeStreamTicketService;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
 
 import java.security.SecureRandom;
@@ -48,7 +48,7 @@ class IdeBrowserWebSocketGatewayTest {
         properties,
         sessions,
         mock(ClusterNodeRegistry.class),
-        mock(ClusterInternalClient.class),
+        mock(IdeClusterClient.class),
         new StandardWebSocketClient());
   }
 
@@ -120,8 +120,8 @@ class IdeBrowserWebSocketGatewayTest {
     IdeBrowserSessionRegistry sessions =
         new IdeBrowserSessionRegistry(new SecureRandom(), Clock.systemUTC(), Duration.ofHours(1));
     EnvironmentId foreignEnv = EnvironmentId.parse("22222222-2222-2222-2222-222222222222");
-    IdeSessionIdentity foreignIdentity =
-        new IdeSessionIdentity(foreignEnv, "instance", UUID.randomUUID());
+    DaemonConnectionIdentity foreignIdentity =
+        new DaemonConnectionIdentity(foreignEnv, "instance", UUID.randomUUID());
     String foreignView = UUID.randomUUID().toString();
     sessions.viewOpened(foreignIdentity, foreignView, "/managed/workspace");
     String foreignCookie = sessions.open(foreignIdentity, foreignView, "/managed/workspace");

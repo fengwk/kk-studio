@@ -67,59 +67,26 @@ function createRepositoryMirror() {
   return mirrorRoot
 }
 
-test('repository structure guard verifies presence of shared prompt package', () => {
-  // Test intent: ensure the legitimate harness/common/.../prompt package remains intact as shared prompt-template code.
-  const legitimatePromptPkg = path.join(
-    REPOSITORY_ROOT,
-    'harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/prompt',
-  )
-  assert.equal(
-    existsSync(legitimatePromptPkg),
-    true,
-    'harness/common prompt package must exist',
-  )
-  assert.equal(
-    existsSync(path.join(legitimatePromptPkg, 'PromptTemplate.java')),
-    true,
-    'PromptTemplate.java must exist under harness/common',
-  )
-  assert.equal(
-    existsSync(path.join(legitimatePromptPkg, 'PromptTemplateLoader.java')),
-    true,
-    'PromptTemplateLoader.java must exist under harness/common',
-  )
-})
-
-test('repository structure guard verifies root and harness POM module lists', () => {
-  // Test intent: ensure declared POM module declarations exactly match expected topology.
-  const rootPom = readFileSync(path.join(REPOSITORY_ROOT, 'pom.xml'), 'utf8')
-  const rootModules = [...rootPom.matchAll(/<module>\s*([^<\s]+)\s*<\/module>/gu)].map((m) => m[1])
-  assert.deepEqual(rootModules, [
+test('repository structure guard verifies root, harness and apps POM module lists', () => {
+  // Test intent: the declared Maven topology is the layering apps -> platform -> harness -> common.
+  const modulesOf = (relativePath) =>
+    [...readFileSync(path.join(REPOSITORY_ROOT, relativePath), 'utf8').matchAll(
+      /<module>\s*([^<\s]+)\s*<\/module>/gu,
+    )].map((m) => m[1])
+  assert.deepEqual(modulesOf('pom.xml'), [
+    'common',
     'share',
     'schema',
     'work',
-    'canvas',
-    'project',
     'harness',
     'platform',
+    'apps',
     'plugins',
     'web',
   ])
-
-  const harnessPom = readFileSync(path.join(REPOSITORY_ROOT, 'harness/pom.xml'), 'utf8')
-  const harnessModules = [...harnessPom.matchAll(/<module>\s*([^<\s]+)\s*<\/module>/gu)].map((m) => m[1])
-  assert.deepEqual(harnessModules, [
-    'common',
-    'mcp',
-    'tool',
-    'environment',
-    'environment-server',
-    'runtime',
-    'provider',
-    'contributor-api',
-    'builtin',
-    'infra',
-  ])
+  assert.deepEqual(modulesOf('harness/pom.xml'), ['environment', 'runtime', 'provider', 'infra'])
+  assert.deepEqual(modulesOf('platform/pom.xml'), ['plugin-api', 'runtime'])
+  assert.deepEqual(modulesOf('apps/pom.xml'), ['canvas', 'project', 'ide'])
 })
 
 test('docs check fails when unexpected harness module directory is introduced', () => {
@@ -605,7 +572,7 @@ const CORE_STATE_ENUMS = [
     constants: ['HISTORY_CUT'],
   },
   {
-    path: 'harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalStatus.java',
+    path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/builtin/goal/GoalStatus.java',
     enumName: 'GoalStatus',
     constants: ['ACTIVE', 'COMPLETE', 'BLOCKED'],
   },
@@ -665,17 +632,17 @@ const CORE_STATE_ENUMS = [
     constants: ['FAILED', 'CANCELLED', 'UNKNOWN'],
   },
   {
-    path: 'canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasFunctionRunStatus.java',
+    path: 'apps/canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasFunctionRunStatus.java',
     enumName: 'CanvasFunctionRunStatus',
     constants: ['READY', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN'],
   },
   {
-    path: 'canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasConflictException.java',
+    path: 'apps/canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasConflictException.java',
     enumName: 'Reason',
     constants: ['CANVAS_NOT_FOUND', 'IDEMPOTENCY_CONFLICT'],
   },
   {
-    path: 'canvas/plugin-api/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionRunException.java',
+    path: 'apps/canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasFunctionRunException.java',
     enumName: 'Reason',
     constants: ['NOT_FOUND', 'CONFLICT'],
   },
@@ -705,7 +672,7 @@ const CORE_STATE_ENUMS = [
     constants: ['PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED', 'TIMED_OUT', 'CANCELLED'],
   },
   {
-    path: 'harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonOfferResult.java',
+    path: 'harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonOfferResult.java',
     enumName: 'DaemonOfferResult',
     constants: ['ACCEPTED', 'BUSY', 'CLOSED'],
   },
@@ -996,33 +963,6 @@ test('repository structure guard rejects missing or empty core state enum consta
   }
 })
 
-test('opencli plugin must not depend on host implementation modules', () => {
-  // Test intent: ensure plugins/opencli POM does not declare forbidden host dependencies.
-  const opencliPomPath = path.join(REPOSITORY_ROOT, 'plugins/opencli/pom.xml')
-  assert.equal(existsSync(opencliPomPath), true, 'plugins/opencli/pom.xml must exist')
-  const pomContent = readFileSync(opencliPomPath, 'utf8')
-  const forbiddenHostArtifacts = [
-    'kk-studio-platform-runtime',
-    'kk-studio-share',
-    'kk-studio-web',
-    'kk-studio-harness-runtime',
-    'kk-studio-harness-provider',
-    'kk-studio-harness-environment',
-    'kk-studio-harness-environment-server',
-    'kk-studio-harness-builtin',
-    'kk-studio-harness-infra',
-    'kk-studio-project',
-    'kk-studio-canvas-infra',
-  ]
-  for (const forbidden of forbiddenHostArtifacts) {
-    assert.equal(
-      pomContent.includes(`<artifactId>${forbidden}</artifactId>`),
-      false,
-      `plugins/opencli must not depend on ${forbidden}`,
-    )
-  }
-})
-
 test('web test suite must not compile-import opencli plugin classes', () => {
   // Test intent: verify web tests interact with opencli via reflection runtime-only, without compile-time imports or static imports.
   const webTestDir = path.join(REPOSITORY_ROOT, 'web/src/test/java')
@@ -1047,8 +987,8 @@ test('web test suite must not compile-import opencli plugin classes', () => {
   scan(webTestDir)
 })
 
-test('plugin dependency guard rejects forbidden host dependencies in isolation', () => {
-  // Test intent: verify check.mjs fails closed if a forbidden host dependency is introduced in plugins/opencli.
+test('module boundary guard rejects a plugin depending on the platform runtime in isolation', () => {
+  // Test intent: plugins reach the host only through the platform plugin SPI; a runtime dependency must fail closed.
   const mirrorRoot = createRepositoryMirror()
   try {
     const mirrorPlugins = path.join(mirrorRoot, 'plugins')
@@ -1074,7 +1014,7 @@ test('plugin dependency guard rejects forbidden host dependencies in isolation',
       },
       (error) => {
         const stderr = error.stderr || ''
-        return stderr.includes('forbidden host implementation dependency kk-studio-platform-runtime')
+        return stderr.includes('plugins/opencli must not depend on kk-studio-platform-runtime')
       },
     )
   } finally {
@@ -1111,6 +1051,73 @@ test('plugin dependency guard rejects forbidden static import in isolation', () 
         const stderr = error.stderr || ''
         return stderr.includes('forbidden compile import of opencli plugin class')
       },
+    )
+  } finally {
+    rmSync(mirrorRoot, { recursive: true, force: true })
+  }
+})
+
+test('module boundary guard rejects platform depending on an app in isolation', () => {
+  // Test intent: platform never depends on apps; reintroducing platform -> project must fail closed.
+  const mirrorRoot = createRepositoryMirror()
+  try {
+    const mirrorPlatform = path.join(mirrorRoot, 'platform')
+    rmSync(mirrorPlatform, { recursive: true, force: true })
+    cpSync(path.join(REPOSITORY_ROOT, 'platform'), mirrorPlatform, {
+      recursive: true,
+      filter: (source) => path.basename(source) !== 'target',
+    })
+    const pom = path.join(mirrorPlatform, 'runtime/pom.xml')
+    writeFileSync(
+      pom,
+      readFileSync(pom, 'utf8').replace(
+        '</dependencies>',
+        '    <dependency><groupId>fun.fengwk.kk-studio</groupId><artifactId>kk-studio-project</artifactId></dependency>\n    </dependencies>',
+      ),
+    )
+    assert.throws(
+      () =>
+        execFileSync('node', [CHECK_SCRIPT, '--root', mirrorRoot], {
+          cwd: mirrorRoot,
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+        }),
+      (error) => (error.stderr || '').includes('platform/runtime must not depend on kk-studio-project'),
+    )
+  } finally {
+    rmSync(mirrorRoot, { recursive: true, force: true })
+  }
+})
+
+test('module boundary guard rejects plugin imports outside the plugin SPI in isolation', () => {
+  // Test intent: plugin sources may import only the platform plugin SPI and shared value types.
+  const mirrorRoot = createRepositoryMirror()
+  try {
+    const mirrorPlugins = path.join(mirrorRoot, 'plugins')
+    rmSync(mirrorPlugins, { recursive: true, force: true })
+    cpSync(path.join(REPOSITORY_ROOT, 'plugins'), mirrorPlugins, {
+      recursive: true,
+      filter: (source) => path.basename(source) !== 'target',
+    })
+    const source = path.join(
+      mirrorPlugins,
+      'media/src/main/java/fun/fengwk/kkstudio/plugin/media/RuntimeLeak.java',
+    )
+    writeFileSync(
+      source,
+      'package fun.fengwk.kkstudio.plugin.media;\nimport fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;\nclass RuntimeLeak {}\n',
+    )
+    assert.throws(
+      () =>
+        execFileSync('node', [CHECK_SCRIPT, '--root', mirrorRoot], {
+          cwd: mirrorRoot,
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+        }),
+      (error) =>
+        (error.stderr || '').includes(
+          'plugins may only import the platform plugin SPI, found fun.fengwk.kkstudio.harness.runtime.HarnessRuntime',
+        ),
     )
   } finally {
     rmSync(mirrorRoot, { recursive: true, force: true })

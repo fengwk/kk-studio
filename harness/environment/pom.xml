@@ -16,7 +16,7 @@
     <dependencies>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
-            <artifactId>kk-studio-harness-common</artifactId>
+            <artifactId>kk-studio-common</artifactId>
         </dependency>
         <dependency>
             <groupId>tools.jackson.core</groupId>
@@ -48,6 +48,7 @@
                                     <includes>
                                         <include>fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog</include>
                                         <include>fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelopeCodec</include>
+                                        <include>fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServer</include>
                                     </includes>
                                     <limits>
                                         <limit>

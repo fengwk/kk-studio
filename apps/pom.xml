@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>fun.fengwk.kk-studio</groupId>
+        <artifactId>kk-studio-parent</artifactId>
+        <version>1.1.3</version>
+    </parent>
+
+    <!-- 建立在平台公开接口之上的应用：只依赖 platform 与 harness，platform 从不反向依赖这里。 -->
+    <artifactId>kk-studio-apps</artifactId>
+    <packaging>pom</packaging>
+
+    <modules>
+        <module>canvas</module>
+        <module>project</module>
+        <module>ide</module>
+    </modules>
+</project>

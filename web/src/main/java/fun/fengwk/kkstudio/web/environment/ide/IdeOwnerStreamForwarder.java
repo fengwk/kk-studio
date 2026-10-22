@@ -12,9 +12,9 @@ import org.springframework.web.socket.client.WebSocketClient;
 import org.springframework.web.socket.handler.AbstractWebSocketHandler;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterIdeOwnerRoute;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalClient;
-import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalPaths;
+import fun.fengwk.kkstudio.ide.cluster.IdeClusterClient;
+import fun.fengwk.kkstudio.ide.cluster.IdeInternalPaths;
+import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
 
 import java.net.URI;
 import java.nio.ByteBuffer;
@@ -35,12 +35,12 @@ import java.util.concurrent.atomic.AtomicReference;
 @Component
 public final class IdeOwnerStreamForwarder {
 
-  private final ClusterInternalClient clusterInternalClient;
+  private final IdeClusterClient clusterInternalClient;
   private final WebSocketClient webSocketClient;
 
   @Autowired
   public IdeOwnerStreamForwarder(
-      ClusterInternalClient clusterInternalClient, WebSocketClient webSocketClient) {
+      IdeClusterClient clusterInternalClient, WebSocketClient webSocketClient) {
     this.clusterInternalClient =
         Objects.requireNonNull(clusterInternalClient, "clusterInternalClient");
     this.webSocketClient = Objects.requireNonNull(webSocketClient, "webSocketClient");
@@ -52,11 +52,8 @@ public final class IdeOwnerStreamForwarder {
    * @param nodePeer 已包装的 Node 侧连接（入站帧由端点入队）
    */
   void forward(
-      ClusterIdeOwnerRoute owner,
-      EnvironmentId environmentId,
-      String ticket,
-      IdeStreamPeer nodePeer) {
-    String canonicalPath = ClusterInternalPaths.reversePath(environmentId, ticket);
+      ClusterOwnerRoute owner, EnvironmentId environmentId, String ticket, IdeStreamPeer nodePeer) {
+    String canonicalPath = IdeInternalPaths.reversePath(environmentId, ticket);
     Map<String, String> authHeaders =
         clusterInternalClient.signHeaders("GET", canonicalPath, owner);
     WebSocketHttpHeaders headers = new WebSocketHttpHeaders();
