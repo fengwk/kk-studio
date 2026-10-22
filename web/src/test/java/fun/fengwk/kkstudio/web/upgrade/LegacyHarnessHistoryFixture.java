@@ -275,8 +275,7 @@ final class LegacyHarnessHistoryFixture {
   private static BranchSettings branchSettings() {
     return new BranchSettings(
         LegacyUpgradeSourceFixture.AGENT,
-        new ModelSelection(
-            LegacyUpgradeSourceFixture.PROVIDER, LegacyUpgradeSourceFixture.MODEL, "default"),
+        new ModelSelection(LegacyUpgradeSourceFixture.MODEL, "default"),
         "legacy-environment");
   }
 

@@ -37,6 +37,7 @@ import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelAbilitiesDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelInputModality;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelLimitDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelRateSetDTO;
@@ -67,6 +68,9 @@ class UsageCostProjectionServiceTest {
   private static final UUID TURN_B_ID = new UUID(0L, 6L);
   private static final UUID USER_B_ID = new UUID(0L, 7L);
   private static final UUID ASSISTANT_B_ID = new UUID(0L, 8L);
+
+  private static final ModelSelection MODEL_A = new ModelSelection("model-a", "default");
+  private static final ModelSelection MODEL_B = new ModelSelection("model-b", "default");
 
   private final AgentModelRepository modelRepository = mock(AgentModelRepository.class);
   private final AgentModelRuntimeConfigParser configParser =
@@ -99,12 +103,14 @@ class UsageCostProjectionServiceTest {
                 assistant(
                     ASSISTANT_A_ID,
                     USER_A_ID,
+                    MODEL_A,
                     new ModelUsage(1_000_000, 1_000_000, 1_000_000, 0, Map.of(), 0L, 3_000_000L)),
                 turnStart(TURN_B_ID, ASSISTANT_A_ID, settings("provider-b", "model-b")),
                 user(USER_B_ID, TURN_B_ID),
                 assistant(
                     ASSISTANT_B_ID,
                     USER_B_ID,
+                    MODEL_B,
                     new ModelUsage(2_000_000, 0, 0, 0, Map.of(), 0L, 2_000_000L))));
 
     HarnessUsageCostDTO costA = costs.get(ASSISTANT_A_ID);
@@ -122,8 +128,37 @@ class UsageCostProjectionServiceTest {
     assertThrows(UnsupportedOperationException.class, () -> costs.put(USER_A_ID, costA));
 
     // 每个出现过的模型只查一次 catalog，且绝不写入。
-    verify(modelRepository).getByProviderNameAndName("provider-a", "model-a");
-    verify(modelRepository).getByProviderNameAndName("provider-b", "model-b");
+    verify(modelRepository).getByName("model-a");
+    verify(modelRepository).getByName("model-b");
+    verifyNoMoreInteractions(modelRepository);
+  }
+
+  /** 组选择只负责路由；费用必须使用 metadata 记录的实际成员型号，而不是按所选组计价。 */
+  @Test
+  void pricesActualGroupMemberInsteadOfSelectedGroup() {
+    stubModel(
+        "group-provider",
+        "model-group",
+        pricing(new BigDecimal("100"), BigDecimal.ZERO, BigDecimal.ZERO));
+    stubModel(
+        "member-provider",
+        "member-a",
+        pricing(new BigDecimal("1"), BigDecimal.ZERO, BigDecimal.ZERO));
+
+    Map<UUID, HarnessUsageCostDTO> costs =
+        service.project(
+            List.of(
+                root(settings("group-provider", "model-group")),
+                turnStart(TURN_A_ID, ROOT_ID, settings("group-provider", "model-group")),
+                user(USER_A_ID, TURN_A_ID),
+                assistant(
+                    ASSISTANT_A_ID,
+                    USER_A_ID,
+                    new ModelSelection("member-a", "default"),
+                    new ModelUsage(1_000_000, 0, 0, 0, Map.of(), 0L, 1_000_000L))));
+
+    assertEquals("1", costs.get(ASSISTANT_A_ID).getAmount());
+    verify(modelRepository).getByName("member-a");
     verifyNoMoreInteractions(modelRepository);
   }
 
@@ -131,7 +166,7 @@ class UsageCostProjectionServiceTest {
   @Test
   void keepsUnpricedEntriesAbsentInsteadOfFakingZero() {
     stubModel("provider-a", "model-a", pricing(BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ZERO));
-    when(modelRepository.getByProviderNameAndName("provider-b", "model-b")).thenReturn(null);
+    when(modelRepository.getByName("model-b")).thenReturn(null);
 
     Map<UUID, HarnessUsageCostDTO> costs =
         service.project(
@@ -142,12 +177,14 @@ class UsageCostProjectionServiceTest {
                 assistant(
                     ASSISTANT_A_ID,
                     USER_A_ID,
+                    MODEL_A,
                     new ModelUsage(1_000_000, 0, 0, 0, Map.of(), 0L, 1_000_000L)),
                 turnStart(TURN_B_ID, ASSISTANT_A_ID, settings("provider-b", "model-b")),
                 user(USER_B_ID, TURN_B_ID),
                 assistant(
                     ASSISTANT_B_ID,
                     USER_B_ID,
+                    MODEL_B,
                     new ModelUsage(1_000_000, 0, 0, 0, Map.of(), 0L, 1_000_000L))));
 
     assertEquals("1", costs.get(ASSISTANT_A_ID).getAmount());
@@ -174,10 +211,11 @@ class UsageCostProjectionServiceTest {
                 assistant(
                     ASSISTANT_A_ID,
                     TURN_A_ID,
+                    MODEL_B,
                     new ModelUsage(1_000_000, 0, 0, 0, Map.of(), 0L, 1_000_000L))));
 
     assertEquals("1", costs.get(ASSISTANT_A_ID).getAmount());
-    verify(modelRepository).getByProviderNameAndName("provider-b", "model-b");
+    verify(modelRepository).getByName("model-b");
     verifyNoMoreInteractions(modelRepository);
   }
 
@@ -199,13 +237,14 @@ class UsageCostProjectionServiceTest {
                 compactionResult(
                     ASSISTANT_A_ID,
                     TURN_A_ID,
+                    MODEL_B,
                     new ModelUsage(1_000_000, 0, 0, 0, Map.of(), 0L, 1_000_000L)),
-                compactionResult(ASSISTANT_B_ID, ASSISTANT_A_ID, null)));
+                compactionResult(ASSISTANT_B_ID, ASSISTANT_A_ID, MODEL_B, null)));
 
     assertEquals("1", costs.get(ASSISTANT_A_ID).getAmount());
     assertNull(costs.get(ASSISTANT_B_ID));
     assertEquals(1, costs.size());
-    verify(modelRepository).getByProviderNameAndName("provider-b", "model-b");
+    verify(modelRepository).getByName("model-b");
     verifyNoMoreInteractions(modelRepository);
   }
 
@@ -223,6 +262,7 @@ class UsageCostProjectionServiceTest {
                 assistant(
                     ASSISTANT_A_ID,
                     USER_A_ID,
+                    MODEL_A,
                     new ModelUsage(1_000_000, 0, 0, 0, Map.of(), 0L, 1_000_000L))));
 
     assertEquals("1", costs.get(ASSISTANT_A_ID).getAmount());
@@ -242,16 +282,18 @@ class UsageCostProjectionServiceTest {
                 assistant(
                     ASSISTANT_A_ID,
                     USER_A_ID,
+                    MODEL_A,
                     new ModelUsage(1_000_000, 0, 0, 0, Map.of(), 0L, 1_000_000L)),
                 user(USER_B_ID, ASSISTANT_A_ID),
                 assistant(
                     ASSISTANT_B_ID,
                     USER_B_ID,
+                    MODEL_A,
                     new ModelUsage(2_000_000, 0, 0, 0, Map.of(), 0L, 2_000_000L))));
 
     assertEquals("1", costs.get(ASSISTANT_A_ID).getAmount());
     assertEquals("2", costs.get(ASSISTANT_B_ID).getAmount());
-    verify(modelRepository, times(1)).getByProviderNameAndName("provider-a", "model-a");
+    verify(modelRepository, times(1)).getByName("model-a");
     verifyNoMoreInteractions(modelRepository);
   }
 
@@ -273,7 +315,10 @@ class UsageCostProjectionServiceTest {
                 turnStart(TURN_A_ID, ROOT_ID, settings("provider-a", "model-a")),
                 user(USER_A_ID, TURN_A_ID),
                 assistant(
-                    ASSISTANT_A_ID, USER_A_ID, new ModelUsage(1, 0, 0, 0, Map.of(), 0L, 1L))));
+                    ASSISTANT_A_ID,
+                    USER_A_ID,
+                    MODEL_A,
+                    new ModelUsage(1, 0, 0, 0, Map.of(), 0L, 1L))));
 
     String amount = costs.get(ASSISTANT_A_ID).getAmount();
     // 单价 1e-7 × 1 token ÷ 1e6 = 1e-13，精确文本必须保留全部有效位。
@@ -281,19 +326,15 @@ class UsageCostProjectionServiceTest {
     assertTrue(new BigDecimal(amount).signum() > 0, amount);
   }
 
-  /** 测试意图：祖先链不在入参里说明 durable 树已损坏，必须失败而不是拿错误的型号计价。 */
+  /** 成功输出的 metadata 缺少实际执行型号属于数据损坏，必须失败而不是猜测或静默跳过。 */
   @Test
-  void failsClosedWhenAncestryIsMissingFromTheProjectedEntries() {
-    stubModel("provider-a", "model-a", pricing(BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ZERO));
-
-    List<Entry> orphaned =
-        List.of(
-            user(USER_A_ID, ROOT_ID),
-            assistant(ASSISTANT_A_ID, USER_A_ID, new ModelUsage(1, 0, 0, 0, Map.of(), 0L, 1L)));
+  void failsClosedWhenAssistantMetadataHasNoActualModel() {
+    List<Entry> entries =
+        List.of(user(USER_A_ID, ROOT_ID), assistantWithoutModel(ASSISTANT_A_ID, USER_A_ID));
 
     IllegalStateException error =
-        assertThrows(IllegalStateException.class, () -> service.project(orphaned));
-    assertTrue(error.getMessage().contains(ROOT_ID.toString()), error.getMessage());
+        assertThrows(IllegalStateException.class, () -> service.project(entries));
+    assertTrue(error.getMessage().contains(ASSISTANT_A_ID.toString()), error.getMessage());
   }
 
   /** 测试意图：catalog 定义本身非法属于数据损坏，照常抛出而不是静默把该 Entry 降级为「未计价」。 */
@@ -302,8 +343,9 @@ class UsageCostProjectionServiceTest {
     AgentModel broken = new AgentModel();
     broken.setProviderName("provider-a");
     broken.setName("model-a");
+    broken.setKind(AgentModelKind.MODEL);
     broken.setConfigJson("{}");
-    when(modelRepository.getByProviderNameAndName("provider-a", "model-a")).thenReturn(broken);
+    when(modelRepository.getByName("model-a")).thenReturn(broken);
 
     List<Entry> entries =
         List.of(
@@ -313,6 +355,7 @@ class UsageCostProjectionServiceTest {
             assistant(
                 ASSISTANT_A_ID,
                 USER_A_ID,
+                MODEL_A,
                 new ModelUsage(1_000_000, 0, 0, 0, Map.of(), 0L, 1_000_000L)));
 
     IllegalArgumentException error =
@@ -324,8 +367,9 @@ class UsageCostProjectionServiceTest {
     AgentModel model = new AgentModel();
     model.setProviderName(providerName);
     model.setName(modelName);
+    model.setKind(AgentModelKind.MODEL);
     model.setConfigJson(configParser.encode(config(pricing)));
-    when(modelRepository.getByProviderNameAndName(providerName, modelName)).thenReturn(model);
+    when(modelRepository.getByName(modelName)).thenReturn(model);
   }
 
   private static AgentModelPricingDTO pricing(
@@ -368,8 +412,7 @@ class UsageCostProjectionServiceTest {
   }
 
   private static BranchSettings settings(String providerName, String modelName) {
-    return new BranchSettings(
-        "assistant", new ModelSelection(providerName, modelName, "default"), null);
+    return new BranchSettings("assistant", new ModelSelection(modelName, "default"), null);
   }
 
   private static Entry root(BranchSettings settings) {
@@ -391,7 +434,7 @@ class UsageCostProjectionServiceTest {
             new CompactionStart(
                 CompactionPhase.FULL,
                 CompactionTrigger.THRESHOLD,
-                new ModelSelection("provider-b", "model-b", "default"),
+                new ModelSelection("model-b", "default"),
                 1024L,
                 ROOT_ID,
                 null,
@@ -422,20 +465,36 @@ class UsageCostProjectionServiceTest {
         NOW);
   }
 
-  private static Entry assistant(UUID id, UUID parentEntryId, ModelUsage usage) {
+  private static Entry assistant(
+      UUID id, UUID parentEntryId, ModelSelection model, ModelUsage usage) {
     return new Entry(
         id,
         SESSION_ID,
         parentEntryId,
         new MessagePayload(
             new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("hi"))),
-            new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage, null),
+            new AssistantMessageMetadata(
+                GenerationStopReason.COMPLETE, usage, null, model, NOW, null),
+            null),
+        NOW);
+  }
+
+  private static Entry assistantWithoutModel(UUID id, UUID parentEntryId) {
+    return new Entry(
+        id,
+        SESSION_ID,
+        parentEntryId,
+        new MessagePayload(
+            new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("hi"))),
+            new AssistantMessageMetadata(
+                GenerationStopReason.COMPLETE, new ModelUsage(1, 0, 0, 0, Map.of(), 0L, 1L), null),
             null),
         NOW);
   }
 
   /** COMPACTION 结果 Entry：真实模型输出携带 canonical metadata；纯摘要 usage 为 null。 */
-  private static Entry compactionResult(UUID id, UUID parentEntryId, ModelUsage usage) {
+  private static Entry compactionResult(
+      UUID id, UUID parentEntryId, ModelSelection model, ModelUsage usage) {
     return new Entry(
         id,
         SESSION_ID,
@@ -444,7 +503,8 @@ class UsageCostProjectionServiceTest {
             "compacted summary",
             usage == null
                 ? null
-                : new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage, null)),
+                : new AssistantMessageMetadata(
+                    GenerationStopReason.COMPLETE, usage, null, model, NOW, null)),
         NOW);
   }
 }
