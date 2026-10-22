@@ -51,7 +51,7 @@ describe('visible thread presentation', () => {
 
   it('uses the real branch variant as identity without consulting catalog reasoning facts', () => {
     // 身份只来自 branch settings 快照，catalog 未加载（无 models）也不改变结果。
-    expect(threadIdentity({ thread })).toBe('researcher · provider/model (deep)')
+    expect(threadIdentity({ thread })).toBe('researcher · model (deep)')
     expect(threadIdentity({ thread: undefined })).toBeNull()
     // 在运行时边界注入非法 null，验证空值保护。
     expect(Reflect.apply(threadIdentity, undefined, [{ thread: null }])).toBeNull()
@@ -64,7 +64,7 @@ describe('visible thread presentation', () => {
           model: { modelName: 'model', variant: '  ' },
         },
       },
-    })).toBe('researcher · provider/model')
+    })).toBe('researcher · model')
   })
 
   it('reports only selected views and keeps callbacks stable without render loops', () => {
@@ -141,7 +141,7 @@ describe('visible thread presentation', () => {
     expect(result.current.parentHref).toBe('/threads/parent')
     render(<MemoryRouter><ThreadPresentationActions view={result.current} /></MemoryRouter>)
     expect(screen.getByRole('link', { name: '回到父 agent' })).toHaveAttribute('href', '/threads/parent')
-    expect(screen.getByText('researcher · provider/model (deep)')).toHaveAttribute('title', 'researcher · provider/model (deep)')
+    expect(screen.getByText('researcher · model (deep)')).toHaveAttribute('title', 'researcher · model (deep)')
     trigger.remove()
   })
 
@@ -174,9 +174,9 @@ describe('visible thread presentation', () => {
       ...initial, projection: { ...initial.projection, thread: { ...thread, name: 'main' } },
     } })
     expect(result.current.name).toBeNull()
-    expect(result.current.identity).toBe('researcher · provider/model (deep)')
+    expect(result.current.identity).toBe('researcher · model (deep)')
     rerender({ ...initial, projection: { models: [], thread: { ...thread, name: 'main' } } })
-    expect(result.current.identity).toBe('researcher · provider/model (deep)')
+    expect(result.current.identity).toBe('researcher · model (deep)')
   })
 
   it('offers only direct-parent navigation, never topbar Debug or subagent actions', () => {
