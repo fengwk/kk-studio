@@ -301,6 +301,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
     final Map<StopReceiptKey, StoredStopReceipt> stopReceipts = new HashMap<>();
     final Map<StopRootKey, List<StopReceiptKey>> stopReceiptsByRoot = new HashMap<>();
     final Map<WorkTarget, Work> works = new HashMap<>();
+    final Map<GroupCooldownKey, GroupCooldown> groupCooldowns = new HashMap<>();
     long nextId;
 
     static State copyOf(State source) {
@@ -315,10 +316,16 @@ public final class InMemoryHarnessStore implements HarnessStore {
       copy.stopReceipts.putAll(source.stopReceipts);
       copy.stopReceiptsByRoot.putAll(source.stopReceiptsByRoot);
       copy.works.putAll(source.works);
+      copy.groupCooldowns.putAll(source.groupCooldowns);
       copy.nextId = source.nextId;
       return copy;
     }
   }
+
+  private record GroupCooldownKey(
+      String groupName, long groupVersion, String memberModelName, String memberVariant) {}
+
+  private record GroupCooldown(Instant cooldownUntil) {}
 
   /** Stop 回执身份 {@code (threadId, stopRequestId)}。 */
   private record StopReceiptKey(UUID threadId, UUID stopRequestId) {}
@@ -1776,6 +1783,36 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     @Override
+    public boolean isGroupMemberCooling(
+        String groupName,
+        long groupVersion,
+        String memberModelName,
+        String memberVariant,
+        Instant now) {
+      checkOpen();
+      GroupCooldown cooldown =
+          state.groupCooldowns.get(
+              new GroupCooldownKey(groupName, groupVersion, memberModelName, memberVariant));
+      return cooldown != null && cooldown.cooldownUntil().isAfter(now);
+    }
+
+    @Override
+    public void freezeGroupMember(
+        String groupName,
+        long groupVersion,
+        String memberModelName,
+        String memberVariant,
+        Instant cooldownUntil,
+        Instant now) {
+      checkOpen();
+      GroupCooldownKey key =
+          new GroupCooldownKey(groupName, groupVersion, memberModelName, memberVariant);
+      GroupCooldown existing = state.groupCooldowns.get(key);
+      if (existing == null || existing.cooldownUntil().isBefore(cooldownUntil)) {
+        state.groupCooldowns.put(key, new GroupCooldown(cooldownUntil));
+      }
+    }
+
     public Optional<ToolInvocation> findToolInvocation(UUID id) {
       checkOpen();
       return Optional.ofNullable(state.toolInvocations.get(id));

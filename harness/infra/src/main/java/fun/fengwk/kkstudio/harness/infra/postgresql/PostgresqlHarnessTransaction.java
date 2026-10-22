@@ -1830,15 +1830,23 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       Instant cooldownUntil,
       Instant now) {
     checkOpen();
+    // 与组配置写入共用 agent_model 行锁：先锁定当前版本，旧版本 callback 不得写入/延长新配置的冷却。
+    Long currentVersion =
+        queryOne(
+                "select version from agent_model where name = ? for share",
+                (rs, rowNumber) -> rs.getLong(1),
+                groupName)
+            .orElse(null);
+    if (currentVersion == null || currentVersion != groupVersion) {
+      return;
+    }
     update(
         """
         insert into agent_model_group_cooldown (
             group_name, member_model_name, member_variant, group_version, cooldown_until,
             created_at, updated_at
         )
-        select ?, ?, ?, ?, ?, ?, ?
-        from agent_model
-        where name = ? and version = ?
+        values (?, ?, ?, ?, ?, ?, ?)
         on conflict (group_name, member_model_name, member_variant) do update
         set cooldown_until = greatest(
                 agent_model_group_cooldown.cooldown_until,
@@ -1853,9 +1861,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
         groupVersion,
         PostgresqlHarnessRows.timestamp(cooldownUntil),
         PostgresqlHarnessRows.timestamp(now),
-        PostgresqlHarnessRows.timestamp(now),
-        groupName,
-        groupVersion);
+        PostgresqlHarnessRows.timestamp(now));
   }
 
   @Override

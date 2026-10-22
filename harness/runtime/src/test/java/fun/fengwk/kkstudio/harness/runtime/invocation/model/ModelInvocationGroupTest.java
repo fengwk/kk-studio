@@ -98,6 +98,8 @@ class ModelInvocationGroupTest {
             0,
             "",
             "",
+            ModelSelection.model("model", "v1"),
+            null,
             new ModelInvocationError(ProviderErrorKind.AUTHENTICATION, "denied"),
             CREATED,
             CREATED);
@@ -133,7 +135,16 @@ class ModelInvocationGroupTest {
             null,
             new ModelGroupProgress("group", 7L, 0, 0));
     ModelAttemptFailure failure =
-        new ModelAttemptFailure(1, 0, "", "", error(), CREATED, CREATED.plusSeconds(1));
+        new ModelAttemptFailure(
+            1,
+            0,
+            "",
+            "",
+            ModelSelection.model("model", "v1"),
+            null,
+            error(),
+            CREATED,
+            CREATED.plusSeconds(1));
 
     ModelInvocation retried =
         running

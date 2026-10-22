@@ -301,8 +301,12 @@ public record ModelInvocation(
     if (group == null || before == null || after == null) {
       throw new IllegalArgumentException("group progress cannot be introduced or removed");
     }
-    if (next.status() != ModelInvocationStatus.READY) {
-      throw new IllegalArgumentException("group progress may only change on a READY retry");
+    boolean preparingDispatch =
+        stored.status() == ModelInvocationStatus.READY
+            && next.status() == ModelInvocationStatus.DISPATCHING;
+    if (next.status() != ModelInvocationStatus.READY && !preparingDispatch) {
+      throw new IllegalArgumentException(
+          "group progress may only change on a READY retry or before dispatch");
     }
     if (!before.groupName().equals(after.groupName())
         || before.groupVersion() != after.groupVersion()
@@ -508,7 +512,11 @@ public record ModelInvocation(
             && stored.groupProgress() != null
             && next.groupProgress() != null
             && next.groupProgress().memberIndex() > stored.groupProgress().memberIndex();
-    if (!confirmedRetry && !dispatchRetry) {
+    boolean groupTerminalFailure =
+        stored.status() == ModelInvocationStatus.RUNNING
+            && next.status() == ModelInvocationStatus.FAILED
+            && stored.groupProgress() != null;
+    if (!confirmedRetry && !dispatchRetry && !groupTerminalFailure) {
       if (!storedFailures.equals(nextFailures)) {
         throw new IllegalArgumentException("failedAttempts may only change on a retry transition");
       }
@@ -529,7 +537,7 @@ public record ModelInvocation(
       throw new IllegalArgumentException(
           "failed attempt must equal the attempt consumed by this retry");
     }
-    if (!appended.error().retryCandidate() && !groupAdvance) {
+    if (!appended.error().retryCandidate() && !groupAdvance && !groupTerminalFailure) {
       throw new IllegalArgumentException("failed attempt requires a retryable error");
     }
   }
@@ -635,7 +643,26 @@ public record ModelInvocation(
         createdAt,
         effectiveMutationTime(now),
         null,
-        progress);
+        progress,
+        requestedAt);
+  }
+
+  /** RUNNING -&gt; FAILED：保留最后一次真实失败审计，供组全部成员耗尽后的终止事实使用。 */
+  public ModelInvocation failAfterAttempt(
+      ModelInvocationError error, ModelAttemptFailure failure, Instant now) {
+    Objects.requireNonNull(error, "error");
+    Objects.requireNonNull(failure, "failure");
+    if (status != ModelInvocationStatus.RUNNING) {
+      throw new IllegalArgumentException("failAfterAttempt requires RUNNING status");
+    }
+    if (failure.attempt() != attempt) {
+      throw new IllegalArgumentException(
+          "failed attempt must equal the current invocation attempt");
+    }
+    List<ModelAttemptFailure> nextFailures = new ArrayList<>(failedAttempts);
+    nextFailures.add(failure);
+    return withState(
+        ModelInvocationStatus.FAILED, attempt, null, null, error, null, nextFailures, now);
   }
 
   /** RUNNING -&gt; READY：记录一次瞬态失败后从头重新调度；attempt 保持已确认，安全 checkpoint 被丢弃。 */
