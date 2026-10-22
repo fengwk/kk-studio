@@ -383,9 +383,7 @@ public final class ModelProcessor implements AutoCloseable {
     }
     // Gateway admission 前确保 lease 有完整 margin：剩余不足以撑到首次 heartbeat 时立即 renew。
     ProcessorLeaseSupport.ensureLeaseMargin(tx, claim, config.leaseConfig(), now);
-    tx.updateModelInvocation(model.beginDispatch(now));
-    tx.updateThread(thread.touchVersion(now));
-    // ModelInvocation 必须挂在真实 TURN_START 上的不变量断言：压缩子身份不再从 TURN_START payload 推导（父压缩 turn
+    // ModelInvocation 必须挂在真实 TURN_START 上的不变量断言：压缩子身份不再从 TURN_START 推导（父压缩 turn
     // 不产生 ModelInvocation），但仍拒绝引用缺失 / 类型错误的 turn start。
     UUID invocationId = model.id();
     UUID turnStartEntryId = model.turnStartEntryId();
@@ -419,6 +417,7 @@ public final class ModelProcessor implements AutoCloseable {
         index++;
       }
       if (index >= group.members().size()) {
+        // THREAD Work 先于 MODEL Work 获得锁，保持项目全局 Work 锁序。
         tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
         if (tx.lockClaimedWork(claim, now).isEmpty()) {
           throw new ClaimLostSignal();
@@ -437,10 +436,12 @@ public final class ModelProcessor implements AutoCloseable {
       if (index != progress.memberIndex()) {
         progress = new ModelGroupProgress(progress.groupName(), progress.groupVersion(), index, 0);
         model = model.withGroupProgress(progress, now);
-        tx.updateModelInvocation(model);
-        tx.updateThread(thread.touchVersion(now));
       }
     }
+    // 冷却跳过后的 progress 与 DISPATCHING 一次落库，避免先 dispatch 再用旧 READY 快照覆盖状态。
+    model = model.beginDispatch(now);
+    tx.updateModelInvocation(model);
+    tx.updateThread(thread.touchVersion(now));
     return new Prepare.Dispatched(
         thread.id(),
         model.requestHeadEntryId(),
@@ -517,6 +518,17 @@ public final class ModelProcessor implements AutoCloseable {
     boolean unconfirmedDispatch = model.status() == ModelInvocationStatus.DISPATCHING;
     int chargeableAttempt =
         unconfirmedDispatch ? Math.addExact(model.attempt(), 1) : model.attempt();
+    var group = model.requestSpec().groupExecution();
+    ModelGroupProgress groupProgress = model.groupProgress();
+    if (group != null
+        && (groupProgress == null
+            || groupProgress.groupVersion() != group.groupVersion()
+            || groupProgress.memberIndex() >= group.members().size())) {
+      throw new IllegalStateException("group invocation is missing matching durable progress");
+    }
+    // 组恢复只消耗当前成员的尝试预算，绝不因 UNKNOWN 自动冻结或降级到下一成员。
+    int budgetAttempt =
+        group == null ? chargeableAttempt : Math.addExact(groupProgress.memberAttempts(), 1);
     ModelInvocationError error =
         new ModelInvocationError(
             ProviderErrorKind.TRANSIENT,
@@ -526,16 +538,20 @@ public final class ModelProcessor implements AutoCloseable {
                 : "model work lease expired; provider outcome cannot be confirmed");
     InvocationRetryDecision decision =
         InvocationRetryDecision.decide(
-            config.retryPolicyProvider().retryPolicy(), true, chargeableAttempt);
+            config.retryPolicyProvider().retryPolicy(), true, budgetAttempt);
     if (decision.retry()) {
       Instant failedAt = durableFailedAt(now, thread, model);
       Instant retryAt = failedAt.plus(decision.delay());
       ModelAttemptFailure failure =
           attemptFailure(model, chargeableAttempt, error, failedAt, retryAt);
-      tx.updateModelInvocation(
+      ModelInvocation retried =
           unconfirmedDispatch
               ? model.retryDispatched(failure, failedAt)
-              : model.retryReady(failure, failedAt));
+              : model.retryReady(failure, failedAt);
+      if (group != null) {
+        retried = retried.withGroupProgress(groupProgress.retryCurrent(), failedAt);
+      }
+      tx.updateModelInvocation(retried);
       tx.updateThread(thread.touchVersion(failedAt));
       if (tx.lockClaimedWork(claim, now).isEmpty()) {
         throw new ClaimLostSignal();
@@ -568,6 +584,8 @@ public final class ModelProcessor implements AutoCloseable {
         checkpoint == null ? 0L : checkpoint.sequence(),
         checkpoint == null ? "" : checkpoint.text(),
         checkpoint == null ? "" : checkpoint.thinking(),
+        model.actualSelection(),
+        model.requestedAt(),
         error,
         failedAt,
         retryAt);
