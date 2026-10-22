@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import type {
+  AgentModelConditionDTO,
   AgentModelPricingDefinitionDTO,
 } from '@/shared/api/contracts/ai-catalog'
 import {
+  MAX_CONDITION_CHILDREN,
+  MAX_CONDITION_DEPTH,
   clonePricing,
   describeCondition,
   emptyPricingDraft,
+  normalizeCondition,
   normalizePricing,
 } from '@/features/ai/catalog/ai-model-pricing-codec'
 
@@ -62,6 +66,74 @@ describe('ai-model-pricing-codec', () => {
         },
       ],
     })
+  })
+
+  it('round-trips zero-edit pricing while preserving explicit empty TTL and false conditions', () => {
+    const source: AgentModelPricingDefinitionDTO = {
+      base: {
+        input: '1',
+        output: '2',
+        cacheRead: '0.1',
+        cacheWrite: '0.2',
+        cacheWriteByTtl: {},
+        reasoning: null,
+      },
+      overrides: [{
+        id: 'all-day',
+        when: {
+          serviceTier: [],
+          any: [],
+          time: { start: '12:00', end: '24:00', timezone: 'UTC' },
+        },
+        rates: { cacheWriteByTtl: {}, reasoning: null },
+      }],
+      multipliers: [],
+    }
+
+    const roundTrip = normalizePricing(
+      clonePricing(JSON.parse(JSON.stringify(source)) as AgentModelPricingDefinitionDTO),
+    )
+    expect(roundTrip).toEqual(source)
+    expect(roundTrip.overrides[0]!.when.serviceTier).toEqual([])
+    expect(roundTrip.overrides[0]!.when.any).toEqual([])
+    expect(roundTrip.overrides[0]!.rates.cacheWriteByTtl).toEqual({})
+  })
+
+  it('accepts end 24:00 after any valid start and rejects equal bounds', () => {
+    const time = (start: string, end: string): AgentModelConditionDTO => ({
+      time: { start, end, timezone: 'UTC' },
+    })
+
+    expect(normalizeCondition(time('00:00', '24:00')).time).toEqual({
+      start: '00:00', end: '24:00', timezone: 'UTC',
+    })
+    expect(normalizeCondition(time('06:30', '24:00')).time).toEqual({
+      start: '06:30', end: '24:00', timezone: 'UTC',
+    })
+    expect(() => normalizeCondition(time('00:00', '00:00'))).toThrow(/must differ/)
+    expect(() => normalizeCondition(time('09:00', '09:00'))).toThrow(/must differ/)
+    expect(() => normalizeCondition(time('24:00', '24:00'))).toThrow(/start/)
+    expect(() => normalizeCondition(time('12:00', '24:01'))).toThrow(/end/)
+  })
+
+  it('honors the backend condition depth and list bounds without exponential fixtures', () => {
+    const nestedNot = (depth: number): AgentModelConditionDTO => {
+      let condition: AgentModelConditionDTO = {}
+      for (let index = 0; index < depth; index += 1) {
+        condition = { not: condition }
+      }
+      return condition
+    }
+    const children = Array.from({ length: MAX_CONDITION_CHILDREN }, () => ({}))
+    const tiers = Array.from({ length: MAX_CONDITION_CHILDREN }, (_, index) => `tier-${index}`)
+
+    expect(normalizeCondition(nestedNot(MAX_CONDITION_DEPTH)).not).toBeDefined()
+    expect(() => normalizeCondition(nestedNot(MAX_CONDITION_DEPTH + 1))).toThrow(/depth/)
+    expect(normalizeCondition({ any: children }).any).toHaveLength(MAX_CONDITION_CHILDREN)
+    expect(() => normalizeCondition({ any: [...children, {}] })).toThrow(/child count/)
+    expect(normalizeCondition({ serviceTier: tiers }).serviceTier).toHaveLength(MAX_CONDITION_CHILDREN)
+    expect(() => normalizeCondition({ serviceTier: [...tiers, 'overflow'] }))
+      .toThrow(/serviceTier/)
   })
 
   it('keeps null reasoning as following output and preserves explicit zero', () => {
@@ -125,6 +197,7 @@ describe('ai-model-pricing-codec', () => {
 
   it('describes structured conditions without raw JSON', () => {
     expect(describeCondition({})).toBe('always')
+    expect(describeCondition({ serviceTier: [] })).toBe('tier ∈ ∅')
     expect(describeCondition({
       context: { gt: 1000, lte: 2000 },
       serviceTier: ['priority'],

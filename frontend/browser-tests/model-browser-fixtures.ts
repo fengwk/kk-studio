@@ -122,7 +122,14 @@ export const FIXTURE_CANDIDATES: ModelDefaultCandidateDTO[] = [
         reasoning: '9',
       },
       overrides: [
-        { id: 'ov-ctx', when: { context: { gt: 200000 } }, rates: { input: '6', output: '30' } },
+        {
+          id: 'ov-ctx',
+          when: {
+            context: { gt: 200000 },
+            time: { start: '00:00', end: '24:00', timezone: 'UTC' },
+          },
+          rates: { input: '6', output: '30', cacheWriteByTtl: {} },
+        },
       ],
       multipliers: [
         { id: 'mx-tier', when: { serviceTier: ['priority'] }, factors: { input: '1.5', output: '1.2' } },

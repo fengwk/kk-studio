@@ -354,6 +354,28 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
       await overrideInput.fill('6.5')
       await expect(overrideInput).toHaveValue('6.5')
 
+      // 目录给出的全天时间必须可读可编辑；TTL patch 用显式空 map 表示清空继承。
+      await expect(overrideRule.getByLabel('开始时间', { exact: true })).toHaveValue('00:00')
+      await expect(overrideRule.getByLabel('结束时间', { exact: true })).toHaveValue('24:00')
+      const ttlOverride = overrideRule.getByRole('checkbox', { name: '覆盖缓存写入 TTL', exact: true })
+      await expect(ttlOverride).toBeChecked()
+      await expect(overrideRule.getByLabel('TTL 秒数', { exact: true })).toHaveCount(0)
+      await overrideRule.getByRole('button', { name: '添加 TTL 覆盖', exact: true }).click()
+      await expect(overrideRule.getByLabel('TTL 秒数', { exact: true })).toHaveValue('300')
+      if (viewport.width === 390) {
+        // 仅在归档截图时增高 390 视口，使 24:00 与 TTL 覆盖开关同屏可见。
+        await page.setViewportSize({ width: 390, height: 1400 })
+        await overrideRule.getByLabel('结束时间', { exact: true }).scrollIntoViewIfNeeded()
+        await page.screenshot({
+          path: test.info().outputPath('catalog-pricing-time-ttl-390.png'),
+          fullPage: true,
+        })
+        await page.setViewportSize(viewport)
+      }
+      await overrideRule.getByRole('button', { name: '删除 TTL 覆盖', exact: true }).click()
+      await expect(overrideRule.getByLabel('TTL 秒数', { exact: true })).toHaveCount(0)
+      await expect(ttlOverride).toBeChecked()
+
       await pricing.getByRole('button', { name: '价格倍率', exact: true }).click()
       const multiplierRule = pricing.locator('.pricing-rule').filter({ hasText: 'mx-tier' })
       await expect(multiplierRule).toBeVisible()
