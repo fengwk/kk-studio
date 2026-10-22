@@ -1067,7 +1067,13 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
             assistantEntryId,
             sessionId,
             userEntryId,
-            new HistoryPayloadMapper().assistantPayload(response, requestSpec.toolBindings()),
+            new HistoryPayloadMapper()
+                .assistantPayload(
+                    response,
+                    requestSpec.toolBindings(),
+                    ModelSelection.model(
+                        requestSpec.model().modelName(), requestSpec.variant().id()),
+                    now),
             now));
 
     UUID modelId = tx.nextId();
