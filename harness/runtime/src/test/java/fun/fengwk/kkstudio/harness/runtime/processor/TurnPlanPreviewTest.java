@@ -49,7 +49,7 @@ class TurnPlanPreviewTest {
     var baseline = seedBaseline(store);
     EntryPath source = path(store, baseline.threadId());
     NewThreadCommand setModel =
-        command(new SetModelCommandPayload(new ModelSelection("provider-2", "model-2", "v2")));
+        command(new SetModelCommandPayload(ModelSelection.model("model-2", "v2")));
     NewThreadCommand setAgent = command(new SetAgentCommandPayload("agent-2"));
     NewThreadCommand userMessage = command(userMessage("hello preview"));
 
@@ -64,7 +64,7 @@ class TurnPlanPreviewTest {
     assertEquals(TurnStartReason.INPUT, start.reason());
     assertEquals(baseline.threadId(), start.ownerThreadId());
     assertEquals(
-        new BranchSettings("agent-2", new ModelSelection("provider-2", "model-2", "v2"), null),
+        new BranchSettings("agent-2", ModelSelection.model("model-2", "v2"), null),
         start.settings());
     MessagePayload message = (MessagePayload) candidate.entries().get(2).payload();
     assertEquals(AgentMessageRole.USER, message.message().role());

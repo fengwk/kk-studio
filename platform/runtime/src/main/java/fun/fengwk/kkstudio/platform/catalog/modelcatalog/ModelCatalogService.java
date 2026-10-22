@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.catalog.modelcatalog;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
@@ -8,6 +9,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.ModelCatalogSource;
 import fun.fengwk.kkstudio.share.ai.catalog.ModelDefaultCandidateDTO;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -34,9 +36,12 @@ public class ModelCatalogService {
   static final Duration TTL = Duration.ofHours(6);
   static final int DEFAULT_PAGE_SIZE = 20;
   static final int MAX_PAGE_SIZE = 50;
+  static final int MAX_QUERY_LENGTH = 200;
+  static final int MAX_CURSOR_LENGTH = 512;
 
   private final SystemSettingsSnapshot settings;
   private final ModelCatalogTransport transport;
+  private final Clock clock;
   private final Map<ModelCatalogSource, ModelsDevCatalogAdapter> adapters =
       new EnumMap<>(ModelCatalogSource.class);
   private final Map<ModelCatalogSource, SourceState> states =
@@ -46,13 +51,24 @@ public class ModelCatalogService {
 
   private ModelCatalogSource activeSource;
 
+  @Autowired
   public ModelCatalogService(
       SystemSettingsSnapshot settings,
       ModelCatalogTransport transport,
       ModelsDevV1Adapter v1Adapter,
       ModelsDevV2Adapter v2Adapter) {
+    this(settings, transport, v1Adapter, v2Adapter, Clock.systemUTC());
+  }
+
+  ModelCatalogService(
+      SystemSettingsSnapshot settings,
+      ModelCatalogTransport transport,
+      ModelsDevV1Adapter v1Adapter,
+      ModelsDevV2Adapter v2Adapter,
+      Clock clock) {
     this.settings = Objects.requireNonNull(settings, "settings");
     this.transport = Objects.requireNonNull(transport, "transport");
+    this.clock = Objects.requireNonNull(clock, "clock");
     adapters.put(v1Adapter.source(), v1Adapter);
     adapters.put(v2Adapter.source(), v2Adapter);
     for (ModelCatalogSource source : ModelCatalogSource.values()) {
@@ -65,21 +81,28 @@ public class ModelCatalogService {
     for (int attempt = 0; attempt < 3; attempt++) {
       ModelCatalogSource source = observeCurrentSource();
       SourceState state = states.get(source);
-      CompletableFuture<Void> load = null;
+      Load load = null;
       synchronized (lock) {
         if (state.snapshot == null || expired(state)) {
-          load = startLoadLocked(source, state);
+          startLoadLocked(source, state);
+        }
+        if (state.loading) {
+          load = new Load(state.loadGeneration, state.load);
         }
       }
       if (load != null) {
         try {
-          load.join();
+          load.future().join();
         } catch (CompletionException ignored) {
           // 错误已经记录在来源状态中；保留旧快照语义。
         }
       }
       synchronized (lock) {
         if (source == activeSource) {
+          if (load != null && state.generation < load.generation()) {
+            // 这一轮加载在来源/generation 切换后被丢弃，不能把空页当作最终结果。
+            continue;
+          }
           return pageLocked(source, state, query, cursor, pageSize);
         }
       }
@@ -111,12 +134,13 @@ public class ModelCatalogService {
     }
   }
 
-  private CompletableFuture<Void> startLoadLocked(ModelCatalogSource source, SourceState state) {
+  private void startLoadLocked(ModelCatalogSource source, SourceState state) {
     if (state.loading) {
-      return state.load;
+      return;
     }
     long loadGeneration = generation.incrementAndGet();
     state.loading = true;
+    state.loadGeneration = loadGeneration;
     state.error = null;
     CompletableFuture<Void> future =
         CompletableFuture.runAsync(
@@ -127,7 +151,7 @@ public class ModelCatalogService {
                 synchronized (lock) {
                   if (loadGeneration == generation.get()) {
                     state.snapshot = List.copyOf(candidates);
-                    state.fetchedAt = Instant.now();
+                    state.fetchedAt = Instant.now(clock);
                     state.generation = loadGeneration;
                     state.error = null;
                   }
@@ -144,7 +168,6 @@ public class ModelCatalogService {
               }
             });
     state.load = future;
-    return future;
   }
 
   private ModelCatalogPageDTO pageLocked(
@@ -171,7 +194,7 @@ public class ModelCatalogService {
     if (candidates == null || candidates.isEmpty()) {
       return List.of();
     }
-    String needle = query == null ? "" : query.strip().toLowerCase(Locale.ROOT);
+    String needle = normalizeQuery(query);
     List<ModelDefaultCandidateDTO> filtered = new ArrayList<>();
     for (ModelDefaultCandidateDTO candidate : candidates) {
       if (needle.isEmpty() || matches(candidate, needle)) {
@@ -189,6 +212,17 @@ public class ModelCatalogService {
     return filtered;
   }
 
+  private static String normalizeQuery(String query) {
+    if (query == null) {
+      return "";
+    }
+    String normalized = query.strip();
+    if (normalized.length() > MAX_QUERY_LENGTH) {
+      normalized = normalized.substring(0, MAX_QUERY_LENGTH);
+    }
+    return normalized.toLowerCase(Locale.ROOT);
+  }
+
   private static boolean matches(ModelDefaultCandidateDTO candidate, String needle) {
     return contains(candidate.getName(), needle)
         || contains(candidate.getProvider(), needle)
@@ -199,12 +233,12 @@ public class ModelCatalogService {
     return value != null && value.toLowerCase(Locale.ROOT).contains(needle);
   }
 
-  private static boolean expired(SourceState state) {
-    return state.fetchedAt == null || !state.fetchedAt.plus(TTL).isAfter(Instant.now());
+  private boolean expired(SourceState state) {
+    return state.fetchedAt == null || !state.fetchedAt.plus(TTL).isAfter(Instant.now(clock));
   }
 
   private static int cursorOffset(String cursor, String generation) {
-    if (cursor == null || cursor.isBlank()) {
+    if (cursor == null || cursor.isBlank() || cursor.length() > MAX_CURSOR_LENGTH) {
       return 0;
     }
     try {
@@ -236,7 +270,10 @@ public class ModelCatalogService {
     private Instant fetchedAt;
     private long generation;
     private boolean loading;
+    private long loadGeneration;
     private String error;
     private CompletableFuture<Void> load;
   }
+
+  private record Load(long generation, CompletableFuture<Void> future) {}
 }

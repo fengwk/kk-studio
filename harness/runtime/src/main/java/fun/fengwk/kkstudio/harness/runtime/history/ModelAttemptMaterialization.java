@@ -146,7 +146,11 @@ public final class ModelAttemptMaterialization {
     }
     MessagePayload expected =
         new HistoryPayloadMapper()
-            .assistantPayload(invocation.result(), invocation.requestSpec().toolBindings());
+            .assistantPayload(
+                invocation.result(),
+                invocation.requestSpec().toolBindings(),
+                invocation.actualSelection(),
+                invocation.requestedAt());
     if (!expected.equals(resultPayload)) {
       throw new IllegalArgumentException(
           "model result must materialize the exact assistant payload");

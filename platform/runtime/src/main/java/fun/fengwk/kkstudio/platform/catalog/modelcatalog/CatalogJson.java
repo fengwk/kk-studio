@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.catalog.modelcatalog;
 
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.cfg.JsonNodeFeature;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.math.BigDecimal;
@@ -9,7 +10,8 @@ import java.math.BigDecimal;
 /** 模型目录适配器共享的只读 JSON 工具；错误消息只描述字段，不回显整份外部数据。 */
 final class CatalogJson {
 
-  private static final JsonMapper MAPPER = JsonMapper.builder().build();
+  private static final JsonMapper MAPPER =
+      JsonMapper.builder().enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS).build();
 
   private CatalogJson() {}
 

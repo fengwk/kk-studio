@@ -1,5 +1,5 @@
 import type { AgentDraft, ModelDraft } from '@/features/ai/catalog/ai-console-types'
-import { modelRef, type AgentModelView } from '@/features/ai/catalog/AgentModelView'
+import type { AgentModelView } from '@/features/ai/catalog/AgentModelView'
 import type { AgentProviderDTO } from '@/shared/api/contracts/ai-catalog'
 import {
   resolvePreferredVariant,
@@ -54,9 +54,15 @@ export function normalizeEditModelDraftProvider(
 }
 
 export function normalizeAgentDraftDefaultVariant(draft: AgentDraft, models: AgentModelView[]): AgentDraft {
-  const selectedModel = models.find((model) => modelRef(model) === draft.model)
+  const selectedModel = models.find((model) => model.name === draft.model)
   if (!selectedModel) {
+    // 模型不在当前页时不丢弃持久化选择，等待详情/下一页重新校验；仅归一化空白值。
     const variant = trimValue(draft.variant)
+    return variant === draft.variant ? draft : { ...draft, variant }
+  }
+  if (selectedModel.kind === 'GROUP') {
+    // 组没有默认 Variant 覆盖；也绝不伪造一个组级 variant。
+    const variant = ''
     return variant === draft.variant ? draft : { ...draft, variant }
   }
 
@@ -78,19 +84,19 @@ export function normalizeCreateAgentDraftSelection(
   models: AgentModelView[],
   preferredModel?: string | null,
 ): AgentDraft {
-  if (models.some((model) => modelRef(model) === draft.model)) {
+  if (models.some((model) => model.name === draft.model)) {
     return normalizeAgentDraftDefaultVariant(draft, models)
   }
 
   const preferredModelValue = preferredModel?.trim()
   const preferred = preferredModelValue
-    ? models.find((model) => modelRef(model) === preferredModelValue)
+    ? models.find((model) => model.name === preferredModelValue)
     : undefined
   if (preferred) {
     return normalizeAgentDraftDefaultVariant(
       {
         ...draft,
-        model: modelRef(preferred),
+        model: preferred.name,
         // 切换默认 model 时清空覆盖，以便应用新 model 的默认值。
         variant: '',
       },
@@ -105,7 +111,7 @@ export function normalizeCreateAgentDraftSelection(
   return normalizeAgentDraftDefaultVariant(
     {
       ...draft,
-      model: modelRef(fallback),
+      model: fallback.name,
       variant: '',
     },
     models,
@@ -117,14 +123,14 @@ export function applyAgentModelSelection(
   model: string,
   models: AgentModelView[],
 ): AgentDraft {
-  const selectedModel = models.find((item) => modelRef(item) === model)
+  const selectedModel = models.find((item) => item.name === model)
   if (!selectedModel) {
     return { ...draft, model, variant: '' }
   }
   return {
     ...draft,
-    model: modelRef(selectedModel),
-    // model 切换时清空覆盖；除非用户重新覆盖，否则使用 model.defaultVariant。
+    model: selectedModel.name,
+    // model 切换时清空覆盖；组本身没有组级 Variant。
     variant: '',
   }
 }

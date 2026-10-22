@@ -1,16 +1,19 @@
-import type { ModelDraft, ModelPricingDraft, VariantDraft } from '@/features/ai/catalog/ai-console-types'
+import type { ModelDraft, VariantDraft } from '@/features/ai/catalog/ai-console-types'
 import {
   newVariantDraft,
-  numberToNull,
   trimToNull,
 } from '@/features/ai/catalog/ai-resource-draft-primitives'
+import {
+  clonePricing,
+  emptyPricingDraft,
+  normalizePricing,
+} from '@/features/ai/catalog/ai-model-pricing-codec'
 import type {
   AgentModelConfigDTO,
   AgentModelCreateDTO,
   AgentModelDTO,
   AgentModelEditablePropertiesDTO,
   AgentModelInputModality,
-  AgentModelPricingDTO,
   AgentModelVariantDTO,
 } from '@/shared/api/contracts/ai-catalog'
 
@@ -22,26 +25,6 @@ const AGENT_MODEL_MODALITIES: AgentModelInputModality[] = [
   'DOCUMENT',
 ]
 const AGENT_MODEL_MODALITY_SET = new Set<string>(AGENT_MODEL_MODALITIES)
-
-/**
- * 新建 model 的默认 pricing 元数据。表单不展示这些字段；
- * 已有 model 保留其之前持久化的元数据。
- */
-function defaultPricingDraft(): ModelPricingDraft {
-  return {
-    currency: 'USD',
-    pricingTier: 'default',
-    serviceTier: 'default',
-    serviceTierMultiplier: '1',
-    version: 'v1',
-    inputPerMillionTokens: '0',
-    outputPerMillionTokens: '0',
-    cacheReadPerMillionTokens: '0',
-    cacheWritePerMillionTokens: '0',
-    cacheWriteLongPerMillionTokens: '0',
-    reasoningPerMillionTokens: '0',
-  }
-}
 
 export function emptyModelDraft(
   provider?: { name: string } | null,
@@ -56,7 +39,7 @@ export function emptyModelDraft(
     tools: true,
     reasoning: false,
     inputModalities: ['TEXT'],
-    pricing: defaultPricingDraft(),
+    pricing: emptyPricingDraft(),
     defaultVariant: 'medium',
     variants: [newVariantDraft({ id: 'medium' })],
   }
@@ -94,29 +77,16 @@ function parseVariant(variant: AgentModelVariantDTO): VariantDraft {
   })
 }
 
-function parsePricing(pricing: AgentModelPricingDTO): ModelPricingDraft {
-  return {
-    currency: pricing.currency,
-    pricingTier: pricing.pricingTier,
-    serviceTier: pricing.serviceTier,
-    serviceTierMultiplier: String(pricing.serviceTierMultiplier),
-    version: pricing.version,
-    inputPerMillionTokens: String(pricing.inputPerMillionTokens),
-    outputPerMillionTokens: String(pricing.outputPerMillionTokens),
-    cacheReadPerMillionTokens: String(pricing.cacheReadPerMillionTokens),
-    cacheWritePerMillionTokens: String(pricing.cacheWritePerMillionTokens),
-    cacheWriteLongPerMillionTokens: String(pricing.cacheWriteLongPerMillionTokens),
-    reasoningPerMillionTokens: String(pricing.reasoningPerMillionTokens),
-  }
-}
-
 export function toModelDraft(model: AgentModelDTO): ModelDraft {
   const config = model.config
+  if (!config) {
+    throw new Error(`MODEL ${model.name} is missing config`)
+  }
 
   return {
-    providerName: model.providerName,
+    providerName: model.providerName ?? '',
     name: model.name,
-    modelId: model.modelId,
+    modelId: model.modelId ?? '',
     description: model.description || '',
     contextWindow: String(config.limit.context),
     maxOutputTokens: String(config.limit.output),
@@ -125,30 +95,18 @@ export function toModelDraft(model: AgentModelDTO): ModelDraft {
     inputModalities: [...config.abilities.inputModalities],
     defaultVariant: config.defaultVariant,
     variants: config.variants.map(parseVariant),
-    pricing: parsePricing(config.pricing),
+    pricing: clonePricing(config.pricing),
   }
 }
 
 function requirePositiveInt(value: string, field: string): number {
-  const parsed = numberToNull(value)
-  if (parsed == null || !Number.isInteger(parsed) || parsed <= 0) {
+  const normalized = value.trim()
+  if (!/^[1-9]\d*$/.test(normalized)) {
     throw new Error(`${field} must be a positive integer`)
   }
-  return parsed
-}
-
-function requireNumber(value: string, field: string): number {
-  const parsed = numberToNull(value)
-  if (parsed == null) {
-    throw new Error(`${field} must be a number`)
-  }
-  return parsed
-}
-
-function requireNonNegativeNumber(value: string, field: string): number {
-  const parsed = requireNumber(value, field)
-  if (parsed < 0) {
-    throw new Error(`${field} must not be negative`)
+  const parsed = Number(normalized)
+  if (!Number.isSafeInteger(parsed)) {
+    throw new Error(`${field} must be a safe positive integer`)
   }
   return parsed
 }
@@ -207,7 +165,7 @@ function serializeVariants(
   })
 }
 
-function buildModelConfig(draft: ModelDraft): AgentModelConfigDTO {
+export function buildModelConfig(draft: ModelDraft): AgentModelConfigDTO {
   const contextWindow = requirePositiveInt(draft.contextWindow, 'config.limit.context')
   const maxOutputTokens = requirePositiveInt(
     draft.maxOutputTokens,
@@ -231,47 +189,9 @@ function buildModelConfig(draft: ModelDraft): AgentModelConfigDTO {
       reasoning: draft.reasoning,
       inputModalities: modalities,
     },
-    pricing: pricingFromDraft(draft.pricing),
+    pricing: normalizePricing(draft.pricing),
     defaultVariant,
     variants,
-  }
-}
-
-function pricingFromDraft(draft: ModelPricingDraft): AgentModelPricingDTO {
-  const multiplier = requirePositiveNumber(
-    draft.serviceTierMultiplier,
-    'config.pricing.serviceTierMultiplier',
-  )
-  return {
-    currency: requireNonBlank(draft.currency, 'config.pricing.currency'),
-    pricingTier: requireNonBlank(draft.pricingTier, 'config.pricing.pricingTier'),
-    serviceTier: requireNonBlank(draft.serviceTier, 'config.pricing.serviceTier'),
-    serviceTierMultiplier: multiplier,
-    version: requireNonBlank(draft.version, 'config.pricing.version'),
-    inputPerMillionTokens: requireNonNegativeNumber(
-      draft.inputPerMillionTokens,
-      'config.pricing.inputPerMillionTokens',
-    ),
-    outputPerMillionTokens: requireNonNegativeNumber(
-      draft.outputPerMillionTokens,
-      'config.pricing.outputPerMillionTokens',
-    ),
-    cacheReadPerMillionTokens: requireNonNegativeNumber(
-      draft.cacheReadPerMillionTokens,
-      'config.pricing.cacheReadPerMillionTokens',
-    ),
-    cacheWritePerMillionTokens: requireNonNegativeNumber(
-      draft.cacheWritePerMillionTokens,
-      'config.pricing.cacheWritePerMillionTokens',
-    ),
-    cacheWriteLongPerMillionTokens: requireNonNegativeNumber(
-      draft.cacheWriteLongPerMillionTokens,
-      'config.pricing.cacheWriteLongPerMillionTokens',
-    ),
-    reasoningPerMillionTokens: requireNonNegativeNumber(
-      draft.reasoningPerMillionTokens,
-      'config.pricing.reasoningPerMillionTokens',
-    ),
   }
 }
 
@@ -283,24 +203,17 @@ function requireNonBlank(value: string, field: string): string {
   return normalized
 }
 
-function requirePositiveNumber(value: string, field: string): number {
-  const parsed = requireNumber(value, field)
-  if (parsed <= 0) {
-    throw new Error(`${field} must be positive`)
-  }
-  return parsed
-}
-
 export function toEditableModel(draft: ModelDraft): AgentModelCreateDTO {
   const providerName = draft.providerName.trim()
   if (!providerName) {
     throw new Error('providerName is required')
   }
   return {
-    providerName,
     name: requireNonBlank(draft.name, 'name'),
-    modelId: requireNonBlank(draft.modelId, 'modelId'),
+    kind: 'MODEL',
     description: trimToNull(draft.description),
+    providerName,
+    modelId: requireNonBlank(draft.modelId, 'modelId'),
     config: buildModelConfig(draft),
   }
 }
@@ -308,8 +221,9 @@ export function toEditableModel(draft: ModelDraft): AgentModelCreateDTO {
 export function toEditableModelUpdate(draft: ModelDraft): AgentModelEditablePropertiesDTO {
   return {
     name: requireNonBlank(draft.name, 'name'),
-    modelId: requireNonBlank(draft.modelId, 'modelId'),
+    kind: 'MODEL',
     description: trimToNull(draft.description),
+    modelId: requireNonBlank(draft.modelId, 'modelId'),
     config: buildModelConfig(draft),
   }
 }

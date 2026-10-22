@@ -1,11 +1,15 @@
+import { useState } from 'react'
 import type {
   AgentModelInputModality,
 } from '@/shared/api/contracts/ai-catalog'
-import type { ModelDraft, ModelPricingDraft, VariantDraft } from '@/features/ai/catalog/ai-console-types'
+import type { ModelDraft, VariantDraft } from '@/features/ai/catalog/ai-console-types'
 import { variantOptionsFromDraft } from '@/features/ai/catalog/ai-draft-normalizers'
-import { sanitizeDecimalInput } from '@/shared/lib/numeric-input'
 import type { ResourceFieldKey } from '@/features/ai/catalog/ai-resource-form-validation'
 import { VariantListEditor } from '@/features/ai/catalog/AiVariantListEditor'
+import { ModelPricingEditor } from '@/features/ai/catalog/AiModelPricingEditor'
+import { ModelCatalogPicker } from '@/features/ai/catalog/AiModelCatalogPicker'
+import { applyCatalogCandidate } from '@/features/ai/catalog/ai-model-catalog-apply'
+import { Button } from '@/shared/ui/controls/Button'
 import { Checkbox } from '@/shared/ui/controls/Checkbox'
 import { NumberInput } from '@/shared/ui/controls/NumberInput'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
@@ -22,19 +26,6 @@ const AGENT_MODEL_INPUT_MODALITIES: AgentModelInputModality[] = [
   'DOCUMENT',
 ]
 
-/** 用户可编辑的每百万 token 价格；币种 / 档位元数据由 wire 契约固定。 */
-const PRICING_UNIT_FIELDS: ReadonlyArray<{
-  field: keyof ModelPricingDraft
-  labelKey: string
-}> = [
-  { field: 'inputPerMillionTokens', labelKey: 'ai.catalog.form.inputPrice' },
-  { field: 'outputPerMillionTokens', labelKey: 'ai.catalog.form.outputPrice' },
-  { field: 'cacheReadPerMillionTokens', labelKey: 'ai.catalog.form.cacheReadPrice' },
-  { field: 'cacheWritePerMillionTokens', labelKey: 'ai.catalog.form.cacheWritePrice' },
-  { field: 'cacheWriteLongPerMillionTokens', labelKey: 'ai.catalog.form.longCacheWritePrice' },
-  { field: 'reasoningPerMillionTokens', labelKey: 'ai.catalog.form.reasoningPrice' },
-]
-
 export function ModelForm({
   draft,
   mode,
@@ -49,6 +40,7 @@ export function ModelForm({
   onChange: (draft: ModelDraft) => void
 }) {
   const { t } = useI18n()
+  const [catalogOpen, setCatalogOpen] = useState(false)
   const variantOptions = variantOptionsFromDraft(draft.variants)
   const providerUnavailable =
     mode === 'edit' &&
@@ -91,16 +83,6 @@ export function ModelForm({
   /** Reasoning 只切换能力开关；空思考强度表示不覆盖协议默认，不自动补全。 */
   function setReasoning(enabled: boolean) {
     onChange({ ...draft, reasoning: enabled })
-  }
-
-  function updatePricing(field: keyof ModelPricingDraft, value: string) {
-    onChange({
-      ...draft,
-      pricing: {
-        ...draft.pricing,
-        [field]: value,
-      },
-    })
   }
 
   return (
@@ -160,6 +142,26 @@ export function ModelForm({
           placeholder={t('ai.catalog.form.modelDescriptionPlaceholder')}
         />
       </label>
+
+      <div className="catalog-picker-launcher">
+        <Button
+          variant="inline"
+          aria-expanded={catalogOpen}
+          onClick={() => setCatalogOpen((current) => !current)}
+        >
+          {catalogOpen
+            ? t('ai.catalog.catalog.hide')
+            : t('ai.catalog.catalog.open')}
+        </Button>
+      </div>
+      {catalogOpen ? (
+        <ModelCatalogPicker
+          onApply={(candidate) => {
+            onChange(applyCatalogCandidate(draft, candidate))
+            setCatalogOpen(false)
+          }}
+        />
+      ) : null}
 
       <section className="structured-section" aria-labelledby="model-limit-heading">
         <div className="structured-section-head">
@@ -239,48 +241,12 @@ export function ModelForm({
         ) : null}
       </fieldset>
 
-      <section
-        className={`structured-section${fieldErrors.pricing ? ' is-error' : ''}`}
-        aria-labelledby="model-pricing-heading"
-      >
-        <div className="structured-section-head">
-          <h3 id="model-pricing-heading">{t('ai.catalog.form.pricing')}</h3>
-        </div>
-        <p className="inline-hint">{t('ai.catalog.form.priceHint')}</p>
-        <div className="form-grid-2">
-          {PRICING_UNIT_FIELDS.map(({ field, labelKey }) => {
-            const label = t(labelKey)
-            return (
-            <label className="form-group" key={field}>
-              <FieldLabel required>{label}</FieldLabel>
-              <div className="price-input">
-                <span className="price-affix" aria-hidden="true">
-                  $
-                </span>
-                <TextInput
-                  type="number"
-                  invalid={Boolean(fieldErrors.pricing)}
-                  inputMode="decimal"
-                  min={0}
-                  step="any"
-                  value={draft.pricing[field]}
-                  onChange={(event) =>
-                    updatePricing(field, sanitizeDecimalInput(event.target.value))
-                  }
-                  placeholder="0"
-                  required
-                  aria-label={t('ai.catalog.form.priceAriaLabel', { label })}
-                />
-                <span className="price-suffix" aria-hidden="true">
-                  {t('ai.catalog.form.priceSuffix')}
-                </span>
-              </div>
-            </label>
-            )
-          })}
-        </div>
-        {fieldErrors.pricing ? <span className="field-error">{fieldErrors.pricing}</span> : null}
-      </section>
+      <ModelPricingEditor
+        pricing={draft.pricing}
+        invalid={Boolean(fieldErrors.pricing)}
+        onChange={(pricing) => onChange({ ...draft, pricing })}
+      />
+      {fieldErrors.pricing ? <span className="field-error">{fieldErrors.pricing}</span> : null}
 
       <label className={`form-group${fieldErrors.defaultVariant ? ' is-error' : ''}`}>
         <FieldLabel required>{t('ai.catalog.form.defaultVariant')}</FieldLabel>

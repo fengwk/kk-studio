@@ -4,6 +4,8 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelGroupExecution;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelGroupMemberExecution;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
@@ -12,8 +14,10 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderRequestJsonCodec;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 /** 一个冻结 {@link ModelRequestSpec} 的严格、确定性 JSON codec。 */
 public final class ModelRequestSpecJsonCodec {
@@ -46,6 +50,9 @@ public final class ModelRequestSpecJsonCodec {
       subagents.add(encodeSubagent(subagent));
     }
     node.set("cacheControl", PROVIDER_CODEC.encodeCacheControlNode(spec.cacheControl()));
+    if (spec.groupExecution() != null) {
+      node.set("groupExecution", encodeGroup(spec.groupExecution()));
+    }
     return node;
   }
 
@@ -58,16 +65,32 @@ public final class ModelRequestSpecJsonCodec {
     InvocationJsonSupport.requireFields(
         node,
         CONTEXT,
-        "catalogEpoch",
-        "providerType",
-        "providerConnectionGenerationId",
-        "model",
-        "variant",
-        "outputTokens",
-        "systemInstruction",
-        "toolBindings",
-        "subagentBindings",
-        "cacheControl");
+        node.has("groupExecution")
+            ? new String[] {
+              "catalogEpoch",
+              "providerType",
+              "providerConnectionGenerationId",
+              "model",
+              "variant",
+              "outputTokens",
+              "systemInstruction",
+              "toolBindings",
+              "subagentBindings",
+              "cacheControl",
+              "groupExecution"
+            }
+            : new String[] {
+              "catalogEpoch",
+              "providerType",
+              "providerConnectionGenerationId",
+              "model",
+              "variant",
+              "outputTokens",
+              "systemInstruction",
+              "toolBindings",
+              "subagentBindings",
+              "cacheControl"
+            });
     ArrayNode toolNodes =
         InvocationJsonSupport.array(
             InvocationJsonSupport.required(node, "toolBindings", CONTEXT), "toolBindings");
@@ -93,7 +116,84 @@ public final class ModelRequestSpecJsonCodec {
         toolBindings,
         subagentBindings,
         PROVIDER_CODEC.decodeCacheControlNode(
-            InvocationJsonSupport.required(node, "cacheControl", CONTEXT)));
+            InvocationJsonSupport.required(node, "cacheControl", CONTEXT)),
+        node.has("groupExecution") ? decodeGroup(node.get("groupExecution")) : null);
+  }
+
+  private static ObjectNode encodeGroup(ModelGroupExecution group) {
+    ObjectNode node = InvocationJsonSupport.NODES.objectNode();
+    node.put("groupName", group.groupName());
+    node.put("groupVersion", group.groupVersion());
+    ArrayNode codes = node.putArray("fallbackStatusCodes");
+    group.fallbackStatusCodes().stream().sorted().forEach(codes::add);
+    node.put("cooldownSeconds", group.cooldownSeconds());
+    ArrayNode members = node.putArray("members");
+    for (ModelGroupMemberExecution member : group.members()) {
+      ObjectNode memberNode = members.addObject();
+      memberNode.put("providerType", member.providerType().name());
+      memberNode.put(
+          "providerConnectionGenerationId", member.providerConnectionGenerationId().toString());
+      memberNode.set("model", MODEL_CODEC.encodeDescriptorNode(member.model()));
+      memberNode.set("variant", MODEL_CODEC.encodeVariantNode(member.variant()));
+    }
+    return node;
+  }
+
+  private static ModelGroupExecution decodeGroup(JsonNode value) {
+    ObjectNode node = InvocationJsonSupport.object(value, "groupExecution");
+    InvocationJsonSupport.requireFields(
+        node,
+        "groupExecution",
+        "groupName",
+        "groupVersion",
+        "fallbackStatusCodes",
+        "cooldownSeconds",
+        "members");
+    ArrayNode codeNodes =
+        InvocationJsonSupport.array(
+            InvocationJsonSupport.required(node, "fallbackStatusCodes", "groupExecution"),
+            "groupExecution.fallbackStatusCodes");
+    Set<Integer> codes = new HashSet<>();
+    for (JsonNode code : codeNodes) {
+      if (!code.isInt()) {
+        throw new IllegalArgumentException(
+            "groupExecution.fallbackStatusCodes must contain integers");
+      }
+      codes.add(code.intValue());
+    }
+    ArrayNode memberNodes =
+        InvocationJsonSupport.array(
+            InvocationJsonSupport.required(node, "members", "groupExecution"),
+            "groupExecution.members");
+    List<ModelGroupMemberExecution> members = new ArrayList<>();
+    for (JsonNode memberNodeValue : memberNodes) {
+      ObjectNode memberNode =
+          InvocationJsonSupport.object(memberNodeValue, "groupExecution.members[]");
+      InvocationJsonSupport.requireFields(
+          memberNode,
+          "groupExecution.members[]",
+          "providerType",
+          "providerConnectionGenerationId",
+          "model",
+          "variant");
+      members.add(
+          new ModelGroupMemberExecution(
+              InvocationJsonSupport.requiredEnum(
+                  memberNode, "providerType", ProviderType.class, "groupExecution.members[]"),
+              InvocationJsonSupport.requiredUuid(
+                  memberNode, "providerConnectionGenerationId", "groupExecution.members[]"),
+              MODEL_CODEC.decodeDescriptorNode(
+                  InvocationJsonSupport.required(memberNode, "model", "groupExecution.members[]")),
+              MODEL_CODEC.decodeVariantNode(
+                  InvocationJsonSupport.required(
+                      memberNode, "variant", "groupExecution.members[]"))));
+    }
+    return new ModelGroupExecution(
+        InvocationJsonSupport.text(node, "groupName", "groupExecution"),
+        InvocationJsonSupport.nonNegativeLong(node, "groupVersion", "groupExecution"),
+        members,
+        codes,
+        InvocationJsonSupport.nonNegativeInt(node, "cooldownSeconds", "groupExecution"));
   }
 
   private static ObjectNode encodeSubagent(SubagentBinding subagent) {

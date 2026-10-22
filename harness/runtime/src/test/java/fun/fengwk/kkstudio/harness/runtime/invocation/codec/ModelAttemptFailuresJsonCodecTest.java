@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelAttemptFailure;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
@@ -27,6 +28,8 @@ class ModelAttemptFailuresJsonCodecTest {
             7,
             "partial",
             "thinking",
+            ModelSelection.model("model", "v1"),
+            null,
             new ModelInvocationError(ProviderErrorKind.TRANSIENT, "provider unavailable"),
             FAILED_AT,
             RETRY_AT);
@@ -37,6 +40,8 @@ class ModelAttemptFailuresJsonCodecTest {
         "[{\"attempt\":1,\"sequence\":7,\"text\":\"partial\",\"thinking\":\"thinking\","
             + "\"error\":{\"kind\":\"TRANSIENT\",\"message\":\"provider unavailable\","
             + "\"httpStatus\":null},"
+            + "\"model\":{\"modelName\":\"model\",\"variant\":\"v1\"},"
+            + "\"requestedAt\":null,"
             + "\"failedAt\":\"2026-01-01T00:00:00.123Z\","
             + "\"retryAt\":\"2026-01-01T00:00:02.123Z\"}]",
         json);

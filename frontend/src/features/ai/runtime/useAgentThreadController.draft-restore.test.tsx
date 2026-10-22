@@ -145,8 +145,7 @@ function threadFixture(
     branchSettings: {
       agentName: 'assistant',
       model: {
-        providerName: 'minimax',
-        modelName: 'MiniMax',
+                modelName: 'MiniMax',
         variant: 'default',
       },
       environmentName: null,
@@ -240,7 +239,7 @@ function goalPendingMessage() {
     },
     targetDraft: {
       agentName: 'assistant',
-      model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+      model: { modelName: 'MiniMax', variant: 'default' },
       environmentName: null,
       yoloEnabled: false,
     },

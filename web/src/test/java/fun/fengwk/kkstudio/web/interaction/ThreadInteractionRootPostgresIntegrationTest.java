@@ -138,7 +138,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
 
   private static final BranchSettings SETTINGS =
       new BranchSettings(
-          "default-assistant", new ModelSelection("stub", "acceptance-stub", "default"), null);
+          "default-assistant", new ModelSelection("acceptance-stub", "default"), null);
 
   private static final String AGENT = "default-assistant";
   private static final String HASH = "a".repeat(64);

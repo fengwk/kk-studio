@@ -71,16 +71,16 @@ describe('useAiConsoleResourceController', () => {
         modelHttpRetryStatusCodes: data.modelHttpRetryStatusCodes !== undefined ? data.modelHttpRetryStatusCodes : currentProvider.modelHttpRetryStatusCodes,
       }
       currentModel = { ...currentModel, providerName: currentProvider.name }
-      currentAgent = { ...currentAgent, model: `${currentModel.providerName}/${currentModel.name}` }
+      currentAgent = { ...currentAgent, model: currentModel.name }
       return currentProvider
     })
-    vi.mocked(agentService.updateModel).mockImplementation(async (_providerName, _modelName, data) => {
+    vi.mocked(agentService.updateModel).mockImplementation(async (_modelName, data) => {
       currentModel = {
         ...currentModel,
         ...data,
         description: data.description !== undefined ? data.description : currentModel.description,
       }
-      currentAgent = { ...currentAgent, model: `${currentModel.providerName}/${currentModel.name}` }
+      currentAgent = { ...currentAgent, model: currentModel.name }
       return currentModel
     })
     vi.mocked(agentService.updateAgent).mockImplementation(async (_name, data) => {
@@ -120,14 +120,13 @@ describe('useAiConsoleResourceController', () => {
 
     await waitFor(() => {
       expect(agentService.updateModel).toHaveBeenCalledWith(
-        'stub',
         'acceptance-stub',
         expect.objectContaining({ expectedVersion: '0' }),
       )
     })
 
     await user.click(screen.getByRole('button', { name: 'open-agent' }))
-    expect(screen.getByTestId('agent-model')).toHaveValue('stub/acceptance-stub')
+    expect(screen.getByTestId('agent-model')).toHaveValue('acceptance-stub')
   })
 
   it('keeps unsaved Agent fields and the persisted model binding across query refreshes', async () => {
@@ -146,12 +145,12 @@ describe('useAiConsoleResourceController', () => {
       queryClient.setQueryData(queryKeys.models.list, page([{ ...currentModel, providerName: 'stub-v2', name: 'acceptance-stub-v2' }]))
       queryClient.setQueryData(
         queryKeys.agents.list,
-        page([{ ...currentAgent, model: 'stub-v2/acceptance-stub-v2' }]),
+        page([{ ...currentAgent, model: 'acceptance-stub-v2' }]),
       )
     })
 
     await waitFor(() => {
-      expect(screen.getByTestId('agent-model')).toHaveValue('stub/acceptance-stub')
+      expect(screen.getByTestId('agent-model')).toHaveValue('acceptance-stub')
     })
     expect(screen.getByTestId('agent-description')).toHaveValue('edited description')
   })
@@ -195,7 +194,7 @@ describe('useAiConsoleResourceController', () => {
     await user.click(screen.getByRole('button', { name: 'submit' }))
     await waitFor(() => {
       expect(agentService.createAgent).toHaveBeenCalledWith(
-        expect.objectContaining({ name: 'new-agent', model: 'stub/acceptance-stub' }),
+        expect.objectContaining({ name: 'new-agent', model: 'acceptance-stub' }),
       )
       expect(screen.getByTestId('modal-open')).toHaveTextContent('closed')
     })
@@ -310,7 +309,7 @@ describe('useAiConsoleResourceController', () => {
     await user.click(screen.getByRole('button', { name: 'delete-model' }))
     await user.click(screen.getByRole('button', { name: 'confirm-delete' }))
     await waitFor(() => {
-      expect(agentService.deleteModel).toHaveBeenCalledWith('stub', 'acceptance-stub', '0')
+      expect(agentService.deleteModel).toHaveBeenCalledWith('acceptance-stub', '0')
       expect(screen.queryByTestId('delete-confirm-open')).not.toBeInTheDocument()
     })
 
@@ -405,7 +404,7 @@ function ResourceControllerHarness() {
       <button type="button" onClick={() => controller.openCreateModel()}>
         create-model
       </button>
-      <button type="button" onClick={() => controller.openEditModel('stub', 'acceptance-stub')}>
+      <button type="button" onClick={() => controller.openEditModel('acceptance-stub')}>
         open-model
       </button>
       <button type="button" onClick={() => controller.openCreateAgent()}>
@@ -489,7 +488,7 @@ function ResourceControllerHarness() {
       <button type="button" onClick={() => controller.deleteProvider('stub', '0')}>
         delete-provider
       </button>
-      <button type="button" onClick={() => controller.deleteModel('stub', 'acceptance-stub', '0')}>
+      <button type="button" onClick={() => controller.deleteModel('acceptance-stub', '0')}>
         delete-model
       </button>
       <button type="button" onClick={() => controller.deleteAgent('default-assistant', '0')}>
@@ -557,6 +556,7 @@ function provider(): AgentProviderDTO {
 function model(): AgentModelDTO {
   return {
     providerName: 'stub',
+    kind: 'MODEL',
     name: 'acceptance-stub',
     modelId: 'acceptance-wire-id',
     description: 'Acceptance model',
@@ -564,18 +564,10 @@ function model(): AgentModelDTO {
       limit: { context: 128000, output: 8192 },
       abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
       pricing: {
-        currency: 'USD',
-        pricingTier: 'default',
-        serviceTier: 'default',
-        serviceTierMultiplier: 1,
-        version: 'v1',
-        inputPerMillionTokens: 0,
-        outputPerMillionTokens: 0,
-        cacheReadPerMillionTokens: 0,
-        cacheWritePerMillionTokens: 0,
-        cacheWriteLongPerMillionTokens: 0,
-        reasoningPerMillionTokens: 0,
-      },
+      base: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0', cacheWriteByTtl: {}, reasoning: null },
+      overrides: [],
+      multipliers: [],
+    },
       defaultVariant: 'default',
       variants: [{ id: 'default' }],
     },
@@ -591,7 +583,7 @@ function agent(): AgentDefinitionDTO {
     description: 'Cloud agent',
     systemPrompt: 'You are helpful',
     type: 'USER' as const,
-    model: 'stub/acceptance-stub',
+    model: 'acceptance-stub',
     variant: 'default',
     config: {
       inheritParentEnvironment: true,

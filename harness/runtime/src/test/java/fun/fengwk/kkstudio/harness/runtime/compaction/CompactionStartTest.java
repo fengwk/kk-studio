@@ -14,7 +14,7 @@ import java.util.UUID;
 /** CompactionStart 的 phase/anchor 最小形状与 run group 不变量。 */
 class CompactionStartTest {
 
-  private static final ModelSelection MODEL = new ModelSelection("p", "m", "v");
+  private static final ModelSelection MODEL = ModelSelection.model("m", "v");
   private static final Long BUDGET = 4096L;
   private static final UUID CHILD_ID = id(100L);
   private static final UUID JOIN_ID = id(101L);

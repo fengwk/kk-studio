@@ -19,8 +19,7 @@ import java.util.List;
 /** 类型化 command payload 的 role、字段与 canonical 值不变量。 */
 class ThreadCommandPayloadTest {
 
-  private static final ModelSelection MODEL =
-      new ModelSelection("anthropic", "claude-sonnet", "default");
+  private static final ModelSelection MODEL = ModelSelection.model("claude-sonnet", "default");
 
   @Test
   void everyPayloadReportsItsCommandType() {

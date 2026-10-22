@@ -62,7 +62,7 @@ public final class HistoryEntryPayloadJsonCodec {
   private static final Set<String> CUSTOM_FIELDS =
       orderedSet("contributorId", "customType", "schemaVersion", "data");
   private static final Set<String> MODEL_ATTEMPT_FAILURE_FIELDS =
-      orderedSet("attempt", "error", "retryAt");
+      orderedSet("attempt", "model", "requestedAt", "error", "retryAt");
   private static final Set<String> CUSTOM_MESSAGE_FIELDS =
       orderedSet("contributorId", "customType", "rendererKey", "message", "details");
   private static final Set<String> ASSISTANT_ERROR_FIELDS = orderedSet("error", "attempt");
@@ -234,6 +234,19 @@ public final class HistoryEntryPayloadJsonCodec {
     attemptNode.put("text", attempt.text());
     attemptNode.put("thinking", attempt.thinking());
     node.set("attempt", attemptNode);
+    ObjectNode modelNode = NODES.objectNode();
+    modelNode.put("modelName", value.model().modelName());
+    if (value.model().variant() == null) {
+      modelNode.putNull("variant");
+    } else {
+      modelNode.put("variant", value.model().variant());
+    }
+    node.set("model", modelNode);
+    if (value.requestedAt() != null) {
+      node.put("requestedAt", value.requestedAt().toString());
+    } else {
+      node.putNull("requestedAt");
+    }
     node.set("error", encodeError(value.error()));
     node.put("retryAt", value.retryAt().toString());
     return node;
@@ -448,14 +461,31 @@ public final class HistoryEntryPayloadJsonCodec {
                 attemptNode, "sequence", "MODEL_ATTEMPT_FAILURE.attempt"),
             HistoryValueCodecs.text(attemptNode, "text"),
             HistoryValueCodecs.text(attemptNode, "thinking"));
-    Instant retryAt;
+    ObjectNode modelNode =
+        HistoryValueCodecs.requireObject(node.get("model"), "MODEL_ATTEMPT_FAILURE.model");
+    HistoryValueCodecs.requireExactFields(
+        modelNode, orderedSet("modelName", "variant"), "MODEL_ATTEMPT_FAILURE.model");
+    ModelSelection model =
+        ModelSelection.model(
+            HistoryValueCodecs.text(modelNode, "modelName"),
+            modelNode.get("variant").isNull()
+                ? null
+                : HistoryValueCodecs.text(modelNode, "variant"));
+    Instant requestedAt =
+        node.get("requestedAt").isNull()
+            ? null
+            : parseInstant(node, "requestedAt", "MODEL_ATTEMPT_FAILURE.requestedAt");
+    Instant retryAt = parseInstant(node, "retryAt", "MODEL_ATTEMPT_FAILURE.retryAt");
+    return new ModelAttemptFailurePayload(
+        attempt, model, requestedAt, decodeError(node.get("error")), retryAt);
+  }
+
+  private static Instant parseInstant(ObjectNode node, String field, String context) {
     try {
-      retryAt = Instant.parse(HistoryValueCodecs.text(node, "retryAt"));
+      return Instant.parse(HistoryValueCodecs.text(node, field));
     } catch (RuntimeException error) {
-      throw new IllegalArgumentException(
-          "MODEL_ATTEMPT_FAILURE.retryAt must be an ISO-8601 instant", error);
+      throw new IllegalArgumentException(context + " must be an ISO-8601 instant", error);
     }
-    return new ModelAttemptFailurePayload(attempt, decodeError(node.get("error")), retryAt);
   }
 
   private static AssistantErrorPayload decodeAssistantError(JsonNode value) {

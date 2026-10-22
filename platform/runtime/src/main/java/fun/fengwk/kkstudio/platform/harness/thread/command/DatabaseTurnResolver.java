@@ -26,6 +26,8 @@ import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelGroupExecution;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelGroupMemberExecution;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
@@ -33,6 +35,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAcces
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccessMode;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
@@ -47,6 +50,8 @@ import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefini
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.model.repo.AgentModelRepository;
+import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelDefaultVariantResolver;
+import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelGroupConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser.ParsedAgentModelConfig;
 import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
@@ -68,6 +73,11 @@ import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.platform.harness.task.CurrentEnvironmentContext;
 import fun.fengwk.kkstudio.platform.harness.task.SkillPromptEntry;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelGroupDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelGroupMemberDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelVariantDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 
 import java.time.Clock;
@@ -76,6 +86,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -109,6 +120,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
   private final AgentProviderRepository providerRepository;
   private final AgentDefinitionConfigCodec agentConfigCodec;
   private final AgentModelRuntimeConfigParser modelConfigParser;
+  private final AgentModelGroupConfigCodec groupConfigCodec;
   private final ProviderFactories providerFactories;
   private final RuntimeToolCatalogSource toolCatalogSource;
   private final EnvironmentRegistry environmentRegistry;
@@ -126,6 +138,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
       AgentProviderRepository providerRepository,
       AgentDefinitionConfigCodec agentConfigCodec,
       AgentModelRuntimeConfigParser modelConfigParser,
+      AgentModelGroupConfigCodec groupConfigCodec,
       ProviderFactories providerFactories,
       RuntimeToolCatalogSource toolCatalogSource,
       EnvironmentRegistry environmentRegistry,
@@ -141,6 +154,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
     this.providerRepository = Objects.requireNonNull(providerRepository, "providerRepository");
     this.agentConfigCodec = Objects.requireNonNull(agentConfigCodec, "agentConfigCodec");
     this.modelConfigParser = Objects.requireNonNull(modelConfigParser, "modelConfigParser");
+    this.groupConfigCodec = Objects.requireNonNull(groupConfigCodec, "groupConfigCodec");
     this.providerFactories = Objects.requireNonNull(providerFactories, "providerFactories");
     this.toolCatalogSource = Objects.requireNonNull(toolCatalogSource, "toolCatalogSource");
     this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
@@ -276,42 +290,16 @@ public final class DatabaseTurnResolver implements TurnResolver {
     AgentDefinitionConfigDTO agentConfig = decodeAgentConfig(agent);
 
     ModelSelection selection = settings.model();
-    AgentProvider provider =
-        require(
-            providerRepository.getByName(selection.providerName()),
-            "provider not found: " + selection.providerName());
-    ProviderType providerType = provider.getProviderType();
-    if (providerType == null) {
-      throw rejection("provider type must not be null");
-    }
-    UUID providerConnectionGenerationId =
-        require(
-            provider.getConnectionGenerationId(),
-            "provider connection generation id must not be null");
-    AgentModel model =
-        require(
-            modelRepository.getByProviderNameAndName(
-                selection.providerName(), selection.modelName()),
-            "model not found: " + selection.providerName() + "/" + selection.modelName());
-    ParsedAgentModelConfig parsedModel = parseModel(model);
-    ModelVariant variant = findVariant(parsedModel, selection.variant());
-    if (variant == null) {
-      throw rejection(
-          "model variant not found: "
-              + selection.providerName()
-              + "/"
-              + selection.modelName()
-              + " variant="
-              + selection.variant());
-    }
+    ResolvedSelection resolvedSelection = resolveSelection(selection);
+    AgentProvider provider = resolvedSelection.provider();
+    ProviderType providerType = resolvedSelection.providerType();
+    UUID providerConnectionGenerationId = resolvedSelection.providerConnectionGenerationId();
+    ParsedAgentModelConfig parsedModel = resolvedSelection.parsedModel();
+    ModelVariant variant = resolvedSelection.variant();
     ProviderFactory providerFactory =
         require(
             providerFactories.lookup(providerType).orElse(null),
-            "provider factory not found for "
-                + selection.providerName()
-                + " ("
-                + providerType
-                + ")");
+            "provider factory not found for " + provider.getName() + " (" + providerType + ")");
 
     // Environment 只由 branch settings 的可空 environmentName 决定：Issue Run 在启动时已显式 SET_ENVIRONMENT，
     // 运行时不再按 Issue/阶段反查或覆写。
@@ -326,29 +314,20 @@ public final class DatabaseTurnResolver implements TurnResolver {
     PlannedTools tools = resolveTools(lease, environmentId, environmentName, toolNames);
     List<ToolBinding> toolBindings = tools.bindings();
 
-    if (!toolBindings.isEmpty() && !parsedModel.tools()) {
-      throw rejection(
-          "model does not support tools: "
-              + selection.providerName()
-              + "/"
-              + selection.modelName());
+    if (!toolBindings.isEmpty()) {
+      for (MemberRuntime member : resolvedSelection.members()) {
+        if (!member.parsed().tools()) {
+          throw rejection("model does not support tools: " + member.modelName());
+        }
+      }
     }
-    if (variant.reasoningEffort() != null && !parsedModel.reasoning()) {
-      throw rejection(
-          "model does not support reasoning: "
-              + selection.providerName()
-              + "/"
-              + selection.modelName());
+    for (MemberRuntime member : resolvedSelection.members()) {
+      if (member.variant().reasoningEffort() != null && !member.parsed().reasoning()) {
+        throw rejection("model does not support reasoning: " + member.modelName());
+      }
     }
 
-    ModelDescriptor descriptor =
-        new ModelDescriptor(
-            selection.providerName(),
-            selection.modelName(),
-            model.getModelId(),
-            parsedModel.inputModalities(),
-            parsedModel.tools(),
-            parsedModel.reasoning());
+    ModelDescriptor descriptor = resolvedSelection.descriptor();
     String systemInstruction =
         systemInstruction(
             agent.getSystemPrompt(),
@@ -357,18 +336,21 @@ public final class DatabaseTurnResolver implements TurnResolver {
             subagentBindings,
             path,
             lease.harnessCatalog());
-    int contextWindow = contextWindow(parsedModel);
+    int contextWindow = resolvedSelection.contextWindow();
+    long estimatedInputTokens = CompactionPlanner.estimateRequestTokens(path, systemInstruction);
     int outputTokens =
-        outputTokens(
-            parsedModel,
-            contextWindow,
-            CompactionPlanner.estimateRequestTokens(path, systemInstruction));
+        resolvedSelection.members().stream()
+            .mapToInt(
+                member ->
+                    outputTokens(
+                        member.parsed(), contextWindow(member.parsed()), estimatedInputTokens))
+            .min()
+            .orElseThrow();
     ProviderCacheControl cacheControl =
         usesCompactionAgentCacheHint(settings)
             ? ProviderCacheControl.none()
             : ProviderCacheControl.session(
-                promptCacheRetention(
-                    providerFactory, provider.getConfigJson(), selection.providerName()),
+                promptCacheRetention(providerFactory, provider.getConfigJson(), provider.getName()),
                 sessionId.toString());
     return new LiveTurnPlan.Planned(
         new ModelRequestSpec(
@@ -381,7 +363,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
             systemInstruction,
             toolBindings,
             subagentBindings,
-            cacheControl),
+            cacheControl,
+            resolvedSelection.group()),
         contextWindow,
         tools.candidates(),
         skills);
@@ -424,13 +407,134 @@ public final class DatabaseTurnResolver implements TurnResolver {
         require(
             agentDefinitionRepository.getByName(compactionAgentName),
             "agent not found: " + compactionAgentName);
-    if (agent.getModelProviderName() == null || agent.getModelName() == null) {
+    if (agent.getModelName() == null) {
       throw rejection("compaction agent has no configured model");
+    }
+    ModelSelection selection =
+        agent.getVariant() == null || agent.getVariant().isBlank()
+            ? new ModelSelection(agent.getModelName(), null)
+            : ModelSelection.model(agent.getModelName(), agent.getVariant());
+    ResolvedSelection resolvedSelection = resolveSelection(selection);
+    ModelSelection compactorModel =
+        resolvedSelection.group() == null
+            ? ModelSelection.model(agent.getModelName(), resolvedSelection.variant().id())
+            : ModelSelection.group(agent.getModelName());
+    int maxOutputTokens =
+        resolvedSelection.members().stream()
+            .mapToInt(member -> outputTokens(member.parsed()))
+            .min()
+            .orElseThrow();
+    long outputBudget =
+        compactionConfigProvider
+            .compactionConfig()
+            .outputBudget(preparation.phase(), maxOutputTokens, preparation.removedPrefixTokens());
+    if (outputBudget <= 0L || outputBudget > Integer.MAX_VALUE) {
+      throw rejection("compaction output budget must be a positive int, got " + outputBudget);
+    }
+    int contextWindow = resolvedSelection.contextWindow();
+    BranchSettings childSettings =
+        new BranchSettings(
+            compactionAgentName, compactorModel, parentPath.baseSettings().environmentName(), null);
+    return new TurnResolver.CompactionResolved(
+        compactorModel, outputBudget, contextWindow, maxOutputTokens, childSettings);
+  }
+
+  /**
+   * 统一逻辑模型解析：单 Model 在此解析默认 Variant；GROUP 一次性冻结组版本、有序成员及其 Provider/连接代际/Descriptor/Variant。
+   *
+   * <p>组能力按成员交集、上下文取最小值；Provider 连接代际与组版本一起冻结，成员切换绝不重新读取 Catalog。
+   */
+  private ResolvedSelection resolveSelection(ModelSelection selection) {
+    AgentModel logical =
+        require(
+            modelRepository.getByName(selection.modelName()),
+            "model not found: " + selection.modelName());
+    if (logical.getKind() == AgentModelKind.GROUP) {
+      if (selection.variant() != null) {
+        throw rejection("model group must not select a variant: " + selection.modelName());
+      }
+      return resolveGroup(logical);
+    }
+    MemberRuntime member = resolveMember(logical, selection.variant());
+    return new ResolvedSelection(
+        member.provider(),
+        member.providerType(),
+        member.providerConnectionGenerationId(),
+        member.parsed(),
+        member.descriptor(),
+        member.variant(),
+        contextWindow(member.parsed()),
+        List.of(member),
+        null);
+  }
+
+  private ResolvedSelection resolveGroup(AgentModel groupModel) {
+    AgentModelGroupDTO group = groupConfigCodec.decode(groupModel.getGroupConfigJson());
+    List<MemberRuntime> members = new ArrayList<>(group.getMembers().size());
+    List<ModelGroupMemberExecution> executions = new ArrayList<>(group.getMembers().size());
+    Set<ModelInputModality> modalities = null;
+    int contextWindow = Integer.MAX_VALUE;
+    for (AgentModelGroupMemberDTO member : group.getMembers()) {
+      AgentModel memberModel =
+          require(
+              modelRepository.getByName(member.getModelName()),
+              "group member model not found: " + member.getModelName());
+      if (memberModel.getKind() != AgentModelKind.MODEL) {
+        throw rejection("group member is not a single model: " + member.getModelName());
+      }
+      MemberRuntime runtime = resolveMember(memberModel, member.getVariant());
+      members.add(runtime);
+      executions.add(
+          new ModelGroupMemberExecution(
+              runtime.providerType(),
+              runtime.providerConnectionGenerationId(),
+              runtime.descriptor(),
+              runtime.variant()));
+      modalities =
+          modalities == null
+              ? new LinkedHashSet<>(runtime.descriptor().inputModalities())
+              : intersect(modalities, runtime.descriptor().inputModalities());
+      contextWindow = Math.min(contextWindow, contextWindow(runtime.parsed()));
+    }
+    if (modalities == null || modalities.isEmpty()) {
+      throw rejection("model group members have no common input modality: " + groupModel.getName());
+    }
+    MemberRuntime first = members.getFirst();
+    ModelDescriptor groupDescriptor =
+        new ModelDescriptor(
+            first.descriptor().providerName(),
+            groupModel.getName(),
+            first.descriptor().modelId(),
+            modalities,
+            first.descriptor().tools(),
+            first.descriptor().reasoning());
+    ModelGroupExecution execution =
+        new ModelGroupExecution(
+            groupModel.getName(),
+            groupModel.getVersion(),
+            executions,
+            new LinkedHashSet<>(group.getFallbackStatusCodes()),
+            group.getCooldownSeconds());
+    return new ResolvedSelection(
+        first.provider(),
+        first.providerType(),
+        first.providerConnectionGenerationId(),
+        first.parsed(),
+        groupDescriptor,
+        first.variant(),
+        contextWindow,
+        members,
+        execution);
+  }
+
+  private MemberRuntime resolveMember(AgentModel model, String overrideVariant) {
+    if (model.getKind() != AgentModelKind.MODEL) {
+      throw rejection("not a single model: " + model.getName());
     }
     AgentProvider provider =
         require(
-            providerRepository.getByName(agent.getModelProviderName()),
-            "provider not found: " + agent.getModelProviderName());
+            providerRepository.getByName(model.getProviderName()),
+            "provider not found: " + model.getProviderName());
     ProviderType providerType = provider.getProviderType();
     if (providerType == null) {
       throw rejection("provider type must not be null");
@@ -439,50 +543,82 @@ public final class DatabaseTurnResolver implements TurnResolver {
         require(
             provider.getConnectionGenerationId(),
             "provider connection generation id must not be null");
-    AgentModel model =
-        require(
-            modelRepository.getByProviderNameAndName(
-                agent.getModelProviderName(), agent.getModelName()),
-            "model not found: " + agent.getModelProviderName() + "/" + agent.getModelName());
+    require(
+        providerFactories.lookup(providerType).orElse(null),
+        "provider factory not found for " + provider.getName() + " (" + providerType + ")");
     ParsedAgentModelConfig parsedModel = parseModel(model);
-    String variantName =
-        agent.getVariant() != null && !agent.getVariant().isBlank()
-            ? agent.getVariant()
-            : parsedModel.defaultVariant();
+    String variantName;
+    try {
+      variantName =
+          AgentModelDefaultVariantResolver.resolveConfiguredVariant(
+              model.getName(), overrideVariant, toConfig(parsedModel));
+    } catch (IllegalArgumentException | IllegalStateException error) {
+      throw rejection(error.getMessage());
+    }
     ModelVariant variant = findVariant(parsedModel, variantName);
     if (variant == null) {
-      throw rejection(
-          "model variant not found: "
-              + agent.getModelProviderName()
-              + "/"
-              + agent.getModelName()
-              + " variant="
-              + variantName);
+      throw rejection("model variant not found: " + model.getName() + " variant=" + variantName);
     }
-    if (variant.reasoningEffort() != null && !parsedModel.reasoning()) {
-      throw rejection(
-          "model does not support reasoning: "
-              + agent.getModelProviderName()
-              + "/"
-              + agent.getModelName());
-    }
-    ModelSelection compactorModel =
-        new ModelSelection(agent.getModelProviderName(), agent.getModelName(), variant.id());
-    int maxOutputTokens = outputTokens(parsedModel);
-    long outputBudget =
-        compactionConfigProvider
-            .compactionConfig()
-            .outputBudget(preparation.phase(), maxOutputTokens, preparation.removedPrefixTokens());
-    if (outputBudget <= 0L || outputBudget > Integer.MAX_VALUE) {
-      throw rejection("compaction output budget must be a positive int, got " + outputBudget);
-    }
-    int contextWindow = contextWindow(parsedModel);
-    BranchSettings childSettings =
-        new BranchSettings(
-            compactionAgentName, compactorModel, parentPath.baseSettings().environmentName(), null);
-    return new TurnResolver.CompactionResolved(
-        compactorModel, outputBudget, contextWindow, maxOutputTokens, childSettings);
+    ModelDescriptor descriptor =
+        new ModelDescriptor(
+            model.getProviderName(),
+            model.getName(),
+            model.getModelId(),
+            parsedModel.inputModalities(),
+            parsedModel.tools(),
+            parsedModel.reasoning());
+    return new MemberRuntime(
+        model.getName(),
+        provider,
+        providerType,
+        providerConnectionGenerationId,
+        parsedModel,
+        descriptor,
+        variant);
   }
+
+  private static Set<ModelInputModality> intersect(
+      Set<ModelInputModality> left, Set<ModelInputModality> right) {
+    Set<ModelInputModality> intersection = new LinkedHashSet<>(left);
+    intersection.retainAll(right);
+    return intersection;
+  }
+
+  private static AgentModelConfigDTO toConfig(ParsedAgentModelConfig parsed) {
+    AgentModelConfigDTO config = new AgentModelConfigDTO();
+    config.setDefaultVariant(parsed.defaultVariant());
+    config.setVariants(
+        parsed.variants().stream()
+            .map(
+                variant -> {
+                  AgentModelVariantDTO dto = new AgentModelVariantDTO();
+                  dto.setId(variant.id());
+                  dto.setReasoningEffort(variant.reasoningEffort());
+                  return dto;
+                })
+            .toList());
+    return config;
+  }
+
+  private record MemberRuntime(
+      String modelName,
+      AgentProvider provider,
+      ProviderType providerType,
+      UUID providerConnectionGenerationId,
+      ParsedAgentModelConfig parsed,
+      ModelDescriptor descriptor,
+      ModelVariant variant) {}
+
+  private record ResolvedSelection(
+      AgentProvider provider,
+      ProviderType providerType,
+      UUID providerConnectionGenerationId,
+      ParsedAgentModelConfig parsedModel,
+      ModelDescriptor descriptor,
+      ModelVariant variant,
+      int contextWindow,
+      List<MemberRuntime> members,
+      ModelGroupExecution group) {}
 
   /** model config limit.context 必须是可表示的正 int；否则确定性拒绝。 */
   private static int contextWindow(ParsedAgentModelConfig parsedModel) {
