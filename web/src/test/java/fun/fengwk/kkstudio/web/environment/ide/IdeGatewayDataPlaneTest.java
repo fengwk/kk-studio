@@ -555,6 +555,30 @@ class IdeGatewayDataPlaneTest {
     assertTrue(peer.acknowledgements.get() > 0);
   }
 
+  /** 上游不读完请求就交付完整响应并关闭反向流：网关停止发送请求 END，仍交付已入队的完整响应。 */
+  @Test
+  void completesResponseWhenTransportClosedBeforeRequestEnd() throws Exception {
+    Harness harness = new Harness();
+    byte[] body = "early-response".getBytes(StandardCharsets.UTF_8);
+    TransportClosedPeer peer =
+        TransportClosedPeer.closedBeforeRequestEnd(
+            List.of(
+                new IdeStreamPeer.Inbound.Text(
+                    CODEC.encodeHttpResponse(
+                        new IdeStreamControlFrame.HttpResponse(
+                            200, List.of(new IdeHeader("content-type", "text/plain"))))),
+                new IdeStreamPeer.Inbound.Binary(CODEC.encodeHttpBody(body)),
+                new IdeStreamPeer.Inbound.Binary(CODEC.encodeHttpEnd())));
+    harness.transport.peerFactory = () -> peer;
+
+    MockHttpServletRequest request = harness.request("GET", "/");
+    MockHttpServletResponse response = new MockHttpServletResponse();
+    harness.dataPlane.handleHttp(ENV, "/", request, response);
+
+    assertEquals(200, response.getStatus());
+    assertArrayEquals(body, response.getContentAsByteArray());
+  }
+
   /** 传输在 HTTP_END 之前关闭：响应不完整，必须以 IOException 失败，不得伪造成功。 */
   @Test
   void incompleteResponseBeforeEndFailsWithIoException() throws Exception {
@@ -824,6 +848,13 @@ class IdeGatewayDataPlaneTest {
 
     private TransportClosedPeer(List<Inbound> frames) {
       this.frames = frames;
+    }
+
+    /** 发送请求 END 之前传输就已关闭，完整响应已在入站队列中。 */
+    private static TransportClosedPeer closedBeforeRequestEnd(List<Inbound> frames) {
+      TransportClosedPeer peer = new TransportClosedPeer(frames);
+      peer.closed = true;
+      return peer;
     }
 
     @Override
