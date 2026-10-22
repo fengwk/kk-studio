@@ -305,7 +305,7 @@ complete 请求为 `{authAttemptId, callbackUrl}`，仅消费仍匹配当前配�
 Plugin 只通过绑定认证引用的 `PluginCredentialAccess` 获得本次请求快照，不持有完整 Store。
 每次解析都回读权威 manifest 并核对凭据行身份，旧代际或旧上下文不能取得新秘密。
 key 缺失或解密失败为 KEY_UNAVAILABLE，读路径不返回未认证载荷；主密钥不可用时禁止写入。
-Plugin fmt1 密文不再兼容读取，已有凭据须在备份并批准迁移后离线转换。
+Plugin fmt1 密文不再兼容读取；升级到 2.0 时须备份旧部署，并在新库中重新配置凭据。
 Skill 令牌共用 AES-GCM 与 AAD 编码原语，但独立保持既有 fmt1 与 Package 身份绑定，不引入插件认证代际。
 
 刷新以短事务 claim lease，请求前核验代际、token、version 与有效截止时刻，

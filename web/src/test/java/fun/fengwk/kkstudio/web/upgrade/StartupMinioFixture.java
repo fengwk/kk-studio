@@ -28,9 +28,9 @@ import java.util.UUID;
  *
  * <p>不操作已有 Compose 栈；{@link #close()} 只停止自有容器，测试进程异常退出时由 Testcontainers 按 container ID 回收。
  *
- * <p>包内可见（package-private）：只是升级验收的物理 S3 基座，不是生产代码。
+ * <p>包内可见（package-private）：只是启动验收的物理 S3 基座，不是生产代码。
  */
-final class UpgradeMinioFixture implements AutoCloseable {
+final class StartupMinioFixture implements AutoCloseable {
 
   /** 与隔离 compose 栈一致的受审服务端 pin；本机架构不同时由 {@code platform} 决定运行形态。 */
   private static final String IMAGE =
@@ -56,13 +56,13 @@ final class UpgradeMinioFixture implements AutoCloseable {
 
   private final String bucket;
 
-  private UpgradeMinioFixture(GenericContainer<?> container, String bucket) {
+  private StartupMinioFixture(GenericContainer<?> container, String bucket) {
     this.container = container;
     this.bucket = bucket;
   }
 
   /** 启动本次测试独占的 MinIO 并建好私有桶；建桶失败时立即停止该容器，绝不留下半启动的资源。 */
-  static UpgradeMinioFixture start() {
+  static StartupMinioFixture start() {
     String bucket = "upgrade-" + UUID.randomUUID().toString().replace("-", "");
     GenericContainer<?> container =
         new GenericContainer<>(DockerImageName.parse(IMAGE))
@@ -70,7 +70,7 @@ final class UpgradeMinioFixture implements AutoCloseable {
             .withEnv("MINIO_ROOT_PASSWORD", SECRET_KEY)
             .withExposedPorts(API_PORT)
             .waitingFor(Wait.forHttp(HEALTH_PATH).forPort(API_PORT))
-            .withCreateContainerCmdModifier(UpgradeMinioFixture::bindLoopbackAndPlatform);
+            .withCreateContainerCmdModifier(StartupMinioFixture::bindLoopbackAndPlatform);
     container.start();
     try {
       createPrivateBucket(container, bucket);
@@ -78,7 +78,7 @@ final class UpgradeMinioFixture implements AutoCloseable {
       container.stop();
       throw error;
     }
-    return new UpgradeMinioFixture(container, bucket);
+    return new StartupMinioFixture(container, bucket);
   }
 
   String endpoint() {
