@@ -34,7 +34,7 @@ interface PreviewRequest {
     commands: Array<{
       type: string
       contents?: Array<{ type: string; text?: string }>
-      model?: { providerName: string; modelName: string; variant: string }
+      model?: { modelName: string; variant: string }
     }>
   }
 }
@@ -43,7 +43,7 @@ interface PreviewRequest {
 interface DebugRequest {
   kind: 'debug'
   body: {
-    model: { providerName: string; modelName: string; variant: string }
+    model: { modelName: string; variant: string }
     environmentName: string | null
   }
 }
@@ -263,7 +263,7 @@ async function installPreviewApiMock(
       if (path === '/api/ai/catalog/agents') {
         const results = options.agentSelection ? ['coder', 'broken-agent'].map((name) => ({
           name,
-          model: name === 'coder' ? 'anthropic/Claude' : 'missing/model',
+          model: name === 'coder' ? 'Claude' : 'missing-model',
           variant: 'fast',
           config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
           version: '1',
@@ -276,14 +276,24 @@ async function installPreviewApiMock(
       if (path === '/api/ai/catalog/models') {
         const results = options.agentSelection ? [{
           providerName: 'anthropic',
+          kind: 'MODEL',
           name: 'Claude',
+          modelId: 'claude',
+          description: null,
           config: {
             limit: { context: 200000, output: 4096 },
             abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
+            pricing: {
+              base: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0', cacheWriteByTtl: {}, reasoning: null },
+              overrides: [],
+              multipliers: [],
+            },
             defaultVariant: 'default',
             variants: [{ id: 'default' }, { id: 'fast' }],
           },
           version: '1',
+          createTime: '2026-01-01T00:00:00Z',
+          updateTime: '2026-01-01T00:00:00Z',
         }] : []
         await route.fulfill({
           json: { status: 200, data: { pageNumber: 1, pageSize: 50, totalCount: results.length, results } },
