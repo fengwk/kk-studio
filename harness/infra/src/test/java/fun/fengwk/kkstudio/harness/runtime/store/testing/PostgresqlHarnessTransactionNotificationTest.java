@@ -503,7 +503,7 @@ class PostgresqlHarnessTransactionNotificationTest {
                   assistantEntryId,
                   sessionId,
                   userEntryId,
-                  mappedAssistant(spec.request(), spec.response()),
+                  mappedAssistant(spec.request(), spec.response(), T1),
                   T1));
           tx.insertThread(
               new ThreadState(

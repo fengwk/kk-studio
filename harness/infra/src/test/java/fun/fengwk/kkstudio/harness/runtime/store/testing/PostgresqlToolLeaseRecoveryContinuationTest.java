@@ -254,7 +254,7 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
                   assistantId,
                   turn.sessionId(),
                   requestHeadEntryId,
-                  StoreTestSupport.mappedAssistant(request, response),
+                  StoreTestSupport.mappedAssistant(request, response, T3),
                   T3));
           tx.updateModelInvocation(
               tx.lockModelInvocation(modelId).orElseThrow().succeed(response, null, null, T3));

@@ -614,7 +614,12 @@ final class DispatcherTestSupport {
         id,
         sessionId,
         parentId,
-        new HistoryPayloadMapper().assistantPayload(response, requestSpec.toolBindings()),
+        new HistoryPayloadMapper()
+            .assistantPayload(
+                response,
+                requestSpec.toolBindings(),
+                ModelSelection.model(requestSpec.model().modelName(), requestSpec.variant().id()),
+                NOW),
         NOW);
   }
 

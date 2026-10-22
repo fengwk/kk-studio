@@ -305,7 +305,7 @@ class PostgresqlModelLeaseRecoveryTest {
                   assistantId,
                   turn.sessionId(),
                   thread.headEntryId(),
-                  StoreTestSupport.mappedAssistant(StoreTestSupport.modelRequest(), response),
+                  StoreTestSupport.mappedAssistant(StoreTestSupport.modelRequest(), response, T3),
                   T3));
           tx.updateModelInvocation(
               tx.lockModelInvocation(modelId).orElseThrow().attachResultEntry(assistantId, T3));
