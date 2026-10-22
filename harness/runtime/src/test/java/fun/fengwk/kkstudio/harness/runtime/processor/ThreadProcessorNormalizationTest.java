@@ -26,6 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
@@ -271,11 +272,14 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
             response,
             null);
     // live attached assistant 由同一 request/response 经 mapper 生成（strict attach 校验要求全等）。
+    ModelSelection selection =
+        ModelSelection.model(requestSpec.model().modelName(), requestSpec.variant().id());
     UUID assistantId =
         insertAssistantPayload(
             fixture.store,
             baseline,
-            new HistoryPayloadMapper().assistantPayload(response, requestSpec.toolBindings()));
+            new HistoryPayloadMapper()
+                .assistantPayload(response, requestSpec.toolBindings(), selection, NOW));
     transitionModel(fixture.store, modelId, m -> m.attachResultEntry(assistantId, NOW));
     seedCommand(
         fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
