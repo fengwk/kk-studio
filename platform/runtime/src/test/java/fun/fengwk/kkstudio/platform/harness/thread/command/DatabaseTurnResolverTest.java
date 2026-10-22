@@ -137,6 +137,8 @@ import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.project.turn.ProjectRunScope;
 import fun.fengwk.kkstudio.project.turn.ProjectRunScopeJsonCodec;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelGroupDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelGroupMemberDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 
@@ -2702,6 +2704,144 @@ class DatabaseTurnResolverTest {
     assertEquals("Compaction", resolved.childSettings().agentName());
     assertEquals(compactorModel, resolved.childSettings().model());
     assertNull(resolved.childSettings().goal());
+  }
+
+  /** 经公开规划/解析路径验证组快照与交集，不直接调用私有 resolveGroup。 */
+  @Test
+  void groupFreezesOrderedMembersAndMinimumBudgets() {
+    Fixture fixture = groupFixture(Set.of(ModelInputModality.TEXT));
+    EntryPath path =
+        fixture.path(new BranchSettings("assistant", ModelSelection.group("group"), null));
+    TurnResolver.Resolved resolved = fixture.resolvedResult(path, null);
+    LiveTurnPlan.Planned planned = fixture.planned(path);
+    assertEquals(2048, resolved.contextWindow());
+    assertEquals(256, resolved.spec().outputTokens());
+    assertEquals(2048, planned.contextWindow());
+    assertEquals(256, planned.spec().outputTokens());
+    var group = resolved.spec().groupExecution();
+    assertEquals(group, planned.spec().groupExecution());
+    assertEquals("group", group.groupName());
+    assertEquals(7L, group.groupVersion());
+    assertEquals(Set.of(429, 503), group.fallbackStatusCodes());
+    assertEquals(31, group.cooldownSeconds());
+    assertEquals(
+        List.of("model", "second"),
+        group.members().stream().map(member -> member.model().modelName()).toList());
+    assertEquals(
+        List.of(new UUID(0, 42), new UUID(0, 43)),
+        group.members().stream().map(member -> member.providerConnectionGenerationId()).toList());
+    assertEquals(
+        List.of("custom", "fast"),
+        group.members().stream().map(member -> member.variant().id()).toList());
+    assertEquals(Set.of(ModelInputModality.TEXT), resolved.spec().model().inputModalities());
+    assertEquals(
+        List.of("provider", "second-provider"),
+        group.members().stream().map(member -> member.model().providerName()).toList());
+    assertEquals(
+        List.of("wire-model", "second"),
+        group.members().stream().map(member -> member.model().modelId()).toList());
+  }
+
+  /** 不合法组选择必须有稳定拒绝原因，不能被随后环境或工具检查掩盖。 */
+  @Test
+  void rejectsInvalidGroupSelections() {
+    Fixture fixture = groupFixture(Set.of(ModelInputModality.TEXT));
+    assertEquals(
+        "model group must not select a variant: group",
+        fixture
+            .rejected(
+                fixture.path(
+                    new BranchSettings(
+                        "assistant", ModelSelection.model("group", "default"), null)))
+            .error()
+            .message());
+    EntryPath path =
+        fixture.path(new BranchSettings("assistant", ModelSelection.group("group"), null));
+    when(fixture.models.getByName("second")).thenReturn(null);
+    assertEquals("group member model not found: second", fixture.rejected(path).error().message());
+    AgentModel nested = new AgentModel();
+    nested.setKind(AgentModelKind.GROUP);
+    when(fixture.models.getByName("second")).thenReturn(nested);
+    assertEquals(
+        "group member is not a single model: second", fixture.rejected(path).error().message());
+    Fixture disjoint = groupFixture(Set.of(ModelInputModality.AUDIO));
+    assertEquals(
+        "model group members have no common input modality: group",
+        disjoint.rejected(path).error().message());
+  }
+
+  @Test
+  void compactionCanSelectGroupWithoutEnvironmentOrTools() {
+    Fixture fixture = groupFixture(Set.of(ModelInputModality.TEXT));
+    fixture.compactionAgent(ModelSelection.group("group"));
+    CompactionPreparation preparation =
+        new CompactionPreparation(
+            CompactionPhase.FULL,
+            CompactionTrigger.THRESHOLD,
+            id(4),
+            null,
+            null,
+            null,
+            List.of(
+                new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("hello")))),
+            123L);
+    TurnResolver.CompactionResolved resolved =
+        fixture.resolvedCompaction(fixture.path(settings("default")), preparation);
+    assertEquals(ModelSelection.group("group"), resolved.childSettings().model());
+    assertEquals(2048, resolved.contextWindow());
+    assertEquals(256, resolved.maxOutputTokens());
+    assertEquals(123, resolved.outputBudget());
+    verifyNoInteractions(
+        fixture.environmentRepository,
+        fixture.environmentRegistry,
+        fixture.agentConfigCodec,
+        fixture.skillCatalogQueryService);
+  }
+
+  private static Fixture groupFixture(Set<ModelInputModality> secondModalities) {
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+    // 第一成员还支持 IMAGE，第二成员只支持 TEXT 时结果必须是交集而非首项或并集。
+    when(fixture.modelConfigParser.parse("model-config"))
+        .thenReturn(
+            new ParsedAgentModelConfig(
+                4096,
+                1024,
+                Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE),
+                true,
+                true,
+                List.of(new ModelVariant("custom", "medium")),
+                "custom",
+                pricing()));
+    fixture.addModel(
+        "second-provider",
+        ModelSelection.model("second", "fast"),
+        new ParsedAgentModelConfig(
+            2048,
+            256,
+            secondModalities,
+            true,
+            true,
+            List.of(new ModelVariant("fast")),
+            "fast",
+            pricing()));
+    AgentModel group = new AgentModel();
+    group.setName("group");
+    group.setKind(AgentModelKind.GROUP);
+    group.setVersion(7L);
+    group.setGroupConfigJson("group-config");
+    when(fixture.models.getByName("group")).thenReturn(group);
+    var config = new AgentModelGroupDTO();
+    var first = new AgentModelGroupMemberDTO();
+    first.setModelName("model");
+    first.setVariant("custom");
+    var second = new AgentModelGroupMemberDTO();
+    second.setModelName("second");
+    second.setVariant("fast");
+    config.setMembers(List.of(first, second));
+    config.setFallbackStatusCodes(List.of(429, 503));
+    config.setCooldownSeconds(31);
+    when(fixture.groupConfigCodec.decode("group-config")).thenReturn(config);
+    return fixture;
   }
 
   @Test
