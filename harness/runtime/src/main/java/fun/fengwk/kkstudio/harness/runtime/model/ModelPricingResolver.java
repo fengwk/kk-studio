@@ -124,6 +124,10 @@ final class ModelPricingResolver {
       ModelUsage usage,
       Instant requestedAt,
       String serviceTier) {
+    if (conditions == null) {
+      return true;
+    }
+    // 标准布尔空合取：显式 all:[] 与未声明均恒真。
     Boolean result = true;
     for (ModelPricingCondition condition : conditions) {
       Boolean nested = matches(condition, usage, requestedAt, serviceTier);
@@ -142,9 +146,13 @@ final class ModelPricingResolver {
       ModelUsage usage,
       Instant requestedAt,
       String serviceTier) {
-    if (conditions.isEmpty()) {
-      // 未声明 any 时不施加额外约束；空对象条件恒真。
+    if (conditions == null) {
+      // 未声明 any 时不施加额外约束。
       return true;
+    }
+    if (conditions.isEmpty()) {
+      // 标准布尔空析取：显式 any:[] 恒假。
+      return false;
     }
     Boolean result = false;
     for (ModelPricingCondition condition : conditions) {
@@ -179,8 +187,11 @@ final class ModelPricingResolver {
   }
 
   private static Boolean matchesServiceTier(List<String> tiers, String actualServiceTier) {
-    if (tiers.isEmpty()) {
+    if (tiers == null) {
       return true;
+    }
+    if (tiers.isEmpty()) {
+      return false;
     }
     if (actualServiceTier == null || actualServiceTier.isBlank()) {
       return null;
@@ -217,8 +228,8 @@ final class ModelPricingResolver {
     LocalTime start = time.start();
     LocalTime end = time.end();
     LocalDate attributionDay = local.toLocalDate();
-    if (start.equals(end)) {
-      // 00:00-00:00 表示全天，只用于只带星期限制的条件。
+    if (time.allDay()) {
+      // 内部 00:00-00:00 表示全天；wire 的显式形态是 00:00-24:00。
     } else if (start.isBefore(end)) {
       if (clock.isBefore(start) || !clock.isBefore(end)) {
         return false;
