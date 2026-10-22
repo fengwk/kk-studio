@@ -41,7 +41,7 @@ describe('thread timeline', () => {
     const timeline = buildThreadTimeline(
       [
         entry('1', 'ROOT', { settings: {
-          agentName: 'JIJI', model: { providerName: 'provider', modelName: 'model', variant: 'default' },
+          agentName: 'JIJI', model: { modelName: 'model', variant: 'default' },
           environmentName: null,
         } }),
         entry('2', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: '检查大纲' }])),
@@ -66,11 +66,11 @@ describe('thread timeline', () => {
   it('projects committed settings snapshots before messages, never compaction settings', () => {
     // 测试意图：配置事件来自持久快照，固定字段顺序且有稳定的复合 ID。
     const initial = {
-      agentName: 'coding', model: { providerName: 'p', modelName: 'm1', variant: 'default' },
+      agentName: 'coding', model: { modelName: 'm1', variant: 'default' },
       environmentName: null,
     }
     const changed = {
-      agentName: 'reviewer', model: { providerName: 'p', modelName: 'm2', variant: 'high' },
+      agentName: 'reviewer', model: { modelName: 'm2', variant: 'high' },
       environmentName: 'local',
     }
     const entries = [
@@ -96,7 +96,7 @@ describe('thread timeline', () => {
   it('clears the diff baseline on malformed snapshots and recovers without invented changes', () => {
     // 测试意图：损坏快照中断差值链；下一完整快照只重建基准，不虚构变更。
     const settings = {
-      agentName: 'coding', model: { providerName: 'p', modelName: 'm', variant: 'default' },
+      agentName: 'coding', model: { modelName: 'm', variant: 'default' },
       environmentName: 'local',
     }
     const projected = buildThreadTimeline([
@@ -116,12 +116,12 @@ describe('thread timeline', () => {
     // 安全点变更立即生效，相同 SETTINGS 和下一 TURN_START 不重复展示。
     const rootSettings = {
       agentName: 'JIJI',
-      model: { providerName: 'commandcode', modelName: 'glm-5.3-flash', variant: 'high' },
+      model: { modelName: 'glm-5.3-flash', variant: 'high' },
       environmentName: 'linux-env',
     }
     const realPayloadSettings = {
       agentName: 'reviewer',
-      model: { providerName: 'commandcode', modelName: 'glm-5.3-flash', variant: 'max' },
+      model: { modelName: 'glm-5.3-flash', variant: 'max' },
       environmentName: null,
       goal: { id: 'goal-1', text: 'code review' },
     }
@@ -210,7 +210,7 @@ describe('thread timeline', () => {
   it('establishes a SETTINGS baseline without inventing changes and applies it after compaction', () => {
     const settings = {
       agentName: 'JIJI',
-      model: { providerName: 'xai', modelName: 'grok-4.7', variant: 'high' },
+      model: { modelName: 'grok-4.7', variant: 'high' },
       environmentName: null,
     }
     const messages = buildThreadTimeline([
@@ -237,12 +237,12 @@ describe('thread timeline', () => {
     // 下一次有效 SETTINGS 仅重新建立 baseline，绝不伪造虚假变更。
     const initial = {
       agentName: 'initial-agent',
-      model: { providerName: 'p', modelName: 'm', variant: 'v1' },
+      model: { modelName: 'm', variant: 'v1' },
       environmentName: null,
     }
     const next = {
       agentName: 'next-agent',
-      model: { providerName: 'p', modelName: 'm', variant: 'v2' },
+      model: { modelName: 'm', variant: 'v2' },
       environmentName: 'env-1',
     }
     const timeline = buildThreadTimeline([
@@ -789,7 +789,7 @@ describe('thread timeline', () => {
 
   it('projects control boundaries as no entry rows plus the TURN_END footer meta', () => {
     const settings = {
-      agentName: 'JIJI', model: { providerName: 'provider', modelName: 'model', variant: 'default' },
+      agentName: 'JIJI', model: { modelName: 'model', variant: 'default' },
       environmentName: null,
     }
     const timeline = buildThreadTimeline(

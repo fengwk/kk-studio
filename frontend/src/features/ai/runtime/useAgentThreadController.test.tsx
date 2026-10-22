@@ -66,8 +66,7 @@ function modelSelection(
   overrides: Partial<HarnessModelSelectionDTO> = {},
 ): HarnessModelSelectionDTO {
   return {
-    providerName: 'minimax',
-    modelName: 'MiniMax',
+        modelName: 'MiniMax',
     variant: 'default',
     ...overrides,
   }
@@ -240,6 +239,7 @@ describe('useAgentThreadController', () => {
       results: [
         {
           providerName: 'minimax',
+          kind: 'MODEL',
           name: 'MiniMax',
           modelId: 'MiniMax',
           description: null,
@@ -247,18 +247,10 @@ describe('useAgentThreadController', () => {
             limit: { context: 128000, output: 8192 },
             abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
             pricing: {
-              currency: 'USD',
-              pricingTier: 'default',
-              serviceTier: 'default',
-              serviceTierMultiplier: 1,
-              version: 'v1',
-              inputPerMillionTokens: 0,
-              outputPerMillionTokens: 0,
-              cacheReadPerMillionTokens: 0,
-              cacheWritePerMillionTokens: 0,
-              cacheWriteLongPerMillionTokens: 0,
-              reasoningPerMillionTokens: 0,
-            },
+      base: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0', cacheWriteByTtl: {}, reasoning: null },
+      overrides: [],
+      multipliers: [],
+    },
             defaultVariant: 'default',
             variants: [{ id: 'default' }],
           },

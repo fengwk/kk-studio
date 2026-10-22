@@ -75,7 +75,7 @@ const assistantAgent: AgentDefinitionDTO = {
   description: null,
   systemPrompt: null,
   type: 'USER',
-  model: 'minimax/MiniMax',
+  model: 'MiniMax',
   variant: 'default',
   config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
   version: '0',
@@ -85,6 +85,7 @@ const assistantAgent: AgentDefinitionDTO = {
 
 const model: AgentModelDTO = {
   providerName: 'minimax',
+  kind: 'MODEL',
   name: 'MiniMax',
   modelId: 'MiniMax',
   description: null,
@@ -92,17 +93,9 @@ const model: AgentModelDTO = {
     limit: { context: 128000, output: 8192 },
     abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
     pricing: {
-      currency: 'USD',
-      pricingTier: 'default',
-      serviceTier: 'default',
-      serviceTierMultiplier: 1,
-      version: '1',
-      inputPerMillionTokens: 0,
-      outputPerMillionTokens: 0,
-      cacheReadPerMillionTokens: 0,
-      cacheWritePerMillionTokens: 0,
-      cacheWriteLongPerMillionTokens: 0,
-      reasoningPerMillionTokens: 0,
+      base: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0', cacheWriteByTtl: {}, reasoning: null },
+      overrides: [],
+      multipliers: [],
     },
     defaultVariant: 'default',
     variants: [{ id: 'default' }],
@@ -128,7 +121,7 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
     executionControl: 'RUNNABLE',
     branchSettings: {
       agentName: 'assistant',
-      model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+      model: { modelName: 'MiniMax', variant: 'default' },
       environmentName: null,
       goal: null,
     },
@@ -670,7 +663,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     const summary = {
       threadId: 'subagent', parentThreadId: null as string | null, name: 'duplicate',
       createdAt: null, updatedAt: null, status: 'IDLE', processing: false,
-      model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' }, headMessagePreview: null,
+      model: { modelName: 'MiniMax', variant: 'default' }, headMessagePreview: null,
     }
     vi.mocked(harnessService.listSessionThreads).mockResolvedValue([summary])
     bindPaneThread('pane-1', [ROOT_ENTRY, TURN_END_ENTRY, MESSAGE_ENTRY], 'entry-3')

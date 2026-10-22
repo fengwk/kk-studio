@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { emptyAgentDraft } from '@/features/ai/catalog/ai-agent-draft-codec'
+import { emptyModelGroupDraft } from '@/features/ai/catalog/ai-model-group-draft-codec'
 import { emptyModelDraft } from '@/features/ai/catalog/ai-model-draft-codec'
 import { buildResourceSubmitPlan } from '@/features/ai/catalog/ai-resource-editor-submit-plans'
 import { emptyProviderDraft } from '@/features/ai/catalog/ai-provider-draft-codec'
@@ -8,18 +9,17 @@ function drafts() {
   return {
     providerDraft: emptyProviderDraft(),
     modelDraft: emptyModelDraft(),
+    modelGroupDraft: emptyModelGroupDraft(),
     agentDraft: emptyAgentDraft(),
   }
 }
 
 describe('ai-resource-editor-submit-plans', () => {
-  it('keeps the edit Model PUT target at the original provider and model identity while placing renamed name in update data', () => {
+  it('keeps the edit Model PUT target at the original logical name while placing renamed name in update data', () => {
     const plan = buildResourceSubmitPlan(
       {
         kind: 'model',
-        mode: 'edit',
-        providerName: 'deleted-provider',
-        name: 'original-model',
+        mode: 'edit', resourceKind: 'MODEL', name: 'original-model',
         expectedVersion: '7',
       },
       {
@@ -35,12 +35,11 @@ describe('ai-resource-editor-submit-plans', () => {
 
     expect(plan).toMatchObject({
       kind: 'model',
-      mode: 'edit',
-      providerName: 'deleted-provider',
-      name: 'original-model',
+      mode: 'edit', name: 'original-model',
       data: { expectedVersion: '7', name: 'renamed-model' },
     })
     if (plan.kind !== 'model' || plan.mode !== 'edit') return
+    expect(plan.data).toHaveProperty('kind', 'MODEL')
     expect(plan.data).not.toHaveProperty('providerName')
     expect(plan.data.name).toBe('renamed-model')
   })

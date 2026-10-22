@@ -11,6 +11,7 @@ import type { AgentDefinitionDTO, AgentModelDTO } from '@/shared/api/contracts/a
 function model(): AgentModelDTO {
   return {
     providerName: 'minimax',
+    kind: 'MODEL',
     name: 'model',
     modelId: 'model-id',
     description: null,
@@ -18,18 +19,10 @@ function model(): AgentModelDTO {
       limit: { context: 128000, output: 8192 },
       abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
       pricing: {
-        currency: 'USD',
-        pricingTier: 'default',
-        serviceTier: 'default',
-        serviceTierMultiplier: 1,
-        version: 'v1',
-        inputPerMillionTokens: 0,
-        outputPerMillionTokens: 0,
-        cacheReadPerMillionTokens: 0,
-        cacheWritePerMillionTokens: 0,
-        cacheWriteLongPerMillionTokens: 0,
-        reasoningPerMillionTokens: 0,
-      },
+      base: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0', cacheWriteByTtl: {}, reasoning: null },
+      overrides: [],
+      multipliers: [],
+    },
       defaultVariant: 'quality',
       variants: [{ id: 'quality' }],
     },
@@ -56,7 +49,7 @@ function draft(overrides: Partial<AgentDraft> = {}): AgentDraft {
 describe('ai-agent-draft-codec', () => {
   it('creates empty drafts from an optional model without inventing a variant', () => {
     expect(emptyAgentDraft(model())).toMatchObject({
-      model: 'minimax/model',
+      model: 'model',
       variant: '',
       inheritParentEnvironment: true,
       subagents: [],
@@ -101,7 +94,7 @@ describe('ai-agent-draft-codec', () => {
       description: null,
       systemPrompt: null,
       type: 'USER',
-      model: 'minimax/model',
+      model: 'model',
       variant: 'quality',
       config: {
         inheritParentEnvironment: false,
@@ -118,7 +111,7 @@ describe('ai-agent-draft-codec', () => {
       name: 'assistant',
       description: '',
       systemPrompt: '',
-      model: 'minimax/model',
+      model: 'model',
       variant: 'quality',
       inheritParentEnvironment: false,
       tools: ['read'],
@@ -139,7 +132,7 @@ describe('ai-agent-draft-codec', () => {
       name: 'assistant',
       description: 'description',
       systemPrompt: 'prompt',
-      model: 'minimax/model',
+      model: 'model',
       variant: 'quality',
       config: {
         inheritParentEnvironment: true,
@@ -152,7 +145,7 @@ describe('ai-agent-draft-codec', () => {
     expect(toEditableAgentUpdate(draft())).toEqual({
       description: 'description',
       systemPrompt: 'prompt',
-      model: 'minimax/model',
+      model: 'model',
       variant: 'quality',
       config: {
         inheritParentEnvironment: true,
@@ -222,7 +215,7 @@ describe('ai-agent-draft-codec', () => {
       description: null,
       systemPrompt: null,
       type: 'USER',
-      model: 'minimax/model',
+      model: 'model',
       variant: null,
       config: {
         inheritParentEnvironment: true,

@@ -7,7 +7,6 @@ import type {
   SkillRefDTO,
 } from '@/shared/api/contracts/ai-catalog'
 import type { AgentDraft } from '@/features/ai/catalog/ai-console-types'
-import { modelRef } from '@/features/ai/catalog/AgentModelView'
 import { trimToNull } from '@/features/ai/catalog/ai-resource-draft-primitives'
 import { translate } from '@/shared/i18n'
 
@@ -88,7 +87,7 @@ export function emptyAgentDraft(model?: AgentModelDTO): AgentDraft {
     name: '',
     description: '',
     systemPrompt: '',
-    model: model ? modelRef(model) : '',
+    model: model?.name ?? '',
     // 空值 = 不覆盖；runtime 使用 model.defaultVariant。
     variant: '',
     inheritParentEnvironment: true,

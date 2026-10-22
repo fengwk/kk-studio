@@ -1,4 +1,4 @@
-import type { AgentModelView } from '@/features/ai/catalog/AgentModelView'
+import type { AgentModelDTO } from '@/shared/api/contracts/ai-catalog'
 import type { VariantDraft } from '@/features/ai/catalog/ai-console-types'
 import { extractVariantIdsFromModel } from '@/features/ai/catalog/ai-model-draft-codec'
 
@@ -22,6 +22,7 @@ export function variantOptionsFromDraft(variants: VariantDraft[]): string[] {
   return uniqueNonEmpty(variants.map((variant) => variant.id))
 }
 
-export function variantOptionsFromModel(model?: AgentModelView | null): string[] {
-  return extractVariantIdsFromModel(model)
+/** 组没有组级 Variant；只有 MODEL 的配置可作为覆盖候选。 */
+export function variantOptionsFromModel(model?: AgentModelDTO | null): string[] {
+  return model?.kind === 'MODEL' ? extractVariantIdsFromModel(model) : []
 }

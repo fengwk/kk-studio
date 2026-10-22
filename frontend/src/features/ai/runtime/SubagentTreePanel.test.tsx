@@ -11,7 +11,7 @@ const node = (threadId: string, parentThreadId: string | null, overrides: Partia
   threadId, parentThreadId, agentName: 'Explorer', name: 'main',
   status: 'IDLE', processing: false, outcome: null, updateTime: 1774958400,
   turnCount: 7, toolCallCount: 12,
-  model: { providerName: 'provider', modelName: 'model', variant: 'default' },
+  model: { modelName: 'model', variant: 'default' },
   ...overrides,
 })
 

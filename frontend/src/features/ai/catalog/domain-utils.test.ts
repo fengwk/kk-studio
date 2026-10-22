@@ -53,17 +53,9 @@ function fullConfig(): AgentModelConfigDTO {
     limit: { context: 128000, output: 8192 },
     abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
     pricing: {
-      currency: 'USD',
-      pricingTier: 'default',
-      serviceTier: 'default',
-      serviceTierMultiplier: 1,
-      version: 'v1',
-      inputPerMillionTokens: 0,
-      outputPerMillionTokens: 0,
-      cacheReadPerMillionTokens: 0,
-      cacheWritePerMillionTokens: 0,
-      cacheWriteLongPerMillionTokens: 0,
-      reasoningPerMillionTokens: 0,
+      base: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0', cacheWriteByTtl: {}, reasoning: null },
+      overrides: [],
+      multipliers: [],
     },
     defaultVariant: 'default',
     variants: [{ id: 'default' }],
@@ -73,6 +65,7 @@ function fullConfig(): AgentModelConfigDTO {
 function model(overrides: Partial<AgentModelDTO> = {}): AgentModelDTO {
   return {
     providerName: 'minimax',
+    kind: 'MODEL',
     name: 'MiniMax-M2.7',
     modelId: 'minimax-upstream',
     description: 'Chat model',
@@ -101,7 +94,7 @@ describe('AI domain utilities', () => {
     })
     expect(emptyModelDraft().inputModalities).toEqual(['TEXT'])
     expect(emptyAgentDraft(model())).toMatchObject({
-      model: 'minimax/MiniMax-M2.7',
+      model: 'MiniMax-M2.7',
       variant: '',
     })
 
@@ -161,7 +154,7 @@ describe('AI domain utilities', () => {
         description: 'desc',
         systemPrompt: 'prompt',
         type: 'USER',
-        model: 'minimax/MiniMax-M2.7',
+        model: 'MiniMax-M2.7',
         variant: 'default',
         config: {
           inheritParentEnvironment: true,
@@ -175,7 +168,7 @@ describe('AI domain utilities', () => {
       }),
     ).toMatchObject({
       name: 'assistant',
-      model: 'minimax/MiniMax-M2.7',
+      model: 'MiniMax-M2.7',
       inheritParentEnvironment: true,
       tools: ['search'],
       subagents: [],
@@ -289,7 +282,7 @@ describe('AI domain utilities', () => {
       name: ' assistant ',
       description: ' desc ',
       systemPrompt: ' prompt ',
-      model: ' minimax/MiniMax-M2.7 ',
+      model: ' MiniMax-M2.7 ',
       variant: ' default ',
       inheritParentEnvironment: true,
       tools: [' search ', ''],
@@ -300,7 +293,7 @@ describe('AI domain utilities', () => {
       name: 'assistant',
       description: 'desc',
       systemPrompt: 'prompt',
-      model: 'minimax/MiniMax-M2.7',
+      model: 'MiniMax-M2.7',
       variant: 'default',
       config: {
         inheritParentEnvironment: true,
@@ -313,7 +306,7 @@ describe('AI domain utilities', () => {
     expect(toEditableAgentUpdate(agentInput)).toEqual({
       description: 'desc',
       systemPrompt: 'prompt',
-      model: 'minimax/MiniMax-M2.7',
+      model: 'MiniMax-M2.7',
       variant: 'default',
       config: {
         inheritParentEnvironment: true,
@@ -334,7 +327,7 @@ describe('AI domain utilities', () => {
         description: 'Cloud agent',
         systemPrompt: null,
         type: 'USER' as const,
-        model: 'minimax/MiniMax-M2.7',
+        model: 'MiniMax-M2.7',
         variant: 'default',
         config: {
           inheritParentEnvironment: true,
@@ -382,10 +375,10 @@ describe('AI domain utilities', () => {
 
     expect(filterAgents(agents, 'assistant')).toHaveLength(1)
     expect(filterAgents(agents, 'cloud')).toHaveLength(0)
-    expect(filterModels(models, 'minimax/MiniMax-M2.7').map((item) => item.name)).toEqual(['MiniMax-M2.7'])
+    expect(filterModels(models, 'MiniMax-M2.7').map((item) => item.name)).toEqual(['MiniMax-M2.7'])
     expect(filterModels(models, 'default')).toHaveLength(0)
-    // 按完整 ref 排序：minimax/... 在 openai/... 之前
-    expect(filterModels(models, '').map((item) => item.name)).toEqual(['MiniMax-M2.7', 'gpt-5.4'])
+    // 按全局唯一逻辑名排序。
+    expect(filterModels(models, '').map((item) => item.name)).toEqual(['gpt-5.4', 'MiniMax-M2.7'])
     expect(filterProviders(providers, 'minimax').map((item) => item.name)).toEqual(['minimax'])
     expect(filterProviders(providers, 'endpoint')).toHaveLength(0)
     expect(filterProviders(providers, '').map((item) => item.name)).toEqual(['minimax', 'openai'])
@@ -437,7 +430,7 @@ describe('AI domain utilities', () => {
     expect(includesSearch('MiniMax', '')).toBe(true)
 
     expect(resourceTitle({ kind: 'provider', mode: 'create' })).toBe('新建 Provider')
-    expect(resourceTitle({ kind: 'model', mode: 'edit', providerName: 'minimax', name: 'MiniMax-M2.7', expectedVersion: '1' })).toBe('编辑 Model')
+    expect(resourceTitle({ kind: 'model', mode: 'edit', resourceKind: 'MODEL', name: 'MiniMax-M2.7', expectedVersion: '1' })).toBe('编辑 Model')
     expect(resourceTitle({ kind: 'agent', mode: 'create', type: 'USER' })).toBe('新建 Agent')
     expect(formatBackendDate([2026, 6, 20, 2, 1, 0, 0])).toBe('2026-06-20 02:01')
     expect(formatBackendDate('2026-06-20T02:01:00')).toBe('2026-06-20 02:01')
@@ -485,7 +478,7 @@ describe('AI domain utilities', () => {
         description: null,
         systemPrompt: null,
         type: 'USER',
-        model: 'openai/gpt-5.4',
+        model: 'gpt-5.4',
         variant: 'default',
         config: {
           inheritParentEnvironment: true,
