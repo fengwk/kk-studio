@@ -426,7 +426,7 @@ public final class ModelProcessor implements AutoCloseable {
         tx.updateModelInvocation(
             model.fail(
                 new ModelInvocationError(
-                    ProviderErrorKind.INVALID_REQUEST,
+                    ProviderErrorKind.NO_AVAILABLE_MODEL,
                     "no available model in group: " + group.groupName()),
                 now));
         tx.updateThread(thread.touchVersion(now));
@@ -564,8 +564,17 @@ public final class ModelProcessor implements AutoCloseable {
     if (tx.lockClaimedWork(claim, now).isEmpty()) {
       throw new ClaimLostSignal();
     }
-    tx.updateModelInvocation(
-        unconfirmedDispatch ? model.failDispatched(error, now) : model.fail(error, now));
+    ModelInvocation terminal;
+    if (group != null && !unconfirmedDispatch) {
+      // 恢复失败同样计入当前成员的失败审计；仍停留在原成员，且不冻结、不降级。
+      Instant failedAt = durableFailedAt(now, thread, model);
+      terminal =
+          model.failAfterAttempt(
+              error, attemptFailure(model, chargeableAttempt, error, failedAt, failedAt), failedAt);
+    } else {
+      terminal = unconfirmedDispatch ? model.failDispatched(error, now) : model.fail(error, now);
+    }
+    tx.updateModelInvocation(terminal);
     tx.updateThread(thread.touchVersion(now));
     tx.completeWork(claim, now);
     return new Prepare.Terminated();

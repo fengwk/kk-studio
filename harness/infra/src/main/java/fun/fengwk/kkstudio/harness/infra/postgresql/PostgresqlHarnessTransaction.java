@@ -1797,8 +1797,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       String memberVariant,
       Instant now) {
     checkOpen();
-    return Boolean.TRUE.equals(
-        queryOne(
+    return queryOne(
             """
             select exists (
                 select 1
@@ -1818,7 +1817,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
             memberVariant,
             groupVersion,
             groupVersion,
-            PostgresqlHarnessRows.timestamp(now)));
+            PostgresqlHarnessRows.timestamp(now))
+        .orElse(false);
   }
 
   @Override

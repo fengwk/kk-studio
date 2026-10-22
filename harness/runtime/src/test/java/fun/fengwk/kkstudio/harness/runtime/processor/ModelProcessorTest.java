@@ -4577,7 +4577,9 @@ class ModelProcessorTest {
     assertEquals(0, fixture.gateway.startCalls);
     ModelInvocation failed = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.FAILED, failed.status());
-    assertEquals(ProviderErrorKind.INVALID_REQUEST, failed.error().kind());
+    assertEquals(ProviderErrorKind.NO_AVAILABLE_MODEL, failed.error().kind());
+    assertNull(failed.error().httpStatus());
+    assertFalse(failed.error().retryCandidate());
     assertTrue(failed.error().message().contains("no available model in group"));
   }
 
@@ -4709,6 +4711,58 @@ class ModelProcessorTest {
     assertEquals(ModelSelection.model("model2", "v1"), failed.failedAttempts().getLast().model());
   }
 
+  /** UNKNOWN 恢复只消耗当前成员预算：允许时留在原成员，耗尽时原成员失败，绝不冻结或切换成员。 */
+  @Test
+  void groupUnknownRecoveryConsumesCurrentMemberBudgetWithoutFreezeOrFallback() {
+    Fixture fixture =
+        fixture(
+            new InvocationRetryPolicy(
+                1,
+                InvocationRetryBackoffStrategy.FIXED,
+                Duration.ofSeconds(5),
+                Duration.ofSeconds(5)),
+            groupSpec(Set.of(), 30));
+    transition(fixture.store, fixture.invocationId, model -> model.beginDispatch(NOW));
+    transition(fixture.store, fixture.invocationId, model -> model.markRunning(NOW));
+    claim(fixture.store, fixture.invocationId, NOW);
+    fixture.clock.advance(Duration.ofSeconds(61));
+    ClaimedWork recovered = claim(fixture.store, fixture.invocationId, fixture.clock.instant());
+
+    assertEquals(ProcessResult.RESCHEDULED, fixture.processor.process(recovered));
+
+    ModelInvocation retried = model(fixture.store, fixture.invocationId);
+    assertEquals(ModelInvocationStatus.READY, retried.status());
+    assertEquals(0, groupProgress(retried).memberIndex());
+    assertEquals(1, groupProgress(retried).memberAttempts());
+    assertEquals(ModelSelection.model("model", "v1"), retried.failedAttempts().getLast().model());
+    boolean cooling =
+        fixture.store.transaction(
+            tx -> tx.isGroupMemberCooling("group", 7L, "model", "v1", fixture.clock.instant()));
+    assertFalse(cooling);
+
+    // 同一成员第二次租约丢失：成员预算耗尽，直接 FAILED，仍不冻结、不切到 model2。
+    fixture.clock.advance(Duration.ofSeconds(5));
+    transition(
+        fixture.store, fixture.invocationId, model -> model.beginDispatch(fixture.clock.instant()));
+    transition(
+        fixture.store, fixture.invocationId, model -> model.markRunning(fixture.clock.instant()));
+    claim(fixture.store, fixture.invocationId, fixture.clock.instant());
+    fixture.clock.advance(Duration.ofSeconds(61));
+    ClaimedWork exhausted = claim(fixture.store, fixture.invocationId, fixture.clock.instant());
+
+    assertEquals(ProcessResult.TERMINATED, fixture.processor.process(exhausted));
+
+    ModelInvocation failed = model(fixture.store, fixture.invocationId);
+    assertEquals(ModelInvocationStatus.FAILED, failed.status());
+    assertEquals(0, groupProgress(failed).memberIndex());
+    assertEquals(ProviderErrorKind.TRANSIENT, failed.error().kind());
+    boolean coolingAfterExhaustion =
+        fixture.store.transaction(
+            tx -> tx.isGroupMemberCooling("group", 7L, "model", "v1", fixture.clock.instant()));
+    assertFalse(coolingAfterExhaustion);
+    assertEquals(0, fixture.gateway.startCalls);
+  }
+
   private static EntryPayload assistantPayload() {
     // live attached 场景的 assistant 由 fixture 的 canonical request/response 经 mapper 派生，与 strict
     // attach 校验一致；
@@ -4718,7 +4772,7 @@ class ModelProcessorTest {
             response("ok", GenerationStopReason.COMPLETE),
             requestWithTool().toolBindings(),
             ModelSelection.model("model", "v1"),
-            null);
+            NOW);
   }
 
   private static BranchSettings branchSettings() {
