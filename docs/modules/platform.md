@@ -66,14 +66,32 @@ durable 快照，到期后同 version 重新 GET 会自然变化，无额外持�
 
 ## Catalog
 
-Provider 与 Agent 以不可变 `name` 寻址；Model 以 `(providerName, name)` 寻址，允许改名。
-变更携带 `expectedVersion`。Model 重命名在同一事务内插入新行、更新 Agent 引用、删除旧行，
-任何 CAS 或引用校验失败整体回滚。删除前校验入边，数据库外键提供并发兜底。
+Provider 与 Agent 以不可变 `name` 寻址。MODEL 与 MODEL GROUP 共用全局唯一的逻辑 `name`
+命名空间：MODEL 另以 `providerName` 指向 Provider，并用独立的 `modelId` 保存发往上游的 wire
+模型标识；GROUP 只保存有序成员、`fallbackStatusCodes` 与 `cooldownSeconds`，不得携带
+`providerName`、`modelId` 或模型 `config`。两类资源都通过 `/api/ai/catalog/models` 创建和查询，
+PUT/DELETE 使用 `/api/ai/catalog/models/{*modelName}`；名称可以包含斜杠，客户端必须把逻辑名作为
+路径 tail 按 `/` 分段编码，保留层级分隔。变更携带 `expectedVersion`。PUT 通过请求体 `name` 支持改名，同一事务更新
+引用，任何 CAS、类型变更或引用校验失败整体回滚。删除 MODEL 前校验 Agent 与 GROUP 入边，
+删除 GROUP 前校验 Agent 入边，数据库外键提供并发兜底。
+
+GROUP 的成员顺序就是 Fill First 顺序，成员只能是 MODEL 且其 Variant 必须已在该 MODEL 声明；
+禁止重复成员和嵌套组。`fallbackStatusCodes` 是必需但可为空的 HTTP 400–599 集合，元素去重；
+`cooldownSeconds` 是必需的非负整数，0 表示仅本次逻辑调用继续下一成员、不写跨调用冷却。
+冻结的组版本隔离成员列表与冷却状态，调用开始后的组更新不混入本次调用。GROUP 的公开
+`config` 只是成员能力的只读派生摘要：上下文/输出取最小值（输出再受上下文约束），工具与推理
+能力取与、输入模态取交集；它不包含组级 pricing、variants 或 defaultVariant。
 
 Provider credential 在显式写入口接收，常规响应给出安全投影；配置同步导出显式包含原值。运行时类型取自
 [`ProviderType`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderType.java)：
 `openai`、`openai_responses`、`anthropic`、`google`，按精确 wire value 解析。
-Model 配置保存 limit、abilities、variants、pricing 和 default variant。
+MODEL 配置保存 limit、abilities、variants、pricing 和 default variant。
+`pricing` 固定为 `{base, overrides, multipliers}`：所有价格与倍率在 wire 上都是十进制字符串，
+单位固定为 USD / 每百万 token；普通基础价缺省归一为 0，倍率缺省为 1，`reasoning: null`
+表示继承最终 output 价。`overrides` 与 `multipliers` 按数组顺序应用，规则 id 必须唯一；
+条件对象同层字段为 AND，支持 `all` / `any` / `not`、context token 边界、service tier、UTC 日期
+与时区时间段。覆盖规则只写入非 null 字段，显式 `reasoning: null` 恢复继承；倍率规则逐字段
+缩放，未列出的字段不变。schema 不再包含 currency、服务档标签、版本标签或 `unpriced` 标记。
 Agent 配置保存工具名、`SkillRef(packageName, name)`、subagents 与 `inheritParentEnvironment`
 （默认 true）；工具候选和 Skill 引用在写入时校验。
 

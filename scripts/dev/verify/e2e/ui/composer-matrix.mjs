@@ -2,7 +2,7 @@ import { createServer } from 'node:http'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 
-import { baseModelConfig } from '../lib/fixtures.mjs'
+import { baseModelConfig, encodePathTail } from '../lib/fixtures.mjs'
 import {
   assert,
   cid,
@@ -1369,6 +1369,7 @@ async function createHoldingQueueFixture(
       'POST',
       '/api/ai/catalog/models',
       {
+        kind: 'MODEL',
         providerName: state.provider.name,
         name: `e2e-ui-hold-model-${suffix}`,
         modelId: `wire-ui-hold-${suffix}`,
@@ -1397,7 +1398,7 @@ async function createHoldingQueueFixture(
         name: `e2e-ui-hold-agent-${suffix}`,
         description: 'Local hold agent for free UI queue tests.',
         systemPrompt: 'Wait for the local E2E stream.',
-        model: `${state.model.providerName}/${state.model.name}`,
+        model: state.model.name,
         variant: 'default',
         config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
       },
@@ -1424,7 +1425,6 @@ async function createHoldingQueueFixture(
       rootSettings: branchSettingsOf(
         { name: `e2e-ui-hold-missing-${suffix}` },
         {
-          providerName: state.model.providerName,
           modelName: state.model.name,
           variant: 'default',
         },
@@ -1449,7 +1449,6 @@ async function createHoldingQueueFixture(
         setAgentCommand(state.agent.name, cid()),
         setModelCommand(
           {
-            providerName: state.model.providerName,
             modelName: state.model.name,
             variant: 'default',
           },
@@ -1536,7 +1535,7 @@ async function cleanupFixture(state) {
     if (!state.model) return
     await deleteCatalogResource(
       state.apiCtx,
-      `/api/ai/catalog/models/${encodeURIComponent(state.model.providerName)}/${encodeURIComponent(state.model.name)}`
+      `/api/ai/catalog/models/${encodePathTail(state.model.name)}`
         + `?expectedVersion=${encodeURIComponent(state.model.version)}`,
     )
   })
@@ -1635,20 +1634,14 @@ async function resolveCatalogTarget(apiCtx) {
   const agents = agentsResponse.json?.data?.results || []
   const models = modelsResponse.json?.data?.results || []
   for (const agent of agents) {
-    const separator = String(agent.model || '').indexOf('/')
-    if (separator <= 0) continue
-    const providerName = String(agent.model).slice(0, separator)
-    const modelName = String(agent.model).slice(separator + 1)
-    const model = models.find(
-      (candidate) =>
-        candidate.providerName === providerName
-        && candidate.name === modelName,
-    )
+    const modelName = String(agent.model || '')
+    if (!modelName) continue
+    const model = models.find((candidate) => candidate.name === modelName)
     const variant = agent.variant || model?.config?.defaultVariant
     if (model && variant) {
       return {
         agent,
-        model: { providerName, modelName, variant },
+        model: { modelName, variant },
       }
     }
   }

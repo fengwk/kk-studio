@@ -18,7 +18,7 @@ import {
   threadTarget,
   waitForQuiescentThread,
 } from '../lib/harness.mjs'
-import { baseModelConfig } from '../lib/fixtures.mjs'
+import { baseModelConfig, encodePathTail } from '../lib/fixtures.mjs'
 import { getCase, registerCase } from '../lib/registry.mjs'
 
 /**
@@ -511,7 +511,7 @@ registerCase({
         if (!model?.name) return
         await ctx.call(
           'DELETE',
-          `/api/ai/catalog/models/${encodeURIComponent(model.name)}?expectedVersion=${encodeURIComponent(model.version)}`,
+          `/api/ai/catalog/models/${encodePathTail(model.name)}?expectedVersion=${encodeURIComponent(model.version)}`,
         )
       })
       await cleanup('provider', cleanupErrors, async () => {

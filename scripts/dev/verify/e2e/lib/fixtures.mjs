@@ -1,6 +1,16 @@
 /** 可复用的合法请求体与配置矩阵行定义。 */
 
 /**
+ * 把 Model 逻辑名编码为 catalog 路径 tail：按 `/` 分段编码，保留逻辑名中的路径层级。
+ *
+ * <p>Model 名称是单一全局身份且允许包含斜杠；不能只对整串调用 `encodeURIComponent` 生成 `%2F`，
+ * 也不能直接拼接未编码的空格或其他保留字符。
+ */
+export function encodePathTail(value) {
+  return String(value).split('/').map(encodeURIComponent).join('/')
+}
+
+/**
  * 完整价格定义：基础费率 + 有序覆盖/倍率规则。
  *
  * <p>所有价格与倍率在 wire 上都是十进制字符串；普通缺价由服务端归一化为 0，reasoning=null 表示跟随

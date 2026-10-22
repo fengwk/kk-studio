@@ -22,7 +22,7 @@ import {
   userMessageCommand,
   waitForQuiescentThread,
 } from '../lib/harness.mjs'
-import { baseModelConfig } from '../lib/fixtures.mjs'
+import { baseModelConfig, encodePathTail } from '../lib/fixtures.mjs'
 import { registerCase } from '../lib/registry.mjs'
 
 registerCase({
@@ -347,7 +347,7 @@ registerCase({
         if (model?.name) {
           await ctx.call(
             'DELETE',
-            `/api/ai/catalog/models/${encodeURIComponent(model.name)}?expectedVersion=${encodeURIComponent(
+            `/api/ai/catalog/models/${encodePathTail(model.name)}?expectedVersion=${encodeURIComponent(
               model.version,
             )}`,
           )

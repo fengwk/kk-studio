@@ -1,5 +1,5 @@
 import { assert, envelopeData, expectHttpError, pageResults, cid } from '../lib/http.mjs'
-import { baseModelConfig, providerCreateBody, providerUpdateBody } from '../lib/fixtures.mjs'
+import { baseModelConfig, encodePathTail, providerCreateBody, providerUpdateBody } from '../lib/fixtures.mjs'
 import {
   assertRootYoloPolicy,
   branchSettingsOf,
@@ -324,6 +324,123 @@ registerCase({
     assert(await findModel(ctx, name), 'recreated Model not listed')
     await deleteModel(ctx, recreated)
     await deleteProvider(ctx, provider)
+  },
+})
+
+registerCase({
+  id: 'crud.model_group.lifecycle',
+  level: 'L1',
+  title: 'Model Group 创建/更新/硬删除 roundtrip',
+  docs: 'GROUP 与 MODEL 共用全局逻辑名：创建有序 Fill First 成员、fallbackStatusCodes 与 cooldownSeconds；读取只暴露 group 与派生能力摘要（无组级 pricing/variants/defaultVariant）；PUT 可重排成员并清空状态码/冷却为 0；DELETE 后可再次创建同名组',
+  async run(ctx) {
+    const suffix = cid().slice(0, 8)
+    let provider = null
+    const models = []
+    let group = null
+    try {
+      provider = envelopeData(
+        (await ctx.call('POST', '/api/ai/catalog/providers', providerCreateBody(suffix))).json,
+      )
+      for (const [index, variant] of ['default', 'review'].entries()) {
+        const model = envelopeData(
+          (
+            await ctx.call('POST', '/api/ai/catalog/models', {
+              kind: 'MODEL',
+              providerName: provider.name,
+              name: `e2e-group-member-${index}-${suffix}`,
+              modelId: `wire-group-member-${index}-${suffix}`,
+              description: `group member ${index}`,
+              config: baseModelConfig({
+                limit: { context: 4096 + index * 1024, output: 256 },
+                variants: [{ id: variant }],
+                defaultVariant: variant,
+              }),
+            })
+          ).json,
+        )
+        models.push(model)
+      }
+
+      const groupName = `e2e-model-group-${suffix}`
+      group = envelopeData(
+        (
+          await ctx.call('POST', '/api/ai/catalog/models', {
+            kind: 'GROUP',
+            name: groupName,
+            description: 'fill first group',
+            group: {
+              members: [
+                { modelName: models[0].name, variant: 'default' },
+                { modelName: models[1].name, variant: 'review' },
+              ],
+              fallbackStatusCodes: [429, 503],
+              cooldownSeconds: 30,
+            },
+          })
+        ).json,
+      )
+      assert(
+        group.kind === 'GROUP'
+          && group.name === groupName
+          && group.providerName == null
+          && group.modelId == null
+          && group.group?.members?.length === 2
+          && JSON.stringify(group.group.fallbackStatusCodes) === JSON.stringify([429, 503])
+          && group.group.cooldownSeconds === 30,
+        JSON.stringify(group),
+      )
+      assert(
+        group.config?.limit?.context === 4096
+          && group.config?.limit?.output === 256
+          && group.config?.pricing == null
+          && group.config?.defaultVariant == null
+          && JSON.stringify(group.config?.variants) === JSON.stringify([]),
+        `group config must be a derived capability summary: ${JSON.stringify(group.config)}`,
+      )
+      assert((await findModel(ctx, groupName))?.kind === 'GROUP', 'group missing from list')
+
+      const updated = envelopeData(
+        (
+          await ctx.call('PUT', modelPath(groupName), {
+            kind: 'GROUP',
+            name: groupName,
+            description: 'updated group',
+            group: {
+              members: [
+                { modelName: models[1].name, variant: 'review' },
+                { modelName: models[0].name, variant: 'default' },
+              ],
+              fallbackStatusCodes: [],
+              cooldownSeconds: 0,
+            },
+            expectedVersion: group.version,
+          })
+        ).json,
+      )
+      assert(
+        updated.description === 'updated group'
+          && updated.group?.members?.[0]?.modelName === models[1].name
+          && updated.group?.members?.[1]?.modelName === models[0].name
+          && JSON.stringify(updated.group?.fallbackStatusCodes) === JSON.stringify([])
+          && updated.group?.cooldownSeconds === 0,
+        JSON.stringify(updated),
+      )
+      assert(String(updated.version) !== String(group.version), 'group version did not advance')
+
+      await deleteModel(ctx, updated)
+      group = null
+      assert(!(await findModel(ctx, groupName)), 'group still listed after delete')
+    } finally {
+      if (group) {
+        await deleteModel(ctx, group).catch(() => undefined)
+      }
+      for (const model of models) {
+        await deleteModel(ctx, model).catch(() => undefined)
+      }
+      if (provider) {
+        await deleteProvider(ctx, provider).catch(() => undefined)
+      }
+    }
   },
 })
 
@@ -1084,8 +1201,7 @@ function modelRef(model) {
 }
 
 function modelPath(name) {
-  const encodedName = String(name).split('/').map(encodeURIComponent).join('/')
-  return `/api/ai/catalog/models/${encodedName}`
+  return `/api/ai/catalog/models/${encodePathTail(name)}`
 }
 
 async function deleteModel(ctx, model) {
