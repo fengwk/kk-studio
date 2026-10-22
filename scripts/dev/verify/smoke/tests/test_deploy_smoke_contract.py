@@ -384,7 +384,6 @@ class TestOfflineChatBatchRequest(unittest.TestCase):
                 "rootSettings": {
                     "agentName": "default-assistant",
                     "model": {
-                        "providerName": "stub",
                         "modelName": "acceptance-stub",
                         "variant": "default",
                     },

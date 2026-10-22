@@ -10,7 +10,6 @@ def build_offline_chat_batch_request(
     command_id: str,
     marker: str,
     agent_name: str = "default-assistant",
-    provider_name: str = "stub",
     model_name: str = "acceptance-stub",
     variant: str = "default",
 ) -> Dict[str, Any]:
@@ -29,7 +28,6 @@ def build_offline_chat_batch_request(
             "rootSettings": {
                 "agentName": agent_name,
                 "model": {
-                    "providerName": provider_name,
                     "modelName": model_name,
                     "variant": variant,
                 },

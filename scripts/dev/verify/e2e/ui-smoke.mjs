@@ -24,6 +24,7 @@ import { assertProviderExecutionBoundary } from './lib/provider-boundary.mjs'
 import { missingUiCapabilities } from './lib/ui-capabilities.mjs'
 import { MINIMAX_ANTHROPIC_M3 } from './lib/real-models.mjs'
 import { createDurationTimer } from './lib/time.mjs'
+import { encodePathTail } from './lib/fixtures.mjs'
 import {
   assertReadOnlyZeroFooter,
   waitForSettledAssistantText,
@@ -109,9 +110,8 @@ async function apiDeleteByName(backendUrl, resource, name) {
       + `?expectedVersion=${encodeURIComponent(hit.version)}`
   } else if (resource === 'models') {
     deletePath =
-      `${resourcePath}?providerName=${encodeURIComponent(hit.providerName)}`
-      + `&modelName=${encodeURIComponent(hit.name)}`
-      + `&expectedVersion=${encodeURIComponent(hit.version)}`
+      `${resourcePath}/${encodePathTail(hit.name)}`
+      + `?expectedVersion=${encodeURIComponent(hit.version)}`
   } else {
     deletePath =
       `${resourcePath}/${encodeURIComponent(hit.name)}`
