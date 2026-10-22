@@ -2,7 +2,6 @@ import type { ProjectWorkflowDTO, ProjectWorkflowStateDTO } from '@/shared/api/g
 
 /** 固定保留状态：必须存在，且不能配置 Agent/Environment/指令/额度，也不能停用。 */
 export const RESERVED_STATE_CODES = ['INIT', 'BLOCKED', 'DONE'] as const
-export type ReservedStateCode = (typeof RESERVED_STATE_CODES)[number]
 
 export const STATE_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/
 

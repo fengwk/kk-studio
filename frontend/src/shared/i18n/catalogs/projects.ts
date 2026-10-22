@@ -3,10 +3,6 @@ export const projectsCatalog = {
     'zh-CN': '正在读取阶段引用，读取完成后才能删除阶段或保存工作流',
     'en-US': 'Loading stage references. Wait before deleting stages or saving the workflow.',
   },
-  'projects.title': {
-    'zh-CN': '项目管理',
-    'en-US': 'Projects',
-  },
   'projects.create': {
     'zh-CN': '新建项目',
     'en-US': 'New Project',
@@ -59,10 +55,6 @@ export const projectsCatalog = {
     'zh-CN': '删除 Issue',
     'en-US': 'Delete Issue',
   },
-  'projects.issue.state': {
-    'zh-CN': '状态',
-    'en-US': 'State',
-  },
   'projects.issue.transition': {
     'zh-CN': '流转状态',
     'en-US': 'Transition State',
@@ -79,10 +71,6 @@ export const projectsCatalog = {
     'zh-CN': '暂停执行',
     'en-US': 'Pause Execution',
   },
-  'projects.issue.resume': {
-    'zh-CN': '继续执行',
-    'en-US': 'Resume Execution',
-  },
   'projects.issue.stop': {
     'zh-CN': '终止运行',
     'en-US': 'Stop Execution',
@@ -95,25 +83,9 @@ export const projectsCatalog = {
     'zh-CN': '重新打开',
     'en-US': 'Reopen',
   },
-  'projects.issue.agentThreads': {
-    'zh-CN': 'Agent Thread',
-    'en-US': 'Agent Threads',
-  },
-  'projects.issue.stageBudgets': {
-    'zh-CN': '阶段预算',
-    'en-US': 'Stage Budgets',
-  },
   'projects.issue.resetBudget': {
     'zh-CN': '重置预算',
     'en-US': 'Reset Budget',
-  },
-  'projects.issue.runs': {
-    'zh-CN': '执行记录',
-    'en-US': 'Runs',
-  },
-  'projects.issue.activities': {
-    'zh-CN': '活动流',
-    'en-US': 'Activity Timeline',
   },
   'projects.issue.comment': {
     'zh-CN': '发表评论',
@@ -123,21 +95,9 @@ export const projectsCatalog = {
     'zh-CN': '下达指令',
     'en-US': 'Send Instruction',
   },
-  'projects.issue.evidence': {
-    'zh-CN': '公开证据',
-    'en-US': 'Public Evidence',
-  },
   'projects.issue.uploadEvidence': {
     'zh-CN': '上传证据',
     'en-US': 'Upload Evidence',
-  },
-  'projects.conflictWarning': {
-    'zh-CN': '版本冲突 (409)：已保留您的编辑草稿，请刷新获取最新版本后重试。',
-    'en-US': 'Conflict (409): Your draft has been preserved. Refresh to update version and retry.',
-  },
-  'projects.retrySameKey': {
-    'zh-CN': '重试操作（沿用原请求）',
-    'en-US': 'Retry (same request)',
   },
   'projects.saveBasic': {
     'zh-CN': '保存基础信息',
@@ -167,21 +127,9 @@ export const projectsCatalog = {
     'zh-CN': '检测到未确认结果的写操作（可能已在服务端生效）',
     'en-US': 'Unconfirmed write request detected (may have taken effect on server)',
   },
-  'projects.issue.retryPending': {
-    'zh-CN': '精确重试未决操作',
-    'en-US': 'Retry Pending Action',
-  },
   'projects.issue.discardPending': {
     'zh-CN': '放弃未决操作',
     'en-US': 'Discard Pending Action',
-  },
-  'projects.issue.discardConfirm': {
-    'zh-CN': '【警告】此操作可能已在服务端执行。放弃后将不再跟踪原请求，可能导致状态不一致。确定要放弃吗？',
-    'en-US': 'Warning: This action may have taken effect on server. Discarding it will lose tracking. Are you sure you want to discard it?',
-  },
-  'projects.issue.cannotModifyDraftWithUnknown': {
-    'zh-CN': '存在未决的未知请求，不能直接修改输入。请先精确重试或明确放弃。',
-    'en-US': 'A pending unknown request exists. Please retry or explicitly discard before modifying input.',
   },
   'projects.cancel': {
     'zh-CN': '取消',
@@ -730,10 +678,6 @@ export const projectsCatalog = {
   'projects.create.submit': {
     'zh-CN': '创建项目',
     'en-US': 'Create project',
-  },
-  'projects.create.submitting': {
-    'zh-CN': '创建中...',
-    'en-US': 'Creating…',
   },
   'projects.create.failed': {
     'zh-CN': '创建项目失败',

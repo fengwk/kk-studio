@@ -2,14 +2,6 @@ import type { LocaleCatalog } from '@/shared/i18n/types'
 
 /** 对话工作区：Thread 运行时、编辑区、历史分支、人工交互与首次配置引导。 */
 export const chatCatalog = {
-  'ai.chat.running': {
-    'en-US': 'RUNNING',
-    'zh-CN': '运行中',
-  },
-  'ai.runtime.approval.title': {
-    'en-US': 'Tool approval',
-    'zh-CN': '工具审批',
-  },
   'ai.runtime.approval.requested': {
     'en-US': 'This tool call requires approval:',
     'zh-CN': '此工具调用需要审批：',
@@ -17,14 +9,6 @@ export const chatCatalog = {
   'ai.runtime.approval.allow': {
     'en-US': 'Allow',
     'zh-CN': '允许',
-  },
-  'ai.runtime.approval.deny': {
-    'en-US': 'Deny',
-    'zh-CN': '拒绝',
-  },
-  'ai.runtime.approval.deciding': {
-    'en-US': 'Applying decision…',
-    'zh-CN': '正在提交审批…',
   },
   'ai.runtime.approval.allowed': {
     'en-US': 'Allowed',
@@ -154,10 +138,6 @@ export const chatCatalog = {
     'en-US': 'Back to Chat list',
     'zh-CN': '返回列表',
   },
-  'ai.chat.backToChatList': {
-    'en-US': 'Back to Chat list',
-    'zh-CN': '返回 Chat 列表',
-  },
   'ai.chat.backToConversation': {
     'en-US': 'Back to conversation',
     'zh-CN': '回到对话',
@@ -166,45 +146,9 @@ export const chatCatalog = {
     'en-US': 'Layout',
     'zh-CN': '布局',
   },
-  'ai.chat.blankTitle': {
-    'en-US': 'New conversation',
-    'zh-CN': '新对话',
-  },
-  'ai.chat.blankDescription': {
-    'en-US': 'Send a message to create a new Thread. Use slash commands to change the Agent or model, or reuse an existing Thread.',
-    'zh-CN': '输入消息以创建新 Thread。使用斜杠命令切换 Agent 或模型，或复用已有 Thread。',
-  },
-  'ai.chat.scope': {
-    'en-US': 'Scope',
-    'zh-CN': '范围',
-  },
-  'ai.chat.currentChat': {
-    'en-US': 'Current Chat',
-    'zh-CN': '当前 Chat',
-  },
-  'ai.chat.globalThread': {
-    'en-US': 'Global Thread',
-    'zh-CN': '全局 Thread',
-  },
-  'ai.chat.sort': {
-    'en-US': 'Sort',
-    'zh-CN': '排序',
-  },
-  'ai.chat.recentlyUpdated': {
-    'en-US': 'Recently updated',
-    'zh-CN': '最近更新',
-  },
-  'ai.chat.createdAt': {
-    'en-US': 'Created',
-    'zh-CN': '创建时间',
-  },
   'ai.chat.loadingList': {
     'en-US': 'Loading…',
     'zh-CN': '加载中…',
-  },
-  'ai.chat.loadMore': {
-    'en-US': 'Load more',
-    'zh-CN': '继续加载',
   },
   'ai.chat.noOptions': {
     'en-US': 'No options',
@@ -301,10 +245,6 @@ export const chatCatalog = {
   'ai.chat.selection.meta': {
     'en-US': '{{visible}} / {{total}} · ↑↓ select · Enter confirm · Esc back{{cycle}}',
     'zh-CN': '{{visible}} / {{total}} · ↑↓ 选择 · Enter 确认 · Esc 返回{{cycle}}',
-  },
-  'ai.chat.selection.tabSort': {
-    'en-US': 'Tab switch sort',
-    'zh-CN': 'Tab 切换排序',
   },
   'ai.chat.history.search': {
     'en-US': 'Search records',
@@ -469,10 +409,6 @@ export const chatCatalog = {
   'ai.chat.branch.breadcrumb': {
     'en-US': 'Branch breadcrumb',
     'zh-CN': '分支面包屑',
-  },
-  'ai.chat.sessionSubtitle': {
-    'en-US': 'Session {{id}}',
-    'zh-CN': 'Session {{id}}',
   },
   'ai.runtime.composer.placeholder': {
     'en-US': 'Enter a task (/ for commands)',
@@ -1117,10 +1053,6 @@ export const chatCatalog = {
     'en-US': 'Retrying (request #{{nextAttempt}})',
     'zh-CN': '正在重试（请求 #{{nextAttempt}}）',
   },
-  'ai.runtime.message.noArguments': {
-    'en-US': '(no arguments)',
-    'zh-CN': '（无参数）',
-  },
   'ai.runtime.message.expandTool': {
     'en-US': 'Expand tool preview',
     'zh-CN': '展开工具预览',
@@ -1277,49 +1209,13 @@ export const chatCatalog = {
     'en-US': 'No text content was delivered with this notification.',
     'zh-CN': '该通知没有附带文本内容。',
   },
-  'ai.runtime.task.state.accepted': {
-    'en-US': 'Accepted / Running in background',
-    'zh-CN': '已接受 / 后台执行',
-  },
-  'ai.runtime.task.state.completed': {
-    'en-US': 'Completed',
-    'zh-CN': '已完成',
-  },
   'ai.runtime.task.state.error': {
     'en-US': 'Failed',
     'zh-CN': '失败',
   },
-  'ai.runtime.task.state.cancelled': {
-    'en-US': 'Cancelled',
-    'zh-CN': '已取消',
-  },
   'ai.runtime.task.subagent': {
     'en-US': 'Subagent',
     'zh-CN': '子代理',
-  },
-  'ai.runtime.task.prompt': {
-    'en-US': 'Prompt',
-    'zh-CN': '任务提示',
-  },
-  'ai.runtime.task.thread': {
-    'en-US': 'Thread ID',
-    'zh-CN': 'Thread ID',
-  },
-  'ai.runtime.task.session': {
-    'en-US': 'Session',
-    'zh-CN': '会话',
-  },
-  'ai.runtime.task.maxTurns': {
-    'en-US': 'Max turns',
-    'zh-CN': '最大轮数',
-  },
-  'ai.runtime.task.report': {
-    'en-US': 'Report',
-    'zh-CN': '报告',
-  },
-  'ai.runtime.task.error': {
-    'en-US': 'Error',
-    'zh-CN': '错误',
   },
   'ai.thread.invalidId': {
     'en-US': 'Invalid thread ID',
@@ -1328,14 +1224,6 @@ export const chatCatalog = {
   'ai.thread.loadFailed': {
     'en-US': 'Failed to load thread',
     'zh-CN': '加载 Thread 失败',
-  },
-  'ai.thread.workspaceTitle': {
-    'en-US': 'Thread: {{threadId}}',
-    'zh-CN': 'Thread: {{threadId}}',
-  },
-  'ai.runtime.entry.rootTitle': {
-    'en-US': 'Conversation started',
-    'zh-CN': '会话开始',
   },
   'ai.runtime.entry.rootText': {
     'en-US': 'The conversation was created.',
@@ -1437,10 +1325,6 @@ export const chatCatalog = {
     'en-US': 'Events',
     'zh-CN': '事件',
   },
-  'ai.runtime.event.systemPrompt': {
-    'en-US': 'System prompt',
-    'zh-CN': '系统提示词',
-  },
   'ai.runtime.event.empty': {
     'en-US': 'No events yet',
     'zh-CN': '暂无事件',
@@ -1500,10 +1384,6 @@ export const chatCatalog = {
   'ai.runtime.debug.close': {
     'en-US': 'Close Debug',
     'zh-CN': '关闭 Debug',
-  },
-  'ai.runtime.debug.envPrefix': {
-    'en-US': 'env: ',
-    'zh-CN': '环境: ',
   },
   'ai.runtime.debug.noEnvironmentSelected': {
     'en-US': 'No environment selected',
@@ -1616,14 +1496,6 @@ export const chatCatalog = {
   'ai.runtime.debug.inspectorTitle': {
     'en-US': 'INSPECTOR',
     'zh-CN': '检查器',
-  },
-  'ai.runtime.debug.toolLabel': {
-    'en-US': 'Tool',
-    'zh-CN': '工具',
-  },
-  'ai.runtime.debug.skillLabel': {
-    'en-US': 'Skill',
-    'zh-CN': '技能',
   },
   'ai.runtime.debug.requestLabel': {
     'en-US': 'Frozen invocation input',
@@ -2033,14 +1905,6 @@ export const chatCatalog = {
     'en-US': 'Unknown command: {{command}}',
     'zh-CN': '未知命令：{{command}}',
   },
-  'ai.runtime.action.blankAgent': {
-    'en-US': '(no Agent)',
-    'zh-CN': '（无 Agent）',
-  },
-  'ai.runtime.action.agentMissing': {
-    'en-US': '(Agent deleted or missing)',
-    'zh-CN': '（Agent 已删除/缺失）',
-  },
   'ai.runtime.action.agentSwitchDisabled': {
     'en-US': 'Agent switching is not available in this mode',
     'zh-CN': '当前模式不支持切换 Agent',
@@ -2053,41 +1917,13 @@ export const chatCatalog = {
     'en-US': 'First send failed',
     'zh-CN': '首发失败',
   },
-  'ai.runtime.action.updateAgentFailed': {
-    'en-US': 'Failed to update Agent',
-    'zh-CN': '更新 Agent 失败',
-  },
   'ai.runtime.action.updateYoloFailed': {
     'en-US': 'Failed to update YOLO',
     'zh-CN': '更新 YOLO 失败',
   },
-  'ai.runtime.action.firstSendMissingSession': {
-    'en-US': 'Chat Thread creation did not return a Session',
-    'zh-CN': '创建 Chat Thread 未返回 Session',
-  },
-  'ai.runtime.action.unavailableScene': {
-    'en-US': 'This scene cannot use /{{command}}',
-    'zh-CN': '当前场景不可用：/{{command}}',
-  },
-  'ai.runtime.action.rebindConflict': {
-    'en-US': 'Unable to relocate Thread: state changed ({{error}}); refresh and try again',
-    'zh-CN': '无法重定位 Thread：状态已变化（{{error}}），请刷新后重试',
-  },
-  'ai.runtime.action.rebindFailed': {
-    'en-US': 'Failed to relocate Thread',
-    'zh-CN': '重定位 Thread 失败',
-  },
-  'ai.runtime.action.rootNotBranchable': {
-    'en-US': 'The root Entry cannot be used as an editable message branch',
-    'zh-CN': '根节点不能作为可编辑消息分支',
-  },
   'ai.runtime.action.threadNotLoaded': {
     'en-US': 'Thread has not loaded yet',
     'zh-CN': 'Thread 尚未加载',
-  },
-  'ai.runtime.action.threadRunning': {
-    'en-US': 'This Thread is running and cannot be relocated; use /stop first',
-    'zh-CN': '当前 Thread 正在运行，无法重定位；请先 /stop',
   },
   'ai.runtime.action.sendFailed': {
     'en-US': 'Send message failed',
@@ -2124,10 +1960,6 @@ export const chatCatalog = {
   'ai.runtime.action.compactUnavailable': {
     'en-US': 'Manual compaction is currently unavailable',
     'zh-CN': '当前无法手动压缩',
-  },
-  'ai.runtime.action.acceptancePending': {
-    'en-US': 'A previous acceptance is still awaiting a definite result',
-    'zh-CN': '上一条接受请求仍在等待确定结果',
   },
   'ai.runtime.action.abandonedPendingNotice': {
     'en-US': 'The pending message was discarded locally. Commands already accepted by the server are not cancelled, and the message will not be resent automatically.',
@@ -2169,17 +2001,9 @@ export const chatCatalog = {
     'en-US': 'Load More',
     'zh-CN': '加载更多',
   },
-  'ai.interaction.sourceChat': {
-    'en-US': 'Chat',
-    'zh-CN': '对话',
-  },
   'ai.interaction.openChatSource': {
     'en-US': 'Open chat',
     'zh-CN': '打开对话',
-  },
-  'ai.interaction.sourceIssue': {
-    'en-US': 'Task chat',
-    'zh-CN': '任务对话',
   },
   'ai.interaction.openIssueSource': {
     'en-US': 'Open task chat',
@@ -2237,25 +2061,9 @@ export const chatCatalog = {
     'en-US': 'Deny',
     'zh-CN': '拒绝',
   },
-  'ai.interaction.approvalTitle': {
-    'en-US': 'Permission Approval',
-    'zh-CN': '权限审批',
-  },
   'ai.interaction.approvalReason': {
     'en-US': 'Reason',
     'zh-CN': '审批原因',
-  },
-  'ai.interaction.waitingInput': {
-    'en-US': 'Waiting for Input',
-    'zh-CN': '等待输入',
-  },
-  'ai.interaction.waitingApproval': {
-    'en-US': 'Waiting for Approval',
-    'zh-CN': '等待审批',
-  },
-  'ai.interaction.waitingEnvironment': {
-    'en-US': 'Waiting for environment',
-    'zh-CN': '等待环境上线',
   },
   'ai.interaction.environmentWaitingCount': {
     'en-US': '{{count}} tool calls waiting for {{environmentName}}',

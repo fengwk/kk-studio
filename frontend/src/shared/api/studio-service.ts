@@ -42,16 +42,6 @@ export function createCanvas(
   }, decodeCanvasDocument)
 }
 
-export function deleteCanvas(
-  canvasId: string,
-  options?: CanvasRequestOptions,
-): Promise<void> {
-  return canvasRequest(`/canvases/${canvasId}`, {
-    method: 'DELETE',
-    signal: options?.signal,
-  })
-}
-
 export function getCanvas(
   canvasId: string,
   options?: CanvasRequestOptions,

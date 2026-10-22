@@ -13,10 +13,6 @@ export const platformCatalog = {
     'en-US': 'Canvas',
     'zh-CN': '画布',
   },
-  'platform.nav.tools': {
-    'en-US': 'Tools',
-    'zh-CN': '工具',
-  },
   'platform.nav.aiAria': {
     'en-US': 'AI',
     'zh-CN': '智能 AI',
@@ -28,10 +24,6 @@ export const platformCatalog = {
   'platform.nav.canvasAria': {
     'en-US': 'Canvas',
     'zh-CN': '画布 Canvas',
-  },
-  'platform.nav.toolsAria': {
-    'en-US': 'Tools',
-    'zh-CN': '工具 Tools',
   },
   'platform.nav.settings': {
     'en-US': 'Settings',

@@ -10,8 +10,6 @@ import { ChatWorkspacePage } from '@/features/chat/ChatWorkspacePage'
 setLocale('zh-CN')
 
 export const HARNESS_CHAT_ID = 'chat-branch-1'
-export const HARNESS_THREAD_ID = 'a2000000-0000-4000-8000-0000000000a1'
-export const HARNESS_SESSION_ID = 'b2000000-0000-4000-8000-0000000000b1'
 
 const queryClient = new QueryClient({
   defaultOptions: {

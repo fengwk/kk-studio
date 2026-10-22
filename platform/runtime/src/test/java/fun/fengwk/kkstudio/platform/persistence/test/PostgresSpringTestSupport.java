@@ -16,6 +16,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import fun.fengwk.kkstudio.platform.PlatformTestApplication;
 import fun.fengwk.kkstudio.platform.storage.StorageMaintenance;
 
+import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.SQLException;
 
@@ -40,6 +41,10 @@ public abstract class PostgresSpringTestSupport {
   private static final String FLYWAY_DISABLED = "false";
   private static final String WORKERS_DISABLED = "false";
 
+  /** 测试上下文的 Skill 缓存目录：位于模块 target 下，随构建产物清理。 */
+  private static final Path SKILL_CACHE_ROOT =
+      Path.of("target", "kk-studio-skills").toAbsolutePath();
+
   @Autowired(required = false)
   private StorageMaintenance storageMaintenance;
 
@@ -62,6 +67,8 @@ public abstract class PostgresSpringTestSupport {
     registry.add("spring.datasource.password", POSTGRES::getPassword);
     registry.add("spring.flyway.enabled", () -> FLYWAY_DISABLED);
     registry.add("kk-studio.harness.runtime.workers-enabled", () -> WORKERS_DISABLED);
+    // Skill 缓存默认落在工作目录；测试上下文改用 target 目录，不在模块根目录留下缓存。
+    registry.add("kk-studio.catalog.skill.cache-root", SKILL_CACHE_ROOT::toString);
   }
 
   @BeforeEach

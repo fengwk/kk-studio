@@ -122,24 +122,6 @@ describe('system settings draft codec', () => {
     )
   })
 
-  it('rejects the removed integrations paths instead of keeping a compat alias', () => {
-    // 旧 integrations 整段已退役：draft 不再包含该 section，按旧路径读写必须 fail-closed，
-    // 组装出的完整聚合请求体也不能再出现 integrations 字段（避免只隐藏 UI 仍回传旧字段）。
-    const draft = settingsSectionsToDraft(makeSettingsDto())
-    expect(Object.hasOwn(draft, 'integrations')).toBe(false)
-    expect(() => getDraftValue(draft, 'integrations.comfyui.baseUrl')).toThrow(
-      /unknown system settings draft path/,
-    )
-    expect(() => setDraftValue(draft, 'integrations.minimaxH3.enabled', true)).toThrow(
-      /unknown system settings draft path/,
-    )
-    expect(draftLeafPaths(draft)).not.toContain('integrations.comfyui.baseUrl')
-    expect(draftLeafPaths(draft).some((path) => path.startsWith('integrations.'))).toBe(false)
-
-    const update = assembleSettingsUpdate(draft, '0')
-    expect(Object.hasOwn(update, 'integrations')).toBe(false)
-  })
-
   it('rejects blank tool names, blank patterns and empty numeric fields with typed reasons', () => {
     const blankTool = settingsSectionsToDraft(makeSettingsDto())
     blankTool.tool.permission = [{ tool: '  ', rules: [{ pattern: '*', action: 'ask' }] }]

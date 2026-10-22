@@ -18,34 +18,6 @@ export type EntryType =
   | 'TURN_END'
   | 'SETTINGS'
 
-/** 一次 fork 的模式：只陈述历史来源形态（同 Session 分支或复制到新 Session）。 */
-export type ForkMode = 'BRANCH' | 'SESSION'
-
-/**
- * FORK Entry 的持久 payload：记录 fork 模式、作为切点的来源 Entry，以及会话 fork 时的来源 Thread
- * （分支 fork 与来源同处一个 Session，因此 sourceThreadId 为 null）。
- * 模型可见的固定英文通知正文不持久化在 payload JSON 中，只陈述事实，不建立执行父子关系。
- */
-export interface HarnessForkPayloadDTO {
-  mode: ForkMode
-  sourceEntryId: string
-  sourceThreadId: string | null
-}
-
-/** 系统结果通知的分类；对模型只是上下文，不是更高权限指令。 */
-export type NotificationKind = 'SUBAGENT_RESULT' | 'TASK_BUDGET'
-
-/**
- * NOTIFICATION Entry / command 的稳定 payload：历史 JSON 与 command JSON 同形。
- * message 是标准 USER AgentMessage（durable 形态），只作为上下文来源，不代表人类输入。
- */
-export interface HarnessNotificationPayloadDTO {
-  notificationId: string
-  kind: NotificationKind
-  sourceThreadId: string
-  message: { role: string; contents: unknown[] }
-}
-
 /**
  * 类型化的 Thread mailbox command 请求。
  *

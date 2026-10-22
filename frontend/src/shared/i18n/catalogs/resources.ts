@@ -110,10 +110,6 @@ export const resourcesCatalog = {
     'en-US': 'Subagents',
     'zh-CN': 'Subagents',
   },
-  'ai.catalog.card.ref': {
-    'en-US': 'Ref',
-    'zh-CN': 'Ref',
-  },
   'ai.catalog.card.modelId': {
     'en-US': 'Model ID',
     'zh-CN': 'Model ID',
@@ -177,10 +173,6 @@ export const resourcesCatalog = {
   'ai.catalog.card.emptyValue': {
     'en-US': '—',
     'zh-CN': '—',
-  },
-  'ai.catalog.card.unknownModel': {
-    'en-US': 'unknown-model',
-    'zh-CN': 'unknown-model',
   },
   'ai.catalog.card.contextLimit': {
     'en-US': 'ctx {{value}}',
@@ -554,10 +546,6 @@ export const resourcesCatalog = {
     'en-US': '(Use model default)',
     'zh-CN': '（使用模型默认）',
   },
-  'ai.catalog.form.none': {
-    'en-US': '(None)',
-    'zh-CN': '（无）',
-  },
   'ai.catalog.form.optionalCredential': {
     'en-US': 'Optional',
     'zh-CN': '可留空',
@@ -589,15 +577,6 @@ export const resourcesCatalog = {
   'ai.catalog.form.inheritParentEnvironment': {
     'en-US': "Inherit parent session's current Environment when delegated to as a subagent",
     'zh-CN': '作为子 Agent 被委派时，继承父会话当前 Environment',
-  },
-  'ai.catalog.form.skillCatalogSource': {
-    'en-US': 'Skill Catalog Environment',
-    'zh-CN': 'Skill 目录 Environment',
-  },
-  'ai.catalog.form.skillCatalogSourceHint': {
-    'en-US':
-      'Only browses the selected Environment\u2019s current skill names for editing; the selection is transient and is never saved or bound to the Agent.',
-    'zh-CN': '仅用于浏览所选 Environment 的当前技能名称以便编辑；选择是临时的，不会保存或绑定到 Agent。',
   },
   'ai.catalog.form.needModel': {
     'en-US': 'Create a Model first to configure an Agent.',
@@ -651,10 +630,6 @@ export const resourcesCatalog = {
   'ai.catalog.form.maxOutputLimitHint': {
     'en-US': 'Model-level output budget; each request also narrows it by the remaining context.',
     'zh-CN': '模型级输出预算；每次请求还会按剩余上下文收敛。',
-  },
-  'ai.catalog.form.emptyPlaceholder': {
-    'en-US': 'Empty',
-    'zh-CN': '空',
   },
   'ai.catalog.form.inputModalityHint': {
     'en-US': 'Input modalities accepted by the model; keep at least one (do not clear all).',
@@ -1053,10 +1028,6 @@ export const resourcesCatalog = {
     'en-US': 'Add at least one model',
     'zh-CN': '请至少添加一个模型',
   },
-  'ai.skillPackages.title': {
-    'en-US': 'Skill Packages',
-    'zh-CN': '技能包',
-  },
   'ai.skillPackages.description': {
     'en-US': 'Platform-global Skill Packages and definitions',
     'zh-CN': '平台全局技能包及其定义管理',
@@ -1081,14 +1052,6 @@ export const resourcesCatalog = {
     'en-US': 'Package Name',
     'zh-CN': '技能包名称',
   },
-  'ai.skillPackages.version': {
-    'en-US': 'Version',
-    'zh-CN': '版本',
-  },
-  'ai.skillPackages.newVersion': {
-    'en-US': 'New Version',
-    'zh-CN': '新版本',
-  },
   'ai.skillPackages.descriptionLabel': {
     'en-US': 'Description',
     'zh-CN': '描述',
@@ -1097,41 +1060,9 @@ export const resourcesCatalog = {
     'en-US': 'Skills Count',
     'zh-CN': '包含技能数量',
   },
-  'ai.skillPackages.updatedAt': {
-    'en-US': 'Updated At',
-    'zh-CN': '更新时间',
-  },
-  'ai.skillPackages.empty': {
-    'en-US': 'No Skill Packages found',
-    'zh-CN': '暂无技能包',
-  },
   'ai.skillPackages.loading': {
     'en-US': 'Loading Skill Packages...',
     'zh-CN': '正在加载技能包...',
-  },
-  'ai.skillPackages.skillsSection': {
-    'en-US': 'Skill Definitions',
-    'zh-CN': '技能定义列表',
-  },
-  'ai.skillPackages.addSkill': {
-    'en-US': 'Add Skill Definition',
-    'zh-CN': '添加技能定义',
-  },
-  'ai.skillPackages.removeSkill': {
-    'en-US': 'Remove Skill',
-    'zh-CN': '移除技能',
-  },
-  'ai.skillPackages.skillName': {
-    'en-US': 'Skill Name',
-    'zh-CN': '技能名称',
-  },
-  'ai.skillPackages.skillDescription': {
-    'en-US': 'Skill Description',
-    'zh-CN': '技能描述',
-  },
-  'ai.skillPackages.skillContent': {
-    'en-US': 'Skill Content',
-    'zh-CN': '技能内容 (Markdown / 指令)',
   },
   'ai.skillPackages.nameRequired': {
     'en-US': 'Package name is required',
@@ -1140,30 +1071,6 @@ export const resourcesCatalog = {
   'ai.skillPackages.nameInvalidChars': {
     'en-US': 'Package name cannot contain : / @ \\',
     'zh-CN': '技能包名称不能包含 : / @ \\',
-  },
-  'ai.skillPackages.versionRequired': {
-    'en-US': 'Package version is required',
-    'zh-CN': '技能包版本不能为空',
-  },
-  'ai.skillPackages.atLeastOneSkill': {
-    'en-US': 'At least one skill definition is required',
-    'zh-CN': '至少需要一条技能定义',
-  },
-  'ai.skillPackages.skillNameRequired': {
-    'en-US': 'Skill name cannot be empty',
-    'zh-CN': '技能名称不能为空',
-  },
-  'ai.skillPackages.skillDescriptionRequired': {
-    'en-US': 'Skill description cannot be empty',
-    'zh-CN': '技能描述不能为空',
-  },
-  'ai.skillPackages.skillContentRequired': {
-    'en-US': 'Skill content cannot be empty',
-    'zh-CN': '技能内容不能为空',
-  },
-  'ai.skillPackages.duplicateSkillName': {
-    'en-US': 'Duplicate skill name: {{name}}',
-    'zh-CN': '存在重复的技能名称：{{name}}',
   },
   'ai.skillPackages.repositoryUrl': {
     'en-US': 'Repository URL',
@@ -1213,10 +1120,6 @@ export const resourcesCatalog = {
     'en-US': 'Observed Branch HEAD',
     'zh-CN': '最近观察到的分支 HEAD',
   },
-  'ai.skillPackages.checkStatus': {
-    'en-US': 'Status',
-    'zh-CN': '状态',
-  },
   'ai.skillPackages.check': {
     'en-US': 'Check',
     'zh-CN': '检查更新',
@@ -1253,10 +1156,6 @@ export const resourcesCatalog = {
     'en-US': 'Check failed',
     'zh-CN': '检查失败',
   },
-  'ai.mcp.title': {
-    'en-US': 'MCP Servers',
-    'zh-CN': 'MCP 服务',
-  },
   'ai.mcp.create': {
     'en-US': 'Create MCP Server',
     'zh-CN': '创建 MCP 服务',
@@ -1284,10 +1183,6 @@ export const resourcesCatalog = {
   'ai.mcp.unsavedDiscoverBlocked': {
     'en-US': 'Unsaved configuration changes. Please save before discovering tools.',
     'zh-CN': '存在未保存的配置更改，请先保存再发现工具。',
-  },
-  'ai.mcp.empty': {
-    'en-US': 'No MCP servers configured',
-    'zh-CN': '暂无配置的 MCP 服务',
   },
   'ai.mcp.name': {
     'en-US': 'Server Name',
@@ -1360,9 +1255,5 @@ export const resourcesCatalog = {
   'ai.mcp.updated': {
     'en-US': 'Updated',
     'zh-CN': '更新时间',
-  },
-  'ai.catalog.form.environment': {
-    'en-US': 'Bound Environment',
-    'zh-CN': '绑定环境',
   },
 } satisfies LocaleCatalog
