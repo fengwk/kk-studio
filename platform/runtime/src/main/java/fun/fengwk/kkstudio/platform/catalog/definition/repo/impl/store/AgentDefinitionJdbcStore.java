@@ -18,16 +18,16 @@ import java.util.Objects;
 public class AgentDefinitionJdbcStore {
 
   private static final String COLUMNS =
-      "name, type, description, system_prompt, model_provider_name, model_name, variant, config,"
+      "name, type, description, system_prompt, model_name, variant, config,"
           + " version, created_at as create_time, updated_at as update_time";
 
   private static final String INSERT_SQL =
       """
       insert into agent_definition (
-          name, type, description, system_prompt, model_provider_name, model_name, variant, config,
+          name, type, description, system_prompt, model_name, variant, config,
           created_at, updated_at, version
       ) values (
-          :name, :type, :description, :systemPrompt, :modelProviderName, :modelName,
+          :name, :type, :description, :systemPrompt, :modelName,
           :variant, cast(:configJson as jsonb), current_timestamp, current_timestamp, 0
       )
       """;
@@ -36,8 +36,7 @@ public class AgentDefinitionJdbcStore {
       """
       update agent_definition
       set description = :description, system_prompt = :systemPrompt,
-          model_provider_name = :modelProviderName, model_name = :modelName,
-          variant = :variant,
+          model_name = :modelName, variant = :variant,
           config = cast(:configJson as jsonb),
           updated_at = greatest(updated_at, current_timestamp), version = version + 1
       where name = :name and version = :expectedVersion
@@ -130,7 +129,6 @@ public class AgentDefinitionJdbcStore {
         .param("type", agent.getType())
         .param("description", agent.getDescription())
         .param("systemPrompt", agent.getSystemPrompt())
-        .param("modelProviderName", agent.getModelProviderName())
         .param("modelName", agent.getModelName())
         .param("variant", agent.getVariant())
         .param("configJson", agent.getConfigJson())
@@ -142,7 +140,6 @@ public class AgentDefinitionJdbcStore {
         .sql(UPDATE_BY_NAME_SQL)
         .param("description", agent.getDescription())
         .param("systemPrompt", agent.getSystemPrompt())
-        .param("modelProviderName", agent.getModelProviderName())
         .param("modelName", agent.getModelName())
         .param("variant", agent.getVariant())
         .param("configJson", agent.getConfigJson())
@@ -169,7 +166,6 @@ public class AgentDefinitionJdbcStore {
     row.setType(rs.getString("type"));
     row.setDescription(rs.getString("description"));
     row.setSystemPrompt(rs.getString("system_prompt"));
-    row.setModelProviderName(rs.getString("model_provider_name"));
     row.setModelName(rs.getString("model_name"));
     row.setVariant(rs.getString("variant"));
     row.setConfigJson(rs.getString("config"));

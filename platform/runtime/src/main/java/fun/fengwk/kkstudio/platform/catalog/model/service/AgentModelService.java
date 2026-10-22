@@ -7,14 +7,14 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelUpdateDTO;
 
-/** 全局 model 应用服务。 */
+/** 全局 model 应用服务：单 Model 与 Model Group 统一按全局 name 寻址。 */
 public interface AgentModelService {
 
   Page<AgentModelDTO> pageModels(PageQuery pageQuery);
 
   AgentModelDTO createModel(AgentModelCreateDTO createDTO);
 
-  AgentModelDTO updateModel(String providerName, String modelName, AgentModelUpdateDTO updateDTO);
+  AgentModelDTO updateModel(String modelName, AgentModelUpdateDTO updateDTO);
 
-  void deleteModel(String providerName, String modelName, String expectedVersion);
+  void deleteModel(String modelName, String expectedVersion);
 }

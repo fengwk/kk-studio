@@ -79,7 +79,7 @@ class CompactionChildScopeTest {
             0,
             NOW,
             NOW);
-    BranchSettings settings = new BranchSettings("parent", new ModelSelection("p", "m", "v"), null);
+    BranchSettings settings = new BranchSettings("parent", ModelSelection.model("m", "v"), null);
     Entry root = new Entry(head, session, null, new RootPayload(settings), NOW);
     when(tx.findThread(PARENT)).thenReturn(Optional.of(parent));
     when(tx.loadEntryPath(head)).thenReturn(new EntryPath(List.of(root)));

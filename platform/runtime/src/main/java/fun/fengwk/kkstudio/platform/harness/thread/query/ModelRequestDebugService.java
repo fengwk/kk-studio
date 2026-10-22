@@ -208,7 +208,6 @@ public final class ModelRequestDebugService {
 
   private static HarnessModelSelectionDTO modelSelection(ModelSelection selection) {
     HarnessModelSelectionDTO dto = new HarnessModelSelectionDTO();
-    dto.setProviderName(selection.providerName());
     dto.setModelName(selection.modelName());
     dto.setVariant(selection.variant());
     return dto;

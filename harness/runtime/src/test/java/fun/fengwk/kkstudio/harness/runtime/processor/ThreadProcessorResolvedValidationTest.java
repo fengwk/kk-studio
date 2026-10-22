@@ -78,13 +78,13 @@ class ThreadProcessorResolvedValidationTest extends ThreadProcessorTestBase {
   @Test
   void modelMismatchBecomesDurableFailure() {
     assertMismatchBecomesDurableFailure(
-        branchSettings().withModel(new ModelSelection("other-provider", "other-model", "v1")));
+        branchSettings().withModel(ModelSelection.model("other-model", "v1")));
   }
 
   @Test
   void variantMismatchBecomesDurableFailure() {
     assertMismatchBecomesDurableFailure(
-        branchSettings().withModel(new ModelSelection("provider", "model", "v9")));
+        branchSettings().withModel(ModelSelection.model("model", "v9")));
   }
 
   /** candidate 默认 branch 事实下（settings = branchSettings()）请求与事实不一致。 */
@@ -149,7 +149,7 @@ class ThreadProcessorResolvedValidationTest extends ThreadProcessorTestBase {
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         new ModelDescriptor(
-            settings.model().providerName(),
+            "provider",
             settings.model().modelName(),
             settings.model().modelName(),
             Set.of(ModelInputModality.TEXT),

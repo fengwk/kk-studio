@@ -156,7 +156,7 @@ public abstract class HarnessStoreInvocationContract {
             assistantEntryId,
             baseline.sessionId(),
             userEntryId,
-            mappedAssistant(requestSpec, response),
+            mappedAssistant(requestSpec, response, T2),
             T2,
             replayState);
 

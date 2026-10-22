@@ -38,19 +38,14 @@ public final class ResolvedRequestValidator {
     ModelSelection expectedModel = settings.model();
     // BranchSettings 只持久化 agent/model 选择与可空 environmentName；Environment 每轮按 name 解析并冻结进
     // binding，binding 之间的一致性（同一环境、skill source 与该环境一致）由 ModelRequestSpec 构造边界保证。
-    if (!spec.model().providerName().equals(expectedModel.providerName())
-        || !spec.model().modelName().equals(expectedModel.modelName())) {
+    if (!spec.model().modelName().equals(expectedModel.modelName())) {
       throw new IllegalStateException(
           "resolved request model "
-              + spec.model().providerName()
-              + "/"
               + spec.model().modelName()
               + " does not match expected model "
-              + expectedModel.providerName()
-              + "/"
               + expectedModel.modelName());
     }
-    if (!spec.variant().id().equals(expectedModel.variant())) {
+    if (expectedModel.variant() != null && !spec.variant().id().equals(expectedModel.variant())) {
       throw new IllegalStateException(
           "resolved request variant "
               + spec.variant().id()

@@ -180,8 +180,7 @@ class HistoryNormalizationTest {
   }
 
   private static BranchSettings settings() {
-    return new BranchSettings(
-        "assistant", new ModelSelection("anthropic", "claude-sonnet", "default"), null);
+    return new BranchSettings("assistant", ModelSelection.model("claude-sonnet", "default"), null);
   }
 
   /** 逐条追加 Entry 的 builder：保证 Session / 父链 / id 唯一性与 EntryPath 不变式一致。 */

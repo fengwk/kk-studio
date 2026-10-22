@@ -99,7 +99,11 @@ public final class ModelOutcomeAppender {
             sessionId,
             parentId,
             succeeded
-                ? payloadMapper.assistantPayload(response, model.requestSpec().toolBindings())
+                ? payloadMapper.assistantPayload(
+                    response,
+                    model.requestSpec().toolBindings(),
+                    model.actualSelection(),
+                    model.requestedAt())
                 : payloadMapper.assistantErrorPayload(model.error(), modelAttemptSnapshot(model)),
             mutationNow,
             succeeded ? model.providerReplayState() : null));
