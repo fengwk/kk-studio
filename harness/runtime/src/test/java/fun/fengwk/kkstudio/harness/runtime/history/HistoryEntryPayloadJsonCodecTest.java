@@ -171,7 +171,7 @@ class HistoryEntryPayloadJsonCodecTest {
         "{\"message\":{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"text\",\"text\":\"answer\"}]},"
             + "\"assistantMetadata\":{\"stopReason\":\"COMPLETE\",\"usage\":{\"inputTokens\":1,"
             + "\"outputTokens\":1,\"cacheReadTokens\":0,\"cacheWriteTokens\":0,"
-            + "\"cacheWriteLongTokens\":0,\"reasoningTokens\":0,\"providerTotalTokens\":2}},"
+            + "\"cacheWriteByTtl\":{},\"reasoningTokens\":0,\"providerTotalTokens\":2}},"
             + "\"toolResultMetadata\":null}";
     MessagePayload legacyPayload = (MessagePayload) CODEC.decode(EntryType.MESSAGE, legacy);
     assertNull(legacyPayload.assistantMetadata().decodeDurationMillis());
@@ -184,7 +184,7 @@ class HistoryEntryPayloadJsonCodecTest {
         "{\"message\":{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"text\",\"text\":\"answer\"}]},"
             + "\"assistantMetadata\":{\"stopReason\":\"COMPLETE\",\"usage\":{\"inputTokens\":1,"
             + "\"outputTokens\":1,\"cacheReadTokens\":0,\"cacheWriteTokens\":0,"
-            + "\"cacheWriteLongTokens\":0,\"reasoningTokens\":0,\"providerTotalTokens\":2},"
+            + "\"cacheWriteByTtl\":{},\"reasoningTokens\":0,\"providerTotalTokens\":2},"
             + "\"decodeDurationMillis\":1234},\"toolResultMetadata\":null}",
         CODEC.encode(timed));
     assertEquals(timed, CODEC.decode(EntryType.MESSAGE, CODEC.encode(timed)));
@@ -348,7 +348,7 @@ class HistoryEntryPayloadJsonCodecTest {
     String suffix = ",\"toolResultMetadata\":null}";
     String base =
         "{\"stopReason\":\"COMPLETE\",\"usage\":{\"inputTokens\":1,\"outputTokens\":1,"
-            + "\"cacheReadTokens\":0,\"cacheWriteTokens\":0,\"cacheWriteLongTokens\":0,"
+            + "\"cacheReadTokens\":0,\"cacheWriteTokens\":0,\"cacheWriteByTtl\":{},"
             + "\"reasoningTokens\":0,\"providerTotalTokens\":2}";
 
     assertEquals(

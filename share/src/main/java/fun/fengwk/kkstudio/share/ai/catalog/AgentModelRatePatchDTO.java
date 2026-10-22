@@ -12,6 +12,7 @@ import java.util.Map;
 
 /** 规则补丁；null/缺失字段表示不修改，显式 reasoning:null 表示回到继承输出。 */
 @Data
+@JsonSerialize(using = AgentModelRatePatchDTOSerializer.class)
 public class AgentModelRatePatchDTO {
 
   @JsonSerialize(using = ToStringSerializer.class)

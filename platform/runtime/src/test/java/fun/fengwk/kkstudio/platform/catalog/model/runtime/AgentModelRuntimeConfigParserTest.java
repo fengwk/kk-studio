@@ -1,8 +1,10 @@
 package fun.fengwk.kkstudio.platform.catalog.model.runtime;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -23,6 +25,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -67,6 +70,62 @@ class AgentModelRuntimeConfigParserTest {
     assertEquals(new BigDecimal("1.1"), parsed.pricing().base().input());
     assertEquals("quality", parsed.defaultVariant());
     assertEquals(List.of(new ModelVariant("quality", "high")), parsed.variants());
+  }
+
+  /** 条件与规则按顺序解析；日期允许单侧缺省，显式 reasoning:null 与未声明 reasoning 保持不同语义。 */
+  @Test
+  void parsesOrderedRulesAndPreservesExplicitReasoningNull() {
+    String config =
+        validConfig()
+            .replace(
+                "\"overrides\":[],\"multipliers\":[]",
+                "\"overrides\":["
+                    + "{\"id\":\"gte-only\",\"when\":{\"date\":{\"gte\":\"2026-08-17\"}},"
+                    + "\"rates\":{\"input\":\"2\"}},"
+                    + "{\"id\":\"reset-reasoning\",\"when\":{},"
+                    + "\"rates\":{\"reasoning\":null}}],"
+                    + "\"multipliers\":[{\"id\":\"priority\","
+                    + "\"when\":{\"serviceTier\":[\"priority\"]},"
+                    + "\"factors\":{\"input\":\"1.5\"}}]");
+
+    var parsed = parser.parse(config);
+    var overrides = parsed.pricing().overrides();
+    assertEquals(2, overrides.size());
+    assertEquals("gte-only", overrides.get(0).id());
+    assertEquals(LocalDate.of(2026, 8, 17), overrides.get(0).when().date().gte());
+    assertNull(overrides.get(0).when().date().lt());
+    assertFalse(overrides.get(0).rates().modifiesReasoning());
+    assertTrue(overrides.get(1).rates().modifiesReasoning());
+    assertNull(overrides.get(1).rates().reasoning());
+    assertEquals("priority", parsed.pricing().multipliers().get(0).id());
+    assertEquals(new BigDecimal("1.5"), parsed.pricing().multipliers().get(0).factors().input());
+
+    String encoded = parser.encode(parser.decode(config));
+    var roundTripped = parser.parse(encoded).pricing().overrides();
+    assertFalse(roundTripped.get(0).rates().modifiesReasoning());
+    assertTrue(roundTripped.get(1).rates().modifiesReasoning());
+  }
+
+  /** 日期边界同时存在时必须可满足；单侧边界合法。 */
+  @Test
+  void rejectsInvertedDateRangeAndAcceptsOneSidedBounds() {
+    assertInvalid(
+        validConfig()
+            .replace(
+                "\"overrides\":[],\"multipliers\":[]",
+                "\"overrides\":[{\"id\":\"bad\",\"when\":{\"date\":"
+                    + "{\"gte\":\"2026-08-18\",\"lt\":\"2026-08-18\"}},"
+                    + "\"rates\":{\"input\":\"1\"}}],\"multipliers\":[]"),
+        "date.gte must be before date.lt");
+    assertDoesNotThrow(
+        () ->
+            parser.parse(
+                validConfig()
+                    .replace(
+                        "\"overrides\":[],\"multipliers\":[]",
+                        "\"overrides\":[{\"id\":\"lt-only\",\"when\":"
+                            + "{\"date\":{\"lt\":\"2026-08-18\"}},"
+                            + "\"rates\":{\"input\":\"1\"}}],\"multipliers\":[]")));
   }
 
   /** off 是显式关闭语义，绝不与 null（协议默认）静默映射。 */
