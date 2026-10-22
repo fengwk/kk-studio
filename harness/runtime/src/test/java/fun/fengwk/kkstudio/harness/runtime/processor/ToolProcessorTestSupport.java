@@ -309,13 +309,16 @@ final class ToolProcessorTestSupport {
                     turnStartEntryId,
                     userMessagePayload(),
                     NOW.plusMillis(2)));
+            ModelSelection actualSelection =
+                ModelSelection.model(modelRequest.model().modelName(), modelRequest.variant().id());
             tx.insertEntry(
                 new Entry(
                     assistantEntryId,
                     sessionId,
                     userEntryId,
                     new HistoryPayloadMapper()
-                        .assistantPayload(response, modelRequest.toolBindings()),
+                        .assistantPayload(
+                            response, modelRequest.toolBindings(), actualSelection, NOW),
                     NOW.plusMillis(3)));
             tx.insertThread(
                 new ThreadState(
@@ -469,13 +472,16 @@ final class ToolProcessorTestSupport {
                   turnStartEntryId,
                   userMessagePayload(),
                   now.plusMillis(2)));
+          ModelSelection actualSelection =
+              ModelSelection.model(modelRequest.model().modelName(), modelRequest.variant().id());
           tx.insertEntry(
               new Entry(
                   assistantEntryId,
                   sessionId,
                   userEntryId,
                   new HistoryPayloadMapper()
-                      .assistantPayload(response, modelRequest.toolBindings()),
+                      .assistantPayload(
+                          response, modelRequest.toolBindings(), actualSelection, now),
                   now.plusMillis(3)));
           tx.insertThread(
               new ThreadState(

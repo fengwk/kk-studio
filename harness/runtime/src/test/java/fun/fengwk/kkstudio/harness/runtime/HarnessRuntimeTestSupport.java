@@ -1194,13 +1194,24 @@ final class HarnessRuntimeTestSupport {
       Instant createdAt,
       ModelRequestSpec requestSpec,
       ProviderResponse response) {
+    return mappedAssistantEntry(id, sessionId, parentId, createdAt, requestSpec, response, T2);
+  }
+
+  static Entry mappedAssistantEntry(
+      UUID id,
+      UUID sessionId,
+      UUID parentId,
+      Instant createdAt,
+      ModelRequestSpec requestSpec,
+      ProviderResponse response,
+      Instant requestedAt) {
     return new Entry(
         id,
         sessionId,
         parentId,
         new HistoryPayloadMapper()
             .assistantPayload(
-                response, requestSpec.toolBindings(), actualSelection(requestSpec), null),
+                response, requestSpec.toolBindings(), actualSelection(requestSpec), requestedAt),
         createdAt);
   }
 
