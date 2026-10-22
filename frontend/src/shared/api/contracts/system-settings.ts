@@ -1,4 +1,5 @@
 import type { DecimalLong, InstantTimestamp } from '@/shared/api/contracts/base'
+import type { ModelCatalogSource } from '@/shared/api/contracts/ai-catalog'
 
 /**
  * GET/PUT {@code /api/settings} 的严格 wire 契约（对齐 share/systemsettings 各 DTO）。
@@ -28,6 +29,7 @@ export interface SystemSettingsToolDTO {
 export type RetryBackoffStrategy = 'FIXED' | 'EXPONENTIAL'
 
 export interface SystemSettingsAiRuntimeDTO {
+  modelCatalogSource: ModelCatalogSource
   retryMaxRetries: number
   retryBackoffStrategy: RetryBackoffStrategy
   retryBaseDelayMillis: DecimalLong
