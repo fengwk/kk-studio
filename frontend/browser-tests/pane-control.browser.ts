@@ -28,7 +28,8 @@ function rootThread(overrides: Record<string, unknown> = {}) {
     sessionId: 'b1000000-0000-4000-8000-0000000000b1',
     headEntryId: null,
     parentThreadId: null,
-    yoloPolicy: { mode: 'DISABLE', rootThreadId: null },
+    rootThreadId: ROOT_ID,
+    yoloEnabled: false,
     nextCommandSequence: '2',
     version: '1',
     status: 'IDLE',
@@ -53,7 +54,6 @@ function childThread() {
     parentThreadId: ROOT_ID,
     status: 'MODEL_STREAM',
     processing: true,
-    yoloPolicy: { mode: 'FOLLOW', rootThreadId: ROOT_ID },
   }
 }
 

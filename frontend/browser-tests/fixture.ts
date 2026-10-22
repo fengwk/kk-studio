@@ -22,3 +22,15 @@ export const test = base.extend<{ pageErrors: Error[] }>({
 
 export { expect }
 export type { Page, Locator }
+
+/** 在页面上解析颜色 token 的计算值；与元素计算样式同一序列化形态（color-mix 结果为 color(srgb …)）。 */
+export function tokenColor(page: Page, token: string): Promise<string> {
+  return page.evaluate((name) => {
+    const probe = document.createElement('span')
+    probe.style.color = `var(${name})`
+    document.body.appendChild(probe)
+    const color = getComputedStyle(probe).color
+    probe.remove()
+    return color
+  }, token)
+}

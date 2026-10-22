@@ -1,5 +1,5 @@
 import type { Route } from '@playwright/test'
-import { expect, test, type Page } from './fixture'
+import { expect, test, tokenColor, type Page } from './fixture'
 import type { InteractionDTO } from '../src/shared/api/contracts/ai-interaction'
 
 const HARNESS_URL = '/browser-tests/interactions-harness.html'
@@ -282,23 +282,17 @@ async function mockPendingApi(page: Page, options: PendingApiOptions = {}): Prom
 }
 
 /** 通过探针元素解析 :root token 的实际计算值，避免在测试里硬编码色值。 */
-function resolveToken(page: Page, token: string): Promise<string> {
-  return page.evaluate((name) => {
-    const probe = document.createElement('span')
-    probe.style.color = `var(${name})`
-    document.body.appendChild(probe)
-    const value = window.getComputedStyle(probe).color
-    probe.remove()
-    return value
-  }, token)
-}
-
+/** 计算样式的颜色：`rgb()`/`rgba()` 或 color-mix 序列化出的 `color(srgb r g b / a)`（通道为 0–1）。 */
 function rgbTriplet(value: string): [number, number, number] {
-  const match = value.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/)
-  if (!match) {
-    throw new Error(`不支持的颜色格式: ${value}`)
+  const rgb = value.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/)
+  if (rgb) {
+    return [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])]
   }
-  return [Number(match[1]), Number(match[2]), Number(match[3])]
+  const srgb = value.match(/color\(srgb ([\d.]+) ([\d.]+) ([\d.]+)/)
+  if (srgb) {
+    return [Number(srgb[1]) * 255, Number(srgb[2]) * 255, Number(srgb[3]) * 255]
+  }
+  throw new Error(`不支持的颜色格式: ${value}`)
 }
 
 function relativeLuminance([r, g, b]: [number, number, number]): number {
@@ -370,12 +364,12 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
         fgMuted,
         warning,
       ] = await Promise.all([
-        resolveToken(page, '--surface'),
-        resolveToken(page, '--border'),
-        resolveToken(page, '--bg'),
-        resolveToken(page, '--fg'),
-        resolveToken(page, '--fg-muted'),
-        resolveToken(page, '--warning'),
+        tokenColor(page, '--surface'),
+        tokenColor(page, '--border'),
+        tokenColor(page, '--bg'),
+        tokenColor(page, '--fg'),
+        tokenColor(page, '--fg-muted'),
+        tokenColor(page, '--warning'),
       ])
 
       // 卡片、审批原因与原始参数必须落在现行暗色 token 上，不能残留浅色回退。
@@ -436,8 +430,8 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
         (el) => window.getComputedStyle(el).backgroundImage,
       )
       expect(allowStyle.backgroundImage).toBe(referencePrimary)
-      expect(allowStyle.color).toBe(await resolveToken(page, '--green-on'))
-      expect(allowStyle.border).toBe(await resolveToken(page, '--green-border'))
+      expect(allowStyle.color).toBe(await tokenColor(page, '--fg-on-accent'))
+      expect(allowStyle.border).toBe(await tokenColor(page, '--accent-border'))
       const denyStyle = await card.locator('.interaction-deny-btn').evaluate((el) => {
         const probe = document.createElement('span')
         probe.style.background = 'var(--danger-gradient)'
@@ -449,7 +443,7 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
       })
       expect(denyStyle.background).toBe(denyStyle.expected)
       expect(denyStyle.background).not.toBe('none')
-      expect(denyStyle.border).toBe(await resolveToken(page, '--danger-strong'))
+      expect(denyStyle.border).toBe(await tokenColor(page, '--danger-strong'))
 
       await expectNoHorizontalOverflow(page)
 
@@ -607,15 +601,15 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
 
     // 等待过渡后的计算值，并确保悬停不覆盖选中态。
     await optionBtn.hover()
-    const greenPrimary = await resolveToken(page, '--green-primary')
-    await expect(optionBtn).toHaveCSS('border-top-color', greenPrimary)
+    const accent = await tokenColor(page, '--accent')
+    await expect(optionBtn).toHaveCSS('border-top-color', accent)
     await expect(optionBtn).toHaveCSS(
       'background-color',
-      await resolveToken(page, '--green-soft'),
+      await tokenColor(page, '--accent-soft'),
     )
     const indicator = optionBtn.locator('.interaction-option-indicator')
-    await expect(indicator).toHaveCSS('background-color', greenPrimary)
-    await expect(indicator).toHaveCSS('color', await resolveToken(page, '--green-on'))
+    await expect(indicator).toHaveCSS('background-color', accent)
+    await expect(indicator).toHaveCSS('color', await tokenColor(page, '--fg-on-accent'))
 
     // 自定义输入必须可聚焦填写；提交前保持禁用，填写后放行。
     const customInput = page.locator('.interaction-custom-input').nth(1)
@@ -674,7 +668,7 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
       release()
       const error = page.locator('.state-block.danger')
       await expect(error).toHaveText(failureMessage)
-      await expect(error).toHaveCSS('color', await resolveToken(page, '--danger'))
+      await expect(error).toHaveCSS('color', await tokenColor(page, '--danger'))
       await expect(page.locator('.interactions-empty-state')).toHaveCount(0)
       await expectNoHorizontalOverflow(page)
       await page.screenshot({ path: test.info().outputPath(`interactions-error-${width}.png`) })
@@ -705,10 +699,10 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
       expect(emptyStyles.borderStyle).toBe('none')
       expect(emptyStyles.iconWidth).toBe('40px')
       expect(emptyStyles.iconHeight).toBe('40px')
-      expect(emptyStyles.iconBg).toBe(await resolveToken(page, '--green-soft'))
-      expect(emptyStyles.iconColor).toBe(await resolveToken(page, '--green-primary'))
-      expect(emptyStyles.titleColor).toBe(await resolveToken(page, '--fg'))
-      expect(emptyStyles.descColor).toBe(await resolveToken(page, '--fg-muted'))
+      expect(emptyStyles.iconBg).toBe(await tokenColor(page, '--accent-soft'))
+      expect(emptyStyles.iconColor).toBe(await tokenColor(page, '--accent'))
+      expect(emptyStyles.titleColor).toBe(await tokenColor(page, '--fg'))
+      expect(emptyStyles.descColor).toBe(await tokenColor(page, '--fg-muted'))
       await expectNoHorizontalOverflow(page)
       await page.screenshot({ path: test.info().outputPath(`interactions-empty-${width}.png`) })
     })
@@ -747,9 +741,9 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
       background: window.getComputedStyle(el).backgroundColor,
       border: window.getComputedStyle(el).borderTopColor,
     }))
-    expect(bannerStyle.color).toBe(await resolveToken(page, '--warning'))
-    expect(bannerStyle.background).toBe(await resolveToken(page, '--warning-soft'))
-    expect(bannerStyle.border).toBe(await resolveToken(page, '--warning-border'))
+    expect(bannerStyle.color).toBe(await tokenColor(page, '--warning'))
+    expect(bannerStyle.background).toBe(await tokenColor(page, '--warning-soft'))
+    expect(bannerStyle.border).toBe(await tokenColor(page, '--warning-border'))
 
     // 过期决策禁止再次提交，但仍可刷新。
     await expect(card.locator('.interaction-allow-btn')).toBeDisabled()

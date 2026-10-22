@@ -1,4 +1,4 @@
-import { expect, test, type Locator, type Page } from './fixture'
+import { expect, test, tokenColor, type Locator, type Page } from './fixture'
 
 /**
  * 共享资源卡的真实浏览器几何/键盘/状态回归：
@@ -181,7 +181,7 @@ test.describe('Shared resource card foundation', () => {
     await expect(target).toBeFocused()
     const focusShadow = await target.evaluate((element) => getComputedStyle(element).boxShadow)
     expect(focusShadow).not.toBe('none')
-    expect(focusShadow).toContain('113, 231, 154')
+    expect(focusShadow).toContain(await tokenColor(page, '--focus-ring'))
 
     // 禁用动作：不可点击、视觉降透明度并显示禁用光标。
     const disabled = page.locator('#card-disabled-action')
