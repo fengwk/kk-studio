@@ -211,7 +211,7 @@ export interface AgentModelEditablePropertiesDTO {
   group?: AgentModelGroupConfigDTO | null
 }
 
-export interface AgentModelCreateDTO extends AgentModelEditablePropertiesDTO {}
+export type AgentModelCreateDTO = AgentModelEditablePropertiesDTO
 
 export interface AgentModelUpdateDTO extends AgentModelEditablePropertiesDTO {
   expectedVersion: CatalogVersion
