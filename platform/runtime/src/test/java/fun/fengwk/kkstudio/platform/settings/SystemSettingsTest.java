@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
+import fun.fengwk.kkstudio.share.ai.catalog.ModelCatalogSource;
 
 import java.lang.reflect.RecordComponent;
 import java.util.ArrayList;
@@ -37,6 +38,7 @@ class SystemSettingsTest {
         List.of(new PermissionRule("*", PermissionAction.ASK)),
         defaults.tool().permission().get("bash"));
     assertEquals(false, defaults.tool().permission().containsKey("read"));
+    assertEquals(ModelCatalogSource.MODELS_DEV_V2, defaults.aiRuntime().modelCatalogSource());
     assertEquals(5_000L, defaults.tool().modelGatewayBusyRetryMillis());
     assertEquals(1_000L, defaults.tool().toolGatewayBusyRetryMillis());
     assertEquals(5_000L, defaults.tool().toolGatewayOverloadRetryMillis());

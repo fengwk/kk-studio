@@ -772,15 +772,21 @@ final class OpenAiResponsesStreamAccumulator {
     long ordinaryInput = usageRemainder(rawInputTokens, cachedTokens, cacheWriteTokens);
     Long providerTotalTokens = hasRawTotalTokens ? rawTotalTokens : null;
 
-    ModelUsage usage =
-        new ModelUsage(
-            ordinaryInput,
-            rawOutputTokens,
-            cachedTokens,
-            cacheWriteTokens,
-            Map.of(),
-            reasoningTokens,
-            providerTotalTokens);
+    ModelUsage usage;
+    try {
+      usage =
+          new ModelUsage(
+              ordinaryInput,
+              rawOutputTokens,
+              cachedTokens,
+              cacheWriteTokens,
+              Map.of(),
+              reasoningTokens,
+              providerTotalTokens);
+    } catch (IllegalArgumentException invalidUsage) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "provider usage values are inconsistent");
+    }
 
     // rawUsageJson 高保真：直接保留上游原生 usage 结构，缺失时不伪造字段；无 usage 时产出 {}
     String rawUsageJson;
