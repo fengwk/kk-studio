@@ -200,11 +200,7 @@ final class StopControl {
     List<UUID> sessionIds =
         sessionIdsList.stream().distinct().sorted(UuidOrder.COMPARATOR).toList();
     for (UUID sessionId : sessionIds) {
-      tx.lockSessionForKeyShare(sessionId)
-          .orElseThrow(
-              () ->
-                  new IllegalStateException(
-                      "session " + sessionId + " disappeared while thread existed"));
+      tx.lockSessionForKeyShare(sessionId).orElseThrow();
     }
 
     List<UUID> threadIdsToLock = new ArrayList<>();
@@ -226,10 +222,6 @@ final class StopControl {
     }
 
     ThreadState lockedTarget = lockedThreads.get(command.threadId());
-    if (!targetThread.sessionId().equals(lockedTarget.sessionId())) {
-      throw new IllegalStateException(
-          "thread " + lockedTarget.id() + " relocated to another session while stopping");
-    }
 
     // durable receipt replay 先于 version CAS：按 (rootThreadId, rootStopRequestId) 返回持久保存的旧范围，不以当前树重算，
     // 也不停止其后启动的新工作。
@@ -363,12 +355,7 @@ final class StopControl {
     for (ThreadStopContext original : contexts.reversed()) {
       // 不在此阶段新增 Commands/Models/Tools 行锁（Stage 4-7 已按规范顺序取得，WORK 之后禁止再取），
       // 直接复用已锁定的 model / siblings；Thread 状态重新读取以保证基于 tx 内最新事实 mutation。
-      ThreadState thread =
-          tx.findThread(original.thread().id())
-              .orElseThrow(
-                  () ->
-                      new HarnessRuntimeNotFoundException(
-                          "thread " + original.thread().id() + " disappeared during Stop"));
+      ThreadState thread = tx.findThread(original.thread().id()).orElseThrow();
       UUID stopRequestId = original.stopRequestId();
       EntryPath path = tx.loadEntryPath(thread.headEntryId());
       List<ThreadCommand> queued = original.queued();

@@ -274,14 +274,9 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       """;
 
   /**
-   * 单次不可变 EntryPath 递归读取 CTE。
+   * 单次不可变 EntryPath 递归读取 CTE：以指定 head 为起点沿父链回溯到 ROOT，按 {@code depth desc} 输出 ROOT 到 head 的有序 Entry。
    *
-   * <p>以指定 head 为起点向上回溯直至根节点：
-   *
-   * <ul>
-   *   <li>通过 {@code CYCLE id SET is_cycle USING path} 阻断环路破坏并标明环路哨兵；
-   *   <li>按 {@code depth desc} 输出自 ROOT 到 head 的单调递增有序 Entry 序列。
-   * </ul>
+   * <p>父链由只追加写入、同 Session 复合外键与「非 ROOT 必有父、不得指向自身」约束保证终止于唯一 ROOT，因此不做环路检测。
    */
   private static final String LOAD_ENTRY_PATH =
       """
@@ -294,14 +289,14 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
           from harness_entry e
           join entry_path ep on e.id = ep.parent_entry_id
           where ep.parent_entry_id is not null
-      ) cycle id set is_cycle using path
+      )
       select id, session_id, parent_entry_id, entry_type, payload, created_at, provider_replay_state
       from entry_path
       order by depth desc
       """;
 
   /**
-   * 窄查询递归 CTE：仅提取路径上的 ROOT、head、环路哨兵及指定 contributorId 的 CUSTOM Entry。
+   * 窄查询递归 CTE：仅提取路径上的 head 与指定 contributorId 的 CUSTOM Entry；head 行用于区分「head 不存在」与「没有状态」。
    *
    * <p>用于局部 Contributor 状态提取；递归仍遍历祖先链，但只返回必要节点，减少结果传输与 Java 侧完整 EntryPath 物化，其结果绝不回填完整路径缓存。
    */
@@ -316,18 +311,16 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
           from harness_entry e
           join custom_entry_path cep on e.id = cep.parent_entry_id
           where cep.parent_entry_id is not null
-      ) cycle id set is_cycle using path
-      select id, session_id, parent_entry_id, entry_type, payload, created_at, provider_replay_state, depth, is_cycle
+      )
+      select id, session_id, parent_entry_id, entry_type, payload, created_at, provider_replay_state
       from custom_entry_path
       where depth = 0
-         or entry_type = 'ROOT'
-         or is_cycle
          or (entry_type = 'CUSTOM' and payload ->> 'contributorId' = ?)
       order by depth desc
       """;
 
   /**
-   * 窄查询递归 CTE：仅提取路径上的 ROOT、head、环路哨兵及非 COMPACTION 的 TURN_START Entry。
+   * 窄查询递归 CTE：仅提取路径上的 ROOT、head、SETTINGS 及非 COMPACTION 的 TURN_START Entry。
    *
    * <p>用于解析 branch 生效 settings（等价于 {@link EntryPath#baseSettings()}）：递归仍遍历祖先链，但只返回决定 settings
    * 的必要节点， 减少结果传输与 Java 侧完整 EntryPath 物化，其结果绝不回填完整路径缓存。COMPACTION turn 的 settings 只描述压缩执行模型，因此在 SQL
@@ -344,26 +337,15 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
           from harness_entry e
           join branch_settings_path bsp on e.id = bsp.parent_entry_id
           where bsp.parent_entry_id is not null
-      ) cycle id set is_cycle using path
-      select id, session_id, parent_entry_id, entry_type, payload, created_at, provider_replay_state, depth, is_cycle
+      )
+      select id, session_id, parent_entry_id, entry_type, payload, created_at, provider_replay_state
       from branch_settings_path
       where depth = 0
          or entry_type = 'ROOT'
-         or is_cycle
          or entry_type = 'SETTINGS'
          or (entry_type = 'TURN_START' and payload ->> 'reason' <> 'COMPACTION')
       order by depth desc
       """;
-
-  private record PathEntryRow(Entry entry, int depth, boolean isCycle) {}
-
-  private static final RowMapper<PathEntryRow> PATH_ENTRY_ROW =
-      (resultSet, rowNumber) -> {
-        Entry entry = PostgresqlHarnessRows.ENTRY.mapRow(resultSet, rowNumber);
-        int depth = resultSet.getInt("depth");
-        boolean isCycle = resultSet.getBoolean("is_cycle");
-        return new PathEntryRow(entry, depth, isCycle);
-      };
 
   private static final Comparator<ThreadCommand> COMMAND_LOCK_ORDER =
       Comparator.comparing(ThreadCommand::threadId, UuidOrder.COMPARATOR)
@@ -663,33 +645,16 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
                       && contributorId.equals(custom.contributorId()))
           .toList();
     }
-    List<PathEntryRow> rows =
+    List<Entry> rows =
         queryList(
-            LOAD_CONTRIBUTOR_CUSTOM_ENTRIES_ON_PATH, PATH_ENTRY_ROW, headEntryId, contributorId);
+            LOAD_CONTRIBUTOR_CUSTOM_ENTRIES_ON_PATH,
+            PostgresqlHarnessRows.ENTRY,
+            headEntryId,
+            contributorId);
     if (rows.isEmpty()) {
       throw new IllegalArgumentException("entry " + headEntryId + " does not exist");
     }
-    for (PathEntryRow row : rows) {
-      if (row.isCycle()) {
-        throw new IllegalArgumentException("entry parent cycle detected at " + row.entry().id());
-      }
-    }
-    PathEntryRow rootRow = rows.get(0);
-    if (!rootRow.entry().payload().type().isRoot()) {
-      throw new IllegalArgumentException("entry path for " + headEntryId + " does not reach root");
-    }
-    PathEntryRow headRow = rows.get(rows.size() - 1);
-    if (headRow.depth() != 0 || !headRow.entry().id().equals(headEntryId)) {
-      throw new IllegalArgumentException("entry path does not end with head " + headEntryId);
-    }
-    UUID sessionId = rootRow.entry().sessionId();
-    for (PathEntryRow row : rows) {
-      if (!row.entry().sessionId().equals(sessionId)) {
-        throw new IllegalArgumentException("entry path crosses sessions: " + row.entry().id());
-      }
-    }
     return rows.stream()
-        .map(PathEntryRow::entry)
         .filter(
             entry ->
                 entry.payload() instanceof CustomEntryPayload custom
@@ -711,31 +676,13 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     if (cached != null) {
       return cached.baseSettings();
     }
-    List<PathEntryRow> rows = queryList(LOAD_BRANCH_SETTINGS, PATH_ENTRY_ROW, headEntryId);
+    List<Entry> rows = queryList(LOAD_BRANCH_SETTINGS, PostgresqlHarnessRows.ENTRY, headEntryId);
     if (rows.isEmpty()) {
       throw new IllegalArgumentException("entry " + headEntryId + " does not exist");
     }
-    for (PathEntryRow row : rows) {
-      if (row.isCycle()) {
-        throw new IllegalArgumentException("entry parent cycle detected at " + row.entry().id());
-      }
-    }
-    if (!rows.get(0).entry().payload().type().isRoot()) {
-      throw new IllegalArgumentException("entry path for " + headEntryId + " does not reach root");
-    }
-    PathEntryRow headRow = rows.get(rows.size() - 1);
-    if (headRow.depth() != 0 || !headRow.entry().id().equals(headEntryId)) {
-      throw new IllegalArgumentException("entry path does not end with head " + headEntryId);
-    }
-    UUID sessionId = rows.get(0).entry().sessionId();
-    for (PathEntryRow row : rows) {
-      if (!row.entry().sessionId().equals(sessionId)) {
-        throw new IllegalArgumentException("entry path crosses sessions: " + row.entry().id());
-      }
-    }
-    // 深度升序即 head-to-root：首个 settings 载体就是离 head 最近的生效快照。
+    // 结果按 ROOT 到 head 排列：从 head 端回看，首个 settings 载体就是离 head 最近的生效快照。
     for (int i = rows.size() - 1; i >= 0; i--) {
-      EntryPayload payload = rows.get(i).entry().payload();
+      EntryPayload payload = rows.get(i).payload();
       if (payload instanceof TurnStartPayload start) {
         if (start.reason() != TurnStartReason.COMPACTION) {
           return start.settings();
@@ -2296,10 +2243,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     }
 
     for (WorkTarget target : lockedWorkTargets) {
-      if (!deleteWork(target)) {
-        throw new IllegalStateException(
-            "locked work disappeared while deleting threads: " + target);
-      }
+      deleteWork(target);
     }
     for (UUID threadId : copied) {
       update("delete from harness_thread_command where thread_id = ?", threadId);

@@ -280,21 +280,6 @@ class SessionDeletionOrchestratorTest {
     verify(chatSessionRepository, never()).deleteBySessionId(any());
   }
 
-  @Test
-  void disappearingThreadAbortsDeepDeletionBeforeChildRowsAreRemoved() {
-    // Session 锁后列出的 Thread 若在 Thread 锁阶段消失，必须抛错并依赖外事务整体回滚。
-    when(chatSessionRepository.listSessionIds(CHAT_ID)).thenReturn(List.of(SESSION_1));
-    putSession(SESSION_1, thread(THREAD_1, SESSION_1));
-    when(transaction.lockThread(THREAD_1)).thenReturn(Optional.empty());
-
-    assertThrows(IllegalStateException.class, () -> service.deleteSessionsByOwner(CHAT_OWNER));
-
-    verify(transaction, never()).deleteThreads(any());
-    verify(transaction, never()).deleteEntries(SESSION_1);
-    verify(transaction, never()).deleteSession(SESSION_1);
-    verifyNoInteractions(refManager);
-  }
-
   /** Run 仍引用绑定/Thread 时归属行删除被 FK RESTRICT 拒绝：深删除必须整体失败且不触碰 Thread/Entry/Session，绝无绕过业务清理的硬删。 */
   @Test
   void runReferencedBindingFailsClosedWithoutDeletingHarnessFacts() {

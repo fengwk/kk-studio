@@ -121,27 +121,21 @@ public class SessionDeletionOrchestrator {
     };
   }
 
-  /** 由稳定绑定解析其 Thread 的 Session；Thread 不可解析说明归属事实已不一致，失败而不是静默跳过删除。 */
+  /** 由稳定绑定解析其 Thread 的 Session：绑定行持有指向 Thread 的外键且归属已被排他锁定，Thread 必然存在。 */
   private UUID boundThreadSessionId(UUID threadId) {
     return requireStore()
         .transaction(tx -> tx.findThread(threadId).map(ThreadState::sessionId))
-        .orElseThrow(
-            () -> new IllegalStateException("Issue agent thread disappeared before deletion"));
+        .orElseThrow();
   }
 
   /** 删除闭包内全部 Thread：按 UUID 升序锁定，拒绝单边删除（父或子存活即闭包被截断），再批量删 join 与执行事实。 */
   private void deleteThreadsDeep(HarnessStore.Transaction tx, Set<UUID> threadIds) {
     List<UUID> ordered = threadIds.stream().sorted(UuidOrder.COMPARATOR).toList();
     for (UUID threadId : ordered) {
-      tx.lockThread(threadId)
-          .orElseThrow(
-              () -> new IllegalStateException("Thread disappeared while deleting session"));
+      tx.lockThread(threadId).orElseThrow();
     }
     for (UUID threadId : ordered) {
-      ThreadState thread =
-          tx.findThread(threadId)
-              .orElseThrow(
-                  () -> new IllegalStateException("Thread disappeared while deleting session"));
+      ThreadState thread = tx.findThread(threadId).orElseThrow();
       if (thread.parentThreadId() != null && !threadIds.contains(thread.parentThreadId())) {
         throw new IllegalStateException(
             "cannot delete a child thread while its execution parent survives");
