@@ -17,7 +17,10 @@ import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.module.SimpleModule;
 
 import fun.fengwk.kkstudio.harness.provider.ProviderProtocolOptionsJson;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.ProviderProtocolOptions;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser.ParsedAgentModelConfig;
@@ -157,18 +160,22 @@ class AgentModelRuntimeConfigParserTest {
     assertTrue(parsed.serviceTier().isEmpty());
   }
 
-  /** wire 全天只接受 00:00-24:00；内部规范为 00:00-00:00，编码保持 24:00。 */
+  /** wire end=24:00 可配任意合法 start；00:00-24:00 保留 canonical wire，22:00-24:00 表达当日终点。 */
   @Test
-  void acceptsAllDayTimeAndKeepsCanonicalEnd24() {
-    String config = configWithTime("00:00", "24:00");
+  void acceptsAllDayAndEndOfDayTimeAndKeepsCanonicalEnd24() {
+    String allDay = configWithTime("00:00", "24:00");
+    var allDayTime = parser.parse(allDay).pricing().overrides().get(0).when().time();
+    assertEquals(LocalTime.MIDNIGHT, allDayTime.start());
+    assertEquals(LocalTime.MIDNIGHT, allDayTime.end());
+    assertTrue(allDayTime.allDay());
+    assertTrue(parser.encode(parser.decode(allDay)).contains("\"end\":\"24:00\""));
 
-    var time = parser.parse(config).pricing().overrides().get(0).when().time();
-    assertEquals(LocalTime.MIDNIGHT, time.start());
-    assertEquals(LocalTime.MIDNIGHT, time.end());
-    assertTrue(time.allDay());
-
-    String encoded = parser.encode(parser.decode(config));
-    assertTrue(encoded.contains("\"end\":\"24:00\""), encoded);
+    String late = configWithTime("22:00", "24:00");
+    var lateTime = parser.parse(late).pricing().overrides().get(0).when().time();
+    assertEquals(LocalTime.of(22, 0), lateTime.start());
+    assertEquals(LocalTime.MIDNIGHT, lateTime.end());
+    assertFalse(lateTime.allDay());
+    assertTrue(parser.encode(parser.decode(late)).contains("\"end\":\"24:00\""));
   }
 
   /** 拒绝 start=24:00，以及把相同起止（含 00:00-00:00）静默当成全天。 */
@@ -177,7 +184,6 @@ class AgentModelRuntimeConfigParserTest {
     assertInvalid(configWithTime("24:00", "24:00"), ".start must be before 24:00");
     assertInvalid(configWithTime("00:00", "00:00"), ".start and end must differ");
     assertInvalid(configWithTime("10:00", "10:00"), ".start and end must differ");
-    assertInvalid(configWithTime("10:00", "24:00"), ".end 24:00 requires start 00:00");
   }
 
   private String configWithTime(String start, String end) {
@@ -584,9 +590,9 @@ class AgentModelRuntimeConfigParserTest {
         "surrounding whitespace");
   }
 
-  /** 类型化 DTO 形式拒绝 null 和损坏的子结构；部分子结构会以明确方式失败。 */
+  /** 类型化 DTO 形式拒绝损坏的必填子结构；缺失 pricing 按零定义归一，而不是继续拒绝。 */
   @Test
-  void rejectsInvalidTypedConfigDirectly() {
+  void validatesTypedConfigAndNormalizesMissingPricing() {
     AgentModelConfigDTO base = parser.decode(validConfig());
     assertNotNull(base);
     AgentModelConfigDTO missingLimit = copy(base, c -> c.setLimit(null));
@@ -603,11 +609,7 @@ class AgentModelRuntimeConfigParserTest {
         abilitiesError.getMessage());
 
     AgentModelConfigDTO missingPricing = copy(base, c -> c.setPricing(null));
-    IllegalArgumentException pricingError =
-        assertThrows(IllegalArgumentException.class, () -> parser.parse(missingPricing));
-    assertTrue(
-        pricingError.getMessage().contains("config.pricing is required"),
-        pricingError.getMessage());
+    assertEquals(ModelPricing.ZERO, parser.parse(missingPricing).pricing());
 
     AgentModelConfigDTO negativeInput =
         copy(base, c -> c.getPricing().getBase().setInput(new BigDecimal("-1")));
@@ -616,6 +618,67 @@ class AgentModelRuntimeConfigParserTest {
     assertTrue(
         multiplierError.getMessage().contains("config.pricing.base.input must not be negative"),
         multiplierError.getMessage());
+  }
+
+  /** 缺失 pricing、缺失 base 普通价格与显式全零定义得到相同 canonical DTO 与零成本。 */
+  @Test
+  void normalizesMissingPricingToCanonicalZeroDefinition() {
+    AgentModelConfigDTO missing = parser.decode(configWithoutPricing());
+    AgentModelConfigDTO partial = parser.decode(configWithPricing("{\"base\":{}}"));
+    AgentModelConfigDTO explicit = parser.decode(configWithPricing(EXPLICIT_ZERO_PRICING));
+
+    assertCanonicalZero(missing);
+    assertCanonicalZero(partial);
+    assertEquals(explicit.getPricing(), missing.getPricing());
+    assertEquals(explicit.getPricing(), partial.getPricing());
+
+    String encoded = parser.encode(missing);
+    assertTrue(encoded.contains("\"pricing\":{\"base\":{"), encoded);
+    assertTrue(encoded.contains("\"input\":\"0\""), encoded);
+    assertTrue(encoded.contains("\"output\":\"0\""), encoded);
+    assertTrue(encoded.contains("\"cacheRead\":\"0\""), encoded);
+    assertTrue(encoded.contains("\"cacheWrite\":\"0\""), encoded);
+    assertTrue(encoded.contains("\"cacheWriteByTtl\":{}"), encoded);
+    assertTrue(encoded.contains("\"overrides\":[]"), encoded);
+    assertTrue(encoded.contains("\"multipliers\":[]"), encoded);
+
+    ModelUsage usage = new ModelUsage(1_000_000, 1_000_000, 0, 0, Map.of(), null, null);
+    assertEquals(
+        ModelCost.zero(), ModelCost.calculate(parser.parse(missing).pricing(), usage, null, null));
+    assertEquals(
+        ModelCost.zero(), ModelCost.calculate(parser.parse(explicit).pricing(), usage, null, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> parser.decode(configWithPricing("{\"base\":{\"input\":1.1}}")));
+  }
+
+  private static void assertCanonicalZero(AgentModelConfigDTO config) {
+    var pricing = config.getPricing();
+    assertNotNull(pricing);
+    assertNotNull(pricing.getBase());
+    assertEquals(BigDecimal.ZERO, pricing.getBase().getInput());
+    assertEquals(BigDecimal.ZERO, pricing.getBase().getOutput());
+    assertEquals(BigDecimal.ZERO, pricing.getBase().getCacheRead());
+    assertEquals(BigDecimal.ZERO, pricing.getBase().getCacheWrite());
+    assertEquals(Map.of(), pricing.getBase().getCacheWriteByTtl());
+    assertNull(pricing.getBase().getReasoning());
+    assertNotNull(pricing.getOverrides());
+    assertTrue(pricing.getOverrides().isEmpty());
+    assertNotNull(pricing.getMultipliers());
+    assertTrue(pricing.getMultipliers().isEmpty());
+  }
+
+  private String configWithPricing(String pricingJson) {
+    String base = configWithoutPricing();
+    return base.substring(0, base.length() - 1) + ",\"pricing\":" + pricingJson + "}";
+  }
+
+  private String configWithoutPricing() {
+    return "{\"limit\":{\"context\":128000,\"output\":8192},"
+        + "\"abilities\":{\"tools\":true,\"reasoning\":true,"
+        + "\"inputModalities\":[\"TEXT\",\"IMAGE\"]},"
+        + "\"defaultVariant\":\"quality\","
+        + "\"variants\":[{\"id\":\"quality\",\"reasoningEffort\":\"high\"}]}";
   }
 
   private static AgentModelConfigDTO copy(
@@ -640,6 +703,10 @@ class AgentModelRuntimeConfigParserTest {
   /** canonical variant wire：只含 id 与 reasoningEffort。 */
   private static final String VARIANT_JSON =
       "\"variants\":[{\"id\":\"quality\",\"reasoningEffort\":\"high\"}],";
+
+  private static final String EXPLICIT_ZERO_PRICING =
+      "{\"base\":{\"input\":\"0\",\"output\":\"0\",\"cacheRead\":\"0\",\"cacheWrite\":\"0\","
+          + "\"cacheWriteByTtl\":{},\"reasoning\":null},\"overrides\":[],\"multipliers\":[]}";
 
   /** 厂商原生协议选项 fixture：覆盖嵌套 object、数组、布尔、小数与超出 Integer 范围的整数。 */
   private static final String PROTOCOL_OPTIONS_JSON =

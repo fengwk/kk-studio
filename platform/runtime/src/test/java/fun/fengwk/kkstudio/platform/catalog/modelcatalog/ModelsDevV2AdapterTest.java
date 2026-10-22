@@ -11,7 +11,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelInputModality;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingConditionDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingDTO;
@@ -292,6 +295,29 @@ class ModelsDevV2AdapterTest {
     assertNull(missing.getAbilities().getTools());
     assertNull(missing.getAbilities().getReasoning());
     assertNull(missing.getLimit());
+  }
+
+  /** supported 候选的 pricing DTO 必须能经唯一 parser 保存并保持等价定价。 */
+  @Test
+  void supportedCandidatePricingSurvivesParserConfigRoundTrip() throws Exception {
+    AgentModelPricingDTO pricing = real.get("databricks/databricks-gpt-5-6-sol").getPricing();
+    JsonMapper mapper = JsonMapper.builder().build();
+    String config =
+        "{\"limit\":{\"context\":128000,\"output\":8192},"
+            + "\"abilities\":{\"tools\":true,\"reasoning\":true,"
+            + "\"inputModalities\":[\"TEXT\"]},"
+            + "\"defaultVariant\":\"default\","
+            + "\"variants\":[{\"id\":\"default\"}],"
+            + "\"pricing\":"
+            + mapper.writeValueAsString(pricing)
+            + "}";
+
+    AgentModelRuntimeConfigParser parser = new AgentModelRuntimeConfigParser(mapper);
+    AgentModelConfigDTO decoded = parser.decode(config);
+    assertEquals(pricing, decoded.getPricing());
+    String encoded = parser.encode(decoded);
+    assertEquals(pricing, parser.decode(encoded).getPricing());
+    assertEquals(parser.parsePricing(pricing), parser.parse(encoded).pricing());
   }
 
   private static void assertRejected(ModelDefaultCandidateDTO candidate) {

@@ -212,6 +212,22 @@ class ModelPricingResolverTest {
                 LocalTime.of(10, 0), LocalTime.of(10, 0), ZoneId.of("UTC"), null));
   }
 
+  /** 22:00-24:00 的 end=24 规范为内部 00:00，仍按开始日的星期归属且不包含次日零点。 */
+  @Test
+  void resolvesLateEndOfDayWindowAndWeekdayAtStart() {
+    ModelPricingCondition.TimeWindow lateWindow =
+        new ModelPricingCondition.TimeWindow(
+            LocalTime.of(22, 0), LocalTime.MIDNIGHT, ZoneId.of("UTC"), List.of(1));
+    ModelPricing pricing = pricingWithOverride("late-end", lateWindow, "5");
+
+    assertEquals(
+        new BigDecimal("5"), calculateInput(pricing, Instant.parse("2026-08-17T23:59:00Z"), null));
+    assertEquals(
+        new BigDecimal("1"), calculateInput(pricing, Instant.parse("2026-08-18T00:00:00Z"), null));
+    assertEquals(
+        new BigDecimal("1"), calculateInput(pricing, Instant.parse("2026-08-17T21:59:00Z"), null));
+  }
+
   /** service tier 属于必需事实；未提供时整个费用为 0，而不是忽略该规则继续猜价。 */
   @Test
   void returnsZeroWhenServiceTierFactIsMissing() {
