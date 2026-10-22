@@ -179,12 +179,13 @@ class AnthropicStreamingDecoderTest {
     assertEquals("text", replayContent.get(1).path("type").asString(""));
     assertEquals("Known text.", replayContent.get(1).path("text").asString(""));
 
-    // usage 正常合并：Anthropic 无原生 total，providerTotalTokens 为 0，分类求和通过 categorizedTokens() 校验
+    // Anthropic 未报告原生 total/reasoning，保留 null；分类求和独立校验。
     ModelUsage usage = response.usage();
     assertEquals(10, usage.inputTokens());
     assertEquals(5, usage.outputTokens());
     assertEquals(0, usage.totalTokens());
-    assertEquals(0, usage.providerTotalTokens());
+    assertNull(usage.providerTotalTokens());
+    assertNull(usage.reasoningTokens());
     assertEquals(15, usage.categorizedTokens());
   }
 
@@ -361,7 +362,8 @@ class AnthropicStreamingDecoderTest {
     assertEquals(10, usage.cacheWriteByTtl().get(300L));
     assertEquals(5, usage.cacheWriteByTtl().get(3600L));
     assertEquals(0, usage.totalTokens());
-    assertEquals(0, usage.providerTotalTokens());
+    assertNull(usage.providerTotalTokens());
+    assertNull(usage.reasoningTokens());
     assertEquals(175, usage.categorizedTokens());
 
     // 校验 replayState 包含完整的原生 payload
@@ -539,7 +541,8 @@ class AnthropicStreamingDecoderTest {
     assertEquals(70, usage.cacheWriteByTtl().get(300L));
     assertEquals(30, usage.cacheWriteByTtl().get(3600L));
     assertEquals(0, usage.totalTokens());
-    assertEquals(0, usage.providerTotalTokens());
+    assertNull(usage.providerTotalTokens());
+    assertNull(usage.reasoningTokens());
     assertEquals(415, usage.categorizedTokens());
 
     assertNotNull(response.rawUsageJson());
