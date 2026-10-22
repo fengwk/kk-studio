@@ -45,14 +45,19 @@ class ModelsDevV2AdapterTest {
     assertDecimal("0.4", pricing.getBase().getCacheRead());
     assertDecimal("5", pricing.getBase().getCacheWrite());
 
-    assertEquals(1, pricing.getOverrides().size());
-    AgentModelPricingOverrideDTO override = pricing.getOverrides().get(0);
-    assertEquals(272000, override.getWhen().getContext().getGt());
-    assertDecimal("8", override.getRates().getInput());
-    assertDecimal("30", override.getRates().getOutput());
-    assertDecimal("0.8", override.getRates().getCacheRead());
-    assertDecimal("10", override.getRates().getCacheWrite());
-    assertFalse(override.getRates().isReasoningSpecified());
+    // input/output 各自保留原顺序，不再按条件合并。
+    assertEquals(2, pricing.getOverrides().size());
+    AgentModelPricingOverrideDTO input = pricing.getOverrides().get(0);
+    assertEquals(272000, input.getWhen().getContext().getGt());
+    assertDecimal("8", input.getRates().getInput());
+    assertDecimal("0.8", input.getRates().getCacheRead());
+    assertDecimal("10", input.getRates().getCacheWrite());
+    assertNull(input.getRates().getOutput());
+    AgentModelPricingOverrideDTO output = pricing.getOverrides().get(1);
+    assertEquals(272000, output.getWhen().getContext().getGt());
+    assertNull(output.getRates().getInput());
+    assertDecimal("30", output.getRates().getOutput());
+    assertFalse(output.getRates().isReasoningSpecified());
 
     assertEquals(2, pricing.getMultipliers().size());
     assertEquals(List.of("priority"), pricing.getMultipliers().get(0).getWhen().getServiceTier());
@@ -155,6 +160,75 @@ class ModelsDevV2AdapterTest {
   }
 
   @Test
+  void keepsEveryFieldWiseOverrideInSourceOrder() {
+    AgentModelPricingDTO pricing = validation.get("validation/override-order").getPricing();
+    assertEquals(3, pricing.getOverrides().size());
+    assertEquals("override-0", pricing.getOverrides().get(0).getId());
+    assertEquals("override-1", pricing.getOverrides().get(1).getId());
+    assertEquals("override-2", pricing.getOverrides().get(2).getId());
+
+    // 相同条件不再合并：第三条只补 cacheRead，不能清空前一条已应用的 input。
+    assertEquals(100, pricing.getOverrides().get(0).getWhen().getContext().getGt());
+    assertDecimal("1", pricing.getOverrides().get(0).getRates().getInput());
+    assertNull(pricing.getOverrides().get(0).getRates().getCacheRead());
+    assertEquals(200, pricing.getOverrides().get(1).getWhen().getContext().getGte());
+    assertDecimal("2", pricing.getOverrides().get(1).getRates().getInput());
+    assertEquals(100, pricing.getOverrides().get(2).getWhen().getContext().getGt());
+    assertNull(pricing.getOverrides().get(2).getRates().getInput());
+    assertDecimal("3", pricing.getOverrides().get(2).getRates().getCacheRead());
+  }
+
+  @Test
+  void rejectsPricingThatTheRuntimeParserWouldReject() {
+    assertRejected(validation.get("validation/context-conflict"));
+    assertRejected(validation.get("validation/not-null"));
+    assertRejected(validation.get("validation/ttl-overflow"));
+    assertRejected(validation.get("validation/precision-overflow"));
+    // 单个坏候选不能炸掉整份目录。
+    assertTrue(validation.get("validation/capable").isPricingSupported());
+  }
+
+  @Test
+  void boundsNestedConditionsAndNodeCount() {
+    String tooDeep = "{}";
+    for (int i = 0; i < 9; i++) {
+      tooDeep = "{\"all\":[" + tooDeep + "]}";
+    }
+    StringBuilder nodes = new StringBuilder();
+    for (int i = 0; i < 65; i++) {
+      if (i > 0) {
+        nodes.append(',');
+      }
+      nodes.append("{}");
+    }
+    String manyNodes = nodes.toString();
+    String json =
+        """
+        {"p":{"models":{
+          "too-deep":{"cost":{"text":{"input":{"price":1,"overrides":[{"when":%s,"price":2}]},"output":{"price":2}}}},
+          "too-many":{"cost":{"text":{"input":{"price":1,"overrides":[{"when":{"all":[%s]},"price":2}]},"output":{"price":2}}}}
+        }}}
+        """
+            .formatted(tooDeep, manyNodes);
+    Map<String, ModelDefaultCandidateDTO> candidates = index(adapter.adapt(json));
+    assertRejected(candidates.get("p/too-deep"));
+    assertRejected(candidates.get("p/too-many"));
+  }
+
+  @Test
+  void keepsExplicitEndAtMidnightAndDefaultsMissingEndToEndOfDay() {
+    AgentModelPricingConditionDTO explicit =
+        validation
+            .get("validation/utc-hours-lt-midnight")
+            .getPricing()
+            .getOverrides()
+            .get(0)
+            .getWhen();
+    assertEquals("22:00", explicit.getTime().getStart());
+    assertEquals("00:00", explicit.getTime().getEnd());
+  }
+
+  @Test
   void keepsOpenEndedDatesWithoutSentinelBounds() {
     AgentModelPricingDTO gteOnly = validation.get("validation/date-gte-only").getPricing();
     assertEquals("2026-01-01", gteOnly.getOverrides().get(0).getWhen().getDate().getGte());
@@ -174,7 +248,7 @@ class ModelsDevV2AdapterTest {
     AgentModelPricingConditionDTO time =
         validation.get("validation/utc-days-equals").getPricing().getOverrides().get(0).getWhen();
     assertEquals("01:00", time.getTime().getStart());
-    assertEquals("00:00", time.getTime().getEnd());
+    assertEquals("24:00", time.getTime().getEnd());
     assertEquals("UTC", time.getTime().getTimezone());
     assertEquals(List.of(1), time.getTime().getWeekdays());
   }
@@ -184,6 +258,8 @@ class ModelsDevV2AdapterTest {
     AgentModelPricingConditionDTO day =
         real.get("time-vendor/weekday-day").getPricing().getOverrides().get(0).getWhen();
     assertEquals(List.of(1, 2, 3, 4, 5), day.getTime().getWeekdays());
+    assertEquals("00:00", day.getTime().getStart());
+    assertEquals("24:00", day.getTime().getEnd());
     assertEquals(2, day.getAll().size());
 
     AgentModelPricingDTO scalar = validation.get("validation/scalar-multiplier").getPricing();

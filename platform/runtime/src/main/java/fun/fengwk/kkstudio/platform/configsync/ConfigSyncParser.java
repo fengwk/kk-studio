@@ -263,7 +263,7 @@ public final class ConfigSyncParser {
     properties.setDescription(entry.optString("description"));
     List<String> removed = new ArrayList<>();
     if (kind == AgentModelKind.MODEL) {
-      properties.setProviderName(entry.reqString("providerName"));
+      properties.setProviderName(entry.reqName("providerName"));
       properties.setModelId(entry.reqString("modelId"));
       Object configNode = requireObject(entry, "config");
       Object cleanedConfig =

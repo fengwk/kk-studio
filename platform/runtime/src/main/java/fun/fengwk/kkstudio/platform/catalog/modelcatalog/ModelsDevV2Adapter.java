@@ -101,7 +101,9 @@ public class ModelsDevV2Adapter implements ModelsDevCatalogAdapter {
     candidate.setAbilities(abilities(model, issues));
     candidate.setSupportIssues(issues);
     try {
-      candidate.setPricing(pricing(model.get("cost"), issues));
+      AgentModelPricingDTO pricing = pricing(model.get("cost"), issues);
+      CatalogPricingValidator.validate(pricing);
+      candidate.setPricing(pricing);
       candidate.setPricingSupported(true);
     } catch (CatalogPriceException error) {
       issues.add(error.getMessage());
@@ -232,8 +234,7 @@ public class ModelsDevV2Adapter implements ModelsDevCatalogAdapter {
         throw new CatalogPriceException("unsupported v2 text cost field: " + key);
       }
     }
-    LinkedHashMap<AgentModelPricingConditionDTO, AgentModelRatePatchDTO> overrides =
-        new LinkedHashMap<>();
+    List<AgentModelPricingOverrideDTO> overrides = new ArrayList<>();
     JsonNode input = textCost.get("input");
     if (input != null && !input.isNull()) {
       JsonNode inputNode = CatalogJson.requireObject(input, "cost.text.input");
@@ -276,12 +277,8 @@ public class ModelsDevV2Adapter implements ModelsDevCatalogAdapter {
       base.setReasoning(null);
     }
     int index = 0;
-    for (Map.Entry<AgentModelPricingConditionDTO, AgentModelRatePatchDTO> entry :
-        overrides.entrySet()) {
-      AgentModelPricingOverrideDTO override = new AgentModelPricingOverrideDTO();
+    for (AgentModelPricingOverrideDTO override : overrides) {
       override.setId("override-" + index++);
-      override.setWhen(entry.getKey());
-      override.setRates(entry.getValue());
       pricing.getOverrides().add(override);
     }
     pricing.setMultipliers(multipliers(cost.get("multipliers"), issues));
@@ -379,7 +376,12 @@ public class ModelsDevV2Adapter implements ModelsDevCatalogAdapter {
           case 'd' -> 86400L;
           default -> throw new CatalogPriceException(name + " has invalid TTL unit: " + key);
         };
-    long seconds = Math.multiplyExact(amount, multiplier);
+    long seconds;
+    try {
+      seconds = Math.multiplyExact(amount, multiplier);
+    } catch (ArithmeticException error) {
+      throw new CatalogPriceException(name + " TTL is too large: " + key);
+    }
     if (seconds <= 0) {
       throw new CatalogPriceException(name + " TTL keys must be positive: " + key);
     }
@@ -389,7 +391,7 @@ public class ModelsDevV2Adapter implements ModelsDevCatalogAdapter {
   private static void collectOverrides(
       JsonNode array,
       boolean inputSide,
-      LinkedHashMap<AgentModelPricingConditionDTO, AgentModelRatePatchDTO> overrides,
+      List<AgentModelPricingOverrideDTO> overrides,
       List<String> issues) {
     if (array == null || array.isNull()) {
       return;
@@ -401,9 +403,7 @@ public class ModelsDevV2Adapter implements ModelsDevCatalogAdapter {
       JsonNode override = CatalogJson.requireObject(item, "cost.text override");
       validateKeys(
           override, inputSide ? INPUT_OVERRIDE_KEYS : OUTPUT_OVERRIDE_KEYS, "text override");
-      AgentModelPricingConditionDTO when = condition(override.get("when"), 0);
-      AgentModelRatePatchDTO patch =
-          overrides.computeIfAbsent(when, ignored -> new AgentModelRatePatchDTO());
+      AgentModelRatePatchDTO patch = new AgentModelRatePatchDTO();
       if (inputSide) {
         patch.setInput(CatalogJson.decimal(override.get("price"), "input override price"));
         JsonNode cache = override.get("cache");
@@ -420,6 +420,10 @@ public class ModelsDevV2Adapter implements ModelsDevCatalogAdapter {
               CatalogJson.decimal(override.get("reasoning"), "output override reasoning"));
         }
       }
+      AgentModelPricingOverrideDTO rule = new AgentModelPricingOverrideDTO();
+      rule.setWhen(condition(override.get("when"), 0));
+      rule.setRates(patch);
+      overrides.add(rule);
     }
   }
 
@@ -531,7 +535,13 @@ public class ModelsDevV2Adapter implements ModelsDevCatalogAdapter {
         }
         case "all" -> condition.setAll(conditions(when.get("all"), depth + 1));
         case "any" -> condition.setAny(conditions(when.get("any"), depth + 1));
-        case "not" -> condition.setNot(condition(when.get("not"), depth + 1));
+        case "not" -> {
+          JsonNode child = when.get("not");
+          if (child == null || child.isNull()) {
+            throw new CatalogPriceException("condition.not must be an object");
+          }
+          condition.setNot(condition(child, depth + 1));
+        }
         default -> throw new CatalogPriceException("unsupported pricing condition: " + key);
       }
     }
@@ -606,17 +616,17 @@ public class ModelsDevV2Adapter implements ModelsDevCatalogAdapter {
 
   private static AgentModelPricingTimeConditionDTO time(JsonNode hours, JsonNode days) {
     String start = "00:00";
-    String end = "00:00";
+    String end = "24:00";
     if (hours != null && !hours.isNull()) {
       JsonNode window = CatalogJson.requireObject(hours, "condition.utc_hours");
       validateKeys(window, UTC_HOURS_KEYS, "condition.utc_hours");
-      String gte = timeText(window.get("gte"), "condition.utc_hours.gte");
-      String lt = timeText(window.get("lt"), "condition.utc_hours.lt");
+      String gte = timeText(window.get("gte"), "condition.utc_hours.gte", false);
+      String lt = timeText(window.get("lt"), "condition.utc_hours.lt", true);
       if (gte == null && lt == null) {
         throw new CatalogPriceException("condition.utc_hours requires gte or lt");
       }
       start = gte == null ? "00:00" : gte;
-      end = lt == null ? "00:00" : ("24:00".equals(lt) ? "00:00" : lt);
+      end = lt == null ? "24:00" : lt;
     }
     AgentModelPricingTimeConditionDTO dto = new AgentModelPricingTimeConditionDTO();
     dto.setStart(start);
@@ -647,12 +657,15 @@ public class ModelsDevV2Adapter implements ModelsDevCatalogAdapter {
     return dto;
   }
 
-  private static String timeText(JsonNode node, String name) {
+  private static String timeText(JsonNode node, String name, boolean allowEndOfDay) {
     String value = textOr(node, null);
     if (value == null) {
       return null;
     }
     if ("24:00".equals(value)) {
+      if (!allowEndOfDay) {
+        throw new CatalogPriceException(name + " must be a time before 24:00");
+      }
       return value;
     }
     try {

@@ -4,7 +4,7 @@ import lombok.Data;
 
 import java.util.List;
 
-/** 价格规则条件；同一对象内的字段为 AND，空对象恒真。 */
+/** 价格规则条件；同一对象内的字段为 AND。all 缺省/空恒真，any/serviceTier 缺省不约束、显式空列表恒假。 */
 @Data
 public class AgentModelPricingConditionDTO {
 
