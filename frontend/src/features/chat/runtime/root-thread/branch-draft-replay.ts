@@ -1,7 +1,7 @@
-import type { HarnessSessionEntryDTO } from '@/shared/api/contracts/ai-runtime'
 import type { BranchDraft } from '@/features/chat/branch-draft'
 import { parsePayload } from '@/features/chat/runtime/payload-json'
 import { threadDraftPath } from '@/features/chat/thread-draft-path'
+import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 
 
 export function cloneDraft(draft: BranchDraft): BranchDraft {

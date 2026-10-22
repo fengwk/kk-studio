@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.share.ai.runtime;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
+import org.jspecify.annotations.Nullable;
 
 import java.time.Instant;
 
@@ -50,19 +51,19 @@ public class ToolInvocationDTO {
    * 环境路由身份：绑定环境的工具为冻结的 canonical UUID string，其它为 null（{@code @JsonInclude(ALWAYS)} 保证 null 显式序列化）。
    */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String environmentId;
+  private @Nullable String environmentId;
 
   /** 当前 Work 冻结的环境亲和性；没有环境亲和 Work 时为 null。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String requiredEnvironmentId;
+  private @Nullable String requiredEnvironmentId;
 
   /** Work 冻结环境的当前权威名称；无环境或名称不可用时显式为 null，不取 Thread 当前选择。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String requiredEnvironmentName;
+  private @Nullable String requiredEnvironmentName;
 
   /** 此调用的环境等待投影下一次可能因时间失效的时刻；非 READY 或无未来边界时显式为 null。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private Instant environmentWaitFreshnessAt;
+  private @Nullable Instant environmentWaitFreshnessAt;
 
   /** 读取时是否因所需环境不可领取而等待；不属于 durable Invocation 状态。 */
   private boolean waitingForEnvironment;
@@ -72,18 +73,18 @@ public class ToolInvocationDTO {
 
   /** 审批状态：canonical JSON（ToolApprovalJsonCodec）；记录决策后非 null（{@code @JsonInclude(ALWAYS)}）。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String approvalJson;
+  private @Nullable String approvalJson;
 
   /** 执行结果：canonical JSON（ToolResultJsonCodec）；仅成功阶段非 null（{@code @JsonInclude(ALWAYS)}）。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String resultJson;
+  private @Nullable String resultJson;
 
   /**
    * 错误详情：canonical JSON（ToolInvocationError record 的严格绑定）；仅记录错误后非
    * null（{@code @JsonInclude(ALWAYS)}）。
    */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String errorJson;
+  private @Nullable String errorJson;
 
   /** 创建时间（UTC Instant）。 */
   private Instant createTime;

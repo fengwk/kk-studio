@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.share.ai.mcp;
 
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import lombok.Data;
+import org.jspecify.annotations.Nullable;
 
 import java.util.Map;
 
@@ -23,13 +24,13 @@ public class McpServerCreateDTO {
   private String url;
 
   /** 自定义请求 header；可空。 */
-  private Map<String, String> headers;
+  private @Nullable Map<String, String> headers;
 
   /** 公共启用开关；可空时按 true 处理。 */
-  private Boolean enabled;
+  private @Nullable Boolean enabled;
 
   /** 正整数毫秒超时；可空时取默认值。 */
-  private Long timeoutMillis;
+  private @Nullable Long timeoutMillis;
 
   @JsonAnySetter
   public void rejectUnknownField(String fieldName, Object value) {

@@ -6,7 +6,7 @@ import { PluginsTab } from '@/features/extensions/PluginsTab'
 import { pluginsService } from '@/shared/api/plugins-service'
 import { ApiError } from '@/shared/api/client'
 import { queryKeys } from '@/shared/lib/query-keys'
-import type { PluginConnectionCheckResult, PluginDTO } from '@/shared/api/contracts/ai-plugin'
+import type { PluginConnectionCheckDTO, PluginDTO } from '@/shared/api/generated/contracts'
 
 vi.mock('@/shared/api/plugins-service', () => ({
   pluginsService: {
@@ -84,8 +84,8 @@ describe('PluginsTab', () => {
       samplePlugin({
         status: 'CONNECTED',
         region: 'CN',
-        expiresAt: '2026-10-01T12:00:00.000Z',
-        nextRefreshAt: '2026-09-25T12:00:00.000Z',
+        expiresAt: 1790856000,
+        nextRefreshAt: 1790337600,
       }),
     ])
 
@@ -481,8 +481,8 @@ describe('PluginsTab', () => {
   }
 
   function checkResult(
-    overrides: Partial<PluginConnectionCheckResult> = {},
-  ): PluginConnectionCheckResult {
+    overrides: Partial<PluginConnectionCheckDTO> = {},
+  ): PluginConnectionCheckDTO {
     return {
       pluginId: 'opencli',
       appliedRevision: '8',
@@ -575,7 +575,7 @@ describe('PluginsTab', () => {
   it('runs exactly one POST with the applied coordinates and shows the three dimensions independently', async () => {
     const user = userEvent.setup()
     vi.mocked(pluginsService.listPlugins).mockResolvedValue([checkablePlugin()])
-    const pending = deferred<PluginConnectionCheckResult>()
+    const pending = deferred<PluginConnectionCheckDTO>()
     vi.mocked(pluginsService.checkConnection).mockReturnValue(pending.promise)
 
     renderTab()
@@ -628,8 +628,8 @@ describe('PluginsTab', () => {
       checkablePlugin(),
       checkablePlugin({ pluginId: 'other', name: 'Other Plugin' }),
     ])
-    const first = deferred<PluginConnectionCheckResult>()
-    const second = deferred<PluginConnectionCheckResult>()
+    const first = deferred<PluginConnectionCheckDTO>()
+    const second = deferred<PluginConnectionCheckDTO>()
     vi.mocked(pluginsService.checkConnection).mockReturnValueOnce(first.promise)
     vi.mocked(pluginsService.checkConnection).mockReturnValueOnce(second.promise)
 
@@ -700,9 +700,9 @@ describe('PluginsTab', () => {
       checkablePlugin(),
       checkablePlugin({ pluginId: 'other', name: 'Other Plugin' }),
     ])
-    const firstA = deferred<PluginConnectionCheckResult>()
-    const b = deferred<PluginConnectionCheckResult>()
-    const secondA = deferred<PluginConnectionCheckResult>()
+    const firstA = deferred<PluginConnectionCheckDTO>()
+    const b = deferred<PluginConnectionCheckDTO>()
+    const secondA = deferred<PluginConnectionCheckDTO>()
     vi.mocked(pluginsService.checkConnection)
       .mockReturnValueOnce(firstA.promise)
       .mockReturnValueOnce(b.promise)

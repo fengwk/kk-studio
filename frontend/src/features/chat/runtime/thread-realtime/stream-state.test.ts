@@ -23,13 +23,13 @@ import {
   snapshotToolStream,
 } from '@/features/chat/runtime/thread-realtime/tool-stream'
 import type {
+  RealtimeToolStream,
+} from '@/features/chat/runtime/thread-realtime/tool-stream'
+import type {
   ModelAttemptFailureDTO,
   ModelInvocationDTO,
   ToolInvocationDTO,
-} from '@/shared/api/contracts/ai-runtime'
-import type {
-  RealtimeToolStream,
-} from '@/features/chat/runtime/thread-realtime/tool-stream'
+} from '@/shared/api/generated/contracts'
 
 describe('thread realtime state', () => {
   it('parses only sequenced model deltas', () => {
@@ -299,8 +299,8 @@ describe('thread realtime state', () => {
       resultJson: null,
       errorJson: null,
       resultEntryId: null,
-      createTime: '2026-07-28T10:00:00Z',
-      updateTime: '2026-07-28T10:00:00Z',
+      createTime: 1785232800,
+      updateTime: 1785232800,
     }
     expect(snapshotModelStream('7', invocation)).toMatchObject({
       attempt: 3,
@@ -330,8 +330,8 @@ describe('thread realtime state', () => {
       approvalJson: null,
       resultJson: null,
       errorJson: null,
-      createTime: '2026-07-28T10:00:00Z',
-      updateTime: '2026-07-28T10:00:00Z',
+      createTime: 1785232800,
+      updateTime: 1785232800,
     }
     // toolCallId 直接来自 invocation，绝不能从 argumentsJson 推测。
     const active = snapshotToolStream(base, '7')
@@ -400,8 +400,8 @@ describe('thread realtime state', () => {
       approvalJson: null,
       resultJson: null,
       errorJson: null,
-      createTime: '2026-07-28T10:00:00Z',
-      updateTime: '2026-07-28T10:00:00Z',
+      createTime: 1785232800,
+      updateTime: 1785232800,
     }
     // 瞬时上传引用投影为 attachment；invalid result 回退
     // 到空文本 base；空白 resultJson 不算终态；非法 errorJson 原样暴露 message。
@@ -480,8 +480,8 @@ describe('thread realtime state', () => {
       resultJson: null,
       errorJson: null,
       resultEntryId: null,
-      createTime: '2026-07-28T10:00:00Z',
-      updateTime: '2026-07-28T10:00:00Z',
+      createTime: 1785232800,
+      updateTime: 1785232800,
     }
     const stream = snapshotModelStream('7', invocation)
 
@@ -549,8 +549,8 @@ describe('thread realtime state', () => {
       resultJson: null,
       errorJson: null,
       resultEntryId: null,
-      createTime: '2026-07-28T10:00:00Z',
-      updateTime: '2026-07-28T10:00:00Z',
+      createTime: 1785232800,
+      updateTime: 1785232800,
     }
     expect(snapshotModelStream('7', null)).toBeNull()
     expect(snapshotModelStream('other', invocation)).toBeNull()
@@ -568,8 +568,8 @@ describe('thread realtime state', () => {
       resultJson: '[not-json',
       errorJson: null,
       resultEntryId: null,
-      createTime: '2026-07-28T10:00:00Z',
-      updateTime: '2026-07-28T10:00:00Z',
+      createTime: 1785232800,
+      updateTime: 1785232800,
     }
     // result payload 非法时回退到冻结的 checkpoint，绝不是空或仅有 lossy realtime delta 的片段。
     expect(snapshotModelStream('7', invocation)).toMatchObject({
@@ -606,8 +606,8 @@ describe('thread realtime state', () => {
       }),
       errorJson: null,
       resultEntryId: null,
-      createTime: '2026-07-28T10:00:00Z',
-      updateTime: '2026-07-28T10:00:00Z',
+      createTime: 1785232800,
+      updateTime: 1785232800,
     }
     // 终止态 result 投影中的 toolCalls 使用条目自身的 index（数组下标）。
     expect(snapshotModelStream('7', invocation)).toMatchObject({
@@ -635,8 +635,8 @@ describe('thread realtime state', () => {
       resultJson: '[not-json',
       errorJson: null,
       resultEntryId: null,
-      createTime: '2026-07-28T10:00:00Z',
-      updateTime: '2026-07-28T10:00:00Z',
+      createTime: 1785232800,
+      updateTime: 1785232800,
     }
     // result payload 非法时回退到冻结的 checkpoint，绝不是空或仅有 lossy realtime delta 的片段。
     expect(snapshotModelStream('7', invocation)).toMatchObject({
@@ -661,8 +661,8 @@ describe('thread realtime state', () => {
       resultJson: '',
       errorJson: ' ',
       resultEntryId: null,
-      createTime: '2026-07-28T10:00:00Z',
-      updateTime: '2026-07-28T10:00:00Z',
+      createTime: 1785232800,
+      updateTime: 1785232800,
     }
     // 空白的 result/error 不算终止态；空 base 保证第一条 realtime delta 不丢失。
     expect(snapshotModelStream('7', invocation)).toMatchObject({
@@ -946,17 +946,17 @@ describe('thread realtime state', () => {
       resultJson: null,
       errorJson: null,
       resultEntryId: null,
-      createTime: '2026-07-28T10:00:00Z',
-      updateTime: '2026-07-28T10:00:00Z',
+      createTime: 1785232800,
+      updateTime: 1785232800,
       ...overrides,
     })
-    // 数字/数组 updateTime 不是合法字符串：createdAt 回退到 createTime。
-    expect(snapshotModelStream('7', baseInvocation({ updateTime: 123 as never }))).toMatchObject({
+    // HTTP 快照不携带流事件时间：createdAt 留空，由之后的实时事件按自身时间排序。
+    expect(snapshotModelStream('7', baseInvocation())).toMatchObject({
       attempt: 1,
       sequence: 0,
       text: '',
       thinking: '',
-      createdAt: '2026-07-28T10:00:00Z',
+      createdAt: '',
     })
     // 合法的非终止 error payload：kind/message 均缺失时，errorCode 留空，
     // errorText 回退到原始 JSON（parseToolErrorText 的 fallback 分支）。
@@ -981,8 +981,8 @@ describe('thread realtime state', () => {
       resultJson: null,
       errorJson: null,
       resultEntryId: null,
-      createTime: '2026-07-28T10:00:00Z',
-      updateTime: '2026-07-28T10:00:00Z',
+      createTime: 1785232800,
+      updateTime: 1785232800,
       ...overrides,
     })
     // 终止态 result 的 JSON 是数组（非 record）：整体视为格式错误，回退冻结 checkpoint。
@@ -1072,10 +1072,8 @@ describe('thread realtime state', () => {
     expect(reduceRealtimeToolStream(null, partial([{ type: 'json', json: cyclic }]))).toMatchObject({
       text: '',
     })
-    // 非字符串 createdAt 会命中 timestampString 的空回退（由 snapshotToolStream 使用）。
-    expect(
-      snapshotToolStream({ ...toolInvocation(), updateTime: 123 as never } as ToolInvocationDTO, '7'),
-    ).toMatchObject({ createdAt: '2026-07-28T10:00:00Z' })
+    // HTTP 快照不携带流事件时间：createdAt 留空。
+    expect(snapshotToolStream(toolInvocation(), '7')).toMatchObject({ createdAt: '' })
   })
 
   it('accepts a tool overlay only for the matching invocation attempt', () => {
@@ -1098,8 +1096,8 @@ describe('thread realtime state', () => {
       approvalJson: null,
       resultJson: null,
       errorJson: null,
-      createTime: '2026-07-28T10:00:00Z',
-      updateTime: '2026-07-28T10:00:00Z',
+      createTime: 1785232800,
+      updateTime: 1785232800,
     })
     const overlay: RealtimeToolStream = {
       threadId: '7',
@@ -1129,8 +1127,8 @@ describe('thread realtime state', () => {
       resultJson: null,
       errorJson: null,
       resultEntryId: null,
-      createTime: '2026-07-28T10:00:00Z',
-      updateTime: '2026-07-28T10:00:00Z',
+      createTime: 1785232800,
+      updateTime: 1785232800,
     }
     const failureForCurrent: ModelAttemptFailureDTO = {
       modelInvocationId: 'inv-1',
@@ -1142,8 +1140,8 @@ describe('thread realtime state', () => {
       thinking: '',
       errorCode: 'TRANSIENT',
       errorMessage: 'timeout',
-      failedAt: '2026-07-28T10:00:01Z',
-      retryAt: '2026-07-28T10:00:03Z',
+      failedAt: 1785232801,
+      retryAt: 1785232803,
     }
     const failureForOther: ModelAttemptFailureDTO = {
       ...failureForCurrent,
@@ -1913,8 +1911,8 @@ function toolInvocation(overrides: Partial<ToolInvocationDTO> = {}): ToolInvocat
     approvalJson: null,
     resultJson: null,
     errorJson: null,
-    createTime: '2026-07-28T10:00:00Z',
-    updateTime: '2026-07-28T10:00:00Z',
+    createTime: 1785232800,
+    updateTime: 1785232800,
     ...overrides,
   }
 }

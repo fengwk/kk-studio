@@ -6,6 +6,7 @@ import com.fasterxml.jackson.annotation.JsonSetter;
 import com.fasterxml.jackson.annotation.Nulls;
 import lombok.Data;
 import lombok.ToString;
+import org.jspecify.annotations.Nullable;
 import tools.jackson.databind.annotation.JsonDeserialize;
 
 /**
@@ -26,7 +27,7 @@ public class PluginSecretPatchDTO {
   @JsonSetter(nulls = Nulls.FAIL)
   @JsonDeserialize(using = PluginWireTextDeserializer.class)
   @ToString.Exclude
-  private String value;
+  private @Nullable String value;
 
   @JsonAnySetter
   public void rejectUnknownField(String fieldName, Object ignoredValue) {

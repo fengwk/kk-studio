@@ -32,7 +32,7 @@ function createFakeStorage(): StorageService {
         state: 'PENDING',
         blobId: null,
         presignedPut: { method: 'PUT', url: `https://s3.test/${id}`, headers: {} },
-        expiresAt: null,
+        expiresAt: 0,
       }
     },
     completeUpload: async (uploadId: string) => ({

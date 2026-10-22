@@ -15,10 +15,10 @@ import { DeleteProjectModal } from './components/DeleteProjectModal'
 import { EditProjectModal } from './components/EditProjectModal'
 import type { ProjectsApi } from './projects-api'
 import { projectsApi } from './projects-api'
-import type { ProjectDTO } from './types'
 import { useI18n } from '@/shared/i18n'
 import { queryKeys } from '@/shared/lib/query-keys'
 import './projects.css'
+import type { ProjectDTO } from '@/shared/api/generated/contracts'
 
 export interface ProjectsPageProps {
   onSelectProject?: (projectId: string) => void

@@ -1,11 +1,11 @@
 import { useEffect, useRef } from 'react'
 import { useResourceSync } from '@/shared/app-events/useResourceSync'
 import type { CanvasRevision } from '@/shared/api/contracts/base'
-import type { CanvasRevisionEventDTO, UUIDString } from '@/shared/api/contracts/studio'
+import type { CanvasRevisionEventDTO } from '@/shared/api/contracts/studio'
 import { compareCanvasRevisions } from '@/shared/lib/canvas-version'
 
 export interface CanvasVersionEventsOptions {
-  canvasId: UUIDString | null
+  canvasId: string | null
   /** 仅当编辑器持有权威 snapshot 后才订阅。 */
   enabled: boolean
   /** 客户端当前已知的 graph 版本修订号（canonical 十进制字符串）。 */

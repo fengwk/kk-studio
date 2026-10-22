@@ -8,13 +8,13 @@ import { CanvasGenerationPanel } from '@/features/canvas/CanvasGenerationPanel'
 import { CanvasRuntimeContext } from '@/features/canvas/CanvasRuntimeContext'
 import type { CanvasSnapshot, ResourceNode } from '@/features/canvas/domain'
 import type { CanvasController } from '@/features/canvas/useCanvasController'
-import type { CanvasFunctionDefinitionDTO, UUIDString } from '@/shared/api/contracts/studio'
+import type { CanvasFunctionDefinitionDTO } from '@/shared/api/generated/contracts'
 
 setLocale('zh-CN')
 
-const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f' as UUIDString
-const NODE_RES1 = '00000000-0000-4000-8000-000000000001' as UUIDString
-const NODE_TARGET = '00000000-0000-4000-8000-000000000009' as UUIDString
+const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
+const NODE_RES1 = '00000000-0000-4000-8000-000000000001'
+const NODE_TARGET = '00000000-0000-4000-8000-000000000009'
 
 const FUNCTION_VERSION = { definitionFingerprint: '0'.repeat(64) }
 
@@ -94,7 +94,7 @@ const snapshot: CanvasSnapshot = {
       transform: { x: 50, y: 50, width: 320, height: 260 },
       groupId: null,
       resources: [{
-        id: `${NODE_RES1}-r0` as UUIDString,
+        id: `${NODE_RES1}-r0`,
         canvasId: CANVAS_ID,
         ownerNodeId: NODE_RES1,
         resourceIndex: 0,

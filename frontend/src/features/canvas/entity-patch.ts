@@ -1,12 +1,12 @@
+import { compareCanvasRevisions } from '@/shared/lib/canvas-version'
+import { deriveReferencesFromNodes } from '@/features/canvas/domain'
 import type {
   CanvasGroupDTO,
   CanvasPatchDTO,
   CanvasReferenceDTO,
   CanvasResourceNodeDTO,
   CanvasSnapshotDTO,
-} from '@/shared/api/contracts/studio'
-import { compareCanvasRevisions } from '@/shared/lib/canvas-version'
-import { deriveReferencesFromNodes } from '@/features/canvas/domain'
+} from '@/shared/api/generated/contracts'
 
 /**
  * 应用单个 graph patch。返回 null 表示该 patch 无法应用（重复或过期的 revision）。

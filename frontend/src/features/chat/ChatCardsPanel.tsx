@@ -1,11 +1,10 @@
 import { CreateCard } from '@/shared/ui/feedback/CreateCard'
 import { ChatCard } from '@/features/chat/ChatCard'
 import { ResourceGrid } from '@/shared/ui/cards/ResourceGrid'
-import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
-import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
 import { useI18n } from '@/shared/i18n'
 import { CatalogSetupGuide } from '@/features/chat/CatalogSetupGuide'
 import { isCatalogSetupComplete, type CatalogSetupState } from '@/features/chat/catalog-setup'
+import type { AgentDefinitionDTO, ChatDTO } from '@/shared/api/generated/contracts'
 
 export function ChatCardsPanel({
   chats,

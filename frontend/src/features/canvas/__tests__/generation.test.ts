@@ -12,15 +12,15 @@ import {
   referenceCandidates,
   referenceKey,
 } from '@/features/canvas/generation'
-import type { CanvasFunctionDefinitionDTO, UUIDString } from '@/shared/api/contracts/studio'
+import type { CanvasFunctionDefinitionDTO } from '@/shared/api/generated/contracts'
 
-const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f' as UUIDString
+const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
 
-const NODE_SINGLE = '00000000-0000-4000-8000-000000000002' as UUIDString
-const NODE_MULTI = '00000000-0000-4000-8000-000000000003' as UUIDString
-const NODE_OUTPUT = '00000000-0000-4000-8000-000000000004' as UUIDString
-const NODE_VIDEO = '00000000-0000-4000-8000-000000000005' as UUIDString
-const NODE_TARGET = '00000000-0000-4000-8000-000000000009' as UUIDString
+const NODE_SINGLE = '00000000-0000-4000-8000-000000000002'
+const NODE_MULTI = '00000000-0000-4000-8000-000000000003'
+const NODE_OUTPUT = '00000000-0000-4000-8000-000000000004'
+const NODE_VIDEO = '00000000-0000-4000-8000-000000000005'
+const NODE_TARGET = '00000000-0000-4000-8000-000000000009'
 
 const FUNCTION_VERSION = { definitionFingerprint: '0'.repeat(64) }
 
@@ -88,7 +88,7 @@ const reportModelNoRef: CanvasFunctionDefinitionDTO = {
 }
 
 function node(
-  id: UUIDString,
+  id: string,
   name: string,
   kinds: Array<'IMAGE' | 'VIDEO'>,
   functionNode = false,
@@ -100,7 +100,7 @@ function node(
     transform: { x: 0, y: 0, width: 320, height: 260 },
     groupId: null,
     resources: kinds.map((kind, index) => ({
-      id: `${id}-r${index}` as UUIDString,
+      id: `${id}-r${index}`,
       canvasId: CANVAS_ID,
       ownerNodeId: id,
       resourceIndex: index,

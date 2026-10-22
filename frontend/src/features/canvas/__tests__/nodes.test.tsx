@@ -6,7 +6,6 @@ import type { Group, Resource, ResourceNode } from '@/features/canvas/domain'
 import { canvasNodeTypes } from '@/features/canvas/nodes/CanvasNodeRenderers'
 import type { CanvasFlowNode } from '@/features/canvas/projection'
 import type { ResourceFlowNodeData } from '@/features/canvas/types'
-import type { UUIDString } from '@/shared/api/contracts/studio'
 import { setLocale } from '@/shared/i18n'
 
 vi.mock('@/shared/api/studio-service', () => ({
@@ -26,10 +25,10 @@ vi.mock('@/shared/api/studio-service', () => ({
 
 const transform = { x: 20, y: 30, width: 320, height: 260 }
 
-const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f' as UUIDString
-const NODE_DEFAULT = '00000000-0000-4000-8000-000000000002' as UUIDString
-const RES_DEFAULT = '00000000-0000-4000-8000-000000000020' as UUIDString
-const BLOB_ASSET = 'ffffffff-0000-4000-8000-000000000001' as UUIDString
+const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
+const NODE_DEFAULT = '00000000-0000-4000-8000-000000000002'
+const RES_DEFAULT = '00000000-0000-4000-8000-000000000020'
+const BLOB_ASSET = 'ffffffff-0000-4000-8000-000000000001'
 
 function resource(kind: Resource['kind'], overrides: Partial<Resource> = {}): Resource {
   return {
@@ -131,7 +130,7 @@ describe('Canvas resource/group node renderers', () => {
 
     for (const fixture of fixtures) {
       const view = renderResourceNode(resourceNode({
-        id: `00000000-0000-4000-8000-00000000000${fixtures.indexOf(fixture) + 2}` as UUIDString,
+        id: `00000000-0000-4000-8000-00000000000${fixtures.indexOf(fixture) + 2}`,
         resources: [fixture],
       }))
       expect(view.container.querySelector('.resource-node')).toHaveClass(
@@ -166,7 +165,7 @@ describe('Canvas resource/group node renderers', () => {
 
   it('renders every ordered resource in one score-selected grid with zero-based aliases', () => {
     const resources = Array.from({ length: 5 }, (_, index) => resource('IMAGE', {
-      id: `00000000-0000-4000-8000-0000000000${20 + index}` as UUIDString,
+      id: `00000000-0000-4000-8000-0000000000${20 + index}`,
       name: `image-${index}`,
       width: index === 0 ? 1024 : null,
       height: 768,
@@ -251,7 +250,7 @@ describe('Canvas resource/group node renderers', () => {
   it('renders Group through the same header container and a dedicated tinted body', () => {
     const Component = canvasNodeTypes.group
     const group: Group = {
-      id: '00000000-0000-4000-8000-000000000004' as UUIDString,
+      id: '00000000-0000-4000-8000-000000000004',
       canvasId: CANVAS_ID,
       title: 'Group title',
       transform: { x: 0, y: 0, width: 500, height: 400 },
@@ -289,7 +288,7 @@ describe('Canvas resource/group node renderers', () => {
     const ResourceComponent = canvasNodeTypes.resource
     const GroupComponent = canvasNodeTypes.group
     const group: Group = {
-      id: '00000000-0000-4000-8000-000000000004' as UUIDString,
+      id: '00000000-0000-4000-8000-000000000004',
       canvasId: CANVAS_ID,
       title: 'Group title',
       transform: { x: 0, y: 0, width: 500, height: 400 },
@@ -371,7 +370,7 @@ describe('Canvas resource/group node renderers', () => {
       name: 'Multi',
       resources: [
         resource('IMAGE', { width: 1024, height: 768 }),
-        resource('IMAGE', { id: '00000000-0000-4000-8000-000000000021' as UUIDString, width: 512, height: 512 }),
+        resource('IMAGE', { id: '00000000-0000-4000-8000-000000000021', width: 512, height: 512 }),
       ],
     }))
     expect(multiView.container.querySelector('.canvas-resource-grid')).toHaveAttribute(

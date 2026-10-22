@@ -4,8 +4,8 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SkillPackagesPage } from '@/features/catalog/skills/SkillPackagesPage'
 import { agentService } from '@/shared/api/agent-service'
-import type { SkillPackageDTO } from '@/shared/api/contracts/ai-catalog'
 import { setLocale } from '@/shared/i18n'
+import type { SkillPackageDTO } from '@/shared/api/generated/contracts'
 
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {
@@ -39,8 +39,8 @@ function samplePackage(overrides: Partial<SkillPackageDTO> = {}): SkillPackageDT
       { name: 'bash', description: 'bash runner' },
     ],
     version: '1',
-    createTime: '2026-07-20T00:00:00.000Z',
-    updateTime: '2026-07-20T01:00:00.000Z',
+    createTime: 1784505600,
+    updateTime: 1784509200,
     ...overrides,
   }
 }

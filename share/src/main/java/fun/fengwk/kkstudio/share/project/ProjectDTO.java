@@ -6,6 +6,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Project 公开传输对象。
@@ -27,7 +28,7 @@ public class ProjectDTO {
   private String version;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String archivedAt;
+  private @Nullable String archivedAt;
 
   private String createdAt;
   private String updatedAt;

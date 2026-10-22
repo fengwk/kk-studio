@@ -1,10 +1,12 @@
 import { AgentPane } from '@/features/chat/runtime/AgentPane'
-import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
-import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
-import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import type { BranchRequestInput, PaneReport } from '@/features/chat/runtime/root-thread/types'
 import type { PaneTarget } from '@/features/chat/runtime/agent-pane'
 import type { ThreadPresentation } from '@/features/chat/runtime/thread-presentation'
+import type {
+  AgentDefinitionDTO,
+  ChatDTO,
+  EnvironmentCardDTO,
+} from '@/shared/api/generated/contracts'
 
 /** Chat 只提供 owner/defaults；发送、导航、命令和 Thread projection 全部由 AgentPane 共享。 */
 export function ChatWorkspacePane({

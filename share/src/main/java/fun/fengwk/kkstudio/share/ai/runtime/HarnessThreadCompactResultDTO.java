@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.share.ai.runtime;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
+import org.jspecify.annotations.Nullable;
 
 /** 手动压缩提交结果。 */
 @Data
@@ -15,5 +16,5 @@ public class HarnessThreadCompactResultDTO {
 
   /** 创建的独立压缩子 Thread ID；Resolver 业务拒绝时为 null。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String childThreadId;
+  private @Nullable String childThreadId;
 }

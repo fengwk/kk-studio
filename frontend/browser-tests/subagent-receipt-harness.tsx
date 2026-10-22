@@ -4,7 +4,7 @@ import '@/styles.css'
 import { MessageList } from '@/features/chat/runtime/thread-panel/messages/MessageList'
 import { buildThreadTimeline } from '@/features/chat/runtime/thread-timeline'
 import { setLocale } from '@/shared/i18n'
-import type { HarnessSessionEntryDTO } from '@/shared/api/contracts/ai-runtime'
+import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 
 setLocale('zh-CN')
 
@@ -54,7 +54,8 @@ function notificationEntry(
       sourceThreadId,
       message: { role: 'USER', contents: [{ type: 'text', text }] },
     }),
-    createTime: '2026-07-28T10:00:00Z',
+    createTime: 1785232800,
+    usageCost: null,
   }
 }
 

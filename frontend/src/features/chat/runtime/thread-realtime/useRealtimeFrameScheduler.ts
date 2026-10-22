@@ -11,7 +11,7 @@ import {
 import {
   type RealtimeToolStream,
 } from '@/features/chat/runtime/thread-realtime/tool-stream'
-import type { ModelAttemptFailureDTO, ModelInvocationDTO } from '@/shared/api/contracts/ai-runtime'
+import type { ModelAttemptFailureDTO, ModelInvocationDTO } from '@/shared/api/generated/contracts'
 
 export function useRealtimeFrameScheduler(
   modelStreamRef: { readonly current: RealtimeModelStream | null },

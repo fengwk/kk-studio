@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useChatPageController } from '@/features/chat/useChatPageController'
 import { agentService } from '@/shared/api/agent-service'
 import { chatService } from '@/shared/api/chat-service'
-import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
+import type { AgentDefinitionDTO } from '@/shared/api/generated/contracts'
 
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {
@@ -33,8 +33,8 @@ describe('useChatPageController', () => {
       environmentName: null,
       yoloEnabled: false,
       version: '1',
-      createTime: null,
-      updateTime: null,
+      createTime: 0,
+      updateTime: 0,
     })
   })
 
@@ -120,8 +120,8 @@ describe('useChatPageController', () => {
       environmentName: null,
       yoloEnabled: false,
       version: '1',
-      createTime: null,
-      updateTime: null,
+      createTime: 0,
+      updateTime: 0,
     }
 
     // 触发编辑
@@ -167,7 +167,7 @@ function page<T>(results: T[]) {
   return {
     pageNumber: 1,
     pageSize: 50,
-    totalCount: results.length,
+    totalCount: String(results.length),
     results,
   }
 }
@@ -187,8 +187,8 @@ function agent(overrides: Partial<AgentDefinitionDTO> = {}): AgentDefinitionDTO 
       subagents: [],
     },
     version: '1',
-    createTime: null,
-    updateTime: null,
+    createTime: 0,
+    updateTime: 0,
     ...overrides,
   }
 }

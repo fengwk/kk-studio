@@ -8,8 +8,7 @@ import type {
   CanvasCommandDTO,
   CanvasSnapshotDTO,
   CanvasTransformDTO,
-  UUIDString,
-} from '@/shared/api/contracts/studio'
+} from '@/shared/api/generated/contracts'
 
 interface TextEditorInput {
   scope: CanvasScope
@@ -142,7 +141,7 @@ export function useCanvasTextEditor({
     const alias = reserveNodeAlias(editor.name)
     void executeCommands([{
       type: 'CREATE_NODE',
-      nodeId: crypto.randomUUID() as UUIDString,
+      nodeId: crypto.randomUUID(),
       name: alias,
       transform: nextTransform(),
       resources: [{ kind: 'TEXT', name: 'text', textContent: editor.markdown }],

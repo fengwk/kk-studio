@@ -8,7 +8,7 @@ import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { useI18n } from '@/shared/i18n'
 import type { ProjectsApi } from '../projects-api'
 import { projectsApi } from '../projects-api'
-import type { IssueDTO } from '../types'
+import type { IssueDTO } from '@/shared/api/generated/contracts'
 
 export interface CreateIssueModalProps {
   isOpen: boolean

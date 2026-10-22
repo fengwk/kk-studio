@@ -28,17 +28,17 @@ import { agentService } from '@/shared/api/agent-service'
 import { ApiError } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
 import type {
-  AgentCommandBatchResponseDTO,
+  AgentDefinitionDTO,
+  HarnessAcceptedCommandsDTO,
   HarnessBranchSettingsDTO,
   HarnessModelSelectionDTO,
   HarnessSessionEntryDTO,
+  HarnessThreadCompactResultDTO,
   HarnessThreadDTO,
   HarnessThreadSnapshotDTO,
   HarnessThreadStopResultDTO,
-  ManualCompactionResponseDTO,
   ToolInvocationDTO,
-} from '@/shared/api/contracts/ai-runtime'
-import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
+} from '@/shared/api/generated/contracts'
 
 /** 控制器 Thread id：资源订阅经严格 codec，必须是 canonical UUID。 */
 const THREAD_ID = '11111111-2222-4333-8444-555555555555'
@@ -102,8 +102,8 @@ function threadFixture(
     processing: false,
     executionControl: 'RUNNABLE',
     branchSettings: branchSettings(),
-    createTime: null,
-    updateTime: null,
+    createTime: 0,
+    updateTime: 0,
     ...rest,
   }
 }
@@ -129,16 +129,17 @@ function snapshotOf(
   }
 }
 
-function acceptedResponse(currentThread = threadFixture()): AgentCommandBatchResponseDTO {
+function acceptedResponse(currentThread = threadFixture()): HarnessAcceptedCommandsDTO {
   return {
-    session: { sessionId: currentThread.sessionId, name: 'Session', createdAt: null },
+    session: { sessionId: currentThread.sessionId, name: 'Session', createdAt: 0 },
     rootEntry: {
       entryId: 'root-1',
       sessionId: currentThread.sessionId,
       parentEntryId: null,
       entryType: 'ROOT',
       payloadJson: '{}',
-      createTime: null,
+      createTime: 0,
+      usageCost: null,
     },
     thread: currentThread,
     acceptedCommands: [],
@@ -166,8 +167,8 @@ function toolInvocationFixture(overrides: Partial<ToolInvocationDTO> = {}): Tool
     approvalJson: '{}',
     resultJson: null,
     errorJson: null,
-    createTime: null,
-    updateTime: null,
+    createTime: 0,
+    updateTime: 0,
     ...overrides,
   }
 }
@@ -181,8 +182,8 @@ const assistantAgentEntry: AgentDefinitionDTO = {
   variant: 'default',
   config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
   version: '0',
-  createTime: null,
-  updateTime: null,
+  createTime: 0,
+  updateTime: 0,
 }
 
 let realtimeSockets: FakeWebSocketHarness
@@ -229,13 +230,13 @@ describe('useAgentThreadController', () => {
     vi.mocked(agentService.listAgents).mockResolvedValue({
       pageNumber: 1,
       pageSize: 50,
-      totalCount: 1,
+      totalCount: '1',
       results: [assistantAgentEntry],
     })
     vi.mocked(agentService.listModels).mockResolvedValue({
       pageNumber: 1,
       pageSize: 50,
-      totalCount: 1,
+      totalCount: '1',
       results: [
         {
           providerName: 'minimax',
@@ -262,8 +263,8 @@ describe('useAgentThreadController', () => {
             variants: [{ id: 'default' }],
           },
           version: '0',
-          createTime: null,
-          updateTime: null,
+          createTime: 0,
+          updateTime: 0,
         },
       ],
     })
@@ -1133,7 +1134,7 @@ describe('useAgentThreadController', () => {
     vi.mocked(agentService.listAgents).mockResolvedValue({
       pageNumber: 1,
       pageSize: 50,
-      totalCount: 1,
+      totalCount: '1',
       results: [
         {
           name: 'assistant',
@@ -1144,8 +1145,8 @@ describe('useAgentThreadController', () => {
           variant: 'default',
           config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
           version: '1',
-          createTime: null,
-          updateTime: null,
+          createTime: 0,
+          updateTime: 0,
         },
       ],
     })
@@ -1179,7 +1180,8 @@ describe('useAgentThreadController', () => {
       parentEntryId: null,
       entryType,
       payloadJson: JSON.stringify(payload),
-      createTime: null,
+      createTime: 0,
+      usageCost: null,
     })
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
       snapshotOf(currentThread, {
@@ -1408,11 +1410,11 @@ describe('useAgentThreadController', () => {
   })
 
   it('blocks overlapping in-flight submission and prevents second submit from overwriting first pending', async () => {
-    let releaseFirst!: (val: AgentCommandBatchResponseDTO) => void
+    let releaseFirst!: (val: HarnessAcceptedCommandsDTO) => void
     vi.mocked(harnessService.acceptThreadCommandBatch)
       .mockImplementationOnce(
         () =>
-          new Promise<AgentCommandBatchResponseDTO>((resolve) => {
+          new Promise<HarnessAcceptedCommandsDTO>((resolve) => {
             releaseFirst = resolve
           }),
       )
@@ -1761,11 +1763,11 @@ describe('useAgentThreadController', () => {
     const baseB = branchDraftFromThread(threadB)
 
     let resolveSendA!: () => void
-    const sendPromiseA = new Promise<AgentCommandBatchResponseDTO>((resolve) => {
+    const sendPromiseA = new Promise<HarnessAcceptedCommandsDTO>((resolve) => {
       resolveSendA = () => resolve(acceptedResponse(threadA))
     })
     let resolveSendB!: () => void
-    const sendPromiseB = new Promise<AgentCommandBatchResponseDTO>((resolve) => {
+    const sendPromiseB = new Promise<HarnessAcceptedCommandsDTO>((resolve) => {
       resolveSendB = () => resolve(acceptedResponse(threadB))
     })
 
@@ -1845,7 +1847,7 @@ describe('useAgentThreadController', () => {
     })
 
     let rejectSendA!: (err: unknown) => void
-    const sendPromiseA = new Promise<AgentCommandBatchResponseDTO>((_resolve, reject) => {
+    const sendPromiseA = new Promise<HarnessAcceptedCommandsDTO>((_resolve, reject) => {
       rejectSendA = reject
     })
 
@@ -1911,7 +1913,7 @@ describe('useAgentThreadController', () => {
     })
 
     let rejectSendA!: (err: unknown) => void
-    const sendPromiseA = new Promise<AgentCommandBatchResponseDTO>((_resolve, reject) => {
+    const sendPromiseA = new Promise<HarnessAcceptedCommandsDTO>((_resolve, reject) => {
       rejectSendA = reject
     })
 
@@ -2008,11 +2010,11 @@ describe('useAgentThreadController', () => {
     })
 
     let resolveSendEpoch0!: () => void
-    const sendPromiseEpoch0 = new Promise<AgentCommandBatchResponseDTO>((resolve) => {
+    const sendPromiseEpoch0 = new Promise<HarnessAcceptedCommandsDTO>((resolve) => {
       resolveSendEpoch0 = () => resolve(acceptedResponse(threadA))
     })
     let resolveSendEpoch2!: () => void
-    const sendPromiseEpoch2 = new Promise<AgentCommandBatchResponseDTO>((resolve) => {
+    const sendPromiseEpoch2 = new Promise<HarnessAcceptedCommandsDTO>((resolve) => {
       resolveSendEpoch2 = () => resolve(acceptedResponse(threadA))
     })
 
@@ -2109,11 +2111,11 @@ describe('useAgentThreadController', () => {
     })
 
     let rejectSendEpoch0!: (err: unknown) => void
-    const sendPromiseEpoch0 = new Promise<AgentCommandBatchResponseDTO>((_resolve, reject) => {
+    const sendPromiseEpoch0 = new Promise<HarnessAcceptedCommandsDTO>((_resolve, reject) => {
       rejectSendEpoch0 = reject
     })
     let resolveSendEpoch2!: () => void
-    const sendPromiseEpoch2 = new Promise<AgentCommandBatchResponseDTO>((resolve) => {
+    const sendPromiseEpoch2 = new Promise<HarnessAcceptedCommandsDTO>((resolve) => {
       resolveSendEpoch2 = () => resolve(acceptedResponse(threadA))
     })
 
@@ -2235,8 +2237,8 @@ describe('useAgentThreadController', () => {
       })
     })
 
-    let resolveCompactEpoch0!: (res: ManualCompactionResponseDTO) => void
-    const compactPromiseEpoch0 = new Promise<ManualCompactionResponseDTO>((resolve) => {
+    let resolveCompactEpoch0!: (res: HarnessThreadCompactResultDTO) => void
+    const compactPromiseEpoch0 = new Promise<HarnessThreadCompactResultDTO>((resolve) => {
       resolveCompactEpoch0 = resolve
     })
 

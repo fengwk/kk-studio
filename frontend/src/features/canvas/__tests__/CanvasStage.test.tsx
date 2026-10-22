@@ -7,8 +7,8 @@ import { CanvasRuntimeContext } from '@/features/canvas/CanvasRuntimeContext'
 import type { CanvasController } from '@/features/canvas/useCanvasController'
 import type { CanvasSnapshot } from '@/features/canvas/domain'
 import { canvasViewportStorageKey } from '@/features/canvas/viewport-storage'
-import type { CanvasSnapshotDTO } from '@/shared/api/contracts/studio'
 import { setLocale } from '@/shared/i18n'
+import type { CanvasSnapshotDTO } from '@/shared/api/generated/contracts'
 
 const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
 const NODE_A = '9f1e6d2a-3b4c-4d5e-8f6a-7b8c9d0e1f2a'
@@ -109,7 +109,7 @@ function resourceDTO(
       textContent: null,
       kind: 'IMAGE',
       mediaType: 'image/png',
-      sizeBytes: 3,
+      sizeBytes: '3',
       width: null,
       height: null,
       durationMs: null,
@@ -440,7 +440,7 @@ describe('CanvasStage ReactFlow wiring', () => {
             textContent: 'hello',
             kind: 'TEXT',
             mediaType: 'text/markdown',
-            sizeBytes: 5,
+            sizeBytes: '5',
             width: null,
             height: null,
             durationMs: null,

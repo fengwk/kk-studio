@@ -8,6 +8,7 @@ import lombok.AccessLevel;
 import lombok.Data;
 import lombok.Getter;
 import lombok.Setter;
+import org.jspecify.annotations.Nullable;
 
 import java.util.List;
 
@@ -22,13 +23,13 @@ public class HarnessCommandCreateDTO {
   private String idempotencyKey;
 
   /** USER_MESSAGE 的非空有序结构化内容。 */
-  private List<HarnessUserMessageContentDTO> contents;
+  private @Nullable List<HarnessUserMessageContentDTO> contents;
 
   /** SET_AGENT 的目标 Agent 名。 */
-  private String agentName;
+  private @Nullable String agentName;
 
   /** SET_MODEL 的目标模型。 */
-  private HarnessModelSelectionDTO model;
+  private @Nullable HarnessModelSelectionDTO model;
 
   /**
    * SET_ENVIRONMENT 的目标 Environment 名；null 表示解除该 branch 的环境选择。
@@ -37,7 +38,7 @@ public class HarnessCommandCreateDTO {
    * 携带即拒绝。HTTP 全局配置默认省略 null，因此这里强制 {@link JsonInclude.Include#ALWAYS} 以便请求形态可精确重放。
    */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String environmentName;
+  private @Nullable String environmentName;
 
   /**
    * GOAL 的目标正文；null 表示清除该 branch 的 Goal。
@@ -46,7 +47,7 @@ public class HarnessCommandCreateDTO {
    * 其余命令携带即拒绝。空字符串不是清除，且会被 canonical 校验拒绝。
    */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String text;
+  private @Nullable String text;
 
   @Getter(AccessLevel.NONE)
   @Setter(AccessLevel.NONE)

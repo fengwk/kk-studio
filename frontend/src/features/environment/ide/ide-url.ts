@@ -2,7 +2,10 @@
  * 入口与 Studio 共用可信浏览器边界，只接受指定环境的同源 bootstrap 路径。
  * pathname 可含部署前缀；不接受跨源、网络路径、凭据或 fragment。
  */
-export function validateIdeEntryUrl(entryUrl: string | null, environmentId: string): string {
+export function validateIdeEntryUrl(
+  entryUrl: string | null | undefined,
+  environmentId: string,
+): string {
   if (!entryUrl || typeof entryUrl !== 'string') {
     throw new Error('Initial IDE view did not return entry URL')
   }

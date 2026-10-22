@@ -18,8 +18,7 @@ import type {
   CanvasFunctionRunRequestDTO,
   CanvasFunctionVersionDTO,
   CanvasSnapshotDTO,
-  UUIDString,
-} from '@/shared/api/contracts/studio'
+} from '@/shared/api/generated/contracts'
 
 const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
 const NODE_FN = 'aaaaaaaa-0000-4000-8000-000000000003'
@@ -66,7 +65,7 @@ function snapshot(run: CanvasFunctionRunDTO | null): CanvasSnapshotDTO {
   }
 }
 
-function run(requestId: UUIDString, status: CanvasFunctionRunDTO['status'], stage: string): CanvasFunctionRunDTO {
+function run(requestId: string, status: CanvasFunctionRunDTO['status'], stage: string): CanvasFunctionRunDTO {
   return {
     nodeId: NODE_FN,
     requestId,
@@ -162,12 +161,12 @@ describe('patchSnapshotRun basis-CAS', () => {
 })
 
 describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () => {
-  const canvasId = CANVAS_ID as UUIDString
-  const nodeId = NODE_FN as UUIDString
+  const canvasId = CANVAS_ID
+  const nodeId = NODE_FN
 
   function setupHook(options?: {
-    flushFunctionConfig?: (nodeId: UUIDString) => Promise<void>
-    resolveFunctionVersion?: (nodeId: UUIDString) => CanvasFunctionVersionDTO | null
+    flushFunctionConfig?: (nodeId: string) => Promise<void>
+    resolveFunctionVersion?: (nodeId: string) => CanvasFunctionVersionDTO | null
   }) {
     const queryClient = new QueryClient()
     const setToast = vi.fn()
@@ -342,7 +341,7 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
     expect(startSpy).toHaveBeenCalledTimes(1)
 
     // 第二次调用（重试已存在的 attempt）：绝不可再调用 flushFunctionConfig！
-    startSpy.mockResolvedValueOnce(run('req-retry' as UUIDString, 'SUCCEEDED', 'COMPLETED'))
+    startSpy.mockResolvedValueOnce(run('req-retry', 'SUCCEEDED', 'COMPLETED'))
     await act(async () => {
       await result.current.startFunctionRun(nodeId)
     })
@@ -366,7 +365,7 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
     await Promise.resolve()
 
     expect(startSpy).toHaveBeenCalledTimes(1)
-    resolveFirst?.(run('req-1' as UUIDString, 'SUCCEEDED', 'COMPLETED'))
+    resolveFirst?.(run('req-1', 'SUCCEEDED', 'COMPLETED'))
     await act(async () => {
       await Promise.all([p1, p2])
     })
@@ -374,8 +373,8 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
 
   it('cancel 精确按 requestId 清除 pending（只发 requestId，不受目录版本变化影响），不误删其他 attempt', async () => {
     cleanupTestStorage()
-    const reqA = 'aaaaaaaa-1111-4000-8000-000000000001' as UUIDString
-    const reqB = 'bbbbbbbb-2222-4000-8000-000000000002' as UUIDString
+    const reqA = 'aaaaaaaa-1111-4000-8000-000000000001'
+    const reqB = 'bbbbbbbb-2222-4000-8000-000000000002'
 
     savePendingFunctionRun({
       canvasId,
@@ -471,7 +470,7 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
     expect(() => loadPendingFunctionRun(canvasId, nodeId)).toThrow(/invalid JSON/)
 
     // 13. 合法规范结构 -> 原值解析
-    const validReqId = crypto.randomUUID() as UUIDString
+    const validReqId = crypto.randomUUID()
     write({ requestId: validReqId, expectedVersion: { ...FUNCTION_VERSION_A } })
     const loaded = loadPendingFunctionRun(canvasId, nodeId)
     expect(loaded?.request.requestId).toBe(validReqId)
@@ -513,7 +512,7 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
   it('旧缓存（有 requestId 但缺 expectedVersion）同样丢弃且本次点击 0 POST', async () => {
     cleanupTestStorage()
     const storageKey = `kkstudio.canvas.pending-run:${canvasId}:${nodeId}`
-    const legacyRequestId = crypto.randomUUID() as UUIDString
+    const legacyRequestId = crypto.randomUUID()
     window.localStorage.setItem(storageKey, JSON.stringify({
       canvasId,
       nodeId,
@@ -640,7 +639,7 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
   it('clearPendingFunctionRun 只清除精确匹配 requestId 的记录，不盲目删除未知内容', () => {
     cleanupTestStorage()
     const storageKey = `kkstudio.canvas.pending-run:${canvasId}:${nodeId}`
-    const storedRequestId = crypto.randomUUID() as UUIDString
+    const storedRequestId = crypto.randomUUID()
 
     savePendingFunctionRun({
       canvasId,
@@ -725,7 +724,7 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
       expect(() => savePendingFunctionRun({
         canvasId,
         nodeId,
-        request: { requestId: crypto.randomUUID() as UUIDString, expectedVersion: FUNCTION_VERSION_A },
+        request: { requestId: crypto.randomUUID(), expectedVersion: FUNCTION_VERSION_A },
         basisRequestId: null,
         createdAt: Date.now(),
       })).toThrow(/readback mismatch/)
@@ -737,8 +736,8 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
 
   it('other attempt 互斥守护：同一节点已存在不同 requestId 的 attempt 时禁止覆盖', () => {
     cleanupTestStorage()
-    const reqA = crypto.randomUUID() as UUIDString
-    const reqB = crypto.randomUUID() as UUIDString
+    const reqA = crypto.randomUUID()
+    const reqB = crypto.randomUUID()
 
     savePendingFunctionRun({
       canvasId,
@@ -763,9 +762,9 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
 
   it('same body guard 校验：同 requestId 但不同 basisRequestId 或 createdAt 一律拒绝覆盖，完全相同方可幂等保存', () => {
     cleanupTestStorage()
-    const reqA = crypto.randomUUID() as UUIDString
-    const basisA = crypto.randomUUID() as UUIDString
-    const basisB = crypto.randomUUID() as UUIDString
+    const reqA = crypto.randomUUID()
+    const basisA = crypto.randomUUID()
+    const basisB = crypto.randomUUID()
     const timeA = 1000000
 
     const initialAttempt: PendingFunctionRunAttempt = {
@@ -837,7 +836,7 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
     window.localStorage.setItem(storageKey, corruptRaw)
 
     const startSpy = vi.spyOn(studioService, 'startCanvasFunctionRun').mockResolvedValue(
-      run('valid-request-id-1234' as UUIDString, 'RUNNING', 'RUNNING'),
+      run('valid-request-id-1234', 'RUNNING', 'RUNNING'),
     )
     startSpy.mockClear()
 
@@ -867,7 +866,7 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
     expect(result.current.discardPendingRun(nodeId, corruptRaw)).toBe(false)
 
     // 完成飞行中请求
-    resolveFirst!(run('valid-request-id-1234' as UUIDString, 'RUNNING', 'RUNNING'))
+    resolveFirst!(run('valid-request-id-1234', 'RUNNING', 'RUNNING'))
     await act(async () => {
       await pendingPromise
     })
@@ -893,7 +892,7 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
 
     // 4. 清理后再启动生成：正常发起 POST！
     startSpy.mockClear()
-    startSpy.mockResolvedValueOnce(run('new-req-id' as UUIDString, 'RUNNING', 'RUNNING'))
+    startSpy.mockResolvedValueOnce(run('new-req-id', 'RUNNING', 'RUNNING'))
     await act(async () => {
       await result.current.startFunctionRun(nodeId)
     })
@@ -983,7 +982,7 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
   it('未知结果 reload 精确重放：原样沿用持久化的 requestId 与旧 expectedVersion，不改请求', async () => {
     cleanupTestStorage()
     const frozenRequest: CanvasFunctionRunRequestDTO = {
-      requestId: 'cafebabe-0000-4000-8000-000000000001' as UUIDString,
+      requestId: 'cafebabe-0000-4000-8000-000000000001',
       expectedVersion: FUNCTION_VERSION_A,
     }
     savePendingFunctionRun({

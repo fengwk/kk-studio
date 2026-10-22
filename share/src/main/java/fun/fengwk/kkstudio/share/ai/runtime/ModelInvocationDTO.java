@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.share.ai.runtime;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
+import org.jspecify.annotations.Nullable;
 
 import java.time.Instant;
 
@@ -47,22 +48,22 @@ public class ModelInvocationDTO {
    * 前也可保留，且推进不要求 Thread version 变化（{@code @JsonInclude(ALWAYS)}）。
    */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String streamCheckpointJson;
+  private @Nullable String streamCheckpointJson;
 
   /** 成功结果：canonical JSON（ProviderResponseJsonCodec）；仅成功阶段非 null（{@code @JsonInclude(ALWAYS)}）。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String resultJson;
+  private @Nullable String resultJson;
 
   /**
    * 错误详情：canonical JSON（ModelInvocationError record 的严格绑定）；仅记录错误后非
    * null（{@code @JsonInclude(ALWAYS)}）。
    */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String errorJson;
+  private @Nullable String errorJson;
 
   /** 结果挂载的 Entry 主键：canonical UUID string；仅 active Tool phase（等于当前 ASSISTANT head）非 null。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String resultEntryId;
+  private @Nullable String resultEntryId;
 
   /** 创建时间（UTC Instant）。 */
   private Instant createTime;

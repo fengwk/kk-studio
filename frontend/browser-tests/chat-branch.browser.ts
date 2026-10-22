@@ -1,5 +1,6 @@
 import { expect, test, type Page } from './fixture'
 import type { Route, WebSocketRoute } from '@playwright/test'
+import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 
 /**
  * 新建分支流程真实浏览器回归（独立基座、独立端口 5184）。
@@ -33,12 +34,12 @@ function chat() {
   }
 }
 
-function entries(options: { usage?: boolean } = {}) {
+function entries(options: { usage?: boolean } = {}): HarnessSessionEntryDTO[] {
   if (options.usage) {
     // 已关闭回合的真实 usage 事实：ASSISTANT 的 assistantMetadata + 读取投影 usageCost，
     // 后面紧跟 TURN_END，使 conversation 渲染出带 turnUsage 的回合 footer。
     return [
-      { entryId: 'entry-1', sessionId: SESSION_ID, parentEntryId: null, entryType: 'ROOT', payloadJson: rootPayload, createTime: '2026-10-01T00:00:00Z' },
+      { entryId: 'entry-1', sessionId: SESSION_ID, parentEntryId: null, entryType: 'ROOT', payloadJson: rootPayload, createTime: 1790812800, usageCost: null },
       {
         entryId: 'entry-assistant',
         sessionId: SESSION_ID,
@@ -59,7 +60,7 @@ function entries(options: { usage?: boolean } = {}) {
           },
         }),
         usageCost: { currency: 'USD', amount: '0.0012' },
-        createTime: '2026-10-01T00:01:00Z',
+        createTime: 1790812860,
       },
       {
         entryId: 'entry-turn',
@@ -67,30 +68,34 @@ function entries(options: { usage?: boolean } = {}) {
         parentEntryId: 'entry-assistant',
         entryType: 'TURN_END',
         payloadJson: JSON.stringify({ outcome: 'COMPLETED' }),
-        createTime: '2026-10-01T00:02:00Z',
+        createTime: 1790812920,
+        usageCost: null,
       },
     ]
   }
   return [
-    { entryId: 'entry-1', sessionId: SESSION_ID, parentEntryId: null, entryType: 'ROOT', payloadJson: rootPayload, createTime: '2026-10-01T00:00:00Z' },
+    { entryId: 'entry-1', sessionId: SESSION_ID, parentEntryId: null, entryType: 'ROOT', payloadJson: rootPayload, createTime: 1790812800, usageCost: null },
     {
       entryId: 'entry-ancestor', sessionId: SESSION_ID, parentEntryId: 'entry-1', entryType: 'MESSAGE',
       payloadJson: JSON.stringify({ message: { role: 'USER', contents: [{ type: 'text', text: 'Real selected ancestor' }] } }),
-      createTime: '2026-10-01T00:00:30Z',
+      createTime: 1790812830,
+      usageCost: null,
     },
-    { entryId: 'entry-2', sessionId: SESSION_ID, parentEntryId: 'entry-ancestor', entryType: 'TURN_END', payloadJson: JSON.stringify({ outcome: 'COMPLETED' }), createTime: '2026-10-01T00:01:00Z' },
+    { entryId: 'entry-2', sessionId: SESSION_ID, parentEntryId: 'entry-ancestor', entryType: 'TURN_END', payloadJson: JSON.stringify({ outcome: 'COMPLETED' }), createTime: 1790812860, usageCost: null },
     {
       entryId: 'entry-3',
       sessionId: SESSION_ID,
       parentEntryId: 'entry-2',
       entryType: 'MESSAGE',
       payloadJson: JSON.stringify({ message: { role: 'USER', contents: [{ type: 'text', text: 'hello' }] } }),
-      createTime: '2026-10-01T00:02:00Z',
+      createTime: 1790812920,
+      usageCost: null,
     },
     {
       entryId: 'entry-sibling', sessionId: SESSION_ID, parentEntryId: 'entry-1', entryType: 'MESSAGE',
       payloadJson: JSON.stringify({ message: { role: 'USER', contents: [{ type: 'text', text: 'Sibling must stay hidden' }] } }),
-      createTime: '2026-10-01T00:02:30Z',
+      createTime: 1790812950,
+      usageCost: null,
     },
   ]
 }
@@ -113,8 +118,8 @@ function thread(headEntryId = 'entry-3', options: { busy?: boolean } = {}) {
       model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
       environmentName: null,
     },
-    createTime: '2026-10-01T00:00:00Z',
-    updateTime: '2026-10-01T00:00:00Z',
+    createTime: 1790812800,
+    updateTime: 1790812800,
   }
 }
 
@@ -138,7 +143,8 @@ async function installChatApi(
       payloadJson: JSON.stringify({ message: { role: 'USER', contents: [{
         type: 'text', text: `Scroll marker ${index}\n${Array(12).fill('Reading position is retained.').join('\n')}`,
       }] } }),
-      createTime: `2026-10-01T00:03:${String(index).padStart(2, '0')}Z`,
+      createTime: Date.parse('2026-10-01T00:03:00Z') / 1000 + index,
+      usageCost: null,
     })))
   }
   const boundThread = thread(
@@ -209,7 +215,7 @@ async function installChatApi(
           data: {
             pageNumber: 1,
             pageSize: 50,
-            totalCount: 1,
+            totalCount: '1',
             results: [{
               name: 'assistant',
               description: '通用助手',
@@ -233,7 +239,7 @@ async function installChatApi(
           data: {
             pageNumber: 1,
             pageSize: 50,
-            totalCount: 2,
+            totalCount: '2',
             results: [
               {
                 providerName: 'minimax',
@@ -344,7 +350,8 @@ async function installChatApi(
           ...(grandchild && grandCompleted ? [{
             entryId: 'entry-background', sessionId: SESSION_ID, parentEntryId: boundThread.headEntryId, entryType: 'MESSAGE',
             payloadJson: JSON.stringify({ message: { role: 'ASSISTANT', contents: [{ type: 'text', text: 'Background completion persisted' }] } }),
-            createTime: '2026-10-01T00:04:00Z',
+            createTime: 1790813040,
+            usageCost: null,
           }] : []),
         ], queuedCommands: [],
         modelInvocation: null, toolInvocations: [], modelAttemptFailures: [],
@@ -378,14 +385,14 @@ async function installChatApi(
       await route.fulfill({ json: { status: 200, data: [
         { threadId: THREAD_ID, parentThreadId: null, name: boundThread.name, agentName: 'assistant',
           model: boundThread.branchSettings.model, status: 'IDLE', processing: false,
-          turnCount: 1, toolCallCount: 0, outcome: 'COMPLETED', updateTime: '2026-10-01T00:00:00Z' },
+          turnCount: 1, toolCallCount: 0, outcome: 'COMPLETED', updateTime: 1790812800 },
         { threadId: CHILD_ID, parentThreadId: THREAD_ID, name: 'direct parent', agentName: 'worker',
           model: boundThread.branchSettings.model, status: 'IDLE', processing: false,
-          turnCount: 2, toolCallCount: 3, outcome: 'COMPLETED', updateTime: '2026-10-01T00:01:00Z' },
+          turnCount: 2, toolCallCount: 3, outcome: 'COMPLETED', updateTime: 1790812860 },
         { threadId: GRANDCHILD_ID, parentThreadId: CHILD_ID, name: 'nested grandchild', agentName: 'researcher',
           model: { ...boundThread.branchSettings.model, variant: 'deep' },
           status: grandCompleted ? 'IDLE' : 'MODEL_STREAM', processing: !grandCompleted,
-          turnCount: 4, toolCallCount: 5, outcome: grandCompleted ? 'COMPLETED' : null, updateTime: '2026-10-01T00:02:00Z' },
+          turnCount: 4, toolCallCount: 5, outcome: grandCompleted ? 'COMPLETED' : null, updateTime: 1790812920 },
       ] } })
       return
     }
@@ -417,7 +424,7 @@ async function installChatApi(
             idempotencyKey: command.idempotencyKey,
             payloadJson: JSON.stringify(payload),
             cancelledAt: null,
-            createTime: '2026-10-01T00:05:00Z',
+            createTime: 1790813100,
           }
         })
         queuedCommands = [...queuedCommands, ...accepted]

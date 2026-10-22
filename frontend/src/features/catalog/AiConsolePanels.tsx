@@ -4,11 +4,8 @@ import { ProviderResourceCard } from '@/features/catalog/AiProviderResourceCard'
 import { modelRef, type AgentModelView } from '@/features/catalog/AgentModelView'
 import { ResourceGrid } from '@/shared/ui/cards/ResourceGrid'
 import { CreateCard } from '@/shared/ui/feedback/CreateCard'
-import type {
-  AgentDefinitionDTO,
-  AgentProviderDTO,
-} from '@/shared/api/contracts/ai-catalog'
 import { useI18n } from '@/shared/i18n'
+import type { AgentDefinitionDTO, AgentProviderDTO } from '@/shared/api/generated/contracts'
 
 export function AgentsPanel({
   agents,

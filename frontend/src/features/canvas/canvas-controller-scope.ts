@@ -2,7 +2,7 @@ import { useMemo, useRef, type Dispatch, type MutableRefObject, type SetStateAct
 import type { CanvasNodeDraft } from '@/features/canvas/canvas-drafts'
 import type { CanvasCommandQueue } from '@/features/canvas/command-queue'
 import type { CanvasLocalState } from '@/features/canvas/types'
-import type { CanvasSnapshotDTO, UUIDString } from '@/shared/api/contracts/studio'
+import type { CanvasSnapshotDTO } from '@/shared/api/generated/contracts'
 
 type DraftPositions = Record<string, { x: number; y: number }>
 
@@ -16,9 +16,9 @@ export interface CanvasScope {
   setState: Dispatch<SetStateAction<CanvasLocalState>>
   isMountedRef: MutableRefObject<boolean>
   canvasEpochRef: MutableRefObject<number>
-  activeCanvasIdRef: MutableRefObject<UUIDString | null>
+  activeCanvasIdRef: MutableRefObject<string | null>
   queueRef: MutableRefObject<CanvasCommandQueue | null>
-  queueCanvasIdRef: MutableRefObject<UUIDString | null>
+  queueCanvasIdRef: MutableRefObject<string | null>
   draftsRef: MutableRefObject<Record<string, CanvasNodeDraft>>
   positionsRef: MutableRefObject<DraftPositions>
   targetDraftsRef: MutableRefObject<Record<string, CanvasNodeDraft>>
@@ -29,13 +29,13 @@ export interface CanvasScope {
 
 export function useCanvasScope(
   setState: Dispatch<SetStateAction<CanvasLocalState>>,
-  initialCanvasId: UUIDString | null,
+  initialCanvasId: string | null,
 ): CanvasScope {
   const isMountedRef = useRef(true)
   const canvasEpochRef = useRef(0)
-  const activeCanvasIdRef = useRef<UUIDString | null>(initialCanvasId)
+  const activeCanvasIdRef = useRef<string | null>(initialCanvasId)
   const queueRef = useRef<CanvasCommandQueue | null>(null)
-  const queueCanvasIdRef = useRef<UUIDString | null>(null)
+  const queueCanvasIdRef = useRef<string | null>(null)
   const draftsRef = useRef<Record<string, CanvasNodeDraft>>({})
   const positionsRef = useRef<DraftPositions>({})
   const targetDraftsRef = useRef<Record<string, CanvasNodeDraft>>({})
@@ -57,7 +57,7 @@ export function useCanvasScope(
 }
 
 /** 进入新的画布身份（或返回列表时的 null）：推进 epoch，丢弃旧队列与全部草稿引用，持久基线回到「未加载」。 */
-export function enterCanvasScope(scope: CanvasScope, canvasId: UUIDString | null): void {
+export function enterCanvasScope(scope: CanvasScope, canvasId: string | null): void {
   scope.canvasEpochRef.current += 1
   scope.activeCanvasIdRef.current = canvasId
   scope.queueRef.current = null

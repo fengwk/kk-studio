@@ -3,13 +3,12 @@ import { useNavigate } from 'react-router'
 import { toUserFacingErrorMessage } from '@/shared/lib/user-facing-error'
 import { mergeChatList } from '@/features/chat/chat-utils'
 import { chatService } from '@/shared/api/chat-service'
-import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
-import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
 import { useI18n } from '@/shared/i18n'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useInvalidateMutation } from '@/shared/lib/useInvalidateMutation'
 import type { ConfirmModalState } from '@/shared/ui/overlays/confirm-modal'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import type { AgentDefinitionDTO, ChatDTO } from '@/shared/api/generated/contracts'
 
 function resolveChatAgentName(
   agentName: string | undefined,

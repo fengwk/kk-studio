@@ -4,7 +4,6 @@ import { Button } from '@/shared/ui/controls/Button'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { useI18n } from '@/shared/i18n'
 import { configSyncService } from '@/shared/api/config-sync-service'
-import type { ConfigSyncItem, ConfigSyncKind } from '@/shared/api/contracts/config-sync'
 import {
   CONFIG_SYNC_GROUPS,
   configSyncErrorMessage,
@@ -18,6 +17,7 @@ import {
   CONFIG_SYNC_EXPORT_FILENAME,
   downloadConfigYaml,
 } from '@/features/settings/sync/download-config-yaml'
+import type { ConfigSyncItem, ConfigSyncKind } from '@/shared/api/generated/contracts'
 
 interface SyncExportModalProps {
   items: ConfigSyncItem[]

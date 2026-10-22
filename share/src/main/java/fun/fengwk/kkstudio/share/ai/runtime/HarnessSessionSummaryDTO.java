@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.share.ai.runtime;
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
+import org.jspecify.annotations.Nullable;
 
 import java.time.Instant;
 
@@ -24,7 +25,7 @@ public class HarnessSessionSummaryDTO {
 
   /** 按时间确定性选择的首条用户可读预览；没有消息时显式为 null。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String firstMessagePreview;
+  private @Nullable String firstMessagePreview;
 
   /** 当前 Session 的 Thread 数量。 */
   private int threadCount;

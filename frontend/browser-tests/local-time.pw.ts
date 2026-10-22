@@ -25,16 +25,11 @@ for (const { timezoneId, instant, crossDay } of zones) {
       try {
         const page = await context.newPage()
         await page.goto('/browser-tests/local-time-harness.html')
-        const expectedDates = [
-          ['instant', instant], ['offset', instant], ['cross-day', crossDay],
-          ['wall-clock', '2026-10-08 13:15'], ['empty', '-'], ['invalid', '-'],
-          ['seconds', instant], ['milliseconds', instant],
-        ]
+        const expectedDates = [['instant', instant], ['cross-day', crossDay], ['fractional', instant]]
         for (const [id, expected] of expectedDates) {
           const meta = page.getByTestId(`chat-${id}`).locator('.resource-card-meta-value').last()
           await expect(meta).toHaveText(expected)
           await expect(meta).toHaveAttribute('title', expected)
-          if (id === 'seconds' || id === 'milliseconds') continue
           for (const [panel, suffix] of [['sessions', '1 Threads'], ['threads', 'IDLE']]) {
             const option = page.getByTestId(panel).getByRole('option')
               .filter({ has: page.locator('.thread-selection-item-title', { hasText: id }) })
@@ -49,11 +44,6 @@ for (const { timezoneId, instant, crossDay } of zones) {
           range.selectNodeContents(element)
           return range.getClientRects().length === 1 && element.scrollWidth <= element.clientWidth
         })).toBe(true)
-        for (const panel of ['sessions', 'threads']) {
-          await expect(page.getByTestId(panel).getByRole('option')
-            .filter({ has: page.locator('.thread-selection-item-title', { hasText: 'array' }) })
-            .locator('.thread-selection-item-subtitle')).toContainText('2026-10-08 13:15')
-        }
         for (const id of ['instant', 'cross-day']) {
           const card = page.getByTestId(`chat-${id}`)
           await card.scrollIntoViewIfNeeded()

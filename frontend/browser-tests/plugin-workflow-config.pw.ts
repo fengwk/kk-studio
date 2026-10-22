@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expect, test, type Page } from './fixture'
-import type { PluginDTO } from '@/shared/api/contracts/ai-plugin'
+import type { PluginDTO } from '@/shared/api/generated/contracts'
 
 /**
  * 真实 ComfyUI 插件配置：与 Java 侧共用同一份 HTTP golden（生产 mapper 产出），

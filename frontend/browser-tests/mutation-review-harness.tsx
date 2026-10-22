@@ -500,7 +500,8 @@ const mutationReviewHarness = {
           ],
         },
       }),
-      createTime: '2026-10-19T00:00:00Z',
+      createTime: 1792368000,
+      usageCost: null,
     }
 
     const toolResultEntry = {
@@ -534,7 +535,8 @@ const mutationReviewHarness = {
           callIndex: 0,
         },
       }),
-      createTime: '2026-10-19T00:00:01Z',
+      createTime: 1792368001,
+      usageCost: null,
     }
 
     const timeline = buildThreadTimeline([asstEntry, toolResultEntry], [], [])

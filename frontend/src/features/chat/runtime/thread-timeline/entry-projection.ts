@@ -1,5 +1,4 @@
 import { extractResultEditReview } from '@/features/chat/runtime/mutation-review'
-import type { HarnessSessionEntryDTO } from '@/shared/api/contracts/ai-runtime'
 import { asRecord, getRecordList, getString, parsePayload } from '@/features/chat/runtime/payload-json'
 import type {
   DialogueContent,
@@ -36,6 +35,7 @@ import {
   parseAssistantUsage,
 } from '@/features/chat/runtime/thread-timeline/content-utils'
 import { translate } from '@/shared/i18n'
+import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 
 /**
  * 逐 turn 的投影上下文。Turn usage 不紧跟 Assistant：summary 先挂起，在相应

@@ -8,7 +8,7 @@ import {
   cancelledInputMessageParts,
   prependCancelledMessages,
 } from '@/features/chat/runtime/cancelled-message-parts'
-import type { HarnessCancelledInputDTO } from '@/shared/api/contracts/ai-runtime'
+import type { HarnessCancelledInputDTO } from '@/shared/api/generated/contracts'
 
 /** Stop 回执里的 USER_MESSAGE：payloadJson 是 canonical ThreadCommandPayload JSON。 */
 function cancelledMessage(

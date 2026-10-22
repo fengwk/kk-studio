@@ -9,10 +9,7 @@ import {
   type ComposerPart,
 } from '@/features/chat/composer/composer-parts'
 import type { BranchDraft } from '@/features/chat/branch-draft'
-import type {
-  HarnessBranchSettingsDTO,
-  HarnessThreadDTO,
-} from '@/shared/api/contracts/ai-runtime'
+import type { HarnessBranchSettingsDTO, HarnessThreadDTO } from '@/shared/api/generated/contracts'
 
 function settings(overrides: Partial<HarnessBranchSettingsDTO> = {}): HarnessBranchSettingsDTO {
   return {
@@ -39,8 +36,8 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
     processing: false,
     executionControl: 'RUNNABLE',
     branchSettings: settings(),
-    createTime: null,
-    updateTime: null,
+    createTime: 0,
+    updateTime: 0,
     ...overrides,
   }
 }

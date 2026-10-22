@@ -3,15 +3,17 @@ import type { BranchDraft } from '@/features/chat/branch-draft'
 import { isCanonicalThreadName } from '@/features/chat/thread-name'
 import type {
   AgentCommandTargetDTO,
-  AgentCommandBatchRequestDTO,
   AgentRuntimeOwnerDTO,
-  HarnessBranchSettingsDTO,
+  HarnessCommandBatchDTO,
   HarnessCommandCreateDTO,
+  HarnessThreadCommandBatchDTO,
+  ImageInputTier,
+} from '@/shared/api/contracts/ai-runtime'
+import type {
+  HarnessBranchSettingsDTO,
   HarnessGoalSettingDTO,
   HarnessModelSelectionDTO,
-  ImageInputTier,
-  ThreadCommandBatchRequestDTO,
-} from '@/shared/api/contracts/ai-runtime'
+} from '@/shared/api/generated/contracts'
 
 export type PaneTarget =
   | { kind: 'NEW_SESSION_DRAFT' }
@@ -29,7 +31,7 @@ export type PaneTargetKind = PaneTarget['kind']
 export interface PendingAcceptance {
   owner: AgentRuntimeOwnerDTO
   target: PaneTarget
-  request: AgentCommandBatchRequestDTO
+  request: HarnessCommandBatchDTO
   branchDraft: BranchDraft
   composerParts: ComposerPart[]
   generation: number
@@ -222,7 +224,7 @@ function isCommand(value: unknown): value is HarnessCommandCreateDTO {
   }
 }
 
-function isCommandBatchRequest(value: unknown): value is AgentCommandBatchRequestDTO {
+function isCommandBatchRequest(value: unknown): value is HarnessCommandBatchDTO {
   return isRecord(value)
     && isOwner(value.owner)
     && isCommandTarget(value.target)
@@ -231,7 +233,7 @@ function isCommandBatchRequest(value: unknown): value is AgentCommandBatchReques
     && value.commands.every(isCommand)
 }
 
-function isThreadCommandBatchRequest(value: unknown): value is ThreadCommandBatchRequestDTO {
+function isThreadCommandBatchRequest(value: unknown): value is HarnessThreadCommandBatchDTO {
   if (!isRecord(value) || !Array.isArray(value.commands) || value.commands.length === 0) {
     return false
   }
@@ -528,7 +530,7 @@ export function clearPendingAcceptance(
  */
 export interface BoundPendingMessage {
   threadId: string
-  request: ThreadCommandBatchRequestDTO
+  request: HarnessThreadCommandBatchDTO
   targetDraft: BranchDraft
   kind: 'MESSAGE' | 'GOAL'
   localDraft: ComposerPart[]
@@ -580,8 +582,8 @@ export function isBoundPendingMessageValue(value: unknown): value is BoundPendin
 }
 
 export function sameBatchRequestIdentity(
-  left: ThreadCommandBatchRequestDTO,
-  right: ThreadCommandBatchRequestDTO,
+  left: HarnessThreadCommandBatchDTO,
+  right: HarnessThreadCommandBatchDTO,
 ): boolean {
   if (left === right) {
     return true
@@ -680,7 +682,7 @@ export function saveBoundPendingMessage(
 
 export function clearBoundPendingMessage(
   threadId: string,
-  matchingRequest?: ThreadCommandBatchRequestDTO,
+  matchingRequest?: HarnessThreadCommandBatchDTO,
   storage?: Pick<Storage, 'getItem' | 'removeItem'>,
 ): boolean {
   const resolved = resolveStorage(storage)

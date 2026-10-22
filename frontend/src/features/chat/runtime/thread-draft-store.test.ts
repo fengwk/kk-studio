@@ -2,10 +2,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createMockIDBFactory } from '@/features/canvas/__tests__/mock-idb'
 
-import type {
-  HarnessCancelledInputDTO,
-  HarnessStoppedThreadReceiptDTO,
-} from '@/shared/api/contracts/ai-runtime'
 
 import {
   createAttachmentPart,
@@ -22,6 +18,10 @@ import {
   saveThreadGoalText,
   type ThreadDraftRecord,
 } from '@/features/chat/runtime/thread-draft-store'
+import type {
+  HarnessCancelledInputDTO,
+  HarnessStoppedThreadReceiptDTO,
+} from '@/shared/api/generated/contracts'
 
 /**
  * 绑定 Thread 草稿记录（thread-draft-store）的行为契约。

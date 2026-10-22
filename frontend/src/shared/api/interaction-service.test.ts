@@ -42,7 +42,7 @@ describe('InteractionService', () => {
         interactionId: 'int-1',
         submissionId: 'sub-1',
         actor: 'local-user',
-        acceptedAt: '2026-09-27T00:00:00Z',
+        acceptedAt: 1790467200,
         materialized: false,
       }),
       put: vi.fn(),

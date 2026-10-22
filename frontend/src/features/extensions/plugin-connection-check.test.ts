@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import type { PluginConnectionCheckResult, PluginDTO } from '@/shared/api/contracts/ai-plugin'
 import {
   pluginConnectionCheckExpected,
   pluginConnectionCheckIsStale,
   type PluginConnectionCheckRun,
 } from '@/features/extensions/plugin-connection-check'
+import type { PluginConnectionCheckDTO, PluginDTO } from '@/shared/api/generated/contracts'
 
 function plugin(overrides: Partial<PluginDTO> = {}): PluginDTO {
   return {
@@ -35,7 +35,7 @@ function plugin(overrides: Partial<PluginDTO> = {}): PluginDTO {
   }
 }
 
-function result(overrides: Partial<PluginConnectionCheckResult> = {}): PluginConnectionCheckResult {
+function result(overrides: Partial<PluginConnectionCheckDTO> = {}): PluginConnectionCheckDTO {
   return {
     pluginId: 'opencli',
     appliedRevision: '8',

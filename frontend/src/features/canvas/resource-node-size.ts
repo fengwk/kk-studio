@@ -1,7 +1,5 @@
-import type {
-  CanvasTransformDTO,
-} from '@/shared/api/contracts/studio'
 import { resourceGridLayout } from '@/features/canvas/resource-grid-layout'
+import type { CanvasTransformDTO } from '@/shared/api/generated/contracts'
 
 export const CANVAS_NODE_HEADER_HEIGHT = 20
 export const CANVAS_NODE_HEADER_GAP = 6

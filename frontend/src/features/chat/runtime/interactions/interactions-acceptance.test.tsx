@@ -52,7 +52,7 @@ describe('Interactions Acceptance Suite (Spec §5)', () => {
       interactionId: 'int-multi',
       submissionId: 'sub-1',
       actor: 'local-user',
-      acceptedAt: '2026-09-27T00:00:00Z',
+      acceptedAt: 1790467200,
       materialized: false,
     })
 
@@ -127,7 +127,7 @@ describe('Interactions Acceptance Suite (Spec §5)', () => {
           interactionId: 'int-freeze',
           submissionId: body.submissionId,
           actor: 'local-user',
-          acceptedAt: '2026-09-27T00:00:00Z',
+          acceptedAt: 1790467200,
           materialized: false,
         }
       },
@@ -237,8 +237,8 @@ describe('Interactions Acceptance Suite (Spec §5)', () => {
       approvalJson: '{"required":true}',
       resultJson: null,
       errorJson: null,
-      createTime: '2026-09-27T00:00:00Z',
-      updateTime: '2026-09-27T00:00:00Z',
+      createTime: 1790467200,
+      updateTime: 1790467200,
     })
 
     render(
@@ -334,7 +334,7 @@ describe('Interactions Acceptance Suite (Spec §5)', () => {
           interactionId: 'int-decline',
           submissionId: body.submissionId,
           actor: 'local-user',
-          acceptedAt: '2026-09-27T00:00:00Z',
+          acceptedAt: 1790467200,
           materialized: false,
         }
       },

@@ -10,14 +10,13 @@
  *   绝不用新基线偷偷重试旧内容。
  */
 
+import type { CanvasRevision } from '@/shared/api/contracts/base'
+import type { ResourceNode } from './domain'
 import type {
   CanvasConflictDTO,
   CanvasFunctionDTO,
   CanvasTransformDTO,
-  UUIDString,
-} from '@/shared/api/contracts/studio'
-import type { CanvasRevision } from '@/shared/api/contracts/base'
-import type { ResourceNode } from './domain'
+} from '@/shared/api/generated/contracts'
 
 export interface CanvasNodeDraft {
   /** 本地递增世代计数器：ACK 响应仅在 generation 匹配时清除，保护后来追加的本地输入 */
@@ -31,15 +30,15 @@ export interface CanvasNodeDraft {
   /** 本地未保存的通用函数配置草稿 */
   function?: CanvasFunctionDTO | null
   /** 本地未保存的分组归属草稿 */
-  groupId?: UUIDString | null
+  groupId?: string | null
   /** 编辑起点基线（Snapshot 修订号及初始内容），用于冲突检测与对比；解决冲突必须明确对比，绝不可自动重试 */
   baseline?: {
     revision?: CanvasRevision
     name?: string
     markdown?: string
-    resourceIds?: UUIDString[]
+    resourceIds?: string[]
     function?: CanvasFunctionDTO | null
-    groupId?: UUIDString | null
+    groupId?: string | null
     transform?: CanvasTransformDTO
     position?: { x: number; y: number }
   }

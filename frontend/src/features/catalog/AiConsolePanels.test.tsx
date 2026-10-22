@@ -3,10 +3,9 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
 import { AgentsPanel, ModelsPanel, ProvidersPanel } from '@/features/catalog/AiConsolePanels'
-import type { AgentModelConfigDTO } from '@/shared/api/contracts/ai-catalog'
 import type { AgentModelView } from '@/features/catalog/AgentModelView'
 import { ChatCardsPanel } from '@/features/chat/ChatCardsPanel'
-import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
+import type { AgentModelConfigDTO, ChatDTO } from '@/shared/api/generated/contracts'
 
 const baseConfig: AgentModelConfigDTO = {
   limit: { context: 128000, output: 8192 },
@@ -36,8 +35,8 @@ function modelWithProvider(): AgentModelView {
     description: null,
     config: baseConfig,
     version: '1',
-    createTime: null,
-    updateTime: null,
+    createTime: 0,
+    updateTime: 0,
   }
 }
 
@@ -59,8 +58,8 @@ describe('AiConsolePanels', () => {
               environmentName: null,
               yoloEnabled: false,
               version: '1',
-              createTime: null,
-              updateTime: null,
+              createTime: 0,
+              updateTime: 0,
             } satisfies ChatDTO,
           ]}
           agents={[]}
@@ -82,8 +81,8 @@ describe('AiConsolePanels', () => {
                 subagents: [],
               },
               version: '1',
-              createTime: null,
-              updateTime: null,
+              createTime: 0,
+              updateTime: 0,
             },
           ]}
           models={[model]}
@@ -107,11 +106,11 @@ describe('AiConsolePanels', () => {
               providerType: 'openai',
               baseUrl: null,
               configured: true,
-              modelCallTimeoutMillis: 1,
-              modelCallIdleTimeoutMillis: 1,
+              modelCallTimeoutMillis: '1',
+              modelCallIdleTimeoutMillis: '1',
               version: '1',
-              createTime: null,
-              updateTime: null,
+              createTime: 0,
+              updateTime: 0,
               modelHttpRetryStatusCodes: null,
             },
           ]}

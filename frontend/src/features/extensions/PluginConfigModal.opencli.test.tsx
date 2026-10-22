@@ -9,7 +9,7 @@ import { PluginConfigModal } from './PluginConfigModal'
 import { pluginsService } from '@/shared/api/plugins-service'
 import { ApiError } from '@/shared/api/client'
 import { decodePluginDTO } from '@/shared/api/ai-plugin-codec'
-import type { PluginDTO } from '@/shared/api/contracts/ai-plugin'
+import type { PluginDTO } from '@/shared/api/generated/contracts'
 
 vi.mock('@/shared/api/plugins-service', () => ({
   pluginsService: { updateConfiguration: vi.fn() },

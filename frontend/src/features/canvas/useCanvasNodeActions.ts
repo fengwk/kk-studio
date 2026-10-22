@@ -9,8 +9,7 @@ import type {
   CanvasFunctionDefinitionDTO,
   CanvasSnapshotDTO,
   CanvasTransformDTO,
-  UUIDString,
-} from '@/shared/api/contracts/studio'
+} from '@/shared/api/generated/contracts'
 
 interface NodeActionsInput {
   scope: CanvasScope
@@ -18,7 +17,7 @@ interface NodeActionsInput {
   models: CanvasFunctionDefinitionDTO[] | undefined
   state: Pick<CanvasLocalState, 'selectedIds' | 'positionDrafts' | 'drafts'>
   executeCommands: (commands: CanvasCommandDTO[], ack?: CanvasDraftAck[]) => Promise<CanvasSnapshotDTO>
-  flushFunctionConfig: (nodeId: UUIDString) => Promise<unknown>
+  flushFunctionConfig: (nodeId: string) => Promise<unknown>
   setToast: (toast: string) => void
   suggestNodeAlias: (preferred: string) => string
   reserveNodeAlias: (preferred: string) => string
@@ -51,7 +50,7 @@ export function useCanvasNodeActions({
   const { setState } = scope
   const { selectedIds, positionDrafts, drafts } = state
 
-  const renameNode = useCallback((nodeId: UUIDString, name: string, expectedName: string) => {
+  const renameNode = useCallback((nodeId: string, name: string, expectedName: string) => {
     const normalized = name.trim()
     if (!normalized || normalized === expectedName) {
       return
@@ -68,7 +67,7 @@ export function useCanvasNodeActions({
       return
     }
     const alias = reserveNodeAlias(outputKind === 'IMAGE' ? '图片生成' : '视频生成')
-    const nodeId = crypto.randomUUID() as UUIDString
+    const nodeId = crypto.randomUUID()
     const defaultConfig = createDefaultFunctionConfig(fnDef)
     defaultConfig.prompt = outputKind === 'IMAGE' ? '描述要生成的图片' : '描述要生成的视频'
     void executeCommands([
@@ -110,7 +109,7 @@ export function useCanvasNodeActions({
     const minY = Math.min(...memberTransforms.map((transform) => transform.y)) - 52
     const maxX = Math.max(...memberTransforms.map((transform) => transform.x + transform.width)) + 32
     const maxY = Math.max(...memberTransforms.map((transform) => transform.y + transform.height)) + 32
-    const groupId = crypto.randomUUID() as UUIDString
+    const groupId = crypto.randomUUID()
     void executeCommands([
       {
         type: 'CREATE_GROUP',
@@ -127,7 +126,7 @@ export function useCanvasNodeActions({
     ]).catch(() => undefined)
   }, [executeCommands, positionDrafts, selectedIds, setToast, snapshot])
 
-  const ungroupGroup = useCallback((groupId: UUIDString) => {
+  const ungroupGroup = useCallback((groupId: string) => {
     const memberNodes = (snapshot?.nodes ?? []).filter((node) => node.groupId === groupId)
     if (memberNodes.length === 0) {
       setToast('当前分组没有成员。')
@@ -141,7 +140,7 @@ export function useCanvasNodeActions({
     }))).catch(() => undefined)
   }, [executeCommands, setToast, snapshot?.nodes])
 
-  const renameGroup = useCallback((groupId: UUIDString, title: string, expectedTitle: string) => {
+  const renameGroup = useCallback((groupId: string, title: string, expectedTitle: string) => {
     const normalized = title.trim()
     if (!normalized || normalized === expectedTitle) {
       return
@@ -149,7 +148,7 @@ export function useCanvasNodeActions({
     void executeCommands([{ type: 'RENAME_GROUP', groupId, expectedTitle, title: normalized }]).catch(() => undefined)
   }, [executeCommands])
 
-  const deleteGroup = useCallback((groupId: UUIDString) => {
+  const deleteGroup = useCallback((groupId: string) => {
     const memberIds = (snapshot?.nodes ?? []).filter((n) => n.groupId === groupId).map((n) => n.id)
     void executeCommands([
       ...memberIds.map((nodeId) => ({
@@ -194,7 +193,7 @@ export function useCanvasNodeActions({
     }).catch(() => undefined)
   }, [executeCommands, selectedIds, setState, snapshot])
 
-  const deleteNode = useCallback((nodeId: UUIDString) => {
+  const deleteNode = useCallback((nodeId: string) => {
     const node = snapshot?.nodes.find((n) => n.id === nodeId)
     void flushFunctionConfig(nodeId)
       .catch(() => undefined)
@@ -221,7 +220,7 @@ export function useCanvasNodeActions({
     if (!draft) {
       return
     }
-    const newId = crypto.randomUUID() as UUIDString
+    const newId = crypto.randomUUID()
     const text = draft.text?.markdown ?? ''
     const commands: CanvasCommandDTO[] = [{
       type: 'CREATE_NODE',
@@ -256,14 +255,14 @@ export function useCanvasNodeActions({
     if (draft.text && draft.text.markdown !== undefined) {
       commands.push({
         type: 'SET_NODE_RESOURCES',
-        nodeId: nodeId as UUIDString,
+        nodeId: nodeId,
         expectedResourceIds: remoteNode.resources.map((r) => r.id),
         resources: [{ kind: 'TEXT', name: 'text', textContent: draft.text.markdown }],
       })
       if (draft.text.name && draft.text.name !== remoteNode.name) {
         commands.push({
           type: 'RENAME_NODE',
-          nodeId: nodeId as UUIDString,
+          nodeId: nodeId,
           expectedName: remoteNode.name,
           name: draft.text.name,
         })
@@ -272,7 +271,7 @@ export function useCanvasNodeActions({
     if (draft.function !== undefined) {
       commands.push({
         type: 'SET_NODE_FUNCTION',
-        nodeId: nodeId as UUIDString,
+        nodeId: nodeId,
         expectedFunction: remoteNode.function,
         function: draft.function,
       })

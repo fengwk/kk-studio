@@ -15,9 +15,8 @@ import {
   naturalNameCompare,
 } from '@/shared/lib/search-utils'
 import type { AgentModelView } from '@/features/catalog/AgentModelView'
-import { providerTypes, type ModelDraft, type ProviderDraft } from '@/features/catalog/ai-console-types'
-import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
-import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
+import { type ModelDraft, type ProviderDraft } from '@/features/catalog/ai-console-types'
+import { AGENT_PROVIDER_TYPES } from '@/shared/api/contracts/ai-catalog'
 import {
   emptyAgentDraft,
   emptyModelDraft,
@@ -33,10 +32,12 @@ import {
   toProviderDraft,
 } from '@/features/catalog/ai-resource-draft-codecs'
 import type {
-  AgentModelDTO,
   AgentModelConfigDTO,
+  AgentModelDTO,
   AgentProviderDTO,
-} from '@/shared/api/contracts/ai-catalog'
+  ChatDTO,
+  EnvironmentCardDTO,
+} from '@/shared/api/generated/contracts'
 
 function modelDraft(overrides: Partial<ModelDraft> = {}): ModelDraft {
   return {
@@ -78,8 +79,8 @@ function model(overrides: Partial<AgentModelDTO> = {}): AgentModelDTO {
     description: 'Chat model',
     config: fullConfig(),
     version: '1',
-    createTime: '2026-06-20T02:00:00',
-    updateTime: '2026-06-20T02:00:00',
+    createTime: 1781920800,
+    updateTime: 1781920800,
     ...overrides,
   }
 }
@@ -112,11 +113,11 @@ describe('AI domain utilities', () => {
         providerType: 'openai_responses',
         baseUrl: 'https://api.minimax.io/v1',
         configured: true,
-        modelCallTimeoutMillis: 120000,
-        modelCallIdleTimeoutMillis: 3000,
+        modelCallTimeoutMillis: '120000',
+        modelCallIdleTimeoutMillis: '3000',
         version: '1',
-        createTime: '2026-06-20T02:00:00',
-        updateTime: '2026-06-20T02:00:00',
+        createTime: 1781920800,
+        updateTime: 1781920800,
         modelHttpRetryStatusCodes: null,
       }),
     ).toEqual({
@@ -170,8 +171,8 @@ describe('AI domain utilities', () => {
           subagents: [],
         },
         version: '1',
-        createTime: '2026-06-20T02:00:00',
-        updateTime: '2026-06-20T02:00:00',
+        createTime: 1781920800,
+        updateTime: 1781920800,
       }),
     ).toMatchObject({
       name: 'assistant',
@@ -184,7 +185,7 @@ describe('AI domain utilities', () => {
 
   /** providerType 选择项必须与 AgentProviderType wire 契约暴露同一组合法枚举。 */
   it('lists the supported provider type wire values', () => {
-    expect(providerTypes).toEqual(['openai', 'openai_responses', 'anthropic', 'google'])
+    expect(AGENT_PROVIDER_TYPES).toEqual(['openai', 'openai_responses', 'anthropic', 'google'])
   })
 
   /** 结构化草稿必须按当前的 provider/model/agent API payload 契约序列化。 */
@@ -343,8 +344,8 @@ describe('AI domain utilities', () => {
           subagents: [],
         },
         version: '1',
-        createTime: '2026-06-20T02:00:00',
-        updateTime: '2026-06-20T02:00:00',
+        createTime: 1781920800,
+        updateTime: 1781920800,
       },
     ]
     const models: AgentModelView[] = [
@@ -358,11 +359,11 @@ describe('AI domain utilities', () => {
         providerType: 'openai',
         baseUrl: 'https://api.minimax.io/v1',
         configured: true,
-        modelCallTimeoutMillis: 1800000,
-        modelCallIdleTimeoutMillis: 120000,
+        modelCallTimeoutMillis: '1800000',
+        modelCallIdleTimeoutMillis: '120000',
         version: '1',
-        createTime: '2026-06-20T02:00:00',
-        updateTime: '2026-06-20T02:00:00',
+        createTime: 1781920800,
+        updateTime: 1781920800,
         modelHttpRetryStatusCodes: null,
       },
       {
@@ -371,11 +372,11 @@ describe('AI domain utilities', () => {
         providerType: 'openai_responses',
         baseUrl: null,
         configured: true,
-        modelCallTimeoutMillis: 1800000,
-        modelCallIdleTimeoutMillis: 120000,
+        modelCallTimeoutMillis: '1800000',
+        modelCallIdleTimeoutMillis: '120000',
         version: '1',
-        createTime: '2026-06-20T02:00:00',
-        updateTime: '2026-06-20T02:00:00',
+        createTime: 1781920800,
+        updateTime: 1781920800,
         modelHttpRetryStatusCodes: null,
       },
     ]
@@ -405,8 +406,8 @@ describe('AI domain utilities', () => {
             environmentName: null,
             yoloEnabled: false,
             version: '1',
-            createTime: '2026-06-21T00:00:00',
-            updateTime: '2026-06-21T00:00:00',
+            createTime: 1782000000,
+            updateTime: 1782000000,
           } satisfies ChatDTO,
           {
             id: '1',
@@ -415,8 +416,8 @@ describe('AI domain utilities', () => {
             environmentName: null,
             yoloEnabled: false,
             version: '1',
-            createTime: '2026-06-22T00:00:00',
-            updateTime: '2026-06-20T00:00:00',
+            createTime: 1782086400,
+            updateTime: 1781913600,
           } satisfies ChatDTO,
         ],
         '',
@@ -429,8 +430,8 @@ describe('AI domain utilities', () => {
         environmentName: null,
         yoloEnabled: false,
         version: '1',
-        createTime: null,
-        updateTime: null,
+        createTime: 0,
+        updateTime: 0,
       } satisfies ChatDTO], 'alp')).toHaveLength(1)
     expect(naturalNameCompare('m2', 'm10')).toBeLessThan(0)
     expect(includesSearch('MiniMax', 'mini')).toBe(true)
@@ -439,11 +440,7 @@ describe('AI domain utilities', () => {
     expect(resourceTitle({ kind: 'provider', mode: 'create' })).toBe('新建 Provider')
     expect(resourceTitle({ kind: 'model', mode: 'edit', providerName: 'minimax', name: 'MiniMax-M2.7', expectedVersion: '1' })).toBe('编辑 Model')
     expect(resourceTitle({ kind: 'agent', mode: 'create', type: 'USER' })).toBe('新建 Agent')
-    expect(formatBackendDate([2026, 6, 20, 2, 1, 0, 0])).toBe('2026-06-20 02:01')
-    expect(formatBackendDate('2026-06-20T02:01:00')).toBe('2026-06-20 02:01')
-    expect(formatBackendDate(0)).toBe('-')
-    expect(formatBackendDate(1_782_000_000)).toBe(formatBackendDate('2026-06-21T00:00:00Z'))
-    expect(formatBackendDate([Number.NaN])).toBe('-')
+    expect(formatBackendDate(Number.NaN)).toBe('-')
   })
 
   /** 可为空的 optional 资源字段映射为完整的可编辑草稿。 */
@@ -458,8 +455,8 @@ describe('AI domain utilities', () => {
         modelCallTimeoutMillis: 1800000,
         modelCallIdleTimeoutMillis: 120000,
         version: '1',
-        createTime: '2026-06-20T02:00:00',
-        updateTime: '2026-06-20T02:00:00',
+        createTime: 1781920800,
+        updateTime: 1781920800,
         modelHttpRetryStatusCodes: null,
       }]),
     ).toMatchObject({
@@ -494,8 +491,8 @@ describe('AI domain utilities', () => {
           subagents: [],
         },
         version: '1',
-        createTime: '2026-06-20T02:00:00',
-        updateTime: '2026-06-20T02:00:00',
+        createTime: 1781920800,
+        updateTime: 1781920800,
       }),
     ).toMatchObject({
       description: '',
@@ -528,6 +525,5 @@ describe('AI domain utilities', () => {
     })
 
     expect(includesSearch('MiniMax', 'missing')).toBe(false)
-    expect(formatBackendDate(null)).toBe('-')
   })
 })

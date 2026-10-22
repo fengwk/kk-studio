@@ -3,9 +3,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { isConflictError } from '@/shared/api/client'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { systemSettingsService } from '@/shared/api/system-settings-service'
-import type {
-  SystemSettingsDTO,
-} from '@/shared/api/contracts/system-settings'
 import {
   assembleSettingsUpdate,
   DraftValidationError,
@@ -19,6 +16,7 @@ import {
   presentConflict,
   type ConflictPresentation,
 } from '@/shared/conflict/conflict-presenter'
+import type { SystemSettingsDTO } from '@/shared/api/generated/contracts'
 
 /** draft 与其 CAS base version 的单一快照：两者总是从同一权威派生点一起捕获/更新。 */
 interface DraftSnapshot {

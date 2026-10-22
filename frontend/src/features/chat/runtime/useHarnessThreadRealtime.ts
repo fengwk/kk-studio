@@ -24,7 +24,7 @@ import type {
   ModelAttemptFailureDTO,
   ModelInvocationDTO,
   ToolInvocationDTO,
-} from '@/shared/api/contracts/ai-runtime'
+} from '@/shared/api/generated/contracts'
 
 export interface HarnessThreadRealtimeState {
   /** 当前 ModelInvocation attempt 的瞬态 model overlay（无则 null）。 */

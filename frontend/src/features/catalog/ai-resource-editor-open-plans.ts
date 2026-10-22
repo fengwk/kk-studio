@@ -9,10 +9,7 @@ import {
 } from '@/features/catalog/ai-resource-draft-codecs'
 import type { ResourceEditorPlan } from '@/features/catalog/ai-resource-editor-plan-types'
 import type { AgentModelView } from '@/features/catalog/AgentModelView'
-import type {
-  AgentDefinitionDTO,
-  AgentProviderDTO,
-} from '@/shared/api/contracts/ai-catalog'
+import type { AgentDefinitionDTO, AgentProviderDTO } from '@/shared/api/generated/contracts'
 
 export function createProviderEditorPlan(): Extract<ResourceEditorPlan, { kind: 'provider' }> {
   return {

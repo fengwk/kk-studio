@@ -19,13 +19,13 @@ import { modelRef, type AgentModelView } from '@/features/catalog/AgentModelView
 import { emptyAgentDraft } from '@/features/catalog/ai-resource-draft-codecs'
 import type { ResourceFieldKey } from '@/features/catalog/ai-resource-form-validation'
 import { Select } from '@/shared/ui/controls/Select'
+import { translate, useI18n } from '@/shared/i18n'
 import type {
   AgentDefinitionDTO,
   AgentDefinitionType,
   SkillPackageDTO,
   ToolCatalogEntryDTO,
-} from '@/shared/api/contracts/ai-catalog'
-import { translate, useI18n } from '@/shared/i18n'
+} from '@/shared/api/generated/contracts'
 
 function toggleValue(items: string[], value: string): string[] {
   return items.includes(value) ? items.filter((item) => item !== value) : [...items, value]

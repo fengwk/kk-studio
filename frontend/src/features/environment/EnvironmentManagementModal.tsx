@@ -2,7 +2,6 @@ import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { useI18n } from '@/shared/i18n'
-import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import { environmentService } from '@/shared/api/environment-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import {
@@ -11,6 +10,7 @@ import {
 } from '@/features/environment/environment-utils'
 import { EnvironmentHostSection } from '@/features/environment/EnvironmentHostSection'
 import { StateBlock } from '@/shared/ui/feedback/StateBlock'
+import type { EnvironmentCardDTO } from '@/shared/api/generated/contracts'
 
 export interface EnvironmentManagementModalProps {
   environment: EnvironmentCardDTO

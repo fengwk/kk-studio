@@ -3,8 +3,8 @@ import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync, readdirSy
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
-import type { EnvironmentInstallConfigDTO } from '@/shared/api/contracts/ai-environment'
 import { detectInstallOS, generateInstallCommand, generateUninstallCommand, validateInstallConfig } from './install-command'
+import type { EnvironmentInstallConfigDTO } from '@/shared/api/generated/contracts'
 
 const origin = 'https://studio.example.com'
 const environmentId = "env/汉字'$(touch NEVER)"

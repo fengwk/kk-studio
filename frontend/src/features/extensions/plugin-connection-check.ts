@@ -1,8 +1,8 @@
 import type {
+  PluginConnectionCheckDTO,
   PluginConnectionCheckRequestDTO,
-  PluginConnectionCheckResult,
   PluginDTO,
-} from '@/shared/api/contracts/ai-plugin'
+} from '@/shared/api/generated/contracts'
 
 /**
  * 一次显式连接检查在前端的完整状态：请求所依据的坐标、阶段与结果。
@@ -19,7 +19,7 @@ export interface PluginConnectionCheckRun {
   pluginId: string
   expectedRevision: string
   phase: PluginConnectionCheckPhase
-  result: PluginConnectionCheckResult | null
+  result: PluginConnectionCheckDTO | null
   /** 只有 `failed` 时的可控错误文案；不外显远端原始值。 */
   errorMessage: string | null
 }
@@ -35,7 +35,7 @@ export function pluginConnectionCheckExpected(
     return null
   }
   const { appliedRevision } = plugin
-  if (appliedRevision === null) {
+  if (appliedRevision == null) {
     return null
   }
   // 已应用实例的配置修订恒为正；0 表示尚无已应用配置，不得作为检查坐标提交。

@@ -5,10 +5,10 @@ import { Button } from '@/shared/ui/controls/Button'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import { Select, type SelectOption } from '@/shared/ui/controls/Select'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
-import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import { environmentService } from '@/shared/api/environment-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
+import type { AgentDefinitionDTO } from '@/shared/api/generated/contracts'
 
 export function CreateChatModal({
   open,

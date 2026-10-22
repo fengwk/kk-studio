@@ -1,15 +1,15 @@
-import type {
-  AgentDefinitionConfigDTO,
-  AgentDefinitionCreateDTO,
-  AgentDefinitionDTO,
-  AgentDefinitionEditablePropertiesDTO,
-  AgentModelDTO,
-  SkillRefDTO,
-} from '@/shared/api/contracts/ai-catalog'
+import type { AgentDefinitionEditablePropertiesDTO } from '@/shared/api/contracts/ai-catalog'
 import type { AgentDraft } from '@/features/catalog/ai-console-types'
 import { modelRef } from '@/features/catalog/AgentModelView'
 import { trimToNull } from '@/features/catalog/ai-resource-draft-primitives'
 import { translate } from '@/shared/i18n'
+import type {
+  AgentDefinitionConfigDTO,
+  AgentDefinitionCreateDTO,
+  AgentDefinitionDTO,
+  AgentModelDTO,
+  SkillRefDTO,
+} from '@/shared/api/generated/contracts'
 
 function normalizeNames(items: string[] | null | undefined): string[] {
   if (!items?.length) {

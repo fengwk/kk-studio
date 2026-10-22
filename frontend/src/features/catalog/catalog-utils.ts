@@ -1,11 +1,8 @@
 import { modelRef, type AgentModelView } from '@/features/catalog/AgentModelView'
 import { includesSearch, naturalNameCompare } from '@/shared/lib/search-utils'
-import type {
-  AgentDefinitionDTO,
-  AgentProviderDTO,
-} from '@/shared/api/contracts/ai-catalog'
 import type { ResourceModal } from '@/features/catalog/ai-console-types'
 import { translate } from '@/shared/i18n'
+import type { AgentDefinitionDTO, AgentProviderDTO } from '@/shared/api/generated/contracts'
 
 export function resourceTitle(modal: ResourceModal): string {
   const prefix = modal.mode === 'create'

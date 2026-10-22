@@ -10,8 +10,10 @@ import type { DebugInspectorSelection } from '@/features/chat/runtime/thread-pan
 import type { ThreadPaneLabels } from '@/features/chat/runtime/ThreadPane'
 import type { ThreadProjection } from '@/features/chat/runtime/useThreadProjection'
 import type { TurnUsage } from '@/features/chat/runtime/thread-timeline-types'
-import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
-import type { HarnessModelRequestDebugRequestDTO } from '@/shared/api/contracts/ai-runtime'
+import type {
+  EnvironmentCardDTO,
+  HarnessModelRequestDebugRequestDTO,
+} from '@/shared/api/generated/contracts'
 
 /**
  * Bound Thread 只读视图需要的投影字段；生产 root/readOnly 都传入完整 {@link ThreadProjection}

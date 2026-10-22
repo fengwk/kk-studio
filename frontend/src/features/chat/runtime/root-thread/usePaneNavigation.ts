@@ -1,10 +1,5 @@
 import { useI18n } from '@/shared/i18n'
-import type {
-  AgentRuntimeOwnerDTO,
-  HarnessSessionEntryDTO,
-  RuntimeSessionSummaryDTO,
-  RuntimeThreadSummaryDTO,
-} from '@/shared/api/contracts/ai-runtime'
+import type { AgentRuntimeOwnerDTO } from '@/shared/api/contracts/ai-runtime'
 import type { BranchDraft } from '@/features/chat/branch-draft'
 import { isBoundTarget, type PaneTarget } from '@/features/chat/runtime/agent-pane'
 import type {
@@ -12,6 +7,11 @@ import type {
   BranchRequestInput,
   PaneInteraction,
 } from '@/features/chat/runtime/root-thread/types'
+import type {
+  HarnessSessionEntryDTO,
+  HarnessSessionSummaryDTO,
+  HarnessThreadSummaryDTO,
+} from '@/shared/api/generated/contracts'
 
 interface PaneNavigationOptions {
   owner: AgentRuntimeOwnerDTO | undefined
@@ -115,7 +115,7 @@ export function usePaneNavigation(options: PaneNavigationOptions) {
     }
   }
 
-  function selectSession(session: RuntimeSessionSummaryDTO): void {
+  function selectSession(session: HarnessSessionSummaryDTO): void {
     if (!owner || capabilities?.allowBranching === false) {
       setActionError(t('ai.runtime.action.branchingDisabled'))
       return
@@ -124,7 +124,7 @@ export function usePaneNavigation(options: PaneNavigationOptions) {
     setInteraction(session.threadCount === 0 ? 'history' : 'thread-threads')
   }
 
-  function selectThread(thread: RuntimeThreadSummaryDTO): void {
+  function selectThread(thread: HarnessThreadSummaryDTO): void {
     if (!owner || capabilities?.allowBranching === false) {
       setActionError(t('ai.runtime.action.branchingDisabled'))
       return

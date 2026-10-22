@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import type { AgentModelConfigDTO, AgentModelDTO } from '@/shared/api/contracts/ai-catalog'
 import {
   formatModelLabel,
   formatModelRef,
   modelRef,
   toAgentModelViews,
 } from '@/features/catalog/AgentModelView'
+import type { AgentModelConfigDTO, AgentModelDTO } from '@/shared/api/generated/contracts'
 
 function model(providerName = 'minimax', name = 'MiniMax-M2.7'): AgentModelDTO {
   const config: AgentModelConfigDTO = {
@@ -27,7 +27,7 @@ function model(providerName = 'minimax', name = 'MiniMax-M2.7'): AgentModelDTO {
     defaultVariant: 'default',
     variants: [{ id: 'default' }],
   }
-  return { providerName, name, modelId: name.toLowerCase(), description: null, config, version: '1', createTime: null, updateTime: null }
+  return { providerName, name, modelId: name.toLowerCase(), description: null, config, version: '1', createTime: 0, updateTime: 0 }
 }
 
 describe('AgentModelView', () => {

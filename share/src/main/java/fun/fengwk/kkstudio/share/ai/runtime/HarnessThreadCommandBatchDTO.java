@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.share.ai.runtime;
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonSetter;
 import lombok.Data;
+import org.jspecify.annotations.Nullable;
 
 import java.util.List;
 
@@ -20,10 +21,10 @@ import java.util.List;
 public class HarnessThreadCommandBatchDTO {
 
   /** 期望的当前 head Entry：canonical UUID string；纯 USER_MESSAGE 发送批次必须省略，其余必须携带。 */
-  private String expectedHeadEntryId;
+  private @Nullable String expectedHeadEntryId;
 
   /** 期望的下一条 command sequence：strict positive decimal string；纯 USER_MESSAGE 发送批次必须省略，其余必须携带。 */
-  private String expectedNextCommandSequence;
+  private @Nullable String expectedNextCommandSequence;
 
   /** 非空、按产品顺序排列的 SET_* + USER_MESSAGE / GOAL 命令列表。 */
   private List<HarnessCommandCreateDTO> commands = List.of();

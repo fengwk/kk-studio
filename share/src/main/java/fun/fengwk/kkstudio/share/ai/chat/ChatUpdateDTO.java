@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonSetter;
 import lombok.Data;
+import org.jspecify.annotations.Nullable;
 
 /**
  * {@code /api/chats/{chatId}} 的更新请求体。
@@ -15,13 +16,13 @@ import lombok.Data;
 public class ChatUpdateDTO {
 
   /** 部分更新：省略（null）保留当前值；提供时必须为非空白（trim 后）且 ≤256 字符。 */
-  private String title;
+  private @Nullable String title;
 
   /** 部分更新：省略（null）保留当前值；提供时必须为已存在的 Agent definition 名（约束同创建）。 */
-  private String agentName;
+  private @Nullable String agentName;
 
   /** 部分更新：仅在 {@link #environmentNameProvided} 为 true 时生效；显式 null 表示清空默认环境。 */
-  private String environmentName;
+  private @Nullable String environmentName;
 
   @JsonIgnore private boolean environmentNameProvided;
 
@@ -37,7 +38,7 @@ public class ChatUpdateDTO {
   }
 
   /** 部分更新：仅在 {@link #yoloEnabledProvided} 为 true 时生效，且显式提供时不得为 null。 */
-  private Boolean yoloEnabled;
+  private @Nullable Boolean yoloEnabled;
 
   @JsonIgnore private boolean yoloEnabledProvided;
 

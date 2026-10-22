@@ -21,7 +21,7 @@ import {
   createTextPart,
 } from '@/features/chat/composer/composer-parts'
 import { ApiError } from '@/shared/api/client'
-import type { HarnessThreadDTO } from '@/shared/api/contracts/ai-runtime'
+import type { HarnessThreadDTO } from '@/shared/api/generated/contracts'
 
 const baseDraft: BranchDraft = {
   agentName: 'assistant',
@@ -49,8 +49,8 @@ const thread: HarnessThreadDTO = {
     environmentName: null,
     goal: null,
   },
-  createTime: null,
-  updateTime: null,
+  createTime: 0,
+  updateTime: 0,
 }
 
 describe('AgentPane acceptance pipeline', () => {

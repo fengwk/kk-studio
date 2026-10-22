@@ -6,6 +6,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Issue Activity 公开传输对象：Issue 唯一有序事实流上的一条记录。
@@ -24,15 +25,15 @@ public class IssueActivityDTO {
   private String actorType;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String actorAgentName;
+  private @Nullable String actorAgentName;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String runId;
+  private @Nullable String runId;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String body;
+  private @Nullable String body;
 
-  private Object data;
+  private @Nullable Object data;
   private String createdAt;
 
   @JsonAnySetter

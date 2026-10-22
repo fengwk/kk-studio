@@ -1,6 +1,6 @@
 import type { WebSocketRoute } from '@playwright/test'
 import { expect, test, type Page } from './fixture'
-import type { ProjectDTO } from '@/features/projects/types'
+import type { ProjectDTO } from '@/shared/api/generated/contracts'
 
 const ID = 'a0000000-0000-0000-0000-000000000001'
 const URL = '/browser-tests/project-workflow-harness.html'
@@ -8,11 +8,11 @@ function project(): ProjectDTO {
   return {
     id: ID, title: 'Workflow Project', description: 'Structured graph',
     workflow: { states: [
-      { state: 'INIT', name: '待开始', next: ['WORK'] },
-      { state: 'WORK', name: '处理中', next: ['DONE'] },
-      { state: 'REVIEW', name: '评审', next: ['DONE'], enabled: false },
-      { state: 'OLD', name: '归档来源', next: [], enabled: false },
-      { state: 'BLOCKED', name: '阻塞' }, { state: 'DONE', name: '完成' },
+      { state: 'INIT', name: '待开始', next: ['WORK'], agent: null, environment: null, instructions: null, maxRuns: null },
+      { state: 'WORK', name: '处理中', next: ['DONE'], agent: null, environment: null, instructions: null, maxRuns: null },
+      { state: 'REVIEW', name: '评审', next: ['DONE'], enabled: false, agent: null, environment: null, instructions: null, maxRuns: null },
+      { state: 'OLD', name: '归档来源', next: [], enabled: false, agent: null, environment: null, instructions: null, maxRuns: null },
+      { state: 'BLOCKED', name: '阻塞', agent: null, environment: null, instructions: null, maxRuns: null }, { state: 'DONE', name: '完成', agent: null, environment: null, instructions: null, maxRuns: null },
     ] },
     yoloEnabled: false, nextIssueNumber: '1', version: '1', archivedAt: null,
     createdAt: '2026-09-20T00:00:00Z', updatedAt: '2026-09-20T00:00:00Z',
@@ -51,7 +51,7 @@ async function transport(page: Page) {
     } else if (path === '/api/projects') {
       await route.fulfill({ json: { status: 200, data: [state.project] } })
     } else if (path === '/api/agents') {
-      await route.fulfill({ json: { status: 200, data: { results: [], totalCount: 0, pageNumber: 1, pageSize: 50 } } })
+      await route.fulfill({ json: { status: 200, data: { results: [], totalCount: '0', pageNumber: 1, pageSize: 50 } } })
     } else if (path === '/api/environments') {
       await route.fulfill({ json: { status: 200, data: [] } })
     } else {

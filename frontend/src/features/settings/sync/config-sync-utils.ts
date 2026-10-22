@@ -3,7 +3,7 @@ import type {
   ConfigSyncItem,
   ConfigSyncKind,
   ConfigSyncRef,
-} from '@/shared/api/contracts/config-sync'
+} from '@/shared/api/generated/contracts'
 
 /** 库存种类展示顺序：与契约的八类一致，Agent 在模型/提供商之前便于依赖自解释。 */
 export const CONFIG_SYNC_KIND_ORDER: ConfigSyncKind[] = [

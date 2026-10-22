@@ -34,7 +34,7 @@ vi.mock('@/shared/api/interaction-service', () => ({
   interactionService: { listInteractions: vi.fn() },
 }))
 
-const page = <T,>(results: T[]) => ({ pageNumber: 1, pageSize: 50, totalCount: results.length, results })
+const page = <T,>(results: T[]) => ({ pageNumber: 1, pageSize: 50, totalCount: String(results.length), results })
 
 describe('App routes', () => {
   beforeEach(() => {

@@ -1,14 +1,11 @@
-import type {
-  CanvasFunctionDefinitionDTO,
-  CanvasResourceKind,
-  UUIDString,
-} from '@/shared/api/contracts/studio'
+import type { CanvasResourceKind } from '@/shared/api/contracts/studio'
 import { isCanonicalUuid } from '@/shared/lib/uuid'
 import type { CanvasFunctionConfig, CanvasResourceReference } from '@/features/canvas/types'
 import type { CanvasSnapshot, Resource, ResourceNode } from '@/features/canvas/domain'
+import type { CanvasFunctionDefinitionDTO } from '@/shared/api/generated/contracts'
 
 export interface ReferenceCandidate {
-  nodeId: UUIDString
+  nodeId: string
   index: number
   node: ResourceNode
   resource: Resource
@@ -248,7 +245,7 @@ export function configToFunctionArgs(
 
 export function referenceCandidates(
   snapshot: CanvasSnapshot,
-  targetNodeId: UUIDString,
+  targetNodeId: string,
   model: CanvasFunctionDefinitionDTO,
 ): ReferenceCandidate[] {
   if (!functionSupportsReferences(model)) {
@@ -278,7 +275,7 @@ export function referenceAlias(node: ResourceNode, index: number): string {
   return `@${node.name}_${index}`
 }
 
-export function referenceKey(nodeId: UUIDString, index: number): string {
+export function referenceKey(nodeId: string, index: number): string {
   return `${nodeId}:${index}`
 }
 

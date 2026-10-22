@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.share.ai.interaction;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
+import org.jspecify.annotations.Nullable;
 
 /**
  * 待处理 Interaction 的产品来源与其展示用名称。
@@ -20,23 +21,23 @@ public class InteractionOwnerDTO {
   private String type;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String chatId;
+  private @Nullable String chatId;
 
   /** Chat 标题；非 Chat 来源为 null。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String chatTitle;
+  private @Nullable String chatTitle;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String issueId;
+  private @Nullable String issueId;
 
   /** Issue 标题；非 Issue+Agent 来源为 null。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String issueTitle;
+  private @Nullable String issueTitle;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String agentName;
+  private @Nullable String agentName;
 
   /** 真实执行根的 Thread 名称；根无名称时为 null。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String rootThreadName;
+  private @Nullable String rootThreadName;
 }

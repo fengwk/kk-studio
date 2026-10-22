@@ -1,12 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type {
-  EntryType,
-  HarnessSessionEntryDTO,
-  HarnessThreadCommandDTO,
-  ModelAttemptFailureDTO,
-  ModelInvocationDTO,
-  ToolInvocationDTO,
-} from '@/shared/api/contracts/ai-runtime'
+import type { EntryType } from '@/shared/api/contracts/ai-runtime'
 import type {
   RealtimeModelStream,
 } from '@/features/chat/runtime/thread-realtime/model-stream'
@@ -15,6 +8,13 @@ import type {
 } from '@/features/chat/runtime/thread-realtime/tool-stream'
 import type { ToolDialogueMessage } from '@/features/chat/runtime/thread-timeline-types'
 import { buildThreadTimeline, isThreadWorking } from '@/features/chat/runtime/thread-timeline'
+import type {
+  HarnessSessionEntryDTO,
+  HarnessThreadCommandDTO,
+  ModelAttemptFailureDTO,
+  ModelInvocationDTO,
+  ToolInvocationDTO,
+} from '@/shared/api/generated/contracts'
 
 describe('thread timeline', () => {
   it.each([
@@ -167,7 +167,7 @@ describe('thread timeline', () => {
     // 变更的 subjectEntryId 和 createdAt 严格来自该 SETTINGS entry
     for (const change of settingsChanges) {
       expect(change.subjectEntryId).toBe('settings-head')
-      expect(change.createdAt).toBe('2026-01-01T00:00:00')
+      expect(change.createdAt).toBe(1767225600)
     }
 
     const extendedEntries = [
@@ -383,7 +383,7 @@ describe('thread timeline', () => {
         thinking: 'partial thinking',
         errorCode: 'TRANSIENT',
         errorMessage: 'try later',
-        retryAt: '2026-07-28T10:00:05Z',
+        retryAt: 1785232805,
         nextAttempt: 2,
       },
       {
@@ -915,8 +915,8 @@ describe('thread timeline', () => {
         approvalJson: JSON.stringify({ required: true, decision: null, decisionId: null }),
         resultJson: null,
         errorJson: null,
-        createTime: '2026-07-28T10:00:00Z',
-        updateTime: '2026-07-28T10:00:00Z',
+        createTime: 1785232800,
+        updateTime: 1785232800,
       },
     ]
     const toolStreams = new Map<string, RealtimeToolStream>([
@@ -984,8 +984,8 @@ describe('thread timeline', () => {
       approvalJson: JSON.stringify({ required: true, decision: null, decisionId: null }),
       resultJson: null,
       errorJson: null,
-      createTime: '2026-07-28T10:00:00Z',
-      updateTime: '2026-07-28T10:00:00Z',
+      createTime: 1785232800,
+      updateTime: 1785232800,
     }
     const toolStreams = new Map<string, RealtimeToolStream>([
       ['inv-2', {
@@ -1076,8 +1076,8 @@ describe('thread timeline', () => {
       approvalJson: JSON.stringify({ required: true, decision: null, decisionId: null }),
       resultJson: null,
       errorJson: null,
-      createTime: '2026-07-28T10:00:00Z',
-      updateTime: '2026-07-28T10:00:00Z',
+      createTime: 1785232800,
+      updateTime: 1785232800,
     }
     const timeline = buildThreadTimeline(
       [
@@ -1130,9 +1130,9 @@ describe('thread timeline', () => {
   it('preserves backend Entry path order when wall-clock timestamps regress', () => {
     const timeline = buildThreadTimeline(
       [
-        { ...entry('1', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'A' }])), createTime: [2026, 1, 1, 0, 0, 3] },
-        { ...entry('2', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'B' }])), createTime: [2026, 1, 1, 0, 0, 1] },
-        { ...entry('3', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'C' }])), createTime: [2026, 1, 1, 0, 0, 2] },
+        { ...entry('1', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'A' }])), createTime: 1767225603 },
+        { ...entry('2', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'B' }])), createTime: 1767225601 },
+        { ...entry('3', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'C' }])), createTime: 1767225602 },
       ],
       [],
       [],
@@ -1143,10 +1143,10 @@ describe('thread timeline', () => {
   it('keeps multi-turn USER then ASSISTANT causality when child timestamps regress', () => {
     const timeline = buildThreadTimeline(
       [
-        { ...entry('1', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: '问题一' }])), createTime: '2026-01-01T00:00:03' },
-        { ...entry('2', 'MESSAGE', messagePayload('ASSISTANT', [{ type: 'text', text: '回答一' }])), createTime: '2026-01-01T00:00:01' },
-        { ...entry('3', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: '问题二' }])), createTime: '2026-01-01T00:00:06' },
-        { ...entry('4', 'MESSAGE', messagePayload('ASSISTANT', [{ type: 'text', text: '回答二' }])), createTime: '2026-01-01T00:00:04' },
+        { ...entry('1', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: '问题一' }])), createTime: 1767225603 },
+        { ...entry('2', 'MESSAGE', messagePayload('ASSISTANT', [{ type: 'text', text: '回答一' }])), createTime: 1767225601 },
+        { ...entry('3', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: '问题二' }])), createTime: 1767225606 },
+        { ...entry('4', 'MESSAGE', messagePayload('ASSISTANT', [{ type: 'text', text: '回答二' }])), createTime: 1767225604 },
       ],
       [],
       [],
@@ -1163,9 +1163,9 @@ describe('thread timeline', () => {
   it('does not inspect createTime when projecting the backend Entry path', () => {
     const timeline = buildThreadTimeline(
       [
-        { ...entry('1', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'late-valid' }])), createTime: '2026-01-01T00:00:03' },
-        { ...entry('2', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'invalid' }])), createTime: 'not-a-date' },
-        { ...entry('3', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'early-valid' }])), createTime: '2026-01-01T00:00:01' },
+        { ...entry('1', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'late-valid' }])), createTime: 1767225603 },
+        { ...entry('2', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'invalid' }])), createTime: Number.NaN },
+        { ...entry('3', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'early-valid' }])), createTime: 1767225601 },
       ],
       [],
       [],
@@ -1957,7 +1957,8 @@ function entry(entryId: string, entryType: EntryType, payload: Record<string, un
     parentEntryId: null,
     entryType,
     payloadJson: JSON.stringify(payload),
-    createTime: '2026-01-01T00:00:00',
+    createTime: 1767225600,
+    usageCost: null,
   }
 }
 
@@ -1976,7 +1977,7 @@ function command(
     idempotencyKey: `cid-${label}`,
     payloadJson: JSON.stringify(payload),
     cancelledAt: null,
-    createTime: '2026-01-01T00:00:00',
+    createTime: 1767225600,
   }
 }
 
@@ -2042,8 +2043,8 @@ function modelAttemptFailure(
     thinking: 'partial thinking',
     errorCode: 'TRANSIENT',
     errorMessage: 'try later',
-    failedAt: '2026-07-28T10:00:00Z',
-    retryAt: '2026-07-28T10:00:05Z',
+    failedAt: 1785232800,
+    retryAt: 1785232805,
     ...overrides,
   }
 }
@@ -2060,8 +2061,8 @@ function modelInvocation(status: string, attempt: number): ModelInvocationDTO {
     resultJson: null,
     errorJson: null,
     resultEntryId: null,
-    createTime: '2026-07-28T10:00:00Z',
-    updateTime: '2026-07-28T10:00:00Z',
+    createTime: 1785232800,
+    updateTime: 1785232800,
   }
 }
 
@@ -2090,8 +2091,8 @@ function invocation(
     approvalJson: null,
     resultJson: null,
     errorJson: null,
-    createTime: '2026-07-28T10:00:00Z',
-    updateTime: '2026-07-28T10:00:00Z',
+    createTime: 1785232800,
+    updateTime: 1785232800,
     ...overrides,
   }
 }

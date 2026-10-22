@@ -3,13 +3,13 @@ import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useAiConsoleResourceController } from '@/features/catalog/useAiConsoleResourceController'
+import { agentService } from '@/shared/api/agent-service'
+import { queryKeys } from '@/shared/lib/query-keys'
 import type {
   AgentDefinitionDTO,
   AgentModelDTO,
   AgentProviderDTO,
-} from '@/shared/api/contracts/ai-catalog'
-import { agentService } from '@/shared/api/agent-service'
-import { queryKeys } from '@/shared/lib/query-keys'
+} from '@/shared/api/generated/contracts'
 
 vi.mock('@/shared/api/environment-service', () => ({
   environmentService: {
@@ -63,11 +63,10 @@ describe('useAiConsoleResourceController', () => {
       currentProvider = {
         ...currentProvider,
         ...data,
-        name: data.name ?? currentProvider.name,
         description: data.description !== undefined ? data.description : currentProvider.description,
         baseUrl: data.baseUrl !== undefined ? data.baseUrl : currentProvider.baseUrl,
-        modelCallTimeoutMillis: data.modelCallTimeoutMillis ?? currentProvider.modelCallTimeoutMillis,
-        modelCallIdleTimeoutMillis: data.modelCallIdleTimeoutMillis ?? currentProvider.modelCallIdleTimeoutMillis,
+        modelCallTimeoutMillis: data.modelCallTimeoutMillis != null ? String(data.modelCallTimeoutMillis) : currentProvider.modelCallTimeoutMillis,
+        modelCallIdleTimeoutMillis: data.modelCallIdleTimeoutMillis != null ? String(data.modelCallIdleTimeoutMillis) : currentProvider.modelCallIdleTimeoutMillis,
         modelHttpRetryStatusCodes: data.modelHttpRetryStatusCodes !== undefined ? data.modelHttpRetryStatusCodes : currentProvider.modelHttpRetryStatusCodes,
       }
       currentModel = { ...currentModel, providerName: currentProvider.name }
@@ -346,13 +345,13 @@ describe('useAiConsoleResourceController', () => {
         hasToken: false,
         currentCommit: '1111111111111111111111111111111111111111',
         observedHeadCommit: '1111111111111111111111111111111111111111',
-        headCheckedAt: '2026-09-21T00:00:00.000Z',
+        headCheckedAt: 1789948800,
         headCheckError: null,
         checkStatus: 'UNCHECKED',
         skills: [{ name: 'dev', description: 'dev skill' }],
         version: '1',
-        createTime: '2026-09-21T00:00:00.000Z',
-        updateTime: '2026-09-21T00:00:00.000Z',
+        createTime: 1789948800,
+        updateTime: 1789948800,
       },
     ])
 
@@ -533,7 +532,7 @@ function page<T>(results: T[]) {
   return {
     pageNumber: 1,
     pageSize: 50,
-    totalCount: results.length,
+    totalCount: String(results.length),
     results,
   }
 }
@@ -545,11 +544,11 @@ function provider(): AgentProviderDTO {
     providerType: 'openai',
     baseUrl: 'http://stub.local/v1',
     configured: true,
-    modelCallTimeoutMillis: 1800000,
-    modelCallIdleTimeoutMillis: 120000,
+    modelCallTimeoutMillis: '1800000',
+    modelCallIdleTimeoutMillis: '120000',
     version: '0',
-    createTime: '2026-06-20T02:00:00',
-    updateTime: '2026-06-20T02:00:00',
+    createTime: 1781920800,
+    updateTime: 1781920800,
     modelHttpRetryStatusCodes: null,
   }
 }
@@ -580,8 +579,8 @@ function model(): AgentModelDTO {
       variants: [{ id: 'default' }],
     },
     version: '0',
-    createTime: '2026-06-20T02:00:00',
-    updateTime: '2026-06-20T02:00:00',
+    createTime: 1781920800,
+    updateTime: 1781920800,
   }
 }
 
@@ -600,7 +599,7 @@ function agent(): AgentDefinitionDTO {
       subagents: [],
     },
     version: '0',
-    createTime: '2026-06-20T02:00:00',
-    updateTime: '2026-06-20T02:00:00',
+    createTime: 1781920800,
+    updateTime: 1781920800,
   }
 }

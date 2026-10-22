@@ -51,13 +51,6 @@ export function isNonNegativeInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
 }
 
-export function timestampString(value: string | readonly number[] | null): string {
-  if (typeof value === 'string' && value.trim()) {
-    return value
-  }
-  return ''
-}
-
 export function getString(value: unknown): string {
   return typeof value === 'string' ? value : ''
 }

@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.share.canvas;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
+import org.jspecify.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -12,7 +13,7 @@ import java.util.Map;
 @Data
 public class CanvasFunctionDefinitionDTO {
   private String name;
-  private String description;
+  private @Nullable String description;
 
   /** 严格 JSON Schema object，前端据此渲染参数编辑器；未知关键字在服务端注册期即被拒绝。 */
   private Map<String, Object> argsSchema = new LinkedHashMap<>();
@@ -20,13 +21,13 @@ public class CanvasFunctionDefinitionDTO {
   /** 有界输出计划：启动时按槽位预分配 Resource ID，成功发布时按该顺序原子挂接。 */
   private List<CanvasFunctionOutputDTO> outputs = new ArrayList<>();
 
-  private CanvasFunctionReferencePolicyDTO referencePolicy;
-  private Boolean available;
+  private @Nullable CanvasFunctionReferencePolicyDTO referencePolicy;
+  private @Nullable Boolean available;
 
   /** 目录暴露的版本身份：该函数完整定义的 fingerprint。 */
   private CanvasFunctionVersionDTO version;
 
   /** required-nullable：available 时必须显式输出 null。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String unavailableReason;
+  private @Nullable String unavailableReason;
 }

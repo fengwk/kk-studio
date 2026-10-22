@@ -1,7 +1,7 @@
 /**
  * 独立 write/check 入口的契约回归：不得真正调用 Maven，只用 PATH 上的 stub mvn 记录实际命令。
  *
- * 这两个脚本是稳定传输契约生成的开发者入口；它们的失败路径与参数同样属于 CI 门禁本身，因此必须回归。
+ * 这两个脚本是前端传输契约生成的开发者入口；它们的失败路径与参数同样属于 CI 门禁本身，因此必须回归。
  */
 
 import assert from 'node:assert/strict'
@@ -17,7 +17,7 @@ const REPOSITORY_ROOT = repositoryRoot()
 const CAPABILITY_DIR = path.join(REPOSITORY_ROOT, 'scripts/dev/verify/generated-contracts')
 const CHECK_SCRIPT = path.join(CAPABILITY_DIR, 'check.sh')
 const WRITE_SCRIPT = path.join(CAPABILITY_DIR, 'write.sh')
-const ARTIFACT_TEST = '-Dtest=StableTsContractArtifactTest'
+const ARTIFACT_TEST = '-Dtest=TsContractArtifactTest'
 const UPDATE_PROPERTY = '-Dkkstudio.contract.generation.update=true'
 
 /** Run `body({ log, environment })` with a stub `mvn` that records JAVA_HOME and its arguments. */

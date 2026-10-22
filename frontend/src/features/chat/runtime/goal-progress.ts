@@ -1,6 +1,5 @@
-import type { BackendDateTime } from '@/shared/api/contracts/base'
-import type { HarnessSessionEntryDTO } from '@/shared/api/contracts/ai-runtime'
 import { parsePayload } from '@/features/chat/runtime/payload-json'
+import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 
 export interface GoalProgressRecord {
   entryId: string
@@ -8,7 +7,7 @@ export interface GoalProgressRecord {
   status: 'complete' | 'blocked'
   reason: string
   reportedAt: string
-  createTime: BackendDateTime
+  createTime: number
 }
 
 export interface BranchGoalProgressResult {
@@ -64,8 +63,7 @@ export function parseGoalProgress(
     const goalId = typeof data.goalId === 'string' ? data.goalId : null
     const status = data.status === 'complete' || data.status === 'blocked' ? data.status : null
     const reason = typeof data.reason === 'string' ? data.reason : null
-    const fallbackTime = typeof entry.createTime === 'string' ? entry.createTime : ''
-    const reportedAt = typeof data.reportedAt === 'string' ? data.reportedAt : fallbackTime
+    const reportedAt = typeof data.reportedAt === 'string' ? data.reportedAt : ''
     if (!goalId || !status || !reason) {
       continue
     }

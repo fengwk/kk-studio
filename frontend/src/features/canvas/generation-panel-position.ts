@@ -1,6 +1,6 @@
-import type { CanvasTransformDTO } from '@/shared/api/contracts/studio'
 import type { StageMetrics } from '@/features/canvas/types'
 import type { StoredCanvasViewport } from '@/features/canvas/viewport-storage'
+import type { CanvasTransformDTO } from '@/shared/api/generated/contracts'
 
 export interface GenerationPanelPosition {
   left: number

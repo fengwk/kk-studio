@@ -4,8 +4,8 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { McpServersPage } from '@/features/catalog/mcp/McpServersPage'
 import { mcpServerService } from '@/shared/api/mcp-server-service'
-import type { McpServerConfigDTO, McpServerDTO } from '@/shared/api/contracts/ai-mcp'
 import { ApiError } from '@/shared/api/client'
+import type { McpServerConfigDTO, McpServerDTO } from '@/shared/api/generated/contracts'
 
 vi.mock('@/shared/api/mcp-server-service', () => ({
   mcpServerService: {
@@ -39,12 +39,12 @@ function mockServer(overrides: Partial<McpServerDTO> = {}): McpServerDTO {
   return {
     name: 'filesystem',
     enabled: true,
-    timeoutMillis: 30000,
+    timeoutMillis: '30000',
     discoveryStatus: 'AVAILABLE',
     toolCount: 3,
     version: '1',
-    createTime: '2026-07-20T00:00:00.000Z',
-    updateTime: '2026-07-20T00:00:00.000Z',
+    createTime: 1784505600,
+    updateTime: 1784505600,
     ...overrides,
   }
 }
@@ -55,7 +55,7 @@ describe('McpServersPage', () => {
     vi.mocked(mcpServerService.pageServers).mockResolvedValue({
       pageNumber: 1,
       pageSize: 100,
-      totalCount: 0,
+      totalCount: '0',
       results: [],
     })
   })
@@ -64,12 +64,12 @@ describe('McpServersPage', () => {
     vi.mocked(mcpServerService.pageServers).mockResolvedValue({
       pageNumber: 1,
       pageSize: 100,
-      totalCount: 1,
+      totalCount: '1',
       results: [
         mockServer({
           name: 'fs_prod',
           enabled: true,
-          timeoutMillis: 45000,
+          timeoutMillis: '45000',
           discoveryStatus: 'AVAILABLE',
           toolCount: 5,
           version: '2',
@@ -108,7 +108,7 @@ describe('McpServersPage', () => {
     vi.mocked(mcpServerService.pageServers).mockResolvedValueOnce({
       pageNumber: 1,
       pageSize: 100,
-      totalCount: 1,
+      totalCount: '1',
       results: [mockServer({ name: 'cached-server' })],
     })
     const { queryClient } = renderPage()
@@ -222,13 +222,13 @@ describe('McpServersPage', () => {
       name: 'srv_edit',
       version: '3',
       enabled: true,
-      timeoutMillis: 30000,
+      timeoutMillis: '30000',
     })
 
     vi.mocked(mcpServerService.pageServers).mockResolvedValue({
       pageNumber: 1,
       pageSize: 100,
-      totalCount: 1,
+      totalCount: '1',
       results: [serverInstance],
     })
 
@@ -237,8 +237,6 @@ describe('McpServersPage', () => {
       version: '3',
       url: 'https://example.com/api',
       headers: { Authorization: 'Bearer token-abc' },
-      enabled: true,
-      timeoutMillis: 30000,
     }
     vi.mocked(mcpServerService.getServerConfig).mockResolvedValue(configResponse)
     vi.mocked(mcpServerService.updateServer).mockResolvedValue(mockServer({ name: 'srv_edit', version: '4' }))
@@ -291,7 +289,7 @@ describe('McpServersPage', () => {
     vi.mocked(mcpServerService.pageServers).mockResolvedValue({
       pageNumber: 1,
       pageSize: 100,
-      totalCount: 1,
+      totalCount: '1',
       results: [serverInstance],
     })
 
@@ -300,8 +298,6 @@ describe('McpServersPage', () => {
       version: '2',
       url: 'https://example.com/mcp',
       headers: { Authorization: 'Bearer tok' },
-      enabled: true,
-      timeoutMillis: 60000,
     })
     vi.mocked(mcpServerService.discoverServer).mockResolvedValue(
       mockServer({ name: 'srv_disc', version: '2', discoveryStatus: 'AVAILABLE', toolCount: 4 }),
@@ -341,7 +337,7 @@ describe('McpServersPage', () => {
     vi.mocked(mcpServerService.pageServers).mockResolvedValue({
       pageNumber: 1,
       pageSize: 100,
-      totalCount: 1,
+      totalCount: '1',
       results: [serverInstance],
     })
     vi.mocked(mcpServerService.deleteServer).mockResolvedValue(undefined)
@@ -366,7 +362,7 @@ describe('McpServersPage', () => {
     vi.mocked(mcpServerService.pageServers).mockResolvedValue({
       pageNumber: 1,
       pageSize: 100,
-      totalCount: 1,
+      totalCount: '1',
       results: [serverInstance],
     })
     vi.mocked(mcpServerService.getServerConfig).mockRejectedValueOnce(new Error('Failed to load config'))
@@ -384,8 +380,6 @@ describe('McpServersPage', () => {
       version: '1',
       url: 'https://example.com/ok',
       headers: {},
-      enabled: true,
-      timeoutMillis: 60000,
     })
 
     await user.click(retryBtn)

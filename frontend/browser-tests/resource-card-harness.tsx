@@ -10,10 +10,10 @@ import { AgentForm, ModelForm, ProviderForm } from '@/features/catalog/AiResourc
 import { emptyAgentDraft, emptyModelDraft, emptyProviderDraft } from '@/features/catalog/ai-resource-draft-codecs'
 import { ModelsPanel, ProvidersPanel } from '@/features/catalog/AiConsolePanels'
 import type { AgentModelView } from '@/features/catalog/AgentModelView'
-import type { AgentProviderDTO } from '@/shared/api/contracts/ai-catalog'
 import { setLocale } from '@/shared/i18n'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { PluginsTab } from '@/features/extensions/PluginsTab'
+import type { AgentProviderDTO } from '@/shared/api/generated/contracts'
 
 setLocale(new URLSearchParams(location.search).get('locale') === 'en-US' ? 'en-US' : 'zh-CN')
 
@@ -156,8 +156,8 @@ const SAMPLE_MODEL: AgentModelView = {
     ],
   },
   version: '1',
-  createTime: null,
-  updateTime: null,
+  createTime: 0,
+  updateTime: 0,
 }
 
 const LONG_MODEL: AgentModelView = {
@@ -182,12 +182,12 @@ const SAMPLE_PROVIDER: AgentProviderDTO = {
   providerType: 'openai',
   baseUrl: 'https://api.openai.com/v1',
   configured: true,
-  modelCallTimeoutMillis: 60000,
-  modelCallIdleTimeoutMillis: 15000,
+  modelCallTimeoutMillis: '60000',
+  modelCallIdleTimeoutMillis: '15000',
   modelHttpRetryStatusCodes: [429, 500, 502, 503],
   version: '1',
-  createTime: '2026-10-01T00:00:00Z',
-  updateTime: '2026-10-01T00:00:00Z',
+  createTime: 1790812800,
+  updateTime: 1790812800,
 }
 
 function PanelsHarness() {

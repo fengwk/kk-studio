@@ -4,8 +4,7 @@ import { MemoryRouter, useLocation } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
 import { ChatCard } from '@/features/chat/ChatCard'
 import { ChatCardsPanel } from '@/features/chat/ChatCardsPanel'
-import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
-import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
+import type { AgentDefinitionDTO, ChatDTO } from '@/shared/api/generated/contracts'
 
 describe('ChatCard', () => {
   it('opens the Chat workspace route', async () => {
@@ -205,8 +204,8 @@ function agent(): AgentDefinitionDTO {
     variant: 'default',
     config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
     version: '1',
-    createTime: null,
-    updateTime: null,
+    createTime: 0,
+    updateTime: 0,
   }
 }
 
@@ -218,7 +217,7 @@ function chat() {
     yoloEnabled: false,
     environmentName: null,
     version: '1',
-    createTime: null,
-    updateTime: null,
+    createTime: 0,
+    updateTime: 0,
   } satisfies ChatDTO
 }

@@ -7,8 +7,8 @@ import { TextInput } from '@/shared/ui/controls/TextInput'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { pluginsService } from '@/shared/api/plugins-service'
 import { useI18n } from '@/shared/i18n'
-import type { PluginDTO } from '@/shared/api/contracts/ai-plugin'
 import './plugin-connect.css'
+import type { PluginDTO } from '@/shared/api/generated/contracts'
 
 interface PluginConnectModalProps {
   plugin: PluginDTO

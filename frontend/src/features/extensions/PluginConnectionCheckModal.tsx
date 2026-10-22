@@ -1,14 +1,13 @@
 import { Button } from '@/shared/ui/controls/Button'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { useI18n, type AppLocale } from '@/shared/i18n'
-import type { InstantTimestamp } from '@/shared/api/contracts/base'
-import type { PluginDTO } from '@/shared/api/contracts/ai-plugin'
 import {
   pluginConnectionCheckExpected,
   pluginConnectionCheckIsStale,
   type PluginConnectionCheckRun,
 } from '@/features/extensions/plugin-connection-check'
 import './plugin-connection-check.css'
+import type { PluginDTO } from '@/shared/api/generated/contracts'
 
 interface PluginConnectionCheckModalProps {
   /** 当前列表中的同名 Plugin：其已应用坐标用于判断本次结果是否仍然对应当前配置。 */
@@ -17,9 +16,9 @@ interface PluginConnectionCheckModalProps {
   onClose: () => void
 }
 
-/** 后端 Instant 的既有 wire 约定是 epoch seconds；展示时按同一约定换算，不做其它缩放。 */
-function formatCheckedAt(value: Exclude<InstantTimestamp, null>, locale: AppLocale): string {
-  const date = new Date(typeof value === 'number' ? value * 1000 : value)
+/** 后端 Instant 的 wire 约定是 epoch seconds。 */
+function formatCheckedAt(value: number, locale: AppLocale): string {
+  const date = new Date(value * 1000)
   return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString(locale)
 }
 

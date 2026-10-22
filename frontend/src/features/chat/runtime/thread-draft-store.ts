@@ -1,4 +1,3 @@
-import type { HarnessStoppedThreadReceiptDTO } from '@/shared/api/contracts/ai-runtime'
 import {
   hasMessageContent,
   partsKey,
@@ -8,6 +7,7 @@ import {
   mergeCancelledGoalTexts,
   prependCancelledMessages,
 } from '@/features/chat/runtime/cancelled-message-parts'
+import type { HarnessStoppedThreadReceiptDTO } from '@/shared/api/generated/contracts'
 
 /**
  * 绑定 Thread 的本地草稿事实源。

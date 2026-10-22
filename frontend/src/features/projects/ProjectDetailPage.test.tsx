@@ -5,7 +5,6 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, useLocation, useNavigate } from 'react-router'
 import { ProjectDetailPage } from './ProjectDetailPage'
 import type { ProjectsApi } from './projects-api'
-import type { IssueDetailDTO, ProjectSnapshotDTO } from './types'
 import { invalidateProjectQueries } from './projects-invalidation'
 import {
   clearPendingAction,
@@ -13,6 +12,7 @@ import {
   storePendingAction,
   type PendingIssueAction,
 } from './pending-action-sidecar'
+import type { IssueDetailDTO, ProjectSnapshotDTO } from '@/shared/api/generated/contracts'
 
 vi.mock('@/shared/app-events', () => ({
   useApplicationEvents: () => ({

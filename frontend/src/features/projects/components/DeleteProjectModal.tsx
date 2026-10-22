@@ -5,7 +5,7 @@ import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { useI18n } from '@/shared/i18n'
 import type { ProjectsApi } from '../projects-api'
 import { projectsApi } from '../projects-api'
-import type { ProjectDTO } from '../types'
+import type { ProjectDTO } from '@/shared/api/generated/contracts'
 
 export interface DeleteProjectModalProps {
   isOpen: boolean

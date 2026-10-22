@@ -3,7 +3,7 @@ import type {
   SkillPackageDTO,
   SkillRefDTO,
   ToolCatalogEntryDTO,
-} from '@/shared/api/contracts/ai-catalog'
+} from '@/shared/api/generated/contracts'
 
 export interface CapabilityOption {
   value: string

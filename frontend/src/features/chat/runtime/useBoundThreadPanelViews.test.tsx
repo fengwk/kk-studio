@@ -7,19 +7,21 @@ import {
   useBoundThreadPanelViews,
 } from '@/features/chat/runtime/useBoundThreadPanelViews'
 import type { ThreadEventRecord } from '@/features/chat/runtime/thread-events'
-import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import type { BoundThreadPanelController } from '@/features/chat/runtime/useBoundThreadPanelViews'
-import type { HarnessModelRequestDebugDTO } from '@/shared/api/contracts/ai-runtime'
 import { harnessService } from '@/shared/api/harness-service'
 import { useThreadPresentation } from './thread-presentation'
 import { ThreadPresentationActions } from './ThreadPresentationActions'
+import type {
+  EnvironmentCardDTO,
+  HarnessModelRequestDebugDTO,
+} from '@/shared/api/generated/contracts'
 
 vi.mock('@/shared/api/harness-service', () => ({
   harnessService: { getModelRequestDebug: vi.fn(), previewHistoricalRequest: vi.fn() },
 }))
 
 const DEBUG: HarnessModelRequestDebugDTO = {
-  kind: 'NEXT_REQUEST_PREVIEW', generatedAt: 'now',
+  kind: 'NEXT_REQUEST_PREVIEW', generatedAt: 1790504400,
   model: { providerName: 'p', modelName: 'm', variant: 'default' },
   environmentName: null, systemInstruction: 'prompt', tools: [], skills: [], subagents: [],
   cacheControl: null, planningError: null,
@@ -40,12 +42,12 @@ function boundController(): BoundThreadPanelController {
       nextCommandSequence: '1', version: '1', status: 'MODEL_READY', processing: true,
       executionControl: 'RUNNABLE', branchSettings: {
         agentName: 'agent', model: DEBUG.model, environmentName: null, goal: null,
-      }, createTime: 'now', updateTime: 'now',
+      }, createTime: 1790504400, updateTime: 1790504400,
     },
     modelInvocation: {
       id: 'model-1', threadId: 'thread', turnStartEntryId: 'turn', requestHeadEntryId: 'head',
       status: 'READY', attempt: 1, streamCheckpointJson: null, resultJson: null,
-      errorJson: null, resultEntryId: null, createTime: 'now', updateTime: 'now',
+      errorJson: null, resultEntryId: null, createTime: 1790504400, updateTime: 1790504400,
     },
   }
 }
@@ -87,7 +89,7 @@ it('renders on-demand preview, inspector and history actions and clears history 
   vi.mocked(harnessService.getModelRequestDebug).mockResolvedValue(DEBUG)
   vi.mocked(harnessService.previewHistoricalRequest).mockResolvedValue({
     kind: 'HISTORICAL_REQUEST_PREVIEW', providerType: 'OPENAI', modelName: 'm',
-    bodyByteSize: 2, bodyJson: '{"history":true}', sourceHeadEntryId: 'head', generatedAt: 'now',
+    bodyByteSize: 2, bodyJson: '{"history":true}', sourceHeadEntryId: 'head', generatedAt: 1790504400,
   })
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const controller = boundController()
@@ -192,13 +194,13 @@ const READY_ENVIRONMENT: EnvironmentCardDTO = {
   status: 'READY',
   statusExpiresAt: null,
   ready: true,
-  lastSeen: '2026-09-19T00:00:00.000Z',
+  lastSeen: 1789776000,
   capabilities: [],
   userName: 'dev-user',
   homeDirectory: '/home/dev',
   version: '1',
-  createTime: '2026-09-19T00:00:00.000Z',
-  updateTime: '2026-09-19T00:00:00.000Z',
+  createTime: 1789776000,
+  updateTime: 1789776000,
 }
 
 describe('useBoundThreadPanelLabels', () => {
@@ -247,7 +249,7 @@ describe('useBoundThreadPanelViews view identity', () => {
     bodyByteSize: 120,
     bodyJson: '{"messages":[{"role":"user","content":"draft"}]}',
     sourceHeadEntryId: 'entry-2',
-    generatedAt: '2026-09-27T05:00:00Z',
+    generatedAt: 1790485200,
   }
 
   function renderViews(initialProps: { threadId: string; viewKey?: string }) {

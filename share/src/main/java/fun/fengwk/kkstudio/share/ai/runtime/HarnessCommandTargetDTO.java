@@ -7,6 +7,7 @@ import lombok.AccessLevel;
 import lombok.Data;
 import lombok.Getter;
 import lombok.Setter;
+import org.jspecify.annotations.Nullable;
 
 /**
  * 创建型命令批次的严格 target union wire DTO。
@@ -20,18 +21,18 @@ public class HarnessCommandTargetDTO {
   /** target 类型：NEW_SESSION、NEW_THREAD 或 NEW_FORKED_SESSION。 */
   private String type;
 
-  private String sessionId;
-  private String startEntryId;
-  private String threadId;
+  private @Nullable String sessionId;
+  private @Nullable String startEntryId;
+  private @Nullable String threadId;
 
   /** NEW_THREAD 的分支显示名；必须显式给出且非 blank（NEW_SESSION / NEW_FORKED_SESSION 禁用）。 */
-  private String threadName;
+  private @Nullable String threadName;
 
   /** NEW_FORKED_SESSION 的来源执行根 Thread；必须显式给出（其它类型禁用）。 */
-  private String sourceThreadId;
+  private @Nullable String sourceThreadId;
 
-  private HarnessBranchSettingsDTO rootSettings;
-  private Boolean yoloEnabled;
+  private @Nullable HarnessBranchSettingsDTO rootSettings;
+  private @Nullable Boolean yoloEnabled;
 
   @Getter(AccessLevel.NONE)
   @Setter(AccessLevel.NONE)

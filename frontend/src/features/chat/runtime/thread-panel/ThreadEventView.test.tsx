@@ -91,7 +91,7 @@ describe('ThreadEventView', () => {
         onSelectedEventIdChange={vi.fn()}
         debug={{
           kind: 'NEXT_REQUEST_PREVIEW',
-          generatedAt: '2026-09-21T00:00:00.000Z',
+          generatedAt: 1789948800,
           model: { providerName: 'minimax', modelName: 'MiniMax-M2.7', variant: 'default' },
           environmentName: null,
           systemInstruction: 'line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10\nline11',
@@ -124,7 +124,7 @@ describe('ThreadEventView', () => {
       bodyByteSize: 24,
       bodyJson: '{"reconstructed":true}',
       sourceHeadEntryId: 'head-1',
-      generatedAt: '2026-09-21T00:00:00.000Z',
+      generatedAt: 1789948800,
       notice: 'reconstructed under current definitions',
     }
 
@@ -327,7 +327,7 @@ describe('ThreadEventView', () => {
     ): ThreadModelRequestDebugData {
       return {
         kind: 'NEXT_REQUEST_PREVIEW',
-        generatedAt: '2026-09-21T00:00:00.000Z',
+        generatedAt: 1789948800,
         model: { providerName: 'minimax', modelName: 'MiniMax-M2.7', variant: 'default' },
         environmentName: 'dev-box',
         systemInstruction: 'You are an expert assistant.',
@@ -557,7 +557,7 @@ describe('ThreadEventView', () => {
           bodyByteSize: 19,
           bodyJson: '{"prompt":"draft"}',
           sourceHeadEntryId: null,
-          generatedAt: '2026-09-27T06:00:00Z',
+          generatedAt: 1790488800,
         },
       }))
       expect(detailTab).toHaveAttribute('aria-selected', 'true')
@@ -831,7 +831,7 @@ describe('ThreadEventView', () => {
         bodyByteSize: 88,
         bodyJson: '{"prompt":"hello responsive preview"}',
         sourceHeadEntryId: null,
-        generatedAt: '2026-09-27T06:00:00Z',
+        generatedAt: 1790488800,
       }
 
       function PreviewResponsiveHarness() {

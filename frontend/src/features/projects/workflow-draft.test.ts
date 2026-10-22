@@ -13,7 +13,7 @@ import {
   type WorkflowDraftState,
   type WorkflowValidationError,
 } from './workflow-draft'
-import type { ProjectWorkflowDTO } from './types'
+import type { ProjectWorkflowDTO } from '@/shared/api/generated/contracts'
 
 function draft(partial: Partial<WorkflowDraftState> & { state: string }): WorkflowDraftState {
   return { ...createDraftState(partial.state), ...partial }
@@ -43,7 +43,7 @@ describe('workflow-draft roundtrip', () => {
     // 测试意图：草稿 → DTO 的往返必须保留多 next 图、停用阶段与 Agent 阶段字段，不压成单 next 流水线。
     const workflow: ProjectWorkflowDTO = {
       states: [
-        { state: 'INIT', name: '待开始', enabled: true, next: ['WORK', 'REVIEW'] },
+        { state: 'INIT', name: '待开始', enabled: true, next: ['WORK', 'REVIEW'], agent: null, environment: null, instructions: null, maxRuns: null },
         {
           state: 'WORK',
           name: '处理中',
@@ -54,9 +54,9 @@ describe('workflow-draft roundtrip', () => {
           enabled: true,
           next: ['REVIEW', 'DONE'],
         },
-        { state: 'REVIEW', name: '评审', enabled: false, next: ['DONE'] },
-        { state: 'BLOCKED', name: '业务阻塞', enabled: true, next: [] },
-        { state: 'DONE', name: '完成', enabled: true, next: [] },
+        { state: 'REVIEW', name: '评审', enabled: false, next: ['DONE'], agent: null, environment: null, instructions: null, maxRuns: null },
+        { state: 'BLOCKED', name: '业务阻塞', enabled: true, next: [], agent: null, environment: null, instructions: null, maxRuns: null },
+        { state: 'DONE', name: '完成', enabled: true, next: [], agent: null, environment: null, instructions: null, maxRuns: null },
       ],
     }
 
@@ -72,8 +72,8 @@ describe('workflow-draft roundtrip', () => {
     })
   })
 
-  it('omits environment, maxRuns and reserved business fields when not applicable', () => {
-    // 测试意图：人工阶段不带 Environment/Run 额度；保留状态不携带任何业务字段。
+  it('clears environment, maxRuns and reserved business fields when not applicable', () => {
+    // 测试意图：人工阶段的 Environment/Run 额度为 null；保留状态的业务字段全部为 null。
     const states = [
       draft({ state: 'INIT', name: '待开始', next: ['WORK'] }),
       draft({ state: 'WORK', name: '人工阶段', instructions: '  说明  ', environment: 'ubuntu', maxRuns: '9', next: ['DONE'] }),
@@ -84,13 +84,20 @@ describe('workflow-draft roundtrip', () => {
     expect(dto.states[1]).toEqual({
       state: 'WORK',
       name: '人工阶段',
+      agent: null,
+      environment: null,
       instructions: '说明',
+      maxRuns: null,
       enabled: true,
       next: ['DONE'],
     })
     expect(dto.states[2]).toEqual({
       state: 'BLOCKED',
       name: '业务阻塞',
+      agent: null,
+      environment: null,
+      instructions: null,
+      maxRuns: null,
       enabled: true,
       next: [],
     })
@@ -103,12 +110,16 @@ describe('validateWorkflowDraft', () => {
   })
 
   it('accepts null manual stages without Agent-only fields', () => {
-    // 仅 null 表示人工；人工指令仍合法且 DTO 不携带 Agent/环境/额度。
+    // 仅 null 表示人工；人工指令仍合法且 DTO 的 Agent/环境/额度均为 null。
     const states = validDraft().map((state) =>
       state.state === 'WORK' ? { ...state, agent: null, environment: null, maxRuns: '' } : state,
     )
     expect(validateWorkflowDraft(states)).toBeNull()
-    expect(buildWorkflowDTO(states).states[1]).not.toHaveProperty('agent')
+    expect(buildWorkflowDTO(states).states[1]).toMatchObject({
+      agent: null,
+      environment: null,
+      maxRuns: null,
+    })
   })
 
   it.each(['', '   '])('rejects incomplete Agent names %j instead of treating them as manual', (agent) => {
@@ -286,9 +297,9 @@ describe('snapshot derived constraints', () => {
   it('rejects removal of a state referenced only by archived issues or blockedFromState', () => {
     const states = toDraftStates({
       states: [
-        { state: 'INIT', name: 'Init', next: ['DONE'] },
-        { state: 'BLOCKED', name: 'Blocked' },
-        { state: 'DONE', name: 'Done' },
+        { state: 'INIT', name: 'Init', next: ['DONE'], agent: null, environment: null, instructions: null, maxRuns: null },
+        { state: 'BLOCKED', name: 'Blocked', agent: null, environment: null, instructions: null, maxRuns: null },
+        { state: 'DONE', name: 'Done', agent: null, environment: null, instructions: null, maxRuns: null },
       ],
     })
     expect(validateWorkflowDraft(states, new Set(['ARCHIVED_SOURCE']))).toEqual({

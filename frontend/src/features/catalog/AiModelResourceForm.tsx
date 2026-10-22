@@ -1,6 +1,3 @@
-import type {
-  AgentModelInputModality,
-} from '@/shared/api/contracts/ai-catalog'
 import type { ModelDraft, VariantDraft } from '@/features/catalog/ai-console-types'
 import { variantOptionsFromDraft } from '@/features/catalog/ai-draft-normalizers'
 import { sanitizeDecimalInput } from '@/shared/lib/numeric-input'
@@ -13,9 +10,9 @@ import { NumberInput } from '@/shared/ui/controls/NumberInput'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 import { Select } from '@/shared/ui/controls/Select'
-import type { AgentProviderDTO } from '@/shared/api/contracts/ai-catalog'
 import { useI18n } from '@/shared/i18n'
 import { RemoteModelIdPicker } from '@/features/catalog/AiRemoteModelIdPicker'
+import type { AgentModelInputModality, AgentProviderDTO } from '@/shared/api/generated/contracts'
 
 const AGENT_MODEL_INPUT_MODALITIES: AgentModelInputModality[] = [
   'TEXT',

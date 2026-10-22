@@ -6,13 +6,13 @@ import type { AgentDraft, ModelDraft, ProviderDraft, ResourceModal } from '@/fea
 import type { ResourceFieldKey } from '@/features/catalog/ai-resource-form-validation'
 import { resourceTitle } from '@/features/catalog/catalog-utils'
 import type { AgentModelView } from '@/features/catalog/AgentModelView'
+import { useI18n } from '@/shared/i18n'
 import type {
   AgentDefinitionDTO,
   AgentProviderDTO,
   SkillPackageDTO,
   ToolCatalogEntryDTO,
-} from '@/shared/api/contracts/ai-catalog'
-import { useI18n } from '@/shared/i18n'
+} from '@/shared/api/generated/contracts'
 
 export function ResourceEditorModal({
   modal,

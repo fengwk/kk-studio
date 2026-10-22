@@ -5,7 +5,7 @@ import { MemoryRouter } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useChatListController } from '@/features/chat/useChatListController'
 import { chatService } from '@/shared/api/chat-service'
-import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
+import type { AgentDefinitionDTO } from '@/shared/api/generated/contracts'
 
 vi.mock('@/shared/api/chat-service', () => ({
   chatService: {
@@ -16,8 +16,8 @@ vi.mock('@/shared/api/chat-service', () => ({
       agentName: 'assistant',
       yoloEnabled: false,
       version: '1',
-      createTime: null,
-      updateTime: null,
+      createTime: 0,
+      updateTime: 0,
     })),
     updateChat: vi.fn(async (chatId: string, data: { title?: string | null; agentName?: string | null; expectedVersion: string }) => ({
       id: chatId,
@@ -25,8 +25,8 @@ vi.mock('@/shared/api/chat-service', () => ({
       agentName: data.agentName ?? 'assistant',
       yoloEnabled: false,
       version: '2',
-      createTime: null,
-      updateTime: null,
+      createTime: 0,
+      updateTime: 0,
     })),
     deleteChat: vi.fn(async () => undefined),
   },
@@ -47,8 +47,8 @@ const agents: AgentDefinitionDTO[] = [
       subagents: [],
     },
     version: '1',
-    createTime: null,
-    updateTime: null,
+    createTime: 0,
+    updateTime: 0,
   },
   {
     name: 'coder',
@@ -64,8 +64,8 @@ const agents: AgentDefinitionDTO[] = [
       subagents: [],
     },
     version: '1',
-    createTime: null,
-    updateTime: null,
+    createTime: 0,
+    updateTime: 0,
   },
 ]
 
@@ -160,8 +160,8 @@ describe('useChatListController', () => {
       yoloEnabled: false,
       environmentName: null,
       version: '5',
-      createTime: null,
-      updateTime: null,
+      createTime: 0,
+      updateTime: 0,
     }
 
     act(() => result.current.openEditChat(existingChat))
@@ -238,8 +238,8 @@ describe('useChatListController', () => {
       yoloEnabled: false,
       environmentName: 'production',
       version: '2',
-      createTime: null,
-      updateTime: null,
+      createTime: 0,
+      updateTime: 0,
     }
 
     act(() => result.current.openEditChat(existingChat))
@@ -285,8 +285,8 @@ describe('useChatListController', () => {
       environmentName: null,
       yoloEnabled: false,
       version: '3',
-      createTime: null,
-      updateTime: null,
+      createTime: 0,
+      updateTime: 0,
     }
 
     act(() => result.current.openEditChat(existingChat))
@@ -363,8 +363,8 @@ describe('useChatListController', () => {
       environmentName: null,
       yoloEnabled: false,
       version: '9',
-      createTime: null,
-      updateTime: null,
+      createTime: 0,
+      updateTime: 0,
     }
 
     act(() => result.current.openDeleteChat(targetChat))

@@ -24,14 +24,10 @@ import { useResourceSync } from '@/shared/app-events/useResourceSync'
 import { isConflictError } from '@/shared/api/client'
 import { presentConflict, type ConflictPresentation } from '@/shared/conflict/conflict-presenter'
 import { ConflictPresenter } from '@/shared/conflict/ConflictPresenter'
-import type {
-  EnvironmentCardDTO,
-  EnvironmentUpdateDTO,
-  EnvironmentUpdatePhase,
-} from '@/shared/api/contracts/ai-environment'
 import { AiNavigation } from '@/app/ai-console/AiNavigation'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
+import type { EnvironmentCardDTO, EnvironmentUpdateDTO } from '@/shared/api/generated/contracts'
 
 const IN_PROGRESS_UPDATE_PHASES = new Set<string>([
   'PENDING',
@@ -40,7 +36,7 @@ const IN_PROGRESS_UPDATE_PHASES = new Set<string>([
   'UNKNOWN',
 ])
 
-const UPDATE_PHASE_KEYS: Record<EnvironmentUpdatePhase, string> = {
+const UPDATE_PHASE_KEYS: Partial<Record<string, string>> = {
   PENDING: 'ai.environment.update.phase.PENDING',
   RUNNING: 'ai.environment.update.phase.RUNNING',
   PREPARED: 'ai.environment.update.phase.PREPARED',

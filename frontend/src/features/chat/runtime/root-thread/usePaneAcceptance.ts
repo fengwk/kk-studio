@@ -4,12 +4,7 @@ import { harnessService } from '@/shared/api/harness-service'
 import { presentConflict, type ConflictPresentation } from '@/shared/conflict/conflict-presenter'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
-import type {
-  AgentCommandBatchResponseDTO,
-  AgentRuntimeOwnerDTO,
-  HarnessSessionEntryDTO,
-  HarnessThreadSnapshotDTO,
-} from '@/shared/api/contracts/ai-runtime'
+import type { AgentRuntimeOwnerDTO } from '@/shared/api/contracts/ai-runtime'
 import type { BranchDraft } from '@/features/chat/branch-draft'
 import {
   clearStoredComposerDraft,
@@ -47,6 +42,11 @@ import {
   type PaneInteraction,
   type RenameKind,
 } from '@/features/chat/runtime/root-thread/types'
+import type {
+  HarnessAcceptedCommandsDTO,
+  HarnessSessionEntryDTO,
+  HarnessThreadSnapshotDTO,
+} from '@/shared/api/generated/contracts'
 
 type Ref<T> = { current: T }
 
@@ -227,7 +227,7 @@ export function usePaneAcceptance(options: PaneAcceptanceOptions) {
    */
   function seedAcceptedThreadSnapshot(
     client: QueryClient,
-    response: AgentCommandBatchResponseDTO,
+    response: HarnessAcceptedCommandsDTO,
   ): void {
     const key = queryKeys.threads.snapshot(response.thread.threadId)
     if (client.getQueryData<HarnessThreadSnapshotDTO>(key) != null) {

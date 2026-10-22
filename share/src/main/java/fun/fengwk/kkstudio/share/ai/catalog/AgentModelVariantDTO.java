@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.share.ai.catalog;
 
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import lombok.Data;
+import org.jspecify.annotations.Nullable;
 import tools.jackson.databind.annotation.JsonDeserialize;
 
 /**
@@ -22,11 +23,11 @@ public class AgentModelVariantDTO {
   private String id;
 
   /** 可空 reasoning effort：由厂商自定义，{@code off} 显式关闭，null 表示协议默认；最大长度 64。 */
-  private String reasoningEffort;
+  private @Nullable String reasoningEffort;
 
   /** 厂商原生协议选项的 JSON object 文本；传输与持久化均不解码其中的数值。 */
   @JsonDeserialize(using = ProtocolOptionsJsonStringDeserializer.class)
-  private String protocolOptionsJson;
+  private @Nullable String protocolOptionsJson;
 
   @JsonAnySetter
   public void rejectUnknownField(String name, Object value) {

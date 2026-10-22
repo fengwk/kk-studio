@@ -1,11 +1,11 @@
-import type {
-  RuntimeSessionSummaryDTO,
-  RuntimeThreadSummaryDTO,
-} from '@/shared/api/contracts/ai-runtime'
 import { formatBackendDate } from '@/features/chat/chat-utils'
+import type {
+  HarnessSessionSummaryDTO,
+  HarnessThreadSummaryDTO,
+} from '@/shared/api/generated/contracts'
 
 
-export function sessionSelectionItem(session: RuntimeSessionSummaryDTO) {
+export function sessionSelectionItem(session: HarnessSessionSummaryDTO) {
   return {
     id: session.sessionId,
     title: session.name,
@@ -19,7 +19,7 @@ export function sessionSelectionItem(session: RuntimeSessionSummaryDTO) {
   }
 }
 
-export function threadSelectionItem(thread: RuntimeThreadSummaryDTO) {
+export function threadSelectionItem(thread: HarnessThreadSummaryDTO) {
   return {
     id: thread.threadId,
     title: thread.name,

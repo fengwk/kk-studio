@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type {
-  EntryType,
-  HarnessSessionEntryDTO,
-  HarnessThreadCommandDTO,
-  ToolInvocationDTO,
-} from '@/shared/api/contracts/ai-runtime'
+import type { EntryType } from '@/shared/api/contracts/ai-runtime'
 import {
   buildThreadTimeline,
   parseApproval,
@@ -12,6 +7,11 @@ import {
 import type {
   RealtimeToolStream,
 } from '@/features/chat/runtime/thread-realtime/tool-stream'
+import type {
+  HarnessSessionEntryDTO,
+  HarnessThreadCommandDTO,
+  ToolInvocationDTO,
+} from '@/shared/api/generated/contracts'
 
 describe('thread timeline edge branches', () => {
   it('projects custom user messages, empty user content, tool resources, and assistant errors', () => {
@@ -362,8 +362,8 @@ describe('thread timeline edge branches', () => {
           thinking: 'hidden',
           errorCode: 'ERROR',
           errorMessage: 'hidden',
-          failedAt: '2026-01-01T00:00:00Z',
-          retryAt: '2026-01-01T00:00:01Z',
+          failedAt: 1767225600,
+          retryAt: 1767225601,
         },
       ],
     )
@@ -461,8 +461,8 @@ describe('thread timeline edge branches', () => {
       approvalJson: null,
       resultJson: null,
       errorJson: null,
-      createTime: '2026-01-01T00:00:00',
-      updateTime: '2026-01-01T00:00:00',
+      createTime: 1767225600,
+      updateTime: 1767225600,
     }
     const timeline = buildThreadTimeline(
       [
@@ -863,7 +863,8 @@ function entry(entryId: string, entryType: EntryType, payload: Record<string, un
     parentEntryId: null,
     entryType,
     payloadJson: JSON.stringify(payload),
-    createTime: '2026-01-01T00:00:00',
+    createTime: 1767225600,
+    usageCost: null,
   }
 }
 
@@ -882,7 +883,7 @@ function command(
     idempotencyKey: `cid-${label}`,
     payloadJson: JSON.stringify(payload),
     cancelledAt: null,
-    createTime: '2026-01-01T00:00:00',
+    createTime: 1767225600,
   }
 }
 

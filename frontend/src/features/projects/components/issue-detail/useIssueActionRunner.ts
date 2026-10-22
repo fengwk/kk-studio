@@ -12,7 +12,7 @@ import {
   type PendingIssueAction,
 } from '../../pending-action-sidecar'
 import type { ProjectsApi } from '../../projects-api'
-import type { IssueDetailDTO } from '../../types'
+import type { IssueDetailDTO } from '@/shared/api/generated/contracts'
 
 function safeLoadPendingAction(issueId: string | null): LoadPendingActionResult {
   if (!issueId) {

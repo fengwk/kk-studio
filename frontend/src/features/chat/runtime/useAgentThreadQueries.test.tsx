@@ -4,10 +4,10 @@ import type { ReactNode } from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { agentService } from '@/shared/api/agent-service'
 import { harnessService } from '@/shared/api/harness-service'
-import type { HarnessThreadSnapshotDTO, ToolInvocationDTO } from '@/shared/api/contracts/ai-runtime'
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
 import { useAgentThreadQueries } from './useAgentThreadQueries'
+import type { HarnessThreadSnapshotDTO, ToolInvocationDTO } from '@/shared/api/generated/contracts'
 
 const ROOT = '11111111-2222-4333-8444-555555555555'
 const CHILD = '22222222-2222-4333-8444-555555555555'
@@ -24,7 +24,7 @@ function snapshot(id = ROOT, overrides: Partial<ToolInvocationDTO> = {}): Harnes
       executionControl: 'RUNNABLE',
       branchSettings: { agentName: 'agent', model: { providerName: 'p', modelName: 'm', variant: 'default' },
         environmentName: 'composer-is-not-the-route', goal: null },
-      createTime: null, updateTime: null,
+      createTime: 0, updateTime: 0,
     },
     entries: [], queuedCommands: [], modelInvocation: null, modelAttemptFailures: [], stopReceipts: [],
     manualCompaction: { available: false, disabledReason: null },
@@ -34,7 +34,7 @@ function snapshot(id = ROOT, overrides: Partial<ToolInvocationDTO> = {}): Harnes
       environmentId: null, requiredEnvironmentId: 'frozen-environment',
       requiredEnvironmentName: 'archlinux', waitingForEnvironment: true, environmentWaitFreshnessAt: null,
       argumentsJson: '{"command":"pwd"}', approvalJson: null, resultJson: null, errorJson: null,
-      createTime: null, updateTime: null, ...overrides,
+      createTime: 0, updateTime: 0, ...overrides,
     }],
   }
 }

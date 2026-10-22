@@ -5,16 +5,16 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { setLocale, translate } from '@/shared/i18n'
 import { EditProjectModal } from './EditProjectModal'
 import { IssueDetailModal } from './IssueDetailModal'
-import type { IssueDetailDTO, ProjectDTO } from '../types'
 import type { ProjectsApi } from '../projects-api'
 import type { StorageService } from '@/shared/api/storage-service'
+import type { IssueDetailDTO, ProjectDTO } from '@/shared/api/generated/contracts'
 
 // Agent 目录/环境列表是工作流编辑器的共享查询依赖；这里固定内容以保证双语渲染断言稳定。
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {
     listAgents: vi.fn().mockResolvedValue({
       results: [{ name: 'architect' }, { name: 'backend-dev' }],
-      totalCount: 2,
+      totalCount: '2',
     }),
   },
 }))
@@ -38,9 +38,9 @@ const project: ProjectDTO = {
   description: 'Project desc',
   workflow: {
     states: [
-      { state: 'INIT', name: '待开始', next: ['DONE'] },
-      { state: 'BLOCKED', name: '业务阻塞' },
-      { state: 'DONE', name: '完成' },
+      { state: 'INIT', name: '待开始', next: ['DONE'], agent: null, environment: null, instructions: null, maxRuns: null },
+      { state: 'BLOCKED', name: '业务阻塞', agent: null, environment: null, instructions: null, maxRuns: null },
+      { state: 'DONE', name: '完成', agent: null, environment: null, instructions: null, maxRuns: null },
     ],
   },
   yoloEnabled: true,

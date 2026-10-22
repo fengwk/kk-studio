@@ -9,8 +9,8 @@ import { queryKeys } from '@/shared/lib/query-keys'
 import { CreateProjectModal } from './CreateProjectModal'
 import { EditProjectModal, type EditProjectModalProps } from './EditProjectModal'
 import { DeleteProjectModal } from './DeleteProjectModal'
-import type { ProjectDTO, ProjectIssueSnapshotDTO } from '../types'
 import type { ProjectsApi } from '../projects-api'
+import type { ProjectDTO, ProjectIssueSnapshotDTO } from '@/shared/api/generated/contracts'
 
 // Agent 目录与环境列表由共享查询提供；这里固定为可预期的目录内容，
 // 以便验证「目录中存在的 Agent」与「仅存于草稿中的历史 Agent」两条路径。
@@ -18,7 +18,7 @@ vi.mock('@/shared/api/agent-service', () => ({
   agentService: {
     listAgents: vi.fn().mockResolvedValue({
       results: [{ name: 'architect' }, { name: 'backend-dev' }],
-      totalCount: 2,
+      totalCount: '2',
     }),
   },
 }))
@@ -64,9 +64,9 @@ const mockProject: ProjectDTO = {
   description: 'Project desc',
   workflow: {
     states: [
-      { state: 'INIT', name: '待开始', next: ['DONE'] },
-      { state: 'BLOCKED', name: '业务阻塞' },
-      { state: 'DONE', name: '完成' },
+      { state: 'INIT', name: '待开始', next: ['DONE'], agent: null, environment: null, instructions: null, maxRuns: null },
+      { state: 'BLOCKED', name: '业务阻塞', agent: null, environment: null, instructions: null, maxRuns: null },
+      { state: 'DONE', name: '完成', agent: null, environment: null, instructions: null, maxRuns: null },
     ],
   },
   yoloEnabled: true,
@@ -82,7 +82,7 @@ const workflowProject: ProjectDTO = {
   ...mockProject,
   workflow: {
     states: [
-      { state: 'INIT', name: '待开始', next: ['WORK', 'REVIEW'] },
+      { state: 'INIT', name: '待开始', next: ['WORK', 'REVIEW'], agent: null, environment: null, instructions: null, maxRuns: null },
       {
         state: 'WORK',
         name: '处理中',
@@ -92,9 +92,9 @@ const workflowProject: ProjectDTO = {
         maxRuns: '3',
         next: ['REVIEW', 'DONE'],
       },
-      { state: 'REVIEW', name: '评审', enabled: false, next: ['DONE'] },
-      { state: 'BLOCKED', name: '业务阻塞' },
-      { state: 'DONE', name: '完成' },
+      { state: 'REVIEW', name: '评审', enabled: false, next: ['DONE'], agent: null, environment: null, instructions: null, maxRuns: null },
+      { state: 'BLOCKED', name: '业务阻塞', agent: null, environment: null, instructions: null, maxRuns: null },
+      { state: 'DONE', name: '完成', agent: null, environment: null, instructions: null, maxRuns: null },
     ],
   },
 }
@@ -169,7 +169,7 @@ describe('EditProjectModal', () => {
     async (catalogState) => {
       // 空/读取中/失败目录不撤销用户模式选择；真实查询刷新后仍须显式选 Agent 与额度。
       const user = userEvent.setup()
-      const emptyPage = { results: [], totalCount: 0, pageNumber: 1, pageSize: 50 }
+      const emptyPage = { results: [], totalCount: '0', pageNumber: 1, pageSize: 50 }
       let resolveCatalog!: (value: typeof emptyPage) => void
       if (catalogState === 'loading') {
         vi.mocked(agentService.listAgents).mockImplementationOnce(
@@ -266,8 +266,8 @@ describe('EditProjectModal', () => {
       ...mockProject,
       workflow: { states: [
         ...mockProject.workflow.states,
-        { state: 'OLD', name: '归档来源', enabled: false, next: [] },
-        { state: 'SOURCE', name: '阻塞来源', enabled: false, next: [] },
+        { state: 'OLD', name: '归档来源', agent: null, environment: null, instructions: null, maxRuns: null, enabled: false, next: [] },
+        { state: 'SOURCE', name: '阻塞来源', agent: null, environment: null, instructions: null, maxRuns: null, enabled: false, next: [] },
       ] },
     }
     renderWithClient(
@@ -288,7 +288,7 @@ describe('EditProjectModal', () => {
     const user = userEvent.setup()
     const project = { ...mockProject, workflow: { states: [
       ...mockProject.workflow.states,
-      { state: 'OLD', name: 'Old', enabled: false, next: [] },
+      { state: 'OLD', name: 'Old', agent: null, environment: null, instructions: null, maxRuns: null, enabled: false, next: [] },
     ] } }
     let resolveSnapshot!: (value: { project: ProjectDTO; issues: []; referencedStateCodes: string[] }) => void
     const api = {
@@ -340,7 +340,7 @@ describe('EditProjectModal', () => {
     const user = userEvent.setup()
     const project = { ...mockProject, workflow: { states: [
       ...mockProject.workflow.states,
-      { state: 'OLD', name: 'Old', enabled: false, next: [] },
+      { state: 'OLD', name: 'Old', agent: null, environment: null, instructions: null, maxRuns: null, enabled: false, next: [] },
     ] } }
     const api = { updateWorkflow: vi.fn() } as unknown as ProjectsApi
     const props = { isOpen: true, project, api, onClose: vi.fn(), onSuccess: vi.fn() }
@@ -606,9 +606,9 @@ describe('EditProjectModal', () => {
     const user = userEvent.setup()
     const freshWorkflow = {
       states: [
-        { state: 'INIT', name: '待开始', next: ['DONE'] },
-        { state: 'BLOCKED', name: '业务阻塞' },
-        { state: 'DONE', name: '完成' },
+        { state: 'INIT', name: '待开始', agent: null, environment: null, instructions: null, maxRuns: null, next: ['DONE'] },
+        { state: 'BLOCKED', name: '业务阻塞', agent: null, environment: null, instructions: null, maxRuns: null },
+        { state: 'DONE', name: '完成', agent: null, environment: null, instructions: null, maxRuns: null },
       ],
     }
     const mockApi = {
@@ -649,9 +649,9 @@ describe('EditProjectModal', () => {
         expectedVersion: '7',
         workflow: {
           states: [
-            { state: 'INIT', name: '待开始', enabled: true, next: ['DONE'] },
-            { state: 'BLOCKED', name: '业务阻塞', enabled: true, next: [] },
-            { state: 'DONE', name: '完成', enabled: true, next: [] },
+            { state: 'INIT', name: '待开始', agent: null, environment: null, instructions: null, maxRuns: null, enabled: true, next: ['DONE'] },
+            { state: 'BLOCKED', name: '业务阻塞', agent: null, environment: null, instructions: null, maxRuns: null, enabled: true, next: [] },
+            { state: 'DONE', name: '完成', agent: null, environment: null, instructions: null, maxRuns: null, enabled: true, next: [] },
           ],
         },
       })
@@ -840,7 +840,7 @@ describe('EditProjectModal', () => {
         expectedVersion: '1',
         workflow: {
           states: [
-            { state: 'INIT', name: '待开始', enabled: true, next: ['WORK', 'REVIEW'] },
+            { state: 'INIT', name: '待开始', agent: null, environment: null, instructions: null, maxRuns: null, enabled: true, next: ['WORK', 'REVIEW'] },
             {
               state: 'WORK',
               name: '处理中',
@@ -851,9 +851,9 @@ describe('EditProjectModal', () => {
               instructions: '实现并自测',
               maxRuns: '3',
             },
-            { state: 'REVIEW', name: '评审', enabled: false, next: ['DONE'] },
-            { state: 'BLOCKED', name: '业务阻塞', enabled: true, next: [] },
-            { state: 'DONE', name: '完成', enabled: true, next: [] },
+            { state: 'REVIEW', name: '评审', agent: null, environment: null, instructions: null, maxRuns: null, enabled: false, next: ['DONE'] },
+            { state: 'BLOCKED', name: '业务阻塞', agent: null, environment: null, instructions: null, maxRuns: null, enabled: true, next: [] },
+            { state: 'DONE', name: '完成', agent: null, environment: null, instructions: null, maxRuns: null, enabled: true, next: [] },
           ],
         },
       })

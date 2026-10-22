@@ -5,8 +5,8 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { CreateChatModal } from '@/features/chat/CreateChatModal'
 import { chooseSelectOption } from '@/test-support/chooseSelectOption'
-import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import { environmentService } from '@/shared/api/environment-service'
+import type { AgentDefinitionDTO } from '@/shared/api/generated/contracts'
 
 vi.mock('@/shared/api/environment-service', () => ({
   environmentService: {
@@ -28,8 +28,8 @@ const agentWithEnv: AgentDefinitionDTO = {
     subagents: [],
   },
   version: '1',
-  createTime: null,
-  updateTime: null,
+  createTime: 0,
+  updateTime: 0,
 }
 
 function createModalProps(

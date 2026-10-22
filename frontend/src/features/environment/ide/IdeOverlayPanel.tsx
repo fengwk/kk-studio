@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { FolderOpen, PanelRightClose, Terminal, X } from 'lucide-react'
 import { environmentService } from '@/shared/api/environment-service'
-import type { EnvironmentCardDTO, IdeViewDTO } from '@/shared/api/contracts/ai-environment'
 import { OpenDirectoryModal } from '@/features/environment/ide/OpenDirectoryModal'
 import { Button } from '@/shared/ui/controls/Button'
 import { Select } from '@/shared/ui/controls/Select'
@@ -11,6 +10,7 @@ import { useI18n } from '@/shared/i18n'
 import { validateIdeEntryUrl } from '@/features/environment/ide/ide-url'
 import { useIdeLifecycle } from '@/features/environment/ide/ide-lifecycle-context'
 import '@/features/environment/ide/ide-overlay-panel.css'
+import type { EnvironmentCardDTO, EnvironmentIdeViewDTO } from '@/shared/api/generated/contracts'
 
 export interface ResolvedEnvironmentInfo {
   id: string
@@ -67,7 +67,7 @@ export function IdeOverlayPanel({
   onIdeMountedChange,
 }: IdeOverlayPanelProps) {
   const { t } = useI18n()
-  const [view, setView] = useState<IdeViewDTO | null>(null)
+  const [view, setView] = useState<EnvironmentIdeViewDTO | null>(null)
   const [status, setStatus] = useState<'idle' | 'opening' | 'ready' | 'error' | 'offline' | 'select-environment'>('idle')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [terminalError, setTerminalError] = useState<string | null>(null)
@@ -79,7 +79,7 @@ export function IdeOverlayPanel({
   const [confirmCloseOpen, setConfirmCloseOpen] = useState(false)
 
   const { registerIdeView } = useIdeLifecycle()
-  const activeViewRef = useRef<IdeViewDTO | null>(null)
+  const activeViewRef = useRef<EnvironmentIdeViewDTO | null>(null)
   useEffect(() => {
     activeViewRef.current = view
   }, [view])
@@ -384,7 +384,7 @@ export function IdeOverlayPanel({
           if (!prev || prev.viewId !== targetViewId || prev.environmentId !== targetEnvId) {
             return prev
           }
-          const nextView: IdeViewDTO = {
+          const nextView: EnvironmentIdeViewDTO = {
             ...prev,
             directory: res.directory,
             entryUrl: prev.entryUrl,

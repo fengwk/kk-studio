@@ -1,7 +1,7 @@
 import { test, expect } from './fixture'
-import type { CanvasCommandDTO, UUIDString } from '../src/shared/api/contracts/studio'
+import type { CanvasCommandDTO } from '@/shared/api/generated/contracts'
 
-const NODE_ID = 'c9e3b7f1-2a4d-4e6f-8a9b-0c1d2e3f4a5b' as UUIDString
+const NODE_ID = 'c9e3b7f1-2a4d-4e6f-8a9b-0c1d2e3f4a5b'
 
 const RENAME_CMD: CanvasCommandDTO = {
   type: 'RENAME_NODE',

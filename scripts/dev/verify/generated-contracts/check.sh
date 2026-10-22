@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 校验前端稳定传输契约（frontend/src/shared/api/generated/stable-contracts.ts）与真实 HTTP Jackson mapper
+# 校验前端传输契约（frontend/src/shared/api/generated/contracts.ts）与 Web 控制器签名、真实 HTTP Jackson mapper
 # 是否漂移。只读：缺文件、字段/enum 变化或产物被手改都会失败，绝不修改源码；更新必须显式运行 write.sh。
 set -euo pipefail
 
@@ -27,6 +27,6 @@ fi
 
 cd "$REPO_ROOT"
 exec env JAVA_HOME="$JDK21" mvn -q -pl web -am \
-  -Dtest=StableTsContractArtifactTest \
+  -Dtest=TsContractArtifactTest \
   -Dsurefire.failIfNoSpecifiedTests=false \
   test

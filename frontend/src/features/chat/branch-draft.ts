@@ -1,13 +1,13 @@
-import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
-import type {
-  HarnessBranchSettingsDTO,
-  HarnessModelSelectionDTO,
-  HarnessCommandCreateDTO,
-  HarnessThreadCommandDTO,
-  HarnessThreadDTO,
-} from '@/shared/api/contracts/ai-runtime'
+import type { HarnessCommandCreateDTO } from '@/shared/api/contracts/ai-runtime'
 import { modelRef, type AgentModelView } from '@/features/catalog'
 import { parsePayload } from '@/features/chat/runtime/payload-json'
+import type {
+  AgentDefinitionDTO,
+  HarnessBranchSettingsDTO,
+  HarnessModelSelectionDTO,
+  HarnessThreadCommandDTO,
+  HarnessThreadDTO,
+} from '@/shared/api/generated/contracts'
 
 /**
  * 面板编辑的完整 branch target：持久化 branch settings 加上 Thread 级别的 YOLO runtime policy。

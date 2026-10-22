@@ -31,7 +31,7 @@ const input: InputInteractionDTO = {
   environmentId: null,
   environmentName: null,
   waitingCount: null,
-  createTime: '2026-09-27T10:00:00Z',
+  createTime: 1790503200,
 }
 
 const approval: ApprovalInteractionDTO = {
@@ -45,7 +45,7 @@ const environmentWait = (rootThreadId: string, environmentId: string): Environme
   type: 'ENVIRONMENT_WAIT',
   rootThreadId,
   owner,
-  createTime: '2026-09-27T10:00:00Z',
+  createTime: 1790503200,
   interactionId: null,
   status: null,
   threadId: null,

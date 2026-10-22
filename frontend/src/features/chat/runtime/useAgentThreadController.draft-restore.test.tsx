@@ -3,15 +3,6 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type {
-  AgentCommandBatchResponseDTO,
-  HarnessCancelledInputDTO,
-  HarnessStoppedThreadReceiptDTO,
-  HarnessThreadDTO,
-  HarnessThreadSnapshotDTO,
-  HarnessThreadStopResultDTO,
-} from '@/shared/api/contracts/ai-runtime'
-import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import { createTextPart, partsToText } from '@/features/chat/composer/composer-parts'
 import { useAgentThreadController } from '@/features/chat/runtime/useAgentThreadController'
 import {
@@ -33,6 +24,15 @@ import { ApplicationEventProvider } from '@/shared/app-events'
 import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
 import { agentService } from '@/shared/api/agent-service'
 import { harnessService } from '@/shared/api/harness-service'
+import type {
+  AgentDefinitionDTO,
+  HarnessAcceptedCommandsDTO,
+  HarnessCancelledInputDTO,
+  HarnessStoppedThreadReceiptDTO,
+  HarnessThreadDTO,
+  HarnessThreadSnapshotDTO,
+  HarnessThreadStopResultDTO,
+} from '@/shared/api/generated/contracts'
 
 /**
  * 控制器层「Stop 回执合并 / 草稿持久化」的行为契约。
@@ -121,8 +121,8 @@ const assistantAgentEntry: AgentDefinitionDTO = {
   variant: 'default',
   config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
   version: '0',
-  createTime: null,
-  updateTime: null,
+  createTime: 0,
+  updateTime: 0,
 }
 
 function threadFixture(
@@ -151,8 +151,8 @@ function threadFixture(
       environmentName: null,
       goal: null,
     },
-    createTime: null,
-    updateTime: null,
+    createTime: 0,
+    updateTime: 0,
     ...rest,
   }
 }
@@ -178,16 +178,17 @@ function snapshotOf(
   }
 }
 
-function acceptedResponse(currentThread = threadFixture()): AgentCommandBatchResponseDTO {
+function acceptedResponse(currentThread = threadFixture()): HarnessAcceptedCommandsDTO {
   return {
-    session: { sessionId: currentThread.sessionId, name: 'Session', createdAt: null },
+    session: { sessionId: currentThread.sessionId, name: 'Session', createdAt: 0 },
     rootEntry: {
       entryId: 'root-1',
       sessionId: currentThread.sessionId,
       parentEntryId: null,
       entryType: 'ROOT',
       payloadJson: '{}',
-      createTime: null,
+      createTime: 0,
+      usageCost: null,
     },
     thread: currentThread,
     acceptedCommands: [],
@@ -293,13 +294,13 @@ describe('useAgentThreadController draft restore', () => {
     vi.mocked(agentService.listAgents).mockResolvedValue({
       pageNumber: 1,
       pageSize: 50,
-      totalCount: 1,
+      totalCount: '1',
       results: [assistantAgentEntry],
     })
     vi.mocked(agentService.listModels).mockResolvedValue({
       pageNumber: 1,
       pageSize: 50,
-      totalCount: 0,
+      totalCount: '0',
       results: [],
     })
     vi.mocked(harnessService.getThreadSnapshot).mockImplementation(async (threadId: string) =>

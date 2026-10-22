@@ -3,22 +3,18 @@ import { Badge, type BadgeTone } from '@/shared/ui/data/Badge'
 import { useI18n, type AppLocale } from '@/shared/i18n'
 import { Button } from '@/shared/ui/controls/Button'
 import { ResourceCard, type ResourceCardMetaRow } from '@/shared/ui/cards/ResourceCard'
-import type { PluginDTO, PluginStatus } from '@/shared/api/contracts/ai-plugin'
-import type { InstantTimestamp } from '@/shared/api/contracts/base'
 import { pluginConnectionCheckExpected } from '@/features/extensions/plugin-connection-check'
+import type { PluginDTO } from '@/shared/api/generated/contracts'
 
-function formatDateTime(value: InstantTimestamp | undefined, locale: AppLocale): string {
-  if (value === null || value === undefined) {
+/** 后端 Instant 的 wire 约定是 epoch seconds。 */
+function formatDateTime(value: number | null | undefined, locale: AppLocale): string {
+  if (value == null) {
     return '—'
   }
-  const date = new Date(typeof value === 'number' ? value * 1000 : value)
-  if (Number.isNaN(date.getTime())) {
-    return String(value)
-  }
-  return date.toLocaleString(locale)
+  return new Date(value * 1000).toLocaleString(locale)
 }
 
-function statusTone(status: PluginStatus): BadgeTone {
+function statusTone(status: string): BadgeTone {
   switch (status) {
     case 'CONNECTED':
       return 'success'

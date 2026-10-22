@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import type { ModelDraft } from '@/features/catalog/ai-console-types'
-import type { AgentModelInputModality } from '@/shared/api/contracts/ai-catalog'
 import {
   newPricingRuleDraft,
   emptyModelDraft,
@@ -13,7 +12,11 @@ import {
   toEditableModelUpdate,
   toModelDraft,
 } from '@/features/catalog/ai-model-draft-codec'
-import type { AgentModelConfigDTO, AgentModelDTO } from '@/shared/api/contracts/ai-catalog'
+import type {
+  AgentModelConfigDTO,
+  AgentModelDTO,
+  AgentModelInputModality,
+} from '@/shared/api/generated/contracts'
 
 function draft(overrides: Partial<ModelDraft> = {}): ModelDraft {
   return {
@@ -68,8 +71,8 @@ function model(configOverride?: AgentModelConfigDTO): AgentModelDTO {
     description: 'desc',
     config: configOverride ?? fullConfig(),
     version: '1',
-    createTime: null,
-    updateTime: null,
+    createTime: 0,
+    updateTime: 0,
   }
 }
 
@@ -251,8 +254,8 @@ describe('ai-model-draft-codec', () => {
       description: createPayload.description,
       config: createPayload.config,
       version: '1',
-      createTime: null,
-      updateTime: null,
+      createTime: 0,
+      updateTime: 0,
     }
     const editDraft = toModelDraft(savedModel)
     expect(
@@ -355,7 +358,7 @@ describe('ai-model-draft-codec', () => {
       cacheWriteLongPerMillionTokens: 0,
       reasoningPerMillionTokens: 2,
     }
-    const longContext = { ...rule, timeWindow: null, minContextTokens: 200000 }
+    const longContext = { ...rule, timeWindow: null, minContextTokens: '200000' }
     const source = model({
       ...fullConfig(),
       pricing: { ...fullConfig().pricing, rules: [rule, longContext] },
@@ -380,7 +383,7 @@ describe('ai-model-draft-codec', () => {
     )
     expect(build({ timeWindowEnabled: false, minContextTokens: '128000' }).pricing.rules?.[0]).toMatchObject({
       timeWindow: null,
-      minContextTokens: 128000,
+      minContextTokens: '128000',
     })
   })
 

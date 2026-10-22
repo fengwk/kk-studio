@@ -43,7 +43,7 @@ describe('useInteractionsController', () => {
     toolName: 'ask_user',
     argumentsJson: '{"questions":[]}',
     approvalJson: null,
-    createTime: '2026-09-27T00:00:00Z',
+    createTime: 1790467200,
   }
 
   const mockItem2: InteractionDTO = {
@@ -60,7 +60,7 @@ describe('useInteractionsController', () => {
     toolName: 'bash',
     argumentsJson: '{"command":"ls"}',
     approvalJson: '{"required":true}',
-    createTime: '2026-09-27T00:01:00Z',
+    createTime: 1790467260,
   }
 
   function mockPage(
@@ -647,7 +647,7 @@ describe('useInteractionsController', () => {
       agentName: null,
       rootThreadName: 'Root',
     },
-    createTime: '2026-09-27T00:00:00Z',
+    createTime: 1790467200,
     interactionId: null,
     status: null,
     threadId: null,

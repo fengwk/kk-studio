@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.share.ai.runtime;
 
 import lombok.Data;
+import org.jspecify.annotations.Nullable;
 
 import java.time.Instant;
 
@@ -60,8 +61,8 @@ public class HarnessProviderRequestPreviewDTO {
    *
    * <p>草稿预览是草稿分支起点；历史预览是该模型输出的请求前缀 head。两者都不包含被预览输出自身及其之后的历史。
    */
-  private String sourceHeadEntryId;
+  private @Nullable String sourceHeadEntryId;
 
   /** 固定提示，取 {@link #DRAFT_NOTICE} 或 {@link #HISTORICAL_NOTICE}。 */
-  private String notice;
+  private @Nullable String notice;
 }

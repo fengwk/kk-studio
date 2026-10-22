@@ -1,7 +1,6 @@
 import type {
   HarnessCommandCreateDTO,
-  HarnessThreadDTO,
-  ThreadCommandBatchRequestDTO,
+  HarnessThreadCommandBatchDTO,
 } from '@/shared/api/contracts/ai-runtime'
 import {
   buildBranchDiffCommands,
@@ -19,13 +18,14 @@ import {
   trimMessageParts,
   type ComposerPart,
 } from '@/features/chat/composer/composer-parts'
+import type { HarnessThreadDTO } from '@/shared/api/generated/contracts'
 
 /**
  * 既有 Thread 的一次命令批次计划：请求只携带精确 CAS 游标与有序命令，
  * 不携带 owner/target；targetDraft 是失败后本地恢复用的 branch 草稿身份。
  */
 export interface CommandBatchPlan {
-  request: ThreadCommandBatchRequestDTO
+  request: HarnessThreadCommandBatchDTO
   identity: string
   targetDraft: BranchDraft
 }

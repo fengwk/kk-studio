@@ -8,7 +8,7 @@ import type {
   AgentModelUpdateDTO,
   AgentProviderCreateDTO,
   AgentProviderUpdateDTO,
-} from '@/shared/api/contracts/ai-catalog'
+} from '@/shared/api/generated/contracts'
 
 function createClient() {
   return createMockHttpClient()

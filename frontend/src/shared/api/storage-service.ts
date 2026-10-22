@@ -1,10 +1,10 @@
 import { ApiError, apiClient, type HttpClient } from '@/shared/api/client'
 import type {
+  StorageBlobUrl,
   StoragePresignedPutDTO,
-  StoragePresignedUrlDTO,
   StorageUploadDTO,
-  StorageUploadReserveRequestDTO,
 } from '@/shared/api/contracts/storage'
+import type { StorageUploadReserveRequestDTO } from '@/shared/api/generated/contracts'
 
 /** 直传签名响应中禁止浏览器发送的请求头（浏览器会拒绝或改写它们）。 */
 const FORBIDDEN_UPLOAD_HEADERS = new Set([
@@ -46,7 +46,7 @@ const FORBIDDEN_UPLOAD_HEADERS = new Set([
  * 该契约绝不暴露 bucket/key，客户端也不能提交对象 key。
  */
 export function createStorageService(client: HttpClient = apiClient) {
-  const getBlobDownloadUrl = async (blobId: string): Promise<StoragePresignedUrlDTO> => {
+  const getBlobDownloadUrl = async (blobId: string): Promise<StorageBlobUrl> => {
     const raw = await client.post<unknown>(
       `/storage/blobs/${encodeURIComponent(blobId)}/download-url`,
     )
@@ -60,9 +60,9 @@ export function createStorageService(client: HttpClient = apiClient) {
       client.post(`/storage/uploads/${encodeURIComponent(uploadId)}/complete`),
     deleteUpload: (uploadId: string): Promise<void> =>
       client.delete(`/storage/uploads/${encodeURIComponent(uploadId)}`),
-    /** 下载 URL 端点（原件）：sizeBytes 是 Java long 的 decimal string|null，严格归一化为 number|null。 */
+    /** 下载 URL 端点（原件）：给出权威 mediaType 与 sizeBytes。 */
     getBlobDownloadUrl,
-    getBlobPreviewUrl: async (blobId: string): Promise<StoragePresignedUrlDTO> => {
+    getBlobPreviewUrl: async (blobId: string): Promise<StorageBlobUrl> => {
       const raw = await client.post<unknown>(
         `/storage/blobs/${encodeURIComponent(blobId)}/preview-url`,
       )
@@ -115,20 +115,18 @@ export const storageService = createStorageService()
 
 /**
  * 严格解码 blob 预签名 URL 响应：url 必须是非空字符串；
- * sizeBytes 是 Java long，wire 为 decimal string|number|null，
- * 统一安全转为 number|null（非负且 Number.isSafeInteger），非法即 fail closed。
+ * sizeBytes 是 Java long 的十进制字符串或 null，转为非负安全整数，非法即 fail closed。
  */
-function decodeBlobUrl(value: unknown): StoragePresignedUrlDTO {
+function decodeBlobUrl(value: unknown): StorageBlobUrl {
   if (!value || typeof value !== 'object') {
     throw new ApiError('Storage blob URL response is invalid')
   }
-  const candidate = value as Partial<StoragePresignedUrlDTO> & Record<string, unknown>
+  const candidate = value as Record<string, unknown>
   if (typeof candidate.url !== 'string' || !candidate.url.trim()) {
     throw new ApiError('Storage blob URL response is missing a non-empty url')
   }
   return {
     url: candidate.url,
-    expiresAt: candidate.expiresAt as StoragePresignedUrlDTO['expiresAt'],
     mediaType: typeof candidate.mediaType === 'string' ? candidate.mediaType : null,
     sizeBytes: decodeBlobSizeBytes(candidate.sizeBytes),
   }
@@ -138,12 +136,8 @@ function decodeBlobSizeBytes(value: unknown): number | null {
   if (value === null || value === undefined) {
     return null
   }
-  let parsed = Number.NaN
-  if (typeof value === 'number') {
-    parsed = value
-  } else if (typeof value === 'string' && /^(0|[1-9][0-9]*)$/.test(value)) {
-    parsed = Number(value)
-  }
+  const parsed =
+    typeof value === 'string' && /^(0|[1-9][0-9]*)$/.test(value) ? Number(value) : Number.NaN
   if (!Number.isSafeInteger(parsed) || parsed < 0) {
     throw new ApiError('Storage blob URL response sizeBytes must be a non-negative safe integer or null')
   }

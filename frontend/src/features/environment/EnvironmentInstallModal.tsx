@@ -1,10 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import type {
-  EnvironmentCardDTO,
-  EnvironmentInstallConfigDTO,
-  InstallOperatingSystem,
-} from '@/shared/api/contracts/ai-environment'
 import { environmentService } from '@/shared/api/environment-service'
 import { isConflictError } from '@/shared/api/client'
 import { presentConflict, type ConflictPresentation } from '@/shared/conflict/conflict-presenter'
@@ -24,9 +19,16 @@ import {
   detectInstallOS,
   generateInstallCommand,
   generateUninstallCommand,
+  isInstallOperatingSystem,
   validateInstallConfig,
+  type InstallOperatingSystem,
+  type ValidatedInstallConfig,
 } from './install-command'
 import './environment-install.css'
+import type {
+  EnvironmentCardDTO,
+  EnvironmentInstallConfigDTO,
+} from '@/shared/api/generated/contracts'
 
 type Translate = (key: string, values?: InterpolationValues) => string
 
@@ -54,7 +56,7 @@ function fieldMessage(t: Translate, field: string): string {
 const blankToNull = (value: string): string | null => (value.trim() ? value : null)
 
 /** 已保存设置 → 表单字段；仅在加载成功或用户选择默认设置时应用。 */
-function formFromConfig(config: EnvironmentInstallConfigDTO) {
+function formFromConfig(config: ValidatedInstallConfig) {
   return {
     os: config.operatingSystem,
     studioUrl: config.daemon.studioUrl,
@@ -86,7 +88,8 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
   const { t } = useI18n()
   const queryClient = useQueryClient()
   const savedOS = environment.installConfig?.operatingSystem
-  const [os, setOS] = useState<InstallOperatingSystem>(savedOS ?? detectInstallOS(navigator.platform))
+  const defaultOS = isInstallOperatingSystem(savedOS) ? savedOS : detectInstallOS(navigator.platform)
+  const [os, setOS] = useState<InstallOperatingSystem>(defaultOS)
   const [studioUrl, setStudioUrl] = useState(window.location.origin)
   const [bashExecutable, setBashExecutable] = useState('')
   const [note, setNote] = useState('')
@@ -166,8 +169,7 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
 
   /** 显式放弃无效的已保存设置，改用 origin/OS 默认值；保留刚读取到的版本。 */
   function useDefaultSettings() {
-    const fallback = savedOS ?? detectInstallOS(navigator.platform)
-    setOS(fallback)
+    setOS(defaultOS)
     setStudioUrl(window.location.origin)
     setBashExecutable('')
     setNote('')
@@ -222,7 +224,7 @@ export function EnvironmentInstallModal({ environment, uninstall = false, onClos
         command = generateInstallCommand(
           downloadOrigin,
           savedCard.id,
-          savedCard.installConfig.operatingSystem,
+          validateInstallConfig(savedCard.installConfig).operatingSystem,
           issued.code,
         )
       }

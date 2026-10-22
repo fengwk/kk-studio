@@ -10,8 +10,8 @@ import { useThreadPresentation, type ThreadPresentation } from './thread-present
 import { ThreadPresentationActions } from './ThreadPresentationActions'
 import { Button } from '@/shared/ui/controls/Button'
 import { useI18n } from '@/shared/i18n'
-import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import '@/features/chat/runtime/child-thread-view.css'
+import type { EnvironmentCardDTO } from '@/shared/api/generated/contracts'
 
 /**
  * 已绑定 Thread 的视图外壳：只消费投影与视图状态，不挂载草稿、上传或人工执行

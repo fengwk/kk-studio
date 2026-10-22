@@ -2,13 +2,6 @@ import {
   extractResultEditReview,
   parseEditReview,
 } from '@/features/chat/runtime/mutation-review'
-import type {
-  HarnessSessionEntryDTO,
-  HarnessThreadCommandDTO,
-  ModelAttemptFailureDTO,
-  ModelInvocationDTO,
-  ToolInvocationDTO,
-} from '@/shared/api/contracts/ai-runtime'
 import { asRecord, getRecordList, getString, parsePayload } from '@/features/chat/runtime/payload-json'
 import type {
   RealtimeModelStream,
@@ -37,6 +30,13 @@ import { projectCompactionEntry } from '@/features/chat/runtime/thread-timeline/
 import { contentText } from '@/features/chat/runtime/thread-timeline/content-utils'
 import { createModelAttemptFailureMessage } from '@/features/chat/runtime/thread-timeline/model-attempt-failure'
 import { translate } from '@/shared/i18n'
+import type {
+  HarnessSessionEntryDTO,
+  HarnessThreadCommandDTO,
+  ModelAttemptFailureDTO,
+  ModelInvocationDTO,
+  ToolInvocationDTO,
+} from '@/shared/api/generated/contracts'
 
 /** 仍在 mailbox 中排队的人类输入类型；NOTIFICATION / CUSTOM_MESSAGE 是系统事实与编排产物。 */
 const HUMAN_INPUT_COMMAND_TYPES = new Set(['USER_MESSAGE', 'GOAL'])

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createHarnessService } from '@/shared/api/harness-service'
 import { createMockHttpClient } from '@/test-support/mock-http-client'
-import type { AgentCommandBatchRequestDTO } from '@/shared/api/contracts/ai-runtime'
+import type { HarnessCommandBatchDTO } from '@/shared/api/contracts/ai-runtime'
 
 function createClient() {
   return createMockHttpClient()
@@ -15,7 +15,7 @@ describe('harnessService', () => {
   it('submits creation command batches via POST /command-batches', async () => {
     const http = createClient()
     const service = createHarnessService(http)
-    const request: AgentCommandBatchRequestDTO = {
+    const request: HarnessCommandBatchDTO = {
       owner: { type: 'CHAT' as const, chatId: 'chat-1' },
       target: {
         type: 'NEW_SESSION' as const,

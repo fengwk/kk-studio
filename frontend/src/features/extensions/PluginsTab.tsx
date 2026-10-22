@@ -16,7 +16,7 @@ import {
   pluginConnectionCheckExpected,
   type PluginConnectionCheckRun,
 } from '@/features/extensions/plugin-connection-check'
-import type { PluginDTO } from '@/shared/api/contracts/ai-plugin'
+import type { PluginDTO } from '@/shared/api/generated/contracts'
 
 export function PluginsTab() {
   const { t } = useI18n()

@@ -7,8 +7,8 @@ import '@/features/environment/ide/ide-overlay-panel.css'
 import { setLocale } from '@/shared/i18n'
 import { IdeLifecycleProvider } from '@/features/environment/ide/IdeLifecycleProvider'
 import { IdeOverlayPanel, type IdeCommandAction, type ResolvedEnvironmentInfo } from '@/features/environment/ide/IdeOverlayPanel'
-import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import { Button } from '@/shared/ui/controls/Button'
+import type { EnvironmentCardDTO } from '@/shared/api/generated/contracts'
 
 setLocale('zh-CN')
 
@@ -35,8 +35,8 @@ const AVAILABLE_ENVS: EnvironmentCardDTO[] = [
     ready: true,
     status: 'READY',
     version: '1',
-    createTime: '2026-10-01T00:00:00Z',
-    updateTime: '2026-10-01T00:00:00Z',
+    createTime: 1790812800,
+    updateTime: 1790812800,
     capabilities: [],
     statusExpiresAt: null,
     lastSeen: null,

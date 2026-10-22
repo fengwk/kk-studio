@@ -1,6 +1,5 @@
-import type { InstantTimestamp } from '@/shared/api/contracts/base'
-import type { SkillRefDTO } from '@/shared/api/contracts/ai-catalog'
 import type { EditReview } from '@/features/chat/runtime/mutation-review'
+import type { SkillRefDTO } from '@/shared/api/generated/contracts'
 
 type DialogueRole =
   | 'user'
@@ -162,7 +161,7 @@ export interface ToolDialogueMessage extends BaseDialogueMessage {
   requiredEnvironmentId?: string | null
   waitingForEnvironment?: boolean
   requiredEnvironmentName?: string | null
-  environmentWaitFreshnessAt?: InstantTimestamp | null
+  environmentWaitFreshnessAt?: number | null
   /** 该 Tool 归属的 Thread id（用于归属解析）。 */
   threadId?: string
   /** 投影的审批状态（当 tool invocation 不带审批时为 null）。 */
@@ -275,8 +274,8 @@ export interface ThreadTimeline {
 
 /** Portable Thread Panel 消费的结构化模型请求 Debug 投影；不依赖 API DTO。 */
 export interface ThreadModelRequestDebugData {
-  kind: 'NEXT_REQUEST_PREVIEW'
-  generatedAt: string | number
+  kind: string
+  generatedAt: number
   model: {
     providerName: string
     modelName: string
@@ -299,7 +298,7 @@ export interface ThreadModelRequestDebugTool {
   environmentSupport: 'NONE' | 'OPTIONAL' | 'REQUIRED'
   requiredEnvironmentId: string | null
   provenance: string
-  state: 'SENT' | 'FILTERED'
+  state: string
   filterReason: string | null
 }
 
@@ -308,7 +307,7 @@ export interface ThreadModelRequestDebugSkill {
   name: string
   description: string
   path: string
-  delivery: 'LOCAL' | 'PLATFORM'
+  delivery: string
   currentCommit: string
   observedHeadCommit: string | null
   installedCommit: string | null
@@ -325,12 +324,12 @@ export interface ThreadModelRequestDebugSubagent {
 }
 
 export interface ThreadModelRequestDebugCacheControl {
-  retention: 'NONE' | 'SHORT' | 'LONG'
+  retention: string
   key: string | null
 }
 
 export interface ThreadModelRequestDebugFrozenInvocation {
-  kind: 'FROZEN_INVOCATION'
+  kind: string
   requestJson: string
 }
 
@@ -339,12 +338,12 @@ export interface ThreadModelRequestDebugFrozenInvocation {
  * kind 区分草稿（绑定或本地分支）与历史条目重放，notice 是服务端的如实说明。
  */
 export interface ThreadProviderRequestPreviewData {
-  kind: 'DRAFT_REQUEST_PREVIEW' | 'HISTORICAL_REQUEST_PREVIEW'
+  kind: string
   providerType: string
   modelName: string
   bodyByteSize: number
   bodyJson: string
-  sourceHeadEntryId: string | null
-  generatedAt: string | number
+  sourceHeadEntryId?: string | null
+  generatedAt: number
   notice?: string | null
 }

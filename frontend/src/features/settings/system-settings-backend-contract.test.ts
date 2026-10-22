@@ -30,7 +30,7 @@ describe('settings backend field contract', () => {
       const source = backendSource(
         `share/src/main/java/fun/fengwk/kkstudio/share/systemsettings/SystemSettings${type}DTO.java`,
       )
-      // 顶层字段声明以两个空格缩进；嵌套 PermissionRuleDTO 等内部类型不属于 section 字段。
+      // 顶层字段声明以两个空格缩进；嵌套 SystemSettingsToolPermissionRuleDTO 等内部类型不属于 section 字段。
       const fields = [...source.matchAll(/^ {2}private [^\n;]+ (\w+);$/gm)]
         .map((match) => match[1])
         .sort()

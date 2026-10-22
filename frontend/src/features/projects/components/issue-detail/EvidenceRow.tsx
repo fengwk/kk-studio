@@ -4,7 +4,7 @@ import { Download, Paperclip } from 'lucide-react'
 import type { StorageService } from '@/shared/api/storage-service'
 import { useI18n } from '@/shared/i18n'
 import { Badge } from '@/shared/ui/data/Badge'
-import type { IssueEvidenceDTO } from '../../types'
+import type { IssueEvidenceDTO } from '@/shared/api/generated/contracts'
 
 interface EvidenceRowProps {
   evidence: IssueEvidenceDTO

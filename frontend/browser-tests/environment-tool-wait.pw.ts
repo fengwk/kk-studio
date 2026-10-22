@@ -30,7 +30,7 @@ for (const scenario of ['pane-root', 'pane-child']) {
     await page.route((url) => url.pathname.startsWith('/api/'), async (route) => {
       const path = new URL(route.request().url()).pathname
       if (route.request().method() !== 'GET') writes.push(path)
-      let data: unknown = { results: [], totalCount: 0, pageNumber: 1, pageSize: 50 }
+      let data: unknown = { results: [], totalCount: '0', pageNumber: 1, pageSize: 50 }
       if (path === `/api/threads/${id}`) {
         reads += 1
         data = {

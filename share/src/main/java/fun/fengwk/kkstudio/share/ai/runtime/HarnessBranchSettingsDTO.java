@@ -9,6 +9,7 @@ import lombok.AccessLevel;
 import lombok.Data;
 import lombok.Getter;
 import lombok.Setter;
+import org.jspecify.annotations.Nullable;
 
 /**
  * 单个 Entry branch 的设置快照。
@@ -33,7 +34,7 @@ public class HarnessBranchSettingsDTO {
    * JsonInclude.Include#ALWAYS}。
    */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String environmentName;
+  private @Nullable String environmentName;
 
   /**
    * 用户维护的 Goal 快照；null 表示该 branch 当前没有用户设定 Goal。
@@ -41,7 +42,7 @@ public class HarnessBranchSettingsDTO {
    * <p>Goal 正文只由 typed GOAL 用户命令设置，因此新建 branch 的 ROOT settings 与请求方向永不携带它；该字段用于向客户端投影当前值。
    */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private HarnessGoalSettingDTO goal;
+  private @Nullable HarnessGoalSettingDTO goal;
 
   @Getter(AccessLevel.NONE)
   @Setter(AccessLevel.NONE)

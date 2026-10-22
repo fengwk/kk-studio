@@ -1,8 +1,8 @@
-import type { CanvasTransformDTO } from '@/shared/api/contracts/studio'
 import {
   CANVAS_NODE_HEADER_GAP,
   CANVAS_NODE_HEADER_HEIGHT,
 } from '@/features/canvas/resource-node-size'
+import type { CanvasTransformDTO } from '@/shared/api/generated/contracts'
 
 /**
  * Group 的可见范围是标题下方的着色 Body。节点与 Body 仍有正面积相交时保留成员关系；

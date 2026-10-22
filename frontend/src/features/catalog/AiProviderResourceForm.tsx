@@ -2,8 +2,7 @@ import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 import { Select } from '@/shared/ui/controls/Select'
 import { TagInput } from '@/shared/ui/controls/TagInput'
-import { providerTypes } from '@/features/catalog/ai-console-types'
-import type { AgentProviderType } from '@/shared/api/contracts/ai-catalog'
+import { AGENT_PROVIDER_TYPES, type AgentProviderType } from '@/shared/api/contracts/ai-catalog'
 import type { ProviderDraft } from '@/features/catalog/ai-console-types'
 import type { ResourceFieldKey } from '@/features/catalog/ai-resource-form-validation'
 import { useI18n } from '@/shared/i18n'
@@ -68,7 +67,7 @@ export function ProviderForm({
           aria-label={t('ai.catalog.form.providerType')}
           value={draft.providerType}
           required
-          options={providerTypes.map((providerType) => ({ value: providerType, label: providerType }))}
+          options={AGENT_PROVIDER_TYPES.map((providerType) => ({ value: providerType, label: providerType }))}
           onChange={(providerType) =>
             onChange({ ...draft, providerType: providerType as AgentProviderType })
           }

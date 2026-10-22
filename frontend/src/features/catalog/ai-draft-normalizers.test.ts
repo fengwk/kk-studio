@@ -17,7 +17,7 @@ import type {
   AgentModelConfigDTO,
   AgentModelDTO,
   AgentProviderDTO,
-} from '@/shared/api/contracts/ai-catalog'
+} from '@/shared/api/generated/contracts'
 
 function modelConfig(overrides: Partial<AgentModelConfigDTO> = {}): AgentModelConfigDTO {
   return {
@@ -50,8 +50,8 @@ function model(overrides: Partial<AgentModelDTO>): AgentModelDTO {
     description: null,
     config: modelConfig(),
     version: '1',
-    createTime: '2026-06-20T02:00:00',
-    updateTime: '2026-06-20T02:00:00',
+    createTime: 1781920800,
+    updateTime: 1781920800,
     ...overrides,
   }
 }
@@ -63,11 +63,11 @@ function provider(name: string): AgentProviderDTO {
     providerType: 'openai',
     baseUrl: null,
     configured: true,
-    modelCallTimeoutMillis: 1800000,
-    modelCallIdleTimeoutMillis: 120000,
+    modelCallTimeoutMillis: '1800000',
+    modelCallIdleTimeoutMillis: '120000',
     version: '1',
-    createTime: null,
-    updateTime: null,
+    createTime: 0,
+    updateTime: 0,
     modelHttpRetryStatusCodes: null,
   }
 }

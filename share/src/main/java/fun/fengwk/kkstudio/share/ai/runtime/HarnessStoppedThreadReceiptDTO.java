@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.share.ai.runtime;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
+import org.jspecify.annotations.Nullable;
 
 import java.util.List;
 
@@ -26,7 +27,7 @@ public class HarnessStoppedThreadReceiptDTO {
    * null（{@code @JsonInclude(ALWAYS)}）。
    */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String stoppedTurnEndEntryId;
+  private @Nullable String stoppedTurnEndEntryId;
 
   /** 该 Thread 本次取消的命令总数（非负整数）。 */
   private Integer cancelledCommandCount;

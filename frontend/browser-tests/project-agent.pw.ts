@@ -111,8 +111,8 @@ function createThreadSnapshot() {
           environmentName: null,
           goal: null,
         },
-        createTime: '2026-09-20T00:00:00Z',
-        updateTime: '2026-09-20T00:00:00Z',
+        createTime: 1789862400,
+        updateTime: 1789862400,
       },
       entries: [
         {
@@ -129,7 +129,7 @@ function createThreadSnapshot() {
               goal: null,
             },
           }),
-          createTime: '2026-09-20T00:00:00Z',
+          createTime: 1789862400,
         },
         {
           entryId: 'e1',
@@ -139,7 +139,7 @@ function createThreadSnapshot() {
           payloadJson: JSON.stringify({
             message: { role: 'USER', contents: [{ type: 'text', text: '梳理鉴权模块的现有边界' }] },
           }),
-          createTime: '2026-09-20T00:00:01Z',
+          createTime: 1789862401,
         },
       ],
       queuedCommands: [],
@@ -265,7 +265,7 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
               data: {
                 pageNumber: 1,
                 pageSize: 50,
-                totalCount: 1,
+                totalCount: '1',
                 results: [
                   { name: 'architect', description: '系统架构师', model: 'MiniMax-M2.7', variant: 'default',
                     config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] }, version: '1' },
@@ -282,7 +282,7 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
               data: {
                 pageNumber: 1,
                 pageSize: 50,
-                totalCount: 0,
+                totalCount: '0',
                 results: [],
               },
             },

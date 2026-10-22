@@ -1,17 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { applyEntityPatch } from '@/features/canvas/entity-patch'
-import type {
-  CanvasPatchDTO,
-  CanvasSnapshotDTO,
-  UUIDString,
-} from '@/shared/api/contracts/studio'
+import type { CanvasPatchDTO, CanvasSnapshotDTO } from '@/shared/api/generated/contracts'
 
-const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f' as UUIDString
-const NODE_A = 'aaaaaaaa-1111-4111-8111-111111111111' as UUIDString
-const NODE_B = 'bbbbbbbb-2222-4222-8222-222222222222' as UUIDString
-const GROUP_A = 'cccccccc-3333-4333-8333-333333333333' as UUIDString
+const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
+const NODE_A = 'aaaaaaaa-1111-4111-8111-111111111111'
+const NODE_B = 'bbbbbbbb-2222-4222-8222-222222222222'
+const GROUP_A = 'cccccccc-3333-4333-8333-333333333333'
 
-const NODE_DTO = (id: UUIDString) => ({
+const NODE_DTO = (id: string) => ({
   id,
   canvasId: CANVAS_ID,
   name: `node-${id.slice(0, 4)}`,
@@ -22,7 +18,7 @@ const NODE_DTO = (id: UUIDString) => ({
   run: null,
 })
 
-const GROUP_DTO = (id: UUIDString) => ({
+const GROUP_DTO = (id: string) => ({
   id,
   canvasId: CANVAS_ID,
   title: 'group',

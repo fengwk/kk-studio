@@ -14,7 +14,7 @@ import {
 } from '@/features/canvas/canvas-local-store'
 import type { CanvasDraftAck } from '@/features/canvas/canvas-operation-storage'
 import type { CanvasLocalState } from '@/features/canvas/types'
-import type { CanvasSnapshotDTO, UUIDString } from '@/shared/api/contracts/studio'
+import type { CanvasSnapshotDTO } from '@/shared/api/generated/contracts'
 
 const SAVE_FAILED_TOAST = '保存草稿失败，数据未保存'
 
@@ -22,7 +22,7 @@ type DraftPositions = Record<string, { x: number; y: number }>
 
 interface DraftPersistenceInput {
   scope: CanvasScope
-  canvasId: UUIDString | null
+  canvasId: string | null
   view: CanvasLocalState['view']
   drafts: CanvasLocalState['drafts']
   snapshot: CanvasSnapshotDTO | undefined
@@ -219,7 +219,7 @@ export function useCanvasDraftPersistence({ scope, canvasId, view, drafts, snaps
       let changed = false
       const nextDrafts = { ...current.drafts }
       for (const [id, draft] of Object.entries(current.drafts)) {
-        if (!remoteNodeIds.has(id as UUIDString) && isNodeDirty(draft) && draft.conflict?.type !== 'remote_deleted') {
+        if (!remoteNodeIds.has(id) && isNodeDirty(draft) && draft.conflict?.type !== 'remote_deleted') {
           changed = true
           nextDrafts[id] = {
             ...draft,
@@ -245,7 +245,7 @@ export function useCanvasDraftPersistence({ scope, canvasId, view, drafts, snaps
   }, [canvasId, draftsRef, setState, snapshot, targetDraftsRef])
 
   const ackDurableDraftsForScope = useCallback((
-    targetCanvasId: UUIDString,
+    targetCanvasId: string,
     targetSessionId: string,
     targetEpoch: number,
     acks: CanvasDraftAck[],

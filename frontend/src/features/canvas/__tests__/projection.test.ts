@@ -5,12 +5,12 @@ import {
   projectEdges,
   projectNodes,
 } from '@/features/canvas/projection'
-import type { CanvasSnapshotDTO, UUIDString } from '@/shared/api/contracts/studio'
+import type { CanvasSnapshotDTO } from '@/shared/api/generated/contracts'
 
-const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f' as UUIDString
-const NODE_IMAGE = 'aaaaaaaa-1111-4111-8111-111111111111' as UUIDString
-const NODE_NOTE = 'bbbbbbbb-2222-4222-8222-222222222222' as UUIDString
-const GROUP_A = 'cccccccc-3333-4333-8333-333333333333' as UUIDString
+const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
+const NODE_IMAGE = 'aaaaaaaa-1111-4111-8111-111111111111'
+const NODE_NOTE = 'bbbbbbbb-2222-4222-8222-222222222222'
+const GROUP_A = 'cccccccc-3333-4333-8333-333333333333'
 
 const snapshotDTO: CanvasSnapshotDTO = {
   document: {
@@ -27,16 +27,16 @@ const snapshotDTO: CanvasSnapshotDTO = {
     transform: { x: 20, y: 30, width: 320, height: 260 },
     groupId: GROUP_A,
     resources: [{
-      id: 'dddddddd-4444-4444-8444-444444444444' as UUIDString,
+      id: 'dddddddd-4444-4444-8444-444444444444',
       canvasId: CANVAS_ID,
       ownerNodeId: NODE_IMAGE,
       resourceIndex: 0,
-      blobId: 'blob-image' as UUIDString,
+      blobId: 'blob-image',
       name: 'image.png',
       textContent: null,
       kind: 'IMAGE',
       mediaType: 'image/png',
-      sizeBytes: Number.MAX_SAFE_INTEGER,
+      sizeBytes: String(Number.MAX_SAFE_INTEGER),
       width: 1024,
       height: 768,
       durationMs: null,
@@ -50,7 +50,7 @@ const snapshotDTO: CanvasSnapshotDTO = {
     },
     run: {
       nodeId: NODE_IMAGE,
-      requestId: 'c3c3c3c3-3333-4333-8333-333333333331' as UUIDString,
+      requestId: 'c3c3c3c3-3333-4333-8333-333333333331',
       status: 'RUNNING',
       stage: 'QUEUED',
       error: null,
@@ -63,7 +63,7 @@ const snapshotDTO: CanvasSnapshotDTO = {
     transform: { x: 600, y: 30, width: 320, height: 260 },
     groupId: null,
     resources: [{
-      id: 'eeeeeeee-5555-4555-8555-555555555555' as UUIDString,
+      id: 'eeeeeeee-5555-4555-8555-555555555555',
       canvasId: CANVAS_ID,
       ownerNodeId: NODE_NOTE,
       resourceIndex: 0,
@@ -72,13 +72,13 @@ const snapshotDTO: CanvasSnapshotDTO = {
       textContent: 'note',
       kind: 'TEXT',
       mediaType: 'text/markdown',
-      sizeBytes: 4,
+      sizeBytes: '4',
       width: null,
       height: null,
       durationMs: null,
       createdAt: '2026-08-10T00:00:00Z',
     }, {
-      id: 'ffffffff-6666-4666-8666-666666666666' as UUIDString,
+      id: 'ffffffff-6666-4666-8666-666666666666',
       canvasId: CANVAS_ID,
       ownerNodeId: NODE_NOTE,
       resourceIndex: 1,
@@ -87,7 +87,7 @@ const snapshotDTO: CanvasSnapshotDTO = {
       textContent: 'x',
       kind: 'TEXT',
       mediaType: 'text/markdown',
-      sizeBytes: 1,
+      sizeBytes: '1',
       width: null,
       height: null,
       durationMs: null,
@@ -147,13 +147,13 @@ describe('Canvas snapshot projection', () => {
       ...snapshotDTO,
       nodes: [{
         ...snapshotDTO.nodes[0],
-        id: 'aaaaaaaa-7777-4777-8777-777777777777' as UUIDString,
+        id: 'aaaaaaaa-7777-4777-8777-777777777777',
         groupId: null,
         function: null,
         run: null,
         resources: [{
           ...snapshotDTO.nodes[0].resources[0],
-          id: 'aaaaaaaa-8888-4888-8888-888888888888' as UUIDString,
+          id: 'aaaaaaaa-8888-4888-8888-888888888888',
           width: 1122,
           height: 1402,
         }],

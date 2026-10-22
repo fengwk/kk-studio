@@ -2,10 +2,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { harnessService } from '@/shared/api/harness-service'
 import { chatService } from '@/shared/api/chat-service'
-import type {
-  AgentRuntimeOwnerDTO,
-  RuntimeSessionSummaryDTO,
-} from '@/shared/api/contracts/ai-runtime'
+import type { AgentRuntimeOwnerDTO } from '@/shared/api/contracts/ai-runtime'
 import { useI18n } from '@/shared/i18n'
 import type { BranchDraft } from '@/features/chat/branch-draft'
 import { threadDraftPath } from '@/features/chat/thread-draft-path'
@@ -17,6 +14,7 @@ import {
   cloneDraft,
 } from '@/features/chat/runtime/root-thread/branch-draft-replay'
 import type { PaneInteraction } from '@/features/chat/runtime/root-thread/types'
+import type { HarnessSessionSummaryDTO } from '@/shared/api/generated/contracts'
 
 /**
  * Pane 的 owner 范围导航查询：Session 列表、Session 下 Thread 列表与完整 Entry Tree。
@@ -31,7 +29,7 @@ export function usePaneNavigationQueries(options: {
   historySessionId: string | null
 }) {
   const { owner, ownerKey, target, interaction, threadNavigationSessionId, historySessionId } = options
-  const sessionsQuery = useQuery<RuntimeSessionSummaryDTO[]>({
+  const sessionsQuery = useQuery<HarnessSessionSummaryDTO[]>({
     queryKey: ['agent-pane', 'sessions', ownerKey],
     queryFn: () => {
       if (!owner) {

@@ -41,21 +41,21 @@ describe('projectActiveThreadTree', () => {
     const tree = projectThreadTree([
       node('root', null), node('old', 'root', { updateTime: 0 }),
       node('z', 'root', { updateTime: 1775001600 }),
-      node('a', 'root', { updateTime: '2026-04-01T00:00:00Z' }),
+      node('a', 'root', { updateTime: 1775001600 }),
       node('active', 'root', { processing: true }),
       node('grand', 'active', { updateTime: 1767225600 }),
     ])
     expect(tree.historyRows.map((row) => row.node.threadId)).toEqual(['active', 'grand', 'a', 'z', 'old'])
     expect(tree.historyRows[1]).toMatchObject({ depth: 1, ancestorContinues: [true], isLast: true })
     expect(tree.historyRows.at(-1)?.isLast).toBe(true)
-    expect(() => projectThreadTree([node('root', null, { updateTime: 'invalid' })])).toThrow(/updateTime/)
+    expect(() => projectThreadTree([node('root', null, { updateTime: Number.NaN })])).toThrow(/updateTime/)
     expect(() => projectThreadTree([node('root', null), node('x', 'y'), node('y', 'x')])).toThrow(/cycle/)
     expect(() => projectThreadTree([node('root', null), node('other', null)])).toThrow(/root/)
   })
 
   it('compares epoch seconds against ISO milliseconds, including fractional seconds', () => {
     const tree = projectThreadTree([
-      node('root', null), node('a-older', 'root', { updateTime: '2026-03-31T12:00:00.000Z' }),
+      node('root', null), node('a-older', 'root', { updateTime: 1774958400 }),
       node('z-newer', 'root', { updateTime: 1774958400.125 }),
     ])
     expect(tree.historyRows.map((row) => row.node.threadId)).toEqual(['z-newer', 'a-older'])

@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.share.ai.skill;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
+import org.jspecify.annotations.Nullable;
 
 import java.time.Instant;
 import java.util.List;
@@ -20,7 +21,7 @@ public class SkillPackageDTO {
   private String packageName;
 
   /** 可空 package 描述；null 表示未填写。 */
-  private String description;
+  private @Nullable String description;
 
   /** 不可变 Git repository URL（带 scheme、无内嵌 userinfo）；更换仓库必须新建 Package。 */
   private String repositoryUrl;
@@ -36,15 +37,15 @@ public class SkillPackageDTO {
 
   /** 最近一次成功检查到的 branch HEAD；从未成功检查时为 null（required-nullable）。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String observedHeadCommit;
+  private @Nullable String observedHeadCommit;
 
   /** 最近一次检查时间；从未检查时为 null（required-nullable）。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private Instant headCheckedAt;
+  private @Nullable Instant headCheckedAt;
 
   /** 最近一次检查的有界错误摘要；检查成功时为 null（required-nullable）。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String headCheckError;
+  private @Nullable String headCheckError;
 
   /** Card 状态，取 {@code UNCHECKED / UP_TO_DATE / UPDATE_AVAILABLE / CHECK_FAILED}。 */
   private String checkStatus;

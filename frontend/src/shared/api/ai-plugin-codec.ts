@@ -1,19 +1,18 @@
 import { ApiError } from '@/shared/api/client'
-import {
-  PLUGIN_CONNECTION_AUTHENTICATION_VALUES,
-  PLUGIN_CONNECTION_BROWSER_SESSION_VALUES,
-  PLUGIN_CONNECTION_REACHABILITY_VALUES,
-} from '@/shared/api/contracts/ai-plugin'
-import type { InstantTimestamp } from '@/shared/api/contracts/base'
+import type { PluginStatus } from '@/shared/api/contracts/ai-plugin'
 import type {
   PluginAuthKindDTO,
   PluginAuthPrepareDTO,
   PluginConfigurationDTO,
-  PluginConnectionCheckResult,
+  PluginConnectionCheckDTO,
   PluginDTO,
   PluginSecretProjectionDTO,
-  PluginStatus,
-} from '@/shared/api/contracts/ai-plugin'
+} from '@/shared/api/generated/contracts'
+import {
+  PLUGIN_CONNECTION_CHECK_AUTHENTICATION_VALUES,
+  PLUGIN_CONNECTION_CHECK_BROWSER_SESSION_VALUES,
+  PLUGIN_CONNECTION_CHECK_REACHABILITY_VALUES,
+} from '@/shared/api/generated/contracts'
 
 function invalidPayload(detail: string): ApiError {
   return new ApiError(`Plugin API returned an invalid payload: ${detail}`)
@@ -67,17 +66,15 @@ function requireNullableString(value: unknown, path: string): string | null {
   return requireString(value, path)
 }
 
-function requireNullableInstant(value: unknown, path: string): InstantTimestamp {
+/** HTTP Jackson 将 Instant 编码为 epoch seconds 数字（可带小数）。 */
+function requireNullableInstant(value: unknown, path: string): number | null {
   if (value === null || value === undefined) {
     return null
   }
   if (typeof value === 'number' && Number.isFinite(value)) {
     return value
   }
-  if (typeof value === 'string' && Number.isFinite(Date.parse(value))) {
-    return value
-  }
-  throw invalidPayload(`${path} must be epoch seconds or an ISO date-time string`)
+  throw invalidPayload(`${path} must be epoch seconds`)
 }
 
 const CANONICAL_DECIMAL = /^(?:0|[1-9]\d*)$/
@@ -364,8 +361,8 @@ function requireEnumValue<T extends string>(
   return value as T
 }
 
-/** 检查时刻必须存在且可解析：缺失、null、非法数值或非法时间串一律拒绝，绝不当作“刚刚检查过”。 */
-function requireInstant(value: unknown, path: string): Exclude<InstantTimestamp, null> {
+/** 检查时刻必须存在且合法：缺失、null 或非法数值一律拒绝，绝不当作“刚刚检查过”。 */
+function requireInstant(value: unknown, path: string): number {
   const instant = requireNullableInstant(value, path)
   if (instant === null) {
     throw invalidPayload(`${path} must not be null`)
@@ -389,7 +386,7 @@ const ALLOWED_CONNECTION_CHECK_KEYS = new Set([
 export function decodePluginConnectionCheckDTO(
   value: unknown,
   path = 'connectionCheck',
-): PluginConnectionCheckResult {
+): PluginConnectionCheckDTO {
   const rec = requireRecord(value, path)
   checkUnknownKeys(rec, ALLOWED_CONNECTION_CHECK_KEYS, path)
   return {
@@ -401,17 +398,17 @@ export function decodePluginConnectionCheckDTO(
     checkedAt: requireInstant(rec.checkedAt, `${path}.checkedAt`),
     reachability: requireEnumValue(
       rec.reachability,
-      PLUGIN_CONNECTION_REACHABILITY_VALUES,
+      PLUGIN_CONNECTION_CHECK_REACHABILITY_VALUES,
       `${path}.reachability`,
     ),
     authentication: requireEnumValue(
       rec.authentication,
-      PLUGIN_CONNECTION_AUTHENTICATION_VALUES,
+      PLUGIN_CONNECTION_CHECK_AUTHENTICATION_VALUES,
       `${path}.authentication`,
     ),
     browserSession: requireEnumValue(
       rec.browserSession,
-      PLUGIN_CONNECTION_BROWSER_SESSION_VALUES,
+      PLUGIN_CONNECTION_CHECK_BROWSER_SESSION_VALUES,
       `${path}.browserSession`,
     ),
   }

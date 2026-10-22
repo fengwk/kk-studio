@@ -7,7 +7,7 @@ import { projectCanvasSnapshot } from '@/features/canvas/domain'
 import { projectNodes } from '@/features/canvas/projection'
 import type { CanvasController } from '@/features/canvas/useCanvasController'
 import type { CanvasTextEditorState } from '@/features/canvas/types'
-import type { CanvasSnapshotDTO } from '@/shared/api/contracts/studio'
+import type { CanvasSnapshotDTO } from '@/shared/api/generated/contracts'
 
 const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
 const NODE_ID = '9f1e6d2a-3b4c-4d5e-8f6a-7b8c9d0e1f2a'
@@ -48,7 +48,7 @@ function snapshotDTO(
         textContent: 'hello',
         kind: 'TEXT',
         mediaType: 'text/markdown',
-        sizeBytes: 5,
+        sizeBytes: '5',
         width: null,
         height: null,
         durationMs: null,

@@ -1,12 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQueryClient, type UseQueryResult } from '@tanstack/react-query'
 import { harnessService } from '@/shared/api/harness-service'
-import type {
-  HarnessThreadDTO,
-  HarnessThreadSnapshotDTO,
-  RuntimeSessionSummaryDTO,
-  RuntimeThreadSummaryDTO,
-} from '@/shared/api/contracts/ai-runtime'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
 import { normalizeThreadName } from '@/features/chat/thread-name'
@@ -22,6 +16,12 @@ import {
   type RenameKind,
   type RenameTarget,
 } from '@/features/chat/runtime/root-thread/types'
+import type {
+  HarnessSessionSummaryDTO,
+  HarnessThreadDTO,
+  HarnessThreadSnapshotDTO,
+  HarnessThreadSummaryDTO,
+} from '@/shared/api/generated/contracts'
 
 interface PaneRenameOptions {
   ownerKey: string | null
@@ -35,7 +35,7 @@ interface PaneRenameOptions {
   renamePendingRef: { current: boolean }
   boundThread: { threadId: string; name: string } | null
   boundSessionId: string | null
-  sessionsQuery: UseQueryResult<RuntimeSessionSummaryDTO[]>
+  sessionsQuery: UseQueryResult<HarnessSessionSummaryDTO[]>
   hasPendingOperation: () => boolean
   setInteraction: (next: PaneInteraction) => void
   setActionError: (message: string | null) => void
@@ -249,13 +249,13 @@ export function usePaneRename(options: PaneRenameOptions) {
     if (!ownerKey) {
       return
     }
-    for (const [key, data] of queryClient.getQueriesData<RuntimeSessionSummaryDTO[]>({
+    for (const [key, data] of queryClient.getQueriesData<HarnessSessionSummaryDTO[]>({
       queryKey: ['agent-pane', 'sessions', ownerKey],
     })) {
       if (data == null) {
         continue
       }
-      queryClient.setQueryData<RuntimeSessionSummaryDTO[]>(
+      queryClient.setQueryData<HarnessSessionSummaryDTO[]>(
         key,
         data.map((item) => item.sessionId === sessionId ? { ...item, name } : item),
       )
@@ -300,13 +300,13 @@ export function usePaneRename(options: PaneRenameOptions) {
         { ...snapshot, thread },
       )
     }
-    for (const [key, data] of queryClient.getQueriesData<RuntimeThreadSummaryDTO[]>({
+    for (const [key, data] of queryClient.getQueriesData<HarnessThreadSummaryDTO[]>({
       queryKey: ['agent-pane', 'threads'],
     })) {
       if (data == null) {
         continue
       }
-      queryClient.setQueryData<RuntimeThreadSummaryDTO[]>(
+      queryClient.setQueryData<HarnessThreadSummaryDTO[]>(
         key,
         data.map((item) => item.threadId === threadId ? { ...item, name: thread.name } : item),
       )

@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.share.systemsettings;
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
+import org.jspecify.annotations.Nullable;
 
 import java.util.List;
 
@@ -52,7 +53,7 @@ public class SystemSettingsSchemaDTO {
 
     private boolean restartRequired;
 
-    private ApplyTiming applyTiming;
+    private @Nullable ApplyTiming applyTiming;
 
     private List<FieldDTO> fields;
 
@@ -70,17 +71,17 @@ public class SystemSettingsSchemaDTO {
 
     private String labelKey;
 
-    private String hintKey;
+    private @Nullable String hintKey;
 
     private FieldType type;
 
     private boolean nullable;
 
-    private Integer min;
+    private @Nullable Integer min;
 
-    private Integer max;
+    private @Nullable Integer max;
 
-    private List<OptionDTO> options;
+    private @Nullable List<OptionDTO> options;
 
     @JsonAnySetter
     public void rejectUnknownField(String name, Object value) {

@@ -5,11 +5,11 @@ import { describe, expect, it, vi } from 'vitest'
 import { CanvasEditor } from '@/features/canvas/CanvasEditor'
 import { CanvasRuntimeContext } from '@/features/canvas/CanvasRuntimeContext'
 import type { CanvasController } from '@/features/canvas/useCanvasController'
-import type { CanvasSnapshotDTO, UUIDString } from '@/shared/api/contracts/studio'
 import { QueryClient, QueryObserver, type UseQueryResult } from '@tanstack/react-query'
 import { ApiError } from '@/shared/api/client'
+import type { CanvasSnapshotDTO } from '@/shared/api/generated/contracts'
 
-const CANVAS_ID: UUIDString = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
+const CANVAS_ID: string = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
 
 /** Stage 依赖 @xyflow/react，Editor 测试只验证状态渲染、导航与线程开关 wiring。 */
 vi.mock('@/features/canvas/CanvasStage', () => ({

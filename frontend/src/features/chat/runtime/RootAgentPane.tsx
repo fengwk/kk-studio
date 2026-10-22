@@ -25,12 +25,11 @@ import { formatThreadStatusLabel } from '@/features/chat/runtime/thread-panel/th
 import { sessionSelectionItem, threadSelectionItem } from '@/features/chat/runtime/root-thread/session-selection-items'
 import { useRootThreadControl } from '@/features/chat/runtime/useRootThreadControl'
 import { type AgentPaneCapabilities, type AgentPaneDefaults, type BranchRequestInput, type PaneReport } from '@/features/chat/runtime/root-thread/types'
-import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import type { AgentRuntimeOwnerDTO } from '@/shared/api/contracts/ai-runtime'
-import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import type { PaneTarget } from '@/features/chat/runtime/agent-pane'
 import type { ThreadProjection } from '@/features/chat/runtime/useThreadProjection'
 import type { useThreadNavigation } from '@/features/chat/runtime/useThreadNavigation'
+import type { AgentDefinitionDTO, EnvironmentCardDTO } from '@/shared/api/generated/contracts'
 
 /**
  * 根控面板：唯一挂载根草稿、上传与人工执行 Hook 的地方，并保留根交互汇聚、

@@ -1,15 +1,15 @@
 import { apiClient, type HttpClient } from '@/shared/api/client'
 import type {
-  ChangeIdeViewDirectoryDTO,
-  CreateIdeViewDTO,
   EnvironmentCardDTO,
   EnvironmentCreateDTO,
   EnvironmentEventDTO,
+  EnvironmentIdeChangeDirectoryDTO,
+  EnvironmentIdeOpenViewDTO,
+  EnvironmentIdeViewDTO,
   EnvironmentInstallCodeDTO,
   EnvironmentInstallConfigDTO,
   EnvironmentUpdateDTO,
-  IdeViewDTO,
-} from '@/shared/api/contracts/ai-environment'
+} from '@/shared/api/generated/contracts'
 
 export function createEnvironmentService(client: HttpClient = apiClient) {
   return {
@@ -61,14 +61,14 @@ export function createEnvironmentService(client: HttpClient = apiClient) {
         `/environments/${encodeURIComponent(id)}?expectedVersion=${encodeURIComponent(expectedVersion)}`,
       ),
 
-    createIdeView: (environmentId: string, data: CreateIdeViewDTO): Promise<IdeViewDTO> =>
+    createIdeView: (environmentId: string, data: EnvironmentIdeOpenViewDTO): Promise<EnvironmentIdeViewDTO> =>
       client.post(`/environments/${encodeURIComponent(environmentId)}/ide/views`, data),
 
     changeIdeViewDirectory: (
       environmentId: string,
       viewId: string,
-      data: ChangeIdeViewDirectoryDTO,
-    ): Promise<IdeViewDTO> =>
+      data: EnvironmentIdeChangeDirectoryDTO,
+    ): Promise<EnvironmentIdeViewDTO> =>
       client.put(
         `/environments/${encodeURIComponent(environmentId)}/ide/views/${encodeURIComponent(viewId)}/directory`,
         data,

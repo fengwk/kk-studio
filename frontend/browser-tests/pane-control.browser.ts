@@ -39,8 +39,8 @@ function rootThread(overrides: Record<string, unknown> = {}) {
       model: { providerName: 'minimax', modelName: 'VeryLongModelName', variant: 'default' },
       environmentName: null,
     },
-    createTime: '2026-10-01T00:00:00Z',
-    updateTime: '2026-10-01T00:00:00Z',
+    createTime: 1790812800,
+    updateTime: 1790812800,
     ...overrides,
   }
 }
@@ -125,11 +125,11 @@ function interactionItems() {
         environmentId: null,
         environmentName: null,
         waitingCount: null,
-        createTime: '2026-10-05T09:57:00Z',
+        createTime: 1791194220,
       },
     ],
     total: 1,
-    freshnessAt: '2026-10-05T09:57:00Z',
+    freshnessAt: 1791194220,
     nextCursor: null,
   }
 }
@@ -195,7 +195,7 @@ async function installPaneApi(
     }
     if (path === '/api/agents' || path === '/api/models') {
       await route.fulfill({
-        json: { status: 200, data: { pageNumber: 1, pageSize: 50, totalCount: 0, results: [] } },
+        json: { status: 200, data: { pageNumber: 1, pageSize: 50, totalCount: '0', results: [] } },
       })
       return
     }
@@ -500,7 +500,7 @@ test('recognizes SETTINGS once and uses the same model label in the footer', asy
       parentEntryId: null,
       entryType: 'ROOT',
       payloadJson: JSON.stringify({ settings: rootSettings }),
-      createTime: '2026-10-01T00:00:00Z',
+      createTime: 1790812800,
     },
     {
       entryId: 'entry-turn-1',
@@ -508,7 +508,7 @@ test('recognizes SETTINGS once and uses the same model label in the footer', asy
       parentEntryId: 'entry-root',
       entryType: 'TURN_START',
       payloadJson: JSON.stringify({ reason: 'INPUT', settings: rootSettings }),
-      createTime: '2026-10-01T00:00:01Z',
+      createTime: 1790812801,
     },
     {
       entryId: 'entry-user-1',
@@ -518,7 +518,7 @@ test('recognizes SETTINGS once and uses the same model label in the footer', asy
       payloadJson: JSON.stringify({
         message: { role: 'USER', contents: [{ type: 'text', text: 'hi' }] },
       }),
-      createTime: '2026-10-01T00:00:02Z',
+      createTime: 1790812802,
     },
     {
       entryId: 'entry-turn-end-1',
@@ -526,7 +526,7 @@ test('recognizes SETTINGS once and uses the same model label in the footer', asy
       parentEntryId: 'entry-user-1',
       entryType: 'TURN_END',
       payloadJson: JSON.stringify({ outcome: 'COMPLETED', turnStartEntryId: 'entry-turn-1' }),
-      createTime: '2026-10-01T00:00:03Z',
+      createTime: 1790812803,
     },
     {
       entryId: 'entry-settings-head',
@@ -537,7 +537,7 @@ test('recognizes SETTINGS once and uses the same model label in the footer', asy
         settings: changedSettings,
         ownerThreadId: ROOT_ID,
       }),
-      createTime: '2026-10-01T00:00:04Z',
+      createTime: 1790812804,
     },
   ]
 
@@ -575,7 +575,7 @@ test('recognizes SETTINGS once and uses the same model label in the footer', asy
     parentEntryId: 'entry-settings-head',
     entryType: 'TURN_START',
     payloadJson: JSON.stringify({ reason: 'INPUT', settings: changedSettings }),
-    createTime: '2026-10-01T00:00:05Z',
+    createTime: 1790812805,
   })
   threadOverrides.headEntryId = 'entry-next-turn'
   threadOverrides.version = '2'

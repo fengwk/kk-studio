@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useApplicationEvents } from '@/shared/app-events'
 import { queryKeys } from '@/shared/lib/query-keys'
-import type { HarnessThreadSnapshotDTO } from '@/shared/api/contracts/ai-runtime'
+import type { HarnessThreadSnapshotDTO } from '@/shared/api/generated/contracts'
 
 /**
  * Retain at most one inactive running Thread projection. The active Thread

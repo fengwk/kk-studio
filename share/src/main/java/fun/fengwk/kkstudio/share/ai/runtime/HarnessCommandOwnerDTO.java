@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.share.ai.runtime;
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonSetter;
 import lombok.Data;
+import org.jspecify.annotations.Nullable;
 
 /**
  * 产品命令批次的 owner wire DTO。
@@ -19,13 +20,13 @@ public class HarnessCommandOwnerDTO {
   private String type;
 
   /** Chat owner 的 canonical UUID string。 */
-  private String chatId;
+  private @Nullable String chatId;
 
   /** Issue+Agent owner 的 canonical UUID string。 */
-  private String issueId;
+  private @Nullable String issueId;
 
   /** Issue+Agent owner 的 Agent 自然名称。 */
-  private String agentName;
+  private @Nullable String agentName;
 
   @JsonSetter("type")
   public void setType(Object value) {

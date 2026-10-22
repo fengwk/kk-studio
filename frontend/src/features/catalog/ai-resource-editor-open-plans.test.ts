@@ -12,7 +12,7 @@ import type {
   AgentModelConfigDTO,
   AgentModelDTO,
   AgentProviderDTO,
-} from '@/shared/api/contracts/ai-catalog'
+} from '@/shared/api/generated/contracts'
 
 function modelConfig(): AgentModelConfigDTO {
   return {
@@ -43,11 +43,11 @@ function provider(_id: string, name: string): AgentProviderDTO {
     providerType: 'openai',
     baseUrl: null,
     configured: true,
-    modelCallTimeoutMillis: 1800000,
-    modelCallIdleTimeoutMillis: 120000,
+    modelCallTimeoutMillis: '1800000',
+    modelCallIdleTimeoutMillis: '120000',
     version: '1',
-    createTime: null,
-    updateTime: null,
+    createTime: 0,
+    updateTime: 0,
     modelHttpRetryStatusCodes: null,
   }
 }
@@ -60,8 +60,8 @@ function model(id: string, providerName: string): AgentModelDTO {
     description: null,
     config: modelConfig(),
     version: '1',
-    createTime: null,
-    updateTime: null,
+    createTime: 0,
+    updateTime: 0,
   }
 }
 
@@ -80,8 +80,8 @@ function agent(id: string, model: string): AgentDefinitionDTO {
       subagents: [],
     },
     version: '1',
-    createTime: null,
-    updateTime: null,
+    createTime: 0,
+    updateTime: 0,
   }
 }
 

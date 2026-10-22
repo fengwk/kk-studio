@@ -4,7 +4,7 @@ import {
   mergeTextParts,
   type ComposerPart,
 } from '@/features/chat/composer/composer-parts'
-import type { HarnessCancelledInputDTO } from '@/shared/api/contracts/ai-runtime'
+import type { HarnessCancelledInputDTO } from '@/shared/api/generated/contracts'
 
 /**
  * Stop 回执里可恢复的人工输入回填：

@@ -18,8 +18,8 @@ import {
 import type {
   SystemSettingsSchemaApplyTiming,
   SystemSettingsSchemaDTO,
-  SystemSettingsSchemaField,
-} from '@/shared/api/contracts/system-settings'
+  SystemSettingsSchemaFieldDTO,
+} from '@/shared/api/generated/contracts'
 
 export function SystemSettingsSchemaRenderer({
   schema,
@@ -80,7 +80,7 @@ function SchemaField({
   draft,
   onChange,
 }: {
-  field: SystemSettingsSchemaField
+  field: SystemSettingsSchemaFieldDTO
   draft: SystemSettingsSectionsDraft
   onChange: (next: SystemSettingsSectionsDraft) => void
 }) {
@@ -174,7 +174,9 @@ function SchemaField({
   }
 }
 
-function toApplyTiming(value: SystemSettingsSchemaApplyTiming | null): ApplyTiming | undefined {
+function toApplyTiming(
+  value: SystemSettingsSchemaApplyTiming | null | undefined,
+): ApplyTiming | undefined {
   switch (value) {
     case 'NEXT_INVOCATION':
       return 'nextInvocation'

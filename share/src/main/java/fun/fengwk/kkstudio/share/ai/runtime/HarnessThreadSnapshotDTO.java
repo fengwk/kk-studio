@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.share.ai.runtime;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
+import org.jspecify.annotations.Nullable;
 
 import java.util.List;
 
@@ -33,7 +34,7 @@ public class HarnessThreadSnapshotDTO {
 
   /** 当前 Turn 的活跃 ModelInvocation 投影；无则 null（{@code @JsonInclude(ALWAYS)} 保证 null 也输出）。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private ModelInvocationDTO modelInvocation;
+  private @Nullable ModelInvocationDTO modelInvocation;
 
   /** 活跃 ModelInvocation 的工具兄弟列表（callIndex 为 0..N-1 连续前缀；不可变列表，默认空）。 */
   private List<ToolInvocationDTO> toolInvocations = List.of();

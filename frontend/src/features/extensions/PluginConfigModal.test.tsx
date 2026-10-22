@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { PluginConfigModal } from './PluginConfigModal'
 import { pluginsService } from '@/shared/api/plugins-service'
 import { ApiError } from '@/shared/api/client'
-import type { PluginDTO } from '@/shared/api/contracts/ai-plugin'
+import type { PluginDTO } from '@/shared/api/generated/contracts'
 
 vi.mock('@/shared/api/plugins-service', () => ({
   pluginsService: { updateConfiguration: vi.fn() },

@@ -18,11 +18,10 @@ import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
 import { trimToNull } from '@/features/catalog/ai-resource-draft-primitives'
 import type {
-  SkillPackageCheckStatus,
   SkillPackageCreateDTO,
   SkillPackageDTO,
   SkillPackageEditDTO,
-} from '@/shared/api/contracts/ai-catalog'
+} from '@/shared/api/generated/contracts'
 
 function formatCommit(commit: string | null | undefined): string {
   if (!commit) {
@@ -34,7 +33,7 @@ function formatCommit(commit: string | null | undefined): string {
 /**
  * 检查状态只映射到共享 Badge 的语义：ok=success、warning=warning、error=danger。
  */
-function checkStatusTone(status: SkillPackageCheckStatus): BadgeTone {
+function checkStatusTone(status: string): BadgeTone {
   switch (status) {
     case 'UP_TO_DATE':
       return 'success'

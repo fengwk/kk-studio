@@ -6,6 +6,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Issue 公开传输对象。
@@ -26,21 +27,21 @@ public class IssueDTO {
   private String state;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String blockedFromState;
+  private @Nullable String blockedFromState;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String blockReason;
+  private @Nullable String blockReason;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String pauseReason;
+  private @Nullable String pauseReason;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String pauseDetail;
+  private @Nullable String pauseDetail;
 
   private String version;
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String archivedAt;
+  private @Nullable String archivedAt;
 
   private String createdAt;
   private String updatedAt;

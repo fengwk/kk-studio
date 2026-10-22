@@ -94,8 +94,8 @@ function threadDto(
       environmentName: 'dev-node',
       goal: null,
     },
-    createTime: '2026-10-01T00:00:00Z',
-    updateTime: '2026-10-01T00:00:00Z',
+    createTime: 1790812800,
+    updateTime: 1790812800,
   }
 }
 
@@ -154,7 +154,7 @@ async function installAgentTreeMock(page: Page) {
     }
     if (path === '/api/agents' || path === '/api/models') {
       await route.fulfill({
-        json: { status: 200, data: { pageNumber: 1, pageSize: 50, totalCount: 0, results: [] } },
+        json: { status: 200, data: { pageNumber: 1, pageSize: 50, totalCount: '0', results: [] } },
       })
       return
     }

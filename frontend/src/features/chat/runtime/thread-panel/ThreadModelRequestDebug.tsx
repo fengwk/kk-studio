@@ -53,7 +53,7 @@ function formatDelivery(
 }
 
 function formatCacheRetention(
-  retention: 'NONE' | 'SHORT' | 'LONG',
+  retention: string,
   t: ReturnType<typeof useI18n>['t'],
 ): string {
   switch (retention) {

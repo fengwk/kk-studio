@@ -35,7 +35,7 @@ import type {
   ModelAttemptFailureDTO,
   ModelInvocationDTO,
   ToolInvocationDTO,
-} from '@/shared/api/contracts/ai-runtime'
+} from '@/shared/api/generated/contracts'
 
 type Ref<T> = { current: T }
 

@@ -68,7 +68,7 @@ function buildItems(): InteractionDTO[] {
       toolName: 'bash',
       argumentsJson: LONG_ARGUMENTS,
       approvalJson: JSON.stringify({ required: true, reason: LONG_REASON }),
-      createTime: '2026-10-05T09:57:00Z',
+      createTime: 1791194220,
     },
     {
       interactionId: QUESTIONNAIRE_INTERACTION_ID,
@@ -109,7 +109,7 @@ function buildItems(): InteractionDTO[] {
         ],
       }),
       approvalJson: null,
-      createTime: '2026-10-05T09:58:00Z',
+      createTime: 1791194280,
     },
     {
       type: 'ENVIRONMENT_WAIT',
@@ -127,7 +127,7 @@ function buildItems(): InteractionDTO[] {
       environmentId: 'a0000000-0000-0000-0000-00000000a001',
       environmentName: 'migration-node',
       waitingCount: 2,
-      createTime: '2026-10-05T09:59:00Z',
+      createTime: 1791194340,
     },
   ]
 }
@@ -185,7 +185,7 @@ async function mockPendingApi(page: Page, options: PendingApiOptions = {}): Prom
         // total 是同一过滤条件下的真实可见待处理总数，与游标分页位置无关。
         await route.fulfill({
           json: { status: 200, data: { items, nextCursor, total: allItems.length,
-            freshnessAt: '2026-10-05T10:00:00Z' } },
+            freshnessAt: 1791194400 } },
         })
         return
       }
@@ -235,7 +235,7 @@ async function mockPendingApi(page: Page, options: PendingApiOptions = {}): Prom
               interactionId: QUESTIONNAIRE_INTERACTION_ID,
               submissionId: 'sub-1',
               actor: 'user',
-              acceptedAt: '2026-10-05T10:00:00Z',
+              acceptedAt: 1791194400,
               materialized: true,
             },
           },

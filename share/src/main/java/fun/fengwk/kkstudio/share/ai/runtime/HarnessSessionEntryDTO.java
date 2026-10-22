@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.share.ai.runtime;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
+import org.jspecify.annotations.Nullable;
 
 import java.time.Instant;
 
@@ -18,7 +19,7 @@ public class HarnessSessionEntryDTO {
    * 父 Entry 主键：canonical UUID string；仅 ROOT Entry 为 null（{@code @JsonInclude(ALWAYS)} 保证 null 也输出）。
    */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String parentEntryId;
+  private @Nullable String parentEntryId;
 
   /**
    * Entry 语义类型，取 {@code EntryType}
@@ -39,5 +40,5 @@ public class HarnessSessionEntryDTO {
    * catalog 删除、价格不可得）显式输出 null，绝不伪装成 0 费用。{@code @JsonInclude(ALWAYS)} 让「未计价」 与「计价为 0」在 wire 上可区分。
    */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private HarnessUsageCostDTO usageCost;
+  private @Nullable HarnessUsageCostDTO usageCost;
 }

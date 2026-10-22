@@ -6,24 +6,23 @@ import type {
   CanvasCommandDTO,
   CanvasFunctionDefinitionDTO,
   CanvasSnapshotDTO,
-  UUIDString,
-} from '@/shared/api/contracts/studio'
+} from '@/shared/api/generated/contracts'
 
 export interface FunctionConfigSyncOptions {
   executeCommands: (commands: CanvasCommandDTO[], ack?: CanvasDraftAck[]) => Promise<unknown>
   getSnapshot?: () => CanvasSnapshotDTO | undefined
   getModel?: (functionName: string) => CanvasFunctionDefinitionDTO | undefined
-  onImmediateDraft?: (nodeId: UUIDString, functionName: string, config: CanvasFunctionConfig) => number
-  getDraftGeneration?: (nodeId: UUIDString) => number | undefined
+  onImmediateDraft?: (nodeId: string, functionName: string, config: CanvasFunctionConfig) => number
+  getDraftGeneration?: (nodeId: string) => number | undefined
 }
 
 export interface FunctionConfigSync {
   scheduleFunctionConfig: (
-    nodeId: UUIDString,
+    nodeId: string,
     functionName: string,
     config: CanvasFunctionConfig,
   ) => void
-  flushFunctionConfig: (nodeId: UUIDString) => Promise<void>
+  flushFunctionConfig: (nodeId: string) => Promise<void>
   /** 离开/切换画布时清空未提交草稿与定时器（不中断进行中的 flush 循环）。 */
   resetPending: () => void
 }
@@ -59,11 +58,11 @@ export function useFunctionConfigSync(
     getDraftGenerationRef.current = getDraftGeneration
   }, [executeCommands, getSnapshot, getModel, onImmediateDraft, getDraftGeneration])
 
-  const pendingFunctionConfigsRef = useRef(new Map<UUIDString, PendingItem>())
-  const functionConfigTimersRef = useRef(new Map<UUIDString, number>())
-  const functionConfigFlushesRef = useRef(new Map<UUIDString, Promise<void>>())
+  const pendingFunctionConfigsRef = useRef(new Map<string, PendingItem>())
+  const functionConfigTimersRef = useRef(new Map<string, number>())
+  const functionConfigFlushesRef = useRef(new Map<string, Promise<void>>())
 
-  const flushFunctionConfig = useCallback((nodeId: UUIDString): Promise<void> => {
+  const flushFunctionConfig = useCallback((nodeId: string): Promise<void> => {
     const timer = functionConfigTimersRef.current.get(nodeId)
     if (timer !== undefined) {
       window.clearTimeout(timer)
@@ -111,7 +110,7 @@ export function useFunctionConfigSync(
   }, [])
 
   const scheduleFunctionConfig = useCallback((
-    nodeId: UUIDString,
+    nodeId: string,
     functionName: string,
     config: CanvasFunctionConfig,
   ) => {

@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.share.ai.catalog;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
+import org.jspecify.annotations.Nullable;
 
 import java.time.Instant;
 import java.util.List;
@@ -14,13 +15,13 @@ public class AgentProviderDTO {
   private String name;
 
   /** 可空描述（text，无长度上限）。 */
-  private String description;
+  private @Nullable String description;
 
   /** 供应商类型，稳定 wire 值之一：{@code openai}、{@code openai_responses}、{@code anthropic}、{@code google}。 */
   private String providerType;
 
   /** 可空模型 API base URL（≤512 字符）。 */
-  private String baseUrl;
+  private @Nullable String baseUrl;
 
   /** 是否已配置凭证（内部 credential 非空白即为 true）；凭证本身永不进入公开 DTO。 */
   private boolean configured;
@@ -37,7 +38,7 @@ public class AgentProviderDTO {
    * <p>前端契约为 {@code number[] | null}：即便全局默认省略 null，本字段也必须显式输出 null。
    */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private List<Integer> modelHttpRetryStatusCodes;
+  private @Nullable List<Integer> modelHttpRetryStatusCodes;
 
   /** 非负十进制字符串版本号；客户端每次更新时必须回传。 */
   private String version;

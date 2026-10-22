@@ -63,13 +63,6 @@ it('续租替换旧截止点：旧定时器被取消，只按新截止点回读�
   hook.unmount()
 })
 
-it('接受 ISO 字符串时刻并解析为同一截止点', () => {
-  const { invalidate, wrapper } = setup()
-  renderHook(() => useReadModelFreshnessRecheck(['interactions'], '2026-10-08T00:00:30Z'), { wrapper })
-  act(() => vi.advanceTimersByTime(30250))
-  expect(invalidate).toHaveBeenCalledTimes(1)
-})
-
 it('没有未来变更时刻时不排任务（无租约即停止）', () => {
   const { invalidate, wrapper } = setup()
   renderHook(() => useReadModelFreshnessRecheck(['interactions'], null), { wrapper })
@@ -199,13 +192,12 @@ it('过去时刻只消费一次，切换后回到旧截止点也不重复', () =
   expect(invalidate).toHaveBeenCalledTimes(2)
 })
 
-it('undefined、无效 ISO 和非有限数字不排任务，清空截止点取消旧任务', () => {
+it('undefined 和非有限数字不排任务，清空截止点取消旧任务', () => {
   const { invalidate, wrapper } = setup()
   const hook = renderHook(({ at }) => useReadModelFreshnessRecheck(['interactions'], at), {
     wrapper,
-    initialProps: { at: undefined as string | number | undefined },
+    initialProps: { at: undefined as number | undefined },
   })
-  hook.rerender({ at: 'invalid' })
   hook.rerender({ at: Infinity })
   expect(vi.getTimerCount()).toBe(0)
   hook.rerender({ at: Date.now() / 1000 + 10 })

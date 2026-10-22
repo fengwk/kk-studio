@@ -12,13 +12,12 @@ import type {
   CanvasNodePatchDTO,
   CanvasPatchDTO,
   CanvasSnapshotDTO,
-  UUIDString,
-} from '@/shared/api/contracts/studio'
+} from '@/shared/api/generated/contracts'
 
-const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f' as UUIDString
-const NODE_ID = 'c9e3b7f1-2a4d-4e6f-8a9b-0c1d2e3f4a5b' as UUIDString
+const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
+const NODE_ID = 'c9e3b7f1-2a4d-4e6f-8a9b-0c1d2e3f4a5b'
 
-function deleteCommand(nodeId: UUIDString = NODE_ID): CanvasCommandDTO {
+function deleteCommand(nodeId: string = NODE_ID): CanvasCommandDTO {
   return {
     type: 'DELETE_NODE',
     nodeId,
@@ -323,7 +322,7 @@ describe('CanvasCommandQueue', () => {
 
     // 模拟重载：新的队列实例共享同一持久化 operation store。
     const replayed: ApplyCanvasCommandsRequestDTO[] = []
-    const recoverApply = vi.fn(async (_canvasId: UUIDString, request: ApplyCanvasCommandsRequestDTO) => {
+    const recoverApply = vi.fn(async (_canvasId: string, request: ApplyCanvasCommandsRequestDTO) => {
       replayed.push(request)
       return advancePatch(1 + replayed.length)
     })
@@ -552,7 +551,7 @@ describe('CanvasCommandQueue', () => {
       canvasId: CANVAS_ID,
       editingSessionId: 'session',
       sessionKey: 'user:canvas:session',
-      idempotencyKey: 'aaaaaaaa-0000-4000-8000-0000000000c1' as UUIDString,
+      idempotencyKey: 'aaaaaaaa-0000-4000-8000-0000000000c1',
       commands: [{ type: 'RENAME_NODE', nodeId: NODE_ID, expectedName: 'init', name: 'A' }],
       ack: [],
       sequence: 0,
@@ -564,7 +563,7 @@ describe('CanvasCommandQueue', () => {
       canvasId: CANVAS_ID,
       editingSessionId: 'session',
       sessionKey: 'user:canvas:session',
-      idempotencyKey: 'aaaaaaaa-0000-4000-8000-0000000000c2' as UUIDString,
+      idempotencyKey: 'aaaaaaaa-0000-4000-8000-0000000000c2',
       commands: [{ type: 'RENAME_NODE', nodeId: NODE_ID, expectedName: 'A', name: 'B' }],
       ack: [],
       sequence: 1,
@@ -605,7 +604,7 @@ describe('CanvasCommandQueue', () => {
       canvasId: CANVAS_ID,
       editingSessionId: 'session',
       sessionKey: 'user:canvas:session',
-      idempotencyKey: 'aaaaaaaa-0000-4000-8000-0000000000d1' as UUIDString,
+      idempotencyKey: 'aaaaaaaa-0000-4000-8000-0000000000d1',
       commands: [deleteCommand()],
       ack: [],
       sequence: 0,
@@ -701,7 +700,7 @@ describe('CanvasCommandQueue', () => {
       canvasId: CANVAS_ID,
       editingSessionId: 'session',
       sessionKey: 'user:canvas:session',
-      idempotencyKey: 'aaaaaaaa-0000-4000-8000-0000000000e1' as UUIDString,
+      idempotencyKey: 'aaaaaaaa-0000-4000-8000-0000000000e1',
       commands: [{ type: 'RENAME_NODE', nodeId: NODE_ID, expectedName: 'a', name: 'conflict' }],
       ack: [],
       sequence: 0,
@@ -713,7 +712,7 @@ describe('CanvasCommandQueue', () => {
       canvasId: CANVAS_ID,
       editingSessionId: 'session',
       sessionKey: 'user:canvas:session',
-      idempotencyKey: 'aaaaaaaa-0000-4000-8000-0000000000e2' as UUIDString,
+      idempotencyKey: 'aaaaaaaa-0000-4000-8000-0000000000e2',
       commands: [{ type: 'RENAME_NODE', nodeId: NODE_ID, expectedName: 'a', name: 'bad' }],
       ack: [],
       sequence: 1,
@@ -725,7 +724,7 @@ describe('CanvasCommandQueue', () => {
       canvasId: CANVAS_ID,
       editingSessionId: 'session',
       sessionKey: 'user:canvas:session',
-      idempotencyKey: 'aaaaaaaa-0000-4000-8000-0000000000e3' as UUIDString,
+      idempotencyKey: 'aaaaaaaa-0000-4000-8000-0000000000e3',
       commands: [deleteCommand()],
       ack: [{ nodeId: NODE_ID, field: 'text', generation: 2 }],
       sequence: 2,
@@ -812,7 +811,7 @@ describe('CanvasCommandQueue', () => {
       canvasId: CANVAS_ID,
       editingSessionId: 'session',
       sessionKey: 'user:canvas:session',
-      idempotencyKey: 'aaaaaaaa-0000-4000-8000-0000000000a5' as UUIDString,
+      idempotencyKey: 'aaaaaaaa-0000-4000-8000-0000000000a5',
       commands: [{ type: 'RENAME_NODE', nodeId: NODE_ID, expectedName: 'init', name: 'A' }],
       ack: [],
       sequence: 5,
@@ -855,7 +854,7 @@ describe('CanvasCommandQueue', () => {
       initialSnapshot: snapshot(1),
       apply,
       refetch: vi.fn(),
-      createCommandId: () => 'aaaaaaaa-0000-4000-8000-0000000000b6' as UUIDString,
+      createCommandId: () => 'aaaaaaaa-0000-4000-8000-0000000000b6',
       operationStore: store,
     })
 
@@ -929,7 +928,7 @@ describe('CanvasCommandQueue', () => {
       canvasId: CANVAS_ID,
       editingSessionId: 'session',
       sessionKey: 'user:canvas:session',
-      idempotencyKey: 'aaaaaaaa-0000-4000-8000-0000000000a5' as UUIDString,
+      idempotencyKey: 'aaaaaaaa-0000-4000-8000-0000000000a5',
       commands: [{ type: 'RENAME_NODE', nodeId: NODE_ID, expectedName: 'init', name: 'A' }],
       ack: [],
       sequence: 5,
@@ -941,7 +940,7 @@ describe('CanvasCommandQueue', () => {
       canvasId: CANVAS_ID,
       editingSessionId: 'session',
       sessionKey: 'user:canvas:session',
-      idempotencyKey: 'aaaaaaaa-0000-4000-8000-0000000000c9' as UUIDString,
+      idempotencyKey: 'aaaaaaaa-0000-4000-8000-0000000000c9',
       commands: [{ type: 'RENAME_NODE', nodeId: NODE_ID, expectedName: 'A', name: 'C' }],
       ack: [],
       sequence: 9,
@@ -985,7 +984,7 @@ describe('CanvasCommandQueue', () => {
       initialSnapshot: snapshot(1),
       apply,
       refetch: vi.fn(),
-      createCommandId: () => 'aaaaaaaa-0000-4000-8000-0000000000b0' as UUIDString,
+      createCommandId: () => 'aaaaaaaa-0000-4000-8000-0000000000b0',
       operationStore: store,
     })
 
@@ -1198,7 +1197,7 @@ describe('CanvasCommandQueue', () => {
     // 模拟重载后：创建新的队列实例并执行 recover
     removeShouldFail = false // 后续存储故障恢复
     const replayedRequests: ApplyCanvasCommandsRequestDTO[] = []
-    const recoverApply = vi.fn(async (_canvasId: UUIDString, request: ApplyCanvasCommandsRequestDTO) => {
+    const recoverApply = vi.fn(async (_canvasId: string, request: ApplyCanvasCommandsRequestDTO) => {
       replayedRequests.push(request)
       return advancePatch(3)
     })
@@ -1230,7 +1229,7 @@ describe('CanvasCommandQueue', () => {
       canvasId: CANVAS_ID,
       editingSessionId: 'session',
       sessionKey: 'user:canvas:session',
-      idempotencyKey: 'aaaaaaaa-0000-4000-8000-000000000099' as UUIDString,
+      idempotencyKey: 'aaaaaaaa-0000-4000-8000-000000000099',
       commands: [{ type: 'RENAME_NODE', nodeId: NODE_ID, expectedName: 'old', name: 'recovered' }],
       baselineRevision: '888',
       extraAuditInfo: { origin: 'unknown' },

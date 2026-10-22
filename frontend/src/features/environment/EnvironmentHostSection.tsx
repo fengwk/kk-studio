@@ -1,7 +1,7 @@
 import { useI18n } from '@/shared/i18n'
 import { Mono } from '@/shared/ui/data/Mono'
 import { formatTimestamp } from '@/features/environment/environment-utils'
-import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
+import type { EnvironmentCardDTO } from '@/shared/api/generated/contracts'
 
 export interface EnvironmentHostSectionProps {
   environment: EnvironmentCardDTO

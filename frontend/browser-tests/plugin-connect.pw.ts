@@ -1,5 +1,5 @@
 import { expect, test, type Page } from './fixture'
-import type { PluginDTO } from '@/shared/api/contracts/ai-plugin'
+import type { PluginDTO } from '@/shared/api/generated/contracts'
 
 const deepLinkPlugin: PluginDTO = {
   pluginId: 'offline-deeplink',

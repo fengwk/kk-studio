@@ -1,8 +1,7 @@
 import type {
   DaemonLspServerConfiguration,
   EnvironmentInstallConfigDTO,
-  InstallOperatingSystem,
-} from '@/shared/api/contracts/ai-environment'
+} from '@/shared/api/generated/contracts'
 
 /**
  * 安装设置校验失败。只携带字段路径；`message` 不含输入值，供非 UI 调用方使用，
@@ -25,7 +24,18 @@ function fail(field: string): never {
 // Java Character.isISOControl (C0 + C1) plus the JSON/JS line separators.
 // eslint-disable-next-line no-control-regex
 const controls = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/
-const operatingSystems = ['linux', 'macos', 'windows'] as const
+export const INSTALL_OPERATING_SYSTEMS = ['linux', 'macos', 'windows'] as const
+export type InstallOperatingSystem = (typeof INSTALL_OPERATING_SYSTEMS)[number]
+
+/** 校验后的安装设置：操作系统收窄为受支持的取值。 */
+export interface ValidatedInstallConfig extends EnvironmentInstallConfigDTO {
+  operatingSystem: InstallOperatingSystem
+}
+
+export function isInstallOperatingSystem(value: unknown): value is InstallOperatingSystem {
+  return (INSTALL_OPERATING_SYSTEMS as readonly unknown[]).includes(value)
+}
+
 const topLevelFields = ['operatingSystem', 'daemon']
 const daemonFields = ['studioUrl', 'note', 'bashExecutable', 'lsp']
 const serverFields = ['command', 'extensions', 'rootMarkers', 'firstMatchMarkers']
@@ -164,15 +174,13 @@ function lspConfiguration(
  */
 export function validateInstallConfig(
   config: EnvironmentInstallConfigDTO,
-): EnvironmentInstallConfigDTO {
+): ValidatedInstallConfig {
   if (!isPlainObject(config) || hasUnknownField(config, topLevelFields)) fail('installConfig')
   const os = config.operatingSystem
-  if (typeof os !== 'string' || !(operatingSystems as readonly string[]).includes(os)) {
-    fail('installConfig.operatingSystem')
-  }
+  if (!isInstallOperatingSystem(os)) fail('installConfig.operatingSystem')
   if (!isPlainObject(config.daemon) || hasUnknownField(config.daemon, daemonFields)) fail('daemon')
   return {
-    operatingSystem: os as InstallOperatingSystem,
+    operatingSystem: os,
     daemon: {
       studioUrl: origin(config.daemon.studioUrl),
       note: note(config.daemon.note),
@@ -229,7 +237,7 @@ export function generateInstallCommand(
 ): string {
   nonblankText(environmentId, 'environmentId')
   nonblankText(code, 'installCode')
-  if (!(operatingSystems as readonly string[]).includes(os)) fail('operatingSystem')
+  if (!isInstallOperatingSystem(os)) fail('operatingSystem')
   const url = scriptUrl(
     origin,
     `/api/environments/${encodeURIComponent(environmentId)}/install?code=${encodeURIComponent(code)}`,
@@ -238,7 +246,7 @@ export function generateInstallCommand(
 }
 
 export function generateUninstallCommand(os: InstallOperatingSystem, origin: string): string {
-  if (!(operatingSystems as readonly string[]).includes(os)) fail('operatingSystem')
+  if (!isInstallOperatingSystem(os)) fail('operatingSystem')
   const url = scriptUrl(origin, `/api/environments/uninstall/${encodeURIComponent(os)}`)
   return os === 'windows' ? windowsCommand(url) : unixCommand(url)
 }

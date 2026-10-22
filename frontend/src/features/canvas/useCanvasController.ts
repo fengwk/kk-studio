@@ -32,15 +32,12 @@ import { useCanvasNodeActions } from '@/features/canvas/useCanvasNodeActions'
 import { useCanvasNodePlacement } from '@/features/canvas/useCanvasNodePlacement'
 import { useCanvasReferenceLinks } from '@/features/canvas/useCanvasReferenceLinks'
 import { useCanvasTextEditor } from '@/features/canvas/useCanvasTextEditor'
-import type {
-  CanvasFunctionVersionDTO,
-  UUIDString,
-} from '@/shared/api/contracts/studio'
 import {
   getCanvas,
   listCanvasFunctions,
 } from '@/shared/api/studio-service'
 import { queryKeys } from '@/shared/lib/query-keys'
+import type { CanvasFunctionVersionDTO } from '@/shared/api/generated/contracts'
 
 const DEFAULT_STAGE: StageMetrics = { width: 960, height: 640, dockTop: 520 }
 
@@ -48,7 +45,7 @@ const DEFAULT_STAGE: StageMetrics = { width: 960, height: 640, dockTop: 520 }
  * 画布编辑器的组合根：持有渲染状态、权威快照与函数目录查询、视口与选区，并把草稿持久化、命令队列、节点落位、文本编辑、引用边与节点操作
  * 这些子 hook 接到同一个 {@link useCanvasScope} 作用域上。展示 = 权威快照 + 待确认操作 + 本地草稿。
  */
-export function useCanvasController(initialCanvasId?: UUIDString) {
+export function useCanvasController(initialCanvasId?: string) {
   const queryClient = useQueryClient()
   const [state, setState] = useState<CanvasLocalState>(() => ({
     view: initialCanvasId ? 'editor' : 'library',
@@ -101,7 +98,7 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
 
   const snapshotQuery = useQuery({
     queryKey: state.canvasId ? queryKeys.studio.canvas(state.canvasId) : ['studio', 'canvas', 'none'],
-    queryFn: ({ signal }) => getCanvas(state.canvasId as UUIDString, { signal }),
+    queryFn: ({ signal }) => getCanvas(state.canvasId as string, { signal }),
     enabled: state.view === 'editor' && Boolean(state.canvasId),
   })
   const modelsQuery = useQuery({
@@ -174,7 +171,7 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
    * 返回值是脱离查询缓存的新对象（调用方随后也不会被目录原地改写影响）。
    * 目录中没有对应定义时返回 null，调用方必须 0 flush / 0 POST。
    */
-  const resolveFunctionVersion = useCallback((nodeId: UUIDString): CanvasFunctionVersionDTO | null => {
+  const resolveFunctionVersion = useCallback((nodeId: string): CanvasFunctionVersionDTO | null => {
     const functionName = draftsRef.current[nodeId]?.function?.name
       ?? currentCanvasSnapshot(scope, snapshot)?.nodes.find((node) => node.id === nodeId)?.function?.name
     if (!functionName) {
@@ -236,7 +233,7 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
   })
 
   /** 离开当前画布前清空所有进行中的本地编辑流水线并进入新的作用域。 */
-  const leaveCanvas = useCallback((nextCanvasId: UUIDString | null) => {
+  const leaveCanvas = useCallback((nextCanvasId: string | null) => {
     resetTransformBatch()
     resetUploads()
     resetFunctionConfigDrafts()
@@ -244,7 +241,7 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     enterCanvasScope(scope, nextCanvasId)
   }, [clearReservedAliases, resetFunctionConfigDrafts, resetTransformBatch, resetUploads, scope])
 
-  const openEditor = useCallback((canvasId: UUIDString) => {
+  const openEditor = useCallback((canvasId: string) => {
     leaveCanvas(canvasId)
     reloadDrafts()
     setInitialFitPending(!hasStoredCanvasViewport(canvasId))

@@ -1,10 +1,10 @@
-import type { HarnessSessionEntryDTO } from '@/shared/api/contracts/ai-runtime'
 import { asRecord, getString, parsePayload } from '@/features/chat/runtime/payload-json'
 import {
   mergeTurnUsage,
   parseAssistantUsage,
 } from '@/features/chat/runtime/thread-timeline/content-utils'
 import type { TurnUsage } from '@/features/chat/runtime/thread-timeline-types'
+import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 
 /**
  * 当前 branch（root-to-head 全 Entry）的累计 usage，纯函数、只看 Entry 事实。

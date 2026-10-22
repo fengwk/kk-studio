@@ -3,7 +3,7 @@ import type {
   SystemSettingsDTO,
   SystemSettingsSchemaDTO,
   SystemSettingsUpdateDTO,
-} from '@/shared/api/contracts/system-settings'
+} from '@/shared/api/generated/contracts'
 
 /**
  * 全局 system settings 聚合的读写面：

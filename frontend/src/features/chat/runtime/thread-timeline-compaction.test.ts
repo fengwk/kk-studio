@@ -3,11 +3,9 @@ import {
   buildThreadTimeline,
 } from '@/features/chat/runtime/thread-timeline-builder'
 import type { EntryEventDialogueMessage } from '@/features/chat/runtime/thread-timeline-types'
-import type {
-  EntryType,
-  HarnessSessionEntryDTO,
-} from '@/shared/api/contracts/ai-runtime'
+import type { EntryType } from '@/shared/api/contracts/ai-runtime'
 import { FULL_COMPACTION_SUMMARY } from '@/test-support/resources/compaction-summary'
+import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 
 /**
  * 完整成功压缩的健康路径：
@@ -40,7 +38,7 @@ describe('compaction summary projection', () => {
       subjectEntryId: 'comp1',
       status: 'done',
     })
-    expect(cards[0].createdAt).toBe('2026-01-01T00:00:03')
+    expect(cards[0].createdAt).toBe(1767225603)
 
     // 卡片留在原压缩回合的位置：此前对话之后、后续对话之前。
     expect(timeline.messages.map((message) =>
@@ -264,6 +262,7 @@ function entry(
     parentEntryId: null,
     entryType,
     payloadJson: JSON.stringify(payload),
-    createTime: `2026-01-01T00:00:0${entryId === 'assistant' ? '2' : '3'}`,
+    createTime: 1767225600 + (entryId === 'assistant' ? 2 : 3),
+    usageCost: null,
   }
 }

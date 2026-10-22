@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.share.ai.runtime;
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
+import org.jspecify.annotations.Nullable;
 
 import java.time.Instant;
 
@@ -15,7 +16,7 @@ public class HarnessThreadSummaryDTO {
 
   /** 执行父 Thread 的 canonical UUID string；根 Thread 显式为 null。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String parentThreadId;
+  private @Nullable String parentThreadId;
 
   /** Thread 的必需非空展示名称（服务端权威值）；主展示文本，绝不回退为 id。 */
   private String name;
@@ -42,7 +43,7 @@ public class HarnessThreadSummaryDTO {
 
   /** 当前 head 上最近的用户可读消息预览；没有消息时显式为 null。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String headMessagePreview;
+  private @Nullable String headMessagePreview;
 
   @JsonAnySetter
   public void rejectUnknownField(String field, Object value) {

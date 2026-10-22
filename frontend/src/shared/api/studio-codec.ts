@@ -1,3 +1,8 @@
+import {
+  CANVAS_FUNCTION_RUN_STATUSES,
+  CANVAS_RESOURCE_KINDS,
+} from '@/shared/api/contracts/studio'
+import type { CanvasFunctionRunStatus, CanvasResourceKind } from '@/shared/api/contracts/studio'
 import { ApiError } from '@/shared/api/client'
 import type { CanvasRevision } from '@/shared/api/contracts/base'
 import { isCanvasRevision } from '@/shared/lib/canvas-version'
@@ -14,8 +19,7 @@ import type {
   CanvasReferenceDTO,
   CanvasResourceNodeDTO,
   CanvasSnapshotDTO,
-  UUIDString,
-} from '@/shared/api/contracts/studio'
+} from '@/shared/api/generated/contracts'
 
 /**
  * Canvas wire codec：纯 primitive/DTO 解码器。
@@ -48,12 +52,12 @@ function requireString(value: unknown, path: string): string {
 
 const UUID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-function requireUuid(value: unknown, path: string): UUIDString {
+function requireUuid(value: unknown, path: string): string {
   const text = requireString(value, path)
   if (!UUID_SHAPE.test(text)) {
     throw invalidPayload(`${path} must be a canonical UUID string`)
   }
-  return text as UUIDString
+  return text
 }
 
 function requireArray(value: unknown, path: string): unknown[] {
@@ -70,22 +74,18 @@ function requireCanvasRevision(value: unknown, path: string): CanvasRevision {
   return value
 }
 
-const RESOURCE_KINDS = ['IMAGE', 'VIDEO', 'AUDIO', 'TEXT'] as const
-
-function requireResourceKind(value: unknown, path: string): CanvasResourceNodeDTO['resources'][number]['kind'] {
-  if (typeof value !== 'string' || !(RESOURCE_KINDS as readonly string[]).includes(value)) {
+function requireResourceKind(value: unknown, path: string): CanvasResourceKind {
+  if (typeof value !== 'string' || !(CANVAS_RESOURCE_KINDS as readonly string[]).includes(value)) {
     throw invalidPayload(`${path} must be one of IMAGE, VIDEO, AUDIO, TEXT`)
   }
-  return value as CanvasResourceNodeDTO['resources'][number]['kind']
+  return value as CanvasResourceKind
 }
 
-const RUN_STATUSES = ['READY', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN'] as const
-
-function requireRunStatus(value: unknown, path: string): NonNullable<CanvasResourceNodeDTO['run']>['status'] {
-  if (typeof value !== 'string' || !(RUN_STATUSES as readonly string[]).includes(value)) {
+function requireRunStatus(value: unknown, path: string): CanvasFunctionRunStatus {
+  if (typeof value !== 'string' || !(CANVAS_FUNCTION_RUN_STATUSES as readonly string[]).includes(value)) {
     throw invalidPayload(`${path} must be one of READY, RUNNING, SUCCEEDED, FAILED, CANCELLED, UNKNOWN`)
   }
-  return value as NonNullable<CanvasResourceNodeDTO['run']>['status']
+  return value as CanvasFunctionRunStatus
 }
 
 function requirePatchOp(value: unknown, path: string): 'REMOVE' | 'UPSERT' {
@@ -168,18 +168,18 @@ function requireInt(value: unknown, path: string): number {
 }
 
 /** Java long wire（decimal string|null）安全解码为 number|null，超 safe integer fail closed。 */
-function decodeLong(value: unknown, path: string): number | null {
+/** Java Long 的 wire 形态：canonical 非负十进制字符串，且必须在安全整数范围内，领域投影才能无损转成 number。 */
+function decodeLong(value: unknown, path: string): string | null {
   if (!decodeNullable(value, path)) {
     return null
   }
   if (!isCanvasRevision(value)) {
     throw invalidPayload(`${path} must be a canonical non-negative decimal string or null`)
   }
-  const parsed = Number(value)
-  if (!Number.isSafeInteger(parsed)) {
+  if (!Number.isSafeInteger(Number(value))) {
     throw invalidPayload(`${path} exceeds Number.MAX_SAFE_INTEGER`)
   }
-  return parsed
+  return value
 }
 
 export function decodeCanvasDocument(value: unknown): CanvasDocumentDTO {
@@ -217,7 +217,7 @@ function decodeCanvasResource(value: unknown): CanvasResourceNodeDTO['resources'
   }
 }
 
-function decodeNullableUuid(value: unknown, path: string): UUIDString | null {
+function decodeNullableUuid(value: unknown, path: string): string | null {
   return decodeNullable(value, path) ? requireUuid(value, path) : null
 }
 
@@ -370,7 +370,7 @@ export function decodeCanvasConflict(value: unknown): CanvasConflictDTO {
 function decodeReferencePolicy(value: unknown): CanvasFunctionReferencePolicyDTO {
   const candidate = requireRecord(value, 'referencePolicy')
   const maxByKindCandidate = requireRecord(candidate.maxByKind, 'referencePolicy.maxByKind')
-  const maxByKind: Partial<Record<CanvasResourceNodeDTO['resources'][number]['kind'], number>> = {}
+  const maxByKind: Record<string, number> = {}
   for (const [kind, limit] of Object.entries(maxByKindCandidate)) {
     maxByKind[requireResourceKind(kind, `referencePolicy.maxByKind.${kind}`)] =
       requireInt(limit, `referencePolicy.maxByKind.${kind}`)

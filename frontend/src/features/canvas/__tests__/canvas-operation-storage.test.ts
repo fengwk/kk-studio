@@ -17,16 +17,16 @@ import {
   handlePageshow,
   resetEditingSessionForTests,
 } from '@/features/canvas/canvas-editing-session'
-import type { CanvasCommandDTO, UUIDString } from '@/shared/api/contracts/studio'
+import type { CanvasCommandDTO } from '@/shared/api/generated/contracts'
 
-const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f' as UUIDString
-const NODE_ID = 'c9e3b7f1-2a4d-4e6f-8a9b-0c1d2e3f4a5b' as UUIDString
-const KEY_1: UUIDString = '11111111-1111-4000-8000-000000000001'
-const KEY_2: UUIDString = '22222222-2222-4000-8000-000000000002'
-const KEY_LATER: UUIDString = '33333333-3333-4000-8000-000000000003'
-const KEY_EARLIER: UUIDString = '44444444-4444-4000-8000-000000000004'
-const KEY_PERSISTED_1: UUIDString = '55555555-5555-4000-8000-000000000005'
-const KEY_PERSISTED_2: UUIDString = '66666666-6666-4000-8000-000000000006'
+const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
+const NODE_ID = 'c9e3b7f1-2a4d-4e6f-8a9b-0c1d2e3f4a5b'
+const KEY_1: string = '11111111-1111-4000-8000-000000000001'
+const KEY_2: string = '22222222-2222-4000-8000-000000000002'
+const KEY_LATER: string = '33333333-3333-4000-8000-000000000003'
+const KEY_EARLIER: string = '44444444-4444-4000-8000-000000000004'
+const KEY_PERSISTED_1: string = '55555555-5555-4000-8000-000000000005'
+const KEY_PERSISTED_2: string = '66666666-6666-4000-8000-000000000006'
 
 function renameCommand(name: string): CanvasCommandDTO {
   return { type: 'RENAME_NODE', nodeId: NODE_ID, expectedName: 'before', name }
@@ -34,7 +34,7 @@ function renameCommand(name: string): CanvasCommandDTO {
 
 function operation(
   sequence: number,
-  idempotencyKey: UUIDString,
+  idempotencyKey: string,
   name: string,
   editingSessionId = 'tab-1',
 ): CanvasPendingOperation {

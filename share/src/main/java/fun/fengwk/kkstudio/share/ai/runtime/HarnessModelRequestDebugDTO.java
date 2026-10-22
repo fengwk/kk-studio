@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.share.ai.runtime;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
+import org.jspecify.annotations.Nullable;
 
 import fun.fengwk.kkstudio.share.ai.catalog.EnvironmentSupportDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
@@ -34,7 +35,7 @@ public class HarnessModelRequestDebugDTO {
 
   /** branch 当前选择的 Environment 名；未选择时为 null（required-nullable）。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String environmentName;
+  private @Nullable String environmentName;
 
   /** 本次请求唯一的 systemInstruction 全文。 */
   private String systemInstruction;
@@ -50,15 +51,15 @@ public class HarnessModelRequestDebugDTO {
 
   /** Provider cache control 事实。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private CacheControlDTO cacheControl;
+  private @Nullable CacheControlDTO cacheControl;
 
   /** planning 失败的稳定错误码；成功时为 null（required-nullable）。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String planningError;
+  private @Nullable String planningError;
 
   /** 活动 ModelInvocation 的冻结 canonical ProviderRequest；没有活动 Invocation 时为 null。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private FrozenInvocationDTO frozenInvocation;
+  private @Nullable FrozenInvocationDTO frozenInvocation;
 
   /** 候选 Tool 的发送状态与最终 definition 事实。 */
   @Data
@@ -78,7 +79,7 @@ public class HarnessModelRequestDebugDTO {
 
     /** 精确要求的目标 Environment UUID（canonical UUID 文本）；不限定环境时为 null（required-nullable）。 */
     @JsonInclude(JsonInclude.Include.ALWAYS)
-    private String requiredEnvironmentId;
+    private @Nullable String requiredEnvironmentId;
 
     /** Contributor 归属身份（{@code contributorId:localName}）。 */
     private String provenance;
@@ -88,7 +89,7 @@ public class HarnessModelRequestDebugDTO {
 
     /** 被过滤的稳定原因（当前唯一值 {@code ENVIRONMENT_NOT_SELECTED}）；{@code SENT} 时为 null（required-nullable）。 */
     @JsonInclude(JsonInclude.Include.ALWAYS)
-    private String filterReason;
+    private @Nullable String filterReason;
   }
 
   /** 单个 Skill 的交付事实与实际 Prompt 片段。 */
@@ -115,11 +116,11 @@ public class HarnessModelRequestDebugDTO {
 
     /** Package 最近检查到的 branch HEAD；从未成功检查时为 null（required-nullable）。 */
     @JsonInclude(JsonInclude.Include.ALWAYS)
-    private String observedHeadCommit;
+    private @Nullable String observedHeadCommit;
 
     /** 当前 Environment 已安装的 commit；无 Environment 或未安装该 Package 时为 null（required-nullable）。 */
     @JsonInclude(JsonInclude.Include.ALWAYS)
-    private String installedCommit;
+    private @Nullable String installedCommit;
 
     /** 实际进入 systemInstruction 的 Skill XML 片段。 */
     private String promptXml;
@@ -162,7 +163,7 @@ public class HarnessModelRequestDebugDTO {
 
     /** 稳定缓存前缀标识（session UUID 文本）；{@code retention = NONE} 时为 null（required-nullable）。 */
     @JsonInclude(JsonInclude.Include.ALWAYS)
-    private String key;
+    private @Nullable String key;
   }
 
   /** 活动 ModelInvocation 的冻结请求。 */

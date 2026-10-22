@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { EnvironmentManagementModal } from '@/features/environment/EnvironmentManagementModal'
 import { environmentService } from '@/shared/api/environment-service'
-import type { EnvironmentCardDTO, EnvironmentEventDTO } from '@/shared/api/contracts/ai-environment'
+import type { EnvironmentCardDTO, EnvironmentEventDTO } from '@/shared/api/generated/contracts'
 
 vi.mock('@/shared/api/environment-service', () => ({
   environmentService: {
@@ -27,11 +27,11 @@ function testEnvironment(overrides: Partial<EnvironmentCardDTO> = {}): Environme
     status: 'READY',
     ready: true,
     statusExpiresAt: null,
-    lastSeen: '2026-07-20T02:00:00.000Z',
+    lastSeen: 1784512800,
     capabilities: [],
     version: '1',
-    createTime: '2026-07-20T00:00:00.000Z',
-    updateTime: '2026-07-20T00:00:00.000Z',
+    createTime: 1784505600,
+    updateTime: 1784505600,
     ...overrides,
   }
 }
@@ -108,13 +108,13 @@ describe('EnvironmentManagementModal', () => {
   it('renders events list with distinguishable levels and empty state when none', async () => {
     const mockEvents: EnvironmentEventDTO[] = [
       {
-        time: '2026-07-20T01:00:00.000Z',
+        time: 1784509200,
         level: 'INFO',
         type: 'READY',
         message: 'Host connected successfully',
       },
       {
-        time: '2026-07-20T01:05:00.000Z',
+        time: 1784509500,
         level: 'WARN',
         type: 'SKILL_SYNC_FAILED',
         message: 'Failed to synchronize skill package',

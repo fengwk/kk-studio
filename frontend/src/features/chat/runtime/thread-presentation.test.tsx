@@ -1,17 +1,16 @@
 import { act, fireEvent, renderHook, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
-import type { HarnessThreadDTO } from '@/shared/api/contracts/ai-runtime'
-import type { AgentModelDTO } from '@/shared/api/contracts/ai-catalog'
 import { setLocale } from '@/shared/i18n'
 import { paneTargetViewKey, threadIdentity, useThreadPresentation } from './thread-presentation'
 import { ThreadPresentationActions } from './ThreadPresentationActions'
+import type { AgentModelDTO, HarnessThreadDTO } from '@/shared/api/generated/contracts'
 
 const thread: HarnessThreadDTO = {
   threadId: 'child', name: 'worker', sessionId: 'session', headEntryId: 'head',
   parentThreadId: 'parent', rootThreadId: 'root', yoloEnabled: false,
   nextCommandSequence: '1', version: '1', status: 'IDLE', processing: false,
-  executionControl: 'RUNNABLE', createTime: null, updateTime: null,
+  executionControl: 'RUNNABLE', createTime: 0, updateTime: 0,
   branchSettings: {
     agentName: 'researcher', model: { providerName: 'provider', modelName: 'model', variant: 'deep' },
     environmentName: null, goal: null,
@@ -19,7 +18,7 @@ const thread: HarnessThreadDTO = {
 }
 const model: AgentModelDTO = {
   providerName: 'provider', name: 'model', modelId: 'actual-model', description: null,
-  version: '1', createTime: null, updateTime: null,
+  version: '1', createTime: 0, updateTime: 0,
   config: {
     limit: { context: 10000, output: 1000 },
     abilities: { tools: true, reasoning: true, inputModalities: ['TEXT'] },

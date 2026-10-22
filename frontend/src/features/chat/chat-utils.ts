@@ -1,12 +1,6 @@
 import { includesSearch } from '@/shared/lib/search-utils'
-import type {
-  ChatDTO,
-} from '@/shared/api/contracts/ai-chat'
-import type {
-  BackendDateTime,
-  CatalogVersion,
-  InstantTimestamp,
-} from '@/shared/api/contracts/base'
+import type { CatalogVersion } from '@/shared/api/contracts/base'
+import type { ChatDTO } from '@/shared/api/generated/contracts'
 
 function catalogVersionValue(version: CatalogVersion): bigint {
   try {
@@ -71,29 +65,11 @@ export function mergeChatIntoList(
   return found ? merged : [...merged, incoming]
 }
 
-function backendTimeValue(value: BackendDateTime | unknown): number {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return value
-  }
-  if (typeof value === 'string' && value.trim()) {
-    const parsed = Date.parse(value)
-    return Number.isFinite(parsed) ? parsed : 0
-  }
-  if (Array.isArray(value) && value.length >= 3) {
-    const [year, month, day, hour = 0, minute = 0, second = 0] = value.map((part) =>
-      Number(part),
-    )
-    const time = Date.UTC(year, (month || 1) - 1, day || 1, hour, minute, second)
-    return Number.isFinite(time) ? time : 0
-  }
-  return 0
-}
-
 export function filterChats(chats: ChatDTO[], search: string): ChatDTO[] {
   return chats
     .filter((chat) => includesSearch(chat.title ?? '', search))
     .sort((left, right) => {
-      const delta = backendTimeValue(right.createTime) - backendTimeValue(left.createTime)
+      const delta = right.createTime - left.createTime
       if (delta !== 0) {
         return delta
       }
@@ -101,36 +77,11 @@ export function filterChats(chats: ChatDTO[], search: string): ChatDTO[] {
     })
 }
 
-export function formatBackendDate(value: BackendDateTime | InstantTimestamp): string {
-  if (!value) {
-    return '-'
-  }
-  if (Array.isArray(value)) {
-    const [year, month = 1, day = 1, hour = 0, minute = 0] = value
-    if (
-      ![year, month, day, hour, minute].every(Number.isFinite)
-      || month < 1 || month > 12
-      || day < 1 || day > 31
-      || hour < 0 || hour > 23
-      || minute < 0 || minute > 59
-    ) {
-      return '-'
-    }
-    return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(
-      day,
-    ).padStart(2, '0')} ${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
-  }
-  const date = new Date(
-    typeof value === 'number'
-      ? (Math.abs(value) < 100_000_000_000 ? value * 1000 : value)
-      : value,
-  )
+/** 把 wire Instant（epoch 秒）格式化为本地 `YYYY-MM-DD HH:mm`；非法值显示 '-'。 */
+export function formatBackendDate(value: number): string {
+  const date = new Date(value * 1000)
   if (!Number.isFinite(date.getTime())) {
     return '-'
-  }
-  // 无时区字符串与数组是本地 wall-clock；有时区字符串和 epoch 才代表瞬时。
-  if (typeof value === 'string' && !/(?:Z|[+-]\d{2}:?\d{2})$/i.test(value)) {
-    return value.replace('T', ' ').slice(0, 16)
   }
   return `${String(date.getFullYear()).padStart(4, '0')}-${String(
     date.getMonth() + 1,

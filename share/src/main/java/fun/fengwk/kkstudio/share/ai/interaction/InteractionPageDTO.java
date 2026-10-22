@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.share.ai.interaction;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
+import org.jspecify.annotations.Nullable;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -22,11 +23,11 @@ public class InteractionPageDTO {
   private List<InteractionDTO> items = new ArrayList<>();
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private String nextCursor;
+  private @Nullable String nextCursor;
 
   private int total;
 
   /** 见类注释：时间驱动的最早可能变更时刻；没有时为 null（仍显式输出，便于客户端区分「无需回读」与「字段缺失」）。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
-  private Instant freshnessAt;
+  private @Nullable Instant freshnessAt;
 }

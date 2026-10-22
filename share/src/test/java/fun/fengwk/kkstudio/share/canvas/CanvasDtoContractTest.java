@@ -14,7 +14,6 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.RecordComponent;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -42,7 +41,7 @@ class CanvasDtoContractTest {
 
   /** durable 位置与版本游标在 wire 上永远是十进制字符串，避免 JS 丢精度。 */
   private static final String[] VERSION_STRING_FIELDS = {
-    "CanvasDocumentDTO.revision", "CanvasPatchDTO.revision", "CanvasVersionEventDTO.revision"
+    "CanvasDocumentDTO.revision", "CanvasPatchDTO.revision"
   };
 
   /** typed command 的 wire 名与核心命令一一对应；缺失或改名都会让前端错位。 */
@@ -242,30 +241,24 @@ class CanvasDtoContractTest {
     }
   }
 
-  /** 冲突载荷必须描述受影响对象与服务端权威值。 */
+  /** 冲突载荷必须描述受影响对象与服务端权威值，判别值由类型信息给出。 */
   @Test
   void conflictsCarryTargetAndServerValues() {
+    JsonSubTypes subtypes = CanvasConflictDTO.class.getAnnotation(JsonSubTypes.class);
+    assertNotNull(subtypes, "CanvasConflictDTO must declare its wire discriminators");
+    Map<String, String> actual = new LinkedHashMap<>();
+    for (JsonSubTypes.Type type : subtypes.value()) {
+      actual.put(type.value().getSimpleName(), type.name());
+    }
     assertEquals(
         Map.of(
-            CanvasConflictDTO.TargetMissing.class, "TARGET_MISSING",
-            CanvasConflictDTO.TargetPresent.class, "TARGET_PRESENT",
-            CanvasConflictDTO.StaleNode.class, "STALE_NODE",
-            CanvasConflictDTO.StaleGroup.class, "STALE_GROUP",
-            CanvasConflictDTO.NodeRunning.class, "NODE_RUNNING",
-            CanvasConflictDTO.NodeReferenced.class, "NODE_REFERENCED"),
-        Map.of(
-            CanvasConflictDTO.TargetMissing.class,
-            new CanvasConflictDTO.TargetMissing("t", "NODE").kind(),
-            CanvasConflictDTO.TargetPresent.class,
-            new CanvasConflictDTO.TargetPresent("t", "NODE").kind(),
-            CanvasConflictDTO.StaleNode.class,
-            new CanvasConflictDTO.StaleNode("n", "NAME", null).kind(),
-            CanvasConflictDTO.StaleGroup.class,
-            new CanvasConflictDTO.StaleGroup("g", null).kind(),
-            CanvasConflictDTO.NodeRunning.class,
-            new CanvasConflictDTO.NodeRunning("n", null).kind(),
-            CanvasConflictDTO.NodeReferenced.class,
-            new CanvasConflictDTO.NodeReferenced("n", List.of("r")).kind()));
+            "TargetMissing", "TARGET_MISSING",
+            "TargetPresent", "TARGET_PRESENT",
+            "StaleNode", "STALE_NODE",
+            "StaleGroup", "STALE_GROUP",
+            "NodeRunning", "NODE_RUNNING",
+            "NodeReferenced", "NODE_REFERENCED"),
+        actual);
     assertEquals(
         Map.of("nodeId", "String", "group", "String", "current", "CanvasResourceNodeDTO"),
         componentTypes(CanvasConflictDTO.StaleNode.class));

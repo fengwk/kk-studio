@@ -15,7 +15,7 @@ import type {
   ModelAttemptFailureDTO,
   ModelInvocationDTO,
   ToolInvocationDTO,
-} from '@/shared/api/contracts/ai-runtime'
+} from '@/shared/api/generated/contracts'
 
 const THREAD_ID = '11111111-2222-4333-8444-555555555555'
 const THREAD_B_ID = 'bbbbbbbb-0000-4000-8000-000000000002'
@@ -1835,8 +1835,8 @@ function modelAttemptFailure(
     thinking: '',
     errorCode: 'TRANSIENT',
     errorMessage: 'failure',
-    failedAt: '2026-01-01T00:00:00Z',
-    retryAt: '2026-01-01T00:00:02Z',
+    failedAt: 1767225600,
+    retryAt: 1767225602,
   }
 }
 
@@ -1916,8 +1916,8 @@ function modelInvocation(
     resultJson: null,
     errorJson: null,
     resultEntryId: null,
-    createTime: '2026-01-01T00:00:00Z',
-    updateTime: '2026-01-01T00:00:00Z',
+    createTime: 1767225600,
+    updateTime: 1767225600,
   }
 }
 
@@ -1941,8 +1941,8 @@ function toolInvocation(overrides: Partial<ToolInvocationDTO> = {}): ToolInvocat
     approvalJson: null,
     resultJson: null,
     errorJson: null,
-    createTime: '2026-01-01T00:00:00Z',
-    updateTime: '2026-01-01T00:00:00Z',
+    createTime: 1767225600,
+    updateTime: 1767225600,
     ...overrides,
   }
 }

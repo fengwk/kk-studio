@@ -3,10 +3,6 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '@/shared/api/client'
-import type {
-  SystemSettingsDTO,
-  SystemSettingsUpdateDTO,
-} from '@/shared/api/contracts/system-settings'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { BrowserPreferencesProvider } from '@/features/settings/browser-preferences'
 import {
@@ -16,6 +12,7 @@ import {
 } from '@/test-support/settings-test-fixtures'
 import { SettingsPage } from '@/features/settings/SettingsPage'
 import { chooseSelectOption } from '@/test-support/chooseSelectOption'
+import type { SystemSettingsDTO, SystemSettingsUpdateDTO } from '@/shared/api/generated/contracts'
 
 const mocks = vi.hoisted(() => ({ get: vi.fn(), getSchema: vi.fn(), update: vi.fn() }))
 
@@ -46,7 +43,7 @@ vi.mock('@/shared/api/agent-service', () => ({
         environmentId: null,
       },
     ]),
-    listModels: vi.fn(async () => ({ pageNumber: 1, pageSize: 50, totalCount: 0, results: [] })),
+    listModels: vi.fn(async () => ({ pageNumber: 1, pageSize: 50, totalCount: '0', results: [] })),
   },
 }))
 
