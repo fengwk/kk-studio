@@ -302,7 +302,7 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
     agent.setName("web-agent-" + System.nanoTime());
     agent.setDescription("skill reference guard agent");
     agent.setSystemPrompt("guard");
-    agent.setModel("stub/acceptance-stub");
+    agent.setModel("acceptance-stub");
     agent.setConfig(config);
     mockMvc
         .perform(
