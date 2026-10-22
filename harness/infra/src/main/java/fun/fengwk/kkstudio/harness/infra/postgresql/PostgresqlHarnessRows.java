@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryEntryPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ModelAttemptFailuresJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ModelGroupProgressJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ModelRequestSpecJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.StreamCheckpointJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolApprovalJsonCodec;
@@ -72,6 +73,7 @@ final class PostgresqlHarnessRows {
   static final HistoryEntryPayloadJsonCodec ENTRY_PAYLOADS = new HistoryEntryPayloadJsonCodec();
   static final ThreadCommandPayloadJsonCodec COMMAND_PAYLOADS = new ThreadCommandPayloadJsonCodec();
   static final ModelRequestSpecJsonCodec MODEL_REQUESTS = new ModelRequestSpecJsonCodec();
+  static final ModelGroupProgressJsonCodec GROUP_EXECUTIONS = new ModelGroupProgressJsonCodec();
   static final StreamCheckpointJsonCodec STREAM_CHECKPOINTS = new StreamCheckpointJsonCodec();
   static final ModelAttemptFailuresJsonCodec MODEL_FAILED_ATTEMPTS =
       new ModelAttemptFailuresJsonCodec();
@@ -239,7 +241,9 @@ final class PostgresqlHarnessRows {
               instant(resultSet, "created_at"),
               instant(resultSet, "updated_at"),
               decodeNullable(
-                  resultSet.getString("provider_replay_state"), PROVIDER_REPLAY_STATES::decode));
+                  resultSet.getString("provider_replay_state"), PROVIDER_REPLAY_STATES::decode),
+              decodeNullable(resultSet.getString("group_execution"), GROUP_EXECUTIONS::decode),
+              nullableInstant(resultSet, "requested_at"));
 
   static final RowMapper<ToolInvocation> TOOL_INVOCATION =
       (resultSet, rowNumber) ->

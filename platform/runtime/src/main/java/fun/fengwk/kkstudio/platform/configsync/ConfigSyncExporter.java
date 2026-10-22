@@ -7,6 +7,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
+import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelGroupConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.provider.configuration.AgentProviderConfigurationCodec;
@@ -16,6 +17,7 @@ import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncRef;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
@@ -39,6 +41,7 @@ public final class ConfigSyncExporter {
 
   private final AgentProviderConfigurationCodec providerConfigurationCodec;
   private final AgentModelRuntimeConfigParser modelConfigParser;
+  private final AgentModelGroupConfigCodec modelGroupConfigCodec;
   private final AgentDefinitionConfigCodec agentConfigCodec;
   private final SystemSettingsCodec systemSettingsCodec;
   private final ConfigSyncYaml yaml;
@@ -59,7 +62,7 @@ public final class ConfigSyncExporter {
 
     List<Object> models = new ArrayList<>();
     for (AgentModel model : snapshot.models()) {
-      if (selected.contains(ConfigSyncRefs.model(model.getProviderName(), model.getName()))) {
+      if (selected.contains(ConfigSyncRefs.model(model.getName()))) {
         models.add(exportModel(model));
       }
     }
@@ -147,11 +150,19 @@ public final class ConfigSyncExporter {
 
   private Map<String, Object> exportModel(AgentModel model) {
     Map<String, Object> map = new LinkedHashMap<>();
-    map.put("providerName", model.getProviderName());
+    map.put("kind", model.getKind().name());
     map.put("name", model.getName());
-    map.put("modelId", model.getModelId());
     putIfNotNull(map, "description", model.getDescription());
-    map.put("config", yaml.toMap(modelConfigParser.decode(model.getConfigJson()), "model.config"));
+    if (model.getKind() == AgentModelKind.MODEL) {
+      map.put("providerName", model.getProviderName());
+      map.put("modelId", model.getModelId());
+      map.put(
+          "config", yaml.toMap(modelConfigParser.decode(model.getConfigJson()), "model.config"));
+    } else {
+      map.put(
+          "group",
+          yaml.toMap(modelGroupConfigCodec.decode(model.getGroupConfigJson()), "model.group"));
+    }
     return map;
   }
 
@@ -160,7 +171,7 @@ public final class ConfigSyncExporter {
     map.put("name", agent.getName());
     putIfNotNull(map, "description", agent.getDescription());
     putIfNotNull(map, "systemPrompt", agent.getSystemPrompt());
-    map.put("model", ConfigSyncRefs.modelName(agent.getModelProviderName(), agent.getModelName()));
+    map.put("model", agent.getModelName());
     putIfNotNull(map, "variant", agent.getVariant());
     map.put("config", yaml.toMap(agentConfigCodec.decode(agent.getConfigJson()), "agent.config"));
     return map;

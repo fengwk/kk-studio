@@ -78,7 +78,6 @@ public class PostgresqlAgentDefinitionRepository implements AgentDefinitionRepos
     result.setType(definition.getType() == null ? null : definition.getType().name());
     result.setDescription(definition.getDescription());
     result.setSystemPrompt(definition.getSystemPrompt());
-    result.setModelProviderName(definition.getModelProviderName());
     result.setModelName(definition.getModelName());
     result.setVariant(definition.getVariant());
     result.setConfigJson(definition.getConfigJson());
@@ -95,7 +94,6 @@ public class PostgresqlAgentDefinitionRepository implements AgentDefinitionRepos
         definition.getType() == null ? null : AgentDefinitionType.valueOf(definition.getType()));
     result.setDescription(definition.getDescription());
     result.setSystemPrompt(definition.getSystemPrompt());
-    result.setModelProviderName(definition.getModelProviderName());
     result.setModelName(definition.getModelName());
     result.setVariant(definition.getVariant());
     result.setConfigJson(definition.getConfigJson());

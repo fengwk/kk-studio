@@ -21,11 +21,11 @@ public class AgentDefinitionDTO {
   /** 可空系统提示词。 */
   private String systemPrompt;
 
-  /** 当前绑定的模型引用，序列化形式为 {@code providerName/modelName}；未配置模型的内置 Agent 显式序列化为 {@code null}，与字段缺失区分。 */
+  /** 当前绑定的全局逻辑模型名（MODEL 或 GROUP）；未配置模型的内置 Agent 显式序列化为 {@code null}，与字段缺失区分。 */
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private String model;
 
-  /** 当前生效的模型变体 id；null 表示未显式指定（运行时解析 model config 的 defaultVariant）。 */
+  /** 当前生效的单模型 Variant id；null 表示未显式指定（运行时解析 model config 的 defaultVariant）；选择 GROUP 时必须为 null。 */
   private String variant;
 
   /** 结构化执行配置（tools/skills/subagents/inheritParentEnvironment），来自持久化的 config JSONB 列。 */

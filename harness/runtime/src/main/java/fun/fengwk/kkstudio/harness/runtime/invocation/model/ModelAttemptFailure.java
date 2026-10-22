@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.invocation.model;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 
 import java.time.Instant;
 import java.util.Objects;
@@ -8,9 +9,9 @@ import java.util.Objects;
 /**
  * 一个已经失败并被调度重试的 Model attempt 的不可变审计事实。
  *
- * <p>failed attempts 只记录可重试的失败（{@link ModelInvocationError#retryCandidate()}）：非 HTTP 的 TRANSIENT /
- * INVALID_RESPONSE，或带 HTTP 状态、由模型 HTTP 状态策略判定重试的失败（含按配置重试的 AUTHENTICATION / BILLING）； OVERFLOW 与
- * CANCELLED 永不进入。它不是对话历史，也不参与任何 Provider request。
+ * <p>failed attempts 记录真实失败 attempt；普通单模型重试仍只接受 {@link
+ * ModelInvocationError#retryCandidate()}。模型组切换到下一成员时，确定性 AUTHENTICATION / BILLING 也可作为审计进入， 但仍由
+ * Invocation transition 限定只能随组推进。OVERFLOW 与 CANCELLED 永不进入。它不是对话历史，也不参与任何 Provider request。
  */
 public record ModelAttemptFailure(
     int attempt,
@@ -31,8 +32,9 @@ public record ModelAttemptFailure(
     text = Objects.requireNonNull(text, "text");
     thinking = Objects.requireNonNull(thinking, "thinking");
     error = Objects.requireNonNull(error, "error");
-    if (!error.retryCandidate()) {
-      throw new IllegalArgumentException("failed attempt requires a retryable error");
+    if (error.kind() == ProviderErrorKind.CANCELLED || error.kind() == ProviderErrorKind.OVERFLOW) {
+      throw new IllegalArgumentException(
+          "cancelled or overflow attempts are not model fallback audit failures");
     }
     failedAt = requireMillisecondPrecision(failedAt, "failedAt");
     retryAt = requireMillisecondPrecision(retryAt, "retryAt");

@@ -10,6 +10,7 @@ import fun.fengwk.kkstudio.platform.catalog.model.repo.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.repo.impl.model.AgentModelDO;
 import fun.fengwk.kkstudio.platform.catalog.model.repo.impl.store.AgentModelJdbcStore;
 import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 
 import java.util.List;
 
@@ -34,13 +35,13 @@ public class PostgresqlAgentModelRepository implements AgentModelRepository {
   }
 
   @Override
-  public AgentModel getByProviderNameAndName(String providerName, String name) {
-    return convert(agentModelJdbcStore.getByProviderNameAndName(providerName, name));
+  public AgentModel getByName(String name) {
+    return convert(agentModelJdbcStore.getByName(name));
   }
 
   @Override
-  public AgentModel getByProviderNameAndNameForUpdate(String providerName, String name) {
-    return convert(agentModelJdbcStore.getByProviderNameAndNameForUpdate(providerName, name));
+  public AgentModel getByNameForUpdate(String name) {
+    return convert(agentModelJdbcStore.getByNameForUpdate(name));
   }
 
   @Override
@@ -55,37 +56,30 @@ public class PostgresqlAgentModelRepository implements AgentModelRepository {
 
   @Override
   public void rename(String oldName, AgentModel model, long expectedVersion) {
-    AgentModelDO modelDO = convert(model);
-    int inserted = agentModelJdbcStore.insertRenamed(oldName, modelDO, expectedVersion);
-    if (inserted != 1) {
-      throw new IllegalStateException(
-          "insert target model failed during rename: "
-              + oldName
-              + " -> "
-              + model.getName()
-              + ", expectedVersion="
-              + expectedVersion);
-    }
-    agentModelJdbcStore.updateReferencingAgents(model.getProviderName(), oldName, model.getName());
-    int deleted =
-        agentModelJdbcStore.deleteByName(model.getProviderName(), oldName, expectedVersion);
-    if (deleted != 1) {
-      throw new IllegalStateException(
-          "delete old model failed during rename: "
-              + oldName
-              + ", expectedVersion="
-              + expectedVersion);
+    int updated = agentModelJdbcStore.rename(oldName, convert(model), expectedVersion);
+    if (updated != 1) {
+      throw new IllegalStateException("rename model failed: " + oldName + " -> " + model.getName());
     }
   }
 
   @Override
-  public boolean deleteByName(String providerName, String name, long expectedVersion) {
-    return agentModelJdbcStore.deleteByName(providerName, name, expectedVersion) == 1;
+  public boolean deleteByName(String name, long expectedVersion) {
+    return agentModelJdbcStore.deleteByName(name, expectedVersion) == 1;
   }
 
   @Override
-  public boolean hasAgents(String providerName, String name) {
-    return agentModelJdbcStore.countAgentsByModelName(providerName, name) > 0;
+  public boolean hasAgents(String name) {
+    return agentModelJdbcStore.countAgentsByModelName(name) > 0;
+  }
+
+  @Override
+  public boolean hasGroupsReferencing(String name) {
+    return agentModelJdbcStore.countGroupsReferencingModel(name) > 0;
+  }
+
+  @Override
+  public boolean hasVariantReferences(String name, String variant) {
+    return agentModelJdbcStore.countVariantReferences(name, variant) > 0;
   }
 
   private AgentModelDO convert(AgentModel model) {
@@ -93,11 +87,13 @@ public class PostgresqlAgentModelRepository implements AgentModelRepository {
       return null;
     }
     AgentModelDO result = new AgentModelDO();
-    result.setProviderName(model.getProviderName());
     result.setName(model.getName());
+    result.setKind(model.getKind() == null ? null : model.getKind().name());
+    result.setProviderName(model.getProviderName());
     result.setModelId(model.getModelId());
     result.setDescription(model.getDescription());
     result.setConfigJson(model.getConfigJson());
+    result.setGroupConfigJson(model.getGroupConfigJson());
     return result;
   }
 
@@ -106,11 +102,13 @@ public class PostgresqlAgentModelRepository implements AgentModelRepository {
       return null;
     }
     AgentModel result = new AgentModel();
-    result.setProviderName(model.getProviderName());
     result.setName(model.getName());
+    result.setKind(model.getKind() == null ? null : AgentModelKind.valueOf(model.getKind()));
+    result.setProviderName(model.getProviderName());
     result.setModelId(model.getModelId());
     result.setDescription(model.getDescription());
     result.setConfigJson(model.getConfigJson());
+    result.setGroupConfigJson(model.getGroupConfigJson());
     result.setVersion(model.getVersion());
     result.setCreateTime(model.getCreateTime());
     result.setUpdateTime(model.getUpdateTime());

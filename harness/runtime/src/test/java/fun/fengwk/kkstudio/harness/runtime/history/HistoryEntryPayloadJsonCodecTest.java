@@ -190,6 +190,25 @@ class HistoryEntryPayloadJsonCodecTest {
     assertEquals(timed, CODEC.decode(EntryType.MESSAGE, CODEC.encode(timed)));
   }
 
+  /** 测试意图：真实执行模型、请求起始时间与 Provider service tier 必须随 assistant metadata 无损冻结。 */
+  @Test
+  void roundTripsActualModelRequestedAtAndResponseServiceTier() {
+    AssistantMessageMetadata metadata =
+        new AssistantMessageMetadata(
+            GenerationStopReason.COMPLETE,
+            new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
+            null,
+            ModelSelection.model("actual-model", "high"),
+            Instant.parse("2026-01-01T00:00:05Z"),
+            "priority");
+    MessagePayload payload = new MessagePayload(assistant("answer"), metadata, null);
+
+    MessagePayload decoded =
+        (MessagePayload) CODEC.decode(EntryType.MESSAGE, CODEC.encode(payload));
+
+    assertEquals(metadata, decoded.assistantMetadata());
+  }
+
   /** 测试意图：人工输入回执随结果迁入 Entry 元数据后必须可无损往返，并作为 runtime 元数据显式编码（不写进业务 details）。 */
   @Test
   void roundTripsAnsweredToolResultReceiptInsideMetadata() {
@@ -383,12 +402,12 @@ class HistoryEntryPayloadJsonCodecTest {
   void encodesCanonicalFieldOrder() {
     assertEquals(
         "{\"settings\":{\"agentName\":\"coding\",\"model\":{"
-            + "\"providerName\":\"anthropic\",\"modelName\":\"claude-sonnet\",\"variant\":\"default\"}"
+            + "\"modelName\":\"claude-sonnet\",\"variant\":\"default\"}"
             + ",\"environmentName\":null,\"goal\":null}}",
         CODEC.encode(new RootPayload(settings())));
     assertEquals(
         "{\"reason\":\"INPUT\",\"settings\":{\"agentName\":\"coding\",\"model\":{"
-            + "\"providerName\":\"anthropic\",\"modelName\":\"claude-sonnet\",\"variant\":\"default\"}"
+            + "\"modelName\":\"claude-sonnet\",\"variant\":\"default\"}"
             + ",\"environmentName\":null,\"goal\":null},"
             + "\"ownerThreadId\":\""
             + OWNER_THREAD_ID
@@ -1271,8 +1290,7 @@ class HistoryEntryPayloadJsonCodecTest {
   }
 
   private static BranchSettings settings() {
-    return new BranchSettings(
-        "coding", new ModelSelection("anthropic", "claude-sonnet", "default"), null);
+    return new BranchSettings("coding", ModelSelection.model("claude-sonnet", "default"), null);
   }
 
   /** CUSTOM entry 的 data 自由 JSON number 以 BigDecimal 保留精度，1e309/1e-324 不得失真。 */
