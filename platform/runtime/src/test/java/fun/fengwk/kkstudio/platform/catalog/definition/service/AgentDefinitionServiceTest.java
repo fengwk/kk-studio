@@ -54,9 +54,7 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
     assertThrows(
         AiDuplicateException.class,
         () -> agentDefinitionService.createAgent(agent(modelRef, name)));
-    assertThrows(
-        AiInUseException.class,
-        () -> agentModelService.deleteModel(model.getName(), "0"));
+    assertThrows(AiInUseException.class, () -> agentModelService.deleteModel(model.getName(), "0"));
 
     AgentDefinitionUpdateDTO update = new AgentDefinitionUpdateDTO();
     update.setDescription("updated");

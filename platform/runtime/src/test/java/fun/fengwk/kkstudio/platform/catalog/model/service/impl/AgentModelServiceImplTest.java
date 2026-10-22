@@ -82,8 +82,7 @@ public class AgentModelServiceImplTest {
 
     when(repository.deleteByName(eq("model"), anyLong())).thenReturn(false);
     when(repository.getByName("model")).thenReturn(null);
-    assertThrows(
-        AiResourceNotFoundException.class, () -> service.deleteModel("model", "0"));
+    assertThrows(AiResourceNotFoundException.class, () -> service.deleteModel("model", "0"));
     when(repository.getByName("model")).thenReturn(reread);
     assertThrows(AiVersionConflictException.class, () -> service.deleteModel("model", "0"));
     verify(resolver, atLeastOnce()).requireModelForUpdate("model");
@@ -113,9 +112,7 @@ public class AgentModelServiceImplTest {
     assertThrows(AiVersionConflictException.class, () -> service.updateModel("model", update));
     verify(factory, never()).update(model, update);
 
-    doThrow(new AiInUseException("agent_model", "in use"))
-        .when(resolver)
-        .ensureDeletable("model");
+    doThrow(new AiInUseException("agent_model", "in use")).when(resolver).ensureDeletable("model");
     assertThrows(AiVersionConflictException.class, () -> service.deleteModel("model", "0"));
     verify(resolver, never()).ensureDeletable("model");
   }

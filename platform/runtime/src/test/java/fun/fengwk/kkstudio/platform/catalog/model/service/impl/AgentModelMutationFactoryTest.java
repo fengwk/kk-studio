@@ -17,7 +17,6 @@ import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfi
 import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelAbilitiesDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelGroupDTO;
@@ -53,6 +52,7 @@ public class AgentModelMutationFactoryTest {
     assertThrows(
         AiValidationException.class, () -> factory.update(existing, new AgentModelUpdateDTO()));
 
+    create.setKind(AgentModelKind.MODEL);
     create.setName("model");
     create.setProviderName("provider");
     create.setConfig(validConfig());
@@ -99,6 +99,7 @@ public class AgentModelMutationFactoryTest {
 
     AgentModelUpdateDTO update = new AgentModelUpdateDTO();
     update.setKind(AgentModelKind.MODEL);
+    update.setProviderName("provider");
     update.setName(model.getName());
     update.setModelId(model.getModelId());
     update.setDescription("updated");
@@ -138,8 +139,7 @@ public class AgentModelMutationFactoryTest {
         () -> factory.newModel("n".repeat(129), create("n".repeat(129), null)));
     AgentModelCreateDTO oversizedModelId = create("model", null);
     oversizedModelId.setModelId("m".repeat(257));
-    assertThrows(
-        AiValidationException.class, () -> factory.newModel("model", oversizedModelId));
+    assertThrows(AiValidationException.class, () -> factory.newModel("model", oversizedModelId));
   }
 
   @Test
@@ -154,6 +154,7 @@ public class AgentModelMutationFactoryTest {
 
     AgentModelUpdateDTO rename = new AgentModelUpdateDTO();
     rename.setKind(AgentModelKind.MODEL);
+    rename.setProviderName("provider");
     rename.setName("new-name");
     rename.setModelId("wire-model");
     rename.setConfig(validConfig());
@@ -191,26 +192,22 @@ public class AgentModelMutationFactoryTest {
     member.setName("member");
     member.setKind(AgentModelKind.MODEL);
     member.setConfigJson(parser().encode(validConfig()));
-    when(repository.getByName("member")).thenReturn(member);
+    when(repository.getByNameForUpdate("member")).thenReturn(member);
 
     AgentModelCreateDTO group = groupCreate("group", member("member", "default"));
     AgentModel created = factory.newModel("group", group);
     assertEquals(AgentModelKind.GROUP, created.getKind());
     assertNotNull(created.getGroupConfigJson());
 
-    when(repository.getByName("group")).thenReturn(created);
+    when(repository.getByNameForUpdate("group")).thenReturn(created);
+    assertThrows(
+        AiValidationException.class,
+        () -> factory.newModel("nested", groupCreate("nested", member("group", "default"))));
     assertThrows(
         AiValidationException.class,
         () ->
             factory.newModel(
-                "nested",
-                groupCreate("nested", member("group", "default"))));
-    assertThrows(
-        AiValidationException.class,
-        () ->
-            factory.newModel(
-                "missing-variant",
-                groupCreate("missing-variant", member("member", "absent"))));
+                "missing-variant", groupCreate("missing-variant", member("member", "absent"))));
 
     AgentModel imageOnly = new AgentModel();
     imageOnly.setName("image-member");
@@ -218,12 +215,13 @@ public class AgentModelMutationFactoryTest {
     AgentModelConfigDTO imageConfig = validConfig();
     imageConfig.getAbilities().setInputModalities(List.of(AgentModelInputModality.IMAGE));
     imageOnly.setConfigJson(parser().encode(imageConfig));
-    when(repository.getByName("image-member")).thenReturn(imageOnly);
+    when(repository.getByNameForUpdate("image-member")).thenReturn(imageOnly);
     AgentModelCreateDTO noIntersection =
         groupCreate(
             "no-intersection", member("member", "default"), member("image-member", "default"));
     AiValidationException error =
-        assertThrows(AiValidationException.class, () -> factory.newModel("no-intersection", noIntersection));
+        assertThrows(
+            AiValidationException.class, () -> factory.newModel("no-intersection", noIntersection));
     assertEquals("group.members have no common input modality", error.getMessage());
   }
 
@@ -238,8 +236,7 @@ public class AgentModelMutationFactoryTest {
     return create;
   }
 
-  private static AgentModelCreateDTO groupCreate(
-      String name, AgentModelGroupMemberDTO... members) {
+  private static AgentModelCreateDTO groupCreate(String name, AgentModelGroupMemberDTO... members) {
     AgentModelGroupDTO group = new AgentModelGroupDTO();
     group.setMembers(List.of(members));
     group.setFallbackStatusCodes(List.of(429));

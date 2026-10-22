@@ -33,8 +33,7 @@ class AgentModelDefaultVariantResolverTest {
     assertEquals("default", resolver.resolve("model", " default "));
     assertEquals(
         "unknown agent model variant: model=model, variant=missing",
-        assertThrows(
-                IllegalArgumentException.class, () -> resolver.resolve("model", "missing"))
+        assertThrows(IllegalArgumentException.class, () -> resolver.resolve("model", "missing"))
             .getMessage());
     assertEquals(
         "unknown agent model: missing",
@@ -48,7 +47,8 @@ class AgentModelDefaultVariantResolverTest {
     AgentModelConfigDTO config = executableConfig();
 
     assertEquals(
-        "default", AgentModelDefaultVariantResolver.resolveConfiguredVariant("model", null, config));
+        "default",
+        AgentModelDefaultVariantResolver.resolveConfiguredVariant("model", null, config));
     assertEquals(
         "default",
         AgentModelDefaultVariantResolver.resolveConfiguredVariant("model", "  default  ", config));

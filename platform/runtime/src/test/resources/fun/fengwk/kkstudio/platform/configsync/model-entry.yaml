@@ -1,5 +1,6 @@
 models:
-  - providerName: p
+  - kind: MODEL
+    providerName: p
     name: m
     modelId: gpt
     config:

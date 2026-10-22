@@ -138,8 +138,7 @@ public class AgentDefinitionMutationFactoryTest {
   public void shouldRejectNullPropertiesAndNullName() {
     AgentDefinitionMutationFactory factory = factory(JsonMapper.builder().build());
     assertThrows(AiValidationException.class, () -> factory.newUserAgent("agent", null));
-    AgentDefinitionCreateDTO create =
-        create(null, "model", config(List.of(), List.of()), null);
+    AgentDefinitionCreateDTO create = create(null, "model", config(List.of(), List.of()), null);
     assertThrows(AiValidationException.class, () -> factory.newUserAgent(null, create));
   }
 
