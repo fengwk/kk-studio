@@ -140,7 +140,7 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
       ChatDTO staleAgentChat = chatService.getChat(chatId);
       assertEquals("default-assistant", staleAgentChat.getAgentName());
       assertTrue(staleAgentChat.isYoloEnabled());
-      // 同一 EntryPath 先后用于"删除后确定性拒绝"与"同名重建后解析到当前新行"；模型选择指向 dev seed 的 stub/acceptance-stub。
+      // 同一 EntryPath 先后用于删除后拒绝与同名重建后解析；引用 dev seed 的全局模型名 acceptance-stub。
       EntryPath path =
           new EntryPath(
               List.of(
@@ -163,7 +163,7 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
       String reboundSystemPrompt = "Rebound assistant: resolved from the re-created current row.";
       AgentDefinitionCreateDTO rebound = new AgentDefinitionCreateDTO();
       rebound.setName("default-assistant");
-      rebound.setModel("stub/acceptance-stub");
+      rebound.setModel("acceptance-stub");
       rebound.setVariant("default");
       AgentDefinitionConfigDTO reboundConfig = new AgentDefinitionConfigDTO();
       reboundConfig.setTools(List.of());
