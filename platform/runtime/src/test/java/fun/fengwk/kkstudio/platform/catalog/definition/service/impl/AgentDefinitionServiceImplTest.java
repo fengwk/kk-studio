@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.catalog.definition.service.impl;
 
+import static fun.fengwk.kkstudio.platform.catalog.model.AgentModelTestData.executableConfig;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -24,6 +25,7 @@ import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepos
 import fun.fengwk.kkstudio.platform.catalog.definition.service.converter.AgentDefinitionConverter;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelDefaultVariantResolver;
+import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.tool.TestRuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;
@@ -36,6 +38,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionType;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 
 import java.sql.SQLException;
@@ -230,6 +233,11 @@ public class AgentDefinitionServiceImplTest {
     AgentDefinitionCreateDTO badRef = create();
     badRef.setModel(" ");
     assertThrows(AiValidationException.class, () -> service.createAgent(badRef));
+    // 全局名称不再要求 provider/name，但仍严格拒绝环绕空白及超长名称。
+    for (String invalidName : List.of(" model", "model ", "m".repeat(129))) {
+      badRef.setModel(invalidName);
+      assertThrows(AiValidationException.class, () -> service.createAgent(badRef));
+    }
 
     // createDTO 为 null：model ref 解析阶段同样确定性拒绝。
     assertThrows(AiValidationException.class, () -> service.createAgent(null));
@@ -242,12 +250,27 @@ public class AgentDefinitionServiceImplTest {
     when(variants.resolve("model", "bad-variant"))
         .thenThrow(new IllegalArgumentException("unknown variant: bad-variant"));
     assertThrows(AiValidationException.class, () -> service.createAgent(create));
+    verify(variants).resolve("model", "bad-variant");
 
     // 非法 config：Agent 选择不存在的工具，configValidator 拒绝时包装为 AiValidationException。
     AgentDefinition badConfig = definition();
     badConfig.setConfigJson("{\"tools\":[\"no-such-tool\"],\"skills\":[],\"subagents\":[]}");
     when(factory.newUserAgent("agent", create)).thenReturn(badConfig);
     assertThrows(AiValidationException.class, () -> service.createAgent(create));
+
+    // GROUP 没有组级 variant；非法选择必须由业务校验拒绝而非空 mock 引发 NPE。
+    AgentModel group = new AgentModel();
+    group.setName("group");
+    group.setKind(AgentModelKind.GROUP);
+    group.setGroupConfigJson(
+        "{\"members\":[{\"modelName\":\"model\",\"variant\":\"default\"}],"
+            + "\"fallbackStatusCodes\":[429],\"cooldownSeconds\":0}");
+    when(resolver.requireModelForUpdate("group")).thenReturn(group);
+    when(resolver.requireModel("group")).thenReturn(group);
+    create.setModel("group");
+    when(factory.newUserAgent("agent", create)).thenReturn(badVariant);
+    assertThrows(AiValidationException.class, () -> service.createAgent(create));
+    verify(variants, never()).resolve(eq("group"), any());
   }
 
   @Test
@@ -411,6 +434,16 @@ public class AgentDefinitionServiceImplTest {
       AgentDefinitionReferenceResolver resolver,
       AgentModelDefaultVariantResolver variants,
       PluginAgentDependencies pluginAgentDependencies) {
+    // requireModel/requireModelForUpdate 成功时返回完整当前模型，而不是 Mockito 的 null。
+    AgentModel model = new AgentModel();
+    model.setName("model");
+    model.setKind(AgentModelKind.MODEL);
+    model.setProviderName("provider");
+    model.setModelId("wire-model");
+    model.setConfigJson(JsonMapper.builder().build().writeValueAsString(executableConfig()));
+    when(resolver.requireModelForUpdate("model")).thenReturn(model);
+    when(resolver.requireModel("model")).thenReturn(model);
+    when(variants.resolve("model", "default")).thenReturn("default");
     return new AgentDefinitionServiceImpl(
         repository,
         converter,
