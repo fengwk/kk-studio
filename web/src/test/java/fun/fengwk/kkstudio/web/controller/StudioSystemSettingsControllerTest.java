@@ -87,6 +87,7 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
                     contains(
                         "aiRuntime.retry",
                         "aiRuntime.httpErrors",
+                        "aiRuntime.modelCatalog",
                         "aiRuntime.compaction",
                         "aiRuntime.subagent")))
         .andExpect(
@@ -98,11 +99,11 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.data.sections[0].groups[1].fields[0].min").value(400))
         .andExpect(jsonPath("$.data.sections[0].groups[1].fields[0].max").value(599))
         .andExpect(
-            jsonPath("$.data.sections[0].groups[2].fields[0].path")
+            jsonPath("$.data.sections[0].groups[3].fields[0].path")
                 .value("aiRuntime.compactionKeepRecentTokens"))
         // field 最小结构：path/labelKey/type/nullable；min/max/options 由 server 表达。
-        .andExpect(jsonPath("$.data.sections[0].groups[2].fields[0].type").value("INTEGER"))
-        .andExpect(jsonPath("$.data.sections[0].groups[2].fields[0].min").value(1))
+        .andExpect(jsonPath("$.data.sections[0].groups[3].fields[0].type").value("INTEGER"))
+        .andExpect(jsonPath("$.data.sections[0].groups[3].fields[0].min").value(1))
         // ENUM options 由 server 表达。
         .andExpect(jsonPath("$.data.sections[0].groups[0].fields[1].type").value("ENUM"))
         .andExpect(
@@ -120,15 +121,26 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.data.sections[1].groups[0].key").value("tool.permission"))
         .andExpect(jsonPath("$.data.sections[1].groups[0].restartRequired").value(false))
         .andExpect(jsonPath("$.data.sections[1].groups[0].applyTiming").value("NEXT_INVOCATION"))
-        // aiRuntime 四组 live 生效：restartRequired=false 且 applyTiming=NEXT_INVOCATION。
+        // 五组顺序固定；modelCatalog 对下一 HTTP 请求生效，其余对下一 invocation 生效。
         .andExpect(jsonPath("$.data.sections[0].groups[0].restartRequired").value(false))
         .andExpect(jsonPath("$.data.sections[0].groups[0].applyTiming").value("NEXT_INVOCATION"))
         .andExpect(jsonPath("$.data.sections[0].groups[1].restartRequired").value(false))
         .andExpect(jsonPath("$.data.sections[0].groups[1].applyTiming").value("NEXT_INVOCATION"))
         .andExpect(jsonPath("$.data.sections[0].groups[2].restartRequired").value(false))
-        .andExpect(jsonPath("$.data.sections[0].groups[2].applyTiming").value("NEXT_INVOCATION"))
+        .andExpect(jsonPath("$.data.sections[0].groups[2].applyTiming").value("NEXT_HTTP_REQUEST"))
+        .andExpect(jsonPath("$.data.sections[0].groups[2].fields.length()").value(1))
+        .andExpect(
+            jsonPath("$.data.sections[0].groups[2].fields[0].path")
+                .value("aiRuntime.modelCatalogSource"))
+        .andExpect(jsonPath("$.data.sections[0].groups[2].fields[0].type").value("ENUM"))
+        .andExpect(jsonPath("$.data.sections[0].groups[2].fields[0].nullable").value(false))
+        .andExpect(
+            jsonPath("$.data.sections[0].groups[2].fields[0].options[*].value")
+                .value(contains("models_dev_v2", "models_dev_v1")))
         .andExpect(jsonPath("$.data.sections[0].groups[3].restartRequired").value(false))
         .andExpect(jsonPath("$.data.sections[0].groups[3].applyTiming").value("NEXT_INVOCATION"))
+        .andExpect(jsonPath("$.data.sections[0].groups[4].restartRequired").value(false))
+        .andExpect(jsonPath("$.data.sections[0].groups[4].applyTiming").value("NEXT_INVOCATION"))
         // restartRequired section 标记：aiRuntime live，tool 不需要重启。
         .andExpect(jsonPath("$.data.sections[0].restartRequired").value(false))
         .andExpect(jsonPath("$.data.sections[1].restartRequired").value(false))

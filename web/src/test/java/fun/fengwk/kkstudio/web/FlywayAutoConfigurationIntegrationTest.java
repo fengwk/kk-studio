@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.web;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -18,6 +19,7 @@ import javax.sql.DataSource;
 
 import java.sql.Connection;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Statement;
 
 /**
@@ -81,9 +83,42 @@ class FlywayAutoConfigurationIntegrationTest {
               "select count(*) from information_schema.columns"
                   + " where table_schema = 'public'"
                   + " and table_name = 'agent_model'"
-                  + " and column_name = 'model_id' and is_nullable = 'NO'")) {
+                  + " and column_name = 'model_id' and is_nullable = 'YES'")) {
         assertTrue(modelIdColumn.next());
-        assertEquals(1L, modelIdColumn.getLong(1), "V1 must declare the required model_id column");
+        assertEquals(1L, modelIdColumn.getLong(1), "GROUP has no wire model_id");
+      }
+      try (ResultSet kindColumn =
+          st.executeQuery(
+              "select count(*) from information_schema.columns where table_schema='public'"
+                  + " and table_name='agent_model' and column_name='kind' and is_nullable='NO'")) {
+        assertTrue(kindColumn.next());
+        assertEquals(1L, kindColumn.getLong(1));
+      }
+      // 列可空不等于放宽 MODEL：形状约束必须拒绝缺失 wire id，GROUP 则合法。
+      SQLException invalidModel =
+          assertThrows(
+              SQLException.class,
+              () ->
+                  st.executeUpdate(
+                      "insert into agent_model(name,kind,provider_name,config)"
+                          + " values ('missing-wire','MODEL','stub','{}'::jsonb)"));
+      assertEquals("23514", invalidModel.getSQLState());
+      assertTrue(invalidModel.getMessage().contains("ck_agent_model_shape"));
+      try {
+        assertEquals(
+            1,
+            st.executeUpdate(
+                "insert into agent_model(name,kind,group_config)"
+                    + " values ('group-without-wire','GROUP','{}'::jsonb)"));
+        try (ResultSet group =
+            st.executeQuery(
+                "select count(*) from agent_model where name='group-without-wire'"
+                    + " and kind='GROUP' and model_id is null and provider_name is null and config is null")) {
+          assertTrue(group.next());
+          assertEquals(1L, group.getLong(1));
+        }
+      } finally {
+        st.executeUpdate("delete from agent_model where name='group-without-wire'");
       }
       try (ResultSet seed =
           st.executeQuery(
@@ -121,9 +156,9 @@ class FlywayAutoConfigurationIntegrationTest {
                   + " and table_name <> 'flyway_schema_history'")) {
         assertTrue(businessTables.next());
         assertEquals(
-            46L,
+            47L,
             businessTables.getLong(1),
-            "the canonical V1 baseline must expose exactly 46 business tables");
+            "the canonical V1 baseline must expose exactly 47 business tables");
       }
       try (ResultSet clusterNode =
           st.executeQuery(

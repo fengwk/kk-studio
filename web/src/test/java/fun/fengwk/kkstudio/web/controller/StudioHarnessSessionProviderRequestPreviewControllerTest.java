@@ -221,12 +221,21 @@ class StudioHarnessSessionProviderRequestPreviewControllerTest {
                       "type":"USER_MESSAGE","idempotencyKey":"%s","contents":[{"type":"TEXT","text":"hi"}]
                     },{
                       "type":"SET_MODEL","idempotencyKey":"%s",
-                      "model":{"providerName":"stub","modelName":"acceptance-stub","variant":"default"}
+                      "model":{"modelName":"acceptance-stub","variant":"default"}
                     }]}
                     """
                         .formatted(START_ENTRY_ID, USER_MESSAGE_KEY, SET_MODEL_KEY)))
         .andExpect(status().isBadRequest());
 
+    // 正常草稿只用全局名称；旧 providerName 字段仍在 DTO 边界拒绝。
+    mockMvc
+        .perform(
+            post("/api/harness/sessions/" + SESSION_ID + "/provider-request-preview")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    draftBody()
+                        .replace("\"modelName\":", "\"providerName\":\"stub\",\"modelName\":")))
+        .andExpect(status().isBadRequest());
     verify(previewService, never()).previewDraft(any(UUID.class), any(UUID.class), any());
     verify(previewService, never()).previewHistorical(any(UUID.class), any(UUID.class));
   }
@@ -327,7 +336,7 @@ class StudioHarnessSessionProviderRequestPreviewControllerTest {
         [{
           "type":"SET_MODEL",
           "idempotencyKey":"%s",
-          "model":{"providerName":"stub","modelName":"acceptance-stub","variant":"default"}
+          "model":{"modelName":"acceptance-stub","variant":"default"}
         },
         {
           "type":"USER_MESSAGE",
