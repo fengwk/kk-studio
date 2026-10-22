@@ -170,7 +170,6 @@ public final class HarnessRuntimeResponseMapper {
   private static HarnessModelSelectionDTO toModelSelectionDto(ModelSelection selection) {
     Objects.requireNonNull(selection, "selection");
     HarnessModelSelectionDTO dto = new HarnessModelSelectionDTO();
-    dto.setProviderName(selection.providerName());
     dto.setModelName(selection.modelName());
     dto.setVariant(selection.variant());
     return dto;

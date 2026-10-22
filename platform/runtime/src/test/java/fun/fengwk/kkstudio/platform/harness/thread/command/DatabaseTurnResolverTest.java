@@ -105,6 +105,7 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpDiscoveryStatus
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.model.repo.AgentModelRepository;
+import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelGroupConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser.ParsedAgentModelConfig;
 import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
@@ -136,6 +137,7 @@ import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.project.turn.ProjectRunScope;
 import fun.fengwk.kkstudio.project.turn.ProjectRunScopeJsonCodec;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 
 import java.time.Clock;
@@ -196,11 +198,10 @@ class DatabaseTurnResolverTest {
   @Test
   void resolvesExactBranchModelReferencesWithoutFallback() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
-    // Agent 自带的 provider/model/variant 引用是旧数据，绝不能被读取。
-    fixture.agent.setModelProviderName("old-provider");
+    // Agent 自带的 model/variant 引用是旧数据，绝不能被读取。
     fixture.agent.setModelName("old-model");
     fixture.agent.setVariant("old-variant");
-    when(fixture.providers.getByName("old-provider")).thenReturn(null);
+    when(fixture.models.getByName("old-model")).thenReturn(null);
     TurnResolver.Resolved resolved = fixture.resolvedResult(fixture.path(settings("custom")), null);
     ModelRequestSpec requestSpec = resolved.spec();
 
@@ -226,7 +227,7 @@ class DatabaseTurnResolverTest {
 
     assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejected.error().code());
     assertEquals(
-        "model variant not found: provider/model variant=missing", rejected.error().message());
+        "unknown agent model variant: model=model, variant=missing", rejected.error().message());
   }
 
   @Test
@@ -266,7 +267,7 @@ class DatabaseTurnResolverTest {
     fixture = new Fixture(List.of(), List.of(), List.of());
     fixture.missingModel();
     assertEquals(
-        "model not found: provider/model",
+        "model not found: model",
         fixture.rejected(fixture.path(settings("default"))).error().message());
 
     fixture = new Fixture(List.of(), List.of(), List.of());
@@ -316,7 +317,7 @@ class DatabaseTurnResolverTest {
 
     TurnResolver.Rejected rejected = fixture.rejected(fixture.path(settings("default")));
 
-    assertEquals("model does not support tools: provider/model", rejected.error().message());
+    assertEquals("model does not support tools: model", rejected.error().message());
   }
 
   @Test
@@ -502,8 +503,7 @@ class DatabaseTurnResolverTest {
     assertEquals(ENV_A, requestSpec.toolBindings().getFirst().environmentId());
 
     BranchSettings missingName =
-        new BranchSettings(
-            "assistant", new ModelSelection("provider", "model", "default"), ENV_MISSING_NAME);
+        new BranchSettings("assistant", new ModelSelection("model", "default"), ENV_MISSING_NAME);
     TurnResolver.Rejected rejected = fixture.rejected(fixture.path(missingName));
     assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejected.error().code());
     assertEquals("environment not found: " + ENV_MISSING_NAME, rejected.error().message());
@@ -532,9 +532,7 @@ class DatabaseTurnResolverTest {
             .resolved(
                 matching.path(
                     new BranchSettings(
-                        "assistant",
-                        new ModelSelection("provider", "model", "default"),
-                        ENV_B_NAME)))
+                        "assistant", new ModelSelection("model", "default"), ENV_B_NAME)))
             .toolBindings()
             .getFirst()
             .environmentId());
@@ -631,8 +629,7 @@ class DatabaseTurnResolverTest {
     LiveTurnPlan.Planned custom =
         fixture.plannedWithSettings(
             path,
-            new BranchSettings(
-                "assistant", new ModelSelection("provider", "model", "custom"), ENV_A_NAME));
+            new BranchSettings("assistant", new ModelSelection("model", "custom"), ENV_A_NAME));
     assertEquals("custom", custom.spec().variant().id());
 
     // 规划只读：path 的 base settings 与最初完全一致，Draft 绝不写回 EntryPath。
@@ -649,9 +646,7 @@ class DatabaseTurnResolverTest {
             .rejected(
                 fixture.path(
                     new BranchSettings(
-                        "assistant",
-                        new ModelSelection("provider", "model", "default"),
-                        ENV_MISSING_NAME)))
+                        "assistant", new ModelSelection("model", "default"), ENV_MISSING_NAME)))
             .error()
             .message());
   }
@@ -720,8 +715,7 @@ class DatabaseTurnResolverTest {
     fixture.readyEnvironment(ENV_A, List.of("dev-a"));
     fixture.readyEnvironment(ENV_B, List.of("dev-b"));
     BranchSettings settings =
-        new BranchSettings(
-            "assistant", new ModelSelection("provider", "model", "default"), ENV_B_NAME);
+        new BranchSettings("assistant", new ModelSelection("model", "default"), ENV_B_NAME);
 
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings));
 
@@ -1006,7 +1000,7 @@ class DatabaseTurnResolverTest {
     fixture = new Fixture(List.of(), List.of(), List.of());
     fixture.modelSupportsReasoning(false);
     assertEquals(
-        "model does not support reasoning: provider/model",
+        "model does not support reasoning: model",
         fixture.rejected(fixture.path(settings("custom"))).error().message());
 
     // reasoningEffort 为 null 的 variant 即使模型不支持 reasoning 也合法。
@@ -1546,7 +1540,7 @@ class DatabaseTurnResolverTest {
             ProviderType.OPENAI,
             PromptCacheRetention.SHORT,
             true);
-    ModelSelection compactor = new ModelSelection("provider", "model", "default");
+    ModelSelection compactor = new ModelSelection("model", "default");
     fixture.compactionAgent(compactor);
     BranchSettings compactorSettings = new BranchSettings("Compaction", compactor, ENV_A_NAME);
 
@@ -1611,7 +1605,7 @@ class DatabaseTurnResolverTest {
             true);
     fixture.provider.setConfigJson(configJson);
     fixture.provider.setBaseUrl("https://example.invalid/v1");
-    fixture.models.getByProviderNameAndName("provider", "model").setModelId("gpt-5.6");
+    fixture.models.getByName("model").setModelId("gpt-5.6");
     ProviderFactory factory = fixture.resolverProviderFactory();
     when(factory.promptCacheRetention(any())).thenReturn(PromptCacheRetention.SHORT);
     JdkHttpSseTransport transport = mock(JdkHttpSseTransport.class);
@@ -1855,13 +1849,12 @@ class DatabaseTurnResolverTest {
 
   /** BranchSettings 冻结 agent/model 与可空 environmentName；解析出的 EnvironmentId 只能来自该 name。 */
   private static BranchSettings settings(String variant) {
-    return new BranchSettings(
-        "assistant", new ModelSelection("provider", "model", variant), ENV_A_NAME);
+    return new BranchSettings("assistant", new ModelSelection("model", variant), ENV_A_NAME);
   }
 
   /** 未选择 Environment 的 branch：环境工具仍需声明并可规划，调用时才失败。 */
   private static BranchSettings unboundSettings(String variant) {
-    return new BranchSettings("assistant", new ModelSelection("provider", "model", variant), null);
+    return new BranchSettings("assistant", new ModelSelection("model", variant), null);
   }
 
   private static EntryPath rootPath(BranchSettings settings) {
@@ -2075,6 +2068,8 @@ class DatabaseTurnResolverTest {
                 id(3),
                 new ModelAttemptFailurePayload(
                     new ModelAttemptSnapshot(1, 4, "retry-only-secret", ""),
+                    settings.model(),
+                    NOW.plusSeconds(1),
                     new AssistantError("TRANSIENT", "provider unavailable"),
                     NOW.plusSeconds(2)),
                 NOW),
@@ -2280,9 +2275,9 @@ class DatabaseTurnResolverTest {
   @Test
   void compactionResolvesFromCompactionAgentAndDoesNotInheritParentModel() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
-    ModelSelection compactorModel =
-        new ModelSelection("fallback-provider", "fallback-model", "fallback");
+    ModelSelection compactorModel = new ModelSelection("fallback-model", "fallback");
     fixture.addModel(
+        "fallback-provider",
         compactorModel,
         new ParsedAgentModelConfig(
             8192,
@@ -2296,7 +2291,7 @@ class DatabaseTurnResolverTest {
     fixture.compactionAgent(compactorModel);
     when(fixture.providers.getByName("provider"))
         .thenThrow(new AssertionError("compaction must not resolve branch settings.model"));
-    when(fixture.models.getByProviderNameAndName("provider", "model"))
+    when(fixture.models.getByName("model"))
         .thenThrow(new AssertionError("compaction must not resolve branch settings.model"));
 
     List<AgentMessage> messages =
@@ -2333,7 +2328,7 @@ class DatabaseTurnResolverTest {
     when(fixture.providers.getByName("provider"))
         .thenThrow(
             new AssertionError("a COMPACTION parent turn must not resolve the provider catalog"));
-    when(fixture.models.getByProviderNameAndName("provider", "model"))
+    when(fixture.models.getByName("model"))
         .thenThrow(
             new AssertionError("a COMPACTION parent turn must not resolve the model catalog"));
 
@@ -2685,7 +2680,7 @@ class DatabaseTurnResolverTest {
   @Test
   void compactionResolvesToCompactionResolvedWithoutToolsOrParentSpec() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
-    ModelSelection compactorModel = new ModelSelection("provider", "model", "default");
+    ModelSelection compactorModel = new ModelSelection("model", "default");
     fixture.compactionAgent(compactorModel);
 
     List<AgentMessage> messages =
@@ -2895,6 +2890,8 @@ class DatabaseTurnResolverTest {
         mock(AgentDefinitionConfigCodec.class);
     private final AgentModelRuntimeConfigParser modelConfigParser =
         mock(AgentModelRuntimeConfigParser.class);
+    private final AgentModelGroupConfigCodec groupConfigCodec =
+        mock(AgentModelGroupConfigCodec.class);
     private final EnvironmentRegistry environmentRegistry = mock(EnvironmentRegistry.class);
     private final SkillPromptPathResolver skillPromptPathResolver =
         new SkillPromptPathResolver(environmentRegistry);
@@ -3047,9 +3044,10 @@ class DatabaseTurnResolverTest {
       AgentModel model = new AgentModel();
       model.setProviderName("provider");
       model.setName("model");
+      model.setKind(AgentModelKind.MODEL);
       model.setModelId("wire-model");
       model.setConfigJson("model-config");
-      when(models.getByProviderNameAndName("provider", "model")).thenReturn(model);
+      when(models.getByName("model")).thenReturn(model);
 
       List<SkillRefDTO> skillRefs = new ArrayList<>();
       for (String skill : skills) {
@@ -3149,6 +3147,7 @@ class DatabaseTurnResolverTest {
               providers,
               agentConfigCodec,
               modelConfigParser,
+              groupConfigCodec,
               new ProviderFactories(factories),
               toolCatalogSource,
               environmentRegistry,
@@ -3168,22 +3167,23 @@ class DatabaseTurnResolverTest {
       when(environmentRepository.getByName(name)).thenReturn(environment);
     }
 
-    private void addModel(ModelSelection selection, ParsedAgentModelConfig parsedModel) {
+    private void addModel(
+        String providerName, ModelSelection selection, ParsedAgentModelConfig parsedModel) {
       AgentProvider fallbackProvider = new AgentProvider();
-      fallbackProvider.setName(selection.providerName());
+      fallbackProvider.setName(providerName);
       fallbackProvider.setProviderType(ProviderType.OPENAI);
       fallbackProvider.setConnectionGenerationId(new UUID(0L, 43L));
       fallbackProvider.setVersion(0L);
-      when(providers.getByName(selection.providerName())).thenReturn(fallbackProvider);
+      when(providers.getByName(providerName)).thenReturn(fallbackProvider);
 
-      String configJson = selection.providerName() + "-config";
+      String configJson = providerName + "-config";
       AgentModel fallbackModel = new AgentModel();
-      fallbackModel.setProviderName(selection.providerName());
+      fallbackModel.setProviderName(providerName);
       fallbackModel.setName(selection.modelName());
       fallbackModel.setModelId(selection.modelName());
+      fallbackModel.setKind(AgentModelKind.MODEL);
       fallbackModel.setConfigJson(configJson);
-      when(models.getByProviderNameAndName(selection.providerName(), selection.modelName()))
-          .thenReturn(fallbackModel);
+      when(models.getByName(selection.modelName())).thenReturn(fallbackModel);
       when(modelConfigParser.parse(configJson)).thenReturn(parsedModel);
     }
 
@@ -3203,7 +3203,7 @@ class DatabaseTurnResolverTest {
     }
 
     private void missingModel() {
-      when(models.getByProviderNameAndName("provider", "model")).thenReturn(null);
+      when(models.getByName("model")).thenReturn(null);
     }
 
     private void failAgentLookup(RuntimeException error) {
@@ -3215,7 +3215,7 @@ class DatabaseTurnResolverTest {
     }
 
     private void failModelLookup(RuntimeException error) {
-      when(models.getByProviderNameAndName("provider", "model")).thenThrow(error);
+      when(models.getByName("model")).thenThrow(error);
     }
 
     private void failAgentConfig(RuntimeException error) {
@@ -3326,7 +3326,6 @@ class DatabaseTurnResolverTest {
       // 与普通 Agent 一样提供可解码的普通执行配置，使内置压缩 Agent 也能走 live 规划路径。
       compaction.setConfigJson("agent-config");
       if (selection != null) {
-        compaction.setModelProviderName(selection.providerName());
         compaction.setModelName(selection.modelName());
         compaction.setVariant(selection.variant());
       }

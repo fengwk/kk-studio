@@ -101,7 +101,7 @@ class DatabaseContributorBranchViewLoaderTest {
   private static BranchSettings settings(UUID goalId, String goalText) {
     return new BranchSettings(
         "coding",
-        new ModelSelection("anthropic", "claude-sonnet", "default"),
+        new ModelSelection("claude-sonnet", "default"),
         null,
         goalId == null ? null : new GoalSetting(goalId, goalText));
   }

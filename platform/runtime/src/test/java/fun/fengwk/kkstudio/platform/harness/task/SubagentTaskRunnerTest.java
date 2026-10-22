@@ -61,7 +61,7 @@ class SubagentTaskRunnerTest {
 
   private static final String AGENT = "alpha";
   private static final Instant NOW = Instant.parse("2026-06-01T00:00:00Z");
-  private static final ModelSelection MODEL = new ModelSelection("provider", "model", "v1");
+  private static final ModelSelection MODEL = new ModelSelection("model", "v1");
 
   private final UUID parentThreadId = UUID.randomUUID();
   private final UUID invocationId = UUID.randomUUID();

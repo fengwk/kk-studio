@@ -114,7 +114,7 @@ class ProviderRequestPreviewServiceTest {
   private static final ModelUsage BELOW_THRESHOLD_USAGE =
       new ModelUsage(1_000L, 2L, 0L, 0L, Map.of(), 0L, 1_002L);
   private static final BranchSettings SETTINGS =
-      new BranchSettings("agent", new ModelSelection("provider", "model", "v1"), null);
+      new BranchSettings("agent", new ModelSelection("model", "v1"), null);
 
   private static final UUID SESSION_ID = id(1L);
   private static final UUID THREAD_ID = id(2L);
@@ -905,7 +905,7 @@ class ProviderRequestPreviewServiceTest {
   private static NewThreadCommand setting(ThreadCommandKind kind) {
     return switch (kind) {
       case SET_MODEL -> new NewThreadCommand(
-          new SetModelCommandPayload(new ModelSelection("provider", "model", "v1")), id(201L));
+          new SetModelCommandPayload(new ModelSelection("model", "v1")), id(201L));
       case SET_AGENT -> new NewThreadCommand(new SetAgentCommandPayload("agent"), id(202L));
     };
   }
