@@ -44,7 +44,7 @@ function mockContext(def, { hitAt = 2, fault } = {}) {
       }
       if (method === 'POST' && url === '/api/ai/catalog/agents') {
         assert.deepEqual(body.config.tools, [])
-        assert.equal(body.model, `${def.providerName}/${def.modelName}`)
+        assert.equal(body.model, def.modelName)
         assert.equal(body.variant, def.variant)
         return response({ name: body.name, version: '0' }, 201)
       }
