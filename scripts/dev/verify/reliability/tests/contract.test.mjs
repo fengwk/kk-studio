@@ -7,7 +7,7 @@ import {
   chatOwner,
   userMessageCommand,
 } from '../../e2e/lib/harness.mjs'
-import { TOOL_NAMES, VARIANT } from '../matrix.mjs'
+import { MODELS, TOOL_NAMES, VARIANT } from '../matrix.mjs'
 import { assertThreadSettings, buildNewSessionRequest } from '../run-agent-matrix.mjs'
 
 const DAEMON_ENV = 'docker-reliability'
@@ -56,6 +56,12 @@ test('run-agent-matrix contract: NEW_SESSION root settings freeze exactly agentN
   })
   assert.deepEqual(request.rootSettings, branchSettingsOf(agent, model))
   assert.deepEqual(Object.keys(request.rootSettings).sort(), ['agentName', 'environmentName', 'model'])
+  // ModelSelection 只携带全局逻辑模型名与 variant，不携带旧 providerName。
+  assert.deepEqual(request.rootSettings.model, {
+    modelName: model.modelName,
+    variant: VARIANT,
+  })
+  assert.deepEqual(Object.keys(request.rootSettings.model).sort(), ['modelName', 'variant'])
   // 未选择 Environment 时必须显式携带 null，而不是省略字段。
   assert.equal(request.rootSettings.environmentName, null)
   // 产品 Workspace 已删除：root settings 不得再携带任何目录/环境覆盖字段。
@@ -80,6 +86,17 @@ test('run-agent-matrix contract: accepted snapshot assertions enforce the canoni
       chat.agentName,
     ),
     /Thread Agent mismatch/,
+  )
+  // 旧 providerName 模型字段必须被精确的 ModelSelection 校验拒绝。
+  const legacyProvider = structuredClone(accepted)
+  legacyProvider.thread.branchSettings.model.providerName = model.providerName
+  assert.throws(
+    () => assertThreadSettings(
+      legacyProvider,
+      fakeCase(model),
+      chat.agentName,
+    ),
+    /Thread ModelSelection mismatch/,
   )
   // 携带未预期字段时，branch settings shape 校验必须拒绝。
   const unexpectedShape = structuredClone(accepted)
@@ -143,7 +160,7 @@ function fakeAgent() {
 }
 
 function fakeModel() {
-  return { providerName: 'minimax', modelName: 'MiniMax-M3', ref: 'minimax/MiniMax-M3', variant: VARIANT }
+  return MODELS.find((model) => model.key === 'm3')
 }
 
 function fakeCase(model) {
