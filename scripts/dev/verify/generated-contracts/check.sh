@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# 校验前端传输契约（frontend/src/shared/api/generated/contracts.ts）与 Web 控制器签名、真实 HTTP Jackson mapper
-# 是否漂移。只读：缺文件、字段/enum 变化或产物被手改都会失败，绝不修改源码；更新必须显式运行 write.sh。
+# 校验前端传输契约（frontend/src/shared/api/generated/contracts.ts）与 Daemon 协议常量
+# （daemon/src/generated/protocol-contract.ts）是否与 Java 事实源漂移。只读：缺文件、字段/enum 变化或产物被手改都会失败，绝不修改源码；更新必须显式运行 write.sh。
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -27,6 +27,6 @@ fi
 
 cd "$REPO_ROOT"
 exec env JAVA_HOME="$JDK21" mvn -q -pl web -am \
-  -Dtest=TsContractArtifactTest \
+  -Dtest=TsContractArtifactTest,DaemonContractArtifactTest \
   -Dsurefire.failIfNoSpecifiedTests=false \
   test

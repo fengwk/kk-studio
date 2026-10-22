@@ -1,4 +1,4 @@
-# 前端传输契约生成
+# 传输契约生成
 
 前端的全部 HTTP 传输类型由
 [contracts.ts](../../../../frontend/src/shared/api/generated/contracts.ts) 提供，它从 Web 控制器签名与生产
@@ -18,6 +18,12 @@ HTTP Jackson 3 mapper 生成，漂移在 CI 中失败。生成器与产物测试
 Java 侧是带 `type` 字段的扁平类（如 Harness 命令、交互、上传）时，前端在 `shared/api/contracts/*` 以同名判别联合
 细化；其余代码直接从生成物导入，不手改生成物。
 
+Daemon 的 [protocol-contract.ts](../../../../daemon/src/generated/protocol-contract.ts) 由
+[harness/environment](../../../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/daemon/)
+测试源码的 `DaemonContractGenerator` 从 Java 协议常量生成：协议与 catalog 版本、payload 上限、错误码，以及消息类型、
+操作系统、架构、上传票据状态与更新阶段的 wire 值。Daemon 的严格解码器只引用这些常量；字段形状仍由两端解码器各自实现，
+并由共享 fixture 对拍。
+
 ## 校验（默认）
 
 ```bash
@@ -25,7 +31,7 @@ scripts/dev/verify/generated-contracts/check.sh
 ```
 
 只读：重新生成并与提交的产物逐字符比对，缺文件、类型变化或产物被手改都会失败，绝不修改源码。
-`mvn verify` 会执行同一个 `TsContractArtifactTest`，因此正常 CI 已覆盖这条门禁。
+`mvn verify` 会执行同样的 `TsContractArtifactTest` 与 `DaemonContractArtifactTest`，因此正常 CI 已覆盖这条门禁。
 
 ## 更新
 
@@ -33,7 +39,7 @@ scripts/dev/verify/generated-contracts/check.sh
 scripts/dev/verify/generated-contracts/write.sh
 ```
 
-用真实 mapper 重写生成产物。提交前必须人工审阅 diff，并同步更新依赖该产物的前端细化、解码器与测试。
+重写两个生成产物。提交前必须人工审阅 diff，并同步更新依赖它们的前端细化、解码器与测试。
 
 两个入口都需要 JDK 21（`JAVA_HOME_21`，回退 `JAVA_HOME`），并且只运行 `-pl web -am` 的定向 reactor，
 不替代全量验证。

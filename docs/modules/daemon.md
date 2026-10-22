@@ -31,7 +31,7 @@ POSIX 目录权限为 0700、敏感文件为 0600。`tmp/workspaces` 由受控�
 
 ## 能力装配与运行时调度
 
-装配阶段冻结 11 项原子能力（9 项模型工具与 2 项内部能力）；IDE 是独立受管服务。能力目录版本为 3，envelope wire 版本为 4，READY payload 版本为 5：
+装配阶段冻结 11 项原子能力（9 项模型工具与 2 项内部能力）；IDE 是独立受管服务。能力目录版本为 3，envelope wire 版本为 4，READY payload 版本为 5（这些版本、payload 上限、错误码与枚举 wire 值都来自由 Java 协议常量生成的 [`protocol-contract.ts`](../../daemon/src/generated/protocol-contract.ts)）：
 - 编码能力：文件读写编辑（`fs.read`、`fs.write`、`fs.edit`、内部审查能力 `fs.edit.preview`）、文件与内容检索（`fs.find`、`fs.grep`）、命令执行（`process.exec`）；
 - 语言服务：`lsp.goto-definition`、`lsp.workspace-symbols`、`lsp.java-decompile`；
 - 扩展与受管服务：内部 `skill.sync` 以及受管 IDE 服务（code-server，通过 `IDE_COMMAND` 与 `IDE_RESULT` 进行生命周期与流控制）。

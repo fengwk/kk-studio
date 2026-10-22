@@ -3,7 +3,7 @@ import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import type { DaemonConfig, LspServerConfig } from './contracts.js'
-import { ProtocolError, parseStrictJson } from './protocol.js'
+import { MAX_NOTE_CHARS, ProtocolError, parseStrictJson } from './protocol.js'
 
 /**
  * Daemon 连接与本地执行配置。
@@ -32,7 +32,6 @@ const CONFIG_LIMITS = {
 }
 
 const SERVER_ID_PATTERN = /^[A-Za-z0-9_.-]+$/
-const NOTE_MAX_CHARS = 512
 
 function invalid(path: string, rule: string): ProtocolError {
   return new ProtocolError(`${path}: ${rule}`)
@@ -193,7 +192,7 @@ function parseNote(value: unknown): string | null {
     throw invalid('daemon.note', 'must not contain control characters')
   }
   const note = value.trim()
-  if (note === '' || note.length > NOTE_MAX_CHARS) {
+  if (note === '' || note.length > MAX_NOTE_CHARS) {
     throw invalid('daemon.note', 'must be a nonblank single line of at most 512 characters')
   }
   return note
