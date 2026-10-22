@@ -86,8 +86,7 @@ class LegacyHarnessHistoryJsonPostgresIntegrationTest {
       "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
   private static final BranchSettings SETTINGS =
-      new BranchSettings(
-          "default-assistant", new ModelSelection("openai", "gpt-5", "default"), null);
+      new BranchSettings("default-assistant", new ModelSelection("gpt-5", "default"), null);
 
   private DataSource dataSource;
   private HarnessStore store;

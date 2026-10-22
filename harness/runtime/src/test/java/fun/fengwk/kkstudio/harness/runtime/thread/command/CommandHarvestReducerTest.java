@@ -25,8 +25,7 @@ class CommandHarvestReducerTest {
 
   private static final Instant CREATED = Instant.parse("2026-01-01T00:00:00Z");
   private static final BranchSettings BASE =
-      new BranchSettings(
-          "coding", new ModelSelection("anthropic", "claude-sonnet", "default"), null);
+      new BranchSettings("coding", ModelSelection.model("claude-sonnet", "default"), null);
 
   /** 测试用确定性 goal id 分配器：每次调用产生新 id，因此断言到的 id 序列同时证明「每条 typed GOAL 设置恰分配一个新 id」。 */
   private static Supplier<UUID> goalIds() {
@@ -52,18 +51,16 @@ class CommandHarvestReducerTest {
                 queued(
                     id(4L),
                     4L,
-                    new SetModelCommandPayload(new ModelSelection("openai", "gpt-4.1", "default"))),
+                    new SetModelCommandPayload(ModelSelection.model("gpt-4.1", "default"))),
                 queued(
                     id(5L),
                     5L,
-                    new SetModelCommandPayload(
-                        new ModelSelection("anthropic", "claude-opus", "thinking"))),
+                    new SetModelCommandPayload(ModelSelection.model("claude-opus", "thinking"))),
                 queued(id(6L), 6L, new SetEnvironmentCommandPayload("local")),
                 queued(id(8L), 8L, new CustomMessageCommandPayload(user("instruction")))));
 
     assertEquals(
-        new BranchSettings(
-            "agent-b", new ModelSelection("anthropic", "claude-opus", "thinking"), "local"),
+        new BranchSettings("agent-b", ModelSelection.model("claude-opus", "thinking"), "local"),
         result);
   }
 
@@ -108,7 +105,7 @@ class CommandHarvestReducerTest {
 
   @Test
   void modelSelectionIsAtomicAndMessagesDoNotChangeSettings() {
-    ModelSelection replacement = new ModelSelection("openai", "gpt-4.1", "default");
+    ModelSelection replacement = ModelSelection.model("gpt-4.1", "default");
     BranchSettings result =
         reduce(
             id(7L),

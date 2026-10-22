@@ -36,11 +36,14 @@ class ConfigSyncGraphTest {
 
   private final ConfigSyncGraph graph =
       new ConfigSyncGraph(
-          ConfigSyncFixtures.AGENT_CONFIG_CODEC, ConfigSyncFixtures.agentDependencies());
+          ConfigSyncFixtures.AGENT_CONFIG_CODEC,
+          ConfigSyncFixtures.GROUP_CONFIG_CODEC,
+          ConfigSyncFixtures.agentDependencies());
 
   private ConfigSyncGraph pluginGraph() {
     return new ConfigSyncGraph(
         ConfigSyncFixtures.AGENT_CONFIG_CODEC,
+        ConfigSyncFixtures.GROUP_CONFIG_CODEC,
         ConfigSyncFixtures.agentDependencies(
             new ConfigSyncFixtures.AgentDependencyPlugin(PLUGIN_ID)));
   }
@@ -48,7 +51,7 @@ class ConfigSyncGraphTest {
   private static ConfigSyncSnapshot pluginSnapshot(String requiredAgent, boolean agentPresent) {
     List<AgentDefinition> agents =
         agentPresent
-            ? List.of(agent(requiredAgent, "p", "m", agentConfig(List.of(), List.of(), List.of())))
+            ? List.of(agent(requiredAgent, "m", agentConfig(List.of(), List.of(), List.of())))
             : List.of();
     return snapshotWithPlugins(
         List.of(provider("p")),
@@ -72,10 +75,9 @@ class ConfigSyncGraphTest {
         List.of(
             agent(
                 "a",
-                "p",
                 "m",
                 agentConfig(List.of("tool_x"), List.of(skillRef("pkg", "s")), List.of("b"))),
-            agent("b", "p", "m", agentConfig(List.of(), List.of(), List.of("a")))),
+            agent("b", "m", agentConfig(List.of(), List.of(), List.of("a")))),
         List.of(skillPackage("pkg", "s")),
         List.of(environment("env")),
         List.of(mcpServer("mcp", true)),
@@ -86,7 +88,7 @@ class ConfigSyncGraphTest {
   void allRefsCoversAllCategories() {
     List<ConfigSyncRef> refs = graph.allRefs(richSnapshot());
     assertTrue(refs.contains(new ConfigSyncRef(ConfigSyncKind.PROVIDERS, "p")));
-    assertTrue(refs.contains(new ConfigSyncRef(ConfigSyncKind.MODELS, "p/m")));
+    assertTrue(refs.contains(new ConfigSyncRef(ConfigSyncKind.MODELS, "m")));
     assertTrue(refs.contains(new ConfigSyncRef(ConfigSyncKind.AGENTS, "a")));
     assertTrue(refs.contains(new ConfigSyncRef(ConfigSyncKind.SKILL_PACKAGES, "pkg")));
     assertTrue(refs.contains(new ConfigSyncRef(ConfigSyncKind.ENVIRONMENTS, "env")));
@@ -101,7 +103,7 @@ class ConfigSyncGraphTest {
     List<ConfigSyncRef> closure =
         graph.closure(prepared, new ConfigSyncRef(ConfigSyncKind.AGENTS, "a"));
 
-    assertTrue(closure.contains(new ConfigSyncRef(ConfigSyncKind.MODELS, "p/m")));
+    assertTrue(closure.contains(new ConfigSyncRef(ConfigSyncKind.MODELS, "m")));
     assertTrue(closure.contains(new ConfigSyncRef(ConfigSyncKind.PROVIDERS, "p")));
     assertTrue(closure.contains(new ConfigSyncRef(ConfigSyncKind.SKILL_PACKAGES, "pkg")));
     assertTrue(closure.contains(new ConfigSyncRef(ConfigSyncKind.AGENTS, "b")));
@@ -144,7 +146,7 @@ class ConfigSyncGraphTest {
         snapshot(
             List.of(provider("p")),
             List.of(model("p", "m")),
-            List.of(agent("a", "p", "m", agentConfig(List.of(), List.of(), List.of("ghost")))),
+            List.of(agent("a", "m", agentConfig(List.of(), List.of(), List.of("ghost")))),
             List.of(),
             List.of(),
             List.of(),
@@ -182,12 +184,12 @@ class ConfigSyncGraphTest {
 
     assertTrue(expanded.contains(new ConfigSyncRef(ConfigSyncKind.PLUGINS, PLUGIN_ID)));
     assertTrue(expanded.contains(new ConfigSyncRef(ConfigSyncKind.AGENTS, "h3")));
-    assertTrue(expanded.contains(new ConfigSyncRef(ConfigSyncKind.MODELS, "p/m")));
+    assertTrue(expanded.contains(new ConfigSyncRef(ConfigSyncKind.MODELS, "m")));
     assertTrue(expanded.contains(new ConfigSyncRef(ConfigSyncKind.PROVIDERS, "p")));
     assertEquals(
         List.of(
             new ConfigSyncRef(ConfigSyncKind.AGENTS, "h3"),
-            new ConfigSyncRef(ConfigSyncKind.MODELS, "p/m"),
+            new ConfigSyncRef(ConfigSyncKind.MODELS, "m"),
             new ConfigSyncRef(ConfigSyncKind.PROVIDERS, "p")),
         pluginGraph.closure(prepared, new ConfigSyncRef(ConfigSyncKind.PLUGINS, PLUGIN_ID)));
   }
@@ -240,8 +242,7 @@ class ConfigSyncGraphTest {
         snapshotWithPlugins(
             List.of(provider("p")),
             List.of(model("p", "m")),
-            List.of(
-                agent("a", "p", "m", agentConfig(List.of(), List.of(), List.of(BUILTIN_AGENT)))),
+            List.of(agent("a", "m", agentConfig(List.of(), List.of(), List.of(BUILTIN_AGENT)))),
             Set.of(BUILTIN_AGENT),
             List.of(),
             List.of(),
@@ -254,7 +255,7 @@ class ConfigSyncGraphTest {
     List<ConfigSyncRef> expanded =
         graph.expand(prepared, List.of(new ConfigSyncRef(ConfigSyncKind.AGENTS, "a")));
 
-    assertTrue(expanded.contains(new ConfigSyncRef(ConfigSyncKind.MODELS, "p/m")));
+    assertTrue(expanded.contains(new ConfigSyncRef(ConfigSyncKind.MODELS, "m")));
     assertFalse(expanded.contains(new ConfigSyncRef(ConfigSyncKind.AGENTS, BUILTIN_AGENT)));
   }
 
@@ -265,7 +266,7 @@ class ConfigSyncGraphTest {
         snapshotWithPlugins(
             List.of(provider("p")),
             List.of(model("p", "m")),
-            List.of(agent("a", "p", "m", agentConfig(List.of(), List.of(), List.of("ghost")))),
+            List.of(agent("a", "m", agentConfig(List.of(), List.of(), List.of("ghost")))),
             Set.of(BUILTIN_AGENT),
             List.of(),
             List.of(),
@@ -315,6 +316,7 @@ class ConfigSyncGraphTest {
     ConfigSyncGraph failingGraph =
         new ConfigSyncGraph(
             ConfigSyncFixtures.AGENT_CONFIG_CODEC,
+            ConfigSyncFixtures.GROUP_CONFIG_CODEC,
             ConfigSyncFixtures.agentDependencies(
                 new ConfigSyncFixtures.FailingAgentDeclarationPlugin(PLUGIN_ID)));
 
@@ -325,7 +327,7 @@ class ConfigSyncGraphTest {
     return snapshotWithPlugins(
         List.of(provider("p")),
         List.of(model("p", "m")),
-        List.of(agent("a", "p", "m", agentConfig(List.of(), List.of(), List.of(BUILTIN_AGENT)))),
+        List.of(agent("a", "m", agentConfig(List.of(), List.of(), List.of(BUILTIN_AGENT)))),
         Set.of(BUILTIN_AGENT),
         List.of(),
         List.of(),
@@ -342,7 +344,7 @@ class ConfigSyncGraphTest {
         new ConfigSyncSnapshot(
             List.of(),
             List.of(),
-            List.of(agent("standalone", "p", "m", agentConfig(List.of(), List.of(), List.of()))),
+            List.of(agent("standalone", "m", agentConfig(List.of(), List.of(), List.of()))),
             Set.of(),
             List.of(),
             List.of(),

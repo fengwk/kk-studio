@@ -74,7 +74,7 @@ class ModelAttemptMaterializationTest {
   private static final EnvironmentId ENVIRONMENT =
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
   private static final BranchSettings SETTINGS =
-      new BranchSettings("agent", new ModelSelection("provider", "model", "v1"), null);
+      new BranchSettings("agent", ModelSelection.model("model", "v1"), null);
 
   @Test
   void acceptsExactFailedAttemptAndTerminalPartial() {
@@ -753,6 +753,8 @@ class ModelAttemptMaterializationTest {
         3,
         "retry partial",
         "retry thinking",
+        ModelSelection.model("model", "v1"),
+        null,
         new ModelInvocationError(ProviderErrorKind.TRANSIENT, "temporary outage"),
         T3,
         T4);
@@ -767,6 +769,8 @@ class ModelAttemptMaterializationTest {
         new ModelAttemptFailurePayload(
             new ModelAttemptSnapshot(
                 failure.attempt(), failure.sequence(), text, failure.thinking()),
+            failure.model(),
+            failure.requestedAt(),
             new AssistantError(failure.error().kind().name(), failure.error().message()),
             failure.retryAt()),
         createdAt);
@@ -923,6 +927,8 @@ class ModelAttemptMaterializationTest {
             1,
             "retry partial",
             "retry thinking",
+            ModelSelection.model("model", "v1"),
+            null,
             new ModelInvocationError(ProviderErrorKind.TRANSIENT, "temporary outage"),
             T3,
             T4);

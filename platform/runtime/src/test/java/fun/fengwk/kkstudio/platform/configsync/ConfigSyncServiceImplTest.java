@@ -47,11 +47,14 @@ class ConfigSyncServiceImplTest {
   private final ConfigSyncYaml yaml = new ConfigSyncYaml();
   private final ConfigSyncGraph graph =
       new ConfigSyncGraph(
-          ConfigSyncFixtures.AGENT_CONFIG_CODEC, ConfigSyncFixtures.agentDependencies());
+          ConfigSyncFixtures.AGENT_CONFIG_CODEC,
+          ConfigSyncFixtures.GROUP_CONFIG_CODEC,
+          ConfigSyncFixtures.agentDependencies());
   private final ConfigSyncExporter exporter =
       new ConfigSyncExporter(
           ConfigSyncFixtures.PROVIDER_CONFIG_CODEC,
           ConfigSyncFixtures.MODEL_CONFIG_PARSER,
+          ConfigSyncFixtures.GROUP_CONFIG_CODEC,
           ConfigSyncFixtures.AGENT_CONFIG_CODEC,
           new SystemSettingsCodec(),
           yaml,
@@ -75,6 +78,7 @@ class ConfigSyncServiceImplTest {
           mcpServerRepository,
           TestCatalogSources.singleLease(toolCatalog),
           ConfigSyncFixtures.MODEL_CONFIG_PARSER,
+          ConfigSyncFixtures.GROUP_CONFIG_CODEC,
           ConfigSyncFixtures.agentDependencies());
 
   private final ConfigSyncServiceImpl service =
@@ -84,7 +88,7 @@ class ConfigSyncServiceImplTest {
     return snapshot(
         List.of(provider("p")),
         List.of(model("p", "m")),
-        List.of(agent("a", "p", "m", agentConfig(List.of(), List.of(), List.of()))),
+        List.of(agent("a", "m", agentConfig(List.of(), List.of(), List.of()))),
         List.of(),
         List.of(),
         List.of(),
@@ -111,8 +115,7 @@ class ConfigSyncServiceImplTest {
 
     assertEquals(4, inventory.getItems().size());
     ConfigSyncItem agentItem = item(inventory, ConfigSyncKind.AGENTS, "a");
-    assertTrue(
-        agentItem.getDependencies().contains(new ConfigSyncRef(ConfigSyncKind.MODELS, "p/m")));
+    assertTrue(agentItem.getDependencies().contains(new ConfigSyncRef(ConfigSyncKind.MODELS, "m")));
     assertTrue(
         agentItem.getDependencies().contains(new ConfigSyncRef(ConfigSyncKind.PROVIDERS, "p")));
     // 闭包不含自身。
@@ -125,7 +128,7 @@ class ConfigSyncServiceImplTest {
   void exportExpandsClosureIntoYaml() {
     when(snapshotReader.read()).thenReturn(richSnapshot());
     ConfigSyncExportRequestDTO request = new ConfigSyncExportRequestDTO();
-    request.setItems(List.of(new ConfigSyncRef(ConfigSyncKind.MODELS, "p/m")));
+    request.setItems(List.of(new ConfigSyncRef(ConfigSyncKind.MODELS, "m")));
 
     String exported = service.export(request).getYaml();
     Map<String, Object> document = yaml.parse(exported);
@@ -156,7 +159,7 @@ class ConfigSyncServiceImplTest {
 
     verify(applier).apply(any());
     assertTrue(result.getImported().contains(new ConfigSyncRef(ConfigSyncKind.PROVIDERS, "p")));
-    assertTrue(result.getImported().contains(new ConfigSyncRef(ConfigSyncKind.MODELS, "p/m")));
+    assertTrue(result.getImported().contains(new ConfigSyncRef(ConfigSyncKind.MODELS, "m")));
     assertTrue(result.getSkipped().isEmpty());
   }
 
@@ -179,7 +182,7 @@ class ConfigSyncServiceImplTest {
     ConfigSyncImportCheckDTO check = service.checkImport(request);
 
     assertTrue(check.getCreated().contains(new ConfigSyncRef(ConfigSyncKind.PROVIDERS, "p")));
-    assertTrue(check.getCreated().contains(new ConfigSyncRef(ConfigSyncKind.MODELS, "p/m")));
+    assertTrue(check.getCreated().contains(new ConfigSyncRef(ConfigSyncKind.MODELS, "m")));
     assertTrue(check.getUpdated().isEmpty());
     assertTrue(check.getSkipped().isEmpty());
     verify(applier, never()).apply(any());
@@ -196,7 +199,7 @@ class ConfigSyncServiceImplTest {
 
     assertTrue(check.getCreated().isEmpty());
     assertTrue(check.getUpdated().contains(new ConfigSyncRef(ConfigSyncKind.PROVIDERS, "p")));
-    assertTrue(check.getUpdated().contains(new ConfigSyncRef(ConfigSyncKind.MODELS, "p/m")));
+    assertTrue(check.getUpdated().contains(new ConfigSyncRef(ConfigSyncKind.MODELS, "m")));
     verify(applier, never()).apply(any());
   }
 

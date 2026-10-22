@@ -27,7 +27,7 @@ vi.mock('axios', async (importOriginal) => {
 
 const draft = {
   agentName: 'coder',
-  model: { providerName: 'p', modelName: 'm', variant: 'default' },
+  model: { modelName: 'm', variant: 'default' },
   environmentName: null,
   yoloEnabled: false,
 }

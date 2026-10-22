@@ -790,7 +790,18 @@ class ModelExecutionStreamFlushTest {
               ModelInvocationError error =
                   new ModelInvocationError(ProviderErrorKind.TRANSIENT, "superseded");
               model =
-                  model.retryReady(new ModelAttemptFailure(1, 0L, "", "", error, NOW, NOW), NOW);
+                  model.retryReady(
+                      new ModelAttemptFailure(
+                          1,
+                          0L,
+                          "",
+                          "",
+                          ModelSelection.model("model", "v1"),
+                          null,
+                          error,
+                          NOW,
+                          NOW),
+                      NOW);
               tx.updateModelInvocation(model);
               model = model.beginDispatch(NOW);
               tx.updateModelInvocation(model);
@@ -2543,7 +2554,7 @@ class ModelExecutionStreamFlushTest {
   }
 
   private static BranchSettings branchSettings() {
-    return new BranchSettings("agent", new ModelSelection("provider", "model", "v1"), null);
+    return new BranchSettings("agent", ModelSelection.model("model", "v1"), null);
   }
 
   private record Baseline(UUID sessionId, UUID rootEntryId, UUID turnStartEntryId, UUID threadId) {}

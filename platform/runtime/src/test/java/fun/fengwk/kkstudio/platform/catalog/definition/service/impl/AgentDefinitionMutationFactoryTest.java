@@ -30,24 +30,22 @@ public class AgentDefinitionMutationFactoryTest {
     AgentDefinitionMutationFactory factory = factory(objectMapper);
     AgentDefinitionConfigDTO config =
         config(List.of("browser"), List.of(skillRef("tools", "java"), skillRef("tools", "dev")));
-    AgentDefinitionCreateDTO create = create("agent", "provider/model", config, "default");
+    AgentDefinitionCreateDTO create = create("agent", "model", config, "default");
 
     AgentDefinition definition = factory.newUserAgent("agent", create);
     AgentDefinitionConfigDTO stored =
         objectMapper.readValue(definition.getConfigJson(), AgentDefinitionConfigDTO.class);
     assertEquals(List.of("browser"), stored.getTools());
     assertEquals(List.of(skillRef("tools", "java"), skillRef("tools", "dev")), stored.getSkills());
-    assertEquals("provider", definition.getModelProviderName());
     assertEquals("model", definition.getModelName());
 
     AgentDefinitionUpdateDTO update = new AgentDefinitionUpdateDTO();
     update.setDescription("updated");
-    update.setModel("other-provider/other-model");
+    update.setModel("other-model");
     update.setVariant("quality");
     update.setConfig(config(List.of(), List.of()));
     factory.update(definition, update);
     assertEquals("agent", definition.getName());
-    assertEquals("other-provider", definition.getModelProviderName());
     assertEquals("other-model", definition.getModelName());
     assertEquals("quality", definition.getVariant());
   }
@@ -58,7 +56,7 @@ public class AgentDefinitionMutationFactoryTest {
     AgentDefinitionCreateDTO create =
         create(
             "agent",
-            "provider/model",
+            "model",
             config(List.of(), List.of(skillRef("tools", "java"), skillRef("tools", "java"))),
             "default");
     AiValidationException error =
@@ -85,30 +83,30 @@ public class AgentDefinitionMutationFactoryTest {
         () ->
             factory.newUserAgent(
                 "\u2003agent\u2003",
-                create("\u2003agent\u2003", "provider/model", config(List.of(), List.of()), null)));
+                create("\u2003agent\u2003", "model", config(List.of(), List.of()), null)));
     AgentDefinitionCreateDTO missingModel =
         create("agent", null, config(List.of(), List.of()), null);
     assertThrows(AiValidationException.class, () -> factory.newUserAgent("agent", missingModel));
-    missingModel.setModel("no-slash");
+    missingModel.setModel(" model");
     assertThrows(AiValidationException.class, () -> factory.newUserAgent("agent", missingModel));
 
-    AgentDefinitionCreateDTO incomplete = create("agent", "provider/model", null, null);
+    AgentDefinitionCreateDTO incomplete = create("agent", "model", null, null);
     assertThrows(AiValidationException.class, () -> factory.newUserAgent("agent", incomplete));
     incomplete.setConfig(config(List.of(), List.of()));
     AgentDefinition allowedBlankVariant = factory.newUserAgent("agent", incomplete);
     assertNull(allowedBlankVariant.getVariant());
 
     AgentDefinitionCreateDTO oversized =
-        create("n".repeat(65), "provider/model", config(List.of(), List.of()), null);
+        create("n".repeat(65), "model", config(List.of(), List.of()), null);
     assertThrows(
         AiValidationException.class, () -> factory.newUserAgent(oversized.getName(), oversized));
     // description 已放开为 text：超长文本不再被拒绝，也不再截断。
     AgentDefinitionCreateDTO longDescription =
-        create("agent", "provider/model", config(List.of(), List.of()), null);
+        create("agent", "model", config(List.of(), List.of()), null);
     longDescription.setDescription("d".repeat(4096));
     assertEquals("d".repeat(4096), factory.newUserAgent("agent", longDescription).getDescription());
     AgentDefinitionCreateDTO pathBreaking =
-        create("agent/name", "provider/model", config(List.of(), List.of()), null);
+        create("agent/name", "model", config(List.of(), List.of()), null);
     assertThrows(
         AiValidationException.class,
         () -> factory.newUserAgent(pathBreaking.getName(), pathBreaking));
@@ -123,7 +121,6 @@ public class AgentDefinitionMutationFactoryTest {
     AgentDefinition builtin =
         factory.newBuiltinAgent(BuiltinAgentDefinitions.COMPACTION_NAME, create);
     assertEquals(AgentDefinitionType.BUILTIN, builtin.getType());
-    assertNull(builtin.getModelProviderName());
     assertNull(builtin.getModelName());
     assertNull(builtin.getVariant());
 
@@ -141,8 +138,7 @@ public class AgentDefinitionMutationFactoryTest {
   public void shouldRejectNullPropertiesAndNullName() {
     AgentDefinitionMutationFactory factory = factory(JsonMapper.builder().build());
     assertThrows(AiValidationException.class, () -> factory.newUserAgent("agent", null));
-    AgentDefinitionCreateDTO create =
-        create(null, "provider/model", config(List.of(), List.of()), null);
+    AgentDefinitionCreateDTO create = create(null, "model", config(List.of(), List.of()), null);
     assertThrows(AiValidationException.class, () -> factory.newUserAgent(null, create));
   }
 

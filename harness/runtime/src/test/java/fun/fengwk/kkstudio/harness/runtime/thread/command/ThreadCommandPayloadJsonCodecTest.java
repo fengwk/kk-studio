@@ -23,8 +23,7 @@ import java.util.UUID;
 class ThreadCommandPayloadJsonCodecTest {
 
   private static final String LEGACY_WORKSPACE_PATH = "123e4567-e89b-12d3-a456-426614174000";
-  private static final ModelSelection MODEL =
-      new ModelSelection("anthropic", "claude-sonnet", "default");
+  private static final ModelSelection MODEL = ModelSelection.model("claude-sonnet", "default");
   private final ThreadCommandPayloadJsonCodec codec = new ThreadCommandPayloadJsonCodec();
 
   @Test

@@ -29,6 +29,8 @@ import fun.fengwk.kkstudio.harness.runtime.history.SettingsPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelGroupExecution;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelGroupProgress;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
@@ -919,7 +921,9 @@ public final class ThreadProcessor {
               null,
               List.of(),
               mutationNow,
-              mutationNow));
+              mutationNow,
+              null,
+              groupProgress(invocationSpec)));
       if (tx.lockClaimedWork(claim, now).isEmpty()) {
         throw new ClaimLostSignal();
       }
@@ -986,6 +990,13 @@ public final class ThreadProcessor {
    */
   static ThreadState lockThreadWithSession(HarnessStore.Transaction tx, UUID threadId) {
     return ThreadLifecycleCoordinator.lockThreadWithAncestors(tx, threadId);
+  }
+
+  private static ModelGroupProgress groupProgress(ModelRequestSpec spec) {
+    ModelGroupExecution group = spec.groupExecution();
+    return group == null
+        ? null
+        : new ModelGroupProgress(group.groupName(), group.groupVersion(), 0, 0);
   }
 
   /** 只有普通 INPUT 把输入水位推进到冻结 cutoff；CONTINUATION / COMPACTION 不推进，保留尚待接纳通知的原始尾部。 */

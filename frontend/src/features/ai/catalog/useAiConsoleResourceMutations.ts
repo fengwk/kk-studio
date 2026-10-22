@@ -41,27 +41,23 @@ export function useAiConsoleResourceMutations({
   })
   const updateModelMutation = useInvalidateMutation({
     mutationFn: ({
-      providerName,
       name,
       data,
     }: {
-      providerName: string
       name: string
       data: AgentModelUpdateDTO
-    }) => agentService.updateModel(providerName, name, data),
+    }) => agentService.updateModel(name, data),
     invalidateQueryKeys: [queryKeys.models.list, queryKeys.agents.list],
     onSuccess: onResourceSaved,
   })
   const deleteModelMutation = useInvalidateMutation({
     mutationFn: ({
-      providerName,
       name,
       expectedVersion,
     }: {
-      providerName: string
       name: string
       expectedVersion: string
-    }) => agentService.deleteModel(providerName, name, expectedVersion),
+    }) => agentService.deleteModel(name, expectedVersion),
     invalidateQueryKeys: [queryKeys.models.list, queryKeys.agents.list],
     onSuccess: onDeleteCompleted,
   })
@@ -102,10 +98,10 @@ export function useAiConsoleResourceMutations({
     deleteProvider: (name: string, expectedVersion: string) =>
       deleteProviderMutation.mutate({ name, expectedVersion }),
     createModel: (data: AgentModelCreateDTO) => createModelMutation.mutate(data),
-    updateModel: (providerName: string, name: string, data: AgentModelUpdateDTO) =>
-      updateModelMutation.mutate({ providerName, name, data }),
-    deleteModel: (providerName: string, name: string, expectedVersion: string) =>
-      deleteModelMutation.mutate({ providerName, name, expectedVersion }),
+    updateModel: (name: string, data: AgentModelUpdateDTO) =>
+      updateModelMutation.mutate({ name, data }),
+    deleteModel: (name: string, expectedVersion: string) =>
+      deleteModelMutation.mutate({ name, expectedVersion }),
     createAgent: (data: AgentDefinitionCreateDTO) => createAgentMutation.mutate(data),
     updateAgent: (name: string, data: AgentDefinitionUpdateDTO) =>
       updateAgentMutation.mutate({ name, data }),

@@ -2,13 +2,24 @@ package fun.fengwk.kkstudio.harness.runtime.entry;
 
 import java.util.Objects;
 
-/** 冻结到 branch settings snapshot 中的不可变 provider/model/variant 引用。 */
-public record ModelSelection(String providerName, String modelName, String variant) {
+/** 冻结到 branch settings snapshot 中的统一逻辑模型选择：全局名称 + 可选单模型 Variant。 */
+public record ModelSelection(String modelName, String variant) {
 
   public ModelSelection {
-    providerName = requireCanonicalName(providerName, "providerName");
     modelName = requireCanonicalName(modelName, "modelName");
-    variant = requireCanonicalName(variant, "variant");
+    if (variant != null) {
+      variant = requireCanonicalName(variant, "variant");
+    }
+  }
+
+  /** 纯单模型选择便利构造：显式 variant。 */
+  public static ModelSelection model(String modelName, String variant) {
+    return new ModelSelection(modelName, variant);
+  }
+
+  /** 模型组没有组级 Variant。 */
+  public static ModelSelection group(String modelName) {
+    return new ModelSelection(modelName, null);
   }
 
   private static String requireCanonicalName(String value, String field) {

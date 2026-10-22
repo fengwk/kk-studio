@@ -45,6 +45,7 @@ import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.CompactionPayload;
@@ -156,7 +157,7 @@ public abstract class HarnessStoreInvocationContract {
             assistantEntryId,
             baseline.sessionId(),
             userEntryId,
-            mappedAssistant(requestSpec, response),
+            mappedAssistant(requestSpec, response, T2),
             T2,
             replayState);
 
@@ -338,6 +339,8 @@ public abstract class HarnessStoreInvocationContract {
             7,
             "partial",
             "thinking",
+            ModelSelection.model("model", "v1"),
+            null,
             new ModelInvocationError(ProviderErrorKind.TRANSIENT, "provider unavailable"),
             T3,
             T4);
@@ -1290,6 +1293,8 @@ public abstract class HarnessStoreInvocationContract {
                                   0,
                                   "",
                                   "",
+                                  ModelSelection.model("model", "v1"),
+                                  null,
                                   new ModelInvocationError(
                                       ProviderErrorKind.TRANSIENT, "provider unavailable"),
                                   T1,

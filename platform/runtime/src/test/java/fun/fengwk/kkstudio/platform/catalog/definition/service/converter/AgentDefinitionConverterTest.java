@@ -22,7 +22,6 @@ public class AgentDefinitionConverterTest {
     assertNull(converter.convert(null));
 
     AgentDefinition invalid = new AgentDefinition();
-    invalid.setModelProviderName("provider");
     invalid.setModelName("model");
     invalid.setConfigJson("not-json");
     assertThrows(IllegalStateException.class, () -> converter.convert(invalid));
@@ -35,12 +34,11 @@ public class AgentDefinitionConverterTest {
     invalid.setVersion(0L);
     invalid.setType(AgentDefinitionType.USER);
     invalid.setConfigJson("{\"tools\":[],\"skills\":[],\"subagents\":[]}");
-    assertEquals("provider/model", converter.convert(invalid).getModel());
+    assertEquals("model", converter.convert(invalid).getModel());
     assertEquals(AgentDefinitionType.USER, converter.convert(invalid).getType());
 
-    // 未配置模型的内置 Agent：两列同为 null，DTO 显式投影 null 而不是构造非法 ModelRef。
+    // 未配置模型的内置 Agent：model 列为 null，DTO 显式投影 null。
     invalid.setType(AgentDefinitionType.BUILTIN);
-    invalid.setModelProviderName(null);
     invalid.setModelName(null);
     AgentDefinitionDTO unconfigured = converter.convert(invalid);
     assertEquals(AgentDefinitionType.BUILTIN, unconfigured.getType());

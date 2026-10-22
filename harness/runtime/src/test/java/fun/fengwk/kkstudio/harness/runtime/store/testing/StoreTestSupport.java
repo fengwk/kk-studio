@@ -613,7 +613,7 @@ final class StoreTestSupport {
   }
 
   static BranchSettings branchSettings() {
-    return new BranchSettings("agent", new ModelSelection("provider", "model", "v1"), null);
+    return new BranchSettings("agent", ModelSelection.model("model", "v1"), null);
   }
 
   static ModelRequestSpec modelRequest() {
@@ -678,7 +678,14 @@ final class StoreTestSupport {
 
   /** SUCCEEDED assistant payload：由同一 request/response 经 mapper 机械派生（strict attach 校验要求全等）。 */
   static MessagePayload mappedAssistant(ModelRequestSpec requestSpec, ProviderResponse response) {
-    return new HistoryPayloadMapper().assistantPayload(response, requestSpec.toolBindings());
+    return mappedAssistant(requestSpec, response, null);
+  }
+
+  static MessagePayload mappedAssistant(
+      ModelRequestSpec requestSpec, ProviderResponse response, Instant requestedAt) {
+    return new HistoryPayloadMapper()
+        .assistantPayload(
+            response, requestSpec.toolBindings(), actualSelection(requestSpec), requestedAt);
   }
 
   static ToolCall toolCall(String toolCallId) {
@@ -761,5 +768,13 @@ final class StoreTestSupport {
         new InputSchema("arguments", Map.of(), Set.of(), false),
         ToolSideEffect.READ_ONLY,
         Duration.ofSeconds(30));
+  }
+
+  private static ModelSelection actualSelection(ModelRequestSpec requestSpec) {
+    if (requestSpec.groupExecution() == null) {
+      return ModelSelection.model(requestSpec.model().modelName(), requestSpec.variant().id());
+    }
+    var member = requestSpec.groupExecution().members().getFirst();
+    return ModelSelection.model(member.model().modelName(), member.variant().id());
   }
 }

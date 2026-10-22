@@ -51,7 +51,7 @@ function createDebugData(): ThreadModelRequestDebugData {
   return {
     kind: 'NEXT_REQUEST_PREVIEW',
     generatedAt: '2026-09-26T12:00:00.000Z',
-    model: { providerName: 'minimax', modelName: 'MiniMax-M2.7', variant: 'default' },
+    model: { modelName: 'MiniMax-M2.7', variant: 'default' },
     environmentName: 'dev-node',
     systemInstruction: LONG_SYSTEM_PROMPT,
     tools: [

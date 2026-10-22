@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 
+import java.time.Instant;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -32,12 +33,12 @@ final class HistoryValueCodecs {
   private static final Set<String> BRANCH_SETTINGS_FIELDS =
       orderedSet("agentName", "model", "environmentName", "goal");
   private static final Set<String> GOAL_FIELDS = orderedSet("id", "text");
-  private static final Set<String> MODEL_SELECTION_FIELDS =
-      orderedSet("providerName", "modelName", "variant");
+  private static final Set<String> MODEL_SELECTION_FIELDS = orderedSet("modelName", "variant");
   private static final Set<String> METADATA_FIELDS = orderedSet("stopReason", "usage");
 
   /** 可选的 assistantMetadata 字段：缺失或 null 表示无可信流计时（含旧历史记录）。 */
-  private static final Set<String> METADATA_OPTIONAL_FIELDS = orderedSet("decodeDurationMillis");
+  private static final Set<String> METADATA_OPTIONAL_FIELDS =
+      orderedSet("decodeDurationMillis", "model", "requestedAt", "responseServiceTier");
 
   private static final Set<String> USAGE_FIELDS =
       orderedSet(
@@ -128,7 +129,6 @@ final class HistoryValueCodecs {
 
   static ObjectNode encodeModelSelection(ModelSelection selection) {
     ObjectNode node = NODES.objectNode();
-    node.put("providerName", selection.providerName());
     node.put("modelName", selection.modelName());
     node.put("variant", selection.variant());
     return node;
@@ -137,10 +137,12 @@ final class HistoryValueCodecs {
   static ModelSelection decodeModelSelection(JsonNode value, String context) {
     ObjectNode node = requireObject(value, context);
     requireExactFields(node, MODEL_SELECTION_FIELDS, context);
+    JsonNode variant = node.get("variant");
+    if (!variant.isNull() && !variant.isString()) {
+      throw new IllegalArgumentException(context + ".variant must be text or null");
+    }
     return new ModelSelection(
-        requiredText(node, "providerName", context),
-        requiredText(node, "modelName", context),
-        requiredText(node, "variant", context));
+        requiredText(node, "modelName", context), variant.isNull() ? null : variant.stringValue());
   }
 
   // ---------- AssistantMessageMetadata ----------
@@ -162,6 +164,15 @@ final class HistoryValueCodecs {
     putNullableLong(usageNode, "providerTotalTokens", usage.providerTotalTokens());
     if (metadata.decodeDurationMillis() != null) {
       node.put("decodeDurationMillis", metadata.decodeDurationMillis());
+    }
+    if (metadata.model() != null) {
+      node.set("model", encodeModelSelection(metadata.model()));
+    }
+    if (metadata.requestedAt() != null) {
+      node.put("requestedAt", metadata.requestedAt().toString());
+    }
+    if (metadata.responseServiceTier() != null) {
+      node.put("responseServiceTier", metadata.responseServiceTier());
     }
     return node;
   }
@@ -188,7 +199,15 @@ final class HistoryValueCodecs {
             nullableNonNegativeLong(usageNode, "providerTotalTokens", "assistantMetadata.usage"));
     Long decodeDurationMillis =
         nullableNonNegativeLong(node, "decodeDurationMillis", "assistantMetadata");
-    return new AssistantMessageMetadata(stopReason, usage, decodeDurationMillis);
+    ModelSelection model =
+        node.hasNonNull("model")
+            ? decodeModelSelection(node.get("model"), "assistantMetadata.model")
+            : null;
+    String requestedAtText = nullableText(node, "requestedAt");
+    Instant requestedAt = requestedAtText == null ? null : Instant.parse(requestedAtText);
+    String responseServiceTier = nullableText(node, "responseServiceTier");
+    return new AssistantMessageMetadata(
+        stopReason, usage, decodeDurationMillis, model, requestedAt, responseServiceTier);
   }
 
   // ---------- 通用 JSON 工具方法 ----------
@@ -356,7 +375,7 @@ final class HistoryValueCodecs {
 
   static String nullableText(ObjectNode node, String field) {
     JsonNode value = node.get(field);
-    return value.isNull() ? null : text(node, field);
+    return value == null || value.isNull() ? null : text(node, field);
   }
 
   /**

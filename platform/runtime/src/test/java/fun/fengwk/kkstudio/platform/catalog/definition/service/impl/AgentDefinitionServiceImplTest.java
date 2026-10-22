@@ -67,7 +67,7 @@ public class AgentDefinitionServiceImplTest {
 
     when(repository.create(definition)).thenThrow(new DuplicateKeyException("duplicate"));
     assertThrows(AiDuplicateException.class, () -> service.createAgent(create));
-    verify(resolver, atLeastOnce()).requireModelForUpdate("provider", "model");
+    verify(resolver, atLeastOnce()).requireModelForUpdate("model");
 
     AgentDefinitionUpdateDTO update = update("0");
     AgentDefinitionUpdateDTO missing = new AgentDefinitionUpdateDTO();
@@ -101,7 +101,7 @@ public class AgentDefinitionServiceImplTest {
 
     AgentDefinitionUpdateDTO update = update("0");
     assertThrows(AiVersionConflictException.class, () -> service.updateAgent("agent", update));
-    verify(resolver, never()).requireModelForUpdate("provider", "model");
+    verify(resolver, never()).requireModelForUpdate("model");
     verify(factory, never()).update(definition, update);
   }
 
@@ -228,7 +228,7 @@ public class AgentDefinitionServiceImplTest {
 
     // 非法 model ref：在引用解析前包装为 AiValidationException。
     AgentDefinitionCreateDTO badRef = create();
-    badRef.setModel("no-slash");
+    badRef.setModel(" ");
     assertThrows(AiValidationException.class, () -> service.createAgent(badRef));
 
     // createDTO 为 null：model ref 解析阶段同样确定性拒绝。
@@ -239,7 +239,7 @@ public class AgentDefinitionServiceImplTest {
     badVariant.setVariant("bad-variant");
     AgentDefinitionCreateDTO create = create();
     when(factory.newUserAgent("agent", create)).thenReturn(badVariant);
-    when(variants.resolve("provider", "model", "bad-variant"))
+    when(variants.resolve("model", "bad-variant"))
         .thenThrow(new IllegalArgumentException("unknown variant: bad-variant"));
     assertThrows(AiValidationException.class, () -> service.createAgent(create));
 
@@ -353,7 +353,6 @@ public class AgentDefinitionServiceImplTest {
 
     AgentDefinition builtin = definition();
     builtin.setType(AgentDefinitionType.BUILTIN);
-    builtin.setModelProviderName(null);
     builtin.setModelName(null);
     when(resolver.requireAgent("agent")).thenReturn(builtin);
     when(resolver.requireAgentAndSubagentsForUpdate("agent", List.of())).thenReturn(builtin);
@@ -367,8 +366,8 @@ public class AgentDefinitionServiceImplTest {
     update.setExpectedVersion("0");
 
     service.updateAgent("agent", update);
-    verify(resolver, never()).requireModelForUpdate(any(), any());
-    verify(variants, never()).resolve(any(), any(), any());
+    verify(resolver, never()).requireModelForUpdate(any());
+    verify(variants, never()).resolve(any(), any());
   }
 
   /** 测试意图：用户 Agent 更新仍必须有模型；显式未配置模型只对内置 Agent 合法（防止 required 语义反转）。 */
@@ -392,7 +391,7 @@ public class AgentDefinitionServiceImplTest {
     update.setExpectedVersion("0");
 
     assertThrows(AiValidationException.class, () -> service.updateAgent("agent", update));
-    verify(resolver, never()).requireModelForUpdate(any(), any());
+    verify(resolver, never()).requireModelForUpdate(any());
     verify(factory, never()).update(any(), any());
   }
 
@@ -432,7 +431,6 @@ public class AgentDefinitionServiceImplTest {
   private AgentDefinition definition() {
     AgentDefinition definition = new AgentDefinition();
     definition.setName("agent");
-    definition.setModelProviderName("provider");
     definition.setModelName("model");
     definition.setConfigJson("{\"tools\":[],\"skills\":[],\"subagents\":[]}");
     definition.setVersion(0L);
@@ -442,14 +440,14 @@ public class AgentDefinitionServiceImplTest {
   private AgentDefinitionCreateDTO create() {
     AgentDefinitionCreateDTO create = new AgentDefinitionCreateDTO();
     create.setName("agent");
-    create.setModel("provider/model");
+    create.setModel("model");
     create.setConfig(config());
     return create;
   }
 
   private AgentDefinitionUpdateDTO update(String version) {
     AgentDefinitionUpdateDTO update = new AgentDefinitionUpdateDTO();
-    update.setModel("provider/model");
+    update.setModel("model");
     update.setConfig(config());
     update.setExpectedVersion(version);
     return update;

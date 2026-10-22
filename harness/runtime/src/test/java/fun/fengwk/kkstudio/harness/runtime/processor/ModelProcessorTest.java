@@ -35,6 +35,9 @@ import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelGroupExecution;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelGroupMemberExecution;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelGroupProgress;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestMaterializer;
@@ -4327,6 +4330,7 @@ class ModelProcessorTest {
         tx -> {
           tx.lockThread(baseline.threadId());
           UUID id = tx.nextId();
+          ModelGroupExecution group = requestSpec.groupExecution();
           tx.insertModelInvocation(
               new ModelInvocation(
                   id,
@@ -4342,7 +4346,11 @@ class ModelProcessorTest {
                   null,
                   List.of(),
                   now,
-                  now));
+                  now,
+                  null,
+                  group == null
+                      ? null
+                      : new ModelGroupProgress(group.groupName(), group.groupVersion(), 0, 0)));
           tx.requestWork(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()), now);
           tx.requestWork(new WorkTarget(WorkTargetType.MODEL, id), now);
           return id;
@@ -4498,17 +4506,277 @@ class ModelProcessorTest {
         null);
   }
 
+  /** 两成员模型组冻结请求：成员逻辑名用于断言真实 gateway 身份，而非仅顶层组名。 */
+  private static ModelRequestSpec groupSpec(Set<Integer> fallbackStatusCodes, int cooldownSeconds) {
+    List<ModelGroupMemberExecution> members = List.of(groupMember("model"), groupMember("model2"));
+    return new ModelRequestSpec(
+        1L,
+        ProviderType.OPENAI,
+        new UUID(0L, 1L),
+        new ModelDescriptor("group", "group", "group", Set.of(ModelInputModality.TEXT), true, true),
+        new ModelVariant("v1"),
+        1024,
+        "Test system instruction.",
+        List.of(),
+        List.of(),
+        ProviderCacheControl.none(),
+        new ModelGroupExecution("group", 7L, members, fallbackStatusCodes, cooldownSeconds));
+  }
+
+  private static ModelGroupMemberExecution groupMember(String name) {
+    return new ModelGroupMemberExecution(
+        ProviderType.OPENAI,
+        new UUID(0L, 1L),
+        new ModelDescriptor("provider", name, name, Set.of(ModelInputModality.TEXT), true, true),
+        new ModelVariant("v1"));
+  }
+
+  private void freezeGroupMember(
+      Fixture fixture, String group, long version, String member, Instant until) {
+    fixture.store.transaction(
+        tx -> {
+          tx.freezeGroupMember(group, version, member, "v1", until, NOW);
+          return null;
+        });
+  }
+
+  private static ModelGroupProgress groupProgress(ModelInvocation invocation) {
+    assertNotNull(invocation.groupProgress());
+    return invocation.groupProgress();
+  }
+
+  /** 组首成员冷却时必须在冻结游标上跳过，真实启动第二成员而非启动后覆盖 DISPATCHING。 */
+  @Test
+  void groupSkipsCoolingFirstMemberAndStartsSecondWithSingleDurableDispatch() {
+    Fixture fixture = fixture(NO_RETRY, groupSpec(Set.of(), 30));
+    freezeGroupMember(fixture, "group", 7L, "model", NOW.plusSeconds(30));
+    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+
+    assertEquals(
+        ProcessResult.STARTED,
+        fixture.processor.process(claim(fixture.store, fixture.invocationId, NOW)));
+
+    assertEquals("model2", fixture.gateway.executions.getFirst().request().model().modelName());
+    ModelInvocation dispatched = model(fixture.store, fixture.invocationId);
+    assertEquals(ModelInvocationStatus.RUNNING, dispatched.status());
+    assertEquals(1, dispatched.attempt());
+    assertEquals(1, groupProgress(dispatched).memberIndex());
+  }
+
+  /** 全成员冷却是无可用候选的本地专用失败，不得启动 gateway，也不得伪装成普通 upstream retry。 */
+  @Test
+  void groupAllMembersCoolingFailsLocallyWithoutGatewayOrRetry() {
+    Fixture fixture = fixture(NO_RETRY, groupSpec(Set.of(), 30));
+    freezeGroupMember(fixture, "group", 7L, "model", NOW.plusSeconds(30));
+    freezeGroupMember(fixture, "group", 7L, "model2", NOW.plusSeconds(30));
+
+    assertEquals(
+        ProcessResult.TERMINATED,
+        fixture.processor.process(claim(fixture.store, fixture.invocationId, NOW)));
+
+    assertEquals(0, fixture.gateway.startCalls);
+    ModelInvocation failed = model(fixture.store, fixture.invocationId);
+    assertEquals(ModelInvocationStatus.FAILED, failed.status());
+    assertEquals(ProviderErrorKind.NO_AVAILABLE_MODEL, failed.error().kind());
+    assertNull(failed.error().httpStatus());
+    assertFalse(failed.error().retryCandidate());
+    assertTrue(failed.error().message().contains("no available model in group"));
+  }
+
+  /** 命中 fallback 码立即冻结并推进，不消耗普通重试预算；下一成员真实执行，且失败审计带实际成员/请求时间。 */
+  @Test
+  void groupFallbackStatusFreezesAndAdvancesToNextMemberWithoutOrdinaryRetry() {
+    Fixture fixture = fixture(NO_RETRY, groupSpec(Set.of(429), 30));
+    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    assertEquals(
+        ProcessResult.STARTED,
+        fixture.processor.process(claim(fixture.store, fixture.invocationId, NOW)));
+
+    fixture
+        .gateway
+        .listener(fixture.invocationId)
+        .onFailed(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "limited", 429));
+
+    ModelInvocation advanced = model(fixture.store, fixture.invocationId);
+    assertEquals(ModelInvocationStatus.READY, advanced.status());
+    assertEquals(1, advanced.attempt());
+    assertEquals(1, groupProgress(advanced).memberIndex());
+    assertEquals(0, groupProgress(advanced).memberAttempts());
+    assertEquals(ModelSelection.model("model", "v1"), advanced.failedAttempts().getFirst().model());
+    assertEquals(NOW, advanced.failedAttempts().getFirst().requestedAt());
+    boolean firstCooling =
+        fixture.store.transaction(
+            tx -> tx.isGroupMemberCooling("group", 7L, "model", "v1", NOW.plusSeconds(1)));
+    boolean secondCooling =
+        fixture.store.transaction(
+            tx -> tx.isGroupMemberCooling("group", 7L, "model2", "v1", NOW.plusSeconds(1)));
+    assertTrue(firstCooling);
+    assertFalse(secondCooling);
+
+    fixture.clock.advance(Duration.ofMillis(1));
+    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    assertEquals(
+        ProcessResult.STARTED,
+        fixture.processor.process(
+            claim(fixture.store, fixture.invocationId, fixture.clock.instant())));
+    assertEquals("model2", fixture.gateway.executions.get(1).request().model().modelName());
+  }
+
+  /** 非 fallback 的可重试错误先消耗当前成员预算；预算耗尽后才冻结并推进，失败审计逐次指向真实成员。 */
+  @Test
+  void groupNonFallbackFailureRetriesCurrentMemberThenFreezesAndAdvances() {
+    Fixture fixture =
+        fixture(
+            new InvocationRetryPolicy(
+                1,
+                InvocationRetryBackoffStrategy.FIXED,
+                Duration.ofSeconds(5),
+                Duration.ofSeconds(5)),
+            groupSpec(Set.of(429), 30));
+    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    assertEquals(
+        ProcessResult.STARTED,
+        fixture.processor.process(claim(fixture.store, fixture.invocationId, NOW)));
+    fixture
+        .gateway
+        .listener(fixture.invocationId)
+        .onFailed(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "server", 500));
+
+    ModelInvocation retried = model(fixture.store, fixture.invocationId);
+    assertEquals(ModelInvocationStatus.READY, retried.status());
+    assertEquals(0, groupProgress(retried).memberIndex());
+    assertEquals(1, groupProgress(retried).memberAttempts());
+    boolean cooling =
+        fixture.store.transaction(
+            tx -> tx.isGroupMemberCooling("group", 7L, "model", "v1", NOW.plusSeconds(1)));
+    assertFalse(cooling);
+
+    fixture.clock.advance(Duration.ofSeconds(5));
+    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    assertEquals(
+        ProcessResult.STARTED,
+        fixture.processor.process(
+            claim(fixture.store, fixture.invocationId, fixture.clock.instant())));
+    fixture
+        .gateway
+        .listener(fixture.invocationId)
+        .onFailed(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "server2", 500));
+
+    ModelInvocation advanced = model(fixture.store, fixture.invocationId);
+    assertEquals(1, groupProgress(advanced).memberIndex());
+    assertEquals(2, advanced.failedAttempts().size());
+    assertEquals(ModelSelection.model("model", "v1"), advanced.failedAttempts().getLast().model());
+    boolean coolingAfterExhaustion =
+        fixture.store.transaction(
+            tx -> tx.isGroupMemberCooling("group", 7L, "model", "v1", NOW.plusSeconds(6)));
+    assertTrue(coolingAfterExhaustion);
+  }
+
+  /** cooldown=0 只推进不写跨调用冷却；所有成员失败后保留最后一次真实 upstream error。 */
+  @Test
+  void groupZeroCooldownAdvancesWithoutFreezingAndKeepsLastError() {
+    Fixture fixture = fixture(NO_RETRY, groupSpec(Set.of(429), 0));
+    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    assertEquals(
+        ProcessResult.STARTED,
+        fixture.processor.process(claim(fixture.store, fixture.invocationId, NOW)));
+    fixture
+        .gateway
+        .listener(fixture.invocationId)
+        .onFailed(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "limited", 429));
+
+    ModelInvocation advanced = model(fixture.store, fixture.invocationId);
+    assertEquals(1, groupProgress(advanced).memberIndex());
+    boolean cooling =
+        fixture.store.transaction(
+            tx -> tx.isGroupMemberCooling("group", 7L, "model", "v1", NOW.plusSeconds(1)));
+    assertFalse(cooling);
+
+    fixture.clock.advance(Duration.ofMillis(1));
+    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    assertEquals(
+        ProcessResult.STARTED,
+        fixture.processor.process(
+            claim(fixture.store, fixture.invocationId, fixture.clock.instant())));
+    fixture
+        .gateway
+        .listener(fixture.invocationId)
+        .onFailed(new ModelInvocationError(ProviderErrorKind.AUTHENTICATION, "denied", 401));
+
+    ModelInvocation failed = model(fixture.store, fixture.invocationId);
+    assertEquals(ModelInvocationStatus.FAILED, failed.status());
+    assertEquals(ProviderErrorKind.AUTHENTICATION, failed.error().kind());
+    assertEquals(401, failed.error().httpStatus());
+    assertEquals(2, failed.failedAttempts().size());
+    assertEquals(ModelSelection.model("model2", "v1"), failed.failedAttempts().getLast().model());
+  }
+
+  /** UNKNOWN 恢复只消耗当前成员预算：允许时留在原成员，耗尽时原成员失败，绝不冻结或切换成员。 */
+  @Test
+  void groupUnknownRecoveryConsumesCurrentMemberBudgetWithoutFreezeOrFallback() {
+    Fixture fixture =
+        fixture(
+            new InvocationRetryPolicy(
+                1,
+                InvocationRetryBackoffStrategy.FIXED,
+                Duration.ofSeconds(5),
+                Duration.ofSeconds(5)),
+            groupSpec(Set.of(), 30));
+    transition(fixture.store, fixture.invocationId, model -> model.beginDispatch(NOW));
+    transition(fixture.store, fixture.invocationId, model -> model.markRunning(NOW));
+    claim(fixture.store, fixture.invocationId, NOW);
+    fixture.clock.advance(Duration.ofSeconds(61));
+    ClaimedWork recovered = claim(fixture.store, fixture.invocationId, fixture.clock.instant());
+
+    assertEquals(ProcessResult.RESCHEDULED, fixture.processor.process(recovered));
+
+    ModelInvocation retried = model(fixture.store, fixture.invocationId);
+    assertEquals(ModelInvocationStatus.READY, retried.status());
+    assertEquals(0, groupProgress(retried).memberIndex());
+    assertEquals(1, groupProgress(retried).memberAttempts());
+    assertEquals(ModelSelection.model("model", "v1"), retried.failedAttempts().getLast().model());
+    boolean cooling =
+        fixture.store.transaction(
+            tx -> tx.isGroupMemberCooling("group", 7L, "model", "v1", fixture.clock.instant()));
+    assertFalse(cooling);
+
+    // 同一成员第二次租约丢失：成员预算耗尽，直接 FAILED，仍不冻结、不切到 model2。
+    fixture.clock.advance(Duration.ofSeconds(5));
+    transition(
+        fixture.store, fixture.invocationId, model -> model.beginDispatch(fixture.clock.instant()));
+    transition(
+        fixture.store, fixture.invocationId, model -> model.markRunning(fixture.clock.instant()));
+    claim(fixture.store, fixture.invocationId, fixture.clock.instant());
+    fixture.clock.advance(Duration.ofSeconds(61));
+    ClaimedWork exhausted = claim(fixture.store, fixture.invocationId, fixture.clock.instant());
+
+    assertEquals(ProcessResult.TERMINATED, fixture.processor.process(exhausted));
+
+    ModelInvocation failed = model(fixture.store, fixture.invocationId);
+    assertEquals(ModelInvocationStatus.FAILED, failed.status());
+    assertEquals(0, groupProgress(failed).memberIndex());
+    assertEquals(ProviderErrorKind.TRANSIENT, failed.error().kind());
+    boolean coolingAfterExhaustion =
+        fixture.store.transaction(
+            tx -> tx.isGroupMemberCooling("group", 7L, "model", "v1", fixture.clock.instant()));
+    assertFalse(coolingAfterExhaustion);
+    assertEquals(0, fixture.gateway.startCalls);
+  }
+
   private static EntryPayload assistantPayload() {
     // live attached 场景的 assistant 由 fixture 的 canonical request/response 经 mapper 派生，与 strict
     // attach 校验一致；
     // 历史（无 active model）场景复用同一 payload 不影响 attach 校验。
     return new HistoryPayloadMapper()
         .assistantPayload(
-            response("ok", GenerationStopReason.COMPLETE), requestWithTool().toolBindings());
+            response("ok", GenerationStopReason.COMPLETE),
+            requestWithTool().toolBindings(),
+            ModelSelection.model("model", "v1"),
+            NOW);
   }
 
   private static BranchSettings branchSettings() {
-    return new BranchSettings("agent", new ModelSelection("provider", "model", "v1"), null);
+    return new BranchSettings("agent", ModelSelection.model("model", "v1"), null);
   }
 
   private static ProviderReplayState sampleReplayState() {

@@ -361,7 +361,7 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
 
   private static BranchSettings settings() {
     return new BranchSettings(
-        "default-assistant", new ModelSelection("stub", "acceptance-stub", "default"), null);
+        "default-assistant", new ModelSelection("acceptance-stub", "default"), null);
   }
 
   private int count(String table, String column, UUID value) {

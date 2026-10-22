@@ -280,9 +280,8 @@ export interface ThreadModelRequestDebugData {
   kind: 'NEXT_REQUEST_PREVIEW'
   generatedAt: string | number
   model: {
-    providerName: string
     modelName: string
-    variant: string
+    variant?: string | null
   }
   environmentName: string | null
   systemInstruction: string

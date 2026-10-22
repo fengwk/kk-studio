@@ -4,34 +4,34 @@ import lombok.Data;
 
 import java.time.Instant;
 
-/** {@code agent_model} 行映射：LLM 模型条目（绑定 provider_name）。 */
+/** {@code agent_model} 行映射：单 Model 与 Model Group 共享全局 name 主键。 */
 @Data
 public class AgentModelDO {
 
-  /** 绑定 Provider 名称（必填，复合主键一部分，外键引用 agent_provider.name）。 */
-  private String providerName;
-
-  /** 模型逻辑名（必填，与 provider_name 组成复合主键）。 */
+  /** 全局唯一逻辑名称（主键）。 */
   private String name;
 
-  /** 发往上游 Provider 的真实模型标识（必填，varchar(256)，不参与唯一性约束）。 */
+  /** MODEL / GROUP。 */
+  private String kind;
+
+  /** MODEL 的 Provider 名；GROUP 为 null。 */
+  private String providerName;
+
+  /** MODEL 的真实 wire 模型标识；GROUP 为 null。 */
   private String modelId;
 
-  /** 描述，可选；text，null 表示未填写。 */
+  /** 可空描述。 */
   private String description;
 
-  /**
-   * 结构化配置 JSON（AgentModelConfigDTO：limit / abilities / pricing / variants / defaultVariant），映射
-   * {@code config} jsonb 列，必填。
-   */
+  /** MODEL 配置 JSON；GROUP 为 null。 */
   private String configJson;
 
-  /** 乐观锁行版本：非负，从 0 开始，每次写操作 +1；CAS 更新依据。 */
+  /** GROUP 配置 JSON；MODEL 为 null。 */
+  private String groupConfigJson;
+
   private Long version;
 
-  /** 创建时间（映射 {@code created_at} timestamptz，毫秒精度）。 */
   private Instant createTime;
 
-  /** 更新时间（映射 {@code updated_at} timestamptz，应用侧维护，毫秒精度）。 */
   private Instant updateTime;
 }

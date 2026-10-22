@@ -44,7 +44,7 @@ function compactionTurn(summaryText: string): HarnessSessionEntryDTO[] {
       reason: 'COMPACTION',
       settings: {
         agentName: 'coder',
-        model: { providerName: 'openai', modelName: 'gpt', variant: 'high' },
+        model: { modelName: 'gpt', variant: 'high' },
         environmentName: null,
       },
       ownerThreadId: 'thread-1',
@@ -53,7 +53,7 @@ function compactionTurn(summaryText: string): HarnessSessionEntryDTO[] {
       compaction: {
         phase: 'FULL',
         trigger: 'THRESHOLD',
-        executionModel: { providerName: 'openai', modelName: 'gpt', variant: 'high' },
+        executionModel: { modelName: 'gpt', variant: 'high' },
         cutEntryId: 'cut-1',
         turnPrefixStartEntryId: null,
         historyCompactionEntryId: null,

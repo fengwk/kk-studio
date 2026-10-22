@@ -155,7 +155,7 @@ describe('buildThreadEventTimeline', () => {
       entry('settings-1', 'SETTINGS', {
         settings: {
           agentName: 'JIJI',
-          model: { providerName: 'commandcode', modelName: 'glm-5.3-flash', variant: 'high' },
+          model: { modelName: 'glm-5.3-flash', variant: 'high' },
           environmentName: null,
           goal: null,
         },
@@ -1112,7 +1112,7 @@ describe('buildThreadEventTimeline', () => {
     const validEntry = entry('settings-valid', 'SETTINGS', {
       settings: {
         agentName: 'architect',
-        model: { providerName: 'commandcode', modelName: 'glm-5.3-flash', variant: 'high' },
+        model: { modelName: 'glm-5.3-flash', variant: 'high' },
         environmentName: 'prod-env',
         goal: null,
       },
@@ -1134,7 +1134,7 @@ describe('buildThreadEventTimeline', () => {
     expect(JSON.parse(validEvent.summary)).toEqual({
       settings: {
         agentName: 'architect',
-        model: { providerName: 'commandcode', modelName: 'glm-5.3-flash', variant: 'high' },
+        model: { modelName: 'glm-5.3-flash', variant: 'high' },
         environmentName: 'prod-env',
         goal: null,
       },
@@ -1143,7 +1143,7 @@ describe('buildThreadEventTimeline', () => {
     expect(JSON.parse(validEvent.rawJson!)).toEqual({
       settings: {
         agentName: 'architect',
-        model: { providerName: 'commandcode', modelName: 'glm-5.3-flash', variant: 'high' },
+        model: { modelName: 'glm-5.3-flash', variant: 'high' },
         environmentName: 'prod-env',
         goal: null,
       },

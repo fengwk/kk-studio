@@ -58,18 +58,88 @@ interface AgentModelAbilitiesDTO {
   inputModalities: AgentModelInputModality[]
 }
 
-export interface AgentModelPricingDTO {
-  currency: string
-  pricingTier: string
-  serviceTier: string
-  serviceTierMultiplier: number | string
-  version: string
-  inputPerMillionTokens: number | string
-  outputPerMillionTokens: number | string
-  cacheReadPerMillionTokens: number | string
-  cacheWritePerMillionTokens: number | string
-  cacheWriteLongPerMillionTokens: number | string
-  reasoningPerMillionTokens: number | string
+/** 精确十进制文本；价格与倍率在 wire 上从不经过 JS 浮点数。 */
+export type AgentModelDecimal = string
+
+/** 每百万 token 的基础费率；cacheWriteByTtl 键为正整数秒。 */
+export interface AgentModelRateSetDTO {
+  input: AgentModelDecimal
+  output: AgentModelDecimal
+  cacheRead: AgentModelDecimal
+  cacheWrite: AgentModelDecimal
+  cacheWriteByTtl: Record<string, AgentModelDecimal>
+  /** null 表示跟随 output；显式值（包括 0）表示独立思考价。 */
+  reasoning: AgentModelDecimal | null
+}
+
+/** 覆盖规则的费率 patch；缺省字段表示继承，显式字符串（包括 "0"）表示覆盖。 */
+export interface AgentModelRatePatchDTO {
+  input?: AgentModelDecimal
+  output?: AgentModelDecimal
+  cacheRead?: AgentModelDecimal
+  cacheWrite?: AgentModelDecimal
+  cacheWriteByTtl?: Record<string, AgentModelDecimal>
+  /** null 表示跟随 output；缺省表示不修改。 */
+  reasoning?: AgentModelDecimal | null
+}
+
+export interface AgentModelContextConditionDTO {
+  gt?: number
+  gte?: number
+  lt?: number
+  lte?: number
+}
+
+export interface AgentModelDateConditionDTO {
+  gte?: string
+  lt?: string
+}
+
+export interface AgentModelTimeConditionDTO {
+  start: string
+  end: string
+  /** IANA 时区名。 */
+  timezone: string
+  /** ISO 星期 1（周一）到 7（周日）。 */
+  weekdays?: number[]
+}
+
+/** 条件对象内的多个字段按 AND 组合；空对象恒真。 */
+export interface AgentModelConditionDTO {
+  context?: AgentModelContextConditionDTO
+  serviceTier?: string[]
+  date?: AgentModelDateConditionDTO
+  time?: AgentModelTimeConditionDTO
+  all?: AgentModelConditionDTO[]
+  any?: AgentModelConditionDTO[]
+  not?: AgentModelConditionDTO
+}
+
+export interface AgentModelPricingOverrideDTO {
+  id: string
+  when: AgentModelConditionDTO
+  rates: AgentModelRatePatchDTO
+}
+
+export interface AgentModelFactorSetDTO {
+  input?: AgentModelDecimal
+  output?: AgentModelDecimal
+  cacheRead?: AgentModelDecimal
+  cacheWrite?: AgentModelDecimal
+  reasoning?: AgentModelDecimal
+}
+
+export interface AgentModelPricingMultiplierDTO {
+  id: string
+  when: AgentModelConditionDTO
+  factors: AgentModelFactorSetDTO
+}
+
+/** 完整价格定义：基础费率 + 有序覆盖/倍率规则。 */
+export interface AgentModelPricingDefinitionDTO {
+  base: AgentModelRateSetDTO
+  overrides: AgentModelPricingOverrideDTO[]
+  multipliers: AgentModelPricingMultiplierDTO[]
 }
 
 /** Variant 表达 reasoning effort 与厂商原生协议请求选项；`off` 为显式关闭，缺省表示协议默认。 */
@@ -86,44 +156,98 @@ export interface AgentModelVariantDTO {
 export interface AgentModelConfigDTO {
   limit: AgentModelLimitDTO
   abilities: AgentModelAbilitiesDTO
-  pricing: AgentModelPricingDTO
+  pricing: AgentModelPricingDefinitionDTO
   defaultVariant: string
   variants: AgentModelVariantDTO[]
 }
 
-/** 携带单一结构化可执行配置的公开 Agent model 资源。 */
+/** 组成员引用具体逻辑 Model 与 Variant；组本身不定义 Variant 或价格。 */
+export interface AgentModelGroupMemberDTO {
+  modelName: string
+  variant: string
+}
+
+/** 组的固定选择配置；成员顺序即 Fill First 顺序。 */
+export interface AgentModelGroupConfigDTO {
+  members: AgentModelGroupMemberDTO[]
+  fallbackStatusCodes: number[]
+  cooldownSeconds: number
+}
+
+export type AgentModelKind = 'MODEL' | 'GROUP'
+
+/**
+ * 统一 AgentModel 资源：MODEL 携带 Provider/ModelID/config，GROUP 携带有序成员配置。
+ * 名称为全局唯一逻辑名；GROUP 响应中的 config 只是派生能力摘要，不能回写为组价格。
+ */
 export interface AgentModelDTO {
-  providerName: string
-  /** 模型逻辑名。 */
+  /** 全局唯一逻辑名；也是 Agent/Thread/聊天的统一引用。 */
   name: string
-  /** 发往上游 Provider 的真实模型标识；与 name 独立且不唯一。 */
-  modelId: string
+  kind: AgentModelKind
   description: string | null
-  config: AgentModelConfigDTO
+  providerName?: string | null
+  /** 发往上游 Provider 的真实模型标识；只属于 MODEL。 */
+  modelId?: string | null
+  /** MODEL 的完整配置；GROUP 的派生摘要可能缺省。 */
+  config?: AgentModelConfigDTO | null
+  /** 仅 GROUP 存在。 */
+  group?: AgentModelGroupConfigDTO | null
   version: CatalogVersion
   createTime: InstantTimestamp
   updateTime: InstantTimestamp
 }
 
 /**
- * Agent model 的可编辑部分。前端发送完整替换：发出请求体时 {@code name}、
- * {@code modelId}、{@code description} 与 {@code config} 均为必需字段。
+ * Agent model 的可编辑部分。前端发送完整替换；MODEL 必须携带
+ * providerName/modelId/config 且不得携带 group，GROUP 必须携带 group 且不得携带单模型字段。
  */
 export interface AgentModelEditablePropertiesDTO {
-  /** 模型逻辑名。 */
   name: string
-  /** 发往上游 Provider 的真实模型标识。 */
-  modelId: string
+  kind: AgentModelKind
   description: string | null
-  config: AgentModelConfigDTO
+  providerName?: string | null
+  modelId?: string | null
+  config?: AgentModelConfigDTO | null
+  group?: AgentModelGroupConfigDTO | null
 }
 
-export interface AgentModelCreateDTO extends AgentModelEditablePropertiesDTO {
-  providerName: string
-}
+export interface AgentModelCreateDTO extends AgentModelEditablePropertiesDTO {}
 
 export interface AgentModelUpdateDTO extends AgentModelEditablePropertiesDTO {
   expectedVersion: CatalogVersion
+}
+
+/** 系统设置中的目录来源；只在新模型参数候选区读取展示。 */
+export type ModelCatalogSource = 'models_dev_v2' | 'models_dev_v1'
+
+/** 目录候选；缺能力/limit 表示未知，明确的 false 才是有效能力事实。 */
+export interface ModelDefaultCandidateDTO {
+  id: string
+  provider: string
+  modelId: string
+  name: string
+  limit?: { context?: number; output?: number } | null
+  abilities?: {
+    tools?: boolean
+    reasoning?: boolean
+    inputModalities?: AgentModelInputModality[]
+  } | null
+  pricing?: AgentModelPricingDefinitionDTO | null
+  variants?: AgentModelVariantDTO[] | null
+  defaultVariant?: string | null
+  supportIssues: string[]
+  pricingSupported: boolean
+}
+
+/** GET/POST /ai/catalog/model-defaults 的分页响应；generation 用于丢弃迟到混源结果。 */
+export interface ModelDefaultsPageDTO {
+  source: ModelCatalogSource
+  generation: string
+  fetchedAt?: InstantTimestamp
+  loading: boolean
+  error?: string | null
+  items: ModelDefaultCandidateDTO[]
+  nextCursor?: string | null
 }
 
 export interface SkillRefDTO {

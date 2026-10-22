@@ -18,7 +18,7 @@ function sampleDebug(overrides: Partial<ThreadModelRequestDebugData> = {}): Thre
   return {
     kind: 'NEXT_REQUEST_PREVIEW',
     generatedAt: '2026-09-21T00:00:00.000Z',
-    model: { providerName: 'minimax', modelName: 'MiniMax-M2.7', variant: 'default' },
+    model: { modelName: 'MiniMax-M2.7', variant: 'default' },
     environmentName: 'dev-node',
     systemInstruction: 'System prompt content with instructions',
     tools: [

@@ -10,7 +10,7 @@ import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider
 import fun.fengwk.kkstudio.platform.error.AiInUseException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 
-/** 解析全局 model 与 provider 引用。 */
+/** 解析全局模型与 Provider 引用。 */
 @AllArgsConstructor
 @Component
 final class AgentModelReferenceResolver {
@@ -21,16 +21,16 @@ final class AgentModelReferenceResolver {
   private final AgentModelRepository agentModelRepository;
   private final AgentProviderRepository agentProviderRepository;
 
-  AgentModel requireModel(String providerName, String name) {
-    AgentModel model = agentModelRepository.getByProviderNameAndName(providerName, name);
+  AgentModel requireModel(String name) {
+    AgentModel model = agentModelRepository.getByName(name);
     if (model == null) {
       throw new AiResourceNotFoundException(MODEL_RESOURCE);
     }
     return model;
   }
 
-  AgentModel requireModelForUpdate(String providerName, String name) {
-    AgentModel model = agentModelRepository.getByProviderNameAndNameForUpdate(providerName, name);
+  AgentModel requireModelForUpdate(String name) {
+    AgentModel model = agentModelRepository.getByNameForUpdate(name);
     if (model == null) {
       throw new AiResourceNotFoundException(MODEL_RESOURCE);
     }
@@ -53,10 +53,13 @@ final class AgentModelReferenceResolver {
     return provider;
   }
 
-  void ensureDeletable(String providerName, String name) {
-    if (agentModelRepository.hasAgents(providerName, name)) {
+  void ensureDeletable(String name) {
+    if (agentModelRepository.hasAgents(name)) {
+      throw new AiInUseException(MODEL_RESOURCE, MODEL_RESOURCE + " in use by agents: " + name);
+    }
+    if (agentModelRepository.hasGroupsReferencing(name)) {
       throw new AiInUseException(
-          MODEL_RESOURCE, MODEL_RESOURCE + " in use by agents: " + providerName + "/" + name);
+          MODEL_RESOURCE, MODEL_RESOURCE + " in use by model groups: " + name);
     }
   }
 }

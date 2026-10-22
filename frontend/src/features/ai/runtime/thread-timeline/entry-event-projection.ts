@@ -8,7 +8,7 @@ import { translate } from '@/shared/i18n'
 
 export type SettingsSnapshot = {
   agentName: string
-  model: { providerName: string; modelName: string; variant: string }
+  model: { modelName: string; variant: string | null }
   environmentName: string | null
 }
 
@@ -22,17 +22,16 @@ export function parseSettingsSnapshot(value: unknown): SettingsSnapshot | null {
   const valid = (field: unknown): field is string =>
     typeof field === 'string' && field.trim().length > 0
   if (
-    !valid(settings.agentName) || !valid(selection.providerName)
-    || !valid(selection.modelName) || !valid(selection.variant)
+    !valid(settings.agentName) || !valid(selection.modelName)
+    || !(selection.variant === undefined || selection.variant === null || valid(selection.variant))
     || !Object.hasOwn(settings, 'environmentName')
     || !(settings.environmentName === null || valid(settings.environmentName))
   ) return null
   return {
     agentName: settings.agentName,
     model: {
-      providerName: selection.providerName,
       modelName: selection.modelName,
-      variant: selection.variant,
+      variant: typeof selection.variant === 'string' ? selection.variant : null,
     },
     environmentName: settings.environmentName,
   }
@@ -47,11 +46,7 @@ export function projectRootSettings(
     'root',
     translate('ai.runtime.entry.rootSettings', {
       agent: settings.agentName,
-      model: formatModelLabel(
-        settings.model.providerName,
-        settings.model.modelName,
-        settings.model.variant,
-      ),
+      model: formatModelLabel(settings.model.modelName, settings.model.variant),
       environment: settings.environmentName ?? translate('ai.runtime.entry.noEnvironment'),
     }),
     '',
@@ -74,16 +69,11 @@ export function projectSettingsChanges(
     }), ''), id: `entry:${entry.entryId}:agent` })
   }
   if (
-    before.model.providerName !== after.model.providerName
-    || before.model.modelName !== after.model.modelName
-    || before.model.variant !== after.model.variant
+    before.model.modelName !== after.model.modelName
+    || (before.model.variant ?? null) !== (after.model.variant ?? null)
   ) {
     changes.push({ ...event(entry, 'settings_change', translate('ai.runtime.entry.modelChanged', {
-      model: formatModelLabel(
-        after.model.providerName,
-        after.model.modelName,
-        after.model.variant,
-      ),
+      model: formatModelLabel(after.model.modelName, after.model.variant),
     }), ''), id: `entry:${entry.entryId}:model` })
   }
   if (before.environmentName !== after.environmentName) {

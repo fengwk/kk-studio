@@ -13,22 +13,21 @@ const thread: HarnessThreadDTO = {
   nextCommandSequence: '1', version: '1', status: 'IDLE', processing: false,
   executionControl: 'RUNNABLE', createTime: null, updateTime: null,
   branchSettings: {
-    agentName: 'researcher', model: { providerName: 'provider', modelName: 'model', variant: 'deep' },
+    agentName: 'researcher', model: { modelName: 'model', variant: 'deep' },
     environmentName: null, goal: null,
   },
 }
 const model: AgentModelDTO = {
-  providerName: 'provider', name: 'model', modelId: 'actual-model', description: null,
+  providerName: 'provider', kind: 'MODEL', name: 'model', modelId: 'actual-model', description: null,
   version: '1', createTime: null, updateTime: null,
   config: {
     limit: { context: 10000, output: 1000 },
     abilities: { tools: true, reasoning: true, inputModalities: ['TEXT'] },
     defaultVariant: 'deep', variants: [{ id: 'deep', reasoningEffort: 'high' }],
     pricing: {
-      currency: 'USD', pricingTier: 'default', serviceTier: 'default', serviceTierMultiplier: 1,
-      version: '1', inputPerMillionTokens: 1, outputPerMillionTokens: 1,
-      cacheReadPerMillionTokens: 1, cacheWritePerMillionTokens: 1,
-      cacheWriteLongPerMillionTokens: 1, reasoningPerMillionTokens: 1,
+      base: { input: '1', output: '1', cacheRead: '1', cacheWrite: '1', cacheWriteByTtl: {}, reasoning: null },
+      overrides: [],
+      multipliers: [],
     },
   },
 }
@@ -52,7 +51,7 @@ describe('visible thread presentation', () => {
 
   it('uses the real branch variant as identity without consulting catalog reasoning facts', () => {
     // 身份只来自 branch settings 快照，catalog 未加载（无 models）也不改变结果。
-    expect(threadIdentity({ thread })).toBe('researcher · provider/model (deep)')
+    expect(threadIdentity({ thread })).toBe('researcher · model (deep)')
     expect(threadIdentity({ thread: undefined })).toBeNull()
     // 在运行时边界注入非法 null，验证空值保护。
     expect(Reflect.apply(threadIdentity, undefined, [{ thread: null }])).toBeNull()
@@ -62,10 +61,10 @@ describe('visible thread presentation', () => {
         ...thread,
         branchSettings: {
           ...thread.branchSettings,
-          model: { providerName: 'provider', modelName: 'model', variant: '  ' },
+          model: { modelName: 'model', variant: '  ' },
         },
       },
-    })).toBe('researcher · provider/model')
+    })).toBe('researcher · model')
   })
 
   it('reports only selected views and keeps callbacks stable without render loops', () => {
@@ -142,7 +141,7 @@ describe('visible thread presentation', () => {
     expect(result.current.parentHref).toBe('/threads/parent')
     render(<MemoryRouter><ThreadPresentationActions view={result.current} /></MemoryRouter>)
     expect(screen.getByRole('link', { name: '回到父 agent' })).toHaveAttribute('href', '/threads/parent')
-    expect(screen.getByText('researcher · provider/model (deep)')).toHaveAttribute('title', 'researcher · provider/model (deep)')
+    expect(screen.getByText('researcher · model (deep)')).toHaveAttribute('title', 'researcher · model (deep)')
     trigger.remove()
   })
 
@@ -175,9 +174,9 @@ describe('visible thread presentation', () => {
       ...initial, projection: { ...initial.projection, thread: { ...thread, name: 'main' } },
     } })
     expect(result.current.name).toBeNull()
-    expect(result.current.identity).toBe('researcher · provider/model (deep)')
+    expect(result.current.identity).toBe('researcher · model (deep)')
     rerender({ ...initial, projection: { models: [], thread: { ...thread, name: 'main' } } })
-    expect(result.current.identity).toBe('researcher · provider/model (deep)')
+    expect(result.current.identity).toBe('researcher · model (deep)')
   })
 
   it('offers only direct-parent navigation, never topbar Debug or subagent actions', () => {

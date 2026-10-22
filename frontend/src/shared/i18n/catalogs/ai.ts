@@ -37,6 +37,10 @@ export const aiCatalog = {
     'en-US': 'Model',
     'zh-CN': 'Model',
   },
+  'ai.catalog.resourceType.modelGroup': {
+    'en-US': 'Model Group',
+    'zh-CN': '模型组',
+  },
   'ai.catalog.resourceType.provider': {
     'en-US': 'Provider',
     'zh-CN': 'Provider',
@@ -310,8 +314,156 @@ export const aiCatalog = {
     'zh-CN': 'Name',
   },
   'ai.catalog.form.nameHint': {
-    'en-US': 'Logical identity used by Agents and branch settings.',
-    'zh-CN': '逻辑标识，供 Agent 与分支配置引用。',
+    'en-US': 'Globally unique logical name shared by Models and Model Groups.',
+    'zh-CN': '全局唯一逻辑名，单 Model 与模型组共享同一名称空间。',
+  },
+  'ai.catalog.form.groupNameHint': {
+    'en-US': 'Globally unique logical name shared with Models.',
+    'zh-CN': '与单 Model 共享的全局唯一逻辑名。',
+  },
+  'ai.catalog.form.modelKind': {
+    'en-US': 'Resource type',
+    'zh-CN': '资源类型',
+  },
+  'ai.catalog.form.groupDescriptionPlaceholder': {
+    'en-US': 'Ordered fallback for coding tasks',
+    'zh-CN': '按序降级的编码模型组合',
+  },
+  'ai.catalog.form.groupMembers': {
+    'en-US': 'Model list',
+    'zh-CN': '模型列表',
+  },
+  'ai.catalog.form.addGroupMember': {
+    'en-US': 'Add model',
+    'zh-CN': '添加模型',
+  },
+  'ai.catalog.form.groupMemberModel': {
+    'en-US': 'Member model {{index}}',
+    'zh-CN': '成员模型 {{index}}',
+  },
+  'ai.catalog.form.groupMemberModelPlaceholder': {
+    'en-US': 'Select a Model',
+    'zh-CN': '选择 Model',
+  },
+  'ai.catalog.form.groupMemberVariant': {
+    'en-US': 'Member variant {{index}}',
+    'zh-CN': '成员 Variant {{index}}',
+  },
+  'ai.catalog.form.groupMemberVariantPlaceholder': {
+    'en-US': 'Select a Variant',
+    'zh-CN': '选择 Variant',
+  },
+  'ai.catalog.form.moveGroupMemberUp': {
+    'en-US': 'Move member up',
+    'zh-CN': '成员上移',
+  },
+  'ai.catalog.form.moveGroupMemberDown': {
+    'en-US': 'Move member down',
+    'zh-CN': '成员下移',
+  },
+  'ai.catalog.form.removeGroupMember': {
+    'en-US': 'Remove member {{index}}',
+    'zh-CN': '删除成员 {{index}}',
+  },
+  'ai.catalog.form.noGroupModels': {
+    'en-US': 'No Models yet. Create one on the Models page first.',
+    'zh-CN': '暂无模型，请先在模型页创建',
+  },
+  'ai.catalog.form.groupMembersRequired': {
+    'en-US': 'Add at least one model',
+    'zh-CN': '请至少添加一个模型',
+  },
+  'ai.catalog.form.groupSummaryAbilities': {
+    'en-US': 'Shared abilities',
+    'zh-CN': '共同能力',
+  },
+  'ai.catalog.form.fallbackStatusCodes': {
+    'en-US': 'Immediate fallback status codes',
+    'zh-CN': '立即降级状态码',
+  },
+  'ai.catalog.form.fallbackStatusCodesPlaceholder': {
+    'en-US': 'Type a status code...',
+    'zh-CN': '输入状态码...',
+  },
+  'ai.catalog.form.fallbackStatusCodesHint': {
+    'en-US': 'HTTP 400–599. Matching responses immediately move to the next member.',
+    'zh-CN': 'HTTP 400–599；命中后立即切换到下一成员。',
+  },
+  'ai.catalog.form.cooldownSeconds': {
+    'en-US': 'Cooldown time',
+    'zh-CN': '冷却时间',
+  },
+  'ai.catalog.form.cooldownHint': {
+    'en-US': '0: skip only for this call; no cooldown is stored.',
+    'zh-CN': '0：仅本次降级，不保存冷却状态。',
+  },
+  'ai.catalog.card.provider': {
+    'en-US': 'Provider',
+    'zh-CN': 'Provider',
+  },
+  'ai.catalog.card.groupMembers': {
+    'en-US': 'Model list',
+    'zh-CN': '模型列表',
+  },
+  'ai.catalog.card.moreMembers': {
+    'en-US': '+{{count}} more',
+    'zh-CN': '另 {{count}} 个',
+  },
+  'ai.catalog.card.fallbackStatusCodes': {
+    'en-US': 'Immediate fallback codes',
+    'zh-CN': '立即降级码',
+  },
+  'ai.catalog.card.cooldownSeconds': {
+    'en-US': 'Cooldown',
+    'zh-CN': '冷却时间',
+  },
+  'ai.catalog.catalog.title': {
+    'en-US': 'Catalog defaults',
+    'zh-CN': '目录默认参数',
+  },
+  'ai.catalog.catalog.open': {
+    'en-US': 'Get default model parameters',
+    'zh-CN': '获取默认模型参数',
+  },
+  'ai.catalog.catalog.hide': {
+    'en-US': 'Hide catalog defaults',
+    'zh-CN': '收起目录默认参数',
+  },
+  'ai.catalog.catalog.searchPlaceholder': {
+    'en-US': 'Search catalog models...',
+    'zh-CN': '搜索目录模型...',
+  },
+  'ai.catalog.catalog.refresh': {
+    'en-US': 'Refresh',
+    'zh-CN': '刷新',
+  },
+  'ai.catalog.catalog.retry': {
+    'en-US': 'Retry',
+    'zh-CN': '重试',
+  },
+  'ai.catalog.catalog.fill': {
+    'en-US': 'Fill',
+    'zh-CN': '一键填入',
+  },
+  'ai.catalog.catalog.empty': {
+    'en-US': 'No matching catalog models.',
+    'zh-CN': '没有匹配的目录模型。',
+  },
+  'ai.catalog.catalog.loadMore': {
+    'en-US': 'Load more',
+    'zh-CN': '加载更多',
+  },
+  'ai.catalog.catalog.noVariants': {
+    'en-US': 'No importable Variants',
+    'zh-CN': '无可导入 Variant',
+  },
+  'ai.catalog.catalog.unsupportedPricing': {
+    'en-US': 'Pricing is not fully supported; existing prices are kept.',
+    'zh-CN': '价格未完整支持；保留现有价格。',
+  },
+  'ai.catalog.catalog.priceSummary': {
+    'en-US': 'in {{input}} / out {{output}} / read {{cacheRead}} / write {{cacheWrite}} · {{overrides}} overrides · {{multipliers}} multipliers',
+    'zh-CN': '输入 {{input}} / 输出 {{output}} / 缓存读 {{cacheRead}} / 缓存写 {{cacheWrite}} · 覆盖 {{overrides}} · 倍率 {{multipliers}}',
   },
   'ai.catalog.form.modelId': {
     'en-US': 'Model ID',
@@ -600,9 +752,196 @@ export const aiCatalog = {
     'zh-CN': '模型可接受的输入模态；至少保留一种（不能全部取消）。',
   },
   'ai.catalog.form.priceHint': {
-    'en-US': 'Price is USD per million tokens. Currency is fixed to USD.',
-    'zh-CN': '单价为 USD / 百万 tokens。币种固定 USD。',
+    'en-US': 'Price is USD per million tokens. Missing prices default to 0; rules use inheritance when left blank.',
+    'zh-CN': '单价为 USD / 百万 tokens；缺省价格按 0 计，规则留空表示继承。',
   },
+  'ai.catalog.form.reasoningPricing': {
+    'en-US': 'Independent reasoning pricing',
+    'zh-CN': '思考独立定价',
+  },
+  'ai.catalog.form.reasoningPricingHint': {
+    'en-US': 'Unchecked: reasoning follows output price. Checked: enter a separate price, including 0.',
+    'zh-CN': '未勾选：思考价跟随输出价；勾选后可输入独立单价，允许 0。',
+  },
+  'ai.catalog.form.cacheWriteTtl': {
+    'en-US': 'Cache write TTL overrides',
+    'zh-CN': '缓存写入 TTL 覆盖',
+  },
+  'ai.catalog.form.overrideTtl': {
+    'en-US': 'Override cache write TTL',
+    'zh-CN': '覆盖缓存写入 TTL',
+  },
+  'ai.catalog.form.overrideTtlHint': {
+    'en-US': 'Unchecked inherits the base map; checked replaces it. An empty map explicitly clears inherited TTL prices.',
+    'zh-CN': '未勾选继承基础映射；勾选后整体替换。显式空映射用于清空继承的 TTL 价格。',
+  },
+  'ai.catalog.form.ttlSeconds': {
+    'en-US': 'TTL seconds',
+    'zh-CN': 'TTL 秒数',
+  },
+  'ai.catalog.form.ttlRate': {
+    'en-US': 'TTL cache write price',
+    'zh-CN': 'TTL 缓存写入价',
+  },
+  'ai.catalog.form.addTtl': {
+    'en-US': 'Add TTL override',
+    'zh-CN': '添加 TTL 覆盖',
+  },
+  'ai.catalog.form.removeTtl': {
+    'en-US': 'Remove TTL override',
+    'zh-CN': '删除 TTL 覆盖',
+  },
+  'ai.catalog.form.priceOverrides': {
+    'en-US': 'Price overrides',
+    'zh-CN': '价格覆盖',
+  },
+  'ai.catalog.form.addPriceOverride': {
+    'en-US': 'Add price override',
+    'zh-CN': '添加价格覆盖',
+  },
+  'ai.catalog.form.priceMultipliers': {
+    'en-US': 'Price multipliers',
+    'zh-CN': '价格倍率',
+  },
+  'ai.catalog.form.addPriceMultiplier': {
+    'en-US': 'Add price multiplier',
+    'zh-CN': '添加价格倍率',
+  },
+  'ai.catalog.form.noPriceRules': {
+    'en-US': 'No rules',
+    'zh-CN': '暂无规则',
+  },
+  'ai.catalog.form.moveRuleUp': {
+    'en-US': 'Move rule up',
+    'zh-CN': '规则上移',
+  },
+  'ai.catalog.form.moveRuleDown': {
+    'en-US': 'Move rule down',
+    'zh-CN': '规则下移',
+  },
+  'ai.catalog.form.removeRule': {
+    'en-US': 'Remove rule',
+    'zh-CN': '删除规则',
+  },
+  'ai.catalog.form.overrideRates': {
+    'en-US': 'Override rates',
+    'zh-CN': '覆盖费率',
+  },
+  'ai.catalog.form.inheritPlaceholder': {
+    'en-US': 'Inherit',
+    'zh-CN': '继承',
+  },
+  'ai.catalog.form.overrideField': {
+    'en-US': 'Override {{label}}',
+    'zh-CN': '覆盖 {{label}}',
+  },
+  'ai.catalog.form.multiplierFactors': {
+    'en-US': 'Multiplier factors',
+    'zh-CN': '倍率因子',
+  },
+  'ai.catalog.form.multiplierField': {
+    'en-US': 'Multiplier {{label}}',
+    'zh-CN': '倍率 {{label}}',
+  },
+  'ai.catalog.form.condition': {
+    'en-US': 'Condition',
+    'zh-CN': '条件',
+  },
+  'ai.catalog.form.addCondition': {
+    'en-US': 'Add condition',
+    'zh-CN': '添加条件',
+  },
+  'ai.catalog.form.removeCondition': {
+    'en-US': 'Remove {{label}}',
+    'zh-CN': '删除 {{label}}',
+  },
+  'ai.catalog.form.removeNestedCondition': {
+    'en-US': 'Remove nested condition',
+    'zh-CN': '删除子条件',
+  },
+  'ai.catalog.form.conditionContext': {
+    'en-US': 'Context tokens',
+    'zh-CN': '上下文 token',
+  },
+  'ai.catalog.form.conditionServiceTier': {
+    'en-US': 'Service tier',
+    'zh-CN': '服务档位',
+  },
+  'ai.catalog.form.conditionDate': {
+    'en-US': 'Date',
+    'zh-CN': '日期',
+  },
+  'ai.catalog.form.conditionTime': {
+    'en-US': 'Time',
+    'zh-CN': '时间',
+  },
+  'ai.catalog.form.condition.all': {
+    'en-US': 'All of',
+    'zh-CN': '全部满足',
+  },
+  'ai.catalog.form.condition.any': {
+    'en-US': 'Any of',
+    'zh-CN': '任一满足',
+  },
+  'ai.catalog.form.condition.not': {
+    'en-US': 'Not',
+    'zh-CN': '取反',
+  },
+  'ai.catalog.form.add.all': {
+    'en-US': 'Add all-of condition',
+    'zh-CN': '添加全部满足子条件',
+  },
+  'ai.catalog.form.add.any': {
+    'en-US': 'Add any-of condition',
+    'zh-CN': '添加任一满足子条件',
+  },
+  'ai.catalog.form.context.gt': {
+    'en-US': 'Greater than',
+    'zh-CN': '大于',
+  },
+  'ai.catalog.form.context.gte': {
+    'en-US': 'At least',
+    'zh-CN': '大于等于',
+  },
+  'ai.catalog.form.context.lt': {
+    'en-US': 'Less than',
+    'zh-CN': '小于',
+  },
+  'ai.catalog.form.context.lte': {
+    'en-US': 'At most',
+    'zh-CN': '小于等于',
+  },
+  'ai.catalog.form.dateFrom': {
+    'en-US': 'Date from',
+    'zh-CN': '起始日期',
+  },
+  'ai.catalog.form.dateBefore': {
+    'en-US': 'Before date',
+    'zh-CN': '截止日期（不含）',
+  },
+  'ai.catalog.form.timeStart': {
+    'en-US': 'Start time',
+    'zh-CN': '开始时间',
+  },
+  'ai.catalog.form.timeEnd': {
+    'en-US': 'End time',
+    'zh-CN': '结束时间',
+  },
+  'ai.catalog.form.timeZone': {
+    'en-US': 'IANA time zone',
+    'zh-CN': 'IANA 时区',
+  },
+  'ai.catalog.form.timeHint': {
+    'en-US': 'Use HH:mm. End may be 24:00; 00:00-24:00 means all day, and start must differ from end.',
+    'zh-CN': '格式 HH:mm；结束时间可为 24:00，00:00-24:00 表示全天，开始与结束不能相同。',
+  },
+  'ai.catalog.form.weekday.1': { 'en-US': 'Mon', 'zh-CN': '周一' },
+  'ai.catalog.form.weekday.2': { 'en-US': 'Tue', 'zh-CN': '周二' },
+  'ai.catalog.form.weekday.3': { 'en-US': 'Wed', 'zh-CN': '周三' },
+  'ai.catalog.form.weekday.4': { 'en-US': 'Thu', 'zh-CN': '周四' },
+  'ai.catalog.form.weekday.5': { 'en-US': 'Fri', 'zh-CN': '周五' },
+  'ai.catalog.form.weekday.6': { 'en-US': 'Sat', 'zh-CN': '周六' },
+  'ai.catalog.form.weekday.7': { 'en-US': 'Sun', 'zh-CN': '周日' },
   'ai.catalog.form.priceAriaLabel': {
     'en-US': '{{label}} USD per million tokens',
     'zh-CN': '{{label}} USD per million tokens',
@@ -807,6 +1146,10 @@ export const aiCatalog = {
   'ai.catalog.validation.agentModel': {
     'en-US': 'Select a Model',
     'zh-CN': '请选择 Model',
+  },
+  'ai.catalog.validation.groupMembers': {
+    'en-US': 'Add at least one model',
+    'zh-CN': '请至少添加一个模型',
   },
   'ai.chat.create': {
     'en-US': 'Create Chat',

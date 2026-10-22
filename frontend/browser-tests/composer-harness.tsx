@@ -6,13 +6,17 @@ import { hasBlockingModal } from '@/shared/ui/blocking-overlay'
 import { ThreadComposer, type ThreadComposerHandle } from '@/features/ai/runtime/thread-panel/ThreadComposer'
 import { THREAD_COMMANDS, type ThreadCommand } from '@/features/ai/runtime/thread-panel/thread-commands'
 import type { ComposerPart } from '@/features/ai/composer/composer-parts'
-import type { ThreadComposerSettingsInput } from '@/features/ai/runtime/thread-panel/ThreadComposerControls'
+import type {
+  ThreadComposerModelOption,
+  ThreadComposerModelSelection,
+  ThreadComposerSettingsInput,
+} from '@/features/ai/runtime/thread-panel/ThreadComposerControls'
 
 setLocale('zh-CN')
 
-const INITIAL_MODELS = [
+const INITIAL_MODELS: readonly ThreadComposerModelOption[] = [
   {
-    providerName: 'minimax',
+    kind: 'MODEL',
     name: 'MiniMax-M2.7',
     config: {
       defaultVariant: 'default',
@@ -20,7 +24,7 @@ const INITIAL_MODELS = [
     },
   },
   {
-    providerName: 'openai',
+    kind: 'MODEL',
     name: 'gpt-4o',
     config: {
       defaultVariant: 'default',
@@ -41,7 +45,7 @@ export function ComposerHarnessApp() {
   const pane1ComposerRef = useRef<ThreadComposerHandle | null>(null)
 
   const [yoloEnabled, setYoloEnabled] = useState(false)
-  const [model, setModel] = useState({ providerName: 'minimax', modelName: 'MiniMax-M2.7', variant: 'default' })
+  const [model, setModel] = useState<ThreadComposerModelSelection>({ modelName: 'MiniMax-M2.7', variant: 'default' })
   const [environmentName, setEnvironmentName] = useState<string | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
   const [lastCommand, setLastCommand] = useState<string | null>(null)

@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.node.JsonNodeFactory;
 
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
@@ -39,7 +40,15 @@ class ModelInvocationTransitionTest {
   private static ModelAttemptFailure failure(int attempt) {
     Instant failedAt = CREATED.plusSeconds(attempt * 2L);
     return new ModelAttemptFailure(
-        attempt, attempt, "partial-" + attempt, "", error(), failedAt, failedAt.plusSeconds(1));
+        attempt,
+        attempt,
+        "partial-" + attempt,
+        "",
+        ModelSelection.model("model", "v1"),
+        null,
+        error(),
+        failedAt,
+        failedAt.plusSeconds(1));
   }
 
   private static ModelInvocation ready(int attempt) {
@@ -298,7 +307,15 @@ class ModelInvocationTransitionTest {
 
     ModelAttemptFailure rewritten =
         new ModelAttemptFailure(
-            1, 9, "rewritten", "", error(), failure(1).failedAt(), failure(1).retryAt());
+            1,
+            9,
+            "rewritten",
+            "",
+            ModelSelection.model("model", "v1"),
+            null,
+            error(),
+            failure(1).failedAt(),
+            failure(1).retryAt());
     ModelInvocation rewrittenHistory =
         new ModelInvocation(
             secondRetry.id(),

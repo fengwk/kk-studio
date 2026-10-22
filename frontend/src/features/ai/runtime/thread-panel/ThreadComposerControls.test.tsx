@@ -13,7 +13,7 @@ import {
 /** 测试用稳定模型目录：第一项多 variant（走二级菜单），第二项单 variant（直接选中）。 */
 const MODELS: readonly ThreadComposerModelOption[] = [
   {
-    providerName: 'minimax',
+    kind: 'MODEL',
     name: 'MiniMax',
     config: {
       defaultVariant: 'default',
@@ -21,7 +21,7 @@ const MODELS: readonly ThreadComposerModelOption[] = [
     },
   },
   {
-    providerName: 'openai',
+    kind: 'MODEL',
     name: 'gpt',
     config: {
       defaultVariant: 'fast',
@@ -32,7 +32,7 @@ const MODELS: readonly ThreadComposerModelOption[] = [
 
 function createSettings(overrides: Partial<ThreadComposerSettingsInput> = {}): ThreadComposerSettingsInput {
   return {
-    model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+    model: { modelName: 'MiniMax', variant: 'default' },
     models: MODELS,
     yoloEnabled: false,
     environmentName: null,
@@ -168,27 +168,27 @@ describe('ThreadComposerControls model/variant menus', () => {
     render(
       <Harness
         settings={createSettings({
-          model: { providerName: 'xai', modelName: 'grok-4.7', variant: 'xhigh' },
+          model: { modelName: 'grok-4.7', variant: 'xhigh' },
         })}
         menu={null}
       />,
     )
     const button = screen.getByRole('button', { name: 'Model 与 Variant' })
-    expect(button).toHaveTextContent('xai/grok-4.7 (xhigh)')
-    expect(button).toHaveAttribute('title', 'xai/grok-4.7 (xhigh)')
+    expect(button).toHaveTextContent('grok-4.7 (xhigh)')
+    expect(button).toHaveAttribute('title', 'grok-4.7 (xhigh)')
   })
 
   it('lists all models with current one marked', () => {
     renderOpen('model')
     expect(screen.getByRole('listbox', { name: 'Model 选项' })).toBeInTheDocument()
     const options = screen.getAllByRole('option')
-    expect(options.map((option) => option.textContent)).toEqual(['minimax/MiniMax', 'openai/gpt'])
-    expect(screen.getByRole('option', { name: 'minimax/MiniMax' })).toHaveAttribute(
+    expect(options.map((option) => option.textContent)).toEqual(['MiniMax', 'gpt'])
+    expect(screen.getByRole('option', { name: 'MiniMax' })).toHaveAttribute(
       'aria-current',
       'true',
     )
     // 当前选中项在列表中渲染 Check 图标，表明 aria-current 与视觉一致。
-    expect(screen.getByRole('option', { name: 'minimax/MiniMax' }).querySelector('svg')).not.toBeNull()
+    expect(screen.getByRole('option', { name: 'MiniMax' }).querySelector('svg')).not.toBeNull()
   })
 
   it('filters models by the search box query', async () => {
@@ -196,7 +196,7 @@ describe('ThreadComposerControls model/variant menus', () => {
     renderOpen('model')
     const search = screen.getByRole('searchbox', { name: '搜索模型' })
     await user.type(search, 'gpt')
-    expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual(['openai/gpt'])
+    expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual(['gpt'])
     await user.clear(search)
     expect(screen.getAllByRole('option')).toHaveLength(2)
   })
@@ -215,10 +215,9 @@ describe('ThreadComposerControls model/variant menus', () => {
   it('selects a single-variant model directly with the variant', async () => {
     const user = userEvent.setup()
     const { onMenuChange, settings } = renderOpen('model')
-    await user.click(screen.getByRole('option', { name: 'openai/gpt' }))
+    await user.click(screen.getByRole('option', { name: 'gpt' }))
     expect(settings.onModelChange).toHaveBeenCalledWith({
-      providerName: 'openai',
-      modelName: 'gpt',
+            modelName: 'gpt',
       variant: 'fast',
     })
     expect(onMenuChange).toHaveBeenCalledWith(null, true)
@@ -246,7 +245,7 @@ describe('ThreadComposerControls model/variant menus', () => {
     const settings = createLiveSettings((model) => selected.push(model))
     const view = renderOpen('model', settings)
     // 鼠标点击 multi-variant 模型进入二级菜单。
-    await user.click(screen.getByRole('option', { name: 'minimax/MiniMax' }))
+    await user.click(screen.getByRole('option', { name: 'MiniMax' }))
     expect(view.onMenuChange.mock.calls).toEqual([['variant', undefined]])
     // active 落在默认 variant（default）；ArrowDown 到 high 后 Enter 提交。
     const listbox = screen.getByRole('listbox', { name: 'Variant 选项' })
@@ -255,7 +254,7 @@ describe('ThreadComposerControls model/variant menus', () => {
       'true',
     )
     await user.keyboard('{ArrowDown}{Enter}')
-    expect(selected).toEqual([{ providerName: 'minimax', modelName: 'MiniMax', variant: 'high' }])
+    expect(selected).toEqual([{ modelName: 'MiniMax', variant: 'high' }])
     expect(view.onMenuChange.mock.calls).toEqual([
       ['variant', undefined],
       [null, true],
@@ -267,19 +266,19 @@ describe('ThreadComposerControls model/variant menus', () => {
     const selected: ThreadComposerModelSelection[] = []
     const settings = createLiveSettings((model) => selected.push(model))
     const view = renderOpen('model', settings)
-    // 初始 active 为当前 model（minimax/MiniMax）；ArrowDown 到 openai/gpt，
+    // 初始 active 为当前 model（MiniMax）；ArrowDown 到 gpt，
     // Enter 直接选中（单 variant 模型无需二级菜单）。
     await user.keyboard('{ArrowDown}{Enter}')
-    expect(selected).toEqual([{ providerName: 'openai', modelName: 'gpt', variant: 'fast' }])
+    expect(selected).toEqual([{ modelName: 'gpt', variant: 'fast' }])
     expect(view.onMenuChange.mock.calls).toEqual([[null, true]])
     view.unmount()
 
     // 重新挂载（关闭后的菜单回到 model 打开状态）验证 End 环绕行为。
     const second = renderOpen('model', createLiveSettings((model) => selected.push(model)))
-    // End 移到末尾项（openai/gpt），再 ArrowDown 环绕回第一项；Enter 应进入
+    // End 移到末尾项（gpt），再 ArrowDown 环绕回第一项；Enter 应进入
     // 二级菜单（multi-variant），而不是直接选中并关闭。
     await user.keyboard('{End}{ArrowDown}{Enter}')
-    expect(selected).toEqual([{ providerName: 'openai', modelName: 'gpt', variant: 'fast' }])
+    expect(selected).toEqual([{ modelName: 'gpt', variant: 'fast' }])
     expect(second.onMenuChange.mock.calls).toEqual([['variant', undefined]])
     // 键盘路径同样进入 Variant 列表，且初始 active 是当前 variant。
     const listbox = screen.getByRole('listbox', { name: 'Variant 选项' })
@@ -294,11 +293,31 @@ describe('ThreadComposerControls model/variant menus', () => {
       'variant',
       createSettings({
         // 当前 model 不在任何目录项中：variantTarget 取不到，菜单渲染空列表。
-        model: { providerName: 'unknown', modelName: 'ghost', variant: 'none' },
+        model: { modelName: 'ghost', variant: 'none' },
       }),
     )
     const listbox = screen.getByRole('listbox', { name: 'Variant 选项' })
     expect(within(listbox).queryAllByRole('option')).toHaveLength(0)
+  })
+
+  it('selects a Model Group immediately without a group-level variant submenu', async () => {
+    const user = userEvent.setup()
+    const settings = createSettings({
+      models: [
+        ...MODELS,
+        { kind: 'GROUP', name: 'fallback-group', config: null },
+      ],
+    })
+    const view = renderOpen('model', settings)
+
+    await user.click(screen.getByRole('option', { name: 'fallback-group' }))
+
+    expect(settings.onModelChange).toHaveBeenCalledWith({
+      modelName: 'fallback-group',
+      variant: null,
+    })
+    expect(view.onMenuChange.mock.calls).toEqual([[null, true]])
+    expect(screen.queryByRole('listbox', { name: 'Variant 选项' })).not.toBeInTheDocument()
   })
 
   it('returns to the model menu with Backspace and closes with Escape', async () => {
@@ -324,7 +343,7 @@ describe('ThreadComposerControls model/variant menus', () => {
       'variant',
       createSettings({
         // 当前 model 不在任何目录项中：variantTarget 为空，返回按钮显示通用 Model 文案。
-        model: { providerName: 'unknown', modelName: 'ghost', variant: 'none' },
+        model: { modelName: 'ghost', variant: 'none' },
       }),
     )
     expect(screen.getByRole('button', { name: 'Model' })).toBeInTheDocument()
@@ -367,12 +386,12 @@ describe('ThreadComposerControls disabled and empty states', () => {
     const settings = createSettings({
       models: [
         {
-          providerName: 'empty',
+          kind: 'MODEL',
           name: 'no-variants',
           config: { defaultVariant: 'x', variants: [] },
         },
         {
-          providerName: 'blank',
+          kind: 'MODEL',
           name: 'blank-variants',
           config: { defaultVariant: 'x', variants: [{ id: '   ' }] },
         },

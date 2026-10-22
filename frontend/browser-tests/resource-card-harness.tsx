@@ -126,6 +126,7 @@ if (rootEl) {
 
 const SAMPLE_MODEL: AgentModelView = {
   providerName: 'openai',
+  kind: 'MODEL',
   name: 'gpt-4o',
   modelId: 'gpt-4o',
   description: 'OpenAI 旗舰多模态思考与生成模型',
@@ -137,17 +138,9 @@ const SAMPLE_MODEL: AgentModelView = {
       inputModalities: ['TEXT', 'IMAGE'],
     },
     pricing: {
-      currency: 'USD',
-      pricingTier: 'default',
-      serviceTier: 'default',
-      serviceTierMultiplier: 1,
-      version: 'v1',
-      inputPerMillionTokens: 2.5,
-      outputPerMillionTokens: 10,
-      cacheReadPerMillionTokens: 1.25,
-      cacheWritePerMillionTokens: 2.5,
-      cacheWriteLongPerMillionTokens: 3.5,
-      reasoningPerMillionTokens: 10,
+      base: { input: '2.5', output: '10', cacheRead: '1.25', cacheWrite: '2.5', cacheWriteByTtl: {}, reasoning: null },
+      overrides: [],
+      multipliers: [],
     },
     defaultVariant: 'standard',
     variants: [
@@ -167,7 +160,7 @@ const LONG_MODEL: AgentModelView = {
   description:
     '这是一段较长的模型描述文本，用于验证卡片在拥有更多业务元数据、多个变体标签以及长说明时能够按内容自然撑开高度，而不会受到固定高度限制。',
   config: {
-    ...SAMPLE_MODEL.config,
+    ...SAMPLE_MODEL.config!,
     variants: [
       { id: 'variant-alpha-primary', reasoningEffort: 'HIGH' },
       { id: 'variant-beta-secondary', reasoningEffort: 'medium' },

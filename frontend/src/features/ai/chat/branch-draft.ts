@@ -6,7 +6,7 @@ import type {
   HarnessThreadCommandDTO,
   HarnessThreadDTO,
 } from '@/shared/api/contracts/ai-runtime'
-import { modelRef, type AgentModelView } from '@/features/ai/catalog'
+import type { AgentModelView } from '@/features/ai/catalog'
 import { parsePayload } from '@/features/ai/runtime/payload-json'
 
 /**
@@ -33,22 +33,27 @@ export function materializeBlankBranchDraft(
   if (!agent || !agent.model) {
     return null
   }
-  const model = models.find((item) => modelRef(item) === agent.model)
+  const model = models.find((item) => item.name === agent.model)
   if (!model) {
     return null
   }
-  const variantId = agent.variant || model.config.defaultVariant || ''
-  const variant = model.config.variants.find((item) => item.id === variantId)
+  if (model.kind === 'GROUP') {
+    // 组没有组级 Variant；成员的 Variant 已固化在组配置中。
+    return {
+      agentName: agent.name,
+      model: { modelName: model.name, variant: null },
+      environmentName: environmentName ?? null,
+      yoloEnabled,
+    }
+  }
+  const variantId = agent.variant || model.config?.defaultVariant || ''
+  const variant = model.config?.variants.find((item) => item.id === variantId)
   if (!variantId || !variant) {
     return null
   }
   return {
     agentName: agent.name,
-    model: {
-      providerName: model.providerName,
-      modelName: model.name,
-      variant: variantId,
-    },
+    model: { modelName: model.name, variant: variantId },
     environmentName: environmentName ?? null,
     yoloEnabled,
   }
@@ -96,9 +101,8 @@ export function branchDraftFromBranchSettings(
   return {
     agentName: settings.agentName,
     model: {
-      providerName: settings.model.providerName,
       modelName: settings.model.modelName,
-      variant: settings.model.variant,
+      variant: settings.model.variant ?? null,
     },
     environmentName: settings.environmentName,
     yoloEnabled,
@@ -107,9 +111,8 @@ export function branchDraftFromBranchSettings(
 
 export function branchDraftsEqual(left: BranchDraft, right: BranchDraft): boolean {
   return left.agentName === right.agentName
-    && left.model.providerName === right.model.providerName
     && left.model.modelName === right.model.modelName
-    && left.model.variant === right.model.variant
+    && (left.model.variant ?? null) === (right.model.variant ?? null)
     && left.environmentName === right.environmentName
     && left.yoloEnabled === right.yoloEnabled
 }
@@ -148,9 +151,8 @@ export function buildBranchDiffCommands(
 }
 
 function sameModelSelection(left: HarnessModelSelectionDTO, right: HarnessModelSelectionDTO): boolean {
-  return left.providerName === right.providerName
-    && left.modelName === right.modelName
-    && left.variant === right.variant
+  return left.modelName === right.modelName
+    && (left.variant ?? null) === (right.variant ?? null)
 }
 
 /**
@@ -186,9 +188,12 @@ function applySettingCommand(base: BranchDraft, command: HarnessThreadCommandDTO
         return {
           ...base,
           model: {
-            providerName: typeof record.providerName === 'string' ? record.providerName : base.model.providerName,
             modelName: typeof record.modelName === 'string' ? record.modelName : base.model.modelName,
-            variant: typeof record.variant === 'string' ? record.variant : base.model.variant,
+            variant: typeof record.variant === 'string'
+              ? record.variant
+              : record.variant === null
+                ? null
+                : (base.model.variant ?? null),
           },
         }
       }
