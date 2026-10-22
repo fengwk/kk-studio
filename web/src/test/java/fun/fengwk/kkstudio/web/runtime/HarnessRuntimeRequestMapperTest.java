@@ -1013,7 +1013,6 @@ class HarnessRuntimeRequestMapperTest {
 
   private static HarnessModelSelectionDTO modelSelection() {
     HarnessModelSelectionDTO selection = new HarnessModelSelectionDTO();
-    selection.setProviderName("openai");
     selection.setModelName("gpt-5");
     selection.setVariant("default");
     return selection;

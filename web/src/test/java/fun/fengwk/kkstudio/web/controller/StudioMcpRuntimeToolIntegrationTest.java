@@ -52,6 +52,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelAbilitiesDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelInputModality;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelLimitDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelRateSetDTO;
@@ -196,6 +197,7 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
         .andExpect(jsonPath("$.data.name").value(providerName));
 
     AgentModelCreateDTO modelDto = new AgentModelCreateDTO();
+    modelDto.setKind(AgentModelKind.MODEL);
     modelDto.setProviderName(providerName);
     modelDto.setName(configuredModelName);
     configureExecutableModel(modelDto);
@@ -215,7 +217,7 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
     invalidConfig.setSubagents(List.of());
     AgentDefinitionCreateDTO invalidAgent = new AgentDefinitionCreateDTO();
     invalidAgent.setName(agentName + "-invalid");
-    invalidAgent.setModel(providerName + "/" + configuredModelName);
+    invalidAgent.setModel(configuredModelName);
     invalidAgent.setVariant("default");
     invalidAgent.setConfig(invalidConfig);
 
@@ -234,7 +236,7 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
     validConfig.setSubagents(List.of());
     AgentDefinitionCreateDTO agentDto = new AgentDefinitionCreateDTO();
     agentDto.setName(agentName);
-    agentDto.setModel(providerName + "/" + configuredModelName);
+    agentDto.setModel(configuredModelName);
     agentDto.setVariant("default");
     agentDto.setConfig(validConfig);
 
@@ -253,8 +255,7 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
     UUID rootEntryId = UUID.randomUUID();
     Session session = new Session(sessionId, "session", now);
     BranchSettings branchSettings =
-        new BranchSettings(
-            agentName, new ModelSelection(providerName, configuredModelName, "default"), null);
+        new BranchSettings(agentName, new ModelSelection(configuredModelName, "default"), null);
     Entry rootEntry = new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings), now);
 
     harnessStore.transaction(

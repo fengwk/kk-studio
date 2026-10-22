@@ -219,7 +219,6 @@ class StudioHarnessThreadControllerTest {
         .andExpect(jsonPath("$.data[0].parentThreadId").value(nullValue()))
         .andExpect(jsonPath("$.data[0].outcome").hasJsonPath())
         .andExpect(jsonPath("$.data[0].outcome").value(nullValue()))
-        .andExpect(jsonPath("$.data[0].model.providerName").value("openai"))
         .andExpect(jsonPath("$.data[0].model.modelName").value("gpt-5"))
         .andExpect(jsonPath("$.data[0].turnCount").value(0))
         .andExpect(jsonPath("$.data[0].toolCallCount").value(0))
@@ -273,8 +272,7 @@ class StudioHarnessThreadControllerTest {
    */
   @Test
   void modelRequestDebugReturnsStructuredPreviewWithoutTouchingRuntime() throws Exception {
-    ModelSelection draftModel =
-        new ModelSelection("draft-model", "draft-variant");
+    ModelSelection draftModel = new ModelSelection("draft-model", "draft-variant");
     when(modelRequestDebugService.getModelRequestDebug(id(1), draftModel, "env-c"))
         .thenReturn(sampleDebug());
 
@@ -283,11 +281,10 @@ class StudioHarnessThreadControllerTest {
             post("/api/harness/threads/" + idText(1) + "/model-request-debug")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
-                    "{\"model\":{\"providerName\":\"draft-provider\",\"modelName\":\"draft-model\","
+                    "{\"model\":{\"modelName\":\"draft-model\","
                         + "\"variant\":\"draft-variant\"},\"environmentName\":\"env-c\"}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.kind").value("NEXT_REQUEST_PREVIEW"))
-        .andExpect(jsonPath("$.data.model.providerName").value("provider"))
         .andExpect(jsonPath("$.data.model.modelName").value("model"))
         .andExpect(jsonPath("$.data.model.variant").value("default"))
         .andExpect(jsonPath("$.data.environmentName").value(nullValue()))
@@ -328,7 +325,7 @@ class StudioHarnessThreadControllerTest {
             post("/api/harness/threads/" + idText(1) + "/model-request-debug")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
-                    "{\"model\":{\"providerName\":\"draft-provider\",\"modelName\":\"draft-model\","
+                    "{\"model\":{\"modelName\":\"draft-model\","
                         + "\"variant\":\"draft-variant\"},\"environmentName\":\"env-c\"}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.frozenInvocation.kind").value("FROZEN_INVOCATION"))
@@ -351,9 +348,7 @@ class StudioHarnessThreadControllerTest {
         .perform(
             post("/api/harness/threads/" + idText(1) + "/model-request-debug")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(
-                    "{\"model\":{\"providerName\":\"provider\",\"modelName\":\"model\","
-                        + "\"variant\":\"default\"}}"))
+                .content("{\"model\":{\"modelName\":\"model\"," + "\"variant\":\"default\"}}"))
         .andExpect(status().isOk());
 
     verify(modelRequestDebugService).getModelRequestDebug(id(1), draftModel, null);
@@ -367,9 +362,7 @@ class StudioHarnessThreadControllerTest {
         .perform(
             post("/api/harness/threads/" + idText(1) + "/model-request-debug")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(
-                    "{\"model\":{\"providerName\":\"\",\"modelName\":\"model\","
-                        + "\"variant\":\"default\"}}"))
+                .content("{\"model\":{\"modelName\":\"\"," + "\"variant\":\"default\"}}"))
         .andExpect(status().isBadRequest());
 
     mockMvc
@@ -377,7 +370,7 @@ class StudioHarnessThreadControllerTest {
             post("/api/harness/threads/" + idText(1) + "/model-request-debug")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
-                    "{\"model\":{\"providerName\":\"provider\",\"modelName\":\"model\","
+                    "{\"model\":{\"modelName\":\"model\","
                         + "\"variant\":\"default\"},\"environmentName\":\"bad/name\"}"))
         .andExpect(status().isBadRequest());
 
@@ -386,7 +379,7 @@ class StudioHarnessThreadControllerTest {
             post("/api/harness/threads/" + idText(1) + "/model-request-debug")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
-                    "{\"model\":{\"providerName\":\"provider\",\"modelName\":\"model\","
+                    "{\"model\":{\"modelName\":\"model\","
                         + "\"variant\":\"default\"},\"bogus\":1}"))
         .andExpect(status().isBadRequest());
 
@@ -401,9 +394,7 @@ class StudioHarnessThreadControllerTest {
         .perform(
             post("/api/harness/threads/not-a-uuid/model-request-debug")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(
-                    "{\"model\":{\"providerName\":\"provider\",\"modelName\":\"model\","
-                        + "\"variant\":\"default\"}}"))
+                .content("{\"model\":{\"modelName\":\"model\"," + "\"variant\":\"default\"}}"))
         .andExpect(status().isBadRequest());
 
     verifyNoInteractions(modelRequestDebugService);
@@ -432,9 +423,7 @@ class StudioHarnessThreadControllerTest {
         .perform(
             post("/api/harness/threads/" + idText(1) + "/model-request-debug")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(
-                    "{\"model\":{\"providerName\":\"provider\",\"modelName\":\"model\","
-                        + "\"variant\":\"default\"}}"))
+                .content("{\"model\":{\"modelName\":\"model\"," + "\"variant\":\"default\"}}"))
         .andExpect(status().isNotFound());
 
     verifyNoInteractions(runtime);
@@ -495,7 +484,6 @@ class StudioHarnessThreadControllerTest {
     debug.setKind("NEXT_REQUEST_PREVIEW");
     debug.setGeneratedAt(Instant.parse("2026-08-17T00:00:00Z"));
     HarnessModelSelectionDTO model = new HarnessModelSelectionDTO();
-    model.setProviderName("provider");
     model.setModelName("model");
     model.setVariant("default");
     debug.setModel(model);

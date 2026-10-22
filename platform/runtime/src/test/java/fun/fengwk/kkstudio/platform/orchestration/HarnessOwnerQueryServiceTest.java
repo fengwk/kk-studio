@@ -64,8 +64,7 @@ class HarnessOwnerQueryServiceTest {
   private static final Instant T4 = Instant.parse("2026-01-01T00:00:04Z");
   private static final Instant T5 = Instant.parse("2026-01-01T00:00:05Z");
   private static final BranchSettings ROOT_SETTINGS =
-      new BranchSettings(
-          "assistant", new ModelSelection("root-model", "default"), null);
+      new BranchSettings("assistant", new ModelSelection("root-model", "default"), null);
 
   private ChatRepository chatRepository;
   private ChatSessionRepository chatSessionRepository;
