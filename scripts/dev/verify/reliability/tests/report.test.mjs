@@ -83,7 +83,7 @@ test('report artifacts never repeat the 12KiB payload', () => {
       },
       preflight: {
         provider: { name: 'minimax', configured: true },
-        models: ['minimax/MiniMax-M2.7', 'minimax/MiniMax-M3'],
+        models: ['minimax/MiniMax-M2.7', 'minimax/MiniMax-M3-Responses'],
       },
       runError: null,
       systemPromptMeta: {
@@ -101,6 +101,11 @@ test('report artifacts never repeat the 12KiB payload', () => {
     assert.deepEqual(summary.configuration.toolNames, TOOL_NAMES)
     const report = readFileSync(path.join(runDir, 'report.md'), 'utf8')
     assert.match(report, /Model-visible tool names: `read, write, edit, bash, grep, find`/)
+    assert.match(
+      report,
+      /Models: `minimax\/MiniMax-M2\.7`, `minimax\/MiniMax-M3-Responses`; variant `high`/,
+    )
+    assert.match(report, /\| `minimax\/MiniMax-M3-Responses` \|/)
     for (const file of [
       path.join(runDir, 'artifacts/m27-pi-repair/trace.json'),
       path.join(runDir, 'summary.json'),

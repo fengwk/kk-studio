@@ -234,7 +234,7 @@ async function createTemporaryAgent(ctx, model, systemPrompt, runId, environment
     name,
     description: 'Temporary Docker reliability matrix agent.',
     systemPrompt,
-    model: model.ref,
+    model: model.modelName,
     variant: VARIANT,
     environmentId,
     config: {
@@ -249,7 +249,10 @@ async function createTemporaryAgent(ctx, model, systemPrompt, runId, environment
   const agent = envelopeData(json)
   assert(agent?.name === name, `created Agent identity mismatch: ${JSON.stringify(agent)}`)
   assert(agent.systemPrompt === systemPrompt, 'created Agent systemPrompt mismatch')
-  assert(agent.model === model.ref && agent.variant === VARIANT, 'created Agent model mismatch')
+  assert(
+    agent.model === model.modelName && agent.variant === VARIANT,
+    'created Agent model mismatch',
+  )
   assert(agent.environmentId === environmentId, 'created Agent environmentId mismatch')
   assert(
     JSON.stringify(agent.config) === JSON.stringify(body.config),
@@ -573,7 +576,6 @@ export function buildNewSessionRequest({ chat, agent, testCase, prompt }) {
     sessionId: cid(),
     threadId: cid(),
     rootSettings: branchSettingsOf(agent, {
-      providerName: testCase.model.providerName,
       modelName: testCase.model.modelName,
       variant: VARIANT,
     }),
@@ -604,11 +606,10 @@ export function assertThreadSettings(accepted, testCase, agentName) {
   assert(
     JSON.stringify(thread.branchSettings?.model)
       === JSON.stringify({
-        providerName: testCase.model.providerName,
         modelName: testCase.model.modelName,
         variant: VARIANT,
       }),
-    'Thread model selection mismatch',
+    `Thread ModelSelection mismatch: ${JSON.stringify(thread.branchSettings?.model)}`,
   )
   assert(
     Object.keys(thread.branchSettings ?? {}).sort().join(',')
