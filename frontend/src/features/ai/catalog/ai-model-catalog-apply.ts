@@ -13,7 +13,7 @@ export function applyCatalogCandidate(
   draft: ModelDraft,
   candidate: ModelDefaultCandidateDTO,
 ): ModelDraft {
-  let next: ModelDraft = { ...draft }
+  const next: ModelDraft = { ...draft }
 
   if (candidate.limit?.context != null) {
     next.contextWindow = String(candidate.limit.context)
