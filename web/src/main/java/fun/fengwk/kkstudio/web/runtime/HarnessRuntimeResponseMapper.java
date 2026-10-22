@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.web.runtime;
 
+import fun.fengwk.kkstudio.common.json.StrictJson;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.CancelledThreadInput;
 import fun.fengwk.kkstudio.harness.runtime.CompactThreadResult;
@@ -15,18 +16,15 @@ import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryEntryPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
-import fun.fengwk.kkstudio.harness.runtime.invocation.codec.StreamCheckpointJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolApprovalJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationErrorJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderResponseJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationErrorJsonCodec;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
 import fun.fengwk.kkstudio.share.ai.interaction.HarnessToolInputResultDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessAcceptedCommandsDTO;
@@ -62,14 +60,9 @@ public final class HarnessRuntimeResponseMapper {
       new HistoryEntryPayloadJsonCodec();
   private static final ThreadCommandPayloadJsonCodec COMMAND_PAYLOADS =
       new ThreadCommandPayloadJsonCodec();
-  private static final StreamCheckpointJsonCodec STREAM_CHECKPOINTS =
-      new StreamCheckpointJsonCodec();
   private static final ProviderResponseJsonCodec MODEL_RESULTS = new ProviderResponseJsonCodec();
-  private static final ModelInvocationErrorJsonCodec MODEL_ERRORS =
-      new ModelInvocationErrorJsonCodec();
   private static final ToolApprovalJsonCodec TOOL_APPROVALS = new ToolApprovalJsonCodec();
-  private static final ToolInvocationErrorJsonCodec TOOL_ERRORS =
-      new ToolInvocationErrorJsonCodec();
+  private static final StrictJson JSON = StrictJson.standard();
 
   private HarnessRuntimeResponseMapper() {}
 
@@ -210,10 +203,11 @@ public final class HarnessRuntimeResponseMapper {
     dto.setStreamCheckpointJson(
         invocation.streamCheckpoint() == null
             ? null
-            : STREAM_CHECKPOINTS.encode(invocation.streamCheckpoint()));
+            : JSON.write(invocation.streamCheckpoint(), "streamCheckpoint"));
     dto.setResultJson(
         invocation.result() == null ? null : MODEL_RESULTS.encode(invocation.result()));
-    dto.setErrorJson(invocation.error() == null ? null : MODEL_ERRORS.encode(invocation.error()));
+    dto.setErrorJson(
+        invocation.error() == null ? null : JSON.write(invocation.error(), "modelInvocationError"));
     dto.setResultEntryId(
         invocation.resultEntryId() == null ? null : invocation.resultEntryId().toString());
     dto.setCreateTime(invocation.createdAt());
@@ -258,7 +252,8 @@ public final class HarnessRuntimeResponseMapper {
         invocation.approval() == null ? null : TOOL_APPROVALS.encode(invocation.approval()));
     dto.setResultJson(
         invocation.result() == null ? null : ToolResultJsonCodec.encode(invocation.result()));
-    dto.setErrorJson(invocation.error() == null ? null : TOOL_ERRORS.encode(invocation.error()));
+    dto.setErrorJson(
+        invocation.error() == null ? null : JSON.write(invocation.error(), "toolInvocationError"));
     dto.setCreateTime(invocation.createdAt());
     dto.setUpdateTime(invocation.updatedAt());
     return dto;

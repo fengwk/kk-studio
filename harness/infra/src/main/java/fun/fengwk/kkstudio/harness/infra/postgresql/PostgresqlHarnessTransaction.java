@@ -1655,7 +1655,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
         encodeModelResult(invocation),
         encodeModelError(invocation),
         invocation.resultEntryId(),
-        PostgresqlHarnessRows.MODEL_FAILED_ATTEMPTS.encode(invocation.failedAttempts()),
+        PostgresqlHarnessRows.JSON.write(invocation.failedAttempts(), "modelAttemptFailures"),
         PostgresqlHarnessRows.timestamp(invocation.createdAt()),
         PostgresqlHarnessRows.timestamp(invocation.updatedAt()),
         encodeModelProviderReplayState(invocation));
@@ -1700,7 +1700,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
             encodeModelResult(invocation),
             encodeModelError(invocation),
             invocation.resultEntryId(),
-            PostgresqlHarnessRows.MODEL_FAILED_ATTEMPTS.encode(invocation.failedAttempts()),
+            PostgresqlHarnessRows.JSON.write(invocation.failedAttempts(), "modelAttemptFailures"),
             PostgresqlHarnessRows.timestamp(invocation.updatedAt()),
             encodeModelProviderReplayState(invocation),
             invocation.id());
@@ -1941,7 +1941,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
           invocation.modelInvocationId(),
           invocation.assistantEntryId(),
           invocation.callIndex(),
-          PostgresqlHarnessRows.TOOL_CALLS.encode(invocation.call()),
+          PostgresqlHarnessRows.JSON.write(invocation.call(), "toolCall"),
           encodeToolBinding(invocation),
           invocation.status().name(),
           invocation.attempt(),
@@ -2991,7 +2991,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   private static String encodeStreamCheckpoint(ModelInvocation invocation) {
     return invocation.streamCheckpoint() == null
         ? null
-        : PostgresqlHarnessRows.STREAM_CHECKPOINTS.encode(invocation.streamCheckpoint());
+        : PostgresqlHarnessRows.JSON.write(invocation.streamCheckpoint(), "streamCheckpoint");
   }
 
   private static String encodeModelResult(ModelInvocation invocation) {
@@ -3003,7 +3003,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   private static String encodeModelError(ModelInvocation invocation) {
     return invocation.error() == null
         ? null
-        : PostgresqlHarnessRows.MODEL_ERRORS.encode(invocation.error());
+        : PostgresqlHarnessRows.JSON.write(invocation.error(), "modelInvocationError");
   }
 
   private static String encodeToolApproval(ToolInvocation invocation) {
@@ -3029,13 +3029,13 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   private static String encodeToolInputReceipt(ToolInvocation invocation) {
     return invocation.inputReceipt() == null
         ? null
-        : PostgresqlHarnessRows.TOOL_INPUT_RECEIPTS.encode(invocation.inputReceipt());
+        : PostgresqlHarnessRows.JSON.write(invocation.inputReceipt(), "toolInputReceipt");
   }
 
   private static String encodeToolError(ToolInvocation invocation) {
     return invocation.error() == null
         ? null
-        : PostgresqlHarnessRows.TOOL_ERRORS.encode(invocation.error());
+        : PostgresqlHarnessRows.JSON.write(invocation.error(), "toolInvocationError");
   }
 
   private void notifyWorkAvailable(WorkTargetType type) {

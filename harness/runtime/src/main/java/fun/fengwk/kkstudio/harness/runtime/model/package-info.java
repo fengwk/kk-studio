@@ -28,9 +28,8 @@
  *       ModelDescriptor}/{@code ModelVariant} 的唯一权威 codec；provider 侧 codec 必须把对应子树委派给它，不得重复实现同一组字段。
  *   <li>{@link fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError} 承载最小 terminal error
  *       snapshot（kind + 非空 message），使 Runtime 调用方可以在不重读原始 exception 的前提下渲染 transient/permanent 分类。
- *   <li>{@link fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationErrorJsonCodec} 是持久化
- *       adapter 使用的 {@link fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError} 严格、确定性
- *       JSON 边界。
+ *   <li>{@link fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError} 的 wire 形态就是 record
+ *       本身，持久化 adapter 经 {@code StrictJson} 严格绑定。
  * </ul>
  *
  * <p>durable 的 {@code ModelInvocation} aggregate 与其 codec 位于 {@code

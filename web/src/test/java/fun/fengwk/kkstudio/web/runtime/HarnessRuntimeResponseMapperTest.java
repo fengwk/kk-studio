@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.json.StrictJson;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
@@ -27,7 +28,6 @@ import fun.fengwk.kkstudio.harness.runtime.entry.GoalSetting;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
-import fun.fengwk.kkstudio.harness.runtime.invocation.codec.StreamCheckpointJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolApprovalJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
@@ -39,7 +39,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationErrorJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
@@ -55,7 +54,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationErrorJsonCodec;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -246,7 +244,9 @@ class HarnessRuntimeResponseMapperTest {
         modelInvocation(ModelInvocationStatus.RUNNING, checkpoint, null, null, null, 1, id(3));
     ModelInvocationDTO runningDto = HarnessRuntimeResponseMapper.toModelInvocationDto(running);
     assertEquals(
-        checkpoint, new StreamCheckpointJsonCodec().decode(runningDto.getStreamCheckpointJson()));
+        checkpoint,
+        StrictJson.standard()
+            .read(runningDto.getStreamCheckpointJson(), StreamCheckpoint.class, "checkpoint"));
     assertNull(runningDto.getResultJson());
     assertNull(runningDto.getErrorJson());
     assertNull(runningDto.getResultEntryId());
@@ -265,7 +265,9 @@ class HarnessRuntimeResponseMapperTest {
     ModelInvocation failed =
         modelInvocation(ModelInvocationStatus.FAILED, null, null, error, null, 1, id(3));
     ModelInvocationDTO failedDto = HarnessRuntimeResponseMapper.toModelInvocationDto(failed);
-    assertEquals(error, new ModelInvocationErrorJsonCodec().decode(failedDto.getErrorJson()));
+    assertEquals(
+        error,
+        StrictJson.standard().read(failedDto.getErrorJson(), ModelInvocationError.class, "error"));
     assertNull(failedDto.getStreamCheckpointJson());
     assertNull(failedDto.getResultJson());
     assertNull(failedDto.getResultEntryId());
@@ -314,7 +316,9 @@ class HarnessRuntimeResponseMapperTest {
     assertNull(unboundDto.getEnvironmentId());
     assertNull(unboundDto.getApprovalJson());
     assertNull(unboundDto.getResultJson());
-    assertEquals(error, new ToolInvocationErrorJsonCodec().decode(unboundDto.getErrorJson()));
+    assertEquals(
+        error,
+        StrictJson.standard().read(unboundDto.getErrorJson(), ToolInvocationError.class, "error"));
     assertEquals(idText(100), unboundDto.getId());
     assertEquals(idText(10), unboundDto.getModelInvocationId());
     assertEquals(idText(4), unboundDto.getAssistantEntryId());

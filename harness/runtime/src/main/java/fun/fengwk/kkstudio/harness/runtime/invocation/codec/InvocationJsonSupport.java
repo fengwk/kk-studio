@@ -135,24 +135,6 @@ final class InvocationJsonSupport {
     return value.intValue();
   }
 
-  static long positiveLong(ObjectNode node, String field, String context) {
-    JsonNode value = required(node, field, context);
-    if (!value.isIntegralNumber() || !value.canConvertToLong() || value.longValue() <= 0) {
-      throw new IllegalArgumentException(
-          context + "." + field + " must be a positive long integer");
-    }
-    return value.longValue();
-  }
-
-  static long nonNegativeLong(ObjectNode node, String field, String context) {
-    JsonNode value = required(node, field, context);
-    if (!value.isIntegralNumber() || !value.canConvertToLong() || value.longValue() < 0) {
-      throw new IllegalArgumentException(
-          context + "." + field + " must be a non-negative long integer");
-    }
-    return value.longValue();
-  }
-
   static <E extends Enum<E>> E nullableEnum(
       ObjectNode node, String field, Class<E> enumType, String context) {
     String value = nullableText(node, field, context);
@@ -233,23 +215,6 @@ final class InvocationJsonSupport {
       throw new IllegalArgumentException(context + " must declare non-null " + field);
     }
     return value;
-  }
-
-  static String jsonObjectText(ObjectNode node, String field, String context) {
-    return requireJsonObject(text(node, field, context), context + "." + field);
-  }
-
-  static String requireJsonObject(String value, String context) {
-    Objects.requireNonNull(value, "value");
-    try {
-      JsonNode parsed = MAPPER.readTree(value);
-      if (parsed == null || !parsed.isObject()) {
-        throw new IllegalArgumentException(context + " must contain a JSON object");
-      }
-      return value;
-    } catch (JacksonException error) {
-      throw new IllegalArgumentException(context + " must contain a JSON object", error);
-    }
   }
 
   static void putNullable(ObjectNode node, String field, String value) {

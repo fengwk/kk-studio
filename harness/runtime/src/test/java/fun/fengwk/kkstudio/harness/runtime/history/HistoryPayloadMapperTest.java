@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.json.StrictJson;
 import fun.fengwk.kkstudio.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.common.result.BinaryResultContent;
 import fun.fengwk.kkstudio.common.result.JsonResultContent;
@@ -40,7 +41,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationErrorJsonCodec;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -404,7 +404,8 @@ class HistoryPayloadMapperTest {
           (ToolResultMessageContent) payload.message().contents().get(0);
       assertTrue(result.error());
       assertEquals("boom", ((TextMessageContent) result.contents().get(0)).text());
-      ToolInvocationError decoded = new ToolInvocationErrorJsonCodec().decode(result.detailsJson());
+      ToolInvocationError decoded =
+          StrictJson.standard().read(result.detailsJson(), ToolInvocationError.class, "error");
       assertEquals("KIND_X", decoded.kind());
       assertEquals("boom", decoded.message());
       assertEquals(invocation.binding(), payload.toolResultMetadata().binding());
