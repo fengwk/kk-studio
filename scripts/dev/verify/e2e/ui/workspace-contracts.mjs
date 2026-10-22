@@ -1,6 +1,6 @@
 import { createServer } from 'node:http'
 
-import { baseModelConfig } from '../lib/fixtures.mjs'
+import { baseModelConfig, encodePathTail } from '../lib/fixtures.mjs'
 import {
   acceptCommandBatch,
   assertRootYoloPolicy,
@@ -123,7 +123,7 @@ export async function runWorkspaceContractMatrix(ui) {
           const modelOptions = page.getByRole('listbox', { name: 'Model 选项' })
           await modelOptions.waitFor({ state: 'visible', timeout: 10_000 })
           await modelOptions.getByRole('option', {
-            name: `${fixture.provider.name}/${fixture.model.name}`,
+            name: fixture.model.name,
             exact: true,
           }).click()
           const variantOptions = page.getByRole('listbox', { name: 'Variant 选项' })
@@ -134,7 +134,7 @@ export async function runWorkspaceContractMatrix(ui) {
           )
           await variantOptions.getByRole('option', { name: 'review', exact: true }).click()
           assert(
-            (await model.innerText()).includes(`${fixture.provider.name}/${fixture.model.name} · review`),
+            (await model.innerText()).includes(`${fixture.model.name} (review)`),
             'selected Model/Variant was not retained in the Composer',
           )
 
@@ -148,8 +148,7 @@ export async function runWorkspaceContractMatrix(ui) {
           )
           const modelPayload = JSON.parse(queued[0].payloadJson)
           assert(
-            modelPayload.model?.providerName === fixture.provider.name
-            && modelPayload.model?.modelName === fixture.model.name
+            modelPayload.model?.modelName === fixture.model.name
             && modelPayload.model?.variant === 'review',
             `queued SET_MODEL does not match the UI selection: ${JSON.stringify(modelPayload)}`,
           )
@@ -796,6 +795,7 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
     state.provider = envelopeData(providerResponse.json)
 
     const modelResponse = await apiCtx.call('POST', '/api/ai/catalog/models', {
+      kind: 'MODEL',
       providerName: state.provider.name,
       name: `e2e-ui-usage-model-${suffix}`,
       modelId: `wire-ui-usage-${suffix}`,
@@ -817,7 +817,7 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
       name: `e2e-ui-usage-agent-${suffix}`,
       description: 'Local completion agent for free Footer usage tests.',
       systemPrompt: 'Return the deterministic local response.',
-      model: `${state.model.providerName}/${state.model.name}`,
+      model: state.model.name,
       variant: 'default',
       config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
     })
@@ -839,7 +839,6 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
       rootSettings: branchSettingsOf(
         state.agent,
         {
-          providerName: state.model.providerName,
           modelName: state.model.name,
           variant: 'default',
         },
@@ -867,7 +866,7 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
       name: `e2e-ui-usage-alt-agent-${suffix}`,
       description: 'Second environment-bound agent for Footer projection tests.',
       systemPrompt: 'Return the deterministic local response.',
-      model: `${state.model.providerName}/${state.model.name}`,
+      model: state.model.name,
       variant: 'default',
       config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
     })
@@ -888,7 +887,6 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
         setAgentCommand(state.otherAgent.name, cid()),
         setModelCommand(
           {
-            providerName: state.model.providerName,
             modelName: state.model.name,
             variant: 'default',
           },
@@ -955,7 +953,7 @@ function childSnapshotWithPendingTool(targetThreadId, rootThreadId) {
       processing: false,
       branchSettings: {
         agentName: 'worker',
-        model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+        model: { modelName: 'MiniMax', variant: 'default' },
         environmentName: null,
       },
       createTime: '2026-07-28T10:00:00Z',
@@ -1024,6 +1022,7 @@ async function createActiveTaskFixture(apiCtx, stamp) {
     state.provider = envelopeData(providerResponse.json)
 
     const modelResponse = await apiCtx.call('POST', '/api/ai/catalog/models', {
+      kind: 'MODEL',
       providerName: state.provider.name,
       name: `e2e-ui-task-model-${suffix}`,
       modelId: `wire-ui-task-${suffix}`,
@@ -1045,7 +1044,7 @@ async function createActiveTaskFixture(apiCtx, stamp) {
       name: childName,
       description: 'Held child used by the TaskStatus browser fixture.',
       systemPrompt: 'Stay in the deterministic local model call.',
-      model: `${state.model.providerName}/${state.model.name}`,
+      model: state.model.name,
       variant: 'default',
       config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
     })
@@ -1056,7 +1055,7 @@ async function createActiveTaskFixture(apiCtx, stamp) {
       name: `e2e-ui-task-parent-${suffix}`,
       description: 'Parent used by the TaskStatus browser fixture.',
       systemPrompt: 'Call the configured task subagent exactly once.',
-      model: `${state.model.providerName}/${state.model.name}`,
+      model: state.model.name,
       variant: 'default',
       config: {
         tools: [],
@@ -1084,7 +1083,6 @@ async function createActiveTaskFixture(apiCtx, stamp) {
       rootSettings: branchSettingsOf(
         { name: `e2e-ui-task-missing-${suffix}` },
         {
-          providerName: state.model.providerName,
           modelName: state.model.name,
           variant: 'default',
         },
@@ -1113,7 +1111,6 @@ async function createActiveTaskFixture(apiCtx, stamp) {
             setAgentCommand(state.parentAgent.name, cid()),
             setModelCommand(
               {
-                providerName: state.model.providerName,
                 modelName: state.model.name,
                 variant: 'default',
               },
@@ -1190,6 +1187,7 @@ async function createToolCardFixture(apiCtx, stamp, daemonEnv) {
     state.provider = envelopeData(providerResponse.json)
 
     const modelResponse = await apiCtx.call('POST', '/api/ai/catalog/models', {
+      kind: 'MODEL',
       providerName: state.provider.name,
       name: `e2e-ui-tool-card-model-${suffix}`,
       modelId: `wire-ui-tool-card-${suffix}`,
@@ -1212,7 +1210,7 @@ async function createToolCardFixture(apiCtx, stamp, daemonEnv) {
       name: `e2e-ui-tool-card-agent-${suffix}`,
       description: 'Agent used by deterministic Tool card browser contracts.',
       systemPrompt: 'Follow each deterministic Tool request exactly once.',
-      model: `${state.model.providerName}/${state.model.name}`,
+      model: state.model.name,
       variant: 'default',
       config: {
         tools: ['write', 'edit', 'bash'],
@@ -1241,7 +1239,6 @@ async function createToolCardFixture(apiCtx, stamp, daemonEnv) {
         // 绝不消费 mock 的 tool-call 响应；真正的 Agent 由 start() 的 SET_AGENT 冻结。
         { name: `e2e-ui-tool-card-missing-${suffix}` },
         {
-          providerName: state.model.providerName,
           modelName: state.model.name,
           variant: 'default',
         },
@@ -1271,7 +1268,6 @@ async function createToolCardFixture(apiCtx, stamp, daemonEnv) {
             setAgentCommand(state.agent.name, cid()),
             setModelCommand(
               {
-                providerName: state.model.providerName,
                 modelName: state.model.name,
                 variant: 'default',
               },
@@ -1341,10 +1337,10 @@ async function cleanupCompletedUsageFixture(state) {
     }
   })
   await cleanup('model', errors, async () => {
-    if (state.model?.providerName && state.model?.name) {
+    if (state.model?.name) {
       await state.apiCtx.call(
         'DELETE',
-        `/api/ai/catalog/models/${encodeURIComponent(state.model.providerName)}/${encodeURIComponent(state.model.name)}?expectedVersion=${encodeURIComponent(state.model.version)}`,
+        `/api/ai/catalog/models/${encodePathTail(state.model.name)}?expectedVersion=${encodeURIComponent(state.model.version)}`,
       )
     }
   })
@@ -1390,10 +1386,10 @@ async function cleanupActiveTaskFixture(state) {
     })
   }
   await cleanup('task model', errors, async () => {
-    if (state.model?.providerName && state.model?.name) {
+    if (state.model?.name) {
       await state.apiCtx.call(
         'DELETE',
-        `/api/ai/catalog/models/${encodeURIComponent(state.model.providerName)}/${encodeURIComponent(state.model.name)}?expectedVersion=${encodeURIComponent(state.model.version)}`,
+        `/api/ai/catalog/models/${encodePathTail(state.model.name)}?expectedVersion=${encodeURIComponent(state.model.version)}`,
       )
     }
   })
@@ -1434,10 +1430,10 @@ async function cleanupToolCardFixture(state) {
     }
   })
   await cleanup('tool-card model', errors, async () => {
-    if (state.model?.providerName && state.model?.name) {
+    if (state.model?.name) {
       await state.apiCtx.call(
         'DELETE',
-        `/api/ai/catalog/models/${encodeURIComponent(state.model.providerName)}/${encodeURIComponent(state.model.name)}?expectedVersion=${encodeURIComponent(state.model.version)}`,
+        `/api/ai/catalog/models/${encodePathTail(state.model.name)}?expectedVersion=${encodeURIComponent(state.model.version)}`,
       )
     }
   })

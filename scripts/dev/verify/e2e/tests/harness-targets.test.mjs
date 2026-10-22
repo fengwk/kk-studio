@@ -167,7 +167,7 @@ test('Session summaries preserve same-named root and child parent identities', a
     updatedAt: '2026-01-01T00:00:00Z',
     status: 'IDLE',
     processing: false,
-    model: { providerName: 'provider', modelName: 'model', variant: 'default' },
+    model: { modelName: 'model', variant: 'default' },
     headMessagePreview: null,
   }
   const child = { ...root, threadId: cid(), parentThreadId: root.threadId }

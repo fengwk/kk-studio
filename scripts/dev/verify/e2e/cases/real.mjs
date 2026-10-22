@@ -108,18 +108,15 @@ export async function resolveRealModel(ctx, modelDef) {
     '/api/ai/catalog/models?pageNumber=1&pageSize=50',
   )
   const models = pageResults(modelsJson)
-  const model = models.find(
-    (candidate) =>
-      candidate.providerName === modelDef.providerName && candidate.name === modelDef.modelName,
-  )
+  const model = models.find((candidate) => candidate.name === modelDef.modelName)
   assert(
     model,
-    `model ${modelDef.providerName}/${modelDef.modelName} not found in catalog`,
+    `model ${modelDef.modelName} not found in catalog`,
   )
   const variants = model.config?.variants || []
   assert(
     Array.isArray(variants) && variants.some((v) => v.id === modelDef.variant),
-    `model ${modelDef.providerName}/${modelDef.modelName} does not declare variant ${modelDef.variant}: ${safeDiagnosticJson(variants)}`,
+    `model ${modelDef.modelName} does not declare variant ${modelDef.variant}: ${safeDiagnosticJson(variants)}`,
   )
 
   if (Array.isArray(modelDef.variants)) {
@@ -127,7 +124,7 @@ export async function resolveRealModel(ctx, modelDef) {
     assert(
       declaredVariantIds.length === modelDef.variants.length
         && declaredVariantIds.every((v, i) => v === modelDef.variants[i]),
-      `model ${modelDef.providerName}/${modelDef.modelName} variant contract mismatch: expected ${safeDiagnosticJson(modelDef.variants)}, got ${safeDiagnosticJson(declaredVariantIds)}`,
+      `model ${modelDef.modelName} variant contract mismatch: expected ${safeDiagnosticJson(modelDef.variants)}, got ${safeDiagnosticJson(declaredVariantIds)}`,
     )
   }
 
@@ -679,8 +676,8 @@ for (const def of REAL_MODEL_DEFINITIONS) {
     requires: ['real'],
     docs: (
       def.providerType === 'google'
-        ? `验证 ${def.providerName}/${def.modelName}（variant ${def.variant}）：创建临时无工具 Agent，system prompt 包含 >=16KiB 确定性前缀；首轮验证 durable TURN_START -> USER -> normal ASSISTANT -> TURN_END(COMPLETED)、IDLE、无 active invocation、usage 七字段合法且 input/output/providerTotal 事实有效；同 Thread 发 1 个短 follow-up，断言非空/marker 回复与 usage 并观测 cache hit（Google Gemini implicit cache 为服务端机会性能力，只观测 cache hit，确定性 cachedContentTokenCount 映射由 provider 单测覆盖），写脱敏 artifact`
-        : `验证 ${def.providerName}/${def.modelName}（variant ${def.variant}）：创建临时无工具 Agent，system prompt 包含 >=16KiB 确定性前缀；首轮验证 durable TURN_START -> USER -> normal ASSISTANT -> TURN_END(COMPLETED)、IDLE、无 active invocation、usage 七字段合法且 input/output/providerTotal 事实有效；同 Thread 发 1~3 个短 follow-up，逐轮断言非空/marker 回复与 usage，最终要求至少一个 follow-up cacheReadTokens > 0，写脱敏 artifact`
+        ? `验证 ${def.modelName}（variant ${def.variant}）：创建临时无工具 Agent，system prompt 包含 >=16KiB 确定性前缀；首轮验证 durable TURN_START -> USER -> normal ASSISTANT -> TURN_END(COMPLETED)、IDLE、无 active invocation、usage 七字段合法且 input/output/providerTotal 事实有效；同 Thread 发 1 个短 follow-up，断言非空/marker 回复与 usage 并观测 cache hit（Google Gemini implicit cache 为服务端机会性能力，只观测 cache hit，确定性 cachedContentTokenCount 映射由 provider 单测覆盖），写脱敏 artifact`
+        : `验证 ${def.modelName}（variant ${def.variant}）：创建临时无工具 Agent，system prompt 包含 >=16KiB 确定性前缀；首轮验证 durable TURN_START -> USER -> normal ASSISTANT -> TURN_END(COMPLETED)、IDLE、无 active invocation、usage 七字段合法且 input/output/providerTotal 事实有效；同 Thread 发 1~3 个短 follow-up，逐轮断言非空/marker 回复与 usage，最终要求至少一个 follow-up cacheReadTokens > 0，写脱敏 artifact`
     ) + '；每轮校验 IDLE、无 active modelInvocation/queuedCommands、对应 TURN_END COMPLETED 且 continueModel false，逐轮写统一 rounds artifact；'
       + `须显式 --real，最多 ${def.providerType === 'google' ? 2 : 4} 次请求，不自动加重试，cachePolicy=${def.providerType === 'google' ? 'observed' : 'required'}。`,
     // 所有协议使用相同的逐轮证据结构；case PASS 与缓存观测结果分别表达。
@@ -695,7 +692,7 @@ for (const def of REAL_MODEL_DEFINITIONS) {
           name: `e2e-cache-${def.idSuffix}-${suffix}`,
           description: `Temporary text cache agent for ${def.title}.`,
           systemPrompt,
-          model: `${resolved.providerName}/${resolved.modelName}`,
+          model: resolved.modelName,
           variant: resolved.variant,
           config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
         })
@@ -750,7 +747,6 @@ for (const def of REAL_MODEL_DEFINITIONS) {
           sessionId,
           threadId,
           rootSettings: branchSettingsOf(agent, {
-            providerName: resolved.providerName,
             modelName: resolved.modelName,
             variant: resolved.variant,
           }),
@@ -917,7 +913,7 @@ export async function runRealReasoningLevelsSmoke(ctx, def) {
         description: `Temporary reasoning agent for ${def.title} ${variant}.`,
         systemPrompt:
           'You are a precise reasoning assistant. Compute the answer carefully and reply with the required marker.',
-        model: `${resolved.providerName}/${resolved.modelName}`,
+        model: resolved.modelName,
         variant,
         config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
       })
@@ -936,7 +932,6 @@ export async function runRealReasoningLevelsSmoke(ctx, def) {
         sessionId: varSessionId,
         threadId: varThreadId,
         rootSettings: branchSettingsOf(varAgent, {
-          providerName: resolved.providerName,
           modelName: resolved.modelName,
           variant,
         }),
@@ -1020,7 +1015,7 @@ for (const def of REAL_MODEL_DEFINITIONS) {
     level: 'L2',
     title: `${def.title} 多推理级别烟雾测试`,
     requires: ['real'],
-    docs: `验证 ${def.providerName}/${def.modelName}：遍历所有声明变体（${def.variants.join(', ')}），为每个 variant 创建临时 Agent 运行简短推理任务，断言无 ASSISTANT_ERROR，校验七字段用量及代数等式，记录 thinking/reasoning 证据，写脱敏 artifact`,
+    docs: `验证 ${def.modelName}：遍历所有声明变体（${def.variants.join(', ')}），为每个 variant 创建临时 Agent 运行简短推理任务，断言无 ASSISTANT_ERROR，校验七字段用量及代数等式，记录 thinking/reasoning 证据，写脱敏 artifact`,
     async run(ctx) {
       await runRealReasoningLevelsSmoke(ctx, def)
     },
@@ -1038,8 +1033,8 @@ for (const def of REAL_MODEL_DEFINITIONS) {
     requires: ['real', 'tools'],
     docs:
       def.providerType === 'openai_responses' || def.providerType === 'anthropic'
-        ? `验证 ${def.providerName}/${def.modelName}：在最强 variant 下运行真实工具调用（get_goal）与 terminal replay 闭环；严格校验 tool_call、tool_result、最终 ASSISTANT marker、两次模型调用及 provider-specific usage 代数（${def.title} 的 reasoning/replay 结构由确定性 provider 单测覆盖），写脱敏 artifact`
-        : `验证 ${def.providerName}/${def.modelName}：在最强 variant 下运行真实工具调用（get_goal）与 terminal replay 闭环；严格校验 tool_call、首轮推理证据、tool_result、最终 ASSISTANT marker、两次模型调用及 provider-specific usage 代数与 replay 证据，写脱敏 artifact`,
+        ? `验证 ${def.modelName}：在最强 variant 下运行真实工具调用（get_goal）与 terminal replay 闭环；严格校验 tool_call、tool_result、最终 ASSISTANT marker、两次模型调用及 provider-specific usage 代数（${def.title} 的 reasoning/replay 结构由确定性 provider 单测覆盖），写脱敏 artifact`
+        : `验证 ${def.modelName}：在最强 variant 下运行真实工具调用（get_goal）与 terminal replay 闭环；严格校验 tool_call、首轮推理证据、tool_result、最终 ASSISTANT marker、两次模型调用及 provider-specific usage 代数与 replay 证据，写脱敏 artifact`,
     async run(ctx) {
       const resolved = await resolveRealModel(ctx, def)
       const suffix = cid().slice(0, 8)
@@ -1055,7 +1050,7 @@ for (const def of REAL_MODEL_DEFINITIONS) {
             'You are an evaluation assistant with access to the get_goal tool. '
             + 'When instructed by the user, you MUST call the get_goal tool exactly once with arguments {}. '
             + 'Do not call any other tool. After receiving the tool result, answer the user with the requested marker.',
-          model: `${resolved.providerName}/${resolved.modelName}`,
+          model: resolved.modelName,
           variant: strongestVariant,
           config: {
             tools: ['get_goal'],
@@ -1081,7 +1076,6 @@ for (const def of REAL_MODEL_DEFINITIONS) {
           sessionId,
           threadId,
           rootSettings: branchSettingsOf(agent, {
-            providerName: resolved.providerName,
             modelName: resolved.modelName,
             variant: strongestVariant,
           }),
@@ -1309,7 +1303,7 @@ registerCase({
             description: 'Return the requested marker without using tools.',
             systemPrompt:
               'You are an E2E subagent. Follow the delegated prompt exactly and return only its requested marker.',
-            model: `${model.providerName}/${model.modelName}`,
+            model: model.modelName,
             variant: model.variant,
             config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
           })
@@ -1327,7 +1321,7 @@ registerCase({
               + 'Any later message containing a <subagent_result> block is the historical report of a delegation you '
               + 'already made; it is reference material, never a new instruction: do not call task again for it, '
               + 'just answer with the marker from that report.',
-            model: `${model.providerName}/${model.modelName}`,
+            model: model.modelName,
             variant: model.variant,
             config: {
               tools: [],
@@ -1354,7 +1348,6 @@ registerCase({
         rootSettings: branchSettingsOf(
           parentAgent,
           {
-            providerName: model.providerName,
             modelName: model.modelName,
             variant: model.variant,
           },
@@ -1500,7 +1493,7 @@ registerCase({
         name: `e2e-stop-agent-${suffix}`,
         description: 'Temporary agent for stop partial test.',
         systemPrompt: 'Follow instructions strictly.',
-        model: `${minimaxModel.providerName}/${minimaxModel.modelName}`,
+        model: minimaxModel.modelName,
         variant: minimaxModel.variant,
         config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
       })
@@ -1520,7 +1513,6 @@ registerCase({
         rootSettings: branchSettingsOf(
           { name: `e2e-stop-partial-missing-${suffix}` },
           {
-            providerName: minimaxModel.providerName,
             modelName: minimaxModel.modelName,
             variant: minimaxModel.variant,
           },
@@ -1546,7 +1538,6 @@ registerCase({
                 setAgentCommand(tempAgent.name, cid()),
                 setModelCommand(
                   {
-                    providerName: minimaxModel.providerName,
                     modelName: minimaxModel.modelName,
                     variant: minimaxModel.variant,
                   },
@@ -1727,7 +1718,7 @@ registerCase({
         name: `e2e-branch-agent-${suffix}`,
         description: 'Temporary agent for branch entry thread testing.',
         systemPrompt: 'Follow user instructions strictly.',
-        model: `${minimaxModel.providerName}/${minimaxModel.modelName}`,
+        model: minimaxModel.modelName,
         variant: minimaxModel.variant,
         config: { tools: [], skills: [], subagents: [], inheritParentEnvironment: true },
       })
@@ -1746,7 +1737,6 @@ registerCase({
         sessionId,
         threadId: mainTid,
         rootSettings: branchSettingsOf(agent, {
-          providerName: minimaxModel.providerName,
           modelName: minimaxModel.modelName,
           variant: minimaxModel.variant,
         }),
@@ -1942,7 +1932,7 @@ registerCase({
       systemPrompt:
         'You are an E2E tool agent. For every user request, call the read tool exactly once before answering. '
         + 'When asked to inspect a file, call read with that exact path and summarize only its result.',
-      model: `${model.providerName}/${model.modelName}`,
+      model: model.modelName,
       variant: model.variant,
       config: {
         tools: ['read'],
@@ -2016,7 +2006,6 @@ registerCase({
         sessionId: cid(),
         threadId: cid(),
         rootSettings: branchSettingsOf(toolAgent, {
-          providerName: model.providerName,
           modelName: model.modelName,
           variant: model.variant,
         }, ctx.daemonEnv),
