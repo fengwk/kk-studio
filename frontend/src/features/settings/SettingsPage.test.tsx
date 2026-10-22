@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -55,6 +55,7 @@ interface NotificationState {
 let notificationState: NotificationState
 
 beforeEach(() => {
+  mocks.update.mockReset()
   localStorage.clear()
   // 清空存储会连带清掉测试基座写入的 locale；恢复默认测试语言。
   setLocale('zh-CN')
@@ -100,6 +101,32 @@ async function tabByName(name: string) {
 }
 
 describe('SettingsPage general tab + notifications', () => {
+  // 真实页面使用服务端 schema，完整 PUT 成功后清理脏状态。
+  it('saves the selected model catalog source through the schema UI', async () => {
+    const user = userEvent.setup()
+    const dto = makeSettingsDto()
+    mocks.update.mockImplementation(async (update) => {
+      const saved = { ...dto, ...update, version: '1' }
+      mocks.get.mockResolvedValue(saved)
+      return saved
+    })
+    renderSettings()
+    await user.click(await tabByName('AI 运行时'))
+    const select = await screen.findByLabelText('模型目录来源')
+    expect(select).toHaveTextContent('models.dev v2')
+    await user.click(select)
+    await user.click(screen.getByRole('option', { name: 'models.dev v1（旧版）' }))
+    expect(screen.getByText('有未保存的更改')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    expect(mocks.update).toHaveBeenCalledWith({
+      tool: dto.tool,
+      aiRuntime: { ...dto.aiRuntime, modelCatalogSource: 'models_dev_v1' },
+      environment: dto.environment, network: dto.network,
+      storageMedia: dto.storageMedia, advanced: dto.advanced, expectedVersion: dto.version,
+    })
+    await waitFor(() => expect(screen.getByRole('button', { name: '保存' })).toBeDisabled())
+    expect(screen.queryByText('有未保存的更改')).not.toBeInTheDocument()
+  })
   // 网络保持 schema 顺序，同步紧随高级，不替换现有服务端设置。
   it('renders every top-level settings tab with Sync after Advanced', async () => {
     renderSettings()

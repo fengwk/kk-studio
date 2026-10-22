@@ -183,6 +183,18 @@ jobs:
           set -euo pipefail
           npm --prefix daemon run build
           node scripts/daemon/verify-java-update-commands.mjs harness/environment/target/daemon-update-java-commands.json
+      - name: Verify the current startup Fat JAR and legacy rejection
+        # 全量 verify 后用真实 java -jar 验证当前空库启动、HTTP 读取与旧库拒绝。
+        # JAR 路径只由根 POM 的当前版本决定，不另建版本事实源。
+        run: |
+          set -euo pipefail
+          version="$(node -e "const m = /<artifactId>kk-studio-parent<\/artifactId>\s*<version>([^<]+)<\/version>/.exec(require('node:fs').readFileSync('pom.xml', 'utf8')); if (!m) throw new Error('root POM version not found'); process.stdout.write(m[1])")"
+          jar="$PWD/web/target/kk-studio-web-${version}.jar"
+          test -f "${jar}"
+          env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -pl web -am test \
+            -Dtest=WebApplicationStartupSubprocessTest \
+            -Dsurefire.failIfNoSpecifiedTests=false \
+            "-Dkkstudio.startup.test.jar=${jar}"
       - name: Install frontend dependencies
         run: npm --prefix frontend ci
       - name: Lint frontend

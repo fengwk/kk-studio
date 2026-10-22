@@ -83,6 +83,8 @@ Vite 默认只监听 `127.0.0.1` 并使用自带 Host allowlist。需要容器�
 | 编译 main/test 源码，不执行测试 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp test-compile` |
 | 跑 Java 单元与集成测试 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp test` |
 | 触发关键类覆盖率门禁 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp verify` |
+| 当前空库启动与旧库拒绝验收（classpath 模式） | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl web -am test -Dtest=WebApplicationStartupSubprocessTest -Dsurefire.failIfNoSpecifiedTests=false` |
+| 当前启动验收（Fat JAR 产物模式） | 同上追加 `'-Dkkstudio.startup.test.jar=<absolute web/target/kk-studio-web-<version>.jar>'`；两种模式都要求全部用例真实通过 |
 | 同源 IDE 真实整链验收（需独立 Postgres 与受控 code-server） | `env JAVA_HOME="$JAVA_HOME_21" KK_STUDIO_IDE_ACCEPTANCE_DIR=<dir> KK_STUDIO_PLAYWRIGHT_MODULE_DIR=<dir> mvn -B -ntp -pl web -am test -Dtest=IdeRealBrowserAcceptanceTest -Dsurefire.failIfNoSpecifiedTests=false` |
 | 只格式化本次改动的 Java 文件 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl <module> spotless:apply '-DspotlessFiles=<file-regex>'` |
 | 前端单元测试 / lint / 类型与构建 / 覆盖率 | `npm --prefix frontend run test`、`run lint`、`run typecheck`、`run typecheck:test`、`run build`、`run coverage` |
@@ -118,6 +120,10 @@ gh workflow run docker-publish.yml --ref dev -f validate_only=true
 该模式运行同一套 Java、前端、脚本、文档和敏感数据检查，以及 Linux、macOS、Windows 安装和更新回归与
 Daemon 五平台矩阵，
 但整个镜像发布 job 会被跳过；它与发布使用独立并发组，不会取消同分支正在进行的镜像发布。
+启动测试使用可丢弃 PostgreSQL 17 与私有 MinIO，验证当前空库能通过正常生产入口启动并提供健康检查与模型目录 API。
+V1 与当前基线不同的已有数据库必须在 Flyway 校验阶段拒绝，且表数据、迁移历史与结构均保持不变；
+退役的 `database-upgrade` 命令必须在启动 Spring 或访问数据库前拒绝。Maven verify 覆盖不含测试替身的生产
+classpath 入口，其后的必需步骤复用同次构建的 Fat JAR 验证相同边界。
 前端必须通过 lint、测试与浏览器基座严格类型检查、覆盖率、生产构建与 Chromium 离线布局回归；任一失败均阻断发布。
 无论门禁是否成功，`frontend-diagnostics` artifact 都保留覆盖率与布局诊断产物 7 天。
 Windows 两个 host 都会报告结果，前一个失败不会遮蔽后一个；任一失败仍阻断正常发布。

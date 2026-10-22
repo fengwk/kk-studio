@@ -162,7 +162,7 @@ class AgentDefinitionServiceUnitTest {
     assertThrows(
         AiValidationException.class,
         () -> service.validateImport("agent", create("agent", null, emptyConfig(), null)));
-    for (String invalidModel : List.of(" model ", "m".repeat(129))) {
+    for (String invalidModel : List.of(" model ", " model", "model ", "m".repeat(129))) {
       assertThrows(
           AiValidationException.class,
           () ->
