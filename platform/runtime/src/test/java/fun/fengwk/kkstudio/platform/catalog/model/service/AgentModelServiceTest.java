@@ -83,13 +83,11 @@ public class AgentModelServiceTest extends PostgresSpringTestSupport {
     AgentModelUpdateDTO stale = modelUpdate(model, modelName, "stale");
     stale.setExpectedVersion(model.getVersion());
     assertThrows(
-        AiVersionConflictException.class,
-        () -> agentModelService.updateModel(modelName, stale));
+        AiVersionConflictException.class, () -> agentModelService.updateModel(modelName, stale));
 
     agentModelService.deleteModel(modelName, updated.getVersion());
     assertThrows(
-        AiResourceNotFoundException.class,
-        () -> agentModelService.deleteModel(modelName, "0"));
+        AiResourceNotFoundException.class, () -> agentModelService.deleteModel(modelName, "0"));
     // 硬删除：同名立即可重建，重建后解析到新行。
     AgentModelDTO recreated = agentModelService.createModel(model(provider.getName(), modelName));
     assertEquals("0", recreated.getVersion());
@@ -193,18 +191,11 @@ public class AgentModelServiceTest extends PostgresSpringTestSupport {
     AgentModelCreateDTO create = model(providerName, "variant-model-" + suffix);
     create.setConfig(
         buildConfig(
-            32768,
-            4096,
-            true,
-            false,
-            "standard",
-            "v1",
-            List.of("default", "fast"),
-            "default"));
+            32768, 4096, true, false, "standard", "v1", List.of("default", "fast"), "default"));
     AgentModelDTO model = agentModelService.createModel(create);
 
-    AgentModelDTO group = agentModelService.createModel(
-        group("variant-group-" + suffix, model.getName(), "fast"));
+    AgentModelDTO group =
+        agentModelService.createModel(group("variant-group-" + suffix, model.getName(), "fast"));
     assertEquals(AgentModelKind.GROUP, group.getKind());
     assertNull(group.getProviderName());
     assertNull(group.getModelId());

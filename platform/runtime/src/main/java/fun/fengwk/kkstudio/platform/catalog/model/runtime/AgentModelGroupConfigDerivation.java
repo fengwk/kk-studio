@@ -13,8 +13,8 @@ import java.util.Set;
 /**
  * 从成员单 Model 配置派生模型组的只读能力摘要。
  *
- * <p>上下文与输出取所有成员的最小值（输出再受最小上下文约束），能力取工具/推理的与和输入模态的交集。组没有自身价格或
- * Variant：派生结果不携带 pricing、defaultVariant 或 variants。
+ * <p>上下文与输出取所有成员的最小值（输出再受最小上下文约束），能力取工具/推理的与和输入模态的交集。组没有自身价格或 Variant：派生结果不携带
+ * pricing、defaultVariant 或 variants。
  */
 public final class AgentModelGroupConfigDerivation {
 

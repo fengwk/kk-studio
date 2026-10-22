@@ -63,6 +63,25 @@ public final class AgentModelMutationFactory {
     apply(model, mutation);
   }
 
+  /**
+   * 在锁定组自身行之前按 canonical 名称顺序锁定成员行。
+   *
+   * <p>组更新与成员改名/删除共用同一把成员行锁，避免组配置引用已被并发删除或移除的 Variant。
+   */
+  void lockMembers(AgentModelEditablePropertiesDTO properties) {
+    if (properties == null
+        || properties.getKind() != AgentModelKind.GROUP
+        || properties.getGroup() == null) {
+      return;
+    }
+    try {
+      groupCodec.validateShape(properties.getGroup());
+    } catch (IllegalArgumentException error) {
+      throw new AiValidationException(RESOURCE, error.getMessage(), error);
+    }
+    lockMemberRows(properties.getGroup());
+  }
+
   /** 更新后从 config 中删掉的 Variant；调用方据此拒绝仍被 Agent/组引用的删除。 */
   List<String> removedVariants(String previousConfigJson, AgentModel updated) {
     if (updated.getKind() != AgentModelKind.MODEL) {
@@ -171,11 +190,12 @@ public final class AgentModelMutationFactory {
 
   /** 成员必须是已存在的单 MODEL，且 Variant 由该 Model 当前 config 声明。 */
   private void validateMembers(AgentModelGroupDTO group) {
+    lockMemberRows(group);
     List<AgentModelConfigDTO> memberConfigs = new ArrayList<>();
     for (int index = 0; index < group.getMembers().size(); index++) {
       AgentModelGroupMemberDTO member = group.getMembers().get(index);
       String path = "group.members[" + index + "]";
-      AgentModel model = modelRepository.getByName(member.getModelName());
+      AgentModel model = modelRepository.getByNameForUpdate(member.getModelName());
       if (model == null) {
         throw new AiValidationException(
             RESOURCE, path + ".modelName references an unknown model: " + member.getModelName());
@@ -210,6 +230,14 @@ public final class AgentModelMutationFactory {
     } catch (IllegalArgumentException error) {
       throw new AiValidationException(RESOURCE, error.getMessage(), error);
     }
+  }
+
+  private void lockMemberRows(AgentModelGroupDTO group) {
+    group.getMembers().stream()
+        .map(AgentModelGroupMemberDTO::getModelName)
+        .distinct()
+        .sorted()
+        .forEach(modelRepository::getByNameForUpdate);
   }
 
   private static String canonicalName(String name) {

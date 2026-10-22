@@ -169,6 +169,15 @@ public class AgentModelJdbcStore {
   }
 
   public int rename(String oldName, AgentModelDO model, long expectedVersion) {
+    // FK cascade 会改写引用行，但不会推进版本；先锁定这些 Agent 行，改名后显式同步版本事实。
+    List<String> referencingAgents =
+        jdbcClient
+            .sql(
+                "select name from agent_definition"
+                    + " where model_name = :oldName order by name for update")
+            .param("oldName", oldName)
+            .query(String.class)
+            .list();
     int updated =
         jdbcClient
             .sql(RENAME_SQL)
@@ -195,6 +204,16 @@ public class AgentModelJdbcStore {
         .param("oldName", oldName)
         .param("name", model.getName())
         .update();
+    for (String agentName : referencingAgents) {
+      jdbcClient
+          .sql(
+              "update agent_definition"
+                  + " set version = version + 1,"
+                  + " updated_at = greatest(updated_at, current_timestamp)"
+                  + " where name = :name")
+          .param("name", agentName)
+          .update();
+    }
     if ("GROUP".equals(model.getKind())) {
       // 组改名同样是一次配置写：旧名字下的冷却不再属于当前组。
       deleteGroupCooldowns(model.getName());
