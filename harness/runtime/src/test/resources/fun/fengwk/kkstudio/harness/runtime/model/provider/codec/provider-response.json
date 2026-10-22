@@ -8,10 +8,10 @@
   "stopReason": "COMPLETE",
   "usage": {
     "inputTokens": 100,
-    "outputTokens": 20,
+    "outputTokens": 25,
     "cacheReadTokens": 0,
     "cacheWriteTokens": 50,
-    "cacheWriteLongTokens": 0,
+    "cacheWriteByTtl": {},
     "reasoningTokens": 5,
     "providerTotalTokens": 175
   },

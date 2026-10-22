@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.share.ai.catalog;
 import lombok.Data;
 import tools.jackson.databind.annotation.JsonDeserialize;
 import tools.jackson.databind.annotation.JsonSerialize;
-import tools.jackson.databind.ser.std.ToStringSerializer;
 
 import java.math.BigDecimal;
 
@@ -11,23 +10,23 @@ import java.math.BigDecimal;
 @Data
 public class AgentModelPricingFactorsDTO {
 
-  @JsonSerialize(using = ToStringSerializer.class)
+  @JsonSerialize(using = DecimalStringSerializer.class)
   @JsonDeserialize(using = DecimalStringDeserializer.class)
   private BigDecimal input;
 
-  @JsonSerialize(using = ToStringSerializer.class)
+  @JsonSerialize(using = DecimalStringSerializer.class)
   @JsonDeserialize(using = DecimalStringDeserializer.class)
   private BigDecimal output;
 
-  @JsonSerialize(using = ToStringSerializer.class)
+  @JsonSerialize(using = DecimalStringSerializer.class)
   @JsonDeserialize(using = DecimalStringDeserializer.class)
   private BigDecimal cacheRead;
 
-  @JsonSerialize(using = ToStringSerializer.class)
+  @JsonSerialize(using = DecimalStringSerializer.class)
   @JsonDeserialize(using = DecimalStringDeserializer.class)
   private BigDecimal cacheWrite;
 
-  @JsonSerialize(using = ToStringSerializer.class)
+  @JsonSerialize(using = DecimalStringSerializer.class)
   @JsonDeserialize(using = DecimalStringDeserializer.class)
   private BigDecimal reasoning;
 }
