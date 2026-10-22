@@ -678,7 +678,7 @@ final class StoreTestSupport {
 
   /** SUCCEEDED assistant payload：由同一 request/response 经 mapper 机械派生（strict attach 校验要求全等）。 */
   static MessagePayload mappedAssistant(ModelRequestSpec requestSpec, ProviderResponse response) {
-    return mappedAssistant(requestSpec, response, null);
+    return mappedAssistant(requestSpec, response, T2);
   }
 
   static MessagePayload mappedAssistant(
