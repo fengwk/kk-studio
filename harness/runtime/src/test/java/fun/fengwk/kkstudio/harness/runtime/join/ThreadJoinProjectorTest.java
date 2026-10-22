@@ -44,6 +44,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayl
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -1603,7 +1604,8 @@ class ThreadJoinProjectorTest {
   }
 
   private static AssistantMessageMetadata assistantMetadata(GenerationStopReason stopReason) {
-    return new AssistantMessageMetadata(stopReason, new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L));
+    return new AssistantMessageMetadata(
+        stopReason, new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L));
   }
 
   private static MessagePayload assistantPayload(String text) {

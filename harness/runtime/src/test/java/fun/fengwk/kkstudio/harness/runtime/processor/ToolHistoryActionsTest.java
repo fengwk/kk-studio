@@ -277,7 +277,7 @@ class ToolHistoryActionsTest {
         "",
         calls,
         stopReason,
-        new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
+        new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L),
         "req-1",
         null,
         "{}");

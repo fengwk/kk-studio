@@ -13,19 +13,36 @@ import tools.jackson.databind.type.LogicalType;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelPricingCondition;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.ProviderProtocolOptions;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelAbilitiesDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelInputModality;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelLimitDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingConditionDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingContextConditionDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingDateConditionDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingFactorsDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingMultiplierDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingOverrideDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingTimeConditionDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelRatePatchDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelRateSetDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelVariantDTO;
 
 import java.math.BigDecimal;
+import java.time.DateTimeException;
+import java.time.LocalDate;
+import java.time.LocalTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
@@ -242,23 +259,246 @@ public final class AgentModelRuntimeConfigParser {
 
   private void validatePricing(AgentModelPricingDTO pricing) {
     String path = "config.pricing";
-    requireNonBlank(pricing.getCurrency(), path + ".currency");
-    requireNonBlank(pricing.getPricingTier(), path + ".pricingTier");
-    requireNonBlank(pricing.getServiceTier(), path + ".serviceTier");
-    requireNonBlank(pricing.getVersion(), path + ".version");
-    requirePositiveBigDecimal(pricing.getServiceTierMultiplier(), path + ".serviceTierMultiplier");
-    requireNonNegativeBigDecimal(
-        pricing.getInputPerMillionTokens(), path + ".inputPerMillionTokens");
-    requireNonNegativeBigDecimal(
-        pricing.getOutputPerMillionTokens(), path + ".outputPerMillionTokens");
-    requireNonNegativeBigDecimal(
-        pricing.getCacheReadPerMillionTokens(), path + ".cacheReadPerMillionTokens");
-    requireNonNegativeBigDecimal(
-        pricing.getCacheWritePerMillionTokens(), path + ".cacheWritePerMillionTokens");
-    requireNonNegativeBigDecimal(
-        pricing.getCacheWriteLongPerMillionTokens(), path + ".cacheWriteLongPerMillionTokens");
-    requireNonNegativeBigDecimal(
-        pricing.getReasoningPerMillionTokens(), path + ".reasoningPerMillionTokens");
+    validateRateSet(pricing.getBase(), path + ".base");
+    List<AgentModelPricingOverrideDTO> overrides = pricing.getOverrides();
+    if (overrides != null) {
+      requireRuleCount(overrides.size(), path + ".overrides");
+      Set<String> ids = new HashSet<>();
+      for (int index = 0; index < overrides.size(); index++) {
+        AgentModelPricingOverrideDTO override = overrides.get(index);
+        if (override == null) {
+          throw invalid(path + ".overrides[" + index + "] must be an object");
+        }
+        String rulePath = path + ".overrides[" + index + "]";
+        requireRuleId(override.getId(), ids, rulePath + ".id");
+        validateCondition(override.getWhen(), rulePath + ".when", 0);
+        validateRatePatch(override.getRates(), rulePath + ".rates");
+      }
+    }
+    List<AgentModelPricingMultiplierDTO> multipliers = pricing.getMultipliers();
+    if (multipliers != null) {
+      requireRuleCount(multipliers.size(), path + ".multipliers");
+      Set<String> ids = new HashSet<>();
+      for (int index = 0; index < multipliers.size(); index++) {
+        AgentModelPricingMultiplierDTO multiplier = multipliers.get(index);
+        if (multiplier == null) {
+          throw invalid(path + ".multipliers[" + index + "] must be an object");
+        }
+        String rulePath = path + ".multipliers[" + index + "]";
+        requireRuleId(multiplier.getId(), ids, rulePath + ".id");
+        validateCondition(multiplier.getWhen(), rulePath + ".when", 0);
+        validateFactors(multiplier.getFactors(), rulePath + ".factors");
+      }
+    }
+  }
+
+  private static void validateRateSet(AgentModelRateSetDTO rates, String path) {
+    if (rates == null) {
+      return;
+    }
+    requireOptionalNonNegative(rates.getInput(), path + ".input");
+    requireOptionalNonNegative(rates.getOutput(), path + ".output");
+    requireOptionalNonNegative(rates.getCacheRead(), path + ".cacheRead");
+    requireOptionalNonNegative(rates.getCacheWrite(), path + ".cacheWrite");
+    requireOptionalNonNegative(rates.getReasoning(), path + ".reasoning");
+    validateTtlRates(rates.getCacheWriteByTtl(), path + ".cacheWriteByTtl");
+  }
+
+  private static void validateRatePatch(AgentModelRatePatchDTO rates, String path) {
+    if (rates == null) {
+      throw invalid(path + " must be an object");
+    }
+    requireOptionalNonNegative(rates.getInput(), path + ".input");
+    requireOptionalNonNegative(rates.getOutput(), path + ".output");
+    requireOptionalNonNegative(rates.getCacheRead(), path + ".cacheRead");
+    requireOptionalNonNegative(rates.getCacheWrite(), path + ".cacheWrite");
+    requireOptionalNonNegative(rates.getReasoning(), path + ".reasoning");
+    validateTtlRates(rates.getCacheWriteByTtl(), path + ".cacheWriteByTtl");
+  }
+
+  private static void validateFactors(AgentModelPricingFactorsDTO factors, String path) {
+    if (factors == null) {
+      throw invalid(path + " must be an object");
+    }
+    requireOptionalNonNegative(factors.getInput(), path + ".input");
+    requireOptionalNonNegative(factors.getOutput(), path + ".output");
+    requireOptionalNonNegative(factors.getCacheRead(), path + ".cacheRead");
+    requireOptionalNonNegative(factors.getCacheWrite(), path + ".cacheWrite");
+    requireOptionalNonNegative(factors.getReasoning(), path + ".reasoning");
+  }
+
+  private static void validateTtlRates(Map<String, BigDecimal> rates, String path) {
+    if (rates == null) {
+      return;
+    }
+    if (rates.size() > ModelPricing.MAX_RULES) {
+      throw invalid(path + " must not exceed " + ModelPricing.MAX_RULES + " entries");
+    }
+    Set<Long> ttls = new HashSet<>();
+    for (Map.Entry<String, BigDecimal> entry : rates.entrySet()) {
+      long ttl = parseTtl(entry.getKey(), path);
+      if (!ttls.add(ttl)) {
+        throw invalid(path + " contains duplicate TTL: " + ttl);
+      }
+      requireOptionalNonNegative(entry.getValue(), path + "." + ttl);
+    }
+  }
+
+  private static void requireRuleCount(int size, String path) {
+    if (size > ModelPricing.MAX_RULES) {
+      throw invalid(path + " must not exceed " + ModelPricing.MAX_RULES + " rules");
+    }
+  }
+
+  private static void requireRuleId(String id, Set<String> ids, String path) {
+    requireNonBlank(id, path);
+    if (!ids.add(id)) {
+      throw invalid("config.pricing rule ids must be unique: " + id);
+    }
+  }
+
+  private static void validateCondition(
+      AgentModelPricingConditionDTO condition, String path, int depth) {
+    if (condition == null) {
+      throw invalid(path + " must be an object");
+    }
+    if (depth > ModelPricingCondition.MAX_DEPTH) {
+      throw invalid(path + " nesting must not exceed " + ModelPricingCondition.MAX_DEPTH);
+    }
+    AgentModelPricingContextConditionDTO context = condition.getContext();
+    if (context != null) {
+      String contextPath = path + ".context";
+      requireOptionalNonNegativeInt(context.getGt(), contextPath + ".gt");
+      requireOptionalNonNegativeInt(context.getGte(), contextPath + ".gte");
+      requireOptionalNonNegativeInt(context.getLt(), contextPath + ".lt");
+      requireOptionalNonNegativeInt(context.getLte(), contextPath + ".lte");
+      ensureCondition(
+          () ->
+              new ModelPricingCondition.Context(
+                  context.getGt(), context.getGte(), context.getLt(), context.getLte()),
+          contextPath);
+    }
+    List<String> serviceTier = condition.getServiceTier();
+    if (serviceTier != null) {
+      if (serviceTier.size() > ModelPricingCondition.MAX_LIST_SIZE) {
+        throw invalid(
+            path
+                + ".serviceTier must not exceed "
+                + ModelPricingCondition.MAX_LIST_SIZE
+                + " values");
+      }
+      for (int index = 0; index < serviceTier.size(); index++) {
+        requireNonBlank(serviceTier.get(index), path + ".serviceTier[" + index + "]");
+      }
+      Set<String> uniqueTiers = new HashSet<>(serviceTier);
+      if (uniqueTiers.size() != serviceTier.size()) {
+        throw invalid(path + ".serviceTier contains duplicate value");
+      }
+    }
+    AgentModelPricingDateConditionDTO date = condition.getDate();
+    if (date != null) {
+      String datePath = path + ".date";
+      LocalDate gte = parseDate(date.getGte(), datePath + ".gte");
+      LocalDate lt = parseDate(date.getLt(), datePath + ".lt");
+      ensureCondition(() -> new ModelPricingCondition.DateRange(gte, lt), datePath);
+    }
+    AgentModelPricingTimeConditionDTO time = condition.getTime();
+    if (time != null) {
+      String timePath = path + ".time";
+      LocalTime start = parseTime(time.getStart(), timePath + ".start");
+      LocalTime end = parseTime(time.getEnd(), timePath + ".end");
+      requireNonBlank(time.getTimezone(), timePath + ".timezone");
+      ZoneId timezone;
+      try {
+        timezone = ZoneId.of(time.getTimezone());
+      } catch (DateTimeException error) {
+        throw invalid(timePath + ".timezone must be an IANA time zone");
+      }
+      List<Integer> weekdays = time.getWeekdays();
+      if (weekdays != null && weekdays.size() > 7) {
+        throw invalid(timePath + ".weekdays must not exceed 7 values");
+      }
+      ensureCondition(
+          () -> new ModelPricingCondition.TimeWindow(start, end, timezone, weekdays), timePath);
+    }
+    validateConditionList(condition.getAll(), path + ".all", depth);
+    validateConditionList(condition.getAny(), path + ".any", depth);
+    if (condition.getNot() != null) {
+      validateCondition(condition.getNot(), path + ".not", depth + 1);
+    }
+  }
+
+  private static void validateConditionList(
+      List<AgentModelPricingConditionDTO> conditions, String path, int depth) {
+    if (conditions == null) {
+      return;
+    }
+    if (conditions.size() > ModelPricingCondition.MAX_LIST_SIZE) {
+      throw invalid(
+          path + " must not exceed " + ModelPricingCondition.MAX_LIST_SIZE + " conditions");
+    }
+    for (int index = 0; index < conditions.size(); index++) {
+      validateCondition(conditions.get(index), path + "[" + index + "]", depth + 1);
+    }
+  }
+
+  private static LocalDate parseDate(String value, String path) {
+    requireNonBlank(value, path);
+    try {
+      return LocalDate.parse(value);
+    } catch (DateTimeParseException error) {
+      throw invalid(path + " must be YYYY-MM-DD");
+    }
+  }
+
+  private static LocalTime parseTime(String value, String path) {
+    requireNonBlank(value, path);
+    try {
+      return LocalTime.parse(value);
+    } catch (DateTimeParseException error) {
+      throw invalid(path + " must be HH:mm");
+    }
+  }
+
+  private static long parseTtl(String value, String path) {
+    try {
+      long ttl = Long.parseLong(value);
+      if (ttl > 0) {
+        return ttl;
+      }
+    } catch (NumberFormatException error) {
+      // fall through to the single public error below
+    }
+    throw invalid(path + " keys must be positive integer seconds");
+  }
+
+  private static void requireOptionalNonNegative(BigDecimal value, String path) {
+    if (value == null) {
+      return;
+    }
+    if (value.signum() < 0) {
+      throw invalid(path + " must not be negative");
+    }
+    if (value.precision() > ModelPricing.MAX_DECIMAL_PRECISION) {
+      throw invalid(path + " precision must not exceed " + ModelPricing.MAX_DECIMAL_PRECISION);
+    }
+    if (value.scale() > ModelPricing.MAX_DECIMAL_SCALE) {
+      throw invalid(path + " scale must not exceed " + ModelPricing.MAX_DECIMAL_SCALE);
+    }
+  }
+
+  private static void requireOptionalNonNegativeInt(Integer value, String path) {
+    if (value != null && value < 0) {
+      throw invalid(path + " must not be negative");
+    }
+  }
+
+  private static void ensureCondition(Runnable constructor, String path) {
+    try {
+      constructor.run();
+    } catch (IllegalArgumentException error) {
+      throw invalid(path + " is invalid: " + error.getMessage(), error);
+    }
   }
 
   private void validateReasoningEffort(String reasoningEffort, String path) {
@@ -303,24 +543,6 @@ public final class AgentModelRuntimeConfigParser {
     }
   }
 
-  private static void requirePositiveBigDecimal(BigDecimal value, String path) {
-    if (value == null) {
-      throw invalid(path + " must be a number");
-    }
-    if (value.signum() <= 0) {
-      throw invalid(path + " must be positive");
-    }
-  }
-
-  private static void requireNonNegativeBigDecimal(BigDecimal value, String path) {
-    if (value == null) {
-      throw invalid(path + " must be a number");
-    }
-    if (value.signum() < 0) {
-      throw invalid(path + " must not be negative");
-    }
-  }
-
   private static String mappingPath(DatabindException error) {
     StringBuilder path = new StringBuilder("config");
     for (JacksonException.Reference reference : error.getPath()) {
@@ -356,21 +578,129 @@ public final class AgentModelRuntimeConfigParser {
 
   private static ModelPricing toModelPricing(AgentModelPricingDTO pricing) {
     try {
-      return new ModelPricing(
-          pricing.getCurrency(),
-          pricing.getPricingTier(),
-          pricing.getServiceTier(),
-          pricing.getServiceTierMultiplier(),
-          pricing.getVersion(),
-          pricing.getInputPerMillionTokens(),
-          pricing.getOutputPerMillionTokens(),
-          pricing.getCacheReadPerMillionTokens(),
-          pricing.getCacheWritePerMillionTokens(),
-          pricing.getCacheWriteLongPerMillionTokens(),
-          pricing.getReasoningPerMillionTokens());
+      List<ModelPricing.Override> overrides = new ArrayList<>();
+      if (pricing.getOverrides() != null) {
+        for (AgentModelPricingOverrideDTO override : pricing.getOverrides()) {
+          overrides.add(
+              new ModelPricing.Override(
+                  override.getId(),
+                  toCondition(override.getWhen()),
+                  toRatePatch(override.getRates())));
+        }
+      }
+      List<ModelPricing.Multiplier> multipliers = new ArrayList<>();
+      if (pricing.getMultipliers() != null) {
+        for (AgentModelPricingMultiplierDTO multiplier : pricing.getMultipliers()) {
+          multipliers.add(
+              new ModelPricing.Multiplier(
+                  multiplier.getId(),
+                  toCondition(multiplier.getWhen()),
+                  toFactors(multiplier.getFactors())));
+        }
+      }
+      return new ModelPricing(toRateSet(pricing.getBase()), overrides, multipliers);
     } catch (IllegalArgumentException error) {
       throw invalid("config.pricing is invalid: " + error.getMessage(), error);
     }
+  }
+
+  private static ModelPricing.RateSet toRateSet(AgentModelRateSetDTO rates) {
+    if (rates == null) {
+      return ModelPricing.RateSet.ZERO;
+    }
+    return new ModelPricing.RateSet(
+        zeroIfNull(rates.getInput()),
+        zeroIfNull(rates.getOutput()),
+        zeroIfNull(rates.getCacheRead()),
+        zeroIfNull(rates.getCacheWrite()),
+        toTtlRates(rates.getCacheWriteByTtl()),
+        rates.getReasoning());
+  }
+
+  private static ModelPricing.RatePatch toRatePatch(AgentModelRatePatchDTO rates) {
+    return new ModelPricing.RatePatch(
+        rates.getInput(),
+        rates.getOutput(),
+        rates.getCacheRead(),
+        rates.getCacheWrite(),
+        rates.getCacheWriteByTtl() == null ? null : toTtlRates(rates.getCacheWriteByTtl()),
+        rates.getReasoning(),
+        rates.isReasoningSpecified());
+  }
+
+  private static ModelPricing.Factors toFactors(AgentModelPricingFactorsDTO factors) {
+    return new ModelPricing.Factors(
+        factors.getInput(),
+        factors.getOutput(),
+        factors.getCacheRead(),
+        factors.getCacheWrite(),
+        factors.getReasoning());
+  }
+
+  private static Map<Long, BigDecimal> toTtlRates(Map<String, BigDecimal> rates) {
+    if (rates == null || rates.isEmpty()) {
+      return Map.of();
+    }
+    Map<Long, BigDecimal> result = new LinkedHashMap<>();
+    for (Map.Entry<String, BigDecimal> entry : rates.entrySet()) {
+      long ttl = parseTtl(entry.getKey(), "config.pricing.cacheWriteByTtl");
+      if (result.put(ttl, entry.getValue()) != null) {
+        throw new IllegalArgumentException("cacheWriteByTtl contains duplicate TTL: " + ttl);
+      }
+    }
+    return Map.copyOf(result);
+  }
+
+  private static BigDecimal zeroIfNull(BigDecimal value) {
+    return value == null ? BigDecimal.ZERO : value;
+  }
+
+  private static ModelPricingCondition toCondition(AgentModelPricingConditionDTO condition) {
+    ModelPricingCondition.Context context = null;
+    AgentModelPricingContextConditionDTO contextDto = condition.getContext();
+    if (contextDto != null) {
+      context =
+          new ModelPricingCondition.Context(
+              contextDto.getGt(), contextDto.getGte(), contextDto.getLt(), contextDto.getLte());
+    }
+    ModelPricingCondition.DateRange date = null;
+    AgentModelPricingDateConditionDTO dateDto = condition.getDate();
+    if (dateDto != null) {
+      date =
+          new ModelPricingCondition.DateRange(
+              parseDate(dateDto.getGte(), "config.pricing.condition.date.gte"),
+              parseDate(dateDto.getLt(), "config.pricing.condition.date.lt"));
+    }
+    ModelPricingCondition.TimeWindow time = null;
+    AgentModelPricingTimeConditionDTO timeDto = condition.getTime();
+    if (timeDto != null) {
+      time =
+          new ModelPricingCondition.TimeWindow(
+              parseTime(timeDto.getStart(), "config.pricing.condition.time.start"),
+              parseTime(timeDto.getEnd(), "config.pricing.condition.time.end"),
+              ZoneId.of(timeDto.getTimezone()),
+              timeDto.getWeekdays());
+    }
+    return new ModelPricingCondition(
+        context,
+        condition.getServiceTier(),
+        date,
+        time,
+        toConditions(condition.getAll()),
+        toConditions(condition.getAny()),
+        condition.getNot() == null ? null : toCondition(condition.getNot()));
+  }
+
+  private static List<ModelPricingCondition> toConditions(
+      List<AgentModelPricingConditionDTO> conditions) {
+    if (conditions == null || conditions.isEmpty()) {
+      return List.of();
+    }
+    List<ModelPricingCondition> result = new ArrayList<>(conditions.size());
+    for (AgentModelPricingConditionDTO condition : conditions) {
+      result.add(toCondition(condition));
+    }
+    return result;
   }
 
   private static IllegalArgumentException invalid(String message) {

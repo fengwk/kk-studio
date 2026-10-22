@@ -196,7 +196,7 @@ public final class ScriptedModelGateway implements ModelGateway {
   }
 
   private static ModelUsage usage() {
-    return new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L);
+    return new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L);
   }
 
   /** 一次 Reviewer Run 的脚本化决定。 */

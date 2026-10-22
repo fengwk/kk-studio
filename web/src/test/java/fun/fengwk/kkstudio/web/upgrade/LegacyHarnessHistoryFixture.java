@@ -31,6 +31,7 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -113,7 +114,7 @@ final class LegacyHarnessHistoryFixture {
                         new ToolCallMessageContent(
                             "call_1", "read", "tool.read", "{\"path\":\"a.txt\"}"))),
                 new AssistantMessageMetadata(
-                    GenerationStopReason.COMPLETE, new ModelUsage(10, 20, 0, 0, 0, 0, 30)),
+                    GenerationStopReason.COMPLETE, new ModelUsage(10, 20, 0, 0, Map.of(), 0L, 30L)),
                 null));
     String toolResultMessage =
         ENTRY_CODEC.encode(

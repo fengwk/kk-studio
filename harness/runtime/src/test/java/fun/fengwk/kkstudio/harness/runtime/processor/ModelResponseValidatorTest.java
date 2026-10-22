@@ -11,6 +11,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 
 import java.util.List;
+import java.util.Map;
 
 /** ModelResponseValidator 直接单元测试：只校验所有调用共享的 canonical response 不变量。 */
 class ModelResponseValidatorTest {
@@ -143,7 +144,7 @@ class ModelResponseValidatorTest {
         null,
         calls,
         stopReason,
-        new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
+        new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L),
         "req-1",
         null,
         null);

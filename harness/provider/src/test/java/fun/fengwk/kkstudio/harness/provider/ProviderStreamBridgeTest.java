@@ -20,6 +20,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -406,7 +407,7 @@ class ProviderStreamBridgeTest {
             "",
             List.of(),
             GenerationStopReason.COMPLETE,
-            new ModelUsage(1, 1, 0, 0, 0, 0, 2),
+            new ModelUsage(1, 1, 0, 0, Map.of(), 0L, 2L),
             "req1",
             "tier1",
             "{}");

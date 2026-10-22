@@ -107,7 +107,7 @@ final class OpenAiResponsesStreamAccumulator {
   private boolean hasRawTotalTokens = false;
   private long cachedTokens = 0L;
   private long cacheWriteTokens = 0L;
-  private long reasoningTokens = 0L;
+  private Long reasoningTokens = null;
   private ProviderCompletion finishedCompletion = null;
 
   /**
@@ -561,7 +561,7 @@ final class OpenAiResponsesStreamAccumulator {
     rawTotalTokens = 0L;
     cachedTokens = 0L;
     cacheWriteTokens = 0L;
-    reasoningTokens = 0L;
+    reasoningTokens = null;
   }
 
   private void extractResponseData(JsonNode responseNode, boolean isTerminal) {
@@ -614,8 +614,10 @@ final class OpenAiResponsesStreamAccumulator {
             throw new ProviderException(
                 ProviderErrorKind.INVALID_RESPONSE, "output_tokens_details is not a JSON object");
           }
-          reasoningTokens =
-              parseNonNegativeLong(outDetails.get("reasoning_tokens"), "reasoning_tokens");
+          if (outDetails.has("reasoning_tokens") && !outDetails.get("reasoning_tokens").isNull()) {
+            reasoningTokens =
+                parseNonNegativeLong(outDetails.get("reasoning_tokens"), "reasoning_tokens");
+          }
         }
       }
     }
@@ -766,18 +768,17 @@ final class OpenAiResponsesStreamAccumulator {
       canReplay = false;
     }
 
-    // Token 用量归一化：total_tokens 缺失时为 0L，不凭空合成
+    // Token 用量归一化：total_tokens 缺失时为 null，不凭空合成；输出总量包含 reasoning。
     long ordinaryInput = usageRemainder(rawInputTokens, cachedTokens, cacheWriteTokens);
-    long ordinaryOutput = usageRemainder(rawOutputTokens, reasoningTokens);
-    long providerTotalTokens = hasRawTotalTokens ? rawTotalTokens : 0L;
+    Long providerTotalTokens = hasRawTotalTokens ? rawTotalTokens : null;
 
     ModelUsage usage =
         new ModelUsage(
             ordinaryInput,
-            ordinaryOutput,
+            rawOutputTokens,
             cachedTokens,
             cacheWriteTokens,
-            0L,
+            Map.of(),
             reasoningTokens,
             providerTotalTokens);
 

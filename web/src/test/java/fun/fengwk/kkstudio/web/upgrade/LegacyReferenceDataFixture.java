@@ -546,7 +546,7 @@ final class LegacyReferenceDataFixture {
                     new ToolCallMessageContent(
                         "call_dense_1", "read", "tool.read", "{\"path\":\"legacy.txt\"}"))),
             new AssistantMessageMetadata(
-                GenerationStopReason.COMPLETE, new ModelUsage(11, 22, 0, 0, 0, 0, 33)),
+                GenerationStopReason.COMPLETE, new ModelUsage(11, 22, 0, 0, Map.of(), 0L, 33L)),
             null));
   }
 

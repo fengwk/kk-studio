@@ -1260,7 +1260,7 @@ class HistoryEntryPayloadJsonCodecTest {
   }
 
   private static AssistantMessageMetadata metadata(GenerationStopReason reason) {
-    ModelUsage usage = new ModelUsage(1L, 1L, 0L, 0L, 0L, 0L, 2L);
+    ModelUsage usage = new ModelUsage(1L, 1L, 0L, 0L, Map.of(), 0L, 2L);
     return new AssistantMessageMetadata(reason, usage);
   }
 

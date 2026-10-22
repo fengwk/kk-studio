@@ -213,8 +213,8 @@ class AnthropicHistoryCacheLiveProbeTest {
             + usage.cacheReadTokens()
             + " write="
             + usage.cacheWriteTokens()
-            + " writeLong="
-            + usage.cacheWriteLongTokens()
+            + " writeByTtl="
+            + usage.cacheWriteByTtl()
             + " rawUsage="
             + safe);
     return result.get();

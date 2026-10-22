@@ -45,6 +45,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.VideoMessageContent;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -133,7 +134,8 @@ class CompactionPlannerTest {
                         video,
                         resource)),
                 new AssistantMessageMetadata(
-                    GenerationStopReason.COMPLETE, new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L)),
+                    GenerationStopReason.COMPLETE,
+                    new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L)),
                 null),
             BASE);
     Entry tool =
@@ -932,7 +934,7 @@ class CompactionPlannerTest {
               new MessagePayload(
                   new AgentMessage(AgentMessageRole.ASSISTANT, contents),
                   new AssistantMessageMetadata(
-                      stopReason, new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L)),
+                      stopReason, new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L)),
                   null),
               BASE));
       return this;
@@ -952,7 +954,8 @@ class CompactionPlannerTest {
               new MessagePayload(
                   new AgentMessage(AgentMessageRole.ASSISTANT, contents),
                   new AssistantMessageMetadata(
-                      GenerationStopReason.COMPLETE, new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L)),
+                      GenerationStopReason.COMPLETE,
+                      new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L)),
                   null),
               BASE));
       return this;

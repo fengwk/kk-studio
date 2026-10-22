@@ -93,15 +93,16 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /** ThreadProcessor 自动压缩 turn：阈值触发、输入不绕过、FULL 应用、HISTORY 部分延续与 overflow 语义（每 claim 一个动作）。 */
 class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
 
   private static final ModelUsage OVER_THRESHOLD_USAGE =
-      new ModelUsage(90_000L, 2L, 0L, 0L, 0L, 0L, 90_002L);
+      new ModelUsage(90_000L, 2L, 0L, 0L, Map.of(), 0L, 90_002L);
   private static final ModelUsage BELOW_THRESHOLD_USAGE =
-      new ModelUsage(80_000L, 2L, 0L, 0L, 0L, 0L, 80_002L);
+      new ModelUsage(80_000L, 2L, 0L, 0L, Map.of(), 0L, 80_002L);
 
   @Test
   void thresholdCompactionRunsBeforeQueuedInputAndConsumesZeroCommands() {
@@ -299,7 +300,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
         compaction.joinInvocationId(),
         "response text",
         GenerationStopReason.COMPLETE,
-        new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L));
+        new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L));
 
     // 一个 claim：THRESHOLD FULL 消费已完成 join，完成压缩关闭 turn（不继续，直接 complete）。
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
@@ -314,7 +315,8 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     // 正式模型输出的原始 usage/stopReason 随结果 durable；metadata 经 canonical codec 无损往返，且不含 cost/pricing。
     assertNotNull(payload.assistantMetadata());
     assertEquals(GenerationStopReason.COMPLETE, payload.assistantMetadata().stopReason());
-    assertEquals(new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L), payload.assistantMetadata().usage());
+    assertEquals(
+        new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L), payload.assistantMetadata().usage());
     HistoryEntryPayloadJsonCodec codec = new HistoryEntryPayloadJsonCodec();
     String durableJson = codec.encode(payload);
     assertEquals(payload, codec.decode(EntryType.COMPACTION, durableJson));
@@ -1912,13 +1914,12 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
   }
 
   private static ModelUsage usage() {
-    return new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L);
+    return new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L);
   }
 
   private static ModelCost cost() {
     return new ModelCost(
         "USD",
-        BigDecimal.ZERO,
         BigDecimal.ZERO,
         BigDecimal.ZERO,
         BigDecimal.ZERO,

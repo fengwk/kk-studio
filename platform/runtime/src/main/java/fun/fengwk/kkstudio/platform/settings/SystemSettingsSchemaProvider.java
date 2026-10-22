@@ -88,6 +88,22 @@ public class SystemSettingsSchemaProvider {
                         400,
                         599)),
                 group(
+                    "aiRuntime.modelCatalog",
+                    "settings.section.aiRuntime.modelCatalog.title",
+                    "settings.section.aiRuntime.modelCatalog.description",
+                    false,
+                    ApplyTiming.NEXT_HTTP_REQUEST,
+                    field(
+                        "aiRuntime.modelCatalogSource",
+                        "settings.field.aiRuntime.modelCatalogSource",
+                        "settings.field.aiRuntime.modelCatalogSource.hint",
+                        FieldType.ENUM,
+                        false,
+                        null,
+                        null,
+                        option("models_dev_v2", "settings.option.modelCatalogSource.modelsDevV2"),
+                        option("models_dev_v1", "settings.option.modelCatalogSource.modelsDevV1"))),
+                group(
                     "aiRuntime.compaction",
                     "settings.section.aiRuntime.compaction.title",
                     "settings.section.aiRuntime.compaction.description",

@@ -33,7 +33,7 @@ class AgentModelRuntimeConfigParserTest {
   private final AgentModelRuntimeConfigParser parser =
       new AgentModelRuntimeConfigParser(JsonMapper.builder().build());
 
-  /** 每个可执行字段（含 6 个独立价格）都经严格解析保留下来；variant 只保留 id、reasoningEffort 与原生协议选项。 */
+  /** 定价段落按完整定义解析：基础费率与 TTL 价格精确保留，不再存在旧 6 个扁平价格字段。 */
   @Test
   void parsesCompleteRuntimeModelWithoutTokenBasedPriceInference() {
     var parsed = parser.parse(validConfig());
@@ -46,17 +46,16 @@ class AgentModelRuntimeConfigParserTest {
     assertTrue(parsed.reasoning());
     assertEquals("quality", parsed.defaultVariant());
     assertEquals(List.of(new ModelVariant("quality", "high")), parsed.variants());
-    assertEquals("USD", parsed.pricing().currency());
-    assertEquals("batch", parsed.pricing().pricingTier());
-    assertEquals("priority", parsed.pricing().serviceTier());
-    assertEquals(new BigDecimal("1.25"), parsed.pricing().serviceTierMultiplier());
-    assertEquals("2026-07-16", parsed.pricing().version());
-    assertEquals(new BigDecimal("1.1"), parsed.pricing().inputPerMillionTokens());
-    assertEquals(new BigDecimal("2.2"), parsed.pricing().outputPerMillionTokens());
-    assertEquals(new BigDecimal("0.3"), parsed.pricing().cacheReadPerMillionTokens());
-    assertEquals(new BigDecimal("0.4"), parsed.pricing().cacheWritePerMillionTokens());
-    assertEquals(new BigDecimal("0.5"), parsed.pricing().cacheWriteLongPerMillionTokens());
-    assertEquals(new BigDecimal("3.6"), parsed.pricing().reasoningPerMillionTokens());
+    var pricing = parsed.pricing();
+    assertEquals(new BigDecimal("1.1"), pricing.base().input());
+    assertEquals(new BigDecimal("2.2"), pricing.base().output());
+    assertEquals(new BigDecimal("0.3"), pricing.base().cacheRead());
+    assertEquals(new BigDecimal("0.4"), pricing.base().cacheWrite());
+    assertEquals(new BigDecimal("0.5"), pricing.base().cacheWriteRate(300));
+    assertEquals(new BigDecimal("0.4"), pricing.base().cacheWriteRate(3600));
+    assertEquals(new BigDecimal("3.6"), pricing.base().reasoning());
+    assertEquals(List.of(), pricing.overrides());
+    assertEquals(List.of(), pricing.multipliers());
   }
 
   /** 类型化 DTO 来回往返：decode -> encode -> parse 得到相同的 runtime 快照。 */
@@ -65,7 +64,7 @@ class AgentModelRuntimeConfigParserTest {
     AgentModelConfigDTO decoded = parser.decode(validConfig());
     String encoded = parser.encode(decoded);
     var parsed = parser.parse(encoded);
-    assertEquals("USD", parsed.pricing().currency());
+    assertEquals(new BigDecimal("1.1"), parsed.pricing().base().input());
     assertEquals("quality", parsed.defaultVariant());
     assertEquals(List.of(new ModelVariant("quality", "high")), parsed.variants());
   }
@@ -378,9 +377,8 @@ class AgentModelRuntimeConfigParserTest {
         validConfig().replace("\"reasoningEffort\":\"high\"", "\"reasoningEffort\":\"   \""),
         "reasoningEffort must not be blank");
     assertInvalid(
-        validConfig()
-            .replace("\"reasoningPerMillionTokens\":3.6", "\"reasoningPerMillionTokens\":null"),
-        "reasoningPerMillionTokens");
+        validConfig().replace("\"reasoning\":\"3.6\"", "\"reasoning\":\"-1\""),
+        "reasoning must not be negative");
     assertInvalid(
         validConfig().replace("[\"TEXT\",\"IMAGE\"]", "[\"UNKNOWN\"]"), "inputModalities[0]");
   }
@@ -406,11 +404,8 @@ class AgentModelRuntimeConfigParserTest {
         validConfig().replace("\"defaultVariant\":\"quality\"", "\"defaultVariant\":\"missing\""),
         "defaultVariant must match");
     assertInvalid(
-        validConfig().replace("\"serviceTierMultiplier\":1.25", "\"serviceTierMultiplier\":0"),
-        "serviceTierMultiplier must be positive");
-    assertInvalid(
-        validConfig().replace("\"inputPerMillionTokens\":1.1", "\"inputPerMillionTokens\":-1"),
-        "inputPerMillionTokens must not be negative");
+        validConfig().replace("\"input\":\"1.1\"", "\"input\":\"-1\""),
+        "input must not be negative");
     assertInvalid(
         validConfig()
             .replace(
@@ -447,11 +442,9 @@ class AgentModelRuntimeConfigParserTest {
         "{\"limit\":{\"context\":1,\"output\":1},\"abilities\":{\"tools\":true,"
             + "\"reasoning\":true,\"inputModalities\":[\"TEXT\"]},"
             + "\"defaultVariant\":\"x\",\"variants\":[],\"pricing\":{"
-            + "\"currency\":\"USD\",\"pricingTier\":\"x\",\"serviceTier\":\"x\","
-            + "\"serviceTierMultiplier\":1,\"version\":\"v\",\"inputPerMillionTokens\":0,"
-            + "\"outputPerMillionTokens\":0,\"cacheReadPerMillionTokens\":0,"
-            + "\"cacheWritePerMillionTokens\":0,\"cacheWriteLongPerMillionTokens\":0,"
-            + "\"reasoningPerMillionTokens\":0}}",
+            + "\"base\":{\"input\":\"0\",\"output\":\"0\",\"cacheRead\":\"0\","
+            + "\"cacheWrite\":\"0\",\"cacheWriteByTtl\":{},\"reasoning\":null},"
+            + "\"overrides\":[],\"multipliers\":[]}}",
         "config.variants must not be empty");
   }
 
@@ -493,14 +486,12 @@ class AgentModelRuntimeConfigParserTest {
         pricingError.getMessage().contains("config.pricing is required"),
         pricingError.getMessage());
 
-    AgentModelConfigDTO zeroMultiplier =
-        copy(base, c -> c.getPricing().setServiceTierMultiplier(BigDecimal.ZERO));
+    AgentModelConfigDTO negativeInput =
+        copy(base, c -> c.getPricing().getBase().setInput(new BigDecimal("-1")));
     IllegalArgumentException multiplierError =
-        assertThrows(IllegalArgumentException.class, () -> parser.parse(zeroMultiplier));
+        assertThrows(IllegalArgumentException.class, () -> parser.parse(negativeInput));
     assertTrue(
-        multiplierError
-            .getMessage()
-            .contains("config.pricing.serviceTierMultiplier must be positive"),
+        multiplierError.getMessage().contains("config.pricing.base.input must not be negative"),
         multiplierError.getMessage());
   }
 
@@ -575,12 +566,9 @@ class AgentModelRuntimeConfigParserTest {
         + "\"inputModalities\":[\"TEXT\",\"IMAGE\"]},"
         + "\"defaultVariant\":\"quality\","
         + VARIANT_JSON
-        + "\"pricing\":{\"currency\":\"USD\",\"pricingTier\":\"batch\","
-        + "\"serviceTier\":\"priority\",\"serviceTierMultiplier\":1.25,"
-        + "\"version\":\"2026-07-16\",\"inputPerMillionTokens\":1.1,"
-        + "\"outputPerMillionTokens\":2.2,\"cacheReadPerMillionTokens\":0.3,"
-        + "\"cacheWritePerMillionTokens\":0.4,"
-        + "\"cacheWriteLongPerMillionTokens\":0.5,"
-        + "\"reasoningPerMillionTokens\":3.6}}";
+        + "\"pricing\":{\"base\":{\"input\":\"1.1\",\"output\":\"2.2\","
+        + "\"cacheRead\":\"0.3\",\"cacheWrite\":\"0.4\","
+        + "\"cacheWriteByTtl\":{\"300\":\"0.5\"},\"reasoning\":\"3.6\"},"
+        + "\"overrides\":[],\"multipliers\":[]}}";
   }
 }

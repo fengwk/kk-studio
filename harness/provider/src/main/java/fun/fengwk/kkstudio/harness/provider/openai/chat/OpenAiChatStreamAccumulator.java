@@ -96,8 +96,8 @@ final class OpenAiChatStreamAccumulator {
   private long cachedTokens = 0L;
   private long cacheWriteTokens = 0L;
   private long completionTokens = 0L;
-  private long reasoningTokens = 0L;
-  private long totalTokens = 0L;
+  private Long reasoningTokens = null;
+  private Long totalTokens = null;
   private String rawUsageJson = "{}";
 
   OpenAiChatStreamAccumulator(
@@ -490,9 +490,9 @@ final class OpenAiChatStreamAccumulator {
     this.promptTokens = optionalNonNegativeLong(usageNode, "prompt_tokens", 0L);
     this.completionTokens = optionalNonNegativeLong(usageNode, "completion_tokens", 0L);
     this.totalTokens =
-        usageNode.has("total_tokens")
+        usageNode.has("total_tokens") && !usageNode.get("total_tokens").isNull()
             ? requiredNonNegativeLong(usageNode.get("total_tokens"), "total_tokens")
-            : 0L;
+            : null;
 
     JsonNode promptDetails = optionalObject(usageNode, "prompt_tokens_details");
     if (promptDetails != null && promptDetails.has("cached_tokens")) {
@@ -529,7 +529,7 @@ final class OpenAiChatStreamAccumulator {
               completionDetails.get("reasoning_tokens"),
               "completion_tokens_details.reasoning_tokens");
     } else {
-      this.reasoningTokens = 0L;
+      this.reasoningTokens = null;
     }
 
     try {
@@ -655,27 +655,18 @@ final class OpenAiChatStreamAccumulator {
       }
     }
 
-    // 互斥 Usage 计算
+    // 输出总量包含 reasoning；reasoning 只作为其可信子集记录，绝不从输出中扣除。
     long ordinaryInput = uncachedTokens(promptTokens, cachedTokens, cacheWriteTokens);
-    long ordinaryOutput =
-        reasoningTokens >= completionTokens ? 0L : completionTokens - reasoningTokens;
-    long inputTokens = ordinaryInput;
-    long outputTokens = ordinaryOutput;
-    long cacheReadTokens = cachedTokens;
-    long cacheWriteTokensVal = cacheWriteTokens;
-    long cacheWriteLongTokensVal = 0L;
-    long reasoningTokensVal = reasoningTokens;
-    long providerTotalTokens = totalTokens;
 
     ModelUsage usage =
         new ModelUsage(
-            inputTokens,
-            outputTokens,
-            cacheReadTokens,
-            cacheWriteTokensVal,
-            cacheWriteLongTokensVal,
-            reasoningTokensVal,
-            providerTotalTokens);
+            ordinaryInput,
+            completionTokens,
+            cachedTokens,
+            cacheWriteTokens,
+            Map.of(),
+            reasoningTokens,
+            totalTokens);
 
     ProviderResponse response =
         new ProviderResponse(

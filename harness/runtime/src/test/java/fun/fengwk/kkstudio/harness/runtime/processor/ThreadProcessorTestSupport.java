@@ -1060,13 +1060,12 @@ final class ThreadProcessorTestSupport {
   }
 
   private static ModelUsage usage() {
-    return new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L);
+    return new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L);
   }
 
   private static ModelCost cost() {
     return new ModelCost(
         "USD",
-        BigDecimal.ZERO,
         BigDecimal.ZERO,
         BigDecimal.ZERO,
         BigDecimal.ZERO,

@@ -16,10 +16,12 @@ import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelRateSetDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelUpdateDTO;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 
 /** 模型变更拒绝 Harness runtime 无法执行的配置。 */
 public class AgentModelMutationFactoryTest {
@@ -60,25 +62,22 @@ public class AgentModelMutationFactoryTest {
   }
 
   @Test
-  public void shouldPreservePricingMetadataAcrossEdit() {
+  public void shouldPreservePricingDefinitionAcrossEdit() {
     AgentModelMutationFactory factory = factory();
     AgentModel model = new AgentModel();
     model.setProviderName("provider");
     model.setName("model");
     model.setModelId("wire-model");
     AgentModelConfigDTO baseline = validConfig();
+    AgentModelRateSetDTO rates = new AgentModelRateSetDTO();
+    rates.setInput(new BigDecimal("7"));
+    rates.setOutput(new BigDecimal("9"));
+    rates.setCacheRead(new BigDecimal("1"));
+    rates.setCacheWrite(new BigDecimal("2"));
+    rates.setCacheWriteByTtl(Map.of("300", new BigDecimal("3")));
+    rates.setReasoning(new BigDecimal("4"));
     AgentModelPricingDTO pricing = baseline.getPricing();
-    pricing.setCurrency("EUR");
-    pricing.setPricingTier("batch");
-    pricing.setServiceTier("priority");
-    pricing.setServiceTierMultiplier(new BigDecimal("1.5"));
-    pricing.setVersion("2026-08-01");
-    pricing.setInputPerMillionTokens(new BigDecimal("7"));
-    pricing.setOutputPerMillionTokens(new BigDecimal("9"));
-    pricing.setCacheReadPerMillionTokens(new BigDecimal("1"));
-    pricing.setCacheWritePerMillionTokens(new BigDecimal("2"));
-    pricing.setCacheWriteLongPerMillionTokens(new BigDecimal("3"));
-    pricing.setReasoningPerMillionTokens(new BigDecimal("4"));
+    pricing.setBase(rates);
 
     AgentModelUpdateDTO update = new AgentModelUpdateDTO();
     update.setName(model.getName());
@@ -91,17 +90,13 @@ public class AgentModelMutationFactoryTest {
         new AgentModelRuntimeConfigParser(JsonMapper.builder().build())
             .decode(model.getConfigJson());
     assertNotNull(persisted.getPricing());
-    assertEquals("EUR", persisted.getPricing().getCurrency());
-    assertEquals("batch", persisted.getPricing().getPricingTier());
-    assertEquals("priority", persisted.getPricing().getServiceTier());
-    assertEquals(new BigDecimal("1.5"), persisted.getPricing().getServiceTierMultiplier());
-    assertEquals("2026-08-01", persisted.getPricing().getVersion());
-    assertEquals(new BigDecimal("7"), persisted.getPricing().getInputPerMillionTokens());
-    assertEquals(new BigDecimal("9"), persisted.getPricing().getOutputPerMillionTokens());
-    assertEquals(new BigDecimal("1"), persisted.getPricing().getCacheReadPerMillionTokens());
-    assertEquals(new BigDecimal("2"), persisted.getPricing().getCacheWritePerMillionTokens());
-    assertEquals(new BigDecimal("3"), persisted.getPricing().getCacheWriteLongPerMillionTokens());
-    assertEquals(new BigDecimal("4"), persisted.getPricing().getReasoningPerMillionTokens());
+    AgentModelRateSetDTO persistedRates = persisted.getPricing().getBase();
+    assertEquals(new BigDecimal("7"), persistedRates.getInput());
+    assertEquals(new BigDecimal("9"), persistedRates.getOutput());
+    assertEquals(new BigDecimal("1"), persistedRates.getCacheRead());
+    assertEquals(new BigDecimal("2"), persistedRates.getCacheWrite());
+    assertEquals(new BigDecimal("3"), persistedRates.getCacheWriteByTtl().get("300"));
+    assertEquals(new BigDecimal("4"), persistedRates.getReasoning());
   }
 
   // 测试意图: 断言 name/modelId 仍受 schema 列宽约束，而 description 已放开为 text 不再拒绝长文本

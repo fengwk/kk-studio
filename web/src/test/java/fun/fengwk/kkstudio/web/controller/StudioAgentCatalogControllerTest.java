@@ -30,6 +30,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelInputModality;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelLimitDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelRateSetDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelVariantDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
@@ -38,6 +39,7 @@ import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 
 /** Provider、Model、Agent Catalog Controller 的 HTTP 契约。 */
 @AutoConfigureMockMvc
@@ -689,17 +691,16 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
     abilities.setInputModalities(List.of(AgentModelInputModality.TEXT));
     config.setAbilities(abilities);
     AgentModelPricingDTO pricing = new AgentModelPricingDTO();
-    pricing.setCurrency("USD");
-    pricing.setPricingTier("test");
-    pricing.setServiceTier("default");
-    pricing.setServiceTierMultiplier(BigDecimal.ONE);
-    pricing.setVersion("v1");
-    pricing.setInputPerMillionTokens(BigDecimal.ZERO);
-    pricing.setOutputPerMillionTokens(BigDecimal.ZERO);
-    pricing.setCacheReadPerMillionTokens(BigDecimal.ZERO);
-    pricing.setCacheWritePerMillionTokens(BigDecimal.ZERO);
-    pricing.setCacheWriteLongPerMillionTokens(BigDecimal.ZERO);
-    pricing.setReasoningPerMillionTokens(BigDecimal.ZERO);
+    AgentModelRateSetDTO base = new AgentModelRateSetDTO();
+    base.setInput(BigDecimal.ZERO);
+    base.setOutput(BigDecimal.ZERO);
+    base.setCacheRead(BigDecimal.ZERO);
+    base.setCacheWrite(BigDecimal.ZERO);
+    base.setCacheWriteByTtl(Map.of());
+    base.setReasoning(null);
+    pricing.setBase(base);
+    pricing.setOverrides(List.of());
+    pricing.setMultipliers(List.of());
     config.setPricing(pricing);
     AgentModelVariantDTO variant = new AgentModelVariantDTO();
     variant.setId("default");

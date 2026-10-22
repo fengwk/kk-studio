@@ -622,7 +622,7 @@ class HarnessRuntimeTreeLockTest {
           AssistantMessageMetadata metadata =
               new AssistantMessageMetadata(
                   GenerationStopReason.COMPLETE,
-                  new ModelUsage(50_000L, 2L, 0L, 0L, 0L, 0L, 50_002L));
+                  new ModelUsage(50_000L, 2L, 0L, 0L, Map.of(), 0L, 50_002L));
           tx.insertEntry(
               new Entry(
                   firstAssistantId,

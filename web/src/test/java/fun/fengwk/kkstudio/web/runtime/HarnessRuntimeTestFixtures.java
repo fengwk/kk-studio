@@ -244,7 +244,7 @@ public final class HarnessRuntimeTestFixtures {
   }
 
   public static ModelUsage usage() {
-    return new ModelUsage(11, 7, 5, 3, 2, 13, 47);
+    return new ModelUsage(11, 20, 5, 3, Map.of(3600L, 3L), 13L, 47L);
   }
 
   public static ProviderResponse toolCallResponse() {

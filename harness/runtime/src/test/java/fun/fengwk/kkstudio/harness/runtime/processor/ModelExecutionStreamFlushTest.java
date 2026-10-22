@@ -2402,7 +2402,7 @@ class ModelExecutionStreamFlushTest {
   }
 
   private static ModelUsage usage() {
-    return new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L);
+    return new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L);
   }
 
   /** 测试用 native replay state：CONTINUE 等非撤下终态必须原样保留它（FILTERED 不保留）。 */
@@ -2417,7 +2417,6 @@ class ModelExecutionStreamFlushTest {
   private static ModelCost cost() {
     return new ModelCost(
         "USD",
-        BigDecimal.ZERO,
         BigDecimal.ZERO,
         BigDecimal.ZERO,
         BigDecimal.ZERO,

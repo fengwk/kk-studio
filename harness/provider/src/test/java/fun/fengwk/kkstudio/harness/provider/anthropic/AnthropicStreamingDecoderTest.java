@@ -357,8 +357,9 @@ class AnthropicStreamingDecoderTest {
     assertEquals(100, usage.inputTokens());
     assertEquals(40, usage.outputTokens());
     assertEquals(20, usage.cacheReadTokens());
-    assertEquals(10, usage.cacheWriteTokens());
-    assertEquals(5, usage.cacheWriteLongTokens());
+    assertEquals(15, usage.cacheWriteTokens());
+    assertEquals(10, usage.cacheWriteByTtl().get(300L));
+    assertEquals(5, usage.cacheWriteByTtl().get(3600L));
     assertEquals(0, usage.totalTokens());
     assertEquals(0, usage.providerTotalTokens());
     assertEquals(175, usage.categorizedTokens());
@@ -534,8 +535,9 @@ class AnthropicStreamingDecoderTest {
     assertEquals(250, usage.inputTokens());
     assertEquals(25, usage.outputTokens());
     assertEquals(40, usage.cacheReadTokens());
-    assertEquals(70, usage.cacheWriteTokens());
-    assertEquals(30, usage.cacheWriteLongTokens());
+    assertEquals(100, usage.cacheWriteTokens());
+    assertEquals(70, usage.cacheWriteByTtl().get(300L));
+    assertEquals(30, usage.cacheWriteByTtl().get(3600L));
     assertEquals(0, usage.totalTokens());
     assertEquals(0, usage.providerTotalTokens());
     assertEquals(415, usage.categorizedTokens());

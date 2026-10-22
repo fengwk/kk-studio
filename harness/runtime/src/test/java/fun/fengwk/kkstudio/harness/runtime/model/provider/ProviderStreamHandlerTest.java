@@ -9,6 +9,7 @@ import tools.jackson.databind.ObjectMapper;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -86,7 +87,7 @@ class ProviderStreamHandlerTest {
         "",
         List.of(),
         GenerationStopReason.COMPLETE,
-        new ModelUsage(1, 1, 0, 0, 0, 0, 2),
+        new ModelUsage(1, 1, 0, 0, Map.of(), 0L, 2L),
         "req-1",
         null,
         "{}");

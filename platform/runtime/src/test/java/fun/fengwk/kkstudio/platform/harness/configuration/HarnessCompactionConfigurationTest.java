@@ -57,7 +57,8 @@ class HarnessCompactionConfigurationTest {
             SystemSettings.AiRuntime.DEFAULT.subagentMaxConcurrency(),
             SystemSettings.AiRuntime.DEFAULT.subagentMaxTotalConcurrency(),
             SystemSettings.AiRuntime.DEFAULT.subagentMaxTurns(),
-            SystemSettings.AiRuntime.DEFAULT.modelHttpRetryStatusCodes());
+            SystemSettings.AiRuntime.DEFAULT.modelHttpRetryStatusCodes(),
+            SystemSettings.AiRuntime.DEFAULT.modelCatalogSource());
     return new SystemSettings(
         SystemSettings.Tool.DEFAULT,
         aiRuntime,

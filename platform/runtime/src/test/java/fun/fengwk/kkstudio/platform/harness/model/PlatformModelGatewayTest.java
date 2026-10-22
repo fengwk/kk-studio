@@ -40,6 +40,7 @@ import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.AbstractExecutorService;
@@ -1074,7 +1075,7 @@ class PlatformModelGatewayTest {
   }
 
   private static ProviderResponse response() {
-    ModelUsage usage = new ModelUsage(1L, 1L, 0L, 0L, 0L, 0L, 2L);
+    ModelUsage usage = new ModelUsage(1L, 1L, 0L, 0L, Map.of(), 0L, 2L);
     return new ProviderResponse(
         "completed", "", List.of(), GenerationStopReason.COMPLETE, usage, null, null, "{}");
   }

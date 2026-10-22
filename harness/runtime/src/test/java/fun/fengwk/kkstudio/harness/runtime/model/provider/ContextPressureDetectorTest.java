@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Context-pressure 纯检测器契约。CANCELLED 不在 facts 中表达，由调用方（adapter classify）先行排除，本测试只验证 detector 的
@@ -226,11 +227,17 @@ class ContextPressureDetectorTest {
   void silentPromptUsageReachingWindowIsContextPressure() {
     long window = 128_000L;
     assertTrue(
-        detect(responseFacts(null, new ModelUsage(100_000, 10, 28_000, 0, 0, 0, 128_010), window)));
+        detect(
+            responseFacts(
+                null, new ModelUsage(100_000, 10, 28_000, 0, Map.of(), 0L, 128_010L), window)));
     assertTrue(
-        detect(responseFacts(null, new ModelUsage(128_000, 10, 0, 0, 0, 0, 128_010), window)));
+        detect(
+            responseFacts(
+                null, new ModelUsage(128_000, 10, 0, 0, Map.of(), 0L, 128_010L), window)));
     assertFalse(
-        detect(responseFacts(null, new ModelUsage(100_000, 10, 27_999, 0, 0, 0, 127_999), window)));
+        detect(
+            responseFacts(
+                null, new ModelUsage(100_000, 10, 27_999, 0, Map.of(), 0L, 127_999L), window)));
   }
 
   /** 意图：严格 LENGTH 恢复条件——LENGTH + output==0 + prompt ≥ ceil(window*0.99) 才成立；低于边界或含 output 不成立。 */
@@ -242,40 +249,40 @@ class ContextPressureDetectorTest {
         detect(
             responseFacts(
                 GenerationStopReason.LENGTH,
-                new ModelUsage(threshold, 0, 0, 0, 0, 0, threshold),
+                new ModelUsage(threshold, 0, 0, 0, Map.of(), 0L, threshold),
                 window)));
     assertTrue(
         detect(
             responseFacts(
                 GenerationStopReason.LENGTH,
-                new ModelUsage(90_000, 0, threshold - 90_000L, 0, 0, 0, threshold),
+                new ModelUsage(90_000, 0, threshold - 90_000L, 0, Map.of(), 0L, threshold),
                 window)));
     assertFalse(
         detect(
             responseFacts(
                 GenerationStopReason.LENGTH,
-                new ModelUsage(threshold - 1, 0, 0, 0, 0, 0, threshold - 1),
+                new ModelUsage(threshold - 1, 0, 0, 0, Map.of(), 0L, threshold - 1),
                 window)));
     // 有 output 的普通 LENGTH 不是 context wall（模型只是到达 max tokens）。
     assertFalse(
         detect(
             responseFacts(
                 GenerationStopReason.LENGTH,
-                new ModelUsage(threshold, 16, 0, 0, 0, 0, threshold + 16),
+                new ModelUsage(threshold, 16, 0, 0, Map.of(), 0L, threshold + 16),
                 window)));
     // 明显低于 window 的 LENGTH 同样不命中。
     assertFalse(
         detect(
             responseFacts(
                 GenerationStopReason.LENGTH,
-                new ModelUsage(10_000, 0, 0, 0, 0, 0, 10_000),
+                new ModelUsage(10_000, 0, 0, 0, Map.of(), 0L, 10_000L),
                 window)));
     // 非 LENGTH stop reason 即使 prompt 达到 0.99 阈值（仍低于 window）也不触发严格恢复。
     assertFalse(
         detect(
             responseFacts(
                 GenerationStopReason.COMPLETE,
-                new ModelUsage(126_720, 0, 0, 0, 0, 0, 126_720),
+                new ModelUsage(126_720, 0, 0, 0, Map.of(), 0L, 126_720L),
                 window)));
   }
 
@@ -300,7 +307,7 @@ class ContextPressureDetectorTest {
                 null,
                 null,
                 GenerationStopReason.LENGTH,
-                new ModelUsage(100_000, 0, 0, 0, 0, 0, 100_000),
+                new ModelUsage(100_000, 0, 0, 0, Map.of(), 0L, 100_000L),
                 null)));
   }
 
@@ -310,19 +317,23 @@ class ContextPressureDetectorTest {
     assertTrue(
         ContextPressureDetector.detectResponse(
             GenerationStopReason.COMPLETE,
-            new ModelUsage(128_000, 0, 0, 0, 0, 0, 128_000),
+            new ModelUsage(128_000, 0, 0, 0, Map.of(), 0L, 128_000L),
             128_000));
     assertTrue(
         ContextPressureDetector.detectResponse(
-            GenerationStopReason.LENGTH, new ModelUsage(126_720, 0, 0, 0, 0, 0, 126_720), 128_000));
+            GenerationStopReason.LENGTH,
+            new ModelUsage(126_720, 0, 0, 0, Map.of(), 0L, 126_720L),
+            128_000));
     assertFalse(
         ContextPressureDetector.detectResponse(
-            GenerationStopReason.LENGTH, new ModelUsage(126_720, 1, 0, 0, 0, 0, 126_721), 128_000));
+            GenerationStopReason.LENGTH,
+            new ModelUsage(126_720, 1, 0, 0, Map.of(), 0L, 126_721L),
+            128_000));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             ContextPressureDetector.detectResponse(
-                GenerationStopReason.COMPLETE, new ModelUsage(1, 0, 0, 0, 0, 0, 1), 0));
+                GenerationStopReason.COMPLETE, new ModelUsage(1, 0, 0, 0, Map.of(), 0L, 1L), 0));
   }
 
   private static boolean detect(ContextPressureFacts facts) {
