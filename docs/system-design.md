@@ -110,7 +110,8 @@ Model 与 Model Group 共用全局唯一逻辑名称空间；`modelName` 只寻�
 
 Root 保存初始设置，每个普通 TurnStart 冻结该回合设置。设置命令在下一轮归约为完整
 快照，fork 沿目标 Entry 的父链恢复当时设置。每轮再从 Catalog 解析当前 Agent 能力和
-模型配置，冻结最终 ModelRequestSpec；引用缺失或能力失效时明确拒绝规划。Environment
+模型配置，冻结最终 ModelRequestSpec。设置的模型已被删除或改名时，本回合改用 Agent 默认模型并记入
+`TURN_START.fallbackModel`；其余引用缺失或能力失效时明确拒绝规划。Environment
 以全局唯一且不可变的 name 进入历史，每轮解析为执行路由使用的内部 UUID。
 
 Goal 由用户通过 typed `GOAL` 命令设置或清除。Agent 使用 `get_goal` 读取正文，通过
@@ -233,8 +234,8 @@ version；Invocation 保存外部请求、attempt、checkpoint 与终态；Work 
 Thread version 用于结构和控制状态 CAS。模型 checkpoint 可在同一 version 内推进，
 首次加载、重连和 resync 都需要读取完整 Snapshot。
 
-流式输出在当前 execution 内有界聚合，flush、retry 和 terminal 在短事务中复验
-attempt 与 Work ownership，提交后发布 realtime。审批和 `ask_user` 是持久等待，
+流式输出在当前 execution 内有界聚合并推送有损的 `MODEL_DELTA`；checkpoint、retry 和 terminal
+在短事务中复验 attempt 与 Work ownership，提交后才发布对应的 realtime 事件。审批和 `ask_user` 是持久等待，
 等待期间释放 Worker；人工决定按冻结调用、身份与提交约束接受后登记后续 Work。
 详细状态机见 [Harness Runtime](modules/harness-runtime.md)，协议适配见
 [Harness Provider](modules/harness-provider.md)。

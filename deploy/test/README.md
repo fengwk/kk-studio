@@ -54,7 +54,7 @@ MinIO server 的平台限制、mc 首次联网构建与源码许可见
   terminal snapshot 替换与 preview signed GET；
 - OpenCLI fake Hub 上的 `gpt-image-2` 与 `seedance2.0fast` 两条 adapter 闭环，验证 GPT Image
   四个、Seedance 六个 durable checkpoint；
-- `dev` seed 的 stub Chat：创建 Chat，再以 `owner: {type: "CHAT", chatId: ...}` 提交
+- stub Chat：用经 Catalog API 创建的 `default-assistant` 创建 Chat，再以 `owner: {type: "CHAT", chatId: ...}` 提交
   Harness command batch 创建 Thread、发送 `USER_MESSAGE`，poll 至 quiescent，断言
   durable assistant MESSAGE、`TURN_END` 为 `COMPLETED` 且无 `ASSISTANT_ERROR` 条目。
 
@@ -76,7 +76,7 @@ docker compose -f deploy/test/compose.yaml --profile app up -d --build --wait
 # 停止容器和网络，保留手动验证的数据
 docker compose -f deploy/test/compose.yaml --profile app down --remove-orphans
 
-# 确认测试数据可丢弃后才执行：额外删除 PostgreSQL、MinIO 与 Plugin 凭据主密钥 volumes，无确认提示
+# 确认测试数据可丢弃后才执行：额外删除 PostgreSQL 与 MinIO volumes，无确认提示
 docker compose -f deploy/test/compose.yaml --profile app down -v --remove-orphans
 ```
 

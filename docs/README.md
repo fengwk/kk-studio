@@ -15,7 +15,7 @@
 | 运行仓库脚本，先确认命令、前置条件与副作用 | [脚本入口索引](../scripts/README.md) |
 | 新增构建期 Plugin 并判断是否需要修改 Settings 前端 | [Platform：新增 Plugin](modules/platform.md#新增-plugin)，随后查看 [Frontend：Plugin 设置](modules/frontend.md#plugin-设置) |
 | 构建 Fat JAR、容器或服务器部署 | [部署与运行](operations/deployment.md) |
-| 从 1.1.3 升级到 2.0.0（导出备份后在全新空库重建） | [部署与运行：从 1.1.3 升级到 2.0.0](operations/deployment.md#从-113-升级到-200) |
+| 从数据面不兼容的版本升级（导出备份后在全新空库重建） | [部署与运行：从数据面不兼容的版本升级](operations/deployment.md#从数据面不兼容的版本升级) |
 | 运行隔离的 Canvas/Storage 测试栈 | [Canvas/Storage 隔离测试栈](../deploy/test/README.md) |
 | 理解一次请求如何执行和恢复 | [系统设计](system-design.md) |
 | 使用 Canvas 资源与 Function，配置 Issue 阶段和 Agent 分工 | [Canvas、Project 与交互](canvas-project.md) |
@@ -40,7 +40,7 @@
 
 | 文档 | 回答的问题 |
 | --- | --- |
-| [Harness Environment](modules/harness-environment.md) | Environment 身份、能力目录与 protocol v1 如何定义？Backend 如何管理 Daemon 会话、route lease、调用所有权和上传票据？ |
+| [Harness Environment](modules/harness-environment.md) | Environment 身份、能力目录与 Daemon wire 协议如何定义？Backend 如何管理 Daemon 会话、route lease、调用所有权和上传票据？ |
 | [Environment Daemon](modules/daemon.md) | 独立主机进程如何执行文件、命令、LSP 与二进制上传？ |
 
 ### 平台

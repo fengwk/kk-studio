@@ -134,13 +134,10 @@ Unix 矩阵在 Ubuntu 与 macOS runner 上使用系统 `/bin/bash`，macOS 明�
 五个目标上真实执行 `npm --prefix daemon run check`、`run build` 与 `run coverage`；macOS 追加系统 Bash 下的
 安装与归档契约测试，Windows 另以 PowerShell 5.1 与 7 运行安装、更新回归。Docker 发布与 Daemon Release
 都要求该门禁成功，release 还要在对应宿主上逐一烟测五个平台归档后才上传 GitHub Release。
-常规 Windows 覆盖率步骤会自动启用同步退出诊断，记录退出来源（`command-exit-report`、`helper-close-fallback`、
-`unknown`）、清理前的 scope/commandPid/exit/cleanup/helper 快照、被管理 helper 的 PID、退出、收敛与终止事实，
-以及采集窗口内与 node/bash/msys 相关的 Application Error 事件和 runner/node/npm/git 版本。无论覆盖率成功还是
-失败，都尝试把 `windows-process-diagnostics` artifact 上传到 Actions，保留 7 天，包含窗口起点、工具链白名单、
-JSONL trace、事件与采集摘要；覆盖率成功却没有 `exit-resolved` 证据时采集步骤显式失败。证据不包含 ProcessSpec
-参数、环境、cwd、launch 文件、token 或内存，也不保证存在原生栈或足以直接定位根因；runner 失联或强制结束时可能
-来不及上传。该诊断只改变 CI 测试证据，不改变 Daemon 运行时行为或发行版本。
+常规 Windows 覆盖率步骤会启用同步退出诊断：无论成功或失败都上传 `windows-process-diagnostics` artifact
+（保留 7 天），记录退出来源、受管 helper 的进程事实、相关 Application Error 事件与工具链版本，
+不含 ProcessSpec 参数、环境、cwd、token 或内存；覆盖率成功却缺少 `exit-resolved` 证据时该步骤失败。
+诊断不保证足以定位根因，也只影响 CI 证据，不改变 Daemon 行为或发行版本。
 
 数据库维护脚本的集成测试使用独立的 PostgreSQL 17 容器。CI 显式安装 17 版客户端并将其
 bin 目录置于 PATH 首位，不依赖 runner 默认版本。本地运行 [scripts/ops/tests](../../scripts/ops/tests) 时，
@@ -272,143 +269,43 @@ npm --prefix frontend run build
 npm --prefix frontend run coverage
 ```
 
-| 命令 | 行为 | 结果 |
-| --- | --- | --- |
-| `run test` | `vitest run` | jsdom 单元/组件测试 |
-| `run test:browser` | Playwright Chromium 全量离线套件回归（CI 门禁） | 统一运行全部 8 个具名 projects，涵盖布局基座、Chat 1–9 pane、Environment 安装、Plugins、Composer、Compaction、Subagent 树与 Tool 卡片，产物输出至对应 reports 子目录 |
-| `run test:layout` | Playwright Chromium 定向 layout 套件回归 | 布局基座与静态产物、共享资源卡/控件、交互卡片、Debug 响应式与预览标题、媒体预览、Canvas、Catalog i18n、Project 工作流与 Agent、Settings 同步；产物在 `reports/layout/` |
-| `run lint` | `eslint .` | TypeScript、React hooks、分层 import 规则 |
-| `run typecheck` | `tsc -b` | 生产源码与构建配置的严格类型检查，不打包 |
-| `run typecheck:test` | `tsc -p tsconfig.test.json` | 全部单元测试、浏览器用例及其基座的严格类型检查，不运行浏览器或模型 |
-| `run build` | `tsc -b && vite build` | strict type-check + Vite production bundle |
-| `run coverage` | `vitest run --coverage` | v8 text/html 报告与阈值门禁 |
+| 命令 | 行为 |
+| --- | --- |
+| `run test` | `vitest run`：jsdom 单元与组件测试 |
+| `run test:browser` | Playwright Chromium 全量离线浏览器回归（CI 门禁），运行全部 9 个具名 project |
+| `run test:layout` / `run test:pane` | 定向运行 `layout` / `pane` project |
+| `run lint` | `eslint .`：TypeScript、React hooks 与分层 import 规则 |
+| `run typecheck` | `tsc -b`：生产源码与构建配置的严格类型检查 |
+| `run typecheck:test` | 单元测试、浏览器用例与基座的严格类型检查 |
+| `run build` | `tsc -b && vite build` |
+| `run coverage` | `vitest run --coverage`：v8 报告与阈值门禁 |
 
-[vite.config.ts](../../frontend/vite.config.ts) 定义 coverage include、exclude 与各项阈值，
-报告目录是 `frontend/coverage/`。[test-setup.ts](../../frontend/src/test-setup.ts) 为每个测试清空
-localStorage、固定 `zh-CN`，并为 ResizeObserver、DOMMatrix、SVG geometry、Canvas 2D、dialog、
-scrollIntoView 和 React Flow layout 提供确定性 stub。
+[vite.config.ts](../../frontend/vite.config.ts) 定义 coverage 范围与阈值，报告在 `frontend/coverage/`。
+[test-setup.ts](../../frontend/src/test-setup.ts) 为每个测试清空 localStorage、固定 `zh-CN`，并为
+ResizeObserver、DOMMatrix、SVG geometry、Canvas 2D、dialog、scrollIntoView 与 React Flow layout 提供确定性 stub。
 
-布局回归需要先在 `frontend/` 执行 `npx playwright install chromium` 安装浏览器。
-用例位于 `frontend/browser-tests/*.pw.ts` 与 `*.browser.ts`，与 Vitest 的组件测试分开运行。
-浏览器基座采用统一静态构建与预览机制（[`vite.browser.config.ts`](../../frontend/vite.browser.config.ts)），
-通过 Rollup 多页（MPA）模式将真实 React 组件与全部测试 harness 预编译至 `reports/browser-site/`。
-全量回归（CI 门禁）执行 `npm run test:browser`，定向回归执行 `npm run test:layout`（或对应 `--project <name>`）；运行前先执行 `build:browser`，成功后启动 Playwright，编译不占用服务器的启动预算。
-Playwright 通过 `preview:browser` 在 loopback 5174 端口启动静态预览
-（`strictPort: true` 且 `reuseExistingServer: false`，以真实 harness URL 进行 HTTP readiness 探测），
-消除 dev HMR、实时转译与共享缓存依赖。调试时可在 `frontend/` 单独执行 `npm run build:browser`
-和 `npm run preview:browser`，直接通过浏览器访问 `http://127.0.0.1:5174/browser-tests/<harness>.html` 检查页面。
-并行验证用 `KK_BROWSER_PORT` 指定独占端口，构建和 Playwright 使用同一值。
-首轮失败时，各 project 报告目录（如 `reports/layout/`）下保留 `trace.zip` 和 `test-failed-*.png`，不依赖重试。
-在 `frontend/` 执行 `npx playwright show-trace <trace-file-path>`，可检查时间线、DOM 快照、
-网络请求与控制台报错；trace 路径相对此目录通常以 `../reports/layout/` 开头。
+### 浏览器回归
 
-Chat 卡片和 Session/Thread 选择器的时间回归可在 `frontend/` 定向执行
-`npm run build:browser && npx playwright test --project layout browser-tests/local-time.pw.ts`。
-该离线用例通过独立浏览器 context 固定上海、UTC、纽约时区，在宽窄视口验证实际组件：
-有时区 ISO 字符串及 epoch 秒/毫秒按浏览器本地时区显示为 `YYYY-MM-DD HH:mm`，
-包括跨日转换；无时区字符串和数组保留本地墙上时钟含义，空值及非法输入显示 `-`。
-
-Chat 默认设置、首发焦点、主题控件与 Debug 布局沿用同一离线 layout 入口：
+首次运行先在 `frontend/` 执行 `npx playwright install chromium`。用例位于 `frontend/browser-tests/*.pw.ts` 与
+`*.browser.ts`，[`playwright.config.ts`](../../frontend/playwright.config.ts) 按具名 project 划分（layout、pane、
+install、plugin、composer-editor、compaction、subagent-tree、mutation-review、tool-card）。
+[`vite.browser.config.ts`](../../frontend/vite.browser.config.ts) 把真实组件与全部 harness 以多页模式预构建到
+`reports/browser-site/`，Playwright 通过 `preview:browser` 在 loopback 5174 端口提供静态页面；harness 只使用离线
+fixture，不访问 Backend、数据库或真实模型。
 
 ```bash
+npm --prefix frontend run test:browser
 npm --prefix frontend run build:browser
-(
-  cd frontend
-  npx playwright test --project layout \
-    browser-tests/chat-defaults.pw.ts browser-tests/composer-focus.pw.ts \
-    browser-tests/debug-responsive-layout.pw.ts browser-tests/debug-preview-title.pw.ts \
-    browser-tests/loading-skeleton.pw.ts browser-tests/retry-controls.pw.ts \
-    browser-tests/canvas-library.pw.ts browser-tests/interactions.pw.ts \
-    browser-tests/mutation-review.pw.ts browser-tests/ide-overlay.pw.ts
-)
+(cd frontend && npx playwright test --project layout browser-tests/model-browser.pw.ts)
 ```
 
-这些用例验证新建/编辑默认值与显式清空、首次接受后的编辑器重挂载与临时禁用恢复、
-模态框和多 pane 防抢焦、等宽 Debug 列与 Subagent 配置详情、骨架屏、按钮忙碌状态和窄屏布局，
-以及 write/edit 审查卡片（完整正文展示、准备中 spinner、真实文件 diff 与成功短文案呈现）和
-同源 IDE 覆盖层面板的显示、折叠与焦点恢复。
-文件变更审查卡片另提供独立的局部组件级浏览器回归入口（非 E2E 矩阵正式 case，独立 Chromium 端口 5178，不修改矩阵 inventory）：
+定向运行前先执行 `build:browser`。并行验证用 `KK_BROWSER_PORT` 指定独占端口，构建与 Playwright 使用同一值。
+调试时单独运行 `build:browser` 与 `preview:browser`，再访问 `http://127.0.0.1:5174/browser-tests/<harness>.html`。
+首轮失败时，各 project 的报告目录（如 `reports/layout/`）保留 `trace.zip` 与失败截图，在 `frontend/` 执行
+`npx playwright show-trace <trace>` 可检查时间线、DOM 快照、网络请求与控制台。
 
-```bash
-npm --prefix frontend run test:mutation:browser
-```
-
-API 规划与代理切换由后端定向测试验证，不以静态浏览器基座替代真实服务契约。
-
-Thread 控制与消息展示通过统一 Playwright 配置划分具名 projects，可按改动范围选择：
-
-```bash
-npm --prefix frontend run test:pane
-(
-  cd frontend
-  npx playwright test --project tool-card
-  npx playwright test --project subagent-tree
-  npx playwright test --project compaction
-  npx playwright test --project composer-editor
-)
-```
-
-Thread/subagent 展示收口可定向运行 `--project pane` 的 `chat-branch.browser.ts`、
-`--project tool-card`、`--project subagent-tree`，以及 layout 配置下的
-`subagent-receipt.pw.ts` 与 `agent-tree.pw.ts`。这些离线回归覆盖根命令入口、只读直接父导航、
-完整当前执行根范围、选择键盘与零写请求、task 可读链接、工具 header/padding、回执链接与箭头顺序，
-并在宽屏及 320/360px 窄屏以实际几何验证统计行、按钮和图标中心。
-
-各 project 只匹配对应 harness，统一在构建后的静态基座与 loopback 端口上运行，不访问 Backend、
-共享数据库或真实模型。Pane 验证根草稿/上传保留、子代理只读、根 Stop，以及新建分支的命名与
-1–9 目标路由、隐藏 pane 显露、完整祖先前缀与 409 改名恢复。Debug 回归从根或本地草稿的命令
-进入独占视图，验证单顶栏退出、控制区挂起，以及草稿、上传和焦点恢复。
-`/subagent` 验证当前执行根的完整历史卡片；split-3/grid-4 非首 pane 的只读孙层验证直接父导航、
-隐藏根 inert、草稿和滚动保留，期间以合法 HTTP/WS 数据验证后台回读与零写入；迟到目标不能抢焦点。
-tool-card 验证流式日志和阅读锚点；
-compaction 验证完整安全正文与外层阅读保护；composer-editor 验证真实 contenteditable、
-IME、Pill 与隐藏根失活。
-
-改动前端如果影响 API 契约、首发顺序或 usage 语义，需要同步更新 E2E 矩阵 case 与相关文档；精确
-case inventory 由 `node scripts/dev/verify/e2e/run-matrix.mjs --list` 与 `--docs` 提供，不在文档里复制。
-
-Canvas 的 UI 页面用例同时检查创建取消零写入、已有卡零创建与空库确认后单次创建；
-离线 `canvas-library` harness 进一步覆盖提交中围栏、失败保留输入和窄屏布局。
-
-Catalog 的免费 L1 模型生命周期用例覆盖 `protocolOptionsJson` 在创建、读取、更新中的文本保真，
-包括大整数与高精度小数；`crud.model_group.lifecycle` 用一个 Group roundtrip 固定全局逻辑名、
-有序成员、`fallbackStatusCodes`、`cooldownSeconds` 与只读派生 config。配置矩阵覆盖非法 JSON、
-重复键、非字符串 token、非法 pricing 数值与负价拒绝。这些用例只操作测试 Catalog，不调用真实模型；
-执行仍需可用的隔离 Backend、数据库与 S3。
-
-Provider 级 `modelHttpRetryStatusCodes` 覆盖由 `crud.provider.http_retry_override` 固定：请求省略该字段保留原值，
-显式 `null` 清除覆盖（继承系统 `aiRuntime.modelHttpRetryStatusCodes` 名单），空数组 `[]` 表示该 Provider 不自动重试
-任何 HTTP 错误，非空数组完全替代系统名单（400–599）。
-内置 Agent 目录身份由 `crud.agent.builtin_identity` 固定：保留名称 `Compaction`、类型 `BUILTIN`（用户创建为 `USER`），
-`type` 不在可编辑请求体内（携带即按未知字段拒绝），内置身份不可删除；内核压缩执行路径按该名称经普通 Agent 目录读取定义，
-模型可显式未配置。
-
-异步 `task` 的工具结果只表示已接受；完成结果由 Runtime 在子 Thread 到达收敛终态边界结算 join 后，
-作为父 Thread 的一条 `NOTIFICATION`（`NotificationKind.SUBAGENT_RESULT`）命令交付——wire 是系统通知
-而不是用户输入，其消息正文为 `<subagent_result thread_id agent state>`；父为 `STOPPED` 时通知只
-固化进历史、不唤醒模型。`real.task_delegation` 分别验证可读英文受理收据与同一子 Thread 的完成通知，
-不能将受理当作完成；
-它还断言子 Thread 的不可变执行父关系指回发起方（`HarnessThreadDTO.parentThreadId`），且子 ROOT
-payload 只含 settings、不物化任何委派运行树元数据。
-受理卡片与回执的 Thread 链接在当前 pane 只读查看子代理，并保留根草稿；返回取查看快照的直接
-`parentThreadId`，孙层先回直接父，再回根。修饰键或独立地址进入 `/threads/:threadId`。
-独立根提供人工控制，独立子代理只读并可定点返回 `/threads/{parentId}`，
-不依赖 Chat 归属。消息、设置、Goal、预览和 Stop 只允许执行根；根面板汇聚后代审批和问卷，
-操作写回原始调用 Thread；
-已有 Thread 的命令使用 `/api/threads/{threadId}/command-batches`，body 不带 owner/target，
-创建 Session/Thread 才使用 owner-aware 的 `/api/command-batches`。
-同一 tool batch 中，某个调用已经成功而另一个仍在等待审批时，成功调用按其自身结果展示，
-等待审批的调用保持未决；durable 工具结果到达后只保留这一权威结果。
-[`ThreadWorkspacePage.test.tsx`](../../frontend/src/features/chat/thread/ThreadWorkspacePage.test.tsx)
-通过真实组件验证根/子代理身份分流、子代理零写控制入口、实际查看身份与只读树/Debug 动作，
-以及非法 ID、加载失败、直接父入口和换路由时旧身份/动作立即失效；
-这些是 jsdom 回归，不替代真实浏览器验证。
-
-真实 `read` 工具的 L4 用例 `tool.read_turn` 需要 `--real --with-tools --with-canvas-storage`，
-断言非 YOLO tool turn 的审批链路，以及 durable
-`tool_result` 内联的完整 `path`/`ends_with_newline`/`range` 投影。read 文本窗口恒在终态链路为 read
-身份加宽的内联预算（320 KiB / 2020 行）内，因此不产生 resource 预览；工具结果外部化到全局 Blob 与
-session 归属由 platform 集成测试守卫，E2E 没有真实模型 tool→blob 端到端证据。
+改动前端如果影响 API 契约、首发顺序或 usage 语义，需要同步更新 E2E 矩阵 case 与本文的分类说明；精确 case
+inventory 由 `node scripts/dev/verify/e2e/run-matrix.mjs --list` 与 `--docs` 提供，不在文档里复制。
 
 ## Compose、静态资源与文档门禁
 
@@ -484,71 +381,10 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 `node scripts/dev/verify/e2e/run-matrix.mjs --list` 与 `--docs` 生成，不要把它们抄进文档；默认执行哪些 case
 由 flag 组合和 case 的 `requires` 共同决定。
 
-矩阵的 Session Thread 摘要读取统一检查必填可空的 `parentThreadId`：根为 null，子为 canonical UUID；列表仍包含全部 Thread。根/子同名保留与快照父身份映射由 OwnerQueryService 单测及 Session HTTP 契约测试覆盖。
-
-免费 L1 覆盖的部分产品契约面：
-
-- `config_sync.inventory_contract` / `config_sync.provider_roundtrip_same_name` /
-  `config_sync.environment_identity_and_token` /
-  `config_sync.import_precheck_and_partial_confirmation` /
-  `config_sync.environment_install_config_roundtrip` /
-  `config_sync.install_config_hard_invalid_precheck`：八类配置清单、凭据随 YAML 导出、导入前的
-  新增/覆盖/跳过清单、硬错误拒绝与部分导入授权、同名 Provider 更新、Environment 身份与注册令牌摘要保留，
-  以及 `installConfig`（studioUrl、note、bashExecutable、内联 LSP servers）随注册令牌摘要的导出导入往返、
-  token+配置原子更新与清除、installConfig 硬错误（含未知字段与退役 `javaHome`）在预检查与导入阶段的零副作用拒绝，响应带 `no-store`。
-  这些 case 均无真实模型或 tool 成本；完整 Git/MCP 准备与整批事务回滚另由 Web 集成测试覆盖。
-- `environment.install_config_cas_roundtrip`：`PUT .../install-config` 以 `expectedVersion` CAS 保存
-  嵌套 `installConfig`，仅内容变化时推进版本，相同配置 no-op 不推进；硬非法值（含退役 `javaHome`）400 且零写入、不回显提交值。
-- `environment.install_script_code_roundtrip`：五分钟 code 签发不改变配置或版本，安装脚本响应为
-  不缓存的 UTF-8 纯文本；缺失、篡改或轮换后失效的 code 被拒绝，卸载脚本不含环境凭据。只下载检查，不执行主机安装。
-- `project.issue_lifecycle`：Project workflow JSON 与设置 CAS、Issue 按 workflow `next`
-  白名单流转、BLOCKED 专用阻塞/恢复、pause(UNKNOWN)/resolve-unknown/resume 门禁、COMMENT
-  幂等与「无活动 Run 不得投递 INSTRUCTION」、Activity 有界窗口分页与 snapshot 投影
-  （`referencedStateCodes` 汇总全部未归档及归档 Issue 的当前状态与阻塞恢复目标，归档不丢引用）。
-- `project.issue_stage_budget`：阶段额度只能授权给启用且有 Agent 的工作阶段，首次
-  `budget-reset` 即授权、重放精确、CAS 过期 409、高水位不回退。
-- `canvas.command_revision_contract` / `canvas.command_conflict_contract`：11 种 typed
-  command、`revision` 坐标与 patch 变化集、批量前置条件过期时整批 409 不写入。
-- `interaction.pending_input_contract`：内置 `ask_user` 冻结出 WAITING_INPUT 后，统一
-  `GET /api/interactions` 与 `POST /api/interactions/{id}/input` 的归属、分页、答案校验与
-  物化门禁；`INPUT` 条目的环境聚合字段显式为 null，owner 展示名与 Chat、执行根 Thread 的权威数据一致。
-  分页携带 required-nullable 的权威回读时刻 `freshnessAt`（本 case 无环境 Tool
-  等待时显式为 null）；该 case 需要 `host-mock`，不是 `requires=-`。
-- `thread_tree.query_contract` / `thread_tree.invalid_and_unknown_thread`：
-  `GET /api/threads/{threadId}/tree` 的最小节点投影、真实根关系、当前路径计数与终态，
-  节点 `updateTime` 只读投影 Thread 权威更新时刻且与 Thread 快照一致，
-  查询不改变 head、版本或 `updateTime`；非法 UUID 为 400，缺失 Thread 为 404。
-  根节点由缺失 Agent 触发确定性规划失败，不调用真实 Provider；
-  跨 Session 的多层父子树与锁序由内存及 PostgreSQL 契约测试覆盖。
-- `events.heartbeat_keepalive` / `events.project_invalidation`：应用事件 WebSocket 的周期
-  heartbeat 保活，以及 Project 全局 changed 失效；Thread/Canvas 的 snapshot-first 对账、
-  tree/interactions/environments 资源回读与 `statusExpiresAt` 一次性回读由前端 jsdom/组件测试覆盖。
-- `settings.system_contract_cas`：系统设置按固定六段（tool、aiRuntime、environment、network、storageMedia、advanced）严格聚合，
-  HTTP 边界未知字段（含已退役的 `integrations`）与非法值 400，整体 CAS 保存与恢复；`storageMedia` 持有临时资源保留期与扫描间隔
-  （默认 3 天 / 30 分钟，热更经心跳通道作用于尚未回收的 Daemon workspace）以及上传有效期与下载签名默认值。
-- `crud.chat.default_environment`：Chat 默认 Environment 是 required-nullable（未选择时显式 null），创建省略
-  `yoloEnabled` 时为 `false`；携带已存在 Environment 作为默认环境，PUT 省略 `environmentName` 保留当前默认环境、
-  显式 null 清空，未知或非 canonical Environment 名 400 且当前值/version 不变。
-- `thread.model_request_debug_draft_settings`：`POST /api/threads/{threadId}/model-request-debug` 以 UI 草稿
-  `{model, environmentName}`（可空）在真实 snapshot 上只读现算；缺失 Agent 的既有 Thread 让规划确定性 `PLANNING_FAILED`
-  （不调用真实 Provider），响应回显草稿 model/env、`planningError` 只回显稳定 code、tools/skills/subagents 安全为空、
-  `frozenInvocation` 与草稿选择独立；缺 model 或非 canonical environmentName 400、GET 405，查询不改变 head/version/sequence。
-- `branch.same_session_new_thread`（L3，`real,branch`）与前端 fork 用例：同 Session 新建 Thread 从历史边界 fork，
-  `FORK` Entry 只记录 `mode`/切点，会话 fork 把切点上下文复制到新 Session；分支不继承源 Thread 的待处理命令、
-  子执行与 Join 订阅，从新分支向旧子执行添加 Join 因直接父不匹配原子拒绝。
-
-`interaction.pending_input_contract`、`thread.queued_command_batch`、
-`thread.provider_request_preview_readonly`、`model.attempt_failure_visibility` 依赖 case 内自建的宿主
-`127.0.0.1` mock Provider（预览用例只使用仅计数 trap），因此属于 `requires=host-mock`：它们不读取真实凭据，
-但在 distributed 容器拓扑下不可用。
-`canvas.storage_upload_contract` 需要 S3，`canvas.function_fake_runtime` 还需要
-`--with-canvas-function` 打开 fake adapter。
-
-Goal 工具目录、Branch 设置命令以及草稿请求预览的拒绝与零写入边界也由 L1 覆盖；
-`thread.provider_request_preview_readonly` 以自建 Provider 覆盖 endpoint 缺省时的 409 与只读编码路径（绝不触达
-transport），历史预览的正向 200 由 `interaction.pending_input_contract` 在真实模型输出上覆盖；预览的 Provider
-wire body 与附件等价性由本地数据库/S3 集成测试覆盖。真实 Agent 的 Issue 接受、阶段交接与
-Goal 进度链路不能仅靠 API 契约断言，需另行在真实 Runtime 上验收。
+case 的 `requires` 决定默认是否执行：`real`、`tools`、`branch`、`canvas-storage`、`canvas-function` 与
+`distributed` 分别对应上表的 flag；`host-mock` 表示 case 在宿主 `127.0.0.1` 自建 mock Provider，不读取真实凭据，
+但在 distributed 容器拓扑下不可用。API 契约断言不能替代真实 Agent 的 Issue 接受、阶段交接与 Goal 进度验收，
+这些需在真实 Runtime 上验收。
 
 默认 backend URL 是 `http://127.0.0.1:18081`，frontend URL 是 `http://127.0.0.1:5173`。
 runner 会复用已有服务，或杀掉上述端口监听后启动服务；执行前须确认端口和 E2E 数据库
@@ -962,11 +798,10 @@ YAML 结构、类型、有效值错误或当前必填字段缺失，会直接拒
 条目名称须非空且没有首尾空白，重复名称不会依次覆盖；注册令牌摘要被不同 Environment 占用、
 同名 Skill Package 更换仓库地址、移除仍被引用的 Skill 或 MCP 工具也会整份拒绝。
 文件未包含的类别保持原样，但包含系统设置时必须提供当前完整设置结构，不能只提供局部字段。
-系统设置的 `integrations` 段整体退役：HTTP 写入携带该段一律 400；配置同步文件里的未知设置字段会被移除
-并作为跳过项列出（沿用既有严格未知字段语义，不做别名、不做双读），其余完整六节在用户明确选择
-“仅导入可用配置”时照常导入，而不是整份文件或整个 settings 条目被拒绝。
-ComfyUI/MiniMax-H3 与 OpenCLI 的普通配置只有插件 Schema 与配置同步 plugins 一个来源：
-普通值随 plugins 条目导入导出，`apiKey` 等秘密与受保护身份走 Plugin Secret API 或登录流程。涉及历史配置结构调整时，严格遵循“配置导出备份 -> 仅在获授权时停机并数据库重建 -> 当前 Schema 初始化 -> 导入恢复”的边界，绝不直接就地操作已有部署或共享数据库。
+系统设置的 HTTP 写入携带未知字段一律 400；配置同步文件里的未知设置字段会被移除并作为跳过项列出，
+其余完整六节在用户明确选择“仅导入可用配置”时照常导入，而不是整份文件或整个 settings 条目被拒绝。
+插件（如 ComfyUI 与 OpenCLI）的普通配置只有插件 Schema 一个来源，普通值随 plugins 条目导入导出，
+`apiKey` 等秘密与受保护身份走 Plugin Secret API 或登录流程。
 Provider 凭据按文件恢复；文件中的 Provider 没有凭据时，同名目标的旧凭据也会清空。
 
 确认后按名称新增或更新，不删除文件外的配置。预览不锁定配置，实际执行重新检查；

@@ -170,7 +170,7 @@ PaneTarget 有四种状态：`NEW_SESSION_DRAFT`（尚无 Session/Thread）、
 已有执行根 Thread（含 Issue Agent 根）可调整 Agent，子任务 Thread 只读。
 配置差异按 SET_AGENT → SET_MODEL → SET_ENVIRONMENT
 前缀发送。忙碌 Thread 的选择立即作为 standalone SET-only 批提交并显示“待生效”，空闲/未创建/停止保留本地草稿随下一条输入提交；YOLO 走独立控制入口。顶栏面包屑显示当前 pane 的 Chat → Session → 分支身份；
-根面板与草稿 pane 不再渲染自身标题。工作区内只读子代理同样不渲染第二层标题栏或只读 badge，
+根面板与草稿 pane 不渲染自身标题。工作区内只读子代理同样不渲染第二层标题栏或只读 badge，
 其真实身份（agent 名称与 `modelName (variant)`；默认 main
 不作为独立身份）与只读动作直接汇入工作区顶栏，并提供返回直属父 Agent 入口。
 模型与变体组合统一使用括号格式，包括输入区底栏及其提示、设置变更记录、执行树和 Agent 卡片；
@@ -217,7 +217,7 @@ Chat 工具卡片与 ApprovalCard 共享文件变更审查组件：
   就绪后立即替换为真实文件 diff（包含 canonical 绝对路径、多 hunk 真实行号与变更行）。
   若缺失或无法解析有效 review，禁用“允许”按钮，保留“拒绝”。
 - **展开与结果呈现**：write 与 edit 默认保持展开并有界滚动；执行成功后，可见结果仅呈现简洁的本地化提示
-  （中文“写入成功”/“编辑成功”，英文“Write succeeded”/“Edit succeeded”），不再在成功结果中重复回显文件正文或 diff；
+  （中文“写入成功”/“编辑成功”，英文“Write succeeded”/“Edit succeeded”），不在成功结果中重复回显文件正文或 diff；
   执行失败时不隐藏错误详情，也不在产生真实终态前虚假展示成功。
 - **来源优先级与持久化结构**：优先从持久化的 `approvalJson.editReview` 获取真实 diff（freeze approval 优先）；对于自动放行（无需审批）、YOLO 模式或页面刷新与 GC 后的结果恢复，从持久化结果的 `details.editReview` 读取真实变更（durable entry 显式解码 `detailsJson`，invocation 从 `resultJson.details` 对象读取）；决不从旧/新参数在前端伪造 diff。其他工具的折叠与展示策略保持不变。
 

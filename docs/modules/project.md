@@ -74,7 +74,7 @@ Project 的 `yoloEnabled` 只在首次创建该 `Issue + Agent` 执行根时初�
 YOLO 开关；修改项目开关不改写既有 Thread。该根委派的后代读取根的开关，
 后续人工开关只更新根行。每次 Run 由 Project 显式提交 `SET_AGENT` / `SET_MODEL` /
 `SET_ENVIRONMENT`、`SET_CONTRIBUTOR_STATE` 与末尾任务输入；阶段 Environment 就来自该 Run 的
-显式命令，Platform 不再按 workflow 反查解析。它作为普通配置命令随 Turn 冻结，不是对已存在
+显式命令，Platform 不按 workflow 反查解析。它作为普通配置命令随 Turn 冻结，不是对已存在
 Thread `BranchSettings` 的带外重写。
 
 `branch` 上的 [`ProjectRunScope`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/turn/ProjectRunScope.java)
@@ -85,7 +85,7 @@ Thread `BranchSettings` 的带外重写。
 在业务锁内校验 Run/Issue/阶段/版本与调用 Thread 身份，fork 不凭继承 scope 获权。Run 完成只认本次
 root Join 冻结的 `terminalEntryId` / `finalAnswerEntryId`（`COMPLETED` / `ERROR` / `CANCELLED` 分别
 完成 / 失败 / 取消），既不按快照最新 head 猜测，也不等待永久子树 idle；工具 UNKNOWN 只作为模型反馈，
-不再升级为人工核查暂停。
+不升级为人工核查暂停。
 
 ## 用例事务与持久化
 
@@ -107,7 +107,7 @@ Work 邮箱是共享 `durable_work` 表中 target type 为 `ISSUE` 的行。
 [`IssueEvidenceServiceImpl`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/impl/IssueEvidenceServiceImpl.java)
 管 Issue **自有的**公开证据：`project_issue_evidence` 一行是 Issue 持有的一个已发布 Blob 引用，
 与 Session 引用各自独立计数，不由 Session 生命周期决定。人工附件经 `lockReadyUpload -> retain ->
-deleteUpload` 在调用方事务内完成引用转移，展示名取自上传行而不是客户端；证据行已存在时不再
+deleteUpload` 在调用方事务内完成引用转移，展示名取自上传行而不是客户端；证据行已存在时不重复
 retain，重复交付不双计。深删除 Session 只释放该 Session 自己的引用。
 
 Project 深删除在一个事务内锁住 Project 行（`FOR UPDATE`），拒绝仍活动的 Run 与未解除的 `UNKNOWN` 暂停，

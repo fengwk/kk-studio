@@ -20,7 +20,7 @@ Provider，定义 Agent，进行可恢复的流式对话，并按需让 Agent �
 | 能力 | 用途 |
 | --- | --- |
 | Chat 与 Agent | 流式对话、思考内容、附件、历史分支、工具调用，以及可恢复的执行状态 |
-| Model Catalog | 分别管理 Provider、真实模型 ID、上下文限制、能力、Variant 与价格 |
+| Model Catalog | 分别管理 Provider、真实模型 ID、上下文限制、能力、Variant、价格与按顺序降级的模型组 |
 | Agent 能力组合 | 为 Agent 选择模型、系统提示词、Tools、Skills 和 Subagents；运行环境由 Branch 选择 |
 | Environment | 通过独立 Daemon 在指定主机上执行文件读写、搜索、命令和 LSP 能力 |
 | MCP | 注册 Streamable HTTP MCP Server，发现其工具并作为 Agent 可选工具执行 |
@@ -58,10 +58,8 @@ docker compose -f deploy/local/compose.yaml up -d --build --wait
 - 查看 App 日志：
   `docker compose -f deploy/local/compose.yaml logs -f app`
 
-本地栈使用 `dev` profile，并预置 `stub` Provider、`acceptance-stub` Model 和
-`default-assistant` Agent，便于查看 Catalog 结构。这些示例配置指向 `stub.local`，
-该模型服务需单独提供；直接使用 `default-assistant` 发消息会连接失败。
-请先按下一节接入自己的 Provider。
+本地栈使用 `dev` profile 从空库启动，不预置 Provider、Model 或 Agent；首次打开时页面会
+引导你按下一节完成配置。
 
 ## 完成第一次对话
 
@@ -70,7 +68,7 @@ Catalog 将连接信息、模型能力和 Agent 行为分开管理：
 | 资源 | 表示什么 |
 | --- | --- |
 | Provider | 上游协议、Base URL、API Key 和调用超时 |
-| Model | Provider 下的逻辑名称、发往上游的真实 Model ID、限制和能力 |
+| Model | 全局唯一的逻辑名称：单个模型（Provider、真实 Model ID、限制、能力与价格），或按顺序降级的模型组 |
 | Agent | 实际用于对话的 Model、系统提示词和可选工具 |
 
 按下面的顺序配置：
@@ -80,8 +78,10 @@ Catalog 将连接信息、模型能力和 Agent 行为分开管理：
    - 填写 Base URL；上游需要认证时再填写 API Key。保存后的密钥不会在 UI 中回显。
 2. 打开 [Model](http://localhost:8080/models)，新建 Model。
    - 选择刚创建的 Provider。
-   - `Name` 是 Studio 内的逻辑名称；`Model ID` 必须是上游接口接受的真实模型标识。
-   - 按上游能力填写上下文、最大输出、输入类型、Tools、Reasoning 和 Variant。
+   - `Name` 是 Studio 内的逻辑名称；`Model ID` 必须是上游接口接受的真实模型标识，可先点击
+     “从 Provider 拉取模型”再选择。
+   - 按上游能力填写上下文、最大输出、输入类型、Tools、Reasoning、Variant 与价格；
+     “目录默认参数”可为常见模型一键填入这些值。
 3. 打开 [Agent](http://localhost:8080/agents)，新建 Agent。
    - 选择 Model，填写系统提示词。
    - 第一次对话可以先不配置 Tools、Skills 或 Subagents。
