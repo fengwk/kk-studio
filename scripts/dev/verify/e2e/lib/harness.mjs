@@ -223,12 +223,11 @@ export function canonicalEnvironmentName(value, field = 'environmentName') {
 /** 由 Agent + Model + Environment 引用构造完整 branchSettings（当前契约精确为 agentName + model + environmentName）。 */
 export function branchSettingsOf(agent, model, environmentName = null) {
   assert(agent?.name, `agent name required: ${JSON.stringify(agent)}`)
-  assert(model?.providerName && model?.modelName && model?.variant, `model required: ${JSON.stringify(model)}`)
+  assert(model?.modelName && model?.variant, `model required: ${JSON.stringify(model)}`)
   canonicalEnvironmentName(environmentName, 'environmentName')
   return {
     agentName: agent.name,
     model: {
-      providerName: model.providerName,
       modelName: model.modelName,
       variant: model.variant,
     },
@@ -660,7 +659,7 @@ export async function listSessionThreads(ctx, sessionId) {
       JSON.stringify(item),
     )
     assert(typeof item.status === 'string', JSON.stringify(item))
-    assert(item.model?.providerName && item.model?.modelName && item.model?.variant, JSON.stringify(item))
+    assert(item.model?.modelName && item.model?.variant, JSON.stringify(item))
     assert(
       item.headMessagePreview === null || typeof item.headMessagePreview === 'string',
       JSON.stringify(item),
@@ -834,7 +833,7 @@ export function setAgentCommand(agentName, idempotencyKey) {
 }
 
 export function setModelCommand(model, idempotencyKey) {
-  assert(model?.providerName && model?.modelName && model?.variant, `model required: ${JSON.stringify(model)}`)
+  assert(model?.modelName && model?.variant, `model required: ${JSON.stringify(model)}`)
   assert(idempotencyKey && typeof idempotencyKey === 'string', 'idempotencyKey required')
   return { type: 'SET_MODEL', idempotencyKey, model }
 }

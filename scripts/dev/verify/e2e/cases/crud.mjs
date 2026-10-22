@@ -66,7 +66,7 @@ registerCase({
   id: 'crud.model.invalid_update_config',
   level: 'L1',
   title: 'Model 非法更新不破坏原配置',
-  docs: 'path 定位既有复合 identity（providerName/modelName）；PUT body 的 name 是目标逻辑名（支持重命名，本 case 保持同名）；PUT 非法 defaultVariant => 400，随后 GET 原配置不变',
+  docs: 'path 以全局逻辑名定位既有 Model；PUT body 的 name 是目标逻辑名（支持重命名，本 case 保持同名）；PUT 非法 defaultVariant => 400，随后 GET 原配置不变',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     const provider = envelopeData(
@@ -76,6 +76,7 @@ registerCase({
     const model = envelopeData(
       (
         await ctx.call('POST', '/api/ai/catalog/models', {
+          kind: 'MODEL',
           providerName: provider.name,
           name: modelName,
           modelId: `wire-invupd-${suffix}`,
@@ -88,9 +89,11 @@ registerCase({
       () =>
         ctx.call(
           'PUT',
-          modelPath(provider.name, modelName),
+          modelPath(modelName),
           {
+            kind: 'MODEL',
             name: modelName,
+            providerName: provider.name,
             modelId: model.modelId,
             description: 'bad',
             config: baseModelConfig({ defaultVariant: 'nope' }),
@@ -99,7 +102,7 @@ registerCase({
         ),
       { status: 400, messageIncludes: /defaultVariant/i },
     )
-    const still = await findModel(ctx, provider.name, modelName)
+    const still = await findModel(ctx, modelName)
     assert(still?.config?.defaultVariant === 'default', JSON.stringify(still))
     // 失败的 PUT 不得改动 identity/version：name 与 version 与创建时完全一致。
     assert(
@@ -233,8 +236,8 @@ registerCase({
 registerCase({
   id: 'crud.model.lifecycle',
   level: 'L1',
-  title: 'Model 复合 name identity 创建/更新/硬删除/同名重建',
-  docs: 'path 定位复合 identity；PUT 不改 providerName；protocolOptionsJson 在创建/读取/更新时保留数值文本；DELETE 后同名可重建且 version 从 0 开始；Provider 最后删除',
+  title: 'Model 全局逻辑名 identity 创建/更新/硬删除/同名重建',
+  docs: 'path 以全局逻辑名定位；PUT 不改 providerName；protocolOptionsJson 在创建/读取/更新时保留数值文本；DELETE 后同名可重建且 version 从 0 开始；Provider 最后删除',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     const provider = envelopeData(
@@ -247,6 +250,7 @@ registerCase({
     const model = envelopeData(
       (
         await ctx.call('POST', '/api/ai/catalog/models', {
+          kind: 'MODEL',
           providerName: provider.name,
           name,
           modelId: `wire-lifecycle-${suffix}`,
@@ -262,7 +266,7 @@ registerCase({
       JSON.stringify(model),
     )
     assert(model.config.variants[0].protocolOptionsJson === originalOptions, 'created options changed')
-    const listed = await findModel(ctx, provider.name, name)
+    const listed = await findModel(ctx, name)
     assert(listed?.config.variants[0].protocolOptionsJson === originalOptions, 'listed options changed')
     const updatedConfig = baseModelConfig({
       limit: { context: 8192, output: 1024 },
@@ -275,8 +279,10 @@ registerCase({
     })
     const updated = envelopeData(
       (
-        await ctx.call('PUT', modelPath(provider.name, name), {
+        await ctx.call('PUT', modelPath(name), {
+          kind: 'MODEL',
           name,
+          providerName: provider.name,
           modelId: model.modelId,
           description: 'updated',
           config: updatedConfig,
@@ -287,15 +293,16 @@ registerCase({
     assert(updated.providerName === provider.name && updated.name === name, JSON.stringify(updated))
     assert(updated.config.defaultVariant === 'fast', JSON.stringify(updated.config))
     assert(updated.config.variants[0].protocolOptionsJson === updatedOptions, 'updated options changed')
-    const relisted = await findModel(ctx, provider.name, name)
+    const relisted = await findModel(ctx, name)
     assert(relisted?.config.variants[0].protocolOptionsJson === updatedOptions, 'relisted options changed')
     await deleteModel(ctx, updated)
-    assert(!(await findModel(ctx, provider.name, name)), 'Model still listed')
+    assert(!(await findModel(ctx, name)), 'Model still listed')
 
     // 硬删除后同名可重建：version 从 0 重新开始，且严格使用新请求体配置。
     const recreated = envelopeData(
       (
         await ctx.call('POST', '/api/ai/catalog/models', {
+          kind: 'MODEL',
           providerName: provider.name,
           name,
           modelId: `wire-recreated-${suffix}`,
@@ -314,7 +321,7 @@ registerCase({
       recreated.config.defaultVariant === 'default',
       `recreated Model must reflect current body config: ${JSON.stringify(recreated)}`,
     )
-    assert(await findModel(ctx, provider.name, name), 'recreated Model not listed')
+    assert(await findModel(ctx, name), 'recreated Model not listed')
     await deleteModel(ctx, recreated)
     await deleteProvider(ctx, provider)
   },
@@ -698,13 +705,13 @@ registerCase({
   id: 'crud.model.delete_unknown_rejected',
   level: 'L1',
   title: '删除不存在 Model 被拒绝',
-  docs: 'DELETE 使用 providerName/modelName path；未知复合 identity => 404',
+  docs: 'DELETE 使用全局逻辑名 path；未知 Model name => 404',
   async run(ctx) {
     await expectHttpError(
       () =>
         ctx.call(
           'DELETE',
-          '/api/ai/catalog/models/missing-provider/missing-model?expectedVersion=0',
+          '/api/ai/catalog/models/missing-model?expectedVersion=0',
         ),
       { status: 404, messageIncludes: /not found|unknown|model/i },
     )
@@ -969,7 +976,7 @@ registerCase({
   id: 'crud.agent.builtin_identity',
   level: 'L1',
   title: '内置 Compaction Agent identity 只读与改名/删除拒绝',
-  docs: 'GET /api/ai/catalog/agents 必含内置 Compaction：type=BUILTIN，model 字段显式输出（未配置为 null，已配置为合法 provider/model 引用，本 case 绝不改写其 model/config）；PUT 携带由系统持有的 name 字段 => 400；DELETE => 409；拒绝后 identity/version 不变',
+  docs: 'GET /api/ai/catalog/agents 必含内置 Compaction：type=BUILTIN，model 字段显式输出（未配置为 null，已配置为全局逻辑模型名，本 case 绝不改写其 model/config）；PUT 携带由系统持有的 name 字段 => 400；DELETE => 409；拒绝后 identity/version 不变',
   async run(ctx) {
     const agents = pageResults(
       (await ctx.call('GET', '/api/ai/catalog/agents?pageNumber=1&pageSize=100')).json,
@@ -980,7 +987,7 @@ registerCase({
       `builtin Compaction Agent must be listed: ${JSON.stringify(agents.map((a) => a.name))}`,
     )
     assert(compaction.type === 'BUILTIN', JSON.stringify(compaction))
-    // model 字段恒在：未配置时显式 null，已配置时是合法 providerName/modelName 引用。
+    // model 字段恒在：未配置时显式 null，已配置时是全局逻辑模型名。
     assert(
       Object.hasOwn(compaction, 'model'),
       `builtin model field must be present: ${JSON.stringify(compaction)}`,
@@ -1025,18 +1032,13 @@ registerCase({
 })
 
 
-/** 由 Agent 的 provider/model 字符串构造 model selection（只切第一个 '/'，保留 model name 内后续 '/'）。 */
+/** 由 Agent 的全局逻辑模型名构造 selection；variant 缺省时使用 default。 */
 function modelSelectionFor(agent) {
-  const separator = String(agent.model || '').indexOf('/')
-  if (separator <= 0) {
-    throw new Error(`agent.model must be provider/model: ${JSON.stringify(agent)}`)
+  const modelName = String(agent.model)
+  if (!modelName) {
+    throw new Error(`agent.model must be a logical model name: ${JSON.stringify(agent)}`)
   }
-  const providerName = String(agent.model).slice(0, separator)
-  const modelName = String(agent.model).slice(separator + 1)
-  if (!providerName || !modelName) {
-    throw new Error(`agent.model must be provider/model: ${JSON.stringify(agent)}`)
-  }
-  return { providerName, modelName, variant: agent.variant || 'default' }
+  return { modelName, variant: agent.variant || 'default' }
 }
 
 async function firstModel(ctx) {
@@ -1070,28 +1072,26 @@ async function firstAgent(ctx) {
   return agent
 }
 
-async function findModel(ctx, providerName, name) {
+async function findModel(ctx, name) {
   const models = pageResults(
     (await ctx.call('GET', '/api/ai/catalog/models?pageNumber=1&pageSize=100')).json,
   )
-  return models.find(
-    (model) => model.providerName === providerName && model.name === name,
-  )
+  return models.find((model) => model.name === name)
 }
 
 function modelRef(model) {
-  return `${model.providerName}/${model.name}`
+  return model.name
 }
 
-function modelPath(providerName, name) {
-  const encodedName = name.split('/').map(encodeURIComponent).join('/')
-  return `/api/ai/catalog/models/${encodeURIComponent(providerName)}/${encodedName}`
+function modelPath(name) {
+  const encodedName = String(name).split('/').map(encodeURIComponent).join('/')
+  return `/api/ai/catalog/models/${encodedName}`
 }
 
 async function deleteModel(ctx, model) {
   await ctx.call(
     'DELETE',
-    `${modelPath(model.providerName, model.name)}?expectedVersion=${encodeURIComponent(model.version)}`,
+    `${modelPath(model.name)}?expectedVersion=${encodeURIComponent(model.version)}`,
   )
 }
 
