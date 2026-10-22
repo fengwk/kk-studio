@@ -78,7 +78,7 @@ public class AgentModelServiceImpl implements AgentModelService {
     AgentModel snapshot = agentModelRepository.getByName(name);
     if (snapshot != null && snapshot.getKind() == AgentModelKind.GROUP) {
       // 先锁成员再锁组行：成员改名/删除走同一模型行锁，避免组配置引用已删除的成员或 Variant。
-      modelMutationFactory.lockMembers(updateDTO);
+      modelMutationFactory.lockMembers(snapshot, updateDTO);
     }
     AgentModel model = referenceResolver.requireModelForUpdate(name);
     ensureExpectedVersion(model, rawExpected, expected);
