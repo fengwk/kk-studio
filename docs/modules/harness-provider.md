@@ -75,7 +75,7 @@ OpenAI Chat 的 `reasoning_content` 与 `reasoning_details` 随 replay payload �
 
 工具绑定或 Environment 变化时，无 replay 的历史工具调用可投影为普通上下文。携带 replay 的助手消息若需降级，Runtime 放弃该消息不兼容的 opaque replay 并改用语义投影（调用与结果仍按既有规则配对，绝不把原生 payload 附着到被改写的内容上），不因存在 replay 就拒绝请求。模型切换与前缀编辑由编码器按 affinity 校验；压缩是摘要重建的有损边界。
 
-语义回退把 assistant 的 `ProviderJsonBlock` 诊断（如 `tool_call_diagnostic`）投影为普通文本，四协议都不再以 `INVALID_REQUEST` 拒绝：Anthropic/Gemini 各为独立 `text` 块/part，OpenAI Chat 并回 assistant `content`，OpenAI Responses 为 `output_text`。
+语义回退把 assistant 的 `ProviderJsonBlock` 诊断（如 `tool_call_diagnostic`）投影为普通文本，四协议都不以 `INVALID_REQUEST` 拒绝：Anthropic/Gemini 各为独立 `text` 块/part，OpenAI Chat 并回 assistant `content`，OpenAI Responses 为 `output_text`。
 
 媒体能力由 [`ProviderMediaCapabilities`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderMediaCapabilities.java) 按用户内容与工具结果分别声明；Platform 把它与模型 `inputModalities` 取交集，把 durable Blob 引用转换成 attempt-only 的 Base64 data URI。编码器不访问 Blob 存储，也不生成私网地址或预签名 URL，未声明的 adapter 默认为 `NONE`。
 

@@ -51,25 +51,25 @@ health、资源下载和 WebSocket 使用各自传输形式。公开路由如下
 | family | 路径 | 用途 |
 | --- | --- | --- |
 | Health | `/healthz` | 存活探针 |
-| Catalog | `/api/providers|models|agents|tools|model-defaults` | Provider/MODEL/GROUP/Agent CRUD、工具候选、Provider 远端模型 ID（`providers/{name}/remote-models`）、新建模型的目录默认参数候选（`model-defaults`）；Model 的 PUT/DELETE 为 `/models/{*modelName}`，名称可含斜杠；变更使用 expectedVersion |
+| Catalog | `/api/providers|models|agents|tools|model-defaults` | Provider/MODEL/GROUP/Agent CRUD、工具候选、Provider 远端模型 ID（`providers/{name}/remote-models`）、新建模型的目录默认参数候选与手动刷新（`model-defaults`、`model-defaults/refresh`）；Model 的 PUT/DELETE 为 `/models/{*modelName}`，名称可含斜杠；变更使用 expectedVersion |
 | Skill | `/api/skill-packages` | CRUD、check、exact commit update |
 | MCP | `/api/mcp-servers` | name-keyed CRUD、显式 no-store config、同步 discover |
-| Plugin | `/api/plugins` | 安全投影、auth/prepare、auth/complete、删除 auth；`{pluginId}/connection-check` 按 expected 坐标执行一次显式只读连接检查 |
+| Plugin | `/api/plugins` | 安全投影、普通配置 PUT、auth/prepare、auth/complete、删除 auth；`{pluginId}/connection-check` 按 expected 坐标执行一次显式只读连接检查 |
 | Chat | `/api/chats` | CRUD 与归属 Session |
 | Harness command | `/api/command-batches`、`/api/threads/{threadId}/command-batches` | 创建型 Chat 命令接受（owner-aware）与既有 Thread 的 owner-free 续写；都返回 202 |
 | Session | `/api/sessions/{sessionId}` | threads、entries（含读取时 `usageCost`）、name、草稿/历史请求预览 |
-| Thread | `/api/threads/{threadId}` | Snapshot、执行树、name、Debug、协议预览、compact、yolo、stop、tool approval |
+| Thread | `/api/threads/{threadId}` | Snapshot、执行树、name、Debug、协议预览、流式追帧（`stream-catchup`）、compact、yolo、stop、tool approval |
 | Agent task | `/api/agent-tasks`、`/{ticketId}`、`/{ticketId}/stop` | 提交独立执行的 Agent 任务（客户端 `ticketId` 为幂等键，同请求重放返回原任务，换内容被拒绝）、按票据观察状态与冻结结果、停止 |
 | Interaction | `/api/interactions` | 等待分页（`total` 是同一过滤条件下真实可见的待处理计数）与 `/{interactionId}/input` 人工提交 |
 | Canvas | `/api/canvases` | CRUD、Snapshot、commands、resource download/preview URL、节点 Function Run |
 | Function catalog | `/api/canvas-functions` | 函数 schema、输出计划、可用性 |
 | Storage | `/api/storage/uploads`、`/api/storage/blobs/{blobId}` | reserve/complete/delete 与短期 download/preview URL |
 | Project | `/api/projects` | CRUD、workflow/yolo、archive/unarchive、Snapshot、Issue 创建 |
-| Issue | `/api/issues/{issueId}` | CRUD、活动/证据、流转、阻塞/恢复、暂停/继续、stop、UNKNOWN 核查、额度重置、归档 |
+| Issue | `/api/issues/{issueId}` | CRUD、活动/证据、流转、阻塞/恢复、暂停/继续、stop、UNKNOWN 核查、额度重置、重开、归档 |
 | Settings | `/api/settings`、`/api/settings/schema` | 聚合 GET/CAS PUT、编辑 schema |
 | Configuration sync | `/api/settings/sync`、`/export`、`/import/check`、`/import` | GET 清单、POST 选择导出、导入检查与确认执行；响应禁止缓存 |
-| Environment | `/api/environments`、`/{id}/update` | Card、注册令牌轮换（明文只在创建与轮换响应中返回一次）、安装设置保存、受管二进制在线更新（POST 发起、GET 只读投影）、运维 events |
-| Environment IDE | `/environment-ide/{environmentId}/` | 同源 IDE 固定入口、bootstrap 票据与 HTTP/WebSocket 数据面 |
+| Environment | `/api/environments`、`/{id}/install`、`/{id}/update`、`/uninstall/{os}` | Card、注册令牌轮换（明文只在创建与轮换响应中返回一次）、安装设置保存、安装命令与一次性安装码、卸载脚本、受管二进制在线更新（POST 发起、GET 只读投影）、运维 events |
+| Environment IDE | `/api/environments/{id}/ide/views`、`/environment-ide/{environmentId}/` | 打开/关闭视图、切换目录与终端；同源 IDE 固定入口、bootstrap 票据与 HTTP/WebSocket 数据面 |
 | Environment Stream | `/api/harness/environment-stream/v1/{ticket}` | Daemon IDE 反向数据流端点 |
 
 `POST /api/chats` 省略 `yoloEnabled` 时为 `false`；创建请求的 `environmentName` 可省略或为 null（都表示无默认环境），
@@ -95,7 +95,7 @@ Harness mapper 校验 canonical UUID、可放入 long 的规范十进字符串�
 Session/Thread 命名是独立控制面；响应状态取 Runtime Snapshot 的分类结果。
 完整执行语义见 [Harness Runtime](harness-runtime.md)。
 
-Thread 控制面按认证、资源权限与请求格式收紧，不再按 Thread 的产品归属拒绝。
+Thread 控制面按认证、资源权限与请求格式收紧，不按 Thread 的产品归属拒绝。
 `GET /api/threads/{threadId}` 的 Snapshot 携带 `thread.executionControl`（`RUNNABLE` / `STOPPED`）、
 派生的 `thread.status` / `processing`（只描述该 Thread 自身，不递归子树）、每条 Entry 的读取时 `usageCost` 与 `stopReceipts`；
 `POST /api/threads/{threadId}/stop` 以 root `expectedVersion` + 稳定 `stopRequestId` 执行精确 CAS，
@@ -160,7 +160,7 @@ Evidence 接收 READY uploadId，在事务内转移引用并返回规范资源�
 只提供 Jackson 2 mapper 的 convention4j JSON 自动装配在组合根被排除
 （[`WebApplication`](../../web/src/main/java/fun/fengwk/kkstudio/web/WebApplication.java) 与其测试入口一致），
 自有代码只解析到该 Jackson 3 mapper；Share DTO 的严格字段规则直接由 Jackson 3 注解声明
-（例如 `protocolOptionsJson` 与网络文本字段只接受 JSON 字符串 token），不再需要跨版本 mixin 桥接。
+（例如 `protocolOptionsJson` 与网络文本字段只接受 JSON 字符串 token）。
 required-nullable 字段由 DTO 显式 ALWAYS。未知字段由 DTO 的 JsonAnySetter 控制，
 领域 codec 另有严格语法校验；HTTP mapper 的 trailing-token 行为保持 Jackson 配置本身的边界。
 

@@ -48,9 +48,9 @@ Tool siblings 按 assistantEntryId/callIndex、Work 按 type/UUID 排序。
 执行根约束要求「无父」与「`root_thread_id` 指向自身」等价，`root_thread_id` 有 Thread 外键；
 `yolo_enabled` 只允许出现在执行根上。根开关更新不递归写子行，执行根与父关系均在创建时固定。
 
-`loadEntryPath` 用单条 `WITH RECURSIVE ... CYCLE id SET is_cycle USING path` 递归 CTE 自 head 回溯到 ROOT，一次往返读出整条不可变路径并按 `depth desc` 输出，同时以环路哨兵检测并拒绝父子成环。句柄内维护事务局部 `Map<UUID, EntryPath>` 正向缓存：冷读一次 CTE 后回填；同事务内连续 `insertEntry` 直接从已缓存父路径派生新节点并更新缓存，后续读取子节点 0 次 CTE；缓存只在本事务可见，`close()` 清空；`deleteEntries` / `deleteSession` 按 session 整体驱逐，避免读到失效数据。`findRootEntry` 优先复用缓存中的 ROOT，未命中时借 `uk_harness_entry_single_root` 点查并把单节点路径写回缓存。[`PostgresqlHarnessRows`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlHarnessRows.java) 负责行映射与毫秒精度校验。
+`loadEntryPath` 用单条 `WITH RECURSIVE` CTE 自 head 回溯到 ROOT，一次往返读出整条不可变路径并按 `depth desc` 输出；只追加写入、同 Session 复合外键与「非 ROOT 必有父、不得指向自身」约束保证父链终止于唯一 ROOT，SQL 不另做环路检测。句柄内维护事务局部 `Map<UUID, EntryPath>` 正向缓存：冷读一次 CTE 后回填；同事务内连续 `insertEntry` 直接从已缓存父路径派生新节点并更新缓存，后续读取子节点 0 次 CTE；缓存只在本事务可见，`close()` 清空；`deleteEntries` / `deleteSession` 按 session 整体驱逐，避免读到失效数据。`findRootEntry` 优先复用缓存中的 ROOT，未命中时借 `uk_harness_entry_single_root` 点查并把单节点路径写回缓存。[`PostgresqlHarnessRows`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlHarnessRows.java) 负责行映射与毫秒精度校验。
 
-`loadContributorCustomEntriesOnPath` 在完整路径缓存精确命中时直接在内存过滤 CUSTOM Entry；未命中时走一条窄递归 CTE，只读 ROOT、head、环路哨兵与匹配该 `contributorId` 的 CUSTOM 节点并验证连通性，结果不回填完整路径缓存。
+`loadContributorCustomEntriesOnPath` 在完整路径缓存精确命中时直接在内存过滤 CUSTOM Entry；未命中时走一条窄递归 CTE，只返回 head（区分 head 不存在）与匹配该 `contributorId` 的 CUSTOM 节点，结果不回填完整路径缓存。
 
 深删除按阶梯取锁：`deleteThreads` 将 UUID 排序，但重复 ID 直接抛 `IllegalArgumentException`，不静默去重。目标 Thread 必须全部已加锁且属于已锁执行树；仍被 join 引用、或删除父 Thread 却遗漏其存活子 Thread 时同样拒绝。随后依次锁 Command、Model、Tool、Work，删除顺序为 Work、Command、Tool、Model，最后整批删除 Thread。`deleteEntries` 叶子优先逐层删除直到只剩 ROOT，Session 由独立的 `deleteSession` 删除。
 
