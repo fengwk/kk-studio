@@ -104,7 +104,7 @@ final class ModelPricingResolver {
     if (Boolean.FALSE.equals(any)) {
       return false;
     }
-    Boolean not = null;
+    Boolean not = true;
     if (condition.not() != null) {
       Boolean nested = matches(condition.not(), usage, requestedAt, serviceTier);
       if (nested == null) {
@@ -143,7 +143,8 @@ final class ModelPricingResolver {
       Instant requestedAt,
       String serviceTier) {
     if (conditions.isEmpty()) {
-      return false;
+      // 未声明 any 时不施加额外约束；空对象条件恒真。
+      return true;
     }
     Boolean result = false;
     for (ModelPricingCondition condition : conditions) {
@@ -191,11 +192,17 @@ final class ModelPricingResolver {
     if (date == null) {
       return true;
     }
+    if (date.gte() == null && date.lt() == null) {
+      return true;
+    }
     if (requestedAt == null) {
       return null;
     }
     LocalDate localDate = requestedAt.atZone(ZoneOffset.UTC).toLocalDate();
-    return !localDate.isBefore(date.gte()) && localDate.isBefore(date.lt());
+    if (date.gte() != null && localDate.isBefore(date.gte())) {
+      return false;
+    }
+    return date.lt() == null || localDate.isBefore(date.lt());
   }
 
   private static Boolean matchesTime(ModelPricingCondition.TimeWindow time, Instant requestedAt) {

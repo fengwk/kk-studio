@@ -34,7 +34,7 @@ public record ModelPricingCondition(
     serviceTier = copyServiceTiers(serviceTier);
     all = copyConditions(all, "all");
     any = copyConditions(any, "any");
-    validateDepth(0);
+    validateDepth(all, any, not, 0);
   }
 
   /** Context token 边界；上下界同时存在时必须保持可满足。 */
@@ -66,13 +66,11 @@ public record ModelPricingCondition(
     }
   }
 
-  /** 左闭右开的 UTC 日期区间。 */
+  /** 左闭右开的 UTC 日期区间；任一缺省表示该侧不设边界。 */
   public record DateRange(LocalDate gte, LocalDate lt) {
 
     public DateRange {
-      Objects.requireNonNull(gte, "date.gte");
-      Objects.requireNonNull(lt, "date.lt");
-      if (!gte.isBefore(lt)) {
+      if (gte != null && lt != null && !gte.isBefore(lt)) {
         throw new IllegalArgumentException("date.gte must be before date.lt");
       }
     }
@@ -149,7 +147,7 @@ public record ModelPricingCondition(
     return List.copyOf(copy);
   }
 
-  void validateDepth(int depth) {
+  private void validateDepth(int depth) {
     if (depth > MAX_DEPTH) {
       throw new IllegalArgumentException("condition nesting must not exceed " + MAX_DEPTH);
     }
@@ -161,6 +159,25 @@ public record ModelPricingCondition(
     }
     if (not != null) {
       not.validateDepth(depth + 1);
+    }
+  }
+
+  private static void validateDepth(
+      List<ModelPricingCondition> allConditions,
+      List<ModelPricingCondition> anyConditions,
+      ModelPricingCondition notCondition,
+      int depth) {
+    if (depth > MAX_DEPTH) {
+      throw new IllegalArgumentException("condition nesting must not exceed " + MAX_DEPTH);
+    }
+    for (ModelPricingCondition condition : allConditions) {
+      condition.validateDepth(depth + 1);
+    }
+    for (ModelPricingCondition condition : anyConditions) {
+      condition.validateDepth(depth + 1);
+    }
+    if (notCondition != null) {
+      notCondition.validateDepth(depth + 1);
     }
   }
 

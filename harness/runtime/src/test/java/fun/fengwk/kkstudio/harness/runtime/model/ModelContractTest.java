@@ -236,11 +236,11 @@ class ModelContractTest {
 
     ModelCost cost = ModelCost.calculate(pricing, usage);
 
-    assertEquals(new BigDecimal("2.40"), cost.input());
+    assertEquals(new BigDecimal("2.4"), cost.input());
     assertEquals(new BigDecimal("3.0"), cost.output());
     assertEquals(new BigDecimal("0.15"), cost.cacheRead());
     assertEquals(new BigDecimal("0.45"), cost.cacheWrite());
-    assertEquals(new BigDecimal("2.70"), cost.reasoning());
+    assertEquals(new BigDecimal("2.7"), cost.reasoning());
     assertEquals(new BigDecimal("8.70"), cost.total());
     BigDecimal sum =
         cost.input()

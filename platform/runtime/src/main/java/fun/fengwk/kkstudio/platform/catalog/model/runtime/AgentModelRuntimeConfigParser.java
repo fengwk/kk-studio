@@ -398,8 +398,8 @@ public final class AgentModelRuntimeConfigParser {
     AgentModelPricingDateConditionDTO date = condition.getDate();
     if (date != null) {
       String datePath = path + ".date";
-      LocalDate gte = parseDate(date.getGte(), datePath + ".gte");
-      LocalDate lt = parseDate(date.getLt(), datePath + ".lt");
+      LocalDate gte = parseOptionalDate(date.getGte(), datePath + ".gte");
+      LocalDate lt = parseOptionalDate(date.getLt(), datePath + ".lt");
       ensureCondition(() -> new ModelPricingCondition.DateRange(gte, lt), datePath);
     }
     AgentModelPricingTimeConditionDTO time = condition.getTime();
@@ -440,6 +440,10 @@ public final class AgentModelRuntimeConfigParser {
     for (int index = 0; index < conditions.size(); index++) {
       validateCondition(conditions.get(index), path + "[" + index + "]", depth + 1);
     }
+  }
+
+  private static LocalDate parseOptionalDate(String value, String path) {
+    return value == null ? null : parseDate(value, path);
   }
 
   private static LocalDate parseDate(String value, String path) {
@@ -668,8 +672,8 @@ public final class AgentModelRuntimeConfigParser {
     if (dateDto != null) {
       date =
           new ModelPricingCondition.DateRange(
-              parseDate(dateDto.getGte(), "config.pricing.condition.date.gte"),
-              parseDate(dateDto.getLt(), "config.pricing.condition.date.lt"));
+              parseOptionalDate(dateDto.getGte(), "config.pricing.condition.date.gte"),
+              parseOptionalDate(dateDto.getLt(), "config.pricing.condition.date.lt"));
     }
     ModelPricingCondition.TimeWindow time = null;
     AgentModelPricingTimeConditionDTO timeDto = condition.getTime();
