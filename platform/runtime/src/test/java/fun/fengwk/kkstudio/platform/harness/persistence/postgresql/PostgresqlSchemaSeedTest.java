@@ -179,12 +179,12 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
             "the deepseek provider config must declare DEEPSEEK thinking format");
 
         assertEquals(
-            "minimax-anthropic/MiniMax-M3",
+            "minimax/MiniMax-M3-Responses,minimax-anthropic/MiniMax-M3",
             singleString(
                 st,
                 "select string_agg(provider_name || '/' || name, ',' order by provider_name, name)"
                     + " from agent_model where name <> model_id"),
-            "only minimax-anthropic/MiniMax-M3 may differ between logical name and wire modelId");
+            "only the two MiniMax rows may differ between logical name and wire modelId");
         assertSingleLong(
             conn,
             "select count(*) from agent_provider where config::text like '%modelAliases%'",
@@ -360,9 +360,10 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
               "update agent_definition set system_prompt = 'tampered-prompt' where name ="
                   + " 'default-assistant'");
           st.executeUpdate(
-              "insert into agent_model (provider_name, name, model_id, description, config) "
-                  + "values ('stub', 'extraneous-stub-model', 'stub-wire-extra', 'extraneous',"
-                  + " '{}'::jsonb)");
+              "insert into agent_model"
+                  + " (name, kind, provider_name, model_id, description, config) "
+                  + "values ('extraneous-stub-model', 'MODEL', 'stub', 'stub-wire-extra',"
+                  + " 'extraneous', '{}'::jsonb)");
         }
         assertSingleLong(
             conn,
@@ -467,15 +468,22 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
     assertSingleCount(conn, "agent_definition", 1L);
     try (Statement st = conn.createStatement()) {
       assertEquals(
-          "minimax/MiniMax-M2.7:high",
+          "MiniMax-M2.7:high",
           singleString(
               st,
-              "select a.model_provider_name || '/' || a.model_name || ':' || a.variant"
+              "select a.model_name || ':' || a.variant"
                   + " from agent_definition a"
-                  + " join agent_model m on m.provider_name = a.model_provider_name"
-                  + " and m.name = a.model_name"
                   + " where a.name = 'default-assistant'"),
-          "the default E2E agent must remain bound to minimax/MiniMax-M2.7");
+          "the default E2E agent must remain bound to the global model name MiniMax-M2.7");
+      assertEquals(
+          "minimax:MODEL",
+          singleString(
+              st,
+              "select m.provider_name || ':' || m.kind"
+                  + " from agent_definition a"
+                  + " join agent_model m on m.name = a.model_name"
+                  + " where a.name = 'default-assistant'"),
+          "the default E2E agent model must resolve to the minimax MODEL row");
     }
     assertPiModelCatalog(conn);
   }
@@ -498,7 +506,8 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
                       + "'config', m.config"
                       + ") order by m.provider_name, m.name)::text"
                       + " from agent_model m"
-                      + " join agent_provider p on p.name = m.provider_name"));
+                      + " join agent_provider p on p.name = m.provider_name"
+                      + " where m.kind = 'MODEL'"));
       assertEquals(
           canonicalModels(expected),
           canonicalModels(actual),

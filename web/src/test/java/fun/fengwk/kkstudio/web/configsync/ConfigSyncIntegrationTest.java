@@ -34,6 +34,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelCreateDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelVariantDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCreateDTO;
@@ -477,20 +478,15 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     String token = envDto.path("registrationToken").asText();
 
     // 先建 B 再无环 A，最后把 B 的 subagents 指向 A，形成互相引用的 Agent。
-    createAgent(
-        agentB, provider + "/" + model, List.of(mcpTool), List.of(skillRef(pkg, "dev")), List.of());
+    createAgent(agentB, model, List.of(mcpTool), List.of(skillRef(pkg, "dev")), List.of());
     JsonNode agentADto =
         createAgent(
-            agentA,
-            provider + "/" + model,
-            List.of(mcpTool),
-            List.of(skillRef(pkg, "dev")),
-            List.of(agentB));
+            agentA, model, List.of(mcpTool), List.of(skillRef(pkg, "dev")), List.of(agentB));
     JsonNode agentBPage = findAgent(agentB);
     AgentDefinitionUpdateDTO link = new AgentDefinitionUpdateDTO();
     link.setDescription("agent " + agentB);
     link.setSystemPrompt("prompt " + agentB);
-    link.setModel(provider + "/" + model);
+    link.setModel(model);
     link.setVariant("default");
     link.setConfig(agentConfig(List.of(mcpTool), List.of(skillRef(pkg, "dev")), List.of(agentA)));
     link.setExpectedVersion(agentBPage.path("version").asText());
@@ -499,7 +495,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     List<Map<String, String>> selection =
         List.of(
             ref("providers", provider),
-            ref("models", provider + "/" + model),
+            ref("models", model),
             ref("agents", agentA),
             ref("agents", agentB),
             ref("skillPackages", pkg),
@@ -519,14 +515,14 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     AgentDefinitionUpdateDTO unlinkA = new AgentDefinitionUpdateDTO();
     unlinkA.setDescription("agent " + agentA);
     unlinkA.setSystemPrompt("prompt " + agentA);
-    unlinkA.setModel(provider + "/" + model);
+    unlinkA.setModel(model);
     unlinkA.setVariant("default");
     unlinkA.setConfig(agentConfig(List.of(mcpTool), List.of(skillRef(pkg, "dev")), List.of()));
     unlinkA.setExpectedVersion(agentADto.path("version").asText());
     JsonNode unlinkedA = putData("/api/ai/catalog/agents/" + agentA, unlinkA);
     deleteOk("/api/ai/catalog/agents/" + agentB, findAgent(agentB).path("version").asText());
     deleteOk("/api/ai/catalog/agents/" + agentA, unlinkedA.path("version").asText());
-    deleteOk("/api/ai/catalog/models/" + provider + "/" + model, modelDto.path("version").asText());
+    deleteOk("/api/ai/catalog/models/" + model, modelDto.path("version").asText());
     deleteOk("/api/ai/catalog/skill-packages/" + pkg, skillDto.path("version").asText());
     deleteOk("/api/ai/mcp-servers/" + mcpName, discoveredMcp.path("version").asText());
     deleteOk(
@@ -542,9 +538,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
             node -> imported.add(node.path("kind").asText() + "/" + node.path("name").asText()));
     assertTrue(
         imported.contains("providers/" + provider), "provider must be recreated: " + imported);
-    assertTrue(
-        imported.contains("models/" + provider + "/" + model),
-        "model must be recreated: " + imported);
+    assertTrue(imported.contains("models/" + model), "model must be recreated: " + imported);
     assertTrue(imported.contains("agents/" + agentA));
     assertTrue(imported.contains("agents/" + agentB));
     assertTrue(imported.contains("skillPackages/" + pkg));
@@ -561,7 +555,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
 
     // Agent 引用闭包（模型/技能/MCP 工具/循环 subagent）恢复。
     JsonNode reA = findAgent(agentA);
-    assertEquals(provider + "/" + model, reA.path("model").asText());
+    assertEquals(model, reA.path("model").asText());
     assertEquals(List.of(mcpTool), listText(reA.path("config").path("tools")));
     assertEquals(List.of("dev"), reA.path("config").path("skills").findValuesAsString("name"));
     assertEquals(pkg, reA.path("config").path("skills").get(0).path("packageName").asText());
@@ -621,15 +615,9 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     JsonNode mcpDto = createMcp(mcpName, mcpServer.endpointUrl(), Map.of());
     discover(mcpDto.path("name").asText(), "0");
     createEnvironment(envName);
-    createAgent(
-        agentB, provider + "/" + model, List.of(), List.of(skillRef(pkg, "dev")), List.of());
-    createAgent(
-        agentA,
-        provider + "/" + model,
-        List.of(mcpTool),
-        List.of(skillRef(pkg, "dev")),
-        List.of(agentB));
-    createAgent(unrelatedAgent, provider + "/" + model, List.of(), List.of(), List.of());
+    createAgent(agentB, model, List.of(), List.of(skillRef(pkg, "dev")), List.of());
+    createAgent(agentA, model, List.of(mcpTool), List.of(skillRef(pkg, "dev")), List.of(agentB));
+    createAgent(unrelatedAgent, model, List.of(), List.of(), List.of());
 
     String yaml =
         postData("/api/settings/sync/export", exportRequest(agentRef(agentA)))
@@ -1029,7 +1017,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     String bad = "sk_agent_bad_" + suffix;
     createProvider(provider, "skip provider");
     createModel(provider, model, "1.25", "{}");
-    createAgent(good, provider + "/" + model, List.of(), List.of(), List.of());
+    createAgent(good, model, List.of(), List.of(), List.of());
 
     String yaml =
         "agents:\n"
@@ -1102,15 +1090,15 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     createProvider(provider, "precision provider");
     JsonNode modelDto = createModel(provider, model, price, "{}");
     String yaml =
-        postData("/api/settings/sync/export", exportRequest(ref("models", provider + "/" + model)))
+        postData("/api/settings/sync/export", exportRequest(ref("models", model)))
             .path("yaml")
             .asText();
-    deleteOk("/api/ai/catalog/models/" + provider + "/" + model, modelDto.path("version").asText());
+    deleteOk("/api/ai/catalog/models/" + model, modelDto.path("version").asText());
     importYaml(yaml);
     JsonNode reModel = findModel(provider, model);
     assertEquals(
         price,
-        reModel.path("config").path("pricing").path("inputPerMillionTokens").asText(),
+        reModel.path("config").path("pricing").path("base").path("input").asText(),
         "pricing BigDecimal must keep full precision");
   }
 
@@ -1169,6 +1157,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
       String providerName, String name, String inputPrice, String protocolOptionsJson)
       throws Exception {
     AgentModelCreateDTO dto = new AgentModelCreateDTO();
+    dto.setKind(AgentModelKind.MODEL);
     dto.setProviderName(providerName);
     dto.setName(name);
     dto.setModelId("wire-" + name);
@@ -1386,6 +1375,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     providerEntry.put("credential", credential);
 
     Map<String, Object> modelEntry = new LinkedHashMap<>();
+    modelEntry.put("kind", "MODEL");
     modelEntry.put("providerName", provider);
     modelEntry.put("name", model);
     modelEntry.put("modelId", "wire-" + model);
@@ -1393,7 +1383,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
 
     Map<String, Object> agentEntry = new LinkedHashMap<>();
     agentEntry.put("name", agent);
-    agentEntry.put("model", provider + "/" + model);
+    agentEntry.put("model", model);
     agentEntry.put("variant", variant);
     agentEntry.put("config", configYaml(agentConfig(List.of(), List.of(), List.of())));
 

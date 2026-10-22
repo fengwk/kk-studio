@@ -37,6 +37,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
       Arrays.asList(
           "agent_definition",
           "agent_model",
+          "agent_model_group_cooldown",
           "agent_provider",
           "canvas_command_dedup",
           "canvas_document",
@@ -153,7 +154,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "type",
         "description",
         "system_prompt",
-        "model_provider_name",
         "model_name",
         "variant",
         "config",
@@ -162,14 +162,25 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "version");
     assertColumns(
         "agent_model",
-        "provider_name",
         "name",
+        "kind",
+        "provider_name",
         "model_id",
         "description",
         "config",
+        "group_config",
         "created_at",
         "updated_at",
         "version");
+    assertColumns(
+        "agent_model_group_cooldown",
+        "group_name",
+        "member_model_name",
+        "member_variant",
+        "group_version",
+        "cooldown_until",
+        "created_at",
+        "updated_at");
     assertColumns(
         "agent_provider",
         "name",
@@ -508,6 +519,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "error",
         "result_entry_id",
         "failed_attempts",
+        "group_execution",
+        "requested_at",
         "created_at",
         "updated_at",
         "provider_replay_state");
@@ -556,6 +569,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         Set.of(
             "agent_definition.config",
             "agent_model.config",
+            "agent_model.group_config",
             "agent_provider.config",
             "canvas_function_run.state_json",
             "canvas_node.function",
@@ -567,6 +581,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "harness_entry.provider_replay_state",
             "harness_model_invocation.error",
             "harness_model_invocation.failed_attempts",
+            "harness_model_invocation.group_execution",
             "harness_model_invocation.provider_replay_state",
             "harness_model_invocation.request_spec",
             "harness_model_invocation.result",
@@ -588,7 +603,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "skill_package.skills",
             "system_setting.config"),
         jsonbColumns,
-        "jsonb columns must exactly match the 33 declared structured payloads");
+        "jsonb columns must exactly match the 35 declared structured payloads");
 
     // 文本保存指数与字节预算，不触发 jsonb 数值展开。
     assertColumnType("text", "plugin_configuration_revision", "values_json");
@@ -654,6 +669,9 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "agent_definition.updated_at",
             "agent_model.created_at",
             "agent_model.updated_at",
+            "agent_model_group_cooldown.cooldown_until",
+            "agent_model_group_cooldown.created_at",
+            "agent_model_group_cooldown.updated_at",
             "agent_provider.created_at",
             "agent_provider.updated_at",
             "canvas_document.created_at",
@@ -677,6 +695,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "environment_update_operation.updated_at",
             "harness_entry.created_at",
             "harness_model_invocation.created_at",
+            "harness_model_invocation.requested_at",
             "harness_model_invocation.updated_at",
             "harness_session.created_at",
             "harness_thread.created_at",
@@ -735,7 +754,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "system_setting.created_at",
             "system_setting.updated_at"),
         temporalColumns,
-        "business schema temporal columns must exactly equal the 85 timestamptz(3) columns");
+        "business schema temporal columns must exactly equal the 88 timestamptz(3) columns");
 
     assertEquals(
         128L,
@@ -967,6 +986,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "canvas_node_canvas_id_fkey",
             "canvas_resource_canvas_id_fkey",
             "fk_agent_definition_model",
+            "fk_agent_model_group_cooldown_group",
+            "fk_agent_model_group_cooldown_member",
             "fk_agent_model_provider",
             "fk_canvas_node_group",
             "fk_canvas_pin_node",
@@ -1028,7 +1049,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "fk_storage_upload_blob",
             "project_issue_project_id_fkey"),
         foreignKeys,
-        "all 66 declared foreign keys must exist in public schema");
+        "all 68 declared foreign keys must exist in public schema");
   }
 
   @Test
@@ -1097,15 +1118,17 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
 
     assertEquals(
         Set.of(
+            "fk_agent_model_group_cooldown_group",
             "fk_environment_connection_environment",
             "fk_environment_update_operation_environment",
             "fk_mcp_tool_server"),
         cascadeFks,
-        "exact set of 3 CASCADE foreign keys");
+        "exact set of 4 CASCADE foreign keys");
 
     assertEquals(
         Set.of(
             "fk_agent_definition_model",
+            "fk_agent_model_group_cooldown_member",
             "fk_agent_model_provider",
             "fk_harness_entry_parent",
             "fk_harness_entry_session",
@@ -1133,7 +1156,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "fk_harness_tool_invocation_model",
             "fk_plugin_catalog_state_revision"),
         noActionFks,
-        "exact set of 27 NO ACTION foreign keys");
+        "exact set of 28 NO ACTION foreign keys");
   }
 
   @Test
@@ -1265,6 +1288,15 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertTrue(
         blobIndex.contains("(blob_id, session_id)"),
         () -> "blob reverse-lookup index must cover (blob_id, session_id): " + blobIndex);
+  }
+
+  @Test
+  void agentCatalogsUseGlobalNamesAndCooldownCompositeKey() throws SQLException {
+    assertEquals(Set.of("name"), primaryKeyColumns("agent_definition"));
+    assertEquals(Set.of("name"), primaryKeyColumns("agent_model"));
+    assertEquals(
+        Set.of("group_name", "member_model_name", "member_variant"),
+        primaryKeyColumns("agent_model_group_cooldown"));
   }
 
   @Test
@@ -2027,6 +2059,24 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
       }
       ps.executeUpdate();
     }
+  }
+
+  private static Set<String> primaryKeyColumns(String table) throws SQLException {
+    Set<String> columns = new TreeSet<>();
+    try (Connection conn = newConnection();
+        PreparedStatement ps =
+            conn.prepareStatement(
+                "select a.attname from pg_index i"
+                    + " join pg_attribute a on a.attrelid = i.indrelid and a.attnum = any(i.indkey)"
+                    + " where i.indrelid = ?::regclass and i.indisprimary")) {
+      ps.setString(1, table);
+      try (ResultSet rs = ps.executeQuery()) {
+        while (rs.next()) {
+          columns.add(rs.getString(1));
+        }
+      }
+    }
+    return columns;
   }
 
   private static Set<String> tableNames() throws SQLException {

@@ -11,6 +11,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.UUID;
@@ -530,7 +531,7 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
     try (Connection conn = newConnection()) {
       insertProvider(conn, providerName);
       insertModel(conn, providerName, modelName);
-      insertDefinition(conn, agentName, providerName, modelName);
+      insertDefinition(conn, agentName, modelName);
       insertThread(conn, threadId, sessionId, entryId);
       insertProject(conn, projectId, "proj-budget", "{\"states\": []}", 1L);
       insertIssue(conn, issueId, projectId, 1L, "issue-budget", "PLANNING", null, null, null, null);
@@ -771,7 +772,7 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
     try (Connection conn = newConnection()) {
       insertProvider(conn, providerName);
       insertModel(conn, providerName, modelName);
-      insertDefinition(conn, agentName, providerName, modelName);
+      insertDefinition(conn, agentName, modelName);
       insertThread(conn, threadId, sessionId, entryId);
       insertProject(conn, projectId, "proj-act", "{\"states\": []}", 1L);
       insertIssue(conn, issueId, projectId, 1L, "issue-act", "PLANNING", null, null, null, null);
@@ -1052,21 +1053,138 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
     }
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
-          conn,
-          "ck_agent_definition_name",
-          () -> insertDefinition(conn, "\tagent\t", providerName, modelName));
+          conn, "ck_agent_definition_name", () -> insertDefinition(conn, "\tagent\t", modelName));
     }
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
-          conn,
-          "ck_agent_definition_name",
-          () -> insertDefinition(conn, "agent/name", providerName, modelName));
+          conn, "ck_agent_definition_name", () -> insertDefinition(conn, "agent/name", modelName));
     }
     try (Connection conn = newConnection()) {
       assertTransactionConstraintViolation(
           conn,
           "fk_agent_definition_model",
-          () -> insertDefinition(conn, "missing-agent", "missing-provider", "missing-model"));
+          () -> insertDefinition(conn, "missing-agent", "missing-model"));
+    }
+  }
+
+  @Test
+  void agentModelKindShapesAndGlobalIdentityAreEnforced() throws SQLException {
+    String providerName = "provider-" + FIXTURE_IDS.incrementAndGet();
+    String modelName = "model-" + FIXTURE_IDS.incrementAndGet();
+    String groupName = "group-" + FIXTURE_IDS.incrementAndGet();
+
+    try (Connection conn = newConnection()) {
+      insertProvider(conn, providerName);
+      insertModel(conn, providerName, modelName);
+      insertGroupModel(conn, groupName, groupConfig(modelName));
+    }
+
+    // 单 Model 与 Group 共享全局名称空间：同名 Group 被主键拒绝。
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "agent_model_pkey",
+          () -> insertGroupModel(conn, modelName, groupConfig(modelName)));
+    }
+
+    // kind 只接受 MODEL/GROUP。
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_agent_model_kind",
+          () -> insertModel(conn, "UNKNOWN", providerName, "model-bad-kind", "'{}'::jsonb"));
+    }
+
+    // MODEL 必须携带 provider/model/config，且不得携带 group_config。
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_agent_model_shape",
+          () -> insertModel(conn, "MODEL", null, "model-no-provider", "'{}'::jsonb"));
+    }
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_agent_model_shape",
+          () ->
+              insertAgentModelRaw(conn, "model-with-group", "MODEL", providerName, "config", "{}"));
+    }
+
+    // GROUP 必须只携带 group_config。
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_agent_model_shape",
+          () ->
+              insertAgentModelRaw(conn, "group-with-provider", "GROUP", providerName, null, "{}"));
+    }
+
+    // AgentDefinition 只引用全局逻辑名称；Group 名称也可作为模型引用。
+    try (Connection conn = newConnection()) {
+      insertDefinition(conn, "agent-group-ref", groupName);
+    }
+  }
+
+  @Test
+  void agentModelGroupCooldownEnforcesCompositeIdentityAndMembership() throws SQLException {
+    String providerName = "provider-" + FIXTURE_IDS.incrementAndGet();
+    String modelName = "model-" + FIXTURE_IDS.incrementAndGet();
+    String groupName = "group-" + FIXTURE_IDS.incrementAndGet();
+
+    try (Connection conn = newConnection()) {
+      insertProvider(conn, providerName);
+      insertModel(conn, providerName, modelName);
+      insertGroupModel(conn, groupName, groupConfig(modelName));
+      insertCooldown(conn, groupName, modelName, "default", 1L);
+    }
+
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "pk_agent_model_group_cooldown",
+          () -> insertCooldown(conn, groupName, modelName, "default", 2L));
+    }
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "ck_agent_model_group_cooldown_variant",
+          () -> insertCooldown(conn, groupName, modelName, " ", 1L));
+    }
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "fk_agent_model_group_cooldown_group",
+          () -> insertCooldown(conn, "missing-group", modelName, "default", 1L));
+    }
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "fk_agent_model_group_cooldown_member",
+          () -> insertCooldown(conn, groupName, "missing-model", "default", 1L));
+    }
+
+    // 成员删除被 NO ACTION 外键拒绝；Group 删除则级联清理冷却。
+    try (Connection conn = newConnection()) {
+      assertTransactionConstraintViolation(
+          conn,
+          "fk_agent_model_group_cooldown_member",
+          () -> {
+            try (PreparedStatement ps =
+                conn.prepareStatement("delete from agent_model where name = ?")) {
+              ps.setString(1, modelName);
+              ps.executeUpdate();
+            }
+          });
+    }
+    try (Connection conn = newConnection();
+        PreparedStatement ps = conn.prepareStatement("delete from agent_model where name = ?")) {
+      ps.setString(1, groupName);
+      assertEquals(1, ps.executeUpdate());
+      try (Statement st = conn.createStatement();
+          ResultSet rs = st.executeQuery("select count(*) from agent_model_group_cooldown")) {
+        assertTrue(rs.next());
+        assertEquals(0L, rs.getLong(1));
+      }
     }
   }
 
@@ -1145,27 +1263,91 @@ class PostgresqlBusinessSchemaTest extends PostgresSchemaSupport {
   }
 
   private void insertModel(Connection conn, String providerName, String name) throws SQLException {
+    insertModel(conn, "MODEL", providerName, name, "'{}'::jsonb");
+  }
+
+  private void insertModel(
+      Connection conn, String kind, String providerName, String name, String configJson)
+      throws SQLException {
     try (PreparedStatement ps =
         conn.prepareStatement(
-            "insert into agent_model (provider_name, name, model_id, config)"
-                + " values (?, ?, ?, '{}'::jsonb)")) {
-      ps.setString(1, providerName);
-      ps.setString(2, name);
-      ps.setString(3, "wire-" + FIXTURE_IDS.incrementAndGet());
+            "insert into agent_model (name, kind, provider_name, model_id, config)"
+                + " values (?, ?, ?, ?, "
+                + configJson
+                + ")")) {
+      ps.setString(1, name);
+      ps.setString(2, kind);
+      ps.setString(3, providerName);
+      ps.setString(4, "wire-" + FIXTURE_IDS.incrementAndGet());
       assertEquals(1, ps.executeUpdate());
     }
   }
 
-  private void insertDefinition(
-      Connection conn, String name, String modelProviderName, String modelName)
+  private void insertGroupModel(Connection conn, String name, String groupConfigJson)
       throws SQLException {
     try (PreparedStatement ps =
         conn.prepareStatement(
-            "insert into agent_definition (name, model_provider_name, model_name, config)"
-                + " values (?, ?, ?, '{}'::jsonb)")) {
+            "insert into agent_model (name, kind, group_config) values (?, 'GROUP', "
+                + groupConfigJson
+                + ")")) {
       ps.setString(1, name);
-      ps.setString(2, modelProviderName);
-      ps.setString(3, modelName);
+      assertEquals(1, ps.executeUpdate());
+    }
+  }
+
+  private static String groupConfig(String memberModelName) {
+    return "cast('{\"members\":[{\"modelName\":\""
+        + memberModelName
+        + "\",\"variant\":\"default\"}],\"fallbackStatusCodes\":[429],"
+        + "\"cooldownSeconds\":30}' as jsonb)";
+  }
+
+  private void insertAgentModelRaw(
+      Connection conn,
+      String name,
+      String kind,
+      String providerName,
+      String modelId,
+      String configJson)
+      throws SQLException {
+    try (PreparedStatement ps =
+        conn.prepareStatement(
+            "insert into agent_model (name, kind, provider_name, model_id, config, group_config)"
+                + " values (?, ?, ?, ?, cast(? as jsonb), cast(? as jsonb))")) {
+      ps.setString(1, name);
+      ps.setString(2, kind);
+      ps.setString(3, providerName);
+      ps.setString(4, modelId == null ? null : "wire-" + FIXTURE_IDS.incrementAndGet());
+      ps.setString(5, configJson);
+      ps.setString(6, "{}");
+      assertEquals(1, ps.executeUpdate());
+    }
+  }
+
+  private void insertCooldown(
+      Connection conn, String groupName, String memberModelName, String variant, long groupVersion)
+      throws SQLException {
+    try (PreparedStatement ps =
+        conn.prepareStatement(
+            "insert into agent_model_group_cooldown"
+                + " (group_name, member_model_name, member_variant, group_version, cooldown_until)"
+                + " values (?, ?, ?, ?, current_timestamp + interval '30 seconds')")) {
+      ps.setString(1, groupName);
+      ps.setString(2, memberModelName);
+      ps.setString(3, variant);
+      ps.setLong(4, groupVersion);
+      assertEquals(1, ps.executeUpdate());
+    }
+  }
+
+  private void insertDefinition(Connection conn, String name, String modelName)
+      throws SQLException {
+    try (PreparedStatement ps =
+        conn.prepareStatement(
+            "insert into agent_definition (name, model_name, config)"
+                + " values (?, ?, '{}'::jsonb)")) {
+      ps.setString(1, name);
+      ps.setString(2, modelName);
       assertEquals(1, ps.executeUpdate());
     }
   }

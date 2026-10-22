@@ -177,17 +177,17 @@ class ConfigSyncYamlTest {
     config.put("defaultVariant", "default");
     config.put("variants", List.of(Map.of("id", "default", "protocolOptionsJson", "{\"a\":1}")));
     Map<String, Object> pricing = new LinkedHashMap<>();
-    pricing.put("currency", "USD");
-    pricing.put("pricingTier", "t");
-    pricing.put("serviceTier", "s");
-    pricing.put("serviceTierMultiplier", 1);
-    pricing.put("version", "v");
-    pricing.put("inputPerMillionTokens", 0);
-    pricing.put("outputPerMillionTokens", 0);
-    pricing.put("cacheReadPerMillionTokens", 0);
-    pricing.put("cacheWritePerMillionTokens", 0);
-    pricing.put("cacheWriteLongPerMillionTokens", 0);
-    pricing.put("reasoningPerMillionTokens", 0);
+    pricing.put(
+        "base",
+        Map.of(
+            "input", "0",
+            "output", "0",
+            "cacheRead", "0",
+            "cacheWrite", "0",
+            "cacheWriteByTtl", Map.of(),
+            "reasoning", "0"));
+    pricing.put("overrides", List.of());
+    pricing.put("multipliers", List.of());
     config.put("pricing", pricing);
 
     AgentModelConfigDTO dto = yaml.convert(config, AgentModelConfigDTO.class, "model.config");
