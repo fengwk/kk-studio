@@ -4,6 +4,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelAttemptFailure;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationErrorJsonCodec;
@@ -53,6 +54,17 @@ public final class ModelAttemptFailuresJsonCodec {
     node.put("text", failure.text());
     node.put("thinking", failure.thinking());
     node.set("error", ERRORS.encodeNode(failure.error()));
+    node.set(
+        "model",
+        InvocationJsonSupport.NODES
+            .objectNode()
+            .put("modelName", failure.model().modelName())
+            .put("variant", failure.model().variant()));
+    if (failure.requestedAt() != null) {
+      node.put("requestedAt", failure.requestedAt().toString());
+    } else {
+      node.putNull("requestedAt");
+    }
     node.put("failedAt", failure.failedAt().toString());
     node.put("retryAt", failure.retryAt().toString());
     return node;
@@ -68,6 +80,8 @@ public final class ModelAttemptFailuresJsonCodec {
         "text",
         "thinking",
         "error",
+        "model",
+        "requestedAt",
         "failedAt",
         "retryAt");
     int attempt = InvocationJsonSupport.positiveInt(node, "attempt", CONTEXT + " entry");
@@ -76,9 +90,20 @@ public final class ModelAttemptFailuresJsonCodec {
     String thinking = InvocationJsonSupport.text(node, "thinking", CONTEXT + " entry");
     ModelInvocationError error =
         ERRORS.decodeNode(InvocationJsonSupport.required(node, "error", CONTEXT + " entry"));
+    ObjectNode model = InvocationJsonSupport.object(node.get("model"), CONTEXT + " entry.model");
+    InvocationJsonSupport.requireFields(model, CONTEXT + " entry.model", "modelName", "variant");
+    ModelSelection selection =
+        ModelSelection.model(
+            InvocationJsonSupport.text(model, "modelName", CONTEXT + " entry.model"),
+            model.get("variant").isNull()
+                ? null
+                : InvocationJsonSupport.text(model, "variant", CONTEXT + " entry.model"));
+    Instant requestedAt =
+        node.get("requestedAt").isNull() ? null : requiredInstant(node, "requestedAt");
     Instant failedAt = requiredInstant(node, "failedAt");
     Instant retryAt = requiredInstant(node, "retryAt");
-    return new ModelAttemptFailure(attempt, sequence, text, thinking, error, failedAt, retryAt);
+    return new ModelAttemptFailure(
+        attempt, sequence, text, thinking, selection, requestedAt, error, failedAt, retryAt);
   }
 
   private static Instant requiredInstant(ObjectNode node, String field) {
