@@ -89,6 +89,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -108,10 +109,10 @@ class ProviderRequestPreviewServiceTest {
 
   /** 阈值压缩触发事实：90_002 + 可见尾部 token 必然越过 softThreshold(CONTEXT_WINDOW)。 */
   private static final ModelUsage OVER_THRESHOLD_USAGE =
-      new ModelUsage(90_000L, 2L, 0L, 0L, 0L, 0L, 90_002L);
+      new ModelUsage(90_000L, 2L, 0L, 0L, Map.of(), 0L, 90_002L);
 
   private static final ModelUsage BELOW_THRESHOLD_USAGE =
-      new ModelUsage(1_000L, 2L, 0L, 0L, 0L, 0L, 1_002L);
+      new ModelUsage(1_000L, 2L, 0L, 0L, Map.of(), 0L, 1_002L);
   private static final BranchSettings SETTINGS =
       new BranchSettings("agent", new ModelSelection("provider", "model", "v1"), null);
 

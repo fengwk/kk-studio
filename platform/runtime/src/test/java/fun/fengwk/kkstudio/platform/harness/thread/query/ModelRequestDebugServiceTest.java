@@ -75,6 +75,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Stream;
@@ -547,7 +548,7 @@ class ModelRequestDebugServiceTest {
       return new MessagePayload(
           message,
           new AssistantMessageMetadata(
-              GenerationStopReason.COMPLETE, new ModelUsage(1, 1, 0, 0, 0, 0, 2), null),
+              GenerationStopReason.COMPLETE, new ModelUsage(1, 1, 0, 0, Map.of(), 0L, 2L), null),
           null);
     }
     return new MessagePayload(message, null, null);

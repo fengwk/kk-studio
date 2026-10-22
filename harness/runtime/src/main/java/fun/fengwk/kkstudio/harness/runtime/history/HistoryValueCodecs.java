@@ -13,7 +13,9 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
@@ -43,7 +45,7 @@ final class HistoryValueCodecs {
           "outputTokens",
           "cacheReadTokens",
           "cacheWriteTokens",
-          "cacheWriteLongTokens",
+          "cacheWriteByTtl",
           "reasoningTokens",
           "providerTotalTokens");
 
@@ -152,9 +154,12 @@ final class HistoryValueCodecs {
     usageNode.put("outputTokens", usage.outputTokens());
     usageNode.put("cacheReadTokens", usage.cacheReadTokens());
     usageNode.put("cacheWriteTokens", usage.cacheWriteTokens());
-    usageNode.put("cacheWriteLongTokens", usage.cacheWriteLongTokens());
-    usageNode.put("reasoningTokens", usage.reasoningTokens());
-    usageNode.put("providerTotalTokens", usage.providerTotalTokens());
+    ObjectNode ttlNode = usageNode.putObject("cacheWriteByTtl");
+    for (var entry : usage.cacheWriteByTtl().entrySet()) {
+      ttlNode.put(entry.getKey().toString(), entry.getValue());
+    }
+    putNullableLong(usageNode, "reasoningTokens", usage.reasoningTokens());
+    putNullableLong(usageNode, "providerTotalTokens", usage.providerTotalTokens());
     if (metadata.decodeDurationMillis() != null) {
       node.put("decodeDurationMillis", metadata.decodeDurationMillis());
     }
@@ -175,15 +180,47 @@ final class HistoryValueCodecs {
             requiredNonNegativeLong(usageNode, "outputTokens", "assistantMetadata.usage"),
             requiredNonNegativeLong(usageNode, "cacheReadTokens", "assistantMetadata.usage"),
             requiredNonNegativeLong(usageNode, "cacheWriteTokens", "assistantMetadata.usage"),
-            requiredNonNegativeLong(usageNode, "cacheWriteLongTokens", "assistantMetadata.usage"),
-            requiredNonNegativeLong(usageNode, "reasoningTokens", "assistantMetadata.usage"),
-            requiredNonNegativeLong(usageNode, "providerTotalTokens", "assistantMetadata.usage"));
+            decodeTtlTokens(
+                requireObject(
+                    usageNode.get("cacheWriteByTtl"), "assistantMetadata.usage.cacheWriteByTtl"),
+                "assistantMetadata.usage.cacheWriteByTtl"),
+            nullableNonNegativeLong(usageNode, "reasoningTokens", "assistantMetadata.usage"),
+            nullableNonNegativeLong(usageNode, "providerTotalTokens", "assistantMetadata.usage"));
     Long decodeDurationMillis =
         nullableNonNegativeLong(node, "decodeDurationMillis", "assistantMetadata");
     return new AssistantMessageMetadata(stopReason, usage, decodeDurationMillis);
   }
 
   // ---------- 通用 JSON 工具方法 ----------
+
+  private static void putNullableLong(ObjectNode node, String field, Long value) {
+    if (value == null) {
+      node.putNull(field);
+    } else {
+      node.put(field, value);
+    }
+  }
+
+  private static Map<Long, Long> decodeTtlTokens(ObjectNode node, String context) {
+    Map<Long, Long> tokens = new LinkedHashMap<>();
+    for (String key : node.propertyNames()) {
+      long ttl;
+      try {
+        ttl = Long.parseLong(key);
+      } catch (NumberFormatException error) {
+        throw new IllegalArgumentException(context + " keys must be positive integer seconds");
+      }
+      if (ttl <= 0) {
+        throw new IllegalArgumentException(context + " keys must be positive integer seconds");
+      }
+      JsonNode value = node.get(key);
+      if (!value.isIntegralNumber() || !value.canConvertToLong() || value.longValue() < 0) {
+        throw new IllegalArgumentException(context + "." + key + " must be a non-negative integer");
+      }
+      tokens.put(ttl, value.longValue());
+    }
+    return Map.copyOf(tokens);
+  }
 
   static ObjectNode requireObject(JsonNode value, String context) {
     if (!(value instanceof ObjectNode object)) {

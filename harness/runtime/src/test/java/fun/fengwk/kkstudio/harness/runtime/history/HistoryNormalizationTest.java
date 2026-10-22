@@ -27,6 +27,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
@@ -164,7 +165,7 @@ class HistoryNormalizationTest {
   }
 
   private static ModelUsage usage() {
-    return new ModelUsage(1L, 1L, 0L, 0L, 0L, 0L, 2L);
+    return new ModelUsage(1L, 1L, 0L, 0L, Map.of(), 0L, 2L);
   }
 
   private static ModelCost cost() {
@@ -172,7 +173,6 @@ class HistoryNormalizationTest {
         "USD",
         BigDecimal.ONE,
         BigDecimal.ONE,
-        BigDecimal.ZERO,
         BigDecimal.ZERO,
         BigDecimal.ZERO,
         BigDecimal.ZERO,

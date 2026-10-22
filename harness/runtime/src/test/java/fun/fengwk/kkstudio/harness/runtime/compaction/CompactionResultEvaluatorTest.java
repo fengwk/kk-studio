@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 /** Compaction terminal 到 durable result/error 的纯语义映射。 */
 class CompactionResultEvaluatorTest {
@@ -107,7 +108,8 @@ class CompactionResultEvaluatorTest {
   }
 
   private static AssistantMessageMetadata metadata(GenerationStopReason stopReason) {
-    return new AssistantMessageMetadata(stopReason, new ModelUsage(1, 1, 0, 0, 0, 0, 2), 100L);
+    return new AssistantMessageMetadata(
+        stopReason, new ModelUsage(1, 1, 0, 0, Map.of(), 0L, 2L), 100L);
   }
 
   private static void assertError(String code, EntryPayload result) {

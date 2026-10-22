@@ -25,6 +25,7 @@ import java.io.UncheckedIOException;
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.function.Consumer;
 
@@ -114,7 +115,7 @@ class ProviderResponseJsonCodecTest {
             null,
             List.of(),
             GenerationStopReason.COMPLETE,
-            new ModelUsage(1, 2, 3, 4, 5, 6, 21),
+            new ModelUsage(1, 8, 3, 5, Map.of(3600L, 5L), 6L, 21L),
             "request-7",
             "priority",
             rawUsageJson);
@@ -205,7 +206,7 @@ class ProviderResponseJsonCodecTest {
             "",
             List.of(),
             GenerationStopReason.CONTINUE,
-            new ModelUsage(1, 2, 0, 0, 0, 0, 3),
+            new ModelUsage(1, 2, 0, 0, Map.of(), 0L, 3L),
             "request-8",
             null,
             "{}");
@@ -279,7 +280,7 @@ class ProviderResponseJsonCodecTest {
                 "call-1", "lookup", FIRST_ARGUMENTS, "look up the capital of paris"),
             new ProviderToolCall("call-2", "weather", SECOND_ARGUMENTS)),
         GenerationStopReason.COMPLETE,
-        new ModelUsage(100, 20, 0, 50, 0, 5, 175),
+        new ModelUsage(100, 25, 0, 50, Map.of(), 5L, 175L),
         null,
         null,
         RAW_USAGE);

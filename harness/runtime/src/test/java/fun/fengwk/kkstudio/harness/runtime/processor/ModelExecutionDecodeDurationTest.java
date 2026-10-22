@@ -37,6 +37,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -63,11 +64,10 @@ class ModelExecutionDecodeDurationTest {
   private static final InvocationRetryPolicy ONE_RETRY =
       new InvocationRetryPolicy(
           1, InvocationRetryBackoffStrategy.FIXED, Duration.ofSeconds(5), Duration.ofSeconds(5));
-  private static final ModelUsage USAGE = new ModelUsage(1, 1, 0, 0, 0, 0, 2);
+  private static final ModelUsage USAGE = new ModelUsage(1, 1, 0, 0, Map.of(), 0L, 2L);
   private static final ModelCost COST =
       new ModelCost(
           "USD",
-          BigDecimal.ZERO,
           BigDecimal.ZERO,
           BigDecimal.ZERO,
           BigDecimal.ZERO,

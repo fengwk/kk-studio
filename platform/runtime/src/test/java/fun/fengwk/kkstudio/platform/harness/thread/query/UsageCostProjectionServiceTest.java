@@ -39,6 +39,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelInputModality;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelLimitDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelRateSetDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelVariantDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessUsageCostDTO;
 
@@ -98,13 +99,13 @@ class UsageCostProjectionServiceTest {
                 assistant(
                     ASSISTANT_A_ID,
                     USER_A_ID,
-                    new ModelUsage(1_000_000, 1_000_000, 1_000_000, 0, 0, 0, 3_000_000)),
+                    new ModelUsage(1_000_000, 1_000_000, 1_000_000, 0, Map.of(), 0L, 3_000_000L)),
                 turnStart(TURN_B_ID, ASSISTANT_A_ID, settings("provider-b", "model-b")),
                 user(USER_B_ID, TURN_B_ID),
                 assistant(
                     ASSISTANT_B_ID,
                     USER_B_ID,
-                    new ModelUsage(2_000_000, 0, 0, 0, 0, 0, 2_000_000))));
+                    new ModelUsage(2_000_000, 0, 0, 0, Map.of(), 0L, 2_000_000L))));
 
     HarnessUsageCostDTO costA = costs.get(ASSISTANT_A_ID);
     assertEquals("USD", costA.getCurrency());
@@ -139,13 +140,15 @@ class UsageCostProjectionServiceTest {
                 turnStart(TURN_A_ID, ROOT_ID, settings("provider-a", "model-a")),
                 user(USER_A_ID, TURN_A_ID),
                 assistant(
-                    ASSISTANT_A_ID, USER_A_ID, new ModelUsage(1_000_000, 0, 0, 0, 0, 0, 1_000_000)),
+                    ASSISTANT_A_ID,
+                    USER_A_ID,
+                    new ModelUsage(1_000_000, 0, 0, 0, Map.of(), 0L, 1_000_000L)),
                 turnStart(TURN_B_ID, ASSISTANT_A_ID, settings("provider-b", "model-b")),
                 user(USER_B_ID, TURN_B_ID),
                 assistant(
                     ASSISTANT_B_ID,
                     USER_B_ID,
-                    new ModelUsage(1_000_000, 0, 0, 0, 0, 0, 1_000_000))));
+                    new ModelUsage(1_000_000, 0, 0, 0, Map.of(), 0L, 1_000_000L))));
 
     assertEquals("1", costs.get(ASSISTANT_A_ID).getAmount());
     assertNull(costs.get(ASSISTANT_B_ID));
@@ -171,7 +174,7 @@ class UsageCostProjectionServiceTest {
                 assistant(
                     ASSISTANT_A_ID,
                     TURN_A_ID,
-                    new ModelUsage(1_000_000, 0, 0, 0, 0, 0, 1_000_000))));
+                    new ModelUsage(1_000_000, 0, 0, 0, Map.of(), 0L, 1_000_000L))));
 
     assertEquals("1", costs.get(ASSISTANT_A_ID).getAmount());
     verify(modelRepository).getByProviderNameAndName("provider-b", "model-b");
@@ -194,7 +197,9 @@ class UsageCostProjectionServiceTest {
                 root(settings("provider-a", "model-a")),
                 compactionTurnStart(TURN_A_ID, ROOT_ID),
                 compactionResult(
-                    ASSISTANT_A_ID, TURN_A_ID, new ModelUsage(1_000_000, 0, 0, 0, 0, 0, 1_000_000)),
+                    ASSISTANT_A_ID,
+                    TURN_A_ID,
+                    new ModelUsage(1_000_000, 0, 0, 0, Map.of(), 0L, 1_000_000L)),
                 compactionResult(ASSISTANT_B_ID, ASSISTANT_A_ID, null)));
 
     assertEquals("1", costs.get(ASSISTANT_A_ID).getAmount());
@@ -218,7 +223,7 @@ class UsageCostProjectionServiceTest {
                 assistant(
                     ASSISTANT_A_ID,
                     USER_A_ID,
-                    new ModelUsage(1_000_000, 0, 0, 0, 0, 0, 1_000_000))));
+                    new ModelUsage(1_000_000, 0, 0, 0, Map.of(), 0L, 1_000_000L))));
 
     assertEquals("1", costs.get(ASSISTANT_A_ID).getAmount());
   }
@@ -235,12 +240,14 @@ class UsageCostProjectionServiceTest {
                 turnStart(TURN_A_ID, ROOT_ID, settings("provider-a", "model-a")),
                 user(USER_A_ID, TURN_A_ID),
                 assistant(
-                    ASSISTANT_A_ID, USER_A_ID, new ModelUsage(1_000_000, 0, 0, 0, 0, 0, 1_000_000)),
+                    ASSISTANT_A_ID,
+                    USER_A_ID,
+                    new ModelUsage(1_000_000, 0, 0, 0, Map.of(), 0L, 1_000_000L)),
                 user(USER_B_ID, ASSISTANT_A_ID),
                 assistant(
                     ASSISTANT_B_ID,
                     USER_B_ID,
-                    new ModelUsage(2_000_000, 0, 0, 0, 0, 0, 2_000_000))));
+                    new ModelUsage(2_000_000, 0, 0, 0, Map.of(), 0L, 2_000_000L))));
 
     assertEquals("1", costs.get(ASSISTANT_A_ID).getAmount());
     assertEquals("2", costs.get(ASSISTANT_B_ID).getAmount());
@@ -265,7 +272,8 @@ class UsageCostProjectionServiceTest {
                 root(settings("provider-a", "model-a")),
                 turnStart(TURN_A_ID, ROOT_ID, settings("provider-a", "model-a")),
                 user(USER_A_ID, TURN_A_ID),
-                assistant(ASSISTANT_A_ID, USER_A_ID, new ModelUsage(1, 0, 0, 0, 0, 0, 1))));
+                assistant(
+                    ASSISTANT_A_ID, USER_A_ID, new ModelUsage(1, 0, 0, 0, Map.of(), 0L, 1L))));
 
     String amount = costs.get(ASSISTANT_A_ID).getAmount();
     // 单价 1e-7 × 1 token ÷ 1e6 = 1e-13，精确文本必须保留全部有效位。
@@ -281,7 +289,7 @@ class UsageCostProjectionServiceTest {
     List<Entry> orphaned =
         List.of(
             user(USER_A_ID, ROOT_ID),
-            assistant(ASSISTANT_A_ID, USER_A_ID, new ModelUsage(1, 0, 0, 0, 0, 0, 1)));
+            assistant(ASSISTANT_A_ID, USER_A_ID, new ModelUsage(1, 0, 0, 0, Map.of(), 0L, 1L)));
 
     IllegalStateException error =
         assertThrows(IllegalStateException.class, () -> service.project(orphaned));
@@ -303,7 +311,9 @@ class UsageCostProjectionServiceTest {
             turnStart(TURN_A_ID, ROOT_ID, settings("provider-a", "model-a")),
             user(USER_A_ID, TURN_A_ID),
             assistant(
-                ASSISTANT_A_ID, USER_A_ID, new ModelUsage(1_000_000, 0, 0, 0, 0, 0, 1_000_000)));
+                ASSISTANT_A_ID,
+                USER_A_ID,
+                new ModelUsage(1_000_000, 0, 0, 0, Map.of(), 0L, 1_000_000L)));
 
     IllegalArgumentException error =
         assertThrows(IllegalArgumentException.class, () -> service.project(entries));
@@ -323,17 +333,16 @@ class UsageCostProjectionServiceTest {
       BigDecimal outputPerMillionTokens,
       BigDecimal cacheReadPerMillionTokens) {
     AgentModelPricingDTO pricing = new AgentModelPricingDTO();
-    pricing.setCurrency("USD");
-    pricing.setPricingTier("standard");
-    pricing.setServiceTier("default");
-    pricing.setServiceTierMultiplier(BigDecimal.ONE);
-    pricing.setVersion("v1");
-    pricing.setInputPerMillionTokens(inputPerMillionTokens);
-    pricing.setOutputPerMillionTokens(outputPerMillionTokens);
-    pricing.setCacheReadPerMillionTokens(cacheReadPerMillionTokens);
-    pricing.setCacheWritePerMillionTokens(BigDecimal.ZERO);
-    pricing.setCacheWriteLongPerMillionTokens(BigDecimal.ZERO);
-    pricing.setReasoningPerMillionTokens(BigDecimal.ZERO);
+    AgentModelRateSetDTO base = new AgentModelRateSetDTO();
+    base.setInput(inputPerMillionTokens);
+    base.setOutput(outputPerMillionTokens);
+    base.setCacheRead(cacheReadPerMillionTokens);
+    base.setCacheWrite(BigDecimal.ZERO);
+    base.setCacheWriteByTtl(Map.of());
+    base.setReasoning(null);
+    pricing.setBase(base);
+    pricing.setOverrides(List.of());
+    pricing.setMultipliers(List.of());
     return pricing;
   }
 

@@ -69,6 +69,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -169,7 +170,7 @@ class LegacyHarnessHistoryJsonPostgresIntegrationTest {
                               new TextMessageContent("asking"))),
                       new AssistantMessageMetadata(
                           GenerationStopReason.COMPLETE,
-                          new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L)),
+                          new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L)),
                       null),
                   T0.plusMillis(3)));
           tx.insertEntry(

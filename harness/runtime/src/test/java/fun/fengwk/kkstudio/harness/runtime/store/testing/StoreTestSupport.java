@@ -252,7 +252,7 @@ final class StoreTestSupport {
         "",
         calls,
         calls.isEmpty() ? GenerationStopReason.COMPLETE : GenerationStopReason.COMPLETE,
-        new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
+        new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L),
         "req-1",
         null,
         "{}");
@@ -670,7 +670,7 @@ final class StoreTestSupport {
         "",
         List.of(new ProviderToolCall(toolCallId, "ask_user", ASK_USER_QUESTIONNAIRE)),
         GenerationStopReason.COMPLETE,
-        new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
+        new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L),
         "req-1",
         null,
         "{}");
@@ -690,7 +690,8 @@ final class StoreTestSupport {
   }
 
   private static AssistantMessageMetadata assistantMetadata(GenerationStopReason stopReason) {
-    return new AssistantMessageMetadata(stopReason, new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L));
+    return new AssistantMessageMetadata(
+        stopReason, new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L));
   }
 
   private static ModelInvocationError modelError() {

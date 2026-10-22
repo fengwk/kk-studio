@@ -141,7 +141,8 @@ class SystemSettingsTest {
                 base.subagentMaxConcurrency(),
                 base.subagentMaxTotalConcurrency(),
                 base.subagentMaxTurns(),
-                base.modelHttpRetryStatusCodes()));
+                base.modelHttpRetryStatusCodes(),
+                base.modelCatalogSource()));
   }
 
   @Test
@@ -160,7 +161,8 @@ class SystemSettingsTest {
                 base.subagentMaxConcurrency(),
                 base.subagentMaxTotalConcurrency(),
                 base.subagentMaxTurns(),
-                base.modelHttpRetryStatusCodes()));
+                base.modelHttpRetryStatusCodes(),
+                base.modelCatalogSource()));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -174,7 +176,8 @@ class SystemSettingsTest {
                 base.subagentMaxConcurrency(),
                 -1,
                 base.subagentMaxTurns(),
-                base.modelHttpRetryStatusCodes()));
+                base.modelHttpRetryStatusCodes(),
+                base.modelCatalogSource()));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -188,7 +191,8 @@ class SystemSettingsTest {
                 base.subagentMaxConcurrency(),
                 base.subagentMaxTotalConcurrency(),
                 0,
-                base.modelHttpRetryStatusCodes()));
+                base.modelHttpRetryStatusCodes(),
+                base.modelCatalogSource()));
   }
 
   @Test
@@ -214,7 +218,8 @@ class SystemSettingsTest {
                 base.subagentMaxConcurrency(),
                 base.subagentMaxTotalConcurrency(),
                 base.subagentMaxTurns(),
-                List.of())
+                List.of(),
+                base.modelCatalogSource())
             .modelHttpRetryStatusCodes());
     for (List<Integer> invalid :
         List.of(Arrays.asList(429, null), List.of(399), List.of(600), List.of(429, 429))) {
@@ -231,7 +236,8 @@ class SystemSettingsTest {
                   base.subagentMaxConcurrency(),
                   base.subagentMaxTotalConcurrency(),
                   base.subagentMaxTurns(),
-                  invalid));
+                  invalid,
+                  base.modelCatalogSource()));
     }
   }
 

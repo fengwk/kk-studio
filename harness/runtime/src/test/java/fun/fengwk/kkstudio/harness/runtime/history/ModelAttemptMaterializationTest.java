@@ -1042,13 +1042,12 @@ class ModelAttemptMaterializationTest {
   }
 
   private static ModelUsage usage() {
-    return new ModelUsage(1, 1, 0, 0, 0, 0, 2);
+    return new ModelUsage(1, 1, 0, 0, Map.of(), 0L, 2L);
   }
 
   private static ModelCost cost() {
     return new ModelCost(
         "USD",
-        BigDecimal.ZERO,
         BigDecimal.ZERO,
         BigDecimal.ZERO,
         BigDecimal.ZERO,

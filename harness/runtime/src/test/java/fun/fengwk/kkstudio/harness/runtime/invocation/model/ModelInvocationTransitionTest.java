@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.IntStream;
 
@@ -865,7 +866,7 @@ class ModelInvocationTransitionTest {
         null,
         List.of(),
         GenerationStopReason.COMPLETE,
-        new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
+        new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L),
         "req-2",
         null,
         null);

@@ -28,6 +28,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCallDiagno
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -348,18 +349,24 @@ final class AnthropicStreamAccumulator {
 
     String rawUsageJson = usageJsonNode.toString();
 
-    // Anthropic Messages 无原生 total_tokens，不合成虚假总数，严格保留原生语义为 0
-    long providerTotalTokens = 0L;
+    // Anthropic Messages 无原生 total_tokens，不合成虚假总数。
+    Map<Long, Long> cacheWriteByTtl = new LinkedHashMap<>();
+    if (cacheCreation5m > 0) {
+      cacheWriteByTtl.put(300L, cacheCreation5m);
+    }
+    if (cacheCreation1h > 0) {
+      cacheWriteByTtl.put(3600L, cacheCreation1h);
+    }
 
     ModelUsage usage =
         new ModelUsage(
             inputTokens,
             outputTokens,
             cacheReadInputTokens,
-            cacheCreation5m,
-            cacheCreation1h,
-            0L,
-            providerTotalTokens);
+            cacheCreationInputTokens,
+            Map.copyOf(cacheWriteByTtl),
+            null,
+            null);
 
     ProviderResponse response =
         new ProviderResponse(

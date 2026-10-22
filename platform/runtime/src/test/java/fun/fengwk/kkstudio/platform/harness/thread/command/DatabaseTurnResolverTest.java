@@ -138,7 +138,6 @@ import fun.fengwk.kkstudio.project.turn.ProjectRunScopeJsonCodec;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 
-import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -1917,7 +1916,8 @@ class DatabaseTurnResolverTest {
                     new AgentMessage(
                         AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("reply"))),
                     new AssistantMessageMetadata(
-                        GenerationStopReason.COMPLETE, new ModelUsage(1L, 1L, 0L, 0L, 0L, 0L, 2L)),
+                        GenerationStopReason.COMPLETE,
+                        new ModelUsage(1L, 1L, 0L, 0L, Map.of(), 0L, 2L)),
                     null),
                 NOW.plusSeconds(3)),
             new Entry(
@@ -2123,18 +2123,7 @@ class DatabaseTurnResolverTest {
   }
 
   private static ModelPricing pricing() {
-    return new ModelPricing(
-        "USD",
-        "standard",
-        "default",
-        BigDecimal.ONE,
-        "v1",
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO);
+    return ModelPricing.ZERO;
   }
 
   @Test
@@ -2840,7 +2829,7 @@ class DatabaseTurnResolverTest {
         new MessagePayload(
             new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent(text))),
             new AssistantMessageMetadata(
-                GenerationStopReason.COMPLETE, new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L)),
+                GenerationStopReason.COMPLETE, new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L)),
             null),
         NOW);
   }

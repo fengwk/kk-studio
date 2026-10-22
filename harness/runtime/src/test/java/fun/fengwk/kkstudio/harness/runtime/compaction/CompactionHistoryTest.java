@@ -30,6 +30,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /** {@link CompactionHistory} 共享历史投影的所有权与 continuation 边界测试。 */
@@ -118,7 +119,7 @@ class CompactionHistoryTest {
 
   private static AssistantMessageMetadata assistantMetadata() {
     return new AssistantMessageMetadata(
-        GenerationStopReason.COMPLETE, new ModelUsage(1, 1, 0, 0, 0, 0, 2));
+        GenerationStopReason.COMPLETE, new ModelUsage(1, 1, 0, 0, Map.of(), 0L, 2L));
   }
 
   private static Entry entry(UUID entryId, UUID parentId, EntryPayload payload) {

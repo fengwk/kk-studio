@@ -33,6 +33,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /** CompactionSummaryAssembler 只持久化 summaryText，并从 enclosing CompactionStart 重建阶段语义。 */
@@ -287,7 +288,7 @@ class CompactionSummaryAssemblerTest {
 
   private static AssistantMessageMetadata metadata() {
     return new AssistantMessageMetadata(
-        GenerationStopReason.COMPLETE, new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L));
+        GenerationStopReason.COMPLETE, new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L));
   }
 
   private record SplitPath(EntryPath path, UUID historyResultEntryId) {}

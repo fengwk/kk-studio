@@ -158,8 +158,9 @@ class AnthropicStreamAccumulatorTest {
     assertEquals(10, response.usage().inputTokens());
     assertEquals(25, response.usage().outputTokens());
     assertEquals(5, response.usage().cacheReadTokens());
-    assertEquals(12, response.usage().cacheWriteTokens()); // 5m
-    assertEquals(8, response.usage().cacheWriteLongTokens()); // 1h
+    assertEquals(20, response.usage().cacheWriteTokens());
+    assertEquals(12, response.usage().cacheWriteByTtl().get(300L));
+    assertEquals(8, response.usage().cacheWriteByTtl().get(3600L));
 
     // tool calls
     assertEquals(1, response.toolCalls().size());
@@ -840,8 +841,9 @@ class AnthropicStreamAccumulatorTest {
     accumulator.handleEvent("message_stop", "{\"type\":\"message_stop\"}");
 
     ProviderCompletion completion = accumulator.finish();
-    assertEquals(20, completion.response().usage().cacheWriteTokens());
-    assertEquals(10, completion.response().usage().cacheWriteLongTokens());
+    assertEquals(30, completion.response().usage().cacheWriteTokens());
+    assertEquals(20, completion.response().usage().cacheWriteByTtl().get(300L));
+    assertEquals(10, completion.response().usage().cacheWriteByTtl().get(3600L));
     assertEquals(0, completion.response().usage().totalTokens());
     assertEquals(0, completion.response().usage().providerTotalTokens());
     assertEquals(140, completion.response().usage().categorizedTokens());
@@ -1063,8 +1065,9 @@ class AnthropicStreamAccumulatorTest {
     accumulator.handleEvent("message_stop", "{\"type\":\"message_stop\"}");
 
     ProviderCompletion completion = accumulator.finish();
-    assertEquals(10, completion.response().usage().cacheWriteTokens());
-    assertEquals(5, completion.response().usage().cacheWriteLongTokens());
+    assertEquals(15, completion.response().usage().cacheWriteTokens());
+    assertEquals(10, completion.response().usage().cacheWriteByTtl().get(300L));
+    assertEquals(5, completion.response().usage().cacheWriteByTtl().get(3600L));
   }
 
   @Test
@@ -1106,12 +1109,9 @@ class AnthropicStreamAccumulatorTest {
     accumulator.handleEvent("message_stop", "{\"type\":\"message_stop\"}");
 
     ProviderCompletion completion = accumulator.finish();
-    assertEquals(10, completion.response().usage().cacheWriteTokens());
-    assertEquals(5, completion.response().usage().cacheWriteLongTokens());
-    assertEquals(
-        15,
-        completion.response().usage().cacheWriteTokens()
-            + completion.response().usage().cacheWriteLongTokens());
+    assertEquals(15, completion.response().usage().cacheWriteTokens());
+    assertEquals(10, completion.response().usage().cacheWriteByTtl().get(300L));
+    assertEquals(5, completion.response().usage().cacheWriteByTtl().get(3600L));
   }
 
   private AnthropicStreamAccumulator newAccumulator() {

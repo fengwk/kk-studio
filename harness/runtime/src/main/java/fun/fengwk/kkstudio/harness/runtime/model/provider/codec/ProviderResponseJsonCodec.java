@@ -18,8 +18,10 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCallDiagno
 
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
@@ -64,7 +66,7 @@ public final class ProviderResponseJsonCodec {
           "outputTokens",
           "cacheReadTokens",
           "cacheWriteTokens",
-          "cacheWriteLongTokens",
+          "cacheWriteByTtl",
           "reasoningTokens",
           "providerTotalTokens");
 
@@ -223,9 +225,12 @@ public final class ProviderResponseJsonCodec {
     node.put("outputTokens", usage.outputTokens());
     node.put("cacheReadTokens", usage.cacheReadTokens());
     node.put("cacheWriteTokens", usage.cacheWriteTokens());
-    node.put("cacheWriteLongTokens", usage.cacheWriteLongTokens());
-    node.put("reasoningTokens", usage.reasoningTokens());
-    node.put("providerTotalTokens", usage.providerTotalTokens());
+    ObjectNode ttlNode = node.putObject("cacheWriteByTtl");
+    for (Map.Entry<Long, Long> entry : usage.cacheWriteByTtl().entrySet()) {
+      ttlNode.put(entry.getKey().toString(), entry.getValue());
+    }
+    putNullableLong(node, "reasoningTokens", usage.reasoningTokens());
+    putNullableLong(node, "providerTotalTokens", usage.providerTotalTokens());
     return node;
   }
 
@@ -237,9 +242,35 @@ public final class ProviderResponseJsonCodec {
         nonNegativeLong(node, "outputTokens"),
         nonNegativeLong(node, "cacheReadTokens"),
         nonNegativeLong(node, "cacheWriteTokens"),
-        nonNegativeLong(node, "cacheWriteLongTokens"),
-        nonNegativeLong(node, "reasoningTokens"),
-        nonNegativeLong(node, "providerTotalTokens"));
+        decodeTtlTokens(node.get("cacheWriteByTtl")),
+        nullableNonNegativeLong(node, "reasoningTokens"),
+        nullableNonNegativeLong(node, "providerTotalTokens"));
+  }
+
+  private static Map<Long, Long> decodeTtlTokens(JsonNode value) {
+    ObjectNode node = object(value, "cacheWriteByTtl");
+    Map<Long, Long> tokens = new LinkedHashMap<>();
+    for (String key : node.propertyNames()) {
+      long ttl;
+      try {
+        ttl = Long.parseLong(key);
+      } catch (NumberFormatException error) {
+        throw new IllegalArgumentException("cacheWriteByTtl keys must be positive integer seconds");
+      }
+      if (ttl <= 0) {
+        throw new IllegalArgumentException("cacheWriteByTtl keys must be positive integer seconds");
+      }
+      tokens.put(ttl, nonNegativeLong(node, key));
+    }
+    return Map.copyOf(tokens);
+  }
+
+  private static void putNullableLong(ObjectNode node, String field, Long value) {
+    if (value == null) {
+      node.putNull(field);
+    } else {
+      node.put(field, value);
+    }
   }
 
   private static ObjectNode object(JsonNode value, String name) {

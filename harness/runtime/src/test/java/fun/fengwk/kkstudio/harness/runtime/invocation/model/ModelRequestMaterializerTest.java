@@ -364,7 +364,8 @@ class ModelRequestMaterializerTest {
                             "read a.txt",
                             "dev"))),
                 new AssistantMessageMetadata(
-                    GenerationStopReason.COMPLETE, new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L)),
+                    GenerationStopReason.COMPLETE,
+                    new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L)),
                 null)));
     entries.add(
         entry(
@@ -618,7 +619,7 @@ class ModelRequestMaterializerTest {
     return new MessagePayload(
         new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent(text))),
         new AssistantMessageMetadata(
-            GenerationStopReason.COMPLETE, new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L)),
+            GenerationStopReason.COMPLETE, new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L)),
         null);
   }
 

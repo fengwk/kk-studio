@@ -39,6 +39,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -163,7 +164,7 @@ class ProviderReplayStateJsonCodecTest {
         new MessagePayload(
             new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("hi"))),
             new AssistantMessageMetadata(
-                GenerationStopReason.COMPLETE, new ModelUsage(1, 1, 0, 0, 0, 0, 0)),
+                GenerationStopReason.COMPLETE, new ModelUsage(1, 1, 0, 0, Map.of(), 0L, 0L)),
             null);
     Entry entry =
         new Entry(
@@ -203,7 +204,7 @@ class ProviderReplayStateJsonCodecTest {
                 "",
                 List.of(),
                 GenerationStopReason.COMPLETE,
-                new ModelUsage(1, 1, 0, 0, 0, 0, 0),
+                new ModelUsage(1, 1, 0, 0, Map.of(), 0L, 0L),
                 null,
                 null,
                 "{}",

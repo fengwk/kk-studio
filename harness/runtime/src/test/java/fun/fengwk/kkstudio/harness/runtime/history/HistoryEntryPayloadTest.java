@@ -686,13 +686,12 @@ class HistoryEntryPayloadTest {
   }
 
   private static AssistantMessageMetadata metadata(GenerationStopReason reason) {
-    ModelUsage usage = new ModelUsage(1L, 1L, 0L, 0L, 0L, 0L, 2L);
+    ModelUsage usage = new ModelUsage(1L, 1L, 0L, 0L, Map.of(), 0L, 2L);
     ModelCost cost =
         new ModelCost(
             "USD",
             BigDecimal.ONE,
             BigDecimal.ONE,
-            BigDecimal.ZERO,
             BigDecimal.ZERO,
             BigDecimal.ZERO,
             BigDecimal.ZERO,

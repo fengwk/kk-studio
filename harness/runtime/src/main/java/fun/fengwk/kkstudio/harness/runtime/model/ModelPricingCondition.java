@@ -1,0 +1,172 @@
+package fun.fengwk.kkstudio.harness.runtime.model;
+
+import java.time.LocalDate;
+import java.time.LocalTime;
+import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Objects;
+import java.util.Set;
+
+/**
+ * Pricing 规则条件。同一个条件对象的多个字段为 AND；{@code all}/{@code any}/{@code not} 提供有限的布尔组合。
+ *
+ * <p>条件只做纯判定，不携带三态结果。缺少判定所需的事实（例如请求时间或最终 service tier）由调用方把整个费用归零， 不得猜测事实后继续计算。
+ */
+public record ModelPricingCondition(
+    Context context,
+    List<String> serviceTier,
+    DateRange date,
+    TimeWindow time,
+    List<ModelPricingCondition> all,
+    List<ModelPricingCondition> any,
+    ModelPricingCondition not) {
+
+  public static final int MAX_LIST_SIZE = 64;
+  public static final int MAX_DEPTH = 8;
+
+  /** 不依赖任何事实的恒真条件。 */
+  public static final ModelPricingCondition ALWAYS =
+      new ModelPricingCondition(null, null, null, null, null, null, null);
+
+  public ModelPricingCondition {
+    serviceTier = copyServiceTiers(serviceTier);
+    all = copyConditions(all, "all");
+    any = copyConditions(any, "any");
+    validateDepth(0);
+  }
+
+  /** Context token 边界；上下界同时存在时必须保持可满足。 */
+  public record Context(Integer gt, Integer gte, Integer lt, Integer lte) {
+
+    public Context {
+      requireNonNegative(gt, "context.gt");
+      requireNonNegative(gte, "context.gte");
+      requireNonNegative(lt, "context.lt");
+      requireNonNegative(lte, "context.lte");
+      if (gt != null && gte != null) {
+        throw new IllegalArgumentException("context must not declare both gt and gte");
+      }
+      if (lt != null && lte != null) {
+        throw new IllegalArgumentException("context must not declare both lt and lte");
+      }
+      if (gt != null && lt != null && gt >= lt) {
+        throw new IllegalArgumentException("context.gt must be less than context.lt");
+      }
+      if (gt != null && lte != null && gt >= lte) {
+        throw new IllegalArgumentException("context.gt must be less than context.lte");
+      }
+      if (gte != null && lt != null && gte >= lt) {
+        throw new IllegalArgumentException("context.gte must be less than context.lt");
+      }
+      if (gte != null && lte != null && gte > lte) {
+        throw new IllegalArgumentException("context.gte must not exceed context.lte");
+      }
+    }
+  }
+
+  /** 左闭右开的 UTC 日期区间。 */
+  public record DateRange(LocalDate gte, LocalDate lt) {
+
+    public DateRange {
+      Objects.requireNonNull(gte, "date.gte");
+      Objects.requireNonNull(lt, "date.lt");
+      if (!gte.isBefore(lt)) {
+        throw new IllegalArgumentException("date.gte must be before date.lt");
+      }
+    }
+  }
+
+  /** IANA 时区中的每日时间窗；跨午夜时按开始日的星期归属。 */
+  public record TimeWindow(
+      LocalTime start, LocalTime end, ZoneId timezone, List<Integer> weekdays) {
+
+    public TimeWindow {
+      Objects.requireNonNull(start, "time.start");
+      Objects.requireNonNull(end, "time.end");
+      Objects.requireNonNull(timezone, "time.timezone");
+      weekdays = copyWeekdays(weekdays);
+    }
+  }
+
+  private static List<String> copyServiceTiers(List<String> serviceTier) {
+    if (serviceTier == null || serviceTier.isEmpty()) {
+      return List.of();
+    }
+    if (serviceTier.size() > MAX_LIST_SIZE) {
+      throw new IllegalArgumentException(
+          "serviceTier must not exceed " + MAX_LIST_SIZE + " values");
+    }
+    Set<String> unique = new HashSet<>();
+    List<String> copy = new ArrayList<>(serviceTier.size());
+    for (String tier : serviceTier) {
+      if (tier == null || tier.isBlank()) {
+        throw new IllegalArgumentException("serviceTier values must not be blank");
+      }
+      if (!unique.add(tier)) {
+        throw new IllegalArgumentException("serviceTier contains duplicate value: " + tier);
+      }
+      copy.add(tier);
+    }
+    return List.copyOf(copy);
+  }
+
+  private static List<ModelPricingCondition> copyConditions(
+      List<ModelPricingCondition> conditions, String name) {
+    if (conditions == null || conditions.isEmpty()) {
+      return List.of();
+    }
+    if (conditions.size() > MAX_LIST_SIZE) {
+      throw new IllegalArgumentException(
+          name + " must not exceed " + MAX_LIST_SIZE + " conditions");
+    }
+    List<ModelPricingCondition> copy = new ArrayList<>(conditions.size());
+    for (ModelPricingCondition condition : conditions) {
+      copy.add(Objects.requireNonNull(condition, name + " condition"));
+    }
+    return List.copyOf(copy);
+  }
+
+  private static List<Integer> copyWeekdays(List<Integer> weekdays) {
+    if (weekdays == null || weekdays.isEmpty()) {
+      return List.of();
+    }
+    if (weekdays.size() > 7) {
+      throw new IllegalArgumentException("time.weekdays must not exceed 7 values");
+    }
+    Set<Integer> unique = new HashSet<>();
+    List<Integer> copy = new ArrayList<>(weekdays.size());
+    for (Integer weekday : weekdays) {
+      if (weekday == null || weekday < 1 || weekday > 7) {
+        throw new IllegalArgumentException("time.weekdays values must be between 1 and 7");
+      }
+      if (!unique.add(weekday)) {
+        throw new IllegalArgumentException("time.weekdays contains duplicate value: " + weekday);
+      }
+      copy.add(weekday);
+    }
+    return List.copyOf(copy);
+  }
+
+  void validateDepth(int depth) {
+    if (depth > MAX_DEPTH) {
+      throw new IllegalArgumentException("condition nesting must not exceed " + MAX_DEPTH);
+    }
+    for (ModelPricingCondition condition : all) {
+      condition.validateDepth(depth + 1);
+    }
+    for (ModelPricingCondition condition : any) {
+      condition.validateDepth(depth + 1);
+    }
+    if (not != null) {
+      not.validateDepth(depth + 1);
+    }
+  }
+
+  private static void requireNonNegative(Integer value, String name) {
+    if (value != null && value < 0) {
+      throw new IllegalArgumentException(name + " must not be negative");
+    }
+  }
+}
