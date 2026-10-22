@@ -331,7 +331,7 @@ registerCase({
   id: 'crud.model_group.lifecycle',
   level: 'L1',
   title: 'Model Group 创建/更新/硬删除 roundtrip',
-  docs: 'GROUP 与 MODEL 共用全局逻辑名：创建有序 Fill First 成员、fallbackStatusCodes 与 cooldownSeconds；读取只暴露 group 与派生能力摘要（无组级 pricing/variants/defaultVariant）；PUT 可重排成员并清空状态码/冷却为 0；DELETE 后可再次创建同名组',
+  docs: 'GROUP 与 MODEL 共用全局逻辑名：创建有序 Fill First 成员、fallbackStatusCodes 与 cooldownSeconds；读取只暴露 group 与派生能力摘要（无组级 pricing/variants/defaultVariant）；PUT 可重排成员并清空状态码/冷却为 0；DELETE 后列表不再包含该组',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     let provider = null
