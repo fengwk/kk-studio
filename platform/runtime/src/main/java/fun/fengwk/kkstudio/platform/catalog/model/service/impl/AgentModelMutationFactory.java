@@ -18,6 +18,8 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
+import java.util.TreeSet;
 
 /** 通过共享的类型化 codec 规范化并校验 MODEL / GROUP 两种模型资源。 */
 @Component
@@ -64,11 +66,11 @@ public final class AgentModelMutationFactory {
   }
 
   /**
-   * 在锁定组自身行之前按 canonical 名称顺序锁定成员行。
+   * 在锁定组自身行之前按 canonical 名称顺序锁定旧、新成员行。
    *
-   * <p>组更新与成员改名/删除共用同一把成员行锁，避免组配置引用已被并发删除或移除的 Variant。
+   * <p>组更新与成员改名/删除共用同一把成员行锁，避免旧成员在更新期间被改名导致 JSON 失效，也避免新成员被并发删除。
    */
-  void lockMembers(AgentModelEditablePropertiesDTO properties) {
+  void lockMembers(AgentModel existing, AgentModelEditablePropertiesDTO properties) {
     if (properties == null
         || properties.getKind() != AgentModelKind.GROUP
         || properties.getGroup() == null) {
@@ -79,7 +81,15 @@ public final class AgentModelMutationFactory {
     } catch (IllegalArgumentException error) {
       throw new AiValidationException(RESOURCE, error.getMessage(), error);
     }
-    lockMemberRows(properties.getGroup());
+    Set<String> names = new TreeSet<>();
+    if (existing != null && existing.getGroupConfigJson() != null) {
+      groupCodec
+          .decode(existing.getGroupConfigJson())
+          .getMembers()
+          .forEach(member -> names.add(member.getModelName()));
+    }
+    properties.getGroup().getMembers().forEach(member -> names.add(member.getModelName()));
+    names.forEach(modelRepository::getByNameForUpdate);
   }
 
   /** 更新后从 config 中删掉的 Variant；调用方据此拒绝仍被 Agent/组引用的删除。 */

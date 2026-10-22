@@ -61,7 +61,7 @@ class FreshInstallSchemaContractTest {
   private static final String PROBE_RESOURCE =
       "fun/fengwk/kkstudio/schema/fresh-install-probes.sql";
   private static final String PROBE_CONTAINER_PATH = "/tmp/fresh-install-probes.sql";
-  private static final int PROBE_ASSERTION_COUNT = 197;
+  private static final int PROBE_ASSERTION_COUNT = 200;
 
   private static final String SNAPSHOT_RESOURCE =
       "fun/fengwk/kkstudio/schema/preserved-schema-snapshot.txt";
@@ -74,6 +74,7 @@ class FreshInstallSchemaContractTest {
       List.of(
           "agent_definition",
           "agent_model",
+          "agent_model_group_cooldown",
           "agent_provider",
           "chat",
           "environment",
@@ -284,19 +285,19 @@ class FreshInstallSchemaContractTest {
                 + " and tablename <> 'flyway_schema_history'"));
   }
 
-  /** 新目标必须真实包含 46 张业务表与 66 个立即外键；数字由 PG catalog 实测，不按迁移文本声明计数。 */
+  /** 新目标必须真实包含 47 张业务表与 68 个立即外键；数字由 PG catalog 实测，不按迁移文本声明计数。 */
   @Test
   void businessInventoryCarriesTheExpectedTablesAndImmediateForeignKeys() throws SQLException {
     try (Connection connection = open()) {
       assertEquals(
-          46,
+          47,
           queryInt(
               connection,
               "select count(*) from pg_class c"
                   + " where c.relnamespace = 'public'::regnamespace and c.relkind = 'r'"
                   + " and c.relname <> 'flyway_schema_history'"));
       assertEquals(
-          66,
+          68,
           queryInt(
               connection,
               "select count(*) from pg_constraint"
