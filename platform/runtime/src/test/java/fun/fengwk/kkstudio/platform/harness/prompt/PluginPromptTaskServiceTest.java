@@ -79,7 +79,7 @@ class PluginPromptTaskServiceTest {
 
   private static final Instant NOW = Instant.parse("2026-06-01T00:00:00Z");
   private static final BranchSettings SETTINGS =
-      new BranchSettings("worker", new ModelSelection("provider", "model", "default"), null);
+      new BranchSettings("worker", new ModelSelection("model", "default"), null);
   private static final UUID SESSION_ID = UUID.randomUUID();
   private static final UUID UPLOAD_ID = UUID.randomUUID();
   private static final UUID BLOB_ID = UUID.randomUUID();

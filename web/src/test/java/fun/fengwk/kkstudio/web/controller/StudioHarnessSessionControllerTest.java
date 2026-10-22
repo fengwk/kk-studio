@@ -214,7 +214,7 @@ class StudioHarnessSessionControllerTest {
             null,
             new RootPayload(
                 new BranchSettings(
-                    "assistant", new ModelSelection("openai", "gpt-5", "default"), null)),
+                    "assistant", new ModelSelection("gpt-5", "default"), null)),
             Instant.parse("2026-08-10T00:00:00Z"));
     Entry user =
         new Entry(

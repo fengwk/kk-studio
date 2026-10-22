@@ -103,7 +103,7 @@ class HarnessRuntimeRequestMapperTest {
     request.setEnvironmentName("env-a");
     HarnessRuntimeRequestMapper.ModelRequestDebugSelection selection =
         HarnessRuntimeRequestMapper.toModelRequestDebugSelection(request);
-    assertEquals(new ModelSelection("openai", "gpt-5", "default"), selection.model());
+    assertEquals(new ModelSelection("gpt-5", "default"), selection.model());
     assertEquals("env-a", selection.environmentName());
 
     // 缺省与显式 null 都表示未选择 Environment。

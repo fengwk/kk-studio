@@ -65,7 +65,7 @@ public final class HarnessRuntimeTestFixtures {
 
   public static BranchSettings settings() {
     return new BranchSettings(
-        "default-assistant", new ModelSelection("openai", "gpt-5", "default"), null);
+        "default-assistant", new ModelSelection("gpt-5", "default"), null);
   }
 
   public static Entry rootEntry() {
