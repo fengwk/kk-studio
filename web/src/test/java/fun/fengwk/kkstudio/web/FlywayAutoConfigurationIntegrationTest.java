@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.web;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -18,6 +19,7 @@ import javax.sql.DataSource;
 
 import java.sql.Connection;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Statement;
 
 /**
@@ -78,14 +80,47 @@ class FlywayAutoConfigurationIntegrationTest {
             0L, unexpectedMigration.getLong(1), "only the canonical V1 migration is known");
       }
       // model_id 只对 MODEL 行必填（GROUP 行为 null），由 kind 形状约束而不是列级 NOT NULL 保证。
-      try (ResultSet modelShape =
+      try (ResultSet modelIdColumn =
           st.executeQuery(
-              "select count(*) from information_schema.table_constraints"
+              "select count(*) from information_schema.columns"
                   + " where table_schema = 'public'"
                   + " and table_name = 'agent_model'"
-                  + " and constraint_name = 'ck_agent_model_shape'")) {
-        assertTrue(modelShape.next());
-        assertEquals(1L, modelShape.getLong(1), "V1 must enforce the MODEL/GROUP row shape");
+                  + " and column_name = 'model_id' and is_nullable = 'YES'")) {
+        assertTrue(modelIdColumn.next());
+        assertEquals(1L, modelIdColumn.getLong(1), "GROUP has no wire model_id");
+      }
+      try (ResultSet kindColumn =
+          st.executeQuery(
+              "select count(*) from information_schema.columns where table_schema='public'"
+                  + " and table_name='agent_model' and column_name='kind' and is_nullable='NO'")) {
+        assertTrue(kindColumn.next());
+        assertEquals(1L, kindColumn.getLong(1));
+      }
+      // 列可空不等于放宽 MODEL：形状约束必须拒绝缺失 wire id，GROUP 则合法。
+      SQLException invalidModel =
+          assertThrows(
+              SQLException.class,
+              () ->
+                  st.executeUpdate(
+                      "insert into agent_model(name,kind,provider_name,config)"
+                          + " values ('missing-wire','MODEL','stub','{}'::jsonb)"));
+      assertEquals("23514", invalidModel.getSQLState());
+      assertTrue(invalidModel.getMessage().contains("ck_agent_model_shape"));
+      try {
+        assertEquals(
+            1,
+            st.executeUpdate(
+                "insert into agent_model(name,kind,group_config)"
+                    + " values ('group-without-wire','GROUP','{}'::jsonb)"));
+        try (ResultSet group =
+            st.executeQuery(
+                "select count(*) from agent_model where name='group-without-wire'"
+                    + " and kind='GROUP' and model_id is null and provider_name is null and config is null")) {
+          assertTrue(group.next());
+          assertEquals(1L, group.getLong(1));
+        }
+      } finally {
+        st.executeUpdate("delete from agent_model where name='group-without-wire'");
       }
       try (ResultSet seed =
           st.executeQuery(
