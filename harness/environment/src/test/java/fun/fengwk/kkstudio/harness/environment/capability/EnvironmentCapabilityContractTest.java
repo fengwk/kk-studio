@@ -239,6 +239,31 @@ class EnvironmentCapabilityContractTest {
     assertTrue(handle.isCancelled());
   }
 
+  /** 测试意图：句柄默认实现保证 zero grace 并把 terminate 委托给 cancel，拒绝 null cause。 */
+  @Test
+  void defaultHandleDelegatesTerminateToCancelWithZeroGrace() {
+    AtomicBoolean cancelled = new AtomicBoolean();
+    EnvironmentCapabilityExecutionHandle handle =
+        new EnvironmentCapabilityExecutionHandle() {
+          @Override
+          public void cancel() {
+            cancelled.set(true);
+          }
+
+          @Override
+          public boolean isCancelled() {
+            return cancelled.get();
+          }
+        };
+
+    assertEquals(Duration.ZERO, handle.terminationGrace());
+    assertFalse(handle.isCancelled());
+    assertThrows(NullPointerException.class, () -> handle.terminate(null));
+    assertFalse(handle.isCancelled());
+    handle.terminate(EnvironmentCapabilityTerminationCause.TIMED_OUT);
+    assertTrue(handle.isCancelled());
+  }
+
   private static String[] componentNames(RecordComponent[] components) {
     String[] names = new String[components.length];
     for (int index = 0; index < components.length; index++) {

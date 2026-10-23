@@ -95,6 +95,10 @@ Work 通知只降低延迟，周期 claim 扫描兜底进程重启和通知丢�
 - 已进入执行后的确定失败声明 `The tool ran but failed; side effects may have occurred.`；
 - 超时、取消、提交不明或远程断开声明 `Whether the tool took effect cannot be confirmed.`，不得声称未执行；bash 的取消与超时仍保留真实的进程终态事实（`EXITED` / `TIMED_OUT` / `CANCELLED`）。
 
+远端执行预算与传输恢复窗口分离：Platform 从发送前起等待一次 `request.timeout + terminationGrace`，
+生产窗口取 invoke 时冻结的心跳超时，partial 与重连均不续期。恢复窗口内保留真实正常或超时输出；
+缺终态到期返回 UNKNOWN，并移除在途记录、阻止重放、取消远端和释放 transfer，不能解释为未执行或安全重试。
+
 文案只陈述事实与恢复动作，不包含自动重试倾向；字段错误不回显含凭据的原始参数，异常路径只暴露安全描述而不是异常栈。未知工具列出当前冻结绑定的允许工具名并要求改用其中之一。路径与 `workdir` 校验在执行前完成并要求绝对路径（bash 的 `workdir` 必须绝对、存在且为目录）。`task` 的参数拒绝在文案中给出续用或新建所需的 `subagent_type`、`prompt` 与 `thread_id`，不打断既有 Thread。
 
 ## 实现与验证
