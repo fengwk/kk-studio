@@ -7,12 +7,26 @@ import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
  * 不依赖对话消息、卡片 visible、TURN_END 投影或任何 flag；compaction 等隐藏内容里真实发生的
  * token/费用同样进入累计。费用按精确十进制求和，缺失/跨币种不伪造完整总额。
  */
+function canonicalUsage(usage: Record<string, number> | null): Record<string, number> | null {
+  if (usage == null || Object.keys(usage).length === 0) {
+    return null
+  }
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    ...usage,
+  }
+}
+
 function assistantEntry(
   entryId: string,
   usage: Record<string, number>,
   usageCost?: { currency: string; amount: string } | null,
   entryType: HarnessSessionEntryDTO['entryType'] = 'MESSAGE',
 ): HarnessSessionEntryDTO {
+  const norm = canonicalUsage(usage)
   return {
     entryId,
     sessionId: 's1',
@@ -20,7 +34,7 @@ function assistantEntry(
     entryType,
     payloadJson: JSON.stringify({
       message: { role: 'ASSISTANT', contents: [{ type: 'text', text: 'ok' }] },
-      ...(Object.keys(usage).length > 0 ? { assistantMetadata: { usage } } : {}),
+      ...(norm != null ? { assistantMetadata: { usage: norm } } : {}),
     }),
     createTime: 1785232800,
     usageCost: usageCost ?? null,
@@ -45,6 +59,7 @@ function compactionEntry(
   usage: Record<string, number> | null,
   usageCost?: { currency: string; amount: string } | null,
 ): HarnessSessionEntryDTO {
+  const norm = canonicalUsage(usage)
   return {
     entryId,
     sessionId: 's1',
@@ -52,7 +67,7 @@ function compactionEntry(
     entryType: 'COMPACTION',
     payloadJson: JSON.stringify({
       summaryText: 'summarized',
-      assistantMetadata: usage == null ? null : { stopReason: 'COMPLETE', usage },
+      assistantMetadata: norm == null ? null : { stopReason: 'COMPLETE', usage: norm },
     }),
     createTime: 1785232800,
     usageCost: usageCost ?? null,
@@ -151,7 +166,10 @@ describe('aggregateEntryUsage', () => {
       ...assistantEntry(entryId, { inputTokens: input, outputTokens: tokens, reasoningTokens: 0, providerTotalTokens: input + tokens }),
       payloadJson: JSON.stringify({
         message: { role: 'ASSISTANT', contents: [{ type: 'text', text: 'ok' }] },
-        assistantMetadata: { usage: { inputTokens: input, outputTokens: tokens }, decodeDurationMillis: millis },
+        assistantMetadata: {
+          usage: { inputTokens: input, outputTokens: tokens, cacheReadTokens: 0, cacheWriteTokens: 0 },
+          decodeDurationMillis: millis,
+        },
       }),
     })
 
@@ -173,5 +191,18 @@ describe('aggregateEntryUsage', () => {
       otherEntry('end-1', 'TURN_END'),
       otherEntry('compaction-1', 'COMPACTION'),
     ])).toBeNull()
+  })
+
+  it('keeps reasoning and providerTotal as null if any entry is unknown', () => {
+    const known = assistantEntry('a', {
+      inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0,
+      reasoningTokens: 2, providerTotalTokens: 17,
+    })
+    const unknown = assistantEntry('b', {
+      inputTokens: 20, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0,
+    })
+    const aggregated = aggregateEntryUsage([known, unknown])
+    expect(aggregated?.reasoning).toBeNull()
+    expect(aggregated?.providerTotal).toBeNull()
   })
 })

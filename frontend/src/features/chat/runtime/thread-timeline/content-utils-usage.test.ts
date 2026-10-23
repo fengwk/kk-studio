@@ -110,16 +110,73 @@ describe('content-utils usage & speed & cache calculations', () => {
     // 旧 payload 里的 metadata.cost 不再被读取：费用只能来自读取投影
     it('never prices from assistant metadata', () => {
       const parsed = parseAssistantUsage({
-        usage: { inputTokens: 10, outputTokens: 20 },
+        usage: { inputTokens: 10, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0 },
         cost: 0.25,
         costTotal: '0.5',
       })
       expect(parsed?.cost).toBeNull()
     })
 
+    it('requires the four non-negative safe integer fields and returns null when missing or invalid', () => {
+      expect(parseAssistantUsage({})).toBeNull()
+      expect(parseAssistantUsage({ usage: null })).toBeNull()
+      expect(parseAssistantUsage({ usage: {} })).toBeNull()
+      expect(parseAssistantUsage({
+        usage: { inputTokens: 10, outputTokens: 20, cacheReadTokens: 5 }, // 缺少 cacheWriteTokens
+      })).toBeNull()
+      expect(parseAssistantUsage({
+        usage: { inputTokens: -1, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      })).toBeNull()
+      expect(parseAssistantUsage({
+        usage: { inputTokens: 1.5, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      })).toBeNull()
+      expect(parseAssistantUsage({
+        usage: { inputTokens: '10', outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      })).toBeNull()
+
+      // 四必填真实全零也必须保留；缺费用/测速不是缺 usage。
+      expect(parseAssistantUsage({
+        usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      })).toMatchObject({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: null })
+
+      // 携带真实 0 费用或有效指标时正常保留
+      const zeroWithCost = parseAssistantUsage(
+        {
+          usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        },
+        { currency: 'USD', amount: '0' },
+      )
+      expect(zeroWithCost).toEqual({
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        reasoning: null,
+        providerTotal: null,
+        cost: { currency: 'USD', amount: '0' },
+        decodeTokens: null,
+        decodeDurationMillis: null,
+        contextInputTokens: 0,
+      })
+    })
+
+    it('treats reasoningTokens and providerTotalTokens as nullable unknown', () => {
+      const parsed = parseAssistantUsage({
+        usage: {
+          inputTokens: 10,
+          outputTokens: 20,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          reasoningTokens: 'bad',
+        },
+      })
+      expect(parsed?.reasoning).toBeNull()
+      expect(parsed?.providerTotal).toBeNull()
+    })
+
     it('accepts only positive safe integer decodeDurationMillis', () => {
       const valid = parseAssistantUsage({
-        usage: { inputTokens: 10, outputTokens: 20 },
+        usage: { inputTokens: 10, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0 },
         decodeDurationMillis: 800,
       })
       expect(valid?.decodeDurationMillis).toBe(800)
@@ -127,14 +184,14 @@ describe('content-utils usage & speed & cache calculations', () => {
 
       for (const bad of ['800', 0, -5, 1.5, Number.POSITIVE_INFINITY, Number.NaN, 2 ** 53]) {
         const parsed = parseAssistantUsage({
-          usage: { inputTokens: 10, outputTokens: 20 },
+          usage: { inputTokens: 10, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0 },
           decodeDurationMillis: bad,
         })
         expect(parsed?.decodeDurationMillis).toBeNull()
         expect(parsed?.decodeTokens).toBeNull()
       }
       const aliased = parseAssistantUsage({
-        usage: { inputTokens: 10, outputTokens: 20 },
+        usage: { inputTokens: 10, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0 },
         decode_duration_millis: 800,
       })
       expect(aliased?.decodeDurationMillis).toBeNull()
@@ -244,6 +301,19 @@ describe('content-utils usage & speed & cache calculations', () => {
       expect(merged.decodeDurationMillis).toBe(200)
       expect(merged.contextInputTokens).toBe(20)
     })
+
+    it('keeps reasoning and providerTotal as null if either is null', () => {
+      const known = usage({ reasoning: 10, providerTotal: 100 })
+      const unknownReasoning = usage({ reasoning: null, providerTotal: 50 })
+      const merged1 = mergeTurnUsage(known, unknownReasoning)
+      expect(merged1.reasoning).toBeNull()
+      expect(merged1.providerTotal).toBe(150)
+
+      const unknownTotal = usage({ reasoning: 5, providerTotal: null })
+      const merged2 = mergeTurnUsage(known, unknownTotal)
+      expect(merged2.reasoning).toBe(15)
+      expect(merged2.providerTotal).toBeNull()
+    })
   })
 
   // 缺失指标的展示默认值不改变原始 usage facts。
@@ -261,24 +331,47 @@ describe('content-utils usage & speed & cache calculations', () => {
       expect(text).toBe('↑100 · ↓50 · R50 · W0 · $0.005 · cache 33.33% · 50 tok/s')
     })
 
-    it('formats a quarter cache hit rate with two decimals', () => {
+    it('formats a quarter cache hit rate with two decimals and keeps missing speed as noData', () => {
       expect(formatTurnUsageText({
         input: 150, output: 50, cacheRead: 50, cacheWrite: 0,
         cost: { currency: 'USD', amount: '0.005' },
-      })).toBe('↑150 · ↓50 · R50 · W0 · $0.005 · cache 25.00% · 0 tok/s')
+      }, (k) => k === 'ai.runtime.status.noData' ? '暂无数据' : k)).toBe(
+        '↑150 · ↓50 · R50 · W0 · $0.005 · cache 25.00% · 暂无数据',
+      )
     })
 
-    it('defaults missing metrics to zero without assuming a currency', () => {
+    it('shows noData for missing cost and speed while preserving real 0', () => {
+      // 缺失费用和速率：显示 noData，不可显示 0
       expect(formatTurnUsageText({
         input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: null,
-      })).toBe('↑0 · ↓0 · R0 · W0 · 0 · cache 0.00% · 0 tok/s')
+      }, (k) => k === 'ai.runtime.status.noData' ? '暂无数据' : k)).toBe(
+        '↑0 · ↓0 · R0 · W0 · 暂无数据 · cache 0.00% · 暂无数据',
+      )
+      // 英文 noData
+      expect(formatTurnUsageText({
+        input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: null,
+      }, (k) => k === 'ai.runtime.status.noData' ? 'No data' : k)).toBe(
+        '↑0 · ↓0 · R0 · W0 · No data · cache 0.00% · No data',
+      )
+
+      // 真实 0：费用 $0，速率 0 tok/s，真实 0 保留
+      expect(formatTurnUsageText({
+        input: 0, output: 0, cacheRead: 0, cacheWrite: 0,
+        cost: { currency: 'USD', amount: '0' },
+        decodeTokens: 0,
+        decodeDurationMillis: 1000,
+      }, (k) => k === 'ai.runtime.status.noData' ? '暂无数据' : k)).toBe(
+        '↑0 · ↓0 · R0 · W0 · $0 · cache 0.00% · 0 tok/s',
+      )
     })
 
     it('keeps the same fields when only cache write has usage', () => {
       expect(formatTurnUsageText({
         input: 100, output: 50, cacheRead: 0, cacheWrite: 20,
         cost: { currency: 'USD', amount: '0.005' },
-      })).toBe('↑100 · ↓50 · R0 · W20 · $0.005 · cache 0.00% · 0 tok/s')
+        decodeTokens: 50,
+        decodeDurationMillis: 1000,
+      })).toBe('↑100 · ↓50 · R0 · W20 · $0.005 · cache 0.00% · 50 tok/s')
     })
   })
 })

@@ -81,6 +81,7 @@ export function ThreadPane({
   const transcript: ThreadPanelTranscriptInput = {
     messages: projection.timeline.messages,
     queuedMessages: projection.timeline.queuedMessages,
+    queuedCustomMessages: projection.queuedCustomMessages,
     loading: projection.messagesLoading,
     error: projection.messagesError,
     bodyRef: projection.bodyRef,

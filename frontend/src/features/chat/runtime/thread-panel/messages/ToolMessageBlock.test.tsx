@@ -1,6 +1,8 @@
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { MemoryRouter } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
+import { TaskToolRenderer } from '@/features/chat/runtime/thread-panel/messages/TaskToolRenderer'
 import { ToolMessageBlock } from '@/features/chat/runtime/thread-panel/messages/ToolMessageBlock'
 import { ResourceBlobUrlContext } from '@/features/chat/runtime/thread-panel/messages/ResourceBlobUrlContext'
 import { TRANSCRIPT_READING_INTENT_EVENT } from '@/features/chat/runtime/transcript-reading'
@@ -770,6 +772,102 @@ describe('ToolMessageBlock per-tool bodies', () => {
     expect(screen.getByText(/renderer:call/)).toBeInTheDocument()
     expect(container.textContent).not.toContain('已受理')
     expect(container.textContent).not.toContain('后台执行')
+  })
+
+  it('renders task with canonical details receipt link, preserves resume argument link, and falls back cleanly on missing/bad details', () => {
+    const resumeArguments = JSON.stringify({
+      subagent_type: 'coder',
+      prompt: 'continue working on subtask',
+      thread_id: '00000000-0000-0000-0000-000000000001',
+    })
+    const callMessage = message({
+      phase: 'call',
+      toolName: 'task',
+      rendererKey: 'task',
+      arguments: resumeArguments,
+      invocationStatus: 'SUCCEEDED',
+    })
+    const resultWithCanonicalDetails = message({
+      phase: 'result',
+      toolName: 'task',
+      rendererKey: 'task',
+      arguments: resumeArguments,
+      details: {
+        kind: 'task.accepted',
+        thread_id: '00000000-0000-0000-0000-000000000002',
+      },
+      contents: [text('Subagent accepted execution.')],
+    })
+
+    const { unmount } = render(
+      <MemoryRouter>
+        <ToolMessageBlock
+          message={callMessage}
+          result={resultWithCanonicalDetails}
+          renderer={TaskToolRenderer}
+        />
+      </MemoryRouter>,
+    )
+
+    // resume 参数链接与受理收据链接同时存在，指向各自的 UUID
+    const links = screen.getAllByRole('link', { name: '查看 subagent 执行' })
+    expect(links).toHaveLength(2)
+    expect(links[0]).toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000001')
+    expect(links[1]).toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000002')
+    // 自然语言正文在受理成功时被链接收敛，不重复展示
+    expect(screen.queryByText('Subagent accepted execution.')).not.toBeInTheDocument()
+    unmount()
+
+    // 缺少 details 时：无 receipt 链接，保留原始自然语言正文；call 的 resume 参数链接仍然保留
+    const resultWithoutDetails = message({
+      phase: 'result',
+      toolName: 'task',
+      rendererKey: 'task',
+      arguments: resumeArguments,
+      contents: [text('Raw output without details receipt.')],
+    })
+    const { unmount: unmount2 } = render(
+      <MemoryRouter>
+        <ToolMessageBlock
+          message={callMessage}
+          result={resultWithoutDetails}
+          renderer={TaskToolRenderer}
+        />
+      </MemoryRouter>,
+    )
+    const singleResumeLink = screen.getAllByRole('link', { name: '查看 subagent 执行' })
+    expect(singleResumeLink).toHaveLength(1)
+    expect(singleResumeLink[0]).toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000001')
+    expect(screen.getByText('Raw output without details receipt.')).toBeInTheDocument()
+    unmount2()
+
+    // 失败（error）时：即使有 details 也不生成收据链接，错误原文完整保留
+    const failedResult = message({
+      phase: 'result',
+      status: 'error',
+      errorMessage: 'Subagent dispatch rejected: budget exceeded',
+      toolName: 'task',
+      rendererKey: 'task',
+      arguments: resumeArguments,
+      details: {
+        kind: 'task.accepted',
+        thread_id: '00000000-0000-0000-0000-000000000003',
+      },
+      contents: [text('Failure explanation detail')],
+    })
+    render(
+      <MemoryRouter>
+        <ToolMessageBlock
+          message={callMessage}
+          result={failedResult}
+          renderer={TaskToolRenderer}
+        />
+      </MemoryRouter>,
+    )
+    const errorLinks = screen.getAllByRole('link', { name: '查看 subagent 执行' })
+    expect(errorLinks).toHaveLength(1)
+    expect(errorLinks[0]).toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000001')
+    expect(screen.getByText('Failure explanation detail')).toBeInTheDocument()
   })
 
   it('renders ask_user as a read-only record without a submission path', () => {

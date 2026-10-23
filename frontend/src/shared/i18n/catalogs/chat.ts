@@ -918,6 +918,10 @@ export const chatCatalog = {
     'en-US': 'queued',
     'zh-CN': 'queued',
   },
+  'ai.runtime.thread.queuedCustomMessage': {
+    'en-US': 'Pending supplementary requirement',
+    'zh-CN': '待处理补充要求',
+  },
   'ai.runtime.thread.working': {
     'en-US': 'Working...',
     'zh-CN': '执行中',

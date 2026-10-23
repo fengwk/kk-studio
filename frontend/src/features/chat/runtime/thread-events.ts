@@ -453,10 +453,19 @@ function projectEntryRecord(
           { label: translate('ai.runtime.event.detail.output'), value: String(usage.output) },
           { label: translate('ai.runtime.event.detail.cacheRead'), value: String(usage.cacheRead) },
           { label: translate('ai.runtime.event.detail.cacheWrite'), value: String(usage.cacheWrite) },
-          { label: translate('ai.runtime.event.detail.reasoning'), value: String(usage.reasoning) },
+          {
+            label: translate('ai.runtime.event.detail.reasoning'),
+            value:
+              usage.reasoning != null
+                ? String(usage.reasoning)
+                : translate('ai.runtime.status.noData'),
+          },
           {
             label: translate('ai.runtime.event.detail.providerTotal'),
-            value: String(usage.providerTotal),
+            value:
+              usage.providerTotal != null
+                ? String(usage.providerTotal)
+                : translate('ai.runtime.status.noData'),
           },
           {
             label: translate('ai.runtime.event.detail.cost'),

@@ -401,6 +401,7 @@ function projectToolResult(
     rendererKey: getString(content.rendererKey),
     arguments: projected.arguments,
     contents: projected.contents,
+    details: projected.details,
     errorMessage: projected.errorMessage,
     createdAt: entry.createTime,
     status: projected.status,
@@ -442,7 +443,7 @@ function decodeDurableToolResultContent(content: Record<string, unknown>): Recor
 export function projectToolResultContent(
   content: Record<string, unknown>,
   argumentsJson: string,
-): Pick<ToolDialogueMessage, 'arguments' | 'contents' | 'errorMessage' | 'status' | 'editReview'> {
+): Pick<ToolDialogueMessage, 'arguments' | 'contents' | 'details' | 'errorMessage' | 'status' | 'editReview'> {
   const error = content.error === true
   const contents = toToolContents(getRecordList(content.contents))
   // 错误直接使用工具结果原文：不再套用通用「工具执行失败」文案；没有可展示原文时
@@ -455,6 +456,8 @@ export function projectToolResultContent(
   return {
     arguments: argumentsJson,
     contents,
+    details: content.details != null && typeof content.details === 'object' && !Array.isArray(content.details)
+      ? content.details as Record<string, unknown> : undefined,
     errorMessage: error && rawError ? rawError : undefined,
     status: error ? 'error' : 'done',
     editReview,

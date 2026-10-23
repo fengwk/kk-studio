@@ -8,7 +8,13 @@ import { buildThreadEventTimeline } from '@/features/chat/runtime/thread-events'
 import { aggregateEntryUsage } from '@/features/chat/runtime/thread-timeline/turn-usage'
 import { useAgentThreadQueries } from '@/features/chat/runtime/useAgentThreadQueries'
 import { useHarnessThreadRealtime } from '@/features/chat/runtime/useHarnessThreadRealtime'
+import {
+  extractQueuedCustomMessages,
+  type QueuedCustomMessage,
+} from '@/features/chat/runtime/queued-custom-messages'
 import { translate } from '@/shared/i18n'
+
+export type { QueuedCustomMessage }
 
 /** 只读 Thread 投影的完整形状：控制面（controller）是它的超集。 */
 export type ThreadProjection = ReturnType<typeof useThreadProjection>
@@ -74,6 +80,10 @@ export function useThreadProjection(threadId: string) {
   const bodyRef = useRef<HTMLDivElement>(null)
   // 根判定：执行根是 parentThreadId 为 null 的 Thread；未加载完成前为 null，控制区不暴露。
   const isRoot = thread == null ? null : thread.parentThreadId == null
+  const queuedCustomMessages = useMemo(
+    () => extractQueuedCustomMessages(queuedCommands),
+    [queuedCommands],
+  )
 
   return {
     threadId,
@@ -94,6 +104,7 @@ export function useThreadProjection(threadId: string) {
     messagesError: snapshotQuery.error,
     bodyRef,
     queuedCommands,
+    queuedCustomMessages,
     manualCompaction,
     stopReceipts,
     modelInvocation,

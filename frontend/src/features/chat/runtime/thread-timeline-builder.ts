@@ -475,7 +475,7 @@ function projectInvocationOverlays(
 function terminalInvocationResult(
   invocation: ToolInvocationDTO,
   call: ToolDialogueMessage,
-): Pick<ToolDialogueMessage, 'arguments' | 'contents' | 'errorMessage' | 'status' | 'editReview'> | null {
+): Pick<ToolDialogueMessage, 'arguments' | 'contents' | 'details' | 'errorMessage' | 'status' | 'editReview'> | null {
   if (invocation.resultJson != null) {
     const projected = projectToolResultContent(parsePayload(invocation.resultJson), call.arguments)
     return {
