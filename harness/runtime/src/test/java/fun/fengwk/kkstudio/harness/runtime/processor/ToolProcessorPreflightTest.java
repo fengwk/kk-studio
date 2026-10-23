@@ -4,10 +4,20 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
 
 import fun.fengwk.kkstudio.harness.environment.capability.ExpectedFile;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
@@ -16,12 +26,16 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEditReview;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
+import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
+import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -29,7 +43,9 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -39,6 +55,86 @@ import java.util.concurrent.atomic.AtomicReference;
 class ToolProcessorPreflightTest {
 
   private final List<ScheduledExecutorService> schedulers = new ArrayList<>();
+
+  /** 已过期 A 恢复时不能取消 B，B 的执行结果仍可正常提交。 */
+  @Test
+  void expiredClaimCannotCancelNewOwnerAfterOwnershipCheck() throws Exception {
+    ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
+    CountDownLatch checked = new CountDownLatch(1);
+    CountDownLatch resume = new CountDownLatch(1);
+    CountDownLatch finish = new CountDownLatch(1);
+    AtomicReference<Thread> worker = new AtomicReference<>();
+    HarnessStore gated = ClaimOwnershipTestSupport.gate(fixture.store, worker, checked, resume);
+    ToolProcessor processor =
+        new ToolProcessor(
+            gated,
+            fixture.gateway,
+            fixture.sink,
+            new ToolProcessorConfig(
+                ToolProcessorTestSupport.LEASE_CONFIG,
+                () -> ToolProcessorTestSupport.NO_RETRY,
+                ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY,
+                ToolProcessorTestSupport.BUSY_FALLBACK_DELAY),
+            fixture.clock,
+            fixture.scheduler,
+            Runnable::run);
+    ClaimedWork claimA =
+        ToolProcessorTestSupport.claim(
+            fixture.store,
+            fixture.toolInvocationId,
+            fixture.clock.instant(),
+            "token-A",
+            Duration.ofSeconds(60));
+    AtomicReference<ProcessResult> result = new AtomicReference<>();
+    Thread threadA = new Thread(() -> result.set(processor.process(claimA)));
+    worker.set(threadA);
+    try {
+      threadA.start();
+      assertTrue(checked.await(5, TimeUnit.SECONDS));
+      fixture.clock.advance(Duration.ofSeconds(61));
+      ClaimedWork claimB =
+          ToolProcessorTestSupport.claim(
+              fixture.store,
+              fixture.toolInvocationId,
+              fixture.clock.instant(),
+              "token-B",
+              Duration.ofSeconds(60));
+      fixture.gateway.queuePreflightAllow();
+      ToolProcessorTestSupport.FakeRun run =
+          fixture.gateway.queueRun(
+              progress -> {
+                try {
+                  if (!finish.await(5, TimeUnit.SECONDS)) {
+                    throw new AssertionError("completion gate timed out");
+                  }
+                } catch (InterruptedException failure) {
+                  Thread.currentThread().interrupt();
+                  throw new AssertionError("new owner was interrupted", failure);
+                }
+                return new ToolGateway.Failed(
+                    new ToolInvocationError("EXPECTED", "finished"), false);
+              });
+      assertEquals(ProcessResult.STARTED, processor.process(claimB));
+      assertTrue(run.awaitExecuting());
+      resume.countDown();
+      threadA.join(5000);
+      assertFalse(threadA.isAlive());
+      assertEquals(ProcessResult.LOST_OWNERSHIP, result.get());
+      assertEquals(0, run.closes.get());
+      assertTrue(processor.hasActiveExecution());
+      finish.countDown();
+      ToolProcessorTestSupport.awaitTrue(
+          () -> !processor.hasActiveExecution(), Duration.ofSeconds(5));
+      assertEquals(
+          new ToolInvocationError("EXPECTED", "finished"),
+          ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).error());
+    } finally {
+      resume.countDown();
+      finish.countDown();
+      processor.close();
+      threadA.join(5000);
+    }
+  }
 
   @AfterEach
   void stopSchedulers() {
@@ -1092,5 +1188,154 @@ class ToolProcessorPreflightTest {
 
   private void deleteToolWork(ToolProcessorTestSupport.Fixture fixture) {
     ToolProcessorTestSupport.deleteToolWork(fixture);
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"ALLOW", "ASK", "DENY"})
+  void preflightCommitFailureAbandonsExecutionAndHeartbeat(String resultKind) {
+    ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
+    UUID toolInvocationId = fixture.toolInvocationId;
+    AtomicBoolean failNextTransaction = new AtomicBoolean();
+    fixture.gateway.preflightHook = call -> failNextTransaction.set(true);
+    switch (resultKind) {
+      case "ALLOW" -> fixture.gateway.queuePreflightAllow();
+      case "ASK" -> fixture.gateway.queuePreflightAsk("needs confirmation");
+      case "DENY" -> fixture.gateway.queuePreflightDeny(
+          new ToolInvocationError("DENIED", "permission denied"));
+      default -> throw new IllegalArgumentException("unexpected result kind: " + resultKind);
+    }
+
+    ScheduledExecutorService scheduler = mock(ScheduledExecutorService.class);
+    ScheduledFuture<?> heartbeatFuture = mock(ScheduledFuture.class);
+    ArgumentCaptor<Runnable> heartbeatTask = ArgumentCaptor.forClass(Runnable.class);
+    doReturn(heartbeatFuture)
+        .when(scheduler)
+        .scheduleAtFixedRate(heartbeatTask.capture(), anyLong(), anyLong(), any(TimeUnit.class));
+    HarnessStore failingStore = failNextTransactionOnce(fixture.store, failNextTransaction);
+    ToolProcessor processor =
+        new ToolProcessor(
+            failingStore,
+            fixture.gateway,
+            fixture.sink,
+            new ToolProcessorConfig(
+                ToolProcessorTestSupport.LEASE_CONFIG,
+                () -> ToolProcessorTestSupport.NO_RETRY,
+                ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY,
+                ToolProcessorTestSupport.BUSY_FALLBACK_DELAY),
+            fixture.clock,
+            scheduler,
+            Runnable::run);
+    ClaimedWork claim =
+        ToolProcessorTestSupport.claim(
+            fixture.store,
+            toolInvocationId,
+            ToolProcessorTestSupport.NOW,
+            "token-failed",
+            Duration.ofSeconds(10));
+
+    try {
+      IllegalStateException failure =
+          assertThrows(IllegalStateException.class, () -> processor.process(claim));
+      assertEquals("injected transaction failure", failure.getMessage());
+
+      // 验证 R2 修复：事务失败后 execution 必须 abandon，heartbeat future 必须被取消
+      assertFalse(processor.hasActiveExecution(), "failed preflight commit must abandon execution");
+      verify(heartbeatFuture).cancel(anyBoolean());
+
+      ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, toolInvocationId);
+      assertEquals(ToolInvocationStatus.READY, tool.status());
+      assertEquals(0, tool.attempt());
+      assertNull(tool.approval());
+      ThreadState thread =
+          ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId());
+      assertEquals(0, thread.version());
+      Work claimedWork = ToolProcessorTestSupport.toolWork(fixture.store, toolInvocationId);
+      assertNotNull(claimedWork);
+      assertEquals("token-failed", claimedWork.leaseToken());
+
+      // 时钟推进到租约过期，验证 Work 可被正常重新 claim
+      fixture.clock.advance(Duration.ofSeconds(35));
+      boolean reclaimable =
+          fixture.store.transaction(
+              tx ->
+                  tx.claimNextWork(WorkTargetType.TOOL, "token-new", Duration.ofSeconds(30))
+                      .isPresent());
+      assertTrue(
+          reclaimable, "abandoned execution must allow Work to be reclaimed after lease expiry");
+    } finally {
+      processor.close();
+    }
+  }
+
+  /** admission 已持有资源后 RUNNING 写库失败，run 与 heartbeat 均须释放。 */
+  @Test
+  void runningCommitFailureReleasesAdmittedRun() {
+    ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
+    AtomicBoolean fail = new AtomicBoolean();
+    fixture.gateway.queuePreflightAllow();
+    fixture.gateway.admitHook = () -> fail.set(true);
+    ToolProcessorTestSupport.FakeRun run =
+        fixture.gateway.queueRun(
+            progress -> {
+              throw new AssertionError("must not execute");
+            });
+    ToolProcessor processor =
+        new ToolProcessor(
+            failNextTransactionOnce(fixture.store, fail),
+            fixture.gateway,
+            fixture.sink,
+            new ToolProcessorConfig(
+                ToolProcessorTestSupport.LEASE_CONFIG,
+                () -> ToolProcessorTestSupport.NO_RETRY,
+                ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY,
+                ToolProcessorTestSupport.BUSY_FALLBACK_DELAY),
+            fixture.clock,
+            fixture.scheduler,
+            Runnable::run);
+    try {
+      assertEquals(
+          ProcessResult.LOST_OWNERSHIP,
+          processor.process(
+              ToolProcessorTestSupport.claim(
+                  fixture.store, fixture.toolInvocationId, fixture.clock.instant())));
+      assertEquals(1, run.closes.get());
+      assertFalse(processor.hasActiveExecution());
+      assertEquals(
+          ToolInvocationStatus.READY,
+          ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
+    } finally {
+      processor.close();
+    }
+  }
+
+  private static HarnessStore failNextTransactionOnce(
+      HarnessStore delegate, AtomicBoolean failNext) {
+    return (HarnessStore)
+        Proxy.newProxyInstance(
+            HarnessStore.class.getClassLoader(),
+            new Class<?>[] {HarnessStore.class},
+            (proxy, method, args) -> {
+              if ("transaction".equals(method.getName()) && failNext.compareAndSet(true, false)) {
+                throw new IllegalStateException("injected transaction failure");
+              }
+              return invokeUnchecked(delegate, method, args);
+            });
+  }
+
+  private static Object invokeUnchecked(Object target, Method method, Object[] args) {
+    try {
+      return method.invoke(target, args);
+    } catch (InvocationTargetException error) {
+      Throwable cause = error.getCause();
+      if (cause instanceof RuntimeException runtime) {
+        throw runtime;
+      }
+      if (cause instanceof Error fatal) {
+        throw fatal;
+      }
+      throw new IllegalStateException(cause);
+    } catch (IllegalAccessException error) {
+      throw new IllegalStateException(error);
+    }
   }
 }

@@ -55,7 +55,7 @@ import java.util.function.Consumer;
  * delete/Stop 串行化，唤醒 THREAD Work 只是 hint，不需要执行树锁。
  */
 @Slf4j
-final class ToolExecution {
+final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution {
 
   private final HarnessStore store;
   private final RealtimeEventSink realtimeEventSink;
@@ -115,7 +115,8 @@ final class ToolExecution {
   }
 
   /** 本 execution 持有的 claim（供 processor 的 duplicate admission fencing 比较 token）。 */
-  ClaimedWork claim() {
+  @Override
+  public ClaimedWork claim() {
     return claim;
   }
 
@@ -148,12 +149,18 @@ final class ToolExecution {
       log.warn("cannot persist tool running state for {}", invocationId, failure);
       committed = false;
     }
-    if (!committed) {
+    if (!committed || abandoned.get()) {
       closeQuietly(run);
       abandon();
       return ProcessResult.LOST_OWNERSHIP;
     }
-    Thread.ofVirtual().name("tool-" + invocationId + "-" + attempt).start(() -> execute(run));
+    try {
+      Thread.ofVirtual().name("tool-" + invocationId + "-" + attempt).start(() -> execute(run));
+    } catch (RuntimeException | Error failure) {
+      closeQuietly(run);
+      abandon();
+      throw failure;
+    }
     return ProcessResult.STARTED;
   }
 
@@ -220,7 +227,8 @@ final class ToolExecution {
   }
 
   /** 停止 heartbeat、从 registry 释放，并在执行体运行期间 interrupt 执行线程；幂等，且不反写任何持久化状态。 */
-  void abandon() {
+  @Override
+  public void abandon() {
     if (!abandoned.compareAndSet(false, true)) {
       return;
     }

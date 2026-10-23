@@ -60,7 +60,7 @@ import java.util.function.LongSupplier;
  * hint，不需要执行树锁。随后只发布已提交的终态补齐 delta；lost ownership 或 Stop 竞态下 {@link #abandon} 中断运行线程并停止一切发布与写入。
  */
 @Slf4j
-final class ModelExecution implements ModelGateway.Sink {
+final class ModelExecution implements ModelGateway.Sink, ClaimAdmissionGuard.GuardedExecution {
 
   private final HarnessStore store;
   private final RealtimeEventSink realtimeEventSink;
@@ -207,7 +207,8 @@ final class ModelExecution implements ModelGateway.Sink {
   }
 
   /** 本 execution 持有的 claim（供 processor 的 duplicate admission fencing 比较 token）。 */
-  ClaimedWork claim() {
+  @Override
+  public ClaimedWork claim() {
     return claim;
   }
 
@@ -542,7 +543,8 @@ final class ModelExecution implements ModelGateway.Sink {
   }
 
   /** 停止 heartbeat 与 tick、中断运行线程（仅 Gateway 运行窗口内）并从 registry 释放；幂等。 */
-  void abandon() {
+  @Override
+  public void abandon() {
     if (!abandoned.compareAndSet(false, true)) {
       return;
     }
