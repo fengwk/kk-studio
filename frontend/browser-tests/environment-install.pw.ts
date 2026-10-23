@@ -39,7 +39,6 @@ async function api(page: Page) {
     if (path.endsWith('/install-code')) {
       return route.fulfill({ json: { code: 'browser-install-code', expiresAt: '2026-10-05T09:05:00.000Z' } })
     }
-    if (path.endsWith('/token')) return route.fulfill({ json: { id: card.id, version: card.version, registrationToken: token } })
     if (path.endsWith('/registration-token')) {
       card = { ...card, version: String(Number(card.version) + 1) }
       return route.fulfill({ json: { ...card, registrationToken: token } })
