@@ -202,4 +202,80 @@ class ModelInvocationGroupTest {
     assertEquals(CREATED.plusSeconds(2), running.requestedAt());
     assertTrue(running.requestedAt().isAfter(CREATED));
   }
+
+  @Test
+  void progressMustStayOnFrozenGroupAndAdvanceMonotonically() {
+    ModelInvocation initial = ready();
+    ModelInvocation budget =
+        initial.withGroupProgress(new ModelGroupProgress("group", 7L, 0, 2), CREATED);
+    ModelInvocation next =
+        budget.withGroupProgress(new ModelGroupProgress("group", 7L, 1, 0), CREATED);
+    ModelInvocation.validateTransition(initial, budget);
+    ModelInvocation.validateTransition(budget, next);
+
+    // 同一成员的预算不可倒退；切换成员必须清零，且绝不能换用新的配置。
+    for (ModelGroupProgress invalid :
+        List.of(
+            new ModelGroupProgress("other", 7L, 0, 2),
+            new ModelGroupProgress("group", 8L, 0, 2),
+            new ModelGroupProgress("group", 7L, 0, 1),
+            new ModelGroupProgress("group", 7L, 1, 1))) {
+      assertThrows(
+          IllegalArgumentException.class, () -> budget.withGroupProgress(invalid, CREATED));
+    }
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> next.withGroupProgress(new ModelGroupProgress("group", 7L, 0, 2), CREATED));
+    ModelInvocation running = initial.markRunning(CREATED);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> running.withGroupProgress(new ModelGroupProgress("group", 7L, 0, 1), CREATED));
+  }
+
+  @Test
+  void requestedAtCanOnlyChangeAtConfirmedStart() {
+    ModelInvocation initial = ready();
+    ModelInvocation running = initial.markRunning(CREATED.plusSeconds(1));
+    ModelInvocation.validateTransition(initial, running);
+    ModelInvocation checkpoint =
+        running.checkpoint(new StreamCheckpoint(1, 1, "a", ""), CREATED.plusSeconds(2));
+    ModelInvocation terminal = running.fail(error(), CREATED.plusSeconds(2));
+    ModelInvocation.validateTransition(running, checkpoint);
+    ModelInvocation.validateTransition(running, terminal);
+    assertEquals(running.requestedAt(), checkpoint.requestedAt());
+    assertEquals(running.requestedAt(), terminal.requestedAt());
+
+    // READY 重排、RUNNING partial 和终态链接均不能伪造或清除真实请求起点。
+    for (ModelInvocation state : List.of(initial, running, terminal)) {
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              ModelInvocation.validateTransition(
+                  state, withRequestedAt(state, CREATED.plusSeconds(3))));
+    }
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> ModelInvocation.validateTransition(running, withRequestedAt(running, null)));
+  }
+
+  private static ModelInvocation withRequestedAt(ModelInvocation value, Instant requestedAt) {
+    return new ModelInvocation(
+        value.id(),
+        value.threadId(),
+        value.turnStartEntryId(),
+        value.requestHeadEntryId(),
+        value.requestSpec(),
+        value.status(),
+        value.attempt(),
+        value.streamCheckpoint(),
+        value.result(),
+        value.error(),
+        value.resultEntryId(),
+        value.failedAttempts(),
+        value.createdAt(),
+        value.updatedAt(),
+        value.providerReplayState(),
+        value.groupProgress(),
+        requestedAt);
+  }
 }

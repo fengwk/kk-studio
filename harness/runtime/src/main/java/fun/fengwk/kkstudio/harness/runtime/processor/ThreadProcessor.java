@@ -163,10 +163,11 @@ public final class ThreadProcessor {
    * 处理一次 dispatcher 已 claim 的 THREAD Work（single-action 持久化 reducer）。
    *
    * <p>先用 Work-only 短事务验证 claim 当前真实 owned，再进 per-thread admission guard（同一 claim 重复 / 并发投递一律 LOST
-   * no-op；不同新 token 抢占 guard）。随后恰执行一次持久化 action：分类、构造 candidate turn plan、同事务 resolve 与提交都在同一个
-   * store transaction 内完成。action 在事务内完成当前 claim；下一 action 已确定时先 {@code requestWork(THREAD)} 再
-   * complete。事务内最终所有权围栏（final fence）失败抛出的 {@link ClaimLostSignal} 在事务完整回滚后在此捕获并映射为
-   * LOST_OWNERSHIP；显式 typed {@link TurnResolveTransientException} 同样在事务回滚后按既有语义 reschedule。
+   * no-op；不同 token 在旧 action 尚未结束时同样 LOST，不抢占 guard）。随后恰执行一次持久化 action：分类、构造 candidate turn
+   * plan、同事务 resolve 与提交都在同一个 store transaction 内完成。action 在事务内完成当前 claim；下一 action 已确定时先 {@code
+   * requestWork(THREAD)} 再 complete。事务内最终所有权围栏（final fence）失败抛出的 {@link ClaimLostSignal}
+   * 在事务完整回滚后在此捕获并映射为 LOST_OWNERSHIP；显式 typed {@link TurnResolveTransientException} 同样在事务回滚后按既有语义
+   * reschedule。
    */
   public ThreadProcessResult process(ClaimedWork claim) {
     Objects.requireNonNull(claim, "claim");

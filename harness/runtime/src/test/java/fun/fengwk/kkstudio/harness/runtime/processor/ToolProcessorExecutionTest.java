@@ -17,6 +17,7 @@ import fun.fengwk.kkstudio.harness.runtime.port.ToolSuccess;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessorTestSupport.FakeRun;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessorTestSupport.Fixture;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
+import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
@@ -25,10 +26,16 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
+import java.util.function.Function;
 
 /**
  * ToolProcessor 的 admission 与阻塞执行：本地 admission 的三种确定性结果、副作用之前持久化 RUNNING、终态提交与重试、取消即 interrupt、
@@ -545,6 +552,207 @@ class ToolProcessorExecutionTest {
           1,
           ToolProcessorTestSupport.threadWork(fixture.store, fixture.baseline.threadId())
               .wakeVersion());
+    }
+  }
+
+  /** admission 已持有 run、RUNNING 回写前 Stop 先收敛为 FAILED：不执行、关闭 run、LOST 且不覆盖终态。 */
+  @Test
+  void stopDuringAdmissionClosesRunWithoutExecuting() {
+    Fixture fixture = approvedFixture();
+    FakeRun run =
+        fixture.gateway.queueRun(progress -> ToolProcessorTestSupport.succeeded("call-1"));
+    fixture.gateway.admitHook =
+        () ->
+            ToolProcessorTestSupport.transition(
+                fixture.store,
+                fixture.toolInvocationId,
+                tool ->
+                    tool.fail(
+                        new ToolInvocationError("CANCELLED", "stopped"),
+                        ToolProcessorTestSupport.NOW));
+
+    assertEquals(ProcessResult.LOST_OWNERSHIP, fixture.processor.process(claim(fixture)));
+
+    assertEquals(0, run.executes.get());
+    assertEquals(1, run.closes.get());
+    assertEquals(ToolInvocationStatus.FAILED, tool(fixture).status());
+    assertFalse(fixture.processor.hasActiveExecution());
+  }
+
+  /** retryable 失败提交前 Work 被删除：RUNNING -&gt; READY 的重排被最终 fence 拒绝，保留 RUNNING 供 lease 恢复。 */
+  @Test
+  void retryableFailureAfterWorkDeletionIsLostWithoutStateChange() throws Exception {
+    Fixture fixture =
+        approvedFixture(ToolProcessorTestSupport.RETRY_TWICE, ToolSideEffect.READ_ONLY);
+    FakeRun run =
+        fixture.gateway.queueRun(
+            progress -> {
+              ToolProcessorTestSupport.deleteToolWork(fixture);
+              return failed(true);
+            });
+
+    assertEquals(ProcessResult.STARTED, fixture.processor.process(claim(fixture)));
+    awaitIdle(fixture);
+    ToolProcessorTestSupport.awaitTrue(() -> run.closes.get() == 1, WAIT);
+
+    assertEquals(ToolInvocationStatus.RUNNING, tool(fixture).status());
+    assertEquals(1, tool(fixture).attempt());
+    assertNull(ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId));
+  }
+
+  /** 非重试终态提交前 Work 被删除：request THREAD wake 随事务回滚，终态行保持 RUNNING。 */
+  @Test
+  void terminalAfterWorkDeletionRollsBackThreadWake() throws Exception {
+    Fixture fixture =
+        approvedFixture(ToolProcessorTestSupport.RETRY_TWICE, ToolSideEffect.READ_ONLY);
+    FakeRun run =
+        fixture.gateway.queueRun(
+            progress -> {
+              ToolProcessorTestSupport.deleteToolWork(fixture);
+              return new ToolGateway.Unknown(new ToolInvocationError("UNCERTAIN", "?"));
+            });
+
+    assertEquals(ProcessResult.STARTED, fixture.processor.process(claim(fixture)));
+    awaitIdle(fixture);
+    ToolProcessorTestSupport.awaitTrue(() -> run.closes.get() == 1, WAIT);
+
+    ToolInvocation tool = tool(fixture);
+    assertEquals(ToolInvocationStatus.RUNNING, tool.status());
+    assertNull(tool.result());
+    assertEquals(
+        1,
+        ToolProcessorTestSupport.threadWork(fixture.store, fixture.baseline.threadId())
+            .wakeVersion());
+  }
+
+  /** run.close 抛异常不阻断资源/registry 清理：终态已提交、执行释放且 close 只调用一次。 */
+  @Test
+  void closeFailureStillReleasesExecutionAfterTerminal() throws Exception {
+    Fixture fixture = approvedFixture();
+    AtomicInteger closes = new AtomicInteger();
+    ToolGateway.Run run =
+        new ToolGateway.Run() {
+          @Override
+          public ToolGateway.Completion execute(Consumer<ToolResult> progress) {
+            return ToolProcessorTestSupport.succeeded("call-1");
+          }
+
+          @Override
+          public void close() {
+            closes.incrementAndGet();
+            throw new IllegalStateException("close failed");
+          }
+        };
+    fixture.gateway.queueAdmit(new ToolGateway.Admitted(run));
+
+    assertEquals(ProcessResult.STARTED, fixture.processor.process(claim(fixture)));
+    awaitStatus(fixture, ToolInvocationStatus.SUCCEEDED);
+    awaitIdle(fixture);
+    ToolProcessorTestSupport.awaitTrue(() -> closes.get() == 1, WAIT);
+
+    assertEquals(1, closes.get());
+    assertNull(ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId));
+  }
+
+  /** 终态写库失败：run 与 registry 仍释放，durable 保持 RUNNING 交给 lease 恢复，绝不伪造成 SUCCEEDED。 */
+  @Test
+  void terminalPersistenceFailureStillReleasesRunAndLeavesRunning() throws Exception {
+    Fixture fixture = approvedFixture();
+    FakeRun run =
+        fixture.gateway.queueRun(progress -> ToolProcessorTestSupport.succeeded("call-1"));
+    try (ToolProcessor processor =
+        new ToolProcessor(
+            failTerminalToolWrites(fixture.store),
+            fixture.gateway,
+            fixture.sink,
+            new ToolProcessorConfig(
+                ToolProcessorTestSupport.LEASE_CONFIG,
+                () -> ToolProcessorTestSupport.NO_RETRY,
+                ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY,
+                ToolProcessorTestSupport.BUSY_FALLBACK_DELAY),
+            fixture.clock,
+            fixture.scheduler,
+            Runnable::run)) {
+      assertEquals(ProcessResult.STARTED, processor.process(claim(fixture)));
+      ToolProcessorTestSupport.awaitTrue(() -> !processor.hasActiveExecution(), WAIT);
+      ToolProcessorTestSupport.awaitTrue(() -> run.closes.get() == 1, WAIT);
+
+      assertEquals(ToolInvocationStatus.RUNNING, tool(fixture).status());
+      assertNull(tool(fixture).result());
+    }
+  }
+
+  /** cancel 之后到达的 partial 直接丢弃：执行体已 abandon，实时投影不再发布。 */
+  @Test
+  void partialAfterCancelIsDropped() throws Exception {
+    Fixture fixture = approvedFixture();
+    FakeRun run =
+        fixture.gateway.queueRun(
+            progress -> {
+              assertTrue(fixture.processor.cancel(fixture.toolInvocationId));
+              progress.accept(ToolProcessorTestSupport.partialResult("call-1"));
+              return ToolProcessorTestSupport.succeeded("call-1");
+            });
+
+    assertEquals(ProcessResult.STARTED, fixture.processor.process(claim(fixture)));
+    awaitIdle(fixture);
+    ToolProcessorTestSupport.awaitTrue(() -> run.closes.get() == 1, WAIT);
+
+    assertTrue(fixture.sink.events.isEmpty());
+    assertEquals(ToolInvocationStatus.RUNNING, tool(fixture).status());
+  }
+
+  /** 只在写入 terminal ToolInvocation 的事务上注入失败，用于验证 safeTerminal 的失败清理。 */
+  private static HarnessStore failTerminalToolWrites(HarnessStore delegate) {
+    return (HarnessStore)
+        Proxy.newProxyInstance(
+            HarnessStore.class.getClassLoader(),
+            new Class<?>[] {HarnessStore.class},
+            (proxy, method, args) -> {
+              if ("transaction".equals(method.getName()) && args != null && args.length == 1) {
+                @SuppressWarnings("unchecked")
+                Function<HarnessStore.Transaction, ?> callback =
+                    (Function<HarnessStore.Transaction, ?>) args[0];
+                return delegate.transaction(
+                    tx ->
+                        callback.apply(
+                            (HarnessStore.Transaction)
+                                Proxy.newProxyInstance(
+                                    HarnessStore.Transaction.class.getClassLoader(),
+                                    new Class<?>[] {HarnessStore.Transaction.class},
+                                    (ignored, txMethod, txArgs) -> {
+                                      if ("updateToolInvocations".equals(txMethod.getName())) {
+                                        @SuppressWarnings("unchecked")
+                                        List<ToolInvocation> invocations =
+                                            (List<ToolInvocation>) txArgs[0];
+                                        if (invocations.stream()
+                                            .anyMatch(
+                                                invocation -> invocation.status().isTerminal())) {
+                                          throw new IllegalStateException(
+                                              "injected terminal persistence failure");
+                                        }
+                                      }
+                                      return invokeUnchecked(tx, txMethod, txArgs);
+                                    })));
+              }
+              return invokeUnchecked(delegate, method, args);
+            });
+  }
+
+  private static Object invokeUnchecked(Object target, Method method, Object[] args) {
+    try {
+      return method.invoke(target, args);
+    } catch (InvocationTargetException error) {
+      Throwable cause = error.getCause();
+      if (cause instanceof RuntimeException runtime) {
+        throw runtime;
+      }
+      if (cause instanceof Error fatal) {
+        throw fatal;
+      }
+      throw new IllegalStateException(cause);
+    } catch (IllegalAccessException error) {
+      throw new IllegalStateException(error);
     }
   }
 }
