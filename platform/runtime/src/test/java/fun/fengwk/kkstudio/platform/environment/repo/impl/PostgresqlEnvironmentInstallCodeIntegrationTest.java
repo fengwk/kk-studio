@@ -86,23 +86,18 @@ class PostgresqlEnvironmentInstallCodeIntegrationTest {
 
     repository.saveInstallCode(envId, codeHash, tokenHash, expiresAt);
 
-    // 边界情况 1：now 早于 expiresAt 毫秒精度 -> 严格大于成立，消费成功
-    Instant justBefore = expiresAt.minusMillis(1);
-    // 重放之前先保存
-    repository.saveInstallCode(envId, codeHash, tokenHash, expiresAt);
-
-    // 边界情况 2：now 晚于 expiresAt -> 消费失败
+    // 已过期或恰好到期时拒绝消费，并保留记录。
     Instant justAfter = expiresAt.plusMillis(1);
     boolean consumedAfter = repository.consumeInstallCode(envId, codeHash, tokenHash, justAfter);
     assertThat(consumedAfter).isFalse();
     assertThat(countInstallCodes(envId)).isEqualTo(1L);
 
-    // 边界情况 3：now 恰好等于 expiresAt -> expires_at > now 不成立，消费失败
     boolean consumedExact = repository.consumeInstallCode(envId, codeHash, tokenHash, expiresAt);
     assertThat(consumedExact).isFalse();
     assertThat(countInstallCodes(envId)).isEqualTo(1L);
 
-    // 边界情况 4：now 严格早于 expiresAt -> 消费成功
+    // 到期前一毫秒仍可消费，成功后物理删除。
+    Instant justBefore = expiresAt.minusMillis(1);
     boolean consumedBefore = repository.consumeInstallCode(envId, codeHash, tokenHash, justBefore);
     assertThat(consumedBefore).isTrue();
     assertThat(countInstallCodes(envId)).isZero();

@@ -2409,9 +2409,8 @@ class ModelProcessorTest {
   }
 
   /**
-   * close 在 process 通过入口检查之后、registry 插入之前完成（close snapshot 之后插入）：putIfAbsent 后的 closed 检查
-   * 必须拦截——abandon 新 execution、保持 READY 并 reschedule 仍 owned 的 Work，绝不调用 Gateway。 确定性同步：持 store
-   * monitor 使 process 阻塞在 claimOwned 事务上，期间执行 close。
+   * 持 store monitor 使 process 阻塞在所有权校验期间，再关闭 processor；迟到准入不得启动 Gateway，仍 owned 的 READY Work
+   * 必须重排且不留下 execution。
    */
   @Test
   void closeBeforeRegistryInsertBouncesReadyWithoutStartingGateway() throws Exception {
@@ -2447,7 +2446,7 @@ class ModelProcessorTest {
     assertTrue(
         System.nanoTime() < deadline, "process must block on the store monitor (claimOwned)");
 
-    fixture.processor.close(); // 此时 executions 为空：本 execution 尚未插入 registry
+    fixture.processor.close(); // 所有权前置校验尚未完成，guard 尚未准入。
     release.countDown();
     holdStore.join(5000);
     processThread.join(5000);
@@ -2481,7 +2480,7 @@ class ModelProcessorTest {
                 new Class<?>[] {ScheduledExecutorService.class},
                 (proxy, method, args) -> {
                   if (method.getName().equals("scheduleAtFixedRate")) {
-                    // startHeartbeat 提交期间取消：execution 已在 registry（putIfAbsent 先于 startHeartbeat）。
+                    // execution 已 attach，在 heartbeat 启动期间取消。
                     processorRef.get().cancel(cancelId.get());
                   }
                   return method.invoke(base, args);
@@ -2709,8 +2708,7 @@ class ModelProcessorTest {
     AtomicReference<ProcessResult> resultA = new AtomicReference<>();
     Thread threadA = new Thread(() -> resultA.set(fixtureA.processor.process(claimedA)));
     threadA.start();
-    assertTrue(
-        inHeartbeat.await(5, TimeUnit.SECONDS)); // A 已 putIfAbsent + prepare，暂停在 startHeartbeat
+    assertTrue(inHeartbeat.await(5, TimeUnit.SECONDS)); // A 已 prepare 并 attach，暂停在 startHeartbeat。
 
     // lease 过期，dispatcher 以 token-2 重新 claim；另一实例接管并完成运行（跨实例，A 的 abandoned 检查不可见）。
     fixtureA.clock.advance(Duration.ofSeconds(61));
