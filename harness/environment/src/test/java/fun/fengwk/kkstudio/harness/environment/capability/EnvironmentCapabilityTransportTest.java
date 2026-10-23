@@ -17,6 +17,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -146,6 +147,17 @@ class EnvironmentCapabilityTransportTest {
         @Override
         public boolean isCancelled() {
           return cancelled.get();
+        }
+
+        @Override
+        public void terminate(EnvironmentCapabilityTerminationCause cause) {
+          Objects.requireNonNull(cause, "cause");
+          cancel();
+        }
+
+        @Override
+        public Duration terminalDeliveryGrace() {
+          return Duration.ZERO;
         }
       };
     }

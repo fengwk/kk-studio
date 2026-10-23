@@ -15,6 +15,7 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityB
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionHandle;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTerminationCause;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTransport;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
 import fun.fengwk.kkstudio.harness.environment.capability.ExpectedFile;
@@ -26,7 +27,9 @@ import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolResultSizeLimits;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 
+import java.time.Duration;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /** {@link EditReviewPreflight}：只读预览准备、成功 Ask 构造以及各种 transport / 畸形 / 超大结果降级为 Deny。 */
@@ -293,6 +296,17 @@ class EditReviewPreflightTest {
     @Override
     public boolean isCancelled() {
       return cancelled.get();
+    }
+
+    @Override
+    public void terminate(EnvironmentCapabilityTerminationCause cause) {
+      Objects.requireNonNull(cause, "cause");
+      cancel();
+    }
+
+    @Override
+    public Duration terminalDeliveryGrace() {
+      return Duration.ZERO;
     }
   }
 }
