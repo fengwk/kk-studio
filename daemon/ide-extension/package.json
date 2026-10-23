@@ -11,6 +11,12 @@
   "main": "./extension.cjs",
   "activationEvents": ["*"],
   "contributes": {
+    "configurationDefaults": {
+      "task.autoDetect": "off",
+      "npm.autoDetect": "off",
+      "npm.fetchOnlinePackageInfo": false,
+      "typescript.disableAutomaticTypeAcquisition": true
+    },
     "commands": [
       { "command": "kkStudio.changeDirectory", "title": "KK Studio: Change Workspace Directory" },
       { "command": "kkStudio.focusTerminal", "title": "KK Studio: Focus Terminal" },
