@@ -166,7 +166,11 @@ final class GeminiStreamAccumulator {
         usageNode.has("thoughtsTokenCount") && !usageNode.get("thoughtsTokenCount").isNull()
             ? optionalTokenCount(usageNode, "thoughtsTokenCount")
             : null;
-    long ordinaryInput = promptTokens >= cached ? promptTokens - cached : 0L;
+    if (cached > promptTokens) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "cached tokens exceed prompt tokens");
+    }
+    long ordinaryInput = promptTokens - cached;
     String tier = null;
     if (usageNode.has("serviceTier")) {
       JsonNode value = usageNode.get("serviceTier");
@@ -178,7 +182,13 @@ final class GeminiStreamAccumulator {
     }
 
     // Gemini candidatesTokenCount 不含 thoughts；内部输出总量包含 reasoning，避免重复计费。
-    long outputTotal = Math.addExact(output, reasoning == null ? 0L : reasoning);
+    long outputTotal;
+    try {
+      outputTotal = Math.addExact(output, reasoning == null ? 0L : reasoning);
+    } catch (ArithmeticException overflow) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "output token count overflow");
+    }
     this.latestUsage =
         new ModelUsage(ordinaryInput, outputTotal, cached, 0L, Map.of(), reasoning, providerTotal);
 
