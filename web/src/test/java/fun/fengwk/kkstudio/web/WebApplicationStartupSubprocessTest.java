@@ -109,8 +109,9 @@ class WebApplicationStartupSubprocessTest {
       try (Entry entry = start(postgres, minio)) {
         assertTrue(entry.process.waitFor(120, TimeUnit.SECONDS), "rejected startup must terminate");
         assertNotEquals(0, entry.process.exitValue());
+        // 生产 Logback 将应用错误写入工作目录的文件，stdout 只含启动横幅。
         assertTrue(
-            Files.readString(entry.log)
+            Files.readString(entry.log.getParent().resolve("logs/kk-studio-all.log"))
                 .contains("Migration checksum mismatch for migration version 1"),
             "must reject at migration validation");
       }
