@@ -16,6 +16,13 @@ SEEN_OPTIONS=
 DOWNLOAD_DIR=
 BACKUP_DIR=
 PUBLISHED=false
+INSTALLING=false
+PHASE='1/7 检查环境与输入'
+FAILURE_REASON=
+START_SINCE=
+START_CURSOR=
+STOP_ATTEMPTED=false
+stage() { PHASE=$1; echo "[$PHASE]" >&2; }
 TEMP_PATHS=()
 VERIFY_TIMEOUT_SECONDS=${DAEMON_VERIFY_TIMEOUT_SECONDS:-30}
 VERIFY_STABLE_SECONDS=${DAEMON_VERIFY_STABLE_SECONDS:-3}
@@ -51,6 +58,10 @@ EOF
 
 fail() {
   local action=安装 detail=$*
+  if [ "$INSTALLING" = true ]; then
+    FAILURE_REASON=$detail
+    exit 1
+  fi
   if [ "$1" = "--uninstall" ]; then
     action=卸载
     shift
@@ -128,13 +139,31 @@ cleanup() {
   trap - EXIT
   for path in ${TEMP_PATHS[@]+"${TEMP_PATHS[@]}"}; do rm -f "$path"; done
   if [ -n "$DOWNLOAD_DIR" ]; then rm -rf "$DOWNLOAD_DIR"; fi
-  if [ "$code" -ne 0 ] && [ "$PUBLISHED" = true ]; then
-    echo "安装失败：发布后启动或注册未完成。未自动回滚，配置和数据未自动恢复。" >&2
-    echo "备份：${BACKUP_DIR:-无（首次安装）}" >&2
-    if [ "$HOST_OS" = Linux ]; then
-      echo "下一步：运行 journalctl --user -u $SERVICE_NAME -n 50 --no-pager 查看原因。" >&2
+  if [ "$code" -ne 0 ] && [ "$INSTALLING" = true ]; then
+    echo "安装失败 [$PHASE]：${FAILURE_REASON:-该阶段操作未完成。}" >&2
+    if [ "$PUBLISHED" = true ]; then
+      echo "程序或配置已开始替换；未自动回滚，请使用备份手动恢复。" >&2
+    elif [ "$STOP_ATTEMPTED" = true ]; then
+      echo "程序和配置尚未替换；已尝试停止服务，请检查服务状态。" >&2
     else
-      echo "下一步：查看日志 ${STDERR_LOG}。" >&2
+      echo "现有程序和配置未改动。" >&2
+    fi
+    echo "备份：${BACKUP_DIR:-无（首次安装）}" >&2
+    if [ -n "$START_SINCE" ] && [ "$HOST_OS" = Linux ]; then
+      local logs=
+      if [ -n "$START_CURSOR" ]; then
+        logs=$(journalctl --user -u "$SERVICE_NAME" --after-cursor "$START_CURSOR" -n 50 --no-pager 2>/dev/null) || logs=
+      fi
+      case "$logs" in
+        *'invalid registration token'*)
+          echo "原因：本次启动的注册令牌被拒绝。下一步：在 Studio 重新生成安装命令。" >&2 ;;
+        *) echo "下一步：运行 systemctl --user status $SERVICE_NAME 检查服务状态。" >&2 ;;
+      esac
+      echo "查看本次日志：journalctl --user -u $SERVICE_NAME --since '$START_SINCE' -n 50 --no-pager" >&2
+    elif [ "$PUBLISHED" = true ] && [ "$HOST_OS" = Darwin ]; then
+      echo "下一步：查看日志 ${STDERR_LOG}，修正后重新安装。" >&2
+    else
+      echo "下一步：修正上述问题后重新执行安装命令。" >&2
     fi
   fi
   exit "$code"
@@ -145,6 +174,7 @@ trap 'exit 143' TERM
 
 ownership_conflict() {
   local reason=$1 actual_path=${2:-$SERVICE_PATH}
+  INSTALLING=false
   echo "安装失败：拒绝操作非受管服务（${reason}）。未自动回滚，未知文件未变更。" >&2
   echo "服务定义：$actual_path" >&2
   if [ "$HOST_OS" = Linux ]; then
@@ -225,7 +255,12 @@ resolve_release_platform() {
   esac
 }
 release_curl() {
-  curl -q --fail --silent --show-error --location --proto '=https' --proto-redir '=https' "$@"
+  local progress=--silent
+  if [ "${1:-}" = --archive ]; then
+    shift
+    if [ -t 2 ]; then progress=--progress-bar; fi
+  fi
+  curl -q --fail "$progress" --show-error --location --proto '=https' --proto-redir '=https' "$@"
 }
 download_daemon() {
   local effective_url asset checksum expected actual pattern
@@ -235,15 +270,18 @@ download_daemon() {
   case "$effective_url" in "$RELEASE_BASE/tag/"*) RELEASE_TAG=${effective_url#"$RELEASE_BASE/tag/"} ;;
     *) fail "latest release did not resolve to an official immutable release tag" ;; esac
   [[ $RELEASE_TAG =~ ^v[0-9A-Za-z._-]+$ ]] || fail "invalid official release tag"
+  echo "版本：$RELEASE_TAG；平台：$RELEASE_OS-$RELEASE_ARCH" >&2
+  stage '3/7 下载归档'
   DOWNLOAD_DIR=$(mktemp -d "${TMPDIR:-/tmp}/kk-studio-daemon.XXXXXXXX")
   chmod 0700 "$DOWNLOAD_DIR"
   asset="kk-studio-daemon-$RELEASE_TAG-$RELEASE_OS-$RELEASE_ARCH.tar.gz"
   DOWNLOADED_ARCHIVE="$DOWNLOAD_DIR/$asset"
   checksum="$DOWNLOADED_ARCHIVE.sha256"
-  release_curl --output "$DOWNLOADED_ARCHIVE" "$RELEASE_BASE/download/$RELEASE_TAG/$asset" ||
+  release_curl --archive --output "$DOWNLOADED_ARCHIVE" "$RELEASE_BASE/download/$RELEASE_TAG/$asset" ||
     fail "无法下载：正式版本发行归档获取失败。请检查网络后重试。"
   release_curl --output "$checksum" "$RELEASE_BASE/download/$RELEASE_TAG/$asset.sha256" ||
     fail "无法下载：正式版本 SHA256 获取失败。请检查网络后重试。"
+  stage '4/7 校验解包配置'
   expected=$(cat "$checksum")
   pattern="^([0-9a-fA-F]{64})[[:blank:]]+\\*?${asset//./\\.}$"
   [[ $expected =~ $pattern ]] || fail "校验失败：SHA256 文件格式无效。"
@@ -465,6 +503,8 @@ verify_running() {
   fail "服务启动失败：服务启动后没有保持运行。"
 }
 cmd_install() {
+  INSTALLING=true
+  stage '1/7 检查环境与输入'
   local option value
   while [ $# -gt 0 ]; do
     option=$1
@@ -487,12 +527,14 @@ cmd_install() {
   check_input "$CONFIG_FILE" 1048576
   check_input "$TOKEN_FILE" 16384
   resolve_release_platform
+  stage '2/7 解析版本'
   download_daemon
   preflight
   stage_service
   # All semantic checks (including macOS plist lint) precede target writes and stop.
   check_managed_paths
   require_ownership
+  stage '5/7 备份停止'
   mkdir -p "$INSTALL_ROOT" "${SERVICE_PATH%/*}"
   if [ "$HOST_OS" = Darwin ]; then mkdir -p "$INSTALL_ROOT/logs"; fi
   backup_current
@@ -500,11 +542,13 @@ cmd_install() {
   stage_file "$TOKEN_FILE" "$INSTALL_ROOT" daemon.token 0600; STAGED_TOKEN=$REGISTERED_TEMP_PATH
   stage_file "$STAGED_SERVICE" "${SERVICE_PATH%/*}" service 0644; STAGED_SERVICE=$REGISTERED_TEMP_PATH
   if [ -f "$SERVICE_PATH" ]; then
+    STOP_ATTEMPTED=true
     if [ "$HOST_OS" = Linux ]; then systemctl --user stop "$SERVICE_NAME";
     else stop_launchd; fi
   fi
   # From the first rename onward a failure must report manual recovery, even partial publication.
   PUBLISHED=true
+  stage '6/7 发布启动'
   publish_program
   mv -f "$STAGED_CONFIG" "$INSTALLED_CONFIG"
   mv -f "$STAGED_TOKEN" "$INSTALLED_TOKEN"
@@ -512,10 +556,21 @@ cmd_install() {
   if [ "$HOST_OS" = Linux ]; then
     systemctl --user daemon-reload
     systemctl --user enable "$SERVICE_NAME"
-    systemctl --user restart "$SERVICE_NAME"
+    systemctl --user reset-failed "$SERVICE_NAME" >/dev/null 2>&1 ||
+      fail "无法清除旧 systemd 失败计数；请检查用户服务管理器后重新安装。"
+    START_SINCE=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+    # Cursor excludes even older failures in the same second. Without one, do not infer a cause.
+    local journal_tail= line
+    journal_tail=$(journalctl --user -u "$SERVICE_NAME" -n 0 --show-cursor --no-pager 2>/dev/null) || journal_tail=
+    while IFS= read -r line; do
+      case "$line" in '-- cursor: '*) START_CURSOR=${line#'-- cursor: '} ;; esac
+    done <<<"$journal_tail"
+    systemctl --user restart "$SERVICE_NAME" >/dev/null 2>&1 ||
+      fail "systemd 未能启动服务。"
   else launchctl bootstrap "$LAUNCHD_DOMAIN" "$SERVICE_PATH"; fi
+  stage '7/7 稳定性验证'
   verify_running
-  echo "KK Studio 环境安装完成，服务已启动。"
+  echo "KK Studio 环境安装完成：程序/配置已写入；服务已运行。"
   echo
   echo "请返回 Studio，确认环境状态为 READY。"
   if [ -n "$BACKUP_DIR" ]; then echo "原安装已备份：$BACKUP_DIR"; fi

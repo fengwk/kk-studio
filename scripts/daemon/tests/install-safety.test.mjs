@@ -120,6 +120,7 @@ describe('install.sh safety', () => {
         assert.ok(result.stderr.includes(expected), expected)
       }
       assert.ok(before.equals(bytes(unit)))
+      assert.ok(!readFileSync(path.join(fixture.state, 'commands'), 'utf8').includes('reset-failed'))
       assert.ok(!existsSync(path.join(fixture.installRoot, 'lib')))
     }))
 
