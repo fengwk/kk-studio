@@ -17,14 +17,15 @@ import java.util.function.BooleanSupplier;
  * <p>以 {@link ConcurrentHashMap#compute} 提供 per-invocation 线性化准入：
  *
  * <ul>
+ *   <li>类级泛型：registry 路径与 execution 强类型绑定，内部无 unchecked 转换。
  *   <li>同 token 去重：同一 claim 的重复 / 并发投递直接拒绝准入，不 cancel、不 mutation。
  *   <li>内部复核 DB claim ownership：准入前在原子计算内复核 DB 所有权，确认当前 claim 为有效 owner。
  *   <li>失权无取消副作用：DB 复核失权时绝不取消或干扰正在运行的合法 execution。
- *   <li>代际替换：新 claim 证实持有 DB 所有权后，原子捕获并释放旧 execution，使旧 claim 安全退场。
- *   <li>禁止在 guard 返回后再读取 registry 盲目取消；长 I/O（如 preflight）绝不放入锁内。
+ *   <li>代际替换：新 claim 证实持有 DB 所有权后，原子捕获旧 execution，并在锁外 abandon，使旧 claim 安全退场。
+ *   <li>close 守卫：close 期间及关闭后的迟到准入不创建 slot、不执行 verifier，旧 ticket 拒绝 attach。
  * </ul>
  */
-final class ClaimAdmissionGuard {
+final class ClaimAdmissionGuard<E extends ClaimAdmissionGuard.GuardedExecution> {
 
   interface GuardedExecution {
     ClaimedWork claim();
@@ -32,67 +33,63 @@ final class ClaimAdmissionGuard {
     void abandon();
   }
 
-  static final class Entry {
-    final String token;
-    volatile GuardedExecution execution;
-    volatile boolean superseded;
+  private static final class Entry<E extends GuardedExecution> {
+    private final String token;
+    private volatile E execution;
+    private volatile boolean superseded;
 
-    Entry(String token) {
+    private Entry(String token) {
       this.token = token;
     }
   }
 
   static final class Ticket<E extends GuardedExecution> implements AutoCloseable {
-    private final ClaimAdmissionGuard guard;
+    private final ClaimAdmissionGuard<E> guard;
     private final UUID invocationId;
-    private final Entry entry;
+
+    /** {@code null} 表示 guard 已 close：迟到准入不持有 slot，只能按既有路由收敛。 */
+    private final Entry<E> entry;
+
     private final AtomicBoolean closed = new AtomicBoolean();
 
-    Ticket(ClaimAdmissionGuard guard, UUID invocationId, Entry entry) {
+    private Ticket(ClaimAdmissionGuard<E> guard, UUID invocationId, Entry<E> entry) {
       this.guard = guard;
       this.invocationId = invocationId;
       this.entry = entry;
     }
 
     boolean isSuperseded() {
-      return entry.superseded;
+      return entry == null || entry.superseded;
     }
 
     boolean attach(E execution) {
-      Objects.requireNonNull(execution, "execution");
-      AtomicBoolean attached = new AtomicBoolean();
-      guard.entries.computeIfPresent(
-          invocationId,
-          (id, current) -> {
-            if (current == entry && !current.superseded) {
-              current.execution = execution;
-              attached.set(true);
-            }
-            return current;
-          });
-      return attached.get();
+      return entry != null && guard.attach(this, entry, execution);
     }
 
     @Override
     public void close() {
-      if (!closed.compareAndSet(false, true)) {
+      if (!closed.compareAndSet(false, true) || entry == null) {
         return;
       }
       guard.releaseTicket(invocationId, entry);
     }
   }
 
-  private final ConcurrentHashMap<UUID, Entry> entries = new ConcurrentHashMap<>();
+  private final ConcurrentHashMap<UUID, Entry<E>> entries = new ConcurrentHashMap<>();
   private volatile boolean closed;
 
-  /** ThreadProcessor 的无 execution 准入。 */
-  boolean tryAdmit(UUID invocationId, String token) {
-    Objects.requireNonNull(invocationId, "invocationId");
-    Objects.requireNonNull(token, "token");
+  Ticket<E> tryAdmit(ClaimedWork claim, BooleanSupplier claimVerifier) {
+    Objects.requireNonNull(claim, "claim");
+    Objects.requireNonNull(claimVerifier, "claimVerifier");
+    UUID invocationId = claim.target().id();
     if (closed) {
-      return false;
+      // close 后迟到准入：不创建 slot、不执行 verifier，返回不可 attach 的 ticket，由调用方按既有路由收敛。
+      return new Ticket<>(this, invocationId, null);
     }
-    AtomicBoolean admitted = new AtomicBoolean();
+    String token = claim.leaseToken();
+    AtomicReference<Ticket<E>> ticketRef = new AtomicReference<>();
+    AtomicReference<E> oldExecution = new AtomicReference<>();
+
     entries.compute(
         invocationId,
         (id, current) -> {
@@ -102,53 +99,10 @@ final class ClaimAdmissionGuard {
           if (current != null && token.equals(current.token)) {
             return current;
           }
-          if (current != null) {
-            current.superseded = true;
-            if (current.execution != null) {
-              current.execution.abandon();
-            }
-          }
-          admitted.set(true);
-          return new Entry(token);
-        });
-    return admitted.get();
-  }
-
-  /** 仅释放仍由指定 token 持有的纯准入槽位。 */
-  void release(UUID invocationId, String token) {
-    entries.computeIfPresent(
-        invocationId,
-        (id, current) -> {
-          if (token.equals(current.token) && current.execution == null) {
-            return null;
-          }
-          return current;
-        });
-  }
-
-  /**
-   * 原子准入：在 per-invocation 锁内复核 DB claim ownership，确认持有后安全捕获并释放旧 execution。
-   *
-   * @param claim 当前 claim
-   * @param claimVerifier 内部复核 DB claim ownership 的无锁/短事务校验
-   * @return 成功准入返回 Ticket，失败（同 token 重复或失权）返回 null
-   */
-  <E extends GuardedExecution> Ticket<E> tryAdmit(
-      ClaimedWork claim, BooleanSupplier claimVerifier) {
-    Objects.requireNonNull(claim, "claim");
-    Objects.requireNonNull(claimVerifier, "claimVerifier");
-    UUID invocationId = claim.target().id();
-    String token = claim.leaseToken();
-    AtomicReference<Ticket<E>> ticketRef = new AtomicReference<>();
-    AtomicReference<GuardedExecution> oldExecution = new AtomicReference<>();
-
-    entries.compute(
-        invocationId,
-        (id, current) -> {
-          if (current != null && token.equals(current.token)) {
+          if (!claimVerifier.getAsBoolean()) {
             return current;
           }
-          if (!claimVerifier.getAsBoolean()) {
+          if (closed) {
             return current;
           }
           if (current != null) {
@@ -157,19 +111,42 @@ final class ClaimAdmissionGuard {
               oldExecution.set(current.execution);
             }
           }
-          Entry next = new Entry(token);
+          Entry<E> next = new Entry<>(token);
           ticketRef.set(new Ticket<>(this, invocationId, next));
           return next;
         });
 
-    GuardedExecution toAbandon = oldExecution.get();
+    E toAbandon = oldExecution.get();
     if (toAbandon != null) {
       toAbandon.abandon();
     }
-    return ticketRef.get();
+    Ticket<E> admitted = ticketRef.get();
+    if (admitted == null && closed) {
+      // close 在原子计算内获胜：同样不留下 slot，交由调用方按 closed 路由收敛。
+      return new Ticket<>(this, invocationId, null);
+    }
+    return admitted;
   }
 
-  void releaseTicket(UUID invocationId, Entry entry) {
+  private boolean attach(Ticket<E> ticket, Entry<E> entry, E execution) {
+    Objects.requireNonNull(execution, "execution");
+    if (closed) {
+      return false;
+    }
+    AtomicBoolean attached = new AtomicBoolean();
+    entries.computeIfPresent(
+        ticket.invocationId,
+        (id, current) -> {
+          if (!closed && current == entry && !current.superseded) {
+            current.execution = execution;
+            attached.set(true);
+          }
+          return current;
+        });
+    return attached.get();
+  }
+
+  private void releaseTicket(UUID invocationId, Entry<E> entry) {
     entries.computeIfPresent(
         invocationId,
         (id, current) -> {
@@ -180,37 +157,37 @@ final class ClaimAdmissionGuard {
         });
   }
 
-  @SuppressWarnings("unchecked")
-  <E extends GuardedExecution> E getExecution(UUID invocationId) {
+  E getExecution(UUID invocationId) {
     Objects.requireNonNull(invocationId, "invocationId");
-    Entry entry = entries.get(invocationId);
+    Entry<E> entry = entries.get(invocationId);
     if (entry != null && !entry.superseded) {
-      return (E) entry.execution;
+      return entry.execution;
     }
     return null;
   }
 
   boolean cancel(UUID invocationId) {
     Objects.requireNonNull(invocationId, "invocationId");
-    AtomicReference<GuardedExecution> cancelled = new AtomicReference<>();
+    AtomicReference<E> cancelledExecution = new AtomicReference<>();
+    AtomicBoolean cancelledEntry = new AtomicBoolean();
     entries.computeIfPresent(
         invocationId,
         (id, current) -> {
+          cancelledEntry.set(true);
           current.superseded = true;
           if (current.execution != null) {
-            cancelled.set(current.execution);
+            cancelledExecution.set(current.execution);
           }
           return null;
         });
-    GuardedExecution execution = cancelled.get();
+    E execution = cancelledExecution.get();
     if (execution != null) {
       execution.abandon();
-      return true;
     }
-    return false;
+    return cancelledEntry.get();
   }
 
-  void releaseExecution(GuardedExecution execution) {
+  void releaseExecution(E execution) {
     if (execution == null) {
       return;
     }
@@ -226,7 +203,7 @@ final class ClaimAdmissionGuard {
   }
 
   boolean hasActiveExecution() {
-    for (Entry entry : entries.values()) {
+    for (Entry<E> entry : entries.values()) {
       if (entry.execution != null && !entry.superseded) {
         return true;
       }
@@ -234,9 +211,13 @@ final class ClaimAdmissionGuard {
     return false;
   }
 
+  boolean isClosed() {
+    return closed;
+  }
+
   void close() {
     closed = true;
-    List<GuardedExecution> toAbandon = new ArrayList<>();
+    List<E> toAbandon = new ArrayList<>();
     for (UUID id : List.copyOf(entries.keySet())) {
       entries.computeIfPresent(
           id,
@@ -248,7 +229,7 @@ final class ClaimAdmissionGuard {
             return null;
           });
     }
-    for (GuardedExecution execution : toAbandon) {
+    for (E execution : toAbandon) {
       execution.abandon();
     }
   }

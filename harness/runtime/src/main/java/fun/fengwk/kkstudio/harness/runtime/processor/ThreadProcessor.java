@@ -136,7 +136,7 @@ public final class ThreadProcessor {
   private final ModelOutcomeAppender modelOutcomeAppender;
   private final TurnPlanBuilder planBuilder = new TurnPlanBuilder();
   private final CommandHarvestReducer settingsReducer = new CommandHarvestReducer();
-  private final ClaimAdmissionGuard admissionGuard = new ClaimAdmissionGuard();
+  private final ThreadAdmissionGuard admissionGuard = new ThreadAdmissionGuard();
   private final ThreadContextProbe threadContextProbe = new ThreadContextProbe();
   private final AutomaticCompactionPlanner automaticCompactionPlanner =
       new AutomaticCompactionPlanner();

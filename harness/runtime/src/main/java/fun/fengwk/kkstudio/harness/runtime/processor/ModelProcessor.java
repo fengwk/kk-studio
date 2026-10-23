@@ -75,9 +75,8 @@ public final class ModelProcessor implements AutoCloseable {
   private final ScheduledExecutorService scheduler;
   private final Executor heartbeatWorker;
   private final Executor executionExecutor;
-  private final ClaimAdmissionGuard admissionGuard = new ClaimAdmissionGuard();
+  private final ClaimAdmissionGuard<ModelExecution> admissionGuard = new ClaimAdmissionGuard<>();
   private final ModelRequestMaterializer materializer = new ModelRequestMaterializer();
-  private volatile boolean closed;
 
   /**
    * {@code executionExecutor} 必须为每个任务提供独立的（虚拟）线程：执行线程在 Provider 调用期间长时间阻塞，同时承载 execution 的定时刷新任务。
@@ -116,7 +115,7 @@ public final class ModelProcessor implements AutoCloseable {
    */
   public ProcessResult process(ClaimedWork claim) {
     Objects.requireNonNull(claim, "claim");
-    if (closed) {
+    if (admissionGuard.isClosed()) {
       throw new IllegalStateException("model processor is closed");
     }
     if (claim.target().type() != WorkTargetType.MODEL) {
@@ -173,7 +172,6 @@ public final class ModelProcessor implements AutoCloseable {
   /** 取消全部本地 execution 并停止各自 heartbeat；不 shutdown 调用方注入的 scheduler / executor；幂等。 */
   @Override
   public void close() {
-    closed = true;
     admissionGuard.close();
   }
 
@@ -202,7 +200,6 @@ public final class ModelProcessor implements AutoCloseable {
       ClaimedWork claim,
       Prepare.Dispatched dispatched,
       ClaimAdmissionGuard.Ticket<ModelExecution> ticket) {
-    UUID invocationId = claim.target().id();
     ModelExecution execution =
         new ModelExecution(
             store,
@@ -221,28 +218,23 @@ public final class ModelProcessor implements AutoCloseable {
             this::release);
     if (!ticket.attach(execution)) {
       execution.abandon();
-      return ProcessResult.LOST_OWNERSHIP;
-    }
-    if (closed || !execution.startHeartbeat() || execution.abandoned() || ticket.isSuperseded()) {
-      // close 已拍快照、scheduler 拒绝导致无法维持 lease，或 close / cancel 在 heartbeat 启动窗口内获胜：不启动，按 reschedule
-      // 实际结果返回。
-      execution.abandon();
-      return abortStart(execution, claim);
+      return admissionGuard.isClosed() ? abortStart(claim) : ProcessResult.LOST_OWNERSHIP;
     }
     boolean started = false;
     try {
+      if (admissionGuard.isClosed()
+          || !execution.startHeartbeat()
+          || execution.abandoned()
+          || ticket.isSuperseded()) {
+        // close 已拍快照、scheduler 拒绝导致无法维持 lease，或 close / cancel 在 heartbeat 启动窗口内获胜：不启动，按 reschedule
+        // 实际结果返回。
+        return abortStart(claim);
+      }
       ProcessResult result = admitAndRun(execution, claim, dispatched, ticket);
       if (result == ProcessResult.STARTED) {
         started = true;
       }
       return result;
-    } catch (RuntimeException unexpected) {
-      // 绝不猜测 complete / reschedule：保留 lease 待过期后由后续 claim 收敛。
-      log.error(
-          "model execution failed unexpectedly for invocation {}: {}",
-          invocationId,
-          ProcessorExceptions.describe(unexpected));
-      throw unexpected;
     } finally {
       if (!started) {
         execution.abandon();
@@ -250,8 +242,7 @@ public final class ModelProcessor implements AutoCloseable {
     }
   }
 
-  private ProcessResult abortStart(ModelExecution execution, ClaimedWork claim) {
-    execution.abandon();
+  private ProcessResult abortStart(ClaimedWork claim) {
     return reschedule(claim, config.admitFailureDelay())
         ? ProcessResult.RESCHEDULED
         : ProcessResult.LOST_OWNERSHIP;
@@ -271,7 +262,6 @@ public final class ModelProcessor implements AutoCloseable {
       return ProcessResult.LOST_OWNERSHIP;
     } catch (ProviderException setupFailure) {
       return rejectBeforeStart(
-          execution,
           claim,
           dispatched,
           setupFailure,
@@ -280,7 +270,6 @@ public final class ModelProcessor implements AutoCloseable {
               messageOrClass(setupFailure, "cannot materialize provider request")));
     } catch (IllegalArgumentException | IllegalStateException setupFailure) {
       return rejectBeforeStart(
-          execution,
           claim,
           dispatched,
           setupFailure,
@@ -304,7 +293,7 @@ public final class ModelProcessor implements AutoCloseable {
           "model gateway admission failed for invocation {}: {}",
           invocationId,
           ProcessorExceptions.describe(failure));
-      return abortStart(execution, claim);
+      return abortStart(claim);
     }
     return switch (admission) {
       case ModelGateway.Busy busy -> {
@@ -330,7 +319,7 @@ public final class ModelProcessor implements AutoCloseable {
     if (execution.abandoned() || ticket.isSuperseded()) {
       // close / cancel / supersede 在准入期间获胜：invocation 仍是 READY，释放名额后按 reschedule 实际结果返回。
       admitted.close();
-      return abortStart(execution, claim);
+      return abortStart(claim);
     }
     boolean submitted = false;
     try {
@@ -365,7 +354,6 @@ public final class ModelProcessor implements AutoCloseable {
   }
 
   private ProcessResult rejectBeforeStart(
-      ModelExecution execution,
       ClaimedWork claim,
       Prepare.Dispatched dispatched,
       RuntimeException setupFailure,
