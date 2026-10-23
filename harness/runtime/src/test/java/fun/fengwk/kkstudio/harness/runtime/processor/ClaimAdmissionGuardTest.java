@@ -15,40 +15,17 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
 import java.time.Instant;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BooleanSupplier;
 
 class ClaimAdmissionGuardTest {
 
-  /** 同一 token 在 active admission 期间只能进入一次；对称 release 后可再次进入。 */
-  @Test
-  void rejectsDuplicateTokenUntilReleased() {
-    ClaimAdmissionGuard guard = new ClaimAdmissionGuard();
-
-    assertTrue(guard.tryAdmit(TestIds.id(1), "token-1"));
-    assertFalse(guard.tryAdmit(TestIds.id(1), "token-1"));
-
-    guard.release(TestIds.id(1), "token-1");
-    assertTrue(guard.tryAdmit(TestIds.id(1), "token-1"));
-  }
-
-  /** 新 lease token 可 supersede 旧 token；旧调用方的迟到 release 不能删除当前 admission。 */
-  @Test
-  void staleReleaseDoesNotRemoveSupersedingToken() {
-    ClaimAdmissionGuard guard = new ClaimAdmissionGuard();
-
-    assertTrue(guard.tryAdmit(TestIds.id(1), "token-1"));
-    assertTrue(guard.tryAdmit(TestIds.id(1), "token-2"));
-
-    guard.release(TestIds.id(1), "token-1");
-    assertFalse(guard.tryAdmit(TestIds.id(1), "token-2"));
-
-    guard.release(TestIds.id(1), "token-2");
-    assertTrue(guard.tryAdmit(TestIds.id(1), "token-2"));
-  }
-
   @Test
   void ticketDeduplicatesSameTokenWithoutAbandoning() {
-    ClaimAdmissionGuard guard = new ClaimAdmissionGuard();
+    ClaimAdmissionGuard<FakeExecution> guard = new ClaimAdmissionGuard<>();
     UUID id = TestIds.id(1);
     ClaimedWork claim = claimedWork(id, "token-1");
     FakeExecution exec1 = new FakeExecution(claim);
@@ -70,7 +47,7 @@ class ClaimAdmissionGuardTest {
 
   @Test
   void ticketVerifierRejectionDoesNotAbandonCurrentExecution() {
-    ClaimAdmissionGuard guard = new ClaimAdmissionGuard();
+    ClaimAdmissionGuard<FakeExecution> guard = new ClaimAdmissionGuard<>();
     UUID id = TestIds.id(1);
     ClaimedWork claim1 = claimedWork(id, "token-1");
     FakeExecution exec1 = new FakeExecution(claim1);
@@ -92,7 +69,7 @@ class ClaimAdmissionGuardTest {
 
   @Test
   void ticketSupersedesOlderExecutionWhenVerifierPasses() {
-    ClaimAdmissionGuard guard = new ClaimAdmissionGuard();
+    ClaimAdmissionGuard<FakeExecution> guard = new ClaimAdmissionGuard<>();
     UUID id = TestIds.id(1);
     ClaimedWork claim1 = claimedWork(id, "token-1");
     FakeExecution exec1 = new FakeExecution(claim1);
@@ -119,7 +96,7 @@ class ClaimAdmissionGuardTest {
 
   @Test
   void unattachedTicketReleasesOnClose() {
-    ClaimAdmissionGuard guard = new ClaimAdmissionGuard();
+    ClaimAdmissionGuard<FakeExecution> guard = new ClaimAdmissionGuard<>();
     UUID id = TestIds.id(1);
     ClaimedWork claim = claimedWork(id, "token-1");
 
@@ -136,7 +113,7 @@ class ClaimAdmissionGuardTest {
 
   @Test
   void cancelAbandonsExecutionAndRemovesEntry() {
-    ClaimAdmissionGuard guard = new ClaimAdmissionGuard();
+    ClaimAdmissionGuard<FakeExecution> guard = new ClaimAdmissionGuard<>();
     UUID id = TestIds.id(1);
     ClaimedWork claim = claimedWork(id, "token-1");
     FakeExecution exec = new FakeExecution(claim);
@@ -152,8 +129,29 @@ class ClaimAdmissionGuardTest {
   }
 
   @Test
+  void cancelBeforeAttachRefusesSubsequentAttach() {
+    ClaimAdmissionGuard<FakeExecution> guard = new ClaimAdmissionGuard<>();
+    UUID id = TestIds.id(1);
+    ClaimedWork claim = claimedWork(id, "token-1");
+    FakeExecution exec = new FakeExecution(claim);
+
+    ClaimAdmissionGuard.Ticket<FakeExecution> ticket = guard.tryAdmit(claim, () -> true);
+    assertNotNull(ticket);
+    assertFalse(ticket.isSuperseded());
+
+    // 在 attach 前调用 cancel
+    assertTrue(guard.cancel(id));
+    assertTrue(ticket.isSuperseded());
+
+    // 随后的 attach 必须被拒绝
+    assertFalse(ticket.attach(exec));
+    assertFalse(guard.hasActiveExecution());
+    assertNull(guard.getExecution(id));
+  }
+
+  @Test
   void closeAbandonsAllActiveExecutions() {
-    ClaimAdmissionGuard guard = new ClaimAdmissionGuard();
+    ClaimAdmissionGuard<FakeExecution> guard = new ClaimAdmissionGuard<>();
     UUID id1 = TestIds.id(1);
     UUID id2 = TestIds.id(2);
     ClaimedWork claim1 = claimedWork(id1, "token-1");
@@ -171,6 +169,90 @@ class ClaimAdmissionGuardTest {
     assertTrue(exec1.abandoned.get());
     assertTrue(exec2.abandoned.get());
     assertFalse(guard.hasActiveExecution());
+  }
+
+  @Test
+  void concurrentCloseDuringVerifierPreventsSlotCreation() throws Exception {
+    ClaimAdmissionGuard<FakeExecution> guard = new ClaimAdmissionGuard<>();
+    UUID id = TestIds.id(1);
+    ClaimedWork claim = claimedWork(id, "token-1");
+
+    CountDownLatch verifierEntered = new CountDownLatch(1);
+    CountDownLatch resumeVerifier = new CountDownLatch(1);
+    CountDownLatch closeFinished = new CountDownLatch(1);
+    AtomicReference<ClaimAdmissionGuard.Ticket<FakeExecution>> ticketRef = new AtomicReference<>();
+
+    Thread admitThread =
+        new Thread(
+            () ->
+                ticketRef.set(
+                    guard.tryAdmit(
+                        claim,
+                        () -> {
+                          verifierEntered.countDown();
+                          try {
+                            resumeVerifier.await(5, TimeUnit.SECONDS);
+                          } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                          }
+                          return true;
+                        })));
+
+    admitThread.start();
+    assertTrue(verifierEntered.await(5, TimeUnit.SECONDS));
+
+    Thread closeThread =
+        new Thread(
+            () -> {
+              guard.close();
+              closeFinished.countDown();
+            });
+    closeThread.start();
+
+    // 等待 close 真正开始并将 guard 设为 closed
+    awaitTrue(guard::isClosed);
+
+    // 恢复 verifier 继续执行
+    resumeVerifier.countDown();
+
+    admitThread.join(5000);
+    closeThread.join(5000);
+    assertFalse(admitThread.isAlive());
+    assertFalse(closeThread.isAlive());
+
+    // close 期间迟到准入绝不创建 slot：返回不可 attach 的 ticket，绝不登记 execution。
+    ClaimAdmissionGuard.Ticket<FakeExecution> ticket = ticketRef.get();
+    assertNotNull(ticket);
+    assertTrue(ticket.isSuperseded());
+    assertFalse(ticket.attach(new FakeExecution(claim)));
+    assertFalse(guard.hasActiveExecution());
+    assertNull(guard.getExecution(id));
+  }
+
+  @Test
+  void ticketAttachRejectedAfterClose() {
+    ClaimAdmissionGuard<FakeExecution> guard = new ClaimAdmissionGuard<>();
+    UUID id = TestIds.id(1);
+    ClaimedWork claim = claimedWork(id, "token-1");
+    FakeExecution exec = new FakeExecution(claim);
+
+    ClaimAdmissionGuard.Ticket<FakeExecution> ticket = guard.tryAdmit(claim, () -> true);
+    assertNotNull(ticket);
+
+    guard.close();
+
+    // close 后 attach 必须失败
+    assertFalse(ticket.attach(exec));
+    assertTrue(ticket.isSuperseded());
+    assertFalse(guard.hasActiveExecution());
+  }
+
+  private static void awaitTrue(BooleanSupplier condition) throws Exception {
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (!condition.getAsBoolean() && System.nanoTime() < deadline) {
+      Thread.sleep(1);
+    }
+    assertTrue(condition.getAsBoolean(), "condition was not satisfied within timeout");
   }
 
   private static ClaimedWork claimedWork(UUID id, String token) {
