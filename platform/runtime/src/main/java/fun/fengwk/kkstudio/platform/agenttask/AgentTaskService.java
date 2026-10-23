@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 /**
  * 平台的 Agent 任务入口：子代理 task 工具、插件 Prompt 任务、Issue 任务与 HTTP 提交都经由它创建
@@ -43,30 +44,84 @@ public class AgentTaskService {
     this.runtimes = Objects.requireNonNull(runtimes, "runtimes");
   }
 
-  /** 提交任务：同一事务内创建（或续用）Thread、接受首批输入并登记票据。 */
+  /**
+   * 提交外部独立任务（仅限 HTTP 等外部请求）：同一事务内创建（或续用）Thread、接受首批输入并登记票据。
+   *
+   * <p>外部身份由 {@code ticketId} 与 {@code requestHash} 唯一确定；已存在票据先校验请求指纹再重放，避免对已接受任务重复物化设置。 首次提交才经由
+   * {@code requestSupplier} 惰性物化请求并调用运行时；校验物化请求与外部身份声明严格一致且无父 Thread。 仅当遭遇 {@code THREAD_ID_REUSED}
+   * 精确冲突时，再次复核票据指纹以实现并发安全的回放。
+   */
+  public UUID submitExternal(
+      UUID ticketId, String requestHash, Supplier<AgentTaskRequest> requestSupplier) {
+    Objects.requireNonNull(ticketId, "ticketId");
+    Objects.requireNonNull(requestHash, "requestHash");
+    Objects.requireNonNull(requestSupplier, "requestSupplier");
+    HarnessRuntime runtime = requireRuntime();
+
+    Optional<ThreadJoin> existingTicket = runtime.findJoin(ticketId);
+    if (existingTicket.isPresent()) {
+      ThreadJoin ticket = existingTicket.get();
+      if (!ticket.requestHash().equals(requestHash)) {
+        throw new IllegalArgumentException("join invocation identity reused");
+      }
+      return ticket.childThreadId();
+    }
+
+    AgentTaskRequest request =
+        Objects.requireNonNull(requestSupplier.get(), "requestSupplier returned null");
+    if (!ticketId.equals(request.ticketId())) {
+      throw new IllegalArgumentException("request supplier returned mismatched ticketId");
+    }
+    if (!requestHash.equals(request.requestHash())) {
+      throw new IllegalArgumentException("request supplier returned mismatched requestHash");
+    }
+    if (request.parentThreadId() != null) {
+      throw new IllegalArgumentException("external agent task cannot have parent thread");
+    }
+
+    try {
+      return submitToRuntime(runtime, request).threadId();
+    } catch (HarnessRuntimeConflictException conflict) {
+      if (conflict.reason() == HarnessRuntimeConflictException.Reason.THREAD_ID_REUSED) {
+        Optional<ThreadJoin> ticket = runtime.findJoin(ticketId);
+        if (ticket.isPresent()) {
+          if (!ticket.get().requestHash().equals(requestHash)) {
+            throw new IllegalArgumentException("join invocation identity reused", conflict);
+          }
+          return ticket.get().childThreadId();
+        }
+      }
+      throw conflict;
+    }
+  }
+
+  /** 提交任务：同一事务内创建（或续用）Thread、接受首批输入并登记票据。 直接提交给运行时，保留 subagent 等内部创建屏障。 */
   public AgentTaskHandle submit(AgentTaskRequest request) {
     Objects.requireNonNull(request, "request");
+    return submitToRuntime(requireRuntime(), request);
+  }
+
+  private AgentTaskHandle submitToRuntime(HarnessRuntime runtime, AgentTaskRequest request) {
     boolean child = request.parentThreadId() != null;
     AcceptedCommands accepted =
-        requireRuntime()
-            .spawn(
-                new SpawnRequest(
-                    request.threadId(),
-                    request.sessionId(),
-                    request.settings(),
-                    request.commands(),
-                    request.preflight(),
-                    request.parentThreadId(),
-                    request.expectedParentHeadEntryId(),
-                    request.continuation(),
-                    request.yoloEnabled(),
-                    ThreadConstraints.NONE,
-                    request.trigger(),
-                    child ? JoinDelivery.NOTIFY_PARENT : JoinDelivery.RECEIPT_ONLY,
-                    child,
-                    request.budget(),
-                    request.ticketId(),
-                    request.requestHash()));
+        runtime.spawn(
+            new SpawnRequest(
+                request.threadId(),
+                request.sessionId(),
+                request.settings(),
+                request.commands(),
+                request.preflight(),
+                request.parentThreadId(),
+                request.expectedParentHeadEntryId(),
+                request.continuation(),
+                request.yoloEnabled(),
+                ThreadConstraints.NONE,
+                request.trigger(),
+                child ? JoinDelivery.NOTIFY_PARENT : JoinDelivery.RECEIPT_ONLY,
+                child,
+                request.budget(),
+                request.ticketId(),
+                request.requestHash()));
     return new AgentTaskHandle(accepted.thread().id(), request.ticketId(), accepted);
   }
 
