@@ -29,6 +29,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.runtime.AgentSpawner;
@@ -881,6 +883,44 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     assertEquals(CompactionTrigger.THRESHOLD, start.compaction().trigger());
   }
 
+  // Native total is optional; categorized cache tokens count, but reasoning is already in output.
+  @ParameterizedTest
+  @CsvSource(
+      value = {
+        "391,112,3584,null,CONTINUATION",
+        "4026,110,0,null,CONTINUATION",
+        "80000,2,5000,null,COMPACTION",
+        "80000,2000,0,null,CONTINUATION",
+        "80000,2,5000,100,CONTINUATION",
+        "80000,2,5000,0,COMPACTION"
+      },
+      nullValues = "null")
+  void optionalProviderTotalAfterTerminalToolBatch(
+      long input, long output, long cacheRead, Long total, TurnStartReason expected) {
+    Fixture fixture = fixture();
+    var baseline = seedCompactionReadyClosedTurn(fixture.store, usage(), true);
+    ModelUsage usage = new ModelUsage(input, output, cacheRead, 0L, Map.of(), output, total);
+    appendClosedContinuationWithToolResult(
+        fixture, baseline, usage, "credential-not-connected", true);
+    requestThreadWork(fixture.store, baseline.threadId());
+    fixture.resolver.autoConsistent = true;
+
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
+    Entry startEntry = path(fixture.store, baseline.threadId()).head();
+    TurnStartPayload start = (TurnStartPayload) startEntry.payload();
+    assertEquals(expected, start.reason());
+    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
+    if (expected == TurnStartReason.CONTINUATION) {
+      assertTrue(
+          fixture
+              .store
+              .transaction(tx -> tx.findModelInvocationByTurn(baseline.threadId(), startEntry.id()))
+              .isPresent());
+    } else {
+      assertEquals(CompactionTrigger.THRESHOLD, start.compaction().trigger());
+    }
+  }
+
   /** below-threshold continuation 失败后完全结束；没有新 demand 时不自唤醒。 */
   @Test
   void failedBelowThresholdContinuationWaitsForNextUserDemand() {
@@ -1168,6 +1208,15 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
    */
   private static void appendClosedContinuationWithToolResult(
       Fixture fixture, ClosedTurnBaseline baseline, ModelUsage usage, String toolResultText) {
+    appendClosedContinuationWithToolResult(fixture, baseline, usage, toolResultText, false);
+  }
+
+  private static void appendClosedContinuationWithToolResult(
+      Fixture fixture,
+      ClosedTurnBaseline baseline,
+      ModelUsage usage,
+      String toolResultText,
+      boolean failed) {
     fixture.store.transaction(
         tx -> {
           tx.lockThread(baseline.threadId());
@@ -1217,7 +1266,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                                   "bash",
                                   "bash",
                                   List.of(new TextMessageContent(toolResultText)),
-                                  false,
+                                  failed,
                                   "{}"))),
                       null,
                       new ToolResultMetadata(
@@ -1225,7 +1274,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                           assistantEntryId,
                           callId,
                           0,
-                          ToolResultStatus.SUCCEEDED,
+                          failed ? ToolResultStatus.FAILED : ToolResultStatus.SUCCEEDED,
                           false,
                           null,
                           null,
