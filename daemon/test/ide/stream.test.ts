@@ -1703,14 +1703,24 @@ describe('WebSocket exchanges over the reverse stream', () => {
   })
 
   it('ignores an http end frame during a websocket exchange', async () => {
+    let probeReceived = false
     const upstream = await startWsUpstream((socket) => {
-      socket.on('message', () => undefined)
+      socket.on('message', (data, isBinary) => {
+        probeReceived = !isBinary && data.toString() === 'still-open'
+      })
     })
+    let ready = false
     let gatewaySocket: WebSocket | undefined
     const gateway = await startGateway((conn) => {
       gatewaySocket = conn.socket
+      conn.socket.on('message', (data, isBinary) => {
+        if (!isBinary && decodeTextFrame(data.toString('utf8')).type === 'WS_READY') {
+          ready = true
+        }
+      })
       // An HTTP end is meaningless for a WebSocket: only the socket close may end the exchange.
       conn.sendEnd()
+      conn.sendWs('text', Buffer.from('still-open'), true)
     })
 
     const exchange = openStreamExchange({
@@ -1719,8 +1729,7 @@ describe('WebSocket exchanges over the reverse stream', () => {
       upstream: upstreamOf(upstream.url),
       signal: newSignal().signal,
     })
-    await waitFor(() => gatewaySocket?.readyState === WebSocket.OPEN)
-    await delay(30)
+    await waitFor(() => ready && probeReceived)
     expect(gatewaySocket?.readyState).toBe(WebSocket.OPEN)
     gatewaySocket?.close()
     await exchange
