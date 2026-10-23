@@ -1037,6 +1037,209 @@ class EnvironmentDaemonServerTest {
     assertEquals(List.of(DaemonMessageType.WELCOME), reconnected.messageTypes());
   }
 
+  /**
+   * 测试意图：并发调用 cancel() 与 terminate(cause) / expire() 时，受 active 正确锁保护， 向当前连接至多发送一次 CANCEL
+   * 帧，绝不出现并发竞争导致重复发送两帧 CANCEL，且名下 transfer 与目录状态得到正确清理。
+   */
+  @Test
+  void cancelAndTerminateRaceDeliversCancelAtMostOnce() throws Exception {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-cancel-terminate-race");
+    ExecutorService racers = Executors.newFixedThreadPool(2);
+    try {
+      for (int round = 0; round < 32; round++) {
+        UUID invocationId = UUID.randomUUID();
+        RecordingListener listener = new RecordingListener();
+        EnvironmentCapabilityExecutionHandle handle =
+            fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(invocationId), listener);
+
+        UUID transferId = UUID.randomUUID();
+        fixture.receive(
+            channel,
+            DaemonMessageType.RESOURCE_UPLOAD_REQUEST,
+            invocationId.toString(),
+            uploadRequest(transferId, "text/plain", "race.txt", 4L, SHA_A));
+        UUID uploadId = uploadIdOfTicket(ticketEnvelope(channel));
+
+        long cancelBefore = channel.countOf(DaemonMessageType.CANCEL);
+        CyclicBarrier barrier = new CyclicBarrier(2);
+        Future<?> cancelTask =
+            racers.submit(
+                () -> {
+                  awaitStart(barrier);
+                  handle.cancel();
+                });
+        Future<?> terminateTask =
+            racers.submit(
+                () -> {
+                  awaitStart(barrier);
+                  handle.terminate(EnvironmentCapabilityTerminationCause.TIMED_OUT);
+                });
+        cancelTask.get();
+        terminateTask.get();
+
+        long cancelAfter = channel.countOf(DaemonMessageType.CANCEL);
+        assertEquals(
+            1L,
+            cancelAfter - cancelBefore,
+            "cancel 与 terminate 并发竞争只能向连接发送恰好一次 CANCEL: round=" + round);
+        assertTrue(handle.isCancelled(), "round=" + round);
+        assertTrue(
+            fixture.ticketService.releases.contains(uploadId),
+            "名下 transfer 必须已被释放: round=" + round);
+
+        fixture.receive(
+            channel,
+            DaemonMessageType.COMPLETED,
+            invocationId.toString(),
+            completedPayload(invocationId, "late-" + round));
+        assertNull(listener.completed);
+        assertNull(listener.error);
+        assertFalse(channel.closed());
+      }
+    } finally {
+      racers.shutdownNow();
+    }
+  }
+
+  /** 测试意图：并发多次调用 handle.cancel() 时，受 active 锁内原子判定与代际推进保护，向连接恰好递交一次 CANCEL，绝不重复发送。 */
+  @Test
+  void concurrentCancelsDeliverCancelExactlyOnce() throws Exception {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-concurrent-cancels");
+    ExecutorService racers = Executors.newFixedThreadPool(4);
+    try {
+      for (int round = 0; round < 32; round++) {
+        UUID invocationId = UUID.randomUUID();
+        RecordingListener listener = new RecordingListener();
+        EnvironmentCapabilityExecutionHandle handle =
+            fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(invocationId), listener);
+
+        long cancelBefore = channel.countOf(DaemonMessageType.CANCEL);
+        CyclicBarrier barrier = new CyclicBarrier(4);
+        List<Future<?>> tasks = new ArrayList<>();
+        for (int index = 0; index < 4; index++) {
+          tasks.add(
+              racers.submit(
+                  () -> {
+                    awaitStart(barrier);
+                    handle.cancel();
+                  }));
+        }
+        for (Future<?> task : tasks) {
+          task.get();
+        }
+
+        long cancelAfter = channel.countOf(DaemonMessageType.CANCEL);
+        assertEquals(
+            1L, cancelAfter - cancelBefore, "并发多次 cancel 只能向连接发送恰好一次 CANCEL: round=" + round);
+        assertTrue(handle.isCancelled());
+      }
+    } finally {
+      racers.shutdownNow();
+    }
+  }
+
+  /**
+   * 测试意图：当调用线程处于已中断状态时调用 terminate(cause)，server 端清理不受中断干扰： 原子移除在途记录、登记 tombstone、向连接至多发送一次 CANCEL
+   * 帧、释放全部 transfer； 调用线程的中断标记（interrupted flag）在调用后依然保持，不抛非预期异常；随后断开重连不重放。
+   */
+  @Test
+  void interruptedThreadTerminateCleansUpSafelyAndPreservesInterruptStatus() throws Exception {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-interrupt-terminate");
+    RecordingListener listener = new RecordingListener();
+    EnvironmentCapabilityExecutionHandle handle =
+        fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), listener);
+
+    fixture.receive(
+        channel,
+        DaemonMessageType.RESOURCE_UPLOAD_REQUEST,
+        CALL_ONE.toString(),
+        uploadRequest(TRANSFER_ONE, "text/plain", "interrupt.txt", 4L, SHA_A));
+    UUID uploadId = uploadIdOfTicket(ticketEnvelope(channel));
+
+    AtomicBoolean wasInterrupted = new AtomicBoolean();
+    Thread worker =
+        new Thread(
+            () -> {
+              Thread.currentThread().interrupt();
+              handle.terminate(EnvironmentCapabilityTerminationCause.CANCELLED);
+              wasInterrupted.set(Thread.currentThread().isInterrupted());
+            },
+            "interrupted-terminator");
+    worker.start();
+    assertTrue(join(worker), "worker 必须安全退出，不得被非预期异常打断");
+    assertTrue(wasInterrupted.get(), "terminate 必须保持调用线程的中断状态");
+
+    assertTrue(handle.isCancelled());
+    assertEquals(1, channel.countOf(DaemonMessageType.CANCEL), "terminate 必须向连接发送至多一次 CANCEL 帧");
+    assertEquals(List.of(uploadId), fixture.ticketService.releases, "名下 transfer 必须已被释放");
+
+    // 迟到终态静默丢弃
+    fixture.receive(
+        channel,
+        DaemonMessageType.COMPLETED,
+        CALL_ONE.toString(),
+        completedPayload(CALL_ONE, "late-after-interrupt"));
+    assertNull(listener.completed);
+    assertNull(listener.error);
+    assertFalse(channel.closed());
+
+    // 重连绝不重放
+    fixture.server.close(channel.connectionId());
+    FakeChannel reconnected = fixture.connectReady("channel-interrupt-terminate-retry");
+    assertEquals(List.of(DaemonMessageType.WELCOME), reconnected.messageTypes());
+  }
+
+  /**
+   * 测试意图：当调用线程处于已中断状态时直接调用 server.expire(handle)，方法保持 void 返回且不向 listener 触发任何终态回调； 原子移除在途记录、登记
+   * tombstone、向连接至多发送一次 CANCEL，释放 transfer 并保持调用线程的中断状态。
+   */
+  @Test
+  void interruptedThreadExpireCleansUpSafelyAndPreservesInterruptStatus() throws Exception {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-interrupt-expire");
+    RecordingListener listener = new RecordingListener();
+    EnvironmentCapabilityExecutionHandle handle =
+        fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), listener);
+
+    fixture.receive(
+        channel,
+        DaemonMessageType.RESOURCE_UPLOAD_REQUEST,
+        CALL_ONE.toString(),
+        uploadRequest(TRANSFER_ONE, "text/plain", "interrupt-expire.txt", 4L, SHA_A));
+    UUID uploadId = uploadIdOfTicket(ticketEnvelope(channel));
+
+    AtomicBoolean wasInterrupted = new AtomicBoolean();
+    Thread worker =
+        new Thread(
+            () -> {
+              Thread.currentThread().interrupt();
+              fixture.server.expire(handle);
+              wasInterrupted.set(Thread.currentThread().isInterrupted());
+            },
+            "interrupted-expirer");
+    worker.start();
+    assertTrue(join(worker), "worker 必须安全退出");
+    assertTrue(wasInterrupted.get(), "expire 必须保持调用线程的中断状态");
+
+    assertNull(listener.completed, "expire 绝不得向 listener 发送完成回调");
+    assertNull(listener.error, "expire 绝不得向 listener 发送错误回调");
+    assertEquals(1, channel.countOf(DaemonMessageType.CANCEL), "expire 必须向连接至多发送一次 CANCEL");
+    assertEquals(List.of(uploadId), fixture.ticketService.releases, "名下 transfer 必须已被释放");
+
+    // 迟到终态静默丢弃
+    fixture.receive(
+        channel,
+        DaemonMessageType.COMPLETED,
+        CALL_ONE.toString(),
+        completedPayload(CALL_ONE, "late-after-expire"));
+    assertNull(listener.completed);
+    assertNull(listener.error);
+    assertFalse(channel.closed());
+  }
+
   /** 测试意图：CANCEL 被 BUSY 拒绝时不得记成已送达。调用保持取消意图，重连只补发 CANCEL，绝不重发 INVOKE；同一代际内再次 cancel 保持幂等。 */
   @Test
   void busyCancelIsRetriedAsCancelOnlyAfterReconnect() {
