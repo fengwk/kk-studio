@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
@@ -45,6 +46,7 @@ import fun.fengwk.kkstudio.canvas.infra.function.FixedCanvasFunctionCatalogSourc
 import fun.fengwk.kkstudio.work.DurableWorkQueue;
 
 import java.sql.Connection;
+import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Duration;
@@ -73,6 +75,76 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
   @Autowired private CanvasFunctionWorkStore workStore;
   @Autowired private CanvasFunctionRunJdbcStore runJdbcStore;
   @Autowired private CanvasFunctionRunStateCodecPort stateCodec;
+
+  /** 清理不可运行 Work 后必须在同一次调用继续领取有效 Run。 */
+  @ParameterizedTest
+  @ValueSource(strings = {"SUCCEEDED", "UNKNOWN", "MISSING"})
+  void skipsInvalidWorkAndContinues(String status) {
+    UUID canvasId = addDocument();
+    UUID invalid = addNode(canvasId, true).id();
+    UUID valid = addNode(canvasId, true).id();
+    if (!status.equals("MISSING")) {
+      insertRunRow(invalid, UUID.randomUUID(), status);
+    }
+    DurableWorkQueue queue =
+        new DurableWorkQueue(
+            JdbcClient.create(jdbc), transactions.getTransactionManager(), "CANVAS_RUN");
+    queue.request(invalid, Duration.ZERO);
+    jdbc.update(
+        "update durable_work set available_at = statement_timestamp() - interval '1 day' where target_id = ?",
+        invalid);
+    runs.insertReady(ready(valid, UUID.randomUUID(), T0));
+
+    assertEquals(valid, workStore.claimNext(LEASE, "owner").orElseThrow().nodeId());
+    assertEquals(0, workRows(invalid));
+    assertEquals(1, runs.findByNodeId(valid).orElseThrow().attempt());
+  }
+
+  /** 真实行锁覆盖 attempt 写入，且 Run 锁必须先于 Work ownership 锁。 */
+  @Test
+  void holdsRunAndWorkLocksThroughAttemptWrite() {
+    UUID nodeId = addNode(addDocument(), true).id();
+    runs.insertReady(ready(nodeId, UUID.randomUUID(), T0));
+    DurableWorkQueue queue =
+        spy(
+            new DurableWorkQueue(
+                JdbcClient.create(jdbc), transactions.getTransactionManager(), "CANVAS_RUN"));
+    CanvasFunctionRunJdbcStore observedRuns =
+        spy(AopTestUtils.<CanvasFunctionRunJdbcStore>getUltimateTargetObject(runJdbcStore));
+    doAnswer(
+            invocation -> {
+              for (String table : List.of("canvas_function_run", "durable_work")) {
+                try (Connection connection = newConnection();
+                    var statement =
+                        connection.prepareStatement(
+                            "select * from "
+                                + table
+                                + " where "
+                                + (table.equals("durable_work") ? "target_id" : "node_id")
+                                + " = ? for update nowait")) {
+                  statement.setObject(1, nodeId);
+                  SQLException error = assertThrows(SQLException.class, statement::executeQuery);
+                  assertEquals("55P03", error.getSQLState());
+                }
+              }
+              return invocation.callRealMethod();
+            })
+        .when(observedRuns)
+        .startAttempt(any(), any());
+    CanvasFunctionWorkStore observed =
+        new CanvasFunctionWorkStore(
+            queue,
+            observedRuns,
+            stateCodec,
+            transactions.getTransactionManager(),
+            Clock.systemUTC());
+
+    assertEquals(1, observed.claimNext(LEASE, "owner").orElseThrow().run().attempt());
+    var order = inOrder(observedRuns, queue);
+    order.verify(observedRuns).findByNodeIdForUpdate(nodeId);
+    order.verify(queue).lockOwned(any());
+    order.verify(observedRuns).startAttempt(any(), any());
+  }
 
   /** 暂停在队列领取与 Run 事务之间，新持有者接管后旧领取不得启动 attempt。 */
   @ParameterizedTest
@@ -117,6 +189,7 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
       }
       assertTrue(old.get(10, TimeUnit.SECONDS).isEmpty());
       assertEquals(takeover ? 1 : 0, runs.findByNodeId(nodeId).orElseThrow().attempt());
+      verify(queue).claimNext("owner-a", LEASE);
     }
   }
 
