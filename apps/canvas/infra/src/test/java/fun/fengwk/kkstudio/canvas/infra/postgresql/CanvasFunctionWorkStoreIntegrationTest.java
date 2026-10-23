@@ -13,9 +13,12 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.postgresql.PGNotification;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.util.AopTestUtils;
 
 import fun.fengwk.kkstudio.canvas.CanvasFunctionBlobAccess;
@@ -43,6 +46,7 @@ import fun.fengwk.kkstudio.work.DurableWorkQueue;
 
 import java.sql.Connection;
 import java.sql.Timestamp;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -67,6 +71,54 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
 
   @Autowired private CanvasFunctionRunRepository runs;
   @Autowired private CanvasFunctionWorkStore workStore;
+  @Autowired private CanvasFunctionRunJdbcStore runJdbcStore;
+  @Autowired private CanvasFunctionRunStateCodecPort stateCodec;
+
+  /** 暂停在队列领取与 Run 事务之间，新持有者接管后旧领取不得启动 attempt。 */
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void takeoverBeforeStartFencesOldClaim(boolean takeover) throws Exception {
+    UUID nodeId = addNode(addDocument(), true).id();
+    runs.insertReady(ready(nodeId, UUID.randomUUID(), T0));
+    DurableWorkQueue queue =
+        spy(
+            new DurableWorkQueue(
+                JdbcClient.create(jdbc), transactions.getTransactionManager(), "CANVAS_RUN"));
+    CountDownLatch claimed = new CountDownLatch(1);
+    CountDownLatch resume = new CountDownLatch(1);
+    doAnswer(
+            invocation -> {
+              Object result = invocation.callRealMethod();
+              claimed.countDown();
+              assertTrue(resume.await(10, TimeUnit.SECONDS));
+              return result;
+            })
+        .when(queue)
+        .claimNext("owner-a", LEASE);
+    CanvasFunctionWorkStore delayed =
+        new CanvasFunctionWorkStore(
+            queue,
+            runJdbcStore,
+            stateCodec,
+            transactions.getTransactionManager(),
+            Clock.systemUTC());
+    try (var executor = Executors.newSingleThreadExecutor()) {
+      var old = executor.submit(() -> delayed.claimNext(LEASE, "owner-a"));
+      try {
+        assertTrue(claimed.await(10, TimeUnit.SECONDS));
+        jdbc.update(
+            "update durable_work set lease_until = statement_timestamp() - interval '1 second' where target_id = ?",
+            nodeId);
+        if (takeover) {
+          assertEquals(1, workStore.claimNext(LEASE, "owner-b").orElseThrow().run().attempt());
+        }
+      } finally {
+        resume.countDown();
+      }
+      assertTrue(old.get(10, TimeUnit.SECONDS).isEmpty());
+      assertEquals(takeover ? 1 : 0, runs.findByNodeId(nodeId).orElseThrow().attempt());
+    }
+  }
 
   /** V1 CHECK 必须拒绝负 attempt；调度与租约不在 Run 行上。 */
   @Test
@@ -118,7 +170,7 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
     UUID requestId = UUID.randomUUID();
     runs.insertReady(ready(node.id(), requestId, T0));
 
-    ClaimedRun first = workStore.claimNext(Duration.ofMillis(1), "owner-old").orElseThrow();
+    ClaimedRun first = workStore.claimNext(LEASE, "owner-old").orElseThrow();
     assertEquals(1, first.run().attempt());
     awaitLeaseExpiry();
     ClaimedRun recovered = workStore.claimNext(LEASE, "owner-new").orElseThrow();
@@ -196,6 +248,7 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
     UUID targetResourceId = UUID.randomUUID();
     CanvasFunctionFrozenRun frozen = mock(CanvasFunctionFrozenRun.class);
     when(frozen.nodeId()).thenReturn(node.id());
+    when(frozen.canvasId()).thenReturn(canvasId);
     when(frozen.requestId()).thenReturn(requestId);
     when(frozen.outputResourceIds()).thenReturn(List.of(targetResourceId));
     CanvasFunctionAdapter adapter = mock(CanvasFunctionAdapter.class);
@@ -373,7 +426,7 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
     UUID canvasId = addDocument();
     NodeRecord node = addNode(canvasId, true);
     runs.insertReady(ready(node.id(), UUID.randomUUID(), T0));
-    ClaimedRun stale = workStore.claimNext(Duration.ofMillis(1), "owner-old").orElseThrow();
+    ClaimedRun stale = workStore.claimNext(LEASE, "owner-old").orElseThrow();
     awaitLeaseExpiry();
     workStore.claimNext(LEASE, "owner-new").orElseThrow();
 
@@ -415,9 +468,10 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
     }
   }
 
-  /** 等待毫秒级短租约在数据库时钟下过期。 */
+  /** 以数据库时间确定性地使本测试的租约过期。 */
   private void awaitLeaseExpiry() {
-    jdbc.queryForObject("select pg_sleep(0.02)::text", String.class);
+    jdbc.update(
+        "update durable_work set lease_until = statement_timestamp() - interval '1 second' where target_type = 'CANVAS_RUN'");
   }
 
   private int workRows(UUID nodeId) {
