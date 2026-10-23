@@ -413,6 +413,38 @@ class SubagentTaskRunnerTest {
   }
 
   @Test
+  void unexpectedFailureDoesNotResubmit() {
+    // 非游标错误只能复核票据，不得重复提交可能已产生副作用的请求。
+    stubParent(List.of(AGENT));
+    IllegalStateException failure = new IllegalStateException("store unavailable");
+    when(runtime.spawn(any())).thenThrow(failure);
+
+    SubagentTaskRejectedException rejected =
+        assertThrows(
+            SubagentTaskRejectedException.class,
+            () -> runner(config()).accept(request(null, null)));
+
+    assertEquals(failure, rejected.getCause());
+    verify(runtime, times(1)).spawn(any());
+  }
+
+  @Test
+  void nonCursorConflictDoesNotResubmit() {
+    // 明确业务冲突没有匹配票据时立即拒绝。
+    stubParent(List.of(AGENT));
+    when(runtime.spawn(any()))
+        .thenThrow(
+            new HarnessRuntimeConflictException(
+                HarnessRuntimeConflictException.Reason.IDEMPOTENCY_KEY_REUSED,
+                "different request"));
+
+    assertThrows(
+        SubagentTaskRejectedException.class, () -> runner(config()).accept(request(null, null)));
+
+    verify(runtime, times(1)).spawn(any());
+  }
+
+  @Test
   void concurrentDuplicateLosingTheRaceReplaysTheWinnersJoin() {
     stubParent(List.of(AGENT));
     UUID childThreadId =
