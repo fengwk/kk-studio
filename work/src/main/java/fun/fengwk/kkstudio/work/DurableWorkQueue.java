@@ -217,6 +217,18 @@ public final class DurableWorkQueue {
         == 1L;
   }
 
+  /** 在调用方事务中锁定仍有效的 claim，锁保持到事务结束；调用方负责先取得目标业务行锁。 */
+  public boolean lockOwned(WorkClaim claim) {
+    Objects.requireNonNull(claim, "claim");
+    return jdbc.sql("select target_id from durable_work" + ownedBy() + " for update")
+        .param("type", targetType)
+        .param("id", claim.targetId())
+        .param("token", claim.leaseToken())
+        .query(UUID.class)
+        .optional()
+        .isPresent();
+  }
+
   /** 无条件删除 target 的 mailbox 行（target 本身被删除时调用）。 */
   public void delete(UUID targetId) {
     jdbc.sql("delete from durable_work where target_type = :type and target_id = :id")

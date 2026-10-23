@@ -52,9 +52,9 @@ public class CanvasFunctionWorkStore {
       if (work.isEmpty()) {
         return Optional.empty();
       }
-      ClaimedRun started = transactions.execute(status -> startAttempt(work.get()));
+      Optional<ClaimedRun> started = transactions.execute(status -> startAttempt(work.get()));
       if (started != null) {
-        return Optional.of(started);
+        return started;
       }
     }
   }
@@ -73,7 +73,13 @@ public class CanvasFunctionWorkStore {
                     && canvasRunWorkQueue.reschedule(claim.work(), delay)));
   }
 
-  private ClaimedRun startAttempt(WorkClaim work) {
+  // null 表示已清理不可运行的 Work，可以继续领取；empty 表示失权，立即结束本轮领取。
+  private Optional<ClaimedRun> startAttempt(WorkClaim work) {
+    // 保持 Run -> Work 锁序；Work 锁覆盖检查到 attempt 写入的整个短事务。
+    runStore.findByNodeIdForUpdate(work.targetId());
+    if (!canvasRunWorkQueue.lockOwned(work)) {
+      return Optional.empty();
+    }
     Optional<CanvasFunctionRunDO> started = runStore.startAttempt(work.targetId(), now());
     if (started.isEmpty()) {
       canvasRunWorkQueue.complete(work);
@@ -91,7 +97,7 @@ public class CanvasFunctionWorkStore {
             run.getError(),
             run.getUpdatedAt().toInstant(),
             run.getCreatedAt().toInstant());
-    return new ClaimedRun(domain, work);
+    return Optional.of(new ClaimedRun(domain, work));
   }
 
   private OffsetDateTime now() {
