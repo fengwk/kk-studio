@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.work;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Duration;
@@ -217,9 +218,16 @@ public final class DurableWorkQueue {
         == 1L;
   }
 
-  /** 在调用方事务中锁定仍有效的 claim，锁保持到事务结束；调用方负责先取得目标业务行锁。 */
+  /**
+   * 在调用方事务中锁定仍有效的 claim，锁保持到事务结束；调用方负责先取得目标业务行锁。
+   *
+   * @throws IllegalStateException 调用方没有活动事务
+   */
   public boolean lockOwned(WorkClaim claim) {
     Objects.requireNonNull(claim, "claim");
+    if (!TransactionSynchronizationManager.isActualTransactionActive()) {
+      throw new IllegalStateException("lockOwned requires an active transaction");
+    }
     return jdbc.sql("select target_id from durable_work" + ownedBy() + " for update")
         .param("type", targetType)
         .param("id", claim.targetId())

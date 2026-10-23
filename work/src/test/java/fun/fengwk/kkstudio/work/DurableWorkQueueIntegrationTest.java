@@ -15,6 +15,7 @@ import org.postgresql.PGNotification;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import java.sql.Connection;
@@ -154,6 +155,65 @@ class DurableWorkQueueIntegrationTest {
     assertFalse(issues.complete(old));
     issues.delete(id);
     assertTrue(issues.find(id).isEmpty());
+  }
+
+  /** 持锁 API 必须显式加入外层事务，且不接受错误或过期 token。 */
+  @Test
+  void lockOwnedRequiresTransactionAndRejectsWrongOrExpiredOwner() {
+    UUID id = UUID.randomUUID();
+    issues.request(id, Duration.ZERO);
+    WorkClaim claim = issues.claimNext("owner", LEASE).orElseThrow();
+    assertThrows(IllegalStateException.class, () -> issues.lockOwned(claim));
+    TransactionTemplate tx = new TransactionTemplate(transactions);
+    tx.executeWithoutResult(
+        status -> {
+          assertFalse(
+              issues.lockOwned(
+                  new WorkClaim(id, claim.wakeVersion(), "wrong", claim.leaseUntil())));
+          assertTrue(issues.lockOwned(claim));
+        });
+    jdbc.sql(
+            "update durable_work set lease_until = statement_timestamp() - interval '1 second' where target_id = :id")
+        .param("id", id)
+        .update();
+    tx.executeWithoutResult(status -> assertFalse(issues.lockOwned(claim)));
+  }
+
+  /** 独立连接 NOWAIT 证明锁真实存在且持续至提交；竞争 claim 使用 SKIP LOCKED 返回空。 */
+  @Test
+  void lockOwnedHoldsRowUntilTransactionCompletes() throws SQLException {
+    UUID id = UUID.randomUUID();
+    issues.request(id, Duration.ZERO);
+    WorkClaim claim = issues.claimNext("owner", LEASE).orElseThrow();
+    try (Connection competitor =
+            DriverManager.getConnection(
+                POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+        Statement statement = competitor.createStatement()) {
+      String lock =
+          "select target_id from durable_work where target_id = '" + id + "' for update nowait";
+      new TransactionTemplate(transactions)
+          .executeWithoutResult(
+              status -> {
+                assertTrue(issues.lockOwned(claim));
+                SQLException blocked =
+                    assertThrows(SQLException.class, () -> statement.executeQuery(lock));
+                assertEquals("55P03", blocked.getSQLState());
+                // 使用独立连接，不加入持锁事务。
+                DurableWorkQueue competingQueue =
+                    new DurableWorkQueue(
+                        JdbcClient.create(
+                            new DriverManagerDataSource(
+                                POSTGRES.getJdbcUrl(),
+                                POSTGRES.getUsername(),
+                                POSTGRES.getPassword())),
+                        transactions,
+                        "ISSUE");
+                assertTrue(competingQueue.claimNext("competitor", LEASE).isEmpty());
+              });
+      try (var result = statement.executeQuery(lock)) {
+        assertTrue(result.next(), "commit must release the ownership lock");
+      }
+    }
   }
 
   /** 只有让行变为「到期且无有效租约」的写入才发送提示，payload 是 target type。 */
