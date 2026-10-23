@@ -495,8 +495,9 @@ class ModelProcessorTest {
                 (proxy, method, args) -> {
                   Object result = invokeUnchecked(fixture.store, method, args);
                   if ("transaction".equals(method.getName())
-                      && transactions.incrementAndGet() == 1) {
-                    // 确定性交错：claimOwned 已读到有效租约，在真正恢复事务前由另一个事务删除 Work。
+                      && transactions.incrementAndGet() == 2) {
+                    // 确定性交错：前置 claimOwned 与 admission guard verifier 都已读到有效租约，
+                    // 在真正恢复事务前由另一个事务删除 Work，验证恢复写入全部回滚。
                     deleteModelWork(fixture);
                   }
                   return result;
@@ -3119,6 +3120,113 @@ class ModelProcessorTest {
     assertEquals(0, fixture.gateway.admitCalls);
   }
 
+  /** admission 期间 Work 被删除：Busy / Rejected 都只返回 LOST，不写 invocation、Thread 或 THREAD wake。 */
+  @Test
+  void admissionResultAfterWorkDeletionIsLostWithoutMutation() {
+    Fixture busy = fixture();
+    busy.gateway.beforeReturn = execution -> deleteModelWork(busy);
+    busy.gateway.queue(new ModelGateway.Busy(Duration.ofSeconds(5)));
+
+    assertEquals(
+        ProcessResult.LOST_OWNERSHIP, busy.processor.process(claim(busy.store, busy.invocationId)));
+
+    assertEquals(ModelInvocationStatus.READY, model(busy.store, busy.invocationId).status());
+    assertEquals(0, thread(busy.store, busy.baseline.threadId()).version());
+    assertEquals(
+        1,
+        work(busy.store, new WorkTarget(WorkTargetType.THREAD, busy.baseline.threadId()))
+            .wakeVersion());
+    assertNull(work(busy.store, new WorkTarget(WorkTargetType.MODEL, busy.invocationId)));
+    assertFalse(busy.processor.hasActiveExecution());
+
+    Fixture rejected = fixture();
+    rejected.gateway.beforeReturn = execution -> deleteModelWork(rejected);
+    rejected.gateway.queue(
+        new ModelGateway.Rejected(
+            new ModelInvocationError(ProviderErrorKind.INVALID_REQUEST, "model rejected")));
+
+    assertEquals(
+        ProcessResult.LOST_OWNERSHIP,
+        rejected.processor.process(claim(rejected.store, rejected.invocationId)));
+
+    assertEquals(
+        ModelInvocationStatus.READY, model(rejected.store, rejected.invocationId).status());
+    assertEquals(0, thread(rejected.store, rejected.baseline.threadId()).version());
+    assertEquals(
+        1,
+        work(rejected.store, new WorkTarget(WorkTargetType.THREAD, rejected.baseline.threadId()))
+            .wakeVersion());
+    assertNull(work(rejected.store, new WorkTarget(WorkTargetType.MODEL, rejected.invocationId)));
+    assertFalse(rejected.processor.hasActiveExecution());
+  }
+
+  /** 准入复核通过后、prepare 前 Work 被删除：READY 不进入 dispatch，零 gateway、零 mutation。 */
+  @Test
+  void readyClaimLostBeforePrepareIsLostWithoutGateway() {
+    Fixture fixture = fixture();
+    HarnessStore hooked = afterAdmissionCheck(fixture.store, () -> deleteModelWork(fixture));
+    try (ModelProcessor processor =
+        new ModelProcessor(
+            hooked,
+            fixture.gateway,
+            fixture.sink,
+            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY),
+            fixture.clock,
+            newScheduler(),
+            Runnable::run,
+            newExecutionExecutor())) {
+      assertEquals(
+          ProcessResult.LOST_OWNERSHIP,
+          processor.process(claim(fixture.store, fixture.invocationId)));
+
+      ModelInvocation model = model(fixture.store, fixture.invocationId);
+      assertEquals(ModelInvocationStatus.READY, model.status());
+      assertEquals(0, model.attempt());
+      assertEquals(0, thread(fixture.store, fixture.baseline.threadId()).version());
+      assertEquals(0, fixture.gateway.admitCalls);
+      assertNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)));
+      assertFalse(processor.hasActiveExecution());
+    }
+  }
+
+  /** 准入复核通过后、终态清理 fence 前 Work 被删除：THREAD wake 的 tentative 写入随事务回滚，终态行与 Thread 保持不变。 */
+  @Test
+  void terminalCleanupClaimLostAtFinalFenceRollsBackThreadWake() {
+    Fixture fixture = fixture();
+    transition(fixture.store, fixture.invocationId, model -> model.markRunning(NOW));
+    transition(
+        fixture.store,
+        fixture.invocationId,
+        model -> model.succeed(response("ok", GenerationStopReason.COMPLETE), NOW));
+    HarnessStore hooked = afterAdmissionCheck(fixture.store, () -> deleteModelWork(fixture));
+    try (ModelProcessor processor =
+        new ModelProcessor(
+            hooked,
+            fixture.gateway,
+            fixture.sink,
+            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY),
+            fixture.clock,
+            newScheduler(),
+            Runnable::run,
+            newExecutionExecutor())) {
+      assertEquals(
+          ProcessResult.LOST_OWNERSHIP,
+          processor.process(claim(fixture.store, fixture.invocationId)));
+
+      ModelInvocation terminal = model(fixture.store, fixture.invocationId);
+      assertEquals(ModelInvocationStatus.SUCCEEDED, terminal.status());
+      assertEquals(1, terminal.attempt());
+      assertEquals(0, thread(fixture.store, fixture.baseline.threadId()).version());
+      assertEquals(
+          1,
+          work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
+              .wakeVersion());
+      assertEquals(0, fixture.gateway.admitCalls);
+      assertNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)));
+      assertFalse(processor.hasActiveExecution());
+    }
+  }
+
   /**
    * 真实 prepare + 拒绝终态路径：每次写事务只先锁 own Thread，再锁 Model/Work，不取 tree、Session 或祖先锁。
    * 拒绝回写与准入共用同一锁边界，覆盖失败终态路径。
@@ -3213,6 +3321,51 @@ class ModelProcessorTest {
                                         })));
                 if (loaded.get()) {
                   afterLoad.run();
+                }
+                return result;
+              }
+              return invokeUnchecked(delegate, method, args);
+            });
+  }
+
+  /**
+   * 在第二次 Work-only ownership 复核（admission guard verifier）提交后执行 {@code afterAdmissionCheck}：模拟另一事务在
+   * 准入复核通过之后、prepare 事务之前删除 claim，用于验证 prepare / 恢复 / 终态清理的最终 fence 完整回滚。
+   */
+  private static HarnessStore afterAdmissionCheck(
+      HarnessStore delegate, Runnable afterAdmissionCheck) {
+    AtomicInteger ownedLocks = new AtomicInteger();
+    AtomicBoolean fired = new AtomicBoolean();
+    return (HarnessStore)
+        Proxy.newProxyInstance(
+            HarnessStore.class.getClassLoader(),
+            new Class<?>[] {HarnessStore.class},
+            (proxy, method, args) -> {
+              if ("transaction".equals(method.getName()) && args != null && args.length == 1) {
+                @SuppressWarnings("unchecked")
+                Function<HarnessStore.Transaction, ?> callback =
+                    (Function<HarnessStore.Transaction, ?>) args[0];
+                AtomicInteger ownedInTransaction = new AtomicInteger();
+                Object result =
+                    delegate.transaction(
+                        tx ->
+                            callback.apply(
+                                (HarnessStore.Transaction)
+                                    Proxy.newProxyInstance(
+                                        HarnessStore.Transaction.class.getClassLoader(),
+                                        new Class<?>[] {HarnessStore.Transaction.class},
+                                        (ignored, txMethod, txArgs) -> {
+                                          Object value = invokeUnchecked(tx, txMethod, txArgs);
+                                          if ("lockClaimedWork".equals(txMethod.getName())
+                                              && value instanceof Optional<?> owned
+                                              && owned.isPresent()) {
+                                            ownedInTransaction.incrementAndGet();
+                                          }
+                                          return value;
+                                        })));
+                if (ownedLocks.addAndGet(ownedInTransaction.get()) >= 2
+                    && fired.compareAndSet(false, true)) {
+                  afterAdmissionCheck.run();
                 }
                 return result;
               }
