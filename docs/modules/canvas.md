@@ -82,14 +82,14 @@ Function 的能力契约（adapter、目录、冻结运行计划、执行上下�
 租用目录 -> 按名找函数（已移除即 conflict）-> 比较完整定义指纹与 expectedVersion
 -> 严格解码 args -> 冻结引用 manifest（节点存在、index 在范围内且是 blob）与媒体事实
 -> 按输出计划预分配 resource id，构造 submitState=PENDING 的冻结计划 -> adapter.preflight
--> 释放上一个 Run 的 pin -> 写入 READY Run 与 INPUT pin -> 请求 Work -> revision + 1
+-> 释放上一个 Run 的 pin -> 写入 READY Run（同事务请求 Work）-> 写 INPUT pin -> revision + 1
 ```
 
 客户端必须回传它从目录读到的定义指纹；函数被移除或同名函数换了定义只会得到 conflict，既不自动重试，也不退回当前同名定义。目录租用保持到事务 `afterCompletion`。冻结计划保存完整函数定义，之后用户改配置、解除引用或替换源资源都不改变这个 Run 的输入。
 
 ### 领取、执行与终态
 
-[`CanvasFunctionWorkStore.claimNext`](../../apps/canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/CanvasFunctionWorkStore.java) 从 `durable_work` 以 `SKIP LOCKED` 领取一条到期 Work，再在单次启动的短事务中按 Run → Work 顺序锁行，确认同一 lease token 在数据库时间下仍有效，才把 Run 推进为 `RUNNING` 并递增 attempt；失权立即返回无任务，终态或已删除的 Run 则清理 Work 后继续扫描。执行中的持有者写入都在 SQL 里要求同一 `request_id`、`status='RUNNING'`，且同一 lease token 在数据库时钟下仍持有租约；token 过期或被接管时写入影响 0 行，旧 worker 的回调只能变成 no-op 或静默退出。
+[`CanvasFunctionWorkStore.claimNext`](../../apps/canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/CanvasFunctionWorkStore.java) 从 `durable_work` 以 `SKIP LOCKED` 领取一条到期 Work，再在单次启动的短事务中按 Run → Work 顺序锁行，确认同一 lease token 在数据库时间下仍有效，才把 Run 推进为 `RUNNING` 并递增 attempt；失权立即返回无任务，终态、`UNKNOWN` 或已删除的 Run 则清理 Work 后继续扫描。执行中的持有者写入都在 SQL 里要求同一 `request_id`、`status='RUNNING'`，且同一 lease token 在数据库时钟下仍持有租约；token 过期或被接管时写入影响 0 行，旧 worker 的回调只能变成 no-op 或静默退出。
 
 [`CanvasFunctionDispatcher`](../../apps/canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/function/CanvasFunctionDispatcher.java) 由周期 poll 驱动，`durable_work` 通道上的 `CANVAS_RUN` 提示只降低延迟，正确性来自 poll 与租约；调度骨架复用 Common 的 [`BoundedWorkDispatcher`](../../common/src/main/java/fun/fengwk/kkstudio/common/concurrent/BoundedWorkDispatcher.java)，没有第二层内存队列，本地容量满时把 Run 还回并推迟。
 

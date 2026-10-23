@@ -422,7 +422,7 @@ null 表示强制直连；`noProxyHosts` 为逗号分隔绕过规则，默认 `l
 | --- | --- |
 | `kk-studio.harness.dispatcher` | claim/handoff 容量、lease、poll 与拒绝 |
 | `kk-studio.harness.execution-admission` | model/tool/skill-sync 本机并发 |
-| `kk-studio.harness.runtime` | worker 开关与 Resource 根 |
+| `kk-studio.harness.runtime` | worker 开关 |
 | `kk-studio.catalog.skill` | Git Skill cache 根（`cache-root`） |
 | `kk-studio.storage` | S3 端点/凭据/bucket、maintenance 与对象清理 |
 | `kk-studio.storage.media` | ffprobe/ffmpeg 可执行文件与临时目录 |
