@@ -444,8 +444,8 @@ public final class ToolExecutionGateway implements ToolGateway {
     }
 
     /**
-     * 发送并阻塞等待单一绝对 deadline。{@code request.timeout} 是远端执行预算，{@code terminationGrace}
-     * 是执行结束后的传输恢复窗；两者只在发送前合成一次等待上界，partial 与重连都不延长它。{@code timeout} 为 0 表示显式无界，不会因 grace 变成有界等待。
+     * 发送并阻塞等待单一绝对 deadline。{@code request.timeout} 是远端执行预算，{@code terminalDeliveryGrace}
+     * 是终态传输恢复窗；两者只合成一次从发送前起算的等待上界，partial 与重连都不延长它。{@code timeout} 为 0 表示显式无界，不会因恢复窗变成有界等待。
      *
      * <p>发送前异常（Busy / Unavailable / SendUncertain）原样向上抛出，由 Gateway 按类型分类。拿到句柄后，任何未能以真实 terminal
      * 收敛的异常退出都会先补一个异常终态并调用 {@code terminate(CANCELLED)}，把远端在途执行与 transfer 释放掉；清理自身的失败只作为 suppressed
@@ -496,14 +496,15 @@ public final class ToolExecutionGateway implements ToolGateway {
       }
       try {
         Duration timeout = request.timeout();
-        Duration grace = transportHandle.terminationGrace();
+        Duration grace = transportHandle.terminalDeliveryGrace();
         if (grace == null) {
           throw new IllegalStateException(
-              "remote capability returned a null termination grace; outcome cannot be confirmed");
+              "remote capability returned a null terminal delivery grace;"
+                  + " outcome cannot be confirmed");
         }
         if (grace.isNegative()) {
           throw new IllegalStateException(
-              "remote capability returned a negative termination grace: "
+              "remote capability returned a negative terminal delivery grace: "
                   + grace
                   + "; outcome cannot be confirmed");
         }
