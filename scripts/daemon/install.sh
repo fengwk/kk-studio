@@ -142,20 +142,20 @@ cleanup() {
   if [ "$code" -ne 0 ] && [ "$INSTALLING" = true ]; then
     echo "安装失败 [$PHASE]：${FAILURE_REASON:-该阶段操作未完成。}" >&2
     if [ "$PUBLISHED" = true ]; then
-      echo "程序或配置已开始替换；未自动回滚，请使用备份手动恢复。" >&2
+      echo "程序或配置已开始替换；未自动回滚。" >&2
     elif [ "$STOP_ATTEMPTED" = true ]; then
       echo "程序和配置尚未替换；已尝试停止服务，请检查服务状态。" >&2
     else
       echo "现有程序和配置未改动。" >&2
     fi
-    echo "备份：${BACKUP_DIR:-无（首次安装）}" >&2
+    echo "备份：${BACKUP_DIR:-无（尚未创建备份）}" >&2
     if [ -n "$START_SINCE" ] && [ "$HOST_OS" = Linux ]; then
       local logs=
       if [ -n "$START_CURSOR" ]; then
         logs=$(journalctl --user -u "$SERVICE_NAME" --after-cursor "$START_CURSOR" -n 50 --no-pager 2>/dev/null) || logs=
       fi
       case "$logs" in
-        *'invalid registration token'*)
+        *'daemon failed: environment registration is rejected: invalid registration token'*)
           echo "原因：本次启动的注册令牌被拒绝。下一步：在 Studio 重新生成安装命令。" >&2 ;;
         *) echo "下一步：运行 systemctl --user status $SERVICE_NAME 检查服务状态。" >&2 ;;
       esac
@@ -543,7 +543,9 @@ cmd_install() {
   stage_file "$STAGED_SERVICE" "${SERVICE_PATH%/*}" service 0644; STAGED_SERVICE=$REGISTERED_TEMP_PATH
   if [ -f "$SERVICE_PATH" ]; then
     STOP_ATTEMPTED=true
-    if [ "$HOST_OS" = Linux ]; then systemctl --user stop "$SERVICE_NAME";
+    if [ "$HOST_OS" = Linux ]; then
+      systemctl --user stop "$SERVICE_NAME" >/dev/null 2>&1 ||
+        fail "systemd 未能停止服务；程序和配置尚未替换。"
     else stop_launchd; fi
   fi
   # From the first rename onward a failure must report manual recovery, even partial publication.
@@ -554,8 +556,10 @@ cmd_install() {
   mv -f "$STAGED_TOKEN" "$INSTALLED_TOKEN"
   mv -f "$STAGED_SERVICE" "$SERVICE_PATH"
   if [ "$HOST_OS" = Linux ]; then
-    systemctl --user daemon-reload
-    systemctl --user enable "$SERVICE_NAME"
+    systemctl --user daemon-reload >/dev/null 2>&1 ||
+      fail "systemd 未能重新加载服务定义。"
+    systemctl --user enable "$SERVICE_NAME" >/dev/null 2>&1 ||
+      fail "systemd 未能启用用户服务。"
     systemctl --user reset-failed "$SERVICE_NAME" >/dev/null 2>&1 ||
       fail "无法清除旧 systemd 失败计数；请检查用户服务管理器后重新安装。"
     START_SINCE=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
@@ -567,7 +571,10 @@ cmd_install() {
     done <<<"$journal_tail"
     systemctl --user restart "$SERVICE_NAME" >/dev/null 2>&1 ||
       fail "systemd 未能启动服务。"
-  else launchctl bootstrap "$LAUNCHD_DOMAIN" "$SERVICE_PATH"; fi
+  else
+    launchctl bootstrap "$LAUNCHD_DOMAIN" "$SERVICE_PATH" >/dev/null 2>&1 ||
+      fail "launchd 未能加载 LaunchAgent。"
+  fi
   stage '7/7 稳定性验证'
   verify_running
   echo "KK Studio 环境安装完成：程序/配置已写入；服务已运行。"
