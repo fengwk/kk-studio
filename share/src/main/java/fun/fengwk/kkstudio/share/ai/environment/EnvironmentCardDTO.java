@@ -14,7 +14,7 @@ public class EnvironmentCardDTO {
   private String name;
   private @Nullable EnvironmentInstallConfigDTO installConfig;
 
-  /** 仅在 create 响应与 rotate-token 响应中返回刚生成的新值；正常列表和详情查询始终为 null， 按需读取当前值走只读 token 端点。 */
+  /** 仅在 create 与 rotate-token 响应返回新值；列表和详情始终为 null。安装通过一次性 code 兑换脚本，不读取现有 token。 */
   @JsonInclude(JsonInclude.Include.NON_NULL)
   private @Nullable String registrationToken;
 
