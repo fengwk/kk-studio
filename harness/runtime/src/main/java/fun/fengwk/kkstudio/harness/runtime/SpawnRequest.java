@@ -22,8 +22,8 @@ import java.util.regex.Pattern;
  * requestHash} 是票据的请求指纹。
  *
  * <p>{@code parentThreadId} 为空表示执行根（票据只冻结回执）；非空表示子 Thread，其有效约束是 {@code constraints} 与父约束的合并。{@code
- * delivery} 为 {@link JoinDelivery#NOTIFY_PARENT} 时必须给出父 Thread 当前的 head 作为准入 cursor。{@code
- * countsTowardQuota} 决定本票据是否计入子任务并发额度。
+ * delivery} 为 {@link JoinDelivery#NOTIFY_PARENT} 时必须给出父 Thread 当前的 head 作为准入
+ * cursor，并决定本票据计入子任务并发额度。
  *
  * @param settings 新 Thread 的 root settings；同时确定票据记录的 Agent 名
  * @param commands 首批命令（可含 SET_* 前缀，恰以一条 user-like 输入结尾）
@@ -43,7 +43,6 @@ public record SpawnRequest(
     ThreadConstraints constraints,
     SpawnTrigger trigger,
     JoinDelivery delivery,
-    boolean countsTowardQuota,
     Budget budget,
     UUID ticketId,
     String requestHash) {
@@ -75,9 +74,6 @@ public record SpawnRequest(
     }
     if ((delivery == JoinDelivery.NOTIFY_PARENT) != (expectedParentHeadEntryId != null)) {
       throw new IllegalArgumentException("only a notify-parent ticket carries the parent head");
-    }
-    if (countsTowardQuota && parentThreadId == null) {
-      throw new IllegalArgumentException("only a ticket with a parent counts toward the quota");
     }
     if (yoloEnabled && (parentThreadId != null || continuation != null)) {
       throw new IllegalArgumentException("only a new execution root takes the yolo switch");

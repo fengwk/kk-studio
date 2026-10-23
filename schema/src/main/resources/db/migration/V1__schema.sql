@@ -1374,7 +1374,6 @@ create table harness_thread_join (
     source_command_sequence bigint not null check (source_command_sequence > 0),
     agent varchar(256) not null,
     delivery varchar(32) not null,
-    counts_toward_quota boolean not null,
     superseded_by_invocation_id uuid,
     max_turns integer,
     reminder_turn bigint not null default 0,
@@ -1401,9 +1400,6 @@ create table harness_thread_join (
         delivery in ('NOTIFY_PARENT', 'SETTLE_OWNER_TURN', 'RECEIPT_ONLY')
         and ((delivery = 'RECEIPT_ONLY') = (parent_thread_id is null))
     ),
-    constraint ck_harness_thread_join_quota check (
-        not counts_toward_quota or parent_thread_id is not null
-    ),
     constraint ck_harness_thread_join_superseded check (
         superseded_by_invocation_id is null
         or (superseded_by_invocation_id <> invocation_id and terminal_entry_id is null)
@@ -1427,8 +1423,18 @@ create table harness_thread_join (
         final_answer_entry_id is null or terminal_entry_id is not null
     ),
     constraint ck_harness_thread_join_delivery check (
-        delivery_command_sequence is null
-        or (delivery_command_sequence > 0 and terminal_entry_id is not null and parent_thread_id is not null)
+        case
+            when delivery = 'NOTIFY_PARENT' then (
+                (terminal_entry_id is null and delivery_command_sequence is null)
+                or (
+                    terminal_entry_id is not null
+                    and delivery_command_sequence is not null
+                    and delivery_command_sequence > 0
+                    and parent_thread_id is not null
+                )
+            )
+            else (delivery_command_sequence is null)
+        end
     )
 );
 
@@ -1440,7 +1446,6 @@ comment on column harness_thread_join.child_thread_id is '目标子 Thread UUID'
 comment on column harness_thread_join.source_command_sequence is '子 Thread 接受源 prompt 的 command sequence';
 comment on column harness_thread_join.agent is '本次执行的 Agent 名';
 comment on column harness_thread_join.delivery is '结算后的交付方式：NOTIFY_PARENT 投递父通知；SETTLE_OWNER_TURN 冻结结果并唤醒父 Thread 的开放 Turn owner；RECEIPT_ONLY 只冻结结果（无父 Thread）';
-comment on column harness_thread_join.counts_toward_quota is '是否计入子任务并发额度（创建时由 spawn 请求决定，必须有父 Thread）';
 comment on column harness_thread_join.superseded_by_invocation_id is '接管本未完成 join 的后续 invocation UUID；被取代的 join 保留源命令与身份，不再占配额或交付';
 comment on column harness_thread_join.max_turns is '软预算最大 turn 数（可空）';
 comment on column harness_thread_join.reminder_turn is '已发出的 max_turns 软提醒轮次计数';
@@ -1455,13 +1460,6 @@ create index idx_harness_thread_join_child_pending
     where terminal_entry_id is null and superseded_by_invocation_id is null;
 
 comment on index idx_harness_thread_join_child_pending is '子 Thread 变为空闲或执行结束时检索等待匹配的 pending join';
-
-create index idx_harness_thread_join_parent_pending
-    on harness_thread_join (parent_thread_id)
-    where terminal_entry_id is not null and delivery_command_sequence is null
-      and delivery = 'NOTIFY_PARENT' and superseded_by_invocation_id is null;
-
-comment on index idx_harness_thread_join_parent_pending is '父 Thread 恢复或接受输入时检索待交付给父的 pending join';
 
 create table harness_thread_stop_receipt (
     root_thread_id uuid not null,

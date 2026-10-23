@@ -3781,7 +3781,6 @@ class ModelProcessorTest {
                   NOW,
                   NOW,
                   JoinDelivery.SETTLE_OWNER_TURN,
-                  false,
                   null));
           return null;
         });

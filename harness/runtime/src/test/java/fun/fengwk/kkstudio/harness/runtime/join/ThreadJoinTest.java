@@ -41,7 +41,6 @@ class ThreadJoinTest {
         T0,
         T0,
         JoinDelivery.NOTIFY_PARENT,
-        true,
         null);
   }
 
@@ -90,7 +89,6 @@ class ThreadJoinTest {
             T0,
             T1,
             JoinDelivery.RECEIPT_ONLY,
-            false,
             null);
 
     assertEquals(invocationId, rootJoin.invocationId());
@@ -126,7 +124,6 @@ class ThreadJoinTest {
             T0,
             T2,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             null);
 
     assertTrue(delivered.matched());
@@ -155,7 +152,6 @@ class ThreadJoinTest {
             T0,
             T0,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             null);
     assertEquals("a", join1.agent());
 
@@ -176,7 +172,6 @@ class ThreadJoinTest {
             T0,
             T0,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             null);
     assertEquals(maxLenAgent, join2.agent());
   }
@@ -201,7 +196,6 @@ class ThreadJoinTest {
                 T0,
                 T0,
                 JoinDelivery.NOTIFY_PARENT,
-                true,
                 null));
 
     assertDoesNotThrow(
@@ -221,7 +215,6 @@ class ThreadJoinTest {
                 T0,
                 T1,
                 JoinDelivery.NOTIFY_PARENT,
-                true,
                 null));
   }
 
@@ -246,7 +239,6 @@ class ThreadJoinTest {
                 T0,
                 T0,
                 JoinDelivery.NOTIFY_PARENT,
-                true,
                 null));
 
     assertThrows(
@@ -267,28 +259,6 @@ class ThreadJoinTest {
                 T0,
                 T0,
                 JoinDelivery.NOTIFY_PARENT,
-                true,
-                null));
-
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new ThreadJoin(
-                id(1),
-                VALID_HASH,
-                id(2),
-                id(3),
-                1L,
-                "agent",
-                10,
-                0L,
-                null,
-                null,
-                null,
-                null,
-                T0,
-                JoinDelivery.NOTIFY_PARENT,
-                true,
                 null));
 
     assertThrows(
@@ -306,10 +276,29 @@ class ThreadJoinTest {
                 null,
                 null,
                 null,
+                null,
+                T0,
+                JoinDelivery.NOTIFY_PARENT,
+                null));
+
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new ThreadJoin(
+                id(1),
+                VALID_HASH,
+                id(2),
+                id(3),
+                1L,
+                "agent",
+                10,
+                0L,
+                null,
+                null,
+                null,
                 T0,
                 null,
                 JoinDelivery.NOTIFY_PARENT,
-                true,
                 null));
   }
 
@@ -334,7 +323,6 @@ class ThreadJoinTest {
                 T0,
                 T0,
                 JoinDelivery.NOTIFY_PARENT,
-                true,
                 null));
 
     assertThrows(
@@ -355,7 +343,6 @@ class ThreadJoinTest {
                 T0,
                 T0,
                 JoinDelivery.NOTIFY_PARENT,
-                true,
                 null));
 
     assertThrows(
@@ -376,7 +363,6 @@ class ThreadJoinTest {
                 T0,
                 T0,
                 JoinDelivery.NOTIFY_PARENT,
-                true,
                 null));
 
     assertThrows(
@@ -397,7 +383,6 @@ class ThreadJoinTest {
                 T0,
                 T0,
                 JoinDelivery.NOTIFY_PARENT,
-                true,
                 null));
   }
 
@@ -424,7 +409,6 @@ class ThreadJoinTest {
                     T0,
                     T0,
                     JoinDelivery.NOTIFY_PARENT,
-                    true,
                     null));
     assertEquals("join parent and child must differ", ex.getMessage());
   }
@@ -451,7 +435,6 @@ class ThreadJoinTest {
                 T0,
                 T0,
                 JoinDelivery.NOTIFY_PARENT,
-                true,
                 null));
 
     // sourceCommandSequence = -1
@@ -473,7 +456,6 @@ class ThreadJoinTest {
                 T0,
                 T0,
                 JoinDelivery.NOTIFY_PARENT,
-                true,
                 null));
 
     // reminderTurn = -1
@@ -495,7 +477,6 @@ class ThreadJoinTest {
                 T0,
                 T0,
                 JoinDelivery.NOTIFY_PARENT,
-                true,
                 null));
   }
 
@@ -520,7 +501,6 @@ class ThreadJoinTest {
                 T0,
                 T0,
                 JoinDelivery.NOTIFY_PARENT,
-                true,
                 null));
 
     assertThrows(
@@ -541,7 +521,6 @@ class ThreadJoinTest {
                 T0,
                 T0,
                 JoinDelivery.NOTIFY_PARENT,
-                true,
                 null));
 
     assertThrows(
@@ -562,7 +541,6 @@ class ThreadJoinTest {
                 T0,
                 T0,
                 JoinDelivery.NOTIFY_PARENT,
-                true,
                 null));
 
     assertThrows(
@@ -583,7 +561,6 @@ class ThreadJoinTest {
                 T0,
                 T0,
                 JoinDelivery.NOTIFY_PARENT,
-                true,
                 null));
   }
 
@@ -608,7 +585,6 @@ class ThreadJoinTest {
                 T0,
                 T0,
                 JoinDelivery.NOTIFY_PARENT,
-                true,
                 null));
 
     assertThrows(
@@ -629,7 +605,6 @@ class ThreadJoinTest {
                 T0,
                 T0,
                 JoinDelivery.NOTIFY_PARENT,
-                true,
                 null));
   }
 
@@ -655,7 +630,6 @@ class ThreadJoinTest {
                 T0,
                 T0,
                 JoinDelivery.NOTIFY_PARENT,
-                true,
                 null));
   }
 
@@ -681,7 +655,6 @@ class ThreadJoinTest {
                 T0,
                 T0,
                 JoinDelivery.RECEIPT_ONLY,
-                false,
                 null));
 
     // deliveryCommandSequence 非空但尚未匹配（terminalEntryId 为空）
@@ -703,7 +676,6 @@ class ThreadJoinTest {
                 T0,
                 T0,
                 JoinDelivery.NOTIFY_PARENT,
-                true,
                 null));
 
     // deliveryCommandSequence 为 0
@@ -725,7 +697,6 @@ class ThreadJoinTest {
                 T0,
                 T0,
                 JoinDelivery.NOTIFY_PARENT,
-                true,
                 null));
 
     // deliveryCommandSequence 为 -1
@@ -747,7 +718,6 @@ class ThreadJoinTest {
                 T0,
                 T0,
                 JoinDelivery.NOTIFY_PARENT,
-                true,
                 null));
   }
 
@@ -839,20 +809,20 @@ class ThreadJoinTest {
     ThreadJoin reminded = initial.remind(1L, T1);
     assertDoesNotThrow(() -> ThreadJoin.validateTransition(initial, reminded));
 
-    // remind -> match
+    // remind -> match: NOTIFY_PARENT 拒绝未交付的中间态持久化
     ThreadJoin matched = reminded.match(id(50), null, T2);
-    assertDoesNotThrow(() -> ThreadJoin.validateTransition(reminded, matched));
+    assertThrows(
+        IllegalArgumentException.class, () -> ThreadJoin.validateTransition(reminded, matched));
 
-    // match -> delivered
+    // 初始/remind -> delivered (单次原子更新至终态)
     ThreadJoin delivered = matched.delivered(10L, T3);
-    assertDoesNotThrow(() -> ThreadJoin.validateTransition(matched, delivered));
+    assertDoesNotThrow(() -> ThreadJoin.validateTransition(reminded, delivered));
 
     // 跨阶段演进：初始 -> delivered
     assertDoesNotThrow(() -> ThreadJoin.validateTransition(initial, delivered));
 
-    // 相同状态且 updatedAt 相同与推进（涵盖 matched 与 delivered 状态的幂等演进）
+    // 相同状态且 updatedAt 相同与推进（涵盖 delivered 状态的幂等演进）
     assertDoesNotThrow(() -> ThreadJoin.validateTransition(initial, initial));
-    assertDoesNotThrow(() -> ThreadJoin.validateTransition(matched, matched));
     assertDoesNotThrow(() -> ThreadJoin.validateTransition(delivered, delivered));
 
     ThreadJoin deliveredAdvanceTime =
@@ -871,7 +841,6 @@ class ThreadJoinTest {
             delivered.createdAt(),
             T3.plusSeconds(1),
             JoinDelivery.NOTIFY_PARENT,
-            true,
             null);
     assertDoesNotThrow(() -> ThreadJoin.validateTransition(delivered, deliveredAdvanceTime));
 
@@ -892,7 +861,6 @@ class ThreadJoinTest {
             initial.createdAt(),
             T2,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             null);
     assertDoesNotThrow(() -> ThreadJoin.validateTransition(initial, initialAdvanceTime));
 
@@ -913,7 +881,6 @@ class ThreadJoinTest {
             T0,
             T0,
             JoinDelivery.RECEIPT_ONLY,
-            false,
             null);
     ThreadJoin rootReminded = rootInitial.remind(1L, T1);
     assertDoesNotThrow(() -> ThreadJoin.validateTransition(rootInitial, rootReminded));
@@ -952,7 +919,6 @@ class ThreadJoinTest {
             old.createdAt(),
             T1,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             null);
     assertThrows(
         IllegalArgumentException.class, () -> ThreadJoin.validateTransition(old, mutateInvocation));
@@ -974,7 +940,6 @@ class ThreadJoinTest {
             old.createdAt(),
             T1,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             null);
     assertThrows(
         IllegalArgumentException.class, () -> ThreadJoin.validateTransition(old, mutateHash));
@@ -996,7 +961,6 @@ class ThreadJoinTest {
             old.createdAt(),
             T1,
             JoinDelivery.RECEIPT_ONLY,
-            false,
             null);
     assertThrows(
         IllegalArgumentException.class,
@@ -1019,7 +983,6 @@ class ThreadJoinTest {
             T0,
             T0,
             JoinDelivery.RECEIPT_ONLY,
-            false,
             null);
     ThreadJoin mutateParentFromNull =
         new ThreadJoin(
@@ -1037,7 +1000,6 @@ class ThreadJoinTest {
             rootOld.createdAt(),
             T1,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             null);
     assertThrows(
         IllegalArgumentException.class,
@@ -1060,7 +1022,6 @@ class ThreadJoinTest {
             old.createdAt(),
             T1,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             null);
     assertThrows(
         IllegalArgumentException.class, () -> ThreadJoin.validateTransition(old, mutateParentDiff));
@@ -1082,7 +1043,6 @@ class ThreadJoinTest {
             old.createdAt(),
             T1,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             null);
     assertThrows(
         IllegalArgumentException.class, () -> ThreadJoin.validateTransition(old, mutateChild));
@@ -1104,7 +1064,6 @@ class ThreadJoinTest {
             old.createdAt(),
             T1,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             null);
     assertThrows(
         IllegalArgumentException.class, () -> ThreadJoin.validateTransition(old, mutateSeq));
@@ -1126,7 +1085,6 @@ class ThreadJoinTest {
             old.createdAt(),
             T1,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             null);
     assertThrows(
         IllegalArgumentException.class, () -> ThreadJoin.validateTransition(old, mutateAgent));
@@ -1148,7 +1106,6 @@ class ThreadJoinTest {
             old.createdAt(),
             T1,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             null);
     assertThrows(
         IllegalArgumentException.class,
@@ -1171,7 +1128,6 @@ class ThreadJoinTest {
             rootOld.createdAt(),
             T1,
             JoinDelivery.RECEIPT_ONLY,
-            false,
             null);
     assertThrows(
         IllegalArgumentException.class,
@@ -1194,7 +1150,6 @@ class ThreadJoinTest {
             old.createdAt(),
             T1,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             null);
     assertThrows(
         IllegalArgumentException.class,
@@ -1217,7 +1172,6 @@ class ThreadJoinTest {
             T1,
             T1,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             null);
     assertThrows(
         IllegalArgumentException.class, () -> ThreadJoin.validateTransition(old, mutateCreatedAt));
@@ -1243,7 +1197,6 @@ class ThreadJoinTest {
             T0,
             T2,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             null);
 
     // updatedAt 回退（T1 早于 oldAdvancedTime 的 updatedAt T2）
@@ -1263,7 +1216,6 @@ class ThreadJoinTest {
             T0,
             T1,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             null);
 
     // reminderTurn 倒退（从 5 变 4）
@@ -1284,7 +1236,6 @@ class ThreadJoinTest {
             old.createdAt(),
             T2,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             null);
     assertThrows(
         IllegalArgumentException.class,
@@ -1316,7 +1267,6 @@ class ThreadJoinTest {
             matched.createdAt(),
             T2,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             null);
     assertThrows(
         IllegalArgumentException.class,
@@ -1339,7 +1289,6 @@ class ThreadJoinTest {
             matched.createdAt(),
             T2,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             null);
     assertThrows(
         IllegalArgumentException.class, () -> ThreadJoin.validateTransition(matched, mutateHead));
@@ -1361,7 +1310,6 @@ class ThreadJoinTest {
             matched.createdAt(),
             T2,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             null);
     assertThrows(
         IllegalArgumentException.class,
@@ -1385,7 +1333,6 @@ class ThreadJoinTest {
             delivered.createdAt(),
             T3,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             null);
     assertThrows(
         IllegalArgumentException.class,
@@ -1408,7 +1355,6 @@ class ThreadJoinTest {
             delivered.createdAt(),
             T3,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             null);
     assertThrows(
         IllegalArgumentException.class,
@@ -1478,13 +1424,12 @@ class ThreadJoinTest {
                 T0,
                 T1,
                 JoinDelivery.NOTIFY_PARENT,
-                true,
                 id(1)));
   }
 
   @Test
   void rejectsNullDeliveryAndImmutableDeliveryOrSupersededInTransition() {
-    // 测试意图：delivery 必填；validateTransition 不允许改写 delivery / 计额标记或已记录的 supersede 身份。
+    // 测试意图：delivery 必填；validateTransition 不允许改写 delivery 或已记录的 supersede 身份。
     assertThrows(
         NullPointerException.class,
         () ->
@@ -1503,7 +1448,6 @@ class ThreadJoinTest {
                 T0,
                 T0,
                 null,
-                false,
                 null));
 
     ThreadJoin old = initialJoin(id(1), id(2), id(3));
@@ -1523,7 +1467,6 @@ class ThreadJoinTest {
             old.createdAt(),
             T1,
             JoinDelivery.SETTLE_OWNER_TURN,
-            false,
             null);
     assertThrows(
         IllegalArgumentException.class, () -> ThreadJoin.validateTransition(old, changedDelivery));
@@ -1545,7 +1488,6 @@ class ThreadJoinTest {
             once.createdAt(),
             T2,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             id(10));
     assertThrows(
         IllegalArgumentException.class,
@@ -1555,20 +1497,18 @@ class ThreadJoinTest {
   }
 
   @Test
-  void deliveryAndQuotaFollowTheParent() {
-    // 测试意图：RECEIPT_ONLY 当且仅当无父；只有带父的票据才可计入额度。
-    ThreadJoin rootTicket = join(null, JoinDelivery.RECEIPT_ONLY, false);
+  void deliveryFollowsTheParent() {
+    // 测试意图：RECEIPT_ONLY 当且仅当无父。
+    ThreadJoin rootTicket = join(null, JoinDelivery.RECEIPT_ONLY);
     assertEquals(JoinDelivery.RECEIPT_ONLY, rootTicket.delivery());
-    assertThrows(
-        IllegalArgumentException.class, () -> join(null, JoinDelivery.NOTIFY_PARENT, false));
-    assertThrows(
-        IllegalArgumentException.class, () -> join(id(2), JoinDelivery.RECEIPT_ONLY, false));
-    assertThrows(IllegalArgumentException.class, () -> join(null, JoinDelivery.RECEIPT_ONLY, true));
-    assertTrue(join(id(2), JoinDelivery.NOTIFY_PARENT, true).countsTowardQuota());
-    assertFalse(join(id(2), JoinDelivery.SETTLE_OWNER_TURN, false).countsTowardQuota());
+    assertThrows(IllegalArgumentException.class, () -> join(null, JoinDelivery.NOTIFY_PARENT));
+    assertThrows(IllegalArgumentException.class, () -> join(id(2), JoinDelivery.RECEIPT_ONLY));
+    assertEquals(JoinDelivery.NOTIFY_PARENT, join(id(2), JoinDelivery.NOTIFY_PARENT).delivery());
+    assertEquals(
+        JoinDelivery.SETTLE_OWNER_TURN, join(id(2), JoinDelivery.SETTLE_OWNER_TURN).delivery());
   }
 
-  private static ThreadJoin join(UUID parent, JoinDelivery delivery, boolean counts) {
+  private static ThreadJoin join(UUID parent, JoinDelivery delivery) {
     return new ThreadJoin(
         id(1),
         VALID_HASH,
@@ -1584,7 +1524,6 @@ class ThreadJoinTest {
         T0,
         T0,
         delivery,
-        counts,
         null);
   }
 }

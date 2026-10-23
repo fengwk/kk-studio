@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.harness.runtime;
 
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -47,7 +46,6 @@ class SpawnRequestTest {
             true,
             SpawnTrigger.CONTROLLER,
             JoinDelivery.RECEIPT_ONLY,
-            false,
             new SpawnRequest.Budget(10, 4, 8, 16),
             commands,
             HASH);
@@ -64,7 +62,6 @@ class SpawnRequestTest {
     assertEquals(ThreadConstraints.NONE, root.constraints());
     assertEquals(SpawnTrigger.CONTROLLER, root.trigger());
     assertEquals(JoinDelivery.RECEIPT_ONLY, root.delivery());
-    assertFalse(root.countsTowardQuota());
     assertEquals(10, root.budget().maxTurns());
     assertEquals(TICKET, root.ticketId());
     assertEquals(HASH, root.requestHash());
@@ -83,14 +80,13 @@ class SpawnRequestTest {
               false,
               trigger,
               JoinDelivery.RECEIPT_ONLY,
-              false,
               SpawnRequest.Budget.unlimited(),
               List.of(command(11, "trigger")),
               HASH);
       assertEquals(trigger, ticket.trigger());
     }
 
-    // 子 Thread：通知父并冻结父 head，同时计入额度。
+    // 子 Thread：通知父并冻结父 head。
     SpawnRequest child =
         request(
             SESSION,
@@ -100,15 +96,13 @@ class SpawnRequestTest {
             false,
             SpawnTrigger.MODEL_TOOL,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             new SpawnRequest.Budget(5, 3, 2, 4),
             List.of(command(12, "child")),
             HASH);
     assertEquals(PARENT, child.parentThreadId());
     assertEquals(HEAD, child.expectedParentHeadEntryId());
-    assertTrue(child.countsTowardQuota());
 
-    // 压缩类票据：结算 owner turn，不计额度，因此不携带父 head。
+    // 压缩类票据：结算 owner turn，不携带父 head。
     SpawnRequest settle =
         request(
             SESSION,
@@ -118,7 +112,6 @@ class SpawnRequestTest {
             false,
             SpawnTrigger.RUNTIME,
             JoinDelivery.SETTLE_OWNER_TURN,
-            false,
             SpawnRequest.Budget.unlimited(),
             List.of(command(13, "compact")),
             HASH);
@@ -134,7 +127,6 @@ class SpawnRequestTest {
             false,
             SpawnTrigger.PLUGIN,
             JoinDelivery.NOTIFY_PARENT,
-            false,
             SpawnRequest.Budget.unlimited(),
             List.of(command(14, "more")),
             HASH);
@@ -157,7 +149,6 @@ class SpawnRequestTest {
                     false,
                     SpawnTrigger.USER,
                     JoinDelivery.RECEIPT_ONLY,
-                    false,
                     SpawnRequest.Budget.unlimited(),
                     List.of(command(20, "user")),
                     HASH));
@@ -180,7 +171,6 @@ class SpawnRequestTest {
                   false,
                   SpawnTrigger.CONTROLLER,
                   JoinDelivery.RECEIPT_ONLY,
-                  false,
                   SpawnRequest.Budget.unlimited(),
                   List.of(command(21, "hash")),
                   hash));
@@ -216,7 +206,6 @@ class SpawnRequestTest {
                 false,
                 SpawnTrigger.CONTROLLER,
                 JoinDelivery.RECEIPT_ONLY,
-                false,
                 SpawnRequest.Budget.unlimited(),
                 List.of(command(40, "receipt-with-parent")),
                 HASH));
@@ -231,7 +220,6 @@ class SpawnRequestTest {
                 false,
                 SpawnTrigger.RUNTIME,
                 JoinDelivery.SETTLE_OWNER_TURN,
-                false,
                 SpawnRequest.Budget.unlimited(),
                 List.of(command(41, "settle-without-parent")),
                 HASH));
@@ -246,7 +234,6 @@ class SpawnRequestTest {
                 false,
                 SpawnTrigger.MODEL_TOOL,
                 JoinDelivery.NOTIFY_PARENT,
-                false,
                 SpawnRequest.Budget.unlimited(),
                 List.of(command(42, "notify-without-parent")),
                 HASH));
@@ -263,7 +250,6 @@ class SpawnRequestTest {
                 false,
                 SpawnTrigger.MODEL_TOOL,
                 JoinDelivery.NOTIFY_PARENT,
-                false,
                 SpawnRequest.Budget.unlimited(),
                 List.of(command(43, "notify-without-head")),
                 HASH));
@@ -278,7 +264,6 @@ class SpawnRequestTest {
                 false,
                 SpawnTrigger.RUNTIME,
                 JoinDelivery.SETTLE_OWNER_TURN,
-                false,
                 SpawnRequest.Budget.unlimited(),
                 List.of(command(44, "settle-with-head")),
                 HASH));
@@ -293,29 +278,8 @@ class SpawnRequestTest {
                 false,
                 SpawnTrigger.CONTROLLER,
                 JoinDelivery.RECEIPT_ONLY,
-                false,
                 SpawnRequest.Budget.unlimited(),
                 List.of(command(45, "receipt-with-head")),
-                HASH));
-  }
-
-  @Test
-  void rejectsQuotaWithoutParent() {
-    // 额度统计的是父 Thread 的未完成子任务，无父票据不能计额。
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            request(
-                SESSION,
-                null,
-                null,
-                null,
-                false,
-                SpawnTrigger.CONTROLLER,
-                JoinDelivery.RECEIPT_ONLY,
-                true,
-                SpawnRequest.Budget.unlimited(),
-                List.of(command(50, "quota-without-parent")),
                 HASH));
   }
 
@@ -333,7 +297,6 @@ class SpawnRequestTest {
                 true,
                 SpawnTrigger.MODEL_TOOL,
                 JoinDelivery.NOTIFY_PARENT,
-                false,
                 SpawnRequest.Budget.unlimited(),
                 List.of(command(60, "child-yolo")),
                 HASH));
@@ -348,7 +311,6 @@ class SpawnRequestTest {
                 true,
                 SpawnTrigger.CONTROLLER,
                 JoinDelivery.RECEIPT_ONLY,
-                false,
                 SpawnRequest.Budget.unlimited(),
                 List.of(command(61, "continued-yolo")),
                 HASH));
@@ -368,7 +330,6 @@ class SpawnRequestTest {
                 false,
                 SpawnTrigger.CONTROLLER,
                 JoinDelivery.RECEIPT_ONLY,
-                false,
                 SpawnRequest.Budget.unlimited(),
                 null,
                 HASH));
@@ -383,7 +344,6 @@ class SpawnRequestTest {
                 false,
                 SpawnTrigger.CONTROLLER,
                 JoinDelivery.RECEIPT_ONLY,
-                false,
                 SpawnRequest.Budget.unlimited(),
                 List.of(),
                 HASH));
@@ -400,7 +360,6 @@ class SpawnRequestTest {
                     false,
                     SpawnTrigger.CONTROLLER,
                     JoinDelivery.RECEIPT_ONLY,
-                    false,
                     SpawnRequest.Budget.unlimited(),
                     List.of(duplicate, duplicate),
                     HASH));
@@ -421,7 +380,6 @@ class SpawnRequestTest {
             false,
             SpawnTrigger.CONTROLLER,
             JoinDelivery.RECEIPT_ONLY,
-            false,
             SpawnRequest.Budget.unlimited(),
             commands,
             HASH);
@@ -484,7 +442,6 @@ class SpawnRequestTest {
         false,
         SpawnTrigger.CONTROLLER,
         JoinDelivery.RECEIPT_ONLY,
-        false,
         SpawnRequest.Budget.unlimited(),
         commands,
         HASH);
@@ -498,7 +455,6 @@ class SpawnRequestTest {
       boolean yoloEnabled,
       SpawnTrigger trigger,
       JoinDelivery delivery,
-      boolean countsTowardQuota,
       SpawnRequest.Budget budget,
       List<NewThreadCommand> commands,
       String requestHash) {
@@ -515,7 +471,6 @@ class SpawnRequestTest {
         ThreadConstraints.NONE,
         trigger,
         delivery,
-        countsTowardQuota,
         budget,
         TICKET,
         requestHash);

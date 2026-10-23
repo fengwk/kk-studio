@@ -240,7 +240,6 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
                   now,
                   now,
                   JoinDelivery.NOTIFY_PARENT,
-                  true,
                   null));
           UUID joinBC = tx.nextId();
           tx.insertJoin(
@@ -259,7 +258,6 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
                   now,
                   now,
                   JoinDelivery.NOTIFY_PARENT,
-                  true,
                   null));
 
           if (bTerminalPending) {

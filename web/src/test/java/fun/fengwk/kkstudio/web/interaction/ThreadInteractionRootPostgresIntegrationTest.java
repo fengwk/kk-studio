@@ -882,7 +882,6 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
             ThreadConstraints.NONE,
             SpawnTrigger.MODEL_TOOL,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             new SpawnRequest.Budget(
                 MAX_TURNS, MAX_DEPTH, MAX_CONCURRENT_CHILDREN, MAX_CONCURRENT_THREADS),
             UUID.randomUUID(),

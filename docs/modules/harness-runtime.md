@@ -210,7 +210,7 @@ Stop 在 tree 锁内校验目标 version 与 `stopRequestId`，按 `parentThread
 
 内置 `task` 工具只做一次持久接受：平台经 `AgentTaskService` 调用统一 `spawn`，在同一事务接受源 prompt、创建或续用子 Thread、写入 Join 票据并请求 Work，然后立即回执 `Task accepted. thread_id: <uuid>.`。子结果不经过工具返回，而是在子执行收敛后作为父 Thread 的一条系统通知交付。
 
-`harness_thread_join` 的一行只记凭据：调用身份与请求指纹、父子 Thread、源命令序号、agent 与 `maxTurns`、交付方式、是否计入额度，以及一次冻结的 `terminalEntryId` / `finalAnswerEntryId` 与交付命令序号。[`JoinDelivery`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/join/JoinDelivery.java) 有三种：
+`harness_thread_join` 的一行只记凭据：调用身份与请求指纹、父子 Thread、源命令序号、agent 与 `maxTurns`、交付方式，以及一次冻结的 `terminalEntryId` / `finalAnswerEntryId` 与交付命令序号（并发额度由 `delivery == NOTIFY_PARENT` 直接推导，不设独立字段）。[`JoinDelivery`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/join/JoinDelivery.java) 有三种：
 
 - `NOTIFY_PARENT`：task 子执行，计入额度；同一事务校验父可接受本次调用、父 head 匹配与深度/并发额度，父已 `STOPPED` 时拒绝新委派。续用只能向既有子追加 prompt，不能改父关系。
 - `RECEIPT_ONLY`：没有父的内部 root 任务，不计额度，只供票据观察。
@@ -218,9 +218,9 @@ Stop 在 tree 锁内校验目标 version 与 `stopRequestId`，按 `parentThread
 
 同一父子对至多一个有效未完成 Join；子 Thread 无未完成的 `SETTLE_OWNER_TURN` 时，新续接可取代旧等待，否则须完成 owner 结算后才可继续。精确重放仍返回原票据。
 
-普通结算要求：源命令已应用；没有尚未冻结结果的直接子 Join、没有未送达的子回执、本 Thread 没有待处理输入——因此多级委派自底向上自然收敛，既不等于首次本地 Idle，也不等待整棵子树永久静止；Stop 的强制结算不受此限。结果固定在源命令应用位置到终态边界的历史范围内，子树后续推进不改写旧回执。`maxTurns` 是软预算，超出时在规划中物化一条 `TASK_BUDGET` 通知，每个 Join 只提醒一次。
+普通结算要求：源命令已应用；没有尚未冻结结果的直接子 Join、本 Thread 没有待处理输入——因此多级委派自底向上自然收敛，既不等于首次本地 Idle，也不等待整棵子树永久静止；Stop 的强制结算不受此限。结果固定在源命令应用位置到终态边界的历史范围内，子树后续推进不改写旧回执。`maxTurns` 是软预算，超出时在规划中物化一条 `TASK_BUDGET` 通知，每个 Join 只提醒一次。
 
-结算与父通知入队在同一事务完成；通知的消息由 `runtime.join` 纯函数渲染（`<subagent_result>` 包裹任务原文与结果），不读取子线程当前 head。显式停止的父不会被唤醒：通知直接物化进历史，待父接受新输入后由 `INPUT` 回合消费。
+结算与父通知入队在同一事务完成：`NOTIFY_PARENT` 结算原子冻结终态结果、写入父 `NOTIFICATION` 命令、推进父序列并请求 Work，通过唯一次 `updateJoin` 直接落盘为 delivered 状态，不持久化已匹配但未送达的中间态。通知的消息由 `runtime.join` 纯函数渲染（`<subagent_result>` 包裹任务原文与结果），不读取子线程当前 head。显式停止的父不会被唤醒：通知直接物化进历史，待父接受新输入后由 `INPUT` 回合消费。
 
 ## 端口与策略
 

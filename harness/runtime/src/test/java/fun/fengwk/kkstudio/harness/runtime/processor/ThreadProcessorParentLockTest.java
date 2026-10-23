@@ -210,7 +210,6 @@ class ThreadProcessorParentLockTest extends ThreadProcessorTestBase {
                   NOW,
                   NOW,
                   JoinDelivery.NOTIFY_PARENT,
-                  true,
                   null));
           return null;
         });
