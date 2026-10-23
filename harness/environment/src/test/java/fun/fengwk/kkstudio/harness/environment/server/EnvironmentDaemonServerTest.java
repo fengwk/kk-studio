@@ -67,6 +67,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.BrokenBarrierException;
@@ -811,30 +812,41 @@ class EnvironmentDaemonServerTest {
           public boolean isCancelled() {
             return false;
           }
+
+          @Override
+          public void terminate(EnvironmentCapabilityTerminationCause cause) {
+            Objects.requireNonNull(cause, "cause");
+          }
+
+          @Override
+          public Duration terminalDeliveryGrace() {
+            return Duration.ZERO;
+          }
         };
     assertThrows(IllegalArgumentException.class, () -> fixture.server.expire(foreign));
   }
 
   /**
-   * 测试意图：ActiveInvocation 在 invoke 时将 server 的 heartbeatTimeout 冻结为 terminationGrace，且不受后续设置变化影响。
+   * 测试意图：ActiveInvocation 在 invoke 时将 server 的 heartbeatTimeout 冻结为
+   * terminalDeliveryGrace，且不受后续设置变化影响。
    */
   @Test
-  void activeInvocationFreezesHeartbeatTimeoutAsTerminationGraceAtInvokeTime() {
+  void activeInvocationFreezesHeartbeatTimeoutAsTerminalDeliveryGraceAtInvokeTime() {
     Fixture fixture = new Fixture();
     fixture.connectReady("channel-grace-freeze");
     EnvironmentCapabilityExecutionHandle firstHandle =
         fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener());
-    assertEquals(Duration.ofSeconds(60), firstHandle.terminationGrace());
+    assertEquals(Duration.ofSeconds(60), firstHandle.terminalDeliveryGrace());
 
     fixture.settings.set(
         new EnvironmentServerSettings(Duration.ofSeconds(15), 16L * 1024 * 1024, 259200L, 1800L));
     EnvironmentCapabilityExecutionHandle secondHandle =
         fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_TWO), new RecordingListener());
-    assertEquals(Duration.ofSeconds(15), secondHandle.terminationGrace());
+    assertEquals(Duration.ofSeconds(15), secondHandle.terminalDeliveryGrace());
     assertEquals(
         Duration.ofSeconds(60),
-        firstHandle.terminationGrace(),
-        "已签发的句柄必须保持 invoke 时冻结的 terminationGrace");
+        firstHandle.terminalDeliveryGrace(),
+        "已签发的句柄必须保持 invoke 时冻结的 terminalDeliveryGrace");
   }
 
   /**
