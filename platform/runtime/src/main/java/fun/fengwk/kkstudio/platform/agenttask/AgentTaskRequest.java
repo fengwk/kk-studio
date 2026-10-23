@@ -1,5 +1,9 @@
 package fun.fengwk.kkstudio.platform.agenttask;
 
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
+
+import fun.fengwk.kkstudio.common.hash.Sha256;
 import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.runtime.SpawnRequest;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
@@ -44,5 +48,37 @@ public record AgentTaskRequest(
     Objects.requireNonNull(trigger, "trigger");
     Objects.requireNonNull(budget, "budget");
     Objects.requireNonNull(requestHash, "requestHash");
+  }
+
+  /**
+   * 规范计算外部任务身份的 canonical JSON 文本：严格覆盖 {@code ticketId}、{@code agent}、{@code prompt} 与 nullable 的
+   * {@code maxTurns}。与内部 settings 或运行时配置无关。
+   */
+  public static String canonicalJson(UUID ticketId, String agent, String prompt, Integer maxTurns) {
+    Objects.requireNonNull(ticketId, "ticketId");
+    if (agent == null || agent.isBlank()) {
+      throw new IllegalArgumentException("agent must not be blank");
+    }
+    if (prompt == null || prompt.isBlank()) {
+      throw new IllegalArgumentException("prompt must not be blank");
+    }
+    if (maxTurns != null && maxTurns <= 0) {
+      throw new IllegalArgumentException("maxTurns must be positive");
+    }
+    ObjectNode node = JsonNodeFactory.instance.objectNode();
+    node.put("ticketId", ticketId.toString());
+    node.put("agent", agent);
+    node.put("prompt", prompt);
+    if (maxTurns == null) {
+      node.putNull("maxTurns");
+    } else {
+      node.put("maxTurns", maxTurns);
+    }
+    return node.toString();
+  }
+
+  /** 规范计算外部任务身份的请求指纹：SHA-256（64 位小写十六进制）。 */
+  public static String requestHash(UUID ticketId, String agent, String prompt, Integer maxTurns) {
+    return Sha256.hex(canonicalJson(ticketId, agent, prompt, maxTurns));
   }
 }
