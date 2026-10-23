@@ -63,7 +63,7 @@ LSP 客户端按项目根、server ID 和配置指纹复用，去重并发初始
 
 task 接受 subagent_type、prompt、可选 max_turns、可选 thread_id。新任务创建子 Thread；thread_id 在原历史上继续，允许切换 Agent，采用目标配置和权限。继续由子 Thread 的持久父发起，以不可变父子关系验证身份，并复验父 head 与停止边界。向仍执行的子追加输入会排队，等下一次 turn 边界。max_turns 是阶段汇报软预算：达到后由 Runtime 以 `TASK_BUDGET` 通知注入提醒。
 
-忙时继续不打断当前模型或工具调用，也不覆盖其冻结请求；目标 settings 与新 prompt 一起入队，在后续 INPUT 边界消费。同一父/子对至多有一个有效未完成 join：新的续接原子上位并 supersede 旧等待，旧 join 保留其 invocation identity 与排队源命令，但不再占额度、不再产生独立交付。因此忙时追加多次 prompt 只会为最新一次 prompt 汇总一份结果，而不是每次委派各交付一次。
+忙时继续不打断当前模型或工具调用，也不覆盖其冻结请求；目标 settings 与新 prompt 一起入队，在后续 INPUT 边界消费。同一父/子对至多有一个有效未完成 join：新的续接原子上位并 supersede 旧等待，旧 join 保留其 invocation identity 与排队源命令，但不再占额度、不再产生独立交付。因此忙时追加多次 prompt 只会为最新一次 prompt 汇总一份结果，而不是每次委派各交付一次。子 Thread 存在未完成的 `SETTLE_OWNER_TURN` 时拒绝新续接；精确重放返回原票据，完成结算后才可继续。
 
 从历史边界 fork 的 Thread 是独立执行根：分支 fork 的 head 是一个只记录 `mode`/切点的新 `FORK` Entry，会话 fork 则把切点处的有效上下文复制到新 Session，两者都追加固定英文 FORK 通知（只陈述事实）。它不继承源 Thread 的待处理命令、子执行或 Join 订阅；原有子任务之后的回执仍交给原父 Thread，新分支不能通过旧 thread_id 接管原有子执行，已在分叉前进入共享历史的回执仍可见。
 
@@ -96,8 +96,8 @@ Work 通知只降低延迟，周期 claim 扫描兜底进程重启和通知丢�
 - 超时、取消、提交不明或远程断开声明 `Whether the tool took effect cannot be confirmed.`，不得声称未执行；bash 的取消与超时仍保留真实的进程终态事实（`EXITED` / `TIMED_OUT` / `CANCELLED`）。
 
 远端执行预算与传输恢复窗口分离：`request.timeout` 是 capability 的执行预算，只有显式指定 `0` 才表示无界；
-`terminationGrace` 只是 invoke 时冻结心跳超时得到的传输恢复窗，不是额外执行时间。Platform 从发送前起
-只等待一次 `request.timeout + terminationGrace`，partial 与重连均不续期；恢复窗口内保留真实正常或
+`terminalDeliveryGrace` 只是 invoke 时冻结心跳超时得到的终态传输恢复窗，不是 terminate 后再等的时间。Platform 从发送前起
+只等待一次 `request.timeout + terminalDeliveryGrace`，partial 与重连均不续期；timeout 为 `0` 时无界。恢复窗口内保留真实正常或
 预算耗尽后的输出。缺终态到期返回 UNKNOWN，并移除在途记录、阻止重放、取消远端和释放 transfer，
 不能解释为未执行或安全重试。真实远端 FAILED 在窗口内交付时仍按确定失败呈现，不降级为 UNKNOWN。
 

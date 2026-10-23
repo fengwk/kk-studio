@@ -14,7 +14,8 @@ import java.util.UUID;
 /**
  * 任务票据（Join）的唯一准入与登记路径：{@link AgentSpawner} 的新建与续用两条路径共用，调用方已持有规范锁序下的全部锁。
  *
- * <p>准入先于任何写入，按父状态、父子配额、执行树深度、全局配额的顺序裁决；登记在源命令写入之后插入票据，并 supersede 同一父/子对上既有未完成票据。
+ * <p>精确重放返回原票据；新准入先拒绝子 Thread 上未完成的 {@code SETTLE_OWNER_TURN}，再按父状态、父子配额、执行树深度、全局配额裁决。
+ * 登记在源命令写入之后插入票据，并 supersede 同一父/子对上可替换的未完成票据；owner 结算完成后才可新续接。
  */
 final class SpawnTickets {
 
@@ -70,7 +71,7 @@ final class SpawnTickets {
     }
   }
 
-  /** 同一父/子对至多一个有效未完成票据：本次续接会原子上位并 supersede 它，配额按替换后的有效数量判定。 */
+  /** 通过准入后，同一父/子对的可替换未完成票据由新续接原子取代，配额按替换后的有效数量判定。 */
   private static int replacedQuotaJoins(HarnessStore.Transaction tx, UUID childId, UUID parentId) {
     return (int)
         tx.loadIncompleteJoins(childId).stream()

@@ -28,7 +28,7 @@ V1 写入单行 SystemSettings 默认聚合；Java 解码与 profile 默认契�
 | Catalog | agent_provider、agent_model（MODEL/GROUP 共用名称空间）、agent_model_group_cooldown、agent_definition、skill_package | [Platform Catalog](platform.md#catalog) |
 | Plugin | plugin_configuration：每个 Plugin 的当前普通配置与修订；plugin_credential：凭据载荷、状态、refresh lease；plugin_auth_attempt：待完成的交互式认证 | [Plugin 配置存储](platform.md#plugin-配置存储)、[Plugin credential](platform.md#plugin-credential) |
 | MCP | mcp_server、mcp_tool：配置与原子发现快照 | [Platform MCP](platform.md#mcp-server-与运行时工具目录) |
-| Environment | environment、environment_connection：注册与环境路由租约、保存的安装设置（`install_config`）、宿主/Skill 投影；environment_install_code：临时一次性安装 code 摘要与有效期；cluster_node：App 节点内部 IDE 路由 origin 与心跳租约 | [Environment](harness-environment.md) |
+| Environment | environment、environment_connection：注册与环境路由租约、保存的安装设置（`install_config`）、宿主/Skill 投影；environment_install_code：临时一次性安装 code 摘要与有效期；environment_update_operation：受管更新操作；cluster_node：App 节点内部 IDE 路由 origin 与心跳租约 | [Environment](harness-environment.md) |
 | Chat | chat、chat_session：owner 关系 | [Platform](platform.md#命令接受产品归属与派发) |
 | Canvas | canvas_document/group/node/resource、function_run、command_dedup、function_resource_pin | [Canvas](canvas.md) |
 | Project | project、project_issue 与 agent_thread/stage_budget/run/activity/evidence | [Project](project.md) |

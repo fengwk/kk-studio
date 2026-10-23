@@ -47,12 +47,12 @@ import java.util.concurrent.ScheduledExecutorService;
  * lease 恢复为 UNKNOWN（attempt 保留）+ version+1 + THREAD wake + complete，绝不重放 Tool；terminal 行只确保 THREAD
  * Work 后 complete，不重复 bump version。
  *
- * <p>执行：并发协议为 claimOwned Work-only 前置校验 -&gt; per-invocation guard -&gt; registry；随后 {@link
- * ToolGateway#admit} 做纯本地 admission（Busy 按 retryAfter reschedule、Rejected 转
- * FAILED，两者都肯定无副作用，attempt 不变）， Admitted 后在任何副作用之前持久化 {@code READY -> RUNNING}，再由 {@link
- * ToolExecution} 在独占虚拟线程上阻塞执行至终态， 终态与资源释放都发生在该线程上。heartbeat 只 renew 当前 Work lease；进程内 registry 以
- * invocationId 为键，{@link #cancel} 提供唯一本地取消入口（interrupt 执行线程），{@link #close} 取消全部并停止各自 heartbeat（不
- * shutdown 注入的 scheduler），closed 后 {@link #process} 拒绝新 claim。
+ * <p>执行：并发协议为 claimOwned Work-only 前置校验 -&gt; per-invocation guard（自身即 execution registry，并在原子计算内再次
+ * 复核 DB ownership） -&gt; prepare；随后 {@link ToolGateway#admit} 做纯本地 admission（Busy 按 retryAfter
+ * reschedule、Rejected 转 FAILED，两者都肯定无副作用，attempt 不变）， Admitted 后在任何副作用之前持久化 {@code READY ->
+ * RUNNING}，再由 {@link ToolExecution} 在独占虚拟线程上阻塞执行至终态， 终态与资源释放都发生在该线程上。heartbeat 只 renew 当前 Work
+ * lease；{@link #cancel} 提供唯一本地取消入口（interrupt 执行线程），{@link #close} 取消全部并停止各自 heartbeat（不 shutdown
+ * 注入的 scheduler），closed 后 {@link #process} 拒绝新 claim。
  */
 @Slf4j
 public final class ToolProcessor implements AutoCloseable {
@@ -86,11 +86,11 @@ public final class ToolProcessor implements AutoCloseable {
   /**
    * 处理一次 dispatcher 已 claim 的 TOOL Work。
    *
-   * <p>任何 admission guard 替换 / active supersede 之前，先用 Work-only 短事务 {@code lockClaimedWork} 验证传入
-   * claim 当前真实 owned：伪造 / 错误 / 已过期 token 一律 LOST_OWNERSHIP no-op，绝不 cancel 合法 active execution。 随后
-   * per-invocation guard 覆盖 prepare 到 registry 插入：同一 claim（同 lease token）重复 / 并发投递直接返回
-   * LOST_OWNERSHIP（不 cancel、不 mutation）；不同新 token（已通过 Work-only 校验，旧 lease 必然过期）先 supersede 旧本地
-   * execution 再 prepare。
+   * <p>先用 Work-only 短事务 {@code lockClaimedWork} 验证传入 claim 当前真实 owned（伪造 / 错误 / 已过期 token 一律
+   * LOST_OWNERSHIP no-op，绝不 cancel 合法 active execution）；再进入同时充当 execution registry 的 per-invocation
+   * guard，由其在原子计算内再次复核 DB ownership，ticket 覆盖 prepare 到 execution 登记。同一 claim（同 lease token）重复 /
+   * 并发投递直接返回 LOST_OWNERSHIP（不 cancel、不 mutation）；不同有效 token 若存在旧 entry，则标记 superseded、捕获旧 execution
+   * 并在原子计算外 abandon，再 prepare。
    */
   public ProcessResult process(ClaimedWork claim) {
     Objects.requireNonNull(claim, "claim");
@@ -153,8 +153,8 @@ public final class ToolProcessor implements AutoCloseable {
   }
 
   /**
-   * 任何 admission guard 替换 / active supersede 之前的 Work-only 前置校验：仅锁 Work 行（锁序：单实体事务只锁 Work）， 验证传入
-   * claim 的 leaseToken 与 leaseUntil 当前仍真实 owned。不触碰 Thread / Invocation，无任何 mutation。
+   * process 进入 guard 前的 Work-only 前置校验，也是 guard 原子计算内再次复核 DB ownership 的回调：仅锁 Work 行（锁序：单实体事务只锁
+   * Work），验证传入 claim 的 leaseToken 与 leaseUntil 当前仍真实 owned。不触碰 Thread / Invocation，无任何 mutation。
    */
   private boolean claimOwned(ClaimedWork claim) {
     return Boolean.TRUE.equals(store.transaction(tx -> !tx.lockClaimedWork(claim).isEmpty()));
