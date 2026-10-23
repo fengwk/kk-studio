@@ -91,6 +91,8 @@ const stateDirs: string[] = []
 
 function fakeHelper(lifetimeMillis = 400): ChildProcessWithoutNullStreams {
   const child = spawn(process.execPath, ['-e', `setTimeout(() => process.exit(0), ${lifetimeMillis})`], {
+    // Pure timer fixtures may be killed; an own undefined key prevents Node inheriting coverage.
+    env: { ...process.env, NODE_V8_COVERAGE: undefined },
     stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
   }) as ChildProcessWithoutNullStreams
   children.push(child)
@@ -128,6 +130,34 @@ afterEach(async () => {
   }
   // 恢复真实原生绑定：假绑定只在一个用例范围内生效。
   installWindowsNativeBindingsForTest(null)
+})
+
+describe('fake helper coverage isolation', () => {
+  test('does not generate coverage on natural exit or change the parent environment', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'kk-helper-coverage-'))
+    const coverageDirectory = join(directory, 'coverage')
+    const previous = process.env.NODE_V8_COVERAGE
+    let child: ChildProcessWithoutNullStreams | undefined
+    try {
+      process.env.NODE_V8_COVERAGE = coverageDirectory
+      child = fakeHelper(1)
+      await new Promise<void>((resolve) => child!.once('close', () => resolve()))
+      expect(child.exitCode).toBe(0)
+      expect(process.env.NODE_V8_COVERAGE).toBe(coverageDirectory)
+      expect(existsSync(coverageDirectory)).toBe(false)
+    } finally {
+      if (child && child.exitCode === null && child.signalCode === null) {
+        child.kill('SIGKILL')
+        await new Promise<void>((resolve) => child!.once('close', () => resolve()))
+      }
+      if (previous === undefined) {
+        delete process.env.NODE_V8_COVERAGE
+      } else {
+        process.env.NODE_V8_COVERAGE = previous
+      }
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
 })
 
 describe.skipIf(process.platform === 'win32')('windows process supervisor lifecycle (mocked native bindings)', () => {
