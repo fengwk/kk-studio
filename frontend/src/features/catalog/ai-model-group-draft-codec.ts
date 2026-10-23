@@ -105,4 +105,3 @@ export function toEditableModelGroup(draft: ModelGroupDraft): AgentModelEditable
     },
   }
 }
-
