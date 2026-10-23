@@ -4,7 +4,7 @@
     "outputTokens": 20,
     "cacheReadTokens": 0,
     "cacheWriteTokens": 0,
-    "cacheWriteLongTokens": 0,
+    "cacheWriteByTtl": {},
     "reasoningTokens": 0,
     "providerTotalTokens": 120
   },
@@ -13,7 +13,7 @@
     "outputTokens": 20,
     "cacheReadTokens": 50,
     "cacheWriteTokens": 0,
-    "cacheWriteLongTokens": 0,
+    "cacheWriteByTtl": {},
     "reasoningTokens": 0,
     "providerTotalTokens": 170
   },
@@ -21,18 +21,18 @@
     "inputTokens": 100,
     "outputTokens": 20,
     "cacheReadTokens": 0,
-    "cacheWriteTokens": 25,
-    "cacheWriteLongTokens": 75,
-    "reasoningTokens": 0,
-    "providerTotalTokens": 0
+    "cacheWriteTokens": 100,
+    "cacheWriteByTtl": {"300": 25, "3600": 75},
+    "reasoningTokens": null,
+    "providerTotalTokens": null
   },
   "anthropicHit": {
     "inputTokens": 100,
     "outputTokens": 20,
     "cacheReadTokens": 50,
-    "cacheWriteTokens": 25,
-    "cacheWriteLongTokens": 75,
-    "reasoningTokens": 0,
-    "providerTotalTokens": 0
+    "cacheWriteTokens": 100,
+    "cacheWriteByTtl": {"300": 25, "3600": 75},
+    "reasoningTokens": null,
+    "providerTotalTokens": null
   }
 }

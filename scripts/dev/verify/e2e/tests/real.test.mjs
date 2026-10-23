@@ -229,53 +229,122 @@ test('prompt cache 确定性前缀与 system prompt 尺寸满足 >=16KiB 边界'
   assert.ok(prompt.includes('exact marker text'), 'system prompt must enforce exact marker emission')
 })
 
-test('assertAssistantUsage 严格校验用量七字段非负性与事实有效性', () => {
-  // 测试意图：验证模型用量元数据断言函数能正确拦截缺失字段、负数值、非安全整数以及零 IO，确保真实 Provider 返回了实质性 token 用量。
+test('assertAssistantUsage 严格校验 ModelUsage 计数、nullable 原始报告与 TTL 拆分', () => {
+  // 测试意图：验证当前 ModelUsage schema（四个非负安全计数、两个 nullable 原始报告、可选 TTL 拆分），
+  // 并确认 requirePositiveIO 使用分类输入总和与已含 reasoning 的输出总量判定真实用量。
   const validUsage = {
     inputTokens: 100,
-    outputTokens: 20,
+    outputTokens: 60,
     cacheReadTokens: 50,
-    cacheWriteTokens: 0,
-    cacheWriteLongTokens: 0,
-    reasoningTokens: 0,
-    providerTotalTokens: 170,
+    cacheWriteTokens: 15,
+    cacheWriteByTtl: { 300: 10, 3600: 5 },
+    reasoningTokens: 30,
+    providerTotalTokens: 225, // 100 + 50 + 15 + 60
   }
 
   assert.doesNotThrow(() => assertAssistantUsage(validUsage))
   assert.doesNotThrow(() => assertAssistantUsage(validUsage, { requirePositiveIO: true }))
 
-  // 缺少字段
+  // 空 TTL 拆分表示未知分布，不参与守恒，但 cacheWriteTokens 仍然有效。
+  assert.doesNotThrow(() => assertAssistantUsage({ ...validUsage, cacheWriteByTtl: {} }))
+
+  // 缺少或显式为 null 的必填计数必须拒绝。
   const missingField = { ...validUsage }
   delete missingField.cacheReadTokens
-  assert.throws(() => assertAssistantUsage(missingField), /non-negative safe integer/)
+  assert.throws(
+    () => assertAssistantUsage(missingField),
+    /cacheReadTokens must be a non-negative safe integer/,
+  )
+  assert.throws(
+    () => assertAssistantUsage({ ...validUsage, inputTokens: null }),
+    /inputTokens must be a non-negative safe integer/,
+  )
 
-  // 负数
+  // 负数、浮点数与非安全整数必须拒绝。
   assert.throws(
     () => assertAssistantUsage({ ...validUsage, inputTokens: -1 }),
-    /non-negative safe integer/,
+    /inputTokens must be a non-negative safe integer/,
   )
-
-  // 浮点数
   assert.throws(
     () => assertAssistantUsage({ ...validUsage, outputTokens: 10.5 }),
+    /outputTokens must be a non-negative safe integer/,
+  )
+  assert.throws(
+    () => assertAssistantUsage({ ...validUsage, cacheReadTokens: Number.MAX_SAFE_INTEGER + 1 }),
+    /cacheReadTokens must be a non-negative safe integer/,
+  )
+
+  // nullable 原始报告允许显式 null，但不允许负数。
+  assert.doesNotThrow(() =>
+    assertAssistantUsage({ ...validUsage, reasoningTokens: null, providerTotalTokens: null }),
+  )
+  assert.throws(
+    () => assertAssistantUsage({ ...validUsage, providerTotalTokens: -1 }),
+    /providerTotalTokens must be a non-negative safe integer/,
+  )
+
+  // reasoning 是 output 的子集，不能大于 output。
+  assert.throws(
+    () => assertAssistantUsage({ ...validUsage, outputTokens: 20, reasoningTokens: 21 }),
+    /reasoningTokens must not exceed outputTokens/,
+  )
+
+  // TTL 拆分结构非法或总量不守恒必须拒绝。
+  assert.throws(
+    () => assertAssistantUsage({ ...validUsage, cacheWriteByTtl: [] }),
+    /cacheWriteByTtl must be an object/,
+  )
+  assert.throws(
+    () => assertAssistantUsage({ ...validUsage, cacheWriteByTtl: { 0: 15 } }),
+    /canonical positive seconds/,
+  )
+  assert.throws(
+    () => assertAssistantUsage({ ...validUsage, cacheWriteByTtl: { '01': 15 } }),
+    /canonical positive seconds/,
+  )
+  assert.throws(
+    () => assertAssistantUsage({ ...validUsage, cacheWriteByTtl: { 300: 10 } }),
+    /cacheWriteByTtl must sum to cacheWriteTokens/,
+  )
+  assert.throws(
+    () => assertAssistantUsage({ ...validUsage, cacheWriteByTtl: { 300: -1, 3600: 16 } }),
     /non-negative safe integer/,
   )
 
-  // requirePositiveIO 检查零 IO
+  // requirePositiveIO：分类输入 input+cacheRead+cacheWrite > 0，输出 outputTokens > 0。
   assert.throws(
-    () => assertAssistantUsage({ ...validUsage, inputTokens: 0 }, { requirePositiveIO: true }),
+    () =>
+      assertAssistantUsage(
+        {
+          ...validUsage,
+          inputTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          cacheWriteByTtl: {},
+        },
+        { requirePositiveIO: true },
+      ),
     /inputTokens must be > 0/,
   )
+  // cacheRead 或 cacheWrite 单独为正即可满足输入事实有效性。
+  assert.doesNotThrow(() =>
+    assertAssistantUsage(
+      { ...validUsage, inputTokens: 0, cacheWriteTokens: 0, cacheWriteByTtl: {} },
+      { requirePositiveIO: true },
+    ),
+  )
+  assert.doesNotThrow(() =>
+    assertAssistantUsage(
+      { ...validUsage, inputTokens: 0, cacheReadTokens: 0, outputTokens: 20, reasoningTokens: 0 },
+      { requirePositiveIO: true },
+    ),
+  )
   assert.throws(
-    () => assertAssistantUsage({ ...validUsage, outputTokens: 0 }, { requirePositiveIO: true }),
+    () => assertAssistantUsage({ ...validUsage, outputTokens: 0, reasoningTokens: 0 }, { requirePositiveIO: true }),
     /outputTokens must be > 0/,
   )
-  assert.throws(
-    () => assertAssistantUsage({ ...validUsage, providerTotalTokens: 0 }, { requirePositiveIO: true }),
-    /providerTotalTokens must be > 0/,
-  )
 
-  // requirePositiveIO: false 时允许零 IO
+  // requirePositiveIO: false 时允许全零。
   assert.doesNotThrow(() =>
     assertAssistantUsage(
       {
@@ -283,9 +352,8 @@ test('assertAssistantUsage 严格校验用量七字段非负性与事实有效�
         outputTokens: 0,
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
-        cacheWriteLongTokens: 0,
-        reasoningTokens: 0,
-        providerTotalTokens: 0,
+        reasoningTokens: null,
+        providerTotalTokens: null,
       },
       { requirePositiveIO: false },
     ),
@@ -407,94 +475,122 @@ test('resolveRealModel 与安全 resolver 校验 catalog 契约，失败时仅�
   )
 })
 
-test('assertProviderUsageAlgebra 针对四大厂商规范代数严格断言正确与违规 fixture', () => {
-  // 测试意图：使用合成 fixture 严密验证四大供应商（Google、OpenAI Responses、Anthropic、DeepSeek）的归一化 ModelUsage 代数等式及非法边界。
+test('assertProviderUsageAlgebra 按当前 ModelUsage 语义校验四大厂商代数，reasoning 计入 output 且不重复计数', () => {
+  // 测试意图：验证当前 ModelUsage 中 outputTokens 已包含 reasoning，providerTotalTokens 只累加一次；
+  // Anthropic 不报告 reasoning/total 拆分时必须保留 null；TTL 拆分包仅解释 cacheWriteTokens，不额外计数。
 
-  // 1. Google Gemini
+  // 1. Google Gemini：total = input + cacheRead + output（output 已含 reasoning）。
   const validGemini = {
     inputTokens: 100,
-    outputTokens: 20,
+    outputTokens: 60, // 含 reasoning 30
     cacheReadTokens: 50,
     cacheWriteTokens: 0,
-    cacheWriteLongTokens: 0,
     reasoningTokens: 30,
-    providerTotalTokens: 200, // 100 + 50 + 20 + 30
+    providerTotalTokens: 210, // 100 + 50 + 60，reasoning 不再重复累加
   }
   assert.doesNotThrow(() => assertProviderUsageAlgebra(validGemini, 'google'))
+  assert.doesNotThrow(() => assertAssistantUsage(validGemini, { providerType: 'google' }))
   // 违规：Gemini 不支持 cacheWriteTokens
   assert.throws(
     () => assertProviderUsageAlgebra({ ...validGemini, cacheWriteTokens: 5 }, 'google'),
     /cacheWriteTokens must be 0/,
   )
-  // 违规：providerTotal 算术不平
+  // 违规：把 reasoning 再加一次或任意算术不平
   assert.throws(
-    () => assertProviderUsageAlgebra({ ...validGemini, providerTotalTokens: 199 }, 'google'),
+    () => assertProviderUsageAlgebra({ ...validGemini, providerTotalTokens: 240 }, 'google'),
+    /Gemini providerTotalTokens algebra mismatch/,
+  )
+  assert.throws(
+    () => assertProviderUsageAlgebra({ ...validGemini, providerTotalTokens: 209 }, 'google'),
     /Gemini providerTotalTokens algebra mismatch/,
   )
 
-  // 2. OpenAI Responses
+  // 2. OpenAI Responses：total = input + cacheRead + cacheWrite + output。
   const validOpenAi = {
     inputTokens: 80,
-    outputTokens: 20,
+    outputTokens: 35, // 含 reasoning 15
     cacheReadTokens: 20,
     cacheWriteTokens: 10,
-    cacheWriteLongTokens: 0,
     reasoningTokens: 15,
-    providerTotalTokens: 145, // wireInput (80+20+10=110) + wireOutput (20+15=35) = 145
+    providerTotalTokens: 145, // (80 + 20 + 10) + 35
   }
   assert.doesNotThrow(() => assertProviderUsageAlgebra(validOpenAi, 'openai_responses'))
-  // 违规：OpenAI Responses 不支持 cacheWriteLongTokens
+  assert.doesNotThrow(() => assertAssistantUsage(validOpenAi, { providerType: 'openai_responses' }))
+  // 违规：把 reasoning 再加一次（115 + 35 + 15 = 165）或任意算术不平
   assert.throws(
-    () => assertProviderUsageAlgebra({ ...validOpenAi, cacheWriteLongTokens: 5 }, 'openai_responses'),
-    /cacheWriteLongTokens must be 0/,
-  )
-  // 违规：providerTotal 算术不平
-  assert.throws(
-    () => assertProviderUsageAlgebra({ ...validOpenAi, providerTotalTokens: 140 }, 'openai_responses'),
+    () => assertProviderUsageAlgebra({ ...validOpenAi, providerTotalTokens: 165 }, 'openai_responses'),
     /OpenAI Responses providerTotalTokens algebra mismatch/,
   )
+  assert.throws(
+    () => assertProviderUsageAlgebra({ ...validOpenAi, providerTotalTokens: 144 }, 'openai_responses'),
+    /OpenAI Responses providerTotalTokens algebra mismatch/,
+  )
+  // 未报告 total 时保留 null，不合成。
+  assert.doesNotThrow(() =>
+    assertProviderUsageAlgebra({ ...validOpenAi, providerTotalTokens: null }, 'openai_responses'),
+  )
 
-  // 3. Anthropic
-  const validAnthropicZeroTotal = {
+  // 3. Anthropic：reasoning 与 total 均不报告，必须为 null；TTL 拆分守恒。
+  const validAnthropic = {
     inputTokens: 100,
     outputTokens: 50,
     cacheReadTokens: 25,
     cacheWriteTokens: 15,
-    cacheWriteLongTokens: 10,
-    reasoningTokens: 0,
-    providerTotalTokens: 0, // Anthropic 闭包后必须为 0
+    cacheWriteByTtl: { 300: 10, 3600: 5 },
+    reasoningTokens: null,
+    providerTotalTokens: null,
   }
-  assert.doesNotThrow(() => assertProviderUsageAlgebra(validAnthropicZeroTotal, 'anthropic'))
-  // 违规：Anthropic reasoningTokens 归一化 DTO 必须为 0（因 wire 计入 outputTokens，不重复计数）
+  assert.doesNotThrow(() => assertProviderUsageAlgebra(validAnthropic, 'anthropic'))
+  assert.doesNotThrow(() => assertAssistantUsage(validAnthropic, { providerType: 'anthropic' }))
+  // 违规：Anthropic reasoning 不提供拆分，任何非 null 值均非法。
   assert.throws(
-    () => assertProviderUsageAlgebra({ ...validAnthropicZeroTotal, reasoningTokens: 5 }, 'anthropic'),
-    /Anthropic reasoningTokens must be 0 in normalized DTO/,
+    () => assertProviderUsageAlgebra({ ...validAnthropic, reasoningTokens: 0 }, 'anthropic'),
+    /Anthropic reasoningTokens must be null/,
   )
-  // 违规：Anthropic providerTotalTokens 必须为 0，任何非零均为非法
   assert.throws(
-    () => assertProviderUsageAlgebra({ ...validAnthropicZeroTotal, providerTotalTokens: 200 }, 'anthropic'),
-    /Anthropic providerTotalTokens must be 0 in normalized DTO/,
+    () => assertProviderUsageAlgebra({ ...validAnthropic, reasoningTokens: 5 }, 'anthropic'),
+    /Anthropic reasoningTokens must be null/,
+  )
+  // 违规：Anthropic providerTotal 不报告，任何非 null 值均非法。
+  assert.throws(
+    () => assertProviderUsageAlgebra({ ...validAnthropic, providerTotalTokens: 0 }, 'anthropic'),
+    /Anthropic providerTotalTokens must be null/,
+  )
+  assert.throws(
+    () => assertProviderUsageAlgebra({ ...validAnthropic, providerTotalTokens: 200 }, 'anthropic'),
+    /Anthropic providerTotalTokens must be null/,
+  )
+  // 违规：TTL 拆分必须守恒到 cacheWriteTokens。
+  assert.throws(
+    () => assertProviderUsageAlgebra({ ...validAnthropic, cacheWriteByTtl: { 300: 14 } }, 'anthropic'),
+    /cacheWriteByTtl must sum to cacheWriteTokens/,
   )
 
-  // 4. DeepSeek (OpenAI Chat)
+  // 4. DeepSeek (OpenAI Chat)：total = input + cacheRead + output（output 已含 reasoning）。
   const validDeepSeek = {
     inputTokens: 100,
-    outputTokens: 20,
+    outputTokens: 60, // 含 reasoning 40
     cacheReadTokens: 30,
     cacheWriteTokens: 0,
-    cacheWriteLongTokens: 0,
     reasoningTokens: 40,
-    providerTotalTokens: 190, // wirePrompt (100+30=130) + wireCompletion (20+40=60) = 190
+    providerTotalTokens: 190, // (100 + 30) + 60
   }
   assert.doesNotThrow(() => assertProviderUsageAlgebra(validDeepSeek, 'openai'))
-  // 违规：DeepSeek 不支持 cacheWriteTokens
-  assert.throws(
-    () => assertProviderUsageAlgebra({ ...validDeepSeek, cacheWriteTokens: 10 }, 'openai'),
-    /cacheWriteTokens must be 0/,
+  assert.doesNotThrow(() => assertAssistantUsage(validDeepSeek, { providerType: 'openai' }))
+  // Chat adapter 同样支持缓存写入，必须计入 prompt 一次。
+  assert.doesNotThrow(
+    () => assertProviderUsageAlgebra(
+      { ...validDeepSeek, cacheWriteTokens: 10, cacheWriteByTtl: { 300: 10 }, providerTotalTokens: 200 },
+      'openai',
+    ),
   )
-  // 违规：providerTotal 算术不平
+  // 违规：把 reasoning 再加一次（130 + 60 + 40 = 230）或任意算术不平
   assert.throws(
-    () => assertProviderUsageAlgebra({ ...validDeepSeek, providerTotalTokens: 180 }, 'openai'),
+    () => assertProviderUsageAlgebra({ ...validDeepSeek, providerTotalTokens: 230 }, 'openai'),
+    /DeepSeek providerTotalTokens algebra mismatch/,
+  )
+  assert.throws(
+    () => assertProviderUsageAlgebra({ ...validDeepSeek, providerTotalTokens: 189 }, 'openai'),
     /DeepSeek providerTotalTokens algebra mismatch/,
   )
 })
@@ -679,120 +775,43 @@ test('sanitizeArtifact 与 safeDiagnosticJson 递归严格脱敏推理文本、�
   assert.equal(cleaned.status, 'IDLE')
 })
 
-test('assertAssistantUsage 接受 OpenAI Responses 与 Chat 协议合法的 providerTotalTokens=0，但分类 token 为 0 时仍拒绝，正 total 仍做代数校验', () => {
-  // 测试意图：验证上游 Responses 与 Chat Completions 协议在未返回 total_tokens 时归一化为 providerTotalTokens=0 属于协议合法，此时断言必须放行通过；但分类 input/output 事实有效性校验不能被削弱（分类为 0 仍必须拒绝）；且当 providerTotalTokens > 0 时代数等式仍必须严格闭合。
-
-  // 1. OpenAI Responses (providerType: 'openai_responses')
-  const responsesZeroTotal = {
+test('assertAssistantUsage 接受各协议未报告或为零的 providerTotalTokens 与生产 MiniMax 样本', () => {
+  // 测试意图：验证未显式报告总量（null 或协议允许的 0）在各 Provider 下均可放行，
+  // 且生产 MiniMax 真实返回（Anthropic 协议、零写入、未报告 reasoning/total）被正常接受。
+  const validSharedUsage = {
     inputTokens: 100,
-    outputTokens: 20,
-    cacheReadTokens: 10,
-    cacheWriteTokens: 5,
-    cacheWriteLongTokens: 0,
-    reasoningTokens: 15,
-    providerTotalTokens: 0, // 上游省略 total_tokens，协议合法为 0
-  }
-  // 零 total 且分类 token > 0 应成功放行
-  assert.doesNotThrow(() =>
-    assertAssistantUsage(responsesZeroTotal, {
-      providerType: 'openai_responses',
-      requirePositiveIO: true,
-    }),
-  )
-
-  // 但分类输入全部为 0 时仍必须拒绝
-  assert.throws(
-    () =>
-      assertAssistantUsage(
-        {
-          ...responsesZeroTotal,
-          inputTokens: 0,
-          cacheReadTokens: 0,
-          cacheWriteTokens: 0,
-        },
-        { providerType: 'openai_responses', requirePositiveIO: true },
-      ),
-    /inputTokens \+ cacheReadTokens \+ cacheWriteTokens \+ cacheWriteLongTokens must be > 0/,
-  )
-
-  // 分类输出与推理全部为 0 时仍必须拒绝
-  assert.throws(
-    () =>
-      assertAssistantUsage(
-        { ...responsesZeroTotal, outputTokens: 0, reasoningTokens: 0 },
-        { providerType: 'openai_responses', requirePositiveIO: true },
-      ),
-    /outputTokens \+ reasoningTokens must be > 0/,
-  )
-
-  // 正 total 时严格执行代数校验：wireInput (100+10+5=115) + wireOutput (20+15=35) = 150
-  assert.doesNotThrow(() =>
-    assertAssistantUsage(
-      { ...responsesZeroTotal, providerTotalTokens: 150 },
-      { providerType: 'openai_responses', requirePositiveIO: true },
-    ),
-  )
-  assert.throws(
-    () =>
-      assertAssistantUsage(
-        { ...responsesZeroTotal, providerTotalTokens: 149 },
-        { providerType: 'openai_responses', requirePositiveIO: true },
-      ),
-    /OpenAI Responses providerTotalTokens algebra mismatch/,
-  )
-
-  // 2. OpenAI Chat / DeepSeek (providerType: 'openai')
-  const chatZeroTotal = {
-    inputTokens: 100,
-    outputTokens: 20,
-    cacheReadTokens: 30,
+    outputTokens: 50,
+    cacheReadTokens: 20,
     cacheWriteTokens: 0,
-    cacheWriteLongTokens: 0,
-    reasoningTokens: 40,
-    providerTotalTokens: 0, // 上游省略 total_tokens，协议合法为 0
+    reasoningTokens: 20,
   }
-  // 零 total 且分类 token > 0 应成功放行
-  assert.doesNotThrow(() =>
-    assertAssistantUsage(chatZeroTotal, {
-      providerType: 'openai',
-      requirePositiveIO: true,
-    }),
-  )
 
-  // 但分类输入全部为 0 时仍必须拒绝
-  assert.throws(
-    () =>
-      assertAssistantUsage(
-        { ...chatZeroTotal, inputTokens: 0, cacheReadTokens: 0 },
-        { providerType: 'openai', requirePositiveIO: true },
-      ),
-    /inputTokens \+ cacheReadTokens must be > 0/,
-  )
+  for (const providerType of ['openai_responses', 'openai', 'google']) {
+    for (const total of [null, 0]) {
+      assert.doesNotThrow(
+        () =>
+          assertAssistantUsage(
+            { ...validSharedUsage, providerTotalTokens: total },
+            { providerType, requirePositiveIO: true },
+          ),
+        `expected providerTotalTokens=${total} to be accepted for ${providerType}`,
+      )
+    }
+  }
 
-  // 分类输出与推理全部为 0 时仍必须拒绝
-  assert.throws(
-    () =>
-      assertAssistantUsage(
-        { ...chatZeroTotal, outputTokens: 0, reasoningTokens: 0 },
-        { providerType: 'openai', requirePositiveIO: true },
-      ),
-    /outputTokens \+ reasoningTokens must be > 0/,
-  )
-
-  // 正 total 时严格执行代数校验：wirePrompt (100+30=130) + wireCompletion (20+40=60) = 190
+  // 生产 MiniMax 真实 fixture：Anthropic 协议、零缓存写入、未报告 reasoningTokens 与 providerTotalTokens
   assert.doesNotThrow(() =>
     assertAssistantUsage(
-      { ...chatZeroTotal, providerTotalTokens: 190 },
-      { providerType: 'openai', requirePositiveIO: true },
+      {
+        inputTokens: 391,
+        outputTokens: 112,
+        cacheReadTokens: 3584,
+        cacheWriteTokens: 0,
+        reasoningTokens: null,
+        providerTotalTokens: null,
+      },
+      { providerType: 'anthropic', requirePositiveIO: true },
     ),
-  )
-  assert.throws(
-    () =>
-      assertAssistantUsage(
-        { ...chatZeroTotal, providerTotalTokens: 189 },
-        { providerType: 'openai', requirePositiveIO: true },
-      ),
-    /DeepSeek providerTotalTokens algebra mismatch/,
   )
 })
 
