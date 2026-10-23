@@ -66,14 +66,12 @@ public class UsageCostProjectionService {
       if (pricing == null) {
         continue;
       }
-      costs.put(
-          entry.id(),
-          usageCost(
-              ModelCost.calculate(
-                  pricing,
-                  metadata.usage(),
-                  metadata.requestedAt(),
-                  metadata.responseServiceTier())));
+      ModelCost cost =
+          ModelCost.calculate(
+              pricing, metadata.usage(), metadata.requestedAt(), metadata.responseServiceTier());
+      if (cost != null) {
+        costs.put(entry.id(), usageCost(cost));
+      }
     }
     return Map.copyOf(costs);
   }

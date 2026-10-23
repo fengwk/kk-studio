@@ -94,6 +94,42 @@ class AnthropicStreamAccumulatorTest {
   }
 
   @Test
+  void missingUsageIsNotAZeroTokenRequest() {
+    AnthropicStreamAccumulator accumulator =
+        new AnthropicStreamAccumulator(request, descriptor, bridge);
+    accumulator.handleEvent(
+        "message_start", "{\"type\":\"message_start\",\"message\":{\"id\":\"missing\"}}");
+    accumulator.handleEvent(
+        "message_delta", "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}");
+    accumulator.handleEvent("message_stop", "{\"type\":\"message_stop\"}");
+    ProviderException error = assertThrows(ProviderException.class, accumulator::finish);
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind());
+    assertTrue(error.getMessage().contains("Anthropic Messages model"));
+  }
+
+  @Test
+  void zeroUsageAndLastThinkingSnapshotRemainDistinctFromUnknown() {
+    AnthropicStreamAccumulator accumulator =
+        new AnthropicStreamAccumulator(request, descriptor, bridge);
+    accumulator.handleEvent(
+        "message_start",
+        "{\"type\":\"message_start\",\"message\":{\"id\":\"zero\",\"usage\":{\"input_tokens\":0,\"output_tokens\":0}}}");
+    accumulator.handleEvent(
+        "message_delta",
+        "{\"type\":\"message_delta\",\"delta\":{},\"usage\":{\"output_tokens\":3,\"output_tokens_details\":{\"thinking_tokens\":2}}}");
+    accumulator.handleEvent(
+        "message_delta",
+        "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":0,"
+            + "\"output_tokens_details\":{\"thinking_tokens\":0}}}");
+    accumulator.handleEvent("message_stop", "{\"type\":\"message_stop\"}");
+    ProviderResponse response = accumulator.finish().response();
+    assertEquals(0L, response.usage().inputTokens());
+    assertEquals(0L, response.usage().outputTokens());
+    assertEquals(0L, response.usage().reasoningTokens());
+    assertNull(response.usage().providerTotalTokens());
+  }
+
+  @Test
   void handlesCompleteTurnWithThinkingTextToolAndUsage() {
     AnthropicStreamAccumulator accumulator =
         new AnthropicStreamAccumulator(request, descriptor, bridge);
@@ -139,7 +175,7 @@ class AnthropicStreamAccumulatorTest {
     // message_delta
     accumulator.handleEvent(
         "message_delta",
-        "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"},\"usage\":{\"output_tokens\":25}}");
+        "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"},\"usage\":{\"output_tokens\":25,\"output_tokens_details\":{\"thinking_tokens\":7}}}");
 
     // message_stop
     accumulator.handleEvent("message_stop", "{\"type\":\"message_stop\"}");
@@ -156,6 +192,8 @@ class AnthropicStreamAccumulatorTest {
     // usage
     assertEquals(10, response.usage().inputTokens());
     assertEquals(25, response.usage().outputTokens());
+    assertEquals(7L, response.usage().reasoningTokens());
+    assertNull(response.usage().providerTotalTokens());
     assertEquals(5, response.usage().cacheReadTokens());
     assertEquals(20, response.usage().cacheWriteTokens());
     assertEquals(12, response.usage().cacheWriteByTtl().get(300L));

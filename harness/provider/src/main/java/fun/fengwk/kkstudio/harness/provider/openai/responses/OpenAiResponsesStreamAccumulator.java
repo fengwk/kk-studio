@@ -677,6 +677,11 @@ final class OpenAiResponsesStreamAccumulator {
       throw new ProviderException(
           ProviderErrorKind.INVALID_RESPONSE, "missing stopReason in OpenAI Responses response");
     }
+    if (latestNativeUsageNode == null) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE,
+          "missing complete usage: OpenAI Responses model " + request.model().modelId());
+    }
 
     List<ProviderToolCall> toolCalls = new ArrayList<>();
     List<ProviderToolCallDiagnostic> toolCallDiagnostics = new ArrayList<>();

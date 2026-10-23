@@ -510,6 +510,11 @@ final class GeminiStreamAccumulator {
 
   /** 流正常传输完毕后的终态验证与 Completion 交付。 */
   ProviderCompletion finish() {
+    if (latestUsage == null) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE,
+          "missing complete usage: Gemini model " + request.model().modelId());
+    }
     if (this.stopReason == null) {
       if (this.promptBlocked && trackedParts.isEmpty()) {
         this.stopReason = GenerationStopReason.FILTERED;
@@ -538,10 +543,7 @@ final class GeminiStreamAccumulator {
       }
     }
 
-    ModelUsage usage =
-        this.latestUsage != null
-            ? this.latestUsage
-            : new ModelUsage(0L, 0L, 0L, 0L, Map.of(), null, null);
+    ModelUsage usage = this.latestUsage;
 
     ProviderResponse response =
         new ProviderResponse(
