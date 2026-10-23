@@ -207,6 +207,18 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
           public boolean deleteById(UUID id, long expectedVersion) {
             return false;
           }
+
+          @Override
+          public void saveInstallCode(
+              UUID id, String codeHash, String registrationTokenHash, Instant expiresAt) {
+            throw new UnsupportedOperationException();
+          }
+
+          @Override
+          public boolean consumeInstallCode(
+              UUID id, String codeHash, String registrationTokenHash, Instant now) {
+            throw new UnsupportedOperationException();
+          }
         };
 
     this.node1 = UUID.randomUUID();

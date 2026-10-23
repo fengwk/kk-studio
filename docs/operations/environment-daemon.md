@@ -199,8 +199,10 @@ Web 保存的 `EnvironmentInstallConfigDTO`：
 | `GET /api/environments/{id}/install?code=...` | 校验 code 后，按当前保存的 OS、配置和 token 返回 UTF-8 纯文本脚本 |
 | `GET /api/environments/uninstall/{operatingSystem}` | 返回对应 OS 的卸载脚本，不含环境配置或凭据 |
 
-签发与脚本响应均禁止缓存。code 以当前 registration token 对安装用途、环境 ID 和到期时间做
-HMAC-SHA256 签名，无独立存储；到期、篡改、错环境、已被兑换或 token 轮换后，下载被拒绝。
+签发与脚本响应均禁止缓存。code 是 256 bit 安全随机值，服务端只保存 SHA-256 摘要、
+5 分钟有效期及签发时的凭证代际。每个环境最多保留一张待兑换 code，新签发立即替换旧 code。
+到期、篡改、错环境、已被兑换或 token 轮换（包括导入变更）后，下载被拒绝。
+兑换在同一事务内消费 code、轮换 token 并生成脚本，失败全部回滚；临时 code 记录不参与配置导出。
 
 ### 配置同步
 

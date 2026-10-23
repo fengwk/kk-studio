@@ -822,6 +822,27 @@ create unique index uk_environment_update_active
 create index idx_environment_update_operation_recent
     on environment_update_operation (environment_id, created_at desc, operation_id desc);
 
+create table environment_install_code (
+    environment_id          uuid           primary key,
+    code_hash               char(64)       not null,
+    registration_token_hash char(64)       not null,
+    expires_at              timestamptz(3) not null,
+    constraint fk_environment_install_code_environment foreign key (environment_id)
+        references environment (id) on delete cascade,
+    constraint ck_environment_install_code_hash check (
+        code_hash ~ '^[0-9a-f]{64}$'
+    ),
+    constraint ck_environment_install_code_registration_token_hash check (
+        registration_token_hash ~ '^[0-9a-f]{64}$'
+    )
+);
+
+comment on table environment_install_code is 'Environment 临时安装 code 记录：每环境至多一条未核销记录，核销时严格匹配 code_hash、registration_token_hash 且 expires_at > now';
+comment on column environment_install_code.environment_id is 'Environment 的全局唯一 UUID（PK，FK cascade）';
+comment on column environment_install_code.code_hash is '临时安装 code 的 SHA-256（小写十六进制）；明文仅返回给调用方一次';
+comment on column environment_install_code.registration_token_hash is '签发 code 时 Environment 持有的 registration_token_hash，用于确保兑换时环境未发生并发轮换';
+comment on column environment_install_code.expires_at is '临时安装 code 的过期时间（毫秒精度）';
+
 ------------------------------------------------------------------------------
 -- 1c. Singleton system settings (id=1)
 --

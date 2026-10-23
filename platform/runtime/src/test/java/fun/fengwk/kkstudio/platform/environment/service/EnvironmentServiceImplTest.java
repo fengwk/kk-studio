@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -56,8 +57,10 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -363,11 +366,48 @@ class EnvironmentServiceImplTest {
     when(repo.lockById(ENV_ID)).thenReturn(env);
     when(repo.updateById(env, 4L)).thenReturn(true);
 
+    AtomicReference<String> savedCodeHash = new AtomicReference<>();
+    AtomicReference<String> savedTokenHash = new AtomicReference<>();
+    doAnswer(
+            invocation -> {
+              savedCodeHash.set(invocation.getArgument(1));
+              savedTokenHash.set(invocation.getArgument(2));
+              return null;
+            })
+        .when(repo)
+        .saveInstallCode(eq(ENV_ID), any(), any(), any());
+
+    when(repo.consumeInstallCode(eq(ENV_ID), any(), any(), any()))
+        .thenAnswer(
+            invocation -> {
+              String codeHash = invocation.getArgument(1);
+              String tokenHash = invocation.getArgument(2);
+              if (Objects.equals(savedCodeHash.get(), codeHash)
+                  && Objects.equals(savedTokenHash.get(), tokenHash)) {
+                savedCodeHash.set(null);
+                return true;
+              }
+              return false;
+            });
+
     assertThrows(
         AiVersionConflictException.class,
         () -> service.issueInstallCode(EnvironmentId.of(ENV_ID), "3"));
     EnvironmentInstallCodeDTO issued = service.issueInstallCode(EnvironmentId.of(ENV_ID), "4");
     assertEquals(NOW.plus(Duration.ofMinutes(5)), issued.getExpiresAt());
+    verify(repo)
+        .saveInstallCode(
+            eq(ENV_ID),
+            eq(EnvironmentInstallCodes.hash(issued.getCode())),
+            eq(h("secret-token")),
+            eq(NOW.plus(Duration.ofMinutes(5))));
+
+    String tampered =
+        (issued.getCode().charAt(0) == 'A' ? "B" : "A") + issued.getCode().substring(1);
+    assertThrows(
+        AiValidationException.class,
+        () -> service.installationScript(EnvironmentId.of(ENV_ID), tampered));
+
     String script = service.installationScript(EnvironmentId.of(ENV_ID), issued.getCode());
 
     assertFalse(script.contains("secret-token"), "the old token is never recoverable");
@@ -389,10 +429,6 @@ class EnvironmentServiceImplTest {
         () -> service.issueInstallCode(EnvironmentId.of(ENV_ID), null));
     assertThrows(
         AiValidationException.class, () -> service.issueInstallCode(EnvironmentId.of(ENV_ID), " "));
-    String tampered = issued.getCode().substring(0, issued.getCode().length() - 1) + "A";
-    assertThrows(
-        AiValidationException.class,
-        () -> service.installationScript(EnvironmentId.of(ENV_ID), tampered));
   }
 
   /** 测试意图：未知身份或缺少已保存安装设置都不能返回可执行的成功空脚本。 */
