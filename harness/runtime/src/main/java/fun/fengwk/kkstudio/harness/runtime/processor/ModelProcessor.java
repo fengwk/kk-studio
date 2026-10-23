@@ -32,11 +32,9 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
@@ -77,7 +75,6 @@ public final class ModelProcessor implements AutoCloseable {
   private final ScheduledExecutorService scheduler;
   private final Executor heartbeatWorker;
   private final Executor executionExecutor;
-  private final ConcurrentHashMap<UUID, ModelExecution> executions = new ConcurrentHashMap<>();
   private final ClaimAdmissionGuard admissionGuard = new ClaimAdmissionGuard();
   private final ModelRequestMaterializer materializer = new ModelRequestMaterializer();
   private volatile boolean closed;
@@ -126,37 +123,24 @@ public final class ModelProcessor implements AutoCloseable {
       throw new IllegalArgumentException(
           "ModelProcessor requires a MODEL work claim, got " + claim.target());
     }
-    UUID invocationId = claim.target().id();
-    String token = claim.leaseToken();
     if (!claimOwned(claim)) {
       return ProcessResult.LOST_OWNERSHIP;
     }
-    if (!admissionGuard.tryAdmit(invocationId, token)) {
+    ClaimAdmissionGuard.Ticket<ModelExecution> ticket =
+        admissionGuard.tryAdmit(claim, () -> claimOwned(claim));
+    if (ticket == null) {
       return ProcessResult.LOST_OWNERSHIP;
     }
-    try {
-      ModelExecution active = executions.get(invocationId);
-      if (active != null) {
-        if (active.claim().leaseToken().equals(token)) {
-          // 同一 claim 已在本地处理：重复 / 迟到投递，no-op，不 cancel、不 mutation。
-          return ProcessResult.LOST_OWNERSHIP;
-        }
-        // 不同新 token：claimOwned 已证明新 claim 真实 owned（旧 lease 必然过期），supersede 旧本地 execution 安全。
-        releaseExecution(active);
-      }
-      try {
-        Prepare prepare = store.transaction(tx -> prepareLocked(tx, claim, tx.now()));
-        return switch (prepare) {
-          case Prepare.Lost ignored -> ProcessResult.LOST_OWNERSHIP;
-          case Prepare.Terminated ignored -> ProcessResult.TERMINATED;
-          case Prepare.Retry ignored -> ProcessResult.RESCHEDULED;
-          case Prepare.Dispatched dispatched -> start(claim, dispatched);
-        };
-      } catch (ClaimLostSignal ignored) {
-        return ProcessResult.LOST_OWNERSHIP;
-      }
-    } finally {
-      admissionGuard.release(invocationId, token);
+    try (ticket) {
+      Prepare prepare = store.transaction(tx -> prepareLocked(tx, claim, tx.now()));
+      return switch (prepare) {
+        case Prepare.Lost ignored -> ProcessResult.LOST_OWNERSHIP;
+        case Prepare.Terminated ignored -> ProcessResult.TERMINATED;
+        case Prepare.Retry ignored -> ProcessResult.RESCHEDULED;
+        case Prepare.Dispatched dispatched -> start(claim, dispatched, ticket);
+      };
+    } catch (ClaimLostSignal ignored) {
+      return ProcessResult.LOST_OWNERSHIP;
     }
   }
 
@@ -167,12 +151,7 @@ public final class ModelProcessor implements AutoCloseable {
    */
   public boolean cancel(UUID invocationId) {
     Objects.requireNonNull(invocationId, "invocationId");
-    ModelExecution execution = executions.remove(invocationId);
-    if (execution == null) {
-      return false;
-    }
-    execution.abandon();
-    return true;
+    return admissionGuard.cancel(invocationId);
   }
 
   /**
@@ -187,7 +166,7 @@ public final class ModelProcessor implements AutoCloseable {
     if (attempt <= 0) {
       return false;
     }
-    ModelExecution execution = executions.get(invocationId);
+    ModelExecution execution = admissionGuard.getExecution(invocationId);
     return execution != null && execution.requestCheckpoint(attempt);
   }
 
@@ -195,14 +174,12 @@ public final class ModelProcessor implements AutoCloseable {
   @Override
   public void close() {
     closed = true;
-    for (ModelExecution execution : List.copyOf(executions.values())) {
-      execution.abandon();
-    }
+    admissionGuard.close();
   }
 
   /** 当前 JVM 是否持有任何活跃的本地 Model execution。 */
   public boolean hasActiveExecution() {
-    return !executions.isEmpty();
+    return admissionGuard.hasActiveExecution();
   }
 
   /**
@@ -213,16 +190,18 @@ public final class ModelProcessor implements AutoCloseable {
     return Boolean.TRUE.equals(store.transaction(tx -> !tx.lockClaimedWork(claim).isEmpty()));
   }
 
-  private void releaseExecution(ModelExecution execution) {
-    executions.remove(execution.invocationId(), execution);
-    execution.abandon();
+  private void release(ModelExecution execution) {
+    admissionGuard.releaseExecution(execution);
   }
 
   /**
    * 登记 execution 并启动 heartbeat，在调用线程上完成物化请求、准入与 RUNNING 持久化，只把阻塞的 Provider 运行与终态提交交给一个虚拟线程。
    * 因此返回值如实反映本次处理：Busy / 准入异常为 RESCHEDULED，确定性拒绝为 TERMINATED，已开始运行为 STARTED。
    */
-  private ProcessResult start(ClaimedWork claim, Prepare.Dispatched dispatched) {
+  private ProcessResult start(
+      ClaimedWork claim,
+      Prepare.Dispatched dispatched,
+      ClaimAdmissionGuard.Ticket<ModelExecution> ticket) {
     UUID invocationId = claim.target().id();
     ModelExecution execution =
         new ModelExecution(
@@ -240,27 +219,34 @@ public final class ModelProcessor implements AutoCloseable {
             heartbeatWorker,
             executionExecutor,
             this::release);
-    ModelExecution existing = executions.putIfAbsent(invocationId, execution);
-    if (existing != null) {
-      // 防御分支（admission guard 串行化后实际不可达）：不启动第二个执行，也不做任何 durable mutation。
-      log.warn("a concurrent local execution already owns invocation {}", invocationId);
+    if (!ticket.attach(execution)) {
+      execution.abandon();
       return ProcessResult.LOST_OWNERSHIP;
     }
-    if (closed || !execution.startHeartbeat() || execution.abandoned()) {
+    if (closed || !execution.startHeartbeat() || execution.abandoned() || ticket.isSuperseded()) {
       // close 已拍快照、scheduler 拒绝导致无法维持 lease，或 close / cancel 在 heartbeat 启动窗口内获胜：不启动，按 reschedule
       // 实际结果返回。
+      execution.abandon();
       return abortStart(execution, claim);
     }
+    boolean started = false;
     try {
-      return admitAndRun(execution, claim, dispatched);
+      ProcessResult result = admitAndRun(execution, claim, dispatched, ticket);
+      if (result == ProcessResult.STARTED) {
+        started = true;
+      }
+      return result;
     } catch (RuntimeException unexpected) {
       // 绝不猜测 complete / reschedule：保留 lease 待过期后由后续 claim 收敛。
       log.error(
           "model execution failed unexpectedly for invocation {}: {}",
           invocationId,
           ProcessorExceptions.describe(unexpected));
-      execution.abandon();
-      return ProcessResult.LOST_OWNERSHIP;
+      throw unexpected;
+    } finally {
+      if (!started) {
+        execution.abandon();
+      }
     }
   }
 
@@ -273,13 +259,15 @@ public final class ModelProcessor implements AutoCloseable {
 
   /** 物化请求、准入并持久化 RUNNING；准入成功后把阻塞运行交给执行线程。 */
   private ProcessResult admitAndRun(
-      ModelExecution execution, ClaimedWork claim, Prepare.Dispatched dispatched) {
+      ModelExecution execution,
+      ClaimedWork claim,
+      Prepare.Dispatched dispatched,
+      ClaimAdmissionGuard.Ticket<ModelExecution> ticket) {
     UUID invocationId = claim.target().id();
     ProviderRequest providerRequest;
     try {
       providerRequest = materializeRequest(claim, dispatched);
     } catch (ClaimLostSignal lost) {
-      execution.abandon();
       return ProcessResult.LOST_OWNERSHIP;
     } catch (ProviderException setupFailure) {
       return rejectBeforeStart(
@@ -320,47 +308,47 @@ public final class ModelProcessor implements AutoCloseable {
     }
     return switch (admission) {
       case ModelGateway.Busy busy -> {
-        execution.abandon();
         yield reschedule(claim, busy.retryAfter())
             ? ProcessResult.RESCHEDULED
             : ProcessResult.LOST_OWNERSHIP;
       }
       case ModelGateway.Rejected rejected -> {
-        execution.abandon();
         yield reject(claim, dispatched, rejected.error())
             ? ProcessResult.TERMINATED
             : ProcessResult.LOST_OWNERSHIP;
       }
-      case ModelGateway.Admitted admitted -> runAdmitted(execution, claim, admitted);
+      case ModelGateway.Admitted admitted -> runAdmitted(execution, claim, admitted, ticket);
     };
   }
 
   /** 先持久化 RUNNING（陈旧启动围栏），再把阻塞运行与终态提交交给执行线程。 */
   private ProcessResult runAdmitted(
-      ModelExecution execution, ClaimedWork claim, ModelGateway.Admitted admitted) {
-    if (execution.abandoned()) {
+      ModelExecution execution,
+      ClaimedWork claim,
+      ModelGateway.Admitted admitted,
+      ClaimAdmissionGuard.Ticket<ModelExecution> ticket) {
+    if (execution.abandoned() || ticket.isSuperseded()) {
       // close / cancel / supersede 在准入期间获胜：invocation 仍是 READY，释放名额后按 reschedule 实际结果返回。
       admitted.close();
       return abortStart(execution, claim);
     }
-    if (!execution.markRunning()) {
-      admitted.close();
-      execution.abandon();
-      return ProcessResult.LOST_OWNERSHIP;
-    }
+    boolean submitted = false;
     try {
+      if (!execution.markRunning()) {
+        return ProcessResult.LOST_OWNERSHIP;
+      }
       executionExecutor.execute(() -> runToTerminal(execution, admitted));
+      submitted = true;
+      return ProcessResult.STARTED;
     } catch (RejectedExecutionException rejected) {
-      // RUNNING 已持久化：不能回退，交给 lease 过期后的恢复路径按既有重试策略收敛。
       log.warn(
-          "model execution executor rejected invocation {}: {}",
-          execution.invocationId(),
-          ProcessorExceptions.describe(rejected));
-      admitted.close();
-      execution.abandon();
+          "model execution executor rejected invocation {}", execution.invocationId(), rejected);
       return ProcessResult.LOST_OWNERSHIP;
+    } finally {
+      if (!submitted) {
+        admitted.close();
+      }
     }
-    return ProcessResult.STARTED;
   }
 
   private void runToTerminal(ModelExecution execution, ModelGateway.Admitted admitted) {
@@ -386,7 +374,6 @@ public final class ModelProcessor implements AutoCloseable {
         "model request materialization failed for invocation {}: {}",
         claim.target().id(),
         ProcessorExceptions.describe(setupFailure));
-    execution.abandon();
     return reject(claim, dispatched, error)
         ? ProcessResult.TERMINATED
         : ProcessResult.LOST_OWNERSHIP;
@@ -678,10 +665,6 @@ public final class ModelProcessor implements AutoCloseable {
     } catch (ClaimLostSignal ignored) {
       return false;
     }
-  }
-
-  private void release(ModelExecution execution) {
-    executions.remove(execution.invocationId(), execution);
   }
 
   /** 内部回滚信号：最终 Work ownership fence 失败时使当前事务完整回滚。 */

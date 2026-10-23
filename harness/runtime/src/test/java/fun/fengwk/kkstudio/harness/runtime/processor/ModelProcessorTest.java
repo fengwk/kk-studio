@@ -2560,6 +2560,124 @@ class ModelProcessorTest {
         ModelInvocationStatus.SUCCEEDED, model(fixture.store, fixture.invocationId).status());
   }
 
+  /** RUNNING 回写失败按既有 LOST 语义退出，名额和本地资源必须释放。 */
+  @Test
+  void markRunningFailureClosesAdmissionAndReleasesExecution() {
+    Fixture fixture = fixture();
+    AtomicBoolean fail = new AtomicBoolean();
+    IllegalStateException failure = new IllegalStateException("running commit failed");
+    HarnessStore failing =
+        (HarnessStore)
+            Proxy.newProxyInstance(
+                HarnessStore.class.getClassLoader(),
+                new Class<?>[] {HarnessStore.class},
+                (proxy, method, args) -> {
+                  if (method.getName().equals("transaction") && fail.compareAndSet(true, false)) {
+                    throw failure;
+                  }
+                  try {
+                    return method.invoke(fixture.store, args);
+                  } catch (InvocationTargetException error) {
+                    throw error.getCause();
+                  }
+                });
+    ModelProcessor processor =
+        new ModelProcessor(
+            failing,
+            fixture.gateway,
+            fixture.sink,
+            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY),
+            fixture.clock,
+            newScheduler(),
+            Runnable::run,
+            newExecutionExecutor());
+    fixture.gateway.queueControlled();
+    fixture.gateway.beforeReturn = ignored -> fail.set(true);
+    try {
+      assertEquals(
+          ProcessResult.LOST_OWNERSHIP,
+          processor.process(claim(fixture.store, fixture.invocationId, "token-A")));
+      assertFalse(processor.hasActiveExecution());
+      assertTrue(fixture.gateway.runs.get(fixture.invocationId).closedWithoutRun.get());
+    } finally {
+      processor.close();
+    }
+  }
+
+  /** Executor 拒绝发生在 durable RUNNING 后，释放名额且不遗留 heartbeat。 */
+  @Test
+  void rejectedExecutionReleasesAdmissionAndExecution() {
+    Fixture fixture = fixture();
+    ModelProcessor processor =
+        new ModelProcessor(
+            fixture.store,
+            fixture.gateway,
+            fixture.sink,
+            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY),
+            fixture.clock,
+            newScheduler(),
+            Runnable::run,
+            ignored -> {
+              throw new RejectedExecutionException("rejected");
+            });
+    fixture.gateway.queueControlled();
+    try {
+      assertEquals(
+          ProcessResult.LOST_OWNERSHIP,
+          processor.process(claim(fixture.store, fixture.invocationId, "token-A")));
+      assertFalse(processor.hasActiveExecution());
+      assertTrue(fixture.gateway.runs.get(fixture.invocationId).closedWithoutRun.get());
+    } finally {
+      processor.close();
+    }
+  }
+
+  /** 已过期 A 在前置检查后恢复，不得中断新 owner B 的合法执行。 */
+  @Test
+  void expiredClaimCannotCancelNewOwnerAfterOwnershipCheck() throws Exception {
+    Fixture fixture = fixture();
+    CountDownLatch checked = new CountDownLatch(1);
+    CountDownLatch resume = new CountDownLatch(1);
+    AtomicReference<Thread> worker = new AtomicReference<>();
+    HarnessStore gated = ClaimOwnershipTestSupport.gate(fixture.store, worker, checked, resume);
+    ModelProcessor processor =
+        new ModelProcessor(
+            gated,
+            fixture.gateway,
+            fixture.sink,
+            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY),
+            fixture.clock,
+            newScheduler(),
+            Runnable::run,
+            newExecutionExecutor());
+    ClaimedWork claimA = claim(fixture.store, fixture.invocationId, "token-A");
+    AtomicReference<ProcessResult> result = new AtomicReference<>();
+    Thread threadA = new Thread(() -> result.set(processor.process(claimA)));
+    worker.set(threadA);
+    try {
+      threadA.start();
+      assertTrue(checked.await(5, TimeUnit.SECONDS));
+      fixture.clock.advance(Duration.ofSeconds(61));
+      ClaimedWork claimB = claim(fixture.store, fixture.invocationId, "token-B");
+      fixture.gateway.queueControlled();
+      assertEquals(ProcessResult.STARTED, processor.process(claimB));
+      ControlledRun fresh = fixture.gateway.controlled(fixture.invocationId);
+      resume.countDown();
+      threadA.join(5000);
+      assertFalse(threadA.isAlive());
+      assertEquals(ProcessResult.LOST_OWNERSHIP, result.get());
+      assertTrue(processor.hasActiveExecution());
+      fresh.succeed(response("done", GenerationStopReason.COMPLETE));
+      awaitTrue(() -> !processor.hasActiveExecution());
+      assertEquals(
+          ModelInvocationStatus.SUCCEEDED, model(fixture.store, fixture.invocationId).status());
+    } finally {
+      resume.countDown();
+      processor.close();
+      threadA.join(5000);
+    }
+  }
+
   /**
    * stale-start fence：A（token-1）在 heartbeat 启动后暂停；lease 过期后由**另一实例**（模拟另一 JVM 的 processor，本地
    * registry / guard 独立，A 的本地 abandoned 检查不可见）以 token-2 接管并完成运行；A 恢复时物化事务的 claim 校验失败 → 立即 abandon
@@ -4140,18 +4258,18 @@ class ModelProcessorTest {
       try {
         while (true) {
           Object[] signal = signals.take();
-          if (signal[0] instanceof ProviderStreamEvent event) {
+          if ("EVENT".equals(signal[0])) {
             try {
-              sink.onEvent(event);
+              sink.onEvent((ProviderStreamEvent) signal[1]);
             } catch (RuntimeException failure) {
               sinkFailure = failure;
               throw failure;
             } finally {
-              ((CountDownLatch) signal[1]).countDown();
+              ((CountDownLatch) signal[2]).countDown();
             }
           } else {
-            ((CountDownLatch) signal[1]).countDown();
-            return (ModelGateway.Outcome) signal[0];
+            ((CountDownLatch) signal[2]).countDown();
+            return (ModelGateway.Outcome) signal[1];
           }
         }
       } catch (InterruptedException cancelled) {
@@ -4169,7 +4287,7 @@ class ModelProcessorTest {
 
     void event(ProviderStreamEvent event) {
       CountDownLatch done = new CountDownLatch(1);
-      signals.add(new Object[] {event, done});
+      signals.add(new Object[] {"EVENT", event, done});
       await(done);
       if (sinkFailure != null) {
         // sink 拒绝事件后 run 随即结束，终态提交发生在 run 返回之后：等待 execution 释放。
@@ -4195,7 +4313,7 @@ class ModelProcessorTest {
 
     private void finish(ModelGateway.Outcome outcome) {
       CountDownLatch done = new CountDownLatch(1);
-      signals.add(new Object[] {outcome, done});
+      signals.add(new Object[] {"OUTCOME", outcome, done});
       await(done);
       // 终态提交发生在 run 返回之后：等待 execution 释放。
       awaitTrue(() -> gateway.owner == null || !gateway.owner.hasActiveExecution());

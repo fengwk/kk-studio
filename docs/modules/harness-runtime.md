@@ -160,7 +160,9 @@ Thread claim 只归约一个持久化动作；Model / Tool claim 驱动一次外
 
 [`ToolProcessor`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolProcessor.java) 的短事务只锁 own Thread -> Model -> Tool -> Work。执行根开启 YOLO 时直接放行，否则在事务外调用 `ToolGateway.preflight`：`Allow` 进入执行，`Ask` 转 `WAITING_APPROVAL`（可附带编辑审查），`Deny` 转 `FAILED`。放行后同样经 `admit` 准入、先持久化 RUNNING，再由 [`ToolExecution`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolExecution.java) 在独占虚拟线程上执行；终态提交之后才释放并发租约与目录租用，因此取消只需 interrupt。只有 `retryable` 且工具为 `READ_ONLY` / `IDEMPOTENT` 的失败才重试；`UNKNOWN` 是终态，与其它终态一样物化为失败结果交给下一轮模型，不阻塞 Thread。工具增量只支持文本与 JSON，作为有损 `TOOL_PARTIAL` 发布。
 
-两类 Processor 共用 [`WorkHeartbeat`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/WorkHeartbeat.java)：调度器只做周期唤醒与非阻塞分派，独立 worker 执行续租事务；续租失败、调度拒绝或分派拒绝都视为失去所有权，统一触发一次 `onLostOwnership`。
+两类 Processor 的本地准入按 invocation 原子协调：在同一准入操作中复核数据库 claim 所有权并捕获要替换的旧 execution，随后只取消该对象。相同 token 去重，失权 claim 不得取消当前执行；准备与外部调用均在准入锁外进行，最终持久化仍须通过 durable ownership fence。
+
+preflight 创建的 execution 在返回 `STARTED` 前由 Processor 负责清理：Allow、Ask、Deny 的回写失败或启动失败均停止 heartbeat 并释放本地登记；成功移交后由执行线程负责释放，不能再由 preflight 清理。两类 Processor 共用 [`WorkHeartbeat`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/WorkHeartbeat.java)：调度器只做周期唤醒与非阻塞分派，独立 worker 执行续租事务；续租失败、调度拒绝或分派拒绝都视为失去所有权，统一触发一次 `onLostOwnership`。
 
 ### 审批与受管文件变更
 
