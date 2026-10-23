@@ -308,6 +308,280 @@ class AgentTaskServiceTest {
     assertThrows(IllegalStateException.class, () -> unbound.stop(UUID.randomUUID()));
   }
 
+  @Test
+  void submitExternalReplaysExistingTicketWithoutCallingSupplierOrSpawning() {
+    UUID ticketId = UUID.randomUUID();
+    UUID childThreadId = UUID.randomUUID();
+    String hash = AgentTaskRequest.requestHash(ticketId, "worker", "work", null);
+    when(runtime.findJoin(ticketId))
+        .thenReturn(Optional.of(join(ticketId, childThreadId, false, false, hash)));
+
+    UUID result =
+        service.submitExternal(
+            ticketId,
+            hash,
+            () -> {
+              throw new AssertionError("supplier must not be called when ticket exists");
+            });
+
+    assertEquals(childThreadId, result);
+    verify(runtime, never()).spawn(any(SpawnRequest.class));
+  }
+
+  @Test
+  void submitExternalWithExistingTicketMismatchedHashThrowsIllegalArgumentException() {
+    UUID ticketId = UUID.randomUUID();
+    UUID childThreadId = UUID.randomUUID();
+    String existingHash = AgentTaskRequest.requestHash(ticketId, "worker", "work1", null);
+    String newHash = AgentTaskRequest.requestHash(ticketId, "worker", "work2", null);
+    when(runtime.findJoin(ticketId))
+        .thenReturn(Optional.of(join(ticketId, childThreadId, false, false, existingHash)));
+
+    IllegalArgumentException ex =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                service.submitExternal(
+                    ticketId,
+                    newHash,
+                    () -> {
+                      throw new AssertionError("supplier must not be called on hash mismatch");
+                    }));
+
+    assertEquals("join invocation identity reused", ex.getMessage());
+    verify(runtime, never()).spawn(any(SpawnRequest.class));
+  }
+
+  @Test
+  void submitExternalValidatesSupplierReturnedRequest() {
+    UUID ticketId = UUID.randomUUID();
+    String hash = AgentTaskRequest.requestHash(ticketId, "worker", "work", 4);
+    when(runtime.findJoin(ticketId)).thenReturn(Optional.empty());
+
+    // 1. supplier 返回 null
+    assertThrows(
+        NullPointerException.class, () -> service.submitExternal(ticketId, hash, () -> null));
+
+    // 2. ticketId 不一致
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            service.submitExternal(
+                ticketId,
+                hash,
+                () -> {
+                  AgentTaskRequest req = request(null, null, null);
+                  return new AgentTaskRequest(
+                      UUID.randomUUID(),
+                      req.threadId(),
+                      req.sessionId(),
+                      req.settings(),
+                      req.commands(),
+                      req.preflight(),
+                      req.trigger(),
+                      req.parentThreadId(),
+                      req.expectedParentHeadEntryId(),
+                      req.continuation(),
+                      req.yoloEnabled(),
+                      req.budget(),
+                      hash);
+                }));
+
+    // 3. requestHash 不一致
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            service.submitExternal(
+                ticketId,
+                hash,
+                () -> {
+                  AgentTaskRequest req = request(null, null, null);
+                  return new AgentTaskRequest(
+                      ticketId,
+                      req.threadId(),
+                      req.sessionId(),
+                      req.settings(),
+                      req.commands(),
+                      req.preflight(),
+                      req.trigger(),
+                      req.parentThreadId(),
+                      req.expectedParentHeadEntryId(),
+                      req.continuation(),
+                      req.yoloEnabled(),
+                      req.budget(),
+                      "different-hash");
+                }));
+
+    // 4. 不能有 parentThreadId
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            service.submitExternal(
+                ticketId,
+                hash,
+                () -> {
+                  AgentTaskRequest req = request(UUID.randomUUID(), null, null);
+                  return new AgentTaskRequest(
+                      ticketId,
+                      req.threadId(),
+                      req.sessionId(),
+                      req.settings(),
+                      req.commands(),
+                      req.preflight(),
+                      req.trigger(),
+                      UUID.randomUUID(),
+                      req.expectedParentHeadEntryId(),
+                      req.continuation(),
+                      req.yoloEnabled(),
+                      req.budget(),
+                      hash);
+                }));
+  }
+
+  @Test
+  void submitExternalReplaysOnThreadIdReusedConflictWhenTicketMatches() {
+    UUID ticketId = UUID.randomUUID();
+    UUID threadId = UUID.randomUUID();
+    String hash = AgentTaskRequest.requestHash(ticketId, "worker", "work", null);
+    AgentTaskRequest req =
+        new AgentTaskRequest(
+            ticketId,
+            threadId,
+            UUID.randomUUID(),
+            SETTINGS,
+            List.of(
+                new NewThreadCommand(
+                    new CustomMessageCommandPayload(AgentMessage.user("work")), UUID.randomUUID())),
+            AcceptancePreflight.IDENTITY,
+            SpawnTrigger.CONTROLLER,
+            null,
+            null,
+            null,
+            false,
+            new SpawnRequest.Budget(null, 1, 1, 10),
+            hash);
+
+    // 首次 findJoin 为空；spawn 遇到并发冲突 THREAD_ID_REUSED；二次查 findJoin 命中已提交的票据
+    when(runtime.findJoin(ticketId))
+        .thenReturn(Optional.empty())
+        .thenReturn(Optional.of(join(ticketId, threadId, false, false, hash)));
+    when(runtime.spawn(any(SpawnRequest.class)))
+        .thenThrow(
+            new HarnessRuntimeConflictException(
+                HarnessRuntimeConflictException.Reason.THREAD_ID_REUSED, "conflict"));
+
+    UUID result = service.submitExternal(ticketId, hash, () -> req);
+    assertEquals(threadId, result);
+  }
+
+  @Test
+  void submitExternalThrowsWhenThreadIdReusedConflictTicketMismatches() {
+    UUID ticketId = UUID.randomUUID();
+    UUID threadId = UUID.randomUUID();
+    String hash = AgentTaskRequest.requestHash(ticketId, "worker", "work", null);
+    String differentHash = AgentTaskRequest.requestHash(ticketId, "worker", "other", null);
+    AgentTaskRequest req =
+        new AgentTaskRequest(
+            ticketId,
+            threadId,
+            UUID.randomUUID(),
+            SETTINGS,
+            List.of(
+                new NewThreadCommand(
+                    new CustomMessageCommandPayload(AgentMessage.user("work")), UUID.randomUUID())),
+            AcceptancePreflight.IDENTITY,
+            SpawnTrigger.CONTROLLER,
+            null,
+            null,
+            null,
+            false,
+            new SpawnRequest.Budget(null, 1, 1, 10),
+            hash);
+
+    when(runtime.findJoin(ticketId))
+        .thenReturn(Optional.empty())
+        .thenReturn(Optional.of(join(ticketId, threadId, false, false, differentHash)));
+    when(runtime.spawn(any(SpawnRequest.class)))
+        .thenThrow(
+            new HarnessRuntimeConflictException(
+                HarnessRuntimeConflictException.Reason.THREAD_ID_REUSED, "conflict"));
+
+    IllegalArgumentException ex =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> service.submitExternal(ticketId, hash, () -> req));
+    assertEquals("join invocation identity reused", ex.getMessage());
+  }
+
+  @Test
+  void submitExternalRethrowsOtherConflicts() {
+    UUID ticketId = UUID.randomUUID();
+    UUID threadId = UUID.randomUUID();
+    String hash = AgentTaskRequest.requestHash(ticketId, "worker", "work", null);
+    AgentTaskRequest req =
+        new AgentTaskRequest(
+            ticketId,
+            threadId,
+            UUID.randomUUID(),
+            SETTINGS,
+            List.of(
+                new NewThreadCommand(
+                    new CustomMessageCommandPayload(AgentMessage.user("work")), UUID.randomUUID())),
+            AcceptancePreflight.IDENTITY,
+            SpawnTrigger.CONTROLLER,
+            null,
+            null,
+            null,
+            false,
+            new SpawnRequest.Budget(null, 1, 1, 10),
+            hash);
+
+    when(runtime.findJoin(ticketId)).thenReturn(Optional.empty());
+    when(runtime.spawn(any(SpawnRequest.class)))
+        .thenThrow(
+            new HarnessRuntimeConflictException(
+                HarnessRuntimeConflictException.Reason.STALE_VERSION, "stale"));
+
+    HarnessRuntimeConflictException ex =
+        assertThrows(
+            HarnessRuntimeConflictException.class,
+            () -> service.submitExternal(ticketId, hash, () -> req));
+    assertEquals(HarnessRuntimeConflictException.Reason.STALE_VERSION, ex.reason());
+  }
+
+  @Test
+  void requestHashIsDeterministicAndDistinguishesMaxTurns() {
+    UUID ticketId = UUID.randomUUID();
+    String hash1 = AgentTaskRequest.requestHash(ticketId, "worker", "work", null);
+    String hash2 = AgentTaskRequest.requestHash(ticketId, "worker", "work", null);
+    assertEquals(hash1, hash2, "identical inputs must yield identical hash");
+
+    String hash3 = AgentTaskRequest.requestHash(ticketId, "worker", "work", 5);
+    assertFalse(hash1.equals(hash3), "explicit maxTurns must differ from null maxTurns");
+
+    String hash4 = AgentTaskRequest.requestHash(ticketId, "worker", "work", 6);
+    assertFalse(hash3.equals(hash4), "different maxTurns values must differ");
+
+    String hashDiffAgent = AgentTaskRequest.requestHash(ticketId, "other", "work", null);
+    assertFalse(hash1.equals(hashDiffAgent), "different agent must differ");
+
+    String hashDiffPrompt = AgentTaskRequest.requestHash(ticketId, "worker", "other", null);
+    assertFalse(hash1.equals(hashDiffPrompt), "different prompt must differ");
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> AgentTaskRequest.requestHash(ticketId, " ", "work", null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> AgentTaskRequest.requestHash(ticketId, "worker", " ", null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> AgentTaskRequest.requestHash(ticketId, "worker", "work", 0));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> AgentTaskRequest.requestHash(ticketId, "worker", "work", -1));
+  }
+
   private AgentTaskRequest request(UUID parentId, UUID parentHead, SpawnRequest.Continuation cont) {
     NewThreadCommand command =
         new NewThreadCommand(
@@ -360,9 +634,14 @@ class AgentTaskServiceTest {
   }
 
   private static ThreadJoin join(UUID ticketId, UUID childId, boolean matched, boolean superseded) {
+    return join(ticketId, childId, matched, superseded, HASH);
+  }
+
+  private static ThreadJoin join(
+      UUID ticketId, UUID childId, boolean matched, boolean superseded, String requestHash) {
     return new ThreadJoin(
         ticketId,
-        HASH,
+        requestHash,
         UUID.randomUUID(),
         childId,
         1,

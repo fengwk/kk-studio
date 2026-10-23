@@ -59,7 +59,7 @@ health、资源下载和 WebSocket 使用各自传输形式。公开路由如下
 | Harness command | `/api/command-batches`、`/api/threads/{threadId}/command-batches` | 创建型 Chat 命令接受（owner-aware）与既有 Thread 的 owner-free 续写；都返回 202 |
 | Session | `/api/sessions/{sessionId}` | threads、entries（含读取时 `usageCost`）、name、草稿/历史请求预览 |
 | Thread | `/api/threads/{threadId}` | Snapshot、执行树、name、Debug、协议预览、流式追帧（`stream-catchup`）、compact、yolo、stop、tool approval |
-| Agent task | `/api/agent-tasks`、`/{ticketId}`、`/{ticketId}/stop` | 提交独立执行的 Agent 任务（客户端 `ticketId` 为幂等键，同请求重放返回原任务，换内容被拒绝）、按票据观察状态与冻结结果、停止 |
+| Agent task | `/api/agent-tasks`、`/{ticketId}`、`/{ticketId}/stop` | 提交独立执行的 Agent 任务（外部身份由 `ticketId`/`agent`/`prompt`/`maxTurns` 确定规范指纹，与 settings 无关；已存在票据校验指纹后直接重放而不重建物化配置，不同字段拒绝）、按票据观察状态与冻结结果、停止 |
 | Interaction | `/api/interactions` | 等待分页（`total` 是同一过滤条件下真实可见的待处理计数）与 `/{interactionId}/input` 人工提交 |
 | Canvas | `/api/canvases` | CRUD、Snapshot、commands、resource download/preview URL、节点 Function Run |
 | Function catalog | `/api/canvas-functions` | 函数 schema、输出计划、可用性 |

@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.web.controller;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -37,6 +38,7 @@ import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 /** Agent 任务 HTTP 入口：提交映射为控制器发起的回执任务，观察 / 停止按票据投影状态，错误经统一 advice 映射。 */
 class StudioAgentTaskControllerTest {
@@ -55,6 +57,13 @@ class StudioAgentTaskControllerTest {
     agentTasks = mock(AgentTaskService.class);
     materializer = mock(AgentBranchSettingsMaterializer.class);
     when(materializer.materialize("worker")).thenReturn(SETTINGS);
+    when(agentTasks.submitExternal(any(UUID.class), any(String.class), any()))
+        .thenAnswer(
+            invocation -> {
+              Supplier<AgentTaskRequest> supplier = invocation.getArgument(2);
+              AgentTaskRequest request = supplier.get();
+              return request.threadId();
+            });
     mockMvc =
         MockMvcBuilders.standaloneSetup(new StudioAgentTaskController(agentTasks, materializer))
             .setControllerAdvice(
@@ -83,10 +92,12 @@ class StudioAgentTaskControllerTest {
           .andExpect(jsonPath("$.data.agent").value("worker"));
     }
 
-    ArgumentCaptor<AgentTaskRequest> captor = ArgumentCaptor.forClass(AgentTaskRequest.class);
-    verify(agentTasks, times(2)).submit(captor.capture());
-    AgentTaskRequest request = captor.getAllValues().get(0);
-    AgentTaskRequest retry = captor.getAllValues().get(1);
+    @SuppressWarnings("unchecked")
+    ArgumentCaptor<Supplier<AgentTaskRequest>> captor = ArgumentCaptor.forClass(Supplier.class);
+    String expectedHash = AgentTaskRequest.requestHash(TICKET_ID, "worker", "summarize", 4);
+    verify(agentTasks, times(2)).submitExternal(eq(TICKET_ID), eq(expectedHash), captor.capture());
+    AgentTaskRequest request = captor.getAllValues().get(0).get();
+    AgentTaskRequest retry = captor.getAllValues().get(1).get();
     assertEquals(TICKET_ID, request.ticketId());
     assertEquals(request.threadId(), retry.threadId());
     assertEquals(request.sessionId(), retry.sessionId());
@@ -99,7 +110,34 @@ class StudioAgentTaskControllerTest {
     assertEquals(SETTINGS, request.settings());
     assertEquals(4, request.budget().maxTurns());
     assertEquals(1, request.commands().size());
-    assertEquals(request.commands().getFirst().requestHash(), request.requestHash());
+    assertEquals(expectedHash, request.requestHash());
+  }
+
+  @Test
+  void submitReplayDoesNotMaterializeSettings() throws Exception {
+    when(agentTasks.observe(TICKET_ID))
+        .thenReturn(
+            Optional.of(
+                new AgentTaskStatus(
+                    TICKET_ID, THREAD_ID, "worker", AgentTaskStatus.State.RUNNING, null)));
+    String body =
+        "{\"ticketId\":\"%s\",\"agent\":\"worker\",\"prompt\":\"summarize\",\"maxTurns\":4}"
+            .formatted(TICKET_ID);
+
+    // 首次提交：submitExternal 执行 supplier 导致 materializer 被调用一次
+    mockMvc
+        .perform(post("/api/agent-tasks").contentType(MediaType.APPLICATION_JSON).content(body))
+        .andExpect(status().isAccepted());
+    verify(materializer, times(1)).materialize("worker");
+
+    // 重放提交：模拟已存在 ticket，submitExternal 直接返回 threadId 而不执行 supplier
+    when(agentTasks.submitExternal(eq(TICKET_ID), any(String.class), any())).thenReturn(THREAD_ID);
+    mockMvc
+        .perform(post("/api/agent-tasks").contentType(MediaType.APPLICATION_JSON).content(body))
+        .andExpect(status().isAccepted());
+
+    // materializer 仍然仅被调用了 1 次，证明重放未重复物化
+    verify(materializer, times(1)).materialize("worker");
   }
 
   @Test
@@ -134,7 +172,7 @@ class StudioAgentTaskControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(withTicket("{\"agent\":\"worker\",\"prompt\":\"work\",\"maxTurns\":0}")))
         .andExpect(status().isBadRequest());
-    verify(agentTasks, never()).submit(any());
+    verify(agentTasks, never()).submitExternal(any(UUID.class), any(String.class), any());
   }
 
   @Test
@@ -147,7 +185,6 @@ class StudioAgentTaskControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(withTicket("{\"agent\":\"ghost\",\"prompt\":\"work\"}")))
         .andExpect(status().isBadRequest());
-    verify(agentTasks, never()).submit(any());
   }
 
   @Test
