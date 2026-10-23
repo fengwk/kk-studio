@@ -150,6 +150,10 @@ public class CanvasFunctionWorker {
         current = transactions.confirmSubmitted(context.currentRun(), claim.leaseToken());
         context.replace(current);
       }
+      if (!runRepository.ownsRunningRequest(
+          current.canvasId(), claim.nodeId(), claim.requestId(), claim.leaseToken())) {
+        throw new CanvasFunctionInternalCancellation("Canvas Function lease was lost");
+      }
       List<UUID> result = List.copyOf(registered.adapter().execute(context, current));
       requireOwnership(ownershipLost);
       if (!result.equals(current.outputResourceIds())) {

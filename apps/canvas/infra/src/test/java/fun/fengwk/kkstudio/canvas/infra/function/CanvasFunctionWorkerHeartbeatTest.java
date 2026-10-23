@@ -98,6 +98,21 @@ class CanvasFunctionWorkerHeartbeatTest {
     }
   }
 
+  /** 恢复已提交任务时不能等首次异步 heartbeat 才检查所有权。 */
+  @Test
+  void resumedSubmittedRunChecksOwnershipBeforeExecute() throws Exception {
+    Fixture fixture = new Fixture(CanvasFunctionSubmitState.SUBMITTED);
+    when(fixture.runRepository.ownsRunningRequest(any(), any(), any(), any())).thenReturn(false);
+    try {
+      fixture.worker.run(fixture.claim);
+      verify(fixture.adapter, never()).submit(any(), any());
+      verify(fixture.adapter, never()).execute(any(), any());
+      verify(fixture.transactions, never()).completeSuccess(any(), any(), any());
+    } finally {
+      fixture.close();
+    }
+  }
+
   /** adapter 抛出 CanvasFunctionUnknownException 时 Worker 收敛为 UNKNOWN。 */
   @Test
   void adapterUnknownExceptionConvergesToUnknownStatus() throws Exception {
@@ -325,6 +340,7 @@ class CanvasFunctionWorkerHeartbeatTest {
           new ClaimedRun(
               run, new WorkClaim(run.nodeId(), 1L, "lease", Instant.EPOCH.plusSeconds(30)));
       when(runRepository.findByNodeId(run.nodeId())).thenReturn(Optional.of(run));
+      when(runRepository.ownsRunningRequest(any(), any(), any(), any())).thenReturn(true);
 
       CanvasFunctionBinding binding = new CanvasFunctionBinding(definition);
       frozen =
