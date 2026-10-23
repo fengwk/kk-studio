@@ -45,7 +45,7 @@ public record ModelCost(
     }
   }
 
-  /** 无条件便利入口；规则需要 requestedAt/serviceTier 时按缺少事实处理，费用为 0。 */
+  /** 无条件便利入口；缺少计价事实时返回 null，不冒充免费请求。 */
   public static ModelCost calculate(ModelPricing pricing, ModelUsage usage) {
     return calculate(pricing, usage, null, null);
   }
@@ -53,7 +53,7 @@ public record ModelCost(
   /**
    * 使用实际请求时间与最终 service tier 解析规则并计算精确费用。
    *
-   * <p>缺少完成当前规则判定必需的事实、reasoning 独立定价缺少可信子集或没有匹配费率时，本次费用为完整 0；非法配置和 用量溢出仍然抛出异常。
+   * <p>缺少完成当前规则判定必需的事实、reasoning 独立定价缺少可信子集或没有匹配费率时返回 null；非法配置和用量溢出仍然抛出异常。
    */
   public static ModelCost calculate(
       ModelPricing pricing, ModelUsage usage, Instant requestedAt, String serviceTier) {
@@ -62,7 +62,7 @@ public record ModelCost(
     ModelPricingResolver.ResolvedRates rates =
         ModelPricingResolver.resolve(pricing, usage, requestedAt, serviceTier);
     if (rates == null) {
-      return zero();
+      return null;
     }
 
     BigDecimal input = priced(rates.input(), usage.inputTokens());
@@ -75,7 +75,7 @@ public record ModelCost(
       Long reasoningTokens = usage.reasoningTokens();
       if (reasoningTokens == null) {
         // 独立 reasoning 价必须有可信子集，否则不能把全部输出都按 reasoning 价猜测。
-        return zero();
+        return null;
       }
       long nonReasoningTokens = usage.outputTokens() - reasoningTokens;
       output = priced(rates.output(), nonReasoningTokens);
@@ -89,7 +89,7 @@ public record ModelCost(
     return new ModelCost(USD, input, output, cacheRead, cacheWrite, reasoning, total);
   }
 
-  /** 完整零费用；缺价与显式 0 走同一条路径。 */
+  /** 已知的完整零费用；不用于表示缺价或缺少计价事实。 */
   public static ModelCost zero() {
     return new ModelCost(
         USD,

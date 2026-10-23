@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.model;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
@@ -130,10 +131,10 @@ class ModelPricingResolverTest {
             new ModelUsage(0, 1_000_000, 0, 0, Map.of(), null, 1_000_000L),
             null,
             null);
-    assertEquals(ModelCost.zero(), missingSubset);
+    assertNull(missingSubset);
   }
 
-  /** 日期边界支持单侧缺省；缺失 requestedAt 时返回完整 0，绝不查询当前时间伪造历史。 */
+  /** 日期边界支持单侧缺省；缺失 requestedAt 时返回未知，绝不查询当前时间伪造历史。 */
   @Test
   void matchesOneSidedUtcDatesAndZeroesWhenRequestedAtIsMissing() {
     ModelPricing gte =
@@ -152,9 +153,7 @@ class ModelPricingResolverTest {
     assertEquals(
         new BigDecimal("1"), calculateInput(lt, Instant.parse("2026-08-18T00:00:00Z"), null));
 
-    assertEquals(
-        ModelCost.zero(),
-        ModelCost.calculate(gte, new ModelUsage(1_000_000, 0, 0, 0, Map.of(), null, null)));
+    assertNull(ModelCost.calculate(gte, new ModelUsage(1_000_000, 0, 0, 0, Map.of(), null, null)));
     assertEquals(
         new BigDecimal("7"),
         calculateInput(
@@ -241,7 +240,9 @@ class ModelPricingResolverTest {
                     new ModelPricing.RatePatch(dec("9"), null, null, null, null, null, false))),
             List.of());
 
-    assertEquals(BigDecimal.ZERO, calculateInput(pricing, MONDAY_LATE, null));
+    assertNull(
+        ModelCost.calculate(
+            pricing, new ModelUsage(1_000_000, 0, 0, 0, Map.of(), null, null), MONDAY_LATE, null));
     assertEquals(new BigDecimal("9"), calculateInput(pricing, MONDAY_LATE, "priority"));
   }
 
@@ -277,7 +278,7 @@ class ModelPricingResolverTest {
             "priority"));
   }
 
-  /** not 包装未知事实仍为未知，整单归零；只有事实已知时才产生确定布尔结果。 */
+  /** not 包装未知事实仍为未知；只有事实已知时才产生确定布尔结果。 */
   @Test
   void keepsUnknownPropagatingThroughNot() {
     ModelPricing pricing =
@@ -286,7 +287,9 @@ class ModelPricingResolverTest {
             new ModelPricingCondition(null, null, null, null, null, null, tier("priority")),
             "9");
 
-    assertEquals(BigDecimal.ZERO, calculateInput(pricing, MONDAY_LATE, null));
+    assertNull(
+        ModelCost.calculate(
+            pricing, new ModelUsage(1_000_000, 0, 0, 0, Map.of(), null, null), MONDAY_LATE, null));
     assertEquals(new BigDecimal("1"), calculateInput(pricing, MONDAY_LATE, "priority"));
     assertEquals(new BigDecimal("9"), calculateInput(pricing, MONDAY_LATE, "standard"));
   }

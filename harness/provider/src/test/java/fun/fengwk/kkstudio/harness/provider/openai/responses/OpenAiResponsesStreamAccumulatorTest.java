@@ -642,7 +642,7 @@ class OpenAiResponsesStreamAccumulatorTest {
     assertEquals("us-east-1", rawUsage.path("extra_details").path("region").asString(""));
   }
 
-  /** 意图：验证当响应中完全未携带 usage 块时，rawUsageJson 产出 {}。 */
+  /** 整份用量缺失不能伪装成真实零用量。 */
   @Test
   void test_emitsEmptyObjectRawUsageWhenNoUsageProvided() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
@@ -655,9 +655,8 @@ class OpenAiResponsesStreamAccumulatorTest {
         MAPPER.readTree(
             "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_no_usage\",\"status\":\"completed\"}}"));
 
-    ProviderResponse resp = accumulator.response();
-    assertEquals("{}", resp.rawUsageJson());
-    assertNull(resp.usage().providerTotalTokens());
+    ProviderException error = assertThrows(ProviderException.class, accumulator::finish);
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind());
   }
 
   /** 意图：验证 COMPLETE 终态下工具调用如果参数为空或未闭合，严禁合成 {}，严格抛出 INVALID_RESPONSE。 */

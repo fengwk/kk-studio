@@ -487,8 +487,9 @@ final class OpenAiChatStreamAccumulator {
   }
 
   private void parseUsageSnapshot(JsonNode usageNode) {
-    this.promptTokens = optionalNonNegativeLong(usageNode, "prompt_tokens", 0L);
-    this.completionTokens = optionalNonNegativeLong(usageNode, "completion_tokens", 0L);
+    this.promptTokens = requiredNonNegativeLong(usageNode.get("prompt_tokens"), "prompt_tokens");
+    this.completionTokens =
+        requiredNonNegativeLong(usageNode.get("completion_tokens"), "completion_tokens");
     this.totalTokens =
         usageNode.has("total_tokens") && !usageNode.get("total_tokens").isNull()
             ? requiredNonNegativeLong(usageNode.get("total_tokens"), "total_tokens")
@@ -552,11 +553,6 @@ final class OpenAiChatStreamAccumulator {
     return value;
   }
 
-  private static long optionalNonNegativeLong(JsonNode parent, String field, long fallback) {
-    JsonNode value = parent.get(field);
-    return value == null ? fallback : requiredNonNegativeLong(value, field);
-  }
-
   private static long requiredNonNegativeLong(JsonNode value, String field) {
     if (value == null
         || !value.isIntegralNumber()
@@ -579,7 +575,11 @@ final class OpenAiChatStreamAccumulator {
 
   private static long uncachedTokens(long total, long firstExcluded, long secondExcluded) {
     long excluded = addUsageValues(firstExcluded, secondExcluded);
-    return excluded >= total ? 0L : total - excluded;
+    if (excluded > total) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "provider usage breakdown exceeds prompt tokens");
+    }
+    return total - excluded;
   }
 
   private static GenerationStopReason mapFinishReason(String reason) {
@@ -593,6 +593,11 @@ final class OpenAiChatStreamAccumulator {
   }
 
   ProviderCompletion finish() {
+    if ("{}".equals(rawUsageJson)) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE,
+          "missing complete usage: OpenAI Chat model " + request.model().modelId());
+    }
     if (config.requireDone()) {
       if (!seenDone) {
         throw new ProviderException(
