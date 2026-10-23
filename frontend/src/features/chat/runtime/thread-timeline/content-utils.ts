@@ -6,6 +6,7 @@ import type {
   TurnUsage,
   UsageCost,
 } from '@/features/chat/runtime/thread-timeline-types'
+import { translate } from '@/shared/i18n'
 
 
 export function contentText(content: Record<string, unknown>): string {
@@ -340,23 +341,49 @@ export function mergeUsageCost(left: UsageCost | null, right: UsageCost | null):
   return amount == null ? null : { currency: left.currency, amount }
 }
 
+function isNonNegativeSafeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+}
+
 /**
  * 从持久 ASSISTANT Entry 的 `assistantMetadata` 提取 provider usage。
  *
  * 只接受 harness 持久 codec 的 canonical 字段名，不兼容 snake_case / 常见别名；
+ * inputTokens、outputTokens、cacheReadTokens、cacheWriteTokens 必须为非负安全整数，
+ * 缺任一字段或非法时返回 null；整个 usage 缺失时返回 null。
+ * reasoningTokens 与 providerTotalTokens 为 nullable 未知（缺失或非法时保持 null）。
  * 费用来自 Entry 的 usageCost 读取投影，绝不从 metadata.cost 自行定价。
  */
 export function parseAssistantUsage(
   metadata: Record<string, unknown>,
   usageCost: unknown = null,
 ): TurnUsage | null {
-  const usage = asRecord(metadata.usage)
-  const input = numberField(usage, 'inputTokens')
-  const output = numberField(usage, 'outputTokens')
-  const cacheRead = numberField(usage, 'cacheReadTokens')
-  const cacheWrite = numberField(usage, 'cacheWriteTokens')
-  const reasoning = numberField(usage, 'reasoningTokens')
-  const providerTotal = numberField(usage, 'providerTotalTokens')
+  if (
+    metadata == null
+    || typeof metadata !== 'object'
+    || metadata.usage == null
+    || typeof metadata.usage !== 'object'
+  ) {
+    return null
+  }
+  const usage = metadata.usage as Record<string, unknown>
+  const rawInput = usage.inputTokens
+  const rawOutput = usage.outputTokens
+  const rawCacheRead = usage.cacheReadTokens
+  const rawCacheWrite = usage.cacheWriteTokens
+
+  if (
+    !isNonNegativeSafeInteger(rawInput)
+    || !isNonNegativeSafeInteger(rawOutput)
+    || !isNonNegativeSafeInteger(rawCacheRead)
+    || !isNonNegativeSafeInteger(rawCacheWrite)
+  ) {
+    return null
+  }
+
+  const reasoning = isNonNegativeSafeInteger(usage.reasoningTokens) ? usage.reasoningTokens : null
+  const providerTotal =
+    isNonNegativeSafeInteger(usage.providerTotalTokens) ? usage.providerTotalTokens : null
   const cost = normalizeUsageCost(usageCost)
 
   // decodeDurationMillis 是 harness 持久字段：只接受 backend 形态的安全整数 > 0。
@@ -368,26 +395,14 @@ export function parseAssistantUsage(
       ? metadata.decodeDurationMillis
       : null
   // outputTokens 已包含 reasoning；TTL 分桶也已包含在 cacheWriteTokens 中。
-  const decodeTokens = decodeDurationMillis != null ? output : null
-  const contextInputTokens = input + cacheRead + cacheWrite
+  const decodeTokens = decodeDurationMillis != null ? rawOutput : null
+  const contextInputTokens = rawInput + rawCacheRead + rawCacheWrite
 
-  if (
-    input <= 0
-    && output <= 0
-    && cacheRead <= 0
-    && cacheWrite <= 0
-    && reasoning <= 0
-    && providerTotal <= 0
-    && cost == null
-    && decodeDurationMillis == null
-  ) {
-    return null
-  }
   return {
-    input,
-    output,
-    cacheRead,
-    cacheWrite,
+    input: rawInput,
+    output: rawOutput,
+    cacheRead: rawCacheRead,
+    cacheWrite: rawCacheWrite,
     reasoning,
     providerTotal,
     cost,
@@ -433,7 +448,7 @@ export function isValidDecodeSample(sample: {
 
 /**
  * 估算解码速率：decodeTokens * 1000 / decodeDurationMillis。
- * 仅在有效样本上计算，无样本返回 null，摘要默认显示 0；速率 >= 10 取整、< 10 保留 1 位小数。
+ * 仅在有效样本上计算，无样本返回 null；速率 >= 10 取整、< 10 保留 1 位小数。
  */
 export function calculateDecodeTokensPerSecond(usage: {
   decodeTokens?: number | null
@@ -448,7 +463,8 @@ export function calculateDecodeTokensPerSecond(usage: {
 
 /**
  * 合并同一 Turn 内多个 ASSISTANT 调用的 Usage。
- * 消耗累加；费用按精确十进制求和（缺失或跨币种 -> null）；最新一次调用上下文覆盖
+ * 消耗累加；reasoning 与 providerTotal 任一未知时保持 null；
+ * 费用按精确十进制求和（缺失或跨币种 -> null）；最新一次调用上下文覆盖
  * contextInputTokens；测速样本仅累加有效样本分子与分母。
  */
 export function mergeTurnUsage(existing: TurnUsage, next: TurnUsage): TurnUsage {
@@ -456,8 +472,14 @@ export function mergeTurnUsage(existing: TurnUsage, next: TurnUsage): TurnUsage 
   const output = existing.output + next.output
   const cacheRead = existing.cacheRead + next.cacheRead
   const cacheWrite = existing.cacheWrite + next.cacheWrite
-  const reasoning = existing.reasoning + next.reasoning
-  const providerTotal = existing.providerTotal + next.providerTotal
+  const reasoning =
+    existing.reasoning != null && next.reasoning != null
+      ? existing.reasoning + next.reasoning
+      : null
+  const providerTotal =
+    existing.providerTotal != null && next.providerTotal != null
+      ? existing.providerTotal + next.providerTotal
+      : null
   const cost = mergeUsageCost(existing.cost, next.cost)
   const contextInputTokens = next.contextInputTokens ?? existing.contextInputTokens ?? null
 
@@ -492,29 +514,34 @@ export function mergeTurnUsage(existing: TurnUsage, next: TurnUsage): TurnUsage 
 /**
  * Turn usage 摘要文本（Conversation TurnSummary、Event TURN_END 与 Footer 共用）：
  * `↑input · ↓output · RcacheRead · WcacheWrite · cost · cache N.NN% · X tok/s`。
- * 所有统计项固定保留；无缓存比例、测速样本或定价时默认显示 0，缓存比例保留两位小数，
- * 不为缺失定价假定币种。默认值仅用于展示，不写入 usage facts。
+ * 所有统计项固定保留；无缓存比例默认显示 0.00%；缺失费用或测速样本时显示 noData（不显示 0），
+ * 真实 0 保留，不为缺失定价假定币种。默认值仅用于展示，不写入 usage facts。
  * 统计项分隔符统一为 U+00B7，Footer 只在其外层使用 U+2223 分组，不覆盖本函数。
  */
-export function formatTurnUsageText(usage: {
-  input: number
-  output: number
-  cacheRead: number
-  cacheWrite: number
-  cost: UsageCost | null
-  decodeTokens?: number | null
-  decodeDurationMillis?: number | null
-}): string {
+export function formatTurnUsageText(
+  usage: {
+    input: number
+    output: number
+    cacheRead: number
+    cacheWrite: number
+    cost: UsageCost | null
+    decodeTokens?: number | null
+    decodeDurationMillis?: number | null
+  },
+  t: (key: string) => string = translate,
+): string {
+  const noData = t('ai.runtime.status.noData')
   const parts = [
     `↑${formatCompactTokens(usage.input)}`,
     `↓${formatCompactTokens(usage.output)}`,
     `R${formatCompactTokens(usage.cacheRead)}`,
     `W${formatCompactTokens(usage.cacheWrite)}`,
   ]
-  parts.push(formatUsageCost(usage.cost) ?? '0')
+  const costText = formatUsageCost(usage.cost)
+  parts.push(costText ?? noData)
   const cacheHitRate = calculateCacheHitRate(usage)
   parts.push(`cache ${(cacheHitRate ?? 0).toFixed(2)}%`)
   const speed = calculateDecodeTokensPerSecond(usage)
-  parts.push(`${speed ?? 0} tok/s`)
+  parts.push(speed != null ? `${speed} tok/s` : noData)
   return parts.join(' · ')
 }

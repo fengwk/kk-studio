@@ -36,6 +36,7 @@ export interface UsageCost {
 
 /**
  * 已关闭 Turn 的 provider usage；reasoning 是 output 的子集，不可重复累加。
+ * reasoning 与 providerTotal 为 nullable（null 表示未知/未提供）。
  * cost 是读取投影（null 表示未定价/不适用），同一 branch 内跨币种或含缺失项时不得伪造成完整总额。
  */
 export interface TurnUsage {
@@ -43,8 +44,8 @@ export interface TurnUsage {
   output: number
   cacheRead: number
   cacheWrite: number
-  reasoning: number
-  providerTotal: number
+  reasoning: number | null
+  providerTotal: number | null
   cost: UsageCost | null
   /** 解码输出 token 数（outputTokens，已含 reasoning），用于与 decodeDurationMillis 配对计算 tok/s */
   decodeTokens?: number | null
@@ -149,6 +150,7 @@ export interface ToolDialogueMessage extends BaseDialogueMessage {
   arguments: string
   /** result 阶段的有序结果内容；call 阶段为空数组。 */
   contents: ToolContent[]
+  details?: Record<string, unknown>
   status?: DialogueStatus
   errorMessage?: string
   /** 持久结果到达之前的瞬态有序内容；只有 text/json（runtime 禁止 partial 携带 Resource）。 */

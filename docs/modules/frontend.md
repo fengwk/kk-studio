@@ -201,6 +201,13 @@ Snapshot、Debug、用量并展示真实身份，并在顶部提供返回直属�
 `/threads/{parentId}`）；身份未确认时不挂载控制 Hook。
 根面板汇聚整棵执行树的审批和问卷，提交仍携带原始调用的 Thread 与 invocation 身份。
 执行结果与任务回执则始终交给直接派发的父 Agent，不改为根订阅。
+子代理观察面板从已有 Snapshot 展示 QUEUED CUSTOM_MESSAGE 的“待处理补充要求”，
+保留命令 sequence、稳定身份和真实正文；独立于人工输入队列，不提供编辑、删除或重排。
+应用后随 Snapshot 更新移出待处理区，历史只展示持久 Entry，不复制待处理记录。
+task 初次执行入口只读取规范 `task.accepted` details 中的 thread_id：
+持久 Entry 的 detailsJson 与 live invocation 的 resultJson.details 使用同一投影。
+续接参数已有的 thread_id 链接保持不变；缺失或损坏 details 时完整展示正文，
+不从自然语言或正文 JSON 推断链接，错误原文仍保留。
 
 全局与根交互区共用 InteractionCardBody/ApprovalCard。非文件变更工具的审批显示一次完整 `argumentsJson`（含 bash 的 workdir），
 默认权限原因本地化，额外原因完整展示；允许与拒绝复用共享 Button，拒绝使用 primary + danger。
@@ -279,9 +286,12 @@ metadata 自行定价；durable 用量按当前 catalog 价格现算，不写回
 时显示 `<$0.000001`，精确 0 才是 `$0`。上下文占用只使用最近一次模型调用的输入估计
 （input + cacheRead + cacheWrite），绝不用分支累计量替代。
 输出 `outputTokens` 已包含推理 token，测速仅用该输出量除以解码耗时；不再额外累加推理。
-缓存写入使用 `cacheWriteTokens` 总量，不叠加 TTL 分桶或旧 `cacheWriteLongTokens` 字段。
+缓存写入使用 `cacheWriteTokens` 总量，不叠加 TTL 分桶。
+usage 必须报告四个非负安全整数：inputTokens、outputTokens、cacheReadTokens、cacheWriteTokens。
+缺失或非法时不合成读数；reasoningTokens 和 providerTotalTokens 未报告时保留未知，聚合时也不补零。
 摘要固定保留 `↑input · ↓output · RcacheRead · WcacheWrite · cost · cache N.NN% · X tok/s`
-全部字段，R/W 为零时也不省略。缺失的上下文估计、费用与速率默认显示 `0`，缓存比例默认显示
+全部字段，R/W 为零时也不省略。缺失费用与速率不可显示 `0`，统一展示中英文 `noData`
+（中文“暂无数据”、英文“No data”），真实 0 正常保留（如 `$0`、`0 tok/s`）；缓存比例默认显示
 `0.00%`，费用未计量时不假定币种；hover 仍明确区分未计量与真实零值，展示默认值不写入统计事实。
 单行保留全部事实并由 CSS 省略，hover 给出环境、上下文与用量三组完整数字（含推理与缓存分项），
 措辞统一为“未缓存输入 / 输出 / 推理 / 缓存命中率”等全称。累计口径覆盖全部 Entry，

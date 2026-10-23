@@ -36,7 +36,7 @@ export interface ThreadStatusModelInput {
   environment?: EnvironmentStatusIdentity | null
   /** 实时可用标记；false 时展示 unavailable 事实。 */
   environmentReady?: boolean
-  /** 当前 root-to-head 已关闭 Turn 的累计 usage；缺失时按 0 展示。 */
+  /** 当前 root-to-head 累计 usage；缺失费用与测速样本保持未知。 */
   branchUsage?: TurnUsage | null
   contextWindow?: number
 }
@@ -105,7 +105,7 @@ export function buildThreadStatusModel(
   // 累计用量与回合摘要共用 U+00B7 统计项分隔；主行保持紧凑，hover 给完整数字与全称明细。
   segments.push({
     key: 'usage',
-    text: formatTurnUsageText(usage),
+    text: formatTurnUsageText(usage, t),
     title: formatUsageDetails(usage, t),
   })
 
@@ -128,7 +128,7 @@ export function formatUsageDetails(usage: TurnUsage, t: TranslateFn): string {
     t('ai.runtime.status.usageTokensDetail', {
       input: String(usage.input),
       output: String(usage.output),
-      reasoning: String(usage.reasoning),
+      reasoning: usage.reasoning != null ? String(usage.reasoning) : noData,
     }),
     t('ai.runtime.status.usageCacheDetail', {
       cacheRead: String(usage.cacheRead),
@@ -147,8 +147,8 @@ const EMPTY_USAGE: TurnUsage = {
   output: 0,
   cacheRead: 0,
   cacheWrite: 0,
-  reasoning: 0,
-  providerTotal: 0,
+  reasoning: null,
+  providerTotal: null,
   cost: null,
 }
 

@@ -136,7 +136,9 @@ describe('thread timeline', () => {
       entry('user-1', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'hello' }])),
       entry('assistant-1', 'MESSAGE', {
         ...messagePayload('ASSISTANT', [{ type: 'text', text: 'ok' }]),
-        assistantMetadata: { usage: { inputTokens: 100, outputTokens: 50 } },
+        assistantMetadata: {
+          usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        },
       }),
       entry('end-1', 'TURN_END', { outcome: 'COMPLETED', turnStartEntryId: 'turn-1' }),
       entry('settings-head', 'SETTINGS', {

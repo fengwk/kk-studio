@@ -311,7 +311,6 @@ describe('buildThreadEventTimeline', () => {
         outputTokens: 20,
         cacheReadTokens: 5,
         cacheWriteTokens: 3,
-        cacheWriteLongTokens: 2,
         reasoningTokens: 7,
         providerTotalTokens: 44,
       },
@@ -344,7 +343,7 @@ describe('buildThreadEventTimeline', () => {
         summaryText: 'summarized',
         assistantMetadata: {
           stopReason: 'COMPLETE',
-          usage: { inputTokens: 1000, outputTokens: 100, providerTotalTokens: 1100 },
+          usage: { inputTokens: 1000, outputTokens: 100, cacheReadTokens: 0, cacheWriteTokens: 0, providerTotalTokens: 1100 },
         },
       }),
       entry('end-1', 'TURN_END', { outcome: 'COMPLETED' }),
@@ -373,7 +372,7 @@ describe('buildThreadEventTimeline', () => {
 
   it('omits zero cache segments from the TURN_END summary but keeps input/output', () => {
     const usage = {
-      usage: { inputTokens: 100, outputTokens: 200, cacheReadTokens: 0, cacheWriteTokens: 0, cacheWriteLongTokens: 0, reasoningTokens: 0, providerTotalTokens: 300 },
+      usage: { inputTokens: 100, outputTokens: 200, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0, providerTotalTokens: 300 },
     }
     const entries = [
       entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
@@ -383,8 +382,24 @@ describe('buildThreadEventTimeline', () => {
     const events = build(entries)
     expect(events[2]!.title).toBe('TURN_END')
     expect(events[2]!.summary).toBe(JSON.stringify({ outcome: 'COMPLETED' }))
+    // 真实 0 保留
+    expect(events[2]!.details.find((row) => row.label === '推理 tokens')?.value).toBe('0')
     // 无定价事实：如实标注暂无数据，绝不伪装成 $0
     expect(events[2]!.details.find((row) => row.label === '费用')?.value).toBe('暂无数据')
+  })
+
+  it('marks unknown reasoning and providerTotal as noData when omitted in usage facts', () => {
+    const usage = {
+      usage: { inputTokens: 100, outputTokens: 200, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    }
+    const entries = [
+      entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
+      entry('assistant-1', 'MESSAGE', messagePayload('ASSISTANT', [{ type: 'text', text: 'r' }], usage)),
+      entry('end-1', 'TURN_END', { outcome: 'COMPLETED' }),
+    ]
+    const events = build(entries)
+    expect(events[2]!.details.find((row) => row.label === '推理 tokens')?.value).toBe('暂无数据')
+    expect(events[2]!.details.find((row) => row.label === 'Provider 总 tokens')?.value).toBe('暂无数据')
   })
 
   it('keeps TURN_END summary as the bare outcome when the turn has no usage', () => {
