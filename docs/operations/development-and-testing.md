@@ -381,6 +381,13 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 `node scripts/dev/verify/e2e/run-matrix.mjs --list` 与 `--docs` 生成，不要把它们抄进文档；默认执行哪些 case
 由 flag 组合和 case 的 `requires` 共同决定。
 
+安装配置与安装码兑换属于免费 L1 API 契约。可用
+`node scripts/dev/verify/e2e/run-matrix.mjs --only environment.install_script_code_roundtrip`
+定向验证五分钟一次性安装码、重签替换、未消费码的轮换失效，以及兑换生成 fresh token 和推进版本。
+Linux 脚本只下载并检查保存配置与响应头，不执行安装；卸载脚本检查不携带 secret。
+该入口需要真实测试服务；`node --test scripts/dev/verify/e2e/tests/environment-install-config.test.mjs`
+只验证用例与 HTTP mock 的契约，不能替代真实 HTTP L1 验收。
+
 case 的 `requires` 决定默认是否执行：`real`、`tools`、`branch`、`canvas-storage`、`canvas-function` 与
 `distributed` 分别对应上表的 flag；`host-mock` 表示 case 在宿主 `127.0.0.1` 自建 mock Provider，不读取真实凭据，
 但在 distributed 容器拓扑下不可用。API 契约断言不能替代真实 Agent 的 Issue 接受、阶段交接与 Goal 进度验收，

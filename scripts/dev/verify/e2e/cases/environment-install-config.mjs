@@ -184,14 +184,18 @@ function assertScriptOmits(script, needle, label) {
   assert(typeof script === 'string' && !script.includes(needle), `${label} must not appear in the script`)
 }
 
-function assertInstallScript(script, { token, config }) {
+function assertInstallScript(script, { previousTokens, config }) {
   assert(typeof script === 'string' && script.length > 0, 'install script must be non-empty text')
   assert(!script.trim().startsWith('{'), 'install script must not be a Result envelope')
   assertScriptContains(script, config.daemon.studioUrl, 'saved studioUrl')
   assertScriptContains(script, config.daemon.note, 'saved note')
   assertScriptContains(script, config.daemon.lsp.servers.jdtls.command[0], 'saved LSP command')
-  assertScriptContains(script, token, 'current registration token')
+  const tokens = [...script.matchAll(/^builtin printf '%s' '([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})' > "\$stage\/daemon\.token"$/gm)]
+  assert(tokens.length === 1, 'install script must stage exactly one UUID registration token')
+  const token = tokens[0][1]
+  assert(!previousTokens.includes(token), 'redemption must generate a fresh registration token')
   assertScriptContains(script, 'install', 'install action')
+  return token
 }
 
 function assertUninstallScript(script, secrets) {
@@ -260,7 +264,7 @@ registerCase({
   id: 'environment.install_script_code_roundtrip',
   level: 'L1',
   title: 'Environment 五分钟安装 code 签发、脚本下载与 token 轮换失效',
-  docs: 'POST /api/environments/{id}/install-code 用 expectedVersion 签发 {code,expiresAt}（no-store、无 registrationToken、约 5 分钟到期且不改 version/配置，stale 版本 409）；GET /{id}/install?code= 返回含已保存配置与当前 token 的 UTF-8 纯文本（no-store、nosniff，不执行）；缺 code/篡改 code 400；POST /{id}/registration-token 轮换后旧 code 400、新 code 脚本含新 token 且环境 id 不变；GET /uninstall/{linux,windows} 无环境 token/配置且不需要 code，非法 OS 400',
+  docs: 'POST /api/environments/{id}/install-code 用 expectedVersion 签发一次性 {code,expiresAt}（no-store、无 registrationToken、约 5 分钟到期且不改 version/配置，stale 版本 409），重签覆盖旧 code；GET /{id}/install?code= 兑换生成 fresh UUID token 并推进 version，保留配置且 detail 无 token；Linux UTF-8 纯文本含保存配置（no-store、nosniff，只下载不执行）；重复/缺失/篡改 code 400；POST /{id}/registration-token 使未消费 code 失效，重签兑换 token 与此前均不同；GET /uninstall/{linux,windows} 无 secret/配置且不需要 code，非法 OS 400',
   async run(ctx) {
     const name = `e2e-install-code-${cid().slice(0, 8)}`
     const { json: createJson } = await ctx.call('POST', '/api/environments', { name })
@@ -331,7 +335,17 @@ registerCase({
         String(headerValue(scriptHeaders, 'x-content-type-options') ?? '').toLowerCase() === 'nosniff',
         'install download must set nosniff',
       )
-      assertInstallScript(script, { token, config })
+      const downloadedToken = assertInstallScript(script, { previousTokens: [token], config })
+      const checkRedemption = async () => {
+        const { json } = await ctx.call('GET', cardPath)
+        const detail = envelopeData(json)
+        assert(BigInt(detail.version) === BigInt(version) + 1n, 'redemption must advance version once')
+        assertInstallConfig(detail.installConfig)
+        assert(!Object.hasOwn(detail, 'registrationToken'), 'detail must not carry registrationToken')
+        version = String(detail.version)
+      }
+      await checkRedemption()
+      await expectStatus(() => downloadInstallationScript(ctx, `${cardPath}/install?code=${encodeURIComponent(code)}`), 400)
 
       await expectStatus(() => downloadInstallationScript(ctx, `${cardPath}/install`), 400)
       await expectStatus(
@@ -341,6 +355,19 @@ registerCase({
         ),
         400,
       )
+
+      const issueCode = async () => {
+        const { json, headers } = await ctx.call('POST', `${cardPath}/install-code`, { expectedVersion: version })
+        assertNoStore(headers, 'install code')
+        const issued = envelopeData(json)
+        assert(typeof issued.code === 'string' && issued.code.length > 0, 'install code must be non-empty')
+        assertExpiresNearFiveMinutes(issued.expiresAt, Date.now())
+        return issued.code
+      }
+      const replacedCode = await issueCode()
+      const pendingCode = await issueCode()
+      assert(pendingCode !== replacedCode, 'reissue must replace the pending code')
+      await expectStatus(() => downloadInstallationScript(ctx, `${cardPath}/install?code=${encodeURIComponent(replacedCode)}`), 400)
 
       const { json: rotatedJson, headers: rotatedHeaders } = await ctx.call(
         'POST',
@@ -357,7 +384,7 @@ registerCase({
       assertInstallConfig(rotated.installConfig)
 
       await expectStatus(
-        () => downloadInstallationScript(ctx, `${cardPath}/install?code=${encodeURIComponent(code)}`),
+        () => downloadInstallationScript(ctx, `${cardPath}/install?code=${encodeURIComponent(pendingCode)}`),
         400,
       )
 
@@ -381,10 +408,11 @@ registerCase({
         String(headerValue(refreshedScriptHeaders, 'x-content-type-options') ?? '').toLowerCase() === 'nosniff',
         'refreshed install download must set nosniff',
       )
-      assertInstallScript(refreshedScript, { token: rotatedToken, config })
+      const refreshedToken = assertInstallScript(refreshedScript, { previousTokens: [token, rotatedToken, downloadedToken], config })
+      await checkRedemption()
       assertScriptOmits(refreshedScript, token, 'previous registration token')
 
-      const secrets = [token, rotatedToken, code, refreshedCode, config.daemon.studioUrl, config.daemon.note]
+      const secrets = [token, rotatedToken, downloadedToken, refreshedToken, code, replacedCode, pendingCode, refreshedCode, config.daemon.studioUrl, config.daemon.note]
       for (const operatingSystem of ['linux', 'windows']) {
         const { json: uninstall, headers: uninstallHeaders } = await ctx.call(
           'GET',
