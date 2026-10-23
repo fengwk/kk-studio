@@ -107,4 +107,3 @@ export interface HarnessThreadCommandBatchDTO {
   expectedNextCommandSequence?: string | null
   commands: HarnessCommandCreateDTO[]
 }
-

@@ -17,4 +17,3 @@ export function makeMockHttp({ rows, putError, getError } = {}) {
   }
   return { request, calls }
 }
-

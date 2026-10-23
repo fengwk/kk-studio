@@ -954,4 +954,3 @@ function toolResultText(contents: Array<Record<string, unknown>>): string {
 function scalarText(value: unknown): string {
   return typeof value === 'number' ? String(value) : getString(value)
 }
-
