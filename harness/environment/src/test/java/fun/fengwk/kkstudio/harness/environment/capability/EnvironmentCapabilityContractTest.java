@@ -240,42 +240,6 @@ class EnvironmentCapabilityContractTest {
     assertTrue(handle.isCancelled());
   }
 
-  /** 测试意图：显式句柄夹具自行校验终止原因，并在终止时取消执行、暴露零恢复窗。 */
-  @Test
-  void explicitHandleFixtureValidatesCauseAndExposesZeroGrace() {
-    AtomicBoolean cancelled = new AtomicBoolean();
-    EnvironmentCapabilityExecutionHandle handle =
-        new EnvironmentCapabilityExecutionHandle() {
-          @Override
-          public void cancel() {
-            cancelled.set(true);
-          }
-
-          @Override
-          public boolean isCancelled() {
-            return cancelled.get();
-          }
-
-          @Override
-          public void terminate(EnvironmentCapabilityTerminationCause cause) {
-            Objects.requireNonNull(cause, "cause");
-            cancel();
-          }
-
-          @Override
-          public Duration terminalDeliveryGrace() {
-            return Duration.ZERO;
-          }
-        };
-
-    assertEquals(Duration.ZERO, handle.terminalDeliveryGrace());
-    assertFalse(handle.isCancelled());
-    assertThrows(NullPointerException.class, () -> handle.terminate(null));
-    assertFalse(handle.isCancelled());
-    handle.terminate(EnvironmentCapabilityTerminationCause.TIMED_OUT);
-    assertTrue(handle.isCancelled());
-  }
-
   private static String[] componentNames(RecordComponent[] components) {
     String[] names = new String[components.length];
     for (int index = 0; index < components.length; index++) {

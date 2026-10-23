@@ -12,11 +12,11 @@ public interface EnvironmentCapabilityExecutionHandle {
   boolean isCancelled();
 
   /**
-   * 调用方放弃等待，清理本地在途与传输资源，并尽最大努力向远端发送带明确原因的取消请求。
+   * 调用方放弃等待，清理本地在途与传输资源，并尽最大努力向远端发送取消请求。
    *
    * <p>本方法不等待终态，也不会额外等待 {@link #terminalDeliveryGrace()}；远端清理是 best effort，不保证副作用未发生或被回滚。
    *
-   * @param cause 终止原因，不得为 {@code null}
+   * @param cause 调用方的终止原因，不得为 {@code null}，不表示通过 wire 传递给远端
    */
   void terminate(EnvironmentCapabilityTerminationCause cause);
 
