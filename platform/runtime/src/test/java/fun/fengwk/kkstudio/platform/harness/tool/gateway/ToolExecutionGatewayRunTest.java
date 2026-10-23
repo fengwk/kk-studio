@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityC
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionListener;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityFailedException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTerminationCause;
 import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
@@ -443,6 +444,9 @@ class ToolExecutionGatewayRunTest {
 
     assertInstanceOf(ToolGateway.Cancelled.class, completion.get());
     assertEquals(1, transport.returnedHandles.get(0).cancelCount());
+    assertEquals(
+        List.of(EnvironmentCapabilityTerminationCause.CANCELLED),
+        transport.returnedHandles.get(0).terminations());
   }
 
   /** 无 handle 视为契约违反：post-send 的 Unknown，不假称未执行。 */

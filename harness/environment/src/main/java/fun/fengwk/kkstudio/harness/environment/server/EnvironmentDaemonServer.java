@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityE
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityFailedException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilitySendUncertainException;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTerminationCause;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTransport;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
@@ -628,7 +629,8 @@ public final class EnvironmentDaemonServer
                 request.timeout(),
                 request.expectedFile()));
     ActiveInvocation active =
-        new ActiveInvocation(environmentId, invocationId, listener, invokePayload);
+        new ActiveInvocation(
+            environmentId, invocationId, listener, invokePayload, settings().heartbeatTimeout());
     DaemonOfferResult outcome = null;
     RuntimeException sendFailure = null;
     synchronized (state) {
@@ -1975,6 +1977,7 @@ public final class EnvironmentDaemonServer
     private final UUID invocationId;
     private final EnvironmentCapabilityExecutionListener listener;
     private final String invokePayload;
+    private final Duration terminationGrace;
     private final AtomicBoolean terminal = new AtomicBoolean();
     private volatile boolean cancelled;
 
@@ -1987,6 +1990,9 @@ public final class EnvironmentDaemonServer
     /** 最近一次成功递交 CANCEL 的连接代际；0 表示尚未送达。与 {@link #cancelled} 分离：意图可以先于送达存在，BUSY/CLOSED 不得推进本字段。 */
     private volatile long cancelDeliveredGeneration;
 
+    /** 最近一次发起递交 CANCEL 的连接代际；0 表示尚未发起。由 {@code this} 保护，用于在锁内原子判定并推进，保证对同一代际至多发送一次。 */
+    private long cancelSentGeneration;
+
     /**
      * 本次调用名下的资源传输绑定（{@code transferId -> binding}），由 {@code this} 保护。
      *
@@ -1998,11 +2004,24 @@ public final class EnvironmentDaemonServer
         EnvironmentId environmentId,
         UUID invocationId,
         EnvironmentCapabilityExecutionListener listener,
-        String invokePayload) {
+        String invokePayload,
+        Duration terminationGrace) {
       this.environmentId = environmentId;
       this.invocationId = invocationId;
       this.listener = listener;
       this.invokePayload = invokePayload;
+      this.terminationGrace = Objects.requireNonNull(terminationGrace, "terminationGrace");
+    }
+
+    @Override
+    public Duration terminationGrace() {
+      return terminationGrace;
+    }
+
+    @Override
+    public void terminate(EnvironmentCapabilityTerminationCause cause) {
+      Objects.requireNonNull(cause, "cause");
+      expire(this);
     }
 
     @Override
@@ -2047,6 +2066,13 @@ public final class EnvironmentDaemonServer
      */
     private void deliverCancel(ConnectionState offered) {
       long offeredGeneration = offered.generation;
+      synchronized (this) {
+        if (cancelDeliveredGeneration >= offeredGeneration
+            || cancelSentGeneration >= offeredGeneration) {
+          return;
+        }
+        cancelSentGeneration = offeredGeneration;
+      }
       DaemonOfferResult outcome =
           offerResult(offered, DaemonMessageType.CANCEL, invocationId.toString(), "{}");
       if (outcome != DaemonOfferResult.ACCEPTED) {
@@ -2062,8 +2088,13 @@ public final class EnvironmentDaemonServer
     }
 
     private void noteCancelDelivered(long generation) {
-      if (generation > cancelDeliveredGeneration) {
-        cancelDeliveredGeneration = generation;
+      synchronized (this) {
+        if (generation > cancelDeliveredGeneration) {
+          cancelDeliveredGeneration = generation;
+        }
+        if (generation > cancelSentGeneration) {
+          cancelSentGeneration = generation;
+        }
       }
     }
   }
