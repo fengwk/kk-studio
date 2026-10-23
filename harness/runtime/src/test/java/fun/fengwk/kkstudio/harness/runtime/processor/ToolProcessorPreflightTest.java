@@ -1238,7 +1238,7 @@ class ToolProcessorPreflightTest {
           assertThrows(IllegalStateException.class, () -> processor.process(claim));
       assertEquals("injected transaction failure", failure.getMessage());
 
-      // 验证 R2 修复：事务失败后 execution 必须 abandon，heartbeat future 必须被取消
+      // 提交失败后释放 execution 并取消 heartbeat。
       assertFalse(processor.hasActiveExecution(), "failed preflight commit must abandon execution");
       verify(heartbeatFuture).cancel(anyBoolean());
 

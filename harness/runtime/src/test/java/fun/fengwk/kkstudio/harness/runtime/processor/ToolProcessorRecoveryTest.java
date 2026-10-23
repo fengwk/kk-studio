@@ -504,10 +504,7 @@ class ToolProcessorRecoveryTest {
         ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId).leaseToken());
   }
 
-  /**
-   * close 在 process 通过入口检查之后、registry 插入之前完成：putIfAbsent 后的 closed 检查必须拦截——abandon 新 execution、 把仍
-   * owned 的 READY reschedule，绝不启动 Gateway。
-   */
+  /** 所有权前置校验期间关闭 processor：迟到准入不得启动 Gateway，仍 owned 的 READY Work 必须重排且不留下 execution。 */
   @Test
   void closeBeforeRegistryInsertBouncesReadyWithoutStartingGateway() throws Exception {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
