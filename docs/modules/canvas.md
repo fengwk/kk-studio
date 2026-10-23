@@ -89,7 +89,7 @@ Function 的能力契约（adapter、目录、冻结运行计划、执行上下�
 
 ### 领取、执行与终态
 
-[`CanvasFunctionWorkStore.claimNext`](../../apps/canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/CanvasFunctionWorkStore.java) 从 `durable_work` 以 `SKIP LOCKED` 领取一条到期 Work，再在短事务里把 Run 推进为 `RUNNING` 并递增 attempt。持有者的每次写入都在 SQL 里要求同一 `request_id`、`status='RUNNING'`，且同一 lease token 在数据库时钟下仍持有租约；token 过期或被接管时写入影响 0 行，旧 worker 的回调只能变成 no-op 或静默退出。
+[`CanvasFunctionWorkStore.claimNext`](../../apps/canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/CanvasFunctionWorkStore.java) 从 `durable_work` 以 `SKIP LOCKED` 领取一条到期 Work，再在单次启动的短事务中按 Run → Work 顺序锁行，确认同一 lease token 在数据库时间下仍有效，才把 Run 推进为 `RUNNING` 并递增 attempt；失权立即返回无任务，终态或已删除的 Run 则清理 Work 后继续扫描。执行中的持有者写入都在 SQL 里要求同一 `request_id`、`status='RUNNING'`，且同一 lease token 在数据库时钟下仍持有租约；token 过期或被接管时写入影响 0 行，旧 worker 的回调只能变成 no-op 或静默退出。
 
 [`CanvasFunctionDispatcher`](../../apps/canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/function/CanvasFunctionDispatcher.java) 由周期 poll 驱动，`durable_work` 通道上的 `CANVAS_RUN` 提示只降低延迟，正确性来自 poll 与租约；调度骨架复用 Common 的 [`BoundedWorkDispatcher`](../../common/src/main/java/fun/fengwk/kkstudio/common/concurrent/BoundedWorkDispatcher.java)，没有第二层内存队列，本地容量满时把 Run 还回并推迟。
 

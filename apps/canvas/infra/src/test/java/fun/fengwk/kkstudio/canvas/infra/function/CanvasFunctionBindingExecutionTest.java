@@ -201,8 +201,10 @@ class CanvasFunctionBindingExecutionTest {
     CanvasFunctionRuntimeProperties properties = new CanvasFunctionRuntimeProperties();
     properties.setLeaseDurationMillis(100);
     properties.setHeartbeatIntervalMillis(10);
+    CanvasFunctionRunRepository repository = mock(CanvasFunctionRunRepository.class);
+    when(repository.ownsRunningRequest(any(), any(), any(), any())).thenReturn(true);
     return new CanvasFunctionWorker(
-        mock(CanvasFunctionRunRepository.class),
+        repository,
         catalogSource,
         stateCodec,
         transactions,
