@@ -62,26 +62,35 @@ public class StudioAgentTaskController {
               UUID ticketId = parse(request.getTicketId());
               String agent = requireText(request.getAgent(), "agent");
               String prompt = requireText(request.getPrompt(), "prompt");
-              BranchSettings settings = settingsMaterializer.materialize(agent);
-              NewThreadCommand command =
-                  new NewThreadCommand(
-                      new CustomMessageCommandPayload(AgentMessage.user(prompt)),
-                      derivedId(ticketId, "command"));
-              agentTasks.submit(
-                  new AgentTaskRequest(
-                      ticketId,
-                      derivedId(ticketId, "thread"),
-                      derivedId(ticketId, "session"),
-                      settings,
-                      List.of(command),
-                      AcceptancePreflight.IDENTITY,
-                      SpawnTrigger.CONTROLLER,
-                      null,
-                      null,
-                      null,
-                      false,
-                      new SpawnRequest.Budget(request.getMaxTurns(), 1, 1, Integer.MAX_VALUE),
-                      command.requestHash()));
+              Integer maxTurns = request.getMaxTurns();
+              if (maxTurns != null && maxTurns <= 0) {
+                throw new IllegalArgumentException("maxTurns must be positive");
+              }
+              String requestHash = AgentTaskRequest.requestHash(ticketId, agent, prompt, maxTurns);
+              agentTasks.submitExternal(
+                  ticketId,
+                  requestHash,
+                  () -> {
+                    BranchSettings settings = settingsMaterializer.materialize(agent);
+                    NewThreadCommand command =
+                        new NewThreadCommand(
+                            new CustomMessageCommandPayload(AgentMessage.user(prompt)),
+                            derivedId(ticketId, "command"));
+                    return new AgentTaskRequest(
+                        ticketId,
+                        derivedId(ticketId, "thread"),
+                        derivedId(ticketId, "session"),
+                        settings,
+                        List.of(command),
+                        AcceptancePreflight.IDENTITY,
+                        SpawnTrigger.CONTROLLER,
+                        null,
+                        null,
+                        null,
+                        false,
+                        new SpawnRequest.Budget(maxTurns, 1, 1, Integer.MAX_VALUE),
+                        requestHash);
+                  });
               return status(ticketId);
             }));
   }
