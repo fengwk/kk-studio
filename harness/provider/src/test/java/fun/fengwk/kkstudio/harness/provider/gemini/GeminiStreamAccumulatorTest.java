@@ -149,6 +149,22 @@ class GeminiStreamAccumulatorTest {
     assertEquals(ProviderReplayFormat.GEMINI_CONTENT, completion.replayState().format());
   }
 
+  /** 非法计数不能被截为零或作为非 provider 异常泄漏。 */
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "{\"promptTokenCount\":1,\"cachedContentTokenCount\":2}",
+        "{\"candidatesTokenCount\":9223372036854775807,\"thoughtsTokenCount\":1}"
+      })
+  void rejectsInconsistentOrOverflowingUsage(String usage) {
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
+    ProviderException error =
+        assertThrows(
+            ProviderException.class,
+            () -> accumulator.handleEvent("message", "{\"usageMetadata\":" + usage + "}"));
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind());
+  }
+
   /** 测试意图：多 part 帧按各自 slot 保持边界，不能把 index 1 追加到 index 0。 */
   @Test
   void multiPartFramesKeepIndependentSlots() throws Exception {
@@ -651,15 +667,15 @@ class GeminiStreamAccumulatorTest {
     }
   }
 
-  /** 测试意图：usageMetadata 缺失计数时归零，cached 超过 prompt 时普通输入归零，未出现 tier 不继承旧值。 */
+  /** 测试意图：可选计数缺失时保留未知语义，未出现 tier 不继承旧值。 */
   @Test
-  void defaultsMissingUsageFieldsAndClampsCachedInput() throws Exception {
+  void doesNotInheritOptionalUsageFields() throws Exception {
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
     accumulator.handleEvent(
         "message", "{\"usageMetadata\":{\"serviceTier\":\"old\",\"promptTokenCount\":10}}");
     accumulator.handleEvent(
         "message",
-        "{\"usageMetadata\":{\"cachedContentTokenCount\":3},"
+        "{\"usageMetadata\":{\"promptTokenCount\":3,\"cachedContentTokenCount\":3},"
             + "\"candidates\":[{\"finishReason\":\"STOP\"}]}");
     ProviderResponse response = accumulator.finish().response();
     assertEquals(0L, response.usage().inputTokens());
@@ -669,7 +685,7 @@ class GeminiStreamAccumulatorTest {
     assertNull(response.usage().providerTotalTokens());
     assertNull(response.serviceTier());
     assertEquals(
-        MAPPER.readTree("{\"cachedContentTokenCount\":3}"),
+        MAPPER.readTree("{\"promptTokenCount\":3,\"cachedContentTokenCount\":3}"),
         MAPPER.readTree(response.rawUsageJson()));
   }
 
