@@ -29,6 +29,7 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityE
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionRequest;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilitySendUncertainException;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTerminationCause;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTransport;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
 import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
@@ -61,6 +62,7 @@ import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -416,6 +418,9 @@ final class ToolGatewayTestSupport {
   /** Environment capability transport 的可观察句柄。 */
   static final class FakeToolHandle implements EnvironmentCapabilityExecutionHandle {
     private final AtomicInteger cancels = new AtomicInteger();
+    private final List<EnvironmentCapabilityTerminationCause> terminations =
+        new CopyOnWriteArrayList<>();
+    volatile Duration terminationGrace = Duration.ZERO;
 
     @Override
     public void cancel() {
@@ -427,8 +432,24 @@ final class ToolGatewayTestSupport {
       return cancels.get() > 0;
     }
 
+    @Override
+    public void terminate(EnvironmentCapabilityTerminationCause cause) {
+      Objects.requireNonNull(cause, "cause");
+      terminations.add(cause);
+      cancel();
+    }
+
+    @Override
+    public Duration terminationGrace() {
+      return terminationGrace;
+    }
+
     int cancelCount() {
       return cancels.get();
+    }
+
+    List<EnvironmentCapabilityTerminationCause> terminations() {
+      return terminations;
     }
   }
 
@@ -436,6 +457,7 @@ final class ToolGatewayTestSupport {
   static final class FakeTransport implements EnvironmentCapabilityTransport {
     final List<InvokeRecord> invocations = new CopyOnWriteArrayList<>();
     final List<FakeToolHandle> returnedHandles = new CopyOnWriteArrayList<>();
+    volatile Duration defaultTerminationGrace = Duration.ZERO;
     volatile InvokeAction action = InvokeAction.RETURN_HANDLE;
     volatile ToolResult syncResult;
     volatile String callbackCallId;
@@ -508,6 +530,7 @@ final class ToolGatewayTestSupport {
 
     private FakeToolHandle newReturnedHandle() {
       FakeToolHandle handle = new FakeToolHandle();
+      handle.terminationGrace = defaultTerminationGrace;
       returnedHandles.add(handle);
       return handle;
     }

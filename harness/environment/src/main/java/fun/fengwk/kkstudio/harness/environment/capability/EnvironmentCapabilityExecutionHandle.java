@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.environment.capability;
 
 import java.time.Duration;
+import java.util.Objects;
 
 /** Capability 异步执行句柄，支持主动取消与带原因的收尾。 */
 public interface EnvironmentCapabilityExecutionHandle {
@@ -19,6 +20,7 @@ public interface EnvironmentCapabilityExecutionHandle {
    * <p>覆盖本方法的能力应只在有界时间内完成收尾；需要运行时把终态提交让给能力时，同时覆盖 {@link #terminationGrace()}。
    */
   default void terminate(EnvironmentCapabilityTerminationCause cause) {
+    Objects.requireNonNull(cause, "cause");
     cancel();
   }
 

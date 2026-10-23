@@ -28,6 +28,7 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityF
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilitySendUncertainException;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTerminationCause;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTransport;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
 import fun.fengwk.kkstudio.harness.environment.capability.ExpectedFile;
@@ -64,6 +65,8 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -441,8 +444,10 @@ public final class ToolExecutionGateway implements ToolGateway {
     }
 
     /**
-     * 发送并阻塞等待唯一终态。发送前异常（Busy / Unavailable / SendUncertain）原样向上抛出，由 Gateway 按类型分类；调用线程被中断时向远端
-     * 请求取消并立即抛出 {@link InterruptedException}，不等待远端确认。
+     * 发送并阻塞等待单一绝对 deadline（request.timeout + transportHandle.terminationGrace）。 发送前异常（Busy /
+     * Unavailable / SendUncertain）原样向上抛出，由 Gateway 按类型分类； 等待超时或调用线程被中断时向远端发起带明确原因的
+     * terminate（TIMED_OUT / CANCELLED）； deadline 超时收敛为未知（结果不可确认，绝不自动重试），中断立即抛出 {@link
+     * InterruptedException}。
      */
     @Override
     public ToolResult execute(
@@ -458,7 +463,9 @@ public final class ToolExecutionGateway implements ToolGateway {
           new EnvironmentCapabilityExecutionListener() {
             @Override
             public void onPartial(EnvironmentCapabilityResult partial) {
-              progress.accept(toToolResult(partial));
+              if (!terminal.isDone()) {
+                progress.accept(toToolResult(partial));
+              }
             }
 
             @Override
@@ -476,17 +483,55 @@ public final class ToolExecutionGateway implements ToolGateway {
       EnvironmentCapabilityExecutionRequest capabilityRequest =
           new EnvironmentCapabilityExecutionRequest(
               capability, capabilityCall, request.timeout(), expectedFile);
+      long startNanos = System.nanoTime();
       EnvironmentCapabilityExecutionHandle transportHandle =
           capabilityTransport.invoke(environmentId, capabilityRequest, listener);
       if (transportHandle == null) {
         throw new IllegalStateException(
             "remote capability returned a null execution handle; outcome cannot be confirmed");
       }
+      Duration timeout = request.timeout();
+      Duration grace = transportHandle.terminationGrace();
+      if (grace == null || grace.isNegative()) {
+        grace = Duration.ZERO;
+      }
+      Duration waitBudget = timeout.isZero() ? Duration.ZERO : timeout.plus(grace);
       EnvironmentCapabilityResult result;
       try {
-        result = terminal.get();
+        if (waitBudget.isZero()) {
+          result = terminal.get();
+        } else {
+          long elapsedNanos = System.nanoTime() - startNanos;
+          long remainingNanos = waitBudget.toNanos() - elapsedNanos;
+          if (remainingNanos <= 0) {
+            EnvironmentCapabilitySendUncertainException timeoutException =
+                new EnvironmentCapabilitySendUncertainException(
+                    "remote capability timed out waiting for terminal outcome after " + waitBudget);
+            if (terminal.completeExceptionally(timeoutException)) {
+              transportHandle.terminate(EnvironmentCapabilityTerminationCause.TIMED_OUT);
+              throw timeoutException;
+            }
+            result = terminal.get();
+          } else {
+            try {
+              result = terminal.get(remainingNanos, TimeUnit.NANOSECONDS);
+            } catch (TimeoutException timedOut) {
+              EnvironmentCapabilitySendUncertainException timeoutException =
+                  new EnvironmentCapabilitySendUncertainException(
+                      "remote capability timed out waiting for terminal outcome after "
+                          + waitBudget,
+                      timedOut);
+              if (terminal.completeExceptionally(timeoutException)) {
+                transportHandle.terminate(EnvironmentCapabilityTerminationCause.TIMED_OUT);
+                throw timeoutException;
+              }
+              result = terminal.get();
+            }
+          }
+        }
       } catch (InterruptedException interrupted) {
-        transportHandle.cancel();
+        terminal.completeExceptionally(interrupted);
+        transportHandle.terminate(EnvironmentCapabilityTerminationCause.CANCELLED);
         throw interrupted;
       } catch (ExecutionException failed) {
         if (failed.getCause() instanceof RuntimeException runtime) {

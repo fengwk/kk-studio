@@ -40,6 +40,7 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityF
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilitySendUncertainException;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTerminationCause;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonArchitecture;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelope;
@@ -812,6 +813,228 @@ class EnvironmentDaemonServerTest {
           }
         };
     assertThrows(IllegalArgumentException.class, () -> fixture.server.expire(foreign));
+  }
+
+  /**
+   * 测试意图：ActiveInvocation 在 invoke 时将 server 的 heartbeatTimeout 冻结为 terminationGrace，且不受后续设置变化影响。
+   */
+  @Test
+  void activeInvocationFreezesHeartbeatTimeoutAsTerminationGraceAtInvokeTime() {
+    Fixture fixture = new Fixture();
+    fixture.connectReady("channel-grace-freeze");
+    EnvironmentCapabilityExecutionHandle firstHandle =
+        fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener());
+    assertEquals(Duration.ofSeconds(60), firstHandle.terminationGrace());
+
+    fixture.settings.set(
+        new EnvironmentServerSettings(Duration.ofSeconds(15), 16L * 1024 * 1024, 259200L, 1800L));
+    EnvironmentCapabilityExecutionHandle secondHandle =
+        fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_TWO), new RecordingListener());
+    assertEquals(Duration.ofSeconds(15), secondHandle.terminationGrace());
+    assertEquals(
+        Duration.ofSeconds(60),
+        firstHandle.terminationGrace(),
+        "已签发的句柄必须保持 invoke 时冻结的 terminationGrace");
+  }
+
+  /**
+   * 测试意图：句柄 terminate(cause) 复用 expire 语义：向当前连接至多发一次 CANCEL、移出在途目录、登记 tombstone、释放全部
+   * transfer；迟到终态帧静默丢弃。
+   */
+  @Test
+  void terminateSendsCancelOnceAndSuppressesLateTerminalFrameAndReleasesTransfers() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-terminate");
+    RecordingListener listener = new RecordingListener();
+    EnvironmentCapabilityExecutionHandle handle =
+        fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), listener);
+
+    fixture.receive(
+        channel,
+        DaemonMessageType.RESOURCE_UPLOAD_REQUEST,
+        CALL_ONE.toString(),
+        uploadRequest(TRANSFER_ONE, "text/plain", "a.txt", 3L, SHA_A));
+    UUID uploadId = uploadIdOfTicket(ticketEnvelope(channel));
+
+    handle.terminate(EnvironmentCapabilityTerminationCause.TIMED_OUT);
+    handle.terminate(EnvironmentCapabilityTerminationCause.CANCELLED);
+
+    assertTrue(handle.isCancelled());
+    assertEquals(
+        List.of(
+            DaemonMessageType.WELCOME,
+            DaemonMessageType.INVOKE,
+            DaemonMessageType.RESOURCE_UPLOAD_TICKET,
+            DaemonMessageType.CANCEL),
+        channel.messageTypes(),
+        "terminate 必须向连接至多发送一次 CANCEL 帧");
+    assertEquals(
+        List.of(uploadId), fixture.ticketService.releases, "terminate 必须幂等释放名下 transfers 且恰好一次");
+
+    // 迟到终态属于已知 invocation：静默丢弃，不得再回调 listener，连接不得被关闭。
+    fixture.receive(
+        channel,
+        DaemonMessageType.COMPLETED,
+        CALL_ONE.toString(),
+        completedPayload(CALL_ONE, "late"));
+    assertNull(listener.completed);
+    assertNull(listener.error);
+    assertFalse(channel.closed());
+  }
+
+  /** 测试意图：terminate(cause) 终结调用后移出在途目录，断开重连（late reconnect）时绝不向新连接重放 INVOKE 或 CANCEL。 */
+  @Test
+  void terminateSuppressesLateReconnectReplay() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-terminate-late-reconnect");
+    RecordingListener listener = new RecordingListener();
+    EnvironmentCapabilityExecutionHandle handle =
+        fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), listener);
+
+    handle.terminate(EnvironmentCapabilityTerminationCause.TIMED_OUT);
+
+    fixture.server.close(channel.connectionId());
+    FakeChannel reconnected = fixture.connectReady("channel-terminate-late-reconnect-retry");
+    assertEquals(
+        List.of(DaemonMessageType.WELCOME),
+        reconnected.messageTypes(),
+        "已 terminate 的调用在 late 重连时绝不重放 INVOKE 或 CANCEL");
+
+    fixture.receive(
+        reconnected,
+        DaemonMessageType.COMPLETED,
+        CALL_ONE.toString(),
+        completedPayload(CALL_ONE, "late-after-reconnect"));
+    assertNull(listener.completed);
+    assertNull(listener.error);
+    assertFalse(reconnected.closed());
+  }
+
+  /** 测试意图：普通 cancel() 保持协作语义：不移出在途目录、不标记 tombstone，重连时在新连接上重放 CANCEL 帧，直到 daemon 给出明确终态。 */
+  @Test
+  void cancelPreservesCooperativeSemanticsAndReplaysOnReconnect() {
+    Fixture fixture = new Fixture();
+    FakeChannel first = fixture.connectReady("channel-cancel-coop-first");
+    RecordingListener listener = new RecordingListener();
+    EnvironmentCapabilityExecutionHandle handle =
+        fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), listener);
+
+    fixture.receive(
+        first,
+        DaemonMessageType.RESOURCE_UPLOAD_REQUEST,
+        CALL_ONE.toString(),
+        uploadRequest(TRANSFER_ONE, "text/plain", "a.txt", 3L, SHA_A));
+    UUID uploadId = uploadIdOfTicket(ticketEnvelope(first));
+
+    handle.cancel();
+    assertTrue(handle.isCancelled());
+    // 协作式 cancel 暂不提前释放 transfer，等待 Daemon 终态
+    assertTrue(fixture.ticketService.releases.isEmpty(), "普通 cancel 保持协作，不提前注销 transfer");
+
+    fixture.server.close(first.connectionId());
+    FakeChannel second = fixture.connectReady("channel-cancel-coop-second");
+    assertEquals(
+        List.of(DaemonMessageType.WELCOME, DaemonMessageType.CANCEL),
+        second.messageTypes(),
+        "重连时新连接必须重放 CANCEL 帧");
+
+    fixture.receive(
+        second,
+        DaemonMessageType.CANCELLED,
+        CALL_ONE.toString(),
+        "{\"reason\":\"cancelled by client\"}");
+    assertInstanceOf(EnvironmentCapabilityCancelledException.class, listener.error);
+    assertEquals("cancelled by client", listener.error.getMessage());
+    assertEquals(List.of(uploadId), fixture.ticketService.releases, "终态到达时正常释放 transfer");
+  }
+
+  /** 测试意图：terminate(cause) 与 daemon 终态帧并发竞争时，至多产生 0 或 1 个 listener 终态回调，且不会引起协议违规关闭连接。 */
+  @Test
+  void terminateRacingTerminalFrameYieldsAtMostOneTerminalCallback() throws Exception {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-terminate-terminal-race");
+    ExecutorService racers = Executors.newFixedThreadPool(2);
+    try {
+      for (int round = 0; round < 32; round++) {
+        UUID invocationId = UUID.randomUUID();
+        RecordingListener listener = new RecordingListener();
+        String completedText = "terminate-round-" + round;
+        EnvironmentCapabilityExecutionHandle handle =
+            fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(invocationId), listener);
+
+        CyclicBarrier start = new CyclicBarrier(2);
+        Future<?> terminating =
+            racers.submit(
+                () -> {
+                  awaitStart(start);
+                  handle.terminate(EnvironmentCapabilityTerminationCause.TIMED_OUT);
+                });
+        Future<?> completing =
+            racers.submit(
+                () -> {
+                  awaitStart(start);
+                  fixture.receive(
+                      channel,
+                      DaemonMessageType.COMPLETED,
+                      invocationId.toString(),
+                      completedPayload(invocationId, completedText));
+                });
+        terminating.get();
+        completing.get();
+
+        int terminals = (listener.completed == null ? 0 : 1) + listener.errorCount;
+        assertTrue(terminals <= 1, "terminate 与终态竞争只能产生 0 或 1 个终态回调: round=" + round);
+        assertEquals(0, listener.partials.size(), "round=" + round);
+        if (listener.completed != null) {
+          assertEquals(completedText, listener.completedText());
+        }
+
+        fixture.receive(
+            channel, DaemonMessageType.FAILED, invocationId.toString(), "{\"message\":\"late\"}");
+        assertEquals(terminals, (listener.completed == null ? 0 : 1) + listener.errorCount);
+        assertFalse(channel.closed());
+      }
+    } finally {
+      racers.shutdownNow();
+    }
+  }
+
+  /** 测试意图：terminate 拒绝 null cause。 */
+  @Test
+  void terminateRejectsNullCause() {
+    Fixture fixture = new Fixture();
+    fixture.connectReady("channel-terminate-null");
+    EnvironmentCapabilityExecutionHandle handle =
+        fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener());
+    assertThrows(NullPointerException.class, () -> handle.terminate(null));
+  }
+
+  /** 测试意图：先 cancel 后 terminate 时保持幂等，当前代际不重复发送 CANCEL，且随后的迟到终态与重连依然被 tombstone 保护。 */
+  @Test
+  void cancelFollowedByTerminateSendsCancelOnceAndSuppressesReplay() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-cancel-then-terminate");
+    RecordingListener listener = new RecordingListener();
+    EnvironmentCapabilityExecutionHandle handle =
+        fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), listener);
+
+    handle.cancel();
+    assertEquals(1, channel.countOf(DaemonMessageType.CANCEL));
+
+    handle.terminate(EnvironmentCapabilityTerminationCause.TIMED_OUT);
+    assertEquals(1, channel.countOf(DaemonMessageType.CANCEL), "当前代际已送达 CANCEL 时 terminate 不再重复发送");
+
+    fixture.receive(
+        channel,
+        DaemonMessageType.COMPLETED,
+        CALL_ONE.toString(),
+        completedPayload(CALL_ONE, "late"));
+    assertNull(listener.completed);
+    assertNull(listener.error);
+
+    fixture.server.close(channel.connectionId());
+    FakeChannel reconnected = fixture.connectReady("channel-cancel-then-terminate-retry");
+    assertEquals(List.of(DaemonMessageType.WELCOME), reconnected.messageTypes());
   }
 
   /** 测试意图：CANCEL 被 BUSY 拒绝时不得记成已送达。调用保持取消意图，重连只补发 CANCEL，绝不重发 INVOKE；同一代际内再次 cancel 保持幂等。 */

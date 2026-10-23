@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityE
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityFailedException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilitySendUncertainException;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTerminationCause;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTransport;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
@@ -628,7 +629,8 @@ public final class EnvironmentDaemonServer
                 request.timeout(),
                 request.expectedFile()));
     ActiveInvocation active =
-        new ActiveInvocation(environmentId, invocationId, listener, invokePayload);
+        new ActiveInvocation(
+            environmentId, invocationId, listener, invokePayload, settings().heartbeatTimeout());
     DaemonOfferResult outcome = null;
     RuntimeException sendFailure = null;
     synchronized (state) {
@@ -693,7 +695,7 @@ public final class EnvironmentDaemonServer
       state = connectionOf(active.environmentId);
     }
     // 已移出在途目录，不再随重连重放；仍尝试把一次 CANCEL 交给当前连接。
-    if (state != null) {
+    if (state != null && active.cancelDeliveredGeneration < state.generation) {
       active.deliverCancel(state);
     }
     releaseAllTransfers(active);
@@ -1975,6 +1977,7 @@ public final class EnvironmentDaemonServer
     private final UUID invocationId;
     private final EnvironmentCapabilityExecutionListener listener;
     private final String invokePayload;
+    private final Duration terminationGrace;
     private final AtomicBoolean terminal = new AtomicBoolean();
     private volatile boolean cancelled;
 
@@ -1998,11 +2001,24 @@ public final class EnvironmentDaemonServer
         EnvironmentId environmentId,
         UUID invocationId,
         EnvironmentCapabilityExecutionListener listener,
-        String invokePayload) {
+        String invokePayload,
+        Duration terminationGrace) {
       this.environmentId = environmentId;
       this.invocationId = invocationId;
       this.listener = listener;
       this.invokePayload = invokePayload;
+      this.terminationGrace = Objects.requireNonNull(terminationGrace, "terminationGrace");
+    }
+
+    @Override
+    public Duration terminationGrace() {
+      return terminationGrace;
+    }
+
+    @Override
+    public void terminate(EnvironmentCapabilityTerminationCause cause) {
+      Objects.requireNonNull(cause, "cause");
+      expire(this);
     }
 
     @Override
