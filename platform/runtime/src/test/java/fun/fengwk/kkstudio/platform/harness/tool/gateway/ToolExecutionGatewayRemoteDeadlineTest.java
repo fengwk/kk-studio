@@ -4,12 +4,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.common.schema.InputSchema;
+import fun.fengwk.kkstudio.common.schema.IntegerSchema;
 import fun.fengwk.kkstudio.harness.builtin.environment.EnvironmentCapabilityTool;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
@@ -22,6 +24,7 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityD
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionHandle;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionListener;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionRequest;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityFailedException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTerminationCause;
@@ -77,6 +80,12 @@ class ToolExecutionGatewayRemoteDeadlineTest {
           CAPABILITY.inputSchema(),
           ToolSideEffect.READ_ONLY,
           CAPABILITY_TIMEOUT);
+  private static final InputSchema TIMEOUT_SCHEMA =
+      new InputSchema(
+          "arguments",
+          Map.of("timeout_seconds", new IntegerSchema("execution budget in seconds")),
+          Set.of(),
+          false);
 
   /**
    * 测试意图：远端丢失 terminal 帧时，阻塞等待严格受限于单一绝对 deadline（request.timeout +
@@ -289,6 +298,196 @@ class ToolExecutionGatewayRemoteDeadlineTest {
     }
   }
 
+  /** 测试意图：timeout 为 0 是显式无界执行预算，即使 handle 给出恢复窗也不得把它缩短为有界等待；恢复窗只用于结束后的传输收尾。 */
+  @Test
+  void zeroTimeoutWaitsUnboundedRegardlessOfGrace() throws Exception {
+    HarnessCatalog catalog = catalog(Duration.ZERO);
+    LatchingTransport transport = new LatchingTransport();
+    transport.delegate.defaultTerminationGrace = Duration.ofMillis(10);
+
+    ToolExecutionGateway gateway = gateway(catalog, transport);
+    ToolGateway.Run run =
+        ToolGatewayTestSupport.admitted(gateway, request(catalog, "call-unbounded"));
+    AtomicReference<ToolGateway.Completion> completion = new AtomicReference<>();
+    Thread worker = Thread.ofVirtual().start(() -> completion.set(run.execute(partial -> {})));
+
+    try {
+      assertTrue(transport.invoked.await(5, TimeUnit.SECONDS), "transport must be invoked");
+      Thread.sleep(80);
+      assertNull(completion.get(), "zero timeout must remain unbounded beyond termination grace");
+
+      EnvironmentCapabilityExecutionListener listener =
+          transport.delegate.invocations.get(0).listener();
+      String capabilityCallId = transport.delegate.invocations.get(0).request().call().id();
+      listener.onComplete(
+          new EnvironmentCapabilityResult(
+              capabilityCallId, List.of(new TextResultContent("unbounded")), false, "{}"));
+
+      worker.join(3_000);
+      assertFalse(worker.isAlive(), "worker must complete after the terminal arrives");
+      ToolGateway.Succeeded succeeded =
+          assertInstanceOf(ToolGateway.Succeeded.class, completion.get());
+      assertEquals("call-unbounded", succeeded.success().result().toolCallId());
+      assertTrue(
+          transport.delegate.returnedHandles.get(0).terminations().isEmpty(),
+          "unbounded wait must not terminate the handle");
+    } finally {
+      worker.interrupt();
+      worker.join(5_000);
+      run.close();
+    }
+  }
+
+  /** 测试意图：terminal 在 invoke 返回句柄前已经完成时，等待立即交付真实结果，不额外启动 deadline 或 terminate。 */
+  @Test
+  void immediateCompletionReturnsBeforeWaitWithoutTermination() {
+    HarnessCatalog catalog = catalog();
+    LatchingTransport transport = new LatchingTransport();
+    transport.delegate.defaultTerminationGrace = Duration.ofSeconds(30);
+    transport.delegate.action = ToolGatewayTestSupport.FakeTransport.InvokeAction.SYNC_COMPLETE;
+    transport.delegate.syncResult =
+        new ToolResult("call-immediate", List.of(new TextResultContent("immediate")), false, "{}");
+
+    ToolExecutionGateway gateway = gateway(catalog, transport);
+    ToolGateway.Run run =
+        ToolGatewayTestSupport.admitted(gateway, request(catalog, "call-immediate"));
+    try {
+      ToolGateway.Succeeded succeeded =
+          assertInstanceOf(ToolGateway.Succeeded.class, run.execute(partial -> {}));
+      assertEquals("call-immediate", succeeded.success().result().toolCallId());
+      assertEquals(
+          "immediate", ((TextResultContent) succeeded.success().result().contents().get(0)).text());
+      assertTrue(
+          transport.delegate.returnedHandles.get(0).terminations().isEmpty(),
+          "already completed terminal must not trigger termination");
+    } finally {
+      run.close();
+    }
+  }
+
+  /** 测试意图：null 与负 grace 是句柄契约违规，必须显式失败并终止仍在途的远端执行，绝不能静默按 ZERO 兜底。 */
+  @Test
+  void nullAndNegativeGraceFailClosedAndTerminateInFlight() {
+    assertInvalidGrace(null);
+    assertInvalidGrace(Duration.ofMillis(-1));
+  }
+
+  private void assertInvalidGrace(Duration grace) {
+    HarnessCatalog catalog = catalog();
+    LatchingTransport transport = new LatchingTransport();
+    transport.delegate.defaultTerminationGrace = grace;
+
+    ToolExecutionGateway gateway = gateway(catalog, transport);
+    ToolGateway.Run run =
+        ToolGatewayTestSupport.admitted(gateway, request(catalog, "call-grace-invalid"));
+    try {
+      ToolGateway.Unknown unknown =
+          assertInstanceOf(ToolGateway.Unknown.class, run.execute(partial -> {}));
+      assertEquals(ToolExecutionGateway.EXECUTION_FAILED_KIND, unknown.error().kind());
+      assertEquals(
+          List.of(EnvironmentCapabilityTerminationCause.CANCELLED),
+          transport.delegate.returnedHandles.get(0).terminations(),
+          "invalid grace must terminate the in-flight execution");
+    } finally {
+      run.close();
+    }
+  }
+
+  /** 测试意图：grace getter 抛错也必须终止在途执行；终止本身再失败只作为 suppressed，不得取代原始失败或让调用崩溃。 */
+  @Test
+  void graceGetterFailureTerminatesInFlightAndCleanupFailureIsSuppressed() {
+    HarnessCatalog catalog = catalog();
+    LatchingTransport transport = new LatchingTransport();
+    transport.delegate.defaultTerminationGraceFailure =
+        new IllegalStateException("grace getter failed");
+    transport.delegate.defaultTerminateFailure = new IllegalStateException("terminate failed");
+
+    ToolExecutionGateway gateway = gateway(catalog, transport);
+    ToolGateway.Run run =
+        ToolGatewayTestSupport.admitted(gateway, request(catalog, "call-grace-getter"));
+    try {
+      ToolGateway.Unknown unknown =
+          assertInstanceOf(ToolGateway.Unknown.class, run.execute(partial -> {}));
+      assertEquals(ToolExecutionGateway.EXECUTION_FAILED_KIND, unknown.error().kind());
+      assertEquals(
+          1,
+          transport.delegate.returnedHandles.get(0).terminateAttempts(),
+          "cleanup must still attempt terminate");
+      assertEquals(
+          List.of(transport.delegate.defaultTerminateFailure),
+          List.of(transport.delegate.defaultTerminationGraceFailure.getSuppressed()),
+          "cleanup failure must remain attached to the original failure");
+    } finally {
+      run.close();
+    }
+  }
+
+  /** 测试意图：timeout + grace 的 Duration 加法或 nanosecond 换算溢出时 fail closed，保持原异常分类并终止在途执行。 */
+  @Test
+  void budgetOverflowFailsClosedAndTerminatesInFlight() {
+    assertBudgetOverflow(Duration.ofSeconds(1));
+    assertBudgetOverflow(Duration.ZERO);
+  }
+
+  private void assertBudgetOverflow(Duration grace) {
+    HarnessCatalog catalog = timeoutArgumentCatalog();
+    LatchingTransport transport = new LatchingTransport();
+    transport.delegate.defaultTerminationGrace = grace;
+
+    ToolExecutionGateway gateway = gateway(catalog, transport);
+    ToolGateway.Run run =
+        ToolGatewayTestSupport.admitted(
+            gateway,
+            request(catalog, "call-overflow", "{\"timeout_seconds\":9223372036854775807}"));
+    try {
+      ToolGateway.Unknown unknown =
+          assertInstanceOf(ToolGateway.Unknown.class, run.execute(partial -> {}));
+      assertEquals(ToolExecutionGateway.EXECUTION_FAILED_KIND, unknown.error().kind());
+      assertEquals(
+          List.of(EnvironmentCapabilityTerminationCause.CANCELLED),
+          transport.delegate.returnedHandles.get(0).terminations(),
+          "overflow must terminate the in-flight execution");
+    } finally {
+      run.close();
+    }
+  }
+
+  /** 测试意图：真实远端 FAILED 在 timeout 后、恢复窗内交付时保持为确定失败，绝不降级成 UNKNOWN。 */
+  @Test
+  void remoteFailureWithinGraceRemainsFailedNotUnknown() throws Exception {
+    HarnessCatalog catalog = catalog();
+    LatchingTransport transport = new LatchingTransport();
+    transport.delegate.defaultTerminationGrace = Duration.ofMillis(300);
+
+    ToolExecutionGateway gateway = gateway(catalog, transport);
+    ToolGateway.Run run =
+        ToolGatewayTestSupport.admitted(gateway, request(catalog, "call-remote-failed"));
+    AtomicReference<ToolGateway.Completion> completion = new AtomicReference<>();
+    Thread worker = Thread.ofVirtual().start(() -> completion.set(run.execute(partial -> {})));
+
+    try {
+      assertTrue(transport.invoked.await(5, TimeUnit.SECONDS), "transport must be invoked");
+      EnvironmentCapabilityExecutionListener listener =
+          transport.delegate.invocations.get(0).listener();
+      Thread.sleep(100);
+      listener.onError(new EnvironmentCapabilityFailedException("exit 1"));
+
+      worker.join(3_000);
+      assertFalse(worker.isAlive(), "worker must complete on the real terminal");
+      ToolGateway.Failed failed = assertInstanceOf(ToolGateway.Failed.class, completion.get());
+      assertEquals(ToolExecutionGateway.EXECUTION_FAILED_KIND, failed.error().kind());
+      assertTrue(failed.error().message().contains("exit 1"));
+      assertFalse(failed.retryable());
+      assertTrue(
+          transport.delegate.returnedHandles.get(0).terminations().isEmpty(),
+          "real remote failure already ended the execution and must not be terminated again");
+    } finally {
+      worker.interrupt();
+      worker.join(5_000);
+      run.close();
+    }
+  }
+
   /** 测试意图：调用在 deadline 内正常完成时，交付恰好一次 Succeeded 终态， 且绝不调用句柄的 terminate 或 cancel。 */
   @Test
   void normalExecutionCompletesOnceWithoutTermination() throws Exception {
@@ -348,7 +547,29 @@ class ToolExecutionGatewayRemoteDeadlineTest {
   }
 
   private static HarnessCatalog catalog() {
-    EnvironmentCapabilityTool tool = new EnvironmentCapabilityTool(TOOL_DESCRIPTOR, CAPABILITY);
+    return catalog(CAPABILITY.inputSchema(), CAPABILITY_TIMEOUT);
+  }
+
+  private static HarnessCatalog catalog(Duration timeout) {
+    return catalog(CAPABILITY.inputSchema(), timeout);
+  }
+
+  private static HarnessCatalog timeoutArgumentCatalog() {
+    return catalog(TIMEOUT_SCHEMA, CAPABILITY_TIMEOUT);
+  }
+
+  private static HarnessCatalog catalog(InputSchema schema, Duration timeout) {
+    EnvironmentCapabilityDescriptor capability =
+        new EnvironmentCapabilityDescriptor(CAPABILITY.id(), CAPABILITY.version(), schema, timeout);
+    ToolDescriptor descriptor =
+        new ToolDescriptor(
+            TOOL_DESCRIPTOR.name(),
+            TOOL_DESCRIPTOR.description(),
+            TOOL_DESCRIPTOR.rendererKey(),
+            schema,
+            TOOL_DESCRIPTOR.sideEffect(),
+            timeout);
+    EnvironmentCapabilityTool tool = new EnvironmentCapabilityTool(descriptor, capability);
     return HarnessCatalog.from(
         List.of(
             HarnessContributor.of(
@@ -358,9 +579,14 @@ class ToolExecutionGatewayRemoteDeadlineTest {
   }
 
   private static ToolInvocationRequest request(HarnessCatalog catalog, String callId) {
+    return request(catalog, callId, "{}");
+  }
+
+  private static ToolInvocationRequest request(
+      HarnessCatalog catalog, String callId, String argumentsJson) {
     ToolContribution contribution = catalog.findTool("remote-tool").orElseThrow();
     return new ToolInvocationRequest(
-        new ToolCall(callId, "remote-tool", "{}"),
+        new ToolCall(callId, "remote-tool", argumentsJson),
         new ToolBinding(
             contribution.definition(),
             new ContributorBinding(

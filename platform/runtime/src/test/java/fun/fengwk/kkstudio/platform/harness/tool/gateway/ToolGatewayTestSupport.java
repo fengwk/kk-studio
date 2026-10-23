@@ -418,9 +418,12 @@ final class ToolGatewayTestSupport {
   /** Environment capability transport 的可观察句柄。 */
   static final class FakeToolHandle implements EnvironmentCapabilityExecutionHandle {
     private final AtomicInteger cancels = new AtomicInteger();
+    private final AtomicInteger terminateAttempts = new AtomicInteger();
     private final List<EnvironmentCapabilityTerminationCause> terminations =
         new CopyOnWriteArrayList<>();
     volatile Duration terminationGrace = Duration.ZERO;
+    volatile RuntimeException terminationGraceFailure;
+    volatile RuntimeException terminateFailure;
 
     @Override
     public void cancel() {
@@ -435,17 +438,30 @@ final class ToolGatewayTestSupport {
     @Override
     public void terminate(EnvironmentCapabilityTerminationCause cause) {
       Objects.requireNonNull(cause, "cause");
+      terminateAttempts.incrementAndGet();
+      RuntimeException failure = terminateFailure;
+      if (failure != null) {
+        throw failure;
+      }
       terminations.add(cause);
       cancel();
     }
 
     @Override
     public Duration terminationGrace() {
+      RuntimeException failure = terminationGraceFailure;
+      if (failure != null) {
+        throw failure;
+      }
       return terminationGrace;
     }
 
     int cancelCount() {
       return cancels.get();
+    }
+
+    int terminateAttempts() {
+      return terminateAttempts.get();
     }
 
     List<EnvironmentCapabilityTerminationCause> terminations() {
@@ -458,6 +474,8 @@ final class ToolGatewayTestSupport {
     final List<InvokeRecord> invocations = new CopyOnWriteArrayList<>();
     final List<FakeToolHandle> returnedHandles = new CopyOnWriteArrayList<>();
     volatile Duration defaultTerminationGrace = Duration.ZERO;
+    volatile RuntimeException defaultTerminationGraceFailure;
+    volatile RuntimeException defaultTerminateFailure;
     volatile InvokeAction action = InvokeAction.RETURN_HANDLE;
     volatile ToolResult syncResult;
     volatile String callbackCallId;
@@ -531,6 +549,8 @@ final class ToolGatewayTestSupport {
     private FakeToolHandle newReturnedHandle() {
       FakeToolHandle handle = new FakeToolHandle();
       handle.terminationGrace = defaultTerminationGrace;
+      handle.terminationGraceFailure = defaultTerminationGraceFailure;
+      handle.terminateFailure = defaultTerminateFailure;
       returnedHandles.add(handle);
       return handle;
     }

@@ -695,7 +695,7 @@ public final class EnvironmentDaemonServer
       state = connectionOf(active.environmentId);
     }
     // 已移出在途目录，不再随重连重放；仍尝试把一次 CANCEL 交给当前连接。
-    if (state != null && active.cancelDeliveredGeneration < state.generation) {
+    if (state != null) {
       active.deliverCancel(state);
     }
     releaseAllTransfers(active);
@@ -1990,6 +1990,9 @@ public final class EnvironmentDaemonServer
     /** 最近一次成功递交 CANCEL 的连接代际；0 表示尚未送达。与 {@link #cancelled} 分离：意图可以先于送达存在，BUSY/CLOSED 不得推进本字段。 */
     private volatile long cancelDeliveredGeneration;
 
+    /** 最近一次发起递交 CANCEL 的连接代际；0 表示尚未发起。由 {@code this} 保护，用于在锁内原子判定并推进，保证对同一代际至多发送一次。 */
+    private long cancelSentGeneration;
+
     /**
      * 本次调用名下的资源传输绑定（{@code transferId -> binding}），由 {@code this} 保护。
      *
@@ -2063,6 +2066,13 @@ public final class EnvironmentDaemonServer
      */
     private void deliverCancel(ConnectionState offered) {
       long offeredGeneration = offered.generation;
+      synchronized (this) {
+        if (cancelDeliveredGeneration >= offeredGeneration
+            || cancelSentGeneration >= offeredGeneration) {
+          return;
+        }
+        cancelSentGeneration = offeredGeneration;
+      }
       DaemonOfferResult outcome =
           offerResult(offered, DaemonMessageType.CANCEL, invocationId.toString(), "{}");
       if (outcome != DaemonOfferResult.ACCEPTED) {
@@ -2078,8 +2088,13 @@ public final class EnvironmentDaemonServer
     }
 
     private void noteCancelDelivered(long generation) {
-      if (generation > cancelDeliveredGeneration) {
-        cancelDeliveredGeneration = generation;
+      synchronized (this) {
+        if (generation > cancelDeliveredGeneration) {
+          cancelDeliveredGeneration = generation;
+        }
+        if (generation > cancelSentGeneration) {
+          cancelSentGeneration = generation;
+        }
       }
     }
   }

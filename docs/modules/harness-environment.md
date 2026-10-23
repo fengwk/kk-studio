@@ -93,13 +93,17 @@ default Duration terminationGrace() { return Duration.ZERO; }
 ```
 
 `cancel()` 请求取消，`isCancelled()` 表示已收到停止请求，不证明远端执行已经结束。
-`terminationGrace` 表达终态回传与重连的传输恢复窗口，不控制 TypeScript Daemon 的执行计时器。
-生产远端句柄在 invoke 时冻结当前 `heartbeatTimeout` 为该窗口。Platform Tool Gateway 从发送前起，
-以 `request.timeout + terminationGrace` 为一次等待的绝对上界；partial 和重连不延长它，
-timeout 为 0 时仍表示无限执行期限。窗口内到达的真实终态（包括超时输出）原样保留。
+`request.timeout` 是 capability 的远端执行预算，`0` 显式表示无界；
+`terminationGrace` 是执行结束后的传输恢复窗，不控制 TypeScript Daemon 的执行计时器。
+生产远端句柄在 invoke 时冻结当前 `heartbeatTimeout` 为该窗口，因此它只覆盖终态回传与重连补发，
+不是额外执行时间，也不会重置执行预算。Platform Tool Gateway 从发送前起只合成一次等待上界
+`request.timeout + terminationGrace`；partial 和重连不延长它，`timeout` 为 `0` 时保持无界，
+不得因恢复窗变成有界等待。恢复窗内到达的真实终态（包括执行预算耗尽后的输出）原样保留。
 缺少终态到期时返回 UNKNOWN，外部效果不确定，不可自动重放；到期或等待线程中断时调用
 `terminate(cause)`，原子移除 server 在途记录、登记 tombstone、请求远端取消并释放 transfer，
-迟到事件丢弃且后续重连不重放。普通 `cancel()` 仍保留等待远端终态的协作语义。
+迟到事件丢弃且后续重连不重放。null 或负的 `terminationGrace` 是句柄契约违规：Gateway 显式失败并终止
+未收敛的在途执行，不按 `ZERO` 静默兜底；等待上界换算异常同样先释放资源，再把原始异常向上抛出。
+普通 `cancel()` 仍保留等待远端终态的协作语义。
 Daemon Runtime 的唯一 invoke timer 通过 `context.signal` 区分 `TIMED_OUT` 与 `CANCELLED`；
 执行器完成清理后交付真实结果，Runtime 不提前抢占终态，见 [Daemon 的超时与取消收尾](daemon.md#能力装配与运行时调度)。
 

@@ -444,9 +444,13 @@ public final class ToolExecutionGateway implements ToolGateway {
     }
 
     /**
-     * 发送并阻塞等待单一绝对 deadline（request.timeout + transportHandle.terminationGrace）。 发送前异常（Busy /
-     * Unavailable / SendUncertain）原样向上抛出，由 Gateway 按类型分类； 等待超时或调用线程被中断时向远端发起带明确原因的
-     * terminate（TIMED_OUT / CANCELLED）； deadline 超时收敛为未知（结果不可确认，绝不自动重试），中断立即抛出 {@link
+     * 发送并阻塞等待单一绝对 deadline。{@code request.timeout} 是远端执行预算，{@code terminationGrace}
+     * 是执行结束后的传输恢复窗；两者只在发送前合成一次等待上界，partial 与重连都不延长它。{@code timeout} 为 0 表示显式无界，不会因 grace 变成有界等待。
+     *
+     * <p>发送前异常（Busy / Unavailable / SendUncertain）原样向上抛出，由 Gateway 按类型分类。拿到句柄后，任何未能以真实 terminal
+     * 收敛的异常退出都会先补一个异常终态并调用 {@code terminate(CANCELLED)}，把远端在途执行与 transfer 释放掉；清理自身的失败只作为 suppressed
+     * 附加到原异常，绝不覆盖或吞掉原始失败。等待超时以 {@code TIMED_OUT} 收尾并抛出 {@link
+     * EnvironmentCapabilitySendUncertainException}，调用线程中断则以 {@code CANCELLED} 收尾并原样抛出 {@link
      * InterruptedException}。
      */
     @Override
@@ -490,48 +494,56 @@ public final class ToolExecutionGateway implements ToolGateway {
         throw new IllegalStateException(
             "remote capability returned a null execution handle; outcome cannot be confirmed");
       }
-      Duration timeout = request.timeout();
-      Duration grace = transportHandle.terminationGrace();
-      if (grace == null || grace.isNegative()) {
-        grace = Duration.ZERO;
-      }
-      Duration waitBudget = timeout.isZero() ? Duration.ZERO : timeout.plus(grace);
-      EnvironmentCapabilityResult result;
       try {
-        if (waitBudget.isZero()) {
+        Duration timeout = request.timeout();
+        Duration grace = transportHandle.terminationGrace();
+        if (grace == null) {
+          throw new IllegalStateException(
+              "remote capability returned a null termination grace; outcome cannot be confirmed");
+        }
+        if (grace.isNegative()) {
+          throw new IllegalStateException(
+              "remote capability returned a negative termination grace: "
+                  + grace
+                  + "; outcome cannot be confirmed");
+        }
+        EnvironmentCapabilityResult result;
+        if (timeout.isZero()) {
+          // 0 是显式无界执行预算：grace 只描述恢复窗，不能把它缩短成有界等待。
           result = terminal.get();
         } else {
-          long elapsedNanos = System.nanoTime() - startNanos;
-          long remainingNanos = waitBudget.toNanos() - elapsedNanos;
-          if (remainingNanos <= 0) {
+          Duration waitBudget = timeout.plus(grace);
+          long remainingNanos =
+              Math.max(0L, waitBudget.toNanos() - (System.nanoTime() - startNanos));
+          try {
+            result = terminal.get(remainingNanos, TimeUnit.NANOSECONDS);
+          } catch (TimeoutException timedOut) {
             EnvironmentCapabilitySendUncertainException timeoutException =
                 new EnvironmentCapabilitySendUncertainException(
-                    "remote capability timed out waiting for terminal outcome after " + waitBudget);
+                    "remote capability timed out waiting for terminal outcome after " + waitBudget,
+                    timedOut);
+            // 只有仍无终态时才由 runtime 抢占；若终态已在竞态中完成，优先交付真实结果或真实失败。
             if (terminal.completeExceptionally(timeoutException)) {
-              transportHandle.terminate(EnvironmentCapabilityTerminationCause.TIMED_OUT);
+              terminate(
+                  transportHandle,
+                  EnvironmentCapabilityTerminationCause.TIMED_OUT,
+                  timeoutException);
               throw timeoutException;
             }
             result = terminal.get();
-          } else {
-            try {
-              result = terminal.get(remainingNanos, TimeUnit.NANOSECONDS);
-            } catch (TimeoutException timedOut) {
-              EnvironmentCapabilitySendUncertainException timeoutException =
-                  new EnvironmentCapabilitySendUncertainException(
-                      "remote capability timed out waiting for terminal outcome after "
-                          + waitBudget,
-                      timedOut);
-              if (terminal.completeExceptionally(timeoutException)) {
-                transportHandle.terminate(EnvironmentCapabilityTerminationCause.TIMED_OUT);
-                throw timeoutException;
-              }
-              result = terminal.get();
-            }
           }
         }
+        if (result == null) {
+          throw new IllegalStateException(
+              "remote capability completed without a result; outcome cannot be confirmed");
+        }
+        return toToolResult(result);
       } catch (InterruptedException interrupted) {
-        terminal.completeExceptionally(interrupted);
-        transportHandle.terminate(EnvironmentCapabilityTerminationCause.CANCELLED);
+        releaseInFlight(
+            terminal,
+            transportHandle,
+            EnvironmentCapabilityTerminationCause.CANCELLED,
+            interrupted);
         throw interrupted;
       } catch (ExecutionException failed) {
         if (failed.getCause() instanceof RuntimeException runtime) {
@@ -540,12 +552,41 @@ public final class ToolExecutionGateway implements ToolGateway {
         throw new IllegalStateException(
             "remote capability failed with a non-runtime error; outcome cannot be confirmed",
             failed.getCause());
+      } catch (RuntimeException | Error failure) {
+        releaseInFlight(
+            terminal, transportHandle, EnvironmentCapabilityTerminationCause.CANCELLED, failure);
+        throw failure;
       }
-      if (result == null) {
-        throw new IllegalStateException(
-            "remote capability completed without a result; outcome cannot be confirmed");
+    }
+
+    /**
+     * 以本地失败收敛尚未完成的 terminal，并终止远端在途执行。
+     *
+     * <p>terminal 已由真实终态完成时不重复终止：远端已经结束，异常按原路径分类。清理异常只附加为 suppressed。
+     */
+    private static void releaseInFlight(
+        CompletableFuture<EnvironmentCapabilityResult> terminal,
+        EnvironmentCapabilityExecutionHandle transportHandle,
+        EnvironmentCapabilityTerminationCause cause,
+        Throwable failure) {
+      if (!terminal.completeExceptionally(failure)) {
+        return;
       }
-      return toToolResult(result);
+      terminate(transportHandle, cause, failure);
+    }
+
+    /** 终止远端；清理失败不替换原始异常。 */
+    private static void terminate(
+        EnvironmentCapabilityExecutionHandle transportHandle,
+        EnvironmentCapabilityTerminationCause cause,
+        Throwable failure) {
+      try {
+        transportHandle.terminate(cause);
+      } catch (RuntimeException | Error cleanup) {
+        if (cleanup != failure) {
+          failure.addSuppressed(cleanup);
+        }
+      }
     }
 
     private ToolResult toToolResult(EnvironmentCapabilityResult result) {
