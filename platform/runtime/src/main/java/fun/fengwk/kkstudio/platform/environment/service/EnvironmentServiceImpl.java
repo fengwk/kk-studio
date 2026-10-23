@@ -228,16 +228,23 @@ public class EnvironmentServiceImpl implements EnvironmentService {
   }
 
   @Override
+  @Transactional
   public EnvironmentInstallCodeDTO issueInstallCode(EnvironmentId id, String expectedVersion) {
     Environment env = requireInstallable(id, expectedVersion);
-    return EnvironmentInstallCodes.issue(
-        env.getId(), env.getRegistrationTokenHash(), clock.instant());
+    String code = EnvironmentInstallCodes.generate();
+    Instant expiresAt = clock.instant().plus(Duration.ofMinutes(5));
+    environmentRepository.saveInstallCode(
+        env.getId(), EnvironmentInstallCodes.hash(code), env.getRegistrationTokenHash(), expiresAt);
+    EnvironmentInstallCodeDTO result = new EnvironmentInstallCodeDTO();
+    result.setCode(code);
+    result.setExpiresAt(expiresAt);
+    return result;
   }
 
   /**
    * 兑换安装 code：为本次安装签发新凭证并写入脚本。
    *
-   * <p>库内只有摘要，脚本必须携带明文，因此兑换即轮换；code 以兑换前的摘要签名，轮换后随即失效，天然只能使用一次。旧凭证的 Daemon 下次握手被拒绝。
+   * <p>锁定环境后原子消费随机 code，再轮换凭证并生成脚本；任一步失败均回滚。旧凭证的 Daemon 下次握手被拒绝。
    */
   @Override
   @Transactional
@@ -247,8 +254,12 @@ public class EnvironmentServiceImpl implements EnvironmentService {
     if (env == null || env.getInstallConfig() == null) {
       throw new AiResourceNotFoundException(RESOURCE);
     }
-    EnvironmentInstallCodes.verify(
-        env.getId(), env.getRegistrationTokenHash(), code, clock.instant());
+    if (code == null
+        || !environmentRepository.consumeInstallCode(
+            env.getId(), EnvironmentInstallCodes.hash(code),
+            env.getRegistrationTokenHash(), clock.instant())) {
+      throw new AiValidationException(RESOURCE, "invalid or expired install code");
+    }
     String token = RegistrationTokens.generate();
     env.setRegistrationTokenHash(RegistrationTokens.hash(token));
     if (!environmentRepository.updateById(env, env.getVersion())) {
@@ -259,19 +270,14 @@ public class EnvironmentServiceImpl implements EnvironmentService {
 
   /** 签发必须校验期望版本；兑换只校验 code，不接收版本。 */
   private Environment requireInstallable(EnvironmentId id, String expectedVersion) {
-    Environment env = readableInstallTarget(id);
+    Objects.requireNonNull(id, "id");
+    Environment env = environmentRepository.lockById(id.value());
+    if (env == null || env.getInstallConfig() == null) {
+      throw new AiResourceNotFoundException(RESOURCE);
+    }
     if (env.getVersion() != CatalogVersions.parse(expectedVersion, "expectedVersion")) {
       throw new AiVersionConflictException(
           RESOURCE, expectedVersion, CatalogVersions.format(env.getVersion()));
-    }
-    return env;
-  }
-
-  private Environment readableInstallTarget(EnvironmentId id) {
-    Objects.requireNonNull(id, "id");
-    Environment env = environmentRepository.getById(id.value());
-    if (env == null || env.getInstallConfig() == null) {
-      throw new AiResourceNotFoundException(RESOURCE);
     }
     return env;
   }

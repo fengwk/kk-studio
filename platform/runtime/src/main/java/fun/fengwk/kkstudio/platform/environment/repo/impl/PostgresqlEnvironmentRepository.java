@@ -1,6 +1,9 @@
 package fun.fengwk.kkstudio.platform.environment.repo.impl;
 
-import lombok.AllArgsConstructor;
+import static fun.fengwk.kkstudio.platform.persistence.PostgresJdbcTypes.toOffsetDateTime;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
@@ -9,7 +12,9 @@ import fun.fengwk.kkstudio.platform.environment.repo.impl.store.EnvironmentJdbcS
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentInstallConfigs;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 
+import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -19,12 +24,45 @@ import java.util.stream.Collectors;
  * <p>三个写方法都要求调用方已开启真实外层事务：SQL 执行前先校验事务，写入成功后再在同一事务连接上发布 {@code
  * environment_changed}，因此通知失败会连同写入一起回滚。
  */
-@AllArgsConstructor
 @Repository
 public class PostgresqlEnvironmentRepository implements EnvironmentRepository {
 
+  private static final String SAVE_INSTALL_CODE_SQL =
+      """
+      insert into environment_install_code (
+          environment_id, code_hash, registration_token_hash, expires_at
+      ) values (
+          :environmentId, :codeHash, :registrationTokenHash, :expiresAt
+      )
+      on conflict (environment_id) do update set
+          code_hash = excluded.code_hash,
+          registration_token_hash = excluded.registration_token_hash,
+          expires_at = excluded.expires_at
+      """;
+
+  private static final String CONSUME_INSTALL_CODE_SQL =
+      """
+      delete from environment_install_code
+      where environment_id = :environmentId
+        and code_hash = :codeHash
+        and registration_token_hash = :registrationTokenHash
+        and expires_at > :now
+      """;
+
   private final EnvironmentJdbcStore environmentJdbcStore;
   private final PostgresqlEnvironmentChangeNotifier notifier;
+  private final JdbcClient jdbcClient;
+
+  @Autowired
+  public PostgresqlEnvironmentRepository(
+      EnvironmentJdbcStore environmentJdbcStore,
+      PostgresqlEnvironmentChangeNotifier notifier,
+      JdbcClient jdbcClient) {
+    this.environmentJdbcStore =
+        Objects.requireNonNull(environmentJdbcStore, "environmentJdbcStore");
+    this.notifier = Objects.requireNonNull(notifier, "notifier");
+    this.jdbcClient = Objects.requireNonNull(jdbcClient, "jdbcClient");
+  }
 
   @Override
   public List<Environment> listNewestFirst() {
@@ -97,6 +135,39 @@ public class PostgresqlEnvironmentRepository implements EnvironmentRepository {
       notifier.environmentChanged(id);
     }
     return deleted;
+  }
+
+  @Override
+  public void saveInstallCode(
+      UUID environmentId, String codeHash, String registrationTokenHash, Instant expiresAt) {
+    Objects.requireNonNull(environmentId, "environmentId");
+    Objects.requireNonNull(codeHash, "codeHash");
+    Objects.requireNonNull(registrationTokenHash, "registrationTokenHash");
+    Objects.requireNonNull(expiresAt, "expiresAt");
+    jdbcClient
+        .sql(SAVE_INSTALL_CODE_SQL)
+        .param("environmentId", environmentId)
+        .param("codeHash", codeHash)
+        .param("registrationTokenHash", registrationTokenHash)
+        .param("expiresAt", toOffsetDateTime(expiresAt))
+        .update();
+  }
+
+  @Override
+  public boolean consumeInstallCode(
+      UUID environmentId, String codeHash, String registrationTokenHash, Instant now) {
+    Objects.requireNonNull(environmentId, "environmentId");
+    Objects.requireNonNull(codeHash, "codeHash");
+    Objects.requireNonNull(registrationTokenHash, "registrationTokenHash");
+    Objects.requireNonNull(now, "now");
+    return jdbcClient
+            .sql(CONSUME_INSTALL_CODE_SQL)
+            .param("environmentId", environmentId)
+            .param("codeHash", codeHash)
+            .param("registrationTokenHash", registrationTokenHash)
+            .param("now", toOffsetDateTime(now))
+            .update()
+        == 1;
   }
 
   private EnvironmentDO toDO(Environment model) {
