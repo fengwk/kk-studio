@@ -278,6 +278,8 @@ metadata 自行定价；durable 用量按当前 catalog 价格现算，不写回
 金额先用精确十进制求和，再统一四舍五入到最多 6 位小数并去掉尾随 0；精确值落在 (0, 0.000001)
 时显示 `<$0.000001`，精确 0 才是 `$0`。上下文占用只使用最近一次模型调用的输入估计
 （input + cacheRead + cacheWrite），绝不用分支累计量替代。
+输出 `outputTokens` 已包含推理 token，测速仅用该输出量除以解码耗时；不再额外累加推理。
+缓存写入使用 `cacheWriteTokens` 总量，不叠加 TTL 分桶或旧 `cacheWriteLongTokens` 字段。
 摘要固定保留 `↑input · ↓output · RcacheRead · WcacheWrite · cost · cache N.NN% · X tok/s`
 全部字段，R/W 为零时也不省略。缺失的上下文估计、费用与速率默认显示 `0`，缓存比例默认显示
 `0.00%`，费用未计量时不假定币种；hover 仍明确区分未计量与真实零值，展示默认值不写入统计事实。

@@ -64,7 +64,7 @@ describe('content-utils usage & speed & cache calculations', () => {
 
   // 只接受 harness 持久 codec 的 canonical 字段名：snake_case / 常见别名一律不再兼容
   describe('parseAssistantUsage canonical fields', () => {
-    it('parses canonical usage with cost from the read projection', () => {
+    it('counts output and cache writes once, ignoring the obsolete long-cache alias', () => {
       const parsed = parseAssistantUsage(
         {
           usage: {
@@ -84,13 +84,13 @@ describe('content-utils usage & speed & cache calculations', () => {
         input: 100,
         output: 50,
         cacheRead: 10,
-        cacheWrite: 25, // 20 + 5 long
+        cacheWrite: 20,
         reasoning: 15,
         providerTotal: 200,
         cost: { currency: 'USD', amount: '0.000500000000' },
-        decodeTokens: 65, // 50 output + 15 reasoning
+        decodeTokens: 50,
         decodeDurationMillis: 1000,
-        contextInputTokens: 135, // 100 + 10 + 25
+        contextInputTokens: 130,
       })
     })
 
