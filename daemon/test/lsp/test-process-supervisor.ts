@@ -17,9 +17,14 @@ export class TestProcessSupervisor implements ProcessSupervisor {
   readonly children: ChildProcess[] = []
 
   async start(spec: ProcessSpec): Promise<ManagedProcess> {
+    // Only external LSP test fixtures run here; fault-test kills must not leave coverage
+    // files for Vitest to parse. Keep the parent environment and other overrides intact.
+    const env = { ...process.env, ...spec.env }
+    // An own undefined key blocks Node's automatic inheritance without reaching the child.
+    env.NODE_V8_COVERAGE = undefined
     const child = spawn(spec.executable, spec.args, {
       cwd: spec.cwd,
-      env: spec.env ? { ...process.env, ...spec.env } : process.env,
+      env,
       stdio: ['pipe', 'pipe', 'pipe'],
     })
     this.children.push(child)
