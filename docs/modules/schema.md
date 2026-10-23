@@ -66,6 +66,9 @@ Work lease 成对，required_environment_id 非空仅适用于 TOOL。Fill First
 费用按实际执行的单模型配置读取。Harness 的 Entry `payload` jsonb 保存 assistant 用量（`stopReason` / `usage` / 可选 `decodeDurationMillis`）与压缩摘要等事实，schema 不设金额或价格列；费用由应用在读取时按当前 catalog 现算。
 `environment.install_config` 只允许 NULL 或 JSON object；数据库只兜底这一形状，字段结构与取值由
 应用 codec 在读写时校验，非法的历史行会在读取时失败而不是被宽容读出。
+`environment_install_code` 以环境 ID 为主键并级联删除，只保存随机一次性安装 code 的 SHA-256、
+签发时的注册凭证摘要及有效期；新签发覆盖旧记录，兑换要求凭证代际一致且严格未过期，并原子删除。
+该临时表不参与配置导出，不保存 code 明文。
 
 ACTIVE Blob 必须有正引用，DELETING 必须零引用，ACTIVE 内容以 hash/size 部分唯一。
 PENDING upload 的 candidate id 在 complete 创建 Blob 后才绑定真实外键。

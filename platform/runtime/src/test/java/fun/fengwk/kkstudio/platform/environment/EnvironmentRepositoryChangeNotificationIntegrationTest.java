@@ -14,6 +14,7 @@ import static org.mockito.Mockito.mock;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
@@ -126,7 +127,8 @@ class EnvironmentRepositoryChangeNotificationIntegrationTest
           .when(failingNotifier)
           .environmentChanged(any());
       PostgresqlEnvironmentRepository failingRepository =
-          new PostgresqlEnvironmentRepository(environmentJdbcStore, failingNotifier);
+          new PostgresqlEnvironmentRepository(
+              environmentJdbcStore, failingNotifier, JdbcClient.create(jdbcTemplate));
       TransactionTemplate transaction = new TransactionTemplate(transactionManager);
 
       Environment created = new Environment();
