@@ -128,7 +128,7 @@ public final class AutomaticCompactionPlanner {
           && message.assistantMetadata() != null) {
         ModelUsage usage = message.assistantMetadata().usage();
         long contextTokens =
-            usage.providerTotalTokens() > 0
+            usage.providerTotalTokens() != null && usage.providerTotalTokens() > 0
                 ? usage.providerTotalTokens()
                 : usage.categorizedTokens();
         contextTokens =

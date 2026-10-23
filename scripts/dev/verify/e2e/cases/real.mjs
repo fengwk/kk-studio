@@ -284,10 +284,10 @@ export function assertProviderUsageAlgebra(usage, providerType, { modelName } = 
       // reasoningTokens 在 Anthropic wire outputTokens 中包含，归一化 DTO 设为 0L 避免重复计费
       assert(reasoningTokens === 0, `Anthropic reasoningTokens must be 0 in normalized DTO, got: ${reasoningTokens}`)
 
-      // providerTotalTokens 必须恰好为 0（Wire 响应未提供 total_tokens 字段，归一化设为 0L）
+      // Wire 未报告 total_tokens；保留 null，不合成总量。
       assert(
-        providerTotalTokens === 0,
-        `Anthropic providerTotalTokens must be 0 in normalized DTO, got: ${providerTotalTokens}`,
+        providerTotalTokens === null,
+        `Anthropic providerTotalTokens must be null in normalized DTO, got: ${providerTotalTokens}`,
       )
       break
     }
@@ -375,8 +375,8 @@ export function assertAssistantUsage(
         `outputTokens must be > 0: ${safeDiagnosticJson(usage)}`,
       )
       assert(
-        usage.providerTotalTokens === 0,
-        `Anthropic providerTotalTokens must be 0: ${safeDiagnosticJson(usage)}`,
+        usage.providerTotalTokens === null,
+        `Anthropic providerTotalTokens must be null: ${safeDiagnosticJson(usage)}`,
       )
     } else if (providerType === 'openai_responses') {
       const totalInput =
