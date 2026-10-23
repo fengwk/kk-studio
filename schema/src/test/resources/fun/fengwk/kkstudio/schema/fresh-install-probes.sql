@@ -62,6 +62,31 @@ select pg_temp.rejects('environment install settings reject array',
     $$update environment set install_config = '[]'::jsonb where id = pg_temp.uid(9000)$$,
     '23514', 'ck_environment_install_config_object');
 
+-- Installation codes: direct SQL writes must obey hash shape and Environment ownership.
+insert into environment_install_code (environment_id, code_hash, registration_token_hash, expires_at)
+    values (pg_temp.uid(9000), repeat('0123456789abcdef', 4), repeat('abcdef0123456789', 4), now());
+select pg_temp.assert_true('installation code accepts lowercase SHA-256 hashes',
+    (select code_hash = repeat('0123456789abcdef', 4)
+        and registration_token_hash = repeat('abcdef0123456789', 4)
+        from environment_install_code where environment_id = pg_temp.uid(9000)));
+select pg_temp.rejects('installation code rejects malformed code hash',
+    $$update environment_install_code set code_hash = repeat('A', 64)
+        where environment_id = pg_temp.uid(9000)$$,
+    '23514', 'ck_environment_install_code_hash');
+select pg_temp.rejects('installation code rejects malformed registration token hash',
+    $$update environment_install_code set registration_token_hash = 'abc'
+        where environment_id = pg_temp.uid(9000)$$,
+    '23514', 'ck_environment_install_code_registration_token_hash');
+select pg_temp.rejects('installation code requires an existing Environment',
+    $$update environment_install_code set environment_id = pg_temp.uid(9001)
+        where environment_id = pg_temp.uid(9000)$$,
+    '23503', 'fk_environment_install_code_environment');
+delete from environment where id = pg_temp.uid(9000);
+select pg_temp.assert_true('deleting an Environment cascades to its installation code',
+    not exists(select 1 from environment_install_code where environment_id = pg_temp.uid(9000)));
+insert into environment (id, name, registration_token_hash)
+    values (pg_temp.uid(9000), 'install-fixture', repeat('a', 64));
+
 -- cluster_node: node registry carries only reachability origin + lease metadata, not liveness bytes.
 insert into cluster_node (instance_id, internal_url, lease_until, last_seen)
     values (pg_temp.uid(9200), 'https://node-a.internal:8443',

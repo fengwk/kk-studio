@@ -60,6 +60,7 @@ const BUSINESS_TABLES = [
   'durable_work',
   'environment',
   'environment_connection',
+  'environment_install_code',
   'environment_update_operation',
   'harness_entry',
   'harness_model_invocation',
@@ -638,7 +639,7 @@ function main() {
   if (!existsSync(probes) || !statSync(probes).isFile()) {
     throw new Error(`missing shared contract probes: ${PROBE_FILE}`)
   }
-  if (BUSINESS_TABLES.length !== 44 || TARGET_TABLES.length !== 17) {
+  if (BUSINESS_TABLES.length !== 45 || TARGET_TABLES.length !== 17) {
     throw new Error('the declared inventory must keep its fixed business and target table counts')
   }
   // Re-derive the inventory from the baseline DDL: a table added to (or removed from) the
