@@ -342,10 +342,15 @@ export class InstallFixture {
       writeExecutable(path.join(this.bindir, 'systemctl'), SYSTEMCTL_SHIM)
       writeExecutable(path.join(this.bindir, 'journalctl'), `#!/bin/sh
 case "$*" in
-  *"--show-cursor"*) printf '%s\\n' '-- cursor: fixture-cursor' ;;
-  *"--after-cursor fixture-cursor"*) printf '%s\\n' "$FAKE_CURRENT_JOURNAL" ;;
-  *) printf '%s\\n' 'invalid registration token old-secret' ;;
+  *"--show-cursor"*)
+    [ "$FAKE_NO_CURSOR" = 1 ] && exit 0
+    printf '%s\\n' '-- cursor: fixture-cursor' ;;
+  *"--after-cursor fixture-cursor"*)
+    printf '%s\\n' "$FAKE_CURRENT_JOURNAL"
+    [ "$FAKE_JOURNAL_FAIL" = 1 ] && exit 1 ;;
+  *) printf '%s\\n' 'daemon failed: environment registration is rejected: invalid registration token old-secret' ;;
 esac
+exit 0
 `)
     } else {
       writeExecutable(path.join(this.bindir, 'launchctl'), LAUNCHCTL_SHIM)
@@ -441,6 +446,10 @@ esac
 const SYSTEMCTL_SHIM = String.raw`#!/bin/sh
 state="$FAKE_SERVICE_STATE"
 printf '%s\n' "$*" >> "$state/commands"
+if [ -n "$FAKE_MANAGER_FAIL" ] && [ "$2" = "$FAKE_MANAGER_FAIL" ]; then
+  echo 'injected-manager-secret' >&2
+  exit 1
+fi
 case "$*" in
   *"reset-failed"*)
     [ "$FAKE_RESET_FAIL" = 1 ] && exit 1
@@ -452,6 +461,7 @@ case "$*" in
     exit 0
     ;;
   *"is-active --quiet"*)
+    [ "$FAKE_INACTIVE" = 1 ] && exit 3
     [ -f "$state/active" ] && exit 0 || exit 3
     ;;
   *"restart"* | *"start"*)
@@ -488,6 +498,10 @@ case "$1" in
     exit 0
     ;;
   bootstrap)
+    if [ "$FAKE_MANAGER_FAIL" = bootstrap ]; then
+      echo 'injected-manager-secret' >&2
+      exit 1
+    fi
     : > "$state/active"
     exit 0
     ;;

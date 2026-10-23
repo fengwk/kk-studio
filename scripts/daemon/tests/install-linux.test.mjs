@@ -38,6 +38,7 @@ function withInstall(body) {
 }
 
 const libDir = (fixture) => path.join(fixture.installRoot, 'lib')
+const tokenRejection = 'daemon failed: environment registration is rejected: invalid registration token'
 
 describe('install.sh on Linux', () => {
   it('uses archive progress only when stderr is a TTY, even with redirected stdin', () =>
@@ -50,6 +51,14 @@ describe('install.sh on Linux', () => {
       const calls = text(log).trim().split('\n').map(line => JSON.parse(line))
       assert.deepEqual(calls.map(args => args.includes('--progress-bar')), [false, true, false])
       assert.ok(calls.every(args => args[0] === '-q' && args.includes('--show-error')))
+      writeFileSync(log, '')
+      const nonTTY = fixture.run(['install', '--config-file', configFile, '--token-file', tokenFile], {
+        extraEnv: { FAKE_CURL_LOG: log },
+      })
+      assert.equal(nonTTY.status, 0, nonTTY.stderr)
+      const silentCalls = text(log).trim().split('\n').map(line => JSON.parse(line))
+      assert.equal(silentCalls.length, 3)
+      assert.ok(silentCalls.every(args => args.includes('--silent') && !args.includes('--progress-bar')))
     }))
   it('clears an old start limit after reload and before restart, retaining limits', () =>
     withInstall(({ fixture, install }) => {
@@ -81,14 +90,77 @@ describe('install.sh on Linux', () => {
   it('translates only current startup diagnostics without exposing raw secrets', () =>
     withInstall(({ fixture, install }) => {
       assert.equal(install().status, 0)
-      for (const current of ['', 'invalid registration token injected-secret']) {
+      for (const current of ['', 'subprocess: invalid registration token injected-secret', `${tokenRejection} injected-secret`]) {
         const result = install({ FAKE_START_FAIL: '1', FAKE_CURRENT_JOURNAL: current })
         assert.notEqual(result.status, 0)
         assert.match(result.stderr, /安装失败 \[6\/7 发布启动\]/)
-        assert.equal(result.stderr.includes('在 Studio 重新生成安装命令'), Boolean(current))
+        assert.equal(result.stderr.includes('在 Studio 重新生成安装命令'), current.startsWith(tokenRejection))
         assert.doesNotMatch(result.stderr, /injected-secret|old-secret|token-value/)
         assert.match(result.stderr, /journalctl .*--since/)
       }
+    }))
+
+  it('reports verification failure after a successful restart using only current diagnostics', () =>
+    withInstall(({ install }) => {
+      const result = install({
+        FAKE_INACTIVE: '1', FAKE_CURRENT_JOURNAL: `${tokenRejection} injected-secret`,
+        DAEMON_VERIFY_TIMEOUT_SECONDS: '0',
+      })
+      assert.notEqual(result.status, 0)
+      assert.match(result.stderr, /安装失败 \[7\/7 稳定性验证\].*没有保持运行/)
+      assert.match(result.stderr, /在 Studio 重新生成安装命令/)
+      assert.doesNotMatch(result.stdout + result.stderr, /READY|安装完成|injected-secret|old-secret|token-value/)
+      assert.match(result.stderr, /备份：无（尚未创建备份）/)
+      assert.doesNotMatch(result.stderr, /请使用备份手动恢复/)
+    }))
+
+  it('preserves the startup failure when no cursor exists or journal reading fails', () =>
+    withInstall(({ install }) => {
+      for (const extra of [{ FAKE_NO_CURSOR: '1' }, { FAKE_JOURNAL_FAIL: '1' }]) {
+        const result = install({
+          FAKE_START_FAIL: '1', FAKE_CURRENT_JOURNAL: `${tokenRejection} injected-secret`, ...extra,
+        })
+        assert.notEqual(result.status, 0)
+        assert.match(result.stderr, /安装失败 \[6\/7 发布启动\]：systemd 未能启动服务/)
+        assert.doesNotMatch(result.stdout + result.stderr, /令牌被拒绝|重新生成安装命令|old-secret|injected-secret|READY/)
+      }
+    }))
+
+  it('does not call an existing installation a first install when preflight fails', () =>
+    withInstall(({ install }) => {
+      assert.equal(install().status, 0)
+      const result = install({ FAKE_NODE_VERSION: '9.9.9' })
+      assert.notEqual(result.status, 0)
+      assert.match(result.stderr, /备份：无（尚未创建备份）/)
+      assert.doesNotMatch(result.stderr, /首次安装/)
+    }))
+
+  it('gives static reasons for failed service manager operations', () =>
+    withInstall(({ install }) => {
+      assert.equal(install().status, 0)
+      for (const [command, phase, reason] of [
+        ['stop', '5/7 备份停止', 'systemd 未能停止服务'],
+        ['daemon-reload', '6/7 发布启动', 'systemd 未能重新加载服务定义'],
+        ['enable', '6/7 发布启动', 'systemd 未能启用用户服务'],
+      ]) {
+        const result = install({ FAKE_MANAGER_FAIL: command })
+        assert.notEqual(result.status, 0)
+        assert.ok(result.stderr.includes(`安装失败 [${phase}]：${reason}`), result.stderr)
+        assert.doesNotMatch(result.stderr, /injected-manager-secret|该阶段操作未完成/)
+      }
+    }))
+
+  it('reports a static launchd bootstrap failure with the correct log path', () =>
+    withTempDir(tmp => {
+      const fixture = new InstallFixture(tmp, { hostOs: 'Darwin' })
+      const [config, token] = fixture.makeInputs()
+      const result = fixture.run(['install', '--config-file', config, '--token-file', token], {
+        extraEnv: { FAKE_MANAGER_FAIL: 'bootstrap' },
+      })
+      assert.notEqual(result.status, 0)
+      assert.match(result.stderr, /安装失败 \[6\/7 发布启动\]：launchd 未能加载 LaunchAgent/)
+      assert.ok(result.stderr.includes(path.join(fixture.installRoot, 'logs/environment-daemon.stderr.log')))
+      assert.doesNotMatch(result.stderr, /injected-manager-secret|该阶段操作未完成/)
     }))
 
   it('reports archive download failure before any publication', () =>
