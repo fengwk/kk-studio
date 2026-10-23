@@ -25,10 +25,14 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
+import fun.fengwk.kkstudio.harness.runtime.AgentSpawner;
+import fun.fengwk.kkstudio.harness.runtime.SpawnRequest;
 import fun.fengwk.kkstudio.harness.runtime.ThreadLifecycleCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.ThreadTreeLocks;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionChildSpawn;
@@ -84,6 +88,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
@@ -293,6 +298,68 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     Entry start = planned.entries().get(9);
     TurnStartPayload compactionStart = (TurnStartPayload) start.payload();
     CompactionStart compaction = compactionStart.compaction();
+
+    // 公共 spawn 不能接管 owner 的唯一结算票据，且拒绝发生在任何命令写入之前。
+    fixture.store.transaction(
+        tx -> {
+          ThreadState child = tx.findThread(compaction.childThreadId()).orElseThrow();
+          var payload = new UserMessageCommandPayload(userMessage("ordinary continuation"));
+          String hash = ThreadCommandPayloadJsonCodec.requestHash(payload);
+          SpawnRequest request =
+              new SpawnRequest(
+                  child.id(),
+                  null,
+                  branchSettings(),
+                  List.of(new NewThreadCommand(payload, id(99001), hash)),
+                  AcceptancePreflight.IDENTITY,
+                  baseline.threadId(),
+                  start.id(),
+                  new SpawnRequest.Continuation(child.headEntryId(), child.nextCommandSequence()),
+                  false,
+                  ThreadConstraints.NONE,
+                  SpawnTrigger.RUNTIME,
+                  JoinDelivery.NOTIFY_PARENT,
+                  true,
+                  SpawnRequest.Budget.unlimited(),
+                  id(99001),
+                  hash);
+          AgentSpawner.lockForSpawn(tx, request);
+          List<ThreadCommand> before = tx.loadQueuedCommands(child.id());
+          IllegalArgumentException rejected =
+              assertThrows(IllegalArgumentException.class, () -> AgentSpawner.spawn(tx, request));
+          assertEquals("child has an unfinished owner settlement", rejected.getMessage());
+          assertEquals(before, tx.loadQueuedCommands(child.id()));
+          assertEquals(child, tx.findThread(child.id()).orElseThrow());
+          ThreadJoin owner = tx.findJoin(compaction.joinInvocationId()).orElseThrow();
+          assertNull(owner.supersededByInvocationId());
+          assertEquals(List.of(owner), tx.loadIncompleteJoins(child.id()));
+          ThreadCommand original = before.getFirst();
+          RootPayload root =
+              (RootPayload) tx.findEntry(child.headEntryId()).orElseThrow().payload();
+          SpawnRequest replay =
+              new SpawnRequest(
+                  child.id(),
+                  null,
+                  root.settings(),
+                  List.of(
+                      new NewThreadCommand(
+                          original.payload(), original.idempotencyKey(), original.requestHash())),
+                  AcceptancePreflight.IDENTITY,
+                  baseline.threadId(),
+                  null,
+                  new SpawnRequest.Continuation(child.headEntryId(), original.sequence()),
+                  false,
+                  ThreadConstraints.NONE,
+                  SpawnTrigger.RUNTIME,
+                  JoinDelivery.SETTLE_OWNER_TURN,
+                  false,
+                  SpawnRequest.Budget.unlimited(),
+                  owner.invocationId(),
+                  owner.requestHash());
+          assertTrue(AgentSpawner.spawn(tx, replay).replayed());
+          assertEquals(before, tx.loadQueuedCommands(child.id()));
+          return null;
+        });
 
     // 推进子 Thread 压缩执行成功（COMPLETED + 非空摘要文本），并通过 matchAndDeliverTerminalJoins 冻结 COMPACTION join
     // 并唤醒父 Thread

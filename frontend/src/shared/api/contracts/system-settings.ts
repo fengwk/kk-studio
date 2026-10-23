@@ -16,4 +16,3 @@ export interface SystemSettingsSectionsDTO {
   storageMedia: SystemSettingsStorageMediaDTO
   advanced: SystemSettingsAdvancedDTO
 }
-

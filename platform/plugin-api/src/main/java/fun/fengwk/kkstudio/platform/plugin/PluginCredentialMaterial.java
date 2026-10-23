@@ -7,7 +7,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 
 /**
- * Plugin 交还 Platform 的待加密凭据材料：路由元数据 + opaque 秘密 JSON。
+ * Plugin 交还 Platform 的凭据材料：路由元数据 + opaque 秘密 JSON。
  *
  * <p>只存在两种真实形态，绝不接受混合三元组：
  *
@@ -17,17 +17,17 @@ import java.time.Instant;
  * </ul>
  *
  * <p>{@code payloadJson} 是 Plugin 自己的秘密载荷（例如 access token 与 client 标识的 JSON），Platform
- * 只把它整体加密，不解析、不投影、 不写日志；{@link #toString()} 有意省略它，避免任何偶然日志泄漏。
+ * 将其与普通配置隔离存储，不提供加密保证，不解析、不投影、不写日志；{@link #toString()} 有意省略它，避免任何偶然日志泄漏。
  *
  * @param region 凭据所属 region；静态密钥为 null
  * @param expiresAt access token 失效时刻（本地时限，不是身份事实）；静态密钥为 null
  * @param nextRefreshAt 下一次自动刷新时刻，由 Plugin 按自己的刷新公式给出；静态密钥为 null
- * @param payloadJson 秘密载荷 JSON 对象文本；只以密文形式落库（见 {@link PluginCredentialStore}）
+ * @param payloadJson 秘密载荷 JSON 对象文本；由 {@link PluginCredentialStore} 隔离存储
  */
 public record PluginCredentialMaterial(
     String region, Instant expiresAt, Instant nextRefreshAt, String payloadJson) {
 
-  /** 单个秘密载荷的 UTF-8 字节上限；超出即拒绝，避免无界密文与无界解密开销。 */
+  /** 单个秘密载荷的 UTF-8 字节上限；超出即拒绝，限制存储与解析开销。 */
   public static final int MAX_PAYLOAD_UTF8_BYTES = 64 * 1024;
 
   public PluginCredentialMaterial {

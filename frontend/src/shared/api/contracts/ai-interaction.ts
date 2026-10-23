@@ -77,4 +77,3 @@ export interface InteractionPageDTO {
   total: number
   freshnessAt: number | null
 }
-

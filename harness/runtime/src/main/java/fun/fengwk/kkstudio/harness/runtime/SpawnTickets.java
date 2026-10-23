@@ -30,6 +30,11 @@ final class SpawnTickets {
     }
     UUID childId = ticket.threadId();
     UUID parentId = ticket.parentThreadId();
+    // owner 的结算票据不能被续接接管；exact replay 已在调用准入前完成身份校验并返回。
+    if (tx.loadIncompleteJoins(childId).stream()
+        .anyMatch(pending -> pending.delivery() == JoinDelivery.SETTLE_OWNER_TURN)) {
+      throw new IllegalArgumentException("child has an unfinished owner settlement");
+    }
     if (parentId != null) {
       ThreadState parent =
           tx.findThread(parentId)
