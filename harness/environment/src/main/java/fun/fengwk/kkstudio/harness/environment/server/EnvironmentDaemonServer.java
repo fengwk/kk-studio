@@ -1977,7 +1977,7 @@ public final class EnvironmentDaemonServer
     private final UUID invocationId;
     private final EnvironmentCapabilityExecutionListener listener;
     private final String invokePayload;
-    private final Duration terminationGrace;
+    private final Duration terminalDeliveryGrace;
     private final AtomicBoolean terminal = new AtomicBoolean();
     private volatile boolean cancelled;
 
@@ -2005,17 +2005,18 @@ public final class EnvironmentDaemonServer
         UUID invocationId,
         EnvironmentCapabilityExecutionListener listener,
         String invokePayload,
-        Duration terminationGrace) {
+        Duration terminalDeliveryGrace) {
       this.environmentId = environmentId;
       this.invocationId = invocationId;
       this.listener = listener;
       this.invokePayload = invokePayload;
-      this.terminationGrace = Objects.requireNonNull(terminationGrace, "terminationGrace");
+      this.terminalDeliveryGrace =
+          Objects.requireNonNull(terminalDeliveryGrace, "terminalDeliveryGrace");
     }
 
     @Override
-    public Duration terminationGrace() {
-      return terminationGrace;
+    public Duration terminalDeliveryGrace() {
+      return terminalDeliveryGrace;
     }
 
     @Override

@@ -421,8 +421,8 @@ final class ToolGatewayTestSupport {
     private final AtomicInteger terminateAttempts = new AtomicInteger();
     private final List<EnvironmentCapabilityTerminationCause> terminations =
         new CopyOnWriteArrayList<>();
-    volatile Duration terminationGrace = Duration.ZERO;
-    volatile RuntimeException terminationGraceFailure;
+    volatile Duration terminalDeliveryGrace = Duration.ZERO;
+    volatile RuntimeException terminalDeliveryGraceFailure;
     volatile RuntimeException terminateFailure;
 
     @Override
@@ -448,12 +448,12 @@ final class ToolGatewayTestSupport {
     }
 
     @Override
-    public Duration terminationGrace() {
-      RuntimeException failure = terminationGraceFailure;
+    public Duration terminalDeliveryGrace() {
+      RuntimeException failure = terminalDeliveryGraceFailure;
       if (failure != null) {
         throw failure;
       }
-      return terminationGrace;
+      return terminalDeliveryGrace;
     }
 
     int cancelCount() {
@@ -473,8 +473,8 @@ final class ToolGatewayTestSupport {
   static final class FakeTransport implements EnvironmentCapabilityTransport {
     final List<InvokeRecord> invocations = new CopyOnWriteArrayList<>();
     final List<FakeToolHandle> returnedHandles = new CopyOnWriteArrayList<>();
-    volatile Duration defaultTerminationGrace = Duration.ZERO;
-    volatile RuntimeException defaultTerminationGraceFailure;
+    volatile Duration defaultTerminalDeliveryGrace = Duration.ZERO;
+    volatile RuntimeException defaultTerminalDeliveryGraceFailure;
     volatile RuntimeException defaultTerminateFailure;
     volatile InvokeAction action = InvokeAction.RETURN_HANDLE;
     volatile ToolResult syncResult;
@@ -548,8 +548,8 @@ final class ToolGatewayTestSupport {
 
     private FakeToolHandle newReturnedHandle() {
       FakeToolHandle handle = new FakeToolHandle();
-      handle.terminationGrace = defaultTerminationGrace;
-      handle.terminationGraceFailure = defaultTerminationGraceFailure;
+      handle.terminalDeliveryGrace = defaultTerminalDeliveryGrace;
+      handle.terminalDeliveryGraceFailure = defaultTerminalDeliveryGraceFailure;
       handle.terminateFailure = defaultTerminateFailure;
       returnedHandles.add(handle);
       return handle;

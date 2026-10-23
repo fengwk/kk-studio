@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -239,9 +240,9 @@ class EnvironmentCapabilityContractTest {
     assertTrue(handle.isCancelled());
   }
 
-  /** 测试意图：句柄默认实现保证 zero grace 并把 terminate 委托给 cancel，拒绝 null cause。 */
+  /** 测试意图：显式句柄夹具自行校验终止原因，并在终止时取消执行、暴露零恢复窗。 */
   @Test
-  void defaultHandleDelegatesTerminateToCancelWithZeroGrace() {
+  void explicitHandleFixtureValidatesCauseAndExposesZeroGrace() {
     AtomicBoolean cancelled = new AtomicBoolean();
     EnvironmentCapabilityExecutionHandle handle =
         new EnvironmentCapabilityExecutionHandle() {
@@ -254,9 +255,20 @@ class EnvironmentCapabilityContractTest {
           public boolean isCancelled() {
             return cancelled.get();
           }
+
+          @Override
+          public void terminate(EnvironmentCapabilityTerminationCause cause) {
+            Objects.requireNonNull(cause, "cause");
+            cancel();
+          }
+
+          @Override
+          public Duration terminalDeliveryGrace() {
+            return Duration.ZERO;
+          }
         };
 
-    assertEquals(Duration.ZERO, handle.terminationGrace());
+    assertEquals(Duration.ZERO, handle.terminalDeliveryGrace());
     assertFalse(handle.isCancelled());
     assertThrows(NullPointerException.class, () -> handle.terminate(null));
     assertFalse(handle.isCancelled());
@@ -329,6 +341,17 @@ class EnvironmentCapabilityContractTest {
         @Override
         public boolean isCancelled() {
           return cancelled.get();
+        }
+
+        @Override
+        public void terminate(EnvironmentCapabilityTerminationCause cause) {
+          Objects.requireNonNull(cause, "cause");
+          cancel();
+        }
+
+        @Override
+        public Duration terminalDeliveryGrace() {
+          return Duration.ZERO;
         }
       };
     }

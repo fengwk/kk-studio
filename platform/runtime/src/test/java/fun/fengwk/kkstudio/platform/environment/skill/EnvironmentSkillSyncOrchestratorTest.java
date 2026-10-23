@@ -31,6 +31,7 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityE
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilitySendUncertainException;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTerminationCause;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTransport;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
@@ -53,6 +54,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.AbstractExecutorService;
@@ -912,6 +914,16 @@ class EnvironmentSkillSyncOrchestratorTest {
     @Override
     public boolean isCancelled() {
       return false;
+    }
+
+    @Override
+    public void terminate(EnvironmentCapabilityTerminationCause cause) {
+      Objects.requireNonNull(cause, "cause");
+    }
+
+    @Override
+    public Duration terminalDeliveryGrace() {
+      return Duration.ZERO;
     }
   }
 }
