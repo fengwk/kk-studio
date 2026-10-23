@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
@@ -45,6 +46,7 @@ import javax.sql.DataSource;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 /**
  * owner 深删除在真实 PostgreSQL 与外键约束下的契约：跨 Session 执行树整体删除、pending join 一并回收、生存者零伤害。
@@ -315,8 +317,15 @@ class SessionDeletionIntegrationTest extends OwnerTestSupport {
     UUID invocationId = UUID.randomUUID();
     store.transaction(
         tx -> {
-          tx.lockThread(childThreadId);
+          List<UUID> threadsToLock =
+              terminalEntryId != null
+                  ? Stream.of(childThreadId, parentThreadId).sorted(UuidOrder.COMPARATOR).toList()
+                  : List.of(childThreadId);
+          threadsToLock.forEach(tx::lockThread);
           tx.insertCommands(List.of(command(childThreadId, sequence)));
+          if (terminalEntryId != null) {
+            tx.insertCommands(List.of(command(parentThreadId, 1L)));
+          }
           ThreadJoin join =
               new ThreadJoin(
                   invocationId,
@@ -333,12 +342,10 @@ class SessionDeletionIntegrationTest extends OwnerTestSupport {
                   T0,
                   T0,
                   JoinDelivery.NOTIFY_PARENT,
-                  true,
                   null);
           tx.insertJoin(join);
           if (terminalEntryId != null) {
-            // insertJoin 只接受未匹配记录；匹配是首次冻结终态 Entry 的单调推进。
-            tx.updateJoin(join.match(terminalEntryId, finalAnswerEntryId, T1));
+            tx.updateJoin(join.match(terminalEntryId, finalAnswerEntryId, T1).delivered(1L, T1));
           }
           return null;
         });

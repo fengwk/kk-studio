@@ -11,9 +11,9 @@ import java.util.regex.Pattern;
  * <p>{@code terminalEntryId} 是本次执行终止时冻结的 terminal Entry（首次最终回答、不可继续失败/Stop 的收尾）；{@code
  * finalAnswerEntryId} 是可空的最终回答入口，绝不借用源输入应用之前的回答。{@code matched()} 由 {@code terminalEntryId} 判定。
  *
- * <p>{@code delivery} 决定结算后的交付方式，{@code countsTowardQuota} 决定是否计入子任务并发额度，二者创建后不可变；{@code
+ * <p>{@code delivery} 决定结算后的交付方式，额度直接由 delivery 为 {@link JoinDelivery#NOTIFY_PARENT} 决定；{@code
  * supersededByInvocationId} 是同一父/子对上后续续接 join 的 invocation identity：同一父子对至多有一个有效未完成 join，旧 join
- * 被新续接原子 supersede 后保留原 invocation identity 与排队 prompt，但不再占用 活跃额度、不再产生重复交付。已匹配结果不可变，也绝不被 supersede。
+ * 被新续接原子 supersede 后保留原 invocation identity 与排队 prompt，但不再占用活跃额度、不再产生重复交付。已匹配结果不可变，也绝不被 supersede。
  */
 public record ThreadJoin(
     UUID invocationId,
@@ -30,7 +30,6 @@ public record ThreadJoin(
     Instant createdAt,
     Instant updatedAt,
     JoinDelivery delivery,
-    boolean countsTowardQuota,
     UUID supersededByInvocationId) {
 
   private static final Pattern HASH = Pattern.compile("[0-9a-f]{64}");
@@ -43,9 +42,6 @@ public record ThreadJoin(
     Objects.requireNonNull(delivery, "delivery");
     if ((delivery == JoinDelivery.RECEIPT_ONLY) != (parentThreadId == null)) {
       throw new IllegalArgumentException("only a parentless join is receipt-only");
-    }
-    if (countsTowardQuota && parentThreadId == null) {
-      throw new IllegalArgumentException("only a join with a parent counts toward the quota");
     }
     if (requestHash == null || !HASH.matcher(requestHash).matches()) {
       throw new IllegalArgumentException("requestHash must be a lowercase SHA-256 hex string");
@@ -106,7 +102,6 @@ public record ThreadJoin(
         createdAt,
         now,
         delivery,
-        countsTowardQuota,
         null);
   }
 
@@ -129,7 +124,6 @@ public record ThreadJoin(
         createdAt,
         now,
         delivery,
-        countsTowardQuota,
         supersededByInvocationId);
   }
 
@@ -152,7 +146,6 @@ public record ThreadJoin(
         createdAt,
         now,
         delivery,
-        countsTowardQuota,
         supersededByInvocationId);
   }
 
@@ -186,7 +179,6 @@ public record ThreadJoin(
         createdAt,
         now,
         delivery,
-        countsTowardQuota,
         successorInvocationId);
   }
 
@@ -203,7 +195,6 @@ public record ThreadJoin(
         || !old.createdAt.equals(next.createdAt)
         || next.reminderTurn < old.reminderTurn
         || old.delivery != next.delivery
-        || old.countsTowardQuota != next.countsTowardQuota
         || (old.matched()
             && (!Objects.equals(old.terminalEntryId, next.terminalEntryId)
                 || !Objects.equals(old.finalAnswerEntryId, next.finalAnswerEntryId)))
@@ -213,6 +204,12 @@ public record ThreadJoin(
         || (old.supersededByInvocationId != null
             && !old.supersededByInvocationId.equals(next.supersededByInvocationId))) {
       throw new IllegalArgumentException("join durable identity or receipt cannot change");
+    }
+    if (next.delivery == JoinDelivery.NOTIFY_PARENT
+        && next.matched()
+        && next.deliveryCommandSequence == null) {
+      throw new IllegalArgumentException(
+          "a matched NOTIFY_PARENT join requires a delivery command sequence");
     }
   }
 }

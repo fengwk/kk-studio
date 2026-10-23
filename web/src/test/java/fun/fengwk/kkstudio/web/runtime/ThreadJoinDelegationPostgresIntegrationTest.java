@@ -887,12 +887,14 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
     assertEquals(1, resultCommands(childAThreadId).size(), "A keeps exactly one C result");
     assertEquals(2, resultCommands(rootThreadId).size(), "root keeps exactly A and B results");
     assertTrue(resultCommands(childBThreadId).isEmpty(), "sibling B never receives C's result");
-    assertTrue(
-        store.<Boolean>transaction(tx -> tx.loadPendingDeliveries(rootThreadId).isEmpty()),
-        "no pending delivery may remain on the root");
-    assertTrue(
-        store.<Boolean>transaction(tx -> tx.loadPendingDeliveries(childAThreadId).isEmpty()),
-        "no pending delivery may remain on A");
+    assertEquals(
+        0,
+        store.<Integer>transaction(tx -> tx.countIncompleteChildJoins(rootThreadId)).intValue(),
+        "no incomplete child join may remain on the root");
+    assertEquals(
+        0,
+        store.<Integer>transaction(tx -> tx.countIncompleteChildJoins(childAThreadId)).intValue(),
+        "no incomplete child join may remain on A");
     for (UUID threadId :
         List.of(rootThreadId, childAThreadId, childBThreadId, grandChildCThreadId)) {
       assertFalse(hasWork(WorkTargetType.THREAD, threadId), "no residual wake for " + threadId);
@@ -1104,7 +1106,6 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
         ThreadConstraints.NONE,
         SpawnTrigger.MODEL_TOOL,
         JoinDelivery.NOTIFY_PARENT,
-        true,
         taskBudget(maxDepth),
         invocationId,
         ThreadCommandPayloadJsonCodec.requestHash(
@@ -1133,7 +1134,6 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
         ThreadConstraints.NONE,
         SpawnTrigger.MODEL_TOOL,
         JoinDelivery.NOTIFY_PARENT,
-        true,
         taskBudget(MAX_DEPTH),
         invocationId,
         ThreadCommandPayloadJsonCodec.requestHash(

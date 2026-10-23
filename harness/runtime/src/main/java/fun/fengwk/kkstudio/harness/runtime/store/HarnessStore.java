@@ -247,12 +247,9 @@ public interface HarnessStore {
     /** 子 Thread 上尚未冻结 terminal 结果且未被后续续接 supersede 的 Join。 */
     List<ThreadJoin> loadIncompleteJoins(UUID childThreadId);
 
-    /** 父 Thread 恢复时读取已冻结结果但尚未交付的 TASK Join；COMPACTION 与已被 supersede 的 Join 不属于 task 待交付集合。 */
-    List<ThreadJoin> loadPendingDeliveries(UUID parentThreadId);
-
     /**
-     * 统计指定父 Thread 下尚未冻结结果、未被 supersede 的 TASK 直接子 Join（{@code terminalEntryId ==
-     * null}）数量；不产生锁。COMPACTION join 不占普通 task 配额，用于子任务并发配额判定。
+     * 统计指定父 Thread 下尚未冻结结果、未被 supersede 的 NOTIFY_PARENT 直接子 Join（{@code terminalEntryId ==
+     * null}）数量；不产生锁。用于子任务并发配额判定。
      *
      * @param parentThreadId 父 Thread ID，不能为 null
      * @return 未完成的直接子 Join 数量

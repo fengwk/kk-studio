@@ -149,11 +149,13 @@ public final class ThreadLifecycleCoordinator {
         }
       }
       ThreadJoin current = join.match(terminalEntryId, finalAnswerEntryId, now);
-      tx.updateJoin(current);
       switch (current.delivery()) {
         case NOTIFY_PARENT -> notifyMatches.add(current);
-        case SETTLE_OWNER_TURN -> settleMatches.add(current);
-        case RECEIPT_ONLY -> {}
+        case SETTLE_OWNER_TURN -> {
+          tx.updateJoin(current);
+          settleMatches.add(current);
+        }
+        case RECEIPT_ONLY -> tx.updateJoin(current);
       }
     }
     if (!notifyMatches.isEmpty()) {
@@ -165,14 +167,12 @@ public final class ThreadLifecycleCoordinator {
   }
 
   /**
-   * 普通终止的委派收敛判据：子执行没有尚未冻结结果的直接子 Join、没有已冻结但未送达的子回执，且本 Thread 没有待处理输入（QUEUED 消息/通知，或已物化但未越过输入水位的
-   * APPLIED 通知）。
+   * 普通终止的委派收敛判据：子执行没有尚未冻结结果的直接子 Join，且本 Thread 没有待处理输入（QUEUED 消息/通知，或已物化但未越过输入水位的 APPLIED 通知）。
    *
    * <p>直接子 Join 自身也遵循同一判据，A-B-C 及更深的委派因此自底向上自然收敛，不需要遍历全树历史空闲节点。
    */
   private static boolean isQuiescent(HarnessStore.Transaction tx, ThreadState child) {
     return tx.countIncompleteChildJoins(child.id()) == 0
-        && tx.loadPendingDeliveries(child.id()).isEmpty()
         && !ThreadInputDemand.hasInputDemand(tx, child);
   }
 

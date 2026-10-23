@@ -1242,7 +1242,6 @@ class ProviderRequestPreviewServiceTest {
         NOW,
         NOW,
         JoinDelivery.SETTLE_OWNER_TURN,
-        false,
         null);
   }
 

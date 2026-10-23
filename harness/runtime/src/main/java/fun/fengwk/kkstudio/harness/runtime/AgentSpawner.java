@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
+import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
@@ -30,7 +31,7 @@ public final class AgentSpawner {
   public static void lockForSpawn(HarnessStore.Transaction tx, SpawnRequest request) {
     Objects.requireNonNull(tx, "tx");
     Objects.requireNonNull(request, "request");
-    if (request.parentThreadId() != null && request.countsTowardQuota()) {
+    if (request.parentThreadId() != null && request.delivery() == JoinDelivery.NOTIFY_PARENT) {
       tx.lockJoinAdmission();
     }
     if (request.continuation() != null) {

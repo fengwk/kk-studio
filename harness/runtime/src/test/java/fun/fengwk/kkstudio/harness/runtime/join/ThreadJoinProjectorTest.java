@@ -130,7 +130,6 @@ class ThreadJoinProjectorTest {
             T0,
             T0,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             null);
 
     store.transaction(
@@ -160,7 +159,6 @@ class ThreadJoinProjectorTest {
             T0,
             T1,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             null);
 
     store.transaction(
@@ -223,7 +221,6 @@ class ThreadJoinProjectorTest {
             T0,
             T1,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             null);
 
     store.transaction(
@@ -269,7 +266,6 @@ class ThreadJoinProjectorTest {
             T0,
             T1,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             null);
 
     store.transaction(
@@ -330,7 +326,6 @@ class ThreadJoinProjectorTest {
             T0,
             T1,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             null);
 
     store.transaction(
@@ -414,7 +409,6 @@ class ThreadJoinProjectorTest {
             T0,
             T1,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             null);
 
     store.transaction(
@@ -485,7 +479,6 @@ class ThreadJoinProjectorTest {
             T0,
             T0,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             null);
 
     store.transaction(
@@ -578,7 +571,6 @@ class ThreadJoinProjectorTest {
             T0,
             T1,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             null);
 
     store.transaction(
@@ -650,7 +642,6 @@ class ThreadJoinProjectorTest {
             T0,
             T1,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             null);
 
     store.transaction(
@@ -723,7 +714,6 @@ class ThreadJoinProjectorTest {
             T0,
             T1,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             null);
 
     store.transaction(
@@ -798,7 +788,6 @@ class ThreadJoinProjectorTest {
             T0,
             T1,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             null);
 
     store.transaction(
@@ -873,7 +862,6 @@ class ThreadJoinProjectorTest {
             T0,
             T1,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             null);
 
     store.transaction(
@@ -965,7 +953,6 @@ class ThreadJoinProjectorTest {
             T0,
             T1,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             null);
 
     store.transaction(
@@ -1032,7 +1019,6 @@ class ThreadJoinProjectorTest {
             T0,
             T1,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             null);
 
     store.transaction(
@@ -1124,7 +1110,6 @@ class ThreadJoinProjectorTest {
             T1,
             T1,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             null);
 
     store.transaction(
@@ -1194,7 +1179,6 @@ class ThreadJoinProjectorTest {
             T0,
             T0,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             null);
 
     // 子线程后续继续执行了第 2 轮并推进了 head (T2)
@@ -1355,7 +1339,6 @@ class ThreadJoinProjectorTest {
                   T0,
                   T0,
                   JoinDelivery.NOTIFY_PARENT,
-                  true,
                   null);
           ThreadJoin joinCustom =
               new ThreadJoin(
@@ -1373,7 +1356,6 @@ class ThreadJoinProjectorTest {
                   T0,
                   T0,
                   JoinDelivery.NOTIFY_PARENT,
-                  true,
                   null);
           ThreadJoin joinGoal =
               new ThreadJoin(
@@ -1391,7 +1373,6 @@ class ThreadJoinProjectorTest {
                   T0,
                   T0,
                   JoinDelivery.NOTIFY_PARENT,
-                  true,
                   null);
 
           ThreadJoinReceipt receiptUser =
@@ -1472,7 +1453,6 @@ class ThreadJoinProjectorTest {
             T0,
             T0,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             null);
 
     store.transaction(
@@ -1524,7 +1504,6 @@ class ThreadJoinProjectorTest {
             T0,
             T0,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             null);
 
     store.transaction(
@@ -1660,7 +1639,6 @@ class ThreadJoinProjectorTest {
         T0,
         T0,
         JoinDelivery.NOTIFY_PARENT,
-        true,
         null);
   }
 }

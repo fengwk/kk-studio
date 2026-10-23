@@ -196,7 +196,6 @@ final class PostgresqlHarnessRows {
               instant(resultSet, "created_at"),
               instant(resultSet, "updated_at"),
               JoinDelivery.valueOf(resultSet.getString("delivery")),
-              resultSet.getBoolean("counts_toward_quota"),
               nullableUuid(resultSet, "superseded_by_invocation_id"));
 
   /** cancelled_inputs 是本模块自有持久协议：严格读取 + BigDecimal 读回自由 JSON，避免数值退化。 */

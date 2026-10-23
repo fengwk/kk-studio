@@ -251,7 +251,6 @@ class PostgresqlCompactionChildTest {
           // 存在 delivery == SETTLE_OWNER_TURN、childThreadId = 子、未 matched 的 join
           ThreadJoin join = tx.findJoin(joinInvocationId).orElseThrow();
           assertEquals(JoinDelivery.SETTLE_OWNER_TURN, join.delivery());
-          assertFalse(join.countsTowardQuota());
           // 压缩子的创建来源与约束经 PostgreSQL 持久化后原样读回。
           assertEquals(SpawnTrigger.RUNTIME, childThread.spawnTrigger());
           assertEquals(false, childThread.constraints().allowAutoCompaction());

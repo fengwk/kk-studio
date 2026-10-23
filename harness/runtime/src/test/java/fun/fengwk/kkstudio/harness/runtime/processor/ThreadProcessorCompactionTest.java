@@ -187,7 +187,6 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
           // COMPACTION join
           ThreadJoin join = tx.findJoin(compaction.joinInvocationId()).orElseThrow();
           assertEquals(JoinDelivery.SETTLE_OWNER_TURN, join.delivery());
-          assertFalse(join.countsTowardQuota());
           assertEquals(SpawnTrigger.RUNTIME, childThread.spawnTrigger());
           assertEquals(new ThreadConstraints(4096, true, false), childThread.constraints());
           assertEquals(baseline.threadId(), join.parentThreadId());
@@ -321,7 +320,6 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                   ThreadConstraints.NONE,
                   SpawnTrigger.RUNTIME,
                   JoinDelivery.NOTIFY_PARENT,
-                  true,
                   SpawnRequest.Budget.unlimited(),
                   id(99001),
                   hash);
@@ -354,7 +352,6 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                   ThreadConstraints.NONE,
                   SpawnTrigger.RUNTIME,
                   JoinDelivery.SETTLE_OWNER_TURN,
-                  false,
                   SpawnRequest.Budget.unlimited(),
                   owner.invocationId(),
                   owner.requestHash());
@@ -2010,7 +2007,6 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                   NOW,
                   NOW,
                   JoinDelivery.NOTIFY_PARENT,
-                  true,
                   null));
           return threadId;
         });

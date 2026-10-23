@@ -22,12 +22,14 @@ import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.NotificationPayload;
 import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
+import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -182,7 +184,22 @@ class HarnessRuntimeThreadSemanticsScenarioTest {
   private void insertMatchedJoin(UUID joinId, UUID parentId, UUID childId, UUID terminalEntryId) {
     store.transaction(
         tx -> {
-          tx.lockThread(childId);
+          for (UUID threadId :
+              List.of(parentId, childId).stream().sorted(UuidOrder.COMPARATOR).toList()) {
+            tx.lockThread(threadId);
+          }
+          tx.insertCommands(
+              List.of(
+                  new ThreadCommand(
+                      parentId,
+                      1L,
+                      userMessagePayload("parent-notification"),
+                      TestIds.id(31),
+                      CREATION_REQUEST_HASH,
+                      null,
+                      null,
+                      null,
+                      T0)));
           ThreadJoin join =
               new ThreadJoin(
                   joinId,
@@ -199,11 +216,10 @@ class HarnessRuntimeThreadSemanticsScenarioTest {
                   T0,
                   T0,
                   JoinDelivery.NOTIFY_PARENT,
-                  true,
                   null);
           // terminalEntryId 指向已存在的 Entry；仅验证冻结结果不被 Stop 改写。
           tx.insertJoin(join);
-          tx.updateJoin(join.match(terminalEntryId, null, T0));
+          tx.updateJoin(join.match(terminalEntryId, null, T0).delivered(1L, T0));
           return null;
         });
   }
@@ -228,7 +244,6 @@ class HarnessRuntimeThreadSemanticsScenarioTest {
                   T0,
                   T0,
                   JoinDelivery.NOTIFY_PARENT,
-                  true,
                   null));
           return null;
         });
