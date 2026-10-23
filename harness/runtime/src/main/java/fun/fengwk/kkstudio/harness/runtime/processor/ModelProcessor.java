@@ -43,9 +43,8 @@ import java.util.concurrent.ScheduledExecutorService;
  * Target Model processor：消费 dispatcher 已 claim 的 MODEL Work，驱动一次 Model invocation 的完整生命周期。
  *
  * <p>只依赖单一 {@link HarnessStore} + {@link ModelGateway} + {@link RealtimeEventSink}，不自行全局 poll；不做任何
- * Entry / head / Usage 写入。所有持久化状态写入都在短事务内按 own Thread -&gt; ModelInvocation -&gt; Work 锁序完成 （同事务需要
- * THREAD Work 时先 request/upsert 并锁定 THREAD Work，再 lockClaimed MODEL Work）；不取执行树锁、Session 锁或
- * 祖先锁。每次写入都以 claim ownership 校验完成，lost / stale 一律完整 no-op。
+ * Entry / head / Usage 写入。短事务只锁 own Thread -&gt; ModelInvocation -&gt; Work （同事务需要 THREAD Work 时先
+ * request/upsert 并锁定 THREAD Work，再 lockClaimed MODEL Work）；不取执行树锁、Session 锁或 祖先锁。公共所有权与准入协议见包说明。
  *
  * <p>执行模型：{@link #process} 在 dispatcher 线程上完成 claim 校验、短 prepare 事务、物化请求、{@link
  * ModelGateway#admit}（纯本地检查，Busy / Rejected 都发生在任何请求发出前，此时 invocation 仍是 READY）与 {@link
@@ -53,17 +52,8 @@ import java.util.concurrent.ScheduledExecutorService;
  * （增量在执行线程同步到达）与终态提交交给 executor 上的一个虚拟线程并返回 {@link ProcessResult#STARTED}。heartbeat 在整个阻塞期间续租当前
  * Work lease。
  *
- * <p>per-invocation admission guard 同时充当进程内 execution registry（以 invocationId 为键），{@link #cancel}
- * 提供唯一本地取消入口（abandon 会中断运行线程并关闭连接），{@link #close} 取消全部并停止各自 heartbeat（不 shutdown 注入的 scheduler /
- * executor），closed 后 {@link #process} 拒绝新 claim。崩溃或失联后 RUNNING 行的 lease 过期，由下一次 claim 按既有重试策略收敛，
- * 绝不重放可能已发出的请求。
- *
- * <p>重复准入所有权围栏（duplicate admission fencing）：{@link #process} 先用 Work-only 短事务校验传入 claim 当前真实
- * owned（伪造 / 错误 / 已过期 token 一律 LOST_OWNERSHIP no-op，不 cancel 合法 active execution），再进入同时充当 execution
- * registry 的 per-invocation guard，由其在原子计算内再次复核 DB ownership，ticket 覆盖 prepare 到 execution 登记。同一
- * claim（同 lease token）重复 / 并发投递一律 LOST_OWNERSHIP no-op（不 cancel、不持久化变更）；不同有效 token 若存在旧 entry，则标记
- * superseded、捕获旧 execution 并在原子计算外 abandon，再由 prepare 按持久化状态收敛（RUNNING 走既有恢复路径）。{@code markRunning}
- * 的 READY + attempt + claim 校验同时充当陈旧启动围栏：Stop / 跨实例 recovery 已获胜时绝不发出请求。
+ * <p>崩溃或失联后 RUNNING 行的 lease 过期，由下一次 claim 按既有重试策略收敛，绝不重放可能已发出的请求。{@code markRunning} 的 READY +
+ * attempt + claim 校验同时充当陈旧启动围栏：Stop / 跨实例 recovery 已获胜时绝不发出请求。
  */
 @Slf4j
 public final class ModelProcessor implements AutoCloseable {
@@ -104,15 +94,12 @@ public final class ModelProcessor implements AutoCloseable {
   /**
    * 处理一次 dispatcher 已 claim 的 MODEL Work。
    *
-   * <p>先用 Work-only 短事务 {@code lockClaimedWork} 验证传入 claim 当前真实 owned（伪造 / 错误 / 已过期 token 一律
-   * LOST_OWNERSHIP no-op，绝不 cancel 合法 active execution）；再进入同时充当 execution registry 的 per-invocation
-   * guard，由其在原子计算内再次复核 DB ownership，ticket 覆盖 prepare 到 execution 登记。同一 claim（同 lease token）重复 /
-   * 并发投递直接返回 LOST_OWNERSHIP（不 cancel、不 mutation）；不同有效 token 若存在旧 entry，则标记 superseded、捕获旧 execution
-   * 并在原子计算外 abandon，再 prepare。prepare 短事务按 own Thread -&gt; ModelInvocation -&gt; Work
-   * 锁序二次校验（不取树锁或祖先锁）：READY 只确认 lease margin 并交给执行线程（不写 invocation）；RUNNING（旧 lease
-   * 过期恢复）按既有重试策略记录一次失败 attempt 后回到 READY 并重排 MODEL Work，预算耗尽则以 FAILED 明确终止并唤醒 THREAD，绝不重放
-   * Provider；terminal 行只确保 THREAD Work 请求 （resultEntryId 仍 null 时）后 complete MODEL Work，不重复 bump
-   * version。
+   * <p>经 {@link ClaimAdmissionGuard} 准入后，prepare 短事务复核状态与所有权：READY 只确认 lease margin 并交给执行线程（不写
+   * invocation）；RUNNING（旧 lease 过期恢复）按既有重试策略记录一次失败 attempt 后回到 READY 并重排 MODEL Work，预算耗尽则以 FAILED
+   * 明确终止并唤醒 THREAD，绝不重放 Provider；terminal 行只确保 THREAD Work 请求 （resultEntryId 仍 null 时）后 complete
+   * MODEL Work，不重复 bump version。
+   *
+   * @return 启动为 STARTED，重排为 RESCHEDULED，已收敛为 TERMINATED，失权或重复投递为 LOST_OWNERSHIP
    */
   public ProcessResult process(ClaimedWork claim) {
     Objects.requireNonNull(claim, "claim");
@@ -181,10 +168,7 @@ public final class ModelProcessor implements AutoCloseable {
     return admissionGuard.hasActiveExecution();
   }
 
-  /**
-   * process 进入 guard 前的 Work-only 前置校验，也是 guard 原子计算内再次复核 DB ownership 的回调：仅锁 Work 行（锁序：单实体事务只锁
-   * Work），验证传入 claim 的 leaseToken 与 leaseUntil 当前仍真实 owned。不触碰 Thread / Invocation，无任何 mutation。
-   */
+  /** 仅锁 Work 验证所有权，用于前置校验与 guard 内复核。 */
   private boolean claimOwned(ClaimedWork claim) {
     return Boolean.TRUE.equals(store.transaction(tx -> !tx.lockClaimedWork(claim).isEmpty()));
   }
