@@ -354,8 +354,7 @@ export function parseAssistantUsage(
   const input = numberField(usage, 'inputTokens')
   const output = numberField(usage, 'outputTokens')
   const cacheRead = numberField(usage, 'cacheReadTokens')
-  const cacheWrite =
-    numberField(usage, 'cacheWriteTokens') + numberField(usage, 'cacheWriteLongTokens')
+  const cacheWrite = numberField(usage, 'cacheWriteTokens')
   const reasoning = numberField(usage, 'reasoningTokens')
   const providerTotal = numberField(usage, 'providerTotalTokens')
   const cost = normalizeUsageCost(usageCost)
@@ -368,7 +367,8 @@ export function parseAssistantUsage(
     && metadata.decodeDurationMillis > 0
       ? metadata.decodeDurationMillis
       : null
-  const decodeTokens = decodeDurationMillis != null ? output + reasoning : null
+  // outputTokens 已包含 reasoning；TTL 分桶也已包含在 cacheWriteTokens 中。
+  const decodeTokens = decodeDurationMillis != null ? output : null
   const contextInputTokens = input + cacheRead + cacheWrite
 
   if (

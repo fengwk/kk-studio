@@ -35,7 +35,7 @@ export interface UsageCost {
 }
 
 /**
- * 已关闭 Turn 的完整 provider usage；各 token 字段互斥。
+ * 已关闭 Turn 的 provider usage；reasoning 是 output 的子集，不可重复累加。
  * cost 是读取投影（null 表示未定价/不适用），同一 branch 内跨币种或含缺失项时不得伪造成完整总额。
  */
 export interface TurnUsage {
@@ -46,7 +46,7 @@ export interface TurnUsage {
   reasoning: number
   providerTotal: number
   cost: UsageCost | null
-  /** 解码输出 token 数（outputTokens + reasoningTokens），用于与 decodeDurationMillis 配对计算 tok/s */
+  /** 解码输出 token 数（outputTokens，已含 reasoning），用于与 decodeDurationMillis 配对计算 tok/s */
   decodeTokens?: number | null
   /** 解码耗时（毫秒），严格有限正值，来自 assistantMetadata.decodeDurationMillis */
   decodeDurationMillis?: number | null
