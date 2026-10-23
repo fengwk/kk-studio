@@ -50,4 +50,3 @@ export interface StorageBlobUrl {
   mediaType: string | null
   sizeBytes: number | null
 }
-

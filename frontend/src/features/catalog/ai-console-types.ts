@@ -111,4 +111,3 @@ export type ResourceModal =
       model: string | null
       expectedVersion: CatalogVersion
     }
-
