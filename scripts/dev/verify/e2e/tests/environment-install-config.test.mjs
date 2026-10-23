@@ -123,6 +123,12 @@ test('environment install-script case checks code, headers and rotation without 
   let saved = null
   let token = originalToken
   let activeCode = null
+  let issueSequence = 0
+  let consumptions = 0
+  let replacedRejections = 0
+  let consumedRejections = 0
+  let rotatedRejections = 0
+  const invalidated = new Map()
   let deleted = false
   const calls = []
   const secretWrites = []
@@ -154,7 +160,8 @@ test('environment install-script case checks code, headers and rotation without 
       }
       if (method === 'POST' && path === `/api/environments/${environmentId}/install-code`) {
         if (body.expectedVersion !== version) throw new HttpError(409, 'version conflict', path)
-        activeCode = `code-v${version}`
+        if (activeCode) invalidated.set(activeCode, 'replaced')
+        activeCode = `opaque-code-${++issueSequence}`
         return {
           json: {
             data: {
@@ -171,12 +178,26 @@ test('environment install-script case checks code, headers and rotation without 
       }
       if (method === 'GET' && path.startsWith(`/api/environments/${environmentId}/install`)) {
         const code = new URL(path, 'http://matrix.local').searchParams.get('code')
-        if (!code || code !== activeCode) throw new HttpError(400, 'install code is invalid', path)
+        if (!code || code !== activeCode) {
+          if (invalidated.get(code) === 'replaced') replacedRejections++
+          if (invalidated.get(code) === 'consumed') consumedRejections++
+          if (invalidated.get(code) === 'rotated') rotatedRejections++
+          throw new HttpError(400, 'install code is invalid', path)
+        }
+        invalidated.set(activeCode, 'consumed')
+        activeCode = null
+        consumptions++
+        token = consumptions === 1
+          ? '33333333-3333-4333-8333-333333333333'
+          : '44444444-4444-4444-8444-444444444444'
+        version = String(Number(version) + 1)
         return { json: installScript(token), headers: scriptHeaders() }
       }
       if (method === 'POST' && path === `/api/environments/${environmentId}/registration-token`) {
         if (body.expectedVersion !== version) throw new HttpError(409, 'version conflict', path)
         token = rotatedToken
+        assert.ok(activeCode, 'rotation must invalidate an unconsumed code')
+        invalidated.set(activeCode, 'rotated')
         activeCode = null
         version = String(Number(version) + 1)
         return {
@@ -207,17 +228,20 @@ test('environment install-script case checks code, headers and rotation without 
   await getCase(SCRIPT_CASE_ID).run(ctx)
 
   assert.equal(deleted, true, 'case must delete the environment it created')
-  assert.equal(version, '2', 'config save and token rotation should each advance version once')
-  assert.equal(token, rotatedToken)
+  assert.equal(version, '4', 'config save, two redemptions and rotation each advance version')
+  assert.equal(consumptions, 2)
+  assert.equal(replacedRejections, 1)
+  assert.equal(consumedRejections, 1)
+  assert.equal(rotatedRejections, 1)
   assert.deepEqual(secretWrites, [], 'case must not write script, token or code artifacts')
   assert.ok(calls.includes('GET /api/environments/uninstall/linux'))
   assert.ok(calls.includes('GET /api/environments/uninstall/windows'))
   assert.ok(calls.includes('GET /api/environments/uninstall/solaris'))
-  assert.equal(calls.filter((call) => call.endsWith('/install-code')).length, 3)
+  assert.equal(calls.filter((call) => call.endsWith('/install-code')).length, 5)
   assert.equal(
     calls.filter((call) => call === `GET /api/environments/${environmentId}/install`).length,
-    5,
-    'case must download once, reject a missing code, a tampered code and the rotated code, then download the new script',
+    7,
+    'case must redeem twice and reject missing, tampered, consumed, replaced and rotated codes',
   )
   assert.ok(!calls.some((call) => call.includes('spawn') || call.includes('exec')))
 })
