@@ -87,10 +87,7 @@ class ToolExecutionGatewayRemoteDeadlineTest {
           Set.of(),
           false);
 
-  /**
-   * 测试意图：远端丢失 terminal 帧时，阻塞等待严格受限于单一绝对 deadline（request.timeout +
-   * transportHandle.terminalDeliveryGrace）， 有界退出且结果收敛为 UNKNOWN，同时向句柄发送 TIMED_OUT 原因的 terminate。
-   */
+  /** 缺失 terminal 时在单一 deadline 收敛为 UNKNOWN，并以 TIMED_OUT 终止句柄。 */
   @Test
   void missingTerminalTimesOutAtSingleDeadlineAndYieldsUnknown() throws Exception {
     HarnessCatalog catalog = catalog();
@@ -131,10 +128,7 @@ class ToolExecutionGatewayRemoteDeadlineTest {
     }
   }
 
-  /**
-   * 测试意图：执行预算耗尽后仍在 terminalDeliveryGrace 恢复窗内等待，此时远端完成收尾并交付终态结果， Gateway 必须交付该真实终态，不得按超时收敛或触发
-   * terminate。
-   */
+  /** 执行预算耗尽后，恢复窗内交付的真实终态仍应保留，不触发 terminate。 */
   @Test
   void terminalDeliveredWithinGraceYieldsTruthfulOutput() throws Exception {
     HarnessCatalog catalog = catalog(Duration.ofMillis(10));
@@ -186,11 +180,12 @@ class ToolExecutionGatewayRemoteDeadlineTest {
     }
   }
 
-  /** 测试意图：持续 partial 不会重置或延长单一绝对 deadline；同步保证首个 partial 后持续发送直到调用结束，到期仍收敛为 UNKNOWN。 */
+  /** invoke 内同步投递首帧，持续 partial 不得延长 deadline，到期仍收敛为 UNKNOWN。 */
   @Test
   void continuousPartialsDoNotExtendSingleAbsoluteDeadline() throws Exception {
     HarnessCatalog catalog = catalog(Duration.ofSeconds(1));
     LatchingTransport transport = new LatchingTransport();
+    transport.sendInitialPartial = true;
     transport.delegate.defaultTerminalDeliveryGrace = Duration.ZERO;
 
     ToolExecutionGateway gateway = gateway(catalog, transport);
@@ -208,10 +203,6 @@ class ToolExecutionGatewayRemoteDeadlineTest {
           transport.delegate.invocations.get(0).listener();
       String capabilityCallId = transport.delegate.invocations.get(0).request().call().id();
 
-      // 同步投递首个 partial，保证 deadline 到期前至少观察到一个 partial
-      listener.onPartial(
-          new EnvironmentCapabilityResult(
-              capabilityCallId, List.of(new TextResultContent("chunk-0")), false, "{}"));
       assertFalse(partials.isEmpty(), "the first partial must be delivered synchronously");
 
       // 其余 partial 持续发送到调用结束，而不是固定次数
@@ -500,12 +491,12 @@ class ToolExecutionGatewayRemoteDeadlineTest {
     }
   }
 
-  /** 测试意图：调用在 deadline 内正常完成时，交付恰好一次 Succeeded 终态， 且绝不调用句柄的 terminate 或 cancel。 */
+  /** latch 确认 invoke 后交付正常终态，不触发 terminate 或 cancel。 */
   @Test
   void normalExecutionCompletesOnceWithoutTermination() throws Exception {
-    HarnessCatalog catalog = catalog();
+    HarnessCatalog catalog = catalog(Duration.ofSeconds(30));
     LatchingTransport transport = new LatchingTransport();
-    transport.delegate.defaultTerminalDeliveryGrace = Duration.ofMillis(100);
+    transport.delegate.defaultTerminalDeliveryGrace = Duration.ZERO;
 
     ToolExecutionGateway gateway = gateway(catalog, transport);
     ToolGateway.Run run = ToolGatewayTestSupport.admitted(gateway, request(catalog, "call-normal"));
@@ -616,6 +607,7 @@ class ToolExecutionGatewayRemoteDeadlineTest {
     private final ToolGatewayTestSupport.FakeTransport delegate =
         new ToolGatewayTestSupport.FakeTransport();
     private final CountDownLatch invoked = new CountDownLatch(1);
+    private boolean sendInitialPartial;
 
     @Override
     public EnvironmentCapabilityExecutionHandle invoke(
@@ -624,6 +616,11 @@ class ToolExecutionGatewayRemoteDeadlineTest {
         EnvironmentCapabilityExecutionListener listener) {
       EnvironmentCapabilityExecutionHandle handle =
           delegate.invoke(environmentId, request, listener);
+      if (sendInitialPartial) {
+        listener.onPartial(
+            new EnvironmentCapabilityResult(
+                request.call().id(), List.of(new TextResultContent("chunk-0")), false, "{}"));
+      }
       invoked.countDown();
       return handle;
     }
