@@ -824,6 +824,66 @@ describe('TestProcessSupervisor resource lifecycle', () => {
     cwd: os.tmpdir(),
   })
 
+  it.each([false, true])('isolates fixture coverage with explicit override=%s', async (explicit) => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lsp-coverage-env-'))
+    const supervisor = new TestProcessSupervisor()
+    const keys = ['NODE_V8_COVERAGE', 'KK_LSP_INHERITED', 'KK_LSP_OVERRIDE'] as const
+    const previous = keys.map((key) => process.env[key])
+    const inheritedCoverage = path.join(tempDir, 'inherited')
+    const explicitCoverage = path.join(tempDir, 'explicit')
+    const output = path.join(tempDir, 'env.json')
+    try {
+      process.env.NODE_V8_COVERAGE = inheritedCoverage
+      process.env.KK_LSP_INHERITED = 'inherited'
+      process.env.KK_LSP_OVERRIDE = 'parent'
+      const specEnv = {
+        KK_LSP_OVERRIDE: 'child',
+        ...(explicit ? { NODE_V8_COVERAGE: explicitCoverage } : {}),
+      }
+      const managed = await supervisor.start({
+        executable: process.execPath,
+        args: ['-e', `require('node:fs').writeFileSync(${JSON.stringify(output)}, JSON.stringify({
+          coverage: process.env.NODE_V8_COVERAGE ?? null,
+          inherited: process.env.KK_LSP_INHERITED,
+          override: process.env.KK_LSP_OVERRIDE,
+        }))`],
+        cwd: tempDir,
+        env: specEnv,
+      })
+      const child = supervisor.children[0]!
+      const closed = new Promise<void>((resolve) => child.once('close', () => resolve()))
+      await expect(managed.exit).resolves.toEqual({ exitCode: 0, signal: null })
+      await closed
+      await supervisor.close()
+      expect(JSON.parse(fs.readFileSync(output, 'utf8'))).toEqual({
+        coverage: null,
+        inherited: 'inherited',
+        override: 'child',
+      })
+      expect(keys.map((key) => process.env[key])).toEqual([inheritedCoverage, 'inherited', 'parent'])
+      expect(specEnv).toEqual({
+        KK_LSP_OVERRIDE: 'child',
+        ...(explicit ? { NODE_V8_COVERAGE: explicitCoverage } : {}),
+      })
+      expect(fs.existsSync(inheritedCoverage)).toBe(false)
+      expect(fs.existsSync(explicitCoverage)).toBe(false)
+    } finally {
+      try {
+        await supervisor.close()
+      } finally {
+        keys.forEach((key, index) => {
+          const value = previous[index]
+          if (value === undefined) {
+            delete process.env[key]
+          } else {
+            process.env[key] = value
+          }
+        })
+        fs.rmSync(tempDir, { recursive: true, force: true })
+      }
+    }
+  })
+
   it('resolves terminate and close only after the real stdio close', async () => {
     const supervisor = new TestProcessSupervisor()
     try {
