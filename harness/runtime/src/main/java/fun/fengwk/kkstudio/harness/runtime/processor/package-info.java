@@ -9,16 +9,21 @@
  * fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor} 输入必须是 TOOL target 的 claim，以 {@link
  * fun.fengwk.kkstudio.harness.runtime.port.ToolGateway} 做本地
  * admission，并在独占虚拟线程上阻塞执行至终态。所有持久化状态变更都在短事务内通过 store 锁序（Thread -&gt; ModelInvocation -&gt;
- * ToolInvocation -&gt; Work，同层 Work 按 (type, id) 升序）与 lease/token 校验完成；Tool 在副作用之前持久化 READY -&gt;
- * RUNNING，取消即对执行线程 interrupt，资源只在终态决议与执行体返回之后释放。
+ * ToolInvocation -&gt; Work，同层 Work 按 (type, id) 升序）与 lease/token 校验完成，lost / stale 完整 no-op；Tool
+ * 在副作用之前持久化 READY -&gt; RUNNING，取消即对执行线程 interrupt，资源只在终态决议与执行体返回之后释放。
  *
- * <p>admission 前先用 Work-only 短事务验证 claim 真实 owned，再进 per-invocation guard 防止同一 claim 重复 / 并发投递误伤合法
- * execution（伪造 / 错误 token 一律 LOST no-op，绝不 cancel 合法 active execution）；READY dispatch 前若 claim
- * lease 剩余不足会在首个 heartbeat 前 renew 出完整 margin。Tool preflight 在事务外执行（期间 heartbeat 维持 lease），Allow /
- * Ask / Deny / 异常四种结果分别收敛为 not-required approval、WAITING_APPROVAL、FAILED 与保持 READY
- * reschedule，提交前二次校验 claim + READY + attempt + approval null。两个 processor 都实现 {@link
- * java.lang.AutoCloseable}：close 与 process 竞态下，registry 插入后启动 heartbeat 前会再次检查 closed，已关闭时立即
- * abandon 并 reschedule 仍 owned 的 READY，绝不启动 Gateway，也不留下新 execution。
+ * <p>admission 前先用 Work-only 短事务验证 claim 真实 owned，再进入同时充当 execution registry 的 per-invocation
+ * guard（{@link fun.fengwk.kkstudio.harness.runtime.processor.ClaimAdmissionGuard}）：ticket 覆盖
+ * prepare 到 execution 登记，guard 在原子计算内再次复核 DB ownership；同一 claim（同 lease token）重复 / 并发投递拒绝准入，不同有效
+ * token 若存在旧 entry，则标记 superseded、捕获旧 execution 并在原子计算外 abandon（伪造 / 错误 token 一律 LOST no-op，绝不
+ * cancel 合法 active execution）；prepare 与外部调用均在准入锁外执行，持久化仍须复核所有权。READY dispatch 前若 claim lease
+ * 剩余不足会在首个 heartbeat 前 renew 出完整 margin。Tool preflight 在事务外执行（期间 heartbeat 维持 lease），提交前二次校验 claim
+ * + READY + attempt + approval null。
+ *
+ * <p>两个 processor 的 cancel 是唯一本地取消入口，只 abandon execution，不反写 durable 状态；close 取消全部并停止各自 heartbeat，
+ * 不 shutdown 注入的 scheduler / executor，关闭后 process 拒绝新 claim。guard 在 close 期间不创建新 slot，close /
+ * cancel 后未 attach 的 ticket 拒绝 attach。 execution 登记后启动 heartbeat 前会再次检查 closed，已关闭时立即 abandon 并
+ * reschedule 仍 owned 的 READY，绝不启动 Gateway，也不留下新 execution。
  *
  * <p>{@link fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor} 输入必须是 THREAD target 的
  * claim，核心状态与解析端口为单一 {@link fun.fengwk.kkstudio.harness.runtime.store.HarnessStore} 与 {@link
