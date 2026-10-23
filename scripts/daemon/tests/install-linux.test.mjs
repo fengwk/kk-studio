@@ -40,6 +40,67 @@ function withInstall(body) {
 const libDir = (fixture) => path.join(fixture.installRoot, 'lib')
 
 describe('install.sh on Linux', () => {
+  it('uses archive progress only when stderr is a TTY, even with redirected stdin', () =>
+    withInstall(({ fixture, configFile, tokenFile }) => {
+      const log = path.join(fixture.state, 'curl-options')
+      const result = fixture.run(['install', '--config-file', configFile, '--token-file', tokenFile], {
+        stderrTTY: true, extraEnv: { FAKE_CURL_LOG: log },
+      })
+      assert.equal(result.status, 0, result.stdout + result.stderr)
+      const calls = text(log).trim().split('\n').map(line => JSON.parse(line))
+      assert.deepEqual(calls.map(args => args.includes('--progress-bar')), [false, true, false])
+      assert.ok(calls.every(args => args[0] === '-q' && args.includes('--show-error')))
+    }))
+  it('clears an old start limit after reload and before restart, retaining limits', () =>
+    withInstall(({ fixture, install }) => {
+      writeFileSync(path.join(fixture.state, 'start-limit'), '')
+      assert.notEqual(spawnSync(path.join(fixture.bindir, 'systemctl'), ['--user', 'restart', 'kk-studio-daemon.service'], {
+        env: { ...process.env, FAKE_SERVICE_STATE: fixture.state },
+      }).status, 0)
+      writeFileSync(path.join(fixture.state, 'commands'), '')
+      const result = install()
+      assert.equal(result.status, 0, result.stderr)
+      const commands = text(path.join(fixture.state, 'commands'))
+      assert.match(commands, /daemon-reload\n--user enable.*\n--user reset-failed.*\n--user restart/)
+      assert.match(text(unitPath(fixture)), /StartLimitIntervalSec=300\nStartLimitBurst=5/)
+      assert.deepEqual([...result.stderr.matchAll(/\[(\d)\/7 /g)].map(m => Number(m[1])), [1, 2, 3, 4, 5, 6, 7])
+      assert.doesNotMatch(result.stderr + result.stdout, /token-value|\x1b|\r/)
+    }))
+
+  it('hard fails reset without restarting and reports publication and backup', () =>
+    withInstall(({ fixture, install }) => {
+      assert.equal(install().status, 0)
+      writeFileSync(path.join(fixture.state, 'commands'), '')
+      const result = install({ FAKE_RESET_FAIL: '1' })
+      assert.notEqual(result.status, 0)
+      assert.match(result.stderr, /安装失败 \[6\/7 发布启动\].*失败计数/)
+      assert.match(result.stderr, /备份：.*backups\/install\./)
+      assert.doesNotMatch(text(path.join(fixture.state, 'commands')), /restart/)
+    }))
+
+  it('translates only current startup diagnostics without exposing raw secrets', () =>
+    withInstall(({ fixture, install }) => {
+      assert.equal(install().status, 0)
+      for (const current of ['', 'invalid registration token injected-secret']) {
+        const result = install({ FAKE_START_FAIL: '1', FAKE_CURRENT_JOURNAL: current })
+        assert.notEqual(result.status, 0)
+        assert.match(result.stderr, /安装失败 \[6\/7 发布启动\]/)
+        assert.equal(result.stderr.includes('在 Studio 重新生成安装命令'), Boolean(current))
+        assert.doesNotMatch(result.stderr, /injected-secret|old-secret|token-value/)
+        assert.match(result.stderr, /journalctl .*--since/)
+      }
+    }))
+
+  it('reports archive download failure before any publication', () =>
+    withInstall(({ fixture, install }) => {
+      unlinkSync(path.join(fixture.httpDir, fixture.asset))
+      const result = install()
+      assert.notEqual(result.status, 0)
+      assert.match(result.stderr, /安装失败 \[3\/7 下载归档\]/)
+      assert.match(result.stderr, /现有程序和配置未改动/)
+      assert.match(result.stderr, /备份：无/)
+    }))
+
   it('installs the program, config, token and service', () =>
     withInstall(({ fixture, install }) => {
       const result = install()
