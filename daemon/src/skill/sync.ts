@@ -19,11 +19,10 @@ export function createSkillCapability(
   return async (call: CapabilityCall, context: CapabilityContext): Promise<CapabilityResult> => {
     const callId = call.invocationId
 
-    if (context.signal.aborted) {
-      return errorResult(callId, 'Operation cancelled')
-    }
-
     try {
+      if (context.signal.aborted) {
+        return errorResult(callId, 'Operation cancelled')
+      }
       const args = call.arguments
       if (!args || typeof args !== 'object' || Array.isArray(args)) {
         return errorResult(callId, 'Invalid skill sync argument', 'INVALID_ARGUMENT')
@@ -83,6 +82,9 @@ export function createSkillCapability(
         return errorResult(callId, error.message, error.code)
       }
       return errorResult(callId, 'Skill sync failed', 'SKILL_SYNC_FAILED')
+    } finally {
+      // install 返回或抛出后没有后台任务。返回前确认，避免调用方在 await 返回后看到未确认。
+      context.confirmExecutionExit()
     }
   }
 }

@@ -97,6 +97,13 @@ export interface CapabilityContext {
   processes: ProcessSupervisor
   resources: ResourceUploader
   progress(result: CapabilityResult): Promise<void>
+  /**
+   * 正向退出证据：仅当本次调用实际管理的执行范围已经结束时调用。
+   *
+   * <p>这不是结果终态。普通 error、timeout、abort 或连接关闭都不能代替它。Runtime 仍要等 executor
+   * 返回或抛出，以及本次收尾结束后，才发送 EXECUTION_EXITED。
+   */
+  confirmExecutionExit(): void
 }
 
 export type CapabilityExecutor = (call: CapabilityCall, context: CapabilityContext) => Promise<CapabilityResult>

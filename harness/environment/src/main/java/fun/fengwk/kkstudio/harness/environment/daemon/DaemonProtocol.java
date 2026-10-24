@@ -11,7 +11,7 @@ public final class DaemonProtocol {
    * daemonInstanceId} 与 manifest {@code daemonVersion} 上报、 以及强制协商的 {@code
    * permessage-deflate}。其他版本帧一律拒绝，不做双协议 fallback。
    */
-  public static final int VERSION = 4;
+  public static final int VERSION = 5;
 
   /**
    * ERROR payload 的可选 {@code code}：目标 Environment 当前已有活跃连接租约，daemon 应按配置退避重连 （同 registration token

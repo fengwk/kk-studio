@@ -193,6 +193,11 @@ class EnvironmentCapabilityTransportTest {
           delegate.onError(error);
         }
       }
+
+      @Override
+      public void onExitConfirmed() {
+        delegate.onExitConfirmed();
+      }
     }
 
     private EnvironmentCapabilityResult result(String text) {
@@ -221,6 +226,11 @@ class EnvironmentCapabilityTransportTest {
       this.error = true;
       this.terminal = error;
       events.add("error");
+    }
+
+    @Override
+    public void onExitConfirmed() {
+      events.add("exit");
     }
   }
 }
