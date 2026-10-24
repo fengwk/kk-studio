@@ -580,6 +580,30 @@ test('token count addition overflow exceeding MAX_SAFE_INTEGER throws Reliabilit
   )
 })
 
+test('cost amount accepts finite numbers and decimal strings but rejects coerced types', () => {
+  const accepted = extractDurableTrace([
+    messageEntry('1', { role: 'ASSISTANT', contents: [{ type: 'text', text: 'a' }] }, metadata(1, 1, 0), { currency: 'USD', amount: '1.25e-1' }),
+    messageEntry('2', { role: 'ASSISTANT', contents: [{ type: 'text', text: 'b' }] }, metadata(1, 1, 0), { currency: 'USD', amount: 0.5 }),
+  ])
+  assert.equal(accepted.costKnown, true)
+  assert.equal(accepted.usage.costTotal, 0.625)
+  for (const amount of [false, true, '', ' ', [], '1,25', '1e']) {
+    assert.throws(
+      () => extractDurableTrace([
+        messageEntry('1', { role: 'ASSISTANT', contents: [{ type: 'text', text: 'bad' }] }, metadata(1, 1, 0), { currency: 'USD', amount }),
+      ]),
+      (error) => error instanceof ReliabilityError && error.category === 'model',
+    )
+  }
+  assert.throws(
+    () => aggregateUsage([
+      { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: null, providerTotalTokens: null, costTotal: Number.MAX_VALUE, assistantMessages: 0 },
+      { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: null, providerTotalTokens: null, costTotal: Number.MAX_VALUE, assistantMessages: 0 },
+    ]),
+    (error) => error instanceof ReliabilityError && /cost addition overflow/.test(error.message),
+  )
+})
+
 test('usageCost recognizes only amount and ignores deprecated total property', () => {
   const legacyTotal = extractDurableTrace([
     messageEntry(
