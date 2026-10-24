@@ -1248,7 +1248,8 @@ class ThreadJoinTest {
     // reminderTurn、以及已投递的 deliveryCommandSequence 不可被篡改。
     ThreadJoin old = initialJoin(id(1), id(2), id(3));
     UUID resultHead = id(50);
-    ThreadJoin matched = old.match(resultHead, null, T1);
+    ThreadJoin matched = old.match(resultHead, null, T1).delivered(10L, T1);
+    assertDoesNotThrow(() -> ThreadJoin.validateTransition(old, matched));
 
     // 篡改 finalAnswerEntryId（冻结后不得改变）
     ThreadJoin mutateFinalAnswer =
@@ -1263,14 +1264,17 @@ class ThreadJoinTest {
             matched.reminderTurn(),
             matched.terminalEntryId(),
             id(60),
-            null,
+            matched.deliveryCommandSequence(),
             matched.createdAt(),
             T2,
             JoinDelivery.NOTIFY_PARENT,
             null);
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> ThreadJoin.validateTransition(matched, mutateFinalAnswer));
+    assertEquals(
+        "join durable identity or receipt cannot change",
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> ThreadJoin.validateTransition(matched, mutateFinalAnswer))
+            .getMessage());
 
     // 篡改 terminalEntryId
     ThreadJoin mutateHead =
@@ -1285,13 +1289,17 @@ class ThreadJoinTest {
             matched.reminderTurn(),
             id(51),
             null,
-            null,
+            matched.deliveryCommandSequence(),
             matched.createdAt(),
             T2,
             JoinDelivery.NOTIFY_PARENT,
             null);
-    assertThrows(
-        IllegalArgumentException.class, () -> ThreadJoin.validateTransition(matched, mutateHead));
+    assertEquals(
+        "join durable identity or receipt cannot change",
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> ThreadJoin.validateTransition(matched, mutateHead))
+            .getMessage());
 
     // matched 后尝试推进 reminderTurn
     ThreadJoin advanceReminderAfterMatched =
@@ -1306,17 +1314,20 @@ class ThreadJoinTest {
             1L,
             matched.terminalEntryId(),
             null,
-            null,
+            matched.deliveryCommandSequence(),
             matched.createdAt(),
             T2,
             JoinDelivery.NOTIFY_PARENT,
             null);
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> ThreadJoin.validateTransition(matched, advanceReminderAfterMatched));
+    assertEquals(
+        "join durable identity or receipt cannot change",
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> ThreadJoin.validateTransition(matched, advanceReminderAfterMatched))
+            .getMessage());
 
     // delivered 之后篡改 deliveryCommandSequence（改成不同值）
-    ThreadJoin delivered = matched.delivered(10L, T2);
+    ThreadJoin delivered = matched;
     ThreadJoin mutateDeliverySeq =
         new ThreadJoin(
             delivered.invocationId(),
@@ -1334,9 +1345,12 @@ class ThreadJoinTest {
             T3,
             JoinDelivery.NOTIFY_PARENT,
             null);
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> ThreadJoin.validateTransition(delivered, mutateDeliverySeq));
+    assertEquals(
+        "join durable identity or receipt cannot change",
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> ThreadJoin.validateTransition(delivered, mutateDeliverySeq))
+            .getMessage());
 
     // delivered 之后将 deliveryCommandSequence 改成 null
     ThreadJoin clearDeliverySeq =
@@ -1356,9 +1370,12 @@ class ThreadJoinTest {
             T3,
             JoinDelivery.NOTIFY_PARENT,
             null);
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> ThreadJoin.validateTransition(delivered, clearDeliverySeq));
+    assertEquals(
+        "join durable identity or receipt cannot change",
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> ThreadJoin.validateTransition(delivered, clearDeliverySeq))
+            .getMessage());
   }
 
   @Test
