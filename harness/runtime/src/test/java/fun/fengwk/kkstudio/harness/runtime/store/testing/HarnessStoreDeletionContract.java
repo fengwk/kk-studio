@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T0;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T1;
-import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T2;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.assistantResponse;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.command;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.inTransaction;
@@ -144,7 +143,7 @@ abstract class HarnessStoreDeletionContract {
             ThreadExecutionControl.RUNNABLE);
     seedCommand(childId, 1L, id(1L));
     UUID joinId = id(700L);
-    seedMatchedUndeliveredJoin(joinId, parentId, childId);
+    seedUnmatchedJoin(joinId, parentId, childId);
 
     // 单边删除（parent 存活）必须被拒绝：执行树根是 parent，锁的仍是同一棵树
     assertThrows(
@@ -197,10 +196,9 @@ abstract class HarnessStoreDeletionContract {
             childBaseline.sessionId(),
             childBaseline.rootEntryId(),
             ThreadExecutionControl.RUNNABLE);
-    seedCommand(parentId, 1L, id(2L));
     seedCommand(childId, 1L, id(3L));
     UUID joinId = id(701L);
-    seedMatchedUndeliveredJoin(joinId, parentId, childId);
+    seedUnmatchedJoin(joinId, parentId, childId);
 
     List<UUID> ordered = List.of(parentId, childId).stream().sorted(UuidOrder.COMPARATOR).toList();
     int deleted =
@@ -270,15 +268,13 @@ abstract class HarnessStoreDeletionContract {
         });
   }
 
-  /** 写入一条已经冻结结果、但尚未交付给父 Thread 的 join（父 Thread 处于 STOPPED 暂停交付）。 */
-  private void seedMatchedUndeliveredJoin(UUID joinId, UUID parentThreadId, UUID childThreadId) {
-    UUID resultHeadEntryId =
-        store.transaction(tx -> tx.findThread(childThreadId).orElseThrow()).headEntryId();
+  /** 写入尚未冻结结果的 NOTIFY_PARENT join，用于验证存活端拒绝删除、两端同删允许删除。 */
+  private void seedUnmatchedJoin(UUID joinId, UUID parentThreadId, UUID childThreadId) {
     inTransaction(
         store,
         tx -> {
           tx.lockThread(childThreadId);
-          ThreadJoin join =
+          tx.insertJoin(
               new ThreadJoin(
                   joinId,
                   "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
@@ -294,9 +290,7 @@ abstract class HarnessStoreDeletionContract {
                   T1,
                   T1,
                   JoinDelivery.NOTIFY_PARENT,
-                  null);
-          tx.insertJoin(join);
-          tx.updateJoin(join.match(resultHeadEntryId, null, T2).delivered(1L, T2));
+                  null));
         });
   }
 }
