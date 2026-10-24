@@ -1,0 +1,18 @@
+{
+  "source": "Stage2 bounded ledger 2026-10-24, xai/grok-4.7 round 1; usage numbers only",
+  "usage": {
+    "input_tokens": 1263,
+    "input_tokens_details": {
+      "cached_tokens": 1152
+    },
+    "output_tokens": 74,
+    "output_tokens_details": {
+      "reasoning_tokens": 73
+    },
+    "total_tokens": 1337,
+    "context_details": {
+      "input_tokens": 1263,
+      "output_tokens": 81
+    }
+  }
+}

@@ -14,6 +14,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
@@ -1575,5 +1576,34 @@ class GeminiStreamAccumulatorTest {
     assertEquals("acc-12345", actual.path("customBillingInfo").path("accountId").asString(""));
     assertTrue(actual.path("experimentalFeatureEnabled").asBoolean(false));
     assertEquals(999, actual.path("unknownMetric").asInt(0));
+  }
+
+  /** 2026-10-24 Gemini 代表的真实 usage 数字；候选外壳是合成的，不是完整原始响应。 */
+  @Test
+  void geminiObservedFinalSnapshotReplacesEarlierUsage() throws Exception {
+    JsonNode fixture =
+        MAPPER.readTree(
+            GeminiStreamAccumulatorTest.class.getResourceAsStream("gemini-usage-2026-10-24.json"));
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
+    accumulator.handleEvent(
+        "message", syntheticGeminiFrame(fixture.path("first"), null).toString());
+    accumulator.handleEvent(
+        "message", syntheticGeminiFrame(fixture.path("last"), "STOP").toString());
+    ProviderResponse response = accumulator.finish().response();
+    assertEquals(143L, response.usage().inputTokens());
+    assertEquals(111L, response.usage().outputTokens());
+    assertEquals(110L, response.usage().reasoningTokens());
+    assertEquals(254L, response.usage().providerTotalTokens());
+    assertEquals(fixture.path("last"), MAPPER.readTree(response.rawUsageJson()));
+  }
+
+  private static ObjectNode syntheticGeminiFrame(JsonNode usage, String finishReason) {
+    ObjectNode frame = MAPPER.createObjectNode();
+    ObjectNode candidate = frame.putArray("candidates").addObject();
+    if (finishReason != null) {
+      candidate.put("finishReason", finishReason);
+    }
+    frame.set("usageMetadata", usage);
+    return frame;
   }
 }

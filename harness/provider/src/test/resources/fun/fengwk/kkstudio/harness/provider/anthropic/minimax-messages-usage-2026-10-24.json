@@ -1,0 +1,11 @@
+{
+  "source": "Stage2 bounded ledger 2026-10-24, minimax/MiniMax-M3.1-Flash round 1; usage numbers only",
+  "start": {
+    "input_tokens": 0,
+    "output_tokens": 0
+  },
+  "delta": {
+    "input_tokens": 214,
+    "output_tokens": 3
+  }
+}

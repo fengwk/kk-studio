@@ -9,11 +9,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
@@ -40,6 +43,8 @@ import java.util.UUID;
 
 /** AnthropicStreamAccumulator 的纯状态机与终态解析测试。 */
 class AnthropicStreamAccumulatorTest {
+
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
 
   private final List<ProviderStreamEvent> emittedEvents = new ArrayList<>();
   private final ProviderStreamHandler recordingHandler =
@@ -1295,6 +1300,32 @@ class AnthropicStreamAccumulatorTest {
     ProviderException exNonObj = assertThrows(ProviderException.class, accNonObj::finish);
     assertEquals(ProviderErrorKind.INVALID_RESPONSE, exNonObj.kind());
     assertEquals("output_tokens_details must be an object", exNonObj.getMessage());
+  }
+
+  /** 2026-10-24 MiniMax 代表的真实 usage 数字；事件外壳是合成的，不是完整原始响应。 */
+  @Test
+  void minimaxObservedSnapshotsLeaveReasoningAndTotalUnknown() throws Exception {
+    JsonNode fixture =
+        MAPPER.readTree(
+            AnthropicStreamAccumulatorTest.class.getResourceAsStream(
+                "minimax-messages-usage-2026-10-24.json"));
+    AnthropicStreamAccumulator accumulator =
+        new AnthropicStreamAccumulator(request, descriptor, bridge);
+    ObjectNode start = MAPPER.createObjectNode();
+    start.put("type", "message_start");
+    start.putObject("message").put("id", "synthetic-terminal").set("usage", fixture.path("start"));
+    ObjectNode delta = MAPPER.createObjectNode();
+    delta.put("type", "message_delta");
+    delta.putObject("delta").put("stop_reason", "end_turn");
+    delta.set("usage", fixture.path("delta"));
+    accumulator.handleEvent("message_start", start.toString());
+    accumulator.handleEvent("message_delta", delta.toString());
+    accumulator.handleEvent("message_stop", "{\"type\":\"message_stop\"}");
+    ModelUsage usage = accumulator.finish().response().usage();
+    assertEquals(214L, usage.inputTokens());
+    assertEquals(3L, usage.outputTokens());
+    assertNull(usage.reasoningTokens());
+    assertNull(usage.providerTotalTokens());
   }
 
   private AnthropicStreamAccumulator newAccumulator() {
