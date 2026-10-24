@@ -694,11 +694,18 @@ class GeminiStreamAccumulatorTest {
       for (String value : malformed) {
         GeminiStreamAccumulator accumulator =
             new GeminiStreamAccumulator(request, descriptor, bridge);
-        String payload = "{\"usageMetadata\":{\"" + field + "\":" + value + "}}";
+        String payload =
+            "{\"candidates\":[{\"finishReason\":\"STOP\"}],\"usageMetadata\":{\""
+                + field
+                + "\":"
+                + value
+                + "}}";
         if ("null".equals(value)) {
+          // finish 的无关前提保持合法，显式 null 必须命中当前字段，而不是缺少终态。
           accumulator.handleEvent("message", payload);
           ProviderException error = assertThrows(ProviderException.class, accumulator::finish);
           assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind(), field + ":" + value);
+          assertEquals("invalid usage field: " + field, error.getMessage());
         } else {
           ProviderException error =
               assertThrows(
@@ -1367,6 +1374,7 @@ class GeminiStreamAccumulatorTest {
             + "\":null}}");
     ProviderException error = assertThrows(ProviderException.class, accumulator::finish);
     assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind());
+    assertEquals("invalid usage field: " + field, error.getMessage());
   }
 
   @Test
