@@ -293,14 +293,15 @@ metadata 自行定价；durable 用量按当前 catalog 价格现算，不写回
 缓存写入使用 `cacheWriteTokens` 总量，不叠加 TTL 分桶。
 usage 必须报告四个非负安全整数：inputTokens、outputTokens、cacheReadTokens、cacheWriteTokens。
 缺失或非法时不合成读数；reasoningTokens 和 providerTotalTokens 未报告时保留未知，聚合时也不补零。
-只有 assistantMetadata 缺失才表示无模型调用的人工 ASSISTANT 消息，不计用量；显式空对象、数组、primitive 或损坏 usage 时，
+assistantMetadata 缺失或为 null 的人工 ASSISTANT 消息不计用量；显式空对象、数组、非对象值或损坏 usage 时，
 该回合及分支的完整计数、总费用传播为未知，不把后续已知项目伪装为完整总量。
 安全整数累加溢出也保留未知；推理计数不得超过输出。合法 usage 仅缺推理计数时，
 仍保留后端已提供的费用，不在前端重新定价。
 摘要固定保留 `↑input · ↓output · RcacheRead · WcacheWrite · cost · cache N.NN% · X tok/s`
-全部字段，R/W 为零时也不省略。缺失费用与速率不可显示 `0`，统一展示中英文 `noData`
-（中文“暂无数据”、英文“No data”），真实 0 正常保留（如 `$0`、`0 tok/s`）；缓存比例默认显示
-`0.00%`，费用未计量时不假定币种；hover 仍明确区分未计量与真实零值，展示默认值不写入统计事实。
+全部字段，R/W 为零时也不省略。未知计数、费用与速率统一展示 `noData`
+（中文“暂无数据”、英文“No data”），真实 0 正常保留（如 `$0`、`0 tok/s`）。
+缓存比例缺少计数或分母溢出时显示 `noData`，只有已知输入总量为零时显示 `0.00%`。
+费用未计量时不假定币种；hover 仍明确区分未计量与真实零值，展示默认值不写入统计事实。
 单行保留全部事实并由 CSS 省略，hover 给出环境、上下文与用量三组完整数字（含推理与缓存分项），
 措辞统一为“未缓存输入 / 输出 / 推理 / 缓存命中率”等全称。累计口径覆盖全部 Entry，
 包括正常对话里不投影的压缩回合；它与对话内已关闭 TURN_END 的回合 footer 是两件事。
