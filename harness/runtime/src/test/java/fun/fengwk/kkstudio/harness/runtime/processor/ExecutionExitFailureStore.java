@@ -11,7 +11,8 @@ import java.util.function.Function;
 /**
  * 测试专用 store 包装：只在实际退出确认持久化（{@code confirmExecution}）调用点注入失败。
  *
- * <p>全部读写委托真实内存 store；故障发生在确认事实写入之前。用于验证 processor 的真实 finally 路径会吞掉持久化失败并保留 UNCONFIRMED，而不是依赖日志文本。
+ * <p>全部读写委托真实内存 store；故障发生在确认事实写入之前。用于验证 processor 的真实 finally 路径捕获并报告持久化失败后仍保留
+ * UNCONFIRMED，而不是依赖日志文本。
  */
 final class ExecutionExitFailureStore {
 
