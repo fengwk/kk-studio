@@ -35,15 +35,16 @@ export interface UsageCost {
 }
 
 /**
- * 已关闭 Turn 的 provider usage；reasoning 是 output 的子集，不可重复累加。
+ * 已关闭 Turn 或 branch 的 provider usage；reasoning 是 output 的子集，不可重复累加。
+ * input、output、cacheRead、cacheWrite 允许为 nullable（null 表示未知/传播未知）。
  * reasoning 与 providerTotal 为 nullable（null 表示未知/未提供）。
- * cost 是读取投影（null 表示未定价/不适用），同一 branch 内跨币种或含缺失项时不得伪造成完整总额。
+ * cost 是读取投影（null 表示未定价/不适用/未知），同一 branch 内跨币种或含缺失项时不得伪造成完整总额。
  */
 export interface TurnUsage {
-  input: number
-  output: number
-  cacheRead: number
-  cacheWrite: number
+  input: number | null
+  output: number | null
+  cacheRead: number | null
+  cacheWrite: number | null
   reasoning: number | null
   providerTotal: number | null
   cost: UsageCost | null

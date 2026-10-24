@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
+  accumulateTurnUsage,
   addDecimalStrings,
+  addNullableSafeInteger,
   calculateCacheHitRate,
   calculateDecodeTokensPerSecond,
   formatTurnUsageText,
@@ -28,6 +30,11 @@ describe('content-utils usage & speed & cache calculations', () => {
   // 验证缓存命中率公式：cacheRead / (input + cacheRead + cacheWrite)
   // 函数只返回未取整的百分数；两位小数由展示层统一处理。分母为 0 时返回 null。
   describe('calculateCacheHitRate', () => {
+    it('does not turn an overflowing cache denominator into a measured zero', () => {
+      const tokens = { input: Number.MAX_SAFE_INTEGER, output: 0, cacheRead: 1, cacheWrite: 0, cost: null }
+      expect(calculateCacheHitRate(tokens)).toBeNull()
+      expect(formatTurnUsageText(tokens)).toContain('cache 暂无数据')
+    })
     it('returns null when denominator is 0', () => {
       expect(calculateCacheHitRate({ input: 0, cacheRead: 0, cacheWrite: 0 })).toBeNull()
     })
@@ -104,7 +111,19 @@ describe('content-utils usage & speed & cache calculations', () => {
           totalTokens: 44,
         },
       })
-      expect(parsed).toBeNull()
+      // 携带模型 metadata 但缺 canonical 字段：返回全 unknown TurnUsage，不采信别名数字
+      expect(parsed).toEqual({
+        input: null,
+        output: null,
+        cacheRead: null,
+        cacheWrite: null,
+        reasoning: null,
+        providerTotal: null,
+        cost: null,
+        decodeTokens: null,
+        decodeDurationMillis: null,
+        contextInputTokens: null,
+      })
     })
 
     // 旧 payload 里的 metadata.cost 不再被读取：费用只能来自读取投影
@@ -117,22 +136,38 @@ describe('content-utils usage & speed & cache calculations', () => {
       expect(parsed?.cost).toBeNull()
     })
 
-    it('requires the four non-negative safe integer fields and returns null when missing or invalid', () => {
+    it('requires the four non-negative safe integer fields and returns null for no metadata, unknown for invalid', () => {
+      // 无模型 metadata 人工 ASSISTANT 不计，返回 null
       expect(parseAssistantUsage({})).toBeNull()
-      expect(parseAssistantUsage({ usage: null })).toBeNull()
-      expect(parseAssistantUsage({ usage: {} })).toBeNull()
+
+      const unknownUsage = {
+        input: null,
+        output: null,
+        cacheRead: null,
+        cacheWrite: null,
+        reasoning: null,
+        providerTotal: null,
+        cost: null,
+        decodeTokens: null,
+        decodeDurationMillis: null,
+        contextInputTokens: null,
+      }
+
+      // 有模型 metadata 但缺 usage 或字段非法：返回全 unknown TurnUsage（不创造真 0）
+      expect(parseAssistantUsage({ usage: null })).toEqual(unknownUsage)
+      expect(parseAssistantUsage({ usage: {} })).toEqual(unknownUsage)
       expect(parseAssistantUsage({
         usage: { inputTokens: 10, outputTokens: 20, cacheReadTokens: 5 }, // 缺少 cacheWriteTokens
-      })).toBeNull()
+      })).toEqual(unknownUsage)
       expect(parseAssistantUsage({
         usage: { inputTokens: -1, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0 },
-      })).toBeNull()
+      })).toEqual(unknownUsage)
       expect(parseAssistantUsage({
         usage: { inputTokens: 1.5, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0 },
-      })).toBeNull()
+      })).toEqual(unknownUsage)
       expect(parseAssistantUsage({
         usage: { inputTokens: '10', outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0 },
-      })).toBeNull()
+      })).toEqual(unknownUsage)
 
       // 四必填真实全零也必须保留；缺费用/测速不是缺 usage。
       expect(parseAssistantUsage({
@@ -195,6 +230,102 @@ describe('content-utils usage & speed & cache calculations', () => {
         decode_duration_millis: 800,
       })
       expect(aliased?.decodeDurationMillis).toBeNull()
+    })
+
+    // known reasoning <= output 一致校验；invalid optional 不得真 0；合法 usage reasoning 未知且后端 cost 已知仍保留费用
+    it('enforces known reasoning <= output and retains known cost when reasoning is unknown', () => {
+      // 1. 合法 reasoning：reasoning <= output
+      const validReasoning = parseAssistantUsage(
+        {
+          usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 30 },
+        },
+        { currency: 'USD', amount: '0.005' },
+      )
+      expect(validReasoning?.reasoning).toBe(30)
+      expect(validReasoning?.cost).toEqual({ currency: 'USD', amount: '0.005' })
+
+      // 2. 违反一致性：reasoning > output -> reasoning 变为 null（不得真 0），合法 usage 保留后端 cost
+      const excessiveReasoning = parseAssistantUsage(
+        {
+          usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 60 },
+        },
+        { currency: 'USD', amount: '0.005' },
+      )
+      expect(excessiveReasoning?.reasoning).toBeNull()
+      expect(excessiveReasoning?.cost).toEqual({ currency: 'USD', amount: '0.005' })
+
+      // 3. invalid optional（负数、非整数、字符串）-> null，不得真 0，保留已知费用
+      const negativeReasoning = parseAssistantUsage(
+        {
+          usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: -1 },
+        },
+        { currency: 'USD', amount: '0.005' },
+      )
+      expect(negativeReasoning?.reasoning).toBeNull()
+      expect(negativeReasoning?.cost).toEqual({ currency: 'USD', amount: '0.005' })
+
+      // 4. invalid providerTotalTokens 不得真 0
+      const badProviderTotal = parseAssistantUsage({
+        usage: { inputTokens: 10, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0, providerTotalTokens: -5 },
+      })
+      expect(badProviderTotal?.providerTotal).toBeNull()
+    })
+
+    it('sets contextInputTokens to null on safe integer overflow', () => {
+      const overflow = parseAssistantUsage({
+        usage: {
+          inputTokens: Number.MAX_SAFE_INTEGER,
+          outputTokens: 10,
+          cacheReadTokens: 1,
+          cacheWriteTokens: 0,
+        },
+      })
+      expect(overflow?.contextInputTokens).toBeNull()
+    })
+  })
+
+  describe('addNullableSafeInteger', () => {
+    it('adds two safe integers correctly', () => {
+      expect(addNullableSafeInteger(10, 20)).toBe(30)
+      expect(addNullableSafeInteger(0, 0)).toBe(0)
+    })
+
+    it('propagates null if either operand is null or undefined', () => {
+      expect(addNullableSafeInteger(10, null)).toBeNull()
+      expect(addNullableSafeInteger(null, 10)).toBeNull()
+      expect(addNullableSafeInteger(null, null)).toBeNull()
+      expect(addNullableSafeInteger(undefined, 10)).toBeNull()
+    })
+
+    it('returns null if either operand is not a non-negative safe integer', () => {
+      expect(addNullableSafeInteger(-1, 10)).toBeNull()
+      expect(addNullableSafeInteger(10, -5)).toBeNull()
+      expect(addNullableSafeInteger(1.5, 10)).toBeNull()
+      expect(addNullableSafeInteger(NaN, 10)).toBeNull()
+      expect(addNullableSafeInteger(Infinity, 10)).toBeNull()
+    })
+
+    it('turns into null (unknown) on safe integer overflow', () => {
+      expect(addNullableSafeInteger(Number.MAX_SAFE_INTEGER, 1)).toBeNull()
+      expect(addNullableSafeInteger(Number.MAX_SAFE_INTEGER, 100)).toBeNull()
+    })
+  })
+
+  describe('accumulateTurnUsage', () => {
+    it('returns current when next is null', () => {
+      const current = usage({ input: 10, output: 5 })
+      expect(accumulateTurnUsage(current, null)).toBe(current)
+    })
+
+    it('returns next when current is null', () => {
+      const next = usage({ input: 10, output: 5 })
+      expect(accumulateTurnUsage(null, next)).toBe(next)
+    })
+
+    it('merges through mergeTurnUsage when both are non-null', () => {
+      const first = usage({ input: 10, output: 5 })
+      const second = usage({ input: 20, output: 10 })
+      expect(accumulateTurnUsage(first, second)?.input).toBe(30)
     })
   })
 
@@ -303,16 +434,119 @@ describe('content-utils usage & speed & cache calculations', () => {
     })
 
     it('keeps reasoning and providerTotal as null if either is null', () => {
-      const known = usage({ reasoning: 10, providerTotal: 100 })
-      const unknownReasoning = usage({ reasoning: null, providerTotal: 50 })
+      const known = usage({ output: 20, reasoning: 10, providerTotal: 100 })
+      const unknownReasoning = usage({ output: 20, reasoning: null, providerTotal: 50 })
       const merged1 = mergeTurnUsage(known, unknownReasoning)
       expect(merged1.reasoning).toBeNull()
       expect(merged1.providerTotal).toBe(150)
 
-      const unknownTotal = usage({ reasoning: 5, providerTotal: null })
+      const unknownTotal = usage({ output: 20, reasoning: 5, providerTotal: null })
       const merged2 = mergeTurnUsage(known, unknownTotal)
       expect(merged2.reasoning).toBe(15)
       expect(merged2.providerTotal).toBeNull()
+    })
+
+    // 定向用例：known + unknown 顺序双向合并（最小未知传播）
+    it('merges known and unknown bidirectionally with identical unknown propagation', () => {
+      const known: TurnUsage = {
+        input: 100,
+        output: 50,
+        cacheRead: 20,
+        cacheWrite: 10,
+        reasoning: 15,
+        providerTotal: 170,
+        cost: { currency: 'USD', amount: '0.05' },
+        decodeTokens: 50,
+        decodeDurationMillis: 1000,
+        contextInputTokens: 130,
+      }
+      const unknown: TurnUsage = {
+        input: null,
+        output: null,
+        cacheRead: null,
+        cacheWrite: null,
+        reasoning: null,
+        providerTotal: null,
+        cost: null,
+        decodeTokens: null,
+        decodeDurationMillis: null,
+        contextInputTokens: null,
+      }
+
+      // 1. known + unknown
+      const forward = mergeTurnUsage(known, unknown)
+      // 2. unknown + known
+      const backward = mergeTurnUsage(unknown, known)
+
+      // 双向顺序下，所有计数与费用字段均变为 null（未知传播）
+      for (const merged of [forward, backward]) {
+        expect(merged.input).toBeNull()
+        expect(merged.output).toBeNull()
+        expect(merged.cacheRead).toBeNull()
+        expect(merged.cacheWrite).toBeNull()
+        expect(merged.reasoning).toBeNull()
+        expect(merged.providerTotal).toBeNull()
+        expect(merged.cost).toBeNull()
+        // 有效测速样本保留
+        expect(merged.decodeTokens).toBe(50)
+        expect(merged.decodeDurationMillis).toBe(1000)
+      }
+
+      // 上下文输入取最新：forward 的 next 是 unknown，因此为 null；backward 的 next 是 known，因此为 130
+      expect(forward.contextInputTokens).toBeNull()
+      expect(backward.contextInputTokens).toBe(130)
+    })
+
+    // 定向用例：safeinteger合并溢出变未知
+    it('turns tokens into null on safe integer overflow during merge', () => {
+      const huge = usage({ input: Number.MAX_SAFE_INTEGER, output: 100 })
+      const extra = usage({ input: 1, output: 50 })
+      const merged = mergeTurnUsage(huge, extra)
+      expect(merged.input).toBeNull() // 溢出变未知
+      expect(merged.output).toBe(150) // 未溢出正常求和
+    })
+
+    // 定向用例：合并后 known reasoning <= output 一致校验
+    it('enforces reasoning <= output on merged values', () => {
+      // 即使单独两个调用自身满足 reasoning <= output，若合并后 reasoning > output 则置为 null
+      const first = usage({ output: 20, reasoning: 18 })
+      const second = usage({ output: 5, reasoning: 10 })
+      const merged = mergeTurnUsage(first, second)
+      // reasoning: 28, output: 25 -> 28 > 25 -> null（不得真 0）
+      expect(merged.output).toBe(25)
+      expect(merged.reasoning).toBeNull()
+    })
+
+    // 定向用例：decodeTokens/duration合并也须安全整数溢出null
+    it('nulls decode measurement when merged sample overflows safe integer', () => {
+      const s1 = usage({ decodeTokens: Number.MAX_SAFE_INTEGER, decodeDurationMillis: 500 })
+      const s2 = usage({ decodeTokens: 1, decodeDurationMillis: 500 })
+      const mergedTokensOverflow = mergeTurnUsage(s1, s2)
+      expect(mergedTokensOverflow.decodeTokens).toBeNull()
+      expect(mergedTokensOverflow.decodeDurationMillis).toBeNull()
+
+      const d1 = usage({ decodeTokens: 10, decodeDurationMillis: Number.MAX_SAFE_INTEGER })
+      const d2 = usage({ decodeTokens: 10, decodeDurationMillis: 1 })
+      const mergedDurationOverflow = mergeTurnUsage(d1, d2)
+      expect(mergedDurationOverflow.decodeTokens).toBeNull()
+      expect(mergedDurationOverflow.decodeDurationMillis).toBeNull()
+    })
+
+    // 定向用例：合法 usage reasoning 未知且后端 cost 已知仍保留费用并正常相加
+    it('retains merged cost when reasoning is unknown but costs are known', () => {
+      const u1 = usage({
+        output: 50,
+        reasoning: null,
+        cost: { currency: 'USD', amount: '0.005' },
+      })
+      const u2 = usage({
+        output: 50,
+        reasoning: 20,
+        cost: { currency: 'USD', amount: '0.003' },
+      })
+      const merged = mergeTurnUsage(u1, u2)
+      expect(merged.cost).toEqual({ currency: 'USD', amount: '0.008' })
+      expect(merged.reasoning).toBeNull()
     })
   })
 
@@ -372,6 +606,27 @@ describe('content-utils usage & speed & cache calculations', () => {
         decodeTokens: 50,
         decodeDurationMillis: 1000,
       })).toBe('↑100 · ↓50 · R0 · W20 · $0.005 · cache 0.00% · 50 tok/s')
+    })
+
+    // 定向用例：0 与未知不同；全未知 usage 在中英文下全部显示 noData，不创造真 0
+    it('formats fully unknown usage as localized noData without inventing zero', () => {
+      const unknownUsage = {
+        input: null,
+        output: null,
+        cacheRead: null,
+        cacheWrite: null,
+        cost: null,
+        decodeTokens: null,
+        decodeDurationMillis: null,
+      }
+      // 中文
+      expect(formatTurnUsageText(unknownUsage, (k) => k === 'ai.runtime.status.noData' ? '暂无数据' : k)).toBe(
+        '↑暂无数据 · ↓暂无数据 · R暂无数据 · W暂无数据 · 暂无数据 · cache 暂无数据 · 暂无数据',
+      )
+      // 英文
+      expect(formatTurnUsageText(unknownUsage, (k) => k === 'ai.runtime.status.noData' ? 'No data' : k)).toBe(
+        '↑No data · ↓No data · RNo data · WNo data · No data · cache No data · No data',
+      )
     })
   })
 })

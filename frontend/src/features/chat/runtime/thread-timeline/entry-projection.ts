@@ -31,7 +31,7 @@ import {
   createTurnUsageMetaMessage,
 } from '@/features/chat/runtime/thread-timeline/meta-projection'
 import {
-  mergeTurnUsage,
+  accumulateTurnUsage,
   parseAssistantUsage,
 } from '@/features/chat/runtime/thread-timeline/content-utils'
 import { translate } from '@/shared/i18n'
@@ -243,8 +243,7 @@ export function projectDurableEntry(
     // assistantMetadata。两参 API 由 usage-owner 提供。
     const usage = parseAssistantUsage(metadata, entry.usageCost)
     if (usage != null) {
-      context.pendingTurnUsage =
-        context.pendingTurnUsage == null ? usage : mergeTurnUsage(context.pendingTurnUsage, usage)
+      context.pendingTurnUsage = accumulateTurnUsage(context.pendingTurnUsage ?? null, usage)
       context.pendingTurnSummary = createTurnUsageMetaMessage(
         entry.entryId,
         context.pendingTurnUsage,
@@ -406,6 +405,9 @@ function projectToolResult(
     createdAt: entry.createTime,
     status: projected.status,
     editReview: projected.editReview,
+    // Invocation 行物化后会删除；终态身份只取 durable toolResultMetadata。
+    invocationStatus: ['SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN'].includes(getString(metadata.status))
+      ? getString(metadata.status) : undefined,
     callIdentity: assistantEntryId && metadataCallIndex != null
       ? strictToolCallIdentity(assistantEntryId, metadataCallIndex)
       : undefined,
