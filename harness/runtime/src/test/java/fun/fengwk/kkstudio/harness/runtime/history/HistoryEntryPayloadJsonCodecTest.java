@@ -1124,36 +1124,33 @@ class HistoryEntryPayloadJsonCodecTest {
         "{\"message\":{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"text\",\"text\":\"x\"}]},"
             + "\"assistantMetadata\":";
     String suffix = ",\"toolResultMetadata\":null}";
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            CODEC.decode(
-                EntryType.MESSAGE,
-                prefix + "{\"stopReason\":\"COMPLETED\",\"usage\":{}}" + suffix));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            CODEC.decode(
-                EntryType.MESSAGE,
-                prefix
-                    + "{\"stopReason\":\"COMPLETED\",\"usage\":{\"inputTokens\":-1,\"outputTokens\":1,\"cacheReadTokens\":0,\"cacheWriteTokens\":0,\"cacheWriteByTtl\":{},\"reasoningTokens\":0,\"providerTotalTokens\":2}}"
-                    + suffix));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            CODEC.decode(
-                EntryType.MESSAGE,
-                prefix
-                    + "{\"stopReason\":\"COMPLETED\",\"usage\":{\"inputTokens\":99999999999999999999,\"outputTokens\":1,\"cacheReadTokens\":0,\"cacheWriteTokens\":0,\"cacheWriteByTtl\":{},\"reasoningTokens\":0,\"providerTotalTokens\":2}}"
-                    + suffix));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            CODEC.decode(
-                EntryType.MESSAGE,
-                prefix
-                    + "{\"stopReason\":\"COMPLETED\",\"usage\":{\"inputTokens\":\"x\",\"outputTokens\":1,\"cacheReadTokens\":0,\"cacheWriteTokens\":0,\"cacheWriteByTtl\":{},\"reasoningTokens\":0,\"providerTotalTokens\":2}}"
-                    + suffix));
+    String metadata =
+        "{\"stopReason\":\"COMPLETE\",\"usage\":{\"inputTokens\":%s,\"outputTokens\":1,"
+            + "\"cacheReadTokens\":0,\"cacheWriteTokens\":0,\"cacheWriteByTtl\":{},"
+            + "\"reasoningTokens\":0,\"providerTotalTokens\":2}}";
+    // 先证明其它字段合法，避免非法 stopReason 让用量校验用例提前通过。
+    MessagePayload valid =
+        (MessagePayload) CODEC.decode(EntryType.MESSAGE, prefix + metadata.formatted("1") + suffix);
+    assertEquals(new ModelUsage(1, 1, 0, 0, Map.of(), 0L, 2L), valid.assistantMetadata().usage());
+    IllegalArgumentException missingUsage =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                CODEC.decode(
+                    EntryType.MESSAGE,
+                    prefix + "{\"stopReason\":\"COMPLETE\",\"usage\":{}}" + suffix));
+    assertTrue(missingUsage.getMessage().contains("assistantMetadata.usage"));
+    for (String invalidInput : List.of("-1", "99999999999999999999", "\"x\"")) {
+      IllegalArgumentException invalidUsage =
+          assertThrows(
+              IllegalArgumentException.class,
+              () ->
+                  CODEC.decode(
+                      EntryType.MESSAGE, prefix + metadata.formatted(invalidInput) + suffix));
+      assertEquals(
+          "assistantMetadata.usage.inputTokens must be a non-negative integer",
+          invalidUsage.getMessage());
+    }
   }
 
   /**
