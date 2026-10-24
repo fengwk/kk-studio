@@ -2,14 +2,11 @@ import path from 'node:path'
 
 import { WRITE_PROOF_MARKER, WRITE_PROOF_META, WRITE_PROOF_PATH, sha256 } from './matrix.mjs'
 
-const TOKEN_FIELDS = Object.freeze([
+const REQUIRED_TOKEN_FIELDS = Object.freeze([
   'inputTokens',
   'outputTokens',
   'cacheReadTokens',
   'cacheWriteTokens',
-  'cacheWriteLongTokens',
-  'reasoningTokens',
-  'providerTotalTokens',
 ])
 
 export class ReliabilityError extends Error {
@@ -187,7 +184,12 @@ export function extractDurableTrace(entries) {
   const toolResults = []
   const assistantTexts = []
   const usage = emptyUsage()
-  const costAccounting = { assistantRows: 0, costRows: 0 }
+  const costAccounting = {
+    assistantRows: 0,
+    costRows: 0,
+    hasUnknownUsage: false,
+    costTotal: 0,
+  }
   const writeCalls = []
   const writeResults = new Map()
 
@@ -203,7 +205,7 @@ export function extractDurableTrace(entries) {
     if (!message || !Array.isArray(message.contents)) continue
     if (message.role === 'ASSISTANT') {
       costAccounting.assistantRows++
-      addAssistantMetadata(usage, payload.assistantMetadata, costAccounting)
+      addAssistantMetadata(usage, payload.assistantMetadata, entry.usageCost, costAccounting)
       const text = message.contents
         .filter((content) => content?.type === 'text')
         .map((content) => String(content.text ?? ''))
@@ -272,6 +274,15 @@ export function extractDurableTrace(entries) {
     ...call,
     result: writeResults.get(call.toolCallId) ?? null,
   }))
+  const costKnown =
+    costAccounting.assistantRows > 0
+    && !costAccounting.hasUnknownUsage
+    && costAccounting.costRows === costAccounting.assistantRows
+
+  if (costAccounting.assistantRows > 0) {
+    usage.costTotal = costKnown ? costAccounting.costTotal : null
+  }
+
   return {
     trace,
     toolCalls,
@@ -280,19 +291,63 @@ export function extractDurableTrace(entries) {
     finalText: assistantTexts.at(-1) ?? '',
     finalTextSummary: summarizeString(assistantTexts.at(-1) ?? '', 1200),
     usage,
-    costKnown:
-      costAccounting.assistantRows > 0
-      && costAccounting.costRows === costAccounting.assistantRows,
+    costKnown,
   }
 }
 
 export function aggregateUsage(items) {
   const total = emptyUsage()
+  let hasUnknownCost = false
+  let seenItems = 0
+
   for (const item of items) {
     const usage = item?.usage ?? item
-    for (const field of TOKEN_FIELDS) total[field] += numberOrZero(usage?.[field])
-    total.costTotal += numberOrZero(usage?.costTotal)
-    total.assistantMessages += numberOrZero(usage?.assistantMessages)
+    if (!usage) continue
+    seenItems++
+    total.assistantMessages = addTokenCounts(
+      total.assistantMessages,
+      optionalTokenCount(usage.assistantMessages, 'assistantMessages') ?? 0,
+      'assistantMessages',
+    )
+
+    for (const field of REQUIRED_TOKEN_FIELDS) {
+      const count = usage[field] == null ? null : requiredTokenCount(usage[field], field)
+      if (count == null) {
+        total[field] = null
+      } else if (seenItems === 1) {
+        total[field] = count
+      } else if (total[field] != null) {
+        total[field] = addTokenCounts(total[field], count, field)
+      }
+    }
+
+    const reasoning = optionalTokenCount(usage.reasoningTokens, 'reasoningTokens')
+    if (seenItems === 1) {
+      total.reasoningTokens = reasoning
+    } else if (total.reasoningTokens == null || usage.reasoningTokens == null) {
+      total.reasoningTokens = null
+    } else {
+      total.reasoningTokens = addTokenCounts(total.reasoningTokens, reasoning, 'reasoningTokens')
+    }
+
+    const providerTotal = optionalTokenCount(usage.providerTotalTokens, 'providerTotalTokens')
+    if (seenItems === 1) {
+      total.providerTotalTokens = providerTotal
+    } else if (total.providerTotalTokens == null || usage.providerTotalTokens == null) {
+      total.providerTotalTokens = null
+    } else {
+      total.providerTotalTokens = addTokenCounts(total.providerTotalTokens, providerTotal, 'providerTotalTokens')
+    }
+
+    if (usage.costTotal == null || item?.costKnown === false) {
+      hasUnknownCost = true
+    } else {
+      total.costTotal += validCostAmount(usage.costTotal)
+    }
+  }
+
+  if (hasUnknownCost) {
+    total.costTotal = null
   }
   return total
 }
@@ -505,17 +560,65 @@ function summarizeJsonString(value) {
   }
 }
 
-function addAssistantMetadata(total, metadata, costAccounting) {
-  if (!metadata) return
-  total.assistantMessages++
-  for (const field of TOKEN_FIELDS) total[field] += numberOrZero(metadata.usage?.[field])
-  const currency = metadata.cost?.currency
-  if (currency != null && currency !== 'USD') {
-    throw new ReliabilityError('model', `unexpected cost currency: ${currency}`)
+function addAssistantMetadata(total, metadata, usageCost, costAccounting) {
+  total.assistantMessages = addTokenCounts(total.assistantMessages, 1, 'assistantMessages')
+
+  if (!metadata || !metadata.usage) {
+    costAccounting.hasUnknownUsage = true
+    for (const field of REQUIRED_TOKEN_FIELDS) {
+      total[field] = null
+    }
+    total.reasoningTokens = null
+    total.providerTotalTokens = null
+    return
   }
-  if (currency === 'USD' && metadata.cost?.total != null) {
-    total.costTotal += numberOrZero(metadata.cost.total)
-    costAccounting.costRows++
+
+  const usage = metadata.usage
+  let missingMandatoryField = false
+
+  for (const field of REQUIRED_TOKEN_FIELDS) {
+    const count = requiredTokenCount(usage[field], field)
+    if (count == null) {
+      missingMandatoryField = true
+      total[field] = null
+    } else if (total[field] != null) {
+      total[field] = addTokenCounts(total[field], count, field)
+    }
+  }
+
+  if (missingMandatoryField) {
+    costAccounting.hasUnknownUsage = true
+  }
+
+  const reasoning = optionalTokenCount(usage.reasoningTokens, 'reasoningTokens')
+  if (total.assistantMessages === 1) {
+    total.reasoningTokens = reasoning
+  } else if (total.reasoningTokens == null || reasoning == null) {
+    total.reasoningTokens = null
+  } else {
+    total.reasoningTokens = addTokenCounts(total.reasoningTokens, reasoning, 'reasoningTokens')
+  }
+
+  const providerTotal = optionalTokenCount(usage.providerTotalTokens, 'providerTotalTokens')
+  if (total.assistantMessages === 1) {
+    total.providerTotalTokens = providerTotal
+  } else if (total.providerTotalTokens == null || providerTotal == null) {
+    total.providerTotalTokens = null
+  } else {
+    total.providerTotalTokens = addTokenCounts(total.providerTotalTokens, providerTotal, 'providerTotalTokens')
+  }
+
+  const cost = usageCost
+  if (cost != null) {
+    const currency = cost.currency
+    if (currency != null && currency !== 'USD') {
+      throw new ReliabilityError('model', `unexpected cost currency: ${currency}`)
+    }
+    const rawAmount = cost.amount
+    if (currency === 'USD' && rawAmount != null) {
+      costAccounting.costTotal += validCostAmount(rawAmount)
+      costAccounting.costRows++
+    }
   }
 }
 
@@ -525,18 +628,43 @@ function emptyUsage() {
     outputTokens: 0,
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
-    cacheWriteLongTokens: 0,
-    reasoningTokens: 0,
-    providerTotalTokens: 0,
+    reasoningTokens: null,
+    providerTotalTokens: null,
     costTotal: 0,
     assistantMessages: 0,
   }
 }
 
-function numberOrZero(value) {
-  const number = Number(value ?? 0)
+function requiredTokenCount(value, field) {
+  if (value == null) return null
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+    throw new ReliabilityError('model', `invalid non-negative integer usage value for ${field}: ${value}`)
+  }
+  return value
+}
+
+function optionalTokenCount(value, field) {
+  if (value == null) return null
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+    throw new ReliabilityError('model', `invalid non-negative integer usage value for ${field}: ${value}`)
+  }
+  return value
+}
+
+function addTokenCounts(a, b, field) {
+  if (a == null || b == null) return null
+  const sum = a + b
+  if (!Number.isSafeInteger(sum)) {
+    throw new ReliabilityError('model', `token count addition overflow for ${field}: ${a} + ${b}`)
+  }
+  return sum
+}
+
+function validCostAmount(value) {
+  if (value == null) return null
+  const number = Number(value)
   if (!Number.isFinite(number) || number < 0) {
-    throw new ReliabilityError('model', `invalid non-negative usage/cost value: ${value}`)
+    throw new ReliabilityError('model', `invalid non-negative cost value: ${value}`)
   }
   return number
 }

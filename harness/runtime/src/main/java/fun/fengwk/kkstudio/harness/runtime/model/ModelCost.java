@@ -71,7 +71,9 @@ public record ModelCost(
 
     BigDecimal output;
     BigDecimal reasoning;
-    if (rates.independentReasoning()) {
+    if (rates.independentReasoning()
+        && rates.output().compareTo(rates.reasoning()) != 0
+        && usage.outputTokens() != 0) {
       Long reasoningTokens = usage.reasoningTokens();
       if (reasoningTokens == null) {
         // 独立 reasoning 价必须有可信子集，否则不能把全部输出都按 reasoning 价猜测。

@@ -104,6 +104,7 @@ class OpenAiChatPrecisionRegressionTest {
             + "\"vendor_opaque\":{\"big\":1e309,\"tiny\":1e-324,"
             + "\"exact\":0.1234567890123456789012345678,\"ratio\":1.10}},"
             + "\"finish_reason\":\"stop\"}]}");
+    accumulator.handleData("{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}");
     accumulator.handleData("[DONE]");
 
     ProviderCompletion completion = accumulator.finish();
@@ -144,6 +145,7 @@ class OpenAiChatPrecisionRegressionTest {
     for (JsonNode frame : frames("fixtures/precision/opaque-indexed-deltas.json")) {
       accumulator.handleData(frame.stringValue());
     }
+    accumulator.handleData("{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}");
     accumulator.handleData("[DONE]");
 
     ProviderCompletion completion = accumulator.finish();
@@ -188,6 +190,7 @@ class OpenAiChatPrecisionRegressionTest {
     accumulator.handleData(
         "{\"id\":null,\"service_tier\":null,\"choices\":[{\"index\":0,"
             + "\"delta\":{\"role\":\"assistant\",\"content\":\"hi\"},\"finish_reason\":\"stop\"}]}");
+    accumulator.handleData("{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}");
     accumulator.handleData("[DONE]");
 
     ProviderCompletion completion = accumulator.finish();

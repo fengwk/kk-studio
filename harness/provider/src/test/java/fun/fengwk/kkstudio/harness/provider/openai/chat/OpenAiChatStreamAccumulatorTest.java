@@ -177,7 +177,7 @@ class OpenAiChatStreamAccumulatorTest {
     ProviderCompletion completion = accumulator.finish();
     assertEquals("hi", completion.response().text());
     assertEquals(GenerationStopReason.COMPLETE, completion.response().stopReason());
-    assertEquals(4L, completion.response().usage().totalTokens());
+    assertEquals(4L, completion.response().usage().providerTotalTokens());
     assertEquals("hi", completion.replayState().payload().path("content").asString(""));
   }
 
@@ -203,7 +203,7 @@ class OpenAiChatStreamAccumulatorTest {
     ProviderCompletion completion = accumulator.finish();
     assertEquals("hi", completion.response().text());
     assertEquals(GenerationStopReason.COMPLETE, completion.response().stopReason());
-    assertEquals(4L, completion.response().usage().totalTokens());
+    assertEquals(4L, completion.response().usage().providerTotalTokens());
     assertEquals(1, recordedEvents.size());
     assertEquals("hi", ((ProviderStreamEvent.TextDelta) recordedEvents.get(0)).text());
     assertEquals("hi", completion.replayState().payload().path("content").asString(""));
@@ -220,6 +220,8 @@ class OpenAiChatStreamAccumulatorTest {
     int eventsAfterFinalize = recordedEvents.size();
     accumulator.handleData(
         "{\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}");
+    accumulator.handleData(
+        "{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}");
     accumulator.handleData("[DONE]");
 
     ProviderCompletion completion = accumulator.finish();
@@ -240,6 +242,8 @@ class OpenAiChatStreamAccumulatorTest {
         length,
         "{\"choices\":[{\"index\":0,\"finish_reason\":\"stop\"}]}",
         MSG_CONFLICTING_FINISH_REASON);
+    length.handleData(
+        "{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}");
     length.handleData("[DONE]");
     assertEquals(GenerationStopReason.LENGTH, length.finish().response().stopReason());
 
@@ -248,6 +252,8 @@ class OpenAiChatStreamAccumulatorTest {
         "{\"choices\":[{\"index\":0,\"delta\":{\"content\":\"censored\"},"
             + "\"finish_reason\":\"content_filter\"}]}");
     filtered.handleData("{\"choices\":[{\"index\":0,\"finish_reason\":\"content_filter\"}]}");
+    filtered.handleData(
+        "{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}");
     filtered.handleData("[DONE]");
     ProviderCompletion completion = filtered.finish();
     assertEquals(GenerationStopReason.FILTERED, completion.response().stopReason());
@@ -277,6 +283,8 @@ class OpenAiChatStreamAccumulatorTest {
     OpenAiChatStreamAccumulator accumulator = createAccumulator();
     accumulator.handleData("{\"choices\":[{\"finish_reason\":\"stop\"}]}");
     accumulator.handleData("{\"choices\":[{\"index\":0,\"finish_reason\":\"stop\"}]}");
+    accumulator.handleData(
+        "{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}");
     accumulator.handleData("[DONE]");
     assertEquals(GenerationStopReason.COMPLETE, accumulator.finish().response().stopReason());
   }
@@ -352,7 +360,7 @@ class OpenAiChatStreamAccumulatorTest {
     assertEquals(2, usage.cacheReadTokens());
     assertEquals(0, usage.cacheWriteTokens());
     assertNull(usage.reasoningTokens());
-    assertEquals(15, usage.totalTokens());
+    assertEquals(15L, usage.providerTotalTokens());
     assertEquals(15, usage.categorizedTokens());
 
     // 验证生成了合法的 ReplayState
@@ -373,6 +381,8 @@ class OpenAiChatStreamAccumulatorTest {
         "{\"id\":\"refusal-1\",\"choices\":[{\"index\":0,\"delta\":{\"refusal\":\"I cannot\"}}]}");
     accumulator.handleData(
         "{\"id\":\"refusal-1\",\"choices\":[{\"index\":0,\"delta\":{\"refusal\":\" help with that.\"},\"finish_reason\":\"stop\"}]}");
+    accumulator.handleData(
+        "{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":6,\"total_tokens\":16}}");
     accumulator.handleData("[DONE]");
 
     ProviderCompletion completion = accumulator.finish();
@@ -496,6 +506,8 @@ class OpenAiChatStreamAccumulatorTest {
           }]
         }
         """);
+    accumulator.handleData(
+        "{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}");
     accumulator.handleData("[DONE]");
 
     ProviderCompletion completion = accumulator.finish();
@@ -540,6 +552,8 @@ class OpenAiChatStreamAccumulatorTest {
         {"index":1,"function":{"arguments":"}"}}
         ]},"finish_reason":"tool_calls"}]}
         """);
+    accumulator.handleData(
+        "{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}");
     accumulator.handleData("[DONE]");
     ProviderCompletion completion = accumulator.finish();
 
@@ -578,6 +592,8 @@ class OpenAiChatStreamAccumulatorTest {
         {"index":1,"id":"1","function":{"name":"lookup","arguments":"{}"}}
         ]},"finish_reason":"tool_calls"}]}
         """);
+    accumulator.handleData(
+        "{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}");
     accumulator.handleData("[DONE]");
     ProviderCompletion completion = accumulator.finish();
 
@@ -614,6 +630,8 @@ class OpenAiChatStreamAccumulatorTest {
         {"index":0,"function":{"arguments":"{}"}}
         ]},"finish_reason":"tool_calls"}]}
         """);
+    accumulator.handleData(
+        "{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}");
     accumulator.handleData("[DONE]");
     ProviderCompletion completion = accumulator.finish();
 
@@ -681,6 +699,8 @@ class OpenAiChatStreamAccumulatorTest {
          "function":{"name":"lookup","arguments":"{\\"q\\":"}}
         ]},"finish_reason":"length"}]}
         """);
+    accumulator.handleData(
+        "{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}");
     accumulator.handleData("[DONE]");
     ProviderCompletion completion = accumulator.finish();
 
@@ -719,6 +739,8 @@ class OpenAiChatStreamAccumulatorTest {
         {"index":0,"function":{"name":"st","arguments":"}"}}
         ]},"finish_reason":"tool_calls"}]}
         """);
+    accumulator.handleData(
+        "{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}");
     accumulator.handleData("[DONE]");
     ProviderCompletion completion = accumulator.finish();
 
@@ -770,6 +792,8 @@ class OpenAiChatStreamAccumulatorTest {
           }]
         }
         """);
+    accumulator.handleData(
+        "{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}");
     accumulator.handleData("[DONE]");
 
     ProviderCompletion completion = accumulator.finish();
@@ -791,6 +815,8 @@ class OpenAiChatStreamAccumulatorTest {
 
     accumulator.handleData(
         "{\"id\":\"c5\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"censored\"},\"finish_reason\":\"content_filter\"}]}");
+    accumulator.handleData(
+        "{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}");
     accumulator.handleData("[DONE]");
 
     ProviderCompletion completion = accumulator.finish();
@@ -833,6 +859,8 @@ class OpenAiChatStreamAccumulatorTest {
 
     accumulator.handleData(
         "{\"choices\":[{\"delta\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}]}");
+    accumulator.handleData(
+        "{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}");
     // 没有 [DONE]，直接 EOF finish
     ProviderCompletion completion = accumulator.finish();
     assertEquals("hi", completion.response().text());
@@ -880,7 +908,7 @@ class OpenAiChatStreamAccumulatorTest {
     assertEquals(0L, usage.cacheWriteTokens());
     assertEquals(60L, usage.inputTokens());
     assertEquals(30L, usage.outputTokens());
-    assertEquals(130L, usage.totalTokens());
+    assertEquals(130L, usage.providerTotalTokens());
     assertEquals(130L, usage.categorizedTokens());
 
     JsonNode rawUsage = MAPPER.readTree(completion.response().rawUsageJson());
@@ -916,7 +944,7 @@ class OpenAiChatStreamAccumulatorTest {
     assertEquals(0L, usage.cacheWriteTokens());
     assertEquals(25L, usage.inputTokens());
     assertEquals(20L, usage.outputTokens());
-    assertEquals(120L, usage.totalTokens());
+    assertEquals(120L, usage.providerTotalTokens());
     assertEquals(120L, usage.categorizedTokens());
 
     JsonNode rawUsage = MAPPER.readTree(completion.response().rawUsageJson());
@@ -951,7 +979,7 @@ class OpenAiChatStreamAccumulatorTest {
     assertEquals(0L, usage.cacheWriteTokens());
     assertEquals(50L, usage.inputTokens());
     assertEquals(15L, usage.outputTokens());
-    assertEquals(95L, usage.totalTokens());
+    assertEquals(95L, usage.providerTotalTokens());
     assertEquals(95L, usage.categorizedTokens());
 
     JsonNode rawUsage = MAPPER.readTree(completion.response().rawUsageJson());
@@ -1073,10 +1101,10 @@ class OpenAiChatStreamAccumulatorTest {
   }
 
   @Test
-  @DisplayName("无缓存字段时 cache 用量默认为 0，完全无 usage 时所有用量归零")
+  @DisplayName("无缓存字段时 cache 用量默认为 0，完全无 usage 时 finish 抛出 INVALID_RESPONSE")
   void testUsageWithoutCacheFieldsDefaultsToZero() {
     // 测试意图：验证 usage 中不存在任何缓存字段时，cacheRead 与 cacheWrite 默认为 0，
-    // inputTokens 与 prompt_tokens 完全一致；且流中未发送 usage 块时所有用量均安全默认为 0。
+    // inputTokens 与 prompt_tokens 完全一致；且流中未发送 usage 块时 finish 抛出 INVALID_RESPONSE 拒绝。
     OpenAiChatStreamAccumulator accumulator1 = createAccumulator();
     accumulator1.handleData(
         "{\"choices\":[{\"delta\":{\"content\":\"plain\"},\"finish_reason\":\"stop\"}]}");
@@ -1098,26 +1126,21 @@ class OpenAiChatStreamAccumulatorTest {
     assertEquals(0L, usage1.cacheWriteTokens());
     assertEquals(50L, usage1.inputTokens());
     assertEquals(10L, usage1.outputTokens());
-    assertEquals(60L, usage1.totalTokens());
+    assertEquals(60L, usage1.providerTotalTokens());
 
     OpenAiChatStreamAccumulator accumulator2 = createAccumulator();
     accumulator2.handleData(
         "{\"choices\":[{\"delta\":{\"content\":\"no_usage\"},\"finish_reason\":\"stop\"}]}");
     accumulator2.handleData("[DONE]");
 
-    ProviderCompletion completion2 = accumulator2.finish();
-    ModelUsage usage2 = completion2.response().usage();
-    assertEquals(0L, usage2.inputTokens());
-    assertEquals(0L, usage2.outputTokens());
-    assertEquals(0L, usage2.cacheReadTokens());
-    assertEquals(0L, usage2.cacheWriteTokens());
-    assertEquals(0L, usage2.totalTokens());
-    assertEquals("{}", completion2.response().rawUsageJson());
+    ProviderException error = assertThrows(ProviderException.class, accumulator2::finish);
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind());
+    assertTrue(error.getMessage().contains("missing complete usage"));
   }
 
   @Test
   @DisplayName(
-      "缺失 total_tokens 时 providerTotalTokens 严格为 0，不合成 prompt+completion，保留原生 rawUsageJson")
+      "缺失 total_tokens 时 providerTotalTokens 严格为 null，不合成 prompt+completion，保留原生 rawUsageJson")
   void testMissingTotalTokensPreservesZeroWithoutSynthesis() {
     OpenAiChatStreamAccumulator accumulator = createAccumulator();
     accumulator.handleData(
@@ -1132,7 +1155,6 @@ class OpenAiChatStreamAccumulatorTest {
     assertEquals(25L, usage.outputTokens());
     // 关键断言：缺失 total_tokens 时保持 unknown，不合成 40
     assertNull(usage.providerTotalTokens());
-    assertEquals(0L, usage.totalTokens());
     assertEquals(40L, usage.categorizedTokens());
 
     // 验证 rawUsageJson 原样保留，未合成 total_tokens 字段
@@ -1188,11 +1210,10 @@ class OpenAiChatStreamAccumulatorTest {
   }
 
   @Test
-  @DisplayName("promptTokens 小于 cachedTokens 时 ordinaryInput 互斥计算安全截断为 0")
+  @DisplayName("promptTokens 小于 cachedTokens 时抛出 INVALID_RESPONSE 拒绝")
   void testUsagePromptTokensLessThanCachedTokensClampedToZero() {
-    // 测试意图：验证当上游报告的合法 cachedTokens 大于 promptTokens 时，
-    // ordinaryInput = max(0, prompt_tokens - cacheRead - cacheWrite) 正确截断为 0，
-    // 且合法通过 ModelUsage 校验。
+    // 测试意图：验证当上游报告的 cachedTokens 大于 promptTokens 时，
+    // uncachedTokens 抛出 INVALID_RESPONSE 拒绝响应，不静默截断为 0。
     OpenAiChatStreamAccumulator accumulator = createAccumulator();
     accumulator.handleData(
         "{\"choices\":[{\"delta\":{\"content\":\"clamp\"},\"finish_reason\":\"stop\"}]}");
@@ -1209,11 +1230,72 @@ class OpenAiChatStreamAccumulatorTest {
         """);
     accumulator.handleData("[DONE]");
 
+    ProviderException error = assertThrows(ProviderException.class, accumulator::finish);
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind());
+    assertEquals("provider usage breakdown exceeds prompt tokens", error.getMessage());
+  }
+
+  @Test
+  @DisplayName("缺少 mandatory prompt_tokens 或 completion_tokens 严格报错")
+  void testUsageMissingMandatoryTokensThrowsInvalidResponse() {
+    assertInvalidUsage("{\"completion_tokens\":10,\"total_tokens\":10}", "prompt_tokens");
+    assertInvalidUsage("{\"prompt_tokens\":10,\"total_tokens\":10}", "completion_tokens");
+  }
+
+  @Test
+  @DisplayName("真实 0 tokens 正常完成且 ModelUsage 归零")
+  void testUsageRealZeroTokensCompletesSuccessfully() {
+    OpenAiChatStreamAccumulator accumulator = createAccumulator();
+    accumulator.handleData(
+        "{\"choices\":[{\"delta\":{\"content\":\"zero\"},\"finish_reason\":\"stop\"}]}");
+    accumulator.handleData(
+        """
+        {
+          "usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0
+          }
+        }
+        """);
+    accumulator.handleData("[DONE]");
+
     ProviderCompletion completion = accumulator.finish();
     ModelUsage usage = completion.response().usage();
     assertEquals(0L, usage.inputTokens());
-    assertEquals(30L, usage.cacheReadTokens());
-    assertEquals(10L, usage.outputTokens());
+    assertEquals(0L, usage.outputTokens());
+    assertEquals(0L, usage.cacheReadTokens());
+    assertEquals(0L, usage.cacheWriteTokens());
+    assertEquals(0L, usage.providerTotalTokens());
+  }
+
+  @Test
+  @DisplayName("nullable total_tokens 与 reasoning_tokens 解析")
+  void testUsageNullableTotalAndReasoningTokens() {
+    OpenAiChatStreamAccumulator accumulator = createAccumulator();
+    accumulator.handleData(
+        "{\"choices\":[{\"delta\":{\"content\":\"reason\"},\"finish_reason\":\"stop\"}]}");
+    accumulator.handleData(
+        """
+        {
+          "usage": {
+            "prompt_tokens": 30,
+            "completion_tokens": 20,
+            "total_tokens": null,
+            "completion_tokens_details": {
+              "reasoning_tokens": 12
+            }
+          }
+        }
+        """);
+    accumulator.handleData("[DONE]");
+
+    ProviderCompletion completion = accumulator.finish();
+    ModelUsage usage = completion.response().usage();
+    assertEquals(30L, usage.inputTokens());
+    assertEquals(20L, usage.outputTokens());
+    assertNull(usage.providerTotalTokens());
+    assertEquals(12L, usage.reasoningTokens());
   }
 
   private OpenAiChatStreamAccumulator createAccumulator() {

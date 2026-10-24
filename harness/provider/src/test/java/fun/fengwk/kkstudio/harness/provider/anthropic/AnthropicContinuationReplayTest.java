@@ -121,7 +121,8 @@ class AnthropicContinuationReplayTest {
 
     AnthropicStreamAccumulator accumulator = accumulator(firstRequest);
     accumulator.handleEvent(
-        "message_start", "{\"type\":\"message_start\",\"message\":{\"usage\":{}}}");
+        "message_start",
+        "{\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10}}}");
     accumulator.handleEvent(
         "content_block_start",
         "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"state\"}}");
@@ -248,7 +249,8 @@ class AnthropicContinuationReplayTest {
 
     AnthropicStreamAccumulator accumulator = accumulator(firstRequest);
     accumulator.handleEvent(
-        "message_start", "{\"type\":\"message_start\",\"message\":{\"usage\":{}}}");
+        "message_start",
+        "{\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10}}}");
     accumulator.handleEvent(
         "content_block_start",
         "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"call_1\",\"name\":\"calc\"}}");

@@ -126,7 +126,9 @@ class OpenAiChatProtocolEventTest {
                 "vendor.custom",
                 "{\"id\":\"c1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"lo\"},"
                     + "\"finish_reason\":\"stop\"}]}"),
-            new Frame(null, "{\"id\":\"c1\",\"type\":\"vendor.type\",\"choices\":[]}"),
+            new Frame(
+                null,
+                "{\"id\":\"c1\",\"type\":\"vendor.type\",\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}"),
             new Frame(null, "[DONE]"));
     serve(frames);
 
@@ -255,7 +257,7 @@ class OpenAiChatProtocolEventTest {
             new Frame(
                 null,
                 "{\"id\":\"c1\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\","
-                    + "\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}"),
+                    + "\"content\":\"ok\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}"),
             new Frame(null, "[DONE]"));
     serve(frames);
 

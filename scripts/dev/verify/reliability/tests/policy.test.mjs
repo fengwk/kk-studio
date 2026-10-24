@@ -51,18 +51,23 @@ test('bash policy allows only target test and narrow Git checks', () => {
 
 test('durable trace summarizes write content by byte length and SHA-256', () => {
   const entries = [
-    messageEntry('1', {
-      role: 'ASSISTANT',
-      contents: [
-        {
-          type: 'tool_call',
-          toolCallId: 'write-1',
-          toolName: 'write',
-          rendererKey: 'write',
-          argumentsJson: JSON.stringify({ path: WRITE_PROOF_PATH, content: WRITE_PROOF }),
-        },
-      ],
-    }, metadata(10, 2, 3, '0.125')),
+    messageEntry(
+      '1',
+      {
+        role: 'ASSISTANT',
+        contents: [
+          {
+            type: 'tool_call',
+            toolCallId: 'write-1',
+            toolName: 'write',
+            rendererKey: 'write',
+            argumentsJson: JSON.stringify({ path: WRITE_PROOF_PATH, content: WRITE_PROOF }),
+          },
+        ],
+      },
+      metadata(10, 2, 3),
+      { currency: 'USD', amount: '0.125' },
+    ),
     messageEntry('2', {
       role: 'TOOL',
       contents: [
@@ -292,7 +297,6 @@ test('usage aggregation sums tokens, cache, assistant rows, and cost', () => {
       outputTokens: 2,
       cacheReadTokens: 3,
       cacheWriteTokens: 4,
-      cacheWriteLongTokens: 5,
       reasoningTokens: 6,
       providerTotalTokens: 12,
       costTotal: 0.1,
@@ -303,7 +307,6 @@ test('usage aggregation sums tokens, cache, assistant rows, and cost', () => {
       outputTokens: 8,
       cacheReadTokens: 9,
       cacheWriteTokens: 1,
-      cacheWriteLongTokens: 2,
       reasoningTokens: 3,
       providerTotalTokens: 15,
       costTotal: 0.2,
@@ -315,7 +318,6 @@ test('usage aggregation sums tokens, cache, assistant rows, and cost', () => {
     outputTokens: 10,
     cacheReadTokens: 12,
     cacheWriteTokens: 5,
-    cacheWriteLongTokens: 7,
     reasoningTokens: 9,
     providerTotalTokens: 27,
     costTotal: 0.30000000000000004,
@@ -323,7 +325,7 @@ test('usage aggregation sums tokens, cache, assistant rows, and cost', () => {
   })
 })
 
-test('durable cost is known only when every assistant row carries USD total metadata', () => {
+test('durable cost is known only when every assistant row carries USD usageCost projection', () => {
   const missing = extractDurableTrace([
     messageEntry('1', {
       role: 'ASSISTANT',
@@ -331,20 +333,321 @@ test('durable cost is known only when every assistant row carries USD total meta
     }),
   ])
   assert.equal(missing.costKnown, false)
+  assert.equal(missing.usage.costTotal, null)
 
-  const wrongCurrency = metadata(1, 1, 0, '0.01')
-  wrongCurrency.cost.currency = 'EUR'
   assert.throws(
     () =>
       extractDurableTrace([
         messageEntry(
           '1',
           { role: 'ASSISTANT', contents: [{ type: 'text', text: 'done' }] },
-          wrongCurrency,
+          metadata(1, 1, 0),
+          { currency: 'EUR', amount: '0.01' },
         ),
       ]),
     /unexpected cost currency/,
   )
+})
+
+test('usage contract preserves null reasoningTokens and providerTotalTokens without coercing to zero', () => {
+  const trace = extractDurableTrace([
+    messageEntry(
+      '1',
+      { role: 'ASSISTANT', contents: [{ type: 'text', text: 'hello' }] },
+      metadata(20, 10, 5, { reasoningTokens: null, providerTotalTokens: null }),
+      { currency: 'USD', amount: '0.005' },
+    ),
+  ])
+  assert.equal(trace.usage.reasoningTokens, null)
+  assert.equal(trace.usage.providerTotalTokens, null)
+  assert.equal(trace.usage.inputTokens, 20)
+  assert.equal(trace.usage.outputTokens, 10)
+  assert.equal(trace.usage.cacheReadTokens, 5)
+  assert.equal(trace.usage.cacheWriteTokens, 0)
+  assert.equal(trace.usage.costTotal, 0.005)
+  assert.equal(trace.costKnown, true)
+})
+
+test('missing entire usage cannot produce known zero cost or speed', () => {
+  const missing = extractDurableTrace([
+    messageEntry(
+      '1',
+      { role: 'ASSISTANT', contents: [{ type: 'text', text: 'hello' }] },
+      { stopReason: 'COMPLETE' },
+      { currency: 'USD', amount: '0' },
+    ),
+  ])
+  assert.equal(missing.costKnown, false)
+  assert.equal(missing.usage.costTotal, null)
+  assert.equal(missing.usage.inputTokens, null)
+  assert.equal(missing.usage.outputTokens, null)
+  assert.equal(missing.usage.cacheReadTokens, null)
+  assert.equal(missing.usage.cacheWriteTokens, null)
+})
+
+test('missing mandatory token field does not default to zero and prevents known cost', () => {
+  const trace = extractDurableTrace([
+    messageEntry(
+      '1',
+      { role: 'ASSISTANT', contents: [{ type: 'text', text: 'hello' }] },
+      {
+        stopReason: 'COMPLETE',
+        usage: {
+          outputTokens: 50,
+          cacheReadTokens: 10,
+          cacheWriteTokens: 0,
+        },
+      },
+      { currency: 'USD', amount: '0.01' },
+    ),
+  ])
+  assert.equal(trace.usage.inputTokens, null)
+  assert.equal(trace.usage.outputTokens, 50)
+  assert.equal(trace.costKnown, false)
+  assert.equal(trace.usage.costTotal, null)
+})
+
+test('aggregating unknown mandatory tokens produces null without masquerading as zero', () => {
+  const aggregated = aggregateUsage([
+    {
+      inputTokens: null,
+      outputTokens: 20,
+      cacheReadTokens: 5,
+      cacheWriteTokens: 0,
+      reasoningTokens: null,
+      providerTotalTokens: null,
+      costTotal: 0.01,
+      assistantMessages: 1,
+    },
+    {
+      inputTokens: 100,
+      outputTokens: 30,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      reasoningTokens: null,
+      providerTotalTokens: null,
+      costTotal: 0.02,
+      assistantMessages: 1,
+    },
+  ])
+  assert.equal(aggregated.inputTokens, null)
+  assert.equal(aggregated.outputTokens, 50)
+  assert.equal(aggregated.cacheReadTokens, 5)
+  assert.equal(aggregated.cacheWriteTokens, 0)
+  assert.equal(aggregated.costTotal, 0.03)
+  assert.equal(aggregated.assistantMessages, 2)
+})
+
+test('reasoningTokens is a subset of outputTokens and never double counted', () => {
+  const trace = extractDurableTrace([
+    messageEntry(
+      '1',
+      { role: 'ASSISTANT', contents: [{ type: 'text', text: 'think' }] },
+      metadata(100, 50, 10, { reasoningTokens: 20, providerTotalTokens: null }),
+      { currency: 'USD', amount: '0.05' },
+    ),
+  ])
+  assert.equal(trace.usage.outputTokens, 50)
+  assert.equal(trace.usage.reasoningTokens, 20)
+  assert.ok(trace.usage.reasoningTokens <= trace.usage.outputTokens)
+})
+
+test('token counts reject non-number types including false, empty string, and string numbers', () => {
+  for (const badValue of [false, true, '', '12', 1.5, -1]) {
+    assert.throws(
+      () =>
+        extractDurableTrace([
+          messageEntry('1', { role: 'ASSISTANT', contents: [{ type: 'text', text: 'hi' }] }, {
+            stopReason: 'COMPLETE',
+            usage: {
+              inputTokens: badValue,
+              outputTokens: 10,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+            },
+          }),
+        ]),
+      (err) => err instanceof ReliabilityError && err.category === 'model',
+    )
+  }
+  // Also verify memory objects with NaN, Infinity, negative or float throw on aggregation
+  for (const nonSafe of [NaN, Infinity, 1.5, -1, '12', false]) {
+    assert.throws(
+      () =>
+        aggregateUsage([
+          {
+            inputTokens: nonSafe,
+            outputTokens: 10,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+          },
+        ]),
+      (err) => err instanceof ReliabilityError && err.category === 'model',
+    )
+  }
+  // Also verify optional reasoningTokens rejects non-numbers
+  assert.throws(
+    () =>
+      extractDurableTrace([
+        messageEntry('1', { role: 'ASSISTANT', contents: [{ type: 'text', text: 'hi' }] }, {
+          stopReason: 'COMPLETE',
+          usage: {
+            inputTokens: 10,
+            outputTokens: 10,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            reasoningTokens: '12',
+          },
+        }),
+      ]),
+    (err) => err instanceof ReliabilityError && err.category === 'model',
+  )
+})
+
+test('token count addition overflow exceeding MAX_SAFE_INTEGER throws ReliabilityError', () => {
+  // 1. extractDurableTrace multi-message addition overflow
+  assert.throws(
+    () =>
+      extractDurableTrace([
+        messageEntry(
+          '1',
+          { role: 'ASSISTANT', contents: [{ type: 'text', text: 'one' }] },
+          metadata(Number.MAX_SAFE_INTEGER, 0, 0),
+        ),
+        messageEntry(
+          '2',
+          { role: 'ASSISTANT', contents: [{ type: 'text', text: 'two' }] },
+          metadata(1, 0, 0),
+        ),
+      ]),
+    (err) => err instanceof ReliabilityError && err.category === 'model',
+  )
+
+  // 2. aggregateUsage two MAX_SAFE_INTEGER items addition overflow
+  assert.throws(
+    () =>
+      aggregateUsage([
+        {
+          inputTokens: Number.MAX_SAFE_INTEGER,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          reasoningTokens: null,
+          providerTotalTokens: null,
+          costTotal: 0,
+          assistantMessages: 1,
+        },
+        {
+          inputTokens: Number.MAX_SAFE_INTEGER,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          reasoningTokens: null,
+          providerTotalTokens: null,
+          costTotal: 0,
+          assistantMessages: 1,
+        },
+      ]),
+    (err) => err instanceof ReliabilityError && err.category === 'model',
+  )
+
+  // 3. assistantMessages addition overflow
+  assert.throws(
+    () =>
+      aggregateUsage([
+        {
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          reasoningTokens: null,
+          providerTotalTokens: null,
+          costTotal: 0,
+          assistantMessages: Number.MAX_SAFE_INTEGER,
+        },
+        {
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          reasoningTokens: null,
+          providerTotalTokens: null,
+          costTotal: 0,
+          assistantMessages: 1,
+        },
+      ]),
+    (err) => err instanceof ReliabilityError && err.category === 'model',
+  )
+})
+
+test('usageCost recognizes only amount and ignores deprecated total property', () => {
+  const legacyTotal = extractDurableTrace([
+    messageEntry(
+      '1',
+      { role: 'ASSISTANT', contents: [{ type: 'text', text: 'hi' }] },
+      metadata(10, 5, 0),
+      { currency: 'USD', total: '0.01' },
+    ),
+  ])
+  assert.equal(legacyTotal.costKnown, false)
+  assert.equal(legacyTotal.usage.costTotal, null)
+
+  const canonical = extractDurableTrace([
+    messageEntry(
+      '1',
+      { role: 'ASSISTANT', contents: [{ type: 'text', text: 'hi' }] },
+      metadata(10, 5, 0),
+      { currency: 'USD', amount: '0.01' },
+    ),
+  ])
+  assert.equal(canonical.costKnown, true)
+  assert.equal(canonical.usage.costTotal, 0.01)
+})
+
+test('aggregateUsage preserves null reasoning, providerTotal, and unknown cost', () => {
+  const aggregated = aggregateUsage([
+    {
+      inputTokens: 10,
+      outputTokens: 5,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      reasoningTokens: null,
+      providerTotalTokens: null,
+      costTotal: null,
+      assistantMessages: 1,
+    },
+    {
+      inputTokens: 20,
+      outputTokens: 10,
+      cacheReadTokens: 2,
+      cacheWriteTokens: 1,
+      reasoningTokens: null,
+      providerTotalTokens: null,
+      costTotal: 0.05,
+      assistantMessages: 1,
+    },
+  ])
+  assert.equal(aggregated.inputTokens, 30)
+  assert.equal(aggregated.outputTokens, 15)
+  assert.equal(aggregated.cacheReadTokens, 2)
+  assert.equal(aggregated.cacheWriteTokens, 1)
+  assert.equal(aggregated.reasoningTokens, null)
+  assert.equal(aggregated.providerTotalTokens, null)
+  assert.equal(aggregated.costTotal, null)
+  assert.equal(aggregated.assistantMessages, 2)
+})
+
+test('providerTotalTokens is independent and not forced to match sum of inputs/outputs', () => {
+  const trace = extractDurableTrace([
+    messageEntry(
+      '1',
+      { role: 'ASSISTANT', contents: [{ type: 'text', text: 'gemini' }] },
+      metadata(100, 50, 0, { reasoningTokens: 10, providerTotalTokens: 200 }),
+      { currency: 'USD', amount: '0.01' },
+    ),
+  ])
+  assert.equal(trace.usage.providerTotalTokens, 200)
+  assert.notEqual(trace.usage.providerTotalTokens, trace.usage.inputTokens + trace.usage.outputTokens)
 })
 
 test('investigation answer oracles require all frozen semantic facts', () => {
@@ -394,7 +697,7 @@ test('exact-one replacement and git status allowlist fail closed', () => {
   )
 })
 
-function messageEntry(entryId, message, assistantMetadata = null) {
+function messageEntry(entryId, message, assistantMetadata = null, usageCost = null) {
   return {
     entryId,
     entryType: 'MESSAGE',
@@ -403,10 +706,16 @@ function messageEntry(entryId, message, assistantMetadata = null) {
       assistantMetadata,
       toolResultMetadata: null,
     }),
+    usageCost,
   }
 }
 
-function metadata(inputTokens, outputTokens, cacheReadTokens, total) {
+function metadata(
+  inputTokens,
+  outputTokens,
+  cacheReadTokens,
+  { reasoningTokens = 1, providerTotalTokens = inputTokens + outputTokens } = {},
+) {
   return {
     stopReason: 'COMPLETE',
     usage: {
@@ -414,19 +723,8 @@ function metadata(inputTokens, outputTokens, cacheReadTokens, total) {
       outputTokens,
       cacheReadTokens,
       cacheWriteTokens: 0,
-      cacheWriteLongTokens: 0,
-      reasoningTokens: 1,
-      providerTotalTokens: inputTokens + outputTokens,
-    },
-    cost: {
-      currency: 'USD',
-      input: '0',
-      output: '0',
-      cacheRead: '0',
-      cacheWrite: '0',
-      cacheWriteLong: '0',
-      reasoning: '0',
-      total,
+      reasoningTokens,
+      providerTotalTokens,
     },
   }
 }

@@ -186,7 +186,8 @@ class OpenAiResponsesStreamAccumulatorTest {
     accumulator.processEvent(
         MAPPER.readTree(
             "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_refusal\","
-                + "\"status\":\"completed\",\"output\":[{\"id\":\"msg_refusal\","
+                + "\"status\":\"completed\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5},"
+                + "\"output\":[{\"id\":\"msg_refusal\","
                 + "\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"refusal\","
                 + "\"refusal\":\"I cannot help with that.\"}]}]}}"));
 
@@ -228,7 +229,7 @@ class OpenAiResponsesStreamAccumulatorTest {
         new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), bridge);
     accumulator.handleEvent(
         "response.completed",
-        "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"output\":[]}}");
+        "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":10,\"output_tokens\":5}}}");
     accumulator.handleEvent(null, "");
     accumulator.handleEvent(null, "[DONE]");
     ProviderException error =
@@ -269,7 +270,7 @@ class OpenAiResponsesStreamAccumulatorTest {
             """));
     accumulator.processEvent(
         MAPPER.readTree(
-            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\"}}"));
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5}}}"));
     assertEquals("{\"x\":1}", accumulator.response().toolCalls().get(0).argumentsJson());
 
     OpenAiResponsesStreamAccumulator conflicting =
@@ -457,7 +458,6 @@ class OpenAiResponsesStreamAccumulatorTest {
     assertEquals(5L, usage.reasoningTokens());
     // 关键：缺失 total_tokens 时保持 unknown，不合成 60
     assertNull(usage.providerTotalTokens());
-    assertEquals(0L, usage.totalTokens());
     assertEquals(60L, usage.categorizedTokens());
 
     // 验证 rawUsageJson 保真不包含 total_tokens
@@ -507,6 +507,29 @@ class OpenAiResponsesStreamAccumulatorTest {
         assertThrows(
             ProviderException.class, () -> acc2.processEvent(MAPPER.readTree(badOutDetails)));
     assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex2.kind());
+  }
+
+  /** 意图：验证缺失 mandatory input_tokens 或 output_tokens 严格抛出 INVALID_RESPONSE。 */
+  @Test
+  void test_rejectsMissingMandatoryUsageTokens() {
+    List<String> badUsages = List.of("{\"output_tokens\": 10}", "{\"input_tokens\": 10}");
+
+    for (String badUsage : badUsages) {
+      OpenAiResponsesStreamAccumulator accumulator =
+          new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
+      String event =
+          "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"usage\":"
+              + badUsage
+              + "}}";
+      ProviderException ex =
+          assertThrows(
+              ProviderException.class,
+              () -> {
+                accumulator.processEvent(MAPPER.readTree(event));
+                accumulator.finish();
+              });
+      assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
+    }
   }
 
   /** 意图：验证 usage 中负数 token 计数严格抛出 INVALID_RESPONSE。 */
@@ -784,6 +807,7 @@ class OpenAiResponsesStreamAccumulatorTest {
 
     String completedEvent =
         "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_term_valid\",\"status\":\"completed\","
+            + "\"usage\":{\"input_tokens\":10,\"output_tokens\":5},"
             + "\"output\":[{\"type\":\"function_call\",\"call_id\":\"call_term_1\",\"name\":\"get_time\",\"arguments\":\"{}\"}]}}";
     accumulator.processEvent(MAPPER.readTree(completedEvent));
 
@@ -914,6 +938,7 @@ class OpenAiResponsesStreamAccumulatorTest {
     // terminal output 中参数截断
     String incompleteEvent =
         "{\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_term_trunc\",\"status\":\"incomplete\","
+            + "\"usage\":{\"input_tokens\":10,\"output_tokens\":5},"
             + "\"incomplete_details\":{\"reason\":\"max_output_tokens\"},"
             + "\"output\":[{\"type\":\"function_call\",\"call_id\":\"call_term_trunc\",\"name\":\"search\",\"arguments\":\"{\\\"query\\\": \\\"part\"}]}}";
     accumulator.processEvent(MAPPER.readTree(incompleteEvent));
@@ -931,7 +956,7 @@ class OpenAiResponsesStreamAccumulatorTest {
         "replay state must be disabled when tool arguments are truncated");
   }
 
-  /** 意图：验证显式 usage: null 作为最新快照清空前一 usage 状态并使 rawUsageJson 为 {}。 */
+  /** 意图：验证显式 usage: null 作为最新快照清空前一 usage 状态，随后 finish/response 抛出 INVALID_RESPONSE。 */
   @Test
   void test_usageNullSnapshotOverwritesPreviousSnapshotAndClearsUsage() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
@@ -951,15 +976,9 @@ class OpenAiResponsesStreamAccumulatorTest {
             + "\"usage\":null}}";
     accumulator.processEvent(MAPPER.readTree(snapshot2));
 
-    ProviderResponse resp = accumulator.response();
-    ModelUsage usage = resp.usage();
-    assertEquals(0L, usage.inputTokens());
-    assertEquals(0L, usage.outputTokens());
-    assertNull(usage.providerTotalTokens());
-    assertEquals(0L, usage.cacheReadTokens());
-    assertEquals(0L, usage.cacheWriteTokens());
-    assertNull(usage.reasoningTokens());
-    assertEquals("{}", resp.rawUsageJson());
+    ProviderException ex = assertThrows(ProviderException.class, accumulator::response);
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
+    assertTrue(ex.getMessage().contains("missing complete usage"));
   }
 
   /** 意图：验证当 terminal response 提供 output 且为空/仅消息时，前序流式有效 tool 被完全清空，终态权威。 */
@@ -987,6 +1006,7 @@ class OpenAiResponsesStreamAccumulatorTest {
     // 终态 completed 显式提供 output 数组，但为空（或仅包含 assistant 消息）
     String completedEvent =
         "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_auth_empty\",\"status\":\"completed\","
+            + "\"usage\":{\"input_tokens\":10,\"output_tokens\":5},"
             + "\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"Final text without tools\"}]}]}}";
     accumulator.processEvent(MAPPER.readTree(completedEvent));
 
@@ -1026,6 +1046,7 @@ class OpenAiResponsesStreamAccumulatorTest {
     // 终态 completed 显式提供 output 数组，替换为 call_2
     String completedEvent =
         "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_auth_rep\",\"status\":\"completed\","
+            + "\"usage\":{\"input_tokens\":10,\"output_tokens\":5},"
             + "\"output\":[{\"type\":\"function_call\",\"id\":\"item_2\",\"call_id\":\"call_2\",\"name\":\"new_tool\",\"arguments\":\"{}\"}]}}";
     accumulator.processEvent(MAPPER.readTree(completedEvent));
 
@@ -1150,7 +1171,11 @@ class OpenAiResponsesStreamAccumulatorTest {
                   }
                 ]
               }
-            ]
+            ],
+            "usage": {
+              "input_tokens": 10,
+              "output_tokens": 5
+            }
           }
         }
         """;
@@ -1207,7 +1232,7 @@ class OpenAiResponsesStreamAccumulatorTest {
 
     // 2. 终态 completed 显式提供空 output 数组
     String completedEvent =
-        "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_clear_1\",\"status\":\"completed\",\"output\":[]}}";
+        "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_clear_1\",\"status\":\"completed\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5},\"output\":[]}}";
     accumulator.processEvent(MAPPER.readTree(completedEvent));
 
     ProviderResponse resp = accumulator.response();
@@ -1243,6 +1268,10 @@ class OpenAiResponsesStreamAccumulatorTest {
           "response": {
             "id": "resp_omit_th",
             "status": "completed",
+            "usage": {
+              "input_tokens": 10,
+              "output_tokens": 5
+            },
             "output": [
               {
                 "type": "message",
@@ -1400,6 +1429,10 @@ class OpenAiResponsesStreamAccumulatorTest {
               "type": "response.completed",
               "response": {
                 "id": "resp_textual_terminal",
+                "usage": {
+                  "input_tokens": 10,
+                  "output_tokens": 5
+                },
                 "output": [
                   {"type": "reasoning", "summary": "Condensed reasoning"},
                   {"type": "message", "role": "assistant", "content": "Final answer"}
@@ -1584,6 +1617,7 @@ class OpenAiResponsesStreamAccumulatorTest {
     accumulator.processEvent(
         MAPPER.readTree(
             "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_prec_1\",\"status\":\"completed\","
+                + "\"usage\":{\"input_tokens\":10,\"output_tokens\":5},"
                 + "\"output\":[{\"type\":\"reasoning\",\"id\":\"rs_1\",\"encrypted_content\":\"enc_terminal\","
                 + "\"summary\":[{\"type\":\"summary_text\",\"text\":\"s1\"}]}]}}"));
 
@@ -1609,6 +1643,7 @@ class OpenAiResponsesStreamAccumulatorTest {
     accumulator.processEvent(
         MAPPER.readTree(
             "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_prec_2\",\"status\":\"completed\","
+                + "\"usage\":{\"input_tokens\":10,\"output_tokens\":5},"
                 + "\"output\":[{\"type\":\"reasoning\",\"id\":\"rs_1\","
                 + "\"summary\":[{\"type\":\"summary_text\",\"text\":\"terminal summary\"}]}]}}"));
 
@@ -1639,6 +1674,7 @@ class OpenAiResponsesStreamAccumulatorTest {
     accumulator.processEvent(
         MAPPER.readTree(
             "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_prec_3\",\"status\":\"completed\","
+                + "\"usage\":{\"input_tokens\":10,\"output_tokens\":5},"
                 + "\"output\":[{\"type\":\"reasoning\",\"id\":\"rs_terminal\","
                 + "\"summary\":[{\"type\":\"summary_text\",\"text\":\"term summary\"}]}]}}"));
 
@@ -1646,7 +1682,7 @@ class OpenAiResponsesStreamAccumulatorTest {
     assertEquals(1, replayOutput.size());
     assertEquals(
         "term summary", replayOutput.get(0).path("summary").get(0).path("text").asString(""));
-    // 由于 ID 冲突，不得继承 rs_stream 的 encrypted_content
+    // 由于 ID冲突，不得继承 rs_stream 的 encrypted_content
     assertFalse(replayOutput.get(0).has("encrypted_content"));
   }
 
@@ -1666,8 +1702,8 @@ class OpenAiResponsesStreamAccumulatorTest {
     accumulator.processEvent(
         MAPPER.readTree(
             "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_prec_5\",\"status\":\"completed\","
-                + "\"output\":[{\"type\":\"message\",\"role\":\"assistant\","
-                + "\"content\":[{\"type\":\"output_text\",\"text\":\"authoritative final text\"}]}]}}"));
+                + "\"usage\":{\"input_tokens\":10,\"output_tokens\":5},"
+                + "\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"authoritative final text\"}]}]}}"));
 
     ProviderResponse resp = accumulator.response();
     assertEquals("authoritative final text", resp.text());
@@ -1894,5 +1930,48 @@ class OpenAiResponsesStreamAccumulatorTest {
     assertEquals(1, replayOutput.size());
     assertEquals("message", replayOutput.get(0).path("type").asString(""));
     assertEquals("streamed", replayOutput.get(0).path("content").get(0).path("text").asString(""));
+  }
+
+  @Test
+  void missingCompleteUsageThrowsInvalidResponseOnFinish() throws Exception {
+    OpenAiResponsesStreamAccumulator accumulator =
+        new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_no_usage\",\"status\":\"completed\"}}"));
+    ProviderException ex = assertThrows(ProviderException.class, accumulator::finish);
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
+    assertTrue(ex.getMessage().contains("missing complete usage"));
+  }
+
+  @Test
+  void realZeroTokensCompletesSuccessfully() throws Exception {
+    OpenAiResponsesStreamAccumulator accumulator =
+        new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_zero\",\"status\":\"completed\","
+                + "\"usage\":{\"input_tokens\":0,\"output_tokens\":0,\"total_tokens\":0}}}"));
+    ProviderCompletion completion = accumulator.finish();
+    assertEquals(0L, completion.response().usage().inputTokens());
+    assertEquals(0L, completion.response().usage().outputTokens());
+    assertEquals(0L, completion.response().usage().providerTotalTokens());
+  }
+
+  @Test
+  void nullableTotalAndReasoningTokens() throws Exception {
+    OpenAiResponsesStreamAccumulator accumulator =
+        new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_null_total\",\"status\":\"completed\","
+                + "\"usage\":{\"input_tokens\":40,\"output_tokens\":30,"
+                + "\"output_tokens_details\":{\"reasoning_tokens\":12}}}}"));
+    ProviderCompletion completion = accumulator.finish();
+    assertEquals(40L, completion.response().usage().inputTokens());
+    assertEquals(30L, completion.response().usage().outputTokens());
+    assertEquals(70L, completion.response().usage().categorizedTokens());
+    assertNull(completion.response().usage().providerTotalTokens());
+    assertEquals(12L, completion.response().usage().reasoningTokens());
   }
 }
