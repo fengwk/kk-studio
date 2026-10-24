@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { CapabilityResult } from '../src/contracts.js'
 import {
+  PROTOCOL_VERSION,
   ProtocolError,
   decodeCapabilities,
   decodeCompleted,
@@ -13,6 +14,7 @@ import {
   decodeUpdateCommand,
   decodeUpdateResult,
   encodeCompleted,
+  encodeEnvelope,
   encodeIdeCommand,
   encodeProgress,
   parseStrictJson,
@@ -27,7 +29,7 @@ const SHA = 'a'.repeat(64)
 const TINY_LIMITS = { maxBytes: 64, maxNestingDepth: 4, maxNumberLength: 8, maxStringBytes: 4 }
 
 function envelope(messageType: string, extra: Record<string, unknown> = {}): string {
-  return JSON.stringify({ protocolVersion: 4, messageType, payload: {}, ...extra })
+  return JSON.stringify({ protocolVersion: PROTOCOL_VERSION, messageType, payload: {}, ...extra })
 }
 
 function result(contents: unknown[]): CapabilityResult {
@@ -77,6 +79,39 @@ describe('parseStrictJson / parseStrictObject', () => {
 })
 
 describe('envelope field validation branches', () => {
+  it('requires a bound invocation and an empty payload for EXECUTION_EXITED', () => {
+    const ENVIRONMENT_ID = UUID
+    const exited = decodeEnvelope(
+      envelope('EXECUTION_EXITED', { environmentId: ENVIRONMENT_ID, invocationId: 'inv-1' }),
+    )
+    expect(exited.invocationId).toBe('inv-1')
+    expect(exited.payload).toEqual({})
+    expect(() =>
+      decodeEnvelope(
+        envelope('EXECUTION_EXITED', {
+          environmentId: ENVIRONMENT_ID,
+          invocationId: 'inv-1',
+          payload: { error: false },
+        }),
+      ),
+    ).toThrow(/payload must be an empty object/)
+    expect(() =>
+      decodeEnvelope(envelope('EXECUTION_EXITED', { environmentId: ENVIRONMENT_ID })),
+    ).toThrow(/requires non-blank invocationId/)
+    expect(() => decodeEnvelope(envelope('EXECUTION_EXITED', { invocationId: 'inv-1' }))).toThrow(
+      /requires non-null environmentId/,
+    )
+    expect(() =>
+      encodeEnvelope({
+        protocolVersion: PROTOCOL_VERSION,
+        messageType: 'EXECUTION_EXITED',
+        environmentId: ENVIRONMENT_ID,
+        invocationId: 'inv-1',
+        payload: { error: false },
+      }),
+    ).toThrow(/payload must be an empty object/)
+  })
+
   it('rejects non-integer protocolVersion and non-string optional fields', () => {
     expect(() => decodeEnvelope(envelope('HELLO', { protocolVersion: '3' }))).toThrow(
       /protocolVersion must be an integer/,

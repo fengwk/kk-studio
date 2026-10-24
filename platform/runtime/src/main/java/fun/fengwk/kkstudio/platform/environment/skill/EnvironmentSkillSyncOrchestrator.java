@@ -58,7 +58,8 @@ import java.util.regex.Pattern;
  * Environment 互不阻塞；锁数量与见过的 Environment 数量无关，历史 key 不会无界增长。单个 Package 失败只记录该 Package 的失败投影与事件，
  * 既不影响其它 Package，也绝不覆盖上一次成功安装的事实。
  *
- * <p>调用完全复用 Environment server core 的 capability 传输契约：每次调用使用新的 UUID，结果不确定（send-uncertain） 绝不重放。
+ * <p>调用完全复用 Environment server core 的 capability 传输契约：每次调用使用新的 UUID，结果不确定（send-uncertain） 绝不重放。 它是
+ * Environment 级管理任务，不属于 Thread Tool body，远端退出通知也不伪造 Thread 执行上下文或账本。
  */
 @Slf4j
 public class EnvironmentSkillSyncOrchestrator {
@@ -308,6 +309,11 @@ public class EnvironmentSkillSyncOrchestrator {
                 @Override
                 public void onError(Throwable error) {
                   terminal.completeExceptionally(error);
+                }
+
+                @Override
+                public void onExitConfirmed() {
+                  // skill.sync 是 Environment 级管理任务，不绑定 Thread Tool body，不能伪造 Thread 执行账本。
                 }
               });
     } catch (RuntimeException error) {

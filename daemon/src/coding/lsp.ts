@@ -73,15 +73,18 @@ export function createLspCapabilities(
   ): Promise<CapabilityResult> => {
     const callId = call.invocationId
     if (context.signal.aborted) {
+      context.confirmExecutionExit()
       if (isTimeout(null, context.signal)) {
         return errorResult(callId, 'Operation timed out')
       }
       return errorResult(callId, 'Operation cancelled')
     }
 
+    let requestSent = false
     try {
       const args = call.arguments
       if (!args || typeof args !== 'object' || Array.isArray(args)) {
+        context.confirmExecutionExit()
         return errorResult(callId, 'tool arguments must be an object')
       }
 
@@ -122,9 +125,17 @@ export function createLspCapabilities(
         line,
         character,
         context.signal,
+        () => context.confirmExecutionExit(),
+        () => {
+          requestSent = true
+        },
       )
       return textResult(callId, result)
     } catch (error) {
+      if (!requestSent) {
+        // 校验、租约或发送前失败都没有发出这次请求。发送之后的失败不能当成未启动。
+        context.confirmExecutionExit()
+      }
       if (isTimeout(error, context.signal)) {
         return errorResult(callId, 'Operation timed out')
       }
@@ -147,15 +158,18 @@ export function createLspCapabilities(
   ): Promise<CapabilityResult> => {
     const callId = call.invocationId
     if (context.signal.aborted) {
+      context.confirmExecutionExit()
       if (isTimeout(null, context.signal)) {
         return errorResult(callId, 'Operation timed out')
       }
       return errorResult(callId, 'Operation cancelled')
     }
 
+    let requestSent = false
     try {
       const args = call.arguments
       if (!args || typeof args !== 'object' || Array.isArray(args)) {
+        context.confirmExecutionExit()
         return errorResult(callId, 'tool arguments must be an object')
       }
 
@@ -186,9 +200,16 @@ export function createLspCapabilities(
         query,
         limit,
         context.signal,
+        () => context.confirmExecutionExit(),
+        () => {
+          requestSent = true
+        },
       )
       return textResult(callId, result)
     } catch (error) {
+      if (!requestSent) {
+        context.confirmExecutionExit()
+      }
       if (isTimeout(error, context.signal)) {
         return errorResult(callId, 'Operation timed out')
       }
@@ -211,15 +232,18 @@ export function createLspCapabilities(
   ): Promise<CapabilityResult> => {
     const callId = call.invocationId
     if (context.signal.aborted) {
+      context.confirmExecutionExit()
       if (isTimeout(null, context.signal)) {
         return errorResult(callId, 'Operation timed out')
       }
       return errorResult(callId, 'Operation cancelled')
     }
 
+    let requestSent = false
     try {
       const args = call.arguments
       if (!args || typeof args !== 'object' || Array.isArray(args)) {
+        context.confirmExecutionExit()
         return errorResult(callId, 'tool arguments must be an object')
       }
 
@@ -237,9 +261,16 @@ export function createLspCapabilities(
         realPath,
         target,
         context.signal,
+        () => context.confirmExecutionExit(),
+        () => {
+          requestSent = true
+        },
       )
       return textResult(callId, result)
     } catch (error) {
+      if (!requestSent) {
+        context.confirmExecutionExit()
+      }
       if (isTimeout(error, context.signal)) {
         return errorResult(callId, 'Operation timed out')
       }

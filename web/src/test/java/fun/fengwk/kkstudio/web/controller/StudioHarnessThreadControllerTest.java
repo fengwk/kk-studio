@@ -181,6 +181,7 @@ class StudioHarnessThreadControllerTest {
             List.of(),
             List.of(),
             0,
+            false,
             false);
     Instant deadline = Instant.parse("2026-10-08T12:00:00Z");
     when(runtime.getThreadSnapshot(id(1))).thenReturn(snapshot);

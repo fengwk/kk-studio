@@ -128,6 +128,7 @@ class HarnessRuntimeResponseMapperTest {
             List.of(),
             List.of(),
             1,
+            false,
             false);
     ThreadSnapshot running = modelSnapshot(ModelInvocationStatus.RUNNING, List.of());
 
@@ -163,6 +164,7 @@ class HarnessRuntimeResponseMapperTest {
             List.of(),
             List.of(),
             1,
+            false,
             false);
     List<HarnessThreadTreeNodeDTO> nodes =
         HarnessRuntimeResponseMapper.toThreadTreeDtos(List.of(waitingWithTurnEnd));
@@ -550,6 +552,7 @@ class HarnessRuntimeResponseMapperTest {
             List.of(),
             List.of(receipt),
             0,
+            false,
             false);
 
     HarnessThreadSnapshotDTO dto =
@@ -608,6 +611,7 @@ class HarnessRuntimeResponseMapperTest {
         List.of(),
         List.of(),
         0,
+        false,
         false);
   }
 
@@ -638,6 +642,7 @@ class HarnessRuntimeResponseMapperTest {
         failures,
         List.of(),
         0,
+        false,
         false);
   }
 
@@ -675,6 +680,7 @@ class HarnessRuntimeResponseMapperTest {
         List.of(),
         List.of(),
         0,
+        false,
         false);
   }
 
@@ -833,7 +839,8 @@ class HarnessRuntimeResponseMapperTest {
         snapshot.modelAttemptFailures(),
         snapshot.stopReceipts(),
         snapshot.incompleteChildJoins(),
-        snapshot.unconsumedAppliedNotifications());
+        snapshot.unconsumedAppliedNotifications(),
+        snapshot.hasUnconfirmedExecution());
   }
 
   private static UUID id(long value) {
