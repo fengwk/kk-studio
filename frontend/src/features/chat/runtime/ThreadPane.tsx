@@ -78,9 +78,36 @@ export function ThreadPane({
     waitingForEnvironment: pendingTool.waitingForEnvironment,
     phase: 'call',
   }) : null
+
+  // 事实优先级：
+  // 1. 真实 active model / tool 执行事实优先：只有真实 active model/tool 才生成/执行
+  //    且 STOPPED 独立控制不可遮在途 model/tool
+  // 2. pendingTool 阻塞事实：审批 / 问卷 / environment 等阻塞文字必须准确不能生成动画
+  // 3. status 三态事实：无 model/tool 且 RUNNING 显示运行中，WAITING 等待异步结果，绝不把 RUNNING 直接显示生成
+  // 4. 其余回退外部 activity 事实
+  let resolvedWorking = activity.working
+  let resolvedWorkingLabel: string | undefined = activity.workingLabel
+
+  if (executing) {
+    resolvedWorking = true
+    resolvedWorkingLabel = t('ai.runtime.thread.working')
+  } else if (pendingToolState) {
+    resolvedWorking = true
+    resolvedWorkingLabel = t(`ai.runtime.tool.${pendingToolState}`, {
+      environment: pendingTool?.requiredEnvironmentName ?? '',
+    })
+  } else if (projection.thread?.status === 'WAITING') {
+    resolvedWorking = true
+    resolvedWorkingLabel = t('ai.runtime.thread.status.WAITING')
+  } else if (projection.thread?.status === 'RUNNING') {
+    resolvedWorking = true
+    resolvedWorkingLabel = t('ai.runtime.thread.status.RUNNING')
+  }
+
   const transcript: ThreadPanelTranscriptInput = {
     messages: projection.timeline.messages,
     queuedMessages: projection.timeline.queuedMessages,
+    queuedCustomMessages: projection.queuedCustomMessages,
     loading: projection.messagesLoading,
     error: projection.messagesError,
     bodyRef: projection.bodyRef,
@@ -89,10 +116,9 @@ export function ThreadPane({
     eventCount: projection.entries.length + projection.queuedCommands.length,
   }
   const panelActivity: ThreadPanelActivityInput = {
-    working: activity.working,
-    workingLabel: pendingToolState && !executing
-      ? t(`ai.runtime.tool.${pendingToolState}`, { environment: pendingTool?.requiredEnvironmentName ?? '' })
-      : activity.workingLabel,
+    working: resolvedWorking,
+    workingLabel: resolvedWorkingLabel,
+    animated: executing,
     widgets: activity.widgets,
     actionError: activity.actionError ?? null,
     onDismissActionError: activity.onDismissActionError,

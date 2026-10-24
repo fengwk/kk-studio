@@ -88,7 +88,6 @@ function threadFixture(
     nextCommandSequence: '1',
     version: '0',
     status: 'IDLE',
-    processing: false,
     executionControl: 'RUNNABLE',
     branchSettings: branchSettings(),
     createTime: 1767225600,
@@ -137,7 +136,7 @@ function busyThreadFixture(
   threadId: string,
   overrides: Partial<HarnessThreadDTO> = {},
 ): HarnessThreadDTO {
-  return threadFixture(threadId, { status: 'MODEL_STREAM', processing: true, ...overrides })
+  return threadFixture(threadId, { status: 'RUNNING', ...overrides })
 }
 
 function acceptedCommandPayload(command: HarnessCommandCreateDTO): Record<string, unknown> {
@@ -1167,7 +1166,7 @@ describe('useBoundBranchPanel', () => {
   })
 
   it('keeps idle and stopped threads as drafts without an immediate submit', async () => {
-    for (const status of ['IDLE', 'STOPPED']) {
+    for (const executionControl of ['RUNNABLE', 'STOPPED']) {
       vi.clearAllMocks()
       vi.mocked(agentService.listAgents).mockResolvedValue({
         pageNumber: 1,
@@ -1182,7 +1181,7 @@ describe('useBoundBranchPanel', () => {
         results: [modelEntry, claudeModelEntry],
       })
       vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
-        snapshotOf(threadFixture(THREAD_ID, { status, processing: false })),
+        snapshotOf(threadFixture(THREAD_ID, { status: 'IDLE', executionControl })),
       )
       vi.mocked(harnessService.acceptThreadCommandBatch).mockResolvedValue(
         acceptedResponse(threadFixture(THREAD_ID), []),

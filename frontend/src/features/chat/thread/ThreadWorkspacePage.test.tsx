@@ -81,8 +81,7 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
     rootThreadId: CHILD_THREAD_ID, yoloEnabled: false,
     nextCommandSequence: '1',
     version: '1',
-    status: 'WAITING_APPROVAL',
-    processing: true,
+    status: 'RUNNING',
     executionControl: 'RUNNABLE',
     branchSettings: {
       agentName: 'assistant',
@@ -231,7 +230,7 @@ function snapshotFor(
     thread: thread({
       threadId: targetThreadId,
       name: targetThreadId === OTHER_CHILD_THREAD_ID ? 'Idle Child' : 'Waiting Parent',
-      status: targetThreadId === OTHER_CHILD_THREAD_ID ? 'IDLE' : 'WAITING_APPROVAL',
+      status: targetThreadId === OTHER_CHILD_THREAD_ID ? 'IDLE' : 'RUNNING',
     }),
     entries: [
       userEntry(
@@ -351,7 +350,7 @@ describe('ThreadWorkspacePage', () => {
     expect(screen.queryByRole('heading', { name: 'researcher' })).toBeNull()
     await act(async () => resolveNext({
       ...snapshotFor(OTHER_CHILD_THREAD_ID), toolInvocations: [],
-      thread: thread({ threadId: OTHER_CHILD_THREAD_ID, name: 'Fresh root', status: 'IDLE', processing: false }),
+      thread: thread({ threadId: OTHER_CHILD_THREAD_ID, name: 'Fresh root', status: 'IDLE' }),
     }))
     await screen.findByRole('heading', { name: 'Fresh root', level: 1 })
     expect(screen.queryByRole('button', { name: '关闭 Debug' })).toBeNull()
@@ -405,7 +404,6 @@ describe('ThreadWorkspacePage', () => {
         parentThreadId: null,
         name: 'Root Agent',
         status: 'IDLE',
-        processing: false,
       }),
       entries: [],
       toolInvocations: [],
@@ -500,7 +498,6 @@ describe('ThreadWorkspacePage', () => {
             parentThreadId: rootId,
             name: 'Idle Child',
             status: 'IDLE',
-            processing: false,
           }),
         }
       }
@@ -513,7 +510,7 @@ describe('ThreadWorkspacePage', () => {
           threadId: CHILD_THREAD_ID,
           parentThreadId: rootId,
           name: 'Waiting Parent',
-          status: 'WAITING_APPROVAL',
+          status: 'RUNNING',
           rootThreadId: rootId, yoloEnabled: false,
         }),
       }
@@ -564,8 +561,8 @@ describe('ThreadWorkspacePage', () => {
         name: 'Root Agent',
         agentName: 'assistant',
         model: { modelName: 'MiniMax', variant: 'default' },
-        status: 'STOPPED',
-        processing: false,
+        status: 'IDLE',
+        executionControl: 'STOPPED',
         turnCount: 2,
         toolCallCount: 1,
         outcome: null,
@@ -577,8 +574,8 @@ describe('ThreadWorkspacePage', () => {
         name: 'Waiting Parent',
         agentName: 'coder',
         model: { modelName: 'MiniMax', variant: 'default' },
-        status: 'WAITING_APPROVAL',
-        processing: true,
+        status: 'RUNNING',
+        executionControl: 'RUNNABLE',
         turnCount: 1,
         toolCallCount: 1,
         outcome: null,
@@ -591,7 +588,7 @@ describe('ThreadWorkspacePage', () => {
         agentName: 'reviewer',
         model: { modelName: 'Claude', variant: 'default' },
         status: 'IDLE',
-        processing: false,
+        executionControl: 'RUNNABLE',
         turnCount: 1,
         toolCallCount: 0,
         outcome: 'FAILED',

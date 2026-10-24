@@ -64,6 +64,7 @@ export interface ToolRendererMessage {
   arguments: string
   status?: ToolRendererStatus
   errorMessage?: string
+  details?: Record<string, unknown>
 }
 
 export interface ToolRendererProps {

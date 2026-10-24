@@ -70,7 +70,15 @@ function usageMetadata(
   output: number,
   extras: Record<string, unknown> = {},
 ) {
-  return { usage: { inputTokens: input, outputTokens: output, ...extras } }
+  return {
+    usage: {
+      inputTokens: input,
+      outputTokens: output,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      ...extras,
+    },
+  }
 }
 
 describe('Turn usage after TURN_END', () => {
@@ -315,7 +323,7 @@ describe('Turn usage after TURN_END', () => {
     expect(ids.indexOf('meta-usage-entry-assistant-2')).toBe(ids.length - 1)
   })
 
-  it('does not project a summary when all usage facts are zero', () => {
+  it('preserves a reported all-zero usage summary', () => {
     const timeline = buildThreadTimeline(
       [
         turnStart(),
@@ -326,14 +334,15 @@ describe('Turn usage after TURN_END', () => {
       [],
       [],
     )
-    // 全零使用量不投影 usage 摘要；TURN_END 页脚 meta 仍保留并携带真实 Entry id。
+    // 真实零与未报告不同；summary 仍携带真实 TURN_END 身份。
     const metas = timeline.messages.filter((message) => message.role === 'meta')
-    expect(metas.map((message) => message.id)).toEqual(['meta-turn-end-end-1'])
+    expect(metas.map((message) => message.id)).toEqual(['meta-usage-entry-assistant-1'])
+    expect(metas[0]).toMatchObject({ turnUsage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } })
     expect(metas.map((message) => (message as { endEntryId?: string }).endEntryId)).toEqual(['end-1'])
   })
 
-  // 只认 canonical backend 字段名：snake_case / 常见别名与旧 metadata.cost 一律不进入 usage
-  it('ignores snake_case aliases and legacy metadata.cost', () => {
+  // 只认 canonical backend 字段名：snake_case / 常见别名与旧 metadata.cost 一律不进入 usage，使完整用量变 unknown
+  it('ignores snake_case aliases and legacy metadata.cost and propagates unknown', () => {
     const timeline = buildThreadTimeline(
       [
         turnStart(),
@@ -355,6 +364,46 @@ describe('Turn usage after TURN_END', () => {
       [],
       [],
     )
+    // 携带模型 metadata 但 usage 非法：投影 unknown turnUsage，不采信别名数字或旧 cost
+    const metaWithUsage = timeline.messages.find(
+      (message) => message.role === 'meta' && message.turnUsage != null,
+    )
+    expect(metaWithUsage).toBeDefined()
+    expect(metaWithUsage?.role === 'meta' ? metaWithUsage.turnUsage : undefined).toMatchObject({
+      input: null,
+      output: null,
+      cacheRead: null,
+      cacheWrite: null,
+      cost: null,
+    })
+    expect(timeline.messages.filter((message) => message.role === 'meta').map((message) => message.id))
+      .toEqual(['meta-usage-entry-assistant-1'])
+  })
+
+  it.each([false, true])('propagates missing model usage through turn projection in either order (%s)', (reverse) => {
+    const known = assistant('known', 'known', usageMetadata(10, 2))
+    known.usageCost = { currency: 'USD', amount: '0.05' }
+    const unknown = assistant('unknown', 'unknown', { stopReason: 'COMPLETE' })
+    const outputs = reverse ? [unknown, known] : [known, unknown]
+    const timeline = buildThreadTimeline([turnStart(), ...outputs, turnEnd()], [], [])
+    const summary = timeline.messages.find((message) => message.role === 'meta' && message.turnUsage != null)
+    expect(summary?.role === 'meta' ? summary.turnUsage : undefined).toMatchObject({
+      input: null, output: null, cacheRead: null, cacheWrite: null, cost: null,
+    })
+  })
+
+  it('omits turn usage summary for manual assistant messages without assistantMetadata', () => {
+    const timeline = buildThreadTimeline(
+      [
+        turnStart(),
+        userMessage('a'),
+        assistant('assistant-manual', '人工回复'),
+        turnEnd(),
+      ],
+      [],
+      [],
+    )
+    // 无模型 metadata 的人工 ASSISTANT 不计，不投影任何 turnUsage meta message
     expect(timeline.messages.some((message) =>
       message.role === 'meta' && message.turnUsage != null)).toBe(false)
     expect(timeline.messages.filter((message) => message.role === 'meta').map((message) => message.id))
@@ -362,12 +411,12 @@ describe('Turn usage after TURN_END', () => {
   })
 
   it('still projects a summary when only reasoning/cache are nonzero', () => {
-    // 全零才抑制 summary：reasoning 或 cache 任一非零都必须投影。
+    // 全零才抑制 summary：reasoning 或 cache 任一非零都必须投影；reasoning 是 output 子集。
     const timeline = buildThreadTimeline(
       [
         turnStart(),
         userMessage('a'),
-        assistant('assistant-1', '回答', usageMetadata(0, 0, {
+        assistant('assistant-1', '回答', usageMetadata(0, 2, {
           reasoningTokens: 2,
           cacheReadTokens: 1,
         })),
@@ -380,7 +429,7 @@ describe('Turn usage after TURN_END', () => {
       (message) => message.role === 'meta' && message.kind === 'turn_usage',
     )
     expect(usage).toMatchObject({
-      turnUsage: { input: 0, output: 0, cacheRead: 1, cacheWrite: 0, reasoning: 2, cost: null },
+      turnUsage: { input: 0, output: 2, cacheRead: 1, cacheWrite: 0, reasoning: 2, cost: null },
     })
   })
 

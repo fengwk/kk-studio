@@ -319,8 +319,17 @@ const toolCardHarness = {
       messages: [
         { ...bashTool('task', 1, false), toolName: 'task', rendererKey: 'task',
           invocationStatus: 'SUCCEEDED', arguments: argumentsValue },
-        { ...bashResult('task', 1), toolName: 'task', rendererKey: 'task', arguments: argumentsValue,
-          contents: [{ type: 'text', text: '{"status":"accepted","thread_id":"00000000-0000-4000-8000-000000000005"}' }] },
+        {
+          ...bashResult('task', 1),
+          toolName: 'task',
+          rendererKey: 'task',
+          arguments: argumentsValue,
+          details: {
+            kind: 'task.accepted',
+            thread_id: '00000000-0000-4000-8000-000000000005',
+          },
+          contents: [{ type: 'text', text: 'Subagent execution started.' }],
+        },
       ],
       streaming: false,
     })

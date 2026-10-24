@@ -5,7 +5,7 @@ import { ThreadWidgetPanel } from '@/features/chat/runtime/thread-panel/ThreadWi
 import type { useActiveThreadTree } from '@/features/chat/runtime/useActiveThreadTree'
 
 /**
- * 根面板自动活跃树：读完整执行树，只保留 processing 节点及其祖先，逐行单行整行点击。
+ * 根面板自动活跃树：读完整执行树，只保留活跃（非 IDLE）节点及其祖先，逐行单行整行点击。
  *
  * 查询由根面板通过 `useActiveThreadTree` 单点持有（同一个缓存与推送），本组件只
  * 负责展示；没有活跃后代时不渲染空壳。查询失败不伪装成最新数据：无数据时给出

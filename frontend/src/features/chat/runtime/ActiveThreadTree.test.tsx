@@ -25,8 +25,10 @@ const IDLE_ID = '00000000-0000-4000-8000-000000000003'
 function treeNode(
   threadId: string,
   parentThreadId: string | null,
-  processing: boolean,
+  active: boolean,
   name: string,
+  status: 'RUNNING' | 'WAITING' | 'IDLE' = active ? 'RUNNING' : 'IDLE',
+  executionControl: 'RUNNABLE' | 'STOPPED' = 'RUNNABLE',
 ) {
   return {
     threadId,
@@ -34,8 +36,8 @@ function treeNode(
     name,
     agentName: 'assistant',
     model: { modelName: 'MiniMax', variant: 'default' },
-    status: processing ? 'MODEL_STREAM' : 'IDLE',
-    processing,
+    status,
+    executionControl,
     turnCount: 1,
     toolCallCount: 0,
     outcome: null,
@@ -126,7 +128,7 @@ describe('ActiveThreadTree', () => {
       { version: 1, type: 'subscribe', resource: { kind: 'tree', id: ROOT_ID } },
     ]))
     vi.mocked(harnessService.getThreadTree).mockResolvedValue([
-      treeNode(ROOT_ID, null, false, 'root'), { ...worker, processing: false, status: 'IDLE', outcome: 'STOPPED' },
+      treeNode(ROOT_ID, null, false, 'root'), { ...worker, status: 'IDLE', outcome: 'STOPPED' },
     ])
     act(() => socket.emitServer({ type: 'event', resource: { kind: 'tree', id: ROOT_ID }, name: 'changed', data: {} }))
     await waitFor(() => expect(screen.getByRole('link', { name: /Explorer/ })).toHaveTextContent('停止'))
@@ -444,5 +446,71 @@ describe('ActiveThreadTree', () => {
     unmount()
     expect(socket.closed).toBe(true)
     expect(harnessService.getThreadTree).toHaveBeenCalledTimes(1)
+  })
+
+  it('renders WAITING as waiting for async result without generation animation and RUNNING as running', async () => {
+    const runningNode = treeNode(WORKER_ID, ROOT_ID, true, 'running-worker', 'RUNNING')
+    const waitingNode = treeNode(IDLE_ID, ROOT_ID, true, 'waiting-worker', 'WAITING')
+    vi.mocked(harnessService.getThreadTree).mockResolvedValue([
+      treeNode(ROOT_ID, null, false, 'root'),
+      runningNode,
+      waitingNode,
+    ])
+
+    renderTree(ROOT_ID)
+
+    const runningLink = await screen.findByRole('link', { name: /running-worker/ })
+    const waitingLink = await screen.findByRole('link', { name: /waiting-worker/ })
+
+    // RUNNING 显示“运行中”，不等于“生成中”
+    const runningStatus = runningLink.querySelector('.thread-tree-status')
+    expect(runningStatus).toHaveTextContent('运行中')
+    expect(runningStatus).toHaveClass('is-running')
+
+    // WAITING 显示“等待异步结果”，无生成动画
+    const waitingStatus = waitingLink.querySelector('.thread-tree-status')
+    expect(waitingStatus).toHaveTextContent('等待异步结果')
+    expect(waitingStatus).toHaveClass('is-waiting')
+    expect(waitingStatus?.className).not.toMatch(/pulse|spin|streaming|generating/)
+  })
+
+  it('preserves status and displays STOPPED as execution control badge without masking status', async () => {
+    const stoppedRunningNode = treeNode(
+      WORKER_ID,
+      ROOT_ID,
+      true,
+      'stopped-running',
+      'RUNNING',
+      'STOPPED',
+    )
+    vi.mocked(harnessService.getThreadTree).mockResolvedValue([
+      treeNode(ROOT_ID, null, false, 'root'),
+      stoppedRunningNode,
+    ])
+
+    renderTree(ROOT_ID)
+
+    const link = await screen.findByRole('link', { name: /stopped-running/ })
+    // status 依然显示“运行中”，绝不被 STOPPED 遮盖为“已停止”
+    expect(link.querySelector('.thread-tree-status')).toHaveTextContent('运行中')
+    // STOPPED 作为独立 execution control 标签呈现
+    expect(link.querySelector('.thread-tree-control.is-stopped')).toHaveTextContent('已停止')
+  })
+
+  it('suppresses false COMPLETED outcome on active non-IDLE nodes', async () => {
+    const falseCompletedNode = {
+      ...treeNode(WORKER_ID, ROOT_ID, true, 'worker', 'RUNNING'),
+      outcome: 'COMPLETED', // 不信旧 fixture，非 IDLE 不暴露 COMPLETED
+    }
+    vi.mocked(harnessService.getThreadTree).mockResolvedValue([
+      treeNode(ROOT_ID, null, false, 'root'),
+      falseCompletedNode,
+    ])
+
+    renderTree(ROOT_ID)
+
+    const link = await screen.findByRole('link', { name: /worker/ })
+    expect(link.querySelector('.thread-tree-status')).toHaveTextContent('运行中')
+    expect(link).not.toHaveTextContent('已完成')
   })
 })

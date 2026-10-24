@@ -16,10 +16,15 @@ export function ThreadTreeRows({ rows, currentThreadId }: {
       {rows.map((row) => {
         const { node } = row
         const outcome = threadTreeOutcome(node)
+        const isStopped = node.executionControl === 'STOPPED'
+        const statusClass = outcome
+          ? `is-${outcome.toLowerCase()}`
+          : `is-${node.status.toLowerCase()}`
         return (
           <li key={node.threadId} className="thread-tree-row"
             data-depth={row.depth} data-thread-id={node.threadId}
-            data-processing={node.processing ? 'true' : 'false'}
+            data-status={node.status}
+            data-execution-control={node.executionControl}
             aria-current={node.threadId === currentThreadId ? 'true' : undefined}>
             <ThreadLink threadId={node.threadId} className="thread-tree-link" title={node.threadId}>
               <span className="thread-tree-connectors" aria-hidden="true">
@@ -32,9 +37,14 @@ export function ThreadTreeRows({ rows, currentThreadId }: {
                 <strong className="thread-tree-identity">{node.agentName}</strong>
                 {node.name !== 'main' && node.name !== node.agentName
                   ? <span className="thread-tree-detail">{node.name}</span> : null}
-                <span className={`thread-tree-status${node.processing ? ' is-processing' : ''}${outcome ? ` is-${outcome.toLowerCase()}` : ''}`}>
+                <span className={`thread-tree-status ${statusClass}`}>
                   {outcome ? t(`ai.runtime.agentTree.outcome.${outcome}`) : formatThreadStatusLabel(node.status, t)}
                 </span>
+                {isStopped && outcome !== 'STOPPED' ? (
+                  <span className="thread-tree-control is-stopped">
+                    {t('ai.runtime.thread.executionControl.STOPPED')}
+                  </span>
+                ) : null}
                 <span className="thread-tree-counts">
                   {t('ai.runtime.agentTree.counts', { turns: node.turnCount, tools: node.toolCallCount })}
                 </span>

@@ -81,16 +81,27 @@ export function SubagentTreePanel({ tree, currentThreadId, onClose }: {
       }}>
         {rows.map(({ node }) => {
           const outcome = threadTreeOutcome(node)
+          const isStopped = node.executionControl === 'STOPPED'
+          const statusClass = outcome
+            ? `is-${outcome.toLowerCase()}`
+            : `is-${node.status.toLowerCase()}`
           return <li key={node.threadId} data-thread-id={node.threadId}
             data-selected={selected?.node.threadId === node.threadId}
+            data-status={node.status}
+            data-execution-control={node.executionControl}
             aria-current={node.threadId === currentThreadId ? 'true' : undefined}>
             <ThreadLink className="subagent-card" threadId={node.threadId}
               onFocus={() => setSelectedId(node.threadId)}>
               <strong>{node.agentName}</strong>
               {node.name !== 'main' && node.name !== node.agentName ? <span>{node.name}</span> : null}
-              <span className="subagent-card-status" data-processing={node.processing} data-outcome={outcome}>
+              <span className={`subagent-card-status ${statusClass}`} data-status={node.status} data-outcome={outcome}>
                 {outcome ? t(`ai.runtime.agentTree.outcome.${outcome}`) : formatThreadStatusLabel(node.status, t)}
               </span>
+              {isStopped && outcome !== 'STOPPED' ? (
+                <span className="subagent-card-control is-stopped">
+                  {t('ai.runtime.thread.executionControl.STOPPED')}
+                </span>
+              ) : null}
               <span>{t('ai.runtime.agentTree.counts', { turns: node.turnCount, tools: node.toolCallCount })}</span>
               <span>{formatModelLabel(node.model.modelName, node.model.variant)}</span>
             </ThreadLink>

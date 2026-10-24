@@ -28,7 +28,7 @@ function node(threadId: string, parentThreadId: string | null) {
     threadId, parentThreadId, name: 'main', agentName: 'Explorer',
     updateTime: 1774958400.125,
     model: { modelName: 'm', variant: 'default' },
-    processing: false, status: 'IDLE', turnCount: 3, toolCallCount: 5, outcome: 'COMPLETED',
+    executionControl: 'RUNNABLE', status: 'IDLE', turnCount: 3, toolCallCount: 5, outcome: 'COMPLETED',
   }
 }
 function reply(nodes: unknown[]) {

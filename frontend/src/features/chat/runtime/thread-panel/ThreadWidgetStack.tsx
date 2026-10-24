@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, type ReactNode } from 'react'
 import { ThreadWorkingStatus } from '@/features/chat/runtime/thread-panel/ThreadWorkingStatus'
 import type { QueuedThreadMessage } from '@/features/chat/runtime/thread-timeline-types'
+import type { QueuedCustomMessage } from '@/features/chat/runtime/queued-custom-messages'
 import { useI18n } from '@/shared/i18n'
 
 /**
@@ -13,17 +14,22 @@ import { useI18n } from '@/shared/i18n'
 export function ThreadWidgetStack({
   working,
   workingLabel,
+  animated = false,
   queuedMessages = [],
+  queuedCustomMessages = [],
   children,
 }: {
   working: boolean
   workingLabel?: string
+  animated?: boolean
   queuedMessages?: QueuedThreadMessage[]
+  queuedCustomMessages?: QueuedCustomMessage[]
   children?: ReactNode
 }) {
   const { t } = useI18n()
   const queueRef = useRef<HTMLOListElement>(null)
   const hasQueuedMessages = queuedMessages.length > 0
+  const hasQueuedCustomMessages = queuedCustomMessages.length > 0
   const latestQueuedMessageId = queuedMessages.at(-1)?.idempotencyKey
   const showWorking = working
 
@@ -35,13 +41,13 @@ export function ThreadWidgetStack({
   }, [latestQueuedMessageId])
 
   // 连 children 都没传时直接不挂载
-  if (!showWorking && !hasQueuedMessages && children == null) {
+  if (!showWorking && !hasQueuedMessages && !hasQueuedCustomMessages && children == null) {
     return null
   }
 
   return (
     <section className="thread-widget-stack" aria-label={t('ai.runtime.thread.widgetZone')}>
-      <ThreadWorkingStatus active={showWorking} label={workingLabel} />
+      <ThreadWorkingStatus active={showWorking} label={workingLabel} animated={animated} />
       {hasQueuedMessages ? (
         <ol
           ref={queueRef}
@@ -51,6 +57,22 @@ export function ThreadWidgetStack({
           {queuedMessages.map((message) => (
             <li key={message.idempotencyKey} className="thread-input-queue-item">
               <span className="thread-input-queue-label">{t('ai.runtime.thread.queued')}</span>
+              <span className="thread-input-queue-content">{message.text}</span>
+            </li>
+          ))}
+        </ol>
+      ) : null}
+      {hasQueuedCustomMessages ? (
+        <ol className="thread-input-queue" aria-label={t('ai.runtime.thread.queuedCustomMessage')}>
+          {queuedCustomMessages.map((message) => (
+            <li
+              key={message.id}
+              className="thread-input-queue-item thread-custom-message-queue-item"
+              data-sequence={message.sequence}
+            >
+              <span className="thread-input-queue-label">
+                {t('ai.runtime.thread.queuedCustomMessage')}
+              </span>
               <span className="thread-input-queue-content">{message.text}</span>
             </li>
           ))}

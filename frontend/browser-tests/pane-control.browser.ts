@@ -33,7 +33,6 @@ function rootThread(overrides: Record<string, unknown> = {}) {
     nextCommandSequence: '2',
     version: '1',
     status: 'IDLE',
-    processing: false,
     executionControl: 'RUNNABLE',
     branchSettings: {
       agentName: 'assistant',
@@ -52,8 +51,7 @@ function childThread() {
     name: 'worker child',
     threadId: CHILD_ID,
     parentThreadId: ROOT_ID,
-    status: 'MODEL_STREAM',
-    processing: true,
+    status: 'RUNNING',
   }
 }
 
@@ -81,7 +79,7 @@ function treeNodes() {
       agentName: 'assistant',
       model: { modelName: 'VeryLongModelName', variant: 'default' },
       status: 'IDLE',
-      processing: false,
+      executionControl: 'RUNNABLE',
       turnCount: 1,
       toolCallCount: 0,
       outcome: null,
@@ -93,8 +91,8 @@ function treeNodes() {
       name: 'worker child',
       agentName: 'coder',
       model: { modelName: 'VeryLongModelName', variant: 'default' },
-      status: 'MODEL_STREAM',
-      processing: true,
+      status: 'RUNNING',
+      executionControl: 'RUNNABLE',
       turnCount: 2,
       toolCallCount: 1,
       outcome: null,
@@ -139,6 +137,7 @@ async function installPaneApi(
   options: {
     rootEntries?: Array<Record<string, unknown>>
     rootThreadOverrides?: Record<string, unknown>
+    rootSnapshotOverrides?: Record<string, unknown>
   } = {},
 ): Promise<Recorded> {
   const recorded: Recorded = {
@@ -160,7 +159,7 @@ async function installPaneApi(
           status: 200,
           data: {
             status: 'STOPPED',
-            thread: rootThread({ status: 'STOPPED', executionControl: 'STOPPED', version: '2' }),
+            thread: rootThread({ status: 'IDLE', executionControl: 'STOPPED', version: '2' }),
             stoppedThreads: [],
           },
         },
@@ -181,6 +180,7 @@ async function installPaneApi(
       const data = {
         ...snapshot(thread),
         entries: options.rootEntries ?? [],
+        ...(options.rootSnapshotOverrides ?? {}),
       }
       await route.fulfill({ json: { status: 200, data } })
       return
@@ -585,4 +585,117 @@ test('recognizes SETTINGS once and uses the same model label in the footer', asy
   await expect(page.getByText(/未识别 Entry|未知条目/)).toHaveCount(0)
   await expect(modelControl).toHaveText('grok-4.7 (xhigh)')
   await page.screenshot({ path: testInfo.outputPath('settings-model-label.png'), fullPage: true })
+})
+
+test('thread status three-state and execution facts in real browser', async ({ page }) => {
+  // 1. WAITING 状态：展示“等待异步结果”，且无脉冲动画（animationName 为 none，data-animated=false）
+  const waitingRecorded = await installPaneApi(page, {
+    rootThreadOverrides: { status: 'WAITING', executionControl: 'RUNNABLE' },
+  })
+  await openRootPane(page, waitingRecorded)
+  const waitingWorking = page.locator('.thread-working')
+  await expect(waitingWorking).toBeVisible()
+  await expect(waitingWorking).toContainText('等待异步结果')
+  await expect(waitingWorking).toHaveAttribute('data-animated', 'false')
+  const waitingDot = waitingWorking.locator('.thread-working-dot')
+  await expect(waitingDot).toHaveClass(/is-static/)
+  const waitingAnim = await waitingDot.evaluate((el) => getComputedStyle(el).animationName)
+  expect(waitingAnim).toBe('none')
+
+  // 2. RUNNING 且无 active model/tool：展示“运行中”，绝不直接显示生成，且无动画
+  await page.route(`/api/threads/${ROOT_ID}`, async (route) => {
+    const thread = rootThread({ status: 'RUNNING', executionControl: 'RUNNABLE' })
+    await route.fulfill({ json: { status: 200, data: snapshot(thread) } })
+  })
+  await page.reload()
+  const runningWorking = page.locator('.thread-working')
+  await expect(runningWorking).toBeVisible()
+  await expect(runningWorking).toContainText('运行中')
+  await expect(runningWorking).not.toContainText('生成')
+  await expect(runningWorking).toHaveAttribute('data-animated', 'false')
+  const runningDot = runningWorking.locator('.thread-working-dot')
+  await expect(runningDot).toHaveClass(/is-static/)
+  const runningAnim = await runningDot.evaluate((el) => getComputedStyle(el).animationName)
+  expect(runningAnim).toBe('none')
+
+  // 3. STOPPED 独立控制不可遮蔽在途执行中的 model/tool：优先展示“执行中”，且带生成动画
+  await page.route(`/api/threads/${ROOT_ID}`, async (route) => {
+    const thread = rootThread({ status: 'RUNNING', executionControl: 'STOPPED' })
+    const data = {
+      ...snapshot(thread),
+      toolInvocations: [{
+        id: 'running-tool-browser',
+        modelInvocationId: 'model-1',
+        assistantEntryId: 'assistant-1',
+        callIndex: 0,
+        status: 'RUNNING',
+        attempt: 1,
+        toolCallId: 'call-active-1',
+        toolName: 'bash',
+        rendererKey: 'bash',
+        environmentId: null,
+        requiredEnvironmentId: null,
+        waitingForEnvironment: false,
+        requiredEnvironmentName: null,
+        environmentWaitFreshnessAt: null,
+        argumentsJson: '{"command":"ls"}',
+        approvalJson: null,
+        resultJson: null,
+        errorJson: null,
+        createTime: 1790812800,
+        updateTime: 1790812800,
+      }],
+    }
+    await route.fulfill({ json: { status: 200, data } })
+  })
+  await page.reload()
+  const activeWorking = page.locator('.thread-working')
+  await expect(activeWorking).toBeVisible()
+  await expect(activeWorking).toContainText('执行中')
+  await expect(activeWorking).not.toContainText('已停止')
+  await expect(activeWorking).toHaveAttribute('data-animated', 'true')
+  const activeDot = activeWorking.locator('.thread-working-dot')
+  await expect(activeDot).not.toHaveClass(/is-static/)
+  const activeAnim = await activeDot.evaluate((el) => getComputedStyle(el).animationName)
+  expect(activeAnim).toContain('thread-pulse')
+
+  // 4. 审批阻塞准确展示文字且无动画
+  await page.route(`/api/threads/${ROOT_ID}`, async (route) => {
+    const thread = rootThread({ status: 'RUNNING', executionControl: 'RUNNABLE' })
+    const data = {
+      ...snapshot(thread),
+      toolInvocations: [{
+        id: 'approval-tool-browser',
+        modelInvocationId: 'model-1',
+        assistantEntryId: 'assistant-1',
+        callIndex: 0,
+        status: 'WAITING_APPROVAL',
+        attempt: 1,
+        toolCallId: 'call-approval-1',
+        toolName: 'bash',
+        rendererKey: 'bash',
+        environmentId: null,
+        requiredEnvironmentId: null,
+        waitingForEnvironment: false,
+        requiredEnvironmentName: null,
+        environmentWaitFreshnessAt: null,
+        argumentsJson: '{"command":"rm -rf /"}',
+        approvalJson: null,
+        resultJson: null,
+        errorJson: null,
+        createTime: 1790812800,
+        updateTime: 1790812800,
+      }],
+    }
+    await route.fulfill({ json: { status: 200, data } })
+  })
+  await page.reload()
+  const approvalWorking = page.locator('.thread-working')
+  await expect(approvalWorking).toBeVisible()
+  await expect(approvalWorking).toContainText('等待审批')
+  await expect(approvalWorking).toHaveAttribute('data-animated', 'false')
+  const approvalDot = approvalWorking.locator('.thread-working-dot')
+  await expect(approvalDot).toHaveClass(/is-static/)
+  const approvalAnim = await approvalDot.evaluate((el) => getComputedStyle(el).animationName)
+  expect(approvalAnim).toBe('none')
 })

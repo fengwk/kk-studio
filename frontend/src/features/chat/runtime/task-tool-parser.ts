@@ -38,27 +38,13 @@ export function parseTaskArguments(json: string): TaskToolArguments {
 }
 
 /**
- * 解析 task 的即时受理收据 JSON：
- * 后端 TaskTool 仅返回一次受理回执 {"thread_id":"uuid","status":"accepted"}。
- *
- * 仅当为合法 JSON 对象、status 严格为 'accepted' 且 thread_id 为规范非空 UUID 字符串时返回收据；
- * 缺少 thread_id、非规范 UUID、completed、未知 status、畸形 JSON、XML 等一律返回 null，
- * 由调用方完整降级到原始文本展示，绝不把受理收据混淆为终态，也不隐瞒畸形收据。
+ * 只读取规范 task.accepted details，不从自然语言正文推断线程身份。
  */
-export function parseTaskReceipt(text: string | null): TaskToolReceipt | null {
-  if (!text || !text.trim()) {
-    return null
-  }
-  let value: unknown
-  try {
-    value = JSON.parse(text)
-  } catch {
-    return null
-  }
+export function parseTaskReceipt(value: unknown): TaskToolReceipt | null {
   if (!isRecord(value)) {
     return null
   }
-  if (value.status !== 'accepted') {
+  if (value.kind !== 'task.accepted') {
     return null
   }
   if (typeof value.thread_id !== 'string') {

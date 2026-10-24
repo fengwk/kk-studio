@@ -136,7 +136,9 @@ describe('thread timeline', () => {
       entry('user-1', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'hello' }])),
       entry('assistant-1', 'MESSAGE', {
         ...messagePayload('ASSISTANT', [{ type: 'text', text: 'ok' }]),
-        assistantMetadata: { usage: { inputTokens: 100, outputTokens: 50 } },
+        assistantMetadata: {
+          usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        },
       }),
       entry('end-1', 'TURN_END', { outcome: 'COMPLETED', turnStartEntryId: 'turn-1' }),
       entry('settings-head', 'SETTINGS', {
@@ -1747,27 +1749,27 @@ describe('thread timeline', () => {
     expect(free?.approval).toBeUndefined()
   })
 
-  it('derives working from thread status/processing and pending queued inputs', () => {
+  it('derives working from activity independently of execution control and pending inputs', () => {
     expect(isThreadWorking(
-        { processing: true } as never,
+        { status: 'RUNNING', executionControl: 'STOPPED' } as never,
         { messages: [], queuedMessages: [], hasPendingInputs: false },
       ),
     ).toBe(true)
     expect(
       isThreadWorking(
-        { processing: false } as never,
+        { status: 'IDLE', executionControl: 'RUNNABLE' } as never,
         { messages: [], queuedMessages: [], hasPendingInputs: true },
       ),
     ).toBe(true)
     expect(
       isThreadWorking(
-        { status: 'IDLE', processing: false } as never,
+        { status: 'IDLE', executionControl: 'STOPPED' } as never,
         { messages: [], queuedMessages: [], hasPendingInputs: false },
       ),
     ).toBe(false)
     expect(
       isThreadWorking(
-        { status: 'MODEL_STREAMING', processing: false } as never,
+        { status: 'WAITING', executionControl: 'RUNNABLE' } as never,
         { messages: [], queuedMessages: [], hasPendingInputs: false },
       ),
     ).toBe(true)

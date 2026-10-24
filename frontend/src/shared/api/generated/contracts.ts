@@ -1199,7 +1199,6 @@ export interface HarnessThreadDTO {
   nextCommandSequence: string
   version: string
   status: string
-  processing: boolean
   executionControl: string
   branchSettings: HarnessBranchSettingsDTO
   createTime: number
@@ -1246,7 +1245,7 @@ export interface HarnessThreadSummaryDTO {
   createdAt: number
   updatedAt: number
   status: string
-  processing: boolean
+  executionControl: string
   model: HarnessModelSelectionDTO
   headMessagePreview: string | null
 }
@@ -1259,7 +1258,7 @@ export interface HarnessThreadTreeNodeDTO {
   agentName: string
   model: HarnessModelSelectionDTO
   status: string
-  processing: boolean
+  executionControl: string
   turnCount: number
   toolCallCount: number
   outcome: string | null

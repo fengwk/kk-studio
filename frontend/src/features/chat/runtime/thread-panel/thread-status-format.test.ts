@@ -34,17 +34,14 @@ const EMPTY_USAGE = {
   output: 0,
   cacheRead: 0,
   cacheWrite: 0,
-  reasoning: 0,
-  providerTotal: 0,
+  reasoning: null as number | null,
+  providerTotal: null as number | null,
   cost: null as UsageCost | null,
 }
 
 describe('thread status formatting', () => {
-  // 状态模型格式调整不能改变工作状态的本地化映射及未知状态回退。
   it.each([
-    'STOPPED', 'QUEUED', 'IDLE', 'CONTINUATION_DUE', 'APPLYING',
-    'MODEL_READY', 'MODEL_RUNNING', 'TOOL_WAITING_APPROVAL',
-    'TOOL_READY', 'TOOL_RUNNING',
+    'RUNNING', 'WAITING', 'IDLE',
   ])('localizes %s through its runtime status key', (status) => {
     expect(formatThreadStatusLabel(status, (key) => `translated:${key}`))
       .toBe(`translated:ai.runtime.thread.status.${status}`)
@@ -56,11 +53,13 @@ describe('thread status formatting', () => {
 
   it('preserves an unknown status without inventing a localized state', () => {
     expect(formatThreadStatusLabel('UNRECOGNIZED')).toBe('UNRECOGNIZED')
+    expect(formatThreadStatusLabel('WAITING_APPROVAL')).toBe('WAITING_APPROVAL')
   })
 
-  it('uses the approval label for both waiting-approval status names', () => {
-    expect(formatThreadStatusLabel('WAITING_APPROVAL')).toBe('等待审批')
-    expect(formatThreadStatusLabel('TOOL_WAITING_APPROVAL')).toBe('等待审批')
+  it('formats genuine three-state labels with default translator', () => {
+    expect(formatThreadStatusLabel('RUNNING')).toBe('运行中')
+    expect(formatThreadStatusLabel('WAITING')).toBe('等待异步结果')
+    expect(formatThreadStatusLabel('IDLE')).toBe('空闲')
   })
 
   // 缺失或无效窗口不能制造上下文占用事实；用量摘要仍应稳定显示。
@@ -123,13 +122,13 @@ describe('thread status formatting', () => {
     expect(usage?.title).not.toContain('累计')
   })
 
-  // 默认数值仅用于摘要展示；hover 仍区分未计量的事实。
-  it('defaults missing metrics to zero while preserving no-data details', () => {
+  // 缺费用与速率显示暂无数据，不可显示 0；hover 仍区分未计量的事实。
+  it('displays no-data for missing cost and speed metrics while preserving real zero', () => {
     const usage = buildThreadStatusModel({
       branchUsage: { ...EMPTY_USAGE, contextInputTokens: 0 },
     }, t).segments.find((segment) => segment.key === 'usage')
 
-    expect(usage?.text).toBe('↑0 · ↓0 · R0 · W0 · 0 · cache 0.00% · 0 tok/s')
+    expect(usage?.text).toBe('↑0 · ↓0 · R0 · W0 · 暂无数据 · cache 0.00% · 暂无数据')
     expect(usage?.title).toContain('估算费用：暂无数据；缓存命中率：暂无数据；生成速度：暂无数据')
   })
 
@@ -180,6 +179,16 @@ describe('turn usage details', () => {
 
     expect(title).toContain('估算费用：暂无数据；缓存命中率：0.00%；生成速度：暂无数据')
     expect(title).not.toContain('$0')
+  })
+
+  it('marks absent reasoning as no-data instead of null', () => {
+    const title = formatUsageDetails(
+      { ...usage, reasoning: null },
+      t,
+    )
+
+    expect(title).toContain('推理：暂无数据 tokens')
+    expect(title).not.toContain('null')
   })
 
   it('formats a quarter cache hit rate with two decimals', () => {

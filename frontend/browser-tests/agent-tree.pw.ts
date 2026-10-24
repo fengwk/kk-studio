@@ -18,7 +18,7 @@ function treeNodes(turnCount = 3) {
       agentName: 'reviewer',
       model: { modelName: LONG_MODEL, variant: 'fast' },
       status: 'IDLE',
-      processing: false,
+      executionControl: 'STOPPED',
       turnCount: 1,
       toolCallCount: 0,
       outcome: 'STOPPED',
@@ -30,8 +30,8 @@ function treeNodes(turnCount = 3) {
       name: 'Grand Worker',
       agentName: 'coder',
       model: { modelName: 'MiniMax-M2', variant: 'default' },
-      status: 'MODEL_RUNNING',
-      processing: true,
+      status: 'RUNNING',
+      executionControl: 'RUNNABLE',
       turnCount: 4,
       toolCallCount: 5,
       outcome: null,
@@ -43,8 +43,8 @@ function treeNodes(turnCount = 3) {
       name: 'Child Planner',
       agentName: 'planner',
       model: { modelName: 'MiniMax-M2', variant: 'default' },
-      status: 'TOOL_WAITING_APPROVAL',
-      processing: true,
+      status: 'WAITING',
+      executionControl: 'RUNNABLE',
       turnCount,
       toolCallCount: 2,
       outcome: null,
@@ -58,7 +58,7 @@ function treeNodes(turnCount = 3) {
       model: { modelName: 'minimax-m2.7', variant: 'default' },
       // 本地状态：根自己空闲，不递归投影子树忙碌。
       status: 'IDLE',
-      processing: false,
+      executionControl: 'RUNNABLE',
       turnCount: 6,
       toolCallCount: 3,
       outcome: null,
@@ -84,7 +84,6 @@ function threadDto(
     nextCommandSequence: '1',
     version: '1',
     status,
-    processing: status !== 'IDLE' && status !== 'STOPPED',
     executionControl: 'RUNNABLE',
     branchSettings: {
       agentName: 'assistant',
@@ -133,14 +132,14 @@ async function installAgentTreeMock(page: Page) {
       await route.fulfill({
         json: {
           status: 200,
-          data: snapshot(CHILD_ID, THREAD_ID, 'Child Planner', 'TOOL_WAITING_APPROVAL'),
+          data: snapshot(CHILD_ID, THREAD_ID, 'Child Planner', 'WAITING'),
         },
       })
       return
     }
     if (path === `/api/threads/${GRAND_ID}`) {
       await route.fulfill({
-        json: { status: 200, data: snapshot(GRAND_ID, CHILD_ID, 'Grand Worker', 'MODEL_RUNNING') },
+        json: { status: 200, data: snapshot(GRAND_ID, CHILD_ID, 'Grand Worker', 'RUNNING') },
       })
       return
     }
@@ -209,9 +208,9 @@ test('the active subagent tree renders automatically inside the bound pane and o
   await expect(rows.nth(0)).toHaveAttribute('data-depth', '0')
   await expect(rows.nth(1)).toHaveAttribute('data-depth', '1')
   await expect(rows.nth(0)).toContainText('Child Planner')
-  await expect(rows.nth(0)).toContainText('等待审批')
+  await expect(rows.nth(0)).toContainText('等待异步结果')
   await expect(rows.nth(1)).toContainText('Grand Worker')
-  await expect(rows.nth(1)).toContainText('模型运行中')
+  await expect(rows.nth(1)).toContainText('运行中')
   await expect(widget).not.toContainText('Preview Thread')
   await expect(widget).not.toContainText('Stopped Sibling')
   await expect(widget).toContainText('2 个活跃')

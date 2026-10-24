@@ -1,6 +1,6 @@
 import { asRecord, getString, parsePayload } from '@/features/chat/runtime/payload-json'
 import {
-  mergeTurnUsage,
+  accumulateTurnUsage,
   parseAssistantUsage,
 } from '@/features/chat/runtime/thread-timeline/content-utils'
 import type { TurnUsage } from '@/features/chat/runtime/thread-timeline-types'
@@ -13,7 +13,7 @@ import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
  * `assistantMetadata`，以及 COMPACTION 结果的 canonical `assistantMetadata`——并读取
  * 投影 `usageCost`，不依赖任何对话消息、卡片 visible、TURN_END 是否已投影，也不加入虚拟消息或
  * flags：因此 compaction 回合等被隐藏内容里真实发生的 token/费用同样进入累计，不会从事实漏计。
- * 未物化（无 metadata）的调用不会有事实，自然不会重复计算。
+ * 无模型 metadata 的人工 ASSISTANT 不计；有模型 metadata 缺 usage 时使 branch 完整费用和对应计数 unknown（不创造零）。
  */
 export function aggregateEntryUsage(
   entries: readonly HarnessSessionEntryDTO[],
@@ -35,10 +35,7 @@ export function aggregateEntryUsage(
       continue
     }
     const usage = parseAssistantUsage(metadata, entry.usageCost ?? null)
-    if (usage == null) {
-      continue
-    }
-    total = total == null ? usage : mergeTurnUsage(total, usage)
+    total = accumulateTurnUsage(total, usage)
   }
   return total
 }

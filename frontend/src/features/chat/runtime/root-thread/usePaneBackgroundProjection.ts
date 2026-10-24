@@ -80,5 +80,5 @@ export function usePaneBackgroundProjection(boundThreadId: string): void {
 
 function needsBackgroundProjection(snapshot: HarnessThreadSnapshotDTO | undefined): boolean {
   return snapshot != null
-    && (snapshot.thread.processing || snapshot.thread.status !== 'IDLE')
+    && (snapshot.thread.status === 'RUNNING' || snapshot.thread.status === 'WAITING')
 }

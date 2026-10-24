@@ -44,7 +44,7 @@ export function useActiveThreadTree(boundThreadId: string | null) {
   })
   const { rows, historyRows, nodesById, root } = projection
   const activeCount = useMemo(
-    () => rows.reduce((count, row) => (row.node.processing ? count + 1 : count), 0),
+    () => rows.reduce((count, row) => (row.node.status !== 'IDLE' ? count + 1 : count), 0),
     [rows],
   )
   // 执行树是 Thread 名称/代理身份的唯一事实源：交互来源与活跃行都从这里解析，
