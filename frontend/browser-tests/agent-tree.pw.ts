@@ -43,6 +43,7 @@ function treeNodes(turnCount = 3) {
       name: 'Child Planner',
       agentName: 'planner',
       model: { modelName: 'MiniMax-M2', variant: 'default' },
+      // 已让出本地执行，等待 Grand Worker 异步回执；不是本地审批阻塞。
       status: 'WAITING',
       executionControl: 'RUNNABLE',
       turnCount,
@@ -56,7 +57,7 @@ function treeNodes(turnCount = 3) {
       name: 'Preview Thread',
       agentName: 'assistant',
       model: { modelName: 'minimax-m2.7', variant: 'default' },
-      // 本地状态：根自己空闲，不递归投影子树忙碌。
+      // 根无待收取的直接委派；执行父关系本身不代表未完成的 Join。
       status: 'IDLE',
       executionControl: 'RUNNABLE',
       turnCount: 6,
