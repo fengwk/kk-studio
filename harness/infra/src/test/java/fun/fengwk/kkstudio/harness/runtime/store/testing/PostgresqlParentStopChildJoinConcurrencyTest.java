@@ -237,7 +237,6 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
                   now,
                   now,
                   JoinDelivery.NOTIFY_PARENT,
-                  true,
                   null));
 
           tx.requestWork(new WorkTarget(WorkTargetType.THREAD, childThreadId));

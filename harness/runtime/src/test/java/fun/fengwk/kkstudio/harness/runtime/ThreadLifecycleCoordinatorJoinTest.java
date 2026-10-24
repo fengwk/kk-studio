@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.NotificationPayload;
 import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
@@ -31,18 +32,21 @@ import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NotificationCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
+import java.lang.reflect.Proxy;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
 /**
- * 终止边界 Join 结算的收敛判据与交付幂等：源输入应用前旧结果不得结算新 Join；普通终止只在没有未完成的直接子 Join、没有未送达子回执、 没有待处理输入时结算；Stop
- * 强制结算不受此限制；交付后不重投。
+ * 终止边界 Join 结算的收敛判据与交付幂等：源输入应用前旧结果不得结算新 Join；普通终止只在没有未完成的直接子 Join、没有待处理输入时结算；Stop 强制结算不受此限制；交付后不重投。
  */
 class ThreadLifecycleCoordinatorJoinTest {
 
@@ -82,7 +86,6 @@ class ThreadLifecycleCoordinatorJoinTest {
                   T0,
                   T0,
                   JoinDelivery.NOTIFY_PARENT,
-                  true,
                   null));
           return null;
         });
@@ -133,6 +136,46 @@ class ThreadLifecycleCoordinatorJoinTest {
     assertNullWork();
   }
 
+  /** J3b：本 Thread 仅有 QUEUED SET_* 控制命令时，不创建模型义务也不阻塞上游 Join 结算。 */
+  @Test
+  void setOnlyQueuedCommandDoesNotBlockUpstreamJoinSettlement() {
+    markSourceApplied();
+    seedQueuedSetAgentCommandAtSequenceTwo();
+
+    matchTerminal(false);
+    ThreadJoin matched = join(joinId);
+    assertTrue(matched.matched());
+    assertNotNull(matched.deliveryCommandSequence());
+    assertEquals(1, rootCommandCount());
+    assertTrue(
+        store.<Boolean>transaction(
+            tx -> tx.findWork(new WorkTarget(WorkTargetType.THREAD, root.threadId())).isPresent()));
+  }
+
+  /** J3c：本 Thread 存在 QUEUED CUSTOM_MESSAGE 时，构成待处理输入需求，阻塞上游 Join 结算。 */
+  @Test
+  void queuedCustomMessageBlocksUpstreamJoinSettlement() {
+    markSourceApplied();
+    seedQueuedCustomMessageCommandAtSequenceTwo();
+
+    matchTerminal(false);
+    assertFalse(join(joinId).matched());
+    assertEquals(0, rootCommandCount());
+    assertNullWork();
+  }
+
+  /** J3d：本 Thread 存在 QUEUED NOTIFICATION 时，构成待处理输入需求，阻塞上游 Join 结算。 */
+  @Test
+  void queuedNotificationBlocksUpstreamJoinSettlement() {
+    markSourceApplied();
+    seedQueuedNotificationCommandAtSequenceTwo();
+
+    matchTerminal(false);
+    assertFalse(join(joinId).matched());
+    assertEquals(0, rootCommandCount());
+    assertNullWork();
+  }
+
   /** J4：本 Thread 有尚未冻结结果的直接子 Join 时不得结算上游 Join。 */
   @Test
   void incompleteChildJoinBlocksUpstreamJoinSettlement() {
@@ -148,20 +191,83 @@ class ThreadLifecycleCoordinatorJoinTest {
     assertNullWork();
   }
 
-  /** J5：直接子 Join 已冻结但尚未交付（pending delivery）时同样不得结算上游 Join。 */
+  /** J5：直接子 Join 终止时单次原子事务完成结果冻结与父通知投递；未消费的通知作为输入需求阻止上游 Join 结算。 */
   @Test
-  void pendingChildDeliveryBlocksUpstreamJoinSettlement() {
+  void grandChildDeliveryAtomicallyNotifiesChildAndBlocksUpstreamSettlementUntilConsumed() {
     markSourceApplied();
     UUID grandChildId = UUID.randomUUID();
-    UUID grandChildTerminal = seedQuiescentChild(grandChildId, childId, 71L).turnEndId();
+    SeededChild grandChild = seedQuiescentChild(grandChildId, childId, 71L);
+    UUID grandChildTerminal = grandChild.turnEndId();
     UUID grandChildJoinId = UUID.randomUUID();
     insertUnmatchedJoin(grandChildJoinId, childId, grandChildId);
-    matchChildJoinWithoutDelivery(grandChildJoinId, grandChildId, grandChildTerminal);
 
+    // 应用 grandChild 的源输入命令
+    store.transaction(
+        tx -> {
+          tx.lockThread(grandChildId);
+          tx.loadQueuedCommands(grandChildId);
+          ThreadCommand source = tx.findCommand(grandChildId, 1L).orElseThrow();
+          tx.updateCommands(List.of(source.markApplied(grandChild.turnStartId())));
+          return null;
+        });
+
+    // grandChild 终止，原子冻结结果并投递到 child 的 seq 2
+    store.transaction(
+        tx -> {
+          ThreadTreeLocks.lockForThread(tx, grandChildId);
+          for (UUID threadId :
+              List.of(grandChildId, childId).stream().sorted(UuidOrder.COMPARATOR).toList()) {
+            tx.lockThread(threadId);
+          }
+          ThreadLifecycleCoordinator.matchAndDeliverTerminalJoins(
+              tx, tx.findThread(grandChildId).orElseThrow(), grandChildTerminal, null, T1, false);
+          return null;
+        });
+
+    ThreadJoin deliveredGrandChild = join(grandChildJoinId);
+    assertTrue(deliveredGrandChild.matched());
+    assertEquals(2L, deliveredGrandChild.deliveryCommandSequence());
+
+    // child 尚未消费该通知，上游 joinId 不得结算
     matchTerminal(false);
     assertFalse(join(joinId).matched());
     assertEquals(0, rootCommandCount());
     assertNullWork();
+  }
+
+  /** J5b：NOTIFY_PARENT 结算时仅调用一次 updateJoin，且传入的必为已分配父交付序列的终态 Join，绝不持久化中间 matched 态。 */
+  @Test
+  void notifyParentSettlementUpdatesJoinExactlyOnceWithDeliveredSequence() {
+    markSourceApplied();
+    List<ThreadJoin> updatedJoins = new ArrayList<>();
+    store.transaction(
+        tx -> {
+          ThreadTreeLocks.lockForThread(tx, childId);
+          for (UUID threadId :
+              List.of(childId, root.threadId()).stream().sorted(UuidOrder.COMPARATOR).toList()) {
+            tx.lockThread(threadId);
+          }
+          HarnessStore.Transaction wrapped =
+              (HarnessStore.Transaction)
+                  Proxy.newProxyInstance(
+                      HarnessStore.Transaction.class.getClassLoader(),
+                      new Class<?>[] {HarnessStore.Transaction.class},
+                      (proxy, method, args) -> {
+                        if (method.getName().equals("updateJoin")) {
+                          updatedJoins.add((ThreadJoin) args[0]);
+                        }
+                        return method.invoke(tx, args);
+                      });
+          ThreadLifecycleCoordinator.matchAndDeliverTerminalJoins(
+              wrapped, tx.findThread(childId).orElseThrow(), terminalEntryId, null, T1, false);
+          return null;
+        });
+
+    assertEquals(
+        1, updatedJoins.size(), "updateJoin must be called exactly once for NOTIFY_PARENT");
+    ThreadJoin singleUpdate = updatedJoins.getFirst();
+    assertTrue(singleUpdate.matched());
+    assertEquals(1L, singleUpdate.deliveryCommandSequence());
   }
 
   /** J6：已物化但尚未越过输入水位的 APPLIED 通知也构成待处理输入；水位推进（INPUT 接纳）后才结算，且恰一次。 */
@@ -283,20 +389,7 @@ class ThreadLifecycleCoordinatorJoinTest {
                   T0,
                   T0,
                   JoinDelivery.NOTIFY_PARENT,
-                  true,
                   null));
-          return null;
-        });
-  }
-
-  /** 冻结子 Join 的结果但不交付（deliveryCommandSequence 保持 null），构造 pending delivery。 */
-  private void matchChildJoinWithoutDelivery(
-      UUID childJoinId, UUID childThreadId, UUID terminalEntryOfChild) {
-    store.transaction(
-        tx -> {
-          tx.lockThread(childThreadId);
-          ThreadJoin join = tx.findJoin(childJoinId).orElseThrow();
-          tx.updateJoin(join.match(terminalEntryOfChild, null, T1));
           return null;
         });
   }
@@ -307,6 +400,77 @@ class ThreadLifecycleCoordinatorJoinTest {
         tx -> {
           tx.lockThread(childId);
           var payload = userMessagePayload("steering");
+          tx.insertCommands(
+              List.of(
+                  new ThreadCommand(
+                      childId,
+                      2L,
+                      payload,
+                      TestIds.id(52),
+                      ThreadCommandPayloadJsonCodec.requestHash(payload),
+                      null,
+                      null,
+                      null,
+                      T1)));
+          return null;
+        });
+  }
+
+  /** 在 child 的 seq 2 插入一条 QUEUED SET_* 控制命令，构造仅有控制维护的合法状态。 */
+  private void seedQueuedSetAgentCommandAtSequenceTwo() {
+    store.transaction(
+        tx -> {
+          tx.lockThread(childId);
+          var payload = new SetAgentCommandPayload("assistant");
+          tx.insertCommands(
+              List.of(
+                  new ThreadCommand(
+                      childId,
+                      2L,
+                      payload,
+                      TestIds.id(52),
+                      ThreadCommandPayloadJsonCodec.requestHash(payload),
+                      null,
+                      null,
+                      null,
+                      T1)));
+          return null;
+        });
+  }
+
+  /** 在 child 的 seq 2 插入一条 QUEUED CUSTOM_MESSAGE，构造待处理输入需求。 */
+  private void seedQueuedCustomMessageCommandAtSequenceTwo() {
+    store.transaction(
+        tx -> {
+          tx.lockThread(childId);
+          var payload = new CustomMessageCommandPayload(AgentMessage.user("custom-steering"));
+          tx.insertCommands(
+              List.of(
+                  new ThreadCommand(
+                      childId,
+                      2L,
+                      payload,
+                      TestIds.id(52),
+                      ThreadCommandPayloadJsonCodec.requestHash(payload),
+                      null,
+                      null,
+                      null,
+                      T1)));
+          return null;
+        });
+  }
+
+  /** 在 child 的 seq 2 插入一条 QUEUED NOTIFICATION，构造待处理输入需求。 */
+  private void seedQueuedNotificationCommandAtSequenceTwo() {
+    store.transaction(
+        tx -> {
+          tx.lockThread(childId);
+          var payload =
+              new NotificationCommandPayload(
+                  UUID.randomUUID(),
+                  NotificationKind.SUBAGENT_RESULT,
+                  childId,
+                  AgentMessage.user("queued-result"));
           tx.insertCommands(
               List.of(
                   new ThreadCommand(
@@ -419,7 +583,6 @@ class ThreadLifecycleCoordinatorJoinTest {
                   T0,
                   T0,
                   JoinDelivery.SETTLE_OWNER_TURN,
-                  false,
                   null));
           return null;
         });
@@ -461,9 +624,10 @@ class ThreadLifecycleCoordinatorJoinTest {
     assertTrue(
         store.<Boolean>transaction(
             tx -> tx.findWork(new WorkTarget(WorkTargetType.THREAD, root.threadId())).isPresent()));
-    // COMPACTION 冻结结果不属于 task 待交付集合。
-    assertTrue(
-        store.<Boolean>transaction(tx -> tx.loadPendingDeliveries(root.threadId()).isEmpty()));
+    // COMPACTION 冻结结果不属于 NOTIFY_PARENT 子任务，不占用子任务并发计数（仍只有 setUp 中的普通 task join）。
+    assertEquals(
+        1,
+        store.<Integer>transaction(tx -> tx.countIncompleteChildJoins(root.threadId())).intValue());
   }
 
   private int rootCommandCount() {

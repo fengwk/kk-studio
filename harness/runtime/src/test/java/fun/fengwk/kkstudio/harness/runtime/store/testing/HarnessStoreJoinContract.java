@@ -146,7 +146,6 @@ public abstract class HarnessStoreJoinContract {
         createdAt,
         updatedAt,
         parentThreadId == null ? JoinDelivery.RECEIPT_ONLY : JoinDelivery.NOTIFY_PARENT,
-        parentThreadId != null,
         null);
   }
 
@@ -462,7 +461,6 @@ public abstract class HarnessStoreJoinContract {
             T0,
             T1,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             null);
 
     assertThrows(
@@ -905,67 +903,46 @@ public abstract class HarnessStoreJoinContract {
   }
 
   @Test
-  void loadPendingDeliveriesFiltersAndSortsCorrectly() {
-    // 测试意图：验证 loadPendingDeliveries 只返回指定父线程且已 matched、未 delivered 的 join，按 (createdAt,
-    // invocationId) 升序。
-    UUID parentId1 = baseline.threadId();
-    UUID parentId2 = createChildThread(null, baseline.sessionId(), baseline.rootEntryId());
-    UUID childId = createChildThread(parentId1, baseline.sessionId(), baseline.rootEntryId());
+  void matchedNotifyParentRequiresDeliveryCommandSequence() {
+    // 测试意图：验证 NOTIFY_PARENT Join 严禁中间 matched-but-undelivered 状态持久化；
+    // 冻结结果必须与 deliveryCommandSequence 原子落库，单独 match 更新抛出异常。
+    UUID parentId = baseline.threadId();
+    UUID childId = createChildThread(parentId, baseline.sessionId(), baseline.rootEntryId());
 
     insertCommand(childId, 1L, TestIds.id(1));
-    insertCommand(childId, 2L, TestIds.id(2));
-    insertCommand(childId, 3L, TestIds.id(3));
-    insertCommand(parentId1, 1L, TestIds.id(4));
+    insertCommand(parentId, 1L, TestIds.id(2));
 
     UUID id1 = TestIds.id(301);
-    UUID id2 = TestIds.id(302);
-    UUID id3 = TestIds.id(303);
-
-    ThreadJoin join1 = initialJoin(id1, parentId1, childId, 1L, T0, T0);
-    ThreadJoin join2 = initialJoin(id2, parentId1, childId, 2L, T1, T1);
-    ThreadJoin join3 = initialJoin(id3, parentId2, childId, 3L, T2, T2);
+    ThreadJoin join1 = initialJoin(id1, parentId, childId, 1L, T0, T0);
 
     inTransaction(
         store,
         tx -> {
           tx.lockThread(childId);
           tx.insertJoin(join1);
-          tx.insertJoin(join2);
-          tx.insertJoin(join3);
         });
 
-    // 初始状态均未 matched，loadPendingDeliveries 返回空
-    assertTrue(store.transaction(tx -> tx.loadPendingDeliveries(parentId1)).isEmpty());
+    ThreadJoin matchedWithoutDelivery = join1.match(baseline.rootEntryId(), null, T2);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockThread(childId);
+                  tx.updateJoin(matchedWithoutDelivery);
+                }));
 
-    // 匹配 join1 与 join2
-    ThreadJoin matched1 = join1.match(baseline.rootEntryId(), null, T2);
-    ThreadJoin matched2 = join2.match(baseline.rootEntryId(), null, T2);
-    ThreadJoin matched3 = join3.match(baseline.rootEntryId(), null, T2);
-
+    ThreadJoin delivered = matchedWithoutDelivery.delivered(1L, T3);
     inTransaction(
         store,
         tx -> {
           tx.lockThread(childId);
-          tx.updateJoin(matched1);
-          tx.updateJoin(matched2);
-          tx.updateJoin(matched3);
+          tx.updateJoin(delivered);
         });
 
-    List<ThreadJoin> pending = store.transaction(tx -> tx.loadPendingDeliveries(parentId1));
-    assertEquals(List.of(matched1, matched2), pending);
-
-    // 将 matched1 交付后，从 pending 列表中移除
-    ThreadJoin delivered1 = matched1.delivered(1L, T3);
-    inTransaction(
-        store,
-        tx -> {
-          tx.lockThread(childId);
-          tx.updateJoin(delivered1);
-        });
-
-    List<ThreadJoin> pendingAfterDelivery =
-        store.transaction(tx -> tx.loadPendingDeliveries(parentId1));
-    assertEquals(List.of(matched2), pendingAfterDelivery);
+    ThreadJoin found = store.transaction(tx -> tx.findJoin(id1)).orElseThrow();
+    assertEquals(delivered, found);
   }
 
   @Test

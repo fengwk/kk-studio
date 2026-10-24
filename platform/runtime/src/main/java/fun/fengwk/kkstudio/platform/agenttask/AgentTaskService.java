@@ -118,7 +118,6 @@ public class AgentTaskService {
                 ThreadConstraints.NONE,
                 request.trigger(),
                 child ? JoinDelivery.NOTIFY_PARENT : JoinDelivery.RECEIPT_ONLY,
-                child,
                 request.budget(),
                 request.ticketId(),
                 request.requestHash()));

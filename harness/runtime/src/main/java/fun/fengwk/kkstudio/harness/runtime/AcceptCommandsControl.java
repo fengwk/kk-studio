@@ -6,8 +6,6 @@ import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.ForkPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinCompletion;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
@@ -436,7 +434,6 @@ final class AcceptCommandsControl {
               ? "expectedHeadEntryId and expectedNextCommandSequence must be omitted for a single USER_MESSAGE batch"
               : "expectedHeadEntryId and expectedNextCommandSequence are required for this command batch");
     }
-    List<ThreadJoin> pending = tx.loadPendingDeliveries(target.threadId());
     // exact replay 查找必须先于 cursor/preflight admission；纯消息 replay 也不依赖 head 变化。
     List<Optional<ThreadCommand>> existing = new ArrayList<>(commands.size());
     for (NewThreadCommand request : commands) {
@@ -467,23 +464,11 @@ final class AcceptCommandsControl {
     List<NewThreadCommand> prepared = preflight.prepare(tx, session, commands);
     requirePreflightShape(commands, prepared);
     long nextSeq = thread.nextCommandSequence();
-    List<ThreadCommand> allInserted = new ArrayList<>();
-    List<ThreadJoin> deliveries = new ArrayList<>();
+    List<ThreadCommand> allInserted = new ArrayList<>(prepared.size());
 
-    if (genuineUserInput && !pending.isEmpty()) {
-      for (ThreadJoin pendingJoin : pending) {
-        ThreadJoinCompletion.Delivery delivery =
-            ThreadJoinCompletion.buildDelivery(tx, pendingJoin, thread, nextSeq, now);
-        allInserted.add(delivery.command());
-        deliveries.add(delivery.delivered());
-        nextSeq++;
-      }
-    }
-
-    List<ThreadCommand> userCommands = new ArrayList<>(prepared.size());
     for (int i = 0; i < prepared.size(); i++) {
       NewThreadCommand request = prepared.get(i);
-      userCommands.add(
+      allInserted.add(
           new ThreadCommand(
               thread.id(),
               nextSeq + i,
@@ -495,12 +480,8 @@ final class AcceptCommandsControl {
               null,
               now));
     }
-    allInserted.addAll(userCommands);
 
     tx.insertCommands(allInserted);
-    for (ThreadJoin delivered : deliveries) {
-      tx.updateJoin(delivered);
-    }
 
     ThreadState advanced =
         resumeStoppedTarget(thread, genuineUserInput)
@@ -516,7 +497,7 @@ final class AcceptCommandsControl {
             session,
             tx.findRootEntry(session.id()).orElseThrow(),
             advanced,
-            List.copyOf(userCommands),
+            List.copyOf(allInserted),
             false,
             false),
         ticket);
@@ -550,10 +531,7 @@ final class AcceptCommandsControl {
         }
       }
     }
-    // 先在树锁内确定完整行锁集合，再按 Session/Thread 排序；不能在 Work 后补锁交付子线程。
-    for (ThreadJoin pending : tx.loadPendingDeliveries(anchorThreadId)) {
-      allThreadIds.add(pending.childThreadId());
-    }
+    // 先在树锁内确定完整行锁集合，再按 Session/Thread 排序。
     Set<UUID> sessionIds = new LinkedHashSet<>();
     for (UUID id : allThreadIds) {
       ThreadState state =
@@ -734,37 +712,14 @@ final class AcceptCommandsControl {
     }
     long firstSequence = ordered.getFirst().sequence();
     if (!cursorFreeBatch && firstSequence != target.expectedNextCommandSequence()) {
-      long expected = target.expectedNextCommandSequence();
-      boolean allPrecedingWereDeliveries = true;
-      if (firstSequence > expected) {
-        for (long seq = expected; seq < firstSequence; seq++) {
-          long checkSeq = seq;
-          boolean isDelivery =
-              tx.findCommand(target.threadId(), checkSeq)
-                  .flatMap(c -> tx.findJoin(c.idempotencyKey()))
-                  .map(
-                      j ->
-                          target.threadId().equals(j.parentThreadId())
-                              && Objects.equals(j.deliveryCommandSequence(), checkSeq))
-                  .orElse(false);
-          if (!isDelivery) {
-            allPrecedingWereDeliveries = false;
-            break;
-          }
-        }
-      } else {
-        allPrecedingWereDeliveries = false;
-      }
-      if (!allPrecedingWereDeliveries) {
-        throw conflict(
-            HarnessRuntimeConflictException.Reason.COMMAND_REPLAY_ORDER_MISMATCH,
-            "existing commands on thread "
-                + target.threadId()
-                + " start at sequence "
-                + firstSequence
-                + " while the request expected "
-                + target.expectedNextCommandSequence());
-      }
+      throw conflict(
+          HarnessRuntimeConflictException.Reason.COMMAND_REPLAY_ORDER_MISMATCH,
+          "existing commands on thread "
+              + target.threadId()
+              + " start at sequence "
+              + firstSequence
+              + " while the request expected "
+              + target.expectedNextCommandSequence());
     }
     for (int i = 0; i < ordered.size(); i++) {
       if (ordered.get(i).sequence() != Math.addExact(firstSequence, (long) i)) {

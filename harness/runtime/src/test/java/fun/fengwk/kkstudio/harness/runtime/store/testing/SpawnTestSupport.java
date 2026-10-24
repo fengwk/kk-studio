@@ -179,7 +179,6 @@ public final class SpawnTestSupport {
             ? SpawnTrigger.RUNTIME
             : notify ? SpawnTrigger.MODEL_TOOL : SpawnTrigger.CONTROLLER,
         ticket.delivery(),
-        notify,
         new SpawnRequest.Budget(
             ticket.maxTurns(),
             ticket.maxDepth(),

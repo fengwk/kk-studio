@@ -1018,24 +1018,6 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     @Override
-    public List<ThreadJoin> loadPendingDeliveries(UUID parentThreadId) {
-      checkOpen();
-      Objects.requireNonNull(parentThreadId, "parentThreadId");
-      return state.joins.values().stream()
-          .filter(
-              join ->
-                  parentThreadId.equals(join.parentThreadId())
-                      && join.matched()
-                      && join.deliveryCommandSequence() == null
-                      && join.delivery() == JoinDelivery.NOTIFY_PARENT
-                      && join.supersededByInvocationId() == null)
-          .sorted(
-              Comparator.comparing(ThreadJoin::createdAt)
-                  .thenComparing(ThreadJoin::invocationId, UuidOrder.COMPARATOR))
-          .toList();
-    }
-
-    @Override
     public int countIncompleteChildJoins(UUID parentThreadId) {
       checkOpen();
       Objects.requireNonNull(parentThreadId, "parentThreadId");
@@ -1046,7 +1028,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
                       parentThreadId.equals(join.parentThreadId())
                           && !join.matched()
                           && join.supersededByInvocationId() == null
-                          && join.countsTowardQuota())
+                          && join.delivery() == JoinDelivery.NOTIFY_PARENT)
               .count();
     }
 
@@ -1071,7 +1053,8 @@ public final class InMemoryHarnessStore implements HarnessStore {
           state.joins.values().stream()
               .filter(
                   join ->
-                      join.countsTowardQuota()
+                      join.parentThreadId() != null
+                          && join.delivery() == JoinDelivery.NOTIFY_PARENT
                           && !join.matched()
                           && join.supersededByInvocationId() == null)
               .count();

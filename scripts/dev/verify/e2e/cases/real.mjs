@@ -187,39 +187,20 @@ function builtinModelChoice(model) {
  *
  * 各字段含义（依据当前各 Java StreamAccumulator 实现）：
  * - inputTokens: 互斥扣除 cached / cacheWrite 后的普通输入 token
- * - outputTokens: 互斥扣除 reasoning 后的普通输出 token
+ * - outputTokens: 包含 reasoning 的输出总量
  * - cacheReadTokens: 命中的提示缓存 token
- * - cacheWriteTokens: 写入的 5m 提示缓存 token（Anthropic / OpenAI Responses）
- * - cacheWriteLongTokens: 写入的 1h 提示缓存 token（Anthropic）
- * - reasoningTokens: 推理 token（Gemini: thoughtsTokenCount; OpenAI: reasoning_tokens; DeepSeek: reasoning_tokens; Anthropic: 0L，因已计入 output_tokens 不重复计费）
- * - providerTotalTokens: 厂商报告的总 token（Anthropic 为 0L/未提供）
+ * - cacheWriteTokens: 缓存写入总量，cacheWriteByTtl 仅是其 TTL 秒数拆分
+ * - reasoningTokens: 输出总量的子集，未报告时为 null
+ * - providerTotalTokens: 厂商原始总量，未报告时为 null，不合成
  */
 export function assertProviderUsageAlgebra(usage, providerType, { modelName } = {}) {
-  assert(usage && typeof usage === 'object', `usage must be an object: ${safeDiagnosticJson(usage)}`)
-
-  const requiredFields = [
-    'inputTokens',
-    'outputTokens',
-    'cacheReadTokens',
-    'cacheWriteTokens',
-    'cacheWriteLongTokens',
-    'reasoningTokens',
-    'providerTotalTokens',
-  ]
-  for (const field of requiredFields) {
-    const value = usage[field]
-    assert(
-      typeof value === 'number' && Number.isSafeInteger(value) && value >= 0,
-      `usage.${field} must be a non-negative safe integer, got: ${value} in ${safeDiagnosticJson(usage)}`,
-    )
-  }
+  assertUsageShape(usage)
 
   const {
     inputTokens,
     outputTokens,
     cacheReadTokens,
     cacheWriteTokens,
-    cacheWriteLongTokens,
     reasoningTokens,
     providerTotalTokens,
   } = usage
@@ -228,18 +209,15 @@ export function assertProviderUsageAlgebra(usage, providerType, { modelName } = 
     case 'google': {
       // Gemini 协议：
       // wire prompt = inputTokens + cacheReadTokens
-      // wire candidates = outputTokens
-      // wire thoughts = reasoningTokens
-      // 不支持 cacheWrite / cacheWriteLong
+      // outputTokens 已包含 wire candidates + thoughts；不支持缓存写入。
       assert(cacheWriteTokens === 0, `Gemini cacheWriteTokens must be 0, got: ${cacheWriteTokens}`)
-      assert(cacheWriteLongTokens === 0, `Gemini cacheWriteLongTokens must be 0, got: ${cacheWriteLongTokens}`)
 
-      // providerTotal = prompt + candidates + thoughts = inputTokens + cacheReadTokens + outputTokens + reasoningTokens
+      // providerTotal = prompt + candidates + thoughts
       if (providerTotalTokens > 0) {
-        const expectedTotal = inputTokens + cacheReadTokens + outputTokens + reasoningTokens
+        const expectedTotal = inputTokens + cacheReadTokens + outputTokens
         assert(
           providerTotalTokens === expectedTotal,
-          `Gemini providerTotalTokens algebra mismatch: expected input(${inputTokens}) + cacheRead(${cacheReadTokens}) + output(${outputTokens}) + reasoning(${reasoningTokens}) = ${expectedTotal}, got ${providerTotalTokens}`,
+          `Gemini providerTotalTokens algebra mismatch: expected ${expectedTotal}, got ${providerTotalTokens}`,
         )
       }
       break
@@ -248,24 +226,10 @@ export function assertProviderUsageAlgebra(usage, providerType, { modelName } = 
     case 'openai_responses': {
       // OpenAI Responses 协议：
       // rawInputTokens = inputTokens + cacheReadTokens + cacheWriteTokens
-      // rawOutputTokens = outputTokens + reasoningTokens
-      // 不支持 cacheWriteLong
-      assert(cacheWriteLongTokens === 0, `OpenAI Responses cacheWriteLongTokens must be 0, got: ${cacheWriteLongTokens}`)
+      // rawOutputTokens = outputTokens（已含 reasoning）
 
       const wireInput = inputTokens + cacheReadTokens + cacheWriteTokens
-      const wireOutput = outputTokens + reasoningTokens
-      assert(
-        cacheReadTokens <= wireInput,
-        `cacheReadTokens (${cacheReadTokens}) must be <= wireInput (${wireInput})`,
-      )
-      assert(
-        cacheWriteTokens <= wireInput,
-        `cacheWriteTokens (${cacheWriteTokens}) must be <= wireInput (${wireInput})`,
-      )
-      assert(
-        reasoningTokens <= wireOutput,
-        `reasoningTokens (${reasoningTokens}) must be <= wireOutput (${wireOutput})`,
-      )
+      const wireOutput = outputTokens
 
       // providerTotal = rawInput + rawOutput = wireInput + wireOutput
       if (providerTotalTokens > 0) {
@@ -280,36 +244,24 @@ export function assertProviderUsageAlgebra(usage, providerType, { modelName } = 
 
     case 'anthropic': {
       // Anthropic 协议：
-      // inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens (5m), cacheWriteLongTokens (1h)
-      // reasoningTokens 在 Anthropic wire outputTokens 中包含，归一化 DTO 设为 0L 避免重复计费
-      assert(reasoningTokens === 0, `Anthropic reasoningTokens must be 0 in normalized DTO, got: ${reasoningTokens}`)
+      // 当前 accumulator 不报告 reasoning 拆分，保留 null。
+      assert(reasoningTokens === null, `Anthropic reasoningTokens must be null, got: ${reasoningTokens}`)
 
-      // providerTotalTokens 必须恰好为 0（Wire 响应未提供 total_tokens 字段，归一化设为 0L）
+      // Wire 未报告 total_tokens；保留 null，不合成总量。
       assert(
-        providerTotalTokens === 0,
-        `Anthropic providerTotalTokens must be 0 in normalized DTO, got: ${providerTotalTokens}`,
+        providerTotalTokens === null,
+        `Anthropic providerTotalTokens must be null in normalized DTO, got: ${providerTotalTokens}`,
       )
       break
     }
 
     case 'openai': {
-      // DeepSeek (通过 OpenAI Chat Completions 协议接入)：
-      // promptTokens = inputTokens + cacheReadTokens
-      // completionTokens = outputTokens + reasoningTokens
-      // 不支持 cacheWrite / cacheWriteLong
-      assert(cacheWriteTokens === 0, `DeepSeek/OpenAI Chat cacheWriteTokens must be 0, got: ${cacheWriteTokens}`)
-      assert(cacheWriteLongTokens === 0, `DeepSeek/OpenAI Chat cacheWriteLongTokens must be 0, got: ${cacheWriteLongTokens}`)
+      // OpenAI Chat accumulator 也解析 cache_write_tokens/cache_creation_input_tokens。
+      // promptTokens = inputTokens + cacheReadTokens + cacheWriteTokens
+      // completionTokens = outputTokens（已含 reasoning）。
 
-      const wirePrompt = inputTokens + cacheReadTokens
-      const wireCompletion = outputTokens + reasoningTokens
-      assert(
-        cacheReadTokens <= wirePrompt,
-        `cacheReadTokens (${cacheReadTokens}) must be <= wirePrompt (${wirePrompt})`,
-      )
-      assert(
-        reasoningTokens <= wireCompletion,
-        `reasoningTokens (${reasoningTokens}) must be <= wireCompletion (${wireCompletion})`,
-      )
+      const wirePrompt = inputTokens + cacheReadTokens + cacheWriteTokens
+      const wireCompletion = outputTokens
 
       // providerTotal = wirePrompt + wireCompletion
       if (providerTotalTokens > 0) {
@@ -334,116 +286,56 @@ export function safeDiagnosticJson(obj, indent = 2) {
   return JSON.stringify(sanitizeArtifact(obj), null, indent)
 }
 
-/**
- * 严格断言 Assistant Metadata Usage 七字段均为非负安全整数，且当 requirePositiveIO 为 true 时校验事实有效。
- */
+// 与 ModelUsage 一致：四个互斥分类，两个 nullable 原始报告，TTL 拆分不额外计数。
+function assertUsageShape(usage) {
+  assert(usage && typeof usage === 'object' && !Array.isArray(usage), 'usage must be an object')
+  const count = (value, field) => assert(
+    Number.isSafeInteger(value) && value >= 0,
+    `usage.${field} must be a non-negative safe integer`,
+  )
+  for (const field of ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens']) {
+    count(usage[field], field)
+  }
+  for (const field of ['reasoningTokens', 'providerTotalTokens']) {
+    if (usage[field] !== null) {
+      count(usage[field], field)
+    }
+  }
+  assert(
+    usage.reasoningTokens === null || usage.reasoningTokens <= usage.outputTokens,
+    'reasoningTokens must not exceed outputTokens',
+  )
+  const ttl = usage.cacheWriteByTtl
+  if (ttl !== undefined && ttl !== null) {
+    assert(typeof ttl === 'object' && !Array.isArray(ttl), 'cacheWriteByTtl must be an object')
+    let sum = 0
+    for (const [seconds, tokens] of Object.entries(ttl)) {
+      assert(/^[1-9]\d*$/.test(seconds) && Number.isSafeInteger(Number(seconds)),
+        'cacheWriteByTtl keys must be canonical positive seconds')
+      count(tokens, `cacheWriteByTtl.${seconds}`)
+      sum += tokens
+      assert(Number.isSafeInteger(sum), 'cacheWriteByTtl sum must be a safe integer')
+    }
+    // 空拆分表示未知 TTL；非空拆分必须守恒。
+    if (Object.keys(ttl).length > 0) {
+      assert(sum === usage.cacheWriteTokens, 'cacheWriteByTtl must sum to cacheWriteTokens')
+    }
+  }
+}
+
+/** 校验当前 ModelUsage schema；需要真实 IO 时使用分类输入和已含 reasoning 的输出总量。 */
 export function assertAssistantUsage(
   usage,
   { requirePositiveIO = true, providerType, modelName } = {},
 ) {
-  assert(usage && typeof usage === 'object', `usage must be an object: ${safeDiagnosticJson(usage)}`)
-  const requiredFields = [
-    'inputTokens',
-    'outputTokens',
-    'cacheReadTokens',
-    'cacheWriteTokens',
-    'cacheWriteLongTokens',
-    'reasoningTokens',
-    'providerTotalTokens',
-  ]
-  for (const field of requiredFields) {
-    const value = usage[field]
-    assert(
-      typeof value === 'number' && Number.isSafeInteger(value) && value >= 0,
-      `usage.${field} must be a non-negative safe integer, got: ${value} in ${safeDiagnosticJson(usage)}`,
-    )
-  }
+  assertUsageShape(usage)
 
   if (requirePositiveIO) {
-    if (providerType === 'anthropic') {
-      const totalInput =
-        usage.inputTokens
-        + usage.cacheReadTokens
-        + usage.cacheWriteTokens
-        + usage.cacheWriteLongTokens
-      assert(
-        totalInput > 0,
-        `inputTokens + cacheReadTokens + cacheWriteTokens + cacheWriteLongTokens must be > 0: ${safeDiagnosticJson(usage)}`,
-      )
-      assert(
-        usage.outputTokens > 0,
-        `outputTokens must be > 0: ${safeDiagnosticJson(usage)}`,
-      )
-      assert(
-        usage.providerTotalTokens === 0,
-        `Anthropic providerTotalTokens must be 0: ${safeDiagnosticJson(usage)}`,
-      )
-    } else if (providerType === 'openai_responses') {
-      const totalInput =
-        usage.inputTokens
-        + usage.cacheReadTokens
-        + usage.cacheWriteTokens
-        + usage.cacheWriteLongTokens
-      assert(
-        totalInput > 0,
-        `inputTokens + cacheReadTokens + cacheWriteTokens + cacheWriteLongTokens must be > 0: ${safeDiagnosticJson(usage)}`,
-      )
-      assert(
-        usage.outputTokens + usage.reasoningTokens > 0,
-        `outputTokens + reasoningTokens must be > 0: ${safeDiagnosticJson(usage)}`,
-      )
-      // OpenAI Responses 协议允许上游缺失 total_tokens 时的 providerTotalTokens=0；若 >0 则代数检查由 assertProviderUsageAlgebra 负责
-    } else if (providerType === 'openai') {
-      assert(
-        usage.inputTokens + usage.cacheReadTokens > 0,
-        `inputTokens + cacheReadTokens must be > 0: ${safeDiagnosticJson(usage)}`,
-      )
-      assert(
-        usage.outputTokens + usage.reasoningTokens > 0,
-        `outputTokens + reasoningTokens must be > 0: ${safeDiagnosticJson(usage)}`,
-      )
-      // OpenAI Chat 协议允许上游缺失 total_tokens 时的 providerTotalTokens=0；若 >0 则代数检查由 assertProviderUsageAlgebra 负责
-    } else if (providerType === 'google') {
-      assert(
-        usage.inputTokens + usage.cacheReadTokens > 0,
-        `inputTokens + cacheReadTokens must be > 0: ${safeDiagnosticJson(usage)}`,
-      )
-      assert(
-        usage.outputTokens + usage.reasoningTokens > 0,
-        `outputTokens + reasoningTokens must be > 0: ${safeDiagnosticJson(usage)}`,
-      )
-      assert(
-        usage.providerTotalTokens > 0,
-        `providerTotalTokens must be > 0: ${safeDiagnosticJson(usage)}`,
-      )
-    } else if (!providerType) {
-      // 向后兼容旧单元测试：未指定 providerType 时严格要求 inputTokens > 0 与 outputTokens > 0
-      assert(
-        usage.inputTokens > 0,
-        `usage.inputTokens must be > 0: ${safeDiagnosticJson(usage)}`,
-      )
-      assert(
-        usage.outputTokens > 0,
-        `outputTokens must be > 0: ${safeDiagnosticJson(usage)}`,
-      )
-      assert(
-        usage.providerTotalTokens > 0,
-        `usage.providerTotalTokens must be > 0: ${safeDiagnosticJson(usage)}`,
-      )
-    } else {
-      assert(
-        usage.inputTokens + usage.cacheReadTokens > 0,
-        `inputTokens + cacheReadTokens must be > 0: ${safeDiagnosticJson(usage)}`,
-      )
-      assert(
-        usage.outputTokens + usage.reasoningTokens > 0,
-        `outputTokens + reasoningTokens must be > 0: ${safeDiagnosticJson(usage)}`,
-      )
-      assert(
-        usage.providerTotalTokens > 0,
-        `providerTotalTokens must be > 0: ${safeDiagnosticJson(usage)}`,
-      )
-    }
+    assert(
+      usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens > 0,
+      `categorized inputTokens must be > 0: ${safeDiagnosticJson(usage)}`,
+    )
+    assert(usage.outputTokens > 0, `outputTokens must be > 0: ${safeDiagnosticJson(usage)}`)
   }
 
   if (providerType) {
@@ -723,14 +615,14 @@ for (const def of REAL_MODEL_DEFINITIONS) {
           // 显式 allowlist：不输出回复、raw provider config/URL/error 或额外 usage 属性。
           const {
             inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens,
-            cacheWriteLongTokens, reasoningTokens, providerTotalTokens,
+            cacheWriteByTtl, reasoningTokens, providerTotalTokens,
           } = usage
-          const inputTotal = inputTokens + cacheReadTokens + cacheWriteTokens + cacheWriteLongTokens
+          const inputTotal = inputTokens + cacheReadTokens + cacheWriteTokens
           evidence.rounds.push({
             ordinal: evidence.rounds.length + 1,
             usage: {
               inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens,
-              cacheWriteLongTokens, reasoningTokens, providerTotalTokens,
+              cacheWriteByTtl, reasoningTokens, providerTotalTokens,
             },
             cacheReadRatio: inputTotal > 0 ? cacheReadTokens / inputTotal : 0,
           })
@@ -801,22 +693,6 @@ for (const def of REAL_MODEL_DEFINITIONS) {
           providerType: def.providerType,
           modelName: def.modelName,
         })
-
-        if (def.providerType === 'google' || def.providerType === 'openai') {
-          assert(
-            firstUsage.cacheWriteTokens === 0,
-            `${def.providerType} does not support cache write, cacheWriteTokens must be 0`,
-          )
-          assert(
-            firstUsage.cacheWriteLongTokens === 0,
-            `${def.providerType} cacheWriteLongTokens must be 0`,
-          )
-        } else if (def.providerType === 'openai_responses' || def.providerType === 'anthropic') {
-          assert(
-            firstUsage.cacheWriteTokens >= 0,
-            `${def.providerType} cacheWriteTokens must be non-negative`,
-          )
-        }
 
         recordRound(firstUsage)
         let cacheHit = false

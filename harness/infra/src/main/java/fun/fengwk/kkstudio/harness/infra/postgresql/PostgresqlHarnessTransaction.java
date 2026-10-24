@@ -986,8 +986,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
             invocation_id, request_hash, parent_thread_id, child_thread_id,
             source_command_sequence, agent, max_turns, reminder_turn,
             terminal_entry_id, final_answer_entry_id, delivery_command_sequence,
-            created_at, updated_at, delivery, counts_toward_quota, superseded_by_invocation_id
-        ) values (?, ?, ?, ?, ?, ?, ?, ?, null, null, null, ?, ?, ?, ?, null)
+            created_at, updated_at, delivery, superseded_by_invocation_id
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, null, null, null, ?, ?, ?, null)
         """,
         join.invocationId(),
         join.requestHash(),
@@ -999,8 +999,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
         join.reminderTurn(),
         PostgresqlHarnessRows.timestamp(join.createdAt()),
         PostgresqlHarnessRows.timestamp(join.updatedAt()),
-        join.delivery().name(),
-        join.countsTowardQuota());
+        join.delivery().name());
   }
 
   @Override
@@ -1029,22 +1028,6 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   @Override
-  public List<ThreadJoin> loadPendingDeliveries(UUID parentThreadId) {
-    checkOpen();
-    Objects.requireNonNull(parentThreadId, "parentThreadId");
-    return queryList(
-        """
-        select * from harness_thread_join
-        where parent_thread_id = ? and terminal_entry_id is not null
-          and delivery_command_sequence is null
-          and delivery = 'NOTIFY_PARENT' and superseded_by_invocation_id is null
-        order by created_at, invocation_id
-        """,
-        PostgresqlHarnessRows.JOIN,
-        parentThreadId);
-  }
-
-  @Override
   public int countIncompleteChildJoins(UUID parentThreadId) {
     checkOpen();
     Objects.requireNonNull(parentThreadId, "parentThreadId");
@@ -1054,7 +1037,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
             select count(*)
             from harness_thread_join
             where parent_thread_id = ? and terminal_entry_id is null
-              and superseded_by_invocation_id is null and counts_toward_quota
+              and superseded_by_invocation_id is null and delivery = 'NOTIFY_PARENT'
             """,
             Integer.class,
             parentThreadId);
@@ -1070,7 +1053,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
             select count(*)
             from harness_thread_join
             where parent_thread_id is not null and terminal_entry_id is null
-              and superseded_by_invocation_id is null and counts_toward_quota
+              and superseded_by_invocation_id is null and delivery = 'NOTIFY_PARENT'
             """,
             Integer.class);
     return count != null ? count : 0;
