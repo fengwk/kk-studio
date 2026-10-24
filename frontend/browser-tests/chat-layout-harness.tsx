@@ -106,9 +106,9 @@ const SAMPLE_BRANCH_USAGE: TurnUsage = {
   cacheRead: 4000,
   cacheWrite: 0,
   reasoning: 150,
-  providerTotal: 16950,
+  providerTotal: 16800,
   cost: { currency: 'USD', amount: '0.042' },
-  decodeTokens: 950,
+  decodeTokens: 800,
   decodeDurationMillis: 2000,
   contextInputTokens: 16000,
 }
@@ -119,11 +119,11 @@ const SAMPLE_LONG_BRANCH_USAGE: TurnUsage = {
   cacheRead: 234567,
   cacheWrite: 345678,
   reasoning: 42000,
-  providerTotal: 1357900,
+  providerTotal: 1358022,
   cost: { currency: 'USD', amount: '123456.789' },
-  decodeTokens: 987654321,
+  decodeTokens: 654321,
   decodeDurationMillis: 10000,
-  contextInputTokens: 890123,
+  contextInputTokens: 703701,
 }
 
 export function ChatLayoutHarnessApp() {
@@ -273,7 +273,16 @@ function TurnUsageHarness() {
     if (withUsage) {
       append('assistant-with-usage', 'MESSAGE', {
         message: { role: 'ASSISTANT', contents: [{ type: 'text', text: '已生成的回答' }] },
-        assistantMetadata: { usage: { inputTokens: 10, outputTokens: 20 } },
+        assistantMetadata: {
+          usage: {
+            inputTokens: 10,
+            outputTokens: 20,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            reasoningTokens: null,
+            providerTotalTokens: null,
+          },
+        },
       })
     }
     append(`error-${id}`, 'ASSISTANT_ERROR', {
