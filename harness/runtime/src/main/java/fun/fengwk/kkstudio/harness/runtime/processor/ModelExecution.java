@@ -2,6 +2,10 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 
 import lombok.extern.slf4j.Slf4j;
 
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitKind;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitLedger;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelAttemptFailure;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelGroupExecution;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelGroupMemberExecution;
@@ -66,8 +70,12 @@ final class ModelExecution implements ModelGateway.Sink, ClaimAdmissionGuard.Gua
   private final RealtimeEventSink realtimeEventSink;
   private final ClaimedWork claim;
   private final UUID invocationId;
+  private final UUID executionId = UUID.randomUUID();
   private final UUID threadId;
   private final int attempt;
+
+  /** 登记成功后冻结的本代身份。确认只比对这一身份，不读取之后可能已更换的 lease。 */
+  private volatile ExecutionExitFact registered;
 
   /**
    * prepare 时冻结的直接 owner-settled 事实：本 Thread 当前有效未完成票据的 delivery 为 SETTLE_OWNER_TURN。只用于摘要完整性校验 （截断
@@ -206,6 +214,44 @@ final class ModelExecution implements ModelGateway.Sink, ClaimAdmissionGuard.Gua
     return invocationId;
   }
 
+  /** body 与本地资源释放之后确认 Studio 退出。持久化失败保持未确认。 */
+  void confirmStudioExit() {
+    confirm(ExecutionExitState.STUDIO_EXITED);
+  }
+
+  private void confirm(ExecutionExitState state) {
+    ExecutionExitFact local = registered;
+    if (local == null) {
+      log.warn("model execution {} was not registered and remains unconfirmed", executionId);
+      return;
+    }
+    try {
+      store.transaction(
+          tx -> {
+            ExecutionExitLedger.lockAncestorChain(tx, threadId);
+            if (tx.lockThread(threadId).isEmpty()) {
+              throw new IllegalStateException(
+                  "thread " + threadId + " disappeared before model execution confirmation");
+            }
+            if (ExecutionExitLedger.confirm(tx, local.executionId(), state).isEmpty()) {
+              throw new IllegalStateException(
+                  "model execution " + local.executionId() + " remains unconfirmed");
+            }
+            ExecutionExitLedger.advanceAfterConfirmation(tx, threadId);
+            return null;
+          });
+    } catch (RuntimeException failure) {
+      log.warn(
+          "cannot confirm model execution exit for {}: {}",
+          local.executionId(),
+          ProcessorExceptions.describe(failure));
+    }
+  }
+
+  private UUID executionId() {
+    return executionId;
+  }
+
   /** 本 execution 持有的 claim（供 processor 的 duplicate admission fencing 比较 token）。 */
   @Override
   public ClaimedWork claim() {
@@ -245,6 +291,16 @@ final class ModelExecution implements ModelGateway.Sink, ClaimAdmissionGuard.Gua
                     }
                     tx.updateModelInvocation(model.markRunning(now));
                     tx.updateThread(thread.touchVersion(now));
+                    registered =
+                        ExecutionExitLedger.register(
+                            tx,
+                            executionId(),
+                            threadId,
+                            invocationId,
+                            attempt,
+                            claim.leaseToken(),
+                            ExecutionExitKind.MODEL,
+                            null);
                     return true;
                   }));
     } catch (RuntimeException failure) {
@@ -252,6 +308,13 @@ final class ModelExecution implements ModelGateway.Sink, ClaimAdmissionGuard.Gua
       committed = false;
     }
     return committed && !abandoned.get();
+  }
+
+  /** RUNNING 已登记但执行线程确定没有启动。登记失败时不确认。 */
+  void confirmNotStarted() {
+    if (registered != null) {
+      confirm(ExecutionExitState.NOT_STARTED);
+    }
   }
 
   /**

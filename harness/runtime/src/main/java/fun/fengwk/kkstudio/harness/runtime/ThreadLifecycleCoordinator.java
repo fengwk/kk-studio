@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitLedger;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.NotificationKind;
@@ -134,7 +135,7 @@ public final class ThreadLifecycleCoordinator {
     if (incomplete.isEmpty()) {
       return;
     }
-    if (!includeUnappliedSource && !isQuiescent(tx, child)) {
+    if (!isQuiescent(tx, child)) {
       // 本次终态不是委派收敛点：子执行还欠未完成的直接子 Join 或待处理输入，只保留未匹配 Join，
       // 不向父结算、不自唤醒忙轮询；后续真实输入/子结算路径会再次到达终止边界。
       return;
@@ -189,7 +190,11 @@ public final class ThreadLifecycleCoordinator {
                         && child.id().equals(start.ownerThreadId()))
             .orElse(false);
     return ThreadActivityEvaluator.isQuiescent(
-        locked.context(), hasOpenCompaction, hasInputDemand, incompleteChildJoins);
+        locked.context(),
+        hasOpenCompaction,
+        hasInputDemand,
+        incompleteChildJoins,
+        ExecutionExitLedger.hasUnconfirmed(tx, child.id()));
   }
 
   /**

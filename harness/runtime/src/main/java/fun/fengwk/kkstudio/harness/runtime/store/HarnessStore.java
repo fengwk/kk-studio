@@ -3,6 +3,8 @@ package fun.fengwk.kkstudio.harness.runtime.store;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.StoppedThreadReceipt;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
@@ -597,5 +599,25 @@ public interface HarnessStore {
      * 删除后该行不存在。调用方必须在删除前完成严格物化校验。
      */
     boolean deleteModelInvocation(UUID modelInvocationId);
+
+    /**
+     * 在已锁定的 Thread 内登记一次具体执行代次。身份不可更换：相同 executionId 必须携带完全相同的身份并返回已有事实；同一 executionId 的不同身份抛
+     * {@link IllegalArgumentException}。不获取新的行锁，因此可安全发生在 Thread 锁之后。
+     */
+    ExecutionExitFact registerExecution(ExecutionExitFact fact);
+
+    /**
+     * 把已登记代次单向推进到退出证据。写入前必须匹配 thread、invocation、attempt、owner lease、kind 与 parent；任一不匹配抛 {@link
+     * IllegalArgumentException} 且不修改行。重复的相同证据幂等并返回原事实；已确认后的不同证据也保持原事实。不存在返回 {@link
+     * Optional#empty()}。不要求 Work 仍存在，也不获取新的行锁。
+     */
+    Optional<ExecutionExitFact> confirmExecution(
+        ExecutionExitFact expected, ExecutionExitState state);
+
+    /** 读取一个 Thread 上尚未确认退出的执行代次；不依赖 open turn，也不产生锁。 */
+    List<ExecutionExitFact> loadUnconfirmedExecutions(UUID threadId);
+
+    /** 按 executionId 读取执行代次；不存在返回 {@link Optional#empty()}。 */
+    Optional<ExecutionExitFact> findExecution(UUID executionId);
   }
 }

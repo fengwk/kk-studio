@@ -42,11 +42,12 @@ class ThreadActivityEvaluatorTest {
             new ThreadContext.IdleOrHistorical(),
             false,
             false,
-            0));
+            0,
+            false));
     assertEquals(
         ThreadRuntimeStatus.RUNNING,
         ThreadActivityEvaluator.evaluate(
-            ThreadExecutionControl.RUNNABLE, continuation(), false, false, 0));
+            ThreadExecutionControl.RUNNABLE, continuation(), false, false, 0, false));
     assertEquals(
         ThreadRuntimeStatus.RUNNING,
         ThreadActivityEvaluator.evaluate(
@@ -54,7 +55,8 @@ class ThreadActivityEvaluatorTest {
             modelActive(ModelInvocationStatus.READY),
             false,
             false,
-            0));
+            0,
+            false));
     assertEquals(
         ThreadRuntimeStatus.RUNNING,
         ThreadActivityEvaluator.evaluate(
@@ -62,7 +64,8 @@ class ThreadActivityEvaluatorTest {
             modelActive(ModelInvocationStatus.RUNNING),
             false,
             false,
-            0));
+            0,
+            false));
     assertEquals(
         ThreadRuntimeStatus.RUNNING,
         ThreadActivityEvaluator.evaluate(
@@ -70,7 +73,8 @@ class ThreadActivityEvaluatorTest {
             new ThreadContext.ModelTerminalPending(model()),
             false,
             false,
-            0));
+            0,
+            false));
     assertEquals(
         ThreadRuntimeStatus.RUNNING,
         ThreadActivityEvaluator.evaluate(
@@ -78,7 +82,8 @@ class ThreadActivityEvaluatorTest {
             new ThreadContext.ToolTerminalPending(model(), assistant(), List.of(), List.of()),
             false,
             false,
-            0));
+            0,
+            false));
     assertEquals(
         ThreadRuntimeStatus.RUNNING,
         ThreadActivityEvaluator.evaluate(
@@ -86,7 +91,8 @@ class ThreadActivityEvaluatorTest {
             toolActive(ToolInvocationStatus.WAITING_APPROVAL),
             false,
             false,
-            0));
+            0,
+            false));
     assertEquals(
         ThreadRuntimeStatus.RUNNING,
         ThreadActivityEvaluator.evaluate(
@@ -94,7 +100,8 @@ class ThreadActivityEvaluatorTest {
             toolActive(ToolInvocationStatus.WAITING_INPUT),
             false,
             false,
-            0));
+            0,
+            false));
     assertEquals(
         ThreadRuntimeStatus.RUNNING,
         ThreadActivityEvaluator.evaluate(
@@ -102,7 +109,8 @@ class ThreadActivityEvaluatorTest {
             toolActive(ToolInvocationStatus.RUNNING),
             false,
             false,
-            0));
+            0,
+            false));
     assertEquals(
         ThreadRuntimeStatus.RUNNING,
         ThreadActivityEvaluator.evaluate(
@@ -110,7 +118,8 @@ class ThreadActivityEvaluatorTest {
             toolActive(ToolInvocationStatus.READY),
             false,
             false,
-            0));
+            0,
+            false));
   }
 
   @Test
@@ -121,60 +130,68 @@ class ThreadActivityEvaluatorTest {
     // 1. 参数校验
     assertThrows(
         NullPointerException.class,
-        () -> ThreadActivityEvaluator.evaluate(null, idle, false, false, 0));
+        () -> ThreadActivityEvaluator.evaluate(null, idle, false, false, 0, false));
     assertThrows(
         NullPointerException.class,
         () ->
             ThreadActivityEvaluator.evaluate(
-                ThreadExecutionControl.RUNNABLE, null, false, false, 0));
+                ThreadExecutionControl.RUNNABLE, null, false, false, 0, false));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             ThreadActivityEvaluator.evaluate(
-                ThreadExecutionControl.RUNNABLE, idle, false, false, -1));
+                ThreadExecutionControl.RUNNABLE, idle, false, false, -1, false));
     assertThrows(
         NullPointerException.class,
-        () -> ThreadActivityEvaluator.isQuiescent(null, false, false, 0));
+        () -> ThreadActivityEvaluator.isQuiescent(null, false, false, 0, false));
     assertThrows(
         IllegalArgumentException.class,
-        () -> ThreadActivityEvaluator.isQuiescent(idle, false, false, -1));
+        () -> ThreadActivityEvaluator.isQuiescent(idle, false, false, -1, false));
 
     // 2. 本地在途执行与 open compaction：始终 RUNNING
     assertEquals(
         ThreadRuntimeStatus.RUNNING,
-        ThreadActivityEvaluator.evaluate(ThreadExecutionControl.RUNNABLE, active, false, false, 0));
+        ThreadActivityEvaluator.evaluate(
+            ThreadExecutionControl.RUNNABLE, active, false, false, 0, false));
     assertEquals(
         ThreadRuntimeStatus.RUNNING,
-        ThreadActivityEvaluator.evaluate(ThreadExecutionControl.STOPPED, active, false, false, 0));
+        ThreadActivityEvaluator.evaluate(
+            ThreadExecutionControl.STOPPED, active, false, false, 0, false));
     assertEquals(
         ThreadRuntimeStatus.RUNNING,
-        ThreadActivityEvaluator.evaluate(ThreadExecutionControl.RUNNABLE, idle, true, false, 0));
+        ThreadActivityEvaluator.evaluate(
+            ThreadExecutionControl.RUNNABLE, idle, true, false, 0, false));
 
     // 3. input demand 与 executionControl 正交性
     assertEquals(
         ThreadRuntimeStatus.RUNNING,
-        ThreadActivityEvaluator.evaluate(ThreadExecutionControl.RUNNABLE, idle, false, true, 0));
+        ThreadActivityEvaluator.evaluate(
+            ThreadExecutionControl.RUNNABLE, idle, false, true, 0, false));
     assertEquals(
         ThreadRuntimeStatus.IDLE,
-        ThreadActivityEvaluator.evaluate(ThreadExecutionControl.STOPPED, idle, false, true, 0));
+        ThreadActivityEvaluator.evaluate(
+            ThreadExecutionControl.STOPPED, idle, false, true, 0, false));
     assertEquals(
         ThreadRuntimeStatus.WAITING,
-        ThreadActivityEvaluator.evaluate(ThreadExecutionControl.STOPPED, idle, false, true, 1));
+        ThreadActivityEvaluator.evaluate(
+            ThreadExecutionControl.STOPPED, idle, false, true, 1, false));
 
     // 4. WAITING 与 IDLE
     assertEquals(
         ThreadRuntimeStatus.WAITING,
-        ThreadActivityEvaluator.evaluate(ThreadExecutionControl.RUNNABLE, idle, false, false, 2));
+        ThreadActivityEvaluator.evaluate(
+            ThreadExecutionControl.RUNNABLE, idle, false, false, 2, false));
     assertEquals(
         ThreadRuntimeStatus.IDLE,
-        ThreadActivityEvaluator.evaluate(ThreadExecutionControl.RUNNABLE, idle, false, false, 0));
+        ThreadActivityEvaluator.evaluate(
+            ThreadExecutionControl.RUNNABLE, idle, false, false, 0, false));
 
     // 5. isQuiescent 收敛判断
-    assertTrue(ThreadActivityEvaluator.isQuiescent(idle, false, false, 0));
-    assertFalse(ThreadActivityEvaluator.isQuiescent(active, false, false, 0));
-    assertFalse(ThreadActivityEvaluator.isQuiescent(idle, true, false, 0));
-    assertFalse(ThreadActivityEvaluator.isQuiescent(idle, false, true, 0));
-    assertFalse(ThreadActivityEvaluator.isQuiescent(idle, false, false, 1));
+    assertTrue(ThreadActivityEvaluator.isQuiescent(idle, false, false, 0, false));
+    assertFalse(ThreadActivityEvaluator.isQuiescent(active, false, false, 0, false));
+    assertFalse(ThreadActivityEvaluator.isQuiescent(idle, true, false, 0, false));
+    assertFalse(ThreadActivityEvaluator.isQuiescent(idle, false, true, 0, false));
+    assertFalse(ThreadActivityEvaluator.isQuiescent(idle, false, false, 1, false));
   }
 
   private static List<ToolInvocation> toolInvocations(ToolInvocationStatus... statuses) {

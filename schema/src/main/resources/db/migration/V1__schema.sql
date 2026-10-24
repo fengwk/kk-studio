@@ -1494,6 +1494,52 @@ create index idx_harness_thread_stop_receipt_root
 
 comment on index idx_harness_thread_stop_receipt_root is '按 (root_thread_id, root_stop_request_id) 检索一次 Stop 产生的全部回执';
 
+create table harness_execution_exit (
+    execution_id uuid primary key,
+    thread_id uuid not null,
+    invocation_id uuid not null,
+    attempt integer not null check (attempt >= 1),
+    owner_lease_token varchar(128) not null,
+    kind varchar(16) not null,
+    parent_execution_id uuid,
+    state varchar(32) not null,
+    registered_at timestamptz(3) not null,
+    confirmed_at timestamptz(3),
+    constraint fk_harness_execution_exit_thread foreign key (thread_id) references harness_thread (id),
+    constraint fk_harness_execution_exit_parent foreign key (parent_execution_id)
+        references harness_execution_exit (execution_id),
+    constraint ck_harness_execution_exit_token check (
+        char_length(owner_lease_token) > 0 and owner_lease_token = btrim(owner_lease_token)
+    ),
+    constraint ck_harness_execution_exit_kind check (
+        (kind in ('MODEL', 'TOOL') and parent_execution_id is null)
+        or (kind = 'REMOTE' and parent_execution_id is not null and parent_execution_id <> execution_id)
+    ),
+    constraint ck_harness_execution_exit_state check (
+        (state = 'UNCONFIRMED' and confirmed_at is null)
+        or (state in ('STUDIO_EXITED', 'REMOTE_ACKNOWLEDGED', 'NOT_STARTED') and confirmed_at is not null)
+    ),
+    constraint ck_harness_execution_exit_time check (confirmed_at is null or confirmed_at >= registered_at)
+);
+
+comment on table harness_execution_exit is '具体执行代次的退出证据。独立于逻辑 Invocation 生命周期，不以 Invocation 外键跟随逻辑删除';
+comment on column harness_execution_exit.execution_id is '这一具体执行代次的不可变身份';
+comment on column harness_execution_exit.thread_id is '所属 Thread；按 Thread 查询，不依赖 open turn';
+comment on column harness_execution_exit.invocation_id is '关联的逻辑 Model 或 Tool invocation';
+comment on column harness_execution_exit.attempt is '该 invocation 的具体执行代次，从 1 开始';
+comment on column harness_execution_exit.owner_lease_token is '登记时持有的 Work lease token';
+comment on column harness_execution_exit.kind is 'MODEL、TOOL 或挂在本地 Tool 代次上的 REMOTE';
+comment on column harness_execution_exit.parent_execution_id is 'REMOTE 关联的本地 Tool 执行代次；本地执行为空';
+comment on column harness_execution_exit.state is '单向退出证据：未确认、Studio 退出、远端 ACK 或确定未启动';
+comment on column harness_execution_exit.registered_at is '登记时间（毫秒精度）';
+comment on column harness_execution_exit.confirmed_at is '退出证据确认时间（毫秒精度）；未确认时为空';
+
+create index idx_harness_execution_exit_thread_unconfirmed
+    on harness_execution_exit (thread_id, registered_at, execution_id)
+    where state = 'UNCONFIRMED';
+
+comment on index idx_harness_execution_exit_thread_unconfirmed is '按 Thread 读取尚未确认退出的执行代次';
+
 ------------------------------------------------------------------------------
 -- 3. Project / Issue business facts
 --

@@ -57,18 +57,24 @@ class ToolGatewayTest {
 
   @Test
   void executionFreezesTheKeyAndTheRequest() {
+    ToolGateway.RemoteExecutionObserver observer = recordingObserver();
     ToolGateway.Execution execution =
         new ToolGateway.Execution(
             UUID.fromString("00000000-0000-0000-0000-000000000009"),
             UUID.fromString("00000000-0000-0000-0000-000000000007"),
             UUID.fromString("00000000-0000-0000-0000-00000000000b"),
-            PortTestData.toolRequest());
+            1,
+            PortTestData.toolRequest(),
+            ToolApproval.notRequired(),
+            observer);
     assertEquals(UUID.fromString("00000000-0000-0000-0000-000000000009"), execution.invocationId());
     assertEquals(UUID.fromString("00000000-0000-0000-0000-000000000007"), execution.threadId());
     assertEquals(
         UUID.fromString("00000000-0000-0000-0000-00000000000b"), execution.assistantEntryId());
+    assertEquals(1, execution.attempt());
     assertEquals(PortTestData.toolRequest(), execution.request());
     assertEquals(ToolApproval.notRequired(), execution.approval());
+    assertSame(observer, execution.remoteExecutions());
     assertNull(execution.expectedFile());
     assertThrows(
         NullPointerException.class,
@@ -77,7 +83,10 @@ class ToolGatewayTest {
                 UUID.fromString("00000000-0000-0000-0000-000000000001"),
                 UUID.fromString("00000000-0000-0000-0000-000000000001"),
                 UUID.fromString("00000000-0000-0000-0000-000000000001"),
-                null));
+                1,
+                null,
+                ToolApproval.notRequired(),
+                observer));
     assertThrows(
         NullPointerException.class,
         () ->
@@ -85,7 +94,20 @@ class ToolGatewayTest {
                 UUID.fromString("00000000-0000-0000-0000-000000000001"),
                 UUID.fromString("00000000-0000-0000-0000-000000000001"),
                 UUID.fromString("00000000-0000-0000-0000-000000000001"),
+                1,
                 PortTestData.toolRequest(),
+                null,
+                observer));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new ToolGateway.Execution(
+                UUID.fromString("00000000-0000-0000-0000-000000000001"),
+                UUID.fromString("00000000-0000-0000-0000-000000000001"),
+                UUID.fromString("00000000-0000-0000-0000-000000000001"),
+                1,
+                PortTestData.toolRequest(),
+                ToolApproval.notRequired(),
                 null));
 
     ExpectedFile expectedFile =
@@ -107,8 +129,10 @@ class ToolGatewayTest {
             UUID.fromString("00000000-0000-0000-0000-000000000009"),
             UUID.fromString("00000000-0000-0000-0000-000000000007"),
             UUID.fromString("00000000-0000-0000-0000-00000000000b"),
+            1,
             PortTestData.toolRequest(),
-            reviewedApproval);
+            reviewedApproval,
+            observer);
     assertSame(reviewedApproval, reviewedExecution.approval());
     assertEquals(expectedFile, reviewedExecution.expectedFile());
   }
@@ -183,11 +207,30 @@ class ToolGatewayTest {
                 UUID.fromString("00000000-0000-0000-0000-000000000005"),
                 UUID.fromString("00000000-0000-0000-0000-000000000003"),
                 UUID.fromString("00000000-0000-0000-0000-000000000007"),
-                PortTestData.toolRequest()));
+                1,
+                PortTestData.toolRequest(),
+                ToolApproval.notRequired(),
+                recordingObserver()));
     assertTrue(result instanceof ToolGateway.Admitted);
     ToolGateway.Run run = ((ToolGateway.Admitted) result).run();
     assertNotNull(run.execute(partial -> {}));
     run.close();
+  }
+
+  /** 测试显式提供的观察者，不代替生产登记实现。 */
+  private static ToolGateway.RemoteExecutionObserver recordingObserver() {
+    return new ToolGateway.RemoteExecutionObserver() {
+      @Override
+      public boolean tryStart(UUID remoteExecutionId) {
+        return true;
+      }
+
+      @Override
+      public void confirmExit(UUID remoteExecutionId) {}
+
+      @Override
+      public void confirmNotStarted(UUID remoteExecutionId) {}
+    };
   }
 
   private static ToolGateway.Run noopRun() {

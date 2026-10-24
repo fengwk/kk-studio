@@ -193,6 +193,7 @@ class ThreadSnapshotTest {
             List.of(),
             List.of(),
             0,
+            false,
             false);
     assertEquals(ThreadRuntimeStatus.IDLE, setOnlySnapshot.runtimeStatus());
   }
@@ -224,6 +225,7 @@ class ThreadSnapshotTest {
             List.of(),
             List.of(),
             0,
+            false,
             false);
     assertEquals(ThreadRuntimeStatus.RUNNING, customMsgSnapshot.runtimeStatus());
 
@@ -252,6 +254,7 @@ class ThreadSnapshotTest {
             List.of(),
             List.of(),
             0,
+            false,
             false);
     assertEquals(ThreadRuntimeStatus.RUNNING, notificationSnapshot.runtimeStatus());
   }
@@ -271,7 +274,8 @@ class ThreadSnapshotTest {
             List.of(),
             List.of(),
             0,
-            true);
+            true,
+            false);
     assertEquals(ThreadRuntimeStatus.RUNNING, runningWithWatermark.runtimeStatus());
   }
 
@@ -290,6 +294,7 @@ class ThreadSnapshotTest {
             List.of(),
             List.of(),
             1,
+            false,
             false);
     assertEquals(ThreadRuntimeStatus.WAITING, waiting.runtimeStatus());
   }
@@ -310,6 +315,7 @@ class ThreadSnapshotTest {
             List.of(),
             List.of(),
             1,
+            false,
             false);
     assertEquals(ThreadRuntimeStatus.WAITING, waitingWithTurnEnd.runtimeStatus());
     assertNull(waitingWithTurnEnd.outcome());
@@ -334,7 +340,8 @@ class ThreadSnapshotTest {
             List.of(),
             List.of(),
             0,
-            true);
+            true,
+            false);
     assertEquals(ThreadRuntimeStatus.IDLE, stoppedWithWatermark.runtimeStatus());
 
     // 2. 存在排队中的系统通知命令
@@ -362,6 +369,7 @@ class ThreadSnapshotTest {
             List.of(),
             List.of(),
             0,
+            false,
             false);
     assertEquals(ThreadRuntimeStatus.IDLE, stoppedWithQueuedNotification.runtimeStatus());
   }
@@ -384,6 +392,7 @@ class ThreadSnapshotTest {
             List.of(),
             List.of(),
             0,
+            false,
             false);
     assertThrows(IllegalStateException.class, forged::runtimeStatus);
   }
@@ -404,6 +413,7 @@ class ThreadSnapshotTest {
                 List.of(),
                 List.of(),
                 -1,
+                false,
                 false));
   }
 
@@ -451,6 +461,7 @@ class ThreadSnapshotTest {
         List.of(),
         List.of(),
         0,
+        false,
         false);
   }
 

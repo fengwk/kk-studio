@@ -630,8 +630,10 @@ public final class ToolProcessor implements AutoCloseable {
                   invocationId,
                   dispatched.threadId(),
                   dispatched.assistantEntryId(),
+                  Math.addExact(dispatched.attempt(), 1),
                   dispatched.request(),
-                  dispatched.approval()));
+                  dispatched.approval(),
+                  execution.remoteExecutions()));
     } catch (RuntimeException failure) {
       // 契约：抛异常表示 admission 没有任何副作用，保持 READY 并 reschedule（attempt 不变）。
       log.warn(

@@ -4,6 +4,10 @@ import lombok.extern.slf4j.Slf4j;
 
 import fun.fengwk.kkstudio.common.result.BinaryResultContent;
 import fun.fengwk.kkstudio.common.result.ResultContent;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitKind;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitLedger;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
@@ -61,8 +65,13 @@ final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution {
   private final RealtimeEventSink realtimeEventSink;
   private final ClaimedWork claim;
   private final UUID invocationId;
+  private final UUID executionId = UUID.randomUUID();
   private final UUID threadId;
   private final int attempt;
+
+  /** 登记成功后冻结的本代身份。确认只比对这一身份，不读取之后可能已更换的 lease。 */
+  private volatile ExecutionExitFact registered;
+
   private final ToolInvocationRequest request;
   private final ToolProcessorConfig config;
   private final Clock clock;
@@ -114,6 +123,87 @@ final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution {
     return invocationId;
   }
 
+  /** 当前 Tool 代次的远端观察者：发送前登记，正向 ACK 或确定未发送才确认。 */
+  ToolGateway.RemoteExecutionObserver remoteExecutions() {
+    return new RemoteExecution();
+  }
+
+  private final class RemoteExecution implements ToolGateway.RemoteExecutionObserver {
+    @Override
+    public boolean tryStart(UUID remoteExecutionId) {
+      Objects.requireNonNull(remoteExecutionId, "remoteExecutionId");
+      if (abandoned.get()) {
+        return false;
+      }
+      return Boolean.TRUE.equals(
+          store.transaction(
+              tx -> {
+                if (tx.lockThread(threadId).isEmpty() || tx.lockClaimedWork(claim).isEmpty()) {
+                  return false;
+                }
+                if (abandoned.get()) {
+                  return false;
+                }
+                ExecutionExitLedger.register(
+                    tx,
+                    remoteExecutionId,
+                    threadId,
+                    invocationId,
+                    attempt,
+                    claim.leaseToken(),
+                    ExecutionExitKind.REMOTE,
+                    executionId());
+                return true;
+              }));
+    }
+
+    @Override
+    public void confirmExit(UUID remoteExecutionId) {
+      confirmRemote(remoteExecutionId, ExecutionExitState.REMOTE_ACKNOWLEDGED);
+    }
+
+    @Override
+    public void confirmNotStarted(UUID remoteExecutionId) {
+      confirmRemote(remoteExecutionId, ExecutionExitState.NOT_STARTED);
+    }
+
+    private void confirmRemote(UUID remoteExecutionId, ExecutionExitState state) {
+      Objects.requireNonNull(remoteExecutionId, "remoteExecutionId");
+      ExecutionExitFact local = registered;
+      if (local == null) {
+        throw new IllegalStateException(
+            "remote execution " + remoteExecutionId + " has no registered local generation");
+      }
+      store.transaction(
+          tx -> {
+            ExecutionExitLedger.lockAncestorChain(tx, threadId);
+            if (tx.lockThread(threadId).isEmpty()) {
+              throw new IllegalStateException(
+                  "thread " + threadId + " disappeared before remote execution confirmation");
+            }
+            ExecutionExitFact stored = tx.findExecution(remoteExecutionId).orElse(null);
+            if (stored == null
+                || !stored.threadId().equals(local.threadId())
+                || !stored.invocationId().equals(local.invocationId())
+                || stored.attempt() != local.attempt()
+                || !stored.ownerLeaseToken().equals(local.ownerLeaseToken())
+                || stored.kind() != ExecutionExitKind.REMOTE
+                || !local.executionId().equals(stored.parentExecutionId())) {
+              throw new IllegalArgumentException(
+                  "remote execution "
+                      + remoteExecutionId
+                      + " does not match the registered generation");
+            }
+            if (ExecutionExitLedger.confirm(tx, remoteExecutionId, state).isEmpty()) {
+              throw new IllegalStateException(
+                  "remote execution " + remoteExecutionId + " remains unconfirmed");
+            }
+            ExecutionExitLedger.advanceAfterConfirmation(tx, threadId);
+            return null;
+          });
+    }
+  }
+
   /** 本 execution 持有的 claim（供 processor 的 duplicate admission fencing 比较 token）。 */
   @Override
   public ClaimedWork claim() {
@@ -150,14 +240,18 @@ final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution {
       committed = false;
     }
     if (!committed || abandoned.get()) {
-      closeQuietly(run);
+      if (committed && closeStrict(run)) {
+        confirmNotStarted();
+      }
       abandon();
       return ProcessResult.LOST_OWNERSHIP;
     }
     try {
       Thread.ofVirtual().name("tool-" + invocationId + "-" + attempt).start(() -> execute(run));
     } catch (RuntimeException | Error failure) {
-      closeQuietly(run);
+      if (closeStrict(run)) {
+        confirmNotStarted();
+      }
       abandon();
       throw failure;
     }
@@ -189,9 +283,71 @@ final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution {
         apply(completion);
       }
     } finally {
-      closeQuietly(run);
+      if (registered != null && closeStrict(run)) {
+        confirmStudioExit();
+      }
       abandon();
     }
+  }
+
+  /** 本地资源释放成功才允许随后确认退出；失败保持未确认并保留异常证据。 */
+  private boolean closeStrict(ToolGateway.Run run) {
+    try {
+      run.close();
+      return true;
+    } catch (RuntimeException failure) {
+      log.warn(
+          "cannot release tool run resources for {}; execution {} remains unconfirmed",
+          invocationId,
+          executionId(),
+          failure);
+      return false;
+    }
+  }
+
+  /** RUNNING 已登记但执行线程确定没有进入 body。登记失败时不确认。 */
+  private void confirmNotStarted() {
+    if (registered != null) {
+      confirm(ExecutionExitState.NOT_STARTED);
+    }
+  }
+
+  /** body 与本地资源释放之后才确认 Studio 退出。持久化失败保持未确认，不能把清理失败当成退出。 */
+  private void confirmStudioExit() {
+    confirm(ExecutionExitState.STUDIO_EXITED);
+  }
+
+  private void confirm(ExecutionExitState state) {
+    ExecutionExitFact local = registered;
+    if (local == null) {
+      log.warn("tool execution {} was not registered and remains unconfirmed", executionId);
+      return;
+    }
+    try {
+      store.transaction(
+          tx -> {
+            ExecutionExitLedger.lockAncestorChain(tx, threadId);
+            if (tx.lockThread(threadId).isEmpty()) {
+              throw new IllegalStateException(
+                  "thread " + threadId + " disappeared before tool execution confirmation");
+            }
+            if (ExecutionExitLedger.confirm(tx, local.executionId(), state).isEmpty()) {
+              throw new IllegalStateException(
+                  "tool execution " + local.executionId() + " remains unconfirmed");
+            }
+            ExecutionExitLedger.advanceAfterConfirmation(tx, threadId);
+            return null;
+          });
+    } catch (RuntimeException failure) {
+      log.warn(
+          "cannot confirm tool execution exit for {}: {}",
+          local.executionId(),
+          ProcessorExceptions.describe(failure));
+    }
+  }
+
+  private UUID executionId() {
+    return executionId;
   }
 
   /** 声明执行体开始；abandon 已获胜时返回 false（工具绝不被调用）。 */
@@ -354,6 +510,16 @@ final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution {
               }
               tx.updateToolInvocations(List.of(tool.markRunning(now)));
               tx.updateThread(thread.touchVersion(now));
+              registered =
+                  ExecutionExitLedger.register(
+                      tx,
+                      executionId(),
+                      threadId,
+                      invocationId,
+                      attempt,
+                      claim.leaseToken(),
+                      ExecutionExitKind.TOOL,
+                      null);
               return true;
             }));
   }
