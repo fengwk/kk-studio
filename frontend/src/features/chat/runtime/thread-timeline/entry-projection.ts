@@ -238,10 +238,9 @@ export function projectDurableEntry(
     if (!text && !thinking && toolCalls.length === 0) {
       messages.push(projectEmptyMessageEntry(entry, role))
     }
-    const metadata = asRecord(payload.assistantMetadata)
     // 价格是读取投影（entry.usageCost），不属于历史 payload；usage 的 token 事实仍来自
-    // assistantMetadata。两参 API 由 usage-owner 提供。
-    const usage = parseAssistantUsage(metadata, entry.usageCost)
+    // assistantMetadata。保留原始形态，空对象和非法值不能先压成“无模型调用”。
+    const usage = parseAssistantUsage(payload.assistantMetadata, entry.usageCost)
     if (usage != null) {
       context.pendingTurnUsage = accumulateTurnUsage(context.pendingTurnUsage ?? null, usage)
       context.pendingTurnSummary = createTurnUsageMetaMessage(

@@ -137,8 +137,14 @@ describe('content-utils usage & speed & cache calculations', () => {
     })
 
     it('requires the four non-negative safe integer fields and returns null for no metadata, unknown for invalid', () => {
-      // 无模型 metadata 人工 ASSISTANT 不计，返回 null
-      expect(parseAssistantUsage({})).toBeNull()
+      // 只有字段缺失才是无模型调用；显式空对象、数组和 primitive 不能漏计。
+      expect(parseAssistantUsage(null)).toBeNull()
+      expect(parseAssistantUsage(undefined)).toBeNull()
+      for (const malformed of [{}, [], false, 0, 'metadata']) {
+        expect(parseAssistantUsage(malformed)).toMatchObject({
+          input: null, output: null, cacheRead: null, cacheWrite: null, cost: null,
+        })
+      }
 
       const unknownUsage = {
         input: null,

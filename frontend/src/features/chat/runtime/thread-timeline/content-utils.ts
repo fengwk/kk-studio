@@ -382,8 +382,8 @@ export function createUnknownTurnUsage(): TurnUsage {
  * 从持久 ASSISTANT Entry 的 `assistantMetadata` 提取 provider usage。
  *
  * 只接受 harness 持久 codec 的 canonical 字段名，不兼容 snake_case / 常见别名；
- * 无模型 metadata 的人工 ASSISTANT / 无模型调用的 Entry 不计，返回 null；
- * 有模型 metadata 但缺 usage 或必要 tokens 非法时返回全未知 TurnUsage（不创造零）；
+ * 只有 assistantMetadata 为 null/undefined 才是无模型调用，返回 null；
+ * 显式存在的空对象、数组、primitive 或损坏 usage 返回全未知 TurnUsage（不创造零）；
  * reasoningTokens 必须满足非负安全整数且 known reasoning <= output 一致校验，非法不得真 0；
  * providerTotalTokens 必须为非负安全整数，非法不得真 0；
  * 合法 usage 下 reasoning 未知且后端 cost 已知仍保留费用；非法或缺失 usage 时完整费用 unknown（null）。
@@ -392,12 +392,11 @@ export function parseAssistantUsage(
   metadata: unknown,
   usageCost: unknown = null,
 ): TurnUsage | null {
-  if (
-    metadata == null
-    || typeof metadata !== 'object'
-    || Object.keys(metadata).length === 0
-  ) {
+  if (metadata == null) {
     return null
+  }
+  if (typeof metadata !== 'object' || Array.isArray(metadata) || Object.keys(metadata).length === 0) {
+    return createUnknownTurnUsage()
   }
 
   const metaRecord = metadata as Record<string, unknown>
