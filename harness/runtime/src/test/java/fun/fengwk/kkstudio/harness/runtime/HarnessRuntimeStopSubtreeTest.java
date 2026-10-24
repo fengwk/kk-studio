@@ -439,7 +439,19 @@ class HarnessRuntimeStopSubtreeTest {
                 AgentMessageRole.USER, List.of(new TextMessageContent("child-result")))),
         TestIds.id(30));
 
-    runtime.stop(new StopCommand(root.threadId(), TestIds.id(16), 0L));
+    // 手工种入的 QUEUED notification 也须预留序列，保持 nextCommandSequence 领先于已用 sequence。
+    store.transaction(
+        tx -> {
+          ThreadState thread = tx.lockThread(root.threadId()).orElseThrow();
+          tx.updateThread(thread.reserveCommandSequences(1, T1));
+          return null;
+        });
+
+    runtime.stop(
+        new StopCommand(
+            root.threadId(),
+            TestIds.id(16),
+            store.transaction(tx -> tx.findThread(root.threadId()).orElseThrow()).version()));
 
     // 通知命令保留为 APPLIED，且恰指向一条物化 NOTIFICATION Entry。
     ThreadCommand command =

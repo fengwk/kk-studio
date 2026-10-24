@@ -18,15 +18,19 @@ import tools.jackson.databind.node.JsonNodeFactory;
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelGroupExecution;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelGroupMemberExecution;
@@ -83,6 +87,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -221,6 +226,152 @@ class ModelProcessorTest {
         work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
     assertNotNull(modelWork);
     assertEquals("token-" + fixture.invocationId, modelWork.leaseToken());
+  }
+
+  /** Model 最终答案先物化、close 后释放：确认前 Join 不交付，真实 finally 确认在同一事务内补结算一次。 */
+  @Test
+  void modelFinalAnswerSettlesJoinOnlyAfterAdmissionClose() throws Exception {
+    Fixture fixture = fixture();
+    deleteModelWork(fixture);
+    fixture.store.transaction(
+        tx -> {
+          tx.lockThread(fixture.baseline.threadId()).orElseThrow();
+          tx.deleteWork(new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()));
+          return null;
+        });
+    UUID parentId = UUID.randomUUID();
+    UserBasis basis = seedUserBasis(fixture.store, parentId);
+    UUID invocationId = seedUserBasisInvocation(fixture.store, basis, requestSpec(), NOW);
+    UUID joinId = UUID.randomUUID();
+    fixture.store.transaction(
+        tx -> {
+          ThreadState child = tx.lockThread(basis.threadId()).orElseThrow();
+          ThreadCommand source =
+              new ThreadCommand(
+                  child.id(),
+                  1L,
+                  new UserMessageCommandPayload(AgentMessage.user("delegate")),
+                  tx.nextId(),
+                  ThreadProcessorTestSupport.CREATION_REQUEST_HASH,
+                  null,
+                  null,
+                  null,
+                  NOW);
+          tx.updateThread(child.reserveCommandSequences(1, NOW));
+          tx.insertCommands(List.of(source));
+          tx.updateCommands(List.of(source.markApplied(basis.turnStartEntryId())));
+          child = tx.lockThread(child.id()).orElseThrow();
+          tx.updateThread(child.advanceInputThroughSequence(1L, NOW));
+          tx.insertJoin(
+              new ThreadJoin(
+                  joinId,
+                  ThreadProcessorTestSupport.CREATION_REQUEST_HASH,
+                  parentId,
+                  child.id(),
+                  1L,
+                  "agent",
+                  10,
+                  0L,
+                  null,
+                  null,
+                  null,
+                  NOW,
+                  NOW,
+                  JoinDelivery.NOTIFY_PARENT,
+                  null));
+          return null;
+        });
+
+    CountDownLatch closeEntered = new CountDownLatch(1);
+    CountDownLatch releaseClose = new CountDownLatch(1);
+    AtomicReference<Thread> runner = new AtomicReference<>();
+    AtomicInteger closes = new AtomicInteger();
+    fixture.gateway.queue(
+        new ModelGateway.Admitted() {
+          @Override
+          public ModelGateway.Outcome run(ModelGateway.Sink sink) {
+            runner.set(Thread.currentThread());
+            return new ModelGateway.Succeeded(
+                new ProviderCompletion(
+                    response("final answer", GenerationStopReason.COMPLETE), null));
+          }
+
+          @Override
+          public void close() {
+            closes.incrementAndGet();
+            closeEntered.countDown();
+            try {
+              if (!releaseClose.await(5, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("test did not release admitted close");
+              }
+            } catch (InterruptedException interrupted) {
+              Thread.currentThread().interrupt();
+              throw new IllegalStateException(interrupted);
+            }
+          }
+        });
+    try {
+      assertEquals(
+          ProcessResult.STARTED, fixture.processor.process(claim(fixture.store, invocationId)));
+      assertTrue(closeEntered.await(5, TimeUnit.SECONDS), "terminal committed and close is held");
+      UUID executionId =
+          fixture.store.transaction(
+              tx -> tx.loadUnconfirmedExecutions(basis.threadId()).get(0).executionId());
+
+      ThreadProcessor threadProcessor =
+          new ThreadProcessor(
+              fixture.store,
+              (threadId, path, preparation) -> null,
+              new ThreadProcessorConfig(Duration.ofSeconds(1), () -> CompactionConfig.DEFAULT));
+      assertEquals(
+          ThreadProcessResult.COMPLETED,
+          threadProcessor.process(
+              ThreadProcessorTestSupport.claimThreadWork(fixture.store, basis.threadId(), NOW)));
+      ThreadJoin pending = fixture.store.transaction(tx -> tx.findJoin(joinId).orElseThrow());
+      assertFalse(pending.matched(), "join must wait for studio exit confirmation");
+      EntryPath materializedPath =
+          fixture.store.transaction(
+              tx -> tx.loadEntryPath(tx.findThread(basis.threadId()).orElseThrow().headEntryId()));
+      assertTrue(
+          materializedPath.head().payload() instanceof TurnEndPayload end && !end.continueModel(),
+          () -> "head=" + materializedPath.head().payload().type());
+      long versionBeforeExit = thread(fixture.store, basis.threadId()).version();
+
+      releaseClose.countDown();
+      assertTrue(runner.get().join(Duration.ofSeconds(5)), "model execution thread exits");
+
+      assertEquals(
+          ExecutionExitState.STUDIO_EXITED,
+          fixture.store.transaction(tx -> tx.findExecution(executionId).orElseThrow().state()),
+          "real finally confirmation commits before checking Join");
+      ThreadJoin settled = fixture.store.transaction(tx -> tx.findJoin(joinId).orElseThrow());
+      assertTrue(settled.matched());
+      assertNotNull(settled.finalAnswerEntryId());
+      Entry answer =
+          fixture.store.transaction(tx -> tx.findEntry(settled.finalAnswerEntryId()).orElseThrow());
+      assertTrue(
+          answer.payload() instanceof MessagePayload message
+              && message.message().role() == AgentMessageRole.ASSISTANT);
+      assertEquals(versionBeforeExit + 1, thread(fixture.store, basis.threadId()).version());
+      assertEquals(
+          ExecutionExitState.STUDIO_EXITED,
+          fixture.store.transaction(tx -> tx.findExecution(executionId).orElseThrow().state()));
+      assertEquals(1, closes.get());
+      assertEquals(1, notificationCount(fixture.store, parentId));
+    } finally {
+      releaseClose.countDown();
+      fixture.processor.close();
+    }
+  }
+
+  /** 父 Thread 上的通知命令只计一次。 */
+  private static int notificationCount(HarnessStore store, UUID parentId) {
+    return store.transaction(
+        tx ->
+            (int)
+                tx.loadCommandsByThread(parentId).stream()
+                    .filter(command -> command.type().isNotification())
+                    .count());
   }
 
   /** Busy：肯定未发出请求，invocation 保持 READY 且不写 Thread，按 retryAfter reschedule，attempt 不变。 */
@@ -708,6 +859,7 @@ class ModelProcessorTest {
     listener.succeed(
         new ProviderCompletion(
             response("truncated partial", GenerationStopReason.LENGTH), sampleReplayState()));
+    awaitExecutionExit(fixture);
 
     ModelInvocation afterFirst = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.READY, afterFirst.status());
@@ -1290,6 +1442,7 @@ class ModelProcessorTest {
 
     listener.event(new ProviderStreamEvent.TextDelta("ans"));
     listener.succeed(response("answer", GenerationStopReason.COMPLETE));
+    awaitExecutionExit(fixture);
 
     ModelInvocation model = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.SUCCEEDED, model.status());
@@ -1301,7 +1454,7 @@ class ModelProcessorTest {
     assertEquals(
         List.of(new ProviderStreamEvent.TextDelta("ans"), new ProviderStreamEvent.TextDelta("wer")),
         deltas(fixture.sink));
-    assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).version());
+    assertEquals(3, thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
         2,
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
@@ -1362,6 +1515,7 @@ class ModelProcessorTest {
     listener.event(new ProviderStreamEvent.TextDelta("partial"));
     listener.event(new ProviderStreamEvent.TextDelta("-tail"));
     listener.fail(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "unavailable"));
+    awaitExecutionExit(fixture);
 
     ModelInvocation model = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.READY, model.status());
@@ -1377,7 +1531,7 @@ class ModelProcessorTest {
         model.failedAttempts().getFirst().error());
     assertEquals(NOW, model.failedAttempts().getFirst().failedAt());
     assertEquals(NOW.plusSeconds(5), model.failedAttempts().getFirst().retryAt());
-    assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).version());
+    assertEquals(3, thread(fixture.store, fixture.baseline.threadId()).version());
     Work modelWork =
         work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
     assertNotNull(modelWork);
@@ -1408,6 +1562,7 @@ class ModelProcessorTest {
     ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
 
     listener.fail(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "first"));
+    awaitExecutionExit(fixture);
     assertEquals(ModelInvocationStatus.READY, model(fixture.store, fixture.invocationId).status());
 
     fixture.clock.advance(Duration.ofSeconds(5));
@@ -1417,6 +1572,7 @@ class ModelProcessorTest {
     ControlledRun secondListener = fixture.gateway.controlled(fixture.invocationId);
 
     secondListener.fail(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "second"));
+    awaitExecutionExit(fixture);
 
     ModelInvocation model = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.FAILED, model.status());
@@ -1425,7 +1581,7 @@ class ModelProcessorTest {
     assertEquals(1, model.failedAttempts().size());
     assertEquals("first", model.failedAttempts().getFirst().error().message());
     assertEquals(NOW.plusSeconds(5), model.failedAttempts().getFirst().retryAt());
-    assertEquals(4, thread(fixture.store, fixture.baseline.threadId()).version());
+    assertEquals(6, thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
         2,
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
@@ -1633,10 +1789,12 @@ class ModelProcessorTest {
     ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
 
     listener.unknown(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "outcome unknown"));
+    awaitExecutionExit(fixture);
 
     ModelInvocation model = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.UNKNOWN, model.status());
     assertEquals(1, model.attempt());
+    assertEquals(3, thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
         2,
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
@@ -1681,9 +1839,11 @@ class ModelProcessorTest {
     deleteModelWork(fixture);
 
     listener.unknown(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "outcome unknown"));
+    awaitExecutionExit(fixture);
 
     assertEquals(
         ModelInvocationStatus.RUNNING, model(fixture.store, fixture.invocationId).status());
+    assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
         1,
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
@@ -1766,11 +1926,13 @@ class ModelProcessorTest {
     ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
 
     listener.fail(new ModelInvocationError(ProviderErrorKind.CANCELLED, "stopped"));
+    awaitExecutionExit(fixture);
 
     ModelInvocation model = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.CANCELLED, model.status());
     assertEquals(1, model.attempt());
     assertEquals(ProviderErrorKind.CANCELLED, model.error().kind());
+    assertEquals(3, thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
         2,
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
@@ -1837,6 +1999,7 @@ class ModelProcessorTest {
 
     listener.event(new ProviderStreamEvent.TextDelta("hello"));
     listener.succeed(response("world", GenerationStopReason.COMPLETE));
+    awaitExecutionExit(fixture);
 
     ModelInvocation model = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.FAILED, model.status());
@@ -1844,6 +2007,7 @@ class ModelProcessorTest {
     assertNotNull(model.streamCheckpoint());
     assertEquals(1, model.streamCheckpoint().sequence());
     assertEquals("hello", model.streamCheckpoint().text());
+    assertEquals(3, thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
         2,
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
@@ -1894,11 +2058,13 @@ class ModelProcessorTest {
 
     listener.event(new ProviderStreamEvent.ToolCallDelta(0, "call_1", null, null));
     listener.event(new ProviderStreamEvent.ToolCallDelta(0, "call_2", null, null));
+    awaitExecutionExit(fixture);
 
     ModelInvocation model = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.FAILED, model.status());
     assertEquals(ProviderErrorKind.INVALID_RESPONSE, model.error().kind());
     assertEquals(1, deltas(fixture.sink).size());
+    assertEquals(3, thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
         2,
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
@@ -2129,13 +2295,14 @@ class ModelProcessorTest {
     ClaimedWork recovered = claim(fixture.store, fixture.invocationId, "token-new");
 
     assertEquals(ProcessResult.TERMINATED, fixture.processor.process(recovered));
+    awaitExecutionExit(fixture);
 
     ModelInvocation model = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.FAILED, model.status());
     assertEquals(1, model.attempt());
     assertEquals(ProviderErrorKind.TRANSIENT, model.error().kind());
     assertEquals(1, fixture.gateway.admitCalls);
-    assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).version());
+    assertEquals(3, thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
         2,
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
@@ -2604,9 +2771,9 @@ class ModelProcessorTest {
     }
   }
 
-  /** Executor 拒绝发生在 durable RUNNING 后，释放名额且不遗留 heartbeat。 */
+  /** Executor 拒绝发生在 durable RUNNING 后：只 close 一次，close 成功才确认 NOT_STARTED 并唤醒 Thread。 */
   @Test
-  void rejectedExecutionReleasesAdmissionAndExecution() {
+  void rejectedExecutionReleasesAdmissionAndConfirmsNotStarted() {
     Fixture fixture = fixture();
     ModelProcessor processor =
         new ModelProcessor(
@@ -2627,9 +2794,129 @@ class ModelProcessorTest {
           processor.process(claim(fixture.store, fixture.invocationId, "token-A")));
       assertFalse(processor.hasActiveExecution());
       assertTrue(fixture.gateway.runs.get(fixture.invocationId).closedWithoutRun.get());
+      assertTrue(
+          Boolean.TRUE.equals(
+              fixture.store.transaction(
+                  tx -> tx.loadUnconfirmedExecutions(fixture.baseline.threadId()).isEmpty())));
+      assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).version());
+      assertNotNull(
+          work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId())));
     } finally {
       processor.close();
     }
+  }
+
+  /** Executor 拒绝后 close 失败：只尝试一次且不确认，执行保持 UNCONFIRMED 等待后续恢复。 */
+  @Test
+  void rejectedExecutionCloseFailureLeavesGenerationUnconfirmed() {
+    Fixture fixture = fixture();
+    AtomicInteger closes = new AtomicInteger();
+    AtomicInteger runs = new AtomicInteger();
+    fixture.gateway.queue(
+        new ModelGateway.Admitted() {
+          @Override
+          public ModelGateway.Outcome run(ModelGateway.Sink sink) {
+            runs.incrementAndGet();
+            return new ModelGateway.Succeeded(
+                new ProviderCompletion(
+                    response("unexpected", GenerationStopReason.COMPLETE), null));
+          }
+
+          @Override
+          public void close() {
+            closes.incrementAndGet();
+            throw new IllegalStateException("close failed");
+          }
+        });
+    ModelProcessor processor =
+        new ModelProcessor(
+            fixture.store,
+            fixture.gateway,
+            fixture.sink,
+            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY),
+            fixture.clock,
+            newScheduler(),
+            Runnable::run,
+            ignored -> {
+              throw new RejectedExecutionException("rejected");
+            });
+    try {
+      assertEquals(
+          ProcessResult.LOST_OWNERSHIP,
+          processor.process(claim(fixture.store, fixture.invocationId, "token-A")));
+      assertEquals(1, closes.get());
+      assertEquals(0, runs.get());
+      assertFalse(processor.hasActiveExecution());
+      List<ExecutionExitFact> unconfirmed =
+          fixture.store.transaction(
+              tx -> tx.loadUnconfirmedExecutions(fixture.baseline.threadId()));
+      assertEquals(1, unconfirmed.size());
+      assertEquals(ExecutionExitState.UNCONFIRMED, unconfirmed.getFirst().state());
+      assertEquals(1, thread(fixture.store, fixture.baseline.threadId()).version());
+    } finally {
+      processor.close();
+    }
+    assertEquals(1, closes.get(), "close failure must not be retried");
+  }
+
+  /** 已接受的执行在 cancel 后才运行：body 不进入，finally 只 close 一次并在成功后确认 NOT_STARTED。 */
+  @Test
+  void cancelledBeforeBodyRunsClosesOnceAndConfirmsNotStarted() {
+    Fixture fixture = fixture();
+    AtomicReference<Runnable> queued = new AtomicReference<>();
+    AtomicInteger closes = new AtomicInteger();
+    AtomicInteger runs = new AtomicInteger();
+    fixture.gateway.queue(
+        new ModelGateway.Admitted() {
+          @Override
+          public ModelGateway.Outcome run(ModelGateway.Sink sink) {
+            runs.incrementAndGet();
+            return new ModelGateway.Succeeded(
+                new ProviderCompletion(
+                    response("unexpected", GenerationStopReason.COMPLETE), null));
+          }
+
+          @Override
+          public void close() {
+            closes.incrementAndGet();
+          }
+        });
+    ModelProcessor processor =
+        new ModelProcessor(
+            fixture.store,
+            fixture.gateway,
+            fixture.sink,
+            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY),
+            fixture.clock,
+            newScheduler(),
+            Runnable::run,
+            queued::set);
+    try {
+      assertEquals(
+          ProcessResult.STARTED,
+          processor.process(claim(fixture.store, fixture.invocationId, "token-A")));
+      assertNotNull(queued.get());
+      assertTrue(processor.cancel(fixture.invocationId));
+      assertFalse(processor.hasActiveExecution());
+
+      queued.get().run();
+
+      assertEquals(0, runs.get(), "cancelled execution must not enter the gateway body");
+      assertEquals(1, closes.get(), "processor finally owns the only close");
+      List<ExecutionExitFact> unconfirmed =
+          fixture.store.transaction(
+              tx -> tx.loadUnconfirmedExecutions(fixture.baseline.threadId()));
+      assertTrue(unconfirmed.isEmpty(), "close success confirms the generation NOT_STARTED");
+      assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).version());
+      assertEquals(
+          1,
+          work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
+              .wakeVersion(),
+          "NOT_STARTED confirmation without a Join must not request a new THREAD wake");
+    } finally {
+      processor.close();
+    }
+    assertEquals(1, closes.get(), "processor close must not close an already released admission");
   }
 
   /** 已过期 A 在前置检查后恢复，不得中断新 owner B 的合法执行。 */
@@ -2737,10 +3024,11 @@ class ModelProcessorTest {
     assertEquals(ProcessResult.LOST_OWNERSHIP, resultA.get());
     assertEquals(0, fixtureA.gateway.admitCalls, "stale start must never call the gateway");
     assertFalse(fixtureA.processor.hasActiveExecution());
+    awaitExecutionExit(fixtureA);
     ModelInvocation model = model(fixtureA.store, fixtureA.invocationId);
     assertEquals(ModelInvocationStatus.SUCCEEDED, model.status());
     assertEquals(1, model.attempt());
-    assertEquals(2, thread(fixtureA.store, fixtureA.baseline.threadId()).version());
+    assertEquals(3, thread(fixtureA.store, fixtureA.baseline.threadId()).version());
     assertEquals(
         2,
         work(fixtureA.store, new WorkTarget(WorkTargetType.THREAD, fixtureA.baseline.threadId()))
@@ -3661,6 +3949,14 @@ class ModelProcessorTest {
 
   /** Session + ROOT + TURN_START(INPUT) + USER；Thread head 指向 USER。 */
   private static UserBasis seedUserBasis(HarnessStore store) {
+    return seedUserBasis(store, null);
+  }
+
+  /**
+   * 同树子 Thread 的 USER basis：{@code parentThreadId} 非空时先建合法父 root，再建 parent/root 指向该父的子 Thread，使
+   * Join 与祖先树锁一致。
+   */
+  private static UserBasis seedUserBasis(HarnessStore store, UUID parentThreadId) {
     return store.transaction(
         tx -> {
           UUID sessionId = tx.nextId();
@@ -3671,6 +3967,13 @@ class ModelProcessorTest {
           tx.insertSession(new Session(sessionId, "session-" + sessionId, NOW));
           tx.insertEntry(
               new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
+          if (parentThreadId != null) {
+            // 先锁树再写父/子 Thread，子 Thread 才能作为 joinedChild 沿用父树锁。
+            tx.lockTree(parentThreadId);
+            tx.insertThread(
+                ThreadProcessorTestSupport.threadState(
+                    parentThreadId, sessionId, rootEntryId, "parent-" + parentThreadId, NOW));
+          }
           tx.insertEntry(
               new Entry(
                   turnStartEntryId,
@@ -3693,7 +3996,25 @@ class ModelProcessorTest {
                   userMessagePayload(),
                   NOW.plusMillis(2)));
           tx.insertThread(
-              ThreadProcessorTestSupport.threadState(threadId, sessionId, userEntryId, NOW));
+              parentThreadId == null
+                  ? ThreadProcessorTestSupport.threadState(threadId, sessionId, userEntryId, NOW)
+                  : new ThreadState(
+                      threadId,
+                      sessionId,
+                      parentThreadId,
+                      userEntryId,
+                      ThreadProcessorTestSupport.CREATION_REQUEST_HASH,
+                      "child-" + threadId,
+                      parentThreadId,
+                      false,
+                      SpawnTrigger.MODEL_TOOL,
+                      ThreadConstraints.NONE,
+                      ThreadExecutionControl.RUNNABLE,
+                      0L,
+                      1L,
+                      0L,
+                      NOW,
+                      NOW));
           return new UserBasis(sessionId, rootEntryId, turnStartEntryId, userEntryId, threadId);
         });
   }
@@ -3930,6 +4251,18 @@ class ModelProcessorTest {
       Thread.sleep(10);
     }
     fail("condition not met within " + timeout);
+  }
+
+  /**
+   * 等待真实 execution finally 的退出确认完成。ownerRelease / hasActiveExecution 早于 close 与
+   * confirm，不能作为终态断言同步点。
+   */
+  private static void awaitExecutionExit(Fixture fixture) {
+    awaitTrue(
+        () ->
+            Boolean.TRUE.equals(
+                fixture.store.transaction(
+                    tx -> tx.loadUnconfirmedExecutions(fixture.baseline.threadId()).isEmpty())));
   }
 
   private static ModelRequestSpec requestSpec() {

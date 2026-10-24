@@ -2331,9 +2331,13 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     for (ModelInvocation model : lockedModels) {
       deleteModelInvocation(model.id());
     }
-    // 自引用 parent FK 为 NO ACTION（语句级校验）：同一 DELETE 同时包含 parent 与 child 会被拒绝。
-    // 先删远端子代，再删本地代次。删除只是 Thread 深删，不是执行退出。
-    deleteExecutionExits(copied);
+    // 自引用 parent FK 为 NO ACTION（语句级校验）：同一条 DELETE 可同时包含父与子执行事实。
+    // 删除只是 Thread 深删，不是执行退出；先删 execution facts，再删 Thread。
+    update(
+        "delete from harness_execution_exit where thread_id in ("
+            + placeholders(copied.size())
+            + ")",
+        copied.toArray());
     int deletedThreads =
         update(
             "delete from harness_thread where id in (" + placeholders(copied.size()) + ")",
@@ -2346,20 +2350,6 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       notifyExecutionTree(root);
     }
     return copied.size();
-  }
-
-  /** 按远端子代优先删除执行事实，避免 parent 外键在同一语句内互相挡住。 */
-  private void deleteExecutionExits(List<UUID> threadIds) {
-    update(
-        "delete from harness_execution_exit where thread_id in ("
-            + placeholders(threadIds.size())
-            + ") and parent_execution_id is not null",
-        threadIds.toArray());
-    update(
-        "delete from harness_execution_exit where thread_id in ("
-            + placeholders(threadIds.size())
-            + ")",
-        threadIds.toArray());
   }
 
   /** 删除指定 Session 下的全部 Entry 节点（叶子优先逐层删除），并同步驱逐事务内缓存。 */
@@ -2469,9 +2459,13 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       requireSameExecutionIdentity(stored.get(), fact);
       return stored.get();
     }
-    if (fact.parentExecutionId() != null && findExecution(fact.parentExecutionId()).isEmpty()) {
-      throw new IllegalArgumentException(
-          "parent execution " + fact.parentExecutionId() + " does not exist");
+    if (fact.parentExecutionId() != null) {
+      ExecutionExitFact parent = findExecution(fact.parentExecutionId()).orElse(null);
+      if (parent == null) {
+        throw new IllegalArgumentException(
+            "parent execution " + fact.parentExecutionId() + " does not exist");
+      }
+      fact.requireRemoteParent(parent);
     }
     update(
         """
@@ -2508,8 +2502,12 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     }
     requireLocked(LockKey.thread(stored.threadId()));
     requireSameExecutionIdentity(stored, expected);
-    if (stored.state().confirmed()) {
+    if (stored.state() == state) {
       return Optional.of(stored);
+    }
+    if (stored.state().confirmed()) {
+      throw new IllegalArgumentException(
+          "execution " + stored.executionId() + " is already confirmed as " + stored.state());
     }
     Instant confirmedAt = now();
     update(

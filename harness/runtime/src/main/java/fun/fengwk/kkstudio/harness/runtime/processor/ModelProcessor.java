@@ -302,40 +302,37 @@ public final class ModelProcessor implements AutoCloseable {
       ModelGateway.Admitted admitted,
       ClaimAdmissionGuard.Ticket<ModelExecution> ticket) {
     if (execution.abandoned() || ticket.isSuperseded()) {
-      // close / cancel / supersede 在准入期间获胜：invocation 仍是 READY，释放名额后按 reschedule 实际结果返回。
-      admitted.close();
+      // close / cancel / supersede 在准入期间获胜：尚未登记执行，只释放一次名额。
+      closeAdmitted(admitted);
       return abortStart(claim);
     }
-    boolean submitted = false;
-    boolean closed = false;
     try {
       if (!execution.markRunning()) {
-        return ProcessResult.LOST_OWNERSHIP;
-      }
-      if (execution.abandoned() || ticket.isSuperseded()) {
-        closed = closeAdmitted(admitted);
-        if (closed) {
-          execution.confirmNotStarted();
+        if (execution.registered()) {
+          releaseUnstarted(execution, admitted);
+        } else {
+          closeAdmitted(admitted);
         }
         return ProcessResult.LOST_OWNERSHIP;
       }
+      if (execution.abandoned() || ticket.isSuperseded()) {
+        releaseUnstarted(execution, admitted);
+        return ProcessResult.LOST_OWNERSHIP;
+      }
       executionExecutor.execute(() -> runToTerminal(execution, admitted));
-      submitted = true;
       return ProcessResult.STARTED;
     } catch (RejectedExecutionException rejected) {
       log.warn(
           "model execution executor rejected invocation {}", execution.invocationId(), rejected);
-      closed = closeAdmitted(admitted);
-      if (closed) {
-        execution.confirmNotStarted();
-      }
+      releaseUnstarted(execution, admitted);
       return ProcessResult.LOST_OWNERSHIP;
-    } finally {
-      if (!submitted && !closed && !closeAdmitted(admitted)) {
-        log.warn(
-            "model admission resources remain held for {}; execution stays unconfirmed",
-            execution.invocationId());
-      }
+    }
+  }
+
+  /** 已登记但确定未进入 body：清理成功才确认未启动，失败保持未确认且不重复关闭。 */
+  private void releaseUnstarted(ModelExecution execution, ModelGateway.Admitted admitted) {
+    if (closeAdmitted(admitted)) {
+      execution.confirmNotStarted();
     }
   }
 
@@ -351,7 +348,11 @@ public final class ModelProcessor implements AutoCloseable {
       execution.abandon();
     } finally {
       if (closeAdmitted(admitted)) {
-        execution.confirmStudioExit();
+        if (execution.bodyStarted()) {
+          execution.confirmStudioExit();
+        } else {
+          execution.confirmNotStarted();
+        }
       }
     }
   }

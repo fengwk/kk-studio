@@ -2357,10 +2357,13 @@ public final class InMemoryHarnessStore implements HarnessStore {
         requireSameIdentity(stored, fact);
         return stored;
       }
-      if (fact.parentExecutionId() != null
-          && !state.executions.containsKey(fact.parentExecutionId())) {
-        throw new IllegalArgumentException(
-            "parent execution " + fact.parentExecutionId() + " does not exist");
+      if (fact.parentExecutionId() != null) {
+        ExecutionExitFact parent = state.executions.get(fact.parentExecutionId());
+        if (parent == null) {
+          throw new IllegalArgumentException(
+              "parent execution " + fact.parentExecutionId() + " does not exist");
+        }
+        fact.requireRemoteParent(parent);
       }
       state.executions.put(fact.executionId(), fact);
       return fact;
@@ -2381,9 +2384,6 @@ public final class InMemoryHarnessStore implements HarnessStore {
       }
       requireLocked(LockKey.thread(stored.threadId()));
       requireSameIdentity(stored, expected);
-      if (stored.state().confirmed()) {
-        return Optional.of(stored);
-      }
       ExecutionExitFact confirmed = stored.confirm(state, now());
       this.state.executions.put(expected.executionId(), confirmed);
       return Optional.of(confirmed);

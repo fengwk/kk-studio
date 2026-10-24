@@ -608,8 +608,8 @@ public interface HarnessStore {
 
     /**
      * 把已登记代次单向推进到退出证据。写入前必须匹配 thread、invocation、attempt、owner lease、kind 与 parent；任一不匹配抛 {@link
-     * IllegalArgumentException} 且不修改行。重复的相同证据幂等并返回原事实；已确认后的不同证据也保持原事实。不存在返回 {@link
-     * Optional#empty()}。不要求 Work 仍存在，也不获取新的行锁。
+     * IllegalArgumentException} 且不修改行。重复的相同证据幂等并返回原事实；已确认后的不同证据抛 {@link
+     * IllegalArgumentException}。不存在返回 {@link Optional#empty()}。不要求 Work 仍存在，也不获取新的行锁。
      */
     Optional<ExecutionExitFact> confirmExecution(
         ExecutionExitFact expected, ExecutionExitState state);

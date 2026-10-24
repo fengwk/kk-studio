@@ -15,7 +15,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadActivityEvaluator;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextClassifier;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NotificationCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
@@ -37,8 +36,8 @@ import java.util.UUID;
  * 执行终止边界上的 Join 冻结与父 Thread 通知交付，以及短预算提醒物化。
  *
  * <p>本类不再维护递归空闲生命周期，也不再按 Thread version 匹配 Join：普通终止（最终回答 / 不可继续失败）只有在源输入已应用、且本 Thread 收敛（无未完成的直接子
- * Join、无待处理输入）时才冻结 Join；Stop 的强制结算不受该收敛判据限制。冻结结果与终态 Entry、父通知在同一事务提交。 父 Thread 为 STOPPED
- * 时通知直接固化到历史而不唤醒模型。
+ * Join、无待处理输入、无未确认执行）时才冻结 Join；Stop 结算允许纳入尚未应用的源命令，但仍要求同一收敛事实。冻结结果与终态 Entry、父通知在同一事务提交。 父 Thread 为
+ * STOPPED 时通知直接固化到历史而不唤醒模型。
  */
 public final class ThreadLifecycleCoordinator {
 
@@ -110,8 +109,8 @@ public final class ThreadLifecycleCoordinator {
    * 在执行终止边界冻结本次 Thread 上尚未完成的 Join，并向父 Thread 交付系统通知。
    *
    * <p>普通终止（{@code includeUnappliedSource == false}）只在该 Thread 收敛时结算：源输入已应用、没有未完成的直接子 Join
-   * 且没有待处理输入；否则保留未匹配 Join，等待后续真实输入或子结算再次到达终止边界。Stop 强制结算（{@code includeUnappliedSource ==
-   * true}）不受收敛判据限制。
+   * 且没有待处理输入；否则保留未匹配 Join，等待后续真实输入或子结算再次到达终止边界。Stop 结算（{@code includeUnappliedSource ==
+   * true}）允许纳入尚未应用的源命令，但仍通过同一收敛判据。
    *
    * @param tx 当前事务句柄，不能为 null
    * @param child 已锁定且刚到达终止边界的子 Thread
@@ -190,6 +189,7 @@ public final class ThreadLifecycleCoordinator {
                         && child.id().equals(start.ownerThreadId()))
             .orElse(false);
     return ThreadActivityEvaluator.isQuiescent(
+        child.executionControl(),
         locked.context(),
         hasOpenCompaction,
         hasInputDemand,
@@ -285,7 +285,9 @@ public final class ThreadLifecycleCoordinator {
       head = entryId;
     }
     tx.updateCommands(applied);
-    ThreadState advanced = parent.reserveCommandSequencesAndAdvanceHead(count, head, now);
+    long watermark = parent.nextCommandSequence() + count - 1L;
+    ThreadState advanced =
+        parent.reserveCommandSequencesAdvanceHeadAndInput(count, head, watermark, now);
     tx.updateThread(advanced);
   }
 

@@ -161,11 +161,11 @@ class HarnessRuntimeThreadSemanticsScenarioTest {
     runtime.stop(new StopCommand(root.threadId(), TestIds.id(14), 0L));
     ThreadState stopped = thread(root.threadId());
     assertEquals(ThreadExecutionControl.STOPPED, stopped.executionControl());
-    // Stop 不推进输入水位。
-    assertEquals(0L, stopped.inputThroughSequence());
+    // Stop 物化通知时同步推进输入水位，已消费通知不再表现为待处理输入。
+    assertEquals(1L, stopped.inputThroughSequence());
     assertEquals(1, notificationCount(root.threadId()));
 
-    // 显式新 USER 输入恢复目标；通知历史不重复、水位仍只在普通 INPUT 提交时推进。
+    // 显式新 USER 输入恢复目标；通知历史不重复，水位保持已物化通知的序号。
     AcceptedCommands accepted =
         runtime.acceptCommands(
             new AcceptCommandsCommand(
@@ -175,7 +175,7 @@ class HarnessRuntimeThreadSemanticsScenarioTest {
     assertFalse(accepted.replayed());
     assertEquals(ThreadExecutionControl.RUNNABLE, thread(root.threadId()).executionControl());
     assertEquals(1, notificationCount(root.threadId()));
-    assertEquals(0L, thread(root.threadId()).inputThroughSequence());
+    assertEquals(1L, thread(root.threadId()).inputThroughSequence());
 
     // 后代随根 Stop 一次性停止，不因显式恢复目标而被复活。
     assertEquals(ThreadExecutionControl.STOPPED, executionControl(child));
