@@ -165,11 +165,12 @@ class HarnessRuntimeStopExitContractTest {
     Fixture fixture = ToolProcessorTestSupport.childFixture(false, 1);
     fixture.gateway.queuePreflightAllow();
     UUID remoteId = UUID.randomUUID();
+    AtomicReference<Boolean> started = new AtomicReference<>();
     FakeRun run =
         fixture.gateway.queueRun(
             progress -> {
               ToolGateway.Execution execution = fixture.gateway.executions.get(0);
-              assertTrue(execution.remoteExecutions().tryStart(remoteId));
+              started.set(execution.remoteExecutions().tryStart(remoteId));
               execution.remoteExecutions().confirmExit(remoteId);
               execution.remoteExecutions().confirmExit(remoteId);
               return new ToolGateway.Cancelled(new ToolInvocationError("CANCELLED", "cancelled"));
@@ -179,37 +180,47 @@ class HarnessRuntimeStopExitContractTest {
           ToolProcessorTestSupport.claim(fixture.store, fixture.toolInvocationId, NOW);
       assertEquals(ProcessResult.STARTED, fixture.processor.process(claim));
       assertTrue(run.awaitExited());
+      assertTrue(run.executionThread.join(Duration.ofSeconds(5)), "the real finally must finish");
+      assertEquals(Boolean.TRUE, started.get(), "remote registration must succeed");
       ExecutionExitFact remote =
           fixture.store.transaction(tx -> tx.findExecution(remoteId).orElseThrow());
       assertEquals(ExecutionExitKind.REMOTE, remote.kind());
       assertEquals(ExecutionExitState.REMOTE_ACKNOWLEDGED, remote.state());
-      assertThrows(
-          IllegalArgumentException.class,
-          () ->
-              fixture.store.transaction(
-                  tx -> {
-                    tx.lockThread(remote.threadId());
-                    return tx.confirmExecution(
-                        new ExecutionExitFact(
-                            remote.executionId(),
-                            remote.threadId(),
-                            remote.invocationId(),
-                            remote.attempt(),
-                            "other-lease",
-                            remote.kind(),
-                            remote.parentExecutionId(),
-                            ExecutionExitState.UNCONFIRMED,
-                            remote.registeredAt(),
-                            null),
-                        ExecutionExitState.NOT_STARTED);
-                  }));
+      IllegalArgumentException mismatch =
+          assertThrows(
+              IllegalArgumentException.class,
+              () ->
+                  fixture.store.transaction(
+                      tx -> {
+                        tx.lockThread(remote.threadId());
+                        return tx.confirmExecution(
+                            new ExecutionExitFact(
+                                remote.executionId(),
+                                remote.threadId(),
+                                remote.invocationId(),
+                                remote.attempt(),
+                                "other-lease",
+                                remote.kind(),
+                                remote.parentExecutionId(),
+                                ExecutionExitState.UNCONFIRMED,
+                                remote.registeredAt(),
+                                null),
+                            ExecutionExitState.NOT_STARTED);
+                      }));
+      assertEquals("execution " + remoteId + " identity cannot be replaced", mismatch.getMessage());
       assertEquals(
           ExecutionExitState.REMOTE_ACKNOWLEDGED,
           fixture.store.transaction(tx -> tx.findExecution(remoteId).orElseThrow().state()));
     } finally {
-      fixture.processor.close();
-      fixture.scheduler.shutdownNow();
-      assertTrue(fixture.scheduler.awaitTermination(5, TimeUnit.SECONDS));
+      try {
+        if (run.executionThread != null) {
+          assertTrue(run.executionThread.join(Duration.ofSeconds(5)), "execution must exit");
+        }
+      } finally {
+        fixture.processor.close();
+        fixture.scheduler.shutdownNow();
+        assertTrue(fixture.scheduler.awaitTermination(5, TimeUnit.SECONDS));
+      }
     }
   }
 
@@ -495,14 +506,20 @@ class HarnessRuntimeStopExitContractTest {
           });
 
       UUID unknown = UUID.randomUUID();
-      assertThrows(
-          IllegalStateException.class,
-          () -> observer.get().confirmExit(unknown),
-          "an unregistered remote acknowledgement must fail");
-      assertThrows(
-          IllegalArgumentException.class,
-          () -> observer.get().confirmExit(foreignRemote.executionId()),
-          "an acknowledgement owned by another parent generation must fail");
+      IllegalStateException missing =
+          assertThrows(
+              IllegalStateException.class,
+              () -> observer.get().confirmExit(unknown),
+              "an unregistered remote acknowledgement must fail");
+      assertEquals("remote execution " + unknown + " remains unconfirmed", missing.getMessage());
+      IllegalArgumentException foreign =
+          assertThrows(
+              IllegalArgumentException.class,
+              () -> observer.get().confirmExit(foreignRemote.executionId()),
+              "an acknowledgement owned by another parent generation must fail");
+      assertEquals(
+          "execution " + foreignRemote.executionId() + " identity cannot be replaced",
+          foreign.getMessage());
       assertAll(
           () -> assertTrue(fixture.store.transaction(tx -> tx.findExecution(unknown)).isEmpty()),
           () ->

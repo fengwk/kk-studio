@@ -252,7 +252,7 @@ describe('Lsp Capabilities Group End-to-End', () => {
     expect(events).toHaveLength(0)
   })
 
-  it('confirms pre-send rejection and successful response but not a sent request before its process exits', async () => {
+  it('confirms pre-send rejection and late server exit but not local cancellation after send', async () => {
     const transcript = path.join(tempDir, 'confirm-transcript.jsonl')
     const config = createConfig(fakeDaemonLspConfig('java', 'slow-definition', transcript))
     group = createLspCapabilities(config, supervisor)
