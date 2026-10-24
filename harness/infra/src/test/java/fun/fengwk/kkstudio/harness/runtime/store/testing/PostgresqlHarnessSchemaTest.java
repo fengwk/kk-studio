@@ -17,7 +17,7 @@ import java.util.UUID;
 class PostgresqlHarnessSchemaTest {
 
   /**
-   * Harness runtime 协议的专有表恰好八张，Work 位于共享的 {@code durable_work}；业务表不使用 harness_ 前缀，因此 {@code
+   * Harness runtime 协议的专有表恰好九张，Work 位于共享的 {@code durable_work}；业务表不使用 harness_ 前缀，因此 {@code
    * harness_%} 全量查询结果必须精确等于这九张表。
    *
    * <p>{@code harness_thread_join} 是原子源 prompt 接受与 join 契约的持久事实（无独立状态枚举，无 prompt/report 冗余）， {@code
