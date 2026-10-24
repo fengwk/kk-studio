@@ -155,10 +155,10 @@ public class HarnessOwnerQueryService {
     dto.setName(thread.name());
     dto.setCreatedAt(thread.createdAt());
     dto.setUpdatedAt(thread.updatedAt());
-    // 本地执行状态直接复用 Thread 快照投影（含 STOPPED），不在此自造第二套递归 busy 判定。
+    // 本地执行状态直接复用 Thread 快照三态投影，全部暴露 executionControl，删 processing。
     ThreadRuntimeStatus status = snapshot.runtimeStatus();
     dto.setStatus(status.name());
-    dto.setProcessing(status.isProcessing());
+    dto.setExecutionControl(thread.executionControl().name());
     var selection = snapshot.entryPath().baseSettings().model();
     HarnessModelSelectionDTO model = new HarnessModelSelectionDTO();
     model.setModelName(selection.modelName());

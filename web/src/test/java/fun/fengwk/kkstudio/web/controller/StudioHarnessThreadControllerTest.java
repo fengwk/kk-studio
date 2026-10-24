@@ -106,7 +106,7 @@ class StudioHarnessThreadControllerTest {
   }
 
   /**
-   * 意图：父 Thread 本地已静止时，快照的 status 只由该 Thread 自身投影为 IDLE 且 processing=false，不再递归子树表达忙碌；
+   * 意图：父 Thread 本地已静止时，快照的 status 只由该 Thread 自身投影为 IDLE 且 executionControl=RUNNABLE，不再递归子树表达忙碌；
    * 同时必须暴露执行父关系。该路由不依赖任何 task join 侧事实，因此服务端不额外注入任何委派状态。
    */
   @Test
@@ -120,7 +120,8 @@ class StudioHarnessThreadControllerTest {
         .perform(get("/api/threads/" + idText(1)))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.thread.status").value("IDLE"))
-        .andExpect(jsonPath("$.data.thread.processing").value(false))
+        .andExpect(jsonPath("$.data.thread.executionControl").value("RUNNABLE"))
+        .andExpect(jsonPath("$.data.thread.processing").doesNotExist())
         .andExpect(jsonPath("$.data.thread.parentThreadId").value(idText(2)));
   }
 
@@ -181,7 +182,9 @@ class StudioHarnessThreadControllerTest {
                         Instant.parse("2026-10-08T10:00:00Z"),
                         Instant.parse("2026-10-08T10:00:00Z"))),
             List.of(),
-            List.of());
+            List.of(),
+            0,
+            false);
     Instant deadline = Instant.parse("2026-10-08T12:00:00Z");
     when(runtime.getThreadSnapshot(id(1))).thenReturn(snapshot);
     when(runtime.manualCompactionAvailability(id(1)))
@@ -227,7 +230,8 @@ class StudioHarnessThreadControllerTest {
         .andExpect(jsonPath("$.data[0].queuedCommands").doesNotExist())
         .andExpect(jsonPath("$.data[1].parentThreadId").value(idText(2)))
         .andExpect(jsonPath("$.data[1].status").value("IDLE"))
-        .andExpect(jsonPath("$.data[1].processing").value(false));
+        .andExpect(jsonPath("$.data[1].executionControl").value("RUNNABLE"))
+        .andExpect(jsonPath("$.data[1].processing").doesNotExist());
 
     verify(runtime).getThreadTree(id(1));
     verify(runtime, never()).getThreadSnapshot(any());

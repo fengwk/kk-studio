@@ -984,18 +984,18 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
         headEntryId(parentThreadId),
         "child work");
 
-    // 父没有本地工作但有活跃直接孩子：durable 执行控制保持 RUNNABLE，本地投影只按父自身事实表达为 IDLE，不再有"等孩子"这类递归状态。
+    // 父没有本地工作但有直接发出的未完成 NOTIFY_PARENT 委派：durable 执行控制保持 RUNNABLE，状态投影为 WAITING。
     assertEquals(ThreadExecutionControl.RUNNABLE, threadState(parentThreadId).executionControl());
     HarnessThreadDTO parentDto =
         HarnessRuntimeResponseMapper.toThreadDto(runtime.getThreadSnapshot(parentThreadId));
-    assertEquals(ThreadRuntimeStatus.IDLE.name(), parentDto.getStatus());
-    assertFalse(parentDto.getProcessing());
+    assertEquals(ThreadRuntimeStatus.WAITING.name(), parentDto.getStatus());
+    assertEquals("RUNNABLE", parentDto.getExecutionControl());
     assertNull(parentDto.getParentThreadId());
-    // 子执行尚未被消费：它对外是排队中（processing），并携带不可变执行父关系。
+    // 子执行尚未被消费：有排队输入，对外处于本地待启动 RUNNING，并携带不可变执行父关系。
     HarnessThreadDTO childDto =
         HarnessRuntimeResponseMapper.toThreadDto(runtime.getThreadSnapshot(childThreadId));
-    assertEquals(ThreadRuntimeStatus.QUEUED.name(), childDto.getStatus());
-    assertTrue(childDto.getProcessing());
+    assertEquals(ThreadRuntimeStatus.RUNNING.name(), childDto.getStatus());
+    assertEquals("RUNNABLE", childDto.getExecutionControl());
     assertEquals(parentThreadId.toString(), childDto.getParentThreadId());
     // 子未收敛前父不可能拿到结果。
     assertFalse(joinOf(invocationId).matched());

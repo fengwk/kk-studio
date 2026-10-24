@@ -193,7 +193,9 @@ class HarnessOwnerQueryServiceTest {
                 null,
                 List.of(),
                 List.of(),
-                List.of()));
+                List.of(),
+                0,
+                false));
     when(runtime.getSession(sessionId)).thenReturn(new Session(sessionId, "agent session", T0));
     when(runtime.getSessionEntries(sessionId)).thenReturn(List.of());
     when(runtime.listThreadsBySession(sessionId)).thenReturn(List.of(thread));
@@ -259,7 +261,9 @@ class HarnessOwnerQueryServiceTest {
             null,
             List.of(),
             List.of(),
-            List.of());
+            List.of(),
+            0,
+            false);
     when(runtime.listThreadsBySession(sessionId)).thenReturn(List.of(thread));
     when(runtime.getThreadSnapshot(threadId)).thenReturn(snapshot);
 
@@ -284,7 +288,9 @@ class HarnessOwnerQueryServiceTest {
                 null,
                 List.of(),
                 List.of(),
-                List.of()));
+                List.of(),
+                0,
+                false));
     String reminderHeadPreview =
         service.listThreadSummaries(sessionId).getFirst().getHeadMessagePreview();
     assertEquals("latest user", reminderHeadPreview);
@@ -328,7 +334,9 @@ class HarnessOwnerQueryServiceTest {
                   null,
                   List.of(),
                   List.of(),
-                  List.of()));
+                  List.of(),
+                  0,
+                  false));
     }
 
     List<HarnessThreadSummaryDTO> summaries = service.listThreadSummaries(sessionId);
@@ -365,11 +373,13 @@ class HarnessOwnerQueryServiceTest {
                 null,
                 List.of(),
                 List.of(),
-                List.of()));
+                List.of(),
+                0,
+                false));
 
     HarnessThreadSummaryDTO idle = service.listThreadSummaries(sessionId).getFirst();
     assertEquals("IDLE", idle.getStatus());
-    assertFalse(idle.isProcessing());
+    assertEquals("RUNNABLE", idle.getExecutionControl());
 
     // 未交付的 join 不再单独决定 processing；递归生命周期由 ThreadState 负责。
   }

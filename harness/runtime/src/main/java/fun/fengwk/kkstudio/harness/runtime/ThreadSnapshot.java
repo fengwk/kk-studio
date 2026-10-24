@@ -13,6 +13,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadActivityEvaluator;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextClassifier;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
@@ -39,7 +40,9 @@ public record ThreadSnapshot(
     ModelInvocation model,
     List<ToolInvocation> toolSiblings,
     List<ModelAttemptFailureProjection> modelAttemptFailures,
-    List<StoppedThreadReceipt> stopReceipts) {
+    List<StoppedThreadReceipt> stopReceipts,
+    int incompleteChildJoins,
+    boolean unconsumedAppliedNotifications) {
 
   public ThreadSnapshot {
     thread = Objects.requireNonNull(thread, "thread");
@@ -49,23 +52,42 @@ public record ThreadSnapshot(
     modelAttemptFailures =
         List.copyOf(Objects.requireNonNull(modelAttemptFailures, "modelAttemptFailures"));
     stopReceipts = List.copyOf(Objects.requireNonNull(stopReceipts, "stopReceipts"));
+    if (incompleteChildJoins < 0) {
+      throw new IllegalArgumentException("incompleteChildJoins must not be negative");
+    }
   }
 
   /**
-   * 持久执行控制为 {@link ThreadExecutionControl#STOPPED} 时投影 STOPPED；否则按本地适用上下文投影细分阶段，本地空闲但存在排队命令时 投影
-   * QUEUED。不递归查询后代。
+   * 运行时状态投影为三态（{@link ThreadRuntimeStatus#RUNNING} / {@link ThreadRuntimeStatus#WAITING} / {@link
+   * ThreadRuntimeStatus#IDLE}），与持久执行控制 {@link ThreadExecutionControl} 正交（STOP 绝不直接覆盖本状态）。
+   *
+   * <ul>
+   *   <li>本地活跃流程未结束（活跃 Model/Tool/Continuation/pending apply 或 open compaction）投影为 {@code RUNNING}；
+   *   <li>待启动输入需求仅在 {@code RUNNABLE} 下体现为本地待启动 {@code RUNNING}；{@code STOPPED} 下保留通知不自启，不得显示为
+   *       RUNNING；
+   *   <li>本地已让出执行但存在未完成直接 NOTIFY_PARENT 子任务（{@code incompleteChildJoins > 0}）投影为 {@code WAITING}；
+   *   <li>无本地义务且无未完成直接子任务投影为 {@code IDLE}。
+   * </ul>
    */
   public ThreadRuntimeStatus runtimeStatus() {
-    if (thread.executionControl().isStopped()) {
-      return ThreadRuntimeStatus.STOPPED;
-    }
-    ThreadRuntimeStatus local =
-        ThreadRuntimeStatus.from(
-            new ThreadContextClassifier().classify(thread, entryPath, model, toolSiblings));
-    if (local != ThreadRuntimeStatus.IDLE) {
-      return local;
-    }
-    return queuedCommands.isEmpty() ? ThreadRuntimeStatus.IDLE : ThreadRuntimeStatus.QUEUED;
+    ThreadContext context =
+        new ThreadContextClassifier().classify(thread, entryPath, model, toolSiblings);
+    boolean hasOpenCompaction =
+        entryPath
+            .openTurnStart()
+            .map(
+                entry ->
+                    entry.payload() instanceof TurnStartPayload start
+                        && start.reason() == TurnStartReason.COMPACTION
+                        && thread.id().equals(start.ownerThreadId()))
+            .orElse(false);
+    boolean hasInputDemand = !queuedCommands.isEmpty() || unconsumedAppliedNotifications;
+    return ThreadActivityEvaluator.evaluate(
+        thread.executionControl(),
+        context,
+        hasOpenCompaction,
+        hasInputDemand,
+        incompleteChildJoins);
   }
 
   /**

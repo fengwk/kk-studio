@@ -278,7 +278,7 @@ class HarnessRuntimeDtoContractTest {
     model.setVariant("default");
     node.setModel(model);
     node.setStatus("IDLE");
-    node.setProcessing(false);
+    node.setExecutionControl("RUNNABLE");
     node.setTurnCount(2);
     node.setToolCallCount(1);
     node.setOutcome(null);
@@ -524,6 +524,20 @@ class HarnessRuntimeDtoContractTest {
   void threadDtoExposesExecutionControlAndStopAggregates() throws Exception {
     assertEquals(
         String.class, HarnessThreadDTO.class.getDeclaredField("executionControl").getType());
+    assertEquals(
+        String.class, HarnessThreadSummaryDTO.class.getDeclaredField("executionControl").getType());
+    assertEquals(
+        String.class,
+        HarnessThreadTreeNodeDTO.class.getDeclaredField("executionControl").getType());
+
+    assertThrows(
+        NoSuchFieldException.class, () -> HarnessThreadDTO.class.getDeclaredField("processing"));
+    assertThrows(
+        NoSuchFieldException.class,
+        () -> HarnessThreadSummaryDTO.class.getDeclaredField("processing"));
+    assertThrows(
+        NoSuchFieldException.class,
+        () -> HarnessThreadTreeNodeDTO.class.getDeclaredField("processing"));
 
     HarnessStoppedThreadReceiptDTO receipt = new HarnessStoppedThreadReceiptDTO();
     receipt.setThreadId("00000000-0000-0000-0000-000000000001");

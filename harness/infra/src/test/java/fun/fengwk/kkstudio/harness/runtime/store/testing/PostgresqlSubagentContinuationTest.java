@@ -127,7 +127,7 @@ class PostgresqlSubagentContinuationTest {
     assertEquals(parent.thread().id(), child.thread().parentThreadId());
     processNext(child.thread().id());
     startModel(child.thread().id());
-    assertEquals(ThreadRuntimeStatus.MODEL_RUNNING, snapshot(child.thread().id()).runtimeStatus());
+    assertEquals(ThreadRuntimeStatus.RUNNING, snapshot(child.thread().id()).runtimeStatus());
     assertFalse(hasThreadWork(parent.thread().id()));
     return new Delegation(parent, child, invocation);
   }
@@ -188,7 +188,7 @@ class PostgresqlSubagentContinuationTest {
     // 安全边界先独立应用 SET_*，不创建空回合，也不消耗后续任务输入。
     processNext(childId);
     ThreadSnapshot appliedSettings = snapshot(childId);
-    assertEquals(ThreadRuntimeStatus.QUEUED, appliedSettings.runtimeStatus());
+    assertEquals(ThreadRuntimeStatus.RUNNING, appliedSettings.runtimeStatus());
     assertInstanceOf(SettingsPayload.class, appliedSettings.entryPath().head().payload());
     assertEquals(1L, appliedSettings.thread().inputThroughSequence());
     assertEquals(List.of(secondInput), appliedSettings.queuedCommands());
@@ -197,7 +197,7 @@ class PostgresqlSubagentContinuationTest {
 
     processNext(childId);
     ThreadSnapshot secondTurn = snapshot(childId);
-    assertEquals(ThreadRuntimeStatus.MODEL_READY, secondTurn.runtimeStatus());
+    assertEquals(ThreadRuntimeStatus.RUNNING, secondTurn.runtimeStatus());
     assertEquals(5L, secondTurn.thread().inputThroughSequence());
     assertEquals(settings, secondTurn.entryPath().baseSettings());
     assertTrue(secondTurn.queuedCommands().isEmpty());

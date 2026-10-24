@@ -13,6 +13,8 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadActivityEvaluator;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextClassifier;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NotificationCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
@@ -167,13 +169,27 @@ public final class ThreadLifecycleCoordinator {
   }
 
   /**
-   * 普通终止的委派收敛判据：子执行没有尚未冻结结果的直接子 Join，且本 Thread 没有待处理输入（QUEUED 消息/通知，或已物化但未越过输入水位的 APPLIED 通知）。
+   * 普通终止的委派收敛判据：子执行没有尚未冻结结果的直接子 Join，没有待处理输入（QUEUED 消息/通知，或已物化但未越过输入水位的 APPLIED 通知）， 且经 {@link
+   * ThreadContextClassifier} 判定的本地上下文已完全空闲（非续作、非待 apply、非活跃 Model/Tool，且非 owner 压缩）。
    *
-   * <p>直接子 Join 自身也遵循同一判据，A-B-C 及更深的委派因此自底向上自然收敛，不需要遍历全树历史空闲节点。
+   * <p>状态与结算共用同一事实判据，不把本地单轮 TURN_END 冒充为整段委派的完成。直接子 Join 自身也遵循同一判据，自底向上自然收敛。
    */
   private static boolean isQuiescent(HarnessStore.Transaction tx, ThreadState child) {
-    return tx.countIncompleteChildJoins(child.id()) == 0
-        && !ThreadInputDemand.hasInputDemand(tx, child);
+    int incompleteChildJoins = tx.countIncompleteChildJoins(child.id());
+    boolean hasInputDemand = ThreadInputDemand.hasInputDemand(tx, child);
+    LockedThreadContext locked = ThreadContextLock.load(tx, child);
+    boolean hasOpenCompaction =
+        locked
+            .path()
+            .openTurnStart()
+            .map(
+                entry ->
+                    entry.payload() instanceof TurnStartPayload start
+                        && start.reason() == TurnStartReason.COMPACTION
+                        && child.id().equals(start.ownerThreadId()))
+            .orElse(false);
+    return ThreadActivityEvaluator.isQuiescent(
+        locked.context(), hasOpenCompaction, hasInputDemand, incompleteChildJoins);
   }
 
   /**

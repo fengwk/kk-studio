@@ -116,8 +116,8 @@ public abstract class HarnessRuntimeThreadTreeContract {
     // （不存在 WAITING_CHILDREN），后代是否活跃不影响祖先投影。
     assertEquals(ThreadRuntimeStatus.IDLE, root.runtimeStatus());
     assertEquals(ThreadRuntimeStatus.IDLE, early.runtimeStatus());
-    assertEquals(ThreadRuntimeStatus.MODEL_RUNNING, child.runtimeStatus());
-    assertEquals(ThreadRuntimeStatus.TOOL_WAITING_APPROVAL, grandchild.runtimeStatus());
+    assertEquals(ThreadRuntimeStatus.RUNNING, child.runtimeStatus());
+    assertEquals(ThreadRuntimeStatus.RUNNING, grandchild.runtimeStatus());
     assertEquals(TurnEndOutcome.FAILED, early.outcome());
     assertNull(root.outcome());
     assertNull(child.outcome());
@@ -184,7 +184,7 @@ public abstract class HarnessRuntimeThreadTreeContract {
     assertTrue(grandchildThread < rootThread);
     assertTrue(rootThread < command);
     assertEquals(
-        ThreadRuntimeStatus.QUEUED,
+        ThreadRuntimeStatus.RUNNING,
         runtime.getThreadTree(tree.earlySiblingId()).stream()
             .filter(snapshot -> snapshot.thread().id().equals(tree.earlySiblingId()))
             .findFirst()
