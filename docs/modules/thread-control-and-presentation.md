@@ -139,7 +139,7 @@ accepted 收据都使用“查看 subagent 执行”链接，字体与正文一�
 
 `/history` 是当前 Session 的只读历史树，与根面板的活跃执行树是两份不同投影：前者按真实 Entry
 画 Git commit lanes（`●` 节点、`│` 连线，线性链同一列，只有真实 sibling 分叉才开新列），
-每行一个 Entry，只有 ROOT 与已关闭 TURN_END 可手工分叉；后者按执行父子关系展示 processing
+每行一个 Entry，只有 ROOT 与已关闭 TURN_END 可手工分叉；后者按执行父子关系展示非 IDLE
 后代。搜索只调暗未命中行并高亮命中片段，不隐藏行、不改图形，也不写 Thread 状态。
 
 命名分支有两个呈现入口并汇入同一命名流程：`/history` 面板底部对选中 ROOT 或已关闭 TURN_END 的
