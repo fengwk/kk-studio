@@ -43,6 +43,7 @@ export function makeContext(dataDir: string, overrides: ContextOverrides = {}): 
     processes: overrides.processes ?? ({} as CapabilityContext['processes']),
     resources: {} as CapabilityContext['resources'],
     progress: overrides.progress ?? (async () => {}),
+    confirmExecutionExit: () => {},
   }
 }
 

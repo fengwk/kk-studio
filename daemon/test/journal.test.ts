@@ -60,4 +60,27 @@ describe('InMemoryInvocationJournal', () => {
   it('rejects a non-positive bound', () => {
     expect(() => new InMemoryInvocationJournal(0)).toThrow()
   })
+
+  it('records exit confirmation independently of the terminal and only once', () => {
+    const journal = new InMemoryInvocationJournal()
+    journal.start('inv-1')
+    expect(journal.confirmExit('missing')).toBe(false)
+    expect(journal.confirmExit('inv-1')).toBe(true)
+    expect(journal.confirmExit('inv-1')).toBe(false)
+    expect(journal.find('inv-1')?.exitConfirmed).toBe(true)
+    expect(journal.complete('inv-1', terminal('CANCELLED', '{"reason":"cancelled"}'))).toBe(true)
+    expect(journal.find('inv-1')?.exitConfirmed).toBe(true)
+    expect(journal.find('inv-1')?.terminalMessage?.messageType).toBe('CANCELLED')
+  })
+
+  it('drops an evicted exit confirmation instead of replaying it', () => {
+    const journal = new InMemoryInvocationJournal(1)
+    journal.start('old')
+    journal.confirmExit('old')
+    journal.complete('old', terminal('COMPLETED'))
+    journal.start('new')
+    journal.complete('new', terminal('FAILED'))
+    expect(journal.find('old')).toBeUndefined()
+    expect(journal.find('new')?.exitConfirmed).toBe(false)
+  })
 })

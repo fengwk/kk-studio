@@ -3,7 +3,7 @@ import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PassThrough, Readable } from 'node:stream'
-import type { CapabilityResult, ManagedProcess, ProcessExit, ProcessSpec } from '../../src/contracts.js'
+import type { CapabilityResult, ManagedProcess, ProcessExit, ProcessSpec, ProcessSupervisor } from '../../src/contracts.js'
 import { processCapability } from '../../src/coding/process.js'
 import { callCapability, makeContext, textOf } from './helpers.js'
 
@@ -268,11 +268,17 @@ describe('process.exec', () => {
       close: async () => {},
     }
 
+    let confirmations = 0
     const pending = callCapability(
       processCapability,
       'process.exec',
       { command: 'sleep 100', workdir: dir },
-      makeContext(dir, { processes: supervisor, signal: controller.signal }),
+      {
+        ...makeContext(dir, { processes: supervisor, signal: controller.signal }),
+        confirmExecutionExit: () => {
+          confirmations += 1
+        },
+      },
       50,
     )
 
@@ -286,6 +292,7 @@ describe('process.exec', () => {
     expect(result.details).toMatchObject({
       code: 'FAILED',
     })
+    expect(confirmations).toBe(0)
   })
 
   it('启动 await 期间 abort 且 terminate 成功收敛返回 terminatedBeforeStart', async () => {
@@ -295,6 +302,7 @@ describe('process.exec', () => {
     const startEntered = Promise.withResolvers<void>()
     const allowStartReturn = Promise.withResolvers<void>()
     let terminated = false
+    let confirmations = 0
 
     const successfulProcess: ManagedProcess = {
       pid: 1234,
@@ -320,7 +328,12 @@ describe('process.exec', () => {
       processCapability,
       'process.exec',
       { command: 'sleep 100', workdir: dir },
-      makeContext(dir, { processes: supervisor, signal: controller.signal }),
+      {
+        ...makeContext(dir, { processes: supervisor, signal: controller.signal }),
+        confirmExecutionExit: () => {
+          confirmations += 1
+        },
+      },
       50,
     )
 
@@ -333,11 +346,78 @@ describe('process.exec', () => {
     expect(result.details).toMatchObject({ process: { outcome: 'TIMED_OUT' } })
     expect(textOf(result)).toContain('timed out after 50 ms')
     expect(terminated).toBe(true)
+    expect(confirmations).toBe(1)
+  })
+
+  it('ACKs after a natural exit has been converged and captured output closed', async () => {
+    // 正向对照：进程真实退出且 terminate 与本地捕获收尾都成功后确认一次。
+    const dir = await tempDir()
+    let confirmations = 0
+    const result = await callCapability(
+      processCapability,
+      'process.exec',
+      { command: 'echo hi', workdir: dir },
+      {
+        ...makeContext(dir, { processes: fakeSupervisor(fakeManagedProcess({ stdout: 'hi\n', exitCode: 0 })) }),
+        confirmExecutionExit: () => {
+          confirmations += 1
+        },
+      },
+    )
+    expect(result.error).toBe(false)
+    expect(confirmations).toBe(1)
+  })
+
+  it('does not ACK when start throws before a managed process exists', async () => {
+    // start 抛错只说明没有返回受管进程，不证明状态目录或 helper 已清理。
+    const dir = await tempDir()
+    let confirmations = 0
+    const supervisor: ProcessSupervisor = {
+      start: async () => {
+        throw new Error('spawn failed after creating the state directory')
+      },
+      close: async () => {},
+    }
+    const result = await callCapability(
+      processCapability,
+      'process.exec',
+      { command: 'echo hi', workdir: dir },
+      {
+        ...makeContext(dir, { processes: supervisor }),
+        confirmExecutionExit: () => {
+          confirmations += 1
+        },
+      },
+    )
+    expect(result.error).toBe(true)
+    expect(confirmations).toBe(0)
+  })
+
+  it('ACKs a rejection that happens before start is attempted', async () => {
+    // 正向对照：workdir 在调用 start 前就被拒绝，执行范围确定未创建。
+    const dir = await tempDir()
+    let confirmations = 0
+    const supervisor = fakeSupervisor(fakeManagedProcess({ exitCode: 0 }))
+    const result = await callCapability(
+      processCapability,
+      'process.exec',
+      { command: 'echo hi', workdir: 'relative' },
+      {
+        ...makeContext(dir, { processes: supervisor }),
+        confirmExecutionExit: () => {
+          confirmations += 1
+        },
+      },
+    )
+    expect(result.error).toBe(true)
+    expect(supervisor.started).toEqual([])
+    expect(confirmations).toBe(1)
   })
 
   it('启动抛出异常且在此期间已 abort 时返回明确的终止说明', async () => {
     const dir = await tempDir()
     const controller = new AbortController()
+    let confirmations = 0
     const supervisor: ProcessSupervisor = {
       start: async () => {
         controller.abort()
@@ -349,10 +429,17 @@ describe('process.exec', () => {
       processCapability,
       'process.exec',
       { command: 'echo hi', workdir: dir },
-      makeContext(dir, { processes: supervisor, signal: controller.signal }),
+      {
+        ...makeContext(dir, { processes: supervisor, signal: controller.signal }),
+        confirmExecutionExit: () => {
+          confirmations += 1
+        },
+      },
     )
     expect(result.error).toBe(true)
     expect(result.details).toMatchObject({ process: { outcome: 'CANCELLED' } })
+    // 取消不能把不确定的 start 清理变成退出证据。
+    expect(confirmations).toBe(0)
   })
 
   it('进程被外部信号杀死时保留输出并记录 signal 说明', async () => {

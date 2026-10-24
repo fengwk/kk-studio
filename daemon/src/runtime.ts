@@ -635,7 +635,15 @@ export class Runtime {
       }
       void this.track(this.execute(invocation, executor, call))
     } catch (error) {
+      this.confirmRejectedBeforeExecution(invocationId)
       this.terminal(invocationId, 'FAILED', JSON.stringify(errorPayload(safeMessage(error))), null)
+    }
+  }
+
+  /** 执行器确定未启动时记录并发送退出确认；重复确认由 journal 吸收。 */
+  private confirmRejectedBeforeExecution(invocationId: string): void {
+    if (this.journal.confirmExit(invocationId)) {
+      this.send('EXECUTION_EXITED', invocationId, '{}')
     }
   }
 
@@ -646,7 +654,10 @@ export class Runtime {
   ): Promise<void> {
     try {
       const result = await executor(call, this.capabilityContext(invocation))
+      invocation.markExecutorReturned()
+      // 上传和终态仍是本次拥有的收尾，完成前不能发送退出确认。
       if (invocation.terminalClaimed) {
+        invocation.finishOwnedCleanup()
         return
       }
       if (result.callId !== invocation.invocationId) {
@@ -656,6 +667,7 @@ export class Runtime {
           JSON.stringify(errorPayload('capability result callId does not match invocationId')),
           null,
         )
+        invocation.finishOwnedCleanup()
         return
       }
       const payloadJson = await encodeCompleted(result, invocation.maxResourceBytes, (content) => {
@@ -666,14 +678,22 @@ export class Runtime {
         return resources.upload(invocation.invocationId, content, invocation.controller.signal)
       })
       this.terminal(invocation.invocationId, 'COMPLETED', payloadJson, null)
+      invocation.finishOwnedCleanup()
     } catch (error) {
+      const executorFailed = !invocation.executorReturned
       if (invocation.terminalClaimed) {
+        if (executorFailed) {
+          invocation.finishOwnedCleanup()
+        }
         return
       }
       const reason = invocation.controller.signal.reason
       if (reason === 'CANCELLED' || reason === 'SHUTDOWN') {
         const payload = reason === 'SHUTDOWN' ? { reason: 'daemon shutdown' } : { reason: 'cancelled' }
         this.terminal(invocation.invocationId, 'CANCELLED', JSON.stringify(payload), reason)
+        if (executorFailed) {
+          invocation.finishOwnedCleanup()
+        }
         return
       }
       if (reason === 'TIMED_OUT') {
@@ -683,9 +703,16 @@ export class Runtime {
           JSON.stringify(errorPayload(`capability execution timed out after ${call.timeoutMillis}ms`)),
           'TIMED_OUT',
         )
+        if (executorFailed) {
+          invocation.finishOwnedCleanup()
+        }
         return
       }
       this.terminal(invocation.invocationId, 'FAILED', JSON.stringify(errorPayload(safeMessage(error))), null)
+      // executor 抛错仍可能已有正向范围证据；后续上传/收尾抛错则不能确认清理完成。
+      if (executorFailed) {
+        invocation.finishOwnedCleanup()
+      }
     }
   }
 
@@ -706,7 +733,29 @@ export class Runtime {
       progress: async (result: CapabilityResult) => {
         this.progress(invocation, result)
       },
+      confirmExecutionExit: () => {
+        // 只记录证据。发送必须等 executor 与本次拥有的收尾都结束，不能在 body 内提前 ACK。
+        invocation.noteExitEvidence((current) => this.publishExecutionExit(current))
+      },
     }
+  }
+
+  /**
+   * executor 与本次拥有的收尾都结束后，才把已记录的正向证据写入 journal 并发送一次。
+   *
+   * <p>终态会把 invocation 移出 running，因此这里持有对象本身，不回查 map。
+   * 尚未开始执行器的确定拒绝由调用方直接确认；已经开始但没有正向证据时这里不补发。
+   * 结果终态、超时和取消本身都不是退出证据。
+   */
+  private publishExecutionExit(invocation: RunningInvocation): void {
+    if (!invocation.executorFinished || !invocation.exitConfirmed || invocation.exitPublished) {
+      return
+    }
+    invocation.exitPublished = true
+    if (!this.journal.confirmExit(invocation.invocationId)) {
+      return
+    }
+    this.send('EXECUTION_EXITED', invocation.invocationId, '{}')
   }
 
   private progress(invocation: RunningInvocation, result: CapabilityResult): void {
@@ -745,11 +794,14 @@ export class Runtime {
   private replay(entry: JournalEntry): void {
     if (entry.state === 'RUNNING') {
       this.send('STARTED', entry.invocationId, JSON.stringify({ replayed: true }))
-      return
+    } else {
+      const terminal = entry.terminalMessage
+      if (terminal !== null) {
+        this.send(terminal.messageType, entry.invocationId, terminal.payloadJson)
+      }
     }
-    const terminal = entry.terminalMessage
-    if (terminal !== null) {
-      this.send(terminal.messageType, entry.invocationId, terminal.payloadJson)
+    if (entry.exitConfirmed) {
+      this.send('EXECUTION_EXITED', entry.invocationId, '{}')
     }
   }
 
@@ -1147,6 +1199,16 @@ class ActiveConnection {
 
 class RunningInvocation {
   terminalClaimed = false
+  /** executor 已返回或抛出，但上传与终态收尾可能尚未完成。 */
+  executorReturned = false
+  /** executor 及其拥有的收尾都已结束。收尾抛错时保持 false。 */
+  executorFinished = false
+  /** capability 留下的正向退出证据。与 executorFinished 都成立后才发送。 */
+  exitConfirmed = false
+  /** 本次已尝试发布退出确认，避免迟到证据与收尾完成重复发送。 */
+  exitPublished = false
+  /** 终态之后仍保留，供迟到证据发布；不依赖 running map。 */
+  private exitPublisher: ((invocation: RunningInvocation) => void) | null = null
   deadlineTimer: NodeJS.Timeout | null = null
 
   constructor(
@@ -1155,6 +1217,28 @@ class RunningInvocation {
     /** INVOKE 时刻协商的资源预算快照；连接断开重置运行时预算也不影响在途执行。 */
     readonly maxResourceBytes: number,
   ) {}
+
+  /** executor 已离开。此前缓存的证据这时才允许进入发布判断。 */
+  markExecutorReturned(): void {
+    this.executorReturned = true
+    this.exitPublisher?.(this)
+  }
+
+  /** 上传与终态收尾已完成。收尾抛错时不得调用。 */
+  finishOwnedCleanup(): void {
+    this.executorReturned = true
+    this.executorFinished = true
+    this.exitPublisher?.(this)
+  }
+
+  /** 记录正向证据。executor 尚未返回时只缓存，返回后才尝试发布。 */
+  noteExitEvidence(publisher: (invocation: RunningInvocation) => void): void {
+    this.exitConfirmed = true
+    this.exitPublisher = publisher
+    if (this.executorReturned) {
+      publisher(this)
+    }
+  }
 
   /** 原子抢占终态仲裁权（terminal-once 互斥点）。 */
   claimTerminal(): boolean {

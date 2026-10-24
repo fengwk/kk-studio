@@ -31,7 +31,7 @@ import {
 } from './generated/protocol-contract.js'
 
 /**
- * Daemon wire 协议的严格 codec（v4 envelope / READY v5 / capability catalog v3）。
+ * Daemon wire 协议的严格 codec（envelope v5 / READY payload v5 / capability catalog v3）。
  *
  * <p>这是 Java Environment Daemon codec 的 Node 等价实现，wire 形状逐字段对齐 harness/environment 的
  * DaemonEnvelopeCodec / DaemonCapabilitiesCodec / DaemonCapabilityInvokeCodec /
@@ -70,6 +70,7 @@ const BOUND_MESSAGES: ReadonlySet<MessageType> = new Set([
   'COMPLETED',
   'FAILED',
   'CANCELLED',
+  'EXECUTION_EXITED',
   'RESOURCE_UPLOAD_REQUEST',
   'RESOURCE_UPLOAD_TICKET',
   'RESOURCE_UPLOAD_COMMIT',
@@ -88,6 +89,7 @@ const INVOCATION_MESSAGES: ReadonlySet<MessageType> = new Set([
   'COMPLETED',
   'FAILED',
   'CANCELLED',
+  'EXECUTION_EXITED',
   'RESOURCE_UPLOAD_REQUEST',
   'RESOURCE_UPLOAD_TICKET',
   'RESOURCE_UPLOAD_COMMIT',
@@ -323,6 +325,9 @@ function requiredCanonicalUuid(value: Record<string, unknown>, field: string, co
 // ---------------------------------------------------------------------------
 
 export function encodeEnvelope(envelope: Envelope): string {
+  if (envelope.messageType === 'EXECUTION_EXITED' && Object.keys(envelope.payload).length !== 0) {
+    throw new ProtocolError('EXECUTION_EXITED payload must be an empty object')
+  }
   const root: Record<string, unknown> = {
     protocolVersion: envelope.protocolVersion,
     messageType: envelope.messageType,
@@ -356,6 +361,9 @@ export function decodeEnvelope(text: string): Envelope {
   if (!isPlainObject(payload)) {
     throw new ProtocolError('envelope.payload must be a JSON object')
   }
+  if (messageType === 'EXECUTION_EXITED' && Object.keys(payload).length !== 0) {
+    throw new ProtocolError('EXECUTION_EXITED payload must be an empty object')
+  }
   let invocationId = optionalText(root, 'invocationId', 'envelope')
   if (invocationId !== null && invocationId.trim() === '') {
     throw new ProtocolError('envelope.invocationId must not be blank when present')
@@ -387,7 +395,7 @@ export function decodeEnvelope(text: string): Envelope {
 }
 
 // ---------------------------------------------------------------------------
-// READY capabilities (v4)
+// READY capabilities (payload version 5；与 envelope protocolVersion 不是同一字段)
 // ---------------------------------------------------------------------------
 
 export interface EnvironmentInfo {

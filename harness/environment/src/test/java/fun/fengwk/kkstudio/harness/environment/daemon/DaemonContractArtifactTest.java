@@ -61,7 +61,7 @@ class DaemonContractArtifactTest {
     String generated = DaemonContractGenerator.generate();
     Path directory = Files.createTempDirectory("kkstudio-daemon-contract");
     Path artifact = directory.resolve("protocol-contract.ts");
-    Files.writeString(artifact, generated.replace("= 4\n", "= 5\n"), UTF_8);
+    Files.writeString(artifact, generated.replace("EXECUTION_EXITED", "EXECUTION_FINISHED"), UTF_8);
 
     AssertionError drifted =
         assertThrows(AssertionError.class, () -> assertArtifactMatches(artifact, generated));
