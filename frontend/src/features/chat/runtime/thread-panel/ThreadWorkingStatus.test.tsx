@@ -10,8 +10,8 @@ describe('ThreadWorkingStatus', () => {
     expect(container).toBeEmptyDOMElement()
   })
 
-  it('renders active execution with animation enabled (STOPPED + still active)', () => {
-    // 验证 STOPPED 独立控制下仍有 active 执行事实时，通过 animated=true 保留真实执行动画
+  it('renders the active indicator with animation enabled', () => {
+    // 本组件只消费 active/animated；执行控制与真实调用的映射由 AgentPane 测试覆盖。
     render(
       <ThreadWorkingStatus
         active

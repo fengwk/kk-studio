@@ -1708,9 +1708,8 @@ describe('useAgentThreadController', () => {
     expect(result.current.stopReplayPending).toBe(false)
   })
 
-  it('treats RUNNING as working while IDLE and STOPPED are idle states', async () => {
-    // 测试意图：status 只描述该 Thread 自身执行阶段；RUNNING（非静止）必须 working=true，
-    // 而 IDLE（含 executionControl STOPPED）一样是静止状态（working=false）。
+  it('treats RUNNING as working and IDLE with STOPPED control as idle', async () => {
+    // RUNNING 表示活动未收敛；本例停止快照的活动事实是 IDLE，而非由 STOPPED 推断空闲。
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
       snapshotOf(threadFixture({ threadId: THREAD_ID, status: 'RUNNING' })),
     )

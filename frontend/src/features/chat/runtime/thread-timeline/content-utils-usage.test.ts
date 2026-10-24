@@ -514,7 +514,7 @@ describe('content-utils usage & speed & cache calculations', () => {
 
     // 定向用例：合并后 known reasoning <= output 一致校验
     it('enforces reasoning <= output on merged values', () => {
-      // 即使单独两个调用自身满足 reasoning <= output，若合并后 reasoning > output 则置为 null
+      // 直接传入含非法 reasoning 的统计对象，验证聚合仍拒绝超过 output 的推理计数。
       const first = usage({ output: 20, reasoning: 18 })
       const second = usage({ output: 5, reasoning: 10 })
       const merged = mergeTurnUsage(first, second)

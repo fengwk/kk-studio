@@ -411,7 +411,7 @@ describe('Turn usage after TURN_END', () => {
   })
 
   it('still projects a summary when only reasoning/cache are nonzero', () => {
-    // 全零才抑制 summary：reasoning 或 cache 任一非零都必须投影；reasoning 是 output 子集。
+    // 输出全为 reasoning 的调用仍产生摘要；reasoning 是 output 子集，不重复累加。
     const timeline = buildThreadTimeline(
       [
         turnStart(),
