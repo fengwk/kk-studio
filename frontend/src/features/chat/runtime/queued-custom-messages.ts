@@ -28,7 +28,7 @@ export function extractQueuedCustomMessages(
       continue
     }
     result.push({
-      id: command.idempotencyKey || `${command.threadId ?? 'thread'}-${command.sequence}`,
+      id: command.idempotencyKey,
       sequence: command.sequence,
       text,
     })
@@ -42,8 +42,7 @@ function extractCustomMessageText(payloadJson: string | null): string {
   const contents = getRecordList(message.contents)
   const textParts: string[] = []
   for (const item of contents) {
-    const type = getString(item.type)
-    if (!type || type === 'text') {
+    if (item.type === 'text') {
       const text = getString(item.text)
       if (text) {
         textParts.push(text)
