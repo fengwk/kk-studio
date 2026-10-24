@@ -97,7 +97,7 @@ Session/Thread 命名是独立控制面；响应状态取 Runtime Snapshot 的�
 
 Thread 控制面按认证、资源权限与请求格式收紧，不按 Thread 的产品归属拒绝。
 `GET /api/threads/{threadId}` 的 Snapshot 携带 `thread.executionControl`（`RUNNABLE` / `STOPPED`）、
-派生的 `thread.status`（`RUNNING` / `WAITING` / `IDLE`，移除 `processing`，只描述该 Thread 自身，不递归子树）、每条 Entry 的读取时 `usageCost` 与 `stopReceipts`；
+派生的 `thread.status`（`RUNNING` / `WAITING` / `IDLE`，只描述该 Thread 自身，不递归子树）、每条 Entry 的读取时 `usageCost` 与 `stopReceipts`；
 `POST /api/threads/{threadId}/stop` 以 root `expectedVersion` + 稳定 `stopRequestId` 执行精确 CAS，
 回执 `status` 为 `STOPPED` / `REPLAYED`、`thread` 是目标权威投影、`stoppedThreads` 是本次完整受影响集合的
 逐 Thread 持久回执（`threadId`、`stopRequestId`、`stoppedTurnEndEntryId`、`cancelledCommandCount`、
@@ -105,7 +105,7 @@ Thread 控制面按认证、资源权限与请求格式收紧，不按 Thread �
 
 ### 请求诊断与预览
 
-`GET /api/threads/{threadId}/tree` 返回该 Thread 所属执行树的节点列表。字段只有 `threadId`、显式可空的 `parentThreadId`、`name`、`agentName`、`model`（`modelName` / 可空 `variant`）、`status`（`RUNNING` / `WAITING` / `IDLE`）、`executionControl`（`RUNNABLE` / `STOPPED`）、`turnCount`、`toolCallCount` 和显式可空的 `outcome`（非 IDLE 状态一律为 null，严禁在等待子任务或活跃时宣称 COMPLETED；移除 `processing`）。它不返回 Entry、Command 或 Tool 参数与结果。非法 UUID 为 400，缺失 Thread 为 404。任意节点返回同一真实根的完整树，顺序为 `createdAt` 再 UUID。
+`GET /api/threads/{threadId}/tree` 返回该 Thread 所属执行树的节点列表。字段只有 `threadId`、显式可空的 `parentThreadId`、`name`、`agentName`、`model`（`modelName` / 可空 `variant`）、`status`（`RUNNING` / `WAITING` / `IDLE`）、`executionControl`（`RUNNABLE` / `STOPPED`）、`turnCount`、`toolCallCount` 和显式可空的 `outcome`（非 IDLE 状态一律为 null，严禁在等待子任务或活跃时宣称 COMPLETED）。它不返回 Entry、Command 或 Tool 参数与结果。非法 UUID 为 400，缺失 Thread 为 404。任意节点返回同一真实根的完整树，顺序为 `createdAt` 再 UUID。
 
 `POST /api/threads/{threadId}/model-request-debug` 以 UI 当前草稿 `{model, environmentName}`（`model` 为必填的 `{modelName, variant?}` 逻辑选择，`environmentName` 可空，null 表示未选 Environment）在真实 Thread snapshot 上做一次只读规划，返回下一次结构化预览与可空的活动冻结请求；每个 subagent 另带当前配置声明 `tools` / `skills` / `subagents` / `configurationJson`。冻结请求始终按原始 snapshot 与原路径物化，与草稿选择无关；全程排除 credential 和 Base64，不写库、不发请求。
 

@@ -197,9 +197,7 @@ public final class ModelRequestMaterializer {
    * <p>依据 {@link NotificationPayload} 事实判断来源，保持历史原始角色与数据库 UI 原文，不改 provider 契约。
    */
   private static AgentMessage wrapNotificationMessage(AgentMessage message) {
-    if (message == null) {
-      return null;
-    }
+    Objects.requireNonNull(message, "message");
     List<AgentMessageContent> wrappedContents = new ArrayList<>(message.contents().size());
     for (AgentMessageContent content : message.contents()) {
       if (content instanceof TextMessageContent text) {
