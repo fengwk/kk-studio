@@ -846,8 +846,11 @@ class OpenAiChatStreamAccumulatorTest {
             request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
 
     accumulator.handleData(
-        "{\"choices\":[{\"delta\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}]}");
-    assertThrows(ProviderException.class, accumulator::finish);
+        "{\"choices\":[{\"delta\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}],"
+            + "\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}");
+    ProviderException ex = assertThrows(ProviderException.class, accumulator::finish);
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
+    assertEquals("stream completed without [DONE]", ex.getMessage());
   }
 
   @Test
@@ -876,8 +879,12 @@ class OpenAiChatStreamAccumulatorTest {
     OpenAiChatStreamAccumulator accumulator =
         new OpenAiChatStreamAccumulator(request, descriptor, config, bridge);
 
-    accumulator.handleData("{\"choices\":[{\"delta\":{\"content\":\"incomplete\"}}]}");
-    assertThrows(ProviderException.class, accumulator::finish);
+    accumulator.handleData(
+        "{\"choices\":[{\"delta\":{\"content\":\"incomplete\"}}],"
+            + "\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}");
+    ProviderException ex = assertThrows(ProviderException.class, accumulator::finish);
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
+    assertEquals("stream ended with EOF before valid finish_reason", ex.getMessage());
   }
 
   @Test

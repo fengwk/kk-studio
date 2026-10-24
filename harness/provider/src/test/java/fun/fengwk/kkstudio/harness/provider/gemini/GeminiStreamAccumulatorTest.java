@@ -525,13 +525,19 @@ class GeminiStreamAccumulatorTest {
         {
           "candidates": [{
             "content": { "role": "model", "parts": [{ "text": "Incomplete without finishReason" }] }
-          }]
+          }],
+          "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15
+          }
         }
         """;
 
     accumulator.handleEvent("message", chunk);
     ProviderException ex = assertThrows(ProviderException.class, accumulator::finish);
     assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
+    assertEquals("Gemini stream completed without terminal finish reason", ex.getMessage());
   }
 
   /** 测试意图：UNSPECIFIED 大小写均为非终态，后续 STOP 接收新文本且保留前帧内容。 */
