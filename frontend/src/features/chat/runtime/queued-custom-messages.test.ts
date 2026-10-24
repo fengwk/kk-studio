@@ -141,15 +141,18 @@ describe('extractQueuedCustomMessages', () => {
     expect(result).toEqual([])
   })
 
-  it('当 idempotencyKey 缺失时使用 threadId 和 sequence 组合稳定兜底 id', () => {
+  it('仅展示规范 text 内容，不把缺失或其他 type 的内容猜成文本', () => {
     const commands: HarnessThreadCommandDTO[] = [
       createCommand({
-        threadId: 't-child',
         sequence: '7',
-        idempotencyKey: '',
         payloadJson: JSON.stringify({
           message: {
-            contents: [{ text: '无 key 时兜底' }],
+            role: 'USER',
+            contents: [
+              { text: '缺少类型' },
+              { type: 'image', text: '非文本内容' },
+              { type: 'text', text: '规范文本' },
+            ],
           },
         }),
       }),
@@ -159,9 +162,9 @@ describe('extractQueuedCustomMessages', () => {
 
     expect(result).toEqual([
       {
-        id: 't-child-7',
+        id: 'cmd-1',
         sequence: '7',
-        text: '无 key 时兜底',
+        text: '规范文本',
       },
     ])
   })
