@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChildThreadView } from '@/features/chat/runtime/ChildThreadView'
 import type { ThreadProjection } from '@/features/chat/runtime/useThreadProjection'
 import { extractQueuedCustomMessages } from '@/features/chat/runtime/queued-custom-messages'
+import { buildThreadTimeline } from '@/features/chat/runtime/thread-timeline'
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
 import { setLocale } from '@/shared/i18n'
@@ -91,18 +92,11 @@ function createMockProjection(snapshot: HarnessThreadSnapshotDTO): ThreadProject
     bound: true,
     isRoot: false,
     title: snapshot.thread.name,
-    timeline: {
-      messages: snapshot.entries.map((entry) => ({
-        id: entry.entryId,
-        role: 'user',
-        text: '历史初始任务',
-      })) as never,
-      queuedMessages: [],
-    } as never,
+    timeline: buildThreadTimeline(snapshot.entries, snapshot.queuedCommands, snapshot.toolInvocations),
     events: [],
     runtimeLabels: { environmentName: null, contextWindow: undefined },
-    branchUsage: null as never,
-    working: snapshot.thread.status === 'RUNNING',
+    branchUsage: null,
+    working: snapshot.thread.status !== 'IDLE',
     entries: snapshot.entries,
     messagesLoading: false,
     messagesError: null,
@@ -263,5 +257,7 @@ describe('ChildThreadView 只读子观察面板 QUEUED CUSTOM_MESSAGE', () => {
 
     // 待处理补充要求区域自动移除
     expect(screen.queryByText('待处理补充要求')).not.toBeInTheDocument()
+    expect(screen.getAllByText('请优先补充边界测试用例')).toHaveLength(1)
+    expect(screen.getByText('请优先补充边界测试用例').closest('.thread-block-user')).not.toBeNull()
   })
 })
