@@ -282,6 +282,19 @@ class OpenCliHubClientContractTest {
     assertFalse(output.getAll().contains("s3cr3t"));
   }
 
+  /** 直接验证客户端拥有的流；服务端 handler 的关闭时序不能证明客户端释放资源。 */
+  @Test
+  void closingResourceStreamClosesItsResponseBodyBeforeEof() throws IOException {
+    TrackingInputStream body = new TrackingInputStream(new byte[] {1, 2, 3});
+    try (OpenCliHubClient client = clientReturning(streamResponse(3L, body))) {
+      try (HubResourceStream stream = client.openResource(resource(3L))) {
+        assertEquals(1, stream.content().read());
+        assertFalse(body.closed, "尚未读到 EOF，不能由读完正文自动关闭掩盖 close 契约");
+      }
+      assertTrue(body.closed, "关闭返回值必须关闭实际响应正文");
+    }
+  }
+
   @Test
   void validatesResourceOriginPathLengthAndMediaTypeBeforeExposingStream() throws IOException {
     byte[] media = new byte[] {1, 2, 3};
