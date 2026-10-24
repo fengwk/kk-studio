@@ -329,7 +329,14 @@ class ModelProcessorTest {
       assertEquals(1, notificationCount(fixture.store, parentId));
     } finally {
       releaseClose.countDown();
-      fixture.processor.close();
+      try {
+        if (runner.get() != null) {
+          assertTrue(
+              runner.get().join(Duration.ofSeconds(5)), "model execution must exit in cleanup");
+        }
+      } finally {
+        fixture.processor.close();
+      }
     }
   }
 
@@ -462,15 +469,18 @@ class ModelProcessorTest {
       }
     } finally {
       releaseClose.countDown();
-      if (runner.get() != null) {
-        assertTrue(
-            runner.get().join(Duration.ofSeconds(5)),
-            "released model execution must exit in cleanup");
+      try {
+        if (runner.get() != null) {
+          assertTrue(
+              runner.get().join(Duration.ofSeconds(5)),
+              "released model execution must exit in cleanup");
+        }
+      } finally {
+        processor.close();
+        fixture.processor.close();
+        fixture.scheduler.shutdownNow();
+        assertTrue(fixture.scheduler.awaitTermination(5, TimeUnit.SECONDS));
       }
-      processor.close();
-      fixture.processor.close();
-      fixture.scheduler.shutdownNow();
-      assertTrue(fixture.scheduler.awaitTermination(5, TimeUnit.SECONDS));
     }
   }
 
@@ -3179,7 +3189,7 @@ class ModelProcessorTest {
     assertEquals(ProcessResult.LOST_OWNERSHIP, resultA.get());
     assertEquals(0, fixtureA.gateway.admitCalls, "stale start must never call the gateway");
     assertFalse(fixtureA.processor.hasActiveExecution());
-    awaitExecutionExit(fixtureA);
+    awaitExecutionExit(fixtureA, gatewayB);
     ModelInvocation model = model(fixtureA.store, fixtureA.invocationId);
     assertEquals(ModelInvocationStatus.SUCCEEDED, model.status());
     assertEquals(1, model.attempt());
@@ -4408,16 +4418,26 @@ class ModelProcessorTest {
     fail("condition not met within " + timeout);
   }
 
-  /**
-   * 等待真实 execution finally 的退出确认完成。ownerRelease / hasActiveExecution 早于 close 与
-   * confirm，不能作为终态断言同步点。
-   */
+  /** 等待被观测 gateway 的真实执行线程退出后，再断言该 Thread 没有未确认执行事实。执行线程 join 是退出证据； registry 清空与轮询都不是。 */
   private static void awaitExecutionExit(Fixture fixture) {
-    awaitTrue(
-        () ->
-            Boolean.TRUE.equals(
-                fixture.store.transaction(
-                    tx -> tx.loadUnconfirmedExecutions(fixture.baseline.threadId()).isEmpty())));
+    awaitExecutionExit(fixture, fixture.gateway);
+  }
+
+  private static void awaitExecutionExit(Fixture fixture, FakeGateway gateway) {
+    List<Thread> executionThreads = List.copyOf(gateway.executionThreads);
+    assertFalse(executionThreads.isEmpty(), "gateway must have started an execution body");
+    for (Thread executionThread : executionThreads) {
+      try {
+        assertTrue(executionThread.join(Duration.ofSeconds(5)), "model execution thread must exit");
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+        fail("interrupted while waiting for model execution thread", interrupted);
+      }
+    }
+    boolean noUnconfirmed =
+        fixture.store.transaction(
+            tx -> tx.loadUnconfirmedExecutions(fixture.baseline.threadId()).isEmpty());
+    assertTrue(noUnconfirmed, "confirmed exit must leave no unconfirmed execution fact");
   }
 
   private static ModelRequestSpec requestSpec() {
@@ -4789,6 +4809,7 @@ class ModelProcessorTest {
   static final class FakeGateway implements ModelGateway {
     final LinkedList<Object> results = new LinkedList<>();
     final List<Execution> executions = new CopyOnWriteArrayList<>();
+    final List<Thread> executionThreads = new CopyOnWriteArrayList<>();
     final ConcurrentHashMap<UUID, ControlledRun> runs = new ConcurrentHashMap<>();
     final AtomicInteger runCalls = new AtomicInteger();
     final AtomicInteger closedUnused = new AtomicInteger();
@@ -4870,6 +4891,7 @@ class ModelProcessorTest {
 
     @Override
     public ModelGateway.Outcome run(ModelGateway.Sink sink) {
+      gateway.executionThreads.add(Thread.currentThread());
       gateway.runCalls.incrementAndGet();
       return script.run(sink);
     }
@@ -4891,6 +4913,7 @@ class ModelProcessorTest {
 
     @Override
     public ModelGateway.Outcome run(ModelGateway.Sink sink) {
+      gateway.executionThreads.add(Thread.currentThread());
       gateway.runCalls.incrementAndGet();
       entered.countDown();
       try {

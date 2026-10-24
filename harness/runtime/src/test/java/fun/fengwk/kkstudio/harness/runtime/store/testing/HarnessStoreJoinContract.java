@@ -37,6 +37,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 
+import java.sql.SQLException;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -1286,14 +1287,18 @@ public abstract class HarnessStoreJoinContract {
             "lease-2",
             ExecutionExitKind.TOOL,
             null);
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            store.transaction(
-                tx -> {
-                  tx.lockThread(threadId);
-                  return tx.registerExecution(replacedLease);
-                }));
+    IllegalArgumentException replacedIdentity =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                store.transaction(
+                    tx -> {
+                      tx.lockThread(threadId);
+                      return tx.registerExecution(replacedLease);
+                    }));
+    assertEquals(
+        "execution " + first.executionId() + " identity cannot be replaced",
+        replacedIdentity.getMessage());
     ExecutionExitFact acknowledged =
         store.transaction(
             tx -> {
@@ -1306,23 +1311,31 @@ public abstract class HarnessStoreJoinContract {
               assertEquals(ExecutionExitState.STUDIO_EXITED, repeated.state());
               return repeated;
             });
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            store.transaction(
-                tx -> {
-                  tx.lockThread(threadId);
-                  return tx.confirmExecution(first, ExecutionExitState.NOT_STARTED);
-                }));
+    IllegalArgumentException downgradedExit =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                store.transaction(
+                    tx -> {
+                      tx.lockThread(threadId);
+                      return tx.confirmExecution(first, ExecutionExitState.NOT_STARTED);
+                    }));
+    assertEquals(
+        "execution " + first.executionId() + " is already confirmed as STUDIO_EXITED",
+        downgradedExit.getMessage());
     assertEquals(ExecutionExitState.STUDIO_EXITED, acknowledged.state());
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            store.transaction(
-                tx -> {
-                  tx.lockThread(threadId);
-                  return tx.confirmExecution(replacedLease, ExecutionExitState.STUDIO_EXITED);
-                }));
+    IllegalArgumentException staleConfirmation =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                store.transaction(
+                    tx -> {
+                      tx.lockThread(threadId);
+                      return tx.confirmExecution(replacedLease, ExecutionExitState.STUDIO_EXITED);
+                    }));
+    assertEquals(
+        "execution " + first.executionId() + " identity cannot be replaced",
+        staleConfirmation.getMessage());
     assertEquals(
         ExecutionExitState.STUDIO_EXITED,
         store.transaction(tx -> tx.findExecution(first.executionId()).orElseThrow().state()));
@@ -1368,14 +1381,16 @@ public abstract class HarnessStoreJoinContract {
           tx.registerExecution(remote);
           return null;
         });
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            store.transaction(
-                tx -> {
-                  tx.lockThread(threadId);
-                  return tx.confirmExecution(model, ExecutionExitState.REMOTE_ACKNOWLEDGED);
-                }));
+    IllegalArgumentException modelRemoteAck =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                store.transaction(
+                    tx -> {
+                      tx.lockThread(threadId);
+                      return tx.confirmExecution(model, ExecutionExitState.REMOTE_ACKNOWLEDGED);
+                    }));
+    assertLocalExecutionRejectsRemoteAcknowledgement(modelRemoteAck);
     assertEquals(
         ExecutionExitState.STUDIO_EXITED,
         store
@@ -1434,22 +1449,30 @@ public abstract class HarnessStoreJoinContract {
           tx.registerExecution(otherLeaseParent);
           return null;
         });
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            store.transaction(
-                tx -> {
-                  tx.lockThread(threadId);
-                  return tx.registerExecution(wrongKindRemote);
-                }));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            store.transaction(
-                tx -> {
-                  tx.lockThread(threadId);
-                  return tx.registerExecution(wrongIdentityRemote);
-                }));
+    IllegalArgumentException wrongKindParentFailure =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                store.transaction(
+                    tx -> {
+                      tx.lockThread(threadId);
+                      return tx.registerExecution(wrongKindRemote);
+                    }));
+    assertEquals(
+        "remote execution parent must be the same generation's TOOL execution",
+        wrongKindParentFailure.getMessage());
+    IllegalArgumentException wrongLeaseParentFailure =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                store.transaction(
+                    tx -> {
+                      tx.lockThread(threadId);
+                      return tx.registerExecution(wrongIdentityRemote);
+                    }));
+    assertEquals(
+        "remote execution parent must be the same generation's TOOL execution",
+        wrongLeaseParentFailure.getMessage());
     assertTrue(store.transaction(tx -> tx.findExecution(wrongKindRemote.executionId())).isEmpty());
     assertTrue(
         store.transaction(tx -> tx.findExecution(wrongIdentityRemote.executionId())).isEmpty());
@@ -1490,14 +1513,17 @@ public abstract class HarnessStoreJoinContract {
                 tx.loadUnconfirmedExecutions(threadId).stream()
                     .map(ExecutionExitFact::executionId)
                     .toList()));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            store.transaction(
-                tx -> {
-                  tx.lockThread(threadId);
-                  return tx.confirmExecution(oldGeneration, ExecutionExitState.REMOTE_ACKNOWLEDGED);
-                }));
+    IllegalArgumentException oldGenerationRemoteAck =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                store.transaction(
+                    tx -> {
+                      tx.lockThread(threadId);
+                      return tx.confirmExecution(
+                          oldGeneration, ExecutionExitState.REMOTE_ACKNOWLEDGED);
+                    }));
+    assertLocalExecutionRejectsRemoteAcknowledgement(oldGenerationRemoteAck);
     assertEquals(
         ExecutionExitState.UNCONFIRMED,
         store.transaction(
@@ -1537,6 +1563,21 @@ public abstract class HarnessStoreJoinContract {
     assertTrue(store.transaction(tx -> tx.findExecution(local.executionId())).isEmpty());
     assertTrue(store.transaction(tx -> tx.findExecution(remote.executionId())).isEmpty());
     assertTrue(store.transaction(tx -> tx.findThread(threadId)).isEmpty());
+  }
+
+  /** 内存校验与 PostgreSQL CHECK 都必须命中 kind/state 边界，不能由其它完整性错误让负例误通过。 */
+  private static void assertLocalExecutionRejectsRemoteAcknowledgement(
+      IllegalArgumentException failure) {
+    for (Throwable cause = failure.getCause(); cause != null; cause = cause.getCause()) {
+      if (cause instanceof SQLException sql) {
+        assertEquals("23514", sql.getSQLState(), "must reject a CHECK violation");
+        assertTrue(
+            sql.getMessage().contains("\"ck_harness_execution_exit_kind_state\""),
+            "must reject the execution kind/state constraint");
+        return;
+      }
+    }
+    assertEquals("only a remote execution can be remote-acknowledged", failure.getMessage());
   }
 
   private static ExecutionExitFact fact(
