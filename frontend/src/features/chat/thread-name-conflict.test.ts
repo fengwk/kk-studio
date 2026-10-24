@@ -5,7 +5,7 @@ import type { HarnessThreadSummaryDTO } from '@/shared/api/generated/contracts'
 
 const summary: HarnessThreadSummaryDTO = {
   threadId: 'root', parentThreadId: null, name: 'main', createdAt: 0, updatedAt: 0,
-  status: 'IDLE', processing: false,
+  status: 'IDLE', executionControl: 'RUNNABLE',
   model: { modelName: 'm', variant: 'v' }, headMessagePreview: null,
 }
 const draft: PaneTarget = { kind: 'NEW_THREAD_DRAFT', sessionId: 's', startEntryId: 'root', threadName: 'main' }

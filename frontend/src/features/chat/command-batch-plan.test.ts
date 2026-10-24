@@ -33,7 +33,6 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
     nextCommandSequence: '1',
     version: '0',
     status: 'IDLE',
-    processing: false,
     executionControl: 'RUNNABLE',
     branchSettings: settings(),
     createTime: 0,

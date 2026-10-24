@@ -12,6 +12,7 @@ import type {
   DialogueMessage,
   QueuedThreadMessage,
 } from '@/features/chat/runtime/thread-timeline-types'
+import type { QueuedCustomMessage } from '@/features/chat/runtime/queued-custom-messages'
 
 /**
  * Transcript 区域：持久 timeline + 实时 mailbox 消息。
@@ -20,6 +21,7 @@ import type {
 export interface ThreadPanelTranscriptInput {
   messages: DialogueMessage[]
   queuedMessages: QueuedThreadMessage[]
+  queuedCustomMessages?: QueuedCustomMessage[]
   loading: boolean
   error: unknown
   errorText?: string
@@ -81,6 +83,7 @@ export interface ThreadPanelComposerInput {
 export interface ThreadPanelActivityInput {
   working: boolean
   workingLabel?: string
+  animated?: boolean
   widgets?: ReactNode
   actionError?: string | null
   onDismissActionError?: () => void
@@ -138,7 +141,9 @@ export function ThreadPanel({ transcript, mainView, controls, activity, slots, h
         {mainView?.debug == null ? <ThreadWidgetStack
           working={activity.working}
           workingLabel={activity.workingLabel}
+          animated={activity.animated}
           queuedMessages={transcript.queuedMessages}
+          queuedCustomMessages={transcript.queuedCustomMessages}
         >
           {activity.widgets}
         </ThreadWidgetStack> : null}

@@ -75,56 +75,74 @@ describe('parseTaskArguments', () => {
 })
 
 describe('parseTaskReceipt', () => {
-  it('parses valid accepted receipt JSON with canonical UUID thread_id', () => {
+  it('parses canonical task.accepted details object with canonical UUID thread_id', () => {
     expect(
-      parseTaskReceipt('{"thread_id":"00000000-0000-0000-0000-000000000004","status":"accepted"}'),
+      parseTaskReceipt({
+        kind: 'task.accepted',
+        thread_id: '00000000-0000-0000-0000-000000000004',
+      }),
+    ).toEqual({
+      status: 'accepted',
+      threadId: '00000000-0000-0000-0000-000000000004',
+    })
+    // 允许两端有空白字符的 UUID，解析后 trim
+    expect(
+      parseTaskReceipt({
+        kind: 'task.accepted',
+        thread_id: '  00000000-0000-0000-0000-000000000004  ',
+      }),
     ).toEqual({
       status: 'accepted',
       threadId: '00000000-0000-0000-0000-000000000004',
     })
   })
 
-  it('rejects receipt when thread_id is missing, blank, or not a canonical UUID', () => {
-    // 缺少 thread_id 或非 UUID shape 绝不能隐瞒为成功收据，必须返回 null
-    expect(parseTaskReceipt('{"status":"accepted"}')).toBeNull()
-    expect(parseTaskReceipt('{"status":"accepted","thread_id":"   "}')).toBeNull()
-    expect(parseTaskReceipt('{"status":"accepted","thread_id":"not-a-uuid"}')).toBeNull()
-    expect(parseTaskReceipt('{"status":"accepted","thread_id":123}')).toBeNull()
-  })
-
-  it('strictly rejects completed status and avoids accepted vs completed confusion', () => {
-    // 终态 completed 绝不是受理收据，必须返回 null
+  it('strictly rejects strings and never parses receipt from body JSON text', () => {
+    // 严禁从正文 JSON 字符串反序列化收据，哪怕包含正确字段
     expect(
-      parseTaskReceipt('{"thread_id":"101","status":"completed"}'),
+      parseTaskReceipt('{"kind":"task.accepted","thread_id":"00000000-0000-0000-0000-000000000004"}'),
     ).toBeNull()
     expect(
-      parseTaskReceipt('{"status":"completed","report":"done"}'),
+      parseTaskReceipt('{"thread_id":"00000000-0000-0000-0000-000000000004","status":"accepted"}'),
     ).toBeNull()
     expect(
-      parseTaskReceipt('{"thread_id":"101","status":"error"}'),
-    ).toBeNull()
-    expect(
-      parseTaskReceipt('{"thread_id":"101","status":"cancelled"}'),
-    ).toBeNull()
-  })
-
-  it('rejects legacy XML envelopes and non-JSON text', () => {
-    expect(
-      parseTaskReceipt('<task thread_id="101" state="accepted">delegation accepted</task>'),
-    ).toBeNull()
-    expect(
-      parseTaskReceipt('<task id="101" state="completed"><task_result>report</task_result></task>'),
+      parseTaskReceipt('<task thread_id="00000000-0000-0000-0000-000000000004" state="accepted">delegation accepted</task>'),
     ).toBeNull()
     expect(parseTaskReceipt('plain text receipt')).toBeNull()
   })
 
-  it('rejects malformed JSON and non-object inputs', () => {
-    expect(parseTaskReceipt('{bad json')).toBeNull()
-    expect(parseTaskReceipt('{"status":"accepted"')).toBeNull()
-    expect(parseTaskReceipt('["accepted"]')).toBeNull()
-    expect(parseTaskReceipt('123')).toBeNull()
+  it('rejects receipt when thread_id is missing, blank, or not a canonical UUID', () => {
+    // 缺少 thread_id 或非 UUID shape 绝不能隐瞒为成功收据，必须返回 null
+    expect(parseTaskReceipt({ kind: 'task.accepted' })).toBeNull()
+    expect(parseTaskReceipt({ kind: 'task.accepted', thread_id: '   ' })).toBeNull()
+    expect(parseTaskReceipt({ kind: 'task.accepted', thread_id: 'not-a-uuid' })).toBeNull()
+    expect(parseTaskReceipt({ kind: 'task.accepted', thread_id: 123 })).toBeNull()
+  })
+
+  it('strictly rejects non-task.accepted kind and avoids accepted vs completed confusion', () => {
+    // 终态 completed 或其他 kind 绝不是受理收据，必须返回 null
+    expect(
+      parseTaskReceipt({ kind: 'task.completed', thread_id: '00000000-0000-0000-0000-000000000004' }),
+    ).toBeNull()
+    expect(
+      parseTaskReceipt({ kind: 'task.error', thread_id: '00000000-0000-0000-0000-000000000004' }),
+    ).toBeNull()
+    expect(
+      parseTaskReceipt({ kind: 'task.cancelled', thread_id: '00000000-0000-0000-0000-000000000004' }),
+    ).toBeNull()
+    // 遗留 status 字段不被识别
+    expect(
+      parseTaskReceipt({ status: 'accepted', thread_id: '00000000-0000-0000-0000-000000000004' }),
+    ).toBeNull()
+  })
+
+  it('rejects null, undefined, arrays, and primitive inputs', () => {
+    expect(parseTaskReceipt(null)).toBeNull()
+    expect(parseTaskReceipt(undefined)).toBeNull()
+    expect(parseTaskReceipt(['task.accepted'])).toBeNull()
+    expect(parseTaskReceipt(123)).toBeNull()
+    expect(parseTaskReceipt(true)).toBeNull()
     expect(parseTaskReceipt('')).toBeNull()
-    expect(parseTaskReceipt('   ')).toBeNull()
   })
 })
 
@@ -189,16 +207,35 @@ describe('TaskToolRenderer call phase', () => {
 })
 
 describe('TaskToolRenderer result phase', () => {
-  it('renders a JSON accepted receipt as a readable link and handles an empty result without inventing one', () => {
-    const { rerender } = render(<MemoryRouter><TaskToolRenderer message={message({
-      phase: 'result', status: 'done',
-      contents: [{ type: 'json', value: { status: 'accepted', thread_id: '00000000-0000-4000-8000-000000000004' } }],
-    })} /></MemoryRouter>)
+  it('renders a canonical details receipt as a readable link and handles an empty result without inventing one', () => {
+    const { rerender } = render(
+      <MemoryRouter>
+        <TaskToolRenderer
+          message={message({
+            phase: 'result',
+            status: 'done',
+            details: {
+              kind: 'task.accepted',
+              thread_id: '00000000-0000-4000-8000-000000000004',
+            },
+            contents: [{ type: 'text', text: 'Subagent execution started.' }],
+          })}
+        />
+      </MemoryRouter>,
+    )
     expect(screen.getByRole('link', { name: '查看 subagent 执行' }))
       .toHaveAttribute('href', '/threads/00000000-0000-4000-8000-000000000004')
-    rerender(<MemoryRouter><TaskToolRenderer message={message({
-      phase: 'result', status: 'done', contents: [{ type: 'text', text: '   ' }],
-    })} /></MemoryRouter>)
+    rerender(
+      <MemoryRouter>
+        <TaskToolRenderer
+          message={message({
+            phase: 'result',
+            status: 'done',
+            contents: [{ type: 'text', text: '   ' }],
+          })}
+        />
+      </MemoryRouter>,
+    )
     expect(screen.queryByRole('link')).toBeNull()
   })
 
@@ -214,16 +251,20 @@ describe('TaskToolRenderer result phase', () => {
     expect(container.querySelector('dt')).toBeNull()
   })
 
-  it('shows only the thread link for a valid accepted receipt', () => {
+  it('shows only the thread link for a canonical accepted receipt and suppresses natural language contents', () => {
     render(
       <MemoryRouter>
         <TaskToolRenderer
           message={message({
             phase: 'result',
             status: 'done',
+            details: {
+              kind: 'task.accepted',
+              thread_id: '00000000-0000-0000-0000-000000000202',
+            },
             contents: [{
               type: 'text',
-              text: '{"thread_id":"00000000-0000-0000-0000-000000000202","status":"accepted"}',
+              text: 'Subagent execution started.',
             }],
           })}
         />
@@ -231,41 +272,75 @@ describe('TaskToolRenderer result phase', () => {
     )
     const link = screen.getByRole('link', { name: '查看 subagent 执行' })
     expect(link).toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000202')
-    // 受理收据既不重复打印，也不宣称子任务完成。
-    expect(screen.queryByText(/"status":"accepted"/)).not.toBeInTheDocument()
+    // 受理收据既不重复打印正文，也不宣称子任务完成。
+    expect(screen.queryByText('Subagent execution started.')).not.toBeInTheDocument()
     expect(screen.queryByText(/已接受|后台执行|已完成|报告/)).not.toBeInTheDocument()
   })
 
-  it('falls back to the full contents when thread_id is missing or not a canonical UUID', () => {
-    render(
+  it('falls back to the full contents when details is missing or invalid', () => {
+    const { rerender } = render(
       <TaskToolRenderer
         message={message({
           phase: 'result',
           status: 'done',
-          contents: [{ type: 'text', text: '{"status":"accepted"}' }],
+          contents: [{ type: 'text', text: 'raw result without details' }],
         })}
       />,
     )
     expect(screen.queryByRole('link')).not.toBeInTheDocument()
-    expect(screen.getByText('{"status":"accepted"}')).toBeInTheDocument()
+    expect(screen.getByText('raw result without details')).toBeInTheDocument()
+
+    // details 损坏（缺少 UUID 或格式错误）：无链接，保留原始文本
+    rerender(
+      <TaskToolRenderer
+        message={message({
+          phase: 'result',
+          status: 'done',
+          details: { kind: 'task.accepted', thread_id: 'not-a-uuid' },
+          contents: [{ type: 'text', text: 'raw result with malformed details' }],
+        })}
+      />,
+    )
+    expect(screen.queryByRole('link')).not.toBeInTheDocument()
+    expect(screen.getByText('raw result with malformed details')).toBeInTheDocument()
   })
 
-  it('never claims completion for a completed-status payload', () => {
+  it('treats legacy body JSON text as fallback content without synthesizing a link', () => {
+    // 遗留正文 JSON 不再被识别为 receipt，直接按原文展示
     render(
       <TaskToolRenderer
         message={message({
           phase: 'result',
           status: 'done',
+          contents: [{ type: 'text', text: '{"status":"accepted","thread_id":"00000000-0000-0000-0000-000000000202"}' }],
+        })}
+      />,
+    )
+    expect(screen.queryByRole('link')).not.toBeInTheDocument()
+    expect(screen.getByText('{"status":"accepted","thread_id":"00000000-0000-0000-0000-000000000202"}')).toBeInTheDocument()
+  })
+
+  it('never claims completion for a non-accepted kind payload', () => {
+    render(
+      <TaskToolRenderer
+        message={message({
+          phase: 'result',
+          status: 'done',
+          details: {
+            kind: 'task.completed',
+            thread_id: '00000000-0000-0000-0000-000000000101',
+          },
           contents: [{
             type: 'text',
-            text: '{"thread_id":"child-101","status":"completed","report":"done"}',
+            text: 'report: execution finished',
           }],
         })}
       />,
     )
+    expect(screen.queryByRole('link')).not.toBeInTheDocument()
     expect(screen.queryByText(/已接受|后台执行|已完成/)).not.toBeInTheDocument()
     expect(
-      screen.getByText('{"thread_id":"child-101","status":"completed","report":"done"}'),
+      screen.getByText('report: execution finished'),
     ).toBeInTheDocument()
   })
 
@@ -282,13 +357,17 @@ describe('TaskToolRenderer result phase', () => {
     expect(screen.getByText('{malformed json content')).toBeInTheDocument()
   })
 
-  it('shows the raw failure contents and JSON body of an error result', () => {
+  it('shows the raw failure contents and JSON body of an error result without link even if details is present', () => {
     render(
       <TaskToolRenderer
         message={message({
           phase: 'result',
           status: 'error',
           errorMessage: 'concurrency limit reached',
+          details: {
+            kind: 'task.accepted',
+            thread_id: '00000000-0000-0000-0000-000000000999',
+          },
           contents: [
             { type: 'text', text: 'subagent task rejected' },
             { type: 'json', value: '{"code":"CONCURRENCY_LIMIT"}' },
@@ -296,6 +375,7 @@ describe('TaskToolRenderer result phase', () => {
         })}
       />,
     )
+    expect(screen.queryByRole('link')).not.toBeInTheDocument()
     expect(screen.getByText('subagent task rejected')).toBeInTheDocument()
     expect(screen.getByText(/"code": "CONCURRENCY_LIMIT"/)).toBeInTheDocument()
     expect(screen.queryByText(/已接受|后台执行/)).not.toBeInTheDocument()

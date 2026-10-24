@@ -18,7 +18,7 @@ function node(
     agentName: 'assistant',
     model: { modelName: 'm', variant: 'default' },
     status: 'IDLE',
-    processing: false,
+    executionControl: 'RUNNABLE',
     turnCount: 1,
     toolCallCount: 0,
     outcome: null,
@@ -29,20 +29,20 @@ function node(
 
 describe('projectActiveThreadTree', () => {
   it('deduplicates identical resumed records but keeps same-name executions and history', () => {
-    const a = node('a', 'root', { name: 'main', agentName: 'Explorer', processing: true })
+    const a = node('a', 'root', { name: 'main', agentName: 'Explorer', status: 'RUNNING' })
     const tree = projectThreadTree([node('root', null), a, { ...a }, node('b', 'a', { agentName: 'Explorer', outcome: 'FAILED' })])
     expect(tree.historyRows.map((row) => row.node.threadId)).toEqual(['a', 'b'])
     expect(tree.rows.map((row) => row.node.threadId)).toEqual(['a'])
-    expect(projectThreadTree([node('root', null), { ...a, processing: false }]).historyRows).toHaveLength(1)
+    expect(projectThreadTree([node('root', null), { ...a, status: 'IDLE' }]).historyRows).toHaveLength(1)
     expect(projectThreadTree([]).root).toBeNull()
   })
 
-  it('sorts each sibling group by processing, time and ID, retaining real connectors', () => {
+  it('sorts each sibling group by active status, time and ID, retaining real connectors', () => {
     const tree = projectThreadTree([
       node('root', null), node('old', 'root', { updateTime: 0 }),
       node('z', 'root', { updateTime: 1775001600 }),
       node('a', 'root', { updateTime: 1775001600 }),
-      node('active', 'root', { processing: true }),
+      node('active', 'root', { status: 'RUNNING' }),
       node('grand', 'active', { updateTime: 1767225600 }),
     ])
     expect(tree.historyRows.map((row) => row.node.threadId)).toEqual(['active', 'grand', 'a', 'z', 'old'])
@@ -68,12 +68,12 @@ describe('projectActiveThreadTree', () => {
       expect(() => projectThreadTree([invalid])).toThrow(/updateTime/)
     },
   )
-  it('keeps processing nodes with their idle ancestors, rooted at the execution root children', () => {
+  it('keeps active (non-IDLE) nodes with their idle ancestors, rooted at the execution root children', () => {
     const rows = projectActiveThreadTree([
       node('root', null),
-      node('a', 'root', { processing: true, status: 'MODEL_STREAM' }),
+      node('a', 'root', { status: 'RUNNING' }),
       node('b', 'a'),
-      node('c', 'b', { processing: true, status: 'TOOL_RUNNING' }),
+      node('c', 'b', { status: 'WAITING' }),
       node('idle', 'root'),
     ])
 
@@ -82,14 +82,14 @@ describe('projectActiveThreadTree', () => {
       ['b', 1],
       ['c', 2],
     ])
-    // 祖先保持如实空闲状态，活跃数量由调用方按 processing 统计。
-    expect(rows.find((row) => row.node.threadId === 'b')?.node.processing).toBe(false)
+    // 祖先保持如实空闲状态，活跃数量由调用方按 status !== 'IDLE' 统计。
+    expect(rows.find((row) => row.node.threadId === 'b')?.node.status).toBe('IDLE')
   })
 
-  it('does not emit the root itself and hides everything when no descendant is processing', () => {
+  it('does not emit the root itself and hides everything when no descendant is active', () => {
     expect(projectActiveThreadTree([node('root', null)])).toEqual([])
     expect(projectActiveThreadTree([
-      node('root', null, { processing: true }),
+      node('root', null, { status: 'RUNNING' }),
       node('a', 'root'),
     ])).toEqual([])
   })
@@ -97,9 +97,9 @@ describe('projectActiveThreadTree', () => {
   it('keeps sibling order stable and independent of input order', () => {
     const rows = projectActiveThreadTree([
       node('root', null),
-      node('b', 'root', { processing: true }),
-      node('a', 'root', { processing: true }),
-      node('c', 'root', { processing: true }),
+      node('b', 'root', { status: 'RUNNING' }),
+      node('a', 'root', { status: 'RUNNING' }),
+      node('c', 'root', { status: 'RUNNING' }),
     ])
     expect(rows.map((row) => row.node.threadId)).toEqual(['a', 'b', 'c'])
   })
@@ -110,7 +110,7 @@ describe('projectActiveThreadTree', () => {
       node('a', 'root'),
       node('b', 'a'),
       node('c', 'b'),
-      node('d', 'c', { processing: true }),
+      node('d', 'c', { status: 'WAITING' }),
     ])
     expect(rows.map((row) => [row.node.threadId, row.depth])).toEqual([
       ['a', 0],
@@ -120,23 +120,42 @@ describe('projectActiveThreadTree', () => {
     ])
   })
 
+  it('treats STOPPED orthogonally as executionControl and not as a fourth activity', () => {
+    // STOPPED 是 executionControl：如果节点 status 为 IDLE 且无活跃后代，不进入活跃树
+    expect(projectActiveThreadTree([
+      node('root', null),
+      node('idle-stopped', 'root', { status: 'IDLE', executionControl: 'STOPPED' }),
+    ])).toEqual([])
+
+    // 如果节点 status 为 RUNNING，即使 executionControl 为 STOPPED，仍保留在活跃树
+    const rows = projectActiveThreadTree([
+      node('root', null),
+      node('running-stopped', 'root', { status: 'RUNNING', executionControl: 'STOPPED' }),
+    ])
+    expect(rows).toHaveLength(1)
+    expect(rows[0]!.node.threadId).toBe('running-stopped')
+    expect(rows[0]!.node.status).toBe('RUNNING')
+    expect(rows[0]!.node.executionControl).toBe('STOPPED')
+  })
+
   it('rejects malformed trees instead of fabricating rows', () => {
     expect(() => projectActiveThreadTree([
       node('root', null),
-      node('root', null, { processing: true }),
+      node('root', null, { status: 'RUNNING' }),
     ])).toThrow(/duplicate/)
     expect(() => projectActiveThreadTree([
-      node('a', 'missing', { processing: true }),
+      node('a', 'missing', { status: 'RUNNING' }),
     ])).toThrow(/root/)
     expect(() => projectActiveThreadTree([
       node('root', null),
-      node('orphan', 'ghost', { processing: true }),
+      node('orphan', 'ghost', { status: 'RUNNING' }),
     ])).toThrow(/parent/)
   })
 
-  it('only reports terminal outcomes for idle finished turns', () => {
+  it('only reports terminal outcomes for idle finished turns and suppresses COMPLETED on non-IDLE', () => {
     expect(threadTreeOutcome(node('a', 'root', { status: 'IDLE', outcome: 'COMPLETED' }))).toBe('COMPLETED')
-    expect(threadTreeOutcome(node('a', 'root', { status: 'MODEL_STREAM', outcome: 'COMPLETED' }))).toBeNull()
+    expect(threadTreeOutcome(node('a', 'root', { status: 'RUNNING', outcome: 'COMPLETED' }))).toBeNull()
+    expect(threadTreeOutcome(node('a', 'root', { status: 'WAITING', outcome: 'COMPLETED' }))).toBeNull()
     expect(threadTreeOutcome(node('a', 'root', { status: 'IDLE', outcome: 'UNKNOWN' }))).toBeNull()
   })
 })

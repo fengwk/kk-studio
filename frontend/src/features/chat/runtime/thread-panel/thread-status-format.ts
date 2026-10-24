@@ -36,7 +36,7 @@ export interface ThreadStatusModelInput {
   environment?: EnvironmentStatusIdentity | null
   /** 实时可用标记；false 时展示 unavailable 事实。 */
   environmentReady?: boolean
-  /** 当前 root-to-head 已关闭 Turn 的累计 usage；缺失时按 0 展示。 */
+  /** 当前 root-to-head 累计 usage；缺失费用与测速样本保持未知。 */
   branchUsage?: TurnUsage | null
   contextWindow?: number
 }
@@ -105,7 +105,7 @@ export function buildThreadStatusModel(
   // 累计用量与回合摘要共用 U+00B7 统计项分隔；主行保持紧凑，hover 给完整数字与全称明细。
   segments.push({
     key: 'usage',
-    text: formatTurnUsageText(usage),
+    text: formatTurnUsageText(usage, t),
     title: formatUsageDetails(usage, t),
   })
 
@@ -126,13 +126,13 @@ export function formatUsageDetails(usage: TurnUsage, t: TranslateFn): string {
   const cost = formatUsageCost(usage.cost)
   return [
     t('ai.runtime.status.usageTokensDetail', {
-      input: String(usage.input),
-      output: String(usage.output),
-      reasoning: String(usage.reasoning),
+      input: usage.input != null ? String(usage.input) : noData,
+      output: usage.output != null ? String(usage.output) : noData,
+      reasoning: usage.reasoning != null ? String(usage.reasoning) : noData,
     }),
     t('ai.runtime.status.usageCacheDetail', {
-      cacheRead: String(usage.cacheRead),
-      cacheWrite: String(usage.cacheWrite),
+      cacheRead: usage.cacheRead != null ? String(usage.cacheRead) : noData,
+      cacheWrite: usage.cacheWrite != null ? String(usage.cacheWrite) : noData,
     }),
     t('ai.runtime.status.usageCostDetail', {
       cost: cost ?? noData,
@@ -147,8 +147,8 @@ const EMPTY_USAGE: TurnUsage = {
   output: 0,
   cacheRead: 0,
   cacheWrite: 0,
-  reasoning: 0,
-  providerTotal: 0,
+  reasoning: null,
+  providerTotal: null,
   cost: null,
 }
 
@@ -170,7 +170,7 @@ function positiveFinite(value: number | undefined): number | null {
 }
 
 /**
- * 格式化 Thread 运行状态，为 STOPPED / QUEUED 等提供准确的本地化文案。
+ * 格式化 Thread 运行状态（RUNNING / WAITING / IDLE）。
  */
 export function formatThreadStatusLabel(
   status?: string | null,
@@ -180,27 +180,12 @@ export function formatThreadStatusLabel(
     return ''
   }
   switch (status) {
-    case 'STOPPED':
-      return t('ai.runtime.thread.status.STOPPED')
-    case 'QUEUED':
-      return t('ai.runtime.thread.status.QUEUED')
+    case 'RUNNING':
+      return t('ai.runtime.thread.status.RUNNING')
+    case 'WAITING':
+      return t('ai.runtime.thread.status.WAITING')
     case 'IDLE':
       return t('ai.runtime.thread.status.IDLE')
-    case 'CONTINUATION_DUE':
-      return t('ai.runtime.thread.status.CONTINUATION_DUE')
-    case 'APPLYING':
-      return t('ai.runtime.thread.status.APPLYING')
-    case 'MODEL_READY':
-      return t('ai.runtime.thread.status.MODEL_READY')
-    case 'MODEL_RUNNING':
-      return t('ai.runtime.thread.status.MODEL_RUNNING')
-    case 'WAITING_APPROVAL':
-    case 'TOOL_WAITING_APPROVAL':
-      return t('ai.runtime.thread.status.TOOL_WAITING_APPROVAL')
-    case 'TOOL_READY':
-      return t('ai.runtime.thread.status.TOOL_READY')
-    case 'TOOL_RUNNING':
-      return t('ai.runtime.thread.status.TOOL_RUNNING')
     default:
       return status
   }

@@ -118,7 +118,6 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
     nextCommandSequence: '1',
     version: '0',
     status: 'IDLE',
-    processing: false,
     executionControl: 'RUNNABLE',
     branchSettings: {
       agentName: 'assistant',
@@ -662,7 +661,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     const user = userEvent.setup()
     const summary = {
       threadId: 'subagent', parentThreadId: null as string | null, name: 'duplicate',
-      createdAt: 0, updatedAt: 0, status: 'IDLE', processing: false,
+      createdAt: 0, updatedAt: 0, status: 'IDLE', executionControl: 'RUNNABLE',
       model: { modelName: 'MiniMax', variant: 'default' }, headMessagePreview: null,
     }
     vi.mocked(harnessService.listSessionThreads).mockResolvedValue([summary])
@@ -829,7 +828,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     if (scenario === 'root' || scenario === 'subagent') {
       vi.mocked(harnessService.listSessionThreads).mockResolvedValue([{
         threadId: 'existing', parentThreadId: scenario === 'root' ? null : 'parent', name: 'duplicate',
-        createdAt: 0, updatedAt: 0, status: 'IDLE', processing: false,
+        createdAt: 0, updatedAt: 0, status: 'IDLE', executionControl: 'RUNNABLE',
         model: thread().branchSettings.model, headMessagePreview: null,
       }])
     }

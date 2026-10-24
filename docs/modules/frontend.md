@@ -93,9 +93,12 @@ Invocation 终态和 attempt failure 建立围栏，迟到信号丢弃；
 durable 结果到达后退出 transient overlay。
 
 [`thread-events.ts`](../../frontend/src/features/chat/runtime/thread-events.ts) 将 Entry、活动
-Invocation 与 attempt failure 投影为时间线记录。`processing` 等价于阶段仍在处理中
-（`IDLE` 与 `STOPPED` 为 false），`executionControl` 是持久执行控制（`RUNNABLE` / `STOPPED`）；
-两者只描述该 Thread 自身，委派进度按执行树逐 Thread 展示，不由父 Thread 递归投影。
+Invocation 与 attempt failure 投影为时间线记录。Thread 活动只有 `RUNNING`、`WAITING`、`IDLE`：
+RUNNING 表示本地流程未结束（包括审批、问卷及环境阻塞），WAITING 仅表示本地已让出执行，
+等待直接异步 system-reminder 结果，IDLE 表示本地已收敛。
+`executionControl` 是正交的持久执行控制（`RUNNABLE` / `STOPPED`），停止不代表调用已物理退出。
+工作条按真实 model/tool invocation 展示执行动画；阻塞、单纯运行中及等待异步结果只显示静态事实。
+STOPPED 不遮盖尚在途的 model/tool。委派进度按执行树逐 Thread 展示，不由父 Thread 递归投影。
 
 ### Thread Debug
 
@@ -201,6 +204,13 @@ Snapshot、Debug、用量并展示真实身份，并在顶部提供返回直属�
 `/threads/{parentId}`）；身份未确认时不挂载控制 Hook。
 根面板汇聚整棵执行树的审批和问卷，提交仍携带原始调用的 Thread 与 invocation 身份。
 执行结果与任务回执则始终交给直接派发的父 Agent，不改为根订阅。
+子代理观察面板从已有 Snapshot 展示 QUEUED CUSTOM_MESSAGE 的“待处理补充要求”，
+保留命令 sequence、稳定身份和真实正文；独立于人工输入队列，不提供编辑、删除或重排。
+应用后随 Snapshot 更新移出待处理区，历史只展示持久 Entry，不复制待处理记录。
+task 初次执行入口只读取规范 `task.accepted` details 中的 thread_id：
+持久 Entry 的 detailsJson 与 live invocation 的 resultJson.details 使用同一投影。
+续接参数已有的 thread_id 链接保持不变；缺失或损坏 details 时完整展示正文，
+不从自然语言或正文 JSON 推断链接，错误原文仍保留。
 
 全局与根交互区共用 InteractionCardBody/ApprovalCard。非文件变更工具的审批显示一次完整 `argumentsJson`（含 bash 的 workdir），
 默认权限原因本地化，额外原因完整展示；允许与拒绝复用共享 Button，拒绝使用 primary + danger。
@@ -221,7 +231,8 @@ Chat 工具卡片与 ApprovalCard 共享文件变更审查组件：
   执行失败时不隐藏错误详情，也不在产生真实终态前虚假展示成功。
 - **来源优先级与持久化结构**：优先从持久化的 `approvalJson.editReview` 获取真实 diff（freeze approval 优先）；对于自动放行（无需审批）、YOLO 模式或页面刷新与 GC 后的结果恢复，从持久化结果的 `details.editReview` 读取真实变更（durable entry 显式解码 `detailsJson`，invocation 从 `resultJson.details` 对象读取）；决不从旧/新参数在前端伪造 diff。其他工具的折叠与展示策略保持不变。
 
-根面板自动查询执行树，在 Widget 区以单行节点展示 processing 后代及其必要祖先；
+根面板自动查询执行树，在 Widget 区以单行节点展示非 IDLE 后代及其必要祖先；
+RUNNING 与 WAITING 都计入活跃数，停止控制独立展示；非 IDLE 节点不展示 COMPLETED outcome。
 不重复根节点，不绘制无活跃后代的空壳。根本地空闲仍继续查询，整树 Stop 仍然可用。
 树行、task ID 与系统回执链接通过 `ThreadLink` 在当前 pane 查看；返回导航基于当前快照的
 直属父 `parentThreadId`，通过 `navigation.openThread(parentId)` 定点打开父级，不依赖浏览栈
@@ -278,8 +289,17 @@ metadata 自行定价；durable 用量按当前 catalog 价格现算，不写回
 金额先用精确十进制求和，再统一四舍五入到最多 6 位小数并去掉尾随 0；精确值落在 (0, 0.000001)
 时显示 `<$0.000001`，精确 0 才是 `$0`。上下文占用只使用最近一次模型调用的输入估计
 （input + cacheRead + cacheWrite），绝不用分支累计量替代。
+输出 `outputTokens` 已包含推理 token，测速仅用该输出量除以解码耗时；不再额外累加推理。
+缓存写入使用 `cacheWriteTokens` 总量，不叠加 TTL 分桶。
+usage 必须报告四个非负安全整数：inputTokens、outputTokens、cacheReadTokens、cacheWriteTokens。
+缺失或非法时不合成读数；reasoningTokens 和 providerTotalTokens 未报告时保留未知，聚合时也不补零。
+无模型 metadata 的人工 ASSISTANT 消息不计用量；有模型 metadata 却缺失或损坏 usage 时，
+该回合及分支的完整计数、总费用传播为未知，不把后续已知项目伪装为完整总量。
+安全整数累加溢出也保留未知；推理计数不得超过输出。合法 usage 仅缺推理计数时，
+仍保留后端已提供的费用，不在前端重新定价。
 摘要固定保留 `↑input · ↓output · RcacheRead · WcacheWrite · cost · cache N.NN% · X tok/s`
-全部字段，R/W 为零时也不省略。缺失的上下文估计、费用与速率默认显示 `0`，缓存比例默认显示
+全部字段，R/W 为零时也不省略。缺失费用与速率不可显示 `0`，统一展示中英文 `noData`
+（中文“暂无数据”、英文“No data”），真实 0 正常保留（如 `$0`、`0 tok/s`）；缓存比例默认显示
 `0.00%`，费用未计量时不假定币种；hover 仍明确区分未计量与真实零值，展示默认值不写入统计事实。
 单行保留全部事实并由 CSS 省略，hover 给出环境、上下文与用量三组完整数字（含推理与缓存分项），
 措辞统一为“未缓存输入 / 输出 / 推理 / 缓存命中率”等全称。累计口径覆盖全部 Entry，

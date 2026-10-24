@@ -7,12 +7,26 @@ import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
  * 不依赖对话消息、卡片 visible、TURN_END 投影或任何 flag；compaction 等隐藏内容里真实发生的
  * token/费用同样进入累计。费用按精确十进制求和，缺失/跨币种不伪造完整总额。
  */
+function canonicalUsage(usage: Record<string, number> | null): Record<string, number> | null {
+  if (usage == null || Object.keys(usage).length === 0) {
+    return null
+  }
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    ...usage,
+  }
+}
+
 function assistantEntry(
   entryId: string,
   usage: Record<string, number>,
   usageCost?: { currency: string; amount: string } | null,
   entryType: HarnessSessionEntryDTO['entryType'] = 'MESSAGE',
 ): HarnessSessionEntryDTO {
+  const norm = canonicalUsage(usage)
   return {
     entryId,
     sessionId: 's1',
@@ -20,7 +34,7 @@ function assistantEntry(
     entryType,
     payloadJson: JSON.stringify({
       message: { role: 'ASSISTANT', contents: [{ type: 'text', text: 'ok' }] },
-      ...(Object.keys(usage).length > 0 ? { assistantMetadata: { usage } } : {}),
+      ...(norm != null ? { assistantMetadata: { usage: norm } } : {}),
     }),
     createTime: 1785232800,
     usageCost: usageCost ?? null,
@@ -45,6 +59,7 @@ function compactionEntry(
   usage: Record<string, number> | null,
   usageCost?: { currency: string; amount: string } | null,
 ): HarnessSessionEntryDTO {
+  const norm = canonicalUsage(usage)
   return {
     entryId,
     sessionId: 's1',
@@ -52,7 +67,7 @@ function compactionEntry(
     entryType: 'COMPACTION',
     payloadJson: JSON.stringify({
       summaryText: 'summarized',
-      assistantMetadata: usage == null ? null : { stopReason: 'COMPLETE', usage },
+      assistantMetadata: norm == null ? null : { stopReason: 'COMPLETE', usage: norm },
     }),
     createTime: 1785232800,
     usageCost: usageCost ?? null,
@@ -72,20 +87,20 @@ describe('aggregateEntryUsage', () => {
     const aggregated = aggregateEntryUsage([
       otherEntry('turn-1', 'TURN_START'),
       assistantEntry('assistant-1', {
-        inputTokens: 10, outputTokens: 2, cacheReadTokens: 3, cacheWriteTokens: 4,
+        inputTokens: 10, outputTokens: 8, cacheReadTokens: 3, cacheWriteTokens: 4,
         reasoningTokens: 5, providerTotalTokens: 24,
       }, { currency: 'USD', amount: '0.125000000000' }),
       otherEntry('end-1', 'TURN_END'),
       otherEntry('turn-2', 'TURN_START'),
       assistantEntry('assistant-2', {
-        inputTokens: 20, outputTokens: 7, cacheReadTokens: 11, cacheWriteTokens: 13,
+        inputTokens: 20, outputTokens: 20, cacheReadTokens: 11, cacheWriteTokens: 13,
         reasoningTokens: 17, providerTotalTokens: 68,
       }, { currency: 'USD', amount: '0.375000000000' }),
     ])
 
     expect(aggregated).toMatchObject({
       input: 30,
-      output: 9,
+      output: 28,
       cacheRead: 14,
       cacheWrite: 17,
       reasoning: 22,
@@ -151,7 +166,10 @@ describe('aggregateEntryUsage', () => {
       ...assistantEntry(entryId, { inputTokens: input, outputTokens: tokens, reasoningTokens: 0, providerTotalTokens: input + tokens }),
       payloadJson: JSON.stringify({
         message: { role: 'ASSISTANT', contents: [{ type: 'text', text: 'ok' }] },
-        assistantMetadata: { usage: { inputTokens: input, outputTokens: tokens }, decodeDurationMillis: millis },
+        assistantMetadata: {
+          usage: { inputTokens: input, outputTokens: tokens, cacheReadTokens: 0, cacheWriteTokens: 0 },
+          decodeDurationMillis: millis,
+        },
       }),
     })
 
@@ -173,5 +191,148 @@ describe('aggregateEntryUsage', () => {
       otherEntry('end-1', 'TURN_END'),
       otherEntry('compaction-1', 'COMPACTION'),
     ])).toBeNull()
+  })
+
+  it('keeps reasoning and providerTotal as null if any entry is unknown', () => {
+    const known = assistantEntry('a', {
+      inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0,
+      reasoningTokens: 2, providerTotalTokens: 17,
+    })
+    const unknown = assistantEntry('b', {
+      inputTokens: 20, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0,
+    })
+    const aggregated = aggregateEntryUsage([known, unknown])
+    expect(aggregated?.reasoning).toBeNull()
+    expect(aggregated?.providerTotal).toBeNull()
+  })
+
+  // 定向用例：无 metadata 人工消息不计入，不污染真实用量
+  it('does not count manual assistant messages without assistantMetadata', () => {
+    const manualOnly = aggregateEntryUsage([
+      otherEntry('turn-1', 'TURN_START'),
+      {
+        entryId: 'manual-1',
+        sessionId: 's1',
+        parentEntryId: null,
+        entryType: 'MESSAGE',
+        payloadJson: JSON.stringify({
+          message: { role: 'ASSISTANT', contents: [{ type: 'text', text: '人工消息' }] },
+        }),
+        createTime: 1785232800,
+        usageCost: null,
+      },
+      otherEntry('end-1', 'TURN_END'),
+    ])
+    // 全新无调用返回 null
+    expect(manualOnly).toBeNull()
+
+    const mixed = aggregateEntryUsage([
+      otherEntry('turn-1', 'TURN_START'),
+      assistantEntry('assistant-real', {
+        inputTokens: 50, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0,
+      }, { currency: 'USD', amount: '0.01' }),
+      {
+        entryId: 'manual-1',
+        sessionId: 's1',
+        parentEntryId: null,
+        entryType: 'MESSAGE',
+        payloadJson: JSON.stringify({
+          message: { role: 'ASSISTANT', contents: [{ type: 'text', text: '人工消息' }] },
+        }),
+        createTime: 1785232810,
+        usageCost: null,
+      },
+      otherEntry('end-1', 'TURN_END'),
+    ])
+    // 人工消息不污染已有事实
+    expect(mixed).toMatchObject({
+      input: 50,
+      output: 10,
+      cost: { currency: 'USD', amount: '0.01' },
+    })
+  })
+
+  // 定向用例：有模型 metadata 缺 usage 时双向顺序均传播未知，且与全新无调用（null）不同
+  it('propagates unknown bidirectionally when model entry is missing usage', () => {
+    const known = assistantEntry('known', {
+      inputTokens: 100, outputTokens: 50, cacheReadTokens: 0, cacheWriteTokens: 0,
+    }, { currency: 'USD', amount: '0.05' })
+
+    const unknown: HarnessSessionEntryDTO = {
+      entryId: 'unknown',
+      sessionId: 's1',
+      parentEntryId: null,
+      entryType: 'MESSAGE',
+      payloadJson: JSON.stringify({
+        message: { role: 'ASSISTANT', contents: [{ type: 'text', text: '模型调用输出' }] },
+        assistantMetadata: { stopReason: 'COMPLETE' }, // 有模型 metadata，但缺 usage
+      }),
+      createTime: 1785232850,
+      usageCost: { currency: 'USD', amount: '0.02' },
+    }
+
+    // 1. 单独调用未知：返回全 unknown TurnUsage 对象，绝非 null（与全新无调用区分），也非 0
+    const singleUnknown = aggregateEntryUsage([unknown])
+    expect(singleUnknown).not.toBeNull()
+    expect(singleUnknown).toEqual({
+      input: null,
+      output: null,
+      cacheRead: null,
+      cacheWrite: null,
+      reasoning: null,
+      providerTotal: null,
+      cost: null,
+      decodeTokens: null,
+      decodeDurationMillis: null,
+      contextInputTokens: null,
+    })
+
+    // 2. known + unknown 顺序
+    const forward = aggregateEntryUsage([known, unknown])
+    expect(forward).toMatchObject({
+      input: null,
+      output: null,
+      cacheRead: null,
+      cacheWrite: null,
+      cost: null,
+    })
+
+    // 3. unknown + known 顺序（双向一致性）
+    const backward = aggregateEntryUsage([unknown, known])
+    expect(backward).toMatchObject({
+      input: null,
+      output: null,
+      cacheRead: null,
+      cacheWrite: null,
+      cost: null,
+    })
+  })
+
+  // 定向用例：已知费用未知 reasoning 在 branch 上精确累计
+  it('retains branch cost when model call has known cost but unknown reasoning', () => {
+    const e1: HarnessSessionEntryDTO = {
+      entryId: 'e1',
+      sessionId: 's1',
+      parentEntryId: null,
+      entryType: 'MESSAGE',
+      payloadJson: JSON.stringify({
+        message: { role: 'ASSISTANT', contents: [{ type: 'text', text: 'hi' }] },
+        assistantMetadata: {
+          usage: { inputTokens: 50, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: null },
+        },
+      }),
+      createTime: 1785232800,
+      usageCost: { currency: 'USD', amount: '0.005' },
+    }
+    const e2 = assistantEntry('e2', {
+      inputTokens: 50, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0,
+      reasoningTokens: 10,
+    }, { currency: 'USD', amount: '0.002' })
+
+    const total = aggregateEntryUsage([e1, e2])
+    expect(total?.cost).toEqual({ currency: 'USD', amount: '0.007' })
+    expect(total?.reasoning).toBeNull() // reasoning 未知传播
+    expect(total?.input).toBe(100)
+    expect(total?.output).toBe(40)
   })
 })

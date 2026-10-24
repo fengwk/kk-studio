@@ -2,7 +2,6 @@ import { ToolContentView } from '@/features/chat/runtime/thread-panel/messages/T
 import { ToolOutputViewport } from '@/features/chat/runtime/thread-panel/messages/ToolOutputViewport'
 import { parseTaskArguments, parseTaskReceipt } from '@/features/chat/runtime/task-tool-parser'
 import { ThreadLink } from '@/features/chat/runtime/ThreadLink'
-import { jsonContentText } from '@/features/chat/runtime/thread-timeline/content-utils'
 import type { ToolRendererMessage, ToolRendererProps } from '@/platform/extensions/types'
 import { translate } from '@/shared/i18n'
 
@@ -42,7 +41,7 @@ function TaskToolCall({ message }: { message: ToolRendererMessage }) {
 
 function TaskToolResult({ message }: { message: ToolRendererMessage }) {
   const isError = message.status === 'error' || Boolean(message.errorMessage)
-  const receipt = isError ? null : parseTaskReceipt(resultJson(message))
+  const receipt = isError ? null : parseTaskReceipt(message.details)
   if (receipt == null) {
     // 终态文本不是合法的受理收据，或者调用失败：完整展示原始结果（不吞错误，不假造报告）。
     return (
@@ -58,16 +57,4 @@ function TaskToolResult({ message }: { message: ToolRendererMessage }) {
       </ThreadLink>
     </div>
   )
-}
-
-function resultJson(message: ToolRendererMessage): string | null {
-  for (const content of message.contents) {
-    if (content.type === 'json') {
-      return jsonContentText(content.value)
-    }
-    if (content.type === 'text' && content.text.trim()) {
-      return content.text
-    }
-  }
-  return null
 }

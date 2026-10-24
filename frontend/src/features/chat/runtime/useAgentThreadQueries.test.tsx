@@ -20,7 +20,7 @@ function snapshot(id = ROOT, overrides: Partial<ToolInvocationDTO> = {}): Harnes
       threadId: id, name: 'Thread', sessionId: 'session', headEntryId: 'head',
       parentThreadId: id === ROOT ? null : ROOT,
       rootThreadId: ROOT, yoloEnabled: false,
-      nextCommandSequence: '1', version: '1', status: 'TOOL_READY', processing: true,
+      nextCommandSequence: '1', version: '1', status: 'RUNNING',
       executionControl: 'RUNNABLE',
       branchSettings: { agentName: 'agent', model: { modelName: 'm', variant: 'default' },
         environmentName: 'composer-is-not-the-route', goal: null },
