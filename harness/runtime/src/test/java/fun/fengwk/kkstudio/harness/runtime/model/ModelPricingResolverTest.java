@@ -170,6 +170,41 @@ class ModelPricingResolverTest {
                     .add(cost.reasoning())));
   }
 
+  /**
+   * reasoning 独立单价与 output 单价数值相同时，若提供了已知的 reasoningTokens 子集， 必须严格将费用拆分为 non-reasoning 部分（output）和
+   * reasoning 部分，不得合并到 output。
+   */
+  @Test
+  void splitsCostWhenReasoningSubsetIsKnownEvenIfReasoningRateMatchesOutput() {
+    ModelPricing pricing =
+        new ModelPricing(
+            new ModelPricing.RateSet(
+                dec("2.0"), dec("4.00"), dec("0.5"), dec("1.0"), Map.of(), dec("4")),
+            List.of(),
+            List.of());
+    // output 1_000_000，其中 reasoning 400_000，则 non-reasoning 为 600_000
+    ModelUsage usageWithReasoning =
+        new ModelUsage(1_000_000, 1_000_000, 200_000, 100_000, Map.of(), 400_000L, 2_300_000L);
+
+    ModelCost cost = ModelCost.calculate(pricing, usageWithReasoning, null, null);
+
+    assertEquals(new BigDecimal("2.0"), cost.input());
+    assertEquals(new BigDecimal("2.40"), cost.output());
+    assertEquals(new BigDecimal("0.1"), cost.cacheRead());
+    assertEquals(new BigDecimal("0.1"), cost.cacheWrite());
+    assertEquals(new BigDecimal("1.6"), cost.reasoning());
+    assertEquals(new BigDecimal("6.20"), cost.total());
+    assertEquals(
+        0,
+        cost.total()
+            .compareTo(
+                cost.input()
+                    .add(cost.output())
+                    .add(cost.cacheRead())
+                    .add(cost.cacheWrite())
+                    .add(cost.reasoning())));
+  }
+
   /** 独立 reasoning 单价与 output 单价不同且未提供 reasoningTokens 子集时返回 null，绝不猜测价格。 */
   @Test
   void returnsNullWhenReasoningPriceDiffersFromOutputAndReasoningTokensAreUnknown() {

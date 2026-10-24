@@ -799,17 +799,13 @@ final class OpenAiResponsesStreamAccumulator {
           ProviderErrorKind.INVALID_RESPONSE, "provider usage values are inconsistent");
     }
 
-    // rawUsageJson 高保真：直接保留上游原生 usage 结构，缺失时不伪造字段；无 usage 时产出 {}
+    // 完整 usage 已在终态校验；原生结构高保真保留，不伪造字段。
     String rawUsageJson;
-    if (latestNativeUsageNode != null) {
-      try {
-        rawUsageJson = OBJECT_MAPPER.writeValueAsString(latestNativeUsageNode);
-      } catch (Exception e) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_RESPONSE, "failed to serialize raw usage JSON");
-      }
-    } else {
-      rawUsageJson = "{}";
+    try {
+      rawUsageJson = OBJECT_MAPPER.writeValueAsString(latestNativeUsageNode);
+    } catch (Exception e) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "failed to serialize raw usage JSON");
     }
 
     ProviderResponse response =

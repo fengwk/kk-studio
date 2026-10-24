@@ -71,18 +71,18 @@ public record ModelCost(
 
     BigDecimal output;
     BigDecimal reasoning;
-    if (rates.independentReasoning()
-        && rates.output().compareTo(rates.reasoning()) != 0
-        && usage.outputTokens() != 0) {
+    if (rates.independentReasoning() && usage.reasoningTokens() != null) {
       Long reasoningTokens = usage.reasoningTokens();
-      if (reasoningTokens == null) {
-        // 独立 reasoning 价必须有可信子集，否则不能把全部输出都按 reasoning 价猜测。
-        return null;
-      }
       long nonReasoningTokens = usage.outputTokens() - reasoningTokens;
       output = priced(rates.output(), nonReasoningTokens);
       reasoning = priced(rates.reasoning(), reasoningTokens);
     } else {
+      if (rates.independentReasoning()
+          && rates.output().compareTo(rates.reasoning()) != 0
+          && usage.outputTokens() != 0) {
+        return null;
+      }
+      // 子集未知但同价（或输出为零）时总额仍确定，费用合并到 output；不表示推理 token 为零。
       output = priced(rates.output(), usage.outputTokens());
       reasoning = BigDecimal.ZERO;
     }

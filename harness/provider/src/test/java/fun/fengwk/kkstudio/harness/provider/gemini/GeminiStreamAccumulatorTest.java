@@ -149,19 +149,22 @@ class GeminiStreamAccumulatorTest {
     assertEquals(ProviderReplayFormat.GEMINI_CONTENT, completion.replayState().format());
   }
 
-  /** 非法计数不能被截为零或作为非 provider 异常泄漏。 */
+  /** 测试意图：缓存关系不一致（breakdown）与输出计数溢出（overflow）在 finish() 判定并抛出 INVALID_RESPONSE。 */
   @ParameterizedTest
   @ValueSource(
       strings = {
-        "{\"promptTokenCount\":1,\"cachedContentTokenCount\":2}",
-        "{\"candidatesTokenCount\":9223372036854775807,\"thoughtsTokenCount\":1}"
+        "{\"promptTokenCount\":1,\"candidatesTokenCount\":0,\"cachedContentTokenCount\":2}",
+        "{\"promptTokenCount\":0,\"candidatesTokenCount\":9223372036854775807,\"thoughtsTokenCount\":1}"
       })
   void rejectsInconsistentOrOverflowingUsage(String usage) {
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
-    ProviderException error =
-        assertThrows(
-            ProviderException.class,
-            () -> accumulator.handleEvent("message", "{\"usageMetadata\":" + usage + "}"));
+    accumulator.handleEvent(
+        "message",
+        "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"done\"}]},\"finishReason\":\"STOP\"}],"
+            + "\"usageMetadata\":"
+            + usage
+            + "}");
+    ProviderException error = assertThrows(ProviderException.class, accumulator::finish);
     assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind());
   }
 
@@ -1292,24 +1295,23 @@ class GeminiStreamAccumulatorTest {
     assertTrue(ex.getMessage().contains("missing complete usage"));
   }
 
+  /**
+   * 测试意图：最终缺少 mandatory 字段（promptTokenCount 或 candidatesTokenCount）在 finish() 触发 INVALID_RESPONSE。
+   */
   @Test
   void missingMandatoryUsageFieldsThrowsInvalidResponse() {
     for (String badUsage : List.of("{\"candidatesTokenCount\":5}", "{\"promptTokenCount\":10}")) {
       GeminiStreamAccumulator accumulator =
           new GeminiStreamAccumulator(request, descriptor, bridge);
-      ProviderException ex =
-          assertThrows(
-              ProviderException.class,
-              () -> {
-                accumulator.handleEvent(
-                    "message",
-                    "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Done\"}]},\"finishReason\":\"STOP\"}],"
-                        + "\"usageMetadata\":"
-                        + badUsage
-                        + "}");
-                accumulator.finish();
-              });
+      accumulator.handleEvent(
+          "message",
+          "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Done\"}]},\"finishReason\":\"STOP\"}],"
+              + "\"usageMetadata\":"
+              + badUsage
+              + "}");
+      ProviderException ex = assertThrows(ProviderException.class, accumulator::finish);
       assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
+      assertTrue(ex.getMessage().contains("missing complete usage"));
     }
   }
 
@@ -1343,5 +1345,189 @@ class GeminiStreamAccumulatorTest {
         28L, completion.response().usage().outputTokens(), "candidates 20 + thoughts 8 = 28");
     assertEquals(8L, completion.response().usage().reasoningTokens());
     assertNull(completion.response().usage().providerTotalTokens());
+  }
+
+  /**
+   * 测试意图：中间帧 usage 只有 promptTokenCount（模型生成中尚未产出 output 计数）， 主代码在 handleEvent 阶段不提前报错，最终帧给出完整 usage
+   * 后 finish() 成功完成。
+   */
+  @Test
+  void intermediateUsageWithOnlyPromptSucceedsWhenFinalUsageIsComplete() {
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
+    accumulator.handleEvent(
+        "message",
+        """
+        {
+          "candidates": [{
+            "content": { "role": "model", "parts": [{ "text": "Hello " }] }
+          }],
+          "usageMetadata": {
+            "promptTokenCount": 10
+          }
+        }
+        """);
+    accumulator.handleEvent(
+        "message",
+        """
+        {
+          "candidates": [{
+            "content": { "role": "model", "parts": [{ "text": "world!" }] },
+            "finishReason": "STOP"
+          }],
+          "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15
+          }
+        }
+        """);
+
+    ProviderCompletion completion = accumulator.finish();
+    assertNotNull(completion);
+    assertEquals("Hello world!", completion.response().text());
+    ModelUsage usage = completion.response().usage();
+    assertNotNull(usage);
+    assertEquals(10L, usage.inputTokens());
+    assertEquals(5L, usage.outputTokens());
+    assertEquals(15L, usage.providerTotalTokens());
+  }
+
+  /**
+   * 测试意图：即使前帧曾经给出过 candidatesTokenCount，若最终帧的 usageMetadata 不完整（缺少 mandatory 字段），
+   * 累加器绝不得继承或跨帧修补前帧的候选字段，也不得默认补 0，必须在 finish() 时拒绝并抛出异常。
+   */
+  @Test
+  void incompleteFinalUsageDoesNotInheritFromPreviousFrame() {
+    // 场景 A：前帧有 candidatesTokenCount，最终帧缺少 candidatesTokenCount
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
+    accumulator.handleEvent(
+        "message",
+        """
+        {
+          "candidates": [{
+            "content": { "role": "model", "parts": [{ "text": "chunk1" }] }
+          }],
+          "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5
+          }
+        }
+        """);
+    accumulator.handleEvent(
+        "message",
+        """
+        {
+          "candidates": [{
+            "content": { "role": "model", "parts": [{ "text": "chunk2" }] },
+            "finishReason": "STOP"
+          }],
+          "usageMetadata": {
+            "promptTokenCount": 12
+          }
+        }
+        """);
+
+    ProviderException ex = assertThrows(ProviderException.class, accumulator::finish);
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
+    assertTrue(ex.getMessage().contains("missing complete usage"));
+
+    // 场景 B：前帧有 promptTokenCount，最终帧缺少 promptTokenCount
+    GeminiStreamAccumulator accumulator2 = new GeminiStreamAccumulator(request, descriptor, bridge);
+    accumulator2.handleEvent(
+        "message",
+        """
+        {
+          "candidates": [{
+            "content": { "role": "model", "parts": [{ "text": "chunk1" }] }
+          }],
+          "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5
+          }
+        }
+        """);
+    accumulator2.handleEvent(
+        "message",
+        """
+        {
+          "candidates": [{
+            "content": { "role": "model", "parts": [{ "text": "chunk2" }] },
+            "finishReason": "STOP"
+          }],
+          "usageMetadata": {
+            "candidatesTokenCount": 8
+          }
+        }
+        """);
+
+    ProviderException ex2 = assertThrows(ProviderException.class, accumulator2::finish);
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex2.kind());
+    assertTrue(ex2.getMessage().contains("missing complete usage"));
+  }
+
+  /**
+   * 测试意图：即使 usageMetadata 仅包含部分字段（非完整 mandatory usage）， 只要显式给出的字段值是非法数字（负数、浮点、非数字字符串、超出 long 范围等），
+   * 必须在 handleEvent 阶段立即拒绝，不推迟到 finish()。
+   */
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "{\"promptTokenCount\": -1}",
+        "{\"promptTokenCount\": 1.5}",
+        "{\"promptTokenCount\": \"bad\"}",
+        "{\"promptTokenCount\": 9223372036854775808}",
+        "{\"candidatesTokenCount\": -5}",
+        "{\"candidatesTokenCount\": 3.14}",
+        "{\"candidatesTokenCount\": \"invalid\"}",
+        "{\"cachedContentTokenCount\": -1}",
+        "{\"thoughtsTokenCount\": -1}",
+        "{\"totalTokenCount\": -1}"
+      })
+  void partialUsageWithExplicitInvalidNumberRejectedImmediately(String partialUsage) {
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
+    ProviderException ex =
+        assertThrows(
+            ProviderException.class,
+            () -> accumulator.handleEvent("message", "{\"usageMetadata\":" + partialUsage + "}"));
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
+  }
+
+  /**
+   * 测试意图：最终 usageMetadata 快照中的未知扩展字段（如嵌套对象、自定义数组、布尔与数字标记等） 必须原样保真保留在 rawUsageJson 中，不得被白名单过滤或丢失。
+   */
+  @Test
+  void rawUsageFinalSnapshotPreservesUnknownFields() throws Exception {
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
+    String finalUsageJson =
+        """
+        {
+          "promptTokenCount": 20,
+          "candidatesTokenCount": 10,
+          "totalTokenCount": 30,
+          "customBillingInfo": {
+            "accountId": "acc-12345",
+            "tierDetails": ["fast", "extra"]
+          },
+          "experimentalFeatureEnabled": true,
+          "unknownMetric": 999
+        }
+        """;
+    accumulator.handleEvent(
+        "message",
+        "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hello\"}]},\"finishReason\":\"STOP\"}],"
+            + "\"usageMetadata\":"
+            + finalUsageJson
+            + "}");
+
+    ProviderCompletion completion = accumulator.finish();
+    String rawJson = completion.response().rawUsageJson();
+    assertNotNull(rawJson);
+    JsonNode expected = MAPPER.readTree(finalUsageJson);
+    JsonNode actual = MAPPER.readTree(rawJson);
+    assertEquals(expected, actual);
+    assertTrue(actual.has("customBillingInfo"));
+    assertEquals("acc-12345", actual.path("customBillingInfo").path("accountId").asString(""));
+    assertTrue(actual.path("experimentalFeatureEnabled").asBoolean(false));
+    assertEquals(999, actual.path("unknownMetric").asInt(0));
   }
 }
