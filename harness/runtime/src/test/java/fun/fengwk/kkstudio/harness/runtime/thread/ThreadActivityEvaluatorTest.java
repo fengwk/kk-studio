@@ -22,7 +22,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
-class ThreadRuntimeStatusTest {
+class ThreadActivityEvaluatorTest {
 
   @Test
   void statusValuesAreExactlyTheThreePublicStates() {
@@ -36,39 +36,81 @@ class ThreadRuntimeStatusTest {
   void mapsLocalContextsToRunningOrIdle() {
     // 测试意图：验证本地 context 投影：仅 IdleOrHistorical 映射为 IDLE，其余本地活跃阶段统一为 RUNNING。
     assertEquals(
-        ThreadRuntimeStatus.IDLE, ThreadRuntimeStatus.from(new ThreadContext.IdleOrHistorical()));
-    assertEquals(ThreadRuntimeStatus.RUNNING, ThreadRuntimeStatus.from(continuation()));
+        ThreadRuntimeStatus.IDLE,
+        ThreadActivityEvaluator.evaluate(
+            ThreadExecutionControl.RUNNABLE,
+            new ThreadContext.IdleOrHistorical(),
+            false,
+            false,
+            0));
     assertEquals(
         ThreadRuntimeStatus.RUNNING,
-        ThreadRuntimeStatus.from(modelActive(ModelInvocationStatus.READY)));
+        ThreadActivityEvaluator.evaluate(
+            ThreadExecutionControl.RUNNABLE, continuation(), false, false, 0));
     assertEquals(
         ThreadRuntimeStatus.RUNNING,
-        ThreadRuntimeStatus.from(modelActive(ModelInvocationStatus.RUNNING)));
+        ThreadActivityEvaluator.evaluate(
+            ThreadExecutionControl.RUNNABLE,
+            modelActive(ModelInvocationStatus.READY),
+            false,
+            false,
+            0));
     assertEquals(
         ThreadRuntimeStatus.RUNNING,
-        ThreadRuntimeStatus.from(new ThreadContext.ModelTerminalPending(model())));
+        ThreadActivityEvaluator.evaluate(
+            ThreadExecutionControl.RUNNABLE,
+            modelActive(ModelInvocationStatus.RUNNING),
+            false,
+            false,
+            0));
     assertEquals(
         ThreadRuntimeStatus.RUNNING,
-        ThreadRuntimeStatus.from(
-            new ThreadContext.ToolTerminalPending(model(), assistant(), List.of(), List.of())));
+        ThreadActivityEvaluator.evaluate(
+            ThreadExecutionControl.RUNNABLE,
+            new ThreadContext.ModelTerminalPending(model()),
+            false,
+            false,
+            0));
     assertEquals(
         ThreadRuntimeStatus.RUNNING,
-        ThreadRuntimeStatus.from(toolActive(ToolInvocationStatus.WAITING_APPROVAL)));
+        ThreadActivityEvaluator.evaluate(
+            ThreadExecutionControl.RUNNABLE,
+            new ThreadContext.ToolTerminalPending(model(), assistant(), List.of(), List.of()),
+            false,
+            false,
+            0));
     assertEquals(
         ThreadRuntimeStatus.RUNNING,
-        ThreadRuntimeStatus.from(toolActive(ToolInvocationStatus.WAITING_INPUT)));
+        ThreadActivityEvaluator.evaluate(
+            ThreadExecutionControl.RUNNABLE,
+            toolActive(ToolInvocationStatus.WAITING_APPROVAL),
+            false,
+            false,
+            0));
     assertEquals(
         ThreadRuntimeStatus.RUNNING,
-        ThreadRuntimeStatus.from(toolActive(ToolInvocationStatus.RUNNING)));
+        ThreadActivityEvaluator.evaluate(
+            ThreadExecutionControl.RUNNABLE,
+            toolActive(ToolInvocationStatus.WAITING_INPUT),
+            false,
+            false,
+            0));
     assertEquals(
         ThreadRuntimeStatus.RUNNING,
-        ThreadRuntimeStatus.from(toolActive(ToolInvocationStatus.READY)));
-  }
-
-  @Test
-  void fromRejectsNullContext() {
-    // 测试意图：验证 null context fail-closed。
-    assertThrows(NullPointerException.class, () -> ThreadRuntimeStatus.from(null));
+        ThreadActivityEvaluator.evaluate(
+            ThreadExecutionControl.RUNNABLE,
+            toolActive(ToolInvocationStatus.RUNNING),
+            false,
+            false,
+            0));
+    assertEquals(
+        ThreadRuntimeStatus.RUNNING,
+        ThreadActivityEvaluator.evaluate(
+            ThreadExecutionControl.RUNNABLE,
+            toolActive(ToolInvocationStatus.READY),
+            false,
+            false,
+            0));
   }
 
   @Test
