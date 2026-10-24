@@ -687,13 +687,17 @@ class GeminiStreamAccumulatorTest {
       for (String value : malformed) {
         GeminiStreamAccumulator accumulator =
             new GeminiStreamAccumulator(request, descriptor, bridge);
-        ProviderException error =
-            assertThrows(
-                ProviderException.class,
-                () ->
-                    accumulator.handleEvent(
-                        "message", "{\"usageMetadata\":{\"" + field + "\":" + value + "}}"));
-        assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind(), field + ":" + value);
+        String payload = "{\"usageMetadata\":{\"" + field + "\":" + value + "}}";
+        if ("null".equals(value)) {
+          accumulator.handleEvent("message", payload);
+          ProviderException error = assertThrows(ProviderException.class, accumulator::finish);
+          assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind(), field + ":" + value);
+        } else {
+          ProviderException error =
+              assertThrows(
+                  ProviderException.class, () -> accumulator.handleEvent("message", payload));
+          assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind(), field + ":" + value);
+        }
       }
     }
     for (String value : List.of("null", "\"  \"", "7", "false", "{}")) {
@@ -1295,24 +1299,67 @@ class GeminiStreamAccumulatorTest {
     assertTrue(ex.getMessage().contains("missing complete usage"));
   }
 
-  /**
-   * 测试意图：最终缺少 mandatory 字段（promptTokenCount 或 candidatesTokenCount）在 finish() 触发 INVALID_RESPONSE。
-   */
+  /** proto3 普通 int32 的零值可省略：最终 usage 对象存在但缺 candidates 时解释为零，原始 JSON 不补字段。 */
   @Test
-  void missingMandatoryUsageFieldsThrowsInvalidResponse() {
-    for (String badUsage : List.of("{\"candidatesTokenCount\":5}", "{\"promptTokenCount\":10}")) {
-      GeminiStreamAccumulator accumulator =
-          new GeminiStreamAccumulator(request, descriptor, bridge);
-      accumulator.handleEvent(
-          "message",
-          "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Done\"}]},\"finishReason\":\"STOP\"}],"
-              + "\"usageMetadata\":"
-              + badUsage
-              + "}");
-      ProviderException ex = assertThrows(ProviderException.class, accumulator::finish);
-      assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
-      assertTrue(ex.getMessage().contains("missing complete usage"));
-    }
+  void omittedCandidatesAreZeroForThinkingExhaustedMaxTokens() throws Exception {
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
+    String usage = "{\"promptTokenCount\":12,\"thoughtsTokenCount\":8,\"totalTokenCount\":20}";
+    accumulator.handleEvent(
+        "message",
+        "{\"candidates\":[{\"finishReason\":\"MAX_TOKENS\"}],\"usageMetadata\":" + usage + "}");
+    ProviderResponse response = accumulator.finish().response();
+    assertEquals(GenerationStopReason.LENGTH, response.stopReason());
+    assertEquals(12L, response.usage().inputTokens());
+    assertEquals(8L, response.usage().outputTokens());
+    assertEquals(8L, response.usage().reasoningTokens());
+    assertEquals(20L, response.usage().providerTotalTokens());
+    assertEquals(MAPPER.readTree(usage), MAPPER.readTree(response.rawUsageJson()));
+  }
+
+  /** promptFeedback 阻断且 usage 省略 candidates/cache 时，按 proto3 零值完成，不要求显式字段。 */
+  @Test
+  void omittedCandidatesAreZeroWhenPromptIsBlocked() {
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
+    accumulator.handleEvent(
+        "message",
+        "{\"promptFeedback\":{\"blockReason\":\"SAFETY\"},\"usageMetadata\":{\"promptTokenCount\":9}}");
+    ProviderResponse response = accumulator.finish().response();
+    assertEquals(GenerationStopReason.FILTERED, response.stopReason());
+    assertEquals(9L, response.usage().inputTokens());
+    assertEquals(0L, response.usage().outputTokens());
+    assertEquals(0L, response.usage().cacheReadTokens());
+    assertNull(response.usage().reasoningTokens());
+    assertNull(response.usage().providerTotalTokens());
+  }
+
+  /** 显式零与省略零的计费结果相同，但原始 JSON 必须保留显式零，不能互相改写。 */
+  @Test
+  void explicitZeroRemainsDistinctInRawUsage() throws Exception {
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
+    String usage =
+        "{\"promptTokenCount\":0,\"candidatesTokenCount\":0,\"cachedContentTokenCount\":0}";
+    accumulator.handleEvent(
+        "message",
+        "{\"candidates\":[{\"finishReason\":\"STOP\"}],\"usageMetadata\":" + usage + "}");
+    ProviderResponse response = accumulator.finish().response();
+    assertEquals(0L, response.usage().inputTokens());
+    assertEquals(0L, response.usage().outputTokens());
+    assertEquals(0L, response.usage().cacheReadTokens());
+    assertEquals(MAPPER.readTree(usage), MAPPER.readTree(response.rawUsageJson()));
+  }
+
+  /** prompt、candidates、cache 的显式 null 不是 proto3 省略，终态必须拒绝。 */
+  @ParameterizedTest
+  @ValueSource(strings = {"promptTokenCount", "candidatesTokenCount", "cachedContentTokenCount"})
+  void explicitNullProto3CountIsInvalid(String field) {
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
+    accumulator.handleEvent(
+        "message",
+        "{\"candidates\":[{\"finishReason\":\"STOP\"}],\"usageMetadata\":{\""
+            + field
+            + "\":null}}");
+    ProviderException error = assertThrows(ProviderException.class, accumulator::finish);
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind());
   }
 
   @Test
@@ -1392,12 +1439,9 @@ class GeminiStreamAccumulatorTest {
     assertEquals(15L, usage.providerTotalTokens());
   }
 
-  /**
-   * 测试意图：即使前帧曾经给出过 candidatesTokenCount，若最终帧的 usageMetadata 不完整（缺少 mandatory 字段），
-   * 累加器绝不得继承或跨帧修补前帧的候选字段，也不得默认补 0，必须在 finish() 时拒绝并抛出异常。
-   */
+  /** 最新快照独立解释：前帧有 candidates 不能填补最终省略值；最终省略按 proto3 为零，原始 JSON 仍只含最终字段。 */
   @Test
-  void incompleteFinalUsageDoesNotInheritFromPreviousFrame() {
+  void finalOmittedCandidatesDoNotInheritPreviousFrame() throws Exception {
     // 场景 A：前帧有 candidatesTokenCount，最终帧缺少 candidatesTokenCount
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
     accumulator.handleEvent(
@@ -1427,9 +1471,10 @@ class GeminiStreamAccumulatorTest {
         }
         """);
 
-    ProviderException ex = assertThrows(ProviderException.class, accumulator::finish);
-    assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
-    assertTrue(ex.getMessage().contains("missing complete usage"));
+    ProviderResponse response = accumulator.finish().response();
+    assertEquals(12L, response.usage().inputTokens());
+    assertEquals(0L, response.usage().outputTokens());
+    assertFalse(MAPPER.readTree(response.rawUsageJson()).has("candidatesTokenCount"));
 
     // 场景 B：前帧有 promptTokenCount，最终帧缺少 promptTokenCount
     GeminiStreamAccumulator accumulator2 = new GeminiStreamAccumulator(request, descriptor, bridge);
@@ -1460,9 +1505,10 @@ class GeminiStreamAccumulatorTest {
         }
         """);
 
-    ProviderException ex2 = assertThrows(ProviderException.class, accumulator2::finish);
-    assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex2.kind());
-    assertTrue(ex2.getMessage().contains("missing complete usage"));
+    ProviderResponse response2 = accumulator2.finish().response();
+    assertEquals(0L, response2.usage().inputTokens());
+    assertEquals(8L, response2.usage().outputTokens());
+    assertFalse(MAPPER.readTree(response2.rawUsageJson()).has("promptTokenCount"));
   }
 
   /**
