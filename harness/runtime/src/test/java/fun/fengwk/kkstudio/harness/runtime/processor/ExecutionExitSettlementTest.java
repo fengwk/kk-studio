@@ -123,9 +123,16 @@ class ExecutionExitSettlementTest {
       assertTrue(model.isEmpty());
     } finally {
       held.release().countDown();
-      fixture.processor.close();
-      fixture.scheduler.shutdownNow();
-      assertTrue(fixture.scheduler.awaitTermination(5, TimeUnit.SECONDS));
+      try {
+        if (delegate.executionThread != null) {
+          assertTrue(
+              delegate.executionThread.join(Duration.ofSeconds(5)), "tool execution must exit");
+        }
+      } finally {
+        fixture.processor.close();
+        fixture.scheduler.shutdownNow();
+        assertTrue(fixture.scheduler.awaitTermination(5, TimeUnit.SECONDS));
+      }
     }
   }
 
@@ -189,9 +196,16 @@ class ExecutionExitSettlementTest {
       assertTrue(model.isEmpty());
     } finally {
       held.release().countDown();
-      fixture.processor.close();
-      fixture.scheduler.shutdownNow();
-      assertTrue(fixture.scheduler.awaitTermination(5, TimeUnit.SECONDS));
+      try {
+        if (delegate.executionThread != null) {
+          assertTrue(
+              delegate.executionThread.join(Duration.ofSeconds(5)), "tool execution must exit");
+        }
+      } finally {
+        fixture.processor.close();
+        fixture.scheduler.shutdownNow();
+        assertTrue(fixture.scheduler.awaitTermination(5, TimeUnit.SECONDS));
+      }
     }
   }
 
@@ -314,15 +328,18 @@ class ExecutionExitSettlementTest {
       }
     } finally {
       held.release().countDown();
-      if (delegate.executionThread != null) {
-        assertTrue(
-            delegate.executionThread.join(Duration.ofSeconds(5)),
-            "released tool execution must exit in cleanup");
+      try {
+        if (delegate.executionThread != null) {
+          assertTrue(
+              delegate.executionThread.join(Duration.ofSeconds(5)),
+              "released tool execution must exit in cleanup");
+        }
+      } finally {
+        processor.close();
+        fixture.processor.close();
+        fixture.scheduler.shutdownNow();
+        assertTrue(fixture.scheduler.awaitTermination(5, TimeUnit.SECONDS));
       }
-      processor.close();
-      fixture.processor.close();
-      fixture.scheduler.shutdownNow();
-      assertTrue(fixture.scheduler.awaitTermination(5, TimeUnit.SECONDS));
     }
   }
 
