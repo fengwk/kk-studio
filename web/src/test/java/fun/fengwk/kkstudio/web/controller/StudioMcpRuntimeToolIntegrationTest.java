@@ -31,6 +31,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
@@ -63,6 +64,7 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -290,8 +292,16 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
     assertInstanceOf(ToolGateway.Allow.class, toolGateway.preflight(invocationRequest));
 
     UUID invocationId = UUID.randomUUID();
+    RecordingRemoteExecutions remoteExecutions = new RecordingRemoteExecutions();
     ToolGateway.Execution execution =
-        new ToolGateway.Execution(invocationId, threadId, rootEntryId, invocationRequest);
+        new ToolGateway.Execution(
+            invocationId,
+            threadId,
+            rootEntryId,
+            1,
+            invocationRequest,
+            ToolApproval.notRequired(),
+            remoteExecutions);
 
     // admit 只做本地检查并持有资源；阻塞执行返回唯一终态，之后释放资源。
     ToolGateway.Admitted admitted =
@@ -314,6 +324,27 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
     // 验证假 MCP Server 确实收到了对应的 tools/call
     assertEquals(1, fakeServer.toolCallCount());
     assertTrue(fakeServer.receivedToolCallNames().contains("echo"));
+    assertTrue(
+        remoteExecutions.started.isEmpty(),
+        "host MCP tool does not register a remote Environment execution");
+  }
+
+  /** 显式记录观察者，避免用生产 no-op 代替本测试的登记边界。 */
+  private static final class RecordingRemoteExecutions
+      implements ToolGateway.RemoteExecutionObserver {
+    private final List<UUID> started = new ArrayList<>();
+
+    @Override
+    public boolean tryStart(UUID remoteExecutionId) {
+      started.add(remoteExecutionId);
+      return true;
+    }
+
+    @Override
+    public void confirmExit(UUID remoteExecutionId) {}
+
+    @Override
+    public void confirmNotStarted(UUID remoteExecutionId) {}
   }
 
   private JsonNode data(MvcResult result) throws Exception {

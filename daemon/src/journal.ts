@@ -7,6 +7,8 @@
  *
  * <p>与 Java 的无界内存 journal 不同，这里的实现有明确上界：只保留最近 {@link DEFAULT_MAX_JOURNAL_ENTRIES} 条终态事实，
  * 超出后按插入顺序淘汰最旧的终态条目；RUNNING 条目永不淘汰（其数量由运行时的并发上限约束）。
+ *
+ * <p>退出确认是与终态分开的事实：条目被容量淘汰后，重放不再包含该确认，Studio 侧保持未知，不在这里补造或重试。
  */
 
 export type InvocationState = 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED'
@@ -23,6 +25,10 @@ export interface JournalEntry {
   invocationId: string
   state: InvocationState
   terminalMessage: TerminalMessage | null
+  /**
+   * 独立退出确认。与结果终态分开保存：重复 INVOKE/CANCEL 或重连时随条目回放，不能由 terminal 推断。
+   */
+  exitConfirmed: boolean
 }
 
 export interface JournalStart {
@@ -36,6 +42,11 @@ export interface InvocationJournal {
   find(invocationId: string): JournalEntry | undefined
   /** 仅把 RUNNING 原子跃迁为终态；已终态或不存在时返回 false。 */
   complete(invocationId: string, terminalMessage: TerminalMessage): boolean
+  /**
+   * 记录一次正向退出确认。未知 invocation 返回 false；重复确认保持已确认并返回 false。
+   * 终态之后仍可记录，二者不是同一事实。
+   */
+  confirmExit(invocationId: string): boolean
 }
 
 /** 内存 journal 默认保留的终态条目上界。 */
@@ -73,7 +84,12 @@ export class InMemoryInvocationJournal implements InvocationJournal {
     if (existing !== undefined) {
       return { created: false, entry: existing }
     }
-    const entry: JournalEntry = { invocationId, state: 'RUNNING', terminalMessage: null }
+    const entry: JournalEntry = {
+      invocationId,
+      state: 'RUNNING',
+      terminalMessage: null,
+      exitConfirmed: false,
+    }
     this.entries.set(invocationId, entry)
     return { created: true, entry }
   }
@@ -91,8 +107,18 @@ export class InMemoryInvocationJournal implements InvocationJournal {
       invocationId,
       state: stateFor(terminalMessage.messageType),
       terminalMessage,
+      exitConfirmed: entry.exitConfirmed,
     })
     this.evictTerminalIfNeeded()
+    return true
+  }
+
+  confirmExit(invocationId: string): boolean {
+    const entry = this.entries.get(invocationId)
+    if (entry === undefined || entry.exitConfirmed) {
+      return false
+    }
+    this.entries.set(invocationId, { ...entry, exitConfirmed: true })
     return true
   }
 

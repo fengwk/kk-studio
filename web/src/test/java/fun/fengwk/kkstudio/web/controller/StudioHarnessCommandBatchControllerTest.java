@@ -676,6 +676,7 @@ class StudioHarnessCommandBatchControllerTest {
         List.of(),
         List.of(),
         0,
+        false,
         false);
   }
 

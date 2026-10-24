@@ -7,7 +7,7 @@
  */
 
 /** 当前 Daemon wire 协议版本；其他版本一律拒绝，不做双协议 fallback。 */
-export const PROTOCOL_VERSION = 4
+export const PROTOCOL_VERSION = 5
 
 /** capability catalog 版本；HELLO 上报，Platform 据此判定能否执行普通能力调用。 */
 export const CAPABILITY_CATALOG_VERSION = '3'
@@ -76,6 +76,7 @@ export const MESSAGE_TYPES = [
   'COMPLETED',
   'FAILED',
   'CANCELLED',
+  'EXECUTION_EXITED',
   'WELCOME',
   'TEMPORARY_RESOURCE_POLICY',
   'INVOKE',

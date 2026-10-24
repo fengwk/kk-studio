@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { Worker } from 'node:worker_threads'
-import type { CapabilityExecutor, CapabilityResult } from '../contracts.js'
+import type { CapabilityContext, CapabilityExecutor, CapabilityResult } from '../contracts.js'
 import { errorResult, textResult } from '../contracts.js'
 import {
   CancelledError,
@@ -59,6 +59,9 @@ function searchFailure(callId: string, error: unknown, signal: AbortSignal): Cap
 }
 
 const findExecutor: CapabilityExecutor = async (call, context) => {
+  let workerStarted = false
+  let workerExited = false
+  let spoolClosed = true
   try {
     const args = call.arguments
     const pattern = requiredString(args, 'pattern')
@@ -67,7 +70,14 @@ const findExecutor: CapabilityExecutor = async (call, context) => {
     const stopBuffer = new SharedArrayBuffer(4)
     const job: SearchJob = { kind: 'find', pattern, path, limit, stopBuffer }
 
-    const reply = await runSearchInWorker(job, context.signal)
+    const reply = await runSearchInWorker(job, context, {
+      onWorkerStarted: () => {
+        workerStarted = true
+      },
+      onWorkerExited: () => {
+        workerExited = true
+      },
+    })
     if (!reply.ok) {
       throw replyError(reply)
     }
@@ -90,6 +100,7 @@ const findExecutor: CapabilityExecutor = async (call, context) => {
     const displayCount = Math.min(limit, reply.matches.length)
     const store = await textOutputStoreFor(context.config.dataDir)
     const spool = new OutputSpool(store, call.invocationId)
+    spoolClosed = false
     try {
       for (let index = 0; index < displayCount; index++) {
         if (index > 0) {
@@ -123,13 +134,22 @@ const findExecutor: CapabilityExecutor = async (call, context) => {
       return finishResult
     } finally {
       await spool.close()
+      spoolClosed = true
     }
   } catch (error) {
     return searchFailure(call.invocationId, error, context.signal)
+  } finally {
+    // 无结果与前置拒绝同样收敛；若已创建 spool，必须成功关闭后才能确认。
+    if ((!workerStarted || workerExited) && spoolClosed) {
+      context.confirmExecutionExit()
+    }
   }
 }
 
 const grepExecutor: CapabilityExecutor = async (call, context) => {
+  let workerStarted = false
+  let workerExited = false
+  let spoolClosed = true
   try {
     const args = call.arguments
     const pattern = requiredString(args, 'pattern')
@@ -152,7 +172,14 @@ const grepExecutor: CapabilityExecutor = async (call, context) => {
       stopBuffer,
     }
 
-    const reply = await runSearchInWorker(job, context.signal)
+    const reply = await runSearchInWorker(job, context, {
+      onWorkerStarted: () => {
+        workerStarted = true
+      },
+      onWorkerExited: () => {
+        workerExited = true
+      },
+    })
     if (!reply.ok) {
       throw replyError(reply)
     }
@@ -174,6 +201,7 @@ const grepExecutor: CapabilityExecutor = async (call, context) => {
 
     const store = await textOutputStoreFor(context.config.dataDir)
     const spool = new OutputSpool(store, call.invocationId)
+    spoolClosed = false
     try {
       for (let index = 0; index < reply.lines.length; index++) {
         if (index > 0) {
@@ -207,9 +235,14 @@ const grepExecutor: CapabilityExecutor = async (call, context) => {
       return finishResult
     } finally {
       await spool.close()
+      spoolClosed = true
     }
   } catch (error) {
     return searchFailure(call.invocationId, error, context.signal)
+  } finally {
+    if ((!workerStarted || workerExited) && spoolClosed) {
+      context.confirmExecutionExit()
+    }
   }
 }
 
@@ -247,17 +280,36 @@ const CLEANUP_GRACE_MILLIS = 5000
  * 写入原子 stop 标记。Worker 协作式停止并回传已收集结果，然后 port.close()；父线程等待 Worker exit 事件再交付。
  * 收到 stop 后启动单个 5s 清理宽限，5s 仍无响应才 await terminate() 并返回明确错误。
  */
-function runSearchInWorker(job: SearchJob, signal: AbortSignal): Promise<SearchReply> {
+interface SearchWorkerExit {
+  onWorkerStarted(): void
+  onWorkerExited(): void
+}
+
+function runSearchInWorker(
+  job: SearchJob,
+  context: CapabilityContext,
+  exit: SearchWorkerExit,
+): Promise<SearchReply> {
+  const signal = context.signal
   return new Promise<SearchReply>((resolve, reject) => {
     const worker = createSearchWorker()
+    exit.onWorkerStarted()
     let settled = false
     let graceTimer: NodeJS.Timeout | null = null
     let receivedReply: SearchReply | null = null
+    let workerExited = false
 
     const clearGraceTimer = (): void => {
       if (graceTimer !== null) {
         clearTimeout(graceTimer)
         graceTimer = null
+      }
+    }
+
+    const confirmIfExited = (): void => {
+      // terminate() 成功或 exit 事件才证明这次 worker 已离开；取消本身不是退出证据。
+      if (workerExited) {
+        exit.onWorkerExited()
       }
     }
 
@@ -270,10 +322,12 @@ function runSearchInWorker(job: SearchJob, signal: AbortSignal): Promise<SearchR
       signal.removeEventListener('abort', triggerStop)
       try {
         await worker.terminate()
+        workerExited = true
       } catch {
         reject(new ToolRunFailureError('search worker cleanup failed; results incomplete', 'INTERNAL'))
         return
       }
+      confirmIfExited()
       reject(error)
     }
 
@@ -313,6 +367,8 @@ function runSearchInWorker(job: SearchJob, signal: AbortSignal): Promise<SearchR
       settled = true
       clearGraceTimer()
       signal.removeEventListener('abort', triggerStop)
+      workerExited = true
+      exit.onWorkerExited()
 
       if (code === 0 && receivedReply !== null) {
         resolve(receivedReply)

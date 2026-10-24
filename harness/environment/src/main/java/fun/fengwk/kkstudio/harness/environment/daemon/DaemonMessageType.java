@@ -10,6 +10,8 @@ public enum DaemonMessageType {
   COMPLETED,
   FAILED,
   CANCELLED,
+  /** 独立退出事实：payload 必须为空对象，不能合成结果终态。 */
+  EXECUTION_EXITED,
   WELCOME,
   TEMPORARY_RESOURCE_POLICY,
   INVOKE,

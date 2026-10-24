@@ -402,6 +402,7 @@ final class EnvironmentDaemonServerTestSupport {
     EnvironmentCapabilityResult completed;
     Throwable error;
     int errorCount;
+    int exitConfirmations;
 
     @Override
     public void onPartial(EnvironmentCapabilityResult partial) {
@@ -417,6 +418,11 @@ final class EnvironmentDaemonServerTestSupport {
     public void onError(Throwable error) {
       this.error = error;
       errorCount++;
+    }
+
+    @Override
+    public void onExitConfirmed() {
+      exitConfirmations++;
     }
 
     String completedText() {
@@ -450,6 +456,11 @@ final class EnvironmentDaemonServerTestSupport {
     @Override
     public void onError(Throwable error) {
       events.add("error:" + error.getClass().getSimpleName());
+    }
+
+    @Override
+    public void onExitConfirmed() {
+      events.add("exit");
     }
 
     List<String> events() {

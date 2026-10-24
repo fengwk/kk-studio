@@ -3,9 +3,11 @@ import { mkdtemp, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { searchCapabilities } from '../../src/coding/search.js'
+import { OutputSpool } from '../../src/coding/output.js'
 import type { SearchReply } from '../../src/coding/search-core.js'
 import { FakeWorker } from './fake-search-worker.js'
-import { callCapability, makeContext } from './helpers.js'
+import { callCapability, makeContext, type ContextOverrides } from './helpers.js'
+import type { CapabilityContext } from '../../src/contracts.js'
 
 /**
  * 直接锁定 Worker 生命周期契约：正常回传和协作停止都只在 Worker 真正退出后交付，
@@ -61,6 +63,22 @@ function track<T>(promise: Promise<T>): { promise: Promise<T>; settled: () => bo
     },
   )
   return { promise: tracked, settled: () => settled }
+}
+
+function confirmingContext(
+  dir: string,
+  overrides: ContextOverrides = {},
+): { context: CapabilityContext; confirmations: () => number } {
+  let count = 0
+  return {
+    context: {
+      ...makeContext(dir, overrides),
+      confirmExecutionExit: () => {
+        count += 1
+      },
+    },
+    confirmations: () => count,
+  }
 }
 
 const noFind: SearchReply = { ok: true, kind: 'find', matches: [], limitReached: false, skipped: [], stopReason: null }
@@ -355,24 +373,70 @@ describe('Worker 协作停止与宽限超时生命周期', () => {
 })
 
 describe('参数校验与 Worker 创建隔离', () => {
+  it('does not confirm a worker exit when spool close fails afterwards', async () => {
+    // worker 退出只证明扫描结束。输出关闭失败时不能把这次退出当成清理成功。
+    const dir = await tempDir()
+    const close = OutputSpool.prototype.close
+    const closeFailure = vi.spyOn(OutputSpool.prototype, 'close').mockImplementationOnce(async function () {
+      await close.call(this)
+      throw new Error('injected spool close failure')
+    })
+    const observed = confirmingContext(dir)
+    const tracked = track(callCapability(find, 'fs.find', { pattern: '*', path: dir, limit: 1 }, observed.context))
+    const worker = await waitForWorker()
+    worker.emit('message', {
+      ok: true,
+      kind: 'find',
+      matches: ['found.txt'],
+      limitReached: false,
+      skipped: [],
+      stopReason: null,
+    })
+    worker.emit('exit', 0)
+    try {
+      const result = await tracked.promise
+      expect(result.error).toBe(true)
+      expect(closeFailure).toHaveBeenCalledOnce()
+      expect(observed.confirmations()).toBe(0)
+    } finally {
+      closeFailure.mockRestore()
+    }
+  })
+
+  it('confirms once after the worker exits and the inline result is released', async () => {
+    // 正向对照：没有溢出文件时，worker 退出且结果交付后确认一次。
+    const dir = await tempDir()
+    const observed = confirmingContext(dir)
+    const tracked = track(callCapability(find, 'fs.find', { pattern: '*.zzz', path: dir }, observed.context))
+    const worker = await waitForWorker()
+    expect(observed.confirmations()).toBe(0)
+    worker.emit('message', noFind)
+    worker.emit('exit', 0)
+    const result = await tracked.promise
+    expect(result.error).toBe(false)
+    expect(observed.confirmations()).toBe(1)
+  })
+
   it('非法参数在能力入口直接被拒绝且不创建 Worker', async () => {
     const dir = await tempDir()
+    const observed = confirmingContext(dir)
     // 缺少必填参数 pattern
-    const result1 = await callCapability(find, 'fs.find', { path: dir }, makeContext(dir))
+    const result1 = await callCapability(find, 'fs.find', { path: dir }, observed.context)
     expect(result1.error).toBe(true)
     expect(result1.details).toMatchObject({ code: 'INVALID_ARGUMENT' })
     expect(FakeWorker.instances).toHaveLength(0)
 
     // 非法 limit (<= 0)
-    const result2 = await callCapability(grep, 'fs.grep', { pattern: 'x', path: dir, limit: 0 }, makeContext(dir))
+    const result2 = await callCapability(grep, 'fs.grep', { pattern: 'x', path: dir, limit: 0 }, observed.context)
     expect(result2.error).toBe(true)
     expect(result2.details).toMatchObject({ code: 'INVALID_ARGUMENT' })
     expect(FakeWorker.instances).toHaveLength(0)
 
     // 不存在的 path
-    const result3 = await callCapability(find, 'fs.find', { pattern: '*.ts', path: join(dir, 'missing') }, makeContext(dir))
+    const result3 = await callCapability(find, 'fs.find', { pattern: '*.ts', path: join(dir, 'missing') }, observed.context)
     expect(result3.error).toBe(true)
     expect(result3.details).toMatchObject({ code: 'NOT_FOUND' })
     expect(FakeWorker.instances).toHaveLength(0)
+    expect(observed.confirmations()).toBe(3)
   })
 })
