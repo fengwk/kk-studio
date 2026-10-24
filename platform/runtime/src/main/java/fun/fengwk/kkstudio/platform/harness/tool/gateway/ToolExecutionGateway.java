@@ -63,6 +63,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -85,6 +86,10 @@ import java.util.function.Supplier;
  * <p>{@link GatewayRun#execute} 在调用方的执行线程上阻塞调用 {@link Tool#execute}：中断映射为取消，工具异常按固定表分类（远程发送不确定性 上报
  * {@code unknown}，不按普通失败处理）。并发租约与目录租用只由 {@link GatewayRun#close()} 释放：Processor 在终态决议提交之后、
  * 执行体返回之后调用它，因此取消绝不代表工作线程已经退出，插件实例不会在仍被访问时被回收。
+ *
+ * <p>远端 Environment 调用每次 {@link BoundEnvironment#execute} 都生成独立 execution id，发送前经 {@link
+ * ToolGateway.RemoteExecutionObserver#tryStart} 登记；登记失败绝不发送。只有 transport 明确保证未发送的 Busy /
+ * Unavailable 才确认未启动，远端 {@code onExitConfirmed} 则独立确认该次执行，普通结果终态不替代退出 ACK。
  *
  * <p>终态结果进入 Runtime 前会校验 call ID、自定义条目注册与 WRITE 声明，并按大小限制外部化内容。
  */
@@ -324,9 +329,9 @@ public final class ToolExecutionGateway implements ToolGateway {
               ? new PlatformBoundEnvironment(
                   execution.request().binding().environmentId(),
                   capabilityTransport,
-                  execution.invocationId().toString(),
                   execution.request().call().id(),
-                  execution.expectedFile())
+                  execution.expectedFile(),
+                  execution.remoteExecutions())
               : null;
       ToolExecutionContext context =
           new ToolExecutionContext(
@@ -421,21 +426,21 @@ public final class ToolExecutionGateway implements ToolGateway {
   private static final class PlatformBoundEnvironment implements BoundEnvironment {
     private final EnvironmentId environmentId;
     private final EnvironmentCapabilityTransport capabilityTransport;
-    private final String invocationId;
     private final String modelCallId;
     private final ExpectedFile expectedFile;
+    private final ToolGateway.RemoteExecutionObserver remoteExecutions;
 
     private PlatformBoundEnvironment(
         EnvironmentId environmentId,
         EnvironmentCapabilityTransport capabilityTransport,
-        String invocationId,
         String modelCallId,
-        ExpectedFile expectedFile) {
+        ExpectedFile expectedFile,
+        ToolGateway.RemoteExecutionObserver remoteExecutions) {
       this.environmentId = Objects.requireNonNull(environmentId, "environmentId");
       this.capabilityTransport = Objects.requireNonNull(capabilityTransport, "capabilityTransport");
-      this.invocationId = Objects.requireNonNull(invocationId, "invocationId");
       this.modelCallId = Objects.requireNonNull(modelCallId, "modelCallId");
       this.expectedFile = expectedFile;
+      this.remoteExecutions = Objects.requireNonNull(remoteExecutions, "remoteExecutions");
     }
 
     @Override
@@ -462,13 +467,21 @@ public final class ToolExecutionGateway implements ToolGateway {
       Objects.requireNonNull(capability, "capability");
       Objects.requireNonNull(request, "request");
       Objects.requireNonNull(progress, "progress");
+      // 每次实际远端调用拥有独立身份；参数构造校验必须先于登记，登记成功才允许发送。
+      UUID remoteExecutionId = UUID.randomUUID();
+      String remoteCallId = remoteExecutionId.toString();
+      EnvironmentCapabilityCall capabilityCall =
+          new EnvironmentCapabilityCall(remoteCallId, request.call().argumentsJson());
+      EnvironmentCapabilityExecutionRequest capabilityRequest =
+          new EnvironmentCapabilityExecutionRequest(
+              capability, capabilityCall, request.timeout(), expectedFile);
       CompletableFuture<EnvironmentCapabilityResult> terminal = new CompletableFuture<>();
       EnvironmentCapabilityExecutionListener listener =
           new EnvironmentCapabilityExecutionListener() {
             @Override
             public void onPartial(EnvironmentCapabilityResult partial) {
               if (!terminal.isDone()) {
-                progress.accept(toToolResult(partial));
+                progress.accept(toToolResult(partial, remoteExecutionId));
               }
             }
 
@@ -481,15 +494,33 @@ public final class ToolExecutionGateway implements ToolGateway {
             public void onError(Throwable error) {
               terminal.completeExceptionally(error);
             }
+
+            @Override
+            public void onExitConfirmed() {
+              // 退出 ACK 独立于结果 future：即使结果已异常完成，迟到 ACK 仍必须确认本次远端执行。
+              remoteExecutions.confirmExit(remoteExecutionId);
+            }
           };
-      EnvironmentCapabilityCall capabilityCall =
-          new EnvironmentCapabilityCall(invocationId, request.call().argumentsJson());
-      EnvironmentCapabilityExecutionRequest capabilityRequest =
-          new EnvironmentCapabilityExecutionRequest(
-              capability, capabilityCall, request.timeout(), expectedFile);
+      if (!remoteExecutions.tryStart(remoteExecutionId)) {
+        throw new EnvironmentCapabilityCancelledException(
+            "remote execution was not started because the tool generation is stopped or no"
+                + " longer owned");
+      }
       long startNanos = System.nanoTime();
-      EnvironmentCapabilityExecutionHandle transportHandle =
-          capabilityTransport.invoke(environmentId, capabilityRequest, listener);
+      EnvironmentCapabilityExecutionHandle transportHandle;
+      try {
+        transportHandle = capabilityTransport.invoke(environmentId, capabilityRequest, listener);
+      } catch (EnvironmentCapabilityBusyException
+          | EnvironmentCapabilityUnavailableException notExecuted) {
+        // 只有传输端口明确保证的发送前 Busy / Unavailable 才能确认未启动；其它异常不构成未发送证据。
+        try {
+          remoteExecutions.confirmNotStarted(remoteExecutionId);
+        } catch (RuntimeException | Error confirmationFailure) {
+          confirmationFailure.addSuppressed(notExecuted);
+          throw confirmationFailure;
+        }
+        throw notExecuted;
+      }
       if (transportHandle == null) {
         throw new IllegalStateException(
             "remote capability returned a null execution handle; outcome cannot be confirmed");
@@ -538,7 +569,7 @@ public final class ToolExecutionGateway implements ToolGateway {
           throw new IllegalStateException(
               "remote capability completed without a result; outcome cannot be confirmed");
         }
-        return toToolResult(result);
+        return toToolResult(result, remoteExecutionId);
       } catch (InterruptedException interrupted) {
         releaseInFlight(
             terminal,
@@ -590,12 +621,14 @@ public final class ToolExecutionGateway implements ToolGateway {
       }
     }
 
-    private ToolResult toToolResult(EnvironmentCapabilityResult result) {
+    private ToolResult toToolResult(EnvironmentCapabilityResult result, UUID remoteExecutionId) {
+      // 远端只应回显本次执行 id；映射回模型 call id。模型 id 回显不是合法远端关联，保留为不匹配。
+      String remoteCallId = remoteExecutionId.toString();
       String toolCallId = result.callId();
-      if (invocationId.equals(toolCallId)) {
+      if (remoteCallId.equals(toolCallId)) {
         toolCallId = modelCallId;
       } else if (modelCallId.equals(toolCallId)) {
-        toolCallId = invocationId;
+        toolCallId = remoteCallId;
       }
       return new ToolResult(toolCallId, result.contents(), result.error(), result.detailsJson());
     }

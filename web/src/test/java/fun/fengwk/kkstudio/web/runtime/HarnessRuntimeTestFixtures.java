@@ -169,21 +169,39 @@ public final class HarnessRuntimeTestFixtures {
   public static ThreadSnapshot idleSnapshot() {
     EntryPath path = new EntryPath(List.of(rootEntry()));
     return new ThreadSnapshot(
-        thread(id(1)), path, List.of(), null, List.of(), List.of(), List.of(), 0, false);
+        thread(id(1)), path, List.of(), null, List.of(), List.of(), List.of(), 0, false, false);
   }
 
   /** rename 后的权威 IDLE 快照：Thread name/version 与 {@link #renamedThread} 一致。 */
   public static ThreadSnapshot renamedIdleSnapshot() {
     EntryPath path = new EntryPath(List.of(rootEntry()));
     return new ThreadSnapshot(
-        renamedThread(id(1)), path, List.of(), null, List.of(), List.of(), List.of(), 0, false);
+        renamedThread(id(1)),
+        path,
+        List.of(),
+        null,
+        List.of(),
+        List.of(),
+        List.of(),
+        0,
+        false,
+        false);
   }
 
   /** IDLE 快照（指定 thread id）。 */
   public static ThreadSnapshot idleSnapshot(UUID threadId) {
     EntryPath path = new EntryPath(List.of(rootEntry()));
     return new ThreadSnapshot(
-        thread(threadId, id(1)), path, List.of(), null, List.of(), List.of(), List.of(), 0, false);
+        thread(threadId, id(1)),
+        path,
+        List.of(),
+        null,
+        List.of(),
+        List.of(),
+        List.of(),
+        0,
+        false,
+        false);
   }
 
   /** 带执行父关系的空闲快照：无本地工作和未完成的直接委派，活动状态为 IDLE。 */
@@ -198,6 +216,7 @@ public final class HarnessRuntimeTestFixtures {
         List.of(),
         List.of(),
         0,
+        false,
         false);
   }
 
@@ -213,6 +232,7 @@ public final class HarnessRuntimeTestFixtures {
         List.of(),
         List.of(),
         0,
+        false,
         false);
   }
 
@@ -228,6 +248,7 @@ public final class HarnessRuntimeTestFixtures {
         List.of(),
         List.of(),
         0,
+        false,
         false);
   }
 
@@ -264,6 +285,7 @@ public final class HarnessRuntimeTestFixtures {
         List.of(),
         List.of(),
         0,
+        false,
         false);
   }
 
@@ -294,6 +316,7 @@ public final class HarnessRuntimeTestFixtures {
         List.of(),
         List.of(),
         0,
+        false,
         false);
   }
 

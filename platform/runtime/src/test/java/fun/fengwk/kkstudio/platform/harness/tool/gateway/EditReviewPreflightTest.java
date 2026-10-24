@@ -56,6 +56,8 @@ class EditReviewPreflightTest {
           executed.set(true);
           assertEquals(ENV_ID, envId);
           assertEquals(EnvironmentCapabilityIds.FS_EDIT_PREVIEW, request.descriptor().id());
+          // 预览不是 Thread Tool body：退出通知只应被安全忽略。
+          listener.onExitConfirmed();
           listener.onComplete(
               new EnvironmentCapabilityResult(
                   request.call().id(),

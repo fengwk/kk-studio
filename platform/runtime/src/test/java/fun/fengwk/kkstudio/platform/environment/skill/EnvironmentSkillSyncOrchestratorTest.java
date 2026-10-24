@@ -894,6 +894,8 @@ class EnvironmentSkillSyncOrchestratorTest {
       maxInFlight.accumulateAndGet(inFlight.incrementAndGet(), Math::max);
       try {
         beforeComplete.run();
+        // skill.sync 是环境管理任务：远端退出通知不属于 Thread 执行账本。
+        listener.onExitConfirmed();
         if (errorCallback) {
           listener.onError(new IllegalStateException("capability execution failed"));
         } else {
