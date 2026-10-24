@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 
 import java.lang.reflect.Method;
@@ -142,6 +143,11 @@ class HarnessStoreContractTest {
   void allReadsReturnOptionalOrImmutableListOrEntryPathOrBranchSettings() {
     for (Method method : HarnessStore.Transaction.class.getDeclaredMethods()) {
       if (method.isSynthetic()) {
+        continue;
+      }
+      // 登记是写入原语，返回冻结后的身份；不把它当作额外的读取投影。
+      if (method.getName().equals("registerExecution")) {
+        assertEquals(ExecutionExitFact.class, method.getReturnType());
         continue;
       }
       Class<?> returnType = method.getReturnType();

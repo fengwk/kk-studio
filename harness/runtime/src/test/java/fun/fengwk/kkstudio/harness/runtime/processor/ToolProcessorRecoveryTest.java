@@ -242,8 +242,15 @@ class ToolProcessorRecoveryTest {
     assertEquals(1, tool.attempt());
     assertEquals(1, fixture.gateway.admitCalls);
     assertTrue(run.awaitExited());
+    // body 返回早于 finally 确认；等待整条执行线程退出后，version 才包含真实退出的递增。
+    assertTrue(run.executionThread.join(Duration.ofSeconds(5)));
+    assertTrue(
+        fixture
+            .store
+            .transaction(tx -> tx.loadUnconfirmedExecutions(fixture.baseline.threadId()))
+            .isEmpty());
     assertEquals(
-        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
+        3, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertNull(ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId));
     assertFalse(fixture.processor.hasActiveExecution());
   }
