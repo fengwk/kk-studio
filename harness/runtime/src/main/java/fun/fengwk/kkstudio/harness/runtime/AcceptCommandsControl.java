@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitLedger;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.ForkPayload;
@@ -454,6 +455,13 @@ final class AcceptCommandsControl {
     if (present == existing.size()) {
       return SpawnTickets.attach(
           tx, replayThreadBatch(tx, target, commands, thread, existing, cursorFreeBatch), ticket);
+    }
+    if (thread.executionControl().isStopped()
+        && genuineUserInput
+        && ExecutionExitLedger.hasUnconfirmed(tx, thread.id())) {
+      throw conflict(
+          HarnessRuntimeConflictException.Reason.EXIT_UNCONFIRMED,
+          "thread " + thread.id() + " is stopped and its execution exit is not confirmed");
     }
     validateThreadBatchAdmission(target, thread, cursorFreeBatch);
     validateBatchShape(target, commands, false);

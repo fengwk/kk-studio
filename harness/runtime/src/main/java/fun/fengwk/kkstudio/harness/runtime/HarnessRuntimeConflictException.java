@@ -59,6 +59,8 @@ public final class HarnessRuntimeConflictException extends RuntimeException {
     /** Thread 当前不满足手动压缩的可用性条件。 */
     MANUAL_COMPACTION_UNAVAILABLE,
     /** 同一 Session 内已存在同名执行根 Thread（root-name 部分唯一索引冲突）。 */
-    THREAD_NAME_CONFLICT
+    THREAD_NAME_CONFLICT,
+    /** STOPPED Thread 的退出或递归委派尚未收敛，拒绝新的恢复执行输入。 */
+    EXIT_UNCONFIRMED
   }
 }

@@ -307,8 +307,16 @@ public final class ModelProcessor implements AutoCloseable {
       return abortStart(claim);
     }
     boolean submitted = false;
+    boolean closed = false;
     try {
       if (!execution.markRunning()) {
+        return ProcessResult.LOST_OWNERSHIP;
+      }
+      if (execution.abandoned() || ticket.isSuperseded()) {
+        closed = closeAdmitted(admitted);
+        if (closed) {
+          execution.confirmNotStarted();
+        }
         return ProcessResult.LOST_OWNERSHIP;
       }
       executionExecutor.execute(() -> runToTerminal(execution, admitted));
@@ -317,10 +325,16 @@ public final class ModelProcessor implements AutoCloseable {
     } catch (RejectedExecutionException rejected) {
       log.warn(
           "model execution executor rejected invocation {}", execution.invocationId(), rejected);
+      closed = closeAdmitted(admitted);
+      if (closed) {
+        execution.confirmNotStarted();
+      }
       return ProcessResult.LOST_OWNERSHIP;
     } finally {
-      if (!submitted) {
-        admitted.close();
+      if (!submitted && !closed && !closeAdmitted(admitted)) {
+        log.warn(
+            "model admission resources remain held for {}; execution stays unconfirmed",
+            execution.invocationId());
       }
     }
   }
@@ -335,6 +349,21 @@ public final class ModelProcessor implements AutoCloseable {
           execution.invocationId(),
           ProcessorExceptions.describe(unexpected));
       execution.abandon();
+    } finally {
+      if (closeAdmitted(admitted)) {
+        execution.confirmStudioExit();
+      }
+    }
+  }
+
+  /** 本地 admission 资源释放成功才允许确认；失败保持该代次未确认。 */
+  private boolean closeAdmitted(ModelGateway.Admitted admitted) {
+    try {
+      admitted.close();
+      return true;
+    } catch (RuntimeException failure) {
+      log.warn("cannot release model admission resources; execution remains unconfirmed", failure);
+      return false;
     }
   }
 

@@ -5,6 +5,8 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.StoppedThreadReceipt;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
@@ -314,6 +316,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
     final Map<StopReceiptKey, StoredStopReceipt> stopReceipts = new HashMap<>();
     final Map<StopRootKey, List<StopReceiptKey>> stopReceiptsByRoot = new HashMap<>();
     final Map<WorkTarget, Work> works = new HashMap<>();
+    final Map<UUID, ExecutionExitFact> executions = new HashMap<>();
     final Map<GroupCooldownKey, GroupCooldown> groupCooldowns = new HashMap<>();
     long nextId;
 
@@ -329,6 +332,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
       copy.stopReceipts.putAll(source.stopReceipts);
       copy.stopReceiptsByRoot.putAll(source.stopReceiptsByRoot);
       copy.works.putAll(source.works);
+      copy.executions.putAll(source.executions);
       copy.groupCooldowns.putAll(source.groupCooldowns);
       copy.nextId = source.nextId;
       return copy;
@@ -2336,7 +2340,79 @@ public final class InMemoryHarnessStore implements HarnessStore {
       for (UUID threadId : copied) {
         state.threads.remove(threadId);
       }
+      state.executions.values().removeIf(fact -> copied.contains(fact.threadId()));
       return copied.size();
+    }
+
+    @Override
+    public ExecutionExitFact registerExecution(ExecutionExitFact fact) {
+      checkOpen();
+      Objects.requireNonNull(fact, "fact");
+      requireLocked(LockKey.thread(fact.threadId()));
+      if (!state.threads.containsKey(fact.threadId())) {
+        throw new IllegalArgumentException("thread " + fact.threadId() + " does not exist");
+      }
+      ExecutionExitFact stored = state.executions.get(fact.executionId());
+      if (stored != null) {
+        requireSameIdentity(stored, fact);
+        return stored;
+      }
+      if (fact.parentExecutionId() != null
+          && !state.executions.containsKey(fact.parentExecutionId())) {
+        throw new IllegalArgumentException(
+            "parent execution " + fact.parentExecutionId() + " does not exist");
+      }
+      state.executions.put(fact.executionId(), fact);
+      return fact;
+    }
+
+    @Override
+    public Optional<ExecutionExitFact> confirmExecution(
+        ExecutionExitFact expected, ExecutionExitState state) {
+      checkOpen();
+      Objects.requireNonNull(expected, "expected");
+      Objects.requireNonNull(state, "state");
+      if (state == ExecutionExitState.UNCONFIRMED) {
+        throw new IllegalArgumentException("confirmation cannot return to unconfirmed");
+      }
+      ExecutionExitFact stored = this.state.executions.get(expected.executionId());
+      if (stored == null) {
+        return Optional.empty();
+      }
+      requireLocked(LockKey.thread(stored.threadId()));
+      requireSameIdentity(stored, expected);
+      if (stored.state().confirmed()) {
+        return Optional.of(stored);
+      }
+      ExecutionExitFact confirmed = stored.confirm(state, now());
+      this.state.executions.put(expected.executionId(), confirmed);
+      return Optional.of(confirmed);
+    }
+
+    @Override
+    public List<ExecutionExitFact> loadUnconfirmedExecutions(UUID threadId) {
+      checkOpen();
+      Objects.requireNonNull(threadId, "threadId");
+      return state.executions.values().stream()
+          .filter(fact -> fact.threadId().equals(threadId) && !fact.state().confirmed())
+          .sorted(
+              Comparator.comparing(ExecutionExitFact::registeredAt)
+                  .thenComparing(ExecutionExitFact::executionId, UuidOrder.COMPARATOR))
+          .toList();
+    }
+
+    @Override
+    public Optional<ExecutionExitFact> findExecution(UUID executionId) {
+      checkOpen();
+      Objects.requireNonNull(executionId, "executionId");
+      return Optional.ofNullable(state.executions.get(executionId));
+    }
+
+    private static void requireSameIdentity(ExecutionExitFact stored, ExecutionExitFact requested) {
+      if (!stored.sameIdentity(requested)) {
+        throw new IllegalArgumentException(
+            "execution " + stored.executionId() + " identity cannot be replaced");
+      }
     }
 
     @Override

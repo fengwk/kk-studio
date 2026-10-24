@@ -42,7 +42,8 @@ public record ThreadSnapshot(
     List<ModelAttemptFailureProjection> modelAttemptFailures,
     List<StoppedThreadReceipt> stopReceipts,
     int incompleteChildJoins,
-    boolean unconsumedAppliedNotifications) {
+    boolean unconsumedAppliedNotifications,
+    boolean hasUnconfirmedExecution) {
 
   public ThreadSnapshot {
     thread = Objects.requireNonNull(thread, "thread");
@@ -88,7 +89,8 @@ public record ThreadSnapshot(
         context,
         hasOpenCompaction,
         hasInputDemand,
-        incompleteChildJoins);
+        incompleteChildJoins,
+        hasUnconfirmedExecution);
   }
 
   /**

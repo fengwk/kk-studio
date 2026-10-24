@@ -101,6 +101,10 @@ class HarnessStoreContractTest {
               "deleteThreads",
               "deleteEntries",
               "deleteSession",
+              "registerExecution",
+              "confirmExecution",
+              "loadUnconfirmedExecutions",
+              "findExecution",
               "now",
               "listThreadsByRoot"));
 

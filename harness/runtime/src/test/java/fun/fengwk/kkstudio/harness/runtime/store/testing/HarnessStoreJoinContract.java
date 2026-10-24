@@ -21,6 +21,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitKind;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
@@ -1248,6 +1251,136 @@ public abstract class HarnessStoreJoinContract {
           tx.deleteThreads(List.of(rootId));
         });
     assertTrue(store.transaction(tx -> tx.findThread(rootId)).isEmpty());
+  }
+
+  @Test
+  void executionIdentityIsImmutableAndDuplicateAcknowledgementIsIdempotent() {
+    // 测试意图：执行代次身份登记后不可替换；重复 ACK 保持首次证据，旧代次不能确认新代次。
+    UUID threadId = baseline.threadId();
+    UUID invocationId = TestIds.id(810);
+    ExecutionExitFact first =
+        fact(TestIds.id(811), threadId, invocationId, 1, "lease-1", ExecutionExitKind.TOOL, null);
+    ExecutionExitFact remote =
+        fact(
+            TestIds.id(812),
+            threadId,
+            invocationId,
+            1,
+            "lease-1",
+            ExecutionExitKind.REMOTE,
+            first.executionId());
+    store.transaction(
+        tx -> {
+          tx.lockThread(threadId);
+          assertEquals(first, tx.registerExecution(first));
+          assertEquals(first, tx.registerExecution(first));
+          assertEquals(remote, tx.registerExecution(remote));
+          return null;
+        });
+    ExecutionExitFact replacedLease =
+        fact(
+            first.executionId(),
+            threadId,
+            invocationId,
+            1,
+            "lease-2",
+            ExecutionExitKind.TOOL,
+            null);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            store.transaction(
+                tx -> {
+                  tx.lockThread(threadId);
+                  return tx.registerExecution(replacedLease);
+                }));
+    ExecutionExitFact acknowledged =
+        store.transaction(
+            tx -> {
+              tx.lockThread(threadId);
+              ExecutionExitFact confirmed =
+                  tx.confirmExecution(first, ExecutionExitState.STUDIO_EXITED).orElseThrow();
+              ExecutionExitFact repeated =
+                  tx.confirmExecution(first, ExecutionExitState.NOT_STARTED).orElseThrow();
+              assertEquals(confirmed, repeated);
+              assertEquals(ExecutionExitState.STUDIO_EXITED, repeated.state());
+              return repeated;
+            });
+    assertEquals(ExecutionExitState.STUDIO_EXITED, acknowledged.state());
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            store.transaction(
+                tx -> {
+                  tx.lockThread(threadId);
+                  return tx.confirmExecution(replacedLease, ExecutionExitState.STUDIO_EXITED);
+                }));
+    assertEquals(
+        ExecutionExitState.STUDIO_EXITED,
+        store.transaction(tx -> tx.findExecution(first.executionId()).orElseThrow().state()));
+    assertEquals(
+        List.of(remote.executionId()),
+        store.transaction(
+            tx ->
+                tx.loadUnconfirmedExecutions(threadId).stream()
+                    .map(ExecutionExitFact::executionId)
+                    .toList()));
+  }
+
+  @Test
+  void deleteThreadsRemovesExecutionFactsWithoutCallingThatExit() {
+    // 测试意图：Thread 深删清理本地代次及其远端子事实，且删除不是退出确认。
+    UUID threadId = baseline.threadId();
+    UUID invocationId = TestIds.id(820);
+    ExecutionExitFact local =
+        fact(TestIds.id(821), threadId, invocationId, 1, "lease-1", ExecutionExitKind.TOOL, null);
+    ExecutionExitFact remote =
+        fact(
+            TestIds.id(822),
+            threadId,
+            invocationId,
+            1,
+            "lease-1",
+            ExecutionExitKind.REMOTE,
+            local.executionId());
+    store.transaction(
+        tx -> {
+          tx.lockThread(threadId);
+          tx.registerExecution(local);
+          tx.registerExecution(remote);
+          return null;
+        });
+    store.transaction(
+        tx -> {
+          tx.lockTree(threadId);
+          tx.lockThread(threadId);
+          assertEquals(1, tx.deleteThreads(List.of(threadId)));
+          return null;
+        });
+    assertTrue(store.transaction(tx -> tx.findExecution(local.executionId())).isEmpty());
+    assertTrue(store.transaction(tx -> tx.findExecution(remote.executionId())).isEmpty());
+    assertTrue(store.transaction(tx -> tx.findThread(threadId)).isEmpty());
+  }
+
+  private static ExecutionExitFact fact(
+      UUID executionId,
+      UUID threadId,
+      UUID invocationId,
+      int attempt,
+      String lease,
+      ExecutionExitKind kind,
+      UUID parentExecutionId) {
+    return new ExecutionExitFact(
+        executionId,
+        threadId,
+        invocationId,
+        attempt,
+        lease,
+        kind,
+        parentExecutionId,
+        ExecutionExitState.UNCONFIRMED,
+        T0,
+        null);
   }
 
   @Test

@@ -13,6 +13,8 @@ import fun.fengwk.kkstudio.harness.runtime.StoppedThreadReceipt;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
@@ -2329,8 +2331,9 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     for (ModelInvocation model : lockedModels) {
       deleteModelInvocation(model.id());
     }
-    // 自引用 parent FK 为 NO ACTION（语句级校验）：同一 DELETE 语句删除整批 parent/child 时约束天然满足，
-    // 无需在应用层做 O(n^2) 拓扑排序。批外存活子线程已在上面显式拒绝。
+    // 自引用 parent FK 为 NO ACTION（语句级校验）：同一 DELETE 同时包含 parent 与 child 会被拒绝。
+    // 先删远端子代，再删本地代次。删除只是 Thread 深删，不是执行退出。
+    deleteExecutionExits(copied);
     int deletedThreads =
         update(
             "delete from harness_thread where id in (" + placeholders(copied.size()) + ")",
@@ -2343,6 +2346,20 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       notifyExecutionTree(root);
     }
     return copied.size();
+  }
+
+  /** 按远端子代优先删除执行事实，避免 parent 外键在同一语句内互相挡住。 */
+  private void deleteExecutionExits(List<UUID> threadIds) {
+    update(
+        "delete from harness_execution_exit where thread_id in ("
+            + placeholders(threadIds.size())
+            + ") and parent_execution_id is not null",
+        threadIds.toArray());
+    update(
+        "delete from harness_execution_exit where thread_id in ("
+            + placeholders(threadIds.size())
+            + ")",
+        threadIds.toArray());
   }
 
   /** 删除指定 Session 下的全部 Entry 节点（叶子优先逐层删除），并同步驱逐事务内缓存。 */
@@ -2437,6 +2454,106 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     int deleted = update("delete from harness_model_invocation where id = ?", modelInvocationId);
     requireSingleUpdate(deleted, "model invocation", modelInvocationId);
     return true;
+  }
+
+  @Override
+  public ExecutionExitFact registerExecution(ExecutionExitFact fact) {
+    checkOpen();
+    Objects.requireNonNull(fact, "fact");
+    requireLocked(LockKey.thread(fact.threadId()));
+    if (findThread(fact.threadId()).isEmpty()) {
+      throw new IllegalArgumentException("thread " + fact.threadId() + " does not exist");
+    }
+    Optional<ExecutionExitFact> stored = findExecution(fact.executionId());
+    if (stored.isPresent()) {
+      requireSameExecutionIdentity(stored.get(), fact);
+      return stored.get();
+    }
+    if (fact.parentExecutionId() != null && findExecution(fact.parentExecutionId()).isEmpty()) {
+      throw new IllegalArgumentException(
+          "parent execution " + fact.parentExecutionId() + " does not exist");
+    }
+    update(
+        """
+        insert into harness_execution_exit (
+            execution_id, thread_id, invocation_id, attempt, owner_lease_token, kind,
+            parent_execution_id, state, registered_at, confirmed_at
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        fact.executionId(),
+        fact.threadId(),
+        fact.invocationId(),
+        fact.attempt(),
+        fact.ownerLeaseToken(),
+        fact.kind().name(),
+        fact.parentExecutionId(),
+        fact.state().name(),
+        PostgresqlHarnessRows.timestamp(fact.registeredAt()),
+        PostgresqlHarnessRows.timestamp(fact.confirmedAt()));
+    return fact;
+  }
+
+  @Override
+  public Optional<ExecutionExitFact> confirmExecution(
+      ExecutionExitFact expected, ExecutionExitState state) {
+    checkOpen();
+    Objects.requireNonNull(expected, "expected");
+    Objects.requireNonNull(state, "state");
+    if (state == ExecutionExitState.UNCONFIRMED) {
+      throw new IllegalArgumentException("confirmation cannot return to unconfirmed");
+    }
+    ExecutionExitFact stored = findExecution(expected.executionId()).orElse(null);
+    if (stored == null) {
+      return Optional.empty();
+    }
+    requireLocked(LockKey.thread(stored.threadId()));
+    requireSameExecutionIdentity(stored, expected);
+    if (stored.state().confirmed()) {
+      return Optional.of(stored);
+    }
+    Instant confirmedAt = now();
+    update(
+        """
+        update harness_execution_exit
+           set state = ?, confirmed_at = ?
+         where execution_id = ? and state = 'UNCONFIRMED'
+        """,
+        state.name(),
+        PostgresqlHarnessRows.timestamp(confirmedAt),
+        expected.executionId());
+    return findExecution(expected.executionId());
+  }
+
+  @Override
+  public List<ExecutionExitFact> loadUnconfirmedExecutions(UUID threadId) {
+    checkOpen();
+    Objects.requireNonNull(threadId, "threadId");
+    return queryList(
+        """
+        select * from harness_execution_exit
+         where thread_id = ? and state = 'UNCONFIRMED'
+         order by registered_at, execution_id
+        """,
+        PostgresqlHarnessRows.EXECUTION_EXIT,
+        threadId);
+  }
+
+  @Override
+  public Optional<ExecutionExitFact> findExecution(UUID executionId) {
+    checkOpen();
+    Objects.requireNonNull(executionId, "executionId");
+    return queryOne(
+        "select * from harness_execution_exit where execution_id = ?",
+        PostgresqlHarnessRows.EXECUTION_EXIT,
+        executionId);
+  }
+
+  private static void requireSameExecutionIdentity(
+      ExecutionExitFact stored, ExecutionExitFact requested) {
+    if (!stored.sameIdentity(requested)) {
+      throw new IllegalArgumentException(
+          "execution " + stored.executionId() + " identity cannot be replaced");
+    }
   }
 
   @Override

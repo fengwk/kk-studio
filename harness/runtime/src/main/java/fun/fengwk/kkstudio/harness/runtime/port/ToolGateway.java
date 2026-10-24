@@ -36,28 +36,43 @@ public interface ToolGateway {
   Admission admit(Execution execution);
 
   /**
-   * 一次 Tool execution 的不可变描述：key 为 {@code (invocationId, threadId)}，request 已冻结。 {@code
+   * 绑定当前 Tool 代次的远端执行观察者。
+   *
+   * <p>{@link #tryStart} 必须在发送前持久登记；Stop 或失权已先获胜时返回 false，调用方不得发送。 {@link #confirmExit} 只接受该次调用的正向
+   * ACK；{@link #confirmNotStarted} 只用于确定未发送。发送是否发生不确定时两者都不能调用。
+   */
+  interface RemoteExecutionObserver {
+    boolean tryStart(UUID remoteExecutionId);
+
+    void confirmExit(UUID remoteExecutionId);
+
+    void confirmNotStarted(UUID remoteExecutionId);
+  }
+
+  /**
+   * 一次 Tool execution 的不可变描述：key 为 {@code (invocationId, threadId, attempt)}，request 已冻结。 {@code
    * assistantEntryId} 是所有 sibling 共享的冻结 branch basis；{@code threadId} 提供平台 ToolExecutionContext
-   * 需要的持久线程所有权。
+   * 需要的持久线程所有权。{@code remoteExecutions} 只登记这一本地代次上的实际远端调用。
    */
   record Execution(
       UUID invocationId,
       UUID threadId,
       UUID assistantEntryId,
+      int attempt,
       ToolInvocationRequest request,
-      ToolApproval approval) {
-
-    public Execution(
-        UUID invocationId, UUID threadId, UUID assistantEntryId, ToolInvocationRequest request) {
-      this(invocationId, threadId, assistantEntryId, request, ToolApproval.notRequired());
-    }
+      ToolApproval approval,
+      RemoteExecutionObserver remoteExecutions) {
 
     public Execution {
       Objects.requireNonNull(invocationId, "invocationId");
       Objects.requireNonNull(threadId, "threadId");
       Objects.requireNonNull(assistantEntryId, "assistantEntryId");
+      if (attempt < 1) {
+        throw new IllegalArgumentException("attempt must be positive");
+      }
       request = Objects.requireNonNull(request, "request");
       approval = Objects.requireNonNull(approval, "approval");
+      remoteExecutions = Objects.requireNonNull(remoteExecutions, "remoteExecutions");
     }
 
     public ExpectedFile expectedFile() {

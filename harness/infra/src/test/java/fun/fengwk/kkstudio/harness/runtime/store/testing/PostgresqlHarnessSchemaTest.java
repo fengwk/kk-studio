@@ -18,7 +18,7 @@ class PostgresqlHarnessSchemaTest {
 
   /**
    * Harness runtime 协议的专有表恰好八张，Work 位于共享的 {@code durable_work}；业务表不使用 harness_ 前缀，因此 {@code
-   * harness_%} 全量查询结果必须精确等于这八张表。
+   * harness_%} 全量查询结果必须精确等于这九张表。
    *
    * <p>{@code harness_thread_join} 是原子源 prompt 接受与 join 契约的持久事实（无独立状态枚举，无 prompt/report 冗余）， {@code
    * harness_thread_stop_receipt} 是 Stop 回执集合的持久事实，属于 runtime 协议空间。
@@ -26,6 +26,7 @@ class PostgresqlHarnessSchemaTest {
   private static final List<String> RUNTIME_TABLES =
       List.of(
           "harness_entry",
+          "harness_execution_exit",
           "harness_model_invocation",
           "harness_session",
           "harness_thread",
@@ -43,7 +44,7 @@ class PostgresqlHarnessSchemaTest {
   }
 
   @Test
-  void schemaContainsExactlyTheEightHarnessTables() {
+  void schemaContainsExactlyTheHarnessTables() {
     // 精确查询全部 harness_% 表：任何业务表（如 session_blob_ref）不得混入 runtime 协议空间；Work 在共享的 durable_work 表。
     List<String> tables =
         jdbc.queryForList(
@@ -220,6 +221,7 @@ class PostgresqlHarnessSchemaTest {
     assertEquals(
         List.of(
             "idx_harness_entry_parent",
+            "idx_harness_execution_exit_thread_unconfirmed",
             "idx_harness_thread_command_queued",
             "idx_harness_thread_command_stop_request",
             "idx_harness_thread_join_child_pending",

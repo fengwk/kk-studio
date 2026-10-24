@@ -16,6 +16,9 @@ import fun.fengwk.kkstudio.common.json.StrictJson;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.CancelledThreadInput;
 import fun.fengwk.kkstudio.harness.runtime.StoppedThreadReceipt;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitKind;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryEntryPayloadJsonCodec;
@@ -343,6 +346,20 @@ final class PostgresqlHarnessRows {
               instant(resultSet, "representative_created_at"),
               uuid(resultSet, "representative_invocation_id"),
               resultSet.getInt("waiting_count"));
+
+  static final RowMapper<ExecutionExitFact> EXECUTION_EXIT =
+      (resultSet, rowNumber) ->
+          new ExecutionExitFact(
+              uuid(resultSet, "execution_id"),
+              uuid(resultSet, "thread_id"),
+              uuid(resultSet, "invocation_id"),
+              resultSet.getInt("attempt"),
+              resultSet.getString("owner_lease_token"),
+              ExecutionExitKind.valueOf(resultSet.getString("kind")),
+              nullableUuid(resultSet, "parent_execution_id"),
+              ExecutionExitState.valueOf(resultSet.getString("state")),
+              instant(resultSet, "registered_at"),
+              nullableInstant(resultSet, "confirmed_at"));
 
   static final RowMapper<EnvironmentToolWaitRow> ENVIRONMENT_TOOL_WAIT =
       (resultSet, rowNumber) ->

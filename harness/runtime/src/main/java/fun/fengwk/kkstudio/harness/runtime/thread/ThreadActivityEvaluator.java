@@ -19,15 +19,18 @@ public final class ThreadActivityEvaluator {
       ThreadContext context,
       boolean hasOpenCompactionTurn,
       boolean hasInputDemand,
-      int incompleteChildJoins) {
+      int incompleteChildJoins,
+      boolean hasUnconfirmedExecution) {
     Objects.requireNonNull(control, "control");
     Objects.requireNonNull(context, "context");
     if (incompleteChildJoins < 0) {
       throw new IllegalArgumentException("incompleteChildJoins must not be negative");
     }
 
-    // 本地在途活跃执行不因 STOPPED 虚构外部退出事实
-    if (!(context instanceof ThreadContext.IdleOrHistorical) || hasOpenCompactionTurn) {
+    // 本地在途活跃执行，以及已登记但尚未确认退出的具体代次，都不因 STOPPED 虚构外部退出事实。
+    if (!(context instanceof ThreadContext.IdleOrHistorical)
+        || hasOpenCompactionTurn
+        || hasUnconfirmedExecution) {
       return ThreadRuntimeStatus.RUNNING;
     }
 
@@ -53,7 +56,8 @@ public final class ThreadActivityEvaluator {
       ThreadContext context,
       boolean hasOpenCompactionTurn,
       boolean hasInputDemand,
-      int incompleteChildJoins) {
+      int incompleteChildJoins,
+      boolean hasUnconfirmedExecution) {
     Objects.requireNonNull(context, "context");
     if (incompleteChildJoins < 0) {
       throw new IllegalArgumentException("incompleteChildJoins must not be negative");
@@ -61,6 +65,7 @@ public final class ThreadActivityEvaluator {
     return (context instanceof ThreadContext.IdleOrHistorical)
         && !hasOpenCompactionTurn
         && !hasInputDemand
-        && incompleteChildJoins == 0;
+        && incompleteChildJoins == 0
+        && !hasUnconfirmedExecution;
   }
 }
