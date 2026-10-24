@@ -2292,10 +2292,58 @@ describe('AgentPane orchestration', () => {
       const working = document.querySelector('.thread-working')
       expect(working).toHaveTextContent('执行中')
       expect(working).not.toHaveTextContent('已停止')
+      expect(working).not.toHaveTextContent('退出尚未确认')
       expect(working).toHaveAttribute('data-animated', 'true')
       expect(working?.querySelector('.thread-working-dot')).not.toHaveClass('is-static')
     })
     stoppedPane.unmount()
+
+    // 场景 4：STOPPED + RUNNING 且没有真实 RUNNING model/tool，静态提示退出尚未确认
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(threadFixture(THREAD_ID, { status: 'RUNNING', executionControl: 'STOPPED' })),
+    )
+    const unconfirmedPane = renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    await waitFor(() => {
+      const working = document.querySelector('.thread-working')
+      expect(working).toHaveTextContent('已请求停止，退出尚未确认')
+      expect(working).not.toHaveTextContent('执行中')
+      expect(working).not.toHaveTextContent('运行中')
+      expect(working).toHaveAttribute('data-animated', 'false')
+      expect(working?.querySelector('.thread-working-dot')).toHaveClass('is-static')
+    })
+    unconfirmedPane.unmount()
+
+    // 场景 5：真实 RUNNING model 同样优先于停止未确认，保持生成动画
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(
+        threadFixture(THREAD_ID, { status: 'RUNNING', executionControl: 'STOPPED' }),
+        {
+          modelInvocation: {
+            id: 'running-model',
+            threadId: THREAD_ID,
+            turnStartEntryId: 'turn-1',
+            requestHeadEntryId: 'head-1',
+            status: 'RUNNING',
+            attempt: 1,
+            streamCheckpointJson: null,
+            resultJson: null,
+            errorJson: null,
+            resultEntryId: null,
+            createTime: 0,
+            updateTime: 0,
+          },
+        },
+      ),
+    )
+    const modelPane = renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    await waitFor(() => {
+      const working = document.querySelector('.thread-working')
+      expect(working).toHaveTextContent('执行中')
+      expect(working).not.toHaveTextContent('退出尚未确认')
+      expect(working).toHaveAttribute('data-animated', 'true')
+      expect(working?.querySelector('.thread-working-dot')).not.toHaveClass('is-static')
+    })
+    modelPane.unmount()
   })
 
   it('isolates ISSUE_AGENT owner storage and routing from independent thread pane without crosstalk', async () => {
