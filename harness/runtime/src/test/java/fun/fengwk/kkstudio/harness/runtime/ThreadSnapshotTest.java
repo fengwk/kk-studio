@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime;
 
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T5;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.approveTool;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.assistantEntry;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.cancelTool;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.markRunningTool;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.runtime;
@@ -12,19 +13,30 @@ import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seed
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedThreadAt;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedToolBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.setWaitingApproval;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.turnEndEntry;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.turnStartEntry;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessageCommand;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessageEntry;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
+import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.NotificationKind;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.NotificationCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 
 import java.time.Clock;
 import java.time.ZoneOffset;
@@ -32,12 +44,10 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * {@link ThreadSnapshot#runtimeStatus()} 统一细粒度运行时状态投影测试。
+ * {@link ThreadSnapshot#runtimeStatus()} 统一三态运行时状态投影测试。
  *
  * <p>全部用例都经真实 {@link InMemoryHarnessStore} 种子与 {@link HarnessRuntime#getThreadSnapshot} 读取，保证投影的
- * {@code thread/entryPath/model/toolSiblings} 满足 {@code ThreadContextClassifier} 的输入契约：终态
- * Model/Tools 与 continuation 都是正常可达状态（分别投影 APPLYING / CONTINUATION_DUE），只有真正不匹配的形状（例如 Model 不属于本
- * Thread）才 fail-closed。
+ * 事务一致性。真正破坏不变量的形状（例如 Model 不属于本 Thread）才 fail-closed。
  */
 class ThreadSnapshotTest {
 
@@ -51,59 +61,54 @@ class ThreadSnapshotTest {
   }
 
   @Test
-  void stoppedExecutionControlMapsToStoppedStatus() {
-    // 测试意图：执行控制 STOPPED 优先于任何本地上下文，统一投影为 STOPPED。
+  void stoppedExecutionControlDoesNotDirectlyOverwriteStatus() {
+    // 测试意图：executionControl 与 status 正交；Thread 本地处于空闲时即使被 STOPPED，status 仍为 IDLE。
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     markActive(baseline.threadId(), ThreadExecutionControl.STOPPED);
-    assertEquals(
-        ThreadRuntimeStatus.STOPPED,
-        runtime.getThreadSnapshot(baseline.threadId()).runtimeStatus());
+    ThreadSnapshot snapshot = runtime.getThreadSnapshot(baseline.threadId());
+    assertEquals(ThreadExecutionControl.STOPPED, snapshot.thread().executionControl());
+    assertEquals(ThreadRuntimeStatus.IDLE, snapshot.runtimeStatus());
   }
 
   @Test
   void idleLifecycleMapsToIdleStatus() {
-    // 测试意图：递归生命周期 IDLE 且本地无适用上下文时投影为 IDLE。
+    // 测试意图：本地无活跃上下文且无未完成直接子任务时投影为 IDLE。
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     assertEquals(
         ThreadRuntimeStatus.IDLE, runtime.getThreadSnapshot(baseline.threadId()).runtimeStatus());
   }
 
   @Test
-  void activeLifecycleWithModelMapsToModelStatus() {
-    // 测试意图：ACTIVE 生命周期下，本地活跃 Model 按 invocation 状态细分为 MODEL_READY/RUNNING。
+  void activeLifecycleWithModelMapsToRunningStatus() {
+    // 测试意图：本地存在非终态 Model 调用时属于未结束流程，投影为 RUNNING。
     for (ModelInvocationStatus status :
         List.of(ModelInvocationStatus.READY, ModelInvocationStatus.RUNNING)) {
       HarnessRuntimeTestSupport.ModelBaseline baseline = seedModel(store, status);
-      ThreadRuntimeStatus expected =
-          switch (status) {
-            case READY -> ThreadRuntimeStatus.MODEL_READY;
-            case RUNNING -> ThreadRuntimeStatus.MODEL_RUNNING;
-            default -> throw new AssertionError();
-          };
-      assertEquals(expected, runtime.getThreadSnapshot(baseline.threadId()).runtimeStatus());
+      assertEquals(
+          ThreadRuntimeStatus.RUNNING,
+          runtime.getThreadSnapshot(baseline.threadId()).runtimeStatus());
     }
   }
 
   @Test
-  void activeLifecycleWithTerminalModelMapsToApplying() {
-    // 测试意图：终态但结果尚未物化的 Model 是正常可达状态（而不是非法形状），投影为 APPLYING。
+  void activeLifecycleWithTerminalModelMapsToRunning() {
+    // 测试意图：终态但结果尚未物化的 Model 属于待 apply 流程，投影为 RUNNING。
     HarnessRuntimeTestSupport.ModelBaseline baseline = seedTerminalModel(store);
     assertEquals(
-        ThreadRuntimeStatus.APPLYING,
+        ThreadRuntimeStatus.RUNNING,
         runtime.getThreadSnapshot(baseline.threadId()).runtimeStatus());
   }
 
   @Test
-  void activeLifecycleWithToolsMapsToToolStatusByPriority() {
-    // 测试意图：ACTIVE 生命周期下，非终态 Tool siblings 按 WAITING_APPROVAL > RUNNING > READY
-    // 细分，优先级最高的 sibling 决定投影。
+  void activeLifecycleWithToolsMapsToRunning() {
+    // 测试意图：审批、问卷、运行中及就绪工具均属于本地未结束流程，投影为 RUNNING。
     HarnessRuntimeTestSupport.MultiToolBaseline waitingApproval = seedToolBaseline(store, 4);
     approveTool(store, waitingApproval.toolIds().get(1));
     approveTool(store, waitingApproval.toolIds().get(2));
     markRunningTool(store, waitingApproval.toolIds().get(2));
     setWaitingApproval(store, waitingApproval.toolIds().get(3));
     assertEquals(
-        ThreadRuntimeStatus.TOOL_WAITING_APPROVAL,
+        ThreadRuntimeStatus.RUNNING,
         runtime.getThreadSnapshot(waitingApproval.threadId()).runtimeStatus());
 
     HarnessRuntimeTestSupport.MultiToolBaseline running = seedToolBaseline(store, 3);
@@ -111,38 +116,35 @@ class ThreadSnapshotTest {
     approveTool(store, running.toolIds().get(2));
     markRunningTool(store, running.toolIds().get(2));
     assertEquals(
-        ThreadRuntimeStatus.TOOL_RUNNING,
-        runtime.getThreadSnapshot(running.threadId()).runtimeStatus());
+        ThreadRuntimeStatus.RUNNING, runtime.getThreadSnapshot(running.threadId()).runtimeStatus());
 
     HarnessRuntimeTestSupport.ToolBaseline ready = seedToolBaseline(store);
     assertEquals(
-        ThreadRuntimeStatus.TOOL_READY,
-        runtime.getThreadSnapshot(ready.threadId()).runtimeStatus());
+        ThreadRuntimeStatus.RUNNING, runtime.getThreadSnapshot(ready.threadId()).runtimeStatus());
   }
 
   @Test
-  void activeLifecycleWithTerminalToolsMapsToApplying() {
-    // 测试意图：全部 sibling 都已终态但 outcome 尚未物化是正常可达状态（而非非法形状），投影为 APPLYING。
+  void activeLifecycleWithTerminalToolsMapsToRunning() {
+    // 测试意图：全部 sibling 都已终态但 outcome 尚未物化属于待 apply 流程，投影为 RUNNING。
     HarnessRuntimeTestSupport.ToolBaseline baseline = seedToolBaseline(store);
     cancelTool(store, baseline);
     assertEquals(
-        ThreadRuntimeStatus.APPLYING,
+        ThreadRuntimeStatus.RUNNING,
         runtime.getThreadSnapshot(baseline.threadId()).runtimeStatus());
   }
 
   @Test
-  void activeLifecycleWithContinuationMapsToContinuationDue() {
-    // 测试意图：ACTIVE 生命周期下，head 为 continueModel=true 且归属本 Thread 的 TURN_END 时投影为
-    // CONTINUATION_DUE。
+  void activeLifecycleWithContinuationMapsToRunning() {
+    // 测试意图：head 为 continueModel=true 且归属本 Thread 的 TURN_END 时属于续作流程，投影为 RUNNING。
     HarnessRuntimeTestSupport.ContinuationBaseline baseline = seedContinuationChain(store, true);
     assertEquals(
-        ThreadRuntimeStatus.CONTINUATION_DUE,
+        ThreadRuntimeStatus.RUNNING,
         runtime.getThreadSnapshot(baseline.threadId()).runtimeStatus());
   }
 
   @Test
   void runnableWithoutLocalContextOrQueuedCommandsMapsToIdleStatus() {
-    // 测试意图：执行控制 RUNNABLE 但本地没有 Model/Tool/continuation，且没有排队命令时投影为 IDLE。
+    // 测试意图：执行控制 RUNNABLE 但本地没有 Model/Tool/continuation，且没有排队命令与未完成子任务时投影为 IDLE。
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     markActive(baseline.threadId(), ThreadExecutionControl.RUNNABLE);
     assertEquals(
@@ -150,10 +152,9 @@ class ThreadSnapshotTest {
   }
 
   @Test
-  void acceptingUserCommandMakesActiveThreadQueued() {
-    // 测试意图：接受用户命令会把 Thread 置为 ACTIVE（预留 sequence）但尚未推进 head，因此投影必须是 QUEUED。
+  void acceptingUserCommandMakesThreadRunning() {
+    // 测试意图：存在排队命令属于未结束流程，投影为 RUNNING。
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
-    ThreadState before = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
     runtime.acceptCommands(
         new AcceptCommandsCommand(
             new AcceptCommandsTarget.Thread(baseline.threadId()),
@@ -161,7 +162,97 @@ class ThreadSnapshotTest {
         AcceptancePreflight.IDENTITY);
     ThreadSnapshot snapshot = runtime.getThreadSnapshot(baseline.threadId());
     assertEquals(1, snapshot.queuedCommands().size());
-    assertEquals(ThreadRuntimeStatus.QUEUED, snapshot.runtimeStatus());
+    assertEquals(ThreadRuntimeStatus.RUNNING, snapshot.runtimeStatus());
+  }
+
+  @Test
+  void idleThreadWithIncompleteChildJoinsMapsToWaiting() {
+    // 测试意图：本地已让出执行且存在未返回的直接 NOTIFY_PARENT 子任务，投影为 WAITING。
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    ThreadSnapshot base = runtime.getThreadSnapshot(baseline.threadId());
+    ThreadSnapshot waiting =
+        new ThreadSnapshot(
+            base.thread(),
+            base.entryPath(),
+            List.of(),
+            null,
+            List.of(),
+            List.of(),
+            List.of(),
+            1,
+            false);
+    assertEquals(ThreadRuntimeStatus.WAITING, waiting.runtimeStatus());
+  }
+
+  @Test
+  void waitingThreadWithLocalTurnEndDoesNotExposeCompletedOutcome() {
+    // 测试意图：非 IDLE outcome 不得声明 COMPLETED；本地回合虽已到达 TURN_END，但子任务未完成时 outcome 为 null。
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    ThreadSnapshot base = runtime.getThreadSnapshot(baseline.threadId());
+    ThreadSnapshot waitingWithTurnEnd =
+        new ThreadSnapshot(
+            base.thread(),
+            base.entryPath(),
+            List.of(),
+            null,
+            List.of(),
+            List.of(),
+            List.of(),
+            1,
+            false);
+    assertEquals(ThreadRuntimeStatus.WAITING, waitingWithTurnEnd.runtimeStatus());
+    assertNull(waitingWithTurnEnd.outcome());
+  }
+
+  @Test
+  void stoppedThreadWithNotificationDemandDoesNotSelfStartAsRunning() {
+    // 测试意图：executionControl 正交；STOPPED 下有未消费通知不得显示为待启动 RUNNING（保留通知不自启，明确义务与控制关系）。
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    markActive(baseline.threadId(), ThreadExecutionControl.STOPPED);
+    ThreadSnapshot stoppedBase = runtime.getThreadSnapshot(baseline.threadId());
+    assertEquals(ThreadExecutionControl.STOPPED, stoppedBase.thread().executionControl());
+
+    // 1. 存在已 APPLIED 但未被消费的通知水位（watermark > inputThroughSequence）
+    ThreadSnapshot stoppedWithWatermark =
+        new ThreadSnapshot(
+            stoppedBase.thread(),
+            stoppedBase.entryPath(),
+            List.of(),
+            null,
+            List.of(),
+            List.of(),
+            List.of(),
+            0,
+            true);
+    assertEquals(ThreadRuntimeStatus.IDLE, stoppedWithWatermark.runtimeStatus());
+
+    // 2. 存在排队中的系统通知命令
+    ThreadSnapshot stoppedWithQueuedNotification =
+        new ThreadSnapshot(
+            stoppedBase.thread(),
+            stoppedBase.entryPath(),
+            List.of(
+                new ThreadCommand(
+                    TestIds.id(99),
+                    1L,
+                    new NotificationCommandPayload(
+                        TestIds.id(100),
+                        NotificationKind.SUBAGENT_RESULT,
+                        TestIds.id(101),
+                        AgentMessage.user("child result")),
+                    TestIds.id(102),
+                    "0".repeat(64),
+                    null,
+                    null,
+                    null,
+                    T5)),
+            null,
+            List.of(),
+            List.of(),
+            List.of(),
+            0,
+            false);
+    assertEquals(ThreadRuntimeStatus.IDLE, stoppedWithQueuedNotification.runtimeStatus());
   }
 
   @Test
@@ -180,8 +271,72 @@ class ThreadSnapshotTest {
             ownerSnapshot.model(),
             List.of(),
             List.of(),
-            List.of());
+            List.of(),
+            0,
+            false);
     assertThrows(IllegalStateException.class, forged::runtimeStatus);
+  }
+
+  @Test
+  void snapshotRejectsNegativeIncompleteChildJoins() {
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    ThreadSnapshot base = runtime.getThreadSnapshot(baseline.threadId());
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ThreadSnapshot(
+                base.thread(),
+                base.entryPath(),
+                List.of(),
+                null,
+                List.of(),
+                List.of(),
+                List.of(),
+                -1,
+                false));
+  }
+
+  @Test
+  void turnCountAndToolCallCountCountPathEntriesAccurately() {
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    ThreadSnapshot base = runtime.getThreadSnapshot(baseline.threadId());
+    assertEquals(0, base.turnCount());
+    assertEquals(0, base.toolCallCount());
+    assertNull(base.outcome());
+
+    // 1. 已有 tool 调用的真实快照上验证 toolCallCount
+    HarnessRuntimeTestSupport.ToolBaseline toolBaseline = seedToolBaseline(store);
+    ThreadSnapshot toolActiveSnapshot = runtime.getThreadSnapshot(toolBaseline.threadId());
+    assertEquals(1, toolActiveSnapshot.toolCallCount());
+
+    // 2. 构造一个普通的纯文本已完成回合
+    UUID turnStartId = UUID.randomUUID();
+    UUID userMsgId = UUID.randomUUID();
+    UUID assistantMsgId = UUID.randomUUID();
+    UUID turnEndId = UUID.randomUUID();
+    Entry turnStart =
+        turnStartEntry(
+            turnStartId, baseline.sessionId(), baseline.rootEntryId(), T5, baseline.threadId());
+    Entry userMsg = userMessageEntry(userMsgId, baseline.sessionId(), turnStartId, T5);
+    Entry assistantMsg = assistantEntry(assistantMsgId, baseline.sessionId(), userMsgId, T5);
+    Entry turnEnd =
+        turnEndEntry(turnEndId, baseline.sessionId(), assistantMsgId, T5, turnStartId, false);
+    EntryPath completedPath =
+        new EntryPath(List.of(base.entryPath().head(), turnStart, userMsg, assistantMsg, turnEnd));
+    ThreadSnapshot completedSnapshot =
+        new ThreadSnapshot(
+            base.thread().advanceHead(turnEndId, T5),
+            completedPath,
+            List.of(),
+            null,
+            List.of(),
+            List.of(),
+            List.of(),
+            0,
+            false);
+    assertEquals(1, completedSnapshot.turnCount());
+    assertEquals(ThreadRuntimeStatus.IDLE, completedSnapshot.runtimeStatus());
+    assertEquals(TurnEndOutcome.COMPLETED, completedSnapshot.outcome());
   }
 
   /** 设置 Thread 的执行控制（种子 fixture 默认 RUNNABLE）。 */

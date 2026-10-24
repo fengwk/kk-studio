@@ -1334,7 +1334,8 @@ class ProviderRequestPreviewServiceTest {
 
   private static ThreadSnapshot snapshot(
       ThreadState thread, EntryPath path, List<ThreadCommand> queued) {
-    return new ThreadSnapshot(thread, path, queued, null, List.of(), List.of(), List.of());
+    return new ThreadSnapshot(
+        thread, path, queued, null, List.of(), List.of(), List.of(), 0, false);
   }
 
   private static ThreadState thread(UUID headEntryId, long nextCommandSequence) {

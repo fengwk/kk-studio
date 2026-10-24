@@ -604,6 +604,6 @@ class PluginPromptTaskServiceTest {
             NOW,
             NOW);
     return new ThreadSnapshot(
-        thread, mock(EntryPath.class), List.of(), null, List.of(), List.of(), List.of());
+        thread, mock(EntryPath.class), List.of(), null, List.of(), List.of(), List.of(), 0, false);
   }
 }

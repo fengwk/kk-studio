@@ -169,21 +169,21 @@ public final class HarnessRuntimeTestFixtures {
   public static ThreadSnapshot idleSnapshot() {
     EntryPath path = new EntryPath(List.of(rootEntry()));
     return new ThreadSnapshot(
-        thread(id(1)), path, List.of(), null, List.of(), List.of(), List.of());
+        thread(id(1)), path, List.of(), null, List.of(), List.of(), List.of(), 0, false);
   }
 
   /** rename 后的权威 IDLE 快照：Thread name/version 与 {@link #renamedThread} 一致。 */
   public static ThreadSnapshot renamedIdleSnapshot() {
     EntryPath path = new EntryPath(List.of(rootEntry()));
     return new ThreadSnapshot(
-        renamedThread(id(1)), path, List.of(), null, List.of(), List.of(), List.of());
+        renamedThread(id(1)), path, List.of(), null, List.of(), List.of(), List.of(), 0, false);
   }
 
   /** IDLE 快照（指定 thread id）。 */
   public static ThreadSnapshot idleSnapshot(UUID threadId) {
     EntryPath path = new EntryPath(List.of(rootEntry()));
     return new ThreadSnapshot(
-        thread(threadId, id(1)), path, List.of(), null, List.of(), List.of(), List.of());
+        thread(threadId, id(1)), path, List.of(), null, List.of(), List.of(), List.of(), 0, false);
   }
 
   /** 已静止但仍有活跃直接孩子的父 Thread 快照：本地状态只由该 Thread 自身投影为 IDLE，不再递归祖先表达子树忙碌；执行父关系仍显式暴露。 */
@@ -196,14 +196,24 @@ public final class HarnessRuntimeTestFixtures {
         null,
         List.of(),
         List.of(),
-        List.of());
+        List.of(),
+        0,
+        false);
   }
 
   /** 显式停止（STOPPED）的 Thread 快照：对外状态为 STOPPED 且非 processing。 */
   public static ThreadSnapshot stoppedSnapshot() {
     EntryPath path = new EntryPath(List.of(rootEntry()));
     return new ThreadSnapshot(
-        stoppedThread(id(1), id(1)), path, List.of(), null, List.of(), List.of(), List.of());
+        stoppedThread(id(1), id(1)),
+        path,
+        List.of(),
+        null,
+        List.of(),
+        List.of(),
+        List.of(),
+        0,
+        false);
   }
 
   /** 已有接受但尚未被消费的命令、因此尚未开始执行的 Thread 快照：RUNNABLE 本地空闲投影为 QUEUED。 */
@@ -216,7 +226,9 @@ public final class HarnessRuntimeTestFixtures {
         null,
         List.of(),
         List.of(),
-        List.of());
+        List.of(),
+        0,
+        false);
   }
 
   /**
@@ -244,7 +256,45 @@ public final class HarnessRuntimeTestFixtures {
         new EntryPath(
             List.of(rootEntry(), turnStart, userMessageEntry(), plainAssistantEntry(), turnEnd));
     return new ThreadSnapshot(
-        activeThread(threadId, id(5)), path, List.of(), null, List.of(), List.of(), List.of());
+        activeThread(threadId, id(5)),
+        path,
+        List.of(),
+        null,
+        List.of(),
+        List.of(),
+        List.of(),
+        0,
+        false);
+  }
+
+  public static ThreadSnapshot completedTurnSnapshot(UUID threadId) {
+    Entry turnStart =
+        new Entry(
+            id(2),
+            id(1),
+            id(1),
+            new TurnStartPayload(TurnStartReason.INPUT, settings(), threadId),
+            NOW);
+    Entry turnEnd =
+        new Entry(
+            id(5),
+            id(1),
+            id(4),
+            new TurnEndPayload(id(2), TurnEndOutcome.COMPLETED, false, null, null),
+            NOW);
+    EntryPath path =
+        new EntryPath(
+            List.of(rootEntry(), turnStart, userMessageEntry(), plainAssistantEntry(), turnEnd));
+    return new ThreadSnapshot(
+        activeThread(threadId, id(5)),
+        path,
+        List.of(),
+        null,
+        List.of(),
+        List.of(),
+        List.of(),
+        0,
+        false);
   }
 
   public static ModelUsage usage() {
