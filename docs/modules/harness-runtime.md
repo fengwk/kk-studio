@@ -69,7 +69,7 @@ tree 锁只用于结构或跨 Thread 的写操作（spawn、Stop、删除、fork
 - `rootThreadId` 是执行根：根指向自身，子代理继承父的执行根。YOLO 只属于执行根，子代理下一次权限决定现读根上的开关。
 - [`ThreadExecutionControl`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/ThreadExecutionControl.java) 只有 `RUNNABLE` / `STOPPED`：Stop 把目标与全部后代置为 `STOPPED`，跨重启保留；显式的新用户输入或新任务只恢复目标本身。`inputThroughSequence` 只由 `INPUT` 回合推进。
 
-对外状态都从 Thread 自身事实派生，不递归子树。[`ThreadSnapshot`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ThreadSnapshot.java) 的 `runtimeStatus()` 给出 `STOPPED`、`IDLE`、`QUEUED`、`CONTINUATION_DUE` 与各 `MODEL_*` / `TOOL_*` / `APPLYING` 细分值；等待子结果不是本地工作，父 Thread 不因未交付的 Join 失去 `IDLE`。`executionFacts()` 另给三个独立事实：`hasWork`（排队命令、非终态 Model、可执行工具或待续写）、`waitingForHuman`（工具等待审批或输入）与 `hasUnknownToolOutcome`。`STOPPED` 不覆盖这些事实，界面显示“已停止”不代表外部调用已经收敛。
+对外状态都从 Thread 自身事实派生，不递归子树。[`ThreadSnapshot`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ThreadSnapshot.java) 的 `runtimeStatus()` 统一为严格三态：`RUNNING`、`WAITING` 与 `IDLE`，与 `executionControl`（`RUNNABLE` / `STOPPED`）完全正交。由 [`ThreadActivityEvaluator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/ThreadActivityEvaluator.java) 共享最小客观事实判定：本地活跃执行或 open compaction 始终为 `RUNNING`；待启动输入需求（排队命令或未消费的已应用通知水位）仅在 `RUNNABLE` 下体现为 `RUNNING`，在 `STOPPED` 下保留通知但不自启（明确抑制本地回合启动，不冒充 RUNNING）；本地已让出执行但存在未完成直接 `NOTIFY_PARENT` 子 Join（`incompleteChildJoins > 0`）体现为 `WAITING`；其余完全静止为空闲 `IDLE`。非 `IDLE` 状态下 `outcome()` 强制抑制为 null，严禁在等待子任务或活跃时宣称 `COMPLETED`。需要注意：StopControl 清理内部调用与 Work 后，底层没有外部执行退出的 durable 确认，不能宣称三态能区分外部进程是否真正退出。`executionFacts()` 另给三个独立事实：`hasWork`、`waitingForHuman` 与 `hasUnknownToolOutcome`。
 
 [`ThreadContextClassifier`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/ThreadContextClassifier.java) 是纯函数：输入 ThreadState、root-to-head 路径、open 回合的 ModelInvocation 及其 Tool siblings，输出唯一的 [`ThreadContext`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/ThreadContext.java)（`IdleOrHistorical`、`ContinuationDue`、`ModelActive`、`ModelTerminalPending`、`ToolActive`、`ToolTerminalPending`）；任何所有权或配对不一致都直接抛 `IllegalStateException`。快照与 Processor 共用这一分类。
 
@@ -210,7 +210,7 @@ Stop 在 tree 锁内校验目标 version 与 `stopRequestId`，按 `parentThread
 
 内置 `task` 工具只做一次持久接受：平台经 `AgentTaskService` 调用统一 `spawn`，在同一事务接受源 prompt、创建或续用子 Thread、写入 Join 票据并请求 Work，然后立即回执 `Task accepted. thread_id: <uuid>.`。子结果不经过工具返回，而是在子执行收敛后作为父 Thread 的一条系统通知交付。
 
-`harness_thread_join` 的一行只记凭据：调用身份与请求指纹、父子 Thread、源命令序号、agent 与 `maxTurns`、交付方式、是否计入额度，以及一次冻结的 `terminalEntryId` / `finalAnswerEntryId` 与交付命令序号。[`JoinDelivery`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/join/JoinDelivery.java) 有三种：
+`harness_thread_join` 的一行只记凭据：调用身份与请求指纹、父子 Thread、源命令序号、agent 与 `maxTurns`、交付方式，以及一次冻结的 `terminalEntryId` / `finalAnswerEntryId` 与交付命令序号（并发额度由 `delivery == NOTIFY_PARENT` 直接推导，不设独立字段）。[`JoinDelivery`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/join/JoinDelivery.java) 有三种：
 
 - `NOTIFY_PARENT`：task 子执行，计入额度；同一事务校验父可接受本次调用、父 head 匹配与深度/并发额度，父已 `STOPPED` 时拒绝新委派。续用只能向既有子追加 prompt，不能改父关系。
 - `RECEIPT_ONLY`：没有父的内部 root 任务，不计额度，只供票据观察。
@@ -218,9 +218,9 @@ Stop 在 tree 锁内校验目标 version 与 `stopRequestId`，按 `parentThread
 
 同一父子对至多一个有效未完成 Join；子 Thread 无未完成的 `SETTLE_OWNER_TURN` 时，新续接可取代旧等待，否则须完成 owner 结算后才可继续。精确重放仍返回原票据。
 
-普通结算要求：源命令已应用；没有尚未冻结结果的直接子 Join、没有未送达的子回执、本 Thread 没有待处理输入——因此多级委派自底向上自然收敛，既不等于首次本地 Idle，也不等待整棵子树永久静止；Stop 的强制结算不受此限。结果固定在源命令应用位置到终态边界的历史范围内，子树后续推进不改写旧回执。`maxTurns` 是软预算，超出时在规划中物化一条 `TASK_BUDGET` 通知，每个 Join 只提醒一次。
+普通结算要求：源命令已应用；没有尚未冻结结果的直接子 Join、本 Thread 没有待处理输入——因此多级委派自底向上自然收敛，既不等于首次本地 Idle，也不等待整棵子树永久静止；Stop 的强制结算不受此限。结果固定在源命令应用位置到终态边界的历史范围内，子树后续推进不改写旧回执。`maxTurns` 是软预算，超出时在规划中物化一条 `TASK_BUDGET` 通知，每个 Join 只提醒一次。
 
-结算与父通知入队在同一事务完成；通知的消息由 `runtime.join` 纯函数渲染（`<subagent_result>` 包裹任务原文与结果），不读取子线程当前 head。显式停止的父不会被唤醒：通知直接物化进历史，待父接受新输入后由 `INPUT` 回合消费。
+结算与父通知入队在同一事务完成：`NOTIFY_PARENT` 结算原子冻结终态结果、写入父 `NOTIFICATION` 命令、推进父序列并请求 Work，通过唯一次 `updateJoin` 直接落盘为 delivered 状态，不持久化已匹配但未送达的中间态。通知的消息由 `runtime.join` 纯函数渲染（`<subagent_result>` 包裹任务原文与结果），不读取子线程当前 head。显式停止的父不会被唤醒：通知直接物化进历史，待父接受新输入后由 `INPUT` 回合消费。
 
 ## 端口与策略
 

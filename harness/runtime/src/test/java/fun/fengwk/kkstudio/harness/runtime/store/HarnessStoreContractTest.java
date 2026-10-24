@@ -53,7 +53,6 @@ class HarnessStoreContractTest {
               "insertJoin",
               "findJoin",
               "loadIncompleteJoins",
-              "loadPendingDeliveries",
               "updateJoin",
               "insertStopReceipts",
               "findStopReceipt",

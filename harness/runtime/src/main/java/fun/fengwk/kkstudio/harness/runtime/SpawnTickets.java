@@ -49,7 +49,7 @@ final class SpawnTickets {
           throw new IllegalArgumentException("join parent no longer accepts this invocation");
         }
       }
-      if (ticket.countsTowardQuota()) {
+      if (ticket.delivery() == JoinDelivery.NOTIFY_PARENT) {
         int projectedChildren =
             tx.countIncompleteChildJoins(parentId) - replacedQuotaJoins(tx, childId, parentId) + 1;
         if (projectedChildren > ticket.budget().maxConcurrentChildren()) {
@@ -62,7 +62,7 @@ final class SpawnTickets {
     if (depth > ticket.budget().maxDepth()) {
       throw new IllegalArgumentException("join depth quota exceeded");
     }
-    if (parentId != null && ticket.countsTowardQuota()) {
+    if (parentId != null && ticket.delivery() == JoinDelivery.NOTIFY_PARENT) {
       int projectedGlobal =
           tx.countIncompleteSubagentJoins() - replacedQuotaJoins(tx, childId, parentId) + 1;
       if (projectedGlobal > ticket.budget().maxConcurrentThreads()) {
@@ -76,7 +76,9 @@ final class SpawnTickets {
     return (int)
         tx.loadIncompleteJoins(childId).stream()
             .filter(
-                pending -> parentId.equals(pending.parentThreadId()) && pending.countsTowardQuota())
+                pending ->
+                    parentId.equals(pending.parentThreadId())
+                        && pending.delivery() == JoinDelivery.NOTIFY_PARENT)
             .count();
   }
 
@@ -95,7 +97,6 @@ final class SpawnTickets {
           || !existing.agent().equals(ticket.agent())
           || !Objects.equals(existing.maxTurns(), ticket.budget().maxTurns())
           || existing.delivery() != ticket.delivery()
-          || existing.countsTowardQuota() != ticket.countsTowardQuota()
           || accepted.acceptedCommands().stream()
               .noneMatch(cmd -> cmd.sequence() == existing.sourceCommandSequence())) {
         throw new IllegalArgumentException("join invocation identity reused");
@@ -123,7 +124,6 @@ final class SpawnTickets {
             now,
             now,
             ticket.delivery(),
-            ticket.countsTowardQuota(),
             null));
     // 新票据落库后才 supersede 既有未完成票据，保证 superseded_by FK 指向已存在的新行；
     // 旧票据只记录接管身份并保留其 invocation identity 与排队源命令，随后不再占用配额、不再产生重复交付。

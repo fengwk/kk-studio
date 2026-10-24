@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.project.platform;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -162,7 +161,6 @@ class IssueThreadExecutionTest {
     assertEquals(threadId, request.threadId());
     assertEquals(SpawnTrigger.CONTROLLER, request.trigger());
     assertEquals(JoinDelivery.RECEIPT_ONLY, request.delivery());
-    assertFalse(request.countsTowardQuota());
     assertNull(request.parentThreadId());
     assertEquals(4L, request.continuation().expectedNextCommandSequence());
     assertEquals(input.requestHash(), request.requestHash());

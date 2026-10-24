@@ -112,7 +112,6 @@ class PostgresqlHarnessSchemaTest {
             "source_command_sequence",
             "agent",
             "delivery",
-            "counts_toward_quota",
             "superseded_by_invocation_id",
             "max_turns",
             "reminder_turn",
@@ -224,7 +223,6 @@ class PostgresqlHarnessSchemaTest {
             "idx_harness_thread_command_queued",
             "idx_harness_thread_command_stop_request",
             "idx_harness_thread_join_child_pending",
-            "idx_harness_thread_join_parent_pending",
             "idx_harness_thread_parent",
             "idx_harness_thread_root",
             "idx_harness_thread_session",
@@ -249,7 +247,6 @@ class PostgresqlHarnessSchemaTest {
     String threadSession = indexDefinition("idx_harness_thread_session");
     String stopRequest = indexDefinition("idx_harness_thread_command_stop_request");
     String childPending = indexDefinition("idx_harness_thread_join_child_pending");
-    String parentPending = indexDefinition("idx_harness_thread_join_parent_pending");
     String toolNonterminal = indexDefinition("idx_harness_tool_invocation_model_nonterminal");
     assertTrue(modelResult.contains("WHERE (result_entry_id IS NOT NULL)"));
     assertTrue(workAvailable.contains("(available_at, target_type, target_id)"));
@@ -264,17 +261,11 @@ class PostgresqlHarnessSchemaTest {
     // Stop 幂等键索引必须按 stop_request_id 聚合并只覆盖非 null 行。
     assertTrue(stopRequest.contains("(thread_id, stop_request_id, sequence)"));
     assertTrue(stopRequest.contains("WHERE (stop_request_id IS NOT NULL)"));
-    // Join 等待匹配与等待投递索引（新模型按 terminal_entry_id 判定 matched；已 supersede 的 join 不参与）
+    // Join 等待匹配索引（新模型按 terminal_entry_id 判定 matched；已 supersede 的 join 不参与）
     assertTrue(childPending.contains("(child_thread_id)"));
     assertTrue(
         childPending.contains(
             "WHERE ((terminal_entry_id IS NULL) AND (superseded_by_invocation_id IS NULL))"));
-    assertTrue(parentPending.contains("(parent_thread_id)"));
-    assertTrue(
-        parentPending.contains(
-            "WHERE ((terminal_entry_id IS NOT NULL) AND (delivery_command_sequence IS NULL)"
-                + " AND ((delivery)::text = 'NOTIFY_PARENT'::text)"
-                + " AND (superseded_by_invocation_id IS NULL))"));
     // Stop 回执集合索引必须按 (root_thread_id, root_stop_request_id) 建键，隔离不同树复用同一请求 UUID。
     String stopReceiptRoot = indexDefinition("idx_harness_thread_stop_receipt_root");
     assertTrue(stopReceiptRoot.contains("(root_thread_id, root_stop_request_id)"));
@@ -1046,8 +1037,8 @@ class PostgresqlHarnessSchemaTest {
             DataIntegrityViolationException.class,
             () ->
                 jdbc.update(
-                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, terminal_entry_id, final_answer_entry_id, delivery_command_sequence, created_at, updated_at, delivery, counts_toward_quota)"
-                        + " values (?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', ?, ?, 1, 'subagent', 10, 0, null, ?, null, statement_timestamp(), statement_timestamp(), 'NOTIFY_PARENT', true)",
+                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, terminal_entry_id, final_answer_entry_id, delivery_command_sequence, created_at, updated_at, delivery)"
+                        + " values (?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', ?, ?, 1, 'subagent', 10, 0, null, ?, null, statement_timestamp(), statement_timestamp(), 'NOTIFY_PARENT')",
                     UUID.randomUUID(),
                     parentThreadId,
                     childThreadId,
@@ -1061,8 +1052,8 @@ class PostgresqlHarnessSchemaTest {
             DataIntegrityViolationException.class,
             () ->
                 jdbc.update(
-                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, terminal_entry_id, final_answer_entry_id, delivery_command_sequence, created_at, updated_at, delivery, counts_toward_quota)"
-                        + " values (?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', ?, ?, 1, 'subagent', 10, 0, ?, null, null, statement_timestamp(), statement_timestamp(), 'NOTIFY_PARENT', true)",
+                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, terminal_entry_id, final_answer_entry_id, delivery_command_sequence, created_at, updated_at, delivery)"
+                        + " values (?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', ?, ?, 1, 'subagent', 10, 0, ?, null, null, statement_timestamp(), statement_timestamp(), 'SETTLE_OWNER_TURN')",
                     UUID.randomUUID(),
                     parentThreadId,
                     childThreadId,
@@ -1076,8 +1067,8 @@ class PostgresqlHarnessSchemaTest {
             DataIntegrityViolationException.class,
             () ->
                 jdbc.update(
-                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, terminal_entry_id, final_answer_entry_id, delivery_command_sequence, created_at, updated_at, delivery, counts_toward_quota)"
-                        + " values (?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', ?, ?, 1, 'subagent', 10, 0, ?, ?, null, statement_timestamp(), statement_timestamp(), 'NOTIFY_PARENT', true)",
+                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, terminal_entry_id, final_answer_entry_id, delivery_command_sequence, created_at, updated_at, delivery)"
+                        + " values (?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', ?, ?, 1, 'subagent', 10, 0, ?, ?, null, statement_timestamp(), statement_timestamp(), 'SETTLE_OWNER_TURN')",
                     UUID.randomUUID(),
                     parentThreadId,
                     childThreadId,
@@ -1086,17 +1077,20 @@ class PostgresqlHarnessSchemaTest {
             "fk_harness_thread_join_final_answer_entry must reject non-existent entry");
     assertTrue(exFinalAnswerFk.getMessage().contains("fk_harness_thread_join_final_answer_entry"));
 
-    // 4. 正向验证：terminal 与 final answer 同时存在（未交付）合法
-    assertDoesNotThrow(
-        () ->
-            jdbc.update(
-                "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, terminal_entry_id, final_answer_entry_id, delivery_command_sequence, created_at, updated_at, delivery, counts_toward_quota)"
-                    + " values (?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', ?, ?, 1, 'subagent', 10, 0, ?, ?, null, statement_timestamp(), statement_timestamp(), 'NOTIFY_PARENT', true)",
-                UUID.randomUUID(),
-                parentThreadId,
-                childThreadId,
-                terminalEntryId,
-                finalAnswerEntryId));
+    // 4. matched 但未交付的 NOTIFY_PARENT 被 ck_harness_thread_join_delivery 严禁
+    DataIntegrityViolationException exMatchedUndelivered =
+        assertThrows(
+            DataIntegrityViolationException.class,
+            () ->
+                jdbc.update(
+                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, terminal_entry_id, final_answer_entry_id, delivery_command_sequence, created_at, updated_at, delivery)"
+                        + " values (?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', ?, ?, 1, 'subagent', 10, 0, ?, ?, null, statement_timestamp(), statement_timestamp(), 'NOTIFY_PARENT')",
+                    UUID.randomUUID(),
+                    parentThreadId,
+                    childThreadId,
+                    terminalEntryId,
+                    finalAnswerEntryId));
+    assertTrue(exMatchedUndelivered.getMessage().contains("ck_harness_thread_join_delivery"));
   }
 
   @Test
@@ -1164,8 +1158,8 @@ class PostgresqlHarnessSchemaTest {
             DataIntegrityViolationException.class,
             () ->
                 jdbc.update(
-                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, terminal_entry_id, final_answer_entry_id, delivery_command_sequence, created_at, updated_at, delivery, counts_toward_quota)"
-                        + " values (?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', ?, ?, 1, 'subagent', 10, 0, null, null, 1, statement_timestamp(), statement_timestamp(), 'NOTIFY_PARENT', true)",
+                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, terminal_entry_id, final_answer_entry_id, delivery_command_sequence, created_at, updated_at, delivery)"
+                        + " values (?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', ?, ?, 1, 'subagent', 10, 0, null, null, 1, statement_timestamp(), statement_timestamp(), 'NOTIFY_PARENT')",
                     UUID.randomUUID(),
                     parentThreadId,
                     childThreadId),
@@ -1178,8 +1172,8 @@ class PostgresqlHarnessSchemaTest {
             DataIntegrityViolationException.class,
             () ->
                 jdbc.update(
-                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, terminal_entry_id, final_answer_entry_id, delivery_command_sequence, created_at, updated_at, delivery, counts_toward_quota)"
-                        + " values (?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', null, ?, 1, 'subagent', 10, 0, ?, null, 1, statement_timestamp(), statement_timestamp(), 'RECEIPT_ONLY', false)",
+                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, terminal_entry_id, final_answer_entry_id, delivery_command_sequence, created_at, updated_at, delivery)"
+                        + " values (?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', null, ?, 1, 'subagent', 10, 0, ?, null, 1, statement_timestamp(), statement_timestamp(), 'RECEIPT_ONLY')",
                     UUID.randomUUID(),
                     childThreadId,
                     terminalEntryId),
@@ -1192,8 +1186,8 @@ class PostgresqlHarnessSchemaTest {
             DataIntegrityViolationException.class,
             () ->
                 jdbc.update(
-                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, terminal_entry_id, final_answer_entry_id, delivery_command_sequence, created_at, updated_at, delivery, counts_toward_quota)"
-                        + " values (?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', ?, ?, 1, 'subagent', 10, 0, ?, null, 99, statement_timestamp(), statement_timestamp(), 'NOTIFY_PARENT', true)",
+                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, terminal_entry_id, final_answer_entry_id, delivery_command_sequence, created_at, updated_at, delivery)"
+                        + " values (?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', ?, ?, 1, 'subagent', 10, 0, ?, null, 99, statement_timestamp(), statement_timestamp(), 'NOTIFY_PARENT')",
                     UUID.randomUUID(),
                     parentThreadId,
                     childThreadId,
@@ -1205,8 +1199,8 @@ class PostgresqlHarnessSchemaTest {
     assertDoesNotThrow(
         () ->
             jdbc.update(
-                "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, terminal_entry_id, final_answer_entry_id, delivery_command_sequence, created_at, updated_at, delivery, counts_toward_quota)"
-                    + " values (?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', ?, ?, 1, 'subagent', 10, 0, ?, null, 1, statement_timestamp(), statement_timestamp(), 'NOTIFY_PARENT', true)",
+                "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, terminal_entry_id, final_answer_entry_id, delivery_command_sequence, created_at, updated_at, delivery)"
+                    + " values (?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', ?, ?, 1, 'subagent', 10, 0, ?, null, 1, statement_timestamp(), statement_timestamp(), 'NOTIFY_PARENT')",
                 UUID.randomUUID(),
                 parentThreadId,
                 childThreadId,
@@ -1252,8 +1246,8 @@ class PostgresqlHarnessSchemaTest {
             DataIntegrityViolationException.class,
             () ->
                 jdbc.update(
-                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, terminal_entry_id, final_answer_entry_id, delivery_command_sequence, created_at, updated_at, delivery, counts_toward_quota)"
-                        + " values (?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', ?, ?, 1, 'subagent', 10, 0, null, null, null, statement_timestamp(), statement_timestamp(), 'NOTIFY_PARENT', true)",
+                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, terminal_entry_id, final_answer_entry_id, delivery_command_sequence, created_at, updated_at, delivery)"
+                        + " values (?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', ?, ?, 1, 'subagent', 10, 0, null, null, null, statement_timestamp(), statement_timestamp(), 'NOTIFY_PARENT')",
                     UUID.randomUUID(),
                     parentThreadId,
                     childThreadId),
@@ -1271,8 +1265,8 @@ class PostgresqlHarnessSchemaTest {
     assertDoesNotThrow(
         () ->
             jdbc.update(
-                "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, terminal_entry_id, final_answer_entry_id, delivery_command_sequence, created_at, updated_at, delivery, counts_toward_quota)"
-                    + " values (?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', ?, ?, 1, 'subagent', 10, 0, null, null, null, statement_timestamp(), statement_timestamp(), 'NOTIFY_PARENT', true)",
+                "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, terminal_entry_id, final_answer_entry_id, delivery_command_sequence, created_at, updated_at, delivery)"
+                    + " values (?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', ?, ?, 1, 'subagent', 10, 0, null, null, null, statement_timestamp(), statement_timestamp(), 'NOTIFY_PARENT')",
                 UUID.randomUUID(),
                 parentThreadId,
                 childThreadId));
@@ -1328,10 +1322,10 @@ class PostgresqlHarnessSchemaTest {
         hash);
 
     UUID pendingInvocation = UUID.randomUUID();
-    // 合法 pending join：带父的 NOTIFY_PARENT 且计入额度。
+    // 合法 pending join：带父的 NOTIFY_PARENT。
     jdbc.update(
-        "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, created_at, updated_at, delivery, counts_toward_quota)"
-            + " values (?, ?, ?, ?, 1, 'subagent', 10, 0, statement_timestamp(), statement_timestamp(), 'NOTIFY_PARENT', true)",
+        "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, created_at, updated_at, delivery)"
+            + " values (?, ?, ?, ?, 1, 'subagent', 10, 0, statement_timestamp(), statement_timestamp(), 'NOTIFY_PARENT')",
         pendingInvocation,
         hash,
         parentThreadId,
@@ -1349,8 +1343,8 @@ class PostgresqlHarnessSchemaTest {
             DataIntegrityViolationException.class,
             () ->
                 jdbc.update(
-                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, delivery, counts_toward_quota, max_turns, reminder_turn, created_at, updated_at)"
-                        + " values (?, ?, ?, ?, 1, 'subagent', 'other', false, 10, 0, statement_timestamp(), statement_timestamp())",
+                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, delivery, max_turns, reminder_turn, created_at, updated_at)"
+                        + " values (?, ?, ?, ?, 1, 'subagent', 'other', 10, 0, statement_timestamp(), statement_timestamp())",
                     UUID.randomUUID(),
                     hash,
                     parentThreadId,
@@ -1358,28 +1352,30 @@ class PostgresqlHarnessSchemaTest {
             "unknown delivery must be rejected");
     assertTrue(exDelivery.getMessage().contains("ck_harness_thread_join_delivery_kind"));
 
-    // 1b. RECEIPT_ONLY 必须无父；计额必须有父。
+    // 1b. RECEIPT_ONLY 必须无父。
     assertThrows(
         DataIntegrityViolationException.class,
         () ->
             jdbc.update(
-                "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, delivery, counts_toward_quota, max_turns, reminder_turn, created_at, updated_at)"
-                    + " values (?, ?, ?, ?, 1, 'subagent', 'RECEIPT_ONLY', false, 10, 0, statement_timestamp(), statement_timestamp())",
+                "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, delivery, max_turns, reminder_turn, created_at, updated_at)"
+                    + " values (?, ?, ?, ?, 1, 'subagent', 'RECEIPT_ONLY', 10, 0, statement_timestamp(), statement_timestamp())",
                 UUID.randomUUID(),
                 hash,
                 parentThreadId,
                 childThreadId));
-    DataIntegrityViolationException exQuota =
+    DataIntegrityViolationException exMatchedUndelivered =
         assertThrows(
             DataIntegrityViolationException.class,
             () ->
                 jdbc.update(
-                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, delivery, counts_toward_quota, max_turns, reminder_turn, created_at, updated_at)"
-                        + " values (?, ?, null, ?, 1, 'subagent', 'RECEIPT_ONLY', true, 10, 0, statement_timestamp(), statement_timestamp())",
+                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, delivery, max_turns, reminder_turn, terminal_entry_id, created_at, updated_at)"
+                        + " values (?, ?, ?, ?, 1, 'subagent', 'NOTIFY_PARENT', 10, 0, ?, statement_timestamp(), statement_timestamp())",
                     UUID.randomUUID(),
                     hash,
-                    childThreadId));
-    assertTrue(exQuota.getMessage().contains("ck_harness_thread_join_quota"));
+                    parentThreadId,
+                    childThreadId,
+                    terminalEntryId));
+    assertTrue(exMatchedUndelivered.getMessage().contains("ck_harness_thread_join_delivery"));
 
     // 2. superseded_by 指向自身 → ck_harness_thread_join_superseded
     UUID selfSuperseded = UUID.randomUUID();
@@ -1388,8 +1384,8 @@ class PostgresqlHarnessSchemaTest {
             DataIntegrityViolationException.class,
             () ->
                 jdbc.update(
-                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, superseded_by_invocation_id, created_at, updated_at, delivery, counts_toward_quota)"
-                        + " values (?, ?, ?, ?, 1, 'subagent', 10, 0, ?, statement_timestamp(), statement_timestamp(), 'NOTIFY_PARENT', true)",
+                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, superseded_by_invocation_id, created_at, updated_at, delivery)"
+                        + " values (?, ?, ?, ?, 1, 'subagent', 10, 0, ?, statement_timestamp(), statement_timestamp(), 'NOTIFY_PARENT')",
                     selfSuperseded,
                     hash,
                     parentThreadId,
@@ -1404,8 +1400,8 @@ class PostgresqlHarnessSchemaTest {
             DataIntegrityViolationException.class,
             () ->
                 jdbc.update(
-                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, terminal_entry_id, superseded_by_invocation_id, created_at, updated_at, delivery, counts_toward_quota)"
-                        + " values (?, ?, ?, ?, 1, 'subagent', 10, 0, ?, ?, statement_timestamp(), statement_timestamp(), 'NOTIFY_PARENT', true)",
+                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, terminal_entry_id, delivery_command_sequence, superseded_by_invocation_id, created_at, updated_at, delivery)"
+                        + " values (?, ?, ?, ?, 1, 'subagent', 10, 0, ?, 1, ?, statement_timestamp(), statement_timestamp(), 'NOTIFY_PARENT')",
                     UUID.randomUUID(),
                     hash,
                     parentThreadId,
@@ -1421,8 +1417,8 @@ class PostgresqlHarnessSchemaTest {
             DataIntegrityViolationException.class,
             () ->
                 jdbc.update(
-                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, superseded_by_invocation_id, created_at, updated_at, delivery, counts_toward_quota)"
-                        + " values (?, ?, ?, ?, 1, 'subagent', 10, 0, ?, statement_timestamp(), statement_timestamp(), 'NOTIFY_PARENT', true)",
+                    "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, superseded_by_invocation_id, created_at, updated_at, delivery)"
+                        + " values (?, ?, ?, ?, 1, 'subagent', 10, 0, ?, statement_timestamp(), statement_timestamp(), 'NOTIFY_PARENT')",
                     UUID.randomUUID(),
                     hash,
                     parentThreadId,
@@ -1434,8 +1430,8 @@ class PostgresqlHarnessSchemaTest {
     // 5. 正向验证：新 join 取代旧未完成 join（superseded_by 指向真实存在的 later invocation）
     UUID continuationInvocation = UUID.randomUUID();
     jdbc.update(
-        "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, created_at, updated_at, delivery, counts_toward_quota)"
-            + " values (?, ?, ?, ?, 1, 'subagent', 10, 0, statement_timestamp(), statement_timestamp(), 'NOTIFY_PARENT', true)",
+        "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id, source_command_sequence, agent, max_turns, reminder_turn, created_at, updated_at, delivery)"
+            + " values (?, ?, ?, ?, 1, 'subagent', 10, 0, statement_timestamp(), statement_timestamp(), 'NOTIFY_PARENT')",
         continuationInvocation,
         hash,
         parentThreadId,

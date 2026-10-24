@@ -93,7 +93,7 @@ public final class HarnessRuntimeResponseMapper {
     dto.setModel(toModelSelectionDto(snapshot.entryPath().baseSettings().model()));
     ThreadRuntimeStatus status = snapshot.runtimeStatus();
     dto.setStatus(status.name());
-    dto.setProcessing(status.isProcessing());
+    dto.setExecutionControl(snapshot.thread().executionControl().name());
     dto.setTurnCount(snapshot.turnCount());
     dto.setToolCallCount(snapshot.toolCallCount());
     dto.setOutcome(snapshot.outcome() == null ? null : snapshot.outcome().name());
@@ -124,7 +124,6 @@ public final class HarnessRuntimeResponseMapper {
     dto.setVersion(Long.toString(snapshot.thread().version()));
     ThreadRuntimeStatus status = snapshot.runtimeStatus();
     dto.setStatus(status.name());
-    dto.setProcessing(status.isProcessing());
     dto.setExecutionControl(snapshot.thread().executionControl().name());
     dto.setBranchSettings(toBranchSettingsDto(snapshot.entryPath().baseSettings()));
     dto.setCreateTime(snapshot.thread().createdAt());

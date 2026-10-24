@@ -9,6 +9,7 @@ import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentTaskRequest;
 import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.runtime.SpawnRequest;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
@@ -131,6 +132,15 @@ public class SubagentTaskRunner implements SubagentRunner {
       } catch (HarnessRuntimeNotFoundException notFound) {
         throw reject("subagent task parent thread no longer exists", notFound);
       } catch (RuntimeException failure) {
+        // 并发胜者可能已经接受票据；先回放，但不能把任意失败当成可重试的游标冲突。
+        SubagentTaskAcceptance concurrent = replay(runtime, request, childThreadId, requestHash);
+        if (concurrent != null) {
+          return concurrent;
+        }
+        if (!(failure instanceof HarnessRuntimeConflictException conflict)
+            || conflict.reason() != HarnessRuntimeConflictException.Reason.STALE_COMMAND_CURSOR) {
+          throw reject(message(failure), failure);
+        }
         lastFailure = failure;
       }
     }

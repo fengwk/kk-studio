@@ -163,11 +163,11 @@ class ThreadExecutionFactsTest {
 
   @Test
   void stoppedControlDoesNotHideInFlightModelOrTool() {
-    // 测试意图：持久 STOPPED 只改变对外状态；外部 Model/Tool 仍在途时工作事实仍为 true，停止方据此判断未收敛。
+    // 测试意图：持久 STOPPED 与 status 正交；外部 Model/Tool 仍在途时 status 为 RUNNING，且工作事实仍为 true，停止方据此判断未收敛。
     HarnessRuntimeTestSupport.ModelBaseline model = seedModel(store, ModelInvocationStatus.RUNNING);
     markControl(model.threadId(), ThreadExecutionControl.STOPPED);
     assertEquals(
-        ThreadRuntimeStatus.STOPPED, runtime.getThreadSnapshot(model.threadId()).runtimeStatus());
+        ThreadRuntimeStatus.RUNNING, runtime.getThreadSnapshot(model.threadId()).runtimeStatus());
     assertEquals(new ThreadExecutionFacts(true, false, false), facts(model.threadId()));
 
     HarnessRuntimeTestSupport.ToolBaseline tool = seedToolBaseline(store);

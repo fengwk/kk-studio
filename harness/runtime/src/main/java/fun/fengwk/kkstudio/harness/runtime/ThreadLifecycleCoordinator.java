@@ -13,6 +13,8 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadActivityEvaluator;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextClassifier;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NotificationCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
@@ -34,7 +36,7 @@ import java.util.UUID;
  * 执行终止边界上的 Join 冻结与父 Thread 通知交付，以及短预算提醒物化。
  *
  * <p>本类不再维护递归空闲生命周期，也不再按 Thread version 匹配 Join：普通终止（最终回答 / 不可继续失败）只有在源输入已应用、且本 Thread 收敛（无未完成的直接子
- * Join、无未送达子回执、无待处理输入）时才冻结 Join；Stop 的强制结算不受该收敛判据限制。冻结结果与终态 Entry、父通知在同一事务提交。 父 Thread 为 STOPPED
+ * Join、无待处理输入）时才冻结 Join；Stop 的强制结算不受该收敛判据限制。冻结结果与终态 Entry、父通知在同一事务提交。 父 Thread 为 STOPPED
  * 时通知直接固化到历史而不唤醒模型。
  */
 public final class ThreadLifecycleCoordinator {
@@ -106,9 +108,9 @@ public final class ThreadLifecycleCoordinator {
   /**
    * 在执行终止边界冻结本次 Thread 上尚未完成的 Join，并向父 Thread 交付系统通知。
    *
-   * <p>普通终止（{@code includeUnappliedSource == false}）只在该 Thread 收敛时结算：源输入已应用、没有未完成的直接子
-   * Join、没有未送达的子回执且没有待处理输入；否则保留未匹配 Join，等待后续真实输入或子结算再次到达终止边界。Stop 强制结算（{@code
-   * includeUnappliedSource == true}）不受收敛判据限制。
+   * <p>普通终止（{@code includeUnappliedSource == false}）只在该 Thread 收敛时结算：源输入已应用、没有未完成的直接子 Join
+   * 且没有待处理输入；否则保留未匹配 Join，等待后续真实输入或子结算再次到达终止边界。Stop 强制结算（{@code includeUnappliedSource ==
+   * true}）不受收敛判据限制。
    *
    * @param tx 当前事务句柄，不能为 null
    * @param child 已锁定且刚到达终止边界的子 Thread
@@ -133,7 +135,7 @@ public final class ThreadLifecycleCoordinator {
       return;
     }
     if (!includeUnappliedSource && !isQuiescent(tx, child)) {
-      // 本次终态不是委派收敛点：子执行还欠未完成的直接子 Join、未送达的子回执或待处理输入，只保留未匹配 Join，
+      // 本次终态不是委派收敛点：子执行还欠未完成的直接子 Join 或待处理输入，只保留未匹配 Join，
       // 不向父结算、不自唤醒忙轮询；后续真实输入/子结算路径会再次到达终止边界。
       return;
     }
@@ -149,11 +151,13 @@ public final class ThreadLifecycleCoordinator {
         }
       }
       ThreadJoin current = join.match(terminalEntryId, finalAnswerEntryId, now);
-      tx.updateJoin(current);
       switch (current.delivery()) {
         case NOTIFY_PARENT -> notifyMatches.add(current);
-        case SETTLE_OWNER_TURN -> settleMatches.add(current);
-        case RECEIPT_ONLY -> {}
+        case SETTLE_OWNER_TURN -> {
+          tx.updateJoin(current);
+          settleMatches.add(current);
+        }
+        case RECEIPT_ONLY -> tx.updateJoin(current);
       }
     }
     if (!notifyMatches.isEmpty()) {
@@ -165,15 +169,27 @@ public final class ThreadLifecycleCoordinator {
   }
 
   /**
-   * 普通终止的委派收敛判据：子执行没有尚未冻结结果的直接子 Join、没有已冻结但未送达的子回执，且本 Thread 没有待处理输入（QUEUED 消息/通知，或已物化但未越过输入水位的
-   * APPLIED 通知）。
+   * 普通终止的委派收敛判据：子执行没有尚未冻结结果的直接子 Join，没有待处理输入（QUEUED 消息/通知，或已物化但未越过输入水位的 APPLIED 通知）， 且经 {@link
+   * ThreadContextClassifier} 判定的本地上下文已完全空闲（非续作、非待 apply、非活跃 Model/Tool，且非 owner 压缩）。
    *
-   * <p>直接子 Join 自身也遵循同一判据，A-B-C 及更深的委派因此自底向上自然收敛，不需要遍历全树历史空闲节点。
+   * <p>状态与结算共用同一事实判据，不把本地单轮 TURN_END 冒充为整段委派的完成。直接子 Join 自身也遵循同一判据，自底向上自然收敛。
    */
   private static boolean isQuiescent(HarnessStore.Transaction tx, ThreadState child) {
-    return tx.countIncompleteChildJoins(child.id()) == 0
-        && tx.loadPendingDeliveries(child.id()).isEmpty()
-        && !ThreadInputDemand.hasInputDemand(tx, child);
+    int incompleteChildJoins = tx.countIncompleteChildJoins(child.id());
+    boolean hasInputDemand = ThreadInputDemand.hasInputDemand(tx, child);
+    LockedThreadContext locked = ThreadContextLock.load(tx, child);
+    boolean hasOpenCompaction =
+        locked
+            .path()
+            .openTurnStart()
+            .map(
+                entry ->
+                    entry.payload() instanceof TurnStartPayload start
+                        && start.reason() == TurnStartReason.COMPACTION
+                        && child.id().equals(start.ownerThreadId()))
+            .orElse(false);
+    return ThreadActivityEvaluator.isQuiescent(
+        locked.context(), hasOpenCompaction, hasInputDemand, incompleteChildJoins);
   }
 
   /**

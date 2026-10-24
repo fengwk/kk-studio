@@ -20,8 +20,11 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.GoalMessages;
 import fun.fengwk.kkstudio.harness.runtime.thread.ProviderMessageProjector;
+import fun.fengwk.kkstudio.harness.runtime.thread.SystemReminder;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 
 import java.util.ArrayList;
@@ -142,7 +145,9 @@ public final class ModelRequestMaterializer {
       } else if (payload instanceof CustomMessagePayload message) {
         projectedMessages.add(ProviderMessageProjector.ProjectedMessage.of(message.message()));
       } else if (payload instanceof NotificationPayload notification) {
-        projectedMessages.add(ProviderMessageProjector.ProjectedMessage.of(notification.message()));
+        projectedMessages.add(
+            ProviderMessageProjector.ProjectedMessage.of(
+                wrapNotificationMessage(notification.message())));
       } else if (payload instanceof ForkPayload) {
         projectedMessages.add(
             ProviderMessageProjector.ProjectedMessage.of(AgentMessage.user(ForkPayload.NOTICE)));
@@ -184,5 +189,26 @@ public final class ModelRequestMaterializer {
       }
     }
     return -1;
+  }
+
+  /**
+   * NOTIFICATION 在模型投影单一边界包装为 system-reminder。
+   *
+   * <p>依据 {@link NotificationPayload} 事实判断来源，保持历史原始角色与数据库 UI 原文，不改 provider 契约。
+   */
+  private static AgentMessage wrapNotificationMessage(AgentMessage message) {
+    List<AgentMessageContent> wrappedContents = new ArrayList<>(message.contents().size());
+    for (AgentMessageContent content : message.contents()) {
+      if (content instanceof TextMessageContent text) {
+        String wrappedText =
+            SystemReminder.isReminderText(text.text())
+                ? text.text()
+                : SystemReminder.wrap(text.text());
+        wrappedContents.add(new TextMessageContent(wrappedText));
+      } else {
+        wrappedContents.add(content);
+      }
+    }
+    return new AgentMessage(message.role(), wrappedContents);
   }
 }

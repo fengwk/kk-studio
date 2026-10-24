@@ -277,7 +277,6 @@ class PromptTaskAcceptancePostgresIntegrationTest extends WebPostgresTestSupport
         ThreadConstraints.NONE,
         SpawnTrigger.PLUGIN,
         JoinDelivery.RECEIPT_ONLY,
-        false,
         new SpawnRequest.Budget(null, 1, 1, Integer.MAX_VALUE),
         PluginPromptTaskService.invocationId(taskId),
         command.requestHash());
