@@ -40,7 +40,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -64,8 +63,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * <p>Node 进程测试前置：本仓 {@code daemon} 模块已完成 {@code npm ci} 与 {@code npm run build} 生成 {@code dist}；系统
  * PATH 上存在 Node 24（或通过环境变量 {@code NODE_BIN} / 系统属性 {@code node.bin} 覆盖）。
  *
- * <p>受控慢浏览器读取说明：测试通过分块读取与延迟施加慢速消费，但由于操作系统套接字缓冲区及 Tomcat 内部缓冲区的存在，
- * 慢浏览器读取测试存在缓冲吸收局限，不能等同于稳定的生产端到端反压保证；其核心意图在于验证在非突发即时消费链路下， 数据包在 credit 窗口推进与连接收尾时能保持完整交付与正常关闭。
+ * <p>慢读取只验证非突发消费下的完整交付；操作系统和 Tomcat 缓冲使其不能代表稳定的生产反压。
  */
 class IdeReverseStreamEndpointIntegrationTest extends WebPostgresTestSupport {
 
@@ -181,21 +179,19 @@ class IdeReverseStreamEndpointIntegrationTest extends WebPostgresTestSupport {
     }
   }
 
-  /** 约 204KB Brotli CSS 经真实 Node 进程传输；数据量在 256 KiB credit 窗口内，全量字节/hash 与 Node 报告严格一致。 */
+  /** 约 204KB Brotli CSS 在 256 KiB credit 窗口内完整交付。 */
   @Test
   void streamsBrotliCssAbout204KbThroughRealNodeProcess() throws Exception {
     runNodeCss("204k", false);
   }
 
-  /**
-   * 跨 256KiB credit 窗口的约 307KB Brotli CSS 经真实 Node 进程传输；必须依赖多轮 ACK 往返推进，全量字节/hash 与 Node 报告严格一致。
-   */
+  /** 约 307KB Brotli CSS 跨越 credit 窗口后完整交付。 */
   @Test
   void streamsBrotliCssCrossing256KibWindowAbout307KbThroughRealNodeProcess() throws Exception {
     runNodeCss("307k", false);
   }
 
-  /** 约 307KB Brotli CSS 受控慢浏览器读取；分块读取并注入受控延迟，验证 Node/网关端到端无损交付（慢浏览器不能声称稳定生产反压，存在缓冲局限）。 */
+  /** 约 307KB Brotli CSS 在慢读取下完整交付。 */
   @Test
   void streamsBrotliCssCrossing256KibWindowUnderControlledSlowBrowserRead() throws Exception {
     runNodeCss("307k", true);
@@ -213,7 +209,7 @@ class IdeReverseStreamEndpointIntegrationTest extends WebPostgresTestSupport {
               IdeCommand command = invocation.getArgument(1);
               assertEquals(IdeAction.OPEN_STREAM, command.action());
               String streamUrl = streamUrl(command.ticket());
-              NodeExecution node = startNodeFixture("br", streamUrl, requestPath, targetSize);
+              NodeExecution node = startNodeFixture(streamUrl, requestPath, targetSize);
               nodeRef.set(node);
               CompletableFuture<IdeReply> reply = new CompletableFuture<>();
               reply.complete(IdeReply.ok(null, null, null));
@@ -223,80 +219,96 @@ class IdeReverseStreamEndpointIntegrationTest extends WebPostgresTestSupport {
     String cookie = openSession(identity, UUID.randomUUID().toString(), "/home/dev/project");
     OkHttpClient browser = localhostClient();
     try {
-      byte[] body;
-      try (Response response =
-          browser
-              .newCall(
-                  new Request.Builder()
-                      .url(
-                          "http://localhost:"
-                              + port
-                              + "/environment-ide/"
-                              + ENVIRONMENT
-                              + requestPath)
-                      .header("Cookie", cookieHeader(cookie))
-                      .header("Accept-Encoding", "br")
-                      .build())
-              .execute()) {
-        assertEquals(200, response.code());
-        assertEquals("text/css", response.header("Content-Type"));
-        assertEquals("br", response.header("Content-Encoding"));
-        assertNotNull(response.body(), "response body must not be null");
-        if (slow) {
-          ByteArrayOutputStream baos = new ByteArrayOutputStream();
-          byte[] buf = new byte[8192];
-          try (InputStream in = response.body().byteStream()) {
-            int read;
-            while ((read = in.read(buf)) != -1) {
-              baos.write(buf, 0, read);
-              Thread.sleep(10);
+      byte[] body = null;
+      Exception httpFailure = null;
+      try {
+        try (Response response =
+            browser
+                .newCall(
+                    new Request.Builder()
+                        .url(
+                            "http://localhost:"
+                                + port
+                                + "/environment-ide/"
+                                + ENVIRONMENT
+                                + requestPath)
+                        .header("Cookie", cookieHeader(cookie))
+                        .header("Accept-Encoding", "br")
+                        .build())
+                .execute()) {
+          assertEquals(200, response.code());
+          assertEquals("text/css", response.header("Content-Type"));
+          assertEquals("br", response.header("Content-Encoding"));
+          assertNotNull(response.body(), "response body must not be null");
+          if (slow) {
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            byte[] buf = new byte[8192];
+            try (InputStream in = response.body().byteStream()) {
+              int read;
+              while ((read = in.read(buf)) != -1) {
+                baos.write(buf, 0, read);
+                Thread.sleep(10);
+              }
             }
+            body = baos.toByteArray();
+          } else {
+            body = response.body().bytes();
           }
-          body = baos.toByteArray();
-        } else {
-          body = response.body().bytes();
         }
+      } catch (Exception error) {
+        httpFailure = error;
       }
 
       NodeExecution node = nodeRef.get();
       assertNotNull(node, "node fixture must have started");
-      try (node) {
-        JsonNode report = node.awaitReport(MAPPER);
-        assertTrue(report.get("exchangeOk").asBoolean(), "exchangeOk must be true");
-        assertTrue(report.get("fixtureFinished").asBoolean(), "fixtureFinished must be true");
-        assertNotNull(report.get("closeObserved"), "closeObserved must not be null");
-        assertEquals(1000, report.get("closeObserved").get("code").asInt());
-
-        int sentBytes = report.get("sentBytes").asInt();
-        String sentSha = report.get("sentSha256").asText();
-        assertEquals(sentBytes, body.length);
-        assertEquals(sentSha, sha256Hex(body));
-
-        if ("204k".equals(targetSize)) {
-          assertTrue(
-              body.length >= 203_000 && body.length <= 205_000,
-              "204k target must be within [203000, 205000], got " + body.length);
-        } else {
-          assertTrue(
-              body.length >= 306_000 && body.length <= 309_000,
-              "307k target must be within [306000, 309000], got " + body.length);
-          assertTrue(body.length > 262_144, "307k must exceed 256 KiB credit window");
+      JsonNode report;
+      try {
+        report = node.awaitReport(MAPPER);
+      } catch (Exception diagnosticError) {
+        if (httpFailure != null) {
+          httpFailure.addSuppressed(diagnosticError);
+          throw httpFailure;
         }
-
-        JsonNode timing = report.get("timing");
-        assertNotNull(timing, "timing must be reported");
-        assertTrue(timing.get("firstBodyMs").isNumber(), "firstBodyMs must be a number");
-        assertTrue(timing.get("lastBodyMs").isNumber(), "lastBodyMs must be a number");
-        assertTrue(timing.get("endMs").isNumber(), "endMs must be a number");
-        assertTrue(timing.get("closeMs").isNumber(), "closeMs must be a number");
-        long firstBodyMs = timing.get("firstBodyMs").asLong();
-        long lastBodyMs = timing.get("lastBodyMs").asLong();
-        long endMs = timing.get("endMs").asLong();
-        long closeMs = timing.get("closeMs").asLong();
-        assertTrue(firstBodyMs <= lastBodyMs, "firstBodyMs must precede or equal lastBodyMs");
-        assertTrue(lastBodyMs <= endMs, "lastBodyMs must precede or equal endMs");
-        assertTrue(endMs <= closeMs, "endMs must precede or equal closeMs");
+        throw diagnosticError;
       }
+      if (httpFailure != null) {
+        throw httpFailure;
+      }
+      assertNotNull(body, "response body must have been read");
+      assertTrue(report.get("exchangeOk").asBoolean(), "exchangeOk must be true");
+      assertTrue(report.get("fixtureFinished").asBoolean(), "fixtureFinished must be true");
+      assertNotNull(report.get("closeObserved"), "closeObserved must not be null");
+      assertEquals(1000, report.get("closeObserved").get("code").asInt());
+
+      int sentBytes = report.get("sentBytes").asInt();
+      String sentSha = report.get("sentSha256").asText();
+      assertEquals(sentBytes, body.length);
+      assertEquals(sentSha, sha256Hex(body));
+
+      if ("204k".equals(targetSize)) {
+        assertTrue(
+            body.length >= 203_000 && body.length <= 205_000,
+            "204k target must be within [203000, 205000], got " + body.length);
+      } else {
+        assertTrue(
+            body.length >= 306_000 && body.length <= 309_000,
+            "307k target must be within [306000, 309000], got " + body.length);
+        assertTrue(body.length > 262_144, "307k must exceed 256 KiB credit window");
+      }
+
+      JsonNode timing = report.get("timing");
+      assertNotNull(timing, "timing must be reported");
+      assertTrue(timing.get("firstBodyMs").isNumber(), "firstBodyMs must be a number");
+      assertTrue(timing.get("lastBodyMs").isNumber(), "lastBodyMs must be a number");
+      assertTrue(timing.get("endMs").isNumber(), "endMs must be a number");
+      assertTrue(timing.get("closeMs").isNumber(), "closeMs must be a number");
+      long firstBodyMs = timing.get("firstBodyMs").asLong();
+      long lastBodyMs = timing.get("lastBodyMs").asLong();
+      long endMs = timing.get("endMs").asLong();
+      long closeMs = timing.get("closeMs").asLong();
+      assertTrue(firstBodyMs <= lastBodyMs, "firstBodyMs must precede or equal lastBodyMs");
+      assertTrue(lastBodyMs <= endMs, "lastBodyMs must precede or equal endMs");
+      assertTrue(endMs <= closeMs, "endMs must precede or equal closeMs");
     } finally {
       shutdown(browser);
       NodeExecution startedNode = nodeRef.get();
@@ -318,45 +330,27 @@ class IdeReverseStreamEndpointIntegrationTest extends WebPostgresTestSupport {
     return "node";
   }
 
-  private static Path resolveFixturePath() {
-    Path path =
-        Path.of(
-                "src/test/resources/fun/fengwk/kkstudio/web/environment/ide/ide-stream-node-fixture.mjs")
-            .toAbsolutePath();
-    if (Files.exists(path)) {
-      return path;
-    }
-    path =
-        Path.of(
-                "web/src/test/resources/fun/fengwk/kkstudio/web/environment/ide/ide-stream-node-fixture.mjs")
-            .toAbsolutePath();
-    if (Files.exists(path)) {
-      return path;
-    }
-    throw new IllegalStateException("Cannot find ide-stream-node-fixture.mjs");
-  }
-
-  private static Path resolveRepoRoot() {
-    Path dir = resolveFixturePath();
-    while (dir != null && dir.getParent() != null) {
-      if (Files.exists(dir.resolve("daemon/dist/network.js"))) {
-        return dir;
-      }
-      dir = dir.getParent();
-    }
-    throw new IllegalStateException("Cannot find repo root containing daemon/dist/network.js");
+  private static Path repoRoot() {
+    // Surefire 不提供 maven.basedir；user.dir 是 web 模块目录。尾部 "." 会被 toAbsolutePath 保留，
+    // 直接 getParent 会停在 web，因此先 normalize。
+    return Path.of(System.getProperty("user.dir")).toAbsolutePath().normalize().getParent();
   }
 
   private static NodeExecution startNodeFixture(
-      String mode, String streamUrl, String requestPath, String targetSize) throws IOException {
-    String nodeBin = resolveNodeBinary();
-    Path fixture = resolveFixturePath();
-    Path repoRoot = resolveRepoRoot();
+      String streamUrl, String requestPath, String targetSize) throws IOException {
+    Path repoRoot = repoRoot();
+    Path fixture =
+        repoRoot.resolve(
+            "web/src/test/resources/fun/fengwk/kkstudio/web/environment/ide/ide-stream-node-fixture.mjs");
     ProcessBuilder pb =
-        new ProcessBuilder(nodeBin, fixture.toString(), mode, streamUrl, requestPath, targetSize);
+        new ProcessBuilder(
+            resolveNodeBinary(),
+            fixture.toString(),
+            repoRoot.toString(),
+            streamUrl,
+            requestPath,
+            targetSize);
     pb.directory(repoRoot.toFile());
-    pb.environment().put("REPO_ROOT", repoRoot.toString());
-    pb.environment().put("NODE_V8_COVERAGE", "");
     Process process = pb.start();
     CompletableFuture<String> stdout =
         CompletableFuture.supplyAsync(
@@ -407,9 +401,18 @@ class IdeReverseStreamEndpointIntegrationTest extends WebPostgresTestSupport {
     }
 
     @Override
-    public void close() {
-      if (process.isAlive()) {
-        process.destroyForcibly();
+    public void close() throws InterruptedException {
+      if (!process.isAlive()) {
+        return;
+      }
+      process.destroyForcibly();
+      try {
+        if (!process.waitFor(5, TimeUnit.SECONDS)) {
+          throw new IllegalStateException("node fixture did not exit after forced termination");
+        }
+      } catch (InterruptedException error) {
+        Thread.currentThread().interrupt();
+        throw error;
       }
     }
   }
