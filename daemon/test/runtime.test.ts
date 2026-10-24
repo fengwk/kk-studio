@@ -1378,32 +1378,35 @@ describe('runtime IDE stream lifetime and shutdown convergence', () => {
 
 describe('runtime execution exit confirmation', () => {
   it('does not ACK until the executor body returns, even after confirmExecutionExit', async () => {
-    let release: (() => void) | null = null
-    const gate = new Promise<void>((resolve) => {
-      release = resolve
-    })
+    const entered = Promise.withResolvers<void>()
+    const gate = Promise.withResolvers<void>()
     const setup = buildRuntime({
       capabilities: {
         'fs.read': async (call, context) => {
           context.confirmExecutionExit()
-          await gate
+          entered.resolve()
+          await gate.promise
           return textResult(call.invocationId)
         },
       },
     })
-    await handshake(setup)
-    setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-exit', payload: invokePayload() }))
-    await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'STARTED'))
-    await tick(3)
-    expect(sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toBe(false)
-    release?.()
-    await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED'))
-    const exited = sent(setup.transport).filter((envelope) => envelope.messageType === 'EXECUTION_EXITED')
-    expect(exited).toHaveLength(1)
-    expect(exited[0]?.payload).toEqual({})
-    const types = sent(setup.transport).map((envelope) => envelope.messageType)
-    expect(types.indexOf('COMPLETED')).toBeLessThan(types.indexOf('EXECUTION_EXITED'))
-    setup.runtime.close()
+    try {
+      await handshake(setup)
+      setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-exit', payload: invokePayload() }))
+      // 直接等待 capability 留下证据，不用固定 tick 数猜测执行位置。
+      await entered.promise
+      expect(sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toBe(false)
+      gate.resolve()
+      await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED'))
+      const exited = sent(setup.transport).filter((envelope) => envelope.messageType === 'EXECUTION_EXITED')
+      expect(exited).toHaveLength(1)
+      expect(exited[0]?.payload).toEqual({})
+      const types = sent(setup.transport).map((envelope) => envelope.messageType)
+      expect(types.indexOf('COMPLETED')).toBeLessThan(types.indexOf('EXECUTION_EXITED'))
+    } finally {
+      gate.resolve()
+      setup.runtime.close()
+    }
   })
 
   it('does not ACK a terminal result that never confirmed its own execution scope', async () => {
@@ -1466,14 +1469,15 @@ describe('runtime execution exit confirmation', () => {
   })
 
   it('ACKs only after a cancelled execution has actually left its scope', async () => {
-    let release: (() => void) | null = null
-    const gate = new Promise<void>((resolve) => {
-      release = resolve
-    })
+    const entered = Promise.withResolvers<void>()
+    const cancelled = Promise.withResolvers<void>()
+    const gate = Promise.withResolvers<void>()
     const setup = buildRuntime({
       capabilities: {
         'fs.read': async (call, context) => {
-          await gate
+          context.signal.addEventListener('abort', () => cancelled.resolve(), { once: true })
+          entered.resolve()
+          await gate.promise
           if (context.signal.aborted) {
             context.confirmExecutionExit()
             return { callId: call.invocationId, error: true, details: {}, contents: [{ type: 'text', text: 'cancelled' }] }
@@ -1482,23 +1486,27 @@ describe('runtime execution exit confirmation', () => {
         },
       },
     })
-    await handshake(setup)
-    setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-cancel', payload: invokePayload() }))
-    await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'STARTED'))
-    setup.transport.receive(serverMessage('CANCEL', { environmentId: ENV, invocationId: 'inv-cancel', payload: {} }))
-    await tick(3)
-    expect(sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toBe(false)
-    expect(sent(setup.transport).some((envelope) => envelope.messageType === 'CANCELLED')).toBe(false)
-    release?.()
-    await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED'))
-    const terminal = sent(setup.transport).find(
-      (envelope) =>
-        envelope.invocationId === 'inv-cancel' &&
-        (envelope.messageType === 'CANCELLED' || envelope.messageType === 'FAILED' || envelope.messageType === 'COMPLETED'),
-    )
-    expect(terminal?.messageType).toBe('COMPLETED')
-    expect(JSON.stringify(terminal?.payload)).toContain('cancelled')
-    setup.runtime.close()
+    try {
+      await handshake(setup)
+      setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-cancel', payload: invokePayload() }))
+      await entered.promise
+      setup.transport.receive(serverMessage('CANCEL', { environmentId: ENV, invocationId: 'inv-cancel', payload: {} }))
+      await cancelled.promise
+      expect(sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toBe(false)
+      expect(sent(setup.transport).some((envelope) => envelope.messageType === 'CANCELLED')).toBe(false)
+      gate.resolve()
+      await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED'))
+      const terminal = sent(setup.transport).find(
+        (envelope) =>
+          envelope.invocationId === 'inv-cancel' &&
+          (envelope.messageType === 'CANCELLED' || envelope.messageType === 'FAILED' || envelope.messageType === 'COMPLETED'),
+      )
+      expect(terminal?.messageType).toBe('COMPLETED')
+      expect(JSON.stringify(terminal?.payload)).toContain('cancelled')
+    } finally {
+      gate.resolve()
+      setup.runtime.close()
+    }
   })
 
   it('ACKs a late confirmation after the terminal removed the running entry, and only once', async () => {
@@ -1553,14 +1561,13 @@ describe('runtime execution exit confirmation', () => {
 
   it('ACKs only after a successful resource upload, not when confirmExecutionExit returns', async () => {
     // 同一调用的正向对照：上传成功且终态发送后，已留下的证据才变成一次 ACK。
-    let releaseUpload: (() => void) | null = null
-    const uploadGate = new Promise<void>((resolve) => {
-      releaseUpload = resolve
-    })
+    const uploadEntered = Promise.withResolvers<void>()
+    const uploadGate = Promise.withResolvers<void>()
     const setup = buildRuntime({
       resources: {
         async upload() {
-          await uploadGate
+          uploadEntered.resolve()
+          await uploadGate.promise
           return {
             type: 'resource',
             uploadId: 'up-1',
@@ -1583,17 +1590,20 @@ describe('runtime execution exit confirmation', () => {
         },
       },
     })
-    await handshake(setup)
-    setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-upload-ok', payload: invokePayload() }))
-    await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'STARTED'))
-    await tick(3)
-    expect(sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toBe(false)
-    releaseUpload?.()
-    await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED'))
-    const types = sent(setup.transport).map((envelope) => envelope.messageType)
-    expect(types.indexOf('COMPLETED')).toBeLessThan(types.indexOf('EXECUTION_EXITED'))
-    expect(sent(setup.transport).filter((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toHaveLength(1)
-    setup.runtime.close()
+    try {
+      await handshake(setup)
+      setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-upload-ok', payload: invokePayload() }))
+      await uploadEntered.promise
+      expect(sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toBe(false)
+      uploadGate.resolve()
+      await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED'))
+      const types = sent(setup.transport).map((envelope) => envelope.messageType)
+      expect(types.indexOf('COMPLETED')).toBeLessThan(types.indexOf('EXECUTION_EXITED'))
+      expect(sent(setup.transport).filter((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toHaveLength(1)
+    } finally {
+      uploadGate.resolve()
+      setup.runtime.close()
+    }
   })
 
   it('does not ACK process.exec when the managed scope fails to converge', async () => {
