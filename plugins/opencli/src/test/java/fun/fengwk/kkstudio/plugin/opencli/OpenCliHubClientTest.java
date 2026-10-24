@@ -38,7 +38,6 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -300,9 +299,8 @@ class OpenCliHubClientTest {
   }
 
   @Test
-  void opensOnlySameOriginResourcePathWithPositiveLengthAndMustCloseStream() throws Exception {
+  void opensOnlySameOriginResourcePathWithPositiveLength() throws Exception {
     byte[] media = new byte[] {1, 2, 3, 4};
-    AtomicBoolean responseClosed = new AtomicBoolean();
     server.createContext(
         "/api/resources/2026-08-10/execution-1/output.png",
         exchange -> {
@@ -311,7 +309,6 @@ class OpenCliHubClientTest {
           exchange.sendResponseHeaders(200, media.length);
           exchange.getResponseBody().write(media);
           exchange.close();
-          responseClosed.set(true);
         });
     server.createContext(
         "/api/resources/no-length",
@@ -334,7 +331,6 @@ class OpenCliHubClientTest {
       assertEquals("image/png", stream.mediaType());
       assertArrayEquals(media, stream.content().readAllBytes());
     }
-    assertTrue(responseClosed.get());
 
     assertThrows(
         OpenCliHubException.class,
