@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.web.environment.ide;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.socket.BinaryMessage;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
@@ -22,6 +23,7 @@ import java.util.Objects;
  *
  * <p>{@link #close()} 与连接侧关闭都会唤醒全部等待者，使数据面立即得知连接已终止。
  */
+@Slf4j
 final class WebSocketIdeStreamPeer implements IdeStreamPeer {
 
   /** 入站队列的帧数上限：足够容纳一个 credit 窗口内的分段与少量控制帧。 */
@@ -70,8 +72,8 @@ final class WebSocketIdeStreamPeer implements IdeStreamPeer {
    * 在会话锁内串行发送一帧。
    *
    * <p>{@code acknowledgement=true} 表示这是消费 credit 的 ACK：它只承载「已真实交付字节」的反馈，连接关闭后属于可安全丢弃的信息，因此 closed
-   * 或发送失败（IOException，或底层已关闭会话抛出的 IllegalStateException）都不报错，只把传输标记为关闭；数据/控制帧仍 fail-closed。
-   * 会话仍存活时抛出的 IllegalStateException 是未知状态，必须原样抛出而不是吞掉。
+   * 或发送失败（IOException，或底层已关闭会话抛出的 IllegalStateException）只丢弃该 ACK，不改变接收 closed 状态（真正的接收关闭由容器
+   * onTransportClosed 负责）；数据/控制帧仍 fail-closed。 会话仍存活时抛出的 IllegalStateException 是未知状态，必须原样抛出而不是吞掉。
    */
   private void send(WebSocketMessage<?> message, boolean acknowledgement) {
     synchronized (sendLock) {
@@ -84,15 +86,16 @@ final class WebSocketIdeStreamPeer implements IdeStreamPeer {
       try {
         session.sendMessage(message);
       } catch (IOException error) {
-        onTransportClosed();
         if (acknowledgement) {
+          log.debug("reverse stream ACK write failed, dropping ACK", error);
           return;
         }
+        onTransportClosed();
         throw new IllegalStateException("failed to send on the reverse stream", error);
       } catch (IllegalStateException error) {
         if (acknowledgement && (closed || !session.isOpen())) {
-          // 底层会话确已关闭：ACK 丢失即可，传输进入关闭态，最终结果由 HTTP_END/WS CLOSE 判定。
-          onTransportClosed();
+          // 底层会话确已关闭：只丢弃该 ACK 不改变 closed，最终结果由 HTTP_END/WS CLOSE 判定。
+          log.debug("reverse stream session is closed, dropping ACK", error);
           return;
         }
         throw error;
