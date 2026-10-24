@@ -233,8 +233,8 @@ final class ModelExecution implements ModelGateway.Sink, ClaimAdmissionGuard.Gua
           tx -> {
             ExecutionExitLedger.lockAncestorChain(tx, threadId);
             if (tx.lockThread(threadId).isEmpty()) {
-              throw new IllegalStateException(
-                  "thread " + threadId + " disappeared before model execution confirmation");
+              // 合法深删已先提交，不再回写该 Thread；缺失本身不构成退出证据。
+              return null;
             }
             ExecutionExitLedger.Confirmation confirmation =
                 ExecutionExitLedger.confirm(tx, local, state)

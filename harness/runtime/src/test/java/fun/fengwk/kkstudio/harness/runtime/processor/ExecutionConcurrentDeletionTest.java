@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
@@ -72,11 +73,26 @@ class ExecutionConcurrentDeletionTest {
     ToolExecutionFixture fixture = toolExecutionFixture(true);
     long versionBefore = threadVersion(fixture.rawStore, fixture.threadId) + 1;
 
-    assertEquals(ProcessResult.STARTED, fixture.execution.start(fixture.run));
-    ToolProcessorTestSupport.awaitTrue(() -> fixture.releases.get() == 1, Duration.ofSeconds(5));
+    try {
+      assertEquals(ProcessResult.STARTED, fixture.execution.start(fixture.run));
+      assertTrue(fixture.run.awaitExited());
+      assertTrue(
+          fixture.run.executionThread.join(Duration.ofSeconds(5)),
+          "must include the actual close and exit-confirmation transaction");
 
-    fixture.assertLostWithStatus(ToolInvocationStatus.RUNNING, versionBefore);
-    assertEquals(1, fixture.run.closes.get());
+      fixture.assertLostWithStatus(ToolInvocationStatus.RUNNING, versionBefore);
+      assertEquals(1, fixture.run.closes.get());
+      assertEquals(
+          List.of(ExecutionExitState.UNCONFIRMED),
+          fixture.rawStore.transaction(
+              tx ->
+                  tx.loadUnconfirmedExecutions(fixture.threadId).stream()
+                      .map(fact -> fact.state())
+                      .toList()),
+          "a missing Thread must not manufacture an exit confirmation");
+    } finally {
+      fixture.execution.abandon();
+    }
   }
 
   @Test
@@ -103,8 +119,17 @@ class ExecutionConcurrentDeletionTest {
         fixture.execution.finish(
             new ModelGateway.Succeeded(new ProviderCompletion(response("answer")))));
 
+    // 该夹具只登记 RUNNING、没有进入 body；并发删除后，确定未启动的本代也不能再回写退出确认。
+    fixture.execution.confirmNotStarted();
     fixture.assertLostWithStatus(ModelInvocationStatus.RUNNING, versionBefore);
     assertNull(modelResult(fixture.rawStore, fixture.invocationId));
+    assertEquals(
+        List.of(ExecutionExitState.UNCONFIRMED),
+        fixture.rawStore.transaction(
+            tx ->
+                tx.loadUnconfirmedExecutions(fixture.threadId).stream()
+                    .map(fact -> fact.state())
+                    .toList()));
   }
 
   private ToolExecutionFixture toolExecutionFixture() {
@@ -317,7 +342,7 @@ class ExecutionConcurrentDeletionTest {
 
   /**
    * 在本 Thread 行锁获取点提交并发深删除：第一次 {@code lockThread} 即视为删除事务已先提交，返回空；其后的线程读取一律返回空。 这验证单 Thread 状态提交仅凭
-   * own Thread 行锁即可与 delete 线性化。
+   * own Thread 行锁即可与 delete 线性化。夹具保留其它记录，额外验证迟到本地确认不会因 Thread 缺失而伪造退出事实。
    */
   private static final class DeletionBeforeThreadLockStore implements HarnessStore {
 

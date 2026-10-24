@@ -41,7 +41,7 @@ import java.util.function.Function;
 
 /**
  * 回归测试：验证 ModelExecution 与 ToolExecution 的业务回写事务只锁本 Thread 的 Thread/Model 或 Tool/Work，
- * 不再获取执行树锁；同时验证 checkpoint 仍只锁 Model 与 Work。
+ * 不再获取执行树锁；同时验证 checkpoint 仍只锁 Model 与 Work。退出确认单独获取树与祖先锁，以便原子推进 Join。
  */
 class ExecutionTreeLockRegressionTest {
 
@@ -239,9 +239,10 @@ class ExecutionTreeLockRegressionTest {
         "checkpoint must lock Model then Work only, with no tree lock");
   }
 
-  /** 测试意图：ToolExecution 的 markRunning 与终态回写只锁本 Thread 的 Thread/Tool/Work，不取执行树锁。 */
+  /** 测试意图：Tool 终态回写保持本地锁序；finally 退出确认另开树锁事务，不将跨 Thread 结算混进终态回写。 */
   @Test
-  void toolExecutionTerminalPathTakesNoTreeLock() {
+  void toolExecutionKeepsTerminalWritesLocalAndConfirmsExitInSeparateTreeTransaction()
+      throws InterruptedException {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
     schedulersToClose.add(fixture.scheduler);
 
@@ -277,15 +278,10 @@ class ExecutionTreeLockRegressionTest {
 
     recordingStore.clearLogs();
     assertEquals(ProcessResult.STARTED, execution.start(run));
-    try {
-      ToolProcessorTestSupport.awaitTrue(
-          () ->
-              ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status()
-                  == ToolInvocationStatus.UNKNOWN,
-          Duration.ofSeconds(5));
-    } catch (InterruptedException interrupted) {
-      throw new AssertionError(interrupted);
-    }
+    assertTrue(run.awaitExited());
+    assertTrue(
+        run.executionThread.join(Duration.ofSeconds(5)),
+        "inspect all transactions only after real execution finally exits");
 
     ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
     assertEquals(ToolInvocationStatus.UNKNOWN, tool.status());
@@ -307,10 +303,12 @@ class ExecutionTreeLockRegressionTest {
                 "lockClaimedWork",
                 "updateToolInvocations",
                 "updateThread",
-                "completeWork")),
+                "completeWork"),
+            List.of(
+                "lockTree", "lockSessionForKeyShare", "lockThread", "lockThread", "updateThread")),
         txLogs);
     assertTrue(
-        txLogs.stream().flatMap(List::stream).noneMatch("lockTree"::equals),
+        txLogs.subList(0, 2).stream().flatMap(List::stream).noneMatch("lockTree"::equals),
         "single-thread execution state commits must not take the tree lock");
   }
 
