@@ -533,10 +533,7 @@ final class OpenAiResponsesStreamAccumulator {
   }
 
   private static long parseNonNegativeLong(JsonNode node, String fieldName) {
-    if (node == null || node.isNull()) {
-      return 0L;
-    }
-    if (!node.isNumber() || !node.isIntegralNumber() || !node.canConvertToLong()) {
+    if (node == null || !node.isIntegralNumber() || !node.canConvertToLong()) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_RESPONSE,
           "invalid usage token count in field "
@@ -587,6 +584,11 @@ final class OpenAiResponsesStreamAccumulator {
         resetUsage();
         latestNativeUsageNode = usageNode.deepCopy();
 
+        if (!usageNode.has("input_tokens") || !usageNode.has("output_tokens")) {
+          throw new ProviderException(
+              ProviderErrorKind.INVALID_RESPONSE,
+              "missing complete usage: OpenAI Responses model " + request.model().modelId());
+        }
         rawInputTokens = parseNonNegativeLong(usageNode.get("input_tokens"), "input_tokens");
         rawOutputTokens = parseNonNegativeLong(usageNode.get("output_tokens"), "output_tokens");
 
@@ -602,9 +604,14 @@ final class OpenAiResponsesStreamAccumulator {
             throw new ProviderException(
                 ProviderErrorKind.INVALID_RESPONSE, "input_tokens_details is not a JSON object");
           }
-          cachedTokens = parseNonNegativeLong(inDetails.get("cached_tokens"), "cached_tokens");
+          cachedTokens =
+              inDetails.has("cached_tokens")
+                  ? parseNonNegativeLong(inDetails.get("cached_tokens"), "cached_tokens")
+                  : 0L;
           cacheWriteTokens =
-              parseNonNegativeLong(inDetails.get("cache_write_tokens"), "cache_write_tokens");
+              inDetails.has("cache_write_tokens")
+                  ? parseNonNegativeLong(inDetails.get("cache_write_tokens"), "cache_write_tokens")
+                  : 0L;
         }
 
         JsonNode outDetails = usageNode.get("output_tokens_details");

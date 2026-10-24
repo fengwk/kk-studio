@@ -229,7 +229,7 @@ class OpenAiResponsesModelProviderTest {
               cb.onEvent(
                   new ServerSentEvent(
                       null,
-                      "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_life\",\"status\":\"completed\"}}"));
+                      "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_life\",\"status\":\"completed\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5}}}"));
               cb.onComplete();
             });
 
@@ -255,7 +255,8 @@ class OpenAiResponsesModelProviderTest {
   void test_rawProtocolFramesEmittedExactlyOnceInOrder() {
     String created = "{\"type\":\"response.created\",\"response\":{\"id\":\"resp_raw\"}}";
     String unknownEvent = "{\"type\":\"response.web_search_call.searching\",\"item_id\":\"ws_1\"}";
-    String completed = "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_raw\"}}";
+    String completed =
+        "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_raw\",\"status\":\"completed\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5}}}";
     JdkHttpSseTransport transport =
         stubTransport(
             (req, cb) -> {

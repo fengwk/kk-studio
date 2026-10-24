@@ -393,7 +393,8 @@ class AnthropicOpaqueReplayTest {
 
     AnthropicStreamAccumulator accumulator = accumulator(firstRequest);
     accumulator.handleEvent(
-        "message_start", "{\"type\":\"message_start\",\"message\":{\"usage\":{}}}");
+        "message_start",
+        "{\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10}}}");
     accumulator.handleEvent(
         "content_block_start",
         "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"server_tool_use\",\"id\":\"srv_1\",\"name\":\"web_search\"}}");
@@ -419,7 +420,8 @@ class AnthropicOpaqueReplayTest {
 
     AnthropicStreamAccumulator accumulator = accumulator(firstRequest);
     accumulator.handleEvent(
-        "message_start", "{\"type\":\"message_start\",\"message\":{\"usage\":{}}}");
+        "message_start",
+        "{\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10}}}");
     accumulator.handleEvent(
         "content_block_start",
         "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"server_tool_use\",\"id\":\"srv_1\",\"name\":\"web_search\",\"input\":{\"query\":\"pre\"}}}");

@@ -391,9 +391,11 @@ class AnthropicStreamAccumulatorTest {
 
     // 仍然保持未启动状态，正常接收 message_start
     accumulator.handleEvent(
-        "message_start", "{\"type\":\"message_start\",\"message\":{\"usage\":{}}}");
+        "message_start",
+        "{\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10,\"output_tokens\":0}}}");
     accumulator.handleEvent(
-        "message_delta", "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}");
+        "message_delta",
+        "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":5}}");
     accumulator.handleEvent("message_stop", "{\"type\":\"message_stop\"}");
 
     ProviderCompletion completion = accumulator.finish();
@@ -436,7 +438,8 @@ class AnthropicStreamAccumulatorTest {
         new AnthropicStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent(
-        "message_start", "{\"type\":\"message_start\",\"message\":{\"usage\":{}}}");
+        "message_start",
+        "{\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10,\"output_tokens\":0}}}");
 
     // block 0: redacted_thinking
     accumulator.handleEvent(
@@ -455,7 +458,8 @@ class AnthropicStreamAccumulatorTest {
 
     // message_delta with end_turn
     accumulator.handleEvent(
-        "message_delta", "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}");
+        "message_delta",
+        "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":5}}");
     accumulator.handleEvent("message_stop", "{\"type\":\"message_stop\"}");
 
     ProviderCompletion completion = accumulator.finish();
@@ -476,13 +480,15 @@ class AnthropicStreamAccumulatorTest {
         new AnthropicStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent(
-        "message_start", "{\"type\":\"message_start\",\"message\":{\"usage\":{}}}");
+        "message_start",
+        "{\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10,\"output_tokens\":0}}}");
     accumulator.handleEvent(
         "content_block_start",
         "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"refused\"}}");
     accumulator.handleEvent("content_block_stop", "{\"type\":\"content_block_stop\",\"index\":0}");
     accumulator.handleEvent(
-        "message_delta", "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"refusal\"}}");
+        "message_delta",
+        "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"refusal\"},\"usage\":{\"output_tokens\":5}}");
     accumulator.handleEvent("message_stop", "{\"type\":\"message_stop\"}");
 
     ProviderCompletion completion = accumulator.finish();
@@ -537,7 +543,8 @@ class AnthropicStreamAccumulatorTest {
         new AnthropicStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent(
-        "message_start", "{\"type\":\"message_start\",\"message\":{\"usage\":{}}}");
+        "message_start",
+        "{\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10,\"output_tokens\":0}}}");
 
     // 初始提供占位符 {}
     accumulator.handleEvent(
@@ -547,7 +554,8 @@ class AnthropicStreamAccumulatorTest {
     accumulator.handleEvent("content_block_stop", "{\"type\":\"content_block_stop\",\"index\":0}");
 
     accumulator.handleEvent(
-        "message_delta", "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}");
+        "message_delta",
+        "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":5}}");
     accumulator.handleEvent("message_stop", "{\"type\":\"message_stop\"}");
 
     ProviderCompletion completion = accumulator.finish();
@@ -562,7 +570,8 @@ class AnthropicStreamAccumulatorTest {
         new AnthropicStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent(
-        "message_start", "{\"type\":\"message_start\",\"message\":{\"usage\":{}}}");
+        "message_start",
+        "{\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10,\"output_tokens\":0}}}");
 
     // 无 input 且无任何 delta 到达
     accumulator.handleEvent(
@@ -571,7 +580,8 @@ class AnthropicStreamAccumulatorTest {
     accumulator.handleEvent("content_block_stop", "{\"type\":\"content_block_stop\",\"index\":0}");
 
     accumulator.handleEvent(
-        "message_delta", "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"max_tokens\"}}");
+        "message_delta",
+        "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"max_tokens\"},\"usage\":{\"output_tokens\":5}}");
     accumulator.handleEvent("message_stop", "{\"type\":\"message_stop\"}");
 
     ProviderCompletion completion = accumulator.finish();
@@ -643,13 +653,15 @@ class AnthropicStreamAccumulatorTest {
         new AnthropicStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent(
-        "message_start", "{\"type\":\"message_start\",\"message\":{\"usage\":{}}}");
+        "message_start",
+        "{\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10,\"output_tokens\":0}}}");
     accumulator.handleEvent(
         "content_block_start",
         "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"call_refused\",\"name\":\"dangerous_op\"}}");
     accumulator.handleEvent("content_block_stop", "{\"type\":\"content_block_stop\",\"index\":0}");
     accumulator.handleEvent(
-        "message_delta", "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"refusal\"}}");
+        "message_delta",
+        "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"refusal\"},\"usage\":{\"output_tokens\":5}}");
     accumulator.handleEvent("message_stop", "{\"type\":\"message_stop\"}");
 
     ProviderCompletion completion = accumulator.finish();
@@ -881,7 +893,6 @@ class AnthropicStreamAccumulatorTest {
     assertEquals(30, completion.response().usage().cacheWriteTokens());
     assertEquals(20, completion.response().usage().cacheWriteByTtl().get(300L));
     assertEquals(10, completion.response().usage().cacheWriteByTtl().get(3600L));
-    assertEquals(0, completion.response().usage().totalTokens());
     assertNull(completion.response().usage().providerTotalTokens());
     assertEquals(140, completion.response().usage().categorizedTokens());
   }
@@ -985,7 +996,8 @@ class AnthropicStreamAccumulatorTest {
         new AnthropicStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent(
-        "message_start", "{\"type\":\"message_start\",\"message\":{\"usage\":{}}}");
+        "message_start",
+        "{\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10,\"output_tokens\":0}}}");
 
     // 初始提供占位符 {}
     accumulator.handleEvent(
@@ -1002,7 +1014,8 @@ class AnthropicStreamAccumulatorTest {
     accumulator.handleEvent("content_block_stop", "{\"type\":\"content_block_stop\",\"index\":0}");
 
     accumulator.handleEvent(
-        "message_delta", "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}");
+        "message_delta",
+        "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":5}}");
     accumulator.handleEvent("message_stop", "{\"type\":\"message_stop\"}");
 
     ProviderCompletion completion = accumulator.finish();
@@ -1086,6 +1099,7 @@ class AnthropicStreamAccumulatorTest {
           "type": "message_start",
           "message": {
             "usage": {
+              "input_tokens": 100,
               "cache_creation_input_tokens": 15,
               "cache_creation_ephemeral_5m_input_tokens": 10,
               "cache_creation": {
@@ -1098,7 +1112,8 @@ class AnthropicStreamAccumulatorTest {
         }
         """);
     accumulator.handleEvent(
-        "message_delta", "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}");
+        "message_delta",
+        "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":20}}");
     accumulator.handleEvent("message_stop", "{\"type\":\"message_stop\"}");
 
     ProviderCompletion completion = accumulator.finish();
@@ -1120,6 +1135,7 @@ class AnthropicStreamAccumulatorTest {
           "type": "message_start",
           "message": {
             "usage": {
+              "input_tokens": 100,
               "cache_creation_input_tokens": 10,
               "cache_creation": {
                 "ephemeral_5m": 10
@@ -1149,6 +1165,136 @@ class AnthropicStreamAccumulatorTest {
     assertEquals(15, completion.response().usage().cacheWriteTokens());
     assertEquals(10, completion.response().usage().cacheWriteByTtl().get(300L));
     assertEquals(5, completion.response().usage().cacheWriteByTtl().get(3600L));
+  }
+
+  @Test
+  void missingMandatoryUsageFieldsThrowsInvalidResponseOnFinish() {
+    // 缺少 input_tokens
+    AnthropicStreamAccumulator accMissingInput =
+        new AnthropicStreamAccumulator(request, descriptor, bridge);
+    accMissingInput.handleEvent(
+        "message_start",
+        "{\"type\":\"message_start\",\"message\":{\"usage\":{\"output_tokens\":5}}}");
+    accMissingInput.handleEvent(
+        "message_delta", "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}");
+    accMissingInput.handleEvent("message_stop", "{\"type\":\"message_stop\"}");
+    ProviderException ex1 = assertThrows(ProviderException.class, accMissingInput::finish);
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex1.kind());
+    assertTrue(ex1.getMessage().contains("missing complete usage"));
+
+    // 缺少 output_tokens
+    AnthropicStreamAccumulator accMissingOutput =
+        new AnthropicStreamAccumulator(request, descriptor, bridge);
+    accMissingOutput.handleEvent(
+        "message_start",
+        "{\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10}}}");
+    accMissingOutput.handleEvent(
+        "message_delta", "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}");
+    accMissingOutput.handleEvent("message_stop", "{\"type\":\"message_stop\"}");
+    ProviderException ex2 = assertThrows(ProviderException.class, accMissingOutput::finish);
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex2.kind());
+    assertTrue(ex2.getMessage().contains("missing complete usage"));
+  }
+
+  @Test
+  void realZeroTokensCompletesSuccessfully() {
+    AnthropicStreamAccumulator accumulator =
+        new AnthropicStreamAccumulator(request, descriptor, bridge);
+    accumulator.handleEvent(
+        "message_start",
+        "{\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":0,\"output_tokens\":0}}}");
+    accumulator.handleEvent(
+        "message_delta", "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}");
+    accumulator.handleEvent("message_stop", "{\"type\":\"message_stop\"}");
+
+    ProviderCompletion completion = accumulator.finish();
+    assertEquals(0L, completion.response().usage().inputTokens());
+    assertEquals(0L, completion.response().usage().outputTokens());
+    assertNull(completion.response().usage().providerTotalTokens());
+  }
+
+  @Test
+  void thinkingTokensLastSnapshotAndValidation() {
+    // 1. 最后快照生效与可选 thinking_tokens
+    AnthropicStreamAccumulator accSnapshot =
+        new AnthropicStreamAccumulator(request, descriptor, bridge);
+    accSnapshot.handleEvent(
+        "message_start",
+        """
+        {
+          "type": "message_start",
+          "message": {
+            "usage": {
+              "input_tokens": 10,
+              "output_tokens": 2,
+              "output_tokens_details": {"thinking_tokens": 1}
+            }
+          }
+        }
+        """);
+    accSnapshot.handleEvent(
+        "message_delta",
+        """
+        {
+          "type": "message_delta",
+          "delta": {"stop_reason": "end_turn"},
+          "usage": {
+            "output_tokens": 20,
+            "output_tokens_details": {"thinking_tokens": 15}
+          }
+        }
+        """);
+    accSnapshot.handleEvent("message_stop", "{\"type\":\"message_stop\"}");
+    ProviderCompletion completion = accSnapshot.finish();
+    assertEquals(15L, completion.response().usage().reasoningTokens());
+
+    // 2. thinking_tokens 超过 output_tokens 报错
+    AnthropicStreamAccumulator accExceed =
+        new AnthropicStreamAccumulator(request, descriptor, bridge);
+    accExceed.handleEvent(
+        "message_start",
+        """
+        {
+          "type": "message_start",
+          "message": {
+            "usage": {
+              "input_tokens": 10,
+              "output_tokens": 5,
+              "output_tokens_details": {"thinking_tokens": 10}
+            }
+          }
+        }
+        """);
+    accExceed.handleEvent(
+        "message_delta", "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}");
+    accExceed.handleEvent("message_stop", "{\"type\":\"message_stop\"}");
+    ProviderException ex = assertThrows(ProviderException.class, accExceed::finish);
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
+    assertEquals("thinking tokens exceed output tokens", ex.getMessage());
+
+    // 3. output_tokens_details 非 object 报错
+    AnthropicStreamAccumulator accNonObj =
+        new AnthropicStreamAccumulator(request, descriptor, bridge);
+    accNonObj.handleEvent(
+        "message_start",
+        """
+        {
+          "type": "message_start",
+          "message": {
+            "usage": {
+              "input_tokens": 10,
+              "output_tokens": 5,
+              "output_tokens_details": 123
+            }
+          }
+        }
+        """);
+    accNonObj.handleEvent(
+        "message_delta", "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}");
+    accNonObj.handleEvent("message_stop", "{\"type\":\"message_stop\"}");
+    ProviderException exNonObj = assertThrows(ProviderException.class, accNonObj::finish);
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, exNonObj.kind());
+    assertEquals("output_tokens_details must be an object", exNonObj.getMessage());
   }
 
   private AnthropicStreamAccumulator newAccumulator() {

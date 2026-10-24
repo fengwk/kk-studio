@@ -114,6 +114,8 @@ class OpenAiChatStreamingDecoderTest {
 
         data: {"id":"c-utf8","choices":[{"index":0,"delta":{"content":"测试通过。"},"finish_reason":"stop"}]}
 
+        data: {"id":"c-utf8","usage":{"prompt_tokens":10,"completion_tokens":5}}
+
         data: [DONE]
 
         """;
@@ -182,6 +184,8 @@ class OpenAiChatStreamingDecoderTest {
         data: {"id":"c-rnd","choices":[{"index":0,"delta":{"role":"assistant","reasoning_content":"思考中..."},"finish_reason":null}]}
 
         data: {"id":"c-rnd","choices":[{"index":0,"delta":{"content":"最终答复。"},"finish_reason":"stop"}]}
+
+        data: {"id":"c-rnd","usage":{"prompt_tokens":10,"completion_tokens":5}}
 
         data: [DONE]
 
@@ -263,6 +267,10 @@ class OpenAiChatStreamingDecoderTest {
             os.flush();
             os.write(
                 "data: {\"id\":\"http-1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" from HTTP!\"},\"finish_reason\":\"stop\"}]}\n\n"
+                    .getBytes(StandardCharsets.UTF_8));
+            os.flush();
+            os.write(
+                "data: {\"id\":\"http-1\",\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}\n\n"
                     .getBytes(StandardCharsets.UTF_8));
             os.flush();
             os.write("data: [DONE]\n\n".getBytes(StandardCharsets.UTF_8));

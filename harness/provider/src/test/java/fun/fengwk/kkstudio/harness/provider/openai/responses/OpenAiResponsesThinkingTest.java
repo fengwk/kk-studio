@@ -93,7 +93,7 @@ class OpenAiResponsesThinkingTest {
                 + "\"item\":{\"id\":\"rs_1\",\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"Step 1: analyze\"}]}}"));
     acc.processEvent(
         MAPPER.readTree(
-            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_th\",\"status\":\"completed\"}}"));
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_th\",\"status\":\"completed\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5}}}"));
 
     ProviderResponse resp = acc.response();
     assertEquals("Step 1: analyze", resp.thinking());
@@ -115,7 +115,7 @@ class OpenAiResponsesThinkingTest {
         MAPPER.readTree("{\"type\":\"response.output_text.delta\",\"delta\":\"Just answer\"}"));
     acc.processEvent(
         MAPPER.readTree(
-            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_no_th\",\"status\":\"completed\"}}"));
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_no_th\",\"status\":\"completed\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5}}}"));
 
     ProviderResponse resp = acc.response();
     assertEquals("", resp.thinking());
@@ -171,7 +171,7 @@ class OpenAiResponsesThinkingTest {
 
     acc.processEvent(
         MAPPER.readTree(
-            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_enc\",\"status\":\"completed\"}}"));
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_enc\",\"status\":\"completed\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5}}}"));
 
     ProviderResponse resp = acc.response();
     ProviderReplayState replayState = acc.replayState();
@@ -254,7 +254,7 @@ class OpenAiResponsesThinkingTest {
                 + "\"item\":{\"id\":\"fc_p2\",\"type\":\"function_call\",\"call_id\":\"c2\",\"name\":\"t2\",\"arguments\":\"{}\"}}"));
     acc.processEvent(
         MAPPER.readTree(
-            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_2tools\",\"status\":\"completed\"}}"));
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_2tools\",\"status\":\"completed\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5}}}"));
 
     acc.response();
     ProviderReplayState replayState = acc.replayState();
@@ -339,6 +339,7 @@ class OpenAiResponsesThinkingTest {
     acc.processEvent(
         MAPPER.readTree(
             "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_asym\",\"status\":\"completed\","
+                + "\"usage\":{\"input_tokens\":10,\"output_tokens\":5},"
                 + "\"output\":["
                 + "{\"type\":\"reasoning\",\"id\":\"rs_asym_1\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"Deliberating deeply\"}]},"
                 + "{\"type\":\"function_call\",\"id\":\"fc_asym\",\"call_id\":\"call_asym\",\"name\":\"do_search\",\"arguments\":\"{\\\"q\\\":\\\"test\\\"}\"}"

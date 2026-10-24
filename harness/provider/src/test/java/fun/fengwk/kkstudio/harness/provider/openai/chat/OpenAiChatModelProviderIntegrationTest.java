@@ -426,7 +426,7 @@ class OpenAiChatModelProviderIntegrationTest {
     assertNotNull(completion);
     assertEquals("Hello world", completion.response().text());
     assertEquals(GenerationStopReason.COMPLETE, completion.response().stopReason());
-    assertEquals(11L, completion.response().usage().totalTokens());
+    assertEquals(11L, completion.response().usage().providerTotalTokens());
     assertEquals(1, deltas.size());
     assertEquals("Hello world", ((ProviderStreamEvent.TextDelta) deltas.get(0)).text());
   }

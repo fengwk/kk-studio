@@ -177,7 +177,8 @@ class GeminiStreamAccumulatorTest {
     accumulator.handleEvent(
         "message",
         """
-        {"candidates":[{"content":{"role":"model","parts":[{"text":"AC"},{"text":"BD"}]},"finishReason":"STOP"}]}
+        {"candidates":[{"content":{"role":"model","parts":[{"text":"AC"},{"text":"BD"}]},"finishReason":"STOP"}],
+         "usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5,"totalTokenCount":15}}
         """);
     ProviderCompletion completion = accumulator.finish();
     assertEquals("ACBD", completion.response().text());
@@ -240,7 +241,12 @@ class GeminiStreamAccumulatorTest {
           "candidates": [{
             "content": { "role": "model", "parts": [{ "text": "Hello world!" }] },
             "finishReason": "STOP"
-          }]
+          }],
+          "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15
+          }
         }
         """;
 
@@ -284,7 +290,12 @@ class GeminiStreamAccumulatorTest {
               "parts": [{ "text": "Final answer." }]
             },
             "finishReason": "STOP"
-          }]
+          }],
+          "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15
+          }
         }
         """;
 
@@ -332,7 +343,12 @@ class GeminiStreamAccumulatorTest {
               ]
             },
             "finishReason": "STOP"
-          }]
+          }],
+          "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15
+          }
         }
         """;
 
@@ -369,7 +385,12 @@ class GeminiStreamAccumulatorTest {
           "candidates": [{
             "content": { "role": "model", "parts": [{ "text": "Partial text..." }] },
             "finishReason": "MAX_TOKENS"
-          }]
+          }],
+          "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15
+          }
         }
         """;
 
@@ -391,7 +412,12 @@ class GeminiStreamAccumulatorTest {
           "candidates": [{
             "content": { "role": "model", "parts": [{ "text": "Unsafe..." }] },
             "finishReason": "SAFETY"
-          }]
+          }],
+          "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15
+          }
         }
         """;
 
@@ -420,7 +446,12 @@ class GeminiStreamAccumulatorTest {
               { "functionCall": { "name": "do_something", "args": { "k": "v" } } }
             ] },
             "finishReason": "ESCALATION"
-          }]
+          }],
+          "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15
+          }
         }
         """;
 
@@ -442,6 +473,11 @@ class GeminiStreamAccumulatorTest {
         {
           "promptFeedback": {
             "blockReason": "SAFETY"
+          },
+          "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 0,
+            "totalTokenCount": 10
           }
         }
         """;
@@ -511,7 +547,8 @@ class GeminiStreamAccumulatorTest {
     accumulator.handleEvent(
         "message",
         """
-        {"candidates":[{"content":{"parts":[{"text":"world!"}]},"finishReason":"STOP"}]}
+        {"candidates":[{"content":{"parts":[{"text":"world!"}]},"finishReason":"STOP"}],
+         "usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5,"totalTokenCount":15}}
         """);
     ProviderCompletion completion = accumulator.finish();
     assertEquals(GenerationStopReason.COMPLETE, completion.response().stopReason());
@@ -538,7 +575,8 @@ class GeminiStreamAccumulatorTest {
         "message",
         """
         {"candidates":[{"content":{"parts":[{"text":"partial"}]},
-        "finishReason":"%s"}]}
+        "finishReason":"%s"}],
+        "usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5,"totalTokenCount":15}}
         """
             .formatted(finishReason));
     assertEquals(List.of(new ProviderStreamEvent.TextDelta("partial")), emittedEvents);
@@ -597,7 +635,8 @@ class GeminiStreamAccumulatorTest {
   void retainsLatestLargeUsageSnapshot() throws Exception {
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
     accumulator.handleEvent(
-        "message", "{\"usageMetadata\":{\"promptTokenCount\":1,\"serviceTier\":\"old\"}}");
+        "message",
+        "{\"usageMetadata\":{\"promptTokenCount\":1,\"candidatesTokenCount\":1,\"serviceTier\":\"old\"}}");
     String latest =
         """
         {"promptTokenCount":4000000000,"cachedContentTokenCount":3000000000,
@@ -672,10 +711,11 @@ class GeminiStreamAccumulatorTest {
   void doesNotInheritOptionalUsageFields() throws Exception {
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
     accumulator.handleEvent(
-        "message", "{\"usageMetadata\":{\"serviceTier\":\"old\",\"promptTokenCount\":10}}");
+        "message",
+        "{\"usageMetadata\":{\"serviceTier\":\"old\",\"promptTokenCount\":10,\"candidatesTokenCount\":5}}");
     accumulator.handleEvent(
         "message",
-        "{\"usageMetadata\":{\"promptTokenCount\":3,\"cachedContentTokenCount\":3},"
+        "{\"usageMetadata\":{\"promptTokenCount\":3,\"candidatesTokenCount\":0,\"cachedContentTokenCount\":3},"
             + "\"candidates\":[{\"finishReason\":\"STOP\"}]}");
     ProviderResponse response = accumulator.finish().response();
     assertEquals(0L, response.usage().inputTokens());
@@ -685,7 +725,8 @@ class GeminiStreamAccumulatorTest {
     assertNull(response.usage().providerTotalTokens());
     assertNull(response.serviceTier());
     assertEquals(
-        MAPPER.readTree("{\"promptTokenCount\":3,\"cachedContentTokenCount\":3}"),
+        MAPPER.readTree(
+            "{\"promptTokenCount\":3,\"candidatesTokenCount\":0,\"cachedContentTokenCount\":3}"),
         MAPPER.readTree(response.rawUsageJson()));
   }
 
@@ -709,7 +750,12 @@ class GeminiStreamAccumulatorTest {
               }]
             },
             "finishReason": "STOP"
-          }]
+          }],
+          "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15
+          }
         }
         """;
 
@@ -854,7 +900,12 @@ class GeminiStreamAccumulatorTest {
               }]
             },
             "finishReason": "STOP"
-          }]
+          }],
+          "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15
+          }
         }
         """;
     validNullIdAcc.handleEvent("message", validNullIdChunk);
@@ -906,7 +957,12 @@ class GeminiStreamAccumulatorTest {
               ]
             },
             "finishReason": "STOP"
-          }]
+          }],
+          "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15
+          }
         }
         """);
 
@@ -967,7 +1023,12 @@ class GeminiStreamAccumulatorTest {
         "message",
         """
         {"candidates": [{"content": {"role": "model", "parts": [{"text": "!"}]},
-          "finishReason": "STOP"}]}
+          "finishReason": "STOP"}],
+         "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15
+         }}
         """);
 
     ProviderCompletion completion = accumulator.finish();
@@ -1022,7 +1083,12 @@ class GeminiStreamAccumulatorTest {
           { "inlineData": { "mimeType": "image/png", "data": "QQ==" } },
           { "toolResponse": { "name": "lookup", "response": { "k": "v" } } },
           { "functionCall": { "id": "c1", "name": "fn", "args": { "k": 1 } } }
-        ]}, "finishReason": "STOP"}]}
+        ]}, "finishReason": "STOP"}],
+         "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15
+         }}
         """);
 
     ProviderCompletion completion = accumulator.finish();
@@ -1053,7 +1119,12 @@ class GeminiStreamAccumulatorTest {
         """
         {"candidates": [{"content": {"role": "model", "parts": [
           { "text": "partial ", "functionCall": { "id": "c1", "name": "fn", "args": { "k": 1 } } }
-        ]}, "finishReason": "STOP"}]}
+        ]}, "finishReason": "STOP"}],
+         "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15
+         }}
         """);
 
     ProviderCompletion completion = accumulator.finish();
@@ -1105,7 +1176,12 @@ class GeminiStreamAccumulatorTest {
         {"candidates": [{"content": {"role": "model", "parts": [
           { "text": "answer", "thoughtSignature": "   " },
           { "text": null, "thoughtSignature": null, "inlineData": { "mimeType": "image/png", "data": "QQ==" } }
-        ]}, "finishReason": "STOP"}]}
+        ]}, "finishReason": "STOP"}],
+         "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15
+         }}
         """);
     ProviderCompletion completion = valuelessKnownFieldAccumulator.finish();
 
@@ -1151,7 +1227,12 @@ class GeminiStreamAccumulatorTest {
               { "inlineData": { "mimeType": "image/jpeg", "data": "AA==" } }
             ] },
             "finishReason": "STOP"
-          }]
+          }],
+          "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15
+          }
         }
         """);
 
@@ -1182,7 +1263,12 @@ class GeminiStreamAccumulatorTest {
               "futurePartField": { "trace": "t-1" }
             }] },
             "finishReason": "STOP"
-          }]
+          }],
+          "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15
+          }
         }
         """);
 
@@ -1191,5 +1277,71 @@ class GeminiStreamAccumulatorTest {
     assertEquals("c1", part.path("functionCall").path("id").asString(""));
     assertEquals(1, part.path("functionCall").path("args").path("k").asInt(0));
     assertEquals("t-1", part.path("futurePartField").path("trace").asString(""));
+  }
+
+  @Test
+  void missingUsageMetadataThrowsInvalidResponseOnFinish() {
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
+    accumulator.handleEvent(
+        "message",
+        """
+        {"candidates":[{"content":{"parts":[{"text":"Done"}]},"finishReason":"STOP"}]}
+        """);
+    ProviderException ex = assertThrows(ProviderException.class, accumulator::finish);
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
+    assertTrue(ex.getMessage().contains("missing complete usage"));
+  }
+
+  @Test
+  void missingMandatoryUsageFieldsThrowsInvalidResponse() {
+    for (String badUsage : List.of("{\"candidatesTokenCount\":5}", "{\"promptTokenCount\":10}")) {
+      GeminiStreamAccumulator accumulator =
+          new GeminiStreamAccumulator(request, descriptor, bridge);
+      ProviderException ex =
+          assertThrows(
+              ProviderException.class,
+              () -> {
+                accumulator.handleEvent(
+                    "message",
+                    "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Done\"}]},\"finishReason\":\"STOP\"}],"
+                        + "\"usageMetadata\":"
+                        + badUsage
+                        + "}");
+                accumulator.finish();
+              });
+      assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
+    }
+  }
+
+  @Test
+  void realZeroTokensCompletesSuccessfully() {
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
+    accumulator.handleEvent(
+        "message",
+        """
+        {"candidates":[{"content":{"parts":[{"text":"Zero"}]},"finishReason":"STOP"}],
+         "usageMetadata":{"promptTokenCount":0,"candidatesTokenCount":0,"totalTokenCount":0}}
+        """);
+    ProviderCompletion completion = accumulator.finish();
+    assertEquals(0L, completion.response().usage().inputTokens());
+    assertEquals(0L, completion.response().usage().outputTokens());
+    assertEquals(0L, completion.response().usage().providerTotalTokens());
+  }
+
+  @Test
+  void nullableTotalAndThoughtsTokenCount() {
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
+    accumulator.handleEvent(
+        "message",
+        """
+        {"candidates":[{"content":{"parts":[{"text":"Result"}]},"finishReason":"STOP"}],
+         "usageMetadata":{"promptTokenCount":30,"candidatesTokenCount":20,"thoughtsTokenCount":8}}
+        """);
+    ProviderCompletion completion = accumulator.finish();
+    assertEquals(30L, completion.response().usage().inputTokens());
+    assertEquals(
+        28L, completion.response().usage().outputTokens(), "candidates 20 + thoughts 8 = 28");
+    assertEquals(8L, completion.response().usage().reasoningTokens());
+    assertNull(completion.response().usage().providerTotalTokens());
   }
 }

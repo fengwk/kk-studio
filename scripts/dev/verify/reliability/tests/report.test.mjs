@@ -121,3 +121,66 @@ test('report artifacts never repeat the 12KiB payload', () => {
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+test('report renders unknown cost and null reasoning without quiet zero coercion', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'reliability-report-unknown-cost-'))
+  try {
+    const runId = 'test-unknown-run'
+    const runDir = createRunDirectory(root, runId)
+    const testCase = CASES[0]
+    const metrics = {
+      inputTokens: 100,
+      outputTokens: 50,
+      cacheReadTokens: 10,
+      cacheWriteTokens: 20,
+      reasoningTokens: null,
+      providerTotalTokens: null,
+      costTotal: null,
+      assistantMessages: 1,
+    }
+    writeSummaryAndReport({
+      runDir,
+      runId,
+      selectedCases: [testCase],
+      results: [
+        {
+          id: testCase.id,
+          model: testCase.model.ref,
+          anchor: testCase.anchor,
+          taskClass: testCase.taskClass,
+          status: 'pass',
+          failureCategory: null,
+          error: null,
+          turnStarted: true,
+          costKnown: false,
+          toolOrder: ['read'],
+          toolCounts: { read: 1 },
+          metrics,
+          tests: { precheck: 'pass', postcheck: 'pass', diffCheck: 'pass' },
+        },
+      ],
+      startedAt: '2026-08-10T00:00:00.000Z',
+      finishedAt: '2026-08-10T00:01:00.000Z',
+      args: {
+        daemonEnv: 'docker-reliability',
+        maxCostUsd: 5,
+      },
+      preflight: {
+        provider: { name: 'minimax', configured: true },
+        models: [testCase.model.ref],
+      },
+      runError: null,
+      systemPromptMeta: {
+        byteLength: 10,
+        sha256: 'a'.repeat(64),
+      },
+    })
+    const report = readFileSync(path.join(runDir, 'report.md'), 'utf8')
+    assert.match(report, /incurred: unknown/)
+    assert.match(report, /100\/50\/10\/20\/- \(cost unknown\)/)
+    assert.match(report, /\| unknown \| pre=pass, post=pass, diff=pass \| - \|/)
+    assert.match(report, /\| 1 \| 100 \| 50 \| 10 \| 20 \| - \| unknown \|/)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})

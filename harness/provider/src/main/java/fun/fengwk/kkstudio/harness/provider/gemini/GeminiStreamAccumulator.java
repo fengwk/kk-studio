@@ -155,6 +155,11 @@ final class GeminiStreamAccumulator {
   }
 
   private void updateUsage(JsonNode usageNode) {
+    if (!usageNode.has("promptTokenCount") || !usageNode.has("candidatesTokenCount")) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE,
+          "missing complete usage: Gemini model " + request.model().modelId());
+    }
     long promptTokens = optionalTokenCount(usageNode, "promptTokenCount");
     long output = optionalTokenCount(usageNode, "candidatesTokenCount");
     Long providerTotal =

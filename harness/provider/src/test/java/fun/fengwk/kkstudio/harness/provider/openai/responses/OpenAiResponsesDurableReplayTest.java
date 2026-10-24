@@ -113,7 +113,7 @@ class OpenAiResponsesDurableReplayTest {
     accumulator.processEvent(
         MAPPER.readTree(
             """
-            {"type":"response.completed","response":{"id":"resp_durable","status":"completed","output":[
+            {"type":"response.completed","response":{"id":"resp_durable","status":"completed","usage":{"input_tokens":10,"output_tokens":5},"output":[
               {"id":"rs_durable","type":"reasoning","encrypted_content":"enc_blob_durable",
                "summary":[{"type":"summary_text","text":"Check the weather"}]},
               {"id":"fc_durable","type":"function_call","call_id":"call_1","name":"query",

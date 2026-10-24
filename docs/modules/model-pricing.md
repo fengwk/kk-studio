@@ -1,5 +1,7 @@
 # 模型用量与计价
 
+上层职责见[系统设计](../system-design.md)。
+
 读取历史记录时，后端使用实际模型、请求时间、最终 service tier 和当前目录价格投影费用；费用不写回模型历史。
 
 ## 分类与未知事实
@@ -12,11 +14,13 @@
 
 ## 费用投影
 
-缺少判定定价规则必需的事实、没有匹配费率，或独立推理价格缺少可信推理子集时，`ModelCost.calculate` 返回 null。平台不为该条目生成费用投影；调用方必须显示为未知，不能补成零金额。
+缺少判定定价规则必需的事实、没有匹配费率，或独立推理价格与输出价格不同且非零输出缺少可信推理子集时，`ModelCost.calculate` 返回 null。平台不为该条目生成费用投影；调用方必须显示为未知，不能补成零金额。推理与输出的最终单价数值相同（不受小数 scale 影响），或输出为零时，未知推理子集不影响总额，仍可计算费用。
 
 已知零费率或完整零用量仍可产生合法零金额。TTL 写入总量只计一次；有拆分时按对应 TTL 价格计费，没有专用 TTL 价格则使用默认写入价格。
 
 ## 协议来源
+
+完整 usage 是成功模型响应的必要事实。Chat 必须报告 prompt/completion，Responses 必须报告 input/output，Gemini 必须报告 prompt/candidates，Anthropic 必须在累计 usage 中报告 input/output；缺少整份或必需计数以关联协议和模型的 `INVALID_RESPONSE` 结束，不产生零用量计费或测速。可选 reasoning 与原生 total 未报告不构成错误。明确报告的零计数仍是合法值。
 
 OpenAI Chat 与 Responses 的输出计数已包含 reasoning。Gemini 的 candidates 与 thoughts 合并一次成为内部输出；额外 hosted-tool 用量保留原始事实，不塞入普通输入输出。
 
