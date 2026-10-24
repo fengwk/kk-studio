@@ -96,8 +96,11 @@ class ToolExecutionGatewayRemoteDeadlineTest {
     transport.delegate.defaultTerminalDeliveryGrace = grace;
 
     ToolExecutionGateway gateway = gateway(catalog, transport);
+    ToolGatewayTestSupport.RecordingRemoteExecutions remoteExecutions =
+        new ToolGatewayTestSupport.RecordingRemoteExecutions();
     ToolGateway.Run run =
-        ToolGatewayTestSupport.admitted(gateway, request(catalog, "call-missing"));
+        ToolGatewayTestSupport.admitted(
+            gateway, request(catalog, "call-missing"), remoteExecutions);
     AtomicReference<ToolGateway.Completion> completion = new AtomicReference<>();
     Thread worker = Thread.ofVirtual().start(() -> completion.set(run.execute(partial -> {})));
 
@@ -121,6 +124,10 @@ class ToolExecutionGatewayRemoteDeadlineTest {
           handle.terminations(),
           "deadline timeout must terminate the handle with TIMED_OUT cause");
       assertEquals(1, handle.cancelCount());
+      assertTrue(
+          remoteExecutions.notStartedConfirmed.isEmpty(),
+          "timeout after send is not a not-started confirmation");
+      assertTrue(remoteExecutions.exitConfirmed.isEmpty(), "timeout is not a positive exit ACK");
     } finally {
       worker.interrupt();
       worker.join(5_000);

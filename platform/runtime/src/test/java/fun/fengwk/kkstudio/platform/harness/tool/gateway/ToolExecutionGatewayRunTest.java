@@ -16,17 +16,24 @@ import fun.fengwk.kkstudio.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.common.result.BinaryResultContent;
 import fun.fengwk.kkstudio.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
+import fun.fengwk.kkstudio.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.contributor.api.BoundEnvironment;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityBusyException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCancelledException;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionListener;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityFailedException;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTerminationCause;
 import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolResultSizeLimits;
@@ -36,12 +43,16 @@ import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.catalog.tool.TestRuntimeToolCatalogSource;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
@@ -52,6 +63,12 @@ import java.util.function.Consumer;
 class ToolExecutionGatewayRunTest {
 
   private static final ToolDescriptor DESCRIPTOR = ToolGatewayTestSupport.hostDescriptor("demo");
+  private static final EnvironmentCapabilityDescriptor REMOTE_CAPABILITY =
+      new EnvironmentCapabilityDescriptor(
+          new EnvironmentCapabilityId("remote.test"),
+          "1",
+          new InputSchema("arguments", Map.of(), Set.of(), false),
+          Duration.ofSeconds(1));
   private static final byte[] BINARY_BYTES = new byte[] {1, 2, 3, 4, 5};
 
   private final ToolGatewayTestSupport.FakeResourceStager store =
@@ -325,6 +342,160 @@ class ToolExecutionGatewayRunTest {
         false);
   }
 
+  /** Stop/失权先赢得登记时不得发送，也不得伪造 exit 或 not-started 确认。 */
+  @Test
+  void deniedRemoteRegistrationDoesNotSendOrFakeExit() {
+    ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
+    ToolGatewayTestSupport.RecordingRemoteExecutions remoteExecutions =
+        new ToolGatewayTestSupport.RecordingRemoteExecutions();
+    remoteExecutions.allowStart = false;
+    ToolExecutionGateway gateway =
+        ToolGatewayTestSupport.gateway(ToolGatewayTestSupport.defaultCatalog(), transport, store);
+    ToolGateway.Run run =
+        ToolGatewayTestSupport.admitted(
+            gateway,
+            ToolGatewayTestSupport.environmentRequest("call-1", ToolGatewayTestSupport.ENV_A),
+            remoteExecutions);
+
+    ToolGateway.Completion completion;
+    try {
+      completion = run.execute(partial -> {});
+    } finally {
+      run.close();
+    }
+
+    assertInstanceOf(ToolGateway.Cancelled.class, completion);
+    assertEquals(1, remoteExecutions.startAttempts.size());
+    assertTrue(remoteExecutions.started.isEmpty());
+    assertTrue(transport.invocations.isEmpty(), "denied registration must not send");
+    assertTrue(remoteExecutions.notStartedConfirmed.isEmpty());
+    assertTrue(remoteExecutions.exitConfirmed.isEmpty());
+  }
+
+  /** 同一 Tool 的多次远端 execute 各自在发送前登记独立 UUID，并分别映射回同一模型 call id。 */
+  @Test
+  void eachRemoteExecuteRegistersIndependentUuidBeforeSend() {
+    ToolGatewayTestSupport.FakeTool tool =
+        new ToolGatewayTestSupport.FakeTool(ToolGatewayTestSupport.hostDescriptor("remote-twice")) {
+          @Override
+          public ToolRequirements requirements() {
+            return ToolRequirements.environment();
+          }
+        };
+    tool.body =
+        (request, progress) -> {
+          BoundEnvironment environment = request.context().environment().orElseThrow();
+          environment.execute(REMOTE_CAPABILITY, request, progress);
+          return ToolOutcome.withoutEffects(
+              environment.execute(REMOTE_CAPABILITY, request, progress));
+        };
+    ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
+    transport.action = ToolGatewayTestSupport.FakeTransport.InvokeAction.SYNC_COMPLETE;
+    transport.syncResult = result("ignored-by-transport", new TextResultContent("ok"));
+    ToolInvocationRequest hostRequest =
+        ToolGatewayTestSupport.hostRequest("call-twice", tool.descriptor());
+    ToolBinding hostBinding = hostRequest.binding();
+    ToolInvocationRequest environmentRequest =
+        new ToolInvocationRequest(
+            hostRequest.call(),
+            new ToolBinding(
+                hostBinding.definition(),
+                hostBinding.contributor(),
+                EnvironmentSupport.REQUIRED,
+                ToolGatewayTestSupport.ENV_A,
+                "test-env"));
+    ToolExecutionGateway gateway =
+        ToolGatewayTestSupport.gateway(
+            ToolGatewayTestSupport.defaultCatalog(tool), transport, store);
+    ToolGatewayTestSupport.RecordingRemoteExecutions remoteExecutions =
+        new ToolGatewayTestSupport.RecordingRemoteExecutions();
+    AtomicBoolean registrationOrderViolated = new AtomicBoolean();
+    remoteExecutions.tryStartHook =
+        remoteExecutionId -> {
+          if (transport.invocations.size() != remoteExecutions.startAttempts.size() - 1) {
+            registrationOrderViolated.set(true);
+          }
+        };
+
+    ToolGateway.Completion completion;
+    ToolGateway.Run run =
+        ToolGatewayTestSupport.admitted(gateway, environmentRequest, remoteExecutions);
+    try {
+      completion = run.execute(partial -> {});
+    } finally {
+      run.close();
+    }
+
+    ToolGateway.Succeeded succeeded = assertInstanceOf(ToolGateway.Succeeded.class, completion);
+    assertEquals("call-twice", succeeded.success().result().toolCallId());
+    assertEquals(2, transport.invocations.size());
+    assertEquals(2, remoteExecutions.started.size());
+    assertFalse(registrationOrderViolated.get(), "registration must precede each send");
+    assertFalse(remoteExecutions.started.get(0).equals(remoteExecutions.started.get(1)));
+    assertFalse(remoteExecutions.started.contains(ToolGatewayTestSupport.INVOCATION_ID));
+    assertTrue(remoteExecutions.exitConfirmed.isEmpty(), "normal terminal is not an exit ACK");
+    assertTrue(remoteExecutions.notStartedConfirmed.isEmpty());
+  }
+
+  /** 结果 future 已异常完成后到达的 exit ACK 仍独立确认该次远端执行。 */
+  @Test
+  void lateExitAckAfterExceptionalResultConfirmsTheRemoteExecution() throws Exception {
+    ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
+    ToolGatewayTestSupport.RecordingRemoteExecutions remoteExecutions =
+        new ToolGatewayTestSupport.RecordingRemoteExecutions();
+
+    ToolGateway.Completion completion =
+        runEnvironmentThen(
+            transport,
+            remoteExecutions,
+            listener -> {
+              listener.onError(new EnvironmentCapabilityFailedException("exit 1"));
+              listener.onExitConfirmed();
+            });
+
+    assertInstanceOf(ToolGateway.Failed.class, completion);
+    UUID remoteExecutionId = UUID.fromString(transport.invocations.get(0).request().call().id());
+    assertEquals(List.of(remoteExecutionId), remoteExecutions.exitConfirmed);
+    assertTrue(remoteExecutions.notStartedConfirmed.isEmpty());
+  }
+
+  /** 发送后结果回调的 Busy 不是“未发送”证据：不得因此 confirmNotStarted。 */
+  @Test
+  void postSendBusyErrorDoesNotConfirmNotStarted() throws Exception {
+    ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
+    ToolGatewayTestSupport.RecordingRemoteExecutions remoteExecutions =
+        new ToolGatewayTestSupport.RecordingRemoteExecutions();
+
+    ToolGateway.Completion completion =
+        runEnvironmentThen(
+            transport,
+            remoteExecutions,
+            listener ->
+                listener.onError(new EnvironmentCapabilityBusyException("busy after send")));
+
+    ToolGateway.Failed failed = assertInstanceOf(ToolGateway.Failed.class, completion);
+    assertTrue(failed.retryable());
+    assertTrue(remoteExecutions.notStartedConfirmed.isEmpty());
+    assertTrue(remoteExecutions.exitConfirmed.isEmpty());
+  }
+
+  /** 未启动确认自身持久化失败时不得被吞成“已确认未执行”，结果保持 Unknown。 */
+  @Test
+  void notStartedConfirmationFailureIsNotSwallowed() {
+    ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
+    transport.action = ToolGatewayTestSupport.FakeTransport.InvokeAction.THROW_UNAVAILABLE;
+    ToolGatewayTestSupport.RecordingRemoteExecutions remoteExecutions =
+        new ToolGatewayTestSupport.RecordingRemoteExecutions();
+    remoteExecutions.confirmNotStartedFailure =
+        new IllegalStateException("execution ledger unavailable");
+
+    ToolGateway.Completion completion = runEnvironment(transport, remoteExecutions);
+
+    assertInstanceOf(ToolGateway.Unknown.class, completion);
+    assertEquals(1, remoteExecutions.notStartedConfirmed.size());
+    assertTrue(remoteExecutions.exitConfirmed.isEmpty());
+  }
+
   private void assertEnvironmentFailure(
       ToolGatewayTestSupport.FakeTransport.InvokeAction action,
       Class<? extends ToolGateway.Completion> type,
@@ -332,7 +503,9 @@ class ToolExecutionGatewayRunTest {
       boolean retryable) {
     ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
     transport.action = action;
-    ToolGateway.Completion completion = runEnvironment(transport);
+    ToolGatewayTestSupport.RecordingRemoteExecutions remoteExecutions =
+        new ToolGatewayTestSupport.RecordingRemoteExecutions();
+    ToolGateway.Completion completion = runEnvironment(transport, remoteExecutions);
 
     assertInstanceOf(type, completion);
     if (completion instanceof ToolGateway.Failed failed) {
@@ -341,15 +514,36 @@ class ToolExecutionGatewayRunTest {
     } else if (completion instanceof ToolGateway.Unknown unknown) {
       assertEquals(kind, unknown.error().kind());
     }
+    UUID remoteExecutionId = UUID.fromString(transport.invocations.get(0).request().call().id());
+    assertEquals(List.of(remoteExecutionId), remoteExecutions.started);
+    assertTrue(remoteExecutions.exitConfirmed.isEmpty(), "result failure is not an exit ACK");
+    if (action == ToolGatewayTestSupport.FakeTransport.InvokeAction.THROW_BUSY
+        || action == ToolGatewayTestSupport.FakeTransport.InvokeAction.THROW_UNAVAILABLE) {
+      assertEquals(
+          List.of(remoteExecutionId),
+          remoteExecutions.notStartedConfirmed,
+          "definitely-unsent transport failure must confirm not started");
+    } else {
+      assertTrue(
+          remoteExecutions.notStartedConfirmed.isEmpty(),
+          "send-uncertain and generic failures must not confirm not started");
+    }
   }
 
   private ToolGateway.Completion runEnvironment(ToolGatewayTestSupport.FakeTransport transport) {
+    return runEnvironment(transport, new ToolGatewayTestSupport.RecordingRemoteExecutions());
+  }
+
+  private ToolGateway.Completion runEnvironment(
+      ToolGatewayTestSupport.FakeTransport transport,
+      ToolGatewayTestSupport.RecordingRemoteExecutions remoteExecutions) {
     ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(ToolGatewayTestSupport.defaultCatalog(), transport, store);
     ToolGateway.Run run =
         ToolGatewayTestSupport.admitted(
             gateway,
-            ToolGatewayTestSupport.environmentRequest("call-1", ToolGatewayTestSupport.ENV_A));
+            ToolGatewayTestSupport.environmentRequest("call-1", ToolGatewayTestSupport.ENV_A),
+            remoteExecutions);
     try {
       return run.execute(partial -> {});
     } finally {
@@ -396,10 +590,13 @@ class ToolExecutionGatewayRunTest {
     ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
     ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(ToolGatewayTestSupport.defaultCatalog(), transport, store);
+    ToolGatewayTestSupport.RecordingRemoteExecutions remoteExecutions =
+        new ToolGatewayTestSupport.RecordingRemoteExecutions();
     ToolGateway.Run run =
         ToolGatewayTestSupport.admitted(
             gateway,
-            ToolGatewayTestSupport.environmentRequest("call-1", ToolGatewayTestSupport.ENV_A));
+            ToolGatewayTestSupport.environmentRequest("call-1", ToolGatewayTestSupport.ENV_A),
+            remoteExecutions);
     List<ToolResult> progress = new ArrayList<>();
     AtomicReference<ToolGateway.Completion> completion = new AtomicReference<>();
     Thread worker = Thread.ofVirtual().start(() -> completion.set(run.execute(progress::add)));
@@ -407,7 +604,10 @@ class ToolExecutionGatewayRunTest {
     assertNull(completion.get(), "run must block until the terminal arrives");
 
     var listener = transport.invocations.get(0).listener();
-    String capabilityCallId = ToolGatewayTestSupport.INVOCATION_ID.toString();
+    String capabilityCallId = transport.invocations.get(0).request().call().id();
+    assertFalse(
+        ToolGatewayTestSupport.INVOCATION_ID.toString().equals(capabilityCallId),
+        "remote execution id must not reuse the ToolInvocation id");
     listener.onPartial(
         new EnvironmentCapabilityResult(
             capabilityCallId, List.of(new TextResultContent("step")), false, "{}"));
@@ -422,6 +622,9 @@ class ToolExecutionGatewayRunTest {
     assertEquals("call-1", succeeded.success().result().toolCallId());
     assertEquals(1, progress.size());
     assertEquals("call-1", progress.get(0).toolCallId());
+    assertTrue(
+        remoteExecutions.exitConfirmed.isEmpty(),
+        "normal terminal completion must not synthesize an exit ACK");
   }
 
   /** 中断：向远端请求取消并立即返回 Cancelled，不等待远端确认。 */
@@ -430,10 +633,13 @@ class ToolExecutionGatewayRunTest {
     ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
     ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(ToolGatewayTestSupport.defaultCatalog(), transport, store);
+    ToolGatewayTestSupport.RecordingRemoteExecutions remoteExecutions =
+        new ToolGatewayTestSupport.RecordingRemoteExecutions();
     ToolGateway.Run run =
         ToolGatewayTestSupport.admitted(
             gateway,
-            ToolGatewayTestSupport.environmentRequest("call-1", ToolGatewayTestSupport.ENV_A));
+            ToolGatewayTestSupport.environmentRequest("call-1", ToolGatewayTestSupport.ENV_A),
+            remoteExecutions);
     AtomicReference<ToolGateway.Completion> completion = new AtomicReference<>();
     Thread worker = Thread.ofVirtual().start(() -> completion.set(run.execute(partial -> {})));
     awaitInvocation(transport);
@@ -447,6 +653,8 @@ class ToolExecutionGatewayRunTest {
     assertEquals(
         List.of(EnvironmentCapabilityTerminationCause.CANCELLED),
         transport.returnedHandles.get(0).terminations());
+    assertTrue(remoteExecutions.notStartedConfirmed.isEmpty());
+    assertTrue(remoteExecutions.exitConfirmed.isEmpty(), "interrupt is not exit evidence");
   }
 
   /** 无 handle 视为契约违反：post-send 的 Unknown，不假称未执行。 */
@@ -596,12 +804,22 @@ class ToolExecutionGatewayRunTest {
       ToolGatewayTestSupport.FakeTransport transport,
       Consumer<EnvironmentCapabilityExecutionListener> terminal)
       throws Exception {
+    return runEnvironmentThen(
+        transport, new ToolGatewayTestSupport.RecordingRemoteExecutions(), terminal);
+  }
+
+  private ToolGateway.Completion runEnvironmentThen(
+      ToolGatewayTestSupport.FakeTransport transport,
+      ToolGatewayTestSupport.RecordingRemoteExecutions remoteExecutions,
+      Consumer<EnvironmentCapabilityExecutionListener> terminal)
+      throws Exception {
     ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(ToolGatewayTestSupport.defaultCatalog(), transport, store);
     ToolGateway.Run run =
         ToolGatewayTestSupport.admitted(
             gateway,
-            ToolGatewayTestSupport.environmentRequest("call-1", ToolGatewayTestSupport.ENV_A));
+            ToolGatewayTestSupport.environmentRequest("call-1", ToolGatewayTestSupport.ENV_A),
+            remoteExecutions);
     AtomicReference<ToolGateway.Completion> completion = new AtomicReference<>();
     Thread worker = Thread.ofVirtual().start(() -> completion.set(run.execute(partial -> {})));
     awaitInvocation(transport);

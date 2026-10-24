@@ -34,7 +34,11 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 
-/** 事务外只读预览：成功才进入审批，任何预览失败都明确拒绝本次编辑而非允许盲批。 */
+/**
+ * 事务外只读预览：成功才进入审批，任何预览失败都明确拒绝本次编辑而非允许盲批。
+ *
+ * <p>预览发生在 Tool body 之前，不属于 Thread Tool 执行账本，因此其远端退出通知不登记运行时执行事实。
+ */
 final class EditReviewPreflight {
 
   static final String FAILED_KIND = "EDIT_REVIEW_FAILED";
@@ -66,6 +70,11 @@ final class EditReviewPreflight {
                 @Override
                 public void onError(Throwable error) {
                   completion.completeExceptionally(error);
+                }
+
+                @Override
+                public void onExitConfirmed() {
+                  // 审批前预览是独立只读调用，不属于 Thread Tool body 执行账本，无需登记远端退出。
                 }
               });
       if (handle == null) {

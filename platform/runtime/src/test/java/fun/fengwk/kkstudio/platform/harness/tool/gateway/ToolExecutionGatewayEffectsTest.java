@@ -308,11 +308,7 @@ class ToolExecutionGatewayEffectsTest {
           new ToolInvocationRequest(
               new ToolCall("call-1", "effects_tool", "{}"),
               new ToolBinding(DEFINITION, contributor, EnvironmentSupport.NONE, null, null));
-      return new ToolGateway.Execution(
-          ToolGatewayTestSupport.INVOCATION_ID,
-          ToolGatewayTestSupport.THREAD_ID,
-          ToolGatewayTestSupport.ASSISTANT_ENTRY_ID,
-          request);
+      return ToolGatewayTestSupport.execution(request);
     }
 
     ToolGateway.Completion run(String localName, StateAccess access) {

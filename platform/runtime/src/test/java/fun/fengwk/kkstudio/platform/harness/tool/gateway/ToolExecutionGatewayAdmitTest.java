@@ -161,9 +161,11 @@ class ToolExecutionGatewayAdmitTest {
 
     assertEquals(ToolGatewayTestSupport.ENV_A, transport.invocations.get(0).environmentId());
     assertEquals(ToolGatewayTestSupport.ENV_B, transport.invocations.get(1).environmentId());
-    assertEquals(
-        ToolGatewayTestSupport.INVOCATION_ID.toString(),
-        transport.invocations.get(0).request().call().id());
+    // 每次实际远端调用使用独立 UUID，不复用 ToolInvocation id。
+    assertFalse(
+        ToolGatewayTestSupport.INVOCATION_ID
+            .toString()
+            .equals(transport.invocations.get(0).request().call().id()));
     assertEquals(
         EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.PROCESS_EXEC),
         transport.invocations.get(0).request().descriptor());
@@ -407,8 +409,10 @@ class ToolExecutionGatewayAdmitTest {
                     ToolGatewayTestSupport.INVOCATION_ID,
                     ToolGatewayTestSupport.THREAD_ID,
                     ToolGatewayTestSupport.ASSISTANT_ENTRY_ID,
+                    1,
                     request,
-                    approved(null))));
+                    approved(null),
+                    new ToolGatewayTestSupport.RecordingRemoteExecutions())));
 
     assertEquals(ToolExecutionGateway.EDIT_REVIEW_REQUIRED_KIND, rejected.error().kind());
     assertTrue(
@@ -447,8 +451,10 @@ class ToolExecutionGatewayAdmitTest {
                         ToolGatewayTestSupport.INVOCATION_ID,
                         ToolGatewayTestSupport.THREAD_ID,
                         ToolGatewayTestSupport.ASSISTANT_ENTRY_ID,
+                        1,
                         request,
-                        approved(new ToolEditReview(expectedFile, "-old\n+new")))))
+                        approved(new ToolEditReview(expectedFile, "-old\n+new")),
+                        new ToolGatewayTestSupport.RecordingRemoteExecutions())))
             .run();
     reviewed.execute(partial -> {});
     reviewed.close();
@@ -498,8 +504,10 @@ class ToolExecutionGatewayAdmitTest {
                         ToolGatewayTestSupport.INVOCATION_ID,
                         ToolGatewayTestSupport.THREAD_ID,
                         ToolGatewayTestSupport.ASSISTANT_ENTRY_ID,
+                        1,
                         request,
-                        approved(null))))
+                        approved(null),
+                        new ToolGatewayTestSupport.RecordingRemoteExecutions())))
             .run();
     run.execute(partial -> {});
     run.close();

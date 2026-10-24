@@ -34,6 +34,7 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityT
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
 import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.permission.BashSurfaceAnalyzer;
@@ -221,7 +222,19 @@ final class ToolGatewayTestSupport {
   }
 
   static ToolGateway.Execution execution(ToolInvocationRequest request) {
-    return new ToolGateway.Execution(INVOCATION_ID, THREAD_ID, ASSISTANT_ENTRY_ID, request);
+    return execution(request, new RecordingRemoteExecutions());
+  }
+
+  static ToolGateway.Execution execution(
+      ToolInvocationRequest request, ToolGateway.RemoteExecutionObserver remoteExecutions) {
+    return new ToolGateway.Execution(
+        INVOCATION_ID,
+        THREAD_ID,
+        ASSISTANT_ENTRY_ID,
+        1,
+        request,
+        ToolApproval.notRequired(),
+        remoteExecutions);
   }
 
   static ToolExecutionGateway gateway(
@@ -317,7 +330,16 @@ final class ToolGatewayTestSupport {
 
   /** admit 并断言 Admitted，返回可执行的 run。 */
   static ToolGateway.Run admitted(ToolExecutionGateway gateway, ToolInvocationRequest request) {
-    return assertInstanceOf(ToolGateway.Admitted.class, gateway.admit(execution(request))).run();
+    return admitted(gateway, request, new RecordingRemoteExecutions());
+  }
+
+  static ToolGateway.Run admitted(
+      ToolExecutionGateway gateway,
+      ToolInvocationRequest request,
+      ToolGateway.RemoteExecutionObserver remoteExecutions) {
+    return assertInstanceOf(
+            ToolGateway.Admitted.class, gateway.admit(execution(request, remoteExecutions)))
+        .run();
   }
 
   static ToolSettings settings(PermissionAction action) {
@@ -363,6 +385,47 @@ final class ToolGatewayTestSupport {
 
     int readCount() {
       return reads.get();
+    }
+  }
+
+  /** 显式记录每次远端执行登记与确认的观察者，不作为生产登记实现的替身。 */
+  static final class RecordingRemoteExecutions implements ToolGateway.RemoteExecutionObserver {
+    final List<UUID> startAttempts = new CopyOnWriteArrayList<>();
+    final List<UUID> started = new CopyOnWriteArrayList<>();
+    final List<UUID> exitConfirmed = new CopyOnWriteArrayList<>();
+    final List<UUID> notStartedConfirmed = new CopyOnWriteArrayList<>();
+    volatile boolean allowStart = true;
+    volatile RuntimeException confirmExitFailure;
+    volatile RuntimeException confirmNotStartedFailure;
+    volatile Consumer<UUID> tryStartHook = remoteExecutionId -> {};
+
+    @Override
+    public boolean tryStart(UUID remoteExecutionId) {
+      startAttempts.add(remoteExecutionId);
+      tryStartHook.accept(remoteExecutionId);
+      if (!allowStart) {
+        return false;
+      }
+      started.add(remoteExecutionId);
+      return true;
+    }
+
+    @Override
+    public void confirmExit(UUID remoteExecutionId) {
+      exitConfirmed.add(remoteExecutionId);
+      throwIfPresent(confirmExitFailure);
+    }
+
+    @Override
+    public void confirmNotStarted(UUID remoteExecutionId) {
+      notStartedConfirmed.add(remoteExecutionId);
+      throwIfPresent(confirmNotStartedFailure);
+    }
+
+    private static void throwIfPresent(RuntimeException failure) {
+      if (failure != null) {
+        throw failure;
+      }
     }
   }
 

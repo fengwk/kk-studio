@@ -200,6 +200,13 @@ Tool 网关先做资源解析与无等待 admission（纯本地：并发租约�
 Tool 网关按完整冻结定义、贡献归属和 requirements 复验目录；有效超时仅经 `Tool.resolveTimeout`
 解析一次并原样传递。具体状态转换见 [Harness Runtime](harness-runtime.md)。
 
+远端 Environment 工具每次实际 capability 调用都在发送前登记独立 UUID（不复用 ToolInvocation id），
+`tryStart` 失败时零发送并收敛为取消；参数构造校验先于登记。只有 transport 明确保证未发送的
+Busy / Unavailable 才确认未启动，send-uncertain、普通异常、中断与超时均保留未确认。远端
+`onExitConfirmed` 直接确认该次执行，独立于可能已异常结束的结果 future；普通成功或失败终态不替代退出
+ACK。远端结果的 call id 映射回原模型 call id。审批前 edit 预览与 Environment skill 同步是独立的
+Environment 管理调用，不写 Thread Tool 执行账本。
+
 媒体物化将模型模态、adapter 能力和权威 MIME 取交集。Blob 转换为 attempt-only Base64；
 原始文件上限 100 MiB，请求累计 data URI 上限 160 MiB。图片按冻结的
 `720P`、`1080P`、`ORIGINAL` 档位处理，方向取 EXIF，动画/多帧、超过 4000 万像素或
