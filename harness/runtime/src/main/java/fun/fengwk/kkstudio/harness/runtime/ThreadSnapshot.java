@@ -97,8 +97,8 @@ public record ThreadSnapshot(
    * <p>三个事实彼此正交：{@code hasWork} 覆盖排队命令、合法本地非终态 Model、本地 READY/RUNNING 工具与 owner 归属本 Thread 的
    * continuation（忽略 TURN_END 后的尾部控制 Entry）；{@code waitingForHuman} 只覆盖本地工具的 {@code
    * WAITING_APPROVAL}/{@code WAITING_INPUT}；{@code hasUnknownToolOutcome} 只覆盖本地工具的 {@code UNKNOWN}
-   * 终态。投影不读取持久执行控制：{@link ThreadExecutionControl#STOPPED} 只影响 {@link #runtimeStatus()}
-   * 对外状态，不影响本投影，因此停止方仍能判断外部执行是否尚未收敛。
+   * 终态。投影不读取持久执行控制：{@link ThreadExecutionControl#STOPPED} 不覆盖仍存在的本地调用事实。 Stop
+   * 清理调用后，本投影不提供外部进程或远端请求的物理退出确认。
    */
   public ThreadExecutionFacts executionFacts() {
     ThreadContext context =
