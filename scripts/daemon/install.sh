@@ -270,7 +270,8 @@ download_daemon() {
   case "$effective_url" in "$RELEASE_BASE/tag/"*) RELEASE_TAG=${effective_url#"$RELEASE_BASE/tag/"} ;;
     *) fail "latest release did not resolve to an official immutable release tag" ;; esac
   [[ $RELEASE_TAG =~ ^v[0-9A-Za-z._-]+$ ]] || fail "invalid official release tag"
-  echo "版本：$RELEASE_TAG；平台：$RELEASE_OS-$RELEASE_ARCH" >&2
+  # Bash 3.2 on macOS treats the leading byte of "；" as part of an unbraced name.
+  echo "版本：${RELEASE_TAG}；平台：${RELEASE_OS}-${RELEASE_ARCH}" >&2
   stage '3/7 下载归档'
   DOWNLOAD_DIR=$(mktemp -d "${TMPDIR:-/tmp}/kk-studio-daemon.XXXXXXXX")
   chmod 0700 "$DOWNLOAD_DIR"

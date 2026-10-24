@@ -30,10 +30,12 @@ export const CODE_SERVER_VERSION = '4.141.0-kk.1'
 export const RELEASE_TAG = `v${DAEMON_VERSION}`
 export const RELEASE_BASE = 'https://github.com/fengwk/kk-studio/releases'
 export const PLATFORMS = ['linux-amd64', 'linux-arm64', 'macos-amd64', 'macos-arm64', 'windows-amd64']
-export const SYSTEM_BASH = '/bin/bash'
+// TEST_BASH lets an isolated Bash 3.2 build run the same suite. Production and CI keep /bin/bash.
+export const SYSTEM_BASH = process.env.TEST_BASH || '/bin/bash'
 
 export const REPOSITORY_ROOT = repositoryRoot()
 const TESTS_DIR = path.join(REPOSITORY_ROOT, 'scripts/daemon/tests')
+const PTY_RUN = path.join(TESTS_DIR, 'support/pty_run.py')
 export const UPDATE_SCRIPTS_TS = path.join(REPOSITORY_ROOT, 'daemon/src/update-scripts.ts')
 export const EXPORT_UPDATE_SCRIPT_MJS = path.join(TESTS_DIR, 'export-update-script.mjs')
 const SCRIPTS_DIR = path.join(REPOSITORY_ROOT, 'scripts/daemon')
@@ -428,12 +430,10 @@ esac
       ...extraEnv,
     }
     if (stderrTTY) {
-      const quote = value => "'" + value.replaceAll("'", "'\\''") + "'"
-      const command = [SYSTEM_BASH, this.script, ...args].map(quote).join(' ') + ' </dev/null'
-      const ptyArgs = process.platform === 'darwin'
-        ? ['-q', '/dev/null', SYSTEM_BASH, '-c', command]
-        : ['-q', '-e', '-c', command, '/dev/null']
-      return asResult(spawnSync('script', ptyArgs, { cwd: this.root, env, encoding: 'utf8' }))
+      // stdin is /dev/null while stderr is a real PTY, even on a noninteractive macOS runner.
+      return asResult(spawnSync('python3', [PTY_RUN, SYSTEM_BASH, this.script, ...args], {
+        cwd: this.root, env, encoding: 'utf8',
+      }))
     }
     return asResult(spawnSync(SYSTEM_BASH, [this.script, ...args], { cwd: this.root, env, encoding: 'utf8' }))
   }
