@@ -297,7 +297,7 @@ class AnthropicStreamAccumulatorTest {
 
     accumulator.handleEvent(
         "message_start",
-        "{\"type\":\"message_start\",\"message\":{\"id\":\"msg_3\",\"usage\":{}}}");
+        "{\"type\":\"message_start\",\"message\":{\"id\":\"msg_3\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5}}}");
     accumulator.handleEvent(
         "content_block_start",
         "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"c1\",\"name\":\"n1\"}}");
@@ -311,6 +311,7 @@ class AnthropicStreamAccumulatorTest {
 
     ProviderException ex = assertThrows(ProviderException.class, accumulator::finish);
     assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
+    assertEquals("invalid tool arguments JSON", ex.getMessage());
   }
 
   @Test
@@ -321,7 +322,7 @@ class AnthropicStreamAccumulatorTest {
     // 总数 20，但 5m + 1h = 10 + 5 = 15 != 20
     accumulator.handleEvent(
         "message_start",
-        "{\"type\":\"message_start\",\"message\":{\"usage\":{\"cache_creation_input_tokens\":20,\"cache_creation\":{\"ephemeral_5m\":10,\"ephemeral_1h\":5}}}}");
+        "{\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10,\"output_tokens\":0,\"cache_creation_input_tokens\":20,\"cache_creation\":{\"ephemeral_5m\":10,\"ephemeral_1h\":5}}}}");
     accumulator.handleEvent(
         "message_delta",
         "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":5}}");
@@ -329,6 +330,7 @@ class AnthropicStreamAccumulatorTest {
 
     ProviderException ex = assertThrows(ProviderException.class, accumulator::finish);
     assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
+    assertEquals("cache_creation tokens breakdown mismatch", ex.getMessage());
   }
 
   /**

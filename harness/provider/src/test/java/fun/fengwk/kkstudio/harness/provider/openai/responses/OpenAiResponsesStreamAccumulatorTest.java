@@ -835,11 +835,13 @@ class OpenAiResponsesStreamAccumulatorTest {
 
     String completedEvent =
         "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_term_no_arg\",\"status\":\"completed\","
+            + "\"usage\":{\"input_tokens\":10,\"output_tokens\":5},"
             + "\"output\":[{\"type\":\"function_call\",\"call_id\":\"call_term_1\",\"name\":\"get_time\"}]}}";
     accumulator.processEvent(MAPPER.readTree(completedEvent));
 
     ProviderException ex = assertThrows(ProviderException.class, accumulator::finish);
     assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
+    assertEquals("incomplete tool call missing arguments", ex.getMessage());
   }
 
   /** 意图：验证 COMPLETE 终态下仅在 terminal output 出现的 tool call 若 arguments 为非字符串类型则抛出 INVALID_RESPONSE。 */
@@ -852,6 +854,7 @@ class OpenAiResponsesStreamAccumulatorTest {
 
       String completedEvent =
           "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_term_non_text\",\"status\":\"completed\","
+              + "\"usage\":{\"input_tokens\":10,\"output_tokens\":5},"
               + "\"output\":[{\"type\":\"function_call\",\"call_id\":\"call_term_1\",\"name\":\"get_time\",\"arguments\":"
               + arg
               + "}]}}";
@@ -859,6 +862,8 @@ class OpenAiResponsesStreamAccumulatorTest {
 
       ProviderException ex = assertThrows(ProviderException.class, accumulator::finish);
       assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
+      // 非字符串 arguments 不会写入 buffer，finish 先于 JSON string 检查命中 missing arguments。
+      assertEquals("incomplete tool call missing arguments", ex.getMessage());
     }
   }
 
@@ -875,6 +880,7 @@ class OpenAiResponsesStreamAccumulatorTest {
 
       String completedEvent =
           "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_term_non_obj\",\"status\":\"completed\","
+              + "\"usage\":{\"input_tokens\":10,\"output_tokens\":5},"
               + "\"output\":[{\"type\":\"function_call\",\"call_id\":\"call_term_1\",\"name\":\"get_time\",\"arguments\":"
               + arg
               + "}]}}";
@@ -882,6 +888,7 @@ class OpenAiResponsesStreamAccumulatorTest {
 
       ProviderException ex = assertThrows(ProviderException.class, accumulator::finish);
       assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
+      assertEquals("tool call arguments cannot be parsed as JSON object", ex.getMessage());
     }
   }
 
@@ -893,11 +900,13 @@ class OpenAiResponsesStreamAccumulatorTest {
 
     String completedEvent =
         "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_term_bad_json\",\"status\":\"completed\","
+            + "\"usage\":{\"input_tokens\":10,\"output_tokens\":5},"
             + "\"output\":[{\"type\":\"function_call\",\"call_id\":\"call_term_1\",\"name\":\"get_time\",\"arguments\":\"{\\\"unclosed\\\":\"}]}}";
     accumulator.processEvent(MAPPER.readTree(completedEvent));
 
     ProviderException ex = assertThrows(ProviderException.class, accumulator::finish);
     assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
+    assertEquals("tool call arguments cannot be parsed as JSON object", ex.getMessage());
   }
 
   /** 意图：验证 COMPLETE 终态下仅在 terminal output 出现的 tool call 若缺失 id 抛出 INVALID_RESPONSE。 */
@@ -908,11 +917,13 @@ class OpenAiResponsesStreamAccumulatorTest {
 
     String completedEvent =
         "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_term_no_id\",\"status\":\"completed\","
+            + "\"usage\":{\"input_tokens\":10,\"output_tokens\":5},"
             + "\"output\":[{\"type\":\"function_call\",\"name\":\"get_time\",\"arguments\":\"{}\"}]}}";
     accumulator.processEvent(MAPPER.readTree(completedEvent));
 
     ProviderException ex = assertThrows(ProviderException.class, accumulator::finish);
     assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
+    assertEquals("tool call missing id", ex.getMessage());
   }
 
   /** 意图：验证 COMPLETE 终态下仅在 terminal output 出现的 tool call 若缺失 name 抛出 INVALID_RESPONSE。 */
@@ -923,11 +934,13 @@ class OpenAiResponsesStreamAccumulatorTest {
 
     String completedEvent =
         "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_term_no_name\",\"status\":\"completed\","
+            + "\"usage\":{\"input_tokens\":10,\"output_tokens\":5},"
             + "\"output\":[{\"type\":\"function_call\",\"call_id\":\"call_1\",\"arguments\":\"{}\"}]}}";
     accumulator.processEvent(MAPPER.readTree(completedEvent));
 
     ProviderException ex = assertThrows(ProviderException.class, accumulator::finish);
     assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
+    assertEquals("tool call missing name", ex.getMessage());
   }
 
   /** 意图：验证 LENGTH 终态下仅在 terminal output 出现的不完整 tool call 生成诊断且禁用回放。 */
@@ -1115,12 +1128,14 @@ class OpenAiResponsesStreamAccumulatorTest {
     // 终态 completed 显式提供 output，但其中的 function_call 缺失 arguments 字段
     String completedEvent =
         "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_buf_missing_term\",\"status\":\"completed\","
+            + "\"usage\":{\"input_tokens\":10,\"output_tokens\":5},"
             + "\"output\":[{\"type\":\"function_call\",\"id\":\"item_1\",\"call_id\":\"call_1\",\"name\":\"calc\"}]}}";
     accumulator.processEvent(MAPPER.readTree(completedEvent));
 
     // 根据 terminal output 权威重建原则，该 tool 在 terminal 中缺失 arguments，COMPLETE 必须拒绝
     ProviderException ex = assertThrows(ProviderException.class, accumulator::finish);
     assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
+    assertEquals("incomplete tool call missing arguments", ex.getMessage());
   }
 
   /** 意图：验证 terminal response 显式提供 output 数组时，权威替换前序流式草稿文本与思考内容，且不触发重复流式事件。 */
@@ -1733,10 +1748,12 @@ class OpenAiResponsesStreamAccumulatorTest {
     accumulator1.processEvent(
         MAPPER.readTree(
             "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_fc_missing_1\",\"status\":\"completed\","
+                + "\"usage\":{\"input_tokens\":10,\"output_tokens\":5},"
                 + "\"output\":[{\"type\":\"function_call\",\"name\":\"do_search\",\"arguments\":\"{\\\"q\\\":\\\"test\\\"}\"}]}}"));
 
     ProviderException ex1 = assertThrows(ProviderException.class, accumulator1::finish);
     assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex1.kind());
+    assertEquals("tool call missing id", ex1.getMessage());
 
     OpenAiResponsesStreamAccumulator accumulator2 =
         new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
@@ -1753,10 +1770,12 @@ class OpenAiResponsesStreamAccumulatorTest {
     accumulator2.processEvent(
         MAPPER.readTree(
             "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_fc_missing_2\",\"status\":\"completed\","
+                + "\"usage\":{\"input_tokens\":10,\"output_tokens\":5},"
                 + "\"output\":[{\"type\":\"function_call\",\"id\":\"fc_item_2\",\"call_id\":\"call_orig_2\",\"arguments\":\"{\\\"q\\\":\\\"test\\\"}\"}]}}"));
 
     ProviderException ex2 = assertThrows(ProviderException.class, accumulator2::finish);
     assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex2.kind());
+    assertEquals("tool call missing name", ex2.getMessage());
   }
 
   /**
