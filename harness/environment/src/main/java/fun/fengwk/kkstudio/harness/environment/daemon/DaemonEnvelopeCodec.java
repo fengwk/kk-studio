@@ -44,7 +44,9 @@ public final class DaemonEnvelopeCodec {
     if (envelope.invocationId() != null) {
       root.put("invocationId", envelope.invocationId());
     }
-    root.set("payload", readPayload(envelope.payloadJson()));
+    ObjectNode payload = readPayload(envelope.payloadJson());
+    requireEmptyExitPayload(envelope.messageType(), payload);
+    root.set("payload", payload);
     try {
       return OBJECT_MAPPER.writeValueAsString(root);
     } catch (JacksonException error) {
@@ -71,6 +73,7 @@ public final class DaemonEnvelopeCodec {
     if (payload == null || !payload.isObject()) {
       throw new DaemonProtocolException("payload must be a JSON object");
     }
+    requireEmptyExitPayload(messageType, payload);
     String invocationId = optionalText(root, "invocationId");
     EnvironmentId environmentId = decodeScope(root, messageType);
     try {
@@ -78,6 +81,13 @@ public final class DaemonEnvelopeCodec {
           protocolVersion, messageType, environmentId, invocationId, writeJson(payload));
     } catch (RuntimeException error) {
       throw new DaemonProtocolException("envelope fields are invalid", error);
+    }
+  }
+
+  /** 退出事实没有业务 payload；编码与解码必须在同一 wire 边界拒绝额外字段。 */
+  private static void requireEmptyExitPayload(DaemonMessageType messageType, JsonNode payload) {
+    if (messageType == DaemonMessageType.EXECUTION_EXITED && !payload.isEmpty()) {
+      throw new DaemonProtocolException("EXECUTION_EXITED payload must be an empty object");
     }
   }
 

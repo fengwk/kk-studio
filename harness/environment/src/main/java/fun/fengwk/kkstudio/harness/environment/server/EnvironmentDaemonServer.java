@@ -1662,9 +1662,6 @@ public final class EnvironmentDaemonServer
   private void handleExecutionExited(
       ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
     requireReady(state);
-    if (!envelopeCodec.readPayload(envelope).isEmpty()) {
-      throw new DaemonProtocolException("EXECUTION_EXITED payload must be an empty object");
-    }
     UUID invocationId = parseUuid(envelope.invocationId(), "invocationId");
     String daemonInstanceId = state.daemonInstanceId;
     if (daemonInstanceId == null) {
