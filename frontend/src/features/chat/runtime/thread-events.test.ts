@@ -336,6 +336,72 @@ describe('buildThreadEventTimeline', () => {
     expect(turnEnd.details.find((row) => row.label === '费用')?.value).toBe('$0.00125')
   })
 
+  // 定向用例：Turn 内存在缺 usage 的模型调用时，双向顺序均污染 TURN_END 的 cost 与 tokens 为未知
+  it('pollutes turn usage bidirectionally in thread events when a model output lacks usage', () => {
+    const knownUsage = {
+      usage: { inputTokens: 50, outputTokens: 25, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    }
+    const missingUsage = {
+      stopReason: 'COMPLETE', // 有 assistantMetadata，但缺失 usage 字段
+    }
+
+    // 1. 顺序 A: known + missing
+    const entriesForward = [
+      entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
+      {
+        ...entry('assistant-1', 'MESSAGE', messagePayload('ASSISTANT', [{ type: 'text', text: '1' }], knownUsage)),
+        usageCost: { currency: 'USD', amount: '0.05' },
+      },
+      entry('assistant-2', 'MESSAGE', messagePayload('ASSISTANT', [{ type: 'text', text: '2' }], missingUsage)),
+      entry('end-1', 'TURN_END', { outcome: 'COMPLETED' }),
+    ]
+    const eventsForward = build(entriesForward)
+    const turnEndForward = eventsForward.find((e) => e.id === 'entry:end-1')!
+    expect(turnEndForward.details.find((row) => row.label === '输入 tokens')?.value).toBe('暂无数据')
+    expect(turnEndForward.details.find((row) => row.label === '输出 tokens')?.value).toBe('暂无数据')
+    expect(turnEndForward.details.find((row) => row.label === '费用')?.value).toBe('暂无数据')
+    expect(turnEndForward.details.find((row) => row.label === '缓存写 tokens')?.value).toBe('暂无数据')
+
+    // 2. 顺序 B: missing + known（双向一致性）
+    const entriesBackward = [
+      entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
+      entry('assistant-1', 'MESSAGE', messagePayload('ASSISTANT', [{ type: 'text', text: '1' }], missingUsage)),
+      {
+        ...entry('assistant-2', 'MESSAGE', messagePayload('ASSISTANT', [{ type: 'text', text: '2' }], knownUsage)),
+        usageCost: { currency: 'USD', amount: '0.05' },
+      },
+      entry('end-1', 'TURN_END', { outcome: 'COMPLETED' }),
+    ]
+    const eventsBackward = build(entriesBackward)
+    const turnEndBackward = eventsBackward.find((e) => e.id === 'entry:end-1')!
+    expect(turnEndBackward.details.find((row) => row.label === '输入 tokens')?.value).toBe('暂无数据')
+    expect(turnEndBackward.details.find((row) => row.label === '输出 tokens')?.value).toBe('暂无数据')
+    expect(turnEndBackward.details.find((row) => row.label === '费用')?.value).toBe('暂无数据')
+    expect(turnEndBackward.details).toEqual(turnEndForward.details)
+  })
+
+  // 定向用例：Turn 内无 metadata 人工消息不污染已知的模型用量与费用
+  it('does not pollute known turn usage when followed by manual assistant message without metadata', () => {
+    const knownUsage = {
+      usage: { inputTokens: 80, outputTokens: 40, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    }
+    const entries = [
+      entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
+      {
+        ...entry('assistant-1', 'MESSAGE', messagePayload('ASSISTANT', [{ type: 'text', text: 'model' }], knownUsage)),
+        usageCost: { currency: 'USD', amount: '0.008' },
+      },
+      // 人工 ASSISTANT：无 assistantMetadata
+      entry('assistant-manual', 'MESSAGE', messagePayload('ASSISTANT', [{ type: 'text', text: 'manual' }])),
+      entry('end-1', 'TURN_END', { outcome: 'COMPLETED' }),
+    ]
+    const events = build(entries)
+    const turnEnd = events.find((e) => e.id === 'entry:end-1')!
+    expect(turnEnd.details.find((row) => row.label === '输入 tokens')?.value).toBe('80')
+    expect(turnEnd.details.find((row) => row.label === '输出 tokens')?.value).toBe('40')
+    expect(turnEnd.details.find((row) => row.label === '费用')?.value).toBe('$0.008')
+  })
+
   it('attributes a compaction result usage to its turn and flags its historical preview eligibility', () => {
     const entries = [
       entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),

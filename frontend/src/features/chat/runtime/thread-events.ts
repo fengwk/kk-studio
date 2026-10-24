@@ -6,10 +6,10 @@ import type {
   RealtimeToolStream,
 } from '@/features/chat/runtime/thread-realtime/tool-stream'
 import {
+  accumulateTurnUsage,
   contentText,
   formatTurnUsageText,
   formatUsageCost,
-  mergeTurnUsage,
   parseAssistantUsage,
 } from '@/features/chat/runtime/thread-timeline/content-utils'
 import type {
@@ -158,7 +158,7 @@ function hasAssistantMetadata(payload: Record<string, unknown>): boolean {
 
 /**
  * 把一条真实模型输出（ASSISTANT MESSAGE 或 COMPACTION 结果）的 canonical metadata 与
- * 读取投影费用并入当前 Turn 的挂起 usage；无事实时原样返回。
+ * 读取投影费用并入当前 Turn 的挂起 usage；无事实时原样返回；缺 usage 时未知传播。
  */
 function accumulateUsage(
   pending: TurnUsage | null,
@@ -166,10 +166,7 @@ function accumulateUsage(
   entry: HarnessSessionEntryDTO,
 ): TurnUsage | null {
   const parsed = parseAssistantUsage(asRecord(payload.assistantMetadata), entry.usageCost ?? null)
-  if (parsed == null) {
-    return pending
-  }
-  return pending == null ? parsed : mergeTurnUsage(pending, parsed)
+  return accumulateTurnUsage(pending, parsed)
 }
 
 function formatDisplayJson(value: unknown): string {
@@ -449,10 +446,34 @@ function projectEntryRecord(
       const details = [...base.details]
       if (usage != null) {
         details.push(
-          { label: translate('ai.runtime.event.detail.input'), value: String(usage.input) },
-          { label: translate('ai.runtime.event.detail.output'), value: String(usage.output) },
-          { label: translate('ai.runtime.event.detail.cacheRead'), value: String(usage.cacheRead) },
-          { label: translate('ai.runtime.event.detail.cacheWrite'), value: String(usage.cacheWrite) },
+          {
+            label: translate('ai.runtime.event.detail.input'),
+            value:
+              usage.input != null
+                ? String(usage.input)
+                : translate('ai.runtime.status.noData'),
+          },
+          {
+            label: translate('ai.runtime.event.detail.output'),
+            value:
+              usage.output != null
+                ? String(usage.output)
+                : translate('ai.runtime.status.noData'),
+          },
+          {
+            label: translate('ai.runtime.event.detail.cacheRead'),
+            value:
+              usage.cacheRead != null
+                ? String(usage.cacheRead)
+                : translate('ai.runtime.status.noData'),
+          },
+          {
+            label: translate('ai.runtime.event.detail.cacheWrite'),
+            value:
+              usage.cacheWrite != null
+                ? String(usage.cacheWrite)
+                : translate('ai.runtime.status.noData'),
+          },
           {
             label: translate('ai.runtime.event.detail.reasoning'),
             value:

@@ -341,8 +341,8 @@ describe('Turn usage after TURN_END', () => {
     expect(metas.map((message) => (message as { endEntryId?: string }).endEntryId)).toEqual(['end-1'])
   })
 
-  // 只认 canonical backend 字段名：snake_case / 常见别名与旧 metadata.cost 一律不进入 usage
-  it('ignores snake_case aliases and legacy metadata.cost', () => {
+  // 只认 canonical backend 字段名：snake_case / 常见别名与旧 metadata.cost 一律不进入 usage，使完整用量变 unknown
+  it('ignores snake_case aliases and legacy metadata.cost and propagates unknown', () => {
     const timeline = buildThreadTimeline(
       [
         turnStart(),
@@ -364,6 +364,46 @@ describe('Turn usage after TURN_END', () => {
       [],
       [],
     )
+    // 携带模型 metadata 但 usage 非法：投影 unknown turnUsage，不采信别名数字或旧 cost
+    const metaWithUsage = timeline.messages.find(
+      (message) => message.role === 'meta' && message.turnUsage != null,
+    )
+    expect(metaWithUsage).toBeDefined()
+    expect(metaWithUsage?.role === 'meta' ? metaWithUsage.turnUsage : undefined).toMatchObject({
+      input: null,
+      output: null,
+      cacheRead: null,
+      cacheWrite: null,
+      cost: null,
+    })
+    expect(timeline.messages.filter((message) => message.role === 'meta').map((message) => message.id))
+      .toEqual(['meta-usage-entry-assistant-1'])
+  })
+
+  it.each([false, true])('propagates missing model usage through turn projection in either order (%s)', (reverse) => {
+    const known = assistant('known', 'known', usageMetadata(10, 2))
+    known.usageCost = { currency: 'USD', amount: '0.05' }
+    const unknown = assistant('unknown', 'unknown', { stopReason: 'COMPLETE' })
+    const outputs = reverse ? [unknown, known] : [known, unknown]
+    const timeline = buildThreadTimeline([turnStart(), ...outputs, turnEnd()], [], [])
+    const summary = timeline.messages.find((message) => message.role === 'meta' && message.turnUsage != null)
+    expect(summary?.role === 'meta' ? summary.turnUsage : undefined).toMatchObject({
+      input: null, output: null, cacheRead: null, cacheWrite: null, cost: null,
+    })
+  })
+
+  it('omits turn usage summary for manual assistant messages without assistantMetadata', () => {
+    const timeline = buildThreadTimeline(
+      [
+        turnStart(),
+        userMessage('a'),
+        assistant('assistant-manual', '人工回复'),
+        turnEnd(),
+      ],
+      [],
+      [],
+    )
+    // 无模型 metadata 的人工 ASSISTANT 不计，不投影任何 turnUsage meta message
     expect(timeline.messages.some((message) =>
       message.role === 'meta' && message.turnUsage != null)).toBe(false)
     expect(timeline.messages.filter((message) => message.role === 'meta').map((message) => message.id))

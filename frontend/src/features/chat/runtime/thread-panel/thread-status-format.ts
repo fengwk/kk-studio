@@ -126,13 +126,13 @@ export function formatUsageDetails(usage: TurnUsage, t: TranslateFn): string {
   const cost = formatUsageCost(usage.cost)
   return [
     t('ai.runtime.status.usageTokensDetail', {
-      input: String(usage.input),
-      output: String(usage.output),
+      input: usage.input != null ? String(usage.input) : noData,
+      output: usage.output != null ? String(usage.output) : noData,
       reasoning: usage.reasoning != null ? String(usage.reasoning) : noData,
     }),
     t('ai.runtime.status.usageCacheDetail', {
-      cacheRead: String(usage.cacheRead),
-      cacheWrite: String(usage.cacheWrite),
+      cacheRead: usage.cacheRead != null ? String(usage.cacheRead) : noData,
+      cacheWrite: usage.cacheWrite != null ? String(usage.cacheWrite) : noData,
     }),
     t('ai.runtime.status.usageCostDetail', {
       cost: cost ?? noData,
