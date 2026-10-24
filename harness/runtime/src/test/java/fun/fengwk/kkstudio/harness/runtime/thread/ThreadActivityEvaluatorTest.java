@@ -203,9 +203,18 @@ class ThreadActivityEvaluatorTest {
     assertFalse(
         ThreadActivityEvaluator.isQuiescent(
             ThreadExecutionControl.RUNNABLE, idle, false, true, 0, false));
-    assertFalse(
+    // STOPPED 保留通知但不自启：输入需求不阻挡收敛，与上方 RUNNABLE 输入需求仍阻挡形成对照。
+    assertTrue(
         ThreadActivityEvaluator.isQuiescent(
             ThreadExecutionControl.STOPPED, idle, false, true, 0, false));
+    // 未确认执行无论 STOPPED 与否都保持 RUNNING，且不得判定为收敛。
+    assertEquals(
+        ThreadRuntimeStatus.RUNNING,
+        ThreadActivityEvaluator.evaluate(
+            ThreadExecutionControl.STOPPED, idle, false, false, 0, true));
+    assertFalse(
+        ThreadActivityEvaluator.isQuiescent(
+            ThreadExecutionControl.STOPPED, idle, false, false, 0, true));
     assertFalse(
         ThreadActivityEvaluator.isQuiescent(
             ThreadExecutionControl.RUNNABLE, idle, false, false, 1, false));
