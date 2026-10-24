@@ -20,6 +20,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
@@ -32,22 +35,37 @@ import fun.fengwk.kkstudio.ide.protocol.IdeReply;
 import fun.fengwk.kkstudio.ide.protocol.IdeStreamCreditWindow;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.net.InetAddress;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * IDE 反向数据面端点的端到端网络契约：真实 Tomcat 上由真实 WebSocket Daemon peer 传输 20 MiB HTTP 响应体。
+ * IDE 反向数据面端点的端到端网络契约：真实 Tomcat 上由真实 WebSocket Daemon peer 传输 20 MiB HTTP 响应体， 以及通过真实 Node 24 进程运行
+ * Daemon 传输模块加载与交付流式 CSS。
  *
- * <p>与 {@link IdeGatewayDataPlaneTest} 的纯组件测试互补：这里走真实 servlet 过滤器（host guard）、真实反向 WebSocket 握手与
- * ticket 消费、真实 credit 往返，验证「浏览器 HTTP → 网关 → 反向 WS → Daemon」整条链路，而不仅是状态机。
+ * <p>Node 进程测试前置：本仓 {@code daemon} 模块已完成 {@code npm ci} 与 {@code npm run build} 生成 {@code dist}；系统
+ * PATH 上存在 Node 24（或通过环境变量 {@code NODE_BIN} / 系统属性 {@code node.bin} 覆盖）。
+ *
+ * <p>受控慢浏览器读取说明：测试通过分块读取与延迟施加慢速消费，但由于操作系统套接字缓冲区及 Tomcat 内部缓冲区的存在，
+ * 慢浏览器读取测试存在缓冲吸收局限，不能等同于稳定的生产端到端反压保证；其核心意图在于验证在非突发即时消费链路下， 数据包在 credit 窗口推进与连接收尾时能保持完整交付与正常关闭。
  */
 class IdeReverseStreamEndpointIntegrationTest extends WebPostgresTestSupport {
 
@@ -55,6 +73,8 @@ class IdeReverseStreamEndpointIntegrationTest extends WebPostgresTestSupport {
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
 
   private static final int BODY_BYTES = 20 * 1024 * 1024;
+
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
 
   @LocalServerPort private int port;
 
@@ -158,6 +178,239 @@ class IdeReverseStreamEndpointIntegrationTest extends WebPostgresTestSupport {
       socket.cancel();
     } finally {
       shutdown(daemon);
+    }
+  }
+
+  /** 约 204KB Brotli CSS 经真实 Node 进程传输；数据量在 256 KiB credit 窗口内，全量字节/hash 与 Node 报告严格一致。 */
+  @Test
+  void streamsBrotliCssAbout204KbThroughRealNodeProcess() throws Exception {
+    runNodeCss("204k", false);
+  }
+
+  /**
+   * 跨 256KiB credit 窗口的约 307KB Brotli CSS 经真实 Node 进程传输；必须依赖多轮 ACK 往返推进，全量字节/hash 与 Node 报告严格一致。
+   */
+  @Test
+  void streamsBrotliCssCrossing256KibWindowAbout307KbThroughRealNodeProcess() throws Exception {
+    runNodeCss("307k", false);
+  }
+
+  /** 约 307KB Brotli CSS 受控慢浏览器读取；分块读取并注入受控延迟，验证 Node/网关端到端无损交付（慢浏览器不能声称稳定生产反压，存在缓冲局限）。 */
+  @Test
+  void streamsBrotliCssCrossing256KibWindowUnderControlledSlowBrowserRead() throws Exception {
+    runNodeCss("307k", true);
+  }
+
+  private void runNodeCss(String targetSize, boolean slow) throws Exception {
+    DaemonConnectionIdentity identity =
+        new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
+    when(endpoint.connectionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
+    String requestPath = "/out/vs/code/browser/workbench/workbench.css";
+    AtomicReference<NodeExecution> nodeRef = new AtomicReference<>();
+    when(endpoint.requestIde(eq(ENVIRONMENT), any()))
+        .thenAnswer(
+            invocation -> {
+              IdeCommand command = invocation.getArgument(1);
+              assertEquals(IdeAction.OPEN_STREAM, command.action());
+              String streamUrl = streamUrl(command.ticket());
+              NodeExecution node = startNodeFixture("br", streamUrl, requestPath, targetSize);
+              nodeRef.set(node);
+              CompletableFuture<IdeReply> reply = new CompletableFuture<>();
+              reply.complete(IdeReply.ok(null, null, null));
+              return new IdeRequest(identity, UUID.randomUUID(), reply);
+            });
+
+    String cookie = openSession(identity, UUID.randomUUID().toString(), "/home/dev/project");
+    OkHttpClient browser = localhostClient();
+    try {
+      byte[] body;
+      try (Response response =
+          browser
+              .newCall(
+                  new Request.Builder()
+                      .url(
+                          "http://localhost:"
+                              + port
+                              + "/environment-ide/"
+                              + ENVIRONMENT
+                              + requestPath)
+                      .header("Cookie", cookieHeader(cookie))
+                      .header("Accept-Encoding", "br")
+                      .build())
+              .execute()) {
+        assertEquals(200, response.code());
+        assertEquals("text/css", response.header("Content-Type"));
+        assertEquals("br", response.header("Content-Encoding"));
+        assertNotNull(response.body(), "response body must not be null");
+        if (slow) {
+          ByteArrayOutputStream baos = new ByteArrayOutputStream();
+          byte[] buf = new byte[8192];
+          try (InputStream in = response.body().byteStream()) {
+            int read;
+            while ((read = in.read(buf)) != -1) {
+              baos.write(buf, 0, read);
+              Thread.sleep(10);
+            }
+          }
+          body = baos.toByteArray();
+        } else {
+          body = response.body().bytes();
+        }
+      }
+
+      NodeExecution node = nodeRef.get();
+      assertNotNull(node, "node fixture must have started");
+      try (node) {
+        JsonNode report = node.awaitReport(MAPPER);
+        assertTrue(report.get("exchangeOk").asBoolean(), "exchangeOk must be true");
+        assertTrue(report.get("fixtureFinished").asBoolean(), "fixtureFinished must be true");
+        assertNotNull(report.get("closeObserved"), "closeObserved must not be null");
+        assertEquals(1000, report.get("closeObserved").get("code").asInt());
+
+        int sentBytes = report.get("sentBytes").asInt();
+        String sentSha = report.get("sentSha256").asText();
+        assertEquals(sentBytes, body.length);
+        assertEquals(sentSha, sha256Hex(body));
+
+        if ("204k".equals(targetSize)) {
+          assertTrue(
+              body.length >= 203_000 && body.length <= 205_000,
+              "204k target must be within [203000, 205000], got " + body.length);
+        } else {
+          assertTrue(
+              body.length >= 306_000 && body.length <= 309_000,
+              "307k target must be within [306000, 309000], got " + body.length);
+          assertTrue(body.length > 262_144, "307k must exceed 256 KiB credit window");
+        }
+
+        JsonNode timing = report.get("timing");
+        assertNotNull(timing, "timing must be reported");
+        assertTrue(timing.get("firstBodyMs").isNumber(), "firstBodyMs must be a number");
+        assertTrue(timing.get("lastBodyMs").isNumber(), "lastBodyMs must be a number");
+        assertTrue(timing.get("endMs").isNumber(), "endMs must be a number");
+        assertTrue(timing.get("closeMs").isNumber(), "closeMs must be a number");
+        long firstBodyMs = timing.get("firstBodyMs").asLong();
+        long lastBodyMs = timing.get("lastBodyMs").asLong();
+        long endMs = timing.get("endMs").asLong();
+        long closeMs = timing.get("closeMs").asLong();
+        assertTrue(firstBodyMs <= lastBodyMs, "firstBodyMs must precede or equal lastBodyMs");
+        assertTrue(lastBodyMs <= endMs, "lastBodyMs must precede or equal endMs");
+        assertTrue(endMs <= closeMs, "endMs must precede or equal closeMs");
+      }
+    } finally {
+      shutdown(browser);
+      NodeExecution startedNode = nodeRef.get();
+      if (startedNode != null) {
+        startedNode.close();
+      }
+    }
+  }
+
+  private static String resolveNodeBinary() {
+    String envNode = System.getenv("NODE_BIN");
+    if (envNode != null && !envNode.isBlank()) {
+      return envNode;
+    }
+    String propNode = System.getProperty("node.bin");
+    if (propNode != null && !propNode.isBlank()) {
+      return propNode;
+    }
+    return "node";
+  }
+
+  private static Path resolveFixturePath() {
+    Path path =
+        Path.of(
+                "src/test/resources/fun/fengwk/kkstudio/web/environment/ide/ide-stream-node-fixture.mjs")
+            .toAbsolutePath();
+    if (Files.exists(path)) {
+      return path;
+    }
+    path =
+        Path.of(
+                "web/src/test/resources/fun/fengwk/kkstudio/web/environment/ide/ide-stream-node-fixture.mjs")
+            .toAbsolutePath();
+    if (Files.exists(path)) {
+      return path;
+    }
+    throw new IllegalStateException("Cannot find ide-stream-node-fixture.mjs");
+  }
+
+  private static Path resolveRepoRoot() {
+    Path dir = resolveFixturePath();
+    while (dir != null && dir.getParent() != null) {
+      if (Files.exists(dir.resolve("daemon/dist/network.js"))) {
+        return dir;
+      }
+      dir = dir.getParent();
+    }
+    throw new IllegalStateException("Cannot find repo root containing daemon/dist/network.js");
+  }
+
+  private static NodeExecution startNodeFixture(
+      String mode, String streamUrl, String requestPath, String targetSize) throws IOException {
+    String nodeBin = resolveNodeBinary();
+    Path fixture = resolveFixturePath();
+    Path repoRoot = resolveRepoRoot();
+    ProcessBuilder pb =
+        new ProcessBuilder(nodeBin, fixture.toString(), mode, streamUrl, requestPath, targetSize);
+    pb.directory(repoRoot.toFile());
+    pb.environment().put("REPO_ROOT", repoRoot.toString());
+    pb.environment().put("NODE_V8_COVERAGE", "");
+    Process process = pb.start();
+    CompletableFuture<String> stdout =
+        CompletableFuture.supplyAsync(
+            () -> {
+              try {
+                return new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+              } catch (IOException e) {
+                throw new CompletionException(e);
+              }
+            });
+    CompletableFuture<String> stderr =
+        CompletableFuture.supplyAsync(
+            () -> {
+              try {
+                return new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
+              } catch (IOException e) {
+                throw new CompletionException(e);
+              }
+            });
+    return new NodeExecution(process, stdout, stderr);
+  }
+
+  private static String sha256Hex(byte[] bytes) {
+    try {
+      return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+    } catch (NoSuchAlgorithmException e) {
+      throw new IllegalStateException("SHA-256 not available", e);
+    }
+  }
+
+  private record NodeExecution(
+      Process process, CompletableFuture<String> stdout, CompletableFuture<String> stderr)
+      implements AutoCloseable {
+
+    JsonNode awaitReport(ObjectMapper mapper) throws Exception {
+      boolean exited = process.waitFor(30, TimeUnit.SECONDS);
+      if (!exited) {
+        process.destroyForcibly();
+      }
+      String err = stderr.get(5, TimeUnit.SECONDS);
+      String out = stdout.get(5, TimeUnit.SECONDS);
+      System.out.println("[node-fixture stderr]\n" + err);
+      System.out.println("[node-fixture report]\n" + out);
+      assertTrue(exited, "Node fixture must exit within timeout. Stderr: " + err);
+      assertEquals(0, process.exitValue(), "Node fixture must exit cleanly. Stderr: " + err);
+      assertTrue(!out.isBlank(), "Node fixture stdout must not be blank. Stderr: " + err);
+      return mapper.readTree(out);
+    }
+
+    @Override
+    public void close() {
+      if (process.isAlive()) {
+        process.destroyForcibly();
+      }
     }
   }
 
