@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.harness.runtime.StopCommand;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
@@ -809,14 +810,12 @@ class PostgresqlJoinAcceptanceRollbackTest {
     assertNoRow("harness_thread_join", "invocation_id", joinBInvocationId);
     assertNoRow("durable_work", "target_id", childBThreadId);
 
-    // 释放额度：冻结 childA 未完成 Join 的 terminal 结果（新模型按未完成 Join 计数，不再依赖 IDLE）
-    store.transaction(
-        tx -> {
-          ThreadState child = tx.lockThread(childAThreadId).orElseThrow();
-          ThreadJoin childJoin = tx.findJoin(joinAInvocationId).orElseThrow();
-          tx.updateJoin(childJoin.match(child.headEntryId(), null, T1));
-          return null;
-        });
+    // 经真实 Stop 路径原子冻结结果并交付父通知，释放未完成 Join 的额度。
+    ThreadState child = store.transaction(tx -> tx.findThread(childAThreadId).orElseThrow());
+    runtime.stop(new StopCommand(childAThreadId, UUID.randomUUID(), child.version()));
+    ThreadJoin settled = store.transaction(tx -> tx.findJoin(joinAInvocationId).orElseThrow());
+    assertTrue(settled.matched());
+    assertNotNull(settled.deliveryCommandSequence());
     assertEquals(0, incompleteSubagentJoins());
 
     // 同一请求在额度释放后成功创建
