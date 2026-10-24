@@ -674,7 +674,9 @@ class StudioHarnessCommandBatchControllerTest {
         null,
         List.of(),
         List.of(),
-        List.of());
+        List.of(),
+        0,
+        false);
   }
 
   private static String batch(String target) {

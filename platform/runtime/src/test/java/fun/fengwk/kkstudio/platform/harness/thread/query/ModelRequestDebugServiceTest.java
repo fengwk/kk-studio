@@ -481,7 +481,7 @@ class ModelRequestDebugServiceTest {
   private static ThreadSnapshot idleSnapshot() {
     EntryPath path = basePath();
     return new ThreadSnapshot(
-        thread(USER_ENTRY_ID), path, List.of(), null, List.of(), List.of(), List.of());
+        thread(USER_ENTRY_ID), path, List.of(), null, List.of(), List.of(), List.of(), 0, false);
   }
 
   /** Tool context：head 是 Assistant 结果，而活动 Invocation 的 request head 是更早的 USER Entry。 */
@@ -504,7 +504,15 @@ class ModelRequestDebugServiceTest {
             NOW,
             NOW);
     return new ThreadSnapshot(
-        thread(ASSISTANT_ENTRY_ID), path, List.of(), model, List.of(), List.of(), List.of());
+        thread(ASSISTANT_ENTRY_ID),
+        path,
+        List.of(),
+        model,
+        List.of(),
+        List.of(),
+        List.of(),
+        0,
+        false);
   }
 
   private static EntryPath basePath() {

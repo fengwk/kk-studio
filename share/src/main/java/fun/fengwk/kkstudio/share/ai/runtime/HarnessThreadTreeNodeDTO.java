@@ -30,11 +30,11 @@ public class HarnessThreadTreeNodeDTO {
   /** 当前 head 路径生效的模型选择。 */
   private HarnessModelSelectionDTO model;
 
-  /** Runtime 的细分状态名称。 */
+  /** Runtime 运行状态：{@code RUNNING / WAITING / IDLE}。 */
   private String status;
 
-  /** {@code status != IDLE}。 */
-  private boolean processing;
+  /** 持久执行控制：{@code RUNNABLE} 或 {@code STOPPED}。 */
+  private String executionControl;
 
   /** 当前 root-to-head 的模型工作轮数，不含 COMPACTION 与 STOP。 */
   private int turnCount;

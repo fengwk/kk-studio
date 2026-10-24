@@ -82,7 +82,6 @@ class AgentTaskServiceTest {
     SpawnRequest spawned = spawn.getValue();
     assertEquals(SpawnTrigger.CONTROLLER, spawned.trigger());
     assertEquals(JoinDelivery.RECEIPT_ONLY, spawned.delivery());
-    assertFalse(spawned.countsTowardQuota());
     assertNull(spawned.parentThreadId());
     assertNull(spawned.expectedParentHeadEntryId());
     assertEquals(ThreadConstraints.NONE, spawned.constraints());
@@ -93,7 +92,7 @@ class AgentTaskServiceTest {
   }
 
   @Test
-  void childTaskNotifiesItsParentAndCountsTowardTheQuota() {
+  void childTaskNotifiesItsParent() {
     AcceptedCommands accepted = accepted(UUID.randomUUID());
     when(runtime.spawn(any())).thenReturn(accepted);
     UUID parentId = UUID.randomUUID();
@@ -104,7 +103,6 @@ class AgentTaskServiceTest {
     ArgumentCaptor<SpawnRequest> spawn = ArgumentCaptor.forClass(SpawnRequest.class);
     verify(runtime).spawn(spawn.capture());
     assertEquals(JoinDelivery.NOTIFY_PARENT, spawn.getValue().delivery());
-    assertTrue(spawn.getValue().countsTowardQuota());
     assertEquals(parentId, spawn.getValue().parentThreadId());
     assertEquals(parentHead, spawn.getValue().expectedParentHeadEntryId());
   }
@@ -128,7 +126,6 @@ class AgentTaskServiceTest {
             NOW,
             NOW,
             JoinDelivery.RECEIPT_ONLY,
-            false,
             null);
     when(runtime.findJoin(ticketId)).thenReturn(Optional.of(join));
     when(runtime.projectJoinReceipt(ticketId)).thenReturn(Optional.empty());
@@ -654,7 +651,6 @@ class AgentTaskServiceTest {
         NOW,
         NOW,
         JoinDelivery.NOTIFY_PARENT,
-        true,
         superseded ? UUID.randomUUID() : null);
   }
 }

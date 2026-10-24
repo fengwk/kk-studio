@@ -7,8 +7,8 @@
 ## 执行根与权限
 
 `parentThreadId` 是不可变执行父关系。独立 fork 是新执行根，不与历史来源形成执行父子关系。
-Thread 的 `status` 和 `processing` 仅描述自身；根空闲而后代活跃是合法状态。
-根 Stop 覆盖全部后代，不能按根本地状态或 Join 是否已结算缩小范围。
+Thread 的 `status`（`RUNNING` / `WAITING` / `IDLE`）和 `executionControl`（`RUNNABLE` / `STOPPED`）仅描述自身，彼此正交；根空闲或等待而后代活跃是合法状态。
+根 Stop 覆盖全部后代，不能按根本地状态或 Join 是否已结算缩小范围。注意：StopControl 清理在途调用与调度义务后，缺乏外部退出 durable 确认，三态无法建立外部物理进程是否已退出的事实。
 
 每个 Thread 持久化不可变的执行根 `root_thread_id`（根指向自身，子代理继承父 Thread 的执行根）
 和 `yolo_enabled`。开关只属于执行根，子代理恒为 false，其有效值取自执行根。
@@ -70,7 +70,7 @@ AgentPane：目标绑定、身份分流、pane 内查看路径、一次只读投
 `ThreadWidgetStack` 负责位置和排列；`ThreadWidgetPanel` 只负责标题、可选操作、外观与
 有界滚动；具体 Widget 提供业务内容。不使用 Widget 注册协议或通用面板管理器。
 
-活跃子代理树基于完整执行树，筛选 processing 节点并保留其祖先。祖先的空闲状态如实显示，
+活跃子代理树基于完整执行树，筛选非 IDLE 节点（RUNNING / WAITING）并保留其祖先。祖先的空闲状态如实显示，
 活跃数量不含纯层级祖先。根面板不重复绘制根节点。每代理一行，稳定顺序，节点过多时滚动，
 无活跃后代时不留空壳。根本地空闲不能停止查询后代；查询失败不伪装成最新数据。
 

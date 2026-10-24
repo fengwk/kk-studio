@@ -574,7 +574,6 @@ class HarnessRuntimeStopSubtreeTest {
                   T0,
                   T0,
                   JoinDelivery.NOTIFY_PARENT,
-                  true,
                   null));
           return modelId;
         });
@@ -662,7 +661,6 @@ class HarnessRuntimeStopSubtreeTest {
                   T0,
                   T0,
                   JoinDelivery.NOTIFY_PARENT,
-                  true,
                   null));
           return null;
         });

@@ -75,7 +75,6 @@ public final class CompactionChildSpawn {
             new ThreadConstraints(outputCap, true, false),
             SpawnTrigger.RUNTIME,
             JoinDelivery.SETTLE_OWNER_TURN,
-            false,
             SpawnRequest.Budget.unlimited(),
             ticketId,
             requestHash));
