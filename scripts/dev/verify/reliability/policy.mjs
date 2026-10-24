@@ -342,7 +342,7 @@ export function aggregateUsage(items) {
     if (usage.costTotal == null || item?.costKnown === false) {
       hasUnknownCost = true
     } else {
-      total.costTotal += validCostAmount(usage.costTotal)
+      total.costTotal = addCostAmounts(total.costTotal, validCostAmount(usage.costTotal))
     }
   }
 
@@ -616,7 +616,10 @@ function addAssistantMetadata(total, metadata, usageCost, costAccounting) {
     }
     const rawAmount = cost.amount
     if (currency === 'USD' && rawAmount != null) {
-      costAccounting.costTotal += validCostAmount(rawAmount)
+      costAccounting.costTotal = addCostAmounts(
+        costAccounting.costTotal,
+        validCostAmount(rawAmount),
+      )
       costAccounting.costRows++
     }
   }
@@ -662,11 +665,21 @@ function addTokenCounts(a, b, field) {
 
 function validCostAmount(value) {
   if (value == null) return null
-  const number = Number(value)
+  const legalNumber = typeof value === 'number' && Number.isFinite(value) && value >= 0
+  const legalDecimal = typeof value === 'string' && /^(?:\d+(?:\.\d+)?|\.\d+)(?:e[+-]?\d+)?$/i.test(value)
+  const number = legalNumber || legalDecimal ? Number(value) : Number.NaN
   if (!Number.isFinite(number) || number < 0) {
     throw new ReliabilityError('model', `invalid non-negative cost value: ${value}`)
   }
   return number
+}
+
+function addCostAmounts(left, right) {
+  const sum = left + right
+  if (!Number.isFinite(sum)) {
+    throw new ReliabilityError('model', `cost addition overflow: ${left} + ${right}`)
+  }
+  return sum
 }
 
 function normalizeShellWhitespace(value) {
