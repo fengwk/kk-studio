@@ -81,7 +81,8 @@ public record ThreadSnapshot(
                         && start.reason() == TurnStartReason.COMPACTION
                         && thread.id().equals(start.ownerThreadId()))
             .orElse(false);
-    boolean hasInputDemand = !queuedCommands.isEmpty() || unconsumedAppliedNotifications;
+    boolean hasInputDemand =
+        ThreadInputDemand.hasQueuedDemand(queuedCommands) || unconsumedAppliedNotifications;
     return ThreadActivityEvaluator.evaluate(
         thread.executionControl(),
         context,
