@@ -105,10 +105,7 @@ class StudioHarnessThreadControllerTest {
             .build();
   }
 
-  /**
-   * 意图：父 Thread 本地已静止时，快照的 status 只由该 Thread 自身投影为 IDLE 且 executionControl=RUNNABLE，不再递归子树表达忙碌；
-   * 同时必须暴露执行父关系。该路由不依赖任何 task join 侧事实，因此服务端不额外注入任何委派状态。
-   */
+  /** 无本地工作和未完成直接委派时透传 IDLE/RUNNABLE，并暴露执行父关系；路由不另行推导状态。 */
   @Test
   void snapshotProjectsIdleParentStatusAndParentThreadId() throws Exception {
     when(runtime.getThreadSnapshot(id(1)))
