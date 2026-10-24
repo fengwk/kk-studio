@@ -127,6 +127,9 @@ const fs = require('node:fs')
 const path = require('node:path')
 
 const args = process.argv.slice(2)
+if (process.env.FAKE_CURL_LOG) {
+  fs.appendFileSync(process.env.FAKE_CURL_LOG, JSON.stringify(args) + '\\n')
+}
 let url = null
 let output = null
 let writeOut = false
@@ -337,6 +340,18 @@ export class InstallFixture {
     writeExecutable(path.join(this.bindir, 'uname'), this.unameShim())
     if (hostOs === 'Linux') {
       writeExecutable(path.join(this.bindir, 'systemctl'), SYSTEMCTL_SHIM)
+      writeExecutable(path.join(this.bindir, 'journalctl'), `#!/bin/sh
+case "$*" in
+  *"--show-cursor"*)
+    [ "$FAKE_NO_CURSOR" = 1 ] && exit 0
+    printf '%s\\n' '-- cursor: fixture-cursor' ;;
+  *"--after-cursor fixture-cursor"*)
+    printf '%s\\n' "$FAKE_CURRENT_JOURNAL"
+    [ "$FAKE_JOURNAL_FAIL" = 1 ] && exit 1 ;;
+  *) printf '%s\\n' 'daemon failed: environment registration is rejected: invalid registration token old-secret' ;;
+esac
+exit 0
+`)
     } else {
       writeExecutable(path.join(this.bindir, 'launchctl'), LAUNCHCTL_SHIM)
       writeExecutable(path.join(this.bindir, 'plutil'), PLUTIL_SHIM)
@@ -396,7 +411,7 @@ esac
     return [configFile, tokenFile]
   }
 
-  run(args, { extraEnv = {} } = {}) {
+  run(args, { extraEnv = {}, stderrTTY = false } = {}) {
     mkdirSync(path.join(this.root, 'tmp'), { recursive: true, mode: 0o700 })
     const env = {
       ...process.env,
@@ -412,6 +427,14 @@ esac
       TMPDIR: path.join(this.root, 'tmp'),
       ...extraEnv,
     }
+    if (stderrTTY) {
+      const quote = value => "'" + value.replaceAll("'", "'\\''") + "'"
+      const command = [SYSTEM_BASH, this.script, ...args].map(quote).join(' ') + ' </dev/null'
+      const ptyArgs = process.platform === 'darwin'
+        ? ['-q', '/dev/null', SYSTEM_BASH, '-c', command]
+        : ['-q', '-e', '-c', command, '/dev/null']
+      return asResult(spawnSync('script', ptyArgs, { cwd: this.root, env, encoding: 'utf8' }))
+    }
     return asResult(spawnSync(SYSTEM_BASH, [this.script, ...args], { cwd: this.root, env, encoding: 'utf8' }))
   }
 
@@ -422,16 +445,28 @@ esac
 
 const SYSTEMCTL_SHIM = String.raw`#!/bin/sh
 state="$FAKE_SERVICE_STATE"
+printf '%s\n' "$*" >> "$state/commands"
+if [ -n "$FAKE_MANAGER_FAIL" ] && [ "$2" = "$FAKE_MANAGER_FAIL" ]; then
+  echo 'injected-manager-secret' >&2
+  exit 1
+fi
 case "$*" in
+  *"reset-failed"*)
+    [ "$FAKE_RESET_FAIL" = 1 ] && exit 1
+    rm -f "$state/start-limit"
+    exit 0 ;;
   *"show-environment"*) exit 0 ;;
   *"show --property=FragmentPath"*)
     if [ -f "$state/unit.path" ]; then cat "$state/unit.path"; fi
     exit 0
     ;;
   *"is-active --quiet"*)
+    [ "$FAKE_INACTIVE" = 1 ] && exit 3
     [ -f "$state/active" ] && exit 0 || exit 3
     ;;
   *"restart"* | *"start"*)
+    [ -f "$state/start-limit" ] && exit 1
+    [ "$FAKE_START_FAIL" = 1 ] && exit 1
     : > "$state/active"
     exit 0
     ;;
@@ -463,6 +498,10 @@ case "$1" in
     exit 0
     ;;
   bootstrap)
+    if [ "$FAKE_MANAGER_FAIL" = bootstrap ]; then
+      echo 'injected-manager-secret' >&2
+      exit 1
+    fi
     : > "$state/active"
     exit 0
     ;;
