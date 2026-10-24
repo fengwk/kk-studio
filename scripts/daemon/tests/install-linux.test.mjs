@@ -41,6 +41,14 @@ const libDir = (fixture) => path.join(fixture.installRoot, 'lib')
 const tokenRejection = 'daemon failed: environment registration is rejected: invalid registration token'
 
 describe('install.sh on Linux', () => {
+  it('preserves the child failure with redirected stdin and real terminal stderr', () =>
+    withTempDir((tmp) => {
+      const fixture = new InstallFixture(tmp)
+      fixture.script = path.join(tmp, 'tty-probe.sh')
+      writeExecutable(fixture.script, '#!/bin/bash\n[ ! -t 0 ] && [ -t 2 ] || exit 91\nexit 23\n')
+      assert.equal(fixture.run([], { stderrTTY: true }).status, 23)
+    }))
+
   it('uses archive progress only when stderr is a TTY, even with redirected stdin', () =>
     withInstall(({ fixture, configFile, tokenFile }) => {
       const log = path.join(fixture.state, 'curl-options')
