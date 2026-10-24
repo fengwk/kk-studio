@@ -356,9 +356,8 @@ class HarnessOwnerQueryServiceTest {
   }
 
   @Test
-  void threadSummaryProcessingAggregatesPendingDelegatedWork() {
-    // 测试意图：Thread 自身静止但子树仍有未交付委派时摘要必须保持 processing：
-    // 否则会话列表会显示"已结束"，用户据此开始下一轮，而异步 task 的结果其实还没回来。
+  void threadSummaryUsesIdleSnapshotFacts() {
+    // 摘要复用无本地工作、无未完成直接委派的快照，不自行构造活动状态。
     UUID sessionId = id(32);
     UUID threadId = id(33);
     Entry root = root(sessionId, id(511), T0, ROOT_SETTINGS);
@@ -380,8 +379,6 @@ class HarnessOwnerQueryServiceTest {
     HarnessThreadSummaryDTO idle = service.listThreadSummaries(sessionId).getFirst();
     assertEquals("IDLE", idle.getStatus());
     assertEquals("RUNNABLE", idle.getExecutionControl());
-
-    // 未交付的 join 不再单独决定 processing；递归生命周期由 ThreadState 负责。
   }
 
   @Test
