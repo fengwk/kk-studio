@@ -66,7 +66,6 @@ function threadSnapshot(cursor: Cursor, entries: unknown[] = []) {
         nextCommandSequence: cursor.nextCommandSequence,
         version: cursor.nextCommandSequence,
         status: 'IDLE',
-        processing: false,
         executionControl: 'RUNNABLE',
         branchSettings: {
           agentName: 'assistant',
@@ -245,7 +244,7 @@ async function installPreviewApiMock(
               agentName: thread.branchSettings.agentName,
               model: thread.branchSettings.model,
               status: thread.status,
-              processing: false,
+              executionControl: 'RUNNABLE',
               turnCount: 0,
               toolCallCount: 0,
               outcome: null,

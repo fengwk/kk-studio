@@ -65,9 +65,9 @@ interface SettingsOverlayEntry {
 /** 仅 STALE_COMMAND_CURSOR 允许借既有冲突回读机制重建一次 cursor/diff，不另造任意重试。 */
 const MAX_STALE_SETTINGS_CURSOR_RETRIES = 2
 
-/** Thread 是否运行中：只有 IDLE/STOPPED 是静止态，其余（排队/模型/工具/应用）都表示 busy。 */
+/** 活动与执行控制正交；等待异步结果也仍占用当前执行。 */
 function isBusyThread(thread: HarnessThreadDTO): boolean {
-  return thread.processing || (thread.status !== 'IDLE' && thread.status !== 'STOPPED')
+  return thread.status === 'RUNNING' || thread.status === 'WAITING'
 }
 
 /**

@@ -5,9 +5,11 @@
 .thread-tree-row[aria-current='true'] .thread-tree-link { background: var(--surface-active); }
 .thread-tree-content { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 8px; min-width: 0; padding: 5px 0; overflow-wrap: anywhere; }
 .thread-tree-identity { font-weight: 600; }
-.thread-tree-detail, .thread-tree-counts, .thread-tree-status { color: var(--fg-muted); font-size: var(--font-size-xs); }
-.thread-tree-status.is-processing { color: var(--info); }
+.thread-tree-detail, .thread-tree-counts, .thread-tree-status, .thread-tree-control { color: var(--fg-muted); font-size: var(--font-size-xs); }
+.thread-tree-status.is-running { color: var(--info); }
+.thread-tree-status.is-waiting { color: var(--fg-muted); }
 .thread-tree-status.is-failed { color: var(--danger); }
+.thread-tree-control.is-stopped { color: var(--warning); }
 .thread-tree-counts { white-space: nowrap; }
 .thread-tree-connectors { display: flex; flex: 0 0 auto; }
 .thread-tree-connectors > span { position: relative; width: 14px; }

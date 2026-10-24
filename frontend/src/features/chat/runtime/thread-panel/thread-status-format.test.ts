@@ -40,11 +40,8 @@ const EMPTY_USAGE = {
 }
 
 describe('thread status formatting', () => {
-  // 状态模型格式调整不能改变工作状态的本地化映射及未知状态回退。
   it.each([
-    'STOPPED', 'QUEUED', 'IDLE', 'CONTINUATION_DUE', 'APPLYING',
-    'MODEL_READY', 'MODEL_RUNNING', 'TOOL_WAITING_APPROVAL',
-    'TOOL_READY', 'TOOL_RUNNING',
+    'RUNNING', 'WAITING', 'IDLE',
   ])('localizes %s through its runtime status key', (status) => {
     expect(formatThreadStatusLabel(status, (key) => `translated:${key}`))
       .toBe(`translated:ai.runtime.thread.status.${status}`)
@@ -56,11 +53,13 @@ describe('thread status formatting', () => {
 
   it('preserves an unknown status without inventing a localized state', () => {
     expect(formatThreadStatusLabel('UNRECOGNIZED')).toBe('UNRECOGNIZED')
+    expect(formatThreadStatusLabel('WAITING_APPROVAL')).toBe('WAITING_APPROVAL')
   })
 
-  it('uses the approval label for both waiting-approval status names', () => {
-    expect(formatThreadStatusLabel('WAITING_APPROVAL')).toBe('等待审批')
-    expect(formatThreadStatusLabel('TOOL_WAITING_APPROVAL')).toBe('等待审批')
+  it('formats genuine three-state labels with default translator', () => {
+    expect(formatThreadStatusLabel('RUNNING')).toBe('运行中')
+    expect(formatThreadStatusLabel('WAITING')).toBe('等待异步结果')
+    expect(formatThreadStatusLabel('IDLE')).toBe('空闲')
   })
 
   // 缺失或无效窗口不能制造上下文占用事实；用量摘要仍应稳定显示。

@@ -9,7 +9,7 @@ import type { useActiveThreadTree } from './useActiveThreadTree'
 
 const node = (threadId: string, parentThreadId: string | null, overrides: Partial<ActiveThreadTreeNode> = {}): ActiveThreadTreeNode => ({
   threadId, parentThreadId, agentName: 'Explorer', name: 'main',
-  status: 'IDLE', processing: false, outcome: null, updateTime: 1774958400,
+  status: 'IDLE', executionControl: 'RUNNABLE', outcome: null, updateTime: 1774958400,
   turnCount: 7, toolCallCount: 12,
   model: { modelName: 'model', variant: 'default' },
   ...overrides,
@@ -72,7 +72,7 @@ describe('subagent execution selector', () => {
     host.rerender(view(reordered))
     fireEvent.keyDown(screen.getByRole('region'), { key: 'Enter' })
     expect(open).toHaveBeenLastCalledWith('child')
-    host.rerender(view(tree([node('root', null), node('new', 'root', { processing: true })])))
+    host.rerender(view(tree([node('root', null), node('new', 'root', { status: 'RUNNING' })])))
     fireEvent.keyDown(screen.getByRole('region'), { key: 'Enter' })
     expect(open).toHaveBeenLastCalledWith('new')
   })
@@ -132,5 +132,32 @@ describe('subagent execution selector', () => {
     host.rerender(<MemoryRouter><SubagentTreePanel tree={{ ...initial, isError: true, refreshFailed: true }} /></MemoryRouter>)
     expect(screen.getByRole('alert')).toHaveTextContent('Agent 关系刷新失败')
     fireEvent.click(screen.getByRole('button', { name: '关闭' }))
+  })
+
+  it('displays STOPPED control badge without masking thread status', () => {
+    const runningStopped = node('rs', 'root', {
+      name: 'Running Stopped',
+      status: 'RUNNING',
+      executionControl: 'STOPPED',
+      outcome: null,
+    })
+    const waitingNode = node('wt', 'root', {
+      name: 'Waiting Node',
+      status: 'WAITING',
+      executionControl: 'RUNNABLE',
+      outcome: null,
+    })
+    const customTree = tree([node('root', null), runningStopped, waitingNode])
+    render(<MemoryRouter><SubagentTreePanel tree={customTree} /></MemoryRouter>)
+
+    const rsLink = screen.getByRole('link', { name: /Running Stopped/ })
+    // status 依然显示“运行中”，不被 STOPPED 遮盖
+    expect(rsLink.querySelector('.subagent-card-status')).toHaveTextContent('运行中')
+    // 独立的 STOPPED 徽标
+    expect(rsLink.querySelector('.subagent-card-control.is-stopped')).toHaveTextContent('已停止')
+
+    const wtLink = screen.getByRole('link', { name: /Waiting Node/ })
+    // WAITING 状态显示“等待异步结果”
+    expect(wtLink.querySelector('.subagent-card-status')).toHaveTextContent('等待异步结果')
   })
 })

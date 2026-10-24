@@ -41,7 +41,6 @@ const thread: HarnessThreadDTO = {
   nextCommandSequence: '9',
   version: '7',
   status: 'IDLE',
-  processing: false,
   executionControl: 'RUNNABLE',
   branchSettings: {
     agentName: 'assistant',

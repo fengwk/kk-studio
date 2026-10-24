@@ -111,8 +111,7 @@ function thread(headEntryId = 'entry-3', options: { busy?: boolean } = {}) {
     yoloEnabled: false,
     nextCommandSequence: '1',
     version: '0',
-    status: options.busy ? 'MODEL_STREAM' : 'IDLE',
-    processing: options.busy === true,
+    status: options.busy ? 'RUNNING' : 'IDLE',
     executionControl: 'RUNNABLE',
     branchSettings: {
       agentName: 'assistant',
@@ -303,7 +302,7 @@ async function installChatApi(
       await route.fulfill({ json: { status: 200, data: [{
         threadId: THREAD_ID, parentThreadId: null, name: boundThread.name,
         createdAt: boundThread.createTime, updatedAt: boundThread.updateTime, status: 'IDLE',
-        processing: false, model: boundThread.branchSettings.model, headMessagePreview: 'hello',
+        executionControl: 'RUNNABLE', model: boundThread.branchSettings.model, headMessagePreview: 'hello',
       }] } })
       return
     }
@@ -338,8 +337,7 @@ async function installChatApi(
           threadId: grandchild ? GRANDCHILD_ID : CHILD_ID,
           name: grandchild ? 'main' : 'direct parent',
           version: grandchild && grandCompleted ? '1' : '0',
-          status: grandchild && !grandCompleted ? 'MODEL_STREAM' : 'IDLE',
-          processing: grandchild && !grandCompleted,
+          status: grandchild && !grandCompleted ? 'RUNNING' : 'IDLE',
           headEntryId: grandchild && grandCompleted ? 'entry-background' : boundThread.headEntryId,
           parentThreadId: grandchild ? CHILD_ID : THREAD_ID,
           branchSettings: { ...boundThread.branchSettings, agentName: grandchild ? 'researcher' : 'worker',
@@ -384,14 +382,14 @@ async function installChatApi(
       recorded.treeReads += 1
       await route.fulfill({ json: { status: 200, data: [
         { threadId: THREAD_ID, parentThreadId: null, name: boundThread.name, agentName: 'assistant',
-          model: boundThread.branchSettings.model, status: 'IDLE', processing: false,
+          model: boundThread.branchSettings.model, status: 'IDLE', executionControl: 'RUNNABLE',
           turnCount: 1, toolCallCount: 0, outcome: 'COMPLETED', updateTime: 1790812800 },
         { threadId: CHILD_ID, parentThreadId: THREAD_ID, name: 'direct parent', agentName: 'worker',
-          model: boundThread.branchSettings.model, status: 'IDLE', processing: false,
+          model: boundThread.branchSettings.model, status: 'IDLE', executionControl: 'RUNNABLE',
           turnCount: 2, toolCallCount: 3, outcome: 'COMPLETED', updateTime: 1790812860 },
         { threadId: GRANDCHILD_ID, parentThreadId: CHILD_ID, name: 'nested grandchild', agentName: 'researcher',
           model: { ...boundThread.branchSettings.model, variant: 'deep' },
-          status: grandCompleted ? 'IDLE' : 'MODEL_STREAM', processing: !grandCompleted,
+          status: grandCompleted ? 'IDLE' : 'RUNNING', executionControl: 'RUNNABLE',
           turnCount: 4, toolCallCount: 5, outcome: grandCompleted ? 'COMPLETED' : null, updateTime: 1790812920 },
       ] } })
       return

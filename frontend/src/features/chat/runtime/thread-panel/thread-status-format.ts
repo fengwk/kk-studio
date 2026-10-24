@@ -170,7 +170,7 @@ function positiveFinite(value: number | undefined): number | null {
 }
 
 /**
- * 格式化 Thread 运行状态，为 STOPPED / QUEUED 等提供准确的本地化文案。
+ * 格式化 Thread 运行状态（RUNNING / WAITING / IDLE）。
  */
 export function formatThreadStatusLabel(
   status?: string | null,
@@ -180,27 +180,12 @@ export function formatThreadStatusLabel(
     return ''
   }
   switch (status) {
-    case 'STOPPED':
-      return t('ai.runtime.thread.status.STOPPED')
-    case 'QUEUED':
-      return t('ai.runtime.thread.status.QUEUED')
+    case 'RUNNING':
+      return t('ai.runtime.thread.status.RUNNING')
+    case 'WAITING':
+      return t('ai.runtime.thread.status.WAITING')
     case 'IDLE':
       return t('ai.runtime.thread.status.IDLE')
-    case 'CONTINUATION_DUE':
-      return t('ai.runtime.thread.status.CONTINUATION_DUE')
-    case 'APPLYING':
-      return t('ai.runtime.thread.status.APPLYING')
-    case 'MODEL_READY':
-      return t('ai.runtime.thread.status.MODEL_READY')
-    case 'MODEL_RUNNING':
-      return t('ai.runtime.thread.status.MODEL_RUNNING')
-    case 'WAITING_APPROVAL':
-    case 'TOOL_WAITING_APPROVAL':
-      return t('ai.runtime.thread.status.TOOL_WAITING_APPROVAL')
-    case 'TOOL_READY':
-      return t('ai.runtime.thread.status.TOOL_READY')
-    case 'TOOL_RUNNING':
-      return t('ai.runtime.thread.status.TOOL_RUNNING')
     default:
       return status
   }

@@ -127,8 +127,7 @@ export function CustomMessageQueueHarness() {
       yoloEnabled: false,
       nextCommandSequence: '3',
       version: '1',
-      status: 'MODEL_READY',
-      processing: true,
+      status: 'RUNNING',
       executionControl: 'RUNNABLE',
       branchSettings: {
         agentName: 'worker',

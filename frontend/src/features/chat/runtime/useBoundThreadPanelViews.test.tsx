@@ -39,7 +39,7 @@ function boundController(): BoundThreadPanelController {
     thread: {
       threadId: 'thread', name: 'main', sessionId: 'session', headEntryId: 'head',
       parentThreadId: null, rootThreadId: 'thread', yoloEnabled: false,
-      nextCommandSequence: '1', version: '1', status: 'MODEL_READY', processing: true,
+      nextCommandSequence: '1', version: '1', status: 'RUNNING',
       executionControl: 'RUNNABLE', branchSettings: {
         agentName: 'agent', model: DEBUG.model, environmentName: null, goal: null,
       }, createTime: 1790504400, updateTime: 1790504400,
@@ -66,7 +66,7 @@ it('refreshes authoritative invocation, phase, version and planner settings with
   await waitFor(() => expect(result.current.debug?.frozenInvocation).toEqual(DEBUG.frozenInvocation))
   const changes: BoundThreadPanelController[] = [
     { ...initial, modelInvocation: { ...initial.modelInvocation!, status: 'RUNNING' } },
-    { ...initial, thread: { ...initial.thread!, status: 'TOOL_RUNNING' } },
+    { ...initial, thread: { ...initial.thread!, status: 'IDLE' } },
     { ...initial, modelInvocation: null },
     { ...initial, modelInvocation: { ...initial.modelInvocation!, id: 'model-2' } },
     { ...initial, thread: { ...initial.thread!, version: '2' } },

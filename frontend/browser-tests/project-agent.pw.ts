@@ -104,7 +104,6 @@ function createThreadSnapshot() {
         nextCommandSequence: '1',
         version: '1',
         status: 'IDLE',
-        processing: false,
         executionControl: 'RUNNABLE',
         branchSettings: {
           agentName: 'architect',
@@ -190,7 +189,7 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
                 status: 'STOPPED',
                 thread: {
                   ...createThreadSnapshot().data.thread,
-                  status: 'STOPPED',
+                  status: 'IDLE',
                   executionControl: 'STOPPED',
                   version: String(stopCount + 1),
                 },

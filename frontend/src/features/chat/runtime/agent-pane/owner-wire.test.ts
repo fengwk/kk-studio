@@ -41,7 +41,6 @@ const thread: HarnessThreadDTO = {
   rootThreadId: 'thread-1', yoloEnabled: false,
   version: '1',
   status: 'IDLE',
-  processing: false,
   executionControl: 'RUNNABLE',
   branchSettings: { agentName: 'coder', model: draft.model, environmentName: null, goal: null },
   createTime: 0,
