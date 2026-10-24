@@ -83,7 +83,17 @@ POSIX 目录权限为 0700、敏感文件为 0600。`tmp/workspaces` 由受控�
 Daemon 受管运行内置的 code-server，响应 `IDE_COMMAND` 的 `OPEN_VIEW`、`CHANGE_DIRECTORY`、`FOCUS_TERMINAL`、`CLOSE_VIEW` 与 `OPEN_STREAM`，返回 `IDE_RESULT`。
 `OPEN_STREAM` 使用根相对路径 `/api/harness/environment-stream/v1/{ticket}?environment={id}`；Daemon 基于由 `studioUrl` 派生的 `gatewayUri` 解析目标地址与 TLS 端点，在 code-server 与 Studio 之间透传 HTTP 和 WebSocket 数据。
 
-### LSP 语言服务
+### IDE 轻量默认值与按需能力
+
+桥接扩展通过原生 `configurationDefaults` 贡献默认值（不写用户 settings，也不禁用扩展）：`task.autoDetect` 与 `npm.autoDetect` 为 `off`，`npm.fetchOnlinePackageInfo` 为 `false`，`typescript.disableAutomaticTypeAcquisition` 为 `true`。这些声明由 IDE 扫描扩展时注册，不依赖桥接代码激活；用户或工作区的显式设置优先。需要自动发现任务、npm 脚本、在线包信息或自动获取 JavaScript 类型包时，可在 IDE 设置中修改对应项。
+
+Git 不设置覆盖值，保留原生自动仓库发现。文件树、编辑、语法高亮、主动搜索、终端、调试、扩展安装与目录切换桥接保留原生能力；实际调试器与高级语言能力仍取决于已安装扩展和宿主工具链。关闭 npm 自动发现避免持续自动扫描 package.json，但不承诺没有 ripgrep：扩展激活探测、主动搜索或用户重新启用发现仍可能执行检索。
+
+上述默认值以桥接扩展被 IDE 启用为前提；原生工作区信任限制仍然生效，受限工作区可能禁用桥接、Git 或语言扩展，不代表这些扩展的配置贡献已经加载。
+
+内置 TS/JS 与 JSON 语言服务按语言文件或相关命令激活；关闭自动类型获取不关闭 TS/JS 补全、诊断，也不删除项目已有类型依赖。关闭 npm 在线包信息并不代表所有 IDE 功能离线（例如 JSON schema、扩展安装仍可能联网）。内置 Java 扩展只有语法与片段，不包含 JDTLS；Java 语义能力需另装 IDE 扩展。下述 Agent LSP 独立配置、启动与回收，不会自动成为 IDE 的语言服务器。
+
+### Agent LSP
 
 LSP 组（[`lsp.ts`](../../daemon/src/coding/lsp.ts)）从配置中的 `lsp.servers` 初始化，按扩展名匹配语言服务器，并在目标文件所属项目根下复用 stdio JSON-RPC 连接。三项能力默认超时 180 秒覆盖启动等待、initialize 与 query 全程，统一消费 `context.signal`；共享池初始化默认 180 秒独立生命周期，单个 waiter 停止不影响其他等待者，最后退出等待 cleanup；闲置 5 分钟自动回收客户端与 1 秒 shutdown 机制保持不变；反编译能力（`lsp.java-decompile`）仅在匹配到 jdtls 服务器时可用。
 
@@ -100,6 +110,8 @@ Daemon 拥有独立的 Node.js 工程与测试套件：
 - 编译构建：`npm --prefix daemon run build`
 - 单元与集成测试：`npm --prefix daemon run test`
 - 覆盖率统计：`npm --prefix daemon run coverage`（基于 Vitest 与 `@vitest/coverage-v8`）
+
+配置贡献的真实 extension-host 集成测试：安装前端测试依赖与 Playwright Chromium 后，运行 `KK_STUDIO_IDE_ACCEPTANCE_DIR=<解压的code-server目录> node --test daemon/test/ide/configuration-native.test.mjs`（Node 24）。测试用独立临时 HOME、user-data、extensions 和动态 loopback 端口启动三个可信工作区，比较无桥接、桥接默认值、用户显式覆盖的 `inspect/get` 结果；不修改真实用户设置，不请求模型。
 
 多平台 CI 由 [.github/workflows/daemon-ci.yml](../../.github/workflows/daemon-ci.yml) 守卫，覆盖 Linux (amd64/arm64)、macOS (arm64/amd64) 与 Windows (amd64) 五大目标环境。发行归档由 [`scripts/daemon/prepare-release.sh`](../../scripts/daemon/prepare-release.sh) 暂存，并由 [`scripts/daemon/smoke-archive.sh`](../../scripts/daemon/smoke-archive.sh) 与 [`scripts/daemon/smoke-archive.ps1`](../../scripts/daemon/smoke-archive.ps1) 验证自足运行能力。
 

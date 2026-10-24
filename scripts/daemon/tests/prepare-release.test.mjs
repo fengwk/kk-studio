@@ -71,7 +71,14 @@ describe('prepare-release.sh', () => {
 
   it('packs the platform prebuilt, runtime and extension into the archive', () =>
     withFixture((fixture) => {
-      assert.equal(fixture.run([RELEASE_TAG, 'linux', 'amd64']).status, 0)
+      // Exercise the real extension manifest through staging and archive creation, not a mock default.
+      const manifest = readFileSync(new URL('../../../daemon/ide-extension/package.json', import.meta.url), 'utf8')
+      writeFileSync(path.join(fixture.repo, 'daemon/ide-extension/package.json'), manifest)
+      const result = fixture.run([RELEASE_TAG, 'linux', 'amd64'])
+      assert.equal(result.status, 0, result.stderr)
+      const packed = spawnSync('tar', ['-xOf', archiveOf(fixture, 'linux', 'amd64'), './ide-extension/package.json'], { encoding: 'utf8' })
+      assert.equal(packed.status, 0, packed.stderr)
+      assert.deepEqual(JSON.parse(packed.stdout), JSON.parse(manifest))
       const names = tarNames(archiveOf(fixture, 'linux', 'amd64'))
       for (const expected of [
         'main.js',
