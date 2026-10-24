@@ -344,7 +344,7 @@ class ThreadSnapshotTest {
             stoppedBase.entryPath(),
             List.of(
                 new ThreadCommand(
-                    TestIds.id(99),
+                    baseline.threadId(),
                     1L,
                     new NotificationCommandPayload(
                         TestIds.id(100),
