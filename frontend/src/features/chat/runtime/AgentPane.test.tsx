@@ -2313,6 +2313,24 @@ describe('AgentPane orchestration', () => {
     })
     unconfirmedPane.unmount()
 
+    // 场景 4b：STOPPED+RUNNING 下残留 READY 不展示排队，仍是静态退出未确认
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(
+        threadFixture(THREAD_ID, { status: 'RUNNING', executionControl: 'STOPPED' }),
+        { toolInvocations: [pendingInvocation()] },
+      ),
+    )
+    const residualPane = renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    await waitFor(() => {
+      const working = document.querySelector('.thread-working')
+      expect(working).toHaveTextContent('已请求停止，退出尚未确认')
+      expect(working).not.toHaveTextContent('排队')
+      expect(working).not.toHaveTextContent('审批')
+      expect(working).toHaveAttribute('data-animated', 'false')
+      expect(working?.querySelector('.thread-working-dot')).toHaveClass('is-static')
+    })
+    residualPane.unmount()
+
     // 场景 5：真实 RUNNING model 同样优先于停止未确认，保持生成动画
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
       snapshot(
