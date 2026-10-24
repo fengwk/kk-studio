@@ -83,8 +83,9 @@ Plugin 配置与凭据写入也在同一事务发出 `plugin_changed`。
 
 修改 V1 后同步领域校验、mapper、结构测试与新库安装测试。
 已有数据库记录 Flyway checksum，源码变更须通过批准的数据库维护操作才能应用；
-当前 V1 的插件表结构变化需要空库初始化或批准的迁移与备份，不能用 `flyway repair`
-代替结构转换。
+当前 V1 的插件表与 ThreadJoin 结构需要空库初始化或批准的迁移与备份，不能用 `flyway repair`
+代替结构转换。ThreadJoin 不再保存 `counts_toward_quota`，已匹配的 `NOTIFY_PARENT` 行必须同时具有
+交付命令序号；既有库不能仅更新应用镜像后继续启动。应用发布本身不授权修改已有库。
 共享环境的 Review、维护窗口、备份保密与恢复步骤以
 [共享数据库重建](../operations/development-and-testing.md#共享数据库重建) 为准。
 本模块文档描述最终结构，操作指南负责数据库变更流程。
