@@ -46,7 +46,8 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * 终止边界 Join 结算的收敛判据与交付幂等：源输入应用前旧结果不得结算新 Join；普通终止只在没有未完成的直接子 Join、没有待处理输入时结算；Stop 强制结算不受此限制；交付后不重投。
+ * 终止边界 Join 结算的收敛判据与交付幂等：源输入应用前旧结果不得结算新 Join；普通终止只在没有未完成的直接子 Join、没有待处理输入时结算；Stop
+ * 只放宽未应用源输入，仍要求同一收敛事实；交付后不重投。
  */
 class ThreadLifecycleCoordinatorJoinTest {
 
@@ -297,9 +298,9 @@ class ThreadLifecycleCoordinatorJoinTest {
     assertEquals(1, rootCommandCount());
   }
 
-  /** J7：Stop 强制结算不受收敛判据限制：有未完成直接子 Join 时仍结算上游 Join。 */
+  /** J7：Stop 只放宽未应用源输入，不绕过收敛判据；存在未完成直接子 Join 时仍不结算上游 Join。 */
   @Test
-  void stopForcedSettlementBypassesQuiescenceBlockers() {
+  void stopSettlementStillRequiresQuiescence() {
     markSourceApplied();
     UUID grandChildId = UUID.randomUUID();
     seedQuiescentChild(grandChildId, childId, 81L);
@@ -308,9 +309,9 @@ class ThreadLifecycleCoordinatorJoinTest {
     matchTerminal(true);
 
     ThreadJoin matched = join(joinId);
-    assertTrue(matched.matched());
-    assertNotNull(matched.deliveryCommandSequence());
-    assertEquals(1, rootCommandCount());
+    assertFalse(matched.matched());
+    assertNull(matched.deliveryCommandSequence());
+    assertEquals(0, rootCommandCount());
   }
 
   /**

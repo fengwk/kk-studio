@@ -216,8 +216,18 @@ public record ThreadState(
    */
   public ThreadState reserveCommandSequencesAndAdvanceHead(
       int count, UUID headEntryId, Instant now) {
+    return reserveCommandSequencesAdvanceHeadAndInput(
+        count, headEntryId, inputThroughSequence, now);
+  }
+
+  /** 停止父线程固化通知：同一 version 内预留序号、推进 head，并把输入水位覆盖到这些已物化通知。水位不得回退。 */
+  public ThreadState reserveCommandSequencesAdvanceHeadAndInput(
+      int count, UUID headEntryId, long inputThroughSequence, Instant now) {
     if (count <= 0) {
       throw new IllegalArgumentException("count must be positive");
+    }
+    if (inputThroughSequence < this.inputThroughSequence) {
+      throw new IllegalArgumentException("inputThroughSequence must not regress");
     }
     return copy(
         Objects.requireNonNull(headEntryId, "headEntryId"),

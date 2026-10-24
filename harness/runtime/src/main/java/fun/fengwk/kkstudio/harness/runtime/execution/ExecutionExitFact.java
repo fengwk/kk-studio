@@ -41,6 +41,12 @@ public record ExecutionExitFact(
       throw new IllegalArgumentException("only a remote execution has a parent execution");
     }
     state = Objects.requireNonNull(state, "state");
+    if (state == ExecutionExitState.REMOTE_ACKNOWLEDGED && kind != ExecutionExitKind.REMOTE) {
+      throw new IllegalArgumentException("only a remote execution can be remote-acknowledged");
+    }
+    if (state == ExecutionExitState.STUDIO_EXITED && kind == ExecutionExitKind.REMOTE) {
+      throw new IllegalArgumentException("a remote execution cannot claim studio exit");
+    }
     registeredAt = HarnessStoreTime.requireMillisecondPrecision(registeredAt);
     confirmedAt = HarnessStoreTime.requireMillisecondPrecision(confirmedAt);
     Objects.requireNonNull(registeredAt, "registeredAt");
@@ -68,7 +74,24 @@ public record ExecutionExitFact(
         && Objects.equals(parentExecutionId, other.parentExecutionId);
   }
 
-  /** 幂等确认：相同证据返回自身；已有不同证据保持原事实，不把旧代或另一种证据写成新结果。 */
+  /** 远端事实只能挂在同 Thread / invocation / attempt / lease 的本地 TOOL 代次下。 */
+  public void requireRemoteParent(ExecutionExitFact parent) {
+    Objects.requireNonNull(parent, "parent");
+    if (kind != ExecutionExitKind.REMOTE) {
+      throw new IllegalArgumentException("only a remote execution has a parent");
+    }
+    if (parent.kind() != ExecutionExitKind.TOOL
+        || !parent.executionId().equals(parentExecutionId)
+        || !parent.threadId().equals(threadId)
+        || !parent.invocationId().equals(invocationId)
+        || parent.attempt() != attempt
+        || !parent.ownerLeaseToken().equals(ownerLeaseToken)) {
+      throw new IllegalArgumentException(
+          "remote execution parent must be the same generation's TOOL execution");
+    }
+  }
+
+  /** 幂等确认：相同证据返回自身；已确认后的另一种证据是冲突，不能把一种退出改写成另一种。 */
   public ExecutionExitFact confirm(ExecutionExitState next, Instant at) {
     Objects.requireNonNull(next, "next");
     if (next == ExecutionExitState.UNCONFIRMED) {
@@ -80,7 +103,8 @@ public record ExecutionExitFact(
       return this;
     }
     if (state.confirmed()) {
-      return this;
+      throw new IllegalArgumentException(
+          "execution " + executionId + " is already confirmed as " + state);
     }
     return new ExecutionExitFact(
         executionId,

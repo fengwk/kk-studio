@@ -3,10 +3,18 @@ package fun.fengwk.kkstudio.harness.runtime.execution;
 import fun.fengwk.kkstudio.harness.runtime.StoppedThreadReceipt;
 import fun.fengwk.kkstudio.harness.runtime.ThreadLifecycleCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.ThreadTreeLocks;
+import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
@@ -56,17 +64,25 @@ public final class ExecutionExitLedger {
   }
 
   /**
-   * 按已登记事实确认退出。先读出真实行，身份不符时存储层拒绝且不改行；事实不存在时返回 empty，调用方必须保留未确认并报告。 确认使用登记时冻结的身份，不使用调用方当前持有的 lease。
+   * 用调用方冻结的完整身份确认退出。存储先读取真实行并比对身份，不符时拒绝且不改行；事实不存在时返回 empty。 重复的相同证据幂等；已确认后的不同证据是冲突，不静默保留。
+   *
+   * <p>{@link Confirmation#changed()} 只在本次事务把未确认事实推进到终态时为 true，重复 ACK 为 false，确认后的结算不得重复推进。
    */
-  public static Optional<ExecutionExitFact> confirm(
-      HarnessStore.Transaction tx, UUID executionId, ExecutionExitState state) {
+  public static Optional<Confirmation> confirm(
+      HarnessStore.Transaction tx, ExecutionExitFact expected, ExecutionExitState state) {
     Objects.requireNonNull(tx, "tx");
-    Objects.requireNonNull(executionId, "executionId");
-    ExecutionExitFact stored = tx.findExecution(executionId).orElse(null);
-    if (stored == null) {
-      return Optional.empty();
+    boolean changed =
+        tx.findExecution(expected.executionId())
+            .map(stored -> !stored.state().confirmed())
+            .orElse(false);
+    return tx.confirmExecution(expected, state).map(fact -> new Confirmation(fact, changed));
+  }
+
+  /** 一次确认的结果：冻结后的真实事实，以及本次是否真正改变了退出证据。 */
+  public record Confirmation(ExecutionExitFact fact, boolean changed) {
+    public Confirmation {
+      Objects.requireNonNull(fact, "fact");
     }
-    return tx.confirmExecution(stored, state);
   }
 
   /** 当前 Thread 是否仍有未确认退出的具体执行。查询不依赖 Invocation 行是否还在。 */
@@ -98,21 +114,94 @@ public final class ExecutionExitLedger {
   }
 
   /**
-   * 退出确认后的持久推进：RUNNABLE Thread 递增 version 并请求 THREAD Work，使原先被未退出事实挡住的普通 Join 能在下一次处理中结算；STOPPED
-   * Thread 则在本事务内递归结算已收敛祖先。
+   * 退出确认后的持久推进：确认真正改变事实时先递增本 Thread version；RUNNABLE Thread 若已物化普通终态则在同一事务内补结算 Join，仍有未完成 Join 时请求
+   * THREAD Work，无 Join 则不安排任何推进；STOPPED Thread 递归结算已收敛祖先。重复 ACK 不触碰任何状态。
    */
-  public static void advanceAfterConfirmation(HarnessStore.Transaction tx, UUID threadId) {
+  public static void advanceAfterConfirmation(
+      HarnessStore.Transaction tx, UUID threadId, Confirmation confirmation) {
     Objects.requireNonNull(tx, "tx");
+    Objects.requireNonNull(confirmation, "confirmation");
+    if (!confirmation.changed()) {
+      return;
+    }
     ThreadState thread = tx.findThread(threadId).orElse(null);
     if (thread == null) {
       return;
     }
+    ThreadState observed = thread.touchVersion(tx.now());
+    tx.updateThread(observed);
     if (thread.executionControl() == ThreadExecutionControl.RUNNABLE) {
-      tx.updateThread(thread.touchVersion(tx.now()));
-      tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()));
+      if (settleClosedTurn(tx, observed)) {
+        return;
+      }
+      if (hasActionableIncompleteJoin(tx, observed.id())) {
+        tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()));
+      }
       return;
     }
     settleStoppedAncestors(tx, threadId);
+  }
+
+  /** 只有源命令已应用、可在后续处理中结算的 Join 才需要 THREAD wake；未应用源命令不得抢先唤醒。 */
+  private static boolean hasActionableIncompleteJoin(HarnessStore.Transaction tx, UUID threadId) {
+    for (ThreadJoin join : tx.loadIncompleteJoins(threadId)) {
+      ThreadCommand source =
+          tx.findCommand(join.childThreadId(), join.sourceCommandSequence()).orElse(null);
+      if (source != null && source.appliedEntryId() != null) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * 普通终态已经物化、只因未确认执行挡住 Join 时，在最后一次确认的同一事务内补结算。边界只取本 Thread 当前路径上属于自己的最近终态，允许其后追加
+   * SETTINGS/NOTIFICATION 等尾部控制 Entry；不借用其它 Thread 的历史。
+   */
+  private static boolean settleClosedTurn(HarnessStore.Transaction tx, ThreadState thread) {
+    if (tx.loadIncompleteJoins(thread.id()).isEmpty()) {
+      return false;
+    }
+    EntryPath path = tx.loadEntryPath(thread.headEntryId());
+    if (path.openTurnStart().isPresent()) {
+      return false;
+    }
+    Entry terminal = path.headIgnoringTrailingControlEntries();
+    if (!(terminal.payload() instanceof TurnEndPayload end)) {
+      return false;
+    }
+    int terminalIndex = path.entries().indexOf(terminal);
+    Entry start = null;
+    for (Entry entry : path.entries()) {
+      if (entry.id().equals(end.turnStartEntryId())) {
+        start = entry;
+      }
+    }
+    if (!(start != null
+        && start.payload() instanceof TurnStartPayload turn
+        && thread.id().equals(turn.ownerThreadId()))) {
+      return false;
+    }
+    // continueModel 是尚未完成的机械续作，不能把这一轮 TURN_END 当成委派终态。
+    if (end.continueModel()) {
+      return false;
+    }
+    ThreadLifecycleCoordinator.matchAndDeliverTerminalJoins(
+        tx, thread, terminal.id(), finalAnswerOnPath(path, terminalIndex), tx.now(), false);
+    return true;
+  }
+
+  /** 最终回答只从本 Thread 当前路径上、紧邻该 TURN_END 之前的 ASSISTANT 消息读取。 */
+  private static UUID finalAnswerOnPath(EntryPath path, int terminalIndex) {
+    if (terminalIndex < 1) {
+      return null;
+    }
+    Entry candidate = path.entries().get(terminalIndex - 1);
+    if (candidate.payload() instanceof MessagePayload message
+        && message.message().role() == AgentMessageRole.ASSISTANT) {
+      return candidate.id();
+    }
+    return null;
   }
 
   public static void settleStoppedAncestors(HarnessStore.Transaction tx, UUID threadId) {

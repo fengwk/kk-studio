@@ -1301,11 +1301,19 @@ public abstract class HarnessStoreJoinContract {
               ExecutionExitFact confirmed =
                   tx.confirmExecution(first, ExecutionExitState.STUDIO_EXITED).orElseThrow();
               ExecutionExitFact repeated =
-                  tx.confirmExecution(first, ExecutionExitState.NOT_STARTED).orElseThrow();
+                  tx.confirmExecution(first, ExecutionExitState.STUDIO_EXITED).orElseThrow();
               assertEquals(confirmed, repeated);
               assertEquals(ExecutionExitState.STUDIO_EXITED, repeated.state());
               return repeated;
             });
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            store.transaction(
+                tx -> {
+                  tx.lockThread(threadId);
+                  return tx.confirmExecution(first, ExecutionExitState.NOT_STARTED);
+                }));
     assertEquals(ExecutionExitState.STUDIO_EXITED, acknowledged.state());
     assertThrows(
         IllegalArgumentException.class,
@@ -1325,6 +1333,175 @@ public abstract class HarnessStoreJoinContract {
                 tx.loadUnconfirmedExecutions(threadId).stream()
                     .map(ExecutionExitFact::executionId)
                     .toList()));
+  }
+
+  @Test
+  void executionKindStateCombinationsAndRemoteParentIdentityAreConstrained() {
+    // 测试意图：退出证据必须与 kind 匹配；Remote 只能挂同代 TOOL 父，非法登记/ACK 都不写。
+    UUID threadId = baseline.threadId();
+    ExecutionExitFact tool =
+        fact(
+            TestIds.id(830), threadId, TestIds.id(831), 1, "lease-1", ExecutionExitKind.TOOL, null);
+    ExecutionExitFact model =
+        fact(
+            TestIds.id(832),
+            threadId,
+            TestIds.id(833),
+            1,
+            "lease-1",
+            ExecutionExitKind.MODEL,
+            null);
+    ExecutionExitFact remote =
+        fact(
+            TestIds.id(834),
+            threadId,
+            TestIds.id(831),
+            1,
+            "lease-1",
+            ExecutionExitKind.REMOTE,
+            tool.executionId());
+    store.transaction(
+        tx -> {
+          tx.lockThread(threadId);
+          tx.registerExecution(tool);
+          tx.registerExecution(model);
+          tx.registerExecution(remote);
+          return null;
+        });
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            store.transaction(
+                tx -> {
+                  tx.lockThread(threadId);
+                  return tx.confirmExecution(model, ExecutionExitState.REMOTE_ACKNOWLEDGED);
+                }));
+    assertEquals(
+        ExecutionExitState.STUDIO_EXITED,
+        store
+            .transaction(
+                tx -> {
+                  tx.lockThread(threadId);
+                  return tx.confirmExecution(model, ExecutionExitState.STUDIO_EXITED);
+                })
+            .orElseThrow()
+            .state());
+    assertEquals(
+        ExecutionExitState.REMOTE_ACKNOWLEDGED,
+        store
+            .transaction(
+                tx -> {
+                  tx.lockThread(threadId);
+                  return tx.confirmExecution(remote, ExecutionExitState.REMOTE_ACKNOWLEDGED);
+                })
+            .orElseThrow()
+            .state());
+
+    ExecutionExitFact wrongKindParent =
+        fact(
+            TestIds.id(835),
+            threadId,
+            TestIds.id(836),
+            1,
+            "lease-2",
+            ExecutionExitKind.MODEL,
+            null);
+    ExecutionExitFact wrongKindRemote =
+        fact(
+            TestIds.id(837),
+            threadId,
+            TestIds.id(836),
+            1,
+            "lease-2",
+            ExecutionExitKind.REMOTE,
+            wrongKindParent.executionId());
+    ExecutionExitFact otherLeaseParent =
+        fact(
+            TestIds.id(838), threadId, TestIds.id(839), 1, "lease-3", ExecutionExitKind.TOOL, null);
+    ExecutionExitFact wrongIdentityRemote =
+        fact(
+            TestIds.id(840),
+            threadId,
+            TestIds.id(839),
+            1,
+            "lease-4",
+            ExecutionExitKind.REMOTE,
+            otherLeaseParent.executionId());
+    store.transaction(
+        tx -> {
+          tx.lockThread(threadId);
+          tx.registerExecution(wrongKindParent);
+          tx.registerExecution(otherLeaseParent);
+          return null;
+        });
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            store.transaction(
+                tx -> {
+                  tx.lockThread(threadId);
+                  return tx.registerExecution(wrongKindRemote);
+                }));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            store.transaction(
+                tx -> {
+                  tx.lockThread(threadId);
+                  return tx.registerExecution(wrongIdentityRemote);
+                }));
+    assertTrue(store.transaction(tx -> tx.findExecution(wrongKindRemote.executionId())).isEmpty());
+    assertTrue(
+        store.transaction(tx -> tx.findExecution(wrongIdentityRemote.executionId())).isEmpty());
+  }
+
+  @Test
+  void overlappingLeaseGenerationsConfirmIndependently() {
+    // 测试意图：同 invocation 的旧新代以不同 lease 并存，确认其中一代不改变另一代的未确认事实。
+    UUID threadId = baseline.threadId();
+    UUID invocationId = TestIds.id(850);
+    ExecutionExitFact oldGeneration =
+        fact(
+            TestIds.id(851), threadId, invocationId, 1, "lease-old", ExecutionExitKind.MODEL, null);
+    ExecutionExitFact newGeneration =
+        fact(
+            TestIds.id(852), threadId, invocationId, 2, "lease-new", ExecutionExitKind.MODEL, null);
+    store.transaction(
+        tx -> {
+          tx.lockThread(threadId);
+          tx.registerExecution(oldGeneration);
+          tx.registerExecution(newGeneration);
+          return null;
+        });
+
+    ExecutionExitFact confirmed =
+        store
+            .transaction(
+                tx -> {
+                  tx.lockThread(threadId);
+                  return tx.confirmExecution(newGeneration, ExecutionExitState.STUDIO_EXITED);
+                })
+            .orElseThrow();
+    assertEquals(ExecutionExitState.STUDIO_EXITED, confirmed.state());
+    assertEquals(
+        List.of(oldGeneration.executionId()),
+        store.transaction(
+            tx ->
+                tx.loadUnconfirmedExecutions(threadId).stream()
+                    .map(ExecutionExitFact::executionId)
+                    .toList()));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            store.transaction(
+                tx -> {
+                  tx.lockThread(threadId);
+                  return tx.confirmExecution(oldGeneration, ExecutionExitState.REMOTE_ACKNOWLEDGED);
+                }));
+    assertEquals(
+        ExecutionExitState.UNCONFIRMED,
+        store.transaction(
+            tx -> tx.findExecution(oldGeneration.executionId()).orElseThrow().state()));
   }
 
   @Test

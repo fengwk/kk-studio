@@ -10,6 +10,8 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.result.BinaryResultContent;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
@@ -224,6 +226,70 @@ class ToolProcessorExecutionTest {
     assertEquals(1, run.closes.get());
     assertEquals(ToolInvocationStatus.READY, tool(fixture).status());
     assertFalse(fixture.processor.hasActiveExecution());
+  }
+
+  /** RUNNING 持久化抛异常：未登记也必须 close 恰一次，Tool 保持 READY，不留下执行事实。 */
+  @Test
+  void markRunningPersistenceFailureClosesRunOnceAndStaysReady() {
+    Fixture fixture = approvedFixture();
+    FakeRun run =
+        fixture.gateway.queueRun(progress -> ToolProcessorTestSupport.succeeded("call-1"));
+    try (ToolProcessor processor =
+        new ToolProcessor(
+            failRunningToolWrites(fixture.store),
+            fixture.gateway,
+            fixture.sink,
+            new ToolProcessorConfig(
+                ToolProcessorTestSupport.LEASE_CONFIG,
+                () -> ToolProcessorTestSupport.NO_RETRY,
+                ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY,
+                ToolProcessorTestSupport.BUSY_FALLBACK_DELAY),
+            fixture.clock,
+            fixture.scheduler,
+            Runnable::run)) {
+      assertEquals(ProcessResult.LOST_OWNERSHIP, processor.process(claim(fixture)));
+
+      assertEquals(0, run.executes.get());
+      assertEquals(1, run.closes.get());
+      assertEquals(ToolInvocationStatus.READY, tool(fixture).status());
+      assertFalse(processor.hasActiveExecution());
+      assertTrue(
+          Boolean.TRUE.equals(
+              fixture.store.transaction(
+                  tx -> tx.loadUnconfirmedExecutions(fixture.baseline.threadId()).isEmpty())));
+    }
+  }
+
+  /** RUNNING 回写失权且 close 失败：仍只尝试 close 一次，Tool 保持 READY，不登记退出事实。 */
+  @Test
+  void lostWorkDuringMarkRunningWithCloseFailureReleasesExactlyOnce() {
+    Fixture fixture = approvedFixture();
+    AtomicInteger closes = new AtomicInteger();
+    fixture.gateway.queueAdmit(
+        new ToolGateway.Admitted(
+            new ToolGateway.Run() {
+              @Override
+              public ToolGateway.Completion execute(Consumer<ToolResult> progress) {
+                throw new AssertionError("lost admission must not execute");
+              }
+
+              @Override
+              public void close() {
+                closes.incrementAndGet();
+                throw new IllegalStateException("close failed");
+              }
+            }));
+    fixture.gateway.admitHook = () -> ToolProcessorTestSupport.deleteToolWork(fixture);
+
+    assertEquals(ProcessResult.LOST_OWNERSHIP, fixture.processor.process(claim(fixture)));
+
+    assertEquals(1, closes.get());
+    assertEquals(ToolInvocationStatus.READY, tool(fixture).status());
+    assertFalse(fixture.processor.hasActiveExecution());
+    assertTrue(
+        Boolean.TRUE.equals(
+            fixture.store.transaction(
+                tx -> tx.loadUnconfirmedExecutions(fixture.baseline.threadId()).isEmpty())));
   }
 
   /** claim lease 剩余不足：admission 之前 renew 出完整 margin。 */
@@ -652,6 +718,10 @@ class ToolProcessorExecutionTest {
 
     assertEquals(1, closes.get());
     assertNull(ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId));
+    List<ExecutionExitFact> unconfirmed =
+        fixture.store.transaction(tx -> tx.loadUnconfirmedExecutions(fixture.baseline.threadId()));
+    assertEquals(1, unconfirmed.size());
+    assertEquals(ExecutionExitState.UNCONFIRMED, unconfirmed.getFirst().state());
   }
 
   /** 终态写库失败：run 与 registry 仍释放，durable 保持 RUNNING 交给 lease 恢复，绝不伪造成 SUCCEEDED。 */
@@ -730,6 +800,45 @@ class ToolProcessorExecutionTest {
                                                 invocation -> invocation.status().isTerminal())) {
                                           throw new IllegalStateException(
                                               "injected terminal persistence failure");
+                                        }
+                                      }
+                                      return invokeUnchecked(tx, txMethod, txArgs);
+                                    })));
+              }
+              return invokeUnchecked(delegate, method, args);
+            });
+  }
+
+  /** 只在写入 RUNNING ToolInvocation 的事务上注入失败，用于验证 markRunning 失败的 close 所有权。 */
+  private static HarnessStore failRunningToolWrites(HarnessStore delegate) {
+    return (HarnessStore)
+        Proxy.newProxyInstance(
+            HarnessStore.class.getClassLoader(),
+            new Class<?>[] {HarnessStore.class},
+            (proxy, method, args) -> {
+              if ("transaction".equals(method.getName()) && args != null && args.length == 1) {
+                @SuppressWarnings("unchecked")
+                Function<HarnessStore.Transaction, ?> callback =
+                    (Function<HarnessStore.Transaction, ?>) args[0];
+                return delegate.transaction(
+                    tx ->
+                        callback.apply(
+                            (HarnessStore.Transaction)
+                                Proxy.newProxyInstance(
+                                    HarnessStore.Transaction.class.getClassLoader(),
+                                    new Class<?>[] {HarnessStore.Transaction.class},
+                                    (ignored, txMethod, txArgs) -> {
+                                      if ("updateToolInvocations".equals(txMethod.getName())) {
+                                        @SuppressWarnings("unchecked")
+                                        List<ToolInvocation> invocations =
+                                            (List<ToolInvocation>) txArgs[0];
+                                        if (invocations.stream()
+                                            .anyMatch(
+                                                invocation ->
+                                                    invocation.status()
+                                                        == ToolInvocationStatus.RUNNING)) {
+                                          throw new IllegalStateException(
+                                              "injected running persistence failure");
                                         }
                                       }
                                       return invokeUnchecked(tx, txMethod, txArgs);

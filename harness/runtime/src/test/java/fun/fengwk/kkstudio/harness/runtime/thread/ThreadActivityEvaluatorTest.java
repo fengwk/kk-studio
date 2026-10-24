@@ -143,10 +143,14 @@ class ThreadActivityEvaluatorTest {
                 ThreadExecutionControl.RUNNABLE, idle, false, false, -1, false));
     assertThrows(
         NullPointerException.class,
-        () -> ThreadActivityEvaluator.isQuiescent(null, false, false, 0, false));
+        () ->
+            ThreadActivityEvaluator.isQuiescent(
+                ThreadExecutionControl.RUNNABLE, null, false, false, 0, false));
     assertThrows(
         IllegalArgumentException.class,
-        () -> ThreadActivityEvaluator.isQuiescent(idle, false, false, -1, false));
+        () ->
+            ThreadActivityEvaluator.isQuiescent(
+                ThreadExecutionControl.RUNNABLE, idle, false, false, -1, false));
 
     // 2. 本地在途执行与 open compaction：始终 RUNNING
     assertEquals(
@@ -187,11 +191,24 @@ class ThreadActivityEvaluatorTest {
             ThreadExecutionControl.RUNNABLE, idle, false, false, 0, false));
 
     // 5. isQuiescent 收敛判断
-    assertTrue(ThreadActivityEvaluator.isQuiescent(idle, false, false, 0, false));
-    assertFalse(ThreadActivityEvaluator.isQuiescent(active, false, false, 0, false));
-    assertFalse(ThreadActivityEvaluator.isQuiescent(idle, true, false, 0, false));
-    assertFalse(ThreadActivityEvaluator.isQuiescent(idle, false, true, 0, false));
-    assertFalse(ThreadActivityEvaluator.isQuiescent(idle, false, false, 1, false));
+    assertTrue(
+        ThreadActivityEvaluator.isQuiescent(
+            ThreadExecutionControl.RUNNABLE, idle, false, false, 0, false));
+    assertFalse(
+        ThreadActivityEvaluator.isQuiescent(
+            ThreadExecutionControl.RUNNABLE, active, false, false, 0, false));
+    assertFalse(
+        ThreadActivityEvaluator.isQuiescent(
+            ThreadExecutionControl.RUNNABLE, idle, true, false, 0, false));
+    assertFalse(
+        ThreadActivityEvaluator.isQuiescent(
+            ThreadExecutionControl.RUNNABLE, idle, false, true, 0, false));
+    assertFalse(
+        ThreadActivityEvaluator.isQuiescent(
+            ThreadExecutionControl.STOPPED, idle, false, true, 0, false));
+    assertFalse(
+        ThreadActivityEvaluator.isQuiescent(
+            ThreadExecutionControl.RUNNABLE, idle, false, false, 1, false));
   }
 
   private static List<ToolInvocation> toolInvocations(ToolInvocationStatus... statuses) {

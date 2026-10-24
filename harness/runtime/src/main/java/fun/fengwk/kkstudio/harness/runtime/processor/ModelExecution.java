@@ -105,6 +105,9 @@ final class ModelExecution implements ModelGateway.Sink, ClaimAdmissionGuard.Gua
 
   private Thread runner;
 
+  /** 是否真正进入 Gateway body；在 runner 登记锁内与 cancel 判定串行化。 */
+  private volatile boolean bodyStarted;
+
   /** 保护下列流式状态与所有发布 / checkpoint / 终态提交。 */
   private final Object lock = new Object();
 
@@ -233,11 +236,13 @@ final class ModelExecution implements ModelGateway.Sink, ClaimAdmissionGuard.Gua
               throw new IllegalStateException(
                   "thread " + threadId + " disappeared before model execution confirmation");
             }
-            if (ExecutionExitLedger.confirm(tx, local.executionId(), state).isEmpty()) {
-              throw new IllegalStateException(
-                  "model execution " + local.executionId() + " remains unconfirmed");
-            }
-            ExecutionExitLedger.advanceAfterConfirmation(tx, threadId);
+            ExecutionExitLedger.Confirmation confirmation =
+                ExecutionExitLedger.confirm(tx, local, state)
+                    .orElseThrow(
+                        () ->
+                            new IllegalStateException(
+                                "model execution " + local.executionId() + " remains unconfirmed"));
+            ExecutionExitLedger.advanceAfterConfirmation(tx, threadId, confirmation);
             return null;
           });
     } catch (RuntimeException failure) {
@@ -261,6 +266,11 @@ final class ModelExecution implements ModelGateway.Sink, ClaimAdmissionGuard.Gua
   /** execution 是否已被 abandon（close / cancel / lost ownership 竞态检查用）。 */
   boolean abandoned() {
     return abandoned.get();
+  }
+
+  /** 是否真正进入过 Gateway body；未进入 body 的 cancel 不是退出，不能确认退出事实。 */
+  boolean bodyStarted() {
+    return bodyStarted;
   }
 
   /** 启动 lease heartbeat；scheduler 拒绝时返回 false。 */
@@ -310,6 +320,11 @@ final class ModelExecution implements ModelGateway.Sink, ClaimAdmissionGuard.Gua
     return committed && !abandoned.get();
   }
 
+  /** 本代是否已经持久登记。启动失败只在登记成功后才能确认未启动。 */
+  boolean registered() {
+    return registered != null;
+  }
+
   /** RUNNING 已登记但执行线程确定没有启动。登记失败时不确认。 */
   void confirmNotStarted() {
     if (registered != null) {
@@ -323,10 +338,10 @@ final class ModelExecution implements ModelGateway.Sink, ClaimAdmissionGuard.Gua
   ModelGateway.Outcome run(ModelGateway.Admitted admitted) {
     synchronized (runGuard) {
       if (abandoned.get()) {
-        admitted.close();
         return null;
       }
       runner = Thread.currentThread();
+      bodyStarted = true;
     }
     try {
       ModelGateway.Outcome outcome = admitted.run(this);

@@ -32,7 +32,7 @@ V1 写入单行 SystemSettings 默认聚合；Java 解码与 profile 默认契�
 | Chat | chat、chat_session：owner 关系 | [Platform](platform.md#命令接受产品归属与派发) |
 | Canvas | canvas_document/group/node/resource、function_run、command_dedup、function_resource_pin | [Canvas](canvas.md) |
 | Project | project、project_issue 与 agent_thread/stage_budget/run/activity/evidence | [Project](project.md) |
-| Harness | harness_session/entry/thread/thread_command/model_invocation/tool_invocation/thread_join/thread_stop_receipt | [Harness Runtime](harness-runtime.md)、[Harness Infra](harness-infra.md) |
+| Harness | harness_session/entry/thread/thread_command/model_invocation/tool_invocation/execution_exit/thread_join/thread_stop_receipt | [Harness Runtime](harness-runtime.md)、[Harness Infra](harness-infra.md) |
 | Durable Work | durable_work：全部后台调度（THREAD/MODEL/TOOL/ISSUE/CANVAS_RUN）共用的 mailbox | [Durable Work](work.md) |
 | Storage | storage_blob/upload/object_cleanup、session_blob_ref | [Storage](platform.md#storageblob-与-resource) |
 | Settings | system_setting，`id = 1` | [配置](platform.md#配置) |
@@ -58,7 +58,7 @@ INPUT/OUTPUT pin 保护执行资源生命周期。UNKNOWN 保留资源并等待�
 
 Issue 同时保持工作阶段、控制暂停和 Run 执行状态；同 Issue 只允许一个活动主 Run。
 阶段预算按 Issue/state，Work 为每 Issue 一个 durable 邮箱。
-Harness 命令按 sequence 与 idempotencyKey 唯一，Thread 持有 `execution_control`（`RUNNABLE`/`STOPPED`）与 `input_through_sequence` 输入水位；Join 固定 `terminal_entry_id`/`final_answer_entry_id` 回执与交付坐标；Stop 在 `harness_thread_stop_receipt` 按 `(thread_id, stop_request_id)` 保存逐 Thread 回执。
+Harness 命令按 sequence 与 idempotencyKey 唯一，Thread 持有 `execution_control`（`RUNNABLE`/`STOPPED`）与 `input_through_sequence` 输入水位；`harness_execution_exit` 每个具体 Model/Tool/Remote 代次一行，以不可变 identity（thread/invocation/attempt/lease/kind/parent）关联，单向保存 `UNCONFIRMED` 到 `STUDIO_EXITED`/`REMOTE_ACKNOWLEDGED`/`NOT_STARTED` 的一项证据，不随 Invocation 删除；仅 MODEL/TOOL 可确认 `STUDIO_EXITED`，仅 REMOTE 可确认 `REMOTE_ACKNOWLEDGED`，远端代次必须挂同 Thread/invocation/attempt/lease 的 TOOL 父代。Join 固定 `terminal_entry_id`/`final_answer_entry_id` 回执与交付坐标；Stop 在 `harness_thread_stop_receipt` 按 `(thread_id, stop_request_id)` 保存逐 Thread 回执。
 同一 Session 的执行根（`parent_thread_id IS NULL`）按规范化后的名称精确唯一，部分唯一索引 `uk_harness_thread_root_name` 裁决并发创建与重命名；冲突返回 HTTP 409、reason `THREAD_NAME_CONFLICT`。跨 Session 或子代理同名不受此约束，精确创建重放仍返回已有身份，不再次插入。
 Work lease 成对，required_environment_id 非空仅适用于 TOOL。Fill First 模型组的有序成员保存在 `agent_model.group_config`，成员 Variant、立即降级状态码与
 固定冷却秒数由应用 codec 校验；`agent_model_group_cooldown` 只保存 `(组, 成员模型, 成员 Variant)`

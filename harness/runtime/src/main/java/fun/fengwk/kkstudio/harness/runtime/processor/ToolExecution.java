@@ -85,6 +85,9 @@ final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution {
   /** monitor 保护：执行线程正处于 {@code Run.execute} 内；只有此时 abandon 才会 interrupt。 */
   private boolean inBody;
 
+  /** 是否真正进入过 Tool body；未进入 body 的执行只允许确认 NOT_STARTED。 */
+  private volatile boolean bodyStarted;
+
   private Thread bodyThread;
   private volatile boolean progressOpen;
 
@@ -181,24 +184,25 @@ final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution {
               throw new IllegalStateException(
                   "thread " + threadId + " disappeared before remote execution confirmation");
             }
-            ExecutionExitFact stored = tx.findExecution(remoteExecutionId).orElse(null);
-            if (stored == null
-                || !stored.threadId().equals(local.threadId())
-                || !stored.invocationId().equals(local.invocationId())
-                || stored.attempt() != local.attempt()
-                || !stored.ownerLeaseToken().equals(local.ownerLeaseToken())
-                || stored.kind() != ExecutionExitKind.REMOTE
-                || !local.executionId().equals(stored.parentExecutionId())) {
-              throw new IllegalArgumentException(
-                  "remote execution "
-                      + remoteExecutionId
-                      + " does not match the registered generation");
-            }
-            if (ExecutionExitLedger.confirm(tx, remoteExecutionId, state).isEmpty()) {
-              throw new IllegalStateException(
-                  "remote execution " + remoteExecutionId + " remains unconfirmed");
-            }
-            ExecutionExitLedger.advanceAfterConfirmation(tx, threadId);
+            ExecutionExitFact expected =
+                new ExecutionExitFact(
+                    remoteExecutionId,
+                    local.threadId(),
+                    local.invocationId(),
+                    local.attempt(),
+                    local.ownerLeaseToken(),
+                    ExecutionExitKind.REMOTE,
+                    local.executionId(),
+                    ExecutionExitState.UNCONFIRMED,
+                    tx.now(),
+                    null);
+            ExecutionExitLedger.Confirmation confirmation =
+                ExecutionExitLedger.confirm(tx, expected, state)
+                    .orElseThrow(
+                        () ->
+                            new IllegalStateException(
+                                "remote execution " + remoteExecutionId + " remains unconfirmed"));
+            ExecutionExitLedger.advanceAfterConfirmation(tx, threadId, confirmation);
             return null;
           });
     }
@@ -228,8 +232,8 @@ final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution {
   }
 
   /**
-   * Gateway admission 返回 Admitted 后调用：先持久化 {@code READY -> RUNNING}（失败即关闭 run 并 LOST），再启动执行线程。run
-   * 的关闭 责任自此转移给执行线程；返回 {@link ProcessResult#STARTED} 表示线程已启动。
+   * Gateway admission 返回 Admitted 后调用：先持久化 {@code READY -> RUNNING}（失败也必须在同一窗口 close），再启动执行线程。 run
+   * 的关闭责任自此转移给执行线程；返回 {@link ProcessResult#STARTED} 表示线程已启动。
    */
   ProcessResult start(ToolGateway.Run run) {
     boolean committed;
@@ -240,7 +244,8 @@ final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution {
       committed = false;
     }
     if (!committed || abandoned.get()) {
-      if (committed && closeStrict(run)) {
+      boolean closed = closeStrict(run);
+      if (committed && closed) {
         confirmNotStarted();
       }
       abandon();
@@ -283,8 +288,13 @@ final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution {
         apply(completion);
       }
     } finally {
-      if (registered != null && closeStrict(run)) {
-        confirmStudioExit();
+      boolean closed = closeStrict(run);
+      if (closed) {
+        if (bodyStarted()) {
+          confirmStudioExit();
+        } else {
+          confirmNotStarted();
+        }
       }
       abandon();
     }
@@ -331,11 +341,13 @@ final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution {
               throw new IllegalStateException(
                   "thread " + threadId + " disappeared before tool execution confirmation");
             }
-            if (ExecutionExitLedger.confirm(tx, local.executionId(), state).isEmpty()) {
-              throw new IllegalStateException(
-                  "tool execution " + local.executionId() + " remains unconfirmed");
-            }
-            ExecutionExitLedger.advanceAfterConfirmation(tx, threadId);
+            ExecutionExitLedger.Confirmation confirmation =
+                ExecutionExitLedger.confirm(tx, local, state)
+                    .orElseThrow(
+                        () ->
+                            new IllegalStateException(
+                                "tool execution " + local.executionId() + " remains unconfirmed"));
+            ExecutionExitLedger.advanceAfterConfirmation(tx, threadId, confirmation);
             return null;
           });
     } catch (RuntimeException failure) {
@@ -350,6 +362,11 @@ final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution {
     return executionId;
   }
 
+  /** 是否真正进入过 Tool body；未进入 body 的 cancel 不是 Studio 退出。 */
+  boolean bodyStarted() {
+    return bodyStarted;
+  }
+
   /** 声明执行体开始；abandon 已获胜时返回 false（工具绝不被调用）。 */
   private boolean enterBody() {
     synchronized (monitor) {
@@ -357,6 +374,7 @@ final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution {
         return false;
       }
       inBody = true;
+      bodyStarted = true;
       bodyThread = Thread.currentThread();
       progressOpen = true;
       return true;
@@ -370,15 +388,6 @@ final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution {
       progressOpen = false;
       bodyThread = null;
       Thread.interrupted();
-    }
-  }
-
-  /** Run 的关闭是幂等且不抛的契约；这里只保证意外异常不会阻断 heartbeat 与 registry 清理。 */
-  private void closeQuietly(ToolGateway.Run run) {
-    try {
-      run.close();
-    } catch (RuntimeException failure) {
-      log.warn("cannot release tool run resources for {}", invocationId, failure);
     }
   }
 

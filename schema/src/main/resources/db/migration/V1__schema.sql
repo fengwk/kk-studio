@@ -1519,6 +1519,11 @@ create table harness_execution_exit (
         (state = 'UNCONFIRMED' and confirmed_at is null)
         or (state in ('STUDIO_EXITED', 'REMOTE_ACKNOWLEDGED', 'NOT_STARTED') and confirmed_at is not null)
     ),
+    constraint ck_harness_execution_exit_kind_state check (
+        state in ('UNCONFIRMED', 'NOT_STARTED')
+        or (kind in ('MODEL', 'TOOL') and state = 'STUDIO_EXITED')
+        or (kind = 'REMOTE' and state = 'REMOTE_ACKNOWLEDGED')
+    ),
     constraint ck_harness_execution_exit_time check (confirmed_at is null or confirmed_at >= registered_at)
 );
 

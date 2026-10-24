@@ -456,12 +456,10 @@ final class AcceptCommandsControl {
       return SpawnTickets.attach(
           tx, replayThreadBatch(tx, target, commands, thread, existing, cursorFreeBatch), ticket);
     }
-    if (thread.executionControl().isStopped()
-        && genuineUserInput
-        && ExecutionExitLedger.hasUnconfirmed(tx, thread.id())) {
+    if (resumeStoppedTarget(thread, genuineUserInput) && !resumeConverged(tx, thread)) {
       throw conflict(
           HarnessRuntimeConflictException.Reason.EXIT_UNCONFIRMED,
-          "thread " + thread.id() + " is stopped and its execution exit is not confirmed");
+          "thread " + thread.id() + " is stopped and its exit or child joins are not converged");
     }
     validateThreadBatchAdmission(target, thread, cursorFreeBatch);
     validateBatchShape(target, commands, false);
@@ -746,6 +744,12 @@ final class AcceptCommandsControl {
         List.copyOf(ordered),
         true,
         false);
+  }
+
+  /** 恢复输入要求本 Thread 已无未确认执行，且直接子 Join 已收敛。SET 等维护输入不恢复，因此不受此限制。 */
+  private static boolean resumeConverged(HarnessStore.Transaction tx, ThreadState thread) {
+    return !ExecutionExitLedger.hasUnconfirmed(tx, thread.id())
+        && tx.countIncompleteChildJoins(thread.id()) == 0;
   }
 
   /** 任何显式新 USER/GOAL/CUSTOM 可信输入都把 STOPPED 目标恢复为 RUNNABLE；不复活任何后代。 */

@@ -50,21 +50,25 @@ public final class ThreadActivityEvaluator {
   /**
    * 判断 Thread 是否处于普通终止的收敛静止状态（可向父结算 Join）。
    *
-   * <p>与快照状态共用判定事实：必须处于 IdleOrHistorical、无 open compaction、无未消费输入需求、且无未完成直接子 Join。
+   * <p>与快照状态共用控制敏感判据：本地必须空闲，且没有未确认执行或未完成直接子 Join。RUNNABLE 的待启动输入仍阻挡结算；STOPPED
+   * 保留通知但不自启，因此不把这些通知当成继续执行。
    */
   public static boolean isQuiescent(
+      ThreadExecutionControl control,
       ThreadContext context,
       boolean hasOpenCompactionTurn,
       boolean hasInputDemand,
       int incompleteChildJoins,
       boolean hasUnconfirmedExecution) {
+    Objects.requireNonNull(control, "control");
     Objects.requireNonNull(context, "context");
     if (incompleteChildJoins < 0) {
       throw new IllegalArgumentException("incompleteChildJoins must not be negative");
     }
+    boolean blockedInput = hasInputDemand && control == ThreadExecutionControl.RUNNABLE;
     return (context instanceof ThreadContext.IdleOrHistorical)
         && !hasOpenCompactionTurn
-        && !hasInputDemand
+        && !blockedInput
         && incompleteChildJoins == 0
         && !hasUnconfirmedExecution;
   }

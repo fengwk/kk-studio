@@ -27,6 +27,7 @@ import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessorTestSupport.FakeRun;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessorTestSupport.Fixture;
+import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeStatus;
@@ -35,12 +36,16 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
+import fun.fengwk.kkstudio.harness.runtime.work.Work;
+import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
+import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
 import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Stop 之后活动执行体尚未退出时，不得把子 Thread 投影成已空闲，也不得提前交付其 NOTIFY_PARENT Join。
@@ -208,6 +213,326 @@ class HarnessRuntimeStopExitContractTest {
     }
   }
 
+  @Test
+  void stopWaitsForEveryRegisteredRemoteAcknowledgementWithoutEarlyJoin() throws Exception {
+    // 测试意图：真实 Tool body 登记两个 remote 后被 Stop；Studio 退出与首个 remote ACK 都不能提前交付 Join，只有最后一个真实 ACK 才收敛。
+    Fixture fixture = ToolProcessorTestSupport.childFixture(false, 1);
+    fixture.gateway.queuePreflightAllow();
+    UUID acknowledgedRemote = UUID.randomUUID();
+    UUID notStartedRemote = UUID.randomUUID();
+    CountDownLatch registered = new CountDownLatch(1);
+    CountDownLatch interrupted = new CountDownLatch(1);
+    CountDownLatch release = new CountDownLatch(1);
+    AtomicReference<ToolGateway.RemoteExecutionObserver> observer = new AtomicReference<>();
+    AtomicReference<List<Boolean>> starts = new AtomicReference<>();
+    AtomicReference<Boolean> released = new AtomicReference<>(false);
+    FakeRun run =
+        fixture.gateway.queueRun(
+            progress -> {
+              ToolGateway.RemoteExecutionObserver remote =
+                  fixture.gateway.executions.get(0).remoteExecutions();
+              observer.set(remote);
+              starts.set(
+                  List.of(remote.tryStart(acknowledgedRemote), remote.tryStart(notStartedRemote)));
+              registered.countDown();
+              while (true) {
+                try {
+                  if (!release.await(5, TimeUnit.SECONDS)) {
+                    return new ToolGateway.Cancelled(
+                        new ToolInvocationError("CANCELLED", "cancelled"));
+                  }
+                  released.set(true);
+                  return new ToolGateway.Cancelled(
+                      new ToolInvocationError("CANCELLED", "cancelled"));
+                } catch (InterruptedException expected) {
+                  // Stop 已送达中断，但执行体还没退出；继续等最终 release，让主线程观察真实的未退出窗口。
+                  interrupted.countDown();
+                }
+              }
+            });
+    HarnessRuntime runtime =
+        new HarnessRuntime(
+            fixture.store,
+            (threadId, candidatePath, preparation) -> null,
+            () -> CompactionConfig.DEFAULT,
+            null,
+            mock(ModelProcessor.class),
+            fixture.processor);
+    UUID leafId = fixture.baseline.threadId();
+    UUID joinId = UUID.randomUUID();
+    UUID parentId = insertSourceAndJoin(fixture, joinId);
+    UUID localExecutionId;
+    try {
+      ClaimedWork claim =
+          ToolProcessorTestSupport.claim(fixture.store, fixture.toolInvocationId, NOW);
+      assertEquals(ProcessResult.STARTED, fixture.processor.process(claim));
+      assertTrue(run.awaitExecuting(), "remote tool body must be entered before stop");
+      assertTrue(registered.await(5, TimeUnit.SECONDS), "both remote executions must register");
+      assertEquals(List.of(true, true), starts.get());
+      int unconfirmedBeforeStop =
+          fixture.store.transaction(tx -> tx.loadUnconfirmedExecutions(leafId).size());
+      assertEquals(
+          3, unconfirmedBeforeStop, "the local generation and both remotes are unconfirmed");
+      localExecutionId =
+          fixture.store.transaction(
+              tx ->
+                  tx.loadUnconfirmedExecutions(leafId).stream()
+                      .filter(fact -> fact.kind() == ExecutionExitKind.TOOL)
+                      .map(ExecutionExitFact::executionId)
+                      .findFirst()
+                      .orElseThrow());
+      ThreadSnapshot before = runtime.getThreadSnapshot(leafId);
+      assertEquals(ThreadRuntimeStatus.RUNNING, before.runtimeStatus());
+      assertFalse(runtime.findJoin(joinId).orElseThrow().matched());
+      assertFalse(parentNotified(fixture, parentId));
+
+      runtime.stop(new StopCommand(leafId, TestIds.id(71), before.thread().version()));
+
+      assertTrue(interrupted.await(5, TimeUnit.SECONDS), "Stop must reach the remote tool body");
+      release.countDown();
+      assertTrue(run.executionThread.join(Duration.ofSeconds(5)), "remote tool body must exit");
+      assertTrue(released.get(), "the test must release the body, not hit its timeout");
+      assertEquals(0, run.exited.getCount(), "tool body really returned");
+      assertEquals(1, run.closes.get(), "run closes after the real body returns");
+      assertTrue(run.exitedBeforeClose);
+
+      assertAll(
+          () ->
+              assertEquals(
+                  ExecutionExitState.STUDIO_EXITED, executionState(fixture, localExecutionId)),
+          () ->
+              assertEquals(
+                  ExecutionExitState.UNCONFIRMED, executionState(fixture, acknowledgedRemote)),
+          () ->
+              assertEquals(
+                  ExecutionExitState.UNCONFIRMED, executionState(fixture, notStartedRemote)),
+          () ->
+              assertEquals(ExecutionExitKind.REMOTE, execution(fixture, acknowledgedRemote).kind()),
+          () ->
+              assertEquals(
+                  localExecutionId, execution(fixture, acknowledgedRemote).parentExecutionId()),
+          () ->
+              assertEquals(
+                  ThreadRuntimeStatus.RUNNING,
+                  runtime.getThreadSnapshot(leafId).runtimeStatus(),
+                  "an unconfirmed remote keeps the stopped expando RUNNING"),
+          () ->
+              assertEquals(
+                  ThreadExecutionControl.STOPPED,
+                  runtime.getThreadSnapshot(leafId).thread().executionControl()),
+          () ->
+              assertFalse(
+                  runtime.findJoin(joinId).orElseThrow().matched(),
+                  "studio exit alone must not deliver the join"),
+          () -> assertEquals(0, notificationCount(fixture, parentId)));
+
+      observer.get().confirmExit(acknowledgedRemote);
+      assertAll(
+          () ->
+              assertEquals(
+                  ExecutionExitState.REMOTE_ACKNOWLEDGED,
+                  executionState(fixture, acknowledgedRemote)),
+          () ->
+              assertEquals(
+                  ExecutionExitState.UNCONFIRMED, executionState(fixture, notStartedRemote)),
+          () ->
+              assertEquals(
+                  ThreadRuntimeStatus.RUNNING,
+                  runtime.getThreadSnapshot(leafId).runtimeStatus(),
+                  "one remote remains unconfirmed"),
+          () -> assertFalse(runtime.findJoin(joinId).orElseThrow().matched()),
+          () -> assertEquals(0, notificationCount(fixture, parentId)));
+
+      long versionAfterFirstAck = version(fixture.store, leafId);
+      long wakeAfterFirstAck = threadWakeVersion(fixture.store, leafId);
+      observer.get().confirmExit(acknowledgedRemote);
+      assertAll(
+          () ->
+              assertEquals(
+                  versionAfterFirstAck,
+                  version(fixture.store, leafId),
+                  "duplicate ack must not bump version"),
+          () ->
+              assertEquals(
+                  wakeAfterFirstAck,
+                  threadWakeVersion(fixture.store, leafId),
+                  "duplicate ack must not wake work"),
+          () ->
+              assertEquals(
+                  0, notificationCount(fixture, parentId), "duplicate ack must not notify"),
+          () ->
+              assertEquals(
+                  ExecutionExitState.REMOTE_ACKNOWLEDGED,
+                  executionState(fixture, acknowledgedRemote)),
+          () ->
+              assertEquals(
+                  ExecutionExitState.UNCONFIRMED, executionState(fixture, notStartedRemote)),
+          () ->
+              assertEquals(
+                  ThreadRuntimeStatus.RUNNING, runtime.getThreadSnapshot(leafId).runtimeStatus()));
+
+      observer.get().confirmNotStarted(notStartedRemote);
+      ThreadSnapshot settled = runtime.getThreadSnapshot(leafId);
+      ThreadJoin delivered = runtime.findJoin(joinId).orElseThrow();
+      assertAll(
+          () ->
+              assertEquals(
+                  ExecutionExitState.NOT_STARTED, executionState(fixture, notStartedRemote)),
+          () ->
+              assertTrue(
+                  fixture.store.transaction(tx -> tx.loadUnconfirmedExecutions(leafId)).isEmpty()),
+          () -> assertEquals(versionAfterFirstAck + 1, version(fixture.store, leafId)),
+          () -> assertEquals(ThreadRuntimeStatus.IDLE, settled.runtimeStatus()),
+          () -> assertEquals(ThreadExecutionControl.STOPPED, settled.thread().executionControl()),
+          () -> assertTrue(delivered.matched(), "the last remote ack delivers the withheld join"),
+          () ->
+              assertEquals(
+                  1, notificationCount(fixture, parentId), "the parent is notified exactly once"));
+
+      UUID afterStopRemote = UUID.randomUUID();
+      assertFalse(
+          observer.get().tryStart(afterStopRemote), "Stop already won; no remote may start");
+      assertTrue(fixture.store.transaction(tx -> tx.findExecution(afterStopRemote)).isEmpty());
+    } finally {
+      release.countDown();
+      try {
+        if (run.executionThread != null) {
+          assertTrue(
+              run.executionThread.join(Duration.ofSeconds(5)),
+              "released remote execution must exit");
+        }
+      } finally {
+        fixture.processor.close();
+        fixture.scheduler.shutdownNow();
+        assertTrue(fixture.scheduler.awaitTermination(5, TimeUnit.SECONDS));
+      }
+    }
+  }
+
+  @Test
+  void remoteAcknowledgementRejectsUnknownAndForeignParentIdentitiesWithoutChangingLegalRows()
+      throws Exception {
+    // 测试意图：observer 只能确认本代次登记的 remote；未登记 ACK 或挂到另一合法父代次的 ACK 必须抛且不改任何已有事实。
+    Fixture fixture = ToolProcessorTestSupport.childFixture(false, 1);
+    fixture.gateway.queuePreflightAllow();
+    UUID legalRemoteId = UUID.randomUUID();
+    CountDownLatch registered = new CountDownLatch(1);
+    CountDownLatch release = new CountDownLatch(1);
+    AtomicReference<ToolGateway.RemoteExecutionObserver> observer = new AtomicReference<>();
+    AtomicReference<Boolean> started = new AtomicReference<>();
+    AtomicReference<Boolean> released = new AtomicReference<>(false);
+    FakeRun run =
+        fixture.gateway.queueRun(
+            progress -> {
+              ToolGateway.RemoteExecutionObserver remote =
+                  fixture.gateway.executions.get(0).remoteExecutions();
+              observer.set(remote);
+              started.set(remote.tryStart(legalRemoteId));
+              registered.countDown();
+              try {
+                if (!release.await(5, TimeUnit.SECONDS)) {
+                  return new ToolGateway.Cancelled(
+                      new ToolInvocationError("CANCELLED", "cancelled"));
+                }
+                released.set(true);
+              } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                return new ToolGateway.Unknown(
+                    new ToolInvocationError("INTERRUPTED", "interrupted"));
+              }
+              return new ToolGateway.Cancelled(new ToolInvocationError("CANCELLED", "cancelled"));
+            });
+    UUID leafId = fixture.baseline.threadId();
+    UUID localExecutionId = null;
+    try {
+      assertEquals(
+          ProcessResult.STARTED,
+          fixture.processor.process(
+              ToolProcessorTestSupport.claim(fixture.store, fixture.toolInvocationId, NOW)));
+      assertTrue(run.awaitExecuting(), "remote tool body must be entered");
+      assertTrue(registered.await(5, TimeUnit.SECONDS), "the legal remote must register");
+      assertEquals(Boolean.TRUE, started.get());
+
+      ExecutionExitFact local =
+          fixture.store.transaction(
+              tx ->
+                  tx.loadUnconfirmedExecutions(leafId).stream()
+                      .filter(fact -> fact.kind() == ExecutionExitKind.TOOL)
+                      .findFirst()
+                      .orElseThrow());
+      localExecutionId = local.executionId();
+      // 另一份来源合法的同代 TOOL/REMOTE 事实：identity 相同但 executionId 与父执行不同，用于构造错误 parent 的 ACK。
+      ExecutionExitFact foreignParent =
+          new ExecutionExitFact(
+              UUID.randomUUID(),
+              leafId,
+              local.invocationId(),
+              local.attempt(),
+              local.ownerLeaseToken(),
+              ExecutionExitKind.TOOL,
+              null,
+              ExecutionExitState.UNCONFIRMED,
+              local.registeredAt(),
+              null);
+      ExecutionExitFact foreignRemote =
+          new ExecutionExitFact(
+              UUID.randomUUID(),
+              leafId,
+              local.invocationId(),
+              local.attempt(),
+              local.ownerLeaseToken(),
+              ExecutionExitKind.REMOTE,
+              foreignParent.executionId(),
+              ExecutionExitState.UNCONFIRMED,
+              NOW,
+              null);
+      fixture.store.transaction(
+          tx -> {
+            tx.lockThread(leafId);
+            tx.registerExecution(foreignParent);
+            tx.registerExecution(foreignRemote);
+            return null;
+          });
+
+      UUID unknown = UUID.randomUUID();
+      assertThrows(
+          IllegalStateException.class,
+          () -> observer.get().confirmExit(unknown),
+          "an unregistered remote acknowledgement must fail");
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> observer.get().confirmExit(foreignRemote.executionId()),
+          "an acknowledgement owned by another parent generation must fail");
+      assertAll(
+          () -> assertTrue(fixture.store.transaction(tx -> tx.findExecution(unknown)).isEmpty()),
+          () ->
+              assertEquals(ExecutionExitState.UNCONFIRMED, executionState(fixture, legalRemoteId)),
+          () ->
+              assertEquals(
+                  ExecutionExitState.UNCONFIRMED,
+                  executionState(fixture, foreignRemote.executionId())),
+          () ->
+              assertEquals(
+                  ExecutionExitState.UNCONFIRMED, executionState(fixture, local.executionId())));
+    } finally {
+      release.countDown();
+      try {
+        if (run.executionThread != null) {
+          assertTrue(
+              run.executionThread.join(Duration.ofSeconds(5)),
+              "released remote execution must exit");
+        }
+      } finally {
+        fixture.processor.close();
+        fixture.scheduler.shutdownNow();
+        assertTrue(fixture.scheduler.awaitTermination(5, TimeUnit.SECONDS));
+      }
+    }
+    assertTrue(released.get(), "the test must release the body, not hit its timeout");
+    assertEquals(ExecutionExitState.STUDIO_EXITED, executionState(fixture, localExecutionId));
+    assertEquals(ExecutionExitState.UNCONFIRMED, executionState(fixture, legalRemoteId));
+  }
+
   private static UUID insertSourceAndJoin(Fixture fixture, UUID joinId) {
     return fixture.store.transaction(
         tx -> {
@@ -276,5 +601,26 @@ class HarnessRuntimeStopExitContractTest {
           }
           return count;
         });
+  }
+
+  private static ExecutionExitFact execution(Fixture fixture, UUID executionId) {
+    return fixture.store.transaction(tx -> tx.findExecution(executionId).orElseThrow());
+  }
+
+  private static ExecutionExitState executionState(Fixture fixture, UUID executionId) {
+    return execution(fixture, executionId).state();
+  }
+
+  private static long version(HarnessStore store, UUID threadId) {
+    return store.transaction(tx -> tx.findThread(threadId).orElseThrow().version());
+  }
+
+  /** 当前 THREAD Work 的唤醒代次；不存在时用 -1 表示，便于确认重复 ACK 不产生 wake。 */
+  private static long threadWakeVersion(HarnessStore store, UUID threadId) {
+    return store.transaction(
+        tx ->
+            tx.findWork(new WorkTarget(WorkTargetType.THREAD, threadId))
+                .map(Work::wakeVersion)
+                .orElse(-1L));
   }
 }

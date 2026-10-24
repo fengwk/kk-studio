@@ -69,8 +69,8 @@ import java.util.function.Consumer;
  * 通知交付，以及最终的 Work fencing。
  *
  * <p>Stop 把目标 Thread 与完整父子后代一次性置为 {@link ThreadExecutionControl#STOPPED}，为每个受影响节点持久保存 {@link
- * StoppedThreadReceipt}。旧 stopRequestId 的重放直接返回持久保存的整批回执，不以当前树重算旧范围、不停止之后启动的新工作。 输入水位不因 Stop
- * 前进；各节点自己的停止边界与被取消的人类输入写入其回执。
+ * StoppedThreadReceipt}。旧 stopRequestId 的重放直接返回持久保存的整批回执，不以当前树重算旧范围、不停止之后启动的新工作。被取消的人类输入写入回执；
+ * 已排队的系统通知物化为历史并同步推进输入水位。
  */
 final class StopControl {
 
@@ -807,7 +807,8 @@ final class StopControl {
 
   /**
    * 停止节点时保留已排队的系统通知：按 sequence 升序物化为历史 {@link NotificationPayload} Entry，并把命令标记为已应用（应用坐标指向 自身
-   * Entry）。输入水位不变、也不唤醒模型；STOPPED 节点上的通知只作为历史输入，待显式新输入恢复后的下一个 INPUT 接纳。返回推进 head 后的 STOPPED Thread。
+   * Entry），输入水位同步覆盖这些已物化通知；不唤醒模型。STOPPED 节点上的通知只作为历史输入，待显式新输入恢复后的下一个 INPUT 接纳。返回推进 head 后的 STOPPED
+   * Thread。
    */
   private static ThreadState materializeQueuedNotifications(
       HarnessStore.Transaction tx,
@@ -818,6 +819,7 @@ final class StopControl {
       return thread;
     }
     UUID head = thread.headEntryId();
+    long inputThroughSequence = thread.inputThroughSequence();
     List<ThreadCommand> applied = new ArrayList<>(notifications.size());
     for (ThreadCommand command : notifications) {
       NotificationCommandPayload payload = (NotificationCommandPayload) command.payload();
@@ -835,9 +837,11 @@ final class StopControl {
               now));
       applied.add(command.markApplied(entryId));
       head = entryId;
+      inputThroughSequence = Math.max(inputThroughSequence, command.sequence());
     }
     tx.updateCommands(applied);
-    ThreadState advanced = thread.advanceHead(head, now);
+    ThreadState advanced =
+        thread.advanceHeadAndInputThroughSequence(head, inputThroughSequence, now);
     tx.updateThread(advanced);
     return advanced;
   }
