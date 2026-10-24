@@ -320,6 +320,7 @@ class ExecutionExitSettlementTest {
             "released tool execution must exit in cleanup");
       }
       processor.close();
+      fixture.processor.close();
       fixture.scheduler.shutdownNow();
       assertTrue(fixture.scheduler.awaitTermination(5, TimeUnit.SECONDS));
     }
