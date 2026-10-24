@@ -237,6 +237,7 @@ class OpenAiChatNativeReplayTest {
         {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"custom_1","type":"custom",
         "custom":{"name":"code","input":"print(1)"}}]},"finish_reason":"tool_calls"}]}
         """);
+    accumulator.handleData("{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}");
     accumulator.handleData("[DONE]");
     ProviderCompletion completion = accumulator.finish();
     assertEquals(List.of(), completion.response().toolCalls());
@@ -278,6 +279,7 @@ class OpenAiChatNativeReplayTest {
         {"choices":[{"delta":{"tool_calls":[{"index":7,
         "function":{"arguments":"\\"q\\":1}"}}]},"finish_reason":"tool_calls"}]}
         """);
+    accumulator.handleData("{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}");
     accumulator.handleData("[DONE]");
     ProviderCompletion completion = accumulator.finish();
     assertEquals(1, completion.response().toolCalls().size());
@@ -338,6 +340,7 @@ class OpenAiChatNativeReplayTest {
         """);
     accumulator.handleData(
         "{\"choices\":[{\"delta\":{\"tool_calls\":[]},\"finish_reason\":\"tool_calls\"}]}");
+    accumulator.handleData("{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}");
     accumulator.handleData("[DONE]");
     ProviderCompletion completion = accumulator.finish();
     assertEquals(1, completion.response().toolCalls().size());
@@ -398,6 +401,7 @@ class OpenAiChatNativeReplayTest {
           ]
         }
         """);
+    accumulator.handleData("{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}");
     accumulator.handleData("[DONE]");
 
     ProviderCompletion completion = accumulator.finish();
@@ -449,6 +453,7 @@ class OpenAiChatNativeReplayTest {
           }]
         }
         """);
+    accumulator.handleData("{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}");
     accumulator.handleData("[DONE]");
 
     JsonNode payload = accumulator.finish().replayState().payload();
@@ -474,6 +479,7 @@ class OpenAiChatNativeReplayTest {
         {"id":"c-tamper","choices":[{"index":0,"delta":{"role":"assistant","content":"honest"},
         "finish_reason":"stop"}]}
         """);
+    accumulator.handleData("{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}");
     accumulator.handleData("[DONE]");
     ProviderCompletion completion = accumulator.finish();
 

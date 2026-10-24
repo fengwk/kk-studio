@@ -120,7 +120,7 @@ class ModelContractTest {
 
     ModelCost cost = ModelCost.calculate(pricing, usage);
 
-    assertEquals(1_900_000, usage.totalTokens());
+    assertEquals(1_900_000L, usage.providerTotalTokens());
     assertEquals(1_900_000, usage.categorizedTokens());
     assertEquals("USD", cost.currency());
     assertEquals(new BigDecimal("1.6"), cost.input());
@@ -188,9 +188,9 @@ class ModelContractTest {
     ModelUsage usage = new ModelUsage(1, 6, 3, 4, Map.of(), 6L, 100L);
 
     assertEquals(14, usage.categorizedTokens());
-    assertEquals(100, usage.totalTokens());
+    assertEquals(100L, usage.providerTotalTokens());
     assertEquals(0, usage.nonReasoningOutputTokens());
-    assertEquals(86, usage.totalTokens() - usage.categorizedTokens());
+    assertEquals(86L, usage.providerTotalTokens() - usage.categorizedTokens());
   }
 
   /** categorizedTokens 在 Long 溢出时必须 fail fast。 */

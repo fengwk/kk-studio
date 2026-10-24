@@ -9,6 +9,10 @@
     "response": {
       "id": "resp_synthetic_content",
       "status": "completed",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
       "output": [
         {
           "id": "rs_synthetic_content",

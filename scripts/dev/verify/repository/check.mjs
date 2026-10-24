@@ -45,6 +45,7 @@ const moduleDocuments = [
   'harness-provider.md',
   'harness-runtime.md',
   'ide.md',
+  'model-pricing.md',
   'platform.md',
   'platform-plugin-api.md',
   'project.md',

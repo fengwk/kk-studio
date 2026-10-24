@@ -1,7 +1,9 @@
 package fun.fengwk.kkstudio.harness.runtime.model;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
@@ -130,10 +132,140 @@ class ModelPricingResolverTest {
             new ModelUsage(0, 1_000_000, 0, 0, Map.of(), null, 1_000_000L),
             null,
             null);
-    assertEquals(ModelCost.zero(), missingSubset);
+    assertNull(missingSubset);
   }
 
-  /** 日期边界支持单侧缺省；缺失 requestedAt 时返回完整 0，绝不查询当前时间伪造历史。 */
+  /**
+   * reasoning 独立单价与 output 单价数值相同（即便 BigDecimal scale 不同）时无需 reasoning 子集； 未提供 reasoningTokens
+   * 时依然能正常计费，全部输出按 output 单价计费且 reasoning 计 0。
+   */
+  @Test
+  void calculatesCostWithoutReasoningSubsetWhenReasoningRateMatchesOutputScaleAgnostically() {
+    // output scale=2 (4.00), reasoning scale=0 (4); compareTo 为 0
+    ModelPricing pricing =
+        new ModelPricing(
+            new ModelPricing.RateSet(
+                dec("2.0"), dec("4.00"), dec("0.5"), dec("1.0"), Map.of(), dec("4")),
+            List.of(),
+            List.of());
+    ModelUsage usageWithoutReasoning =
+        new ModelUsage(1_000_000, 1_000_000, 200_000, 100_000, Map.of(), null, 2_300_000L);
+
+    ModelCost cost = ModelCost.calculate(pricing, usageWithoutReasoning, null, null);
+
+    assertEquals(new BigDecimal("2.0"), cost.input());
+    assertEquals(new BigDecimal("4.00"), cost.output());
+    assertEquals(new BigDecimal("0.1"), cost.cacheRead());
+    assertEquals(new BigDecimal("0.1"), cost.cacheWrite());
+    assertEquals(BigDecimal.ZERO, cost.reasoning());
+    assertEquals(new BigDecimal("6.20"), cost.total());
+    assertEquals(
+        0,
+        cost.total()
+            .compareTo(
+                cost.input()
+                    .add(cost.output())
+                    .add(cost.cacheRead())
+                    .add(cost.cacheWrite())
+                    .add(cost.reasoning())));
+  }
+
+  /**
+   * reasoning 独立单价与 output 单价数值相同时，若提供了已知的 reasoningTokens 子集， 必须严格将费用拆分为 non-reasoning 部分（output）和
+   * reasoning 部分，不得合并到 output。
+   */
+  @Test
+  void splitsCostWhenReasoningSubsetIsKnownEvenIfReasoningRateMatchesOutput() {
+    ModelPricing pricing =
+        new ModelPricing(
+            new ModelPricing.RateSet(
+                dec("2.0"), dec("4.00"), dec("0.5"), dec("1.0"), Map.of(), dec("4")),
+            List.of(),
+            List.of());
+    // output 1_000_000，其中 reasoning 400_000，则 non-reasoning 为 600_000
+    ModelUsage usageWithReasoning =
+        new ModelUsage(1_000_000, 1_000_000, 200_000, 100_000, Map.of(), 400_000L, 2_300_000L);
+
+    ModelCost cost = ModelCost.calculate(pricing, usageWithReasoning, null, null);
+
+    assertEquals(new BigDecimal("2.0"), cost.input());
+    assertEquals(new BigDecimal("2.40"), cost.output());
+    assertEquals(new BigDecimal("0.1"), cost.cacheRead());
+    assertEquals(new BigDecimal("0.1"), cost.cacheWrite());
+    assertEquals(new BigDecimal("1.6"), cost.reasoning());
+    assertEquals(new BigDecimal("6.20"), cost.total());
+    assertEquals(
+        0,
+        cost.total()
+            .compareTo(
+                cost.input()
+                    .add(cost.output())
+                    .add(cost.cacheRead())
+                    .add(cost.cacheWrite())
+                    .add(cost.reasoning())));
+  }
+
+  /** 独立 reasoning 单价与 output 单价不同且未提供 reasoningTokens 子集时返回 null，绝不猜测价格。 */
+  @Test
+  void returnsNullWhenReasoningPriceDiffersFromOutputAndReasoningTokensAreUnknown() {
+    ModelPricing higherReasoning =
+        new ModelPricing(
+            new ModelPricing.RateSet(dec("1"), dec("5"), dec("0"), dec("0"), Map.of(), dec("10")),
+            List.of(),
+            List.of());
+    ModelPricing lowerReasoning =
+        new ModelPricing(
+            new ModelPricing.RateSet(dec("1"), dec("5"), dec("0"), dec("0"), Map.of(), dec("2")),
+            List.of(),
+            List.of());
+    ModelUsage usageUnknownReasoning =
+        new ModelUsage(1_000_000, 500_000, 0, 0, Map.of(), null, 1_500_000L);
+
+    assertNull(ModelCost.calculate(higherReasoning, usageUnknownReasoning, null, null));
+    assertNull(ModelCost.calculate(lowerReasoning, usageUnknownReasoning, null, null));
+  }
+
+  /** outputTokens 为 0 时无需 reasoning 子集；即使 reasoning 单价不同且为 null 也可计算，完整保留已知的输入与缓存非零费用。 */
+  @Test
+  void calculatesCostWhenOutputIsZeroEvenWithDifferentReasoningPriceAndUnknownReasoning() {
+    ModelPricing pricing =
+        new ModelPricing(
+            new ModelPricing.RateSet(
+                dec("3"), dec("10"), dec("0.5"), dec("2"), Map.of(300L, dec("1")), dec("25")),
+            List.of(),
+            List.of());
+    ModelUsage usageZeroOutput =
+        new ModelUsage(1_000_000, 0, 400_000, 500_000, Map.of(300L, 500_000L), null, 1_900_000L);
+
+    ModelCost cost = ModelCost.calculate(pricing, usageZeroOutput, null, null);
+
+    assertEquals(new BigDecimal("3"), cost.input());
+    assertEquals(BigDecimal.ZERO, cost.output());
+    assertEquals(new BigDecimal("0.2"), cost.cacheRead());
+    assertEquals(new BigDecimal("0.5"), cost.cacheWrite());
+    assertEquals(BigDecimal.ZERO, cost.reasoning());
+    assertEquals(new BigDecimal("3.7"), cost.total());
+    assertTrue(cost.total().signum() > 0);
+  }
+
+  /** cacheWriteByTtl 各 TTL 分配数量按各自费率计费，未显式覆盖 TTL 按 base 费率补足，TTL 与基础用量严格互斥累加，绝不重复计费。 */
+  @Test
+  void appliesTtlRatesMutuallyExclusiveWithoutDoubleChargingAllocatedTokens() {
+    ModelPricing pricing =
+        new ModelPricing(rates("0", "0", "0", "10", Map.of(300L, dec("2"))), List.of(), List.of());
+    // 总 cacheWriteTokens = 1_500_000：300s TTL 500_000, 3600s TTL 1_000_000，守恒相加 = 1_500_000
+    ModelUsage usage =
+        new ModelUsage(
+            0, 0, 0, 1_500_000, Map.of(300L, 500_000L, 3600L, 1_000_000L), null, 1_500_000L);
+
+    ModelCost cost = ModelCost.calculate(pricing, usage, null, null);
+
+    // 500_000 * 2 / 1M = 1; 1_000_000 * 10 / 1M = 10; total = 11
+    assertEquals(new BigDecimal("11"), cost.cacheWrite());
+    assertEquals(new BigDecimal("11"), cost.total());
+  }
+
+  /** 日期边界支持单侧缺省；缺失 requestedAt 时返回未知，绝不查询当前时间伪造历史。 */
   @Test
   void matchesOneSidedUtcDatesAndZeroesWhenRequestedAtIsMissing() {
     ModelPricing gte =
@@ -152,9 +284,7 @@ class ModelPricingResolverTest {
     assertEquals(
         new BigDecimal("1"), calculateInput(lt, Instant.parse("2026-08-18T00:00:00Z"), null));
 
-    assertEquals(
-        ModelCost.zero(),
-        ModelCost.calculate(gte, new ModelUsage(1_000_000, 0, 0, 0, Map.of(), null, null)));
+    assertNull(ModelCost.calculate(gte, new ModelUsage(1_000_000, 0, 0, 0, Map.of(), null, null)));
     assertEquals(
         new BigDecimal("7"),
         calculateInput(
@@ -241,7 +371,9 @@ class ModelPricingResolverTest {
                     new ModelPricing.RatePatch(dec("9"), null, null, null, null, null, false))),
             List.of());
 
-    assertEquals(BigDecimal.ZERO, calculateInput(pricing, MONDAY_LATE, null));
+    assertNull(
+        ModelCost.calculate(
+            pricing, new ModelUsage(1_000_000, 0, 0, 0, Map.of(), null, null), MONDAY_LATE, null));
     assertEquals(new BigDecimal("9"), calculateInput(pricing, MONDAY_LATE, "priority"));
   }
 
@@ -277,7 +409,7 @@ class ModelPricingResolverTest {
             "priority"));
   }
 
-  /** not 包装未知事实仍为未知，整单归零；只有事实已知时才产生确定布尔结果。 */
+  /** not 包装未知事实仍为未知；只有事实已知时才产生确定布尔结果。 */
   @Test
   void keepsUnknownPropagatingThroughNot() {
     ModelPricing pricing =
@@ -286,7 +418,9 @@ class ModelPricingResolverTest {
             new ModelPricingCondition(null, null, null, null, null, null, tier("priority")),
             "9");
 
-    assertEquals(BigDecimal.ZERO, calculateInput(pricing, MONDAY_LATE, null));
+    assertNull(
+        ModelCost.calculate(
+            pricing, new ModelUsage(1_000_000, 0, 0, 0, Map.of(), null, null), MONDAY_LATE, null));
     assertEquals(new BigDecimal("1"), calculateInput(pricing, MONDAY_LATE, "priority"));
     assertEquals(new BigDecimal("9"), calculateInput(pricing, MONDAY_LATE, "standard"));
   }

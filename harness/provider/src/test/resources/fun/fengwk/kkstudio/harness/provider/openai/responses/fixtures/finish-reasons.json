@@ -38,6 +38,10 @@
       "reason": "max_output_tokens"
     },
     "model": "gpt-5.4-mini",
+    "usage": {
+      "input_tokens": 10,
+      "output_tokens": 5
+    },
     "output": [
       {
         "id": "msg_incomp_1",
@@ -60,6 +64,10 @@
       "reason": "content_filter"
     },
     "model": "gpt-5.4-mini",
+    "usage": {
+      "input_tokens": 10,
+      "output_tokens": 5
+    },
     "output": []
   },
   "incomplete_unknown_reason": {
@@ -70,6 +78,10 @@
       "reason": "future_unsupported_reason"
     },
     "model": "gpt-5.4-mini",
+    "usage": {
+      "input_tokens": 10,
+      "output_tokens": 5
+    },
     "output": []
   },
   "incomplete_missing_details": {
@@ -77,6 +89,10 @@
     "object": "response",
     "status": "incomplete",
     "model": "gpt-5.4-mini",
+    "usage": {
+      "input_tokens": 10,
+      "output_tokens": 5
+    },
     "output": []
   }
 }

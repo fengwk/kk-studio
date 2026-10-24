@@ -91,7 +91,12 @@ class GeminiStreamingDecoderTest {
           "candidates": [{
             "content": { "role": "model", "parts": [{ "text": "世界！" }] },
             "finishReason": "STOP"
-          }]
+          }],
+          "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15
+          }
         }
         """;
 
@@ -131,7 +136,12 @@ class GeminiStreamingDecoderTest {
           "candidates": [{
             "content": { "role": "model", "parts": [{ "text": "line1\\nline2\\tindent" }] },
             "finishReason": "STOP"
-          }]
+          }],
+          "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15
+          }
         }
         """;
 

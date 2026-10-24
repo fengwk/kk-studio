@@ -126,7 +126,8 @@ class AnthropicCitationsReplayTest {
     ProviderRequest firstRequest = request(List.of(userMsg()));
     AnthropicStreamAccumulator accumulator = accumulator(firstRequest);
     accumulator.handleEvent(
-        "message_start", "{\"type\":\"message_start\",\"message\":{\"usage\":{}}}");
+        "message_start",
+        "{\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10}}}");
     accumulator.handleEvent(
         "content_block_start",
         "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\",\"citations\":[{\"type\":\"document_location\",\"cited_text\":\"start\"}]}}");
@@ -163,7 +164,8 @@ class AnthropicCitationsReplayTest {
     ProviderRequest firstRequest = request(List.of(userMsg()));
     AnthropicStreamAccumulator accumulator = accumulator(firstRequest);
     accumulator.handleEvent(
-        "message_start", "{\"type\":\"message_start\",\"message\":{\"usage\":{}}}");
+        "message_start",
+        "{\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10}}}");
     accumulator.handleEvent(
         "content_block_start",
         "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}");
@@ -194,7 +196,8 @@ class AnthropicCitationsReplayTest {
     ProviderRequest firstRequest = request(List.of(userMsg()));
     AnthropicStreamAccumulator accumulator = accumulator(firstRequest);
     accumulator.handleEvent(
-        "message_start", "{\"type\":\"message_start\",\"message\":{\"usage\":{}}}");
+        "message_start",
+        "{\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10}}}");
     accumulator.handleEvent(
         "content_block_start",
         "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}");

@@ -119,7 +119,7 @@ class OpenAiResponsesLosslessItemReplayTest {
     accumulator.processEvent(
         MAPPER.readTree(
             "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_lossless\","
-                + "\"status\":\"completed\",\"output\":"
+                + "\"status\":\"completed\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5},\"output\":"
                 + output
                 + "}}"));
     return accumulator.replayState();
@@ -241,6 +241,7 @@ class OpenAiResponsesLosslessItemReplayTest {
     accumulator.processEvent(
         MAPPER.readTree(
             "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_enc\",\"status\":\"completed\","
+                + "\"usage\":{\"input_tokens\":10,\"output_tokens\":5},"
                 + "\"output\":[{\"id\":\"rs_1\",\"type\":\"reasoning\",\"status\":\"completed\","
                 + "\"summary\":[{\"type\":\"summary_text\",\"text\":\"check the weather\"}]}]}}"));
 

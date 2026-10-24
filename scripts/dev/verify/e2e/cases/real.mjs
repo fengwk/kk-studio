@@ -212,14 +212,8 @@ export function assertProviderUsageAlgebra(usage, providerType, { modelName } = 
       // outputTokens 已包含 wire candidates + thoughts；不支持缓存写入。
       assert(cacheWriteTokens === 0, `Gemini cacheWriteTokens must be 0, got: ${cacheWriteTokens}`)
 
-      // providerTotal = prompt + candidates + thoughts
-      if (providerTotalTokens > 0) {
-        const expectedTotal = inputTokens + cacheReadTokens + outputTokens
-        assert(
-          providerTotalTokens === expectedTotal,
-          `Gemini providerTotalTokens algebra mismatch: expected ${expectedTotal}, got ${providerTotalTokens}`,
-        )
-      }
+      // Gemini 原生 totalTokenCount 独立（可能包含 hosted 工具等服务端附加），不能强等式绑定；
+      // 保留上游原始报告验证，不从分类伪造 total。
       break
     }
 
@@ -244,9 +238,8 @@ export function assertProviderUsageAlgebra(usage, providerType, { modelName } = 
 
     case 'anthropic': {
       // Anthropic 协议：
-      // 当前 accumulator 不报告 reasoning 拆分，保留 null。
-      assert(reasoningTokens === null, `Anthropic reasoningTokens must be null, got: ${reasoningTokens}`)
-
+      // outputTokens 已包含 wire output_tokens（含可选 thinking_tokens 一次，不重复相加）；
+      // reasoningTokens 来自 output_tokens_details.thinking_tokens，可选（未报告时为 null，有 thinking 时 <= outputTokens）；
       // Wire 未报告 total_tokens；保留 null，不合成总量。
       assert(
         providerTotalTokens === null,

@@ -101,7 +101,7 @@ final class GeminiStreamAccumulator {
   /** 累积状态是否可安全写入原生 replay；无法保真的 union 冲突会显式关闭冻结，而不是交付损坏的回放。 */
   private boolean replayFreezable = true;
 
-  private ModelUsage latestUsage = null;
+  private JsonNode latestUsageSnapshot = null;
   private String rawUsageJson = "{}";
   private String serviceTier = null;
 
@@ -155,43 +155,88 @@ final class GeminiStreamAccumulator {
   }
 
   private void updateUsage(JsonNode usageNode) {
-    long promptTokens = optionalTokenCount(usageNode, "promptTokenCount");
-    long output = optionalTokenCount(usageNode, "candidatesTokenCount");
-    Long providerTotal =
-        usageNode.has("totalTokenCount") && !usageNode.get("totalTokenCount").isNull()
-            ? optionalTokenCount(usageNode, "totalTokenCount")
-            : null;
-    long cached = optionalTokenCount(usageNode, "cachedContentTokenCount");
-    Long reasoning =
-        usageNode.has("thoughtsTokenCount") && !usageNode.get("thoughtsTokenCount").isNull()
-            ? optionalTokenCount(usageNode, "thoughtsTokenCount")
-            : null;
-    long ordinaryInput = promptTokens >= cached ? promptTokens - cached : 0L;
-    String tier = null;
-    if (usageNode.has("serviceTier")) {
-      JsonNode value = usageNode.get("serviceTier");
-      if (!value.isString() || value.stringValue().isBlank()) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_RESPONSE, "invalid usage field: serviceTier");
+    for (String field :
+        List.of(
+            "promptTokenCount",
+            "candidatesTokenCount",
+            "cachedContentTokenCount",
+            "thoughtsTokenCount",
+            "totalTokenCount")) {
+      JsonNode value = usageNode.get(field);
+      if (value != null && !value.isNull()) {
+        optionalTokenCount(usageNode, field);
       }
-      tier = value.stringValue();
     }
+    if (usageNode.has("serviceTier")) {
+      serviceTier(usageNode);
+    }
+    // 保留最新原始快照；终态才解释 proto3 省略零，不跨快照补字段。
+    latestUsageSnapshot = usageNode.deepCopy();
+  }
+
+  private ModelUsage normalizeFinalUsage(JsonNode usageNode) {
+    // UsageMetadata 的 prompt/candidates/cache 是普通 proto3 int32，ProtoJSON 可省略零值。
+    // 这是 Gemini 协议事实，不是通用缺字段补零；显式 null、非法数字仍拒绝。
+    long promptTokens = proto3ZeroDefaultCount(usageNode, "promptTokenCount");
+    long output = proto3ZeroDefaultCount(usageNode, "candidatesTokenCount");
+    long cached = proto3ZeroDefaultCount(usageNode, "cachedContentTokenCount");
+    Long providerTotal = optionalReportedCount(usageNode, "totalTokenCount");
+    Long reasoning = optionalReportedCount(usageNode, "thoughtsTokenCount");
+    if (cached > promptTokens) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "cached tokens exceed prompt tokens");
+    }
+    long ordinaryInput = promptTokens - cached;
+    this.serviceTier = serviceTier(usageNode);
 
     // Gemini candidatesTokenCount 不含 thoughts；内部输出总量包含 reasoning，避免重复计费。
-    long outputTotal = Math.addExact(output, reasoning == null ? 0L : reasoning);
-    this.latestUsage =
-        new ModelUsage(ordinaryInput, outputTotal, cached, 0L, Map.of(), reasoning, providerTotal);
-
-    this.serviceTier = tier;
+    long outputTotal;
+    try {
+      outputTotal = Math.addExact(output, reasoning == null ? 0L : reasoning);
+    } catch (ArithmeticException overflow) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "output token count overflow");
+    }
     this.rawUsageJson = usageNode.toString();
+    return new ModelUsage(
+        ordinaryInput, outputTotal, cached, 0L, Map.of(), reasoning, providerTotal);
+  }
+
+  private static String serviceTier(JsonNode usageNode) {
+    if (!usageNode.has("serviceTier")) {
+      return null;
+    }
+    JsonNode value = usageNode.get("serviceTier");
+    if (!value.isString() || value.stringValue().isBlank()) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "invalid usage field: serviceTier");
+    }
+    return value.stringValue();
+  }
+
+  private static long proto3ZeroDefaultCount(JsonNode usageNode, String field) {
+    JsonNode value = usageNode.get(field);
+    if (value == null || value.isMissingNode()) {
+      return 0L;
+    }
+    return optionalTokenCount(usageNode, field);
+  }
+
+  private static Long optionalReportedCount(JsonNode usageNode, String field) {
+    JsonNode value = usageNode.get(field);
+    if (value == null || value.isNull() || value.isMissingNode()) {
+      return null;
+    }
+    return optionalTokenCount(usageNode, field);
   }
 
   private static long optionalTokenCount(JsonNode usageNode, String field) {
     JsonNode value = usageNode.get(field);
-    if (value == null) {
-      return 0L;
-    }
-    if (!value.isIntegralNumber() || !value.canConvertToLong() || value.longValue() < 0L) {
+    if (value == null
+        || value.isNull()
+        || !value.isIntegralNumber()
+        || !value.canConvertToLong()
+        || value.longValue() < 0L) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_RESPONSE, "invalid usage field: " + field);
     }
@@ -500,6 +545,12 @@ final class GeminiStreamAccumulator {
 
   /** 流正常传输完毕后的终态验证与 Completion 交付。 */
   ProviderCompletion finish() {
+    if (latestUsageSnapshot == null) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE,
+          "missing complete usage: Gemini model " + request.model().modelId());
+    }
+    ModelUsage usage = normalizeFinalUsage(latestUsageSnapshot);
     if (this.stopReason == null) {
       if (this.promptBlocked && trackedParts.isEmpty()) {
         this.stopReason = GenerationStopReason.FILTERED;
@@ -527,11 +578,6 @@ final class GeminiStreamAccumulator {
         fullText.append(tp.text);
       }
     }
-
-    ModelUsage usage =
-        this.latestUsage != null
-            ? this.latestUsage
-            : new ModelUsage(0L, 0L, 0L, 0L, Map.of(), null, null);
 
     ProviderResponse response =
         new ProviderResponse(

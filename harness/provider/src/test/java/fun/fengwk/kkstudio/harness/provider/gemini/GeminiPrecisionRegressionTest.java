@@ -112,7 +112,7 @@ class GeminiPrecisionRegressionTest {
         "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"hi\","
             + "\"vendor_opaque\":{\"big\":1e309,\"tiny\":1e-324,"
             + "\"exact\":0.1234567890123456789012345678,\"ratio\":1.10}}]},"
-            + "\"finishReason\":\"STOP\"}]}");
+            + "\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":10,\"candidatesTokenCount\":5,\"totalTokenCount\":15}}");
 
     ProviderCompletion completion = accumulator.finish();
     JsonNode opaque = completion.replayState().payload().path("parts").get(0).path("vendor_opaque");
@@ -147,7 +147,9 @@ class GeminiPrecisionRegressionTest {
     accumulator.handleEvent(
         "message",
         "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"hi\"}]},\"finishReason\":null}]}");
-    accumulator.handleEvent("message", "{\"candidates\":[{\"finishReason\":\"STOP\"}]}");
+    accumulator.handleEvent(
+        "message",
+        "{\"candidates\":[{\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":10,\"candidatesTokenCount\":5,\"totalTokenCount\":15}}");
 
     ProviderCompletion completion = accumulator.finish();
     assertEquals("hi", completion.response().text());

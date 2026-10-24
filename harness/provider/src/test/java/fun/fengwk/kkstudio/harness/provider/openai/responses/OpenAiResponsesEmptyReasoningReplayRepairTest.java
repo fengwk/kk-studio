@@ -407,7 +407,7 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
     accumulator.processEvent(
         MAPPER.readTree(
             """
-            {"type":"response.completed","response":{"id":"resp_valid","status":"completed","output":[
+            {"type":"response.completed","response":{"id":"resp_valid","status":"completed","usage":{"input_tokens":10,"output_tokens":5},"output":[
               {"id":"rs_valid","type":"reasoning","encrypted_content":"opaque_blob_exact",
                "summary":[{"type":"summary_text","text":"durable thought"}]},
               {"id":"msg_valid","type":"message","role":"assistant","content":[
@@ -687,7 +687,7 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
     accumulator.processEvent(
         MAPPER.readTree(
             """
-            {"type":"response.completed","response":{"id":"resp_enc_only","status":"completed","output":[
+            {"type":"response.completed","response":{"id":"resp_enc_only","status":"completed","usage":{"input_tokens":10,"output_tokens":5},"output":[
               {"id":"rs_enc_only","type":"reasoning","encrypted_content":"opaque_blob"},
               {"id":"msg_enc_only","type":"message","role":"assistant","content":[
                 {"type":"output_text","text":"answer"}]}
@@ -724,7 +724,7 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
     accumulator.processEvent(
         MAPPER.readTree(
             """
-            {"type":"response.completed","response":{"id":"resp_no_reasoning","status":"completed","output":[
+            {"type":"response.completed","response":{"id":"resp_no_reasoning","status":"completed","usage":{"input_tokens":10,"output_tokens":5},"output":[
               {"id":"msg_only","type":"message","role":"assistant","content":[
                 {"type":"output_text","text":"answer"}]}
             ]}}
@@ -750,7 +750,7 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
     accumulator.processEvent(
         MAPPER.readTree(
             """
-            {"type":"response.completed","response":{"id":"resp_textual_summary","status":"completed","output":[
+            {"type":"response.completed","response":{"id":"resp_textual_summary","status":"completed","usage":{"input_tokens":10,"output_tokens":5},"output":[
               {"id":"rs_textual","type":"reasoning","summary":"authoritative summary"},
               {"id":"msg_textual","type":"message","role":"assistant","content":[
                 {"type":"output_text","text":"answer"}]}
@@ -783,7 +783,7 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
     accumulator.processEvent(
         MAPPER.readTree(
             """
-            {"type":"response.completed","response":{"id":"resp_blank_blocks","status":"completed","output":[
+            {"type":"response.completed","response":{"id":"resp_blank_blocks","status":"completed","usage":{"input_tokens":10,"output_tokens":5},"output":[
               {"id":"rs_blank","type":"reasoning","summary":[
                 {"type":"summary_text","text":""},
                 {"type":"summary_text","text":""}]},
@@ -810,7 +810,7 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
     accumulator.processEvent(
         MAPPER.readTree(
             """
-            {"type":"response.completed","response":{"id":"resp_enc_keep","status":"completed","output":[
+            {"type":"response.completed","response":{"id":"resp_enc_keep","status":"completed","usage":{"input_tokens":10,"output_tokens":5},"output":[
               {"id":"rs_keep","type":"reasoning","encrypted_content":"opaque_keep_exact","summary":[]},
               {"id":"msg_keep","type":"message","role":"assistant","content":[
                 {"type":"output_text","text":"answer"}]}
@@ -841,7 +841,7 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
     accumulator.processEvent(
         MAPPER.readTree(
             """
-            {"type":"response.completed","response":{"id":"resp_ws","status":"completed","output":[
+            {"type":"response.completed","response":{"id":"resp_ws","status":"completed","usage":{"input_tokens":10,"output_tokens":5},"output":[
               {"id":"rs_ws","type":"reasoning","summary":[
                 {"type":"summary_text","text":"  \\n "}]},
               {"id":"msg_ws","type":"message","role":"assistant","content":[
