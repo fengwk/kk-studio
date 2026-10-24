@@ -165,7 +165,7 @@ function accumulateUsage(
   payload: Record<string, unknown>,
   entry: HarnessSessionEntryDTO,
 ): TurnUsage | null {
-  const parsed = parseAssistantUsage(asRecord(payload.assistantMetadata), entry.usageCost ?? null)
+  const parsed = parseAssistantUsage(payload.assistantMetadata, entry.usageCost ?? null)
   return accumulateTurnUsage(pending, parsed)
 }
 

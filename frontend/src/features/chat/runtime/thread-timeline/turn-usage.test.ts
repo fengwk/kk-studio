@@ -265,7 +265,7 @@ describe('aggregateEntryUsage', () => {
       entryType: 'MESSAGE',
       payloadJson: JSON.stringify({
         message: { role: 'ASSISTANT', contents: [{ type: 'text', text: '模型调用输出' }] },
-        assistantMetadata: { stopReason: 'COMPLETE' }, // 有模型 metadata，但缺 usage
+        assistantMetadata: {}, // 显式空 metadata 不是人工消息
       }),
       createTime: 1785232850,
       usageCost: { currency: 'USD', amount: '0.02' },

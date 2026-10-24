@@ -293,7 +293,7 @@ metadata 自行定价；durable 用量按当前 catalog 价格现算，不写回
 缓存写入使用 `cacheWriteTokens` 总量，不叠加 TTL 分桶。
 usage 必须报告四个非负安全整数：inputTokens、outputTokens、cacheReadTokens、cacheWriteTokens。
 缺失或非法时不合成读数；reasoningTokens 和 providerTotalTokens 未报告时保留未知，聚合时也不补零。
-无模型 metadata 的人工 ASSISTANT 消息不计用量；有模型 metadata 却缺失或损坏 usage 时，
+只有 assistantMetadata 缺失才表示无模型调用的人工 ASSISTANT 消息，不计用量；显式空对象、数组、primitive 或损坏 usage 时，
 该回合及分支的完整计数、总费用传播为未知，不把后续已知项目伪装为完整总量。
 安全整数累加溢出也保留未知；推理计数不得超过输出。合法 usage 仅缺推理计数时，
 仍保留后端已提供的费用，不在前端重新定价。

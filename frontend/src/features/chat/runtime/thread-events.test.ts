@@ -39,9 +39,9 @@ function entry(
   }
 }
 
-function messagePayload(role: string, contents: Array<Record<string, unknown>>, metadata?: Record<string, unknown>) {
+function messagePayload(role: string, contents: Array<Record<string, unknown>>, metadata?: unknown) {
   const payload: Record<string, unknown> = { message: { role, contents } }
-  if (metadata) {
+  if (metadata !== undefined) {
     payload.assistantMetadata = metadata
   }
   return payload
@@ -341,9 +341,7 @@ describe('buildThreadEventTimeline', () => {
     const knownUsage = {
       usage: { inputTokens: 50, outputTokens: 25, cacheReadTokens: 0, cacheWriteTokens: 0 },
     }
-    const missingUsage = {
-      stopReason: 'COMPLETE', // 有 assistantMetadata，但缺失 usage 字段
-    }
+    const missingUsage = false // 显式非法 metadata，不能先压成无模型调用
 
     // 1. 顺序 A: known + missing
     const entriesForward = [

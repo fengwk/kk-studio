@@ -21,16 +21,16 @@ export function aggregateEntryUsage(
   let total: TurnUsage | null = null
   for (const entry of entries) {
     const payload = parsePayload(entry.payloadJson)
-    let metadata: Record<string, unknown>
+    let metadata: unknown
     if (entry.entryType === 'COMPACTION') {
       // 压缩结果也是真实模型输出：canonical assistantMetadata 与 Entry.usageCost 是同一份事实。
-      metadata = asRecord(payload.assistantMetadata)
+      metadata = payload.assistantMetadata
     } else if (entry.entryType === 'MESSAGE' || entry.entryType === 'CUSTOM_MESSAGE') {
       const message = asRecord(payload.message)
       if (getString(message.role) !== 'ASSISTANT') {
         continue
       }
-      metadata = asRecord(payload.assistantMetadata)
+      metadata = payload.assistantMetadata
     } else {
       continue
     }

@@ -34,12 +34,12 @@ function entry(
 function assistant(
   id: string,
   text: string,
-  metadata?: Record<string, unknown>,
+  metadata?: unknown,
 ): HarnessSessionEntryDTO {
   const payload: Record<string, unknown> = {
     message: { role: 'ASSISTANT', contents: [{ type: 'text', text }] },
   }
-  if (metadata) {
+  if (metadata !== undefined) {
     payload.assistantMetadata = metadata
   }
   return entry(id, 'MESSAGE', payload)
@@ -380,10 +380,10 @@ describe('Turn usage after TURN_END', () => {
       .toEqual(['meta-usage-entry-assistant-1'])
   })
 
-  it.each([false, true])('propagates missing model usage through turn projection in either order (%s)', (reverse) => {
+  it.each([false, true])('propagates invalid model metadata through turn projection in either order (%s)', (reverse) => {
     const known = assistant('known', 'known', usageMetadata(10, 2))
     known.usageCost = { currency: 'USD', amount: '0.05' }
-    const unknown = assistant('unknown', 'unknown', { stopReason: 'COMPLETE' })
+    const unknown = assistant('unknown', 'unknown', [])
     const outputs = reverse ? [unknown, known] : [known, unknown]
     const timeline = buildThreadTimeline([turnStart(), ...outputs, turnEnd()], [], [])
     const summary = timeline.messages.find((message) => message.role === 'meta' && message.turnUsage != null)
