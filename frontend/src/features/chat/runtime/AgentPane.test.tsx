@@ -302,7 +302,6 @@ function thread(
     nextCommandSequence: '1',
     version: '0',
     status: 'IDLE',
-    processing: false,
     /** 持久执行控制：RUNNABLE / STOPPED，与本地展示 status 无关。 */
     executionControl: 'RUNNABLE',
     branchSettings: {
@@ -332,6 +331,17 @@ function snapshot(
     manualCompaction: { available: false, disabledReason: 'not available' },
     stopReceipts: [],
     ...overrides,
+  }
+}
+
+function pendingInvocation(): ToolInvocationDTO {
+  return {
+    id: 'waiting-tool', modelInvocationId: 'model-1', assistantEntryId: 'assistant-1', callIndex: 0,
+    status: 'READY', attempt: 1, toolCallId: 'call-1', toolName: 'bash', rendererKey: 'bash',
+    environmentId: null, requiredEnvironmentId: 'frozen-env', waitingForEnvironment: false,
+    requiredEnvironmentName: 'archlinux', environmentWaitFreshnessAt: null,
+    argumentsJson: '{"command":"pwd"}', approvalJson: null, resultJson: null, errorJson: null,
+    createTime: 0, updateTime: 0,
   }
 }
 
@@ -424,7 +434,7 @@ function treeNode(
   threadId: string,
   parentThreadId: string | null,
   name: string,
-  processing: boolean,
+  active: boolean,
 ) {
   return {
     threadId,
@@ -432,8 +442,8 @@ function treeNode(
     name,
     agentName: parentThreadId == null ? 'assistant' : 'coder',
     model: { modelName: 'MiniMax', variant: 'default' },
-    status: processing ? 'MODEL_STREAM' : 'IDLE',
-    processing,
+    status: active ? 'RUNNING' : 'IDLE',
+    executionControl: 'RUNNABLE',
     turnCount: 1,
     toolCallCount: 0,
     outcome: null,
@@ -565,7 +575,7 @@ describe('AgentPane orchestration', () => {
     }])
     vi.mocked(harnessService.listSessionThreads).mockResolvedValue([{
       threadId: THREAD_ID, parentThreadId: null, name: 'thread-name',
-      createdAt: 0, updatedAt: 0, status: 'IDLE', processing: false,
+      createdAt: 0, updatedAt: 0, status: 'IDLE', executionControl: 'RUNNABLE',
       model: thread().branchSettings.model, headMessagePreview: null,
     }])
     renderPane({ type: 'CHAT', chatId: CHAT_ID })
@@ -1043,7 +1053,7 @@ describe('AgentPane orchestration', () => {
       createdAt: 0,
       updatedAt: 0,
       status: 'IDLE',
-      processing: false,
+      executionControl: 'RUNNABLE',
       model: { modelName: 'MiniMax', variant: 'default' },
       headMessagePreview: 'thread preview',
     }])
@@ -1183,7 +1193,7 @@ describe('AgentPane orchestration', () => {
   it('keeps a background realtime version from changing the persisted target', async () => {
     const user = userEvent.setup()
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
-      snapshot(thread({ status: 'MODEL_STREAMING', processing: true })),
+      snapshot(thread({ status: 'RUNNING', executionControl: 'RUNNABLE' })),
     )
     localStorage.setItem(
       `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
@@ -1204,7 +1214,7 @@ describe('AgentPane orchestration', () => {
     handlers?.onError?.('ERR', 'mock error')
     view.client.setQueryData(
       queryKeys.threads.snapshot(THREAD_ID),
-      snapshot(thread({ status: 'IDLE', processing: false })),
+      snapshot(thread({ status: 'IDLE', executionControl: 'RUNNABLE' })),
     )
     handlers?.onEvent?.('version', {}, undefined)
     await waitFor(() => expect(
@@ -1225,13 +1235,13 @@ describe('AgentPane orchestration', () => {
       name,
       createdAt: 0,
       updatedAt: 0,
-      status: 'MODEL_STREAMING' as const,
-      processing: true,
+      status: 'RUNNING' as const,
+      executionControl: 'RUNNABLE',
       model: { modelName: 'MiniMax', variant: 'default' },
       headMessagePreview: null,
     })
     vi.mocked(harnessService.getThreadSnapshot).mockImplementation(async (threadId) =>
-      snapshot(thread({ threadId, status: 'MODEL_STREAMING', processing: true })),
+      snapshot(thread({ threadId, status: 'RUNNING', executionControl: 'RUNNABLE' })),
     )
     vi.mocked(chatService.listChatSessions).mockResolvedValue([{
       sessionId: 'session-1',
@@ -1467,7 +1477,7 @@ describe('AgentPane orchestration', () => {
       createdAt: 0,
       updatedAt: 0,
       status: 'IDLE',
-      processing: false,
+      executionControl: 'RUNNABLE',
       model: { modelName: 'MiniMax', variant: 'default' },
       headMessagePreview: null,
     })).toMatchObject({
@@ -1575,7 +1585,7 @@ describe('AgentPane orchestration', () => {
         agentName: 'assistant',
         model: { modelName: 'MiniMax', variant: 'default' },
         status: 'IDLE',
-        processing: false,
+        executionControl: 'RUNNABLE',
         turnCount: 1,
         toolCallCount: 0,
         outcome: null,
@@ -1587,8 +1597,8 @@ describe('AgentPane orchestration', () => {
         name: 'worker',
         agentName: 'coder',
         model: { modelName: 'MiniMax', variant: 'default' },
-        status: 'MODEL_STREAM',
-        processing: true,
+        status: 'RUNNING',
+        executionControl: 'RUNNABLE',
         turnCount: 1,
         toolCallCount: 0,
         outcome: null,
@@ -1611,7 +1621,7 @@ describe('AgentPane orchestration', () => {
         agentName: 'assistant',
         model: { modelName: 'MiniMax', variant: 'default' },
         status: 'IDLE',
-        processing: false,
+        executionControl: 'RUNNABLE',
         turnCount: 1,
         toolCallCount: 0,
         outcome: null,
@@ -1646,7 +1656,7 @@ describe('AgentPane orchestration', () => {
       agentName: 'assistant',
       model: { modelName: 'MiniMax', variant: 'default' },
       status: 'IDLE',
-      processing: false,
+      executionControl: 'RUNNABLE',
       turnCount: 1,
       toolCallCount: 0,
       outcome: null,
@@ -1657,8 +1667,8 @@ describe('AgentPane orchestration', () => {
       name: threadId === THREAD_ID ? 'active A' : 'active B',
       agentName: 'coder',
       model: { modelName: 'MiniMax', variant: 'default' },
-      status: 'MODEL_STREAM',
-      processing: true,
+      status: 'RUNNING',
+      executionControl: 'RUNNABLE',
       turnCount: 1,
       toolCallCount: 0,
       outcome: null,
@@ -1680,7 +1690,7 @@ describe('AgentPane orchestration', () => {
       parentThreadId: null,
       name: 'thread B',
       status: 'IDLE',
-      processing: false,
+      executionControl: 'RUNNABLE',
       createdAt: 0,
       updatedAt: 0,
       model: { modelName: 'MiniMax', variant: 'default' },
@@ -1954,7 +1964,7 @@ describe('AgentPane orchestration', () => {
       createdAt: 0,
       updatedAt: 0,
       status: 'IDLE',
-      processing: false,
+      executionControl: 'RUNNABLE',
       model: { modelName: 'MiniMax', variant: 'default' },
       headMessagePreview: null,
     }])
@@ -2072,7 +2082,7 @@ describe('AgentPane orchestration', () => {
   it('does not retain a background subscription for a terminal previous thread', async () => {
     const user = userEvent.setup()
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
-      snapshot(thread({ status: 'IDLE', processing: false })),
+      snapshot(thread({ status: 'IDLE', executionControl: 'RUNNABLE' })),
     )
     localStorage.setItem(
       `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
@@ -2148,8 +2158,7 @@ describe('AgentPane orchestration', () => {
     const user = userEvent.setup()
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
       snapshot(threadFixture(THREAD_ID, {
-        status: 'STOPPED',
-        processing: false,
+        status: 'IDLE',
         executionControl: 'STOPPED',
       })),
     )
@@ -2228,19 +2237,65 @@ describe('AgentPane orchestration', () => {
     await waitFor(() => expect(composer).toHaveTextContent('cancelled draft'))
   })
 
-  it('renders localized QUEUED status label when bound thread is queued', async () => {
-    // 测试意图：当绑定的 Thread 处于 QUEUED 排队状态时，AgentPane 必须将 workingLabel 传给 ChatPanel 并展示“排队中”。
-    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
-      snapshot(threadFixture(THREAD_ID, { status: 'QUEUED', processing: false })),
-    )
+  it('renders three-state thread status and gives priority to active execution facts', async () => {
+    // 测试意图：验证 Thread status 三态及执行事实优先级：
+    // 1. WAITING 状态展示“等待异步结果”，无生成动画；
+    // 2. RUNNING 状态且无 active model/tool 时展示“运行中”，绝不直接显示生成，无生成动画；
+    // 3. STOPPED 独立控制不可遮蔽在途执行中的 model/tool，优先展示真实“执行中”，且带生成动画。
     localStorage.setItem(
       `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
       JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
     )
-    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+
+    // 场景 1：WAITING 本地让出等异步结果，无动画
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(threadFixture(THREAD_ID, { status: 'WAITING', executionControl: 'RUNNABLE' })),
+    )
+    const { unmount } = renderPane({ type: 'CHAT', chatId: CHAT_ID })
     await waitFor(() => {
-      expect(screen.getByText('排队中')).toBeInTheDocument()
+      const working = document.querySelector('.thread-working')
+      expect(working).toHaveTextContent('等待异步结果')
+      expect(working).toHaveAttribute('data-animated', 'false')
+      expect(working?.querySelector('.thread-working-dot')).toHaveClass('is-static')
     })
+    unmount()
+
+    // 场景 2：RUNNING 且无 active model/tool，展示“运行中”，绝不直接显示生成，无动画
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(threadFixture(THREAD_ID, { status: 'RUNNING', executionControl: 'RUNNABLE' })),
+    )
+    const runningPane = renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    await waitFor(() => {
+      const working = document.querySelector('.thread-working')
+      expect(working).toHaveTextContent('运行中')
+      expect(working).not.toHaveTextContent('生成')
+      expect(working).toHaveAttribute('data-animated', 'false')
+      expect(working?.querySelector('.thread-working-dot')).toHaveClass('is-static')
+    })
+    runningPane.unmount()
+
+    // 场景 3：STOPPED 独立控制不可遮蔽在途执行，在途真实执行优先展示“执行中”，且带生成动画
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(
+        threadFixture(THREAD_ID, { status: 'RUNNING', executionControl: 'STOPPED' }),
+        {
+          toolInvocations: [{
+            ...pendingInvocation(),
+            id: 'running-active-tool',
+            status: 'RUNNING',
+          }],
+        },
+      ),
+    )
+    const stoppedPane = renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    await waitFor(() => {
+      const working = document.querySelector('.thread-working')
+      expect(working).toHaveTextContent('执行中')
+      expect(working).not.toHaveTextContent('已停止')
+      expect(working).toHaveAttribute('data-animated', 'true')
+      expect(working?.querySelector('.thread-working-dot')).not.toHaveClass('is-static')
+    })
+    stoppedPane.unmount()
   })
 
   it('isolates ISSUE_AGENT owner storage and routing from independent thread pane without crosstalk', async () => {
@@ -3121,7 +3176,7 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
           parentThreadId: null,
           name: 'Thread 2',
           status: 'IDLE',
-          processing: false,
+          executionControl: 'RUNNABLE',
           model: { modelName: 'MiniMax', variant: 'default' },
           createdAt: 0,
           updatedAt: 0,
@@ -3854,7 +3909,7 @@ describe('AgentPane root control and child observation', () => {
       name: isRoot ? 'root thread' : 'worker',
       parentThreadId: isRoot ? null : THREAD_ID,
       status: 'IDLE',
-      processing: false,
+      executionControl: 'RUNNABLE',
     }))
   }
 
@@ -3960,7 +4015,7 @@ describe('AgentPane root control and child observation', () => {
     // 根本地空闲但后代仍在处理：Stop 仍然可用，并且请求必须落在执行根（runtime root）。
     const user = userEvent.setup()
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
-      snapshot(thread({ threadId: THREAD_ID, status: 'IDLE', processing: false })),
+      snapshot(thread({ threadId: THREAD_ID, status: 'IDLE', executionControl: 'RUNNABLE' })),
     )
     vi.mocked(harnessService.getThreadTree).mockResolvedValue([
       treeNode(THREAD_ID, null, 'root thread', false),
@@ -4046,17 +4101,6 @@ describe('AgentPane root control mounting', () => {
     }))
   }
 
-  function pendingInvocation(): ToolInvocationDTO {
-    return {
-      id: 'waiting-tool', modelInvocationId: 'model-1', assistantEntryId: 'assistant-1', callIndex: 0,
-      status: 'READY', attempt: 1, toolCallId: 'call-1', toolName: 'bash', rendererKey: 'bash',
-      environmentId: null, requiredEnvironmentId: 'frozen-env', waitingForEnvironment: false,
-      requiredEnvironmentName: 'archlinux', environmentWaitFreshnessAt: null,
-      argumentsJson: '{"command":"pwd"}', approvalJson: null, resultJson: null, errorJson: null,
-      createTime: 0, updateTime: 0,
-    }
-  }
-
   it.each([
     ['READY', false, '排队中'],
     ['READY', true, '等待环境 archlinux 上线'],
@@ -4065,7 +4109,7 @@ describe('AgentPane root control mounting', () => {
   ])('working 展示 %s 的真实等待而不是通用执行中', async (status, waiting, label) => {
     bindPaneTarget({ kind: 'BOUND_THREAD', threadId: THREAD_ID })
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot(
-      thread({ status: 'TOOL_READY', processing: true }),
+      thread({ status: 'RUNNING', executionControl: 'RUNNABLE' }),
       { toolInvocations: [{
         ...pendingInvocation(), status, waitingForEnvironment: waiting,
         requiredEnvironmentId: 'frozen-env', requiredEnvironmentName: 'archlinux',
@@ -4073,6 +4117,7 @@ describe('AgentPane root control mounting', () => {
     ))
     renderPane({ type: 'CHAT', chatId: CHAT_ID })
     await waitFor(() => expect(document.querySelector('.thread-working')).toHaveTextContent(label))
+    expect(document.querySelector('.thread-working')).toHaveAttribute('data-animated', 'false')
     expect(document.querySelector('.thread-working')).not.toHaveTextContent('执行中')
     expect(document.querySelector('.thread-status-footer')).not.toHaveTextContent('等待环境')
   })
@@ -4080,7 +4125,7 @@ describe('AgentPane root control mounting', () => {
   it('真实 RUNNING sibling 不被另一个环境等待覆盖为整条 Thread 等待', async () => {
     bindPaneTarget({ kind: 'BOUND_THREAD', threadId: THREAD_ID })
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot(
-      thread({ status: 'TOOL_RUNNING', processing: true }),
+      thread({ status: 'RUNNING', executionControl: 'RUNNABLE' }),
       { toolInvocations: [
         { ...pendingInvocation(), status: 'READY', waitingForEnvironment: true,
           requiredEnvironmentId: 'frozen-env', requiredEnvironmentName: 'archlinux' },
@@ -4089,6 +4134,7 @@ describe('AgentPane root control mounting', () => {
     ))
     renderPane({ type: 'CHAT', chatId: CHAT_ID })
     await waitFor(() => expect(document.querySelector('.thread-working')).toHaveTextContent('执行中'))
+    expect(document.querySelector('.thread-working')).toHaveAttribute('data-animated', 'true')
   })
 
   it('never mounts root control for an unconfirmed bound target', async () => {

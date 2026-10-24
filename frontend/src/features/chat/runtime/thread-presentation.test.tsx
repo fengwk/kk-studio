@@ -9,7 +9,7 @@ import type { AgentModelDTO, HarnessThreadDTO } from '@/shared/api/generated/con
 const thread: HarnessThreadDTO = {
   threadId: 'child', name: 'worker', sessionId: 'session', headEntryId: 'head',
   parentThreadId: 'parent', rootThreadId: 'root', yoloEnabled: false,
-  nextCommandSequence: '1', version: '1', status: 'IDLE', processing: false,
+  nextCommandSequence: '1', version: '1', status: 'IDLE',
   executionControl: 'RUNNABLE', createTime: 0, updateTime: 0,
   branchSettings: {
     agentName: 'researcher', model: { modelName: 'model', variant: 'deep' },

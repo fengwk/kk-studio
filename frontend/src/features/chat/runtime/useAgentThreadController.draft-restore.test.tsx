@@ -139,7 +139,6 @@ function threadFixture(
     nextCommandSequence: '1',
     version: '0',
     status: 'IDLE',
-    processing: false,
     executionControl: 'RUNNABLE',
     branchSettings: {
       agentName: 'assistant',

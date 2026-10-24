@@ -62,13 +62,13 @@ export function projectThreadTree(nodes: readonly ActiveThreadTreeNode[]) {
     }
   }
   for (const siblings of children.values()) {
-    siblings.sort((a, b) => Number(b.processing) - Number(a.processing)
+    siblings.sort((a, b) => Number(b.status !== 'IDLE') - Number(a.status !== 'IDLE')
       || timeValue(b.updateTime) - timeValue(a.updateTime)
       || a.threadId.localeCompare(b.threadId))
   }
   const visible = new Set<string>()
   for (const node of unique) {
-    if (!node.processing) {
+    if (node.status === 'IDLE') {
       continue
     }
     let cursor: ActiveThreadTreeNode | undefined = node
@@ -102,7 +102,7 @@ function signature(node: ActiveThreadTreeNode): string {
   return JSON.stringify([
     node.threadId, node.parentThreadId, node.updateTime, node.name, node.agentName,
     node.model.modelName, node.model.variant,
-    node.status, node.processing, node.turnCount, node.toolCallCount, node.outcome,
+    node.status, node.executionControl, node.turnCount, node.toolCallCount, node.outcome,
   ])
 }
 

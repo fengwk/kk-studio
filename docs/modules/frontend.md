@@ -93,9 +93,12 @@ Invocation 终态和 attempt failure 建立围栏，迟到信号丢弃；
 durable 结果到达后退出 transient overlay。
 
 [`thread-events.ts`](../../frontend/src/features/chat/runtime/thread-events.ts) 将 Entry、活动
-Invocation 与 attempt failure 投影为时间线记录。`processing` 等价于阶段仍在处理中
-（`IDLE` 与 `STOPPED` 为 false），`executionControl` 是持久执行控制（`RUNNABLE` / `STOPPED`）；
-两者只描述该 Thread 自身，委派进度按执行树逐 Thread 展示，不由父 Thread 递归投影。
+Invocation 与 attempt failure 投影为时间线记录。Thread 活动只有 `RUNNING`、`WAITING`、`IDLE`：
+RUNNING 表示本地流程未结束（包括审批、问卷及环境阻塞），WAITING 仅表示本地已让出执行，
+等待直接异步 system-reminder 结果，IDLE 表示本地已收敛。
+`executionControl` 是正交的持久执行控制（`RUNNABLE` / `STOPPED`），停止不代表调用已物理退出。
+工作条按真实 model/tool invocation 展示执行动画；阻塞、单纯运行中及等待异步结果只显示静态事实。
+STOPPED 不遮盖尚在途的 model/tool。委派进度按执行树逐 Thread 展示，不由父 Thread 递归投影。
 
 ### Thread Debug
 
@@ -228,7 +231,8 @@ Chat 工具卡片与 ApprovalCard 共享文件变更审查组件：
   执行失败时不隐藏错误详情，也不在产生真实终态前虚假展示成功。
 - **来源优先级与持久化结构**：优先从持久化的 `approvalJson.editReview` 获取真实 diff（freeze approval 优先）；对于自动放行（无需审批）、YOLO 模式或页面刷新与 GC 后的结果恢复，从持久化结果的 `details.editReview` 读取真实变更（durable entry 显式解码 `detailsJson`，invocation 从 `resultJson.details` 对象读取）；决不从旧/新参数在前端伪造 diff。其他工具的折叠与展示策略保持不变。
 
-根面板自动查询执行树，在 Widget 区以单行节点展示 processing 后代及其必要祖先；
+根面板自动查询执行树，在 Widget 区以单行节点展示非 IDLE 后代及其必要祖先；
+RUNNING 与 WAITING 都计入活跃数，停止控制独立展示；非 IDLE 节点不展示 COMPLETED outcome。
 不重复根节点，不绘制无活跃后代的空壳。根本地空闲仍继续查询，整树 Stop 仍然可用。
 树行、task ID 与系统回执链接通过 `ThreadLink` 在当前 pane 查看；返回导航基于当前快照的
 直属父 `parentThreadId`，通过 `navigation.openThread(parentId)` 定点打开父级，不依赖浏览栈

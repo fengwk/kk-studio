@@ -31,7 +31,6 @@ const mockThread: HarnessThreadDTO = {
   nextCommandSequence: '1',
   version: '1',
   status: 'IDLE',
-  processing: false,
   executionControl: 'RUNNABLE',
   branchSettings: {
     agentName: 'assistant',

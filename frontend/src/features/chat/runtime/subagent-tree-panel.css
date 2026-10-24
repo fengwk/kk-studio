@@ -42,10 +42,19 @@
   outline-offset: 2px;
 }
 
-.subagent-card-status[data-processing='true'] {
+.subagent-card-status.is-running {
   color: var(--info);
 }
 
-.subagent-card-status[data-outcome='FAILED'] {
+.subagent-card-status.is-waiting {
+  color: var(--fg-muted);
+}
+
+.subagent-card-status[data-outcome='FAILED'],
+.subagent-card-status.is-failed {
   color: var(--danger);
+}
+
+.subagent-card-control.is-stopped {
+  color: var(--warning);
 }

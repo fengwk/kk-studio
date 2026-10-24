@@ -26,7 +26,6 @@ function createSnapshot(queuedCommands: HarnessThreadSnapshotDTO['queuedCommands
       nextCommandSequence: '3',
       version: '1',
       status: 'IDLE',
-      processing: false,
       executionControl: 'RUNNABLE',
       branchSettings: {
         agentName: 'worker',

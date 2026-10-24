@@ -98,7 +98,6 @@ function threadFixture(
     nextCommandSequence: '1',
     version: '0',
     status: 'IDLE',
-    processing: false,
     executionControl: 'RUNNABLE',
     branchSettings: branchSettings(),
     createTime: 0,
@@ -1709,26 +1708,25 @@ describe('useAgentThreadController', () => {
     expect(result.current.stopReplayPending).toBe(false)
   })
 
-  it('treats QUEUED as working while IDLE and STOPPED are idle states', async () => {
-    // 测试意图：status 只描述该 Thread 自身执行阶段；QUEUED（非静止）必须 working=true，
-    // 而 STOPPED 与 IDLE 一样是静止状态（processing=false → working=false）。
+  it('treats RUNNING as working while IDLE and STOPPED are idle states', async () => {
+    // 测试意图：status 只描述该 Thread 自身执行阶段；RUNNING（非静止）必须 working=true，
+    // 而 IDLE（含 executionControl STOPPED）一样是静止状态（working=false）。
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
-      snapshotOf(threadFixture({ threadId: THREAD_ID, status: 'QUEUED', processing: false })),
+      snapshotOf(threadFixture({ threadId: THREAD_ID, status: 'RUNNING' })),
     )
     const { result } = renderHook(
       () => useAgentThreadController(THREAD_ID),
       { wrapper },
     )
     await waitFor(() => expect(result.current.disabled).toBe(false))
-    expect(result.current.thread?.status).toBe('QUEUED')
+    expect(result.current.thread?.status).toBe('RUNNING')
     expect(result.current.working).toBe(true)
 
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
       snapshotOf(
         threadFixture({
           threadId: THREAD_ID_2,
-          status: 'STOPPED',
-          processing: false,
+          status: 'IDLE',
           executionControl: 'STOPPED',
         }),
       ),
@@ -1738,7 +1736,8 @@ describe('useAgentThreadController', () => {
       { wrapper },
     )
     await waitFor(() => expect(result2.current.disabled).toBe(false))
-    expect(result2.current.thread?.status).toBe('STOPPED')
+    expect(result2.current.thread?.status).toBe('IDLE')
+    expect(result2.current.thread?.executionControl).toBe('STOPPED')
     expect(result2.current.working).toBe(false)
   })
 

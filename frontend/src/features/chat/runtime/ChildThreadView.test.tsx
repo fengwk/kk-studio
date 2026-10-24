@@ -27,8 +27,7 @@ function mockChildSnapshot(overrides: Partial<HarnessThreadSnapshotDTO> = {}): H
       yoloEnabled: false,
       nextCommandSequence: '3',
       version: '1',
-      status: 'MODEL_READY',
-      processing: true,
+      status: 'RUNNING',
       executionControl: 'RUNNABLE',
       branchSettings: {
         agentName: 'worker',
@@ -103,7 +102,7 @@ function createMockProjection(snapshot: HarnessThreadSnapshotDTO): ThreadProject
     events: [],
     runtimeLabels: { environmentName: null, contextWindow: undefined },
     branchUsage: null as never,
-    working: snapshot.thread.processing,
+    working: snapshot.thread.status === 'RUNNING',
     entries: snapshot.entries,
     messagesLoading: false,
     messagesError: null,

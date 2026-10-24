@@ -40,7 +40,7 @@ for (const scenario of ['pane-root', 'pane-child']) {
             parentThreadId: id === ROOT ? null : ROOT,
             rootThreadId: ROOT,
             yoloEnabled: false,
-            nextCommandSequence: '1', version: '1', status: 'TOOL_READY', processing: true,
+            nextCommandSequence: '1', version: '1', status: 'RUNNING',
             executionControl: 'RUNNABLE',
             branchSettings: { agentName: 'assistant',
               model: { modelName: 'VeryLongModelName', variant: 'default' },
@@ -82,7 +82,7 @@ for (const scenario of ['pane-root', 'pane-child']) {
           threadId, parentThreadId: threadId === ROOT ? null : ROOT,
           name: threadId === ROOT ? '等待工具 Thread' : 'worker',
           agentName: 'assistant', model: { modelName: 'VeryLongModelName', variant: 'default' },
-          status: 'IDLE', processing: false, turnCount: 1, toolCallCount: 1,
+          status: 'IDLE', executionControl: 'RUNNABLE', turnCount: 1, toolCallCount: 1,
           outcome: null, updateTime: now / 1000,
         }))
       } else if (path === '/api/environments') {

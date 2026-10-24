@@ -9,21 +9,46 @@ import { projectThreadTree, type ActiveThreadTreeNode } from '@/features/chat/ru
 import { ThreadNavigationContext } from '@/features/chat/runtime/thread-navigation-context'
 
 setLocale('zh-CN')
-const node = (threadId: string, parentThreadId: string | null, agentName: string, processing = false, outcome: string | null = null): ActiveThreadTreeNode => ({
-  threadId, parentThreadId, agentName, name: 'main', processing, outcome,
-  updateTime: 1774958400, status: processing ? 'MODEL_RUNNING' : 'IDLE',
+const node = (
+  threadId: string,
+  parentThreadId: string | null,
+  agentName: string,
+  status: 'RUNNING' | 'WAITING' | 'IDLE' = 'IDLE',
+  executionControl: 'RUNNABLE' | 'STOPPED' = 'RUNNABLE',
+  outcome: string | null = null,
+): ActiveThreadTreeNode => ({
+  threadId,
+  parentThreadId,
+  agentName,
+  name: 'main',
+  executionControl,
+  outcome,
+  updateTime: 1774958400,
+  status,
   model: { modelName: 'Known-model', variant: 'default' },
-  turnCount: 7, toolCallCount: 12,
+  turnCount: 7,
+  toolCallCount: 12,
 })
 export function Harness() {
   const [selected, setSelected] = useState('deep')
   const [active, setActive] = useState(true)
   const projection = projectThreadTree([
-    node('root', null, 'Root'), node('planner', 'root', 'Planner'),
-    node('worker', 'planner', 'Explorer'), node('deep', 'worker', 'Explorer', active, active ? null : 'COMPLETED'),
-    node('failed', 'root', 'Reviewer', false, 'FAILED'), node('stopped', 'root', 'Explorer', false, 'STOPPED'),
+    node('root', null, 'Root'),
+    node('planner', 'root', 'Planner'),
+    node('worker', 'planner', 'Explorer', active ? 'WAITING' : 'IDLE'),
+    node('deep', 'worker', 'Explorer', active ? 'RUNNING' : 'IDLE', 'RUNNABLE', active ? null : 'COMPLETED'),
+    node('failed', 'root', 'Reviewer', 'IDLE', 'RUNNABLE', 'FAILED'),
+    node('stopped', 'root', 'Explorer', 'IDLE', 'STOPPED', 'STOPPED'),
   ])
-  const tree = { ...projection, activeCount: active ? 1 : 0, rootThreadId: 'root', isLoading: false, isError: false, refreshFailed: false, refetch: () => undefined }
+  const tree = {
+    ...projection,
+    activeCount: active ? 2 : 0,
+    rootThreadId: 'root',
+    isLoading: false,
+    isError: false,
+    refreshFailed: false,
+    refetch: () => undefined,
+  }
   return <MemoryRouter><ThreadNavigationContext.Provider value={setSelected}>
     <main style={{ maxWidth: 760, margin: '20px auto', padding: 8 }}>
       <button className="ghost-btn" onClick={() => setActive(false)}>finish</button>

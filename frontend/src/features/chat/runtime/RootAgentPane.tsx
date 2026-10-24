@@ -21,7 +21,6 @@ import {
 import { ConflictPresenter } from '@/shared/conflict/ConflictPresenter'
 import { NameRenamePanel } from '@/features/chat/runtime/thread-panel/NameRenamePanel'
 import { BranchGoalPanel } from '@/features/chat/runtime/thread-panel/BranchGoalPanel'
-import { formatThreadStatusLabel } from '@/features/chat/runtime/thread-panel/thread-status-format'
 import { sessionSelectionItem, threadSelectionItem } from '@/features/chat/runtime/root-thread/session-selection-items'
 import { useRootThreadControl } from '@/features/chat/runtime/useRootThreadControl'
 import { type AgentPaneCapabilities, type AgentPaneDefaults, type BranchRequestInput, type PaneReport } from '@/features/chat/runtime/root-thread/types'
@@ -123,13 +122,6 @@ export function RootAgentPane({
   // 视图同样以整 pane 只读覆盖的方式展示。
   const debugActive = pane.boundViews.mode === 'debug'
 
-  const boundStatus = pane.target.kind === 'BOUND_THREAD' ? pane.controller.thread?.status : null
-  const boundWorkingLabel = boundStatus === 'QUEUED'
-    || boundStatus === 'WAITING_APPROVAL'
-    || boundStatus === 'TOOL_WAITING_APPROVAL'
-    ? formatThreadStatusLabel(boundStatus, t)
-    : undefined
-
   // 自动活跃树只挂执行根面板；根自身不重复出一行。查询由本组件单点持有。
   const boundIsRoot = boundThreadName != null && pane.controller.thread?.parentThreadId == null
   const boundThreadId = pane.target.kind === 'BOUND_THREAD' ? pane.target.threadId : null
@@ -154,7 +146,6 @@ export function RootAgentPane({
         environments={environments}
         activity={{
           working: pane.controller.working || pane.composer.pending,
-          workingLabel: boundWorkingLabel,
           actionError: pane.error,
           onDismissActionError,
           widgets: boundIsRoot && boundThreadId != null && !debugActive
