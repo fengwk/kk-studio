@@ -129,7 +129,7 @@ abstract class HarnessStoreDeletionContract {
 
   @Test
   void deleteJoinsForThreadsDeletesPendingJoinWhenBothEndsAreDeleted() {
-    // 测试意图：验证批量 join 删除原语在父子两端都位于删除集合内时，可以删除尚未交付（pending delivery）的 join；
+    // 测试意图：验证批量 join 删除原语在父子两端都位于删除集合内时，可以删除尚未匹配的 join；
     // 同一 join 在只有 child 一侧被删除时仍被拒绝，保证任何存活 Thread 都不会留下悬挂的 join 引用。
     Baseline parentBaseline = seedThreadBaseline(store);
     UUID parentId = parentBaseline.threadId();

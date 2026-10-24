@@ -488,7 +488,7 @@ public abstract class HarnessStoreJoinContract {
 
   @Test
   void updateJoinMatchAndDeliveryRoundTrip() {
-    // 测试意图：验证 Join 完整的生命周期推进：创建 -> match 冻结结果 -> delivery 交付给父线程。
+    // NOTIFY_PARENT 的冻结结果与交付序号必须在同一次持久更新中写入。
     UUID childId =
         createChildThread(baseline.threadId(), baseline.sessionId(), baseline.rootEntryId());
     insertCommand(childId, 1L, TestIds.id(1));
@@ -563,9 +563,17 @@ public abstract class HarnessStoreJoinContract {
     // 改写 terminalEntryId
     ThreadJoin changedTerminal =
         joinReceipts(
-            invocationId, baseline.threadId(), childId, 1L, other.rootEntryId(), null, 1L, T0, T2);
-    assertThrows(
-        IllegalArgumentException.class,
+            invocationId,
+            baseline.threadId(),
+            childId,
+            1L,
+            other.rootEntryId(),
+            baseline.rootEntryId(),
+            1L,
+            T0,
+            T2);
+    assertJoinRejected(
+        "join durable identity or receipt cannot change",
         () ->
             inTransaction(
                 store,
@@ -583,11 +591,11 @@ public abstract class HarnessStoreJoinContract {
             1L,
             baseline.rootEntryId(),
             other.rootEntryId(),
-            null,
+            1L,
             T0,
             T2);
-    assertThrows(
-        IllegalArgumentException.class,
+    assertJoinRejected(
+        "join durable identity or receipt cannot change",
         () ->
             inTransaction(
                 store,
@@ -680,8 +688,8 @@ public abstract class HarnessStoreJoinContract {
 
     ThreadJoin advancedReminder =
         reminded.remind(2L, T3).match(baseline.rootEntryId(), null, T3).delivered(1L, T3);
-    assertThrows(
-        IllegalArgumentException.class,
+    assertJoinRejected(
+        "join durable identity or receipt cannot change",
         () ->
             inTransaction(
                 store,
@@ -716,6 +724,7 @@ public abstract class HarnessStoreJoinContract {
     UUID childId =
         createChildThread(baseline.threadId(), baseline.sessionId(), baseline.rootEntryId());
     insertCommand(childId, 1L, TestIds.id(1));
+    insertCommand(baseline.threadId(), 1L, TestIds.id(2));
     UUID invocationId = TestIds.id(114);
     ThreadJoin join = initialJoin(invocationId, baseline.threadId(), childId, 1L);
 
@@ -727,9 +736,10 @@ public abstract class HarnessStoreJoinContract {
         });
 
     UUID nonExistentEntryId = TestIds.id(987);
-    ThreadJoin matchedNonExistentTerminal = join.match(nonExistentEntryId, null, T1);
-    assertThrows(
-        IllegalArgumentException.class,
+    ThreadJoin matchedNonExistentTerminal =
+        join.match(nonExistentEntryId, null, T1).delivered(1L, T1);
+    assertJoinRejected(
+        "entry " + nonExistentEntryId + " does not exist",
         () ->
             inTransaction(
                 store,
@@ -739,9 +749,9 @@ public abstract class HarnessStoreJoinContract {
                 }));
 
     ThreadJoin matchedNonExistentFinalAnswer =
-        join.match(baseline.rootEntryId(), nonExistentEntryId, T1);
-    assertThrows(
-        IllegalArgumentException.class,
+        join.match(baseline.rootEntryId(), nonExistentEntryId, T1).delivered(1L, T1);
+    assertJoinRejected(
+        "entry " + nonExistentEntryId + " does not exist",
         () ->
             inTransaction(
                 store,
@@ -777,6 +787,16 @@ public abstract class HarnessStoreJoinContract {
                   tx.lockThread(childId);
                   tx.updateJoin(delivered);
                 }));
+
+    // 只补齐缺失的父命令后，同一更新必须成功，排除其它前置校验导致的假阳性。
+    insertCommand(baseline.threadId(), 1L, TestIds.id(2));
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(childId);
+          tx.updateJoin(delivered);
+        });
+    assertEquals(delivered, store.transaction(tx -> tx.findJoin(invocationId).orElseThrow()));
   }
 
   @Test
@@ -895,8 +915,8 @@ public abstract class HarnessStoreJoinContract {
         });
 
     ThreadJoin matchedWithoutDelivery = join1.match(baseline.rootEntryId(), null, T2);
-    assertThrows(
-        IllegalArgumentException.class,
+    assertJoinRejected(
+        "a matched NOTIFY_PARENT join requires a delivery command sequence",
         () ->
             inTransaction(
                 store,
@@ -1094,7 +1114,7 @@ public abstract class HarnessStoreJoinContract {
 
   @Test
   void deleteJoinsByChildRejectsUnmatchedJoinUntilDelivered() {
-    // 测试意图：验证 deleteJoinsByChild 在子线程 Join 已匹配但未交付给父线程时拒绝删除，交付后方可安全删除。
+    // 未匹配 Join 仍承担向存活父线程交付的义务；原子冻结并交付后方可删除。
     UUID childId =
         createChildThread(baseline.threadId(), baseline.sessionId(), baseline.rootEntryId());
     insertCommand(childId, 1L, TestIds.id(1));
@@ -1108,7 +1128,7 @@ public abstract class HarnessStoreJoinContract {
           tx.insertJoin(initialJoin(invocationId, baseline.threadId(), childId, 1L));
         });
 
-    // 已匹配但未交付时删除失败
+    // 未匹配时删除失败
     assertThrows(
         IllegalArgumentException.class,
         () ->
