@@ -88,8 +88,8 @@ class OfficialUpdateArtifactFixtureTest {
   }
 
   /**
-   * 生成跨语言串联产物：正例 commandJson/envelopeJson 来自生产 codec（envelope 为 wire v4 UPDATE），反例保留按 fixture 组装的原始
-   * payload。产物只写本模块 {@code target}，供父用真实 Node decoder 验证「Java 接受 ⇔ Node 接受」。
+   * 生成跨语言串联产物：正例 commandJson/envelopeJson 来自生产 codec（envelope 为当前 wire 协议的 UPDATE），反例保留按 fixture
+   * 组装的原始 payload。产物只写本模块 {@code target}，供父用真实 Node decoder 验证「Java 接受 ⇔ Node 接受」。
    */
   @Test
   void writesJavaProductionCommandsForCrossLanguageReplay() throws IOException {
