@@ -297,13 +297,17 @@ test('Java update commands are replayed through the built Node decoder as a requ
   const index = steps.indexOf(step)
   assert.ok(index > verify, 'the Java-to-Node decoder step must run after the Java producer verify')
   const install = steps.findIndex((step) => stepField(step, 'run') === 'npm --prefix daemon ci')
-  assert.ok(install >= 0 && install < index, 'the daemon dependencies must be installed before the decoder step')
-  const run = stepField(step, 'run')
-  assert.match(run, /npm --prefix daemon run build/u)
+  const builds = steps.filter((step) => stepField(step, 'run') === 'npm --prefix daemon run build')
+  assert.equal(builds.length, 1, 'expected exactly one same-commit daemon build')
+  const build = builds[0]
+  const buildIndex = steps.indexOf(build)
   assert.ok(
-    run.indexOf('npm --prefix daemon run build') < run.indexOf('node scripts/daemon/verify-java-update-commands.mjs'),
-    'the production decoder must be built before the CLI runs',
+    install >= 0 && install < buildIndex && buildIndex < verify,
+    'install dependencies and build the Node transport before Java integration tests and decoder replay',
   )
+  assert.equal(stepField(build, 'if'), undefined, 'the daemon build must not be conditional')
+  assert.doesNotMatch(build, /continue-on-error:|\|\|\s*true/u)
+  const run = stepField(step, 'run')
   assert.match(run, /node scripts\/daemon\/verify-java-update-commands\.mjs harness\/environment\/target\/daemon-update-java-commands\.json/u)
   assert.equal(stepField(step, 'if'), undefined, 'the Java-to-Node decoder step must not be conditional')
   assert.doesNotMatch(step, /continue-on-error:|\|\|\s*true/u)

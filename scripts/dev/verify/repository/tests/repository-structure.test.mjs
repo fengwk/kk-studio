@@ -496,19 +496,7 @@ const CORE_STATE_ENUMS = [
   {
     path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/ThreadRuntimeStatus.java',
     enumName: 'ThreadRuntimeStatus',
-    constants: [
-      'IDLE',
-      'QUEUED',
-      'STOPPED',
-      'CONTINUATION_DUE',
-      'MODEL_READY',
-      'MODEL_RUNNING',
-      'APPLYING',
-      'TOOL_WAITING_APPROVAL',
-      'TOOL_WAITING_INPUT',
-      'TOOL_RUNNING',
-      'TOOL_READY',
-    ],
+    constants: ['RUNNING', 'WAITING', 'IDLE'],
   },
   {
     path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelInvocationStatus.java',
