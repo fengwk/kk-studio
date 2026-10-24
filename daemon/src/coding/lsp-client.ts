@@ -5,6 +5,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import {
   CancellationTokenSource,
   createMessageConnection,
+  ErrorCodes,
+  ResponseError,
   StreamMessageReader,
   StreamMessageWriter,
   type MessageConnection,
@@ -20,6 +22,18 @@ import { LspError, LspTimeoutError } from './lsp-error.js'
  * header arriving across chunks still fits comfortably inside this budget.
  */
 export const MAX_BANNER_BYTES = 8 * 1024
+
+/**
+ * vscode-jsonrpc 把本地写失败和连接 dispose 也 reject 成 ResponseError。
+ * 这两种都不是服务端响应：MessageWriteError 发生在 write 失败，PendingResponseRejected 发生在 dispose 清掉未完成请求。
+ */
+function isServerResponseError(error: unknown): boolean {
+  return (
+    error instanceof ResponseError &&
+    error.code !== ErrorCodes.MessageWriteError &&
+    error.code !== ErrorCodes.PendingResponseRejected
+  )
+}
 
 export class GarbageBannerFilter extends Transform {
   private foundFirstHeader = false
@@ -498,6 +512,8 @@ export class LspClient {
     line: number,
     character: number,
     signal?: AbortSignal,
+    onRequestFinished?: () => void,
+    onRequestSent?: () => void,
   ): Promise<string[]> {
     this.requireRunning()
     if (!this.supports('textDocument/definition')) {
@@ -518,7 +534,7 @@ export class LspClient {
         position: pos,
       },
       'textDocument/definition',
-      { signal },
+      { signal, onRequestFinished, onRequestSent },
     )
     return this.formatLocations(result)
   }
@@ -527,6 +543,8 @@ export class LspClient {
     query: string,
     limit: number,
     signal?: AbortSignal,
+    onRequestFinished?: () => void,
+    onRequestSent?: () => void,
   ): Promise<string[]> {
     this.requireRunning()
     if (!this.supports('workspace/symbol')) {
@@ -536,12 +554,17 @@ export class LspClient {
       'workspace/symbol',
       { query },
       'workspace/symbol',
-      { signal },
+      { signal, onRequestFinished, onRequestSent },
     )
     return this.formatSymbols(result, limit)
   }
 
-  async javaDecompile(target: string, signal?: AbortSignal): Promise<string> {
+  async javaDecompile(
+    target: string,
+    signal?: AbortSignal,
+    onRequestFinished?: () => void,
+    onRequestSent?: () => void,
+  ): Promise<string> {
     this.requireRunning()
     const jdtMatch = target.match(JDT_URI_REGEX)
     if (jdtMatch) {
@@ -553,7 +576,7 @@ export class LspClient {
         'java/classFileContents',
         { uri: uriMatch },
         'java/classFileContents',
-        { signal },
+        { signal, onRequestFinished, onRequestSent },
       )
       return this.requireDecompiledSource(result, target)
     }
@@ -576,7 +599,7 @@ export class LspClient {
         arguments: [pathToFileURL(localPath).href],
       },
       'java.decompile',
-      { signal },
+      { signal, onRequestFinished, onRequestSent },
     )
     return this.requireDecompiledSource(result, target)
   }
@@ -679,6 +702,13 @@ export class LspClient {
       signal?: AbortSignal
       timeoutMillis?: number
       requireAlive?: boolean
+      /**
+       * 仅当服务端已给出成功结果或 RPC 错误，或共享服务器进程已实际退出时调用。
+       * 本地写失败、连接 dispose、取消、超时和传输失败都不是请求结束。
+       */
+      onRequestFinished?: () => void
+      /** 调用 connection.sendRequest 之前同步调用，表示这次请求已经进入发送。 */
+      onRequestSent?: () => void
     } = {},
   ): Promise<T> {
     const requireAlive = options.requireAlive ?? true
@@ -724,9 +754,17 @@ export class LspClient {
       }
     })
 
+    let exitConfirmed = false
+    const confirmExit = (): void => {
+      if (!exitConfirmed) {
+        exitConfirmed = true
+        options.onRequestFinished?.()
+      }
+    }
     const exitPromise = this.managed.exit.then((exit) => {
       this.hasExited = true
       this.exitCode = exit.exitCode
+      confirmExit()
       const code = exit.exitCode != null ? String(exit.exitCode) : 'unknown'
       throw new LspError(`LSP server '${this.server.id}' exited (exit code ${code})`)
     })
@@ -735,8 +773,24 @@ export class LspClient {
     void exitPromise.catch(() => {})
 
     try {
-      const races: Promise<unknown>[] = [
-        this.connection.sendRequest(method, params, cts.token) as Promise<T>,
+      // 发送前同步标记“进入发送”：同步抛错时这次请求是否已写出无法证明，必须保守视为已发送。
+      options.onRequestSent?.()
+      const request = this.connection.sendRequest(method, params, cts.token) as Promise<T>
+      // 取消、超时和本地传输故障只说明不再等待。promise reject 本身不是服务端响应。
+      const tracked = request.then(
+        (value) => {
+          confirmExit()
+          return value
+        },
+        (error: unknown) => {
+          if (isServerResponseError(error)) {
+            confirmExit()
+          }
+          throw error
+        },
+      )
+      const races: Promise<T>[] = [
+        tracked,
         abortPromise,
         exitPromise,
         this.transportFailurePromise,
@@ -744,11 +798,11 @@ export class LspClient {
       if (timeoutPromise) {
         races.push(timeoutPromise)
       }
-      const result = (await Promise.race(races)) as T
+      const value = await Promise.race(races)
       if (requireAlive) {
         this.requireRunning()
       }
-      return result
+      return value
     } catch (err) {
       if (requireAlive && !this.isAlive()) {
         this.requireRunning()
@@ -765,6 +819,7 @@ export class LspClient {
         signal.removeEventListener('abort', onAbort)
       }
       cts.dispose()
+      // 独立回调仍等待迟到响应或真实进程退出；本地等待结束不是退出确认。
     }
   }
 

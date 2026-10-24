@@ -96,6 +96,8 @@ const readExecutor: CapabilityExecutor = async (call, context) => {
     }
   } catch (error) {
     return toErrorResult(call.invocationId, error)
+  } finally {
+    confirmLocalExit(context)
   }
 }
 
@@ -273,6 +275,8 @@ const writeExecutor: CapabilityExecutor = async (call, context) => {
     }
   } catch (error) {
     return toErrorResult(call.invocationId, error)
+  } finally {
+    confirmLocalExit(context)
   }
 }
 
@@ -403,6 +407,8 @@ async function editFile(
     }
   } catch (error) {
     return toErrorResult(call.invocationId, error)
+  } finally {
+    confirmLocalExit(context)
   }
 }
 
@@ -417,6 +423,11 @@ async function statOrNull(path: string): Promise<Awaited<ReturnType<typeof stat>
     const classified = classifyFileSystemError(error)
     throw new ToolRunFailureError(classified.message, classified.code)
   }
+}
+
+/** 文件能力没有 worker 或子进程；调用返回前实际范围已经结束。 */
+function confirmLocalExit(context: CapabilityContext): void {
+  context.confirmExecutionExit()
 }
 
 function requireActive(context: CapabilityContext): void {

@@ -288,6 +288,11 @@ class EnvironmentCapabilityContractTest {
                 listener.onError(error);
               }
             }
+
+            @Override
+            public void onExitConfirmed() {
+              listener.onExitConfirmed();
+            }
           };
       fenced.onPartial(result(request, "partial-1"));
       fenced.onPartial(result(request, "partial-2"));
@@ -345,6 +350,11 @@ class EnvironmentCapabilityContractTest {
     public void onError(Throwable error) {
       this.error = error;
       events.add("error");
+    }
+
+    @Override
+    public void onExitConfirmed() {
+      events.add("exit");
     }
   }
 }

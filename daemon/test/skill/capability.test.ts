@@ -42,6 +42,7 @@ describe('createSkillCapability', () => {
       processes: dummyProcesses,
       resources: dummyResources,
       progress: async () => {},
+      confirmExecutionExit: () => {},
     }
   }
 
@@ -192,10 +193,18 @@ describe('createSkillCapability', () => {
       timeoutMillis: 5000,
     }
 
-    const result = await capability(call, createContext(ac.signal))
+    let confirmations = 0
+    const result = await capability(call, {
+      ...createContext(ac.signal),
+      confirmExecutionExit: () => {
+        confirmations += 1
+      },
+    })
     expect(result.error).toBe(true)
     expect(result.details).toEqual({})
     expect(result.contents).toEqual([{ type: 'text', text: 'Error: Operation cancelled' }])
+    // 安装已经进入后的中断仍由 finally 确认一次：install 已返回，没有留下后台任务。
+    expect(confirmations).toBe(1)
   })
 
   it('missing or invalid argument types return coded INVALID_ARGUMENT error', async () => {
@@ -281,6 +290,7 @@ describe('createSkillCapability', () => {
     const capability = createSkillCapability(config, createTestInstaller())
     const ac = new AbortController()
     ac.abort()
+    let confirmations = 0
 
     const call: CapabilityCall = {
       invocationId: 'call-abort-early',
@@ -294,10 +304,17 @@ describe('createSkillCapability', () => {
       timeoutMillis: 5000,
     }
 
-    const result = await capability(call, createContext(ac.signal))
+    const result = await capability(call, {
+      ...createContext(ac.signal),
+      confirmExecutionExit: () => {
+        confirmations += 1
+      },
+    })
     expect(result.error).toBe(true)
     expect(result.details).toEqual({})
     expect(result.contents).toEqual([{ type: 'text', text: 'Error: Operation cancelled' }])
+    // 最前面的 abort 发生在安装之前，确定未启动必须确认一次。
+    expect(confirmations).toBe(1)
   })
 
   it('SkillSyncException is mapped to coded error result', async () => {

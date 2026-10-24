@@ -90,7 +90,8 @@ import java.util.function.Supplier;
 public final class EnvironmentDaemonServer
     implements EnvironmentCapabilityTransport, DaemonEndpoint {
 
-  private static final int MAX_INVOCATION_TOMBSTONES = 1024;
+  /** 每个 Environment 保留的已终结 invocation 上界；超限淘汰最旧条目，淘汰后迟到退出确认不再交付。 */
+  static final int MAX_INVOCATION_TOMBSTONES = 1024;
 
   /** 单次调用允许的并发资源传输数上限，防止恶意/失控 Daemon 无界创建上传行。 */
   private static final int MAX_TRANSFERS_PER_INVOCATION = 16;
@@ -131,7 +132,8 @@ public final class EnvironmentDaemonServer
   private final Map<EnvironmentId, EnvironmentState> environments = new HashMap<>();
   private final Map<EnvironmentId, LinkedHashMap<UUID, ActiveInvocation>> invocationsByEnvironment =
       new HashMap<>();
-  private final Map<EnvironmentId, ArrayDeque<UUID>> invocationTombstones = new HashMap<>();
+  private final Map<EnvironmentId, LinkedHashMap<UUID, ExitConfirmation>> invocationTombstones =
+      new HashMap<>();
 
   /**
    * 在途 IDE 元数据命令：{@code invocationId -> pending}，守护于 {@code inventory}。
@@ -630,7 +632,12 @@ public final class EnvironmentDaemonServer
                 request.expectedFile()));
     ActiveInvocation active =
         new ActiveInvocation(
-            environmentId, invocationId, listener, invokePayload, settings().heartbeatTimeout());
+            environmentId,
+            invocationId,
+            listener,
+            invokePayload,
+            settings().heartbeatTimeout(),
+            state.daemonInstanceId());
     DaemonOfferResult outcome = null;
     RuntimeException sendFailure = null;
     synchronized (state) {
@@ -691,7 +698,7 @@ public final class EnvironmentDaemonServer
         return;
       }
       active.markTerminal();
-      addTombstone(active.environmentId, active.invocationId);
+      addTombstoneLocked(active);
       state = connectionOf(active.environmentId);
     }
     // 已移出在途目录，不再随重连重放；仍尝试把一次 CANCEL 交给当前连接。
@@ -733,10 +740,15 @@ public final class EnvironmentDaemonServer
 
   private ActiveInvocation registeredInvocation(EnvironmentId environmentId, UUID invocationId) {
     synchronized (inventory) {
-      LinkedHashMap<UUID, ActiveInvocation> invocations =
-          invocationsByEnvironment.get(environmentId);
-      return invocations == null ? null : invocations.get(invocationId);
+      return registeredInvocationLocked(environmentId, invocationId);
     }
+  }
+
+  /** 调用方必须持有 {@code inventory}。 */
+  private ActiveInvocation registeredInvocationLocked(
+      EnvironmentId environmentId, UUID invocationId) {
+    LinkedHashMap<UUID, ActiveInvocation> invocations = invocationsByEnvironment.get(environmentId);
+    return invocations == null ? null : invocations.get(invocationId);
   }
 
   private List<ActiveInvocation> activeInvocations(EnvironmentId environmentId) {
@@ -749,19 +761,101 @@ public final class EnvironmentDaemonServer
 
   private boolean hasTombstone(EnvironmentId environmentId, UUID invocationId) {
     synchronized (inventory) {
-      ArrayDeque<UUID> tombstones = invocationTombstones.get(environmentId);
-      return tombstones != null && tombstones.contains(invocationId);
+      return hasTombstoneLocked(environmentId, invocationId);
     }
   }
 
-  private void addTombstone(EnvironmentId environmentId, UUID invocationId) {
+  /** 调用方必须持有 {@code inventory}。 */
+  private boolean hasTombstoneLocked(EnvironmentId environmentId, UUID invocationId) {
+    LinkedHashMap<UUID, ExitConfirmation> tombstones = invocationTombstones.get(environmentId);
+    return tombstones != null && tombstones.containsKey(invocationId);
+  }
+
+  /**
+   * 登记有界 tombstone，并保留原 listener 与发起调用时的 daemon 身份。
+   *
+   * <p>terminate/expire 立即结束本地等待，但不得丢掉随后真正到来的退出确认。条目仍按插入顺序淘汰，不引入无界 registry。 调用方必须持有 {@code
+   * inventory}，保证活动条目移除与 tombstone 登记在同一原子边界。
+   */
+  private void addTombstoneLocked(ActiveInvocation active) {
+    LinkedHashMap<UUID, ExitConfirmation> tombstones =
+        invocationTombstones.computeIfAbsent(
+            active.environmentId, ignored -> new LinkedHashMap<>());
+    ExitConfirmation retained = new ExitConfirmation(active.listener, active.daemonInstanceId);
+    if (active.exitConfirmed.get()) {
+      retained.delivered.set(true);
+    }
+    tombstones.put(active.invocationId, retained);
+    while (tombstones.size() > MAX_INVOCATION_TOMBSTONES) {
+      tombstones.pollFirstEntry();
+    }
+  }
+
+  /** 取出仍可交付的退出确认；身份不符或已交付返回 empty。调用方必须持有 {@code inventory}。 */
+  private Optional<ExitConfirmation> claimExitConfirmationLocked(
+      EnvironmentId environmentId, UUID invocationId, String daemonInstanceId) {
+    ActiveInvocation active = registeredInvocationLocked(environmentId, invocationId);
+    if (active != null) {
+      if (!active.daemonInstanceId.equals(daemonInstanceId) || !active.claimExit()) {
+        return Optional.empty();
+      }
+      return Optional.of(new ExitConfirmation(active.listener, active.daemonInstanceId, true));
+    }
+    LinkedHashMap<UUID, ExitConfirmation> tombstones = invocationTombstones.get(environmentId);
+    ExitConfirmation retained = tombstones == null ? null : tombstones.get(invocationId);
+    if (retained == null
+        || !retained.daemonInstanceId.equals(daemonInstanceId)
+        || !retained.claim()) {
+      return Optional.empty();
+    }
+    return Optional.of(retained);
+  }
+
+  /**
+   * 同实例重连后重发未交付退出确认对应的 CANCEL。
+   *
+   * <p>终态或 terminate 已把调用移出活动目录，Daemon 的 journal 仍可能保存着终态与退出确认；重发 CANCEL 让 Daemon 按同一 invocationId
+   * 重放既有事实，或停止仍可能运行的 scope。绝不重发 INVOKE，不重新执行。未知 CANCEL 在 Daemon 端被忽略， 不会产生 ACK；每个 READY 代际至多发送一次。
+   */
+  private void resendPendingExitConfirmations(ConnectionState state, EnvironmentId environmentId) {
+    String daemonInstanceId = state.daemonInstanceId;
+    if (daemonInstanceId == null) {
+      return;
+    }
+    List<UUID> pending = new ArrayList<>();
     synchronized (inventory) {
-      ArrayDeque<UUID> tombstones =
-          invocationTombstones.computeIfAbsent(environmentId, ignored -> new ArrayDeque<>());
-      tombstones.remove(invocationId);
-      tombstones.addLast(invocationId);
-      while (tombstones.size() > MAX_INVOCATION_TOMBSTONES) {
-        tombstones.removeFirst();
+      LinkedHashMap<UUID, ExitConfirmation> tombstones = invocationTombstones.get(environmentId);
+      if (tombstones == null) {
+        return;
+      }
+      for (Map.Entry<UUID, ExitConfirmation> entry : tombstones.entrySet()) {
+        ExitConfirmation confirmation = entry.getValue();
+        if (!confirmation.delivered.get()
+            && confirmation.daemonInstanceId.equals(daemonInstanceId)) {
+          pending.add(entry.getKey());
+        }
+      }
+    }
+    for (UUID invocationId : pending) {
+      DaemonOfferResult outcome;
+      synchronized (state) {
+        if (!state.isReady()) {
+          return;
+        }
+        try {
+          outcome = state.offer(DaemonMessageType.CANCEL, invocationId.toString(), "{}");
+        } catch (RuntimeException transportFailure) {
+          outcome = null;
+        }
+      }
+      if (outcome == null || outcome == DaemonOfferResult.CLOSED) {
+        close(state.connection.connectionId());
+        return;
+      }
+      if (outcome == DaemonOfferResult.BUSY) {
+        // 帧肯定未发送；关闭当前代际，由既有重连在新的 READY 上再试一次。
+        close(state.connection.connectionId());
+        return;
       }
     }
   }
@@ -789,6 +883,7 @@ public final class EnvironmentDaemonServer
       case COMPLETED -> handleCompleted(state, envelope, deferred);
       case FAILED -> handleFailed(state, envelope, deferred);
       case CANCELLED -> handleCancelled(state, envelope, deferred);
+      case EXECUTION_EXITED -> handleExecutionExited(state, envelope, deferred);
       case ERROR -> handleError(state, envelope);
       case UPDATE_RESULT -> handleUpdateResult(state, envelope, deferred);
       case IDE_RESULT -> handleIdeResult(state, envelope, deferred);
@@ -942,6 +1037,7 @@ public final class EnvironmentDaemonServer
           replaceDaemonInstance(environmentId, daemonInstanceId)
               ? takeAbandonedInvocations(environmentId)
               : List.of();
+      state.rememberDaemonInstance(daemonInstanceId);
       state.bind(environmentId, acquired.leaseToken());
       state.capabilityCatalogVersion = capabilityCatalogVersion;
       synchronized (inventory) {
@@ -1006,12 +1102,10 @@ public final class EnvironmentDaemonServer
       if (invocations != null) {
         for (ActiveInvocation active : invocations.values()) {
           active.markTerminal();
+          addTombstoneLocked(active);
           abandoned.add(active);
         }
       }
-    }
-    for (ActiveInvocation active : abandoned) {
-      addTombstone(environmentId, active.invocationId);
     }
     return abandoned;
   }
@@ -1109,6 +1203,7 @@ public final class EnvironmentDaemonServer
     }
     deferred.add(() -> notifyEnvironmentReady(environmentId));
     resendActiveInvocations(state, environmentId);
+    resendPendingExitConfirmations(state, environmentId);
   }
 
   /**
@@ -1559,7 +1654,43 @@ public final class EnvironmentDaemonServer
     }
   }
 
-  /** 返回匹配 invocationId 的活动调用；已终结调用返回 null（迟到帧静默忽略），其余为协议错误。 */
+  /**
+   * 投递独立退出确认：只接受发起该调用的 daemon 身份，且至多一次。
+   *
+   * <p>结果终态、超时和断连都不产生该回调。terminate 后条目仍留在有界 tombstone 中，因此取消之后真正到来的确认仍能交付。
+   */
+  private void handleExecutionExited(
+      ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
+    requireReady(state);
+    if (!envelopeCodec.readPayload(envelope).isEmpty()) {
+      throw new DaemonProtocolException("EXECUTION_EXITED payload must be an empty object");
+    }
+    UUID invocationId = parseUuid(envelope.invocationId(), "invocationId");
+    String daemonInstanceId = state.daemonInstanceId;
+    if (daemonInstanceId == null) {
+      throw new DaemonProtocolException("EXECUTION_EXITED requires a known daemon instance");
+    }
+    Optional<ExitConfirmation> confirmation;
+    boolean known;
+    synchronized (inventory) {
+      confirmation =
+          claimExitConfirmationLocked(state.environmentId, invocationId, daemonInstanceId);
+      known =
+          confirmation.isPresent()
+              || hasTombstoneLocked(state.environmentId, invocationId)
+              || registeredInvocationLocked(state.environmentId, invocationId) != null;
+    }
+    if (confirmation.isPresent()) {
+      EnvironmentCapabilityExecutionListener listener = confirmation.get().listener;
+      deferred.add(listener::onExitConfirmed);
+      return;
+    }
+    if (!known) {
+      throw new DaemonProtocolException(
+          "daemon exit confirmation does not own invocationId: " + envelope.invocationId());
+    }
+  }
+
   private ActiveInvocation callbackTarget(ConnectionState state, DaemonEnvelope envelope) {
     requireReady(state);
     UUID invocationId = parseUuid(envelope.invocationId(), "invocationId");
@@ -1590,40 +1721,35 @@ public final class EnvironmentDaemonServer
   private ActiveInvocation takeTerminalTarget(ConnectionState state, DaemonEnvelope envelope) {
     requireReady(state);
     UUID invocationId = parseUuid(envelope.invocationId(), "invocationId");
-    ActiveInvocation active = takeRegistered(state.environmentId, invocationId);
-    if (active != null) {
-      addTombstone(state.environmentId, invocationId);
-      return active;
-    }
-    if (hasTombstone(state.environmentId, invocationId)) {
-      return null;
+    synchronized (inventory) {
+      ActiveInvocation active = takeRegisteredLocked(state.environmentId, invocationId);
+      if (active != null) {
+        addTombstoneLocked(active);
+        return active;
+      }
+      if (hasTombstoneLocked(state.environmentId, invocationId)) {
+        return null;
+      }
     }
     throw new DaemonProtocolException(
         "daemon terminal callback does not own invocationId: " + envelope.invocationId());
   }
 
-  /**
-   * 从活动目录移除并标记终态；移除失败返回 null。
-   *
-   * <p>目录锁内完成「取出 + mark terminal」，因此并发的终态帧、expire 与实例接管至多一个赢家。
-   */
-  private ActiveInvocation takeRegistered(EnvironmentId environmentId, UUID invocationId) {
-    synchronized (inventory) {
-      LinkedHashMap<UUID, ActiveInvocation> invocations =
-          invocationsByEnvironment.get(environmentId);
-      if (invocations == null) {
-        return null;
-      }
-      ActiveInvocation active = invocations.remove(invocationId);
-      if (active == null) {
-        return null;
-      }
-      if (invocations.isEmpty()) {
-        invocationsByEnvironment.remove(environmentId);
-      }
-      active.markTerminal();
-      return active;
+  /** 从活动目录移除并标记终态；移除失败返回 null。调用方必须持有 {@code inventory}。 */
+  private ActiveInvocation takeRegisteredLocked(EnvironmentId environmentId, UUID invocationId) {
+    LinkedHashMap<UUID, ActiveInvocation> invocations = invocationsByEnvironment.get(environmentId);
+    if (invocations == null) {
+      return null;
     }
+    ActiveInvocation active = invocations.remove(invocationId);
+    if (active == null) {
+      return null;
+    }
+    if (invocations.isEmpty()) {
+      invocationsByEnvironment.remove(environmentId);
+    }
+    active.markTerminal();
+    return active;
   }
 
   /** 递交一帧；传输同步失败意味着连接已失效：断开该连接并返回 false。 */
@@ -1979,6 +2105,8 @@ public final class EnvironmentDaemonServer
     private final String invokePayload;
     private final Duration terminalDeliveryGrace;
     private final AtomicBoolean terminal = new AtomicBoolean();
+    private final AtomicBoolean exitConfirmed = new AtomicBoolean();
+    private final String daemonInstanceId;
     private volatile boolean cancelled;
 
     /**
@@ -2005,13 +2133,15 @@ public final class EnvironmentDaemonServer
         UUID invocationId,
         EnvironmentCapabilityExecutionListener listener,
         String invokePayload,
-        Duration terminalDeliveryGrace) {
+        Duration terminalDeliveryGrace,
+        String daemonInstanceId) {
       this.environmentId = environmentId;
       this.invocationId = invocationId;
       this.listener = listener;
       this.invokePayload = invokePayload;
       this.terminalDeliveryGrace =
           Objects.requireNonNull(terminalDeliveryGrace, "terminalDeliveryGrace");
+      this.daemonInstanceId = Objects.requireNonNull(daemonInstanceId, "daemonInstanceId");
     }
 
     @Override
@@ -2058,6 +2188,11 @@ public final class EnvironmentDaemonServer
 
     private void markTerminal() {
       terminal.set(true);
+    }
+
+    /** 活动调用的退出确认至多抢占一次；与结果终态无关。 */
+    private boolean claimExit() {
+      return exitConfirmed.compareAndSet(false, true);
     }
 
     /**
@@ -2133,6 +2268,7 @@ public final class EnvironmentDaemonServer
     private volatile EnvironmentId environmentId;
     private volatile boolean helloReceived;
     private volatile String capabilityCatalogVersion;
+    private volatile String daemonInstanceId;
     private volatile DaemonOperatingSystem daemonOperatingSystem;
     private volatile boolean ready;
     private volatile boolean cleaned;
@@ -2218,6 +2354,23 @@ public final class EnvironmentDaemonServer
       helloReceived = true;
     }
 
+    /** 冻结本连接 HELLO 声明的 daemon 进程身份；重复 HELLO 已在进入前拒绝。 */
+    private void rememberDaemonInstance(String instanceId) {
+      daemonInstanceId = Objects.requireNonNull(instanceId, "daemonInstanceId");
+    }
+
+    /**
+     * 本连接 HELLO 声明的 daemon 进程身份。
+     *
+     * <p>退出确认只认发起调用时冻结的这个身份，不读取 Environment 当前接管者。
+     */
+    private String daemonInstanceId() {
+      if (daemonInstanceId == null) {
+        throw new IllegalStateException("daemon instance identity is not bound");
+      }
+      return daemonInstanceId;
+    }
+
     /** READY 中冻结的目标 Daemon OS；READY 之前为 null。 */
     private DaemonOperatingSystem readyDaemonOperatingSystem() {
       return isReady() ? daemonOperatingSystem : null;
@@ -2266,6 +2419,35 @@ public final class EnvironmentDaemonServer
         DaemonMessageType type, EnvironmentId scope, String invocationId, String payloadJson) {
       return envelopeCodec.encode(
           new DaemonEnvelope(DaemonProtocol.VERSION, type, scope, invocationId, payloadJson));
+    }
+  }
+
+  /**
+   * 有界 tombstone 中保留的退出确认。
+   *
+   * <p>本地等待可以先结束，但 listener 与原 daemon 身份必须留下，直到确认交付或条目被容量淘汰。
+   */
+  private static final class ExitConfirmation {
+    private final EnvironmentCapabilityExecutionListener listener;
+    private final String daemonInstanceId;
+    private final AtomicBoolean delivered = new AtomicBoolean();
+
+    private ExitConfirmation(
+        EnvironmentCapabilityExecutionListener listener, String daemonInstanceId) {
+      this(listener, daemonInstanceId, false);
+    }
+
+    private ExitConfirmation(
+        EnvironmentCapabilityExecutionListener listener,
+        String daemonInstanceId,
+        boolean delivered) {
+      this.listener = listener;
+      this.daemonInstanceId = daemonInstanceId;
+      this.delivered.set(delivered);
+    }
+
+    private boolean claim() {
+      return delivered.compareAndSet(false, true);
     }
   }
 

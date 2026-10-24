@@ -247,13 +247,53 @@ describe('LspClient Protocol & Handshake', () => {
     expect(client.isAlive()).toBe(true)
   })
 
+  it('does not confirm a locally disposed request until the server actually exits', async () => {
+    // 用真实 JSON-RPC connection 的 dispose 精确制造本地拒绝；服务端确已收到请求且仍在运行。
+    const { client, transcript } = await startClient('slow-definition')
+    const file = path.join(tempDir, 'App.java')
+    fs.writeFileSync(file, 'class App {}\n')
+    let finished = 0
+    const request = client.definition(file, 1, 0, undefined, () => {
+      finished += 1
+    })
+    const rejected = expect(request).rejects.toThrow(/LSP request failed/)
+    await awaitEvent(
+      transcript,
+      (e) => e.event === 'recv' && e.message?.method === 'textDocument/definition',
+    )
+    client['connection'].dispose()
+    await rejected
+    expect(finished).toBe(0)
+    expect(client.isAlive()).toBe(true)
+    expect(receivedMessages(transcript, 'textDocument/definition')).toHaveLength(1)
+    // 正向对照：本地等待已结束，但实际进程退出后仍必须交付一次迟到确认。
+    await client.stop(0)
+    expect(finished).toBe(1)
+  })
+
+  it('confirms a real server error response as request completion', async () => {
+    // 正向对照：服务端 RPC 错误是这次请求的真实响应，断流则不是。
+    const { client } = await startClient('error-definition')
+    const file = path.join(tempDir, 'App.java')
+    fs.writeFileSync(file, 'class App {}\n')
+    let finished = 0
+    await expect(client.definition(file, 1, 0, undefined, () => {
+      finished += 1
+    })).rejects.toThrow(LspError)
+    expect(finished).toBe(1)
+    expect(client.isAlive()).toBe(true)
+  })
+
   it('abort signal cancels in-flight request', async () => {
     const { client, transcript } = await startClient('slow-definition')
     const file = path.join(tempDir, 'App.java')
     fs.writeFileSync(file, 'class App {}\n')
 
     const ac = new AbortController()
-    const p = client.definition(file, 1, 0, ac.signal)
+    let finished = 0
+    const p = client.definition(file, 1, 0, ac.signal, () => {
+      finished += 1
+    })
     await awaitEvent(
       transcript,
       (e) => e.event === 'recv' && e.message?.method === 'textDocument/definition',
@@ -261,6 +301,7 @@ describe('LspClient Protocol & Handshake', () => {
     ac.abort()
 
     await expect(p).rejects.toThrow(/Operation cancelled/)
+    expect(finished).toBe(0)
     // Verify $/cancelRequest was sent
     const cancelEvent = await awaitEvent(
       transcript,

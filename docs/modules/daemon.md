@@ -31,7 +31,7 @@ POSIX 目录权限为 0700、敏感文件为 0600。`tmp/workspaces` 由受控�
 
 ## 能力装配与运行时调度
 
-装配阶段冻结 11 项原子能力（9 项模型工具与 2 项内部能力）；IDE 是独立受管服务。能力目录版本为 3，envelope wire 版本为 4，READY payload 版本为 5（这些版本、payload 上限、错误码与枚举 wire 值都来自由 Java 协议常量生成的 [`protocol-contract.ts`](../../daemon/src/generated/protocol-contract.ts)）：
+装配阶段冻结 11 项原子能力（9 项模型工具与 2 项内部能力）；IDE 是独立受管服务。能力目录版本为 3，envelope wire 版本为 5，READY payload 版本为 5（这些版本、payload 上限、错误码与枚举 wire 值都来自由 Java 协议常量生成的 [`protocol-contract.ts`](../../daemon/src/generated/protocol-contract.ts)）：
 - 编码能力：文件读写编辑（`fs.read`、`fs.write`、`fs.edit`、内部审查能力 `fs.edit.preview`）、文件与内容检索（`fs.find`、`fs.grep`）、命令执行（`process.exec`）；
 - 语言服务：`lsp.goto-definition`、`lsp.workspace-symbols`、`lsp.java-decompile`；
 - 扩展与受管服务：内部 `skill.sync` 以及受管 IDE 服务（code-server，通过 `IDE_COMMAND` 与 `IDE_RESULT` 进行生命周期与流控制）。
@@ -40,8 +40,9 @@ POSIX 目录权限为 0700、敏感文件为 0600。`tmp/workspaces` 由受控�
 - 连接握手强制协商 `permessage-deflate`，缺失时以 1010 关闭；仅传输文本帧，超阈值单帧以 1008 关闭。
 - `daemonInstanceId` 在构造时随机生成，同进程所有 HELLO 复用。连接断开指数退避重连，上限为 30 秒；重连不改变进程内已有执行事实。
 - 注册被拒（REJECTED）进入 FAILED 状态、停止重连并退出进程；临时不可用（RETRY_LATER）退避重连。
-- INVOKE 经过严格 JSON 解码后，以 [`Journal`](../../daemon/src/journal.ts) 的 `start(invocationId)` 原子去重。已有条目直接重放：RUNNING 状态重放 `STARTED(replayed=true)`，已完成条目重放冻结终态，副作用不再重复执行。
+- INVOKE 经过严格 JSON 解码后，以 [`Journal`](../../daemon/src/journal.ts) 的 `start(invocationId)` 原子去重。已有条目直接重放：RUNNING 状态重放 `STARTED(replayed=true)`，已完成条目重放冻结终态，副作用不再重复执行。退出确认单独保存在同一条目里，重复 INVOKE 或 CANCEL 时随条目重放 `EXECUTION_EXITED`；不能从终态报文推断。有界 journal 淘汰条目后不再重放该确认。
 - 超时与取消：Runtime 维护唯一的 invoke timer，超时或取消时通过同一 `context.signal` 请求停止（`TIMED_OUT` / `CANCELLED`），不提前抢占终态；由 process、search 等执行器在 cleanup 后交付真实结果，已完成的文件修改提交成功决不能被 late abort 覆盖。系统不对 OS 阻塞做严格硬中止或承诺 60 秒内一定回包。
+- 退出确认：能力只在确知自己管理的范围已经结束时调用 `confirmExecutionExit()`。文件读写编辑在调用返回前没有留下 worker。`skill.sync` 只在进入安装前就能确定未开始，或安装调用已经返回时确认。`fs.find` / `fs.grep` 要等到本次 worker 退出，并且输出 spool 关闭成功；校验失败且 worker 尚未创建时确认为未开始。`process.exec` 要等到受管进程 `terminate` 成功且本地捕获关闭成功；`start` 抛错不证明范围已清理，不能确认。LSP 只在服务端成功结果或服务端 RPC 错误到达，或共享语言服务器进程实际退出时确认；本地写失败、连接 dispose、取消、超时和传输失败都不是请求结束。参数、租约或发送前失败才确认为未开始。Runtime 持有同一次调用对象：executor 及其拥有的上传和终态收尾完成，并且正向证据已经留下，才发送一次空 payload 的 `EXECUTION_EXITED`。证据晚于终态到达仍然发送；收尾抛错不发送。确定未启动 executor 的拒绝直接确认；已经启动但没有正向证据时不补发。取消、超时和普通 error 本身都不是退出证据。重连后 Platform 对同一未确认退出事实重发 `CANCEL` 以拉取 journal 事实或停止仍运行的执行范围；未知 `CANCEL` 不产生确认。
 - 关停顺序：逆序释放连接与在途调用、能力资源、受控临时存储与目录锁。关停中发生的异常通过 `AggregateError` 聚合抛出，不静默吞掉清理错误。
 
 ## 本地存储与文本输出

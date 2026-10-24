@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createLspCapabilities, type LspCapabilityGroup } from '../../src/coding/lsp.js'
 import type {
   CapabilityCall,
@@ -50,6 +50,7 @@ describe('Lsp Capabilities Group End-to-End', () => {
   function createContext(
     config: DaemonConfig,
     signal = new AbortController().signal,
+    confirmExecutionExit: () => void = () => {},
   ): CapabilityContext {
     return {
       config,
@@ -57,6 +58,7 @@ describe('Lsp Capabilities Group End-to-End', () => {
       processes: supervisor,
       resources: dummyUploader,
       progress: async () => {},
+      confirmExecutionExit,
     }
   }
 
@@ -248,6 +250,84 @@ describe('Lsp Capabilities Group End-to-End', () => {
     // Assert that no server was started during validation failures
     const events = readEvents(transcript)
     expect(events).toHaveLength(0)
+  })
+
+  it('confirms pre-send rejection and successful response but not a sent request before its process exits', async () => {
+    const transcript = path.join(tempDir, 'confirm-transcript.jsonl')
+    const config = createConfig(fakeDaemonLspConfig('java', 'slow-definition', transcript))
+    group = createLspCapabilities(config, supervisor)
+    const file = path.join(tempDir, 'App.java')
+    fs.writeFileSync(file, 'class App {}\n')
+    const gotoDef = group.capabilities['lsp.goto-definition']!
+    let confirmations = 0
+    const confirm = (): void => {
+      confirmations += 1
+    }
+
+    // 参数校验在租约和发送之前完成，确定没有目标请求。
+    const invalid = await gotoDef(
+      {
+        invocationId: 'confirm-invalid',
+        capabilityId: 'lsp.goto-definition',
+        arguments: { path: file },
+        timeoutMillis: 5000,
+      },
+      createContext(config, undefined, confirm),
+    )
+    expect(invalid.error).toBe(true)
+    expect(confirmations).toBe(1)
+
+    const controller = new AbortController()
+    const pending = gotoDef(
+      {
+        invocationId: 'confirm-sent',
+        capabilityId: 'lsp.goto-definition',
+        arguments: { path: file, line: 1 },
+        timeoutMillis: 5000,
+      },
+      createContext(config, controller.signal, confirm),
+    )
+    await awaitEvent(
+      transcript,
+      (event) => event.event === 'recv' && event.message?.method === 'textDocument/definition',
+    )
+    controller.abort()
+    expect((await pending).error).toBe(true)
+    // 本地取消只结束等待；目标请求已发出，不能据此确认执行结束。
+    expect(confirmations).toBe(1)
+
+    // 共享服务器进程实际退出是独立的迟到证据。
+    await group.close()
+    group = null
+    await vi.waitFor(() => expect(confirmations).toBe(2))
+  })
+
+  it('confirms a lease failure before the target request but not as a server exit', async () => {
+    const transcript = path.join(tempDir, 'no-init-confirm.jsonl')
+    const config = createConfig(fakeDaemonLspConfig('java', 'no-init', transcript))
+    const localGroup = createLspCapabilities(config, supervisor, { initializeTimeout: 200 })
+    const file = path.join(tempDir, 'App.java')
+    fs.writeFileSync(file, 'class App {}\n')
+    let confirmations = 0
+    try {
+      const result = await localGroup.capabilities['lsp.goto-definition']!(
+        {
+          invocationId: 'confirm-lease',
+          capabilityId: 'lsp.goto-definition',
+          arguments: { path: file, line: 1 },
+          timeoutMillis: 5000,
+        },
+        createContext(config, undefined, () => {
+          confirmations += 1
+        }),
+      )
+      expect(result.error).toBe(true)
+      // 服务进程可能已经启动，但本次目标请求从未发出。
+      expect(supervisor.children.length).toBe(1)
+      expect(confirmations).toBe(1)
+    } finally {
+      await localGroup.close()
+    }
   })
 
   it('executes goto-definition, workspace-symbols, and java-decompile sharing one client', async () => {

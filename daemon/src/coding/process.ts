@@ -39,6 +39,7 @@ type ProcessOutcome = 'EXITED' | 'TIMED_OUT' | 'CANCELLED'
 const processExecutor: CapabilityExecutor = async (call, context) => {
   let spool: OutputSpool | null = null
   let managed: ManagedProcess | null = null
+  let startAttempted = false
   let cancelled = false
   let timedOut = false
   let terminationFailure: unknown = null
@@ -104,6 +105,7 @@ const processExecutor: CapabilityExecutor = async (call, context) => {
     const decoder = new ProcessUtf8Decoder()
 
     try {
+      startAttempted = true
       managed = await context.processes.start({
         executable: context.config.bashExecutable,
         args: ['-lc', command],
@@ -112,6 +114,7 @@ const processExecutor: CapabilityExecutor = async (call, context) => {
       })
     } catch {
       await requestTermination()
+      // 没有返回 managed 时，terminate 只是空操作，不能把 start 的清理失败当成已收敛。
       if (cancelled) {
         return terminatedBeforeStart(call.invocationId, 'CANCELLED', timeoutMillis)
       }
@@ -187,7 +190,12 @@ const processExecutor: CapabilityExecutor = async (call, context) => {
     // 兜底：返回前收敛执行范围并释放全部中转资源；收敛是幂等的。
     await requestTermination()
     if (spool !== null) {
+      // 捕获文件未释放时不能确认；close 抛错会跳过下面的确认。
       await spool.close()
+    }
+    // start 抛错不证明受管范围已经物理清理。只有确定未调用 start，或已有受管进程且 terminate 成功，才确认。
+    if (!startAttempted || (managed !== null && terminationFailure === null)) {
+      context.confirmExecutionExit()
     }
   }
 }

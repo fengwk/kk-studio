@@ -179,6 +179,9 @@ class EnvironmentDaemonServerTest {
 
           @Override
           public void onError(Throwable error) {}
+
+          @Override
+          public void onExitConfirmed() {}
         };
     fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), listener);
 
@@ -214,6 +217,9 @@ class EnvironmentDaemonServerTest {
 
           @Override
           public void onError(Throwable error) {}
+
+          @Override
+          public void onExitConfirmed() {}
         });
 
     fixture.receive(
@@ -362,6 +368,9 @@ class EnvironmentDaemonServerTest {
             failures.incrementAndGet();
             throw new IllegalStateException("listener failed");
           }
+
+          @Override
+          public void onExitConfirmed() {}
         });
     fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_TWO), second);
 
@@ -492,9 +501,10 @@ class EnvironmentDaemonServerTest {
         List.of("partial:chunk-0", "error:EnvironmentCapabilitySendUncertainException"),
         listener.events());
 
-    // 已回收的调用不再随同一实例重连重放。
+    // 已回收的调用不再重放 INVOKE；未确认的退出事实只为同实例重放一次 CANCEL。
     FakeChannel reconnected = fixture.reconnectReady("channel-callback-overflow-retry");
-    assertEquals(List.of(DaemonMessageType.WELCOME), reconnected.messageTypes());
+    assertEquals(
+        List.of(DaemonMessageType.WELCOME, DaemonMessageType.CANCEL), reconnected.messageTypes());
   }
 
   /**
@@ -735,10 +745,11 @@ class EnvironmentDaemonServerTest {
     assertNull(listener.error);
     assertFalse(channel.closed());
 
-    // 已放弃的调用不再随重连重放（否则会重新执行副作用）。
+    // 已放弃的调用不再重放 INVOKE（否则会重新执行副作用）；未确认退出事实只为同实例重放 CANCEL。
     fixture.server.close(channel.connectionId());
     FakeChannel reconnected = fixture.connectReady("channel-expire-retry");
-    assertEquals(List.of(DaemonMessageType.WELCOME), reconnected.messageTypes());
+    assertEquals(
+        List.of(DaemonMessageType.WELCOME, DaemonMessageType.CANCEL), reconnected.messageTypes());
   }
 
   /**
@@ -894,7 +905,189 @@ class EnvironmentDaemonServerTest {
     assertFalse(channel.closed());
   }
 
-  /** 测试意图：terminate(cause) 终结调用后移出在途目录，断开重连（late reconnect）时绝不向新连接重放 INVOKE 或 CANCEL。 */
+  /**
+   * 测试意图：未确认的 tombstone 只接受发起调用的 daemon 身份。不同实例既不能确认，也不会收到 CANCEL 重放； 原实例重连时收到一次 CANCEL 以拉取 journal
+   * 事实，随后真实 ACK 交付一次，确认后不再重放。
+   */
+  @Test
+  void lateExitConfirmationIsDeliveredOnceOnlyForTheOriginalDaemon() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-exit-late");
+    RecordingListener listener = new RecordingListener();
+    EnvironmentCapabilityExecutionHandle handle =
+        fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), listener);
+    handle.terminate(EnvironmentCapabilityTerminationCause.CANCELLED);
+
+    fixture.server.close(channel.connectionId());
+    FakeChannel other = fixture.connectReady("channel-exit-other-instance", OTHER_INSTANCE_ID);
+    assertEquals(
+        List.of(DaemonMessageType.WELCOME), other.messageTypes(), "不同 daemon 身份不重放未确认退出确认的 CANCEL");
+    fixture.receive(other, DaemonMessageType.EXECUTION_EXITED, CALL_ONE.toString(), "{}");
+    assertEquals(0, listener.exitConfirmations, "其它 daemon 身份不能替原调用确认退出");
+    assertNull(listener.error);
+    assertFalse(other.closed());
+    fixture.server.close(other.connectionId());
+
+    FakeChannel reconnected = fixture.connectReady("channel-exit-original-retry", INSTANCE_ID);
+    assertEquals(
+        List.of(DaemonMessageType.WELCOME, DaemonMessageType.CANCEL),
+        reconnected.messageTypes(),
+        "原实例 READY 时对未确认 tombstone 只重放一次 CANCEL，不重放 INVOKE");
+    fixture.receive(reconnected, DaemonMessageType.EXECUTION_EXITED, CALL_ONE.toString(), "{}");
+    fixture.receive(reconnected, DaemonMessageType.EXECUTION_EXITED, CALL_ONE.toString(), "{}");
+    assertEquals(1, listener.exitConfirmations);
+    assertNull(listener.completed);
+    assertNull(listener.error);
+    assertFalse(reconnected.closed());
+
+    fixture.server.close(reconnected.connectionId());
+    FakeChannel afterConfirmed = fixture.connectReady("channel-exit-after-confirmed", INSTANCE_ID);
+    assertEquals(
+        List.of(DaemonMessageType.WELCOME),
+        afterConfirmed.messageTypes(),
+        "已交付的退出确认不再随 READY 重放 CANCEL");
+  }
+
+  /**
+   * 测试意图：终态帧与独立退出确认并发时，「移除活动调用 + 登记 tombstone」必须原子可见； 两个事实各自至多交付一次，且不能因活动/tombstone 之间的窗口被误判为未知
+   * invocation。
+   */
+  @Test
+  void terminalAndExitConfirmationRaceRemainsAtomic() throws Exception {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-terminal-exit-race");
+    ExecutorService racers = Executors.newFixedThreadPool(2);
+    try {
+      for (int round = 0; round < 32; round++) {
+        UUID invocationId = UUID.randomUUID();
+        RecordingListener listener = new RecordingListener();
+        String completedText = "exit-race-round-" + round;
+        fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(invocationId), listener);
+
+        CyclicBarrier start = new CyclicBarrier(2);
+        Future<?> completing =
+            racers.submit(
+                () -> {
+                  awaitStart(start);
+                  fixture.receive(
+                      channel,
+                      DaemonMessageType.COMPLETED,
+                      invocationId.toString(),
+                      completedPayload(invocationId, completedText));
+                });
+        Future<?> exiting =
+            racers.submit(
+                () -> {
+                  awaitStart(start);
+                  fixture.receive(
+                      channel, DaemonMessageType.EXECUTION_EXITED, invocationId.toString(), "{}");
+                });
+        completing.get();
+        exiting.get();
+
+        assertEquals(completedText, listener.completedText(), "round=" + round);
+        assertEquals(1, listener.exitConfirmations, "round=" + round);
+        assertNull(listener.error, "round=" + round);
+        assertFalse(channel.closed(), "round=" + round);
+      }
+    } finally {
+      racers.shutdownNow();
+    }
+  }
+
+  /** 测试意图：普通 COMPLETED 不产生退出确认；终态之后真实 ACK 仍独立交付一次。 */
+  @Test
+  void lateExitConfirmationAfterCompletedIsIndependentFromTerminal() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-exit-after-completed");
+    RecordingListener listener = new RecordingListener();
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), listener);
+    fixture.receive(
+        channel,
+        DaemonMessageType.COMPLETED,
+        CALL_ONE.toString(),
+        completedPayload(CALL_ONE, "done"));
+
+    assertEquals("done", listener.completedText());
+    assertEquals(0, listener.exitConfirmations);
+    assertNull(listener.error);
+    fixture.receive(channel, DaemonMessageType.EXECUTION_EXITED, CALL_ONE.toString(), "{}");
+    assertEquals(1, listener.exitConfirmations);
+    assertEquals(1, listener.completed.contents().size());
+  }
+
+  /**
+   * 测试意图：有界 tombstone 淘汰最旧条目后，原 daemon 的迟到空 EXECUTION_EXITED 不再交付。不为淘汰身份另建无界表，因此该帧按未知 invocation
+   * 关闭连接，但关闭本身不是退出证据。
+   */
+  @Test
+  void evictedTombstoneDropsLateExitConfirmation() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-exit-evicted");
+    RecordingListener oldest = new RecordingListener();
+    fixture
+        .server
+        .invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), oldest)
+        .terminate(EnvironmentCapabilityTerminationCause.CANCELLED);
+
+    for (int index = 0; index < EnvironmentDaemonServer.MAX_INVOCATION_TOMBSTONES; index++) {
+      fixture
+          .server
+          .invoke(
+              ENVIRONMENT_ID,
+              capabilityRequest(new UUID(0L, 20_000L + index)),
+              new RecordingListener())
+          .terminate(EnvironmentCapabilityTerminationCause.TIMED_OUT);
+    }
+
+    fixture.server.close(channel.connectionId());
+    FakeChannel afterEvict = fixture.connectReady("channel-exit-evicted-retry");
+    assertEquals(
+        EnvironmentDaemonServer.MAX_INVOCATION_TOMBSTONES,
+        afterEvict.countOf(DaemonMessageType.CANCEL),
+        "仍保留的未确认 tombstone 各重放一次 CANCEL");
+    assertTrue(
+        afterEvict.envelopes().stream()
+            .noneMatch(
+                envelope ->
+                    envelope.messageType() == DaemonMessageType.CANCEL
+                        && CALL_ONE.toString().equals(envelope.invocationId())),
+        "被容量淘汰的 tombstone 不再重放 CANCEL");
+    fixture.receive(afterEvict, DaemonMessageType.EXECUTION_EXITED, CALL_ONE.toString(), "{}");
+    assertEquals(0, oldest.exitConfirmations, "容量淘汰后的迟到确认不再交付");
+    assertNull(oldest.completed);
+    assertNull(oldest.error);
+    assertTrue(afterEvict.closed(), "淘汰后不再保留身份，未知退出确认按协议违规关闭，且不交付 ACK");
+  }
+
+  /** 测试意图：活动调用的退出确认与结果终态分开，且非空 payload 不能当作确认。 */
+  @Test
+  void activeExitConfirmationIsSeparateFromTheTerminalResult() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-exit-active");
+    RecordingListener listener = new RecordingListener();
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), listener);
+
+    fixture.receive(
+        channel, DaemonMessageType.EXECUTION_EXITED, CALL_ONE.toString(), "{\"ok\":true}");
+    assertTrue(channel.closed());
+    assertEquals(0, listener.exitConfirmations);
+
+    FakeChannel retried = fixture.reconnectReady("channel-exit-active-retry");
+    fixture.receive(retried, DaemonMessageType.EXECUTION_EXITED, CALL_ONE.toString(), "{}");
+    fixture.receive(retried, DaemonMessageType.EXECUTION_EXITED, CALL_ONE.toString(), "{}");
+    assertEquals(1, listener.exitConfirmations);
+    fixture.receive(
+        retried,
+        DaemonMessageType.COMPLETED,
+        CALL_ONE.toString(),
+        completedPayload(CALL_ONE, "done"));
+    assertEquals("done", listener.completedText());
+    assertEquals(1, listener.exitConfirmations);
+    assertFalse(retried.closed());
+  }
+
+  /** 测试意图：terminate(cause) 终结调用后移出在途目录，late 重连绝不重放 INVOKE；未确认退出事实只重放 CANCEL。 */
   @Test
   void terminateSuppressesLateReconnectReplay() {
     Fixture fixture = new Fixture();
@@ -908,9 +1101,9 @@ class EnvironmentDaemonServerTest {
     fixture.server.close(channel.connectionId());
     FakeChannel reconnected = fixture.connectReady("channel-terminate-late-reconnect-retry");
     assertEquals(
-        List.of(DaemonMessageType.WELCOME),
+        List.of(DaemonMessageType.WELCOME, DaemonMessageType.CANCEL),
         reconnected.messageTypes(),
-        "已 terminate 的调用在 late 重连时绝不重放 INVOKE 或 CANCEL");
+        "已 terminate 的调用在 late 重连时绝不重放 INVOKE，只为未确认退出事实重放 CANCEL");
 
     fixture.receive(
         reconnected,
@@ -1046,7 +1239,10 @@ class EnvironmentDaemonServerTest {
 
     fixture.server.close(channel.connectionId());
     FakeChannel reconnected = fixture.connectReady("channel-cancel-then-terminate-retry");
-    assertEquals(List.of(DaemonMessageType.WELCOME), reconnected.messageTypes());
+    assertEquals(
+        List.of(DaemonMessageType.WELCOME, DaemonMessageType.CANCEL),
+        reconnected.messageTypes(),
+        "未确认退出事实只重放 CANCEL，绝不重放 INVOKE");
   }
 
   /**
@@ -1198,10 +1394,11 @@ class EnvironmentDaemonServerTest {
     assertNull(listener.error);
     assertFalse(channel.closed());
 
-    // 重连绝不重放
+    // 重连不重放 INVOKE；未确认退出事实只重放 CANCEL。
     fixture.server.close(channel.connectionId());
     FakeChannel reconnected = fixture.connectReady("channel-interrupt-terminate-retry");
-    assertEquals(List.of(DaemonMessageType.WELCOME), reconnected.messageTypes());
+    assertEquals(
+        List.of(DaemonMessageType.WELCOME, DaemonMessageType.CANCEL), reconnected.messageTypes());
   }
 
   /**
