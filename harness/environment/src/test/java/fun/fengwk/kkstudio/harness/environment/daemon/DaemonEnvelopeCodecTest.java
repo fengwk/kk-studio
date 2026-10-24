@@ -37,6 +37,51 @@ class DaemonEnvelopeCodecTest {
     assertTrue(json.contains("\"invocationId\":\"invocation\""));
   }
 
+  /** 退出确认只携带关联身份，空对象（包括带空白的 JSON 写法）能往返。 */
+  @Test
+  void executionExitedWithEmptyPayloadRoundTrips() {
+    DaemonEnvelope envelope =
+        new DaemonEnvelope(
+            DaemonProtocol.VERSION, DaemonMessageType.EXECUTION_EXITED, ID, ID_TEXT, "{}");
+    assertEquals(envelope, codec.decode(codec.encode(envelope)));
+    assertEquals(
+        envelope,
+        codec.decode(
+            current(
+                    "\"messageType\":\"EXECUTION_EXITED\",\"environmentId\":\""
+                        + ID_TEXT
+                        + "\",\"invocationId\":\""
+                        + ID_TEXT
+                        + "\",")
+                + "\"payload\":{ \n }}"));
+  }
+
+  /** 编解码都拒绝非空退出 payload，与 Node codec 使用同一严格契约，不等到运行时处理才拒绝。 */
+  @Test
+  void rejectsNonEmptyExecutionExitedPayloadInBothDirections() {
+    DaemonEnvelope envelope =
+        new DaemonEnvelope(
+            DaemonProtocol.VERSION,
+            DaemonMessageType.EXECUTION_EXITED,
+            ID,
+            ID_TEXT,
+            "{\"ok\":true}");
+    assertEquals(
+        "EXECUTION_EXITED payload must be an empty object",
+        assertThrows(DaemonProtocolException.class, () -> codec.encode(envelope)).getMessage());
+    String wire =
+        current(
+                "\"messageType\":\"EXECUTION_EXITED\",\"environmentId\":\""
+                    + ID_TEXT
+                    + "\",\"invocationId\":\""
+                    + ID_TEXT
+                    + "\",")
+            + "\"payload\":{\"ok\":true}}";
+    assertEquals(
+        "EXECUTION_EXITED payload must be an empty object",
+        assertThrows(DaemonProtocolException.class, () -> codec.decode(wire)).getMessage());
+  }
+
   /** 未知版本、未知类型、非对象 payload 和未知字段必须分别在 wire 边界拒绝。 */
   @Test
   void rejectsUnsupportedOrMalformedWireEnvelope() {

@@ -10,6 +10,7 @@ import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonSe
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.TOKEN;
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.capabilityRequest;
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.completedPayload;
+import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.encode;
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.helloPayload;
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.partialPayload;
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.readyPayload;
@@ -1068,8 +1069,11 @@ class EnvironmentDaemonServerTest {
     RecordingListener listener = new RecordingListener();
     fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), listener);
 
-    fixture.receive(
-        channel, DaemonMessageType.EXECUTION_EXITED, CALL_ONE.toString(), "{\"ok\":true}");
+    // 正常 encoder 已拒绝非空退出 payload；从合法帧只替换消息类型，验证真实入站畸形帧仍关闭连接且不交付。
+    String malformed =
+        encode(ENVIRONMENT_ID, DaemonMessageType.STARTED, CALL_ONE.toString(), "{\"ok\":true}")
+            .replace("\"messageType\":\"STARTED\"", "\"messageType\":\"EXECUTION_EXITED\"");
+    fixture.server.receive(channel.connectionId(), malformed);
     assertTrue(channel.closed());
     assertEquals(0, listener.exitConfirmations);
 
