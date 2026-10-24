@@ -191,9 +191,8 @@ class HarnessRuntimeJoinAcceptanceTest {
   }
 
   @Test
-  void deliveryCommandPrecedingReplayOrderAccepted() {
-    // 测试意图：父线程仍 RUNNABLE 时，子线程终止把 NOTIFICATION 交付命令排在父线程 seq 2；
-    // 之后重放父线程用户命令时，只有被跳过的前置序号全部是 Join 交付命令才接受重放，其余乱序确定性拒绝。
+  void replayRequiresExactCursorEvenWhenPrecededByDeliveryCommand() {
+    // NOTIFICATION 占用 seq 2 后，新批次从 seq 3 接纳；重放必须使用接纳时的精确游标。
     AcceptedCommands root =
         runtime.acceptCommands(session(46, 47, null), AcceptancePreflight.IDENTITY);
     UUID parentId = root.thread().id();
@@ -224,7 +223,15 @@ class HarnessRuntimeJoinAcceptanceTest {
     assertEquals(2, accepted.acceptedCommands().size());
     assertEquals(3L, accepted.acceptedCommands().get(0).sequence());
 
-    // client 仍以原始期望序号 2 重放：由于移除了通知重放偏移，序号不匹配应确定性拒绝 COMMAND_REPLAY_ORDER_MISMATCH。
+    AcceptedCommands exactReplay =
+        runtime.acceptCommands(
+            new AcceptCommandsCommand(
+                new AcceptCommandsTarget.Thread(parentId, parent.headEntryId(), 3L), batch),
+            AcceptancePreflight.IDENTITY);
+    assertTrue(exactReplay.replayed());
+    assertEquals(accepted.acceptedCommands(), exactReplay.acceptedCommands());
+
+    // 仅将游标改为 seq 2：即使对应命令是系统通知，也不能越过它接受错位重放。
     AcceptCommandsCommand originalReplay =
         new AcceptCommandsCommand(
             new AcceptCommandsTarget.Thread(parentId, parent.headEntryId(), 2L), batch);
