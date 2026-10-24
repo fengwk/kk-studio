@@ -101,7 +101,6 @@ final class GeminiStreamAccumulator {
   /** 累积状态是否可安全写入原生 replay；无法保真的 union 冲突会显式关闭冻结，而不是交付损坏的回放。 */
   private boolean replayFreezable = true;
 
-  private ModelUsage latestUsage = null;
   private JsonNode latestUsageSnapshot = null;
   private String rawUsageJson = "{}";
   private String serviceTier = null;
@@ -163,56 +162,32 @@ final class GeminiStreamAccumulator {
             "cachedContentTokenCount",
             "thoughtsTokenCount",
             "totalTokenCount")) {
-      if (usageNode.has(field)) {
-        if ((field.equals("thoughtsTokenCount") || field.equals("totalTokenCount"))
-            && usageNode.get(field).isNull()) {
-          continue;
-        }
+      JsonNode value = usageNode.get(field);
+      if (value != null && !value.isNull()) {
         optionalTokenCount(usageNode, field);
       }
     }
     if (usageNode.has("serviceTier")) {
-      JsonNode tier = usageNode.get("serviceTier");
-      if (!tier.isString() || tier.stringValue().isBlank()) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_RESPONSE, "invalid usage field: serviceTier");
-      }
+      serviceTier(usageNode);
     }
-    // 中间帧可以尚无完整计数；保留最新原始快照，完整性仅在 finish 校验，不跨快照补字段。
+    // 保留最新原始快照；终态才解释 proto3 省略零，不跨快照补字段。
     latestUsageSnapshot = usageNode.deepCopy();
   }
 
-  private void normalizeFinalUsage(JsonNode usageNode) {
-    if (!usageNode.has("promptTokenCount") || !usageNode.has("candidatesTokenCount")) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_RESPONSE,
-          "missing complete usage: Gemini model " + request.model().modelId());
-    }
-    long promptTokens = optionalTokenCount(usageNode, "promptTokenCount");
-    long output = optionalTokenCount(usageNode, "candidatesTokenCount");
-    Long providerTotal =
-        usageNode.has("totalTokenCount") && !usageNode.get("totalTokenCount").isNull()
-            ? optionalTokenCount(usageNode, "totalTokenCount")
-            : null;
-    long cached = optionalTokenCount(usageNode, "cachedContentTokenCount");
-    Long reasoning =
-        usageNode.has("thoughtsTokenCount") && !usageNode.get("thoughtsTokenCount").isNull()
-            ? optionalTokenCount(usageNode, "thoughtsTokenCount")
-            : null;
+  private ModelUsage normalizeFinalUsage(JsonNode usageNode) {
+    // UsageMetadata 的 prompt/candidates/cache 是普通 proto3 int32，ProtoJSON 可省略零值。
+    // 这是 Gemini 协议事实，不是通用缺字段补零；显式 null、非法数字仍拒绝。
+    long promptTokens = proto3ZeroDefaultCount(usageNode, "promptTokenCount");
+    long output = proto3ZeroDefaultCount(usageNode, "candidatesTokenCount");
+    long cached = proto3ZeroDefaultCount(usageNode, "cachedContentTokenCount");
+    Long providerTotal = optionalReportedCount(usageNode, "totalTokenCount");
+    Long reasoning = optionalReportedCount(usageNode, "thoughtsTokenCount");
     if (cached > promptTokens) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_RESPONSE, "cached tokens exceed prompt tokens");
     }
     long ordinaryInput = promptTokens - cached;
-    String tier = null;
-    if (usageNode.has("serviceTier")) {
-      JsonNode value = usageNode.get("serviceTier");
-      if (!value.isString() || value.stringValue().isBlank()) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_RESPONSE, "invalid usage field: serviceTier");
-      }
-      tier = value.stringValue();
-    }
+    this.serviceTier = serviceTier(usageNode);
 
     // Gemini candidatesTokenCount 不含 thoughts；内部输出总量包含 reasoning，避免重复计费。
     long outputTotal;
@@ -222,19 +197,46 @@ final class GeminiStreamAccumulator {
       throw new ProviderException(
           ProviderErrorKind.INVALID_RESPONSE, "output token count overflow");
     }
-    this.latestUsage =
-        new ModelUsage(ordinaryInput, outputTotal, cached, 0L, Map.of(), reasoning, providerTotal);
-
-    this.serviceTier = tier;
     this.rawUsageJson = usageNode.toString();
+    return new ModelUsage(
+        ordinaryInput, outputTotal, cached, 0L, Map.of(), reasoning, providerTotal);
+  }
+
+  private static String serviceTier(JsonNode usageNode) {
+    if (!usageNode.has("serviceTier")) {
+      return null;
+    }
+    JsonNode value = usageNode.get("serviceTier");
+    if (!value.isString() || value.stringValue().isBlank()) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "invalid usage field: serviceTier");
+    }
+    return value.stringValue();
+  }
+
+  private static long proto3ZeroDefaultCount(JsonNode usageNode, String field) {
+    JsonNode value = usageNode.get(field);
+    if (value == null || value.isMissingNode()) {
+      return 0L;
+    }
+    return optionalTokenCount(usageNode, field);
+  }
+
+  private static Long optionalReportedCount(JsonNode usageNode, String field) {
+    JsonNode value = usageNode.get(field);
+    if (value == null || value.isNull() || value.isMissingNode()) {
+      return null;
+    }
+    return optionalTokenCount(usageNode, field);
   }
 
   private static long optionalTokenCount(JsonNode usageNode, String field) {
     JsonNode value = usageNode.get(field);
-    if (value == null) {
-      return 0L;
-    }
-    if (!value.isIntegralNumber() || !value.canConvertToLong() || value.longValue() < 0L) {
+    if (value == null
+        || value.isNull()
+        || !value.isIntegralNumber()
+        || !value.canConvertToLong()
+        || value.longValue() < 0L) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_RESPONSE, "invalid usage field: " + field);
     }
@@ -548,7 +550,7 @@ final class GeminiStreamAccumulator {
           ProviderErrorKind.INVALID_RESPONSE,
           "missing complete usage: Gemini model " + request.model().modelId());
     }
-    normalizeFinalUsage(latestUsageSnapshot);
+    ModelUsage usage = normalizeFinalUsage(latestUsageSnapshot);
     if (this.stopReason == null) {
       if (this.promptBlocked && trackedParts.isEmpty()) {
         this.stopReason = GenerationStopReason.FILTERED;
@@ -576,8 +578,6 @@ final class GeminiStreamAccumulator {
         fullText.append(tp.text);
       }
     }
-
-    ModelUsage usage = this.latestUsage;
 
     ProviderResponse response =
         new ProviderResponse(
