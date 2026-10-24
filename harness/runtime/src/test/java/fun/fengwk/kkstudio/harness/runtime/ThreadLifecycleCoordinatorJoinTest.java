@@ -32,7 +32,9 @@ import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NotificationCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -44,8 +46,7 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * 终止边界 Join 结算的收敛判据与交付幂等：源输入应用前旧结果不得结算新 Join；普通终止只在没有未完成的直接子 Join、没有未送达子回执、 没有待处理输入时结算；Stop
- * 强制结算不受此限制；交付后不重投。
+ * 终止边界 Join 结算的收敛判据与交付幂等：源输入应用前旧结果不得结算新 Join；普通终止只在没有未完成的直接子 Join、没有待处理输入时结算；Stop 强制结算不受此限制；交付后不重投。
  */
 class ThreadLifecycleCoordinatorJoinTest {
 
@@ -128,6 +129,46 @@ class ThreadLifecycleCoordinatorJoinTest {
   void queuedInputBlocksUpstreamJoinSettlement() {
     markSourceApplied();
     seedQueuedUserCommandAtSequenceTwo();
+
+    matchTerminal(false);
+    assertFalse(join(joinId).matched());
+    assertEquals(0, rootCommandCount());
+    assertNullWork();
+  }
+
+  /** J3b：本 Thread 仅有 QUEUED SET_* 控制命令时，不创建模型义务也不阻塞上游 Join 结算。 */
+  @Test
+  void setOnlyQueuedCommandDoesNotBlockUpstreamJoinSettlement() {
+    markSourceApplied();
+    seedQueuedSetAgentCommandAtSequenceTwo();
+
+    matchTerminal(false);
+    ThreadJoin matched = join(joinId);
+    assertTrue(matched.matched());
+    assertNotNull(matched.deliveryCommandSequence());
+    assertEquals(1, rootCommandCount());
+    assertTrue(
+        store.<Boolean>transaction(
+            tx -> tx.findWork(new WorkTarget(WorkTargetType.THREAD, root.threadId())).isPresent()));
+  }
+
+  /** J3c：本 Thread 存在 QUEUED CUSTOM_MESSAGE 时，构成待处理输入需求，阻塞上游 Join 结算。 */
+  @Test
+  void queuedCustomMessageBlocksUpstreamJoinSettlement() {
+    markSourceApplied();
+    seedQueuedCustomMessageCommandAtSequenceTwo();
+
+    matchTerminal(false);
+    assertFalse(join(joinId).matched());
+    assertEquals(0, rootCommandCount());
+    assertNullWork();
+  }
+
+  /** J3d：本 Thread 存在 QUEUED NOTIFICATION 时，构成待处理输入需求，阻塞上游 Join 结算。 */
+  @Test
+  void queuedNotificationBlocksUpstreamJoinSettlement() {
+    markSourceApplied();
+    seedQueuedNotificationCommandAtSequenceTwo();
 
     matchTerminal(false);
     assertFalse(join(joinId).matched());
@@ -359,6 +400,77 @@ class ThreadLifecycleCoordinatorJoinTest {
         tx -> {
           tx.lockThread(childId);
           var payload = userMessagePayload("steering");
+          tx.insertCommands(
+              List.of(
+                  new ThreadCommand(
+                      childId,
+                      2L,
+                      payload,
+                      TestIds.id(52),
+                      ThreadCommandPayloadJsonCodec.requestHash(payload),
+                      null,
+                      null,
+                      null,
+                      T1)));
+          return null;
+        });
+  }
+
+  /** 在 child 的 seq 2 插入一条 QUEUED SET_* 控制命令，构造仅有控制维护的合法状态。 */
+  private void seedQueuedSetAgentCommandAtSequenceTwo() {
+    store.transaction(
+        tx -> {
+          tx.lockThread(childId);
+          var payload = new SetAgentCommandPayload("assistant");
+          tx.insertCommands(
+              List.of(
+                  new ThreadCommand(
+                      childId,
+                      2L,
+                      payload,
+                      TestIds.id(52),
+                      ThreadCommandPayloadJsonCodec.requestHash(payload),
+                      null,
+                      null,
+                      null,
+                      T1)));
+          return null;
+        });
+  }
+
+  /** 在 child 的 seq 2 插入一条 QUEUED CUSTOM_MESSAGE，构造待处理输入需求。 */
+  private void seedQueuedCustomMessageCommandAtSequenceTwo() {
+    store.transaction(
+        tx -> {
+          tx.lockThread(childId);
+          var payload = new CustomMessageCommandPayload(AgentMessage.user("custom-steering"));
+          tx.insertCommands(
+              List.of(
+                  new ThreadCommand(
+                      childId,
+                      2L,
+                      payload,
+                      TestIds.id(52),
+                      ThreadCommandPayloadJsonCodec.requestHash(payload),
+                      null,
+                      null,
+                      null,
+                      T1)));
+          return null;
+        });
+  }
+
+  /** 在 child 的 seq 2 插入一条 QUEUED NOTIFICATION，构造待处理输入需求。 */
+  private void seedQueuedNotificationCommandAtSequenceTwo() {
+    store.transaction(
+        tx -> {
+          tx.lockThread(childId);
+          var payload =
+              new NotificationCommandPayload(
+                  UUID.randomUUID(),
+                  NotificationKind.SUBAGENT_RESULT,
+                  childId,
+                  AgentMessage.user("queued-result"));
           tx.insertCommands(
               List.of(
                   new ThreadCommand(

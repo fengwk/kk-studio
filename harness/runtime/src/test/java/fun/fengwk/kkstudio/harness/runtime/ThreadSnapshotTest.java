@@ -35,7 +35,9 @@ import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NotificationCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 
 import java.time.Clock;
@@ -163,6 +165,114 @@ class ThreadSnapshotTest {
     ThreadSnapshot snapshot = runtime.getThreadSnapshot(baseline.threadId());
     assertEquals(1, snapshot.queuedCommands().size());
     assertEquals(ThreadRuntimeStatus.RUNNING, snapshot.runtimeStatus());
+  }
+
+  @Test
+  void setOnlyQueuedCommandsDoNotMakeThreadRunning() {
+    // 测试意图：SET_* 控制命令不创建模型任务义务，也不构成 turn 需求，在 RUNNABLE 下快照状态仍为 IDLE。
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    ThreadCommand setCommand =
+        new ThreadCommand(
+            baseline.threadId(),
+            1L,
+            new SetAgentCommandPayload("assistant"),
+            TestIds.id(1),
+            "0".repeat(64),
+            null,
+            null,
+            null,
+            T5);
+    ThreadSnapshot base = runtime.getThreadSnapshot(baseline.threadId());
+    ThreadSnapshot setOnlySnapshot =
+        new ThreadSnapshot(
+            base.thread(),
+            base.entryPath(),
+            List.of(setCommand),
+            null,
+            List.of(),
+            List.of(),
+            List.of(),
+            0,
+            false);
+    assertEquals(ThreadRuntimeStatus.IDLE, setOnlySnapshot.runtimeStatus());
+  }
+
+  @Test
+  void queuedCustomMessageOrNotificationMakesThreadRunning() {
+    // 测试意图：QUEUED 的 CUSTOM_MESSAGE 与 NOTIFICATION 均代表真实待启动输入需求，在 RUNNABLE 下快照状态为 RUNNING。
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    ThreadSnapshot base = runtime.getThreadSnapshot(baseline.threadId());
+
+    ThreadCommand customMsgCommand =
+        new ThreadCommand(
+            baseline.threadId(),
+            1L,
+            new CustomMessageCommandPayload(AgentMessage.user("custom-input")),
+            TestIds.id(1),
+            "0".repeat(64),
+            null,
+            null,
+            null,
+            T5);
+    ThreadSnapshot customMsgSnapshot =
+        new ThreadSnapshot(
+            base.thread(),
+            base.entryPath(),
+            List.of(customMsgCommand),
+            null,
+            List.of(),
+            List.of(),
+            List.of(),
+            0,
+            false);
+    assertEquals(ThreadRuntimeStatus.RUNNING, customMsgSnapshot.runtimeStatus());
+
+    ThreadCommand notificationCommand =
+        new ThreadCommand(
+            baseline.threadId(),
+            2L,
+            new NotificationCommandPayload(
+                TestIds.id(100),
+                NotificationKind.SUBAGENT_RESULT,
+                TestIds.id(101),
+                AgentMessage.user("notification-input")),
+            TestIds.id(2),
+            "0".repeat(64),
+            null,
+            null,
+            null,
+            T5);
+    ThreadSnapshot notificationSnapshot =
+        new ThreadSnapshot(
+            base.thread(),
+            base.entryPath(),
+            List.of(notificationCommand),
+            null,
+            List.of(),
+            List.of(),
+            List.of(),
+            0,
+            false);
+    assertEquals(ThreadRuntimeStatus.RUNNING, notificationSnapshot.runtimeStatus());
+  }
+
+  @Test
+  void unconsumedAppliedNotificationWatermarkMakesThreadRunningWhenRunnable() {
+    // 测试意图：APPLIED 通知超过输入水位（unconsumedAppliedNotifications=true）在 RUNNABLE 下表示待启动输入，投影为 RUNNING。
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    ThreadSnapshot base = runtime.getThreadSnapshot(baseline.threadId());
+    ThreadSnapshot runningWithWatermark =
+        new ThreadSnapshot(
+            base.thread(),
+            base.entryPath(),
+            List.of(),
+            null,
+            List.of(),
+            List.of(),
+            List.of(),
+            0,
+            true);
+    assertEquals(ThreadRuntimeStatus.RUNNING, runningWithWatermark.runtimeStatus());
   }
 
   @Test
