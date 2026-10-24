@@ -24,10 +24,19 @@ export class LspService {
     line: number,
     character: number,
     signal?: AbortSignal,
+    onRequestFinished?: () => void,
+    onRequestSent?: () => void,
   ): Promise<string> {
     const entry = await this.pool.lease(file, signal)
     try {
-      const locations = await entry.client.definition(file, line, character, signal)
+      const locations = await entry.client.definition(
+        file,
+        line,
+        character,
+        signal,
+        onRequestFinished,
+        onRequestSent,
+      )
       return locations.join('\n')
     } finally {
       this.pool.release(entry)
@@ -39,10 +48,12 @@ export class LspService {
     query: string,
     limit: number,
     signal?: AbortSignal,
+    onRequestFinished?: () => void,
+    onRequestSent?: () => void,
   ): Promise<string> {
     const entry = await this.pool.lease(file, signal)
     try {
-      const symbols = await entry.client.workspaceSymbols(query, limit, signal)
+      const symbols = await entry.client.workspaceSymbols(query, limit, signal, onRequestFinished, onRequestSent)
       return symbols.join('\n')
     } finally {
       this.pool.release(entry)
@@ -53,10 +64,12 @@ export class LspService {
     file: string,
     target: string,
     signal?: AbortSignal,
+    onRequestFinished?: () => void,
+    onRequestSent?: () => void,
   ): Promise<string> {
     const entry = await this.pool.lease(file, signal)
     try {
-      return await entry.client.javaDecompile(target, signal)
+      return await entry.client.javaDecompile(target, signal, onRequestFinished, onRequestSent)
     } finally {
       this.pool.release(entry)
     }

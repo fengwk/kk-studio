@@ -116,7 +116,7 @@ describe('runtime handshake', () => {
     const hello = sent(setup.transport).find((envelope) => envelope.messageType === 'HELLO')
     expect(hello).toBeDefined()
     expect(hello?.environmentId).toBeNull()
-    expect(hello?.payload.protocolVersion).toBe(4)
+    expect(hello?.payload.protocolVersion).toBe(5)
     expect(hello?.payload.capabilityCatalogVersion).toBe('3')
     expect(hello?.payload.daemonVersion).toBe(DAEMON_VERSION)
     expect(hello?.payload.registrationToken).toBe('test-registration-token')
@@ -596,6 +596,12 @@ describe('runtime invocation lifecycle', () => {
     ) as Record<string, unknown>
     setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-2', payload: mismatched }))
     await waitFor(() => setup.runtime.getJournal().find('inv-2')?.state === 'FAILED')
+    // 参数/能力确定未进入执行器：可以直接确认未执行，且每个调用至多一次。
+    expect(
+      sent(setup.transport)
+        .filter((envelope) => envelope.messageType === 'EXECUTION_EXITED')
+        .map((envelope) => envelope.invocationId),
+    ).toEqual(['inv-1', 'inv-2'])
     setup.runtime.close()
   })
 
@@ -1367,5 +1373,268 @@ describe('runtime IDE stream lifetime and shutdown convergence', () => {
     )
     await waitFor(() => releases.length === cap + 1)
     setup.runtime.close()
+  })
+})
+
+describe('runtime execution exit confirmation', () => {
+  it('does not ACK until the executor body returns, even after confirmExecutionExit', async () => {
+    let release: (() => void) | null = null
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const setup = buildRuntime({
+      capabilities: {
+        'fs.read': async (call, context) => {
+          context.confirmExecutionExit()
+          await gate
+          return textResult(call.invocationId)
+        },
+      },
+    })
+    await handshake(setup)
+    setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-exit', payload: invokePayload() }))
+    await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'STARTED'))
+    await tick(3)
+    expect(sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toBe(false)
+    release?.()
+    await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED'))
+    const exited = sent(setup.transport).filter((envelope) => envelope.messageType === 'EXECUTION_EXITED')
+    expect(exited).toHaveLength(1)
+    expect(exited[0]?.payload).toEqual({})
+    const types = sent(setup.transport).map((envelope) => envelope.messageType)
+    expect(types.indexOf('COMPLETED')).toBeLessThan(types.indexOf('EXECUTION_EXITED'))
+    setup.runtime.close()
+  })
+
+  it('does not ACK a terminal result that never confirmed its own execution scope', async () => {
+    const setup = buildRuntime({
+      capabilities: {
+        'fs.read': async (call) => textResult(call.invocationId),
+      },
+    })
+    await handshake(setup)
+    setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-plain', payload: invokePayload() }))
+    await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'COMPLETED'))
+    expect(sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toBe(false)
+    setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-plain', payload: invokePayload() }))
+    await tick(2)
+    expect(sent(setup.transport).filter((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toHaveLength(0)
+    setup.runtime.close()
+  })
+
+  it('replays a stored EXECUTION_EXITED independently of the terminal on duplicate INVOKE', async () => {
+    const setup = buildRuntime({
+      capabilities: {
+        'fs.read': async (call, context) => {
+          context.confirmExecutionExit()
+          return textResult(call.invocationId)
+        },
+      },
+    })
+    await handshake(setup)
+    setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-replay', payload: invokePayload() }))
+    await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'COMPLETED'))
+    const before = sent(setup.transport).filter((envelope) => envelope.messageType === 'EXECUTION_EXITED').length
+    expect(before).toBe(1)
+    setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-replay', payload: invokePayload() }))
+    await tick(2)
+    const replayed = sent(setup.transport).filter((envelope) => envelope.invocationId === 'inv-replay')
+    expect(replayed.filter((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toHaveLength(2)
+    expect(replayed.some((envelope) => envelope.messageType === 'COMPLETED')).toBe(true)
+    setup.runtime.close()
+  })
+
+  it('replays a stored EXECUTION_EXITED once on a repeated CANCEL after the terminal', async () => {
+    const setup = buildRuntime({
+      capabilities: {
+        'fs.read': async (call, context) => {
+          context.confirmExecutionExit()
+          return textResult(call.invocationId)
+        },
+      },
+    })
+    await handshake(setup)
+    setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-cancel-replay', payload: invokePayload() }))
+    await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'COMPLETED'))
+    setup.transport.receive(serverMessage('CANCEL', { environmentId: ENV, invocationId: 'inv-cancel-replay', payload: {} }))
+    setup.transport.receive(serverMessage('CANCEL', { environmentId: ENV, invocationId: 'inv-cancel-replay', payload: {} }))
+    await tick(2)
+    const replayed = sent(setup.transport).filter((envelope) => envelope.invocationId === 'inv-cancel-replay')
+    expect(replayed.filter((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toHaveLength(3)
+    expect(replayed.filter((envelope) => envelope.messageType === 'COMPLETED')).toHaveLength(3)
+    setup.runtime.close()
+  })
+
+  it('ACKs only after a cancelled execution has actually left its scope', async () => {
+    let release: (() => void) | null = null
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const setup = buildRuntime({
+      capabilities: {
+        'fs.read': async (call, context) => {
+          await gate
+          if (context.signal.aborted) {
+            context.confirmExecutionExit()
+            return { callId: call.invocationId, error: true, details: {}, contents: [{ type: 'text', text: 'cancelled' }] }
+          }
+          return textResult(call.invocationId)
+        },
+      },
+    })
+    await handshake(setup)
+    setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-cancel', payload: invokePayload() }))
+    await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'STARTED'))
+    setup.transport.receive(serverMessage('CANCEL', { environmentId: ENV, invocationId: 'inv-cancel', payload: {} }))
+    await tick(3)
+    expect(sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toBe(false)
+    expect(sent(setup.transport).some((envelope) => envelope.messageType === 'CANCELLED')).toBe(false)
+    release?.()
+    await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED'))
+    const terminal = sent(setup.transport).find(
+      (envelope) =>
+        envelope.invocationId === 'inv-cancel' &&
+        (envelope.messageType === 'CANCELLED' || envelope.messageType === 'FAILED' || envelope.messageType === 'COMPLETED'),
+    )
+    expect(terminal?.messageType).toBe('COMPLETED')
+    expect(JSON.stringify(terminal?.payload)).toContain('cancelled')
+    setup.runtime.close()
+  })
+
+  it('ACKs a late confirmation after the terminal removed the running entry, and only once', async () => {
+    // 终态会移出 running。迟到的正向证据必须仍绑定这次调用并发送一次，不能因为 map 已空而丢失。
+    let confirm: (() => void) | null = null
+    const setup = buildRuntime({
+      capabilities: {
+        'fs.read': async (call, context) => {
+          confirm = () => context.confirmExecutionExit()
+          return textResult(call.invocationId)
+        },
+      },
+    })
+    await handshake(setup)
+    setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-late', payload: invokePayload() }))
+    await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'COMPLETED'))
+    expect(sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toBe(false)
+    confirm?.()
+    confirm?.()
+    await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED'))
+    expect(sent(setup.transport).filter((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toHaveLength(1)
+    setup.runtime.close()
+  })
+
+  it('does not ACK when owned upload cleanup throws after the executor confirmed', async () => {
+    // 正向证据不能抢在本次资源上传之前发出。上传抛错说明收尾未完成，终态之后也不补 ACK。
+    const setup = buildRuntime({
+      resources: {
+        async upload() {
+          throw new Error('upload failed')
+        },
+      },
+      capabilities: {
+        'fs.read': async (call, context) => {
+          context.confirmExecutionExit()
+          return {
+            callId: call.invocationId,
+            error: false,
+            details: {},
+            contents: [{ type: 'binary', bytes: Uint8Array.of(1), mediaType: 'application/octet-stream' }],
+          }
+        },
+      },
+    })
+    await handshake(setup)
+    setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-upload', payload: invokePayload() }))
+    await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'FAILED'))
+    await tick(3)
+    expect(sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toBe(false)
+    setup.runtime.close()
+  })
+
+  it('ACKs only after a successful resource upload, not when confirmExecutionExit returns', async () => {
+    // 同一调用的正向对照：上传成功且终态发送后，已留下的证据才变成一次 ACK。
+    let releaseUpload: (() => void) | null = null
+    const uploadGate = new Promise<void>((resolve) => {
+      releaseUpload = resolve
+    })
+    const setup = buildRuntime({
+      resources: {
+        async upload() {
+          await uploadGate
+          return {
+            type: 'resource',
+            uploadId: 'up-1',
+            mediaType: 'application/octet-stream',
+            name: null,
+            size: 1,
+            sha256: 'abc',
+          }
+        },
+      },
+      capabilities: {
+        'fs.read': async (call, context) => {
+          context.confirmExecutionExit()
+          return {
+            callId: call.invocationId,
+            error: false,
+            details: {},
+            contents: [{ type: 'binary', bytes: Uint8Array.of(1), mediaType: 'application/octet-stream' }],
+          }
+        },
+      },
+    })
+    await handshake(setup)
+    setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-upload-ok', payload: invokePayload() }))
+    await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'STARTED'))
+    await tick(3)
+    expect(sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toBe(false)
+    releaseUpload?.()
+    await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED'))
+    const types = sent(setup.transport).map((envelope) => envelope.messageType)
+    expect(types.indexOf('COMPLETED')).toBeLessThan(types.indexOf('EXECUTION_EXITED'))
+    expect(sent(setup.transport).filter((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toHaveLength(1)
+    setup.runtime.close()
+  })
+
+  it('does not ACK process.exec when the managed scope fails to converge', async () => {
+    const setup = buildRuntime({
+      capabilities: processCapabilities,
+      processes: {
+        async start() {
+          const stdout = new PassThrough()
+          const stderr = new PassThrough()
+          stdout.end()
+          stderr.end()
+          return {
+            stdin: new PassThrough(),
+            stdout,
+            stderr,
+            exit: Promise.resolve({ exitCode: 0, signal: null }),
+            terminate: async () => {
+              throw new Error('scope still running')
+            },
+          } satisfies ManagedProcess
+        },
+        async close() {},
+      },
+    })
+    await handshake(setup)
+    const dir = await realpath(await mkdtemp(join(tmpdir(), 'kk-exit-process-')))
+    try {
+      setup.transport.receive(
+        serverMessage('INVOKE', {
+          environmentId: ENV,
+          invocationId: 'inv-process',
+          payload: invokePayload('process.exec', 0, { command: 'true', workdir: dir }),
+        }),
+      )
+      await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'COMPLETED' || envelope.messageType === 'FAILED'))
+      expect(sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toBe(false)
+      const terminal = sent(setup.transport).find((envelope) => envelope.messageType === 'FAILED' || envelope.messageType === 'COMPLETED')
+      expect(JSON.stringify(terminal?.payload)).toContain('did not converge')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+      setup.runtime.close()
+    }
   })
 })

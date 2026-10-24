@@ -37,7 +37,7 @@ import { artifactFixture } from './support/update-fixture.js'
 const ENVIRONMENT_ID = '11111111-2222-4333-8444-555555555555'
 
 function envelope(messageType: string, extra: Record<string, unknown> = {}): string {
-  return JSON.stringify({ protocolVersion: 4, messageType, payload: {}, ...extra })
+  return JSON.stringify({ protocolVersion: PROTOCOL_VERSION, messageType, payload: {}, ...extra })
 }
 
 describe('envelope codec', () => {

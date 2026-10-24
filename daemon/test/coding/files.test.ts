@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileCapabilities } from '../../src/coding/files.js'
+import type { CapabilityContext } from '../../src/contracts.js'
 import { callCapability, makeContext, textOf } from './helpers.js'
 
 const tempDirs: string[] = []
@@ -47,6 +48,38 @@ describe('file capability stop reason', () => {
       expect(await readFile(file, 'utf8')).toBe('before\n')
     },
   )
+})
+
+describe('file capability exit confirmation', () => {
+  it('confirms exactly once on success and preflight rejection', async () => {
+    // 文件能力没有遗留 worker：成功与返回前的失败都已在调用返回时结束本次范围。
+    const dir = await tempDir()
+    const file = join(dir, 'confirm.txt')
+    let count = 0
+    const context = (): CapabilityContext => ({
+      ...makeContext(dir),
+      confirmExecutionExit: () => {
+        count += 1
+      },
+    })
+
+    const readResult = await callCapability(read, 'fs.read', { path: 'relative.txt' }, context())
+    expect(readResult.error).toBe(true)
+    expect(count).toBe(1)
+
+    const written = await callCapability(write, 'fs.write', { path: file, content: 'after\n' }, context())
+    expect(written.error).toBe(false)
+    expect(count).toBe(2)
+
+    const edited = await callCapability(
+      edit,
+      'fs.edit',
+      { path: file, old_string: 'missing', new_string: 'x' },
+      context(),
+    )
+    expect(edited.error).toBe(true)
+    expect(count).toBe(3)
+  })
 })
 
 describe('fs.read', () => {
