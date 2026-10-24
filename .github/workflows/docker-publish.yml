@@ -161,6 +161,9 @@ jobs:
       - name: Install daemon dependencies
         # 仓库脚本 fixture 使用真实 daemon 依赖（含 tar 解析器）与真实 Node 入口。
         run: npm --prefix daemon ci
+      - name: Build daemon transport for Java integration tests
+        # Web 反向流测试启动真实 Node 进程，必须先生成同一提交的 daemon/dist。
+        run: npm --prefix daemon run build
       - name: Run repository script tests
         run: |
           set -euo pipefail
@@ -181,7 +184,6 @@ jobs:
         # decoder，两端对共享 fixture 的接受/拒绝集合不一致即阻断发布。
         run: |
           set -euo pipefail
-          npm --prefix daemon run build
           node scripts/daemon/verify-java-update-commands.mjs harness/environment/target/daemon-update-java-commands.json
       - name: Verify the current startup Fat JAR and legacy rejection
         # 全量 verify 后用真实 java -jar 验证当前空库启动、HTTP 读取与旧库拒绝。
