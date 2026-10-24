@@ -14,6 +14,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
@@ -149,6 +150,25 @@ class GeminiStreamAccumulatorTest {
     assertEquals(ProviderReplayFormat.GEMINI_CONTENT, completion.replayState().format());
   }
 
+  /** 测试意图：缓存关系不一致（breakdown）与输出计数溢出（overflow）在 finish() 判定并抛出 INVALID_RESPONSE。 */
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "{\"promptTokenCount\":1,\"candidatesTokenCount\":0,\"cachedContentTokenCount\":2}",
+        "{\"promptTokenCount\":0,\"candidatesTokenCount\":9223372036854775807,\"thoughtsTokenCount\":1}"
+      })
+  void rejectsInconsistentOrOverflowingUsage(String usage) {
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
+    accumulator.handleEvent(
+        "message",
+        "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"done\"}]},\"finishReason\":\"STOP\"}],"
+            + "\"usageMetadata\":"
+            + usage
+            + "}");
+    ProviderException error = assertThrows(ProviderException.class, accumulator::finish);
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind());
+  }
+
   /** 测试意图：多 part 帧按各自 slot 保持边界，不能把 index 1 追加到 index 0。 */
   @Test
   void multiPartFramesKeepIndependentSlots() throws Exception {
@@ -161,7 +181,8 @@ class GeminiStreamAccumulatorTest {
     accumulator.handleEvent(
         "message",
         """
-        {"candidates":[{"content":{"role":"model","parts":[{"text":"AC"},{"text":"BD"}]},"finishReason":"STOP"}]}
+        {"candidates":[{"content":{"role":"model","parts":[{"text":"AC"},{"text":"BD"}]},"finishReason":"STOP"}],
+         "usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5,"totalTokenCount":15}}
         """);
     ProviderCompletion completion = accumulator.finish();
     assertEquals("ACBD", completion.response().text());
@@ -224,7 +245,12 @@ class GeminiStreamAccumulatorTest {
           "candidates": [{
             "content": { "role": "model", "parts": [{ "text": "Hello world!" }] },
             "finishReason": "STOP"
-          }]
+          }],
+          "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15
+          }
         }
         """;
 
@@ -268,7 +294,12 @@ class GeminiStreamAccumulatorTest {
               "parts": [{ "text": "Final answer." }]
             },
             "finishReason": "STOP"
-          }]
+          }],
+          "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15
+          }
         }
         """;
 
@@ -316,7 +347,12 @@ class GeminiStreamAccumulatorTest {
               ]
             },
             "finishReason": "STOP"
-          }]
+          }],
+          "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15
+          }
         }
         """;
 
@@ -353,7 +389,12 @@ class GeminiStreamAccumulatorTest {
           "candidates": [{
             "content": { "role": "model", "parts": [{ "text": "Partial text..." }] },
             "finishReason": "MAX_TOKENS"
-          }]
+          }],
+          "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15
+          }
         }
         """;
 
@@ -375,7 +416,12 @@ class GeminiStreamAccumulatorTest {
           "candidates": [{
             "content": { "role": "model", "parts": [{ "text": "Unsafe..." }] },
             "finishReason": "SAFETY"
-          }]
+          }],
+          "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15
+          }
         }
         """;
 
@@ -404,7 +450,12 @@ class GeminiStreamAccumulatorTest {
               { "functionCall": { "name": "do_something", "args": { "k": "v" } } }
             ] },
             "finishReason": "ESCALATION"
-          }]
+          }],
+          "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15
+          }
         }
         """;
 
@@ -426,6 +477,11 @@ class GeminiStreamAccumulatorTest {
         {
           "promptFeedback": {
             "blockReason": "SAFETY"
+          },
+          "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 0,
+            "totalTokenCount": 10
           }
         }
         """;
@@ -495,7 +551,8 @@ class GeminiStreamAccumulatorTest {
     accumulator.handleEvent(
         "message",
         """
-        {"candidates":[{"content":{"parts":[{"text":"world!"}]},"finishReason":"STOP"}]}
+        {"candidates":[{"content":{"parts":[{"text":"world!"}]},"finishReason":"STOP"}],
+         "usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5,"totalTokenCount":15}}
         """);
     ProviderCompletion completion = accumulator.finish();
     assertEquals(GenerationStopReason.COMPLETE, completion.response().stopReason());
@@ -522,7 +579,8 @@ class GeminiStreamAccumulatorTest {
         "message",
         """
         {"candidates":[{"content":{"parts":[{"text":"partial"}]},
-        "finishReason":"%s"}]}
+        "finishReason":"%s"}],
+        "usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5,"totalTokenCount":15}}
         """
             .formatted(finishReason));
     assertEquals(List.of(new ProviderStreamEvent.TextDelta("partial")), emittedEvents);
@@ -581,7 +639,8 @@ class GeminiStreamAccumulatorTest {
   void retainsLatestLargeUsageSnapshot() throws Exception {
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
     accumulator.handleEvent(
-        "message", "{\"usageMetadata\":{\"promptTokenCount\":1,\"serviceTier\":\"old\"}}");
+        "message",
+        "{\"usageMetadata\":{\"promptTokenCount\":1,\"candidatesTokenCount\":1,\"serviceTier\":\"old\"}}");
     String latest =
         """
         {"promptTokenCount":4000000000,"cachedContentTokenCount":3000000000,
@@ -629,13 +688,17 @@ class GeminiStreamAccumulatorTest {
       for (String value : malformed) {
         GeminiStreamAccumulator accumulator =
             new GeminiStreamAccumulator(request, descriptor, bridge);
-        ProviderException error =
-            assertThrows(
-                ProviderException.class,
-                () ->
-                    accumulator.handleEvent(
-                        "message", "{\"usageMetadata\":{\"" + field + "\":" + value + "}}"));
-        assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind(), field + ":" + value);
+        String payload = "{\"usageMetadata\":{\"" + field + "\":" + value + "}}";
+        if ("null".equals(value)) {
+          accumulator.handleEvent("message", payload);
+          ProviderException error = assertThrows(ProviderException.class, accumulator::finish);
+          assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind(), field + ":" + value);
+        } else {
+          ProviderException error =
+              assertThrows(
+                  ProviderException.class, () -> accumulator.handleEvent("message", payload));
+          assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind(), field + ":" + value);
+        }
       }
     }
     for (String value : List.of("null", "\"  \"", "7", "false", "{}")) {
@@ -651,15 +714,16 @@ class GeminiStreamAccumulatorTest {
     }
   }
 
-  /** 测试意图：usageMetadata 缺失计数时归零，cached 超过 prompt 时普通输入归零，未出现 tier 不继承旧值。 */
+  /** 测试意图：可选计数缺失时保留未知语义，未出现 tier 不继承旧值。 */
   @Test
-  void defaultsMissingUsageFieldsAndClampsCachedInput() throws Exception {
+  void doesNotInheritOptionalUsageFields() throws Exception {
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
     accumulator.handleEvent(
-        "message", "{\"usageMetadata\":{\"serviceTier\":\"old\",\"promptTokenCount\":10}}");
+        "message",
+        "{\"usageMetadata\":{\"serviceTier\":\"old\",\"promptTokenCount\":10,\"candidatesTokenCount\":5}}");
     accumulator.handleEvent(
         "message",
-        "{\"usageMetadata\":{\"cachedContentTokenCount\":3},"
+        "{\"usageMetadata\":{\"promptTokenCount\":3,\"candidatesTokenCount\":0,\"cachedContentTokenCount\":3},"
             + "\"candidates\":[{\"finishReason\":\"STOP\"}]}");
     ProviderResponse response = accumulator.finish().response();
     assertEquals(0L, response.usage().inputTokens());
@@ -669,7 +733,8 @@ class GeminiStreamAccumulatorTest {
     assertNull(response.usage().providerTotalTokens());
     assertNull(response.serviceTier());
     assertEquals(
-        MAPPER.readTree("{\"cachedContentTokenCount\":3}"),
+        MAPPER.readTree(
+            "{\"promptTokenCount\":3,\"candidatesTokenCount\":0,\"cachedContentTokenCount\":3}"),
         MAPPER.readTree(response.rawUsageJson()));
   }
 
@@ -693,7 +758,12 @@ class GeminiStreamAccumulatorTest {
               }]
             },
             "finishReason": "STOP"
-          }]
+          }],
+          "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15
+          }
         }
         """;
 
@@ -838,7 +908,12 @@ class GeminiStreamAccumulatorTest {
               }]
             },
             "finishReason": "STOP"
-          }]
+          }],
+          "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15
+          }
         }
         """;
     validNullIdAcc.handleEvent("message", validNullIdChunk);
@@ -890,7 +965,12 @@ class GeminiStreamAccumulatorTest {
               ]
             },
             "finishReason": "STOP"
-          }]
+          }],
+          "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15
+          }
         }
         """);
 
@@ -951,7 +1031,12 @@ class GeminiStreamAccumulatorTest {
         "message",
         """
         {"candidates": [{"content": {"role": "model", "parts": [{"text": "!"}]},
-          "finishReason": "STOP"}]}
+          "finishReason": "STOP"}],
+         "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15
+         }}
         """);
 
     ProviderCompletion completion = accumulator.finish();
@@ -1006,7 +1091,12 @@ class GeminiStreamAccumulatorTest {
           { "inlineData": { "mimeType": "image/png", "data": "QQ==" } },
           { "toolResponse": { "name": "lookup", "response": { "k": "v" } } },
           { "functionCall": { "id": "c1", "name": "fn", "args": { "k": 1 } } }
-        ]}, "finishReason": "STOP"}]}
+        ]}, "finishReason": "STOP"}],
+         "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15
+         }}
         """);
 
     ProviderCompletion completion = accumulator.finish();
@@ -1037,7 +1127,12 @@ class GeminiStreamAccumulatorTest {
         """
         {"candidates": [{"content": {"role": "model", "parts": [
           { "text": "partial ", "functionCall": { "id": "c1", "name": "fn", "args": { "k": 1 } } }
-        ]}, "finishReason": "STOP"}]}
+        ]}, "finishReason": "STOP"}],
+         "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15
+         }}
         """);
 
     ProviderCompletion completion = accumulator.finish();
@@ -1089,7 +1184,12 @@ class GeminiStreamAccumulatorTest {
         {"candidates": [{"content": {"role": "model", "parts": [
           { "text": "answer", "thoughtSignature": "   " },
           { "text": null, "thoughtSignature": null, "inlineData": { "mimeType": "image/png", "data": "QQ==" } }
-        ]}, "finishReason": "STOP"}]}
+        ]}, "finishReason": "STOP"}],
+         "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15
+         }}
         """);
     ProviderCompletion completion = valuelessKnownFieldAccumulator.finish();
 
@@ -1135,7 +1235,12 @@ class GeminiStreamAccumulatorTest {
               { "inlineData": { "mimeType": "image/jpeg", "data": "AA==" } }
             ] },
             "finishReason": "STOP"
-          }]
+          }],
+          "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15
+          }
         }
         """);
 
@@ -1166,7 +1271,12 @@ class GeminiStreamAccumulatorTest {
               "futurePartField": { "trace": "t-1" }
             }] },
             "finishReason": "STOP"
-          }]
+          }],
+          "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15
+          }
         }
         """);
 
@@ -1175,5 +1285,325 @@ class GeminiStreamAccumulatorTest {
     assertEquals("c1", part.path("functionCall").path("id").asString(""));
     assertEquals(1, part.path("functionCall").path("args").path("k").asInt(0));
     assertEquals("t-1", part.path("futurePartField").path("trace").asString(""));
+  }
+
+  @Test
+  void missingUsageMetadataThrowsInvalidResponseOnFinish() {
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
+    accumulator.handleEvent(
+        "message",
+        """
+        {"candidates":[{"content":{"parts":[{"text":"Done"}]},"finishReason":"STOP"}]}
+        """);
+    ProviderException ex = assertThrows(ProviderException.class, accumulator::finish);
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
+    assertTrue(ex.getMessage().contains("missing complete usage"));
+  }
+
+  /** proto3 普通 int32 的零值可省略：最终 usage 对象存在但缺 candidates 时解释为零，原始 JSON 不补字段。 */
+  @Test
+  void omittedCandidatesAreZeroForThinkingExhaustedMaxTokens() throws Exception {
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
+    String usage = "{\"promptTokenCount\":12,\"thoughtsTokenCount\":8,\"totalTokenCount\":20}";
+    accumulator.handleEvent(
+        "message",
+        "{\"candidates\":[{\"finishReason\":\"MAX_TOKENS\"}],\"usageMetadata\":" + usage + "}");
+    ProviderResponse response = accumulator.finish().response();
+    assertEquals(GenerationStopReason.LENGTH, response.stopReason());
+    assertEquals(12L, response.usage().inputTokens());
+    assertEquals(8L, response.usage().outputTokens());
+    assertEquals(8L, response.usage().reasoningTokens());
+    assertEquals(20L, response.usage().providerTotalTokens());
+    assertEquals(MAPPER.readTree(usage), MAPPER.readTree(response.rawUsageJson()));
+  }
+
+  /** promptFeedback 阻断且 usage 省略 candidates/cache 时，按 proto3 零值完成，不要求显式字段。 */
+  @Test
+  void omittedCandidatesAreZeroWhenPromptIsBlocked() {
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
+    accumulator.handleEvent(
+        "message",
+        "{\"promptFeedback\":{\"blockReason\":\"SAFETY\"},\"usageMetadata\":{\"promptTokenCount\":9}}");
+    ProviderResponse response = accumulator.finish().response();
+    assertEquals(GenerationStopReason.FILTERED, response.stopReason());
+    assertEquals(9L, response.usage().inputTokens());
+    assertEquals(0L, response.usage().outputTokens());
+    assertEquals(0L, response.usage().cacheReadTokens());
+    assertNull(response.usage().reasoningTokens());
+    assertNull(response.usage().providerTotalTokens());
+  }
+
+  /** 显式零与省略零的计费结果相同，但原始 JSON 必须保留显式零，不能互相改写。 */
+  @Test
+  void explicitZeroRemainsDistinctInRawUsage() throws Exception {
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
+    String usage =
+        "{\"promptTokenCount\":0,\"candidatesTokenCount\":0,\"cachedContentTokenCount\":0}";
+    accumulator.handleEvent(
+        "message",
+        "{\"candidates\":[{\"finishReason\":\"STOP\"}],\"usageMetadata\":" + usage + "}");
+    ProviderResponse response = accumulator.finish().response();
+    assertEquals(0L, response.usage().inputTokens());
+    assertEquals(0L, response.usage().outputTokens());
+    assertEquals(0L, response.usage().cacheReadTokens());
+    assertEquals(MAPPER.readTree(usage), MAPPER.readTree(response.rawUsageJson()));
+  }
+
+  /** prompt、candidates、cache 的显式 null 不是 proto3 省略，终态必须拒绝。 */
+  @ParameterizedTest
+  @ValueSource(strings = {"promptTokenCount", "candidatesTokenCount", "cachedContentTokenCount"})
+  void explicitNullProto3CountIsInvalid(String field) {
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
+    accumulator.handleEvent(
+        "message",
+        "{\"candidates\":[{\"finishReason\":\"STOP\"}],\"usageMetadata\":{\""
+            + field
+            + "\":null}}");
+    ProviderException error = assertThrows(ProviderException.class, accumulator::finish);
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind());
+  }
+
+  @Test
+  void realZeroTokensCompletesSuccessfully() {
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
+    accumulator.handleEvent(
+        "message",
+        """
+        {"candidates":[{"content":{"parts":[{"text":"Zero"}]},"finishReason":"STOP"}],
+         "usageMetadata":{"promptTokenCount":0,"candidatesTokenCount":0,"totalTokenCount":0}}
+        """);
+    ProviderCompletion completion = accumulator.finish();
+    assertEquals(0L, completion.response().usage().inputTokens());
+    assertEquals(0L, completion.response().usage().outputTokens());
+    assertEquals(0L, completion.response().usage().providerTotalTokens());
+  }
+
+  @Test
+  void nullableTotalAndThoughtsTokenCount() {
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
+    accumulator.handleEvent(
+        "message",
+        """
+        {"candidates":[{"content":{"parts":[{"text":"Result"}]},"finishReason":"STOP"}],
+         "usageMetadata":{"promptTokenCount":30,"candidatesTokenCount":20,"thoughtsTokenCount":8}}
+        """);
+    ProviderCompletion completion = accumulator.finish();
+    assertEquals(30L, completion.response().usage().inputTokens());
+    assertEquals(
+        28L, completion.response().usage().outputTokens(), "candidates 20 + thoughts 8 = 28");
+    assertEquals(8L, completion.response().usage().reasoningTokens());
+    assertNull(completion.response().usage().providerTotalTokens());
+  }
+
+  /**
+   * 测试意图：中间帧 usage 只有 promptTokenCount（模型生成中尚未产出 output 计数）， 主代码在 handleEvent 阶段不提前报错，最终帧给出完整 usage
+   * 后 finish() 成功完成。
+   */
+  @Test
+  void intermediateUsageWithOnlyPromptSucceedsWhenFinalUsageIsComplete() {
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
+    accumulator.handleEvent(
+        "message",
+        """
+        {
+          "candidates": [{
+            "content": { "role": "model", "parts": [{ "text": "Hello " }] }
+          }],
+          "usageMetadata": {
+            "promptTokenCount": 10
+          }
+        }
+        """);
+    accumulator.handleEvent(
+        "message",
+        """
+        {
+          "candidates": [{
+            "content": { "role": "model", "parts": [{ "text": "world!" }] },
+            "finishReason": "STOP"
+          }],
+          "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15
+          }
+        }
+        """);
+
+    ProviderCompletion completion = accumulator.finish();
+    assertNotNull(completion);
+    assertEquals("Hello world!", completion.response().text());
+    ModelUsage usage = completion.response().usage();
+    assertNotNull(usage);
+    assertEquals(10L, usage.inputTokens());
+    assertEquals(5L, usage.outputTokens());
+    assertEquals(15L, usage.providerTotalTokens());
+  }
+
+  /** 最新快照独立解释：前帧有 candidates 不能填补最终省略值；最终省略按 proto3 为零，原始 JSON 仍只含最终字段。 */
+  @Test
+  void finalOmittedCandidatesDoNotInheritPreviousFrame() throws Exception {
+    // 场景 A：前帧有 candidatesTokenCount，最终帧缺少 candidatesTokenCount
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
+    accumulator.handleEvent(
+        "message",
+        """
+        {
+          "candidates": [{
+            "content": { "role": "model", "parts": [{ "text": "chunk1" }] }
+          }],
+          "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5
+          }
+        }
+        """);
+    accumulator.handleEvent(
+        "message",
+        """
+        {
+          "candidates": [{
+            "content": { "role": "model", "parts": [{ "text": "chunk2" }] },
+            "finishReason": "STOP"
+          }],
+          "usageMetadata": {
+            "promptTokenCount": 12
+          }
+        }
+        """);
+
+    ProviderResponse response = accumulator.finish().response();
+    assertEquals(12L, response.usage().inputTokens());
+    assertEquals(0L, response.usage().outputTokens());
+    assertFalse(MAPPER.readTree(response.rawUsageJson()).has("candidatesTokenCount"));
+
+    // 场景 B：前帧有 promptTokenCount，最终帧缺少 promptTokenCount
+    GeminiStreamAccumulator accumulator2 = new GeminiStreamAccumulator(request, descriptor, bridge);
+    accumulator2.handleEvent(
+        "message",
+        """
+        {
+          "candidates": [{
+            "content": { "role": "model", "parts": [{ "text": "chunk1" }] }
+          }],
+          "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5
+          }
+        }
+        """);
+    accumulator2.handleEvent(
+        "message",
+        """
+        {
+          "candidates": [{
+            "content": { "role": "model", "parts": [{ "text": "chunk2" }] },
+            "finishReason": "STOP"
+          }],
+          "usageMetadata": {
+            "candidatesTokenCount": 8
+          }
+        }
+        """);
+
+    ProviderResponse response2 = accumulator2.finish().response();
+    assertEquals(0L, response2.usage().inputTokens());
+    assertEquals(8L, response2.usage().outputTokens());
+    assertFalse(MAPPER.readTree(response2.rawUsageJson()).has("promptTokenCount"));
+  }
+
+  /**
+   * 测试意图：即使 usageMetadata 仅包含部分字段（非完整 mandatory usage）， 只要显式给出的字段值是非法数字（负数、浮点、非数字字符串、超出 long 范围等），
+   * 必须在 handleEvent 阶段立即拒绝，不推迟到 finish()。
+   */
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "{\"promptTokenCount\": -1}",
+        "{\"promptTokenCount\": 1.5}",
+        "{\"promptTokenCount\": \"bad\"}",
+        "{\"promptTokenCount\": 9223372036854775808}",
+        "{\"candidatesTokenCount\": -5}",
+        "{\"candidatesTokenCount\": 3.14}",
+        "{\"candidatesTokenCount\": \"invalid\"}",
+        "{\"cachedContentTokenCount\": -1}",
+        "{\"thoughtsTokenCount\": -1}",
+        "{\"totalTokenCount\": -1}"
+      })
+  void partialUsageWithExplicitInvalidNumberRejectedImmediately(String partialUsage) {
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
+    ProviderException ex =
+        assertThrows(
+            ProviderException.class,
+            () -> accumulator.handleEvent("message", "{\"usageMetadata\":" + partialUsage + "}"));
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
+  }
+
+  /**
+   * 测试意图：最终 usageMetadata 快照中的未知扩展字段（如嵌套对象、自定义数组、布尔与数字标记等） 必须原样保真保留在 rawUsageJson 中，不得被白名单过滤或丢失。
+   */
+  @Test
+  void rawUsageFinalSnapshotPreservesUnknownFields() throws Exception {
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
+    String finalUsageJson =
+        """
+        {
+          "promptTokenCount": 20,
+          "candidatesTokenCount": 10,
+          "totalTokenCount": 30,
+          "customBillingInfo": {
+            "accountId": "acc-12345",
+            "tierDetails": ["fast", "extra"]
+          },
+          "experimentalFeatureEnabled": true,
+          "unknownMetric": 999
+        }
+        """;
+    accumulator.handleEvent(
+        "message",
+        "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hello\"}]},\"finishReason\":\"STOP\"}],"
+            + "\"usageMetadata\":"
+            + finalUsageJson
+            + "}");
+
+    ProviderCompletion completion = accumulator.finish();
+    String rawJson = completion.response().rawUsageJson();
+    assertNotNull(rawJson);
+    JsonNode expected = MAPPER.readTree(finalUsageJson);
+    JsonNode actual = MAPPER.readTree(rawJson);
+    assertEquals(expected, actual);
+    assertTrue(actual.has("customBillingInfo"));
+    assertEquals("acc-12345", actual.path("customBillingInfo").path("accountId").asString(""));
+    assertTrue(actual.path("experimentalFeatureEnabled").asBoolean(false));
+    assertEquals(999, actual.path("unknownMetric").asInt(0));
+  }
+
+  /** 2026-10-24 Gemini 代表的真实 usage 数字；候选外壳是合成的，不是完整原始响应。 */
+  @Test
+  void geminiObservedFinalSnapshotReplacesEarlierUsage() throws Exception {
+    JsonNode fixture =
+        MAPPER.readTree(
+            GeminiStreamAccumulatorTest.class.getResourceAsStream("gemini-usage-2026-10-24.json"));
+    GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
+    accumulator.handleEvent(
+        "message", syntheticGeminiFrame(fixture.path("first"), null).toString());
+    accumulator.handleEvent(
+        "message", syntheticGeminiFrame(fixture.path("last"), "STOP").toString());
+    ProviderResponse response = accumulator.finish().response();
+    assertEquals(143L, response.usage().inputTokens());
+    assertEquals(111L, response.usage().outputTokens());
+    assertEquals(110L, response.usage().reasoningTokens());
+    assertEquals(254L, response.usage().providerTotalTokens());
+    assertEquals(fixture.path("last"), MAPPER.readTree(response.rawUsageJson()));
+  }
+
+  private static ObjectNode syntheticGeminiFrame(JsonNode usage, String finishReason) {
+    ObjectNode frame = MAPPER.createObjectNode();
+    ObjectNode candidate = frame.putArray("candidates").addObject();
+    if (finishReason != null) {
+      candidate.put("finishReason", finishReason);
+    }
+    frame.set("usageMetadata", usage);
+    return frame;
   }
 }

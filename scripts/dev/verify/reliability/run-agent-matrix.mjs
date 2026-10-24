@@ -120,7 +120,9 @@ export async function main(argv = process.argv.slice(2)) {
         daemonEnv: args.daemonEnv,
       })
       results.push(result)
-      incurredCost += result.metrics.costTotal
+      if (result.metrics?.costTotal != null) {
+        incurredCost += result.metrics.costTotal
+      }
       if (result.turnStarted && !result.costKnown) costAccountingBlocked = true
       writeCaseResult(runDir, result)
     }
@@ -158,8 +160,10 @@ export async function main(argv = process.argv.slice(2)) {
   })
   publishLatest(args.reportRoot, runDir, runId)
   console.log(`Agent reliability report: ${path.join(runDir, 'report.md')}`)
+  const costUsdText =
+    summary.usage.costTotal != null ? summary.usage.costTotal.toFixed(6) : 'unknown'
   console.log(
-    `Result: ${summary.status.toUpperCase()} pass=${summary.totals.pass} fail=${summary.totals.fail} skip=${summary.totals.skip} costUsd=${summary.usage.costTotal.toFixed(6)}`,
+    `Result: ${summary.status.toUpperCase()} pass=${summary.totals.pass} fail=${summary.totals.fail} skip=${summary.totals.skip} costUsd=${costUsdText}`,
   )
   return summary.status === 'pass' ? 0 : 1
 }

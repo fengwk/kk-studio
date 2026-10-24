@@ -163,7 +163,8 @@ export function writeSummaryAndReport({
     `- Models: ${MODELS.map((model) => `\`${model.ref}\``).join(', ')}; variant \`${VARIANT}\``,
   )
   lines.push(`- Model-visible tool names: \`${TOOL_NAMES.join(', ')}\``)
-  lines.push(`- Cost cap: USD ${formatCost(args.maxCostUsd)}; incurred: USD ${formatCost(usage.costTotal)}`)
+  const incurredCostText = usage.costTotal != null ? `USD ${formatCost(usage.costTotal)}` : 'unknown'
+  lines.push(`- Cost cap: USD ${formatCost(args.maxCostUsd)}; incurred: ${incurredCostText}`)
   lines.push(
     `- Totals: pass=${totals.pass} fail=${totals.fail} skip=${totals.skip} realTurns=${totals.realTurns}/${selectedCases.length} unknownCostCases=${totals.unknownCostCases}`,
   )
@@ -204,17 +205,20 @@ export function writeSummaryAndReport({
           .join(', ')}; order: ${result.toolOrder.join(' → ')}`
       : '-'
     const tokens =
-      `${metrics.inputTokens}/${metrics.outputTokens}/`
-      + `${metrics.cacheReadTokens}/${metrics.cacheWriteTokens + metrics.cacheWriteLongTokens}/`
-      + `${metrics.reasoningTokens}${result.costKnown ? '' : ' (cost unknown)'}`
+      `${metrics.inputTokens ?? '-'}/${metrics.outputTokens ?? '-'}/`
+      + `${metrics.cacheReadTokens ?? '-'}/${metrics.cacheWriteTokens ?? '-'}/`
+      + `${metrics.reasoningTokens ?? '-'}${result.costKnown ? '' : ' (cost unknown)'}`
     const tests = result.tests
       ? `pre=${result.tests.precheck ?? '-'}, post=${result.tests.postcheck ?? '-'}, diff=${result.tests.diffCheck ?? '-'}`
       : '-'
     const failure = result.failureCategory
       ? `${result.failureCategory}: ${summarizeString(result.error ?? '', 160)}`
       : '-'
+    const costText = result.costKnown && metrics.costTotal != null
+      ? `$${formatCost(metrics.costTotal)}`
+      : 'unknown'
     lines.push(
-      `| ${result.status.toUpperCase()} | \`${result.id}\` | \`${result.model}\` | ${result.anchor} | ${result.taskClass} | ${escapeCell(tools)} | ${tokens} | $${formatCost(metrics.costTotal)} | ${escapeCell(tests)} | ${escapeCell(failure)} |`,
+      `| ${result.status.toUpperCase()} | \`${result.id}\` | \`${result.model}\` | ${result.anchor} | ${result.taskClass} | ${escapeCell(tools)} | ${tokens} | ${costText} | ${escapeCell(tests)} | ${escapeCell(failure)} |`,
     )
   }
   lines.push('')
@@ -224,8 +228,9 @@ export function writeSummaryAndReport({
   lines.push('| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |')
   for (const model of MODELS.map((candidate) => candidate.ref)) {
     const metrics = modelUsage[model] ?? aggregateUsage([])
+    const costText = metrics.costTotal != null ? `$${formatCost(metrics.costTotal)}` : 'unknown'
     lines.push(
-      `| \`${model}\` | ${metrics.assistantMessages} | ${metrics.inputTokens} | ${metrics.outputTokens} | ${metrics.cacheReadTokens} | ${metrics.cacheWriteTokens + metrics.cacheWriteLongTokens} | ${metrics.reasoningTokens} | $${formatCost(metrics.costTotal)} |`,
+      `| \`${model}\` | ${metrics.assistantMessages} | ${metrics.inputTokens ?? '-'} | ${metrics.outputTokens ?? '-'} | ${metrics.cacheReadTokens ?? '-'} | ${metrics.cacheWriteTokens ?? '-'} | ${metrics.reasoningTokens ?? '-'} | ${costText} |`,
     )
   }
   lines.push('')
@@ -286,7 +291,8 @@ function sanitizeString(value) {
 }
 
 function formatCost(value) {
-  return Number(value ?? 0).toFixed(6)
+  if (value == null) return 'unknown'
+  return Number(value).toFixed(6)
 }
 
 function escapeCell(value) {

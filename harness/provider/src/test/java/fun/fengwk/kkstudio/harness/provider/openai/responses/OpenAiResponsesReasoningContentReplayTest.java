@@ -224,6 +224,7 @@ class OpenAiResponsesReasoningContentReplayTest {
       }
       ObjectNode terminal = MAPPER.createObjectNode().put("type", "response.completed");
       ObjectNode response = terminal.putObject("response");
+      response.putObject("usage").put("input_tokens", 10).put("output_tokens", 5);
       if (explicitOutput) {
         response.set("output", output);
       }

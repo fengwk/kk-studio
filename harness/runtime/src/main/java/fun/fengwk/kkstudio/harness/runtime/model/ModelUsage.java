@@ -32,11 +32,6 @@ public record ModelUsage(
     providerTotalTokens = optionalNonNegative(providerTotalTokens, "providerTotalTokens");
   }
 
-  /** 返回 Provider 报告的总 token；未报告时为 0，仅用于兼容既有展示字段。 */
-  public long totalTokens() {
-    return providerTotalTokens == null ? 0L : providerTotalTokens;
-  }
-
   /** 返回归一化后互斥的 token 总量（output 已包含 reasoning，不重复相加）。 */
   public long categorizedTokens() {
     long sum = inputTokens;

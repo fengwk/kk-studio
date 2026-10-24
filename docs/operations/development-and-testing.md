@@ -461,7 +461,7 @@ Gemini implicit cache 是机会性能力，零缓存不会导致失败：**Gemin
 通过，不代表缓存命中**。
 
 报告中的 `real-text-cache-*.json` 使用统一 `rounds`，每轮 `ordinal` 从首轮 1 开始，记录 usage
-七字段及单请求 `cacheReadRatio=cacheReadTokens/(inputTokens+cacheReadTokens+cacheWriteTokens+cacheWriteLongTokens)`。
+七字段及单请求 `cacheReadRatio=cacheReadTokens/(inputTokens+cacheReadTokens+cacheWriteTokens)`。
 `modelRequestCount` 是已完成观测数，不是底层 transport retries 计数；`cachePolicy` 为 Google
 `observed`、其他 `required`，`cacheOutcome` 按 follow-up 观测记录 `HIT` / `NOT_OBSERVED`，
 尚无后续观测时为 `NOT_EVALUATED`。它与 case PASS/FAIL 独立。每轮成功观测立即写入白名单 artifact，

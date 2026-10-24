@@ -157,6 +157,11 @@ final class AnthropicStreamAccumulator {
 
   /** 在流传输自然结束或接收到完整报文后触发完成组装。 */
   ProviderCompletion finish() {
+    if (!rawUsage.has("input_tokens") || !rawUsage.has("output_tokens")) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE,
+          "missing complete usage: Anthropic Messages model " + request.model().modelId());
+    }
     if (!started || !stopped) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_RESPONSE,
@@ -358,6 +363,22 @@ final class AnthropicStreamAccumulator {
       cacheWriteByTtl.put(3600L, cacheCreation1h);
     }
 
+    Long reasoningTokens = null;
+    JsonNode outputDetails = rawUsage.get("output_tokens_details");
+    if (outputDetails != null && !outputDetails.isNull()) {
+      if (!outputDetails.isObject()) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_RESPONSE, "output_tokens_details must be an object");
+      }
+      JsonNode thinking = outputDetails.get("thinking_tokens");
+      if (thinking != null && !thinking.isNull()) {
+        reasoningTokens = parseNonNegativeLong(thinking, "thinking_tokens");
+        if (reasoningTokens > outputTokens) {
+          throw new ProviderException(
+              ProviderErrorKind.INVALID_RESPONSE, "thinking tokens exceed output tokens");
+        }
+      }
+    }
     ModelUsage usage =
         new ModelUsage(
             inputTokens,
@@ -365,7 +386,7 @@ final class AnthropicStreamAccumulator {
             cacheReadInputTokens,
             cacheCreationInputTokens,
             Map.copyOf(cacheWriteByTtl),
-            null,
+            reasoningTokens,
             null);
 
     ProviderResponse response =

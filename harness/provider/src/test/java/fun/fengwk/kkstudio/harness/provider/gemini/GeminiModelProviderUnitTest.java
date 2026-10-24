@@ -286,7 +286,7 @@ class GeminiModelProviderUnitTest {
             ScriptedSseTransport.events(
                 new ServerSentEvent(
                     "message",
-                    "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"hi back\"}]},\"finishReason\":\"STOP\"}]}")),
+                    "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"hi back\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":10,\"candidatesTokenCount\":5,\"totalTokenCount\":15}}")),
             descriptor,
             "k")
         .stream(request, recording);

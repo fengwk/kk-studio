@@ -1,0 +1,15 @@
+{
+  "source": "Stage2 bounded ledger 2026-10-24, google/gemini-3.8-flash round 2; usage numbers only",
+  "first": {
+    "promptTokenCount": 35,
+    "candidatesTokenCount": 1,
+    "totalTokenCount": 146,
+    "thoughtsTokenCount": 110
+  },
+  "last": {
+    "promptTokenCount": 143,
+    "candidatesTokenCount": 1,
+    "totalTokenCount": 254,
+    "thoughtsTokenCount": 110
+  }
+}

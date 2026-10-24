@@ -115,7 +115,12 @@ class GeminiThinkingTest {
               ]
             },
             "finishReason": "STOP"
-          }]
+          }],
+          "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15
+          }
         }
         """;
 
@@ -160,7 +165,12 @@ class GeminiThinkingTest {
               "parts": [{ "text": "42" }]
             },
             "finishReason": "STOP"
-          }]
+          }],
+          "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15
+          }
         }
         """;
 
@@ -197,7 +207,12 @@ class GeminiThinkingTest {
               ]
             },
             "finishReason": "STOP"
-          }]
+          }],
+          "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15
+          }
         }
         """;
 
@@ -249,7 +264,12 @@ class GeminiThinkingTest {
               { "text": "answer" }
             ] },
             "finishReason": "STOP"
-          }]
+          }],
+          "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15
+          }
         }
         """);
 
@@ -305,7 +325,12 @@ class GeminiThinkingTest {
               { "text": "answer" }
             ] },
             "finishReason": "STOP"
-          }]
+          }],
+          "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15
+          }
         }
         """);
 
@@ -349,7 +374,12 @@ class GeminiThinkingTest {
               { "text": "think more", "thought": true, "thoughtSignature": "sig_2" }
             ] },
             "finishReason": "STOP"
-          }]
+          }],
+          "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15
+          }
         }
         """);
 
@@ -383,7 +413,12 @@ class GeminiThinkingTest {
               { "inlineData": { "mimeType": "image/png", "data": "QQ==" } }
             ] },
             "finishReason": "STOP"
-          }]
+          }],
+          "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 5,
+            "totalTokenCount": 15
+          }
         }
         """);
 

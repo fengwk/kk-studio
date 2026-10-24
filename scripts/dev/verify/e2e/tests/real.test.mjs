@@ -477,32 +477,39 @@ test('resolveRealModel 与安全 resolver 校验 catalog 契约，失败时仅�
 
 test('assertProviderUsageAlgebra 按当前 ModelUsage 语义校验四大厂商代数，reasoning 计入 output 且不重复计数', () => {
   // 测试意图：验证当前 ModelUsage 中 outputTokens 已包含 reasoning，providerTotalTokens 只累加一次；
-  // Anthropic 不报告 reasoning/total 拆分时必须保留 null；TTL 拆分包仅解释 cacheWriteTokens，不额外计数。
+  // Anthropic 支持可选 thinking（reasoningTokens 非 null <= outputTokens）或缺省 null，total 必须保留 null；
+  // Gemini 原生 total 独立不强等式；TTL 拆分包仅解释 cacheWriteTokens，不额外计数。
 
-  // 1. Google Gemini：total = input + cacheRead + output（output 已含 reasoning）。
+  // 1. Google Gemini：output 已含 reasoning；不支持缓存写入；原生 totalTokenCount 独立（可能含 hosted 工具附加），不强等式约束。
   const validGemini = {
     inputTokens: 100,
     outputTokens: 60, // 含 reasoning 30
     cacheReadTokens: 50,
     cacheWriteTokens: 0,
     reasoningTokens: 30,
-    providerTotalTokens: 210, // 100 + 50 + 60，reasoning 不再重复累加
+    providerTotalTokens: 210, // 独立原生 total
   }
   assert.doesNotThrow(() => assertProviderUsageAlgebra(validGemini, 'google'))
   assert.doesNotThrow(() => assertAssistantUsage(validGemini, { providerType: 'google' }))
+  // 独立 total 回归：原生 totalTokenCount 独立于分类之和（例如附加 hosted 工具调用消耗或服务端开销）
+  assert.doesNotThrow(
+    () => assertProviderUsageAlgebra({ ...validGemini, providerTotalTokens: 240 }, 'google'),
+  )
+  assert.doesNotThrow(
+    () => assertProviderUsageAlgebra({ ...validGemini, providerTotalTokens: 209 }, 'google'),
+  )
+  assert.doesNotThrow(
+    () => assertProviderUsageAlgebra({ ...validGemini, providerTotalTokens: null }, 'google'),
+  )
   // 违规：Gemini 不支持 cacheWriteTokens
   assert.throws(
     () => assertProviderUsageAlgebra({ ...validGemini, cacheWriteTokens: 5 }, 'google'),
     /cacheWriteTokens must be 0/,
   )
-  // 违规：把 reasoning 再加一次或任意算术不平
+  // 违规：reasoningTokens 超出 outputTokens
   assert.throws(
-    () => assertProviderUsageAlgebra({ ...validGemini, providerTotalTokens: 240 }, 'google'),
-    /Gemini providerTotalTokens algebra mismatch/,
-  )
-  assert.throws(
-    () => assertProviderUsageAlgebra({ ...validGemini, providerTotalTokens: 209 }, 'google'),
-    /Gemini providerTotalTokens algebra mismatch/,
+    () => assertProviderUsageAlgebra({ ...validGemini, reasoningTokens: 61 }, 'google'),
+    /reasoningTokens must not exceed outputTokens/,
   )
 
   // 2. OpenAI Responses：total = input + cacheRead + cacheWrite + output。
@@ -530,7 +537,7 @@ test('assertProviderUsageAlgebra 按当前 ModelUsage 语义校验四大厂商�
     assertProviderUsageAlgebra({ ...validOpenAi, providerTotalTokens: null }, 'openai_responses'),
   )
 
-  // 3. Anthropic：reasoning 与 total 均不报告，必须为 null；TTL 拆分守恒。
+  // 3. Anthropic：outputTokens 包含 thinking（输出含 thinking 一次）；reasoningTokens 可选（未报告为 null，有 thinking 时非 null <= outputTokens）；total 未报告保持 null。
   const validAnthropic = {
     inputTokens: 100,
     outputTokens: 50,
@@ -542,14 +549,20 @@ test('assertProviderUsageAlgebra 按当前 ModelUsage 语义校验四大厂商�
   }
   assert.doesNotThrow(() => assertProviderUsageAlgebra(validAnthropic, 'anthropic'))
   assert.doesNotThrow(() => assertAssistantUsage(validAnthropic, { providerType: 'anthropic' }))
-  // 违规：Anthropic reasoning 不提供拆分，任何非 null 值均非法。
-  assert.throws(
+  // 回归：官方支持可选 output_tokens_details.thinking_tokens（输出含 thinking 一次，reasoningTokens 非 null 且 <= outputTokens）
+  assert.doesNotThrow(
     () => assertProviderUsageAlgebra({ ...validAnthropic, reasoningTokens: 0 }, 'anthropic'),
-    /Anthropic reasoningTokens must be null/,
   )
+  assert.doesNotThrow(
+    () => assertProviderUsageAlgebra({ ...validAnthropic, reasoningTokens: 20 }, 'anthropic'),
+  )
+  assert.doesNotThrow(
+    () => assertAssistantUsage({ ...validAnthropic, reasoningTokens: 20 }, { providerType: 'anthropic' }),
+  )
+  // 违规：reasoningTokens 超出 outputTokens
   assert.throws(
-    () => assertProviderUsageAlgebra({ ...validAnthropic, reasoningTokens: 5 }, 'anthropic'),
-    /Anthropic reasoningTokens must be null/,
+    () => assertProviderUsageAlgebra({ ...validAnthropic, reasoningTokens: 51 }, 'anthropic'),
+    /reasoningTokens must not exceed outputTokens/,
   )
   // 违规：Anthropic providerTotal 不报告，任何非 null 值均非法。
   assert.throws(
