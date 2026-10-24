@@ -19,164 +19,120 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 class ThreadRuntimeStatusTest {
 
   @Test
-  void mapsEveryValidContextToTheStablePublicStatus() {
-    // 覆盖所有合法 context 形状，锁定对外 status vocabulary。
+  void statusValuesAreExactlyTheThreePublicStates() {
+    // 测试意图：对外运行时状态只有 RUNNING / WAITING / IDLE 三态，与 executionControl 正交。
+    assertEquals(
+        Set.of(ThreadRuntimeStatus.RUNNING, ThreadRuntimeStatus.WAITING, ThreadRuntimeStatus.IDLE),
+        Set.of(ThreadRuntimeStatus.values()));
+  }
+
+  @Test
+  void mapsLocalContextsToRunningOrIdle() {
+    // 测试意图：验证本地 context 投影：仅 IdleOrHistorical 映射为 IDLE，其余本地活跃阶段统一为 RUNNING。
     assertEquals(
         ThreadRuntimeStatus.IDLE, ThreadRuntimeStatus.from(new ThreadContext.IdleOrHistorical()));
-    assertEquals(ThreadRuntimeStatus.CONTINUATION_DUE, ThreadRuntimeStatus.from(continuation()));
+    assertEquals(ThreadRuntimeStatus.RUNNING, ThreadRuntimeStatus.from(continuation()));
     assertEquals(
-        ThreadRuntimeStatus.MODEL_READY,
+        ThreadRuntimeStatus.RUNNING,
         ThreadRuntimeStatus.from(modelActive(ModelInvocationStatus.READY)));
     assertEquals(
-        ThreadRuntimeStatus.MODEL_RUNNING,
+        ThreadRuntimeStatus.RUNNING,
         ThreadRuntimeStatus.from(modelActive(ModelInvocationStatus.RUNNING)));
     assertEquals(
-        ThreadRuntimeStatus.APPLYING,
+        ThreadRuntimeStatus.RUNNING,
         ThreadRuntimeStatus.from(new ThreadContext.ModelTerminalPending(model())));
     assertEquals(
-        ThreadRuntimeStatus.APPLYING,
+        ThreadRuntimeStatus.RUNNING,
         ThreadRuntimeStatus.from(
             new ThreadContext.ToolTerminalPending(model(), assistant(), List.of(), List.of())));
     assertEquals(
-        ThreadRuntimeStatus.TOOL_WAITING_APPROVAL,
+        ThreadRuntimeStatus.RUNNING,
         ThreadRuntimeStatus.from(toolActive(ToolInvocationStatus.WAITING_APPROVAL)));
     assertEquals(
-        ThreadRuntimeStatus.TOOL_WAITING_INPUT,
+        ThreadRuntimeStatus.RUNNING,
         ThreadRuntimeStatus.from(toolActive(ToolInvocationStatus.WAITING_INPUT)));
     assertEquals(
-        ThreadRuntimeStatus.TOOL_RUNNING,
+        ThreadRuntimeStatus.RUNNING,
         ThreadRuntimeStatus.from(toolActive(ToolInvocationStatus.RUNNING)));
     assertEquals(
-        ThreadRuntimeStatus.TOOL_READY,
+        ThreadRuntimeStatus.RUNNING,
         ThreadRuntimeStatus.from(toolActive(ToolInvocationStatus.READY)));
   }
 
   @Test
-  void toolStatusUsesTheDocumentedBlockingPriority() {
-    // sibling 顺序不能改变 WAITING_APPROVAL > RUNNING > READY 的优先级。
-    assertEquals(
-        ThreadRuntimeStatus.TOOL_WAITING_APPROVAL,
-        ThreadRuntimeStatus.from(
-            toolActive(
-                ToolInvocationStatus.READY,
-                ToolInvocationStatus.RUNNING,
-                ToolInvocationStatus.WAITING_APPROVAL)));
-    assertEquals(
-        ThreadRuntimeStatus.TOOL_RUNNING,
-        ThreadRuntimeStatus.from(
-            toolActive(ToolInvocationStatus.READY, ToolInvocationStatus.RUNNING)));
-    // 审批优先于等待回答，等待回答优先于运行。
-    assertEquals(
-        ThreadRuntimeStatus.TOOL_WAITING_APPROVAL,
-        ThreadRuntimeStatus.from(
-            toolActive(
-                ToolInvocationStatus.RUNNING,
-                ToolInvocationStatus.WAITING_INPUT,
-                ToolInvocationStatus.WAITING_APPROVAL)));
-    assertEquals(
-        ThreadRuntimeStatus.TOOL_WAITING_INPUT,
-        ThreadRuntimeStatus.from(
-            toolActive(
-                ToolInvocationStatus.READY,
-                ToolInvocationStatus.RUNNING,
-                ToolInvocationStatus.WAITING_INPUT)));
-  }
-
-  @Test
-  void rejectsInvalidActiveContextsInsteadOfInventingAStatus() {
-    // terminal Model 与空/全 terminal Tool 列表必须由 classifier 产出 terminal-pending context。
-    for (ModelInvocationStatus status :
-        List.of(
-            ModelInvocationStatus.SUCCEEDED,
-            ModelInvocationStatus.FAILED,
-            ModelInvocationStatus.CANCELLED,
-            ModelInvocationStatus.UNKNOWN)) {
-      assertThrows(
-          IllegalStateException.class, () -> ThreadRuntimeStatus.from(modelActive(status)));
-    }
-    assertThrows(IllegalStateException.class, () -> ThreadRuntimeStatus.from(toolActive()));
-    assertThrows(
-        IllegalStateException.class,
-        () ->
-            ThreadRuntimeStatus.from(
-                toolActive(
-                    ToolInvocationStatus.SUCCEEDED,
-                    ToolInvocationStatus.FAILED,
-                    ToolInvocationStatus.CANCELLED,
-                    ToolInvocationStatus.UNKNOWN)));
+  void fromRejectsNullContext() {
+    // 测试意图：验证 null context fail-closed。
     assertThrows(NullPointerException.class, () -> ThreadRuntimeStatus.from(null));
   }
 
   @Test
-  void fromModelStatusMapsNonTerminalStatusesAndRejectsTerminal() {
-    // 测试意图：验证 fromModelStatus 正确映射 READY/RUNNING，并对终态和 null fail-closed。
-    assertEquals(
-        ThreadRuntimeStatus.MODEL_READY,
-        ThreadRuntimeStatus.fromModelStatus(ModelInvocationStatus.READY));
-    assertEquals(
-        ThreadRuntimeStatus.MODEL_RUNNING,
-        ThreadRuntimeStatus.fromModelStatus(ModelInvocationStatus.RUNNING));
-    for (ModelInvocationStatus status :
-        List.of(
-            ModelInvocationStatus.SUCCEEDED,
-            ModelInvocationStatus.FAILED,
-            ModelInvocationStatus.CANCELLED,
-            ModelInvocationStatus.UNKNOWN)) {
-      assertThrows(IllegalStateException.class, () -> ThreadRuntimeStatus.fromModelStatus(status));
-    }
-    assertThrows(NullPointerException.class, () -> ThreadRuntimeStatus.fromModelStatus(null));
-  }
+  void evaluatorEnforcesInvariantsAndEvaluatesStatesAccurately() {
+    ThreadContext idle = new ThreadContext.IdleOrHistorical();
+    ThreadContext active = continuation();
 
-  @Test
-  void fromToolSiblingsMapsByPriorityAndRejectsTerminalOrEmpty() {
-    // 测试意图：验证 fromToolSiblings 遵循 WAITING_APPROVAL > RUNNING > READY 优先级，且对全终态或空列表
-    // fail-closed。
-    assertEquals(
-        ThreadRuntimeStatus.TOOL_WAITING_APPROVAL,
-        ThreadRuntimeStatus.fromToolSiblings(
-            toolInvocations(
-                ToolInvocationStatus.READY,
-                ToolInvocationStatus.RUNNING,
-                ToolInvocationStatus.WAITING_APPROVAL)));
-    assertEquals(
-        ThreadRuntimeStatus.TOOL_RUNNING,
-        ThreadRuntimeStatus.fromToolSiblings(
-            toolInvocations(ToolInvocationStatus.READY, ToolInvocationStatus.RUNNING)));
-    assertEquals(
-        ThreadRuntimeStatus.TOOL_READY,
-        ThreadRuntimeStatus.fromToolSiblings(toolInvocations(ToolInvocationStatus.READY)));
+    // 1. 参数校验
     assertThrows(
-        IllegalStateException.class, () -> ThreadRuntimeStatus.fromToolSiblings(List.of()));
+        NullPointerException.class,
+        () -> ThreadActivityEvaluator.evaluate(null, idle, false, false, 0));
     assertThrows(
-        IllegalStateException.class,
+        NullPointerException.class,
         () ->
-            ThreadRuntimeStatus.fromToolSiblings(
-                toolInvocations(
-                    ToolInvocationStatus.SUCCEEDED,
-                    ToolInvocationStatus.FAILED,
-                    ToolInvocationStatus.CANCELLED,
-                    ToolInvocationStatus.UNKNOWN)));
-    assertThrows(NullPointerException.class, () -> ThreadRuntimeStatus.fromToolSiblings(null));
-  }
+            ThreadActivityEvaluator.evaluate(
+                ThreadExecutionControl.RUNNABLE, null, false, false, 0));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ThreadActivityEvaluator.evaluate(
+                ThreadExecutionControl.RUNNABLE, idle, false, false, -1));
+    assertThrows(
+        NullPointerException.class,
+        () -> ThreadActivityEvaluator.isQuiescent(null, false, false, 0));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> ThreadActivityEvaluator.isQuiescent(idle, false, false, -1));
 
-  @Test
-  void onlyIdleAndStoppedAreNotProcessing() {
-    // processing 是 status 的稳定派生；IDLE 与 STOPPED 为 false，其余（含 QUEUED 与各本地阶段）为 true。
-    for (ThreadRuntimeStatus status : ThreadRuntimeStatus.values()) {
-      if (status == ThreadRuntimeStatus.IDLE || status == ThreadRuntimeStatus.STOPPED) {
-        assertFalse(status.isProcessing(), status.name());
-      } else {
-        assertTrue(status.isProcessing(), status.name());
-      }
-    }
-    assertFalse(ThreadRuntimeStatus.IDLE.isProcessing());
-    assertFalse(ThreadRuntimeStatus.STOPPED.isProcessing());
-    assertTrue(ThreadRuntimeStatus.QUEUED.isProcessing());
+    // 2. 本地在途执行与 open compaction：始终 RUNNING
+    assertEquals(
+        ThreadRuntimeStatus.RUNNING,
+        ThreadActivityEvaluator.evaluate(ThreadExecutionControl.RUNNABLE, active, false, false, 0));
+    assertEquals(
+        ThreadRuntimeStatus.RUNNING,
+        ThreadActivityEvaluator.evaluate(ThreadExecutionControl.STOPPED, active, false, false, 0));
+    assertEquals(
+        ThreadRuntimeStatus.RUNNING,
+        ThreadActivityEvaluator.evaluate(ThreadExecutionControl.RUNNABLE, idle, true, false, 0));
+
+    // 3. input demand 与 executionControl 正交性
+    assertEquals(
+        ThreadRuntimeStatus.RUNNING,
+        ThreadActivityEvaluator.evaluate(ThreadExecutionControl.RUNNABLE, idle, false, true, 0));
+    assertEquals(
+        ThreadRuntimeStatus.IDLE,
+        ThreadActivityEvaluator.evaluate(ThreadExecutionControl.STOPPED, idle, false, true, 0));
+    assertEquals(
+        ThreadRuntimeStatus.WAITING,
+        ThreadActivityEvaluator.evaluate(ThreadExecutionControl.STOPPED, idle, false, true, 1));
+
+    // 4. WAITING 与 IDLE
+    assertEquals(
+        ThreadRuntimeStatus.WAITING,
+        ThreadActivityEvaluator.evaluate(ThreadExecutionControl.RUNNABLE, idle, false, false, 2));
+    assertEquals(
+        ThreadRuntimeStatus.IDLE,
+        ThreadActivityEvaluator.evaluate(ThreadExecutionControl.RUNNABLE, idle, false, false, 0));
+
+    // 5. isQuiescent 收敛判断
+    assertTrue(ThreadActivityEvaluator.isQuiescent(idle, false, false, 0));
+    assertFalse(ThreadActivityEvaluator.isQuiescent(active, false, false, 0));
+    assertFalse(ThreadActivityEvaluator.isQuiescent(idle, true, false, 0));
+    assertFalse(ThreadActivityEvaluator.isQuiescent(idle, false, true, 0));
+    assertFalse(ThreadActivityEvaluator.isQuiescent(idle, false, false, 1));
   }
 
   private static List<ToolInvocation> toolInvocations(ToolInvocationStatus... statuses) {

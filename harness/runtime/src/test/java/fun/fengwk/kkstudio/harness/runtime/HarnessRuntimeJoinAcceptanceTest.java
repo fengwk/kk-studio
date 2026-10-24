@@ -170,11 +170,11 @@ class HarnessRuntimeJoinAcceptanceTest {
         ThreadExecutionControl.STOPPED,
         store.transaction(tx -> tx.findThread(childId).orElseThrow().executionControl()));
 
-    // 子 Join 在停止边界冻结并已写入交付引用，不再滞留为 pending delivery。
+    // 子 Join 在停止边界冻结并已写入交付引用，不再滞留为未交付状态。
     ThreadJoin settled = runtime.findJoin(joinReq.invocationId()).orElseThrow();
     assertTrue(settled.matched());
     assertNotNull(settled.deliveryCommandSequence());
-    assertTrue(store.transaction(tx -> tx.loadPendingDeliveries(parentId)).isEmpty());
+    assertEquals(0, store.<Integer>transaction(tx -> tx.countIncompleteChildJoins(parentId)));
 
     // 通知直接物化到父线程历史；不留下 queued 命令，也不请求父 Thread Work。
     assertTrue(parentHistoryContainsNotification(parentId));
@@ -224,14 +224,16 @@ class HarnessRuntimeJoinAcceptanceTest {
     assertEquals(2, accepted.acceptedCommands().size());
     assertEquals(3L, accepted.acceptedCommands().get(0).sequence());
 
-    // client 仍以原始期望序号 2 重放：被跳过的 seq 2 恰是 Join 交付命令，按契约应接受重放。
+    // client 仍以原始期望序号 2 重放：由于移除了通知重放偏移，序号不匹配应确定性拒绝 COMMAND_REPLAY_ORDER_MISMATCH。
     AcceptCommandsCommand originalReplay =
         new AcceptCommandsCommand(
             new AcceptCommandsTarget.Thread(parentId, parent.headEntryId(), 2L), batch);
-    AcceptedCommands replayed =
-        runtime.acceptCommands(originalReplay, AcceptancePreflight.IDENTITY);
-    assertTrue(replayed.replayed());
-    assertEquals(3L, replayed.acceptedCommands().getFirst().sequence());
+    HarnessRuntimeConflictException conflict =
+        assertThrows(
+            HarnessRuntimeConflictException.class,
+            () -> runtime.acceptCommands(originalReplay, AcceptancePreflight.IDENTITY));
+    assertEquals(
+        HarnessRuntimeConflictException.Reason.COMMAND_REPLAY_ORDER_MISMATCH, conflict.reason());
   }
 
   /** 该 Thread 当前 head 所在历史路径上是否已物化系统通知（STOPPED 父线程的 Join 交付直接固化到历史）。 */
@@ -818,7 +820,6 @@ class HarnessRuntimeJoinAcceptanceTest {
 
     ThreadJoin join = runtime.findJoin(settle.invocationId()).orElseThrow();
     assertEquals(JoinDelivery.SETTLE_OWNER_TURN, join.delivery());
-    assertFalse(join.countsTowardQuota());
     assertEquals(0, store.<Integer>transaction(tx -> tx.countIncompleteChildJoins(parentId)));
     assertEquals(0, store.<Integer>transaction(tx -> tx.countIncompleteSubagentJoins()));
 
@@ -851,7 +852,6 @@ class HarnessRuntimeJoinAcceptanceTest {
             new ThreadConstraints(1_000, false, false),
             SpawnTrigger.CONTROLLER,
             JoinDelivery.RECEIPT_ONLY,
-            false,
             SpawnRequest.Budget.unlimited(),
             TestIds.id(4003),
             rootCommand.requestHash());
@@ -874,7 +874,6 @@ class HarnessRuntimeJoinAcceptanceTest {
             new ThreadConstraints(2_000, true, true),
             SpawnTrigger.MODEL_TOOL,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             SpawnRequest.Budget.unlimited(),
             TestIds.id(4007),
             childCommand.requestHash());
@@ -883,7 +882,6 @@ class HarnessRuntimeJoinAcceptanceTest {
     assertEquals(SpawnTrigger.MODEL_TOOL, child.thread().spawnTrigger());
     ThreadJoin childJoin = runtime.findJoin(TestIds.id(4007)).orElseThrow();
     assertEquals(JoinDelivery.NOTIFY_PARENT, childJoin.delivery());
-    assertTrue(childJoin.countsTowardQuota());
 
     ThreadState current = runtime.getThreadSnapshot(child.thread().id()).thread();
     NewThreadCommand resumedCommand = userMessageCommand(TestIds.id(4008), "more");
@@ -901,7 +899,6 @@ class HarnessRuntimeJoinAcceptanceTest {
             ThreadConstraints.NONE,
             SpawnTrigger.CONTROLLER,
             JoinDelivery.NOTIFY_PARENT,
-            true,
             SpawnRequest.Budget.unlimited(),
             TestIds.id(4009),
             resumedCommand.requestHash());
@@ -911,7 +908,6 @@ class HarnessRuntimeJoinAcceptanceTest {
     assertEquals(new ThreadConstraints(1_000, true, false), resumed.thread().constraints());
     ThreadJoin resumedJoin = runtime.findJoin(TestIds.id(4009)).orElseThrow();
     assertEquals(JoinDelivery.NOTIFY_PARENT, resumedJoin.delivery());
-    assertTrue(resumedJoin.countsTowardQuota());
   }
 
   /** 统一 spawn 在写任何行前复用 accept 的 batch 形状规则；非法批次必须是参数错误而不是 ClassCast 或部分写入。 */
@@ -949,7 +945,6 @@ class HarnessRuntimeJoinAcceptanceTest {
             ThreadConstraints.NONE,
             SpawnTrigger.CONTROLLER,
             JoinDelivery.RECEIPT_ONLY,
-            false,
             SpawnRequest.Budget.unlimited(),
             ticketId,
             commands.getFirst().requestHash());

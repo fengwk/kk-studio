@@ -598,11 +598,14 @@ class HarnessRuntimeManualCompactionTest {
                   NOW,
                   NOW,
                   delivery,
-                  delivery == JoinDelivery.NOTIFY_PARENT,
                   null);
           tx.insertJoin(join);
           if (matchedJoin) {
-            tx.updateJoin(join.match(rootEntryId, null, NOW));
+            ThreadJoin matched = join.match(rootEntryId, null, NOW);
+            if (delivery == JoinDelivery.NOTIFY_PARENT) {
+              matched = matched.delivered(1L, NOW);
+            }
+            tx.updateJoin(matched);
           }
           return threadId;
         });

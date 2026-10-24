@@ -102,12 +102,13 @@ class HarnessRuntimeResponseMapperTest {
     assertEquals(parent.entryPath().baseSettings().agentName(), node.getAgentName());
     assertEquals("gpt-5", node.getModel().getModelName());
     assertEquals("IDLE", node.getStatus());
-    assertFalse(node.isProcessing());
+    assertEquals("RUNNABLE", node.getExecutionControl());
     assertEquals(0, node.getTurnCount());
     assertEquals(0, node.getToolCallCount());
     assertNull(node.getOutcome());
     assertEquals(parent.thread().updatedAt(), node.getUpdateTime());
-    assertEquals("CONTINUATION_DUE", nodes.get(1).getStatus());
+    assertEquals("RUNNING", nodes.get(1).getStatus());
+    assertEquals("RUNNABLE", nodes.get(1).getExecutionControl());
     assertEquals(1, nodes.get(1).getTurnCount());
     assertNull(nodes.get(1).getOutcome());
     assertEquals(continuing.thread().updatedAt(), nodes.get(1).getUpdateTime());
@@ -115,57 +116,76 @@ class HarnessRuntimeResponseMapperTest {
 
   @Test
   void projectsEveryReachableRuntimeStatusFromThreadSnapshot() {
-    // 测试意图：HTTP 必须保留 Runtime 的完整状态词汇，包括终态待物化和续写，不能将它们压成排队或异常。
+    // 测试意图：对外状态严格收敛为三态（RUNNING / WAITING / IDLE），与持久 executionControl 正交。
+    ThreadSnapshot idle = HarnessRuntimeTestFixtures.idleSnapshot();
+    ThreadSnapshot waiting =
+        new ThreadSnapshot(
+            idle.thread(),
+            idle.entryPath(),
+            List.of(),
+            null,
+            List.of(),
+            List.of(),
+            List.of(),
+            1,
+            false);
+    ThreadSnapshot running = modelSnapshot(ModelInvocationStatus.RUNNING, List.of());
+
     Map<ThreadRuntimeStatus, ThreadSnapshot> cases = new LinkedHashMap<>();
-    // 只有完全静止的 IDLE 不是 processing，其余状态一律 processing。
-    cases.put(ThreadRuntimeStatus.IDLE, HarnessRuntimeTestFixtures.idleSnapshot());
-    // 生命周期 ACTIVE 且尚无本地适用上下文时，等待调度启动新 turn。
-    cases.put(ThreadRuntimeStatus.QUEUED, HarnessRuntimeTestFixtures.queuedSnapshot());
-    cases.put(ThreadRuntimeStatus.STOPPED, HarnessRuntimeTestFixtures.stoppedSnapshot());
-    cases.put(
-        ThreadRuntimeStatus.CONTINUATION_DUE,
-        HarnessRuntimeTestFixtures.continuationPendingSnapshot(id(1)));
-    cases.put(ThreadRuntimeStatus.APPLYING, modelSnapshot(ModelInvocationStatus.FAILED, List.of()));
-    cases.put(
-        ThreadRuntimeStatus.MODEL_READY, modelSnapshot(ModelInvocationStatus.READY, List.of()));
-    cases.put(
-        ThreadRuntimeStatus.MODEL_RUNNING, modelSnapshot(ModelInvocationStatus.RUNNING, List.of()));
-    cases.put(
-        ThreadRuntimeStatus.TOOL_WAITING_APPROVAL,
-        toolSnapshot(ToolInvocationStatus.WAITING_APPROVAL));
-    cases.put(
-        ThreadRuntimeStatus.TOOL_WAITING_INPUT, toolSnapshot(ToolInvocationStatus.WAITING_INPUT));
-    cases.put(ThreadRuntimeStatus.TOOL_RUNNING, toolSnapshot(ToolInvocationStatus.RUNNING));
-    cases.put(ThreadRuntimeStatus.TOOL_READY, toolSnapshot(ToolInvocationStatus.READY));
+    cases.put(ThreadRuntimeStatus.IDLE, idle);
+    cases.put(ThreadRuntimeStatus.WAITING, waiting);
+    cases.put(ThreadRuntimeStatus.RUNNING, running);
     assertEquals(Set.of(ThreadRuntimeStatus.values()), cases.keySet());
 
     for (Map.Entry<ThreadRuntimeStatus, ThreadSnapshot> entry : cases.entrySet()) {
       HarnessThreadDTO dto = HarnessRuntimeResponseMapper.toThreadDto(entry.getValue());
       assertEquals(entry.getKey().name(), dto.getStatus());
-      assertEquals(entry.getKey().isProcessing(), dto.getProcessing());
+      assertEquals("RUNNABLE", dto.getExecutionControl());
     }
 
     HarnessThreadDTO terminalTool =
         HarnessRuntimeResponseMapper.toThreadDto(toolSnapshot(ToolInvocationStatus.FAILED));
-    assertEquals(ThreadRuntimeStatus.APPLYING.name(), terminalTool.getStatus());
-    assertTrue(terminalTool.getProcessing());
+    assertEquals(ThreadRuntimeStatus.RUNNING.name(), terminalTool.getStatus());
+    assertEquals("RUNNABLE", terminalTool.getExecutionControl());
+  }
+
+  @Test
+  void treeNodeWithWaitingLocalTurnEndDoesNotExposeCompletedOutcome() {
+    // 测试意图：tree 非 IDLE outcome 不得声明 COMPLETED；子任务未完成时 WAITING 且 outcome 必须为 null。
+    ThreadSnapshot completed = HarnessRuntimeTestFixtures.completedTurnSnapshot(id(3));
+    ThreadSnapshot waitingWithTurnEnd =
+        new ThreadSnapshot(
+            completed.thread(),
+            completed.entryPath(),
+            List.of(),
+            null,
+            List.of(),
+            List.of(),
+            List.of(),
+            1,
+            false);
+    List<HarnessThreadTreeNodeDTO> nodes =
+        HarnessRuntimeResponseMapper.toThreadTreeDtos(List.of(waitingWithTurnEnd));
+    assertEquals("WAITING", nodes.getFirst().getStatus());
+    assertNull(nodes.getFirst().getOutcome());
   }
 
   @Test
   void projectsIdleParentAndQueuedThreadStatusFromSnapshot() {
-    // 测试意图：父 Thread 的对外状态只由该 Thread 自身投影，不再递归子树；本地静止即 IDLE 且非 processing。
+    // 测试意图：父 Thread 的对外状态只由该 Thread 自身投影，不再递归子树；本地静止即 IDLE。
     ThreadSnapshot parent = HarnessRuntimeTestFixtures.idleParentSnapshot(id(2));
     HarnessThreadDTO parentDto = HarnessRuntimeResponseMapper.toThreadDto(parent);
     assertEquals(ThreadRuntimeStatus.IDLE.name(), parentDto.getStatus());
-    assertFalse(parentDto.getProcessing());
+    assertEquals("RUNNABLE", parentDto.getExecutionControl());
     // 同一快照必须同时暴露不可变执行父关系，供前端展示执行树而不混入 Session 对话历史。
     assertEquals(idText(2), parentDto.getParentThreadId());
 
-    // 已有接受但尚未被消费的命令同样是"工作尚未结束"：处理中，且不是 IDLE。
+    // 已有接受但尚未被消费的命令同样是"工作尚未结束"：待启动 RUNNING，且不是 IDLE。
     ThreadSnapshot queued = HarnessRuntimeTestFixtures.queuedSnapshot();
     HarnessThreadDTO queuedDto = HarnessRuntimeResponseMapper.toThreadDto(queued);
-    assertEquals(ThreadRuntimeStatus.QUEUED.name(), queuedDto.getStatus());
-    assertTrue(queuedDto.getProcessing());
+    assertEquals(ThreadRuntimeStatus.RUNNING.name(), queuedDto.getStatus());
+    assertEquals("RUNNABLE", queuedDto.getExecutionControl());
+    // 根 Thread 的父关系必须显式 null（不是空串），前端据此判断执行树根。
     // 根 Thread 的父关系必须显式 null（不是空串），前端据此判断执行树根。
     assertNull(queuedDto.getParentThreadId());
   }
@@ -195,7 +215,6 @@ class HarnessRuntimeResponseMapperTest {
     assertEquals(NOW, dto.getCreateTime());
     assertEquals(NOW, dto.getUpdateTime());
     assertEquals("RUNNABLE", dto.getExecutionControl());
-    assertFalse(dto.getProcessing());
   }
 
   @Test
@@ -530,7 +549,9 @@ class HarnessRuntimeResponseMapperTest {
             null,
             List.of(),
             List.of(),
-            List.of(receipt));
+            List.of(receipt),
+            0,
+            false);
 
     HarnessThreadSnapshotDTO dto =
         HarnessRuntimeResponseMapper.toSnapshotDto(
@@ -586,7 +607,9 @@ class HarnessRuntimeResponseMapperTest {
         null,
         List.of(),
         List.of(),
-        List.of());
+        List.of(),
+        0,
+        false);
   }
 
   private static ThreadSnapshot modelSnapshot(
@@ -614,7 +637,9 @@ class HarnessRuntimeResponseMapperTest {
         model,
         List.of(),
         failures,
-        List.of());
+        List.of(),
+        0,
+        false);
   }
 
   private static ThreadSnapshot toolSnapshot(ToolInvocationStatus status) {
@@ -649,7 +674,9 @@ class HarnessRuntimeResponseMapperTest {
         model,
         List.of(tool),
         List.of(),
-        List.of());
+        List.of(),
+        0,
+        false);
   }
 
   private static ModelInvocation modelInvocation(
@@ -805,7 +832,9 @@ class HarnessRuntimeResponseMapperTest {
         snapshot.model(),
         snapshot.toolSiblings(),
         snapshot.modelAttemptFailures(),
-        snapshot.stopReceipts());
+        snapshot.stopReceipts(),
+        snapshot.incompleteChildJoins(),
+        snapshot.unconsumedAppliedNotifications());
   }
 
   private static UUID id(long value) {

@@ -294,10 +294,9 @@ abstract class HarnessStoreDeletionContract {
                   T1,
                   T1,
                   JoinDelivery.NOTIFY_PARENT,
-                  true,
                   null);
           tx.insertJoin(join);
-          tx.updateJoin(join.match(resultHeadEntryId, null, T2));
+          tx.updateJoin(join.match(resultHeadEntryId, null, T2).delivered(1L, T2));
         });
   }
 }

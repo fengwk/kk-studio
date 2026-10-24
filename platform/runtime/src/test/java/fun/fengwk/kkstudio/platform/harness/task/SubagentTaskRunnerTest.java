@@ -171,10 +171,9 @@ class SubagentTaskRunnerTest {
     // 执行父关系由 Runtime 建立：请求携带父 Thread，ROOT settings 只由本次物化结果决定。
     assertEquals(parentThreadId, accepted1.parentThreadId());
     assertEquals(target, accepted1.settings());
-    // 模型发起的子代理：通知父 Thread、计入额度，票据即 invocation。
+    // 模型发起的子代理：通知父 Thread，票据即 invocation。
     assertEquals(SpawnTrigger.MODEL_TOOL, accepted1.trigger());
     assertEquals(JoinDelivery.NOTIFY_PARENT, accepted1.delivery());
-    assertTrue(accepted1.countsTowardQuota());
     assertEquals(invocationId, accepted1.ticketId());
     // 源 prompt 与票据同一批命令：恰好一条可信调用方 CUSTOM_MESSAGE。
     assertEquals(1, accepted1.commands().size());
@@ -410,6 +409,38 @@ class SubagentTaskRunnerTest {
     verify(runtime, times(2)).spawn(command.capture());
     // 第二次必须使用重新读取的 cursor，而不是第一次的陈旧 cursor。
     assertEquals(secondHead, command.getAllValues().get(1).continuation().expectedHeadEntryId());
+  }
+
+  @Test
+  void unexpectedFailureDoesNotResubmit() {
+    // 非游标错误只能复核票据，不得重复提交可能已产生副作用的请求。
+    stubParent(List.of(AGENT));
+    IllegalStateException failure = new IllegalStateException("store unavailable");
+    when(runtime.spawn(any())).thenThrow(failure);
+
+    SubagentTaskRejectedException rejected =
+        assertThrows(
+            SubagentTaskRejectedException.class,
+            () -> runner(config()).accept(request(null, null)));
+
+    assertEquals(failure, rejected.getCause());
+    verify(runtime, times(1)).spawn(any());
+  }
+
+  @Test
+  void nonCursorConflictDoesNotResubmit() {
+    // 明确业务冲突没有匹配票据时立即拒绝。
+    stubParent(List.of(AGENT));
+    when(runtime.spawn(any()))
+        .thenThrow(
+            new HarnessRuntimeConflictException(
+                HarnessRuntimeConflictException.Reason.IDEMPOTENCY_KEY_REUSED,
+                "different request"));
+
+    assertThrows(
+        SubagentTaskRejectedException.class, () -> runner(config()).accept(request(null, null)));
+
+    verify(runtime, times(1)).spawn(any());
   }
 
   @Test
@@ -650,7 +681,6 @@ class SubagentTaskRunnerTest {
         NOW,
         NOW,
         JoinDelivery.NOTIFY_PARENT,
-        true,
         null);
   }
 

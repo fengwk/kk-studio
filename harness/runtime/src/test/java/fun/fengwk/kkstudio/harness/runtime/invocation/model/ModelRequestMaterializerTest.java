@@ -28,6 +28,8 @@ import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.runtime.history.NotificationKind;
+import fun.fengwk.kkstudio.harness.runtime.history.NotificationPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.ToolResultMetadata;
 import fun.fengwk.kkstudio.harness.runtime.history.ToolResultStatus;
@@ -58,6 +60,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.GoalMessages;
+import fun.fengwk.kkstudio.harness.runtime.thread.SystemReminder;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -623,6 +626,54 @@ class ModelRequestMaterializerTest {
         new AssistantMessageMetadata(
             GenerationStopReason.COMPLETE, new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L)),
         null);
+  }
+
+  @Test
+  void notificationPayloadWrapsTextMessageInReminderPreservingOriginalRoleAndDurableMessage() {
+    String originalText = "subagent execution completed";
+    AgentMessage durableMessage =
+        new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent(originalText)));
+    NotificationPayload notificationPayload =
+        new NotificationPayload(id(99L), NotificationKind.SUBAGENT_RESULT, id(98L), durableMessage);
+
+    List<Entry> entries =
+        List.of(
+            entry(1L, 0L, new RootPayload(SETTINGS)),
+            entry(2L, 1L, new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, id(100L))),
+            entry(3L, 2L, notificationPayload));
+
+    ProviderRequest request =
+        MATERIALIZER.materialize(new EntryPath(entries), liveSpec(bashBinding()));
+
+    // 1. 模型投影单一边界：Notification 文本被包装在 <system-reminder> 中，保留原始 USER role
+    assertEquals(1, request.messages().size());
+    ProviderMessage projected = request.messages().getFirst();
+    assertEquals(ProviderMessageRole.USER, projected.role());
+    assertTrue(textOf(projected).contains("<system-reminder>"));
+    assertTrue(textOf(projected).contains(originalText));
+    assertEquals(SystemReminder.wrap(originalText), textOf(projected));
+
+    // 2. 原生 durable message 与 payload 未被变异或双重包装
+    assertEquals(originalText, ((TextMessageContent) durableMessage.contents().getFirst()).text());
+    assertEquals(AgentMessageRole.USER, durableMessage.role());
+
+    // 3. 已经包含 reminder 的文本不会被二次包装
+    AgentMessage alreadyWrappedMessage =
+        new AgentMessage(
+            AgentMessageRole.USER,
+            List.of(new TextMessageContent(SystemReminder.wrap(originalText))));
+    NotificationPayload alreadyWrappedPayload =
+        new NotificationPayload(
+            id(97L), NotificationKind.SUBAGENT_RESULT, id(96L), alreadyWrappedMessage);
+    List<Entry> wrappedEntries =
+        List.of(
+            entry(1L, 0L, new RootPayload(SETTINGS)),
+            entry(2L, 1L, new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, id(100L))),
+            entry(4L, 2L, alreadyWrappedPayload));
+
+    ProviderRequest wrappedRequest =
+        MATERIALIZER.materialize(new EntryPath(wrappedEntries), liveSpec(bashBinding()));
+    assertEquals(SystemReminder.wrap(originalText), textOf(wrappedRequest.messages().getFirst()));
   }
 
   private static String textOf(ProviderMessage message) {

@@ -227,6 +227,10 @@ public final class HarnessRuntime {
           for (ThreadState thread : locked) {
             List<ThreadCommand> queued = tx.loadQueuedCommands(thread.id());
             EntryPath path = tx.loadEntryPath(thread.headEntryId());
+            int incompleteChildJoins = tx.countIncompleteChildJoins(thread.id());
+            boolean unconsumedAppliedNotifications =
+                ThreadInputDemand.hasUnconsumedNotification(
+                    tx.loadCommandsByThread(thread.id()), thread.inputThroughSequence());
             // 树锁串行化同树 Invocation 写入；只读探测不在多个节点间回退 Model/Tool 锁阶梯。
             snapshots.add(
                 snapshot(
@@ -234,7 +238,9 @@ public final class HarnessRuntime {
                     path,
                     queued,
                     probe.probe(tx, thread, path),
-                    tx.loadStopReceiptsByThread(thread.id())));
+                    tx.loadStopReceiptsByThread(thread.id()),
+                    incompleteChildJoins,
+                    unconsumedAppliedNotifications));
           }
           snapshots.sort(
               Comparator.comparing((ThreadSnapshot snapshot) -> snapshot.thread().createdAt())
@@ -601,8 +607,18 @@ public final class HarnessRuntime {
       HarnessStore.Transaction tx, ThreadState thread) {
     List<ThreadCommand> queued = tx.loadQueuedCommands(thread.id());
     LockedThreadContext locked = ThreadContextLock.load(tx, thread);
+    int incompleteChildJoins = tx.countIncompleteChildJoins(thread.id());
+    boolean unconsumedAppliedNotifications =
+        ThreadInputDemand.hasUnconsumedNotification(
+            tx.loadCommandsByThread(thread.id()), thread.inputThroughSequence());
     return snapshot(
-        thread, locked.path(), queued, locked.context(), tx.loadStopReceiptsByThread(thread.id()));
+        thread,
+        locked.path(),
+        queued,
+        locked.context(),
+        tx.loadStopReceiptsByThread(thread.id()),
+        incompleteChildJoins,
+        unconsumedAppliedNotifications);
   }
 
   private static ThreadSnapshot snapshot(
@@ -610,12 +626,30 @@ public final class HarnessRuntime {
       EntryPath path,
       List<ThreadCommand> queued,
       ThreadContext context,
-      List<StoppedThreadReceipt> stopReceipts) {
+      List<StoppedThreadReceipt> stopReceipts,
+      int incompleteChildJoins,
+      boolean unconsumedAppliedNotifications) {
     return switch (context) {
       case ThreadContext.IdleOrHistorical ignored -> new ThreadSnapshot(
-          thread, path, queued, null, List.of(), List.of(), stopReceipts);
+          thread,
+          path,
+          queued,
+          null,
+          List.of(),
+          List.of(),
+          stopReceipts,
+          incompleteChildJoins,
+          unconsumedAppliedNotifications);
       case ThreadContext.ContinuationDue ignored -> new ThreadSnapshot(
-          thread, path, queued, null, List.of(), List.of(), stopReceipts);
+          thread,
+          path,
+          queued,
+          null,
+          List.of(),
+          List.of(),
+          stopReceipts,
+          incompleteChildJoins,
+          unconsumedAppliedNotifications);
       case ThreadContext.ModelActive active -> new ThreadSnapshot(
           thread,
           path,
@@ -623,7 +657,9 @@ public final class HarnessRuntime {
           active.model(),
           List.of(),
           projectModelAttemptFailures(active.model(), path),
-          stopReceipts);
+          stopReceipts,
+          incompleteChildJoins,
+          unconsumedAppliedNotifications);
       case ThreadContext.ModelTerminalPending pending -> new ThreadSnapshot(
           thread,
           path,
@@ -631,11 +667,29 @@ public final class HarnessRuntime {
           pending.model(),
           List.of(),
           projectModelAttemptFailures(pending.model(), path),
-          stopReceipts);
+          stopReceipts,
+          incompleteChildJoins,
+          unconsumedAppliedNotifications);
       case ThreadContext.ToolActive active -> new ThreadSnapshot(
-          thread, path, queued, active.model(), active.siblings(), List.of(), stopReceipts);
+          thread,
+          path,
+          queued,
+          active.model(),
+          active.siblings(),
+          List.of(),
+          stopReceipts,
+          incompleteChildJoins,
+          unconsumedAppliedNotifications);
       case ThreadContext.ToolTerminalPending pending -> new ThreadSnapshot(
-          thread, path, queued, pending.model(), pending.siblings(), List.of(), stopReceipts);
+          thread,
+          path,
+          queued,
+          pending.model(),
+          pending.siblings(),
+          List.of(),
+          stopReceipts,
+          incompleteChildJoins,
+          unconsumedAppliedNotifications);
     };
   }
 

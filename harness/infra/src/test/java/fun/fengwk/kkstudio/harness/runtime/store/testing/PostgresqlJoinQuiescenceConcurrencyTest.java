@@ -240,7 +240,6 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
                   now,
                   now,
                   JoinDelivery.NOTIFY_PARENT,
-                  true,
                   null));
           UUID joinBC = tx.nextId();
           tx.insertJoin(
@@ -259,7 +258,6 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
                   now,
                   now,
                   JoinDelivery.NOTIFY_PARENT,
-                  true,
                   null));
 
           if (bTerminalPending) {
@@ -375,7 +373,7 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
       assertEquals(ThreadProcessResult.COMPLETED, processor.process(claim("b-input", T1)));
       ThreadSnapshot processing = runtime.getThreadSnapshot(tree.threadB());
       assertEquals(2L, processing.thread().inputThroughSequence());
-      assertEquals(ThreadRuntimeStatus.MODEL_READY, processing.runtimeStatus());
+      assertEquals(ThreadRuntimeStatus.RUNNING, processing.runtimeStatus());
       assertFalse(join(tree.joinAB()).matched(), "INPUT consumption alone is not completion");
       completeReadyModel(tree.threadB(), T1);
       assertEquals(ThreadProcessResult.COMPLETED, processor.process(claim("b-final", T1)));
@@ -507,7 +505,7 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
       release.countDown();
       assertEquals(ThreadProcessResult.COMPLETED, childFuture.get(10, TimeUnit.SECONDS));
       ThreadSnapshot observed = observerFuture.get(10, TimeUnit.SECONDS);
-      assertEquals(ThreadRuntimeStatus.QUEUED, observed.runtimeStatus());
+      assertEquals(ThreadRuntimeStatus.RUNNING, observed.runtimeStatus());
       assertEquals(1, observed.queuedCommands().size());
       assertEquals(
           tree.threadC(),

@@ -514,8 +514,8 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
           "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id,"
               + " child_thread_id, source_command_sequence, agent, max_turns, reminder_turn,"
               + " terminal_entry_id, final_answer_entry_id, delivery_command_sequence, created_at,"
-              + " updated_at, delivery, counts_toward_quota)"
-              + " values (?, ?, ?, ?, ?, ?, ?, 0, null, null, null, ?, ?, ?, ?)",
+              + " updated_at, delivery)"
+              + " values (?, ?, ?, ?, ?, ?, ?, 0, null, null, null, ?, ?, ?)",
           request.ticketId(),
           request.requestHash(),
           request.parentThreadId(),
@@ -525,8 +525,7 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
           request.budget().maxTurns(),
           now,
           now,
-          request.delivery().name(),
-          request.countsTowardQuota());
+          request.delivery().name());
       return accepted;
     }
 
@@ -537,7 +536,7 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
               "select invocation_id, request_hash, parent_thread_id, child_thread_id,"
                   + " source_command_sequence, agent, max_turns, reminder_turn, terminal_entry_id,"
                   + " final_answer_entry_id, delivery_command_sequence, created_at, updated_at,"
-                  + " delivery, counts_toward_quota"
+                  + " delivery"
                   + " from harness_thread_join where invocation_id = ?",
               invocationId);
       if (rows.isEmpty()) {
@@ -562,7 +561,6 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
               ((Timestamp) row.get("created_at")).toInstant(),
               ((Timestamp) row.get("updated_at")).toInstant(),
               JoinDelivery.valueOf((String) row.get("delivery")),
-              (Boolean) row.get("counts_toward_quota"),
               null));
     }
 
