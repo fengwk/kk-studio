@@ -63,6 +63,7 @@ const BUSINESS_TABLES = [
   'environment_install_code',
   'environment_update_operation',
   'harness_entry',
+  'harness_execution_exit',
   'harness_model_invocation',
   'harness_session',
   'harness_thread',
