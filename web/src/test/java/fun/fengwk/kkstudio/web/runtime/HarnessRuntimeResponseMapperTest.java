@@ -172,7 +172,7 @@ class HarnessRuntimeResponseMapperTest {
 
   @Test
   void projectsIdleParentAndQueuedThreadStatusFromSnapshot() {
-    // 测试意图：父 Thread 的对外状态只由该 Thread 自身投影，不再递归子树；本地静止即 IDLE。
+    // 无本地工作和未完成直接委派时为 IDLE；执行父关系本身不代表仍有任务。
     ThreadSnapshot parent = HarnessRuntimeTestFixtures.idleParentSnapshot(id(2));
     HarnessThreadDTO parentDto = HarnessRuntimeResponseMapper.toThreadDto(parent);
     assertEquals(ThreadRuntimeStatus.IDLE.name(), parentDto.getStatus());
@@ -185,7 +185,6 @@ class HarnessRuntimeResponseMapperTest {
     HarnessThreadDTO queuedDto = HarnessRuntimeResponseMapper.toThreadDto(queued);
     assertEquals(ThreadRuntimeStatus.RUNNING.name(), queuedDto.getStatus());
     assertEquals("RUNNABLE", queuedDto.getExecutionControl());
-    // 根 Thread 的父关系必须显式 null（不是空串），前端据此判断执行树根。
     // 根 Thread 的父关系必须显式 null（不是空串），前端据此判断执行树根。
     assertNull(queuedDto.getParentThreadId());
   }

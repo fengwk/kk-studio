@@ -48,8 +48,8 @@ import java.util.UUID;
 /**
  * {@link ThreadSnapshot#runtimeStatus()} 统一三态运行时状态投影测试。
  *
- * <p>全部用例都经真实 {@link InMemoryHarnessStore} 种子与 {@link HarnessRuntime#getThreadSnapshot} 读取，保证投影的
- * 事务一致性。真正破坏不变量的形状（例如 Model 不属于本 Thread）才 fail-closed。
+ * <p>使用 {@link InMemoryHarnessStore} 种子读取真实本地上下文，并构造直接子 Join 与输入需求事实验证快照投影。 真正破坏不变量的形状（例如 Model
+ * 不属于本 Thread）才 fail-closed。
  */
 class ThreadSnapshotTest {
 
@@ -298,7 +298,8 @@ class ThreadSnapshotTest {
   void waitingThreadWithLocalTurnEndDoesNotExposeCompletedOutcome() {
     // 测试意图：非 IDLE outcome 不得声明 COMPLETED；本地回合虽已到达 TURN_END，但子任务未完成时 outcome 为 null。
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
-    ThreadSnapshot base = runtime.getThreadSnapshot(baseline.threadId());
+    ThreadSnapshot base = completedTurnSnapshot(baseline);
+    assertEquals(TurnEndOutcome.COMPLETED, base.outcome());
     ThreadSnapshot waitingWithTurnEnd =
         new ThreadSnapshot(
             base.thread(),
@@ -420,6 +421,14 @@ class ThreadSnapshotTest {
     assertEquals(1, toolActiveSnapshot.toolCallCount());
 
     // 2. 构造一个普通的纯文本已完成回合
+    ThreadSnapshot completedSnapshot = completedTurnSnapshot(baseline);
+    assertEquals(1, completedSnapshot.turnCount());
+    assertEquals(ThreadRuntimeStatus.IDLE, completedSnapshot.runtimeStatus());
+    assertEquals(TurnEndOutcome.COMPLETED, completedSnapshot.outcome());
+  }
+
+  private ThreadSnapshot completedTurnSnapshot(HarnessRuntimeTestSupport.Baseline baseline) {
+    ThreadSnapshot base = runtime.getThreadSnapshot(baseline.threadId());
     UUID turnStartId = UUID.randomUUID();
     UUID userMsgId = UUID.randomUUID();
     UUID assistantMsgId = UUID.randomUUID();
@@ -433,20 +442,16 @@ class ThreadSnapshotTest {
         turnEndEntry(turnEndId, baseline.sessionId(), assistantMsgId, T5, turnStartId, false);
     EntryPath completedPath =
         new EntryPath(List.of(base.entryPath().head(), turnStart, userMsg, assistantMsg, turnEnd));
-    ThreadSnapshot completedSnapshot =
-        new ThreadSnapshot(
-            base.thread().advanceHead(turnEndId, T5),
-            completedPath,
-            List.of(),
-            null,
-            List.of(),
-            List.of(),
-            List.of(),
-            0,
-            false);
-    assertEquals(1, completedSnapshot.turnCount());
-    assertEquals(ThreadRuntimeStatus.IDLE, completedSnapshot.runtimeStatus());
-    assertEquals(TurnEndOutcome.COMPLETED, completedSnapshot.outcome());
+    return new ThreadSnapshot(
+        base.thread().advanceHead(turnEndId, T5),
+        completedPath,
+        List.of(),
+        null,
+        List.of(),
+        List.of(),
+        List.of(),
+        0,
+        false);
   }
 
   /** 设置 Thread 的执行控制（种子 fixture 默认 RUNNABLE）。 */

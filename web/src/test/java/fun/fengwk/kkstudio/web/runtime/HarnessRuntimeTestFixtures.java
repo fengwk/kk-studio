@@ -186,7 +186,7 @@ public final class HarnessRuntimeTestFixtures {
         thread(threadId, id(1)), path, List.of(), null, List.of(), List.of(), List.of(), 0, false);
   }
 
-  /** 已静止但仍有活跃直接孩子的父 Thread 快照：本地状态只由该 Thread 自身投影为 IDLE，不再递归祖先表达子树忙碌；执行父关系仍显式暴露。 */
+  /** 带执行父关系的空闲快照：无本地工作和未完成的直接委派，活动状态为 IDLE。 */
   public static ThreadSnapshot idleParentSnapshot(UUID parentThreadId) {
     EntryPath path = new EntryPath(List.of(rootEntry()));
     return new ThreadSnapshot(
@@ -201,7 +201,7 @@ public final class HarnessRuntimeTestFixtures {
         false);
   }
 
-  /** 显式停止（STOPPED）的 Thread 快照：对外状态为 STOPPED 且非 processing。 */
+  /** 无本地工作和未完成直接委派的停止快照：活动为 IDLE，执行控制为 STOPPED。 */
   public static ThreadSnapshot stoppedSnapshot() {
     EntryPath path = new EntryPath(List.of(rootEntry()));
     return new ThreadSnapshot(
@@ -216,7 +216,7 @@ public final class HarnessRuntimeTestFixtures {
         false);
   }
 
-  /** 已有接受但尚未被消费的命令、因此尚未开始执行的 Thread 快照：RUNNABLE 本地空闲投影为 QUEUED。 */
+  /** 已接纳的用户输入尚未消费：RUNNABLE 下投影为待启动的 RUNNING。 */
   public static ThreadSnapshot queuedSnapshot() {
     EntryPath path = new EntryPath(List.of(rootEntry()));
     return new ThreadSnapshot(
@@ -233,9 +233,9 @@ public final class HarnessRuntimeTestFixtures {
 
   /**
    * 尚有 continuation 义务的 Thread 快照：ROOT -&gt; TURN_START -&gt; USER -&gt; ASSISTANT -&gt;
-   * continueModel TURN_END，durable 生命周期为 ACTIVE。
+   * continueModel TURN_END，执行控制为 RUNNABLE。
    *
-   * <p>续写义务属于当前 Thread，Runtime 将其投影为 CONTINUATION_DUE。
+   * <p>续写义务属于当前 Thread，Runtime 将其活动投影为 RUNNING。
    */
   public static ThreadSnapshot continuationPendingSnapshot(UUID threadId) {
     Entry turnStart =
