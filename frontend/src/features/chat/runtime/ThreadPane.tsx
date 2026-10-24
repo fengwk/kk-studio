@@ -79,12 +79,19 @@ export function ThreadPane({
     phase: 'call',
   }) : null
 
+  // 已请求停止但 Thread 仍 RUNNING、且没有真实 RUNNING model/tool：退出尚未确认。
+  // 这只是现有 executionControl 与 status 的静态组合，不代表执行即将结束。
+  const stopExitUnconfirmed = projection.thread?.executionControl === 'STOPPED'
+    && projection.thread.status === 'RUNNING'
+    && !executing
+
   // 事实优先级：
   // 1. 真实 active model / tool 执行事实优先：只有真实 active model/tool 才生成/执行
   //    且 STOPPED 独立控制不可遮在途 model/tool
   // 2. pendingTool 阻塞事实：审批 / 问卷 / environment 等阻塞文字必须准确不能生成动画
-  // 3. status 三态事实：无 model/tool 且 RUNNING 显示运行中，WAITING 等待异步结果，绝不把 RUNNING 直接显示生成
-  // 4. 其余回退外部 activity 事实
+  // 3. STOPPED+RUNNING 且无真实执行：静态提示退出尚未确认，不承诺马上退出
+  // 4. status 三态事实：无 model/tool 且 RUNNING 显示运行中，WAITING 等待异步结果，绝不把 RUNNING 直接显示生成
+  // 5. 其余回退外部 activity 事实
   let resolvedWorking = activity.working
   let resolvedWorkingLabel: string | undefined = activity.workingLabel
 
@@ -96,6 +103,9 @@ export function ThreadPane({
     resolvedWorkingLabel = t(`ai.runtime.tool.${pendingToolState}`, {
       environment: pendingTool?.requiredEnvironmentName ?? '',
     })
+  } else if (stopExitUnconfirmed) {
+    resolvedWorking = true
+    resolvedWorkingLabel = t('ai.runtime.thread.stopExitUnconfirmed')
   } else if (projection.thread?.status === 'WAITING') {
     resolvedWorking = true
     resolvedWorkingLabel = t('ai.runtime.thread.status.WAITING')

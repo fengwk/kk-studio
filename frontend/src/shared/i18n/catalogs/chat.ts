@@ -993,6 +993,10 @@ export const chatCatalog = {
     'en-US': 'Stopped',
     'zh-CN': '已停止',
   },
+  'ai.runtime.thread.stopExitUnconfirmed': {
+    'en-US': 'Stop requested; exit not yet confirmed',
+    'zh-CN': '已请求停止，退出尚未确认',
+  },
   'ai.runtime.message.stopped': {
     'en-US': 'Stopped',
     'zh-CN': '已停止',
