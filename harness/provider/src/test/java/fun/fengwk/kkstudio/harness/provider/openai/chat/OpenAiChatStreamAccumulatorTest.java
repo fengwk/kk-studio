@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
@@ -1141,7 +1142,7 @@ class OpenAiChatStreamAccumulatorTest {
   @Test
   @DisplayName(
       "缺失 total_tokens 时 providerTotalTokens 严格为 null，不合成 prompt+completion，保留原生 rawUsageJson")
-  void testMissingTotalTokensPreservesZeroWithoutSynthesis() {
+  void missingTotalTokensRemainsUnknownWithoutSynthesis() {
     OpenAiChatStreamAccumulator accumulator = createAccumulator();
     accumulator.handleData(
         """
@@ -1211,7 +1212,7 @@ class OpenAiChatStreamAccumulatorTest {
 
   @Test
   @DisplayName("promptTokens 小于 cachedTokens 时抛出 INVALID_RESPONSE 拒绝")
-  void testUsagePromptTokensLessThanCachedTokensClampedToZero() {
+  void usageBreakdownExceedingPromptTokensIsRejected() {
     // 测试意图：验证当上游报告的 cachedTokens 大于 promptTokens 时，
     // uncachedTokens 抛出 INVALID_RESPONSE 拒绝响应，不静默截断为 0。
     OpenAiChatStreamAccumulator accumulator = createAccumulator();
@@ -1296,6 +1297,31 @@ class OpenAiChatStreamAccumulatorTest {
     assertEquals(20L, usage.outputTokens());
     assertNull(usage.providerTotalTokens());
     assertEquals(12L, usage.reasoningTokens());
+  }
+
+  /** 2026-10-24 DeepSeek 代表的真实 usage 数字；终止帧是合成外壳，不是完整原始响应。 */
+  @Test
+  void deepseekObservedUsageKeepsReasoningInsideOutput() throws Exception {
+    JsonNode usage =
+        MAPPER
+            .readTree(
+                OpenAiChatStreamAccumulatorTest.class.getResourceAsStream(
+                    "deepseek-chat-usage-2026-10-24.json"))
+            .path("usage");
+    OpenAiChatStreamAccumulator accumulator = createAccumulator();
+    ObjectNode frame = MAPPER.createObjectNode();
+    frame.putArray("choices").addObject().put("finish_reason", "stop").putObject("delta");
+    frame.set("usage", usage);
+    accumulator.handleData(frame.toString());
+    accumulator.handleData("[DONE]");
+    ModelUsage parsed = accumulator.finish().response().usage();
+    assertEquals(48L, parsed.inputTokens());
+    assertEquals(25L, parsed.outputTokens());
+    assertEquals(23L, parsed.reasoningTokens());
+    assertTrue(parsed.reasoningTokens() <= parsed.outputTokens());
+    assertEquals(73L, parsed.providerTotalTokens());
+    JsonNode raw = MAPPER.readTree(accumulator.finish().response().rawUsageJson());
+    assertEquals(23L, raw.path("completion_tokens_details").path("reasoning_tokens").asLong(0L));
   }
 
   private OpenAiChatStreamAccumulator createAccumulator() {

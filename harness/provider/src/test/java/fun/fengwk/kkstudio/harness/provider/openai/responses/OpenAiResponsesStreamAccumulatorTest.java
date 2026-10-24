@@ -12,6 +12,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
@@ -667,7 +668,7 @@ class OpenAiResponsesStreamAccumulatorTest {
 
   /** 整份用量缺失不能伪装成真实零用量。 */
   @Test
-  void test_emitsEmptyObjectRawUsageWhenNoUsageProvided() throws Exception {
+  void missingUsageIsRejectedInsteadOfEmptyRawUsage() throws Exception {
     OpenAiResponsesStreamAccumulator accumulator =
         new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
 
@@ -1956,6 +1957,35 @@ class OpenAiResponsesStreamAccumulatorTest {
     assertEquals(0L, completion.response().usage().inputTokens());
     assertEquals(0L, completion.response().usage().outputTokens());
     assertEquals(0L, completion.response().usage().providerTotalTokens());
+  }
+
+  /** 2026-10-24 xAI 代表的真实 usage 数字；终止帧是合成外壳，不是完整原始响应。 */
+  @Test
+  void xaiObservedUsageUsesResponseOutputAndSeparatesCache() throws Exception {
+    JsonNode usage =
+        MAPPER
+            .readTree(
+                OpenAiResponsesStreamAccumulatorTest.class.getResourceAsStream(
+                    "xai-responses-usage-2026-10-24.json"))
+            .path("usage");
+    OpenAiResponsesStreamAccumulator accumulator =
+        new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), event -> {});
+    ObjectNode event = MAPPER.createObjectNode();
+    event.put("type", "response.completed");
+    ObjectNode response = event.putObject("response");
+    response.put("id", "synthetic-terminal");
+    response.put("status", "completed");
+    response.set("usage", usage);
+    accumulator.processEvent(event);
+    ModelUsage parsed = accumulator.finish().response().usage();
+    assertEquals(111L, parsed.inputTokens());
+    assertEquals(1152L, parsed.cacheReadTokens());
+    assertEquals(74L, parsed.outputTokens());
+    assertEquals(73L, parsed.reasoningTokens());
+    assertEquals(1337L, parsed.providerTotalTokens());
+    JsonNode raw = MAPPER.readTree(accumulator.finish().response().rawUsageJson());
+    assertEquals(74L, raw.path("output_tokens").asLong(0L));
+    assertEquals(81L, raw.path("context_details").path("output_tokens").asLong(0L));
   }
 
   @Test
