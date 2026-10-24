@@ -102,6 +102,7 @@ final class GeminiStreamAccumulator {
   private boolean replayFreezable = true;
 
   private ModelUsage latestUsage = null;
+  private JsonNode latestUsageSnapshot = null;
   private String rawUsageJson = "{}";
   private String serviceTier = null;
 
@@ -155,6 +156,33 @@ final class GeminiStreamAccumulator {
   }
 
   private void updateUsage(JsonNode usageNode) {
+    for (String field :
+        List.of(
+            "promptTokenCount",
+            "candidatesTokenCount",
+            "cachedContentTokenCount",
+            "thoughtsTokenCount",
+            "totalTokenCount")) {
+      if (usageNode.has(field)) {
+        if ((field.equals("thoughtsTokenCount") || field.equals("totalTokenCount"))
+            && usageNode.get(field).isNull()) {
+          continue;
+        }
+        optionalTokenCount(usageNode, field);
+      }
+    }
+    if (usageNode.has("serviceTier")) {
+      JsonNode tier = usageNode.get("serviceTier");
+      if (!tier.isString() || tier.stringValue().isBlank()) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_RESPONSE, "invalid usage field: serviceTier");
+      }
+    }
+    // 中间帧可以尚无完整计数；保留最新原始快照，完整性仅在 finish 校验，不跨快照补字段。
+    latestUsageSnapshot = usageNode.deepCopy();
+  }
+
+  private void normalizeFinalUsage(JsonNode usageNode) {
     if (!usageNode.has("promptTokenCount") || !usageNode.has("candidatesTokenCount")) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_RESPONSE,
@@ -515,11 +543,12 @@ final class GeminiStreamAccumulator {
 
   /** 流正常传输完毕后的终态验证与 Completion 交付。 */
   ProviderCompletion finish() {
-    if (latestUsage == null) {
+    if (latestUsageSnapshot == null) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_RESPONSE,
           "missing complete usage: Gemini model " + request.model().modelId());
     }
+    normalizeFinalUsage(latestUsageSnapshot);
     if (this.stopReason == null) {
       if (this.promptBlocked && trackedParts.isEmpty()) {
         this.stopReason = GenerationStopReason.FILTERED;
