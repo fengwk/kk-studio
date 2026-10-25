@@ -139,7 +139,7 @@ public interface ToolGateway {
     /** 阻塞执行并返回唯一终态；{@code progress} 接收已校验的非 terminal partial。 */
     Completion execute(Consumer<ToolResult> progress);
 
-    /** 释放本次执行持有的本地资源（并发配额与目录租用）；幂等，且不抛出。 */
+    /** 释放本次执行持有的本地资源（并发配额与目录租用）；幂等。释放失败必须传播，不能据此确认退出。 */
     @Override
     void close();
   }
