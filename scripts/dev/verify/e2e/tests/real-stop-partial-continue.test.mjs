@@ -72,15 +72,14 @@ class FakeApplicationEventSocket {
   }
 }
 
-async function withFakeApplicationEvents(fn) {
+function installFakeApplicationEvents(t) {
   const original = globalThis.WebSocket
-  globalThis.WebSocket = FakeApplicationEventSocket
-  try {
-    return await fn()
-  } finally {
+  // 恢复不依赖 case Promise 成功结束；超时或断言失败也由测试生命周期清理。
+  t.after(() => {
     globalThis.WebSocket = original
     FakeApplicationEventSocket.reset()
-  }
+  })
+  globalThis.WebSocket = FakeApplicationEventSocket
 }
 
 /**
@@ -413,11 +412,12 @@ function createStopCaseContext({ exitConverges = true } = {}) {
   }
 }
 
-test('registered stop case waits for the stable exit baseline before replay and follow-up', async () => {
+test('registered stop case waits for the stable exit baseline before replay and follow-up', { timeout: 5_000 }, async (t) => {
   // 意图：首次 Stop 只写入 STOPPED 控制并留下 RUNNING；实际 case 必须先等到 IDLE+STOPPED 双观测，
   // 再用原 stopRequestId/expectedVersion 重放，对照收敛基线而不是首次 Stop 响应。
   const ctx = createStopCaseContext()
-  await withFakeApplicationEvents(() => getCase(CASE_ID).run(ctx))
+  installFakeApplicationEvents(t)
+  await getCase(CASE_ID).run(ctx)
 
   assert.equal(ctx.stopRequests.length, 2)
   assert.equal(ctx.stopRequests[0].kind, 'stop')
@@ -447,13 +447,14 @@ test('registered stop case waits for the stable exit baseline before replay and 
   assert.equal(continued.data.exitBaseline.headEntryId, baseline.headEntryId)
 })
 
-test('registered stop case times out instead of replaying or resuming an unconfirmed exit', async (t) => {
+test('registered stop case times out instead of replaying or resuming an unconfirmed exit', { timeout: 5_000 }, async (t) => {
   // 意图：退出确认永远不收敛时，case 只能超时失败，不能把 STOPPED 控制当作可续写，也不能重放或发 follow-up。
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] })
+  installFakeApplicationEvents(t)
   const ctx = createStopCaseContext({ exitConverges: false })
   let failure = null
   let settled = false
-  const run = withFakeApplicationEvents(() => getCase(CASE_ID).run(ctx))
+  const run = getCase(CASE_ID).run(ctx)
     .then(
       () => {
         settled = true
@@ -471,9 +472,9 @@ test('registered stop case times out instead of replaying or resuming an unconfi
     t.mock.timers.tick(100)
     ticks += 1
   }
+  assert.ok(settled, 'case must settle after the bounded quiescent wait')
   await run
 
-  assert.ok(settled, 'case must settle after the bounded quiescent wait')
   assert.ok(failure, 'unconfirmed exit must fail the case')
   assert.match(failure.message, /thread did not become quiescent/)
   assert.equal(ctx.replayCalls, 0)
