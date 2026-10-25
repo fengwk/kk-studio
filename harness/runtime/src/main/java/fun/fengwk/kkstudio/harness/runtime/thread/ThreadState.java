@@ -210,16 +210,6 @@ public record ThreadState(
     return copy(headEntryId, executionControl, inputThroughSequence, nextCommandSequence, now);
   }
 
-  /**
-   * 在同一 version 内预留 {@code count} 条 Command sequence 并推进 head：用于父 Thread 已停止时把系统通知直接固化到历史（命令与 head
-   * 必须一致）。{@code count} 必须为正。
-   */
-  public ThreadState reserveCommandSequencesAndAdvanceHead(
-      int count, UUID headEntryId, Instant now) {
-    return reserveCommandSequencesAdvanceHeadAndInput(
-        count, headEntryId, inputThroughSequence, now);
-  }
-
   /** 停止父线程固化通知：同一 version 内预留序号、推进 head，并把输入水位覆盖到这些已物化通知。水位不得回退。 */
   public ThreadState reserveCommandSequencesAdvanceHeadAndInput(
       int count, UUID headEntryId, long inputThroughSequence, Instant now) {

@@ -544,7 +544,9 @@ class HarnessRuntimeStopSubtreeTest {
           UUID userEntryId = tx.nextId();
           tx.insertEntry(userMessageEntry(userEntryId, root.sessionId(), turnStartEntryId, T1));
           ThreadState child = tx.lockThread(childId).orElseThrow();
-          tx.updateThread(child.reserveCommandSequencesAndAdvanceHead(1, userEntryId, T1));
+          tx.updateThread(
+              child.reserveCommandSequencesAdvanceHeadAndInput(
+                  1, userEntryId, child.inputThroughSequence(), T1));
 
           ThreadCommandPayload payload = userMessagePayload("delegated-task");
           ThreadCommand source =
