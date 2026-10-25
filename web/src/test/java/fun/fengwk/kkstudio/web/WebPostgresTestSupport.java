@@ -4,11 +4,14 @@ import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeEach;
 import org.postgresql.Driver;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
+import org.springframework.context.SmartLifecycle;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.SimpleDriverDataSource;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -17,6 +20,10 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionDispatcher;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRuntime;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogSnapshot;
+import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialRefreshDispatcher;
+import fun.fengwk.kkstudio.platform.storage.StorageMaintenance;
+import fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationLoop;
+import fun.fengwk.kkstudio.web.runtime.PluginCatalogRefresher;
 
 import javax.sql.DataSource;
 
@@ -26,6 +33,7 @@ import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -43,9 +51,17 @@ import java.util.UUID;
  *       的修订与值原样写回 {@code plugin_configuration}，使缓存复用的 Context 与库内配置一致；这里不重新 configure。
  * </ul>
  *
+ * <p>Schema 重置与后台数据库任务互斥：重置会 drop 并重建 {@code public} schema，因此 {@link #resetAndApplySchema} 先暂停本
+ * Context 中确已运行的数据库后台生命周期（两个 PostgreSQL notification loop、插件目录对账、凭据刷新、存储维护）， 待 schema 与 fixture
+ * seed/配置全部恢复后，只重启原先运行的那一组。这里按具体 bean 暂停而不是枚举全部 Spring 生命周期，也不永久 {@code close} 它们，因此 Web 服务器与本测试私有
+ * Processor 执行器不受影响。
+ *
+ * <p>{@link DirtiesContext} 按类关闭本类的 Context：其他测试类缓存的 Context 不会在本类完成 schema 重置后继续用各自的后台任务访问共享库。
+ *
  * <p>需要独立配置的 Runner 测试用 {@link #createIsolatedDatabase()} 在同一个物理容器上取自己的数据库。
  */
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT, classes = WebTestApplication.class)
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 public abstract class WebPostgresTestSupport {
 
   private static final String FLYWAY_DISABLED = "false";
@@ -90,6 +106,20 @@ public abstract class WebPostgresTestSupport {
 
   @Autowired private JdbcClient baselineJdbc;
 
+  @Autowired
+  @Qualifier("postgresqlNotificationLoop")
+  private PostgresqlNotificationLoop postgresqlNotificationLoop;
+
+  @Autowired
+  @Qualifier("realtimeNotificationLoop")
+  private PostgresqlNotificationLoop realtimeNotificationLoop;
+
+  @Autowired private PluginCatalogRefresher pluginCatalogRefresher;
+
+  @Autowired private PluginCredentialRefreshDispatcher pluginCredentialRefreshDispatcher;
+
+  @Autowired private StorageMaintenance storageMaintenance;
+
   @DynamicPropertySource
   static void overrideDataSource(DynamicPropertyRegistry registry) {
     // 新 Context 构造前先回到 baseline：启动时按本 Context 的安装定义写入默认配置，而不是沿用上一个测试类的配置。
@@ -110,11 +140,27 @@ public abstract class WebPostgresTestSupport {
 
   @BeforeEach
   final void resetAndApplySchema() throws Exception {
+    // 共享 Schema 即将被 drop 重建：只暂停本 Context 中确已运行、且会直接访问数据库的后台生命周期。
+    // 全部 stop 完成后才 reset；fixture seed 与配置恢复后只重启原先运行的那一组，不用 close（永久关闭）。
+    List<SmartLifecycle> pausedLifecycles =
+        databaseLifecycles().stream().filter(SmartLifecycle::isRunning).toList();
+    pausedLifecycles.forEach(SmartLifecycle::stop);
     try (Connection conn = newConnection()) {
       resetAndMigrateDevDatabase(conn);
       verifyDevSeed(conn);
     }
     persistBaselineConfigurations();
+    pausedLifecycles.forEach(SmartLifecycle::start);
+  }
+
+  /** 与共享 Schema 直接竞争的后台生命周期；不枚举或停止其他 Spring 生命周期和服务器。 */
+  private List<SmartLifecycle> databaseLifecycles() {
+    return List.of(
+        postgresqlNotificationLoop,
+        realtimeNotificationLoop,
+        pluginCatalogRefresher,
+        pluginCredentialRefreshDispatcher,
+        storageMaintenance);
   }
 
   /**
