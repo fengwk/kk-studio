@@ -352,7 +352,7 @@ describe('LspClient Protocol & Handshake', () => {
       const cleanupFailures: unknown[] = []
       if (client) {
         try {
-          await client.stop(0)
+          await bounded(client.stop(0), 'client scope cleanup')
         } catch (error) {
           cleanupFailures.push(error)
         }
@@ -410,7 +410,7 @@ describe('LspClient Protocol & Handshake', () => {
       await bounded(controlled.terminateStarted, 'stop scope termination')
 
       controlled.releaseCleanup()
-      const firstFailure: unknown = await client.stop(0).catch((error: unknown) => error)
+      const firstFailure: unknown = await bounded(client.stop(0), 'failed stop').catch((error: unknown) => error)
       expectedStopFailure = firstFailure
       expect(firstFailure).toBeInstanceOf(LspError)
       expect((firstFailure as LspError).message).toBe(
@@ -420,7 +420,7 @@ describe('LspClient Protocol & Handshake', () => {
       expect(finished).toBe(0)
 
       // 缓存的是同一次失败结论：重复 stop 不会重试终结，也不会据此补发确认。
-      const secondFailure: unknown = await client.stop(0).catch((error: unknown) => error)
+      const secondFailure: unknown = await bounded(client.stop(0), 'cached failed stop').catch((error: unknown) => error)
       expect(secondFailure).toBe(firstFailure)
       expect(controlled.terminateCalls).toBe(1)
       expect(finished).toBe(0)
@@ -430,7 +430,7 @@ describe('LspClient Protocol & Handshake', () => {
       const cleanupFailures: unknown[] = []
       if (client) {
         try {
-          await client.stop(0)
+          await bounded(client.stop(0), 'client scope cleanup')
         } catch (error) {
           // 只容忍本用例已观察到的同一缓存 stop 失败，其余清理异常仍然暴露。
           if (error !== expectedStopFailure) {
@@ -477,7 +477,7 @@ describe('LspClient Protocol & Handshake', () => {
       expect(controlled.terminateCalls).toBe(1)
       await awaitProcessGone(pid)
       // 已缓存的成功收尾结论：复用不再触发第二次终结。
-      await client.stop(500)
+      await bounded(client.stop(500), 'cached successful stop')
       expect(controlled.terminateCalls).toBe(1)
     } finally {
       // 先释放预置屏障，再分别完成客户端与真实子进程收尾；前者失败不能跳过后者。
@@ -485,7 +485,7 @@ describe('LspClient Protocol & Handshake', () => {
       const cleanupFailures: unknown[] = []
       if (client) {
         try {
-          await client.stop(0)
+          await bounded(client.stop(0), 'client scope cleanup')
         } catch (error) {
           cleanupFailures.push(error)
         }
