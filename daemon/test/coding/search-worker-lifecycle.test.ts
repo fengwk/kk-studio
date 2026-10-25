@@ -381,25 +381,32 @@ describe('参数校验与 Worker 创建隔离', () => {
       await close.call(this)
       throw new Error('injected spool close failure')
     })
-    const observed = confirmingContext(dir)
+    const controller = new AbortController()
+    const observed = confirmingContext(dir, { signal: controller.signal })
     const tracked = track(callCapability(find, 'fs.find', { pattern: '*', path: dir, limit: 1 }, observed.context))
-    const worker = await waitForWorker()
-    worker.emit('message', {
-      ok: true,
-      kind: 'find',
-      matches: ['found.txt'],
-      limitReached: false,
-      skipped: [],
-      stopReason: null,
-    })
-    worker.emit('exit', 0)
     try {
+      const worker = await waitForWorker()
+      worker.emit('message', {
+        ok: true,
+        kind: 'find',
+        matches: ['found.txt'],
+        limitReached: false,
+        skipped: [],
+        stopReason: null,
+      })
+      worker.emit('exit', 0)
       const result = await tracked.promise
       expect(result.error).toBe(true)
       expect(closeFailure).toHaveBeenCalledOnce()
       expect(observed.confirmations()).toBe(0)
     } finally {
-      closeFailure.mockRestore()
+      try {
+        // 准备或断言失败时也结束这次 Worker 等待，再恢复全局 prototype，避免下一项用到残留 spy。
+        controller.abort()
+        await tracked.promise
+      } finally {
+        closeFailure.mockRestore()
+      }
     }
   })
 

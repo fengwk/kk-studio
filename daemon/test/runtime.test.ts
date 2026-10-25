@@ -1406,6 +1406,7 @@ describe('runtime execution exit confirmation', () => {
     } finally {
       gate.resolve()
       setup.runtime.close()
+      await setup.runtime.awaitCompletion()
     }
   })
 
@@ -1506,6 +1507,7 @@ describe('runtime execution exit confirmation', () => {
     } finally {
       gate.resolve()
       setup.runtime.close()
+      await setup.runtime.awaitCompletion()
     }
   })
 
@@ -1603,6 +1605,7 @@ describe('runtime execution exit confirmation', () => {
     } finally {
       uploadGate.resolve()
       setup.runtime.close()
+      await setup.runtime.awaitCompletion()
     }
   })
 
