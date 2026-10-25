@@ -2973,10 +2973,11 @@ class ModelProcessorTest {
     }
   }
 
-  /** Executor 拒绝发生在 durable RUNNING 后：只 close 一次，close 成功才确认 NOT_STARTED 并唤醒 Thread。 */
+  /** Executor 拒绝发生在 durable RUNNING 后：close 成功才确认 NOT_STARTED，而不是 Studio body 已退出。 */
   @Test
   void rejectedExecutionReleasesAdmissionAndConfirmsNotStarted() {
     Fixture fixture = fixture();
+    AtomicReference<ExecutionExitFact> registered = new AtomicReference<>();
     ModelProcessor processor =
         new ModelProcessor(
             fixture.store,
@@ -2987,6 +2988,9 @@ class ModelProcessorTest {
             newScheduler(),
             Runnable::run,
             ignored -> {
+              registered.set(
+                  fixture.store.transaction(
+                      tx -> tx.loadUnconfirmedExecutions(fixture.baseline.threadId()).getFirst()));
               throw new RejectedExecutionException("rejected");
             });
     fixture.gateway.queueControlled();
@@ -3000,6 +3004,11 @@ class ModelProcessorTest {
           Boolean.TRUE.equals(
               fixture.store.transaction(
                   tx -> tx.loadUnconfirmedExecutions(fixture.baseline.threadId()).isEmpty())));
+      assertEquals(
+          ExecutionExitState.NOT_STARTED,
+          fixture.store.transaction(
+              tx -> tx.findExecution(registered.get().executionId()).orElseThrow().state()),
+          "the same registered fact must remain as NOT_STARTED, not disappear or claim body exit");
       assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).version());
       assertNotNull(
           work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId())));
@@ -3108,6 +3117,9 @@ class ModelProcessorTest {
           ProcessResult.STARTED,
           processor.process(claim(fixture.store, fixture.invocationId, "token-A")));
       assertNotNull(queued.get());
+      ExecutionExitFact registered =
+          fixture.store.transaction(
+              tx -> tx.loadUnconfirmedExecutions(fixture.baseline.threadId()).getFirst());
       assertTrue(processor.cancel(fixture.invocationId));
       assertFalse(processor.hasActiveExecution());
 
@@ -3119,6 +3131,11 @@ class ModelProcessorTest {
           fixture.store.transaction(
               tx -> tx.loadUnconfirmedExecutions(fixture.baseline.threadId()));
       assertTrue(unconfirmed.isEmpty(), "close success confirms the generation NOT_STARTED");
+      assertEquals(
+          ExecutionExitState.NOT_STARTED,
+          fixture.store.transaction(
+              tx -> tx.findExecution(registered.executionId()).orElseThrow().state()),
+          "a queued execution that never entered body cannot claim STUDIO_EXITED");
       assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).version());
       assertEquals(
           1,
