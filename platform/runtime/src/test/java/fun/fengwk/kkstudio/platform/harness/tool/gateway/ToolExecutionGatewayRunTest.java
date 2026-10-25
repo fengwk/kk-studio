@@ -790,35 +790,11 @@ class ToolExecutionGatewayRunTest {
   void catalogCloseFailureStillReleasesTheQuota() {
     ToolGatewayTestSupport.FakeTool tool = new ToolGatewayTestSupport.FakeTool(DESCRIPTOR);
     tool.body = (request, progress) -> ToolOutcome.withoutEffects(result("call-1"));
-    RuntimeToolCatalogSource delegate =
-        TestRuntimeToolCatalogSource.of(ToolGatewayTestSupport.defaultCatalog(tool));
     IllegalStateException closeFailure = new IllegalStateException("catalog close failed");
     RuntimeToolCatalogSource failingClose =
-        () -> {
-          RuntimeToolCatalogSource.Lease lease = delegate.acquire();
-          return new RuntimeToolCatalogSource.Lease() {
-            @Override
-            public HarnessCatalog harnessCatalog() {
-              return lease.harnessCatalog();
-            }
-
-            @Override
-            public RuntimeToolCatalog catalog() {
-              return lease.catalog();
-            }
-
-            @Override
-            public ToolContribution require(ToolBinding binding) {
-              return lease.require(binding);
-            }
-
-            @Override
-            public void close() {
-              lease.close();
-              throw closeFailure;
-            }
-          };
-        };
+        failingCloseCatalogSource(
+            TestRuntimeToolCatalogSource.of(ToolGatewayTestSupport.defaultCatalog(tool)),
+            closeFailure);
     ConcurrencyAdmission admission = new ConcurrencyAdmission(1);
     ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
@@ -835,6 +811,49 @@ class ToolExecutionGatewayRunTest {
 
     assertSame(closeFailure, assertThrows(IllegalStateException.class, run::close));
     admission.tryAcquire().orElseThrow().close();
+  }
+
+  /**
+   * 故障对照：执行中主断言失败后仍须实际 join worker 并调用 Run.close；关闭失败只能作为 suppressed 保留在原始 AssertionError
+   * 上。仅覆盖该窗口，不声称完整故障矩阵。
+   */
+  @Test
+  void primaryAssertionFailureSurvivesWorkerExitAndRunCloseFailure() {
+    AssertionError primary = new AssertionError("primary fixture failure");
+    IllegalStateException closeFailure = new IllegalStateException("catalog close failed");
+    ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
+    ToolExecutionGateway gateway =
+        ToolGatewayTestSupport.gateway(
+            failingCloseCatalogSource(
+                TestRuntimeToolCatalogSource.of(ToolGatewayTestSupport.defaultCatalog()),
+                closeFailure),
+            transport,
+            store,
+            ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
+            ToolGatewayTestSupport.settings(PermissionAction.ALLOW),
+            new ConcurrencyAdmission(1));
+    ToolGateway.Run run =
+        ToolGatewayTestSupport.admitted(
+            gateway,
+            ToolGatewayTestSupport.environmentRequest("call-1", ToolGatewayTestSupport.ENV_A));
+    AtomicReference<ToolGateway.Completion> completion = new AtomicReference<>();
+    Thread worker = Thread.ofVirtual().start(() -> completion.set(run.execute(partial -> {})));
+
+    AssertionError thrown =
+        assertThrows(
+            AssertionError.class,
+            () -> {
+              try {
+                awaitInvocation(transport);
+                throw primary;
+              } finally {
+                closeRunAfterWorkerExit(worker, run);
+              }
+            });
+
+    assertSame(primary, thrown);
+    assertArrayEquals(new Throwable[] {closeFailure}, thrown.getSuppressed());
+    assertInstanceOf(ToolGateway.Cancelled.class, completion.get());
   }
 
   private ToolGateway.Completion runEnvironmentThen(
@@ -878,6 +897,36 @@ class ToolExecutionGatewayRunTest {
     } finally {
       run.close();
     }
+  }
+
+  /** 包装真实目录租约：委托关闭后抛出固定失败，用于验证 Run 关闭错误不会覆盖主失败。 */
+  private static RuntimeToolCatalogSource failingCloseCatalogSource(
+      RuntimeToolCatalogSource delegate, RuntimeException closeFailure) {
+    return () -> {
+      RuntimeToolCatalogSource.Lease lease = delegate.acquire();
+      return new RuntimeToolCatalogSource.Lease() {
+        @Override
+        public HarnessCatalog harnessCatalog() {
+          return lease.harnessCatalog();
+        }
+
+        @Override
+        public RuntimeToolCatalog catalog() {
+          return lease.catalog();
+        }
+
+        @Override
+        public ToolContribution require(ToolBinding binding) {
+          return lease.require(binding);
+        }
+
+        @Override
+        public void close() {
+          lease.close();
+          throw closeFailure;
+        }
+      };
+    };
   }
 
   private static void awaitInvocation(ToolGatewayTestSupport.FakeTransport transport)
