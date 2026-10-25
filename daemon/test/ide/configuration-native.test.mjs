@@ -162,8 +162,6 @@ exports.activate = async () => {
       let closed
       let childClosed = true
       let page
-      let bodyFailure
-      let cleanupFailure = false
       try {
         ;({ child, closed } = spawnTracked(join(runtime, 'lib', process.platform === 'win32' ? 'node.exe' : 'node'), [
           join(runtime, 'out/node/entry.js'), '--auth', 'none', '--bind-addr', '127.0.0.1:0',
@@ -198,14 +196,13 @@ exports.activate = async () => {
         }
         snapshots.push(JSON.parse(snapshot))
       } catch (error) {
-        bodyFailure = error
+        failures.push(error)
       } finally {
         // Page failures must not bypass terminating and joining the real code-server child.
-        const cleanupFailures = []
         try {
           await page?.close()
         } catch (error) {
-          cleanupFailures.push(error)
+          failures.push(error)
         }
         if (child) {
           try {
@@ -214,21 +211,14 @@ exports.activate = async () => {
           } catch (error) {
             // Only the real 'close' event may make the profiles removable.
             childClosed = error.childClosed === true
-            cleanupFailures.push(error)
+            failures.push(error)
           }
         }
         if (!childClosed) {
           rootRemovable = false
         }
-        if (bodyFailure) {
-          failures.push(bodyFailure)
-        }
-        if (cleanupFailures.length > 0) {
-          cleanupFailure = true
-          failures.push(...cleanupFailures)
-        }
       }
-      if (bodyFailure || cleanupFailure) {
+      if (failures.length > 0) {
         break
       }
     }
