@@ -601,7 +601,7 @@ public final class ToolExecutionGateway implements ToolGateway {
     /**
      * 以本地失败收敛尚未完成的 terminal，并终止远端在途执行。
      *
-     * <p>terminal 已由真实终态完成时不重复终止：远端已经结束，异常按原路径分类。清理异常只附加为 suppressed。
+     * <p>terminal 已由结果终态完成时不重复终止，异常按原路径分类；远端退出仍等待独立 ACK。清理异常只附加为 suppressed。
      */
     private static void releaseInFlight(
         CompletableFuture<EnvironmentCapabilityResult> terminal,
