@@ -761,9 +761,15 @@ export class LspClient {
         options.onRequestFinished?.()
       }
     }
-    const exitPromise = this.managed.exit.then((exit) => {
+    const exitPromise = this.managed.exit.then(async (exit) => {
       this.hasExited = true
       this.exitCode = exit.exitCode
+      // ManagedProcess.exit 只是可用性报告（命令退出或 helper fallback），不等于受管范围已经收尾。
+      // 需要确认的请求必须等待同一个 stopPromise 给出成功结论；失败或仍在等待时保持未确认，也不重试。
+      // 内部 shutdown 请求没有 onRequestFinished，因此不会反过来等待自己所属的 stop。
+      if (options.onRequestFinished) {
+        await this.stop(0)
+      }
       confirmExit()
       const code = exit.exitCode != null ? String(exit.exitCode) : 'unknown'
       throw new LspError(`LSP server '${this.server.id}' exited (exit code ${code})`)

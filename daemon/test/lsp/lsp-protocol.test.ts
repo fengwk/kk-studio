@@ -13,7 +13,24 @@ import {
   receivedMessages,
   sentMessages,
 } from './fake-lsp-helper.js'
+import { ExitBarrierSupervisor } from './exit-barrier-supervisor.js'
 import { TestProcessSupervisor } from './test-process-supervisor.js'
+
+/** Bounded wait for a real callback; it never treats elapsed time as proof of anything. */
+function bounded<T>(promise: Promise<T>, description: string, timeoutMillis = 5000): Promise<T> {
+  let timer: NodeJS.Timeout | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`timed out waiting for ${description}`)),
+      timeoutMillis,
+    )
+  })
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer !== undefined) {
+      clearTimeout(timer)
+    }
+  })
+}
 
 describe('LspClient Protocol & Handshake', () => {
   let tempDir: string
@@ -253,8 +270,13 @@ describe('LspClient Protocol & Handshake', () => {
     const file = path.join(tempDir, 'App.java')
     fs.writeFileSync(file, 'class App {}\n')
     let finished = 0
+    let confirmFinished!: () => void
+    const confirmed = new Promise<void>((resolve) => {
+      confirmFinished = resolve
+    })
     const request = client.definition(file, 1, 0, undefined, () => {
       finished += 1
+      confirmFinished()
     })
     const rejected = expect(request).rejects.toThrow(/LSP request failed/)
     await awaitEvent(
@@ -268,7 +290,133 @@ describe('LspClient Protocol & Handshake', () => {
     expect(receivedMessages(transcript, 'textDocument/definition')).toHaveLength(1)
     // 正向对照：本地等待已结束，但实际进程退出后仍必须交付一次迟到确认。
     await client.stop(0)
+    await bounded(confirmed, 'late exit confirmation')
     expect(finished).toBe(1)
+  })
+
+  it('confirms an exit-reported request only after the stop scope finishes', async () => {
+    const transcript = path.join(tempDir, `exit-scope-${Date.now()}.jsonl`)
+    const config = fakeServerConfig('fake', 'slow-definition', transcript)
+    const controlled = new ExitBarrierSupervisor()
+    const client = await LspClient.launch(config, tempDir, config.command[0]!, controlled)
+    try {
+      await client.initialize(5000)
+      const file = path.join(tempDir, 'App.java')
+      fs.writeFileSync(file, 'class App {}\n')
+
+      let finished = 0
+      let confirmFinished!: () => void
+      const confirmed = new Promise<void>((resolve) => {
+        confirmFinished = resolve
+      })
+      const request = client.definition(file, 1, 0, undefined, () => {
+        finished += 1
+        confirmFinished()
+      })
+      const rejected = expect(request).rejects.toThrow(/LSP (?:client stopped|server 'fake' exited)/)
+
+      // 目标 RPC 必须真实进入 fixture；onRequestSent 只证明 SDK 开始发送。
+      await awaitEvent(
+        transcript,
+        (event) => event.event === 'recv' && event.message?.method === 'textDocument/definition',
+      )
+      expect(receivedMessages(transcript, 'textDocument/definition')).toHaveLength(1)
+
+      // 退出报告已处理、本地请求已结束，但受管范围的 cleanup gate 尚未释放。
+      controlled.reportExit()
+      await rejected
+      expect(finished).toBe(0)
+      expect(client.isAlive()).toBe(false)
+      await bounded(controlled.terminateStarted, 'stop scope termination')
+
+      controlled.releaseCleanup()
+      await bounded(confirmed, 'request exit confirmation')
+      expect(finished).toBe(1)
+    } finally {
+      controlled.releaseCleanup()
+      await controlled.close()
+      fs.rmSync(tempDir, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps an exit-reported request unconfirmed when the same stop scope fails, without retrying', async () => {
+    const transcript = path.join(tempDir, `exit-scope-failure-${Date.now()}.jsonl`)
+    const config = fakeServerConfig('fake', 'slow-definition', transcript)
+    const controlled = new ExitBarrierSupervisor(new Error('deferred termination boom'))
+    const client = await LspClient.launch(config, tempDir, config.command[0]!, controlled)
+    try {
+      await client.initialize(5000)
+      const file = path.join(tempDir, 'App.java')
+      fs.writeFileSync(file, 'class App {}\n')
+
+      let finished = 0
+      const request = client.definition(file, 1, 0, undefined, () => {
+        finished += 1
+      })
+      const rejected = expect(request).rejects.toThrow(/LSP (?:client stopped|server 'fake' exited)/)
+      await awaitEvent(
+        transcript,
+        (event) => event.event === 'recv' && event.message?.method === 'textDocument/definition',
+      )
+      expect(receivedMessages(transcript, 'textDocument/definition')).toHaveLength(1)
+
+      controlled.reportExit()
+      await rejected
+      expect(finished).toBe(0)
+      await bounded(controlled.terminateStarted, 'stop scope termination')
+
+      controlled.releaseCleanup()
+      const firstFailure: unknown = await client.stop(0).catch((error: unknown) => error)
+      expect(firstFailure).toBeInstanceOf(LspError)
+      expect((firstFailure as LspError).message).toBe(
+        'LSP server process termination failed during shutdown',
+      )
+      expect(controlled.terminateCalls).toBe(1)
+      expect(finished).toBe(0)
+
+      // 缓存的是同一次失败结论：重复 stop 不会重试终结，也不会据此补发确认。
+      const secondFailure: unknown = await client.stop(0).catch((error: unknown) => error)
+      expect(secondFailure).toBe(firstFailure)
+      expect(controlled.terminateCalls).toBe(1)
+      expect(finished).toBe(0)
+    } finally {
+      controlled.releaseCleanup()
+      await controlled.close()
+      fs.rmSync(tempDir, { recursive: true, force: true })
+    }
+  })
+
+  it('does not self-wait when an explicit stop observes the exit report during shutdown', async () => {
+    const transcript = path.join(tempDir, `exit-during-shutdown-${Date.now()}.jsonl`)
+    const config = fakeServerConfig('fake', 'stubborn', transcript)
+    const controlled = new ExitBarrierSupervisor()
+    const client = await LspClient.launch(config, tempDir, config.command[0]!, controlled)
+    try {
+      await client.initialize(5000)
+      const started = await awaitEvent(transcript, (event) => event.event === 'start')
+      const pid = started.pid!
+
+      const stopping = client.stop(500)
+      await awaitEvent(
+        transcript,
+        (event) => event.event === 'recv' && event.message?.method === 'shutdown',
+      )
+      // shutdown 正在等待响应时收到退出报告：内部请求不能反过来等待同一个 stopPromise。
+      controlled.reportExit()
+      await bounded(controlled.terminateStarted, 'stop scope termination')
+      controlled.releaseCleanup()
+      await bounded(stopping, 'explicit stop')
+
+      expect(controlled.terminateCalls).toBe(1)
+      await awaitProcessGone(pid)
+      // 已缓存的成功收尾结论：复用不再触发第二次终结。
+      await client.stop(500)
+      expect(controlled.terminateCalls).toBe(1)
+    } finally {
+      controlled.releaseCleanup()
+      await controlled.close()
+      fs.rmSync(tempDir, { recursive: true, force: true })
+    }
   })
 
   it('confirms a real server error response as request completion', async () => {
