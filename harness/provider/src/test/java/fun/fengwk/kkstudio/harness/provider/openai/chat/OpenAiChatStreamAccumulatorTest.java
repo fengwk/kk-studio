@@ -1306,6 +1306,36 @@ class OpenAiChatStreamAccumulatorTest {
     assertEquals(12L, usage.reasoningTokens());
   }
 
+  /**
+   * 测试意图：合法终止与完整 mandatory usage 下，reasoning_tokens 超出 completion_tokens 属于协议非法值， 必须由 finish() 以
+   * INVALID_RESPONSE 报告，而不是泄漏 ModelUsage 构造器的 IllegalArgumentException。
+   */
+  @Test
+  @DisplayName("reasoning_tokens 超过 completion_tokens 映射为 INVALID_RESPONSE")
+  void rejectsReasoningTokensExceedingCompletionTokens() {
+    OpenAiChatStreamAccumulator accumulator = createAccumulator();
+    accumulator.handleData(
+        "{\"choices\":[{\"delta\":{\"content\":\"answer\"},\"finish_reason\":\"stop\"}]}");
+    accumulator.handleData(
+        """
+        {
+          "usage": {
+            "prompt_tokens": 10,
+            "completion_tokens": 5,
+            "total_tokens": 15,
+            "completion_tokens_details": {
+              "reasoning_tokens": 6
+            }
+          }
+        }
+        """);
+    accumulator.handleData("[DONE]");
+
+    ProviderException error = assertThrows(ProviderException.class, accumulator::finish);
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind());
+    assertEquals("reasoning tokens exceed completion tokens", error.getMessage());
+  }
+
   /** 2026-10-24 DeepSeek 代表的真实 usage 数字；终止帧是合成外壳，不是完整原始响应。 */
   @Test
   void deepseekObservedUsageKeepsReasoningInsideOutput() throws Exception {
