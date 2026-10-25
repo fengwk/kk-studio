@@ -69,7 +69,7 @@ import java.util.function.Supplier;
  *
  * <p><b>实例身份与重连恢复：</b>调用只按 {@code (environmentId, invocationId)} 关联，物理连接失效不终结在途调用。同一 {@code
  * daemonInstanceId} 再次 READY 时，核心以相同 invocationId 恢复每个在途调用：只发送取消意图，绝不重发 INVOKE；Daemon 从 journal
- * 重放既有事实或停止仍运行的 scope。只有身份不同的新 daemon 进程接管该 Environment 时，旧的在途调用才被判定为结果不确定（exactly-once 通知）。
+ * 重放既有事实或停止仍运行的 scope。身份不同的新 daemon 进程接管该 Environment 时，旧的在途调用被判定为结果不确定（exactly-once 通知）。
  *
  * <p><b>终态唯一与回调顺序：</b>COMPLETED/FAILED/CANCELLED 回调、连接清理与显式 {@link #expire} 竞争时只有一个赢家；已知 invocation
  * 的迟到 STARTED/PROGRESS 静默丢弃，未知 invocation 的回调按协议违规关闭连接。并发 {@code receive} 下 listener 回调 仍严格按该连接
@@ -251,7 +251,7 @@ public final class EnvironmentDaemonServer
    * 回调积压达到每连接上界时的 fail-closed 收敛：关闭连接，并把该 Environment 仍在途的调用一次性回收为结果不确定。
    *
    * <p>已入队的批次仍由当前 drainer 按顺序执行，回收回调追加在同一队列尾部，因此不会出现迟到 partial 晚于 terminal；被回收的 invocation 同时登记
-   * tombstone，接管或重连重放的帧不再触发第二次终态。该路径与实例接管同语义：旧进程不可能再给出终态。
+   * tombstone，接管或重连后迟到的帧不再触发第二次终态。本地结果收敛不证明旧进程或其执行范围已经退出。
    */
   private void failCallbackBacklog(ConnectionState state) {
     EnvironmentId environmentId = state.environmentId;

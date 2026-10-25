@@ -1622,7 +1622,7 @@ class EnvironmentDaemonServerTest {
               });
       assertTrue(closeStarted.await(5, TimeUnit.SECONDS), "关闭任务必须在有界时间内发起");
 
-      // close 正在等待同一 state monitor；释放受控 offer 后两边才能真实完成。
+      // 关闭任务已发起；释放受控 offer 后分别等待两个任务的真实完成。
       first.releaseOffer();
       closing.get(5, TimeUnit.SECONDS);
       cancelling.get(5, TimeUnit.SECONDS);
