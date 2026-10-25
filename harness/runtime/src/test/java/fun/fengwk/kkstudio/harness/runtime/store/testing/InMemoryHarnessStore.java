@@ -1037,6 +1037,19 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     @Override
+    public boolean hasIncompleteOwnerChildJoin(UUID parentThreadId) {
+      checkOpen();
+      Objects.requireNonNull(parentThreadId, "parentThreadId");
+      return state.joins.values().stream()
+          .anyMatch(
+              join ->
+                  parentThreadId.equals(join.parentThreadId())
+                      && !join.matched()
+                      && join.supersededByInvocationId() == null
+                      && join.delivery() == JoinDelivery.SETTLE_OWNER_TURN);
+    }
+
+    @Override
     public void lockJoinAdmission() {
       checkOpen();
       if (joinAdmissionLocked) {

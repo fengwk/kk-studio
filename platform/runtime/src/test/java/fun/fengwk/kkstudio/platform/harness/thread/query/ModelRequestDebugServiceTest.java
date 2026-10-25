@@ -490,6 +490,7 @@ class ModelRequestDebugServiceTest {
         List.of(),
         0,
         false,
+        false,
         false);
   }
 
@@ -521,6 +522,7 @@ class ModelRequestDebugServiceTest {
         List.of(),
         List.of(),
         0,
+        false,
         false,
         false);
   }

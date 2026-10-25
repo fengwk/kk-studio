@@ -169,7 +169,17 @@ public final class HarnessRuntimeTestFixtures {
   public static ThreadSnapshot idleSnapshot() {
     EntryPath path = new EntryPath(List.of(rootEntry()));
     return new ThreadSnapshot(
-        thread(id(1)), path, List.of(), null, List.of(), List.of(), List.of(), 0, false, false);
+        thread(id(1)),
+        path,
+        List.of(),
+        null,
+        List.of(),
+        List.of(),
+        List.of(),
+        0,
+        false,
+        false,
+        false);
   }
 
   /** rename 后的权威 IDLE 快照：Thread name/version 与 {@link #renamedThread} 一致。 */
@@ -184,6 +194,7 @@ public final class HarnessRuntimeTestFixtures {
         List.of(),
         List.of(),
         0,
+        false,
         false,
         false);
   }
@@ -201,6 +212,7 @@ public final class HarnessRuntimeTestFixtures {
         List.of(),
         0,
         false,
+        false,
         false);
   }
 
@@ -216,6 +228,7 @@ public final class HarnessRuntimeTestFixtures {
         List.of(),
         List.of(),
         0,
+        false,
         false,
         false);
   }
@@ -233,6 +246,7 @@ public final class HarnessRuntimeTestFixtures {
         List.of(),
         0,
         false,
+        false,
         false);
   }
 
@@ -248,6 +262,7 @@ public final class HarnessRuntimeTestFixtures {
         List.of(),
         List.of(),
         0,
+        false,
         false,
         false);
   }
@@ -286,6 +301,7 @@ public final class HarnessRuntimeTestFixtures {
         List.of(),
         0,
         false,
+        false,
         false);
   }
 
@@ -316,6 +332,7 @@ public final class HarnessRuntimeTestFixtures {
         List.of(),
         List.of(),
         0,
+        false,
         false,
         false);
   }

@@ -50,6 +50,7 @@ class HarnessStoreContractTest {
               "lockJoinAdmission",
               "listChildren",
               "countIncompleteChildJoins",
+              "hasIncompleteOwnerChildJoin",
               "countIncompleteSubagentJoins",
               "insertJoin",
               "findJoin",

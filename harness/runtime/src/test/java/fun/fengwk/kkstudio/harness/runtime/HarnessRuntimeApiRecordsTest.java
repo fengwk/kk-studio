@@ -507,7 +507,7 @@ class HarnessRuntimeApiRecordsTest {
                 T0));
     ThreadSnapshot snapshot =
         new ThreadSnapshot(
-            thread, path, queued, null, List.of(), List.of(), List.of(), 0, false, false);
+            thread, path, queued, null, List.of(), List.of(), List.of(), 0, false, false, false);
     assertEquals(1, snapshot.queuedCommands().size());
     assertThrows(UnsupportedOperationException.class, () -> snapshot.queuedCommands().add(null));
     assertThrows(UnsupportedOperationException.class, () -> snapshot.toolSiblings().add(null));
@@ -515,27 +515,29 @@ class HarnessRuntimeApiRecordsTest {
         IllegalArgumentException.class,
         () ->
             new ThreadSnapshot(
-                thread, path, queued, null, List.of(), List.of(), List.of(), -1, false, false));
+                thread, path, queued, null, List.of(), List.of(), List.of(), -1, false, false,
+                false));
     assertThrows(
         NullPointerException.class,
         () ->
             new ThreadSnapshot(
-                null, path, queued, null, List.of(), List.of(), List.of(), 0, false, false));
+                null, path, queued, null, List.of(), List.of(), List.of(), 0, false, false, false));
     assertThrows(
         NullPointerException.class,
         () ->
             new ThreadSnapshot(
-                thread, null, queued, null, List.of(), List.of(), List.of(), 0, false, false));
+                thread, null, queued, null, List.of(), List.of(), List.of(), 0, false, false,
+                false));
     assertThrows(
         NullPointerException.class,
         () ->
             new ThreadSnapshot(
-                thread, path, null, null, List.of(), List.of(), List.of(), 0, false, false));
+                thread, path, null, null, List.of(), List.of(), List.of(), 0, false, false, false));
     assertThrows(
         NullPointerException.class,
         () ->
             new ThreadSnapshot(
-                thread, path, queued, null, null, List.of(), List.of(), 0, false, false));
+                thread, path, queued, null, null, List.of(), List.of(), 0, false, false, false));
   }
 
   @Test

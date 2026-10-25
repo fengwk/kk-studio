@@ -124,6 +124,27 @@ public abstract class HarnessStoreJoinContract {
         updatedAt);
   }
 
+  /** 构造直接 owner 结算义务 Join；除 delivery 外与普通父 Join 相同。 */
+  private static ThreadJoin settleOwnerJoin(
+      UUID invocationId, UUID parentThreadId, UUID childThreadId, long sourceCommandSequence) {
+    return new ThreadJoin(
+        invocationId,
+        REQUEST_HASH,
+        parentThreadId,
+        childThreadId,
+        sourceCommandSequence,
+        "test-agent",
+        10,
+        0L,
+        null,
+        null,
+        null,
+        T0,
+        T0,
+        JoinDelivery.SETTLE_OWNER_TURN,
+        null);
+  }
+
   /** 构造携带显式 terminal / final answer / delivery 凭据的 Join，用于终止状态与不可变性校验。 */
   private static ThreadJoin joinReceipts(
       UUID invocationId,
@@ -1905,6 +1926,101 @@ public abstract class HarnessStoreJoinContract {
           assertEquals(1, tx.countIncompleteChildJoins(childId1));
           return null;
         });
+  }
+
+  @Test
+  void hasIncompleteOwnerChildJoinMatchesOnlyUnmatchedOwnerSettlementJoins() {
+    // 测试意图：owner 结算义务只识别直接 parent 下未冻结、未被 supersede 的 SETTLE_OWNER_TURN Join；
+    // NOTIFY_PARENT、已匹配及其他父 Thread 的 Join 都不计入。
+    UUID rootId = baseline.threadId();
+    UUID notifyChildId = createChildThread(rootId, baseline.sessionId(), baseline.rootEntryId());
+    UUID settleChildId = createChildThread(rootId, baseline.sessionId(), baseline.rootEntryId());
+    UUID supersededChildId =
+        createChildThread(rootId, baseline.sessionId(), baseline.rootEntryId());
+    UUID nonExistentParentId = store.transaction(HarnessStore.Transaction::nextId);
+
+    insertCommand(notifyChildId, 1L, TestIds.id(1));
+    insertCommand(settleChildId, 1L, TestIds.id(2));
+    insertCommand(supersededChildId, 1L, TestIds.id(3));
+    insertCommand(supersededChildId, 2L, TestIds.id(4));
+
+    store.transaction(
+        tx -> {
+          assertFalse(tx.hasIncompleteOwnerChildJoin(rootId));
+          assertFalse(tx.hasIncompleteOwnerChildJoin(nonExistentParentId));
+          return null;
+        });
+
+    UUID notifyJoinId = TestIds.id(811);
+    UUID settleJoinId = TestIds.id(812);
+    UUID supersededJoinId = TestIds.id(813);
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(notifyChildId);
+          tx.insertJoin(initialJoin(notifyJoinId, rootId, notifyChildId, 1L));
+
+          tx.lockThread(settleChildId);
+          tx.insertJoin(settleOwnerJoin(settleJoinId, rootId, settleChildId, 1L));
+        });
+
+    store.transaction(
+        tx -> {
+          assertTrue(tx.hasIncompleteOwnerChildJoin(rootId));
+          assertFalse(tx.hasIncompleteOwnerChildJoin(settleChildId));
+          assertFalse(tx.hasIncompleteOwnerChildJoin(nonExistentParentId));
+          return null;
+        });
+
+    // 冻结结果后不再构成未完成义务。
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(settleChildId);
+          tx.updateJoin(
+              tx.findJoin(settleJoinId).orElseThrow().match(baseline.rootEntryId(), null, T1));
+        });
+    store.transaction(
+        tx -> {
+          assertFalse(tx.hasIncompleteOwnerChildJoin(rootId));
+          return null;
+        });
+
+    // 新的未匹配义务可见；被后续续接 supersede 后不再计入。
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(supersededChildId);
+          tx.insertJoin(settleOwnerJoin(supersededJoinId, rootId, supersededChildId, 1L));
+        });
+    store.transaction(
+        tx -> {
+          assertTrue(tx.hasIncompleteOwnerChildJoin(rootId));
+          return null;
+        });
+    inTransaction(
+        store,
+        tx -> {
+          UUID successorJoinId = TestIds.id(814);
+          tx.lockThread(supersededChildId);
+          // 接管 Join 必须是真实存在的后续 Join；这里用 NOTIFY_PARENT 证明它不会冒充 owner 结算义务。
+          tx.insertJoin(initialJoin(successorJoinId, rootId, supersededChildId, 2L));
+          tx.updateJoin(
+              tx.findJoin(supersededJoinId).orElseThrow().superseded(successorJoinId, T1));
+        });
+    store.transaction(
+        tx -> {
+          assertFalse(tx.hasIncompleteOwnerChildJoin(rootId));
+          return null;
+        });
+  }
+
+  @Test
+  void hasIncompleteOwnerChildJoinRejectsNullArgument() {
+    // 测试意图：查询参数不能为 null。
+    assertThrows(
+        NullPointerException.class,
+        () -> inTransaction(store, tx -> tx.hasIncompleteOwnerChildJoin(null)));
   }
 
   @Test

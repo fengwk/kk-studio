@@ -43,7 +43,8 @@ public record ThreadSnapshot(
     List<StoppedThreadReceipt> stopReceipts,
     int incompleteChildJoins,
     boolean unconsumedAppliedNotifications,
-    boolean hasUnconfirmedExecution) {
+    boolean hasUnconfirmedExecution,
+    boolean hasIncompleteOwnerChildJoin) {
 
   public ThreadSnapshot {
     thread = Objects.requireNonNull(thread, "thread");
@@ -63,7 +64,8 @@ public record ThreadSnapshot(
    * ThreadRuntimeStatus#IDLE}），与持久执行控制 {@link ThreadExecutionControl} 正交（STOP 绝不直接覆盖本状态）。
    *
    * <ul>
-   *   <li>本地活跃流程未结束（活跃 Model/Tool/Continuation/pending apply 或 open compaction）投影为 {@code RUNNING}；
+   *   <li>本地活跃流程未结束（活跃 Model/Tool/Continuation/pending apply、自身 open owner COMPACTION，或尚未冻结的
+   *       SETTLE_OWNER_TURN 直接子 Join）投影为 {@code RUNNING}；
    *   <li>待启动输入需求仅在 {@code RUNNABLE} 下体现为本地待启动 {@code RUNNING}；{@code STOPPED} 下保留通知不自启，不得显示为
    *       RUNNING；
    *   <li>本地已让出执行但存在未完成直接 NOTIFY_PARENT 子任务（{@code incompleteChildJoins > 0}）投影为 {@code WAITING}；
@@ -82,12 +84,13 @@ public record ThreadSnapshot(
                         && start.reason() == TurnStartReason.COMPACTION
                         && thread.id().equals(start.ownerThreadId()))
             .orElse(false);
+    boolean hasCompactionObligation = hasOpenCompaction || hasIncompleteOwnerChildJoin;
     boolean hasInputDemand =
         ThreadInputDemand.hasQueuedDemand(queuedCommands) || unconsumedAppliedNotifications;
     return ThreadActivityEvaluator.evaluate(
         thread.executionControl(),
         context,
-        hasOpenCompaction,
+        hasCompactionObligation,
         hasInputDemand,
         incompleteChildJoins,
         hasUnconfirmedExecution);
