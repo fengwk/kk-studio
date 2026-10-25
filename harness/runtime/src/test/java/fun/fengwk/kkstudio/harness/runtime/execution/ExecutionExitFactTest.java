@@ -121,16 +121,17 @@ class ExecutionExitFactTest {
                 OTHER_LEASE,
                 ExecutionExitKind.REMOTE,
                 TOOL_EXECUTION_ID)),
+        // MODEL/TOOL 都是合法的无父代事实；kind 负例不能同时改变 parent，否则会掩盖漏掉 kind 的比较。
         Arguments.of(
             "kind",
-            remote,
+            tool(),
             unconfirmed(
-                REMOTE_EXECUTION_ID,
+                TOOL_EXECUTION_ID,
                 THREAD_ID,
                 INVOCATION_ID,
                 1,
                 LEASE,
-                ExecutionExitKind.TOOL,
+                ExecutionExitKind.MODEL,
                 null)),
         Arguments.of(
             "parentExecutionId",
@@ -192,7 +193,14 @@ class ExecutionExitFactTest {
     ExecutionExitFact tool = tool();
 
     assertDoesNotThrow(() -> remote.requireRemoteParent(tool));
-    assertThrows(IllegalArgumentException.class, () -> remote.requireRemoteParent(model()));
+    // 除 kind 外与合法 TOOL 父代完全相同，确保拒绝原因不是另一执行 id。
+    ExecutionExitFact modelParent =
+        unconfirmed(
+            TOOL_EXECUTION_ID, THREAD_ID, INVOCATION_ID, 1, LEASE, ExecutionExitKind.MODEL, null);
+    assertEquals(
+        "remote execution parent must be the same generation's TOOL execution",
+        assertThrows(IllegalArgumentException.class, () -> remote.requireRemoteParent(modelParent))
+            .getMessage());
     assertThrows(
         IllegalArgumentException.class,
         () ->
