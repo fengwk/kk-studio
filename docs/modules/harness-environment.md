@@ -336,6 +336,7 @@ COMPLETED
 `COMPLETED`/`FAILED`/`CANCELLED` 回调、实例接管与显式 `expire` 竞争时只有一个赢家；已终结 invocation 的标识由 `MAX_INVOCATION_TOMBSTONES = 1024` 的有界 tombstone 记录，超限时淘汰最旧条目。
 
 - `expire(handle)` 由调用方在自身 deadline 上判定超时：它至多发送一次 `CANCEL`，不向 listener 补发终态，并把该 invocation 移出重放集合，之后到达的 daemon 终态被 tombstone 静默丢弃。同一有界 tombstone 保留原 listener 与发起调用时的 daemon 身份：随后真正到来的空 `EXECUTION_EXITED` 仍调用 `onExitConfirmed()` 一次。其它 daemon 身份、重复帧和非空 payload 都不确认。条目被容量淘汰后不再保留 listener 或 daemon 身份，迟到确认不再交付；此时该帧与未知 invocation 一样按协议违规关闭连接，关闭本身不是退出证据。退出确认与结果终态无关，取消、超时和断连本身不产生它。若终态或 `expire` 已移除活动调用而退出确认尚未交付，同一 daemon 实例重新 READY 时只为该 tombstone 重发一次 `CANCEL`，让 Daemon 从 journal 重放既有终态/退出事实或停止仍运行的执行范围；绝不重发 `INVOKE`，不重新执行。未知 `CANCEL` 不产生确认，已交付或已被淘汰的条目、以及不同 daemon 身份都不触发重发。
+- `onExitConfirmed()` 的回调交付不等于退出账本已提交。回调失败只记录固定阶段与异常类名，不记录原始异常正文或凭据，也不阻断后续回调；重复 ACK 不重试失败写入，不补造持久退出事实。
 - 物理连接失效**不**终结在途调用：同一 `daemonInstanceId` 重连 READY 后以相同 `invocationId` 重放，Daemon journal 负责重放 `STARTED` 与终态而不重复执行副作用。
 - 身份不同的新 Daemon 接管 Environment 时，旧在途调用恰好一次地以 [`EnvironmentCapabilitySendUncertainException`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilitySendUncertainException.java) 收敛为结果不确定，并释放其上传；新进程从自己的实例事实开始接受调用。旧主机副作用的停止或回滚仍需独立核查。
 - 已终结 invocation 的迟到或重放 `COMPLETED`/`FAILED`/`CANCELLED` 由 tombstone 吸收并静默丢弃，`STARTED`/`PROGRESS` 同样不回调；未知 `invocationId` 的回调按协议违规关闭连接，因为回调只按 `invocationId` 归属，不按连接代际。

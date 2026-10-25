@@ -1679,7 +1679,16 @@ public final class EnvironmentDaemonServer
     }
     if (confirmation.isPresent()) {
       EnvironmentCapabilityExecutionListener listener = confirmation.get().listener;
-      deferred.add(listener::onExitConfirmed);
+      deferred.add(
+          () -> {
+            try {
+              listener.onExitConfirmed();
+            } catch (RuntimeException | Error failure) {
+              // 回调隔离层会继续 drain；账本写入失败必须先留下安全诊断，不补 ACK、不重试。
+              logFailure("execution exit confirmation", failure);
+              throw failure;
+            }
+          });
       return;
     }
     if (!known) {
