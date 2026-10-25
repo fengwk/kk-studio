@@ -226,7 +226,7 @@ export function assertProviderUsageAlgebra(usage, providerType, { modelName } = 
       const wireOutput = outputTokens
 
       // providerTotal = rawInput + rawOutput = wireInput + wireOutput
-      if (providerTotalTokens > 0) {
+      if (providerTotalTokens !== null) {
         const expectedTotal = wireInput + wireOutput
         assert(
           providerTotalTokens === expectedTotal,
@@ -257,7 +257,7 @@ export function assertProviderUsageAlgebra(usage, providerType, { modelName } = 
       const wireCompletion = outputTokens
 
       // providerTotal = wirePrompt + wireCompletion
-      if (providerTotalTokens > 0) {
+      if (providerTotalTokens !== null) {
         const expectedTotal = wirePrompt + wireCompletion
         assert(
           providerTotalTokens === expectedTotal,

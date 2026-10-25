@@ -608,6 +608,30 @@ test('assertProviderUsageAlgebra 按当前 ModelUsage 语义校验四大厂商�
   )
 })
 
+test('assertProviderUsageAlgebra 区分已知零 total 与未报告', () => {
+  // 非零分类配零 total 必须失败；全零及未报告则分别保留真实零与未知，不借旧零哨兵跳过校验。
+  const usage = {
+    inputTokens: 1,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    reasoningTokens: null,
+    providerTotalTokens: 1,
+  }
+  for (const [providerType, expectedMessage] of [
+    ['openai_responses', 'OpenAI Responses providerTotalTokens algebra mismatch: expected wireInput(1) + wireOutput(0) = 1, got 0'],
+    ['openai', 'DeepSeek providerTotalTokens algebra mismatch: expected wirePrompt(1) + wireCompletion(0) = 1, got 0'],
+  ]) {
+    assert.doesNotThrow(() => assertProviderUsageAlgebra(usage, providerType))
+    assert.doesNotThrow(() => assertProviderUsageAlgebra({ ...usage, providerTotalTokens: null }, providerType))
+    assert.doesNotThrow(() => assertProviderUsageAlgebra({ ...usage, inputTokens: 0, providerTotalTokens: 0 }, providerType))
+    assert.throws(
+      () => assertProviderUsageAlgebra({ ...usage, providerTotalTokens: 0 }, providerType),
+      { message: expectedMessage },
+    )
+  }
+})
+
 test('sanitizeArtifact 与 safeDiagnosticJson 递归严格脱敏推理文本、回放载荷与敏感元数据', () => {
   // 测试意图：确保 Anthropic thinking/redacted data/signature、OpenAI Responses reasoning summary/encrypted_content、OpenAI Chat reasoning_content/details、Gemini thought 兄弟 text/thoughtSignature、replay payload/raw usage/URL/credential/HTTP body 等任何敏感信息均无法在 sanitizeArtifact 与 safeDiagnosticJson 的序列化输出中存活，同时保留必要结构性长度与类型元数据。
   const sensitiveSource = {
@@ -788,8 +812,8 @@ test('sanitizeArtifact 与 safeDiagnosticJson 递归严格脱敏推理文本、�
   assert.equal(cleaned.status, 'IDLE')
 })
 
-test('assertAssistantUsage 接受各协议未报告或为零的 providerTotalTokens 与生产 MiniMax 样本', () => {
-  // 测试意图：验证未显式报告总量（null 或协议允许的 0）在各 Provider 下均可放行，
+test('assertAssistantUsage 接受各协议未报告或已知的 providerTotalTokens 与生产 MiniMax 样本', () => {
+  // 测试意图：未报告总量使用 null，已知总量与分类一致；两者在各 Provider 下均可放行，
   // 且生产 MiniMax 真实返回（Anthropic 协议、零写入、未报告 reasoning/total）被正常接受。
   const validSharedUsage = {
     inputTokens: 100,
@@ -800,7 +824,7 @@ test('assertAssistantUsage 接受各协议未报告或为零的 providerTotalTok
   }
 
   for (const providerType of ['openai_responses', 'openai', 'google']) {
-    for (const total of [null, 0]) {
+    for (const total of [null, 170]) {
       assert.doesNotThrow(
         () =>
           assertAssistantUsage(
