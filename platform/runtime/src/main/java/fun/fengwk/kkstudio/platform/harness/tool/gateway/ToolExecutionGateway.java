@@ -517,6 +517,13 @@ public final class ToolExecutionGateway implements ToolGateway {
           remoteExecutions.confirmNotStarted(remoteExecutionId);
         } catch (RuntimeException | Error confirmationFailure) {
           confirmationFailure.addSuppressed(notExecuted);
+          if (confirmationFailure instanceof RuntimeException) {
+            // Unknown 分类会记录异常 message；只提供安全诊断，原始持久化失败仍作为 cause 保留。
+            throw new IllegalStateException(
+                "phase=REMOTE_NOT_STARTED_CONFIRM; exception="
+                    + confirmationFailure.getClass().getSimpleName(),
+                confirmationFailure);
+          }
           throw confirmationFailure;
         }
         throw notExecuted;

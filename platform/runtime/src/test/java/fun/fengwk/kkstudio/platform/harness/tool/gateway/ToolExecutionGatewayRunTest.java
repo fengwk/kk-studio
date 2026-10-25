@@ -10,7 +10,12 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 
 import fun.fengwk.kkstudio.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.common.result.BinaryResultContent;
@@ -486,14 +491,41 @@ class ToolExecutionGatewayRunTest {
     transport.action = ToolGatewayTestSupport.FakeTransport.InvokeAction.THROW_UNAVAILABLE;
     ToolGatewayTestSupport.RecordingRemoteExecutions remoteExecutions =
         new ToolGatewayTestSupport.RecordingRemoteExecutions();
-    remoteExecutions.confirmNotStartedFailure =
-        new IllegalStateException("execution ledger unavailable");
+    String secret = "synthetic-secret-not-started-ledger-details";
+    remoteExecutions.confirmNotStartedFailure = new IllegalStateException(secret);
+    Logger logger = (Logger) LoggerFactory.getLogger(ToolExecutionGateway.class);
+    Level previousLevel = logger.getLevel();
+    boolean previousAdditivity = logger.isAdditive();
+    ListAppender<ILoggingEvent> logs = new ListAppender<>();
+    logs.setContext(logger.getLoggerContext());
+    logs.start();
+    logger.addAppender(logs);
+    logger.setLevel(Level.WARN);
+    logger.setAdditive(false);
+    try {
+      ToolGateway.Completion completion = runEnvironment(transport, remoteExecutions);
 
-    ToolGateway.Completion completion = runEnvironment(transport, remoteExecutions);
-
-    assertInstanceOf(ToolGateway.Unknown.class, completion);
-    assertEquals(1, remoteExecutions.notStartedConfirmed.size());
-    assertTrue(remoteExecutions.exitConfirmed.isEmpty());
+      assertInstanceOf(ToolGateway.Unknown.class, completion);
+      assertEquals(1, remoteExecutions.notStartedConfirmed.size());
+      assertTrue(remoteExecutions.exitConfirmed.isEmpty());
+      // 同步确认失败也会流入 Unknown 分类：日志不得回显持久化异常正文。
+      assertEquals(1, logs.list.size(), "confirmation failure must remain diagnosable once");
+      ILoggingEvent failure = logs.list.getFirst();
+      assertFalse(failure.getFormattedMessage().contains(secret));
+      assertTrue(
+          failure
+              .getFormattedMessage()
+              .contains("phase=REMOTE_NOT_STARTED_CONFIRM; exception=IllegalStateException"));
+      assertNull(failure.getThrowableProxy());
+      for (Object argument : failure.getArgumentArray()) {
+        assertFalse(String.valueOf(argument).contains(secret));
+      }
+    } finally {
+      logger.detachAppender(logs);
+      logs.stop();
+      logger.setLevel(previousLevel);
+      logger.setAdditive(previousAdditivity);
+    }
   }
 
   private void assertEnvironmentFailure(
