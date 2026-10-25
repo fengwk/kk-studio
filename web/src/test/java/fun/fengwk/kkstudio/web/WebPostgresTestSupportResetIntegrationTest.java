@@ -92,14 +92,16 @@ class WebPostgresTestSupportResetIntegrationTest extends WebPostgresTestSupport 
 
   @Test
   void manualResetDoesNotStartALifecycleThatWasAlreadyStopped() throws Exception {
-    // 只暂停一个 bean：reset 必须把它当作「非运行集合」，既不 stop 也不 start；finally 恢复现场供后续测试。
+    // 只暂停一个 bean：reset 不得启动它；仅在 Schema 已恢复时清理现场，不重启半迁移库。
     PluginCredentialRefreshDispatcher stopped = pluginCredentialRefreshDispatcher;
     stopped.stop();
     assertFalse(stopped.isRunning());
     clearInvocations(databaseLifecycles().toArray());
 
+    boolean resetCompleted = false;
     try {
       resetAndApplySchema();
+      resetCompleted = true;
 
       verify(stopped, never()).stop();
       verify(stopped, never()).start();
@@ -129,7 +131,7 @@ class WebPostgresTestSupportResetIntegrationTest extends WebPostgresTestSupport 
               .query(Long.class)
               .single());
     } finally {
-      if (!stopped.isRunning()) {
+      if (resetCompleted && !stopped.isRunning()) {
         stopped.start();
       }
     }

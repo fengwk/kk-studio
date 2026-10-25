@@ -112,8 +112,8 @@ public abstract class HarnessRuntimeThreadTreeContract {
     assertEquals(tree.rootId(), early.thread().parentThreadId());
     assertEquals(tree.rootId(), child.thread().parentThreadId());
     assertEquals(tree.childId(), grandchild.thread().parentThreadId());
-    // 新模型下 runtime status 只由该 Thread 本地上下文投影，绝不聚合后代：Root 自身空闲且无排队命令，故投影 IDLE
-    // （不存在 WAITING_CHILDREN），后代是否活跃不影响祖先投影。
+    // 本例只有执行父关系，没有未完成的直接 Join；Root 无本地工作和输入需求，因此为 IDLE。
+    // 后代本身活跃不等于祖先有等待义务；未完成的直接 NOTIFY_PARENT Join 才会影响 WAITING 投影。
     assertEquals(ThreadRuntimeStatus.IDLE, root.runtimeStatus());
     assertEquals(ThreadRuntimeStatus.IDLE, early.runtimeStatus());
     assertEquals(ThreadRuntimeStatus.RUNNING, child.runtimeStatus());
