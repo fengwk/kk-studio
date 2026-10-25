@@ -735,13 +735,16 @@ class ToolProcessorExecutionTest {
           ExecutionExitFailureStore.SYNTHETIC_SECRET);
     } finally {
       try {
-        fixture.processor.close();
-        // 早期断言失败时 body 也可能已启动：close 只请求中断，必须 join 已观测的真实 runner。
-        Thread executionThread = runner.get();
-        if (executionThread != null) {
-          assertTrue(
-              executionThread.join(Duration.ofSeconds(5)),
-              "tool execution thread must exit during cleanup");
+        try {
+          fixture.processor.close();
+        } finally {
+          // 早期断言或 close 失败也必须 join；close 只请求中断，不是退出屏障。
+          Thread executionThread = runner.get();
+          if (executionThread != null) {
+            assertTrue(
+                executionThread.join(Duration.ofSeconds(5)),
+                "tool execution thread must exit during cleanup");
+          }
         }
       } finally {
         try {
