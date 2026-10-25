@@ -3,6 +3,8 @@ package fun.fengwk.kkstudio.harness.runtime.store.testing;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.CREATION_REQUEST_HASH;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T1;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.branchSettings;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -14,7 +16,13 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
+import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
+import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
+import fun.fengwk.kkstudio.harness.runtime.SpawnRequest;
+import fun.fengwk.kkstudio.harness.runtime.StopCommand;
 import fun.fengwk.kkstudio.harness.runtime.ThreadLifecycleCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
@@ -25,11 +33,14 @@ import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.CompactionPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.runtime.history.NotificationPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.ToolResultMetadata;
 import fun.fengwk.kkstudio.harness.runtime.history.ToolResultStatus;
@@ -38,6 +49,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
@@ -53,6 +65,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
+import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessorConfig;
@@ -61,6 +74,8 @@ import fun.fengwk.kkstudio.harness.runtime.processor.ProcessorLeaseConfig;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessResult;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorConfig;
+import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
+import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessorConfig;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
@@ -74,8 +89,12 @@ import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.NotificationCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
@@ -92,15 +111,20 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Deque;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /** 真实临时 PostgreSQL 端到端集成测试：覆盖压缩子 Thread 创建、父 durable wait、子真实执行到终态、父消费并按摘要提交。 */
 class PostgresqlCompactionChildTest {
@@ -123,7 +147,260 @@ class PostgresqlCompactionChildTest {
   private ScheduledExecutorService scheduler;
   private ScriptedChildGateway gateway;
   private ModelProcessor modelProcessor;
+  private TurnResolver resolver;
   private volatile InvocationRetryPolicy retryPolicy = NO_RETRY;
+
+  /** 在已 spawn 的 owner 上补两段越过压缩阈值的闭合历史，并把 spawn 源命令标记为第一段的实际输入。 */
+  private void seedOwnerCompactionHistory(UUID ownerThreadId) {
+    store.transaction(
+        tx -> {
+          ThreadState owner = ThreadLifecycleCoordinator.lockThreadWithParent(tx, ownerThreadId);
+          BranchSettings settings = tx.loadEntryPath(owner.headEntryId()).baseSettings();
+          UUID turn1StartId = tx.nextId();
+          UUID turn1UserId = tx.nextId();
+          UUID turn1AssistantId = tx.nextId();
+          UUID turn1EndId = tx.nextId();
+          UUID turn2StartId = tx.nextId();
+          UUID turn2UserId = tx.nextId();
+          UUID turn2AssistantId = tx.nextId();
+          UUID turn2EndId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  turn1StartId,
+                  owner.sessionId(),
+                  owner.headEntryId(),
+                  inputTurnStart(settings, ownerThreadId),
+                  T1));
+          tx.insertEntry(
+              new Entry(
+                  turn1UserId,
+                  owner.sessionId(),
+                  turn1StartId,
+                  new MessagePayload(
+                      new AgentMessage(
+                          AgentMessageRole.USER,
+                          List.of(new TextMessageContent("historical user " + "h".repeat(50_000)))),
+                      null,
+                      null),
+                  T1));
+          tx.insertEntry(
+              new Entry(
+                  turn1AssistantId,
+                  owner.sessionId(),
+                  turn1UserId,
+                  new MessagePayload(
+                      new AgentMessage(
+                          AgentMessageRole.ASSISTANT,
+                          List.of(
+                              new TextMessageContent(
+                                  "historical assistant " + "a".repeat(50_000)))),
+                      new AssistantMessageMetadata(
+                          GenerationStopReason.COMPLETE,
+                          new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L)),
+                      null),
+                  T1));
+          tx.insertEntry(
+              new Entry(
+                  turn1EndId,
+                  owner.sessionId(),
+                  turn1AssistantId,
+                  new TurnEndPayload(turn1StartId, TurnEndOutcome.COMPLETED, false, null, null),
+                  T1));
+          tx.insertEntry(
+              new Entry(
+                  turn2StartId,
+                  owner.sessionId(),
+                  turn1EndId,
+                  inputTurnStart(settings, ownerThreadId),
+                  T1));
+          tx.insertEntry(
+              new Entry(
+                  turn2UserId,
+                  owner.sessionId(),
+                  turn2StartId,
+                  new MessagePayload(
+                      new AgentMessage(
+                          AgentMessageRole.USER,
+                          List.of(
+                              new TextMessageContent(
+                                  "user asks a very long question" + "x".repeat(90_000)))),
+                      null,
+                      null),
+                  T1));
+          tx.insertEntry(
+              new Entry(
+                  turn2AssistantId,
+                  owner.sessionId(),
+                  turn2UserId,
+                  new MessagePayload(
+                      new AgentMessage(
+                          AgentMessageRole.ASSISTANT,
+                          List.of(new TextMessageContent("historical reply"))),
+                      new AssistantMessageMetadata(
+                          GenerationStopReason.COMPLETE, OVER_THRESHOLD_USAGE),
+                      null),
+                  T1));
+          tx.insertEntry(
+              new Entry(
+                  turn2EndId,
+                  owner.sessionId(),
+                  turn2AssistantId,
+                  new TurnEndPayload(turn2StartId, TurnEndOutcome.COMPLETED, false, null, null),
+                  T1));
+          ThreadCommand source =
+              tx.loadQueuedCommands(ownerThreadId).stream()
+                  .filter(command -> command.sequence() == 1L)
+                  .findFirst()
+                  .orElseThrow();
+          tx.updateCommands(List.of(source.markApplied(turn1StartId)));
+          tx.updateThread(owner.advanceHeadAndInputThroughSequence(turn2EndId, 1L, T1));
+          return null;
+        });
+  }
+
+  private static TurnStartPayload inputTurnStart(BranchSettings settings, UUID ownerThreadId) {
+    return new TurnStartPayload(
+        TurnStartReason.INPUT,
+        settings,
+        ownerThreadId,
+        CONTEXT_WINDOW,
+        MAX_OUTPUT_TOKENS,
+        null,
+        null);
+  }
+
+  /** 测试只需 Stop 的真实 Model 取消语义，不执行任何工具。 */
+  private ToolProcessor noOpToolProcessor() {
+    ToolGateway gateway =
+        new ToolGateway() {
+          @Override
+          public ToolGateway.PreflightResult preflight(ToolInvocationRequest request) {
+            throw new UnsupportedOperationException("no tools in this test");
+          }
+
+          @Override
+          public ToolGateway.Admission admit(ToolGateway.Execution execution) {
+            throw new UnsupportedOperationException("no tools in this test");
+          }
+        };
+    return new ToolProcessor(
+        store,
+        gateway,
+        event -> {},
+        new ToolProcessorConfig(
+            new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5)),
+            () -> NO_RETRY,
+            Duration.ofSeconds(5),
+            Duration.ofSeconds(5)),
+        Clock.fixed(T1, ZoneOffset.UTC),
+        scheduler,
+        Runnable::run);
+  }
+
+  /** 处理 THREAD Work 直到目标 owner 被处理；Stop 提前投递的父通知 Work 一并 drain，避免污染目标断言。 */
+  private boolean processThreadWorkUntil(UUID expectedThreadId) {
+    for (int i = 0; i < 8; i++) {
+      Optional<ClaimedWork> claim = claimNextThreadWork();
+      if (claim.isEmpty()) {
+        return false;
+      }
+      if (processor.process(claim.get()) != ThreadProcessResult.COMPLETED) {
+        return false;
+      }
+      if (expectedThreadId.equals(claim.get().target().id())) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private Optional<ClaimedWork> claimNextThreadWork() {
+    return store.transaction(
+        tx ->
+            tx.claimNextWork(
+                WorkTargetType.THREAD, UUID.randomUUID().toString(), Duration.ofSeconds(30)));
+  }
+
+  private List<ExecutionExitFact> loadUnconfirmedExecutions(UUID threadId) {
+    return store.transaction(tx -> tx.loadUnconfirmedExecutions(threadId));
+  }
+
+  private int countIncompleteChildJoins(UUID parentThreadId) {
+    return store.transaction(tx -> tx.countIncompleteChildJoins(parentThreadId));
+  }
+
+  private long version(UUID threadId) {
+    return store.transaction(tx -> tx.findThread(threadId).orElseThrow().version());
+  }
+
+  /** 外层父 Thread 上按 notificationId 去重的通知数量（含已物化与仍为命令的交付）。 */
+  private int notificationCount(UUID parentThreadId) {
+    return store.transaction(
+        tx -> {
+          Set<UUID> notificationIds = new HashSet<>();
+          for (ThreadCommand command : tx.loadCommandsByThread(parentThreadId)) {
+            if (command.type().isNotification()) {
+              notificationIds.add(
+                  ((NotificationCommandPayload) command.payload()).notificationId());
+            }
+          }
+          EntryPath path =
+              tx.loadEntryPath(tx.findThread(parentThreadId).orElseThrow().headEntryId());
+          for (Entry entry : path.entries()) {
+            if (entry.payload() instanceof NotificationPayload notification) {
+              notificationIds.add(notification.notificationId());
+            }
+          }
+          return notificationIds.size();
+        });
+  }
+
+  /** release 后独立 join、关闭 processor 与 scheduler；所有清理失败均返回给调用方保留。 */
+  private List<Throwable> cleanup(
+      HoldingModelGateway holdingGateway,
+      ModelProcessor stoppingModelProcessor,
+      ToolProcessor toolProcessor,
+      ExecutorService executionExecutor,
+      Thread executionThread) {
+    List<Throwable> failures = new ArrayList<>();
+    holdingGateway.release();
+    if (executionThread != null) {
+      try {
+        if (!executionThread.join(Duration.ofSeconds(5))) {
+          failures.add(new AssertionError("model execution thread must exit after release"));
+        }
+      } catch (Throwable failure) {
+        failures.add(failure);
+      }
+    }
+    try {
+      stoppingModelProcessor.close();
+    } catch (Throwable failure) {
+      failures.add(failure);
+    }
+    try {
+      toolProcessor.close();
+    } catch (Throwable failure) {
+      failures.add(failure);
+    }
+    try {
+      executionExecutor.shutdownNow();
+      if (!executionExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+        failures.add(new AssertionError("model execution executor must terminate"));
+      }
+    } catch (Throwable failure) {
+      failures.add(failure);
+    }
+    try {
+      scheduler.shutdownNow();
+      if (!scheduler.awaitTermination(5, TimeUnit.SECONDS)) {
+        failures.add(new AssertionError("scheduler must terminate"));
+      }
+    } catch (Throwable failure) {
+      failures.add(failure);
+    }
+    return failures;
+  }
 
   /** 普通 Turn 解析出的输出预算与 cache 覆盖：仅在本测试内模拟“当前配置给压缩子的预算/缓存档位”。 */
   private Integer resolvedOutputTokens;
@@ -138,7 +415,7 @@ class PostgresqlCompactionChildTest {
     store = PostgresqlHarnessStoreFixture.resetAndCreate();
     Clock clock = Clock.fixed(T1, ZoneOffset.UTC);
     scheduler = Executors.newSingleThreadScheduledExecutor();
-    TurnResolver resolver =
+    resolver =
         (threadId, path, preparation) -> {
           if (preparation != null) {
             ModelSelection compactorModel = ModelSelection.model("compactor-model", "v1");
@@ -684,6 +961,222 @@ class PostgresqlCompactionChildTest {
     assertEquals(1, queuedCommandCount(parentId));
   }
 
+  /**
+   * Stop 关闭 owner 自有 COMPACTION turn 后，仍未收敛的 SETTLE_OWNER_TURN 压缩子必须继续把 owner 留给 RUNNING；外层
+   * NOTIFY_PARENT 只能等压缩子真实退出确认后收敛，且 owner 的派生 cursor 必须推进，随后同一恢复输入才可接受。
+   */
+  @Test
+  void stoppedCompactionOwnerWaitsForSummaryExitBeforeSettlingAndResuming() throws Throwable {
+    HoldingModelGateway holdingGateway = new HoldingModelGateway();
+    ExecutorService executionExecutor = Executors.newVirtualThreadPerTaskExecutor();
+    ToolProcessor toolProcessor = noOpToolProcessor();
+    ModelProcessor stoppingModelProcessor =
+        new ModelProcessor(
+            store,
+            holdingGateway,
+            event -> {},
+            new ModelProcessorConfig(
+                new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5)),
+                () -> NO_RETRY,
+                Duration.ofSeconds(5)),
+            Clock.fixed(T1, ZoneOffset.UTC),
+            scheduler,
+            Runnable::run,
+            executionExecutor);
+    HarnessRuntime stoppingRuntime =
+        new HarnessRuntime(
+            store,
+            resolver,
+            () -> CompactionConfig.DEFAULT,
+            null,
+            stoppingModelProcessor,
+            toolProcessor);
+    runtime = stoppingRuntime;
+    modelProcessor = stoppingModelProcessor;
+    Thread executionThread = null;
+    Throwable primary = null;
+    try {
+      StoreTestSupport.Baseline outer = seedThreadBaseline(store);
+      UUID outerThreadId = outer.threadId();
+      UUID ownerThreadId = UUID.randomUUID();
+      UUID outerJoinId = UUID.randomUUID();
+      NewThreadCommand ownerSource =
+          new NewThreadCommand(
+              new UserMessageCommandPayload(AgentMessage.user("outer task")), UUID.randomUUID());
+      stoppingRuntime.spawn(
+          new SpawnRequest(
+              ownerThreadId,
+              UUID.randomUUID(),
+              branchSettings(),
+              List.of(ownerSource),
+              AcceptancePreflight.IDENTITY,
+              outerThreadId,
+              outer.rootEntryId(),
+              null,
+              false,
+              ThreadConstraints.NONE,
+              SpawnTrigger.CONTROLLER,
+              JoinDelivery.NOTIFY_PARENT,
+              SpawnRequest.Budget.unlimited(),
+              outerJoinId,
+              ownerSource.requestHash()));
+
+      seedOwnerCompactionHistory(ownerThreadId);
+      seedUserCommand(ownerThreadId, "queued input");
+      requestThreadWork(ownerThreadId);
+      processNext(ownerThreadId);
+
+      CompactionChild child = compactionChildOf(ownerThreadId);
+      assertTrue(hasWork(WorkTargetType.THREAD, child.childThreadId()));
+      processNext(child.childThreadId());
+      UUID childModelId = openChildModel(child.childThreadId());
+      assertEquals(ProcessResult.STARTED, processModel(stoppingModelProcessor, childModelId, T1));
+      assertTrue(holdingGateway.entered.await(5, TimeUnit.SECONDS), "model body must be entered");
+      executionThread = holdingGateway.runner();
+      assertNotNull(executionThread);
+
+      long ownerVersionAtStop = version(ownerThreadId);
+      stoppingRuntime.stop(new StopCommand(ownerThreadId, UUID.randomUUID(), ownerVersionAtStop));
+      boolean stopInterruptedBody = holdingGateway.interrupted.await(5, TimeUnit.SECONDS);
+
+      ThreadSnapshot childHeld = snapshot(child.childThreadId());
+      ThreadSnapshot ownerHeld = snapshot(ownerThreadId);
+      ThreadJoin childJoinHeld = findJoin(child.joinInvocationId());
+      ThreadJoin outerJoinHeld = stoppingRuntime.findJoin(outerJoinId).orElseThrow();
+      int outerNotificationsHeld = notificationCount(outerThreadId);
+      int incompleteChildJoinsHeld = countIncompleteChildJoins(ownerThreadId);
+      List<ExecutionExitFact> unconfirmedHeld = loadUnconfirmedExecutions(child.childThreadId());
+      UUID childExecutionId =
+          unconfirmedHeld.isEmpty() ? null : unconfirmedHeld.getFirst().executionId();
+
+      NewThreadCommand resumeCommand =
+          new NewThreadCommand(
+              new UserMessageCommandPayload(AgentMessage.user("resume")), UUID.randomUUID());
+      AcceptCommandsCommand resumeRequest =
+          new AcceptCommandsCommand(
+              new AcceptCommandsTarget.Thread(ownerThreadId), List.of(resumeCommand));
+      HarnessRuntimeConflictException.Reason resumeReason = null;
+      boolean resumeAcceptedWhileHeld = false;
+      try {
+        stoppingRuntime.acceptCommands(resumeRequest, AcceptancePreflight.IDENTITY);
+        resumeAcceptedWhileHeld = true;
+      } catch (HarnessRuntimeConflictException conflict) {
+        resumeReason = conflict.reason();
+      }
+
+      ThreadSnapshot ownerBeforeSettings = snapshot(ownerThreadId);
+      NewThreadCommand settingsCommand =
+          new NewThreadCommand(new SetAgentCommandPayload("assistant"), UUID.randomUUID());
+      AcceptCommandsCommand settingsRequest =
+          new AcceptCommandsCommand(
+              new AcceptCommandsTarget.Thread(
+                  ownerThreadId,
+                  ownerBeforeSettings.thread().headEntryId(),
+                  ownerBeforeSettings.thread().nextCommandSequence()),
+              List.of(settingsCommand));
+      boolean settingsAccepted = true;
+      try {
+        stoppingRuntime.acceptCommands(settingsRequest, AcceptancePreflight.IDENTITY);
+      } catch (RuntimeException failure) {
+        settingsAccepted = false;
+      }
+      boolean ownerSettingsWorkProcessed =
+          settingsAccepted && processThreadWorkUntil(ownerThreadId);
+      ThreadSnapshot ownerAfterSettings = snapshot(ownerThreadId);
+      boolean ownerStillStopped =
+          ownerAfterSettings.thread().executionControl() == ThreadExecutionControl.STOPPED;
+      boolean ownerWorkAfterSettings = hasWork(WorkTargetType.THREAD, ownerThreadId);
+      long ownerVersionAfterSettings = ownerAfterSettings.thread().version();
+
+      holdingGateway.release();
+      boolean executionExited = executionThread.join(Duration.ofSeconds(5));
+      ExecutionExitFact childExecutionAfter =
+          childExecutionId == null
+              ? null
+              : store.transaction(tx -> tx.findExecution(childExecutionId).orElse(null));
+      ThreadJoin childJoinAfter = findJoin(child.joinInvocationId());
+      ThreadJoin outerJoinAfter = stoppingRuntime.findJoin(outerJoinId).orElseThrow();
+      int outerNotificationsAfter = notificationCount(outerThreadId);
+      ThreadSnapshot ownerAfterExit = snapshot(ownerThreadId);
+      long ownerVersionAfterExit = ownerAfterExit.thread().version();
+
+      boolean resumeAcceptedAfterExit = false;
+      ThreadExecutionControl controlAfterResume = ownerAfterExit.thread().executionControl();
+      try {
+        stoppingRuntime.acceptCommands(resumeRequest, AcceptancePreflight.IDENTITY);
+        resumeAcceptedAfterExit = true;
+        controlAfterResume = snapshot(ownerThreadId).thread().executionControl();
+      } catch (RuntimeException ignored) {
+        // 实际结果由下方断言报告。
+      }
+
+      HarnessRuntimeConflictException.Reason observedResumeReason = resumeReason;
+      boolean observedResumeAcceptedWhileHeld = resumeAcceptedWhileHeld;
+      boolean observedSettingsAccepted = settingsAccepted;
+      boolean observedResumeAcceptedAfterExit = resumeAcceptedAfterExit;
+      ThreadExecutionControl observedControlAfterResume = controlAfterResume;
+
+      assertAll(
+          () -> assertTrue(stopInterruptedBody, "Stop must interrupt the held model body"),
+          () -> assertEquals(1, unconfirmedHeld.size()),
+          () -> assertEquals(ExecutionExitState.UNCONFIRMED, unconfirmedHeld.getFirst().state()),
+          () -> assertTrue(childHeld.hasUnconfirmedExecution()),
+          () -> assertEquals(ThreadRuntimeStatus.RUNNING, childHeld.runtimeStatus()),
+          () -> assertFalse(childJoinHeld.matched()),
+          () ->
+              assertEquals(
+                  ThreadRuntimeStatus.RUNNING,
+                  ownerHeld.runtimeStatus(),
+                  "owner keeps a held summary obligation and must stay RUNNING"),
+          () ->
+              assertFalse(
+                  outerJoinHeld.matched(),
+                  "outer NOTIFY_PARENT must stay unmatched while the summary body is held"),
+          () -> assertEquals(0, outerNotificationsHeld),
+          () -> assertEquals(0, incompleteChildJoinsHeld),
+          () ->
+              assertEquals(
+                  HarnessRuntimeConflictException.Reason.EXIT_UNCONFIRMED, observedResumeReason),
+          () -> assertFalse(observedResumeAcceptedWhileHeld),
+          () -> assertTrue(observedSettingsAccepted),
+          () -> assertTrue(ownerSettingsWorkProcessed),
+          () -> assertTrue(ownerStillStopped),
+          () -> assertFalse(ownerWorkAfterSettings),
+          () -> assertTrue(executionExited),
+          () -> assertNotNull(childExecutionAfter),
+          () -> assertEquals(ExecutionExitState.STUDIO_EXITED, childExecutionAfter.state()),
+          () -> assertTrue(childJoinAfter.matched()),
+          () -> assertTrue(outerJoinAfter.matched()),
+          () -> assertEquals(1, outerNotificationsAfter),
+          () -> assertEquals(ThreadRuntimeStatus.IDLE, ownerAfterExit.runtimeStatus()),
+          () ->
+              assertTrue(
+                  ownerVersionAfterExit > ownerVersionAfterSettings,
+                  "settling the held summary must advance the owner version cursor"),
+          () -> assertTrue(observedResumeAcceptedAfterExit),
+          () -> assertEquals(ThreadExecutionControl.RUNNABLE, observedControlAfterResume));
+    } catch (Throwable failure) {
+      primary = failure;
+    } finally {
+      List<Throwable> cleanupFailures =
+          cleanup(
+              holdingGateway,
+              stoppingModelProcessor,
+              toolProcessor,
+              executionExecutor,
+              executionThread);
+      if (primary != null) {
+        cleanupFailures.forEach(primary::addSuppressed);
+        throw primary;
+      }
+      if (!cleanupFailures.isEmpty()) {
+        Throwable first = cleanupFailures.getFirst();
+        cleanupFailures.stream().skip(1).forEach(first::addSuppressed);
+        throw first;
+      }
+    }
+  }
+
   // ===== 压缩子驱动的真实模型执行辅助 =====
 
   private record CompactionChild(
@@ -868,6 +1361,10 @@ class PostgresqlCompactionChildTest {
 
   /** claim 一次 MODEL Work 并交给真实 ModelProcessor：模型调用按 provider 回调推进。 */
   private ProcessResult processModel(UUID invocationId, Instant now) {
+    return processModel(modelProcessor, invocationId, now);
+  }
+
+  private ProcessResult processModel(ModelProcessor processor, UUID invocationId, Instant now) {
     ClaimedWork claim =
         store
             .transaction(
@@ -876,7 +1373,7 @@ class PostgresqlCompactionChildTest {
                         WorkTargetType.MODEL, UUID.randomUUID().toString(), Duration.ofSeconds(30)))
             .orElseThrow();
     assertEquals(invocationId, claim.target().id());
-    return modelProcessor.process(claim);
+    return processor.process(claim);
   }
 
   private ModelInvocation findModel(UUID invocationId) {
@@ -930,6 +1427,48 @@ class PostgresqlCompactionChildTest {
         "req-compaction-child",
         null,
         "{}");
+  }
+
+  /** body 进入后保持显式 gate；Stop 的 interrupt 只计数，绝不释放 gate。 */
+  private static final class HoldingModelGateway implements ModelGateway {
+    private final CountDownLatch entered = new CountDownLatch(1);
+    private final CountDownLatch interrupted = new CountDownLatch(1);
+    private final CountDownLatch release = new CountDownLatch(1);
+    private volatile Thread runner;
+
+    @Override
+    public Admission admit(Execution execution) {
+      return new Admitted() {
+        @Override
+        public Outcome run(Sink sink) {
+          runner = Thread.currentThread();
+          entered.countDown();
+          while (true) {
+            try {
+              release.await();
+              break;
+            } catch (InterruptedException ignored) {
+              interrupted.countDown();
+            }
+          }
+          Thread.interrupted();
+          return new Succeeded(
+              new ProviderCompletion(
+                  providerResponse("held summary", GenerationStopReason.COMPLETE), null));
+        }
+
+        @Override
+        public void close() {}
+      };
+    }
+
+    Thread runner() {
+      return runner;
+    }
+
+    void release() {
+      release.countDown();
+    }
   }
 
   /** 脚本化子压缩 model gateway：按序返回排入的终态，覆盖截断 / 超限的真实 processor 路径（执行线程内联运行）。 */
