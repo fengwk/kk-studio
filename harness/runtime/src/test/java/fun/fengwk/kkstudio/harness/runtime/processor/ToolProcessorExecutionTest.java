@@ -34,6 +34,7 @@ import java.lang.reflect.Proxy;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -696,32 +697,51 @@ class ToolProcessorExecutionTest {
   void closeFailureStillReleasesExecutionAfterTerminal() throws Exception {
     Fixture fixture = approvedFixture();
     AtomicInteger closes = new AtomicInteger();
+    AtomicReference<Thread> runner = new AtomicReference<>();
     ToolGateway.Run run =
         new ToolGateway.Run() {
           @Override
           public ToolGateway.Completion execute(Consumer<ToolResult> progress) {
+            runner.set(Thread.currentThread());
             return ToolProcessorTestSupport.succeeded("call-1");
           }
 
           @Override
           public void close() {
             closes.incrementAndGet();
-            throw new IllegalStateException("close failed");
+            throw new IllegalStateException(ExecutionExitFailureStore.SYNTHETIC_SECRET);
           }
         };
     fixture.gateway.queueAdmit(new ToolGateway.Admitted(run));
+    ExitLogCapture exitLogs = ExitLogCapture.attach(ToolExecution.class);
+    try {
+      assertEquals(ProcessResult.STARTED, fixture.processor.process(claim(fixture)));
+      awaitStatus(fixture, ToolInvocationStatus.SUCCEEDED);
+      awaitIdle(fixture);
+      ToolProcessorTestSupport.awaitTrue(() -> closes.get() == 1, WAIT);
+      assertTrue(runner.get().join(Duration.ofSeconds(5)), "tool execution thread exits");
 
-    assertEquals(ProcessResult.STARTED, fixture.processor.process(claim(fixture)));
-    awaitStatus(fixture, ToolInvocationStatus.SUCCEEDED);
-    awaitIdle(fixture);
-    ToolProcessorTestSupport.awaitTrue(() -> closes.get() == 1, WAIT);
-
-    assertEquals(1, closes.get());
-    assertNull(ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId));
-    List<ExecutionExitFact> unconfirmed =
-        fixture.store.transaction(tx -> tx.loadUnconfirmedExecutions(fixture.baseline.threadId()));
-    assertEquals(1, unconfirmed.size());
-    assertEquals(ExecutionExitState.UNCONFIRMED, unconfirmed.getFirst().state());
+      assertEquals(1, closes.get());
+      assertNull(ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId));
+      List<ExecutionExitFact> unconfirmed =
+          fixture.store.transaction(
+              tx -> tx.loadUnconfirmedExecutions(fixture.baseline.threadId()));
+      assertEquals(1, unconfirmed.size());
+      assertEquals(ExecutionExitState.UNCONFIRMED, unconfirmed.getFirst().state());
+      exitLogs.assertSingleSafeFailure(
+          "cannot release tool run resources",
+          "TOOL_RUN_CLOSE",
+          IllegalStateException.class,
+          ExecutionExitFailureStore.SYNTHETIC_SECRET);
+    } finally {
+      try {
+        fixture.processor.close();
+        fixture.scheduler.shutdownNow();
+        assertTrue(fixture.scheduler.awaitTermination(5, TimeUnit.SECONDS));
+      } finally {
+        exitLogs.close();
+      }
+    }
   }
 
   /** 终态写库失败：run 与 registry 仍释放，durable 保持 RUNNING 交给 lease 恢复，绝不伪造成 SUCCEEDED。 */

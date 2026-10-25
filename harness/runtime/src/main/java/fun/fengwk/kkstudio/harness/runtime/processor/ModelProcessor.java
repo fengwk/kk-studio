@@ -363,7 +363,10 @@ public final class ModelProcessor implements AutoCloseable {
       admitted.close();
       return true;
     } catch (RuntimeException failure) {
-      log.warn("cannot release model admission resources; execution remains unconfirmed", failure);
+      log.warn(
+          "cannot release model admission resources; execution remains unconfirmed;"
+              + " phase=MODEL_ADMISSION_CLOSE; exception={}",
+          failure.getClass().getSimpleName());
       return false;
     }
   }

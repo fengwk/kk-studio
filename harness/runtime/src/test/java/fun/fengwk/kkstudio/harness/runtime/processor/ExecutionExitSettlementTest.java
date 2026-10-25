@@ -253,6 +253,7 @@ class ExecutionExitSettlementTest {
     UUID joinId = UUID.randomUUID();
     insertAppliedJoin(fixture.store, leafId, joinId);
     UUID executionId = null;
+    ExitLogCapture exitLogs = ExitLogCapture.attach(ToolExecution.class);
     try {
       assertEquals(
           ProcessResult.STARTED,
@@ -318,6 +319,11 @@ class ExecutionExitSettlementTest {
             () -> assertEquals(ThreadExecutionControl.STOPPED, after.thread().executionControl()),
             () -> assertFalse(join.matched(), "unconfirmed exit must withhold the join"),
             () -> assertEquals(0, notificationCount(fixture.store, parentId)));
+        exitLogs.assertSingleSafeFailure(
+            "cannot confirm tool execution exit",
+            "TOOL_EXIT_CONFIRM",
+            ExecutionExitFailureStore.InjectedPersistenceFailure.class,
+            ExecutionExitFailureStore.SYNTHETIC_SECRET);
       } else {
         assertAll(
             () -> assertEquals(ExecutionExitState.STUDIO_EXITED, state),
@@ -325,6 +331,7 @@ class ExecutionExitSettlementTest {
             () -> assertEquals(ThreadExecutionControl.STOPPED, after.thread().executionControl()),
             () -> assertTrue(join.matched(), "confirmed exit delivers the withheld join"),
             () -> assertEquals(1, notificationCount(fixture.store, parentId)));
+        exitLogs.assertNoFailure("cannot confirm tool execution exit");
       }
     } finally {
       held.release().countDown();
@@ -335,10 +342,14 @@ class ExecutionExitSettlementTest {
               "released tool execution must exit in cleanup");
         }
       } finally {
-        processor.close();
-        fixture.processor.close();
-        fixture.scheduler.shutdownNow();
-        assertTrue(fixture.scheduler.awaitTermination(5, TimeUnit.SECONDS));
+        try {
+          processor.close();
+          fixture.processor.close();
+          fixture.scheduler.shutdownNow();
+          assertTrue(fixture.scheduler.awaitTermination(5, TimeUnit.SECONDS));
+        } finally {
+          exitLogs.close();
+        }
       }
     }
   }

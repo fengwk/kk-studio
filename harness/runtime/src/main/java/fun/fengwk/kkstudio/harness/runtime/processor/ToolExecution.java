@@ -307,10 +307,11 @@ final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution {
       return true;
     } catch (RuntimeException failure) {
       log.warn(
-          "cannot release tool run resources for {}; execution {} remains unconfirmed",
+          "cannot release tool run resources for {}; execution {} remains unconfirmed;"
+              + " phase=TOOL_RUN_CLOSE; exception={}",
           invocationId,
           executionId(),
-          failure);
+          failure.getClass().getSimpleName());
       return false;
     }
   }
@@ -352,9 +353,9 @@ final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution {
           });
     } catch (RuntimeException failure) {
       log.warn(
-          "cannot confirm tool execution exit for {}: {}",
+          "cannot confirm tool execution exit for {}; phase=TOOL_EXIT_CONFIRM; exception={}",
           local.executionId(),
-          ProcessorExceptions.describe(failure));
+          failure.getClass().getSimpleName());
     }
   }
 

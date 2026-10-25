@@ -411,6 +411,7 @@ class ModelProcessorTest {
           }
         });
     UUID executionId = null;
+    ExitLogCapture exitLogs = ExitLogCapture.attach(ModelExecution.class);
     try {
       assertEquals(ProcessResult.STARTED, processor.process(claim(fixture.store, invocationId)));
       assertTrue(closeEntered.await(5, TimeUnit.SECONDS), "terminal committed and close is held");
@@ -459,6 +460,11 @@ class ModelProcessorTest {
             () -> assertEquals(ThreadExecutionControl.STOPPED, after.thread().executionControl()),
             () -> assertFalse(join.matched(), "unconfirmed exit must withhold the join"),
             () -> assertEquals(0, notificationCount(fixture.store, parentId)));
+        exitLogs.assertSingleSafeFailure(
+            "cannot confirm model execution exit",
+            "MODEL_EXIT_CONFIRM",
+            ExecutionExitFailureStore.InjectedPersistenceFailure.class,
+            ExecutionExitFailureStore.SYNTHETIC_SECRET);
       } else {
         assertAll(
             () -> assertEquals(ExecutionExitState.STUDIO_EXITED, state),
@@ -466,6 +472,7 @@ class ModelProcessorTest {
             () -> assertEquals(ThreadExecutionControl.STOPPED, after.thread().executionControl()),
             () -> assertTrue(join.matched(), "confirmed exit delivers the withheld join"),
             () -> assertEquals(1, notificationCount(fixture.store, parentId)));
+        exitLogs.assertNoFailure("cannot confirm model execution exit");
       }
     } finally {
       releaseClose.countDown();
@@ -476,10 +483,14 @@ class ModelProcessorTest {
               "released model execution must exit in cleanup");
         }
       } finally {
-        processor.close();
-        fixture.processor.close();
-        fixture.scheduler.shutdownNow();
-        assertTrue(fixture.scheduler.awaitTermination(5, TimeUnit.SECONDS));
+        try {
+          processor.close();
+          fixture.processor.close();
+          fixture.scheduler.shutdownNow();
+          assertTrue(fixture.scheduler.awaitTermination(5, TimeUnit.SECONDS));
+        } finally {
+          exitLogs.close();
+        }
       }
     }
   }
@@ -2448,32 +2459,52 @@ class ModelProcessorTest {
   /**
    * 同一 JVM 内旧 lease 过期后新 claim（不同 token）：supersede 本地旧 execution，按既有重试策略恢复 durable RUNNING（保留已确认
    * attempt / 取消旧 handle / 绝不重放 Provider）；无重试预算时如实终止 FAILED。
+   *
+   * <p>{@code process} 返回 STARTED 只表示已把运行交给执行线程，不保证 body 已进入。必须先等待旧 body 真正进入再推进 clock / reclaim；否则
+   * supersede 可能发生在 runner 登记之前，退出观察没有可 join 的旧线程。
    */
   @Test
-  void sameJvmRecoverySupersedesStaleLocalExecution() {
+  void sameJvmRecoverySupersedesStaleLocalExecution() throws Exception {
     Fixture fixture = fixture();
-    fixture.gateway.queueControlled();
-    assertEquals(
-        ProcessResult.STARTED,
-        fixture.processor.process(claim(fixture.store, fixture.invocationId, "token-old")));
-    fixture.clock.advance(Duration.ofSeconds(61));
-    ClaimedWork recovered = claim(fixture.store, fixture.invocationId, "token-new");
+    ControlledRun oldRun = new ControlledRun();
+    fixture.gateway.queue(oldRun);
+    try {
+      assertEquals(
+          ProcessResult.STARTED,
+          fixture.processor.process(claim(fixture.store, fixture.invocationId, "token-old")));
+      assertTrue(
+          oldRun.entered.await(5, TimeUnit.SECONDS),
+          "old model body must enter before the lease is reclaimed");
+      fixture.clock.advance(Duration.ofSeconds(61));
+      ClaimedWork recovered = claim(fixture.store, fixture.invocationId, "token-new");
 
-    assertEquals(ProcessResult.TERMINATED, fixture.processor.process(recovered));
-    awaitExecutionExit(fixture);
+      assertEquals(ProcessResult.TERMINATED, fixture.processor.process(recovered));
+      awaitExecutionExit(fixture);
 
-    ModelInvocation model = model(fixture.store, fixture.invocationId);
-    assertEquals(ModelInvocationStatus.FAILED, model.status());
-    assertEquals(1, model.attempt());
-    assertEquals(ProviderErrorKind.TRANSIENT, model.error().kind());
-    assertEquals(1, fixture.gateway.admitCalls);
-    assertEquals(3, thread(fixture.store, fixture.baseline.threadId()).version());
-    assertEquals(
-        2,
-        work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
-            .wakeVersion());
-    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)));
-    assertFalse(fixture.processor.hasActiveExecution());
+      ModelInvocation model = model(fixture.store, fixture.invocationId);
+      assertEquals(ModelInvocationStatus.FAILED, model.status());
+      assertEquals(1, model.attempt());
+      assertEquals(ProviderErrorKind.TRANSIENT, model.error().kind());
+      assertEquals(1, fixture.gateway.admitCalls);
+      assertEquals(3, thread(fixture.store, fixture.baseline.threadId()).version());
+      assertEquals(
+          2,
+          work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
+              .wakeVersion());
+      assertNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)));
+      assertFalse(fixture.processor.hasActiveExecution());
+    } finally {
+      // close 请求中断；只 join 真正运行过 body 的线程，registry 是否清空不作为退出证据。
+      try {
+        fixture.processor.close();
+      } finally {
+        for (Thread executionThread : List.copyOf(fixture.gateway.executionThreads)) {
+          assertTrue(
+              executionThread.join(Duration.ofSeconds(5)),
+              "model execution thread must exit during cleanup");
+        }
+      }
+    }
   }
 
   /** 恢复路径中 work 行已被删除：LOST_OWNERSHIP，无 mutation。 */
@@ -2990,7 +3021,7 @@ class ModelProcessorTest {
           @Override
           public void close() {
             closes.incrementAndGet();
-            throw new IllegalStateException("close failed");
+            throw new IllegalStateException(ExecutionExitFailureStore.SYNTHETIC_SECRET);
           }
         });
     ModelProcessor processor =
@@ -3005,6 +3036,7 @@ class ModelProcessorTest {
             ignored -> {
               throw new RejectedExecutionException("rejected");
             });
+    ExitLogCapture exitLogs = ExitLogCapture.attach(ModelProcessor.class);
     try {
       assertEquals(
           ProcessResult.LOST_OWNERSHIP,
@@ -3018,8 +3050,17 @@ class ModelProcessorTest {
       assertEquals(1, unconfirmed.size());
       assertEquals(ExecutionExitState.UNCONFIRMED, unconfirmed.getFirst().state());
       assertEquals(1, thread(fixture.store, fixture.baseline.threadId()).version());
+      exitLogs.assertSingleSafeFailure(
+          "cannot release model admission resources",
+          "MODEL_ADMISSION_CLOSE",
+          IllegalStateException.class,
+          ExecutionExitFailureStore.SYNTHETIC_SECRET);
     } finally {
-      processor.close();
+      try {
+        processor.close();
+      } finally {
+        exitLogs.close();
+      }
     }
     assertEquals(1, closes.get(), "close failure must not be retried");
   }
