@@ -37,6 +37,7 @@ import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
 /**
@@ -61,9 +62,14 @@ class ExecutionTreeLockRegressionTest {
   private final List<ScheduledExecutorService> schedulersToClose = new CopyOnWriteArrayList<>();
 
   @AfterEach
-  void tearDown() {
+  void tearDown() throws InterruptedException {
     for (ScheduledExecutorService scheduler : schedulersToClose) {
       scheduler.shutdownNow();
+    }
+    for (ScheduledExecutorService scheduler : schedulersToClose) {
+      assertTrue(
+          scheduler.awaitTermination(5, TimeUnit.SECONDS),
+          "scheduler must terminate during cleanup");
     }
   }
 
@@ -277,39 +283,55 @@ class ExecutionTreeLockRegressionTest {
                 new ToolGateway.Unknown(new ToolInvocationError("REMOTE_UNCERTAIN", "uncertain")));
 
     recordingStore.clearLogs();
-    assertEquals(ProcessResult.STARTED, execution.start(run));
-    assertTrue(run.awaitExited());
-    assertTrue(
-        run.executionThread.join(Duration.ofSeconds(5)),
-        "inspect all transactions only after real execution finally exits");
+    try {
+      assertEquals(ProcessResult.STARTED, execution.start(run));
+      assertTrue(run.awaitExited());
+      assertTrue(
+          run.executionThread.join(Duration.ofSeconds(5)),
+          "inspect all transactions only after real execution finally exits");
 
-    ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
-    assertEquals(ToolInvocationStatus.UNKNOWN, tool.status());
+      ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
+      assertEquals(ToolInvocationStatus.UNKNOWN, tool.status());
 
-    List<List<String>> txLogs = recordingStore.recordedOperations();
-    assertFalse(txLogs.isEmpty(), "must record transactions");
-    assertEquals(
-        List.of(
-            List.of(
-                "lockThread",
-                "lockToolInvocation",
-                "lockClaimedWork",
-                "updateToolInvocations",
-                "updateThread"),
-            List.of(
-                "lockThread",
-                "lockToolInvocation",
-                "requestWork",
-                "lockClaimedWork",
-                "updateToolInvocations",
-                "updateThread",
-                "completeWork"),
-            List.of(
-                "lockTree", "lockSessionForKeyShare", "lockThread", "lockThread", "updateThread")),
-        txLogs);
-    assertTrue(
-        txLogs.subList(0, 2).stream().flatMap(List::stream).noneMatch("lockTree"::equals),
-        "single-thread execution state commits must not take the tree lock");
+      List<List<String>> txLogs = recordingStore.recordedOperations();
+      assertFalse(txLogs.isEmpty(), "must record transactions");
+      assertEquals(
+          List.of(
+              List.of(
+                  "lockThread",
+                  "lockToolInvocation",
+                  "lockClaimedWork",
+                  "updateToolInvocations",
+                  "updateThread"),
+              List.of(
+                  "lockThread",
+                  "lockToolInvocation",
+                  "requestWork",
+                  "lockClaimedWork",
+                  "updateToolInvocations",
+                  "updateThread",
+                  "completeWork"),
+              List.of(
+                  "lockTree",
+                  "lockSessionForKeyShare",
+                  "lockThread",
+                  "lockThread",
+                  "updateThread")),
+          txLogs);
+      assertTrue(
+          txLogs.subList(0, 2).stream().flatMap(List::stream).noneMatch("lockTree"::equals),
+          "single-thread execution state commits must not take the tree lock");
+    } finally {
+      try {
+        execution.abandon();
+      } finally {
+        if (run.executionThread != null) {
+          assertTrue(
+              run.executionThread.join(Duration.ofSeconds(5)),
+              "tool execution must exit during cleanup");
+        }
+      }
+    }
   }
 
   // --- 记录 Store 装饰器 ---

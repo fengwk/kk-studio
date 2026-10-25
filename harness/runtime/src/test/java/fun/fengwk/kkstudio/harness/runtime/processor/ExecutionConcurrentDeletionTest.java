@@ -36,6 +36,7 @@ import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
@@ -49,9 +50,14 @@ class ExecutionConcurrentDeletionTest {
   private final List<ScheduledExecutorService> schedulersToClose = new CopyOnWriteArrayList<>();
 
   @AfterEach
-  void tearDown() {
+  void tearDown() throws InterruptedException {
     for (ScheduledExecutorService scheduler : schedulersToClose) {
       scheduler.shutdownNow();
+    }
+    for (ScheduledExecutorService scheduler : schedulersToClose) {
+      assertTrue(
+          scheduler.awaitTermination(5, TimeUnit.SECONDS),
+          "scheduler must terminate during cleanup");
     }
   }
 
@@ -91,7 +97,15 @@ class ExecutionConcurrentDeletionTest {
                       .toList()),
           "a missing Thread must not manufacture an exit confirmation");
     } finally {
-      fixture.execution.abandon();
+      try {
+        fixture.execution.abandon();
+      } finally {
+        if (fixture.run.executionThread != null) {
+          assertTrue(
+              fixture.run.executionThread.join(Duration.ofSeconds(5)),
+              "tool execution must exit during cleanup");
+        }
+      }
     }
   }
 
