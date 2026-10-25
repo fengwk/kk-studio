@@ -1416,14 +1416,20 @@ describe('runtime execution exit confirmation', () => {
         'fs.read': async (call) => textResult(call.invocationId),
       },
     })
-    await handshake(setup)
-    setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-plain', payload: invokePayload() }))
-    await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'COMPLETED'))
-    expect(sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toBe(false)
-    setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-plain', payload: invokePayload() }))
-    await tick(2)
-    expect(sent(setup.transport).filter((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toHaveLength(0)
-    setup.runtime.close()
+    try {
+      await handshake(setup)
+      setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-plain', payload: invokePayload() }))
+      await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'COMPLETED'))
+      expect(sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toBe(false)
+      setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-plain', payload: invokePayload() }))
+      // 等重放终态这一具体动作，不用固定 tick 数猜测重复 INVOKE 已处理。
+      await waitFor(() => sent(setup.transport).filter((envelope) => envelope.messageType === 'COMPLETED').length === 2)
+      expect(sent(setup.transport).filter((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toHaveLength(0)
+    } finally {
+      setup.runtime.close()
+      await setup.runtime.awaitCompletion()
+    }
+    expect(setup.runtime.getJournal().find('inv-plain')?.exitConfirmed).toBe(false)
   })
 
   it('replays a stored EXECUTION_EXITED independently of the terminal on duplicate INVOKE', async () => {
@@ -1435,17 +1441,21 @@ describe('runtime execution exit confirmation', () => {
         },
       },
     })
-    await handshake(setup)
-    setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-replay', payload: invokePayload() }))
-    await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'COMPLETED'))
-    const before = sent(setup.transport).filter((envelope) => envelope.messageType === 'EXECUTION_EXITED').length
-    expect(before).toBe(1)
-    setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-replay', payload: invokePayload() }))
-    await tick(2)
-    const replayed = sent(setup.transport).filter((envelope) => envelope.invocationId === 'inv-replay')
-    expect(replayed.filter((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toHaveLength(2)
-    expect(replayed.some((envelope) => envelope.messageType === 'COMPLETED')).toBe(true)
-    setup.runtime.close()
+    try {
+      await handshake(setup)
+      setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-replay', payload: invokePayload() }))
+      await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED'))
+      const before = sent(setup.transport).filter((envelope) => envelope.messageType === 'EXECUTION_EXITED').length
+      expect(before).toBe(1)
+      setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-replay', payload: invokePayload() }))
+      await waitFor(() => sent(setup.transport).filter((envelope) => envelope.messageType === 'EXECUTION_EXITED').length === 2)
+      const replayed = sent(setup.transport).filter((envelope) => envelope.invocationId === 'inv-replay')
+      expect(replayed.filter((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toHaveLength(2)
+      expect(replayed.filter((envelope) => envelope.messageType === 'COMPLETED')).toHaveLength(2)
+    } finally {
+      setup.runtime.close()
+      await setup.runtime.awaitCompletion()
+    }
   })
 
   it('replays a stored EXECUTION_EXITED once on a repeated CANCEL after the terminal', async () => {
@@ -1457,16 +1467,20 @@ describe('runtime execution exit confirmation', () => {
         },
       },
     })
-    await handshake(setup)
-    setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-cancel-replay', payload: invokePayload() }))
-    await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'COMPLETED'))
-    setup.transport.receive(serverMessage('CANCEL', { environmentId: ENV, invocationId: 'inv-cancel-replay', payload: {} }))
-    setup.transport.receive(serverMessage('CANCEL', { environmentId: ENV, invocationId: 'inv-cancel-replay', payload: {} }))
-    await tick(2)
-    const replayed = sent(setup.transport).filter((envelope) => envelope.invocationId === 'inv-cancel-replay')
-    expect(replayed.filter((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toHaveLength(3)
-    expect(replayed.filter((envelope) => envelope.messageType === 'COMPLETED')).toHaveLength(3)
-    setup.runtime.close()
+    try {
+      await handshake(setup)
+      setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-cancel-replay', payload: invokePayload() }))
+      await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED'))
+      setup.transport.receive(serverMessage('CANCEL', { environmentId: ENV, invocationId: 'inv-cancel-replay', payload: {} }))
+      setup.transport.receive(serverMessage('CANCEL', { environmentId: ENV, invocationId: 'inv-cancel-replay', payload: {} }))
+      await waitFor(() => sent(setup.transport).filter((envelope) => envelope.messageType === 'EXECUTION_EXITED').length === 3)
+      const replayed = sent(setup.transport).filter((envelope) => envelope.invocationId === 'inv-cancel-replay')
+      expect(replayed.filter((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toHaveLength(3)
+      expect(replayed.filter((envelope) => envelope.messageType === 'COMPLETED')).toHaveLength(3)
+    } finally {
+      setup.runtime.close()
+      await setup.runtime.awaitCompletion()
+    }
   })
 
   it('ACKs only after a cancelled execution has actually left its scope', async () => {
@@ -1522,15 +1536,19 @@ describe('runtime execution exit confirmation', () => {
         },
       },
     })
-    await handshake(setup)
-    setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-late', payload: invokePayload() }))
-    await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'COMPLETED'))
-    expect(sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toBe(false)
-    confirm?.()
-    confirm?.()
-    await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED'))
-    expect(sent(setup.transport).filter((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toHaveLength(1)
-    setup.runtime.close()
+    try {
+      await handshake(setup)
+      setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-late', payload: invokePayload() }))
+      await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'COMPLETED'))
+      expect(sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toBe(false)
+      confirm?.()
+      confirm?.()
+      await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED'))
+      expect(sent(setup.transport).filter((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toHaveLength(1)
+    } finally {
+      setup.runtime.close()
+      await setup.runtime.awaitCompletion()
+    }
   })
 
   it('does not ACK when owned upload cleanup throws after the executor confirmed', async () => {
@@ -1553,12 +1571,18 @@ describe('runtime execution exit confirmation', () => {
         },
       },
     })
-    await handshake(setup)
-    setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-upload', payload: invokePayload() }))
-    await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'FAILED'))
-    await tick(3)
-    expect(sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toBe(false)
-    setup.runtime.close()
+    try {
+      await handshake(setup)
+      setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-upload', payload: invokePayload() }))
+      await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'FAILED'))
+      expect(sent(setup.transport).find((envelope) => envelope.messageType === 'FAILED')?.payload).toEqual({ message: 'upload failed' })
+      expect(sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toBe(false)
+    } finally {
+      setup.runtime.close()
+      await setup.runtime.awaitCompletion()
+    }
+    // Runtime 已真正收尾；失败的上传不能留下可在重连后重放的退出事实。
+    expect(setup.runtime.getJournal().find('inv-upload')?.exitConfirmed).toBe(false)
   })
 
   it('ACKs only after a successful resource upload, not when confirmExecutionExit returns', async () => {
@@ -1631,9 +1655,11 @@ describe('runtime execution exit confirmation', () => {
         async close() {},
       },
     })
-    await handshake(setup)
-    const dir = await realpath(await mkdtemp(join(tmpdir(), 'kk-exit-process-')))
+    let dir: string | null = null
     try {
+      await handshake(setup)
+      dir = await mkdtemp(join(tmpdir(), 'kk-exit-process-'))
+      dir = await realpath(dir)
       setup.transport.receive(
         serverMessage('INVOKE', {
           environmentId: ENV,
@@ -1646,8 +1672,14 @@ describe('runtime execution exit confirmation', () => {
       const terminal = sent(setup.transport).find((envelope) => envelope.messageType === 'FAILED' || envelope.messageType === 'COMPLETED')
       expect(JSON.stringify(terminal?.payload)).toContain('did not converge')
     } finally {
-      await rm(dir, { recursive: true, force: true })
-      setup.runtime.close()
+      try {
+        setup.runtime.close()
+        await setup.runtime.awaitCompletion()
+      } finally {
+        if (dir !== null) {
+          await rm(dir, { recursive: true, force: true })
+        }
+      }
     }
   })
 })
