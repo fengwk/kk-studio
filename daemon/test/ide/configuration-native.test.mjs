@@ -4,10 +4,9 @@
  * KK_STUDIO_IDE_ACCEPTANCE_DIR=<extracted code-server> node --test <this file>
  */
 import assert from 'node:assert/strict'
-import { once } from 'node:events'
 import { test } from 'node:test'
 import { createRequire } from 'node:module'
-import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile, access } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
@@ -31,18 +30,28 @@ const stopGraceMs = 5_000
 const stopForceMs = 5_000
 const stopTimeoutCode = 'STOP_TIMEOUT'
 
-// Register 'close' before the child can exit: exit precedes stdio close whenever a
-// descendant inherits the pipes, and only 'close' proves those pipes are released.
+// Register 'exit' and 'close' before any await: exit can precede stdio close when a
+// descendant inherits the pipes. `closed` settles only on the real 'close' event; a
+// spawn error is recorded and surfaced after that close, never as a fake join.
 function spawnTracked(file, args, options) {
   const child = spawn(file, args, options)
-  const closed = new Promise((resolve, reject) => {
-    child.once('close', (code, signal) => resolve({ code, signal }))
-    child.once('error', reject)
+  let spawnError
+  const exited = new Promise(resolve => {
+    child.once('exit', (code, signal) => resolve({ code, signal }))
   })
-  // The same rejection stays observable at the await site without an interim
-  // unhandled rejection if spawning fails before cleanup runs.
+  const closed = new Promise((resolve, reject) => {
+    child.once('error', error => { spawnError = error })
+    child.once('close', (code, signal) => {
+      if (spawnError) {
+        reject(spawnError)
+      } else {
+        resolve({ code, signal })
+      }
+    })
+  })
+  // Keep a later spawn failure observable without an interim unhandled rejection.
   closed.catch(() => {})
-  return { child, closed }
+  return { child, closed, exited }
 }
 
 // Bound a promise without leaving its losing timer behind.
@@ -61,7 +70,27 @@ async function bounded(promise, ms, message) {
   }
 }
 
+async function waitUntil(predicate, ms, message) {
+  const deadline = Date.now() + ms
+  while (!(await predicate())) {
+    if (Date.now() >= deadline) throw new Error(message)
+    await delay(10)
+  }
+}
+
+async function pathExists(path) {
+  try {
+    await access(path)
+    return true
+  } catch (error) {
+    if (error.code === 'ENOENT') return false
+    throw error
+  }
+}
+
 // Terminate only this spawned child. A close timeout is a failure, never a joined child.
+// Non-timeout errors surface only after 'close'; `childClosed` records that fact so the
+// caller can clean the profile while still reporting the original failure.
 async function stopChild(child, closed, { graceMs = stopGraceMs, forceMs = stopForceMs } = {}) {
   if (child.exitCode === null && child.signalCode === null) {
     child.kill('SIGTERM')
@@ -69,10 +98,19 @@ async function stopChild(child, closed, { graceMs = stopGraceMs, forceMs = stopF
   try {
     return await bounded(closed, graceMs, 'child did not close after SIGTERM')
   } catch (error) {
-    if (error.code !== stopTimeoutCode) throw error
+    if (error.code !== stopTimeoutCode) {
+      throw Object.assign(error, { childClosed: true })
+    }
   }
   child.kill('SIGKILL')
-  return bounded(closed, forceMs, 'child did not close after SIGKILL')
+  try {
+    return await bounded(closed, forceMs, 'child did not close after SIGKILL')
+  } catch (error) {
+    if (error.code !== stopTimeoutCode) {
+      throw Object.assign(error, { childClosed: true })
+    }
+    throw Object.assign(error, { childClosed: false })
+  }
 }
 
 test('native configuration contributions and explicit user precedence', { skip: !runtime, timeout: 180_000 }, async () => {
@@ -119,16 +157,19 @@ exports.activate = async () => {
   require('node:fs').writeFileSync(${JSON.stringify(result)}, JSON.stringify(values));
 };
 `)
-      const { child, closed } = spawnTracked(join(runtime, 'lib', process.platform === 'win32' ? 'node.exe' : 'node'), [
-        join(runtime, 'out/node/entry.js'), '--auth', 'none', '--bind-addr', '127.0.0.1:0',
-        '--user-data-dir', userData, '--extensions-dir', extensions,
-        '--config', join(dir, 'config.yaml'), '--disable-telemetry', join(dir, 'workspace'),
-      ], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, HOME: dir, XDG_DATA_HOME: dir, XDG_CONFIG_HOME: dir } })
-      let output = ''
-      child.stdout.on('data', chunk => { output += chunk })
-      child.stderr.on('data', chunk => { output += chunk })
+      let child
+      let closed
+      let childClosed = true
       let page
       try {
+        ;({ child, closed } = spawnTracked(join(runtime, 'lib', process.platform === 'win32' ? 'node.exe' : 'node'), [
+          join(runtime, 'out/node/entry.js'), '--auth', 'none', '--bind-addr', '127.0.0.1:0',
+          '--user-data-dir', userData, '--extensions-dir', extensions,
+          '--config', join(dir, 'config.yaml'), '--disable-telemetry', join(dir, 'workspace'),
+        ], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, HOME: dir, XDG_DATA_HOME: dir, XDG_CONFIG_HOME: dir } }))
+        let output = ''
+        child.stdout.on('data', chunk => { output += chunk })
+        child.stderr.on('data', chunk => { output += chunk })
         page = await browser.newPage()
         page.on('console', message => { output += '\nBROWSER: ' + message.text() })
         const deadline = Date.now() + 45_000
@@ -161,12 +202,18 @@ exports.activate = async () => {
         } catch (error) {
           failures.push(error)
         }
-        try {
-          await stopChild(child, closed)
-        } catch (error) {
-          // A still-running child may keep using the temporary profiles: never delete them.
+        if (child) {
+          try {
+            await stopChild(child, closed)
+            childClosed = true
+          } catch (error) {
+            // Only the real 'close' event may make the profiles removable.
+            childClosed = error.childClosed === true
+            failures.push(error)
+          }
+        }
+        if (!childClosed) {
           rootRemovable = false
-          failures.push(error)
         }
         if (failures.length === 1) {
           throw failures[0]
@@ -203,62 +250,151 @@ exports.activate = async () => {
   }
 })
 
-// Public-boundary evidence: a real child exits while a real grandchild keeps stdout
-// open. Only the ancestor's 'close' proves the pipe was released; stopChild must wait
-// for it, and must fail explicitly instead of claiming a join while the pipe is held.
-test('cleanup joins stdio close rather than child exit', { timeout: 20_000 }, async () => {
-  const root = await mkdtemp(join(tmpdir(), 'kk-native-close-'))
-  const gate = join(root, 'gate')
-  const held = join(root, 'held')
-  const holderScript = join(root, 'holder.cjs')
-  const childScript = join(root, 'child.cjs')
-  await writeFile(holderScript, `
+// Public-boundary evidence: a real child exits while a tracked grandchild keeps stdout
+// open. The ACK instrument proves the holder is alive, so 'close' cannot have fired only
+// because time passed. The old policy joined at 'exit'; the assertion below is what turns
+// red under that policy, while the new path must wait for the actual 'close' event.
+test('cleanup joins stdio close rather than child exit', { timeout: 30_000 }, async () => {
+  let root
+  let gate
+  let probe
+  let ack
+  let pidFile
+  let child
+  let closed
+  let exited
+  let holderPid
+  let rootRemovable = true
+  let failure
+  try {
+    root = await mkdtemp(join(tmpdir(), 'kk-native-close-'))
+    gate = join(root, 'gate')
+    probe = join(root, 'probe')
+    ack = join(root, 'ack')
+    pidFile = join(root, 'holder-pid')
+    const holderScript = join(root, 'holder.cjs')
+    const childScript = join(root, 'child.cjs')
+    await writeFile(holderScript, `
 const { existsSync, writeFileSync } = require('node:fs')
-process.stdout.write('PIPE_HELD\\n')
-writeFileSync(${JSON.stringify(held)}, '')
+process.stdout.write('PIPE_HELD ' + process.pid + '\\n')
+let acknowledged = false
 const timer = setInterval(() => {
+  if (!acknowledged && existsSync(${JSON.stringify(probe)})) {
+    writeFileSync(${JSON.stringify(ack)}, '')
+    acknowledged = true
+  }
   if (existsSync(${JSON.stringify(gate)})) {
     clearInterval(timer)
     process.exit(0)
   }
 }, 10)
+// Bounded self-cleanup if the parent never opens the gate.
+setTimeout(() => process.exit(2), 15000).unref()
 `)
-  await writeFile(childScript, `
+    await writeFile(childScript, `
 const { spawn } = require('node:child_process')
-spawn(process.execPath, [${JSON.stringify(holderScript)}], { stdio: ['ignore', 'inherit', 'inherit'] })
+const { writeFileSync } = require('node:fs')
+const holder = spawn(process.execPath, [${JSON.stringify(holderScript)}], { stdio: ['ignore', 'inherit', 'inherit'] })
+writeFileSync(${JSON.stringify(pidFile)}, String(holder.pid))
 process.exit(0)
 `)
-  const { child, closed } = spawnTracked(process.execPath, [childScript], { stdio: ['ignore', 'pipe', 'pipe'] })
-  let output = ''
-  child.stdout.on('data', chunk => { output += chunk })
-  child.stderr.on('data', chunk => { output += chunk })
-  try {
-    await once(child, 'exit')
-    const deadline = Date.now() + 10_000
-    while (!output.includes('PIPE_HELD')) {
-      assert.ok(Date.now() < deadline, output)
-      await delay(10)
-    }
-    // 'exit' has fired; the gate proves the pipe-holder is still alive, so 'close' cannot fire.
-    const pending = await Promise.race([
-      closed.then(() => 'closed'),
-      delay(150, 'pending'),
-    ])
-    assert.equal(pending, 'pending', output)
+    ;({ child, closed, exited } = spawnTracked(process.execPath, [childScript], { stdio: ['ignore', 'pipe', 'pipe'] }))
+    let output = ''
+    child.stdout.on('data', chunk => { output += chunk })
+    child.stderr.on('data', chunk => { output += chunk })
+    let closeSettled = false
+    closed.then(() => { closeSettled = true }, () => { closeSettled = true })
+    // Bound the exit observation so a broken child still reaches cleanup.
+    await bounded(exited, 10_000, 'direct child did not exit')
+    await waitUntil(() => /PIPE_HELD \d+/.test(output), 10_000, output)
+    holderPid = Number(output.match(/PIPE_HELD (\d+)/)[1])
+    // This is exactly where the old cleanup returned; the pipe holder is still alive.
+    const legacyJoin = () => exited
+    await legacyJoin()
+    await writeFile(probe, '')
+    await waitUntil(() => pathExists(ack), 10_000, 'pipe holder did not acknowledge')
+    assert.equal(closeSettled, false, 'close must remain pending while the pipe is held')
+    // The bounded timeout is an expected negative while the gate stays closed; it is not
+    // the exit evidence itself.
     await assert.rejects(
       stopChild(child, closed, { graceMs: 100, forceMs: 100 }),
       /did not close after SIGKILL/,
     )
+    assert.equal(closeSettled, false)
     await writeFile(gate, '')
     const { code, signal } = await stopChild(child, closed, { graceMs: 3_000, forceMs: 3_000 })
     assert.equal(code, 0)
     assert.equal(signal, null)
+    assert.equal(closeSettled, true)
+  } catch (error) {
+    failure = error
   } finally {
-    await writeFile(gate, '')
-    try {
-      await bounded(closed, 3_000, 'evidence child did not close')
-    } finally {
-      await rm(root, { recursive: true, force: true })
+    const cleanupFailures = []
+    let childClosed = !child
+    if (gate) {
+      try {
+        await writeFile(gate, '')
+      } catch (error) {
+        cleanupFailures.push(error)
+      }
+    }
+    if (child) {
+      try {
+        await stopChild(child, closed, { graceMs: 3_000, forceMs: 3_000 })
+        childClosed = true
+      } catch (error) {
+        childClosed = error.childClosed === true
+        cleanupFailures.push(error)
+      }
+    }
+    if (!childClosed) {
+      if (holderPid === undefined && pidFile) {
+        try {
+          const value = Number(await readFile(pidFile, 'utf8'))
+          if (Number.isInteger(value) && value > 0) {
+            holderPid = value
+          }
+        } catch (error) {
+          if (error.code !== 'ENOENT') cleanupFailures.push(error)
+        }
+      }
+      if (holderPid === undefined) {
+        cleanupFailures.push(new Error('pipe holder PID unavailable'))
+      } else {
+        try {
+          process.kill(holderPid, 'SIGKILL')
+        } catch (error) {
+          if (error.code !== 'ESRCH') cleanupFailures.push(error)
+        }
+      }
+      try {
+        await bounded(closed, 3_000, 'child did not close after killing the pipe holder')
+        childClosed = true
+      } catch (error) {
+        if (error.code !== stopTimeoutCode) childClosed = true
+        cleanupFailures.push(error)
+      }
+    }
+    if (!childClosed) {
+      rootRemovable = false
+    }
+    if (root && rootRemovable) {
+      try {
+        await rm(root, { recursive: true, force: true })
+      } catch (error) {
+        cleanupFailures.push(error)
+      }
+    } else if (root) {
+      console.error(`preserving ${root}: evidence child did not close`)
+    }
+    if (cleanupFailures.length > 0) {
+      const cleanupError = cleanupFailures.length === 1
+        ? cleanupFailures[0]
+        : new AggregateError(cleanupFailures, 'evidence cleanup failed')
+      failure = failure
+        ? new AggregateError([failure, cleanupError], 'evidence failed')
+        : cleanupError
     }
   }
+  if (failure) throw failure
 })
