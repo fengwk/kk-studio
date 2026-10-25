@@ -523,9 +523,9 @@ test('assertProviderUsageAlgebra 按当前 ModelUsage 语义校验四大厂商�
   }
   assert.doesNotThrow(() => assertProviderUsageAlgebra(validOpenAi, 'openai_responses'))
   assert.doesNotThrow(() => assertAssistantUsage(validOpenAi, { providerType: 'openai_responses' }))
-  // 违规：把 reasoning 再加一次（115 + 35 + 15 = 165）或任意算术不平
+  // 违规：把 reasoning 再加一次（110 + 35 + 15 = 160）或任意算术不平
   assert.throws(
-    () => assertProviderUsageAlgebra({ ...validOpenAi, providerTotalTokens: 165 }, 'openai_responses'),
+    () => assertProviderUsageAlgebra({ ...validOpenAi, providerTotalTokens: 160 }, 'openai_responses'),
     /OpenAI Responses providerTotalTokens algebra mismatch/,
   )
   assert.throws(
