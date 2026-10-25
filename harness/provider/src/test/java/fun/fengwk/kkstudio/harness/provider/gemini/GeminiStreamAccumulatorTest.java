@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -150,14 +151,15 @@ class GeminiStreamAccumulatorTest {
     assertEquals(ProviderReplayFormat.GEMINI_CONTENT, completion.replayState().format());
   }
 
-  /** 测试意图：缓存关系不一致（breakdown）与输出计数溢出（overflow）在 finish() 判定并抛出 INVALID_RESPONSE。 */
+  /** 合法 STOP 前提下，具体诊断区分缓存关系错误与输出加法溢出，避免其他响应错误让负例误通过。 */
   @ParameterizedTest
-  @ValueSource(
-      strings = {
-        "{\"promptTokenCount\":1,\"candidatesTokenCount\":0,\"cachedContentTokenCount\":2}",
-        "{\"promptTokenCount\":0,\"candidatesTokenCount\":9223372036854775807,\"thoughtsTokenCount\":1}"
+  @CsvSource(
+      delimiter = '|',
+      value = {
+        "{\"promptTokenCount\":1,\"candidatesTokenCount\":0,\"cachedContentTokenCount\":2}|cached tokens exceed prompt tokens",
+        "{\"promptTokenCount\":0,\"candidatesTokenCount\":9223372036854775807,\"thoughtsTokenCount\":1}|output token count overflow"
       })
-  void rejectsInconsistentOrOverflowingUsage(String usage) {
+  void rejectsInconsistentOrOverflowingUsage(String usage, String expectedMessage) {
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
     accumulator.handleEvent(
         "message",
@@ -167,6 +169,7 @@ class GeminiStreamAccumulatorTest {
             + "}");
     ProviderException error = assertThrows(ProviderException.class, accumulator::finish);
     assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind());
+    assertEquals(expectedMessage, error.getMessage());
   }
 
   /** 测试意图：多 part 帧按各自 slot 保持边界，不能把 index 1 追加到 index 0。 */
