@@ -1065,7 +1065,13 @@ class EnvironmentDaemonServerTest {
     Fixture fixture = new Fixture();
     FakeChannel channel = fixture.connectReady("channel-terminal-exit-race");
     ExecutorService racers = Executors.newFixedThreadPool(2);
-    try {
+    // 清理失败作为 suppressed 保留，不能覆盖竞态主体的首个失败。
+    try (AutoCloseable cleanup =
+        () -> {
+          racers.shutdownNow();
+          assertTrue(
+              racers.awaitTermination(5, TimeUnit.SECONDS), "race workers must exit in cleanup");
+        }) {
       for (int round = 0; round < 32; round++) {
         UUID invocationId = UUID.randomUUID();
         RecordingListener listener = new RecordingListener();
@@ -1098,9 +1104,6 @@ class EnvironmentDaemonServerTest {
         assertNull(listener.error, "round=" + round);
         assertFalse(channel.closed(), "round=" + round);
       }
-    } finally {
-      racers.shutdownNow();
-      assertTrue(racers.awaitTermination(5, TimeUnit.SECONDS), "race workers must exit in cleanup");
     }
   }
 
@@ -1608,7 +1611,14 @@ class EnvironmentDaemonServerTest {
         fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), listener);
 
     ExecutorService workers = Executors.newFixedThreadPool(2);
-    try {
+    // 先放行受控 offer 再真实等待线程池退出；清理失败不替换主体异常。
+    try (AutoCloseable cleanup =
+        () -> {
+          first.releaseOffer();
+          workers.shutdownNow();
+          assertTrue(
+              workers.awaitTermination(5, TimeUnit.SECONDS), "race workers must exit in cleanup");
+        }) {
       first.holdNextOffer = true;
       Future<?> cancelling = workers.submit(handle::cancel);
       assertTrue(first.awaitOfferEntered(), "CANCEL 必须停在旧代际的递交窗口");
@@ -1637,11 +1647,6 @@ class EnvironmentDaemonServerTest {
       assertEquals(0, second.countOf(DaemonMessageType.INVOKE));
       assertTrue(handle.isCancelled());
       assertEquals(0, listener.exitConfirmations, "旧 CANCEL 接受与新 READY 恢复都不得确认退出");
-    } finally {
-      first.releaseOffer();
-      workers.shutdownNow();
-      assertTrue(
-          workers.awaitTermination(5, TimeUnit.SECONDS), "race workers must exit in cleanup");
     }
   }
 
