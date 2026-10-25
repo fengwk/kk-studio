@@ -30,8 +30,9 @@ const opposite = {
 test('native configuration contributions and explicit user precedence', { skip: !runtime, timeout: 180_000 }, async () => {
   const { chromium } = requireFrontend('@playwright/test')
   const root = await mkdtemp(join(tmpdir(), 'kk-native-defaults-'))
-  const browser = await chromium.launch({ headless: true })
+  let browser
   try {
+    browser = await chromium.launch({ headless: true })
     const snapshots = []
     for (const mode of ['baseline', 'defaults', 'user']) {
       const dir = join(root, mode)
@@ -77,9 +78,10 @@ exports.activate = async () => {
       let output = ''
       child.stdout.on('data', chunk => { output += chunk })
       child.stderr.on('data', chunk => { output += chunk })
-      const page = await browser.newPage()
-      page.on('console', message => { output += '\nBROWSER: ' + message.text() })
+      let page
       try {
+        page = await browser.newPage()
+        page.on('console', message => { output += '\nBROWSER: ' + message.text() })
         const deadline = Date.now() + 45_000
         while (!/http:\/\/127\.0\.0\.1:\d+/.test(output)) {
           assert.equal(child.exitCode, null, output)
@@ -103,9 +105,15 @@ exports.activate = async () => {
         }
         snapshots.push(JSON.parse(snapshot))
       } finally {
-        await page.close()
-        child.kill()
-        if (child.exitCode === null) await new Promise(resolve => child.once('exit', resolve))
+        // Browser/page failures must not bypass joining the real code-server child.
+        try {
+          await page?.close()
+        } finally {
+          child.kill()
+          if (child.exitCode === null && child.signalCode === null) {
+            await new Promise(resolve => child.once('exit', resolve))
+          }
+        }
       }
     }
     const [baseline, contributed, user] = snapshots
@@ -123,7 +131,10 @@ exports.activate = async () => {
     }
     console.log(JSON.stringify({ baseline, contributed, user }, null, 2))
   } finally {
-    await browser.close()
-    await rm(root, { recursive: true, force: true })
+    try {
+      await browser?.close()
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   }
 })
