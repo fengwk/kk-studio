@@ -102,9 +102,9 @@ function buildRuntime(options: {
 
 async function handshake(setup: Setup): Promise<void> {
   setup.runtime.start()
-  await tick()
+  await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'HELLO'))
   setup.transport.receive(serverMessage('WELCOME', { environmentId: ENV, payload: welcomePayload }))
-  await tick()
+  await waitFor(() => setup.runtime.getState() === 'READY')
   expect(setup.runtime.getState()).toBe('READY')
 }
 
@@ -622,14 +622,16 @@ describe('runtime invocation lifecycle', () => {
         result: { callId: 'inv-1', error: false, details: {}, contents: [{ type: 'text', text: 'partial' }] },
       })
     } finally {
-      setup.runtime.close()
-      await setup.runtime.awaitCompletion()
+      try {
+        setup.runtime.close()
+      } finally {
+        await setup.runtime.awaitCompletion()
+      }
     }
   })
 
   it('requests cancellation when a progress result cannot be encoded', async () => {
     // 编码失败立即封存 FAILED，但执行体仍被真实 gate 持有；停止意图必须已送达，退出确认只等 body 真正离开。
-    const entered = Promise.withResolvers<void>()
     const gate = Promise.withResolvers<void>()
     let abortReason: unknown
     let bodyHeld = false
@@ -641,12 +643,9 @@ describe('runtime invocation lifecycle', () => {
           }, { once: true })
           await context.progress({ callId: call.invocationId, error: false, details: {}, contents: [{ type: 'binary', bytes: new Uint8Array([1]), mediaType: 'text/plain' }] })
           bodyHeld = true
-          entered.resolve()
           await gate.promise
           bodyHeld = false
-          if (context.signal.aborted) {
-            context.confirmExecutionExit()
-          }
+          context.confirmExecutionExit()
           return textResult(call.invocationId)
         },
       },
@@ -654,7 +653,7 @@ describe('runtime invocation lifecycle', () => {
     try {
       await handshake(setup)
       setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-binary-progress', payload: invokePayload() }))
-      await entered.promise
+      await waitFor(() => bodyHeld)
       expect(bodyHeld).toBe(true)
       const failed = sent(setup.transport).filter((envelope) => envelope.messageType === 'FAILED')
       expect(failed).toHaveLength(1)
@@ -675,8 +674,11 @@ describe('runtime invocation lifecycle', () => {
       expect(setup.runtime.getJournal().find('inv-binary-progress')?.state).toBe('FAILED')
     } finally {
       gate.resolve()
-      setup.runtime.close()
-      await setup.runtime.awaitCompletion()
+      try {
+        setup.runtime.close()
+      } finally {
+        await setup.runtime.awaitCompletion()
+      }
     }
   })
 
