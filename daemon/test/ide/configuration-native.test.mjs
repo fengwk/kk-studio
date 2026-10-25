@@ -198,9 +198,11 @@ exports.activate = async () => {
       } catch (error) {
         failures.push(error)
       } finally {
-        // Page failures must not bypass terminating and joining the real code-server child.
+        // A failed or stalled page close must not bypass joining the real code-server child.
         try {
-          await page?.close()
+          if (page) {
+            await bounded(page.close(), stopGraceMs, 'page did not close')
+          }
         } catch (error) {
           failures.push(error)
         }
@@ -242,7 +244,9 @@ exports.activate = async () => {
     failures.push(error)
   } finally {
     try {
-      await browser?.close()
+      if (browser) {
+        await bounded(browser.close(), stopGraceMs, 'browser did not close')
+      }
     } catch (error) {
       failures.push(error)
     }
