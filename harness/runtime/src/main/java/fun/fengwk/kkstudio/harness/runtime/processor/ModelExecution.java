@@ -247,9 +247,9 @@ final class ModelExecution implements ModelGateway.Sink, ClaimAdmissionGuard.Gua
           });
     } catch (RuntimeException failure) {
       log.warn(
-          "cannot confirm model execution exit for {}: {}",
+          "cannot confirm model execution exit for {}; phase=MODEL_EXIT_CONFIRM; exception={}",
           local.executionId(),
-          ProcessorExceptions.describe(failure));
+          failure.getClass().getSimpleName());
     }
   }
 

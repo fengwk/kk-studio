@@ -16,6 +16,9 @@ import java.util.function.Function;
  */
 final class ExecutionExitFailureStore {
 
+  /** 明显 synthetic 的异常详情：任何退出边界日志都不允许回显它。 */
+  static final String SYNTHETIC_SECRET = "synthetic-secret-exit-failure-details";
+
   private ExecutionExitFailureStore() {}
 
   /**
@@ -46,8 +49,7 @@ final class ExecutionExitFailureStore {
                                     if ("confirmExecution".equals(txMethod.getName())) {
                                       confirmAttempts.incrementAndGet();
                                       if (failConfirm) {
-                                        throw new InjectedPersistenceFailure(
-                                            "injected exit confirmation persistence failure");
+                                        throw new InjectedPersistenceFailure(SYNTHETIC_SECRET);
                                       }
                                     }
                                     return invoke(tx, txMethod, txArgs);
