@@ -766,11 +766,12 @@ export class Runtime {
       const payloadJson = encodeProgress(result)
       this.send('PROGRESS', invocation.invocationId, payloadJson)
     } catch (error) {
+      // 对外保留 FAILED 诊断，但封存失败的同时必须把停止意图交给仍持有执行体的调用。
       this.terminal(
         invocation.invocationId,
         'FAILED',
         JSON.stringify(errorPayload(`cannot encode partial capability result: ${safeMessage(error)}`)),
-        null,
+        'CANCELLED',
       )
     }
   }
