@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { isAbsolute } from 'node:path'
 
 import type { CapabilityResult, DaemonConfig, IdeService, ResourceUploader } from '../src/contracts.js'
+import { InMemoryInvocationJournal } from '../src/journal.js'
 import { encodeInvoke, decodeEnvelope } from '../src/protocol.js'
 import {
   Runtime,
@@ -221,6 +222,114 @@ describe('runtime inbound protocol branches', () => {
     transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-1', payload: invokeJson() }))
     await waitFor(() => sentTypes(transport).includes('FAILED'))
     runtime.close()
+  })
+})
+
+describe('runtime journal capacity recovery evidence', () => {
+  it('recovery CANCEL never starts an evicted invocation while INVOKE re-executes it', async () => {
+    const invocationA = 'inv-journal-a'
+    const invocationB = 'inv-journal-b'
+    const journal = new InMemoryInvocationJournal(1)
+    const aGate = Promise.withResolvers<void>()
+    const aStarted = Promise.withResolvers<void>()
+    let aExecutions = 0
+    let bExecutions = 0
+
+    const transport = new FakeTransport()
+    const runtime = new Runtime(
+      baseOptions({
+        transport,
+        journal,
+        capabilities: {
+          'fs.read': async (call, context) => {
+            if (call.invocationId === invocationA) {
+              aExecutions += 1
+              if (aExecutions === 1) {
+                aStarted.resolve()
+                await aGate.promise
+              }
+            } else {
+              bExecutions += 1
+              // B 留下独立退出证据：终态与退出确认都必须进入容量为 1 的 journal。
+              context.confirmExecutionExit()
+            }
+            return { callId: call.invocationId, error: false, details: {}, contents: [{ type: 'text', text: 'ok' }] }
+          },
+        },
+      }),
+    )
+
+    const framesFor = (invocationId: string) =>
+      transport.sent.map((message) => decodeEnvelope(message)).filter((envelope) => envelope.invocationId === invocationId)
+    const typesFor = (invocationId: string) => framesFor(invocationId).map((envelope) => envelope.messageType)
+
+    try {
+      runtime.start()
+      // 以实际 HELLO / READY 观察握手完成，不靠 tick 猜测连接已就绪。
+      await waitFor(() => sentTypes(transport).includes('HELLO'))
+      transport.receive(serverMessage('WELCOME', { environmentId: ENV, payload: welcomePayload() }))
+      await waitFor(() => runtime.getState() === 'READY')
+
+      // A 先真正进入执行体并停在显式 gate；此时还没有任何终态可供容量淘汰。
+      transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: invocationA, payload: invokeJson() }))
+      await aStarted.promise
+      expect(aExecutions).toBe(1)
+
+      // B 后进入并完成：真实 COMPLETED 与独立 EXECUTION_EXITED 都已发出。
+      transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: invocationB, payload: invokeJson() }))
+      await waitFor(
+        () =>
+          typesFor(invocationB).filter((type) => type === 'COMPLETED').length === 1 &&
+          typesFor(invocationB).filter((type) => type === 'EXECUTION_EXITED').length === 1,
+      )
+      expect(bExecutions).toBe(1)
+      expect(journal.find(invocationB)).toMatchObject({ state: 'COMPLETED', exitConfirmed: true })
+
+      // 释放 A 并等它真实的 COMPLETED。A 的 RUNNING 条目早于 B 插入，转为终态后是最旧终态，先被自身容量淘汰。
+      aGate.resolve()
+      await waitFor(
+        () =>
+          typesFor(invocationA).filter((type) => type === 'COMPLETED').length === 1 &&
+          journal.find(invocationA) === undefined,
+      )
+      expect(journal.find(invocationA)).toBeUndefined()
+      expect(journal.find(invocationB)).toMatchObject({ state: 'COMPLETED', exitConfirmed: true })
+      const aFramesBeforeCancel = typesFor(invocationA)
+
+      // 恢复只发送 CANCEL：被淘汰的 A 未命中 journal，既不再执行，也不造终态、退出确认或 ACK。
+      transport.receive(serverMessage('CANCEL', { environmentId: ENV, invocationId: invocationA, payload: {} }))
+      // CANCEL B 是 FIFO 正控制：必须重放 B 的具体终态与独立退出事实。
+      transport.receive(serverMessage('CANCEL', { environmentId: ENV, invocationId: invocationB, payload: {} }))
+      await waitFor(
+        () =>
+          typesFor(invocationB).filter((type) => type === 'COMPLETED').length === 2 &&
+          typesFor(invocationB).filter((type) => type === 'EXECUTION_EXITED').length === 2,
+      )
+      expect(aExecutions).toBe(1)
+      expect(typesFor(invocationA)).toEqual(aFramesBeforeCancel)
+      expect(journal.find(invocationA)).toBeUndefined()
+      expect(journal.find(invocationB)).toMatchObject({ state: 'COMPLETED', exitConfirmed: true })
+
+      // 对照：若 Server 错把 INVOKE 当恢复查询，容量淘汰后已无终态可重放，A 会真实二次执行。
+      // 这不是安全恢复，而是被禁止的恢复策略的可观测后果。
+      transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: invocationA, payload: invokeJson() }))
+      await waitFor(
+        () =>
+          aExecutions === 2 &&
+          typesFor(invocationA).filter((type) => type === 'COMPLETED').length === 2,
+      )
+      expect(aExecutions).toBe(2)
+      expect(typesFor(invocationA).filter((type) => type === 'STARTED').length).toBe(2)
+      expect(journal.find(invocationA)).toMatchObject({ state: 'COMPLETED' })
+    } finally {
+      // 失败或正常结束都先释放 body gate，再关闭 Runtime，最后实际等待在途收尾完成。
+      aGate.resolve()
+      try {
+        runtime.close()
+      } finally {
+        await runtime.awaitCompletion()
+      }
+    }
   })
 })
 
