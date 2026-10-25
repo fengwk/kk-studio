@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { Worker } from 'node:worker_threads'
-import type { CapabilityContext, CapabilityExecutor, CapabilityResult } from '../contracts.js'
+import type { CapabilityExecutor, CapabilityResult } from '../contracts.js'
 import { errorResult, textResult } from '../contracts.js'
 import {
   CancelledError,
@@ -70,7 +70,7 @@ const findExecutor: CapabilityExecutor = async (call, context) => {
     const stopBuffer = new SharedArrayBuffer(4)
     const job: SearchJob = { kind: 'find', pattern, path, limit, stopBuffer }
 
-    const reply = await runSearchInWorker(job, context, {
+    const reply = await runSearchInWorker(job, context.signal, {
       onWorkerStarted: () => {
         workerStarted = true
       },
@@ -172,7 +172,7 @@ const grepExecutor: CapabilityExecutor = async (call, context) => {
       stopBuffer,
     }
 
-    const reply = await runSearchInWorker(job, context, {
+    const reply = await runSearchInWorker(job, context.signal, {
       onWorkerStarted: () => {
         workerStarted = true
       },
@@ -287,29 +287,20 @@ interface SearchWorkerExit {
 
 function runSearchInWorker(
   job: SearchJob,
-  context: CapabilityContext,
+  signal: AbortSignal,
   exit: SearchWorkerExit,
 ): Promise<SearchReply> {
-  const signal = context.signal
   return new Promise<SearchReply>((resolve, reject) => {
     const worker = createSearchWorker()
     exit.onWorkerStarted()
     let settled = false
     let graceTimer: NodeJS.Timeout | null = null
     let receivedReply: SearchReply | null = null
-    let workerExited = false
 
     const clearGraceTimer = (): void => {
       if (graceTimer !== null) {
         clearTimeout(graceTimer)
         graceTimer = null
-      }
-    }
-
-    const confirmIfExited = (): void => {
-      // terminate() 成功或 exit 事件才证明这次 worker 已离开；取消本身不是退出证据。
-      if (workerExited) {
-        exit.onWorkerExited()
       }
     }
 
@@ -322,12 +313,12 @@ function runSearchInWorker(
       signal.removeEventListener('abort', triggerStop)
       try {
         await worker.terminate()
-        workerExited = true
       } catch {
         reject(new ToolRunFailureError('search worker cleanup failed; results incomplete', 'INTERNAL'))
         return
       }
-      confirmIfExited()
+      // 仅成功 await terminate() 才确认；取消或 terminate reject 都不是退出证据。
+      exit.onWorkerExited()
       reject(error)
     }
 
@@ -367,7 +358,6 @@ function runSearchInWorker(
       settled = true
       clearGraceTimer()
       signal.removeEventListener('abort', triggerStop)
-      workerExited = true
       exit.onWorkerExited()
 
       if (code === 0 && receivedReply !== null) {
