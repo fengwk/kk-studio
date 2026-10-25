@@ -118,6 +118,7 @@ test('native configuration contributions and explicit user precedence', { skip: 
   const root = await mkdtemp(join(tmpdir(), 'kk-native-defaults-'))
   let browser
   let rootRemovable = true
+  const failures = []
   try {
     browser = await chromium.launch({ headless: true })
     const snapshots = []
@@ -161,6 +162,8 @@ exports.activate = async () => {
       let closed
       let childClosed = true
       let page
+      let bodyFailure
+      let cleanupFailure = false
       try {
         ;({ child, closed } = spawnTracked(join(runtime, 'lib', process.platform === 'win32' ? 'node.exe' : 'node'), [
           join(runtime, 'out/node/entry.js'), '--auth', 'none', '--bind-addr', '127.0.0.1:0',
@@ -194,13 +197,15 @@ exports.activate = async () => {
           if (!snapshot) await delay(100)
         }
         snapshots.push(JSON.parse(snapshot))
+      } catch (error) {
+        bodyFailure = error
       } finally {
         // Page failures must not bypass terminating and joining the real code-server child.
-        const failures = []
+        const cleanupFailures = []
         try {
           await page?.close()
         } catch (error) {
-          failures.push(error)
+          cleanupFailures.push(error)
         }
         if (child) {
           try {
@@ -209,44 +214,63 @@ exports.activate = async () => {
           } catch (error) {
             // Only the real 'close' event may make the profiles removable.
             childClosed = error.childClosed === true
-            failures.push(error)
+            cleanupFailures.push(error)
           }
         }
         if (!childClosed) {
           rootRemovable = false
         }
-        if (failures.length === 1) {
-          throw failures[0]
+        if (bodyFailure) {
+          failures.push(bodyFailure)
         }
-        if (failures.length > 1) {
-          throw new AggregateError(failures, 'native acceptance cleanup failed')
+        if (cleanupFailures.length > 0) {
+          cleanupFailure = true
+          failures.push(...cleanupFailures)
         }
       }
+      if (bodyFailure || cleanupFailure) {
+        break
+      }
     }
-    const [baseline, contributed, user] = snapshots
-    for (const [key, value] of Object.entries(defaults)) {
-      assert.equal(contributed[key].defaultValue, value, key)
-      assert.equal(contributed[key].effective, value, key)
-      assert.equal(user[key].defaultValue, value, key)
-      assert.equal(user[key].globalValue, opposite[key], key)
-      assert.equal(user[key].effective, opposite[key], key)
+    if (failures.length === 0) {
+      const [baseline, contributed, user] = snapshots
+      for (const [key, value] of Object.entries(defaults)) {
+        assert.equal(contributed[key].defaultValue, value, key)
+        assert.equal(contributed[key].effective, value, key)
+        assert.equal(user[key].defaultValue, value, key)
+        assert.equal(user[key].globalValue, opposite[key], key)
+        assert.equal(user[key].effective, opposite[key], key)
+      }
+      assert.equal(baseline['git.autoRepositoryDetection'].defaultValue, true)
+      assert.equal(baseline['git.autoRepositoryDetection'].effective, true)
+      for (const snapshot of [contributed, user]) {
+        assert.deepEqual(snapshot['git.autoRepositoryDetection'], baseline['git.autoRepositoryDetection'])
+      }
+      console.log(JSON.stringify({ baseline, contributed, user }, null, 2))
     }
-    assert.equal(baseline['git.autoRepositoryDetection'].defaultValue, true)
-    assert.equal(baseline['git.autoRepositoryDetection'].effective, true)
-    for (const snapshot of [contributed, user]) {
-      assert.deepEqual(snapshot['git.autoRepositoryDetection'], baseline['git.autoRepositoryDetection'])
-    }
-    console.log(JSON.stringify({ baseline, contributed, user }, null, 2))
+  } catch (error) {
+    failures.push(error)
   } finally {
     try {
       await browser?.close()
-    } finally {
-      if (rootRemovable) {
-        await rm(root, { recursive: true, force: true })
-      } else {
-        console.error(`preserving ${root}: a code-server child did not close`)
-      }
+    } catch (error) {
+      failures.push(error)
     }
+    if (rootRemovable) {
+      try {
+        await rm(root, { recursive: true, force: true })
+      } catch (error) {
+        failures.push(error)
+      }
+    } else {
+      console.error(`preserving ${root}: a code-server child did not close`)
+    }
+  }
+  if (failures.length === 1) {
+    throw failures[0]
+  }
+  if (failures.length > 1) {
+    throw new AggregateError(failures, 'native acceptance failed')
   }
 })
 
