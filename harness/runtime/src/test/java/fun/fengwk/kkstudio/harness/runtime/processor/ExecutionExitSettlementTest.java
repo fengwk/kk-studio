@@ -344,11 +344,17 @@ class ExecutionExitSettlementTest {
       } finally {
         try {
           processor.close();
-          fixture.processor.close();
-          fixture.scheduler.shutdownNow();
-          assertTrue(fixture.scheduler.awaitTermination(5, TimeUnit.SECONDS));
         } finally {
-          exitLogs.close();
+          try {
+            fixture.processor.close();
+          } finally {
+            try {
+              fixture.scheduler.shutdownNow();
+              assertTrue(fixture.scheduler.awaitTermination(5, TimeUnit.SECONDS));
+            } finally {
+              exitLogs.close();
+            }
+          }
         }
       }
     }
