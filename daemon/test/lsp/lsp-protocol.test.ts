@@ -298,8 +298,12 @@ describe('LspClient Protocol & Handshake', () => {
     const transcript = path.join(tempDir, `exit-scope-${Date.now()}.jsonl`)
     const config = fakeServerConfig('fake', 'slow-definition', transcript)
     const controlled = new ExitBarrierSupervisor()
-    const client = await LspClient.launch(config, tempDir, config.command[0]!, controlled)
+    let client: LspClient | null = null
     try {
+      client = await bounded(
+        LspClient.launch(config, tempDir, config.command[0]!, controlled),
+        'client launch',
+      )
       await client.initialize(5000)
       const file = path.join(tempDir, 'App.java')
       fs.writeFileSync(file, 'class App {}\n')
@@ -313,7 +317,15 @@ describe('LspClient Protocol & Handshake', () => {
         finished += 1
         confirmFinished()
       })
-      const rejected = expect(request).rejects.toThrow(/LSP (?:client stopped|server 'fake' exited)/)
+      let requestError: unknown = null
+      const settled = request.then(
+        () => {
+          throw new Error('request unexpectedly resolved')
+        },
+        (error: unknown) => {
+          requestError = error
+        },
+      )
 
       // 目标 RPC 必须真实进入 fixture；onRequestSent 只证明 SDK 开始发送。
       await awaitEvent(
@@ -324,18 +336,35 @@ describe('LspClient Protocol & Handshake', () => {
 
       // 退出报告已处理、本地请求已结束，但受管范围的 cleanup gate 尚未释放。
       controlled.reportExit()
-      await rejected
+      await bounded(settled, 'request settlement')
       expect(finished).toBe(0)
       expect(client.isAlive()).toBe(false)
+      expect(requestError).toBeInstanceOf(LspError)
+      expect((requestError as LspError).message).toBe('LSP client stopped')
       await bounded(controlled.terminateStarted, 'stop scope termination')
 
       controlled.releaseCleanup()
       await bounded(confirmed, 'request exit confirmation')
       expect(finished).toBe(1)
     } finally {
+      // 先释放预置屏障，再分别完成客户端与真实子进程收尾；前者失败不能跳过后者。
       controlled.releaseCleanup()
-      await controlled.close()
-      fs.rmSync(tempDir, { recursive: true, force: true })
+      const cleanupFailures: unknown[] = []
+      if (client) {
+        try {
+          await client.stop(0)
+        } catch (error) {
+          cleanupFailures.push(error)
+        }
+      }
+      try {
+        await controlled.close()
+      } catch (error) {
+        cleanupFailures.push(error)
+      }
+      if (cleanupFailures.length > 0) {
+        throw new AggregateError(cleanupFailures, 'controlled exit test cleanup failed')
+      }
     }
   })
 
@@ -343,8 +372,13 @@ describe('LspClient Protocol & Handshake', () => {
     const transcript = path.join(tempDir, `exit-scope-failure-${Date.now()}.jsonl`)
     const config = fakeServerConfig('fake', 'slow-definition', transcript)
     const controlled = new ExitBarrierSupervisor(new Error('deferred termination boom'))
-    const client = await LspClient.launch(config, tempDir, config.command[0]!, controlled)
+    let client: LspClient | null = null
+    let expectedStopFailure: unknown = null
     try {
+      client = await bounded(
+        LspClient.launch(config, tempDir, config.command[0]!, controlled),
+        'client launch',
+      )
       await client.initialize(5000)
       const file = path.join(tempDir, 'App.java')
       fs.writeFileSync(file, 'class App {}\n')
@@ -353,7 +387,15 @@ describe('LspClient Protocol & Handshake', () => {
       const request = client.definition(file, 1, 0, undefined, () => {
         finished += 1
       })
-      const rejected = expect(request).rejects.toThrow(/LSP (?:client stopped|server 'fake' exited)/)
+      let requestError: unknown = null
+      const settled = request.then(
+        () => {
+          throw new Error('request unexpectedly resolved')
+        },
+        (error: unknown) => {
+          requestError = error
+        },
+      )
       await awaitEvent(
         transcript,
         (event) => event.event === 'recv' && event.message?.method === 'textDocument/definition',
@@ -361,12 +403,15 @@ describe('LspClient Protocol & Handshake', () => {
       expect(receivedMessages(transcript, 'textDocument/definition')).toHaveLength(1)
 
       controlled.reportExit()
-      await rejected
+      await bounded(settled, 'request settlement')
       expect(finished).toBe(0)
+      expect(requestError).toBeInstanceOf(LspError)
+      expect((requestError as LspError).message).toBe('LSP client stopped')
       await bounded(controlled.terminateStarted, 'stop scope termination')
 
       controlled.releaseCleanup()
       const firstFailure: unknown = await client.stop(0).catch((error: unknown) => error)
+      expectedStopFailure = firstFailure
       expect(firstFailure).toBeInstanceOf(LspError)
       expect((firstFailure as LspError).message).toBe(
         'LSP server process termination failed during shutdown',
@@ -380,9 +425,27 @@ describe('LspClient Protocol & Handshake', () => {
       expect(controlled.terminateCalls).toBe(1)
       expect(finished).toBe(0)
     } finally {
+      // 先释放预置屏障，再分别完成客户端与真实子进程收尾；前者失败不能跳过后者。
       controlled.releaseCleanup()
-      await controlled.close()
-      fs.rmSync(tempDir, { recursive: true, force: true })
+      const cleanupFailures: unknown[] = []
+      if (client) {
+        try {
+          await client.stop(0)
+        } catch (error) {
+          // 只容忍本用例已观察到的同一缓存 stop 失败，其余清理异常仍然暴露。
+          if (error !== expectedStopFailure) {
+            cleanupFailures.push(error)
+          }
+        }
+      }
+      try {
+        await controlled.close()
+      } catch (error) {
+        cleanupFailures.push(error)
+      }
+      if (cleanupFailures.length > 0) {
+        throw new AggregateError(cleanupFailures, 'controlled exit test cleanup failed')
+      }
     }
   })
 
@@ -390,8 +453,12 @@ describe('LspClient Protocol & Handshake', () => {
     const transcript = path.join(tempDir, `exit-during-shutdown-${Date.now()}.jsonl`)
     const config = fakeServerConfig('fake', 'stubborn', transcript)
     const controlled = new ExitBarrierSupervisor()
-    const client = await LspClient.launch(config, tempDir, config.command[0]!, controlled)
+    let client: LspClient | null = null
     try {
+      client = await bounded(
+        LspClient.launch(config, tempDir, config.command[0]!, controlled),
+        'client launch',
+      )
       await client.initialize(5000)
       const started = await awaitEvent(transcript, (event) => event.event === 'start')
       const pid = started.pid!
@@ -413,9 +480,24 @@ describe('LspClient Protocol & Handshake', () => {
       await client.stop(500)
       expect(controlled.terminateCalls).toBe(1)
     } finally {
+      // 先释放预置屏障，再分别完成客户端与真实子进程收尾；前者失败不能跳过后者。
       controlled.releaseCleanup()
-      await controlled.close()
-      fs.rmSync(tempDir, { recursive: true, force: true })
+      const cleanupFailures: unknown[] = []
+      if (client) {
+        try {
+          await client.stop(0)
+        } catch (error) {
+          cleanupFailures.push(error)
+        }
+      }
+      try {
+        await controlled.close()
+      } catch (error) {
+        cleanupFailures.push(error)
+      }
+      if (cleanupFailures.length > 0) {
+        throw new AggregateError(cleanupFailures, 'controlled exit test cleanup failed')
+      }
     }
   })
 
