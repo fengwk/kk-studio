@@ -73,16 +73,16 @@ task 接受 subagent_type、prompt、可选 max_turns、可选 thread_id。新�
 
 完成消息结构包含 thread_id、本次 Agent、状态、本次任务原文及结果。失败时分离 error 和 partial_result。正文正确转义；模型的 `<error>` 详情最多 1000 个 Unicode 码点（含英文 ` [TRUNCATED]` 标记、转义前计数、不拆代理对），任务原文、成功报告与普通 partial_result 不截断；task 原文是历史引用不是给父的新指令。任务原文绑定本次调用，不使用首次创建时的任务。长文本沿用资源化，保留完整访问入口。
 
-完成结果不是原 `task` 调用返回的第二个结果：`task` 只返回接受回执，子 Thread 在源输入应用后、且没有未完成直接子 Join / 待处理输入时，以最终回答或不可继续失败冻结 `terminalEntryId` / `finalAnswerEntryId` 结算 join；Stop 强制结算不受上述收敛条件限制。结果冻结与父 `NOTIFICATION` 命令在同一事务提交，不存在等待补投的持久中间态。父为 `RUNNABLE` 时请求 THREAD wake；父为 `STOPPED` 时通知直接固化进历史，接受新任务输入后才继续模型。多条结果可以合并处理，父仍负责最终验收。
+完成结果不是原 `task` 调用返回的第二个结果：`task` 只返回接受回执。普通结算要求源输入已应用，本地流程已结束，没有未完成的直接子 Join（含 owner 压缩结算义务）、待处理输入或未确认退出的执行，再以最终回答或不可继续失败冻结 `terminalEntryId` / `finalAnswerEntryId`。Stop 允许结算尚未应用的源输入，但仍须等待执行退出与直接子 Join 收敛；保留的系统通知不触发已停止 Thread 继续执行。结果冻结与父 `NOTIFICATION` 命令在同一事务提交，不存在等待补投的持久中间态。父为 `RUNNABLE` 时请求 THREAD wake；父为 `STOPPED` 时通知直接固化进历史，接受新任务输入后才继续模型。多条结果可以合并处理，父仍负责最终验收。
 
 ### 持久义务与交付
 
-Thread 的活动状态与执行控制正交：本地流程未结束为 `RUNNING`；本地已让出执行且等待直接子 Join 异步结果为 `WAITING`，不空转模型或保留等待线程；无本地义务及直接异步结果为 `IDLE`。等待审批或人工输入仍属于本地流程，排队的设置维护命令不构成模型输入需求。子任务按各自收敛终态逐层结算并通知父：源输入已应用且没有未完成的直接子 Join 或待处理输入时，本地终态才作为委派收敛点向上回执，单轮 `TURN_END` 本身不足以保证整次委派可交付。
+Thread 的活动状态与执行控制正交：本地流程未结束、存在未确认退出的执行或 owner 压缩结算义务时为 `RUNNING`；本地已让出执行且等待直接 `NOTIFY_PARENT` 子 Join 异步结果时为 `WAITING`，不空转模型或保留等待线程；无本地义务及直接异步结果为 `IDLE`。等待审批或人工输入仍属于本地流程，排队的设置维护命令不构成模型输入需求。状态与 Join 结算使用同一收敛判据，子任务自底向上逐层结算并通知父；单轮 `TURN_END` 本身不足以保证整次委派可交付。
 
 内部以工具 invocation ID 标识本次委派，join 记录父子 Thread、源命令、冻结的终态/最终回答 Entry 与投递坐标；固定归属与每次执行身份分开。执行由 Session/Thread/Entry/Command/Work 的统一生命周期推进。
 
-子 Thread 终态、join 冻结与父通知交付在同一数据库事务内完成。接受与结果交付使用工具 invocation ID
-作为稳定幂等身份；并发额度按尚未冻结终态且未被 supersede 的子 Join 计，同一父/子对至多一个有效未完成 join，
+join 冻结与父通知交付在同一数据库事务内完成；子 Thread 终态已先物化时，最后一次退出确认可在其事务中补结算。接受与结果交付使用工具 invocation ID
+作为稳定幂等身份；并发额度按尚未冻结终态且未被 supersede 的 `NOTIFY_PARENT` 子 Join 计，同一父/子对至多一个有效未完成 join，
 root ticket 不占子任务名额。忙时继续仍需通过单父与全局额度准入，额度已满则明确拒绝。
 Work 通知只降低延迟，周期 claim 扫描兜底进程重启和通知丢失；
 父为 `STOPPED` 时通知只固化、不唤醒。

@@ -8,7 +8,7 @@
 
 `parentThreadId` 是不可变执行父关系。独立 fork 是新执行根，不与历史来源形成执行父子关系。
 Thread 的 `status`（`RUNNING` / `WAITING` / `IDLE`）和 `executionControl`（`RUNNABLE` / `STOPPED`）仅描述自身，彼此正交；根空闲或等待而后代活跃是合法状态。
-根 Stop 覆盖全部后代，不能按根本地状态或 Join 是否已结算缩小范围。注意：StopControl 清理在途调用与调度义务后，缺乏外部退出 durable 确认，三态无法建立外部物理进程是否已退出的事实。
+根 Stop 覆盖全部后代，不能按根本地状态或 Join 是否已结算缩小范围。Stop 清理逻辑调用与调度义务不代表执行已退出；独立持久退出账本按具体执行代次记录 Studio 资源释放或远端正向确认，未确认执行使 Thread 保持 `RUNNING`。确认只覆盖对应执行范围，三态本身不证明所有外部进程或副作用都已结束。
 
 每个 Thread 持久化不可变的执行根 `root_thread_id`（根指向自身，子代理继承父 Thread 的执行根）
 和 `yolo_enabled`。开关只属于执行根，子代理恒为 false，其有效值取自执行根。
