@@ -291,13 +291,14 @@ test('tool isolation rejects anchors, other cases, and unscoped relative paths',
 })
 
 test('usage aggregation sums tokens, cache, assistant rows, and cost', () => {
+  // 每条输入的 reasoning 都是 output 的合法子集，聚合不会重复加入输出。
   const total = aggregateUsage([
     {
       inputTokens: 10,
       outputTokens: 2,
       cacheReadTokens: 3,
       cacheWriteTokens: 4,
-      reasoningTokens: 6,
+      reasoningTokens: 2,
       providerTotalTokens: 12,
       costTotal: 0.1,
       assistantMessages: 1,
@@ -318,7 +319,7 @@ test('usage aggregation sums tokens, cache, assistant rows, and cost', () => {
     outputTokens: 10,
     cacheReadTokens: 12,
     cacheWriteTokens: 5,
-    reasoningTokens: 9,
+    reasoningTokens: 5,
     providerTotalTokens: 27,
     costTotal: 0.30000000000000004,
     assistantMessages: 3,
@@ -505,22 +506,23 @@ test('token counts reject non-number types including false, empty string, and st
 })
 
 test('token count addition overflow exceeding MAX_SAFE_INTEGER throws ReliabilityError', () => {
-  // 1. extractDurableTrace multi-message addition overflow
+  // 单条最大计数合法，且零输出不带推理；只在累加第二条后命中指定字段的溢出。
+  const first = messageEntry(
+    '1',
+    { role: 'ASSISTANT', contents: [{ type: 'text', text: 'one' }] },
+    metadata(Number.MAX_SAFE_INTEGER, 0, 0, { reasoningTokens: 0, providerTotalTokens: null }),
+  )
+  const second = messageEntry(
+    '2',
+    { role: 'ASSISTANT', contents: [{ type: 'text', text: 'two' }] },
+    metadata(1, 0, 0, { reasoningTokens: 0, providerTotalTokens: null }),
+  )
+  assert.doesNotThrow(() => extractDurableTrace([first]))
   assert.throws(
-    () =>
-      extractDurableTrace([
-        messageEntry(
-          '1',
-          { role: 'ASSISTANT', contents: [{ type: 'text', text: 'one' }] },
-          metadata(Number.MAX_SAFE_INTEGER, 0, 0),
-        ),
-        messageEntry(
-          '2',
-          { role: 'ASSISTANT', contents: [{ type: 'text', text: 'two' }] },
-          metadata(1, 0, 0),
-        ),
-      ]),
-    (err) => err instanceof ReliabilityError && err.category === 'model',
+    () => extractDurableTrace([first, second]),
+    (err) => err instanceof ReliabilityError
+      && err.category === 'model'
+      && err.message === `token count addition overflow for inputTokens: ${Number.MAX_SAFE_INTEGER} + 1`,
   )
 
   // 2. aggregateUsage two MAX_SAFE_INTEGER items addition overflow
@@ -548,7 +550,9 @@ test('token count addition overflow exceeding MAX_SAFE_INTEGER throws Reliabilit
           assistantMessages: 1,
         },
       ]),
-    (err) => err instanceof ReliabilityError && err.category === 'model',
+    (err) => err instanceof ReliabilityError
+      && err.category === 'model'
+      && err.message === `token count addition overflow for inputTokens: ${Number.MAX_SAFE_INTEGER} + ${Number.MAX_SAFE_INTEGER}`,
   )
 
   // 3. assistantMessages addition overflow
@@ -576,7 +580,9 @@ test('token count addition overflow exceeding MAX_SAFE_INTEGER throws Reliabilit
           assistantMessages: 1,
         },
       ]),
-    (err) => err instanceof ReliabilityError && err.category === 'model',
+    (err) => err instanceof ReliabilityError
+      && err.category === 'model'
+      && err.message === `token count addition overflow for assistantMessages: ${Number.MAX_SAFE_INTEGER} + 1`,
   )
 })
 
