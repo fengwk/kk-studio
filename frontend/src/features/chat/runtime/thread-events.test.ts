@@ -312,7 +312,8 @@ describe('buildThreadEventTimeline', () => {
         cacheReadTokens: 5,
         cacheWriteTokens: 3,
         reasoningTokens: 7,
-        providerTotalTokens: 44,
+        // 合成用量保持分类合计一致，reasoning 已包含在 output 中。
+        providerTotalTokens: 38,
       },
       // 旧的 metadata.cost 不再被读取：费用只能来自 Entry.usageCost 读取投影
       cost: 0.00125,
