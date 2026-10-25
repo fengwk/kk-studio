@@ -107,7 +107,13 @@ describe('createSkillCapability', () => {
       timeoutMillis: 10_000,
     }
 
-    const context = createContext()
+    let confirmations = 0
+    const context: CapabilityContext = {
+      ...createContext(),
+      confirmExecutionExit: () => {
+        confirmations += 1
+      },
+    }
     const result = await capability(call, context)
 
     expect(result.callId).toBe('call-1')
@@ -125,6 +131,8 @@ describe('createSkillCapability', () => {
 
     const installedFile = path.join(dataDir, 'skills', 'demo-package', 'demo-skill', 'SKILL.md')
     expect(fs.readFileSync(installedFile, 'utf8')).toBe('# Demo Skill\n')
+    // install 已成功返回，没有遗留后台任务，确认一次退出。
+    expect(confirmations).toBe(1)
   })
 
   it('handles optional credential string and trims whitespace', async () => {
@@ -203,13 +211,19 @@ describe('createSkillCapability', () => {
     expect(result.error).toBe(true)
     expect(result.details).toEqual({})
     expect(result.contents).toEqual([{ type: 'text', text: 'Error: Operation cancelled' }])
-    // 安装已经进入后的中断仍由 finally 确认一次：install 已返回，没有留下后台任务。
-    expect(confirmations).toBe(1)
+    // install 已进入并以 AbortError 抛出，不能据此证明 owned 资源已收敛，因此不确认退出。
+    expect(confirmations).toBe(0)
   })
 
   it('missing or invalid argument types return coded INVALID_ARGUMENT error', async () => {
     const capability = createSkillCapability(config, createTestInstaller())
-    const context = createContext()
+    let confirmations = 0
+    const context: CapabilityContext = {
+      ...createContext(),
+      confirmExecutionExit: () => {
+        confirmations += 1
+      },
+    }
 
     // Missing required field
     const call1: CapabilityCall = {
@@ -270,6 +284,8 @@ describe('createSkillCapability', () => {
     expect(res4.error).toBe(true)
     expect(res4.details).toEqual({ code: 'INVALID_ARGUMENT' })
     expect(res4.contents).toEqual([{ type: 'text', text: 'Error: Invalid skill sync argument' }])
+    // 四次拒绝都发生在 install 之前，每次都可确认退出；install 未进入。
+    expect(confirmations).toBe(4)
   })
 
   it('default installer branch without injection handles validation without running install', async () => {
@@ -332,10 +348,18 @@ describe('createSkillCapability', () => {
       timeoutMillis: 5000,
     }
 
-    const result = await capability(call, createContext())
+    let confirmations = 0
+    const result = await capability(call, {
+      ...createContext(),
+      confirmExecutionExit: () => {
+        confirmations += 1
+      },
+    })
     expect(result.error).toBe(true)
     expect(result.details).toEqual({ code: 'INVALID_REPOSITORY_URL' })
     expect(result.contents).toEqual([{ type: 'text', text: 'Error: Repository URL is malformed' }])
+    // install 已进入后抛出业务错误，不能补造退出确认。
+    expect(confirmations).toBe(0)
   })
 
   it('unexpected error is mapped to SKILL_SYNC_FAILED', async () => {
@@ -364,10 +388,86 @@ describe('createSkillCapability', () => {
       timeoutMillis: 5000,
     }
 
-    const result = await capability(call, createContext())
+    let confirmations = 0
+    const result = await capability(call, {
+      ...createContext(),
+      confirmExecutionExit: () => {
+        confirmations += 1
+      },
+    })
     expect(result.error).toBe(true)
     expect(result.details).toEqual({ code: 'SKILL_SYNC_FAILED' })
     expect(result.contents).toEqual([{ type: 'text', text: 'Error: Skill sync failed' }])
+    // install 已进入并抛出普通错误，不能确认退出。
+    expect(confirmations).toBe(0)
+  })
+
+  it('owns rollback cleanup failure after install entered and does not confirm exit', async () => {
+    const skillsRoot = path.join(dataDir, 'skills')
+    const stagingRoot = path.join(dataDir, 'skill-work', 'staging')
+    const backupRoot = path.join(dataDir, 'skill-work', 'backup')
+    const packageName = 'rollback-fail-package'
+    const remoteUrl = pathToFileURL(remoteRepoDir).toString()
+    const packageDir = path.join(skillsRoot, packageName)
+
+    // 先建立可回滚的已安装包，再用公开 directoryMover 注入制造发布失败且回滚失败。
+    const initialInstaller = new SkillPackageInstaller(skillsRoot, stagingRoot, backupRoot, {
+      privateFs: createTestPrivateFs(),
+    })
+    await initialInstaller.install(packageName, remoteUrl, 'main', commitId)
+
+    const faultyInstaller = new SkillPackageInstaller(skillsRoot, stagingRoot, backupRoot, {
+      privateFs: createTestPrivateFs(),
+      directoryMover: async (source, target) => {
+        if (source === packageDir && target.startsWith(backupRoot)) {
+          await fs.promises.rename(source, target)
+          return
+        }
+        if (source.startsWith(stagingRoot) && target === packageDir) {
+          throw new Error('initial swap failure')
+        }
+        if (source.startsWith(backupRoot) && target === packageDir) {
+          throw new Error('rollback move failure')
+        }
+        await fs.promises.rename(source, target)
+      },
+    })
+    const capability = createSkillCapability(config, faultyInstaller)
+
+    const call: CapabilityCall = {
+      invocationId: 'call-rollback-fail',
+      capabilityId: 'skill.sync',
+      arguments: {
+        packageName,
+        repositoryUrl: remoteUrl,
+        branch: 'main',
+        targetCommit: commitId,
+      },
+      timeoutMillis: 5000,
+    }
+
+    let confirmations = 0
+    const result = await capability(call, {
+      ...createContext(),
+      confirmExecutionExit: () => {
+        confirmations += 1
+      },
+    })
+
+    expect(result.error).toBe(true)
+    expect(result.details).toEqual({ code: 'INSTALL_FAILED' })
+    expect(result.contents).toEqual([
+      {
+        type: 'text',
+        text: 'Error: Failed to swap installed package directory and rollback of the previous package failed',
+      },
+    ])
+    // install 已进入且 owned 包目录的回滚收尾失败，不能补造退出确认。
+    expect(confirmations).toBe(0)
+    // 失败真实发生：旧包已移出且回滚未完成，staging 仍在 finally 中被清理。
+    expect(fs.existsSync(packageDir)).toBe(false)
+    const stagingEntries = fs.existsSync(stagingRoot) ? fs.readdirSync(stagingRoot) : []
+    expect(stagingEntries).toEqual([])
   })
 
   it('registered skill.sync executor fails closed for a 64-hex SHA-256 target commit', async () => {
