@@ -68,8 +68,8 @@ import java.util.function.Supplier;
  * WELCOME。READY、HEARTBEAT 与断开连接同样以围栏推进状态； 租约存储不可用时 fail-closed。
  *
  * <p><b>实例身份与重连恢复：</b>调用只按 {@code (environmentId, invocationId)} 关联，物理连接失效不终结在途调用。同一 {@code
- * daemonInstanceId} 再次 READY 时，核心以相同 invocationId 重放每个在途 INVOKE，Daemon journal 负责重放 STARTED
- * 或终态而不重复执行。只有身份不同的新 daemon 进程接管该 Environment 时，旧的在途调用才被判定为结果不确定（exactly-once 通知）。
+ * daemonInstanceId} 再次 READY 时，核心以相同 invocationId 恢复每个在途调用：只发送取消意图，绝不重发 INVOKE；Daemon 从 journal
+ * 重放既有事实或停止仍运行的 scope。只有身份不同的新 daemon 进程接管该 Environment 时，旧的在途调用才被判定为结果不确定（exactly-once 通知）。
  *
  * <p><b>终态唯一与回调顺序：</b>COMPLETED/FAILED/CANCELLED 回调、连接清理与显式 {@link #expire} 竞争时只有一个赢家；已知 invocation
  * 的迟到 STARTED/PROGRESS 静默丢弃，未知 invocation 的回调按协议违规关闭连接。并发 {@code receive} 下 listener 回调 仍严格按该连接
@@ -635,7 +635,6 @@ public final class EnvironmentDaemonServer
             environmentId,
             invocationId,
             listener,
-            invokePayload,
             settings().heartbeatTimeout(),
             state.daemonInstanceId());
     DaemonOfferResult outcome = null;
@@ -654,14 +653,14 @@ public final class EnvironmentDaemonServer
       try {
         outcome = state.offer(DaemonMessageType.INVOKE, invocationId.toString(), invokePayload);
         if (outcome == DaemonOfferResult.ACCEPTED) {
-          active.sentGeneration = state.generation;
+          active.invokeSentGeneration = state.generation;
         }
       } catch (RuntimeException error) {
         sendFailure = error;
       }
     }
     if (sendFailure != null) {
-      // 传输在递交过程中失败：连接失效，调用保持活动并由同实例重连以同一 invocationId 重放。
+      // 传输在递交过程中失败：连接失效，调用保持活动；同实例重连只发送取消意图，不重发 INVOKE。
       close(state.connection.connectionId());
       return active;
     }
@@ -682,7 +681,7 @@ public final class EnvironmentDaemonServer
   /**
    * 终结一次由调用方判定超时或放弃的调用：移出活动目录、登记 tombstone 并至多发送一次 CANCEL。
    *
-   * <p>该方法不向 listener 发送终态；超时判定由调用方在自身 deadline 上完成。调用被放弃后不再随重连重放，因此即使 CANCEL 未能 送达也不会重复执行。
+   * <p>该方法不向 listener 发送终态；超时判定由调用方在自身 deadline 上完成。调用被放弃后不再恢复为在途执行，因此即使 CANCEL 未能送达也不会重复执行。
    */
   public void expire(EnvironmentCapabilityExecutionHandle handle) {
     Objects.requireNonNull(handle, "handle");
@@ -701,7 +700,7 @@ public final class EnvironmentDaemonServer
       addTombstoneLocked(active);
       state = connectionOf(active.environmentId);
     }
-    // 已移出在途目录，不再随重连重放；仍尝试把一次 CANCEL 交给当前连接。
+    // 已移出在途目录，不再恢复为在途执行；仍尝试把一次 CANCEL 交给当前连接。
     if (state != null) {
       active.deliverCancel(state);
     }
@@ -1172,7 +1171,7 @@ public final class EnvironmentDaemonServer
     }
   }
 
-  /** 处理 daemon READY 声明：围栏式登记 READY 能力、唤醒会话监听器并重放同实例的在途调用。 */
+  /** 处理 daemon READY 声明：围栏式登记 READY 能力、唤醒会话监听器并恢复同实例的在途调用。 */
   private void handleReady(
       ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
     requireHello(state);
@@ -1202,60 +1201,38 @@ public final class EnvironmentDaemonServer
       state.daemonOperatingSystem = capabilities.environment().operatingSystem();
     }
     deferred.add(() -> notifyEnvironmentReady(environmentId));
-    resendActiveInvocations(state, environmentId);
+    recoverActiveInvocations(state, environmentId);
     resendPendingExitConfirmations(state, environmentId);
   }
 
   /**
-   * 重放尚未在当前连接代际发出的在途调用。
+   * 同实例重连后恢复未终结的在途调用：只发送取消意图，绝不重发 INVOKE。
    *
-   * <p>已记录取消意图的调用只发 CANCEL，绝不重发 INVOKE。尚未取消的调用以相同 invocationId 重放 INVOKE：Daemon journal 以
-   * invocationId 去重，RUNNING 重放 STARTED，已终结重放终态，因此重放不会重复执行副作用。本地队列拒绝不改变在途调用的存在；BUSY/CLOSED
-   * 关闭当前连接，由既有重连在新代际再试，不新增轮询。
+   * <p>排除判断集中在连接状态锁内：已终结、当前代际刚成功初次递交 INVOKE 且尚未取消、或 CANCEL 已在本代送达的调用不再恢复。Daemon journal
+   * 只保留有界终态，不能为恢复提供永久去重，因此恢复以既有 cancelled 意图请求停止或重放事实，绝不再次执行。本地队列拒绝不改变在途调用的存在；
+   * BUSY/CLOSED/传输失败关闭当前连接，由既有重连在新代际再试，不新增轮询。
    */
-  private void resendActiveInvocations(ConnectionState state, EnvironmentId environmentId) {
+  private void recoverActiveInvocations(ConnectionState state, EnvironmentId environmentId) {
     for (ActiveInvocation active : activeInvocations(environmentId)) {
-      if (active.isTerminal()) {
-        continue;
-      }
-      boolean cancelOnly = active.cancellationRequested();
-      if (!cancelOnly && active.sentGeneration == state.generation) {
-        continue;
-      }
-      if (cancelOnly && active.cancelDeliveredGeneration == state.generation) {
-        continue;
-      }
       DaemonOfferResult outcome;
       synchronized (state) {
         if (!state.isReady()) {
           return;
         }
-        if (active.cancellationRequested()) {
-          if (active.cancelDeliveredGeneration == state.generation) {
-            continue;
-          }
-          try {
-            outcome = state.offer(DaemonMessageType.CANCEL, active.invocationId.toString(), "{}");
-          } catch (RuntimeException transportFailure) {
-            outcome = null;
-          }
-          if (outcome == DaemonOfferResult.ACCEPTED) {
-            active.noteCancelDelivered(state.generation);
-          }
-        } else {
-          if (active.sentGeneration == state.generation) {
-            continue;
-          }
-          try {
-            outcome =
-                state.offer(
-                    DaemonMessageType.INVOKE, active.invocationId.toString(), active.invokePayload);
-          } catch (RuntimeException transportFailure) {
-            outcome = null;
-          }
-          if (outcome == DaemonOfferResult.ACCEPTED) {
-            active.sentGeneration = state.generation;
-          }
+        if (active.isTerminal()
+            || (!active.isCancelled() && active.invokeSentGeneration == state.generation)
+            || active.cancelDeliveredGeneration == state.generation) {
+          continue;
+        }
+        // 恢复取消意图使用既有状态字段：调用仍保留原 listener 等待终态，但不允许再次执行。
+        active.cancelled = true;
+        try {
+          outcome = state.offer(DaemonMessageType.CANCEL, active.invocationId.toString(), "{}");
+        } catch (RuntimeException transportFailure) {
+          outcome = null;
+        }
+        if (outcome == DaemonOfferResult.ACCEPTED) {
+          active.noteCancelDelivered(state.generation);
         }
       }
       if (outcome == null || outcome == DaemonOfferResult.CLOSED) {
@@ -2108,18 +2085,14 @@ public final class EnvironmentDaemonServer
     private final EnvironmentId environmentId;
     private final UUID invocationId;
     private final EnvironmentCapabilityExecutionListener listener;
-    private final String invokePayload;
     private final Duration terminalDeliveryGrace;
     private final AtomicBoolean terminal = new AtomicBoolean();
     private final AtomicBoolean exitConfirmed = new AtomicBoolean();
     private final String daemonInstanceId;
     private volatile boolean cancelled;
 
-    /**
-     * 最近一次成功递交 INVOKE 的连接代际；0 表示尚未递交。重连后与当前代际不同即触发重放，因此该字段的良性竞争最多导致一次冗余重放 （Daemon journal 以
-     * invocationId 去重）。已取消的调用不再使用该字段重发 INVOKE。
-     */
-    private volatile long sentGeneration;
+    /** 初次 INVOKE 成功递交的连接代际；0 表示尚未确认递交。恢复只据此排除当前代际刚送达的调用，绝不重发；旧代际或递交结果不确定的调用 只发送取消意图。 */
+    private volatile long invokeSentGeneration;
 
     /** 最近一次成功递交 CANCEL 的连接代际；0 表示尚未送达。与 {@link #cancelled} 分离：意图可以先于送达存在，BUSY/CLOSED 不得推进本字段。 */
     private volatile long cancelDeliveredGeneration;
@@ -2138,13 +2111,11 @@ public final class EnvironmentDaemonServer
         EnvironmentId environmentId,
         UUID invocationId,
         EnvironmentCapabilityExecutionListener listener,
-        String invokePayload,
         Duration terminalDeliveryGrace,
         String daemonInstanceId) {
       this.environmentId = environmentId;
       this.invocationId = invocationId;
       this.listener = listener;
-      this.invokePayload = invokePayload;
       this.terminalDeliveryGrace =
           Objects.requireNonNull(terminalDeliveryGrace, "terminalDeliveryGrace");
       this.daemonInstanceId = Objects.requireNonNull(daemonInstanceId, "daemonInstanceId");
@@ -2181,10 +2152,6 @@ public final class EnvironmentDaemonServer
 
     @Override
     public boolean isCancelled() {
-      return cancelled;
-    }
-
-    private boolean cancellationRequested() {
       return cancelled;
     }
 
@@ -2262,7 +2229,7 @@ public final class EnvironmentDaemonServer
     }
   }
 
-  /** 单个连接代际的协议状态；{@code generation} 用于识别需要重放 INVOKE 的新连接。 */
+  /** 单个连接代际的协议状态；{@code generation} 用于识别需要恢复取消意图或退出确认的新连接。 */
   private final class ConnectionState {
 
     /** 串行化该连接的入站协议处理与回调批次排队；不与其它锁嵌套反向获取，回调执行一律在持锁之外。 */
