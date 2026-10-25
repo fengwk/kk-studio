@@ -14,7 +14,12 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.web.socket.BinaryMessage;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.WebSocketMessage;
@@ -170,13 +175,39 @@ class WebSocketIdeStreamPeerTest {
     assertThrows(IllegalStateException.class, () -> peer.sendText("{}"));
   }
 
-  /** 回送 ACK 时发生 IOException：只丢弃该 ACK 不改变 closed，绝不把 ACK 失败升级为异常（结果由 END/CLOSE 判定）。 */
+  /** 回送 ACK 时发生 IOException：只丢弃该 ACK 不改变 closed，异常正文不得进入日志。 */
   @Test
   void acknowledgementSendIoFailureDropsAckWithoutClosingPeerAndDoesNotThrow() throws Exception {
-    doThrow(new IOException("boom")).when(session).sendMessage(any());
+    String secret = "synthetic-ack-write-secret";
+    doThrow(new IOException(secret)).when(session).sendMessage(any());
     WebSocketIdeStreamPeer peer = new WebSocketIdeStreamPeer(session);
-    assertDoesNotThrow(() -> peer.sendAcknowledgement(new byte[] {3, 0, 0, 0, 10}));
-    assertFalse(peer.closed());
+    Logger logger = (Logger) LoggerFactory.getLogger(WebSocketIdeStreamPeer.class);
+    Level previousLevel = logger.getLevel();
+    boolean previousAdditivity = logger.isAdditive();
+    ListAppender<ILoggingEvent> logs = new ListAppender<>();
+    logs.setContext(logger.getLoggerContext());
+    logs.start();
+    logger.addAppender(logs);
+    logger.setLevel(Level.DEBUG);
+    logger.setAdditive(false);
+    try {
+      assertDoesNotThrow(() -> peer.sendAcknowledgement(new byte[] {3, 0, 0, 0, 10}));
+      assertFalse(peer.closed());
+      assertTrue(
+          peer.offer(new IdeStreamPeer.Inbound.Text("{}")), "ACK drop must not close receiver");
+      assertEquals(1, logs.list.size(), "ACK write failure must be logged once");
+      ILoggingEvent event = logs.list.getFirst();
+      assertEquals(Level.DEBUG, event.getLevel());
+      assertTrue(event.getFormattedMessage().contains("phase=IDE_ACK_WRITE"));
+      assertTrue(event.getFormattedMessage().contains("exception=IOException"));
+      assertFalse(event.getFormattedMessage().contains(secret));
+      assertNull(event.getThrowableProxy(), "ACK failure log must not carry the throwable");
+    } finally {
+      logger.detachAppender(logs);
+      logs.stop();
+      logger.setLevel(previousLevel);
+      logger.setAdditive(previousAdditivity);
+    }
   }
 
   /** 会话仍存活时底层抛出的 IllegalStateException 是未知状态，ACK 发送也必须原样抛出而不是吞掉。 */
@@ -190,14 +221,40 @@ class WebSocketIdeStreamPeerTest {
     assertFalse(peer.closed());
   }
 
-  /** 会话确已关闭时 IllegalStateException 视为关闭：ACK 丢弃且不提前封死入站队列。 */
+  /** 会话确已关闭时 IllegalStateException 视为关闭：ACK 丢弃、异常正文不入日志且不提前封死入站队列。 */
   @Test
   void acknowledgementIllegalStateOnClosedSessionIsSwallowed() throws Exception {
+    String secret = "synthetic-ack-closed-secret";
     when(session.isOpen()).thenReturn(false);
-    doThrow(new IllegalStateException("session closed")).when(session).sendMessage(any());
+    doThrow(new IllegalStateException(secret)).when(session).sendMessage(any());
     WebSocketIdeStreamPeer peer = new WebSocketIdeStreamPeer(session);
-    assertDoesNotThrow(() -> peer.sendAcknowledgement(new byte[] {3, 0, 0, 0, 10}));
-    assertFalse(peer.closed());
+    Logger logger = (Logger) LoggerFactory.getLogger(WebSocketIdeStreamPeer.class);
+    Level previousLevel = logger.getLevel();
+    boolean previousAdditivity = logger.isAdditive();
+    ListAppender<ILoggingEvent> logs = new ListAppender<>();
+    logs.setContext(logger.getLoggerContext());
+    logs.start();
+    logger.addAppender(logs);
+    logger.setLevel(Level.DEBUG);
+    logger.setAdditive(false);
+    try {
+      assertDoesNotThrow(() -> peer.sendAcknowledgement(new byte[] {3, 0, 0, 0, 10}));
+      assertFalse(peer.closed());
+      assertTrue(
+          peer.offer(new IdeStreamPeer.Inbound.Text("{}")), "ACK drop must not close receiver");
+      assertEquals(1, logs.list.size(), "closed-session ACK drop must be logged once");
+      ILoggingEvent event = logs.list.getFirst();
+      assertEquals(Level.DEBUG, event.getLevel());
+      assertTrue(event.getFormattedMessage().contains("phase=IDE_ACK_CLOSED"));
+      assertTrue(event.getFormattedMessage().contains("exception=IllegalStateException"));
+      assertFalse(event.getFormattedMessage().contains(secret));
+      assertNull(event.getThrowableProxy(), "closed-session ACK log must not carry the throwable");
+    } finally {
+      logger.detachAppender(logs);
+      logs.stop();
+      logger.setLevel(previousLevel);
+      logger.setAdditive(previousAdditivity);
+    }
   }
 
   /**
