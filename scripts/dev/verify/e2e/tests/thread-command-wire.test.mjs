@@ -8,6 +8,7 @@ import {
   newThreadTarget,
   previewProviderRequest,
   stopThread,
+  stopThreadForCleanup,
   threadTarget,
   userMessageCommand,
 } from '../lib/harness.mjs'
@@ -301,6 +302,27 @@ test('NEW_THREAD first creation asserts the normalized name, exact replay does n
     { call: async () => response('renamed later', true) },
     { owner, target, commands: [command] },
   )
+})
+
+test('cleanup does not repeat an accepted stop while the Thread remains RUNNING', async () => {
+  // 停止请求已生效不代表退出；cleanup 不重复发 stop，也不改写活动事实。
+  const threadId = cid()
+  const snapshot = {
+    thread: threadDto(threadId, { status: 'RUNNING', executionControl: 'STOPPED' }),
+    queuedCommands: [],
+    modelInvocation: null,
+    toolInvocations: [],
+  }
+  const calls = []
+  await stopThreadForCleanup({
+    async call(method, path) {
+      calls.push([method, path])
+      assert.equal(method, 'GET')
+      return { json: { data: snapshot } }
+    },
+  }, threadId)
+  assert.deepEqual(calls, [['GET', `/api/threads/${threadId}`]])
+  assert.equal(snapshot.thread.status, 'RUNNING')
 })
 
 test('stopThread validates per-thread receipts and rejects the removed root-only shape', async () => {

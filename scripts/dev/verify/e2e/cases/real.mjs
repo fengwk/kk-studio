@@ -1898,15 +1898,16 @@ registerCase({
         safeDiagnosticJson(accepted.thread.branchSettings),
       )
       let waiting = null
+      let readInvocation = null
       let terminal = null
       for (let i = 0; i < 120; i++) {
         const current = await getThreadSnapshot(ctx, tid)
         // 审批等待是 ToolInvocation 的事实；Thread 自身仍是 RUNNING，不能把 RUNNING 当成审批。
-        const readApproval = (current.toolInvocations || []).find(
+        readInvocation = (current.toolInvocations || []).find(
           (invocation) =>
             invocation.toolName === 'read' && invocation.status === 'WAITING_APPROVAL',
         )
-        if (readApproval) {
+        if (readInvocation) {
           waiting = current
           break
         }
@@ -1922,9 +1923,6 @@ registerCase({
       assert(
         waiting,
         `never reached read WAITING_APPROVAL on thread ${tid}: ${safeDiagnosticJson(terminal)}`,
-      )
-      const readInvocation = waiting.toolInvocations.find(
-        (invocation) => invocation.toolName === 'read',
       )
       assert(readInvocation, `no WAITING_APPROVAL read invocation: ${safeDiagnosticJson(waiting)}`)
       assert(readInvocation.status === 'WAITING_APPROVAL', safeDiagnosticJson(readInvocation))
