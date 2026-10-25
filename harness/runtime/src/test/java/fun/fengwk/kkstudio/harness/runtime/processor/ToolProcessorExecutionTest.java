@@ -736,10 +736,20 @@ class ToolProcessorExecutionTest {
     } finally {
       try {
         fixture.processor.close();
-        fixture.scheduler.shutdownNow();
-        assertTrue(fixture.scheduler.awaitTermination(5, TimeUnit.SECONDS));
+        // 早期断言失败时 body 也可能已启动：close 只请求中断，必须 join 已观测的真实 runner。
+        Thread executionThread = runner.get();
+        if (executionThread != null) {
+          assertTrue(
+              executionThread.join(Duration.ofSeconds(5)),
+              "tool execution thread must exit during cleanup");
+        }
       } finally {
-        exitLogs.close();
+        try {
+          fixture.scheduler.shutdownNow();
+          assertTrue(fixture.scheduler.awaitTermination(5, TimeUnit.SECONDS));
+        } finally {
+          exitLogs.close();
+        }
       }
     }
   }
