@@ -98,42 +98,41 @@ class ToolExecutionGatewayRemoteDeadlineTest {
     ToolExecutionGateway gateway = gateway(catalog, transport);
     ToolGatewayTestSupport.RecordingRemoteExecutions remoteExecutions =
         new ToolGatewayTestSupport.RecordingRemoteExecutions();
-    ToolGateway.Run run =
-        ToolGatewayTestSupport.admitted(
-            gateway, request(catalog, "call-missing"), remoteExecutions);
     AtomicReference<ToolGateway.Completion> completion = new AtomicReference<>();
-    Thread worker = Thread.ofVirtual().start(() -> completion.set(run.execute(partial -> {})));
 
-    try {
-      assertTrue(transport.invoked.await(5, TimeUnit.SECONDS), "transport must be invoked");
-      worker.join(3_000);
-      assertFalse(
-          worker.isAlive(), "worker must exit within bounded deadline without external interrupt");
+    try (ToolGateway.Run run =
+        ToolGatewayTestSupport.admitted(
+            gateway, request(catalog, "call-missing"), remoteExecutions)) {
+      Thread worker = Thread.ofVirtual().start(() -> completion.set(run.execute(partial -> {})));
+      try (AutoCloseable workerExit =
+          () -> {
+            worker.interrupt();
+            assertTrue(worker.join(Duration.ofSeconds(5)), "deadline worker must exit in cleanup");
+          }) {
+        assertTrue(transport.invoked.await(5, TimeUnit.SECONDS), "transport must be invoked");
+        worker.join(Duration.ofSeconds(3));
+        assertFalse(
+            worker.isAlive(),
+            "worker must exit within bounded deadline without external interrupt");
 
-      ToolGateway.Completion result = completion.get();
-      assertNotNull(result, "completion must be delivered upon timeout");
-      ToolGateway.Unknown unknown = assertInstanceOf(ToolGateway.Unknown.class, result);
-      assertEquals(ToolExecutionGateway.REMOTE_UNCERTAIN_KIND, unknown.error().kind());
-      assertTrue(
-          unknown.error().message().contains("cannot be confirmed"),
-          "deadline timeout outcome is uncertain and must not claim not executed");
+        ToolGateway.Completion result = completion.get();
+        assertNotNull(result, "completion must be delivered upon timeout");
+        ToolGateway.Unknown unknown = assertInstanceOf(ToolGateway.Unknown.class, result);
+        assertEquals(ToolExecutionGateway.REMOTE_UNCERTAIN_KIND, unknown.error().kind());
+        assertTrue(
+            unknown.error().message().contains("cannot be confirmed"),
+            "deadline timeout outcome is uncertain and must not claim not executed");
 
-      ToolGatewayTestSupport.FakeToolHandle handle = transport.delegate.returnedHandles.get(0);
-      assertEquals(
-          List.of(EnvironmentCapabilityTerminationCause.TIMED_OUT),
-          handle.terminations(),
-          "deadline timeout must terminate the handle with TIMED_OUT cause");
-      assertEquals(1, handle.cancelCount());
-      assertTrue(
-          remoteExecutions.notStartedConfirmed.isEmpty(),
-          "timeout after send is not a not-started confirmation");
-      assertTrue(remoteExecutions.exitConfirmed.isEmpty(), "timeout is not a positive exit ACK");
-    } finally {
-      worker.interrupt();
-      try {
-        assertTrue(worker.join(Duration.ofSeconds(5)), "deadline worker must exit in cleanup");
-      } finally {
-        run.close();
+        ToolGatewayTestSupport.FakeToolHandle handle = transport.delegate.returnedHandles.get(0);
+        assertEquals(
+            List.of(EnvironmentCapabilityTerminationCause.TIMED_OUT),
+            handle.terminations(),
+            "deadline timeout must terminate the handle with TIMED_OUT cause");
+        assertEquals(1, handle.cancelCount());
+        assertTrue(
+            remoteExecutions.notStartedConfirmed.isEmpty(),
+            "timeout after send is not a not-started confirmation");
+        assertTrue(remoteExecutions.exitConfirmed.isEmpty(), "timeout is not a positive exit ACK");
       }
     }
   }
