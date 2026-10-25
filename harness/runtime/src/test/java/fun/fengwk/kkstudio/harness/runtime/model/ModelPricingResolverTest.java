@@ -267,7 +267,7 @@ class ModelPricingResolverTest {
 
   /** 日期边界支持单侧缺省；缺失 requestedAt 时返回未知，绝不查询当前时间伪造历史。 */
   @Test
-  void matchesOneSidedUtcDatesAndZeroesWhenRequestedAtIsMissing() {
+  void matchesOneSidedUtcDatesAndReturnsUnknownWhenRequestedAtIsMissing() {
     ModelPricing gte =
         pricingWithOverride(
             "gte", new ModelPricingCondition.DateRange(LocalDate.of(2026, 8, 17), null), "2");
