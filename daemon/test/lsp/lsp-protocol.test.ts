@@ -43,13 +43,24 @@ describe('LspClient Protocol & Handshake', () => {
   })
 
   afterEach(async () => {
-    for (const client of clients) {
-      await client.stop(200)
+    const cleanupFailures: unknown[] = []
+    for (const client of clients.splice(0)) {
+      try {
+        await bounded(client.stop(200), 'registered client cleanup')
+      } catch (error) {
+        cleanupFailures.push(error)
+      }
     }
-    await supervisor.close()
     try {
+      // 客户端停止失败也必须独立关闭真实子进程；确认其 stdio close 后再删除目录。
+      await supervisor.close()
       fs.rmSync(tempDir, { recursive: true, force: true })
-    } catch {}
+    } catch (error) {
+      cleanupFailures.push(error)
+    }
+    if (cleanupFailures.length > 0) {
+      throw new AggregateError(cleanupFailures, 'LSP protocol fixture cleanup failed')
+    }
   })
 
   async function startClient(mode = 'normal'): Promise<{ client: LspClient; transcript: string }> {
@@ -264,34 +275,77 @@ describe('LspClient Protocol & Handshake', () => {
     expect(client.isAlive()).toBe(true)
   })
 
-  it('does not confirm a locally disposed request until the server actually exits', async () => {
-    // 用真实 JSON-RPC connection 的 dispose 精确制造本地拒绝；服务端确已收到请求且仍在运行。
-    const { client, transcript } = await startClient('slow-definition')
-    const file = path.join(tempDir, 'App.java')
-    fs.writeFileSync(file, 'class App {}\n')
-    let finished = 0
-    let confirmFinished!: () => void
-    const confirmed = new Promise<void>((resolve) => {
-      confirmFinished = resolve
-    })
-    const request = client.definition(file, 1, 0, undefined, () => {
-      finished += 1
-      confirmFinished()
-    })
-    const rejected = expect(request).rejects.toThrow(/LSP request failed/)
-    await awaitEvent(
-      transcript,
-      (e) => e.event === 'recv' && e.message?.method === 'textDocument/definition',
-    )
-    client['connection'].dispose()
-    await rejected
-    expect(finished).toBe(0)
-    expect(client.isAlive()).toBe(true)
-    expect(receivedMessages(transcript, 'textDocument/definition')).toHaveLength(1)
-    // 正向对照：本地等待已结束，但实际进程退出后仍必须交付一次迟到确认。
-    await client.stop(0)
-    await bounded(confirmed, 'late exit confirmation')
-    expect(finished).toBe(1)
+  it('does not confirm a locally stopped request before its managed scope closes', async () => {
+    // 公开 stop 会释放真实 JSON-RPC connection；本地拒绝不能替代受管范围收尾，不访问私有字段。
+    const transcript = path.join(tempDir, `local-stop-${Date.now()}.jsonl`)
+    const config = fakeServerConfig('fake', 'slow-definition', transcript)
+    const controlled = new ExitBarrierSupervisor()
+    let client: LspClient | null = null
+    try {
+      client = await bounded(
+        LspClient.launch(config, tempDir, config.command[0]!, controlled),
+        'client launch',
+      )
+      await client.initialize(5000)
+      const file = path.join(tempDir, 'App.java')
+      fs.writeFileSync(file, 'class App {}\n')
+      let finished = 0
+      let confirmFinished!: () => void
+      const confirmed = new Promise<void>((resolve) => {
+        confirmFinished = resolve
+      })
+      let requestError: unknown = null
+      const settled = client.definition(file, 1, 0, undefined, () => {
+        finished += 1
+        confirmFinished()
+      }).then(
+        () => {
+          throw new Error('request unexpectedly resolved')
+        },
+        (error: unknown) => {
+          requestError = error
+        },
+      )
+      await awaitEvent(
+        transcript,
+        (event) => event.event === 'recv' && event.message?.method === 'textDocument/definition',
+      )
+      expect(receivedMessages(transcript, 'textDocument/definition')).toHaveLength(1)
+
+      const stopping = client.stop(0)
+      await bounded(settled, 'locally stopped request')
+      await bounded(controlled.terminateStarted, 'stop scope termination')
+      expect(requestError).toBeInstanceOf(LspError)
+      expect((requestError as LspError).message).toBe('LSP client stopped')
+      expect(finished).toBe(0)
+      expect(client.isAlive()).toBe(false)
+
+      // 正向对照：只有真实范围收尾成功、退出报告实际到达后，才交付一次迟到确认。
+      controlled.releaseCleanup()
+      await bounded(stopping, 'local stop completion')
+      expect(finished).toBe(0)
+      controlled.reportExit()
+      await bounded(confirmed, 'late exit confirmation')
+      expect(finished).toBe(1)
+    } finally {
+      controlled.releaseCleanup()
+      const cleanupFailures: unknown[] = []
+      if (client) {
+        try {
+          await bounded(client.stop(0), 'client scope cleanup')
+        } catch (error) {
+          cleanupFailures.push(error)
+        }
+      }
+      try {
+        await controlled.close()
+      } catch (error) {
+        cleanupFailures.push(error)
+      }
+      if (cleanupFailures.length > 0) {
+        throw new AggregateError(cleanupFailures, 'local stop test cleanup failed')
+      }
+    }
   })
 
   it('confirms an exit-reported request only after the stop scope finishes', async () => {
