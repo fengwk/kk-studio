@@ -1021,8 +1021,8 @@ class EnvironmentDaemonServerTest {
                   fixture.receive(
                       channel, DaemonMessageType.EXECUTION_EXITED, invocationId.toString(), "{}");
                 });
-        completing.get();
-        exiting.get();
+        completing.get(5, TimeUnit.SECONDS);
+        exiting.get(5, TimeUnit.SECONDS);
 
         assertEquals(completedText, listener.completedText(), "round=" + round);
         assertEquals(1, listener.exitConfirmations, "round=" + round);
@@ -1031,6 +1031,7 @@ class EnvironmentDaemonServerTest {
       }
     } finally {
       racers.shutdownNow();
+      assertTrue(racers.awaitTermination(5, TimeUnit.SECONDS), "race workers must exit in cleanup");
     }
   }
 
