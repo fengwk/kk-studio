@@ -1339,7 +1339,7 @@ registerCase({
   level: 'L2',
   title: '真实流式 /stop 持久化 partial、exact replay 并继续新一轮',
   requires: ['real'],
-  docs: '使用 minimax-anthropic/MiniMax-M3：bootstrap 用 missing Agent 确定性 PLANNING_FAILED 创建空闲 Thread（不调用真实 Provider）；随后经 owner-free POST /api/threads/{threadId}/command-batches 提交 SET_AGENT/SET_MODEL + initialPrompt 启动真实 turn；首个非空 text/thinking delta 后 stop（stopRequestId + version CAS）=> stop status STOPPED、thread.executionControl STOPPED（Thread status 不出现 STOPPED，保持活动三态）、version+1、stoppedThreads[] 目标回执 stoppedTurnEndEntryId 非空、durable ASSISTANT_ABORTED 关闭旧 turn；同 stopRequestId + 原 expectedVersion exact replay => status REPLAYED、同回执 stoppedTurnEndEntryId、version 不再变化；真实 turn 区间（initialMarker 之后）无 ASSISTANT_ERROR/无 normal assistant；follow-up 位于 barrier 后并仅产生一个新 assistant MESSAGE',
+  docs: '使用 minimax-anthropic/MiniMax-M3：bootstrap 用 missing Agent 确定性 PLANNING_FAILED 创建空闲 Thread（不调用真实 Provider）；随后经 owner-free POST /api/threads/{threadId}/command-batches 提交 SET_AGENT/SET_MODEL + initialPrompt 启动真实 turn；首个非空 text/thinking delta 后 stop（stopRequestId + version CAS）=> stop status STOPPED、thread.executionControl STOPPED（Thread status 不出现 STOPPED，保持活动三态）、version+1、stoppedThreads[] 目标回执 stoppedTurnEndEntryId 非空、durable ASSISTANT_ABORTED 关闭旧 turn；首次 stop 后异步 exit ledger 可能尚未确认，Thread 仍为 RUNNING，必须等既有 waitForQuiescentThread（60s/100ms，IDLE + 空 queue/model/tool + 两次稳定 cursor）收敛为 IDLE + STOPPED 的退出基线（confirmation 只推进 version，STOPPED 控制与 barrier head 不变，artifact 记录 exitBaseline）；同 stopRequestId + 原 expectedVersion exact replay => status REPLAYED、同回执 stoppedTurnEndEntryId、相对退出基线 head/version 不再变化；未收敛不得 replay 或续写；真实 turn 区间（initialMarker 之后）无 ASSISTANT_ERROR/无 normal assistant；follow-up 位于收敛基线后并仅产生一个新 assistant MESSAGE',
   async run(ctx) {
     const minimaxModel = await requireRealMiniMaxM3(ctx)
 
@@ -1470,6 +1470,30 @@ registerCase({
         `ASSISTANT_ABORTED must follow initial USER: ${safeDiagnosticJson(entriesAfterStop)}`,
       )
 
+      // 首次 Stop 返回 STOPPED 控制时，异步 exit ledger 仍可能未确认，Thread 保持 RUNNING；
+      // 必须先等到完整快照双观测收敛的退出基线，再把 replay 的 head/version 与该基线比较。
+      const exitBaseline = await waitForQuiescentThread(ctx, tid, {
+        timeoutMs: 60_000,
+        intervalMs: 100,
+      })
+      assert(
+        exitBaseline.executionControl === 'STOPPED',
+        `converged exit baseline must remain STOPPED: ${safeDiagnosticJson(exitBaseline)}`,
+      )
+      assert(
+        String(exitBaseline.headEntryId) === String(stop.thread.headEntryId),
+        `exit confirmation must not move the stopped turn head: ${safeDiagnosticJson({ stop, exitBaseline })}`,
+      )
+      const convergedEntries = await snapshotEntries(ctx, tid)
+      const convergedAbortedEntries = convergedEntries.filter(
+        (entry) => entryType(entry) === 'ASSISTANT_ABORTED',
+      )
+      assert(
+        convergedAbortedEntries.length === 1
+          && String(convergedAbortedEntries[0].entryId) === String(abortedEntry.entryId),
+        `exit confirmation must preserve the durable aborted barrier: ${safeDiagnosticJson(convergedEntries)}`,
+      )
+
       const replay = await stopThread(ctx, tid, {
         stopRequestId,
         expectedVersion,
@@ -1483,14 +1507,14 @@ registerCase({
       )
       assert(replayReceipt.cancelledCommandCount === 0, safeDiagnosticJson(replayReceipt))
       assert(
-        String(replay.thread.headEntryId) === String(stop.thread.headEntryId)
-          && String(replay.thread.version) === String(stop.thread.version),
-        `replay must not mutate the Thread: ${safeDiagnosticJson({ stop, replay })}`,
+        String(replay.thread.headEntryId) === String(exitBaseline.headEntryId)
+          && String(replay.thread.version) === String(exitBaseline.version),
+        `replay must not mutate the converged Thread baseline: ${safeDiagnosticJson({ exitBaseline, replay })}`,
       )
       ctx.writeArtifact(
         'stop-partial-after-stop.json',
         JSON.stringify(
-          sanitizeArtifact({ firstDelta, beforeStop, stop, replay, entriesAfterStop }),
+          sanitizeArtifact({ firstDelta, beforeStop, stop, exitBaseline, replay, entriesAfterStop }),
           null,
           2,
         ),
@@ -1551,6 +1575,7 @@ registerCase({
             firstDelta,
             beforeStop,
             stop,
+            exitBaseline,
             replay,
             entriesAfterStop,
             finalThread,
