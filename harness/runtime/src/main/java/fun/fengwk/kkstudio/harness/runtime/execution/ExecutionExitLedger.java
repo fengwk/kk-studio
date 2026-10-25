@@ -216,8 +216,7 @@ public final class ExecutionExitLedger {
       // 停止边界的先后由当前 head 的历史路径确定；回执时间与 UUID 顺序都不能表达 Entry 历史先后。
       Entry terminal = tx.loadEntryPath(thread.headEntryId()).headIgnoringTrailingControlEntries();
       if (!(terminal.payload() instanceof TurnEndPayload end)
-          || end.outcome() != TurnEndOutcome.STOPPED
-          || end.closeRequestId() == null) {
+          || end.outcome() != TurnEndOutcome.STOPPED) {
         return;
       }
       StoppedThreadReceipt receipt =
