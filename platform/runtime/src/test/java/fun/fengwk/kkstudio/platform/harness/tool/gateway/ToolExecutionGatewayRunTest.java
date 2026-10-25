@@ -600,31 +600,34 @@ class ToolExecutionGatewayRunTest {
     List<ToolResult> progress = new ArrayList<>();
     AtomicReference<ToolGateway.Completion> completion = new AtomicReference<>();
     Thread worker = Thread.ofVirtual().start(() -> completion.set(run.execute(progress::add)));
-    awaitInvocation(transport);
-    assertNull(completion.get(), "run must block until the terminal arrives");
+    try {
+      awaitInvocation(transport);
+      assertNull(completion.get(), "run must block until the terminal arrives");
 
-    var listener = transport.invocations.get(0).listener();
-    String capabilityCallId = transport.invocations.get(0).request().call().id();
-    assertFalse(
-        ToolGatewayTestSupport.INVOCATION_ID.toString().equals(capabilityCallId),
-        "remote execution id must not reuse the ToolInvocation id");
-    listener.onPartial(
-        new EnvironmentCapabilityResult(
-            capabilityCallId, List.of(new TextResultContent("step")), false, "{}"));
-    listener.onComplete(
-        new EnvironmentCapabilityResult(
-            capabilityCallId, List.of(new TextResultContent("done")), false, "{}"));
-    worker.join(5000);
-    run.close();
+      var listener = transport.invocations.get(0).listener();
+      String capabilityCallId = transport.invocations.get(0).request().call().id();
+      assertFalse(
+          ToolGatewayTestSupport.INVOCATION_ID.toString().equals(capabilityCallId),
+          "remote execution id must not reuse the ToolInvocation id");
+      listener.onPartial(
+          new EnvironmentCapabilityResult(
+              capabilityCallId, List.of(new TextResultContent("step")), false, "{}"));
+      listener.onComplete(
+          new EnvironmentCapabilityResult(
+              capabilityCallId, List.of(new TextResultContent("done")), false, "{}"));
+      assertTrue(worker.join(Duration.ofSeconds(5)), "remote adapter must exit");
 
-    ToolGateway.Succeeded succeeded =
-        assertInstanceOf(ToolGateway.Succeeded.class, completion.get());
-    assertEquals("call-1", succeeded.success().result().toolCallId());
-    assertEquals(1, progress.size());
-    assertEquals("call-1", progress.get(0).toolCallId());
-    assertTrue(
-        remoteExecutions.exitConfirmed.isEmpty(),
-        "normal terminal completion must not synthesize an exit ACK");
+      ToolGateway.Succeeded succeeded =
+          assertInstanceOf(ToolGateway.Succeeded.class, completion.get());
+      assertEquals("call-1", succeeded.success().result().toolCallId());
+      assertEquals(1, progress.size());
+      assertEquals("call-1", progress.get(0).toolCallId());
+      assertTrue(
+          remoteExecutions.exitConfirmed.isEmpty(),
+          "normal terminal completion must not synthesize an exit ACK");
+    } finally {
+      closeRunAfterWorkerExit(worker, run);
+    }
   }
 
   /** 中断：向远端请求取消并立即返回 Cancelled，不等待远端确认。 */
@@ -642,19 +645,21 @@ class ToolExecutionGatewayRunTest {
             remoteExecutions);
     AtomicReference<ToolGateway.Completion> completion = new AtomicReference<>();
     Thread worker = Thread.ofVirtual().start(() -> completion.set(run.execute(partial -> {})));
-    awaitInvocation(transport);
+    try {
+      awaitInvocation(transport);
+      worker.interrupt();
+      assertTrue(worker.join(Duration.ofSeconds(5)), "interrupted remote adapter must exit");
 
-    worker.interrupt();
-    worker.join(5000);
-    run.close();
-
-    assertInstanceOf(ToolGateway.Cancelled.class, completion.get());
-    assertEquals(1, transport.returnedHandles.get(0).cancelCount());
-    assertEquals(
-        List.of(EnvironmentCapabilityTerminationCause.CANCELLED),
-        transport.returnedHandles.get(0).terminations());
-    assertTrue(remoteExecutions.notStartedConfirmed.isEmpty());
-    assertTrue(remoteExecutions.exitConfirmed.isEmpty(), "interrupt is not exit evidence");
+      assertInstanceOf(ToolGateway.Cancelled.class, completion.get());
+      assertEquals(1, transport.returnedHandles.get(0).cancelCount());
+      assertEquals(
+          List.of(EnvironmentCapabilityTerminationCause.CANCELLED),
+          transport.returnedHandles.get(0).terminations());
+      assertTrue(remoteExecutions.notStartedConfirmed.isEmpty());
+      assertTrue(remoteExecutions.exitConfirmed.isEmpty(), "interrupt is not exit evidence");
+    } finally {
+      closeRunAfterWorkerExit(worker, run);
+    }
   }
 
   /** 无 handle 视为契约违反：post-send 的 Unknown，不假称未执行。 */
@@ -822,11 +827,25 @@ class ToolExecutionGatewayRunTest {
             remoteExecutions);
     AtomicReference<ToolGateway.Completion> completion = new AtomicReference<>();
     Thread worker = Thread.ofVirtual().start(() -> completion.set(run.execute(partial -> {})));
-    awaitInvocation(transport);
-    terminal.accept(transport.invocations.get(0).listener());
-    worker.join(5000);
-    run.close();
-    return completion.get();
+    try {
+      awaitInvocation(transport);
+      terminal.accept(transport.invocations.get(0).listener());
+      assertTrue(worker.join(Duration.ofSeconds(5)), "remote adapter must exit after its terminal");
+      return completion.get();
+    } finally {
+      closeRunAfterWorkerExit(worker, run);
+    }
+  }
+
+  /** 远端夹具在准备/回调/断言失败时也必须 join 真实 worker，且 join 失败不能跳过 run 资源释放。 */
+  private static void closeRunAfterWorkerExit(Thread worker, ToolGateway.Run run)
+      throws InterruptedException {
+    worker.interrupt();
+    try {
+      assertTrue(worker.join(Duration.ofSeconds(5)), "remote adapter must exit in cleanup");
+    } finally {
+      run.close();
+    }
   }
 
   private static void awaitInvocation(ToolGatewayTestSupport.FakeTransport transport)
