@@ -10,9 +10,10 @@ import { callCapability, makeContext, textOf } from './helpers.js'
 const tempDirs: string[] = []
 
 async function tempDir(): Promise<string> {
-  const dir = await realpath(await mkdtemp(join(tmpdir(), 'kk-proc-')))
+  const dir = await mkdtemp(join(tmpdir(), 'kk-proc-'))
+  // realpath 失败时，afterEach 仍持有已创建目录的清理责任。
   tempDirs.push(dir)
-  return dir
+  return await realpath(dir)
 }
 
 afterEach(async () => {
