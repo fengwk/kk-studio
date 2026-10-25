@@ -181,7 +181,15 @@ describe('compaction summary projection', () => {
             ],
           },
           assistantMetadata: {
-            usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15, costTotal: 0.01 },
+            // 使用有效用量，避免把非法旧别名被忽略误当作压缩回合隐藏用量。
+            usage: {
+              inputTokens: 10,
+              outputTokens: 5,
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              reasoningTokens: 0,
+              providerTotalTokens: 15,
+            },
           },
         }),
         compactionEntry('comp1', 'final summary'),
