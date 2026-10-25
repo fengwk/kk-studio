@@ -516,7 +516,6 @@ registerCase({
         const snapshot = await getThreadSnapshot(ctx, threadId)
         if (
           snapshot.thread.status !== 'IDLE'
-          || snapshot.thread.processing
           || snapshot.queuedCommands.length > 0
           || snapshot.modelInvocation !== null
         ) {

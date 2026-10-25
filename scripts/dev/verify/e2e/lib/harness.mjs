@@ -147,7 +147,7 @@ export function threadIdOf(thread) {
     `nextCommandSequence starts at 1: ${JSON.stringify(thread)}`,
   )
   nonNegativeDecimal(thread.version, 'version')
-  // 执行控制只有 RUNNABLE / STOPPED；status 只描述本 Thread 自身，本地投影不再有 WAITING_CHILDREN。
+  // 执行控制只有 RUNNABLE / STOPPED；status 只描述本 Thread 自身，二者正交。
   assert(
     thread.executionControl === 'RUNNABLE' || thread.executionControl === 'STOPPED',
     `executionControl must be RUNNABLE|STOPPED: ${JSON.stringify(thread)}`,
@@ -156,24 +156,16 @@ export function threadIdOf(thread) {
     THREAD_RUNTIME_STATUSES.has(thread.status),
     `unknown ThreadRuntimeStatus: ${JSON.stringify(thread.status)}`,
   )
-  assert(typeof thread.processing === 'boolean', `processing must be boolean: ${JSON.stringify(thread)}`)
+  // 旧 boolean processing 已被三态 status 取代，不保留兼容别名。
+  assert(
+    !Object.hasOwn(thread, 'processing'),
+    `processing has been removed from the Thread projection: ${JSON.stringify(thread)}`,
+  )
   return threadId
 }
 
-/** Thread 自身本地运行时状态投影全集（无 WAITING_CHILDREN；STOPPED 表示持久执行控制已停止）。 */
-const THREAD_RUNTIME_STATUSES = new Set([
-  'IDLE',
-  'QUEUED',
-  'STOPPED',
-  'CONTINUATION_DUE',
-  'MODEL_READY',
-  'MODEL_RUNNING',
-  'APPLYING',
-  'TOOL_WAITING_APPROVAL',
-  'TOOL_WAITING_INPUT',
-  'TOOL_RUNNING',
-  'TOOL_READY',
-])
+/** Thread 自身本地活动三态；STOP 只改变 executionControl，不覆盖本状态。 */
+const THREAD_RUNTIME_STATUSES = new Set(['RUNNING', 'WAITING', 'IDLE'])
 
 /**
  * 创建 Chat（name-based Agent 引用；可选默认 Environment name，Chat 不携带任何 workspace 状态）。
@@ -990,7 +982,8 @@ export async function stopThread(ctx, threadId, { stopRequestId, expectedVersion
 }
 
 /**
- * Cleanup 专用 stop：snapshot/version CAS 之间若发生推进，复用同一 stopRequestId
+ * Cleanup 专用 stop：只确保停止已被请求，不等待物理退出。executionControl=STOPPED 表示请求已生效；
+ * 否则若仍有本线程活动就发一次 stop。snapshot/version CAS 之间若发生推进，复用同一 stopRequestId
  * 重读最新 version 重试；这只处理 STALE_VERSION，不吞掉其他 HTTP 错误。
  */
 export async function stopThreadForCleanup(
@@ -1003,13 +996,16 @@ export async function stopThreadForCleanup(
   let lastError = null
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const snapshot = await getThreadSnapshot(ctx, threadId)
-    // STOPPED 的 Thread 已无本线程工作：它不再是 cleanup 目标，也不因持久停止状态被误判为 active。
+    // STOPPED 只表示停止已请求；cleanup 不把请求当作物理退出，也不再重复发 stop。
+    const stopRequested = snapshot.thread.executionControl === 'STOPPED'
     const active =
-      (snapshot.thread.status !== 'IDLE' && snapshot.thread.status !== 'STOPPED')
-      || snapshot.thread.processing
-      || snapshot.queuedCommands.length > 0
-      || snapshot.modelInvocation !== null
-      || snapshot.toolInvocations.length > 0
+      !stopRequested
+      && (
+        snapshot.thread.status !== 'IDLE'
+        || snapshot.queuedCommands.length > 0
+        || snapshot.modelInvocation !== null
+        || snapshot.toolInvocations.length > 0
+      )
     if (!active) {
       return
     }
@@ -1064,8 +1060,9 @@ export async function approveToolInvocation(
 /**
  * 轮询完整快照直到 Thread 真正 quiescent 并返回最终 Thread 投影。
  *
- * 判定基于完整 snapshot 而不是单字段：status=IDLE、processing=false、queuedCommands 为空、
+ * 判定基于完整 snapshot 而不是单字段：status=IDLE、queuedCommands 为空、
  * modelInvocation=null、toolInvocations 为空，且同一 cursor/version 必须连续观测两次。
+ * executionControl=STOPPED 只表示停止已请求，不能替代活动状态判定。
  * 单次 quiescent 可能落在异步 Work 已移除队列、尚未提交 Thread 尾部状态的瞬时窗口，不能作为
  * 后续 CAS 写入的稳定 cursor。
  */
@@ -1100,7 +1097,6 @@ export function observeQuiescentSnapshot(previousKey, snapshot) {
   const thread = snapshot?.thread
   if (
     thread?.status !== 'IDLE'
-    || thread.processing
     || (snapshot?.queuedCommands || []).length !== 0
     || snapshot?.modelInvocation !== null
     || (snapshot?.toolInvocations || []).length !== 0

@@ -950,8 +950,8 @@ function childSnapshotWithPendingTool(targetThreadId, rootThreadId) {
       yoloEnabled: false,
       nextCommandSequence: '1',
       version: '1',
-      status: 'TOOL_WAITING_APPROVAL',
-      processing: false,
+      status: 'RUNNING',
+      executionControl: 'RUNNABLE',
       branchSettings: {
         agentName: 'worker',
         model: { modelName: 'MiniMax', variant: 'default' },

@@ -1273,7 +1273,7 @@ registerCase({
       })
       parentSnapshot = completion.snapshot
       assert(
-        parentSnapshot.thread.status === 'IDLE' && parentSnapshot.thread.processing === false,
+        parentSnapshot.thread.status === 'IDLE',
         safeDiagnosticJson(parentSnapshot.thread),
       )
       assert(
@@ -1302,7 +1302,7 @@ registerCase({
       // 子 Thread 的执行父关系与 ROOT payload 都必须符合委派契约（无 subagentContext 运行树）。
       delegatedChildFacts(parentThreadId, childSnapshot)
       assert(
-        childSnapshot.thread.processing === false,
+        childSnapshot.thread.status === 'IDLE',
         `child thread must be settled: ${safeDiagnosticJson(childSnapshot.thread)}`,
       )
       const completionEntry = (parentSnapshot.entries || []).findIndex((entry) => {
@@ -1339,7 +1339,7 @@ registerCase({
   level: 'L2',
   title: '真实流式 /stop 持久化 partial、exact replay 并继续新一轮',
   requires: ['real'],
-  docs: '使用 minimax-anthropic/MiniMax-M3：bootstrap 用 missing Agent 确定性 PLANNING_FAILED 创建空闲 Thread（不调用真实 Provider）；随后经 owner-free POST /api/threads/{threadId}/command-batches 提交 SET_AGENT/SET_MODEL + initialPrompt 启动真实 turn；首个非空 text/thinking delta 后 stop（stopRequestId + version CAS）=> status STOPPED、thread.executionControl STOPPED、version+1、stoppedThreads[] 目标回执 stoppedTurnEndEntryId 非空、durable ASSISTANT_ABORTED 关闭旧 turn；同 stopRequestId + 原 expectedVersion exact replay => status REPLAYED、同回执 stoppedTurnEndEntryId、version 不再变化；真实 turn 区间（initialMarker 之后）无 ASSISTANT_ERROR/无 normal assistant；follow-up 位于 barrier 后并仅产生一个新 assistant MESSAGE',
+  docs: '使用 minimax-anthropic/MiniMax-M3：bootstrap 用 missing Agent 确定性 PLANNING_FAILED 创建空闲 Thread（不调用真实 Provider）；随后经 owner-free POST /api/threads/{threadId}/command-batches 提交 SET_AGENT/SET_MODEL + initialPrompt 启动真实 turn；首个非空 text/thinking delta 后 stop（stopRequestId + version CAS）=> stop status STOPPED、thread.executionControl STOPPED（Thread status 不出现 STOPPED，保持活动三态）、version+1、stoppedThreads[] 目标回执 stoppedTurnEndEntryId 非空、durable ASSISTANT_ABORTED 关闭旧 turn；同 stopRequestId + 原 expectedVersion exact replay => status REPLAYED、同回执 stoppedTurnEndEntryId、version 不再变化；真实 turn 区间（initialMarker 之后）无 ASSISTANT_ERROR/无 normal assistant；follow-up 位于 barrier 后并仅产生一个新 assistant MESSAGE',
   async run(ctx) {
     const minimaxModel = await requireRealMiniMaxM3(ctx)
 
@@ -1785,7 +1785,7 @@ registerCase({
   level: 'L4',
   title: '非 YOLO tool turn：WAITING_APPROVAL、ALLOW 后 read 内联结果',
   requires: ['real', 'tools', 'canvas-storage'],
-  docs: '默认使用 minimax-anthropic/MiniMax-M3（可由 E2E_BUILTIN_MODEL 覆盖为其它已声明模型）+ backend S3 enabled（GlobalStorageToolResultHistoryMaterializer bean，否则 Resource 引用 fail-closed 无法进入 durable history）：Agent definition 不携带任何 Environment 绑定（environmentId 不是 Agent 字段），Environment 只由 NEW_SESSION 的 branchSettings.environmentName 绑定 canonical daemon name 并在每轮解析为内部路由身份；yolo=false 时 read tool 进入 TOOL_WAITING_APPROVAL（ToolInvocationDTO 只暴露扁平 environmentId，无 location/environment wrapper）；approval ALLOW（decisionId 幂等）后执行；daemon 投影 32 行文本窗口，durable tool_result.contents 内联完整 canonical 文本（path/ends_with_newline/range header 与编号正文，无 lsp 行、无截断元数据）且不产生 resource；后续模型轮次在结果内联后成功返回非空 Assistant 回复并以 TURN_END(COMPLETED, continueModel=false) 收束；模型来自 E2E_BUILTIN_MODEL（默认 minimax_anthropic），实际选择写入 artifact',
+  docs: '默认使用 minimax-anthropic/MiniMax-M3（可由 E2E_BUILTIN_MODEL 覆盖为其它已声明模型）+ backend S3 enabled（GlobalStorageToolResultHistoryMaterializer bean，否则 Resource 引用 fail-closed 无法进入 durable history）：Agent definition 不携带任何 Environment 绑定（environmentId 不是 Agent 字段），Environment 只由 NEW_SESSION 的 branchSettings.environmentName 绑定 canonical daemon name 并在每轮解析为内部路由身份；yolo=false 时 read ToolInvocation 进入 WAITING_APPROVAL（Thread status 为 RUNNING，审批等待不是 Thread 活动状态；ToolInvocationDTO 只暴露扁平 environmentId，无 location/environment wrapper）；approval ALLOW（decisionId 幂等）后执行；daemon 投影 32 行文本窗口，durable tool_result.contents 内联完整 canonical 文本（path/ends_with_newline/range header 与编号正文，无 lsp 行、无截断元数据）且不产生 resource；后续模型轮次在结果内联后成功返回非空 Assistant 回复并以 TURN_END(COMPLETED, continueModel=false) 收束；模型来自 E2E_BUILTIN_MODEL（默认 minimax_anthropic），实际选择写入 artifact',
   async run(ctx) {
     await getCase('daemon.ready').run(ctx)
     const model = await requireBuiltinModel(ctx)
@@ -1901,16 +1901,18 @@ registerCase({
       let terminal = null
       for (let i = 0; i < 120; i++) {
         const current = await getThreadSnapshot(ctx, tid)
-        if (current.thread.status === 'TOOL_WAITING_APPROVAL') {
+        // 审批等待是 ToolInvocation 的事实；Thread 自身仍是 RUNNING，不能把 RUNNING 当成审批。
+        const readApproval = (current.toolInvocations || []).find(
+          (invocation) =>
+            invocation.toolName === 'read' && invocation.status === 'WAITING_APPROVAL',
+        )
+        if (readApproval) {
           waiting = current
           break
         }
         if (
-          current.thread.status === 'FAILED'
-          || (
-            current.thread.status === 'IDLE'
-            && (current.entries || []).some((entry) => entryType(entry) === 'TURN_END')
-          )
+          current.thread.status === 'IDLE'
+          && (current.entries || []).some((entry) => entryType(entry) === 'TURN_END')
         ) {
           terminal = current
           break
@@ -1919,7 +1921,7 @@ registerCase({
       }
       assert(
         waiting,
-        `never reached TOOL_WAITING_APPROVAL on thread ${tid}: ${safeDiagnosticJson(terminal)}`,
+        `never reached read WAITING_APPROVAL on thread ${tid}: ${safeDiagnosticJson(terminal)}`,
       )
       const readInvocation = waiting.toolInvocations.find(
         (invocation) => invocation.toolName === 'read',
@@ -2306,7 +2308,8 @@ async function waitForSubagentResult(ctx, threadId, taskId, { timeoutMs = 240_00
   while (Date.now() <= deadline) {
     const snapshot = await getThreadSnapshot(ctx, threadId)
     last = snapshot
-    const idle = !snapshot.thread.processing && (snapshot.queuedCommands || []).length === 0
+    const idle = snapshot.thread.status === 'IDLE'
+      && (snapshot.queuedCommands || []).length === 0
     const matched = subagentResults(snapshot.entries || []).filter(
       (result) => result.sourceThreadId === taskId,
     )

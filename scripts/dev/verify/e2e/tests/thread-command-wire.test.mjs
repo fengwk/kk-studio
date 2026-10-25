@@ -22,7 +22,6 @@ const threadDto = (threadId, { status = 'IDLE', executionControl = 'RUNNABLE', h
   nextCommandSequence: '2',
   version: '1',
   status,
-  processing: status !== 'IDLE' && status !== 'STOPPED',
   executionControl,
   rootThreadId: threadId,
   yoloEnabled: false,
@@ -329,7 +328,7 @@ test('stopThread validates per-thread receipts and rejects the removed root-only
         json: { data: {
           status: 'STOPPED',
           thread: threadDto(threadId, {
-            status: 'STOPPED',
+            status: 'IDLE',
             executionControl: 'STOPPED',
             headEntryId: stoppedTurnEndEntryId,
           }),
