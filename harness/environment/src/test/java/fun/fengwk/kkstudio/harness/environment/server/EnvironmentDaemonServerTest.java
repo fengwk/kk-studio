@@ -949,6 +949,44 @@ class EnvironmentDaemonServerTest {
         "已交付的退出确认不再随 READY 重放 CANCEL");
   }
 
+  /** 账本确认抛错仍须留下脱敏诊断；重复 ACK 不重试失败写入，也不阻断后续调用的独立退出确认。 */
+  @Test
+  void exitConfirmationFailureIsLoggedSafelyWithoutBlockingLaterCallbacks() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-exit-failure");
+    AtomicInteger attempts = new AtomicInteger();
+    SerialListener failing =
+        new SerialListener() {
+          @Override
+          public void onExitConfirmed() {
+            attempts.incrementAndGet();
+            throw new IllegalStateException("exit persistence failed: " + SYNTHETIC_SECRET);
+          }
+        };
+    EnvironmentCapabilityExecutionHandle handle =
+        fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), failing);
+    handle.terminate(EnvironmentCapabilityTerminationCause.CANCELLED);
+    RecordingListener following = new RecordingListener();
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_TWO), following);
+
+    try (CoreLogCapture logs = new CoreLogCapture()) {
+      fixture.receive(channel, DaemonMessageType.EXECUTION_EXITED, CALL_ONE.toString(), "{}");
+      fixture.receive(channel, DaemonMessageType.EXECUTION_EXITED, CALL_ONE.toString(), "{}");
+      fixture.receive(channel, DaemonMessageType.EXECUTION_EXITED, CALL_TWO.toString(), "{}");
+
+      assertEquals(1, attempts.get(), "failed persistence must not be retried on a duplicate ACK");
+      assertTrue(failing.events().isEmpty(), "a failed callback must not fabricate another result");
+      assertEquals(1, following.exitConfirmations, "later callbacks must still drain");
+      assertNull(following.completed);
+      assertNull(following.error);
+      assertFalse(channel.closed());
+      logs.assertOnlySafeFailures(1, "execution exit confirmation");
+      assertEquals(
+          "environment daemon execution exit confirmation failed: IllegalStateException",
+          logs.records().getFirst().getMessage());
+    }
+  }
+
   /**
    * 测试意图：终态帧与独立退出确认并发时，「移除活动调用 + 登记 tombstone」必须原子可见； 两个事实各自至多交付一次，且不能因活动/tombstone 之间的窗口被误判为未知
    * invocation。
