@@ -18,6 +18,8 @@ export function createSkillCapability(
 
   return async (call: CapabilityCall, context: CapabilityContext): Promise<CapabilityResult> => {
     const callId = call.invocationId
+    let installStarted = false
+    let installReturned = false
 
     try {
       if (context.signal.aborted) {
@@ -50,6 +52,7 @@ export function createSkillCapability(
         parsedCredential = credential.trim().length > 0 ? credential.trim() : null
       }
 
+      installStarted = true
       const installed = await activeInstaller.install(
         packageName,
         repositoryUrl,
@@ -58,6 +61,7 @@ export function createSkillCapability(
         parsedCredential,
         context.signal,
       )
+      installReturned = true
 
       return {
         callId,
@@ -83,8 +87,10 @@ export function createSkillCapability(
       }
       return errorResult(callId, 'Skill sync failed', 'SKILL_SYNC_FAILED')
     } finally {
-      // install 返回或抛出后没有后台任务。返回前确认，避免调用方在 await 返回后看到未确认。
-      context.confirmExecutionExit()
+      // 未调用 install，或 install 已成功返回时，没有未收敛的 owned 资源；一旦已调用后抛错则不推断退出。
+      if (!installStarted || installReturned) {
+        context.confirmExecutionExit()
+      }
     }
   }
 }
