@@ -87,7 +87,9 @@ final class WebSocketIdeStreamPeer implements IdeStreamPeer {
         session.sendMessage(message);
       } catch (IOException error) {
         if (acknowledgement) {
-          log.debug("reverse stream ACK write failed, dropping ACK", error);
+          log.debug(
+              "reverse stream ACK write failed, dropping ACK; phase=IDE_ACK_WRITE; exception={}",
+              error.getClass().getSimpleName());
           return;
         }
         onTransportClosed();
@@ -95,7 +97,9 @@ final class WebSocketIdeStreamPeer implements IdeStreamPeer {
       } catch (IllegalStateException error) {
         if (acknowledgement && (closed || !session.isOpen())) {
           // 底层会话确已关闭：只丢弃该 ACK 不改变 closed，最终结果由 HTTP_END/WS CLOSE 判定。
-          log.debug("reverse stream session is closed, dropping ACK", error);
+          log.debug(
+              "reverse stream session is closed, dropping ACK; phase=IDE_ACK_CLOSED; exception={}",
+              error.getClass().getSimpleName());
           return;
         }
         throw error;
