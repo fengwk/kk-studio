@@ -1426,13 +1426,13 @@ describe('runtime IDE stream lifetime and shutdown convergence', () => {
 
 describe('runtime execution exit confirmation', () => {
   it('does not ACK until the executor body returns, even after confirmExecutionExit', async () => {
-    const entered = Promise.withResolvers<void>()
+    let entered = false
     const gate = Promise.withResolvers<void>()
     const setup = buildRuntime({
       capabilities: {
         'fs.read': async (call, context) => {
           context.confirmExecutionExit()
-          entered.resolve()
+          entered = true
           await gate.promise
           return textResult(call.invocationId)
         },
@@ -1441,8 +1441,8 @@ describe('runtime execution exit confirmation', () => {
     try {
       await handshake(setup)
       setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-exit', payload: invokePayload() }))
-      // 直接等待 capability 留下证据，不用固定 tick 数猜测执行位置。
-      await entered.promise
+      // 有界等待 capability body 真正进入，不用固定 tick 数或 STARTED 猜测执行位置。
+      await waitFor(() => entered)
       expect(sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toBe(false)
       gate.resolve()
       await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED'))
@@ -1453,8 +1453,12 @@ describe('runtime execution exit confirmation', () => {
       expect(types.indexOf('COMPLETED')).toBeLessThan(types.indexOf('EXECUTION_EXITED'))
     } finally {
       gate.resolve()
-      setup.runtime.close()
-      await setup.runtime.awaitCompletion()
+      // close 抛错也必须真正 join，避免执行器仍停留在本次 scope 内。
+      try {
+        setup.runtime.close()
+      } finally {
+        await setup.runtime.awaitCompletion()
+      }
     }
   })
 
@@ -1474,8 +1478,11 @@ describe('runtime execution exit confirmation', () => {
       await waitFor(() => sent(setup.transport).filter((envelope) => envelope.messageType === 'COMPLETED').length === 2)
       expect(sent(setup.transport).filter((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toHaveLength(0)
     } finally {
-      setup.runtime.close()
-      await setup.runtime.awaitCompletion()
+      try {
+        setup.runtime.close()
+      } finally {
+        await setup.runtime.awaitCompletion()
+      }
     }
     expect(setup.runtime.getJournal().find('inv-plain')?.exitConfirmed).toBe(false)
   })
@@ -1501,8 +1508,11 @@ describe('runtime execution exit confirmation', () => {
       expect(replayed.filter((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toHaveLength(2)
       expect(replayed.filter((envelope) => envelope.messageType === 'COMPLETED')).toHaveLength(2)
     } finally {
-      setup.runtime.close()
-      await setup.runtime.awaitCompletion()
+      try {
+        setup.runtime.close()
+      } finally {
+        await setup.runtime.awaitCompletion()
+      }
     }
   })
 
@@ -1526,20 +1536,25 @@ describe('runtime execution exit confirmation', () => {
       expect(replayed.filter((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toHaveLength(3)
       expect(replayed.filter((envelope) => envelope.messageType === 'COMPLETED')).toHaveLength(3)
     } finally {
-      setup.runtime.close()
-      await setup.runtime.awaitCompletion()
+      try {
+        setup.runtime.close()
+      } finally {
+        await setup.runtime.awaitCompletion()
+      }
     }
   })
 
   it('ACKs only after a cancelled execution has actually left its scope', async () => {
-    const entered = Promise.withResolvers<void>()
-    const cancelled = Promise.withResolvers<void>()
+    let entered = false
+    let cancelled = false
     const gate = Promise.withResolvers<void>()
     const setup = buildRuntime({
       capabilities: {
         'fs.read': async (call, context) => {
-          context.signal.addEventListener('abort', () => cancelled.resolve(), { once: true })
-          entered.resolve()
+          context.signal.addEventListener('abort', () => {
+            cancelled = true
+          }, { once: true })
+          entered = true
           await gate.promise
           if (context.signal.aborted) {
             context.confirmExecutionExit()
@@ -1552,9 +1567,10 @@ describe('runtime execution exit confirmation', () => {
     try {
       await handshake(setup)
       setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-cancel', payload: invokePayload() }))
-      await entered.promise
+      // 有界等待真实 capability body 与 abort 事件，不用固定 tick 数猜测。
+      await waitFor(() => entered)
       setup.transport.receive(serverMessage('CANCEL', { environmentId: ENV, invocationId: 'inv-cancel', payload: {} }))
-      await cancelled.promise
+      await waitFor(() => cancelled)
       expect(sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toBe(false)
       expect(sent(setup.transport).some((envelope) => envelope.messageType === 'CANCELLED')).toBe(false)
       gate.resolve()
@@ -1568,8 +1584,12 @@ describe('runtime execution exit confirmation', () => {
       expect(JSON.stringify(terminal?.payload)).toContain('cancelled')
     } finally {
       gate.resolve()
-      setup.runtime.close()
-      await setup.runtime.awaitCompletion()
+      // close 抛错也必须真正 join，避免执行器仍停留在本次 scope 内。
+      try {
+        setup.runtime.close()
+      } finally {
+        await setup.runtime.awaitCompletion()
+      }
     }
   })
 
@@ -1594,8 +1614,11 @@ describe('runtime execution exit confirmation', () => {
       await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED'))
       expect(sent(setup.transport).filter((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toHaveLength(1)
     } finally {
-      setup.runtime.close()
-      await setup.runtime.awaitCompletion()
+      try {
+        setup.runtime.close()
+      } finally {
+        await setup.runtime.awaitCompletion()
+      }
     }
   })
 
@@ -1626,8 +1649,11 @@ describe('runtime execution exit confirmation', () => {
       expect(sent(setup.transport).find((envelope) => envelope.messageType === 'FAILED')?.payload).toEqual({ message: 'upload failed' })
       expect(sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toBe(false)
     } finally {
-      setup.runtime.close()
-      await setup.runtime.awaitCompletion()
+      try {
+        setup.runtime.close()
+      } finally {
+        await setup.runtime.awaitCompletion()
+      }
     }
     // Runtime 已真正收尾；失败的上传不能留下可在重连后重放的退出事实。
     expect(setup.runtime.getJournal().find('inv-upload')?.exitConfirmed).toBe(false)
@@ -1635,12 +1661,12 @@ describe('runtime execution exit confirmation', () => {
 
   it('ACKs only after a successful resource upload, not when confirmExecutionExit returns', async () => {
     // 同一调用的正向对照：上传成功且终态发送后，已留下的证据才变成一次 ACK。
-    const uploadEntered = Promise.withResolvers<void>()
+    let uploadEntered = false
     const uploadGate = Promise.withResolvers<void>()
     const setup = buildRuntime({
       resources: {
         async upload() {
-          uploadEntered.resolve()
+          uploadEntered = true
           await uploadGate.promise
           return {
             type: 'resource',
@@ -1667,7 +1693,8 @@ describe('runtime execution exit confirmation', () => {
     try {
       await handshake(setup)
       setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-upload-ok', payload: invokePayload() }))
-      await uploadEntered.promise
+      // 有界等待真实 uploader 进入，不用 tick 数或终态猜测上传已开始。
+      await waitFor(() => uploadEntered)
       expect(sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toBe(false)
       uploadGate.resolve()
       await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED'))
@@ -1676,8 +1703,12 @@ describe('runtime execution exit confirmation', () => {
       expect(sent(setup.transport).filter((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toHaveLength(1)
     } finally {
       uploadGate.resolve()
-      setup.runtime.close()
-      await setup.runtime.awaitCompletion()
+      // close 抛错也必须真正 join，避免执行器仍停留在本次 scope 内。
+      try {
+        setup.runtime.close()
+      } finally {
+        await setup.runtime.awaitCompletion()
+      }
     }
   })
 
@@ -1720,12 +1751,16 @@ describe('runtime execution exit confirmation', () => {
       const terminal = sent(setup.transport).find((envelope) => envelope.messageType === 'FAILED' || envelope.messageType === 'COMPLETED')
       expect(JSON.stringify(terminal?.payload)).toContain('did not converge')
     } finally {
+      // close 抛错也必须真正 join；清理目录放在最内层，join 失败也尽量释放。
       try {
         setup.runtime.close()
-        await setup.runtime.awaitCompletion()
       } finally {
-        if (dir !== null) {
-          await rm(dir, { recursive: true, force: true })
+        try {
+          await setup.runtime.awaitCompletion()
+        } finally {
+          if (dir !== null) {
+            await rm(dir, { recursive: true, force: true })
+          }
         }
       }
     }
