@@ -21,9 +21,26 @@ import { LspService } from '../../src/coding/lsp-service.js'
 import { TestProcessSupervisor } from './test-process-supervisor.js'
 
 describe('Lsp Capabilities Group End-to-End', () => {
-  let tempDir: string
+  let tempDir = ''
   let supervisor: TestProcessSupervisor
   let group: LspCapabilityGroup | null = null
+
+  /** 有界关闭：close 自身挂住或失败时，finally 仍必须继续执行真实的 supervisor 收尾。 */
+  async function closeWithin(target: LspCapabilityGroup, timeoutMillis = 5000): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      await Promise.race([
+        target.close(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('LSP group close timed out')), timeoutMillis)
+        }),
+      ])
+    } finally {
+      if (timer !== undefined) {
+        clearTimeout(timer)
+      }
+    }
+  }
 
   const dummyUploader: ResourceUploader = {
     upload: async () => {
@@ -63,19 +80,47 @@ describe('Lsp Capabilities Group End-to-End', () => {
   }
 
   beforeEach(() => {
-    tempDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'lsp-cap-test-')))
+    tempDir = ''
     supervisor = new TestProcessSupervisor()
+    // 先保存 mkdtemp 结果再 realpath：realpath 抛错时也能清理已创建目录。
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lsp-cap-test-'))
+    tempDir = fs.realpathSync(tempDir)
   })
 
   afterEach(async () => {
-    if (group) {
-      await group.close()
-      group = null
+    const pending = group
+    // 先置空，关闭失败也不会把本例 group 留给下一例。
+    group = null
+    const errors: unknown[] = []
+    if (pending !== null) {
+      try {
+        await closeWithin(pending)
+      } catch (error) {
+        errors.push(error)
+      }
     }
-    await supervisor.close()
+    // 无论 group close 是否失败，都独立执行真实 supervisor.close()。
+    let supervisorClosed = false
     try {
-      fs.rmSync(tempDir, { recursive: true, force: true })
-    } catch {}
+      await supervisor.close()
+      supervisorClosed = true
+    } catch (error) {
+      errors.push(error)
+    }
+    // 真实 child 收尾成功后才删目录；失败时保留现场并保留异常。
+    if (supervisorClosed && tempDir) {
+      try {
+        fs.rmSync(tempDir, { recursive: true, force: true })
+      } catch (error) {
+        errors.push(error)
+      }
+    }
+    if (errors.length === 1) {
+      throw errors[0]
+    }
+    if (errors.length > 1) {
+      throw new AggregateError(errors, 'LSP capability cleanup failed')
+    }
   })
 
   it('validates arguments before starting any server process', async () => {
@@ -297,7 +342,7 @@ describe('Lsp Capabilities Group End-to-End', () => {
     expect(confirmations).toBe(1)
 
     // 共享服务器进程实际退出是独立的迟到证据。
-    await group.close()
+    await closeWithin(group)
     group = null
     await vi.waitFor(() => expect(confirmations).toBe(2))
   })
@@ -326,7 +371,7 @@ describe('Lsp Capabilities Group End-to-End', () => {
       expect(supervisor.children.length).toBe(1)
       expect(confirmations).toBe(1)
     } finally {
-      await localGroup.close()
+      await closeWithin(localGroup)
     }
   })
 

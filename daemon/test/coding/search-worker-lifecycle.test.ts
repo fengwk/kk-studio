@@ -22,9 +22,10 @@ vi.mock('node:worker_threads', async () => {
 const tempDirs: string[] = []
 
 async function tempDir(): Promise<string> {
-  const dir = await realpath(await mkdtemp(join(tmpdir(), 'kk-swlife-')))
-  tempDirs.push(dir)
-  return dir
+  const created = await mkdtemp(join(tmpdir(), 'kk-swlife-'))
+  // 先登记 mkdtemp 结果再 realpath：realpath 失败时也能清理已创建目录。
+  tempDirs.push(created)
+  return await realpath(created)
 }
 
 afterEach(async () => {
@@ -401,10 +402,15 @@ describe('参数校验与 Worker 创建隔离', () => {
       expect(observed.confirmations()).toBe(0)
     } finally {
       try {
-        // 准备或断言失败时也结束这次 Worker 等待，再恢复全局 prototype，避免下一项用到残留 spy。
+        // 清理失败路径：本假 fixture 主动结束受控等待，避免等真实 5s grace timer；
+        // emit exit 只是测试收尾，不证明真实 worker 退出故障。
         controller.abort()
+        const worker = FakeWorker.instances.at(-1)
+        worker?.release()
+        worker?.emit('exit', 0)
         await tracked.promise
       } finally {
+        // 恢复全局 prototype 独立放在最外层，不被上面的清理失败绕过。
         closeFailure.mockRestore()
       }
     }
@@ -413,15 +419,26 @@ describe('参数校验与 Worker 创建隔离', () => {
   it('confirms once after the worker exits and the inline result is released', async () => {
     // 正向对照：没有溢出文件时，worker 退出且结果交付后确认一次。
     const dir = await tempDir()
-    const observed = confirmingContext(dir)
+    const controller = new AbortController()
+    const observed = confirmingContext(dir, { signal: controller.signal })
     const tracked = track(callCapability(find, 'fs.find', { pattern: '*.zzz', path: dir }, observed.context))
-    const worker = await waitForWorker()
-    expect(observed.confirmations()).toBe(0)
-    worker.emit('message', noFind)
-    worker.emit('exit', 0)
-    const result = await tracked.promise
-    expect(result.error).toBe(false)
-    expect(observed.confirmations()).toBe(1)
+    try {
+      const worker = await waitForWorker()
+      expect(observed.confirmations()).toBe(0)
+      worker.emit('message', noFind)
+      worker.emit('exit', 0)
+      const result = await tracked.promise
+      expect(result.error).toBe(false)
+      expect(observed.confirmations()).toBe(1)
+    } finally {
+      // 准备或断言失败时主动结束本次假 Worker 等待；emit exit 只是 fixture 收尾，
+      // 不证明真实 worker 退出故障，也不等待真实 5s grace timer。
+      controller.abort()
+      const worker = FakeWorker.instances.at(-1)
+      worker?.release()
+      worker?.emit('exit', 0)
+      await tracked.promise
+    }
   })
 
   it('非法参数在能力入口直接被拒绝且不创建 Worker', async () => {
