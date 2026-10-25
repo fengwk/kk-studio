@@ -220,39 +220,57 @@ class ToolProcessorRecoveryTest {
         tool -> tool.markApprovalNotRequired(ToolProcessorTestSupport.NOW));
     ToolProcessorTestSupport.FakeRun run =
         fixture.gateway.queueRun(progress -> ToolProcessorTestSupport.blockUntilInterrupted());
-    assertEquals(
-        ProcessResult.STARTED,
-        fixture.processor.process(
-            ToolProcessorTestSupport.claim(
-                fixture.store,
-                fixture.toolInvocationId,
-                ToolProcessorTestSupport.NOW,
-                "token-old")));
-    assertTrue(run.awaitExecuting());
-    fixture.clock.advance(Duration.ofSeconds(61));
-    ToolProcessorTestSupport.replaceToolWork(fixture, ToolProcessorTestSupport.NOW);
-    ClaimedWork recovered =
-        ToolProcessorTestSupport.claim(
-            fixture.store, fixture.toolInvocationId, fixture.clock.instant(), "token-new");
+    try {
+      assertEquals(
+          ProcessResult.STARTED,
+          fixture.processor.process(
+              ToolProcessorTestSupport.claim(
+                  fixture.store,
+                  fixture.toolInvocationId,
+                  ToolProcessorTestSupport.NOW,
+                  "token-old")));
+      assertTrue(run.awaitExecuting());
+      fixture.clock.advance(Duration.ofSeconds(61));
+      ToolProcessorTestSupport.replaceToolWork(fixture, ToolProcessorTestSupport.NOW);
+      ClaimedWork recovered =
+          ToolProcessorTestSupport.claim(
+              fixture.store, fixture.toolInvocationId, fixture.clock.instant(), "token-new");
 
-    assertEquals(ProcessResult.TERMINATED, fixture.processor.process(recovered));
+      assertEquals(ProcessResult.TERMINATED, fixture.processor.process(recovered));
 
-    ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
-    assertEquals(ToolInvocationStatus.UNKNOWN, tool.status());
-    assertEquals(1, tool.attempt());
-    assertEquals(1, fixture.gateway.admitCalls);
-    assertTrue(run.awaitExited());
-    // body 返回早于 finally 确认；等待整条执行线程退出后，version 才包含真实退出的递增。
-    assertTrue(run.executionThread.join(Duration.ofSeconds(5)));
-    assertTrue(
-        fixture
-            .store
-            .transaction(tx -> tx.loadUnconfirmedExecutions(fixture.baseline.threadId()))
-            .isEmpty());
-    assertEquals(
-        3, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
-    assertNull(ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId));
-    assertFalse(fixture.processor.hasActiveExecution());
+      ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
+      assertEquals(ToolInvocationStatus.UNKNOWN, tool.status());
+      assertEquals(1, tool.attempt());
+      assertEquals(1, fixture.gateway.admitCalls);
+      assertTrue(run.awaitExited());
+      // body 返回早于 finally 确认；等待整条执行线程退出后，version 才包含真实退出的递增。
+      assertTrue(run.executionThread.join(Duration.ofSeconds(5)));
+      assertTrue(
+          fixture
+              .store
+              .transaction(tx -> tx.loadUnconfirmedExecutions(fixture.baseline.threadId()))
+              .isEmpty());
+      assertEquals(
+          3, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
+      assertNull(ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId));
+      assertFalse(fixture.processor.hasActiveExecution());
+    } finally {
+      // Fixture 的 scheduler 不在本类 schedulers 集合中；中断请求、真实 runner join 和 scheduler 关闭都必须完成。
+      try {
+        fixture.processor.close();
+      } finally {
+        try {
+          if (run.executionThread != null) {
+            assertTrue(
+                run.executionThread.join(Duration.ofSeconds(5)),
+                "recovered tool execution must exit during cleanup");
+          }
+        } finally {
+          fixture.scheduler.shutdownNow();
+          assertTrue(fixture.scheduler.awaitTermination(5, TimeUnit.SECONDS));
+        }
+      }
+    }
   }
 
   /** active RUNNING + 伪造不同 token 的 claim：Work-only 前置校验先拦截，合法 execution 不被 cancel。 */
