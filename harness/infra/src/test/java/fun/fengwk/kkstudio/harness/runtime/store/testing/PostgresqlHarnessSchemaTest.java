@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime.store.testing;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -11,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import java.sql.SQLException;
 import java.util.List;
 import java.util.UUID;
 
@@ -1092,6 +1094,10 @@ class PostgresqlHarnessSchemaTest {
                     childThreadId,
                     terminalEntryId,
                     finalAnswerEntryId));
+    assertEquals(
+        "23514",
+        assertInstanceOf(SQLException.class, exMatchedUndelivered.getMostSpecificCause())
+            .getSQLState());
     assertTrue(exMatchedUndelivered.getMessage().contains("ck_harness_thread_join_delivery"));
   }
 
@@ -1377,6 +1383,10 @@ class PostgresqlHarnessSchemaTest {
                     parentThreadId,
                     childThreadId,
                     terminalEntryId));
+    assertEquals(
+        "23514",
+        assertInstanceOf(SQLException.class, exMatchedUndelivered.getMostSpecificCause())
+            .getSQLState());
     assertTrue(exMatchedUndelivered.getMessage().contains("ck_harness_thread_join_delivery"));
 
     // 2. superseded_by 指向自身 → ck_harness_thread_join_superseded
