@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime.execution;
 import fun.fengwk.kkstudio.harness.runtime.StoppedThreadReceipt;
 import fun.fengwk.kkstudio.harness.runtime.ThreadLifecycleCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.ThreadTreeLocks;
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
@@ -212,11 +213,16 @@ public final class ExecutionExitLedger {
       if (thread == null || !thread.executionControl().isStopped()) {
         return;
       }
+      // 停止边界的先后由当前 head 的历史路径确定；回执时间与 UUID 顺序都不能表达 Entry 历史先后。
+      Entry terminal = tx.loadEntryPath(thread.headEntryId()).headIgnoringTrailingControlEntries();
+      if (!(terminal.payload() instanceof TurnEndPayload end)
+          || end.outcome() != TurnEndOutcome.STOPPED
+          || end.closeRequestId() == null) {
+        return;
+      }
       StoppedThreadReceipt receipt =
-          tx.loadStopReceiptsByThread(thread.id()).stream()
-              .reduce((first, second) -> second)
-              .orElse(null);
-      if (receipt == null || receipt.stoppedTurnEndEntryId() == null) {
+          tx.findStopReceipt(thread.id(), end.closeRequestId()).orElse(null);
+      if (receipt == null || !terminal.id().equals(receipt.stoppedTurnEndEntryId())) {
         return;
       }
       ThreadLifecycleCoordinator.matchAndDeliverTerminalJoins(
