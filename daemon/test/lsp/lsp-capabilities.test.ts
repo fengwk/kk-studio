@@ -21,7 +21,7 @@ import { LspService } from '../../src/coding/lsp-service.js'
 import { TestProcessSupervisor } from './test-process-supervisor.js'
 
 describe('Lsp Capabilities Group End-to-End', () => {
-  let tempDir: string
+  let tempDir = ''
   let supervisor: TestProcessSupervisor
   let group: LspCapabilityGroup | null = null
 
@@ -80,10 +80,11 @@ describe('Lsp Capabilities Group End-to-End', () => {
   }
 
   beforeEach(() => {
+    tempDir = ''
+    supervisor = new TestProcessSupervisor()
     // 先保存 mkdtemp 结果再 realpath：realpath 抛错时也能清理已创建目录。
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lsp-cap-test-'))
     tempDir = fs.realpathSync(tempDir)
-    supervisor = new TestProcessSupervisor()
   })
 
   afterEach(async () => {
@@ -107,7 +108,7 @@ describe('Lsp Capabilities Group End-to-End', () => {
       errors.push(error)
     }
     // 真实 child 收尾成功后才删目录；失败时保留现场并保留异常。
-    if (supervisorClosed) {
+    if (supervisorClosed && tempDir) {
       try {
         fs.rmSync(tempDir, { recursive: true, force: true })
       } catch (error) {
