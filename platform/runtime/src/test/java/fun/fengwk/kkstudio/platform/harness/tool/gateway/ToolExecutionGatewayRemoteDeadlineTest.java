@@ -130,8 +130,11 @@ class ToolExecutionGatewayRemoteDeadlineTest {
       assertTrue(remoteExecutions.exitConfirmed.isEmpty(), "timeout is not a positive exit ACK");
     } finally {
       worker.interrupt();
-      worker.join(5_000);
-      run.close();
+      try {
+        assertTrue(worker.join(Duration.ofSeconds(5)), "deadline worker must exit in cleanup");
+      } finally {
+        run.close();
+      }
     }
   }
 
