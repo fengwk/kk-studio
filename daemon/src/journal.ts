@@ -1,12 +1,12 @@
 /**
  * Invocation 去重与终态重放的最小 journal 端口及其内存实现。
  *
- * <p>journal 是 Daemon 进程内的执行事实源：WebSocket 连接只是消息管道。断线后 journal 保留事实，同实例重连时若
- * Platform 以相同 invocationId 重放 INVOKE，RUNNING 条目重放 STARTED、终态条目重放对应 terminal 报文，绝不重复执行
- * 副作用。终态一旦写入不可逆（terminal-once）。
+ * <p>journal 是 Daemon 进程内的执行事实源：WebSocket 连接只是消息管道。同实例重连由 CANCEL 请求重放已有终态和独立
+ * 退出事实，或停止仍在运行的 scope，不重发 INVOKE。重复 INVOKE 只在条目存在时去重；条目缺失不证明该调用从未执行，
+ * 不能把 INVOKE 用作恢复查询。终态一旦写入不可逆（terminal-once）。
  *
- * <p>与 Java 的无界内存 journal 不同，这里的实现有明确上界：只保留最近 {@link DEFAULT_MAX_JOURNAL_ENTRIES} 条终态事实，
- * 超出后按插入顺序淘汰最旧的终态条目；RUNNING 条目永不淘汰（其数量由运行时的并发上限约束）。
+ * <p>内存实现至多保留 {@link DEFAULT_MAX_JOURNAL_ENTRIES} 条终态事实，超出后按 start 的插入顺序淘汰终态条目；
+ * RUNNING 条目永不淘汰（其数量由运行时的并发上限约束）。
  *
  * <p>退出确认是与终态分开的事实：条目被容量淘汰后，重放不再包含该确认，Studio 侧保持未知，不在这里补造或重试。
  */
@@ -15,7 +15,7 @@ export type InvocationState = 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED'
 
 export type TerminalMessageType = 'COMPLETED' | 'FAILED' | 'CANCELLED'
 
-/** 可在重复 INVOKE 或重连后重发的终态 wire 消息。 */
+/** 可随已有 journal 条目重放的终态 wire 消息。 */
 export interface TerminalMessage {
   messageType: TerminalMessageType
   payloadJson: string
@@ -26,7 +26,7 @@ export interface JournalEntry {
   state: InvocationState
   terminalMessage: TerminalMessage | null
   /**
-   * 独立退出确认。与结果终态分开保存：重复 INVOKE/CANCEL 或重连时随条目回放，不能由 terminal 推断。
+   * 独立退出确认。与结果终态分开保存：命中条目的重复 INVOKE/CANCEL 可随条目回放，不能由 terminal 推断。
    */
   exitConfirmed: boolean
 }
