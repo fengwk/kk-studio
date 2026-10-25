@@ -703,8 +703,8 @@ export class LspClient {
       timeoutMillis?: number
       requireAlive?: boolean
       /**
-       * 仅当服务端已给出成功结果或 RPC 错误，或共享服务器进程已实际退出时调用。
-       * 本地写失败、连接 dispose、取消、超时和传输失败都不是请求结束。
+       * 仅当服务端已给出成功结果或 RPC 错误，或请求收到服务器退出报告且同一 stop 已成功完成
+       * 范围收尾时调用。本地写失败、连接 dispose、取消、超时和传输失败都不是请求结束。
        */
       onRequestFinished?: () => void
       /** 调用 connection.sendRequest 之前同步调用，表示这次请求已经进入发送。 */
