@@ -661,6 +661,10 @@ final class OpenAiChatStreamAccumulator {
     }
 
     // 输出总量包含 reasoning；reasoning 只作为其可信子集记录，绝不从输出中扣除。
+    if (reasoningTokens != null && reasoningTokens > completionTokens) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "reasoning tokens exceed completion tokens");
+    }
     long ordinaryInput = uncachedTokens(promptTokens, cachedTokens, cacheWriteTokens);
 
     ModelUsage usage =
