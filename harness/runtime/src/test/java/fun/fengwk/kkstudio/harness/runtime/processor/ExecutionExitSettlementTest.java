@@ -129,9 +129,12 @@ class ExecutionExitSettlementTest {
               delegate.executionThread.join(Duration.ofSeconds(5)), "tool execution must exit");
         }
       } finally {
-        fixture.processor.close();
-        fixture.scheduler.shutdownNow();
-        assertTrue(fixture.scheduler.awaitTermination(5, TimeUnit.SECONDS));
+        try {
+          fixture.processor.close();
+        } finally {
+          fixture.scheduler.shutdownNow();
+          assertTrue(fixture.scheduler.awaitTermination(5, TimeUnit.SECONDS));
+        }
       }
     }
   }
@@ -202,9 +205,12 @@ class ExecutionExitSettlementTest {
               delegate.executionThread.join(Duration.ofSeconds(5)), "tool execution must exit");
         }
       } finally {
-        fixture.processor.close();
-        fixture.scheduler.shutdownNow();
-        assertTrue(fixture.scheduler.awaitTermination(5, TimeUnit.SECONDS));
+        try {
+          fixture.processor.close();
+        } finally {
+          fixture.scheduler.shutdownNow();
+          assertTrue(fixture.scheduler.awaitTermination(5, TimeUnit.SECONDS));
+        }
       }
     }
   }

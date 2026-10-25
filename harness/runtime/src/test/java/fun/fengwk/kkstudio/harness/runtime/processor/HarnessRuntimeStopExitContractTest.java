@@ -133,9 +133,12 @@ class HarnessRuntimeStopExitContractTest {
           assertTrue(run.exitedBeforeClose);
         }
       } finally {
-        fixture.processor.close();
-        fixture.scheduler.shutdownNow();
-        assertTrue(fixture.scheduler.awaitTermination(5, TimeUnit.SECONDS));
+        try {
+          fixture.processor.close();
+        } finally {
+          fixture.scheduler.shutdownNow();
+          assertTrue(fixture.scheduler.awaitTermination(5, TimeUnit.SECONDS));
+        }
       }
     }
     // 真实 body 返回且 close 成功后，Studio 退出确认必须把 STOPPED 子线程收敛为 IDLE，并只交付一次 Join。
@@ -217,9 +220,12 @@ class HarnessRuntimeStopExitContractTest {
           assertTrue(run.executionThread.join(Duration.ofSeconds(5)), "execution must exit");
         }
       } finally {
-        fixture.processor.close();
-        fixture.scheduler.shutdownNow();
-        assertTrue(fixture.scheduler.awaitTermination(5, TimeUnit.SECONDS));
+        try {
+          fixture.processor.close();
+        } finally {
+          fixture.scheduler.shutdownNow();
+          assertTrue(fixture.scheduler.awaitTermination(5, TimeUnit.SECONDS));
+        }
       }
     }
   }
@@ -413,9 +419,12 @@ class HarnessRuntimeStopExitContractTest {
               "released remote execution must exit");
         }
       } finally {
-        fixture.processor.close();
-        fixture.scheduler.shutdownNow();
-        assertTrue(fixture.scheduler.awaitTermination(5, TimeUnit.SECONDS));
+        try {
+          fixture.processor.close();
+        } finally {
+          fixture.scheduler.shutdownNow();
+          assertTrue(fixture.scheduler.awaitTermination(5, TimeUnit.SECONDS));
+        }
       }
     }
   }
@@ -540,9 +549,12 @@ class HarnessRuntimeStopExitContractTest {
               "released remote execution must exit");
         }
       } finally {
-        fixture.processor.close();
-        fixture.scheduler.shutdownNow();
-        assertTrue(fixture.scheduler.awaitTermination(5, TimeUnit.SECONDS));
+        try {
+          fixture.processor.close();
+        } finally {
+          fixture.scheduler.shutdownNow();
+          assertTrue(fixture.scheduler.awaitTermination(5, TimeUnit.SECONDS));
+        }
       }
     }
     assertTrue(released.get(), "the test must release the body, not hit its timeout");
