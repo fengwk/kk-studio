@@ -24,7 +24,7 @@ function fixture(reasons = ['PREVIEW_STALE_CURSOR', 'PREVIEW_PLANNING_FAILED']) 
         const { threadId, sessionId } = body.target
         thread = {
           threadId, sessionId, headEntryId: id(2), parentThreadId: null,
-          name: 'main', version: '1', nextCommandSequence: '2', status: 'IDLE', processing: false,
+          name: 'main', version: '1', nextCommandSequence: '2', status: 'IDLE',
           executionControl: 'RUNNABLE',
           rootThreadId: threadId, yoloEnabled: false,
         }
@@ -174,7 +174,6 @@ function modelRequestDebugFixture() {
         version: '1',
         nextCommandSequence: '2',
         status: 'IDLE',
-        processing: false,
         executionControl: 'RUNNABLE',
         rootThreadId: threadId, yoloEnabled: false,
       }

@@ -64,7 +64,7 @@ function mockContext(def, { hitAt = 2, fault } = {}) {
         if (url === '/api/command-batches') {
           assert.equal(body.target.type, 'NEW_SESSION')
           thread = { threadId: body.target.threadId, sessionId: body.target.sessionId,
-            name: 'cache-test', parentThreadId: null, status: 'IDLE', processing: false,
+            name: 'cache-test', parentThreadId: null, status: 'IDLE',
             executionControl: 'RUNNABLE', rootThreadId: body.target.threadId, yoloEnabled: false }
         } else {
           // 既有 Thread 续写面 owner-free：单条纯 USER_MESSAGE 只带 commands，不带 cursor。
@@ -106,7 +106,7 @@ function mockContext(def, { hitAt = 2, fault } = {}) {
         if (requestCount === 2 && snapshotReads === 3) {
           if (fault === 'activeInvocation') snapshot.modelInvocation = { id: randomUUID() }
           if (fault === 'queuedCommands') snapshot.queuedCommands = [{ sequence: '3' }]
-          if (fault === 'status') snapshot.thread = { ...thread, status: 'MODEL_RUNNING' }
+          if (fault === 'status') snapshot.thread = { ...thread, status: 'RUNNING' }
         }
         return response(snapshot)
       }

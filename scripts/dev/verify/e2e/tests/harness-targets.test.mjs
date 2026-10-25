@@ -142,7 +142,6 @@ test('threadParentIdOf/threadIdOf enforce the immutable execution parent relatio
     nextCommandSequence: '1',
     version: '0',
     status: 'IDLE',
-    processing: false,
     executionControl: 'RUNNABLE',
   }
 
@@ -159,6 +158,60 @@ test('threadParentIdOf/threadIdOf enforce the immutable execution parent relatio
   }
 })
 
+test('threadIdOf accepts only the three-state runtime status and rejects removed processing', () => {
+  // 测试意图：Thread 的 status 只表示本地活动三态（RUNNING/WAITING/IDLE），executionControl 是正交的
+  // 持久控制（RUNNABLE/STOPPED）；threadIdOf 必须接受六种组合，并显式拒绝旧状态词汇和已删除的 processing。
+  const threadId = '00000000-0000-4000-8000-000000000000'
+  const base = {
+    threadId,
+    sessionId: '11111111-1111-4111-8111-111111111111',
+    headEntryId: '22222222-2222-4222-8222-222222222222',
+    parentThreadId: null,
+    name: 'main',
+    rootThreadId: threadId,
+    yoloEnabled: false,
+    nextCommandSequence: '1',
+    version: '0',
+  }
+  for (const status of ['RUNNING', 'WAITING', 'IDLE']) {
+    for (const executionControl of ['RUNNABLE', 'STOPPED']) {
+      assert.equal(
+        threadIdOf({ ...base, status, executionControl }),
+        threadId,
+        `status=${status} executionControl=${executionControl}`,
+      )
+    }
+  }
+
+  for (const status of [
+    'QUEUED',
+    'STOPPED',
+    'CONTINUATION_DUE',
+    'MODEL_READY',
+    'MODEL_RUNNING',
+    'APPLYING',
+    'TOOL_WAITING_APPROVAL',
+    'TOOL_WAITING_INPUT',
+    'TOOL_RUNNING',
+    'TOOL_READY',
+    'PROCESSING',
+  ]) {
+    assert.throws(
+      () => threadIdOf({ ...base, status, executionControl: 'RUNNABLE' }),
+      /unknown ThreadRuntimeStatus/,
+      `legacy status ${status} must be rejected`,
+    )
+  }
+
+  // 新合同不保留旧 boolean 别名：即使值与新状态一致，携带 processing 也必须被拒绝。
+  for (const processing of [false, true]) {
+    assert.throws(
+      () => threadIdOf({ ...base, status: 'IDLE', executionControl: 'RUNNABLE', processing }),
+      /processing/,
+    )
+  }
+})
+
 test('Session summaries preserve same-named root and child parent identities', async () => {
   // 摘要 helper 不按名称去重，也不过滤子节点；根 null 和子 canonical UUID 均可通过契约检查。
   const root = {
@@ -168,7 +221,7 @@ test('Session summaries preserve same-named root and child parent identities', a
     createdAt: '2026-01-01T00:00:00Z',
     updatedAt: '2026-01-01T00:00:00Z',
     status: 'IDLE',
-    processing: false,
+    executionControl: 'RUNNABLE',
     model: { modelName: 'model', variant: 'default' },
     headMessagePreview: null,
   }
@@ -210,7 +263,6 @@ test('thread YOLO wire is an explicit boolean with an immutable execution root',
     nextCommandSequence: '1',
     version: '0',
     status: 'IDLE',
-    processing: false,
     executionControl: 'RUNNABLE',
   }
   const childThread = {

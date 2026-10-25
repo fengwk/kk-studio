@@ -570,7 +570,6 @@ registerCase({
         const snapshot = await getThreadSnapshot(ctx, threadId)
         if (
           snapshot.thread.status !== 'IDLE'
-          || snapshot.thread.processing
           || snapshot.queuedCommands.length > 0
           || snapshot.modelInvocation !== null
         ) {
@@ -1684,7 +1683,7 @@ registerCase({
   id: 'thread.stop_idle_boundary',
   level: 'L1',
   title: 'IDLE stop 写入持久 STOP barrier 且同 stopRequestId exact replay',
-  docs: 'POST /stop body={stopRequestId,expectedVersion}；本线程无 open Turn 时写入完整 STOP barrier Turn（TURN_START(STOP) → ASSISTANT_ERROR(CANCELLED) → TURN_END(STOPPED, continueModel=false, USER_STOP, closeRequestId)）=> status=STOPPED、thread.executionControl=STOPPED、stoppedThreads[] 含目标 Thread 回执（threadId/stopRequestId 为请求值、stoppedTurnEndEntryId=该 TURN_END 且成为新 head、cancelledCommandCount=0、cancelledInputs=[]）、version 恰好 +1；同 stopRequestId + 原 expectedVersion 再次调用 => status=REPLAYED、同回执 stoppedTurnEndEntryId、version/head/Entry 集合不变（不写第二条 barrier）；未使用过的 stopRequestId 配 stale version => 409。真实 live Turn 的 STOPPED/REPLAYED 由 L2 real.stop_partial_continue 覆盖',
+  docs: 'POST /stop body={stopRequestId,expectedVersion}；本线程无 open Turn 时写入完整 STOP barrier Turn（TURN_START(STOP) → ASSISTANT_ERROR(CANCELLED) → TURN_END(STOPPED, continueModel=false, USER_STOP, closeRequestId)）=> stop status=STOPPED、thread.executionControl=STOPPED（Thread 活动三态仍为 IDLE，STOP 不覆盖 status）、stoppedThreads[] 含目标 Thread 回执（threadId/stopRequestId 为请求值、stoppedTurnEndEntryId=该 TURN_END 且成为新 head、cancelledCommandCount=0、cancelledInputs=[]）、version 恰好 +1；同 stopRequestId + 原 expectedVersion 再次调用 => status=REPLAYED、同回执 stoppedTurnEndEntryId、version/head/Entry 集合不变（不写第二条 barrier）；未使用过的 stopRequestId 配 stale version => 409。真实 live Turn 的 STOPPED/REPLAYED 由 L2 real.stop_partial_continue 覆盖',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -1709,7 +1708,7 @@ registerCase({
     const thread = await waitForQuiescentThread(ctx, threadId, { timeoutMs: 60_000, intervalMs: 100 })
     // 前置事实：确定性失败的 Agent 让首个 Turn 已闭合，Thread 处于无本线程 open Turn 的空闲态。
     assert(
-      thread.processing === false && thread.status === 'IDLE',
+      thread.status === 'IDLE',
       `expected quiescent idle Thread: ${JSON.stringify(thread)}`,
     )
     const stopRequestId = cid()
@@ -2340,11 +2339,11 @@ registerCase({
       const root = nodes[0]
       assertExactFields(
         root,
-        ['threadId', 'parentThreadId', 'name', 'agentName', 'model', 'status', 'processing', 'turnCount', 'toolCallCount', 'outcome', 'updateTime'],
+        ['threadId', 'parentThreadId', 'name', 'agentName', 'model', 'status', 'executionControl', 'turnCount', 'toolCallCount', 'outcome', 'updateTime'],
         'HarnessThreadTreeNodeDTO',
       )
       assert(root.threadId === threadId && root.parentThreadId === null, JSON.stringify(root))
-      assert(root.status === 'IDLE' && root.processing === false, JSON.stringify(root))
+      assert(root.status === 'IDLE' && root.executionControl === 'RUNNABLE', JSON.stringify(root))
       assert(root.outcome === 'FAILED' && root.turnCount === 1 && root.toolCallCount === 0, JSON.stringify(root))
       assert(isDeepStrictEqual(root.model, before.thread.branchSettings.model), JSON.stringify(root))
       // updateTime 是 Thread.updatedAt 的只读投影：非空有限的 epoch seconds，且与权威 Thread 快照精确相同。

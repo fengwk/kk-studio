@@ -21,8 +21,11 @@ test('active work and cursor changes reset the quiescent candidate', () => {
   const candidate = observeQuiescentSnapshot(null, initial)
 
   for (const active of [
-    { ...initial, thread: { ...initial.thread, status: 'MODEL_RUNNING' } },
-    { ...initial, thread: { ...initial.thread, processing: true } },
+    { ...initial, thread: { ...initial.thread, status: 'RUNNING' } },
+    { ...initial, thread: { ...initial.thread, status: 'WAITING' } },
+    // STOP 只改变持久控制，不能把仍活动的 Thread 变成 quiescent。
+    { ...initial, thread: { ...initial.thread, status: 'RUNNING', executionControl: 'STOPPED' } },
+    { ...initial, thread: { ...initial.thread, status: 'WAITING', executionControl: 'STOPPED' } },
     { ...initial, queuedCommands: [{ sequence: '1' }] },
     { ...initial, modelInvocation: { id: 'model-1' } },
     { ...initial, toolInvocations: [{ id: 'tool-1' }] },
@@ -32,6 +35,15 @@ test('active work and cursor changes reset the quiescent candidate', () => {
       stable: false,
     })
   }
+
+  // STOPPED + IDLE 且无队列/Invocation 时仍是合法稳定候选；控制不替代活动事实。
+  const stoppedIdle = {
+    ...initial,
+    thread: { ...initial.thread, executionControl: 'STOPPED' },
+  }
+  const stoppedCandidate = observeQuiescentSnapshot(null, stoppedIdle)
+  assert.notEqual(stoppedCandidate.key, null)
+  assert.equal(observeQuiescentSnapshot(stoppedCandidate.key, stoppedIdle).stable, true)
 
   for (const threadChange of [
     { headEntryId: '00000000-0000-0000-0000-000000000003' },
@@ -56,7 +68,7 @@ function quiescentSnapshot() {
       nextCommandSequence: '2',
       version: '7',
       status: 'IDLE',
-      processing: false,
+      executionControl: 'RUNNABLE',
     },
     queuedCommands: [],
     modelInvocation: null,

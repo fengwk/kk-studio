@@ -262,7 +262,6 @@ async function offlineChat(client) {
     const candidate = current.thread
     quiescent =
       candidate.status === 'IDLE' &&
-      candidate.processing === false &&
       current.queuedCommands.length === 0 &&
       current.modelInvocation === null &&
       current.toolInvocations.length === 0

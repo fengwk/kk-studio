@@ -188,8 +188,8 @@ function acceptedEnvelope(chat, model) {
       rootThreadId: threadId,
       yoloEnabled: true,
       branchSettings: { ...branchSettingsOf(fakeAgent(), model), goal: null },
-      status: 'PROCESSING',
-      processing: true,
+      status: 'RUNNING',
+      executionControl: 'RUNNABLE',
     },
     acceptedCommands: [
       {
