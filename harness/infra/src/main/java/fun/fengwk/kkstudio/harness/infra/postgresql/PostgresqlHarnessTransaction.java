@@ -1047,6 +1047,25 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   @Override
+  public boolean hasIncompleteOwnerChildJoin(UUID parentThreadId) {
+    checkOpen();
+    Objects.requireNonNull(parentThreadId, "parentThreadId");
+    Boolean found =
+        queryForObject(
+            """
+            select exists(
+              select 1
+              from harness_thread_join
+              where parent_thread_id = ? and terminal_entry_id is null
+                and superseded_by_invocation_id is null and delivery = 'SETTLE_OWNER_TURN'
+            )
+            """,
+            Boolean.class,
+            parentThreadId);
+    return Boolean.TRUE.equals(found);
+  }
+
+  @Override
   public int countIncompleteSubagentJoins() {
     checkOpen();
     Integer count =

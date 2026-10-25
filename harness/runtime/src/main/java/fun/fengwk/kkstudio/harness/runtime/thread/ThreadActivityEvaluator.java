@@ -17,7 +17,7 @@ public final class ThreadActivityEvaluator {
   public static ThreadRuntimeStatus evaluate(
       ThreadExecutionControl control,
       ThreadContext context,
-      boolean hasOpenCompactionTurn,
+      boolean hasCompactionObligation,
       boolean hasInputDemand,
       int incompleteChildJoins,
       boolean hasUnconfirmedExecution) {
@@ -27,9 +27,10 @@ public final class ThreadActivityEvaluator {
       throw new IllegalArgumentException("incompleteChildJoins must not be negative");
     }
 
-    // 本地在途活跃执行，以及已登记但尚未确认退出的具体代次，都不因 STOPPED 虚构外部退出事实。
+    // 本地在途活跃执行、自身 open owner compaction 或尚未冻结的 owner 结算子 Join，以及已登记但尚未确认退出的具体代次，
+    // 都不因 STOPPED 虚构外部退出事实。
     if (!(context instanceof ThreadContext.IdleOrHistorical)
-        || hasOpenCompactionTurn
+        || hasCompactionObligation
         || hasUnconfirmedExecution) {
       return ThreadRuntimeStatus.RUNNING;
     }
@@ -56,7 +57,7 @@ public final class ThreadActivityEvaluator {
   public static boolean isQuiescent(
       ThreadExecutionControl control,
       ThreadContext context,
-      boolean hasOpenCompactionTurn,
+      boolean hasCompactionObligation,
       boolean hasInputDemand,
       int incompleteChildJoins,
       boolean hasUnconfirmedExecution) {
@@ -67,7 +68,7 @@ public final class ThreadActivityEvaluator {
     }
     boolean blockedInput = hasInputDemand && control == ThreadExecutionControl.RUNNABLE;
     return (context instanceof ThreadContext.IdleOrHistorical)
-        && !hasOpenCompactionTurn
+        && !hasCompactionObligation
         && !blockedInput
         && incompleteChildJoins == 0
         && !hasUnconfirmedExecution;

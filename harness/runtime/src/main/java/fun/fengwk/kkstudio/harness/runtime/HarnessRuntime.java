@@ -241,7 +241,8 @@ public final class HarnessRuntime {
                     tx.loadStopReceiptsByThread(thread.id()),
                     incompleteChildJoins,
                     unconsumedAppliedNotifications,
-                    !tx.loadUnconfirmedExecutions(thread.id()).isEmpty()));
+                    !tx.loadUnconfirmedExecutions(thread.id()).isEmpty(),
+                    tx.hasIncompleteOwnerChildJoin(thread.id())));
           }
           snapshots.sort(
               Comparator.comparing((ThreadSnapshot snapshot) -> snapshot.thread().createdAt())
@@ -613,6 +614,7 @@ public final class HarnessRuntime {
         ThreadInputDemand.hasUnconsumedNotification(
             tx.loadCommandsByThread(thread.id()), thread.inputThroughSequence());
     boolean hasUnconfirmedExecution = !tx.loadUnconfirmedExecutions(thread.id()).isEmpty();
+    boolean hasIncompleteOwnerChildJoin = tx.hasIncompleteOwnerChildJoin(thread.id());
     return snapshot(
         thread,
         locked.path(),
@@ -621,7 +623,8 @@ public final class HarnessRuntime {
         tx.loadStopReceiptsByThread(thread.id()),
         incompleteChildJoins,
         unconsumedAppliedNotifications,
-        hasUnconfirmedExecution);
+        hasUnconfirmedExecution,
+        hasIncompleteOwnerChildJoin);
   }
 
   private static ThreadSnapshot snapshot(
@@ -632,7 +635,8 @@ public final class HarnessRuntime {
       List<StoppedThreadReceipt> stopReceipts,
       int incompleteChildJoins,
       boolean unconsumedAppliedNotifications,
-      boolean hasUnconfirmedExecution) {
+      boolean hasUnconfirmedExecution,
+      boolean hasIncompleteOwnerChildJoin) {
     return switch (context) {
       case ThreadContext.IdleOrHistorical ignored -> new ThreadSnapshot(
           thread,
@@ -644,7 +648,8 @@ public final class HarnessRuntime {
           stopReceipts,
           incompleteChildJoins,
           unconsumedAppliedNotifications,
-          hasUnconfirmedExecution);
+          hasUnconfirmedExecution,
+          hasIncompleteOwnerChildJoin);
       case ThreadContext.ContinuationDue ignored -> new ThreadSnapshot(
           thread,
           path,
@@ -655,7 +660,8 @@ public final class HarnessRuntime {
           stopReceipts,
           incompleteChildJoins,
           unconsumedAppliedNotifications,
-          hasUnconfirmedExecution);
+          hasUnconfirmedExecution,
+          hasIncompleteOwnerChildJoin);
       case ThreadContext.ModelActive active -> new ThreadSnapshot(
           thread,
           path,
@@ -666,7 +672,8 @@ public final class HarnessRuntime {
           stopReceipts,
           incompleteChildJoins,
           unconsumedAppliedNotifications,
-          hasUnconfirmedExecution);
+          hasUnconfirmedExecution,
+          hasIncompleteOwnerChildJoin);
       case ThreadContext.ModelTerminalPending pending -> new ThreadSnapshot(
           thread,
           path,
@@ -677,7 +684,8 @@ public final class HarnessRuntime {
           stopReceipts,
           incompleteChildJoins,
           unconsumedAppliedNotifications,
-          hasUnconfirmedExecution);
+          hasUnconfirmedExecution,
+          hasIncompleteOwnerChildJoin);
       case ThreadContext.ToolActive active -> new ThreadSnapshot(
           thread,
           path,
@@ -688,7 +696,8 @@ public final class HarnessRuntime {
           stopReceipts,
           incompleteChildJoins,
           unconsumedAppliedNotifications,
-          hasUnconfirmedExecution);
+          hasUnconfirmedExecution,
+          hasIncompleteOwnerChildJoin);
       case ThreadContext.ToolTerminalPending pending -> new ThreadSnapshot(
           thread,
           path,
@@ -699,7 +708,8 @@ public final class HarnessRuntime {
           stopReceipts,
           incompleteChildJoins,
           unconsumedAppliedNotifications,
-          hasUnconfirmedExecution);
+          hasUnconfirmedExecution,
+          hasIncompleteOwnerChildJoin);
     };
   }
 

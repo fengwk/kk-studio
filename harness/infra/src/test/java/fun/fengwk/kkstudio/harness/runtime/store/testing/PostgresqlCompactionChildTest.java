@@ -156,6 +156,12 @@ class PostgresqlCompactionChildTest {
         tx -> {
           ThreadState owner = ThreadLifecycleCoordinator.lockThreadWithParent(tx, ownerThreadId);
           BranchSettings settings = tx.loadEntryPath(owner.headEntryId()).baseSettings();
+          ThreadCommand source =
+              tx.loadQueuedCommands(ownerThreadId).stream()
+                  .filter(command -> command.sequence() == 1L)
+                  .findFirst()
+                  .orElseThrow();
+          UserMessageCommandPayload sourcePayload = (UserMessageCommandPayload) source.payload();
           UUID turn1StartId = tx.nextId();
           UUID turn1UserId = tx.nextId();
           UUID turn1AssistantId = tx.nextId();
@@ -176,12 +182,7 @@ class PostgresqlCompactionChildTest {
                   turn1UserId,
                   owner.sessionId(),
                   turn1StartId,
-                  new MessagePayload(
-                      new AgentMessage(
-                          AgentMessageRole.USER,
-                          List.of(new TextMessageContent("historical user " + "h".repeat(50_000)))),
-                      null,
-                      null),
+                  new MessagePayload(sourcePayload.message(), null, null),
                   T1));
           tx.insertEntry(
               new Entry(
@@ -247,11 +248,6 @@ class PostgresqlCompactionChildTest {
                   turn2AssistantId,
                   new TurnEndPayload(turn2StartId, TurnEndOutcome.COMPLETED, false, null, null),
                   T1));
-          ThreadCommand source =
-              tx.loadQueuedCommands(ownerThreadId).stream()
-                  .filter(command -> command.sequence() == 1L)
-                  .findFirst()
-                  .orElseThrow();
           tx.updateCommands(List.of(source.markApplied(turn1StartId)));
           tx.updateThread(owner.advanceHeadAndInputThroughSequence(turn2EndId, 1L, T1));
           return null;
@@ -373,23 +369,29 @@ class PostgresqlCompactionChildTest {
         failures.add(failure);
       }
     }
-    try {
-      stoppingModelProcessor.close();
-    } catch (Throwable failure) {
-      failures.add(failure);
-    }
-    try {
-      toolProcessor.close();
-    } catch (Throwable failure) {
-      failures.add(failure);
-    }
-    try {
-      executionExecutor.shutdownNow();
-      if (!executionExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
-        failures.add(new AssertionError("model execution executor must terminate"));
+    if (stoppingModelProcessor != null) {
+      try {
+        stoppingModelProcessor.close();
+      } catch (Throwable failure) {
+        failures.add(failure);
       }
-    } catch (Throwable failure) {
-      failures.add(failure);
+    }
+    if (toolProcessor != null) {
+      try {
+        toolProcessor.close();
+      } catch (Throwable failure) {
+        failures.add(failure);
+      }
+    }
+    if (executionExecutor != null) {
+      try {
+        executionExecutor.shutdownNow();
+        if (!executionExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+          failures.add(new AssertionError("model execution executor must terminate"));
+        }
+      } catch (Throwable failure) {
+        failures.add(failure);
+      }
     }
     try {
       scheduler.shutdownNow();
@@ -968,34 +970,37 @@ class PostgresqlCompactionChildTest {
   @Test
   void stoppedCompactionOwnerWaitsForSummaryExitBeforeSettlingAndResuming() throws Throwable {
     HoldingModelGateway holdingGateway = new HoldingModelGateway();
-    ExecutorService executionExecutor = Executors.newVirtualThreadPerTaskExecutor();
-    ToolProcessor toolProcessor = noOpToolProcessor();
-    ModelProcessor stoppingModelProcessor =
-        new ModelProcessor(
-            store,
-            holdingGateway,
-            event -> {},
-            new ModelProcessorConfig(
-                new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5)),
-                () -> NO_RETRY,
-                Duration.ofSeconds(5)),
-            Clock.fixed(T1, ZoneOffset.UTC),
-            scheduler,
-            Runnable::run,
-            executionExecutor);
-    HarnessRuntime stoppingRuntime =
-        new HarnessRuntime(
-            store,
-            resolver,
-            () -> CompactionConfig.DEFAULT,
-            null,
-            stoppingModelProcessor,
-            toolProcessor);
-    runtime = stoppingRuntime;
-    modelProcessor = stoppingModelProcessor;
+    ExecutorService executionExecutor = null;
+    ToolProcessor toolProcessor = null;
+    ModelProcessor stoppingModelProcessor = null;
     Thread executionThread = null;
     Throwable primary = null;
     try {
+      executionExecutor = Executors.newVirtualThreadPerTaskExecutor();
+      toolProcessor = noOpToolProcessor();
+      stoppingModelProcessor =
+          new ModelProcessor(
+              store,
+              holdingGateway,
+              event -> {},
+              new ModelProcessorConfig(
+                  new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5)),
+                  () -> NO_RETRY,
+                  Duration.ofSeconds(5)),
+              Clock.fixed(T1, ZoneOffset.UTC),
+              scheduler,
+              Runnable::run,
+              executionExecutor);
+      HarnessRuntime stoppingRuntime =
+          new HarnessRuntime(
+              store,
+              resolver,
+              () -> CompactionConfig.DEFAULT,
+              null,
+              stoppingModelProcessor,
+              toolProcessor);
+      runtime = stoppingRuntime;
+      modelProcessor = stoppingModelProcessor;
       StoreTestSupport.Baseline outer = seedThreadBaseline(store);
       UUID outerThreadId = outer.threadId();
       UUID ownerThreadId = UUID.randomUUID();
@@ -1030,7 +1035,7 @@ class PostgresqlCompactionChildTest {
       assertTrue(hasWork(WorkTargetType.THREAD, child.childThreadId()));
       processNext(child.childThreadId());
       UUID childModelId = openChildModel(child.childThreadId());
-      assertEquals(ProcessResult.STARTED, processModel(stoppingModelProcessor, childModelId, T1));
+      assertEquals(ProcessResult.STARTED, processModel(childModelId, T1));
       assertTrue(holdingGateway.entered.await(5, TimeUnit.SECONDS), "model body must be entered");
       executionThread = holdingGateway.runner();
       assertNotNull(executionThread);
@@ -1074,14 +1079,23 @@ class PostgresqlCompactionChildTest {
                   ownerBeforeSettings.thread().headEntryId(),
                   ownerBeforeSettings.thread().nextCommandSequence()),
               List.of(settingsCommand));
-      boolean settingsAccepted = true;
+      boolean settingsAccepted = false;
+      Throwable settingsAcceptFailure = null;
       try {
         stoppingRuntime.acceptCommands(settingsRequest, AcceptancePreflight.IDENTITY);
-      } catch (RuntimeException failure) {
-        settingsAccepted = false;
+        settingsAccepted = true;
+      } catch (Throwable failure) {
+        settingsAcceptFailure = failure;
       }
-      boolean ownerSettingsWorkProcessed =
-          settingsAccepted && processThreadWorkUntil(ownerThreadId);
+      boolean ownerSettingsWorkProcessed = false;
+      Throwable settingsProcessFailure = null;
+      if (settingsAccepted) {
+        try {
+          ownerSettingsWorkProcessed = processThreadWorkUntil(ownerThreadId);
+        } catch (Throwable failure) {
+          settingsProcessFailure = failure;
+        }
+      }
       ThreadSnapshot ownerAfterSettings = snapshot(ownerThreadId);
       boolean ownerStillStopped =
           ownerAfterSettings.thread().executionControl() == ThreadExecutionControl.STOPPED;
@@ -1099,15 +1113,17 @@ class PostgresqlCompactionChildTest {
       int outerNotificationsAfter = notificationCount(outerThreadId);
       ThreadSnapshot ownerAfterExit = snapshot(ownerThreadId);
       long ownerVersionAfterExit = ownerAfterExit.thread().version();
+      boolean ownerWorkAfterExit = hasWork(WorkTargetType.THREAD, ownerThreadId);
 
       boolean resumeAcceptedAfterExit = false;
+      Throwable resumeAfterExitFailure = null;
       ThreadExecutionControl controlAfterResume = ownerAfterExit.thread().executionControl();
       try {
         stoppingRuntime.acceptCommands(resumeRequest, AcceptancePreflight.IDENTITY);
         resumeAcceptedAfterExit = true;
         controlAfterResume = snapshot(ownerThreadId).thread().executionControl();
-      } catch (RuntimeException ignored) {
-        // 实际结果由下方断言报告。
+      } catch (Throwable failure) {
+        resumeAfterExitFailure = failure;
       }
 
       HarnessRuntimeConflictException.Reason observedResumeReason = resumeReason;
@@ -1115,6 +1131,10 @@ class PostgresqlCompactionChildTest {
       boolean observedSettingsAccepted = settingsAccepted;
       boolean observedResumeAcceptedAfterExit = resumeAcceptedAfterExit;
       ThreadExecutionControl observedControlAfterResume = controlAfterResume;
+      Throwable observedSettingsAcceptFailure = settingsAcceptFailure;
+      Throwable observedSettingsProcessFailure = settingsProcessFailure;
+      Throwable observedResumeAfterExitFailure = resumeAfterExitFailure;
+      boolean observedOwnerSettingsWorkProcessed = ownerSettingsWorkProcessed;
 
       assertAll(
           () -> assertTrue(stopInterruptedBody, "Stop must interrupt the held model body"),
@@ -1139,21 +1159,39 @@ class PostgresqlCompactionChildTest {
                   HarnessRuntimeConflictException.Reason.EXIT_UNCONFIRMED, observedResumeReason),
           () -> assertFalse(observedResumeAcceptedWhileHeld),
           () -> assertTrue(observedSettingsAccepted),
-          () -> assertTrue(ownerSettingsWorkProcessed),
+          () ->
+              assertNull(
+                  observedSettingsAcceptFailure,
+                  () -> "SET accept failed: " + observedSettingsAcceptFailure),
+          () ->
+              assertNull(
+                  observedSettingsProcessFailure,
+                  () -> "SET processing failed: " + observedSettingsProcessFailure),
+          () -> assertTrue(observedOwnerSettingsWorkProcessed),
           () -> assertTrue(ownerStillStopped),
           () -> assertFalse(ownerWorkAfterSettings),
           () -> assertTrue(executionExited),
+          () ->
+              assertTrue(
+                  holdingGateway.releasedNormally,
+                  "held body must finish after explicit release, not the gate timeout"),
           () -> assertNotNull(childExecutionAfter),
           () -> assertEquals(ExecutionExitState.STUDIO_EXITED, childExecutionAfter.state()),
           () -> assertTrue(childJoinAfter.matched()),
           () -> assertTrue(outerJoinAfter.matched()),
           () -> assertEquals(1, outerNotificationsAfter),
           () -> assertEquals(ThreadRuntimeStatus.IDLE, ownerAfterExit.runtimeStatus()),
+          () -> assertFalse(ownerWorkAfterExit),
           () ->
-              assertTrue(
-                  ownerVersionAfterExit > ownerVersionAfterSettings,
-                  "settling the held summary must advance the owner version cursor"),
+              assertEquals(
+                  ownerVersionAfterSettings + 1,
+                  ownerVersionAfterExit,
+                  "settling the held summary must advance the owner version cursor exactly once"),
           () -> assertTrue(observedResumeAcceptedAfterExit),
+          () ->
+              assertNull(
+                  observedResumeAfterExitFailure,
+                  () -> "post-exit resume failed: " + observedResumeAfterExitFailure),
           () -> assertEquals(ThreadExecutionControl.RUNNABLE, observedControlAfterResume));
     } catch (Throwable failure) {
       primary = failure;
@@ -1361,10 +1399,6 @@ class PostgresqlCompactionChildTest {
 
   /** claim 一次 MODEL Work 并交给真实 ModelProcessor：模型调用按 provider 回调推进。 */
   private ProcessResult processModel(UUID invocationId, Instant now) {
-    return processModel(modelProcessor, invocationId, now);
-  }
-
-  private ProcessResult processModel(ModelProcessor processor, UUID invocationId, Instant now) {
     ClaimedWork claim =
         store
             .transaction(
@@ -1373,7 +1407,7 @@ class PostgresqlCompactionChildTest {
                         WorkTargetType.MODEL, UUID.randomUUID().toString(), Duration.ofSeconds(30)))
             .orElseThrow();
     assertEquals(invocationId, claim.target().id());
-    return processor.process(claim);
+    return modelProcessor.process(claim);
   }
 
   private ModelInvocation findModel(UUID invocationId) {
@@ -1429,12 +1463,13 @@ class PostgresqlCompactionChildTest {
         "{}");
   }
 
-  /** body 进入后保持显式 gate；Stop 的 interrupt 只计数，绝不释放 gate。 */
+  /** body 进入后保持显式 gate；Stop 的 interrupt 只计数，不释放 gate，也不重置清理超时。 */
   private static final class HoldingModelGateway implements ModelGateway {
     private final CountDownLatch entered = new CountDownLatch(1);
     private final CountDownLatch interrupted = new CountDownLatch(1);
     private final CountDownLatch release = new CountDownLatch(1);
     private volatile Thread runner;
+    private volatile boolean releasedNormally;
 
     @Override
     public Admission admit(Execution execution) {
@@ -1443,9 +1478,13 @@ class PostgresqlCompactionChildTest {
         public Outcome run(Sink sink) {
           runner = Thread.currentThread();
           entered.countDown();
+          long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
           while (true) {
             try {
-              release.await();
+              if (!release.await(deadline - System.nanoTime(), TimeUnit.NANOSECONDS)) {
+                throw new AssertionError("held model body gate was not released");
+              }
+              releasedNormally = true;
               break;
             } catch (InterruptedException ignored) {
               interrupted.countDown();

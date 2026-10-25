@@ -259,6 +259,15 @@ public interface HarnessStore {
     int countIncompleteChildJoins(UUID parentThreadId);
 
     /**
+     * 判断指定父 Thread 是否存在尚未冻结结果、未被 supersede 的直接 SETTLE_OWNER_TURN 子 Join；不产生锁。用于把 owner 压缩结算义务与
+     * NOTIFY_PARENT 子任务配额区分开。
+     *
+     * @param parentThreadId 父 Thread ID，不能为 null
+     * @return 是否存在未完成的 owner 结算义务
+     */
+    boolean hasIncompleteOwnerChildJoin(UUID parentThreadId);
+
+    /**
      * 全局统计尚未冻结结果、未被 supersede 且拥有非空 parentThreadId 的 TASK Join 数量；跨所有 root 聚合，root
      * ticket（parentThreadId 为空）与 COMPACTION join 不计入。 不产生锁。用于 subagent 任务的全局并发上限判定。
      *

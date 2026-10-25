@@ -194,6 +194,7 @@ class ThreadSnapshotTest {
             List.of(),
             0,
             false,
+            false,
             false);
     assertEquals(ThreadRuntimeStatus.IDLE, setOnlySnapshot.runtimeStatus());
   }
@@ -226,6 +227,7 @@ class ThreadSnapshotTest {
             List.of(),
             0,
             false,
+            false,
             false);
     assertEquals(ThreadRuntimeStatus.RUNNING, customMsgSnapshot.runtimeStatus());
 
@@ -255,6 +257,7 @@ class ThreadSnapshotTest {
             List.of(),
             0,
             false,
+            false,
             false);
     assertEquals(ThreadRuntimeStatus.RUNNING, notificationSnapshot.runtimeStatus());
   }
@@ -275,6 +278,7 @@ class ThreadSnapshotTest {
             List.of(),
             0,
             true,
+            false,
             false);
     assertEquals(ThreadRuntimeStatus.RUNNING, runningWithWatermark.runtimeStatus());
   }
@@ -294,6 +298,7 @@ class ThreadSnapshotTest {
             List.of(),
             List.of(),
             1,
+            false,
             false,
             false);
     assertEquals(ThreadRuntimeStatus.WAITING, waiting.runtimeStatus());
@@ -315,6 +320,7 @@ class ThreadSnapshotTest {
             List.of(),
             List.of(),
             1,
+            false,
             false,
             false);
     assertEquals(ThreadRuntimeStatus.WAITING, waitingWithTurnEnd.runtimeStatus());
@@ -341,6 +347,7 @@ class ThreadSnapshotTest {
             List.of(),
             0,
             true,
+            false,
             false);
     assertEquals(ThreadRuntimeStatus.IDLE, stoppedWithWatermark.runtimeStatus());
 
@@ -370,8 +377,32 @@ class ThreadSnapshotTest {
             List.of(),
             0,
             false,
+            false,
             false);
     assertEquals(ThreadRuntimeStatus.IDLE, stoppedWithQueuedNotification.runtimeStatus());
+  }
+
+  @Test
+  void stoppedThreadWithIncompleteOwnerChildJoinStaysRunning() {
+    // 测试意图：STOPPED 只表达执行控制；尚未冻结的 owner 压缩结算义务仍投影为 RUNNING，不能提前 IDLE。
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    markActive(baseline.threadId(), ThreadExecutionControl.STOPPED);
+    ThreadSnapshot stoppedBase = runtime.getThreadSnapshot(baseline.threadId());
+
+    ThreadSnapshot awaitingOwnerSettlement =
+        new ThreadSnapshot(
+            stoppedBase.thread(),
+            stoppedBase.entryPath(),
+            List.of(),
+            null,
+            List.of(),
+            List.of(),
+            List.of(),
+            0,
+            false,
+            false,
+            true);
+    assertEquals(ThreadRuntimeStatus.RUNNING, awaitingOwnerSettlement.runtimeStatus());
   }
 
   @Test
@@ -393,6 +424,7 @@ class ThreadSnapshotTest {
             List.of(),
             0,
             false,
+            false,
             false);
     assertThrows(IllegalStateException.class, forged::runtimeStatus);
   }
@@ -413,6 +445,7 @@ class ThreadSnapshotTest {
                 List.of(),
                 List.of(),
                 -1,
+                false,
                 false,
                 false));
   }
@@ -461,6 +494,7 @@ class ThreadSnapshotTest {
         List.of(),
         List.of(),
         0,
+        false,
         false,
         false);
   }

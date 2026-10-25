@@ -746,10 +746,11 @@ final class AcceptCommandsControl {
         false);
   }
 
-  /** 恢复输入要求本 Thread 已无未确认执行，且直接子 Join 已收敛。SET 等维护输入不恢复，因此不受此限制。 */
+  /** 恢复输入要求本 Thread 已无未确认执行，且直接子 Join（含 owner 压缩结算义务）已收敛。SET 等维护输入不恢复，因此不受此限制。 */
   private static boolean resumeConverged(HarnessStore.Transaction tx, ThreadState thread) {
     return !ExecutionExitLedger.hasUnconfirmed(tx, thread.id())
-        && tx.countIncompleteChildJoins(thread.id()) == 0;
+        && tx.countIncompleteChildJoins(thread.id()) == 0
+        && !tx.hasIncompleteOwnerChildJoin(thread.id());
   }
 
   /** 任何显式新 USER/GOAL/CUSTOM 可信输入都把 STOPPED 目标恢复为 RUNNABLE；不复活任何后代。 */

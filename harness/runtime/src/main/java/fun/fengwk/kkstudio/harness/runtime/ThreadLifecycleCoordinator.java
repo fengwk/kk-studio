@@ -188,10 +188,12 @@ public final class ThreadLifecycleCoordinator {
                         && start.reason() == TurnStartReason.COMPACTION
                         && child.id().equals(start.ownerThreadId()))
             .orElse(false);
+    boolean hasCompactionObligation =
+        hasOpenCompaction || tx.hasIncompleteOwnerChildJoin(child.id());
     return ThreadActivityEvaluator.isQuiescent(
         child.executionControl(),
         locked.context(),
-        hasOpenCompaction,
+        hasCompactionObligation,
         hasInputDemand,
         incompleteChildJoins,
         ExecutionExitLedger.hasUnconfirmed(tx, child.id()));
@@ -293,7 +295,7 @@ public final class ThreadLifecycleCoordinator {
 
   /**
    * 对一批刚冻结的 SETTLE_OWNER_TURN Join 唤醒父 Thread Work：结果只冻结 receipt，不构造 SUBAGENT_RESULT 通知、不分配父序列；父
-   * Thread 的开放 Turn owner 在随后的处理中按 join 消费已冻结结果。
+   * Thread 的开放 Turn owner 在随后的处理中按 join 消费已冻结结果。STOPPED owner 只推进一次 version，不请求 Work、不自动恢复执行。
    */
   private static void wakeOwners(HarnessStore.Transaction tx, List<ThreadJoin> settleMatches) {
     Set<UUID> parents = new LinkedHashSet<>();
@@ -303,7 +305,12 @@ public final class ThreadLifecycleCoordinator {
       }
     }
     for (UUID parentId : parents) {
-      tx.requestWork(new WorkTarget(WorkTargetType.THREAD, parentId));
+      ThreadState parent = tx.lockThread(parentId).orElseThrow();
+      if (parent.executionControl().isStopped()) {
+        tx.updateThread(parent.touchVersion(tx.now()));
+      } else {
+        tx.requestWork(new WorkTarget(WorkTargetType.THREAD, parentId));
+      }
     }
   }
 
