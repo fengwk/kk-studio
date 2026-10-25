@@ -1593,28 +1593,56 @@ class EnvironmentDaemonServerTest {
     assertEquals(1, reconnected.countOf(DaemonMessageType.CANCEL), "当代已送达后再次 cancel 必须幂等");
   }
 
-  /** 测试意图：旧连接在 CANCEL 已接受之后被新代际替换时，旧代际的接受不能抹掉新代际上的取消意图；新连接只重发 CANCEL。 */
+  /**
+   * 测试意图：旧代际 CANCEL 在受控 offer 中实际 ACCEPTED 后连接被真实关闭；旧代际的接受不能抹掉新代际的取消意图。
+   *
+   * <p>closeConnectionState 与受控 offer 共用 state monitor，因此先确认关闭任务已经发起，再释放 offer，并通过有界 Future.get
+   * 确认真实完成。isReady=false 只证明旧路由已移除，不是执行退出证据。
+   */
   @Test
-  void staleCancelAcceptDoesNotEraseANewerGeneration() {
+  void acceptedOldCancelDoesNotSuppressNextGenerationRecovery() throws Exception {
     Fixture fixture = new Fixture();
     FakeChannel first = fixture.connectReady("channel-cancel-generation");
+    RecordingListener listener = new RecordingListener();
     EnvironmentCapabilityExecutionHandle handle =
-        fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener());
+        fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), listener);
 
-    first.holdNextOffer = true;
-    Thread cancelling = new Thread(handle::cancel, "cancel-generation");
-    cancelling.start();
-    assertTrue(first.awaitOfferEntered(), "CANCEL 必须停在旧代际的递交窗口");
+    ExecutorService workers = Executors.newFixedThreadPool(2);
+    try {
+      first.holdNextOffer = true;
+      Future<?> cancelling = workers.submit(handle::cancel);
+      assertTrue(first.awaitOfferEntered(), "CANCEL 必须停在旧代际的递交窗口");
 
-    fixture.server.close(first.connectionId());
-    FakeChannel second = fixture.connectReady("channel-cancel-generation-next");
-    first.releaseOffer();
-    assertTrue(join(cancelling));
+      CountDownLatch closeStarted = new CountDownLatch(1);
+      Future<?> closing =
+          workers.submit(
+              () -> {
+                closeStarted.countDown();
+                fixture.server.close(first.connectionId());
+              });
+      assertTrue(closeStarted.await(5, TimeUnit.SECONDS), "关闭任务必须在有界时间内发起");
 
-    assertEquals(
-        List.of(DaemonMessageType.WELCOME, DaemonMessageType.CANCEL), second.messageTypes());
-    assertEquals(0, second.countOf(DaemonMessageType.INVOKE));
-    assertTrue(handle.isCancelled());
+      // close 正在等待同一 state monitor；释放受控 offer 后两边才能真实完成。
+      first.releaseOffer();
+      closing.get(5, TimeUnit.SECONDS);
+      cancelling.get(5, TimeUnit.SECONDS);
+
+      assertFalse(fixture.server.isReady(ENVIRONMENT_ID), "旧路由已移除；该事实不是执行退出证据");
+      assertEquals(1, first.countOf(DaemonMessageType.CANCEL), "旧递交必须实际ACCEPTED，不能靠hold超时");
+
+      FakeChannel second = fixture.connectReady("channel-cancel-generation-next");
+      assertEquals(
+          List.of(DaemonMessageType.WELCOME, DaemonMessageType.CANCEL), second.messageTypes());
+      assertEquals(1, second.countOf(DaemonMessageType.CANCEL));
+      assertEquals(0, second.countOf(DaemonMessageType.INVOKE));
+      assertTrue(handle.isCancelled());
+      assertEquals(0, listener.exitConfirmations, "旧 CANCEL 接受与新 READY 恢复都不得确认退出");
+    } finally {
+      first.releaseOffer();
+      workers.shutdownNow();
+      assertTrue(
+          workers.awaitTermination(5, TimeUnit.SECONDS), "race workers must exit in cleanup");
+    }
   }
 
   /** 测试意图：终态帧与实例接管同时从目录取走同一调用时，listener 恰好收到一次终态。后到者看到的是已经取出的调用，不得再发第二终态。 */
