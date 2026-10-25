@@ -231,7 +231,6 @@ describe('runtime journal capacity recovery evidence', () => {
     const invocationB = 'inv-journal-b'
     const journal = new InMemoryInvocationJournal(1)
     const aGate = Promise.withResolvers<void>()
-    const aStarted = Promise.withResolvers<void>()
     let aExecutions = 0
     let bExecutions = 0
 
@@ -245,14 +244,13 @@ describe('runtime journal capacity recovery evidence', () => {
             if (call.invocationId === invocationA) {
               aExecutions += 1
               if (aExecutions === 1) {
-                aStarted.resolve()
                 await aGate.promise
               }
             } else {
               bExecutions += 1
-              // B 留下独立退出证据：终态与退出确认都必须进入容量为 1 的 journal。
-              context.confirmExecutionExit()
             }
+            // 两个 body 都留下真实退出证据；A 的确认发生在显式 gate 之后。
+            context.confirmExecutionExit()
             return { callId: call.invocationId, error: false, details: {}, contents: [{ type: 'text', text: 'ok' }] }
           },
         },
@@ -272,7 +270,7 @@ describe('runtime journal capacity recovery evidence', () => {
 
       // A 先真正进入执行体并停在显式 gate；此时还没有任何终态可供容量淘汰。
       transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: invocationA, payload: invokeJson() }))
-      await aStarted.promise
+      await waitFor(() => aExecutions === 1)
       expect(aExecutions).toBe(1)
 
       // B 后进入并完成：真实 COMPLETED 与独立 EXECUTION_EXITED 都已发出。
@@ -294,6 +292,8 @@ describe('runtime journal capacity recovery evidence', () => {
       )
       expect(journal.find(invocationA)).toBeUndefined()
       expect(journal.find(invocationB)).toMatchObject({ state: 'COMPLETED', exitConfirmed: true })
+      // A 的 body 已提供退出证据，但终态先写入就淘汰了自己的行，因此初次执行没有 EXECUTION_EXITED。
+      expect(typesFor(invocationA).filter((type) => type === 'EXECUTION_EXITED')).toHaveLength(0)
       const aFramesBeforeCancel = typesFor(invocationA)
 
       // 恢复只发送 CANCEL：被淘汰的 A 未命中 journal，既不再执行，也不造终态、退出确认或 ACK。
@@ -306,21 +306,24 @@ describe('runtime journal capacity recovery evidence', () => {
           typesFor(invocationB).filter((type) => type === 'EXECUTION_EXITED').length === 2,
       )
       expect(aExecutions).toBe(1)
+      expect(bExecutions).toBe(1)
       expect(typesFor(invocationA)).toEqual(aFramesBeforeCancel)
       expect(journal.find(invocationA)).toBeUndefined()
       expect(journal.find(invocationB)).toMatchObject({ state: 'COMPLETED', exitConfirmed: true })
 
       // 对照：若 Server 错把 INVOKE 当恢复查询，容量淘汰后已无终态可重放，A 会真实二次执行。
-      // 这不是安全恢复，而是被禁止的恢复策略的可观测后果。
+      // 这不是安全恢复，而是被禁止的恢复策略的可观测后果；第二次 body 完成后的独立退出帧证明正控制能产生 ACK。
       transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: invocationA, payload: invokeJson() }))
       await waitFor(
         () =>
           aExecutions === 2 &&
-          typesFor(invocationA).filter((type) => type === 'COMPLETED').length === 2,
+          typesFor(invocationA).filter((type) => type === 'COMPLETED').length === 2 &&
+          typesFor(invocationA).filter((type) => type === 'EXECUTION_EXITED').length === 1,
       )
       expect(aExecutions).toBe(2)
       expect(typesFor(invocationA).filter((type) => type === 'STARTED').length).toBe(2)
-      expect(journal.find(invocationA)).toMatchObject({ state: 'COMPLETED' })
+      expect(typesFor(invocationA).filter((type) => type === 'EXECUTION_EXITED')).toHaveLength(1)
+      expect(journal.find(invocationA)).toMatchObject({ state: 'COMPLETED', exitConfirmed: true })
     } finally {
       // 失败或正常结束都先释放 body gate，再关闭 Runtime，最后实际等待在途收尾完成。
       aGate.resolve()
