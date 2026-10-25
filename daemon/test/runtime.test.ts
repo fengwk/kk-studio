@@ -605,7 +605,7 @@ describe('runtime invocation lifecycle', () => {
     setup.runtime.close()
   })
 
-  it('forwards progress and rejects binary progress', async () => {
+  it('forwards progress frames', async () => {
     const setup = buildRuntime({
       capabilities: {
         'fs.read': async (call, context) => {
@@ -614,24 +614,70 @@ describe('runtime invocation lifecycle', () => {
         },
       },
     })
-    await handshake(setup)
-    setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-1', payload: invokePayload() }))
-    await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'PROGRESS'))
-    expect(sent(setup.transport).find((envelope) => envelope.messageType === 'PROGRESS')?.payload).toBeDefined()
-    setup.runtime.close()
+    try {
+      await handshake(setup)
+      setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-1', payload: invokePayload() }))
+      await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'PROGRESS'))
+      expect(sent(setup.transport).find((envelope) => envelope.messageType === 'PROGRESS')?.payload).toEqual({
+        result: { callId: 'inv-1', error: false, details: {}, contents: [{ type: 'text', text: 'partial' }] },
+      })
+    } finally {
+      setup.runtime.close()
+      await setup.runtime.awaitCompletion()
+    }
+  })
 
-    const bad = buildRuntime({
+  it('requests cancellation when a progress result cannot be encoded', async () => {
+    // 编码失败立即封存 FAILED，但执行体仍被真实 gate 持有；停止意图必须已送达，退出确认只等 body 真正离开。
+    const entered = Promise.withResolvers<void>()
+    const gate = Promise.withResolvers<void>()
+    let abortReason: unknown
+    let bodyHeld = false
+    const setup = buildRuntime({
       capabilities: {
         'fs.read': async (call, context) => {
+          context.signal.addEventListener('abort', () => {
+            abortReason = context.signal.reason
+          }, { once: true })
           await context.progress({ callId: call.invocationId, error: false, details: {}, contents: [{ type: 'binary', bytes: new Uint8Array([1]), mediaType: 'text/plain' }] })
+          bodyHeld = true
+          entered.resolve()
+          await gate.promise
+          bodyHeld = false
+          if (context.signal.aborted) {
+            context.confirmExecutionExit()
+          }
           return textResult(call.invocationId)
         },
       },
     })
-    await handshake(bad)
-    bad.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-1', payload: invokePayload() }))
-    await waitFor(() => sent(bad.transport).some((envelope) => envelope.messageType === 'FAILED'))
-    bad.runtime.close()
+    try {
+      await handshake(setup)
+      setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-binary-progress', payload: invokePayload() }))
+      await entered.promise
+      expect(bodyHeld).toBe(true)
+      const failed = sent(setup.transport).filter((envelope) => envelope.messageType === 'FAILED')
+      expect(failed).toHaveLength(1)
+      expect(failed[0]?.payload).toEqual({
+        message: 'cannot encode partial capability result: PROGRESS result must not contain binary content',
+      })
+      // 失败封存本身不确认退出：body 仍在 gate 内，不能有 ACK。
+      expect(sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toBe(false)
+      // 原实现缺少这一步，执行体会一直不知道自己应当停止。
+      expect(abortReason).toBe('CANCELLED')
+      expect(setup.runtime.getJournal().find('inv-binary-progress')?.state).toBe('FAILED')
+      gate.resolve()
+      await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED'))
+      expect(bodyHeld).toBe(false)
+      expect(sent(setup.transport).filter((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toHaveLength(1)
+      expect(sent(setup.transport).filter((envelope) => envelope.messageType === 'FAILED')).toHaveLength(1)
+      expect(sent(setup.transport).some((envelope) => envelope.messageType === 'COMPLETED')).toBe(false)
+      expect(setup.runtime.getJournal().find('inv-binary-progress')?.state).toBe('FAILED')
+    } finally {
+      gate.resolve()
+      setup.runtime.close()
+      await setup.runtime.awaitCompletion()
+    }
   })
 
   it('fails when the capability result callId mismatches', async () => {
