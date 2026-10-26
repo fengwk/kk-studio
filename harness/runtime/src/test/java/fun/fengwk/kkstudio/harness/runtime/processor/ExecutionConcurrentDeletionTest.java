@@ -79,7 +79,16 @@ class ExecutionConcurrentDeletionTest {
     ToolExecutionFixture fixture = toolExecutionFixture(true);
     long versionBefore = threadVersion(fixture.rawStore, fixture.threadId) + 1;
 
-    try {
+    // 资源逆序关闭：先 abandon，再独立有界 join；清理失败不覆盖主体失败。
+    try (AutoCloseable awaitExit =
+            () -> {
+              if (fixture.run.executionThread != null) {
+                assertTrue(
+                    fixture.run.executionThread.join(Duration.ofSeconds(5)),
+                    "tool execution must exit during cleanup");
+              }
+            };
+        AutoCloseable abandon = fixture.execution::abandon) {
       assertEquals(ProcessResult.STARTED, fixture.execution.start(fixture.run));
       assertTrue(fixture.run.awaitExited());
       assertTrue(
@@ -96,16 +105,6 @@ class ExecutionConcurrentDeletionTest {
                       .map(fact -> fact.state())
                       .toList()),
           "a missing Thread must not manufacture an exit confirmation");
-    } finally {
-      try {
-        fixture.execution.abandon();
-      } finally {
-        if (fixture.run.executionThread != null) {
-          assertTrue(
-              fixture.run.executionThread.join(Duration.ofSeconds(5)),
-              "tool execution must exit during cleanup");
-        }
-      }
     }
   }
 
