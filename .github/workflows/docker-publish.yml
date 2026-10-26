@@ -175,6 +175,13 @@ jobs:
             exit 1
           fi
           node --test "${node_files[@]}"
+      - name: Pull the isolated PostgreSQL baseline image
+        # The schema checker runs with --pull=never; pull the pinned image explicitly first.
+        run: docker pull postgres:17.10
+      - name: Verify the sole V1 baseline on a fresh PostgreSQL
+        # Loads the real migration into an owned, network-isolated container and checks the full
+        # table inventory, target columns/relations/indexes and the shared SQL probes.
+        run: node scripts/dev/verify/repository/check-canvas-project-schema.mjs
       - name: Scan for sensitive data
         run: node scripts/dev/verify/repository/check-sensitive-data.mjs
       - name: Verify Java sources, tests and coverage
