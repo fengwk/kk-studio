@@ -8,7 +8,7 @@ import {
   type IdeCommandAction,
   type ResolvedEnvironmentInfo,
 } from '@/features/environment/ide/IdeOverlayPanel'
-import { validateIdeEntryUrl } from '@/features/environment/ide/ide-url'
+import { validateIdeEntryUrl, deriveIdeSessionUrl } from '@/features/environment/ide/ide-url'
 import { environmentService } from '@/shared/api/environment-service'
 import { IdeLifecycleProvider } from '@/features/environment/ide/IdeLifecycleProvider'
 import type { EnvironmentCardDTO } from '@/shared/api/generated/contracts'
@@ -46,6 +46,8 @@ vi.mock('@/shared/api/environment-service', () => ({
     changeIdeViewDirectory: vi.fn().mockResolvedValue({}),
     openIdeViewTerminal: vi.fn().mockResolvedValue(undefined),
     closeIdeView: vi.fn().mockResolvedValue(undefined),
+    probeIdeSession: vi.fn().mockResolvedValue(204),
+    closeIdeViewKeepalive: vi.fn().mockResolvedValue(undefined),
   },
 }))
 
@@ -66,6 +68,21 @@ describe('validateIdeEntryUrl', () => {
     path.replace('token=fixture', ''), `${path}&token=duplicate`,
   ])('拒绝不属于当前环境的入口 %s', (value) => {
     expect(() => validateIdeEntryUrl(value, env)).toThrow()
+  })
+
+  it('从已校验入口推导无 token 的会话探测地址并保留部署前缀', () => {
+    expect(deriveIdeSessionUrl(path)).toBe(`/environment-ide/${env}/__ide/session`)
+    expect(deriveIdeSessionUrl(`/studio${path}`)).toBe(`/studio/environment-ide/${env}/__ide/session`)
+    expect(deriveIdeSessionUrl(`${window.location.origin}/studio${path}`))
+      .toBe(`/studio/environment-ide/${env}/__ide/session`)
+  })
+
+  it.each([
+    '',
+    '/other/__ide/bootstrap?token=fixture',
+    'https://other.test/__ide/bootstrap?token=fixture',
+  ])('拒绝无法安全推导会话地址的入口 %s', (value) => {
+    expect(() => deriveIdeSessionUrl(value)).toThrow()
   })
 })
 
@@ -133,6 +150,12 @@ describe('IdeOverlayPanel', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(environmentService.createIdeView).mockReset().mockResolvedValue({} as never)
+    vi.mocked(environmentService.changeIdeViewDirectory).mockReset().mockResolvedValue({} as never)
+    vi.mocked(environmentService.openIdeViewTerminal).mockReset().mockResolvedValue(undefined)
+    vi.mocked(environmentService.closeIdeView).mockReset().mockResolvedValue(undefined)
+    vi.mocked(environmentService.probeIdeSession).mockReset().mockResolvedValue(204)
+    vi.mocked(environmentService.closeIdeViewKeepalive).mockReset().mockResolvedValue(undefined)
   })
 
   it('uses the directory as its compact open action and labels icon-only controls', async () => {
@@ -945,5 +968,317 @@ describe('IdeOverlayPanel', () => {
       expect(screen.getByTestId('ide-error-banner')).toBeInTheDocument()
     })
     expect(screen.getByTestId('ide-error-banner')).toHaveTextContent('打开工作区 IDE 失败')
+  })
+
+  describe('IDE session probing', () => {
+    const viewId = 'v-session'
+    const entryUrl = `/environment-ide/${readyEnv.id}/__ide/bootstrap?token=old`
+
+    function renderOpenPanel() {
+      return render(
+        <IdeOverlayPanel
+          isOpen={true}
+          viewId={viewId}
+          environment={readyEnv}
+          availableEnvironments={availableEnvironments}
+          action={{ id: 1, mode: 'files' }}
+          onCollapse={vi.fn()}
+          onClose={vi.fn()}
+        />,
+      )
+    }
+
+    function reopenCapableCreate() {
+      vi.mocked(environmentService.createIdeView)
+        .mockResolvedValueOnce({
+          viewId,
+          environmentId: readyEnv.id,
+          directory: '/home/user',
+          entryUrl,
+        })
+        .mockResolvedValueOnce({
+          viewId,
+          environmentId: readyEnv.id,
+          directory: '/home/user',
+          entryUrl: `/environment-ide/${readyEnv.id}/__ide/bootstrap?token=new`,
+        })
+    }
+
+    it.each([401, 409])('reopens the same view after an iframe load probe returns %s', async (status) => {
+      // 测试意图：bootstrap 后会话失效（401/409）必须用同一 viewId 无 directory 重开，并替换 iframe。
+      reopenCapableCreate()
+      vi.mocked(environmentService.probeIdeSession).mockResolvedValueOnce(status)
+
+      renderOpenPanel()
+      const iframe = await screen.findByTestId('ide-iframe')
+      fireEvent.load(iframe)
+
+      await waitFor(() => {
+        expect(environmentService.createIdeView).toHaveBeenCalledTimes(2)
+      })
+      expect(environmentService.createIdeView).toHaveBeenNthCalledWith(2, readyEnv.id, { viewId })
+      await waitFor(() => {
+        expect(screen.getByTestId('ide-iframe'))
+          .toHaveAttribute('src', `/environment-ide/${readyEnv.id}/__ide/bootstrap?token=new`)
+      })
+    })
+
+    it.each([503, null])('keeps the old iframe while the probe is %s', async (status) => {
+      // 测试意图：503 与网络未知只等待，不重开；旧 iframe 保持挂载。
+      reopenCapableCreate()
+      vi.mocked(environmentService.probeIdeSession).mockResolvedValueOnce(status)
+
+      renderOpenPanel()
+      const iframe = await screen.findByTestId('ide-iframe')
+      fireEvent.load(iframe)
+
+      await waitFor(() => {
+        expect(environmentService.probeIdeSession).toHaveBeenCalledTimes(1)
+      })
+      await act(async () => {
+        await Promise.resolve()
+      })
+      expect(environmentService.createIdeView).toHaveBeenCalledOnce()
+      expect(screen.getByTestId('ide-iframe')).toHaveAttribute('src', entryUrl)
+    })
+
+    it('reopens after an onLoad network error once a later probe returns 204', async () => {
+      // 测试意图：断线期间 bootstrap 失败会在 onLoad 标记重开，恢复后 204 必须真正替换 iframe。
+      reopenCapableCreate()
+      vi.mocked(environmentService.probeIdeSession)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(204)
+
+      const { rerender } = renderOpenPanel()
+      const iframe = await screen.findByTestId('ide-iframe')
+      fireEvent.load(iframe)
+      await waitFor(() => {
+        expect(environmentService.probeIdeSession).toHaveBeenCalledTimes(1)
+      })
+      expect(environmentService.createIdeView).toHaveBeenCalledOnce()
+
+      rerender(
+        <IdeOverlayPanel
+          isOpen={true}
+          viewId={viewId}
+          environment={{ ...readyEnv, ready: false }}
+          availableEnvironments={availableEnvironments}
+          action={{ id: 1, mode: 'files' }}
+          onCollapse={vi.fn()}
+          onClose={vi.fn()}
+        />,
+      )
+      rerender(
+        <IdeOverlayPanel
+          isOpen={true}
+          viewId={viewId}
+          environment={readyEnv}
+          availableEnvironments={availableEnvironments}
+          action={{ id: 1, mode: 'files' }}
+          onCollapse={vi.fn()}
+          onClose={vi.fn()}
+        />,
+      )
+
+      await waitFor(() => {
+        expect(environmentService.probeIdeSession).toHaveBeenCalledTimes(2)
+        expect(environmentService.createIdeView).toHaveBeenCalledTimes(2)
+      })
+      await waitFor(() => {
+        expect(screen.getByTestId('ide-iframe'))
+          .toHaveAttribute('src', `/environment-ide/${readyEnv.id}/__ide/bootstrap?token=new`)
+      })
+    })
+
+    it('probes every ten seconds while the view exists', async () => {
+      // 测试意图：视图存在时周期探测，401 触发重开；间隔固定为 10 秒。
+      const setIntervalSpy = vi.spyOn(window, 'setInterval')
+      try {
+        reopenCapableCreate()
+        renderOpenPanel()
+        await screen.findByTestId('ide-iframe')
+
+        const interval = setIntervalSpy.mock.calls.find(([, delay]) => delay === 10_000)
+        expect(interval).toBeDefined()
+        vi.mocked(environmentService.probeIdeSession).mockResolvedValueOnce(401)
+        await act(async () => {
+          ;(interval?.[0] as () => void)()
+        })
+
+        await waitFor(() => {
+          expect(environmentService.createIdeView).toHaveBeenCalledTimes(2)
+        })
+      } finally {
+        setIntervalSpy.mockRestore()
+      }
+    })
+
+    it('keeps the old iframe after a failed reopen and retries on the next probe cycle', async () => {
+      // 测试意图：重开失败不得清空旧 iframe；needsReopen 保留到下一轮成功探测。
+      const setIntervalSpy = vi.spyOn(window, 'setInterval')
+      try {
+        vi.mocked(environmentService.createIdeView)
+          .mockResolvedValueOnce({
+            viewId,
+            environmentId: readyEnv.id,
+            directory: '/home/user',
+            entryUrl,
+          })
+          .mockRejectedValueOnce(new Error('reopen failed'))
+          .mockResolvedValueOnce({
+            viewId,
+            environmentId: readyEnv.id,
+            directory: '/home/user',
+            entryUrl: `/environment-ide/${readyEnv.id}/__ide/bootstrap?token=recovered`,
+          })
+        vi.mocked(environmentService.probeIdeSession).mockResolvedValueOnce(401)
+
+        renderOpenPanel()
+        const iframe = await screen.findByTestId('ide-iframe')
+        fireEvent.load(iframe)
+
+        await waitFor(() => {
+          expect(environmentService.createIdeView).toHaveBeenCalledTimes(2)
+        })
+        await act(async () => {
+          await Promise.resolve()
+          await Promise.resolve()
+        })
+        expect(screen.getByTestId('ide-iframe')).toHaveAttribute('src', entryUrl)
+
+        const interval = setIntervalSpy.mock.calls.find(([, delay]) => delay === 10_000)
+        expect(interval).toBeDefined()
+        vi.mocked(environmentService.probeIdeSession).mockResolvedValueOnce(204)
+        await act(async () => {
+          ;(interval?.[0] as () => void)()
+        })
+
+        await waitFor(() => {
+          expect(environmentService.createIdeView).toHaveBeenCalledTimes(3)
+        })
+        await waitFor(() => {
+          expect(screen.getByTestId('ide-iframe'))
+            .toHaveAttribute('src', `/environment-ide/${readyEnv.id}/__ide/bootstrap?token=recovered`)
+        })
+      } finally {
+        setIntervalSpy.mockRestore()
+      }
+    })
+
+    it('waits for an in-flight reopen before closing, and never resurrects the closed view', async () => {
+      // 测试意图：requestClose 必须等待重开完成再关闭；迟到重开结果不能复活已关闭视图。
+      const user = userEvent.setup()
+      let resolveReopen: (value: unknown) => void = () => {}
+      const pendingReopen = new Promise((resolve) => {
+        resolveReopen = resolve
+      })
+      vi.mocked(environmentService.createIdeView)
+        .mockResolvedValueOnce({
+          viewId,
+          environmentId: readyEnv.id,
+          directory: '/home/user',
+          entryUrl,
+        })
+        .mockReturnValueOnce(pendingReopen as never)
+      vi.mocked(environmentService.probeIdeSession).mockResolvedValueOnce(401)
+
+      const onClose = vi.fn()
+      render(
+        <IdeOverlayPanel
+          isOpen={true}
+          viewId={viewId}
+          environment={readyEnv}
+          availableEnvironments={availableEnvironments}
+          action={{ id: 1, mode: 'files' }}
+          onCollapse={vi.fn()}
+          onClose={onClose}
+        />,
+      )
+
+      const iframe = await screen.findByTestId('ide-iframe')
+      fireEvent.load(iframe)
+      await waitFor(() => {
+        expect(environmentService.createIdeView).toHaveBeenCalledTimes(2)
+      })
+
+      await user.click(screen.getByTestId('ide-close-btn'))
+      await user.click(screen.getByTestId('ide-confirm-close-btn'))
+      expect(environmentService.closeIdeView).not.toHaveBeenCalled()
+
+      await act(async () => {
+        resolveReopen({
+          viewId,
+          environmentId: readyEnv.id,
+          directory: '/home/user',
+          entryUrl: `/environment-ide/${readyEnv.id}/__ide/bootstrap?token=reopened-before-close`,
+        })
+      })
+
+      await waitFor(() => {
+        expect(environmentService.closeIdeView).toHaveBeenCalledWith(readyEnv.id, viewId)
+        expect(onClose).toHaveBeenCalledOnce()
+      })
+      expect(screen.queryByTestId('ide-iframe')).not.toBeInTheDocument()
+    })
+
+    it('drops a late probe result after the view was closed', async () => {
+      // 测试意图：关闭后到达的 401 探测结果不得触发重开。
+      const user = userEvent.setup()
+      let resolveProbe: (value: number | null) => void = () => {}
+      const pendingProbe = new Promise<number | null>((resolve) => {
+        resolveProbe = resolve
+      })
+      vi.mocked(environmentService.createIdeView).mockResolvedValueOnce({
+        viewId,
+        environmentId: readyEnv.id,
+        directory: '/home/user',
+        entryUrl,
+      })
+      vi.mocked(environmentService.probeIdeSession).mockReturnValueOnce(pendingProbe)
+
+      renderOpenPanel()
+      const iframe = await screen.findByTestId('ide-iframe')
+      fireEvent.load(iframe)
+      await waitFor(() => {
+        expect(environmentService.probeIdeSession).toHaveBeenCalledTimes(1)
+      })
+
+      await user.click(screen.getByTestId('ide-close-btn'))
+      await user.click(screen.getByTestId('ide-confirm-close-btn'))
+      await waitFor(() => {
+        expect(screen.queryByTestId('ide-iframe')).not.toBeInTheDocument()
+      })
+
+      await act(async () => {
+        resolveProbe(401)
+      })
+      expect(environmentService.createIdeView).toHaveBeenCalledOnce()
+      expect(screen.queryByTestId('ide-iframe')).not.toBeInTheDocument()
+    })
+
+    it('releases the active view with a keepalive DELETE on pagehide, except when persisted', async () => {
+      // 测试意图：刷新/关闭发送 keepalive DELETE；bfcache 恢复（persisted=true）不释放。
+      vi.mocked(environmentService.createIdeView).mockResolvedValueOnce({
+        viewId,
+        environmentId: readyEnv.id,
+        directory: '/home/user',
+        entryUrl,
+      })
+      renderOpenPanel()
+      await screen.findByTestId('ide-iframe')
+
+      const pageHide = (persisted: boolean) => {
+        const event = new Event('pagehide') as PageTransitionEvent
+        Object.defineProperty(event, 'persisted', { value: persisted })
+        window.dispatchEvent(event)
+      }
+
+      pageHide(false)
+      expect(environmentService.closeIdeViewKeepalive).toHaveBeenCalledWith(readyEnv.id, viewId)
+      vi.mocked(environmentService.closeIdeViewKeepalive).mockClear()
+
+      pageHide(true)
+      expect(environmentService.closeIdeViewKeepalive).not.toHaveBeenCalled()
+    })
   })
 })

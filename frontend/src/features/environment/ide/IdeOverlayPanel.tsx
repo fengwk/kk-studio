@@ -7,7 +7,7 @@ import { Select } from '@/shared/ui/controls/Select'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { LoadingSpinner } from '@/shared/ui/feedback/LoadingSpinner'
 import { useI18n } from '@/shared/i18n'
-import { validateIdeEntryUrl } from '@/features/environment/ide/ide-url'
+import { validateIdeEntryUrl, deriveIdeSessionUrl } from '@/features/environment/ide/ide-url'
 import { useIdeLifecycle } from '@/features/environment/ide/ide-lifecycle-context'
 import '@/features/environment/ide/ide-overlay-panel.css'
 import type { EnvironmentCardDTO, EnvironmentIdeViewDTO } from '@/shared/api/generated/contracts'
@@ -37,6 +37,9 @@ export interface IdeOverlayPanelProps {
   onRestoreFocus?: () => void
   onIdeMountedChange?: (mounted: boolean) => void
 }
+
+const IDE_SESSION_PROBE_INTERVAL_MS = 10_000
+const IDE_SESSION_PROBE_TIMEOUT_MS = 5_000
 
 /**
  * 安全格式化面向用户的错误文案：
@@ -104,11 +107,18 @@ export function IdeOverlayPanel({
   const mountedRef = useRef(true)
   const lastHandledActionIdRef = useRef(0)
   const pendingShellActionRef = useRef<number | null>(null)
+  // 会话探测与自动重开：needsReopen 跨周期保留，直到一次成功替换或视图关闭。
+  const needsReopenRef = useRef(false)
+  const probingRef = useRef(false)
+  const probeAbortRef = useRef<AbortController | null>(null)
+  const wasEnvironmentReadyRef = useRef<boolean | null>(null)
 
   useEffect(() => {
     mountedRef.current = true
     return () => {
       mountedRef.current = false
+      probeAbortRef.current?.abort()
+      probeAbortRef.current = null
     }
   }, [])
 
@@ -137,6 +147,7 @@ export function IdeOverlayPanel({
         return
       }
       const epoch = operationEpochRef.current
+      needsReopenRef.current = false
       openInFlightRef.current = true
       setStatus('opening')
       setErrorMessage(null)
@@ -197,9 +208,110 @@ export function IdeOverlayPanel({
     [viewId, t],
   )
 
-  // iframe 加载完成处理：通知 loaded，并消费 pending 的 shell terminal 动作
+  // 用同一 viewId 重开已失效的视图；失败保留旧 iframe，needsReopen 留待下一轮探测。
+  const reopenView = useCallback(
+    async (target: EnvironmentIdeViewDTO) => {
+      if (openInFlightRef.current || closeInFlightRef.current) {
+        return
+      }
+      const epoch = operationEpochRef.current
+      openInFlightRef.current = true
+      const promise = (async () => {
+        let reopened: EnvironmentIdeViewDTO
+        try {
+          const res = await environmentService.createIdeView(target.environmentId, { viewId })
+          res.entryUrl = validateIdeEntryUrl(res.entryUrl, target.environmentId)
+          reopened = res
+        } catch {
+          // 旧 iframe 仍保留；下个探测周期再试。
+          return
+        }
+        if (operationEpochRef.current !== epoch || !mountedRef.current) {
+          // 视图已关闭或组件卸载：迟到结果不得复活视图，尽力释放刚创建的服务端视图。
+          try {
+            await environmentService.closeIdeView(target.environmentId, reopened.viewId)
+          } catch {
+            console.error('Failed to close IDE view after a stale reopen')
+          }
+          return
+        }
+        needsReopenRef.current = false
+        activeViewRef.current = reopened
+        setView(reopened)
+        setStatus('ready')
+        setIsIframeLoaded(false)
+      })()
+      openingPromiseRef.current = promise
+      try {
+        await promise
+      } finally {
+        openInFlightRef.current = false
+      }
+    },
+    [viewId],
+  )
+
+  // 探测会话：401/409 与 iframe onLoad 的非 204 标记重开；503 或网络未知只等待。
+  const probeAndRecover = useCallback(
+    async (markOnAnyNotReady: boolean) => {
+      if (probingRef.current || !mountedRef.current) {
+        return
+      }
+      const active = activeViewRef.current
+      if (active == null) {
+        return
+      }
+      let sessionUrl: string
+      try {
+        sessionUrl = deriveIdeSessionUrl(active.entryUrl ?? '')
+      } catch {
+        return
+      }
+      const epoch = operationEpochRef.current
+      const controller = new AbortController()
+      probeAbortRef.current = controller
+      const timeout = window.setTimeout(() => controller.abort(), IDE_SESSION_PROBE_TIMEOUT_MS)
+      probingRef.current = true
+      let status: number | null
+      try {
+        status = await environmentService.probeIdeSession(sessionUrl, controller.signal)
+      } catch {
+        status = null
+      } finally {
+        window.clearTimeout(timeout)
+        if (probeAbortRef.current === controller) {
+          probeAbortRef.current = null
+        }
+        probingRef.current = false
+      }
+      if (
+        operationEpochRef.current !== epoch
+        || !mountedRef.current
+        || activeViewRef.current?.viewId !== active.viewId
+        || activeViewRef.current?.environmentId !== active.environmentId
+        || activeViewRef.current?.entryUrl !== active.entryUrl
+      ) {
+        return
+      }
+      if (markOnAnyNotReady) {
+        if (status !== 204) {
+          needsReopenRef.current = true
+        }
+      } else if (status === 401 || status === 409) {
+        needsReopenRef.current = true
+      }
+      if (!needsReopenRef.current || status === 503 || status === null) {
+        return
+      }
+      await reopenView(active)
+    },
+    [reopenView],
+  )
+
+  // iframe 加载完成处理：探测一次会话，并消费 pending 的 shell terminal 动作
   const handleIframeLoaded = useCallback(() => {
     setIsIframeLoaded(true)
+    void probeAndRecover(true)
     const active = activeViewRef.current
     if (active && pendingShellActionRef.current != null) {
       pendingShellActionRef.current = null
@@ -207,7 +319,41 @@ export function IdeOverlayPanel({
         setTerminalError(formatSafeError(err, t('ai.ide.terminalFailed')))
       })
     }
-  }, [viewId, t])
+  }, [viewId, t, probeAndRecover])
+
+  // 视图存在时每 10 秒探测一次；重开后按新视图重新计时。
+  useEffect(() => {
+    if (view == null) return
+    const timer = window.setInterval(() => {
+      void probeAndRecover(false)
+    }, IDE_SESSION_PROBE_INTERVAL_MS)
+    return () => window.clearInterval(timer)
+  }, [view, probeAndRecover])
+
+  // environment.ready 由 false 变 true 时立即探测，覆盖 Daemon 实例重连后的恢复。
+  useEffect(() => {
+    const ready = environment?.ready === true
+    const wasReady = wasEnvironmentReadyRef.current
+    wasEnvironmentReadyRef.current = ready
+    if (view != null && ready && wasReady === false) {
+      void probeAndRecover(false)
+    }
+  }, [environment?.ready, view, probeAndRecover])
+
+  // 刷新/关闭页面时用 keepalive DELETE 释放视图，避免旧 view 在 Daemon 与网关侧累积；
+  // bfcache 恢复（persisted=true）不释放，dirty 关闭仍由 Daemon 拒绝。
+  useEffect(() => {
+    const handlePageHide = (event: PageTransitionEvent) => {
+      if (event.persisted) return
+      const active = activeViewRef.current
+      if (active == null) return
+      void environmentService.closeIdeViewKeepalive(active.environmentId, active.viewId).catch(() => {
+        console.error('Failed to release IDE view on page hide')
+      })
+    }
+    window.addEventListener('pagehide', handlePageHide)
+    return () => window.removeEventListener('pagehide', handlePageHide)
+  }, [])
 
   // 处理显式命令动作序列（来自 AgentPane onOpenIde）
   useEffect(() => {
@@ -278,6 +424,8 @@ export function IdeOverlayPanel({
   // 统一切断与关闭逻辑：供全局路由拦截与本地关闭调用。
   // 成功关闭返回 true，失败（如后端报 DIRTY 错误）返回 false 并保留 DOM 与错误提示
   const requestClose = useCallback(async (): Promise<boolean> => {
+    // 中止尚未完成的探测，避免关闭后由迟到结果触发重开。
+    probeAbortRef.current?.abort()
     // 若正在处于 opening 流程，等待其完成后再执行关闭
     if (openInFlightRef.current && openingPromiseRef.current) {
       try {
@@ -309,6 +457,7 @@ export function IdeOverlayPanel({
     }
     closeInFlightRef.current = false
     activeViewRef.current = null
+    needsReopenRef.current = false
     setView(null)
     setStatus('idle')
     setIsIframeLoaded(false)
