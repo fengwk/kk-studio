@@ -42,6 +42,7 @@ function createSnapshot(queuedCommands: HarnessThreadSnapshotDTO['queuedCommands
     toolInvocations: [],
     modelAttemptFailures: [],
     stopReceipts: [],
+    unconfirmedExecutions: [],
     manualCompaction: { available: false, disabledReason: null },
   }
 }

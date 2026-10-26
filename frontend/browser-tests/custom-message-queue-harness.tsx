@@ -154,6 +154,7 @@ export function CustomMessageQueueHarness() {
     queuedCustomMessages,
     manualCompaction: { available: false, disabledReason: null },
     stopReceipts: [],
+    unconfirmedExecutions: [],
     modelInvocation: null,
     toolInvocations: [],
     modelAttemptFailures: [],

@@ -142,6 +142,7 @@ function snapshot(currentThread = thread()): HarnessThreadSnapshotDTO {
     modelAttemptFailures: [],
     manualCompaction: { available: false, disabledReason: 'not available' },
     stopReceipts: [],
+    unconfirmedExecutions: [],
   }
 }
 
