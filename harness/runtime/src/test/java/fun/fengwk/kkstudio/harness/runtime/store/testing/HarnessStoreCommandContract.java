@@ -13,6 +13,7 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.withCancelledAt;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.withConsumedTurnStart;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -1065,6 +1066,55 @@ public abstract class HarnessStoreCommandContract {
                   ThreadCommand queued = queuedCommand(tx, baseline.threadId(), TestIds.id(4));
                   tx.updateCommands(List.of(queued.markApplied(matchingEntryId)));
                 }));
+  }
+
+  @Test
+  void hasAppliedNotificationAfterCountsOnlyAppliedNotificationsBeyondTheSequence() {
+    // 测试意图：未接纳通知判据只看给定 sequence 之后已应用的 NOTIFICATION；QUEUED/CANCELLED 通知、已应用的其它命令与其它 Thread 都不算。
+    UUID sourceThreadId = TestIds.id(42);
+    insertNotificationCommand(
+        TestIds.id(41), NotificationKind.SUBAGENT_RESULT, sourceThreadId, "applied", 1);
+    UUID appliedEntryId =
+        insertNotificationEntry(
+            TestIds.id(41), NotificationKind.SUBAGENT_RESULT, sourceThreadId, "applied");
+    insertNotificationCommand(
+        TestIds.id(43), NotificationKind.SUBAGENT_RESULT, sourceThreadId, "queued", 2);
+    insertNotificationCommand(
+        TestIds.id(44), NotificationKind.SUBAGENT_RESULT, sourceThreadId, "cancelled", 3);
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          tx.insertCommands(List.of(command(baseline.threadId(), 4, TestIds.id(4))));
+        });
+    UUID turnStartEntryId =
+        store.transaction(
+            tx -> {
+              UUID id = tx.nextId();
+              tx.insertEntry(
+                  turnStartEntry(
+                      id, baseline.sessionId(), baseline.rootEntryId(), baseline.threadId(), T1));
+              return id;
+            });
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          tx.updateCommands(
+              List.of(
+                  queuedCommand(tx, baseline.threadId(), TestIds.id(1)).markApplied(appliedEntryId),
+                  withCancelledAt(
+                      queuedCommand(tx, baseline.threadId(), TestIds.id(3)), TestIds.id(9), T2),
+                  withConsumedTurnStart(
+                      queuedCommand(tx, baseline.threadId(), TestIds.id(4)), turnStartEntryId)));
+        });
+
+    assertTrue(
+        store.<Boolean>transaction(tx -> tx.hasAppliedNotificationAfter(baseline.threadId(), 0)));
+    assertFalse(
+        store.<Boolean>transaction(tx -> tx.hasAppliedNotificationAfter(baseline.threadId(), 1)));
+    assertFalse(
+        store.<Boolean>transaction(tx -> tx.hasAppliedNotificationAfter(TestIds.id(99), 0)));
   }
 
   /** 断言命令更新被拒绝且异常信息包含给定片段。 */

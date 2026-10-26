@@ -1426,6 +1426,19 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     @Override
+    public boolean hasAppliedNotificationAfter(UUID threadId, long afterSequence) {
+      checkOpen();
+      Objects.requireNonNull(threadId, "threadId");
+      return state.commands.values().stream()
+          .anyMatch(
+              command ->
+                  command.threadId().equals(threadId)
+                      && command.sequence() > afterSequence
+                      && command.state() == ThreadCommandState.APPLIED
+                      && command.type().isNotification());
+    }
+
+    @Override
     public List<ThreadCommand> loadCancelledCommandsByRequest(UUID threadId, UUID stopRequestId) {
       checkOpen();
       Objects.requireNonNull(threadId, "threadId");

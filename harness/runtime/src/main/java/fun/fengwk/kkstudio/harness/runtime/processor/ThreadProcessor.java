@@ -725,9 +725,7 @@ public final class ThreadProcessor {
     // 取得高序 WORK 锁并破坏锁序）。最终 commit fence 在全部低序 mutation 后校验所有权，失败即整体回滚。
     // 最小事实：INPUT 可以没有任何 queued 输入，只要本 Thread 有尚未接纳的已物化通知；这些通知已在历史里，不重复写 entry。
     boolean pendingNotificationInput =
-        reason == TurnStartReason.INPUT
-            && ThreadInputDemand.hasUnconsumedNotification(
-                tx.loadCommandsByThread(thread.id()), thread.inputThroughSequence());
+        reason == TurnStartReason.INPUT && ThreadInputDemand.hasUnconsumedNotification(tx, thread);
     TurnPlan plan =
         planBuilder.build(
             thread.id(),

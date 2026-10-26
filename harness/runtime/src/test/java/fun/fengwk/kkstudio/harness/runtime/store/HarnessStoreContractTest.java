@@ -67,6 +67,7 @@ class HarnessStoreContractTest {
               "findCommandByIdempotencyKey",
               "findCommand",
               "loadCommandsByThread",
+              "hasAppliedNotificationAfter",
               "loadCancelledCommandsByRequest",
               "loadQueuedCommands",
               "insertCommands",

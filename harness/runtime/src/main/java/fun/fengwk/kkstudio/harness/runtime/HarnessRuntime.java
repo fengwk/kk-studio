@@ -229,8 +229,7 @@ public final class HarnessRuntime {
             EntryPath path = tx.loadEntryPath(thread.headEntryId());
             int incompleteChildJoins = tx.countIncompleteChildJoins(thread.id());
             boolean unconsumedAppliedNotifications =
-                ThreadInputDemand.hasUnconsumedNotification(
-                    tx.loadCommandsByThread(thread.id()), thread.inputThroughSequence());
+                ThreadInputDemand.hasUnconsumedNotification(tx, thread);
             // 树锁串行化同树 Invocation 写入；只读探测不在多个节点间回退 Model/Tool 锁阶梯。
             snapshots.add(
                 snapshot(
@@ -611,8 +610,7 @@ public final class HarnessRuntime {
     LockedThreadContext locked = ThreadContextLock.load(tx, thread);
     int incompleteChildJoins = tx.countIncompleteChildJoins(thread.id());
     boolean unconsumedAppliedNotifications =
-        ThreadInputDemand.hasUnconsumedNotification(
-            tx.loadCommandsByThread(thread.id()), thread.inputThroughSequence());
+        ThreadInputDemand.hasUnconsumedNotification(tx, thread);
     boolean hasUnconfirmedExecution = !tx.loadUnconfirmedExecutions(thread.id()).isEmpty();
     boolean hasIncompleteOwnerChildJoin = tx.hasIncompleteOwnerChildJoin(thread.id());
     return snapshot(
