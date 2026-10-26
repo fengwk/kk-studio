@@ -5,6 +5,7 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.assistantPayload;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.assistantResponse;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.command;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.loadCommandsByThread;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.resolvedTurnStartPayload;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.rootEntry;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.session;
@@ -634,7 +635,7 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
   }
 
   private List<ThreadCommand> commandsOf(UUID threadId) {
-    return store.transaction(tx -> tx.loadCommandsByThread(threadId));
+    return store.transaction(tx -> loadCommandsByThread(tx, threadId));
   }
 
   private List<ThreadCommand> queuedOf(UUID threadId) {

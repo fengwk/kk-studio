@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.loadCommandsByThread;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -46,7 +47,7 @@ class PostgresqlThreadNameTest {
     var replay = runtime.acceptCommands(request, AcceptancePreflight.IDENTITY);
     assertTrue(replay.replayed());
     assertEquals(renamed, replay.thread());
-    assertEquals(1, store.transaction(tx -> tx.loadCommandsByThread(createdId)).size());
+    assertEquals(1, store.transaction(tx -> loadCommandsByThread(tx, createdId)).size());
     UUID rejectedId = UUID.randomUUID();
     var conflictRequest =
         new AcceptCommandsCommand(
@@ -59,7 +60,7 @@ class PostgresqlThreadNameTest {
             () -> runtime.acceptCommands(conflictRequest, AcceptancePreflight.IDENTITY));
     assertEquals(HarnessRuntimeConflictException.Reason.THREAD_NAME_CONFLICT, conflict.reason());
     assertTrue(store.transaction(tx -> tx.findThread(rejectedId)).isEmpty());
-    assertTrue(store.transaction(tx -> tx.loadCommandsByThread(rejectedId)).isEmpty());
+    assertTrue(store.transaction(tx -> loadCommandsByThread(tx, rejectedId)).isEmpty());
     assertTrue(
         store
             .transaction(tx -> tx.findWork(new WorkTarget(WorkTargetType.THREAD, rejectedId)))

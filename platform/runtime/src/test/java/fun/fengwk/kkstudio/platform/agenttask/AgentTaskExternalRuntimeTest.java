@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.agenttask;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.loadCommandsByThread;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -294,7 +295,7 @@ class AgentTaskExternalRuntimeTest {
     }
 
     // 验证真实 Runtime 中的命令：该 Thread 上的命令严格为 1 条，无重复/额外命令
-    List<ThreadCommand> commands = store.transaction(tx -> tx.loadCommandsByThread(threadId));
+    List<ThreadCommand> commands = store.transaction(tx -> loadCommandsByThread(tx, threadId));
     assertEquals(1, commands.size());
     assertEquals(commandId, commands.getFirst().idempotencyKey());
 
@@ -302,7 +303,7 @@ class AgentTaskExternalRuntimeTest {
     UUID replayedId = service.submitExternal(ticketId, requestHash, supplierA);
     assertEquals(threadId, replayedId);
     List<ThreadCommand> commandsAfterReplay =
-        store.transaction(tx -> tx.loadCommandsByThread(threadId));
+        store.transaction(tx -> loadCommandsByThread(tx, threadId));
     assertEquals(1, commandsAfterReplay.size());
   }
 }

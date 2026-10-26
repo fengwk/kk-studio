@@ -1416,16 +1416,6 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     @Override
-    public List<ThreadCommand> loadCommandsByThread(UUID threadId) {
-      checkOpen();
-      Objects.requireNonNull(threadId, "threadId");
-      return state.commands.values().stream()
-          .filter(command -> command.threadId().equals(threadId))
-          .sorted(Comparator.comparingLong(ThreadCommand::sequence))
-          .toList();
-    }
-
-    @Override
     public boolean hasAppliedNotificationAfter(UUID threadId, long afterSequence) {
       checkOpen();
       Objects.requireNonNull(threadId, "threadId");

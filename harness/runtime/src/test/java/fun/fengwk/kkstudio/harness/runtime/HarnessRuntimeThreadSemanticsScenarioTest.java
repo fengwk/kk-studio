@@ -9,6 +9,7 @@ import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seed
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedQueuedCommand;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessageCommand;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessagePayload;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.loadCommandsByThread;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -103,7 +104,7 @@ class HarnessRuntimeThreadSemanticsScenarioTest {
     assertNotNull(frozen.terminalEntryId());
     UUID frozenTerminal = frozen.terminalEntryId();
     Integer deliveriesBefore =
-        store.transaction(tx -> tx.loadCommandsByThread(root.threadId())).size();
+        store.transaction(tx -> loadCommandsByThread(tx, root.threadId())).size();
 
     // 之后的 fork（新子线程）与重放旧 Stop 都不改写冻结结果，也不产生第二条通知。
     UUID forked =
@@ -115,7 +116,8 @@ class HarnessRuntimeThreadSemanticsScenarioTest {
         frozenTerminal,
         store.transaction(tx -> tx.findJoin(joinId).orElseThrow()).terminalEntryId());
     assertEquals(
-        deliveriesBefore, store.transaction(tx -> tx.loadCommandsByThread(root.threadId())).size());
+        deliveriesBefore,
+        store.transaction(tx -> loadCommandsByThread(tx, root.threadId())).size());
   }
 
   /** S3：父已 STOPPED 时子结果物化入历史；新实例重启后仍在且只有一条，绝不唤醒已停止模型。 */

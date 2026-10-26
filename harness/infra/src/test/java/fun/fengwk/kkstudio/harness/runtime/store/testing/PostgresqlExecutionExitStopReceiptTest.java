@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.CREATION_REQUEST_HASH;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T0;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.loadCommandsByThread;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -303,7 +304,7 @@ class PostgresqlExecutionExitStopReceiptTest {
   }
 
   private long notificationCount(UUID parentThreadId) {
-    return store.transaction(tx -> tx.loadCommandsByThread(parentThreadId)).stream()
+    return store.transaction(tx -> loadCommandsByThread(tx, parentThreadId)).stream()
         .filter(command -> command.type().isNotification())
         .count();
   }
