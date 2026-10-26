@@ -3,7 +3,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { LspClient, isJdtlsCommand } from '../../src/coding/lsp-client.js'
-import { LspError } from '../../src/coding/lsp-error.js'
+import { LspBootstrapError, LspError } from '../../src/coding/lsp-error.js'
+import { ProcessScopeNotConvergedError, type ProcessSupervisor } from '../../src/contracts.js'
 import {
   awaitEvent,
   awaitProcessGone,
@@ -632,6 +633,73 @@ describe('LspClient Protocol & Handshake', () => {
     await expect(
       LspClient.launch(config, tempDir, config.command[0]!, supervisor),
     ).rejects.toThrow(/exited before initialization \(exit code 7\)/)
+  })
+
+  it('preserves the start rejection and marks a proven converged failure', async () => {
+    const config = fakeServerConfig('fake', 'normal', path.join(tempDir, 'unused.jsonl'))
+    const startFailure = new Error('spawn failed')
+    const rejecting: ProcessSupervisor = {
+      start: async () => {
+        throw startFailure
+      },
+      close: async () => {},
+    }
+    const error = await LspClient.launch(config, tempDir, config.command[0]!, rejecting).catch(
+      (failure: unknown) => failure,
+    )
+    expect(error).toBeInstanceOf(LspBootstrapError)
+    expect((error as LspBootstrapError).converged).toBe(true)
+    expect((error as LspBootstrapError).cause).toBe(startFailure)
+    expect((error as Error).message).toBe(
+      `LSP server 'fake' cannot be started: ${config.command[0]}`,
+    )
+  })
+
+  it('does not mark an unconverged start rejection as an exit', async () => {
+    const config = fakeServerConfig('fake', 'normal', path.join(tempDir, 'unused.jsonl'))
+    const startFailure = new ProcessScopeNotConvergedError('spawn cleanup failed')
+    const rejecting: ProcessSupervisor = {
+      start: async () => {
+        throw startFailure
+      },
+      close: async () => {},
+    }
+    const error = await LspClient.launch(config, tempDir, config.command[0]!, rejecting).catch(
+      (failure: unknown) => failure,
+    )
+    expect(error).toBeInstanceOf(LspBootstrapError)
+    expect((error as LspBootstrapError).converged).toBe(false)
+    expect((error as LspBootstrapError).cause).toBe(startFailure)
+  })
+
+  it('keeps the primary launch failure and cleanup failure when termination fails', async () => {
+    const transcript = path.join(tempDir, `dead-cleanup-${Date.now()}.jsonl`)
+    const config = fakeServerConfig('dead', 'dead', transcript)
+    const start = supervisor.start.bind(supervisor)
+    const cleanupFailure = new Error('launch cleanup boom')
+    const controlled: ProcessSupervisor = {
+      start: async (spec) => {
+        const managed = await start(spec)
+        await managed.exit
+        return {
+          ...managed,
+          terminate: async () => {
+            throw cleanupFailure
+          },
+        }
+      },
+      close: () => supervisor.close(),
+    }
+    const error = await LspClient.launch(config, tempDir, config.command[0]!, controlled).catch(
+      (failure: unknown) => failure,
+    )
+    expect(error).toBeInstanceOf(LspBootstrapError)
+    expect((error as LspBootstrapError).converged).toBe(false)
+    expect((error as Error).message).toMatch(/exited before initialization \(exit code 7\)/)
+    const cause = (error as LspBootstrapError).cause
+    expect(cause).toBeInstanceOf(AggregateError)
+    expect((cause as AggregateError).errors).toHaveLength(2)
+    expect((cause as AggregateError).errors[1]).toBe(cleanupFailure)
   })
 
   it('no-init server times out during initialize and terminates process', async () => {
