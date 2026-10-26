@@ -487,10 +487,10 @@ class IdeReverseStreamEndpointIntegrationTest extends WebPostgresTestSupport {
           }
           byte[] payload = new byte[size];
           System.arraycopy(chunk, 0, payload, 0, size);
-          while (!window.canSend(size)) {
+          while (!window.canSendFrame(size)) {
             drainAcks();
           }
-          window.onSend(size);
+          window.onSendFrame(size);
           sendBinary(codec.encodeHttpBody(payload));
           sent += size;
         }

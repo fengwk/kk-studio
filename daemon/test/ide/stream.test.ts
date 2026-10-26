@@ -15,7 +15,9 @@ import { openStreamExchange } from '../../src/transport/stream.js'
 import { UpstreamWebSocket } from '../../src/transport/upstream-websocket.js'
 import {
   INITIAL_CREDIT,
+  MAX_IN_FLIGHT_FRAMES,
   MAX_PAYLOAD,
+  MIN_FRAME_CREDIT,
   CreditWindow,
   decodeBinaryFrame,
   decodeTextFrame,
@@ -24,6 +26,7 @@ import {
   encodeHttpEnd,
   encodeTextFrame,
   encodeWsFrame,
+  frameCost,
   type TextFrame,
 } from '../../src/ide/wire.js'
 
@@ -159,7 +162,8 @@ interface Gateway {
   sendText(frame: TextFrame): void
   sendBody(payload: Buffer): void
   sendEnd(): void
-  sendAck(bytes: number): void
+  /** Acknowledges consumed credit: one frame's payload length, or an aggregated cost of at least one frame. */
+  sendAck(credit: number): void
   sendWs(kind: 'text' | 'binary', payload: Buffer, last: boolean): void
   sendRaw(data: Buffer): void
 }
@@ -174,7 +178,7 @@ async function startGateway(onConnection: (gateway: Gateway) => void): Promise<H
       sendText: (frame) => socket.send(encodeTextFrame(frame)),
       sendBody: (payload) => socket.send(encodeHttpBody(payload)),
       sendEnd: () => socket.send(encodeHttpEnd()),
-      sendAck: (bytes) => socket.send(encodeAck(bytes)),
+      sendAck: (credit) => socket.send(encodeAck(frameCost(credit))),
       sendWs: (kind, payload, last) => socket.send(encodeWsFrame(kind, payload, last)),
       sendRaw: (data) => socket.send(data),
     }
@@ -567,12 +571,12 @@ class GatewayPump {
   private flush(): void {
     while (this.index < this.chunks.length) {
       const chunk = this.chunks[this.index] as Buffer
-      if (this.outstanding + chunk.length > INITIAL_CREDIT) {
+      if (this.outstanding + frameCost(chunk.length) > INITIAL_CREDIT) {
         return
       }
       this.index += 1
       this.gateway.socket.send(this.encode(chunk))
-      this.outstanding += chunk.length
+      this.outstanding += frameCost(chunk.length)
     }
     if (!this.completed) {
       this.completed = true
@@ -606,13 +610,13 @@ class WsFragmentPump {
   private flush(): void {
     while (this.index < this.chunks.length) {
       const chunk = this.chunks[this.index] as Buffer
-      if (this.outstanding + chunk.length > INITIAL_CREDIT) {
+      if (this.outstanding + frameCost(chunk.length) > INITIAL_CREDIT) {
         return
       }
       const last = this.index === this.chunks.length - 1
       this.index += 1
       this.gateway.socket.send(encodeWsFrame(this.kind, chunk, last))
-      this.outstanding += chunk.length
+      this.outstanding += frameCost(chunk.length)
     }
     if (!this.completed) {
       this.completed = true
@@ -784,7 +788,7 @@ describe('HTTP exchanges over the reverse stream', () => {
         const frame = decodeBinaryFrame(data as Buffer)
         if (frame.kind === 'http-body') {
           total += frame.payload.length
-          unacked += frame.payload.length
+          unacked += frameCost(frame.payload.length)
           peakUnacked = Math.max(peakUnacked, unacked)
           if (unacked >= ACK_THRESHOLD) {
             conn.sendAck(unacked)
@@ -1052,7 +1056,7 @@ describe('WebSocket exchanges over the reverse stream', () => {
         const frame = decodeBinaryFrame(data as Buffer)
         if (frame.kind === 'ws-binary' || frame.kind === 'ws-text') {
           total += frame.payload.length
-          unacked += frame.payload.length
+          unacked += frameCost(frame.payload.length)
           peakUnacked = Math.max(peakUnacked, unacked)
           if (unacked >= ACK_THRESHOLD) {
             conn.sendAck(unacked)
@@ -1176,7 +1180,7 @@ describe('WebSocket exchanges over the reverse stream', () => {
         const frame = decodeBinaryFrame(data as Buffer)
         if (frame.kind === 'ws-text' || frame.kind === 'ws-binary') {
           received += frame.payload.length
-          unacked += frame.payload.length
+          unacked += frameCost(frame.payload.length)
           if (ackEnabled && unacked >= ACK_THRESHOLD) {
             flushAck()
           }
@@ -1488,7 +1492,7 @@ describe('WebSocket exchanges over the reverse stream', () => {
           }
           received += frame.payload.length
           lastSeen = lastSeen || frame.last
-          unacked += frame.payload.length
+          unacked += frameCost(frame.payload.length)
           peakUnacked = Math.max(peakUnacked, unacked)
           if (ackEnabled && unacked >= ACK_THRESHOLD) {
             flushAck()
@@ -1842,11 +1846,11 @@ describe('wire framing is validated', () => {
     ).rejects.toThrow(/type changed across fragments/)
   })
 
-  it('bounds a flood of zero length websocket fragments', async () => {
+  it('charges zero length websocket fragments the minimum frame credit', async () => {
     const upstream = await startWsUpstream(() => undefined)
     const gateway = await startGateway((conn) => {
-      // Zero length fragments reserve no credit, so only the frame count can stop them.
-      for (let index = 0; index < 4000; index += 1) {
+      // Every fragment, even an empty one, costs MIN_FRAME_CREDIT, so the window itself stops a flood.
+      for (let index = 0; index <= MAX_IN_FLIGHT_FRAMES; index += 1) {
         conn.sendWs('binary', Buffer.alloc(0), false)
       }
     })
@@ -1857,23 +1861,23 @@ describe('wire framing is validated', () => {
         upstream: upstreamOf(upstream.url),
         signal: newSignal().signal,
       }),
-    ).rejects.toThrow(/too many buffered websocket fragments/)
+    ).rejects.toThrow(/credit window exceeded/)
   })
 })
 
 describe('credit window cancellation', () => {
   it('releases a blocked wait when its signal aborts', async () => {
     const window = new CreditWindow(INITIAL_CREDIT)
-    window.reserve(INITIAL_CREDIT)
+    window.reserveFrame(INITIAL_CREDIT)
     const controller = new AbortController()
-    const blocked = window.waitFor(1, controller.signal)
+    const blocked = window.waitForFrame(1, controller.signal)
     controller.abort()
     await expect(blocked).rejects.toMatchObject({ name: 'AbortError' })
 
     // An already aborted signal never registers a waiter, and a normal ack still wakes waiters.
-    await expect(window.waitFor(1, controller.signal)).rejects.toMatchObject({ name: 'AbortError' })
+    await expect(window.waitForFrame(1, controller.signal)).rejects.toMatchObject({ name: 'AbortError' })
     window.ack(INITIAL_CREDIT)
-    await expect(window.waitFor(1)).resolves.toBeUndefined()
+    await expect(window.waitForFrame(1)).resolves.toBeUndefined()
   })
 })
 
@@ -2215,7 +2219,7 @@ describe('stream failure boundaries', () => {
     ).rejects.toThrow(/unexpected WebSocket frame during HTTP exchange/)
   })
 
-  it('forwards an empty final browser fragment without a zero acknowledgement', async () => {
+  it('forwards an empty final browser fragment and acknowledges every fragment at its frame cost', async () => {
     const messages: string[] = []
     const upstream = await startWsUpstream((socket) => {
       socket.on('message', (data) => {
@@ -2251,9 +2255,9 @@ describe('stream failure boundaries', () => {
 
     await waitFor(() => messages.length === 1, 8000)
     expect(messages[0]).toBe('hello')
-    await waitFor(() => acks.includes(5))
-    // The empty fragment reserved no credit, so no zero-length acknowledgement may be sent.
-    expect(acks).not.toContain(0)
+    // Both the 5 byte and the empty fragment cost the minimum frame credit, and each is acknowledged as such.
+    await waitFor(() => acks.length === 2)
+    expect(acks).toEqual([MIN_FRAME_CREDIT, MIN_FRAME_CREDIT])
 
     gatewaySocket?.close()
     await exchange
@@ -2390,7 +2394,7 @@ describe('stream failure boundaries', () => {
     expect(destroyed).toBe(true)
   })
 
-  it('bounds a flood of queued body frames instead of buffering unboundedly', async () => {
+  it('bounds a flood of small body frames by the frame credit instead of buffering unboundedly', async () => {
     let reached!: () => void
     const reachedUpstream = new Promise<void>((resolve) => {
       reached = resolve
@@ -2409,9 +2413,9 @@ describe('stream failure boundaries', () => {
         conn.send(0x2, encodeHttpBody(Buffer.from('a')))
         void (async () => {
           await reachedUpstream
-          // Backpressure stalls the pump, so the flood must hit the bounded queue, not memory.
+          // Backpressure stalls the pump; every 1 byte frame costs MIN_FRAME_CREDIT, so the window stops the flood.
           await waitFor(() => writes >= 1)
-          for (let index = 0; index < 1025; index += 1) {
+          for (let index = 0; index < MAX_IN_FLIGHT_FRAMES; index += 1) {
             conn.send(0x2, encodeHttpBody(Buffer.from('b')))
           }
         })()
@@ -2424,7 +2428,7 @@ describe('stream failure boundaries', () => {
           upstream: upstreamOf(upstream.url),
           signal: newSignal().signal,
         }),
-      ).rejects.toThrow(/queue limit exceeded/)
+      ).rejects.toThrow(/credit window exceeded/)
     } finally {
       spy.mockRestore()
     }

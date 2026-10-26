@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   CreditWindow,
+  INITIAL_CREDIT,
+  MAX_IN_FLIGHT_FRAMES,
   MAX_PAYLOAD,
+  MIN_FRAME_CREDIT,
   WireError,
   decodeBinaryFrame,
   decodeTextFrame,
@@ -11,6 +14,7 @@ import {
   encodeTextFrame,
   encodeWsFrame,
   filterResponseHeaders,
+  frameCost,
   isHopByHopHeader,
   validateIdePath,
 } from '../../src/ide/wire.js'
@@ -79,27 +83,43 @@ describe('text frame codec', () => {
 })
 
 describe('credit window', () => {
-  it('tracks outstanding bytes and rejects overrun', () => {
-    const window = new CreditWindow(10)
-    window.reserve(6)
-    expect(window.available).toBe(4)
-    expect(() => window.reserve(5)).toThrow(/exceeded/)
-    window.ack(6)
-    expect(window.available).toBe(10)
-    expect(() => window.ack(1)).toThrow(/exceeds unacknowledged/)
+  it('charges every data frame at least the minimum credit', () => {
+    // Small and empty frames cost MIN_FRAME_CREDIT, so one window bounds frames in flight as well as bytes.
+    expect(frameCost(0)).toBe(MIN_FRAME_CREDIT)
+    expect(frameCost(1)).toBe(MIN_FRAME_CREDIT)
+    expect(frameCost(MIN_FRAME_CREDIT + 1)).toBe(MIN_FRAME_CREDIT + 1)
+    expect(MAX_IN_FLIGHT_FRAMES).toBe(INITIAL_CREDIT / MIN_FRAME_CREDIT)
+    const window = new CreditWindow()
+    for (let index = 0; index < MAX_IN_FLIGHT_FRAMES; index += 1) {
+      expect(window.reserveFrame(index % 2)).toBe(MIN_FRAME_CREDIT)
+    }
+    expect(window.available).toBe(0)
+    expect(() => window.reserveFrame(0)).toThrow(/exceeded/)
+  })
+
+  it('tracks outstanding credit and rejects overrun and invalid acknowledgements', () => {
+    const window = new CreditWindow(2 * MIN_FRAME_CREDIT)
+    expect(window.reserveFrame(600)).toBe(600)
+    expect(window.available).toBe(2 * MIN_FRAME_CREDIT - 600)
+    expect(() => window.reserveFrame(1)).toThrow(/exceeded/)
+    expect(() => window.ack(MIN_FRAME_CREDIT - 1)).toThrow(/at least one frame/)
+    expect(() => window.ack(601)).toThrow(/exceeds unacknowledged/)
     expect(() => window.ack(-1)).toThrow(WireError)
+    window.ack(600)
+    expect(window.available).toBe(2 * MIN_FRAME_CREDIT)
+    expect(() => new CreditWindow(MIN_FRAME_CREDIT - 1)).toThrow(/invalid credit window size/)
   })
 
   it('wakes blocked senders after acknowledgement', async () => {
-    const window = new CreditWindow(4)
-    window.reserve(4)
+    const window = new CreditWindow(MIN_FRAME_CREDIT)
+    window.reserveFrame(0)
     let released = false
-    const waiting = window.waitFor(4).then(() => {
+    const waiting = window.waitForFrame(0).then(() => {
       released = true
     })
     await new Promise((resolve) => setTimeout(resolve, 5))
     expect(released).toBe(false)
-    window.ack(4)
+    window.ack(MIN_FRAME_CREDIT)
     await waiting
     expect(released).toBe(true)
   })

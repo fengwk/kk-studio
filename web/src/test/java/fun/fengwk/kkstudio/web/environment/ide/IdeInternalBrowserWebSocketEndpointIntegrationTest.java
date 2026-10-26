@@ -35,6 +35,7 @@ import fun.fengwk.kkstudio.ide.protocol.DaemonIdeStreamCodec;
 import fun.fengwk.kkstudio.ide.protocol.IdeAction;
 import fun.fengwk.kkstudio.ide.protocol.IdeCommand;
 import fun.fengwk.kkstudio.ide.protocol.IdeReply;
+import fun.fengwk.kkstudio.ide.protocol.IdeStreamCreditWindow;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.environment.cluster.JdbcClusterNodeRegistry;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
@@ -337,7 +338,8 @@ class IdeInternalBrowserWebSocketEndpointIntegrationTest extends WebPostgresTest
       if (frame[0] == 4 || frame[0] == 5) {
         sawMessage.countDown();
         webSocket.send(ByteString.of(frame));
-        webSocket.send(ByteString.of(codec.encodeAck(frame.length - 2)));
+        webSocket.send(
+            ByteString.of(codec.encodeAck(IdeStreamCreditWindow.frameCost(frame.length - 2))));
       }
     }
   }

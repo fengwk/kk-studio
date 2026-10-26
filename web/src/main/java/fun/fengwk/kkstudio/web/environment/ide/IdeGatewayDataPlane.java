@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.web.environment.ide;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
@@ -55,6 +56,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * <p>失败一律 fail-closed：无 cookie/代际不匹配 → 401/409；等待反向连接超时 → 504 并放弃在途 {@code OPEN_STREAM}；通道不可用 →
  * 503。任何路径都不重放副作用、不伪造响应体。
  */
+@Slf4j
 @Component
 public final class IdeGatewayDataPlane {
 
@@ -201,6 +203,9 @@ public final class IdeGatewayDataPlane {
             properties.requirePairingTimeout(),
             abandonOnce);
     IdeStreamPeer peer = null;
+    IdeRequest ideRequest = null;
+    Exchange exchange = null;
+    long startedNanos = System.nanoTime();
     try {
       String streamUrl = properties.streamUrl(environmentId, issued.ticket());
       IdeCommand command =
@@ -214,24 +219,25 @@ public final class IdeGatewayDataPlane {
               request.getMethod(),
               rawPathAndQuery,
               forwardRequestHeaders(request));
-      IdeRequest ideRequest = transport.requestIde(environmentId, command);
+      ideRequest = transport.requestIde(environmentId, command);
       invocation.set(ideRequest.invocationId());
       peer = pairing.awaitPeer();
-      Exchange exchange =
-          new Exchange(
-              request,
-              response,
-              environmentId,
-              peer,
-              System.nanoTime() + properties.requireRequestTimeout().toNanos());
+      exchange =
+          new Exchange(request, response, environmentId, peer, properties.requireRequestTimeout());
       exchange.run(request);
     } catch (IdeStreamPairingException error) {
+      logFailedExchange(environmentId, request, "PAIRING_FAILED", null, ideRequest, startedNanos);
       sendError(response, HttpServletResponse.SC_GATEWAY_TIMEOUT);
     } catch (EnvironmentCapabilityUnavailableException
         | EnvironmentCapabilityBusyException
         | EnvironmentCapabilitySendUncertainException error) {
       sendError(response, HttpServletResponse.SC_SERVICE_UNAVAILABLE);
     } catch (IOException | RuntimeException error) {
+      if (exchange == null || !exchange.browserFailed) {
+        // 浏览器自行离开属于正常结束；其余失败来自 Daemon 侧或网关，必须留下可判定关闭方的诊断。
+        logFailedExchange(
+            environmentId, request, error.toString(), exchange, ideRequest, startedNanos);
+      }
       // 上游/传输失败：尚未提交时清理已被 forward 写入的响应头与缓冲，避免残留 Content-Encoding/ETag/Location 污染错误响应；
       // 已提交的截断响应无法回滚，保持异常中止（绝不伪造已完整收到的压缩字节）。
       resetUncommitted(response);
@@ -243,6 +249,29 @@ public final class IdeGatewayDataPlane {
         peer.close();
       }
     }
+  }
+
+  /** 一条 HTTP exchange 非正常结束时的单行诊断：结束原因、Daemon 关闭码与失败回执、已交付字节与时长；不记录查询串。 */
+  private static void logFailedExchange(
+      EnvironmentId environmentId,
+      HttpServletRequest request,
+      String outcome,
+      Exchange exchange,
+      IdeRequest ideRequest,
+      long startedNanos) {
+    log.info(
+        "ide http exchange failed: environment={} method={} path={} outcome={} daemonClose={}"
+            + " daemonReply={} responseStarted={} fromDaemon={} frames/{} bytes durationMs={}",
+        environmentId,
+        request.getMethod(),
+        request.getRequestURI(),
+        outcome,
+        exchange == null ? "-" : IdeStreamDiagnostics.describe(exchange.peer.remoteCloseStatus()),
+        IdeStreamDiagnostics.replyFailure(ideRequest, IdeStreamDiagnostics.REPLY_GRACE),
+        exchange != null && exchange.responseStarted,
+        exchange == null ? 0 : exchange.fromDaemonFrames,
+        exchange == null ? 0 : exchange.fromDaemonBytes,
+        Duration.ofNanos(System.nanoTime() - startedNanos).toMillis());
   }
 
   /**
@@ -474,23 +503,31 @@ public final class IdeGatewayDataPlane {
     private final EnvironmentId environmentId;
     private final IdeStreamRelay relay;
     private final IdeStreamPeer peer;
-    private final long deadlineNanos;
+    private final long idleTimeoutNanos;
+    private long lastProgressNanos;
     private boolean responseStarted;
     private boolean done;
     private boolean failed;
     private boolean closed;
+    private boolean browserFailed;
+    private long fromDaemonFrames;
+    private long fromDaemonBytes;
 
+    /**
+     * @param idleTimeout 等待首帧以及两帧之间的最长空闲；只要 Daemon 持续有帧到达（数据或 ACK），长时间的传输不受整体时长限制
+     */
     private Exchange(
         HttpServletRequest request,
         HttpServletResponse response,
         EnvironmentId environmentId,
         IdeStreamPeer peer,
-        long deadlineNanos) {
+        Duration idleTimeout) {
       this.request = request;
       this.response = response;
       this.environmentId = environmentId;
       this.peer = peer;
-      this.deadlineNanos = deadlineNanos;
+      this.idleTimeoutNanos = idleTimeout.toNanos();
+      this.lastProgressNanos = System.nanoTime();
       this.relay =
           new IdeStreamRelay(
               new IdeStreamRelay.Sink() {
@@ -515,7 +552,12 @@ public final class IdeGatewayDataPlane {
       sendRequestBody(request);
       readResponse();
       if (!failed) {
-        response.getOutputStream().flush();
+        try {
+          response.getOutputStream().flush();
+        } catch (IOException error) {
+          browserFailed = true;
+          throw error;
+        }
       }
     }
 
@@ -529,7 +571,7 @@ public final class IdeGatewayDataPlane {
       try (InputStream input = request.getInputStream()) {
         byte[] buffer = new byte[DaemonIdeStreamCodec.MAX_PAYLOAD_BYTES];
         int read;
-        while ((read = input.read(buffer)) > 0) {
+        while ((read = readBrowser(input, buffer)) > 0) {
           ensureCredit(read);
           if (failed || closed || done) {
             return;
@@ -542,6 +584,16 @@ public final class IdeGatewayDataPlane {
         }
       }
       sendToDaemon(relay::sendHttpEnd);
+    }
+
+    /** 读取浏览器请求体；浏览器中途离开属于浏览器侧结束，不记为 Daemon 侧失败。 */
+    private int readBrowser(InputStream input, byte[] buffer) throws IOException {
+      try {
+        return input.read(buffer);
+      } catch (IOException error) {
+        browserFailed = true;
+        throw error;
+      }
     }
 
     /**
@@ -574,8 +626,9 @@ public final class IdeGatewayDataPlane {
       }
     }
 
-    private void ensureCredit(int bytes) throws IOException {
-      while (!done && !failed && !closed && relay.sendableToDaemon() < bytes) {
+    /** 等待足够发送一个载荷为 {@code payloadBytes} 的数据帧的 credit（期间继续处理 Daemon 的响应与 ACK）。 */
+    private void ensureCredit(int payloadBytes) throws IOException {
+      while (!done && !failed && !closed && !relay.canSendToDaemon(payloadBytes)) {
         pump();
       }
     }
@@ -597,17 +650,19 @@ public final class IdeGatewayDataPlane {
      * 取下一个入站帧。
      *
      * <p>{@code poll} 返回 {@code null} 只表示本次没有入站帧（空闲），不是连接关闭：慢速 IDE 可能超过一个 poll 间隔才产生首字节。只有 {@link
-     * IdeStreamPeer#closed()} 才视为关闭，其余情况继续等待到本次 exchange 的真实 deadline。
+     * IdeStreamPeer#closed()} 才视为关闭；其余情况继续等待，直到连续空闲超过本次 exchange 的空闲上限。每个到达的帧都重新计时。
      */
     private IdeStreamPeer.Inbound nextInbound() throws IOException {
-      long remaining = deadlineNanos - System.nanoTime();
+      long remaining = lastProgressNanos + idleTimeoutNanos - System.nanoTime();
       if (remaining <= 0L) {
-        throw new SocketTimeoutException("ide exchange timed out");
+        throw new SocketTimeoutException("ide exchange idle timeout");
       }
       Duration wait = Duration.ofNanos(Math.min(remaining, POLL_INTERVAL_NANOS));
       try {
         IdeStreamPeer.Inbound inbound = peer.poll(wait);
-        if (inbound == null && peer.closed()) {
+        if (inbound != null) {
+          lastProgressNanos = System.nanoTime();
+        } else if (peer.closed()) {
           closed = true;
         }
         return inbound;
@@ -640,8 +695,15 @@ public final class IdeGatewayDataPlane {
             failed = true;
             return;
           }
-          response.getOutputStream().write(body.bytes());
-          relay.ackFromDaemon(body.bytes().length);
+          fromDaemonFrames++;
+          fromDaemonBytes += body.bytes().length;
+          try {
+            response.getOutputStream().write(body.bytes());
+          } catch (IOException error) {
+            browserFailed = true;
+            throw error;
+          }
+          relay.acknowledge(body);
         }
         case IdeStreamBinaryFrame.HttpEnd ignored -> {
           // HTTP_END 只在已收到 HTTP_RESPONSE 且尚未结束时有效；先于元数据的 END 不得默认成 200 空 body。

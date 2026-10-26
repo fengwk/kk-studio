@@ -7,7 +7,7 @@
  */
 
 /** 当前 Daemon wire 协议版本；其他版本一律拒绝，不做双协议 fallback。 */
-export const PROTOCOL_VERSION = 5
+export const PROTOCOL_VERSION = 6
 
 /** capability catalog 版本；HELLO 上报，Platform 据此判定能否执行普通能力调用。 */
 export const CAPABILITY_CATALOG_VERSION = '3'

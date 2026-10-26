@@ -12,8 +12,10 @@
  * code-server WS is a bounded streaming RFC 6455 client: it forwards one payload piece at a time
  * and never reassembles a whole message, so an arbitrarily large IDE message stays bounded.
  * Every payload direction is bounded by an independent credit window; the peer may only
- * send as many bytes as it has been granted, and bytes are acknowledged only after we
- * have actually consumed them (no unbounded buffering, no ack-before-consume).
+ * send as much frame credit as it has been granted (each data frame costs its payload length
+ * but at least MIN_FRAME_CREDIT), and frames are acknowledged only after we have actually
+ * consumed them (no unbounded buffering, no ack-before-consume). The per-frame minimum bounds
+ * frames in flight too, so queues are sized from the credit alone.
  */
 
 import http from 'node:http'
@@ -23,6 +25,7 @@ import WebSocket, { type RawData } from 'ws'
 import { getOutboundNetwork } from '../network.js'
 import {
   CreditWindow,
+  MAX_IN_FLIGHT_FRAMES,
   MAX_PAYLOAD,
   WireError,
   decodeBinaryFrame,
@@ -33,16 +36,10 @@ import {
   encodeTextFrame,
   encodeWsFrame,
   filterResponseHeaders,
+  frameCost,
   type TextFrame,
 } from '../ide/wire.js'
 import { UpstreamWebSocket, isValidCloseCode } from './upstream-websocket.js'
-
-/**
- * Maximum number of wire frames buffered in one direction. The credit window already bounds
- * payload bytes; this cap additionally bounds a flood of zero-length frames, which reserve no
- * credit, so a peer can never grow an unbounded queue.
- */
-const MAX_PENDING_FRAMES = 1024
 
 export interface StreamRequest {
   mode: 'HTTP' | 'WS'
@@ -250,9 +247,9 @@ class Outbox {
       while (offset < chunk.length) {
         const end = Math.min(offset + MAX_PAYLOAD, chunk.length)
         const payload = chunk.subarray(offset, end)
-        await window.waitFor(payload.length, signal)
+        await window.waitForFrame(payload.length, signal)
         // Reserve before the frame is observable so an early ack can never over-release credit.
-        window.reserve(payload.length)
+        window.reserveFrame(payload.length)
         this.socket.send(encodeHttpBody(payload))
         offset = end
       }
@@ -401,13 +398,12 @@ abstract class Exchange {
     this.fail(new WireError(`unexpected text frame ${frame.type}`))
   }
 
-  protected sendAck(bytes: number): void {
-    if (bytes <= 0) {
-      return
-    }
-    this.recvWindow.ack(bytes)
+  /** Acknowledges one consumed data frame carrying `payloadLength` bytes at its frame cost. */
+  protected sendAck(payloadLength: number): void {
+    const credit = frameCost(payloadLength)
+    this.recvWindow.ack(credit)
     if (this.gateway.readyState === WebSocket.OPEN) {
-      this.gateway.send(encodeAck(bytes))
+      this.gateway.send(encodeAck(credit))
     }
   }
 
@@ -421,7 +417,8 @@ abstract class Exchange {
 }
 
 class HttpExchange extends Exchange {
-  private readonly inbound = new AsyncQueue<Buffer>(MAX_PENDING_FRAMES)
+  /** Received request body frames awaiting upload; the receive credit bounds them to one window. */
+  private readonly inbound = new AsyncQueue<Buffer>(MAX_IN_FLIGHT_FRAMES)
   private upstreamRequest?: http.ClientRequest
   private upstreamResponse?: IncomingMessage
   private inboundEnded = false
@@ -507,7 +504,7 @@ class HttpExchange extends Exchange {
         if (frame.payload.length === 0) {
           throw new WireError('http body frame must not be empty')
         }
-        this.recvWindow.reserve(frame.payload.length)
+        this.recvWindow.reserveFrame(frame.payload.length)
         this.inbound.push(frame.payload)
         return
       }
@@ -606,12 +603,12 @@ class WebSocketExchange extends Exchange {
         return
       }
       if (frame.type === 'data') {
-        await this.sendWindow.waitFor(frame.payload.length, this.abort.signal)
+        await this.sendWindow.waitForFrame(frame.payload.length, this.abort.signal)
         if (this.settled) {
           return
         }
         // Reserve before the frame is observable so an early ack can never over-release credit.
-        this.sendWindow.reserve(frame.payload.length)
+        this.sendWindow.reserveFrame(frame.payload.length)
         await this.outbox.sendWsFragment(frame.kind, frame.payload, frame.last)
         continue
       }
@@ -640,13 +637,10 @@ class WebSocketExchange extends Exchange {
         }
         this.queuedMessageOpen = !frame.last
         // Reserve per fragment and forward each fragment as it is flushed so a message larger
-        // than the credit window never deadlocks. A flood of zero-length frames reserves no
-        // credit, so the frame count is bounded separately.
-        this.recvWindow.reserve(frame.payload.length)
+        // than the credit window never deadlocks. Every fragment, even an empty one, costs at
+        // least the minimum frame credit, so the receive window also bounds the pending count.
+        this.recvWindow.reserveFrame(frame.payload.length)
         this.pendingFragments.push({ kind, payload: frame.payload, last: frame.last, first })
-        if (this.pendingFragments.length > MAX_PENDING_FRAMES) {
-          throw new WireError('too many buffered websocket fragments')
-        }
         this.maybeDrainFragments()
         return
       }

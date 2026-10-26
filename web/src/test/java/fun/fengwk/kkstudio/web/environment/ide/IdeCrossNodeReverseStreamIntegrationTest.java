@@ -375,14 +375,14 @@ class IdeCrossNodeReverseStreamIntegrationTest extends WebPostgresTestSupport {
           }
           byte[] payload = new byte[size];
           System.arraycopy(chunk, 0, payload, 0, size);
-          while (!window.canSend(size)) {
+          while (!window.canSendFrame(size)) {
             byte[] ack = inbound.poll(30, TimeUnit.SECONDS);
             if (ack == null || ack[0] != 3) {
               return;
             }
             window.onAck(unsignedInt(ack));
           }
-          window.onSend(size);
+          window.onSendFrame(size);
           socket.send(ByteString.of(codec.encodeHttpBody(payload)));
           sent += size;
         }

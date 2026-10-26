@@ -25,6 +25,7 @@ import fun.fengwk.kkstudio.ide.protocol.DaemonIdeStreamCodec;
 import fun.fengwk.kkstudio.ide.protocol.IdeAction;
 import fun.fengwk.kkstudio.ide.protocol.IdeCommand;
 import fun.fengwk.kkstudio.ide.protocol.IdeReply;
+import fun.fengwk.kkstudio.ide.protocol.IdeStreamCreditWindow;
 import fun.fengwk.kkstudio.ide.protocol.IdeStreamMode;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
@@ -193,7 +194,8 @@ class IdeBrowserWebSocketEndpointIntegrationTest extends WebPostgresTestSupport 
         // 浏览器 → Daemon 分段：原样 echo 回浏览器，并 ACK 已消费字节。
         sawMessage.countDown();
         webSocket.send(ByteString.of(frame));
-        webSocket.send(ByteString.of(codec.encodeAck(frame.length - 2)));
+        webSocket.send(
+            ByteString.of(codec.encodeAck(IdeStreamCreditWindow.frameCost(frame.length - 2))));
       } else if (frame[0] == 3) {
         // 网关对 echo 字节的 ACK：无需处理。
       }

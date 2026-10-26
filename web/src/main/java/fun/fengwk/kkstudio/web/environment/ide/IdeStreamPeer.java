@@ -1,6 +1,9 @@
 package fun.fengwk.kkstudio.web.environment.ide;
 
+import org.springframework.web.socket.CloseStatus;
+
 import java.time.Duration;
+import java.util.Set;
 
 /**
  * 一条已配对的反向数据连接（Daemon 侧）在 Gateway 内的窄句柄：发送 wire 帧、拉取入站帧、关闭。
@@ -28,8 +31,36 @@ public interface IdeStreamPeer extends AutoCloseable {
   /** 连接是否已关闭（对端断开、发送失败或本端关闭）。 */
   boolean closed();
 
+  /**
+   * 对端或传输给出的关闭状态；连接仍打开或由本端主动关闭时为 {@code null}。
+   *
+   * <p>反向流的关闭码是 Daemon 转述的 code-server 关闭码或协议错误原因，数据面据此记录关闭方并向浏览器原样转述，而不是一律改写成 1011。
+   */
+  CloseStatus remoteCloseStatus();
+
+  /** 以指定状态关闭连接（跨节点转述对端关闭码、协议错误等）。 */
+  void close(CloseStatus status);
+
+  /** 以正常状态关闭连接。 */
   @Override
   void close();
+
+  /** 把对端关闭状态转换为可以在另一条 WebSocket 上发送的状态：合法的应用关闭码原样保留；缺失、无关闭帧（1006）等不能发送的状态统一为 1011 并注明连接丢失。 */
+  static CloseStatus relayable(CloseStatus status) {
+    if (status == null) {
+      return STREAM_LOST;
+    }
+    int code = status.getCode();
+    boolean sendable = SENDABLE_PROTOCOL_CODES.contains(code) || (code >= 3000 && code <= 4999);
+    return sendable ? status : STREAM_LOST;
+  }
+
+  /** 1012–1014 虽有定义，但 Jakarta WebSocket 实际关闭时会拒绝，因此不在可转述集合内。 */
+  Set<Integer> SENDABLE_PROTOCOL_CODES =
+      Set.of(1000, 1001, 1002, 1003, 1007, 1008, 1009, 1010, 1011);
+
+  /** 对端没有给出可转述关闭码时的统一状态。 */
+  CloseStatus STREAM_LOST = CloseStatus.SERVER_ERROR.withReason("ide stream lost");
 
   /**
    * 入站帧：文本控制帧或二进制帧。

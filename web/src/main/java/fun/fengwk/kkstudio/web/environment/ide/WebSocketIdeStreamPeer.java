@@ -7,6 +7,8 @@ import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketMessage;
 import org.springframework.web.socket.WebSocketSession;
 
+import fun.fengwk.kkstudio.ide.protocol.IdeStreamCreditWindow;
+
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -18,19 +20,24 @@ import java.util.Objects;
  * 由真实反向 WebSocket 连接支撑的 {@link IdeStreamPeer}：入站帧进入同时受帧数与字节预算约束的队列，出站帧在会话锁内串行发送。
  *
  * <p>数据面线程在单线程内驱动 {@link #sendText}/{@link #sendBinary}/{@link #poll}，WebSocket
- * 容器线程只负责入队。入站队列严格有界：credit 只限制数据载荷，控制帧不受 credit
- * 约束，因此这里额外以字节预算与帧数上限兜住「大量小零载荷控制帧」造成的无界内存；超界即拒绝入队，由调用方 fail-closed 关闭连接，绝不无界缓冲、也绝不先 ACK 后缓冲。
+ * 容器线程只负责入队。入站队列的上界由协议推导：每个数据帧至少消耗一个最小 credit，因此在途数据帧至多 {@link
+ * IdeStreamCreditWindow#MAX_IN_FLIGHT_FRAMES} 个；对端的 ACK 至少确认一个最小帧，因此未处理 ACK
+ * 同样至多这么多；文本控制帧只有少数几个。守约的对端永远不会 超界，超界即协议错误，由调用方 fail-closed 关闭连接，绝不无界缓冲、也绝不先 ACK 后缓冲。
  *
- * <p>{@link #close()} 与连接侧关闭都会唤醒全部等待者，使数据面立即得知连接已终止。
+ * <p>{@link #close()} 与连接侧关闭都会唤醒全部等待者，使数据面立即得知连接已终止；连接侧关闭同时记录对端关闭状态，供数据面判定关闭方并转述关闭码。
  */
 @Slf4j
 final class WebSocketIdeStreamPeer implements IdeStreamPeer {
 
-  /** 入站队列的帧数上限：足够容纳一个 credit 窗口内的分段与少量控制帧。 */
-  static final int MAX_QUEUED_FRAMES = 512;
+  /** 一条交换内的文本控制帧（响应头、WS_READY、ERROR）与 END 的余量。 */
+  private static final int CONTROL_FRAME_ALLOWANCE = 8;
 
-  /** 入站队列的字节预算：覆盖 2 个 256 KiB credit 窗口，控制帧同样计入。 */
-  static final long MAX_QUEUED_BYTES = 2L * 262144L;
+  /** 入站队列的帧数上限：在途数据帧与未处理 ACK 各至多一个窗口的帧数，加少量控制帧。 */
+  static final int MAX_QUEUED_FRAMES =
+      2 * IdeStreamCreditWindow.MAX_IN_FLIGHT_FRAMES + CONTROL_FRAME_ALLOWANCE;
+
+  /** 入站队列的字节预算：数据载荷不超过一个 credit 窗口，另为控制帧与 ACK 留出一个窗口的余量。 */
+  static final long MAX_QUEUED_BYTES = 2L * IdeStreamCreditWindow.INITIAL_CREDIT;
 
   private final WebSocketSession session;
   private final Deque<Inbound> inbound = new ArrayDeque<>();
@@ -38,6 +45,7 @@ final class WebSocketIdeStreamPeer implements IdeStreamPeer {
   private final Object sendLock = new Object();
   private long queuedBytes;
   private volatile boolean closed;
+  private volatile CloseStatus remoteCloseStatus;
 
   WebSocketIdeStreamPeer(WebSocketSession session) {
     this.session = Objects.requireNonNull(session, "session");
@@ -92,7 +100,9 @@ final class WebSocketIdeStreamPeer implements IdeStreamPeer {
               error.getClass().getSimpleName());
           return;
         }
-        onTransportClosed();
+        onTransportClosed(
+            CloseStatus.NO_CLOSE_FRAME.withReason(
+                "send failed: " + error.getClass().getSimpleName()));
         throw new IllegalStateException("failed to send on the reverse stream", error);
       } catch (IllegalStateException error) {
         if (acknowledgement && (closed || !session.isOpen())) {
@@ -158,7 +168,17 @@ final class WebSocketIdeStreamPeer implements IdeStreamPeer {
   }
 
   @Override
+  public CloseStatus remoteCloseStatus() {
+    return remoteCloseStatus;
+  }
+
+  @Override
   public void close() {
+    close(CloseStatus.NORMAL);
+  }
+
+  @Override
+  public void close(CloseStatus status) {
     synchronized (stateLock) {
       if (closed) {
         return;
@@ -167,15 +187,18 @@ final class WebSocketIdeStreamPeer implements IdeStreamPeer {
       stateLock.notifyAll();
     }
     try {
-      session.close(CloseStatus.NORMAL);
+      session.close(status);
     } catch (IOException ignored) {
       // 会话在关闭前已断开。
     }
   }
 
-  /** 连接侧关闭（对端断开/错误）：标记关闭并唤醒全部等待者。 */
-  void onTransportClosed() {
+  /** 连接侧关闭（对端断开/错误）：记录首个关闭状态，标记关闭并唤醒全部等待者。 */
+  void onTransportClosed(CloseStatus status) {
     synchronized (stateLock) {
+      if (!closed) {
+        remoteCloseStatus = status;
+      }
       closed = true;
       stateLock.notifyAll();
     }

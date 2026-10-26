@@ -30,6 +30,7 @@ import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.ide.IdeCommandTransport;
 import fun.fengwk.kkstudio.ide.protocol.DaemonIdeStreamCodec;
 import fun.fengwk.kkstudio.ide.protocol.IdeStreamBinaryFrame;
+import fun.fengwk.kkstudio.ide.protocol.IdeStreamCreditWindow;
 import fun.fengwk.kkstudio.ide.protocol.IdeStreamMode;
 import fun.fengwk.kkstudio.ide.stream.IdeStreamPairingRegistry;
 import fun.fengwk.kkstudio.ide.stream.IdeStreamRelay;
@@ -71,6 +72,21 @@ class WebSocketIdeStreamPeerTest {
       assertTrue(peer.offer(new IdeStreamPeer.Inbound.Text("{}")), "frame " + i + " must fit");
     }
     assertFalse(peer.offer(new IdeStreamPeer.Inbound.Text("{}")));
+  }
+
+  /** 测试意图：入站上界由 credit 推导，一个窗口内协议允许的全部数据帧、ACK 与控制帧必须都能入队，守约的对端永远不会被误断开。 */
+  @Test
+  void acceptsAWholeCreditWindowOfLegalTraffic() {
+    WebSocketIdeStreamPeer peer = new WebSocketIdeStreamPeer(session);
+    DaemonIdeStreamCodec codec = new DaemonIdeStreamCodec();
+    byte[] tinySegment = codec.encodeWsSegment(false, true, new byte[1]);
+    byte[] ack = codec.encodeAck(IdeStreamCreditWindow.MIN_FRAME_CREDIT);
+    for (int i = 0; i < IdeStreamCreditWindow.MAX_IN_FLIGHT_FRAMES; i++) {
+      assertTrue(peer.offer(new IdeStreamPeer.Inbound.Binary(tinySegment)), "data frame " + i);
+      assertTrue(peer.offer(new IdeStreamPeer.Inbound.Binary(ack)), "ack frame " + i);
+    }
+    assertTrue(peer.offer(new IdeStreamPeer.Inbound.Text("{\"type\":\"WS_READY\"}")));
+    assertTrue(peer.offer(new IdeStreamPeer.Inbound.Binary(codec.encodeHttpEnd())));
   }
 
   /** 小零载荷控制帧同样受字节预算约束：恶意 ACK/text 洪水不能无限占用内存。 */
@@ -141,7 +157,7 @@ class WebSocketIdeStreamPeerTest {
                   }
                 });
     Thread.sleep(50);
-    peer.onTransportClosed();
+    peer.onTransportClosed(CloseStatus.GOING_AWAY);
     waiter.join(5_000);
     assertFalse(waiter.isAlive(), "transport close must wake the blocked poll");
   }
@@ -155,20 +171,47 @@ class WebSocketIdeStreamPeerTest {
     assertFalse(peer.offer(new IdeStreamPeer.Inbound.Text("{}")));
   }
 
-  /** 发送失败即视为连接关闭（fail-closed）。 */
+  /** 发送失败即视为连接关闭（fail-closed），并记录无关闭帧的原因供数据面诊断。 */
   @Test
   void sendFailureClosesPeer() throws Exception {
     doThrow(new IOException("boom")).when(session).sendMessage(any());
     WebSocketIdeStreamPeer peer = new WebSocketIdeStreamPeer(session);
     assertThrows(IllegalStateException.class, () -> peer.sendBinary(new byte[] {1}));
     assertTrue(peer.closed());
+    assertEquals(CloseStatus.NO_CLOSE_FRAME.getCode(), peer.remoteCloseStatus().getCode());
+    assertEquals("send failed: IOException", peer.remoteCloseStatus().getReason());
+  }
+
+  /** 测试意图：对端关闭状态只记录首个原因；本端主动关闭不伪造对端关闭状态。 */
+  @Test
+  void recordsOnlyTheFirstRemoteCloseStatus() {
+    WebSocketIdeStreamPeer remote = new WebSocketIdeStreamPeer(session);
+    remote.onTransportClosed(CloseStatus.GOING_AWAY);
+    remote.onTransportClosed(CloseStatus.SERVER_ERROR);
+    assertEquals(CloseStatus.GOING_AWAY, remote.remoteCloseStatus());
+
+    WebSocketIdeStreamPeer local = new WebSocketIdeStreamPeer(session);
+    local.close(CloseStatus.POLICY_VIOLATION);
+    local.onTransportClosed(CloseStatus.NORMAL);
+    assertNull(local.remoteCloseStatus());
+  }
+
+  /** 测试意图：可转述的应用关闭码原样保留；缺失或不能发送的关闭码统一为 1011，避免把 1006 写到另一条连接上。 */
+  @Test
+  void relayableKeepsSendableCodesAndReplacesTheRest() {
+    assertEquals(CloseStatus.NORMAL, IdeStreamPeer.relayable(CloseStatus.NORMAL));
+    CloseStatus application = new CloseStatus(4001, "app");
+    assertEquals(application, IdeStreamPeer.relayable(application));
+    assertEquals(IdeStreamPeer.STREAM_LOST, IdeStreamPeer.relayable(null));
+    assertEquals(IdeStreamPeer.STREAM_LOST, IdeStreamPeer.relayable(CloseStatus.NO_CLOSE_FRAME));
+    assertEquals(IdeStreamPeer.STREAM_LOST, IdeStreamPeer.relayable(CloseStatus.SERVICE_RESTARTED));
   }
 
   /** 连接侧关闭后消费 ACK 可安全丢弃（不丢已入队响应）；数据帧仍必须 fail-closed。 */
   @Test
   void acknowledgementAfterTransportCloseIsDroppedButDataStillRejected() {
     WebSocketIdeStreamPeer peer = new WebSocketIdeStreamPeer(session);
-    peer.onTransportClosed();
+    peer.onTransportClosed(CloseStatus.GOING_AWAY);
     assertDoesNotThrow(() -> peer.sendAcknowledgement(new byte[] {3, 0, 0, 0, 10}));
     assertTrue(peer.closed());
     assertThrows(IllegalStateException.class, () -> peer.sendBinary(new byte[] {1}));
@@ -283,7 +326,7 @@ class WebSocketIdeStreamPeerTest {
    * 真实反向端点与 relay 的闭合接收流程：ACK 写失败故障注入（mock session 写入抛 IOException，模拟对端关闭读取，非真实 Tomcat 网络故障）。
    *
    * <p>闭合流程： 1. BODY 帧经 handler.handleBinaryMessage 入队 -> peer.poll 消费 -> relay.receiveBinary； 2.
-   * 数据面消费后通过 relay.ackFromDaemon 触发 ACK 写出，此处 mock session 抛出 IOException； 3. 对端随后发送 HTTP_END 经
+   * 数据面消费后通过 relay.acknowledge 触发 ACK 写出，此处 mock session 抛出 IOException； 3. 对端随后发送 HTTP_END 经
    * handler.handleBinaryMessage 入队 -> peer.poll 消费 -> relay.receiveBinary 解码； 4. 关键验证：在旧生产代码中，第 2 步
    * ACK 失败会将 peer 提前置为 closed，导致第 3 步 handler 接收 END 时 peer.offer(END) 被拒（handler 触发
    * TOO_BIG_TO_PROCESS 并 detach），数据面 poll 不到 END； 修复后，ACK 失败仅丢弃该 ACK，后续 END 仍能正常入队被 poll 并被 relay
@@ -369,10 +412,11 @@ class WebSocketIdeStreamPeerTest {
     handler.handleBinaryMessage(baseSession, new BinaryMessage(ByteBuffer.wrap(bodyChunk)));
     IdeStreamPeer.Inbound bodyInbound = peer.poll(Duration.ofMillis(100));
     assertNotNull(bodyInbound, "body chunk must be polled");
-    relay.receiveBinary(((IdeStreamPeer.Inbound.Binary) bodyInbound).frame());
+    IdeStreamBinaryFrame body =
+        relay.receiveBinary(((IdeStreamPeer.Inbound.Binary) bodyInbound).frame());
 
     // 3. 消费后触发 ACK 写出，此处命中故障注入抛出 IOException
-    relay.ackFromDaemon(3);
+    relay.acknowledge(body);
 
     // 4. 对端随后发送 HTTP_END 经由 handler 入队
     byte[] endBytes = codec.encodeHttpEnd();
