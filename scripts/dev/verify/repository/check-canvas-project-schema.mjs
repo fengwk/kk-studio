@@ -640,7 +640,7 @@ function main() {
   if (!existsSync(probes) || !statSync(probes).isFile()) {
     throw new Error(`missing shared contract probes: ${PROBE_FILE}`)
   }
-  if (BUSINESS_TABLES.length !== 45 || TARGET_TABLES.length !== 17) {
+  if (BUSINESS_TABLES.length !== 46 || TARGET_TABLES.length !== 17) {
     throw new Error('the declared inventory must keep its fixed business and target table counts')
   }
   // Re-derive the inventory from the baseline DDL: a table added to (or removed from) the
