@@ -115,10 +115,11 @@ class OpenAiChatRequestEncoderTest {
   }
 
   @Test
-  @DisplayName("通过配置覆盖 openAiChatIncludeUsage 为 false")
-  void testDisableIncludeUsage() throws Exception {
+  @DisplayName("始终请求 usage：旧配置字段被忽略，requireDone=false 也不关闭 include_usage")
+  void alwaysRequestsUsage() throws Exception {
     OpenAiChatConfiguration config =
-        new OpenAiChatConfiguration(false, true, PromptCacheRetention.NONE);
+        OpenAiChatConfiguration.parse(
+            "{\"openAiChatIncludeUsage\": false, \"openAiChatRequireDone\": false}");
     ProviderMessage userMsg =
         new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hello")));
     ProviderRequest request =
@@ -133,7 +134,7 @@ class OpenAiChatRequestEncoderTest {
 
     OpenAiChatEncodedRequest encoded = encoder.encode(request, descriptor, config);
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
-    assertFalse(root.path("stream_options").path("include_usage").asBoolean(false));
+    assertTrue(root.path("stream_options").path("include_usage").asBoolean(false));
   }
 
   @Test
@@ -785,7 +786,7 @@ class OpenAiChatRequestEncoderTest {
 
     // 1. NONE: 不发任何 cache hint
     OpenAiChatConfiguration configNone =
-        new OpenAiChatConfiguration(true, true, PromptCacheRetention.NONE);
+        new OpenAiChatConfiguration(true, PromptCacheRetention.NONE);
     ProviderRequest reqNone =
         cacheRequest("Test system instruction.", List.of(userMsg), ProviderCacheControl.none());
     JsonNode rootNone =
@@ -796,7 +797,7 @@ class OpenAiChatRequestEncoderTest {
 
     // 2. SHORT: key 直接使用运行时会话 key，retention=in_memory
     OpenAiChatConfiguration configShort =
-        new OpenAiChatConfiguration(true, true, PromptCacheRetention.SHORT);
+        new OpenAiChatConfiguration(true, PromptCacheRetention.SHORT);
     ProviderCacheControl cacheControlShort =
         ProviderCacheControl.session(PromptCacheRetention.SHORT, "my-key-short");
     ProviderRequest reqShort =
@@ -811,7 +812,7 @@ class OpenAiChatRequestEncoderTest {
 
     // 3. LONG: retention=24h
     OpenAiChatConfiguration configLong =
-        new OpenAiChatConfiguration(true, true, PromptCacheRetention.LONG);
+        new OpenAiChatConfiguration(true, PromptCacheRetention.LONG);
     ProviderCacheControl cacheControlLong =
         ProviderCacheControl.session(PromptCacheRetention.LONG, "my-key-long");
     ProviderRequest reqLong =
@@ -903,7 +904,7 @@ class OpenAiChatRequestEncoderTest {
 
     // 4. 不支持的音频格式抛异常
     OpenAiChatConfiguration audioConfig =
-        new OpenAiChatConfiguration(true, true, PromptCacheRetention.NONE);
+        new OpenAiChatConfiguration(true, PromptCacheRetention.NONE);
     ProviderMessage audioFlac =
         new ProviderMessage(
             ProviderMessageRole.USER,
@@ -1156,7 +1157,7 @@ class OpenAiChatRequestEncoderTest {
 
     // 3. MP3 音频格式识别
     OpenAiChatConfiguration audioConfig =
-        new OpenAiChatConfiguration(true, true, PromptCacheRetention.NONE);
+        new OpenAiChatConfiguration(true, PromptCacheRetention.NONE);
     ProviderMessage mp3Msg =
         new ProviderMessage(
             ProviderMessageRole.USER,
@@ -1185,7 +1186,7 @@ class OpenAiChatRequestEncoderTest {
 
     // 4. PDF 非法 mediaType
     OpenAiChatConfiguration pdfConfig =
-        new OpenAiChatConfiguration(true, true, PromptCacheRetention.NONE);
+        new OpenAiChatConfiguration(true, PromptCacheRetention.NONE);
     ProviderMessage badDocMsg =
         new ProviderMessage(
             ProviderMessageRole.USER,
@@ -1232,7 +1233,7 @@ class OpenAiChatRequestEncoderTest {
 
     // 6. tool-call-only assistant 不制造 content；启用缓存时也不改写消息内容或注入 breakpoint
     OpenAiChatConfiguration configShort =
-        new OpenAiChatConfiguration(true, true, PromptCacheRetention.SHORT);
+        new OpenAiChatConfiguration(true, PromptCacheRetention.SHORT);
     ProviderCacheControl cacheControlShort =
         ProviderCacheControl.session(PromptCacheRetention.SHORT, "session-key");
     ProviderMessage userMsg =

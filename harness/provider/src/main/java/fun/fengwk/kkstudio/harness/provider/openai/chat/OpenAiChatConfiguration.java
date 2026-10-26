@@ -18,7 +18,9 @@ import java.util.Objects;
  * OpenAI Chat Completions 适配器配置解析与校验对象。
  *
  * <p>已知字段严格类型与取值校验，未知字段安全忽略，禁止向外泄露原始配置内容。提示缓存只由一个与运行时一致的留存档位字段 {@code promptCacheRetention}（{@link
- * PromptCacheRetention}）表达，不再有协议私有的 capability/policy/mode；缓存 key 由运行时按 Session 提供。
+ * PromptCacheRetention}）表达，不再有协议私有的 capability/policy/mode；缓存 key 由运行时按 Session 提供。成功响应必须携带完整
+ * usage，因此 {@code stream_options.include_usage} 恒为 true，不属于配置项；旧配置中的 {@code openAiChatIncludeUsage}
+ * 按未知字段忽略。
  */
 public final class OpenAiChatConfiguration {
 
@@ -29,7 +31,6 @@ public final class OpenAiChatConfiguration {
           .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
           .build();
 
-  public static final String FIELD_INCLUDE_USAGE = "openAiChatIncludeUsage";
   public static final String FIELD_REQUIRE_DONE = "openAiChatRequireDone";
   public static final String FIELD_PROMPT_CACHE_RETENTION = "promptCacheRetention";
   public static final String FIELD_THINKING_FORMAT = "openAiChatThinkingFormat";
@@ -39,22 +40,18 @@ public final class OpenAiChatConfiguration {
     DEEPSEEK
   }
 
-  private final boolean includeUsage;
   private final boolean requireDone;
   private final PromptCacheRetention promptCacheRetention;
   private final ThinkingFormat thinkingFormat;
 
-  public OpenAiChatConfiguration(
-      boolean includeUsage, boolean requireDone, PromptCacheRetention promptCacheRetention) {
-    this(includeUsage, requireDone, promptCacheRetention, ThinkingFormat.STANDARD);
+  public OpenAiChatConfiguration(boolean requireDone, PromptCacheRetention promptCacheRetention) {
+    this(requireDone, promptCacheRetention, ThinkingFormat.STANDARD);
   }
 
   public OpenAiChatConfiguration(
-      boolean includeUsage,
       boolean requireDone,
       PromptCacheRetention promptCacheRetention,
       ThinkingFormat thinkingFormat) {
-    this.includeUsage = includeUsage;
     this.requireDone = requireDone;
     this.promptCacheRetention =
         promptCacheRetention == null ? PromptCacheRetention.NONE : promptCacheRetention;
@@ -62,7 +59,7 @@ public final class OpenAiChatConfiguration {
   }
 
   public static OpenAiChatConfiguration defaults() {
-    return new OpenAiChatConfiguration(true, true, PromptCacheRetention.NONE);
+    return new OpenAiChatConfiguration(true, PromptCacheRetention.NONE);
   }
 
   public static OpenAiChatConfiguration parse(String configJson) {
@@ -79,17 +76,6 @@ public final class OpenAiChatConfiguration {
     if (!root.isObject()) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST, "OpenAI chat configuration must be a JSON object");
-    }
-
-    boolean includeUsage = true;
-    if (root.has(FIELD_INCLUDE_USAGE)) {
-      JsonNode node = root.get(FIELD_INCLUDE_USAGE);
-      if (!node.isBoolean()) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST,
-            "field " + FIELD_INCLUDE_USAGE + " must be a boolean");
-      }
-      includeUsage = node.booleanValue();
     }
 
     boolean requireDone = true;
@@ -139,12 +125,7 @@ public final class OpenAiChatConfiguration {
       }
     }
 
-    return new OpenAiChatConfiguration(
-        includeUsage, requireDone, promptCacheRetention, thinkingFormat);
-  }
-
-  public boolean includeUsage() {
-    return includeUsage;
+    return new OpenAiChatConfiguration(requireDone, promptCacheRetention, thinkingFormat);
   }
 
   public boolean requireDone() {
@@ -167,22 +148,19 @@ public final class OpenAiChatConfiguration {
     if (!(o instanceof OpenAiChatConfiguration that)) {
       return false;
     }
-    return includeUsage == that.includeUsage
-        && requireDone == that.requireDone
+    return requireDone == that.requireDone
         && promptCacheRetention == that.promptCacheRetention
         && thinkingFormat == that.thinkingFormat;
   }
 
   @Override
   public int hashCode() {
-    return Objects.hash(includeUsage, requireDone, promptCacheRetention, thinkingFormat);
+    return Objects.hash(requireDone, promptCacheRetention, thinkingFormat);
   }
 
   @Override
   public String toString() {
-    return "OpenAiChatConfiguration[includeUsage="
-        + includeUsage
-        + ", requireDone="
+    return "OpenAiChatConfiguration[requireDone="
         + requireDone
         + ", promptCacheRetention="
         + promptCacheRetention

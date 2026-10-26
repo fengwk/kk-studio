@@ -625,7 +625,7 @@ class OpenAiChatModelProviderIntegrationTest {
         });
 
     OpenAiChatConfiguration sessionConfig =
-        new OpenAiChatConfiguration(true, true, PromptCacheRetention.SHORT);
+        new OpenAiChatConfiguration(true, PromptCacheRetention.SHORT);
     ModelProvider provider =
         new OpenAiChatProviderAdapter(transport, "sk-test", sessionConfig).create(descriptor);
 
