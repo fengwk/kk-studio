@@ -1639,11 +1639,11 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
   }
 
   /**
-   * 意图：父 Thread 在压缩子执行期间进入 durable STOPPED 后，子终态只固化压缩结果（CompactionPayload + TURN_END），不请求任何
-   * Work、不消费队列中的 user 输入、不续作模型；重复 claim 也不重复结算。
+   * 意图：owner 在压缩子执行期间处于 STOPPED 时，子执行的 SETTLE_OWNER_TURN 结算只冻结回执并推进一次 owner version：不请求 owner 的
+   * THREAD Work、不物化压缩结果、不消费排队的 user 输入，压缩义务保留到显式恢复。
    */
   @Test
-  void stoppedParentSettlesCompactionResultWithoutWorkOrQueuedInputConsumption() {
+  void stoppedOwnerKeepsCompactionObligationWithoutWorkOrQueuedInputConsumption() {
     Fixture fixture = fixture();
     var baseline = seedCompactionReadyClosedTurn(fixture.store, OVER_THRESHOLD_USAGE);
     UUID queuedCommand =
@@ -1655,10 +1655,12 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     fixture.resolver.autoConsistent = true;
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
 
-    CompactionStart compaction =
-        ((TurnStartPayload) path(fixture.store, baseline.threadId()).head().payload()).compaction();
-    // 子执行期间父被置为 STOPPED（durable 执行控制）。
+    EntryPath waiting = path(fixture.store, baseline.threadId());
+    CompactionStart compaction = ((TurnStartPayload) waiting.head().payload()).compaction();
+    // 子执行期间 owner 被置为 STOPPED（durable 执行控制）。
     setStopped(fixture.store, baseline.threadId());
+    long versionBeforeSettlement =
+        fixture.store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow().version());
 
     settleCompactionChildSuccess(
         fixture,
@@ -1667,22 +1669,22 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
         "stopped parent summary",
         GenerationStopReason.COMPLETE,
         usage());
-    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
 
-    EntryPath settled = path(fixture.store, baseline.threadId());
-    assertInstanceOf(
-        CompactionPayload.class, settled.entries().get(settled.entries().size() - 2).payload());
-    assertEquals(TurnEndOutcome.COMPLETED, ((TurnEndPayload) settled.head().payload()).outcome());
+    assertTrue(
+        fixture
+            .store
+            .transaction(tx -> tx.findJoin(compaction.joinInvocationId()).orElseThrow())
+            .matched());
+    long versionAfterSettlement =
+        fixture.store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow().version());
+    assertEquals(versionBeforeSettlement + 1, versionAfterSettlement);
+    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
+    EntryPath afterSettlement = path(fixture.store, baseline.threadId());
+    assertEquals(waiting.entries().size(), afterSettlement.entries().size());
+    assertEquals(waiting.head().id(), afterSettlement.head().id());
     assertEquals(
         ThreadExecutionControl.STOPPED, executionControl(fixture.store, baseline.threadId()));
-    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
     assertTrue(isQueued(fixture.store, baseline.threadId(), queuedCommand));
-
-    // 重复 claim：STOPPED 只完成 fencing，不再产生任何 durable mutation 或新结算。
-    requestThreadWork(fixture.store, baseline.threadId());
-    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
-    assertEquals(
-        settled.entries().size(), path(fixture.store, baseline.threadId()).entries().size());
   }
 
   /** 意图：等待子执行期间到达的用户输入绝不进入冻结摘要，也不在等待 claim 中被消费；结算后作为新的 INPUT turn 正常处理。 */
