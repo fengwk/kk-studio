@@ -572,10 +572,12 @@ class FileExecutionExitJournalTest {
 
     private final Process process;
     private final FutureTask<String> locked;
+    private final Thread reader;
 
-    private CrossProcessLock(Process process, FutureTask<String> locked) {
+    private CrossProcessLock(Process process, FutureTask<String> locked, Thread reader) {
       this.process = process;
       this.locked = locked;
+      this.reader = reader;
     }
 
     static CrossProcessLock start(Path directory) throws IOException {
@@ -595,7 +597,7 @@ class FileExecutionExitJournalTest {
       Thread reader = new Thread(locked, "execution-exit-journal-lock-probe");
       reader.setDaemon(true);
       reader.start();
-      return new CrossProcessLock(process, locked);
+      return new CrossProcessLock(process, locked, reader);
     }
 
     void awaitLocked() throws Exception {
@@ -607,42 +609,105 @@ class FileExecutionExitJournalTest {
 
     @Override
     public void close() throws Exception {
+      boolean interrupted = Thread.interrupted();
       Exception failure = null;
+
       try {
         process.getOutputStream().close();
-      } catch (IOException error) {
-        failure = error;
+      } catch (IOException | RuntimeException error) {
+        failure = addFailure(failure, error);
       }
+
+      boolean graceful = false;
       try {
-        if (!process.waitFor(5, TimeUnit.SECONDS)) {
-          process.destroyForcibly();
-          if (!process.waitFor(5, TimeUnit.SECONDS)) {
-            IllegalStateException stillAlive =
-                new IllegalStateException("journal lock holder did not exit");
-            if (failure != null) {
-              stillAlive.addSuppressed(failure);
-            }
-            throw stillAlive;
-          }
-        }
+        graceful = process.waitFor(5, TimeUnit.SECONDS);
       } catch (InterruptedException error) {
-        process.destroyForcibly();
-        Thread.currentThread().interrupt();
-        if (failure != null) {
-          error.addSuppressed(failure);
+        interrupted = true;
+        failure = addFailure(failure, error);
+      }
+      if (graceful) {
+        int exitCode = process.exitValue();
+        if (exitCode != 0) {
+          failure =
+              addFailure(
+                  failure,
+                  new IllegalStateException("journal lock holder exited with status " + exitCode));
         }
-        throw error;
-      } finally {
+      } else {
+        failure =
+            addFailure(
+                failure,
+                new IllegalStateException("journal lock holder required forced termination"));
+        try {
+          process.destroyForcibly();
+        } catch (RuntimeException error) {
+          failure = addFailure(failure, error);
+        }
+        boolean terminated = false;
+        try {
+          terminated = process.waitFor(5, TimeUnit.SECONDS);
+        } catch (InterruptedException error) {
+          interrupted = true;
+          failure = addFailure(failure, error);
+        }
+        if (!terminated) {
+          failure =
+              addFailure(
+                  failure,
+                  new IllegalStateException(
+                      "journal lock holder did not exit after forced termination"));
+        }
+      }
+
+      try {
+        process.getInputStream().close();
+      } catch (IOException | RuntimeException error) {
+        failure = addFailure(failure, error);
+      }
+
+      try {
+        reader.join(TimeUnit.SECONDS.toMillis(5));
+      } catch (InterruptedException error) {
+        interrupted = true;
+        failure = addFailure(failure, error);
+      }
+      if (reader.isAlive()) {
+        locked.cancel(true);
+        try {
+          reader.join(TimeUnit.SECONDS.toMillis(1));
+        } catch (InterruptedException error) {
+          interrupted = true;
+          failure = addFailure(failure, error);
+        }
+        if (reader.isAlive()) {
+          failure =
+              addFailure(
+                  failure, new IllegalStateException("journal lock holder reader did not exit"));
+        }
+      }
+
+      try {
         if (process.isAlive()) {
           process.destroyForcibly();
         }
-        if (!locked.isDone()) {
-          locked.cancel(true);
-        }
+      } catch (RuntimeException error) {
+        failure = addFailure(failure, error);
+      }
+
+      if (interrupted) {
+        Thread.currentThread().interrupt();
       }
       if (failure != null) {
         throw failure;
       }
+    }
+
+    private static Exception addFailure(Exception primary, Exception next) {
+      if (primary == null) {
+        return next;
+      }
+      primary.addSuppressed(next);
+      return primary;
     }
   }
 
