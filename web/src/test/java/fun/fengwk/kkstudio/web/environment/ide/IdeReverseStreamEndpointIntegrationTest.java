@@ -89,6 +89,7 @@ class IdeReverseStreamEndpointIntegrationTest extends WebPostgresTestSupport {
         new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
     when(endpoint.connectionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
     FakeDaemon daemon = new FakeDaemon();
+    UUID invocationId = UUID.randomUUID();
     when(endpoint.requestIde(eq(ENVIRONMENT), any()))
         .thenAnswer(
             invocation -> {
@@ -97,7 +98,7 @@ class IdeReverseStreamEndpointIntegrationTest extends WebPostgresTestSupport {
               daemon.dial(streamUrl(command.ticket()));
               CompletableFuture<IdeReply> reply = new CompletableFuture<>();
               reply.complete(IdeReply.ok(null, null, null));
-              return new IdeRequest(identity, UUID.randomUUID(), reply);
+              return new IdeRequest(identity, invocationId, reply);
             });
 
     String cookie = openSession(identity, UUID.randomUUID().toString(), "/home/dev/project");
@@ -127,7 +128,8 @@ class IdeReverseStreamEndpointIntegrationTest extends WebPostgresTestSupport {
       assertNull(response.header("TE"), "hop-by-hop header must not reach the browser");
       assertTrue(daemon.sawRequestEnd.await(5, TimeUnit.SECONDS), "daemon must observe HTTP END");
       assertTrue(daemon.completed.await(5, TimeUnit.SECONDS), "daemon must finish its response");
-      verify(endpoint, timeout(5_000)).abandonIde(any());
+      // 只核对本用例的调用：前序用例失败时遗留的异步 abandon 可能在 mock 重置后才到达。
+      verify(endpoint, timeout(5_000)).abandonIde(invocationId);
     } finally {
       shutdown(browser);
       daemon.awaitStopped();
