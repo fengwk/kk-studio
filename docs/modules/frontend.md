@@ -327,6 +327,13 @@ Environment 管理面展示宿主事实与有界运维事件窗口，并提供�
 工作区内的受管 Environment 支持同源 IDE 嵌入：前端接收服务端的根相对 `entryUrl`（`/environment-ide/{id}/__ide/bootstrap?token=...`），
 直接通过普通 iframe 嵌入；Studio 与受管环境属于同一可信浏览器边界，不要求独立域名。本地开发环境由 Vite 的
 `/environment-ide` 代理通过 `changeOrigin: false, ws: true` 保留 Host 与 Origin 并透传 WebSocket。
+视图存在期间，前端把已校验 `entryUrl` 的 `__ide/bootstrap` 改写为同源 `__ide/session`（丢弃一次性 token 与查询串、保留部署前缀），
+用 `credentials: 'same-origin'`、`cache: 'no-store'` 的 `fetch` 读取状态码；网络错误或有界超时视为未知。
+每 10 秒探测一次，`environment.ready` 由 false 变 true 时立即探测一次，每次 iframe 加载后再探测一次；
+401/409（以及加载后的非 204）标记需要重开，503 或未知只等待。需要重开时用同一 `viewId`、不传 directory 调用
+`createIdeView`，校验新 `entryUrl` 后才替换 iframe；失败保留旧 iframe 并在下一周期重试。重开与首次打开共用单飞状态，
+关闭会等待在途重开，迟到的探测或重开结果不能复活已关闭视图。刷新或关闭页面时（`pagehide` 且 `persisted=false`）
+以 keepalive DELETE 释放当前视图，避免 view 在 Daemon 与网关侧累积；Daemon 仍按 dirty 语义拒绝关闭，bfcache 恢复不释放。
 
 Projects 使用权威 ProjectSnapshot/IssueDetail，按 workflow states 分列，
 通过 version CAS 提交控制、阶段额度、Activity 与 Evidence。

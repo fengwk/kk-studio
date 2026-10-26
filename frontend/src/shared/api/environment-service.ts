@@ -1,4 +1,4 @@
-import { apiClient, type HttpClient } from '@/shared/api/client'
+import { apiBaseUrl, apiClient, type HttpClient } from '@/shared/api/client'
 import type {
   EnvironmentCardDTO,
   EnvironmentCreateDTO,
@@ -80,9 +80,40 @@ export function createEnvironmentService(client: HttpClient = apiClient) {
       ),
 
     closeIdeView: (environmentId: string, viewId: string): Promise<void> =>
-      client.delete(
-        `/environments/${encodeURIComponent(environmentId)}/ide/views/${encodeURIComponent(viewId)}`,
-      ),
+      client.delete(ideViewPath(environmentId, viewId)),
+
+    /**
+     * 只读探测同源 IDE 会话；网络错误或超时返回 null（未知），不做重试。
+     * 探测地址由已校验的 entryUrl 从 __ide/bootstrap 改写为 __ide/session，不带 bootstrap token。
+     */
+    probeIdeSession: (sessionUrl: string, signal?: AbortSignal): Promise<number | null> =>
+      probeIdeSession(sessionUrl, signal),
+
+    /** pagehide 时用 keepalive DELETE 释放视图；Daemon 仍按 dirty 语义拒绝关闭。 */
+    closeIdeViewKeepalive: (environmentId: string, viewId: string): Promise<void> =>
+      fetch(`${apiBaseUrl}${ideViewPath(environmentId, viewId)}`, {
+        method: 'DELETE',
+        credentials: 'same-origin',
+        keepalive: true,
+      }).then(() => undefined),
+  }
+}
+
+function ideViewPath(environmentId: string, viewId: string): string {
+  return `/environments/${encodeURIComponent(environmentId)}/ide/views/${encodeURIComponent(viewId)}`
+}
+
+async function probeIdeSession(sessionUrl: string, signal?: AbortSignal): Promise<number | null> {
+  try {
+    const response = await fetch(sessionUrl, {
+      method: 'GET',
+      credentials: 'same-origin',
+      cache: 'no-store',
+      signal,
+    })
+    return response.status
+  } catch {
+    return null
   }
 }
 
