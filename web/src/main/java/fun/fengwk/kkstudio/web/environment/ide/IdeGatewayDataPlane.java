@@ -224,7 +224,7 @@ public final class IdeGatewayDataPlane {
           new Exchange(request, response, environmentId, peer, properties.requireRequestTimeout());
       exchange.run(request);
     } catch (IdeStreamPairingException error) {
-      logFailedExchange(environmentId, request, "PAIRING_FAILED", null, ideRequest, startedNanos);
+      logFailedExchange(environmentId, "PAIRING_FAILED", null, ideRequest, startedNanos);
       sendError(response, HttpServletResponse.SC_GATEWAY_TIMEOUT);
     } catch (EnvironmentCapabilityUnavailableException
         | EnvironmentCapabilityBusyException
@@ -234,7 +234,7 @@ public final class IdeGatewayDataPlane {
       if (exchange == null || !exchange.browserFailed) {
         // 浏览器自行离开属于正常结束；其余失败来自 Daemon 侧或网关，必须留下可判定关闭方的诊断。
         logFailedExchange(
-            environmentId, request, error.toString(), exchange, ideRequest, startedNanos);
+            environmentId, error.getClass().getSimpleName(), exchange, ideRequest, startedNanos);
       }
       // 上游/传输失败：尚未提交时清理已被 forward 写入的响应头与缓冲，避免残留 Content-Encoding/ETag/Location 污染错误响应；
       // 已提交的截断响应无法回滚，保持异常中止（绝不伪造已完整收到的压缩字节）。
@@ -249,20 +249,18 @@ public final class IdeGatewayDataPlane {
     }
   }
 
-  /** 一条 HTTP exchange 非正常结束时的单行诊断：结束原因、Daemon 关闭码与失败回执、已交付字节与时长；不记录查询串。 */
+  /** 一条 HTTP exchange 非正常结束时的安全诊断；不记录 URL、异常消息或对端回执文本。 */
   private static void logFailedExchange(
       EnvironmentId environmentId,
-      HttpServletRequest request,
       String outcome,
       Exchange exchange,
       IdeRequest ideRequest,
       long startedNanos) {
     log.info(
-        "ide http exchange failed: environment={} method={} path={} outcome={} daemonClose={}"
+        "ide http exchange failed: environment={} invocation={} outcome={} daemonClose={}"
             + " daemonReply={} responseStarted={} fromDaemon={} frames/{} bytes durationMs={}",
         environmentId,
-        request.getMethod(),
-        request.getRequestURI(),
+        ideRequest == null ? "-" : ideRequest.invocationId(),
         outcome,
         exchange == null ? "-" : IdeStreamDiagnostics.describe(exchange.peer.remoteCloseStatus()),
         IdeStreamDiagnostics.replyFailure(ideRequest, IdeStreamDiagnostics.REPLY_GRACE),

@@ -68,7 +68,9 @@ public final class IdeOwnerStreamForwarder {
     try {
       target = internalWebSocketUri(owner.internalUrl(), canonicalPath);
     } catch (IllegalArgumentException error) {
-      log.info("cannot forward ide reverse stream to the owner: {}", error.getMessage());
+      log.info(
+          "cannot forward ide reverse stream; phase=IDE_OWNER_URI; exception={}",
+          error.getClass().getSimpleName());
       nodePeer.close(OWNER_UNREACHABLE);
       return;
     }
@@ -105,7 +107,9 @@ public final class IdeOwnerStreamForwarder {
 
               @Override
               public void handleTransportError(WebSocketSession session, Throwable exception) {
-                log.info("ide reverse forward transport error: {}", exception.toString());
+                log.info(
+                    "ide reverse forward transport failed; phase=IDE_OWNER_TRANSPORT; exception={}",
+                    exception.getClass().getSimpleName());
                 detach(
                     ownerPeer,
                     CloseStatus.NO_CLOSE_FRAME.withReason(
@@ -117,7 +121,9 @@ public final class IdeOwnerStreamForwarder {
     pending.whenComplete(
         (session, error) -> {
           if (error != null) {
-            log.info("ide reverse forward to owner failed: {}", error.toString());
+            log.info(
+                "ide reverse forward to owner failed; phase=IDE_OWNER_CONNECT; exception={}",
+                error.getClass().getSimpleName());
             nodePeer.close(OWNER_UNREACHABLE);
           }
         });

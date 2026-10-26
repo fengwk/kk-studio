@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { IdeError, safeMessage } from '../../src/ide/errors.js'
+import { WireError } from '../../src/ide/wire.js'
 import { canonicalDirectory, hostHome, newViewId, validateViewId, workspaceFileContent } from '../../src/ide/workspace.js'
 
 const cleanups: (() => Promise<void> | void)[] = []
@@ -57,6 +58,8 @@ describe('safe error messages', () => {
     aborted.name = 'AbortError'
     expect(safeMessage(aborted)).toBe('ide request was cancelled')
     expect(safeMessage(new Error('secret token=abc'))).toBe('ide request failed')
+    // Transport and peer protocol errors are not trusted operator-safe messages.
+    expect(safeMessage(new WireError('synthetic-sensitive-stream-error'))).toBe('ide stream protocol or transport failed')
     expect(safeMessage('nonsense')).toBe('ide request failed')
   })
 })
