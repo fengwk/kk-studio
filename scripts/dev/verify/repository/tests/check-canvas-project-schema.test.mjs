@@ -119,8 +119,8 @@ function declaredTargetContract(sql) {
 }
 
 test('test intent: the inventory equals the tables the real baseline creates and targets are a subset', () => {
+  // The baseline DDL is the only table-count fact source; no second hardcoded total to keep in sync.
   assert.deepEqual([...BUSINESS_TABLES].sort(), declaredBaselineTables(BASELINE))
-  assert.equal(BUSINESS_TABLES.length, 46)
   assert.ok(TARGET_TABLES.every((table) => BUSINESS_TABLES.includes(table)))
 })
 
