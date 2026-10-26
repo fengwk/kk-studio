@@ -9,9 +9,12 @@ import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
@@ -19,6 +22,8 @@ import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
 
 class FileExecutionExitJournalTest {
 
@@ -447,6 +452,57 @@ class FileExecutionExitJournalTest {
   }
 
   @Test
+  void constructorFailsWithoutAcquiringChannelWhenLockFileIsNotWritable(@TempDir Path directory)
+      throws Exception {
+    assumePosixNonRoot(directory);
+    Path lockPath = directory.resolve(".lock");
+    Files.writeString(lockPath, "");
+
+    try (AutoCloseable restore = filePermissions(lockPath, "r--------")) {
+      ExecutionExitJournalException failure =
+          assertThrows(
+              ExecutionExitJournalException.class, () -> new FileExecutionExitJournal(directory));
+      assertTrue(failure.getMessage().contains("cannot lock"));
+    }
+
+    ExecutionExitJournalRecord record =
+        record(
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            ExecutionExitState.STUDIO_EXITED,
+            T0);
+    try (FileExecutionExitJournal journal = new FileExecutionExitJournal(directory)) {
+      journal.write(record);
+      assertEquals(List.of(record), journal.loadAll());
+    }
+  }
+
+  @Test
+  void crossProcessLockHolderPreventsASecondJournalProcess(@TempDir Path directory)
+      throws Exception {
+    try (CrossProcessLock holder = CrossProcessLock.start(directory)) {
+      holder.awaitLocked();
+      ExecutionExitJournalException locked =
+          assertThrows(
+              ExecutionExitJournalException.class, () -> new FileExecutionExitJournal(directory));
+      assertTrue(locked.getMessage().contains("already locked"));
+    }
+
+    ExecutionExitJournalRecord record =
+        record(
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            ExecutionExitState.STUDIO_EXITED,
+            T0);
+    try (FileExecutionExitJournal journal = new FileExecutionExitJournal(directory)) {
+      journal.write(record);
+      assertEquals(List.of(record), journal.loadAll());
+    }
+  }
+
+  @Test
   void strictJsonParsingRejectsNonObjectDuplicateKeysAndTrailingTokens(@TempDir Path directory)
       throws IOException {
     UUID executionId = UUID.randomUUID();
@@ -503,6 +559,107 @@ class FileExecutionExitJournalTest {
     Files.setPosixFilePermissions(directory, PosixFilePermissions.fromString(permissions));
     return () ->
         Files.setPosixFilePermissions(directory, PosixFilePermissions.fromString("rwx------"));
+  }
+
+  /** 设置文件权限，并在 TWR 关闭时恢复 0600。 */
+  private static AutoCloseable filePermissions(Path file, String permissions) throws IOException {
+    Files.setPosixFilePermissions(file, PosixFilePermissions.fromString(permissions));
+    return () -> Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("rw-------"));
+  }
+
+  /** 真实跨进程锁持有者：子进程用同一 java.home 启动，握手完成后阻塞等待父进程关闭 stdin。 */
+  private static final class CrossProcessLock implements AutoCloseable {
+
+    private final Process process;
+    private final FutureTask<String> locked;
+
+    private CrossProcessLock(Process process, FutureTask<String> locked) {
+      this.process = process;
+      this.locked = locked;
+    }
+
+    static CrossProcessLock start(Path directory) throws IOException {
+      String java = Path.of(System.getProperty("java.home"), "bin", "java").toString();
+      String classpath =
+          System.getProperty("surefire.test.class.path", System.getProperty("java.class.path"));
+      Process process =
+          new ProcessBuilder(
+                  java, "-cp", classpath, LockHolderProbe.class.getName(), directory.toString())
+              .redirectErrorStream(true)
+              .start();
+      FutureTask<String> locked =
+          new FutureTask<>(
+              new BufferedReader(
+                      new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))
+                  ::readLine);
+      Thread reader = new Thread(locked, "execution-exit-journal-lock-probe");
+      reader.setDaemon(true);
+      reader.start();
+      return new CrossProcessLock(process, locked);
+    }
+
+    void awaitLocked() throws Exception {
+      String line = locked.get(10, TimeUnit.SECONDS);
+      if (!"LOCKED".equals(line)) {
+        throw new IllegalStateException("journal lock holder did not acquire the lock: " + line);
+      }
+    }
+
+    @Override
+    public void close() throws Exception {
+      Exception failure = null;
+      try {
+        process.getOutputStream().close();
+      } catch (IOException error) {
+        failure = error;
+      }
+      try {
+        if (!process.waitFor(5, TimeUnit.SECONDS)) {
+          process.destroyForcibly();
+          if (!process.waitFor(5, TimeUnit.SECONDS)) {
+            IllegalStateException stillAlive =
+                new IllegalStateException("journal lock holder did not exit");
+            if (failure != null) {
+              stillAlive.addSuppressed(failure);
+            }
+            throw stillAlive;
+          }
+        }
+      } catch (InterruptedException error) {
+        process.destroyForcibly();
+        Thread.currentThread().interrupt();
+        if (failure != null) {
+          error.addSuppressed(failure);
+        }
+        throw error;
+      } finally {
+        if (process.isAlive()) {
+          process.destroyForcibly();
+        }
+        if (!locked.isDone()) {
+          locked.cancel(true);
+        }
+      }
+      if (failure != null) {
+        throw failure;
+      }
+    }
+  }
+
+  /** test-only 子进程入口：持有真实 journal 目录锁，直到父进程关闭 stdin。 */
+  public static final class LockHolderProbe {
+
+    private LockHolderProbe() {}
+
+    public static void main(String[] args) throws Exception {
+      try (FileExecutionExitJournal ignored = new FileExecutionExitJournal(Path.of(args[0]))) {
+        System.out.println("LOCKED");
+        System.out.flush();
+        while (System.in.read() != -1) {
+          // 父进程通过关闭 stdin 请求释放锁。
+        }
+      }
+    }
   }
 
   private static void assertNoTemporaryFiles(Path directory) throws IOException {
