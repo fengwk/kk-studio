@@ -66,6 +66,7 @@ function snapshot(thread: Record<string, unknown>) {
     modelAttemptFailures: [],
     manualCompaction: { available: false, disabledReason: null },
     stopReceipts: [],
+    unconfirmedExecutions: [],
   }
 }
 
