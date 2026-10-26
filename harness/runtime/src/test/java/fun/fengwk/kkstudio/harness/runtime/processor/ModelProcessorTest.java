@@ -14,6 +14,7 @@ import static org.mockito.Mockito.mock;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import tools.jackson.databind.node.JsonNodeFactory;
 
@@ -26,6 +27,7 @@ import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState;
@@ -234,9 +236,16 @@ class ModelProcessorTest {
     assertEquals("token-" + fixture.invocationId, modelWork.leaseToken());
   }
 
-  /** Model 最终答案先物化、close 后释放：确认前 Join 不交付，真实 finally 确认在同一事务内补结算一次。 */
-  @Test
-  void modelFinalAnswerSettlesJoinOnlyAfterAdmissionClose() throws Exception {
+  /**
+   * Model 终态先物化、close 后释放：确认前 Join 不交付，真实 finally 确认在同一事务内补结算一次；与普通终止路径一致，只有正常完成冻结最终回答，截断与过滤的
+   * FAILED 回合即使以 ASSISTANT 消息结尾也不冻结。
+   */
+  @ParameterizedTest
+  @EnumSource(
+      value = GenerationStopReason.class,
+      names = {"COMPLETE", "LENGTH", "FILTERED"})
+  void modelTerminalSettlesJoinOnlyAfterAdmissionClose(GenerationStopReason stopReason)
+      throws Exception {
     Fixture fixture = fixture();
     deleteModelWork(fixture);
     fixture.store.transaction(
@@ -261,8 +270,7 @@ class ModelProcessorTest {
           public ModelGateway.Outcome run(ModelGateway.Sink sink) {
             runner.set(Thread.currentThread());
             return new ModelGateway.Succeeded(
-                new ProviderCompletion(
-                    response("final answer", GenerationStopReason.COMPLETE), null));
+                new ProviderCompletion(response("final answer", stopReason), null));
           }
 
           @Override
@@ -301,9 +309,18 @@ class ModelProcessorTest {
       EntryPath materializedPath =
           fixture.store.transaction(
               tx -> tx.loadEntryPath(tx.findThread(basis.threadId()).orElseThrow().headEntryId()));
+      boolean completed = stopReason == GenerationStopReason.COMPLETE;
+      TurnEndOutcome expectedOutcome = completed ? TurnEndOutcome.COMPLETED : TurnEndOutcome.FAILED;
       assertTrue(
-          materializedPath.head().payload() instanceof TurnEndPayload end && !end.continueModel(),
-          () -> "head=" + materializedPath.head().payload().type());
+          materializedPath.head().payload() instanceof TurnEndPayload end
+              && !end.continueModel()
+              && end.outcome() == expectedOutcome,
+          () -> "head=" + materializedPath.head().payload());
+      assertTrue(
+          materializedPath.entries().get(materializedPath.entries().size() - 2).payload()
+                  instanceof MessagePayload message
+              && message.message().role() == AgentMessageRole.ASSISTANT,
+          "the closed turn ends with the ASSISTANT response in every case");
       long versionBeforeExit = thread(fixture.store, basis.threadId()).version();
 
       releaseClose.countDown();
@@ -315,12 +332,18 @@ class ModelProcessorTest {
           "real finally confirmation commits before checking Join");
       ThreadJoin settled = fixture.store.transaction(tx -> tx.findJoin(joinId).orElseThrow());
       assertTrue(settled.matched());
-      assertNotNull(settled.finalAnswerEntryId());
-      Entry answer =
-          fixture.store.transaction(tx -> tx.findEntry(settled.finalAnswerEntryId()).orElseThrow());
-      assertTrue(
-          answer.payload() instanceof MessagePayload message
-              && message.message().role() == AgentMessageRole.ASSISTANT);
+      assertEquals(materializedPath.head().id(), settled.terminalEntryId());
+      if (completed) {
+        assertNotNull(settled.finalAnswerEntryId());
+        Entry answer =
+            fixture.store.transaction(
+                tx -> tx.findEntry(settled.finalAnswerEntryId()).orElseThrow());
+        assertTrue(
+            answer.payload() instanceof MessagePayload message
+                && message.message().role() == AgentMessageRole.ASSISTANT);
+      } else {
+        assertNull(settled.finalAnswerEntryId(), "a FAILED turn freezes no final answer");
+      }
       assertEquals(versionBeforeExit + 1, thread(fixture.store, basis.threadId()).version());
       assertEquals(
           ExecutionExitState.STUDIO_EXITED,
