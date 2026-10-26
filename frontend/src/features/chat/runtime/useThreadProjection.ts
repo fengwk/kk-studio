@@ -38,6 +38,7 @@ export function useThreadProjection(threadId: string) {
     toolInvocations,
     modelAttemptFailures,
     stopReceipts,
+    unconfirmedExecutions,
     manualCompaction,
     snapshotQuery,
   } = useAgentThreadQueries(threadId)
@@ -107,6 +108,7 @@ export function useThreadProjection(threadId: string) {
     queuedCustomMessages,
     manualCompaction,
     stopReceipts,
+    unconfirmedExecutions,
     modelInvocation,
     toolInvocations,
     modelAttemptFailures,

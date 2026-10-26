@@ -123,6 +123,7 @@ function snapshotOf(
       disabledReason: 'Thread snapshot is not loaded',
     },
     stopReceipts: [],
+    unconfirmedExecutions: [],
     ...extras,
   }
 }

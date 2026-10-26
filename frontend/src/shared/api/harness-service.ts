@@ -40,6 +40,7 @@ import type {
  * - GET /threads/{id}/system-prompt
  * - PUT /threads/{id}/yolo
  * - POST /threads/{id}/stop
+ * - POST /threads/{threadId}/executions/{executionId}/abandon
  * - PUT /threads/{threadId}/tool-invocations/{invocationId}/approval
  */
 export function createHarnessService(client: HttpClient = apiClient) {
@@ -121,6 +122,20 @@ export function createHarnessService(client: HttpClient = apiClient) {
       data: HarnessThreadStopDTO,
     ): Promise<HarnessThreadStopResultDTO> =>
       client.post(`/threads/${encodeURIComponent(threadId)}/stop`, data),
+
+    /**
+     * 显式放弃等待一个未确认退出事实。服务端按 `(threadId, executionId, expectedVersion)`
+     * CAS；重复放弃或已真实确认的执行安全 replay，返回当前完整快照。
+     */
+    abandonExecution: (
+      threadId: string,
+      executionId: string,
+      data: { expectedVersion: string },
+    ): Promise<HarnessThreadSnapshotDTO> =>
+      client.post(
+        `/threads/${encodeURIComponent(threadId)}/executions/${encodeURIComponent(executionId)}/abandon`,
+        data,
+      ),
 
     decideApproval: (
       threadId: string,

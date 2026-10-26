@@ -109,6 +109,7 @@ function snapshotOf(
     toolInvocations: [],
     modelAttemptFailures: [],
     stopReceipts: [],
+    unconfirmedExecutions: [],
     manualCompaction: { available: false, disabledReason: null },
     ...extras,
   }
