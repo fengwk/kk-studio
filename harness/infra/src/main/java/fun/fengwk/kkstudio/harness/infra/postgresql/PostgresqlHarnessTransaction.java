@@ -1451,6 +1451,26 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   @Override
+  public boolean hasAppliedNotificationAfter(UUID threadId, long afterSequence) {
+    checkOpen();
+    Objects.requireNonNull(threadId, "threadId");
+    Boolean found =
+        queryForObject(
+            """
+            select exists(
+              select 1
+              from harness_thread_command
+              where thread_id = ? and sequence > ?
+                and command_type = 'NOTIFICATION' and applied_entry_id is not null
+            )
+            """,
+            Boolean.class,
+            threadId,
+            afterSequence);
+    return Boolean.TRUE.equals(found);
+  }
+
+  @Override
   public List<ThreadCommand> loadCancelledCommandsByRequest(UUID threadId, UUID stopRequestId) {
     checkOpen();
     Objects.requireNonNull(threadId, "threadId");

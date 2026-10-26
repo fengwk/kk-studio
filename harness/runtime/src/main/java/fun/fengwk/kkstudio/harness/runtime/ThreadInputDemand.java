@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.harness.runtime;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
 
 import java.util.List;
 
@@ -23,8 +22,7 @@ public final class ThreadInputDemand {
     if (hasQueuedDemand(tx.loadQueuedCommands(thread.id()))) {
       return true;
     }
-    return hasUnconsumedNotification(
-        tx.loadCommandsByThread(thread.id()), thread.inputThroughSequence());
+    return hasUnconsumedNotification(tx, thread);
   }
 
   /** queued 快照中是否存在需要驱动 turn 的输入（USER_MESSAGE、USER CUSTOM_MESSAGE 或系统 NOTIFICATION）。 */
@@ -38,15 +36,7 @@ public final class ThreadInputDemand {
   }
 
   /** 已物化但位于输入水位之后的 APPLIED 系统通知是否仍待 INPUT 接纳。 */
-  public static boolean hasUnconsumedNotification(
-      List<ThreadCommand> commands, long inputThroughSequence) {
-    for (ThreadCommand command : commands) {
-      if (command.sequence() > inputThroughSequence
-          && command.state() == ThreadCommandState.APPLIED
-          && command.type().isNotification()) {
-        return true;
-      }
-    }
-    return false;
+  public static boolean hasUnconsumedNotification(HarnessStore.Transaction tx, ThreadState thread) {
+    return tx.hasAppliedNotificationAfter(thread.id(), thread.inputThroughSequence());
   }
 }

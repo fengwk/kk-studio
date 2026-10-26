@@ -23,7 +23,8 @@ import java.util.UUID;
 
 /**
  * {@link ThreadInputDemand} 抽取自 Processor 的同一输入需求判据，本测试以 typed 矩阵锁定其语义：消息/通知构成 turn 需求，
- * 设置与已终结命令不构成；已物化但未越过输入水位的 APPLIED 通知仍构成需求，其余状态不构成。
+ * 设置与已终结命令不构成。已物化但未越过输入水位的 APPLIED 通知由 store 原语判定，其状态矩阵在 {@code HarnessStoreCommandContract} 中对两种
+ * store 一起验证。
  */
 class ThreadInputDemandTest {
 
@@ -42,30 +43,6 @@ class ThreadInputDemandTest {
         ThreadInputDemand.hasQueuedDemand(
             List.of(command(1L, new SetAgentCommandPayload("assistant"), null, null))));
     assertFalse(ThreadInputDemand.hasQueuedDemand(List.of()));
-  }
-
-  /** 只有水位之后的 APPLIED 通知构成未接纳需求；QUEUED/CANCELLED、非通知类型与已越过水位都不构成。 */
-  @Test
-  void hasUnconsumedNotificationOnlyCountsAppliedNotificationBeyondWatermark() {
-    UUID notificationId = UUID.randomUUID();
-    ThreadCommand appliedNotification =
-        command(2L, notification(notificationId), TestIds.id(3), null);
-    assertTrue(ThreadInputDemand.hasUnconsumedNotification(List.of(appliedNotification), 1L));
-    assertFalse(ThreadInputDemand.hasUnconsumedNotification(List.of(appliedNotification), 2L));
-
-    // 尚未 APPLIED 的通知不是可接纳的已物化需求。
-    assertFalse(
-        ThreadInputDemand.hasUnconsumedNotification(
-            List.of(command(2L, notification(notificationId), null, null)), 1L));
-    // 已取消的命令不算需求。
-    assertFalse(
-        ThreadInputDemand.hasUnconsumedNotification(
-            List.of(command(2L, notification(notificationId), null, TestIds.id(4))), 1L));
-    // 非通知类型即使 APPLIED 也不构成「未接纳通知」。
-    assertFalse(
-        ThreadInputDemand.hasUnconsumedNotification(
-            List.of(command(2L, userMessage(), TestIds.id(5), null)), 1L));
-    assertFalse(ThreadInputDemand.hasUnconsumedNotification(List.of(), 0L));
   }
 
   /** queued 用户消息构成输入需求。 */
