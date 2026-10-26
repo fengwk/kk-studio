@@ -312,8 +312,8 @@ class ExecutionExitConfirmerDurabilityTest {
     ExecutionExitConfirmer confirmer =
         TestExecutionExitConfirmer.create(store, Clock.fixed(T0, ZoneOffset.UTC));
     CountDownLatch start = new CountDownLatch(1);
-    ExecutorService workers = Executors.newFixedThreadPool(2);
-    try {
+    // TWR waits for both callbacks even if one assertion fails, so no worker outlives this test.
+    try (ExecutorService workers = Executors.newFixedThreadPool(2)) {
       var first = workers.submit(() -> confirmAfter(start, confirmer, fact));
       var second = workers.submit(() -> confirmAfter(start, confirmer, fact));
       start.countDown();
@@ -321,8 +321,6 @@ class ExecutionExitConfirmerDurabilityTest {
           ExecutionExitConfirmer.Outcome.CONFIRMED, first.get(5, TimeUnit.SECONDS).outcome());
       assertEquals(
           ExecutionExitConfirmer.Outcome.CONFIRMED, second.get(5, TimeUnit.SECONDS).outcome());
-    } finally {
-      workers.shutdownNow();
     }
     ExecutionExitFact confirmed =
         store.transaction(tx -> tx.findExecution(fact.executionId()).orElseThrow());
