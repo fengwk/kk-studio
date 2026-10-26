@@ -638,3 +638,101 @@ invocation 抛 `DaemonProtocolException` 并关闭连接；`MAX_INVOCATION_TOMBS
    冻结最终 SHA，运行 `validate_only=true` 全量 CI 并核对 `head_sha`（第 11 节）。
 3. 未审部分：全部测试差异（约 14k 行）、E2E case 与脚本测试文件、docs/build；M1 的生产 Provider 核对；L4。
 4. 推送 `handoff`、合入 `main`/`dev`、`v4.0.0` tag 与 Daemon Release 仍需用户单独授权。
+
+## 17. 2026-10-26 第二轮：根因修复与收尾清单
+
+本节写给零上下文的接手者：先读第 14 节授权边界与 16.1 环境说明，再按 17.4 的顺序收尾。
+
+### 17.1 用户指令与授权
+
+- 用户要求根因修复，不接受表面修复。对 16.5 的待决项，用户已同意按本节推荐方案实施，不必再次征求设计意见；集成测试在受限环境可以先跳过。
+- 用户授权提交并推送 `handoff` 分支，本节即为推送内容。合入 `main`/`dev`、tag/发布、全量 CI 触发、生产操作与真实模型请求仍按第 14 节需单独授权。
+- 约束不变：不削弱 Spotless/Checkstyle/JaCoCo/敏感数据/文档/版本门禁；未知退出保持 UNCONFIRMED，不得 force-clear、伪造 ACK 或合成物理退出事实；只做普通提交。
+
+### 17.2 本轮提交（`d7d922f03` 之后）
+
+| 提交 | 内容 |
+| --- | --- |
+| `9e512a678` | fix(ide)：反向流 credit 按帧计价（每帧至少 512），网关转述 Daemon 关闭码，补每条流的诊断日志，HTTP exchange 改为空闲超时；Daemon wire 协议升到 6 |
+| `f20fe68cb` | fix(environment)：同实例重连发送 RECOVER 恢复在途调用，不再一律 CANCEL（H2）；tombstone 淘汰优先已交付退出确认的条目（M5） |
+| `9d5bfefe3` | fix(ide)：IDE 凭据绑定 Daemon 实例而不是路由租约，重连不再作废会话（I2 后端）；新增 `__ide/session` 探测 |
+| 本文件更新 | 本节 |
+
+### 17.3 根因与修复
+
+1. **线上 IDE 断流（代码层根因之一，已复现）。** credit 只按字节计价，而网关入站队列另有 512 帧上限：守约的 Daemon 在一个 262144 字节窗口内
+   可以发出上千个小帧（code-server 终端输出、RPC、文件事件）。复现：HTTP 1000 个小帧 → 网关以 1009 关闭反向流，浏览器拿到截断的 200；
+   WebSocket 1000 帧只收到 690 帧后 1011。修复（`9e512a678`）：每个数据帧消耗 `max(载荷, 512)`，在途帧数因此 ≤ 512，两端队列上界由
+   credit 推导；ACK 必须 ≥ 512 且不超过未确认量；超界按协议违规以 1008 关闭。网关现在转述 Daemon 关闭码（只有缺失或不可发送时才用
+   1011），每条 IDE WebSocket 结束和每条非正常结束的 HTTP exchange 都写一行诊断（结束原因、双方关闭码、`OPEN_STREAM` 失败回执、帧数与
+   字节数、时长）；Daemon 写 `daemon ide <mode> stream failed: <原因>`。HTTP 的 `request-timeout` 改为首个响应与两次进展之间的空闲上限。
+   线上首次关闭方仍需部署后用这些日志确认。**这是 Daemon wire 协议变更（`DaemonProtocol.VERSION = 6`），属于 Daemon 发布：旧 Daemon 在
+   HELLO 被拒，需要重装（`docs/operations/environment-daemon.md` 已有通用说明）；4.0.0 尚未发布，无需另行升版本，但 v4.0.0 的 Daemon
+   Release 必须包含它。** 证据：harness/environment、apps/ide、web 的 IDE 用例与新增回归用例
+   `IdeReverseStreamSmallFrameIntegrationTest`（4000 个 16 字节帧，HTTP 与 WS）通过；Daemon vitest 1275 通过；credit 变异会让用例失败。
+2. **H2 同实例重连取消全部在途远端调用。** `recoverActiveInvocations` 对旧连接代际的未终结调用一律发 CANCEL。修复（`f20fe68cb`）：新增
+   Server→Daemon 的 `RECOVER`，Daemon 按 journal 重放而不重新执行：仍在运行的回 `STARTED {replayed:true}`，已终结的重放终态与
+   `EXECUTION_EXITED`，未知的静默；只有调用方已取消的才发 CANCEL。文档：`docs/modules/harness-environment.md`、`docs/modules/daemon.md`。
+3. **M5 迟到退出确认因 tombstone 淘汰而断连。** 淘汰改为优先淘汰已交付退出确认的条目，等待确认的条目最后才淘汰（变异验证）；真正未知的
+   迟到确认仍按协议违规关闭，此时已极少发生。
+4. **I2 任何重连都让打开着的 IDE 失效。** 每次 HELLO 都会铸造新的 lease token，而 IDE cookie、票据、配对与流都绑定它：重连后所有流被关，
+   旧标签页的每个请求都是 409，前端也不会重新打开。修复（`9d5bfefe3`，后端）：IDE 代际改为 Daemon 实例（`DaemonConnectionIdentity` 去掉
+   lease）。内核只在另一个实例于本节点接管时发出 `EnvironmentSessionListener.onDaemonInstanceReplaced(previous)`，由
+   `IdeGenerationCloseListener` 关闭旧代际（配对、两类票据、浏览器会话）。各入口按 `IdeGenerationState` 裁决：CURRENT 继续；DISCONNECTED
+   返回 503 且保留 cookie；REPLACED 返回 409。去掉了 30 秒代际复核；反向回拨只在 REPLACED 时拒绝；新增只读的
+   `GET /environment-ide/{env}/__ide/session`（204/401/409/503，跨节点单跳到 owner）。证据：三模块 IDE 相关用例 129 个，修复 1 处测试数据
+   后，剩余 3 个失败只因系统 Node 22，用 Node 24 复跑通过；三模块 `validate`、文档门禁、敏感数据门禁通过。**前端部分未完成，见 17.4 第 1 项。**
+5. **更正 16.4 第 11 项的自评。** 按模型名计价与 v2.0.0 “模型名是全局身份”的设计一致，是完整修复而不是表面修复，无需改动。
+
+### 17.4 待办（按顺序，均已获准按推荐方案实施）
+
+1. **I2 前端：探测会话并自动重新打开。** 文件：`frontend/src/features/environment/ide/IdeOverlayPanel.tsx`、`ide-url.ts`、
+   `frontend/src/shared/api/environment-service.ts` 及对应测试。
+   - 由已校验的 entryUrl 推导探测地址：把末尾的 `__ide/bootstrap` 换成 `__ide/session` 并去掉查询串（保留部署前缀）。用 `fetch`
+     （`credentials: 'same-origin'`、`cache: 'no-store'`）取状态码，网络错误视为未知。
+   - 视图存在时每 10 秒探测一次；`environment.ready` 变为 true 时立即探测。401/409 标记需要重新打开；需要重新打开且状态既不是 503 也不是
+     网络错误时，用同一 `viewId` 调 `createIdeView`（Daemon 对已存在视图的 `OPEN_VIEW` 幂等；不传 directory，避免与 Daemon 记录冲突）。
+     校验新的 entryUrl 后替换视图，iframe 随之重新加载；失败时保留旧 iframe，下个周期再试；每个周期最多重开一次。复用
+     `openInFlightRef`/`openingPromiseRef`，让 `requestClose` 等待重开完成。
+   - 每次 iframe `onLoad` 后探测一次，结果不是 204 就标记需要重新打开，覆盖“bootstrap 恰好发生在断线期间”的情况。
+   - `pagehide`（`persisted` 为 false）时用 `fetch(DELETE /api/environments/{env}/ide/views/{viewId}, {keepalive: true})` 释放活跃视图。
+     原因：刷新页面不会卸载 React 组件，每次刷新都换随机 `viewId`，旧视图在 Daemon 与网关两侧累积；代际改为实例级后，累积会持续到 Daemon 重启，
+     最终触发 `MAX_VIEWS_PER_GENERATION = 64` 的“视图额度耗尽”。脏窗口仍由 Daemon 拒绝关闭，不丢数据。
+   - 测试：401/409 触发重开、503 不重开、onLoad 后失败在恢复时重开、pagehide 发送 keepalive DELETE；同步前端文档。
+2. **A7 + M4：统一退出确认并收窄锁。** 根因（16.4 第 7 项的源头）：`ToolExecution.confirm`、`ToolExecution.confirmRemote` 与 `ModelExecution`
+   的确认各写一份，对“Thread 已深删”的处理曾经分叉。做法：合并为一个确认组件，两条路径共用；锁收窄：Thread 为 RUNNABLE 且没有未完成 Join 时
+   只锁本 Thread 完成确认，需要结算时再走完整 `lockAncestorChain`。注意锁序与并发结算，补并发用例。
+3. **H1：未确认退出的收敛出口。** 推荐方案：
+   - 用户显式“放弃确认”，记录为独立的 ABANDONED 事实，不冒充退出；之后到达的真实退出证据可以取代 ABANDONED。全栈改动：ledger 状态、schema
+     CHECK、store、runtime API、web 端点、DTO/TS 契约、UI 按钮、i18n、文档。
+   - 确认写入失败时持久化重试（数据库瞬时故障、主备切换、死锁回滚后仍能补确认），不再只记日志。
+   - 宿主死亡证据（例如 `cluster_node` 实例被替换）可行就实现，否则写入已知限制。
+   - 不得 force-clear 或伪造 ACK。
+4. **#5 / A5：拒绝对 STOPPED Thread 手动压缩。** 手动压缩 API 没有 STOPPED 守卫，16.4 第 5 项改写测试时假设的“STOPPED + open 压缩回合”可能经真实
+   路径可达。新增 DisabledReason 贯通 runtime → web → 前端，先写可达性测试再修。
+5. **A6：最终回答的推导只保留一处。** 根因（16.4 第 6 项的源头）：`ModelOutcomeAppender` 与 `ExecutionExitLedger.settleClosedTurn` 各自推导
+   `finalAnswerEntryId`。抽成共享函数，两处共用。
+6. **A8：从 store 接口删除 `loadCommandsByThread`。** 生产代码已不调用（16.4 第 8 项）；约 40 处测试改用测试辅助方法。
+7. **A9：`harness_execution_exit` 的保留策略。** 目前只有深删会清理这些行。与 H1 一起决定清理时机，或写入文档。
+8. **H3：删除 `openAiChatIncludeUsage`。** 编码器恒发 `include_usage=true`；同步配置同步、`docs/modules/harness-provider.md` 与测试，并决定已有配置中该字段的处理方式。
+9. **M1：** 在文档与发布说明写明 usage 现在是必需字段，上游缺失即调用失败；发布前核对生产 Provider。
+10. **A3 / A4：定价条件文案改为单一静态映射。** 根因（16.4 第 2、3 项的源头）：i18n key 由字符串动态拼接，编译器查不到缺失的 key。在
+    `AiModelPricingEditor` 用一张 `CONDITION_LABELS` 表覆盖全部条件文案，并把 `translate` 的参数收紧为目录 key 联合类型（约 19 处动态 key 需改写）。
+11. **A12：schema 检查脚本只保留一个事实源。** 根因（16.4 第 12 项的源头）：表数量在脚本与测试中各写一份。删除脚本里多余的数量守卫（表集合已与 DDL
+    比对），修正 `scripts/README.md` 措辞，并把 `check-canvas-project-schema.mjs` 接入 CI（先 `docker pull postgres:17.10`）。
+12. **A13：IDE Node 用例自行收尾。** 根因（16.4 第 13 项的源头）：`IdeReverseStreamEndpointIntegrationTest` 的 Node 用例失败后留下异步
+    `abandonIde`。让每个用例结束前等待自己的 `abandonIde` 完成。
+13. **LSP 启动失败的退出确认。** 与 `f70661628`（`process.exec`）同类：supervisor 已证明范围收敛的启动失败应确认退出。用
+    `ProcessScopeNotConvergedError` 与 `trackDescendant` 在 `daemon/src` 中定位 LSP 启动路径。
+14. **L4：** `scripts/daemon/tests/support/pty_run.py` 让脚本测试依赖 python3；改用 `script` 命令，或在文档中记为例外。
+15. **收尾验证：** 完成上述各项后，重跑全量本地检查（见 16.6 的清单：`mvn verify`、前端 typecheck/lint/vitest/Playwright、Daemon `npm run check`
+    与 vitest、仓库脚本测试、文档/敏感数据/版本门禁）。本轮只跑了定向测试，没有跑全量 `mvn verify`。再按第 11 节冻结 SHA 并请求授权触发全量 CI。
+
+### 17.5 接手环境提示
+
+- JDK 21：`/opt/toolchains/jdk21`；每次 Maven 显式指定，例如 `env JAVA_HOME=/opt/toolchains/jdk21 mvn -o ...`。
+- Web 的真实 Node 反向流用例要求 Node 24（与 CI 一致）。系统 Node 是 22，需要按官方 `SHASUMS256.txt` 校验后下载 v24.21.0，只放进验证命令的 `PATH`。
+  上一会话放在临时目录里的 Node 与本机 PG16 shim 不会保留。
+- 数据库用例需要 PostgreSQL：CI 用 Testcontainers PG17；没有 Docker 时需自备本机 PostgreSQL，且不得提交任何测试连接改动（提交前确认
+  `git diff --cached -S LocalPg` 为空）。
+- Spotless 只格式化改动的文件：`mvn -pl <module> spotless:apply -DspotlessFiles=<改动文件的绝对路径正则>`，并检查 diff。
