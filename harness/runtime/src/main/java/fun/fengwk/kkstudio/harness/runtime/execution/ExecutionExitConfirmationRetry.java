@@ -31,19 +31,26 @@ public final class ExecutionExitConfirmationRetry implements AutoCloseable {
   private ScheduledFuture<?> task;
 
   public ExecutionExitConfirmationRetry(ExecutionExitConfirmer confirmer) {
-    this.confirmer = Objects.requireNonNull(confirmer, "confirmer");
-    this.timer =
+    this(
+        confirmer,
         Executors.newSingleThreadScheduledExecutor(
             Thread.ofPlatform()
                 .name("execution-exit-confirmation-timer", 0L)
                 .daemon(true)
-                .factory());
-    this.worker =
+                .factory()),
         Executors.newSingleThreadExecutor(
             Thread.ofPlatform()
                 .name("execution-exit-confirmation-worker", 0L)
                 .daemon(true)
-                .factory());
+                .factory()));
+  }
+
+  /** 包内可见的 executor 注入只用于确定性测试；生产构造器仍创建真实单线程 timer/worker。 */
+  ExecutionExitConfirmationRetry(
+      ExecutionExitConfirmer confirmer, ScheduledExecutorService timer, ExecutorService worker) {
+    this.confirmer = Objects.requireNonNull(confirmer, "confirmer");
+    this.timer = Objects.requireNonNull(timer, "timer");
+    this.worker = Objects.requireNonNull(worker, "worker");
   }
 
   /** 启动周期重放；重复调用幂等。 */
@@ -93,16 +100,24 @@ public final class ExecutionExitConfirmationRetry implements AutoCloseable {
     }
     timer.shutdownNow();
     worker.shutdownNow();
-    await(timer);
-    await(worker);
+    await(timer, worker);
   }
 
-  private static void await(ExecutorService executor) {
-    try {
-      if (!executor.awaitTermination(SHUTDOWN_WAIT.toMillis(), TimeUnit.MILLISECONDS)) {
-        log.warn("execution exit confirmation executor did not terminate in time");
+  private static void await(ExecutorService... executors) {
+    boolean interrupted = false;
+    for (ExecutorService executor : executors) {
+      if (Thread.interrupted()) {
+        interrupted = true;
       }
-    } catch (InterruptedException interrupted) {
+      try {
+        if (!executor.awaitTermination(SHUTDOWN_WAIT.toMillis(), TimeUnit.MILLISECONDS)) {
+          log.warn("execution exit confirmation executor did not terminate in time");
+        }
+      } catch (InterruptedException error) {
+        interrupted = true;
+      }
+    }
+    if (interrupted) {
       Thread.currentThread().interrupt();
     }
   }

@@ -113,6 +113,24 @@ class HarnessRuntimeAbandonExitTest {
     assertTrue(upgradedReplay.unconfirmedExecutions().isEmpty());
   }
 
+  @Test
+  void abandonmentRejectsUnknownThreadExecutionAndNegativeVersion() {
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    HarnessRuntime runtime =
+        HarnessRuntimeTestSupport.runtime(store, Clock.fixed(T0, ZoneOffset.UTC));
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+
+    assertThrows(
+        HarnessRuntimeNotFoundException.class,
+        () -> runtime.abandonExecution(UUID.randomUUID(), UUID.randomUUID(), 0L));
+    assertThrows(
+        HarnessRuntimeNotFoundException.class,
+        () -> runtime.abandonExecution(baseline.threadId(), UUID.randomUUID(), 0L));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> runtime.abandonExecution(baseline.threadId(), UUID.randomUUID(), -1L));
+  }
+
   private static ExecutionExitFact register(
       InMemoryHarnessStore store, UUID threadId, UUID invocationId, Instant registeredAt) {
     ExecutionExitFact fact =
