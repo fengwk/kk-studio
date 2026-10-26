@@ -16,7 +16,7 @@ import type {
   DialogueTimestamp,
   TurnUsage,
 } from '@/features/chat/runtime/thread-timeline-types'
-import { translate } from '@/shared/i18n'
+import { translate, type TranslationKey } from '@/shared/i18n'
 import type {
   HarnessSessionEntryDTO,
   ModelAttemptFailureDTO,
@@ -98,7 +98,7 @@ export interface ThreadEventTimelineInput {
   toolStreams?: ReadonlyMap<string, RealtimeToolStream> | null
 }
 
-const STATUS_TEXT_KEY: Record<ThreadEventStatus, string> = {
+const STATUS_TEXT_KEY: Record<ThreadEventStatus, TranslationKey> = {
   pending: 'ai.runtime.event.status.PENDING',
   running: 'ai.runtime.event.status.RUNNING',
   completed: 'ai.runtime.event.status.COMPLETED',

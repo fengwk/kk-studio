@@ -3,7 +3,7 @@ import type {
   EntryEventKind,
 } from '@/features/chat/runtime/thread-timeline-types'
 import { formatModelLabel } from '@/features/catalog'
-import { translate } from '@/shared/i18n'
+import { translate, type TranslationKey } from '@/shared/i18n'
 import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 
 export type SettingsSnapshot = {
@@ -151,7 +151,7 @@ export function projectUnknownEntry(entry: HarnessSessionEntryDTO): EntryEventDi
   )
 }
 
-const NOTIFICATION_TITLE_KEYS: Record<string, string> = {
+const NOTIFICATION_TITLE_KEYS: Record<string, TranslationKey> = {
   SUBAGENT_RESULT: 'ai.runtime.notification.entry.SUBAGENT_RESULTTitle',
   TASK_BUDGET: 'ai.runtime.notification.entry.TASK_BUDGETTitle',
 }
@@ -163,7 +163,7 @@ const NOTIFICATION_TITLE_KEYS: Record<string, string> = {
 export const FORK_NOTICE_TEXT =
   'This thread was forked. Earlier tool calls and background tasks will not resume or report here. Subagent thread IDs inherited from history are no longer valid.'
 
-const FORK_TITLE_KEYS: Record<string, string> = {
+const FORK_TITLE_KEYS: Record<string, TranslationKey> = {
   BRANCH: 'ai.runtime.entry.forkBranchTitle',
   SESSION: 'ai.runtime.entry.forkSessionTitle',
 }

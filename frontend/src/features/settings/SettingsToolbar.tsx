@@ -1,11 +1,11 @@
-import { useI18n } from '@/shared/i18n'
+import { useI18n, type TranslationKey } from '@/shared/i18n'
 import { Panel } from '@/shared/ui/layout/Panel'
 import { Toolbar } from '@/shared/ui/layout/Toolbar'
 import type { SystemSettingsEditor } from '@/features/settings/useSystemSettingsEditor'
 import type { DraftValidationReason } from '@/features/settings/system-settings-draft'
 import { Button } from '@/shared/ui/controls/Button'
 
-const DRAFT_ERROR_KEYS: Record<DraftValidationReason, string> = {
+const DRAFT_ERROR_KEYS: Record<DraftValidationReason, TranslationKey> = {
   blankToolName: 'settings.error.permissionToolNameRequired',
   duplicateToolName: 'settings.error.permissionDuplicateToolName',
   blankPattern: 'settings.error.permissionPatternRequired',

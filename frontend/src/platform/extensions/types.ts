@@ -1,4 +1,5 @@
 import type { ComponentType, ReactNode } from 'react'
+import type { TranslationKey } from '@/shared/i18n'
 
 export interface ExtensionComponentProps {
   children?: ReactNode
@@ -6,7 +7,7 @@ export interface ExtensionComponentProps {
 
 export interface PageNavItem {
   label: string
-  labelKey?: string
+  labelKey?: TranslationKey
   order?: number
 }
 
