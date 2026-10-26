@@ -329,11 +329,16 @@ describe('LspClientPool Concurrency & Lifecycle', () => {
   it('confirms a lease superseded by close only after the shared client stop succeeds', async () => {
     const transcript = path.join(tempDir, 'lease-close-shared-stop.jsonl')
     const server = fakeServerConfig('java', 'normal', transcript)
+    const launchStarted = Promise.withResolvers<number>()
+    const launchGate = Promise.withResolvers<void>()
     const stopStarted = Promise.withResolvers<void>()
     const stopGate = Promise.withResolvers<void>()
     const gated: ProcessSupervisor = {
       start: async (spec) => {
         const managed = await supervisor.start(spec)
+        // 先持有真实进程、暂停 bootstrap：测试必须在 initialize/publish 之前安装 resolve hook。
+        launchStarted.resolve(managed.pid)
+        await launchGate.promise
         return {
           ...managed,
           terminate: async (graceMillis?: number) => {
@@ -351,31 +356,33 @@ describe('LspClientPool Concurrency & Lifecycle', () => {
     pools.push(pool)
     const file = path.join(tempDir, 'App.java')
     fs.writeFileSync(file, 'class App {}\n')
-
-    let exits = 0
-    const leaseOutcome = pool.lease(file, undefined, () => {
-      exits += 1
-    }).then(
-      () => null,
-      (error: unknown) => error,
-    )
-    const startEvent = await awaitEvent(transcript, (event) => event.event === 'start')
-    const boots = Array.from((pool as any).boots.values()) as Array<{
-      resolve: (client: unknown) => void
-    }>
-    expect(boots).toHaveLength(1)
-    const originalResolve = boots[0].resolve
-    let closeOutcome: Promise<Error | null> | null = null
-    boots[0].resolve = (client: unknown): void => {
-      originalResolve(client)
-      // 成功发布后、租约恢复前关闭：租约必须等同一个 cached stop 成功后才能确认。
-      closeOutcome = pool.close().then(
-        () => null,
-        (error: unknown) => error as Error,
-      )
-    }
+    let stopGateReleased = false
 
     try {
+      let exits = 0
+      const leaseOutcome = pool.lease(file, undefined, () => {
+        exits += 1
+      }).then(
+        () => null,
+        (error: unknown) => error,
+      )
+      const pid = await launchStarted.promise
+      const boots = Array.from((pool as any).boots.values()) as Array<{
+        resolve: (client: unknown) => void
+      }>
+      expect(boots).toHaveLength(1)
+      const originalResolve = boots[0].resolve
+      let closeOutcome: Promise<Error | null> | null = null
+      boots[0].resolve = (client: unknown): void => {
+        originalResolve(client)
+        // 成功发布后、租约恢复前关闭：租约必须等同一个 cached stop 成功后才能确认。
+        closeOutcome = pool.close().then(
+          () => null,
+          (error: unknown) => error as Error,
+        )
+      }
+
+      launchGate.resolve()
       await stopStarted.promise
       expect(closeOutcome).not.toBeNull()
       let closeSettled = false
@@ -385,14 +392,20 @@ describe('LspClientPool Concurrency & Lifecycle', () => {
       await new Promise<void>((resolve) => setImmediate(resolve))
       expect(closeSettled).toBe(false)
       expect(exits).toBe(0)
-    } finally {
-      stopGate.resolve()
-    }
 
-    expect(await closeOutcome!).toBeNull()
-    expect(await leaseOutcome).toBeInstanceOf(Error)
-    await vi.waitFor(() => expect(exits).toBe(1))
-    await awaitProcessGone(startEvent.pid!)
+      stopGate.resolve()
+      stopGateReleased = true
+      expect(await closeOutcome!).toBeNull()
+      expect(await leaseOutcome).toBeInstanceOf(Error)
+      await vi.waitFor(() => expect(exits).toBe(1))
+      await awaitProcessGone(pid)
+    } finally {
+      // 任何断言失败都要放行 bootstrap 与物理停止，之后由池和 supervisor 完成真实收尾。
+      launchGate.resolve()
+      if (!stopGateReleased) {
+        stopGate.resolve()
+      }
+    }
   })
 
   it('concurrent failed boots share single launch and can retry afterwards', async () => {
