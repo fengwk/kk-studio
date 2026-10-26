@@ -544,11 +544,11 @@ class EnvironmentDaemonServerTest {
   }
 
   /**
-   * 测试意图：物理连接丢失不得终结在途调用。同一 Daemon 进程（相同 daemonInstanceId）重连 READY 后，核心必须以相同 invocationId 恢复取消意图（只发
-   * CANCEL，不重发 INVOKE），并继续为同一 invocation 派发 daemon 终态。
+   * 测试意图：物理连接丢失不得终结在途调用。同一 Daemon 进程（相同 daemonInstanceId）重连 READY 后，核心以相同 invocationId 发送不终止执行的
+   * RECOVER（不重发 INVOKE、不发 CANCEL），调用保持未取消并继续运行，同一 invocation 的 daemon 终态照常派发。
    */
   @Test
-  void sameDaemonInstanceReconnectCancelsActiveInvokeAndKeepsTerminalOwnership() {
+  void sameDaemonInstanceReconnectRecoversActiveInvokeWithoutCancellingIt() {
     Fixture fixture = new Fixture();
     FakeChannel first = fixture.connectReady("channel-instance-a");
     RecordingListener listener = new RecordingListener();
@@ -566,15 +566,16 @@ class EnvironmentDaemonServerTest {
 
     FakeChannel second = fixture.connectReady("channel-instance-b");
     assertEquals(
-        List.of(DaemonMessageType.WELCOME, DaemonMessageType.CANCEL), second.messageTypes());
+        List.of(DaemonMessageType.WELCOME, DaemonMessageType.RECOVER), second.messageTypes());
     assertEquals(CALL_ONE.toString(), second.envelopes().get(1).invocationId());
     assertEquals(0, second.countOf(DaemonMessageType.INVOKE), "恢复不得重新执行在途调用");
-    assertTrue(handle.isCancelled(), "恢复的取消意图记录在既有 cancelled 状态");
+    assertEquals(0, second.countOf(DaemonMessageType.CANCEL), "控制连接抖动不得停止仍在运行的调用");
+    assertFalse(handle.isCancelled(), "恢复不得替调用表达取消意图");
     assertEquals(0, listener.exitConfirmations, "恢复本身不得声称执行已经退出");
     // 每次 READY 都唤醒一次会话监听器：重连后 Environment 再次被登记为可用。
     assertEquals(List.of(ENVIRONMENT_ID, ENVIRONMENT_ID), fixture.readyNotifications);
 
-    // 终态仍归属同一 invocation：CANCEL 恢复后到达的终态只回调一次。
+    // 终态仍归属同一 invocation：RECOVER 回放 STARTED 后到达的终态只回调一次。
     fixture.receive(second, DaemonMessageType.STARTED, CALL_ONE.toString(), "{\"replayed\":true}");
     fixture.receive(
         second,
@@ -625,7 +626,7 @@ class EnvironmentDaemonServerTest {
     assertFalse(replacement.closed());
   }
 
-  /** 测试意图：同一 Daemon 进程在第 N 次断开重连后仍不产生终态；恢复只发 CANCEL 而不重发 INVOKE，结果事实仍归属原 listener。 */
+  /** 测试意图：初次递交结果不确定的调用在同一 Daemon 进程重连后只收到 RECOVER，不重发 INVOKE、不被取消，结果事实仍归属原 listener。 */
   @Test
   void transportFailureKeepsInvocationActiveForSameInstanceRecovery() {
     Fixture fixture = new Fixture();
@@ -642,12 +643,12 @@ class EnvironmentDaemonServerTest {
     assertTrue(channel.closed());
     assertFalse(fixture.server.isReady(ENVIRONMENT_ID));
 
-    // 同一实例重连：初次递交结果不确定，只发送取消意图，不重发 INVOKE；调用仍可收敛。
+    // 同一实例重连：初次递交结果不确定，只发送 RECOVER，不重发 INVOKE；调用仍可收敛。
     FakeChannel reconnected = fixture.connectReady("channel-send-failure-retry");
     assertEquals(
-        List.of(DaemonMessageType.WELCOME, DaemonMessageType.CANCEL), reconnected.messageTypes());
+        List.of(DaemonMessageType.WELCOME, DaemonMessageType.RECOVER), reconnected.messageTypes());
     assertEquals(0, reconnected.countOf(DaemonMessageType.INVOKE));
-    assertTrue(handle.isCancelled());
+    assertFalse(handle.isCancelled());
     assertEquals(0, listener.exitConfirmations, "初次递交不确定的恢复不得声称执行已经退出");
     fixture.receive(
         reconnected,
@@ -659,9 +660,9 @@ class EnvironmentDaemonServerTest {
     assertEquals(0, listener.exitConfirmations, "普通终态不得自行确认退出");
   }
 
-  /** 测试意图：恢复 CANCEL 被本地队列 BUSY 拒绝时不得记成已送达；关闭当前连接并保留在途调用，下一同实例代际重试 CANCEL， 不重发 INVOKE。 */
+  /** 测试意图：恢复 RECOVER 被本地队列 BUSY 拒绝时不得记成已送达；关闭当前连接并保留在途调用，下一同实例代际重试 RECOVER，不重发 INVOKE。 */
   @Test
-  void recoveryCancelBusyClosesConnectionAndRetriesNextGeneration() {
+  void recoveryBusyClosesConnectionAndRetriesNextGeneration() {
     Fixture fixture = new Fixture();
     FakeChannel first = fixture.connectReady("channel-recovery-busy-first");
     RecordingListener listener = new RecordingListener();
@@ -675,23 +676,23 @@ class EnvironmentDaemonServerTest {
     second.busyNextOffer = true;
     fixture.receiveReady(second);
 
-    assertTrue(second.closed(), "恢复 CANCEL 的 BUSY 必须关闭当前连接以触发既有重连");
-    assertEquals(0, second.countOf(DaemonMessageType.CANCEL), "被拒绝的恢复 CANCEL 不得出现在 wire 上");
-    assertTrue(handle.isCancelled(), "取消意图在递交结果确定前已经记录");
+    assertTrue(second.closed(), "恢复 RECOVER 的 BUSY 必须关闭当前连接以触发既有重连");
+    assertEquals(0, second.countOf(DaemonMessageType.RECOVER), "被拒绝的恢复 RECOVER 不得出现在 wire 上");
+    assertFalse(handle.isCancelled(), "恢复不得替调用表达取消意图");
     assertNull(listener.error);
     assertNull(listener.completed);
     assertEquals(0, listener.exitConfirmations, "BUSY 拒绝的恢复不得声称执行已经退出");
 
     FakeChannel third = fixture.connectReady("channel-recovery-busy-third");
     assertEquals(
-        List.of(DaemonMessageType.WELCOME, DaemonMessageType.CANCEL), third.messageTypes());
+        List.of(DaemonMessageType.WELCOME, DaemonMessageType.RECOVER), third.messageTypes());
     assertEquals(0, third.countOf(DaemonMessageType.INVOKE));
-    assertEquals(0, listener.exitConfirmations, "下一代 READY 补发 CANCEL 也不得自行确认退出");
+    assertEquals(0, listener.exitConfirmations, "下一代 READY 补发 RECOVER 也不得自行确认退出");
   }
 
-  /** 测试意图：恢复 CANCEL 递交抛错属于传输失败；关闭当前连接并保留在途调用，下一同实例代际重试 CANCEL，不重发 INVOKE。 */
+  /** 测试意图：恢复 RECOVER 递交抛错属于传输失败；关闭当前连接并保留在途调用，下一同实例代际重试 RECOVER，不重发 INVOKE。 */
   @Test
-  void recoveryCancelTransportFailureClosesConnectionAndRetriesNextGeneration() {
+  void recoveryTransportFailureClosesConnectionAndRetriesNextGeneration() {
     Fixture fixture = new Fixture();
     FakeChannel first = fixture.connectReady("channel-recovery-failure-first");
     RecordingListener listener = new RecordingListener();
@@ -705,18 +706,18 @@ class EnvironmentDaemonServerTest {
     second.failNextOffer = true;
     fixture.receiveReady(second);
 
-    assertTrue(second.closed(), "恢复 CANCEL 的传输失败必须关闭当前连接");
-    assertEquals(0, second.countOf(DaemonMessageType.CANCEL), "抛错的恢复 CANCEL 不得出现在 wire 上");
-    assertTrue(handle.isCancelled());
+    assertTrue(second.closed(), "恢复 RECOVER 的传输失败必须关闭当前连接");
+    assertEquals(0, second.countOf(DaemonMessageType.RECOVER), "抛错的恢复 RECOVER 不得出现在 wire 上");
+    assertFalse(handle.isCancelled());
     assertNull(listener.error);
     assertNull(listener.completed);
     assertEquals(0, listener.exitConfirmations, "传输失败的恢复不得声称执行已经退出");
 
     FakeChannel third = fixture.connectReady("channel-recovery-failure-third");
     assertEquals(
-        List.of(DaemonMessageType.WELCOME, DaemonMessageType.CANCEL), third.messageTypes());
+        List.of(DaemonMessageType.WELCOME, DaemonMessageType.RECOVER), third.messageTypes());
     assertEquals(0, third.countOf(DaemonMessageType.INVOKE));
-    assertEquals(0, listener.exitConfirmations, "下一代 READY 补发 CANCEL 也不得自行确认退出");
+    assertEquals(0, listener.exitConfirmations, "下一代 READY 补发 RECOVER 也不得自行确认退出");
   }
 
   /**
@@ -1172,6 +1173,31 @@ class EnvironmentDaemonServerTest {
     assertTrue(afterEvict.closed(), "淘汰后不再保留身份，未知退出确认按协议违规关闭，且不交付 ACK");
   }
 
+  /** 测试意图：容量淘汰优先已交付退出确认的条目；仍在等待确认的最旧条目被保留，其迟到 EXECUTION_EXITED 照常交付，连接不被关闭。 */
+  @Test
+  void tombstoneEvictionKeepsEntriesStillAwaitingExitConfirmation() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-exit-retained");
+    RecordingListener awaiting = new RecordingListener();
+    fixture
+        .server
+        .invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), awaiting)
+        .terminate(EnvironmentCapabilityTerminationCause.CANCELLED);
+    for (int index = 0; index < EnvironmentDaemonServer.MAX_INVOCATION_TOMBSTONES; index++) {
+      UUID callId = new UUID(0L, 30_000L + index);
+      fixture
+          .server
+          .invoke(ENVIRONMENT_ID, capabilityRequest(callId), new RecordingListener())
+          .terminate(EnvironmentCapabilityTerminationCause.TIMED_OUT);
+      fixture.receive(channel, DaemonMessageType.EXECUTION_EXITED, callId.toString(), "{}");
+    }
+
+    // 第 1025 个条目触发了淘汰：被淘汰的是退出确认已交付的条目，而不是仍在等待的 CALL_ONE。
+    fixture.receive(channel, DaemonMessageType.EXECUTION_EXITED, CALL_ONE.toString(), "{}");
+    assertEquals(1, awaiting.exitConfirmations, "仍在等待的条目在容量淘汰后照常交付退出确认");
+    assertFalse(channel.closed());
+  }
+
   /** 测试意图：活动调用的退出确认与结果终态分开，且非空 payload 不能当作确认。 */
   @Test
   void activeExitConfirmationIsSeparateFromTheTerminalResult() {
@@ -1190,9 +1216,9 @@ class EnvironmentDaemonServerTest {
 
     FakeChannel retried = fixture.reconnectReady("channel-exit-active-retry");
     assertEquals(
-        List.of(DaemonMessageType.WELCOME, DaemonMessageType.CANCEL),
+        List.of(DaemonMessageType.WELCOME, DaemonMessageType.RECOVER),
         retried.messageTypes(),
-        "活动在途调用的恢复只发 CANCEL，不重发 INVOKE");
+        "活动在途调用的恢复只发 RECOVER，不重发 INVOKE");
     assertEquals(0, retried.countOf(DaemonMessageType.INVOKE));
     assertEquals(0, listener.exitConfirmations, "恢复后、真实 EXECUTION_EXITED 前不得确认退出");
     fixture.receive(retried, DaemonMessageType.EXECUTION_EXITED, CALL_ONE.toString(), "{}");
@@ -1778,8 +1804,8 @@ class EnvironmentDaemonServerTest {
     assertTrue(first.closed());
     assertNull(listener.error);
     assertEquals(
-        List.of(DaemonMessageType.WELCOME, DaemonMessageType.CANCEL), second.messageTypes());
-    assertEquals(0, second.countOf(DaemonMessageType.INVOKE), "旧代际在途调用只恢复取消意图");
+        List.of(DaemonMessageType.WELCOME, DaemonMessageType.RECOVER), second.messageTypes());
+    assertEquals(0, second.countOf(DaemonMessageType.INVOKE), "旧代际在途调用只经 RECOVER 取回");
     assertTrue(second.isOpen());
     assertTrue(fixture.server.isReady(ENVIRONMENT_ID));
   }
@@ -1798,8 +1824,8 @@ class EnvironmentDaemonServerTest {
     assertTrue(first.closed());
     assertNull(firstListener.error);
     assertEquals(
-        List.of(DaemonMessageType.WELCOME, DaemonMessageType.CANCEL), second.messageTypes());
-    assertEquals(0, second.countOf(DaemonMessageType.INVOKE), "旧代际在途调用只恢复取消意图");
+        List.of(DaemonMessageType.WELCOME, DaemonMessageType.RECOVER), second.messageTypes());
+    assertEquals(0, second.countOf(DaemonMessageType.INVOKE), "旧代际在途调用只经 RECOVER 取回");
 
     // 旧代际已解绑：迟到帧被直接丢弃，不产生协议错误帧，也不影响新代际。
     int secondEnvelopes = second.envelopes().size();
@@ -2425,7 +2451,7 @@ class EnvironmentDaemonServerTest {
   }
 
   /**
-   * 测试意图：回调只按 invocationId 归属，不按连接代际 —— 同一 Daemon 进程重连以 CANCEL 恢复（不重发
+   * 测试意图：回调只按 invocationId 归属，不按连接代际 —— 同一 Daemon 进程重连以 RECOVER 取回（不重发
    * INVOKE）后，新连接仍是这些在途调用的合法持有者，其终态必须被派发。
    */
   @Test
@@ -2437,7 +2463,7 @@ class EnvironmentDaemonServerTest {
 
     FakeChannel reconnected = fixture.reconnectReady("channel-reconnected");
     assertEquals(
-        List.of(DaemonMessageType.WELCOME, DaemonMessageType.CANCEL), reconnected.messageTypes());
+        List.of(DaemonMessageType.WELCOME, DaemonMessageType.RECOVER), reconnected.messageTypes());
     assertEquals(0, reconnected.countOf(DaemonMessageType.INVOKE));
     assertEquals(0, listener.exitConfirmations, "恢复本身不得声称执行已经退出");
     fixture.receive(

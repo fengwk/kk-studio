@@ -65,6 +65,7 @@ const BOUND_MESSAGES: ReadonlySet<MessageType> = new Set([
   'HEARTBEAT',
   'INVOKE',
   'CANCEL',
+  'RECOVER',
   'STARTED',
   'PROGRESS',
   'COMPLETED',
@@ -84,6 +85,7 @@ const BOUND_MESSAGES: ReadonlySet<MessageType> = new Set([
 const INVOCATION_MESSAGES: ReadonlySet<MessageType> = new Set([
   'INVOKE',
   'CANCEL',
+  'RECOVER',
   'STARTED',
   'PROGRESS',
   'COMPLETED',
