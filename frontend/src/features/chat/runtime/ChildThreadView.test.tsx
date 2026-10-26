@@ -284,7 +284,7 @@ describe('ChildThreadView 只读子观察面板 QUEUED CUSTOM_MESSAGE', () => {
         invocationId: 'invocation-child',
         attempt: 2,
         kind: 'TOOL',
-        registeredAt: '2026-01-01T00:00:00.000Z',
+        registeredAt: 1767225600000,
       }],
     }
     const projection = createMockProjection(stopped)
