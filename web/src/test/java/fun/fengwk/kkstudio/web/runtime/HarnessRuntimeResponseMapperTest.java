@@ -413,6 +413,20 @@ class HarnessRuntimeResponseMapperTest {
   }
 
   @Test
+  void passesStoppedManualCompactionReasonThroughAsStableName() {
+    // DTO 只透传稳定枚举名；前端负责本地化，API 不新增私有 reason 枚举。
+    HarnessThreadSnapshotDTO dto =
+        HarnessRuntimeResponseMapper.toSnapshotDto(
+            HarnessRuntimeTestFixtures.idleSnapshot(),
+            ManualCompactionAvailability.disabled(
+                ManualCompactionAvailability.DisabledReason.THREAD_STOPPED),
+            Map.of());
+
+    assertFalse(dto.getManualCompaction().getAvailable());
+    assertEquals("THREAD_STOPPED", dto.getManualCompaction().getDisabledReason());
+  }
+
+  @Test
   void projectsToolSnapshotAndEnabledCompaction() {
     // Tool phase snapshot 必须同时暴露已成功 Model 与完整 sibling，并清空 disabledReason。
     ThreadSnapshot snapshot = toolSnapshot(ToolInvocationStatus.WAITING_APPROVAL);

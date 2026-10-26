@@ -129,6 +129,10 @@ final class ManualCompactionControl {
   /** 沿当前分支回溯带上下文预算的已关闭 Turn，并依次检查所有权、模型与 token 阈值。 */
   private ManualDecision manualDecision(
       HarnessStore.Transaction tx, ThreadState thread, EntryPath path) {
+    // STOPPED 是持久执行事实：历史仍然可读，但绝不能在停止的 Thread 上启动新的压缩回合或 resolve。
+    if (thread.executionControl().isStopped()) {
+      return ManualDecision.disabled(ManualCompactionAvailability.DisabledReason.THREAD_STOPPED);
+    }
     CompactionConfig compactionConfig = compactionConfigProvider.compactionConfig();
     ThreadContext context = threadContextProbe.probe(tx, thread, path);
     if (!(context instanceof ThreadContext.IdleOrHistorical)
