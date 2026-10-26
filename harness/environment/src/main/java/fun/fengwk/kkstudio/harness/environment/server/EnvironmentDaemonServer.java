@@ -90,7 +90,10 @@ import java.util.function.Supplier;
 public final class EnvironmentDaemonServer
     implements EnvironmentCapabilityTransport, DaemonEndpoint {
 
-  /** 每个 Environment 保留的已终结 invocation 上界；超限淘汰最旧条目，淘汰后迟到退出确认不再交付。 */
+  /**
+   * 每个 Environment 保留的已终结 invocation 上界。超限时优先淘汰退出确认已交付的最旧条目；只有全部条目都仍在等待退出确认时才淘汰最旧条目，
+   * 淘汰后其迟到退出确认不再交付。
+   */
   static final int MAX_INVOCATION_TOMBSTONES = 1024;
 
   /** 单次调用允许的并发资源传输数上限，防止恶意/失控 Daemon 无界创建上传行。 */
@@ -653,7 +656,7 @@ public final class EnvironmentDaemonServer
       try {
         outcome = state.offer(DaemonMessageType.INVOKE, invocationId.toString(), invokePayload);
         if (outcome == DaemonOfferResult.ACCEPTED) {
-          active.invokeSentGeneration = state.generation;
+          active.deliveredGeneration = state.generation;
         }
       } catch (RuntimeException error) {
         sendFailure = error;
@@ -773,8 +776,9 @@ public final class EnvironmentDaemonServer
   /**
    * 登记有界 tombstone，并保留原 listener 与发起调用时的 daemon 身份。
    *
-   * <p>terminate/expire 立即结束本地等待，但不得丢掉随后真正到来的退出确认。条目仍按插入顺序淘汰，不引入无界 registry。 调用方必须持有 {@code
-   * inventory}，保证活动条目移除与 tombstone 登记在同一原子边界。
+   * <p>terminate/expire 立即结束本地等待，但不得丢掉随后真正到来的退出确认。超限时先淘汰退出确认已交付的最旧条目：它们只剩忽略迟到帧的作用，
+   * 而仍在等待确认的条目一旦被淘汰，对应的远端执行就再也无法确认退出。不引入无界 registry。调用方必须持有 {@code inventory}，保证活动条目移除与 tombstone
+   * 登记在同一原子边界。
    */
   private void addTombstoneLocked(ActiveInvocation active) {
     LinkedHashMap<UUID, ExitConfirmation> tombstones =
@@ -786,8 +790,20 @@ public final class EnvironmentDaemonServer
     }
     tombstones.put(active.invocationId, retained);
     while (tombstones.size() > MAX_INVOCATION_TOMBSTONES) {
-      tombstones.pollFirstEntry();
+      evictOneTombstoneLocked(tombstones);
     }
+  }
+
+  /** 淘汰一个 tombstone：优先最旧的已交付条目，没有时才淘汰最旧条目。 */
+  private static void evictOneTombstoneLocked(LinkedHashMap<UUID, ExitConfirmation> tombstones) {
+    Iterator<ExitConfirmation> retained = tombstones.values().iterator();
+    while (retained.hasNext()) {
+      if (retained.next().delivered.get()) {
+        retained.remove();
+        return;
+      }
+    }
+    tombstones.pollFirstEntry();
   }
 
   /** 取出仍可交付的退出确认；身份不符或已交付返回 empty。调用方必须持有 {@code inventory}。 */
@@ -891,6 +907,7 @@ public final class EnvironmentDaemonServer
       case WELCOME,
           INVOKE,
           CANCEL,
+          RECOVER,
           RESOURCE_UPLOAD_TICKET,
           UPDATE,
           IDE_COMMAND -> throw new DaemonProtocolException(
@@ -1206,11 +1223,11 @@ public final class EnvironmentDaemonServer
   }
 
   /**
-   * 同实例重连后恢复未终结的在途调用：只发送取消意图，绝不重发 INVOKE。
+   * 同实例重连后恢复未终结的在途调用：未取消的调用发送不终止执行的 {@code RECOVER}，已有取消意图的调用重放 {@code CANCEL}；绝不重发 INVOKE。
    *
-   * <p>排除判断集中在连接状态锁内：已终结、当前代际刚成功初次递交 INVOKE 且尚未取消、或 CANCEL 已在本代送达的调用不再恢复。Daemon journal
-   * 只保留有界终态，不能为恢复提供永久去重，因此恢复以既有 cancelled 意图请求停止或重放事实，绝不再次执行。本地队列拒绝不改变在途调用的存在；
-   * BUSY/CLOSED/传输失败关闭当前连接，由既有重连在新代际再试，不新增轮询。
+   * <p>排除判断集中在连接状态锁内：已终结、已在当前代际递交且尚未取消、或 CANCEL 已在本代送达的调用不再恢复。控制连接的一次抖动因此不会停止仍在运行的 命令：Daemon 回放
+   * STARTED 后继续执行，结果在新连接上交付。Daemon journal 只保留有界终态，不能为恢复提供永久去重，所以恢复只取回或停止，绝不再次执行。
+   * 本地队列拒绝不改变在途调用的存在；BUSY/CLOSED/传输失败关闭当前连接，由既有重连在新代际再试，不新增轮询。
    */
   private void recoverActiveInvocations(ConnectionState state, EnvironmentId environmentId) {
     for (ActiveInvocation active : activeInvocations(environmentId)) {
@@ -1220,19 +1237,28 @@ public final class EnvironmentDaemonServer
           return;
         }
         if (active.isTerminal()
-            || (!active.isCancelled() && active.invokeSentGeneration == state.generation)
+            || (!active.isCancelled() && active.deliveredGeneration == state.generation)
             || active.cancelDeliveredGeneration == state.generation) {
           continue;
         }
-        // 恢复取消意图使用既有状态字段：调用仍保留原 listener 等待终态，但不允许再次执行。
-        active.cancelled = true;
+        // 只有 Studio 已表达取消意图的调用才在新代际重放 CANCEL；其余调用发送不终止执行的 RECOVER：Daemon 对运行中的调用回放 STARTED
+        // 并继续执行，对已终结的调用重放终态与独立退出确认，对从未收到的调用保持静默。INVOKE 绝不重发，因为 journal 终态有上界。
+        boolean recover = !active.isCancelled();
         try {
-          outcome = state.offer(DaemonMessageType.CANCEL, active.invocationId.toString(), "{}");
+          outcome =
+              state.offer(
+                  recover ? DaemonMessageType.RECOVER : DaemonMessageType.CANCEL,
+                  active.invocationId.toString(),
+                  "{}");
         } catch (RuntimeException transportFailure) {
           outcome = null;
         }
         if (outcome == DaemonOfferResult.ACCEPTED) {
-          active.noteCancelDelivered(state.generation);
+          if (recover) {
+            active.deliveredGeneration = state.generation;
+          } else {
+            active.noteCancelDelivered(state.generation);
+          }
         }
       }
       if (outcome == null || outcome == DaemonOfferResult.CLOSED) {
@@ -2091,8 +2117,10 @@ public final class EnvironmentDaemonServer
     private final String daemonInstanceId;
     private volatile boolean cancelled;
 
-    /** 初次 INVOKE 成功递交的连接代际；0 表示尚未确认递交。恢复只据此排除当前代际刚送达的调用，绝不重发；旧代际或递交结果不确定的调用 只发送取消意图。 */
-    private volatile long invokeSentGeneration;
+    /**
+     * 最近一次把调用成功递交给 Daemon（初次 INVOKE 或重连后的 RECOVER）的连接代际；0 表示尚未确认递交。恢复据此排除已在当前代际递交的调用；INVOKE 绝不重发。
+     */
+    private volatile long deliveredGeneration;
 
     /** 最近一次成功递交 CANCEL 的连接代际；0 表示尚未送达。与 {@link #cancelled} 分离：意图可以先于送达存在，BUSY/CLOSED 不得推进本字段。 */
     private volatile long cancelDeliveredGeneration;

@@ -1,9 +1,10 @@
 /**
  * Invocation 去重与终态重放的最小 journal 端口及其内存实现。
  *
- * <p>journal 是 Daemon 进程内的执行事实源：WebSocket 连接只是消息管道。同实例重连由 CANCEL 请求重放已有终态和独立
- * 退出事实，或停止仍在运行的 scope，不重发 INVOKE。重复 INVOKE 只在条目存在时去重；条目缺失不证明该调用从未执行，
- * 不能把 INVOKE 用作恢复查询。终态一旦写入不可逆（terminal-once）。
+ * <p>journal 是 Daemon 进程内的执行事实源：WebSocket 连接只是消息管道。同实例重连由 RECOVER 取回在途调用：运行中的调用
+ * 回放 STARTED 并继续执行，已终结的调用重放终态和独立退出事实；只有 Studio 已表达取消意图的调用才收到 CANCEL 并停止
+ * scope。INVOKE 不重发：重复 INVOKE 只在条目存在时去重，条目缺失不证明该调用从未执行，不能把 INVOKE 用作恢复查询。
+ * 终态一旦写入不可逆（terminal-once）。
  *
  * <p>内存实现至多保留 {@link DEFAULT_MAX_JOURNAL_ENTRIES} 条终态事实，超出后按 start 的插入顺序淘汰终态条目；
  * RUNNING 条目永不淘汰（其数量由运行时的并发上限约束）。

@@ -15,6 +15,7 @@ import type {
   ResourceUploader,
 } from '../src/contracts.js'
 import { DAEMON_VERSION } from '../src/config.js'
+import { PROTOCOL_VERSION } from '../src/generated/protocol-contract.js'
 import { CAPABILITY_CATALOG_VERSION, encodeInvoke, decodeEnvelope, type Envelope } from '../src/protocol.js'
 import { Runtime, type TemporaryResourceSweeper, type UpdatePort } from '../src/runtime.js'
 import { fileCapabilities } from '../src/coding/files.js'
@@ -116,7 +117,7 @@ describe('runtime handshake', () => {
     const hello = sent(setup.transport).find((envelope) => envelope.messageType === 'HELLO')
     expect(hello).toBeDefined()
     expect(hello?.environmentId).toBeNull()
-    expect(hello?.payload.protocolVersion).toBe(5)
+    expect(hello?.payload.protocolVersion).toBe(PROTOCOL_VERSION)
     expect(hello?.payload.capabilityCatalogVersion).toBe('3')
     expect(hello?.payload.daemonVersion).toBe(DAEMON_VERSION)
     expect(hello?.payload.registrationToken).toBe('test-registration-token')
@@ -251,6 +252,66 @@ describe('runtime invocation lifecycle', () => {
     expect(sent(setup.transport).filter((envelope) => envelope.messageType === 'COMPLETED').length).toBe(2)
     expect(sent(setup.transport).some((envelope) => envelope.messageType === 'CANCELLED')).toBe(false)
     setup.runtime.close()
+  })
+
+  // RECOVER 是同实例重连后的取回：运行中的调用回放 STARTED 并继续执行，绝不像 CANCEL 那样中止执行体。
+  it('recovers a running invocation without aborting it and delivers its later result', async () => {
+    let observedSignal: AbortSignal | null = null
+    const release = Promise.withResolvers<void>()
+    const setup = buildRuntime({
+      capabilities: {
+        'fs.read': async (call, context) => {
+          observedSignal = context.signal
+          await release.promise
+          return textResult(call.invocationId)
+        },
+      },
+    })
+    await handshake(setup)
+    setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-recover', payload: invokePayload() }))
+    await waitFor(() => observedSignal !== null)
+    setup.transport.receive(serverMessage('RECOVER', { environmentId: ENV, invocationId: 'inv-recover', payload: {} }))
+    await tick()
+    const recovered = sent(setup.transport).filter((envelope) => envelope.invocationId === 'inv-recover')
+    expect(recovered.filter((envelope) => envelope.messageType === 'STARTED').map((envelope) => envelope.payload)).toEqual([
+      {},
+      { replayed: true },
+    ])
+    expect(observedSignal?.aborted).toBe(false)
+    release.resolve()
+    await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'COMPLETED'))
+    expect(sent(setup.transport).some((envelope) => envelope.messageType === 'CANCELLED')).toBe(false)
+    setup.runtime.close()
+  })
+
+  it('replays a terminal invocation with its exit confirmation on RECOVER and ignores an unknown one', async () => {
+    const setup = buildRuntime({
+      capabilities: {
+        'fs.read': async (call, context) => {
+          context.confirmExecutionExit()
+          return textResult(call.invocationId)
+        },
+      },
+    })
+    try {
+      await handshake(setup)
+      setup.transport.receive(serverMessage('RECOVER', { environmentId: ENV, invocationId: 'missing', payload: {} }))
+      await tick()
+      expect(sent(setup.transport).some((envelope) => envelope.invocationId === 'missing')).toBe(false)
+      setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-recovered', payload: invokePayload() }))
+      await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'EXECUTION_EXITED'))
+      setup.transport.receive(serverMessage('RECOVER', { environmentId: ENV, invocationId: 'inv-recovered', payload: {} }))
+      await waitFor(() => sent(setup.transport).filter((envelope) => envelope.messageType === 'EXECUTION_EXITED').length === 2)
+      const replayed = sent(setup.transport).filter((envelope) => envelope.invocationId === 'inv-recovered')
+      expect(replayed.filter((envelope) => envelope.messageType === 'COMPLETED')).toHaveLength(2)
+      expect(replayed.filter((envelope) => envelope.messageType === 'EXECUTION_EXITED')).toHaveLength(2)
+    } finally {
+      try {
+        setup.runtime.close()
+      } finally {
+        await setup.runtime.awaitCompletion()
+      }
+    }
   })
 
   // 验证超时机制：Runtime在timer到期仅发abort信号，cleanup期间维持RUNNING不发终态，release后才完成终态。

@@ -32,6 +32,7 @@ public record DaemonEnvelope(
           DaemonMessageType.HEARTBEAT,
           DaemonMessageType.INVOKE,
           DaemonMessageType.CANCEL,
+          DaemonMessageType.RECOVER,
           DaemonMessageType.STARTED,
           DaemonMessageType.PROGRESS,
           DaemonMessageType.COMPLETED,
@@ -50,6 +51,7 @@ public record DaemonEnvelope(
       Set.of(
           DaemonMessageType.INVOKE,
           DaemonMessageType.CANCEL,
+          DaemonMessageType.RECOVER,
           DaemonMessageType.STARTED,
           DaemonMessageType.PROGRESS,
           DaemonMessageType.COMPLETED,

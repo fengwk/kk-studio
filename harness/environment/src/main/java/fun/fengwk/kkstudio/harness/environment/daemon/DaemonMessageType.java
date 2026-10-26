@@ -16,6 +16,8 @@ public enum DaemonMessageType {
   TEMPORARY_RESOURCE_POLICY,
   INVOKE,
   CANCEL,
+  /** 同实例重连后取回在途调用：Daemon 对运行中的调用回放 STARTED 并继续执行，对已终结的调用重放终态与退出确认，绝不终止执行。 */
+  RECOVER,
   RESOURCE_UPLOAD_REQUEST,
   RESOURCE_UPLOAD_TICKET,
   RESOURCE_UPLOAD_COMMIT,

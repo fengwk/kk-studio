@@ -446,6 +446,9 @@ export class Runtime {
         case 'CANCEL':
           this.handleCancel(envelope)
           return
+        case 'RECOVER':
+          this.handleRecover(envelope)
+          return
         case 'WELCOME':
           this.handleWelcome(connection, envelope)
           return
@@ -789,6 +792,17 @@ export class Runtime {
     const invocation = this.running.get(invocationId)
     if (invocation !== undefined) {
       invocation.controller.abort('CANCELLED')
+    }
+  }
+
+  /**
+   * 同实例重连后的取回：只重放 journal 已有的事实，绝不终止执行。运行中的调用回放 STARTED 并继续执行，结果经当前连接交付；
+   * 已终结的调用重放终态与独立退出确认；从未收到的调用保持静默。
+   */
+  private handleRecover(envelope: Envelope): void {
+    const entry = this.journal.find(requireInvocationId(envelope))
+    if (entry !== undefined) {
+      this.replay(entry)
     }
   }
 
