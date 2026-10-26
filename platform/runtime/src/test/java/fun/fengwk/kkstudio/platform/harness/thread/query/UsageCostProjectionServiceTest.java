@@ -192,6 +192,37 @@ class UsageCostProjectionServiceTest {
     assertEquals(1, costs.size());
   }
 
+  /** 测试意图：执行过的单模型改名或删除后同名被模型组复用时，组没有该模型的价格：该结果如实缺席，不让整段历史读取失败。 */
+  @Test
+  void keepsEntriesAbsentWhenTheExecutedModelNameNowBelongsToAGroup() {
+    stubModel("provider-a", "model-a", pricing(BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ZERO));
+    when(modelRepository.getByName("model-b"))
+        .thenReturn(AgentModel.builder().kind(AgentModelKind.GROUP).name("model-b").build());
+
+    Map<UUID, HarnessUsageCostDTO> costs =
+        service.project(
+            List.of(
+                root(settings("provider-a", "model-a")),
+                turnStart(TURN_A_ID, ROOT_ID, settings("provider-a", "model-a")),
+                user(USER_A_ID, TURN_A_ID),
+                assistant(
+                    ASSISTANT_A_ID,
+                    USER_A_ID,
+                    MODEL_A,
+                    new ModelUsage(1_000_000, 0, 0, 0, Map.of(), 0L, 1_000_000L)),
+                turnStart(TURN_B_ID, ASSISTANT_A_ID, settings("provider-b", "model-b")),
+                user(USER_B_ID, TURN_B_ID),
+                assistant(
+                    ASSISTANT_B_ID,
+                    USER_B_ID,
+                    MODEL_B,
+                    new ModelUsage(1_000_000, 0, 0, 0, Map.of(), 0L, 1_000_000L))));
+
+    assertEquals("1", costs.get(ASSISTANT_A_ID).getAmount());
+    assertNull(costs.get(ASSISTANT_B_ID));
+    assertEquals(1, costs.size());
+  }
+
   /**
    * 测试意图：压缩 Turn 实际调用的是 {@code compaction.executionModel}（fallback 时与用户所选 model 不同），因此必须以真实调用型号的
    * 价格计价，绝不用 settings.model 冒充。
