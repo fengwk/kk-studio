@@ -7,8 +7,10 @@ import type {
   CapabilityCall,
   CapabilityContext,
   DaemonConfig,
+  ProcessSupervisor,
   ResourceUploader,
 } from '../../src/contracts.js'
+import { ProcessScopeNotConvergedError } from '../../src/contracts.js'
 import {
   awaitEvent,
   createJdtlsWrapper,
@@ -371,6 +373,212 @@ describe('Lsp Capabilities Group End-to-End', () => {
       expect(supervisor.children.length).toBe(1)
       expect(confirmations).toBe(1)
     } finally {
+      await closeWithin(localGroup)
+    }
+  })
+
+  it('confirms a start rejection the supervisor proved converged', async () => {
+    const config = createConfig(fakeDaemonLspConfig('java', 'normal', path.join(tempDir, 'never-started.jsonl')))
+    let starts = 0
+    const rejecting: ProcessSupervisor = {
+      start: async () => {
+        starts += 1
+        throw new Error('spawn failed')
+      },
+      close: async () => {},
+    }
+    const localGroup = createLspCapabilities(config, rejecting)
+    const file = path.join(tempDir, 'App.java')
+    fs.writeFileSync(file, 'class App {}\n')
+    let confirmations = 0
+    try {
+      const result = await localGroup.capabilities['lsp.goto-definition']!(
+        {
+          invocationId: 'start-converged',
+          capabilityId: 'lsp.goto-definition',
+          arguments: { path: file, line: 1 },
+          timeoutMillis: 5000,
+        },
+        createContext(config, undefined, () => {
+          confirmations += 1
+        }),
+      )
+      expect(result.error).toBe(true)
+      expect((result.contents[0] as any).text).toContain('cannot be started')
+      expect(starts).toBe(1)
+      expect(confirmations).toBe(1)
+    } finally {
+      await closeWithin(localGroup)
+    }
+  })
+
+  it('does not confirm a start rejection that could not be proven converged', async () => {
+    const config = createConfig(fakeDaemonLspConfig('java', 'normal', path.join(tempDir, 'unconverged.jsonl')))
+    const startFailure = new ProcessScopeNotConvergedError('spawn cleanup could not be proven')
+    let starts = 0
+    const rejecting: ProcessSupervisor = {
+      start: async () => {
+        starts += 1
+        throw startFailure
+      },
+      close: async () => {},
+    }
+    const localGroup = createLspCapabilities(config, rejecting)
+    const file = path.join(tempDir, 'App.java')
+    fs.writeFileSync(file, 'class App {}\n')
+    let confirmations = 0
+    const context = createContext(config, undefined, () => {
+      confirmations += 1
+    })
+    try {
+      const first = await localGroup.capabilities['lsp.goto-definition']!(
+        {
+          invocationId: 'start-unconverged-1',
+          capabilityId: 'lsp.goto-definition',
+          arguments: { path: file, line: 1 },
+          timeoutMillis: 5000,
+        },
+        context,
+      )
+      expect(first.error).toBe(true)
+      const second = await localGroup.capabilities['lsp.goto-definition']!(
+        {
+          invocationId: 'start-unconverged-2',
+          capabilityId: 'lsp.goto-definition',
+          arguments: { path: file, line: 1 },
+          timeoutMillis: 5000,
+        },
+        context,
+      )
+      expect(second.error).toBe(true)
+      // 没证明收敛：不确认退出，同 key 也不重新启动。
+      expect(confirmations).toBe(0)
+      expect(starts).toBe(1)
+    } finally {
+      await expect(closeWithin(localGroup)).rejects.toThrow(/failed to release all resources/)
+    }
+  })
+
+  it('confirms a no-server rejection before any process exists', async () => {
+    const config = createConfig({})
+    group = createLspCapabilities(config, supervisor)
+    const file = path.join(tempDir, 'App.java')
+    fs.writeFileSync(file, 'class App {}\n')
+    let confirmations = 0
+    const result = await group.capabilities['lsp.goto-definition']!(
+      {
+        invocationId: 'no-server',
+        capabilityId: 'lsp.goto-definition',
+        arguments: { path: file, line: 1 },
+        timeoutMillis: 5000,
+      },
+      createContext(config, undefined, () => {
+        confirmations += 1
+      }),
+    )
+    expect(result.error).toBe(true)
+    expect((result.contents[0] as any).text).toContain('No LSP server configured')
+    expect(confirmations).toBe(1)
+  })
+
+  it('does not confirm when initialize fails and the bootstrap cleanup also fails', async () => {
+    const transcript = path.join(tempDir, 'init-cleanup-fail.jsonl')
+    const config = createConfig(fakeDaemonLspConfig('java', 'no-init', transcript))
+    const failing: ProcessSupervisor = {
+      start: async (spec) => {
+        const managed = await supervisor.start(spec)
+        return {
+          ...managed,
+          terminate: async () => {
+            throw new Error('cleanup boom')
+          },
+        }
+      },
+      close: () => supervisor.close(),
+    }
+    const localGroup = createLspCapabilities(config, failing, {
+      initializeTimeout: 100,
+      shutdownGrace: 50,
+    })
+    const file = path.join(tempDir, 'App.java')
+    fs.writeFileSync(file, 'class App {}\n')
+    let confirmations = 0
+    try {
+      const result = await localGroup.capabilities['lsp.goto-definition']!(
+        {
+          invocationId: 'init-cleanup-fail',
+          capabilityId: 'lsp.goto-definition',
+          arguments: { path: file, line: 1 },
+          timeoutMillis: 5000,
+        },
+        createContext(config, undefined, () => {
+          confirmations += 1
+        }),
+      )
+      expect(result.error).toBe(true)
+      expect(confirmations).toBe(0)
+    } finally {
+      await expect(closeWithin(localGroup)).rejects.toThrow(/failed to release all resources/)
+    }
+  })
+
+  it('confirms a cancelled bootstrap only after its held cleanup succeeds', async () => {
+    const transcript = path.join(tempDir, 'held-bootstrap-cleanup.jsonl')
+    const config = createConfig(fakeDaemonLspConfig('java', 'slow-init', transcript))
+    const cleanupGate = Promise.withResolvers<void>()
+    const terminateStarted = Promise.withResolvers<void>()
+    const gated: ProcessSupervisor = {
+      start: async (spec) => {
+        const managed = await supervisor.start(spec)
+        return {
+          ...managed,
+          terminate: async (graceMillis?: number) => {
+            terminateStarted.resolve()
+            await cleanupGate.promise
+            await managed.terminate(graceMillis)
+          },
+        }
+      },
+      close: () => supervisor.close(),
+    }
+    const localGroup = createLspCapabilities(config, gated, {
+      shutdownGrace: 300,
+    })
+    const file = path.join(tempDir, 'App.java')
+    fs.writeFileSync(file, 'class App {}\n')
+    let confirmations = 0
+    const controller = new AbortController()
+    try {
+      const pending = localGroup.capabilities['lsp.goto-definition']!(
+        {
+          invocationId: 'held-cleanup',
+          capabilityId: 'lsp.goto-definition',
+          arguments: { path: file, line: 1 },
+          timeoutMillis: 5000,
+        },
+        createContext(config, controller.signal, () => {
+          confirmations += 1
+        }),
+      )
+      await awaitEvent(transcript, (event) => event.event === 'start')
+      controller.abort()
+      await terminateStarted.promise
+      // 清理尚未收敛：最后一个等待者仍在等待，不能提前确认退出。
+      expect(confirmations).toBe(0)
+      let settled = false
+      void pending.then(() => {
+        settled = true
+      })
+      await new Promise<void>((resolve) => setImmediate(resolve))
+      expect(settled).toBe(false)
+
+      cleanupGate.resolve()
+      const result = await pending
+      expect(result.error).toBe(true)
+      expect((result.contents[0] as any).text).toBe('Error: Operation cancelled')
+      await vi.waitFor(() => expect(confirmations).toBe(1))
+    } finally {
+      cleanupGate.resolve()
       await closeWithin(localGroup)
     }
   })
@@ -804,7 +1012,7 @@ describe('Lsp Capabilities Group End-to-End', () => {
       createContext(brokenConfig),
     )
     expect(r8.error).toBe(true)
-    expect((r8.contents[0] as any).text).toContain('The capability failed while running')
+    expect((r8.contents[0] as any).text).toContain("LSP server 'java' failed to start")
 
     const r9 = await brokenGroup.capabilities['lsp.workspace-symbols']!(
       {
@@ -816,7 +1024,7 @@ describe('Lsp Capabilities Group End-to-End', () => {
       createContext(brokenConfig),
     )
     expect(r9.error).toBe(true)
-    expect((r9.contents[0] as any).text).toContain('The capability failed while running')
+    expect((r9.contents[0] as any).text).toContain("LSP server 'java' failed to start")
 
     const r10 = await brokenGroup.capabilities['lsp.java-decompile']!(
       {
@@ -828,7 +1036,7 @@ describe('Lsp Capabilities Group End-to-End', () => {
       createContext(brokenConfig),
     )
     expect(r10.error).toBe(true)
-    expect((r10.contents[0] as any).text).toContain('The capability failed while running')
+    expect((r10.contents[0] as any).text).toContain("LSP server 'java' failed to start")
   })
 
   it('exposes activeClientCount on LspService', async () => {

@@ -11,10 +11,15 @@ import {
   StreamMessageWriter,
   type MessageConnection,
 } from 'vscode-jsonrpc/node'
-import type { ManagedProcess, ProcessExit, ProcessSupervisor } from '../contracts.js'
+import {
+  ProcessScopeNotConvergedError,
+  type ManagedProcess,
+  type ProcessExit,
+  type ProcessSupervisor,
+} from '../contracts.js'
 import { TextFileCodec } from './lsp-codec.js'
 import type { ResolvedServerConfig } from './lsp-discovery.js'
-import { LspError, LspTimeoutError } from './lsp-error.js'
+import { LspBootstrapError, LspError, LspTimeoutError } from './lsp-error.js'
 
 /**
  * Pre-header budget: non-LSP banner bytes are tolerated only up to this bound. Past it the stream
@@ -260,8 +265,12 @@ export class LspClient {
         args: command.slice(1),
         cwd: root,
       })
-    } catch {
-      throw new LspError(`LSP server '${server.id}' cannot be started: ${command[0]}`)
+    } catch (error) {
+      // supervisor 契约：普通拒绝已证明本次尝试没有遗留进程；只有 ProcessScopeNotConvergedError 可能仍有进程。
+      throw new LspBootstrapError(`LSP server '${server.id}' cannot be started: ${command[0]}`, {
+        cause: error,
+        converged: !(error instanceof ProcessScopeNotConvergedError),
+      })
     }
 
     const STDERR_TAIL_BYTES = 8 * 1024
@@ -306,19 +315,18 @@ export class LspClient {
       } catch (failure) {
         cleanupError = failure
       }
+      const message =
+        error instanceof LspError
+          ? error.message
+          : `LSP server '${server.id}' failed to start`
       if (cleanupError !== undefined) {
-        const cause = new AggregateError([error, cleanupError], 'LSP launch failed and cleanup failed')
-        if (error instanceof LspError) {
-          throw new LspError(error.message, { cause })
-        }
-        if (error instanceof Error) {
-          // Preserve the original error identity and message; record the cleanup failure without masking it.
-          error.cause = cause
-          throw error
-        }
-        throw new LspError(`LSP server '${server.id}' failed to start`, { cause })
+        // 主失败与清理失败都要保留；清理未被证明收敛时，调用方不得据此确认退出。
+        throw new LspBootstrapError(message, {
+          cause: new AggregateError([error, cleanupError], 'LSP launch failed and cleanup failed'),
+          converged: false,
+        })
       }
-      throw error
+      throw new LspBootstrapError(message, { cause: error, converged: true })
     }
   }
 

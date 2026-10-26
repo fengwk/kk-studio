@@ -24,20 +24,28 @@ export class LspService {
     line: number,
     character: number,
     signal?: AbortSignal,
-    onRequestFinished?: () => void,
-    onRequestSent?: () => void,
+    onExecutionExit?: () => void,
   ): Promise<string> {
-    const entry = await this.pool.lease(file, signal)
+    const entry = await this.pool.lease(file, signal, onExecutionExit)
+    let requestSent = false
     try {
       const locations = await entry.client.definition(
         file,
         line,
         character,
         signal,
-        onRequestFinished,
-        onRequestSent,
+        onExecutionExit,
+        () => {
+          requestSent = true
+        },
       )
       return locations.join('\n')
+    } catch (error) {
+      if (!requestSent) {
+        // 租约已成功，本地失败发生在目标请求发出之前：没有遗留的目标调用。
+        onExecutionExit?.()
+      }
+      throw error
     } finally {
       this.pool.release(entry)
     }
@@ -48,13 +56,26 @@ export class LspService {
     query: string,
     limit: number,
     signal?: AbortSignal,
-    onRequestFinished?: () => void,
-    onRequestSent?: () => void,
+    onExecutionExit?: () => void,
   ): Promise<string> {
-    const entry = await this.pool.lease(file, signal)
+    const entry = await this.pool.lease(file, signal, onExecutionExit)
+    let requestSent = false
     try {
-      const symbols = await entry.client.workspaceSymbols(query, limit, signal, onRequestFinished, onRequestSent)
+      const symbols = await entry.client.workspaceSymbols(
+        query,
+        limit,
+        signal,
+        onExecutionExit,
+        () => {
+          requestSent = true
+        },
+      )
       return symbols.join('\n')
+    } catch (error) {
+      if (!requestSent) {
+        onExecutionExit?.()
+      }
+      throw error
     } finally {
       this.pool.release(entry)
     }
@@ -64,12 +85,24 @@ export class LspService {
     file: string,
     target: string,
     signal?: AbortSignal,
-    onRequestFinished?: () => void,
-    onRequestSent?: () => void,
+    onExecutionExit?: () => void,
   ): Promise<string> {
-    const entry = await this.pool.lease(file, signal)
+    const entry = await this.pool.lease(file, signal, onExecutionExit)
+    let requestSent = false
     try {
-      return await entry.client.javaDecompile(target, signal, onRequestFinished, onRequestSent)
+      return await entry.client.javaDecompile(
+        target,
+        signal,
+        onExecutionExit,
+        () => {
+          requestSent = true
+        },
+      )
+    } catch (error) {
+      if (!requestSent) {
+        onExecutionExit?.()
+      }
+      throw error
     } finally {
       this.pool.release(entry)
     }
