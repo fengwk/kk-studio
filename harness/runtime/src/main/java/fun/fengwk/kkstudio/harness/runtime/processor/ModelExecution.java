@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 
 import lombok.extern.slf4j.Slf4j;
 
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitKind;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitLedger;
@@ -67,6 +68,7 @@ import java.util.function.LongSupplier;
 final class ModelExecution implements ModelGateway.Sink, ClaimAdmissionGuard.GuardedExecution {
 
   private final HarnessStore store;
+  private final ExecutionExitConfirmer exitConfirmer;
   private final RealtimeEventSink realtimeEventSink;
   private final ClaimedWork claim;
   private final UUID invocationId;
@@ -145,7 +147,8 @@ final class ModelExecution implements ModelGateway.Sink, ClaimAdmissionGuard.Gua
       ScheduledExecutorService scheduler,
       Executor heartbeatWorker,
       Executor flushExecutor,
-      Consumer<ModelExecution> ownerRelease) {
+      Consumer<ModelExecution> ownerRelease,
+      ExecutionExitConfirmer exitConfirmer) {
     this(
         store,
         realtimeEventSink,
@@ -161,7 +164,8 @@ final class ModelExecution implements ModelGateway.Sink, ClaimAdmissionGuard.Gua
         heartbeatWorker,
         flushExecutor,
         ownerRelease,
-        System::nanoTime);
+        System::nanoTime,
+        exitConfirmer);
   }
 
   ModelExecution(
@@ -179,8 +183,10 @@ final class ModelExecution implements ModelGateway.Sink, ClaimAdmissionGuard.Gua
       Executor heartbeatWorker,
       Executor flushExecutor,
       Consumer<ModelExecution> ownerRelease,
-      LongSupplier nanoTime) {
+      LongSupplier nanoTime,
+      ExecutionExitConfirmer exitConfirmer) {
     this.store = Objects.requireNonNull(store, "store");
+    this.exitConfirmer = Objects.requireNonNull(exitConfirmer, "exitConfirmer");
     this.realtimeEventSink = Objects.requireNonNull(realtimeEventSink, "realtimeEventSink");
     this.claim = Objects.requireNonNull(claim, "claim");
     this.invocationId = claim.target().id();
@@ -229,22 +235,11 @@ final class ModelExecution implements ModelGateway.Sink, ClaimAdmissionGuard.Gua
       return;
     }
     try {
-      store.transaction(
-          tx -> {
-            ExecutionExitLedger.lockAncestorChain(tx, threadId);
-            if (tx.lockThread(threadId).isEmpty()) {
-              // 合法深删已先提交，不再回写该 Thread；缺失本身不构成退出证据。
-              return null;
-            }
-            ExecutionExitLedger.Confirmation confirmation =
-                ExecutionExitLedger.confirm(tx, local, state)
-                    .orElseThrow(
-                        () ->
-                            new IllegalStateException(
-                                "model execution " + local.executionId() + " remains unconfirmed"));
-            ExecutionExitLedger.advanceAfterConfirmation(tx, threadId, confirmation);
-            return null;
-          });
+      ExecutionExitConfirmer.Result result = exitConfirmer.confirm(local, state);
+      if (result.outcome() == ExecutionExitConfirmer.Outcome.THREAD_MISSING) {
+        // 合法深删已先提交，不再回写该 Thread；缺失本身不构成退出证据。
+        return;
+      }
     } catch (RuntimeException failure) {
       log.warn(
           "cannot confirm model execution exit for {}; phase=MODEL_EXIT_CONFIRM; exception={}",

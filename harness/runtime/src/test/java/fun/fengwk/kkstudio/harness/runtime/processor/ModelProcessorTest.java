@@ -31,6 +31,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState;
+import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
@@ -394,7 +395,8 @@ class ModelProcessorTest {
             fixture.clock,
             fixture.scheduler,
             Runnable::run,
-            newExecutionExecutor());
+            newExecutionExecutor(),
+            TestExecutionExitConfirmer.create(processorStore, fixture.clock));
     fixture.gateway.owner = processor;
     HarnessRuntime runtime =
         new HarnessRuntime(
@@ -867,7 +869,8 @@ class ModelProcessorTest {
             fixture.clock,
             newScheduler(),
             Runnable::run,
-            Runnable::run)) {
+            Runnable::run,
+            TestExecutionExitConfirmer.create(fixture.store, fixture.clock))) {
       assertEquals(ProcessResult.LOST_OWNERSHIP, processor.process(recovered));
       assertEquals(beforeModel, model(fixture.store, fixture.invocationId));
       assertEquals(beforeThread, thread(fixture.store, fixture.baseline.threadId()));
@@ -2982,7 +2985,8 @@ class ModelProcessorTest {
             fixture.clock,
             newScheduler(),
             Runnable::run,
-            newExecutionExecutor());
+            newExecutionExecutor(),
+            TestExecutionExitConfirmer.create(fixture.store, fixture.clock));
     fixture.gateway.queueControlled();
     fixture.gateway.beforeReturn = ignored -> fail.set(true);
     try {
@@ -3015,7 +3019,8 @@ class ModelProcessorTest {
                   fixture.store.transaction(
                       tx -> tx.loadUnconfirmedExecutions(fixture.baseline.threadId()).getFirst()));
               throw new RejectedExecutionException("rejected");
-            });
+            },
+            TestExecutionExitConfirmer.create(fixture.store, fixture.clock));
     fixture.gateway.queueControlled();
     try {
       assertEquals(
@@ -3073,7 +3078,8 @@ class ModelProcessorTest {
             Runnable::run,
             ignored -> {
               throw new RejectedExecutionException("rejected");
-            });
+            },
+            TestExecutionExitConfirmer.create(fixture.store, fixture.clock));
     ExitLogCapture exitLogs = ExitLogCapture.attach(ModelProcessor.class);
     try {
       assertEquals(
@@ -3134,7 +3140,8 @@ class ModelProcessorTest {
             fixture.clock,
             newScheduler(),
             Runnable::run,
-            queued::set);
+            queued::set,
+            TestExecutionExitConfirmer.create(fixture.store, fixture.clock));
     try {
       assertEquals(
           ProcessResult.STARTED,
@@ -3188,7 +3195,8 @@ class ModelProcessorTest {
             fixture.clock,
             newScheduler(),
             Runnable::run,
-            newExecutionExecutor());
+            newExecutionExecutor(),
+            TestExecutionExitConfirmer.create(fixture.store, fixture.clock));
     ClaimedWork claimA = claim(fixture.store, fixture.invocationId, "token-A");
     AtomicReference<ProcessResult> result = new AtomicReference<>();
     Thread threadA = new Thread(() -> result.set(processor.process(claimA)));
@@ -3266,7 +3274,8 @@ class ModelProcessorTest {
             fixtureA.clock,
             newScheduler(),
             Runnable::run,
-            newExecutionExecutor());
+            newExecutionExecutor(),
+            TestExecutionExitConfirmer.create(fixtureA.store, fixtureA.clock));
     assertEquals(ProcessResult.STARTED, processorB.process(claimedB));
     awaitTrue(() -> !processorB.hasActiveExecution());
 
@@ -3306,7 +3315,8 @@ class ModelProcessorTest {
             fixture.clock,
             newScheduler(),
             Runnable::run,
-            newExecutionExecutor());
+            newExecutionExecutor(),
+            TestExecutionExitConfirmer.create(fixture.store, fixture.clock));
 
     assertEquals(
         ProcessResult.LOST_OWNERSHIP,
@@ -3351,7 +3361,8 @@ class ModelProcessorTest {
             fixture.clock,
             hooked,
             Runnable::run,
-            newExecutionExecutor());
+            newExecutionExecutor(),
+            TestExecutionExitConfirmer.create(fixture.store, fixture.clock));
     fixture.gateway.queueControlled(); // 不应被消费
 
     assertEquals(ProcessResult.LOST_OWNERSHIP, processor.process(claimed));
@@ -3440,7 +3451,8 @@ class ModelProcessorTest {
                 fixture.clock,
                 newScheduler(),
                 Runnable::run,
-                Runnable::run));
+                Runnable::run,
+                TestExecutionExitConfirmer.create(fixture.store, fixture.clock)));
     assertThrows(
         NullPointerException.class,
         () ->
@@ -3452,7 +3464,8 @@ class ModelProcessorTest {
                 fixture.clock,
                 newScheduler(),
                 null,
-                Runnable::run));
+                Runnable::run,
+                TestExecutionExitConfirmer.create(fixture.store, fixture.clock)));
     assertThrows(
         NullPointerException.class,
         () ->
@@ -3464,7 +3477,8 @@ class ModelProcessorTest {
                 fixture.clock,
                 newScheduler(),
                 Runnable::run,
-                null));
+                null,
+                TestExecutionExitConfirmer.create(fixture.store, fixture.clock)));
   }
 
   /** ProcessorLeaseConfig：interval 必须为正且严格小于 leaseDuration。 */
@@ -3560,7 +3574,8 @@ class ModelProcessorTest {
             Clock.systemUTC(),
             newScheduler(),
             Runnable::run,
-            newExecutionExecutor());
+            newExecutionExecutor(),
+            TestExecutionExitConfirmer.create(store, Clock.systemUTC()));
     ControlledRun run = new ControlledRun();
     gateway.queue(run);
     ClaimedWork claimed =
@@ -3606,7 +3621,8 @@ class ModelProcessorTest {
             fixture.clock,
             dead,
             Runnable::run,
-            newExecutionExecutor());
+            newExecutionExecutor(),
+            TestExecutionExitConfirmer.create(fixture.store, fixture.clock));
     fixture.gateway.queueControlled();
 
     assertEquals(
@@ -3712,7 +3728,8 @@ class ModelProcessorTest {
             fixture.clock,
             newScheduler(),
             Runnable::run,
-            newExecutionExecutor())) {
+            newExecutionExecutor(),
+            TestExecutionExitConfirmer.create(fixture.store, fixture.clock))) {
       assertEquals(
           ProcessResult.LOST_OWNERSHIP,
           processor.process(claim(fixture.store, fixture.invocationId)));
@@ -3746,7 +3763,8 @@ class ModelProcessorTest {
             fixture.clock,
             newScheduler(),
             Runnable::run,
-            newExecutionExecutor())) {
+            newExecutionExecutor(),
+            TestExecutionExitConfirmer.create(fixture.store, fixture.clock))) {
       assertEquals(
           ProcessResult.LOST_OWNERSHIP,
           processor.process(claim(fixture.store, fixture.invocationId)));
@@ -3786,7 +3804,8 @@ class ModelProcessorTest {
             fixture.clock,
             newScheduler(),
             Runnable::run,
-            newExecutionExecutor());
+            newExecutionExecutor(),
+            TestExecutionExitConfirmer.create(fixture.store, fixture.clock));
 
     assertEquals(
         ProcessResult.TERMINATED, processor.process(claim(fixture.store, fixture.invocationId)));
@@ -4126,7 +4145,8 @@ class ModelProcessorTest {
               clock,
               scheduler,
               Runnable::run,
-              executionExecutor);
+              executionExecutor,
+              TestExecutionExitConfirmer.create(store, clock));
       gateway.owner = processor;
     }
   }
@@ -4196,7 +4216,8 @@ class ModelProcessorTest {
         Clock.fixed(NOW, ZoneOffset.UTC),
         newScheduler(),
         Runnable::run,
-        newExecutionExecutor());
+        newExecutionExecutor(),
+        TestExecutionExitConfirmer.create(store, Clock.fixed(NOW, ZoneOffset.UTC)));
   }
 
   /** Session + ROOT + TURN_START(INPUT) + USER；Thread head 指向 USER。 */

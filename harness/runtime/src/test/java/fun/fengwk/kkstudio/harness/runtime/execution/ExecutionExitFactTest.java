@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime.execution;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -185,6 +186,34 @@ class ExecutionExitFactTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> confirmed.confirm(ExecutionExitState.UNCONFIRMED, CONFIRMED_AT.plusSeconds(1)));
+  }
+
+  @Test
+  void abandonmentIsExplicitIdempotentAndUpgradeableByRealEvidence() {
+    ExecutionExitFact abandoned = tool().abandon(REGISTERED_AT.plusMillis(10));
+    assertEquals(ExecutionExitState.ABANDONED, abandoned.state());
+    assertFalse(abandoned.state().confirmed());
+    assertNull(abandoned.confirmedAt());
+    assertEquals(REGISTERED_AT.plusMillis(10), abandoned.abandonedAt());
+    assertSame(abandoned, abandoned.abandon(REGISTERED_AT.plusMillis(20)));
+
+    ExecutionExitFact upgraded = abandoned.confirm(ExecutionExitState.STUDIO_EXITED, CONFIRMED_AT);
+    assertEquals(ExecutionExitState.STUDIO_EXITED, upgraded.state());
+    assertEquals(CONFIRMED_AT, upgraded.confirmedAt());
+    assertEquals(abandoned.abandonedAt(), upgraded.abandonedAt());
+    assertThrows(
+        IllegalArgumentException.class, () -> upgraded.abandon(CONFIRMED_AT.plusMillis(1)));
+  }
+
+  @Test
+  void realEvidenceObservedBeforeAbandonmentIsStillValidAndNotRewritten() {
+    // 测试意图：观测时间可以早于用户放弃时刻；两者各自只需不早于登记，不能为排序伪造时间。
+    ExecutionExitFact abandoned = tool().abandon(REGISTERED_AT.plusMillis(10));
+    ExecutionExitFact upgraded =
+        abandoned.confirm(ExecutionExitState.STUDIO_EXITED, REGISTERED_AT.plusMillis(5));
+    assertEquals(REGISTERED_AT.plusMillis(5), upgraded.confirmedAt());
+    assertEquals(REGISTERED_AT.plusMillis(10), upgraded.abandonedAt());
+    assertEquals(ExecutionExitState.STUDIO_EXITED, upgraded.state());
   }
 
   @Test
@@ -382,6 +411,7 @@ class ExecutionExitFactTest {
         parentExecutionId,
         state,
         registeredAt,
-        confirmedAt);
+        confirmedAt,
+        null);
   }
 }

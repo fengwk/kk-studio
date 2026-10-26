@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
@@ -127,7 +128,8 @@ class ExecutionTreeLockRegressionTest {
             scheduler,
             Runnable::run,
             Runnable::run,
-            ignored -> {});
+            ignored -> {},
+            TestExecutionExitConfirmer.create(recordingStore, Clock.fixed(NOW, ZoneOffset.UTC)));
 
     assertTrue(execution.markRunning());
 
@@ -224,7 +226,8 @@ class ExecutionTreeLockRegressionTest {
             scheduler,
             Runnable::run,
             Runnable::run,
-            ignored -> {});
+            ignored -> {},
+            TestExecutionExitConfirmer.create(recordingStore, Clock.fixed(NOW, ZoneOffset.UTC)));
 
     assertTrue(execution.markRunning());
     recordingStore.clearLogs();
@@ -275,7 +278,8 @@ class ExecutionTreeLockRegressionTest {
             fixture.clock,
             fixture.scheduler,
             Runnable::run,
-            ignored -> {});
+            ignored -> {},
+            TestExecutionExitConfirmer.create(recordingStore, fixture.clock));
 
     ToolProcessorTestSupport.FakeRun run =
         new ToolProcessorTestSupport.FakeRun(
@@ -311,16 +315,11 @@ class ExecutionTreeLockRegressionTest {
                   "updateToolInvocations",
                   "updateThread",
                   "completeWork"),
-              List.of(
-                  "lockTree",
-                  "lockSessionForKeyShare",
-                  "lockThread",
-                  "lockThread",
-                  "updateThread")),
+              List.of("lockThread", "updateThread")),
           txLogs);
       assertTrue(
-          txLogs.subList(0, 2).stream().flatMap(List::stream).noneMatch("lockTree"::equals),
-          "single-thread execution state commits must not take the tree lock");
+          txLogs.stream().flatMap(List::stream).noneMatch("lockTree"::equals),
+          "a RUNNABLE execution without incomplete joins must confirm without tree locks");
     } finally {
       try {
         execution.abandon();

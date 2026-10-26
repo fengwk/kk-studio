@@ -106,6 +106,8 @@ docker run -d --name kk-studio-app -p 127.0.0.1:8080:8080 \
   -e 'KK_STUDIO_STORAGE_S3_BUCKET=<bucket>' \
   -e 'KK_STUDIO_STORAGE_S3_ACCESS_KEY=<access-key>' \
   -e 'KK_STUDIO_STORAGE_S3_SECRET_KEY=<secret-key>' \
+  -e KK_STUDIO_EXIT_CONFIRMATION_DIRECTORY=/app/execution-exits \
+  -v kk-studio-execution-exits:/app/execution-exits \
   kk-studio-app:production
 curl -fsS http://127.0.0.1:8080/actuator/health
 ```
@@ -117,6 +119,10 @@ PostgreSQL 与已配置 bucket 必须先可达，启动失败先诊断连接而�
 - `KK_STUDIO_STORAGE_S3_ENDPOINT` 是服务端读写地址；`KK_STUDIO_STORAGE_S3_PUBLIC_ENDPOINT` 是
   返回给浏览器的预签名直传/直下地址，必须是浏览器可访问的 origin，服务端 `PUT`/`GET`/
   `HEAD`/`COPY`/`DELETE` 始终使用前者。
+- `KK_STUDIO_EXIT_CONFIRMATION_DIRECTORY` 指向本机退出确认 journal；必须挂载持久卷，并由单个
+  Studio 实例独占（默认 `/app/.kkstudio/execution-exits`，镜像示例使用 `/app/execution-exits`）。
+  目录需要 UID/GID `10001` 可写；它与数据库事实共同构成可重试证据，journal 存在本身不证明远端
+  进程已退出，也不能替代真实 `STUDIO_EXITED` / `REMOTE_ACKNOWLEDGED` / `NOT_STARTED`。
 - `prod` profile 不做 `dev`/`e2e` seed；空库的 schema 由 Flyway 的
   [`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql) 建立，migration
   只由唯一 Flyway owner 执行。
@@ -328,6 +334,7 @@ PI_BASE_ANCHOR=/path/to/pi-base \
 | --- | --- | --- |
 | local | host mapping/database/S3/profile | `KK_STUDIO_APP_*`、`KK_STUDIO_PG_*`、`KK_STUDIO_S3_*`、`KK_STUDIO_STORAGE_S3_*`、`KK_STUDIO_SPRING_PROFILES_ACTIVE` |
 | local | Harness dispatcher | `KK_STUDIO_HARNESS_DISPATCHER_*` |
+| local/test/reliability/distributed/NAS App | execution-exit journal | `KK_STUDIO_EXIT_CONFIRMATION_DIRECTORY`（每个 App 实例独立持久卷） |
 | NAS App 节点 | prod 数据面与异步执行 | `KK_STUDIO_DB_*`、`KK_STUDIO_STORAGE_S3_*` |
 | 本机 preview | 外部数据面配置文件 | `SHARED_PREVIEW_ENV_FILE` 指向的文件内的同一组 `KK_STUDIO_DB_*` / `KK_STUDIO_STORAGE_S3_*` |
 | local/reliability | admission/gateway | `KK_STUDIO_MODEL_MAX_CONCURRENCY`、`KK_STUDIO_TOOL_MAX_CONCURRENCY`、`KK_STUDIO_ENVIRONMENT_GATEWAY_*`（subagent 并发上限不经环境变量配置，只由运行时 SystemSettings 的 `aiRuntime.subagent*` 持有） |
@@ -398,19 +405,19 @@ Daemon 不读取这项 Backend 配置；它遵循本机环境与操作系统代�
 全部数据可丢弃后执行；不能用来修复生产认证、Flyway 校验或健康 S3 的连接问题。
 
 ```bash
-# local：停止并保留数据；第二条额外删除 PostgreSQL 与 MinIO 数据
+# local：停止并保留数据；第二条额外删除 PostgreSQL、MinIO 与 execution-exit journal
 docker compose -f deploy/local/compose.yaml down
 docker compose -f deploy/local/compose.yaml down -v
 
-# test：停止并保留数据；第二条额外删除 PostgreSQL/MinIO volumes
+# test：停止并保留数据；第二条额外删除 PostgreSQL/MinIO/execution-exit volumes
 docker compose -f deploy/test/compose.yaml --profile app down --remove-orphans
 docker compose -f deploy/test/compose.yaml --profile app down -v --remove-orphans
 
-# distributed：停止并保留数据；第二条删除 PG/MinIO/daemon workspace volumes
+# distributed：停止并保留数据；第二条删除 PG/MinIO/daemon workspace/execution-exit volumes
 ./scripts/dev/verify/e2e/distributed.sh down
 ./scripts/dev/verify/e2e/distributed.sh down --volumes
 
-# reliability：保留或删除 PostgreSQL/MinIO/workspace named volumes
+# reliability：保留或删除 PostgreSQL/MinIO/workspace/execution-exit named volumes
 ./scripts/dev/verify/reliability/stack.sh down
 ./scripts/dev/verify/reliability/stack.sh down --volumes
 
@@ -450,9 +457,12 @@ tag 不同：
 它承担共享数据库唯一的 Flyway owner 与 Harness worker，Thread/Model/Tool 的异步执行都发生在这里。
 容器数量与 Gateway 域名由外部部署管理，本仓脚本不校验 NAS 的实际拓扑。迭代手段
 是替换镜像 tag 并重启容器，而不是在容器内改源码，因此容器不挂载源码工作区、Maven/npm cache
-或 `gh` 配置。
+或 `gh` 配置。外部 Compose 还必须为 App 挂载独立的持久卷到
+`KK_STUDIO_EXIT_CONFIRMATION_DIRECTORY`（例如 `/app/execution-exits`），保证 UID/GID `10001`
+可写且不与任何其它 Studio 实例共享；该卷保存退出确认 journal，重启后用于重放，但它本身不是
+宿主进程已退出的证明。
 
-镜像创建了 UID/GID `10001` 可写的 `/app/logs`，日志配置由 Platform 引入的 convention4j
+镜像创建了 UID/GID `10001` 可写的 `/app/logs` 与 `/app/execution-exits`，日志配置由 Platform 引入的 convention4j
 Logback 配置与运行环境共同决定。排查时先看 `docker logs vps-kk-studio` 与实际日志配置；
 控制台只有 JVM 或启动横幅不代表没有应用错误。若日志写文件，按运行配置定位文件，再读取并脱敏。
 需要跨容器替换保留日志时，由外部 Compose 为日志目录设置持久挂载与 UID/GID `10001` 的写权限，

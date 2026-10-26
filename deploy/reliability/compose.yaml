@@ -79,8 +79,11 @@ services:
       KK_STUDIO_STORAGE_S3_BUCKET: kk-studio-reliability
       KK_STUDIO_STORAGE_S3_ACCESS_KEY: kk-studio-reliability
       KK_STUDIO_STORAGE_S3_SECRET_KEY: kk-studio-reliability-only
+      KK_STUDIO_EXIT_CONFIRMATION_DIRECTORY: /app/execution-exits
     ports:
       - "127.0.0.1:${RELIABILITY_APP_PORT:-18091}:8080"
+    volumes:
+      - execution-exits:/app/execution-exits
     depends_on:
       postgres:
         condition: service_healthy
@@ -140,4 +143,5 @@ networks:
 volumes:
   postgres-data:
   minio-data:
+  execution-exits:
   daemon-workspace:

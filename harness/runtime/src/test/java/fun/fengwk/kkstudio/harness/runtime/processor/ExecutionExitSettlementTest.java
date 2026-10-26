@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.harness.runtime.StopCommand;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState;
+import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
@@ -230,7 +231,8 @@ class ExecutionExitSettlementTest {
                       ToolProcessorTestSupport.BUSY_FALLBACK_DELAY),
                   fixture.clock,
                   fixture.scheduler,
-                  Runnable::run);
+                  Runnable::run,
+                  TestExecutionExitConfirmer.create(processorStore, fixture.clock));
           AutoCloseable execution =
               executionCleanup(held, delegate, "released tool execution must exit in cleanup")) {
         fixture.gateway.admitResults.clear();

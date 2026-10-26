@@ -95,6 +95,137 @@ class PostgresqlHarnessSchemaTest {
   }
 
   @Test
+  void executionExitTableStoresAbandonmentSeparatelyFromRealExitEvidence() {
+    UUID threadId = seedExecutionExitThread();
+    List<String> columns =
+        jdbc.queryForList(
+            """
+            select column_name
+            from information_schema.columns
+            where table_schema = 'public' and table_name = 'harness_execution_exit'
+            order by ordinal_position
+            """,
+            String.class);
+    assertEquals(
+        List.of(
+            "execution_id",
+            "thread_id",
+            "invocation_id",
+            "attempt",
+            "owner_lease_token",
+            "kind",
+            "parent_execution_id",
+            "state",
+            "registered_at",
+            "confirmed_at",
+            "abandoned_at"),
+        columns);
+    List<String> checks =
+        jdbc.queryForList(
+            """
+            select constraint_name
+            from information_schema.table_constraints
+            where table_schema = 'public' and table_name = 'harness_execution_exit'
+              and constraint_type = 'CHECK'
+              and constraint_name like 'ck%'
+            order by constraint_name
+            """,
+            String.class);
+    assertEquals(
+        List.of(
+            "ck_harness_execution_exit_kind",
+            "ck_harness_execution_exit_kind_state",
+            "ck_harness_execution_exit_state",
+            "ck_harness_execution_exit_time",
+            "ck_harness_execution_exit_token"),
+        checks);
+
+    UUID executionId = UUID.randomUUID();
+    jdbc.update(
+        "insert into harness_execution_exit (execution_id, thread_id, invocation_id, attempt,"
+            + " owner_lease_token, kind, parent_execution_id, state, registered_at, confirmed_at,"
+            + " abandoned_at) values (?, ?, ?, 1, 'lease-1', 'TOOL', null, 'UNCONFIRMED',"
+            + " timestamp with time zone '2026-01-01 00:00:00.123+00', null, null)",
+        executionId,
+        threadId,
+        UUID.randomUUID());
+    DataIntegrityViolationException unconfirmedAbandonment =
+        assertThrows(
+            DataIntegrityViolationException.class,
+            () ->
+                jdbc.update(
+                    "update harness_execution_exit set abandoned_at = registered_at"
+                        + " where execution_id = ?",
+                    executionId));
+    assertTrue(unconfirmedAbandonment.getMessage().contains("ck_harness_execution_exit_state"));
+    assertThrows(
+        DataIntegrityViolationException.class,
+        () ->
+            jdbc.update(
+                "update harness_execution_exit set state = 'ABANDONED' where execution_id = ?",
+                executionId));
+
+    jdbc.update(
+        "update harness_execution_exit set state = 'ABANDONED',"
+            + " abandoned_at = registered_at + interval '2 milliseconds' where execution_id = ?",
+        executionId);
+    jdbc.update(
+        "update harness_execution_exit set state = 'STUDIO_EXITED',"
+            + " confirmed_at = registered_at + interval '1 millisecond' where execution_id = ?",
+        executionId);
+    assertTrue(
+        jdbc.queryForObject(
+            """
+            select state = 'STUDIO_EXITED'
+                   and confirmed_at = registered_at + interval '1 millisecond'
+                   and abandoned_at = registered_at + interval '2 milliseconds'
+            from harness_execution_exit where execution_id = ?
+            """,
+            Boolean.class,
+            executionId));
+    DataIntegrityViolationException beforeRegistration =
+        assertThrows(
+            DataIntegrityViolationException.class,
+            () ->
+                jdbc.update(
+                    "update harness_execution_exit"
+                        + " set confirmed_at = registered_at - interval '1 millisecond'"
+                        + " where execution_id = ?",
+                    executionId));
+    assertTrue(beforeRegistration.getMessage().contains("ck_harness_execution_exit_time"));
+  }
+
+  private UUID seedExecutionExitThread() {
+    UUID sessionId = UUID.randomUUID();
+    UUID rootEntryId = UUID.randomUUID();
+    UUID threadId = UUID.randomUUID();
+    jdbc.update(
+        "insert into harness_session (id, name, created_at)"
+            + " values (?, 'session-exit', statement_timestamp())",
+        sessionId);
+    jdbc.update(
+        "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload,"
+            + " created_at) values (?, ?, null, 'ROOT', '{\"title\":\"root\"}'::jsonb,"
+            + " statement_timestamp())",
+        rootEntryId,
+        sessionId);
+    jdbc.update(
+        "insert into harness_thread (id, session_id, head_entry_id, creation_request_hash, name,"
+            + " root_thread_id, yolo_enabled, spawn_trigger, constraints, execution_control,"
+            + " input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+            + " values (?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',"
+            + " 'thread-exit', ?, false, 'MODEL_TOOL',"
+            + " '{\"maxOutputTokens\":null,\"promptCacheDisabled\":false,"
+            + "\"allowAutoCompaction\":true}'::jsonb, 'RUNNABLE', 0, 1, 0,"
+            + " statement_timestamp(), statement_timestamp())",
+        threadId,
+        sessionId,
+        rootEntryId,
+        threadId);
+    return threadId;
+  }
+
+  @Test
   void threadJoinTableStoresOnlyItsOwnedDurableState() {
     // 测试意图：验证 harness_thread_join 表列定义严格与契约对齐，无历史多余状态枚举或 prompt/report 冗余复制。
     List<String> columns =

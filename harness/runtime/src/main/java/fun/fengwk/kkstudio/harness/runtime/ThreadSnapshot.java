@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
@@ -43,7 +44,7 @@ public record ThreadSnapshot(
     List<StoppedThreadReceipt> stopReceipts,
     int incompleteChildJoins,
     boolean unconsumedAppliedNotifications,
-    boolean hasUnconfirmedExecution,
+    List<ExecutionExitFact> unconfirmedExecutions,
     boolean hasIncompleteOwnerChildJoin) {
 
   public ThreadSnapshot {
@@ -54,9 +55,16 @@ public record ThreadSnapshot(
     modelAttemptFailures =
         List.copyOf(Objects.requireNonNull(modelAttemptFailures, "modelAttemptFailures"));
     stopReceipts = List.copyOf(Objects.requireNonNull(stopReceipts, "stopReceipts"));
+    unconfirmedExecutions =
+        List.copyOf(Objects.requireNonNull(unconfirmedExecutions, "unconfirmedExecutions"));
     if (incompleteChildJoins < 0) {
       throw new IllegalArgumentException("incompleteChildJoins must not be negative");
     }
+  }
+
+  /** 仅 UNCONFIRMED 事实阻塞收敛；ABANDONED 已由用户显式解除阻塞。 */
+  public boolean hasUnconfirmedExecution() {
+    return !unconfirmedExecutions.isEmpty();
   }
 
   /**
@@ -93,7 +101,7 @@ public record ThreadSnapshot(
         hasCompactionObligation,
         hasInputDemand,
         incompleteChildJoins,
-        hasUnconfirmedExecution);
+        hasUnconfirmedExecution());
   }
 
   /**

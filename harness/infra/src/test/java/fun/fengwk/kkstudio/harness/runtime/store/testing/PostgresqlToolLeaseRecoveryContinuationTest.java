@@ -173,7 +173,8 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
             Duration.ofSeconds(9)),
         Clock.systemUTC(),
         scheduler,
-        Runnable::run);
+        Runnable::run,
+        ExecutionExitTestSupport.confirmer(store, Clock.systemUTC()));
   }
 
   private ThreadProcessor newThreadProcessor() {

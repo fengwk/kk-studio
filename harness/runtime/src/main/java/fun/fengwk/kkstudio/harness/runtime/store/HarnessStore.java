@@ -622,14 +622,21 @@ public interface HarnessStore {
     ExecutionExitFact registerExecution(ExecutionExitFact fact);
 
     /**
-     * 把已登记代次单向推进到退出证据。写入前必须匹配 thread、invocation、attempt、owner lease、kind 与 parent；任一不匹配抛 {@link
-     * IllegalArgumentException} 且不修改行。重复的相同证据幂等并返回原事实；已确认后的不同证据抛 {@link
-     * IllegalArgumentException}。不存在返回 {@link Optional#empty()}。不要求 Work 仍存在，也不获取新的行锁。
+     * 把已登记代次单向推进到真实退出证据。写入前必须匹配 thread、invocation、attempt、owner lease、kind 与 parent；任一不匹配抛 {@link
+     * IllegalArgumentException} 且不修改行。重复的相同证据幂等并返回原事实；已确认真实证据后的不同证据抛 {@link
+     * IllegalArgumentException}。ABANDONED 可升级为真实证据并保留放弃时刻。不存在返回 {@link Optional#empty()}。不要求 Work
+     * 仍存在，也不获取新的行锁。
      */
     Optional<ExecutionExitFact> confirmExecution(
-        ExecutionExitFact expected, ExecutionExitState state);
+        ExecutionExitFact expected, ExecutionExitState state, Instant confirmedAt);
 
-    /** 读取一个 Thread 上尚未确认退出的执行代次；不依赖 open turn，也不产生锁。 */
+    /**
+     * 用用户显式放弃解除收敛阻塞；它不是物理退出。写入前必须匹配完整身份；UNCONFIRMED 才推进到 ABANDONED，重复放弃幂等返回原事实， 已真实确认后的放弃抛 {@link
+     * IllegalArgumentException}。不存在返回 {@link Optional#empty()}。不获取新的行锁。
+     */
+    Optional<ExecutionExitFact> abandonExecution(ExecutionExitFact expected, Instant abandonedAt);
+
+    /** 读取一个 Thread 上尚未确认退出（仅 UNCONFIRMED）的执行代次；不依赖 open turn，也不产生锁。 */
     List<ExecutionExitFact> loadUnconfirmedExecutions(UUID threadId);
 
     /** 按 executionId 读取执行代次；不存在返回 {@link Optional#empty()}。 */

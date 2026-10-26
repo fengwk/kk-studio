@@ -129,7 +129,7 @@ class HarnessRuntimeResponseMapperTest {
             List.of(),
             1,
             false,
-            false,
+            List.of(),
             false);
     ThreadSnapshot running = modelSnapshot(ModelInvocationStatus.RUNNING, List.of());
 
@@ -166,7 +166,7 @@ class HarnessRuntimeResponseMapperTest {
             List.of(),
             1,
             false,
-            false,
+            List.of(),
             false);
     List<HarnessThreadTreeNodeDTO> nodes =
         HarnessRuntimeResponseMapper.toThreadTreeDtos(List.of(waitingWithTurnEnd));
@@ -555,7 +555,7 @@ class HarnessRuntimeResponseMapperTest {
             List.of(receipt),
             0,
             false,
-            false,
+            List.of(),
             false);
 
     HarnessThreadSnapshotDTO dto =
@@ -615,7 +615,7 @@ class HarnessRuntimeResponseMapperTest {
         List.of(),
         0,
         false,
-        false,
+        List.of(),
         false);
   }
 
@@ -647,7 +647,7 @@ class HarnessRuntimeResponseMapperTest {
         List.of(),
         0,
         false,
-        false,
+        List.of(),
         false);
   }
 
@@ -686,7 +686,7 @@ class HarnessRuntimeResponseMapperTest {
         List.of(),
         0,
         false,
-        false,
+        List.of(),
         false);
   }
 
@@ -846,7 +846,7 @@ class HarnessRuntimeResponseMapperTest {
         snapshot.stopReceipts(),
         snapshot.incompleteChildJoins(),
         snapshot.unconsumedAppliedNotifications(),
-        snapshot.hasUnconfirmedExecution(),
+        snapshot.unconfirmedExecutions(),
         snapshot.hasIncompleteOwnerChildJoin());
   }
 

@@ -584,6 +584,35 @@ class HarnessRuntimeDtoContractTest {
     assertEquals(1, snapshot.getStopReceipts().size());
   }
 
+  /** 测试意图：snapshot 列出具体未确认执行；放弃请求只接受字符串版本并拒绝未知字段。 */
+  @Test
+  void snapshotCarriesUnconfirmedExecutionsAndAbandonRequestIsStrict() throws Exception {
+    HarnessThreadSnapshotDTO snapshot = new HarnessThreadSnapshotDTO();
+    assertTrue(snapshot.getUnconfirmedExecutions().isEmpty());
+    HarnessExecutionExitDTO exit = new HarnessExecutionExitDTO();
+    exit.setExecutionId("00000000-0000-0000-0000-000000000001");
+    exit.setInvocationId("00000000-0000-0000-0000-000000000002");
+    exit.setAttempt(1);
+    exit.setKind("REMOTE");
+    exit.setRegisteredAt(Instant.parse("2026-09-27T00:00:00Z"));
+    snapshot.setUnconfirmedExecutions(List.of(exit));
+    assertEquals(1, snapshot.getUnconfirmedExecutions().size());
+    assertEquals(
+        Instant.class, HarnessExecutionExitDTO.class.getDeclaredField("registeredAt").getType());
+
+    HarnessExecutionAbandonDTO request =
+        MAPPER.readValue("{\"expectedVersion\":\"12\"}", HarnessExecutionAbandonDTO.class);
+    assertEquals("12", request.getExpectedVersion());
+    assertThrows(
+        Exception.class,
+        () -> MAPPER.readValue("{\"expectedVersion\":12}", HarnessExecutionAbandonDTO.class));
+    assertThrows(
+        Exception.class,
+        () ->
+            MAPPER.readValue(
+                "{\"expectedVersion\":\"12\",\"unknown\":true}", HarnessExecutionAbandonDTO.class));
+  }
+
   /** 测试意图：停止回执的 nullable 停止边界必须显式发射 null，避免刷新侧把「缺失」误判为「未知」。 */
   @Test
   void stoppedThreadReceiptAlwaysSerializesNullableStoppedTurnEndEntryId() throws Exception {

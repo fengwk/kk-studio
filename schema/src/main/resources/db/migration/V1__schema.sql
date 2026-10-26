@@ -1505,6 +1505,7 @@ create table harness_execution_exit (
     state varchar(32) not null,
     registered_at timestamptz(3) not null,
     confirmed_at timestamptz(3),
+    abandoned_at timestamptz(3),
     constraint fk_harness_execution_exit_thread foreign key (thread_id) references harness_thread (id),
     constraint fk_harness_execution_exit_parent foreign key (parent_execution_id)
         references harness_execution_exit (execution_id),
@@ -1516,15 +1517,19 @@ create table harness_execution_exit (
         or (kind = 'REMOTE' and parent_execution_id is not null and parent_execution_id <> execution_id)
     ),
     constraint ck_harness_execution_exit_state check (
-        (state = 'UNCONFIRMED' and confirmed_at is null)
+        (state = 'UNCONFIRMED' and confirmed_at is null and abandoned_at is null)
+        or (state = 'ABANDONED' and confirmed_at is null and abandoned_at is not null)
         or (state in ('STUDIO_EXITED', 'REMOTE_ACKNOWLEDGED', 'NOT_STARTED') and confirmed_at is not null)
     ),
     constraint ck_harness_execution_exit_kind_state check (
-        state in ('UNCONFIRMED', 'NOT_STARTED')
+        state in ('UNCONFIRMED', 'NOT_STARTED', 'ABANDONED')
         or (kind in ('MODEL', 'TOOL') and state = 'STUDIO_EXITED')
         or (kind = 'REMOTE' and state = 'REMOTE_ACKNOWLEDGED')
     ),
-    constraint ck_harness_execution_exit_time check (confirmed_at is null or confirmed_at >= registered_at)
+    constraint ck_harness_execution_exit_time check (
+        (confirmed_at is null or confirmed_at >= registered_at)
+        and (abandoned_at is null or abandoned_at >= registered_at)
+    )
 );
 
 comment on table harness_execution_exit is '具体执行代次的退出证据。独立于逻辑 Invocation 生命周期，不以 Invocation 外键跟随逻辑删除';
@@ -1535,9 +1540,10 @@ comment on column harness_execution_exit.attempt is '该 invocation 的具体执
 comment on column harness_execution_exit.owner_lease_token is '登记时持有的 Work lease token';
 comment on column harness_execution_exit.kind is 'MODEL、TOOL 或挂在本地 Tool 代次上的 REMOTE';
 comment on column harness_execution_exit.parent_execution_id is 'REMOTE 关联的本地 Tool 执行代次；本地执行为空';
-comment on column harness_execution_exit.state is '单向退出证据：未确认、Studio 退出、远端 ACK 或确定未启动';
+comment on column harness_execution_exit.state is '退出证据：未确认、Studio 退出、远端 ACK、确定未启动，或用户显式放弃（ABANDONED 不代表物理退出）';
 comment on column harness_execution_exit.registered_at is '登记时间（毫秒精度）';
-comment on column harness_execution_exit.confirmed_at is '退出证据确认时间（毫秒精度）；未确认时为空';
+comment on column harness_execution_exit.confirmed_at is '真实退出证据确认时间（毫秒精度）；未确认或放弃时为空';
+comment on column harness_execution_exit.abandoned_at is '用户显式放弃确认的时间（毫秒精度）；只有 ABANDONED 必填，后续真实确认保留';
 
 create index idx_harness_execution_exit_thread_unconfirmed
     on harness_execution_exit (thread_id, registered_at, execution_id)

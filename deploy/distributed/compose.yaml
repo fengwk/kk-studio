@@ -159,8 +159,11 @@ services:
       KK_STUDIO_STORAGE_MEDIA_FFPROBE_BINARY: ffprobe
       KK_STUDIO_STORAGE_MEDIA_FFMPEG_BINARY: ffmpeg
       KK_STUDIO_STORAGE_MEDIA_TEMP_DIR: /tmp
+      KK_STUDIO_EXIT_CONFIRMATION_DIRECTORY: /app/execution-exits
     ports:
       - "127.0.0.1:${DISTRIBUTED_APP_A_PORT:-18082}:8080"
+    volumes:
+      - execution-exits-a:/app/execution-exits
     depends_on:
       postgres:
         condition: service_healthy
@@ -182,6 +185,8 @@ services:
     environment: *app-environment
     ports:
       - "127.0.0.1:${DISTRIBUTED_APP_B_PORT:-18083}:8080"
+    volumes:
+      - execution-exits-b:/app/execution-exits
     depends_on:
       postgres:
         condition: service_healthy
@@ -252,6 +257,8 @@ services:
 volumes:
   postgres-data:
   minio-data:
+  execution-exits-a:
+  execution-exits-b:
   daemon-workspace-a:
   daemon-workspace-b:
 

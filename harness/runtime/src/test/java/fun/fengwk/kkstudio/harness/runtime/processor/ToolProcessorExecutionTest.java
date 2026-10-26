@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.common.result.BinaryResultContent;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState;
+import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
@@ -247,7 +248,8 @@ class ToolProcessorExecutionTest {
                 ToolProcessorTestSupport.BUSY_FALLBACK_DELAY),
             fixture.clock,
             fixture.scheduler,
-            Runnable::run)) {
+            Runnable::run,
+            TestExecutionExitConfirmer.create(fixture.store, fixture.clock))) {
       assertEquals(ProcessResult.LOST_OWNERSHIP, processor.process(claim(fixture)));
 
       assertEquals(0, run.executes.get());
@@ -775,7 +777,8 @@ class ToolProcessorExecutionTest {
                 ToolProcessorTestSupport.BUSY_FALLBACK_DELAY),
             fixture.clock,
             fixture.scheduler,
-            Runnable::run)) {
+            Runnable::run,
+            TestExecutionExitConfirmer.create(fixture.store, fixture.clock))) {
       assertEquals(ProcessResult.STARTED, processor.process(claim(fixture)));
       ToolProcessorTestSupport.awaitTrue(() -> !processor.hasActiveExecution(), WAIT);
       ToolProcessorTestSupport.awaitTrue(() -> run.closes.get() == 1, WAIT);

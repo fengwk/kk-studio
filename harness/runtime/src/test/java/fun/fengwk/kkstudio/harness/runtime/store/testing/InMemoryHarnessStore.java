@@ -2397,12 +2397,13 @@ public final class InMemoryHarnessStore implements HarnessStore {
 
     @Override
     public Optional<ExecutionExitFact> confirmExecution(
-        ExecutionExitFact expected, ExecutionExitState state) {
+        ExecutionExitFact expected, ExecutionExitState state, Instant confirmedAt) {
       checkOpen();
       Objects.requireNonNull(expected, "expected");
       Objects.requireNonNull(state, "state");
-      if (state == ExecutionExitState.UNCONFIRMED) {
-        throw new IllegalArgumentException("confirmation cannot return to unconfirmed");
+      Objects.requireNonNull(confirmedAt, "confirmedAt");
+      if (!state.confirmed()) {
+        throw new IllegalArgumentException("confirmation requires real exit evidence");
       }
       ExecutionExitFact stored = this.state.executions.get(expected.executionId());
       if (stored == null) {
@@ -2410,9 +2411,26 @@ public final class InMemoryHarnessStore implements HarnessStore {
       }
       requireLocked(LockKey.thread(stored.threadId()));
       requireSameIdentity(stored, expected);
-      ExecutionExitFact confirmed = stored.confirm(state, now());
+      ExecutionExitFact confirmed = stored.confirm(state, confirmedAt);
       this.state.executions.put(expected.executionId(), confirmed);
       return Optional.of(confirmed);
+    }
+
+    @Override
+    public Optional<ExecutionExitFact> abandonExecution(
+        ExecutionExitFact expected, Instant abandonedAt) {
+      checkOpen();
+      Objects.requireNonNull(expected, "expected");
+      Objects.requireNonNull(abandonedAt, "abandonedAt");
+      ExecutionExitFact stored = this.state.executions.get(expected.executionId());
+      if (stored == null) {
+        return Optional.empty();
+      }
+      requireLocked(LockKey.thread(stored.threadId()));
+      requireSameIdentity(stored, expected);
+      ExecutionExitFact abandoned = stored.abandon(abandonedAt);
+      this.state.executions.put(expected.executionId(), abandoned);
+      return Optional.of(abandoned);
     }
 
     @Override
@@ -2420,7 +2438,10 @@ public final class InMemoryHarnessStore implements HarnessStore {
       checkOpen();
       Objects.requireNonNull(threadId, "threadId");
       return state.executions.values().stream()
-          .filter(fact -> fact.threadId().equals(threadId) && !fact.state().confirmed())
+          .filter(
+              fact ->
+                  fact.threadId().equals(threadId)
+                      && fact.state() == ExecutionExitState.UNCONFIRMED)
           .sorted(
               Comparator.comparing(ExecutionExitFact::registeredAt)
                   .thenComparing(ExecutionExitFact::executionId, UuidOrder.COMPARATOR))

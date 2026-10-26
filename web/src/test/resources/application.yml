@@ -32,3 +32,5 @@ kk-studio:
   harness:
     runtime:
       workers-enabled: false
+      # 每个测试上下文使用独立目录，避免文件锁在并行/缓存上下文间冲突。
+      exit-confirmation-directory: ${java.io.tmpdir}/kk-studio-exit-confirmation-${random.uuid}

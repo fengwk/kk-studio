@@ -13,6 +13,7 @@ import fun.fengwk.kkstudio.harness.runtime.ToolInputAcceptance;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.GoalSetting;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryEntryPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
@@ -30,6 +31,7 @@ import fun.fengwk.kkstudio.share.ai.interaction.HarnessToolInputResultDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessAcceptedCommandsDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessBranchSettingsDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCancelledInputDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessExecutionExitDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessGoalSettingDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessManualCompactionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
@@ -312,6 +314,18 @@ public final class HarnessRuntimeResponseMapper {
         manualCompaction.available() ? null : manualCompaction.disabledReason().name());
     dto.setManualCompaction(manualCompactionDto);
     dto.setStopReceipts(toStopReceiptDtos(snapshot.stopReceipts()));
+    List<HarnessExecutionExitDTO> executions =
+        new ArrayList<>(snapshot.unconfirmedExecutions().size());
+    for (ExecutionExitFact fact : snapshot.unconfirmedExecutions()) {
+      HarnessExecutionExitDTO execution = new HarnessExecutionExitDTO();
+      execution.setExecutionId(fact.executionId().toString());
+      execution.setInvocationId(fact.invocationId().toString());
+      execution.setAttempt(fact.attempt());
+      execution.setKind(fact.kind().name());
+      execution.setRegisteredAt(fact.registeredAt());
+      executions.add(execution);
+    }
+    dto.setUnconfirmedExecutions(List.copyOf(executions));
     return dto;
   }
 

@@ -61,6 +61,7 @@ public final class ExecutionExitLedger {
             parentExecutionId,
             ExecutionExitState.UNCONFIRMED,
             now,
+            null,
             null));
   }
 
@@ -70,13 +71,32 @@ public final class ExecutionExitLedger {
    * <p>{@link Confirmation#changed()} 只在本次事务把未确认事实推进到终态时为 true，重复 ACK 为 false，确认后的结算不得重复推进。
    */
   public static Optional<Confirmation> confirm(
-      HarnessStore.Transaction tx, ExecutionExitFact expected, ExecutionExitState state) {
+      HarnessStore.Transaction tx,
+      ExecutionExitFact expected,
+      ExecutionExitState state,
+      Instant confirmedAt) {
     Objects.requireNonNull(tx, "tx");
     boolean changed =
         tx.findExecution(expected.executionId())
             .map(stored -> !stored.state().confirmed())
             .orElse(false);
-    return tx.confirmExecution(expected, state).map(fact -> new Confirmation(fact, changed));
+    return tx.confirmExecution(expected, state, confirmedAt)
+        .map(fact -> new Confirmation(fact, changed));
+  }
+
+  /**
+   * 用用户显式放弃证据解除收敛阻塞。放弃不是退出；重复放弃幂等，真实确认后的放弃是冲突。
+   *
+   * <p>{@link Confirmation#changed()} 只在本次事务把 UNCONFIRMED 推进到 ABANDONED 时为 true。
+   */
+  public static Optional<Confirmation> abandon(
+      HarnessStore.Transaction tx, ExecutionExitFact expected, Instant abandonedAt) {
+    Objects.requireNonNull(tx, "tx");
+    boolean changed =
+        tx.findExecution(expected.executionId())
+            .map(stored -> stored.state() == ExecutionExitState.UNCONFIRMED)
+            .orElse(false);
+    return tx.abandonExecution(expected, abandonedAt).map(fact -> new Confirmation(fact, changed));
   }
 
   /** 一次确认的结果：冻结后的真实事实，以及本次是否真正改变了退出证据。 */
@@ -112,6 +132,25 @@ public final class ExecutionExitLedger {
     snapshots.stream()
         .sorted((left, right) -> UuidOrder.COMPARATOR.compare(left.id(), right.id()))
         .forEach(snapshot -> tx.lockThread(snapshot.id()));
+  }
+
+  /**
+   * 快路径推进：调用方已确认本 Thread 为 RUNNABLE 且没有未完成 Join，只需在确认真正改变事实时递增本 Thread version。
+   *
+   * <p>不进入 {@link #settleClosedTurn} 或任何祖先/父 Thread 结算，因此快路径不会因 Join 逻辑反向获取树锁。
+   */
+  public static void advanceFastPath(
+      HarnessStore.Transaction tx, UUID threadId, Confirmation confirmation) {
+    Objects.requireNonNull(tx, "tx");
+    Objects.requireNonNull(confirmation, "confirmation");
+    if (!confirmation.changed()) {
+      return;
+    }
+    ThreadState thread = tx.findThread(threadId).orElse(null);
+    if (thread == null) {
+      return;
+    }
+    tx.updateThread(thread.touchVersion(tx.now()));
   }
 
   /**

@@ -1016,6 +1016,20 @@ export interface HarnessDraftPreviewRequestDTO {
   commands: HarnessCommandCreateDTO[]
 }
 
+/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessExecutionAbandonDTO */
+export interface HarnessExecutionAbandonDTO {
+  expectedVersion: string
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessExecutionExitDTO */
+export interface HarnessExecutionExitDTO {
+  executionId: string
+  invocationId: string
+  attempt: number
+  kind: string
+  registeredAt: number
+}
+
 /** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessGoalSettingDTO */
 export interface HarnessGoalSettingDTO {
   id: string
@@ -1216,6 +1230,7 @@ export interface HarnessThreadSnapshotDTO {
   modelAttemptFailures: ModelAttemptFailureDTO[]
   manualCompaction: HarnessManualCompactionDTO
   stopReceipts: HarnessStoppedThreadReceiptDTO[]
+  unconfirmedExecutions: HarnessExecutionExitDTO[]
 }
 
 /** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadStopDTO */

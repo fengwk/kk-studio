@@ -14,6 +14,7 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.userMessagePayload;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -1325,9 +1326,9 @@ public abstract class HarnessStoreJoinContract {
             tx -> {
               tx.lockThread(threadId);
               ExecutionExitFact confirmed =
-                  tx.confirmExecution(first, ExecutionExitState.STUDIO_EXITED).orElseThrow();
+                  tx.confirmExecution(first, ExecutionExitState.STUDIO_EXITED, T0).orElseThrow();
               ExecutionExitFact repeated =
-                  tx.confirmExecution(first, ExecutionExitState.STUDIO_EXITED).orElseThrow();
+                  tx.confirmExecution(first, ExecutionExitState.STUDIO_EXITED, T0).orElseThrow();
               assertEquals(confirmed, repeated);
               assertEquals(ExecutionExitState.STUDIO_EXITED, repeated.state());
               return repeated;
@@ -1339,7 +1340,7 @@ public abstract class HarnessStoreJoinContract {
                 store.transaction(
                     tx -> {
                       tx.lockThread(threadId);
-                      return tx.confirmExecution(first, ExecutionExitState.NOT_STARTED);
+                      return tx.confirmExecution(first, ExecutionExitState.NOT_STARTED, T0);
                     }));
     assertEquals(
         "execution " + first.executionId() + " is already confirmed as STUDIO_EXITED",
@@ -1352,7 +1353,8 @@ public abstract class HarnessStoreJoinContract {
                 store.transaction(
                     tx -> {
                       tx.lockThread(threadId);
-                      return tx.confirmExecution(replacedLease, ExecutionExitState.STUDIO_EXITED);
+                      return tx.confirmExecution(
+                          replacedLease, ExecutionExitState.STUDIO_EXITED, T0);
                     }));
     assertEquals(
         "execution " + first.executionId() + " identity cannot be replaced",
@@ -1367,6 +1369,67 @@ public abstract class HarnessStoreJoinContract {
                 tx.loadUnconfirmedExecutions(threadId).stream()
                     .map(ExecutionExitFact::executionId)
                     .toList()));
+  }
+
+  @Test
+  void abandonmentIsStaleReplayableAndUpgradeableByRealEvidence() {
+    // 测试意图：ABANDONED 不是退出确认，不进入未确认列表；重复放弃幂等，真实证据可升级并保留 abandonedAt。
+    UUID threadId = baseline.threadId();
+    UUID invocationId = TestIds.id(820);
+    ExecutionExitFact exitFact =
+        fact(TestIds.id(821), threadId, invocationId, 1, "lease-1", ExecutionExitKind.TOOL, null);
+    store.transaction(
+        tx -> {
+          tx.lockThread(threadId);
+          tx.registerExecution(exitFact);
+          return null;
+        });
+
+    ExecutionExitFact abandoned =
+        store.transaction(
+            tx -> {
+              tx.lockThread(threadId);
+              ExecutionExitFact changed = tx.abandonExecution(exitFact, T0).orElseThrow();
+              ExecutionExitFact repeated =
+                  tx.abandonExecution(exitFact, T0.plusMillis(500)).orElseThrow();
+              assertEquals(changed, repeated);
+              return changed;
+            });
+    assertEquals(ExecutionExitState.ABANDONED, abandoned.state());
+    assertNull(abandoned.confirmedAt());
+    assertEquals(T0, abandoned.abandonedAt());
+    assertTrue(
+        store.transaction(tx -> tx.loadUnconfirmedExecutions(threadId)).stream()
+            .noneMatch(candidate -> candidate.executionId().equals(exitFact.executionId())));
+
+    ExecutionExitFact confirmed =
+        store.transaction(
+            tx -> {
+              tx.lockThread(threadId);
+              return tx.confirmExecution(
+                      exitFact, ExecutionExitState.STUDIO_EXITED, T0.plusMillis(1))
+                  .orElseThrow();
+            });
+    assertEquals(ExecutionExitState.STUDIO_EXITED, confirmed.state());
+    assertEquals(T0.plusMillis(1), confirmed.confirmedAt());
+    assertEquals(T0, confirmed.abandonedAt());
+    assertEquals(
+        confirmed,
+        store.transaction(
+            tx -> {
+              tx.lockThread(threadId);
+              return tx.confirmExecution(
+                      exitFact, ExecutionExitState.STUDIO_EXITED, T0.plusMillis(2))
+                  .orElseThrow();
+            }));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            store.transaction(
+                tx -> {
+                  tx.lockThread(threadId);
+                  return tx.abandonExecution(exitFact, T0.plusMillis(3));
+                }));
   }
 
   @Test
@@ -1409,7 +1472,7 @@ public abstract class HarnessStoreJoinContract {
                 store.transaction(
                     tx -> {
                       tx.lockThread(threadId);
-                      return tx.confirmExecution(model, ExecutionExitState.REMOTE_ACKNOWLEDGED);
+                      return tx.confirmExecution(model, ExecutionExitState.REMOTE_ACKNOWLEDGED, T0);
                     }));
     assertLocalExecutionRejectsRemoteAcknowledgement(modelRemoteAck);
     assertEquals(
@@ -1418,7 +1481,7 @@ public abstract class HarnessStoreJoinContract {
             .transaction(
                 tx -> {
                   tx.lockThread(threadId);
-                  return tx.confirmExecution(model, ExecutionExitState.STUDIO_EXITED);
+                  return tx.confirmExecution(model, ExecutionExitState.STUDIO_EXITED, T0);
                 })
             .orElseThrow()
             .state());
@@ -1428,7 +1491,7 @@ public abstract class HarnessStoreJoinContract {
             .transaction(
                 tx -> {
                   tx.lockThread(threadId);
-                  return tx.confirmExecution(remote, ExecutionExitState.REMOTE_ACKNOWLEDGED);
+                  return tx.confirmExecution(remote, ExecutionExitState.REMOTE_ACKNOWLEDGED, T0);
                 })
             .orElseThrow()
             .state());
@@ -1523,7 +1586,7 @@ public abstract class HarnessStoreJoinContract {
             .transaction(
                 tx -> {
                   tx.lockThread(threadId);
-                  return tx.confirmExecution(newGeneration, ExecutionExitState.STUDIO_EXITED);
+                  return tx.confirmExecution(newGeneration, ExecutionExitState.STUDIO_EXITED, T0);
                 })
             .orElseThrow();
     assertEquals(ExecutionExitState.STUDIO_EXITED, confirmed.state());
@@ -1542,7 +1605,7 @@ public abstract class HarnessStoreJoinContract {
                     tx -> {
                       tx.lockThread(threadId);
                       return tx.confirmExecution(
-                          oldGeneration, ExecutionExitState.REMOTE_ACKNOWLEDGED);
+                          oldGeneration, ExecutionExitState.REMOTE_ACKNOWLEDGED, T0);
                     }));
     assertLocalExecutionRejectsRemoteAcknowledgement(oldGenerationRemoteAck);
     assertEquals(
@@ -1619,6 +1682,7 @@ public abstract class HarnessStoreJoinContract {
         parentExecutionId,
         ExecutionExitState.UNCONFIRMED,
         T0,
+        null,
         null);
   }
 

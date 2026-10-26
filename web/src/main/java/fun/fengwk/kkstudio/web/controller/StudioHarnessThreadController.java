@@ -28,6 +28,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugService;
 import fun.fengwk.kkstudio.platform.harness.thread.query.UsageCostProjectionService;
 import fun.fengwk.kkstudio.platform.interaction.InteractionService;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessExecutionAbandonDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelRequestDebugDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelRequestDebugRequestDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessNameUpdateDTO;
@@ -106,28 +107,55 @@ public class StudioHarnessThreadController {
   public Result<HarnessThreadSnapshotDTO> getSnapshot(@PathVariable String threadId) {
     return Results.ok(
         withRuntimeTranslation(
+            () ->
+                snapshotResponse(
+                    runtime.getThreadSnapshot(
+                        HarnessRuntimeRequestMapper.parseUuid(threadId, "threadId")))));
+  }
+
+  /**
+   * 显式放弃一个具体执行代次的退出确认；只解除收敛阻塞，不冒充物理退出或取消执行。
+   *
+   * <p>请求形状先严格校验；认证与资源读取边界与快照查询一致，不额外限制为执行根，否则 H1 子任务将永久没有放弃出口。首次放弃要求 STOPPED 与 expectedVersion
+   * 精确匹配，重复放弃或已真实确认是安全 replay。
+   */
+  @PostMapping("/{threadId}/executions/{executionId}/abandon")
+  public Result<HarnessThreadSnapshotDTO> abandonExecution(
+      @PathVariable String threadId,
+      @PathVariable String executionId,
+      @RequestBody HarnessExecutionAbandonDTO request) {
+    return Results.ok(
+        withRuntimeTranslation(
             () -> {
-              UUID id = HarnessRuntimeRequestMapper.parseUuid(threadId, "threadId");
-              ThreadSnapshot snapshot = runtime.getThreadSnapshot(id);
-              ManualCompactionAvailability availability = runtime.manualCompactionAvailability(id);
-              Map<UUID, HarnessUsageCostDTO> usageCosts =
-                  usageCostProjectionService.project(snapshot.entryPath().entries());
-              HarnessThreadSnapshotDTO dto =
-                  HarnessRuntimeResponseMapper.toSnapshotDto(snapshot, availability, usageCosts);
-              Map<UUID, ToolInvocationDTO> tools = new HashMap<>();
-              for (ToolInvocationDTO tool : dto.getToolInvocations()) {
-                tools.put(UUID.fromString(tool.getId()), tool);
-              }
-              for (var wait : runtime.listEnvironmentToolWaits(tools.keySet())) {
-                ToolInvocationDTO tool = tools.get(wait.invocationId());
-                tool.setRequiredEnvironmentId(
-                    wait.environmentId() == null ? null : wait.environmentId().toString());
-                tool.setWaitingForEnvironment(wait.waitingForEnvironment());
-                tool.setRequiredEnvironmentName(wait.environmentName());
-                tool.setEnvironmentWaitFreshnessAt(wait.freshnessAt());
-              }
-              return dto;
+              HarnessRuntimeRequestMapper.AbandonExecutionTarget target =
+                  HarnessRuntimeRequestMapper.toAbandonExecutionTarget(
+                      threadId, executionId, request);
+              return snapshotResponse(
+                  runtime.abandonExecution(
+                      target.threadId(), target.executionId(), target.expectedVersion()));
             }));
+  }
+
+  private HarnessThreadSnapshotDTO snapshotResponse(ThreadSnapshot snapshot) {
+    UUID id = snapshot.thread().id();
+    ManualCompactionAvailability availability = runtime.manualCompactionAvailability(id);
+    Map<UUID, HarnessUsageCostDTO> usageCosts =
+        usageCostProjectionService.project(snapshot.entryPath().entries());
+    HarnessThreadSnapshotDTO dto =
+        HarnessRuntimeResponseMapper.toSnapshotDto(snapshot, availability, usageCosts);
+    Map<UUID, ToolInvocationDTO> tools = new HashMap<>();
+    for (ToolInvocationDTO tool : dto.getToolInvocations()) {
+      tools.put(UUID.fromString(tool.getId()), tool);
+    }
+    for (var wait : runtime.listEnvironmentToolWaits(tools.keySet())) {
+      ToolInvocationDTO tool = tools.get(wait.invocationId());
+      tool.setRequiredEnvironmentId(
+          wait.environmentId() == null ? null : wait.environmentId().toString());
+      tool.setWaitingForEnvironment(wait.waitingForEnvironment());
+      tool.setRequiredEnvironmentName(wait.environmentName());
+      tool.setEnvironmentWaitFreshnessAt(wait.freshnessAt());
+    }
+    return dto;
   }
 
   /**

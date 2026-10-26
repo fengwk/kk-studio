@@ -51,6 +51,7 @@ class ExecutionExitResumeTest {
                   null,
                   ExecutionExitState.UNCONFIRMED,
                   T0,
+                  null,
                   null));
           return null;
         });
@@ -68,7 +69,7 @@ class ExecutionExitResumeTest {
         tx -> {
           tx.lockThread(baseline.threadId());
           ExecutionExitFact stored = tx.findExecution(TestIds.id(2)).orElseThrow();
-          tx.confirmExecution(stored, ExecutionExitState.STUDIO_EXITED);
+          tx.confirmExecution(stored, ExecutionExitState.STUDIO_EXITED, T0.plusMillis(1));
           return null;
         });
     runtime.acceptCommands(resume, AcceptancePreflight.IDENTITY);
@@ -171,6 +172,7 @@ class ExecutionExitResumeTest {
                   null,
                   ExecutionExitState.UNCONFIRMED,
                   T0,
+                  null,
                   null));
           return null;
         });

@@ -12,6 +12,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
@@ -679,7 +680,8 @@ class ToolProcessorRecoveryTest {
                 ToolProcessorTestSupport.BUSY_FALLBACK_DELAY),
             fixture.clock,
             hooked,
-            Runnable::run);
+            Runnable::run,
+            TestExecutionExitConfirmer.create(fixture.store, fixture.clock));
     fixture.gateway.queueRun(progress -> ToolProcessorTestSupport.blockUntilInterrupted());
 
     assertEquals(ProcessResult.LOST_OWNERSHIP, processor.process(claimed));
@@ -821,7 +823,8 @@ class ToolProcessorRecoveryTest {
                 null,
                 fixture.clock,
                 fixture.scheduler,
-                Runnable::run));
+                Runnable::run,
+                TestExecutionExitConfirmer.create(fixture.store, fixture.clock)));
     new ToolProcessorConfig(
         ToolProcessorTestSupport.LEASE_CONFIG,
         () -> ToolProcessorTestSupport.NO_RETRY,
@@ -852,7 +855,8 @@ class ToolProcessorRecoveryTest {
                 ToolProcessorTestSupport.BUSY_FALLBACK_DELAY),
             fixture.clock,
             dead,
-            Runnable::run);
+            Runnable::run,
+            TestExecutionExitConfirmer.create(fixture.store, fixture.clock));
     fixture.gateway.queueRun(progress -> ToolProcessorTestSupport.blockUntilInterrupted());
 
     assertEquals(
@@ -1044,7 +1048,8 @@ class ToolProcessorRecoveryTest {
             fixture.clock,
             fixture.scheduler,
             Runnable::run,
-            ignored -> releases.incrementAndGet());
+            ignored -> releases.incrementAndGet(),
+            TestExecutionExitConfirmer.create(fixture.store, fixture.clock));
     ToolProcessorTestSupport.FakeRun run =
         new ToolProcessorTestSupport.FakeRun(
             progress -> ToolProcessorTestSupport.blockUntilInterrupted());

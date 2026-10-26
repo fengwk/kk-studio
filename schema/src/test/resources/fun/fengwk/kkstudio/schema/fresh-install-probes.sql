@@ -1012,6 +1012,55 @@ select pg_temp.rejects('a matched join cannot be superseded',
     '23514', 'ck_harness_thread_join_superseded');
 
 -- ---------------------------------------------------------------------------
+-- Execution exit evidence: abandonment is a separate, nullable timestamp and
+-- never masquerades as a real exit. Real evidence may replace abandonment while
+-- preserving it, and neither timestamp may precede registration.
+-- ---------------------------------------------------------------------------
+insert into harness_execution_exit (execution_id, thread_id, invocation_id, attempt,
+    owner_lease_token, kind, parent_execution_id, state, registered_at, confirmed_at, abandoned_at)
+    values (pg_temp.uid(1700), pg_temp.uid(310), pg_temp.uid(1701), 1, 'lease-1', 'TOOL',
+        null, 'UNCONFIRMED', '2026-01-01 00:00:00.123+00', null, null);
+select pg_temp.assert_true('execution exit stores an optional millisecond abandonment time',
+    (select is_nullable = 'YES' and data_type = 'timestamp with time zone'
+        and datetime_precision = 3
+        from information_schema.columns
+        where table_name = 'harness_execution_exit' and column_name = 'abandoned_at'));
+select pg_temp.rejects('an unconfirmed execution cannot carry abandonment time',
+    $$update harness_execution_exit set abandoned_at = registered_at
+      where execution_id = pg_temp.uid(1700)$$,
+    '23514', 'ck_harness_execution_exit_state');
+select pg_temp.rejects('an abandoned execution requires abandonment time',
+    $$update harness_execution_exit set state = 'ABANDONED'
+      where execution_id = pg_temp.uid(1700)$$,
+    '23514', 'ck_harness_execution_exit_state');
+update harness_execution_exit
+    set state = 'ABANDONED', abandoned_at = registered_at + interval '2 milliseconds'
+    where execution_id = pg_temp.uid(1700);
+select pg_temp.assert_true('abandonment is durable without fabricating a confirmation',
+    (select state = 'ABANDONED' and confirmed_at is null and abandoned_at is not null
+        from harness_execution_exit where execution_id = pg_temp.uid(1700)));
+select pg_temp.rejects('an abandoned execution cannot also carry confirmation',
+    $$update harness_execution_exit set confirmed_at = registered_at + interval '3 milliseconds'
+      where execution_id = pg_temp.uid(1700)$$,
+    '23514', 'ck_harness_execution_exit_state');
+update harness_execution_exit
+    set state = 'STUDIO_EXITED', confirmed_at = registered_at + interval '1 millisecond'
+    where execution_id = pg_temp.uid(1700);
+select pg_temp.assert_true('real evidence may replace abandonment and preserve its earlier time',
+    (select state = 'STUDIO_EXITED'
+        and confirmed_at = registered_at + interval '1 millisecond'
+        and abandoned_at = registered_at + interval '2 milliseconds'
+        from harness_execution_exit where execution_id = pg_temp.uid(1700)));
+select pg_temp.rejects('confirmation cannot precede registration',
+    $$update harness_execution_exit set confirmed_at = registered_at - interval '1 millisecond'
+      where execution_id = pg_temp.uid(1700)$$,
+    '23514', 'ck_harness_execution_exit_time');
+select pg_temp.rejects('abandonment cannot precede registration',
+    $$update harness_execution_exit set abandoned_at = registered_at - interval '1 millisecond'
+      where execution_id = pg_temp.uid(1700)$$,
+    '23514', 'ck_harness_execution_exit_time');
+
+-- ---------------------------------------------------------------------------
 -- Storage/Skills/Environment-update baseline changes: removed persisted upload
 -- expiry, encrypted skill token envelope, and managed update admission.
 -- ---------------------------------------------------------------------------

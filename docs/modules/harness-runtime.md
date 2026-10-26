@@ -69,7 +69,7 @@ tree 锁只用于结构或跨 Thread 的写操作（spawn、Stop、删除、fork
 - `rootThreadId` 是执行根：根指向自身，子代理继承父的执行根。YOLO 只属于执行根，子代理下一次权限决定现读根上的开关。
 - [`ThreadExecutionControl`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/ThreadExecutionControl.java) 只有 `RUNNABLE` / `STOPPED`：Stop 把目标与全部后代置为 `STOPPED`，跨重启保留；显式的新用户输入或新任务只恢复目标本身。`inputThroughSequence` 由 `INPUT` 回合推进；Stop 物化已排队通知时也同步覆盖这些通知的序号，保证三态与 Join 判据对“已消费通知”一致。
 
-对外状态都从 Thread 自身事实派生，不递归子树。[`ThreadSnapshot`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ThreadSnapshot.java) 的 `runtimeStatus()` 统一为严格三态：`RUNNING`、`WAITING` 与 `IDLE`，与 `executionControl`（`RUNNABLE` / `STOPPED`）完全正交。由 [`ThreadActivityEvaluator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/ThreadActivityEvaluator.java) 共享最小客观事实判定：本地活跃执行、自身 open owner compaction 或仍有未完成的直接 `SETTLE_OWNER_TURN` 子 Join 始终为 `RUNNING`；待启动输入需求（排队命令或未消费的已应用通知水位）仅在 `RUNNABLE` 下体现为 `RUNNING`，在 `STOPPED` 下保留通知但不自启（明确抑制本地回合启动，不冒充 RUNNING）；本地已让出执行但存在未完成直接 `NOTIFY_PARENT` 子 Join（`incompleteChildJoins > 0`）体现为 `WAITING`；其余完全静止为空闲 `IDLE`。非 `IDLE` 状态下 `outcome()` 强制抑制为 null，严禁在等待子任务或活跃时宣称 `COMPLETED`。需要注意：未确认执行会让 Thread 保持非空闲，但退出 ACK 只证明本地 body 返回与资源释放完成，不扩张为对远端进程或副作用的普遍事实，因此三态仍不能单独证明外部进程已退出。`executionFacts()` 另给三个独立事实：`hasWork`、`waitingForHuman` 与 `hasUnknownToolOutcome`。
+对外状态都从 Thread 自身事实派生，不递归子树。[`ThreadSnapshot`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ThreadSnapshot.java) 的 `runtimeStatus()` 统一为严格三态：`RUNNING`、`WAITING` 与 `IDLE`，与 `executionControl`（`RUNNABLE` / `STOPPED`）完全正交。由 [`ThreadActivityEvaluator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/ThreadActivityEvaluator.java) 共享最小客观事实判定：本地活跃执行、自身 open owner compaction 或仍有未完成的直接 `SETTLE_OWNER_TURN` 子 Join 始终为 `RUNNING`；待启动输入需求（排队命令或未消费的已应用通知水位）仅在 `RUNNABLE` 下体现为 `RUNNING`，在 `STOPPED` 下保留通知但不自启（明确抑制本地回合启动，不冒充 RUNNING）；本地已让出执行但存在未完成直接 `NOTIFY_PARENT` 子 Join（`incompleteChildJoins > 0`）体现为 `WAITING`；其余完全静止为空闲 `IDLE`。非 `IDLE` 状态下 `outcome()` 强制抑制为 null，严禁在等待子任务或活跃时宣称 `COMPLETED`。需要注意：未确认执行（`UNCONFIRMED`）会让 Thread 保持非空闲；显式 `ABANDONED` 或已确认真实退出不再阻塞，但退出 ACK 只证明本地 body 返回与资源释放完成，不扩张为对远端进程或副作用的普遍事实，因此三态仍不能单独证明外部进程已退出。`executionFacts()` 另给三个独立事实：`hasWork`、`waitingForHuman` 与 `hasUnknownToolOutcome`。
 
 [`ThreadContextClassifier`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/ThreadContextClassifier.java) 是纯函数：输入 ThreadState、root-to-head 路径、open 回合的 ModelInvocation 及其 Tool siblings，输出唯一的 [`ThreadContext`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/ThreadContext.java)（`IdleOrHistorical`、`ContinuationDue`、`ModelActive`、`ModelTerminalPending`、`ToolActive`、`ToolTerminalPending`）；任何所有权或配对不一致都直接抛 `IllegalStateException`。快照与 Processor 共用这一分类。
 
@@ -164,6 +164,12 @@ Model / Tool Processor 的本地准入与 execution 登记由同一类级强类�
 
 每个具体执行代次在进入 body 或发出远端调用前登记为独立的退出事实，不依赖逻辑 Invocation 行是否仍存在。admission 取得的每个 run 在失权、取消或离场时都恰 close 一次；body 返回且本地 admission close 成功后，执行线程才确认 `STUDIO_EXITED`；远端子执行在完整 identity 匹配后确认 `REMOTE_ACKNOWLEDGED`。已登记但确定未进入 body 的代次，只在 close 成功后确认 `NOT_STARTED`；close 失败保留 `UNCONFIRMED`，不得偷偷二次 close 或确认。取消、lease 丢失与逻辑终态本身都不等于退出：body 开始后仍须等待真实返回并完成资源释放，未进入 body 的已排队任务也由统一 finally 收敛。最后一次真正改变退出事实的 ACK 在同一事务递增 Thread version；若普通终态已物化则直接补结算 Join，否则只有存在源命令已应用的未完成 Join 才请求 THREAD Work。重复 ACK 不重复 version、wake 或通知；STOPPED Thread 在 ACK 事务内递归结算已收敛祖先。
 
+### 退出确认与放弃
+
+真实退出证据只有 `STUDIO_EXITED`、`REMOTE_ACKNOWLEDGED` 与 `NOT_STARTED` 三种。确认入口在读取或提交数据库之前先把完整执行身份与证据时刻写入本机 write-ahead journal；只有确认与结算事务提交成功后才删除记录。同一身份重放 canonical 时刻，不因重试刷新 `confirmedAt`；数据库故障或事实缺失保留 journal 并 fail-closed，Thread 已随合法深删消失时只在该空事务提交后删除。进程重启后每 1 秒在 worker 线程重放一次，损坏、身份冲突与目录占用都 fail-closed。journal 目录由单个 Studio 实例独占并持久化，文件锁在进程生命周期内持有；journal 写入只证明正向证据已落盘，不证明远端进程已经退出。
+
+`ABANDONED` 是用户显式放弃继续等待确认的独立事实，不是物理退出，也不能伪造 ACK。只有 `UNCONFIRMED` 阻止收敛；首次放弃要求 Thread 已 `STOPPED`、执行属于该 Thread 且 `expectedVersion` 精确匹配，重复放弃或已真实确认是安全 replay，容忍旧 version。真实证据到达后可以把 `ABANDONED` 升级为已确认状态并保留原 `abandonedAt`；两种时刻都不得早于 `registeredAt`，但 `confirmedAt` 可以早于 `abandonedAt`，绝不改写观测时间。退出事实行（包括放弃行）保留到 Thread 深删除，没有 TTL，也不以 lease 到期、`cluster_node` 路由记录或 journal 存在推断宿主已死亡。
+
 Thread 由轻量 `ThreadAdmissionGuard` 独立防重，旧 action 未结束时同 token 或异 token 均返回 LOST，不抢占。
 
 preflight 创建的 execution 在返回 `STARTED` 前由 Processor 负责清理：Allow、Ask、Deny 的回写失败或启动失败均停止 heartbeat 并释放本地登记；成功移交后由执行线程负责释放，不能再由 preflight 清理。两类 Processor 共用 [`WorkHeartbeat`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/WorkHeartbeat.java)：调度器只做周期唤醒与非阻塞分派，独立 worker 执行续租事务；续租失败、调度拒绝或分派拒绝都视为失去所有权，统一触发一次 `onLostOwnership`。
@@ -202,7 +208,7 @@ Stop 在 tree 锁内校验目标 version 与 `stopRequestId`，按 `parentThread
 
 [`StopResult`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/StopResult.java) 返回完整受影响集合；每个 [`StoppedThreadReceipt`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/StoppedThreadReceipt.java) 记录停止边界、取消数量与被退回的人工输入（`USER_MESSAGE` / `GOAL`）。`CUSTOM_MESSAGE` 与设置命令被取消但不退回；`NOTIFICATION` 不取消，而是物化进历史、同步推进 `inputThroughSequence` 且不唤醒模型。整次 Stop 按 `(root_thread_id, root_stop_request_id)` 持久化：精确重放返回原集合、不重停新工作，后代的派生身份被当作新请求复用时为 `STOP_REQUEST_ID_REUSED`。
 
-显式新输入恢复 STOPPED 目标前，必须已无未确认执行，且没有未完成的直接 `NOTIFY_PARENT` 或 `SETTLE_OWNER_TURN` 子 Join；设置类维护输入不触发恢复，因此不受此限制。已收敛后代的退出 ACK 可递归完成祖先的 Join 结算，不依赖祖先重新启动。
+显式新输入恢复 STOPPED 目标前，必须已无 `UNCONFIRMED` 执行，且没有未完成的直接 `NOTIFY_PARENT` 或 `SETTLE_OWNER_TURN` 子 Join；`ABANDONED` 或已确认执行不阻塞恢复。设置类维护输入不触发恢复，因此不受此限制。已收敛后代的退出 ACK 可递归完成祖先的 Join 结算，不依赖祖先重新启动。
 
 ## 人工输入与权限
 
@@ -222,7 +228,7 @@ Stop 在 tree 锁内校验目标 version 与 `stopRequestId`，按 `parentThread
 
 同一父子对至多一个有效未完成 Join；子 Thread 无未完成的 `SETTLE_OWNER_TURN` 时，新续接可取代旧等待，否则须完成 owner 结算后才可继续。精确重放仍返回原票据。
 
-普通结算要求：源命令已应用；没有尚未冻结结果的直接子 Join（含 owner 结算义务）、本 Thread 没有待处理输入且没有未确认执行——因此多级委派自底向上自然收敛，既不等于首次本地 Idle，也不等待整棵子树永久静止。Stop 结算允许纳入尚未应用的源命令，但仍要求同一收敛事实。普通终态已物化但 Join 仍被未确认执行阻挡时，最后一次退出 ACK 在同一事务内补结算，不依赖后续 Work 恰好再次到达。结果固定在源命令应用位置到终态边界的历史范围内，子树后续推进不改写旧回执。`maxTurns` 是软预算，超出时在规划中物化一条 `TASK_BUDGET` 通知，每个 Join 只提醒一次。
+普通结算要求：源命令已应用；没有尚未冻结结果的直接子 Join（含 owner 结算义务）、本 Thread 没有待处理输入且没有 `UNCONFIRMED` 执行——`ABANDONED` 或已确认执行不再阻塞，因此多级委派自底向上自然收敛，既不等于首次本地 Idle，也不等待整棵子树永久静止。Stop 结算允许纳入尚未应用的源命令，但仍要求同一收敛事实。普通终态已物化但 Join 仍被未确认执行阻挡时，最后一次退出 ACK 在同一事务内补结算，不依赖后续 Work 恰好再次到达。结果固定在源命令应用位置到终态边界的历史范围内，子树后续推进不改写旧回执。`maxTurns` 是软预算，超出时在规划中物化一条 `TASK_BUDGET` 通知，每个 Join 只提醒一次。
 
 结算与父通知入队在同一事务完成：`NOTIFY_PARENT` 结算原子冻结终态结果、写入父 `NOTIFICATION` 命令、推进父序列并请求 Work，通过唯一次 `updateJoin` 直接落盘为 delivered 状态，不持久化已匹配但未送达的中间态。通知的消息由 `runtime.join` 纯函数渲染（`<subagent_result>` 包裹任务原文与结果），不读取子线程当前 head。显式停止的父不会被唤醒：通知直接物化进历史，待父接受新输入后由 `INPUT` 回合消费。
 
@@ -324,7 +330,7 @@ Goal 正文由用户经 typed `GOAL` 命令写入 branch settings，Agent 只能
 | `runtime.admission` | 进程内无等待的并发槽位，不持久化、不跨进程协调 |
 | `runtime.compaction` | 压缩阈值、切分规划、结果评估与子执行 spawn；规划与评估是纯函数 |
 | `runtime.entry` | 分支配置与回合生命周期值：`BranchSettings`、`GoalSetting`、启动原因与结局 |
-| `runtime.execution` | 具体执行代次的窄退出账本：身份登记、单向 ACK、确认后的 Join 结算推进；不复制 Invocation 状态机 |
+| `runtime.execution` | 具体执行代次的窄退出账本：身份登记、单向真实 ACK、显式放弃、journal write-ahead 重放与确认后的 Join 结算推进；不复制 Invocation 状态机 |
 | `runtime.history` | Entry、`EntryPath`、回合文法校验与历史 JSON 编解码 |
 | `runtime.input` | `ask_user` 问卷与答案的纯值校验和规范化 |
 | `runtime.interaction` | 等待输入/审批的只读投影与稳定分页，不持有产品归属 |

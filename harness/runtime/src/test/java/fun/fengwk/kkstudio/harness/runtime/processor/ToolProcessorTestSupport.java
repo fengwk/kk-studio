@@ -13,6 +13,7 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
@@ -267,7 +268,8 @@ final class ToolProcessorTestSupport {
                   LEASE_CONFIG, () -> retryPolicy, PREFLIGHT_FAILURE_DELAY, BUSY_FALLBACK_DELAY),
               clock,
               scheduler,
-              Runnable::run);
+              Runnable::run,
+              TestExecutionExitConfirmer.create(store, clock));
     }
 
     /**

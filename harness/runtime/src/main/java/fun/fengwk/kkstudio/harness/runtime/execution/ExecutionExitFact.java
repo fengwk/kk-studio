@@ -21,7 +21,8 @@ public record ExecutionExitFact(
     UUID parentExecutionId,
     ExecutionExitState state,
     Instant registeredAt,
-    Instant confirmedAt) {
+    Instant confirmedAt,
+    Instant abandonedAt) {
 
   public ExecutionExitFact {
     executionId = Objects.requireNonNull(executionId, "executionId");
@@ -49,15 +50,30 @@ public record ExecutionExitFact(
     }
     registeredAt = HarnessStoreTime.requireMillisecondPrecision(registeredAt);
     confirmedAt = HarnessStoreTime.requireMillisecondPrecision(confirmedAt);
+    abandonedAt = HarnessStoreTime.requireMillisecondPrecision(abandonedAt);
     Objects.requireNonNull(registeredAt, "registeredAt");
     if (state == ExecutionExitState.UNCONFIRMED) {
       if (confirmedAt != null) {
         throw new IllegalArgumentException("an unconfirmed execution has no confirmation time");
       }
+      if (abandonedAt != null) {
+        throw new IllegalArgumentException("an unconfirmed execution has no abandonment time");
+      }
+    } else if (state == ExecutionExitState.ABANDONED) {
+      if (confirmedAt != null) {
+        throw new IllegalArgumentException("an abandoned execution has no confirmation time");
+      }
+      abandonedAt = Objects.requireNonNull(abandonedAt, "abandonedAt");
+      if (abandonedAt.isBefore(registeredAt)) {
+        throw new IllegalArgumentException("abandonment cannot precede registration");
+      }
     } else {
       confirmedAt = Objects.requireNonNull(confirmedAt, "confirmedAt");
       if (confirmedAt.isBefore(registeredAt)) {
         throw new IllegalArgumentException("confirmation cannot precede registration");
+      }
+      if (abandonedAt != null && abandonedAt.isBefore(registeredAt)) {
+        throw new IllegalArgumentException("abandonment cannot precede registration");
       }
     }
   }
@@ -91,11 +107,44 @@ public record ExecutionExitFact(
     }
   }
 
-  /** 幂等确认：相同证据返回自身；已确认后的另一种证据是冲突，不能把一种退出改写成另一种。 */
+  /** 幂等放弃：相同放弃返回自身；真实确认后的放弃是冲突，不能把退出改写成放弃。 */
+  public ExecutionExitFact abandon(Instant at) {
+    Instant abandoned = HarnessStoreTime.requireMillisecondPrecision(at);
+    Objects.requireNonNull(abandoned, "abandonedAt");
+    if (state == ExecutionExitState.ABANDONED) {
+      return this;
+    }
+    if (state.confirmed()) {
+      throw new IllegalArgumentException(
+          "execution " + executionId + " is already confirmed as " + state);
+    }
+    if (state != ExecutionExitState.UNCONFIRMED) {
+      throw new IllegalArgumentException(
+          "execution " + executionId + " cannot be abandoned from " + state);
+    }
+    return new ExecutionExitFact(
+        executionId,
+        threadId,
+        invocationId,
+        attempt,
+        ownerLeaseToken,
+        kind,
+        parentExecutionId,
+        ExecutionExitState.ABANDONED,
+        registeredAt,
+        null,
+        abandoned);
+  }
+
+  /**
+   * 幂等确认：相同真实证据返回自身；已确认后的另一种真实证据是冲突，不能把一种退出改写成另一种。
+   *
+   * <p>ABANDONED 不是真实退出，可以被真实证据取代；取代后保留原放弃时刻。
+   */
   public ExecutionExitFact confirm(ExecutionExitState next, Instant at) {
     Objects.requireNonNull(next, "next");
-    if (next == ExecutionExitState.UNCONFIRMED) {
-      throw new IllegalArgumentException("confirmation cannot return to unconfirmed");
+    if (next == ExecutionExitState.UNCONFIRMED || next == ExecutionExitState.ABANDONED) {
+      throw new IllegalArgumentException("confirmation requires real exit evidence");
     }
     Instant confirmed = HarnessStoreTime.requireMillisecondPrecision(at);
     Objects.requireNonNull(confirmed, "confirmedAt");
@@ -116,7 +165,8 @@ public record ExecutionExitFact(
         parentExecutionId,
         next,
         registeredAt,
-        confirmed);
+        confirmed,
+        abandonedAt);
   }
 
   private static String requireLeaseToken(String token) {

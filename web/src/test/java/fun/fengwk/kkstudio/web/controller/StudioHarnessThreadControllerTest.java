@@ -182,7 +182,7 @@ class StudioHarnessThreadControllerTest {
             List.of(),
             0,
             false,
-            false,
+            List.of(),
             false);
     Instant deadline = Instant.parse("2026-10-08T12:00:00Z");
     when(runtime.getThreadSnapshot(id(1))).thenReturn(snapshot);
@@ -268,6 +268,52 @@ class StudioHarnessThreadControllerTest {
         .andExpect(jsonPath("$.data.thread.threadId").value(idText(1)))
         .andExpect(jsonPath("$.data.manualCompaction.available").value(false))
         .andExpect(jsonPath("$.data.manualCompaction.disabledReason").value("BELOW_MINIMUM"));
+  }
+
+  /** 意图：放弃执行确认严格解析字符串版本并返回最新快照，不限制目标必须为执行根。 */
+  @Test
+  void abandonExecutionMapsVersionAndReturnsSnapshotForChildThread() throws Exception {
+    when(runtime.abandonExecution(id(7), id(9), 4L))
+        .thenReturn(HarnessRuntimeTestFixtures.idleSnapshot(id(7)));
+    when(runtime.manualCompactionAvailability(id(7)))
+        .thenReturn(ManualCompactionAvailability.enabled());
+
+    mockMvc
+        .perform(
+            post("/api/threads/" + idText(7) + "/executions/" + idText(9) + "/abandon")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"expectedVersion\":\"4\"}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.thread.threadId").value(idText(7)))
+        .andExpect(jsonPath("$.data.version").value("3"));
+
+    verify(runtime).abandonExecution(id(7), id(9), 4L);
+  }
+
+  /** 意图：非字符串/非规范版本与非 canonical UUID 在调用 Runtime 前以 400 拒绝。 */
+  @Test
+  void abandonExecutionRejectsMalformedRequestBeforeRuntime() throws Exception {
+    for (String body :
+        List.of(
+            "{\"expectedVersion\":4}",
+            "{\"expectedVersion\":\"-1\"}",
+            "{\"expectedVersion\":\"4.0\"}",
+            "{\"expectedVersion\":\"4\",\"unknown\":true}")) {
+      mockMvc
+          .perform(
+              post("/api/threads/" + idText(7) + "/executions/" + idText(9) + "/abandon")
+                  .contentType(MediaType.APPLICATION_JSON)
+                  .content(body))
+          .andExpect(status().isBadRequest());
+    }
+    mockMvc
+        .perform(
+            post("/api/threads/not-a-uuid/executions/" + idText(9) + "/abandon")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"expectedVersion\":\"4\"}"))
+        .andExpect(status().isBadRequest());
+
+    verifyNoInteractions(runtime, modelRequestDebugService, interactionService);
   }
 
   /**

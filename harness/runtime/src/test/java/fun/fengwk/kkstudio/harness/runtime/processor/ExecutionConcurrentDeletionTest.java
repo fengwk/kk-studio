@@ -9,6 +9,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState;
+import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
@@ -212,7 +213,8 @@ class ExecutionConcurrentDeletionTest {
             support.clock,
             support.scheduler,
             Runnable::run,
-            ignored -> releases.incrementAndGet());
+            ignored -> releases.incrementAndGet(),
+            TestExecutionExitConfirmer.create(store, support.clock));
     ToolProcessorTestSupport.FakeRun run =
         new ToolProcessorTestSupport.FakeRun(
             progress -> {
@@ -352,7 +354,9 @@ class ExecutionConcurrentDeletionTest {
               scheduler,
               Runnable::run,
               Runnable::run,
-              ignored -> releases.incrementAndGet());
+              ignored -> releases.incrementAndGet(),
+              TestExecutionExitConfirmer.create(
+                  store, Clock.fixed(ThreadProcessorTestSupport.NOW, ZoneOffset.UTC)));
     }
 
     /** LOST 语义：本地槽位释放、无实时事件、durable 状态与 Thread version 不变。 */
