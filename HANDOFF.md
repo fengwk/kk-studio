@@ -7,7 +7,7 @@
 - 全部有效代码改动已收敛到唯一交接分支 `handoff`，代码基线为 `7ba0f167eff6eb07b78b24880970880fb1e964f5`，本文件及其索引修正形成仅含文档的提交。
 - 实现与定向验证覆盖了主要路径；**内容 Review 未完成，最终候选全量 CI 未运行，`main`/`dev` 未合入，`v4.0.0` 未发布**。
 - 本地仅保留 `main`、`dev`、`handoff` 三个分支；所有开发 workspace 已释放，记录归档在 `.workspace/.archives/`。
-- 没有推送、发布、部署、生产数据库写入或新的真实模型请求。24 次有界模型探测已封账，hosted 探测 SKIPPED。
+- `handoff` 分支已推送到 `origin/handoff`；没有合入/推送 `main`/`dev`，没有发布、部署、生产数据库写入或新的真实模型请求。24 次有界模型探测已封账，hosted 探测 SKIPPED。
 
 ## 2. 接手前必读
 
@@ -40,7 +40,7 @@
 - 禁止生产修复、重启、登录、取消任务、修改设置、部署或执行未授权迁移。
 - 24 次模型探测已封账；不得发起新的 live 模型请求，除非用户单独明确授权。
 - 线上 IDE 首次关闭方与根因未确认；禁止用重试、关闭 Brotli、放大超时等表面修复冒充根因修复。
-- 发布、`main`/`dev` 推送、tag、生产操作都需要用户单独授权。本次交接只授权了分支收敛与 workspace 释放。
+- 发布、`main`/`dev` 推送、tag、生产操作都需要用户单独授权。本次交接授权了分支收敛、workspace 释放和 `handoff` 分支推送；未授权全量 CI、`main`/`dev` 合入或发布。
 
 ### 3.4 门禁与覆盖率
 
@@ -74,7 +74,7 @@
 - 初始检查时，`git diff --stat 7ba0..HEAD` 应只包含 `HANDOFF.md`。
 - `git diff --check 7ba0..HEAD` 应为空。
 - 37 个非交接 workspace 已释放：其中 36 个已合并分支随释放删除；唯一未合入的红色测试提交 `26c5b77aaf832e94ade6fb2fed2026df9cb4b1a6` 已保存为 bundle（见第 12 节），其分支也已删除。
-- 远程跟踪引用仍是 `origin/worktree/runtime-convergence`；本地改名未推送，也未创建 `origin/handoff`。后续推送需单独授权。
+- `origin/handoff` 已创建并与本地 `handoff` 一致；旧远程引用 `origin/worktree/runtime-convergence` 仍保留，未删除。
 
 ### 4.1 重新创建工作区
 
@@ -313,7 +313,7 @@ git diff --check
 
 ### 10.5 全量 CI（validate-only）
 
-先获得推送授权，再执行：
+分支已推送；触发全量 CI 仍需单独授权，然后执行：
 
 ```sh
 gh workflow run docker-publish.yml \
@@ -334,7 +334,7 @@ gh run list --repo fengwk/kk-studio --workflow=docker-publish.yml --limit 3
 2. 完成第 8 节 Review；发现问题走隔离 workspace，普通提交，补定向测试；不要 amend/rebase。
 3. 更新 `REVIEW.md`/`TODOLIST.md` 的实际可见范围和测试证据；不要把“请求范围”写成“已读”。
 4. 运行必要的定向测试与仓库门禁；冻结最终 SHA。
-5. 推送任务分支（需授权），触发 `validate_only=true` 全量 CI。
+5. 触发 `validate_only=true` 全量 CI（需授权）；分支推送已完成。
 6. 核对 CI run `head_sha` 精确等于最终 SHA；所有 job 成功；失败则定向修复后重新冻结/触发。
 7. 合入 `main`/`dev`（需授权）：目标已推进时，先把最新目标合入候选，复核并验证新提交，再用新的 expected target/head 调 `git-workspace-cli integrate`。
 8. 推送 `main`/`dev`（需授权）；确认远端 refs 与本地一致。
@@ -430,10 +430,11 @@ ps -eo pid,args | grep -E '\.workspace/|mvn|surefire|playwright' | grep -v grep
 - 将全部有效改动收敛到一个交接分支。
 - 在分支中提交本交接文档。
 - 释放所有开发 workspace，仅保留 `main`、`dev`、`handoff` 三个本地分支。
+- 推送 `handoff` 分支到 `origin/handoff`。
 
 尚未授权、必须再次确认：
 
-- 推送任务分支或触发全量 CI。
+- 触发全量 CI。
 - 合入/推送 `main`/`dev`。
 - 创建/推送 `v4.0.0` tag、发布 Daemon Release 或镜像。
 - 部署、生产数据库写入/迁移/修复、登录/设置变更。
