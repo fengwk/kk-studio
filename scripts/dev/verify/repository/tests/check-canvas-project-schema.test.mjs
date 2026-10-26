@@ -7,9 +7,19 @@
  */
 
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
+import { fileURLToPath } from 'node:url'
 
 import { repositoryRoot } from '../../../lib/repo-root.mjs'
 import {
@@ -161,3 +171,75 @@ test('test intent: the declaration parser handles comments, case and if-not-exis
   const sql = '-- create table commented (id uuid);\nCREATE TABLE IF NOT EXISTS real_table (id uuid);\n'
   assert.deepEqual(declaredBaselineTables(sql), ['real_table'])
 })
+
+test(
+  'test intent: readiness rejects the Unix-only init server and loads DDL only after a loopback TCP SELECT 1',
+  {
+    skip: !existsSync('/var/run/docker.sock') &&
+      'requires the local Docker socket path the checker validates',
+  },
+  () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'kk-schema-readiness-'))
+    const bin = path.join(root, 'bin')
+    const state = path.join(root, 'state')
+    mkdirSync(bin)
+    mkdirSync(state)
+    const fixture = path.join(
+      path.dirname(fileURLToPath(import.meta.url)),
+      'fixtures',
+      'schema-readiness-docker.mjs',
+    )
+    const quote = (value) => `'${value.replaceAll("'", "'\\''")}'`
+    const docker = path.join(bin, 'docker')
+    writeFileSync(
+      docker,
+      `#!/bin/sh\nexec ${quote(process.execPath)} ${quote(fixture)} "$@"\n`,
+      { mode: 0o755 },
+    )
+    const environment = {
+      ...process.env,
+      PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}`,
+      FAKE_DOCKER_STATE: state,
+    }
+    for (const key of ['DOCKER_HOST', 'DOCKER_CONTEXT', 'DOCKER_TLS_VERIFY', 'DOCKER_CERT_PATH']) {
+      delete environment[key]
+    }
+    try {
+      const result = spawnSync(
+        process.execPath,
+        [path.join(repositoryRoot(), 'scripts/dev/verify/repository/check-canvas-project-schema.mjs')],
+        { cwd: repositoryRoot(), encoding: 'utf8', env: environment, timeout: 120_000 },
+      )
+      assert.equal(result.status, 0, result.stderr || result.stdout)
+      assert.match(result.stdout, /PASS 213 positive and negative database contract assertions/)
+      assert.match(result.stdout, /PASS validator detects 5 non-declared schema changes/)
+
+      const phases = readFileSync(path.join(state, 'phases.log'), 'utf8').trim().split('\n')
+      assert.deepEqual(
+        phases.filter((phase) => phase.startsWith('tcp-attempt')),
+        ['tcp-attempt 1', 'tcp-attempt 2', 'tcp-attempt 3'],
+        'the checker must wait through the failing loopback TCP attempts',
+      )
+      assert.ok(!phases.includes('unix-temp-server-ready'), 'pg_isready must not be the readiness gate')
+      assert.ok(!phases.includes('EARLY_DDL'), 'baseline DDL must not run before the target database is reachable')
+      const readyIndex = phases.indexOf('tcp-ready')
+      const baselineIndex = phases.indexOf('baseline')
+      const probesIndex = phases.indexOf('probes')
+      assert.ok(readyIndex >= 0, 'the loopback TCP SELECT 1 must establish readiness')
+      assert.ok(baselineIndex > readyIndex, 'the baseline must load after TCP readiness')
+      assert.ok(probesIndex > baselineIndex, 'the probes must run after the baseline loads')
+
+      const calls = readFileSync(path.join(state, 'calls.log'), 'utf8')
+        .trim().split('\n').map((line) => JSON.parse(line))
+      const readiness = calls.filter((args) => args.includes('psql') && !args.includes('-i'))
+      assert.equal(readiness.length, 3, 'readiness must be probed by non-interactive psql')
+      for (const args of readiness) {
+        assert.ok(args.includes('-h') && args.includes('127.0.0.1'), 'readiness must use loopback TCP')
+        assert.ok(args.includes('SELECT 1'), 'readiness must select from the exact target database')
+      }
+      assert.ok(existsSync(path.join(state, 'removed')), 'the owned container must be cleaned up')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  },
+)
