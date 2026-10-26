@@ -80,7 +80,7 @@ export function createLspCapabilities(
       return errorResult(callId, 'Operation cancelled')
     }
 
-    let requestSent = false
+    let executionStarted = false
     try {
       const args = call.arguments
       if (!args || typeof args !== 'object' || Array.isArray(args)) {
@@ -120,20 +120,18 @@ export function createLspCapabilities(
         character = rawChar
       }
 
+      executionStarted = true
       const result = await service.gotoDefinition(
         realPath,
         line,
         character,
         context.signal,
         () => context.confirmExecutionExit(),
-        () => {
-          requestSent = true
-        },
       )
       return textResult(callId, result)
     } catch (error) {
-      if (!requestSent) {
-        // 校验、租约或发送前失败都没有发出这次请求。发送之后的失败不能当成未启动。
+      if (!executionStarted) {
+        // 参数校验在租约与服务调用之前完成，确定没有启动执行范围。
         context.confirmExecutionExit()
       }
       if (isTimeout(error, context.signal)) {
@@ -165,7 +163,7 @@ export function createLspCapabilities(
       return errorResult(callId, 'Operation cancelled')
     }
 
-    let requestSent = false
+    let executionStarted = false
     try {
       const args = call.arguments
       if (!args || typeof args !== 'object' || Array.isArray(args)) {
@@ -195,19 +193,17 @@ export function createLspCapabilities(
         limit = rawLimit
       }
 
+      executionStarted = true
       const result = await service.workspaceSymbols(
         realPath,
         query,
         limit,
         context.signal,
         () => context.confirmExecutionExit(),
-        () => {
-          requestSent = true
-        },
       )
       return textResult(callId, result)
     } catch (error) {
-      if (!requestSent) {
+      if (!executionStarted) {
         context.confirmExecutionExit()
       }
       if (isTimeout(error, context.signal)) {
@@ -239,7 +235,7 @@ export function createLspCapabilities(
       return errorResult(callId, 'Operation cancelled')
     }
 
-    let requestSent = false
+    let executionStarted = false
     try {
       const args = call.arguments
       if (!args || typeof args !== 'object' || Array.isArray(args)) {
@@ -257,18 +253,16 @@ export function createLspCapabilities(
       }
       const target = rawTarget
 
+      executionStarted = true
       const result = await service.javaDecompile(
         realPath,
         target,
         context.signal,
         () => context.confirmExecutionExit(),
-        () => {
-          requestSent = true
-        },
       )
       return textResult(callId, result)
     } catch (error) {
-      if (!requestSent) {
+      if (!executionStarted) {
         context.confirmExecutionExit()
       }
       if (isTimeout(error, context.signal)) {

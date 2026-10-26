@@ -89,6 +89,7 @@ class IdeReverseStreamEndpointIntegrationTest extends WebPostgresTestSupport {
     when(endpoint.connectionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
     FakeDaemon daemon = new FakeDaemon();
     UUID invocationId = UUID.randomUUID();
+    AtomicReference<UUID> invocationRef = new AtomicReference<>();
     when(endpoint.requestIde(eq(ENVIRONMENT), any()))
         .thenAnswer(
             invocation -> {
@@ -97,12 +98,20 @@ class IdeReverseStreamEndpointIntegrationTest extends WebPostgresTestSupport {
               daemon.dial(streamUrl(command.ticket()));
               CompletableFuture<IdeReply> reply = new CompletableFuture<>();
               reply.complete(IdeReply.ok(null, null, null));
+              // 只有真正返回给端点的调用才存在对应的 abandon。
+              invocationRef.set(invocationId);
               return new IdeRequest(identity, invocationId, reply);
             });
 
-    String cookie = openSession(identity, UUID.randomUUID().toString(), "/home/dev/project");
     OkHttpClient browser = localhostClient();
-    try {
+    // TWR 保证 body 失败时清理失败作为 suppressed 保留，而不是覆盖原始失败。
+    try (AutoCloseable cleanup =
+        () ->
+            runCleanup(
+                () -> shutdown(browser),
+                daemon::awaitStopped,
+                () -> awaitAbandon(invocationRef.get()))) {
+      String cookie = openSession(identity, UUID.randomUUID().toString(), "/home/dev/project");
       Response response =
           browser
               .newCall(
@@ -127,11 +136,6 @@ class IdeReverseStreamEndpointIntegrationTest extends WebPostgresTestSupport {
       assertNull(response.header("TE"), "hop-by-hop header must not reach the browser");
       assertTrue(daemon.sawRequestEnd.await(5, TimeUnit.SECONDS), "daemon must observe HTTP END");
       assertTrue(daemon.completed.await(5, TimeUnit.SECONDS), "daemon must finish its response");
-      // 只核对本用例的调用：前序用例失败时遗留的异步 abandon 可能在 mock 重置后才到达。
-      verify(endpoint, timeout(5_000)).abandonIde(invocationId);
-    } finally {
-      shutdown(browser);
-      daemon.awaitStopped();
     }
   }
 
@@ -203,6 +207,7 @@ class IdeReverseStreamEndpointIntegrationTest extends WebPostgresTestSupport {
     when(endpoint.connectionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
     String requestPath = "/out/vs/code/browser/workbench/workbench.css";
     AtomicReference<NodeExecution> nodeRef = new AtomicReference<>();
+    AtomicReference<UUID> invocationRef = new AtomicReference<>();
     when(endpoint.requestIde(eq(ENVIRONMENT), any()))
         .thenAnswer(
             invocation -> {
@@ -211,14 +216,28 @@ class IdeReverseStreamEndpointIntegrationTest extends WebPostgresTestSupport {
               String streamUrl = streamUrl(command.ticket());
               NodeExecution node = startNodeFixture(streamUrl, requestPath, targetSize);
               nodeRef.set(node);
+              UUID invocationId = UUID.randomUUID();
+              // 只有真正返回给端点的调用才存在对应的 abandon。
+              invocationRef.set(invocationId);
               CompletableFuture<IdeReply> reply = new CompletableFuture<>();
               reply.complete(IdeReply.ok(null, null, null));
-              return new IdeRequest(identity, UUID.randomUUID(), reply);
+              return new IdeRequest(identity, invocationId, reply);
             });
 
-    String cookie = openSession(identity, UUID.randomUUID().toString(), "/home/dev/project");
     OkHttpClient browser = localhostClient();
-    try {
+    // TWR 保证 body 失败时清理失败作为 suppressed 保留，而不是覆盖原始失败。
+    try (AutoCloseable cleanup =
+        () ->
+            runCleanup(
+                () -> shutdown(browser),
+                () -> {
+                  NodeExecution startedNode = nodeRef.get();
+                  if (startedNode != null) {
+                    startedNode.close();
+                  }
+                },
+                () -> awaitAbandon(invocationRef.get()))) {
+      String cookie = openSession(identity, UUID.randomUUID().toString(), "/home/dev/project");
       byte[] body = null;
       Exception httpFailure = null;
       try {
@@ -309,13 +328,48 @@ class IdeReverseStreamEndpointIntegrationTest extends WebPostgresTestSupport {
       assertTrue(firstBodyMs <= lastBodyMs, "firstBodyMs must precede or equal lastBodyMs");
       assertTrue(lastBodyMs <= endMs, "lastBodyMs must precede or equal endMs");
       assertTrue(endMs <= closeMs, "endMs must precede or equal closeMs");
-    } finally {
-      shutdown(browser);
-      NodeExecution startedNode = nodeRef.get();
-      if (startedNode != null) {
-        startedNode.close();
+    }
+  }
+
+  /**
+   * 只等待本用例实际返回给端点的 invocation；5 秒独立有界，不使用 any() 或其它用例的异步调用。
+   *
+   * <p>调用发生在 TWR 清理阶段，因此 body 的原始失败会保留，清理超时作为 suppressed 追加。
+   */
+  private void awaitAbandon(UUID invocationId) {
+    if (invocationId != null) {
+      verify(endpoint, timeout(5_000)).abandonIde(invocationId);
+    }
+  }
+
+  /**
+   * 依次执行全部清理步骤；任一失败都先完成后续步骤，再抛出首个失败，其余作为 suppressed 保留。
+   *
+   * <p>这样关闭浏览器失败也不会跳过本用例自己的 {@code abandonIde} 等待。
+   */
+  private static void runCleanup(AutoCloseable... actions) throws Exception {
+    Throwable failure = null;
+    for (AutoCloseable action : actions) {
+      try {
+        action.close();
+      } catch (Throwable error) {
+        if (failure == null) {
+          failure = error;
+        } else if (failure != error) {
+          failure.addSuppressed(error);
+        }
       }
     }
+    if (failure == null) {
+      return;
+    }
+    if (failure instanceof Exception exception) {
+      throw exception;
+    }
+    if (failure instanceof Error error) {
+      throw error;
+    }
+    throw new IllegalStateException("cleanup failed", failure);
   }
 
   private static String resolveNodeBinary() {
