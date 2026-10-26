@@ -68,6 +68,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
@@ -78,7 +79,7 @@ import java.util.function.Consumer;
  * <p>每个 builder 只构造一个独立 record；baseline 方法按事务语义原子写入最小合法组合（Session + ROOT + Thread，或再带一个 open
  * TURN_START）。测试通过 {@link #inTransaction} 复用 void 事务体，避免每个 lambda 手写 {@code return null}。
  */
-final class StoreTestSupport {
+public final class StoreTestSupport {
 
   static final EnvironmentId ENV_ID = EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
   static final UUID OWNER_THREAD_ID = TestIds.id(10L);
@@ -104,6 +105,35 @@ final class StoreTestSupport {
           body.accept(tx);
           return null;
         });
+  }
+
+  /**
+   * 测试专用：按 Thread 的 {@code nextCommandSequence} 逐条读取历史 Command，保持 sequence 升序。
+   *
+   * <p>生产 store 不再暴露全历史查询；测试只依赖已分配的 sequence 区间与单条读取。Thread 不存在时与旧查询一致返回空列表。
+   */
+  public static List<ThreadCommand> loadCommandsByThread(
+      HarnessStore.Transaction tx, UUID threadId) {
+    Objects.requireNonNull(tx, "tx");
+    Objects.requireNonNull(threadId, "threadId");
+    return tx.findThread(threadId)
+        .map(
+            thread -> {
+              List<ThreadCommand> commands = new ArrayList<>();
+              for (long sequence = 1; sequence < thread.nextCommandSequence(); sequence++) {
+                tx.findCommand(threadId, sequence).ifPresent(commands::add);
+              }
+              return List.copyOf(commands);
+            })
+        .orElse(List.of());
+  }
+
+  /**
+   * 在独立事务中读取 Thread 的历史 Command；语义见 {@link #loadCommandsByThread(HarnessStore.Transaction, UUID)}。
+   */
+  public static List<ThreadCommand> loadCommandsByThread(HarnessStore store, UUID threadId) {
+    Objects.requireNonNull(store, "store");
+    return store.transaction(tx -> loadCommandsByThread(tx, threadId));
   }
 
   /** 最小已提交 baseline：包含 ROOT 的一个 session，以及指向该 ROOT 的一个 thread。 */

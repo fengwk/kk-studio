@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.loadCommandsByThread;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -262,7 +263,7 @@ class HarnessRuntimeManualCompactionTest {
             tx -> tx.listThreadsBySession(after.root().sessionId()).size()));
     List<ThreadCommand> commands =
         fixture.store.<List<ThreadCommand>>transaction(
-            tx -> tx.loadCommandsByThread(baseline.threadId()));
+            tx -> loadCommandsByThread(tx, baseline.threadId()));
     assertEquals(1, commands.size());
     assertEquals(ThreadCommandState.QUEUED, commands.getFirst().state());
     assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));

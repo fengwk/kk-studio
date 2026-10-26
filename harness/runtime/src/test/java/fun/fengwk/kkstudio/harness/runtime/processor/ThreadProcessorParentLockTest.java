@@ -8,6 +8,7 @@ import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestS
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.claimThreadWork;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.thread;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.work;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.loadCommandsByThread;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -130,7 +131,7 @@ class ThreadProcessorParentLockTest extends ThreadProcessorTestBase {
         ThreadProcessorTestSupport.command(fixture.store, childId, sourceId).state());
 
     List<ThreadCommand> parentCommands =
-        fixture.store.transaction(tx -> tx.loadCommandsByThread(parentId));
+        fixture.store.transaction(tx -> loadCommandsByThread(tx, parentId));
     assertEquals(1, parentCommands.size());
     assertTrue(parentCommands.getFirst().payload() instanceof NotificationCommandPayload);
     assertEquals(ThreadCommandState.QUEUED, parentCommands.getFirst().state());

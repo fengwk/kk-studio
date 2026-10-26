@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime.store.testing;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.CREATION_REQUEST_HASH;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T1;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.branchSettings;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.loadCommandsByThread;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -335,7 +336,7 @@ class PostgresqlCompactionChildTest {
     return store.transaction(
         tx -> {
           Set<UUID> notificationIds = new HashSet<>();
-          for (ThreadCommand command : tx.loadCommandsByThread(parentThreadId)) {
+          for (ThreadCommand command : loadCommandsByThread(tx, parentThreadId)) {
             if (command.type().isNotification()) {
               notificationIds.add(
                   ((NotificationCommandPayload) command.payload()).notificationId());
@@ -517,7 +518,7 @@ class PostgresqlCompactionChildTest {
           assertInstanceOf(RootPayload.class, rootEntry.payload());
 
           // 子第一条 command 的 payload 是 CustomMessageCommandPayload（摘要 prompt，非空）
-          List<ThreadCommand> childCommands = tx.loadCommandsByThread(childThreadId);
+          List<ThreadCommand> childCommands = loadCommandsByThread(tx, childThreadId);
           assertEquals(1, childCommands.size());
           ThreadCommand childFirstCmd = childCommands.getFirst();
           assertEquals(1L, childFirstCmd.sequence());

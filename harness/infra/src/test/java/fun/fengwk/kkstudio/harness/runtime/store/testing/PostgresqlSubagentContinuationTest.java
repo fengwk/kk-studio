@@ -4,6 +4,7 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T1;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.assistantResponse;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.branchSettings;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.loadCommandsByThread;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.succeededRequest;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -378,7 +379,7 @@ class PostgresqlSubagentContinuationTest {
   }
 
   private List<ThreadCommand> commands(UUID threadId) {
-    return store.transaction(tx -> tx.loadCommandsByThread(threadId));
+    return store.transaction(tx -> loadCommandsByThread(tx, threadId));
   }
 
   private List<ThreadCommand> notifications(UUID threadId) {

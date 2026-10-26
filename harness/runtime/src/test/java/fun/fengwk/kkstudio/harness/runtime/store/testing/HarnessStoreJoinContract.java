@@ -9,6 +9,7 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.command;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.inTransaction;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.insertChildEntry;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.loadCommandsByThread;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.turnStartEntry;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.userMessagePayload;
@@ -96,8 +97,14 @@ public abstract class HarnessStoreJoinContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(threadId);
+          ThreadState thread = tx.lockThread(threadId).orElseThrow();
           tx.insertCommands(List.of(command(threadId, sequence, idempotencyKey)));
+          // 测试种子必须保持 nextCommandSequence 领先于已写 sequence，测试辅助才能仅凭已分配区间读取历史。
+          if (thread.nextCommandSequence() <= sequence) {
+            tx.updateThread(
+                thread.reserveCommandSequences(
+                    Math.toIntExact(sequence + 1 - thread.nextCommandSequence()), T0));
+          }
         });
   }
 
@@ -1809,8 +1816,8 @@ public abstract class HarnessStoreJoinContract {
           assertTrue(tx.findThread(rootB).isPresent());
           assertTrue(tx.findThread(childB).isPresent());
           assertTrue(tx.findJoin(joinB).isPresent());
-          assertEquals(1, tx.loadCommandsByThread(childB).size());
-          assertEquals(1, tx.loadCommandsByThread(rootB).size());
+          assertEquals(1, loadCommandsByThread(tx, childB).size());
+          assertEquals(1, loadCommandsByThread(tx, rootB).size());
           return null;
         });
   }

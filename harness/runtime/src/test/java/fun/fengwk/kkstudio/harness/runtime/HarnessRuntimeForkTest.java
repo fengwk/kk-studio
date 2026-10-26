@@ -14,6 +14,7 @@ import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.thre
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.turnEndEntry;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.turnStartEntry;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessageCommand;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.loadCommandsByThread;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -192,7 +193,7 @@ class HarnessRuntimeForkTest {
         List.of(1L),
         store.transaction(
             tx ->
-                tx.loadCommandsByThread(newThreadId).stream()
+                loadCommandsByThread(tx, newThreadId).stream()
                     .map(command -> command.sequence())
                     .toList()));
     assertTrue(

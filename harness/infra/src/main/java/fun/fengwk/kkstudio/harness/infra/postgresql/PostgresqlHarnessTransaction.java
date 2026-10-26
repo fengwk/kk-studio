@@ -1436,21 +1436,6 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   @Override
-  public List<ThreadCommand> loadCommandsByThread(UUID threadId) {
-    checkOpen();
-    Objects.requireNonNull(threadId, "threadId");
-    return queryList(
-        """
-        select *
-        from harness_thread_command
-        where thread_id = ?
-        order by sequence
-        """,
-        PostgresqlHarnessRows.COMMAND,
-        threadId);
-  }
-
-  @Override
   public boolean hasAppliedNotificationAfter(UUID threadId, long afterSequence) {
     checkOpen();
     Objects.requireNonNull(threadId, "threadId");

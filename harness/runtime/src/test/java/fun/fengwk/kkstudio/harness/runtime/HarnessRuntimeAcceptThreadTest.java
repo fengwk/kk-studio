@@ -7,6 +7,7 @@ import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seed
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedThreadWork;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.systemReminderCommand;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessageCommand;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.loadCommandsByThread;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -116,7 +117,7 @@ class HarnessRuntimeAcceptThreadTest {
                     List.of(userMessageCommand(TestIds.id(1), "hello"))),
                 AcceptancePreflight.IDENTITY));
     assertEquals(
-        0, store.<Integer>transaction(tx -> tx.loadCommandsByThread(baseline.threadId()).size()));
+        0, store.<Integer>transaction(tx -> loadCommandsByThread(tx, baseline.threadId()).size()));
     AcceptedCommands accepted =
         runtime.acceptCommands(
             pure(baseline.threadId(), userMessageCommand(TestIds.id(1), "hello")),
@@ -144,7 +145,7 @@ class HarnessRuntimeAcceptThreadTest {
                     AcceptancePreflight.IDENTITY));
     assertEquals(Reason.STALE_COMMAND_CURSOR, error.reason());
     assertEquals(
-        1, store.<Integer>transaction(tx -> tx.loadCommandsByThread(baseline.threadId()).size()));
+        1, store.<Integer>transaction(tx -> loadCommandsByThread(tx, baseline.threadId()).size()));
   }
 
   /** exact ordered replay：全 id 存在、hash 相同、sequence 连续且首 sequence 等于 expected → replayed，不写新行。 */
@@ -421,7 +422,7 @@ class HarnessRuntimeAcceptThreadTest {
                 AcceptancePreflight.IDENTITY));
     // 没有写入任何命令。
     assertTrue(
-        store.<Boolean>transaction(tx -> tx.loadCommandsByThread(baseline.threadId()).isEmpty()));
+        store.<Boolean>transaction(tx -> loadCommandsByThread(tx, baseline.threadId()).isEmpty()));
   }
 
   /**

@@ -14,6 +14,7 @@ import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.targ
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.turnStartEntry;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessageEntry;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessagePayload;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.loadCommandsByThread;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -219,7 +220,7 @@ class HarnessRuntimeStopSubtreeTest {
     ThreadJoin join = store.transaction(tx -> tx.findJoin(joinId).orElseThrow());
     assertTrue(join.matched());
     assertNotNull(join.deliveryCommandSequence());
-    List<ThreadCommand> parentCommands = store.transaction(tx -> tx.loadCommandsByThread(parent));
+    List<ThreadCommand> parentCommands = store.transaction(tx -> loadCommandsByThread(tx, parent));
     assertEquals(1, parentCommands.size());
     assertTrue(parentCommands.getFirst().payload() instanceof NotificationCommandPayload);
     assertEquals(ThreadCommandState.QUEUED, parentCommands.getFirst().state());
@@ -353,7 +354,7 @@ class HarnessRuntimeStopSubtreeTest {
 
     // 父仍 RUNNABLE：通知以命令交付并请求父 Thread Work。
     List<ThreadCommand> parentCommands =
-        store.transaction(tx -> tx.loadCommandsByThread(root.threadId()));
+        store.transaction(tx -> loadCommandsByThread(tx, root.threadId()));
     assertEquals(1, parentCommands.size());
     assertTrue(parentCommands.getFirst().payload() instanceof NotificationCommandPayload);
     assertEquals(ThreadCommandState.QUEUED, parentCommands.getFirst().state());
@@ -495,7 +496,7 @@ class HarnessRuntimeStopSubtreeTest {
 
     // 父也在停止集合：通知直接固化到父历史，命令为 APPLIED 而非 QUEUED。
     List<ThreadCommand> parentCommands =
-        store.transaction(tx -> tx.loadCommandsByThread(root.threadId()));
+        store.transaction(tx -> loadCommandsByThread(tx, root.threadId()));
     assertEquals(1, parentCommands.size());
     ThreadCommand delivered = parentCommands.getFirst();
     assertTrue(delivered.payload() instanceof NotificationCommandPayload);
