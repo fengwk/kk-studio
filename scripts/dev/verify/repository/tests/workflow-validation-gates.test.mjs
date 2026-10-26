@@ -212,6 +212,26 @@ test('CI provisions and selects the PostgreSQL fixture client major before valid
   }
 })
 
+test('the Canvas/Project schema gate runs in full CI against a pulled isolated image', () => {
+  // The checker runs with --pull=never, so CI must pull the pinned image first; both steps are
+  // unconditional parts of the full validate job, not the dev-only image publish job.
+  const steps = validationSteps()
+  const pull = steps.filter((step) => stepField(step, 'run') === 'docker pull postgres:17.10')
+  assert.equal(pull.length, 1, 'expected exactly one pinned PostgreSQL image pull')
+  const checks = steps.filter(
+    (step) => stepField(step, 'run') === 'node scripts/dev/verify/repository/check-canvas-project-schema.mjs',
+  )
+  assert.equal(checks.length, 1, 'expected exactly one schema checker step')
+  const pullIndex = steps.indexOf(pull[0])
+  const checkIndex = steps.indexOf(checks[0])
+  assert.ok(pullIndex < checkIndex, 'the image pull must precede the schema checker')
+  for (const step of [pull[0], checks[0]]) {
+    assert.equal(stepField(step, 'if'), undefined, 'schema gate steps must not be conditional')
+    assert.doesNotMatch(step, /continue-on-error:|(?:\|\||&&)\s*true/u)
+  }
+  assert.ok(!jobBlock(docker, 'publish').includes('check-canvas-project-schema.mjs'))
+})
+
 test('Windows installer gates run both PowerShell hosts and fail closed', () => {
   // Do not use continue-on-error: PS 5.1 is the minimum supported host and PS 7 catches modern drift.
   const block = jobBlock(daemonCi, 'windows_daemon_installer')

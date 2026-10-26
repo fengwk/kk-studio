@@ -147,6 +147,8 @@ bin 目录置于 PATH 首位，不依赖 runner 默认版本。本地运行 [scr
 ### Daemon 安装与受管更新回归
 
 在仓库根运行 `node --test scripts/daemon/tests/*.test.mjs`，覆盖安装、下载、受管更新与发布脚本契约。
+Unix PTY 用例需要宿主 `python3`：它只用标准库 `pty` 驱动安装器的伪终端交互，属于测试依赖，
+产品运行时不依赖 Python。不要改用 `script` 命令替代，因为各平台的参数与可用性不一致。
 Unix fixtures 替代网络与服务管理命令，真实执行 SHA256 校验、文件替换与暂存输入校验，验证 latest
 解析与发行归档版本匹配、`--check-config` 预检失败保留现有安装、受管身份判定、覆盖安装的备份与替换，
 以及卸载只移除受管服务与程序。安装器没有交互提示、from-source 与单独 upgrade 入口；从 checkout

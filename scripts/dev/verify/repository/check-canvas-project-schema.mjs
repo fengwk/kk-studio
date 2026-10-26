@@ -35,6 +35,8 @@ export const BASELINE_FILE = 'V1__schema.sql'
 // Single copy of the positive/negative SQL probes, shared with the schema module's Java
 // contract test; the repository keeps no second copy of them.
 const PROBE_FILE = 'schema/src/test/resources/fun/fengwk/kkstudio/schema/fresh-install-probes.sql'
+// The schema module's Java contract test owns the exact assertion count; this runner only requires
+// a meaningful lower bound so a truncated probe run cannot pass.
 const MINIMUM_PROBE_ASSERTIONS = 135
 const IMAGE = 'postgres:17.10'
 
@@ -639,9 +641,6 @@ function main() {
   const probes = path.join(root, PROBE_FILE)
   if (!existsSync(probes) || !statSync(probes).isFile()) {
     throw new Error(`missing shared contract probes: ${PROBE_FILE}`)
-  }
-  if (BUSINESS_TABLES.length !== 46 || TARGET_TABLES.length !== 17) {
-    throw new Error('the declared inventory must keep its fixed business and target table counts')
   }
   // Re-derive the inventory from the baseline DDL: a table added to (or removed from) the
   // baseline without updating BUSINESS_TABLES must fail before the isolated database runs.
