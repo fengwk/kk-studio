@@ -356,7 +356,6 @@ describe('LspClientPool Concurrency & Lifecycle', () => {
     pools.push(pool)
     const file = path.join(tempDir, 'App.java')
     fs.writeFileSync(file, 'class App {}\n')
-    let stopGateReleased = false
 
     try {
       let exits = 0
@@ -394,7 +393,6 @@ describe('LspClientPool Concurrency & Lifecycle', () => {
       expect(exits).toBe(0)
 
       stopGate.resolve()
-      stopGateReleased = true
       expect(await closeOutcome!).toBeNull()
       expect(await leaseOutcome).toBeInstanceOf(Error)
       await vi.waitFor(() => expect(exits).toBe(1))
@@ -402,9 +400,7 @@ describe('LspClientPool Concurrency & Lifecycle', () => {
     } finally {
       // 任何断言失败都要放行 bootstrap 与物理停止，之后由池和 supervisor 完成真实收尾。
       launchGate.resolve()
-      if (!stopGateReleased) {
-        stopGate.resolve()
-      }
+      stopGate.resolve()
     }
   })
 
