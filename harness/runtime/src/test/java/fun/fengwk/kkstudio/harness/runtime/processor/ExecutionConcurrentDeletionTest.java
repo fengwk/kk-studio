@@ -76,7 +76,7 @@ class ExecutionConcurrentDeletionTest {
 
   @Test
   void toolTerminalLosesOwnershipWhenThreadDeletedBeforeOwnThreadLock() throws Exception {
-    ToolExecutionFixture fixture = toolExecutionFixture(true);
+    ToolExecutionFixture fixture = toolExecutionFixture(true, null);
     long versionBefore = threadVersion(fixture.rawStore, fixture.threadId) + 1;
 
     // 资源逆序关闭：先 abandon，再独立有界 join；清理失败不覆盖主体失败。
@@ -105,6 +105,38 @@ class ExecutionConcurrentDeletionTest {
                       .map(fact -> fact.state())
                       .toList()),
           "a missing Thread must not manufacture an exit confirmation");
+    }
+  }
+
+  @Test
+  void lateRemoteAcknowledgementAfterThreadDeletionNeitherFailsNorConfirms() throws Exception {
+    // 测试意图：远端 ACK 晚于合法深删时与本地退出确认一致：事务不失败、不回写，缺失的 Thread 也不能伪造远端确认。
+    UUID remoteId = UUID.randomUUID();
+    ToolExecutionFixture fixture = toolExecutionFixture(false, remoteId);
+    try (AutoCloseable awaitExit =
+            () -> {
+              if (fixture.run.executionThread != null) {
+                assertTrue(
+                    fixture.run.executionThread.join(Duration.ofSeconds(5)),
+                    "tool execution must exit during cleanup");
+              }
+            };
+        AutoCloseable abandon = fixture.execution::abandon) {
+      assertEquals(ProcessResult.STARTED, fixture.execution.start(fixture.run));
+      assertTrue(fixture.run.awaitExited());
+      assertTrue(
+          fixture.run.executionThread.join(Duration.ofSeconds(5)),
+          "must include the actual close and exit-confirmation transaction");
+      assertEquals(ExecutionExitState.UNCONFIRMED, executionState(fixture.rawStore, remoteId));
+
+      fixture.store.armDeletionBeforeNextThreadLock();
+      fixture.execution.remoteExecutions().confirmExit(remoteId);
+
+      fixture.store.assertNoTransactionFailure();
+      assertEquals(
+          ExecutionExitState.UNCONFIRMED,
+          executionState(fixture.rawStore, remoteId),
+          "a missing Thread must not manufacture a remote acknowledgement");
     }
   }
 
@@ -146,11 +178,14 @@ class ExecutionConcurrentDeletionTest {
   }
 
   private ToolExecutionFixture toolExecutionFixture() {
-    return toolExecutionFixture(false);
+    return toolExecutionFixture(false, null);
   }
 
-  /** 已审批的 READY Tool 链 + 进程内 execution；{@code armInBody} 决定是否在执行体内布置「终态事务前删除 Thread」。 */
-  private ToolExecutionFixture toolExecutionFixture(boolean armInBody) {
+  /**
+   * 已审批的 READY Tool 链 + 进程内 execution；{@code armInBody} 决定是否在执行体内布置「终态事务前删除 Thread」，{@code
+   * remoteInBody} 非空时执行体先登记这一次远端调用。
+   */
+  private ToolExecutionFixture toolExecutionFixture(boolean armInBody, UUID remoteInBody) {
     ToolProcessorTestSupport.Fixture support = ToolProcessorTestSupport.fixture();
     schedulersToClose.add(support.scheduler);
     ClaimedWork claim =
@@ -181,6 +216,9 @@ class ExecutionConcurrentDeletionTest {
     ToolProcessorTestSupport.FakeRun run =
         new ToolProcessorTestSupport.FakeRun(
             progress -> {
+              if (remoteInBody != null && !execution.remoteExecutions().tryStart(remoteInBody)) {
+                throw new IllegalStateException("remote registration must succeed");
+              }
               if (armInBody) {
                 store.armDeletionBeforeNextThreadLock();
               }
@@ -331,6 +369,10 @@ class ExecutionConcurrentDeletionTest {
 
   private static long threadVersion(InMemoryHarnessStore store, UUID threadId) {
     return ToolProcessorTestSupport.thread(store, threadId).version();
+  }
+
+  private static ExecutionExitState executionState(InMemoryHarnessStore store, UUID executionId) {
+    return store.transaction(tx -> tx.findExecution(executionId).orElseThrow().state());
   }
 
   private static ModelInvocationStatus modelStatus(InMemoryHarnessStore store, UUID invocationId) {
