@@ -116,7 +116,9 @@ public final class IdeRemoteDataPlaneForwarder {
       response.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
       return;
     } catch (IOException error) {
-      log.info("remote ide data plane forward failed: {}", error.toString());
+      log.info(
+          "remote ide data plane forward failed; phase=IDE_REMOTE_FORWARD; exception={}",
+          error.getClass().getSimpleName());
       response.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
       return;
     }

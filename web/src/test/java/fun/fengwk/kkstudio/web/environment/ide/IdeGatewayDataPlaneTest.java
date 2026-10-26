@@ -7,10 +7,17 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.web.socket.CloseStatus;
@@ -747,6 +754,46 @@ class IdeGatewayDataPlaneTest {
     assertThrows(
         IOException.class, () -> harness.dataPlane.handleHttp(ENV, "/", request, response));
     assertEquals(0, response.getContentAsByteArray().length);
+  }
+
+  /** 上游异常、关闭原因与 URL 都可能携带秘密；失败诊断只保留分类、关闭码和调用身份。 */
+  @Test
+  void failureDiagnosticsDoNotLogRemoteTextOrRequestPaths() throws Exception {
+    String secret = "synthetic-ide-diagnostic-secret";
+    Harness harness = new Harness();
+    IdeStreamPeer peer = mock(IdeStreamPeer.class);
+    when(peer.poll(any())).thenThrow(new IllegalStateException(secret));
+    when(peer.remoteCloseStatus()).thenReturn(CloseStatus.SERVER_ERROR.withReason(secret));
+    harness.transport.peerFactory = () -> peer;
+    MockHttpServletRequest request = harness.request("GET", "/" + secret);
+    Logger logger = (Logger) LoggerFactory.getLogger(IdeGatewayDataPlane.class);
+    Level previousLevel = logger.getLevel();
+    boolean previousAdditivity = logger.isAdditive();
+    ListAppender<ILoggingEvent> logs = new ListAppender<>();
+    logs.setContext(logger.getLoggerContext());
+    logs.start();
+    logger.addAppender(logs);
+    logger.setLevel(Level.INFO);
+    logger.setAdditive(false);
+    try {
+      assertThrows(
+          IllegalStateException.class,
+          () ->
+              harness.dataPlane.handleHttp(
+                  ENV, "/" + secret, request, new MockHttpServletResponse()));
+      assertEquals(1, logs.list.size());
+      ILoggingEvent event = logs.list.getFirst();
+      assertTrue(event.getFormattedMessage().contains("outcome=IllegalStateException"));
+      assertTrue(event.getFormattedMessage().contains("daemonClose=1011"));
+      assertFalse(event.getFormattedMessage().contains(secret));
+      assertNull(event.getThrowableProxy());
+      assertEquals(1, harness.transport.abandoned.size());
+    } finally {
+      logger.detachAppender(logs);
+      logs.stop();
+      logger.setLevel(previousLevel);
+      logger.setAdditive(previousAdditivity);
+    }
   }
 
   private static byte[] gzip(byte[] payload) throws IOException {
