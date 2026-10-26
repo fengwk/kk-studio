@@ -521,14 +521,15 @@ class HarnessRuntimeStopExitContractTest {
                 () -> observer.get().confirmExit(unknown),
                 "an unregistered remote acknowledgement must fail");
         assertEquals(
-            "thread still exists but execution " + unknown + " is missing", missing.getMessage());
-        IllegalArgumentException foreign =
+            "remote execution " + unknown + " was not registered before start",
+            missing.getMessage());
+        IllegalStateException foreign =
             assertThrows(
-                IllegalArgumentException.class,
+                IllegalStateException.class,
                 () -> observer.get().confirmExit(foreignRemote.executionId()),
                 "an acknowledgement owned by another parent generation must fail");
         assertEquals(
-            "execution " + foreignRemote.executionId() + " identity cannot be replaced",
+            "remote execution " + foreignRemote.executionId() + " was not registered before start",
             foreign.getMessage());
         assertAll(
             () -> assertTrue(fixture.store.transaction(tx -> tx.findExecution(unknown)).isEmpty()),

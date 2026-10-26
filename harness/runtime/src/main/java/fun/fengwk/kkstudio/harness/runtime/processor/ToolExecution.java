@@ -35,6 +35,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -73,6 +75,10 @@ final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution {
 
   /** 登记成功后冻结的本代身份。确认只比对这一身份，不读取之后可能已更换的 lease。 */
   private volatile ExecutionExitFact registered;
+
+  /** 本代次已成功登记的远端事实；发送前写入，确认时直接复用原始 registeredAt，不在确认事务中重新拼接。 */
+  private final ConcurrentMap<UUID, ExecutionExitFact> registeredRemotes =
+      new ConcurrentHashMap<>();
 
   private final ToolInvocationRequest request;
   private final ToolProcessorConfig config;
@@ -142,16 +148,16 @@ final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution {
       if (abandoned.get()) {
         return false;
       }
-      return Boolean.TRUE.equals(
+      ExecutionExitFact remote =
           store.transaction(
               tx -> {
                 if (tx.lockThread(threadId).isEmpty() || tx.lockClaimedWork(claim).isEmpty()) {
-                  return false;
+                  return null;
                 }
                 if (abandoned.get()) {
-                  return false;
+                  return null;
                 }
-                ExecutionExitLedger.register(
+                return ExecutionExitLedger.register(
                     tx,
                     remoteExecutionId,
                     threadId,
@@ -160,8 +166,13 @@ final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution {
                     claim.leaseToken(),
                     ExecutionExitKind.REMOTE,
                     executionId());
-                return true;
-              }));
+              });
+      if (remote == null) {
+        return false;
+      }
+      // 必须先写入本地注册表再返回允许发送；确认只使用这条已持久化身份及其原始登记时间。
+      registeredRemotes.put(remoteExecutionId, remote);
+      return true;
     }
 
     @Override
@@ -176,26 +187,17 @@ final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution {
 
     private void confirmRemote(UUID remoteExecutionId, ExecutionExitState state) {
       Objects.requireNonNull(remoteExecutionId, "remoteExecutionId");
-      ExecutionExitFact local = registered;
-      if (local == null) {
+      if (registered == null) {
         throw new IllegalStateException(
             "remote execution " + remoteExecutionId + " has no registered local generation");
       }
-      ExecutionExitFact expected =
-          new ExecutionExitFact(
-              remoteExecutionId,
-              local.threadId(),
-              local.invocationId(),
-              local.attempt(),
-              local.ownerLeaseToken(),
-              ExecutionExitKind.REMOTE,
-              local.executionId(),
-              ExecutionExitState.UNCONFIRMED,
-              local.registeredAt(),
-              null,
-              null);
+      ExecutionExitFact remote = registeredRemotes.get(remoteExecutionId);
+      if (remote == null) {
+        throw new IllegalStateException(
+            "remote execution " + remoteExecutionId + " was not registered before start");
+      }
       // 远端交付失败必须显式抛出；合法深删由 confirmer 按 missing-safe 结束。
-      exitConfirmer.confirm(expected, state);
+      exitConfirmer.confirm(remote, state);
     }
   }
 
