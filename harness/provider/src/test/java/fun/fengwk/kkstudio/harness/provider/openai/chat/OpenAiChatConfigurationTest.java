@@ -21,7 +21,6 @@ class OpenAiChatConfigurationTest {
   @DisplayName("null 或空白配置返回默认配置（NONE）")
   void parseDefaults() {
     OpenAiChatConfiguration config1 = OpenAiChatConfiguration.parse(null);
-    assertTrue(config1.includeUsage());
     assertTrue(config1.requireDone());
     assertEquals(PromptCacheRetention.NONE, config1.promptCacheRetention());
 
@@ -35,7 +34,6 @@ class OpenAiChatConfigurationTest {
     String json =
         """
         {
-          "openAiChatIncludeUsage": false,
           "openAiChatRequireDone": false,
           "promptCacheRetention": "LONG",
           "unknownField": "should_be_ignored",
@@ -43,10 +41,20 @@ class OpenAiChatConfigurationTest {
         }
         """;
     OpenAiChatConfiguration config = OpenAiChatConfiguration.parse(json);
-    assertFalse(config.includeUsage());
     assertFalse(config.requireDone());
     assertEquals(PromptCacheRetention.LONG, config.promptCacheRetention());
     assertEquals("promptCacheRetention", OpenAiChatConfiguration.FIELD_PROMPT_CACHE_RETENTION);
+  }
+
+  @Test
+  @DisplayName("已删除的 openAiChatIncludeUsage 完全按未知字段忽略，不再参与类型校验")
+  void legacyIncludeUsageFieldIsIgnoredAsUnknown() {
+    assertEquals(
+        OpenAiChatConfiguration.defaults(),
+        OpenAiChatConfiguration.parse("{\"openAiChatIncludeUsage\": false}"));
+    assertEquals(
+        OpenAiChatConfiguration.defaults(),
+        OpenAiChatConfiguration.parse("{\"openAiChatIncludeUsage\": \"not-a-boolean\"}"));
   }
 
   @Test
@@ -76,9 +84,6 @@ class OpenAiChatConfigurationTest {
   @Test
   @DisplayName("字段类型不匹配严格拒绝")
   void rejectInvalidFieldTypes() {
-    assertThrows(
-        ProviderException.class,
-        () -> OpenAiChatConfiguration.parse("{\"openAiChatIncludeUsage\": \"true\"}"));
     assertThrows(
         ProviderException.class,
         () -> OpenAiChatConfiguration.parse("{\"openAiChatRequireDone\": 1}"));

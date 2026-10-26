@@ -175,7 +175,7 @@ class OpenAiChatProtocolOptionsTest {
   }
 
   @Test
-  @DisplayName("stream_options 保留 native 子字段，include_usage 由运行时独占")
+  @DisplayName("stream_options 保留 native 子字段，include_usage 由运行时独占且恒为 true")
   void mergesStreamOptionsWithRuntimeIncludeUsage() throws Exception {
     JsonNode merged =
         encode(
@@ -184,23 +184,6 @@ class OpenAiChatProtocolOptionsTest {
             List.of());
     assertTrue(merged.path("stream_options").path("continuous_usage_stats").asBoolean(false));
     assertTrue(merged.path("stream_options").path("include_usage").asBoolean(false));
-
-    // runtime 配置仍然决定 include_usage 的最终值
-    OpenAiChatConfiguration withoutUsage =
-        new OpenAiChatConfiguration(false, true, PromptCacheRetention.NONE);
-    JsonNode configured =
-        MAPPER.readTree(
-            encoder
-                .encode(
-                    request(
-                        reasoningModel,
-                        nativeVariant("{\"stream_options\":{\"continuous_usage_stats\":true}}"),
-                        List.of()),
-                    descriptor,
-                    withoutUsage)
-                .bodyUtf8Bytes());
-    assertFalse(configured.path("stream_options").path("include_usage").asBoolean(false));
-    assertTrue(configured.path("stream_options").path("continuous_usage_stats").asBoolean(false));
 
     // include_usage 是 runtime-owned：native 声明即冲突
     ProviderException conflict =
@@ -349,7 +332,6 @@ class OpenAiChatProtocolOptionsTest {
                     request(reasoningModel, nativeVariant("{\"seed\":1}", "off"), List.of()),
                     descriptor,
                     new OpenAiChatConfiguration(
-                        true,
                         true,
                         PromptCacheRetention.NONE,
                         OpenAiChatConfiguration.ThinkingFormat.DEEPSEEK))
