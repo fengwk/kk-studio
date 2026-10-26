@@ -17,7 +17,9 @@
  *
  * Isolation: the container is created from a local image on the local Docker unix socket only, never joins a
  * network, never publishes a host port, uses a tmpfs data directory and is removed on exit. Deployment
- * database connection variables are never read.
+ * database connection variables are never read. Readiness requires a loopback TCP `SELECT 1` against the
+ * exact target database: the official image's temporary init server listens only on a Unix socket and
+ * accepts `pg_isready` before `POSTGRES_DB` exists.
  */
 
 import { spawnSync } from 'node:child_process'
@@ -714,11 +716,29 @@ function main() {
     ]).stdout.trim()
     let ready = false
     for (let attempt = 0; attempt < 60 && !ready; attempt += 1) {
-      ready =
-        command(['exec', containerId, 'pg_isready', '-U', 'postgres', '-d', database], {
-          check: false,
-          timeout: 10_000,
-        }).status === 0
+      // The official image first starts a temporary Unix-only server before creating
+      // POSTGRES_DB. `pg_isready` accepts that server, so readiness must instead prove the
+      // exact target database over loopback TCP and return exactly one row.
+      const probe = command(
+        [
+          'exec',
+          containerId,
+          'psql',
+          '-X',
+          '-v',
+          'ON_ERROR_STOP=1',
+          '-h',
+          '127.0.0.1',
+          '-U',
+          'postgres',
+          '-d',
+          database,
+          '-Atqc',
+          'SELECT 1',
+        ],
+        { check: false, timeout: 10_000 },
+      )
+      ready = probe.status === 0 && probe.stdout === '1\n'
       if (!ready) {
         Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500)
       }
