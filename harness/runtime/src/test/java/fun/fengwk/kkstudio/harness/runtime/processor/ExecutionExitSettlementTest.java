@@ -60,6 +60,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
@@ -71,70 +72,62 @@ class ExecutionExitSettlementTest {
   void failedToolContinuationIsNotSettledByStudioExit() throws Exception {
     // 测试意图：失败 Tool 的 TURN_END 是 continueModel 义务，真实 finally 确认后 Join 仍不交付，只保留 THREAD Work 供续作。
     Fixture fixture = ToolProcessorTestSupport.childFixture(false, 1);
-    fixture.gateway.queuePreflightAllow();
-    FakeRun delegate =
-        fixture.gateway.queueRun(
-            progress -> new ToolGateway.Failed(new ToolInvocationError("FAILED", "failed"), false));
-    Held held = holdClose(delegate);
-    fixture.gateway.admitResults.clear();
-    fixture.gateway.queueAdmit(new ToolGateway.Admitted(held.run()));
-    HarnessRuntime runtime = runtime(fixture);
-    UUID leafId = fixture.baseline.threadId();
-    UUID parentId = parentOf(fixture.store, leafId);
-    UUID joinId = UUID.randomUUID();
-    insertAppliedJoin(fixture.store, leafId, joinId);
-    try {
-      assertEquals(
-          ProcessResult.STARTED,
-          fixture.processor.process(
-              ToolProcessorTestSupport.claim(fixture.store, fixture.toolInvocationId, NOW)));
-      assertTrue(held.closeEntered().await(5, TimeUnit.SECONDS), "body returned and close is held");
-      driveTerminal(fixture, leafId);
-      EntryPath closed =
-          fixture.store.transaction(
-              tx -> tx.loadEntryPath(tx.findThread(leafId).orElseThrow().headEntryId()));
-      assertTrue(
-          closed.head().payload() instanceof TurnEndPayload end && end.continueModel(),
-          () -> "head=" + closed.head().payload().type() + " payload=" + closed.head().payload());
-      assertFalse(runtime.findJoin(joinId).orElseThrow().matched());
-      assertTrue(runtime.getThreadSnapshot(leafId).hasUnconfirmedExecution());
-      assertEquals(ThreadRuntimeStatus.RUNNING, runtime.getThreadSnapshot(leafId).runtimeStatus());
-      UUID executionId =
-          fixture.store.transaction(
-              tx -> tx.loadUnconfirmedExecutions(leafId).get(0).executionId());
-      long versionBeforeExit = version(fixture.store, leafId);
+    try (AutoCloseable scheduler = schedulerCleanup(fixture.scheduler);
+        AutoCloseable fixtureProcessor = fixture.processor) {
+      fixture.gateway.queuePreflightAllow();
+      FakeRun delegate =
+          fixture.gateway.queueRun(
+              progress ->
+                  new ToolGateway.Failed(new ToolInvocationError("FAILED", "failed"), false));
+      Held held = holdClose(delegate);
+      try (AutoCloseable execution = executionCleanup(held, delegate, "tool execution must exit")) {
+        fixture.gateway.admitResults.clear();
+        fixture.gateway.queueAdmit(new ToolGateway.Admitted(held.run()));
+        HarnessRuntime runtime = runtime(fixture);
+        UUID leafId = fixture.baseline.threadId();
+        UUID parentId = parentOf(fixture.store, leafId);
+        UUID joinId = UUID.randomUUID();
+        insertAppliedJoin(fixture.store, leafId, joinId);
+        assertEquals(
+            ProcessResult.STARTED,
+            fixture.processor.process(
+                ToolProcessorTestSupport.claim(fixture.store, fixture.toolInvocationId, NOW)));
+        assertTrue(
+            held.closeEntered().await(5, TimeUnit.SECONDS), "body returned and close is held");
+        driveTerminal(fixture, leafId);
+        EntryPath closed =
+            fixture.store.transaction(
+                tx -> tx.loadEntryPath(tx.findThread(leafId).orElseThrow().headEntryId()));
+        assertTrue(
+            closed.head().payload() instanceof TurnEndPayload end && end.continueModel(),
+            () -> "head=" + closed.head().payload().type() + " payload=" + closed.head().payload());
+        assertFalse(runtime.findJoin(joinId).orElseThrow().matched());
+        assertTrue(runtime.getThreadSnapshot(leafId).hasUnconfirmedExecution());
+        assertEquals(
+            ThreadRuntimeStatus.RUNNING, runtime.getThreadSnapshot(leafId).runtimeStatus());
+        UUID executionId =
+            fixture.store.transaction(
+                tx -> tx.loadUnconfirmedExecutions(leafId).get(0).executionId());
+        long versionBeforeExit = version(fixture.store, leafId);
 
-      held.release().countDown();
-      assertTrue(delegate.executionThread.join(Duration.ofSeconds(5)), "execution thread exits");
+        held.release().countDown();
+        assertTrue(delegate.executionThread.join(Duration.ofSeconds(5)), "execution thread exits");
 
-      assertFalse(runtime.findJoin(joinId).orElseThrow().matched());
-      assertEquals(0, notificationCount(fixture.store, parentId));
-      assertEquals(versionBeforeExit + 1, version(fixture.store, leafId));
-      assertEquals(
-          ExecutionExitState.STUDIO_EXITED,
-          fixture.store.transaction(tx -> tx.findExecution(executionId).orElseThrow().state()));
-      assertEquals(ThreadRuntimeStatus.RUNNING, runtime.getThreadSnapshot(leafId).runtimeStatus());
-      Optional<Work> continuation =
-          fixture.store.transaction(
-              tx -> tx.findWork(new WorkTarget(WorkTargetType.THREAD, leafId)));
-      assertTrue(continuation.isPresent(), "continueModel obligation must request THREAD work");
-      Optional<ModelInvocation> model =
-          fixture.store.transaction(tx -> tx.findModelInvocation(fixture.modelInvocationId));
-      assertTrue(model.isEmpty());
-    } finally {
-      held.release().countDown();
-      try {
-        if (delegate.executionThread != null) {
-          assertTrue(
-              delegate.executionThread.join(Duration.ofSeconds(5)), "tool execution must exit");
-        }
-      } finally {
-        try {
-          fixture.processor.close();
-        } finally {
-          fixture.scheduler.shutdownNow();
-          assertTrue(fixture.scheduler.awaitTermination(5, TimeUnit.SECONDS));
-        }
+        assertFalse(runtime.findJoin(joinId).orElseThrow().matched());
+        assertEquals(0, notificationCount(fixture.store, parentId));
+        assertEquals(versionBeforeExit + 1, version(fixture.store, leafId));
+        assertEquals(
+            ExecutionExitState.STUDIO_EXITED,
+            fixture.store.transaction(tx -> tx.findExecution(executionId).orElseThrow().state()));
+        assertEquals(
+            ThreadRuntimeStatus.RUNNING, runtime.getThreadSnapshot(leafId).runtimeStatus());
+        Optional<Work> continuation =
+            fixture.store.transaction(
+                tx -> tx.findWork(new WorkTarget(WorkTargetType.THREAD, leafId)));
+        assertTrue(continuation.isPresent(), "continueModel obligation must request THREAD work");
+        Optional<ModelInvocation> model =
+            fixture.store.transaction(tx -> tx.findModelInvocation(fixture.modelInvocationId));
+        assertTrue(model.isEmpty());
       }
     }
   }
@@ -144,73 +137,64 @@ class ExecutionExitSettlementTest {
       throws Exception {
     // 测试意图：三层整树 Stop 后叶子执行体未退出时两层 Join 都不交付；真实 finally 确认后自底向上各通知一次，且不启动模型。
     Fixture fixture = ToolProcessorTestSupport.childFixture(false, 2);
-    fixture.gateway.queuePreflightAllow();
-    FakeRun delegate =
-        fixture.gateway.queueRun(
-            progress -> new ToolGateway.Failed(new ToolInvocationError("FAILED", "failed"), false));
-    Held held = holdClose(delegate);
-    fixture.gateway.admitResults.clear();
-    fixture.gateway.queueAdmit(new ToolGateway.Admitted(held.run()));
-    HarnessRuntime runtime = runtime(fixture);
-    UUID leafId = fixture.baseline.threadId();
-    UUID parentId = parentOf(fixture.store, leafId);
-    UUID rootId =
-        fixture.store.transaction(tx -> tx.findThread(leafId).orElseThrow().rootThreadId());
-    UUID leafJoinId = UUID.randomUUID();
-    UUID parentJoinId = UUID.randomUUID();
-    insertAppliedJoin(fixture.store, leafId, leafJoinId);
-    insertAppliedJoin(fixture.store, parentId, parentJoinId);
-    try {
-      assertEquals(
-          ProcessResult.STARTED,
-          fixture.processor.process(
-              ToolProcessorTestSupport.claim(fixture.store, fixture.toolInvocationId, NOW)));
-      assertTrue(held.closeEntered().await(5, TimeUnit.SECONDS), "body returned and close is held");
+    try (AutoCloseable scheduler = schedulerCleanup(fixture.scheduler);
+        AutoCloseable fixtureProcessor = fixture.processor) {
+      fixture.gateway.queuePreflightAllow();
+      FakeRun delegate =
+          fixture.gateway.queueRun(
+              progress ->
+                  new ToolGateway.Failed(new ToolInvocationError("FAILED", "failed"), false));
+      Held held = holdClose(delegate);
+      try (AutoCloseable execution = executionCleanup(held, delegate, "tool execution must exit")) {
+        fixture.gateway.admitResults.clear();
+        fixture.gateway.queueAdmit(new ToolGateway.Admitted(held.run()));
+        HarnessRuntime runtime = runtime(fixture);
+        UUID leafId = fixture.baseline.threadId();
+        UUID parentId = parentOf(fixture.store, leafId);
+        UUID rootId =
+            fixture.store.transaction(tx -> tx.findThread(leafId).orElseThrow().rootThreadId());
+        UUID leafJoinId = UUID.randomUUID();
+        UUID parentJoinId = UUID.randomUUID();
+        insertAppliedJoin(fixture.store, leafId, leafJoinId);
+        insertAppliedJoin(fixture.store, parentId, parentJoinId);
+        assertEquals(
+            ProcessResult.STARTED,
+            fixture.processor.process(
+                ToolProcessorTestSupport.claim(fixture.store, fixture.toolInvocationId, NOW)));
+        assertTrue(
+            held.closeEntered().await(5, TimeUnit.SECONDS), "body returned and close is held");
 
-      long rootVersion = runtime.getThreadSnapshot(rootId).thread().version();
-      runtime.stop(new StopCommand(rootId, TestIds.id(71), rootVersion));
+        long rootVersion = runtime.getThreadSnapshot(rootId).thread().version();
+        runtime.stop(new StopCommand(rootId, TestIds.id(71), rootVersion));
 
-      assertFalse(runtime.findJoin(leafJoinId).orElseThrow().matched());
-      assertFalse(runtime.findJoin(parentJoinId).orElseThrow().matched());
-      assertEquals(0, notificationCount(fixture.store, parentId));
-      assertEquals(0, notificationCount(fixture.store, rootId));
-      assertEquals(
-          ThreadExecutionControl.STOPPED,
-          runtime.getThreadSnapshot(leafId).thread().executionControl());
-      assertEquals(ThreadRuntimeStatus.RUNNING, runtime.getThreadSnapshot(leafId).runtimeStatus());
-      long leafVersionAfterStop = version(fixture.store, leafId);
-      long rootVersionAfterStop = version(fixture.store, rootId);
+        assertFalse(runtime.findJoin(leafJoinId).orElseThrow().matched());
+        assertFalse(runtime.findJoin(parentJoinId).orElseThrow().matched());
+        assertEquals(0, notificationCount(fixture.store, parentId));
+        assertEquals(0, notificationCount(fixture.store, rootId));
+        assertEquals(
+            ThreadExecutionControl.STOPPED,
+            runtime.getThreadSnapshot(leafId).thread().executionControl());
+        assertEquals(
+            ThreadRuntimeStatus.RUNNING, runtime.getThreadSnapshot(leafId).runtimeStatus());
+        long leafVersionAfterStop = version(fixture.store, leafId);
+        long rootVersionAfterStop = version(fixture.store, rootId);
 
-      held.release().countDown();
-      assertTrue(delegate.executionThread.join(Duration.ofSeconds(5)), "execution thread exits");
+        held.release().countDown();
+        assertTrue(delegate.executionThread.join(Duration.ofSeconds(5)), "execution thread exits");
 
-      assertTrue(runtime.findJoin(leafJoinId).orElseThrow().matched());
-      assertTrue(runtime.findJoin(parentJoinId).orElseThrow().matched());
-      assertEquals(1, notificationCount(fixture.store, parentId));
-      assertEquals(1, notificationCount(fixture.store, rootId));
-      assertEquals(leafVersionAfterStop + 1, version(fixture.store, leafId));
-      assertEquals(rootVersionAfterStop + 1, version(fixture.store, rootId));
-      assertFalse(runtime.getThreadSnapshot(parentId).unconsumedAppliedNotifications());
-      assertFalse(runtime.getThreadSnapshot(rootId).unconsumedAppliedNotifications());
-      assertEquals(ThreadRuntimeStatus.IDLE, runtime.getThreadSnapshot(parentId).runtimeStatus());
-      assertEquals(ThreadRuntimeStatus.IDLE, runtime.getThreadSnapshot(rootId).runtimeStatus());
-      Optional<ModelInvocation> model =
-          fixture.store.transaction(tx -> tx.findModelInvocation(fixture.modelInvocationId));
-      assertTrue(model.isEmpty());
-    } finally {
-      held.release().countDown();
-      try {
-        if (delegate.executionThread != null) {
-          assertTrue(
-              delegate.executionThread.join(Duration.ofSeconds(5)), "tool execution must exit");
-        }
-      } finally {
-        try {
-          fixture.processor.close();
-        } finally {
-          fixture.scheduler.shutdownNow();
-          assertTrue(fixture.scheduler.awaitTermination(5, TimeUnit.SECONDS));
-        }
+        assertTrue(runtime.findJoin(leafJoinId).orElseThrow().matched());
+        assertTrue(runtime.findJoin(parentJoinId).orElseThrow().matched());
+        assertEquals(1, notificationCount(fixture.store, parentId));
+        assertEquals(1, notificationCount(fixture.store, rootId));
+        assertEquals(leafVersionAfterStop + 1, version(fixture.store, leafId));
+        assertEquals(rootVersionAfterStop + 1, version(fixture.store, rootId));
+        assertFalse(runtime.getThreadSnapshot(parentId).unconsumedAppliedNotifications());
+        assertFalse(runtime.getThreadSnapshot(rootId).unconsumedAppliedNotifications());
+        assertEquals(ThreadRuntimeStatus.IDLE, runtime.getThreadSnapshot(parentId).runtimeStatus());
+        assertEquals(ThreadRuntimeStatus.IDLE, runtime.getThreadSnapshot(rootId).runtimeStatus());
+        Optional<ModelInvocation> model =
+            fixture.store.transaction(tx -> tx.findModelInvocation(fixture.modelInvocationId));
+        assertTrue(model.isEmpty());
       }
     }
   }
@@ -222,185 +206,174 @@ class ExecutionExitSettlementTest {
     // 测试意图：真实 Tool body 已返回、close 被 latch 挡住时 Stop 封账；释放后 close 成功但退出确认持久化失败，
     // 该代次必须保留 UNCONFIRMED（RUNNING/Join 未交付/父无通知）；同一路径不注入故障时正常收敛。
     Fixture fixture = ToolProcessorTestSupport.childFixture(false, 1);
-    fixture.gateway.queuePreflightAllow();
-    FakeRun delegate =
-        fixture.gateway.queueRun(
-            progress ->
-                new ToolGateway.Cancelled(new ToolInvocationError("CANCELLED", "cancelled")));
-    Held held = holdClose(delegate);
-    fixture.gateway.admitResults.clear();
-    fixture.gateway.queueAdmit(new ToolGateway.Admitted(held.run()));
-    AtomicInteger confirmAttempts = new AtomicInteger();
-    HarnessStore processorStore =
-        ExecutionExitFailureStore.wrapping(fixture.store, confirmAttempts, failConfirm);
-    ToolProcessor processor =
-        new ToolProcessor(
-            processorStore,
-            fixture.gateway,
-            fixture.sink,
-            new ToolProcessorConfig(
-                ToolProcessorTestSupport.LEASE_CONFIG,
-                () -> ToolProcessorTestSupport.NO_RETRY,
-                ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY,
-                ToolProcessorTestSupport.BUSY_FALLBACK_DELAY),
-            fixture.clock,
-            fixture.scheduler,
-            Runnable::run);
-    HarnessRuntime runtime =
-        new HarnessRuntime(
-            fixture.store,
-            (threadId, candidatePath, preparation) -> null,
-            () -> CompactionConfig.DEFAULT,
-            null,
-            mock(ModelProcessor.class),
-            processor);
-    UUID leafId = fixture.baseline.threadId();
-    UUID parentId = parentOf(fixture.store, leafId);
-    UUID joinId = UUID.randomUUID();
-    insertAppliedJoin(fixture.store, leafId, joinId);
-    UUID executionId = null;
-    ExitLogCapture exitLogs = ExitLogCapture.attach(ToolExecution.class);
-    try {
-      assertEquals(
-          ProcessResult.STARTED,
-          processor.process(
-              ToolProcessorTestSupport.claim(fixture.store, fixture.toolInvocationId, NOW)));
-      assertTrue(held.closeEntered().await(5, TimeUnit.SECONDS), "body returned and close is held");
-      assertEquals(0, delegate.closes.get(), "close is still held after the real body returned");
-      executionId =
-          fixture.store.transaction(
-              tx -> tx.loadUnconfirmedExecutions(leafId).get(0).executionId());
-      assertEquals(0, confirmAttempts.get(), "Stop must not attempt exit confirmation");
-      ThreadSnapshot before = runtime.getThreadSnapshot(leafId);
-      assertEquals(ThreadRuntimeStatus.RUNNING, before.runtimeStatus());
-      assertFalse(runtime.findJoin(joinId).orElseThrow().matched());
-      assertEquals(0, notificationCount(fixture.store, parentId));
+    try (AutoCloseable scheduler = schedulerCleanup(fixture.scheduler);
+        AutoCloseable fixtureProcessor = fixture.processor) {
+      fixture.gateway.queuePreflightAllow();
+      FakeRun delegate =
+          fixture.gateway.queueRun(
+              progress ->
+                  new ToolGateway.Cancelled(new ToolInvocationError("CANCELLED", "cancelled")));
+      Held held = holdClose(delegate);
+      AtomicInteger confirmAttempts = new AtomicInteger();
+      HarnessStore processorStore =
+          ExecutionExitFailureStore.wrapping(fixture.store, confirmAttempts, failConfirm);
+      try (ExitLogCapture exitLogs = ExitLogCapture.attach(ToolExecution.class);
+          ToolProcessor processor =
+              new ToolProcessor(
+                  processorStore,
+                  fixture.gateway,
+                  fixture.sink,
+                  new ToolProcessorConfig(
+                      ToolProcessorTestSupport.LEASE_CONFIG,
+                      () -> ToolProcessorTestSupport.NO_RETRY,
+                      ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY,
+                      ToolProcessorTestSupport.BUSY_FALLBACK_DELAY),
+                  fixture.clock,
+                  fixture.scheduler,
+                  Runnable::run);
+          AutoCloseable execution =
+              executionCleanup(held, delegate, "released tool execution must exit in cleanup")) {
+        fixture.gateway.admitResults.clear();
+        fixture.gateway.queueAdmit(new ToolGateway.Admitted(held.run()));
+        HarnessRuntime runtime =
+            new HarnessRuntime(
+                fixture.store,
+                (threadId, candidatePath, preparation) -> null,
+                () -> CompactionConfig.DEFAULT,
+                null,
+                mock(ModelProcessor.class),
+                processor);
+        UUID leafId = fixture.baseline.threadId();
+        UUID parentId = parentOf(fixture.store, leafId);
+        UUID joinId = UUID.randomUUID();
+        insertAppliedJoin(fixture.store, leafId, joinId);
+        UUID executionId = null;
+        assertEquals(
+            ProcessResult.STARTED,
+            processor.process(
+                ToolProcessorTestSupport.claim(fixture.store, fixture.toolInvocationId, NOW)));
+        assertTrue(
+            held.closeEntered().await(5, TimeUnit.SECONDS), "body returned and close is held");
+        assertEquals(0, delegate.closes.get(), "close is still held after the real body returned");
+        executionId =
+            fixture.store.transaction(
+                tx -> tx.loadUnconfirmedExecutions(leafId).get(0).executionId());
+        assertEquals(0, confirmAttempts.get(), "Stop must not attempt exit confirmation");
+        ThreadSnapshot before = runtime.getThreadSnapshot(leafId);
+        assertEquals(ThreadRuntimeStatus.RUNNING, before.runtimeStatus());
+        assertFalse(runtime.findJoin(joinId).orElseThrow().matched());
+        assertEquals(0, notificationCount(fixture.store, parentId));
 
-      runtime.stop(new StopCommand(leafId, TestIds.id(71), before.thread().version()));
+        runtime.stop(new StopCommand(leafId, TestIds.id(71), before.thread().version()));
 
-      assertTrue(
-          fixture
-              .store
-              .transaction(tx -> tx.findToolInvocation(fixture.toolInvocationId))
-              .isEmpty(),
-          "Stop deletes the terminal Tool invocation");
-      assertTrue(
-          fixture
-              .store
-              .transaction(tx -> tx.findModelInvocation(fixture.modelInvocationId))
-              .isEmpty(),
-          "Stop deletes the parent Model invocation");
-      assertTrue(
-          fixture
-              .store
-              .transaction(
-                  tx -> tx.findWork(new WorkTarget(WorkTargetType.TOOL, fixture.toolInvocationId)))
-              .isEmpty());
-      UUID heldExecutionId = executionId;
-      assertEquals(
-          ExecutionExitState.UNCONFIRMED,
-          fixture.store.transaction(tx -> tx.findExecution(heldExecutionId).orElseThrow().state()));
-      assertEquals(ThreadRuntimeStatus.RUNNING, runtime.getThreadSnapshot(leafId).runtimeStatus());
-      assertFalse(runtime.findJoin(joinId).orElseThrow().matched());
-      assertEquals(0, notificationCount(fixture.store, parentId));
+        assertTrue(
+            fixture
+                .store
+                .transaction(tx -> tx.findToolInvocation(fixture.toolInvocationId))
+                .isEmpty(),
+            "Stop deletes the terminal Tool invocation");
+        assertTrue(
+            fixture
+                .store
+                .transaction(tx -> tx.findModelInvocation(fixture.modelInvocationId))
+                .isEmpty(),
+            "Stop deletes the parent Model invocation");
+        assertTrue(
+            fixture
+                .store
+                .transaction(
+                    tx ->
+                        tx.findWork(new WorkTarget(WorkTargetType.TOOL, fixture.toolInvocationId)))
+                .isEmpty());
+        UUID heldExecutionId = executionId;
+        assertEquals(
+            ExecutionExitState.UNCONFIRMED,
+            fixture.store.transaction(
+                tx -> tx.findExecution(heldExecutionId).orElseThrow().state()));
+        assertEquals(
+            ThreadRuntimeStatus.RUNNING, runtime.getThreadSnapshot(leafId).runtimeStatus());
+        assertFalse(runtime.findJoin(joinId).orElseThrow().matched());
+        assertEquals(0, notificationCount(fixture.store, parentId));
 
-      held.release().countDown();
-      assertTrue(
-          delegate.executionThread.join(Duration.ofSeconds(5)),
-          "released tool execution must exit, including exit confirmation");
-      assertEquals(1, delegate.closes.get(), "successful close runs exactly once");
-      assertEquals(1, confirmAttempts.get(), "exactly one exit confirmation persistence attempt");
-      ThreadSnapshot after = runtime.getThreadSnapshot(leafId);
-      ThreadJoin join = runtime.findJoin(joinId).orElseThrow();
-      ExecutionExitState state =
-          fixture.store.transaction(tx -> tx.findExecution(heldExecutionId).orElseThrow().state());
-      if (failConfirm) {
-        assertAll(
-            () ->
-                assertEquals(
-                    ExecutionExitState.UNCONFIRMED,
-                    state,
-                    "failed confirmation must preserve the exit fact"),
-            () -> assertEquals(ThreadRuntimeStatus.RUNNING, after.runtimeStatus()),
-            () -> assertEquals(ThreadExecutionControl.STOPPED, after.thread().executionControl()),
-            () -> assertFalse(join.matched(), "unconfirmed exit must withhold the join"),
-            () -> assertEquals(0, notificationCount(fixture.store, parentId)));
-        exitLogs.assertSingleSafeFailure(
-            "cannot confirm tool execution exit",
-            "TOOL_EXIT_CONFIRM",
-            ExecutionExitFailureStore.InjectedPersistenceFailure.class,
-            ExecutionExitFailureStore.SYNTHETIC_SECRET);
-      } else {
-        assertAll(
-            () -> assertEquals(ExecutionExitState.STUDIO_EXITED, state),
-            () -> assertEquals(ThreadRuntimeStatus.IDLE, after.runtimeStatus()),
-            () -> assertEquals(ThreadExecutionControl.STOPPED, after.thread().executionControl()),
-            () -> assertTrue(join.matched(), "confirmed exit delivers the withheld join"),
-            () -> assertEquals(1, notificationCount(fixture.store, parentId)));
-        exitLogs.assertNoFailure("cannot confirm tool execution exit");
-      }
-    } finally {
-      held.release().countDown();
-      try {
-        if (delegate.executionThread != null) {
-          assertTrue(
-              delegate.executionThread.join(Duration.ofSeconds(5)),
-              "released tool execution must exit in cleanup");
-        }
-      } finally {
-        try {
-          processor.close();
-        } finally {
-          try {
-            fixture.processor.close();
-          } finally {
-            try {
-              fixture.scheduler.shutdownNow();
-              assertTrue(fixture.scheduler.awaitTermination(5, TimeUnit.SECONDS));
-            } finally {
-              exitLogs.close();
-            }
-          }
+        held.release().countDown();
+        assertTrue(
+            delegate.executionThread.join(Duration.ofSeconds(5)),
+            "released tool execution must exit, including exit confirmation");
+        assertEquals(1, delegate.closes.get(), "successful close runs exactly once");
+        assertEquals(1, confirmAttempts.get(), "exactly one exit confirmation persistence attempt");
+        ThreadSnapshot after = runtime.getThreadSnapshot(leafId);
+        ThreadJoin join = runtime.findJoin(joinId).orElseThrow();
+        ExecutionExitState state =
+            fixture.store.transaction(
+                tx -> tx.findExecution(heldExecutionId).orElseThrow().state());
+        if (failConfirm) {
+          assertAll(
+              () ->
+                  assertEquals(
+                      ExecutionExitState.UNCONFIRMED,
+                      state,
+                      "failed confirmation must preserve the exit fact"),
+              () -> assertEquals(ThreadRuntimeStatus.RUNNING, after.runtimeStatus()),
+              () -> assertEquals(ThreadExecutionControl.STOPPED, after.thread().executionControl()),
+              () -> assertFalse(join.matched(), "unconfirmed exit must withhold the join"),
+              () -> assertEquals(0, notificationCount(fixture.store, parentId)));
+          exitLogs.assertSingleSafeFailure(
+              "cannot confirm tool execution exit",
+              "TOOL_EXIT_CONFIRM",
+              ExecutionExitFailureStore.InjectedPersistenceFailure.class,
+              ExecutionExitFailureStore.SYNTHETIC_SECRET);
+        } else {
+          assertAll(
+              () -> assertEquals(ExecutionExitState.STUDIO_EXITED, state),
+              () -> assertEquals(ThreadRuntimeStatus.IDLE, after.runtimeStatus()),
+              () -> assertEquals(ThreadExecutionControl.STOPPED, after.thread().executionControl()),
+              () -> assertTrue(join.matched(), "confirmed exit delivers the withheld join"),
+              () -> assertEquals(1, notificationCount(fixture.store, parentId)));
+          exitLogs.assertNoFailure("cannot confirm tool execution exit");
         }
       }
     }
   }
 
   @Test
-  void stoppedParentRejectsResumeWhileADirectChildJoinIsOpenButAcceptsSettings() {
+  void stoppedParentRejectsResumeWhileADirectChildJoinIsOpenButAcceptsSettings() throws Exception {
     // 测试意图：STOPPED 且直接子 Join 未收敛时拒绝新的恢复输入；SET 维护输入不恢复执行，因此不受此限制。
     Fixture fixture = ToolProcessorTestSupport.childFixture(false, 1);
-    HarnessRuntime runtime = runtime(fixture);
-    UUID leafId = fixture.baseline.threadId();
-    UUID parentId = parentOf(fixture.store, leafId);
-    insertAppliedJoin(fixture.store, leafId, UUID.randomUUID());
-    fixture.store.transaction(
-        tx -> {
-          ThreadState parent = tx.lockThread(parentId).orElseThrow();
-          tx.updateThread(parent.changeExecutionControl(ThreadExecutionControl.STOPPED, NOW));
-          return null;
-        });
-    AcceptCommandsCommand resume =
-        new AcceptCommandsCommand(
-            new AcceptCommandsTarget.Thread(parentId),
-            List.of(
-                new NewThreadCommand(
-                    new UserMessageCommandPayload(AgentMessage.user("resume")), TestIds.id(91))));
-    HarnessRuntimeConflictException rejected =
-        assertThrows(
-            HarnessRuntimeConflictException.class,
-            () -> runtime.acceptCommands(resume, AcceptancePreflight.IDENTITY));
-    assertEquals(HarnessRuntimeConflictException.Reason.EXIT_UNCONFIRMED, rejected.reason());
-    ThreadState current = runtime.getThreadSnapshot(parentId).thread();
-    runtime.acceptCommands(
-        new AcceptCommandsCommand(
-            new AcceptCommandsTarget.Thread(
-                parentId, current.headEntryId(), current.nextCommandSequence()),
-            List.of(new NewThreadCommand(new SetAgentCommandPayload("assistant"), TestIds.id(92)))),
-        AcceptancePreflight.IDENTITY);
-    assertEquals(
-        ThreadExecutionControl.STOPPED,
-        runtime.getThreadSnapshot(parentId).thread().executionControl());
+    try (AutoCloseable scheduler = schedulerCleanup(fixture.scheduler);
+        AutoCloseable fixtureProcessor = fixture.processor) {
+      HarnessRuntime runtime = runtime(fixture);
+      UUID leafId = fixture.baseline.threadId();
+      UUID parentId = parentOf(fixture.store, leafId);
+      insertAppliedJoin(fixture.store, leafId, UUID.randomUUID());
+      fixture.store.transaction(
+          tx -> {
+            ThreadState parent = tx.lockThread(parentId).orElseThrow();
+            tx.updateThread(parent.changeExecutionControl(ThreadExecutionControl.STOPPED, NOW));
+            return null;
+          });
+      AcceptCommandsCommand resume =
+          new AcceptCommandsCommand(
+              new AcceptCommandsTarget.Thread(parentId),
+              List.of(
+                  new NewThreadCommand(
+                      new UserMessageCommandPayload(AgentMessage.user("resume")), TestIds.id(91))));
+      HarnessRuntimeConflictException rejected =
+          assertThrows(
+              HarnessRuntimeConflictException.class,
+              () -> runtime.acceptCommands(resume, AcceptancePreflight.IDENTITY));
+      assertEquals(HarnessRuntimeConflictException.Reason.EXIT_UNCONFIRMED, rejected.reason());
+      ThreadState current = runtime.getThreadSnapshot(parentId).thread();
+      runtime.acceptCommands(
+          new AcceptCommandsCommand(
+              new AcceptCommandsTarget.Thread(
+                  parentId, current.headEntryId(), current.nextCommandSequence()),
+              List.of(
+                  new NewThreadCommand(new SetAgentCommandPayload("assistant"), TestIds.id(92)))),
+          AcceptancePreflight.IDENTITY);
+      assertEquals(
+          ThreadExecutionControl.STOPPED,
+          runtime.getThreadSnapshot(parentId).thread().executionControl());
+    }
   }
 
   private static HarnessRuntime runtime(Fixture fixture) {
@@ -411,6 +384,25 @@ class ExecutionExitSettlementTest {
         null,
         mock(ModelProcessor.class),
         fixture.processor);
+  }
+
+  /** 有界停止 fixture 私有 scheduler，避免 ExecutorService.close 的潜在无界等待。 */
+  private static AutoCloseable schedulerCleanup(ScheduledExecutorService scheduler) {
+    return () -> {
+      scheduler.shutdownNow();
+      assertTrue(scheduler.awaitTermination(5, TimeUnit.SECONDS));
+    };
+  }
+
+  /** 独立释放 held close 并等待真实 worker 退出；失败作为 TWR 抑制异常，不覆盖主体失败。 */
+  private static AutoCloseable executionCleanup(
+      Held held, FakeRun delegate, String failureMessage) {
+    return () -> {
+      held.release().countDown();
+      if (delegate.executionThread != null) {
+        assertTrue(delegate.executionThread.join(Duration.ofSeconds(5)), failureMessage);
+      }
+    };
   }
 
   /** body 返回后挡住 close，让终态物化与 Join 观察发生在真实退出确认之前。 */
