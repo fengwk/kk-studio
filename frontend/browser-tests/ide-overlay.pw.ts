@@ -373,7 +373,7 @@ test.describe('Chat IDE Overlay Responsive & Iframe Identity Durability', () => 
     await page.click('[data-testid="ide-set-environment-ready"]')
     await expect.poll(() => audit.sessionProbes.length).toBe(2)
     await expect.poll(() => audit.openCalls.length).toBe(2)
-    expect(audit.openCalls[1]).toMatchObject({
+    expect(audit.openCalls[1]).toEqual({
       environmentId: HARNESS_ENV_ID,
       viewId: PANE_1_VIEW_ID,
       body: { viewId: PANE_1_VIEW_ID },
@@ -388,7 +388,7 @@ test.describe('Chat IDE Overlay Responsive & Iframe Identity Durability', () => 
     await page.click('[data-testid="ide-set-environment-ready"]')
     await expect.poll(() => audit.sessionProbes.length).toBe(4)
     await expect.poll(() => audit.openCalls.length).toBe(3)
-    expect(audit.openCalls[2]).toMatchObject({
+    expect(audit.openCalls[2]).toEqual({
       environmentId: HARNESS_ENV_ID,
       viewId: PANE_1_VIEW_ID,
       body: { viewId: PANE_1_VIEW_ID },
@@ -446,7 +446,7 @@ test.describe('Chat IDE Overlay Responsive & Iframe Identity Durability', () => 
     await page.click('[data-testid="ide-set-environment-ready"]')
     await expect.poll(() => audit.sessionProbes.length).toBe(3)
     await expect.poll(() => audit.openCalls.length).toBe(2)
-    expect(audit.openCalls[1]).toMatchObject({
+    expect(audit.openCalls[1]).toEqual({
       environmentId: HARNESS_ENV_ID,
       viewId: PANE_1_VIEW_ID,
       body: { viewId: PANE_1_VIEW_ID },
