@@ -91,7 +91,9 @@ final class IdeStreamFrameBridge implements AutoCloseable {
       Thread.currentThread().interrupt();
       status = IdeStreamPeer.STREAM_LOST;
     } catch (RuntimeException error) {
-      log.info("ide frame bridge failed: {}", error.toString());
+      log.info(
+          "ide frame bridge failed; phase=IDE_FRAME_BRIDGE; exception={}",
+          error.getClass().getSimpleName());
       status = IdeStreamPeer.STREAM_LOST;
     } finally {
       close(status);

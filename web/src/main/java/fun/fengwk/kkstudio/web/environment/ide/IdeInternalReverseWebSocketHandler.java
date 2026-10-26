@@ -110,7 +110,9 @@ public final class IdeInternalReverseWebSocketHandler extends AbstractWebSocketH
 
   @Override
   public void handleTransportError(WebSocketSession session, Throwable exception) throws Exception {
-    log.info("internal reverse transport error on {}: {}", session.getId(), exception.toString());
+    log.info(
+        "internal reverse transport failed; phase=IDE_INTERNAL_REVERSE_TRANSPORT; exception={}",
+        exception.getClass().getSimpleName());
     detach(
         session,
         CloseStatus.NO_CLOSE_FRAME.withReason(

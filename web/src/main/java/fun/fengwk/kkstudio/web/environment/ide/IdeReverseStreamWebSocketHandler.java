@@ -136,7 +136,9 @@ public final class IdeReverseStreamWebSocketHandler extends AbstractWebSocketHan
 
   @Override
   public void handleTransportError(WebSocketSession session, Throwable exception) throws Exception {
-    log.info("reverse stream transport error on {}: {}", session.getId(), exception.toString());
+    log.info(
+        "reverse stream transport failed; phase=IDE_REVERSE_TRANSPORT; exception={}",
+        exception.getClass().getSimpleName());
     detach(
         session,
         CloseStatus.NO_CLOSE_FRAME.withReason(

@@ -234,14 +234,13 @@ final class IdeBrowserStreamSession {
         | EnvironmentCapabilitySendUncertainException error) {
       end("DAEMON_UNAVAILABLE", CloseStatus.SERVER_ERROR);
     } catch (RuntimeException error) {
-      end("FAILED " + error, CloseStatus.SERVER_ERROR);
+      end("FAILED " + error.getClass().getSimpleName(), CloseStatus.SERVER_ERROR);
     } finally {
       IdeStreamPeer current = peer;
       CloseStatus daemonClose = current == null ? null : current.remoteCloseStatus();
       // Daemon 侧异常结束时，其 OPEN_STREAM 回执携带失败原因且紧随关闭到达：短暂等待后再放弃该调用。
       boolean daemonSideFailure =
           outcome != null
-              && !outcome.equals("GENERATION_CHANGED")
               && (daemonClose == null || daemonClose.getCode() != CloseStatus.NORMAL.getCode());
       String daemonReply =
           IdeStreamDiagnostics.replyFailure(

@@ -15,7 +15,7 @@ import java.util.concurrent.TimeoutException;
 /**
  * IDE 数据流收尾诊断：把关闭状态与 Daemon 对 {@code OPEN_STREAM} 的失败回执压成安全摘要，供每条流结束时写一行日志，使线上能判定关闭方与原因。
  *
- * <p>摘要只含关闭码、协议原因与 Daemon 的固定安全消息，不含 ticket、cookie、查询串或请求体。
+ * <p>只记录数值关闭码与失败分类。关闭原因、Daemon 回执和异常消息都可能包含对端提供的路径或凭据，不进入日志。
  */
 final class IdeStreamDiagnostics {
 
@@ -29,14 +29,11 @@ final class IdeStreamDiagnostics {
     if (status == null) {
       return "-";
     }
-    String reason = status.getReason();
-    return reason == null || reason.isEmpty()
-        ? String.valueOf(status.getCode())
-        : status.getCode() + " " + reason;
+    return String.valueOf(status.getCode());
   }
 
   /**
-   * Daemon 对 {@code OPEN_STREAM} 的失败回执消息；成功、尚未到达、已取消或请求未发出时为 {@code -}。
+   * Daemon 对 {@code OPEN_STREAM} 的失败分类；不记录回执中的自由文本。成功、尚未到达、已取消或请求未发出时为 {@code -}。
    *
    * @param wait 最长等待时间；零表示只读取已到达的回执
    */
@@ -49,7 +46,7 @@ final class IdeStreamDiagnostics {
           wait.isZero()
               ? request.reply().getNow(null)
               : request.reply().get(wait.toMillis(), TimeUnit.MILLISECONDS);
-      return reply == null || reply.ok() ? "-" : String.valueOf(reply.message());
+      return reply == null || reply.ok() ? "-" : "REJECTED";
     } catch (TimeoutException
         | CancellationException
         | CompletionException
