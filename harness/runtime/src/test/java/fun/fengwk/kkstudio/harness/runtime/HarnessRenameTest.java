@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T0;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.loadCommandsByThread;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -118,7 +119,7 @@ class HarnessRenameTest {
     ThreadState stored = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
     assertEquals(renamed, stored);
     // Thread rename 是 isolated metadata mutation：Command / Work / Entry tree 全部保持 rename 前状态。
-    assertTrue(store.transaction(tx -> tx.loadCommandsByThread(baseline.threadId())).isEmpty());
+    assertTrue(store.transaction(tx -> loadCommandsByThread(tx, baseline.threadId())).isEmpty());
     assertTrue(
         store
             .transaction(

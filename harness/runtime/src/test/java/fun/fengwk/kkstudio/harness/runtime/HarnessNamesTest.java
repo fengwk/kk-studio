@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T0;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.loadCommandsByThread;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -241,7 +242,7 @@ class HarnessNamesTest {
 
     // seedBaseline 的根 Thread + 新建分支 = 2，且分支只有初始一条 Command / 一份 Work。
     assertEquals(2, store.transaction(tx -> tx.listThreadsBySession(baseline.sessionId())).size());
-    assertEquals(1, store.transaction(tx -> tx.loadCommandsByThread(branchThreadId)).size());
+    assertEquals(1, store.transaction(tx -> loadCommandsByThread(tx, branchThreadId)).size());
   }
 
   @Test

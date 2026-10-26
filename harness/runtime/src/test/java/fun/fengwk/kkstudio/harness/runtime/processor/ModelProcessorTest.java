@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.processor;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.loadCommandsByThread;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -529,7 +530,7 @@ class ModelProcessorTest {
     return store.transaction(
         tx ->
             (int)
-                tx.loadCommandsByThread(parentId).stream()
+                loadCommandsByThread(tx, parentId).stream()
                     .filter(command -> command.type().isNotification())
                     .count());
   }

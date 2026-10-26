@@ -330,9 +330,6 @@ public interface HarnessStore {
      */
     List<ThreadCommand> loadQueuedCommands(UUID threadId);
 
-    /** 读取该 Thread 的全部 Command（QUEUED/APPLIED/CANCELLED，含历史），按 sequence 升序；不产生锁。返回不可变列表。 */
-    List<ThreadCommand> loadCommandsByThread(UUID threadId);
-
     /**
      * 判断该 Thread 是否存在 sequence 大于 {@code afterSequence} 的 APPLIED NOTIFICATION Command；不产生锁，只按
      * {@code (thread_id, sequence)} 区间判定、不读取 payload。用于识别已物化但尚未越过输入水位的系统通知。

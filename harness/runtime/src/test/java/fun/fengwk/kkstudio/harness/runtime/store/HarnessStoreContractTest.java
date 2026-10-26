@@ -66,7 +66,6 @@ class HarnessStoreContractTest {
               "lockSessionForUpdate",
               "findCommandByIdempotencyKey",
               "findCommand",
-              "loadCommandsByThread",
               "hasAppliedNotificationAfter",
               "loadCancelledCommandsByRequest",
               "loadQueuedCommands",
@@ -138,6 +137,8 @@ class HarnessStoreContractTest {
             .map(Method::getName)
             .collect(Collectors.toSet());
     assertEquals(ALLOWED_PRIMITIVES, actual);
+    // 全历史 Command 读取只属于测试辅助，不得以任何名字回到生产 store 契约。
+    assertFalse(actual.contains("loadCommandsByThread"), "test-only command history query leaked");
   }
 
   /** 测试意图：读取原语只能返回 Optional / 不可变 List / EntryPath / BranchSettings 这四类只读投影。 */

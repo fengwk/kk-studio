@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.CREATION_REQUEST_HASH;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessorTestSupport.NOW;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.loadCommandsByThread;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -616,7 +617,7 @@ class HarnessRuntimeStopExitContractTest {
     return fixture.store.transaction(
         tx -> {
           int count = 0;
-          for (ThreadCommand command : tx.loadCommandsByThread(parentId)) {
+          for (ThreadCommand command : loadCommandsByThread(tx, parentId)) {
             if (command.type().isNotification()) {
               count++;
             }

@@ -6,6 +6,7 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.command;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.inTransaction;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.insertChildEntry;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.loadCommandsByThread;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.mappedAssistant;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedTurnBaseline;
@@ -116,7 +117,7 @@ abstract class HarnessStoreDeletionContract {
     assertEquals(1, deleted);
 
     assertTrue(store.transaction(tx -> tx.findThread(baseline.threadId())).isEmpty());
-    assertTrue(store.transaction(tx -> tx.loadCommandsByThread(baseline.threadId())).isEmpty());
+    assertTrue(store.transaction(tx -> loadCommandsByThread(tx, baseline.threadId())).isEmpty());
     assertTrue(store.transaction(tx -> tx.findModelInvocation(modelId)).isEmpty());
     assertTrue(store.transaction(tx -> tx.findToolInvocation(toolId)).isEmpty());
     assertTrue(store.transaction(tx -> tx.findWork(threadWork)).isEmpty());
@@ -219,8 +220,8 @@ abstract class HarnessStoreDeletionContract {
           assertTrue(tx.findThread(parentId).isEmpty());
           assertTrue(tx.findThread(childId).isEmpty());
           assertTrue(tx.findJoin(joinId).isEmpty());
-          assertTrue(tx.loadCommandsByThread(parentId).isEmpty());
-          assertTrue(tx.loadCommandsByThread(childId).isEmpty());
+          assertTrue(loadCommandsByThread(tx, parentId).isEmpty());
+          assertTrue(loadCommandsByThread(tx, childId).isEmpty());
           // 两个 Session 的 Entry 历史都不受影响（Session 级删除另行处理）
           assertTrue(tx.findSession(parentBaseline.sessionId()).isPresent());
           assertTrue(tx.findSession(childBaseline.sessionId()).isPresent());

@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.web.runtime;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.loadCommandsByThread;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -1217,7 +1218,7 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
   }
 
   private List<ThreadCommand> commandsOf(UUID threadId) {
-    return store.transaction(tx -> tx.loadCommandsByThread(threadId));
+    return store.transaction(tx -> loadCommandsByThread(tx, threadId));
   }
 
   /** 父 Thread 上已入队的 join 结果交付命令（NOTIFICATION/SUBAGENT_RESULT），按 sequence 升序。 */
