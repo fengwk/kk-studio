@@ -76,7 +76,7 @@ class OpenAiChatSecurityAndArchitectureTest {
   void testToStringDoesNotLeakSecrets() {
     String sensitiveKey = "sk-super-sensitive-secret-token-xyz-123456789";
     OpenAiChatProviderAdapter adapter =
-        new OpenAiChatProviderAdapter(transport, sensitiveKey, "{\"openAiChatIncludeUsage\":true}");
+        new OpenAiChatProviderAdapter(transport, sensitiveKey, "{\"openAiChatRequireDone\":true}");
     ModelProvider provider = adapter.create(descriptor);
 
     String adapterStr = adapter.toString();

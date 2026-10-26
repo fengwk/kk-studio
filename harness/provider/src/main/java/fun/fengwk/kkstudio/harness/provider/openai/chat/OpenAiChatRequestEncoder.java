@@ -129,7 +129,7 @@ final class OpenAiChatRequestEncoder {
     root.put("model", request.model().modelId());
     root.put("stream", true);
 
-    applyStreamOptions(root, config);
+    applyStreamOptions(root);
 
     applyReasoningParameters(root, request.model(), request.variant(), config);
     // 输出预算只来自 Model 级 limit.output（普通请求再按剩余上下文收敛），不来自 variant。
@@ -181,9 +181,9 @@ final class OpenAiChatRequestEncoder {
 
   /**
    * {@code stream_options} 由运行时与 native 共同构造：native 必须是 object 且保留自己的子字段，{@code include_usage}
-   * 由运行时独占。
+   * 由运行时独占并始终为 true，因为完整 usage 是成功响应的必需事实。
    */
-  private static void applyStreamOptions(ObjectNode root, OpenAiChatConfiguration config) {
+  private static void applyStreamOptions(ObjectNode root) {
     JsonNode nativeOptions = root.get("stream_options");
     ObjectNode streamOptions;
     if (nativeOptions == null) {
@@ -201,7 +201,7 @@ final class OpenAiChatRequestEncoder {
       }
       streamOptions = (ObjectNode) nativeOptions;
     }
-    streamOptions.put("include_usage", config.includeUsage());
+    streamOptions.put("include_usage", true);
   }
 
   /**
