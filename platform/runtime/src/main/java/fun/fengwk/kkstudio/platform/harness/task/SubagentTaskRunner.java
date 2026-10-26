@@ -133,7 +133,14 @@ public class SubagentTaskRunner implements SubagentRunner {
         throw reject("subagent task parent thread no longer exists", notFound);
       } catch (RuntimeException failure) {
         // 并发胜者可能已经接受票据；先回放，但不能把任意失败当成可重试的游标冲突。
-        SubagentTaskAcceptance concurrent = replay(runtime, request, childThreadId, requestHash);
+        SubagentTaskAcceptance concurrent;
+        try {
+          concurrent = replay(runtime, request, childThreadId, requestHash);
+        } catch (RuntimeException replayFailure) {
+          // 回放自身失败时保留提交失败，避免诊断只剩回放错误。
+          replayFailure.addSuppressed(failure);
+          throw replayFailure;
+        }
         if (concurrent != null) {
           return concurrent;
         }
