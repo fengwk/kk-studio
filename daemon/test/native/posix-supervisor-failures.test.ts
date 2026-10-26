@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { ProcessScopeNotConvergedError } from '../../src/contracts.js'
 import { PosixManagedProcess, PosixProcessSupervisor } from '../../src/native/posix-supervisor.js'
 import * as state from '../../src/native/state.js'
 
@@ -107,6 +108,52 @@ describe.skipIf(process.platform === 'win32')('posix supervisor failure branches
     expect(helper.unref).toHaveBeenCalledOnce()
     helper.stdout.destroy()
     helper.stderr.destroy()
+  })
+
+  test('a failed start whose scope converged rejects with the original error only', async () => {
+    // start 契约：清理已证明收敛时只抛原始失败（不是 ProcessScopeNotConvergedError），调用方据此可以确认退出。
+    const establish = vi
+      .spyOn(PosixManagedProcess.prototype, 'establish')
+      .mockRejectedValue(new Error('establish failed'))
+    const supervisor = new PosixProcessSupervisor()
+    try {
+      const failure = await supervisor
+        .start({ executable: process.execPath, args: ['-e', ''], cwd: tmpdir() })
+        .then(
+          () => null,
+          (error: unknown) => error,
+        )
+      expect(failure).toBeInstanceOf(Error)
+      expect(failure).not.toBeInstanceOf(ProcessScopeNotConvergedError)
+      expect((failure as Error).message).toBe('establish failed')
+    } finally {
+      establish.mockRestore()
+      await supervisor.close()
+    }
+  })
+
+  test('a failed start whose cleanup cannot be proven converged rejects with the typed error', async () => {
+    // 先真实收尾（杀掉 helper，不泄漏进程），再模拟收尾无法证明收敛：此时必须抛 ProcessScopeNotConvergedError。
+    const establish = vi
+      .spyOn(PosixManagedProcess.prototype, 'establish')
+      .mockRejectedValue(new Error('establish failed'))
+    const realClose = PosixManagedProcess.prototype.close
+    const close = vi
+      .spyOn(PosixManagedProcess.prototype, 'close')
+      .mockImplementation(async function (this: PosixManagedProcess) {
+        await realClose.call(this)
+        throw new Error('cleanup could not be proven')
+      })
+    const supervisor = new PosixProcessSupervisor()
+    try {
+      await expect(
+        supervisor.start({ executable: process.execPath, args: ['-e', ''], cwd: tmpdir() }),
+      ).rejects.toThrow(ProcessScopeNotConvergedError)
+    } finally {
+      establish.mockRestore()
+      close.mockRestore()
+      await supervisor.close()
+    }
   })
 
   test('a launch spec that cannot be written fails closed before spawning the helper', async () => {

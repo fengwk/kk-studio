@@ -1,7 +1,7 @@
 import { realpath, stat } from 'node:fs/promises'
 import type { Readable } from 'node:stream'
 import type { CapabilityExecutor, CapabilityResult, ManagedProcess } from '../contracts.js'
-import { errorResult } from '../contracts.js'
+import { ProcessScopeNotConvergedError, errorResult } from '../contracts.js'
 import {
   ToolInputRejectedError,
   ToolRunFailureError,
@@ -40,6 +40,8 @@ const processExecutor: CapabilityExecutor = async (call, context) => {
   let spool: OutputSpool | null = null
   let managed: ManagedProcess | null = null
   let startAttempted = false
+  /** start 拒绝且 supervisor 保证本次尝试没有遗留进程。 */
+  let startFailedConverged = false
   let cancelled = false
   let timedOut = false
   let terminationFailure: unknown = null
@@ -112,9 +114,10 @@ const processExecutor: CapabilityExecutor = async (call, context) => {
         cwd: workdir,
         signal: context.signal,
       })
-    } catch {
+    } catch (error) {
+      // supervisor 契约：只有 ProcessScopeNotConvergedError 表示失败范围可能仍有进程；其它拒绝已证明本次尝试没有遗留进程。
+      startFailedConverged = !(error instanceof ProcessScopeNotConvergedError)
       await requestTermination()
-      // 没有返回 managed 时，terminate 只是空操作，不能把 start 的清理失败当成已收敛。
       if (cancelled) {
         return terminatedBeforeStart(call.invocationId, 'CANCELLED', timeoutMillis)
       }
@@ -193,8 +196,8 @@ const processExecutor: CapabilityExecutor = async (call, context) => {
       // 捕获文件未释放时不能确认；close 抛错会跳过下面的确认。
       await spool.close()
     }
-    // start 抛错不证明受管范围已经物理清理。只有确定未调用 start，或已有受管进程且 terminate 成功，才确认。
-    if (!startAttempted || (managed !== null && terminationFailure === null)) {
+    // 确认需要正向证据：未调用 start、start 的拒绝已证明没有遗留进程，或已有受管进程且 terminate 成功。
+    if (!startAttempted || startFailedConverged || (managed !== null && terminationFailure === null)) {
       context.confirmExecutionExit()
     }
   }

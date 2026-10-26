@@ -7,6 +7,7 @@ import { PassThrough } from 'node:stream'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import type { Kernel32, WindowsNativeBindings } from '../../src/native/win32.js'
 import { installWindowsNativeBindingsForTest, loadWindowsNativeTypes } from '../../src/native/win32.js'
+import { ProcessScopeNotConvergedError } from '../../src/contracts.js'
 import {
   WindowsManagedProcess,
   WindowsProcessSupervisor,
@@ -213,6 +214,31 @@ describe.skipIf(process.platform === 'win32')('windows process supervisor lifecy
     await expect(supervisor.trackDescendant(managed.pid, 4242)).resolves.toBeUndefined()
     await managed.terminate()
     await supervisor.close()
+  }, 30_000)
+
+  test('a failed start whose cleanup cannot be proven converged rejects with the typed error', async () => {
+    // 先真实收尾（杀掉 helper，不泄漏进程），再模拟收尾无法证明收敛：此时必须抛 ProcessScopeNotConvergedError。
+    installWindowsNativeBindingsForTest(bindings({ openJob: 10n, activeProcesses: 0, queryJob: 1, closeHandle: 1, terminateJob: 1, getLastError: 5 }))
+    const establish = vi
+      .spyOn(WindowsManagedProcess.prototype, 'establish')
+      .mockRejectedValue(new Error('establish failed'))
+    const realClose = WindowsManagedProcess.prototype.close
+    const close = vi
+      .spyOn(WindowsManagedProcess.prototype, 'close')
+      .mockImplementation(async function (this: WindowsManagedProcess) {
+        await realClose.call(this)
+        throw new Error('cleanup could not be proven')
+      })
+    const supervisor = new WindowsProcessSupervisor()
+    try {
+      await expect(
+        supervisor.start({ executable: process.execPath, args: ['-e', '0'], cwd: workdir }),
+      ).rejects.toThrow(ProcessScopeNotConvergedError)
+    } finally {
+      establish.mockRestore()
+      close.mockRestore()
+      await supervisor.close()
+    }
   }, 30_000)
 
   test('a helper that dies before publishing the scope fails closed', async () => {
