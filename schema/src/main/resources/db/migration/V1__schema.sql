@@ -1545,6 +1545,16 @@ create index idx_harness_execution_exit_thread_unconfirmed
 
 comment on index idx_harness_execution_exit_thread_unconfirmed is '按 Thread 读取尚未确认退出的执行代次';
 
+create index idx_harness_execution_exit_thread
+    on harness_execution_exit (thread_id);
+
+create index idx_harness_execution_exit_parent
+    on harness_execution_exit (parent_execution_id)
+    where parent_execution_id is not null;
+
+comment on index idx_harness_execution_exit_thread is 'Thread 深删按 thread_id 删除执行代次，并服务删除 Thread 时的外键检查';
+comment on index idx_harness_execution_exit_parent is '删除执行代次时服务 REMOTE 指向本地 Tool 代次的自引用外键检查';
+
 ------------------------------------------------------------------------------
 -- 3. Project / Issue business facts
 --
