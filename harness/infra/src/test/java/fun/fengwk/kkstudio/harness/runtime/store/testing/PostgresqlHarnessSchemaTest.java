@@ -223,6 +223,8 @@ class PostgresqlHarnessSchemaTest {
     assertEquals(
         List.of(
             "idx_harness_entry_parent",
+            "idx_harness_execution_exit_parent",
+            "idx_harness_execution_exit_thread",
             "idx_harness_execution_exit_thread_unconfirmed",
             "idx_harness_thread_command_queued",
             "idx_harness_thread_command_stop_request",
@@ -270,6 +272,11 @@ class PostgresqlHarnessSchemaTest {
     assertTrue(
         childPending.contains(
             "WHERE ((terminal_entry_id IS NULL) AND (superseded_by_invocation_id IS NULL))"));
+    // 执行代次只增不删到 Thread 深删：按 thread_id 删除与 Thread 外键检查、以及自引用 parent 外键检查都必须走索引。
+    assertTrue(indexDefinition("idx_harness_execution_exit_thread").contains("(thread_id)"));
+    String exitParent = indexDefinition("idx_harness_execution_exit_parent");
+    assertTrue(exitParent.contains("(parent_execution_id)"));
+    assertTrue(exitParent.contains("WHERE (parent_execution_id IS NOT NULL)"));
     // Stop 回执集合索引必须按 (root_thread_id, root_stop_request_id) 建键，隔离不同树复用同一请求 UUID。
     String stopReceiptRoot = indexDefinition("idx_harness_thread_stop_receipt_root");
     assertTrue(stopReceiptRoot.contains("(root_thread_id, root_stop_request_id)"));
