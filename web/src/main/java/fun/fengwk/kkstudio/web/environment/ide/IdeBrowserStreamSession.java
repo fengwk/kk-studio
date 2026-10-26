@@ -50,6 +50,9 @@ import java.util.concurrent.atomic.AtomicReference;
  * <p>入站分段进入按字节有界的队列（阻塞容器线程形成 TCP 背压，超时 fail-closed），出站按 credit 分段发送：二进制逐段透传，文本用流式 UTF-8
  * 解码器跨分段解码并在码点边界切分，绝不整包缓冲、绝不先 ACK 后交付。转发线程是虚拟线程，活跃 WS 不设整体寿命，仅 metadata 就绪 阶段有
  * deadline，之后按有限周期复核代际。
+ *
+ * <p>Daemon 侧关闭时把它给出的关闭码（code-server 的关闭码或协议原因）原样转述给浏览器；每条流结束时写一行诊断日志（结束原因、双方关闭码、Daemon
+ * 失败回执、双向帧数与字节数、时长），使线上可以判定关闭方。
  */
 @Slf4j
 final class IdeBrowserStreamSession {
@@ -97,6 +100,15 @@ final class IdeBrowserStreamSession {
 
   /** 流式解码器尚未消费的 ≤3 字节不完整 UTF-8 序列，必须跨分段保留。 */
   private byte[] textPending = new byte[0];
+
+  /** 本流的结束原因；只记录首个原因，浏览器主动断开为默认值。 */
+  private String outcome;
+
+  private CloseStatus browserClose;
+  private long fromDaemonFrames;
+  private long fromDaemonBytes;
+  private long toDaemonFrames;
+  private long toDaemonBytes;
 
   IdeBrowserStreamSession(
       WebSocketSession browser,
@@ -163,6 +175,8 @@ final class IdeBrowserStreamSession {
   }
 
   private void run() {
+    long startedNanos = System.nanoTime();
+    IdeRequest request = null;
     IdeStreamTicketService.Issued issued =
         deps.streamTickets().issue(session.identity(), IdeStreamMode.WS);
     AtomicReference<UUID> invocation = new AtomicReference<>();
@@ -194,7 +208,7 @@ final class IdeBrowserStreamSession {
               "GET",
               rawPathAndQuery,
               headers);
-      IdeRequest request = deps.transport().requestIde(environmentId, command);
+      request = deps.transport().requestIde(environmentId, command);
       invocation.set(request.invocationId());
       peer = pairing.awaitPeer();
       relay =
@@ -218,26 +232,56 @@ final class IdeBrowserStreamSession {
       if (awaitReady(System.nanoTime() + deps.properties().requireRequestTimeout().toNanos())) {
         relayUntilClosed();
       } else {
-        closeBrowser(CloseStatus.SERVER_ERROR);
+        end("NOT_READY", CloseStatus.SERVER_ERROR);
       }
     } catch (IdeStreamPairingException error) {
-      closeBrowser(CloseStatus.SERVER_ERROR);
+      end("PAIRING_FAILED", CloseStatus.SERVER_ERROR);
     } catch (EnvironmentCapabilityUnavailableException
         | EnvironmentCapabilityBusyException
         | EnvironmentCapabilitySendUncertainException error) {
-      closeBrowser(CloseStatus.SERVER_ERROR);
+      end("DAEMON_UNAVAILABLE", CloseStatus.SERVER_ERROR);
     } catch (RuntimeException error) {
-      log.debug("browser ide stream failed: {}", error.getMessage());
-      closeBrowser(CloseStatus.SERVER_ERROR);
+      end("FAILED " + error, CloseStatus.SERVER_ERROR);
     } finally {
+      IdeStreamPeer current = peer;
+      CloseStatus daemonClose = current == null ? null : current.remoteCloseStatus();
+      // Daemon 侧异常结束时，其 OPEN_STREAM 回执携带失败原因且紧随关闭到达：短暂等待后再放弃该调用。
+      boolean daemonSideFailure =
+          outcome != null
+              && !outcome.equals("GENERATION_CHANGED")
+              && (daemonClose == null || daemonClose.getCode() != CloseStatus.NORMAL.getCode());
+      String daemonReply =
+          IdeStreamDiagnostics.replyFailure(
+              request, daemonSideFailure ? IdeStreamDiagnostics.REPLY_GRACE : Duration.ZERO);
       abandonOnce.run();
       pairing.close();
-      IdeStreamPeer current = peer;
       if (current != null) {
         current.close();
       }
       onClosed.run();
+      log.info(
+          "ide websocket stream ended: environment={} outcome={} daemonClose={} browserClose={}"
+              + " daemonReply={} fromDaemon={} frames/{} bytes toDaemon={} frames/{} bytes"
+              + " durationMs={}",
+          environmentId,
+          outcome == null ? "BROWSER_CLOSED" : outcome,
+          IdeStreamDiagnostics.describe(daemonClose),
+          IdeStreamDiagnostics.describe(browserClose),
+          daemonReply,
+          fromDaemonFrames,
+          fromDaemonBytes,
+          toDaemonFrames,
+          toDaemonBytes,
+          Duration.ofNanos(System.nanoTime() - startedNanos).toMillis());
     }
+  }
+
+  /** 记录首个结束原因并以给定状态关闭浏览器连接。 */
+  private void end(String reason, CloseStatus status) {
+    if (outcome == null) {
+      outcome = reason;
+    }
+    closeBrowser(status);
   }
 
   /** 等待 Daemon 的 {@code WS_READY}；此前的任何数据帧都是协议错误。只在 metadata 就绪阶段有 deadline。 */
@@ -274,13 +318,14 @@ final class IdeBrowserStreamSession {
           pollPeer(Long.MAX_VALUE, pending == null ? POLL_TICK_MILLIS : 0L);
       if (frame != null) {
         if (!handleDaemonFrame(frame)) {
-          closeBrowser(CloseStatus.SERVER_ERROR);
+          end(outcome, CloseStatus.SERVER_ERROR);
           return;
         }
         continue;
       }
       if (peer.closed()) {
-        closeBrowser(CloseStatus.SERVER_ERROR);
+        // 原样转述 Daemon 给出的关闭码（code-server 关闭码或协议原因），缺失时才统一为 1011。
+        end("DAEMON_CLOSED", IdeStreamPeer.relayable(peer.remoteCloseStatus()));
         return;
       }
       long now = System.currentTimeMillis();
@@ -288,7 +333,7 @@ final class IdeBrowserStreamSession {
         nextGenerationCheck = now + GENERATION_RECHECK_MILLIS;
         if (!generationCurrent(deps.transport(), environmentId, session)) {
           // 租约失效/接管：以有限周期复核并真实关闭本流。
-          closeBrowser(CloseStatus.POLICY_VIOLATION);
+          end("GENERATION_CHANGED", CloseStatus.POLICY_VIOLATION);
           return;
         }
       }
@@ -296,21 +341,30 @@ final class IdeBrowserStreamSession {
     closeBrowser(CloseStatus.NORMAL);
   }
 
-  /** 处理一个 Daemon 入站帧；返回 false 表示协议错误需 fail-closed。 */
+  /** 处理一个 Daemon 入站帧；返回 false 表示需要 fail-closed，此时已记录结束原因。 */
   private boolean handleDaemonFrame(IdeStreamPeer.Inbound frame) {
     if (frame instanceof IdeStreamPeer.Inbound.Text text) {
       IdeStreamControlFrame control = relay.receiveText(text.json());
-      return !(control instanceof IdeStreamControlFrame.Error);
+      if (control instanceof IdeStreamControlFrame.Error) {
+        outcome = "DAEMON_ERROR";
+        return false;
+      }
+      return true;
     }
     IdeStreamBinaryFrame decoded =
         relay.receiveBinary(((IdeStreamPeer.Inbound.Binary) frame).frame());
     switch (decoded) {
       case IdeStreamBinaryFrame.WsSegment segment -> {
+        fromDaemonFrames++;
+        fromDaemonBytes += segment.bytes().length;
         boolean delivered = segment.text() ? sendTextPart(segment) : sendBinaryPart(segment);
         if (!delivered) {
+          if (outcome == null) {
+            outcome = "BROWSER_SEND_FAILED";
+          }
           return false;
         }
-        relay.ackFromDaemon(segment.bytes().length);
+        relay.acknowledge(segment);
         return true;
       }
       case IdeStreamBinaryFrame.Ack ignored -> {
@@ -318,9 +372,11 @@ final class IdeBrowserStreamSession {
         return true;
       }
       case IdeStreamBinaryFrame.HttpBody ignored -> {
+        outcome = "PROTOCOL_ERROR http body on a websocket stream";
         return false;
       }
       case IdeStreamBinaryFrame.HttpEnd ignored -> {
+        outcome = "PROTOCOL_ERROR http end on a websocket stream";
         return false;
       }
     }
@@ -345,7 +401,7 @@ final class IdeBrowserStreamSession {
       }
       if (segment.last() && input.hasRemaining()) {
         // 消息结束仍有不完整序列：非法 UTF-8。
-        closeBrowser(CloseStatus.BAD_DATA.withReason("invalid utf-8"));
+        end("INVALID_UTF8", CloseStatus.BAD_DATA.withReason("invalid utf-8"));
         return false;
       }
       textPending = new byte[input.remaining()];
@@ -353,7 +409,7 @@ final class IdeBrowserStreamSession {
       chars.flip();
       return sendBrowserText(chars.toString(), segment.last() && textPending.length == 0);
     } catch (CharacterCodingException error) {
-      closeBrowser(CloseStatus.BAD_DATA.withReason("invalid utf-8"));
+      end("INVALID_UTF8", CloseStatus.BAD_DATA.withReason("invalid utf-8"));
       return false;
     }
   }
@@ -373,6 +429,9 @@ final class IdeBrowserStreamSession {
         remote.sendText(text, last);
         return true;
       } catch (IOException | RuntimeException error) {
+        if (outcome == null) {
+          outcome = "BROWSER_SEND_FAILED " + error.getClass().getSimpleName();
+        }
         return false;
       }
     }
@@ -394,6 +453,9 @@ final class IdeBrowserStreamSession {
         remote.sendBinary(ByteBuffer.wrap(bytes), segment.last());
         return true;
       } catch (IOException | RuntimeException error) {
+        if (outcome == null) {
+          outcome = "BROWSER_SEND_FAILED " + error.getClass().getSimpleName();
+        }
         return false;
       }
     }
@@ -405,15 +467,20 @@ final class IdeBrowserStreamSession {
     int offset = pending.offset;
     boolean messageEnd = pending.frame.last();
     if (payload.length == 0) {
+      // 零长度分段同样按最小帧代价消耗 credit。
+      if (!relay.canSendToDaemon(0)) {
+        return pending;
+      }
       relay.sendWsSegment(pending.frame.text(), messageEnd, new byte[0]);
+      toDaemonFrames++;
       return null;
     }
     while (offset < payload.length) {
-      long credit = relay.sendableToDaemon();
-      if (credit <= 0L) {
+      int maxPayload = relay.maxPayloadSendableToDaemon();
+      if (maxPayload <= 0) {
         return new Pending(pending.frame, offset);
       }
-      int size = (int) Math.min(Math.min(payload.length - offset, credit), SEGMENT_BYTES);
+      int size = Math.min(payload.length - offset, maxPayload);
       size = trimToCodepointBoundary(pending.frame.text(), payload, offset, size);
       if (size <= 0) {
         // 当前 credit 只够切在码点中间：等待 Daemon ACK 释放更多 credit，绝不发出非法 UTF-8。
@@ -422,6 +489,8 @@ final class IdeBrowserStreamSession {
       byte[] chunk = Arrays.copyOfRange(payload, offset, offset + size);
       offset += size;
       relay.sendWsSegment(pending.frame.text(), messageEnd && offset >= payload.length, chunk);
+      toDaemonFrames++;
+      toDaemonBytes += size;
     }
     return null;
   }
@@ -504,6 +573,9 @@ final class IdeBrowserStreamSession {
     stopped.set(true);
     synchronized (browser) {
       if (browser.isOpen()) {
+        if (browserClose == null) {
+          browserClose = status;
+        }
         try {
           browser.close(status);
         } catch (IOException ignored) {

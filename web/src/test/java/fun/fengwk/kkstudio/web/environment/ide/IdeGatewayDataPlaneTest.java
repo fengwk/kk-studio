@@ -13,6 +13,7 @@ import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.web.socket.CloseStatus;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
@@ -828,6 +829,16 @@ class IdeGatewayDataPlaneTest {
     }
 
     @Override
+    public CloseStatus remoteCloseStatus() {
+      return null;
+    }
+
+    @Override
+    public void close(CloseStatus status) {
+      closed = true;
+    }
+
+    @Override
     public void close() {
       closed = true;
     }
@@ -890,6 +901,16 @@ class IdeGatewayDataPlaneTest {
     @Override
     public boolean closed() {
       return closed;
+    }
+
+    @Override
+    public CloseStatus remoteCloseStatus() {
+      return null;
+    }
+
+    @Override
+    public void close(CloseStatus status) {
+      closed = true;
     }
 
     @Override

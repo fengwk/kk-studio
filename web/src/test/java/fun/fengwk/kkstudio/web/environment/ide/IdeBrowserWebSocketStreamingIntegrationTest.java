@@ -30,6 +30,7 @@ import fun.fengwk.kkstudio.ide.protocol.IdeCommand;
 import fun.fengwk.kkstudio.ide.protocol.IdeHeader;
 import fun.fengwk.kkstudio.ide.protocol.IdeReply;
 import fun.fengwk.kkstudio.ide.protocol.IdeStreamControlFrame;
+import fun.fengwk.kkstudio.ide.protocol.IdeStreamCreditWindow;
 import fun.fengwk.kkstudio.ide.protocol.IdeStreamMode;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
@@ -409,12 +410,14 @@ class IdeBrowserWebSocketStreamingIntegrationTest extends WebPostgresTestSupport
         textSegments.add(payload);
         // echo：原样把分段回给浏览器，并 ACK 已消费字节。
         webSocket.send(ByteString.of(frame));
-        webSocket.send(ByteString.of(codec.encodeAck(payload.length)));
+        webSocket.send(
+            ByteString.of(codec.encodeAck(IdeStreamCreditWindow.frameCost(payload.length))));
       } else if (frame[0] == 5) {
         binaryFins.add(last);
         binarySegments.add(payload);
         webSocket.send(ByteString.of(frame));
-        webSocket.send(ByteString.of(codec.encodeAck(payload.length)));
+        webSocket.send(
+            ByteString.of(codec.encodeAck(IdeStreamCreditWindow.frameCost(payload.length))));
       }
     }
   }

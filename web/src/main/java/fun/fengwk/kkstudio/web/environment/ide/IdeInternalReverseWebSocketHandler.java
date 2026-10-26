@@ -36,6 +36,9 @@ public final class IdeInternalReverseWebSocketHandler extends AbstractWebSocketH
 
   private static final CloseStatus REJECTED = CloseStatus.POLICY_VIOLATION;
 
+  private static final CloseStatus FRAME_BUDGET_EXCEEDED =
+      CloseStatus.POLICY_VIOLATION.withReason("inbound frame budget exceeded");
+
   private final IdeStreamTicketService streamTickets;
   private final IdeStreamPairingRegistry<IdeStreamPeer> pairings;
   private final IdeCommandTransport transport;
@@ -79,7 +82,7 @@ public final class IdeInternalReverseWebSocketHandler extends AbstractWebSocketH
     }
     WebSocketIdeStreamPeer peer = new WebSocketIdeStreamPeer(session);
     if (!pairings.pair(ticket, peer)) {
-      peer.onTransportClosed();
+      peer.onTransportClosed(REJECTED);
       reject(session, "internal reverse exchange is no longer waiting");
       return;
     }
@@ -102,14 +105,16 @@ public final class IdeInternalReverseWebSocketHandler extends AbstractWebSocketH
 
   @Override
   public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
-    detach(session);
+    detach(session, status);
   }
 
   @Override
   public void handleTransportError(WebSocketSession session, Throwable exception) throws Exception {
-    log.debug(
-        "internal reverse transport error on {}: {}", session.getId(), exception.getMessage());
-    detach(session);
+    log.info("internal reverse transport error on {}: {}", session.getId(), exception.toString());
+    detach(
+        session,
+        CloseStatus.NO_CLOSE_FRAME.withReason(
+            "transport error: " + exception.getClass().getSimpleName()));
     if (session.isOpen()) {
       session.close(CloseStatus.SERVER_ERROR);
     }
@@ -125,16 +130,19 @@ public final class IdeInternalReverseWebSocketHandler extends AbstractWebSocketH
       return;
     }
     if (!peer.offer(frame)) {
-      // 超出有界入站预算：fail-closed 关闭连接，绝不无界缓冲。
-      detach(session);
-      session.close(CloseStatus.TOO_BIG_TO_PROCESS);
+      // 守约的对端不可能超出由 credit 推导的入站上界：这是协议错误，fail-closed 关闭连接，绝不无界缓冲。
+      log.warn(
+          "internal reverse stream {} exceeded the credit-derived inbound frame budget; closing",
+          session.getId());
+      detach(session, FRAME_BUDGET_EXCEEDED);
+      session.close(FRAME_BUDGET_EXCEEDED);
     }
   }
 
-  private void detach(WebSocketSession session) {
+  private void detach(WebSocketSession session, CloseStatus status) {
     WebSocketIdeStreamPeer peer = peers.remove(session.getId());
     if (peer != null) {
-      peer.onTransportClosed();
+      peer.onTransportClosed(status);
     }
   }
 

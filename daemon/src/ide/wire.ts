@@ -13,9 +13,14 @@
  * Binary frames:
  *   byte 1 + payload                       HTTP body chunk (payload <= 65536)
  *   byte 2                                 HTTP END / half close
- *   byte 3 + uint32 big endian             incremental ACK of consumed payload bytes
+ *   byte 3 + uint32 big endian             incremental ACK of consumed credit
  *   byte 4 + last(0|1) + payload           WS text fragment
  *   byte 5 + last(0|1) + payload           WS binary fragment
+ *
+ * Every data frame (HTTP body chunk or WS fragment) consumes `frameCost(payload length)` credit:
+ * its payload length, but at least MIN_FRAME_CREDIT, so zero-length fragments cost credit too. The
+ * window therefore bounds frames in flight as well as bytes, and a receiver can size its queue
+ * from the credit alone. An ACK always covers at least one frame's minimum cost.
  *
  * Unknown frame types, malformed ACKs and out-of-window traffic fail closed.
  */
@@ -23,6 +28,10 @@
 export const INITIAL_CREDIT = 262_144
 export const MAX_PAYLOAD = 65_536
 export const MAX_TEXT_FRAME_BYTES = 16 * 1024
+/** Minimum credit consumed by one data frame, including a zero-length WebSocket fragment. */
+export const MIN_FRAME_CREDIT = 512
+/** Upper bound of data frames in flight within one credit window. */
+export const MAX_IN_FLIGHT_FRAMES = INITIAL_CREDIT / MIN_FRAME_CREDIT
 
 export const FRAME_HTTP_BODY = 1
 export const FRAME_HTTP_END = 2
@@ -217,19 +226,28 @@ export function encodeTextFrame(frame: TextFrame): string {
   return JSON.stringify(frame)
 }
 
+/** Credit consumed by one data frame carrying `payloadLength` bytes. */
+export function frameCost(payloadLength: number): number {
+  if (!Number.isInteger(payloadLength) || payloadLength < 0) {
+    throw new WireError('invalid frame payload length')
+  }
+  return Math.max(payloadLength, MIN_FRAME_CREDIT)
+}
+
 /**
- * Tracks how many payload bytes were reserved but not yet acknowledged.
+ * Tracks how much data frame credit was reserved but not yet acknowledged.
  *
- * Used in both directions; `reserve` guards against window overrun, `ack` releases
- * capacity and wakes blocked senders. `waitFor` accepts a signal so a cancelled exchange
- * cannot strand a sender that is waiting for credit.
+ * Used in both directions; `reserveFrame` guards against window overrun, `ack` releases
+ * capacity and wakes blocked senders. `waitForFrame` accepts a signal so a cancelled exchange
+ * cannot strand a sender that is waiting for credit. Reservations and waits are expressed per
+ * data frame, so a caller can never reserve a raw payload length below the frame cost.
  */
 export class CreditWindow {
   private unacked = 0
   private readonly waiters = new Set<() => void>()
 
   constructor(readonly limit: number = INITIAL_CREDIT) {
-    if (!Number.isInteger(limit) || limit <= 0) {
+    if (!Number.isInteger(limit) || limit < MIN_FRAME_CREDIT) {
       throw new WireError('invalid credit window size')
     }
   }
@@ -242,24 +260,25 @@ export class CreditWindow {
     return this.unacked
   }
 
-  reserve(bytes: number): void {
-    if (!Number.isInteger(bytes) || bytes < 0) {
-      throw new WireError('invalid credit reservation')
-    }
-    if (bytes > this.available) {
+  /** Reserves the credit of one data frame and returns its cost; fails when the frame does not fit. */
+  reserveFrame(payloadLength: number): number {
+    const cost = frameCost(payloadLength)
+    if (cost > this.available) {
       throw new WireError('credit window exceeded')
     }
-    this.unacked += bytes
+    this.unacked += cost
+    return cost
   }
 
-  ack(bytes: number): void {
-    if (!Number.isInteger(bytes) || bytes < 0) {
-      throw new WireError('invalid ack amount')
+  /** Releases acknowledged credit; an ACK must cover at least one frame's minimum cost. */
+  ack(credit: number): void {
+    if (!Number.isInteger(credit) || credit < MIN_FRAME_CREDIT) {
+      throw new WireError('ack must cover at least one frame')
     }
-    if (bytes > this.unacked) {
-      throw new WireError('ack exceeds unacknowledged payload')
+    if (credit > this.unacked) {
+      throw new WireError('ack exceeds unacknowledged credit')
     }
-    this.unacked -= bytes
+    this.unacked -= credit
     if (this.waiters.size > 0 && this.available > 0) {
       const waiters = [...this.waiters]
       this.waiters.clear()
@@ -269,11 +288,13 @@ export class CreditWindow {
     }
   }
 
-  async waitFor(bytes: number, signal?: AbortSignal): Promise<void> {
-    if (!Number.isInteger(bytes) || bytes < 0 || bytes > this.limit) {
+  /** Waits until one data frame carrying `payloadLength` bytes fits into the window. */
+  async waitForFrame(payloadLength: number, signal?: AbortSignal): Promise<void> {
+    const cost = frameCost(payloadLength)
+    if (cost > this.limit) {
       throw new WireError('invalid credit wait')
     }
-    while (this.available < bytes) {
+    while (this.available < cost) {
       if (signal?.aborted) {
         throw creditAbortError()
       }

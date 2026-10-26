@@ -184,17 +184,25 @@ export async function createIdeService(config: DaemonConfig, processes: ProcessS
     const headers = validateHeaders(command.headers ?? [])
     const session = await manager.ensureStarted(signal)
     const request: StreamRequest = { mode: command.mode, method: command.method ?? 'GET', path, headers }
-    await openStreamExchange({
-      streamUrl,
-      request,
-      upstream: {
-        host: session.host,
-        port: session.port,
-        cookie: session.cookie,
-        protocols: extractProtocols(headers),
-      },
-      signal,
-    })
+    try {
+      await openStreamExchange({
+        streamUrl,
+        request,
+        upstream: {
+          host: session.host,
+          port: session.port,
+          cookie: session.cookie,
+          protocols: extractProtocols(headers),
+        },
+        signal,
+      })
+    } catch (error) {
+      // A cancelled exchange is an ordinary end; any other failure leaves one safe line on the host.
+      if (!(error instanceof Error && error.name === 'AbortError')) {
+        process.stderr.write(`daemon ide ${command.mode.toLowerCase()} stream failed: ${safeMessage(error)}\n`)
+      }
+      throw error
+    }
     return { ok: true }
   }
 

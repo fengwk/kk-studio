@@ -8,10 +8,11 @@ public final class DaemonProtocol {
    *
    * <p>本版本只有固定的五个 envelope 字段（{@code protocolVersion}、{@code messageType}、nullable {@code
    * environmentId}、nullable {@code invocationId}、{@code payload}）、HELLO 携带的 {@code
-   * daemonInstanceId} 与 manifest {@code daemonVersion} 上报、 以及强制协商的 {@code
-   * permessage-deflate}。其他版本帧一律拒绝，不做双协议 fallback。
+   * daemonInstanceId} 与 manifest {@code daemonVersion} 上报、 以及强制协商的 {@code permessage-deflate}。IDE
+   * 反向数据流的每个数据帧至少消耗一个最小 credit（见 {@code IdeStreamCreditWindow}），同实例重连用不终止执行的 {@code RECOVER}
+   * 取回在途调用。其他版本帧一律拒绝，不做双协议 fallback。
    */
-  public static final int VERSION = 5;
+  public static final int VERSION = 6;
 
   /**
    * ERROR payload 的可选 {@code code}：目标 Environment 当前已有活跃连接租约，daemon 应按配置退避重连 （同 registration token

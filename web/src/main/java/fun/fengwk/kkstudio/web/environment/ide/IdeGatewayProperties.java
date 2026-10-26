@@ -28,7 +28,7 @@ public class IdeGatewayProperties {
   /** 等待 Daemon 反向连接的超时；超时即关闭浏览器侧并放弃在途 OPEN_STREAM。 */
   private Duration pairingTimeout = DEFAULT_PAIRING_TIMEOUT;
 
-  /** 单条浏览器 exchange 的整体上限（含请求体与响应体转发）。 */
+  /** 单条浏览器 exchange 等待首个响应、以及传输中两次进展之间的最长空闲；持续有进展的长传输（大文件下载、慢速链路）不受整体时长限制。 */
   private Duration requestTimeout = DEFAULT_REQUEST_TIMEOUT;
 
   /** 浏览器 IDE 会话 cookie 有效期（path 隔离、HttpOnly）。 */

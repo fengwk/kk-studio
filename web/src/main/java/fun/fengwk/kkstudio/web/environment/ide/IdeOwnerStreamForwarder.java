@@ -35,6 +35,12 @@ import java.util.concurrent.atomic.AtomicReference;
 @Component
 public final class IdeOwnerStreamForwarder {
 
+  private static final CloseStatus OWNER_UNREACHABLE =
+      CloseStatus.SERVER_ERROR.withReason("ide owner unreachable");
+
+  private static final CloseStatus FRAME_BUDGET_EXCEEDED =
+      CloseStatus.POLICY_VIOLATION.withReason("inbound frame budget exceeded");
+
   private final IdeClusterClient clusterInternalClient;
   private final WebSocketClient webSocketClient;
 
@@ -62,8 +68,8 @@ public final class IdeOwnerStreamForwarder {
     try {
       target = internalWebSocketUri(owner.internalUrl(), canonicalPath);
     } catch (IllegalArgumentException error) {
-      log.debug("cannot forward ide reverse stream: {}", error.getMessage());
-      nodePeer.close();
+      log.info("cannot forward ide reverse stream to the owner: {}", error.getMessage());
+      nodePeer.close(OWNER_UNREACHABLE);
       return;
     }
     AtomicReference<IdeStreamPeer> ownerPeer = new AtomicReference<>();
@@ -94,12 +100,16 @@ public final class IdeOwnerStreamForwarder {
 
               @Override
               public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
-                detach(ownerPeer);
+                detach(ownerPeer, status);
               }
 
               @Override
               public void handleTransportError(WebSocketSession session, Throwable exception) {
-                detach(ownerPeer);
+                log.info("ide reverse forward transport error: {}", exception.toString());
+                detach(
+                    ownerPeer,
+                    CloseStatus.NO_CLOSE_FRAME.withReason(
+                        "transport error: " + exception.getClass().getSimpleName()));
               }
             },
             headers,
@@ -107,8 +117,8 @@ public final class IdeOwnerStreamForwarder {
     pending.whenComplete(
         (session, error) -> {
           if (error != null) {
-            log.debug("ide reverse forward to owner failed: {}", error.getMessage());
-            nodePeer.close();
+            log.info("ide reverse forward to owner failed: {}", error.toString());
+            nodePeer.close(OWNER_UNREACHABLE);
           }
         });
   }
@@ -116,15 +126,16 @@ public final class IdeOwnerStreamForwarder {
   private static void offer(AtomicReference<IdeStreamPeer> ownerPeer, IdeStreamPeer.Inbound frame) {
     IdeStreamPeer peer = ownerPeer.get();
     if (peer instanceof WebSocketIdeStreamPeer webSocketPeer && !webSocketPeer.offer(frame)) {
-      // 超出有界入站预算：fail-closed 关闭连接，绝不无界缓冲。
-      webSocketPeer.close();
+      // 守约的对端不可能超出由 credit 推导的入站上界：这是协议错误，fail-closed 关闭连接，绝不无界缓冲。
+      log.warn("owner side of a forwarded ide stream exceeded the inbound frame budget; closing");
+      webSocketPeer.close(FRAME_BUDGET_EXCEEDED);
     }
   }
 
-  private static void detach(AtomicReference<IdeStreamPeer> ownerPeer) {
+  private static void detach(AtomicReference<IdeStreamPeer> ownerPeer, CloseStatus status) {
     IdeStreamPeer peer = ownerPeer.get();
     if (peer instanceof WebSocketIdeStreamPeer webSocketPeer) {
-      webSocketPeer.onTransportClosed();
+      webSocketPeer.onTransportClosed(status);
     }
   }
 

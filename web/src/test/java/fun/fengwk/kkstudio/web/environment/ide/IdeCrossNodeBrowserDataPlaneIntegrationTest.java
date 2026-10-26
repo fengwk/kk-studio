@@ -1209,14 +1209,14 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
           }
           byte[] payload = new byte[size];
           System.arraycopy(chunk, 0, payload, 0, size);
-          while (!window.canSend(size)) {
+          while (!window.canSendFrame(size)) {
             byte[] ack = inbound.poll(30, TimeUnit.SECONDS);
             if (ack == null || ack[0] != 3) {
               return;
             }
             window.onAck(unsignedInt(ack));
           }
-          window.onSend(size);
+          window.onSendFrame(size);
           socket.send(ByteString.of(codec.encodeHttpBody(payload)));
           sent += size;
           if (sent >= disconnectAfterBytes) {
@@ -1345,7 +1345,8 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
               textFins.add(last);
             }
             sawMessage.countDown();
-            current.send(ByteString.of(codec.encodeAck(payload.length)));
+            current.send(
+                ByteString.of(codec.encodeAck(IdeStreamCreditWindow.frameCost(payload.length))));
             if (echo) {
               current.send(ByteString.of(frame));
             }
@@ -1391,7 +1392,7 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
     private void awaitCredit(int size) throws InterruptedException {
       long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(60);
       synchronized (creditLock) {
-        while (!sendCredit.canSend(size)) {
+        while (!sendCredit.canSendFrame(size)) {
           if (failure.get() != null || closed.getCount() == 0) {
             throw new IllegalStateException(
                 "daemon reverse connection closed while waiting credit");
@@ -1402,7 +1403,7 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
           }
           TimeUnit.NANOSECONDS.timedWait(creditLock, remaining);
         }
-        sendCredit.onSend(size);
+        sendCredit.onSendFrame(size);
       }
     }
 

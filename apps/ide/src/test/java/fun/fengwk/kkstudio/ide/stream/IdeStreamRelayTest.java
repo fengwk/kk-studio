@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocolException;
 import fun.fengwk.kkstudio.ide.protocol.DaemonIdeStreamCodec;
 import fun.fengwk.kkstudio.ide.protocol.IdeStreamBinaryFrame;
 import fun.fengwk.kkstudio.ide.protocol.IdeStreamControlFrame;
+import fun.fengwk.kkstudio.ide.protocol.IdeStreamCreditWindow;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -104,37 +105,78 @@ class IdeStreamRelayTest {
   void failsClosedWhenDaemonExceedsReceiveCredit() {
     IdeStreamRelay relay = new IdeStreamRelay(new RecordingSink());
     byte[] frame = CODEC.encodeHttpBody(new byte[65536]);
+    List<IdeStreamBinaryFrame> received = new ArrayList<>();
     for (int i = 0; i < 4; i++) {
-      relay.receiveBinary(frame);
+      received.add(relay.receiveBinary(frame));
     }
     assertThrows(DaemonProtocolException.class, () -> relay.receiveBinary(frame));
 
-    relay.ackFromDaemon(4 * 65536);
+    received.forEach(relay::acknowledge);
     relay.receiveBinary(frame);
+  }
+
+  @Test
+  void daemonSmallFrameFloodBeyondTheFrameBudgetFailsClosed() {
+    // 测试意图：小帧同样按最小 credit 计价，Daemon 在窗口内至多 512 个在途数据帧；超出即协议错误，接收端无需另设会误伤合法流量的帧数上限。
+    IdeStreamRelay relay = new IdeStreamRelay(new RecordingSink());
+    byte[] tiny = CODEC.encodeWsSegment(false, true, new byte[1]);
+    byte[] empty = CODEC.encodeWsSegment(false, true, new byte[0]);
+    for (int i = 0; i < IdeStreamCreditWindow.MAX_IN_FLIGHT_FRAMES; i++) {
+      relay.receiveBinary(i % 2 == 0 ? tiny : empty);
+    }
+    assertThrows(DaemonProtocolException.class, () -> relay.receiveBinary(empty));
   }
 
   @Test
   void ackReleasesDaemonSendWindowAndEmitsAckFrame() {
     RecordingSink sink = new RecordingSink();
     IdeStreamRelay relay = new IdeStreamRelay(sink);
-    relay.receiveBinary(CODEC.encodeHttpBody(new byte[1000]));
+    IdeStreamBinaryFrame body = relay.receiveBinary(CODEC.encodeHttpBody(new byte[1000]));
+    IdeStreamBinaryFrame small = relay.receiveBinary(CODEC.encodeHttpBody(new byte[10]));
     int binariesBefore = sink.binaries.size();
-    relay.ackFromDaemon(1000);
-    // ACK 走独立窄出口：不得混入数据帧（sendBinary）序列。
+    relay.acknowledge(body);
+    relay.acknowledge(small);
+    // ACK 走独立窄出口：不得混入数据帧（sendBinary）序列；小帧按最小 credit 确认。
     assertEquals(binariesBefore, sink.binaries.size());
-    byte[] last = sink.acks.get(sink.acks.size() - 1);
-    assertEquals(3, last[0]);
-    assertEquals(1000, ((IdeStreamBinaryFrame.Ack) CODEC.decodeBinary(last)).byteCount());
+    assertEquals(
+        1000, ((IdeStreamBinaryFrame.Ack) CODEC.decodeBinary(sink.acks.get(0))).byteCount());
+    assertEquals(
+        IdeStreamCreditWindow.MIN_FRAME_CREDIT,
+        ((IdeStreamBinaryFrame.Ack) CODEC.decodeBinary(sink.acks.get(1))).byteCount());
   }
 
-  /** 非法 ACK（负数/超出未确认发送量）必须 fail-closed，而不是被静默忽略或发出。 */
+  /** 非法 ACK（无未确认数据帧、非数据帧、不足一帧）必须 fail-closed，而不是被静默忽略或发出。 */
   @Test
   void rejectsInvalidAckBookkeeping() {
     RecordingSink sink = new RecordingSink();
     IdeStreamRelay relay = new IdeStreamRelay(sink);
-    assertThrows(DaemonProtocolException.class, () -> relay.ackFromDaemon(-1));
-    assertThrows(DaemonProtocolException.class, () -> relay.ackFromDaemon(1));
+    assertThrows(
+        DaemonProtocolException.class,
+        () -> relay.acknowledge(new IdeStreamBinaryFrame.HttpBody(new byte[1])));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> relay.acknowledge(new IdeStreamBinaryFrame.HttpEnd()));
     assertTrue(sink.acks.isEmpty());
+
+    relay.sendHttpBody(new byte[1]);
+    assertThrows(DaemonProtocolException.class, () -> relay.receiveBinary(CODEC.encodeAck(511)));
+  }
+
+  @Test
+  void sendableToDaemonAccountsTheMinimumFrameCredit() {
+    IdeStreamRelay relay = new IdeStreamRelay(new RecordingSink());
+    assertEquals(DaemonIdeStreamCodec.MAX_PAYLOAD_BYTES, relay.maxPayloadSendableToDaemon());
+    for (int i = 0; i < IdeStreamCreditWindow.MAX_IN_FLIGHT_FRAMES; i++) {
+      relay.sendWsSegment(true, true, new byte[0]);
+    }
+    assertEquals(0, relay.maxPayloadSendableToDaemon());
+    assertFalse(relay.canSendToDaemon(0));
+    assertThrows(DaemonProtocolException.class, () -> relay.sendWsSegment(true, true, new byte[0]));
+
+    relay.receiveBinary(CODEC.encodeAck(2 * IdeStreamCreditWindow.MIN_FRAME_CREDIT));
+    assertEquals(2 * IdeStreamCreditWindow.MIN_FRAME_CREDIT, relay.maxPayloadSendableToDaemon());
+    assertTrue(relay.canSendToDaemon(1024));
+    assertFalse(relay.canSendToDaemon(1025));
   }
 
   @Test

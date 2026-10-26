@@ -7,13 +7,15 @@ import fun.fengwk.kkstudio.ide.protocol.IdeStreamControlFrame;
 import fun.fengwk.kkstudio.ide.protocol.IdeStreamCreditWindow;
 
 import java.util.Objects;
+import java.util.OptionalInt;
 
 /**
  * 反向数据面的纯状态机：一条 HTTP exchange / IDE WebSocket 对应一侧（Server Gateway）的帧收发与 credit 裁决。
  *
- * <p>双向各有独立 credit 窗口：{@code toDaemon} 限制本端可发送但未获 Daemon ACK 的字节，{@code fromDaemon} 限制本端已接收 但未向
- * Daemon ACK 的字节。任何超窗发送、超窗/负数 ACK、未知帧或已关闭后的操作都 fail-closed（抛 {@link
- * DaemonProtocolException}），保证无无界排队、无「先 ACK 后缓冲」。字节只在此处流转，绝不进入 SQL/PG。
+ * <p>双向各有独立 credit 窗口：{@code toDaemon} 限制本端已发送但未获 Daemon ACK 的数据帧，{@code fromDaemon} 限制本端已接收 但未向
+ * Daemon ACK 的数据帧；每帧按 {@link IdeStreamCreditWindow#frameCost(int)} 计价。任何超窗发送、超窗/不足一帧/负数
+ * ACK、未知帧或已关闭后的操作都 fail-closed（抛 {@link DaemonProtocolException}），保证无无界排队、无「先 ACK
+ * 后缓冲」。字节只在此处流转，绝不进入 SQL/PG。
  *
  * <p>本类不做重排：HTTP body/END 与 WS 分段按线序返回，由适配层按 FIN 重组为单条 IDE 消息；它也不持有真实传输，所有出站帧经 {@link Sink} 交给适配层。
  */
@@ -44,14 +46,14 @@ public final class IdeStreamRelay {
     this.sink = Objects.requireNonNull(sink, "sink");
   }
 
-  /** 本端仍可发送给 Daemon 的字节数（适配层据此等待 credit，而非无界排队）。 */
-  public long sendableToDaemon() {
-    return toDaemon.available();
+  /** 现在能否向 Daemon 发送一个载荷为 {@code payloadBytes} 的数据帧（适配层据此等待 credit，而非无界排队）。 */
+  public boolean canSendToDaemon(int payloadBytes) {
+    return toDaemon.canSendFrame(payloadBytes);
   }
 
-  /** 本端仍可接收但尚未 ACK 的字节数。 */
-  public long receivableFromDaemon() {
-    return fromDaemon.available();
+  /** 现在可向 Daemon 发送的单帧最大载荷；剩余 credit 不足一个最小帧时为 0，适配层应等待 ACK。 */
+  public int maxPayloadSendableToDaemon() {
+    return (int) Math.min(toDaemon.maxFramePayload(), DaemonIdeStreamCodec.MAX_PAYLOAD_BYTES);
   }
 
   public boolean isClosed() {
@@ -66,7 +68,7 @@ public final class IdeStreamRelay {
       throw new DaemonProtocolException(
           "http body chunk exceeds " + DaemonIdeStreamCodec.MAX_PAYLOAD_BYTES);
     }
-    if (!toDaemon.onSend(payload.length)) {
+    if (!toDaemon.onSendFrame(payload.length)) {
       throw new DaemonProtocolException("http body chunk exceeds available send credit");
     }
     sink.sendBinary(codec.encodeHttpBody(payload));
@@ -81,8 +83,8 @@ public final class IdeStreamRelay {
   /**
    * 发送一个 WS 分段（≤65536，{@code fin} 标记本消息是否结束）。
    *
-   * <p>适配层把一条 WS 消息切成逐段调用本方法，并在每段前用 {@link #sendableToDaemon()} 等待 credit：本方法只裁决单段，超窗即 fail-closed
-   * 且不发送，因此不会像整条消息一次性发送那样在发送数段后才因 credit 不足产生「部分已发」的副作用。
+   * <p>适配层把一条 WS 消息切成逐段调用本方法，并在每段前用 {@link #maxPayloadSendableToDaemon()} 等待 credit：本方法只裁决单段，超窗即
+   * fail-closed 且不发送，因此不会像整条消息一次性发送那样在发送数段后才因 credit 不足产生「部分已发」的副作用。
    */
   public void sendWsSegment(boolean text, boolean fin, byte[] chunk) {
     requireOpen();
@@ -91,7 +93,7 @@ public final class IdeStreamRelay {
       throw new DaemonProtocolException(
           "ws segment exceeds " + DaemonIdeStreamCodec.MAX_PAYLOAD_BYTES + " bytes");
     }
-    if (!toDaemon.onSend(chunk.length)) {
+    if (!toDaemon.onSendFrame(chunk.length)) {
       throw new DaemonProtocolException("ws segment exceeds available send credit");
     }
     sink.sendBinary(codec.encodeWsSegment(text, fin, chunk));
@@ -104,8 +106,8 @@ public final class IdeStreamRelay {
   }
 
   /**
-   * 处理 Daemon 的二进制帧：HTTP body / WS 分段计入接收 credit（适配层消费后调 {@link #ackFromDaemon(int)}），ACK 释放发送
-   * credit。
+   * 处理 Daemon 的二进制帧：HTTP body / WS 分段计入接收 credit（适配层消费后调 {@link
+   * #acknowledge(IdeStreamBinaryFrame)}），ACK 释放发送 credit。
    */
   public IdeStreamBinaryFrame receiveBinary(byte[] frame) {
     requireOpen();
@@ -114,31 +116,34 @@ public final class IdeStreamRelay {
       toDaemon.onAck(ack.byteCount());
       return ack;
     }
-    int bytes =
-        switch (decoded) {
-          case IdeStreamBinaryFrame.HttpBody body -> body.bytes().length;
-          case IdeStreamBinaryFrame.WsSegment segment -> segment.bytes().length;
-          case IdeStreamBinaryFrame.HttpEnd ignored -> 0;
-          case IdeStreamBinaryFrame.Ack ignored -> 0;
-        };
-    if (bytes > 0 && !fromDaemon.onSend(bytes)) {
+    OptionalInt payloadBytes = dataPayloadBytes(decoded);
+    if (payloadBytes.isPresent() && !fromDaemon.onSendFrame(payloadBytes.getAsInt())) {
       throw new DaemonProtocolException("daemon exceeded the receive credit window");
     }
     return decoded;
   }
 
-  /** 本端已真实消费 {@code consumed} 字节：给 Daemon 回 ACK，释放其发送窗口不再超过初始 credit。 */
-  public void ackFromDaemon(int consumed) {
+  /** 本端已真实消费一个 Daemon 数据帧：按该帧的 credit 代价回 ACK，释放其发送窗口。 */
+  public void acknowledge(IdeStreamBinaryFrame consumed) {
     requireOpen();
-    if (consumed < 0) {
-      throw new DaemonProtocolException("ack byte count must not be negative");
-    }
-    if (consumed == 0) {
-      return;
-    }
-    fromDaemon.onAck(consumed);
+    int credit =
+        IdeStreamCreditWindow.frameCost(
+            dataPayloadBytes(consumed)
+                .orElseThrow(
+                    () -> new IllegalArgumentException("only data frames consume receive credit")));
+    fromDaemon.onAck(credit);
     // ACK 只是消费反馈，经独立窄出口发送，传输已断开时适配层可丢弃而不影响已交付的数据。
-    sink.sendAcknowledgement(codec.encodeAck(consumed));
+    sink.sendAcknowledgement(codec.encodeAck(credit));
+  }
+
+  /** 数据帧（HTTP body / WS 分段）的载荷字节数；END 与 ACK 不消耗 credit。 */
+  private static OptionalInt dataPayloadBytes(IdeStreamBinaryFrame frame) {
+    return switch (frame) {
+      case IdeStreamBinaryFrame.HttpBody body -> OptionalInt.of(body.bytes().length);
+      case IdeStreamBinaryFrame.WsSegment segment -> OptionalInt.of(segment.bytes().length);
+      case IdeStreamBinaryFrame.HttpEnd ignored -> OptionalInt.empty();
+      case IdeStreamBinaryFrame.Ack ignored -> OptionalInt.empty();
+    };
   }
 
   /** 关闭该流：此后任何收发都 fail-closed（取消/错误/关闭双向收尾后调用）。 */
