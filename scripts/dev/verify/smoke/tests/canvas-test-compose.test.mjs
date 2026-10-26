@@ -29,7 +29,13 @@ test('test intent: the default profile omits app so the resident stack stays min
 })
 
 test('test intent: the app profile waits only for the data plane and the HTTP mock', { skip: !dockerAvailable && 'docker compose is not available' }, () => {
-  const app = composeConfig('--profile', 'app').services.app
+  const config = composeConfig('--profile', 'app')
+  const app = config.services.app
   assert.deepEqual(new Set(Object.keys(app.depends_on ?? {})), new Set(['postgres', 'minio', 'minio-init', 'http-mock']))
-  assert.ok(!app.volumes || app.volumes.length === 0)
+  // Only the per-instance exit journal is persistent; source/build directories stay out of the app.
+  assert.deepEqual(app.volumes.map(({ type, source, target }) => ({ type, source, target })), [
+    { type: 'volume', source: 'execution-exits', target: '/app/execution-exits' },
+  ])
+  assert.ok(Object.hasOwn(config.volumes, 'execution-exits'))
+  assert.equal(app.environment.KK_STUDIO_EXIT_CONFIRMATION_DIRECTORY, '/app/execution-exits')
 })

@@ -105,6 +105,7 @@ class HarnessStoreContractTest {
               "deleteSession",
               "registerExecution",
               "confirmExecution",
+              "abandonExecution",
               "loadUnconfirmedExecutions",
               "findExecution",
               "now",

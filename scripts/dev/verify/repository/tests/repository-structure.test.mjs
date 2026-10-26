@@ -492,6 +492,7 @@ const CORE_STATE_ENUMS = [
       'MANUAL_COMPACTION_UNAVAILABLE',
       'THREAD_NAME_CONFLICT',
       'EXIT_UNCONFIRMED',
+      'EXIT_ABANDON_NOT_APPLICABLE',
     ],
   },
   {
@@ -598,6 +599,7 @@ const CORE_STATE_ENUMS = [
     path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ManualCompactionAvailability.java',
     enumName: 'DisabledReason',
     constants: [
+      'THREAD_STOPPED',
       'THREAD_BUSY',
       'OWNERSHIP_BARRIER',
       'NO_RESOLVED_CONTEXT',
