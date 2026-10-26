@@ -4,9 +4,9 @@
 
 ## 1. 一句话状态
 
-- 全部有效代码改动已收敛到唯一交接分支 `worktree/runtime-convergence`，代码基线为 `7ba0f167eff6eb07b78b24880970880fb1e964f5`，本文件在其后形成一个仅含文档的提交。
+- 全部有效代码改动已收敛到唯一交接分支 `handoff`，代码基线为 `7ba0f167eff6eb07b78b24880970880fb1e964f5`，本文件及其索引修正形成仅含文档的提交。
 - 实现与定向验证覆盖了主要路径；**内容 Review 未完成，最终候选全量 CI 未运行，`main`/`dev` 未合入，`v4.0.0` 未发布**。
-- 本地仅保留 `main`、`dev`、`worktree/runtime-convergence` 三个分支；所有开发 workspace 已释放，记录归档在 `.workspace/.archives/`。
+- 本地仅保留 `main`、`dev`、`handoff` 三个分支；所有开发 workspace 已释放，记录归档在 `.workspace/.archives/`。
 - 没有推送、发布、部署、生产数据库写入或新的真实模型请求。24 次有界模型探测已封账，hosted 探测 SKIPPED。
 
 ## 2. 接手前必读
@@ -30,7 +30,7 @@
 
 - 只允许普通提交；禁止 `--amend`、`rebase`、直接向 `main`/`dev` 提交。
 - 一个 worktree 同一时刻只有一个写入者；接手前确认没有残留构建或测试进程。
-- 交接分支是 `worktree/runtime-convergence`。根仓库当前检出 `dev`，不要在根工作区提交。
+- 交接分支是 `handoff`。根仓库当前检出 `dev`，不要在根工作区提交。
 - 释放/归档使用 `git-workspace-cli`；不要手工删除仍被引用的 worktree 或分支。
 
 ### 3.3 生产、发布与探测
@@ -58,22 +58,23 @@
 | 项目 | 值 |
 | --- | --- |
 | 仓库 | `git rev-parse --show-toplevel` 返回的根目录 |
-| 交接分支 | `worktree/runtime-convergence` |
+| 交接分支 | `handoff` |
 | 代码基线 | `7ba0f167eff6eb07b78b24880970880fb1e964f5` |
 | 基线 | `a300679d9f068c4c29ce287cdc62bec0752cf84a` |
 | 提交数 | 基线到代码基线 161 个提交 |
 | 代码净差异 | 362 路径，+18948/-3249，35009 行 diff |
-| 本地保留分支 | `main`、`dev`、`worktree/runtime-convergence` |
+| 本地保留分支 | `main`、`dev`、`handoff` |
 | `main` / `dev` | `a300679d9f068c4c29ce287cdc62bec0752cf84a` |
 | 版本 | 根 POM `4.0.0`；尚未发布，尚未打 tag |
 | 全量 CI | `7ba0`/本文件提交均未运行；最近成功 CI 只覆盖 `925c334098182eda7abdb9da55df8765977ed8ee` |
 
 本文件提交后：
 
-- `git rev-parse worktree/runtime-convergence` 是新的交接 HEAD。
+- `git rev-parse handoff` 是新的交接 HEAD。
 - 初始检查时，`git diff --stat 7ba0..HEAD` 应只包含 `HANDOFF.md`。
 - `git diff --check 7ba0..HEAD` 应为空。
-- 36 个已释放 workspace 的分支都已删除；唯一未合入的红色测试提交 `26c5b77aaf832e94ade6fb2fed2026df9cb4b1a6` 已保存为 bundle（见第 12 节），分支已删除。
+- 37 个非交接 workspace 已释放：其中 36 个已合并分支随释放删除；唯一未合入的红色测试提交 `26c5b77aaf832e94ade6fb2fed2026df9cb4b1a6` 已保存为 bundle（见第 12 节），其分支也已删除。
+- 远程跟踪引用仍是 `origin/worktree/runtime-convergence`；本地改名未推送，也未创建 `origin/handoff`。后续推送需单独授权。
 
 ### 4.1 重新创建工作区
 
@@ -81,7 +82,7 @@
 
 ```sh
 mkdir -p .workspace/runtime-convergence
-git worktree add .workspace/runtime-convergence/worktree worktree/runtime-convergence
+git worktree add .workspace/runtime-convergence/worktree handoff
 ```
 
 然后确认：
@@ -317,7 +318,7 @@ git diff --check
 ```sh
 gh workflow run docker-publish.yml \
   --repo fengwk/kk-studio \
-  --ref worktree/runtime-convergence \
+  --ref handoff \
   -f validate_only=true
 
 gh run list --repo fengwk/kk-studio --workflow=docker-publish.yml --limit 3
@@ -350,11 +351,11 @@ gh run list --repo fengwk/kk-studio --workflow=docker-publish.yml --limit 3
 
 ## 12. Workspace 与归档索引
 
-所有非交接 workspace 已在 2026-10-26 释放；记录在 `.workspace/.archives/<archive>/records/`。原 workspace 自身的 `records/` 下的文件，归档后位于 `<archive>/records/records/`（CLI 保留目录名）。交接 workspace 在本文件提交后释放，归档名形如 `<timestamp>-runtime-convergence`。
+所有非交接 workspace 已在 2026-10-26 释放；记录在 `.workspace/.archives/<archive>/records/`。原 workspace 自身的 `records/` 下的文件，归档后位于 `<archive>/records/records/`（CLI 保留目录名）。交接 workspace 已在本文档首次提交后释放为 `20261026-033430-028039Z-runtime-convergence`。
 
 | Workspace | HEAD | 用途 | 归档目录（`.workspace/.archives/` 下） |
 | --- | --- | --- | --- |
-| runtime-convergence | `7ba0f167e` + 本文件提交 | 唯一交接分支、集成、最终材料 | 释放后查找 `*-runtime-convergence` |
+| runtime-convergence | `7ba0f167e` + 本文档提交 | 唯一交接分支、集成、最终材料 | `20261026-033430-028039Z-runtime-convergence` |
 | ci-web-reset | `b438fa286` | CI 测试库 reset / Flyway 46 | `20261026-032755-030191Z-ci-web-reset` |
 | daemon-install-ux | `c709e08b8` | 安装器 UX/PTY/docs | `20261026-032755-308986Z-daemon-install-ux` |
 | ide-lightweight | `e8998c127` | IDE 原生默认值 | `20261026-032755-553409Z-ide-lightweight` |
@@ -395,6 +396,7 @@ gh run list --repo fengwk/kk-studio --workflow=docker-publish.yml --limit 3
 
 特别保留：
 
+- 交接 workspace 归档：`.workspace/.archives/20261026-033430-028039Z-runtime-convergence`；全量 diff 在 `records/evidence/final-net-7ba0f167e/`，其 `net-a300679d9-to-7ba0f167e.diff` SHA256 为 `ac3f3375d25ec88a4f209edb2aae50bb23be0c20f4ef3fc608f29e44fa5ab73a`。
 - 红测分支 bundle：`.workspace/.archives/20261026-032828-867851Z-review-stop-owner-compaction-red/records/records/red-branch-26c5b77.bundle`
   - SHA256 `f9a69fb60d59555891dbd366aa79ccc106515e24934604a155753d31d650ca80`
   - 可恢复：`git worktree add -b recover-red /tmp/recover-red <bundle>`（先 `git bundle verify`）。
@@ -408,14 +410,14 @@ cd "$(git rev-parse --show-toplevel)"
 git branch --format='%(refname:short)'
 git worktree list
 git status --short
-git log --oneline --decorate -5 worktree/runtime-convergence
-git diff --stat 7ba0f167eff6eb07b78b24880970880fb1e964f5..worktree/runtime-convergence
+git log --oneline --decorate -5 handoff
+git diff --stat 7ba0f167eff6eb07b78b24880970880fb1e964f5..handoff
 ps -eo pid,args | grep -E '\.workspace/|mvn|surefire|playwright' | grep -v grep
 ```
 
 预期：
 
-- 本地分支只有 `main`、`dev`、`worktree/runtime-convergence`。
+- 本地分支只有 `main`、`dev`、`handoff`。
 - 只有根工作区；交接 workspace 需要按 4.1 重新创建。
 - 初始 `git diff --stat 7ba0..HEAD` 只显示 `HANDOFF.md`。
 - 根仓库 `dev` clean；不要在此提交。
@@ -427,7 +429,7 @@ ps -eo pid,args | grep -E '\.workspace/|mvn|surefire|playwright' | grep -v grep
 
 - 将全部有效改动收敛到一个交接分支。
 - 在分支中提交本交接文档。
-- 释放所有开发 workspace，仅保留 `main`、`dev`、`worktree/runtime-convergence` 三个本地分支。
+- 释放所有开发 workspace，仅保留 `main`、`dev`、`handoff` 三个本地分支。
 
 尚未授权、必须再次确认：
 
