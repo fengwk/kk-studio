@@ -95,4 +95,17 @@ describe('ModelPricingEditor source controls', () => {
     expect(JSON.parse(screen.getByTestId('pricing-json').textContent!).overrides[0].rates)
       .not.toHaveProperty('cacheWriteByTtl')
   })
+
+  it('labels every condition in the add menu with its translated name', () => {
+    // 测试意图：添加菜单的选项必须与条件块标题共用已定义的 i18n key，否则会显示原始 key。
+    setLocale('en-US')
+    const initial = pricing()
+    initial.overrides[0]!.when = {}
+    render(<PricingHarness initial={initial} />)
+    openFirstRule()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add condition' }))
+    const labels = screen.getAllByRole('option').map((option) => option.textContent)
+    expect(labels).toEqual(['Context tokens', 'Service tier', 'Date', 'Time', 'All of', 'Any of', 'Not'])
+  })
 })

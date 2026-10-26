@@ -484,6 +484,17 @@ function FactorEditor({
 
 type ConditionKey = 'context' | 'serviceTier' | 'date' | 'time' | 'all' | 'any' | 'not'
 
+/** 每种条件的显示名：添加菜单与已添加的条件块使用同一组 i18n key。 */
+const CONDITION_LABELS: Record<ConditionKey, string> = {
+  context: 'ai.catalog.form.conditionContext',
+  serviceTier: 'ai.catalog.form.conditionServiceTier',
+  date: 'ai.catalog.form.conditionDate',
+  time: 'ai.catalog.form.conditionTime',
+  all: 'ai.catalog.form.condition.all',
+  any: 'ai.catalog.form.condition.any',
+  not: 'ai.catalog.form.condition.not',
+}
+
 /** 时间条件的最小合法默认值：全天使用 wire 规定的 00:00-24:00。 */
 const ALL_DAY_TIME = { start: '00:00', end: '24:00', timezone: 'UTC' } as const
 
@@ -699,7 +710,7 @@ export function ConditionEditor({
             placeholder={t('ai.catalog.form.addCondition')}
             options={available.map((key) => ({
               value: key,
-              label: t(`ai.catalog.form.condition.${key}`),
+              label: t(CONDITION_LABELS[key]),
             }))}
             onChange={add}
           />
