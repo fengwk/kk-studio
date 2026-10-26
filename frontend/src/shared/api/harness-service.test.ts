@@ -210,4 +210,20 @@ describe('harnessService', () => {
       body,
     )
   })
+
+  /**
+   * 测试意图：放弃等待未确认执行使用 POST /threads/{threadId}/executions/{executionId}/abandon，
+   * 两个路径参数都必须转义，body 只含 exact expectedVersion。
+   */
+  it('abandons one unconfirmed execution via POST .../executions/{executionId}/abandon', async () => {
+    const http = createClient()
+    const service = createHarnessService(http)
+
+    await service.abandonExecution('thread /1', 'execution /2', { expectedVersion: '9' })
+
+    expect(http.post).toHaveBeenCalledWith(
+      '/threads/thread%20%2F1/executions/execution%20%2F2/abandon',
+      { expectedVersion: '9' },
+    )
+  })
 })

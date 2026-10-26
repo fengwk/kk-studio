@@ -243,6 +243,7 @@ export function usePaneAcceptance(options: PaneAcceptanceOptions) {
       modelAttemptFailures: [],
       manualCompaction: { available: false, disabledReason: null },
       stopReceipts: [],
+      unconfirmedExecutions: [],
     })
   }
 

@@ -11,6 +11,7 @@ import {
   type ResourceBlobUrls,
 } from '@/features/chat/runtime/thread-panel/messages/ResourceBlobUrlContext'
 import { useBoundThreadPanelLabels } from '@/features/chat/runtime/useBoundThreadPanelViews'
+import { UnconfirmedExecutionsPanel } from '@/features/chat/runtime/UnconfirmedExecutionsPanel'
 import type { ThreadProjection } from '@/features/chat/runtime/useThreadProjection'
 import { storageService } from '@/shared/api/storage-service'
 import type { EnvironmentStatusIdentity } from '@/features/chat/runtime/thread-panel/thread-status-format'
@@ -42,6 +43,8 @@ export interface ThreadPaneActivityInput {
  * 该组件只消费传入的投影，不查询、不订阅、也不挂载草稿/上传/人工执行 Hook，
  * 因此同一组件既是根面板的展示层，也是只读子代理视图的全部实现；两者的差别
  * 只在于调用方是否传入根控制区（`RootThreadControlArea`）作为 `controls`。
+ * 未确认退出事实的“放弃等待”是唯一维护动作：它不写执行事实，必须随投影在
+ * 根与可查看的子代理 Thread 上都可用；其余写入口仍只属于根控制区。
  */
 /** 主视图与滚动恢复由调用方持有：根面板复用控制面的视图实例，只读视图自持。 */
 export interface ThreadPaneViews {
@@ -78,6 +81,10 @@ export function ThreadPane({
     waitingForEnvironment: pendingTool.waitingForEnvironment,
     phase: 'call',
   }) : null
+  // 只有 STOPPED 才允许放弃等待；RUNNABLE 的普通在途执行不是“未确认退出”事实。
+  const unconfirmedExecutions = projection.thread?.executionControl === 'STOPPED'
+    ? projection.unconfirmedExecutions
+    : []
 
   // 已请求停止但 Thread 仍 RUNNING、且没有真实 RUNNING model/tool：退出尚未确认。
   // 这只是现有 executionControl 与 status 的静态组合，不代表执行即将结束。
@@ -128,7 +135,20 @@ export function ThreadPane({
     working: resolvedWorking,
     workingLabel: resolvedWorkingLabel,
     animated: executing,
-    widgets: activity.widgets,
+    widgets: unconfirmedExecutions.length === 0
+      ? activity.widgets
+      : (
+        <>
+          <UnconfirmedExecutionsPanel
+            key={projection.threadId}
+            threadId={projection.threadId}
+            rootThreadId={projection.thread?.rootThreadId ?? ''}
+            expectedVersion={projection.thread?.version ?? ''}
+            executions={unconfirmedExecutions}
+          />
+          {activity.widgets}
+        </>
+      ),
     actionError: activity.actionError ?? null,
     onDismissActionError: activity.onDismissActionError,
   }

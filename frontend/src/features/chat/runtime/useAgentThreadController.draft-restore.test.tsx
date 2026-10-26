@@ -172,6 +172,7 @@ function snapshotOf(
       disabledReason: null,
     },
     stopReceipts: [],
+    unconfirmedExecutions: [],
     ...extras,
   }
 }

@@ -99,6 +99,12 @@ RUNNING 表示本地流程未结束（包括审批、问卷及环境阻塞），
 `executionControl` 是正交的持久执行控制（`RUNNABLE` / `STOPPED`），停止不代表调用已物理退出。
 工作条按真实 model/tool invocation 展示执行动画；阻塞、单纯运行中及等待异步结果只显示静态事实。
 STOPPED 不遮盖尚在途的 model/tool。委派进度按执行树逐 Thread 展示，不由父 Thread 递归投影。
+STOPPED Thread 的 Snapshot 另携带 `unconfirmedExecutions`；只有 `executionControl=STOPPED` 且列表非空时，
+Thread 面板逐个列出 kind、attempt 与完整 executionId，RUNNABLE 的未知/活跃执行不混入该列表。
+“放弃等待”按单个 executionId 与当前 `expectedVersion` 显式确认，不自动批量；确认文案必须说明它只停止
+等待退出确认，不终止本地或远端执行，执行可能继续产生副作用，恢复也可能与其重叠。成功以服务端完整快照
+刷新投影与执行树，命令可用性随快照更新；失败保留原事实并显示友好错误，409 只回读最新事实让用户重新选择，
+绝不自动重试或自动恢复执行。该维护动作随投影在根和可查看的只读子代理 Thread 上都可用，其余写入口仍只属于根。
 
 ### Thread Debug
 

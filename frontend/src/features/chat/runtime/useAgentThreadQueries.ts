@@ -42,6 +42,8 @@ export function useAgentThreadQueries(threadId: string) {
     [snapshot],
   )
   const stopReceipts = useMemo(() => snapshot?.stopReceipts ?? [], [snapshot])
+  // 未确认退出事实是后端快照的必需字段：只在快照尚未加载时为空，不静默兜底缺失契约。
+  const unconfirmedExecutions = snapshot == null ? [] : snapshot.unconfirmedExecutions
   const environmentTools = toolInvocations.filter(
     (invocation) => invocation.status === 'READY' && invocation.requiredEnvironmentId != null,
   )
@@ -74,6 +76,7 @@ export function useAgentThreadQueries(threadId: string) {
     toolInvocations,
     modelAttemptFailures,
     stopReceipts,
+    unconfirmedExecutions,
     manualCompaction: snapshot?.manualCompaction ?? {
       available: false,
       disabledReason: 'Thread snapshot is not loaded',
