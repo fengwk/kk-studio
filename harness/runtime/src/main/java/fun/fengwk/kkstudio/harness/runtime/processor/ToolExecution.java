@@ -181,8 +181,8 @@ final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution {
           tx -> {
             ExecutionExitLedger.lockAncestorChain(tx, threadId);
             if (tx.lockThread(threadId).isEmpty()) {
-              throw new IllegalStateException(
-                  "thread " + threadId + " disappeared before remote execution confirmation");
+              // 与本地确认一致：合法深删已连同执行事实一起提交，迟到 ACK 无事实可确认；缺失本身不构成退出证据。
+              return null;
             }
             ExecutionExitFact expected =
                 new ExecutionExitFact(
