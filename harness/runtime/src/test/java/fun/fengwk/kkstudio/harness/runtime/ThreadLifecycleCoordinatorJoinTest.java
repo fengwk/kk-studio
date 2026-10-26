@@ -9,6 +9,7 @@ import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.turn
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.turnStartEntry;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessageEntry;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessagePayload;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.loadCommandsByThread;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -632,7 +633,7 @@ class ThreadLifecycleCoordinatorJoinTest {
   }
 
   private int rootCommandCount() {
-    return store.<Integer>transaction(tx -> tx.loadCommandsByThread(root.threadId()).size());
+    return store.<Integer>transaction(tx -> loadCommandsByThread(tx, root.threadId()).size());
   }
 
   private void assertNullWork() {

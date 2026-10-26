@@ -7,6 +7,7 @@ import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T2;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.settings;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.systemReminderCommand;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessageCommand;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.loadCommandsByThread;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -175,7 +176,7 @@ class HarnessRuntimeAcceptInitialTest {
     assertEquals(2L, thread.nextCommandSequence());
 
     List<ThreadCommand> commands =
-        store.transaction(tx -> tx.loadCommandsByThread(TestIds.id(102)));
+        store.transaction(tx -> loadCommandsByThread(tx, TestIds.id(102)));
     assertEquals(1, commands.size());
     assertEquals(1L, commands.getFirst().sequence());
     assertEquals(ThreadCommandState.QUEUED, commands.getFirst().state());
@@ -202,7 +203,7 @@ class HarnessRuntimeAcceptInitialTest {
     assertTrue(store.<Boolean>transaction(tx -> tx.findSession(TestIds.id(101)).isEmpty()));
     assertTrue(store.<Boolean>transaction(tx -> tx.findThread(TestIds.id(102)).isEmpty()));
     assertTrue(
-        store.<Boolean>transaction(tx -> tx.loadCommandsByThread(TestIds.id(102)).isEmpty()));
+        store.<Boolean>transaction(tx -> loadCommandsByThread(tx, TestIds.id(102)).isEmpty()));
   }
 
   @Test
@@ -650,7 +651,7 @@ class HarnessRuntimeAcceptInitialTest {
     assertEquals(baseline.rootEntryId(), source.headEntryId());
     assertEquals(0L, source.version());
     assertTrue(
-        store.<Boolean>transaction(tx -> tx.loadCommandsByThread(baseline.threadId()).isEmpty()));
+        store.<Boolean>transaction(tx -> loadCommandsByThread(tx, baseline.threadId()).isEmpty()));
     assertTrue(
         store.<Boolean>transaction(
             tx ->
@@ -691,7 +692,7 @@ class HarnessRuntimeAcceptInitialTest {
       assertEquals(boundary, forkPayload.sourceEntryId());
       assertEquals(boundary, fork.parentEntryId());
       assertEquals(1L, thread.version());
-      assertEquals(1, store.transaction(tx -> tx.loadCommandsByThread(threadId)).size());
+      assertEquals(1, store.transaction(tx -> loadCommandsByThread(tx, threadId)).size());
     }
 
     // 每次 fork 只追加一个 FORK 事实节点，绝不复制共享前缀。
@@ -767,7 +768,7 @@ class HarnessRuntimeAcceptInitialTest {
 
   private void assertNoNewThreadFacts(UUID threadId) {
     assertTrue(store.<Boolean>transaction(tx -> tx.findThread(threadId).isEmpty()));
-    assertTrue(store.<Boolean>transaction(tx -> tx.loadCommandsByThread(threadId).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> loadCommandsByThread(tx, threadId).isEmpty()));
     assertTrue(
         store.<Boolean>transaction(
             tx -> tx.findWork(new WorkTarget(WorkTargetType.THREAD, threadId)).isEmpty()));
@@ -925,6 +926,6 @@ class HarnessRuntimeAcceptInitialTest {
     assertEquals(expectedMessage, error.getMessage());
     assertTrue(store.<Boolean>transaction(tx -> tx.findSession(sessionId).isEmpty()));
     assertTrue(store.<Boolean>transaction(tx -> tx.findThread(threadId).isEmpty()));
-    assertTrue(store.<Boolean>transaction(tx -> tx.loadCommandsByThread(threadId).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> loadCommandsByThread(tx, threadId).isEmpty()));
   }
 }
