@@ -1,6 +1,8 @@
+import type { TranslationKey } from '@/shared/i18n'
+
 export interface SettingsTabMeta {
   id: string
-  labelKey: string
+  labelKey: TranslationKey
 }
 
 /** General 是唯一保留在前端本地的设置页签；server 页签来自 settings schema sections。 */

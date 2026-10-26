@@ -44,7 +44,7 @@ export function DeleteProjectModal({
       onSuccess(project.id)
       onClose()
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : t('projects.delete.failed'))
+      setErrorMessage(err instanceof Error ? err.message : t('shared.requestFailed'))
     } finally {
       setIsDeleting(false)
     }

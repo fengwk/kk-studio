@@ -1,4 +1,4 @@
-import { useI18n } from '@/shared/i18n'
+import { requireTranslationKey, useI18n } from '@/shared/i18n'
 import {
   SettingsCard,
   SettingsIntegerListField,
@@ -39,7 +39,7 @@ export function SystemSettingsSchemaRenderer({
             {section.groups.map((group) => (
               <SettingsCard
                 key={group.key}
-                title={t(group.labelKey)}
+                title={t(requireTranslationKey(group.labelKey))}
                 timing={groupTiming(group)}
               >
                 {group.fields.map((field) => (
@@ -86,8 +86,8 @@ function SchemaField({
 }) {
   const { t } = useI18n()
   const value = getDraftValue(draft, field.path)
-  const label = t(field.labelKey)
-  const hint = field.hintKey == null ? undefined : t(field.hintKey)
+  const label = t(requireTranslationKey(field.labelKey))
+  const hint = field.hintKey == null ? undefined : t(requireTranslationKey(field.hintKey))
   const update = (next: unknown) => onChange(setDraftValue(draft, field.path, next))
 
   switch (field.type) {
@@ -137,7 +137,7 @@ function SchemaField({
           value={value as string}
           options={(field.options ?? []).map((option) => ({
             value: option.value,
-            label: t(option.labelKey),
+            label: t(requireTranslationKey(option.labelKey)),
           }))}
           hint={hint}
           onChange={update}

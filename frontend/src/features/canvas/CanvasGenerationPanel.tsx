@@ -30,7 +30,7 @@ import { NumberInput } from '@/shared/ui/controls/NumberInput'
 import { Select, type SelectOption } from '@/shared/ui/controls/Select'
 import { TextArea } from '@/shared/ui/controls/TextArea'
 import { TextInput } from '@/shared/ui/controls/TextInput'
-import { useI18n } from '@/shared/i18n'
+import { useI18n, type TranslationKey } from '@/shared/i18n'
 import type {
   CanvasFunctionDefinitionDTO,
   CanvasTransformDTO,
@@ -757,7 +757,7 @@ function functionSourceIdentity(modelKey: string, config: CanvasFunctionConfig):
   )}`
 }
 
-function runStatusKey(status: NonNullable<ResourceNode['run']>['status']): string {
+function runStatusKey(status: NonNullable<ResourceNode['run']>['status']): TranslationKey {
   if (status === 'READY') {
     return 'canvas.generation.status.ready'
   }
@@ -777,7 +777,7 @@ function runStatusKey(status: NonNullable<ResourceNode['run']>['status']): strin
 }
 
 function runDisplayLabel(
-  t: (key: string, values?: Record<string, string | number>) => string,
+  t: (key: TranslationKey, values?: Record<string, string | number>) => string,
   status: NonNullable<ResourceNode['run']>['status'],
   stage: string,
 ): string {

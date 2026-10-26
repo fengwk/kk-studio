@@ -5,10 +5,10 @@ import {
   formatUsageCost,
 } from '@/features/chat/runtime/thread-timeline/content-utils'
 import type { TurnUsage } from '@/features/chat/runtime/thread-timeline-types'
-import { translate } from '@/shared/i18n'
+import { translate, type TranslationKey } from '@/shared/i18n'
 
 /** 注入式翻译函数：默认使用全局 catalog，便于对格式化本身做确定性验证。 */
-export type TranslateFn = (key: string, values?: Record<string, string | number>) => string
+export type TranslateFn = (key: TranslationKey, values?: Record<string, string | number>) => string
 
 /** Footer 唯一一行的分组分隔符（U+2223）；组内统计项由 formatTurnUsageText 使用 U+00B7。 */
 export const FOOTER_SEGMENT_SEPARATOR = ' ∣ '
@@ -174,7 +174,7 @@ function positiveFinite(value: number | undefined): number | null {
  */
 export function formatThreadStatusLabel(
   status?: string | null,
-  t: (key: string) => string = translate,
+  t: (key: TranslationKey) => string = translate,
 ): string {
   if (!status) {
     return ''

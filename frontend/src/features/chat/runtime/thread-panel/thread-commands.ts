@@ -2,7 +2,7 @@ import type {
   PaneTarget,
   PaneTargetKind,
 } from '@/features/chat/runtime/agent-pane/pane-target'
-import { translate } from '@/shared/i18n'
+import { translate, type TranslationKey } from '@/shared/i18n'
 
 interface ManualCompactionAvailability {
   available: boolean
@@ -32,12 +32,12 @@ export interface ThreadCommand {
   id: ThreadCommandId
   label: string
   description: string
-  labelKey?: string
-  descriptionKey?: string
+  labelKey?: TranslationKey
+  descriptionKey?: TranslationKey
   keywords?: string[]
   disabled?: boolean
   disabledReason?: string
-  disabledReasonKey?: string
+  disabledReasonKey?: TranslationKey
 }
 
 /**

@@ -1,10 +1,23 @@
 import { useCallback, useSyncExternalStore } from 'react'
-import { messageCatalog } from '@/shared/i18n/catalogs'
+import { messageCatalog, type TranslationKey } from '@/shared/i18n/catalogs'
 import type { InterpolationValues, LocaleMessages, AppLocale } from '@/shared/i18n/types'
 
 export type { AppLocale, InterpolationValues } from '@/shared/i18n/types'
 export type { TranslationKey } from '@/shared/i18n/catalogs'
 export { messageCatalog }
+
+/** 服务端等外部输入只有在 catalog 中存在时才能作为翻译 key 使用。 */
+export function isTranslationKey(value: string): value is TranslationKey {
+  return Object.hasOwn(messageCatalog, value)
+}
+
+/** 收窄外部提供的翻译 key；未知 key 立即失败，避免以缺失文案继续渲染。 */
+export function requireTranslationKey(value: string): TranslationKey {
+  if (!isTranslationKey(value)) {
+    throw new Error(`Unknown i18n key: ${value}`)
+  }
+  return value
+}
 
 export const LOCALE_STORAGE_KEY = 'kk-studio.locale'
 
@@ -39,7 +52,7 @@ export function setLocale(locale: AppLocale): void {
   }
 }
 
-export function translate(key: string, values?: InterpolationValues): string {
+export function translate(key: TranslationKey, values?: InterpolationValues): string {
   const locale = getLocale()
   const messages = (messageCatalog as Record<string, LocaleMessages | undefined>)[key]
   const message = messages?.[locale]
@@ -59,7 +72,10 @@ export function translate(key: string, values?: InterpolationValues): string {
 
 export function useI18n() {
   const locale = useSyncExternalStore(localeListenersSubscribe, getLocaleSnapshot, getServerLocale)
-  const t = useCallback((key: string, values?: InterpolationValues) => translate(key, values), [])
+  const t = useCallback(
+    (key: TranslationKey, values?: InterpolationValues) => translate(key, values),
+    [],
+  )
 
   return {
     locale,

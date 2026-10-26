@@ -9,13 +9,13 @@ import {
   type HistoryEntryKind,
   type HistoryTreeRow,
 } from '@/features/chat/history-tree'
-import { useI18n } from '@/shared/i18n'
+import { useI18n, type TranslationKey } from '@/shared/i18n'
 import { Button } from '@/shared/ui/controls/Button'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 import '@/features/chat/history-tree.css'
 import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 
-const KIND_LABEL_KEYS: Record<HistoryEntryKind, string> = {
+const KIND_LABEL_KEYS: Record<HistoryEntryKind, TranslationKey> = {
   root: 'ai.chat.branch.kindRoot',
   user: 'ai.chat.history.user',
   assistant: 'ai.chat.history.assistant',

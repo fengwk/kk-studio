@@ -1,6 +1,6 @@
 import { Activity, LogIn, LogOut, Plug, Settings } from 'lucide-react'
 import { Badge, type BadgeTone } from '@/shared/ui/data/Badge'
-import { useI18n, type AppLocale } from '@/shared/i18n'
+import { useI18n, type AppLocale, type TranslationKey } from '@/shared/i18n'
 import { Button } from '@/shared/ui/controls/Button'
 import { ResourceCard, type ResourceCardMetaRow } from '@/shared/ui/cards/ResourceCard'
 import { pluginConnectionCheckExpected } from '@/features/extensions/plugin-connection-check'
@@ -12,6 +12,18 @@ function formatDateTime(value: number | null | undefined, locale: AppLocale): st
     return '—'
   }
   return new Date(value * 1000).toLocaleString(locale)
+}
+
+const PLUGIN_STATUS_LABEL_KEYS = {
+  NOT_CONNECTED: 'plugins.status.NOT_CONNECTED',
+  CONNECTED: 'plugins.status.CONNECTED',
+  REFRESH_FAILED: 'plugins.status.REFRESH_FAILED',
+  REFRESH_UNCERTAIN: 'plugins.status.REFRESH_UNCERTAIN',
+  REAUTH_REQUIRED: 'plugins.status.REAUTH_REQUIRED',
+} as const satisfies Record<string, TranslationKey>
+
+function isPluginStatus(status: string): status is keyof typeof PLUGIN_STATUS_LABEL_KEYS {
+  return Object.hasOwn(PLUGIN_STATUS_LABEL_KEYS, status)
 }
 
 function statusTone(status: string): BadgeTone {
@@ -46,6 +58,9 @@ export function PluginCard({
   connectionCheckPending: boolean
 }) {
   const { t, locale } = useI18n()
+  const statusLabel = plugin.status != null && isPluginStatus(plugin.status)
+    ? t(PLUGIN_STATUS_LABEL_KEYS[plugin.status])
+    : plugin.status
 
   const isDeepLink = plugin.authKind?.type === 'DEEP_LINK'
   const isConnected = plugin.status === 'CONNECTED'
@@ -140,7 +155,7 @@ export function PluginCard({
               tone={statusTone(plugin.status)}
               data-testid={`plugin-status-${plugin.pluginId}`}
             >
-              {t(`plugins.status.${plugin.status}`) || plugin.status}
+              {statusLabel}
             </Badge>
           ) : null}
         </>

@@ -6,7 +6,7 @@ import type {
   TurnUsage,
   UsageCost,
 } from '@/features/chat/runtime/thread-timeline-types'
-import { translate } from '@/shared/i18n'
+import { translate, type TranslationKey } from '@/shared/i18n'
 
 
 export function contentText(content: Record<string, unknown>): string {
@@ -616,7 +616,7 @@ export function formatTurnUsageText(
     decodeTokens?: number | null
     decodeDurationMillis?: number | null
   },
-  t: (key: string) => string = translate,
+  t: (key: TranslationKey) => string = translate,
 ): string {
   const noData = t('ai.runtime.status.noData')
   const parts = [

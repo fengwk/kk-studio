@@ -11,7 +11,7 @@ import { Select } from '@/shared/ui/controls/Select'
 import { Checkbox } from '@/shared/ui/controls/Checkbox'
 import { Toast } from '@/shared/ui/feedback/Toast'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
-import { useI18n, type InterpolationValues } from '@/shared/i18n'
+import { useI18n, type InterpolationValues, type TranslationKey } from '@/shared/i18n'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { copyTextToClipboard } from './clipboard'
 import {
@@ -30,7 +30,7 @@ import type {
   EnvironmentInstallConfigDTO,
 } from '@/shared/api/generated/contracts'
 
-type Translate = (key: string, values?: InterpolationValues) => string
+type Translate = (key: TranslationKey, values?: InterpolationValues) => string
 
 /** 元数据读取失败：传输错误可重试；已保存设置无效可重试或改用默认设置。 */
 type LoadError =
