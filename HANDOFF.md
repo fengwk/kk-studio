@@ -795,3 +795,12 @@ ABANDONED 只放弃等待，不冒充退出、不取消执行、不自动 Resume
 - Daemon 源码树 `bbd3acb5523abcf9ddd0270c0916227bd3c0e30a` 与已验证 `2c7432d9b` 相同；scripts 树 `fe3f5d11bba6654d687b053dad01b1a954658c81`、schema 树 `ecab68b211e70a00c7c4929e7628e0354ec9698a` 与已验证 `8b8dd222c` 相同。复用同树的 Daemon 1,289 passed、脚本 738 passed 和 Schema 213 probes 结果，不冒充本 SHA 重新运行。
 - `b80c17e71` 的 docs/版本门禁通过，敏感扫描检出本节记录的本机路径。本次仅移除该路径并补充验证事实；后续提交不改变已验证的源码或测试，仍需重新通过文档/敏感扫描，并由最终提交的全量远端 CI 验收。
 - 完整原始日志和结构化摘要保存在本轮 `closure-validate-*` 的 records 目录；后续归档仍保留此前失败记录。尚无本轮 `main`/`dev` 推送、远端 CI 成功或 Release 完成证据。
+
+### 18.6 远端门禁与初始化竞态补修
+
+- `d44b8ba368c33e0d3b859c39618fac9b25e4f014` 已通过 expected-ref CLI 串行快进至 `handoff`、`main`、`dev`，并原子推送三分支。该提交与本地全量验证 SHA 的唯一差异为交接文档。
+- 首轮 `main` docker-publish **40391340200 失败**于 fresh PostgreSQL baseline 检查，未进入后续 Java/前端门禁，`:main` 镜像被阻止；`dev` 镜像 **40391340481 成功**不能替代全量验证。独立 main/dev daemon-ci **40391340257 / 40391340448 成功**；五平台 Node、Windows PS 5.1/7 与 Unix 安装器均通过。
+- 根因不是连到另一实例：checker 始终在自己创建的隔离容器里执行。官方 PG17.10 entrypoint 在创建 `POSTGRES_DB` 前先启动 **仅 Unix socket 的临时 server**；旧 `pg_isready` 可返回成功但目标库不存在。真实隔离复现记录显示同一时刻 Unix ready、TCP refused，日志中的 CREATE DATABASE 随后才发生。
+- 修复 **f02c0a5746884b03255d2554f0c49d5745be0c6e**：保持原有有界 readiness 等待，仅以容器 loopback TCP 的 exact database `psql -X -v ON_ERROR_STOP=1 ... SELECT 1` 成功且 stdout 精确 `1\n` 作为就绪证据，不增加固定 sleep 或无依据重试。隔离、本地 Docker socket、无端口、清理与 mutation 门禁不变。
+- 新增实际运行 checker 的 PATH fixture 行为回归：临时 server 接受 pg_isready、TCP 尚未就绪时不得放行 DDL。旧 checker 为红，修复后定向 **20 tests / 0 fail / 0 skip**；独立真实 schema **213 probes / 5 mutations** 通过，父级在集成树重跑同样通过。此变更仅影响脚本与测试，无需重复本地 Maven/前端/Daemon 全量；最终提交仍须完整远端 CI。
+- 第一轮 CI JSON、失败日志、真实 PG 时序、红绿回归与修复后日志均保留。尚未创建正式 tag 或发布 Release。
