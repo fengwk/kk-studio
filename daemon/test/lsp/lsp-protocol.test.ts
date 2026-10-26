@@ -281,6 +281,8 @@ describe('LspClient Protocol & Handshake', () => {
     const config = fakeServerConfig('fake', 'slow-definition', transcript)
     const controlled = new ExitBarrierSupervisor()
     let client: LspClient | null = null
+    // body 的原始失败必须保留；收尾失败只能按发生顺序追加，不能覆盖它。
+    const errors: unknown[] = []
     try {
       client = await bounded(
         LspClient.launch(config, tempDir, config.command[0]!, controlled),
@@ -327,24 +329,28 @@ describe('LspClient Protocol & Handshake', () => {
       controlled.reportExit()
       await bounded(confirmed, 'late exit confirmation')
       expect(finished).toBe(1)
+    } catch (error) {
+      errors.push(error)
     } finally {
       controlled.releaseCleanup()
-      const cleanupFailures: unknown[] = []
       if (client) {
         try {
           await bounded(client.stop(0), 'client scope cleanup')
         } catch (error) {
-          cleanupFailures.push(error)
+          errors.push(error)
         }
       }
       try {
         await controlled.close()
       } catch (error) {
-        cleanupFailures.push(error)
+        errors.push(error)
       }
-      if (cleanupFailures.length > 0) {
-        throw new AggregateError(cleanupFailures, 'local stop test cleanup failed')
-      }
+    }
+    if (errors.length === 1) {
+      throw errors[0]
+    }
+    if (errors.length > 1) {
+      throw new AggregateError(errors, 'local stop test cleanup failed')
     }
   })
 
@@ -353,6 +359,8 @@ describe('LspClient Protocol & Handshake', () => {
     const config = fakeServerConfig('fake', 'slow-definition', transcript)
     const controlled = new ExitBarrierSupervisor()
     let client: LspClient | null = null
+    // body 失败优先保留；受管范围与客户端收尾失败按发生顺序追加。
+    const errors: unknown[] = []
     try {
       client = await bounded(
         LspClient.launch(config, tempDir, config.command[0]!, controlled),
@@ -400,25 +408,29 @@ describe('LspClient Protocol & Handshake', () => {
       controlled.releaseCleanup()
       await bounded(confirmed, 'request exit confirmation')
       expect(finished).toBe(1)
+    } catch (error) {
+      errors.push(error)
     } finally {
       // 先释放预置屏障，再分别完成客户端与真实子进程收尾；前者失败不能跳过后者。
       controlled.releaseCleanup()
-      const cleanupFailures: unknown[] = []
       if (client) {
         try {
           await bounded(client.stop(0), 'client scope cleanup')
         } catch (error) {
-          cleanupFailures.push(error)
+          errors.push(error)
         }
       }
       try {
         await controlled.close()
       } catch (error) {
-        cleanupFailures.push(error)
+        errors.push(error)
       }
-      if (cleanupFailures.length > 0) {
-        throw new AggregateError(cleanupFailures, 'controlled exit test cleanup failed')
-      }
+    }
+    if (errors.length === 1) {
+      throw errors[0]
+    }
+    if (errors.length > 1) {
+      throw new AggregateError(errors, 'controlled exit test cleanup failed')
     }
   })
 
@@ -428,6 +440,8 @@ describe('LspClient Protocol & Handshake', () => {
     const controlled = new ExitBarrierSupervisor(new Error('deferred termination boom'))
     let client: LspClient | null = null
     let expectedStopFailure: unknown = null
+    // body 失败优先保留；已观察到的缓存失败按对象身份忽略，其余收尾失败顺序追加。
+    const errors: unknown[] = []
     try {
       client = await bounded(
         LspClient.launch(config, tempDir, config.command[0]!, controlled),
@@ -478,28 +492,32 @@ describe('LspClient Protocol & Handshake', () => {
       expect(secondFailure).toBe(firstFailure)
       expect(controlled.terminateCalls).toBe(1)
       expect(finished).toBe(0)
+    } catch (error) {
+      errors.push(error)
     } finally {
       // 先释放预置屏障，再分别完成客户端与真实子进程收尾；前者失败不能跳过后者。
       controlled.releaseCleanup()
-      const cleanupFailures: unknown[] = []
       if (client) {
         try {
           await bounded(client.stop(0), 'client scope cleanup')
         } catch (error) {
           // 只容忍本用例已观察到的同一缓存 stop 失败，其余清理异常仍然暴露。
           if (error !== expectedStopFailure) {
-            cleanupFailures.push(error)
+            errors.push(error)
           }
         }
       }
       try {
         await controlled.close()
       } catch (error) {
-        cleanupFailures.push(error)
+        errors.push(error)
       }
-      if (cleanupFailures.length > 0) {
-        throw new AggregateError(cleanupFailures, 'controlled exit test cleanup failed')
-      }
+    }
+    if (errors.length === 1) {
+      throw errors[0]
+    }
+    if (errors.length > 1) {
+      throw new AggregateError(errors, 'controlled exit test cleanup failed')
     }
   })
 
@@ -508,6 +526,8 @@ describe('LspClient Protocol & Handshake', () => {
     const config = fakeServerConfig('fake', 'stubborn', transcript)
     const controlled = new ExitBarrierSupervisor()
     let client: LspClient | null = null
+    // body 失败优先保留；显式 stop 与真实子进程收尾失败按发生顺序追加。
+    const errors: unknown[] = []
     try {
       client = await bounded(
         LspClient.launch(config, tempDir, config.command[0]!, controlled),
@@ -533,25 +553,29 @@ describe('LspClient Protocol & Handshake', () => {
       // 已缓存的成功收尾结论：复用不再触发第二次终结。
       await bounded(client.stop(500), 'cached successful stop')
       expect(controlled.terminateCalls).toBe(1)
+    } catch (error) {
+      errors.push(error)
     } finally {
       // 先释放预置屏障，再分别完成客户端与真实子进程收尾；前者失败不能跳过后者。
       controlled.releaseCleanup()
-      const cleanupFailures: unknown[] = []
       if (client) {
         try {
           await bounded(client.stop(0), 'client scope cleanup')
         } catch (error) {
-          cleanupFailures.push(error)
+          errors.push(error)
         }
       }
       try {
         await controlled.close()
       } catch (error) {
-        cleanupFailures.push(error)
+        errors.push(error)
       }
-      if (cleanupFailures.length > 0) {
-        throw new AggregateError(cleanupFailures, 'controlled exit test cleanup failed')
-      }
+    }
+    if (errors.length === 1) {
+      throw errors[0]
+    }
+    if (errors.length > 1) {
+      throw new AggregateError(errors, 'controlled exit test cleanup failed')
     }
   })
 
