@@ -135,7 +135,7 @@ protocolVersion / messageType / environmentId / invocationId? / payload
 握手与调用时序：
 
 ```text
-Daemon -> HELLO(protocolVersion=5, registrationToken, capabilityCatalogVersion=3, daemonVersion, daemonInstanceId)
+Daemon -> HELLO(protocolVersion=6, registrationToken, capabilityCatalogVersion=3, daemonVersion, daemonInstanceId)
 Gateway -> WELCOME(environmentId, name, maxResourceBytes, temporaryResourceTtlSeconds, temporaryResourceCleanupIntervalSeconds)
 Daemon -> READY(version=5, daemonVersion, environment)
 Daemon -> HEARTBEAT*
@@ -293,7 +293,7 @@ close(connectionId)
 | `BUSY` | [`EnvironmentCapabilityBusyException`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityBusyException.java) | 帧确定未发送，连接保持可用，调用方可安全重试 |
 | `CLOSED` | [`EnvironmentCapabilityUnavailableException`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityUnavailableException.java) | 帧确定未发送，调用确定未执行 |
 
-同一 Environment 内重复使用相同活动 `invocationId` 属于调用方错误，在发送任何帧之前即被拒绝。传输递交时抛错会关闭连接，但返回活动句柄，等待同实例恢复；不能把这条路径解释为确定未执行。恢复时，旧连接代际或初次递交结果不确定的在途调用只发送相同 `invocationId` 的 `CANCEL`，绝不重发 `INVOKE`；当前代际刚成功初次递交 INVOKE 且尚未取消的调用保持排除。这些排除判断集中在连接状态锁内，避免 READY 与新调用并发时误取消。恢复的 `CANCEL` 记录既有取消意图：Daemon 命中 journal 时重放既有终态或独立退出事实，或停止仍在运行的 scope；未命中时不执行、不造终态或 ACK，调用沿现有 deadline/terminate 路径结束等待。取消意图与成功递交代际分别记录，BUSY/CLOSED 不算送达，也不靠空转轮询重试。
+同一 Environment 内重复使用相同活动 `invocationId` 属于调用方错误，在发送任何帧之前即被拒绝。传输递交时抛错会关闭连接，但返回活动句柄，等待同实例恢复；不能把这条路径解释为确定未执行。恢复时，旧连接代际或初次递交结果不确定的在途调用发送相同 `invocationId` 的 `RECOVER`，仅已有取消意图时发送 `CANCEL`，绝不重发 `INVOKE`；当前代际刚成功初次递交 INVOKE 且尚未取消的调用保持排除。这些判断集中在连接状态锁内，避免 READY 与新调用并发时误恢复。Daemon 命中 journal 时，`RECOVER` 回放 STARTED 或既有终态与独立退出事实，不停止仍在运行的 scope；`CANCEL` 才要求停止。未命中时不执行、不造终态或 ACK，调用沿现有 deadline/terminate 路径结束等待。取消意图与成功递交代际分别记录，BUSY/CLOSED 不算送达，也不靠空转轮询重试。
 
 ### 资源上传控制面
 

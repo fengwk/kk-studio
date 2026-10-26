@@ -31,7 +31,7 @@ import {
 } from './generated/protocol-contract.js'
 
 /**
- * Daemon wire 协议的严格 codec（envelope v5 / READY payload v5 / capability catalog v3）。
+ * Daemon wire 协议的严格 codec（envelope v6 / READY payload v5 / capability catalog v3）。
  *
  * <p>这是 Java Environment Daemon codec 的 Node 等价实现，wire 形状逐字段对齐 harness/environment 的
  * DaemonEnvelopeCodec / DaemonCapabilitiesCodec / DaemonCapabilityInvokeCodec /
