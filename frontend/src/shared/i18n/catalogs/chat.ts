@@ -566,6 +566,34 @@ export const chatCatalog = {
     'en-US': 'This project supports only one session',
     'zh-CN': '当前项目仅支持单会话',
   },
+  'ai.runtime.command.disabled.compaction.threadStopped': {
+    'en-US': 'The Thread is stopped; resume it before compacting',
+    'zh-CN': 'Thread 已停止，恢复后才能压缩',
+  },
+  'ai.runtime.command.disabled.compaction.threadBusy': {
+    'en-US': 'The Thread is busy; wait for the current turn to finish',
+    'zh-CN': 'Thread 正在执行，请等待当前回合结束',
+  },
+  'ai.runtime.command.disabled.compaction.ownershipBarrier': {
+    'en-US': 'The history crosses another Thread and cannot be compacted',
+    'zh-CN': '历史跨越其他 Thread，无法压缩',
+  },
+  'ai.runtime.command.disabled.compaction.noResolvedContext': {
+    'en-US': 'No compactable context was found',
+    'zh-CN': '没有可用于压缩的上下文',
+  },
+  'ai.runtime.command.disabled.compaction.modelChanged': {
+    'en-US': 'The model changed; start a new turn before compacting',
+    'zh-CN': '模型已变更，请先开始新一轮',
+  },
+  'ai.runtime.command.disabled.compaction.belowMinimum': {
+    'en-US': 'The context is below the minimum size for manual compaction',
+    'zh-CN': '上下文尚未达到手动压缩的最小量',
+  },
+  'ai.runtime.command.disabled.compaction.nothingToCompact': {
+    'en-US': 'There is nothing to compact',
+    'zh-CN': '没有可压缩的内容',
+  },
   'ai.runtime.command.upload': {
     'en-US': 'Upload files',
     'zh-CN': '上传文件',

@@ -6,11 +6,10 @@ import fun.fengwk.kkstudio.harness.runtime.ThreadTreeLocks;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.runtime.history.FinalAnswerEntry;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
@@ -187,25 +186,13 @@ public final class ExecutionExitLedger {
     if (end.continueModel()) {
       return false;
     }
-    // 与普通终止路径一致：只有正常完成的回合冻结最终回答，失败回合即使以 ASSISTANT 消息结尾也不冻结。
+    // 与普通终态物化共用同一最终回答判定：COMPLETED 且无续作义务时，只取紧邻 TURN_END 的 ASSISTANT 消息。
+    Entry precedingEntry = terminalIndex > 0 ? path.entries().get(terminalIndex - 1) : null;
     UUID finalAnswerEntryId =
-        end.outcome() == TurnEndOutcome.COMPLETED ? finalAnswerOnPath(path, terminalIndex) : null;
+        FinalAnswerEntry.resolve(end.outcome(), end.continueModel(), precedingEntry);
     ThreadLifecycleCoordinator.matchAndDeliverTerminalJoins(
         tx, thread, terminal.id(), finalAnswerEntryId, tx.now(), false);
     return true;
-  }
-
-  /** 最终回答只从本 Thread 当前路径上、紧邻该 TURN_END 之前的 ASSISTANT 消息读取。 */
-  private static UUID finalAnswerOnPath(EntryPath path, int terminalIndex) {
-    if (terminalIndex < 1) {
-      return null;
-    }
-    Entry candidate = path.entries().get(terminalIndex - 1);
-    if (candidate.payload() instanceof MessagePayload message
-        && message.message().role() == AgentMessageRole.ASSISTANT) {
-      return candidate.id();
-    }
-    return null;
   }
 
   public static void settleStoppedAncestors(HarnessStore.Transaction tx, UUID threadId) {

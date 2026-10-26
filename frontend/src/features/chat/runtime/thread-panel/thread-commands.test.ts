@@ -29,16 +29,40 @@ describe('AgentPane command registry', () => {
     ])
   })
 
-  it('keeps compact disabled with the server reason and enables it when available', () => {
+  it('maps every compaction disabled reason to localized text instead of the raw enum', () => {
+    // 服务端只给稳定枚举名；命令面板与错误提示必须显示本地化文案，未知 reason 也不能漏出裸值。
     const target = { kind: 'BOUND_THREAD' as const, threadId: 't1' }
-    const disabled = threadCommandsForTarget(target, {
-      available: false,
-      disabledReason: 'already compacting',
-    }).find((command) => command.id === 'compact')
-    expect(disabled).toMatchObject({
-      disabled: true,
-      disabledReason: 'already compacting',
-    })
+    const reasons = [
+      'THREAD_STOPPED',
+      'THREAD_BUSY',
+      'OWNERSHIP_BARRIER',
+      'NO_RESOLVED_CONTEXT',
+      'MODEL_CHANGED',
+      'BELOW_MINIMUM',
+      'NOTHING_TO_COMPACT',
+      'FUTURE_REASON',
+    ]
+    for (const reason of reasons) {
+      const compact = threadCommandsForTarget(target, {
+        available: false,
+        disabledReason: reason,
+      }).find((command) => command.id === 'compact')
+      expect(compact?.disabled).toBe(true)
+      expect(compact?.disabledReason).toBeTruthy()
+      expect(compact?.disabledReason).not.toBe(reason)
+    }
+    expect(
+      threadCommandsForTarget(target, {
+        available: false,
+        disabledReason: 'THREAD_STOPPED',
+      }).find((command) => command.id === 'compact')?.disabledReason,
+    ).toBe('Thread 已停止，恢复后才能压缩')
+    expect(
+      threadCommandsForTarget(target, {
+        available: false,
+        disabledReason: 'FUTURE_REASON',
+      }).find((command) => command.id === 'compact')?.disabledReason,
+    ).toBe('当前无法手动压缩')
     expect(
       threadCommandsForTarget(target, { available: true, disabledReason: null })
         .find((command) => command.id === 'compact')?.disabled,

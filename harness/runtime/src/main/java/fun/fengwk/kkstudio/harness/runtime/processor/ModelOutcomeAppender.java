@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.FinalAnswerEntry;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptMaterialization;
 import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptSnapshot;
@@ -92,10 +93,9 @@ public final class ModelOutcomeAppender {
         ModelAttemptFailureAppender.append(tx, sessionId, path.head().id(), model, false);
     boolean succeeded = model.status() == ModelInvocationStatus.SUCCEEDED;
     ProviderResponse response = model.result();
-    UUID resultEntryId = tx.nextId();
-    tx.insertEntry(
+    Entry resultEntry =
         new Entry(
-            resultEntryId,
+            tx.nextId(),
             sessionId,
             parentId,
             succeeded
@@ -106,7 +106,9 @@ public final class ModelOutcomeAppender {
                     model.requestedAt())
                 : payloadMapper.assistantErrorPayload(model.error(), modelAttemptSnapshot(model)),
             mutationNow,
-            succeeded ? model.providerReplayState() : null));
+            succeeded ? model.providerReplayState() : null);
+    tx.insertEntry(resultEntry);
+    UUID resultEntryId = resultEntry.id();
     if (!succeeded) {
       UUID turnEndId =
           appendTurnEnd(
@@ -138,7 +140,13 @@ public final class ModelOutcomeAppender {
         tx.updateModelInvocation(model.attachResultEntry(resultEntryId, mutationNow));
         tx.deleteModelInvocation(model.id());
         yield new Applied(
-            turnEndId, resultEntryId, true, false, false, TurnEndOutcome.COMPLETED, List.of());
+            turnEndId,
+            FinalAnswerEntry.resolve(TurnEndOutcome.COMPLETED, false, resultEntry),
+            true,
+            false,
+            false,
+            TurnEndOutcome.COMPLETED,
+            List.of());
       }
       case ModelResponsePlan.Continue ignored -> {
         UUID turnEndId =
