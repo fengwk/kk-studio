@@ -187,8 +187,11 @@ public final class ExecutionExitLedger {
     if (end.continueModel()) {
       return false;
     }
+    // 与普通终止路径一致：只有正常完成的回合冻结最终回答，失败回合即使以 ASSISTANT 消息结尾也不冻结。
+    UUID finalAnswerEntryId =
+        end.outcome() == TurnEndOutcome.COMPLETED ? finalAnswerOnPath(path, terminalIndex) : null;
     ThreadLifecycleCoordinator.matchAndDeliverTerminalJoins(
-        tx, thread, terminal.id(), finalAnswerOnPath(path, terminalIndex), tx.now(), false);
+        tx, thread, terminal.id(), finalAnswerEntryId, tx.now(), false);
     return true;
   }
 
