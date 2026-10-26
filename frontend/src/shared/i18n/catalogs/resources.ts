@@ -819,6 +819,34 @@ export const resourcesCatalog = {
     'en-US': 'Use HH:mm. End may be 24:00; 00:00-24:00 means all day, and start must differ from end.',
     'zh-CN': '格式 HH:mm；结束时间可为 24:00，00:00-24:00 表示全天，开始与结束不能相同。',
   },
+  'ai.catalog.form.weekday.1': {
+    'en-US': 'Mon',
+    'zh-CN': '周一',
+  },
+  'ai.catalog.form.weekday.2': {
+    'en-US': 'Tue',
+    'zh-CN': '周二',
+  },
+  'ai.catalog.form.weekday.3': {
+    'en-US': 'Wed',
+    'zh-CN': '周三',
+  },
+  'ai.catalog.form.weekday.4': {
+    'en-US': 'Thu',
+    'zh-CN': '周四',
+  },
+  'ai.catalog.form.weekday.5': {
+    'en-US': 'Fri',
+    'zh-CN': '周五',
+  },
+  'ai.catalog.form.weekday.6': {
+    'en-US': 'Sat',
+    'zh-CN': '周六',
+  },
+  'ai.catalog.form.weekday.7': {
+    'en-US': 'Sun',
+    'zh-CN': '周日',
+  },
   'ai.catalog.form.priceAriaLabel': {
     'en-US': '{{label}} USD per million tokens',
     'zh-CN': '{{label}} USD per million tokens',

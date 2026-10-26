@@ -96,6 +96,20 @@ describe('ModelPricingEditor source controls', () => {
       .not.toHaveProperty('cacheWriteByTtl')
   })
 
+  it('labels the weekday checkboxes with ISO weekday names', () => {
+    // 测试意图：weekday 1..7 按 ISO 星期解释（1=周一，与后端 DayOfWeek 一致），每个复选框都显示译名而不是原始 key。
+    setLocale('en-US')
+    render(<PricingHarness initial={pricing()} />)
+    openFirstRule()
+
+    for (const day of ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']) {
+      expect(screen.getByRole('checkbox', { name: day })).toBeInTheDocument()
+    }
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Mon' }))
+    expect(JSON.parse(screen.getByTestId('pricing-json').textContent!).overrides[0].when.time.weekdays)
+      .toEqual([1])
+  })
+
   it('labels every condition in the add menu with its translated name', () => {
     // 测试意图：添加菜单的选项必须与条件块标题共用已定义的 i18n key，否则会显示原始 key。
     setLocale('en-US')
