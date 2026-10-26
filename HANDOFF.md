@@ -817,3 +817,10 @@ ABANDONED 只放弃等待，不冒充退出、不取消执行、不自动 Resume
 - `c2e73e7f6` 的 main run **40399428903**：五平台 Daemon、安装器、Schema、敏感扫描、Java 全量、Fat JAR 与前端静态检查全部成功；前端 coverage 有 1 项失败（3,466 passed / 2 skipped）：`SyncTab.test.tsx` 的导入完成后第二次 Escape 没有关闭弹窗。`:main` 镜像仍未发布，未创建正式 tag。
 - 源码与失败 DOM 对照：异步结果 DOM 已提交不代表 Dialog 更新 `pendingRef` 的 passive effect 已完成；原测试在外部直接 resolve promise，仅观察结果文本后立刻 `fireEvent`，把尚未刷新的 pending 守卫当作下一次用户交互。
 - 仅修正该测试：用 async `act` 完成 promise 及相关更新/effects，再通过 `user.keyboard` 发送 Escape；保留“导入中不能关、完成后可关”的原有断言和超时。没有修改 Dialog/导入生产代码、添加 retries 或跳测。
+
+### 18.9 共享 Schema 测试生命周期隔离
+
+- `114f12e2d` 的 main run **40404750696**：五平台 Daemon/安装器与 Schema 通过，但 `ThreadJoinDelegationPostgresIntegrationTest` 的 `@BeforeEach drop schema` 与另一业务事务发生表锁死锁；不能签收该 run，也未创建正式 tag。
+- 定向一轮 14 tests（reset 基座 3 + Join 11）通过，未直接重现死锁。自有测试容器的只读锁采样只证明存在并发业务事务，**不能据此确定原 CI 的 PID 748 对应哪个 Java 线程**，也不把普通短暂 `idle in transaction` 当作连接泄露。
+- 代码可确认的隔离缺口：此类自持 dispatcher executor 已等待终止，但 ModelProcessor 另有执行 executor，终态/registry release 之后还会进行退出确认；共享基座暂停的五个 SmartLifecycle 不覆盖这些任务。不能用 dispatcher 已停止或 Thread 投影终态证明所有数据库写入线程已退出。
+- 修正范围仅此真正执行异步模型的集成测试类：沿用项目已有 `@DirtiesContext(AFTER_EACH_TEST_METHOD)` 模式，每个用例后由 Spring 关闭 processor 与执行 executor/其它后台资源，再创建下一上下文并重建 Schema。其余用例不改，不增加 DB retry、不修改超时、不关闭生产安全机制、不改变产品代码。

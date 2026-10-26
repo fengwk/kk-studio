@@ -17,6 +17,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.w3c.dom.Document;
@@ -122,8 +123,12 @@ import java.util.stream.Collectors;
  *
  * <p>唯一被替换的外部依赖是真实模型：{@link EchoModelGateway} 把最后一条 USER 消息原样回显，因此每个 turn 的产出确定且能证明结果沿树传递。
  * 其余全部是产品路径。等待一律是有界轮询 + 明确超时，不使用固定 sleep。
+ *
+ * <p>每个用例结束后关闭自己的上下文：dispatcher executor 收尾不等于 Model 执行线程与退出确认事务已经结束。由 Spring 关闭 processor、等待其
+ * execution executor 与其它数据库后台任务退出后，下一用例才允许重建共享 Schema。
  */
 @Import(ThreadJoinDelegationPostgresIntegrationTest.EchoModelGatewayConfiguration.class)
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_EACH_TEST_METHOD)
 class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport {
 
   private static final BranchSettings SETTINGS =
