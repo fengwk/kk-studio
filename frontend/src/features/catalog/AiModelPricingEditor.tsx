@@ -15,7 +15,7 @@ import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import { NumberInput } from '@/shared/ui/controls/NumberInput'
 import { Select } from '@/shared/ui/controls/Select'
 import { TextInput } from '@/shared/ui/controls/TextInput'
-import { useI18n } from '@/shared/i18n'
+import { useI18n, type TranslationKey } from '@/shared/i18n'
 
 const BASE_FIELDS = [
   { field: 'input', labelKey: 'ai.catalog.form.inputPrice' },
@@ -485,7 +485,7 @@ function FactorEditor({
 type ConditionKey = 'context' | 'serviceTier' | 'date' | 'time' | 'all' | 'any' | 'not'
 
 /** 每种条件的显示名：添加菜单与已添加的条件块使用同一组 i18n key。 */
-const CONDITION_LABELS: Record<ConditionKey, string> = {
+const CONDITION_LABELS: Record<ConditionKey, TranslationKey> = {
   context: 'ai.catalog.form.conditionContext',
   serviceTier: 'ai.catalog.form.conditionServiceTier',
   date: 'ai.catalog.form.conditionDate',
@@ -493,6 +493,19 @@ const CONDITION_LABELS: Record<ConditionKey, string> = {
   all: 'ai.catalog.form.condition.all',
   any: 'ai.catalog.form.condition.any',
   not: 'ai.catalog.form.condition.not',
+}
+
+/** ISO 星期序号是后端 wire 契约，显式表保证每个序号只映射到已定义的译名。 */
+const WEEKDAYS = [1, 2, 3, 4, 5, 6, 7] as const
+type Weekday = (typeof WEEKDAYS)[number]
+const WEEKDAY_LABELS: Record<Weekday, TranslationKey> = {
+  1: 'ai.catalog.form.weekday.1',
+  2: 'ai.catalog.form.weekday.2',
+  3: 'ai.catalog.form.weekday.3',
+  4: 'ai.catalog.form.weekday.4',
+  5: 'ai.catalog.form.weekday.5',
+  6: 'ai.catalog.form.weekday.6',
+  7: 'ai.catalog.form.weekday.7',
 }
 
 /** 时间条件的最小合法默认值：全天使用 wire 规定的 00:00-24:00。 */
@@ -541,7 +554,7 @@ export function ConditionEditor({
       <legend>{t('ai.catalog.form.condition')}</legend>
       <div className="condition-dimensions">
         {condition.context ? (
-          <ConditionBlock label={t('ai.catalog.form.conditionContext')} onRemove={() => remove('context')}>
+          <ConditionBlock label={t(CONDITION_LABELS.context)} onRemove={() => remove('context')}>
             <div className="form-grid-2">
               {(['gt', 'gte', 'lt', 'lte'] as const).map((field) => (
                 <label className="form-group" key={field}>
@@ -565,7 +578,7 @@ export function ConditionEditor({
         ) : null}
 
         {condition.serviceTier ? (
-          <ConditionBlock label={t('ai.catalog.form.conditionServiceTier')} onRemove={() => remove('serviceTier')}>
+          <ConditionBlock label={t(CONDITION_LABELS.serviceTier)} onRemove={() => remove('serviceTier')}>
             <TextInput
               value={condition.serviceTier.join(', ')}
               placeholder="standard, priority"
@@ -579,7 +592,7 @@ export function ConditionEditor({
         ) : null}
 
         {condition.date ? (
-          <ConditionBlock label={t('ai.catalog.form.conditionDate')} onRemove={() => remove('date')}>
+          <ConditionBlock label={t(CONDITION_LABELS.date)} onRemove={() => remove('date')}>
             <div className="form-grid-2">
               <label className="form-group">
                 <FieldLabel>{t('ai.catalog.form.dateFrom')}</FieldLabel>
@@ -610,7 +623,7 @@ export function ConditionEditor({
         ) : null}
 
         {condition.time ? (
-          <ConditionBlock label={t('ai.catalog.form.conditionTime')} onRemove={() => remove('time')}>
+          <ConditionBlock label={t(CONDITION_LABELS.time)} onRemove={() => remove('time')}>
             <div className="form-grid-2">
               <label className="form-group">
                 <FieldLabel required>{t('ai.catalog.form.timeStart')}</FieldLabel>
@@ -653,7 +666,7 @@ export function ConditionEditor({
             </div>
             <span className="inline-hint">{t('ai.catalog.form.timeHint')}</span>
             <div className="weekday-row">
-              {[1, 2, 3, 4, 5, 6, 7].map((day) => (
+              {WEEKDAYS.map((day) => (
                 <Checkbox
                   key={day}
                   checked={condition.time!.weekdays?.includes(day) ?? false}
@@ -670,7 +683,7 @@ export function ConditionEditor({
                       },
                     })
                   }}
-                  label={t(`ai.catalog.form.weekday.${day}`)}
+                  label={t(WEEKDAY_LABELS[day])}
                 />
               ))}
             </div>
@@ -680,7 +693,7 @@ export function ConditionEditor({
         {(['all', 'any'] as const).map((key) => condition[key] ? (
           <ConditionBlock
             key={key}
-            label={t(`ai.catalog.form.condition.${key}`)}
+            label={t(CONDITION_LABELS[key])}
             onRemove={() => remove(key)}
           >
             <NestedConditions
@@ -693,7 +706,7 @@ export function ConditionEditor({
         ) : null)}
 
         {condition.not ? (
-          <ConditionBlock label={t('ai.catalog.form.condition.not')} onRemove={() => remove('not')}>
+          <ConditionBlock label={t(CONDITION_LABELS.not)} onRemove={() => remove('not')}>
             <ConditionEditor
               condition={condition.not}
               depth={depth + 1}

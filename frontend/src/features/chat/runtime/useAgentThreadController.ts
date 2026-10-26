@@ -38,7 +38,7 @@ import {
 import { isConflictError } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
 import { queryKeys } from '@/shared/lib/query-keys'
-import { translate, useI18n } from '@/shared/i18n'
+import { translate, useI18n, type TranslationKey } from '@/shared/i18n'
 import {
   presentConflict,
   type ConflictPresentation,
@@ -209,7 +209,7 @@ export function useAgentThreadController(
    * 409 意味着本地 version 已过期或 Thread 未处于静默状态。给出明确提示并重新拉取
    * 目标 Thread，使下一次尝试携带当前的 version。
    */
-  function reportMutationError(error: unknown, fallbackKey: string, targetThreadId = threadId) {
+  function reportMutationError(error: unknown, fallbackKey: TranslationKey, targetThreadId = threadId) {
     if (isConflictError(error)) {
       const presented = presentConflict(error)
       if (presented != null) {
@@ -482,7 +482,7 @@ export function useAgentThreadController(
   }
 
   /** 在持久的 Thread snapshot 加载完成前，拦截 mailbox 操作。 */
-  function requireBoundThread(actionKey: string): boolean {
+  function requireBoundThread(actionKey: TranslationKey): boolean {
     if (bound) {
       return true
     }

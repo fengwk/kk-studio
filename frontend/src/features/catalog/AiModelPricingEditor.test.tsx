@@ -122,4 +122,18 @@ describe('ModelPricingEditor source controls', () => {
     const labels = screen.getAllByRole('option').map((option) => option.textContent)
     expect(labels).toEqual(['Context tokens', 'Service tier', 'Date', 'Time', 'All of', 'Any of', 'Not'])
   })
+
+  it('uses the same translated label on an added condition block', () => {
+    // 测试意图：已添加条件块的标题和删除入口必须使用同一组译名，而不是仅菜单正确。
+    setLocale('en-US')
+    const initial = pricing()
+    initial.overrides[0]!.when = {}
+    render(<PricingHarness initial={initial} />)
+    openFirstRule()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add condition' }))
+    fireEvent.click(screen.getByRole('option', { name: 'Context tokens' }))
+
+    expect(screen.getByRole('button', { name: 'Remove Context tokens' })).toBeInTheDocument()
+  })
 })

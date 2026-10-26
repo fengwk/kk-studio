@@ -15,7 +15,7 @@ import {
   type SystemSettingsEditor,
 } from '@/features/settings/useSystemSettingsEditor'
 import { ConflictPresenter } from '@/shared/conflict/ConflictPresenter'
-import { useI18n } from '@/shared/i18n'
+import { requireTranslationKey, useI18n } from '@/shared/i18n'
 import { Button } from '@/shared/ui/controls/Button'
 import { Tabs, type TabItem } from '@/shared/ui/controls/Tabs'
 import { StateBlock } from '@/shared/ui/feedback/StateBlock'
@@ -35,7 +35,7 @@ export function SettingsPage({
     () =>
       (editor.schema?.sections ?? []).map((section) => ({
         id: section.key,
-        labelKey: section.labelKey,
+        labelKey: requireTranslationKey(section.labelKey),
       })),
     [editor.schema],
   )

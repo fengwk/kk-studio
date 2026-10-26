@@ -1,3 +1,4 @@
+import type { TranslationKey } from '@/shared/i18n'
 import type { ProjectWorkflowDTO, ProjectWorkflowStateDTO } from '@/shared/api/generated/contracts'
 
 /** 固定保留状态：必须存在，且不能配置 Agent/Environment/指令/额度，也不能停用。 */
@@ -146,7 +147,7 @@ export type WorkflowValidationError =
   | { code: 'undeclaredTarget'; state: string; target: string }
 
 /** 错误 code 对应的 i18n 文案 key。 */
-export function workflowErrorKey(error: WorkflowValidationError): string {
+export function workflowErrorKey(error: WorkflowValidationError): TranslationKey {
   return `projects.workflow.error.${error.code}`
 }
 

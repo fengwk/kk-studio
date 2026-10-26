@@ -23,7 +23,7 @@ import {
   storageService as defaultStorageService,
   type StorageService,
 } from '@/shared/api/storage-service'
-import { useI18n } from '@/shared/i18n'
+import { useI18n, type TranslationKey } from '@/shared/i18n'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { createUuid } from '@/shared/lib/uuid'
 import { Button } from '@/shared/ui/controls/Button'
@@ -250,7 +250,7 @@ export function IssueDetailModal({
   }, [isOpen])
 
   /** 未决未知操作属于该表单时拒绝修改；否则更新值，偏离冻结 payload 即换新请求身份。 */
-  const guardedChange = (blockedKind: IssueActionKind, blockedMessage: string, apply: () => void) => {
+  const guardedChange = (blockedKind: IssueActionKind, blockedMessage: TranslationKey, apply: () => void) => {
     if (pendingUnknownAction && pendingUnknownAction.kind === blockedKind) {
       setActionError(t(blockedMessage))
       return

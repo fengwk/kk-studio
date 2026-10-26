@@ -1,3 +1,4 @@
+import type { TranslationKey } from '@/shared/i18n'
 import type {
   ConfigSyncImportCheckDTO,
   ConfigSyncItem,
@@ -20,7 +21,7 @@ export const CONFIG_SYNC_KIND_ORDER: ConfigSyncKind[] = [
 export interface ConfigSyncKindGroup {
   key: string
   kindKeys: ConfigSyncKind[]
-  labelKey: string
+  labelKey: TranslationKey
 }
 
 /**
@@ -39,7 +40,7 @@ export const CONFIG_SYNC_GROUPS: ConfigSyncKindGroup[] = [
   { key: 'plugins', kindKeys: ['plugins'], labelKey: 'settings.sync.kind.plugins' },
 ]
 
-export function configSyncKindLabelKey(kind: ConfigSyncKind): string {
+export function configSyncKindLabelKey(kind: ConfigSyncKind): TranslationKey {
   return `settings.sync.kind.${kind}`
 }
 

@@ -6,7 +6,7 @@ import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import { Select } from '@/shared/ui/controls/Select'
 import { TextArea } from '@/shared/ui/controls/TextArea'
 import { TextInput } from '@/shared/ui/controls/TextInput'
-import { useI18n } from '@/shared/i18n'
+import { useI18n, type TranslationKey } from '@/shared/i18n'
 import { findNodeAtLocation, type JSONPath, type Node } from 'jsonc-parser'
 import {
   getNodeSafeValue,
@@ -641,7 +641,7 @@ export function SchemaElementRenderer({
 /** 文件读取失败的可读文案：只说明规则与位置，不回显文件内容。 */
 function fileErrorMessage(
   result: Extract<JsonFileReadResult, { ok: false }>,
-  t: (key: string, values?: Record<string, string | number>) => string,
+  t: (key: TranslationKey, values?: Record<string, string | number>) => string,
 ): string {
   switch (result.reason) {
     case 'too-large':

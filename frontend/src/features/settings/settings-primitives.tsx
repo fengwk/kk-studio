@@ -1,6 +1,6 @@
 import { useId, type ReactNode } from 'react'
 import { Switch } from '@/shared/ui/controls/Switch'
-import { useI18n } from '@/shared/i18n'
+import { useI18n, type TranslationKey } from '@/shared/i18n'
 import { NumberInput } from '@/shared/ui/controls/NumberInput'
 import { Select } from '@/shared/ui/controls/Select'
 import { TagInput } from '@/shared/ui/controls/TagInput'
@@ -9,15 +9,17 @@ import { TextInput } from '@/shared/ui/controls/TextInput'
 /** 配置生效时机：下次调用、下次 HTTP 请求或进程重启。 */
 export type ApplyTiming = 'nextInvocation' | 'nextHttpRequest' | 'restart'
 
+const APPLY_TIMING_LABEL_KEYS: Record<ApplyTiming, TranslationKey> = {
+  nextInvocation: 'settings.applyTiming.nextInvocation',
+  nextHttpRequest: 'settings.applyTiming.nextHttpRequest',
+  restart: 'settings.applyTiming.restart',
+}
+
 export function ApplyTimingBadge({ timing }: { timing: ApplyTiming }) {
   const { t } = useI18n()
   return (
     <span className="settings-apply-timing" data-timing={timing}>
-      {t({
-        nextInvocation: 'settings.applyTiming.nextInvocation',
-        nextHttpRequest: 'settings.applyTiming.nextHttpRequest',
-        restart: 'settings.applyTiming.restart',
-      }[timing])}
+      {t(APPLY_TIMING_LABEL_KEYS[timing])}
     </span>
   )
 }

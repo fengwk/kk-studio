@@ -1,3 +1,5 @@
+import type { TranslationKey } from '@/shared/i18n'
+
 /**
  * 快捷键展示唯一事实源：扁平 {@link ShortcutDefinition} 列表。
  *
@@ -15,9 +17,9 @@ export interface ShortcutDefinition {
   /** 展示键序，如 `Esc`、`Ctrl/Cmd+K`。 */
   keys: string
   /** 动作短标签的 i18n key。 */
-  labelKey: string
+  labelKey: TranslationKey
   /** 动作详细说明的 i18n key。 */
-  descriptionKey: string
+  descriptionKey: TranslationKey
 }
 
 export const SHORTCUT_SCOPE_ORDER: readonly ShortcutScope[] = [
@@ -27,7 +29,7 @@ export const SHORTCUT_SCOPE_ORDER: readonly ShortcutScope[] = [
   'canvas',
 ]
 
-export const SHORTCUT_SCOPE_TITLE_KEYS: Record<ShortcutScope, string> = {
+export const SHORTCUT_SCOPE_TITLE_KEYS: Record<ShortcutScope, TranslationKey> = {
   application: 'ai.runtime.shortcuts.group.application',
   thread: 'ai.runtime.shortcuts.group.thread',
   debug: 'ai.runtime.shortcuts.group.debug',

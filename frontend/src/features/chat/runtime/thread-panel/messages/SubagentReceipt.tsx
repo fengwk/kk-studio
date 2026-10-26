@@ -17,11 +17,11 @@ import { subagentTaskPreview } from '@/features/chat/runtime/thread-panel/messag
 import { SystemMessageBody } from '@/features/chat/runtime/thread-panel/messages/SystemMessageBody'
 import { announceTranscriptReading } from '@/features/chat/runtime/transcript-reading'
 import type { EntryNotification } from '@/features/chat/runtime/thread-timeline-types'
-import { useI18n } from '@/shared/i18n'
+import { useI18n, type TranslationKey } from '@/shared/i18n'
 import './subagent-receipt.css'
 
 /** 三终态的真实短标签：completed 只表示该次执行已返回，不代表目标已验收。 */
-const STATE_LABEL_KEYS: Record<SubagentReceiptState, string> = {
+const STATE_LABEL_KEYS: Record<SubagentReceiptState, TranslationKey> = {
   completed: 'ai.runtime.notification.entry.subagentState.completed',
   error: 'ai.runtime.task.state.error',
   cancelled: 'ai.runtime.notification.entry.cancelled',

@@ -15,7 +15,7 @@ import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import { agentService } from '@/shared/api/agent-service'
 import { queryKeys } from '@/shared/lib/query-keys'
-import { useI18n } from '@/shared/i18n'
+import { useI18n, type TranslationKey } from '@/shared/i18n'
 import { trimToNull } from '@/features/catalog/ai-resource-draft-primitives'
 import type {
   SkillPackageCreateDTO,
@@ -45,6 +45,17 @@ function checkStatusTone(status: string): BadgeTone {
     default:
       return 'warning'
   }
+}
+
+const CHECK_STATUS_LABEL_KEYS = {
+  UNCHECKED: 'ai.skillPackages.status.UNCHECKED',
+  UP_TO_DATE: 'ai.skillPackages.status.UP_TO_DATE',
+  UPDATE_AVAILABLE: 'ai.skillPackages.status.UPDATE_AVAILABLE',
+  CHECK_FAILED: 'ai.skillPackages.status.CHECK_FAILED',
+} as const satisfies Record<string, TranslationKey>
+
+function isCheckStatus(status: string): status is keyof typeof CHECK_STATUS_LABEL_KEYS {
+  return Object.hasOwn(CHECK_STATUS_LABEL_KEYS, status)
 }
 
 export function SkillPackagesPage() {
@@ -148,6 +159,9 @@ export function SkillPackagesPage() {
       {filteredPackages.map((pkg) => {
         const isChecking = checkingPackage === pkg.packageName
         const isUpdating = updatingPackage === pkg.packageName
+        const checkStatusLabel = isCheckStatus(pkg.checkStatus)
+          ? t(CHECK_STATUS_LABEL_KEYS[pkg.checkStatus])
+          : pkg.checkStatus
         const hasUpdate =
           Boolean(pkg.observedHeadCommit) && pkg.observedHeadCommit !== pkg.currentCommit
 
@@ -201,7 +215,7 @@ export function SkillPackagesPage() {
             subtitle={pkg.description || '—'}
             badge={
               <Badge tone={checkStatusTone(pkg.checkStatus)} data-testid="check-status-pill">
-                {t(`ai.skillPackages.status.${pkg.checkStatus}`)}
+                {checkStatusLabel}
               </Badge>
             }
             meta={rows}

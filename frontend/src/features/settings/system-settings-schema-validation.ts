@@ -9,6 +9,7 @@ import type {
   SystemSettingsSchemaFieldDTO,
   SystemSettingsSchemaFieldType,
 } from '@/shared/api/generated/contracts'
+import { isTranslationKey } from '@/shared/i18n'
 
 const FIELD_TYPES = new Set<SystemSettingsSchemaFieldType>([
   'BOOLEAN',
@@ -45,7 +46,9 @@ export function validateSystemSettingsSchema(
       if (
         !nonBlank(section.key)
         || !nonBlank(section.labelKey)
+        || !isTranslationKey(section.labelKey)
         || !nonBlank(section.descriptionKey)
+        || !isTranslationKey(section.descriptionKey)
         || typeof section.restartRequired !== 'boolean'
         || !Array.isArray(section.groups)
         || section.groups.length === 0
@@ -60,7 +63,9 @@ export function validateSystemSettingsSchema(
         if (
           !nonBlank(group.key)
           || !nonBlank(group.labelKey)
+          || !isTranslationKey(group.labelKey)
           || !nonBlank(group.descriptionKey)
+          || !isTranslationKey(group.descriptionKey)
           || typeof group.restartRequired !== 'boolean'
           || (group.applyTiming != null && !APPLY_TIMINGS.has(group.applyTiming))
           || !Array.isArray(group.fields)
@@ -98,9 +103,10 @@ function validateField(
   if (
     !nonBlank(field.path)
     || !nonBlank(field.labelKey)
+    || !isTranslationKey(field.labelKey)
     || !FIELD_TYPES.has(field.type)
     || typeof field.nullable !== 'boolean'
-    || (field.hintKey != null && !nonBlank(field.hintKey))
+    || (field.hintKey != null && (!nonBlank(field.hintKey) || !isTranslationKey(field.hintKey)))
   ) {
     return `invalid settings schema field: ${field.path ?? '<missing>'}`
   }
@@ -124,6 +130,7 @@ function validateField(
       if (
         !nonBlank(option.value)
         || !nonBlank(option.labelKey)
+        || !isTranslationKey(option.labelKey)
         || optionValues.has(option.value)
       ) {
         return `invalid settings schema option: ${field.path}`

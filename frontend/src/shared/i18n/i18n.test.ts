@@ -45,8 +45,11 @@ describe('i18n runtime', () => {
 
   it('returns a visible deterministic marker for missing messages', () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const missingKey: string = 'missing.example'
     try {
-      expect(translate('missing.example')).toBe('⟦missing:missing.example⟧')
+      // 测试意图：未知 key 在编译期被拒绝，同时运行时仍保留缺失文案标记。
+      // @ts-expect-error string 类型的动态 key 不得传入 translate。
+      expect(translate(missingKey)).toBe('⟦missing:missing.example⟧')
       expect(consoleError).toHaveBeenCalledWith('Missing i18n message: missing.example')
     } finally {
       consoleError.mockRestore()
