@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.web.runtime;
 
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.context.annotation.Bean;
@@ -24,6 +25,10 @@ import fun.fengwk.kkstudio.harness.infra.realtime.RealtimeBus;
 import fun.fengwk.kkstudio.harness.infra.realtime.RealtimePayloadBuffer;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitConfirmationRetry;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitConfirmer;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitJournal;
+import fun.fengwk.kkstudio.harness.runtime.execution.FileExecutionExitJournal;
 import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
@@ -81,6 +86,7 @@ import fun.fengwk.kkstudio.web.environment.ide.IdeGenerationCloseListener;
 import javax.sql.DataSource;
 
 import java.net.http.HttpClient;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
@@ -345,6 +351,26 @@ public class HarnessRuntimeConfiguration {
     return Executors.newVirtualThreadPerTaskExecutor();
   }
 
+  /** 退出确认 write-ahead journal。部署目录必须是持久卷，且每个 Studio 实例独占；文件锁在进程生命周期内持有。 */
+  @Bean(destroyMethod = "close")
+  public ExecutionExitJournal executionExitJournal(
+      @Value("${kk-studio.harness.runtime.exit-confirmation-directory}") String directory) {
+    return new FileExecutionExitJournal(Path.of(directory));
+  }
+
+  @Bean
+  public ExecutionExitConfirmer executionExitConfirmer(
+      HarnessStore store, ExecutionExitJournal executionExitJournal, Clock clock) {
+    return new ExecutionExitConfirmer(store, executionExitJournal, clock);
+  }
+
+  /** 每秒从 journal 派发一次重放；JDBC 只在 worker 线程执行，关闭时有界取消。 */
+  @Bean(initMethod = "start", destroyMethod = "close")
+  public ExecutionExitConfirmationRetry executionExitConfirmationRetry(
+      ExecutionExitConfirmer executionExitConfirmer) {
+    return new ExecutionExitConfirmationRetry(executionExitConfirmer);
+  }
+
   @Bean(destroyMethod = "close")
   public ModelProcessor modelProcessor(
       HarnessStore store,
@@ -354,7 +380,8 @@ public class HarnessRuntimeConfiguration {
       Clock clock,
       @Qualifier("harnessProcessorScheduler") ScheduledExecutorService scheduler,
       @Qualifier("harnessHeartbeatWorkerExecutor") Executor heartbeatWorker,
-      @Qualifier("harnessModelExecutionExecutor") ExecutorService executionExecutor) {
+      @Qualifier("harnessModelExecutionExecutor") ExecutorService executionExecutor,
+      ExecutionExitConfirmer executionExitConfirmer) {
     return new ModelProcessor(
         store,
         modelGateway,
@@ -363,7 +390,8 @@ public class HarnessRuntimeConfiguration {
         clock,
         scheduler,
         heartbeatWorker,
-        executionExecutor);
+        executionExecutor,
+        executionExitConfirmer);
   }
 
   @Bean(destroyMethod = "close")
@@ -374,9 +402,17 @@ public class HarnessRuntimeConfiguration {
       ToolProcessorConfig config,
       Clock clock,
       @Qualifier("harnessProcessorScheduler") ScheduledExecutorService scheduler,
-      @Qualifier("harnessHeartbeatWorkerExecutor") Executor heartbeatWorker) {
+      @Qualifier("harnessHeartbeatWorkerExecutor") Executor heartbeatWorker,
+      ExecutionExitConfirmer executionExitConfirmer) {
     return new ToolProcessor(
-        store, toolGateway, realtimeEventSink, config, clock, scheduler, heartbeatWorker);
+        store,
+        toolGateway,
+        realtimeEventSink,
+        config,
+        clock,
+        scheduler,
+        heartbeatWorker,
+        executionExitConfirmer);
   }
 
   @Bean

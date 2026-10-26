@@ -196,7 +196,7 @@ class HarnessOwnerQueryServiceTest {
                 List.of(),
                 0,
                 false,
-                false,
+                List.of(),
                 false));
     when(runtime.getSession(sessionId)).thenReturn(new Session(sessionId, "agent session", T0));
     when(runtime.getSessionEntries(sessionId)).thenReturn(List.of());
@@ -266,7 +266,7 @@ class HarnessOwnerQueryServiceTest {
             List.of(),
             0,
             false,
-            false,
+            List.of(),
             false);
     when(runtime.listThreadsBySession(sessionId)).thenReturn(List.of(thread));
     when(runtime.getThreadSnapshot(threadId)).thenReturn(snapshot);
@@ -295,7 +295,7 @@ class HarnessOwnerQueryServiceTest {
                 List.of(),
                 0,
                 false,
-                false,
+                List.of(),
                 false));
     String reminderHeadPreview =
         service.listThreadSummaries(sessionId).getFirst().getHeadMessagePreview();
@@ -343,7 +343,7 @@ class HarnessOwnerQueryServiceTest {
                   List.of(),
                   0,
                   false,
-                  false,
+                  List.of(),
                   false));
     }
 
@@ -383,7 +383,7 @@ class HarnessOwnerQueryServiceTest {
                 List.of(),
                 0,
                 false,
-                false,
+                List.of(),
                 false));
 
     HarnessThreadSummaryDTO idle = service.listThreadSummaries(sessionId).getFirst();

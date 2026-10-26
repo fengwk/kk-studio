@@ -20,6 +20,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
 import fun.fengwk.kkstudio.harness.environment.capability.ExpectedFile;
+import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEditReview;
@@ -77,7 +78,8 @@ class ToolProcessorPreflightTest {
                 ToolProcessorTestSupport.BUSY_FALLBACK_DELAY),
             fixture.clock,
             fixture.scheduler,
-            Runnable::run);
+            Runnable::run,
+            TestExecutionExitConfirmer.create(gated, fixture.clock));
     ClaimedWork claimA =
         ToolProcessorTestSupport.claim(
             fixture.store,
@@ -261,7 +263,8 @@ class ToolProcessorPreflightTest {
                 ToolProcessorTestSupport.BUSY_FALLBACK_DELAY),
             fixture.clock,
             fixture.scheduler,
-            Runnable::run);
+            Runnable::run,
+            TestExecutionExitConfirmer.create(recording, fixture.clock));
 
     assertEquals(
         ProcessResult.TERMINATED,
@@ -1001,7 +1004,8 @@ class ToolProcessorPreflightTest {
                 ToolProcessorTestSupport.BUSY_FALLBACK_DELAY),
             fixture.clock,
             dead,
-            Runnable::run);
+            Runnable::run,
+            TestExecutionExitConfirmer.create(fixture.store, fixture.clock));
     fixture.gateway.queuePreflightAllow();
     fixture.gateway.queueRun(progress -> ToolProcessorTestSupport.blockUntilInterrupted());
 
@@ -1224,7 +1228,8 @@ class ToolProcessorPreflightTest {
                 ToolProcessorTestSupport.BUSY_FALLBACK_DELAY),
             fixture.clock,
             scheduler,
-            Runnable::run);
+            Runnable::run,
+            TestExecutionExitConfirmer.create(failingStore, fixture.clock));
     ClaimedWork claim =
         ToolProcessorTestSupport.claim(
             fixture.store,
@@ -1291,7 +1296,8 @@ class ToolProcessorPreflightTest {
                 ToolProcessorTestSupport.BUSY_FALLBACK_DELAY),
             fixture.clock,
             fixture.scheduler,
-            Runnable::run);
+            Runnable::run,
+            TestExecutionExitConfirmer.create(fixture.store, fixture.clock));
     try {
       assertEquals(
           ProcessResult.LOST_OWNERSHIP,

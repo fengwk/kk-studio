@@ -116,6 +116,7 @@ services:
       KK_STUDIO_HARNESS_DISPATCHER_REJECTION_DELAY: ${KK_STUDIO_HARNESS_DISPATCHER_REJECTION_DELAY:-1s}
       KK_STUDIO_HARNESS_DISPATCHER_WORKER_CONCURRENCY: ${KK_STUDIO_HARNESS_DISPATCHER_WORKER_CONCURRENCY:-16}
       KK_STUDIO_HARNESS_DISPATCHER_WORKER_QUEUE_CAPACITY: ${KK_STUDIO_HARNESS_DISPATCHER_WORKER_QUEUE_CAPACITY:-64}
+      KK_STUDIO_EXIT_CONFIRMATION_DIRECTORY: /app/execution-exits
       KK_STUDIO_MODEL_MAX_CONCURRENCY: ${KK_STUDIO_MODEL_MAX_CONCURRENCY:-16}
       KK_STUDIO_TOOL_MAX_CONCURRENCY: ${KK_STUDIO_TOOL_MAX_CONCURRENCY:-64}
       KK_STUDIO_ENVIRONMENT_GATEWAY_MAX_MESSAGE_BYTES: ${KK_STUDIO_ENVIRONMENT_GATEWAY_MAX_MESSAGE_BYTES:-16777216}
@@ -134,6 +135,9 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
+    # 每个 App 实例独占自己的写前日志卷；不要与其它 Studio 实例共享。
+    volumes:
+      - kk-studio-execution-exits:/app/execution-exits
     healthcheck:
       test:
         - CMD
@@ -148,3 +152,4 @@ services:
 volumes:
   kk-studio-postgres:
   kk-studio-minio:
+  kk-studio-execution-exits:

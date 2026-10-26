@@ -214,8 +214,10 @@ class HarnessRuntimeStopExitContractTest {
                                   remote.parentExecutionId(),
                                   ExecutionExitState.UNCONFIRMED,
                                   remote.registeredAt(),
+                                  null,
                                   null),
-                              ExecutionExitState.NOT_STARTED);
+                              ExecutionExitState.NOT_STARTED,
+                              NOW);
                         }));
         assertEquals(
             "execution " + remoteId + " identity cannot be replaced", mismatch.getMessage());
@@ -488,6 +490,7 @@ class HarnessRuntimeStopExitContractTest {
                 null,
                 ExecutionExitState.UNCONFIRMED,
                 local.registeredAt(),
+                null,
                 null);
         ExecutionExitFact foreignRemote =
             new ExecutionExitFact(
@@ -500,6 +503,7 @@ class HarnessRuntimeStopExitContractTest {
                 foreignParent.executionId(),
                 ExecutionExitState.UNCONFIRMED,
                 NOW,
+                null,
                 null);
         fixture.store.transaction(
             tx -> {
@@ -515,7 +519,8 @@ class HarnessRuntimeStopExitContractTest {
                 IllegalStateException.class,
                 () -> observer.get().confirmExit(unknown),
                 "an unregistered remote acknowledgement must fail");
-        assertEquals("remote execution " + unknown + " remains unconfirmed", missing.getMessage());
+        assertEquals(
+            "thread still exists but execution " + unknown + " is missing", missing.getMessage());
         IllegalArgumentException foreign =
             assertThrows(
                 IllegalArgumentException.class,

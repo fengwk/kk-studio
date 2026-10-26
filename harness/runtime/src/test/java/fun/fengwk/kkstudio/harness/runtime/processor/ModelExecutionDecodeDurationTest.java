@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
@@ -326,7 +327,8 @@ class ModelExecutionDecodeDurationTest {
               Runnable::run,
               Runnable::run,
               ignored -> {},
-              nano);
+              nano,
+              TestExecutionExitConfirmer.create(store, Clock.fixed(NOW, ZoneOffset.UTC)));
       assertTrue(execution.startHeartbeat(), "heartbeat must start");
       assertTrue(execution.markRunning(), "READY must persist RUNNING");
     }

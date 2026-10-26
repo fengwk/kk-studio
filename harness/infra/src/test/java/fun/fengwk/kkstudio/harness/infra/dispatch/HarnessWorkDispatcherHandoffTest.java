@@ -52,6 +52,7 @@ import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessorConfig;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.ExecutionExitTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
@@ -418,7 +419,8 @@ class HarnessWorkDispatcherHandoffTest {
             clock,
             processorScheduler,
             Runnable::run,
-            Runnable::run);
+            Runnable::run,
+            ExecutionExitTestSupport.confirmer(store, clock));
     ToolProcessor toolProcessor =
         new ToolProcessor(
             store,
@@ -428,7 +430,8 @@ class HarnessWorkDispatcherHandoffTest {
                 leaseConfig, () -> noRetry, Duration.ofSeconds(7), Duration.ofSeconds(9)),
             clock,
             processorScheduler,
-            Runnable::run);
+            Runnable::run,
+            ExecutionExitTestSupport.confirmer(store, clock));
     HarnessWorkDispatcher dispatcher =
         new HarnessWorkDispatcher(
             store,
@@ -515,7 +518,8 @@ class HarnessWorkDispatcherHandoffTest {
             clock,
             processorScheduler,
             Runnable::run,
-            Runnable::run);
+            Runnable::run,
+            ExecutionExitTestSupport.confirmer(store, clock));
     ToolProcessor toolProcessor =
         new ToolProcessor(
             store,
@@ -525,7 +529,8 @@ class HarnessWorkDispatcherHandoffTest {
                 leaseConfig, () -> noRetry, Duration.ofSeconds(7), Duration.ofSeconds(9)),
             clock,
             processorScheduler,
-            Runnable::run);
+            Runnable::run,
+            ExecutionExitTestSupport.confirmer(store, clock));
     CopyOnWriteArrayList<UUID> threadHandoffs = new CopyOnWriteArrayList<>();
     Consumer<ClaimedWork> recordThreadHandoff =
         claim -> {

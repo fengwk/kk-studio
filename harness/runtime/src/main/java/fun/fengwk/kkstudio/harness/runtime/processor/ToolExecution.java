@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import fun.fengwk.kkstudio.common.result.BinaryResultContent;
 import fun.fengwk.kkstudio.common.result.ResultContent;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitKind;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitLedger;
@@ -62,6 +63,7 @@ import java.util.function.Consumer;
 final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution {
 
   private final HarnessStore store;
+  private final ExecutionExitConfirmer exitConfirmer;
   private final RealtimeEventSink realtimeEventSink;
   private final ClaimedWork claim;
   private final UUID invocationId;
@@ -102,8 +104,10 @@ final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution {
       Clock clock,
       ScheduledExecutorService scheduler,
       Executor heartbeatWorker,
-      Consumer<ToolExecution> ownerRelease) {
+      Consumer<ToolExecution> ownerRelease,
+      ExecutionExitConfirmer exitConfirmer) {
     this.store = Objects.requireNonNull(store, "store");
+    this.exitConfirmer = Objects.requireNonNull(exitConfirmer, "exitConfirmer");
     this.realtimeEventSink = Objects.requireNonNull(realtimeEventSink, "realtimeEventSink");
     this.claim = Objects.requireNonNull(claim, "claim");
     this.invocationId = claim.target().id();
@@ -177,34 +181,21 @@ final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution {
         throw new IllegalStateException(
             "remote execution " + remoteExecutionId + " has no registered local generation");
       }
-      store.transaction(
-          tx -> {
-            ExecutionExitLedger.lockAncestorChain(tx, threadId);
-            if (tx.lockThread(threadId).isEmpty()) {
-              // 与本地确认一致：合法深删已连同执行事实一起提交，迟到 ACK 无事实可确认；缺失本身不构成退出证据。
-              return null;
-            }
-            ExecutionExitFact expected =
-                new ExecutionExitFact(
-                    remoteExecutionId,
-                    local.threadId(),
-                    local.invocationId(),
-                    local.attempt(),
-                    local.ownerLeaseToken(),
-                    ExecutionExitKind.REMOTE,
-                    local.executionId(),
-                    ExecutionExitState.UNCONFIRMED,
-                    tx.now(),
-                    null);
-            ExecutionExitLedger.Confirmation confirmation =
-                ExecutionExitLedger.confirm(tx, expected, state)
-                    .orElseThrow(
-                        () ->
-                            new IllegalStateException(
-                                "remote execution " + remoteExecutionId + " remains unconfirmed"));
-            ExecutionExitLedger.advanceAfterConfirmation(tx, threadId, confirmation);
-            return null;
-          });
+      ExecutionExitFact expected =
+          new ExecutionExitFact(
+              remoteExecutionId,
+              local.threadId(),
+              local.invocationId(),
+              local.attempt(),
+              local.ownerLeaseToken(),
+              ExecutionExitKind.REMOTE,
+              local.executionId(),
+              ExecutionExitState.UNCONFIRMED,
+              local.registeredAt(),
+              null,
+              null);
+      // 远端交付失败必须显式抛出；合法深删由 confirmer 按 missing-safe 结束。
+      exitConfirmer.confirm(expected, state);
     }
   }
 
@@ -335,22 +326,11 @@ final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution {
       return;
     }
     try {
-      store.transaction(
-          tx -> {
-            ExecutionExitLedger.lockAncestorChain(tx, threadId);
-            if (tx.lockThread(threadId).isEmpty()) {
-              // 合法深删已先提交，不再回写该 Thread；缺失本身不构成退出证据。
-              return null;
-            }
-            ExecutionExitLedger.Confirmation confirmation =
-                ExecutionExitLedger.confirm(tx, local, state)
-                    .orElseThrow(
-                        () ->
-                            new IllegalStateException(
-                                "tool execution " + local.executionId() + " remains unconfirmed"));
-            ExecutionExitLedger.advanceAfterConfirmation(tx, threadId, confirmation);
-            return null;
-          });
+      ExecutionExitConfirmer.Result result = exitConfirmer.confirm(local, state);
+      if (result.outcome() == ExecutionExitConfirmer.Outcome.THREAD_MISSING) {
+        // 合法深删已先提交，不再回写该 Thread；缺失本身不构成退出证据。
+        return;
+      }
     } catch (RuntimeException failure) {
       log.warn(
           "cannot confirm tool execution exit for {}; phase=TOOL_EXIT_CONFIRM; exception={}",

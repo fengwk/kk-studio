@@ -35,6 +35,7 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandBatchDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandCreateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandOwnerDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandTargetDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessExecutionAbandonDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelRequestDebugRequestDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessNameUpdateDTO;
@@ -148,6 +149,19 @@ public final class HarnessRuntimeRequestMapper {
         parseUuid(dto.getStopRequestId(), "stopRequestId"),
         parseNonNegativeDecimal(dto.getExpectedVersion(), "expectedVersion"));
   }
+
+  /** 解析放弃退出确认目标；执行 id 与 Thread id 都是 canonical UUID，expectedVersion 是 non-negative bigint。 */
+  public static AbandonExecutionTarget toAbandonExecutionTarget(
+      String threadId, String executionId, HarnessExecutionAbandonDTO dto) {
+    requireNonNull(dto, "abandonDTO");
+    return new AbandonExecutionTarget(
+        parseUuid(threadId, "threadId"),
+        parseUuid(executionId, "executionId"),
+        parseNonNegativeDecimal(dto.getExpectedVersion(), "expectedVersion"));
+  }
+
+  /** 已校验的放弃退出确认目标。 */
+  public record AbandonExecutionTarget(UUID threadId, UUID executionId, long expectedVersion) {}
 
   public static SetThreadYoloCommand toSetThreadYoloCommand(
       String threadId, HarnessThreadYoloUpdateDTO dto) {

@@ -98,10 +98,13 @@ Session/Thread 命名是独立控制面；响应状态取 Runtime Snapshot 的�
 Thread 控制面按认证、资源权限与请求格式收紧，不按 Thread 的产品归属拒绝。
 `GET /api/threads/{threadId}` 的 Snapshot 携带 `thread.executionControl`（`RUNNABLE` / `STOPPED`）、
 派生的 `thread.status`（`RUNNING` / `WAITING` / `IDLE`，只描述该 Thread 自身，不递归子树）、每条 Entry 的读取时 `usageCost` 与 `stopReceipts`；
+`unconfirmedExecutions` 列出该 Thread 尚未退出的具体执行（`executionId`、`invocationId`、`attempt`、`kind`、`registeredAt`）；
 `POST /api/threads/{threadId}/stop` 以 root `expectedVersion` + 稳定 `stopRequestId` 执行精确 CAS，
 回执 `status` 为 `STOPPED` / `REPLAYED`、`thread` 是目标权威投影、`stoppedThreads` 是本次完整受影响集合的
 逐 Thread 持久回执（`threadId`、`stopRequestId`、`stoppedTurnEndEntryId`、`cancelledCommandCount`、
 仅含 `USER_MESSAGE` / `GOAL` 的 `cancelledInputs`）。
+`POST /api/threads/{threadId}/executions/{executionId}/abandon` 接受 `{"expectedVersion":"<bigint>"}`，显式放弃一个具体执行代次并返回最新 Snapshot；
+它与 Snapshot 使用相同的认证与资源读取边界，子 Thread 也可放弃，首次放弃要求 `STOPPED` 与精确 version，重复放弃或已确认真实退出是安全 replay。
 
 ### 请求诊断与预览
 

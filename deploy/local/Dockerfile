@@ -76,7 +76,7 @@ RUN set -eux; \
             --shell /usr/sbin/nologin \
             --comment "kk-studio app" \
             kkstudio; \
-    mkdir -p /app/logs; \
+    mkdir -p /app/logs /app/execution-exits; \
     chown -R kkstudio:kkstudio /app
 
 WORKDIR /app

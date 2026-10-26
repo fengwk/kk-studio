@@ -613,7 +613,7 @@ class PluginPromptTaskServiceTest {
         List.of(),
         0,
         false,
-        false,
+        List.of(),
         false);
   }
 }

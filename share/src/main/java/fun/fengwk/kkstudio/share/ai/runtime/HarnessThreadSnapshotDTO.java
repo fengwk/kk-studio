@@ -47,4 +47,7 @@ public class HarnessThreadSnapshotDTO {
 
   /** 该 Thread 自己的、包含可恢复人工输入的持久 Stop 回执（不可变列表，默认空）。 */
   private List<HarnessStoppedThreadReceiptDTO> stopReceipts = List.of();
+
+  /** 当前仍为 UNCONFIRMED 的执行代次（不含已放弃或已确认历史；不可变列表，默认空）。 */
+  private List<HarnessExecutionExitDTO> unconfirmedExecutions = List.of();
 }

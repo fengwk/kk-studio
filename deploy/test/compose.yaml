@@ -128,8 +128,11 @@ services:
       KK_STUDIO_STORAGE_MEDIA_FFMPEG_BINARY: ffmpeg
       KK_STUDIO_STORAGE_MEDIA_TEMP_DIR: /tmp
       KK_STUDIO_CANVAS_FUNCTION_FAKE_ENABLED: "true"
+      KK_STUDIO_EXIT_CONFIRMATION_DIRECTORY: /app/execution-exits
     ports:
       - "127.0.0.1:${CANVAS_TEST_APP_PORT:-18088}:8080"
+    volumes:
+      - execution-exits:/app/execution-exits
     depends_on:
       postgres:
         condition: service_healthy
@@ -145,6 +148,7 @@ services:
 volumes:
   postgres-data:
   minio-data:
+  execution-exits:
 
 networks:
   canvas-test:

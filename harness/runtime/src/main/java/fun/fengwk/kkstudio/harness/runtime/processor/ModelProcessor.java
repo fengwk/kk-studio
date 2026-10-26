@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 
 import lombok.extern.slf4j.Slf4j;
 
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
@@ -59,6 +60,7 @@ import java.util.concurrent.ScheduledExecutorService;
 public final class ModelProcessor implements AutoCloseable {
 
   private final HarnessStore store;
+  private final ExecutionExitConfirmer exitConfirmer;
   private final ModelGateway gateway;
   private final RealtimeEventSink realtimeEventSink;
   private final ModelProcessorConfig config;
@@ -80,8 +82,10 @@ public final class ModelProcessor implements AutoCloseable {
       Clock clock,
       ScheduledExecutorService scheduler,
       Executor heartbeatWorker,
-      Executor executionExecutor) {
+      Executor executionExecutor,
+      ExecutionExitConfirmer exitConfirmer) {
     this.store = Objects.requireNonNull(store, "store");
+    this.exitConfirmer = Objects.requireNonNull(exitConfirmer, "exitConfirmer");
     this.gateway = Objects.requireNonNull(gateway, "gateway");
     this.realtimeEventSink = Objects.requireNonNull(realtimeEventSink, "realtimeEventSink");
     this.config = Objects.requireNonNull(config, "config");
@@ -200,7 +204,8 @@ public final class ModelProcessor implements AutoCloseable {
             scheduler,
             heartbeatWorker,
             executionExecutor,
-            this::release);
+            this::release,
+            exitConfirmer);
     if (!ticket.attach(execution)) {
       execution.abandon();
       return admissionGuard.isClosed() ? abortStart(claim) : ProcessResult.LOST_OWNERSHIP;

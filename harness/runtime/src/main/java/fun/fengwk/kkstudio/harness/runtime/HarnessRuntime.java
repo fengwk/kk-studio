@@ -4,6 +4,9 @@ import lombok.extern.slf4j.Slf4j;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitLedger;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.interaction.EnvironmentToolWait;
@@ -240,7 +243,7 @@ public final class HarnessRuntime {
                     tx.loadStopReceiptsByThread(thread.id()),
                     incompleteChildJoins,
                     unconsumedAppliedNotifications,
-                    !tx.loadUnconfirmedExecutions(thread.id()).isEmpty(),
+                    tx.loadUnconfirmedExecutions(thread.id()),
                     tx.hasIncompleteOwnerChildJoin(thread.id())));
           }
           snapshots.sort(
@@ -393,6 +396,66 @@ public final class HarnessRuntime {
               cancelLocalExecutions(toolExecutionCanceller, "Tool", stopped.toolExecutionIds());
             });
     return commit.result();
+  }
+
+  /**
+   * 用户显式放弃等待一个具体执行代次的退出确认。放弃是独立事实，不冒充物理退出，也不取消任何执行。
+   *
+   * <p>只接受已 STOPPED 的 Thread；锁序为执行树 -&gt; Session -&gt; Thread。首次放弃要求 expectedVersion
+   * 精确匹配，并在同一事务内推进 Thread version 与已收敛的 Join 结算。重复放弃或已被真实证据确认的同一事实是安全 replay，不因旧 expectedVersion
+   * 失败；执行不属于目标 Thread、Thread 仍 RUNNABLE 或版本过期均拒绝。Thread 深删后不存在可放弃事实。
+   */
+  public ThreadSnapshot abandonExecution(UUID threadId, UUID executionId, long expectedVersion) {
+    Objects.requireNonNull(threadId, "threadId");
+    Objects.requireNonNull(executionId, "executionId");
+    if (expectedVersion < 0) {
+      throw new IllegalArgumentException("expectedVersion must not be negative");
+    }
+    store.transaction(
+        tx -> {
+          ExecutionExitLedger.lockAncestorChain(tx, threadId);
+          ThreadState thread = tx.lockThread(threadId).orElse(null);
+          if (thread == null) {
+            throw new HarnessRuntimeNotFoundException("thread " + threadId + " does not exist");
+          }
+          ExecutionExitFact stored = tx.findExecution(executionId).orElse(null);
+          if (stored == null) {
+            throw new HarnessRuntimeNotFoundException(
+                "execution " + executionId + " does not exist");
+          }
+          if (!stored.threadId().equals(threadId)) {
+            throw conflict(
+                HarnessRuntimeConflictException.Reason.EXIT_ABANDON_NOT_APPLICABLE,
+                "execution " + executionId + " does not belong to thread " + threadId);
+          }
+          if (stored.state() == ExecutionExitState.ABANDONED || stored.state().confirmed()) {
+            return null;
+          }
+          if (!thread.executionControl().isStopped()) {
+            throw conflict(
+                HarnessRuntimeConflictException.Reason.EXIT_ABANDON_NOT_APPLICABLE,
+                "thread " + threadId + " must be STOPPED before an exit can be abandoned");
+          }
+          if (thread.version() != expectedVersion) {
+            throw conflict(
+                HarnessRuntimeConflictException.Reason.STALE_VERSION,
+                "thread "
+                    + threadId
+                    + " version is "
+                    + thread.version()
+                    + ", expected "
+                    + expectedVersion);
+          }
+          ExecutionExitLedger.Confirmation confirmation =
+              ExecutionExitLedger.abandon(tx, stored, tx.now())
+                  .orElseThrow(
+                      () ->
+                          new IllegalStateException(
+                              "execution " + executionId + " remains unconfirmed"));
+          ExecutionExitLedger.advanceAfterConfirmation(tx, threadId, confirmation);
+          return null;
+        });
+    return getThreadSnapshot(threadId);
   }
 
   /**
@@ -611,7 +674,7 @@ public final class HarnessRuntime {
     int incompleteChildJoins = tx.countIncompleteChildJoins(thread.id());
     boolean unconsumedAppliedNotifications =
         ThreadInputDemand.hasUnconsumedNotification(tx, thread);
-    boolean hasUnconfirmedExecution = !tx.loadUnconfirmedExecutions(thread.id()).isEmpty();
+    List<ExecutionExitFact> unconfirmedExecutions = tx.loadUnconfirmedExecutions(thread.id());
     boolean hasIncompleteOwnerChildJoin = tx.hasIncompleteOwnerChildJoin(thread.id());
     return snapshot(
         thread,
@@ -621,7 +684,7 @@ public final class HarnessRuntime {
         tx.loadStopReceiptsByThread(thread.id()),
         incompleteChildJoins,
         unconsumedAppliedNotifications,
-        hasUnconfirmedExecution,
+        unconfirmedExecutions,
         hasIncompleteOwnerChildJoin);
   }
 
@@ -633,7 +696,7 @@ public final class HarnessRuntime {
       List<StoppedThreadReceipt> stopReceipts,
       int incompleteChildJoins,
       boolean unconsumedAppliedNotifications,
-      boolean hasUnconfirmedExecution,
+      List<ExecutionExitFact> unconfirmedExecutions,
       boolean hasIncompleteOwnerChildJoin) {
     return switch (context) {
       case ThreadContext.IdleOrHistorical ignored -> new ThreadSnapshot(
@@ -646,7 +709,7 @@ public final class HarnessRuntime {
           stopReceipts,
           incompleteChildJoins,
           unconsumedAppliedNotifications,
-          hasUnconfirmedExecution,
+          unconfirmedExecutions,
           hasIncompleteOwnerChildJoin);
       case ThreadContext.ContinuationDue ignored -> new ThreadSnapshot(
           thread,
@@ -658,7 +721,7 @@ public final class HarnessRuntime {
           stopReceipts,
           incompleteChildJoins,
           unconsumedAppliedNotifications,
-          hasUnconfirmedExecution,
+          unconfirmedExecutions,
           hasIncompleteOwnerChildJoin);
       case ThreadContext.ModelActive active -> new ThreadSnapshot(
           thread,
@@ -670,7 +733,7 @@ public final class HarnessRuntime {
           stopReceipts,
           incompleteChildJoins,
           unconsumedAppliedNotifications,
-          hasUnconfirmedExecution,
+          unconfirmedExecutions,
           hasIncompleteOwnerChildJoin);
       case ThreadContext.ModelTerminalPending pending -> new ThreadSnapshot(
           thread,
@@ -682,7 +745,7 @@ public final class HarnessRuntime {
           stopReceipts,
           incompleteChildJoins,
           unconsumedAppliedNotifications,
-          hasUnconfirmedExecution,
+          unconfirmedExecutions,
           hasIncompleteOwnerChildJoin);
       case ThreadContext.ToolActive active -> new ThreadSnapshot(
           thread,
@@ -694,7 +757,7 @@ public final class HarnessRuntime {
           stopReceipts,
           incompleteChildJoins,
           unconsumedAppliedNotifications,
-          hasUnconfirmedExecution,
+          unconfirmedExecutions,
           hasIncompleteOwnerChildJoin);
       case ThreadContext.ToolTerminalPending pending -> new ThreadSnapshot(
           thread,
@@ -706,7 +769,7 @@ public final class HarnessRuntime {
           stopReceipts,
           incompleteChildJoins,
           unconsumedAppliedNotifications,
-          hasUnconfirmedExecution,
+          unconfirmedExecutions,
           hasIncompleteOwnerChildJoin);
     };
   }

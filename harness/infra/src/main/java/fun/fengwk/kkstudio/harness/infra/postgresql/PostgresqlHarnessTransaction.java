@@ -2510,8 +2510,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
         """
         insert into harness_execution_exit (
             execution_id, thread_id, invocation_id, attempt, owner_lease_token, kind,
-            parent_execution_id, state, registered_at, confirmed_at
-        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            parent_execution_id, state, registered_at, confirmed_at, abandoned_at
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         fact.executionId(),
         fact.threadId(),
@@ -2522,18 +2522,20 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
         fact.parentExecutionId(),
         fact.state().name(),
         PostgresqlHarnessRows.timestamp(fact.registeredAt()),
-        PostgresqlHarnessRows.timestamp(fact.confirmedAt()));
+        PostgresqlHarnessRows.timestamp(fact.confirmedAt()),
+        PostgresqlHarnessRows.timestamp(fact.abandonedAt()));
     return fact;
   }
 
   @Override
   public Optional<ExecutionExitFact> confirmExecution(
-      ExecutionExitFact expected, ExecutionExitState state) {
+      ExecutionExitFact expected, ExecutionExitState state, Instant confirmedAt) {
     checkOpen();
     Objects.requireNonNull(expected, "expected");
     Objects.requireNonNull(state, "state");
-    if (state == ExecutionExitState.UNCONFIRMED) {
-      throw new IllegalArgumentException("confirmation cannot return to unconfirmed");
+    Objects.requireNonNull(confirmedAt, "confirmedAt");
+    if (!state.confirmed()) {
+      throw new IllegalArgumentException("confirmation requires real exit evidence");
     }
     ExecutionExitFact stored = findExecution(expected.executionId()).orElse(null);
     if (stored == null) {
@@ -2548,15 +2550,42 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       throw new IllegalArgumentException(
           "execution " + stored.executionId() + " is already confirmed as " + stored.state());
     }
-    Instant confirmedAt = now();
+    ExecutionExitFact confirmed = stored.confirm(state, confirmedAt);
     update(
         """
         update harness_execution_exit
            set state = ?, confirmed_at = ?
+         where execution_id = ? and state in ('UNCONFIRMED', 'ABANDONED')
+        """,
+        confirmed.state().name(),
+        PostgresqlHarnessRows.timestamp(confirmed.confirmedAt()),
+        expected.executionId());
+    return findExecution(expected.executionId());
+  }
+
+  @Override
+  public Optional<ExecutionExitFact> abandonExecution(
+      ExecutionExitFact expected, Instant abandonedAt) {
+    checkOpen();
+    Objects.requireNonNull(expected, "expected");
+    Objects.requireNonNull(abandonedAt, "abandonedAt");
+    ExecutionExitFact stored = findExecution(expected.executionId()).orElse(null);
+    if (stored == null) {
+      return Optional.empty();
+    }
+    requireLocked(LockKey.thread(stored.threadId()));
+    requireSameExecutionIdentity(stored, expected);
+    ExecutionExitFact abandoned = stored.abandon(abandonedAt);
+    if (abandoned == stored) {
+      return Optional.of(stored);
+    }
+    update(
+        """
+        update harness_execution_exit
+           set state = 'ABANDONED', abandoned_at = ?
          where execution_id = ? and state = 'UNCONFIRMED'
         """,
-        state.name(),
-        PostgresqlHarnessRows.timestamp(confirmedAt),
+        PostgresqlHarnessRows.timestamp(abandoned.abandonedAt()),
         expected.executionId());
     return findExecution(expected.executionId());
   }

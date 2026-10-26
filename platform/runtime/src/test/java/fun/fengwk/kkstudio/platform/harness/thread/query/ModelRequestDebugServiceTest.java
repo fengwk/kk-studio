@@ -490,7 +490,7 @@ class ModelRequestDebugServiceTest {
         List.of(),
         0,
         false,
-        false,
+        List.of(),
         false);
   }
 
@@ -523,7 +523,7 @@ class ModelRequestDebugServiceTest {
         List.of(),
         0,
         false,
-        false,
+        List.of(),
         false);
   }
 

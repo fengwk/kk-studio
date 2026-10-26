@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 
 import lombok.extern.slf4j.Slf4j;
 
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.input.HumanInputJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.input.HumanInputTool;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
@@ -55,6 +56,7 @@ import java.util.concurrent.ScheduledExecutorService;
 public final class ToolProcessor implements AutoCloseable {
 
   private final HarnessStore store;
+  private final ExecutionExitConfirmer exitConfirmer;
   private final ToolGateway gateway;
   private final RealtimeEventSink realtimeEventSink;
   private final ToolProcessorConfig config;
@@ -70,8 +72,10 @@ public final class ToolProcessor implements AutoCloseable {
       ToolProcessorConfig config,
       Clock clock,
       ScheduledExecutorService scheduler,
-      Executor heartbeatWorker) {
+      Executor heartbeatWorker,
+      ExecutionExitConfirmer exitConfirmer) {
     this.store = Objects.requireNonNull(store, "store");
+    this.exitConfirmer = Objects.requireNonNull(exitConfirmer, "exitConfirmer");
     this.gateway = Objects.requireNonNull(gateway, "gateway");
     this.realtimeEventSink = Objects.requireNonNull(realtimeEventSink, "realtimeEventSink");
     this.config = Objects.requireNonNull(config, "config");
@@ -688,7 +692,8 @@ public final class ToolProcessor implements AutoCloseable {
         clock,
         scheduler,
         heartbeatWorker,
-        this::release);
+        this::release,
+        exitConfirmer);
   }
 
   /** 有效 YOLO 只由执行根的开关决定；子代理读取其不可变执行根。 */

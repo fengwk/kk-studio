@@ -290,7 +290,8 @@ class PostgresqlCompactionChildTest {
             Duration.ofSeconds(5)),
         Clock.fixed(T1, ZoneOffset.UTC),
         scheduler,
-        Runnable::run);
+        Runnable::run,
+        ExecutionExitTestSupport.confirmer(store, Clock.fixed(T1, ZoneOffset.UTC)));
   }
 
   /** 处理 THREAD Work 直到目标 owner 被处理；Stop 提前投递的父通知 Work 一并 drain，避免污染目标断言。 */
@@ -455,7 +456,8 @@ class PostgresqlCompactionChildTest {
             clock,
             scheduler,
             Runnable::run,
-            Runnable::run);
+            Runnable::run,
+            ExecutionExitTestSupport.confirmer(store, clock));
   }
 
   @AfterEach
@@ -990,7 +992,8 @@ class PostgresqlCompactionChildTest {
               Clock.fixed(T1, ZoneOffset.UTC),
               scheduler,
               Runnable::run,
-              executionExecutor);
+              executionExecutor,
+              ExecutionExitTestSupport.confirmer(store, Clock.fixed(T1, ZoneOffset.UTC)));
       HarnessRuntime stoppingRuntime =
           new HarnessRuntime(
               store,

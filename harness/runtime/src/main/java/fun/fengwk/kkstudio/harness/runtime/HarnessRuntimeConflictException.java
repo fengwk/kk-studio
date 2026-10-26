@@ -61,6 +61,8 @@ public final class HarnessRuntimeConflictException extends RuntimeException {
     /** 同一 Session 内已存在同名执行根 Thread（root-name 部分唯一索引冲突）。 */
     THREAD_NAME_CONFLICT,
     /** STOPPED Thread 的退出或递归委派尚未收敛，拒绝新的恢复执行输入。 */
-    EXIT_UNCONFIRMED
+    EXIT_UNCONFIRMED,
+    /** 放弃退出确认的目标不适用：Thread 未 STOPPED、执行不属于该 Thread 或已不可放弃。 */
+    EXIT_ABANDON_NOT_APPLICABLE
   }
 }

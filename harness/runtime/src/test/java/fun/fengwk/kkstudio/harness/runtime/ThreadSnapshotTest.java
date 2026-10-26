@@ -194,7 +194,7 @@ class ThreadSnapshotTest {
             List.of(),
             0,
             false,
-            false,
+            List.of(),
             false);
     assertEquals(ThreadRuntimeStatus.IDLE, setOnlySnapshot.runtimeStatus());
   }
@@ -227,7 +227,7 @@ class ThreadSnapshotTest {
             List.of(),
             0,
             false,
-            false,
+            List.of(),
             false);
     assertEquals(ThreadRuntimeStatus.RUNNING, customMsgSnapshot.runtimeStatus());
 
@@ -257,7 +257,7 @@ class ThreadSnapshotTest {
             List.of(),
             0,
             false,
-            false,
+            List.of(),
             false);
     assertEquals(ThreadRuntimeStatus.RUNNING, notificationSnapshot.runtimeStatus());
   }
@@ -278,7 +278,7 @@ class ThreadSnapshotTest {
             List.of(),
             0,
             true,
-            false,
+            List.of(),
             false);
     assertEquals(ThreadRuntimeStatus.RUNNING, runningWithWatermark.runtimeStatus());
   }
@@ -299,7 +299,7 @@ class ThreadSnapshotTest {
             List.of(),
             1,
             false,
-            false,
+            List.of(),
             false);
     assertEquals(ThreadRuntimeStatus.WAITING, waiting.runtimeStatus());
   }
@@ -321,7 +321,7 @@ class ThreadSnapshotTest {
             List.of(),
             1,
             false,
-            false,
+            List.of(),
             false);
     assertEquals(ThreadRuntimeStatus.WAITING, waitingWithTurnEnd.runtimeStatus());
     assertNull(waitingWithTurnEnd.outcome());
@@ -347,7 +347,7 @@ class ThreadSnapshotTest {
             List.of(),
             0,
             true,
-            false,
+            List.of(),
             false);
     assertEquals(ThreadRuntimeStatus.IDLE, stoppedWithWatermark.runtimeStatus());
 
@@ -377,7 +377,7 @@ class ThreadSnapshotTest {
             List.of(),
             0,
             false,
-            false,
+            List.of(),
             false);
     assertEquals(ThreadRuntimeStatus.IDLE, stoppedWithQueuedNotification.runtimeStatus());
   }
@@ -400,7 +400,7 @@ class ThreadSnapshotTest {
             List.of(),
             0,
             false,
-            false,
+            List.of(),
             true);
     assertEquals(ThreadRuntimeStatus.RUNNING, awaitingOwnerSettlement.runtimeStatus());
   }
@@ -424,7 +424,7 @@ class ThreadSnapshotTest {
             List.of(),
             0,
             false,
-            false,
+            List.of(),
             false);
     assertThrows(IllegalStateException.class, forged::runtimeStatus);
   }
@@ -446,7 +446,7 @@ class ThreadSnapshotTest {
                 List.of(),
                 -1,
                 false,
-                false,
+                List.of(),
                 false));
   }
 
@@ -495,7 +495,7 @@ class ThreadSnapshotTest {
         List.of(),
         0,
         false,
-        false,
+        List.of(),
         false);
   }
 

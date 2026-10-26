@@ -359,7 +359,8 @@ final class PostgresqlHarnessRows {
               nullableUuid(resultSet, "parent_execution_id"),
               ExecutionExitState.valueOf(resultSet.getString("state")),
               instant(resultSet, "registered_at"),
-              nullableInstant(resultSet, "confirmed_at"));
+              nullableInstant(resultSet, "confirmed_at"),
+              nullableInstant(resultSet, "abandoned_at"));
 
   static final RowMapper<EnvironmentToolWaitRow> ENVIRONMENT_TOOL_WAIT =
       (resultSet, rowNumber) ->

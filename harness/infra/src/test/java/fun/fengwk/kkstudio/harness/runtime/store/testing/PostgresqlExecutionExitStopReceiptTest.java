@@ -279,7 +279,7 @@ class PostgresqlExecutionExitStopReceiptTest {
           ExecutionExitLedger.lockAncestorChain(tx, threadId);
           tx.lockThread(threadId).orElseThrow();
           ExecutionExitLedger.Confirmation confirmation =
-              ExecutionExitLedger.confirm(tx, expected, ExecutionExitState.NOT_STARTED)
+              ExecutionExitLedger.confirm(tx, expected, ExecutionExitState.NOT_STARTED, tx.now())
                   .orElseThrow();
           ExecutionExitLedger.advanceAfterConfirmation(tx, threadId, confirmation);
           return confirmation.changed();

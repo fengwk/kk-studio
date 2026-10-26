@@ -15,6 +15,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
@@ -931,7 +932,8 @@ class ModelExecutionStreamFlushTest {
             scheduler,
             Runnable::run,
             Runnable::run,
-            e -> {});
+            e -> {},
+            TestExecutionExitConfirmer.create(store, Clock.fixed(NOW, ZoneOffset.UTC)));
 
     assertTrue(execution.markRunning());
 
@@ -992,7 +994,8 @@ class ModelExecutionStreamFlushTest {
             scheduler,
             Runnable::run,
             Runnable::run,
-            e -> {});
+            e -> {},
+            TestExecutionExitConfirmer.create(store, Clock.fixed(NOW, ZoneOffset.UTC)));
 
     assertTrue(execution.markRunning());
 
@@ -1045,7 +1048,8 @@ class ModelExecutionStreamFlushTest {
             scheduler,
             Runnable::run,
             Runnable::run,
-            e -> {});
+            e -> {},
+            TestExecutionExitConfirmer.create(store, Clock.fixed(NOW, ZoneOffset.UTC)));
 
     assertTrue(execution.markRunning());
 
@@ -1249,7 +1253,8 @@ class ModelExecutionStreamFlushTest {
             scheduler,
             Runnable::run,
             flushExecutor,
-            ignored -> {});
+            ignored -> {},
+            TestExecutionExitConfirmer.create(store, Clock.fixed(NOW, ZoneOffset.UTC)));
     return new Fixture(store, baseline, invocationId, sink, execution, flushConfig);
   }
 
