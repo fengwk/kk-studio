@@ -12,6 +12,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTransport;
+import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentSessionListener;
 import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcherConfig;
@@ -75,7 +76,7 @@ import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
-import fun.fengwk.kkstudio.web.environment.ide.IdeLeaseCloseListener;
+import fun.fengwk.kkstudio.web.environment.ide.IdeGenerationCloseListener;
 
 import javax.sql.DataSource;
 
@@ -525,9 +526,10 @@ public class HarnessRuntimeConfiguration {
   }
 
   /**
-   * READY 事件的组合宿主：唤醒可选的 HarnessWorkDispatcher，触发该 Environment 的 Skill 全量同步，并让受管更新服务判定最终成功。
+   * 会话事件的组合宿主：READY 唤醒可选的 HarnessWorkDispatcher，触发该 Environment 的 Skill 全量同步，并让受管更新服务判定最终成功； Daemon
+   * 实例接管时关闭旧代际的 IDE 数据面。
    *
-   * <p>三个动作都立刻返回且各自隔离异常：READY 的会话状态推进会先落库，任何宿主回调失败都不得影响会话本身。
+   * <p>每个动作都立刻返回且各自隔离异常：会话状态推进会先完成，任何宿主回调失败都不得影响会话本身。
    *
    * <p>三个协作者都用延迟解析：dispatcher、Skill 同步编排器与更新服务都经由 capability 传输间接依赖本监听器（daemon server → listener →
    * 协作者），启动期直接注入会形成环。
@@ -537,7 +539,7 @@ public class HarnessRuntimeConfiguration {
       ObjectProvider<HarnessWorkDispatcher> dispatcherProvider,
       ObjectProvider<EnvironmentSkillSyncOrchestrator> orchestratorProvider,
       ObjectProvider<EnvironmentUpdateService> updateServiceProvider,
-      ObjectProvider<IdeLeaseCloseListener> ideLeaseCloseProvider) {
+      ObjectProvider<IdeGenerationCloseListener> ideGenerationCloseProvider) {
     return new EnvironmentSessionListener() {
       @Override
       public void onEnvironmentReady(EnvironmentId environmentId) {
@@ -558,11 +560,10 @@ public class HarnessRuntimeConfiguration {
       }
 
       @Override
-      public void onEnvironmentDisconnected(EnvironmentId environmentId, UUID leaseToken) {
-        // 租约失效/接管：关闭该代际的 IDE 反向流并撤销入口凭据，而不是只撤销票据。
+      public void onDaemonInstanceReplaced(DaemonConnectionIdentity previous) {
+        // 换进程接管：关闭旧代际的 IDE 反向流并撤销入口凭据，而不是只撤销票据。
         try {
-          ideLeaseCloseProvider.ifAvailable(
-              listener -> listener.onLeaseClosed(environmentId, leaseToken));
+          ideGenerationCloseProvider.ifAvailable(listener -> listener.onGenerationClosed(previous));
         } catch (RuntimeException ignored) {
         }
       }

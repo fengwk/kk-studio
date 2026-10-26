@@ -8,8 +8,8 @@ import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.AbstractWebSocketHandler;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.ide.IdeCommandTransport;
+import fun.fengwk.kkstudio.ide.IdeGenerationState;
 import fun.fengwk.kkstudio.ide.stream.IdeStreamPairingRegistry;
 import fun.fengwk.kkstudio.ide.stream.IdeStreamTicketService;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
@@ -75,9 +75,9 @@ public final class IdeInternalReverseWebSocketHandler extends AbstractWebSocketH
       reject(session, "internal reverse ticket is unknown, consumed or expired");
       return;
     }
-    Optional<DaemonConnectionIdentity> current = transport.connectionIdentity(environmentId);
-    if (current.isEmpty() || !current.get().equals(consumed.get().identity())) {
-      reject(session, "internal reverse ticket generation is no longer current");
+    if (IdeGenerationState.of(transport, consumed.get().identity())
+        == IdeGenerationState.REPLACED) {
+      reject(session, "internal reverse ticket generation has been replaced");
       return;
     }
     WebSocketIdeStreamPeer peer = new WebSocketIdeStreamPeer(session);

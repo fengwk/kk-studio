@@ -25,7 +25,7 @@ import java.util.concurrent.TimeoutException;
  *
  * <p>命令超时/断线/排队拒绝映射为 IDE 通道不可用（客户端可重试）；Daemon 明确拒绝（dirty、目录不可访问等）映射为校验错误并保留 Daemon
  * 文案。所有失败路径都不重放副作用，也不伪造成功结果；{@code OPEN_VIEW} 在任何副作用之前先校验 Independent Origin 配置（缺配置
- * fail-closed），并把入口凭据绑定到命令进入传输时的连接代际。
+ * fail-closed），并把入口凭据绑定到命令进入传输时的 Daemon 实例代际。
  */
 public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
 
@@ -34,6 +34,9 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
 
   public static final String IDE_ROUTE_PREFIX = "/environment-ide/";
   public static final String BOOTSTRAP_PATH = "__ide/bootstrap";
+
+  /** 浏览器探测 IDE 会话的网关路径，与 {@link #BOOTSTRAP_PATH} 同在保留的 {@code __ide/} 前缀下。 */
+  public static final String SESSION_PATH = "__ide/session";
 
   private final IdeCommandTransport transport;
   private final IdeBootstrapTicketService bootstrapTickets;
@@ -96,7 +99,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
             "environment IDE view capacity is exhausted", error);
       }
     }
-    // 入口凭据绑定命令的代际；租约失效/接管时由 host/router 依代际关闭并 revoke。
+    // 入口凭据绑定命令的代际；另一个 Daemon 实例接管时由宿主依代际关闭并 revoke。
     String ticket = bootstrapTickets.issue(result.identity(), dto.getViewId(), workspacePath);
     dto.setEntryUrl(IDE_ROUTE_PREFIX + environmentId + "/" + BOOTSTRAP_PATH + "?token=" + ticket);
     return dto;

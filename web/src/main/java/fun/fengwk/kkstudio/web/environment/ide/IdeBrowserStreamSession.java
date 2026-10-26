@@ -11,8 +11,6 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityBusyException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilitySendUncertainException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
-import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
-import fun.fengwk.kkstudio.ide.IdeCommandTransport;
 import fun.fengwk.kkstudio.ide.IdeRequest;
 import fun.fengwk.kkstudio.ide.protocol.DaemonIdeStreamCodec;
 import fun.fengwk.kkstudio.ide.protocol.IdeAction;
@@ -39,7 +37,6 @@ import java.util.ArrayDeque;
 import java.util.Arrays;
 import java.util.Deque;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -49,7 +46,7 @@ import java.util.concurrent.atomic.AtomicReference;
  *
  * <p>入站分段进入按字节有界的队列（阻塞容器线程形成 TCP 背压，超时 fail-closed），出站按 credit 分段发送：二进制逐段透传，文本用流式 UTF-8
  * 解码器跨分段解码并在码点边界切分，绝不整包缓冲、绝不先 ACK 后交付。转发线程是虚拟线程，活跃 WS 不设整体寿命，仅 metadata 就绪 阶段有
- * deadline，之后按有限周期复核代际。
+ * deadline。控制连接短暂断开不影响已建立的流；另一个 Daemon 实例接管时，代际清理关闭反向流，本流随之结束。
  *
  * <p>Daemon 侧关闭时把它给出的关闭码（code-server 的关闭码或协议原因）原样转述给浏览器；每条流结束时写一行诊断日志（结束原因、双方关闭码、Daemon
  * 失败回执、双向帧数与字节数、时长），使线上可以判定关闭方。
@@ -70,9 +67,6 @@ final class IdeBrowserStreamSession {
   private static final long MAX_INBOUND_BLOCK_MILLIS = 60_000L;
 
   private static final long POLL_TICK_MILLIS = 5L;
-
-  /** 代际/租约复核周期：有限周期检查，绝不逐帧查库。 */
-  private static final long GENERATION_RECHECK_MILLIS = 30_000L;
 
   record Frame(boolean text, byte[] payload, boolean last) {}
 
@@ -192,8 +186,7 @@ final class IdeBrowserStreamSession {
         deps.pairings()
             .open(
                 issued.ticket(),
-                environmentId,
-                session.identity().leaseToken(),
+                session.identity(),
                 deps.properties().requirePairingTimeout(),
                 abandonOnce);
     try {
@@ -303,10 +296,9 @@ final class IdeBrowserStreamSession {
     return false;
   }
 
-  /** 双方向转发主循环：活跃 WS 不设整体寿命，直到浏览器/Daemon 断开或代际变更。 */
+  /** 双方向转发主循环：活跃 WS 不设整体寿命，直到浏览器或 Daemon 一侧断开。 */
   private void relayUntilClosed() {
     Pending pending = null;
-    long nextGenerationCheck = System.currentTimeMillis() + GENERATION_RECHECK_MILLIS;
     while (!stopped.get()) {
       if (pending == null) {
         pending = pollInbound();
@@ -327,15 +319,6 @@ final class IdeBrowserStreamSession {
         // 原样转述 Daemon 给出的关闭码（code-server 关闭码或协议原因），缺失时才统一为 1011。
         end("DAEMON_CLOSED", IdeStreamPeer.relayable(peer.remoteCloseStatus()));
         return;
-      }
-      long now = System.currentTimeMillis();
-      if (now >= nextGenerationCheck) {
-        nextGenerationCheck = now + GENERATION_RECHECK_MILLIS;
-        if (!generationCurrent(deps.transport(), environmentId, session)) {
-          // 租约失效/接管：以有限周期复核并真实关闭本流。
-          end("GENERATION_CHANGED", CloseStatus.POLICY_VIOLATION);
-          return;
-        }
       }
     }
     closeBrowser(CloseStatus.NORMAL);
@@ -558,15 +541,6 @@ final class IdeBrowserStreamSession {
       }
     }
     return null;
-  }
-
-  /** 代际仍是当前 READY 代际（由数据面按有限周期复核，绝不逐帧查库）。 */
-  private static boolean generationCurrent(
-      IdeCommandTransport transport,
-      EnvironmentId environmentId,
-      IdeBrowserSessionRegistry.Session session) {
-    Optional<DaemonConnectionIdentity> current = transport.connectionIdentity(environmentId);
-    return current.isPresent() && current.get().equals(session.identity());
   }
 
   private void closeBrowser(CloseStatus status) {

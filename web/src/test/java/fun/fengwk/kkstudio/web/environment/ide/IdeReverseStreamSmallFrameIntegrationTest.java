@@ -157,8 +157,7 @@ class IdeReverseStreamSmallFrameIntegrationTest extends WebPostgresTestSupport {
   }
 
   private String openSession(SmallFrameDaemon daemon, String viewId) {
-    DaemonConnectionIdentity identity =
-        new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
+    DaemonConnectionIdentity identity = new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1");
     when(endpoint.connectionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
     when(endpoint.requestIde(eq(ENVIRONMENT), any()))
         .thenAnswer(

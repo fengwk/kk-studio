@@ -50,8 +50,7 @@ class IdeGatewayComponentsTest {
     MutableClock clock = new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
     IdeBrowserSessionRegistry sessions =
         new IdeBrowserSessionRegistry(new SecureRandom(), clock, Duration.ofMinutes(5));
-    DaemonConnectionIdentity identity =
-        new DaemonConnectionIdentity(ENV, "instance", UUID.randomUUID());
+    DaemonConnectionIdentity identity = new DaemonConnectionIdentity(ENV, "instance");
     String view = UUID.randomUUID().toString();
 
     // 未知 cookie 必须是「未命中」而不是 NPE。
@@ -69,11 +68,12 @@ class IdeGatewayComponentsTest {
     assertFalse(refreshed.equals(cookie), "expired cookie must be replaced");
     assertTrue(sessions.lookup(refreshed).orElseThrow().authorizesWorkspace("/managed/workspace"));
 
-    // 租约关闭按代际清除。
-    sessions.closeGeneration(ENV, UUID.randomUUID());
+    // 代际只由 Daemon 实例决定：关闭其它实例的代际不影响本代际，关闭本代际清除 cookie 与授权。
+    sessions.closeGeneration(new DaemonConnectionIdentity(ENV, "another-instance"));
     assertFalse(sessions.lookup(refreshed).isEmpty());
-    sessions.closeGeneration(ENV, identity.leaseToken());
+    sessions.closeGeneration(identity);
     assertTrue(sessions.lookup(refreshed).isEmpty());
+    assertEquals(0, sessions.viewCount(identity));
   }
 
   /** 多面板：同一代际复用同一 cookie，新授权 workspace 对已存在的 cookie 立即可用，CLOSE_VIEW 真实撤销。 */
@@ -82,8 +82,7 @@ class IdeGatewayComponentsTest {
     MutableClock clock = new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
     IdeBrowserSessionRegistry sessions =
         new IdeBrowserSessionRegistry(new SecureRandom(), clock, Duration.ofMinutes(30));
-    DaemonConnectionIdentity identity =
-        new DaemonConnectionIdentity(ENV, "instance", UUID.randomUUID());
+    DaemonConnectionIdentity identity = new DaemonConnectionIdentity(ENV, "instance");
 
     String firstView = UUID.randomUUID().toString();
     String secondView = UUID.randomUUID().toString();
@@ -97,9 +96,8 @@ class IdeGatewayComponentsTest {
     assertTrue(sessions.lookup(first).orElseThrow().authorizesWorkspace("/managed/two"));
     assertTrue(sessions.lookup(first).orElseThrow().authorizesWorkspace("/managed/one"));
 
-    // 别的代际不可见。
-    DaemonConnectionIdentity otherGeneration =
-        new DaemonConnectionIdentity(ENV, "instance", UUID.randomUUID());
+    // 别的代际（另一个 Daemon 实例）不可见。
+    DaemonConnectionIdentity otherGeneration = new DaemonConnectionIdentity(ENV, "other-instance");
     String otherView = UUID.randomUUID().toString();
     sessions.viewOpened(otherGeneration, otherView, "/managed/three");
     String otherCookie = sessions.open(otherGeneration, otherView, "/managed/three");
@@ -122,8 +120,7 @@ class IdeGatewayComponentsTest {
     MutableClock clock = new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
     IdeBrowserSessionRegistry sessions =
         new IdeBrowserSessionRegistry(new SecureRandom(), clock, Duration.ofMinutes(30));
-    DaemonConnectionIdentity identity =
-        new DaemonConnectionIdentity(ENV, "instance", UUID.randomUUID());
+    DaemonConnectionIdentity identity = new DaemonConnectionIdentity(ENV, "instance");
     String view = UUID.randomUUID().toString();
 
     // 未经 OPEN_VIEW 的票据不得建立任何会话。
@@ -146,8 +143,7 @@ class IdeGatewayComponentsTest {
     MutableClock clock = new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
     IdeBrowserSessionRegistry sessions =
         new IdeBrowserSessionRegistry(new SecureRandom(), clock, Duration.ofMinutes(30));
-    DaemonConnectionIdentity identity =
-        new DaemonConnectionIdentity(ENV, "instance", UUID.randomUUID());
+    DaemonConnectionIdentity identity = new DaemonConnectionIdentity(ENV, "instance");
     int views = 32;
     ExecutorService pool = Executors.newFixedThreadPool(8);
     try {
@@ -180,8 +176,7 @@ class IdeGatewayComponentsTest {
     MutableClock clock = new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
     IdeBrowserSessionRegistry sessions =
         new IdeBrowserSessionRegistry(new SecureRandom(), clock, Duration.ofMinutes(30));
-    DaemonConnectionIdentity identity =
-        new DaemonConnectionIdentity(ENV, "instance", UUID.randomUUID());
+    DaemonConnectionIdentity identity = new DaemonConnectionIdentity(ENV, "instance");
     for (int index = 0; index < IdeBrowserSessionRegistry.MAX_VIEWS_PER_GENERATION; index++) {
       sessions.viewOpened(identity, UUID.randomUUID().toString(), "/managed/" + index);
     }

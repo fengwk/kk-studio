@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.environment.server;
 
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.ENVIRONMENT_ID;
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.OTHER_ENVIRONMENT_ID;
+import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.OTHER_INSTANCE_ID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -16,6 +17,7 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityU
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * 意图：IDE 元数据通道必须复用既有的 READY/lease/更新准入围栏，且作为独立于 Agent journal 的通道：命令递交成功才登记在途，
@@ -190,16 +192,36 @@ class EnvironmentDaemonServerIdeTest {
   }
 
   @Test
-  void disconnectSignalsLeaseGenerationForCredentialAndStreamCleanup() {
+  void sameInstanceReconnectKeepsTheIdeGeneration() {
     EnvironmentDaemonServerTestSupport.Fixture fixture =
         new EnvironmentDaemonServerTestSupport.Fixture();
-    EnvironmentDaemonServerTestSupport.FakeChannel channel = fixture.connectReady("c1");
-    DaemonIdeCall request = fixture.server.requestIde(ENVIRONMENT_ID, COMMAND);
+    EnvironmentDaemonServerTestSupport.FakeChannel first = fixture.connectReady("c1");
+    DaemonConnectionIdentity before = fixture.server.requestIde(ENVIRONMENT_ID, COMMAND).identity();
 
-    fixture.server.close(channel.connectionId());
+    fixture.server.close(first.connectionId());
+    // 断线期间没有 READY 连接可供下发，但代际本身不结束。
+    assertTrue(fixture.server.connectionIdentity(ENVIRONMENT_ID).isEmpty());
+    fixture.connectReady("c2");
 
-    // 代际关闭必须通知宿主，使其关闭绑定该 (environment, lease) 的 IDE 流与入口凭据，而非只撤销票据。
-    assertEquals(List.of(ENVIRONMENT_ID), fixture.disconnectedEnvironments);
-    assertEquals(List.of(request.identity().leaseToken()), fixture.disconnectedLeaseTokens);
+    // 同一 Daemon 进程重连换了路由租约，IDE 凭据仍绑定同一代际，宿主不会收到代际结束通知。
+    assertEquals(Optional.of(before), fixture.server.connectionIdentity(ENVIRONMENT_ID));
+    assertEquals(List.of(), fixture.replacedInstances);
+  }
+
+  @Test
+  void differentInstanceTakeoverEndsThePreviousIdeGeneration() {
+    EnvironmentDaemonServerTestSupport.Fixture fixture =
+        new EnvironmentDaemonServerTestSupport.Fixture();
+    EnvironmentDaemonServerTestSupport.FakeChannel first = fixture.connectReady("c1");
+    DaemonConnectionIdentity before = fixture.server.requestIde(ENVIRONMENT_ID, COMMAND).identity();
+
+    fixture.server.close(first.connectionId());
+    fixture.connectReady("c2", OTHER_INSTANCE_ID);
+
+    // 换进程接管必须通知宿主关闭旧代际的 IDE 流与入口凭据，新连接以新实例身份下发。
+    assertEquals(List.of(before), fixture.replacedInstances);
+    assertEquals(
+        Optional.of(new DaemonConnectionIdentity(ENVIRONMENT_ID, OTHER_INSTANCE_ID)),
+        fixture.server.connectionIdentity(ENVIRONMENT_ID));
   }
 }

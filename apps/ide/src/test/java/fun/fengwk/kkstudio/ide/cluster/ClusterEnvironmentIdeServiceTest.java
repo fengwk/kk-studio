@@ -195,15 +195,12 @@ class ClusterEnvironmentIdeServiceTest {
       CompletableFuture<IdeReply> reply = new CompletableFuture<>();
       reply.complete(IdeReply.ok(VIEW, "/home/dev/project", "/daemon/workspaces/" + VIEW));
       return new IdeRequest(
-          new DaemonConnectionIdentity(environmentId, "daemon-instance", UUID.randomUUID()),
-          UUID.randomUUID(),
-          reply);
+          new DaemonConnectionIdentity(environmentId, "daemon-instance"), UUID.randomUUID(), reply);
     }
 
     @Override
     public Optional<DaemonConnectionIdentity> connectionIdentity(EnvironmentId environmentId) {
-      return Optional.of(
-          new DaemonConnectionIdentity(environmentId, "daemon-instance", UUID.randomUUID()));
+      return Optional.of(new DaemonConnectionIdentity(environmentId, "daemon-instance"));
     }
 
     @Override

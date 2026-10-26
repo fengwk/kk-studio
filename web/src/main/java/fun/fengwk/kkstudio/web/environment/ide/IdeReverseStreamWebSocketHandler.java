@@ -8,8 +8,8 @@ import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.AbstractWebSocketHandler;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.ide.IdeCommandTransport;
+import fun.fengwk.kkstudio.ide.IdeGenerationState;
 import fun.fengwk.kkstudio.ide.stream.IdeStreamPairingRegistry;
 import fun.fengwk.kkstudio.ide.stream.IdeStreamTicketService;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
@@ -83,11 +83,10 @@ public final class IdeReverseStreamWebSocketHandler extends AbstractWebSocketHan
       reject(session, "reverse stream ticket is unknown, consumed or expired");
       return;
     }
-    IdeStreamTicketService.Consumed stream = consumed.get();
-    Optional<DaemonConnectionIdentity> current =
-        transport.connectionIdentity(stream.environmentId());
-    if (current.isEmpty() || !current.get().equals(stream.identity())) {
-      reject(session, "reverse stream ticket generation is no longer current");
+    // 同一实例在控制连接短暂断开时回拨的反向流仍属当前代际；只拒绝已被另一个实例接管的代际。
+    if (IdeGenerationState.of(transport, consumed.get().identity())
+        == IdeGenerationState.REPLACED) {
+      reject(session, "reverse stream ticket generation has been replaced");
       return;
     }
     WebSocketIdeStreamPeer peer = new WebSocketIdeStreamPeer(session);

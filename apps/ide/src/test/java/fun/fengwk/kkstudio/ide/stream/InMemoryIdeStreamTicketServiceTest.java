@@ -17,18 +17,16 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.Optional;
-import java.util.UUID;
 
 /**
- * 意图：IDE 流 ticket 必须一次性、绑定连接代际（Environment + Daemon 实例 + 租约）与模式、且短时过期；消费即删除使二次消费 失败，revoke
- * 只清除同租约未消费的 ticket，避免旧代际 ticket 被新 owner 复用。
+ * 意图：IDE 流 ticket 必须一次性、绑定 Daemon 实例代际（Environment + Daemon 实例）与模式、且短时过期；消费即删除使二次消费 失败，revoke
+ * 只清除同代际未消费的 ticket，避免被接管实例的 ticket 继续可用。
  */
 class InMemoryIdeStreamTicketServiceTest {
 
   private static final EnvironmentId ENV =
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
   private static final String INSTANCE = "33333333-3333-3333-3333-333333333333";
-  private static final UUID LEASE = new UUID(0L, 1L);
 
   private final MutableClock clock = new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
 
@@ -36,14 +34,14 @@ class InMemoryIdeStreamTicketServiceTest {
     return new InMemoryIdeStreamTicketService(new SecureRandom(), clock, Duration.ofSeconds(30));
   }
 
-  private static DaemonConnectionIdentity identity(UUID leaseToken) {
-    return new DaemonConnectionIdentity(ENV, INSTANCE, leaseToken);
+  private static DaemonConnectionIdentity identity(String daemonInstanceId) {
+    return new DaemonConnectionIdentity(ENV, daemonInstanceId);
   }
 
   @Test
   void issuesOpaque256BitTicketAndConsumesOnce() {
     InMemoryIdeStreamTicketService service = service();
-    IdeStreamTicketService.Issued issued = service.issue(identity(LEASE), IdeStreamMode.HTTP);
+    IdeStreamTicketService.Issued issued = service.issue(identity(INSTANCE), IdeStreamMode.HTTP);
 
     // 32 字节 base64url（无 padding）固定 43 个字符；不含注册 token。
     assertEquals(43, issued.ticket().length());
@@ -53,7 +51,6 @@ class InMemoryIdeStreamTicketServiceTest {
     assertTrue(consumed.isPresent());
     assertEquals(ENV, consumed.get().environmentId());
     assertEquals(INSTANCE, consumed.get().identity().daemonInstanceId());
-    assertEquals(LEASE, consumed.get().identity().leaseToken());
     assertEquals(IdeStreamMode.HTTP, consumed.get().mode());
     assertTrue(service.consume(issued.ticket()).isEmpty());
   }
@@ -62,29 +59,29 @@ class InMemoryIdeStreamTicketServiceTest {
   void issuesDistinctTickets() {
     InMemoryIdeStreamTicketService service = service();
     assertNotEquals(
-        service.issue(identity(LEASE), IdeStreamMode.WS).ticket(),
-        service.issue(identity(LEASE), IdeStreamMode.WS).ticket());
+        service.issue(identity(INSTANCE), IdeStreamMode.WS).ticket(),
+        service.issue(identity(INSTANCE), IdeStreamMode.WS).ticket());
   }
 
   @Test
   void expiredTicketIsNotConsumable() {
     InMemoryIdeStreamTicketService service = service();
-    String ticket = service.issue(identity(LEASE), IdeStreamMode.WS).ticket();
+    String ticket = service.issue(identity(INSTANCE), IdeStreamMode.WS).ticket();
     clock.advance(Duration.ofSeconds(31));
     assertTrue(service.consume(ticket).isEmpty());
   }
 
   @Test
-  void revokeClearsOnlyMatchingLease() {
+  void revokeClearsOnlyMatchingGeneration() {
     InMemoryIdeStreamTicketService service = service();
-    String currentLeaseTicket = service.issue(identity(LEASE), IdeStreamMode.HTTP).ticket();
-    UUID otherLease = new UUID(0L, 2L);
-    String otherLeaseTicket = service.issue(identity(otherLease), IdeStreamMode.HTTP).ticket();
+    String replacedTicket = service.issue(identity(INSTANCE), IdeStreamMode.HTTP).ticket();
+    String otherInstance = "44444444-4444-4444-4444-444444444444";
+    String currentTicket = service.issue(identity(otherInstance), IdeStreamMode.HTTP).ticket();
 
-    service.revoke(ENV, LEASE);
+    service.revoke(identity(INSTANCE));
 
-    assertTrue(service.consume(currentLeaseTicket).isEmpty());
-    assertTrue(service.consume(otherLeaseTicket).isPresent());
+    assertTrue(service.consume(replacedTicket).isEmpty());
+    assertTrue(service.consume(currentTicket).isPresent());
   }
 
   @Test

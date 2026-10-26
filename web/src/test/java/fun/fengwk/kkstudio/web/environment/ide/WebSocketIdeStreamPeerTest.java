@@ -336,8 +336,7 @@ class WebSocketIdeStreamPeerTest {
   void reverseStreamEndpointWithAckWriteFaultAcceptsSubsequentEndMessage() throws Exception {
     DaemonIdeStreamCodec codec = new DaemonIdeStreamCodec();
     EnvironmentId environmentId = EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
-    DaemonConnectionIdentity identity =
-        new DaemonConnectionIdentity(environmentId, "daemon-1", UUID.randomUUID());
+    DaemonConnectionIdentity identity = new DaemonConnectionIdentity(environmentId, "daemon-1");
 
     InMemoryIdeStreamTicketService ticketService = new InMemoryIdeStreamTicketService();
     IdeStreamTicketService.Issued issued = ticketService.issue(identity, IdeStreamMode.HTTP);
@@ -345,8 +344,7 @@ class WebSocketIdeStreamPeerTest {
 
     IdeStreamPairingRegistry<IdeStreamPeer> pairings = new IdeStreamPairingRegistry<>();
     IdeStreamPairingRegistry<IdeStreamPeer>.Pairing pairing =
-        pairings.open(
-            ticket, environmentId, identity.leaseToken(), Duration.ofSeconds(5), () -> {});
+        pairings.open(ticket, identity, Duration.ofSeconds(5), () -> {});
 
     IdeCommandTransport transport = mock(IdeCommandTransport.class);
     when(transport.connectionIdentity(environmentId)).thenReturn(Optional.of(identity));

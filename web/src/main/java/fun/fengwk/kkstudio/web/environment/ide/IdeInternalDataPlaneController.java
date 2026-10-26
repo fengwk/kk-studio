@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.ide.EnvironmentIdeServiceImpl;
 import fun.fengwk.kkstudio.ide.cluster.IdeInternalPaths;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthenticationException;
@@ -29,13 +30,15 @@ import java.util.Map;
  * <p>安全顺序固定为「认证 → 目标解析 → 本节点 owner 核对 → 还原原始 path → 数据面」：HMAC 覆盖 method 与完整内部 path/query，任何校验都在读取
  * 请求体之前完成，因此未认证的大请求体不会被解析、也不会触发任何 Daemon 副作用。本节点不是 READY owner（陈旧/已接管）时以 409 未受理返回， 绝不递归转发、绝不自动重放。
  *
- * <p>请求体与响应体都由数据面流式搬运（bootstrap 跳转只回 303 与 Set-Cookie），不整包缓冲、不落 SQL/PG。
+ * <p>请求体与响应体都由数据面流式搬运（bootstrap 跳转只回 303 与 Set-Cookie，会话探测只回状态码），不整包缓冲、不落 SQL/PG。
  */
 @Slf4j
 @RestController
 public final class IdeInternalDataPlaneController {
 
-  private static final String BOOTSTRAP_PATH = "/__ide/bootstrap";
+  private static final String BOOTSTRAP_PATH = "/" + EnvironmentIdeServiceImpl.BOOTSTRAP_PATH;
+
+  private static final String SESSION_PATH = "/" + EnvironmentIdeServiceImpl.SESSION_PATH;
 
   private final ClusterInternalAuthentication authentication;
   private final ClusterNodeRegistry clusterNodeRegistry;
@@ -72,18 +75,22 @@ public final class IdeInternalDataPlaneController {
     requireLocalOwner(environment);
     String rawPathAndQuery = requirePathParameter(request);
     IdeForwardedRequest forwarded = IdeForwardedRequest.of(request, rawPathAndQuery);
-    if (isBootstrapPath(rawPathAndQuery)) {
+    String path = pathOf(rawPathAndQuery);
+    if (BOOTSTRAP_PATH.equals(path)) {
       // bootstrap 消费（一次性票据 + Set-Cookie + 跳转）同样只在 owner 执行。
       dataPlane.handleBootstrap(environment, forwarded, response);
+      return;
+    }
+    if (SESSION_PATH.equals(path)) {
+      dataPlane.handleSession(environment, rawPathAndQuery, forwarded, response);
       return;
     }
     dataPlane.handleInternalHttp(environment, rawPathAndQuery, forwarded, response);
   }
 
-  private boolean isBootstrapPath(String rawPathAndQuery) {
+  private static String pathOf(String rawPathAndQuery) {
     int question = rawPathAndQuery.indexOf('?');
-    String path = question < 0 ? rawPathAndQuery : rawPathAndQuery.substring(0, question);
-    return BOOTSTRAP_PATH.equals(path);
+    return question < 0 ? rawPathAndQuery : rawPathAndQuery.substring(0, question);
   }
 
   /** 原始 path 必须存在；缺失即 fail-closed（认证通过也不放行）。 */

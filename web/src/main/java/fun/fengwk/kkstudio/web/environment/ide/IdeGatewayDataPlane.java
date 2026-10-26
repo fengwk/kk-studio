@@ -10,9 +10,9 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityBusyException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilitySendUncertainException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
-import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.ide.IdeBootstrapTicketService;
 import fun.fengwk.kkstudio.ide.IdeCommandTransport;
+import fun.fengwk.kkstudio.ide.IdeGenerationState;
 import fun.fengwk.kkstudio.ide.IdeRequest;
 import fun.fengwk.kkstudio.ide.protocol.DaemonIdeStreamCodec;
 import fun.fengwk.kkstudio.ide.protocol.IdeAction;
@@ -49,12 +49,13 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * IDE 同源网关的数据面：把浏览器 HTTP exchange 经一次性 ticket 与 Daemon 反向连接配对后双向转发。
  *
- * <p>每个请求：解析 host-only 会话 cookie → 复核其绑定代际仍是当前 READY 代际 → 铸造一次性 stream ticket 并登记 pending 配对 → 通过
- * {@code OPEN_STREAM} 命令把 ticket + 受控 streamUrl 交给 Daemon → 等待反向连接后按 credit 双向转发请求体与响应。 请求/响应头都过滤
- * hop-by-hop 与 {@code content-length}；IDE 数据不进入 SQL/PG。
+ * <p>每个请求：解析 host-only 会话 cookie → 复核其绑定的 Daemon 实例代际（{@link IdeGenerationState}）→ 铸造一次性 stream
+ * ticket 并登记 pending 配对 → 通过 {@code OPEN_STREAM} 命令把 ticket + 受控 streamUrl 交给 Daemon → 等待反向连接后按
+ * credit 双向转发请求体与响应。 请求/响应头都过滤 hop-by-hop 与 {@code content-length}；IDE 数据不进入 SQL/PG。
  *
- * <p>失败一律 fail-closed：无 cookie/代际不匹配 → 401/409；等待反向连接超时 → 504 并放弃在途 {@code OPEN_STREAM}；通道不可用 →
- * 503。任何路径都不重放副作用、不伪造响应体。
+ * <p>失败一律 fail-closed：无 cookie → 401；代际已被另一个 Daemon 实例接管 → 409；暂无 READY 连接或通道不可用 → 503（同一实例重连后 原
+ * cookie 继续有效）；等待反向连接超时 → 504 并放弃在途 {@code OPEN_STREAM}。任何路径都不重放副作用、不伪造响应体。浏览器侧用 {@link
+ * #handleSession} 探测会话，据此决定等待还是重新打开视图。
  */
 @Slf4j
 @Component
@@ -175,8 +176,9 @@ public final class IdeGatewayDataPlane {
       sendError(response, HttpServletResponse.SC_UNAUTHORIZED);
       return;
     }
-    if (!generationCurrent(environmentId, session)) {
-      sendError(response, HttpServletResponse.SC_CONFLICT);
+    int rejection = generationRejection(IdeGenerationState.of(transport, session.identity()));
+    if (rejection != 0) {
+      sendError(response, rejection);
       return;
     }
     if (!workspaceQueryAllowed(session, request)) {
@@ -197,11 +199,7 @@ public final class IdeGatewayDataPlane {
         };
     IdeStreamPairingRegistry<IdeStreamPeer>.Pairing pairing =
         pairings.open(
-            issued.ticket(),
-            environmentId,
-            session.identity().leaseToken(),
-            properties.requirePairingTimeout(),
-            abandonOnce);
+            issued.ticket(), session.identity(), properties.requirePairingTimeout(), abandonOnce);
     IdeStreamPeer peer = null;
     IdeRequest ideRequest = null;
     Exchange exchange = null;
@@ -302,8 +300,7 @@ public final class IdeGatewayDataPlane {
       return;
     }
     IdeBootstrapTicketService.Ticket ticket = consumed.get();
-    Optional<DaemonConnectionIdentity> current = transport.connectionIdentity(environmentId);
-    if (current.isEmpty() || !current.get().equals(ticket.identity())) {
+    if (IdeGenerationState.of(transport, ticket.identity()) == IdeGenerationState.REPLACED) {
       sendError(response, HttpServletResponse.SC_GONE);
       return;
     }
@@ -333,6 +330,40 @@ public final class IdeGatewayDataPlane {
         routeBase
             + "?workspace="
             + URLEncoder.encode(ticket.workspacePath(), StandardCharsets.UTF_8));
+  }
+
+  /**
+   * 浏览器探测当前 IDE 会话：204 有效；401 无会话（cookie 缺失、过期或代际已关闭）；409 代际已被另一个 Daemon 实例接管；503 暂无 READY
+   * 连接，同一实例重连后继续有效。401/409 需要重新打开视图换取新入口，503 只需等待。
+   *
+   * <p>只读、无副作用，不触达 Daemon；非 owner 节点同样单跳到 owner 裁决。
+   */
+  public void handleSession(
+      EnvironmentId environmentId,
+      String rawPathAndQuery,
+      HttpServletRequest request,
+      HttpServletResponse response)
+      throws IOException {
+    Objects.requireNonNull(environmentId, "environmentId");
+    if (forwardRemote(environmentId, rawPathAndQuery, request, response)) {
+      return;
+    }
+    IdeBrowserSessionRegistry.Session session = requireSession(environmentId, request);
+    int rejection =
+        session == null
+            ? HttpServletResponse.SC_UNAUTHORIZED
+            : generationRejection(IdeGenerationState.of(transport, session.identity()));
+    response.setHeader("Cache-Control", "no-store");
+    response.setStatus(rejection == 0 ? HttpServletResponse.SC_NO_CONTENT : rejection);
+  }
+
+  /** 会话代际不能建立新反向流时的 HTTP 状态：被另一个实例接管为 409（凭据永久失效），暂无 READY 连接为 503（同一实例重连后继续）；可以建立时返回 0。 */
+  static int generationRejection(IdeGenerationState state) {
+    return switch (state) {
+      case CURRENT -> 0;
+      case DISCONNECTED -> HttpServletResponse.SC_SERVICE_UNAVAILABLE;
+      case REPLACED -> HttpServletResponse.SC_CONFLICT;
+    };
   }
 
   public static String routeBase(HttpServletRequest request, EnvironmentId environmentId) {
@@ -396,12 +427,6 @@ public final class IdeGatewayDataPlane {
       }
     }
     return null;
-  }
-
-  private boolean generationCurrent(
-      EnvironmentId environmentId, IdeBrowserSessionRegistry.Session session) {
-    Optional<DaemonConnectionIdentity> current = transport.connectionIdentity(environmentId);
-    return current.isPresent() && current.get().equals(session.identity());
   }
 
   /** IDE 根路径上的 {@code workspace}/{@code folder} 只能指向本代际已授权的受管 workspace（支持多面板）。 */

@@ -19,14 +19,16 @@ import java.util.regex.Pattern;
  * IDE 同源网关路由过滤器：在 Studio 同源下固定 {@code /environment-ide/{environmentId}/...} 路由。
  *
  * <p>按路径解析规范 UUID 的 environmentId；剥除 route base（{@code /environment-ide/{environmentId}/}）后将请求
- * 转发给数据面。bootstrap 请求（{@code __ide/bootstrap}）消费一次性票据并设置 Path 限定在当前环境 route base 的 cookie；WebSocket
- * upgrade 请求转交 {@link IdeBrowserWebSocketGateway}；其它请求由 {@link IdeGatewayDataPlane} 转发。非 IDE
- * 路径原样放行。
+ * 转发给数据面。bootstrap 请求（{@code __ide/bootstrap}）消费一次性票据并设置 Path 限定在当前环境 route base 的 cookie；会话探测
+ * （{@code __ide/session}）只返回状态码；WebSocket upgrade 请求转交 {@link IdeBrowserWebSocketGateway}；其它请求由
+ * {@link IdeGatewayDataPlane} 转发。非 IDE 路径原样放行。
  */
 @Component
 public final class IdeGatewayFilter extends OncePerRequestFilter {
 
   private static final String BOOTSTRAP_ENDPOINT = "/" + EnvironmentIdeServiceImpl.BOOTSTRAP_PATH;
+
+  private static final String SESSION_ENDPOINT = "/" + EnvironmentIdeServiceImpl.SESSION_PATH;
 
   private static final Pattern ROUTE_PATTERN =
       Pattern.compile(
@@ -85,6 +87,11 @@ public final class IdeGatewayFilter extends OncePerRequestFilter {
 
     if (BOOTSTRAP_ENDPOINT.equals(remainder)) {
       dataPlane.handleBootstrap(environmentId, rawPathAndQuery, request, response);
+      return;
+    }
+
+    if (SESSION_ENDPOINT.equals(remainder)) {
+      dataPlane.handleSession(environmentId, rawPathAndQuery, request, response);
       return;
     }
 

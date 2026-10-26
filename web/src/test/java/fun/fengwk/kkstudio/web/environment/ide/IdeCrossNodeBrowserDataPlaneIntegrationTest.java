@@ -139,9 +139,9 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
 
   @Autowired private IdeBootstrapTicketService bootstrapTickets;
 
-  @Autowired private IdeLeaseCloseListener leaseCloseListener;
+  @Autowired private IdeGenerationCloseListener generationCloseListener;
 
-  private final List<UUID> caseLeases = new ArrayList<>();
+  private final List<DaemonConnectionIdentity> caseGenerations = new ArrayList<>();
 
   @Autowired private JdbcClusterNodeRegistry nodeRegistry;
 
@@ -159,8 +159,7 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
   void forwardsTwentyMiBHttpThroughNonOwnerOrigin() throws Exception {
     startForwarderNode(nodeRegistry.localNodeId(), ownerPort);
     registerReadyOwner(nodeRegistry.localNodeId());
-    DaemonConnectionIdentity identity =
-        new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
+    DaemonConnectionIdentity identity = new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1");
     when(endpoint.connectionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
     NodePeer node = new NodePeer();
     AtomicInteger opens = new AtomicInteger();
@@ -208,8 +207,7 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
   void forwardsBootstrapAndReusesGenerationCookie() throws Exception {
     startForwarderNode(nodeRegistry.localNodeId(), ownerPort);
     registerReadyOwner(nodeRegistry.localNodeId());
-    DaemonConnectionIdentity identity =
-        new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
+    DaemonConnectionIdentity identity = new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1");
     when(endpoint.connectionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
 
     String firstView = UUID.randomUUID().toString();
@@ -250,8 +248,7 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
   void forwardsBrowserWebSocketThroughNonOwnerOrigin() throws Exception {
     startForwarderNode(nodeRegistry.localNodeId(), ownerPort);
     registerReadyOwner(nodeRegistry.localNodeId());
-    DaemonConnectionIdentity identity =
-        new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
+    DaemonConnectionIdentity identity = new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1");
     when(endpoint.connectionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
     WsNodeDaemon node = new WsNodeDaemon(true);
     when(endpoint.requestIde(eq(ENVIRONMENT), any()))
@@ -310,8 +307,7 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
   void uploadsTwentyMiBSingleBrowserBinaryThroughNonOwnerOrigin() throws Exception {
     startForwarderNode(nodeRegistry.localNodeId(), ownerPort);
     registerReadyOwner(nodeRegistry.localNodeId());
-    DaemonConnectionIdentity identity =
-        new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
+    DaemonConnectionIdentity identity = new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1");
     when(endpoint.connectionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
     WsNodeDaemon node = new WsNodeDaemon(false);
     AtomicInteger opens = new AtomicInteger();
@@ -369,8 +365,7 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
   void streamsTwentyMiBDaemonBinaryToBrowserThroughNonOwnerOrigin() throws Exception {
     startForwarderNode(nodeRegistry.localNodeId(), ownerPort);
     registerReadyOwner(nodeRegistry.localNodeId());
-    DaemonConnectionIdentity identity =
-        new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
+    DaemonConnectionIdentity identity = new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1");
     when(endpoint.connectionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
     WsNodeDaemon node = new WsNodeDaemon(false);
     when(endpoint.requestIde(eq(ENVIRONMENT), any()))
@@ -406,8 +401,7 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
   void streamsUtf8TextSplittingCodepointsThroughNonOwnerOrigin() throws Exception {
     startForwarderNode(nodeRegistry.localNodeId(), ownerPort);
     registerReadyOwner(nodeRegistry.localNodeId());
-    DaemonConnectionIdentity identity =
-        new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
+    DaemonConnectionIdentity identity = new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1");
     when(endpoint.connectionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
     WsNodeDaemon node = new WsNodeDaemon(false);
     when(endpoint.requestIde(eq(ENVIRONMENT), any()))
@@ -440,13 +434,12 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
     }
   }
 
-  /** 代际撤销（租约关闭）必须立即主动关闭已建立的浏览器 WS 与 Daemon 反向连接，而不是等代际复核周期。 */
+  /** 代际结束（另一个 Daemon 实例接管）必须立即主动关闭已建立的浏览器 WS 与 Daemon 反向连接。 */
   @Test
-  void leaseCloseActivelyClosesBrowserWebSocketThroughNonOwnerOrigin() throws Exception {
+  void generationCloseActivelyClosesBrowserWebSocketThroughNonOwnerOrigin() throws Exception {
     startForwarderNode(nodeRegistry.localNodeId(), ownerPort);
     registerReadyOwner(nodeRegistry.localNodeId());
-    DaemonConnectionIdentity identity =
-        new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
+    DaemonConnectionIdentity identity = new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1");
     when(endpoint.connectionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
     WsNodeDaemon node = new WsNodeDaemon(true);
     when(endpoint.requestIde(eq(ENVIRONMENT), any()))
@@ -464,11 +457,11 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
     try (BrowserSocket socket = browserSocket(browser, cookie, "/ws/close")) {
       assertTrue(socket.awaitOpen(), "browser websocket must be established");
       assertTrue(node.awaitReady(), "daemon reverse connection must be ready");
-      // 真实租约关闭钩子（B 的组合根装配）：pairings.closeLease + 票据 revoke + 会话代际清除。
-      leaseCloseListener.onLeaseClosed(ENVIRONMENT, identity.leaseToken());
+      // 真实代际结束钩子（B 的组合根装配）：pairings.closeGeneration + 票据 revoke + 会话代际清除。
+      generationCloseListener.onGenerationClosed(identity);
       assertTrue(
           socket.closed.await(20, TimeUnit.SECONDS),
-          "browser websocket must be actively closed on lease close");
+          "browser websocket must be actively closed when its generation ends");
       assertEquals(
           1011, socket.closeCode, "owner hop close must use the fixed Jakarta-legal safe status");
       assertTrue(node.closed.await(20, TimeUnit.SECONDS), "daemon reverse connection must close");
@@ -750,9 +743,7 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
               CompletableFuture<IdeReply> reply = new CompletableFuture<>();
               reply.complete(IdeReply.ok(null, null, null));
               return new IdeRequest(
-                  new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID()),
-                  UUID.randomUUID(),
-                  reply);
+                  new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1"), UUID.randomUUID(), reply);
             });
 
     String path = IdeInternalPaths.dataHttpPath(ENVIRONMENT, "/workspace/secret.txt");
@@ -784,12 +775,9 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
               CompletableFuture<IdeReply> reply = new CompletableFuture<>();
               reply.complete(IdeReply.ok(null, null, null));
               return new IdeRequest(
-                  new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID()),
-                  UUID.randomUUID(),
-                  reply);
+                  new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1"), UUID.randomUUID(), reply);
             });
-    DaemonConnectionIdentity identity =
-        new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
+    DaemonConnectionIdentity identity = new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1");
     when(endpoint.connectionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
     String cookie = openSession(identity, UUID.randomUUID().toString(), "/home/dev/project");
 
@@ -811,15 +799,13 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
     }
   }
 
-  /** 代际（租约）失效：owner 拒绝该 cookie，且不触发任何 Daemon 副作用。 */
+  /** 代际已被另一个 Daemon 实例接管：owner 拒绝该 cookie，且不触发任何 Daemon 副作用。 */
   @Test
-  void rejectsStaleLeaseGeneration() throws Exception {
+  void rejectsReplacedGeneration() throws Exception {
     startForwarderNode(nodeRegistry.localNodeId(), ownerPort);
     registerReadyOwner(nodeRegistry.localNodeId());
-    DaemonConnectionIdentity stale =
-        new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
-    DaemonConnectionIdentity current =
-        new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
+    DaemonConnectionIdentity stale = new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1");
+    DaemonConnectionIdentity current = new DaemonConnectionIdentity(ENVIRONMENT, "daemon-2");
     when(endpoint.connectionIdentity(ENVIRONMENT)).thenReturn(Optional.of(current));
     AtomicInteger opens = new AtomicInteger();
     when(endpoint.requestIde(eq(ENVIRONMENT), any()))
@@ -855,8 +841,7 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
   void doesNotReplayWhenDaemonPeerDisconnects() throws Exception {
     startForwarderNode(nodeRegistry.localNodeId(), ownerPort);
     registerReadyOwner(nodeRegistry.localNodeId());
-    DaemonConnectionIdentity identity =
-        new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
+    DaemonConnectionIdentity identity = new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1");
     when(endpoint.connectionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
     NodePeer node = new NodePeer();
     node.disconnectAfterBytes = 1024 * 1024;
@@ -1493,7 +1478,7 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
   /** bootstrap 消费的真实前置：先由真实 OPEN_VIEW 授权视图，再消费一次性票据换 cookie。 */
   private String openSession(
       DaemonConnectionIdentity identity, String viewId, String workspacePath) {
-    caseLeases.add(identity.leaseToken());
+    caseGenerations.add(identity);
     sessions.viewOpened(identity, viewId, workspacePath);
     return sessions.open(identity, viewId, workspacePath);
   }
@@ -1504,9 +1489,9 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
    */
   @AfterEach
   void drainCaseSessions() {
-    for (UUID lease : caseLeases) {
-      leaseCloseListener.onLeaseClosed(ENVIRONMENT, lease);
+    for (DaemonConnectionIdentity generation : caseGenerations) {
+      generationCloseListener.onGenerationClosed(generation);
     }
-    caseLeases.clear();
+    caseGenerations.clear();
   }
 }

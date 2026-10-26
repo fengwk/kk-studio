@@ -68,8 +68,9 @@ import java.util.function.Supplier;
  * WELCOME。READY、HEARTBEAT 与断开连接同样以围栏推进状态； 租约存储不可用时 fail-closed。
  *
  * <p><b>实例身份与重连恢复：</b>调用只按 {@code (environmentId, invocationId)} 关联，物理连接失效不终结在途调用。同一 {@code
- * daemonInstanceId} 再次 READY 时，核心以相同 invocationId 恢复每个在途调用：只发送取消意图，绝不重发 INVOKE；Daemon 从 journal
- * 重放既有事实或停止仍运行的 scope。身份不同的新 daemon 进程接管该 Environment 时，旧的在途调用被判定为结果不确定（exactly-once 通知）。
+ * daemonInstanceId} 再次 READY 时，核心以相同 invocationId 恢复每个在途调用：未取消的发送 RECOVER，调用方已取消的发送 CANCEL，绝不重发
+ * INVOKE；Daemon 从 journal 重放既有事实，仍在运行的调用继续运行。身份不同的新 daemon 进程接管该 Environment
+ * 时，旧的在途调用被判定为结果不确定（exactly-once 通知），宿主同时收到旧实例代际结束的通知。
  *
  * <p><b>终态唯一与回调顺序：</b>COMPLETED/FAILED/CANCELLED 回调、连接清理与显式 {@link #expire} 竞争时只有一个赢家；已知 invocation
  * 的迟到 STARTED/PROGRESS 静默丢弃，未知 invocation 的回调按协议违规关闭连接。并发 {@code receive} 下 listener 回调 仍严格按该连接
@@ -404,7 +405,7 @@ public final class EnvironmentDaemonServer
   }
 
   /**
-   * 返回该 Environment 当前 READY 连接的代际快照（Daemon 实例身份 + 路由租约）。
+   * 返回该 Environment 当前 READY 连接背后的 Daemon 实例身份。
    *
    * <p>供 IDE 入口/反向流在建立凭据前冻结代际；无本地连接、未 READY 或身份未知时返回 empty。读取只持目录锁，不做外部 I/O。
    */
@@ -416,12 +417,7 @@ public final class EnvironmentDaemonServer
       if (state == null || !state.isReady() || environment.daemonInstanceId == null) {
         return Optional.empty();
       }
-      UUID leaseToken = state.leaseToken;
-      if (leaseToken == null) {
-        return Optional.empty();
-      }
-      return Optional.of(
-          new DaemonConnectionIdentity(environmentId, environment.daemonInstanceId, leaseToken));
+      return Optional.of(new DaemonConnectionIdentity(environmentId, environment.daemonInstanceId));
     }
   }
 
@@ -535,7 +531,7 @@ public final class EnvironmentDaemonServer
     }
     if (outcome == DaemonOfferResult.ACCEPTED) {
       return new DaemonIdeCall(
-          new DaemonConnectionIdentity(environmentId, daemonInstanceId, leaseToken),
+          new DaemonConnectionIdentity(environmentId, daemonInstanceId),
           invocationId,
           pending.reply);
     }
@@ -1049,10 +1045,9 @@ public final class EnvironmentDaemonServer
         closeConnectionState(previous);
       }
       // 身份不同的新进程接管：旧进程已不可能再给出该 Environment 的终态，其全部在途调用按结果不确定终结恰好一次。
+      String replacedInstanceId = replaceDaemonInstance(environmentId, daemonInstanceId);
       List<ActiveInvocation> abandoned =
-          replaceDaemonInstance(environmentId, daemonInstanceId)
-              ? takeAbandonedInvocations(environmentId)
-              : List.of();
+          replacedInstanceId == null ? List.of() : takeAbandonedInvocations(environmentId);
       state.rememberDaemonInstance(daemonInstanceId);
       state.bind(environmentId, acquired.leaseToken());
       state.capabilityCatalogVersion = capabilityCatalogVersion;
@@ -1069,6 +1064,12 @@ public final class EnvironmentDaemonServer
                             + "; capability invocation outcome is uncertain.")));
         // 换进程接管后旧进程不可能再给出这些调用的终态：其名下上传按已绑定 uploadId 清理，绝不留给新进程消费。
         deferred.add(() -> releaseAllTransfers(active));
+      }
+      if (replacedInstanceId != null) {
+        // 旧实例的 IDE 代际随之结束：宿主关闭绑定它的入口凭据与反向流。
+        DaemonConnectionIdentity replaced =
+            new DaemonConnectionIdentity(environmentId, replacedInstanceId);
+        deferred.add(() -> notifyDaemonInstanceReplaced(replaced));
       }
       ObjectNode welcomePayload = envelopeCodec.createPayload();
       welcomePayload.put("environmentId", environmentId.toString());
@@ -1094,14 +1095,14 @@ public final class EnvironmentDaemonServer
   /**
    * 记录新的 daemon 实例身份。
    *
-   * @return 该 Environment 此前已有不同实例身份（新进程接管）时返回 true
+   * @return 该 Environment 此前在本节点的不同实例身份（新进程接管）；首次连接或同一实例重连时返回 {@code null}
    */
-  private boolean replaceDaemonInstance(EnvironmentId environmentId, String daemonInstanceId) {
+  private String replaceDaemonInstance(EnvironmentId environmentId, String daemonInstanceId) {
     synchronized (inventory) {
       EnvironmentState environment = environmentOf(environmentId);
       String previous = environment.daemonInstanceId;
       environment.daemonInstanceId = daemonInstanceId;
-      return previous != null && !previous.equals(daemonInstanceId);
+      return previous == null || previous.equals(daemonInstanceId) ? null : previous;
     }
   }
 
@@ -1879,19 +1880,10 @@ public final class EnvironmentDaemonServer
     } catch (Throwable error) {
       closeFailure = error;
     }
-    // IDE 命令不重放；租约或传输释放失败也必须使该代命令收敛并通知宿主。
+    // IDE 命令不重放；租约或传输释放失败也必须使该代命令收敛。
     failPendingIdeCalls(state);
-    Throwable notificationFailure = null;
-    if (environmentId != null && leaseToken != null) {
-      try {
-        sessionListener.onEnvironmentDisconnected(environmentId, leaseToken);
-      } catch (Throwable error) {
-        notificationFailure = error;
-      }
-    }
     Error cleanupError = recordCleanupFailure(null, leaseFailure);
     cleanupError = recordCleanupFailure(cleanupError, closeFailure);
-    cleanupError = recordCleanupFailure(cleanupError, notificationFailure);
     Throwable diagnosticFailure = null;
     if (leaseFailure != null) {
       diagnosticFailure =
@@ -1900,11 +1892,6 @@ public final class EnvironmentDaemonServer
     if (closeFailure != null) {
       diagnosticFailure =
           logCleanupFailure("connection cleanup transport close", closeFailure, diagnosticFailure);
-    }
-    if (notificationFailure != null) {
-      diagnosticFailure =
-          logCleanupFailure(
-              "environment disconnected notification", notificationFailure, diagnosticFailure);
     }
     if (cleanupError != null) {
       if (diagnosticFailure != null && cleanupError != diagnosticFailure) {
@@ -1979,6 +1966,14 @@ public final class EnvironmentDaemonServer
       sessionListener.onEnvironmentReady(environmentId);
     } catch (RuntimeException error) {
       logFailure("environment ready notification", error);
+    }
+  }
+
+  private void notifyDaemonInstanceReplaced(DaemonConnectionIdentity previous) {
+    try {
+      sessionListener.onDaemonInstanceReplaced(previous);
+    } catch (RuntimeException error) {
+      logFailure("daemon instance replaced notification", error);
     }
   }
 

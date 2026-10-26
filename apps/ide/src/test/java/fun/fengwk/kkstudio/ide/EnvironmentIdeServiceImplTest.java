@@ -41,7 +41,6 @@ class EnvironmentIdeServiceImplTest {
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
   private static final String VIEW = "11111111-2222-3333-4444-555555555555";
   private static final String INSTANCE = "33333333-3333-3333-3333-333333333333";
-  private static final UUID LEASE = new UUID(0L, 77L);
 
   private EnvironmentIdeServiceImpl service(
       FakeTransport transport, IdeBootstrapTicketService bootstrap, Duration timeout) {
@@ -81,9 +80,8 @@ class EnvironmentIdeServiceImplTest {
     assertEquals(ENV, ticket.environmentId());
     assertEquals(VIEW, ticket.viewId());
     assertEquals("/daemon/workspaces/" + VIEW, ticket.workspacePath());
-    // 入口绑定命令进入传输时的连接代际（Daemon 实例 + 租约）。
-    assertEquals(INSTANCE, ticket.identity().daemonInstanceId());
-    assertEquals(LEASE, ticket.identity().leaseToken());
+    // 入口绑定命令进入传输时的 Daemon 实例代际。
+    assertEquals(new DaemonConnectionIdentity(ENV, INSTANCE), ticket.identity());
     assertTrue(bootstrap.consume(token).isEmpty());
   }
 
@@ -375,7 +373,7 @@ class EnvironmentIdeServiceImplTest {
             .openView(ENV, openViewRequest("/home/dev"));
 
     // 授权跟随真实视图生命周期，并绑定命令进入传输时的连接代际。
-    assertEquals(new DaemonConnectionIdentity(ENV, INSTANCE, LEASE), authorization.openedIdentity);
+    assertEquals(new DaemonConnectionIdentity(ENV, INSTANCE), authorization.openedIdentity);
     assertEquals(VIEW, authorization.openedViewId);
     assertEquals("/daemon/workspaces/" + VIEW, authorization.openedWorkspace);
     IdeBootstrapTicketService.Ticket ticket =
@@ -416,7 +414,7 @@ class EnvironmentIdeServiceImplTest {
     service.closeView(ENV, VIEW);
 
     assertEquals(IdeAction.CLOSE_VIEW, transport.command.action());
-    assertEquals(new DaemonConnectionIdentity(ENV, INSTANCE, LEASE), authorization.closedIdentity);
+    assertEquals(new DaemonConnectionIdentity(ENV, INSTANCE), authorization.closedIdentity);
     assertEquals(VIEW, authorization.closedViewId);
     // 关闭后旧票据必须失效，否则同一 viewId 重开时旧入口仍能换到 cookie。
     assertTrue(bootstrap.consume(token).isEmpty());
@@ -498,8 +496,7 @@ class EnvironmentIdeServiceImplTest {
           future.complete(reply);
         }
       }
-      DaemonConnectionIdentity identity =
-          new DaemonConnectionIdentity(environmentId, INSTANCE, LEASE);
+      DaemonConnectionIdentity identity = new DaemonConnectionIdentity(environmentId, INSTANCE);
       return new IdeRequest(identity, invocationId, future);
     }
 
@@ -510,7 +507,7 @@ class EnvironmentIdeServiceImplTest {
 
     @Override
     public Optional<DaemonConnectionIdentity> connectionIdentity(EnvironmentId environmentId) {
-      return Optional.of(new DaemonConnectionIdentity(environmentId, INSTANCE, LEASE));
+      return Optional.of(new DaemonConnectionIdentity(environmentId, INSTANCE));
     }
   }
 
