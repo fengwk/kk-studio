@@ -17,6 +17,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 class FileExecutionExitJournalTest {
@@ -349,6 +350,134 @@ class FileExecutionExitJournalTest {
   }
 
   @Test
+  void postRenameForceFailureKeepsRecordAndRepeatsForceForExistingProof(@TempDir Path directory)
+      throws Exception {
+    assumePosixNonRoot(directory);
+    UUID executionId = UUID.randomUUID();
+    UUID threadId = UUID.randomUUID();
+    UUID invocationId = UUID.randomUUID();
+    ExecutionExitJournalRecord renamed =
+        record(executionId, threadId, invocationId, ExecutionExitState.STUDIO_EXITED, T0);
+
+    try (FileExecutionExitJournal journal = new FileExecutionExitJournal(directory);
+        AutoCloseable restore = directoryPermissions(directory, "-wx------")) {
+      ExecutionExitJournalException first =
+          assertThrows(ExecutionExitJournalException.class, () -> journal.write(renamed));
+      assertTrue(first.getMessage().contains("force"));
+      assertTrue(
+          Files.exists(directory.resolve(executionId + ".json")),
+          "atomic rename must complete before the directory force fails");
+
+      // 已存在 canonical record 也必须重新 force；不能因为读取到旧记录就跳过持久性保证。
+      ExecutionExitJournalException repeated =
+          assertThrows(
+              ExecutionExitJournalException.class,
+              () ->
+                  journal.write(
+                      record(
+                          executionId,
+                          threadId,
+                          invocationId,
+                          ExecutionExitState.STUDIO_EXITED,
+                          T0.plusSeconds(2))));
+      assertTrue(repeated.getMessage().contains("force"));
+
+      restore.close();
+      ExecutionExitJournalRecord canonical =
+          journal.write(
+              record(
+                  executionId,
+                  threadId,
+                  invocationId,
+                  ExecutionExitState.STUDIO_EXITED,
+                  T0.plusSeconds(3)));
+      assertEquals(renamed, canonical, "the original canonical evidence and time must be reused");
+      assertEquals(List.of(renamed), journal.loadAll());
+      assertNoTemporaryFiles(directory);
+    }
+  }
+
+  @Test
+  void directoryWithoutWriteRejectsTemporaryCreationAndLeavesNoJsonOrTemporaryFile(
+      @TempDir Path directory) throws Exception {
+    assumePosixNonRoot(directory);
+    UUID executionId = UUID.randomUUID();
+    ExecutionExitJournalRecord record =
+        record(
+            executionId,
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            ExecutionExitState.STUDIO_EXITED,
+            T0);
+
+    try (FileExecutionExitJournal journal = new FileExecutionExitJournal(directory);
+        AutoCloseable restore = directoryPermissions(directory, "r-x------")) {
+      assertThrows(ExecutionExitJournalException.class, () -> journal.write(record));
+      Path target = directory.resolve(executionId + ".json");
+      assertFalse(Files.exists(target));
+      assertNoTemporaryFiles(directory);
+      assertNoJsonFiles(directory);
+
+      restore.close();
+      assertEquals(record, journal.write(record));
+      assertEquals(List.of(record), journal.loadAll());
+    }
+  }
+
+  @Test
+  void unreadableDirectoryFailsClosedAndKeepsExistingRecord(@TempDir Path directory)
+      throws Exception {
+    assumePosixNonRoot(directory);
+    ExecutionExitJournalRecord record =
+        record(
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            ExecutionExitState.STUDIO_EXITED,
+            T0);
+
+    try (FileExecutionExitJournal journal = new FileExecutionExitJournal(directory)) {
+      journal.write(record);
+      try (AutoCloseable restore = directoryPermissions(directory, "---------")) {
+        assertThrows(ExecutionExitJournalException.class, journal::loadAll);
+        restore.close();
+        assertEquals(List.of(record), journal.loadAll(), "the existing record must survive");
+      }
+    }
+  }
+
+  @Test
+  void strictJsonParsingRejectsNonObjectDuplicateKeysAndTrailingTokens(@TempDir Path directory)
+      throws IOException {
+    UUID executionId = UUID.randomUUID();
+    ExecutionExitJournalRecord valid =
+        record(
+            executionId,
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            ExecutionExitState.STUDIO_EXITED,
+            T0);
+    Path entry = directory.resolve(executionId + ".json");
+
+    try (FileExecutionExitJournal journal = new FileExecutionExitJournal(directory)) {
+      journal.write(valid);
+      String template = Files.readString(entry);
+
+      Files.writeString(entry, "[]");
+      assertThrows(ExecutionExitJournalException.class, journal::loadAll);
+      assertTrue(Files.exists(entry));
+
+      Files.writeString(entry, template.replace("\"attempt\":1", "\"attempt\":1,\"attempt\":1"));
+      assertThrows(ExecutionExitJournalException.class, journal::loadAll);
+      assertTrue(Files.exists(entry));
+
+      Files.writeString(entry, template + "{}");
+      assertThrows(ExecutionExitJournalException.class, journal::loadAll);
+      assertTrue(Files.exists(entry));
+    }
+  }
+
+  @Test
   void unreadableRecordFailsClosed(@TempDir Path directory) throws IOException {
     Assumptions.assumeTrue(Files.getFileStore(directory).supportsFileAttributeView("posix"));
     Path entry = directory.resolve(UUID.randomUUID() + ".json");
@@ -358,6 +487,37 @@ class FileExecutionExitJournalTest {
       assertThrows(ExecutionExitJournalException.class, journal::loadAll);
     } finally {
       Files.setPosixFilePermissions(entry, PosixFilePermissions.fromString("rw-------"));
+    }
+  }
+
+  private static void assumePosixNonRoot(Path directory) throws IOException {
+    Assumptions.assumeTrue(Files.getFileStore(directory).supportsFileAttributeView("posix"));
+    Assumptions.assumeFalse(
+        "root".equals(System.getProperty("user.name")),
+        "root bypasses POSIX directory permission checks");
+  }
+
+  /** 设置测试目录权限，并在 TWR 关闭时恢复 0700；显式提前 close 后再次 close 仍幂等。 */
+  private static AutoCloseable directoryPermissions(Path directory, String permissions)
+      throws IOException {
+    Files.setPosixFilePermissions(directory, PosixFilePermissions.fromString(permissions));
+    return () ->
+        Files.setPosixFilePermissions(directory, PosixFilePermissions.fromString("rwx------"));
+  }
+
+  private static void assertNoTemporaryFiles(Path directory) throws IOException {
+    try (var files = Files.list(directory)) {
+      assertTrue(
+          files.noneMatch(path -> path.getFileName().toString().endsWith(".tmp")),
+          "no temporary file may be left behind");
+    }
+  }
+
+  private static void assertNoJsonFiles(Path directory) throws IOException {
+    try (var files = Files.list(directory)) {
+      assertTrue(
+          files.noneMatch(path -> path.getFileName().toString().endsWith(".json")),
+          "no journal record may be created");
     }
   }
 
