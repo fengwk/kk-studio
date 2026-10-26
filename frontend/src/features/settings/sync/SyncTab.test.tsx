@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SyncTab } from '@/features/settings/sync/SyncTab'
@@ -694,14 +694,18 @@ describe('SyncTab import', () => {
     await screen.findByRole('dialog', { name: '导入配置' })
 
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '确认导入' }))
-    fireEvent.keyDown(window, { key: 'Escape' })
+    await user.keyboard('{Escape}')
     expect(screen.getByRole('dialog', { name: '导入配置' })).toBeInTheDocument()
 
-    pending.resolve({ imported: [], skipped: [] })
+    // 结果 DOM 可先于 Dialog 的 pending effect 可见；先提交整个异步更新，再发下一次用户按键。
+    await act(async () => {
+      pending.resolve({ imported: [], skipped: [] })
+      await pending.promise
+    })
     await waitFor(() =>
       expect(within(screen.getByRole('dialog')).getByText('没有可导入的配置。')).toBeInTheDocument(),
     )
-    fireEvent.keyDown(window, { key: 'Escape' })
+    await user.keyboard('{Escape}')
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   })
 

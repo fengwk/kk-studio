@@ -811,3 +811,9 @@ ABANDONED 只放弃等待，不冒充退出、不取消执行、不自动 Resume
 - 测试修复 **bffbd60f8ea132420856bd708db1294202ef7706**：真实 managed process 启动后使用显式 launch gate 阻止 initialize/publish，安装 publication hook 后再放行；整个易失败区段置于 finally 保护中，所有路径都释放 launch/stop gate。没有改生产逻辑、延长超时、增加 retry、skip 或放宽退出断言。
 - 本地 Node check/build 通过；完整 `lsp-pool` **32 tests passed**，目标并发用例另 **5/5** 通过。父级进一步删除不必要的 gate-release 布尔状态，利用 Promise resolve 的幂等性在 finally 无条件释放。
 - 该补修只有测试与交接文档变更；等待最终提交的全量远端矩阵，不以先前平台成功替代。
+
+### 18.8 React 异步按键用例补修
+
+- `c2e73e7f6` 的 main run **40399428903**：五平台 Daemon、安装器、Schema、敏感扫描、Java 全量、Fat JAR 与前端静态检查全部成功；前端 coverage 有 1 项失败（3,466 passed / 2 skipped）：`SyncTab.test.tsx` 的导入完成后第二次 Escape 没有关闭弹窗。`:main` 镜像仍未发布，未创建正式 tag。
+- 源码与失败 DOM 对照：异步结果 DOM 已提交不代表 Dialog 更新 `pendingRef` 的 passive effect 已完成；原测试在外部直接 resolve promise，仅观察结果文本后立刻 `fireEvent`，把尚未刷新的 pending 守卫当作下一次用户交互。
+- 仅修正该测试：用 async `act` 完成 promise 及相关更新/effects，再通过 `user.keyboard` 发送 Escape；保留“导入中不能关、完成后可关”的原有断言和超时。没有修改 Dialog/导入生产代码、添加 retries 或跳测。
