@@ -54,6 +54,7 @@ const queryClient = new QueryClient({
 })
 
 export function IdeHarnessApp() {
+  const [environmentReady, setEnvironmentReady] = useState<boolean>(true)
   const [pane1Width, setPane1Width] = useState<number>(1000)
   const [pane1Narrow, setPane1Narrow] = useState<boolean>(false)
   const [pane1Open, setPane1Open] = useState<boolean>(false)
@@ -63,6 +64,8 @@ export function IdeHarnessApp() {
   const [pane2Narrow, setPane2Narrow] = useState<boolean>(false)
   const [pane2Open, setPane2Open] = useState<boolean>(false)
   const [pane2Action, setPane2Action] = useState<IdeCommandAction | null>(null)
+
+  const environment: ResolvedEnvironmentInfo = { ...TEST_ENV, ready: environmentReady }
 
   return (
     <div className="harness-container" data-testid="ide-harness-root">
@@ -116,6 +119,25 @@ export function IdeHarnessApp() {
           onClick={() => setPane1Open(true)}
         >
           恢复 P1
+        </Button>
+
+        <span style={{ borderLeft: '1px solid rgba(255,255,255,0.2)', height: 20, margin: '0 8px' }} />
+
+        <Button
+          size="compact"
+          variant="ghost"
+          data-testid="ide-set-environment-offline"
+          onClick={() => setEnvironmentReady(false)}
+        >
+          环境离线
+        </Button>
+        <Button
+          size="compact"
+          variant="ghost"
+          data-testid="ide-set-environment-ready"
+          onClick={() => setEnvironmentReady(true)}
+        >
+          环境就绪
         </Button>
 
         <span style={{ borderLeft: '1px solid rgba(255,255,255,0.2)', height: 20, margin: '0 8px' }} />
@@ -194,7 +216,7 @@ export function IdeHarnessApp() {
             isOpen={pane1Open}
             viewId={PANE_1_VIEW_ID}
             paneId="pane-1"
-            environment={TEST_ENV}
+            environment={environment}
             availableEnvironments={AVAILABLE_ENVS}
             action={pane1Action}
             isNarrow={pane1Narrow}
@@ -225,7 +247,7 @@ export function IdeHarnessApp() {
             isOpen={pane2Open}
             viewId={PANE_2_VIEW_ID}
             paneId="pane-2"
-            environment={TEST_ENV}
+            environment={environment}
             availableEnvironments={AVAILABLE_ENVS}
             action={pane2Action}
             isNarrow={pane2Narrow}

@@ -16,14 +16,32 @@ const PANE_2_VIEW_ID = 'c2000000-0000-4000-8000-000000000002'
 const ALLOWED_VIEW_IDS = new Set([PANE_1_VIEW_ID, PANE_2_VIEW_ID])
 
 interface MockAudit {
-  openCalls: Array<{ environmentId: string; viewId: string }>
+  openCalls: Array<{ environmentId: string; viewId: string; body: Record<string, unknown> }>
   iframeRequests: Record<string, number>
+  sessionProbes: string[]
 }
 
-async function setupStrictIdeRoutes(page: Page): Promise<MockAudit> {
+interface StrictIdeRouteOptions {
+  /** 每次会话探测返回的状态码；缺省 204，测试可注入 401/409/503 等真实契约状态。 */
+  sessionStatus?: (probeIndex: number) => number | Promise<number>
+}
+
+function viewIdFromToken(token: string | null): string {
+  if (!token) {
+    return ''
+  }
+  const nonceSeparator = token.lastIndexOf('-r')
+  return nonceSeparator < 0 ? token : token.slice(0, nonceSeparator)
+}
+
+async function setupStrictIdeRoutes(
+  page: Page,
+  options: StrictIdeRouteOptions = {},
+): Promise<MockAudit> {
   const audit: MockAudit = {
     openCalls: [],
     iframeRequests: {},
+    sessionProbes: [],
   }
 
   // 1. 严格拦截创建 IDE 视图 API：契约字段与 UUID 必须精确匹配，不使用兜底
@@ -39,14 +57,14 @@ async function setupStrictIdeRoutes(page: Page): Promise<MockAudit> {
       throw new Error(`请求携带未知的环境 ID: ${req.url()}`)
     }
 
-    const body = req.postDataJSON() as { viewId?: string } | null
-    const viewId = body?.viewId
+    const body = (req.postDataJSON() as Record<string, unknown> | null) ?? {}
+    const viewId = typeof body.viewId === 'string' ? body.viewId : undefined
     if (!viewId || !ALLOWED_VIEW_IDS.has(viewId)) {
       throw new Error(`收到非法或未登记的 viewId: ${String(viewId)}`)
     }
 
-    audit.openCalls.push({ environmentId: HARNESS_ENV_ID, viewId })
-    const entryUrl = `/environment-ide/${HARNESS_ENV_ID}/__ide/bootstrap?token=${viewId}`
+    audit.openCalls.push({ environmentId: HARNESS_ENV_ID, viewId, body })
+    const entryUrl = `/environment-ide/${HARNESS_ENV_ID}/__ide/bootstrap?token=${viewId}-r${audit.openCalls.length}`
 
     await route.fulfill({
       status: 200,
@@ -63,10 +81,30 @@ async function setupStrictIdeRoutes(page: Page): Promise<MockAudit> {
     })
   })
 
-  // 2. 严格拦截 iframe fixture：记录请求次数与不可变 loadNonce 探针
+  // 2. 严格拦截真实契约的只读会话探测：精确环境、GET、无查询串；缺省 204 表示会话有效。
+  await page.route('**/environment-ide/*/__ide/session*', async (route) => {
+    const req = route.request()
+    const parsed = new URL(req.url())
+    if (req.method() !== 'GET') {
+      throw new Error(`会话探测使用了非 GET 方法: ${req.method()}`)
+    }
+    const envMatch = parsed.pathname.match(/\/environment-ide\/([^/]+)\/__ide\/session$/)
+    if (!envMatch || decodeURIComponent(envMatch[1]) !== HARNESS_ENV_ID) {
+      throw new Error(`会话探测携带未知的环境 ID: ${req.url()}`)
+    }
+    if (parsed.search !== '') {
+      throw new Error(`会话探测不得携带查询串: ${parsed.search}`)
+    }
+
+    audit.sessionProbes.push(parsed.pathname)
+    const status = await (options.sessionStatus?.(audit.sessionProbes.length - 1) ?? 204)
+    await route.fulfill({ status, headers: { 'Cache-Control': 'no-store' } })
+  })
+
+  // 3. 严格拦截 iframe fixture：记录请求次数与不可变 loadNonce 探针
   await page.route('**/environment-ide/*/__ide/bootstrap*', async (route) => {
     const parsed = new URL(route.request().url())
-    const viewId = parsed.searchParams.get('token')
+    const viewId = viewIdFromToken(parsed.searchParams.get('token'))
     if (!viewId || !ALLOWED_VIEW_IDS.has(viewId)) {
       throw new Error(`iframe fixture 请求携带非预期的 viewId: ${String(viewId)}`)
     }
@@ -99,7 +137,7 @@ async function setupStrictIdeRoutes(page: Page): Promise<MockAudit> {
     })
   })
 
-  // 3. 辅助 API 终端创建与显式关闭精确放行，其余路径 404
+  // 4. 辅助 API 终端创建与显式关闭精确放行，其余路径 404
   await page.route('**/api/environments/*/ide/views/**/terminal', async (route) => {
     if (route.request().method() === 'POST') {
       await route.fulfill({
@@ -309,5 +347,112 @@ test.describe('Chat IDE Overlay Responsive & Iframe Identity Durability', () => 
     expect(audit.openCalls.length).toBe(2)
     expect(audit.iframeRequests[PANE_1_VIEW_ID]).toBe(1)
     expect(audit.iframeRequests[PANE_2_VIEW_ID]).toBe(1)
+  })
+
+  test('Case 4: 401/409 会话失效时用同一 viewId 无 directory 重开并重载 iframe', async ({ page }) => {
+    // 真实浏览器行为：每次重开后服务端签发新 bootstrap token，iframe 必须重新加载；
+    // 每次 OPEN 请求只能包含精确 viewId，不能携带旧 directory。
+    const sessionStatuses: number[] = []
+    const audit = await setupStrictIdeRoutes(page, {
+      sessionStatus: () => sessionStatuses.shift() ?? 204,
+    })
+
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.goto(HARNESS_URL)
+    await page.click('[data-testid="p1-open-btn"]')
+
+    const pane1Frame = page.frameLocator('[data-pane-id="pane-1"] iframe[data-testid="ide-iframe"]')
+    await expect(pane1Frame.locator('#ide-badge')).toHaveText(PANE_1_VIEW_ID)
+    await expect.poll(() => audit.sessionProbes.length).toBe(1)
+    const firstNonce = await pane1Frame.locator('#load-nonce').textContent()
+    expect(audit.openCalls.length).toBe(1)
+
+    // 401：用同一 viewId 重开；新 entryUrl 带新 token，iframe 重新加载。
+    sessionStatuses.push(401)
+    await page.click('[data-testid="ide-set-environment-offline"]')
+    await page.click('[data-testid="ide-set-environment-ready"]')
+    await expect.poll(() => audit.sessionProbes.length).toBe(2)
+    await expect.poll(() => audit.openCalls.length).toBe(2)
+    expect(audit.openCalls[1]).toMatchObject({
+      environmentId: HARNESS_ENV_ID,
+      viewId: PANE_1_VIEW_ID,
+      body: { viewId: PANE_1_VIEW_ID },
+    })
+    await expect.poll(() => pane1Frame.locator('#load-nonce').textContent()).not.toBe(firstNonce)
+    await expect.poll(() => audit.sessionProbes.length).toBe(3)
+    const secondNonce = await pane1Frame.locator('#load-nonce').textContent()
+
+    // 409：代际被接管同样按同一 viewId 重开，不携带 directory。
+    sessionStatuses.push(409)
+    await page.click('[data-testid="ide-set-environment-offline"]')
+    await page.click('[data-testid="ide-set-environment-ready"]')
+    await expect.poll(() => audit.sessionProbes.length).toBe(4)
+    await expect.poll(() => audit.openCalls.length).toBe(3)
+    expect(audit.openCalls[2]).toMatchObject({
+      environmentId: HARNESS_ENV_ID,
+      viewId: PANE_1_VIEW_ID,
+      body: { viewId: PANE_1_VIEW_ID },
+    })
+    await expect.poll(() => pane1Frame.locator('#load-nonce').textContent()).not.toBe(secondNonce)
+    await expect.poll(() => audit.sessionProbes.length).toBe(5)
+
+    // 探测地址始终是精确环境的无 token、无查询串 __ide/session。
+    const expectedSessionPath = `/environment-ide/${HARNESS_ENV_ID}/__ide/session`
+    expect(audit.sessionProbes.every((path) => path === expectedSessionPath)).toBe(true)
+    expect(audit.openCalls.map((call) => call.viewId))
+      .toEqual([PANE_1_VIEW_ID, PANE_1_VIEW_ID, PANE_1_VIEW_ID])
+    expect(audit.iframeRequests[PANE_1_VIEW_ID]).toBe(3)
+  })
+
+  test('Case 5: 503 保留原 iframe 且不重复 OPEN，恢复 204 后才重开', async ({ page }) => {
+    // 真实浏览器行为：bootstrap/探测遇 503 时只等待，旧 iframe 与加载 nonce 保持不变；
+    // 恢复 204 后才用同一 viewId 无 directory 重开。
+    const sessionStatuses: number[] = [503]
+    const audit = await setupStrictIdeRoutes(page, {
+      sessionStatus: () => sessionStatuses.shift() ?? 204,
+    })
+
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.goto(HARNESS_URL)
+    await page.click('[data-testid="p1-open-btn"]')
+
+    const iframe = page.locator('[data-pane-id="pane-1"] iframe[data-testid="ide-iframe"]')
+    const pane1Frame = page.frameLocator('[data-pane-id="pane-1"] iframe[data-testid="ide-iframe"]')
+    await expect(pane1Frame.locator('#ide-badge')).toHaveText(PANE_1_VIEW_ID)
+    await expect.poll(() => audit.sessionProbes.length).toBe(1)
+    const initialNonce = await pane1Frame.locator('#load-nonce').textContent()
+    await page.evaluate(() => {
+      const element = document.querySelector('[data-pane-id="pane-1"] iframe[data-testid="ide-iframe"]')
+      ;(window as unknown as { __cachedIframeEl: Element | null }).__cachedIframeEl = element
+    })
+    // onLoad 探测返回 503 后只保留等待状态，不重开。
+    await page.waitForTimeout(300)
+    expect(audit.openCalls.length).toBe(1)
+
+    // 再次 503：仍保留同一 iframe 与 nonce，不重复 OPEN。
+    sessionStatuses.push(503)
+    await page.click('[data-testid="ide-set-environment-offline"]')
+    await page.click('[data-testid="ide-set-environment-ready"]')
+    await expect.poll(() => audit.sessionProbes.length).toBe(2)
+    await page.waitForTimeout(300)
+    expect(audit.openCalls.length).toBe(1)
+    expect(await iframe.evaluate((element) => (
+      (window as unknown as { __cachedIframeEl: Element | null }).__cachedIframeEl === element
+    ))).toBe(true)
+    expect(await pane1Frame.locator('#load-nonce').textContent()).toBe(initialNonce)
+
+    // 恢复 204：用同一 viewId、无 directory 重开，iframe 加载新 token 并刷新 nonce。
+    await page.click('[data-testid="ide-set-environment-offline"]')
+    await page.click('[data-testid="ide-set-environment-ready"]')
+    await expect.poll(() => audit.sessionProbes.length).toBe(3)
+    await expect.poll(() => audit.openCalls.length).toBe(2)
+    expect(audit.openCalls[1]).toMatchObject({
+      environmentId: HARNESS_ENV_ID,
+      viewId: PANE_1_VIEW_ID,
+      body: { viewId: PANE_1_VIEW_ID },
+    })
+    await expect.poll(() => pane1Frame.locator('#load-nonce').textContent()).not.toBe(initialNonce)
+    await expect.poll(() => audit.sessionProbes.length).toBe(4)
+    expect(audit.iframeRequests[PANE_1_VIEW_ID]).toBe(2)
   })
 })
