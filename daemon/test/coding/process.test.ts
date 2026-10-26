@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PassThrough, Readable } from 'node:stream'
 import type { CapabilityResult, ManagedProcess, ProcessExit, ProcessSpec, ProcessSupervisor } from '../../src/contracts.js'
+import { ProcessScopeNotConvergedError } from '../../src/contracts.js'
 import { processCapability } from '../../src/coding/process.js'
 import { callCapability, makeContext, textOf } from './helpers.js'
 
@@ -369,13 +370,40 @@ describe('process.exec', () => {
     expect(confirmations).toBe(1)
   })
 
-  it('does not ACK when start throws before a managed process exists', async () => {
-    // start 抛错只说明没有返回受管进程，不证明状态目录或 helper 已清理。
+  it('ACKs when start rejects with a failure the supervisor proved converged', async () => {
+    // supervisor 契约：普通拒绝保证本次尝试没有遗留进程（未 spawn，或已终止并证明收敛），属于正向退出证据。
     const dir = await tempDir()
     let confirmations = 0
     const supervisor: ProcessSupervisor = {
       start: async () => {
-        throw new Error('spawn failed after creating the state directory')
+        throw new Error('the process scope helper failed during its spawn phase')
+      },
+      close: async () => {},
+    }
+    const result = await callCapability(
+      processCapability,
+      'process.exec',
+      { command: 'echo hi', workdir: dir },
+      {
+        ...makeContext(dir, { processes: supervisor }),
+        confirmExecutionExit: () => {
+          confirmations += 1
+        },
+      },
+    )
+    expect(result.error).toBe(true)
+    expect(confirmations).toBe(1)
+  })
+
+  it('does not ACK when start cannot prove the failed scope converged', async () => {
+    // 只有 ProcessScopeNotConvergedError 表示失败范围可能仍有进程：不能把它当成退出证据。
+    const dir = await tempDir()
+    let confirmations = 0
+    const supervisor: ProcessSupervisor = {
+      start: async () => {
+        throw new ProcessScopeNotConvergedError(
+          'spawn failed; additionally the failed scope could not be proven converged: kill failed',
+        )
       },
       close: async () => {},
     }
@@ -439,8 +467,8 @@ describe('process.exec', () => {
     )
     expect(result.error).toBe(true)
     expect(result.details).toMatchObject({ process: { outcome: 'CANCELLED' } })
-    // 取消不能把不确定的 start 清理变成退出证据。
-    expect(confirmations).toBe(0)
+    // 取消期间的普通 start 拒绝同样已由 supervisor 证明没有遗留进程。
+    expect(confirmations).toBe(1)
   })
 
   it('进程被外部信号杀死时保留输出并记录 signal 说明', async () => {

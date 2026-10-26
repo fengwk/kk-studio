@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { join } from 'node:path'
 import type { Readable, Writable } from 'node:stream'
 import type { ManagedProcess, ProcessExit, ProcessSpec, ProcessSupervisor } from '../contracts.js'
+import { ProcessScopeNotConvergedError } from '../contracts.js'
 import { resolveHelperPath } from './helper-path.js'
 import { verifyPrivateFile } from './private-fs.js'
 import * as state from './state.js'
@@ -65,7 +66,9 @@ export class WindowsProcessSupervisor implements ProcessSupervisor {
         await managed.close()
       } catch (cleanupError) {
         // 收尾失败必须与启动失败一起上报：绝不静默降级成「已经清理好」。
-        throw new Error(`${describe(error)}; additionally the failed scope could not be proven converged: ${describe(cleanupError)}`)
+        throw new ProcessScopeNotConvergedError(
+          `${describe(error)}; additionally the failed scope could not be proven converged: ${describe(cleanupError)}`,
+        )
       }
       throw error
     }

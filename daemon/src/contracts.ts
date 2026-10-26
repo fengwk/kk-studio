@@ -42,7 +42,20 @@ export interface ManagedProcess {
   terminate(graceMillis?: number): Promise<void>
 }
 
+/**
+ * 启动失败且失败的执行范围未能被证明已收敛。
+ *
+ * <p>这是 {@link ProcessSupervisor.start} 唯一表示「可能仍有进程存活」的拒绝；调用方不得据此确认退出。
+ */
+export class ProcessScopeNotConvergedError extends Error {}
+
 export interface ProcessSupervisor {
+  /**
+   * 启动一个受管执行范围。
+   *
+   * <p>拒绝分两类：{@link ProcessScopeNotConvergedError} 表示失败范围未被证明已收敛；其它拒绝保证本次尝试没有遗留进程
+   * （尚未 spawn，或已 spawn 的范围已被终止并证明收敛）。
+   */
   start(spec: ProcessSpec): Promise<ManagedProcess>
   /** Adds IDE PTY sessions that intentionally establish their own POSIX session. */
   trackDescendant?(rootPid: number, childPid: number): Promise<void>
