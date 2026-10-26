@@ -2,7 +2,7 @@ import type {
   PaneTarget,
   PaneTargetKind,
 } from '@/features/chat/runtime/agent-pane/pane-target'
-import { translate } from '@/shared/i18n'
+import { translate, type TranslationKey } from '@/shared/i18n'
 
 interface ManualCompactionAvailability {
   available: boolean
@@ -114,6 +114,21 @@ const TARGET_COMMANDS: Record<PaneTargetKind, ThreadCommandId[]> = {
 
 const DISABLED_KEY = 'ai.runtime.command.disabledReason'
 
+const COMPACTION_DISABLED_REASON_KEYS: Record<string, TranslationKey> = {
+  THREAD_STOPPED: 'ai.runtime.command.disabled.compaction.threadStopped',
+  THREAD_BUSY: 'ai.runtime.command.disabled.compaction.threadBusy',
+  OWNERSHIP_BARRIER: 'ai.runtime.command.disabled.compaction.ownershipBarrier',
+  NO_RESOLVED_CONTEXT: 'ai.runtime.command.disabled.compaction.noResolvedContext',
+  MODEL_CHANGED: 'ai.runtime.command.disabled.compaction.modelChanged',
+  BELOW_MINIMUM: 'ai.runtime.command.disabled.compaction.belowMinimum',
+  NOTHING_TO_COMPACT: 'ai.runtime.command.disabled.compaction.nothingToCompact',
+}
+
+function manualCompactionDisabledReason(reason: string | null): string {
+  const key = reason == null ? undefined : COMPACTION_DISABLED_REASON_KEYS[reason]
+  return translate(key ?? 'ai.runtime.action.compactUnavailable')
+}
+
 export interface ThreadCommandOptions {
   manualCompaction?: ManualCompactionAvailability | null
   allowNewSession?: boolean
@@ -177,7 +192,7 @@ export function threadCommandsForTarget(
     if (readOnlyDisabled) {
       disabledReason = translate('ai.runtime.command.disabled.readOnly')
     } else if (compactDisabled) {
-      disabledReason = manualCompaction?.disabledReason ?? undefined
+      disabledReason = manualCompactionDisabledReason(manualCompaction?.disabledReason ?? null)
     } else if (newDisabled) {
       disabledReason = translate('ai.runtime.command.disabled.singleSession')
     } else if (agentDisabled) {

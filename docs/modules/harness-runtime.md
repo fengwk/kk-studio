@@ -200,7 +200,7 @@ manualMinimum    = min(keepRecentTokens*2, C/2)
 
 [`CompactionPlanner`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionPlanner.java) 是纯函数：从尾部估算长度，越过 `effectiveKeep` 后取下一个合法切点，绝不切在 Tool 结果或压缩回合内部；切点落在 Agent 轮次中间时先出 HISTORY 摘要，再由续写义务驱动 TURN_PREFIX 摘要。最新一批尚未被后续 assistant 消费的工具调用不会被提前摘要。[`CompactionResultEvaluator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionResultEvaluator.java) 把截断、过滤、返回工具调用、空摘要、保留段解析失败与无 token 收益判为失败；可重试的失败走普通调用重试预算，耗尽则子执行失败、父回合失败且不交付部分结果。
 
-手工压缩走 `compactThread`：单事务复验 expected version 与可用性，成功时原子提交压缩回合、子 Thread 与票据。[`ManualCompactionAvailability`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ManualCompactionAvailability.java) 是给界面的瞬时投影（忙碌、模型已变化、低于最小量、无可压缩内容等），不能替代提交时的复验。
+手工压缩走 `compactThread`：单事务复验 expected version 与可用性，成功时原子提交压缩回合、子 Thread 与票据。[`ManualCompactionAvailability`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ManualCompactionAvailability.java) 是给界面的瞬时投影（Thread 已停止、忙碌、模型已变化、低于最小量、无可压缩内容等），不能替代提交时的复验。`STOPPED` 是持久执行事实：即使历史仍满足压缩阈值，`manualDecision` 也在 resolve 与任何写入之前直接返回 `THREAD_STOPPED`；先由显式新输入恢复为 `RUNNABLE` 才允许再次压缩。
 
 ## 停止
 
@@ -228,7 +228,7 @@ Stop 在 tree 锁内校验目标 version 与 `stopRequestId`，按 `parentThread
 
 同一父子对至多一个有效未完成 Join；子 Thread 无未完成的 `SETTLE_OWNER_TURN` 时，新续接可取代旧等待，否则须完成 owner 结算后才可继续。精确重放仍返回原票据。
 
-普通结算要求：源命令已应用；没有尚未冻结结果的直接子 Join（含 owner 结算义务）、本 Thread 没有待处理输入且没有 `UNCONFIRMED` 执行——`ABANDONED` 或已确认执行不再阻塞，因此多级委派自底向上自然收敛，既不等于首次本地 Idle，也不等待整棵子树永久静止。Stop 结算允许纳入尚未应用的源命令，但仍要求同一收敛事实。普通终态已物化但 Join 仍被未确认执行阻挡时，最后一次退出 ACK 在同一事务内补结算，不依赖后续 Work 恰好再次到达。结果固定在源命令应用位置到终态边界的历史范围内，子树后续推进不改写旧回执。`maxTurns` 是软预算，超出时在规划中物化一条 `TASK_BUDGET` 通知，每个 Join 只提醒一次。
+普通结算要求：源命令已应用；没有尚未冻结结果的直接子 Join（含 owner 结算义务）、本 Thread 没有待处理输入且没有 `UNCONFIRMED` 执行——`ABANDONED` 或已确认执行不再阻塞，因此多级委派自底向上自然收敛，既不等于首次本地 Idle，也不等待整棵子树永久静止。Stop 结算允许纳入尚未应用的源命令，但仍要求同一收敛事实。普通终态已物化但 Join 仍被未确认执行阻挡时，最后一次退出 ACK 在同一事务内补结算，不依赖后续 Work 恰好再次到达。普通终态物化与这次迟到确认共用同一最终回答规则：只有 `COMPLETED`、无 `continueModel` 义务且紧邻 `TURN_END` 之前是 ASSISTANT 消息时才冻结 `finalAnswerEntryId`；失败、续作与非 ASSISTANT 结尾一律为空。结果固定在源命令应用位置到终态边界的历史范围内，子树后续推进不改写旧回执。`maxTurns` 是软预算，超出时在规划中物化一条 `TASK_BUDGET` 通知，每个 Join 只提醒一次。
 
 结算与父通知入队在同一事务完成：`NOTIFY_PARENT` 结算原子冻结终态结果、写入父 `NOTIFICATION` 命令、推进父序列并请求 Work，通过唯一次 `updateJoin` 直接落盘为 delivered 状态，不持久化已匹配但未送达的中间态。通知的消息由 `runtime.join` 纯函数渲染（`<subagent_result>` 包裹任务原文与结果），不读取子线程当前 head。显式停止的父不会被唤醒：通知直接物化进历史，待父接受新输入后由 `INPUT` 回合消费。
 

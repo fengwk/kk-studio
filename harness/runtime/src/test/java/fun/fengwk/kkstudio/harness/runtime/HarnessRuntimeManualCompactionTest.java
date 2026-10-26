@@ -197,6 +197,73 @@ class HarnessRuntimeManualCompactionTest {
         () -> fixture.runtime.compactThread(new CompactThreadCommand(missing, 0)));
   }
 
+  /**
+   * Stop 后 Thread 仍是完整历史，旧实现会把它当作可手动压缩：availability 返回 enabled，compactThread 还会写 COMPACTION Turn
+   * 并调用 resolver。真实 Stop 路径的回归必须证明守卫发生在 resolve/写入之前，且重放 Stop 不改变结论。
+   */
+  @Test
+  void stoppedThreadRejectsManualCompactionBeforeResolveOrWrites() {
+    Fixture fixture = fixture();
+    ClosedTurnBaseline baseline = seedCompactionReadyClosedTurn(fixture.store);
+    fixture.resolver.autoConsistent = true;
+    UUID stopRequestId = UUID.randomUUID();
+    StopResult stopped =
+        fixture.runtime.stop(new StopCommand(baseline.threadId(), stopRequestId, 0));
+    assertFalse(stopped.replayed());
+    assertEquals(ThreadExecutionControl.STOPPED, stopped.thread().executionControl());
+
+    EntryPath stoppedPath = path(fixture.store, baseline.threadId());
+    UUID stoppedHeadId = stoppedPath.head().id();
+    long stoppedVersion = stopped.thread().version();
+    int stoppedEntryCount = stoppedPath.entries().size();
+
+    ManualCompactionAvailability availability =
+        fixture.runtime.manualCompactionAvailability(baseline.threadId());
+    assertFalse(availability.available());
+    assertEquals(
+        ManualCompactionAvailability.DisabledReason.THREAD_STOPPED, availability.disabledReason());
+
+    HarnessRuntimeConflictException rejected =
+        assertThrows(
+            HarnessRuntimeConflictException.class,
+            () ->
+                fixture.runtime.compactThread(
+                    new CompactThreadCommand(baseline.threadId(), stoppedVersion)));
+    assertEquals(
+        HarnessRuntimeConflictException.Reason.MANUAL_COMPACTION_UNAVAILABLE, rejected.reason());
+    assertEquals(0, fixture.resolver.calls, "STOPPED must be rejected before turn resolution");
+    assertUnchanged(fixture, baseline.threadId(), stoppedHeadId, stoppedVersion, stoppedEntryCount);
+
+    // 同一 stopRequestId 的 replay 不写新事实；结论仍是 STOPPED，重复 compact 仍不触发 resolver。
+    StopResult replay =
+        fixture.runtime.stop(new StopCommand(baseline.threadId(), stopRequestId, stoppedVersion));
+    assertTrue(replay.replayed());
+    assertEquals(stoppedVersion, replay.thread().version());
+    assertEquals(
+        ManualCompactionAvailability.DisabledReason.THREAD_STOPPED,
+        fixture.runtime.manualCompactionAvailability(baseline.threadId()).disabledReason());
+    assertThrows(
+        HarnessRuntimeConflictException.class,
+        () ->
+            fixture.runtime.compactThread(
+                new CompactThreadCommand(baseline.threadId(), stoppedVersion)));
+    assertEquals(0, fixture.resolver.calls);
+    assertUnchanged(fixture, baseline.threadId(), stoppedHeadId, stoppedVersion, stoppedEntryCount);
+  }
+
+  private static void assertUnchanged(
+      Fixture fixture, UUID threadId, UUID headEntryId, long version, int entryCount) {
+    EntryPath after = path(fixture.store, threadId);
+    assertEquals(headEntryId, after.head().id());
+    assertEquals(entryCount, after.entries().size());
+    assertEquals(version, thread(fixture.store, threadId).version());
+    assertEquals(
+        1,
+        fixture.store.<Integer>transaction(
+            tx -> tx.listThreadsBySession(after.root().sessionId()).size()),
+        "rejected manual compaction must not create a COMPACTION child thread");
+  }
+
   @Test
   void compactThreadRejectsNullResolverResult() {
     // Resolver 返回 null 违背契约，必须零 durable mutation。
@@ -630,9 +697,11 @@ class HarnessRuntimeManualCompactionTest {
     private final Deque<Result> results = new ArrayDeque<>();
     private Runnable onResolve;
     private boolean autoConsistent;
+    private int calls;
 
     @Override
     public Result resolve(UUID threadId, EntryPath path, CompactionPreparation preparation) {
+      calls++;
       if (onResolve != null) {
         onResolve.run();
       }
