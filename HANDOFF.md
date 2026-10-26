@@ -804,3 +804,10 @@ ABANDONED 只放弃等待，不冒充退出、不取消执行、不自动 Resume
 - 修复 **f02c0a5746884b03255d2554f0c49d5745be0c6e**：保持原有有界 readiness 等待，仅以容器 loopback TCP 的 exact database `psql -X -v ON_ERROR_STOP=1 ... SELECT 1` 成功且 stdout 精确 `1\n` 作为就绪证据，不增加固定 sleep 或无依据重试。隔离、本地 Docker socket、无端口、清理与 mutation 门禁不变。
 - 新增实际运行 checker 的 PATH fixture 行为回归：临时 server 接受 pg_isready、TCP 尚未就绪时不得放行 DDL。旧 checker 为红，修复后定向 **20 tests / 0 fail / 0 skip**；独立真实 schema **213 probes / 5 mutations** 通过，父级在集成树重跑同样通过。此变更仅影响脚本与测试，无需重复本地 Maven/前端/Daemon 全量；最终提交仍须完整远端 CI。
 - 第一轮 CI JSON、失败日志、真实 PG 时序、红绿回归与修复后日志均保留。尚未创建正式 tag 或发布 Release。
+
+### 18.7 macOS 测试同步补修
+
+- 后续 `main` docker-publish **40395032832** 已通过修复后的 fresh Schema 检查、敏感扫描、全量 Java、decoder、Fat JAR 与前端静态/覆盖率步骤，但 `macos-amd64` 的一项 LSP lifecycle 用例失败：等待子进程 `start` 日志后，boot 可能已发布并被移出 Map，无法再安装测试 hook；断言发生在 finally 外，stop gate 悬挂又引发 afterEach 超时。该提交不能作为全量 CI 通过。
+- 测试修复 **bffbd60f8ea132420856bd708db1294202ef7706**：真实 managed process 启动后使用显式 launch gate 阻止 initialize/publish，安装 publication hook 后再放行；整个易失败区段置于 finally 保护中，所有路径都释放 launch/stop gate。没有改生产逻辑、延长超时、增加 retry、skip 或放宽退出断言。
+- 本地 Node check/build 通过；完整 `lsp-pool` **32 tests passed**，目标并发用例另 **5/5** 通过。父级进一步删除不必要的 gate-release 布尔状态，利用 Promise resolve 的幂等性在 finally 无条件释放。
+- 该补修只有测试与交接文档变更；等待最终提交的全量远端矩阵，不以先前平台成功替代。
