@@ -2,6 +2,8 @@
 
 > 这是操作交接文档，不是产品文档；收敛完成后可以删除。它描述当前真实状态、已验证证据、未完成 Review、阻塞和下一步，不能把“代码已集成”理解为“任务已验收”。
 
+> **最新执行状态见第 18 节。** 第 1–17 节保留各历史时点的事实，不代表本轮授权、工作区或最终验证状态。
+
 ## 1. 一句话状态
 
 - 全部有效代码改动已收敛到唯一交接分支 `handoff`，代码基线为 `7ba0f167eff6eb07b78b24880970880fb1e964f5`，本文件及其索引修正形成仅含文档的提交。
@@ -736,3 +738,51 @@ invocation 抛 `DaemonProtocolException` 并关闭连接；`MAX_INVOCATION_TOMBS
 - 数据库用例需要 PostgreSQL：CI 用 Testcontainers PG17；没有 Docker 时需自备本机 PostgreSQL，且不得提交任何测试连接改动（提交前确认
   `git diff --cached -S LocalPg` 为空）。
 - Spotless 只格式化改动的文件：`mvn -pl <module> spotless:apply -DspotlessFiles=<改动文件的绝对路径正则>`，并检查 diff。
+
+## 18. 2026-10-27 并行收尾与发布候选
+
+### 18.1 本轮授权与版本
+
+- 用户明确授权：最大化并行推进，审查通过后主动合入并推送 `main` 与 `dev`，发布 Daemon 新版本；同时授权必要的全量 CI 与发行验证。
+- 版本规则为 `<整体架构变更升级>.<破坏性变更升级>.<兼容性变更升级>`。GitHub 最新已发布版本为 `v3.0.1`，`v4.0.0` 的 tag 与 Release 均不存在；本次整体架构收敛使用仓库已对齐的 **4.0.0**，不为尚未发行的候选反复叠加版本。
+- 该授权不包含生产数据库重建、Flyway repair、部署/重启或新的真实模型请求；本轮没有执行这些操作。
+- 当前可用环境：JDK 21 `/usr/local/opt/jdk21`、Node 24 `/home/fengwk/.local/node-v24/bin`、Docker 29.9.2。旧受限环境的 PG16 shim 与 Docker 不可用结论不再适用。
+
+### 18.2 第 17.4 节交付
+
+| 项 | 已实现结果 |
+| --- | --- |
+| 1 | IDE 同源会话探测、同 viewId 无 directory 重开、503/网络未知保留旧 iframe、关闭竞争与 pagehide keepalive；补真实 Chromium 的 401/409/503 恢复回归 |
+| 2–3 | Model/Tool/local/remote 共用确认器；journal 在任何数据库访问之前持久化；快路径仅锁自身 Thread，慢路径另起树锁优先事务；STOPPED + CAS 的逐项 ABANDONED 全栈入口 |
+| 4–5 | STOPPED Thread 在 resolve/写入之前拒绝手动压缩；普通终态与迟到 ACK 结算共用最终回答规则 |
+| 6 | 删除生产 `loadCommandsByThread`；测试按已分配 sequence 区间读取单条 Command |
+| 7 | 退出事实保留至 Thread 深删，不设 TTL；宿主消失、路由替换和缺少 registry 均不构成物理退出证据，无法取得证据时使用显式放弃 |
+| 8–9 | Chat 恒请求 usage，移除配置开关，旧字段仅按已有未知字段规则忽略；文档说明完整 usage 必需与兼容边界 |
+| 10 | 定价条件使用一张静态 label 映射；翻译 API 接受目录 key 联合类型，服务端 schema key 运行时严格校验 |
+| 11 | schema 检查从唯一 V1 DDL 推导表集合；全量 CI 先 pull PG17.10 再执行隔离检查 |
+| 12–14 | IDE Node 测试等待本次调用收尾；LSP 仅按启动/清理正向证据确认；明确 Unix PTY fixture 的 python3 标准库例外 |
+| 15 | 已完成一轮集成全量本地验证；后续审查补修后的最终候选复核与远端 CI/发行核实仍在推进，见下节 |
+
+ABANDONED 只放弃等待，不冒充退出、不取消执行、不自动 Resume；迟到真实证据可升级它并保留 `abandonedAt`。每个 Studio 实例必须独占且持久化自己的退出确认 journal 目录，各 Compose 栈已配置独立卷。
+
+### 18.3 独立审查补修与验证事实
+
+- IDE 诊断移除不可信关闭原因、回执文本、异常原文与 URL/path，只保留固定阶段、简单异常类、关闭码和调用身份。
+- 远端退出确认保留 `tryStart` 返回的实际远端登记事实。Studio 时钟落后且 REMOTE 晚于本地 TOOL 登记时，proof 时间不再错误地沿用本地登记边界；新增数据库短暂失败后重放回归。
+- journal 增补真实 POSIX 写入/目录 force/读取失败、canonical 记录重试、跨进程独占锁验证；测试用子进程与 reader 显式有界等待和 join，TWR 保留主异常及 suppressed 清理失败。
+- 集成修正未同步的 store 白名单、状态枚举守卫、仅允许 journal 持久卷的 Compose 断言、前端数值时间戳 fixture 和浏览器 snapshot/session fixture；没有放宽原有门禁。
+- 候选 `8b8dd222ce6f4ac50522c52bd9a911aebdc88a62`：全量 `mvn verify` exit 0（25 模块，16 项 JaCoCo check 通过）；Surefire XML 共 8,921 tests / 0 failures / 0 errors / 4 skipped。Java update decoder 5 accepted / 12 rejected；当前 Fat JAR 启动与旧库拒绝检查通过。该 SHA **不包含之后的远端登记时间补修及新增 journal/browser 测试**。
+- 同候选前端 typecheck/test types/lint/CSS/coverage/build 通过：3,467 tests passed、2 skipped；覆盖率 statements 90.82%、branches 85.24%、functions 90.62%、lines 91.35%。首轮浏览器 252 passed / 6 failed：两处 fixture 遗漏已补修；另四处超时用例在不延长超时、不重试的双 worker 定向执行中 23/23 通过，但该结果不单独证明首次超时的全部因果。
+- Daemon 生产树在 `2c7432d9b` 上先 build 后全量测试：1,289 passed / 24 平台相关 skipped。`8b8dd222` 的脚本全量 738 passed / 1 Windows-only skipped；docs、敏感数据、版本与隔离 Schema 检查通过（46 张业务表、17 张目标表、213 probes、5 类变异）。
+- 后续定向证据：远端确认相关 43 个 Java tests 通过，`ToolExecution` 行覆盖 225/250 = 90.0%；文件 journal 20 个 tests 真跑且 0 skipped，最后一次单类度量 **214/240 = 89.2%**，未达到 90% 目标；剩余主要是 move/close/cleanup 的底层故障分支，没有以生产 fault seam 或门禁豁免掩盖。最终全量度量需另核对，不用其它核心类覆盖率替代。
+- 所有原始失败日志均保留，不能将历史通过或子代理报告替代最终 SHA 上的实际 Review/验收。历史 7ba0/925c 的未证明完整审读声明仍不恢复；本轮不声称重新逐行审读所有历史 35k diff。
+
+### 18.4 最终发行收尾
+
+1. 冻结包含所有后续补修的候选，复核集成 diff、生成契约、格式与必要定向/全量检查，保存精确 SHA 与真实退出码。
+2. 通过串行 expected-ref 集成入口推进 `handoff`、`main`、`dev`，普通 fast-forward/merge；不改写历史。
+3. 推送分支并核对该 SHA 的全量 CI（dev 镜像构建不能替代）。CI 通过前不得宣称全量验收或发布完成。
+4. 仅在已合入 `origin/main` 且门禁通过的提交上推送 `v4.0.0`，核实 Daemon Release 的五平台归档、对应 `.tar.gz.sha256`、元数据与法律文件；不覆盖旧资产。
+5. 更新本节最终 refs/CI/Release 证据，归档并释放本任务临时工作区。
+
+生产 Provider 的当前兼容性与线上 IDE 首次关闭方未在本轮操作验证；脱敏 fixture 和离线浏览器不构成生产全面兼容承诺。升级部署前仍须按部署文档逐项验证，并保留配置与数据库备份；发布本身不授权执行生产迁移。
