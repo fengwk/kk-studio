@@ -222,7 +222,7 @@ Environment 管理调用，不写 Thread Tool 执行账本。
 历史入口按该输出记录的显式时间重建普通模型输出；父 COMPACTION 输出按冻结 child Thread / join 的 `finalAnswerEntryId` 定位压缩子最后一次调用并重建其前缀，结果仍是历史重建、不等于原始发送字节。
 入口、`kind` 与冲突契约见 [Web](web.md)。
 
-用量与费用只在读取时投影：durable 只保存 ASSISTANT `MESSAGE` 与 COMPACTION 结果的真实 `assistantMetadata`（`stopReason`、`usage`、可选 `decodeDurationMillis`，以及实际执行的 `model`、请求时刻 `requestedAt` 与 Provider 报告的 `responseServiceTier`），绝不持久化金额。`UsageCostProjectionService` 按 metadata 中实际执行的模型读取当前 catalog 价格，以请求时刻、上下文 token 与 service tier 依次应用覆盖与倍率规则，用纯 `BigDecimal` 现算并输出精确十进制字符串 `amount`；模型已从 catalog 删除则费用缺席，定义损坏则抛错，绝不伪装成 0。同一投影内每个出现过的模型至多查一次 catalog。
+用量与费用只在读取时投影：durable 只保存 ASSISTANT `MESSAGE` 与 COMPACTION 结果的真实 `assistantMetadata`（`stopReason`、`usage`、可选 `decodeDurationMillis`，以及实际执行的 `model`、请求时刻 `requestedAt` 与 Provider 报告的 `responseServiceTier`），绝不持久化金额。`UsageCostProjectionService` 按 metadata 中实际执行的模型读取当前 catalog 价格，以请求时刻、上下文 token 与 service tier 依次应用覆盖与倍率规则，用纯 `BigDecimal` 现算并输出精确十进制字符串 `amount`；catalog 中已没有该单模型（已删除，或改名/删除后同名被模型组复用）则费用缺席，定义损坏则抛错，绝不伪装成 0。同一投影内每个出现过的模型至多查一次 catalog。
 
 ## Storage、Blob 与 Resource
 

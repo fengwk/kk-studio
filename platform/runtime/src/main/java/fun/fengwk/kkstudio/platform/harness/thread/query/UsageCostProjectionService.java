@@ -26,7 +26,7 @@ import java.util.UUID;
  *
  * <p>费用边界：Assistant / COMPACTION 的 metadata 冻结真实执行 ModelSelection、请求时间与 Provider 报告的
  * serviceTier；本服务只按这些事实与当前 catalog 价格现算，绝不沿 branch settings 或组配置兜底。同一次投影内每个模型至多查一次
- * catalog；模型已删除时缺席，数据损坏时抛出。
+ * catalog；模型已删除、或改名/删除后同名被模型组复用时缺席，数据损坏时抛出。
  */
 @Component
 public class UsageCostProjectionService {
@@ -91,20 +91,20 @@ public class UsageCostProjectionService {
     return null;
   }
 
-  /** 当前价格：模型已从 catalog 移除时返回 null（未计价），同一次投影内每个模型只查一次库。 */
+  /**
+   * 当前价格：catalog 中已没有这个单模型时返回 null（未计价），同一次投影内每个模型只查一次库。metadata 记录的是当时执行的单模型；同名的模型组只说明名称已被复用，
+   * 不提供该模型的价格。
+   */
   private ModelPricing pricing(ModelSelection selection, Map<String, ModelPricing> pricingByModel) {
     String key = selection.modelName();
     if (pricingByModel.containsKey(key)) {
       return pricingByModel.get(key);
     }
     AgentModel model = modelRepository.getByName(selection.modelName());
-    if (model != null && model.kind() != AgentModelKind.MODEL) {
-      throw new IllegalStateException(
-          "assistant metadata must reference an executed single model, got group: "
-              + selection.modelName());
-    }
     ModelPricing pricing =
-        model == null ? null : modelConfigParser.parse(model.configJson()).pricing();
+        model == null || model.kind() != AgentModelKind.MODEL
+            ? null
+            : modelConfigParser.parse(model.configJson()).pricing();
     pricingByModel.put(key, pricing);
     return pricing;
   }
