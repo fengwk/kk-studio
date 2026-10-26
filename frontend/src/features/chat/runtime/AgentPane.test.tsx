@@ -2189,14 +2189,14 @@ describe('AgentPane orchestration', () => {
       invocationId: 'invocation-1',
       attempt: 1,
       kind: 'MODEL',
-      registeredAt: '2026-01-01T00:00:00.000Z',
+      registeredAt: 1767225600000,
     }
     const secondExecution = {
       executionId: 'execution-tool-2',
       invocationId: 'invocation-2',
       attempt: 2,
       kind: 'TOOL',
-      registeredAt: '2026-01-01T00:00:01.000Z',
+      registeredAt: 1767225601000,
     }
     const initial = snapshot(
       threadFixture(THREAD_ID, { status: 'IDLE', executionControl: 'STOPPED', version: '7' }),
@@ -2268,7 +2268,7 @@ describe('AgentPane orchestration', () => {
       invocationId: 'invocation-runnable',
       attempt: 1,
       kind: 'TOOL',
-      registeredAt: '2026-01-01T00:00:00.000Z',
+      registeredAt: 1767225600000,
     }
     localStorage.setItem(
       `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
@@ -2302,7 +2302,7 @@ describe('AgentPane orchestration', () => {
       invocationId: 'invocation-failed',
       attempt: 3,
       kind: 'REMOTE',
-      registeredAt: '2026-01-01T00:00:00.000Z',
+      registeredAt: 1767225600000,
     }
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
       snapshot(threadFixture(THREAD_ID, { executionControl: 'STOPPED' }), {
@@ -2336,7 +2336,7 @@ describe('AgentPane orchestration', () => {
       invocationId: 'invocation-stale',
       attempt: 1,
       kind: 'MODEL',
-      registeredAt: '2026-01-01T00:00:00.000Z',
+      registeredAt: 1767225600000,
     }
     vi.mocked(harnessService.getThreadSnapshot)
       .mockResolvedValueOnce(snapshot(
