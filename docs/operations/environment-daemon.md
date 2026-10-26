@@ -401,11 +401,11 @@ SHA256、官方校验文件与发行清单版本，并用现有 `daemon.json` �
 - **最终成功只由更新后 Daemon 以目标版本重新 READY 确认**；Daemon 的阶段回执只表达准备进度，
   连接断开派生为 `UNKNOWN`（等待重连），不等于失败。持久阶段为 `PENDING / RUNNING / PREPARED /
   SUCCEEDED / FAILED`。
-- 只有已在运行当前 Node Daemon 的受管安装才能远程更新；更早的产品不能自更新：已发行的 Java 1.1.0
-  Daemon 与当前 Node Daemon 的 wire 不兼容，旧 Node Daemon 的 UPDATE 入口只接受 `.jar` 制品，
-  会拒绝当前的 `.tar.gz` 发行归档。
+- 只有与当前 Studio 使用同一 wire 协议版本、且已在运行受管 Node Daemon 的安装才能远程更新。协议版本不同的
+  Daemon（升级 Studio 后仍在运行旧协议的 Daemon，或已发行的 Java 1.1.0 Daemon）在 HELLO 阶段即被拒绝，
+  收不到更新命令；旧 Node Daemon 的 UPDATE 入口也只接受 `.jar` 制品，会拒绝当前的 `.tar.gz` 发行归档。
 
-从这些旧版本迁移不需要先卸载或删除数据：在 Web 弹窗重新**“保存并复制安装命令”**，在目标主机执行一次
+因此升级到改变了 wire 协议版本的 Studio 后，每台主机都要重新执行一次安装命令。从这些旧版本迁移不需要先卸载或删除数据：在 Web 弹窗重新**“保存并复制安装命令”**，在目标主机执行一次
 覆盖安装即可。安装器先校验新发行归档和安装输入，再停止受管服务；旧程序、`daemon.json` 与
 `daemon.token` 保留在独立的 `backups/` 子目录，然后发布新程序、配置与 token 并重启服务。
 数据目录、日志与既有备份保留。覆盖安装重新 `READY` 后才继续
