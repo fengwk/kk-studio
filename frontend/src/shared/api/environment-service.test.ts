@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createEnvironmentService } from '@/shared/api/environment-service'
 import { createMockHttpClient } from '@/test-support/mock-http-client'
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
 
 describe('environmentService', () => {
   it('saves nested daemon settings with the CAS version and encoded ID', async () => {
@@ -186,5 +190,46 @@ describe('environmentService', () => {
     const service = createEnvironmentService(client)
     await service.closeIdeView('env-1', 'v-1')
     expect(client.delete).toHaveBeenCalledWith('/environments/env-1/ide/views/v-1')
+  })
+
+  it('probes the ide session with same-origin no-store fetch and reports its status', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ status: 401 })
+    vi.stubGlobal('fetch', fetchMock)
+    const signal = new AbortController().signal
+
+    const status = await createEnvironmentService(createMockHttpClient())
+      .probeIdeSession('/studio/environment-ide/env-1/__ide/session', signal)
+
+    expect(status).toBe(401)
+    expect(fetchMock).toHaveBeenCalledWith('/studio/environment-ide/env-1/__ide/session', {
+      method: 'GET',
+      credentials: 'same-origin',
+      cache: 'no-store',
+      signal,
+    })
+  })
+
+  it('treats an ide session probe network failure as unknown without retrying', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError('network down'))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const status = await createEnvironmentService(createMockHttpClient())
+      .probeIdeSession('/environment-ide/env-1/__ide/session')
+
+    expect(status).toBeNull()
+    expect(fetchMock).toHaveBeenCalledOnce()
+  })
+
+  it('releases an ide view with a keepalive DELETE on page hide', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ status: 204 })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await createEnvironmentService(createMockHttpClient()).closeIdeViewKeepalive('env/a', 'v/1')
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/environments/env%2Fa/ide/views/v%2F1', {
+      method: 'DELETE',
+      credentials: 'same-origin',
+      keepalive: true,
+    })
   })
 })
