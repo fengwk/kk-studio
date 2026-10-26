@@ -746,7 +746,7 @@ invocation 抛 `DaemonProtocolException` 并关闭连接；`MAX_INVOCATION_TOMBS
 - 用户明确授权：最大化并行推进，审查通过后主动合入并推送 `main` 与 `dev`，发布 Daemon 新版本；同时授权必要的全量 CI 与发行验证。
 - 版本规则为 `<整体架构变更升级>.<破坏性变更升级>.<兼容性变更升级>`。GitHub 最新已发布版本为 `v3.0.1`，`v4.0.0` 的 tag 与 Release 均不存在；本次整体架构收敛使用仓库已对齐的 **4.0.0**，不为尚未发行的候选反复叠加版本。
 - 该授权不包含生产数据库重建、Flyway repair、部署/重启或新的真实模型请求；本轮没有执行这些操作。
-- 当前可用环境：JDK 21 `/usr/local/opt/jdk21`、Node 24 `/home/fengwk/.local/node-v24/bin`、Docker 29.9.2。旧受限环境的 PG16 shim 与 Docker 不可用结论不再适用。
+- 当前可用环境：JDK 21（命令显式设置 `JAVA_HOME` 和 `PATH`）、Node 24、Docker 29.9.2。旧受限环境的 PG16 shim 与 Docker 不可用结论不再适用。
 
 ### 18.2 第 17.4 节交付
 
@@ -786,3 +786,12 @@ ABANDONED 只放弃等待，不冒充退出、不取消执行、不自动 Resume
 5. 更新本节最终 refs/CI/Release 证据，归档并释放本任务临时工作区。
 
 生产 Provider 的当前兼容性与线上 IDE 首次关闭方未在本轮操作验证；脱敏 fixture 和离线浏览器不构成生产全面兼容承诺。升级部署前仍须按部署文档逐项验证，并保留配置与数据库备份；发布本身不授权执行生产迁移。
+
+### 18.5 冻结候选本地验收
+
+- `b80c17e7128353918ca9080dc4b4d1db6a2dbd09` 包含全部后续补修，独立 Java worktree 的 **`mvn clean verify` exit 0**：891 份新生成 Surefire XML，共 8,929 tests、0 failures/errors、4 skipped；额外 Fat JAR 启动/旧库拒绝 3/3，Node update decoder 5 accepted / 12 rejected。25 模块正常格式、静态与 16 项 JaCoCo 门禁通过。
+- 同 SHA 前端全部类型/ESLint/CSS/coverage/build 门禁 exit 0；3,467 passed / 2 Windows-only skipped，覆盖率保持 90.82/85.24/90.62/91.35%；完整 Chromium 使用双 worker、零 retries、原超时，**260/260 passed**。
+- 最终全量 Java 行覆盖 60,377/65,175 = 92.64%；`ToolExecution`（含嵌套类）266/285 = 93.33%，`ExecutionExitConfirmer`（含嵌套类）95/100 = 95.00%，`FileExecutionExitJournal` 214/240 = **89.17%**。该单类仍低于 90% 目标，实际构建门禁均通过；不以整体覆盖替代此限制。
+- Daemon 源码树 `bbd3acb5523abcf9ddd0270c0916227bd3c0e30a` 与已验证 `2c7432d9b` 相同；scripts 树 `fe3f5d11bba6654d687b053dad01b1a954658c81`、schema 树 `ecab68b211e70a00c7c4929e7628e0354ec9698a` 与已验证 `8b8dd222c` 相同。复用同树的 Daemon 1,289 passed、脚本 738 passed 和 Schema 213 probes 结果，不冒充本 SHA 重新运行。
+- `b80c17e71` 的 docs/版本门禁通过，敏感扫描检出本节记录的本机路径。本次仅移除该路径并补充验证事实；后续提交不改变已验证的源码或测试，仍需重新通过文档/敏感扫描，并由最终提交的全量远端 CI 验收。
+- 完整原始日志和结构化摘要保存在本轮 `closure-validate-*` 的 records 目录；后续归档仍保留此前失败记录。尚无本轮 `main`/`dev` 推送、远端 CI 成功或 Release 完成证据。
