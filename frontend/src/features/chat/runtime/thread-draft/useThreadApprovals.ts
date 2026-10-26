@@ -2,6 +2,7 @@ import { useEffect, useRef, type MutableRefObject } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { createDecisionId } from '@/features/chat/command-batch-plan'
 import { harnessService } from '@/shared/api/harness-service'
+import type { TranslationKey } from '@/shared/i18n'
 import { queryKeys } from '@/shared/lib/query-keys'
 
 interface ThreadApprovalsInput {
@@ -10,7 +11,7 @@ interface ThreadApprovalsInput {
   isStillBound: (originThreadId: string, originEpoch: number) => boolean
   setActionError: (message: string | null) => void
   clearConflict: () => void
-  reportMutationError: (error: unknown, fallbackKey: string, targetThreadId?: string) => void
+  reportMutationError: (error: unknown, fallbackKey: TranslationKey, targetThreadId?: string) => void
 }
 
 /**

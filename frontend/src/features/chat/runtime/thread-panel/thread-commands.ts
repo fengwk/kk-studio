@@ -32,12 +32,12 @@ export interface ThreadCommand {
   id: ThreadCommandId
   label: string
   description: string
-  labelKey?: string
-  descriptionKey?: string
+  labelKey?: TranslationKey
+  descriptionKey?: TranslationKey
   keywords?: string[]
   disabled?: boolean
   disabledReason?: string
-  disabledReasonKey?: string
+  disabledReasonKey?: TranslationKey
 }
 
 /**

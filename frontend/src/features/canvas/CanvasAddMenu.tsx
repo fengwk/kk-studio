@@ -1,11 +1,11 @@
 import { useEffect, useRef, type KeyboardEvent } from 'react'
 import { useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
 import type { AddMenuAction } from '@/features/canvas/types'
-import { useI18n } from '@/shared/i18n'
+import { useI18n, type TranslationKey } from '@/shared/i18n'
 
 const MENU_ITEMS: Array<{
   action: AddMenuAction
-  labelKey: string
+  labelKey: TranslationKey
   icon: string
   accept?: string
 }> = [

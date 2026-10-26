@@ -1,4 +1,5 @@
 import type { ThreadCommand } from '@/features/chat/runtime/thread-panel/thread-commands'
+import type { TranslationKey } from '@/shared/i18n'
 import type { BranchDraft } from '@/features/chat/branch-draft'
 import {
   isBoundTarget,
@@ -15,7 +16,7 @@ import type {
 export interface PaneCommandContext {
   target: PaneTarget
   capabilities?: AgentPaneCapabilities
-  t: (key: string) => string
+  t: (key: TranslationKey) => string
   onFocus?: () => void
   onOpenIde?: (options: { mode: 'files' | 'shell' }) => void
   activeDraft: BranchDraft | null

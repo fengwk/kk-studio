@@ -1,4 +1,4 @@
-import { translate } from '@/shared/i18n'
+import { translate, type TranslationKey } from '@/shared/i18n'
 
 /** 将底层英文/技术错误转成用户可读文案。 */
 export function toUserFacingErrorMessage(error: unknown): string {
@@ -23,7 +23,7 @@ export function toUserFacingErrorMessage(error: unknown): string {
     return translate('ai.catalog.validation.protocolOptionsNotObject', { id })
   }
 
-  const rules: Array<{ match: RegExp; key: string }> = [
+  const rules: Array<{ match: RegExp; key: TranslationKey }> = [
     { match: /protocolOptionsJson.*65536/i, key: 'ai.catalog.validation.protocolOptionsTooLarge' },
     { match: /protocolOptionsJson.*(?:is invalid|must be a JSON string)/i, key: 'ai.catalog.validation.protocolOptionsStrict' },
     { match: /protocolOptionsJson.*valid JSON/i, key: 'ai.catalog.validation.protocolOptionsInvalidJsonSimple' },

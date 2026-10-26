@@ -34,6 +34,40 @@ describe('system settings schema validation', () => {
     )
   })
 
+  it('rejects schema labels, hints and options that are not translation keys', () => {
+    // 服务端 schema 的展示 key 必须存在于本地 catalog；未知 key 会在渲染层立即失败，
+    // 因此校验入口必须先 fail-closed，而不是把缺失文案带进编辑器。
+    const sectionSchema = makeSettingsSchema()
+    sectionSchema.sections[0]!.labelKey = 'settings.missing.section'
+    expect(validateSystemSettingsSchema(sectionSchema, draft)).toBe(
+      'invalid settings schema section: aiRuntime',
+    )
+
+    const groupSchema = makeSettingsSchema()
+    groupSchema.sections[0]!.groups[0]!.labelKey = 'settings.missing.group'
+    expect(validateSystemSettingsSchema(groupSchema, draft)).toBe(
+      'invalid settings schema group: aiRuntime.retry',
+    )
+
+    const fieldSchema = makeSettingsSchema()
+    fieldSchema.sections[0]!.groups[0]!.fields[0]!.labelKey = 'settings.missing.field'
+    expect(validateSystemSettingsSchema(fieldSchema, draft)).toBe(
+      'invalid settings schema field: aiRuntime.retryMaxRetries',
+    )
+
+    const hintSchema = makeSettingsSchema()
+    hintSchema.sections[0]!.groups[0]!.fields[0]!.hintKey = 'settings.missing.hint'
+    expect(validateSystemSettingsSchema(hintSchema, draft)).toBe(
+      'invalid settings schema field: aiRuntime.retryMaxRetries',
+    )
+
+    const optionSchema = makeSettingsSchema()
+    optionSchema.sections[0]!.groups[0]!.fields[1]!.options![0]!.labelKey = 'settings.missing.option'
+    expect(validateSystemSettingsSchema(optionSchema, draft)).toBe(
+      'invalid settings schema option: aiRuntime.retryBackoffStrategy',
+    )
+  })
+
   it('rejects a duplicate section key', () => {
     const schema = makeSettingsSchema()
     // 复制整个 aiRuntime section：key 重复必须被 fail-closed，而不是叠加渲染。

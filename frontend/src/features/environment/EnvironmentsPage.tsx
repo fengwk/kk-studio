@@ -26,7 +26,7 @@ import { presentConflict, type ConflictPresentation } from '@/shared/conflict/co
 import { ConflictPresenter } from '@/shared/conflict/ConflictPresenter'
 import { AiNavigation } from '@/app/ai-console/AiNavigation'
 import { queryKeys } from '@/shared/lib/query-keys'
-import { useI18n } from '@/shared/i18n'
+import { useI18n, type TranslationKey } from '@/shared/i18n'
 import type { EnvironmentCardDTO, EnvironmentUpdateDTO } from '@/shared/api/generated/contracts'
 
 const IN_PROGRESS_UPDATE_PHASES = new Set<string>([
@@ -36,7 +36,7 @@ const IN_PROGRESS_UPDATE_PHASES = new Set<string>([
   'UNKNOWN',
 ])
 
-const UPDATE_PHASE_KEYS: Partial<Record<string, string>> = {
+const UPDATE_PHASE_KEYS: Partial<Record<string, TranslationKey>> = {
   PENDING: 'ai.environment.update.phase.PENDING',
   RUNNING: 'ai.environment.update.phase.RUNNING',
   PREPARED: 'ai.environment.update.phase.PREPARED',
@@ -51,7 +51,7 @@ function isUpdateInProgress(phase?: string | null): boolean {
 
 function formatUpdateStatus(
   update: EnvironmentUpdateDTO,
-  t: (key: string) => string,
+  t: (key: TranslationKey) => string,
 ): string {
   const phaseKey = UPDATE_PHASE_KEYS[update.phase]
   const phaseLabel = phaseKey ? t(phaseKey) : update.phase

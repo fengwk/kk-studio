@@ -12,7 +12,7 @@ import {
 } from '@/features/settings/permission-utils'
 import type { PermissionGroupDraft } from '@/features/settings/system-settings-draft'
 import { agentService } from '@/shared/api/agent-service'
-import { useI18n } from '@/shared/i18n'
+import { requireTranslationKey, useI18n } from '@/shared/i18n'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { Button } from '@/shared/ui/controls/Button'
 import { IconButton } from '@/shared/ui/controls/IconButton'
@@ -145,7 +145,7 @@ export function PermissionEditor({
                       aria-label={t('settings.permission.actionAriaLabel', { index: ruleIndex + 1 })}
                       options={options.map((option) => ({
                         value: option.value,
-                        label: t(option.labelKey),
+                        label: t(requireTranslationKey(option.labelKey)),
                       }))}
                       onChange={(action) =>
                         onChange(
