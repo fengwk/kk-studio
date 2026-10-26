@@ -428,6 +428,27 @@ class SubagentTaskRunnerTest {
   }
 
   @Test
+  void replayFailureAfterSubmitFailureKeepsTheSubmitFailure() {
+    // 提交失败后的票据复核自身也失败时，抛出复核错误并保留提交失败，诊断不丢失首个原因。
+    stubParent(List.of(AGENT));
+    IllegalStateException submitFailure = new IllegalStateException("store unavailable");
+    IllegalStateException replayFailure = new IllegalStateException("join read failed");
+    when(runtime.spawn(any())).thenThrow(submitFailure);
+    when(runtime.findJoin(invocationId))
+        .thenReturn(Optional.empty())
+        .thenReturn(Optional.empty())
+        .thenThrow(replayFailure);
+
+    IllegalStateException thrown =
+        assertThrows(
+            IllegalStateException.class, () -> runner(config()).accept(request(null, null)));
+
+    assertEquals(replayFailure, thrown);
+    assertEquals(List.of(submitFailure), List.of(thrown.getSuppressed()));
+    verify(runtime, times(1)).spawn(any());
+  }
+
+  @Test
   void nonCursorConflictDoesNotResubmit() {
     // 明确业务冲突没有匹配票据时立即拒绝。
     stubParent(List.of(AGENT));
