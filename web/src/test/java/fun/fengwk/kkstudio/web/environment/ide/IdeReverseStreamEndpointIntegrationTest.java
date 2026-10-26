@@ -85,8 +85,7 @@ class IdeReverseStreamEndpointIntegrationTest extends WebPostgresTestSupport {
   /** 20 MiB 响应体经真实反向 WS 传输；credit 窗口只有 256 KiB，因此 ACK 往返必须真实生效。 */
   @Test
   void streamsTwentyMiBBodyThroughRealReverseWebSocket() throws Exception {
-    DaemonConnectionIdentity identity =
-        new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
+    DaemonConnectionIdentity identity = new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1");
     when(endpoint.connectionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
     FakeDaemon daemon = new FakeDaemon();
     UUID invocationId = UUID.randomUUID();
@@ -200,8 +199,7 @@ class IdeReverseStreamEndpointIntegrationTest extends WebPostgresTestSupport {
   }
 
   private void runNodeCss(String targetSize, boolean slow) throws Exception {
-    DaemonConnectionIdentity identity =
-        new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
+    DaemonConnectionIdentity identity = new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1");
     when(endpoint.connectionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
     String requestPath = "/out/vs/code/browser/workbench/workbench.css";
     AtomicReference<NodeExecution> nodeRef = new AtomicReference<>();

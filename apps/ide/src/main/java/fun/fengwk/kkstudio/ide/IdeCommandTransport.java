@@ -21,9 +21,9 @@ public interface IdeCommandTransport {
   void abandonIde(UUID invocationId);
 
   /**
-   * 该 Environment 当前 READY 连接的代际快照；无本地连接/未 READY 时返回 empty。
+   * 该 Environment 当前 READY 连接背后的 Daemon 实例代际；无本地连接/未 READY 时返回 empty。
    *
-   * <p>IDE 入口与反向流据此把 cookie/流绑定到具体 Daemon 实例与租约；跨进程接管后旧绑定自动作废。
+   * <p>IDE 入口与反向流据此把 cookie/流绑定到具体 Daemon 实例，并用 {@link IdeGenerationState} 裁决既有凭据。
    */
   Optional<DaemonConnectionIdentity> connectionIdentity(EnvironmentId environmentId);
 }

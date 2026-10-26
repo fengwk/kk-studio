@@ -12,18 +12,19 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentSessionListener;
 import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestrator;
 import fun.fengwk.kkstudio.platform.environment.update.EnvironmentUpdateService;
-import fun.fengwk.kkstudio.web.environment.ide.IdeLeaseCloseListener;
+import fun.fengwk.kkstudio.web.environment.ide.IdeGenerationCloseListener;
 
 import java.util.UUID;
 import java.util.function.Consumer;
 
 /**
  * 意图：验证 compositeEnvironmentSessionListener 在 READY 事件上既唤醒 HarnessWorkDispatcher，又触发 Skill
- * 全量同步与受管更新 最终成功判定，且任一宿主抛出运行时异常时都不得向调用方泄露异常。
+ * 全量同步与受管更新 最终成功判定；Daemon 实例接管时转发给 IDE 数据面清理；任一宿主抛出运行时异常时都不得向调用方泄露异常。
  */
 class CompositeEnvironmentSessionListenerTest {
 
@@ -33,8 +34,8 @@ class CompositeEnvironmentSessionListenerTest {
   private ObjectProvider<EnvironmentSkillSyncOrchestrator> orchestratorProvider;
   private EnvironmentUpdateService updateService;
   private ObjectProvider<EnvironmentUpdateService> updateServiceProvider;
-  private IdeLeaseCloseListener leaseCloseListener;
-  private ObjectProvider<IdeLeaseCloseListener> leaseCloseProvider;
+  private IdeGenerationCloseListener generationCloseListener;
+  private ObjectProvider<IdeGenerationCloseListener> generationCloseProvider;
   private EnvironmentSessionListener listener;
 
   @SuppressWarnings("unchecked")
@@ -74,30 +75,44 @@ class CompositeEnvironmentSessionListenerTest {
         .when(updateServiceProvider)
         .ifAvailable(any());
 
-    leaseCloseListener = mock(IdeLeaseCloseListener.class);
-    leaseCloseProvider = mock(ObjectProvider.class);
+    generationCloseListener = mock(IdeGenerationCloseListener.class);
+    generationCloseProvider = mock(ObjectProvider.class);
     doAnswer(
             invocation -> {
-              Consumer<IdeLeaseCloseListener> consumer = invocation.getArgument(0);
-              consumer.accept(leaseCloseListener);
+              Consumer<IdeGenerationCloseListener> consumer = invocation.getArgument(0);
+              consumer.accept(generationCloseListener);
               return null;
             })
-        .when(leaseCloseProvider)
+        .when(generationCloseProvider)
         .ifAvailable(any());
 
     listener =
         config.compositeEnvironmentSessionListener(
-            dispatcherProvider, orchestratorProvider, updateServiceProvider, leaseCloseProvider);
+            dispatcherProvider,
+            orchestratorProvider,
+            updateServiceProvider,
+            generationCloseProvider);
   }
 
   @Test
-  void forwardsLeaseCloseToIdeDataPlaneCleanup() {
-    EnvironmentId envId = EnvironmentId.of(UUID.randomUUID());
-    UUID leaseToken = UUID.randomUUID();
+  void forwardsInstanceReplacementToIdeDataPlaneCleanup() {
+    DaemonConnectionIdentity previous =
+        new DaemonConnectionIdentity(EnvironmentId.of(UUID.randomUUID()), "daemon-1");
 
-    listener.onEnvironmentDisconnected(envId, leaseToken);
+    listener.onDaemonInstanceReplaced(previous);
 
-    verify(leaseCloseListener).onLeaseClosed(envId, leaseToken);
+    verify(generationCloseListener).onGenerationClosed(previous);
+  }
+
+  @Test
+  void ideCleanupExceptionDoesNotPropagate() {
+    DaemonConnectionIdentity previous =
+        new DaemonConnectionIdentity(EnvironmentId.of(UUID.randomUUID()), "daemon-1");
+    doThrow(new IllegalStateException("ide cleanup failed"))
+        .when(generationCloseListener)
+        .onGenerationClosed(any());
+
+    assertDoesNotThrow(() -> listener.onDaemonInstanceReplaced(previous));
   }
 
   @Test

@@ -15,7 +15,6 @@ import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonSe
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.partialPayload;
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.readyPayload;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -2757,9 +2756,9 @@ class EnvironmentDaemonServerTest {
     assertEquals(Set.of(), fixture.server.readyEnvironments());
   }
 
-  /** 测试意图：租约解绑注入 Error 时收尾不跳过——在途 IDE 命令仍按结果不确定终结、断开通知仍发生、Error 以原身份抛出，且只记录固定阶段与异常类名。 */
+  /** 测试意图：租约解绑注入 Error 时收尾不跳过——在途 IDE 命令仍按结果不确定终结、Error 以原身份抛出，且只记录固定阶段与异常类名。 */
   @Test
-  void leaseErrorStillFailsPendingIdeAndNotifiesDisconnected() {
+  void leaseErrorStillFailsPendingIde() {
     Fixture fixture = new Fixture();
     FakeChannel channel = fixture.connectReady("channel-cleanup-ide-lease-error");
     DaemonIdeCall request = fixture.server.requestIde(ENVIRONMENT_ID, OPEN_VIEW_COMMAND);
@@ -2780,14 +2779,12 @@ class EnvironmentDaemonServerTest {
     assertTrue(request.reply().isCompletedExceptionally());
     assertInstanceOf(
         EnvironmentCapabilitySendUncertainException.class, request.reply().exceptionNow());
-    assertEquals(List.of(ENVIRONMENT_ID), fixture.disconnectedEnvironments);
-    assertEquals(List.of(request.identity().leaseToken()), fixture.disconnectedLeaseTokens);
     assertFalse(fixture.server.isReady(ENVIRONMENT_ID));
   }
 
-  /** 测试意图：传输关闭注入 Error 时收尾不跳过——租约已解绑、IDE 命令仍终结、断开通知仍发生，Error 以原身份抛出。 */
+  /** 测试意图：传输关闭注入 Error 时收尾不跳过——租约已解绑、IDE 命令仍终结，Error 以原身份抛出。 */
   @Test
-  void transportErrorStillFailsPendingIdeAndNotifiesDisconnected() {
+  void transportErrorStillFailsPendingIde() {
     Fixture fixture = new Fixture();
     FakeChannel channel = fixture.connectReady("channel-cleanup-ide-transport-error");
     DaemonIdeCall request = fixture.server.requestIde(ENVIRONMENT_ID, OPEN_VIEW_COMMAND);
@@ -2809,43 +2806,27 @@ class EnvironmentDaemonServerTest {
     assertTrue(request.reply().isCompletedExceptionally());
     assertInstanceOf(
         EnvironmentCapabilitySendUncertainException.class, request.reply().exceptionNow());
-    assertEquals(List.of(ENVIRONMENT_ID), fixture.disconnectedEnvironments);
-    assertEquals(List.of(request.identity().leaseToken()), fixture.disconnectedLeaseTokens);
     assertFalse(fixture.server.isReady(ENVIRONMENT_ID));
   }
 
-  /** 测试意图：断开通知自身的 RuntimeException 只记录固定阶段与异常类名，不改变已关闭状态；重复关闭是幂等 no-op，通知身份不因失败而放宽。 */
+  /** 测试意图：实例接管通知自身的 RuntimeException 只记录固定阶段与异常类名，新实例照常完成握手并 READY。 */
   @Test
-  void disconnectedNotificationRuntimeFailureIsLoggedSafelyAndKeepsConnectionClosed() {
+  void replacedNotificationRuntimeFailureIsLoggedSafelyAndKeepsTheNewInstanceReady() {
     Fixture fixture = new Fixture();
-    FakeChannel channel = fixture.connectReady("channel-disconnected-notify-runtime");
-    DaemonIdeCall request = fixture.server.requestIde(ENVIRONMENT_ID, OPEN_VIEW_COMMAND);
-    fixture.disconnectedNotificationFailure =
-        new IllegalStateException("disconnected notification failed: " + SYNTHETIC_SECRET);
+    FakeChannel first = fixture.connectReady("channel-replaced-notify-first");
+    fixture.server.close(first.connectionId());
+    fixture.replacedNotificationFailure =
+        new IllegalStateException("replaced notification failed: " + SYNTHETIC_SECRET);
 
     try (CoreLogCapture logs = new CoreLogCapture()) {
-      assertDoesNotThrow(() -> fixture.server.close(channel.connectionId()));
-      logs.assertOnlySafeFailures(1, "environment disconnected notification");
+      fixture.connectReady("channel-replaced-notify-second", OTHER_INSTANCE_ID);
+      logs.assertOnlySafeFailures(1, "daemon instance replaced notification");
     }
 
-    assertTrue(channel.closed(), "a failing notification must not reopen the transport");
-    assertFalse(fixture.server.isReady(ENVIRONMENT_ID));
-    assertEquals(0, fixture.server.activeIdeCount());
-    assertTrue(request.reply().isCompletedExceptionally());
-    assertInstanceOf(
-        EnvironmentCapabilitySendUncertainException.class, request.reply().exceptionNow());
-    assertEquals(List.of(ENVIRONMENT_ID), fixture.disconnectedEnvironments);
-    assertEquals(List.of(request.identity().leaseToken()), fixture.disconnectedLeaseTokens);
-
-    try (CoreLogCapture logs = new CoreLogCapture()) {
-      assertDoesNotThrow(() -> fixture.server.close(channel.connectionId()));
-      assertEquals(
-          0, logs.records().size(), "an already closed connection must not be cleaned twice");
-    }
+    assertTrue(fixture.server.isReady(ENVIRONMENT_ID));
     assertEquals(
-        1,
-        fixture.disconnectedEnvironments.size(),
-        "the disconnected notification must not repeat for an already closed connection");
+        List.of(new DaemonConnectionIdentity(ENVIRONMENT_ID, INSTANCE_ID)),
+        fixture.replacedInstances);
   }
 
   /** 内核 IDE 通道不解释载荷，任意 JSON 命令即可驱动在途登记与收尾。 */

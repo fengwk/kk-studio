@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.ide.stream;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.harness.environment.server.OneTimeTicketStore;
 import fun.fengwk.kkstudio.ide.protocol.IdeStreamMode;
@@ -10,10 +9,9 @@ import java.time.Clock;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.UUID;
 
 /**
- * 进程内一次性 IDE 流 ticket 实现：委托 {@link OneTimeTicketStore}，绑定值编码为连接代际 + 模式。
+ * 进程内一次性 IDE 流 ticket 实现：委托 {@link OneTimeTicketStore}，绑定值编码为 Daemon 实例代际 + 模式。
  *
  * <p>只在本节点（当前 owner）内有效，不做跨节点复制：跨节点请求先由 owner 定位再本地消费。
  */
@@ -47,13 +45,9 @@ public final class InMemoryIdeStreamTicketService implements IdeStreamTicketServ
   }
 
   @Override
-  public void revoke(EnvironmentId environmentId, UUID leaseToken) {
-    Objects.requireNonNull(environmentId, "environmentId");
-    Objects.requireNonNull(leaseToken, "leaseToken");
-    store.revoke(
-        consumed ->
-            consumed.identity().environmentId().equals(environmentId)
-                && consumed.identity().leaseToken().equals(leaseToken));
+  public void revoke(DaemonConnectionIdentity identity) {
+    Objects.requireNonNull(identity, "identity");
+    store.revoke(consumed -> consumed.identity().equals(identity));
   }
 
   /** 当前未消费 ticket 数量（用于测试与诊断，不暴露 ticket 值）。 */

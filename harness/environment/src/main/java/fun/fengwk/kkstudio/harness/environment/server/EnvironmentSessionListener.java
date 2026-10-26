@@ -2,8 +2,6 @@ package fun.fengwk.kkstudio.harness.environment.server;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 
-import java.util.UUID;
-
 /**
  * 会话事件窄端口：核心在状态推进后向宿主发出信号。
  *
@@ -15,9 +13,10 @@ public interface EnvironmentSessionListener {
   void onEnvironmentReady(EnvironmentId environmentId);
 
   /**
-   * 一个连接代际被关闭（断线/接管/换代）：该 {@code (environmentId, leaseToken)} 的路由租约不再由本节点持有。
+   * 另一个 Daemon 实例在本节点接管了该 Environment：{@code previous} 代际就此结束。
    *
-   * <p>宿主据此作废并关闭绑定该代际的 IDE 入口凭据与反向数据流（ticket 撤销只是其中一环，已建立的流也必须关闭）。默认空实现， 不强制所有宿主关心 IDE 数据面。
+   * <p>同一实例断线重连不触发本回调，它的进程、code-server 与视图都还在。宿主据此作废并关闭绑定旧代际的 IDE 入口凭据与反向数据流（ticket
+   * 撤销只是其中一环，已建立的流也必须关闭）。默认空实现，不强制所有宿主关心 IDE 数据面。
    */
-  default void onEnvironmentDisconnected(EnvironmentId environmentId, UUID leaseToken) {}
+  default void onDaemonInstanceReplaced(DaemonConnectionIdentity previous) {}
 }

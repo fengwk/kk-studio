@@ -13,14 +13,12 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.UUID;
 
 /**
  * IDE 浏览器会话与受管 workspace 授权登记。
@@ -34,8 +32,9 @@ import java.util.UUID;
  * </ul>
  *
  * <p>因此 cookie 过期 <em>不会</em> 撤销仍然打开着的视图，也绝不用空闲超时推断视图关闭（会误杀仍在使用的多面板视图）；反之，视图关闭或代际结束会立即撤销 授权并使
- * cookie 失效。同一代际（Environment + Daemon 实例 + 租约）只保留一个 cookie：多次 bootstrap（多面板、多 workspace）复用同一
- * cookie，其可访问的 workspace 是该代际当前打开的视图集合，映射始终与真实视图生命周期一致。
+ * cookie 失效。代际即 Daemon 实例：同一实例断线重连时 code-server 与视图都还在，cookie 与授权保留；另一个实例在本节点接管时整代关闭。每个 Environment
+ * 在本节点至多一个代际，同一代际只保留一个 cookie：多次 bootstrap（多面板、多 workspace）复用同一 cookie，其可访问的 workspace
+ * 是该代际当前打开的视图集合，映射始终与真实视图生命周期一致。
  *
  * <p><b>并发模型：</b>全部公共元数据由单一 {@link #lock} 串行访问（并存代际 ≤ {@value #MAX_GENERATIONS}、单代际视图 ≤ {@value
  * #MAX_VIEWS_PER_GENERATION}，规模小且操作是纯内存映射读写），因此不存在「先 get 再 put」的非原子窗口，也不需要多层并发容器。
@@ -158,24 +157,13 @@ public final class IdeBrowserSessionRegistry implements IdeViewAuthorizationList
     }
   }
 
-  /** 关闭某代际的全部会话与视图授权（租约失效/接管）；代际寿命只由该通知决定，与 cookie 过期无关。 */
-  public void closeGeneration(EnvironmentId environmentId, UUID leaseToken) {
-    Objects.requireNonNull(environmentId, "environmentId");
-    Objects.requireNonNull(leaseToken, "leaseToken");
+  /** 关闭某代际的会话与全部视图授权（另一个 Daemon 实例接管）；代际寿命只由该通知决定，与 cookie 过期无关。 */
+  public void closeGeneration(DaemonConnectionIdentity identity) {
+    Objects.requireNonNull(identity, "identity");
     synchronized (lock) {
-      Iterator<Map.Entry<Generation, GenerationState>> iterator = generations.entrySet().iterator();
-      while (iterator.hasNext()) {
-        Map.Entry<Generation, GenerationState> entry = iterator.next();
-        Generation generation = entry.getKey();
-        if (!generation.identity.environmentId().equals(environmentId)
-            || !generation.identity.leaseToken().equals(leaseToken)) {
-          continue;
-        }
-        iterator.remove();
-        String cookie = entry.getValue().cookie;
-        if (cookie != null) {
-          cookies.remove(cookie);
-        }
+      GenerationState state = generations.remove(new Generation(identity));
+      if (state != null && state.cookie != null) {
+        cookies.remove(state.cookie);
       }
     }
   }

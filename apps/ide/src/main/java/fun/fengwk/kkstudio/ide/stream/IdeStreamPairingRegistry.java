@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.ide.stream;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -10,18 +10,19 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.UUID;
 
 /**
  * 反向数据面的「浏览器 exchange ↔ Daemon 反向连接」一次性配对注册表。
  *
- * <p>每个 HTTP exchange / IDE WebSocket 先由 Gateway 铸造 stream ticket 并登记一个 pending 配对（绑定 {@code
- * Environment + leaseToken}），随后通过 {@code OPEN_STREAM} 命令把 ticket 交给 Daemon；Daemon 反向连上 stream
- * endpoint 后由 {@link #pair(String, AutoCloseable)} 交付 peer，等待方 {@link Pairing#awaitPeer()} 才能继续转发。
+ * <p>每个 HTTP exchange / IDE WebSocket 先由 Gateway 铸造 stream ticket 并登记一个 pending 配对（绑定 Daemon 实例代际
+ * {@link DaemonConnectionIdentity}），随后通过 {@code OPEN_STREAM} 命令把 ticket 交给 Daemon；Daemon 反向连上
+ * stream endpoint 后由 {@link #pair(String, AutoCloseable)} 交付 peer，等待方 {@link Pairing#awaitPeer()}
+ * 才能继续转发。
  *
- * <p><b>超时与租约失效的收敛：</b>等待超时的 pending 配对会被原子终结——关闭可能的 peer、执行 {@code abandon} 回调（放弃在途 {@code
+ * <p><b>超时与代际结束的收敛：</b>等待超时的 pending 配对会被原子终结——关闭可能的 peer、执行 {@code abandon} 回调（放弃在途 {@code
  * OPEN_STREAM}）并向等待方抛出 {@link IdeStreamPairingException}；已交付 peer 的配对由 {@link Pairing#close()} 或
- * {@link #closeLease} 关闭 peer。租约关闭/接管时按代际关闭全部 pending 与 active 配对，因此不会出现「只 revoke 票据、流仍在转发」。
+ * {@link #closeGeneration} 关闭 peer。另一个 Daemon 实例接管时按代际关闭全部 pending 与 active 配对，因此不会出现「只 revoke
+ * 票据、流仍在转发」；同一实例断线重连不结束代际，已建立的反向流照常转发。
  *
  * <p>ticket 一次性：配对成功或终结后即从表中移除，迟到的反向连接（ticket 已消费）会由 {@link #pair} 返回 {@code false}，由适配层
  * fail-closed 关闭该连接。所有状态由单一锁保护；peer 的关闭与 abandon 回调在锁外执行。
@@ -32,25 +33,19 @@ public final class IdeStreamPairingRegistry<P extends AutoCloseable> {
 
   private final Object lock = new Object();
   private final Map<String, Entry<P>> byTicket = new HashMap<>();
-  private final Map<Generation, Set<Entry<P>>> byGeneration = new HashMap<>();
+  private final Map<DaemonConnectionIdentity, Set<Entry<P>>> byGeneration = new HashMap<>();
 
   /** 登记一个 pending 配对；ticket 必须已由 {@link IdeStreamTicketService} 铸造并绑定同一代际。 */
   public Pairing open(
-      String ticket,
-      EnvironmentId environmentId,
-      UUID leaseToken,
-      Duration timeout,
-      Runnable abandon) {
+      String ticket, DaemonConnectionIdentity generation, Duration timeout, Runnable abandon) {
     Objects.requireNonNull(ticket, "ticket");
-    Objects.requireNonNull(environmentId, "environmentId");
-    Objects.requireNonNull(leaseToken, "leaseToken");
+    Objects.requireNonNull(generation, "generation");
     Objects.requireNonNull(timeout, "timeout");
     Objects.requireNonNull(abandon, "abandon");
     if (timeout.isZero() || timeout.isNegative()) {
       throw new IllegalArgumentException("timeout must be positive");
     }
-    Entry<P> entry =
-        new Entry<>(ticket, new Generation(environmentId, leaseToken), abandon, timeout);
+    Entry<P> entry = new Entry<>(ticket, generation, abandon, timeout);
     synchronized (lock) {
       if (byTicket.containsKey(ticket)) {
         throw new IllegalStateException("stream ticket is already pending");
@@ -82,13 +77,12 @@ public final class IdeStreamPairingRegistry<P extends AutoCloseable> {
     }
   }
 
-  /** 租约失效/接管：按代际关闭全部 pending 与 active 配对。 */
-  public void closeLease(EnvironmentId environmentId, UUID leaseToken) {
-    Objects.requireNonNull(environmentId, "environmentId");
-    Objects.requireNonNull(leaseToken, "leaseToken");
+  /** 代际结束（另一个 Daemon 实例接管）：关闭该代际全部 pending 与 active 配对。 */
+  public void closeGeneration(DaemonConnectionIdentity generation) {
+    Objects.requireNonNull(generation, "generation");
     List<Entry<P>> targets;
     synchronized (lock) {
-      Set<Entry<P>> entries = byGeneration.get(new Generation(environmentId, leaseToken));
+      Set<Entry<P>> entries = byGeneration.get(generation);
       targets = entries == null ? List.of() : new ArrayList<>(entries);
     }
     IdeStreamPairingException failure = null;
@@ -176,19 +170,18 @@ public final class IdeStreamPairingRegistry<P extends AutoCloseable> {
     }
   }
 
-  private record Generation(EnvironmentId environmentId, UUID leaseToken) {}
-
   private static final class Entry<P extends AutoCloseable> {
 
     private final String ticket;
-    private final Generation generation;
+    private final DaemonConnectionIdentity generation;
     private final Runnable abandon;
     private final long deadlineNanos;
     private P peer;
     private boolean paired;
     private boolean closed;
 
-    private Entry(String ticket, Generation generation, Runnable abandon, Duration timeout) {
+    private Entry(
+        String ticket, DaemonConnectionIdentity generation, Runnable abandon, Duration timeout) {
       this.ticket = ticket;
       this.generation = generation;
       this.abandon = abandon;

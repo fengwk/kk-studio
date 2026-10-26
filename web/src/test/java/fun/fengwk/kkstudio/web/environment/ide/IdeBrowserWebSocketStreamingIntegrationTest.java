@@ -163,8 +163,7 @@ class IdeBrowserWebSocketStreamingIntegrationTest extends WebPostgresTestSupport
   void completesCompressedHttpResponseThenReverseClose() throws Exception {
     byte[] plain = "hello-from-code-server".getBytes(StandardCharsets.UTF_8);
     byte[] compressed = gzip(plain);
-    DaemonConnectionIdentity identity =
-        new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
+    DaemonConnectionIdentity identity = new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1");
     try (HttpFakeDaemon daemon = new HttpFakeDaemon(compressed)) {
       when(endpoint.connectionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
       when(endpoint.requestIde(eq(ENVIRONMENT), any()))
@@ -232,8 +231,7 @@ class IdeBrowserWebSocketStreamingIntegrationTest extends WebPostgresTestSupport
   }
 
   private Browser openBrowser(FakeDaemon daemon) throws Exception {
-    DaemonConnectionIdentity identity =
-        new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
+    DaemonConnectionIdentity identity = new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1");
     when(endpoint.connectionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
     when(endpoint.requestIde(eq(ENVIRONMENT), any()))
         .thenAnswer(

@@ -118,8 +118,7 @@ class IdeCrossNodeReverseStreamIntegrationTest extends WebPostgresTestSupport {
   void forwardsTwentyMiBThroughNonOwnerNode() throws Exception {
     int forwarderPort = startForwarderNode(nodeRegistry.localNodeId(), ownerPort);
     registerReadyOwner();
-    DaemonConnectionIdentity identity =
-        new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
+    DaemonConnectionIdentity identity = new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1");
     when(endpoint.connectionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
     NodePeer node = new NodePeer(forwarderPort, ENVIRONMENT);
     when(endpoint.requestIde(eq(ENVIRONMENT), any()))

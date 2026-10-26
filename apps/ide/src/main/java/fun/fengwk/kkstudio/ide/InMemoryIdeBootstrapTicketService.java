@@ -6,7 +6,6 @@ import fun.fengwk.kkstudio.harness.environment.server.OneTimeTicketStore;
 
 import java.util.Objects;
 import java.util.Optional;
-import java.util.UUID;
 
 /** 进程内一次性 bootstrap 票据实现：委托 {@link OneTimeTicketStore}，仅在本节点消费。 */
 public final class InMemoryIdeBootstrapTicketService implements IdeBootstrapTicketService {
@@ -27,13 +26,9 @@ public final class InMemoryIdeBootstrapTicketService implements IdeBootstrapTick
   }
 
   @Override
-  public void revoke(EnvironmentId environmentId, UUID leaseToken) {
-    Objects.requireNonNull(environmentId, "environmentId");
-    Objects.requireNonNull(leaseToken, "leaseToken");
-    store.revoke(
-        ticket ->
-            ticket.identity().environmentId().equals(environmentId)
-                && ticket.identity().leaseToken().equals(leaseToken));
+  public void revoke(DaemonConnectionIdentity identity) {
+    Objects.requireNonNull(identity, "identity");
+    store.revoke(ticket -> ticket.identity().equals(identity));
   }
 
   @Override

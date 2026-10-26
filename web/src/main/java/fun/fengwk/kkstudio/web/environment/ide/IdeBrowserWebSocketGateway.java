@@ -18,8 +18,8 @@ import org.springframework.web.socket.server.support.DefaultHandshakeHandler;
 import org.springframework.web.socket.server.support.WebSocketHttpRequestHandler;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.ide.IdeCommandTransport;
+import fun.fengwk.kkstudio.ide.IdeGenerationState;
 import fun.fengwk.kkstudio.ide.cluster.IdeClusterClient;
 import fun.fengwk.kkstudio.ide.protocol.IdeHeader;
 import fun.fengwk.kkstudio.ide.stream.IdeStreamPairingRegistry;
@@ -122,8 +122,11 @@ public final class IdeBrowserWebSocketGateway {
         response.sendError(HttpServletResponse.SC_UNAUTHORIZED);
         return;
       }
-      if (!generationCurrent(environmentId, session)) {
-        response.sendError(HttpServletResponse.SC_CONFLICT);
+      int rejection =
+          IdeGatewayDataPlane.generationRejection(
+              IdeGenerationState.of(transport, session.identity()));
+      if (rejection != 0) {
+        response.sendError(rejection);
         return;
       }
       handler =
@@ -171,12 +174,6 @@ public final class IdeBrowserWebSocketGateway {
       }
     }
     return null;
-  }
-
-  private boolean generationCurrent(
-      EnvironmentId environmentId, IdeBrowserSessionRegistry.Session session) {
-    Optional<DaemonConnectionIdentity> current = transport.connectionIdentity(environmentId);
-    return current.isPresent() && current.get().equals(session.identity());
   }
 
   private IdeStreamDeps deps() {

@@ -120,8 +120,7 @@ class IdeBrowserWebSocketGatewayTest {
     IdeBrowserSessionRegistry sessions =
         new IdeBrowserSessionRegistry(new SecureRandom(), Clock.systemUTC(), Duration.ofHours(1));
     EnvironmentId foreignEnv = EnvironmentId.parse("22222222-2222-2222-2222-222222222222");
-    DaemonConnectionIdentity foreignIdentity =
-        new DaemonConnectionIdentity(foreignEnv, "instance", UUID.randomUUID());
+    DaemonConnectionIdentity foreignIdentity = new DaemonConnectionIdentity(foreignEnv, "instance");
     String foreignView = UUID.randomUUID().toString();
     sessions.viewOpened(foreignIdentity, foreignView, "/managed/workspace");
     String foreignCookie = sessions.open(foreignIdentity, foreignView, "/managed/workspace");

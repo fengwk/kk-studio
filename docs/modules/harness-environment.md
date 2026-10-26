@@ -380,7 +380,8 @@ COMPLETED
 携带心跳超时（同时用作租约期限）、资源字节上限与临时资源 TTL/扫描间隔，以 supplier 注入并在每个判定点现读，因此宿主修改配置立即
 生效，核心不缓存配置；临时资源策略在同一连接的心跳通道按需推送 `TEMPORARY_RESOURCE_POLICY`，只对尚未回收的 workspace 生效。[`EnvironmentSessionListener`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentSessionListener.java)
 在每次 READY 后于锁外唤醒宿主；生产组合 listener 同时唤醒 Harness Work dispatcher 与
-异步 Skill Package 对账，两者失败彼此隔离，也不回滚已经成立的 READY 会话。
+异步 Skill Package 对账，两者失败彼此隔离，也不回滚已经成立的 READY 会话。另一个 Daemon 实例在本节点接管某个 Environment 时，
+listener 在锁外收到 `onDaemonInstanceReplaced(previous)`，宿主据此关闭旧实例的 IDE 代际；同一实例断线重连不触发该回调。
 
 持久化实现（连接注册、租约、上传行与对象存储）与 WebSocket 传输实现在 `platform` 与 `web` 模块完成适配；本模块只定义窄端口语义，不感知 SQL、bucket、对象 key 或 Spring。
 

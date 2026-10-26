@@ -7,8 +7,8 @@ import org.springframework.web.socket.WebSocketHandler;
 import org.springframework.web.socket.server.HandshakeInterceptor;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.ide.IdeCommandTransport;
+import fun.fengwk.kkstudio.ide.IdeGenerationState;
 import fun.fengwk.kkstudio.ide.cluster.IdeInternalPaths;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthenticationException;
@@ -83,7 +83,9 @@ final class IdeInternalBrowserHandshakeInterceptor implements HandshakeIntercept
       return false;
     }
     Optional<IdeBrowserSessionRegistry.Session> session = session(request, environmentId.get());
-    if (session.isEmpty() || !generationCurrent(environmentId.get(), session.get())) {
+    if (session.isEmpty()
+        || IdeGenerationState.of(transport, session.get().identity())
+            != IdeGenerationState.CURRENT) {
       log.debug("rejected internal browser handshake: browser session is missing or stale");
       return false;
     }
@@ -104,12 +106,6 @@ final class IdeInternalBrowserHandshakeInterceptor implements HandshakeIntercept
 
   private boolean local(EnvironmentId environmentId) {
     return clusterNodeRegistry.route(environmentId).filter(ClusterOwnerRoute::local).isPresent();
-  }
-
-  private boolean generationCurrent(
-      EnvironmentId environmentId, IdeBrowserSessionRegistry.Session session) {
-    Optional<DaemonConnectionIdentity> current = transport.connectionIdentity(environmentId);
-    return current.isPresent() && current.get().equals(session.identity());
   }
 
   private Optional<IdeBrowserSessionRegistry.Session> session(

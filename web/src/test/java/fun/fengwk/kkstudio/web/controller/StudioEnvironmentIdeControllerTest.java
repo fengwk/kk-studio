@@ -334,9 +334,7 @@ class StudioEnvironmentIdeControllerTest {
               ideCommand.directory(),
               "/daemon/workspaces/" + ideCommand.viewId()));
       return new IdeRequest(
-          new DaemonConnectionIdentity(environmentId, DAEMON_INSTANCE, LEASE),
-          UUID.randomUUID(),
-          reply);
+          new DaemonConnectionIdentity(environmentId, DAEMON_INSTANCE), UUID.randomUUID(), reply);
     }
 
     @Override

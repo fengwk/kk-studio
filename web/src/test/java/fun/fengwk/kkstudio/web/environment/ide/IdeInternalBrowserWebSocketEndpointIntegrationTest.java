@@ -103,9 +103,7 @@ class IdeInternalBrowserWebSocketEndpointIntegrationTest extends WebPostgresTest
               CompletableFuture<IdeReply> reply = new CompletableFuture<>();
               reply.complete(IdeReply.ok(null, null, null));
               return new IdeRequest(
-                  new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID()),
-                  UUID.randomUUID(),
-                  reply);
+                  new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1"), UUID.randomUUID(), reply);
             });
     Map<String, String> forged =
         Map.of(
@@ -132,9 +130,7 @@ class IdeInternalBrowserWebSocketEndpointIntegrationTest extends WebPostgresTest
               CompletableFuture<IdeReply> reply = new CompletableFuture<>();
               reply.complete(IdeReply.ok(null, null, null));
               return new IdeRequest(
-                  new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID()),
-                  UUID.randomUUID(),
-                  reply);
+                  new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1"), UUID.randomUUID(), reply);
             });
     String path = IdeInternalPaths.dataWsPath(ENVIRONMENT, "/ws/echo");
     Map<String, String> authHeaders =
@@ -185,8 +181,7 @@ class IdeInternalBrowserWebSocketEndpointIntegrationTest extends WebPostgresTest
   @Test
   void completesInternalHandshakeAndEchoesThroughDaemon() throws Exception {
     registerReadyOwner();
-    DaemonConnectionIdentity identity =
-        new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
+    DaemonConnectionIdentity identity = new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1");
     when(endpoint.connectionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
     EchoDaemon daemon = new EchoDaemon();
     when(endpoint.requestIde(eq(ENVIRONMENT), any()))

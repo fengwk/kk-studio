@@ -145,6 +145,7 @@ Evidence 接收 READY uploadId，在事务内转移引用并返回规范资源�
 - **Bootstrap 与会话隔离**：一次性票据请求由 `__ide/bootstrap?token=...` 消费，并在响应中通过 `Set-Cookie` 下发
   `Path` 限定在 `/environment-ide/{environmentId}/` 的 HttpOnly cookie；重定向严格保持在当前环境 route base 之下。
   Studio 与受管环境属于同一可信浏览器边界（非沙箱隔离），不需要独立 IDE 域名或主机模板。
+- **会话探测**：`__ide/session` 只读、不触达 Daemon，返回 204（会话有效）、401（无会话）、409（代际已被另一个 Daemon 实例接管）或 503（暂无 READY 连接，同一实例重连后原 cookie 继续有效）。前端据此决定等待还是重新打开视图。
 - **HTTP 与 WebSocket 转发**：普通 HTTP 请求由 [`IdeGatewayDataPlane`](../../web/src/main/java/fun/fengwk/kkstudio/web/environment/ide/IdeGatewayDataPlane.java)
   转发；WebSocket upgrade 请求由 [`IdeBrowserWebSocketGateway`](../../web/src/main/java/fun/fengwk/kkstudio/web/environment/ide/IdeBrowserWebSocketGateway.java)
   处理。跨节点场景通过内部端点（`/internal/environment-ide/{env}/http` 与 `/ws`）转发至持有目标环境连接的 owner 节点。

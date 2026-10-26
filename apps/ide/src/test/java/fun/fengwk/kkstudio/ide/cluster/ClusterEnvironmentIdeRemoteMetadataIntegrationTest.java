@@ -317,15 +317,14 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
       CompletableFuture<IdeReply> future = new CompletableFuture<>();
       future.complete(reply);
       return new IdeRequest(
-          new DaemonConnectionIdentity(environmentId, "daemon-instance", UUID.randomUUID()),
+          new DaemonConnectionIdentity(environmentId, "daemon-instance"),
           UUID.randomUUID(),
           future);
     }
 
     @Override
     public Optional<DaemonConnectionIdentity> connectionIdentity(EnvironmentId environmentId) {
-      return Optional.of(
-          new DaemonConnectionIdentity(environmentId, "daemon-instance", UUID.randomUUID()));
+      return Optional.of(new DaemonConnectionIdentity(environmentId, "daemon-instance"));
     }
 
     @Override

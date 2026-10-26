@@ -65,21 +65,21 @@ public class IdeGatewayConfiguration {
   }
 
   /**
-   * 代际关闭清理：关闭该 {@code (environment, lease)} 的全部反向流配对，并撤销 stream/bootstrap 票据与浏览器会话。
+   * 代际结束清理：关闭该 Daemon 实例代际的全部反向流配对，并撤销 stream/bootstrap 票据与浏览器会话。
    *
    * <p>任一子步骤异常都不影响其它清理与会话状态推进，因此整体隔离。
    */
   @Bean
-  public IdeLeaseCloseListener ideLeaseCloseListener(
+  public IdeGenerationCloseListener ideGenerationCloseListener(
       IdeStreamPairingRegistry<IdeStreamPeer> pairings,
       IdeStreamTicketService streamTickets,
       IdeBootstrapTicketService bootstrapTickets,
       IdeBrowserSessionRegistry sessions) {
-    return (environmentId, leaseToken) -> {
-      closeQuietly(() -> pairings.closeLease(environmentId, leaseToken));
-      closeQuietly(() -> streamTickets.revoke(environmentId, leaseToken));
-      closeQuietly(() -> bootstrapTickets.revoke(environmentId, leaseToken));
-      closeQuietly(() -> sessions.closeGeneration(environmentId, leaseToken));
+    return generation -> {
+      closeQuietly(() -> pairings.closeGeneration(generation));
+      closeQuietly(() -> streamTickets.revoke(generation));
+      closeQuietly(() -> bootstrapTickets.revoke(generation));
+      closeQuietly(() -> sessions.closeGeneration(generation));
     };
   }
 

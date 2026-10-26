@@ -17,7 +17,6 @@ import fun.fengwk.kkstudio.ide.stream.IdeStreamTicketService;
 
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -73,8 +72,7 @@ class IdeBrowserStreamSessionInboundBudgetTest {
   private static IdeBrowserStreamSession newSession() {
     IdeBrowserSessionRegistry.Session generation =
         new IdeBrowserSessionRegistry.Session(
-            new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID()),
-            Set.of("/home/dev/project"));
+            new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1"), Set.of("/home/dev/project"));
     IdeStreamDeps deps =
         new IdeStreamDeps(
             mock(IdeCommandTransport.class),

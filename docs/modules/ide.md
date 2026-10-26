@@ -19,7 +19,7 @@ IDE 让用户在 Studio 同源下打开某个 Environment 上由 Daemon 托管�
 
 载荷属于 IDE 应用：[`DaemonIdeCommandTransport`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/DaemonIdeCommandTransport.java) 用 [`DaemonIdeCodec`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/protocol/DaemonIdeCodec.java) 编码 [`IdeCommand`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/protocol/IdeCommand.java)、解码 [`IdeReply`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/protocol/IdeReply.java)。动作集合 [`IdeAction`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/protocol/IdeAction.java) 为 `OPEN_VIEW`、`CHANGE_DIRECTORY`、`FOCUS_TERMINAL`、`CLOSE_VIEW` 与 `OPEN_STREAM`，与 Daemon 的 [`contracts.ts`](../../daemon/src/contracts.ts) 一致。回执载荷不合法只让这一条 IDE 调用失败，不影响同一连接上的 Agent 能力调用。
 
-每条命令进入传输时冻结连接代际 [`DaemonConnectionIdentity`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonConnectionIdentity.java)（Environment、Daemon 实例与路由租约）。所有 IDE 凭据都绑定这个代际，租约失效或被接管后旧凭据一律作废。
+每条命令进入传输时冻结代际 [`DaemonConnectionIdentity`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonConnectionIdentity.java)，即 Environment 当前 READY 连接背后的 Daemon 实例。所有 IDE 凭据都绑定这个代际：同一 Daemon 进程断线重连后，它的 code-server 与视图都还在，凭据继续有效；另一个实例在本节点接管时，内核发出 `onDaemonInstanceReplaced`，旧代际的凭据与流一律作废。每个 Environment 在本节点至多保留一个代际。各入口按 [`IdeGenerationState`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/IdeGenerationState.java) 统一裁决：当前实例可以建立新的反向流；暂无 READY 连接时返回 503，等待同一实例重连；已被接管时返回 409，浏览器需要重新打开视图。
 
 ## 元数据服务
 
@@ -38,7 +38,7 @@ IDE 让用户在 Studio 同源下打开某个 Environment 上由 Daemon 托管�
 
 流控由双向独立的 [`IdeStreamCreditWindow`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/protocol/IdeStreamCreditWindow.java) 约束：初始 credit 262144，每个数据帧（HTTP body 或 WS 分段）按载荷字节计价但至少 512，零长度分段同样计价。因此一个窗口同时限制在途字节与在途帧数（至多 512 帧），两端的入站队列按 credit 推导出的上界定界，code-server 终端输出、RPC 这类小消息的突发不会被误断开。ACK 只能确认已真实消费的数据帧且至少覆盖一帧；超窗发送、超窗/不足一帧/负数 ACK、未知帧与关闭后的操作一律关闭流，因此没有无界排队，也没有“先 ACK 后缓冲”。
 
-单条 HTTP exchange 只限制等待首个响应以及传输中两次进展之间的空闲（`kk-studio.harness.ide-gateway.request-timeout`），持续有进展的大文件下载不受整体时长限制。Daemon 侧关闭反向流时，网关把它给出的关闭码（code-server 的关闭码或协议原因）原样转述给浏览器，只有缺失或不能发送时才用 1011；跨节点单跳同样转述。每条 IDE WebSocket 结束、以及每条非正常结束的 HTTP exchange，网关都写一行诊断日志：结束原因、Daemon 侧与浏览器侧关闭码、Daemon 对 `OPEN_STREAM` 的失败回执、双向帧数与字节数和时长，不含票据、cookie 与查询串；Daemon 在宿主日志写一行 `daemon ide <mode> stream failed: <原因>`。由此可以判定每次断流的关闭方。配对等待超时会关闭可能的 peer 并放弃在途 `OPEN_STREAM`；租约关闭或接管时按代际关闭全部待配对与已配对的流，迟到的反向连接因票据已消费而被拒绝。
+单条 HTTP exchange 只限制等待首个响应以及传输中两次进展之间的空闲（`kk-studio.harness.ide-gateway.request-timeout`），持续有进展的大文件下载不受整体时长限制。Daemon 侧关闭反向流时，网关把它给出的关闭码（code-server 的关闭码或协议原因）原样转述给浏览器，只有缺失或不能发送时才用 1011；跨节点单跳同样转述。每条 IDE WebSocket 结束、以及每条非正常结束的 HTTP exchange，网关都写一行诊断日志：结束原因、Daemon 侧与浏览器侧关闭码、Daemon 对 `OPEN_STREAM` 的失败回执、双向帧数与字节数和时长，不含票据、cookie 与查询串；Daemon 在宿主日志写一行 `daemon ide <mode> stream failed: <原因>`。由此可以判定每次断流的关闭方。配对等待超时会关闭可能的 peer 并放弃在途 `OPEN_STREAM`；控制连接短暂断开不影响已建立的流，同一实例回拨的反向流照常配对；另一个实例接管时按代际关闭全部待配对与已配对的流，迟到的反向连接因票据已撤销或代际已被接管而被拒绝。
 
 ## 跨节点
 

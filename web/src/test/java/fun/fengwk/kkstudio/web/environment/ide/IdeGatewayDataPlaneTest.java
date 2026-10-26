@@ -62,7 +62,6 @@ class IdeGatewayDataPlaneTest {
   private static final EnvironmentId ENV =
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
   private static final String INSTANCE = "33333333-3333-3333-3333-333333333333";
-  private static final UUID LEASE = new UUID(0L, 1L);
   private static final DaemonIdeStreamCodec CODEC = new DaemonIdeStreamCodec();
 
   private static IdeGatewayProperties properties() {
@@ -77,7 +76,7 @@ class IdeGatewayDataPlaneTest {
     final IdeBrowserSessionRegistry sessions =
         new IdeBrowserSessionRegistry(new SecureRandom(), Clock.systemUTC(), Duration.ofHours(1));
     final IdeBootstrapTicketService bootstrap = new InMemoryIdeBootstrapTicketService();
-    final DaemonConnectionIdentity identity = new DaemonConnectionIdentity(ENV, INSTANCE, LEASE);
+    final DaemonConnectionIdentity identity = new DaemonConnectionIdentity(ENV, INSTANCE);
     final FakeTransport transport = new FakeTransport(pairings);
     final ClusterNodeRegistry clusterNodeRegistry =
         new ClusterNodeRegistry() {
@@ -342,17 +341,67 @@ class IdeGatewayDataPlaneTest {
   }
 
   @Test
-  void rejectsWhenGenerationChanged() throws Exception {
+  void rejectsWhenAnotherDaemonInstanceTookOver() throws Exception {
     Harness harness = new Harness();
     String cookie = harness.sessionCookie();
-    harness.transport.identity = new DaemonConnectionIdentity(ENV, INSTANCE, UUID.randomUUID());
+    harness.transport.identity = new DaemonConnectionIdentity(ENV, "another-instance");
     MockHttpServletRequest request = new MockHttpServletRequest("GET", "/");
     request.setCookies(new Cookie(harness.properties.requireSessionCookieName(), cookie));
     MockHttpServletResponse response = new MockHttpServletResponse();
 
     harness.dataPlane.handleHttp(ENV, "/", request, response);
 
+    // 换进程接管后旧 cookie 永久失效：浏览器必须重新打开视图。
     assertEquals(409, response.getStatus());
+    assertNull(
+        harness.transport.lastCommand.get(), "a replaced generation must not reach the daemon");
+  }
+
+  @Test
+  void answersServiceUnavailableWhileTheDaemonIsReconnecting() throws Exception {
+    Harness harness = new Harness();
+    MockHttpServletRequest request = harness.request("GET", "/");
+    harness.transport.identity = null;
+    MockHttpServletResponse response = new MockHttpServletResponse();
+
+    harness.dataPlane.handleHttp(ENV, "/", request, response);
+
+    // 同一实例重连前没有 READY 连接可下发 OPEN_STREAM：暂不可用而不是作废 cookie。
+    assertEquals(503, response.getStatus());
+    assertNull(harness.transport.lastCommand.get());
+
+    harness.transport.identity = harness.identity;
+    // 同一代际只有一个 cookie：再次构造的请求携带的正是上面那个 cookie。
+    MockHttpServletRequest again = harness.request("GET", "/");
+    assertEquals(request.getCookies()[0].getValue(), again.getCookies()[0].getValue());
+    MockHttpServletResponse recovered = new MockHttpServletResponse();
+    harness.dataPlane.handleHttp(ENV, "/", again, recovered);
+    assertEquals(200, recovered.getStatus(), "the same cookie must work once the instance is back");
+  }
+
+  @Test
+  void sessionProbeReportsTheGenerationStateWithoutTouchingTheDaemon() throws Exception {
+    Harness harness = new Harness();
+    MockHttpServletRequest withCookie = harness.request("GET", "/__ide/session");
+
+    assertEquals(204, probe(harness, withCookie).getStatus());
+    harness.transport.identity = null;
+    assertEquals(503, probe(harness, withCookie).getStatus());
+    harness.transport.identity = new DaemonConnectionIdentity(ENV, "another-instance");
+    assertEquals(409, probe(harness, withCookie).getStatus());
+    harness.sessions.closeGeneration(harness.identity);
+    assertEquals(401, probe(harness, withCookie).getStatus());
+    assertEquals(
+        401, probe(harness, new MockHttpServletRequest("GET", "/__ide/session")).getStatus());
+    assertNull(harness.transport.lastCommand.get(), "a probe must never send an IDE command");
+  }
+
+  private static MockHttpServletResponse probe(Harness harness, MockHttpServletRequest request)
+      throws IOException {
+    MockHttpServletResponse response = new MockHttpServletResponse();
+    harness.dataPlane.handleSession(ENV, "/__ide/session", request, response);
+    assertEquals("no-store", response.getHeader("Cache-Control"));
+    return response;
   }
 
   @Test
@@ -450,8 +499,7 @@ class IdeGatewayDataPlaneTest {
   void rejectsSessionCookieFromDifferentEnvironment() throws Exception {
     Harness harness = new Harness();
     EnvironmentId foreignEnv = EnvironmentId.parse("22222222-2222-2222-2222-222222222222");
-    DaemonConnectionIdentity foreignIdentity =
-        new DaemonConnectionIdentity(foreignEnv, "instance", UUID.randomUUID());
+    DaemonConnectionIdentity foreignIdentity = new DaemonConnectionIdentity(foreignEnv, "instance");
     String foreignView = UUID.randomUUID().toString();
     harness.sessions.viewOpened(foreignIdentity, foreignView, "/managed/workspace");
     String foreignCookie =
@@ -748,7 +796,7 @@ class IdeGatewayDataPlaneTest {
 
     @Override
     public Optional<DaemonConnectionIdentity> connectionIdentity(EnvironmentId environmentId) {
-      return Optional.of(identity);
+      return Optional.ofNullable(identity);
     }
   }
 

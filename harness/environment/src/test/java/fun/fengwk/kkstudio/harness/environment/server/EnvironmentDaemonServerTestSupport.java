@@ -170,8 +170,7 @@ final class EnvironmentDaemonServerTestSupport {
     final FakeLeaseStore leaseStore = new FakeLeaseStore();
     final FakeTicketService ticketService = new FakeTicketService();
     final List<EnvironmentId> readyNotifications = new ArrayList<>();
-    final List<EnvironmentId> disconnectedEnvironments = new ArrayList<>();
-    final List<UUID> disconnectedLeaseTokens = new ArrayList<>();
+    final List<DaemonConnectionIdentity> replacedInstances = new ArrayList<>();
     final List<EnvironmentId> updateResultEnvironments = new ArrayList<>();
     final List<DaemonUpdateResult> updateResults = new ArrayList<>();
     final AtomicReference<EnvironmentServerSettings> settings =
@@ -185,8 +184,8 @@ final class EnvironmentDaemonServerTestSupport {
     /** 注入的宿主更新回执通知失败；用于验证同职责通知失败去敏可观察。 */
     Throwable updateNotificationFailure;
 
-    /** 注入的宿主断开通知失败；用于验证断开通知失败去敏可观察且不改变已关闭状态。 */
-    Throwable disconnectedNotificationFailure;
+    /** 注入的实例接管通知失败；用于验证通知失败去敏可观察且不阻断新实例的握手。 */
+    Throwable replacedNotificationFailure;
 
     Fixture() {
       this.server =
@@ -214,12 +213,10 @@ final class EnvironmentDaemonServerTestSupport {
                 }
 
                 @Override
-                public void onEnvironmentDisconnected(
-                    EnvironmentId environmentId, UUID leaseToken) {
-                  disconnectedEnvironments.add(environmentId);
-                  disconnectedLeaseTokens.add(leaseToken);
-                  if (disconnectedNotificationFailure != null) {
-                    throwUnchecked(disconnectedNotificationFailure);
+                public void onDaemonInstanceReplaced(DaemonConnectionIdentity previous) {
+                  replacedInstances.add(previous);
+                  if (replacedNotificationFailure != null) {
+                    throwUnchecked(replacedNotificationFailure);
                   }
                 }
               },

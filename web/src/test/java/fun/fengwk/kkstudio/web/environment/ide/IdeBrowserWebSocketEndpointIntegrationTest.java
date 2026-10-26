@@ -61,8 +61,7 @@ class IdeBrowserWebSocketEndpointIntegrationTest extends WebPostgresTestSupport 
   /** 浏览器 WS 消息经反向连接 echo 回来，且 UTF-8 文本语义保持。 */
   @Test
   void echoesBrowserWebSocketMessageThroughReverseStream() throws Exception {
-    DaemonConnectionIdentity identity =
-        new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1", UUID.randomUUID());
+    DaemonConnectionIdentity identity = new DaemonConnectionIdentity(ENVIRONMENT, "daemon-1");
     when(endpoint.connectionIdentity(ENVIRONMENT)).thenReturn(Optional.of(identity));
     EchoDaemon daemon = new EchoDaemon();
     when(endpoint.requestIde(eq(ENVIRONMENT), any()))
