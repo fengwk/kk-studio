@@ -1,9 +1,11 @@
-import { act, cleanup, render, screen } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChildThreadView } from '@/features/chat/runtime/ChildThreadView'
+import { harnessService } from '@/shared/api/harness-service'
 import type { ThreadProjection } from '@/features/chat/runtime/useThreadProjection'
 import { extractQueuedCustomMessages } from '@/features/chat/runtime/queued-custom-messages'
 import { buildThreadTimeline } from '@/features/chat/runtime/thread-timeline'
@@ -76,6 +78,7 @@ function mockChildSnapshot(overrides: Partial<HarnessThreadSnapshotDTO> = {}): H
     toolInvocations: [],
     modelAttemptFailures: [],
     stopReceipts: [],
+    unconfirmedExecutions: [],
     manualCompaction: { available: false, disabledReason: null },
     ...overrides,
   }
@@ -105,6 +108,7 @@ function createMockProjection(snapshot: HarnessThreadSnapshotDTO): ThreadProject
     queuedCustomMessages,
     manualCompaction: snapshot.manualCompaction,
     stopReceipts: snapshot.stopReceipts,
+    unconfirmedExecutions: snapshot.unconfirmedExecutions,
     modelInvocation: snapshot.modelInvocation,
     toolInvocations: snapshot.toolInvocations,
     modelAttemptFailures: snapshot.modelAttemptFailures,
@@ -130,6 +134,7 @@ describe('ChildThreadView 只读子观察面板 QUEUED CUSTOM_MESSAGE', () => {
   afterEach(() => {
     cleanup()
     queryClient.clear()
+    vi.restoreAllMocks()
     act(() => setLocale('zh-CN'))
   })
 
@@ -259,5 +264,54 @@ describe('ChildThreadView 只读子观察面板 QUEUED CUSTOM_MESSAGE', () => {
     expect(screen.queryByText('待处理补充要求')).not.toBeInTheDocument()
     expect(screen.getAllByText('请优先补充边界测试用例')).toHaveLength(1)
     expect(screen.getByText('请优先补充边界测试用例').closest('.thread-block-user')).not.toBeNull()
+  })
+
+  it('lets a stopped child thread abandon its own unconfirmed execution', async () => {
+    // 测试意图：未确认退出事实随投影出现在可查看的子代理面板；
+    // 放弃请求使用子 Thread 身份与它自己的 expectedVersion，而不是根或展示层猜测。
+    const user = userEvent.setup()
+    const base = mockChildSnapshot()
+    const stopped = {
+      ...base,
+      version: '7',
+      thread: {
+        ...base.thread,
+        version: '7',
+        executionControl: 'STOPPED',
+      },
+      unconfirmedExecutions: [{
+        executionId: 'execution-child',
+        invocationId: 'invocation-child',
+        attempt: 2,
+        kind: 'TOOL',
+        registeredAt: '2026-01-01T00:00:00.000Z',
+      }],
+    }
+    const projection = createMockProjection(stopped)
+    const abandon = vi.spyOn(harnessService, 'abandonExecution').mockResolvedValue(stopped)
+
+    render(
+      <ChildThreadView
+        threadId={CHILD_THREAD_ID}
+        projection={projection}
+        environments={[]}
+      />,
+      { wrapper },
+    )
+
+    expect(screen.getByRole('heading', { name: '未确认退出执行' })).toBeInTheDocument()
+    expect(screen.getByText('执行 execution-child')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', {
+      name: '放弃等待 TOOL 第 2 次尝试',
+    }))
+    const dialog = await screen.findByRole('alertdialog')
+    expect(dialog).toHaveTextContent('执行 execution-child 将不再等待退出确认')
+    await user.click(within(dialog).getByRole('button', { name: '放弃等待' }))
+
+    await waitFor(() => expect(abandon).toHaveBeenCalledWith(
+      CHILD_THREAD_ID,
+      'execution-child',
+      { expectedVersion: '7' },
+    ))
   })
 })

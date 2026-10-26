@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -245,6 +245,7 @@ vi.mock('@/shared/api/harness-service', () => ({
     compactThread: vi.fn(),
     setThreadYolo: vi.fn(),
     stopThread: vi.fn(),
+    abandonExecution: vi.fn(),
     decideApproval: vi.fn(),
     renameSession: vi.fn(),
     renameThread: vi.fn(),
@@ -330,6 +331,7 @@ function snapshot(
     modelAttemptFailures: [],
     manualCompaction: { available: false, disabledReason: 'not available' },
     stopReceipts: [],
+    unconfirmedExecutions: [],
     ...overrides,
   }
 }
@@ -2176,6 +2178,199 @@ describe('AgentPane orchestration', () => {
     await user.click(composer)
     await user.keyboard('/stop')
     expect(await screen.findByRole('option', { name: /^stop/ })).toHaveAttribute('aria-disabled', 'false')
+  })
+
+  it('shows unconfirmed executions only for a stopped thread and abandons exactly the selected execution', async () => {
+    // 测试意图：STOPPED + 非空事实才展示逐项入口；取消不发请求，确认只发送所选 executionId
+    // 与当前 expectedVersion。成功以返回快照更新投影并刷新执行树，另一项仍保留。
+    const user = userEvent.setup()
+    const firstExecution = {
+      executionId: 'execution-model-1',
+      invocationId: 'invocation-1',
+      attempt: 1,
+      kind: 'MODEL',
+      registeredAt: '2026-01-01T00:00:00.000Z',
+    }
+    const secondExecution = {
+      executionId: 'execution-tool-2',
+      invocationId: 'invocation-2',
+      attempt: 2,
+      kind: 'TOOL',
+      registeredAt: '2026-01-01T00:00:01.000Z',
+    }
+    const initial = snapshot(
+      threadFixture(THREAD_ID, { status: 'IDLE', executionControl: 'STOPPED', version: '7' }),
+      { unconfirmedExecutions: [firstExecution, secondExecution] },
+    )
+    const updated = snapshot(
+      threadFixture(THREAD_ID, { status: 'IDLE', executionControl: 'STOPPED', version: '8' }),
+      { unconfirmedExecutions: [secondExecution] },
+    )
+    vi.mocked(harnessService.getThreadSnapshot)
+      .mockResolvedValueOnce(initial)
+      .mockResolvedValue(updated)
+    vi.mocked(harnessService.abandonExecution).mockResolvedValue(updated)
+    localStorage.setItem(
+      `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
+      JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
+    )
+    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+
+    expect(await screen.findByRole('heading', { name: '未确认退出执行' })).toBeInTheDocument()
+    expect(screen.getByText('类型 MODEL')).toBeInTheDocument()
+    expect(screen.getByText('第 1 次尝试')).toBeInTheDocument()
+    expect(screen.getByText('执行 execution-model-1')).toBeInTheDocument()
+    expect(screen.getByText('类型 TOOL')).toBeInTheDocument()
+    expect(screen.getByText('执行 execution-tool-2')).toBeInTheDocument()
+
+    const firstAbandon = screen.getByRole('button', {
+      name: '放弃等待 MODEL 第 1 次尝试',
+    })
+    await user.click(firstAbandon)
+    const dialog = await screen.findByRole('alertdialog')
+    expect(dialog).toHaveTextContent('执行 execution-model-1 将不再等待退出确认')
+    expect(dialog).toHaveTextContent('不会终止本地或远端执行')
+    expect(dialog).toHaveTextContent('执行可能继续产生副作用，恢复也可能与其重叠')
+
+    await user.click(within(dialog).getByRole('button', { name: '取消' }))
+    expect(harnessService.abandonExecution).not.toHaveBeenCalled()
+    expect(screen.getByText('执行 execution-model-1')).toBeInTheDocument()
+
+    const snapshotCallsBefore = vi.mocked(harnessService.getThreadSnapshot).mock.calls.length
+    const treeCallsBefore = vi.mocked(harnessService.getThreadTree).mock.calls.length
+    await user.click(screen.getByRole('button', {
+      name: '放弃等待 MODEL 第 1 次尝试',
+    }))
+    const confirmDialog = await screen.findByRole('alertdialog')
+    await user.click(within(confirmDialog).getByRole('button', { name: '放弃等待' }))
+
+    await waitFor(() => expect(harnessService.abandonExecution).toHaveBeenCalledTimes(1))
+    expect(harnessService.abandonExecution).toHaveBeenCalledWith(
+      THREAD_ID,
+      'execution-model-1',
+      { expectedVersion: '7' },
+    )
+    await waitFor(() => expect(screen.queryByText('执行 execution-model-1')).not.toBeInTheDocument())
+    expect(screen.getByText('执行 execution-tool-2')).toBeInTheDocument()
+    await waitFor(() => expect(
+      vi.mocked(harnessService.getThreadSnapshot).mock.calls.length,
+    ).toBeGreaterThan(snapshotCallsBefore))
+    await waitFor(() => expect(
+      vi.mocked(harnessService.getThreadTree).mock.calls.length,
+    ).toBeGreaterThan(treeCallsBefore))
+  })
+
+  it('hides unconfirmed executions on a runnable thread or when a stopped thread has no facts', async () => {
+    // 测试意图：未确认退出列表只在 executionControl=STOPPED 且事实非空时出现，
+    // 不把 RUNNABLE 的未知/活跃执行混入。
+    const execution = {
+      executionId: 'execution-runnable',
+      invocationId: 'invocation-runnable',
+      attempt: 1,
+      kind: 'TOOL',
+      registeredAt: '2026-01-01T00:00:00.000Z',
+    }
+    localStorage.setItem(
+      `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
+      JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
+    )
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(threadFixture(THREAD_ID, { executionControl: 'RUNNABLE' }), {
+        unconfirmedExecutions: [execution],
+      }),
+    )
+    const runnable = renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    await waitFor(() => expect(harnessService.getThreadSnapshot).toHaveBeenCalledTimes(1))
+    expect(screen.queryByRole('heading', { name: '未确认退出执行' })).not.toBeInTheDocument()
+    runnable.unmount()
+
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(threadFixture(THREAD_ID, { executionControl: 'STOPPED' }), {
+        unconfirmedExecutions: [],
+      }),
+    )
+    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+    await waitFor(() => expect(harnessService.getThreadSnapshot).toHaveBeenCalledTimes(2))
+    expect(screen.queryByRole('heading', { name: '未确认退出执行' })).not.toBeInTheDocument()
+  })
+
+  it('keeps the unconfirmed execution list and a friendly error when abandoning fails', async () => {
+    // 测试意图：失败不得让事实从界面消失，也不得自动重试危险操作。
+    const user = userEvent.setup()
+    const execution = {
+      executionId: 'execution-failed',
+      invocationId: 'invocation-failed',
+      attempt: 3,
+      kind: 'REMOTE',
+      registeredAt: '2026-01-01T00:00:00.000Z',
+    }
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshot(threadFixture(THREAD_ID, { executionControl: 'STOPPED' }), {
+        unconfirmedExecutions: [execution],
+      }),
+    )
+    vi.mocked(harnessService.abandonExecution).mockRejectedValueOnce(new Error('network down'))
+    localStorage.setItem(
+      `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
+      JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
+    )
+    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+
+    await user.click(await screen.findByRole('button', {
+      name: '放弃等待 REMOTE 第 3 次尝试',
+    }))
+    const dialog = await screen.findByRole('alertdialog')
+    await user.click(within(dialog).getByRole('button', { name: '放弃等待' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('放弃等待失败：network down')
+    expect(screen.getByText('执行 execution-failed')).toBeInTheDocument()
+    expect(harnessService.abandonExecution).toHaveBeenCalledTimes(1)
+  })
+
+  it('refreshes facts on a stale abandon conflict and does not retry automatically', async () => {
+    // 测试意图：409 只回读最新快照与执行树，明确提示用户按新列表重选；
+    // 同一危险操作不得自动重发。
+    const user = userEvent.setup()
+    const execution = {
+      executionId: 'execution-stale',
+      invocationId: 'invocation-stale',
+      attempt: 1,
+      kind: 'MODEL',
+      registeredAt: '2026-01-01T00:00:00.000Z',
+    }
+    vi.mocked(harnessService.getThreadSnapshot)
+      .mockResolvedValueOnce(snapshot(
+        threadFixture(THREAD_ID, { executionControl: 'STOPPED', version: '7' }),
+        { unconfirmedExecutions: [execution] },
+      ))
+      .mockResolvedValue(snapshot(
+        threadFixture(THREAD_ID, { executionControl: 'STOPPED', version: '8' }),
+        { unconfirmedExecutions: [execution] },
+      ))
+    vi.mocked(harnessService.abandonExecution).mockRejectedValueOnce(
+      new ApiError('version changed', 409),
+    )
+    localStorage.setItem(
+      `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
+      JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
+    )
+    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+
+    await user.click(await screen.findByRole('button', {
+      name: '放弃等待 MODEL 第 1 次尝试',
+    }))
+    const dialog = await screen.findByRole('alertdialog')
+    await user.click(within(dialog).getByRole('button', { name: '放弃等待' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('已加载最新快照')
+    expect(harnessService.abandonExecution).toHaveBeenCalledTimes(1)
+    expect(harnessService.abandonExecution).toHaveBeenCalledWith(
+      THREAD_ID,
+      'execution-stale',
+      { expectedVersion: '7' },
+    )
+    await waitFor(() => expect(harnessService.getThreadSnapshot).toHaveBeenCalledTimes(2))
+    expect(screen.getByText('执行 execution-stale')).toBeInTheDocument()
   })
 
   it('keeps a failed draft restore visible with a manual retry that restores the cancelled input', async () => {
@@ -4297,6 +4492,7 @@ describe('AgentPane root control mounting', () => {
       'stopReceipts',
       'thread',
       'toolInvocations',
+      'unconfirmedExecutions',
       'version',
     ])
     expect(seeded?.thread.threadId).toBe(NEW_ROOT_ID)

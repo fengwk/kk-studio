@@ -1,0 +1,69 @@
+.thread-unconfirmed-executions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--danger-border);
+  border-radius: 10px;
+  background: var(--danger-soft);
+}
+
+.thread-unconfirmed-executions-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.thread-unconfirmed-executions-title {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.thread-unconfirmed-executions-hint {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  line-height: 1.5;
+  color: var(--fg-muted);
+}
+
+.thread-unconfirmed-executions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.thread-unconfirmed-executions-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-raised);
+}
+
+.thread-unconfirmed-executions-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  min-width: 0;
+  font-size: var(--font-size-xs);
+  color: var(--fg-muted);
+}
+
+.thread-unconfirmed-executions-facts code {
+  color: var(--fg);
+  font-size: var(--font-size-xs);
+  overflow-wrap: anywhere;
+}
+
+.thread-unconfirmed-executions-error {
+  margin: 0;
+}

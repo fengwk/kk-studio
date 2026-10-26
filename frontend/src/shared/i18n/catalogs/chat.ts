@@ -1025,6 +1025,54 @@ export const chatCatalog = {
     'en-US': 'Stop requested; exit not yet confirmed',
     'zh-CN': '已请求停止，退出尚未确认',
   },
+  'ai.runtime.unconfirmedExecutions.title': {
+    'en-US': 'Unconfirmed executions',
+    'zh-CN': '未确认退出执行',
+  },
+  'ai.runtime.unconfirmedExecutions.hint': {
+    'en-US': 'These executions have not confirmed exit. Abandoning only stops waiting for confirmation; it does not stop local or remote execution.',
+    'zh-CN': '这些执行尚未确认退出。放弃等待只停止等待确认，不会终止本地或远端执行。',
+  },
+  'ai.runtime.unconfirmedExecutions.itemKind': {
+    'en-US': 'Type {{kind}}',
+    'zh-CN': '类型 {{kind}}',
+  },
+  'ai.runtime.unconfirmedExecutions.itemAttempt': {
+    'en-US': 'Attempt {{attempt}}',
+    'zh-CN': '第 {{attempt}} 次尝试',
+  },
+  'ai.runtime.unconfirmedExecutions.itemExecutionId': {
+    'en-US': 'Execution {{executionId}}',
+    'zh-CN': '执行 {{executionId}}',
+  },
+  'ai.runtime.unconfirmedExecutions.abandon': {
+    'en-US': 'Abandon waiting',
+    'zh-CN': '放弃等待',
+  },
+  'ai.runtime.unconfirmedExecutions.abandonItem': {
+    'en-US': 'Abandon waiting for {{kind}} attempt {{attempt}}',
+    'zh-CN': '放弃等待 {{kind}} 第 {{attempt}} 次尝试',
+  },
+  'ai.runtime.unconfirmedExecutions.confirmTitle': {
+    'en-US': 'Abandon waiting for {{kind}} attempt {{attempt}}?',
+    'zh-CN': '放弃等待 {{kind}} 第 {{attempt}} 次尝试？',
+  },
+  'ai.runtime.unconfirmedExecutions.confirmDescription': {
+    'en-US': 'Execution {{executionId}} will no longer be waited on for exit confirmation. This action does not terminate the local or remote execution; it may continue producing side effects, and recovery may overlap with it.',
+    'zh-CN': '执行 {{executionId}} 将不再等待退出确认。此操作不会终止本地或远端执行；执行可能继续产生副作用，恢复也可能与其重叠。',
+  },
+  'ai.runtime.unconfirmedExecutions.confirmAction': {
+    'en-US': 'Abandon waiting',
+    'zh-CN': '放弃等待',
+  },
+  'ai.runtime.unconfirmedExecutions.stale': {
+    'en-US': 'The Thread changed or this execution is no longer unconfirmed. The latest snapshot was loaded; choose again from the current list.',
+    'zh-CN': 'Thread 已变化，或该执行已不再未确认。已加载最新快照，请按当前列表重新选择。',
+  },
+  'ai.runtime.unconfirmedExecutions.failed': {
+    'en-US': 'Failed to abandon waiting: {{error}}',
+    'zh-CN': '放弃等待失败：{{error}}',
+  },
   'ai.runtime.message.stopped': {
     'en-US': 'Stopped',
     'zh-CN': '已停止',

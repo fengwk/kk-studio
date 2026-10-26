@@ -26,7 +26,7 @@ function snapshot(id = ROOT, overrides: Partial<ToolInvocationDTO> = {}): Harnes
         environmentName: 'composer-is-not-the-route', goal: null },
       createTime: 0, updateTime: 0,
     },
-    entries: [], queuedCommands: [], modelInvocation: null, modelAttemptFailures: [], stopReceipts: [],
+    entries: [], queuedCommands: [], modelInvocation: null, modelAttemptFailures: [], stopReceipts: [], unconfirmedExecutions: [],
     manualCompaction: { available: false, disabledReason: null },
     toolInvocations: [{
       id: 'tool', modelInvocationId: 'model', assistantEntryId: 'entry', callIndex: 0,

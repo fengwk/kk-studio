@@ -160,6 +160,7 @@ function snapshotWithPendingTool(targetThreadId: string): HarnessThreadSnapshotD
     modelAttemptFailures: [],
     manualCompaction: { available: true, disabledReason: null },
     stopReceipts: [],
+    unconfirmedExecutions: [],
   }
 }
 
