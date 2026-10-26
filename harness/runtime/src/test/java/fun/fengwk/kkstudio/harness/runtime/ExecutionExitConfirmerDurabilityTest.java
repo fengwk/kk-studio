@@ -33,6 +33,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /** 退出确认的 durable 边界：先落盘 proof、数据库故障保留、重启重放与并发 exactly-once。 */
@@ -182,6 +183,128 @@ class ExecutionExitConfirmerDurabilityTest {
   }
 
   @Test
+  void replayContinuesAfterOneRecordFails(@TempDir Path directory) throws Exception {
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    ExecutionExitFact missing = expected(baseline.threadId(), TestIds.id(7), T0);
+    ExecutionExitFact present = register(store, baseline.threadId(), TestIds.id(8), T0);
+
+    try (FileExecutionExitJournal journal = new FileExecutionExitJournal(directory)) {
+      journal.write(recordFor(missing));
+      journal.write(recordFor(present));
+      ExecutionExitConfirmer confirmer =
+          new ExecutionExitConfirmer(store, journal, Clock.fixed(T0, ZoneOffset.UTC));
+
+      confirmer.replayPending();
+
+      assertEquals(1, journal.loadAll().size());
+      assertEquals(missing.executionId(), journal.loadAll().getFirst().executionId());
+    }
+    ExecutionExitFact confirmed =
+        store.transaction(tx -> tx.findExecution(present.executionId()).orElseThrow());
+    assertEquals(ExecutionExitState.STUDIO_EXITED, confirmed.state());
+  }
+
+  @Test
+  void deleteFailureKeepsProofAndReplayDoesNotAdvanceVersionAgain(@TempDir Path directory) {
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    ExecutionExitFact fact = register(store, baseline.threadId(), TestIds.id(9), T0);
+
+    try (FileExecutionExitJournal delegate = new FileExecutionExitJournal(directory)) {
+      ExecutionExitJournal journal = new FailingDeleteJournal(delegate);
+      ExecutionExitConfirmer confirmer =
+          new ExecutionExitConfirmer(store, journal, Clock.fixed(T0, ZoneOffset.UTC));
+
+      assertEquals(
+          ExecutionExitConfirmer.Outcome.CONFIRMED,
+          confirmer.confirm(fact, ExecutionExitState.STUDIO_EXITED).outcome());
+      assertEquals(1, delegate.loadAll().size());
+      assertEquals(1L, threadVersion(store, baseline.threadId()));
+
+      assertEquals(
+          ExecutionExitConfirmer.Outcome.CONFIRMED,
+          confirmer.confirm(fact, ExecutionExitState.STUDIO_EXITED).outcome());
+      assertTrue(delegate.loadAll().isEmpty());
+      assertEquals(1L, threadVersion(store, baseline.threadId()));
+    }
+  }
+
+  @Test
+  void confirmedStateCannotBeReplacedByDifferentRealEvidence(@TempDir Path directory) {
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    ExecutionExitFact fact = register(store, baseline.threadId(), TestIds.id(10), T0);
+
+    try (FileExecutionExitJournal journal = new FileExecutionExitJournal(directory)) {
+      ExecutionExitConfirmer confirmer =
+          new ExecutionExitConfirmer(store, journal, Clock.fixed(T0, ZoneOffset.UTC));
+      confirmer.confirm(fact, ExecutionExitState.STUDIO_EXITED);
+
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> confirmer.confirm(fact, ExecutionExitState.NOT_STARTED));
+
+      assertEquals(1, journal.loadAll().size());
+      assertEquals(ExecutionExitState.NOT_STARTED, journal.loadAll().getFirst().targetState());
+    }
+    ExecutionExitFact confirmed =
+        store.transaction(tx -> tx.findExecution(fact.executionId()).orElseThrow());
+    assertEquals(ExecutionExitState.STUDIO_EXITED, confirmed.state());
+    assertEquals(1L, threadVersion(store, baseline.threadId()));
+  }
+
+  @Test
+  void journalIdentityConflictIsRetainedWithoutTouchingTheDatabase(@TempDir Path directory) {
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    ExecutionExitFact recorded = expected(baseline.threadId(), TestIds.id(11), T0);
+    ExecutionExitFact conflicting =
+        new ExecutionExitFact(
+            recorded.executionId(),
+            recorded.threadId(),
+            TestIds.id(12),
+            recorded.attempt(),
+            recorded.ownerLeaseToken(),
+            recorded.kind(),
+            recorded.parentExecutionId(),
+            ExecutionExitState.UNCONFIRMED,
+            recorded.registeredAt(),
+            null,
+            null);
+
+    try (FileExecutionExitJournal journal = new FileExecutionExitJournal(directory)) {
+      journal.write(recordFor(recorded));
+      ExecutionExitConfirmer confirmer =
+          new ExecutionExitConfirmer(store, journal, Clock.fixed(T0, ZoneOffset.UTC));
+
+      assertThrows(
+          ExecutionExitJournalException.class,
+          () -> confirmer.confirm(conflicting, ExecutionExitState.STUDIO_EXITED));
+
+      assertEquals(1, journal.loadAll().size());
+      assertEquals(recorded.invocationId(), journal.loadAll().getFirst().invocationId());
+    }
+  }
+
+  @Test
+  void unconfirmedTargetIsRejectedBeforeWritingProof(@TempDir Path directory) {
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    ExecutionExitFact fact = register(store, baseline.threadId(), TestIds.id(13), T0);
+
+    try (FileExecutionExitJournal journal = new FileExecutionExitJournal(directory)) {
+      ExecutionExitConfirmer confirmer =
+          new ExecutionExitConfirmer(store, journal, Clock.fixed(T0, ZoneOffset.UTC));
+
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> confirmer.confirm(fact, ExecutionExitState.UNCONFIRMED));
+      assertTrue(journal.loadAll().isEmpty());
+    }
+  }
+
+  @Test
   void concurrentCallbacksAdvanceVersionExactlyOnce() throws Exception {
     InMemoryHarnessStore store = new InMemoryHarnessStore();
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
@@ -235,6 +358,56 @@ class ExecutionExitConfirmerDurabilityTest {
           return tx.registerExecution(fact);
         });
     return fact;
+  }
+
+  private static long threadVersion(InMemoryHarnessStore store, UUID threadId) {
+    return store.transaction(tx -> tx.findThread(threadId).orElseThrow().version());
+  }
+
+  private static ExecutionExitJournalRecord recordFor(ExecutionExitFact fact) {
+    return new ExecutionExitJournalRecord(
+        fact.executionId(),
+        fact.threadId(),
+        fact.invocationId(),
+        fact.attempt(),
+        fact.ownerLeaseToken(),
+        fact.kind(),
+        fact.parentExecutionId(),
+        ExecutionExitState.STUDIO_EXITED,
+        T0);
+  }
+
+  private static final class FailingDeleteJournal implements ExecutionExitJournal {
+
+    private final ExecutionExitJournal delegate;
+    private final AtomicBoolean failNextDelete = new AtomicBoolean(true);
+
+    private FailingDeleteJournal(ExecutionExitJournal delegate) {
+      this.delegate = delegate;
+    }
+
+    @Override
+    public ExecutionExitJournalRecord write(ExecutionExitJournalRecord record) {
+      return delegate.write(record);
+    }
+
+    @Override
+    public void delete(UUID executionId) {
+      if (failNextDelete.compareAndSet(true, false)) {
+        throw new ExecutionExitJournalException("delete failed");
+      }
+      delegate.delete(executionId);
+    }
+
+    @Override
+    public List<ExecutionExitJournalRecord> loadAll() {
+      return delegate.loadAll();
+    }
+
+    @Override
+    public void close() {
+      delegate.close();
+    }
   }
 
   private static ExecutionExitFact expected(

@@ -61,6 +61,8 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
   public FileExecutionExitJournal(Path directory) {
     this.directory = Objects.requireNonNull(directory, "directory").toAbsolutePath();
     createDirectory();
+    FileChannel channel = null;
+    FileLock acquired = null;
     try {
       Path lockPath = this.directory.resolve(LOCK_FILE);
       if (Files.isSymbolicLink(lockPath)
@@ -69,25 +71,28 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
         throw new ExecutionExitJournalException(
             "execution exit journal lock is not a regular file: " + lockPath);
       }
-      this.lockChannel =
-          FileChannel.open(lockPath, StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+      channel = FileChannel.open(lockPath, StandardOpenOption.CREATE, StandardOpenOption.WRITE);
       setFilePermissions(lockPath);
       try {
-        this.lock = lockChannel.tryLock();
+        acquired = channel.tryLock();
       } catch (OverlappingFileLockException error) {
-        closeQuietly(lockChannel);
         throw new ExecutionExitJournalException(
             "execution exit journal directory is already locked: " + this.directory, error);
       }
-      if (lock == null) {
-        closeQuietly(lockChannel);
+      if (acquired == null) {
         throw new ExecutionExitJournalException(
             "execution exit journal directory is already locked: " + this.directory);
       }
-    } catch (IOException error) {
+    } catch (IOException | RuntimeException error) {
+      closeAfterConstructorFailure(acquired, channel, error);
+      if (error instanceof ExecutionExitJournalException journalError) {
+        throw journalError;
+      }
       throw new ExecutionExitJournalException(
           "cannot lock execution exit journal directory: " + this.directory, error);
     }
+    this.lockChannel = channel;
+    this.lock = acquired;
   }
 
   @Override
@@ -99,12 +104,15 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
       ExecutionExitJournalRecord existing = readIfPresent(target);
       if (existing != null) {
         if (existing.sameIdentity(record) && existing.targetState() == record.targetState()) {
+          forceDirectoryForWrite();
           return existing;
         }
         throw new ExecutionExitJournalException(
             "execution exit journal identity or target conflict for " + record.executionId());
       }
       Path temporary = directory.resolve("." + UUID.randomUUID() + ".tmp");
+      boolean moved = false;
+      Throwable failure = null;
       try {
         writeDurably(temporary, encode(record));
         try {
@@ -115,13 +123,24 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
         } catch (AtomicMoveNotSupportedException error) {
           throw new ExecutionExitJournalException(
               "execution exit journal does not support atomic rename", error);
+        } catch (IOException error) {
+          throw new ExecutionExitJournalException(
+              "cannot persist execution exit journal entry for " + record.executionId(), error);
         }
-        forceDirectory();
+        moved = true;
+        forceDirectoryForWrite();
         return record;
-      } catch (IOException error) {
-        deleteQuietly(temporary);
+      } catch (IOException | RuntimeException error) {
+        failure = error;
+        if (error instanceof ExecutionExitJournalException journalError) {
+          throw journalError;
+        }
         throw new ExecutionExitJournalException(
             "cannot persist execution exit journal entry for " + record.executionId(), error);
+      } finally {
+        if (!moved) {
+          deleteTemporary(temporary, failure);
+        }
       }
     }
   }
@@ -179,15 +198,28 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
       if (closed) {
         return;
       }
-      closed = true;
+      Throwable failure = null;
       if (lock != null && lock.isValid()) {
         try {
           lock.release();
-        } catch (IOException ignored) {
-          // 关闭路径不再产生新的持久化事实；通道关闭会一并释放锁。
+        } catch (IOException error) {
+          failure = error;
         }
       }
-      closeQuietly(lockChannel);
+      try {
+        lockChannel.close();
+      } catch (IOException error) {
+        if (failure == null) {
+          failure = error;
+        } else {
+          failure.addSuppressed(error);
+        }
+      }
+      closed = true;
+      if (failure != null) {
+        throw new ExecutionExitJournalException(
+            "cannot close execution exit journal directory: " + directory, failure);
+      }
     }
   }
 
@@ -335,6 +367,15 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
     }
   }
 
+  private void forceDirectoryForWrite() {
+    try {
+      forceDirectory();
+    } catch (IOException error) {
+      throw new ExecutionExitJournalException(
+          "cannot force execution exit journal directory", error);
+    }
+  }
+
   private void forceDirectory() throws IOException {
     try (FileChannel channel = FileChannel.open(directory, StandardOpenOption.READ)) {
       channel.force(true);
@@ -359,22 +400,31 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
     }
   }
 
-  private static void deleteQuietly(Path path) {
+  private static void deleteTemporary(Path path, Throwable primary) {
     try {
       Files.deleteIfExists(path);
-    } catch (IOException ignored) {
-      // 临时文件残留不影响已提交事实；下次写入会使用新的 UUID 文件名。
+    } catch (IOException cleanup) {
+      if (primary != null) {
+        primary.addSuppressed(cleanup);
+      }
     }
   }
 
-  private static void closeQuietly(FileChannel channel) {
-    if (channel == null) {
-      return;
+  private static void closeAfterConstructorFailure(
+      FileLock acquired, FileChannel channel, Throwable primary) {
+    if (acquired != null && acquired.isValid()) {
+      try {
+        acquired.release();
+      } catch (IOException cleanup) {
+        primary.addSuppressed(cleanup);
+      }
     }
-    try {
-      channel.close();
-    } catch (IOException ignored) {
-      // 关闭失败没有可恢复动作。
+    if (channel != null) {
+      try {
+        channel.close();
+      } catch (IOException cleanup) {
+        primary.addSuppressed(cleanup);
+      }
     }
   }
 }
