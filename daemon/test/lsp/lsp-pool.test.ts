@@ -456,7 +456,7 @@ describe('LspClientPool Concurrency & Lifecycle', () => {
     await pool.close()
   })
 
-  it('keeps the key closed and never confirms a start rejection that was not converged', async () => {
+  it('keeps the key closed and confirms only the new lease rejected by an unconverged start', async () => {
     const server = fakeServerConfig('java', 'normal', path.join(tempDir, 'unconverged-start.jsonl'))
     const startFailure = new ProcessScopeNotConvergedError('spawn cleanup could not be proven')
     let starts = 0
@@ -472,19 +472,24 @@ describe('LspClientPool Concurrency & Lifecycle', () => {
     const file = path.join(tempDir, 'App.java')
     fs.writeFileSync(file, 'class App {}\n')
 
-    let exits = 0
+    let ownerExits = 0
     const first = await pool.lease(file, undefined, () => {
-      exits += 1
+      ownerExits += 1
     }).catch((error: unknown) => error)
     expect(first).toBeInstanceOf(LspBootstrapError)
     expect((first as LspBootstrapError).converged).toBe(false)
     expect((first as LspBootstrapError).cause).toBe(startFailure)
+    // 原失败启动的参与者没有正向收敛证据，不能确认。
+    expect(ownerExits).toBe(0)
+
+    let rejectedExits = 0
     const second = await pool.lease(file, undefined, () => {
-      exits += 1
+      rejectedExits += 1
     }).catch((error: unknown) => error)
     expect(second).toBe(first)
+    // 新调用没有加入旧启动，直接拒绝即可确认其目标从未发出。
+    expect(rejectedExits).toBe(1)
     expect(starts).toBe(1)
-    expect(exits).toBe(0)
     const cleanup = await expectPoolCloseFailure(pool)
     // 关闭失败保留的仍是未收敛的 typed bootstrap 失败本身。
     expect(cleanup.failures[0]).toBe(first)
@@ -978,7 +983,10 @@ describe('LspClientPool Concurrency & Lifecycle', () => {
     const javaFile = path.join(tempDir, 'App.java')
     fs.writeFileSync(javaFile, 'class App {}\n')
 
-    const entry = await pool.lease(javaFile)
+    let ownerExits = 0
+    const entry = await pool.lease(javaFile, undefined, () => {
+      ownerExits += 1
+    })
     const started = Promise.withResolvers<void>()
     const originalStop = entry.client.stop.bind(entry.client)
     let stopFailure: unknown
@@ -996,24 +1004,174 @@ describe('LspClientPool Concurrency & Lifecycle', () => {
     // 空闲回收的终止失败：退休登记必须保留，等待者与后续租约共享同一条失败。
     await started.promise
     expect(pool.activeCount()).toBe(0)
-    const first = await pool.lease(javaFile).then(
+    let rejectedExits = 0
+    const first = await pool.lease(javaFile, undefined, () => {
+      rejectedExits += 1
+    }).then(
       () => null,
       (error: unknown) => error,
     )
     expect(first).toBeInstanceOf(Error)
     expect(first).toBe(stopFailure)
-    const second = await pool.lease(javaFile).then(
+    // 新调用未参与旧客户端的启动，旧退休失败不能阻止它确认目标从未发出。
+    expect(rejectedExits).toBe(1)
+    const second = await pool.lease(javaFile, undefined, () => {
+      rejectedExits += 1
+    }).then(
       () => null,
       (error: unknown) => error,
     )
     // 同一条失败对象：既没有替换登记，也绝没有为同一个 key 启动第二个服务器。
     expect(second).toBe(first)
+    expect(rejectedExits).toBe(2)
+    expect(ownerExits).toBe(0)
     expect(readEvents(transcript).filter((e) => e.event === 'start')).toHaveLength(1)
     expect(stop).toHaveBeenCalledTimes(1)
     const cleanup = await expectPoolCloseFailure(pool)
     // 退休失败作为 typed cause 保留，而不是只剩一个计数。
     expect(cleanup.failures).toContain(stopFailure)
     stop.mockRestore()
+  })
+
+  it.each([
+    ['cancellation', undefined],
+    ['timeout', 'TIMED_OUT'],
+  ] as const)(
+    'confirms a %s retirement wait once without depending on the old stop',
+    async (mode, reason) => {
+      const transcript = path.join(tempDir, `retirement-wait-${mode}.jsonl`)
+      const server = fakeServerConfig('java', 'normal', transcript)
+      const stopStarted = Promise.withResolvers<void>()
+      const stopGate = Promise.withResolvers<void>()
+      const gated: ProcessSupervisor = {
+        start: async (spec) => {
+          const managed = await supervisor.start(spec)
+          return {
+            ...managed,
+            terminate: async (graceMillis?: number) => {
+              stopStarted.resolve()
+              await stopGate.promise
+              await managed.terminate(graceMillis)
+            },
+          }
+        },
+        close: () => supervisor.close(),
+      }
+      const pool = new LspClientPool(LspDiscovery.of([server]), gated, {
+        idleTimeout: 50,
+        shutdownGrace: 200,
+      })
+      pools.push(pool)
+      const file = path.join(tempDir, 'App.java')
+      fs.writeFileSync(file, 'class App {}\n')
+      let ownerExits = 0
+      let waiterExits = 0
+      const controller = new AbortController()
+      let pid: number | undefined
+      try {
+        const entry = await pool.lease(file, undefined, () => {
+          ownerExits += 1
+        })
+        pid = (await awaitEvent(transcript, (event) => event.event === 'start')).pid
+        pool.release(entry)
+        // 真实 idle 计时触发 stop；显式 gate 保证检查时退休仍在进行，不靠固定 sleep。
+        await stopStarted.promise
+        const pending = pool.lease(file, controller.signal, () => {
+          waiterExits += 1
+        }).catch((error: unknown) => error)
+        controller.abort(reason)
+        const failure = await pending
+        if (reason === 'TIMED_OUT') {
+          expect(failure).toBeInstanceOf(LspTimeoutError)
+          expect((failure as Error).message).toBe('Operation timed out')
+        } else {
+          expect(failure).toBeInstanceOf(Error)
+          expect((failure as Error).name).toBe('AbortError')
+          expect((failure as Error).message).toBe('Operation cancelled')
+        }
+        // 本次租约尚未启动或接管进程，旧 stop 是否完成不改变这次确认。
+        expect(waiterExits).toBe(1)
+        expect(ownerExits).toBe(0)
+        expect(readEvents(transcript).filter((event) => event.event === 'start')).toHaveLength(1)
+      } finally {
+        stopGate.resolve()
+      }
+      expect(pid).toBeDefined()
+      await awaitProcessGone(pid!)
+      await vi.waitFor(() => expect((pool as any).retiring.size).toBe(0))
+      // 旧 retire 完成后不得再次回调，也不得回头确认原 owner。
+      expect(waiterExits).toBe(1)
+      expect(ownerExits).toBe(0)
+      expect(readEvents(transcript).filter((event) => event.event === 'start')).toHaveLength(1)
+    },
+  )
+
+  it('keeps the old owner unconfirmed when retirement stop fails and confirms only the new lease', async () => {
+    const transcript = path.join(tempDir, 'retirement-wait-fail.jsonl')
+    const server = fakeServerConfig('java', 'normal', transcript)
+    const stopStarted = Promise.withResolvers<void>()
+    const stopGate = Promise.withResolvers<void>()
+    const terminateFailure = new Error('retirement terminate boom')
+    const gated: ProcessSupervisor = {
+      start: async (spec) => {
+        const managed = await supervisor.start(spec)
+        return {
+          ...managed,
+          terminate: async () => {
+            stopStarted.resolve()
+            await stopGate.promise
+            throw terminateFailure
+          },
+        }
+      },
+      close: () => supervisor.close(),
+    }
+    const pool = new LspClientPool(LspDiscovery.of([server]), gated, {
+      idleTimeout: 50,
+      shutdownGrace: 100,
+    })
+    pools.push(pool)
+    const file = path.join(tempDir, 'App.java')
+    fs.writeFileSync(file, 'class App {}\n')
+    let ownerExits = 0
+    let rejectedExits = 0
+    let pending!: Promise<unknown>
+    try {
+      const entry = await pool.lease(file, undefined, () => {
+        ownerExits += 1
+      })
+      await awaitEvent(transcript, (event) => event.event === 'start')
+      pool.release(entry)
+      await stopStarted.promise
+      pending = pool.lease(file, undefined, () => {
+        rejectedExits += 1
+      }).catch((error: unknown) => error)
+      // 旧退休尚未收敛：新调用只能等待，不能启动第二个服务器，也不能提前确认。
+      await new Promise<void>((resolve) => setImmediate(resolve))
+      expect(rejectedExits).toBe(0)
+      expect(readEvents(transcript).filter((event) => event.event === 'start')).toHaveLength(1)
+    } finally {
+      stopGate.resolve()
+    }
+
+    const failure = await pending
+    expect(failure).toBeInstanceOf(LspError)
+    expect((failure as Error).message).toContain('termination failed')
+    expect((failure as Error).cause).toBe(terminateFailure)
+    // 新调用没有加入旧启动，旧 stop 失败不能阻止它确认目标从未发出；原 owner 仍不确认。
+    expect(rejectedExits).toBe(1)
+    expect(ownerExits).toBe(0)
+
+    let directExits = 0
+    await expect(pool.lease(file, undefined, () => {
+      directExits += 1
+    })).rejects.toBe(failure)
+    expect(directExits).toBe(1)
+    expect(ownerExits).toBe(0)
+    expect(readEvents(transcript).filter((event) => event.event === 'start')).toHaveLength(1)
+    const cleanup = await expectPoolCloseFailure(pool)
+    // 旧 stop 失败仍保留为 close 的 typed cause，没有被新调用的确认覆盖。
+    expect(cleanup.failures).toContain(failure)
   })
 
   it('keeps a key closed when a failed boot could not be proven cleaned up', async () => {
@@ -1033,9 +1191,9 @@ describe('LspClientPool Concurrency & Lifecycle', () => {
     const javaFile = path.join(tempDir, 'App.java')
     fs.writeFileSync(javaFile, 'class App {}\n')
 
-    let exits = 0
+    let ownerExits = 0
     const first = await pool.lease(javaFile, undefined, () => {
-      exits += 1
+      ownerExits += 1
     }).then(
       () => null,
       (error: unknown) => error,
@@ -1043,15 +1201,19 @@ describe('LspClientPool Concurrency & Lifecycle', () => {
     expect(first).toBeInstanceOf(LspBootstrapError)
     expect((first as Error).message).toContain('startup failed and cleanup failed')
     expect((first as LspBootstrapError).cause).toBeInstanceOf(AggregateError)
-    // 清理没能证明收敛：旧实例可能仍然存活，同一个 key 的后续租约必须共享同一条失败。
+    // 清理没能证明收敛：原失败启动的参与者不能确认。
+    expect(ownerExits).toBe(0)
+
+    let rejectedExits = 0
     const second = await pool.lease(javaFile, undefined, () => {
-      exits += 1
+      rejectedExits += 1
     }).then(
       () => null,
       (error: unknown) => error,
     )
     expect(second).toBe(first)
-    expect(exits).toBe(0)
+    // 新调用没有加入旧启动，直接拒绝即可确认其目标从未发出。
+    expect(rejectedExits).toBe(1)
     expect(readEvents(transcript).filter((e) => e.event === 'start')).toHaveLength(1)
     const cleanup = await expectPoolCloseFailure(pool)
     expect(cleanup.failures[0]).toBeInstanceOf(LspError)
@@ -1069,7 +1231,10 @@ describe('LspClientPool Concurrency & Lifecycle', () => {
     const file = path.join(tempDir, 'App.java')
     fs.writeFileSync(file, 'class App {}\n')
     const controller = new AbortController()
-    const first = pool.lease(file, controller.signal).catch((error: unknown) => error)
+    let ownerExits = 0
+    const first = pool.lease(file, controller.signal, () => {
+      ownerExits += 1
+    }).catch((error: unknown) => error)
     await awaitEvent(transcript, (event) => event.event === 'recv' && event.message?.method === 'initialize')
     controller.abort('TIMED_OUT')
 
@@ -1077,7 +1242,14 @@ describe('LspClientPool Concurrency & Lifecycle', () => {
     const failure = await first
     expect(failure).toBeInstanceOf(LspBootstrapError)
     expect((failure as Error).message).toContain('cleanup failed')
-    await expect(pool.lease(file)).rejects.toBe(failure)
+    expect(ownerExits).toBe(0)
+    let rejectedExits = 0
+    await expect(pool.lease(file, undefined, () => {
+      rejectedExits += 1
+    })).rejects.toBe(failure)
+    // 新调用未加入启动；直接拒绝只确认它自己，不确认原失败启动的参与者。
+    expect(rejectedExits).toBe(1)
+    expect(ownerExits).toBe(0)
     expect(readEvents(transcript).filter((event) => event.event === 'start')).toHaveLength(1)
     await expectPoolCloseFailure(pool)
   })
@@ -1124,18 +1296,24 @@ describe('LspClientPool Concurrency & Lifecycle', () => {
 
     const ac1 = new AbortController()
     const ac2 = new AbortController()
+    let ownerExits = 0
+    let waitingLeaseExits = 0
 
     try {
       // 首个 waiter 取消后，旧进程的清理门禁阻止 boot 提前收敛。
-      const p1 = pool.lease(file, ac1.signal).catch((err: unknown) => err)
+      const p1 = pool.lease(file, ac1.signal, () => {
+        ownerExits += 1
+      }).catch((err: unknown) => err)
       await awaitEvent(transcript, (event) => event.event === 'recv' && event.message?.method === 'initialize')
       ac1.abort()
       await terminateStartedGate.promise
       expect(terminateStarted).toBe(true)
 
-      // 新 waiter 等待旧 boot 的清理，但它自身取消不必等共享清理门禁。
+      // 新 waiter 尚未加入旧 boot；它取消时直接确认本次未启动，不挂靠旧 boot 的清理。
       let p2Settled = false
-      const p2 = pool.lease(file, ac2.signal).catch((err: unknown) => {
+      const p2 = pool.lease(file, ac2.signal, () => {
+        waitingLeaseExits += 1
+      }).catch((err: unknown) => {
         p2Settled = true
         return err
       })
@@ -1146,6 +1324,8 @@ describe('LspClientPool Concurrency & Lifecycle', () => {
       expect(err2).toBeInstanceOf(Error)
       expect((err2 as Error).name).toBe('AbortError')
       expect(p2Settled).toBe(true)
+      expect(waitingLeaseExits).toBe(1)
+      expect(ownerExits).toBe(0)
 
       let p1Settled = false
       void p1.then(() => {
@@ -1159,6 +1339,9 @@ describe('LspClientPool Concurrency & Lifecycle', () => {
       const err1 = await p1
       expect(err1).toBeInstanceOf(Error)
       expect((err1 as Error).name).toBe('AbortError')
+      // 原 boot 参与者只在清理成功的正向证据出现后确认一次。
+      expect(ownerExits).toBe(1)
+      expect(waitingLeaseExits).toBe(1)
 
       // 旧进程必须退出
       if (oldPid !== null) {
