@@ -1,13 +1,12 @@
 package fun.fengwk.kkstudio.harness.runtime.execution;
 
-import java.util.List;
 import java.util.UUID;
 
 /**
  * 退出确认 write-ahead journal 的最小端口。
  *
- * <p>{@link #write} 必须在数据库确认事务提交之前完成并持久化；{@link #delete} 只在确认与结算提交之后调用。读取失败或记录身份冲突必须
- * fail-closed，不得删除原记录。
+ * <p>{@link #write} 必须在数据库确认事务提交之前完成并持久化；{@link #delete} 只在确认与结算提交之后调用。读取不得删除或覆盖无法解码、
+ * 身份不符或类型异常的文件：逐文件失败进入快照，健康记录仍可重放；目录本身无法枚举或 journal 已关闭时整体失败。
  */
 public interface ExecutionExitJournal extends AutoCloseable {
 
@@ -17,8 +16,8 @@ public interface ExecutionExitJournal extends AutoCloseable {
   /** 删除一条已完成的记录；不存在时幂等成功。 */
   void delete(UUID executionId);
 
-  /** 读取全部待重放记录；损坏或身份冲突必须抛 {@link ExecutionExitJournalException}。 */
-  List<ExecutionExitJournalRecord> loadAll();
+  /** 读取健康记录与逐文件失败；目录无法枚举或 journal 已关闭时抛 {@link ExecutionExitJournalException}。 */
+  ExecutionExitJournalSnapshot loadAll();
 
   @Override
   void close();
