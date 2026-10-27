@@ -196,29 +196,32 @@ describe('mux metadata validation', () => {
 
   it('detects duplicate, unknown and missing keys and malformed JSON', () => {
     const duplicate = Buffer.from('{"code":"A","code":"B","message":"x"}')
-    expect(() => decodeFrame(rawFrame(FRAME_RESET, 1, duplicate))).toThrow(/duplicate key/)
+    expect(() => decodeFrame(rawFrame(FRAME_RESET, 1, duplicate))).toThrow(/duplicate field/)
+    const escapedDuplicate = Buffer.from('{"code":"A","\\u0063ode":"B","message":"x"}')
+    expect(() => decodeFrame(rawFrame(FRAME_RESET, 1, escapedDuplicate))).toThrow(/duplicate field/)
     expect(() => decodeFrame(rawFrame(FRAME_RESET, 1, metadata({ code: 'A', message: 'x', extra: 1 })))).toThrow(
       /unknown field/,
     )
     expect(() => decodeFrame(rawFrame(FRAME_RESET, 1, metadata({ code: 'A' })))).toThrow(/missing field/)
     expect(() => decodeFrame(rawFrame(FRAME_RESET, 1, Buffer.from('"x"')))).toThrow(/JSON object/)
-    expect(() => decodeFrame(rawFrame(FRAME_RESET, 1, Buffer.from('{"code":}')))).toThrow(/invalid JSON/)
-    expect(() => decodeFrame(rawFrame(FRAME_RESET, 1, Buffer.from('{"code":"A" "message":"x"}')))).toThrow(/colon|comma/)
-    expect(() => decodeFrame(rawFrame(FRAME_RESET, 1, Buffer.from('{"code" "A","message":"x"}')))).toThrow(/colon/)
-    expect(() => decodeFrame(rawFrame(FRAME_RESET, 1, Buffer.from('{"code":"A","message":[1 2]}')))).toThrow(/comma/)
-    expect(() => decodeFrame(rawFrame(FRAME_RESET, 1, Buffer.from('{"code":"A","message":"\\q"}')))).toThrow(/escape/)
-    expect(() => decodeFrame(rawFrame(FRAME_RESET, 1, Buffer.from('{"code":"A","message":"\\u12"}')))).toThrow(
-      /unicode escape/,
-    )
-    expect(() => decodeFrame(rawFrame(FRAME_RESET, 1, Buffer.from('{"code":"A","message":"\n"}')))).toThrow(
-      /control character/,
-    )
-    expect(() => decodeFrame(rawFrame(FRAME_RESET, 1, Buffer.from('{"code":"A","message":[1,]}')))).toThrow(
-      /invalid JSON|comma/,
-    )
-    expect(() => decodeFrame(rawFrame(FRAME_RESET, 1, Buffer.from('{"code":"A","message":1e999}')))).toThrow(/not finite/)
-    expect(() => decodeFrame(rawFrame(FRAME_RESET, 1, Buffer.from('{"code":"A","message":tru}')))).toThrow(/invalid JSON/)
-    expect(() => decodeFrame(rawFrame(FRAME_OPEN, 1, Buffer.from('['.repeat(40))))).toThrow(/nested|invalid/)
+    for (const malformed of [
+      '{"code":}',
+      '{"code":"A" "message":"x"}',
+      '{"code" "A","message":"x"}',
+      '{"code":"A","message":[1 2]}',
+      '{"code":"A","message":"\\q"}',
+      '{"code":"A","message":"\\u12"}',
+      '{"code":"A","message":"\n"}',
+      '{"code":"A","message":[1,]}',
+      '{"code":"A","message":tru}',
+    ]) {
+      expect(() => decodeFrame(rawFrame(FRAME_RESET, 1, Buffer.from(malformed)))).toThrow(/valid JSON/)
+    }
+    expect(() => decodeFrame(rawFrame(FRAME_RESET, 1, Buffer.from('{"code":"A","message":1e999}')))).toThrow(/non-finite/)
+    expect(() =>
+      decodeFrame(rawFrame(FRAME_RESET, 1, Buffer.from(`{"code":"A","message":${'1'.repeat(65)}}`))),
+    ).toThrow(/number token exceeds/)
+    expect(() => decodeFrame(rawFrame(FRAME_OPEN, 1, Buffer.from('['.repeat(40))))).toThrow(/nesting depth/)
   })
 
   it('validates every OPEN field and its bounds', () => {
@@ -372,6 +375,6 @@ describe('strict metadata parser completeness', () => {
     )
     expect(() => decodeFrame('nope' as never)).toThrow(/Uint8Array/)
     const lowSurrogate = Buffer.from('{"code":"A","message":"\\udc00"}', 'utf8')
-    expect(() => decodeFrame(rawFrame(FRAME_RESET, 1, lowSurrogate))).toThrow(/unpaired/)
+    expect(() => decodeFrame(rawFrame(FRAME_RESET, 1, lowSurrogate))).toThrow(/valid Unicode/)
   })
 })
