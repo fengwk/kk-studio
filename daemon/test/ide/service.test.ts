@@ -604,6 +604,7 @@ describe('managed code-server IDE service', () => {
           body += frame.payload.toString('utf8')
         } else if (frame.kind === 'http-end') {
           ended = true
+          socket.close(1000)
         }
       })
     })

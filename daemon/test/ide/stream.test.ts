@@ -9,7 +9,7 @@ import {
 } from 'node:http'
 import { createHash } from 'node:crypto'
 import type { AddressInfo, Socket } from 'node:net'
-import { WebSocketServer, WebSocket } from 'ws'
+import { WebSocketServer, WebSocket, type RawData } from 'ws'
 import { getOutboundNetwork } from '../../src/network.js'
 import { openStreamExchange } from '../../src/transport/stream.js'
 import { UpstreamWebSocket } from '../../src/transport/upstream-websocket.js'
@@ -168,7 +168,21 @@ interface Gateway {
   sendRaw(data: Buffer): void
 }
 
-async function startGateway(onConnection: (gateway: Gateway) => void): Promise<Harness> {
+interface GatewayOptions {
+  /** Behave like the Java data plane: after consuming the response END, close the stream normally. */
+  closeAfterEnd?: boolean
+}
+
+/** The daemon's one byte HTTP END wire frame. */
+function isHttpEndFrame(data: RawData, isBinary: boolean): boolean {
+  if (!isBinary) {
+    return false
+  }
+  const payload = Buffer.isBuffer(data) ? data : Array.isArray(data) ? Buffer.concat(data) : Buffer.from(data)
+  return payload.length === 1 && payload[0] === 2
+}
+
+async function startGateway(onConnection: (gateway: Gateway) => void, options: GatewayOptions = {}): Promise<Harness> {
   const server = createServer()
   const port = await listen(server)
   const wss = new WebSocketServer({ server })
@@ -183,6 +197,14 @@ async function startGateway(onConnection: (gateway: Gateway) => void): Promise<H
       sendRaw: (data) => socket.send(data),
     }
     onConnection(gateway)
+    if (options.closeAfterEnd ?? true) {
+      // Install after the test listener so its assertions observe the consumed END before the close.
+      socket.on('message', (data, isBinary) => {
+        if (isHttpEndFrame(data, isBinary)) {
+          socket.close(1000)
+        }
+      })
+    }
   })
   const harness = {
     url: `ws://127.0.0.1:${port}/api/harness/environment-stream/v1/ticket`,
@@ -910,6 +932,216 @@ describe('HTTP exchanges over the reverse stream', () => {
     await waitFor(() => ended)
     expect(seenCookie).toBe('code-server-session=private')
     expect(seenAuthorization).toBeUndefined()
+  })
+
+  it.each([
+    { closeFirst: false, writeFails: false },
+    { closeFirst: true, writeFails: false },
+    { closeFirst: true, writeFails: true },
+  ])('waits for END flush and Studio close ($closeFirst, write failure $writeFails)', async ({ closeFirst, writeFails }) => {
+    const upstream = await startHttpUpstream((_req, res) => {
+      res.writeHead(200)
+      res.end('ok')
+    })
+    let studioSocket: WebSocket | undefined
+    let markEndReceived!: () => void
+    const endReceived = new Promise<void>((resolve) => {
+      markEndReceived = resolve
+    })
+    const gateway = await startGateway(
+      (conn) => {
+        studioSocket = conn.socket
+        conn.socket.on('message', (data, isBinary) => {
+          if (isHttpEndFrame(data, isBinary)) {
+            markEndReceived()
+          }
+        })
+      },
+      { closeAfterEnd: false },
+    )
+
+    let endCallback: ((error?: Error) => void) | undefined
+    let markClientClosed!: () => void
+    const clientClosed = new Promise<void>((resolve) => {
+      markClientClosed = resolve
+    })
+    let markCallbackCaptured!: () => void
+    const callbackCaptured = new Promise<void>((resolve) => {
+      markCallbackCaptured = resolve
+    })
+    const originalSend = WebSocket.prototype.send
+    const sendSpy = vi
+      .spyOn(WebSocket.prototype, 'send')
+      .mockImplementation(function (this: WebSocket, data: Parameters<WebSocket['send']>[0], ...rest: unknown[]): void {
+        const callback = rest.find((value): value is (error?: Error) => void => typeof value === 'function')
+        if (Buffer.isBuffer(data) && data.length === 1 && data[0] === 2) {
+          endCallback = callback
+          this.once('close', markClientClosed)
+          markCallbackCaptured()
+          // Write END but withhold its completion callback until the test releases it.
+          Reflect.apply(originalSend, this, [data])
+          return
+        }
+        Reflect.apply(originalSend, this, [data, ...rest])
+      })
+
+    try {
+      let settled = false
+      const exchange = openStreamExchange({
+        streamUrl: gateway.url,
+        request: { mode: 'HTTP', method: 'GET', path: '/', headers: [] },
+        upstream: upstreamOf(upstream.url),
+        signal: newSignal().signal,
+      })
+      void exchange.then(
+        () => {
+          settled = true
+        },
+        () => {
+          settled = true
+        },
+      )
+
+      await callbackCaptured
+      await endReceived
+      expect(endCallback).toBeTypeOf('function')
+      expect(settled).toBe(false)
+
+      if (closeFirst) {
+        studioSocket?.close(1000)
+        await clientClosed
+        expect(settled).toBe(false)
+      }
+      endCallback?.(writeFails ? new Error('synthetic END write failure') : undefined)
+      if (writeFails) {
+        await expect(exchange).rejects.toThrow(/stream end write failed/)
+        return
+      }
+      await new Promise<void>((resolve) => setImmediate(resolve))
+      if (!closeFirst) {
+        // END is flushed, but the Studio has not confirmed consumption by closing.
+        expect(settled).toBe(false)
+        studioSocket?.close(1000)
+      }
+      await expect(exchange).resolves.toBeUndefined()
+      expect(settled).toBe(true)
+    } finally {
+      sendSpy.mockRestore()
+    }
+  })
+
+  it('rejects a normal studio close before the response END', async () => {
+    const upstream = await startHttpUpstream((_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/plain' })
+      // Keep the response open so no END can be written before the Studio closes.
+      res.write('partial')
+    })
+    const gateway = await startGateway(
+      (conn) => {
+        conn.socket.on('message', (data, isBinary) => {
+          if (!isBinary && decodeTextFrame(data.toString('utf8')).type === 'HTTP_RESPONSE') {
+            conn.socket.close(1000)
+          }
+        })
+      },
+      { closeAfterEnd: false },
+    )
+
+    await expect(
+      openStreamExchange({
+        streamUrl: gateway.url,
+        request: { mode: 'HTTP', method: 'GET', path: '/', headers: [] },
+        upstream: upstreamOf(upstream.url),
+        signal: newSignal().signal,
+      }),
+    ).rejects.toThrow(/stream closed before response end/)
+  })
+
+  it('rejects an abnormal studio close after the response END', async () => {
+    const upstream = await startHttpUpstream((_req, res) => {
+      res.writeHead(200)
+      res.end('ok')
+    })
+    let studioSocket: WebSocket | undefined
+    let markEndReceived!: () => void
+    const endReceived = new Promise<void>((resolve) => {
+      markEndReceived = resolve
+    })
+    const gateway = await startGateway(
+      (conn) => {
+        studioSocket = conn.socket
+        conn.socket.on('message', (data, isBinary) => {
+          if (isHttpEndFrame(data, isBinary)) {
+            markEndReceived()
+          }
+        })
+      },
+      { closeAfterEnd: false },
+    )
+
+    const exchange = openStreamExchange({
+      streamUrl: gateway.url,
+      request: { mode: 'HTTP', method: 'GET', path: '/', headers: [] },
+      upstream: upstreamOf(upstream.url),
+      signal: newSignal().signal,
+    })
+    await endReceived
+    studioSocket?.close(1011, 'studio failed')
+    await expect(exchange).rejects.toThrow(/stream socket closed abnormally/)
+  })
+
+  it('fails when the response END write reports an error', async () => {
+    const upstream = await startHttpUpstream((_req, res) => {
+      res.writeHead(200)
+      res.end('ok')
+    })
+    const gateway = await startGateway(() => undefined)
+    const originalSend = WebSocket.prototype.send
+    const sendSpy = vi
+      .spyOn(WebSocket.prototype, 'send')
+      .mockImplementation(function (this: WebSocket, data: Parameters<WebSocket['send']>[0], ...rest: unknown[]): void {
+        const callback = rest.find((value): value is (error?: Error) => void => typeof value === 'function')
+        if (Buffer.isBuffer(data) && data.length === 1 && data[0] === 2) {
+          callback?.(new Error('end write failed'))
+          return
+        }
+        Reflect.apply(originalSend, this, [data, ...rest])
+      })
+
+    try {
+      await expect(
+        openStreamExchange({
+          streamUrl: gateway.url,
+          request: { mode: 'HTTP', method: 'GET', path: '/', headers: [] },
+          upstream: upstreamOf(upstream.url),
+          signal: newSignal().signal,
+        }),
+      ).rejects.toThrow(/stream end write failed/)
+    } finally {
+      sendSpy.mockRestore()
+    }
+  })
+
+  it('fails when the stream socket errors after opening', async () => {
+    const upstream = await startHttpUpstream((_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/plain' })
+      // Keep the response open so only the socket error can settle the exchange.
+      res.write('partial')
+    })
+    let conn: RawGatewayConn | undefined
+    const gateway = await startRawGateway((opened) => {
+      conn = opened
+    })
+
+    const exchange = openStreamExchange({
+      streamUrl: gateway.url,
+      request: { mode: 'HTTP', method: 'GET', path: '/', headers: [] },
+      upstream: upstreamOf(upstream.url),
+      signal: newSignal().signal,
+    })
+    await waitFor(() => (conn?.received.length ?? 0) > 0)
+    conn?.write(serverFrame(0x1, Buffer.from('a'), { rsv: 1 }))
+    await expect(exchange).rejects.toThrow(/stream socket error/)
   })
 
   it('fails closed when the peer acknowledges more than it received', async () => {
