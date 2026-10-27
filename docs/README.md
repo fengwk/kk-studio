@@ -9,6 +9,7 @@
 | --- | --- |
 | 第一次运行并完成对话 | [项目 README](../README.md)，随后查看 [本地栈](../deploy/local/README.md) |
 | 把本机文件、命令和 LSP 提供给 Agent | [Environment Daemon 安装与运行](operations/environment-daemon.md) |
+| 实施 Environment、Daemon、IDE 与 tab 工作状态重构 | [重构设计契约（待实现）](modules/environment-ide-design.md) |
 | 修改源码并选择合适的检查 | [开发与测试](operations/development-and-testing.md) |
 | 修改页面或共享 UI，保持紧凑与一致 | [前端视觉与交互语言](modules/frontend-design-language.md) |
 | 核对内置工具与异步委派的行为契约 | [内置工具与异步委派](modules/builtin-tools-design.md) |
