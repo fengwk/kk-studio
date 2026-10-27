@@ -112,7 +112,7 @@ function writeJdkJar(jar, archive, entries) {
       mkdirSync(path.dirname(file), { recursive: true })
       writeFileSync(file, content)
     }
-    execFileSync(jar, ['--create', '--file', archive, '-C', staging, '.'])
+    execFileSync(jar, ['--create', '--no-manifest', '--file', archive, '-C', staging, '.'])
   } finally {
     rmSync(staging, { recursive: true, force: true })
   }
@@ -404,8 +404,18 @@ test('the workflow stage keeps both the stable and versioned agent files', () =>
     const agentName = `convention4j-agent-${version}.jar`
     const agent = path.join(directory, agentName)
     const appJar = path.join(directory, `kk-studio-web-${VERSION}.jar`)
+    const probe = path.join(directory, 'AgentClasspathProbe.java')
+    writeFileSync(probe, `public class AgentClasspathProbe {
+  public static void premain(String ignored) {}
+  public static void main(String[] args) throws ClassNotFoundException {
+    Class.forName("AgentClasspathProbe", true, null);
+  }
+}
+`)
+    execFileSync(path.join(path.dirname(jar), 'javac'), ['-d', directory, probe])
     writeJdkJar(jar, agent, {
-      'META-INF/MANIFEST.MF': `Manifest-Version: 1.0\nBoot-Class-Path: ${agentName}\n`,
+      'META-INF/MANIFEST.MF': `Manifest-Version: 1.0\nPremain-Class: AgentClasspathProbe\nBoot-Class-Path: ${agentName}\n\n`,
+      'AgentClasspathProbe.class': readFileSync(path.join(directory, 'AgentClasspathProbe.class')),
     })
     const agentBytes = readFileSync(agent)
     writeJdkJar(jar, appJar, {
@@ -447,6 +457,17 @@ test('the workflow stage keeps both the stable and versioned agent files', () =>
 
     const verified = run('verify', '--dir', output, '--version', VERSION, '--source-commit', COMMIT)
     assert.equal(verified.status, 0, verified.stderr)
+
+    // A byte-preserving rename alone is insufficient: bootstrap loading resolves the manifest's
+    // versioned filename, not the -javaagent stable alias. Missing that file must break this probe.
+    const args = [`-javaagent:${stable}`, '-cp', directory, 'AgentClasspathProbe']
+    const java = path.join(path.dirname(jar), 'java')
+    const bootstrapped = spawnSync(java, args, { encoding: 'utf8' })
+    assert.equal(bootstrapped.status, 0, bootstrapped.stderr)
+    unlinkSync(versioned)
+    const missingBootstrap = spawnSync(java, args, { encoding: 'utf8' })
+    assert.equal(missingBootstrap.status, 1, missingBootstrap.stderr)
+    assert.match(missingBootstrap.stderr, /ClassNotFoundException: AgentClasspathProbe/u)
   } finally {
     rmSync(directory, { recursive: true, force: true })
   }
