@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitJournal;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitJournalRecord;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitJournalSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitKind;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionExitConfirmer;
@@ -120,9 +121,10 @@ class ToolExecutionRemoteExitTest {
       AtomicBoolean failNextTransaction = new AtomicBoolean();
       HarnessStore failingStore = failNextTransaction(support.store, failNextTransaction);
       RecordingJournal journal = new RecordingJournal(TestExecutionExitConfirmer.memoryJournal());
+      ToolProcessorTestSupport.MutableClock confirmationClock =
+          new ToolProcessorTestSupport.MutableClock(ToolProcessorTestSupport.NOW);
       ExecutionExitConfirmer confirmer =
-          new ExecutionExitConfirmer(
-              failingStore, journal, Clock.fixed(ToolProcessorTestSupport.NOW, ZoneOffset.UTC));
+          new ExecutionExitConfirmer(failingStore, journal, confirmationClock);
       ToolExecution execution = execution(support, claim, failingStore, confirmer);
       UUID remoteId = UUID.randomUUID();
       AtomicReference<ExecutionExitFact> registered = new AtomicReference<>();
@@ -140,7 +142,7 @@ class ToolExecutionRemoteExitTest {
                 assertThrows(IllegalStateException.class, () -> observer.confirmExit(remoteId));
                 assertEquals(
                     List.of(remoteId),
-                    journal.loadAll().stream()
+                    journal.loadAll().records().stream()
                         .map(ExecutionExitJournalRecord::executionId)
                         .toList(),
                     "the remote proof must survive the failed database transaction");
@@ -155,11 +157,14 @@ class ToolExecutionRemoteExitTest {
           executionFact(support.store, remoteId).state(),
           "a failed database confirmation must not claim the remote exited");
 
+      confirmationClock.advance(Duration.ofSeconds(1));
       confirmer.replayPending();
 
       ExecutionExitFact replayed = executionFact(support.store, remoteId);
       assertEquals(ExecutionExitState.REMOTE_ACKNOWLEDGED, replayed.state());
-      assertTrue(journal.loadAll().isEmpty(), "a successful replay must delete the retained proof");
+      assertTrue(
+          journal.loadAll().records().isEmpty(),
+          "a successful replay must delete the retained proof");
       assertFalse(replayed.confirmedAt().isBefore(replayed.registeredAt()));
       assertEquals(registered.get().registeredAt(), replayed.registeredAt());
       assertEquals(
@@ -255,7 +260,7 @@ class ToolExecutionRemoteExitTest {
     }
 
     @Override
-    public List<ExecutionExitJournalRecord> loadAll() {
+    public ExecutionExitJournalSnapshot loadAll() {
       return delegate.loadAll();
     }
 
