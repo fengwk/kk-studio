@@ -12,12 +12,19 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import jakarta.websocket.SendHandler;
+import jakarta.websocket.SendResult;
+import org.apache.tomcat.websocket.Transformation;
+import org.apache.tomcat.websocket.WsRemoteEndpointImplBase;
+import org.apache.tomcat.websocket.WsSession;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.socket.BinaryMessage;
@@ -43,11 +50,14 @@ import java.io.IOException;
 import java.net.URI;
 import java.nio.ByteBuffer;
 import java.time.Duration;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.ReentrantLock;
 
 /** 反向流 peer 的有界入站队列与关闭唤醒契约。 */
 class WebSocketIdeStreamPeerTest {
@@ -253,6 +263,38 @@ class WebSocketIdeStreamPeerTest {
     }
   }
 
+  /** 真实 Tomcat 状态机在写失败后残留 partial-writing；不得再次写 ACK，也不得封死后续 END。 */
+  @Test
+  void failedAckDoesNotRetryTomcatPartialWriteOrDiscardEnd() throws Exception {
+    FaultyTomcatEndpoint endpoint = new FaultyTomcatEndpoint();
+    when(session.isOpen()).thenReturn(true);
+    doAnswer(
+            invocation -> {
+              BinaryMessage message = invocation.getArgument(0);
+              endpoint.sendPartialBytes(message.getPayload(), message.isLast());
+              return null;
+            })
+        .when(session)
+        .sendMessage(any());
+    WebSocketIdeStreamPeer peer = new WebSocketIdeStreamPeer(session);
+    byte[] ack = new DaemonIdeStreamCodec().encodeAck(512);
+
+    assertDoesNotThrow(() -> peer.sendAcknowledgement(ack));
+    // 容器的关闭回调尚未到达，isOpen 仍为 true，重试会触发 BINARY_PARTIAL_WRITING 异常。
+    assertTrue(session.isOpen());
+    assertDoesNotThrow(() -> peer.sendAcknowledgement(ack));
+    assertThrows(IllegalStateException.class, () -> peer.sendBinary(new byte[] {1}));
+    verify(session, times(1)).sendMessage(any());
+    assertEquals(1, endpoint.writeAttempts.get());
+    assertFalse(peer.closed());
+    assertTrue(
+        peer.offer(new IdeStreamPeer.Inbound.Binary(new DaemonIdeStreamCodec().encodeHttpEnd())));
+    IdeStreamPeer.Inbound.Binary end =
+        assertInstanceOf(IdeStreamPeer.Inbound.Binary.class, peer.poll(Duration.ZERO));
+    assertInstanceOf(
+        IdeStreamBinaryFrame.HttpEnd.class, new DaemonIdeStreamCodec().decodeBinary(end.frame()));
+  }
+
   /** 会话仍存活时底层抛出的 IllegalStateException 是未知状态，ACK 发送也必须原样抛出而不是吞掉。 */
   @Test
   void acknowledgementIllegalStateOnLiveSessionPropagates() throws Exception {
@@ -431,5 +473,41 @@ class WebSocketIdeStreamPeerTest {
     // 6. 容器正常关闭连接后触发 afterConnectionClosed，peer 正式进入 closed 状态
     handler.afterConnectionClosed(baseSession, CloseStatus.NORMAL);
     assertTrue(peer.closed(), "peer must be closed after container connection close callback");
+  }
+
+  /** 只在真实 Tomcat 状态机的底层写边界注入 IOException，不伪造 partial-writing 状态。 */
+  private static final class FaultyTomcatEndpoint extends WsRemoteEndpointImplBase {
+    private final AtomicInteger writeAttempts = new AtomicInteger();
+    private final ReentrantLock writeLock = new ReentrantLock();
+
+    private FaultyTomcatEndpoint() throws IOException {
+      WsSession nativeSession = mock(WsSession.class);
+      when(nativeSession.getUserProperties()).thenReturn(Map.of());
+      setSession(nativeSession);
+      Transformation transformation = mock(Transformation.class);
+      when(transformation.sendMessagePart(any()))
+          .thenAnswer(invocation -> invocation.getArgument(0));
+      setTransformation(transformation);
+    }
+
+    @Override
+    protected void doWrite(
+        SendHandler handler, boolean blocking, long writeTimeoutExpiry, ByteBuffer... data) {
+      writeAttempts.incrementAndGet();
+      handler.onResult(new SendResult(new IOException("synthetic ACK write failure")));
+    }
+
+    @Override
+    protected boolean isMasked() {
+      return false;
+    }
+
+    @Override
+    protected void doClose() {}
+
+    @Override
+    protected ReentrantLock getLock() {
+      return writeLock;
+    }
   }
 }

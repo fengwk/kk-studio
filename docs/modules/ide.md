@@ -38,6 +38,8 @@ IDE 让用户在 Studio 同源下打开某个 Environment 上由 Daemon 托管�
 
 流控由双向独立的 [`IdeStreamCreditWindow`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/protocol/IdeStreamCreditWindow.java) 约束：初始 credit 262144，每个数据帧（HTTP body 或 WS 分段）按载荷字节计价但至少 512，零长度分段同样计价。因此一个窗口同时限制在途字节与在途帧数（至多 512 帧），两端的入站队列按 credit 推导出的上界定界，code-server 终端输出、RPC 这类小消息的突发不会被误断开。ACK 只能确认已真实消费的数据帧且至少覆盖一帧；超窗发送、超窗/不足一帧/负数 ACK、未知帧与关闭后的操作一律关闭流，因此没有无界排队，也没有“先 ACK 后缓冲”。
 
+HTTP 请求方向的 END 只表示请求体发送完毕，不结束响应。Daemon 完成响应体并确认响应 END 写出后，等待 Studio 消费 END、刷新浏览器输出并以 1000 正常关闭反向流，随后才报告交换成功；Studio 在响应交付失败时以 1011 关闭。END 写失败、END 前关闭或异常关闭均为失败，不把传输断开当作成功。Studio 回送 ACK 首次写失败后不再尝试任何发送，但仍接收随后到达的响应与 END；ACK 失败不等同于接收方向已经关闭。
+
 单条 HTTP exchange 只限制等待首个响应以及传输中两次进展之间的空闲（`kk-studio.harness.ide-gateway.request-timeout`），持续有进展的大文件下载不受整体时长限制。Daemon 侧关闭反向流时，网关把它给出的关闭码（code-server 的关闭码或协议原因）原样转述给浏览器，只有缺失或不能发送时才用 1011；跨节点单跳同样转述。每条 IDE WebSocket 结束、以及每条非正常结束的 HTTP exchange，网关都写一行诊断日志：结束原因、Daemon 侧与浏览器侧关闭码、Daemon 对 `OPEN_STREAM` 的失败回执、双向帧数与字节数和时长，不含票据、cookie 与查询串；Daemon 在宿主日志写一行 `daemon ide <mode> stream failed: <原因>`。由此可以判定每次断流的关闭方。配对等待超时会关闭可能的 peer 并放弃在途 `OPEN_STREAM`；控制连接短暂断开不影响已建立的流，同一实例回拨的反向流照常配对；另一个实例接管时按代际关闭全部待配对与已配对的流，迟到的反向连接因票据已撤销或代际已被接管而被拒绝。
 
 ## 跨节点

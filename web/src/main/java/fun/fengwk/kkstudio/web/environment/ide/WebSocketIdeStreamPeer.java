@@ -44,6 +44,10 @@ final class WebSocketIdeStreamPeer implements IdeStreamPeer {
   private final Object stateLock = new Object();
   private final Object sendLock = new Object();
   private long queuedBytes;
+
+  /** 发送端写失败后不可复用；只受 sendLock 保护，不代表入站已关闭。 */
+  private boolean outboundFailed;
+
   private volatile boolean closed;
   private volatile CloseStatus remoteCloseStatus;
 
@@ -79,21 +83,22 @@ final class WebSocketIdeStreamPeer implements IdeStreamPeer {
   /**
    * 在会话锁内串行发送一帧。
    *
-   * <p>{@code acknowledgement=true} 表示这是消费 credit 的 ACK：它只承载「已真实交付字节」的反馈，连接关闭后属于可安全丢弃的信息，因此 closed
-   * 或发送失败（IOException，或底层已关闭会话抛出的 IllegalStateException）只丢弃该 ACK，不改变接收 closed 状态（真正的接收关闭由容器
-   * onTransportClosed 负责）；数据/控制帧仍 fail-closed。 会话仍存活时抛出的 IllegalStateException 是未知状态，必须原样抛出而不是吞掉。
+   * <p>{@code acknowledgement=true} 表示这是消费 credit 的 ACK：它只承载「已真实交付字节」的反馈。首次写失败后封闭发送端，后续 ACK
+   * 可直接丢弃，但不封闭入站（否则可能丢失随后到达的 END）。Tomcat 的 partial-write 状态在 IOException 后可能未复原，因此不能再次尝试发送；数据/控制帧仍
+   * fail-closed。没有先前写失败且会话仍存活时的 IllegalStateException 必须原样抛出。
    */
   private void send(WebSocketMessage<?> message, boolean acknowledgement) {
     synchronized (sendLock) {
-      if (closed) {
+      if (closed || outboundFailed) {
         if (acknowledgement) {
           return;
         }
-        throw new IllegalStateException("reverse stream peer is closed");
+        throw new IllegalStateException("reverse stream peer is not writable");
       }
       try {
         session.sendMessage(message);
       } catch (IOException error) {
+        outboundFailed = true;
         if (acknowledgement) {
           log.debug(
               "reverse stream ACK write failed, dropping ACK; phase=IDE_ACK_WRITE; exception={}",
@@ -106,6 +111,7 @@ final class WebSocketIdeStreamPeer implements IdeStreamPeer {
         throw new IllegalStateException("failed to send on the reverse stream", error);
       } catch (IllegalStateException error) {
         if (acknowledgement && (closed || !session.isOpen())) {
+          outboundFailed = true;
           // 底层会话确已关闭：只丢弃该 ACK 不改变 closed，最终结果由 HTTP_END/WS CLOSE 判定。
           log.debug(
               "reverse stream session is closed, dropping ACK; phase=IDE_ACK_CLOSED; exception={}",

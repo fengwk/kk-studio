@@ -5,6 +5,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import org.springframework.web.socket.CloseStatus;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityBusyException;
@@ -203,6 +204,7 @@ public final class IdeGatewayDataPlane {
     IdeStreamPeer peer = null;
     IdeRequest ideRequest = null;
     Exchange exchange = null;
+    boolean completed = false;
     long startedNanos = System.nanoTime();
     try {
       String streamUrl = properties.streamUrl(environmentId, issued.ticket());
@@ -223,6 +225,7 @@ public final class IdeGatewayDataPlane {
       exchange =
           new Exchange(request, response, environmentId, peer, properties.requireRequestTimeout());
       exchange.run(request);
+      completed = true;
     } catch (IdeStreamPairingException error) {
       logFailedExchange(environmentId, "PAIRING_FAILED", null, ideRequest, startedNanos);
       sendError(response, HttpServletResponse.SC_GATEWAY_TIMEOUT);
@@ -242,9 +245,14 @@ public final class IdeGatewayDataPlane {
       throw error;
     } finally {
       abandonOnce.run();
-      pairing.close();
-      if (peer != null) {
-        peer.close();
+      try {
+        if (peer != null) {
+          // 必须先选择关闭状态，配对回收会再次幂等关闭 peer。
+          // 1000 确认响应 END 与浏览器输出 flush 均成功，失败不能被 Daemon 当作正常完成。
+          peer.close(completed ? CloseStatus.NORMAL : CloseStatus.SERVER_ERROR);
+        }
+      } finally {
+        pairing.close();
       }
     }
   }
