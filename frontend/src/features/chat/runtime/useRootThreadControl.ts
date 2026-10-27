@@ -592,7 +592,9 @@ export function useRootThreadControl({
     if (focusIntent == null) {
       return
     }
-    if (!focused || !samePaneTarget(focusIntent, target)) {
+    // 受控目标的父级提交可能晚于本次 focusIntent 渲染；targetRef 已在 changeTarget
+    // 内同步指向新目标，用它判断才能保留本次待恢复的焦点。
+    if (!focused || !samePaneTarget(focusIntent, targetRef.current)) {
       setFocusIntent(null)
       return
     }

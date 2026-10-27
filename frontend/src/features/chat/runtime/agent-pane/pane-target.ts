@@ -38,17 +38,12 @@ export interface PendingAcceptance {
   unknownOutcome: boolean
 }
 
-const TARGET_STORAGE_PREFIX = 'kk-studio.agent-pane-target.'
 const PENDING_STORAGE_PREFIX = 'kk-studio.agent-pane-acceptance.'
 
 export function ownerIdentity(owner: AgentRuntimeOwnerDTO): string {
   return owner.type === 'CHAT'
     ? `CHAT:${owner.chatId}`
     : `ISSUE_AGENT:${owner.issueId}:${owner.agentName}`
-}
-
-function storageKey(owner: AgentRuntimeOwnerDTO, paneId: string): string {
-  return `${TARGET_STORAGE_PREFIX}${ownerIdentity(owner)}:${paneId}`
 }
 
 function pendingStorageKey(owner: AgentRuntimeOwnerDTO, paneId: string): string {
@@ -434,54 +429,18 @@ export function targetIdentity(target: PaneTarget): string {
   return `thread:${target.threadId}`
 }
 
-export function loadPaneTarget(
-  owner: AgentRuntimeOwnerDTO,
-  paneId: string,
-  storage: Pick<Storage, 'getItem'> = globalThis.localStorage,
-): PaneTarget {
-  try {
-    const raw = storage.getItem(storageKey(owner, paneId))
-    if (!raw) {
-      return { kind: 'NEW_SESSION_DRAFT' }
-    }
-    return normalizePaneTarget(JSON.parse(raw))
-  } catch {
-    return { kind: 'NEW_SESSION_DRAFT' }
-  }
-}
-
-export function savePaneTarget(
-  owner: AgentRuntimeOwnerDTO,
-  paneId: string,
-  target: PaneTarget,
-  storage: Pick<Storage, 'setItem'> = globalThis.localStorage,
-): void {
-  try {
-    storage.setItem(storageKey(owner, paneId), JSON.stringify(target))
-  } catch {
-    // Ignore quota or cross-origin storage errors.
-  }
-}
-
-export function clearPaneTarget(
-  owner: AgentRuntimeOwnerDTO,
-  paneId: string,
-  storage: Pick<Storage, 'removeItem'> = globalThis.localStorage,
-): void {
-  try {
-    storage.removeItem(storageKey(owner, paneId))
-  } catch {
-    // Ignore storage errors.
-  }
-}
-
 export function loadPendingAcceptance(
   owner: AgentRuntimeOwnerDTO,
   paneId: string,
-  storage: Pick<Storage, 'getItem'> = globalThis.localStorage,
+  storage?: Pick<Storage, 'getItem'>,
+  expectedTarget?: PaneTarget,
 ): PendingAcceptance | null {
+  const resolved = resolveStorage(storage)
+  if (resolved == null) {
+    return null
+  }
   try {
-    const raw = storage.getItem(pendingStorageKey(owner, paneId))
+    const raw = resolved.getItem(pendingStorageKey(owner, paneId))
     if (!raw) {
       return null
     }
@@ -494,6 +453,11 @@ export function loadPendingAcceptance(
       || ownerIdentity(parsed.owner) !== ownerIdentity(owner)
       || ownerIdentity(parsed.request.owner) !== ownerIdentity(owner)
     ) {
+      return null
+    }
+    // paneId 只定位记录槽位；恢复应用还必须核对记录自己的展示目标。目标不匹配时
+    // 保留原记录供原操作对账，既不删除也不改写成当前 UI 的请求。
+    if (expectedTarget != null && !samePaneTarget(parsed.target, expectedTarget)) {
       return null
     }
     return parsed
