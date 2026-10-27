@@ -6,6 +6,7 @@ import path from 'node:path'
 import { Readable, Writable } from 'node:stream'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DaemonConfig, ManagedProcess, ProcessExit, ProcessSpec, ProcessSupervisor } from '../src/contracts.js'
+import { acquireFileLock, type DirectoryLock } from '../src/native/index.js'
 import {
   HANDOFF_FILE,
   MANAGED_ENTRY,
@@ -13,7 +14,9 @@ import {
   RESULT_FILE,
   RUNTIME_MANIFEST,
   STREAM_LIMIT_BYTES,
+  TAKEOVER_FILE,
   UNIX_UPDATE_SCRIPT_NAME,
+  UPDATE_LOCK_FILE,
   WINDOWS_UPDATE_SCRIPT_NAME,
   createUpdateHandler,
   detachedLaunchCommand,
@@ -108,6 +111,14 @@ function harness(
         path.join(destination, 'runtime', 'code-server', 'lib', os === 'windows' ? 'node.exe' : 'node'),
         '',
       )
+      await mkdir(path.join(destination, 'dist'), { recursive: true })
+      await writeFile(path.join(destination, 'dist', 'update-entry.js'), '// updater entry')
+      await mkdir(path.join(destination, 'node_modules', 'koffi'), { recursive: true })
+      await writeFile(path.join(destination, 'node_modules', 'koffi', 'package.json'), '{}')
+      const packagePlatform = `${os === 'windows' ? 'win32' : os === 'macos' ? 'darwin' : 'linux'}-${arch === 'amd64' ? 'x64' : 'arm64'}`
+      const platformPackage = path.join(destination, 'node_modules', '@koromix', `koffi-${packagePlatform}`)
+      await mkdir(platformPackage, { recursive: true })
+      await writeFile(path.join(platformPackage, 'package.json'), '{}')
     },
     async run(command, args) {
       runCalls.push({ command, args })
@@ -175,6 +186,23 @@ async function readHandoff(dir: string): Promise<Record<string, unknown>> {
   return JSON.parse(await readFile(path.join(dir, 'updates', OPERATION_ID, HANDOFF_FILE), 'utf8')) as Record<string, unknown>
 }
 
+/** 模拟更新器在拿到安装目录互斥后写入 takeover；返回值代表更新器仍持有互斥。 */
+async function simulateUpdaterTakeover(dir: string, token = ''): Promise<DirectoryLock> {
+  const handoff = await readHandoff(dir)
+  await writeFile(
+    path.join(dir, 'updates', OPERATION_ID, TAKEOVER_FILE),
+    `${JSON.stringify({
+      operationId: OPERATION_ID,
+      targetVersion: VERSION,
+      token: token === '' ? handoff.startupToken : token,
+      pid: process.pid,
+    })}\n`,
+    { mode: 0o600 },
+  )
+  const lock = await acquireFileLock(path.join(dir, 'updates', UPDATE_LOCK_FILE))
+  return lock
+}
+
 describe('update handler', () => {
   let dataDir: string
   let handler: ReturnType<typeof createUpdateHandler>
@@ -209,9 +237,36 @@ describe('update handler', () => {
     // 许可必须等 Runtime 把 PREPARED 回执入缓存并完成一次出站尝试后才释放：handler 只交付幂等的释放步骤。
     await expect(stat(path.join(operationDir, PERMIT_FILE))).rejects.toThrow()
     expect(typeof outcome.releasePermit).toBe('function')
-    await outcome.releasePermit?.()
+    const updaterLock = await simulateUpdaterTakeover(dataDir)
+    try {
+      await outcome.releasePermit?.()
+    } finally {
+      await updaterLock.close()
+    }
     expect((await stat(path.join(operationDir, PERMIT_FILE))).isFile()).toBe(true)
     expect(h.runCalls().some(call => call.command === 'systemd-run')).toBe(true)
+  })
+
+  it('reports archive body progress only and never mixes the checksum file', async () => {
+    const h = harness()
+    const progress: Array<{ downloadedBytes: number; totalBytes: number | null }> = []
+    const deps: UpdateDependencies = {
+      ...h.deps,
+      async fetchTo(url, destination, signal, maxBytes, report) {
+        if (!url.endsWith('.sha256')) {
+          report?.(4, 10)
+        }
+        await h.deps.fetchTo(url, destination, signal, maxBytes)
+      },
+    }
+    const outcome = await createUpdateHandler(deps)(
+      command(),
+      config(dataDir),
+      new AbortController().signal,
+      update => progress.push(update),
+    )
+    expect(outcome.phase).toBe('PREPARED')
+    expect(progress).toEqual([{ downloadedBytes: 4, totalBytes: 10 }])
   })
 
   it('never releases the permit when the detached updater was not accepted', async () => {
@@ -227,15 +282,40 @@ describe('update handler', () => {
     const h = harness()
     handler = createUpdateHandler(h.deps)
     const first = await handler(command(), config(dataDir), new AbortController().signal)
-    await first.releasePermit?.()
+    const firstLock = await simulateUpdaterTakeover(dataDir)
+    try {
+      await first.releasePermit?.()
+    } finally {
+      await firstLock.close()
+    }
     const replay = await handler(command(), config(dataDir), new AbortController().signal)
     expect(replay.phase).toBe('PREPARED')
     expect(h.fetchCount()).toBe(2)
     // 重放既是回执重发，也是许可释放的天然重试：释放失败后同一条路径可以再次释放。
     const operationDir = path.join(dataDir, 'updates', OPERATION_ID)
     await rm(path.join(operationDir, PERMIT_FILE), { force: true })
-    await replay.releasePermit?.()
+    const replayLock = await simulateUpdaterTakeover(dataDir)
+    try {
+      await replay.releasePermit?.()
+    } finally {
+      await replayLock.close()
+    }
     expect((await stat(path.join(operationDir, PERMIT_FILE))).isFile()).toBe(true)
+  })
+
+  it('does not release the permit for a takeover record from another operation', async () => {
+    const h = harness()
+    handler = createUpdateHandler(h.deps)
+    const outcome = await handler(command(), config(dataDir), new AbortController().signal)
+    const updaterLock = await simulateUpdaterTakeover(dataDir, '33333333-3333-4333-8333-333333333333')
+    try {
+      await expect(outcome.releasePermit?.()).rejects.toThrow(
+        'the update takeover record does not match the operation',
+      )
+    } finally {
+      await updaterLock.close()
+    }
+    await expect(stat(path.join(dataDir, 'updates', OPERATION_ID, PERMIT_FILE))).rejects.toThrow()
   })
 
   it('reuses a completed handoff for the same operation without a second download', async () => {
@@ -298,20 +378,20 @@ describe('update handler', () => {
     const expected = `"main.js" "--config" "${configPath}"`
     expect(WINDOWS_UPDATE_SCRIPT).toContain(`$expectedArguments = '"main.js" "--config" "' + $configPath + '"'`)
     expect(WINDOWS_UPDATE_SCRIPT).toContain(
-      "if ([string]$task.Description -ne $TaskDescription) { Fail-Closed 'managed scheduled task is not owned by the installer' }",
+      "if ([string]$task.Description -ne $TaskDescription) { Write-Failure 'managed scheduled task is not owned by the installer' }",
     )
     // 运行时身份按规范化路径比较（Windows 大小写不敏感），但仍必须是冻结的受管 node.exe。
     expect(WINDOWS_UPDATE_SCRIPT).toContain(
       "if (-not (Test-SamePath -Left ([string]$action.Execute) -Right $expectedNode)) {",
     )
     expect(WINDOWS_UPDATE_SCRIPT).toContain(
-      "Fail-Closed 'managed scheduled task does not run the managed runtime'",
+      "Write-Failure 'managed scheduled task does not run the managed runtime'",
     )
     expect(WINDOWS_UPDATE_SCRIPT).toContain(
       "if ([string]$action.Arguments -ne $expectedArguments) {",
     )
     expect(WINDOWS_UPDATE_SCRIPT).toContain(
-      "Fail-Closed 'managed scheduled task arguments do not match the managed configuration'",
+      "Write-Failure 'managed scheduled task arguments do not match the managed configuration'",
     )
     expect(installedDir.endsWith('\\lib')).toBe(true)
     expect(configPath.endsWith('daemon.json')).toBe(true)
@@ -536,32 +616,84 @@ describe('staged distribution failures', () => {
 })
 
 describe('detached launch command', () => {
-  it('uses a transient systemd user unit on Linux and passes all three directories', () => {
-    const line = detachedLaunchCommand('linux', OPERATION_ID, '/u/script.sh', '/u/op/extract', '/u/lib')
+  const updaterNode = '/u/op/updater/node'
+  const updaterEntry = '/u/op/updater/dist/update-entry.js'
+
+  it('uses a transient systemd user unit on Linux and passes the updater entrypoint', () => {
+    const line = detachedLaunchCommand(
+      'linux',
+      OPERATION_ID,
+      '/u/op/script.sh',
+      '/u/op/extract',
+      '/u/lib',
+      updaterNode,
+      updaterEntry,
+    )
     expect(line[0]).toBe('systemd-run')
     expect(line).toContain('--user')
     expect(line).toContain(`--unit=kk-studio-daemon-update-${OPERATION_ID}`)
-    expect(line.slice(-4)).toEqual(['/u/script.sh', '/u/op', '/u/op/extract', '/u/lib'])
+    expect(line.slice(-7)).toEqual([
+      '/u/op/script.sh',
+      'run',
+      '/u/op',
+      '/u/op/extract',
+      '/u/lib',
+      updaterNode,
+      updaterEntry,
+    ])
   })
 
-  it('submits a transient launchd job on macOS and passes all three directories', () => {
-    const line = detachedLaunchCommand('macos', OPERATION_ID, '/u/script.sh', '/u/op/extract', '/u/lib')
+  it('submits a transient launchd job on macOS and passes the updater entrypoint', () => {
+    const line = detachedLaunchCommand(
+      'macos',
+      OPERATION_ID,
+      '/u/op/script.sh',
+      '/u/op/extract',
+      '/u/lib',
+      updaterNode,
+      updaterEntry,
+    )
     expect(line.slice(0, 4)).toEqual(['launchctl', 'submit', '-l', `kk-studio-daemon-update-${OPERATION_ID}`])
-    expect(line.slice(-4)).toEqual(['/u/script.sh', '/u/op', '/u/op/extract', '/u/lib'])
+    expect(line.slice(-7)).toEqual([
+      '/u/op/script.sh',
+      'run',
+      '/u/op',
+      '/u/op/extract',
+      '/u/lib',
+      updaterNode,
+      updaterEntry,
+    ])
   })
 
   it('registers a one-shot scheduled task on Windows through an encoded command', () => {
-    const line = detachedLaunchCommand('windows', OPERATION_ID, 'C:/u/script.ps1', 'C:/u/op/extract', 'C:/u/lib')
+    const line = detachedLaunchCommand(
+      'windows',
+      OPERATION_ID,
+      'C:/u/script.ps1',
+      'C:/u/op/extract',
+      'C:/u/lib',
+      'C:/u/op/updater/node.exe',
+      'C:/u/op/updater/dist/update-entry.js',
+    )
     expect(line.slice(0, 4)).toEqual(['powershell', '-NoProfile', '-NonInteractive', '-EncodedCommand'])
     const script = Buffer.from(line[4] ?? '', 'base64').toString('utf16le')
     expect(script).toContain(`kk-studio-daemon-update-${OPERATION_ID}`)
     expect(script).toContain('-InstalledDir')
+    expect(script).toContain('-UpdaterEntry')
     expect(script).toContain('Register-ScheduledTask')
     expect(script).toContain('Start-ScheduledTask')
   })
 
   it('escapes single quotes in Windows paths without breaking the encoded command', () => {
-    const line = detachedLaunchCommand('windows', OPERATION_ID, "C:/u/it's/script.ps1", "C:/u/it's/extract", 'C:/u/lib')
+    const line = detachedLaunchCommand(
+      'windows',
+      OPERATION_ID,
+      "C:/u/it's/script.ps1",
+      "C:/u/it's/extract",
+      'C:/u/lib',
+      "C:/u/it's/node.exe",
+      "C:/u/it's/update-entry.js",
+    )
     const script = Buffer.from(line[4] ?? '', 'base64').toString('utf16le')
     expect(script).toContain("''")
   })
