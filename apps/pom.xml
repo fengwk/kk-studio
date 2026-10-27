@@ -7,7 +7,7 @@
     <parent>
         <groupId>fun.fengwk.kk-studio</groupId>
         <artifactId>kk-studio-parent</artifactId>
-        <version>4.0.3</version>
+        <version>5.0.0</version>
     </parent>
 
     <!-- 建立在平台公开接口之上的应用：只依赖 platform 与 harness，platform 从不反向依赖这里。 -->
