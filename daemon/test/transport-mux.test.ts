@@ -180,9 +180,9 @@ describe('single writer and per-stream ordering', () => {
     ).toEqual([
       `DATA:${first.id}:one`,
       `DATA:${first.id}:two`,
+      `DATA:${second.id}:other`,
       `DATA:${first.id}:three`,
       `END:${first.id}`,
-      `DATA:${second.id}:other`,
     ])
   })
 
@@ -527,6 +527,161 @@ describe('HTTP request/response lifecycle', () => {
   })
 })
 
+describe('physical delivery before send completion', () => {
+  it('accepts WINDOW delivered before DATA send callbacks settle in both directions', async () => {
+    let server!: MuxConnection
+    let daemon!: MuxConnection
+    const open = captureOnOpen()
+    const toServer: MuxFrame[] = []
+    const toDaemon: MuxFrame[] = []
+    const serverFatal: MuxError[] = []
+    const daemonFatal: MuxError[] = []
+    let holdServerData = false
+    let holdDaemonData = false
+    let releaseServerData: (() => void) | null = null
+    let releaseDaemonData: (() => void) | null = null
+    let serverDataSettled = false
+    let daemonDataSettled = false
+
+    server = createMuxConnection({
+      role: 'server',
+      send(raw) {
+        const outbound = decodeFrame(raw)
+        toDaemon.push(outbound)
+        daemon.receive(raw)
+        if (holdServerData && outbound.type === 'DATA') {
+          return new Promise<void>((resolve) => {
+            releaseServerData = resolve
+          })
+        }
+        return Promise.resolve()
+      },
+      onFatal: (error) => serverFatal.push(error),
+    })
+    daemon = createMuxConnection({
+      role: 'daemon',
+      ...open,
+      send(raw) {
+        const outbound = decodeFrame(raw)
+        toServer.push(outbound)
+        server.receive(raw)
+        if (holdDaemonData && outbound.type === 'DATA') {
+          return new Promise<void>((resolve) => {
+            releaseDaemonData = resolve
+          })
+        }
+        return Promise.resolve()
+      },
+      onFatal: (error) => daemonFatal.push(error),
+    })
+
+    const stream = server.open(openRequest())
+    await tick()
+    const remote = open.streams[0]!
+    await remote.accept()
+    await remote.sendHeaders({ status: 200, headers: [] })
+    await tick()
+
+    holdServerData = true
+    const upstream = stream.write(Buffer.from('up'))
+    void upstream.then(() => (serverDataSettled = true))
+    await tick()
+    expect(serverFatal).toEqual([])
+    expect(daemonFatal).toEqual([])
+    expect(serverDataSettled).toBe(false)
+    expect(toServer.some((outbound) => outbound.type === 'WINDOW' && outbound.streamId === 1)).toBe(true)
+    expect(releaseServerData).not.toBeNull()
+    releaseServerData!()
+    await upstream
+
+    holdDaemonData = true
+    const downstream = remote.write(Buffer.from('down'))
+    void downstream.then(() => (daemonDataSettled = true))
+    await tick()
+    expect(serverFatal).toEqual([])
+    expect(daemonFatal).toEqual([])
+    expect(daemonDataSettled).toBe(false)
+    expect(toDaemon.some((outbound) => outbound.type === 'WINDOW' && outbound.streamId === 1)).toBe(true)
+    expect(releaseDaemonData).not.toBeNull()
+    releaseDaemonData!()
+    await downstream
+  })
+
+  it('accepts COMPLETE before the END send callback and finishes only after both sides settle', async () => {
+    let server!: MuxConnection
+    let daemon!: MuxConnection
+    const open = captureOnOpen()
+    const toDaemon: MuxFrame[] = []
+    const errors: MuxError[] = []
+    let holdDaemonEnd = false
+    let releaseDaemonEnd: (() => void) | null = null
+    let responseEnded = false
+    let requestEnded = false
+    let completed = 0
+
+    server = createMuxConnection({
+      role: 'server',
+      send(raw) {
+        toDaemon.push(decodeFrame(raw))
+        daemon.receive(raw)
+        return Promise.resolve()
+      },
+      onEnd: (stream) => {
+        responseEnded = true
+        void stream.complete().catch((error: MuxError) => errors.push(error))
+      },
+      onFatal: (error) => errors.push(error),
+    })
+    daemon = createMuxConnection({
+      role: 'daemon',
+      ...open,
+      send(raw) {
+        const outbound = decodeFrame(raw)
+        server.receive(raw)
+        if (holdDaemonEnd && outbound.type === 'END') {
+          return new Promise<void>((resolve) => {
+            releaseDaemonEnd = resolve
+          })
+        }
+        return Promise.resolve()
+      },
+      onEnd: () => {
+        requestEnded = true
+      },
+      onComplete: () => {
+        completed++
+      },
+      onFatal: (error) => errors.push(error),
+    })
+
+    const stream = server.open(openRequest())
+    await tick()
+    const remote = open.streams[0]!
+    await remote.accept()
+    await remote.sendHeaders({ status: 200, headers: [] })
+    await stream.end()
+    await tick()
+    expect(requestEnded).toBe(true)
+
+    holdDaemonEnd = true
+    const responseEnd = remote.end()
+    let endSettled = false
+    void responseEnd.then(() => (endSettled = true))
+    await tick()
+    expect(responseEnded).toBe(true)
+    expect(completed).toBe(0)
+    expect(endSettled).toBe(false)
+    expect(toDaemon.some((outbound) => outbound.type === 'COMPLETE')).toBe(true)
+    expect(errors).toEqual([])
+    expect(releaseDaemonEnd).not.toBeNull()
+    releaseDaemonEnd!()
+    await responseEnd
+    await tick()
+    expect(completed).toBe(1)
+    expect(errors).toEqual([])
+  })
+})
+
 describe('inbound credit and downstream acknowledgement', () => {
   it('returns exact stream and connection credit only after each downstream promise settles', async () => {
     const output = sink()
@@ -645,16 +800,21 @@ describe('inbound credit and downstream acknowledgement', () => {
     await tick()
     expect(resets).toEqual([{ id: 1, reset: { code: 'UPSTREAM_GONE', message: 'upstream closed' } }])
     expect(fatal).toBeNull()
-    expect(windows(output.frames())).toEqual([{ streamId: 0, credit: 2000 }])
+    // Only queued data is released by RESET; the in-flight callback keeps its 1000-byte reservation.
+    expect(windows(output.frames())).toEqual([{ streamId: 0, credit: 1000 }])
     gate.resolve()
     await tick()
-    expect(windows(output.frames())).toEqual([{ streamId: 0, credit: 2000 }])
+    expect(windows(output.frames())).toEqual([
+      { streamId: 0, credit: 1000 },
+      { streamId: 0, credit: 1000 },
+    ])
 
     // A late DATA frame for the closed id costs connection credit, is discarded, and is returned.
     daemon.receive(frame({ type: 'DATA', streamId: 1, payload: Buffer.alloc(600, 1), flags: { kind: 'http' } }))
     await tick()
     expect(windows(output.frames())).toEqual([
-      { streamId: 0, credit: 2000 },
+      { streamId: 0, credit: 1000 },
+      { streamId: 0, credit: 1000 },
       { streamId: 0, credit: 600 },
     ])
     expect(fatal).toBeNull()
@@ -673,6 +833,82 @@ describe('inbound credit and downstream acknowledgement', () => {
     await acceptAndHeaders(open.streams[1]!)
     await daemon.drain()
     expect(fatal).toBeNull()
+  })
+
+  it('releases an in-flight buffer once when its callback rejects after RESET', async () => {
+    const output = sink()
+    const open = captureOnOpen()
+    const gate = deferred()
+    let fatal: MuxError | null = null
+    const daemon = makeConnection(
+      {
+        role: 'daemon',
+        ...open,
+        onData: () => gate.promise,
+        onFatal: (error) => (fatal = error),
+      },
+      output,
+    )
+    await receiveOpen(daemon, 1)
+    await acceptAndHeaders(open.streams[0]!)
+    daemon.receive(frame({ type: 'DATA', streamId: 1, payload: Buffer.alloc(1000), flags: { kind: 'http' } }))
+    daemon.receive(frame({ type: 'RESET', streamId: 1, reset: { code: 'CANCEL', message: '' } }))
+    await tick()
+    expect(windows(output.frames())).toEqual([])
+    gate.reject(new Error('consumer aborted'))
+    await tick()
+    expect(windows(output.frames())).toEqual([{ streamId: 0, credit: 1000 }])
+
+    daemon.receive(frame({ type: 'DATA', streamId: 1, payload: Buffer.alloc(600, 1), flags: { kind: 'http' } }))
+    await tick()
+    expect(windows(output.frames())).toEqual([
+      { streamId: 0, credit: 1000 },
+      { streamId: 0, credit: 600 },
+    ])
+    expect(fatal).toBeNull()
+  })
+
+  it('keeps an in-flight downstream buffer charged across RESET and new streams', async () => {
+    const output = sink()
+    const open = captureOnOpen()
+    const gate = deferred()
+    let fatal: MuxError | null = null
+    const daemon = makeConnection(
+      {
+        role: 'daemon',
+        ...open,
+        onData: () => gate.promise,
+        onFatal: (error) => (fatal = error),
+      },
+      output,
+    )
+    await receiveOpen(daemon, 1)
+    const first = open.streams[0]!
+    await acceptAndHeaders(first)
+    daemon.receive(frame({ type: 'DATA', streamId: 1, payload: Buffer.alloc(100), flags: { kind: 'http' } }))
+    daemon.receive(frame({ type: 'RESET', streamId: 1, reset: { code: 'CANCEL', message: 'reset while pending' } }))
+    await tick()
+    expect(fatal).toBeNull()
+
+    const chunk = Buffer.alloc(65_536)
+    for (let streamId = 2; streamId <= 16; streamId++) {
+      await receiveOpen(daemon, streamId)
+      const stream = open.streams.at(-1)!
+      await acceptAndHeaders(stream)
+      for (let index = 0; index < 4; index++) {
+        daemon.receive(frame({ type: 'DATA', streamId, payload: chunk, flags: { kind: 'http' } }))
+      }
+    }
+    await receiveOpen(daemon, 17)
+    const last = open.streams.at(-1)!
+    await acceptAndHeaders(last)
+    for (let index = 0; index < 3; index++) {
+      daemon.receive(frame({ type: 'DATA', streamId: 17, payload: chunk, flags: { kind: 'http' } }))
+    }
+    daemon.receive(frame({ type: 'DATA', streamId: 17, payload: Buffer.alloc(65_024), flags: { kind: 'http' } }))
+    expect(fatal).toBeNull()
+    daemon.receive(frame({ type: 'DATA', streamId: 17, payload: Buffer.alloc(1), flags: { kind: 'http' } }))
+    expect(fatal?.message).toMatch(/connection receive credit exceeded/)
   })
 
   it('returns connection credit for abandoned and closed-stream buffers but no stream WINDOW', async () => {
@@ -992,6 +1228,78 @@ describe('protocol state validation', () => {
     await server.drain()
     server.receive(frame({ type: 'COMPLETE', streamId: stream.id }))
     expect(serverFatal?.message).toMatch(/unallocated|only valid/)
+  })
+
+  it('requires daemon WS HEADERS 101 before accepting request DATA', async () => {
+    const output = sink()
+    const open = captureOnOpen()
+    let fatal: MuxError | null = null
+    const daemon = makeConnection({ role: 'daemon', ...open, onFatal: (error) => (fatal = error) }, output)
+    await receiveOpen(daemon, 1, 'WS')
+    await open.streams[0]!.accept()
+    daemon.receive(frame({ type: 'DATA', streamId: 1, payload: Buffer.from('early'), flags: { kind: 'ws', text: true, fin: true } }))
+    expect(fatal?.message).toMatch(/HEADERS 101/)
+
+    // Queued HEADERS are not sent yet; peer request DATA must still be rejected.
+    const queuedOpen = captureOnOpen()
+    let releaseReady: (() => void) | null = null
+    let queuedFatal: MuxError | null = null
+    const queued = createMuxConnection({
+      role: 'daemon',
+      ...queuedOpen,
+      send(raw) {
+        if (decodeFrame(raw).type === 'READY') {
+          return new Promise<void>((resolve) => {
+            releaseReady = resolve
+          })
+        }
+        return Promise.resolve()
+      },
+      onFatal: (error) => (queuedFatal = error),
+    })
+    await receiveOpen(queued, 1, 'WS')
+    const queuedStream = queuedOpen.streams[0]!
+    const accepting = queuedStream.accept().catch(() => {})
+    await tick()
+    const sendingHeaders = queuedStream.sendHeaders({ status: 101, headers: [] }).catch(() => {})
+    queued.receive(frame({ type: 'DATA', streamId: 1, payload: Buffer.from('queued'), flags: { kind: 'ws', text: true, fin: true } }))
+    expect(queuedFatal?.message).toMatch(/HEADERS 101/)
+    expect(releaseReady).not.toBeNull()
+    releaseReady!()
+    await Promise.all([accepting, sendingHeaders])
+
+    // HEADERS dispatched but its send callback is still pending: peer may already answer with DATA.
+    const okOpen = captureOnOpen()
+    let okFatal: MuxError | null = null
+    let releaseHeaders: (() => void) | null = null
+    let received = ''
+    const ok = createMuxConnection({
+      role: 'daemon',
+      ...okOpen,
+      send(raw) {
+        if (decodeFrame(raw).type === 'HEADERS') {
+          return new Promise<void>((resolve) => {
+            releaseHeaders = resolve
+          })
+        }
+        return Promise.resolve()
+      },
+      onData: (_stream, data) => {
+        received = Buffer.from(data.payload).toString()
+      },
+      onFatal: (error) => (okFatal = error),
+    })
+    await receiveOpen(ok, 1, 'WS')
+    const stream = okOpen.streams[0]!
+    await stream.accept()
+    const headersSent = stream.sendHeaders({ status: 101, headers: [] })
+    await tick()
+    expect(releaseHeaders).not.toBeNull()
+    ok.receive(frame({ type: 'DATA', streamId: 1, payload: Buffer.from('after-101'), flags: { kind: 'ws', text: true, fin: true } }))
+    expect(okFatal).toBeNull()
+    expect(received).toBe('after-101')
+    releaseHeaders!()
+    await headersSent
   })
 
   it('rejects invalid HEADERS status and duplicate COMPLETE/CLOSE where applicable', async () => {
@@ -1465,15 +1773,23 @@ describe('downstream failures reset only the affected stream', () => {
     onData: MuxConnectionOptions['onData'],
     options: Partial<MuxConnectionOptions> = {},
     mode: 'HTTP' | 'WS' = 'HTTP',
-  ): Promise<{ daemon: MuxConnection; stream: MuxStream; output: Sink; fatal: () => MuxError | null }> {
+  ): Promise<{
+    daemon: MuxConnection
+    stream: MuxStream
+    output: Sink
+    fatal: () => MuxError | null
+    resets: { id: number; reset: ResetPayload }[]
+  }> {
     const output = sink()
     const open = captureOnOpen()
+    const resets: { id: number; reset: ResetPayload }[] = []
     let fatal: MuxError | null = null
     const daemon = makeConnection(
       {
         role: 'daemon',
         ...open,
         onData,
+        onReset: (id, reset) => resets.push({ id, reset }),
         onFatal: (error) => (fatal = error),
         ...options,
       },
@@ -1483,7 +1799,12 @@ describe('downstream failures reset only the affected stream', () => {
     const stream = open.streams[0]!
     await stream.accept()
     await stream.sendHeaders({ status: mode === 'WS' ? 101 : 200, headers: [] })
-    return { daemon, stream, output, fatal: () => fatal }
+    return { daemon, stream, output, fatal: () => fatal, resets }
+  }
+
+  const downstreamReset = {
+    id: 1,
+    reset: { code: 'DOWNSTREAM_ERROR', message: 'downstream consumption failed' },
   }
 
   it('resets on synchronous and asynchronous DATA consumer failures', async () => {
@@ -1494,6 +1815,7 @@ describe('downstream failures reset only the affected stream', () => {
     await tick()
     expect(sync.fatal()).toBeNull()
     expect(sync.output.frames().at(-1)).toMatchObject({ type: 'RESET', reset: { code: 'DOWNSTREAM_ERROR' } })
+    expect(sync.resets).toEqual([downstreamReset])
 
     const asyncFailure = await setupDaemon(async () => {
       throw new Error('async consumer failed')
@@ -1502,6 +1824,7 @@ describe('downstream failures reset only the affected stream', () => {
     await tick()
     expect(asyncFailure.fatal()).toBeNull()
     expect(asyncFailure.output.frames().at(-1)).toMatchObject({ type: 'RESET', reset: { code: 'DOWNSTREAM_ERROR' } })
+    expect(asyncFailure.resets).toEqual([downstreamReset])
   })
 
   it('resets on synchronous and asynchronous END consumer failures', async () => {
@@ -1513,6 +1836,7 @@ describe('downstream failures reset only the affected stream', () => {
     sync.daemon.receive(frame({ type: 'END', streamId: 1 }))
     await tick()
     expect(sync.output.frames().at(-1)).toMatchObject({ type: 'RESET', reset: { code: 'DOWNSTREAM_ERROR' } })
+    expect(sync.resets).toEqual([downstreamReset])
 
     const asyncFailure = await setupDaemon(undefined, {
       onEnd: async () => {
@@ -1522,6 +1846,7 @@ describe('downstream failures reset only the affected stream', () => {
     asyncFailure.daemon.receive(frame({ type: 'END', streamId: 1 }))
     await tick()
     expect(asyncFailure.output.frames().at(-1)).toMatchObject({ type: 'RESET', reset: { code: 'DOWNSTREAM_ERROR' } })
+    expect(asyncFailure.resets).toEqual([downstreamReset])
   })
 
   it('resets on synchronous and asynchronous CLOSE consumer failures', async () => {
@@ -1533,6 +1858,7 @@ describe('downstream failures reset only the affected stream', () => {
     sync.daemon.receive(frame({ type: 'CLOSE', streamId: 1, close: { code: 1000, reason: '' } }))
     await tick()
     expect(sync.output.frames().at(-1)).toMatchObject({ type: 'RESET', reset: { code: 'DOWNSTREAM_ERROR' } })
+    expect(sync.resets).toEqual([downstreamReset])
 
     const asyncFailure = await setupDaemon(undefined, {
       onClose: async () => {
@@ -1542,6 +1868,7 @@ describe('downstream failures reset only the affected stream', () => {
     asyncFailure.daemon.receive(frame({ type: 'CLOSE', streamId: 1, close: { code: 1000, reason: '' } }))
     await tick()
     expect(asyncFailure.output.frames().at(-1)).toMatchObject({ type: 'RESET', reset: { code: 'DOWNSTREAM_ERROR' } })
+    expect(asyncFailure.resets).toEqual([downstreamReset])
   })
 })
 
