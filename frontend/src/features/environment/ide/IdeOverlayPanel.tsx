@@ -40,6 +40,7 @@ export interface IdeOverlayPanelProps {
 
 const IDE_SESSION_PROBE_INTERVAL_MS = 10_000
 const IDE_SESSION_PROBE_TIMEOUT_MS = 5_000
+const IDE_RECOVERY_ATTEMPT_LIMIT = 3
 
 /**
  * 安全格式化面向用户的错误文案：
@@ -80,6 +81,8 @@ export function IdeOverlayPanel({
   const [directoryError, setDirectoryError] = useState<string | null>(null)
   const [isIframeLoaded, setIsIframeLoaded] = useState(false)
   const [confirmCloseOpen, setConfirmCloseOpen] = useState(false)
+  const [sessionRecoveryFailed, setSessionRecoveryFailed] = useState(false)
+  const [isSessionRecoveryRetrying, setIsSessionRecoveryRetrying] = useState(false)
 
   const { registerIdeView } = useIdeLifecycle()
   const activeViewRef = useRef<EnvironmentIdeViewDTO | null>(null)
@@ -114,6 +117,24 @@ export function IdeOverlayPanel({
   const probingRef = useRef(false)
   const probeAbortRef = useRef<AbortController | null>(null)
   const wasEnvironmentReadyRef = useRef<boolean | null>(null)
+  // 连续恢复预算：每次真正调用 createIdeView 的重开消耗一次，HTTP 创建成功本身不重置。
+  // 只有探测返回 204 确认当前会话健康、手动重试、全新打开或关闭才开启新一轮预算。
+  const recoveryAttemptsRef = useRef(0)
+  const recoveryExhaustedRef = useRef(false)
+
+  const resetSessionRecovery = useCallback(() => {
+    recoveryAttemptsRef.current = 0
+    recoveryExhaustedRef.current = false
+    setSessionRecoveryFailed(false)
+    setIsSessionRecoveryRetrying(false)
+  }, [])
+
+  const markSessionRecoveryFailed = useCallback(() => {
+    recoveryExhaustedRef.current = true
+    if (mountedRef.current) {
+      setSessionRecoveryFailed(true)
+    }
+  }, [])
 
   useEffect(() => {
     mountedRef.current = true
@@ -149,6 +170,8 @@ export function IdeOverlayPanel({
         return
       }
       const epoch = operationEpochRef.current
+      // 首次打开或关闭后重新打开属于全新恢复周期。
+      resetSessionRecovery()
       needsReopenRef.current = false
       pendingLoadProbeRef.current = false
       openInFlightRef.current = true
@@ -208,16 +231,19 @@ export function IdeOverlayPanel({
       openingPromiseRef.current = promise
       await promise
     },
-    [viewId, t],
+    [viewId, t, resetSessionRecovery],
   )
 
   // 用同一 viewId 重开已失效的视图；失败保留旧 iframe，needsReopen 留待下一轮探测。
+  // 每次真正发出的 createIdeView 都消耗一次连续恢复预算，成功仅替换 iframe，不在此重置预算。
   const reopenView = useCallback(
     async (target: EnvironmentIdeViewDTO) => {
       if (openInFlightRef.current || closeInFlightRef.current) {
         return
       }
       const epoch = operationEpochRef.current
+      recoveryAttemptsRef.current += 1
+      const attempt = recoveryAttemptsRef.current
       openInFlightRef.current = true
       const promise = (async () => {
         let reopened: EnvironmentIdeViewDTO
@@ -226,7 +252,14 @@ export function IdeOverlayPanel({
           res.entryUrl = validateIdeEntryUrl(res.entryUrl, target.environmentId)
           reopened = res
         } catch {
-          // 旧 iframe 仍保留；下个探测周期再试。
+          // 旧 iframe 仍保留；失败请求同样消耗预算，达到上限后停止自动重开。
+          if (
+            operationEpochRef.current === epoch
+            && mountedRef.current
+            && attempt >= IDE_RECOVERY_ATTEMPT_LIMIT
+          ) {
+            markSessionRecoveryFailed()
+          }
           return
         }
         if (operationEpochRef.current !== epoch || !mountedRef.current) {
@@ -244,6 +277,9 @@ export function IdeOverlayPanel({
         setView(reopened)
         setStatus('ready')
         setIsIframeLoaded(false)
+        if (attempt >= IDE_RECOVERY_ATTEMPT_LIMIT) {
+          markSessionRecoveryFailed()
+        }
       })()
       openingPromiseRef.current = promise
       try {
@@ -252,7 +288,7 @@ export function IdeOverlayPanel({
         openInFlightRef.current = false
       }
     },
-    [viewId],
+    [viewId, markSessionRecoveryFailed],
   )
 
   // 探测会话：onLoad 的非 204 只标记重开，周期或 ready 上升沿才执行恢复；
@@ -309,6 +345,11 @@ export function IdeOverlayPanel({
       }
       const loadIntent = loadIntentAtStart || pendingLoadProbeRef.current
       pendingLoadProbeRef.current = false
+      // 204 是当前会话仍健康的唯一确认，只有它能清空失败状态并复位连续恢复预算。
+      // 注意：既有 needsReopen 在 204 下仍按原设计执行一次重开，该次重开会消耗新预算的一次。
+      if (status === 204) {
+        resetSessionRecovery()
+      }
       if (loadIntent) {
         if (status !== 204) {
           needsReopenRef.current = true
@@ -321,12 +362,40 @@ export function IdeOverlayPanel({
         return
       }
       if (!needsReopenRef.current || status === 503 || status === null) {
+        // 503/未知既不代表会话恢复，也不消耗恢复预算。
+        return
+      }
+      if (
+        recoveryExhaustedRef.current
+        || recoveryAttemptsRef.current >= IDE_RECOVERY_ATTEMPT_LIMIT
+      ) {
+        markSessionRecoveryFailed()
         return
       }
       await reopenView(active)
     },
-    [reopenView],
+    [reopenView, resetSessionRecovery, markSessionRecoveryFailed],
   )
+
+  // 手动重试：用户明确开启新一轮恢复预算，但仍复用 reopenView 的单飞与 epoch 防线。
+  // 探测、打开或关闭在途时忽略点击，避免并发 create 或丢失 close 隔离。
+  const handleRetrySessionRecovery = useCallback(() => {
+    if (openInFlightRef.current || closeInFlightRef.current || probingRef.current) {
+      return
+    }
+    const active = activeViewRef.current
+    if (active == null) {
+      return
+    }
+    recoveryAttemptsRef.current = 0
+    recoveryExhaustedRef.current = false
+    setIsSessionRecoveryRetrying(true)
+    void reopenView(active).finally(() => {
+      if (mountedRef.current) {
+        setIsSessionRecoveryRetrying(false)
+      }
+    })
+  }, [reopenView])
 
   // iframe 加载完成处理：探测一次会话并只记录重开意图，同时消费 pending 的 shell terminal 动作
   const handleIframeLoaded = useCallback(() => {
@@ -479,6 +548,7 @@ export function IdeOverlayPanel({
     activeViewRef.current = null
     needsReopenRef.current = false
     pendingLoadProbeRef.current = false
+    resetSessionRecovery()
     setView(null)
     setStatus('idle')
     setIsIframeLoaded(false)
@@ -490,7 +560,7 @@ export function IdeOverlayPanel({
     onIdeMountedChangeRef.current?.(false)
     onCloseRef.current?.()
     return true
-  }, [viewId, t])
+  }, [viewId, t, resetSessionRecovery])
 
   const executeClose = useCallback(async () => {
     const success = await requestClose()
@@ -706,6 +776,21 @@ export function IdeOverlayPanel({
       {errorMessage ? (
         <div className="ide-panel-error-banner" data-testid="ide-error-banner">
           {errorMessage}
+        </div>
+      ) : null}
+
+      {sessionRecoveryFailed && view != null ? (
+        <div className="ide-panel-recovery-banner" role="alert" data-testid="ide-recovery-error">
+          <span>{t('ai.ide.sessionRecoveryFailed')}</span>
+          <Button
+            variant="ghost"
+            size="compact"
+            loading={isSessionRecoveryRetrying}
+            onClick={handleRetrySessionRecovery}
+            data-testid="ide-session-retry-btn"
+          >
+            {t('shared.retry')}
+          </Button>
         </div>
       ) : null}
 
