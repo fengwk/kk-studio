@@ -135,8 +135,9 @@ test('daemon-ci runs the full Node daemon suite on the five release targets', ()
 })
 
 test('every daemon coverage gate builds the tested JavaScript first', () => {
-    // Daemon 的 Vitest alias 读取 dist；仅 check 不会生成真实被测代码。
-    for (const [source, job] of [[CI, 'node_daemon'], [RELEASE, 'validate_daemon']]) {
+    // Daemon 的 Vitest alias 读取 dist；仅 check 不会生成真实被测代码。覆盖率只在 daemon-ci
+    // 矩阵执行，release stage 只构建发行 JS 并运行仓库脚本测试。
+    for (const [source, job] of [[CI, 'node_daemon']]) {
         const commands = stepsOf(jobBlock(source, job))
             .map((step) => stepField(step, 'run') === '|' ? stepRun(step) : stepField(step, 'run') ?? '')
             .join('\n')
@@ -149,23 +150,21 @@ test('every daemon coverage gate builds the tested JavaScript first', () => {
 test('Node daemon release and installer jobs do not require a JDK toolchain', () => {
     // 发行 fixture 已使用 Node/tar，不再需要退役 Java Daemon 的 jar 工具。
     assert.doesNotMatch(RELEASE, /actions\/setup-java@|JAVA_VERSION/u)
-    for (const name of ['validate_unix_daemon', 'validate_windows_daemon']) {
-        assert.doesNotMatch(jobBlock(DOCKER, name), /actions\/setup-java@|JAVA_VERSION/u)
+    for (const name of ['validate_unix_daemon', 'validate_windows_daemon', 'validate_daemon']) {
+        assert.throws(() => jobBlock(DOCKER, name), new RegExp(`missing job: ${name}`, 'u'))
+        assert.throws(() => jobBlock(RELEASE, name), new RegExp(`missing job: ${name}`, 'u'))
     }
 })
 
-test('daemon-ci pins the daemon lockfile cache and stays a read-only push/pull-request gate', () => {
+test('daemon-ci is a pull-request and reusable gate without a duplicate push trigger', () => {
     const triggers = topLevelSection(CI, 'on')
     assert.match(triggers, /^ {2}workflow_call:$/m)
     assert.match(triggers, /^ {2}workflow_dispatch:$/m)
-    const push = triggers.match(/^ {2}push:\n([\s\S]*?)(?=^ {2}\w)/m)?.[1]
-    assert.ok(push, 'missing push trigger')
-    assert.deepEqual(
-        push.match(/^ {4}branches:\n((?: {6}- .+\n)+)/m)?.[1]?.match(/^ {6}- (.+)$/gm)?.map((line) => line.trim()),
-        ['- main', '- dev'],
-    )
-    assert.match(push, /^ {4}paths:$/m)
-    assert.match(triggers, /^ {2}pull_request:$/m)
+    assert.doesNotMatch(triggers, /^ {2}push:$/m, 'docker-publish and daemon-release own the main/tag invocations')
+    const pullRequest = triggers.match(/^ {2}pull_request:\n([\s\S]*?)(?=^ {2}\w)/m)?.[1]
+    assert.ok(pullRequest, 'missing pull_request trigger')
+    assert.match(pullRequest, /^ {4}paths:$/m)
+    assert.match(pullRequest, /daemon\/\*\*/u)
     assert.match(topLevelSection(CI, 'permissions'), /^ {2}contents: read$/m)
     assert.match(topLevelSection(CI, 'concurrency'), /^ {2}cancel-in-progress: true$/m)
 
@@ -230,8 +229,7 @@ test('the release pipeline smoke-tests every staged archive on its own host', ()
     assert.match(publishNeeds, /^ {6}- stage$/m)
     const stageNeeds = jobBlock(RELEASE, 'stage').match(/^ {4}needs:\n((?: {6}- \w+\n)+)/m)?.[1]
     assert.match(stageNeeds, /^ {6}- daemon_ci$/m)
-    assert.match(stageNeeds, /^ {6}- validate_daemon$/m)
-    assert.match(stageNeeds, /^ {6}- validate_windows_daemon$/m)
+    assert.doesNotMatch(stageNeeds, /validate_daemon|validate_windows_daemon/u)
 
     // 烟测入口必须真实使用归档自带的冻结运行时，并在不含用户 Node/Java 的 PATH 下调用。
     const smokeScript = readFileSync(path.join(ROOT, 'scripts/daemon/smoke-archive.sh'), 'utf8')
@@ -280,7 +278,7 @@ test('the release workflow is read-only except for the publishing job', () => {
     // 默认最小权限；只有真正写 Release 的 job 才要 contents: write。
     assert.match(topLevelSection(RELEASE, 'permissions'), /^ {2}contents: read$/m)
     assert.match(jobBlock(RELEASE, 'publish'), /^ {4}permissions:\n {6}contents: write$/m)
-    for (const job of ['stage', 'smoke_archives', 'validate_daemon', 'validate_windows_daemon']) {
+    for (const job of ['stage', 'smoke_archives']) {
         assert.doesNotMatch(jobBlock(RELEASE, job), /^ {4}permissions:\n {6}contents: write$/m, `${job} must not gain write access`)
     }
 })
@@ -434,9 +432,8 @@ test('the release pipeline reuses the same matrix and cannot publish without it'
 
     const needs = jobBlock(RELEASE, 'stage').match(/^ {4}needs:\n((?: {6}- \w+\n)+)/m)?.[1]
     assert.ok(needs, 'missing stage needs')
-    for (const required of [reused.name, 'validate_daemon', 'validate_windows_daemon']) {
-        assert.match(needs, new RegExp(`^ {6}- ${required}$`, 'm'))
-    }
+    assert.match(needs, new RegExp(`^ {6}- ${reused.name}$`, 'm'))
+    assert.doesNotMatch(needs, /validate_daemon|validate_windows_daemon/u)
     const publishNeeds = jobBlock(RELEASE, 'publish').match(/^ {4}needs:\n((?: {6}- \w+\n)+)/m)?.[1]
     assert.match(publishNeeds, /^ {6}- smoke_archives$/m)
     assert.match(topLevelSection(RELEASE, 'on'), /^ {4}tags:$/m)
@@ -450,12 +447,10 @@ test('full repository validation reuses the daemon matrix and installs archive p
     const publish = jobBlock(DOCKER, 'publish')
     assert.match(publish, /^ {6}- daemon_ci$/m)
     assert.match(publish, /needs\.daemon_ci\.result == 'success'/u)
-    for (const [source, job] of [[DOCKER, 'validate'], [DOCKER, 'validate_unix_daemon'], [RELEASE, 'stage']]) {
+    for (const [source, job] of [[DOCKER, 'validate'], [RELEASE, 'stage']]) {
         const steps = stepsOf(jobBlock(source, job))
         const install = steps.findIndex((step) => stepField(step, 'run') === 'npm --prefix daemon ci')
-        const scriptTests = steps.findIndex((step) => stepField(step, 'name') === (
-            job === 'validate_unix_daemon' ? 'Test installer with system Bash' : 'Run repository script tests'
-        ))
+        const scriptTests = steps.findIndex((step) => stepField(step, 'name') === 'Run repository script tests')
         assert.ok(install >= 0 && scriptTests > install, `${job} must install the real tar parser before fixtures`)
     }
 })

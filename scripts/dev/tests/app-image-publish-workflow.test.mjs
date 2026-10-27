@@ -10,11 +10,23 @@ const WORKFLOW = readText(path.join(REPOSITORY_ROOT, '.github/workflows/docker-p
 
 test('test intent: dev and main build one Dockerfile and push one image repository', () => {
   assert.ok(WORKFLOW.includes('file: deploy/local/Dockerfile'))
+  assert.ok(WORKFLOW.includes('file: ${{ github.workspace }}/deploy/local/Dockerfile'))
   // Assembled so this file does not itself count as a live reference to the removed node.
   assert.ok(!WORKFLOW.includes('deploy/' + 'dev'))
   assert.ok(!WORKFLOW.includes('kk-studio-' + 'dev'))
   assert.ok(WORKFLOW.includes('${{ secrets.DOCKERHUB_NAMESPACE }}/kk-studio:${{ steps.target.outputs.tag }}'))
   assert.ok(WORKFLOW.includes('${{ secrets.DOCKERHUB_NAMESPACE }}/kk-studio:${{ github.sha }}'))
+})
+
+test('test intent: main reuses the verified artifact while dev keeps the source build', () => {
+  // The main path downloads the same-run artifact and selects the explicit Dockerfile target;
+  // dev keeps the source context and the default source stage.
+  assert.ok(WORKFLOW.includes('name: kk-studio-app-${{ github.sha }}'))
+  assert.ok(WORKFLOW.includes('target: verified-artifact'))
+  assert.ok(WORKFLOW.includes('context: ${{ runner.temp }}/verified-app'))
+  assert.ok(WORKFLOW.includes('node scripts/dev/ci/app-artifact.mjs verify'))
+  assert.ok(!WORKFLOW.includes('run-id:'))
+  assert.ok(!WORKFLOW.includes('mvn -B -ntp verify'))
 })
 
 test('test intent: the mutable tag is selected fail-closed from the pushed branch', () => {
@@ -26,11 +38,14 @@ test('test intent: the mutable tag is selected fail-closed from the pushed branc
 })
 
 test('test intent: push validation stays main-only and credentials stay in secrets', () => {
-  // Push gates stay on main; manual validation is opt-in and never a build credential.
+  // Push gates stay on main; manual validation is opt-in and never a build credential. Preflight
+  // is intentionally unconditional so dev also checks version/docs/sensitive data.
   const gate =
     "    if: github.ref_name == 'main' || (github.event_name == 'workflow_dispatch' && inputs.validate_only)\n"
-  assert.equal(WORKFLOW.split(gate).length - 1, 4)
+  assert.equal(WORKFLOW.split(gate).length - 1, 3)
+  assert.ok(WORKFLOW.includes("needs.preflight.result == 'success'"))
   assert.ok(WORKFLOW.includes("needs.validate.result == 'skipped'"))
+  assert.ok(WORKFLOW.includes("needs.validate_frontend.result == 'skipped'"))
   assert.ok(WORKFLOW.includes('!cancelled()'))
   assert.ok(WORKFLOW.includes('password: ${{ secrets.DOCKERHUB_TOKEN }}'))
   assert.ok(!WORKFLOW.includes('build-args'))
