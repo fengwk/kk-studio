@@ -108,7 +108,9 @@ export function IdeOverlayPanel({
   const lastHandledActionIdRef = useRef(0)
   const pendingShellActionRef = useRef<number | null>(null)
   // 会话探测与自动重开：needsReopen 跨周期保留，直到一次成功替换或视图关闭。
+  // pendingLoadProbeRef 记录 onLoad 的探测意图；若已有探测在途，其完成状态仍按“加载后”语义合并。
   const needsReopenRef = useRef(false)
+  const pendingLoadProbeRef = useRef(false)
   const probingRef = useRef(false)
   const probeAbortRef = useRef<AbortController | null>(null)
   const wasEnvironmentReadyRef = useRef<boolean | null>(null)
@@ -148,6 +150,7 @@ export function IdeOverlayPanel({
       }
       const epoch = operationEpochRef.current
       needsReopenRef.current = false
+      pendingLoadProbeRef.current = false
       openInFlightRef.current = true
       setStatus('opening')
       setErrorMessage(null)
@@ -236,6 +239,7 @@ export function IdeOverlayPanel({
           return
         }
         needsReopenRef.current = false
+        pendingLoadProbeRef.current = false
         activeViewRef.current = reopened
         setView(reopened)
         setStatus('ready')
@@ -251,26 +255,35 @@ export function IdeOverlayPanel({
     [viewId],
   )
 
-  // 探测会话：401/409 与 iframe onLoad 的非 204 标记重开；503 或网络未知只等待。
+  // 探测会话：onLoad 的非 204 只标记重开，周期或 ready 上升沿才执行恢复；
+  // 503 或网络未知只保留标记并等待。已有探测在途时，onLoad 意图合并到该结果，不排队重试。
   const probeAndRecover = useCallback(
-    async (markOnAnyNotReady: boolean) => {
+    async (trigger: 'load' | 'background') => {
+      if (trigger === 'load') {
+        pendingLoadProbeRef.current = true
+      }
       if (probingRef.current || !mountedRef.current) {
         return
       }
       const active = activeViewRef.current
       if (active == null) {
+        pendingLoadProbeRef.current = false
         return
       }
       let sessionUrl: string
       try {
         sessionUrl = deriveIdeSessionUrl(active.entryUrl ?? '')
       } catch {
+        pendingLoadProbeRef.current = false
         return
       }
       const epoch = operationEpochRef.current
       const controller = new AbortController()
       probeAbortRef.current = controller
       const timeout = window.setTimeout(() => controller.abort(), IDE_SESSION_PROBE_TIMEOUT_MS)
+      // 取走当前加载意图；探测期间到达的新 onLoad 会在完成时再次合并。
+      const loadIntentAtStart = pendingLoadProbeRef.current
+      pendingLoadProbeRef.current = false
       probingRef.current = true
       let status: number | null
       try {
@@ -291,14 +304,21 @@ export function IdeOverlayPanel({
         || activeViewRef.current?.environmentId !== active.environmentId
         || activeViewRef.current?.entryUrl !== active.entryUrl
       ) {
+        // 旧视图的迟到结果不能消费新视图的加载意图。
         return
       }
-      if (markOnAnyNotReady) {
+      const loadIntent = loadIntentAtStart || pendingLoadProbeRef.current
+      pendingLoadProbeRef.current = false
+      if (loadIntent) {
         if (status !== 204) {
           needsReopenRef.current = true
         }
       } else if (status === 401 || status === 409) {
         needsReopenRef.current = true
+      }
+      if (trigger === 'load') {
+        // 加载链只标记，避免错误页反复 load 立即触发重开风暴。
+        return
       }
       if (!needsReopenRef.current || status === 503 || status === null) {
         return
@@ -308,10 +328,10 @@ export function IdeOverlayPanel({
     [reopenView],
   )
 
-  // iframe 加载完成处理：探测一次会话，并消费 pending 的 shell terminal 动作
+  // iframe 加载完成处理：探测一次会话并只记录重开意图，同时消费 pending 的 shell terminal 动作
   const handleIframeLoaded = useCallback(() => {
     setIsIframeLoaded(true)
-    void probeAndRecover(true)
+    void probeAndRecover('load')
     const active = activeViewRef.current
     if (active && pendingShellActionRef.current != null) {
       pendingShellActionRef.current = null
@@ -325,7 +345,7 @@ export function IdeOverlayPanel({
   useEffect(() => {
     if (view == null) return
     const timer = window.setInterval(() => {
-      void probeAndRecover(false)
+      void probeAndRecover('background')
     }, IDE_SESSION_PROBE_INTERVAL_MS)
     return () => window.clearInterval(timer)
   }, [view, probeAndRecover])
@@ -336,7 +356,7 @@ export function IdeOverlayPanel({
     const wasReady = wasEnvironmentReadyRef.current
     wasEnvironmentReadyRef.current = ready
     if (view != null && ready && wasReady === false) {
-      void probeAndRecover(false)
+      void probeAndRecover('background')
     }
   }, [environment?.ready, view, probeAndRecover])
 
@@ -458,6 +478,7 @@ export function IdeOverlayPanel({
     closeInFlightRef.current = false
     activeViewRef.current = null
     needsReopenRef.current = false
+    pendingLoadProbeRef.current = false
     setView(null)
     setStatus('idle')
     setIsIframeLoaded(false)
