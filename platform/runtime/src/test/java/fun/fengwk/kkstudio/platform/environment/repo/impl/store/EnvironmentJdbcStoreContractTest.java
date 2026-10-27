@@ -14,13 +14,17 @@ import java.util.Arrays;
  */
 class EnvironmentJdbcStoreContractTest {
 
-  /** 意图：token 和配置同一条 CAS SQL 更新，绝不包含 name。 */
+  /** 意图：token 和配置同一条 CAS SQL 更新，绝不包含 name；token 变化时同一语句清空安装 code。 */
   @Test
-  void updateByIdNeverWritesName() {
+  void updateByIdNeverWritesNameAndClearsInstallCodeOnTokenChange() {
     String sql = EnvironmentJdbcStore.UPDATE_BY_ID_SQL;
 
     assertTrue(sql.contains("registration_token_hash = :registrationTokenHash"), sql);
     assertTrue(sql.contains("install_config = cast(:installConfigJson as jsonb)"), sql);
+    assertTrue(
+        sql.contains(
+            "when registration_token_hash is distinct from :registrationTokenHash then null"),
+        sql);
     assertTrue(sql.contains("version = version + 1"), sql);
     assertFalse(sql.contains("name"), "environment name must never be updated: " + sql);
   }

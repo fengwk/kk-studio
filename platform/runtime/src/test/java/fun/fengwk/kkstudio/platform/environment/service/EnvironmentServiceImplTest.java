@@ -10,7 +10,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -350,7 +349,7 @@ class EnvironmentServiceImplTest {
     assertEquals("/home/dev", card.getHomeDirectory());
   }
 
-  /** 测试意图：兑换安装 code 即签发新凭证写入脚本，库内只更新摘要，同一 code 无法再次兑换。 */
+  /** 测试意图：兑换安装 code 由仓库原子清 code、轮换凭证并写入脚本；签发不推进版本，同一 code 无法再次兑换。 */
   @Test
   void installationScriptIssuesAFreshTokenAndConsumesTheCode() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
@@ -364,27 +363,23 @@ class EnvironmentServiceImplTest {
     env.setInstallConfig(config);
     when(repo.getById(ENV_ID)).thenReturn(env);
     when(repo.lockById(ENV_ID)).thenReturn(env);
-    when(repo.updateById(env, 4L)).thenReturn(true);
 
     AtomicReference<String> savedCodeHash = new AtomicReference<>();
     AtomicReference<String> savedTokenHash = new AtomicReference<>();
-    doAnswer(
-            invocation -> {
-              savedCodeHash.set(invocation.getArgument(1));
-              savedTokenHash.set(invocation.getArgument(2));
-              return null;
-            })
-        .when(repo)
-        .saveInstallCode(eq(ENV_ID), any(), any(), any());
-
-    when(repo.consumeInstallCode(eq(ENV_ID), any(), any(), any()))
+    when(repo.saveInstallCode(eq(ENV_ID), eq(4L), any(), any()))
         .thenAnswer(
             invocation -> {
-              String codeHash = invocation.getArgument(1);
-              String tokenHash = invocation.getArgument(2);
-              if (Objects.equals(savedCodeHash.get(), codeHash)
-                  && Objects.equals(savedTokenHash.get(), tokenHash)) {
+              savedCodeHash.set(invocation.getArgument(2));
+              return true;
+            });
+    when(repo.redeemInstallCode(eq(ENV_ID), eq(4L), any(), any()))
+        .thenAnswer(
+            invocation -> {
+              String codeHash = invocation.getArgument(2);
+              String tokenHash = invocation.getArgument(3);
+              if (Objects.equals(savedCodeHash.get(), codeHash)) {
                 savedCodeHash.set(null);
+                savedTokenHash.set(tokenHash);
                 return true;
               }
               return false;
@@ -398,8 +393,8 @@ class EnvironmentServiceImplTest {
     verify(repo)
         .saveInstallCode(
             eq(ENV_ID),
+            eq(4L),
             eq(EnvironmentInstallCodes.hash(issued.getCode())),
-            eq(h("secret-token")),
             eq(NOW.plus(Duration.ofMinutes(5))));
 
     String tampered =
@@ -411,15 +406,20 @@ class EnvironmentServiceImplTest {
     String script = service.installationScript(EnvironmentId.of(ENV_ID), issued.getCode());
 
     assertFalse(script.contains("secret-token"), "the old token is never recoverable");
-    assertNotEquals(h("secret-token"), env.getRegistrationTokenHash());
-    verify(repo).updateById(env, 4L);
+    verify(repo)
+        .redeemInstallCode(
+            eq(ENV_ID),
+            eq(4L),
+            eq(EnvironmentInstallCodes.hash(issued.getCode())),
+            eq(savedTokenHash.get()));
     assertTrue(
-        script.contains(tokenFor(env.getRegistrationTokenHash(), script)),
+        script.contains(tokenFor(savedTokenHash.get(), script)),
         "the script carries the plaintext whose hash is now stored");
     assertThrows(
         AiValidationException.class,
         () -> service.installationScript(EnvironmentId.of(ENV_ID), issued.getCode()),
-        "a redeemed code is bound to the old hash and cannot be reused");
+        "a redeemed code cannot be reused");
+    verify(repo, never()).updateById(any(), anyLong());
     verify(repo, never()).getByRegistrationTokenHash(any());
     assertThrows(
         AiValidationException.class,
