@@ -8,6 +8,8 @@ import type {
   CapabilityExecutor,
   CapabilityResult,
   DaemonConfig,
+  DataBindHandler,
+  IdeLeaseHandler,
   IdeService,
   ManagedProcess,
   ProcessExit,
@@ -16,8 +18,17 @@ import type {
 } from '../src/contracts.js'
 import { DAEMON_VERSION } from '../src/config.js'
 import { PROTOCOL_VERSION } from '../src/generated/protocol-contract.js'
-import { CAPABILITY_CATALOG_VERSION, encodeInvoke, decodeEnvelope, type Envelope } from '../src/protocol.js'
-import { Runtime, type TemporaryResourceSweeper, type UpdatePort } from '../src/runtime.js'
+import {
+  CAPABILITY_CATALOG_VERSION,
+  READY_CAPABILITIES_VERSION,
+  decodeCapabilities,
+  decodeEnvelope,
+  decodeHeartbeat,
+  decodeRuntimeStatus,
+  encodeInvoke,
+  type Envelope,
+} from '../src/protocol.js'
+import { Runtime, type TemporaryResourceSweeper, type UpdatePort, type UpdateProgressReporter } from '../src/runtime.js'
 import { fileCapabilities } from '../src/coding/files.js'
 import { processCapabilities } from '../src/coding/process.js'
 import { artifactFixture } from './support/update-fixture.js'
@@ -75,10 +86,14 @@ function buildRuntime(options: {
   resources?: ResourceUploader
   update?: UpdatePort
   ide?: IdeService
+  dataBind?: DataBindHandler
+  ideLease?: IdeLeaseHandler
   temporaryResources?: TemporaryResourceSweeper
   heartbeatIntervalMillis?: number
   maxConcurrentInvocations?: number
   ideCommandTimeoutMillis?: number
+  monotonicNow?: () => number
+  daemonVersion?: string
 } = {}): Setup {
   const transport = new FakeTransport()
   const config = testConfig()
@@ -91,12 +106,16 @@ function buildRuntime(options: {
     resources: options.resources,
     update: options.update,
     ide: options.ide,
+    dataBind: options.dataBind,
+    ideLease: options.ideLease,
     temporaryResources: options.temporaryResources,
     heartbeatIntervalMillis: options.heartbeatIntervalMillis ?? 10_000,
     initialReconnectDelayMillis: 5,
     maxReconnectDelayMillis: 20,
     maxConcurrentInvocations: options.maxConcurrentInvocations,
     ideCommandTimeoutMillis: options.ideCommandTimeoutMillis,
+    monotonicNow: options.monotonicNow,
+    daemonVersion: options.daemonVersion,
   })
   return { transport, runtime, config }
 }
@@ -131,7 +150,8 @@ describe('runtime handshake', () => {
     expect(setup.runtime.getBoundEnvironmentId()).toBe(ENV)
     const ready = sent(setup.transport).find((envelope) => envelope.messageType === 'READY')
     expect(ready?.environmentId).toBe(ENV)
-    expect((ready?.payload as { version: number }).version).toBe(5)
+    expect((ready?.payload as { version: number }).version).toBe(READY_CAPABILITIES_VERSION)
+    expect((ready?.payload as { runtimeStatus: { revision: string } }).runtimeStatus.revision).toBe('1')
     setup.runtime.close()
   })
 
@@ -996,10 +1016,51 @@ describe('runtime update handling', () => {
     setup.runtime.close()
   })
 
-  it('rejects a different update while one is in progress', async () => {
+  it('rejects a different target while one is in progress and reports the active target', async () => {
     const gate = new Promise<void>(() => {})
+    let handled = 0
     const update: UpdatePort = {
       async handleUpdate() {
+        handled++
+        await gate
+        return { phase: 'PREPARED' }
+      },
+    }
+    const setup = buildRuntime({ update })
+    await handshake(setup)
+    setup.transport.receive(serverMessage('UPDATE', { environmentId: ENV, payload: command }))
+    await tick()
+    setup.transport.receive(
+      serverMessage('UPDATE', {
+        environmentId: ENV,
+        payload: {
+          ...command,
+          operationId: '44444444-4444-4555-8666-777777777777',
+          targetVersion: '9.9.10',
+          artifactUrl: command.artifactUrl.replaceAll(command.targetVersion, '9.9.10'),
+        },
+      }),
+    )
+    await tick()
+    const busy = sent(setup.transport).find(
+      (envelope) =>
+        envelope.messageType === 'UPDATE_RESULT' &&
+        (envelope.payload as { operationId: string }).operationId === '44444444-4444-4555-8666-777777777777',
+    )
+    expect((busy?.payload as { phase: string }).phase).toBe('FAILED')
+    expect((busy?.payload as { message: string }).message).toContain(command.targetVersion)
+    expect(handled).toBe(1)
+    setup.runtime.close()
+  })
+
+  it('returns the current snapshot for a same-target new command and rejects the same id with changed arguments', async () => {
+    const gate = new Promise<void>(() => {})
+    let handled = 0
+    const update: UpdatePort = {
+      async handleUpdate(_command, _config, _signal, reportProgress) {
+        handled++
+        reportProgress!({ downloadedBytes: 12, totalBytes: 100 })
+        reportProgress!({ downloadedBytes: 5, totalBytes: 100 })
         await gate
         return { phase: 'PREPARED' }
       },
@@ -1015,7 +1076,753 @@ describe('runtime update handling', () => {
       }),
     )
     await tick()
+    expect(handled).toBe(1)
+    const status = sent(setup.transport)
+      .filter((envelope) => envelope.messageType === 'RUNTIME_STATUS')
+      .at(-1)
+    expect((status?.payload as { status: { update: unknown } }).status.update).toMatchObject({
+      targetVersion: command.targetVersion,
+      downloadedBytes: 12,
+      totalBytes: 100,
+    })
+
+    setup.transport.receive(
+      serverMessage('UPDATE', { environmentId: ENV, payload: { ...command, artifactSha256: 'b'.repeat(64) } }),
+    )
+    await tick()
     expect(sent(setup.transport).some((envelope) => envelope.messageType === 'ERROR')).toBe(true)
+    expect(handled).toBe(1)
+    setup.runtime.close()
+  })
+
+  it('returns the current snapshot for an already installed target without invoking the updater', async () => {
+    let handled = 0
+    const update: UpdatePort = {
+      async handleUpdate() {
+        handled++
+        return { phase: 'PREPARED' }
+      },
+    }
+    const setup = buildRuntime({ update })
+    await handshake(setup)
+    setup.transport.receive(
+      serverMessage('UPDATE', {
+        environmentId: ENV,
+        payload: {
+          ...command,
+          targetVersion: DAEMON_VERSION,
+          artifactUrl: command.artifactUrl.replaceAll(command.targetVersion, DAEMON_VERSION),
+        },
+      }),
+    )
+    await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'RUNTIME_STATUS'))
+    expect(handled).toBe(0)
+    expect(
+      sent(setup.transport).some(
+        (envelope) =>
+          envelope.messageType === 'UPDATE_RESULT' &&
+          (envelope.payload as { operationId?: string }).operationId === command.operationId,
+      ),
+    ).toBe(false)
+    const status = sent(setup.transport)
+      .filter((envelope) => envelope.messageType === 'RUNTIME_STATUS')
+      .at(-1)
+    expect(decodeRuntimeStatus(JSON.stringify(status?.payload))).toEqual(setup.runtime.getRuntimeStatus())
+    expect(setup.runtime.getRuntimeStatus().status.update).toBeNull()
+    setup.runtime.close()
+  })
+
+  it('clears the update on explicit failure and ignores late progress callbacks', async () => {
+    const gate = Promise.withResolvers<void>()
+    let updateAttempts = 0
+    let reportProgress: UpdateProgressReporter | null = null
+    const update: UpdatePort = {
+      async handleUpdate(_command, _config, _signal, reporter) {
+        updateAttempts++
+        reportProgress = reporter ?? null
+        reporter!({ downloadedBytes: 12, totalBytes: 100 })
+        await gate.promise
+        throw new Error('download failed')
+      },
+    }
+    const setup = buildRuntime({ update, heartbeatIntervalMillis: 20 })
+    await handshake(setup)
+    setup.transport.receive(serverMessage('UPDATE', { environmentId: ENV, payload: command }))
+    await waitFor(() => reportProgress !== null)
+    await waitFor(() => setup.runtime.getRuntimeStatus().status.update?.downloadedBytes === 12)
+    const beforeFailure = setup.runtime.getRuntimeStatus()
+    gate.resolve()
+    await waitFor(
+      () =>
+        sent(setup.transport).some(
+          (envelope) => envelope.messageType === 'UPDATE_RESULT' && (envelope.payload as { phase: string }).phase === 'FAILED',
+        ),
+    )
+    const afterFailure = setup.runtime.getRuntimeStatus()
+    expect(afterFailure.status.update).toBeNull()
+    expect(BigInt(afterFailure.revision)).toBeGreaterThan(BigInt(beforeFailure.revision))
+    expect(
+      sent(setup.transport).some(
+        (envelope) =>
+          envelope.messageType === 'RUNTIME_STATUS' &&
+          decodeRuntimeStatus(JSON.stringify(envelope.payload)).status.update === null,
+      ),
+    ).toBe(true)
+
+    const statusCount = sent(setup.transport).filter((envelope) => envelope.messageType === 'RUNTIME_STATUS').length
+    reportProgress!({ downloadedBytes: 1, totalBytes: 100 })
+    await tick()
+    expect(sent(setup.transport).filter((envelope) => envelope.messageType === 'RUNTIME_STATUS')).toHaveLength(statusCount)
+    expect(setup.runtime.getRuntimeStatus()).toEqual(afterFailure)
+    await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'HEARTBEAT'))
+    const heartbeat = sent(setup.transport)
+      .filter((envelope) => envelope.messageType === 'HEARTBEAT')
+      .at(-1)
+    expect(decodeHeartbeat(JSON.stringify(heartbeat?.payload)).runtimeStatus).toEqual(afterFailure)
+
+    // 明确失败后同一目标的新 operation 可以重试；上一轮 update Promise 不占住准入门闩。
+    const retryOperationId = '44444444-4444-4555-8666-777777777777'
+    setup.transport.receive(
+      serverMessage('UPDATE', {
+        environmentId: ENV,
+        payload: { ...command, operationId: retryOperationId },
+      }),
+    )
+    await waitFor(() => updateAttempts === 2)
+    await waitFor(
+      () =>
+        sent(setup.transport).some(
+          (envelope) =>
+            envelope.messageType === 'UPDATE_RESULT' &&
+            (envelope.payload as { operationId: string }).operationId === retryOperationId &&
+            (envelope.payload as { phase: string }).phase === 'FAILED',
+        ),
+    )
+    setup.runtime.close()
+  })
+
+  it('blocks new invocations and IDE creation while an update is being prepared and releases them on failure', async () => {
+    const gate = Promise.withResolvers<void>()
+    let updateAttempts = 0
+    let capabilityCalls = 0
+    let ideCalls = 0
+    const update: UpdatePort = {
+      async handleUpdate() {
+        updateAttempts++
+        await gate.promise
+        throw new Error('download failed')
+      },
+    }
+    const setup = buildRuntime({
+      update,
+      capabilities: {
+        'fs.read': async (call) => {
+          capabilityCalls++
+          return textResult(call.invocationId)
+        },
+      },
+      ide: {
+        async handle() {
+          ideCalls++
+          return { ok: true }
+        },
+        async close() {},
+      },
+    })
+    await handshake(setup)
+    setup.transport.receive(serverMessage('UPDATE', { environmentId: ENV, payload: command }))
+    await waitFor(
+      () =>
+        sent(setup.transport).some(
+          (envelope) => envelope.messageType === 'UPDATE_RESULT' && (envelope.payload as { phase: string }).phase === 'ACCEPTED',
+        ),
+    )
+
+    setup.transport.receive(
+      serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-blocked', payload: invokePayload() }),
+    )
+    setup.transport.receive(
+      serverMessage('IDE_COMMAND', {
+        environmentId: ENV,
+        invocationId: 'ide-blocked',
+        payload: { action: 'OPEN_VIEW', viewId: ENV },
+      }),
+    )
+    await waitFor(() =>
+      sent(setup.transport).some(
+        (envelope) =>
+          envelope.messageType === 'UPDATE_RESULT' ||
+          envelope.messageType === 'IDE_RESULT' ||
+          envelope.messageType === 'FAILED',
+      ),
+    )
+    await tick()
+    const blockedInvocation = sent(setup.transport).find(
+      (envelope) => envelope.messageType === 'FAILED' && envelope.invocationId === 'inv-blocked',
+    )
+    expect((blockedInvocation?.payload as { message: string }).message).toContain('update admission is held')
+    expect(
+      sent(setup.transport).some(
+        (envelope) =>
+          envelope.messageType === 'IDE_RESULT' &&
+          envelope.invocationId === 'ide-blocked' &&
+          (envelope.payload as { ok: boolean }).ok === false,
+      ),
+    ).toBe(true)
+    expect(capabilityCalls).toBe(0)
+    expect(ideCalls).toBe(0)
+
+    gate.resolve()
+    await waitFor(
+      () =>
+        sent(setup.transport).some(
+          (envelope) => envelope.messageType === 'UPDATE_RESULT' && (envelope.payload as { phase: string }).phase === 'FAILED',
+        ),
+    )
+    setup.transport.receive(
+      serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-after-failure', payload: invokePayload() }),
+    )
+    await waitFor(() =>
+      sent(setup.transport).some(
+        (envelope) => envelope.messageType === 'COMPLETED' && envelope.invocationId === 'inv-after-failure',
+      ),
+    )
+    expect(capabilityCalls).toBe(1)
+    expect(updateAttempts).toBe(1)
+    setup.runtime.close()
+  })
+
+  it('keeps the admission gate held after PREPARED for new calls, views, data binds, and leases', async () => {
+    let updateCalls = 0
+    let ideCalls = 0
+    const update: UpdatePort = {
+      async handleUpdate() {
+        updateCalls++
+        return { phase: 'PREPARED' }
+      },
+    }
+    const setup = buildRuntime({
+      update,
+      ide: {
+        async handle() {
+          ideCalls++
+          return { ok: true }
+        },
+        async close() {},
+      },
+    })
+    await handshake(setup)
+    setup.transport.receive(serverMessage('UPDATE', { environmentId: ENV, payload: command }))
+    await waitFor(
+      () =>
+        sent(setup.transport).some(
+          (envelope) => envelope.messageType === 'UPDATE_RESULT' && (envelope.payload as { phase: string }).phase === 'PREPARED',
+        ),
+    )
+
+    setup.transport.receive(
+      serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-after-prepared', payload: invokePayload() }),
+    )
+    setup.transport.receive(
+      serverMessage('IDE_COMMAND', {
+        environmentId: ENV,
+        invocationId: 'ide-after-prepared',
+        payload: { action: 'OPEN_VIEW', viewId: ENV },
+      }),
+    )
+    setup.transport.receive(
+      serverMessage('DATA_BIND', {
+        environmentId: ENV,
+        payload: {
+          generation: '1',
+          ticket: 'A'.repeat(43),
+          streamUrl: 'https://studio.example.com/data',
+        },
+      }),
+    )
+    setup.transport.receive(
+      serverMessage('IDE_LEASE', {
+        environmentId: ENV,
+        payload: {
+          round: '1',
+          bindings: [
+            {
+              viewId: ENV,
+              documentId: '99999999-2222-4333-8444-555555555555',
+              bindingEpoch: '1',
+            },
+          ],
+        },
+      }),
+    )
+    await waitFor(
+      () =>
+        sent(setup.transport).filter((envelope) => envelope.messageType === 'ERROR').length >= 2,
+    )
+    await tick()
+    expect(
+      sent(setup.transport).some(
+        (envelope) =>
+          envelope.messageType === 'FAILED' &&
+          envelope.invocationId === 'inv-after-prepared' &&
+          (envelope.payload as { message: string }).message.includes('update admission is held'),
+      ),
+    ).toBe(true)
+    expect(
+      sent(setup.transport).some(
+        (envelope) =>
+          envelope.messageType === 'IDE_RESULT' &&
+          envelope.invocationId === 'ide-after-prepared' &&
+          (envelope.payload as { message: string }).message.includes('update is in progress'),
+      ),
+    ).toBe(true)
+    const errors = sent(setup.transport).filter((envelope) => envelope.messageType === 'ERROR')
+    expect(errors.some((envelope) => (envelope.payload as { message: string }).message.includes('not allowed while environment update'))).toBe(
+      true,
+    )
+    expect(setup.runtime.getRuntimeStatus().status.update?.targetVersion).toBe(command.targetVersion)
+    expect(ideCalls).toBe(0)
+
+    setup.transport.receive(
+      serverMessage('UPDATE', {
+        environmentId: ENV,
+        payload: { ...command, operationId: '44444444-4444-4555-8666-777777777777' },
+      }),
+    )
+    await tick()
+    expect(updateCalls).toBe(1)
+    expect(setup.runtime.getRuntimeStatus().status.update?.targetVersion).toBe(command.targetVersion)
+    setup.runtime.close()
+  })
+
+  it('uses the IDE admission view to reject UPDATE before taking the gate', async () => {
+    let canStart = false
+    let updateCalls = 0
+    const setup = buildRuntime({
+      ide: {
+        async handle() {
+          return { ok: true }
+        },
+        canStartUpdate: () => canStart,
+        async close() {},
+      },
+      update: {
+        async handleUpdate() {
+          updateCalls++
+          return { phase: 'PREPARED' }
+        },
+      },
+    })
+    await handshake(setup)
+    setup.transport.receive(serverMessage('UPDATE', { environmentId: ENV, payload: command }))
+    await waitFor(
+      () =>
+        sent(setup.transport).some(
+          (envelope) =>
+            envelope.messageType === 'UPDATE_RESULT' &&
+            (envelope.payload as { phase: string }).phase === 'FAILED' &&
+            (envelope.payload as { message: string }).message.includes('IDE views'),
+        ),
+    )
+    expect(updateCalls).toBe(0)
+
+    canStart = true
+    setup.transport.receive(
+      serverMessage('UPDATE', {
+        environmentId: ENV,
+        payload: { ...command, operationId: '44444444-4444-4555-8666-777777777777' },
+      }),
+    )
+    await waitFor(() => updateCalls === 1)
+    await waitFor(
+      () =>
+        sent(setup.transport).some(
+          (envelope) =>
+            envelope.messageType === 'UPDATE_RESULT' &&
+            (envelope.payload as { operationId: string }).operationId === '44444444-4444-4555-8666-777777777777' &&
+            (envelope.payload as { phase: string }).phase === 'PREPARED',
+        ),
+    )
+    setup.runtime.close()
+  })
+
+  it('keeps EXECUTION_EXITED and recovery semantics while protected work blocks UPDATE admission', async () => {
+    const release = Promise.withResolvers<void>()
+    let capabilityCalls = 0
+    let updateCalls = 0
+    const setup = buildRuntime({
+      update: {
+        async handleUpdate() {
+          updateCalls++
+          return { phase: 'PREPARED' }
+        },
+      },
+      capabilities: {
+        'fs.read': async (call, context) => {
+          capabilityCalls++
+          context.confirmExecutionExit()
+          await release.promise
+          return textResult(call.invocationId)
+        },
+      },
+    })
+    await handshake(setup)
+    setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-recover', payload: invokePayload() }))
+    await waitFor(() => capabilityCalls === 1)
+    setup.transport.receive(serverMessage('RECOVER', { environmentId: ENV, invocationId: 'inv-recover', payload: {} }))
+    await tick()
+    setup.transport.receive(serverMessage('UPDATE', { environmentId: ENV, payload: command }))
+    await waitFor(
+      () =>
+        sent(setup.transport).some(
+          (envelope) =>
+            envelope.messageType === 'UPDATE_RESULT' &&
+            (envelope.payload as { phase: string }).phase === 'FAILED' &&
+            (envelope.payload as { message: string }).message.includes('protected execution'),
+        ),
+    )
+    expect(updateCalls).toBe(0)
+
+    release.resolve()
+    await waitFor(() =>
+      sent(setup.transport).some(
+        (envelope) => envelope.messageType === 'EXECUTION_EXITED' && envelope.invocationId === 'inv-recover',
+      ),
+    )
+    const types = sent(setup.transport)
+      .filter((envelope) => envelope.invocationId === 'inv-recover')
+      .map((envelope) => envelope.messageType)
+    expect(types.indexOf('COMPLETED')).toBeGreaterThanOrEqual(0)
+    expect(types.indexOf('COMPLETED')).toBeLessThan(types.indexOf('EXECUTION_EXITED'))
+    expect(types.filter((messageType) => messageType === 'EXECUTION_EXITED')).toHaveLength(1)
+
+    await tick()
+    setup.transport.receive(
+      serverMessage('UPDATE', {
+        environmentId: ENV,
+        payload: { ...command, operationId: '44444444-4444-4555-8666-777777777777' },
+      }),
+    )
+    await waitFor(
+      () =>
+        sent(setup.transport).some(
+          (envelope) =>
+            envelope.messageType === 'UPDATE_RESULT' &&
+            (envelope.payload as { operationId: string }).operationId === '44444444-4444-4555-8666-777777777777' &&
+            (envelope.payload as { phase: string }).phase === 'PREPARED',
+        ),
+    )
+    expect(updateCalls).toBe(1)
+    setup.runtime.close()
+  })
+
+  it('delivers heartbeat and reconnect snapshots from the same cached progress state', async () => {
+    const gate = Promise.withResolvers<void>()
+    let reportProgress: UpdateProgressReporter | null = null
+    const update: UpdatePort = {
+      async handleUpdate(_command, _config, _signal, reporter) {
+        reportProgress = reporter ?? null
+        reporter!({ downloadedBytes: 20, totalBytes: 100 })
+        reporter!({ downloadedBytes: 10, totalBytes: 100 })
+        await gate.promise
+        return { phase: 'PREPARED' }
+      },
+    }
+    const setup = buildRuntime({ update, heartbeatIntervalMillis: 20 })
+    await handshake(setup)
+    const ready = sent(setup.transport).find((envelope) => envelope.messageType === 'READY')
+    const initial = decodeCapabilities(JSON.stringify(ready?.payload))
+    expect(initial.runtimeStatus).toEqual({
+      revision: '1',
+      status: { daemonVersion: DAEMON_VERSION, update: null },
+    })
+
+    setup.transport.receive(serverMessage('UPDATE', { environmentId: ENV, payload: command }))
+    await waitFor(() => reportProgress !== null)
+    await waitFor(() => setup.runtime.getRuntimeStatus().status.update?.downloadedBytes === 20)
+    const current = setup.runtime.getRuntimeStatus()
+    reportProgress!({ downloadedBytes: 10, totalBytes: 100 })
+    expect(setup.runtime.getRuntimeStatus()).toEqual(current)
+
+    await waitFor(() =>
+      sent(setup.transport).some(
+        (envelope) =>
+          envelope.messageType === 'HEARTBEAT' &&
+          decodeHeartbeat(JSON.stringify(envelope.payload)).runtimeStatus.status.update?.downloadedBytes === 20,
+      ),
+    )
+    const heartbeat = sent(setup.transport)
+      .filter((envelope) => envelope.messageType === 'HEARTBEAT')
+      .at(-1)
+    expect(decodeHeartbeat(JSON.stringify(heartbeat?.payload))).toEqual({
+      runtimeStatus: current,
+      ideLeaseRound: null,
+    })
+
+    setup.transport.disconnect()
+    await waitFor(() => setup.transport.connectCount >= 2)
+    setup.transport.receive(serverMessage('WELCOME', { environmentId: ENV, payload: welcomePayload }))
+    await waitFor(() => setup.runtime.getState() === 'READY')
+    const reconnectReady = sent(setup.transport)
+      .filter((envelope) => envelope.messageType === 'READY')
+      .at(-1)
+    const reconnected = decodeCapabilities(JSON.stringify(reconnectReady?.payload))
+    expect(reconnected.runtimeStatus).toEqual(current)
+    expect(setup.runtime.getUpdateProgress()).toEqual(current.status.update)
+    gate.resolve()
+    await waitFor(
+      () =>
+        sent(setup.transport).some(
+          (envelope) => envelope.messageType === 'UPDATE_RESULT' && (envelope.payload as { phase: string }).phase === 'PREPARED',
+        ),
+    )
+    setup.runtime.close()
+  })
+
+  it('uses the updater progress callback shape and the pull progress hook', async () => {
+    let pulled = 0
+    const gate = Promise.withResolvers<void>()
+    const update: UpdatePort = {
+      async handleUpdate(
+        _command,
+        _config,
+        _signal,
+        reportProgress?: (progress: { downloadedBytes: number; totalBytes: number | null }) => void,
+      ) {
+        // 与 r500-updater 的实际第四参数一致：进度对象，而不是两个位置参数。
+        reportProgress?.({ downloadedBytes: 33, totalBytes: 99 })
+        await gate.promise
+        return { phase: 'PREPARED' }
+      },
+      getProgress() {
+        pulled++
+        return { downloadedBytes: 33, totalBytes: 99 }
+      },
+    }
+    const setup = buildRuntime({ update })
+    await handshake(setup)
+    setup.transport.receive(serverMessage('UPDATE', { environmentId: ENV, payload: command }))
+    await waitFor(
+      () =>
+        sent(setup.transport).some(
+          (envelope) => envelope.messageType === 'UPDATE_RESULT' && (envelope.payload as { phase: string }).phase === 'ACCEPTED',
+        ),
+    )
+    expect(setup.runtime.getUpdateProgress()).toEqual({
+      targetVersion: command.targetVersion,
+      downloadedBytes: 33,
+      totalBytes: 99,
+    })
+    expect(pulled).toBeGreaterThan(0)
+    gate.resolve()
+    await tick()
+    setup.runtime.close()
+  })
+})
+
+describe('runtime extension handlers', () => {
+  const operationId = '33333333-4444-4555-8666-777777777777'
+  const command = {
+    operationId,
+    targetVersion: artifactFixture.targetVersion,
+    artifactUrl: artifactFixture.accepted[0]!.artifactUrl,
+    artifactSha256: artifactFixture.artifactSha256,
+  }
+  const binding = {
+    generation: '1',
+    ticket: 'A'.repeat(43),
+    streamUrl: 'https://studio.example.com/data?generation=1',
+  }
+  const lease = {
+    round: '1',
+    bindings: [
+      {
+        viewId: ENV,
+        documentId: '99999999-2222-4333-8444-555555555555',
+        bindingEpoch: '1',
+      },
+    ],
+  }
+
+  it('reports DATA_BIND explicitly when no handler is configured', async () => {
+    const setup = buildRuntime()
+    await handshake(setup)
+    setup.transport.receive(serverMessage('DATA_BIND', { environmentId: ENV, payload: binding }))
+    await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'ERROR'))
+    const error = sent(setup.transport).find((envelope) => envelope.messageType === 'ERROR')
+    expect((error?.payload as { message: string }).message).toContain('DATA_BIND handler is not configured')
+    setup.runtime.close()
+  })
+
+  it('validates DATA_BIND same-origin before invoking the configured handler', async () => {
+    const seen: unknown[] = []
+    const setup = buildRuntime({
+      dataBind: {
+        bind(value) {
+          seen.push(value)
+        },
+      },
+    })
+    await handshake(setup)
+    setup.transport.receive(
+      serverMessage('DATA_BIND', {
+        environmentId: ENV,
+        payload: { ...binding, streamUrl: 'https://other.example.com/data' },
+      }),
+    )
+    await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'ERROR'))
+    expect(seen).toEqual([])
+    expect(
+      (sent(setup.transport).find((envelope) => envelope.messageType === 'ERROR')?.payload as { message: string }).message,
+    ).toContain('same-origin')
+
+    setup.transport.receive(serverMessage('DATA_BIND', { environmentId: ENV, payload: binding }))
+    await waitFor(() => seen.length === 1)
+    expect(seen[0]).toEqual(binding)
+    setup.runtime.close()
+  })
+
+  it('keeps an active data connection in the UPDATE busy check until it converges', async () => {
+    const bindGate = Promise.withResolvers<void>()
+    const seenSignals: AbortSignal[] = []
+    let updateCalls = 0
+    const setup = buildRuntime({
+      dataBind: {
+        async bind(_value, signal) {
+          seenSignals.push(signal)
+          await bindGate.promise
+        },
+      },
+      update: {
+        async handleUpdate() {
+          updateCalls++
+          return { phase: 'PREPARED' }
+        },
+      },
+    })
+    await handshake(setup)
+    setup.transport.receive(serverMessage('DATA_BIND', { environmentId: ENV, payload: binding }))
+    await waitFor(() => seenSignals.length === 1)
+    expect(seenSignals[0]?.aborted).toBe(false)
+
+    setup.transport.receive(serverMessage('UPDATE', { environmentId: ENV, payload: command }))
+    await waitFor(
+      () =>
+        sent(setup.transport).some(
+          (envelope) =>
+            envelope.messageType === 'UPDATE_RESULT' &&
+            (envelope.payload as { phase: string }).phase === 'FAILED' &&
+            (envelope.payload as { message: string }).message.includes('data connection'),
+        ),
+    )
+    expect(updateCalls).toBe(0)
+
+    bindGate.resolve()
+    await tick()
+    await tick()
+    setup.transport.receive(
+      serverMessage('UPDATE', {
+        environmentId: ENV,
+        payload: { ...command, operationId: '44444444-4444-4555-8666-777777777777' },
+      }),
+    )
+    await waitFor(
+      () =>
+        sent(setup.transport).some(
+          (envelope) =>
+            envelope.messageType === 'UPDATE_RESULT' &&
+            (envelope.payload as { operationId: string }).operationId === '44444444-4444-4555-8666-777777777777' &&
+            (envelope.payload as { phase: string }).phase === 'PREPARED',
+        ),
+    )
+    expect(updateCalls).toBe(1)
+    setup.runtime.close()
+  })
+
+  it('reports asynchronous DATA_BIND failures as control errors', async () => {
+    const setup = buildRuntime({
+      dataBind: {
+        async bind() {
+          throw new Error('stream setup failed')
+        },
+      },
+    })
+    await handshake(setup)
+    setup.transport.receive(serverMessage('DATA_BIND', { environmentId: ENV, payload: binding }))
+    await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'ERROR'))
+    expect(
+      (sent(setup.transport).find((envelope) => envelope.messageType === 'ERROR')?.payload as { message: string }).message,
+    ).toContain('DATA_BIND handler failed: stream setup failed')
+    setup.runtime.close()
+  })
+
+  it('reports IDE_LEASE explicitly when no handler is configured', async () => {
+    const setup = buildRuntime()
+    await handshake(setup)
+    setup.transport.receive(serverMessage('IDE_LEASE', { environmentId: ENV, payload: lease }))
+    await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'ERROR'))
+    expect(
+      (sent(setup.transport).find((envelope) => envelope.messageType === 'ERROR')?.payload as { message: string }).message,
+    ).toContain('IDE_LEASE handler is not configured')
+    setup.runtime.close()
+  })
+
+  it('issues one-use, expiring IDE lease rounds only while views are active', async () => {
+    let activeViews = false
+    let now = 0
+    const applied: unknown[] = []
+    const setup = buildRuntime({
+      ideLease: {
+        hasActiveViews: () => activeViews,
+        apply(value) {
+          applied.push(value)
+        },
+      },
+      monotonicNow: () => now,
+    })
+    await handshake(setup)
+
+    const heartbeat = (): ReturnType<typeof decodeHeartbeat> => {
+      const internals = setup.runtime as unknown as { sendHeartbeat(): void }
+      internals.sendHeartbeat()
+      const latest = sent(setup.transport)
+        .filter((envelope) => envelope.messageType === 'HEARTBEAT')
+        .at(-1)
+      return decodeHeartbeat(JSON.stringify(latest?.payload))
+    }
+
+    expect(heartbeat().ideLeaseRound).toBeNull()
+    setup.transport.receive(serverMessage('IDE_LEASE', { environmentId: ENV, payload: lease }))
+    await tick()
+    expect(applied).toEqual([])
+
+    activeViews = true
+    expect(heartbeat().ideLeaseRound).toBe('1')
+    setup.transport.receive(serverMessage('IDE_LEASE', { environmentId: ENV, payload: lease }))
+    await waitFor(() => applied.length === 1)
+    expect(applied[0]).toEqual(lease)
+
+    // 同一轮只接受一次证明。
+    setup.transport.receive(serverMessage('IDE_LEASE', { environmentId: ENV, payload: lease }))
+    await tick()
+    expect(applied).toHaveLength(1)
+
+    now = 15_000
+    expect(heartbeat().ideLeaseRound).toBe('2')
+    setup.transport.receive(serverMessage('IDE_LEASE', { environmentId: ENV, payload: { ...lease, round: '2' } }))
+    await waitFor(() => applied.length === 2)
+
+    now = 30_000
+    expect(heartbeat().ideLeaseRound).toBe('3')
+    now = 45_000
+    setup.transport.receive(serverMessage('IDE_LEASE', { environmentId: ENV, payload: { ...lease, round: '3' } }))
+    await tick()
+    expect(applied).toHaveLength(2)
+    expect(
+      (sent(setup.transport).filter((envelope) => envelope.messageType === 'ERROR').at(-1)?.payload as {
+        message: string
+      }).message,
+    ).toContain('current unexpired round')
     setup.runtime.close()
   })
 })

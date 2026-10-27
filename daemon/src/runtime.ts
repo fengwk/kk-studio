@@ -9,7 +9,9 @@ import type {
   CapabilityExecutor,
   CapabilityResult,
   DaemonConfig,
+  DataBindHandler,
   IdeCommand,
+  IdeLeaseHandler,
   IdeService,
   ProcessSupervisor,
   ResourceUploader,
@@ -22,20 +24,27 @@ import {
   READY_CAPABILITIES_VERSION,
   ProtocolError,
   decodeEnvelope,
+  decodeDataBind,
   decodeIdeCommand,
+  decodeIdeLease,
   decodeInvoke,
   decodeUpdateCommand,
   encodeCapabilities,
   encodeCompleted,
   encodeEnvelope,
+  encodeHeartbeat,
   encodeIdeReply,
   encodeProgress,
+  encodeRuntimeStatus,
   encodeUpdateResult,
   errorPayload,
   utf8ByteLength,
+  validateDataBindOrigin,
   type EnvironmentInfo,
   type Envelope,
   type MessageType,
+  type RuntimeStatus,
+  type RuntimeStatusUpdate,
   type UpdateCommand,
   type UpdateResult,
 } from './protocol.js'
@@ -46,6 +55,7 @@ import {
   type JournalEntry,
   type TerminalMessage,
 } from './journal.js'
+import { RuntimeStatusTracker, type UpdateByteProgress } from './runtime-status.js'
 import type { ControlConnection, ControlTransport, ControlTransportListener } from './transport/control.js'
 import {
   createHttpPutObject,
@@ -84,13 +94,26 @@ export interface UpdateOutcomeLike {
   releasePermit?: () => Promise<void>
 }
 
+/**
+ * 更新器适配边界。
+ *
+ * <p>{@link handleUpdate} 的 reportProgress 接收一次下载进度对象，与 updater 的实际入口一致；可选 {@link getProgress}
+ * 供没有事件回调的适配器拉取当前字节数。Runtime 只在当前被准入的 operation 上接受进度，并在心跳/重连时把最新快照带给
+ * Server。
+ */
+export type UpdateProgressReporter = (progress: UpdateByteProgress) => void
+
 export interface UpdatePort {
   handleUpdate(
     command: Record<string, unknown>,
     config: DaemonConfig,
     signal: AbortSignal,
+    reportProgress?: UpdateProgressReporter,
   ): Promise<UpdateOutcomeLike>
+  getProgress?(): UpdateByteProgress | null
 }
+
+export type { UpdateByteProgress } from './runtime-status.js'
 
 export interface RuntimeOptions {
   config: DaemonConfig
@@ -110,12 +133,18 @@ export interface RuntimeOptions {
   putObject?: PresignedPutSender
   update?: UpdatePort
   ide?: IdeService
+  /** 受控数据连接绑定处理器；未配置时 DATA_BIND 必须显式报错，不能静默成功。 */
+  dataBind?: DataBindHandler
+  /** IDE 使用证明处理器；未配置时 IDE_LEASE 必须显式报错。 */
+  ideLease?: IdeLeaseHandler
   temporaryResources?: TemporaryResourceSweeper
   heartbeatIntervalMillis?: number
   initialReconnectDelayMillis?: number
   maxReconnectDelayMillis?: number
   maxConcurrentInvocations?: number
   ideCommandTimeoutMillis?: number
+  /** IDE 租约轮次的新鲜度判定时钟；缺省使用单调的 performance.now。 */
+  monotonicNow?: () => number
 }
 
 const FALLBACK_FAILURE_MESSAGE = 'capability execution failed'
@@ -127,6 +156,8 @@ const DEFAULT_IDE_COMMAND_TIMEOUT_MILLIS = 30_000
 /** 在途 IDE 请求条数上界：OPEN_STREAM 可无限存活，必须以此硬上限防止无界 map 与资源耗尽。 */
 const MAX_IN_FLIGHT_IDE_COMMANDS = 256
 const IDE_BUSY_MESSAGE = 'too many in-flight IDE commands'
+/** IDE_LEASE 轮次在下一心跳或 15 秒后失效，二者先到为准。 */
+const IDE_LEASE_ROUND_TTL_MILLIS = 15_000
 /** 内存中保留的受管更新回执条数上界：足够覆盖少量重发与重连重放，不无界累积。 */
 const MAX_TRACKED_UPDATE_OPERATIONS = 8
 const DAEMON_VERSION_PATTERN = /^[0-9A-Za-z._+-]{1,64}$/
@@ -144,21 +175,31 @@ export class Runtime {
   private readonly resourceClient: ResourceTransferClient | null
   private readonly update: UpdatePort | null
   private readonly ide: IdeService | null
+  private readonly dataBind: DataBindHandler | null
+  private readonly ideLease: IdeLeaseHandler | null
   private readonly temporaryResources: TemporaryResourceSweeper | null
   private readonly heartbeatIntervalMillis: number
   private readonly initialReconnectDelayMillis: number
   private readonly maxReconnectDelayMillis: number
   private readonly maxConcurrentInvocations: number
   private readonly ideCommandTimeoutMillis: number
+  private readonly monotonicNow: () => number
+  private readonly runtimeStatus: RuntimeStatusTracker
   private readonly daemonInstanceId = randomUUID()
   private readonly running = new Map<string, RunningInvocation>()
   private readonly ideInFlight = new Map<string, AbortController>()
   private readonly updateResults = new Map<string, UpdateReceipt>()
   /** 停机独立释放步骤与未收敛在途执行的失败：绝不阻断其余清理，由装配层显式聚合报告。 */
   private readonly shutdownFailures: unknown[] = []
-  /** 所有已登记的在途执行（capability/IDE/update）；停机后必须全部收敛才发布完成信号。 */
+  /** 所有已登记的在途执行（capability/IDE/update/data bind）；停机后必须全部收敛才发布完成信号。 */
   private readonly inFlight = new Set<Promise<void>>()
-  private activeUpdateController: AbortController | null = null
+  /** 普通/恢复执行及其拥有的上传收尾；更新准入必须等它们全部结束。 */
+  private readonly protectedExecutions = new Set<Promise<void>>()
+  /** 数据连接建立/存续 Promise；活动数据流阻止更新准入。 */
+  private readonly dataBindInFlight = new Set<Promise<void>>()
+  private activeUpdate: ActiveUpdate | null = null
+  private activeIdeLeaseRound: ActiveIdeLeaseRound | null = null
+  private ideLeaseRound = 0n
 
   private boundEnvironmentId: string | null = null
   private maxResourceBytes = 0
@@ -175,7 +216,6 @@ export class Runtime {
   private state: RuntimeState = 'STOPPED'
   private failureReason: string | null = null
   private nextReconnectDelay: number
-  private activeUpdateOperationId: string | null = null
 
   private heartbeatTimer: NodeJS.Timeout | null = null
   private reconnectTimer: NodeJS.Timeout | null = null
@@ -197,7 +237,11 @@ export class Runtime {
     this.environment = options.environment ?? detectEnvironmentInfo(options.config)
     this.update = options.update ?? null
     this.ide = options.ide ?? null
+    this.dataBind = options.dataBind ?? null
+    this.ideLease = options.ideLease ?? null
     this.temporaryResources = options.temporaryResources ?? null
+    this.monotonicNow = options.monotonicNow ?? (() => performance.now())
+    this.runtimeStatus = new RuntimeStatusTracker(this.daemonVersion)
     this.heartbeatIntervalMillis = requirePositive(
       options.heartbeatIntervalMillis ?? DEFAULT_HEARTBEAT_INTERVAL_MILLIS,
       'heartbeatIntervalMillis',
@@ -276,6 +320,17 @@ export class Runtime {
     return this.journal
   }
 
+  /** 当前完整运行状态快照；与 READY/HEARTBEAT/RUNTIME_STATUS 的 wire 结构一致。 */
+  getRuntimeStatus(): RuntimeStatus {
+    return this.currentRuntimeStatus()
+  }
+
+  /** 当前更新字节进度；无更新时 null。供更新器/运维适配器读取同一份事实，不产生历史。 */
+  getUpdateProgress(): RuntimeStatusUpdate | null {
+    this.refreshUpdateProgress()
+    return this.runtimeStatus.getUpdate()
+  }
+
   /** 主动停机；幂等。 */
   close(): void {
     this.shutdown('STOPPED', null)
@@ -349,6 +404,8 @@ export class Runtime {
     this.maxResourceBytes = 0
     this.boundEnvironmentId = null
     this.state = 'DISCONNECTED'
+    this.activeIdeLeaseRound = null
+    connection?.abort.abort('CONTROL_DISCONNECTED')
     // IDE 请求绑定于控制代际：连接失效即中止在途 IDE 请求，绝不跨代际重放副作用。
     for (const controller of this.ideInFlight.values()) {
       controller.abort('CONTROL_DISCONNECTED')
@@ -390,14 +447,26 @@ export class Runtime {
       version: READY_CAPABILITIES_VERSION,
       daemonVersion: this.daemonVersion,
       environment: this.environment,
+      runtimeStatus: this.currentRuntimeStatus(),
     })
     return this.sendOn(connection, 'READY', null, payload)
   }
 
   private sendHeartbeat(): void {
-    if (this.state === 'READY') {
-      this.send('HEARTBEAT', null, '{}')
+    if (this.state !== 'READY') {
+      return
     }
+    const runtimeStatus = this.currentRuntimeStatus()
+    let ideLeaseRound: string | null = null
+    if (this.ideLease !== null && this.ideLease.hasActiveViews()) {
+      this.ideLeaseRound++
+      ideLeaseRound = this.ideLeaseRound.toString()
+    }
+    const sent = this.send('HEARTBEAT', null, encodeHeartbeat({ runtimeStatus, ideLeaseRound }))
+    this.activeIdeLeaseRound =
+      sent && ideLeaseRound !== null
+        ? { round: ideLeaseRound, sentAt: this.monotonicNow(), consumed: false }
+        : null
   }
 
   private send(messageType: MessageType, invocationId: string | null, payloadJson: string): boolean {
@@ -460,6 +529,12 @@ export class Runtime {
           return
         case 'UPDATE':
           this.handleUpdate(envelope)
+          return
+        case 'DATA_BIND':
+          this.handleDataBind(connection, envelope)
+          return
+        case 'IDE_LEASE':
+          this.handleIdeLease(envelope)
           return
         case 'RESOURCE_UPLOAD_TICKET':
           this.handleTicket(envelope)
@@ -612,6 +687,9 @@ export class Runtime {
       return
     }
     try {
+      if (this.updateAdmissionHeld()) {
+        throw new Error('environment update admission is held')
+      }
       const executor = this.capabilities[invoke.capabilityId]
       if (executor === undefined) {
         throw new Error(`unknown Environment capability: ${invoke.capabilityId}`)
@@ -636,7 +714,7 @@ export class Runtime {
         timeoutMillis: invoke.timeoutMillis,
         ...(invoke.expectedFile === undefined ? {} : { expectedFile: invoke.expectedFile }),
       }
-      void this.track(this.execute(invocation, executor, call))
+      void this.trackProtected(this.execute(invocation, executor, call))
     } catch (error) {
       this.confirmRejectedBeforeExecution(invocationId)
       this.terminal(invocationId, 'FAILED', JSON.stringify(errorPayload(safeMessage(error))), null)
@@ -900,55 +978,187 @@ export class Runtime {
       throw new ProtocolError('UPDATE requires a READY bound connection')
     }
     const command = decodeUpdateCommand(JSON.stringify(envelope.payload))
-    const cached = this.updateResults.get(command.operationId)
-    if (cached !== undefined) {
-      // 已完成 operation 只重放回执并幂等重试许可释放，绝不第二次下载或启动。
-      this.deliverUpdateResult(cached)
-      return
-    }
-    if (this.activeUpdateOperationId !== null) {
-      if (this.activeUpdateOperationId === command.operationId) {
+    const commandKey = updateCommandKey(command)
+    const active = this.activeUpdate
+    if (active !== null) {
+      if (active.operationId === command.operationId) {
+        if (active.commandKey !== commandKey) {
+          throw new ProtocolError('the same update operationId must not change its arguments')
+        }
+        // PREPARED 后重放冻结回执；准备中的重复请求只刷新当前快照，不重复 ACK 或执行。
+        if (active.prepared) {
+          this.deliverUpdateResult(active.receipt)
+        } else {
+          this.publishRuntimeStatus()
+        }
         return
       }
-      throw new ProtocolError('a different update operation is already in progress')
+      if (active.targetVersion === command.targetVersion) {
+        // UPDATE_RESULT 不承载进度；同目标的新请求以当前完整状态快照回复，不重复执行。
+        this.publishRuntimeStatus()
+        return
+      }
+      this.rejectUpdate(command, `update is busy for target ${active.targetVersion}`)
+      return
     }
-    this.activeUpdateOperationId = command.operationId
-    this.sendUpdateResult(
-      encodeUpdateResult({ operationId: command.operationId, phase: 'ACCEPTED', message: null }),
-    )
-    const controller = new AbortController()
-    this.activeUpdateController = controller
-    void this.track(this.executeUpdate(command, controller))
+    const cached = this.updateResults.get(command.operationId)
+    if (cached !== undefined) {
+      if (cached.commandKey !== commandKey) {
+        throw new ProtocolError('the same update operationId must not change its arguments')
+      }
+      // 已完成 operation 只重放回执并幂等重试许可释放。
+      this.deliverUpdateResult(cached)
+      this.publishRuntimeStatus()
+      return
+    }
+    if (this.daemonVersion === command.targetVersion) {
+      // 已经是目标版本：只返回当前完整状态，不重装也不伪造 UPDATE_RESULT。
+      this.publishRuntimeStatus()
+      return
+    }
+    const busyReason = this.updateBusyReason()
+    if (busyReason !== null) {
+      this.rejectUpdate(command, `update is busy: ${busyReason}`)
+      return
+    }
+    if (this.update === null) {
+      this.rejectUpdate(command, 'managed update is not configured')
+      return
+    }
+    const receipt: UpdateReceipt = {
+      commandKey,
+      payloadJson: encodeUpdateResult({ operationId: command.operationId, phase: 'ACCEPTED', message: null }),
+    }
+    const admitted: ActiveUpdate = {
+      operationId: command.operationId,
+      commandKey,
+      targetVersion: command.targetVersion,
+      controller: new AbortController(),
+      receipt,
+      prepared: false,
+    }
+    // 先建立准入门闩与当前快照，再发送 ACCEPTED；新调用/IDE 创建从此刻起同步被拒绝。
+    this.activeUpdate = admitted
+    this.runtimeStatus.beginUpdate(command.targetVersion)
+    this.publishRuntimeStatus()
+    this.sendUpdateResult(receipt.payloadJson)
+    void this.track(this.executeUpdate(admitted, command))
   }
 
-  private async executeUpdate(command: UpdateCommand, controller: AbortController): Promise<void> {
-    let receipt: UpdateReceipt
+  private async executeUpdate(active: ActiveUpdate, command: UpdateCommand): Promise<void> {
+    let prepared: UpdateOutcomeLike | null = null
+    let failure: Error | null = null
     try {
-      if (this.update === null) {
+      const update = this.update
+      if (update === null) {
         throw new Error('managed update is not configured')
       }
-      const raw = await this.update.handleUpdate(
+      const raw = await update.handleUpdate(
         command as unknown as Record<string, unknown>,
         this.config,
-        controller.signal,
+        active.controller?.signal ?? AbortSignal.abort('SHUTDOWN'),
+        (progress) => this.reportUpdateProgress(active, progress),
       )
-      receipt = {
-        payloadJson: encodeUpdateResult(normalizeUpdateResult(raw, command.operationId)),
-        releasePermit: raw.releasePermit,
+      if (raw.phase === 'FAILED') {
+        failure = new Error(typeof raw.message === 'string' && raw.message.trim() !== '' ? raw.message : 'update failed')
+      } else {
+        prepared = raw
       }
     } catch (error) {
-      receipt = {
+      failure = error instanceof Error ? error : new Error(safeMessage(error))
+    }
+    active.controller = null
+    if (failure !== null || prepared === null) {
+      if (this.activeUpdate === active) {
+        this.activeUpdate = null
+      }
+      this.runtimeStatus.clearUpdate()
+      this.publishRuntimeStatus()
+      const receipt: UpdateReceipt = {
+        commandKey: active.commandKey,
         payloadJson: encodeUpdateResult({
           operationId: command.operationId,
           phase: 'FAILED',
-          message: safeMessage(error),
+          message: safeMessage(failure ?? new Error('update failed')),
         }),
       }
-    } finally {
-      this.activeUpdateOperationId = null
-      if (this.activeUpdateController === controller) {
-        this.activeUpdateController = null
+      this.rememberUpdateResult(command.operationId, receipt)
+      this.deliverUpdateResult(receipt)
+      return
+    }
+    // 已接受交接：更新门闩与当前目标快照保持到进程确定退出；下载字节在心跳中继续上报。
+    this.refreshUpdateProgress()
+    const receipt: UpdateReceipt = {
+      commandKey: active.commandKey,
+      payloadJson: encodeUpdateResult(normalizeUpdateResult(prepared, command.operationId)),
+      ...(prepared.releasePermit === undefined ? {} : { releasePermit: prepared.releasePermit }),
+    }
+    active.receipt = receipt
+    active.prepared = true
+    this.runtimeStatus.beginUpdate(command.targetVersion)
+    this.publishRuntimeStatus()
+    this.rememberUpdateResult(command.operationId, receipt)
+    this.deliverUpdateResult(receipt)
+  }
+
+  private reportUpdateProgress(active: ActiveUpdate, progress: UpdateByteProgress): void {
+    if (this.activeUpdate !== active) {
+      return
+    }
+    this.runtimeStatus.reportProgress(progress)
+  }
+
+  private refreshUpdateProgress(): void {
+    const active = this.activeUpdate
+    const getProgress = this.update?.getProgress
+    if (active === null || getProgress === undefined) {
+      return
+    }
+    try {
+      const progress = getProgress.call(this.update)
+      if (progress !== null) {
+        this.reportUpdateProgress(active, progress)
       }
+    } catch (error) {
+      this.collectDiagnosticFailure('update progress', error)
+    }
+  }
+
+  private currentRuntimeStatus(): RuntimeStatus {
+    this.refreshUpdateProgress()
+    return this.runtimeStatus.snapshot()
+  }
+
+  private publishRuntimeStatus(): void {
+    if (this.state === 'READY' && this.boundEnvironmentId !== null) {
+      this.send('RUNTIME_STATUS', null, encodeRuntimeStatus(this.currentRuntimeStatus()))
+    }
+  }
+
+  private updateAdmissionHeld(): boolean {
+    return this.activeUpdate !== null
+  }
+
+  private updateBusyReason(): string | null {
+    if (this.running.size > 0 || this.protectedExecutions.size > 0) {
+      return 'protected execution is still running'
+    }
+    if (this.ideInFlight.size > 0) {
+      return 'IDE command is in progress'
+    }
+    if (this.dataBindInFlight.size > 0) {
+      return 'IDE data connection is active'
+    }
+    if (this.ide?.canStartUpdate !== undefined && !this.ide.canStartUpdate()) {
+      return 'IDE views or cleanup are active'
+    }
+    return null
+  }
+
+  private rejectUpdate(command: UpdateCommand, message: string): void {
+    const receipt: UpdateReceipt = {
+      commandKey: updateCommandKey(command),
+      payloadJson: encodeUpdateResult({ operationId: command.operationId, phase: 'FAILED', message }),
     }
     this.rememberUpdateResult(command.operationId, receipt)
     this.deliverUpdateResult(receipt)
@@ -967,11 +1177,9 @@ export class Runtime {
   }
 
   private resendUpdateResults(): void {
-    const active = this.activeUpdateOperationId
-    if (active !== null && !this.updateResults.has(active)) {
-      this.sendUpdateResult(
-        encodeUpdateResult({ operationId: active, phase: 'ACCEPTED', message: null }),
-      )
+    const active = this.activeUpdate
+    if (active !== null) {
+      this.deliverUpdateResult(active.receipt)
       return
     }
     let last: UpdateReceipt | undefined
@@ -1012,6 +1220,81 @@ export class Runtime {
   }
 
   // -------------------------------------------------------------------------
+  // 数据绑定与 IDE 使用证明扩展点
+  // -------------------------------------------------------------------------
+
+  private handleDataBind(connection: ActiveConnection, envelope: Envelope): void {
+    if (this.state !== 'READY' || envelope.environmentId === null) {
+      throw new ProtocolError('DATA_BIND requires a READY bound connection')
+    }
+    if (this.updateAdmissionHeld()) {
+      throw new ProtocolError('DATA_BIND is not allowed while environment update admission is held')
+    }
+    const binding = decodeDataBind(JSON.stringify(envelope.payload))
+    validateDataBindOrigin(binding, this.config.studioUrl)
+    if (this.dataBind === null) {
+      throw new ProtocolError('DATA_BIND handler is not configured')
+    }
+    this.runDataBindHandler('DATA_BIND', () => this.dataBind?.bind(binding, connection.abort.signal))
+  }
+
+  private handleIdeLease(envelope: Envelope): void {
+    if (this.state !== 'READY' || envelope.environmentId === null) {
+      throw new ProtocolError('IDE_LEASE requires a READY bound connection')
+    }
+    if (this.updateAdmissionHeld()) {
+      throw new ProtocolError('IDE_LEASE is not allowed while environment update admission is held')
+    }
+    const lease = decodeIdeLease(JSON.stringify(envelope.payload))
+    if (this.ideLease === null) {
+      throw new ProtocolError('IDE_LEASE handler is not configured')
+    }
+    const active = this.activeIdeLeaseRound
+    if (
+      active === null ||
+      active.consumed ||
+      active.round !== lease.round ||
+      this.monotonicNow() - active.sentAt >= IDE_LEASE_ROUND_TTL_MILLIS
+    ) {
+      throw new ProtocolError('IDE_LEASE round is not the current unexpired round')
+    }
+    // 一轮只接受一次证明；处理器失败也不重放旧轮次，等待下一次正常心跳。
+    active.consumed = true
+    this.runExtensionHandler('IDE_LEASE', () => this.ideLease?.apply(lease))
+  }
+
+  /** 数据连接的生命周期代表绑定存续；未收敛前不得开始更新。 */
+  private runDataBindHandler(phase: string, action: () => Promise<void> | void): void {
+    const result = action()
+    if (result === undefined) {
+      return
+    }
+    const promise = Promise.resolve(result).catch((error: unknown) => {
+      this.sendExtensionError(phase, error)
+    })
+    this.trackIn(this.dataBindInFlight, promise)
+  }
+
+  /** 扩展处理器的失败必须显式回到控制连接；异步失败不阻断当前入站帧处理。 */
+  private runExtensionHandler(phase: string, action: () => Promise<void> | void): void {
+    const result = action()
+    if (result === undefined) {
+      return
+    }
+    void this.track(
+      Promise.resolve(result).catch((error: unknown) => {
+        this.sendExtensionError(phase, error)
+      }),
+    )
+  }
+
+  private sendExtensionError(phase: string, error: unknown): void {
+    if (this.state === 'READY') {
+      this.send('ERROR', null, JSON.stringify(errorPayload(`${phase} handler failed: ${safeMessage(error)}`)))
+    }
+  }
+
+  // -------------------------------------------------------------------------
   // IDE 请求（元数据动作有独立 deadline；OPEN_STREAM 是活动通道，不进入 Agent journal，
   // 断线/停机中止而不跨代际重放副作用）
   // -------------------------------------------------------------------------
@@ -1024,6 +1307,10 @@ export class Runtime {
     const command = decodeIdeCommand(JSON.stringify(envelope.payload))
     if (this.ideInFlight.has(invocationId)) {
       // 同连接内重复的 IDE 请求不再执行副作用。
+      return
+    }
+    if (this.updateAdmissionHeld() && command.action === 'OPEN_VIEW') {
+      this.send('IDE_RESULT', invocationId, encodeIdeReply({ ok: false, message: 'environment update is in progress' }))
       return
     }
     if (this.ide === null) {
@@ -1103,8 +1390,10 @@ export class Runtime {
     }
     this.release('resource transfer client close', () => this.resourceClient?.close())
     if (connection !== null) {
+      connection.abort.abort('SHUTDOWN')
       this.release('connection close', () => connection.connection.close())
     }
+    this.activeIdeLeaseRound = null
     for (const invocation of this.running.values()) {
       invocation.claimTerminal()
       invocation.controller.abort('SHUTDOWN')
@@ -1122,8 +1411,10 @@ export class Runtime {
     }
     this.ideInFlight.clear()
     // 受管更新使用独立 controller；停机必须中止，否则其 OS 作业句柄悬空。
-    this.activeUpdateController?.abort('SHUTDOWN')
-    this.activeUpdateController = null
+    this.activeUpdate?.controller?.abort('SHUTDOWN')
+    if (this.activeUpdate !== null) {
+      this.activeUpdate.controller = null
+    }
     this.release('transport close', () => this.transport.close())
     void this.finalize(terminalState)
   }
@@ -1160,9 +1451,20 @@ export class Runtime {
 
   /** 登记一个在途执行 Promise，并在其收敛后自动移除。 */
   private track(promise: Promise<void>): Promise<void> {
+    return this.trackIn(null, promise)
+  }
+
+  /** 普通/恢复执行额外进入更新准入占用集合；更新自身的 Promise 不进入。 */
+  private trackProtected(promise: Promise<void>): Promise<void> {
+    return this.trackIn(this.protectedExecutions, promise)
+  }
+
+  private trackIn(group: Set<Promise<void>> | null, promise: Promise<void>): Promise<void> {
     this.inFlight.add(promise)
+    group?.add(promise)
     const remove = (): void => {
       this.inFlight.delete(promise)
+      group?.delete(promise)
     }
     promise.then(remove, remove)
     return promise
@@ -1196,6 +1498,7 @@ export class Runtime {
 class ActiveConnection {
   helloSent = false
   ready = false
+  readonly abort = new AbortController()
   private welcomed = false
 
   constructor(
@@ -1305,12 +1608,38 @@ function normalizeUpdateResult(raw: UpdateOutcomeLike, operationId: string): Upd
   return { operationId, phase, message }
 }
 
+/** 幂等身份只比较命令参数；operationId 是请求关联键，不是参数的一部分。 */
+function updateCommandKey(command: UpdateCommand): string {
+  return JSON.stringify([command.targetVersion, command.artifactUrl, command.artifactSha256])
+}
+
+/**
+ * 一个已准入的更新：从 ACCEPTED 起持有到明确失败或进程退出。
+ *
+ * <p>PREPARED 只表示独立更新器已接受交接，因此 controller 可以结束，但准入门闩与目标快照必须继续保留。
+ */
+interface ActiveUpdate {
+  operationId: string
+  commandKey: string
+  targetVersion: string
+  controller: AbortController | null
+  receipt: UpdateReceipt
+  prepared: boolean
+}
+
+interface ActiveIdeLeaseRound {
+  round: string
+  sentAt: number
+  consumed: boolean
+}
+
 /**
  * 一条已完成 operation 的冻结事实：回执文本，加上「确实已被独立 OS 更新器接受」时才存在的许可释放步骤。
  *
  * <p>重放与重连重发只需要这一份事实：不再准备、下载或启动，但仍幂等重试许可释放。
  */
 interface UpdateReceipt {
+  commandKey: string
   payloadJson: string
   releasePermit?: () => Promise<void>
 }

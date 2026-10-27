@@ -63,6 +63,7 @@ const BOUND_MESSAGES: ReadonlySet<MessageType> = new Set([
   'WELCOME',
   'READY',
   'HEARTBEAT',
+  'RUNTIME_STATUS',
   'INVOKE',
   'CANCEL',
   'RECOVER',
@@ -79,6 +80,8 @@ const BOUND_MESSAGES: ReadonlySet<MessageType> = new Set([
   'UPDATE_RESULT',
   'IDE_COMMAND',
   'IDE_RESULT',
+  'DATA_BIND',
+  'IDE_LEASE',
 ])
 
 /** envelope 必须携带非空 invocationId 的消息类型。IDE 消息携带 IDE 请求 UUID，但不进入 Agent journal。 */
@@ -97,6 +100,13 @@ const INVOCATION_MESSAGES: ReadonlySet<MessageType> = new Set([
   'RESOURCE_UPLOAD_COMMIT',
   'IDE_COMMAND',
   'IDE_RESULT',
+])
+
+/** 环境级状态与扩展消息只绑定当前控制代际，不携带 invocationId。 */
+const NO_INVOCATION_MESSAGES: ReadonlySet<MessageType> = new Set([
+  'RUNTIME_STATUS',
+  'DATA_BIND',
+  'IDE_LEASE',
 ])
 
 const ENVELOPE_FIELDS = new Set(['protocolVersion', 'messageType', 'environmentId', 'invocationId', 'payload'])
@@ -323,6 +333,260 @@ function requiredCanonicalUuid(value: Record<string, unknown>, field: string, co
 }
 
 // ---------------------------------------------------------------------------
+// Current runtime status
+// ---------------------------------------------------------------------------
+
+/** Java/JS 共享的 long 正整数字符串上限。 */
+const LONG_MAX_DECIMAL = '9223372036854775807'
+const POSITIVE_DECIMAL_PATTERN = /^[1-9][0-9]*$/
+const BASE64URL_256_PATTERN = /^[A-Za-z0-9_-]{43}$/
+
+export interface RuntimeStatusUpdate {
+  targetVersion: string
+  downloadedBytes: number
+  totalBytes: number | null
+}
+
+export interface RuntimeStatusBody {
+  daemonVersion: string
+  update: RuntimeStatusUpdate | null
+}
+
+/** READY / HEARTBEAT / RUNTIME_STATUS 共用的完整运行状态快照。 */
+export interface RuntimeStatus {
+  revision: string
+  status: RuntimeStatusBody
+}
+
+export interface HeartbeatPayload {
+  runtimeStatus: RuntimeStatus
+  ideLeaseRound: string | null
+}
+
+export interface DataBind {
+  generation: string
+  ticket: string
+  streamUrl: string
+}
+
+export interface IdeLeaseBinding {
+  viewId: string
+  documentId: string
+  bindingEpoch: string
+}
+
+export interface IdeLease {
+  round: string
+  bindings: IdeLeaseBinding[]
+}
+
+/** 单个 IDE_LEASE 批次允许携带的绑定上限。 */
+export const MAX_IDE_LEASE_BINDINGS = 64
+
+/** 解析规范正十进制字符串，并限制在 Java long 的非零范围内。 */
+export function requirePositiveDecimal(value: unknown, context: string): string {
+  if (typeof value !== 'string' || !POSITIVE_DECIMAL_PATTERN.test(value)) {
+    throw new ProtocolError(`${context} must be a positive decimal string`)
+  }
+  if (value.length > LONG_MAX_DECIMAL.length || (value.length === LONG_MAX_DECIMAL.length && value > LONG_MAX_DECIMAL)) {
+    throw new ProtocolError(`${context} must not exceed ${LONG_MAX_DECIMAL}`)
+  }
+  return value
+}
+
+function validateRuntimeStatusUpdate(raw: unknown, context: string): RuntimeStatusUpdate {
+  if (!isPlainObject(raw)) {
+    throw new ProtocolError(`${context} must be a JSON object`)
+  }
+  rejectUnknownFields(raw, new Set(['targetVersion', 'downloadedBytes', 'totalBytes']), context)
+  const targetVersion = requiredText(raw, 'targetVersion', context)
+  try {
+    validateDaemonVersion(targetVersion)
+  } catch (error) {
+    throw new ProtocolError(`${context}.targetVersion is invalid: ${(error as Error).message}`)
+  }
+  const downloadedBytes = requiredNonNegativeSafeInteger(raw, 'downloadedBytes', context)
+  const totalValue = raw.totalBytes
+  let totalBytes: number | null
+  if (totalValue === null) {
+    totalBytes = null
+  } else if (
+    typeof totalValue === 'number' &&
+    Number.isSafeInteger(totalValue) &&
+    totalValue >= downloadedBytes
+  ) {
+    totalBytes = totalValue
+  } else {
+    throw new ProtocolError(`${context}.totalBytes must be null or a safe integer not below downloadedBytes`)
+  }
+  return { targetVersion, downloadedBytes, totalBytes }
+}
+
+/** 校验并规范化完整 runtime status；编码与解码共用同一组边界。 */
+export function validateRuntimeStatus(raw: unknown, context: string): RuntimeStatus {
+  if (!isPlainObject(raw)) {
+    throw new ProtocolError(`${context} must be a JSON object`)
+  }
+  rejectUnknownFields(raw, new Set(['revision', 'status']), context)
+  const revision = requirePositiveDecimal(raw.revision, `${context}.revision`)
+  const status = requiredObject(raw, 'status', context)
+  rejectUnknownFields(status, new Set(['daemonVersion', 'update']), `${context}.status`)
+  const daemonVersion = requiredText(status, 'daemonVersion', `${context}.status`)
+  try {
+    validateDaemonVersion(daemonVersion)
+  } catch (error) {
+    throw new ProtocolError(`${context}.status.daemonVersion is invalid: ${(error as Error).message}`)
+  }
+  if (!('update' in status)) {
+    throw new ProtocolError(`${context}.status.update must be null or an object`)
+  }
+  const update = status.update === null ? null : validateRuntimeStatusUpdate(status.update, `${context}.status.update`)
+  return { revision, status: { daemonVersion, update } }
+}
+
+export function encodeRuntimeStatus(status: RuntimeStatus): string {
+  return JSON.stringify(validateRuntimeStatus(status, 'runtime status'))
+}
+
+export function decodeRuntimeStatus(text: string): RuntimeStatus {
+  return validateRuntimeStatus(parseStrictObject(text, 'runtime status', CONTROL_LIMITS), 'runtime status')
+}
+
+function validateIdeLeaseRound(value: unknown, context: string): string | null {
+  if (value === null) {
+    return null
+  }
+  return requirePositiveDecimal(value, context)
+}
+
+export function encodeHeartbeat(heartbeat: HeartbeatPayload): string {
+  const runtimeStatus = validateRuntimeStatus(heartbeat.runtimeStatus, 'HEARTBEAT runtimeStatus')
+  const ideLeaseRound = validateIdeLeaseRound(heartbeat.ideLeaseRound, 'HEARTBEAT ideLeaseRound')
+  return JSON.stringify({ runtimeStatus, ideLeaseRound })
+}
+
+export function decodeHeartbeat(text: string): HeartbeatPayload {
+  const root = parseStrictObject(text, 'HEARTBEAT payload', CONTROL_LIMITS)
+  rejectUnknownFields(root, new Set(['runtimeStatus', 'ideLeaseRound']), 'HEARTBEAT payload')
+  if (!('runtimeStatus' in root) || !('ideLeaseRound' in root)) {
+    throw new ProtocolError('HEARTBEAT payload must declare runtimeStatus and ideLeaseRound')
+  }
+  return {
+    runtimeStatus: validateRuntimeStatus(root.runtimeStatus, 'HEARTBEAT payload.runtimeStatus'),
+    ideLeaseRound: validateIdeLeaseRound(root.ideLeaseRound, 'HEARTBEAT payload.ideLeaseRound'),
+  }
+}
+
+function validateDataBindValue(raw: unknown, context: string): DataBind {
+  if (!isPlainObject(raw)) {
+    throw new ProtocolError(`${context} must be a JSON object`)
+  }
+  rejectUnknownFields(raw, new Set(['generation', 'ticket', 'streamUrl']), context)
+  const generation = requirePositiveDecimal(raw.generation, `${context}.generation`)
+  const ticket = requiredText(raw, 'ticket', context)
+  if (!BASE64URL_256_PATTERN.test(ticket)) {
+    throw new ProtocolError(`${context}.ticket must be 43 base64url characters`)
+  }
+  const streamUrl = requiredText(raw, 'streamUrl', context)
+  if (streamUrl.length > 2048) {
+    throw new ProtocolError(`${context}.streamUrl must not exceed 2048 characters`)
+  }
+  if (/[\u0000-\u001f\u007f]/.test(streamUrl)) {
+    throw new ProtocolError(`${context}.streamUrl must not contain control characters`)
+  }
+  let parsed: URL
+  try {
+    parsed = new URL(streamUrl)
+  } catch {
+    throw new ProtocolError(`${context}.streamUrl must be an absolute URL`)
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    throw new ProtocolError(`${context}.streamUrl must use http or https`)
+  }
+  if (parsed.host === '' || parsed.pathname === '' || !parsed.pathname.startsWith('/')) {
+    throw new ProtocolError(`${context}.streamUrl must have a host and absolute path`)
+  }
+  if (parsed.username !== '' || parsed.password !== '' || parsed.hash !== '') {
+    throw new ProtocolError(`${context}.streamUrl must not contain credentials or a fragment`)
+  }
+  return { generation, ticket, streamUrl }
+}
+
+export function encodeDataBind(binding: DataBind): string {
+  return JSON.stringify(validateDataBindValue(binding, 'DATA_BIND payload'))
+}
+
+export function decodeDataBind(text: string): DataBind {
+  return validateDataBindValue(parseStrictObject(text, 'DATA_BIND payload', CONTROL_LIMITS), 'DATA_BIND payload')
+}
+
+/**
+ * 数据地址必须与配置的 Studio 同源。
+ *
+ * <p>streamUrl 与 Studio 都使用 HTTP(S)；scheme、host 与有效端口必须完全一致，且不携带 userinfo 或 fragment。
+ */
+export function validateDataBindOrigin(binding: DataBind, studioUrl: string): DataBind {
+  let studio: URL
+  try {
+    studio = new URL(studioUrl)
+  } catch {
+    throw new ProtocolError('configured studioUrl must be an absolute http(s) URL')
+  }
+  if (studio.protocol !== 'https:' && studio.protocol !== 'http:') {
+    throw new ProtocolError('configured studioUrl must use http or https')
+  }
+  const stream = new URL(binding.streamUrl)
+  if (stream.protocol !== studio.protocol || stream.host !== studio.host) {
+    throw new ProtocolError('DATA_BIND streamUrl must be same-origin with the configured Studio')
+  }
+  return binding
+}
+
+function validateIdeLeaseValue(raw: unknown, context: string): IdeLease {
+  if (!isPlainObject(raw)) {
+    throw new ProtocolError(`${context} must be a JSON object`)
+  }
+  rejectUnknownFields(raw, new Set(['round', 'bindings']), context)
+  const round = requirePositiveDecimal(raw.round, `${context}.round`)
+  const bindingsValue = raw.bindings
+  if (!Array.isArray(bindingsValue)) {
+    throw new ProtocolError(`${context}.bindings must be an array`)
+  }
+  if (bindingsValue.length > MAX_IDE_LEASE_BINDINGS) {
+    throw new ProtocolError(`${context}.bindings must not exceed ${MAX_IDE_LEASE_BINDINGS} entries`)
+  }
+  const bindings: IdeLeaseBinding[] = []
+  const viewIds = new Set<string>()
+  for (let index = 0; index < bindingsValue.length; index++) {
+    const entryContext = `${context}.bindings[${index}]`
+    const entry = bindingsValue[index]
+    if (!isPlainObject(entry)) {
+      throw new ProtocolError(`${entryContext} must be a JSON object`)
+    }
+    rejectUnknownFields(entry, new Set(['viewId', 'documentId', 'bindingEpoch']), entryContext)
+    const viewId = requiredCanonicalUuid(entry, 'viewId', entryContext)
+    if (viewIds.has(viewId)) {
+      throw new ProtocolError(`${context}.bindings must not repeat viewId`)
+    }
+    viewIds.add(viewId)
+    bindings.push({
+      viewId,
+      documentId: requiredCanonicalUuid(entry, 'documentId', entryContext),
+      bindingEpoch: requirePositiveDecimal(entry.bindingEpoch, `${entryContext}.bindingEpoch`),
+    })
+  }
+  return { round, bindings }
+}
+
+export function encodeIdeLease(lease: IdeLease): string {
+  return JSON.stringify(validateIdeLeaseValue(lease, 'IDE_LEASE payload'))
+}
+
+export function decodeIdeLease(text: string): IdeLease {
+  return validateIdeLeaseValue(parseStrictObject(text, 'IDE_LEASE payload', CONTROL_LIMITS), 'IDE_LEASE payload')
+}
+
+// ---------------------------------------------------------------------------
 // Envelope
 // ---------------------------------------------------------------------------
 
@@ -375,6 +639,9 @@ export function decodeEnvelope(text: string): Envelope {
       throw new ProtocolError(`envelope.${messageType} requires non-blank invocationId`)
     }
   }
+  if (invocationId !== null && NO_INVOCATION_MESSAGES.has(messageType)) {
+    throw new ProtocolError(`envelope.${messageType} must not declare invocationId`)
+  }
   let environmentId: string | null = null
   if (messageType === 'HELLO') {
     const raw = root.environmentId
@@ -415,9 +682,10 @@ export interface Capabilities {
   version: number
   daemonVersion: string
   environment: EnvironmentInfo
+  runtimeStatus: RuntimeStatus
 }
 
-const READY_ROOT_FIELDS = new Set(['version', 'daemonVersion', 'environment'])
+const READY_ROOT_FIELDS = new Set(['version', 'daemonVersion', 'environment', 'runtimeStatus'])
 const READY_ENVIRONMENT_FIELDS = new Set([
   'operatingSystem',
   'architecture',
@@ -437,6 +705,13 @@ export function validateDaemonVersion(value: string): string {
 }
 
 export function encodeCapabilities(capabilities: Capabilities): string {
+  if (capabilities.version !== READY_CAPABILITIES_VERSION) {
+    throw new ProtocolError(`unsupported READY capabilities version: ${capabilities.version}`)
+  }
+  const runtimeStatus = validateRuntimeStatus(capabilities.runtimeStatus, 'READY payload.runtimeStatus')
+  if (runtimeStatus.status.daemonVersion !== capabilities.daemonVersion) {
+    throw new ProtocolError('READY payload.runtimeStatus daemonVersion must match READY daemonVersion')
+  }
   return JSON.stringify({
     version: capabilities.version,
     daemonVersion: capabilities.daemonVersion,
@@ -449,6 +724,7 @@ export function encodeCapabilities(capabilities: Capabilities): string {
       note: capabilities.environment.note,
       tempDirectory: capabilities.environment.tempDirectory,
     },
+    runtimeStatus,
   })
 }
 
@@ -478,6 +754,10 @@ export function decodeCapabilities(text: string): Capabilities {
   if (!(ARCHITECTURES as readonly string[]).includes(architecture)) {
     throw new ProtocolError(`unsupported daemon architecture: ${architecture}`)
   }
+  const runtimeStatus = validateRuntimeStatus(root.runtimeStatus, 'READY payload.runtimeStatus')
+  if (runtimeStatus.status.daemonVersion !== daemonVersion) {
+    throw new ProtocolError('READY payload.runtimeStatus daemonVersion must match READY daemonVersion')
+  }
   return {
     version,
     daemonVersion,
@@ -490,6 +770,7 @@ export function decodeCapabilities(text: string): Capabilities {
       note: requiredText(environment, 'note', 'READY environment'),
       tempDirectory: requiredText(environment, 'tempDirectory', 'READY environment'),
     },
+    runtimeStatus,
   }
 }
 
