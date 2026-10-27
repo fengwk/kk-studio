@@ -14,7 +14,7 @@ import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.channels.OverlappingFileLockException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.DirectoryIteratorException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
@@ -24,6 +24,7 @@ import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.time.DateTimeException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -31,12 +32,13 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * 单机文件实现：每个执行身份一个 {@code <executionId>.json}，目录与文件分别限定为 0700/0600。
  *
- * <p>进程启动时以独占文件锁占用目录，防止两个 Studio 进程共用同一目录。写入先在同目录创建临时文件、设置权限并 force，再原子 rename； 读取遇到损坏或文件名/内容身份不一致时
- * fail-closed，不删除原文件。
+ * <p>进程启动时以独占文件锁占用目录，防止两个 Studio 进程共用同一目录。写入先在同目录创建临时文件、设置权限并 force，再原子 rename； 读取遇到无法解码、
+ * 身份不符或类型异常的文件时只记录该文件失败，不删除或覆盖原文件，健康记录仍返回。
  */
 public final class FileExecutionExitJournal implements ExecutionExitJournal {
 
@@ -55,7 +57,7 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
   private final Path directory;
   private final FileChannel lockChannel;
   private final FileLock lock;
-  private final Object writeLock = new Object();
+  private final ReentrantLock writeLock = new ReentrantLock();
   private boolean closed;
 
   public FileExecutionExitJournal(Path directory) {
@@ -98,17 +100,24 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
   @Override
   public ExecutionExitJournalRecord write(ExecutionExitJournalRecord record) {
     Objects.requireNonNull(record, "record");
-    synchronized (writeLock) {
+    writeLock.lock();
+    try {
       ensureOpen();
       Path target = fileFor(record.executionId());
       ExecutionExitJournalRecord existing = readIfPresent(target);
       if (existing != null) {
-        if (existing.sameIdentity(record) && existing.targetState() == record.targetState()) {
-          forceDirectoryForWrite();
-          return existing;
+        if (!existing.sameIdentity(record)) {
+          throw new ExecutionExitJournalConflictException(
+              ExecutionExitJournalConflictException.Conflict.IDENTITY,
+              "execution exit journal identity conflict for " + record.executionId());
         }
-        throw new ExecutionExitJournalException(
-            "execution exit journal identity or target conflict for " + record.executionId());
+        if (existing.targetState() != record.targetState()) {
+          throw new ExecutionExitJournalConflictException(
+              ExecutionExitJournalConflictException.Conflict.TARGET,
+              "execution exit journal target conflict for " + record.executionId());
+        }
+        forceDirectoryForWrite();
+        return existing;
       }
       Path temporary = directory.resolve("." + UUID.randomUUID() + ".tmp");
       boolean moved = false;
@@ -118,11 +127,10 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
         try {
           Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE);
         } catch (FileAlreadyExistsException error) {
-          throw new ExecutionExitJournalException(
-              "execution exit journal identity conflict for " + record.executionId(), error);
-        } catch (AtomicMoveNotSupportedException error) {
-          throw new ExecutionExitJournalException(
-              "execution exit journal does not support atomic rename", error);
+          throw new ExecutionExitJournalConflictException(
+              ExecutionExitJournalConflictException.Conflict.IDENTITY,
+              "execution exit journal identity conflict for " + record.executionId(),
+              error);
         } catch (IOException error) {
           throw new ExecutionExitJournalException(
               "cannot persist execution exit journal entry for " + record.executionId(), error);
@@ -142,13 +150,16 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
           deleteTemporary(temporary, failure);
         }
       }
+    } finally {
+      writeLock.unlock();
     }
   }
 
   @Override
   public void delete(UUID executionId) {
     Objects.requireNonNull(executionId, "executionId");
-    synchronized (writeLock) {
+    writeLock.lock();
+    try {
       ensureOpen();
       try {
         Files.deleteIfExists(fileFor(executionId));
@@ -157,44 +168,59 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
         throw new ExecutionExitJournalException(
             "cannot delete execution exit journal entry for " + executionId, error);
       }
+    } finally {
+      writeLock.unlock();
     }
   }
 
   @Override
-  public List<ExecutionExitJournalRecord> loadAll() {
-    synchronized (writeLock) {
+  public ExecutionExitJournalSnapshot loadAll() {
+    writeLock.lock();
+    try {
       ensureOpen();
       List<Path> files = new ArrayList<>();
+      List<ExecutionExitJournalFailure> failures = new ArrayList<>();
       try (DirectoryStream<Path> stream = Files.newDirectoryStream(directory, "*" + SUFFIX)) {
         for (Path file : stream) {
           if (Files.isSymbolicLink(file) || !Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
-            throw new ExecutionExitJournalException(
-                "execution exit journal entry is not a regular file: " + file.getFileName());
+            failures.add(
+                new ExecutionExitJournalFailure(
+                    file.getFileName().toString(),
+                    ExecutionExitJournalFailure.Reason.INVALID_FILE_TYPE,
+                    null));
+            continue;
           }
           files.add(file);
         }
-      } catch (IOException error) {
+      } catch (IOException | DirectoryIteratorException error) {
         throw new ExecutionExitJournalException(
             "cannot list execution exit journal directory: " + directory, error);
       }
       files.sort(Comparator.comparing(path -> path.getFileName().toString()));
       List<ExecutionExitJournalRecord> records = new ArrayList<>(files.size());
       for (Path file : files) {
-        ExecutionExitJournalRecord record = read(file);
-        String expectedName = record.executionId() + SUFFIX;
-        if (!file.getFileName().toString().equals(expectedName)) {
-          throw new ExecutionExitJournalException(
-              "execution exit journal file identity mismatch: " + file.getFileName());
+        String fileName = file.getFileName().toString();
+        try {
+          ExecutionExitJournalRecord record = readEntry(file);
+          if (!fileName.equals(record.executionId() + SUFFIX)) {
+            throw new EntryReadFailure(ExecutionExitJournalFailure.Reason.IDENTITY_MISMATCH, null);
+          }
+          records.add(record);
+        } catch (EntryReadFailure failure) {
+          failures.add(
+              new ExecutionExitJournalFailure(fileName, failure.reason, failure.getCause()));
         }
-        records.add(record);
       }
-      return List.copyOf(records);
+      return new ExecutionExitJournalSnapshot(records, failures);
+    } finally {
+      writeLock.unlock();
     }
   }
 
   @Override
   public void close() {
-    synchronized (writeLock) {
+    writeLock.lock();
+    try {
       if (closed) {
         return;
       }
@@ -220,6 +246,8 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
         throw new ExecutionExitJournalException(
             "cannot close execution exit journal directory: " + directory, failure);
       }
+    } finally {
+      writeLock.unlock();
     }
   }
 
@@ -256,16 +284,30 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
   }
 
   private ExecutionExitJournalRecord read(Path file) {
+    try {
+      return readEntry(file);
+    } catch (EntryReadFailure failure) {
+      String fileName = file.getFileName().toString();
+      String message =
+          switch (failure.reason) {
+            case INVALID_FILE_TYPE -> "execution exit journal entry is not a regular file: ";
+            case UNREADABLE -> "cannot read execution exit journal file: ";
+            case CORRUPT -> "corrupt execution exit journal file: ";
+            case IDENTITY_MISMATCH -> "execution exit journal file identity mismatch: ";
+          };
+      throw new ExecutionExitJournalException(message + fileName, failure.getCause());
+    }
+  }
+
+  private ExecutionExitJournalRecord readEntry(Path file) {
     if (Files.isSymbolicLink(file) || !Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
-      throw new ExecutionExitJournalException(
-          "execution exit journal entry is not a regular file: " + file.getFileName());
+      throw new EntryReadFailure(ExecutionExitJournalFailure.Reason.INVALID_FILE_TYPE, null);
     }
     String json;
     try {
       json = Files.readString(file, StandardCharsets.UTF_8);
     } catch (IOException error) {
-      throw new ExecutionExitJournalException(
-          "cannot read execution exit journal file: " + file.getFileName(), error);
+      throw new EntryReadFailure(ExecutionExitJournalFailure.Reason.UNREADABLE, error);
     }
     try {
       JsonNode parsed = MAPPER.readTree(json);
@@ -273,9 +315,8 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
         throw new IllegalArgumentException("journal entry must be a JSON object");
       }
       return decode(node);
-    } catch (JacksonException | IllegalArgumentException error) {
-      throw new ExecutionExitJournalException(
-          "corrupt execution exit journal file: " + file.getFileName(), error);
+    } catch (JacksonException | IllegalArgumentException | DateTimeException error) {
+      throw new EntryReadFailure(ExecutionExitJournalFailure.Reason.CORRUPT, error);
     }
   }
 
@@ -400,31 +441,41 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
     }
   }
 
-  private static void deleteTemporary(Path path, Throwable primary) {
+  private void deleteTemporary(Path temporary, Throwable failure) {
     try {
-      Files.deleteIfExists(path);
-    } catch (IOException cleanup) {
-      if (primary != null) {
-        primary.addSuppressed(cleanup);
+      Files.deleteIfExists(temporary);
+    } catch (IOException error) {
+      if (failure != null) {
+        failure.addSuppressed(error);
       }
     }
   }
 
-  private static void closeAfterConstructorFailure(
-      FileLock acquired, FileChannel channel, Throwable primary) {
+  private void closeAfterConstructorFailure(
+      FileLock acquired, FileChannel channel, Throwable failure) {
     if (acquired != null && acquired.isValid()) {
       try {
         acquired.release();
-      } catch (IOException cleanup) {
-        primary.addSuppressed(cleanup);
+      } catch (IOException error) {
+        failure.addSuppressed(error);
       }
     }
     if (channel != null) {
       try {
         channel.close();
-      } catch (IOException cleanup) {
-        primary.addSuppressed(cleanup);
+      } catch (IOException error) {
+        failure.addSuppressed(error);
       }
+    }
+  }
+
+  private static final class EntryReadFailure extends RuntimeException {
+
+    private final ExecutionExitJournalFailure.Reason reason;
+
+    private EntryReadFailure(ExecutionExitJournalFailure.Reason reason, Throwable cause) {
+      super(null, cause);
+      this.reason = reason;
     }
   }
 }

@@ -195,7 +195,7 @@ class ExecutionExitConfirmationRetryTest {
     public void delete(UUID executionId) {}
 
     @Override
-    public List<ExecutionExitJournalRecord> loadAll() {
+    public ExecutionExitJournalSnapshot loadAll() {
       if (active.incrementAndGet() > 1) {
         concurrent.set(true);
       }
@@ -215,7 +215,7 @@ class ExecutionExitConfirmationRetryTest {
           failOnce = false;
           throw new ExecutionExitJournalException("database unavailable");
         }
-        return List.of();
+        return new ExecutionExitJournalSnapshot(List.of(), List.of());
       } finally {
         active.decrementAndGet();
         completed.countDown();

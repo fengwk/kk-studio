@@ -30,6 +30,41 @@ class FileExecutionExitJournalTest {
   private static final Instant T0 = Instant.parse("2026-07-01T00:00:00Z");
 
   @Test
+  void invalidTimestampIsIsolatedAndCannotBeOverwritten(@TempDir Path directory)
+      throws IOException {
+    // 时间解析异常也是单文件损坏，不能逃出 snapshot 阻断健康记录或允许覆盖坏证明。
+    ExecutionExitJournalRecord bad =
+        record(
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            ExecutionExitState.STUDIO_EXITED,
+            T0);
+    ExecutionExitJournalRecord healthy =
+        record(
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            ExecutionExitState.STUDIO_EXITED,
+            T0);
+    try (FileExecutionExitJournal journal = new FileExecutionExitJournal(directory)) {
+      journal.write(bad);
+      journal.write(healthy);
+      Path entry = directory.resolve(bad.executionId() + ".json");
+      String corrupted =
+          Files.readString(entry)
+              .replace("\"confirmedAt\":\"" + T0 + "\"", "\"confirmedAt\":\"not-an-instant\"");
+      Files.writeString(entry, corrupted);
+
+      ExecutionExitJournalSnapshot snapshot = journal.loadAll();
+      assertEquals(List.of(healthy), snapshot.records());
+      assertSingleFailure(snapshot, ExecutionExitJournalFailure.Reason.CORRUPT);
+      assertThrows(ExecutionExitJournalException.class, () -> journal.write(bad));
+      assertEquals(corrupted, Files.readString(entry));
+    }
+  }
+
+  @Test
   void writesCanonicalRecordReusesSameProofAndRejectsConflicts(@TempDir Path directory) {
     UUID executionId = UUID.randomUUID();
     UUID threadId = UUID.randomUUID();
@@ -48,7 +83,7 @@ class FileExecutionExitJournalTest {
               ExecutionExitState.STUDIO_EXITED,
               T0.plusMillis(500));
       assertEquals(first, journal.write(repeated));
-      assertEquals(1, journal.loadAll().size());
+      assertEquals(1, journal.loadAll().records().size());
 
       ExecutionExitJournalRecord replacedIdentity =
           record(
@@ -61,7 +96,7 @@ class FileExecutionExitJournalTest {
       ExecutionExitJournalRecord replacedTarget =
           record(executionId, threadId, invocationId, ExecutionExitState.NOT_STARTED, T0);
       assertThrows(ExecutionExitJournalException.class, () -> journal.write(replacedTarget));
-      assertEquals(first, journal.loadAll().getFirst());
+      assertEquals(first, journal.loadAll().records().getFirst());
     }
   }
 
@@ -81,9 +116,9 @@ class FileExecutionExitJournalTest {
           ExecutionExitJournalException.class, () -> new FileExecutionExitJournal(directory));
     }
     try (FileExecutionExitJournal reopened = new FileExecutionExitJournal(directory)) {
-      assertEquals(record, reopened.loadAll().getFirst());
+      assertEquals(record, reopened.loadAll().records().getFirst());
       reopened.delete(executionId);
-      assertTrue(reopened.loadAll().isEmpty());
+      assertTrue(reopened.loadAll().records().isEmpty());
     }
   }
 
@@ -112,24 +147,40 @@ class FileExecutionExitJournalTest {
   }
 
   @Test
-  void corruptRecordFailsClosedWithoutDeletingFile(@TempDir Path directory) throws IOException {
+  void corruptRecordIsReportedWithoutBlockingHealthyRecordsOrDeletingFile(@TempDir Path directory)
+      throws IOException {
+    UUID healthyId = UUID.randomUUID();
+    ExecutionExitJournalRecord healthy =
+        record(
+            healthyId, UUID.randomUUID(), UUID.randomUUID(), ExecutionExitState.STUDIO_EXITED, T0);
     Path corrupt = directory.resolve(UUID.randomUUID() + ".json");
     Files.writeString(corrupt, "{\"executionId\":\"not-a-uuid\"}");
     try (FileExecutionExitJournal journal = new FileExecutionExitJournal(directory)) {
-      assertThrows(ExecutionExitJournalException.class, journal::loadAll);
+      journal.write(healthy);
+      ExecutionExitJournalSnapshot snapshot = journal.loadAll();
+      assertEquals(List.of(healthy), snapshot.records());
+      assertSingleFailure(snapshot, ExecutionExitJournalFailure.Reason.CORRUPT);
     }
     assertTrue(Files.exists(corrupt));
     assertFalse(Files.readString(corrupt).isBlank());
   }
 
   @Test
-  void symbolicLinkEntryFailsClosed(@TempDir Path directory) throws IOException {
+  void symbolicLinkEntryIsReportedWithoutBlockingHealthyRecords(@TempDir Path directory)
+      throws IOException {
+    UUID healthyId = UUID.randomUUID();
+    ExecutionExitJournalRecord healthy =
+        record(
+            healthyId, UUID.randomUUID(), UUID.randomUUID(), ExecutionExitState.STUDIO_EXITED, T0);
     Path target = directory.resolve("outside.tmp");
     Files.writeString(target, "{}");
     Path entry = directory.resolve(UUID.randomUUID() + ".json");
     Files.createSymbolicLink(entry, target);
     try (FileExecutionExitJournal journal = new FileExecutionExitJournal(directory)) {
-      assertThrows(ExecutionExitJournalException.class, journal::loadAll);
+      journal.write(healthy);
+      ExecutionExitJournalSnapshot snapshot = journal.loadAll();
+      assertEquals(List.of(healthy), snapshot.records());
+      assertSingleFailure(snapshot, ExecutionExitJournalFailure.Reason.INVALID_FILE_TYPE);
     }
     assertTrue(Files.isSymbolicLink(entry));
   }
@@ -165,7 +216,7 @@ class FileExecutionExitJournalTest {
               UUID.randomUUID(),
               ExecutionExitState.STUDIO_EXITED,
               T0));
-      assertEquals(1, journal.loadAll().size());
+      assertEquals(1, journal.loadAll().records().size());
     }
   }
 
@@ -200,6 +251,54 @@ class FileExecutionExitJournalTest {
   }
 
   @Test
+  void writeRejectsCorruptExistingTargetWithoutReplacingIt(@TempDir Path directory)
+      throws IOException {
+    UUID executionId = UUID.randomUUID();
+    Path target = directory.resolve(executionId + ".json");
+    Files.writeString(target, "{}");
+    try (FileExecutionExitJournal journal = new FileExecutionExitJournal(directory)) {
+      assertThrows(
+          ExecutionExitJournalException.class,
+          () ->
+              journal.write(
+                  record(
+                      executionId,
+                      UUID.randomUUID(),
+                      UUID.randomUUID(),
+                      ExecutionExitState.STUDIO_EXITED,
+                      T0)));
+    }
+    assertEquals("{}", Files.readString(target));
+  }
+
+  @Test
+  void writeRejectsUnreadableExistingTargetWithoutReplacingIt(@TempDir Path directory)
+      throws IOException {
+    assumePosixNonRoot(directory);
+    UUID executionId = UUID.randomUUID();
+    Path target = directory.resolve(executionId + ".json");
+    Files.writeString(target, "{}");
+    try (FileExecutionExitJournal journal = new FileExecutionExitJournal(directory)) {
+      Files.setPosixFilePermissions(target, PosixFilePermissions.fromString("---------"));
+      try {
+        assertThrows(
+            ExecutionExitJournalException.class,
+            () ->
+                journal.write(
+                    record(
+                        executionId,
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        ExecutionExitState.STUDIO_EXITED,
+                        T0)));
+      } finally {
+        Files.setPosixFilePermissions(target, PosixFilePermissions.fromString("rw-------"));
+      }
+    }
+    assertEquals("{}", Files.readString(target));
+  }
+
+  @Test
   void writeAndDeleteReportNonRegularTarget(@TempDir Path directory) throws IOException {
     UUID executionId = UUID.randomUUID();
     Path target = directory.resolve(executionId + ".json");
@@ -223,7 +322,7 @@ class FileExecutionExitJournalTest {
   }
 
   @Test
-  void loadAllRejectsRecordStoredUnderAnotherExecutionId(@TempDir Path directory)
+  void loadAllReportsRecordStoredUnderAnotherExecutionId(@TempDir Path directory)
       throws IOException {
     UUID executionId = UUID.randomUUID();
     try (FileExecutionExitJournal journal = new FileExecutionExitJournal(directory)) {
@@ -239,7 +338,9 @@ class FileExecutionExitJournalTest {
     Path renamed = directory.resolve(UUID.randomUUID() + ".json");
     Files.move(stored, renamed);
     try (FileExecutionExitJournal journal = new FileExecutionExitJournal(directory)) {
-      assertThrows(ExecutionExitJournalException.class, journal::loadAll);
+      ExecutionExitJournalSnapshot snapshot = journal.loadAll();
+      assertTrue(snapshot.records().isEmpty());
+      assertSingleFailure(snapshot, ExecutionExitJournalFailure.Reason.IDENTITY_MISMATCH);
     }
     assertTrue(Files.exists(renamed));
   }
@@ -287,12 +388,12 @@ class FileExecutionExitJournalTest {
             T0);
     try (FileExecutionExitJournal journal = new FileExecutionExitJournal(directory)) {
       journal.write(record);
-      assertEquals(record, journal.loadAll().getFirst());
+      assertEquals(record, journal.loadAll().records().getFirst());
     }
   }
 
   @Test
-  void corruptFieldShapeFailsClosed(@TempDir Path directory) throws IOException {
+  void corruptFieldShapeIsReportedPerFile(@TempDir Path directory) throws IOException {
     Path entry = directory.resolve(UUID.randomUUID() + ".json");
     try (FileExecutionExitJournal journal = new FileExecutionExitJournal(directory)) {
       Files.writeString(
@@ -305,7 +406,7 @@ class FileExecutionExitJournalTest {
               + UUID.randomUUID()
               + "\",\"attempt\":1,\"ownerLeaseToken\":\"lease-1\",\"kind\":\"TOOL\","
               + "\"parentExecutionId\":null,\"targetState\":\"STUDIO_EXITED\"}");
-      assertThrows(ExecutionExitJournalException.class, journal::loadAll);
+      assertSingleFailure(journal.loadAll(), ExecutionExitJournalFailure.Reason.CORRUPT);
 
       Files.writeString(
           entry,
@@ -320,7 +421,7 @@ class FileExecutionExitJournalTest {
               + "\"confirmedAtX\":\""
               + T0
               + "\"}");
-      assertThrows(ExecutionExitJournalException.class, journal::loadAll);
+      assertSingleFailure(journal.loadAll(), ExecutionExitJournalFailure.Reason.CORRUPT);
 
       Files.writeString(
           entry,
@@ -335,7 +436,7 @@ class FileExecutionExitJournalTest {
               + "\"confirmedAt\":\""
               + T0
               + "\"}");
-      assertThrows(ExecutionExitJournalException.class, journal::loadAll);
+      assertSingleFailure(journal.loadAll(), ExecutionExitJournalFailure.Reason.CORRUPT);
 
       Files.writeString(
           entry,
@@ -350,7 +451,7 @@ class FileExecutionExitJournalTest {
               + "\"confirmedAt\":\""
               + T0
               + "\"}");
-      assertThrows(ExecutionExitJournalException.class, journal::loadAll);
+      assertSingleFailure(journal.loadAll(), ExecutionExitJournalFailure.Reason.CORRUPT);
     }
   }
 
@@ -397,7 +498,7 @@ class FileExecutionExitJournalTest {
                   ExecutionExitState.STUDIO_EXITED,
                   T0.plusSeconds(3)));
       assertEquals(renamed, canonical, "the original canonical evidence and time must be reused");
-      assertEquals(List.of(renamed), journal.loadAll());
+      assertEquals(List.of(renamed), journal.loadAll().records());
       assertNoTemporaryFiles(directory);
     }
   }
@@ -425,7 +526,7 @@ class FileExecutionExitJournalTest {
 
       restore.close();
       assertEquals(record, journal.write(record));
-      assertEquals(List.of(record), journal.loadAll());
+      assertEquals(List.of(record), journal.loadAll().records());
     }
   }
 
@@ -446,7 +547,8 @@ class FileExecutionExitJournalTest {
       try (AutoCloseable restore = directoryPermissions(directory, "---------")) {
         assertThrows(ExecutionExitJournalException.class, journal::loadAll);
         restore.close();
-        assertEquals(List.of(record), journal.loadAll(), "the existing record must survive");
+        assertEquals(
+            List.of(record), journal.loadAll().records(), "the existing record must survive");
       }
     }
   }
@@ -474,7 +576,7 @@ class FileExecutionExitJournalTest {
             T0);
     try (FileExecutionExitJournal journal = new FileExecutionExitJournal(directory)) {
       journal.write(record);
-      assertEquals(List.of(record), journal.loadAll());
+      assertEquals(List.of(record), journal.loadAll().records());
     }
   }
 
@@ -498,7 +600,7 @@ class FileExecutionExitJournalTest {
             T0);
     try (FileExecutionExitJournal journal = new FileExecutionExitJournal(directory)) {
       journal.write(record);
-      assertEquals(List.of(record), journal.loadAll());
+      assertEquals(List.of(record), journal.loadAll().records());
     }
   }
 
@@ -520,30 +622,44 @@ class FileExecutionExitJournalTest {
       String template = Files.readString(entry);
 
       Files.writeString(entry, "[]");
-      assertThrows(ExecutionExitJournalException.class, journal::loadAll);
+      assertSingleFailure(journal.loadAll(), ExecutionExitJournalFailure.Reason.CORRUPT);
       assertTrue(Files.exists(entry));
 
       Files.writeString(entry, template.replace("\"attempt\":1", "\"attempt\":1,\"attempt\":1"));
-      assertThrows(ExecutionExitJournalException.class, journal::loadAll);
+      assertSingleFailure(journal.loadAll(), ExecutionExitJournalFailure.Reason.CORRUPT);
       assertTrue(Files.exists(entry));
 
       Files.writeString(entry, template + "{}");
-      assertThrows(ExecutionExitJournalException.class, journal::loadAll);
+      assertSingleFailure(journal.loadAll(), ExecutionExitJournalFailure.Reason.CORRUPT);
       assertTrue(Files.exists(entry));
     }
   }
 
   @Test
-  void unreadableRecordFailsClosed(@TempDir Path directory) throws IOException {
+  void unreadableRecordIsReportedWithoutBlockingHealthyRecords(@TempDir Path directory)
+      throws IOException {
     Assumptions.assumeTrue(Files.getFileStore(directory).supportsFileAttributeView("posix"));
+    UUID healthyId = UUID.randomUUID();
+    ExecutionExitJournalRecord healthy =
+        record(
+            healthyId, UUID.randomUUID(), UUID.randomUUID(), ExecutionExitState.STUDIO_EXITED, T0);
     Path entry = directory.resolve(UUID.randomUUID() + ".json");
     Files.writeString(entry, "{}");
     Files.setPosixFilePermissions(entry, PosixFilePermissions.fromString("---------"));
     try (FileExecutionExitJournal journal = new FileExecutionExitJournal(directory)) {
-      assertThrows(ExecutionExitJournalException.class, journal::loadAll);
+      journal.write(healthy);
+      ExecutionExitJournalSnapshot snapshot = journal.loadAll();
+      assertEquals(List.of(healthy), snapshot.records());
+      assertSingleFailure(snapshot, ExecutionExitJournalFailure.Reason.UNREADABLE);
     } finally {
       Files.setPosixFilePermissions(entry, PosixFilePermissions.fromString("rw-------"));
     }
+  }
+
+  private static void assertSingleFailure(
+      ExecutionExitJournalSnapshot snapshot, ExecutionExitJournalFailure.Reason reason) {
+    assertEquals(1, snapshot.failures().size());
+    assertEquals(reason, snapshot.failures().getFirst().reason());
   }
 
   private static void assumePosixNonRoot(Path directory) throws IOException {

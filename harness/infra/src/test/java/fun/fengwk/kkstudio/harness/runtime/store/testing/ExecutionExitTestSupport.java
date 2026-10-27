@@ -2,8 +2,9 @@ package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitJournal;
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitJournalException;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitJournalConflictException;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitJournalRecord;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitJournalSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 
 import java.time.Clock;
@@ -32,11 +33,17 @@ public final class ExecutionExitTestSupport {
         records.put(record.executionId(), record);
         return record;
       }
-      if (existing.sameIdentity(record) && existing.targetState() == record.targetState()) {
-        return existing;
+      if (!existing.sameIdentity(record)) {
+        throw new ExecutionExitJournalConflictException(
+            ExecutionExitJournalConflictException.Conflict.IDENTITY,
+            "execution exit journal identity conflict for " + record.executionId());
       }
-      throw new ExecutionExitJournalException(
-          "execution exit journal identity or target conflict for " + record.executionId());
+      if (existing.targetState() != record.targetState()) {
+        throw new ExecutionExitJournalConflictException(
+            ExecutionExitJournalConflictException.Conflict.TARGET,
+            "execution exit journal target conflict for " + record.executionId());
+      }
+      return existing;
     }
 
     @Override
@@ -45,8 +52,8 @@ public final class ExecutionExitTestSupport {
     }
 
     @Override
-    public synchronized List<ExecutionExitJournalRecord> loadAll() {
-      return List.copyOf(records.values());
+    public synchronized ExecutionExitJournalSnapshot loadAll() {
+      return new ExecutionExitJournalSnapshot(List.copyOf(records.values()), List.of());
     }
 
     @Override
