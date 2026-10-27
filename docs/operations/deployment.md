@@ -40,7 +40,7 @@ sh scripts/dev/lib/extract-convention4j-agent.sh "$JAVA_HOME_21/bin/jar" \
 ```
 
 `distribution` profile 在 `prepare-package` 阶段由 [web/pom.xml](../../web/pom.xml) 的
-`frontend-maven-plugin` 安装 Node `v24.14.0`、npm `11.9.0` 并执行 `npm ci` 与
+`frontend-maven-plugin` 安装 Node `v24.21.0`、npm `11.9.0` 并执行 `npm ci` 与
 `npm run build`，把 Vite 产物复制到 `web/target/classes/static`，再由
 `spring-boot-maven-plugin` 写入 `BOOT-INF/classes/static`。普通 `mvn test` / `mvn package`
 不激活该 profile。
@@ -131,6 +131,31 @@ PostgreSQL 与已配置 bucket 必须先可达，启动失败先诊断连接而�
 - `prod` profile 的数据源只来自 `KK_STUDIO_DB_URL`/`KK_STUDIO_DB_USER`/`KK_STUDIO_DB_PASSWORD`，
   没有默认值，缺失时启动失败而不是回退到开发数据库；`SPRING_PROFILES_ACTIVE` 与全部
   `KK_STUDIO_STORAGE_S3_*` 同样必须显式提供。
+
+### 退出确认 journal 故障恢复
+
+journal 写入是数据库退出确认的前置条件。磁盘满、只读或某条记录损坏时，数据库可用也不会绕过该条件。
+健康文件仍可独立重放；同一 execution 的损坏文件必须修复，不能靠收到另一条回调覆盖原证明。
+首次写失败的证明可能只在 Studio 进程内，**不要先重启、清空卷或删除 `.lock`**：
+重启可能丢失尚未落盘的证明，删除仍在使用的锁文件则可能让两个实例同时进入同一目录。
+
+1. 按告警中的 phase、execution ID 与失败类别定位范围，检查空间、inode、挂载是否只读，以及实际运行
+   UID 对目录、`.lock` 和记录文件的属主与权限。只处理这一个实例的 journal 卷，不改数据库确认状态。
+2. 对空间、挂载和权限故障，优先在保留当前进程及原目录锁的情况下恢复可写性。让内存证明先成功落盘；
+   自动重试按 1/2/4/8/16/30 秒退避，不能把告警去重后的安静误认为恢复成功。
+3. 对损坏或身份冲突，先经部署负责人授权备份卷、对应数据库事实和诊断证据；备份放在 journal
+   目录之外并保持 owner-only，不把记录内容或凭据贴入日志、工单或仓库。需要替换文件时进入维护窗口，
+   停止唯一 Studio 实例并确认其进程已退出，再操作文件。若还有仅存于内存的证明，须先按上一步持久化；
+   做不到时必须明确记录重启造成的不可恢复风险。
+4. 只有可信的原始备份或完整原始退出证明，才能用于恢复对应 `<executionId>.json`。核对执行身份、
+   invocation、attempt、owner lease、kind、parent、target 与首次 `confirmedAt`，不能按当前时间重建，
+   也不能从超时、断连或数据库中的 `UNCONFIRMED` 猜测退出。保留坏文件的备份，不覆盖其他 execution；
+   恢复后为应用 UID 设置记录 `0600`、目录 `0700`，并保持同一卷只由一个实例持有。
+5. 恢复原单实例服务，通过执行快照核对真实确认状态及等待它的 Join 是否推进；不变量冲突每 30 秒重新
+   核对。没有可信原始证明时，不手写 JSON、直接更新数据库或删除坏文件冒充修复：可以继续保留证据等待
+   有效恢复，或由用户在 Thread 已停止时显式放弃等待。`ABANDONED` 只解除等待，不表示进程已经退出。
+
+该流程不授权自动重启、修改共享数据库或删除证据；部署操作与备份恢复由该部署的负责人执行。
 
 ## 运行配置
 
@@ -500,9 +525,11 @@ Environment Daemon 不属于 NAS App 容器：需要主机能力时，在目标�
 ### 发布产物与凭据边界
 
 [`.github/workflows/docker-publish.yml`](../../.github/workflows/docker-publish.yml) 在推送
-`main` 时先执行全仓 Java/Frontend/脚本/文档/敏感数据门禁，再构建并发布
-`<namespace>/kk-studio:main`；推送 `dev` 时不执行这组全仓门禁，直接构建并
-发布同一个 Dockerfile 的 `<namespace>/kk-studio:dev`。需只验收不发布时可显式使用
+`main` 或 `dev` 时先检查仓库版本、文档与敏感数据；`main` 随后并行执行全仓 Java/脚本、
+Frontend 与五平台 Daemon 门禁，再发布 `<namespace>/kk-studio:main`。Java 验收构建的发行 Fat JAR
+包含前端，并经启动检查；镜像只从同 run、同 SHA 且通过版本和摘要校验的 artifact 装配，
+不重新构建源码。推送 `dev` 时不执行这组重门禁，仍从源码构建并发布同一个 Dockerfile 的
+`<namespace>/kk-studio:dev`，不能把镜像成功当作全量验收通过。需只验收不发布时可显式使用
 `workflow_dispatch` 的 `validate_only=true`，操作见[CI 验证](development-and-testing.md#ci-验证与镜像发布)。
 两者都附带 commit SHA tag、
 `linux/amd64` 平台和 Buildx GHA cache。这个 tag 标识构建所用的源码提交，不是可按提交重现的
