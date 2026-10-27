@@ -167,6 +167,27 @@
   border-bottom: 1px solid var(--border);
 }
 
+.ide-panel-recovery-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 12px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: var(--font-size-xs);
+  border-bottom: 1px solid var(--border);
+}
+
+.ide-panel-recovery-banner span {
+  min-width: 0;
+}
+
+.ide-panel-recovery-banner .ghost-btn {
+  flex-shrink: 0;
+  color: var(--danger);
+}
+
 .ide-confirm-dialog-content {
   display: flex;
   flex-direction: column;

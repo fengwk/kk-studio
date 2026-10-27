@@ -455,4 +455,73 @@ test.describe('Chat IDE Overlay Responsive & Iframe Identity Durability', () => 
     await expect.poll(() => audit.sessionProbes.length).toBe(4)
     expect(audit.iframeRequests[PANE_1_VIEW_ID]).toBe(2)
   })
+
+  test('Case 6: 连续恢复 3 次后停止自动重开，显示提示并支持手动重试', async ({ page }) => {
+    // 真实浏览器行为：401 连续耗尽 3 次恢复预算后不再 OPEN，保留最近 iframe 与目录；
+    // 手动重试开启新预算；新 iframe 的 204 探测清除失败提示。
+    const sessionStatuses: number[] = []
+    const audit = await setupStrictIdeRoutes(page, {
+      sessionStatus: () => sessionStatuses.shift() ?? 204,
+    })
+
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.goto(HARNESS_URL)
+    await page.click('[data-testid="p1-open-btn"]')
+
+    const pane1 = page.locator('[data-testid="test-pane-1"]')
+    const pane1Frame = page.frameLocator('[data-pane-id="pane-1"] iframe[data-testid="ide-iframe"]')
+    const iframe = page.locator('[data-pane-id="pane-1"] iframe[data-testid="ide-iframe"]')
+    await expect(pane1Frame.locator('#ide-badge')).toHaveText(PANE_1_VIEW_ID)
+    await expect.poll(() => audit.sessionProbes.length).toBe(1)
+    expect(audit.openCalls.length).toBe(1)
+
+    // 每次失败恢复后新 iframe 的 onLoad 再探测一次 401，随后 ready 上升沿触发下一次恢复。
+    sessionStatuses.push(401, 401, 401, 401, 401, 401, 401)
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      const probesBefore = audit.sessionProbes.length
+      const opensBefore = audit.openCalls.length
+      await page.click('[data-testid="ide-set-environment-offline"]')
+      await page.click('[data-testid="ide-set-environment-ready"]')
+      await expect.poll(() => audit.sessionProbes.length).toBe(probesBefore + 2)
+      await expect.poll(() => audit.openCalls.length).toBe(opensBefore + 1)
+    }
+
+    await expect(page.getByTestId('ide-recovery-error')).toBeVisible()
+    await expect(page.getByTestId('ide-recovery-error'))
+      .toContainText('IDE 会话未能恢复，请检查浏览器 Cookie 或网络设置后重试。')
+    await expect(page.getByTestId('ide-session-retry-btn')).toBeEnabled()
+    const stableNonce = await pane1Frame.locator('#load-nonce').textContent()
+    await page.evaluate(() => {
+      const element = document.querySelector('[data-pane-id="pane-1"] iframe[data-testid="ide-iframe"]')
+      ;(window as unknown as { __cachedIframeEl: Element | null }).__cachedIframeEl = element
+    })
+
+    // 预算耗尽后继续 401：仍不 OPEN，最近 iframe 与目录保留。
+    await page.click('[data-testid="ide-set-environment-offline"]')
+    await page.click('[data-testid="ide-set-environment-ready"]')
+    await expect.poll(() => audit.sessionProbes.length).toBe(8)
+    await page.waitForTimeout(300)
+    expect(audit.openCalls.length).toBe(4)
+    expect(await iframe.evaluate((element) => (
+      (window as unknown as { __cachedIframeEl: Element | null }).__cachedIframeEl === element
+    ))).toBe(true)
+    expect(await pane1Frame.locator('#load-nonce').textContent()).toBe(stableNonce)
+    await expect(pane1.getByTestId('ide-directory-badge')).toHaveText(HARNESS_DIRECTORY)
+    await page.screenshot({ path: path.join(REPORTS_DIR, 'ide-recovery-exhausted.png') })
+
+    // 手动重试立即发起一次恢复；新 iframe 的 204 探测清除失败提示。
+    sessionStatuses.push(204)
+    await page.click('[data-testid="ide-session-retry-btn"]')
+    await expect.poll(() => audit.openCalls.length).toBe(5)
+    await expect.poll(() => audit.sessionProbes.length).toBe(9)
+    await expect(page.getByTestId('ide-recovery-error')).toHaveCount(0)
+    await expect.poll(() => pane1Frame.locator('#load-nonce').textContent()).not.toBe(stableNonce)
+    expect(audit.openCalls[4]).toEqual({
+      environmentId: HARNESS_ENV_ID,
+      viewId: PANE_1_VIEW_ID,
+      body: { viewId: PANE_1_VIEW_ID },
+    })
+    expect(audit.iframeRequests[PANE_1_VIEW_ID]).toBe(5)
+    await page.screenshot({ path: path.join(REPORTS_DIR, 'ide-recovery-retried.png') })
+  })
 })
