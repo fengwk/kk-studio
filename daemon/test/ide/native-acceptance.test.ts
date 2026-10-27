@@ -146,6 +146,7 @@ async function createGateway(): Promise<Gateway> {
         captured.body += frame.payload.toString('utf8')
       } else if (frame.kind === 'http-end') {
         captured.ended = true
+        socket.close(1000)
       } else if (frame.kind === 'ws-text' || frame.kind === 'ws-binary') {
         captured.wsMessages.push(frame.payload.toString('utf8'))
       }

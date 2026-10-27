@@ -236,9 +236,20 @@ class Outbox {
   }
 
   sendEnd(): Promise<void> {
-    return this.enqueue(() => {
-      this.socket.send(encodeHttpEnd())
-    })
+    return this.enqueue(
+      () =>
+        new Promise<void>((resolve, reject) => {
+          this.socket.send(encodeHttpEnd(), (error) => {
+            if (error) {
+              const failure = new WireError('stream end write failed')
+              failure.cause = error
+              reject(failure)
+            } else {
+              resolve()
+            }
+          })
+        }),
+    )
   }
 
   sendBody(chunk: Buffer, window: CreditWindow, signal: AbortSignal): Promise<void> {
@@ -422,10 +433,23 @@ class HttpExchange extends Exchange {
   private upstreamRequest?: http.ClientRequest
   private upstreamResponse?: IncomingMessage
   private inboundEnded = false
+  private responseEndWrite?: Promise<void>
 
   listen(): void {
     super.listen()
-    this.gateway.on('close', () => this.succeed())
+    this.gateway.on('close', (code: number) => {
+      if (code !== 1000) {
+        this.fail(new WireError('stream socket closed abnormally'))
+      } else if (this.responseEndWrite === undefined) {
+        this.fail(new WireError('stream closed before response end'))
+      } else {
+        // The peer may finish before the local write callback; both must succeed.
+        void this.responseEndWrite.then(
+          () => this.succeed(),
+          (error: unknown) => this.fail(error),
+        )
+      }
+    })
   }
 
   start(): void {
@@ -490,8 +514,9 @@ class HttpExchange extends Exchange {
     for await (const chunk of response) {
       await this.outbox.sendBody(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array), this.sendWindow, this.abort.signal)
     }
-    await this.outbox.sendEnd()
-    this.succeed()
+    // Only Studio knows the response was consumed. It closes normally after HTTP_END and flush.
+    this.responseEndWrite = this.outbox.sendEnd()
+    await this.responseEndWrite
   }
 
   protected handleBinary(data: Buffer): void {
@@ -721,9 +746,11 @@ export async function openStreamExchange(options: StreamExchangeOptions): Promis
   const exchange = options.request.mode === 'HTTP' ? new HttpExchange(options, gateway) : new WebSocketExchange(options, gateway)
   exchange.listen()
   const onAbort = (): void => exchange.fail(abortError())
+  const onSocketError = (): void => exchange.fail(new WireError('stream socket error'))
   options.signal.addEventListener('abort', onAbort, { once: true })
   try {
     await waitForOpen(gateway, remainingMillis(timeout, startedAt), options.signal)
+    gateway.on('error', onSocketError)
     exchange.start()
     await exchange.done
   } catch (error) {
@@ -732,6 +759,7 @@ export async function openStreamExchange(options: StreamExchangeOptions): Promis
     await exchange.done.catch(() => undefined)
     throw error
   } finally {
+    gateway.off('error', onSocketError)
     options.signal.removeEventListener('abort', onAbort)
   }
 }
