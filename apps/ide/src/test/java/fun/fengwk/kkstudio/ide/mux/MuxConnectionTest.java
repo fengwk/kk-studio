@@ -263,6 +263,7 @@ class MuxConnectionTest {
     assertThrows(IllegalStateException.class, stream::complete);
 
     listener.data.get(0).consumed();
+    assertThrows(IllegalStateException.class, stream::complete);
     CompletableFuture<Void> requestEnd = stream.sendEnd();
     assertTrue(requestEnd.isDone());
     CompletableFuture<Void> complete = stream.complete();
@@ -283,7 +284,7 @@ class MuxConnectionTest {
   }
 
   @Test
-  void remoteResetDropsUnconsumedBufferAndLateDataWithoutTombstone() {
+  void remoteResetKeepsUnconsumedBufferChargedAndLateDataWithoutTombstone() {
     FakeMuxTransport transport = new FakeMuxTransport();
     MuxConnection connection = connection(transport);
     TestListener listener = new TestListener();
@@ -297,20 +298,24 @@ class MuxConnectionTest {
         CODEC.encode(new MuxFrame.Reset(streamId, new MuxReset("UPSTREAM_FAILED", "failed"))));
     assertEquals(1, listener.resets.size());
     assertEquals(0, connection.activeStreamCount());
-    assertEquals(0, connection.connectionReceiveUnacked());
+    assertEquals(1000L, connection.connectionReceiveUnacked());
     assertTrue(stream.closed().toCompletableFuture().isDone());
-    int windowsAfterReset = windowFrameCount(transport);
-    assertEquals(1, windowsAfterReset);
-    List<MuxFrame.Window> windows = windows(transport);
-    assertEquals(1000L, windows.get(windows.size() - 1).increment());
+    assertEquals(0, windowFrameCount(transport));
 
+    MuxReceivedData received = listener.data.get(0);
+    received.consumed();
+    assertEquals(1, windowFrameCount(transport));
+    assertEquals(1000L, windows(transport).get(0).increment());
+    assertEquals(0, connection.connectionReceiveUnacked());
     listener.data.get(0).consumed();
-    assertEquals(windowsAfterReset, windowFrameCount(transport));
+    assertEquals(1, windowFrameCount(transport));
 
     receiveData(connection, streamId, MuxDataKind.HTTP, false, new byte[700]);
     assertEquals(1, listener.data.size());
     List<MuxFrame.Window> afterLate = windows(transport);
+    assertEquals(2, afterLate.size());
     assertEquals(700L, afterLate.get(afterLate.size() - 1).increment());
+    assertEquals(0, connection.connectionReceiveUnacked());
     connection.receive(CODEC.encode(new MuxFrame.Window(streamId, 123456)));
     connection.receive(CODEC.encode(new MuxFrame.Complete(streamId)));
     assertTrue(connection.isOpen());
@@ -321,10 +326,119 @@ class MuxConnectionTest {
   }
 
   @Test
+  void remoteResetReturnsOnlyConsumedCreditAndKeepsDeliveredBuffersCharged() {
+    FakeMuxTransport transport = new FakeMuxTransport();
+    MuxConnection connection = connection(transport);
+    TestListener listener = new TestListener();
+    MuxStream stream = openReadyHttp(connection, listener);
+    receiveHeaders(connection, stream, 200);
+    long streamId = stream.streamId().getAsLong();
+    receiveData(connection, stream, MuxDataKind.HTTP, false, new byte[1000]);
+    receiveData(connection, stream, MuxDataKind.HTTP, false, new byte[1000]);
+
+    // 第一帧已消费但未达到 flush 阈值；RESET 只能收回这部分 pendingWindow。
+    listener.data.get(0).consumed();
+    assertEquals(2000L, connection.connectionReceiveUnacked());
+    assertEquals(0, windowFrameCount(transport));
+
+    connection.receive(
+        CODEC.encode(new MuxFrame.Reset(streamId, new MuxReset("UPSTREAM_FAILED", "failed"))));
+    assertEquals(1, windowFrameCount(transport));
+    assertEquals(1000L, windows(transport).get(0).increment());
+    assertEquals(1000L, connection.connectionReceiveUnacked());
+
+    // 已投递但未消费的片段保持占用，消费后只归还连接级额度。
+    listener.data.get(1).consumed();
+    assertEquals(2, windowFrameCount(transport));
+    assertEquals(1000L, windows(transport).get(1).increment());
+    assertEquals(0, connection.connectionReceiveUnacked());
+  }
+
+  @Test
+  void resetPendingDeliveredBuffersRemainChargedAcrossOpenReset() {
+    FakeMuxTransport transport = new FakeMuxTransport();
+    RecordingFailure failure = new RecordingFailure();
+    MuxConnection connection = new MuxConnection(transport, failure);
+    TestListener listener = new TestListener();
+    long perStream = 4L * 65536;
+
+    for (int round = 0; round < 16; round++) {
+      MuxStream stream = openReadyHttp(connection, listener);
+      receiveHeaders(connection, stream, 200);
+      for (int frame = 0; frame < 4; frame++) {
+        receiveData(connection, stream, MuxDataKind.HTTP, false, new byte[65536]);
+      }
+      stream.reset("CANCELLED", "adapter still holds delivered buffers");
+      assertEquals((round + 1) * perStream, connection.connectionReceiveUnacked());
+    }
+    assertEquals(4L * 1024 * 1024, connection.connectionReceiveUnacked());
+    assertEquals(0, connection.activeStreamCount());
+
+    MuxStream overflow = openReadyHttp(connection, listener);
+    receiveHeaders(connection, overflow, 200);
+    assertThrows(
+        MuxProtocolException.class,
+        () -> receiveData(connection, overflow, MuxDataKind.HTTP, false, new byte[1]));
+    assertTrue(failure.await());
+    assertFalse(connection.isOpen());
+  }
+
+  @Test
+  void lateDataChargesConnectionCreditUntilWindowWriteCompletes() {
+    FakeMuxTransport transport = new FakeMuxTransport(false);
+    MuxConnection connection = connection(transport);
+    MuxStream stream = connection.open(httpOpen(), new TestListener());
+    transport.completeNext();
+    ready(connection, stream);
+    receiveHeaders(connection, stream, 200);
+    long streamId = stream.streamId().getAsLong();
+
+    CompletableFuture<Void> reset = stream.reset("CANCELLED", "writer is blocked");
+    assertFalse(reset.isDone());
+    receiveData(connection, streamId, MuxDataKind.HTTP, false, new byte[1]);
+    assertEquals(512L, connection.connectionReceiveUnacked());
+    assertEquals(0, windowFrameCount(transport));
+
+    transport.completeNext();
+    assertTrue(reset.isDone());
+    assertEquals(512L, connection.connectionReceiveUnacked());
+    assertEquals(1, windowFrameCount(transport));
+
+    transport.completeNext();
+    assertEquals(0, connection.connectionReceiveUnacked());
+    assertEquals(512L, windows(transport).get(0).increment());
+  }
+
+  @Test
+  void lateDataRespectsAggregateCreditWhileWriterIsBlocked() {
+    FakeMuxTransport transport = new FakeMuxTransport(false);
+    RecordingFailure failure = new RecordingFailure();
+    MuxConnection connection = new MuxConnection(transport, failure);
+    MuxStream stream = connection.open(httpOpen(), new TestListener());
+    transport.completeNext();
+    ready(connection, stream);
+    receiveHeaders(connection, stream, 200);
+    long streamId = stream.streamId().getAsLong();
+    stream.reset("CANCELLED", "writer is blocked");
+
+    for (int i = 0; i < 64; i++) {
+      receiveData(connection, streamId, MuxDataKind.HTTP, false, new byte[65536]);
+    }
+    assertEquals(4L * 1024 * 1024, connection.connectionReceiveUnacked());
+    assertEquals(0, windowFrameCount(transport));
+    assertThrows(
+        MuxProtocolException.class,
+        () -> receiveData(connection, streamId, MuxDataKind.HTTP, false, new byte[1]));
+    assertTrue(failure.await());
+    assertFalse(connection.isOpen());
+  }
+
+  @Test
   void localResetReleasesInboundCreditAndCancelsQueuedData() {
     FakeMuxTransport transport = new FakeMuxTransport(false);
     MuxConnection connection = connection(transport);
-    MuxStream stream = openReadyHttp(connection, new TestListener());
+    TestListener listener = new TestListener();
+    MuxStream stream = openReadyHttp(connection, listener);
     receiveHeaders(connection, stream, 200);
     receiveData(connection, stream, MuxDataKind.HTTP, false, new byte[900]);
     assertEquals(900L, connection.connectionReceiveUnacked());
@@ -335,7 +449,10 @@ class MuxConnectionTest {
     assertTrue(cancelled.isCompletedExceptionally());
     assertFalse(reset.isDone());
     assertEquals(0, connection.activeStreamCount());
-    assertEquals(0, connection.connectionReceiveUnacked());
+    assertEquals(900L, connection.connectionReceiveUnacked());
+
+    listener.data.get(0).consumed();
+    assertEquals(900L, connection.connectionReceiveUnacked());
 
     while (transport.pendingCount() > 0) {
       transport.completeNext();
@@ -343,8 +460,8 @@ class MuxConnectionTest {
     assertTrue(reset.isDone());
     assertTrue(stream.closed().toCompletableFuture().isDone());
     assertTrue(connection.isOpen());
-    MuxFrame last = frames(transport).getLast();
-    assertInstanceOf(MuxFrame.Reset.class, last);
+    assertEquals(0, connection.connectionReceiveUnacked());
+    assertEquals(1, resetFrames(transport).size());
   }
 
   @Test
@@ -451,7 +568,7 @@ class MuxConnectionTest {
   }
 
   @Test
-  void localCloseDropsQueuedDataAndWaitsForTheInFlightFrame() {
+  void localClosePreservesQueuedDataBeforeClose() {
     FakeMuxTransport transport = new FakeMuxTransport(false);
     MuxConnection connection = connection(transport);
     MuxStream stream = connection.open(wsOpen(), new TestListener());
@@ -464,22 +581,74 @@ class MuxConnectionTest {
       writes.add(stream.sendWsData(false, true, new byte[65536]));
     }
     CompletableFuture<Void> close = stream.sendClose(1000, "done");
-    for (int i = 1; i < writes.size(); i++) {
-      assertTrue(writes.get(i).isCompletedExceptionally());
-    }
     assertFalse(close.isDone());
 
     while (transport.pendingCount() > 0) {
       transport.completeNext();
     }
-    assertTrue(writes.get(0).isDone());
+    for (CompletableFuture<Void> write : writes) {
+      assertTrue(write.isDone());
+    }
     assertTrue(close.isDone());
     assertFalse(stream.closed().toCompletableFuture().isDone());
     connection.receive(
         CODEC.encode(new MuxFrame.Close(stream.streamId().getAsLong(), new MuxClose(1000, "ack"))));
     assertTrue(stream.closed().toCompletableFuture().isDone());
-    assertEquals(1, dataFrameCount(transport));
+    assertEquals(4, dataFrameCount(transport));
     assertEquals(1, closeFrames(transport).size());
+    List<MuxFrame> written = frames(transport);
+    int closeIndex = written.size() - 1;
+    for (int i = 1; i <= 4; i++) {
+      assertEquals(MuxFrameType.DATA, written.get(closeIndex - i).type());
+    }
+    assertEquals(MuxFrameType.CLOSE, written.get(closeIndex).type());
+  }
+
+  @Test
+  void activeWsCloseWaitsForPriorDataCompletionCallback() throws Exception {
+    FakeMuxTransport transport = new FakeMuxTransport(false);
+    MuxConnection connection = connection(transport);
+    MuxStream stream = connection.open(wsOpen(), new TestListener());
+    transport.completeNext();
+    ready(connection, stream);
+    receiveHeaders(connection, stream, 101);
+
+    CountDownLatch callbackEntered = new CountDownLatch(1);
+    CountDownLatch releaseCallback = new CountDownLatch(1);
+    CompletableFuture<Void> data = stream.sendWsData(false, true, new byte[1000]);
+    data.whenComplete(
+        (ignored, error) -> {
+          callbackEntered.countDown();
+          await(releaseCallback);
+        });
+    CompletableFuture<Void> close = stream.sendClose(1000, "done");
+    assertEquals(1, transport.pendingCount());
+
+    ExecutorService executor = Executors.newSingleThreadExecutor();
+    try {
+      Future<?> completing = executor.submit(transport::completeNext);
+      await(callbackEntered);
+      assertFalse(close.isDone());
+      assertEquals(0, closeFrames(transport).size());
+
+      // 回调阻塞期间另一线程触发 pump，CLOSE 仍不得越过该 DATA 回调。
+      connection.receive(CODEC.encode(new MuxFrame.Window(0, 1000)));
+      assertEquals(MuxFrameType.DATA, frames(transport).getLast().type());
+      assertEquals(0, closeFrames(transport).size());
+
+      releaseCallback.countDown();
+      completing.get(3, TimeUnit.SECONDS);
+    } finally {
+      releaseCallback.countDown();
+      executor.shutdownNow();
+    }
+
+    transport.awaitWrites(3);
+    List<MuxFrame> written = frames(transport);
+    assertEquals(MuxFrameType.DATA, written.get(written.size() - 2).type());
+    assertEquals(MuxFrameType.CLOSE, written.getLast().type());
+    transport.completeNext();
+    assertTrue(close.isDone());
   }
 
   @Test
