@@ -28,6 +28,7 @@ import {
  */
 const DIST_DIR = fileURLToPath(new URL('../dist', import.meta.url))
 const MAIN_ENTRY = join(DIST_DIR, 'main.js')
+const PACKAGE_VERSION = JSON.parse(readFileSync(join(DIST_DIR, '..', 'package.json'), 'utf8')).version
 
 const cleans: Array<() => void | Promise<void>> = []
 afterEach(async () => {
@@ -70,6 +71,13 @@ describe('daemon compiled CLI information commands', () => {
     const version = await runCli(['--version'])
     expect(version.code).toBe(0)
     expect(version.stdout).toContain(`kk-studio-daemon ${DAEMON_VERSION}`)
+  })
+
+  it('reports the packaged daemon version from the compiled entry', async () => {
+    // 真实 CLI 输出必须与 npm 包版本一致，避免测试只做常量自比较。
+    const version = await runCli(['--version'])
+    expect(version.code).toBe(0)
+    expect(version.stdout).toBe(`kk-studio-daemon ${PACKAGE_VERSION}\n`)
   })
 
   it('validates --check-config from the compiled entry with safe diagnostics', async () => {
