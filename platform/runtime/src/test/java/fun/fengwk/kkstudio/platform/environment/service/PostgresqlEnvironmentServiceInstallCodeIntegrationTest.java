@@ -21,6 +21,7 @@ import fun.fengwk.kkstudio.platform.environment.RegistrationTokens;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.share.ai.environment.DaemonConfiguration;
@@ -32,6 +33,7 @@ import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallConfigUpdateDT
 
 import java.lang.reflect.Proxy;
 import java.time.Clock;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -148,7 +150,49 @@ class PostgresqlEnvironmentServiceInstallCodeIntegrationTest extends PostgresSpr
     assertThat(countInstallCodes(envId)).isZero();
   }
 
-  /** 测试意图：签发 code 后发生凭证轮换（rotateToken），旧 code 携带的历史 tokenHash 失效拒绝消费。 */
+  /** 测试意图：签发只覆盖 code 不推进版本；过期预期版本失败且不替换现有 code。 */
+  @Test
+  void issueDoesNotAdvanceVersionAndStaleExpectedVersionKeepsExistingCode() {
+    EnvironmentId envId = createTestEnvironment("issue-version-env");
+    EnvironmentInstallCodeDTO issued = environmentService.issueInstallCode(envId, "1");
+
+    assertThat(environmentService.get(envId).getVersion()).isEqualTo("1");
+    assertThat(countInstallCodes(envId)).isEqualTo(1L);
+
+    assertThrows(
+        AiVersionConflictException.class, () -> environmentService.issueInstallCode(envId, "0"));
+    assertThat(countInstallCodes(envId)).isEqualTo(1L);
+
+    assertThat(environmentService.installationScript(envId, issued.getCode())).isNotBlank();
+    assertThat(environmentService.get(envId).getVersion()).isEqualTo("2");
+  }
+
+  /** 测试意图：过期 code 在数据库时间下被拒绝，且不会被消费或轮换凭证。 */
+  @Test
+  void expiredCodeIsRejectedAndPreserved() {
+    EnvironmentId envId = createTestEnvironment("expired-code-env");
+    EnvironmentInstallCodeDTO issued = environmentService.issueInstallCode(envId, "1");
+    jdbcClient
+        .sql(
+            """
+            update environment set install_code = jsonb_build_object(
+                'codeHash', :codeHash,
+                'expiresAt', :expiresAt)
+            where id = :id
+            """)
+        .param("codeHash", EnvironmentInstallCodes.hash(issued.getCode()))
+        .param("expiresAt", Instant.now().minusSeconds(60).toString())
+        .param("id", envId.value())
+        .update();
+
+    assertThrows(
+        AiValidationException.class,
+        () -> environmentService.installationScript(envId, issued.getCode()));
+    assertThat(countInstallCodes(envId)).isEqualTo(1L);
+    assertThat(environmentService.get(envId).getVersion()).isEqualTo("1");
+  }
+
+  /** 测试意图：签发 code 后发生凭证轮换（rotateToken），同一行事务清空 code，旧 code 拒绝消费。 */
   @Test
   void rotateTokenInvalidatesIssuedCode() {
     EnvironmentId envId = createTestEnvironment("rotate-invalidates-env");
@@ -157,6 +201,7 @@ class PostgresqlEnvironmentServiceInstallCodeIntegrationTest extends PostgresSpr
 
     // 轮换凭证，使 Environment 持有的 registrationTokenHash 发生改变
     environmentService.rotateToken(envId, "1");
+    assertThat(countInstallCodes(envId)).isZero();
 
     assertThrows(
         AiValidationException.class,
@@ -172,6 +217,7 @@ class PostgresqlEnvironmentServiceInstallCodeIntegrationTest extends PostgresSpr
 
     String newImportedTokenHash = RegistrationTokens.hash("imported-fresh-token");
     environmentService.updateImportedEnvironment(envId, newImportedTokenHash, validConfig(), "1");
+    assertThat(countInstallCodes(envId)).isZero();
 
     assertThrows(
         AiValidationException.class,
@@ -291,25 +337,26 @@ class PostgresqlEnvironmentServiceInstallCodeIntegrationTest extends PostgresSpr
     assertThat(environmentService.get(envId).getVersion()).isEqualTo("2");
   }
 
-  /** 测试意图：凭据更新落库失败时，事务回滚撤销 code 消费，code 记录保留且之后可成功重试。 */
+  /** 测试意图：兑换已写入后发生异常时，外层事务回滚撤销 code 清空、token 轮换与版本递增。 */
   @Test
-  void tokenWriteFailureRollsBackCodeConsumption() {
+  void redeemFailureRollsBackCodeConsumption() {
     EnvironmentId envId = createTestEnvironment("token-write-failure-env");
     EnvironmentInstallCodeDTO issued = environmentService.issueInstallCode(envId, "1");
     assertThat(countInstallCodes(envId)).isEqualTo(1L);
 
-    // 构造在 updateById 阶段抛出异常的 Repository 代理
+    // 构造在 redeemInstallCode 成功写入后抛出异常的 Repository 代理
     EnvironmentRepository failingRepo =
         (EnvironmentRepository)
             Proxy.newProxyInstance(
                 EnvironmentRepository.class.getClassLoader(),
                 new Class<?>[] {EnvironmentRepository.class},
                 (proxy, method, args) -> {
-                  if ("updateById".equals(method.getName())) {
+                  Object result = method.invoke(environmentRepository, args);
+                  if ("redeemInstallCode".equals(method.getName())) {
                     throw new DataAccessResourceFailureException(
-                        "simulated database update failure");
+                        "simulated database failure after redeem");
                   }
-                  return method.invoke(environmentRepository, args);
+                  return result;
                 });
 
     EnvironmentService failingService =
@@ -356,7 +403,7 @@ class PostgresqlEnvironmentServiceInstallCodeIntegrationTest extends PostgresSpr
 
   private long countInstallCodes(EnvironmentId id) {
     return jdbcClient
-        .sql("select count(*) from environment_install_code where environment_id = :id")
+        .sql("select count(*) from environment where id = :id and install_code is not null")
         .param("id", id.value())
         .query(Long.class)
         .single();
