@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.environment.repo.impl;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 
 import org.junit.jupiter.api.BeforeAll;
@@ -8,12 +9,16 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.postgresql.Driver;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.SimpleDriverDataSource;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.platform.environment.RegistrationTokens;
 import fun.fengwk.kkstudio.platform.environment.repo.impl.store.EnvironmentJdbcStore;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentInstallCodes;
 import fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport;
+
+import javax.sql.DataSource;
 
 import java.sql.Connection;
 import java.sql.SQLException;
@@ -22,25 +27,29 @@ import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 
 /**
- * {@link PostgresqlEnvironmentRepository} 临时安装 code 持久化操作在真实 PostgreSQL 17 上的集成测试。
+ * {@link PostgresqlEnvironmentRepository} 安装授权在真实 PostgreSQL 17 上的集成测试。
  *
- * <p>验证目标包括：一次性原子消费语义（消费后物理删除）、严格过期边界检查（{@code expires_at > now}）、upsert 替换覆盖旧记录、凭据不匹配安全性以及外键级联删除。
+ * <p>验证目标包括：code 只落在 environment.install_code 且签发不推进版本、一次性原子兑换、数据库时间下的过期拒绝、摘要/版本不匹配安全性，以及兑换同时轮换
+ * token 并递增版本。
  */
 class PostgresqlEnvironmentInstallCodeIntegrationTest {
 
+  private static DataSource dataSource;
   private static JdbcClient jdbcClient;
+  private static TransactionTemplate transaction;
 
   private PostgresqlEnvironmentRepository repository;
 
   @BeforeAll
   static void beforeAll() {
-    jdbcClient =
-        JdbcClient.create(
-            new SimpleDriverDataSource(
-                new Driver(),
-                PostgresSchemaSupport.POSTGRES.getJdbcUrl(),
-                PostgresSchemaSupport.POSTGRES.getUsername(),
-                PostgresSchemaSupport.POSTGRES.getPassword()));
+    dataSource =
+        new SimpleDriverDataSource(
+            new Driver(),
+            PostgresSchemaSupport.POSTGRES.getJdbcUrl(),
+            PostgresSchemaSupport.POSTGRES.getUsername(),
+            PostgresSchemaSupport.POSTGRES.getPassword());
+    jdbcClient = JdbcClient.create(dataSource);
+    transaction = new TransactionTemplate(new DataSourceTransactionManager(dataSource));
   }
 
   @BeforeEach
@@ -54,122 +63,108 @@ class PostgresqlEnvironmentInstallCodeIntegrationTest {
     repository = new PostgresqlEnvironmentRepository(store, notifier, jdbcClient);
   }
 
-  /** 测试意图：临时安装 code 在成功兑换后被物理删除，第二次兑换必须返回 false。 */
+  /** 测试意图：签发把严格对象写到 environment 行且不推进 CAS 版本；再次签发覆盖旧摘要。 */
   @Test
-  void consumeOnceSucceedsThenSubsequentAttemptsFail() {
+  void saveWritesOneObjectWithoutAdvancingVersion() {
     UUID envId = insertEnvironment("env-alpha", "token-alpha");
-    String tokenHash = RegistrationTokens.hash("token-alpha");
-    String code = EnvironmentInstallCodes.generate();
-    String codeHash = EnvironmentInstallCodes.hash(code);
-    Instant now = Instant.parse("2026-10-23T10:00:00.000Z");
-    Instant expiresAt = now.plus(10, ChronoUnit.MINUTES);
+    String firstHash = EnvironmentInstallCodes.hash("first-code");
+    String secondHash = EnvironmentInstallCodes.hash("second-code");
+    Instant expiresAt = Instant.now().plus(10, ChronoUnit.MINUTES);
 
-    repository.saveInstallCode(envId, codeHash, tokenHash, expiresAt);
-    assertThat(countInstallCodes(envId)).isEqualTo(1L);
+    assertThat(save(envId, 0L, firstHash, expiresAt)).isTrue();
+    assertThat(version(envId)).isZero();
+    assertThat(installCodeHash(envId)).isEqualTo(firstHash);
 
-    boolean firstConsume = repository.consumeInstallCode(envId, codeHash, tokenHash, now);
-    assertThat(firstConsume).isTrue();
-    assertThat(countInstallCodes(envId)).isZero();
-
-    boolean secondConsume = repository.consumeInstallCode(envId, codeHash, tokenHash, now);
-    assertThat(secondConsume).isFalse();
+    assertThat(save(envId, 0L, secondHash, expiresAt.plusSeconds(60))).isTrue();
+    assertThat(version(envId)).isZero();
+    assertThat(installCodeHash(envId)).isEqualTo(secondHash);
   }
 
-  /** 测试意图：过期检查必须严格满足 expires_at > now，等于或晚于过期时间均拒绝消费。 */
+  /** 测试意图：成功兑换原子清空 code、轮换 token 摘要并递增版本，同一 code 不能二次兑换。 */
   @Test
-  void expiryBoundaryStrictlyRequiresExpiresAtGreaterThanNow() {
+  void redeemOnceClearsCodeRotatesTokenAndAdvancesVersion() {
     UUID envId = insertEnvironment("env-beta", "token-beta");
-    String tokenHash = RegistrationTokens.hash("token-beta");
-    String code = EnvironmentInstallCodes.generate();
-    String codeHash = EnvironmentInstallCodes.hash(code);
-    Instant expiresAt = Instant.parse("2026-10-23T12:00:00.000Z");
+    String codeHash = EnvironmentInstallCodes.hash("one-shot-code");
+    String newTokenHash = RegistrationTokens.hash("rotated-token");
+    assertThat(save(envId, 0L, codeHash, Instant.now().plus(10, ChronoUnit.MINUTES))).isTrue();
 
-    repository.saveInstallCode(envId, codeHash, tokenHash, expiresAt);
+    assertThat(redeem(envId, 0L, codeHash, newTokenHash)).isTrue();
+    assertThat(installCode(envId)).isNull();
+    assertThat(registrationTokenHash(envId)).isEqualTo(newTokenHash);
+    assertThat(version(envId)).isEqualTo(1L);
 
-    // 已过期或恰好到期时拒绝消费，并保留记录。
-    Instant justAfter = expiresAt.plusMillis(1);
-    boolean consumedAfter = repository.consumeInstallCode(envId, codeHash, tokenHash, justAfter);
-    assertThat(consumedAfter).isFalse();
-    assertThat(countInstallCodes(envId)).isEqualTo(1L);
-
-    boolean consumedExact = repository.consumeInstallCode(envId, codeHash, tokenHash, expiresAt);
-    assertThat(consumedExact).isFalse();
-    assertThat(countInstallCodes(envId)).isEqualTo(1L);
-
-    // 到期前一毫秒仍可消费，成功后物理删除。
-    Instant justBefore = expiresAt.minusMillis(1);
-    boolean consumedBefore = repository.consumeInstallCode(envId, codeHash, tokenHash, justBefore);
-    assertThat(consumedBefore).isTrue();
-    assertThat(countInstallCodes(envId)).isZero();
+    assertThat(redeem(envId, 1L, codeHash, RegistrationTokens.hash("second-token"))).isFalse();
+    assertThat(registrationTokenHash(envId)).isEqualTo(newTokenHash);
+    assertThat(version(envId)).isEqualTo(1L);
   }
 
-  /** 测试意图：再次签发安装 code（saveInstallCode upsert）会原子替换旧凭证，旧 code 无法再消费。 */
+  /** 测试意图：数据库时间下已过期的 code 被拒绝，且 code、token 与版本都保持不变。 */
   @Test
-  void saveInstallCodeUpsertReplacesPreviousCode() {
+  void expiredCodeIsRejectedAndPreserved() {
     UUID envId = insertEnvironment("env-gamma", "token-gamma");
-    String tokenHash = RegistrationTokens.hash("token-gamma");
-    String oldCodeHash = EnvironmentInstallCodes.hash("old-code");
-    String newCodeHash = EnvironmentInstallCodes.hash("new-code");
-    Instant now = Instant.parse("2026-10-23T10:00:00.000Z");
+    String codeHash = EnvironmentInstallCodes.hash("expired-code");
+    assertThat(save(envId, 0L, codeHash, Instant.now().minus(1, ChronoUnit.HOURS))).isTrue();
 
-    repository.saveInstallCode(envId, oldCodeHash, tokenHash, now.plus(5, ChronoUnit.MINUTES));
-    repository.saveInstallCode(envId, newCodeHash, tokenHash, now.plus(10, ChronoUnit.MINUTES));
-
-    assertThat(countInstallCodes(envId)).isEqualTo(1L);
-
-    // 旧 code 消费失败
-    boolean oldConsumed = repository.consumeInstallCode(envId, oldCodeHash, tokenHash, now);
-    assertThat(oldConsumed).isFalse();
-    assertThat(countInstallCodes(envId)).isEqualTo(1L);
-
-    // 新 code 消费成功
-    boolean newConsumed = repository.consumeInstallCode(envId, newCodeHash, tokenHash, now);
-    assertThat(newConsumed).isTrue();
-    assertThat(countInstallCodes(envId)).isZero();
+    assertThat(redeem(envId, 0L, codeHash, RegistrationTokens.hash("unused-token"))).isFalse();
+    assertThat(installCodeHash(envId)).isEqualTo(codeHash);
+    assertThat(registrationTokenHash(envId)).isEqualTo(RegistrationTokens.hash("token-gamma"));
+    assertThat(version(envId)).isZero();
   }
 
-  /** 测试意图：环境 ID、codeHash 或 registrationTokenHash 任意一项不匹配时均拒绝消费且不破坏已有记录。 */
+  /** 测试意图：摘要或预期版本不匹配时拒绝且保留 code，正确摘要和版本仍可兑换。 */
   @Test
-  void consumeWithMismatchedCredentialsFailsAndPreservesCode() {
+  void mismatchedHashOrVersionRejectedAndPreservesCode() {
     UUID envId = insertEnvironment("env-delta", "token-delta");
-    UUID anotherEnvId = insertEnvironment("env-other", "token-other");
-    String tokenHash = RegistrationTokens.hash("token-delta");
     String codeHash = EnvironmentInstallCodes.hash("target-code");
-    String wrongCodeHash = EnvironmentInstallCodes.hash("wrong-code");
-    String wrongTokenHash = RegistrationTokens.hash("wrong-token");
-    Instant now = Instant.parse("2026-10-23T10:00:00.000Z");
+    assertThat(save(envId, 0L, codeHash, Instant.now().plus(10, ChronoUnit.MINUTES))).isTrue();
 
-    repository.saveInstallCode(envId, codeHash, tokenHash, now.plus(10, ChronoUnit.MINUTES));
+    assertThat(redeem(envId, 0L, EnvironmentInstallCodes.hash("wrong-code"), tokenHash("wrong")))
+        .isFalse();
+    assertThat(redeem(envId, 1L, codeHash, tokenHash("stale-version"))).isFalse();
+    assertThat(installCodeHash(envId)).isEqualTo(codeHash);
+    assertThat(version(envId)).isZero();
 
-    // 错误 Environment ID
-    assertThat(repository.consumeInstallCode(anotherEnvId, codeHash, tokenHash, now)).isFalse();
-    // 错误 codeHash
-    assertThat(repository.consumeInstallCode(envId, wrongCodeHash, tokenHash, now)).isFalse();
-    // 错误 tokenHash
-    assertThat(repository.consumeInstallCode(envId, codeHash, wrongTokenHash, now)).isFalse();
-
-    // 记录完好保留，正确凭据消费成功
-    assertThat(countInstallCodes(envId)).isEqualTo(1L);
-    assertThat(repository.consumeInstallCode(envId, codeHash, tokenHash, now)).isTrue();
-    assertThat(countInstallCodes(envId)).isZero();
+    assertThat(redeem(envId, 0L, codeHash, tokenHash("correct"))).isTrue();
+    assertThat(installCode(envId)).isNull();
   }
 
-  /** 测试意图：Environment 删除时，关联的临时安装 code 必须由外键 ON DELETE CASCADE 自动清理。 */
+  /** 测试意图：签发使用过期 CAS 版本时不得覆盖当前 code。 */
   @Test
-  void deleteEnvironmentCascadesToInstallCode() {
+  void saveWithStaleVersionDoesNotWrite() {
     UUID envId = insertEnvironment("env-epsilon", "token-epsilon");
-    String tokenHash = RegistrationTokens.hash("token-epsilon");
-    String codeHash = EnvironmentInstallCodes.hash("cascade-code");
-    Instant now = Instant.parse("2026-10-23T10:00:00.000Z");
+    assertThat(save(envId, 1L, EnvironmentInstallCodes.hash("stale-issue"), Instant.now()))
+        .isFalse();
+    assertThat(installCode(envId)).isNull();
+  }
 
-    repository.saveInstallCode(envId, codeHash, tokenHash, now.plus(10, ChronoUnit.MINUTES));
-    assertThat(countInstallCodes(envId)).isEqualTo(1L);
+  /** 测试意图：安装 code 写路径与稳定行写路径一样必须处于外层事务。 */
+  @Test
+  void saveRequiresOuterTransaction() {
+    UUID envId = insertEnvironment("env-zeta", "token-zeta");
+    assertThatThrownBy(
+            () ->
+                repository.saveInstallCode(
+                    envId,
+                    0L,
+                    EnvironmentInstallCodes.hash("outside-tx"),
+                    Instant.now().plus(5, ChronoUnit.MINUTES)))
+        .isInstanceOf(IllegalStateException.class);
+    assertThat(installCode(envId)).isNull();
+  }
 
-    // 删除 Environment
-    jdbcClient.sql("delete from environment where id = :id").param("id", envId).update();
+  private boolean save(UUID envId, long expectedVersion, String codeHash, Instant expiresAt) {
+    return Boolean.TRUE.equals(
+        transaction.execute(
+            status -> repository.saveInstallCode(envId, expectedVersion, codeHash, expiresAt)));
+  }
 
-    assertThat(countInstallCodes(envId)).isZero();
-    assertThat(repository.consumeInstallCode(envId, codeHash, tokenHash, now)).isFalse();
+  private boolean redeem(
+      UUID envId, long expectedVersion, String codeHash, String registrationTokenHash) {
+    return Boolean.TRUE.equals(
+        transaction.execute(
+            status ->
+                repository.redeemInstallCode(
+                    envId, expectedVersion, codeHash, registrationTokenHash)));
   }
 
   private UUID insertEnvironment(String name, String token) {
@@ -190,11 +185,40 @@ class PostgresqlEnvironmentInstallCodeIntegrationTest {
     return id;
   }
 
-  private long countInstallCodes(UUID environmentId) {
+  private String installCodeHash(UUID environmentId) {
     return jdbcClient
-        .sql("select count(*) from environment_install_code where environment_id = :id")
+        .sql("select install_code->>'codeHash' from environment where id = :id")
+        .param("id", environmentId)
+        .query(String.class)
+        .single();
+  }
+
+  private String installCode(UUID environmentId) {
+    return jdbcClient
+        .sql("select install_code::text from environment where id = :id")
+        .param("id", environmentId)
+        .query(String.class)
+        .optional()
+        .orElse(null);
+  }
+
+  private String registrationTokenHash(UUID environmentId) {
+    return jdbcClient
+        .sql("select registration_token_hash from environment where id = :id")
+        .param("id", environmentId)
+        .query(String.class)
+        .single();
+  }
+
+  private long version(UUID environmentId) {
+    return jdbcClient
+        .sql("select version from environment where id = :id")
         .param("id", environmentId)
         .query(Long.class)
         .single();
+  }
+
+  private static String tokenHash(String token) {
+    return RegistrationTokens.hash(token);
   }
 }

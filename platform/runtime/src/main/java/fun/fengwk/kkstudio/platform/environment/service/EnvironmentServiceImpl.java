@@ -233,8 +233,10 @@ public class EnvironmentServiceImpl implements EnvironmentService {
     Environment env = requireInstallable(id, expectedVersion);
     String code = EnvironmentInstallCodes.generate();
     Instant expiresAt = clock.instant().plus(Duration.ofMinutes(5));
-    environmentRepository.saveInstallCode(
-        env.getId(), EnvironmentInstallCodes.hash(code), env.getRegistrationTokenHash(), expiresAt);
+    if (!environmentRepository.saveInstallCode(
+        env.getId(), env.getVersion(), EnvironmentInstallCodes.hash(code), expiresAt)) {
+      throw new IllegalStateException("locked environment changed while issuing an install code");
+    }
     EnvironmentInstallCodeDTO result = new EnvironmentInstallCodeDTO();
     result.setCode(code);
     result.setExpiresAt(expiresAt);
@@ -244,7 +246,7 @@ public class EnvironmentServiceImpl implements EnvironmentService {
   /**
    * 兑换安装 code：为本次安装签发新凭证并写入脚本。
    *
-   * <p>锁定环境后原子消费随机 code，再轮换凭证并生成脚本；任一步失败均回滚。旧凭证的 Daemon 下次握手被拒绝。
+   * <p>锁定环境后由仓库在数据库时间下原子校验并清空 code，同时轮换凭证、递增版本并生成脚本；任一步失败均回滚。旧凭证的 Daemon 下次握手被拒绝。
    */
   @Override
   @Transactional
@@ -254,16 +256,16 @@ public class EnvironmentServiceImpl implements EnvironmentService {
     if (env == null || env.getInstallConfig() == null) {
       throw new AiResourceNotFoundException(RESOURCE);
     }
-    if (code == null
-        || !environmentRepository.consumeInstallCode(
-            env.getId(), EnvironmentInstallCodes.hash(code),
-            env.getRegistrationTokenHash(), clock.instant())) {
+    if (code == null) {
       throw new AiValidationException(RESOURCE, "invalid or expired install code");
     }
     String token = RegistrationTokens.generate();
-    env.setRegistrationTokenHash(RegistrationTokens.hash(token));
-    if (!environmentRepository.updateById(env, env.getVersion())) {
-      throw new IllegalStateException("locked environment changed while issuing a token");
+    if (!environmentRepository.redeemInstallCode(
+        env.getId(),
+        env.getVersion(),
+        EnvironmentInstallCodes.hash(code),
+        RegistrationTokens.hash(token))) {
+      throw new AiValidationException(RESOURCE, "invalid or expired install code");
     }
     return EnvironmentInstallScripts.install(env.getInstallConfig(), token);
   }
