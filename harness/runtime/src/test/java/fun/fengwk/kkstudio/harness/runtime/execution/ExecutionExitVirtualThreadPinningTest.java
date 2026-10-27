@@ -23,6 +23,7 @@ import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
@@ -50,14 +51,26 @@ class ExecutionExitVirtualThreadPinningTest {
                 directory.toString())
             .redirectErrorStream(true)
             .start();
-    boolean exited = process.waitFor(30, TimeUnit.SECONDS);
-    if (!exited) {
-      process.destroyForcibly();
+    try {
+      boolean exited = process.waitFor(30, TimeUnit.SECONDS);
+      if (!exited) {
+        process.destroyForcibly();
+        exited = process.waitFor(30, TimeUnit.SECONDS);
+      }
+      String output =
+          exited
+              ? new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8)
+              : "pinning probe did not terminate after destroyForcibly";
+      assertTrue(exited, output);
+      assertEquals(0, process.exitValue(), output);
+      assertTrue(output.contains("NO_PIN"), output);
+    } finally {
+      process.getInputStream().close();
+      if (process.isAlive()) {
+        process.destroyForcibly();
+        process.waitFor(5, TimeUnit.SECONDS);
+      }
     }
-    String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-    assertTrue(exited, () -> "pinning probe did not finish: " + output);
-    assertEquals(0, process.exitValue(), output);
-    assertTrue(output.contains("NO_PIN"), output);
   }
 
   /** test-only 子进程入口。 */
@@ -75,37 +88,42 @@ class ExecutionExitVirtualThreadPinningTest {
       runStripeScenario(confirmer, warmupFact, new CountDownLatch(0), new CountDownLatch(0));
       warmupFileLock(directory.resolve("warmup"));
 
+      Path dump = Files.createTempFile(directory, "pinning", ".jfr");
+      try (Recording recording = startPinningRecording()) {
+        CountDownLatch databaseEntered = new CountDownLatch(1);
+        CountDownLatch releaseDatabase = new CountDownLatch(1);
+        ExecutionExitConfirmer blockedConfirmer =
+            new ExecutionExitConfirmer(
+                blockingStore(databaseEntered, releaseDatabase),
+                TestExecutionExitConfirmer.memoryJournal(),
+                Clock.systemUTC());
+        runStripeScenario(blockedConfirmer, fact(), databaseEntered, releaseDatabase);
+
+        Path journalDirectory = directory.resolve("journal");
+        try (FileExecutionExitJournal journal = new FileExecutionExitJournal(journalDirectory)) {
+          runFileLockScenario(journal);
+        }
+
+        recording.stop();
+        recording.dump(dump);
+        long pinned = 0;
+        for (RecordedEvent event : RecordingFile.readAllEvents(dump)) {
+          if (event.getEventType().getName().equals("jdk.VirtualThreadPinned")) {
+            pinned++;
+          }
+        }
+        System.out.println(pinned == 0 ? "NO_PIN" : "PINNED=" + pinned);
+        System.out.flush();
+      } finally {
+        Files.deleteIfExists(dump);
+      }
+    }
+
+    private static Recording startPinningRecording() {
       Recording recording = new Recording();
       recording.enable("jdk.VirtualThreadPinned").withThreshold(Duration.ZERO).withStackTrace();
       recording.start();
-
-      CountDownLatch databaseEntered = new CountDownLatch(1);
-      CountDownLatch releaseDatabase = new CountDownLatch(1);
-      ExecutionExitConfirmer blockedConfirmer =
-          new ExecutionExitConfirmer(
-              blockingStore(databaseEntered, releaseDatabase),
-              TestExecutionExitConfirmer.memoryJournal(),
-              Clock.systemUTC());
-      runStripeScenario(blockedConfirmer, fact(), databaseEntered, releaseDatabase);
-
-      Path journalDirectory = directory.resolve("journal");
-      try (FileExecutionExitJournal journal = new FileExecutionExitJournal(journalDirectory)) {
-        runFileLockScenario(journal);
-      }
-
-      Path dump = Files.createTempFile(directory, "pinning", ".jfr");
-      recording.stop();
-      recording.dump(dump);
-      long pinned = 0;
-      for (RecordedEvent event : RecordingFile.readAllEvents(dump)) {
-        if (event.getEventType().getName().equals("jdk.VirtualThreadPinned")) {
-          pinned++;
-        }
-      }
-      recording.close();
-      Files.deleteIfExists(dump);
-      System.out.println(pinned == 0 ? "NO_PIN" : "PINNED=" + pinned);
-      System.out.flush();
+      return recording;
     }
 
     private static void runStripeScenario(
@@ -114,38 +132,40 @@ class ExecutionExitVirtualThreadPinningTest {
         CountDownLatch databaseEntered,
         CountDownLatch releaseDatabase)
         throws Exception {
-      Thread holder =
-          Thread.ofVirtual()
-              .start(
-                  () -> {
-                    try {
-                      confirmer.confirm(fact, ExecutionExitState.STUDIO_EXITED);
-                    } catch (RuntimeException ignored) {
-                      // 数据库由测试代理拒绝；这里只验证 stripe 阻塞期间是否 pin。
-                    }
-                  });
-      if (databaseEntered.getCount() > 0) {
-        assertTrue(databaseEntered.await(10, TimeUnit.SECONDS), "holder did not enter database");
-      }
-      CountDownLatch contenderStarted = new CountDownLatch(1);
-      Thread contender =
-          Thread.ofVirtual()
-              .start(
-                  () -> {
-                    contenderStarted.countDown();
-                    try {
-                      confirmer.confirm(fact, ExecutionExitState.STUDIO_EXITED);
-                    } catch (RuntimeException ignored) {
-                      // 同一 execution 的第二个回调只需阻塞在 stripe 上。
-                    }
-                  });
-      assertTrue(contenderStarted.await(10, TimeUnit.SECONDS));
-      Thread.sleep(250);
-      releaseDatabase.countDown();
-      holder.join(10_000);
-      contender.join(10_000);
-      if (holder.isAlive() || contender.isAlive()) {
-        throw new IllegalStateException("stripe scenario did not finish");
+      Thread holder = null;
+      Thread contender = null;
+      try {
+        holder =
+            Thread.ofVirtual()
+                .start(
+                    () -> {
+                      try {
+                        confirmer.confirm(fact, ExecutionExitState.STUDIO_EXITED);
+                      } catch (RuntimeException ignored) {
+                        // 数据库由测试代理拒绝；这里只验证 stripe 阻塞期间是否 pin。
+                      }
+                    });
+        if (databaseEntered.getCount() > 0) {
+          assertTrue(databaseEntered.await(10, TimeUnit.SECONDS), "holder did not enter database");
+        }
+        CountDownLatch contenderStarted = new CountDownLatch(1);
+        contender =
+            Thread.ofVirtual()
+                .start(
+                    () -> {
+                      contenderStarted.countDown();
+                      try {
+                        confirmer.confirm(fact, ExecutionExitState.STUDIO_EXITED);
+                      } catch (RuntimeException ignored) {
+                        // 同一 execution 的第二个回调只需阻塞在 stripe 上。
+                      }
+                    });
+        assertTrue(contenderStarted.await(10, TimeUnit.SECONDS));
+        awaitCarrierProgress();
+      } finally {
+        releaseDatabase.countDown();
+        joinBounded(holder, "stripe holder");
+        joinBounded(contender, "stripe contender");
       }
     }
 
@@ -153,47 +173,88 @@ class ExecutionExitVirtualThreadPinningTest {
       ReentrantLock lock = fileJournalLock(journal);
       CountDownLatch acquired = new CountDownLatch(1);
       CountDownLatch release = new CountDownLatch(1);
-      Thread holder =
-          Thread.ofVirtual()
-              .start(
-                  () -> {
-                    lock.lock();
-                    try {
-                      acquired.countDown();
-                      release.await();
-                    } catch (InterruptedException error) {
-                      Thread.currentThread().interrupt();
-                    } finally {
-                      lock.unlock();
-                    }
-                  });
-      assertTrue(acquired.await(10, TimeUnit.SECONDS), "file journal lock was not acquired");
-      ExecutionExitJournalRecord record =
-          new ExecutionExitJournalRecord(
-              UUID.randomUUID(),
-              UUID.randomUUID(),
-              UUID.randomUUID(),
-              1,
-              "lease-1",
-              ExecutionExitKind.TOOL,
-              null,
-              ExecutionExitState.STUDIO_EXITED,
-              Instant.EPOCH);
-      CountDownLatch contenderStarted = new CountDownLatch(1);
-      Thread contender =
-          Thread.ofVirtual()
-              .start(
-                  () -> {
-                    contenderStarted.countDown();
-                    journal.write(record);
-                  });
-      assertTrue(contenderStarted.await(10, TimeUnit.SECONDS));
-      Thread.sleep(250);
-      release.countDown();
-      holder.join(10_000);
-      contender.join(10_000);
-      if (holder.isAlive() || contender.isAlive()) {
-        throw new IllegalStateException("file journal scenario did not finish");
+      AtomicReference<Throwable> contenderFailure = new AtomicReference<>();
+      Thread holder = null;
+      Thread contender = null;
+      try {
+        holder =
+            Thread.ofVirtual()
+                .start(
+                    () -> {
+                      lock.lock();
+                      try {
+                        acquired.countDown();
+                        release.await();
+                      } catch (InterruptedException error) {
+                        Thread.currentThread().interrupt();
+                      } finally {
+                        lock.unlock();
+                      }
+                    });
+        assertTrue(acquired.await(10, TimeUnit.SECONDS), "file journal lock was not acquired");
+        ExecutionExitJournalRecord record =
+            new ExecutionExitJournalRecord(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                1,
+                "lease-1",
+                ExecutionExitKind.TOOL,
+                null,
+                ExecutionExitState.STUDIO_EXITED,
+                Instant.EPOCH);
+        CountDownLatch contenderStarted = new CountDownLatch(1);
+        contender =
+            Thread.ofVirtual()
+                .start(
+                    () -> {
+                      contenderStarted.countDown();
+                      try {
+                        journal.write(record);
+                      } catch (Throwable failure) {
+                        contenderFailure.set(failure);
+                      }
+                    });
+        assertTrue(contenderStarted.await(10, TimeUnit.SECONDS));
+        awaitCarrierProgress();
+      } finally {
+        release.countDown();
+        joinBounded(holder, "file journal holder");
+        joinBounded(contender, "file journal contender");
+      }
+      Throwable failure = contenderFailure.get();
+      if (failure != null) {
+        throw new IllegalStateException("file journal contender failed", failure);
+      }
+    }
+
+    private static void awaitCarrierProgress() throws Exception {
+      CountDownLatch progressed = new CountDownLatch(1);
+      Thread task = Thread.ofVirtual().start(progressed::countDown);
+      try {
+        assertTrue(
+            progressed.await(10, TimeUnit.SECONDS),
+            "single carrier did not advance an unrelated virtual thread");
+      } finally {
+        task.join(10_000);
+      }
+      if (task.isAlive()) {
+        throw new IllegalStateException("unrelated virtual task did not finish");
+      }
+    }
+
+    private static void joinBounded(Thread thread, String name) {
+      if (thread == null) {
+        return;
+      }
+      try {
+        thread.join(10_000);
+      } catch (InterruptedException error) {
+        Thread.currentThread().interrupt();
+        throw new IllegalStateException("interrupted while joining " + name, error);
+      }
+      if (thread.isAlive()) {
+        throw new IllegalStateException(name + " did not finish");
       }
     }
 

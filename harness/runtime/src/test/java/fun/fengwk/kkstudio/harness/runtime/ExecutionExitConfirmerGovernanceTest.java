@@ -75,9 +75,10 @@ class ExecutionExitConfirmerGovernanceTest {
   }
 
   @Test
-  void conflictingCallbackRetainsOriginalProofAndBlocksAutomaticReplay() {
+  void diskSnapshotWriteFailureTouchesNoDatabaseAndRetainsOriginalTime() {
     Fixture fixture = Fixture.create();
     FaultJournal journal = new FaultJournal(TestExecutionExitConfirmer.memoryJournal());
+    journal.write(recordFor(fixture.fact));
     journal.failWrites = 1;
     AtomicInteger databaseTransactions = new AtomicInteger();
     ExecutionExitConfirmer confirmer =
@@ -86,25 +87,54 @@ class ExecutionExitConfirmerGovernanceTest {
             journal,
             fixture.clock);
 
+    confirmer.replayPending();
+
+    assertEquals(
+        0, databaseTransactions.get(), "snapshot proof must be rewritten before DB access");
+    assertEquals(2, journal.writes());
+    assertEquals(1, journal.delegate.loadAll().records().size());
+
+    fixture.clock.advance(Duration.ofSeconds(1));
+    confirmer.replayPending();
+
+    ExecutionExitFact confirmed = execution(fixture.store, fixture.fact.executionId());
+    assertEquals(1, databaseTransactions.get());
+    assertEquals(ExecutionExitState.STUDIO_EXITED, confirmed.state());
+    assertEquals(T0, confirmed.confirmedAt(), "the disk canonical time must be preserved");
+    assertTrue(journal.delegate.loadAll().records().isEmpty());
+  }
+
+  @Test
+  void conflictingCallbackDoesNotPoisonOriginalTransientRetry() {
+    Fixture fixture = Fixture.create();
+    FaultJournal journal = new FaultJournal(TestExecutionExitConfirmer.memoryJournal());
+    AtomicInteger databaseTransactions = new AtomicInteger();
+    AtomicInteger failures = new AtomicInteger(1);
+    ExecutionExitConfirmer confirmer =
+        new ExecutionExitConfirmer(
+            countingStore(fixture.store, databaseTransactions, failures), journal, fixture.clock);
+
     assertThrows(
-        ExecutionExitJournalException.class,
+        IllegalStateException.class,
         () -> confirmer.confirm(fixture.fact, ExecutionExitState.STUDIO_EXITED));
-    fixture.clock.advance(Duration.ofSeconds(5));
+    assertEquals(1, databaseTransactions.get());
+    assertEquals(1, journal.writes());
+    assertEquals(1, journal.delegate.loadAll().records().size());
+
+    fixture.clock.advance(Duration.ofSeconds(1));
     assertThrows(
         ExecutionExitJournalConflictException.class,
         () -> confirmer.confirm(fixture.fact, ExecutionExitState.NOT_STARTED));
-    assertEquals(0, databaseTransactions.get());
-    assertTrue(journal.delegate.loadAll().records().isEmpty());
+    assertEquals(1, databaseTransactions.get());
+    assertEquals(1, journal.writes(), "a rejected new input must not rewrite the canonical proof");
 
-    fixture.clock.advance(Duration.ofSeconds(5));
     confirmer.replayPending();
-    assertEquals(0, databaseTransactions.get(), "a target conflict must pause automatic replay");
-    assertTrue(journal.delegate.loadAll().records().isEmpty());
-
-    confirmer.confirm(fixture.fact, ExecutionExitState.STUDIO_EXITED);
     ExecutionExitFact confirmed = execution(fixture.store, fixture.fact.executionId());
+    assertEquals(2, databaseTransactions.get(), "the original transient failure is due");
+    assertEquals(2, journal.writes(), "the cached canonical proof must be written before retry");
     assertEquals(ExecutionExitState.STUDIO_EXITED, confirmed.state());
-    assertEquals(T0, confirmed.confirmedAt(), "the explicit retry must keep the first proof");
+    assertEquals(T0, confirmed.confirmedAt(), "the rejected callback must not replace the proof");
+    assertTrue(journal.delegate.loadAll().records().isEmpty());
   }
 
   @Test
@@ -144,6 +174,45 @@ class ExecutionExitConfirmerGovernanceTest {
           ExecutionExitState.STUDIO_EXITED,
           execution(fixture.store, present.executionId()).state());
     }
+  }
+
+  @Test
+  void explicitConfirmAfterPermanentFailureAllowsTransientRetry() {
+    Fixture fixture = Fixture.create();
+    ExecutionExitFact missing = expected(fixture.baseline.threadId(), TestIds.id(22), T0);
+    FaultJournal journal = new FaultJournal(TestExecutionExitConfirmer.memoryJournal());
+    journal.write(recordFor(missing));
+    AtomicInteger databaseTransactions = new AtomicInteger();
+    AtomicInteger failures = new AtomicInteger();
+    ExecutionExitConfirmer confirmer =
+        new ExecutionExitConfirmer(
+            countingStore(fixture.store, databaseTransactions, failures), journal, fixture.clock);
+
+    confirmer.replayPending();
+    assertEquals(1, databaseTransactions.get());
+    assertEquals(1, journal.delegate.loadAll().records().size());
+
+    register(fixture.store, missing);
+    failures.set(1);
+    fixture.clock.advance(Duration.ofSeconds(1));
+    assertThrows(
+        IllegalStateException.class,
+        () -> confirmer.confirm(missing, ExecutionExitState.STUDIO_EXITED));
+    assertEquals(2, databaseTransactions.get());
+    assertEquals(1, journal.delegate.loadAll().records().size());
+
+    fixture.clock.set(T0.plusMillis(1_999));
+    confirmer.replayPending();
+    assertEquals(2, databaseTransactions.get(), "the explicit transient failure keeps its backoff");
+
+    fixture.clock.set(T0.plusSeconds(2));
+    confirmer.replayPending();
+
+    ExecutionExitFact confirmed = execution(fixture.store, missing.executionId());
+    assertEquals(3, databaseTransactions.get());
+    assertEquals(ExecutionExitState.STUDIO_EXITED, confirmed.state());
+    assertEquals(T0, confirmed.confirmedAt());
+    assertTrue(journal.delegate.loadAll().records().isEmpty());
   }
 
   @Test
@@ -208,11 +277,28 @@ class ExecutionExitConfirmerGovernanceTest {
       assertEquals(
           ExecutionExitState.STUDIO_EXITED,
           execution(fixture.store, fixture.fact.executionId()).state());
+      assertEquals(1, journal.loads());
       assertEquals(1, logs.matching("phase=EXIT_CONFIRMATION_JOURNAL_LOAD").size());
 
-      fixture.clock.advance(Duration.ofSeconds(1));
       confirmer.replayPending();
+      assertEquals(1, journal.loads(), "directory load must wait for its backoff");
+
+      fixture.clock.advance(Duration.ofMillis(999));
+      confirmer.replayPending();
+      assertEquals(1, journal.loads(), "directory load is not due before one second");
+
+      fixture.clock.advance(Duration.ofMillis(1));
+      confirmer.replayPending();
+      assertEquals(2, journal.loads(), "directory load is retried when due");
       assertEquals(1, logs.matching("phase=EXIT_CONFIRMATION_JOURNAL_LOAD").size());
+
+      journal.failLoads = false;
+      fixture.clock.advance(Duration.ofSeconds(2));
+      confirmer.replayPending();
+      assertEquals(3, journal.loads(), "a recovered directory load clears the failure state");
+
+      confirmer.replayPending();
+      assertEquals(4, journal.loads(), "healthy directory is loaded on every replay round");
     }
   }
 
@@ -355,12 +441,16 @@ class ExecutionExitConfirmerGovernanceTest {
   private static ExecutionExitFact register(
       InMemoryHarnessStore store, UUID threadId, UUID invocationId) {
     ExecutionExitFact fact = expected(threadId, invocationId, T0);
+    register(store, fact);
+    return fact;
+  }
+
+  private static void register(InMemoryHarnessStore store, ExecutionExitFact fact) {
     store.transaction(
         tx -> {
-          tx.lockThread(threadId);
+          tx.lockThread(fact.threadId());
           return tx.registerExecution(fact);
         });
-    return fact;
   }
 
   private static ExecutionExitFact execution(HarnessStore store, UUID executionId) {
@@ -458,6 +548,7 @@ class ExecutionExitConfirmerGovernanceTest {
 
     private final ExecutionExitJournal delegate;
     private final AtomicInteger writes = new AtomicInteger();
+    private final AtomicInteger loads = new AtomicInteger();
     private volatile int failWrites;
     private volatile int failAfterDelegateWrites;
     private volatile int failDeletes;
@@ -493,6 +584,7 @@ class ExecutionExitConfirmerGovernanceTest {
 
     @Override
     public ExecutionExitJournalSnapshot loadAll() {
+      loads.incrementAndGet();
       if (failLoads) {
         throw new ExecutionExitJournalException("cannot list journal directory");
       }
@@ -506,6 +598,10 @@ class ExecutionExitConfirmerGovernanceTest {
 
     private int writes() {
       return writes.get();
+    }
+
+    private int loads() {
+      return loads.get();
     }
   }
 

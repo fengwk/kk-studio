@@ -16,7 +16,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
 
@@ -28,8 +28,9 @@ import java.util.function.Supplier;
  * ExecutionExitLedger#lockAncestorChain} 作为新事务第一把锁重新确认。
  *
  * <p>同一 execution 的确认在进程内按稳定 stripe 串行化，保证并发回调只产生一次 version 推进与一次 journal 删除，并始终复用第一次 canonical
- * proof 的身份、目标和确认时刻。首次 journal 写入失败时 proof 只保留在本进程内等待重试，不能宣称跨进程 durable。事实缺失与 identity/target
- * 冲突只暂停该 execution 的自动重放；其它数据库或文件失败按 {@link #BACKOFF_SECONDS} 退避，成功后重置。
+ * proof 的身份、目标和确认时刻。首次 journal 写入失败时 proof 只保留在本进程内等待重试，不能宣称跨进程 durable。事实缺失或 canonical proof 与
+ * journal/数据库的真实 identity/target 冲突只暂停该 execution 的自动重放；被拒绝的新输入不改变原 proof。其它数据库或文件失败按 {@link
+ * #BACKOFF_SECONDS} 退避，成功后重置。
  */
 @Slf4j
 public final class ExecutionExitConfirmer {
@@ -48,7 +49,7 @@ public final class ExecutionExitConfirmer {
   private final ConcurrentHashMap<UUID, PendingProof> proofs = new ConcurrentHashMap<>();
   private final ConcurrentHashMap<UUID, Failure> failures = new ConcurrentHashMap<>();
   private final Set<String> reportedFileFailures = ConcurrentHashMap.newKeySet();
-  private final AtomicBoolean directoryFailureReported = new AtomicBoolean();
+  private final AtomicReference<DirectoryFailure> directoryFailure = new AtomicReference<>();
 
   public ExecutionExitConfirmer(HarnessStore store, ExecutionExitJournal journal, Clock clock) {
     this.store = Objects.requireNonNull(store, "store");
@@ -69,8 +70,7 @@ public final class ExecutionExitConfirmer {
     Instant now = clock.instant();
     Instant observedAt = now.isBefore(expected.registeredAt()) ? expected.registeredAt() : now;
     ExecutionExitJournalRecord candidate = proof(expected, state, observedAt);
-    return locked(
-        expected.executionId(), () -> confirmInLock(candidate, false, PHASE_CONFIRM, now));
+    return locked(expected.executionId(), () -> confirmInLock(candidate, PHASE_CONFIRM, now));
   }
 
   /** 重放内存 proof 与磁盘 snapshot；单条失败保留该记录并继续其它记录。 */
@@ -95,13 +95,16 @@ public final class ExecutionExitConfirmer {
     }
 
     ExecutionExitJournalSnapshot snapshot;
+    if (!shouldLoadDirectory(now)) {
+      return;
+    }
     try {
       snapshot = journal.loadAll();
     } catch (RuntimeException failure) {
-      reportDirectoryFailure(failure);
+      reportDirectoryFailure(now, failure);
       return;
     }
-    directoryFailureReported.set(false);
+    directoryFailure.set(null);
     reportFileFailures(snapshot.failures());
     for (ExecutionExitJournalRecord record : snapshot.records()) {
       UUID executionId = record.executionId();
@@ -117,7 +120,7 @@ public final class ExecutionExitConfirmer {
                 if (proofs.containsKey(executionId) || !shouldAttempt(executionId, now)) {
                   return false;
                 }
-                proofs.put(executionId, new PendingProof(record, true));
+                proofs.put(executionId, new PendingProof(record));
                 replayOne(record, now);
                 return true;
               });
@@ -138,48 +141,35 @@ public final class ExecutionExitConfirmer {
     }
   }
 
-  private Result confirmInLock(
-      ExecutionExitJournalRecord candidate, boolean candidateDurable, String phase, Instant now) {
+  private Result confirmInLock(ExecutionExitJournalRecord candidate, String phase, Instant now) {
     UUID executionId = candidate.executionId();
     PendingProof pending = proofs.get(executionId);
     if (pending == null) {
-      pending = new PendingProof(candidate, candidateDurable);
+      pending = new PendingProof(candidate);
       proofs.put(executionId, pending);
     } else if (!pending.record().sameIdentity(candidate)) {
-      throw permanent(
-          executionId,
-          FailureReason.IDENTITY_CONFLICT,
-          phase,
-          now,
-          new ExecutionExitJournalConflictException(
-              ExecutionExitJournalConflictException.Conflict.IDENTITY,
-              "execution " + executionId + " identity cannot be replaced"));
+      throw new ExecutionExitJournalConflictException(
+          ExecutionExitJournalConflictException.Conflict.IDENTITY,
+          "execution " + executionId + " identity cannot be replaced");
     } else if (pending.record().targetState() != candidate.targetState()) {
-      throw permanent(
-          executionId,
-          FailureReason.TARGET_CONFLICT,
-          phase,
-          now,
-          new ExecutionExitJournalConflictException(
-              ExecutionExitJournalConflictException.Conflict.TARGET,
-              "execution " + executionId + " target cannot be replaced"));
+      throw new ExecutionExitJournalConflictException(
+          ExecutionExitJournalConflictException.Conflict.TARGET,
+          "execution " + executionId + " target cannot be replaced");
     }
 
-    ExecutionExitJournalRecord canonical = pending.record();
-    if (!pending.durable()) {
-      try {
-        canonical = journal.write(canonical);
-        proofs.put(executionId, new PendingProof(canonical, true));
-      } catch (ExecutionExitJournalConflictException conflict) {
-        FailureReason reason =
-            conflict.conflict() == ExecutionExitJournalConflictException.Conflict.IDENTITY
-                ? FailureReason.IDENTITY_CONFLICT
-                : FailureReason.TARGET_CONFLICT;
-        throw permanent(executionId, reason, phase, now, conflict);
-      } catch (RuntimeException failure) {
-        recordFailure(executionId, FailureReason.JOURNAL_WRITE, phase, now, failure);
-        throw failure;
-      }
+    ExecutionExitJournalRecord canonical;
+    try {
+      canonical = journal.write(pending.record());
+      proofs.put(executionId, new PendingProof(canonical));
+    } catch (ExecutionExitJournalConflictException conflict) {
+      FailureReason reason =
+          conflict.conflict() == ExecutionExitJournalConflictException.Conflict.IDENTITY
+              ? FailureReason.IDENTITY_CONFLICT
+              : FailureReason.TARGET_CONFLICT;
+      throw permanent(executionId, reason, phase, now, conflict);
+    } catch (RuntimeException failure) {
+      recordFailure(executionId, FailureReason.JOURNAL_WRITE, phase, now, failure);
+      throw failure;
     }
 
     ExecutionExitJournalRecord canonicalProof = canonical;
@@ -195,7 +185,7 @@ public final class ExecutionExitConfirmer {
       return complete(executionId, fast, phase, now);
     } catch (RuntimeException failure) {
       Failure current = failures.get(executionId);
-      if (current == null || !current.permanent()) {
+      if (current == null || !current.permanent() || PHASE_CONFIRM.equals(phase)) {
         recordFailure(executionId, FailureReason.DATABASE, phase, now, failure);
       }
       throw failure;
@@ -204,7 +194,7 @@ public final class ExecutionExitConfirmer {
 
   private void replayOne(ExecutionExitJournalRecord record, Instant now) {
     try {
-      confirmInLock(record, true, PHASE_REPLAY, now);
+      confirmInLock(record, PHASE_REPLAY, now);
     } catch (RuntimeException failure) {
       if (!failures.containsKey(record.executionId())) {
         recordFailure(record.executionId(), FailureReason.REPLAY, PHASE_REPLAY, now, failure);
@@ -341,14 +331,22 @@ public final class ExecutionExitConfirmer {
     reportedFileFailures.retainAll(current);
   }
 
-  private void reportDirectoryFailure(RuntimeException failure) {
-    if (directoryFailureReported.compareAndSet(false, true)) {
+  private void reportDirectoryFailure(Instant now, RuntimeException failure) {
+    DirectoryFailure previous = directoryFailure.get();
+    int attempts = previous == null ? 1 : previous.attempts() + 1;
+    directoryFailure.set(new DirectoryFailure(attempts, now.plusSeconds(backoffSeconds(attempts))));
+    if (previous == null) {
       log.warn(
           "cannot read execution exit journal;"
               + " phase={}; reason=DIRECTORY; executionId=-; exception={}",
           PHASE_JOURNAL_LOAD,
           failure.getClass().getSimpleName());
     }
+  }
+
+  private boolean shouldLoadDirectory(Instant now) {
+    DirectoryFailure failure = directoryFailure.get();
+    return failure == null || !now.isBefore(failure.nextAttemptAt());
   }
 
   private boolean shouldAttempt(UUID executionId, Instant now) {
@@ -375,7 +373,7 @@ public final class ExecutionExitConfirmer {
     Instant nextAttemptAt =
         permanent ? Instant.MAX : now.plus(Duration.ofSeconds(backoffSeconds(attempts)));
     failures.put(executionId, new Failure(reason, permanent, attempts, nextAttemptAt));
-    if (!sameReason || !previous.alerted()) {
+    if (!sameReason) {
       log.warn(
           "cannot resolve execution exit confirmation;"
               + " phase={}; reason={}; executionId={}; exception={}",
@@ -422,17 +420,10 @@ public final class ExecutionExitConfirmer {
     REPLAY
   }
 
-  private record PendingProof(ExecutionExitJournalRecord record, boolean durable) {}
+  private record PendingProof(ExecutionExitJournalRecord record) {}
+
+  private record DirectoryFailure(int attempts, Instant nextAttemptAt) {}
 
   private record Failure(
-      FailureReason reason,
-      boolean permanent,
-      int attempts,
-      Instant nextAttemptAt,
-      boolean alerted) {
-
-    private Failure(FailureReason reason, boolean permanent, int attempts, Instant nextAttemptAt) {
-      this(reason, permanent, attempts, nextAttemptAt, true);
-    }
-  }
+      FailureReason reason, boolean permanent, int attempts, Instant nextAttemptAt) {}
 }
