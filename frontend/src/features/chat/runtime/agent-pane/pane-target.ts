@@ -429,65 +429,141 @@ export function targetIdentity(target: PaneTarget): string {
   return `thread:${target.threadId}`
 }
 
+export function samePendingAcceptanceIdentity(
+  left: PendingAcceptance,
+  right: PendingAcceptance,
+): boolean {
+  // 请求身份以命令幂等键 + owner + 展示目标为准；generation/unknownOutcome 是同一
+  // 请求的本地对账状态，更新它们不能生成新的请求身份。
+  return left.owner.type === right.owner.type
+    && ownerIdentity(left.owner) === ownerIdentity(right.owner)
+    && ownerIdentity(left.request.owner) === ownerIdentity(right.request.owner)
+    && samePaneTarget(left.target, right.target)
+    && sameBatchRequestIdentity(left.request, right.request)
+}
+
+export type PendingAcceptanceSlot =
+  | { status: 'empty' }
+  | { status: 'occupied'; pending: PendingAcceptance }
+  | { status: 'invalid' }
+  | { status: 'unavailable' }
+
+/**
+ * 按 owner/pane 槽位读取原始 pending，不按当前展示目标过滤。
+ *
+ * 槽位被损坏/不可读取时也不能当成“从未执行”：调用方必须阻塞新提交，避免覆盖
+ * 仍可能属于原操作的记录。
+ */
+export function inspectPendingAcceptanceSlot(
+  owner: AgentRuntimeOwnerDTO,
+  paneId: string,
+  storage?: Pick<Storage, 'getItem'>,
+): PendingAcceptanceSlot {
+  const resolved = resolveStorage(storage)
+  if (resolved == null) {
+    return { status: 'unavailable' }
+  }
+  try {
+    const raw = resolved.getItem(pendingStorageKey(owner, paneId))
+    if (!raw) {
+      return { status: 'empty' }
+    }
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(raw)
+    } catch {
+      return { status: 'invalid' }
+    }
+    if (
+      !isPendingAcceptanceValue(parsed)
+      || parsed.owner.type !== owner.type
+      || ownerIdentity(parsed.owner) !== ownerIdentity(owner)
+      || ownerIdentity(parsed.request.owner) !== ownerIdentity(owner)
+    ) {
+      return { status: 'invalid' }
+    }
+    return { status: 'occupied', pending: parsed }
+  } catch {
+    return { status: 'unavailable' }
+  }
+}
+
 export function loadPendingAcceptance(
   owner: AgentRuntimeOwnerDTO,
   paneId: string,
   storage?: Pick<Storage, 'getItem'>,
   expectedTarget?: PaneTarget,
 ): PendingAcceptance | null {
-  const resolved = resolveStorage(storage)
-  if (resolved == null) {
+  const slot = inspectPendingAcceptanceSlot(owner, paneId, storage)
+  if (slot.status !== 'occupied') {
     return null
   }
-  try {
-    const raw = resolved.getItem(pendingStorageKey(owner, paneId))
-    if (!raw) {
-      return null
-    }
-    const parsed: unknown = JSON.parse(raw)
-    if (!isPendingAcceptanceValue(parsed)) {
-      return null
-    }
-    if (
-      parsed.owner.type !== owner.type
-      || ownerIdentity(parsed.owner) !== ownerIdentity(owner)
-      || ownerIdentity(parsed.request.owner) !== ownerIdentity(owner)
-    ) {
-      return null
-    }
-    // paneId 只定位记录槽位；恢复应用还必须核对记录自己的展示目标。目标不匹配时
-    // 保留原记录供原操作对账，既不删除也不改写成当前 UI 的请求。
-    if (expectedTarget != null && !samePaneTarget(parsed.target, expectedTarget)) {
-      return null
-    }
-    return parsed
-  } catch {
+  // paneId 只定位记录槽位；恢复应用还必须核对记录自己的展示目标。目标不匹配时
+  // 保留原记录供原操作对账，既不删除也不改写成当前 UI 的请求。
+  if (expectedTarget != null && !samePaneTarget(slot.pending.target, expectedTarget)) {
     return null
   }
+  return slot.pending
 }
 
+/**
+ * 写入 pending 使用 best-effort 槽位 compare-and-set：先读后写，不是跨 tab 原子
+ * 操作。它用于阻止常规路径覆盖已存在的不同目标/不同幂等键记录；同时并发写入
+ * 仍可能由浏览器最后写入者获胜。已有异目标记录必须保留，由原目标切回后对账。
+ */
 export function savePendingAcceptance(
   owner: AgentRuntimeOwnerDTO,
   paneId: string,
   pending: PendingAcceptance,
-  storage: Pick<Storage, 'setItem'> = globalThis.localStorage,
-): void {
+  storage: Pick<Storage, 'getItem' | 'setItem'> = globalThis.localStorage,
+): boolean {
+  const resolved = resolveStorage(storage)
+  if (
+    resolved == null
+    || ownerIdentity(pending.owner) !== ownerIdentity(owner)
+    || ownerIdentity(pending.request.owner) !== ownerIdentity(owner)
+  ) {
+    return false
+  }
+  const slot = inspectPendingAcceptanceSlot(owner, paneId, resolved)
+  if (slot.status === 'invalid' || slot.status === 'unavailable') {
+    return false
+  }
+  if (slot.status === 'occupied' && !samePendingAcceptanceIdentity(slot.pending, pending)) {
+    return false
+  }
   try {
-    storage.setItem(pendingStorageKey(owner, paneId), JSON.stringify(pending))
+    resolved.setItem(pendingStorageKey(owner, paneId), JSON.stringify(pending))
+    return true
   } catch {
-    // Ignore quota errors.
+    return false
   }
 }
 
+/**
+ * best-effort 只清除与 expected 同一原始请求的记录；槽位被其他请求占用、损坏或
+ * 不可读时保留原记录，避免迟到的成功/取消清掉别人的对账资料。先读后删不是跨 tab
+ * 原子操作，这里只覆盖常规路径。
+ */
 export function clearPendingAcceptance(
   owner: AgentRuntimeOwnerDTO,
   paneId: string,
-  storage: Pick<Storage, 'removeItem'> = globalThis.localStorage,
-): void {
+  expected: PendingAcceptance,
+  storage: Pick<Storage, 'getItem' | 'removeItem'> = globalThis.localStorage,
+): boolean {
+  const resolved = resolveStorage(storage)
+  if (resolved == null) {
+    return false
+  }
+  const slot = inspectPendingAcceptanceSlot(owner, paneId, resolved)
+  if (slot.status !== 'occupied' || !samePendingAcceptanceIdentity(slot.pending, expected)) {
+    return false
+  }
   try {
-    storage.removeItem(pendingStorageKey(owner, paneId))
+    resolved.removeItem(pendingStorageKey(owner, paneId))
+    return true
   } catch {
-    // Ignore storage errors.
+    return false
   }
 }
 

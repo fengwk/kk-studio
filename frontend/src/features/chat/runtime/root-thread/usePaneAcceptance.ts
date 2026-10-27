@@ -28,10 +28,11 @@ import {
 } from '@/features/chat/runtime/agent-pane/agent-pane-pipeline'
 import {
   clearPendingAcceptance,
+  inspectPendingAcceptanceSlot,
   isBoundTarget,
   isDraftHistoryTarget,
   isNewThreadTarget,
-  loadPendingAcceptance,
+  samePaneTarget,
   savePendingAcceptance,
   type PaneTarget,
   type PendingAcceptance,
@@ -87,6 +88,30 @@ interface PaneAcceptanceOptions {
   setRenameError: (message: string | null) => void
 }
 
+interface PendingSlotView {
+  pending: PendingAcceptance | null
+  blocked: boolean
+}
+
+/** 只把与当前展示目标相同的 pending 恢复为可操作记录；其余占用只阻塞槽位。 */
+function pendingSlotView(
+  owner: AgentRuntimeOwnerDTO | undefined,
+  paneId: string,
+  target: PaneTarget,
+): PendingSlotView {
+  if (!owner) {
+    return { pending: null, blocked: false }
+  }
+  const slot = inspectPendingAcceptanceSlot(owner, paneId)
+  if (slot.status === 'occupied' && samePaneTarget(slot.pending.target, target)) {
+    return {
+      pending: { ...slot.pending, unknownOutcome: true },
+      blocked: false,
+    }
+  }
+  return { pending: null, blocked: slot.status === 'invalid' || slot.status === 'occupied' }
+}
+
 /**
  * 未绑定 Thread 的首次发送（NEW_SESSION / NEW_THREAD / NEW_FORKED_SESSION 草稿）：
  * 冻结请求、原子提交、未知结果恢复与确定失败回滚。成功后先种权威快照再切目标。
@@ -101,22 +126,73 @@ export function usePaneAcceptance(options: PaneAcceptanceOptions) {
   } = options
   const { t } = useI18n()
   const queryClient = useQueryClient()
-  const [pendingAcceptance, setPendingAcceptance] = useState<PendingAcceptance | null>(
-    () => {
-      if (!owner) {
-        return null
-      }
-      const pending = loadPendingAcceptance(owner, paneId, undefined, target)
-      const restored = pending == null ? null : { ...pending, unknownOutcome: true }
-      // 栅栏 ref 与 state 同步起步：首帧 hasPendingOperation 就必须看到恢复的未决验收。
-      pendingAcceptanceRef.current = restored
-      return restored
-    },
+  const [initialPendingSlot] = useState(() => pendingSlotView(owner, paneId, target))
+  const [pendingAcceptance, setPendingAcceptance] = useState<PendingAcceptance | null>(() => {
+    // 栅栏 ref 与 state 同步起步：首帧 hasPendingOperation 就必须看到恢复的未决验收。
+    pendingAcceptanceRef.current = initialPendingSlot.pending
+    return initialPendingSlot.pending
+  })
+  const [pendingAcceptanceBlocked, setPendingAcceptanceBlocked] = useState(
+    initialPendingSlot.blocked,
   )
 
   useEffect(() => {
     pendingAcceptanceRef.current = pendingAcceptance
   }, [pendingAcceptance, pendingAcceptanceRef])
+
+  // 展示目标切换后只恢复与原目标一致的记录；其他目标的 pending 保留在槽位中，
+  // 用于阻塞新提交并提示切回原目标，不复制、不删除、不套用到当前面板。
+  useEffect(() => {
+    if (!owner) {
+      return
+    }
+    if (pendingAcceptanceRef.current != null) {
+      setPendingAcceptanceBlocked(false)
+      return
+    }
+    const slot = inspectPendingAcceptanceSlot(owner, paneId)
+    if (slot.status === 'occupied' && samePaneTarget(slot.pending.target, targetRef.current)) {
+      const restored = { ...slot.pending, unknownOutcome: true }
+      pendingAcceptanceRef.current = restored
+      setPendingAcceptance(restored)
+      setPendingAcceptanceBlocked(false)
+      return
+    }
+    setPendingAcceptanceBlocked(slot.status === 'invalid' || slot.status === 'occupied')
+  }, [owner, ownerKey, paneId, target, targetRef, pendingAcceptanceRef])
+
+  /**
+   * 提交前同步检查槽位：只允许空槽或当前目标自己的请求继续。其他目标/损坏槽位
+   * 保持原记录并阻止新请求，避免 save 覆盖；切回原目标后本函数会恢复同一请求。
+   */
+  function blockSubmissionForForeignPending(): boolean {
+    if (!owner) {
+      return false
+    }
+    const slot = inspectPendingAcceptanceSlot(owner, paneId)
+    if (slot.status === 'empty' || slot.status === 'unavailable') {
+      if (slot.status === 'empty' && pendingAcceptanceRef.current == null) {
+        setPendingAcceptanceBlocked(false)
+      }
+      return false
+    }
+    if (
+      slot.status === 'occupied'
+      && !isBoundTarget(targetRef.current)
+      && samePaneTarget(slot.pending.target, targetRef.current)
+    ) {
+      if (pendingAcceptanceRef.current == null) {
+        const restored = { ...slot.pending, unknownOutcome: true }
+        pendingAcceptanceRef.current = restored
+        setPendingAcceptance(restored)
+      }
+      setPendingAcceptanceBlocked(false)
+      return false
+    }
+    setPendingAcceptanceBlocked(true)
+    setActionError(t('ai.runtime.action.pendingAcceptanceBlocked'))
+    return true
+  }
 
   function abandonPendingAcceptance(): void {
     const pending = pendingAcceptanceRef.current
@@ -127,8 +203,8 @@ export function usePaneAcceptance(options: PaneAcceptanceOptions) {
     generationRef.current += 1
     pendingAcceptanceRef.current = null
     setPendingAcceptance(null)
-    if (owner) {
-      clearPendingAcceptance(owner, paneId)
+    if (owner && pending != null) {
+      clearPendingAcceptance(owner, paneId, pending)
     }
     setActionError(null)
     setConflict(null)
@@ -150,8 +226,24 @@ export function usePaneAcceptance(options: PaneAcceptanceOptions) {
     const pending = makePending(frozen)
     pendingAcceptanceRef.current = pending
     setPendingAcceptance(pending)
-    if (owner) {
-      savePendingAcceptance(owner, paneId, pending)
+    if (owner && !savePendingAcceptance(owner, paneId, pending)) {
+      // 另一个 tab 可能刚占用了同一槽位，或本 tab 无法持久化未决请求。两种情况都
+      // 不能发送：失败响应将失去原请求对账资料。保留已有记录，不覆盖。
+      pendingAcceptanceRef.current = null
+      setPendingAcceptance(null)
+      const slot = inspectPendingAcceptanceSlot(owner, paneId)
+      if (slot.status === 'occupied' && samePaneTarget(slot.pending.target, targetRef.current)) {
+        const restored = { ...slot.pending, unknownOutcome: true }
+        pendingAcceptanceRef.current = restored
+        setPendingAcceptance(restored)
+        setPendingAcceptanceBlocked(false)
+      } else {
+        setPendingAcceptanceBlocked(slot.status === 'invalid' || slot.status === 'occupied')
+      }
+      setActionError(t(slot.status === 'invalid' || slot.status === 'occupied'
+        ? 'ai.runtime.action.pendingAcceptanceBlocked'
+        : 'ai.runtime.action.pendingAcceptanceNotSaved'))
+      return
     }
     if (clearComposer) {
       setParts([])
@@ -166,6 +258,9 @@ export function usePaneAcceptance(options: PaneAcceptanceOptions) {
     },
   ): void {
     if (capabilities?.readOnly) {
+      return
+    }
+    if (blockSubmissionForForeignPending()) {
       return
     }
     if (hasPendingOperation()) {
@@ -276,7 +371,7 @@ export function usePaneAcceptance(options: PaneAcceptanceOptions) {
       pendingAcceptanceRef.current = null
       setPendingAcceptance(null)
       if (owner) {
-        clearPendingAcceptance(owner, paneId)
+        clearPendingAcceptance(owner, paneId, pending)
       }
       generationRef.current += 1
       const bound: PaneTarget = { kind: 'BOUND_THREAD', threadId: response.thread.threadId }
@@ -307,8 +402,12 @@ export function usePaneAcceptance(options: PaneAcceptanceOptions) {
       if (!isDefiniteAcceptanceFailure(error)) {
         const unknown = { ...pending, unknownOutcome: true }
         setPendingAcceptance(unknown)
-        if (owner) {
-          savePendingAcceptance(owner, paneId, unknown)
+        if (owner && !savePendingAcceptance(owner, paneId, unknown)) {
+          const slot = inspectPendingAcceptanceSlot(owner, paneId)
+          setActionError(t(slot.status === 'empty' || slot.status === 'unavailable'
+            ? 'ai.runtime.action.pendingAcceptanceNotSaved'
+            : 'ai.runtime.action.pendingAcceptanceBlocked'))
+          return
         }
         setActionError(errorMessage(error, t('ai.runtime.action.requestFailed')))
         return
@@ -316,7 +415,7 @@ export function usePaneAcceptance(options: PaneAcceptanceOptions) {
       pendingAcceptanceRef.current = null
       setPendingAcceptance(null)
       if (owner) {
-        clearPendingAcceptance(owner, paneId)
+        clearPendingAcceptance(owner, paneId, pending)
       }
       setParts(prependFrozenComposerParts(pending.composerParts, partsRef.current))
       setLocalDraft(preserveCurrentBranchDraft(pending.branchDraft, localDraftRef.current))
@@ -339,19 +438,28 @@ export function usePaneAcceptance(options: PaneAcceptanceOptions) {
     if (pendingAcceptance == null) {
       return
     }
-    const retry = { ...pendingAcceptance, unknownOutcome: false }
+    // generation 是当前 tab 的本地栅栏，不是请求身份；恢复的旧记录重试时刷新它，
+    // 原 request/idempotencyKey 保持不变。
+    const retry = { ...pendingAcceptance, unknownOutcome: false, generation: generationRef.current }
     setActionError(null)
     setConflict(null)
     pendingAcceptanceRef.current = retry
     setPendingAcceptance(retry)
-    if (owner) {
-      savePendingAcceptance(owner, paneId, retry)
+    if (owner && !savePendingAcceptance(owner, paneId, retry)) {
+      const slot = inspectPendingAcceptanceSlot(owner, paneId)
+      setActionError(t(slot.status === 'empty' || slot.status === 'unavailable'
+        ? 'ai.runtime.action.pendingAcceptanceNotSaved'
+        : 'ai.runtime.action.pendingAcceptanceBlocked'))
+      return
     }
     void submitFrozenAcceptance(retry)
   }
 
   function handleSubmit(payloadParts?: ComposerPart[], localDraftParts?: ComposerPart[]) {
     if (capabilities?.readOnly) {
+      return
+    }
+    if (blockSubmissionForForeignPending()) {
       return
     }
     if (isBoundTarget(target)) {
@@ -393,6 +501,7 @@ export function usePaneAcceptance(options: PaneAcceptanceOptions) {
 
   return {
     pendingAcceptance,
+    pendingAcceptanceBlocked,
     submitGoal,
     handleSubmit,
     retryAcceptance,
