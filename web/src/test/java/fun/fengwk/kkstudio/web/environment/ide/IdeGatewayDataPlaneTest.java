@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -15,6 +16,7 @@ import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import jakarta.servlet.ServletOutputStream;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
@@ -132,13 +134,13 @@ class IdeGatewayDataPlaneTest {
   void streamsHttpResponseLargerThan16MiBWithHopByHopFiltering() throws Exception {
     Harness harness = new Harness();
     int total = 20 * 1024 * 1024;
-    harness.transport.peerFactory =
-        () ->
-            new ScriptedPeer(
-                total,
-                List.of(
-                    new IdeHeader("content-type", "text/plain"),
-                    new IdeHeader("Connection", "keep-alive")));
+    ScriptedPeer peer =
+        new ScriptedPeer(
+            total,
+            List.of(
+                new IdeHeader("content-type", "text/plain"),
+                new IdeHeader("Connection", "keep-alive")));
+    harness.transport.peerFactory = () -> peer;
 
     MockHttpServletRequest request = harness.request("GET", "/");
     MockHttpServletResponse response = new MockHttpServletResponse();
@@ -156,6 +158,32 @@ class IdeGatewayDataPlaneTest {
     // hop-by-hop header 不得转发给浏览器。
     assertFalse(response.getHeaderNames().contains("Connection"));
     // 正常完成后在途 OPEN_STREAM 恰好被放弃一次（幂等，不重复）。
+    assertEquals(1, harness.transport.abandoned.size());
+    assertEquals(CloseStatus.NORMAL, peer.closeStatus);
+  }
+
+  /** 已消费 END 但浏览器输出 flush 失败时，不能用 1000 告诉 Daemon 整条交换已正常完成。 */
+  @Test
+  void signalsFlushFailureWithAnAbnormalStreamClose() throws Exception {
+    Harness harness = new Harness();
+    ScriptedPeer peer = new ScriptedPeer(0, List.of());
+    harness.transport.peerFactory = () -> peer;
+    ServletOutputStream output = mock(ServletOutputStream.class);
+    doThrow(new IOException("synthetic browser flush failure")).when(output).flush();
+    MockHttpServletResponse response =
+        new MockHttpServletResponse() {
+          @Override
+          public ServletOutputStream getOutputStream() {
+            return output;
+          }
+        };
+
+    assertThrows(
+        IOException.class,
+        () -> harness.dataPlane.handleHttp(ENV, "/", harness.request("GET", "/"), response));
+
+    assertTrue(peer.ended);
+    assertEquals(CloseStatus.SERVER_ERROR, peer.closeStatus);
     assertEquals(1, harness.transport.abandoned.size());
   }
 
@@ -859,6 +887,7 @@ class IdeGatewayDataPlaneTest {
     private boolean ended;
     private volatile boolean closed;
     private volatile int receivedRequestBytes;
+    private CloseStatus closeStatus;
 
     private ScriptedPeer(int bodyBytes, List<IdeHeader> headers) {
       this.bodyBytes = bodyBytes;
@@ -930,12 +959,16 @@ class IdeGatewayDataPlaneTest {
 
     @Override
     public void close(CloseStatus status) {
-      closed = true;
+      // 与真实 peer 一致：只允许第一次关闭决定发送给 Daemon 的状态。
+      if (!closed) {
+        closeStatus = status;
+        closed = true;
+      }
     }
 
     @Override
     public void close() {
-      closed = true;
+      close(CloseStatus.NORMAL);
     }
   }
 
