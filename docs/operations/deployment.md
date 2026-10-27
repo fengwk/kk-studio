@@ -121,10 +121,10 @@ PostgreSQL 与已配置 bucket 必须先可达，启动失败先诊断连接而�
   `HEAD`/`COPY`/`DELETE` 始终使用前者。
 - `KK_STUDIO_EXIT_CONFIRMATION_DIRECTORY` 指向本机退出确认 journal；必须挂载持久卷，并由单个
   Studio 实例独占（默认 `/app/.kkstudio/execution-exits`，镜像示例使用 `/app/execution-exits`）。
-  该 POSIX 目录及其中既有的 `.lock` 文件必须归应用 UID/GID `10001` 所有，并允许应用将目录设为
-  `0700`、文件设为 `0600`；仅由 group 或 ACL 授予写权限不足，因此须保留独占持久卷以及镜像已完成
-  的 `chown 10001:10001`。它与数据库事实共同构成可重试证据，journal 存在本身不证明远端进程已退出，
-  也不能替代真实 `STUDIO_EXITED` / `REMOTE_ACKNOWLEDGED` / `NOT_STARTED`。
+  在 POSIX 卷上，挂载后的目录及其中既有的 `.lock` 文件必须归应用 UID `10001` 所有，并允许应用
+  将目录设为 `0700`、文件设为 `0600`；仅由 group 或 ACL 授予写权限不足。镜像已为自带目录设置属主，
+  但外部挂载可能遮盖镜像目录，部署时须另外准备卷的属主与权限。它与数据库事实共同构成可重试证据，
+  journal 存在本身不证明远端进程已退出，也不能替代真实 `STUDIO_EXITED` / `REMOTE_ACKNOWLEDGED` / `NOT_STARTED`。
 - `prod` profile 不做 `dev`/`e2e` seed；空库的 schema 由 Flyway 的
   [`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql) 建立，migration
   只由唯一 Flyway owner 执行。
@@ -467,10 +467,10 @@ tag 不同：
 容器数量与 Gateway 域名由外部部署管理，本仓脚本不校验 NAS 的实际拓扑。迭代手段
 是替换镜像 tag 并重启容器，而不是在容器内改源码，因此容器不挂载源码工作区、Maven/npm cache
 或 `gh` 配置。外部 Compose 还必须为 App 挂载独立的持久卷到
-`KK_STUDIO_EXIT_CONFIRMATION_DIRECTORY`（例如 `/app/execution-exits`），保证该 POSIX 目录及既有的
-`.lock` 文件归应用 UID/GID `10001` 所有，并允许应用将目录设为 `0700`、文件设为 `0600`；只让 group
-或 ACL 可写不足，必须保留卷的独占归属以及镜像已执行的 `chown 10001:10001`，且不与任何其它 Studio
-实例共享。该卷保存退出确认 journal，重启后用于重放，但它本身不是宿主进程已退出的证明。
+`KK_STUDIO_EXIT_CONFIRMATION_DIRECTORY`（例如 `/app/execution-exits`），保证挂载后的 POSIX 目录及既有
+`.lock` 文件归应用 UID `10001` 所有，并允许应用设置目录 `0700`、文件 `0600`；仅 group 或 ACL 可写不足，
+镜像自身的 `chown` 也不代替挂载卷的初始化。该卷不与任何其它 Studio 实例共享，保存退出确认 journal
+供重启后重放，但 journal 存在本身不是宿主进程已退出的证明。
 
 镜像创建了 UID/GID `10001` 可写的 `/app/logs` 与 `/app/execution-exits`，日志配置由 Platform 引入的 convention4j
 Logback 配置与运行环境共同决定。排查时先看 `docker logs vps-kk-studio` 与实际日志配置；
