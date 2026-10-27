@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitJournal;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitJournalException;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitJournalRecord;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitJournalSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitKind;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.runtime.execution.FileExecutionExitJournal;
@@ -53,7 +54,7 @@ class ExecutionExitConfirmerDurabilityTest {
       assertThrows(
           IllegalStateException.class,
           () -> unavailable.confirm(fact, ExecutionExitState.STUDIO_EXITED));
-      assertEquals(1, journal.loadAll().size());
+      assertEquals(1, journal.loadAll().records().size());
       assertEquals(
           ExecutionExitState.UNCONFIRMED,
           store.transaction(tx -> tx.findExecution(fact.executionId()).orElseThrow().state()));
@@ -64,7 +65,7 @@ class ExecutionExitConfirmerDurabilityTest {
           new ExecutionExitConfirmer(
               store, journal, Clock.fixed(T0.plusSeconds(10), ZoneOffset.UTC));
       restarted.replayPending();
-      assertEquals(0, journal.loadAll().size());
+      assertEquals(0, journal.loadAll().records().size());
     }
     ExecutionExitFact confirmed =
         store.transaction(tx -> tx.findExecution(fact.executionId()).orElseThrow());
@@ -84,7 +85,7 @@ class ExecutionExitConfirmerDurabilityTest {
       assertThrows(
           IllegalStateException.class,
           () -> unavailable.confirm(fact, ExecutionExitState.STUDIO_EXITED));
-      assertEquals(1, journal.loadAll().size());
+      assertEquals(1, journal.loadAll().records().size());
     }
     store.transaction(
         tx -> {
@@ -97,7 +98,7 @@ class ExecutionExitConfirmerDurabilityTest {
           new ExecutionExitConfirmer(
               store, journal, Clock.fixed(T0.plusSeconds(10), ZoneOffset.UTC));
       restarted.replayPending();
-      assertTrue(journal.loadAll().isEmpty());
+      assertTrue(journal.loadAll().records().isEmpty());
     }
     ExecutionExitFact confirmed =
         store.transaction(tx -> tx.findExecution(fact.executionId()).orElseThrow());
@@ -131,8 +132,8 @@ class ExecutionExitConfirmerDurabilityTest {
           }
 
           @Override
-          public List<ExecutionExitJournalRecord> loadAll() {
-            return List.of();
+          public ExecutionExitJournalSnapshot loadAll() {
+            return new ExecutionExitJournalSnapshot(List.of(), List.of());
           }
 
           @Override
@@ -161,7 +162,7 @@ class ExecutionExitConfirmerDurabilityTest {
       assertThrows(
           IllegalStateException.class,
           () -> confirmer.confirm(unknown, ExecutionExitState.STUDIO_EXITED));
-      assertEquals(1, journal.loadAll().size());
+      assertEquals(1, journal.loadAll().records().size());
       journal.delete(unknown.executionId());
     }
 
@@ -178,7 +179,7 @@ class ExecutionExitConfirmerDurabilityTest {
       assertEquals(
           ExecutionExitConfirmer.Outcome.THREAD_MISSING,
           restarted.confirm(deleted, ExecutionExitState.STUDIO_EXITED).outcome());
-      assertTrue(journal.loadAll().isEmpty());
+      assertTrue(journal.loadAll().records().isEmpty());
     }
   }
 
@@ -197,8 +198,8 @@ class ExecutionExitConfirmerDurabilityTest {
 
       confirmer.replayPending();
 
-      assertEquals(1, journal.loadAll().size());
-      assertEquals(missing.executionId(), journal.loadAll().getFirst().executionId());
+      assertEquals(1, journal.loadAll().records().size());
+      assertEquals(missing.executionId(), journal.loadAll().records().getFirst().executionId());
     }
     ExecutionExitFact confirmed =
         store.transaction(tx -> tx.findExecution(present.executionId()).orElseThrow());
@@ -219,13 +220,13 @@ class ExecutionExitConfirmerDurabilityTest {
       assertEquals(
           ExecutionExitConfirmer.Outcome.CONFIRMED,
           confirmer.confirm(fact, ExecutionExitState.STUDIO_EXITED).outcome());
-      assertEquals(1, delegate.loadAll().size());
+      assertEquals(1, delegate.loadAll().records().size());
       assertEquals(1L, threadVersion(store, baseline.threadId()));
 
       assertEquals(
           ExecutionExitConfirmer.Outcome.CONFIRMED,
           confirmer.confirm(fact, ExecutionExitState.STUDIO_EXITED).outcome());
-      assertTrue(delegate.loadAll().isEmpty());
+      assertTrue(delegate.loadAll().records().isEmpty());
       assertEquals(1L, threadVersion(store, baseline.threadId()));
     }
   }
@@ -245,8 +246,9 @@ class ExecutionExitConfirmerDurabilityTest {
           IllegalArgumentException.class,
           () -> confirmer.confirm(fact, ExecutionExitState.NOT_STARTED));
 
-      assertEquals(1, journal.loadAll().size());
-      assertEquals(ExecutionExitState.NOT_STARTED, journal.loadAll().getFirst().targetState());
+      assertEquals(1, journal.loadAll().records().size());
+      assertEquals(
+          ExecutionExitState.NOT_STARTED, journal.loadAll().records().getFirst().targetState());
     }
     ExecutionExitFact confirmed =
         store.transaction(tx -> tx.findExecution(fact.executionId()).orElseThrow());
@@ -282,8 +284,8 @@ class ExecutionExitConfirmerDurabilityTest {
           ExecutionExitJournalException.class,
           () -> confirmer.confirm(conflicting, ExecutionExitState.STUDIO_EXITED));
 
-      assertEquals(1, journal.loadAll().size());
-      assertEquals(recorded.invocationId(), journal.loadAll().getFirst().invocationId());
+      assertEquals(1, journal.loadAll().records().size());
+      assertEquals(recorded.invocationId(), journal.loadAll().records().getFirst().invocationId());
     }
   }
 
@@ -300,7 +302,7 @@ class ExecutionExitConfirmerDurabilityTest {
       assertThrows(
           IllegalArgumentException.class,
           () -> confirmer.confirm(fact, ExecutionExitState.UNCONFIRMED));
-      assertTrue(journal.loadAll().isEmpty());
+      assertTrue(journal.loadAll().records().isEmpty());
     }
   }
 
@@ -398,7 +400,7 @@ class ExecutionExitConfirmerDurabilityTest {
     }
 
     @Override
-    public List<ExecutionExitJournalRecord> loadAll() {
+    public ExecutionExitJournalSnapshot loadAll() {
       return delegate.loadAll();
     }
 

@@ -8,9 +8,16 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
 
 /**
@@ -20,98 +27,216 @@ import java.util.function.Supplier;
  * 删除记录。快路径只锁本 Thread，Thread 为 RUNNABLE 且没有未完成 Join 时只推进 version；需要祖先结算时先结束只读探测事务，再以 {@link
  * ExecutionExitLedger#lockAncestorChain} 作为新事务第一把锁重新确认。
  *
- * <p>同一 execution 的确认在进程内按稳定 stripe 串行化，保证并发回调只产生一次 version 推进与一次 journal 删除。合法深删已提交时 Thread
- * 与事实一起消失，确认按 missing-safe 结束并删除 journal；Thread 仍存在但事实缺失是持久化不变量破坏，保留 journal 并失败。 journal
- * 无法写入时异常向调用方传播，调用方不得宣称 durable。
+ * <p>同一 execution 的确认在进程内按稳定 stripe 串行化，保证并发回调只产生一次 version 推进与一次 journal 删除，并始终复用第一次 canonical
+ * proof 的身份、目标和确认时刻。首次 journal 写入失败时 proof 只保留在本进程内等待重试，不能宣称跨进程 durable。事实缺失与 identity/target
+ * 冲突只暂停该 execution 的自动重放；其它数据库或文件失败按 {@link #BACKOFF_SECONDS} 退避，成功后重置。
  */
 @Slf4j
 public final class ExecutionExitConfirmer {
 
   private static final int LOCK_STRIPES = 64;
+  private static final int[] BACKOFF_SECONDS = {1, 2, 4, 8, 16, 30};
+  private static final String PHASE_CONFIRM = "EXIT_CONFIRMATION_CONFIRM";
+  private static final String PHASE_REPLAY = "EXIT_CONFIRMATION_REPLAY";
+  private static final String PHASE_JOURNAL_READ = "EXIT_CONFIRMATION_JOURNAL_READ";
+  private static final String PHASE_JOURNAL_LOAD = "EXIT_CONFIRMATION_JOURNAL_LOAD";
 
   private final HarnessStore store;
   private final ExecutionExitJournal journal;
   private final Clock clock;
-  private final Object[] executionLocks = new Object[LOCK_STRIPES];
+  private final ReentrantLock[] executionLocks = new ReentrantLock[LOCK_STRIPES];
+  private final ConcurrentHashMap<UUID, PendingProof> proofs = new ConcurrentHashMap<>();
+  private final ConcurrentHashMap<UUID, Failure> failures = new ConcurrentHashMap<>();
+  private final Set<String> reportedFileFailures = ConcurrentHashMap.newKeySet();
+  private final AtomicBoolean directoryFailureReported = new AtomicBoolean();
 
   public ExecutionExitConfirmer(HarnessStore store, ExecutionExitJournal journal, Clock clock) {
     this.store = Objects.requireNonNull(store, "store");
     this.journal = Objects.requireNonNull(journal, "journal");
     this.clock = HarnessStoreTime.millisecondClock(Objects.requireNonNull(clock, "clock"));
     for (int i = 0; i < executionLocks.length; i++) {
-      executionLocks[i] = new Object();
+      executionLocks[i] = new ReentrantLock();
     }
   }
 
   /** 用真实退出证据确认；journal 写入失败或事实缺失/冲突时抛出，数据库确认失败保留 journal 后原样抛出。 */
   public Result confirm(ExecutionExitFact expected, ExecutionExitState state) {
-    return locked(expected.executionId(), () -> confirmInternal(expected, state, null));
-  }
-
-  /** 重放 journal 中所有待确认记录；单条失败保留该记录并继续其它记录。 */
-  public void replayPending() {
-    for (ExecutionExitJournalRecord record : journal.loadAll()) {
-      try {
-        locked(
-            record.executionId(),
-            () ->
-                confirmInternal(
-                    record.expected(record.confirmedAt()),
-                    record.targetState(),
-                    record.confirmedAt()));
-      } catch (RuntimeException failure) {
-        log.warn(
-            "cannot replay execution exit confirmation for {};"
-                + " phase=EXIT_CONFIRMATION_REPLAY; exception={}",
-            record.executionId(),
-            failure.getClass().getSimpleName());
-      }
-    }
-  }
-
-  private <T> T locked(UUID executionId, Supplier<T> action) {
-    synchronized (executionLocks[Math.floorMod(executionId.hashCode(), LOCK_STRIPES)]) {
-      return action.get();
-    }
-  }
-
-  private Result confirmInternal(
-      ExecutionExitFact expected, ExecutionExitState state, Instant replayedAt) {
     Objects.requireNonNull(expected, "expected");
     Objects.requireNonNull(state, "state");
     if (!state.confirmed()) {
       throw new IllegalArgumentException("confirmation requires real exit evidence");
     }
-    Instant observedAt = replayedAt == null ? clock.instant() : replayedAt;
-    if (observedAt.isBefore(expected.registeredAt())) {
-      observedAt = expected.registeredAt();
-    }
-    // 正向 proof 必须先落盘；此时尚未读取数据库，数据库不可用也不会丢失 durable 重试依据。
-    ExecutionExitJournalRecord canonical = journal.write(proof(expected, state, observedAt));
-    Instant confirmedAt = canonical.confirmedAt();
-
-    Attempt fast = store.transaction(tx -> attemptFast(tx, expected, state, confirmedAt));
-    if (fast == Attempt.RETRY_SLOW) {
-      fast = store.transaction(tx -> attemptSlow(tx, expected, state, confirmedAt));
-    }
-    return complete(expected.executionId(), fast);
+    Instant now = clock.instant();
+    Instant observedAt = now.isBefore(expected.registeredAt()) ? expected.registeredAt() : now;
+    ExecutionExitJournalRecord candidate = proof(expected, state, observedAt);
+    return locked(
+        expected.executionId(), () -> confirmInLock(candidate, false, PHASE_CONFIRM, now));
   }
 
-  private Result complete(UUID executionId, Attempt attempt) {
+  /** 重放内存 proof 与磁盘 snapshot；单条失败保留该记录并继续其它记录。 */
+  public void replayPending() {
+    Instant now = clock.instant();
+    Set<UUID> attempted = new HashSet<>();
+    for (UUID executionId : List.copyOf(proofs.keySet())) {
+      boolean replayed =
+          locked(
+              executionId,
+              () -> {
+                PendingProof pending = proofs.get(executionId);
+                if (pending == null || !shouldAttempt(executionId, now)) {
+                  return false;
+                }
+                replayOne(pending.record(), now);
+                return true;
+              });
+      if (replayed) {
+        attempted.add(executionId);
+      }
+    }
+
+    ExecutionExitJournalSnapshot snapshot;
+    try {
+      snapshot = journal.loadAll();
+    } catch (RuntimeException failure) {
+      reportDirectoryFailure(failure);
+      return;
+    }
+    directoryFailureReported.set(false);
+    reportFileFailures(snapshot.failures());
+    for (ExecutionExitJournalRecord record : snapshot.records()) {
+      UUID executionId = record.executionId();
+      if (attempted.contains(executionId)
+          || proofs.containsKey(executionId)
+          || !shouldAttempt(executionId, now)) {
+        continue;
+      }
+      boolean replayed =
+          locked(
+              executionId,
+              () -> {
+                if (proofs.containsKey(executionId) || !shouldAttempt(executionId, now)) {
+                  return false;
+                }
+                proofs.put(executionId, new PendingProof(record, true));
+                replayOne(record, now);
+                return true;
+              });
+      if (replayed) {
+        attempted.add(executionId);
+      }
+    }
+  }
+
+  private <T> T locked(UUID executionId, Supplier<T> action) {
+    ReentrantLock lock =
+        executionLocks[Math.floorMod(executionId.hashCode(), executionLocks.length)];
+    lock.lock();
+    try {
+      return action.get();
+    } finally {
+      lock.unlock();
+    }
+  }
+
+  private Result confirmInLock(
+      ExecutionExitJournalRecord candidate, boolean candidateDurable, String phase, Instant now) {
+    UUID executionId = candidate.executionId();
+    PendingProof pending = proofs.get(executionId);
+    if (pending == null) {
+      pending = new PendingProof(candidate, candidateDurable);
+      proofs.put(executionId, pending);
+    } else if (!pending.record().sameIdentity(candidate)) {
+      throw permanent(
+          executionId,
+          FailureReason.IDENTITY_CONFLICT,
+          phase,
+          now,
+          new ExecutionExitJournalConflictException(
+              ExecutionExitJournalConflictException.Conflict.IDENTITY,
+              "execution " + executionId + " identity cannot be replaced"));
+    } else if (pending.record().targetState() != candidate.targetState()) {
+      throw permanent(
+          executionId,
+          FailureReason.TARGET_CONFLICT,
+          phase,
+          now,
+          new ExecutionExitJournalConflictException(
+              ExecutionExitJournalConflictException.Conflict.TARGET,
+              "execution " + executionId + " target cannot be replaced"));
+    }
+
+    ExecutionExitJournalRecord canonical = pending.record();
+    if (!pending.durable()) {
+      try {
+        canonical = journal.write(canonical);
+        proofs.put(executionId, new PendingProof(canonical, true));
+      } catch (ExecutionExitJournalConflictException conflict) {
+        FailureReason reason =
+            conflict.conflict() == ExecutionExitJournalConflictException.Conflict.IDENTITY
+                ? FailureReason.IDENTITY_CONFLICT
+                : FailureReason.TARGET_CONFLICT;
+        throw permanent(executionId, reason, phase, now, conflict);
+      } catch (RuntimeException failure) {
+        recordFailure(executionId, FailureReason.JOURNAL_WRITE, phase, now, failure);
+        throw failure;
+      }
+    }
+
+    ExecutionExitJournalRecord canonicalProof = canonical;
+    ExecutionExitFact confirmedFact = canonicalProof.expected(canonicalProof.confirmedAt());
+    ExecutionExitState targetState = canonicalProof.targetState();
+    Instant confirmedAt = canonicalProof.confirmedAt();
+    try {
+      Attempt fast =
+          store.transaction(tx -> attemptFast(tx, confirmedFact, targetState, confirmedAt));
+      if (fast == Attempt.RETRY_SLOW) {
+        fast = store.transaction(tx -> attemptSlow(tx, confirmedFact, targetState, confirmedAt));
+      }
+      return complete(executionId, fast, phase, now);
+    } catch (RuntimeException failure) {
+      Failure current = failures.get(executionId);
+      if (current == null || !current.permanent()) {
+        recordFailure(executionId, FailureReason.DATABASE, phase, now, failure);
+      }
+      throw failure;
+    }
+  }
+
+  private void replayOne(ExecutionExitJournalRecord record, Instant now) {
+    try {
+      confirmInLock(record, true, PHASE_REPLAY, now);
+    } catch (RuntimeException failure) {
+      if (!failures.containsKey(record.executionId())) {
+        recordFailure(record.executionId(), FailureReason.REPLAY, PHASE_REPLAY, now, failure);
+      }
+    }
+  }
+
+  private Result complete(UUID executionId, Attempt attempt, String phase, Instant now) {
     return switch (attempt) {
       case CONFIRMED -> {
         // 只有确认事务成功提交后才删除 journal。
-        deleteJournal(executionId);
+        deleteJournal(executionId, phase, now);
         yield new Result(Outcome.CONFIRMED);
       }
       case THREAD_MISSING -> {
-        deleteJournal(executionId);
+        deleteJournal(executionId, phase, now);
         yield new Result(Outcome.THREAD_MISSING);
       }
-      case FACT_MISSING -> throw new IllegalStateException(
-          "thread still exists but execution " + executionId + " is missing");
-      case CONFLICT -> throw new IllegalArgumentException(
-          "execution " + executionId + " identity cannot be replaced");
+      case FACT_MISSING -> throw permanent(
+          executionId,
+          FailureReason.FACT_MISSING,
+          phase,
+          now,
+          new IllegalStateException(
+              "thread still exists but execution " + executionId + " is missing"));
+      case CONFLICT -> throw permanent(
+          executionId,
+          FailureReason.CONFLICT,
+          phase,
+          now,
+          new IllegalArgumentException(
+              "execution " + executionId + " identity cannot be replaced"));
       case RETRY_SLOW -> throw new IllegalStateException("slow confirmation path was not retried");
     };
   }
@@ -188,16 +313,81 @@ public final class ExecutionExitConfirmer {
         observedAt);
   }
 
-  private void deleteJournal(UUID executionId) {
+  private void deleteJournal(UUID executionId, String phase, Instant now) {
     try {
       journal.delete(executionId);
+      proofs.remove(executionId);
+      failures.remove(executionId);
     } catch (RuntimeException failure) {
+      recordFailure(executionId, FailureReason.JOURNAL_DELETE, phase, now, failure);
+    }
+  }
+
+  private void reportFileFailures(List<ExecutionExitJournalFailure> fileFailures) {
+    Set<String> current = new HashSet<>();
+    for (ExecutionExitJournalFailure failure : fileFailures) {
+      current.add(failure.fileName());
+      if (reportedFileFailures.add(failure.fileName())) {
+        UUID executionId = failure.canonicalExecutionId();
+        log.warn(
+            "cannot read execution exit journal entry;"
+                + " phase={}; reason={}; executionId={}; exception={}",
+            PHASE_JOURNAL_READ,
+            failure.reason(),
+            executionId == null ? "-" : executionId,
+            failure.exceptionClass());
+      }
+    }
+    reportedFileFailures.retainAll(current);
+  }
+
+  private void reportDirectoryFailure(RuntimeException failure) {
+    if (directoryFailureReported.compareAndSet(false, true)) {
       log.warn(
-          "cannot delete execution exit journal entry for {};"
-              + " phase=EXIT_CONFIRMATION_JOURNAL_DELETE; exception={}",
-          executionId,
+          "cannot read execution exit journal;"
+              + " phase={}; reason=DIRECTORY; executionId=-; exception={}",
+          PHASE_JOURNAL_LOAD,
           failure.getClass().getSimpleName());
     }
+  }
+
+  private boolean shouldAttempt(UUID executionId, Instant now) {
+    Failure failure = failures.get(executionId);
+    return failure == null || (!failure.permanent() && !now.isBefore(failure.nextAttemptAt()));
+  }
+
+  private RuntimeException permanent(
+      UUID executionId, FailureReason reason, String phase, Instant now, RuntimeException failure) {
+    recordFailure(executionId, reason, phase, now, failure);
+    return failure;
+  }
+
+  private void recordFailure(
+      UUID executionId, FailureReason reason, String phase, Instant now, Throwable failure) {
+    Failure previous = failures.get(executionId);
+    boolean sameReason = previous != null && previous.reason() == reason;
+    int attempts = sameReason ? previous.attempts() + 1 : 1;
+    boolean permanent =
+        reason == FailureReason.FACT_MISSING
+            || reason == FailureReason.IDENTITY_CONFLICT
+            || reason == FailureReason.TARGET_CONFLICT
+            || reason == FailureReason.CONFLICT;
+    Instant nextAttemptAt =
+        permanent ? Instant.MAX : now.plus(Duration.ofSeconds(backoffSeconds(attempts)));
+    failures.put(executionId, new Failure(reason, permanent, attempts, nextAttemptAt));
+    if (!sameReason || !previous.alerted()) {
+      log.warn(
+          "cannot resolve execution exit confirmation;"
+              + " phase={}; reason={}; executionId={}; exception={}",
+          phase,
+          reason,
+          executionId,
+          failure == null ? "-" : failure.getClass().getSimpleName());
+    }
+  }
+
+  private static long backoffSeconds(int attempts) {
+    return BACKOFF_SECONDS[Math.min(attempts - 1, BACKOFF_SECONDS.length - 1)];
   }
 
   /** 一次确认的对外结果。 */
@@ -219,5 +409,30 @@ public final class ExecutionExitConfirmer {
     FACT_MISSING,
     CONFLICT,
     RETRY_SLOW
+  }
+
+  private enum FailureReason {
+    FACT_MISSING,
+    IDENTITY_CONFLICT,
+    TARGET_CONFLICT,
+    CONFLICT,
+    JOURNAL_WRITE,
+    JOURNAL_DELETE,
+    DATABASE,
+    REPLAY
+  }
+
+  private record PendingProof(ExecutionExitJournalRecord record, boolean durable) {}
+
+  private record Failure(
+      FailureReason reason,
+      boolean permanent,
+      int attempts,
+      Instant nextAttemptAt,
+      boolean alerted) {
+
+    private Failure(FailureReason reason, boolean permanent, int attempts, Instant nextAttemptAt) {
+      this(reason, permanent, attempts, nextAttemptAt, true);
+    }
   }
 }
