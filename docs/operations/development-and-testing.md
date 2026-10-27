@@ -10,7 +10,7 @@
 | --- | --- |
 | JDK 21 | 所有 Maven 命令显式使用 `JAVA_HOME_21`；根 POM 的 `maven.compiler.release` 是 `21` |
 | Maven | 通过 `mvn` 可用；[`scripts/dev/app.sh`](../../scripts/dev/app.sh)、[`scripts/dev/verify/e2e/lib.sh`](../../scripts/dev/verify/e2e/lib.sh)、[`scripts/dev/verify/supply-chain/run.sh`](../../scripts/dev/verify/supply-chain/run.sh) 优先取 `JAVA_HOME_21`，否则取 `JAVA_HOME`，检查 java 可执行但不检查版本号，调用方须确保为 21；[`regression.sh`](../../scripts/dev/verify/reliability/regression.sh) 只接受 `JAVA_HOME_21` 并校验版本 |
-| Node 与 npm | Frontend 依赖由 [`package-lock.json`](../../frontend/package-lock.json) 固定；`distribution` profile 会自动安装 Node `v24.14.0` 与 npm `11.9.0` |
+| Node 与 npm | Frontend 依赖由 [`package-lock.json`](../../frontend/package-lock.json) 固定；`distribution` profile 会自动安装 Node `v24.21.0` 与 npm `11.9.0` |
 | Docker 与 Compose v2 | 本地栈、测试栈、性能基线和镜像扫描需要 |
 | `curl`、`jq`、`lsof` | [scripts/dev/app.sh](../../scripts/dev/app.sh) 的启动硬依赖；端口与健康探测使用 lsof/curl |
 
@@ -109,31 +109,39 @@ E2E 自身的 L1–L5 是 API case 的 level 分组，含义见下文 E2E 章节
 
 ### CI 验证与镜像发布
 
-`docker-publish` 在 `main` 上先执行仓库、Unix 与 Windows 安装和更新门禁再发布；`dev` push 默认只构建发布，
-不会执行这些门禁，因此不能把 dev 镜像构建成功当作测试通过。需要在合入 main 前运行完整 CI 时，
+`docker-publish` 每次触发先执行版本、文档与敏感数据 preflight（`dev` 也不跳过版本一致性）。
+`main` 随后并行运行 Java 仓库门禁、前端门禁与 Daemon 五平台矩阵；`dev` push 默认只以源码构建发布，
+不会执行这些重门禁，因此不能把 dev 镜像构建成功当作测试通过。需要在合入 main 前运行完整 CI 时，
 先把待验证提交推送到目标分支，再显式运行不发布模式：
 
 ```bash
 gh workflow run docker-publish.yml --ref dev -f validate_only=true
 ```
 
-该模式运行同一套 Java、前端、脚本、文档和敏感数据检查，以及 Linux、macOS、Windows 安装和更新回归与
-Daemon 五平台矩阵，
+该模式运行同一套 preflight、Java、前端、脚本、文档和敏感数据检查，以及 Daemon 五平台矩阵，
 但整个镜像发布 job 会被跳过；它与发布使用独立并发组，不会取消同分支正在进行的镜像发布。
 启动测试使用可丢弃 PostgreSQL 17 与私有 MinIO，验证当前空库能通过正常生产入口启动并提供健康检查与模型目录 API。
 V1 与当前基线不同的已有数据库必须在 Flyway 校验阶段拒绝，且表数据、迁移历史与结构均保持不变；
-退役的 `database-upgrade` 命令必须在启动 Spring 或访问数据库前拒绝。Maven verify 覆盖不含测试替身的生产
-classpath 入口，其后的必需步骤复用同次构建的 Fat JAR 验证相同边界。
+退役的 `database-upgrade` 命令必须在启动 Spring 或访问数据库前拒绝。Java 门禁以
+`mvn -B -ntp -Pdistribution verify` 启动完整仓库测试与覆盖率，并在同次 reactor 中只打包一次带内嵌
+React 产物的发行 Fat JAR；其后的必需步骤复用同一 JAR 验证启动/旧库拒绝、Node decoder 与
+matching convention4j agent。通过后上传仅含 `app.jar`、agent 与版本/提交/SHA256 清单的
+`kk-studio-app-<commit-sha>` artifact。`main` publish 只下载同 run、同 SHA 的该 artifact，
+校验版本、提交与文件摘要后选择 `deploy/local/Dockerfile` 的 `verified-artifact` 阶段构建镜像，
+不重新构建源码，也不使用普通 verify 产生的无前端 JAR；`dev` 仍从源码 context 使用默认 `source` 阶段。
 前端必须通过 lint、测试与浏览器基座严格类型检查、覆盖率、生产构建与 Chromium 离线布局回归；任一失败均阻断发布。
 无论门禁是否成功，`frontend-diagnostics` artifact 都保留覆盖率与布局诊断产物 7 天。
 Windows 两个 host 都会报告结果，前一个失败不会遮蔽后一个；任一失败仍阻断正常发布。
-Unix 矩阵在 Ubuntu 与 macOS runner 上使用系统 `/bin/bash`，macOS 明确检查 Bash 3.2，
-不以 Homebrew Bash 的结果替代系统自带版本。
+Unix 脚本回归在完整 repository 测试中以系统 Bash 运行；macOS 安装与归档契约由其矩阵的系统 Bash
+步骤覆盖，明确检查 Bash 3.2，不以 Homebrew Bash 的结果替代系统自带版本。
 [daemon-ci.yml](../../.github/workflows/daemon-ci.yml) 是 Daemon 的平台门禁：Node 固定 24.21.0 并按
 `daemon/package-lock.json` 安装，在 linux-amd64、linux-arm64、macos-arm64、macos-amd64、windows-amd64
 五个目标上真实执行 `npm --prefix daemon run check`、`run build` 与 `run coverage`；macOS 追加系统 Bash 下的
-安装与归档契约测试，Windows 另以 PowerShell 5.1 与 7 运行安装、更新回归。Docker 发布与 Daemon Release
-都要求该门禁成功，release 还要在对应宿主上逐一烟测五个平台归档后才上传 GitHub Release。
+安装与归档契约测试，Windows 另以 PowerShell 5.1 与 7 运行安装、更新回归。该工作流作为 PR 门禁，
+并分别由 `docker-publish`（main）与 `daemon-release`（tag）调用，不再独立监听 push，避免同一提交
+重复执行矩阵。Docker 发布与 Daemon Release 都要求该门禁成功；release 的 stage 还运行完整仓库脚本
+测试（含 Unix 安装器 fixture）与 tag/main ancestry、文档、敏感数据和版本门禁，随后在对应宿主上逐一
+烟测五个平台归档才上传 GitHub Release。
 常规 Windows 覆盖率步骤会启用同步退出诊断：无论成功或失败都上传 `windows-process-diagnostics` artifact
 （保留 7 天），记录退出来源、受管 helper 的进程事实、相关 Application Error 事件与工具链版本，
 不含 ProcessSpec 参数、环境、cwd、token 或内存；覆盖率成功却缺少 `exit-resolved` 证据时该步骤失败。
@@ -200,7 +208,7 @@ node scripts/daemon/verify-java-update-commands.mjs harness/environment/target/d
 
 Java producer 把生产 codec 的结果写入 `harness/environment/target/daemon-update-java-commands.json`，
 CLI 再用该产物驱动构建出的生产 decoder：五条官方平台命令必须可解，十二条错配必须被拒。
-CI 在 `mvn verify` 之后以同样的顺序运行这两步。
+CI 在 `mvn -Pdistribution verify` 之后以同样的顺序运行这两步。
 
 ## Java 质量检查
 
