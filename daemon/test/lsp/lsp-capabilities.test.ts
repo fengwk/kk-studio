@@ -412,7 +412,7 @@ describe('Lsp Capabilities Group End-to-End', () => {
     }
   })
 
-  it('does not confirm a start rejection that could not be proven converged', async () => {
+  it('confirms only the new lease directly rejected by an unconverged start', async () => {
     const config = createConfig(fakeDaemonLspConfig('java', 'normal', path.join(tempDir, 'unconverged.jsonl')))
     const startFailure = new ProcessScopeNotConvergedError('spawn cleanup could not be proven')
     let starts = 0
@@ -441,6 +441,8 @@ describe('Lsp Capabilities Group End-to-End', () => {
         context,
       )
       expect(first.error).toBe(true)
+      // 原失败启动的参与者没有正向收敛证据，不能确认。
+      expect(confirmations).toBe(0)
       const second = await localGroup.capabilities['lsp.goto-definition']!(
         {
           invocationId: 'start-unconverged-2',
@@ -451,8 +453,8 @@ describe('Lsp Capabilities Group End-to-End', () => {
         context,
       )
       expect(second.error).toBe(true)
-      // 没证明收敛：不确认退出，同 key 也不重新启动。
-      expect(confirmations).toBe(0)
+      // 新调用没有加入旧启动，直接拒绝即可确认其目标从未发出。
+      expect(confirmations).toBe(1)
       expect(starts).toBe(1)
     } finally {
       await expect(closeWithin(localGroup)).rejects.toThrow(/failed to release all resources/)

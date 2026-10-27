@@ -207,14 +207,29 @@ export class LspClientPool {
       if (retirement) {
         if (retirement.failure !== null) {
           // 上次退休没能证明收敛：旧实例可能仍然存活，同 key 绝不重新启动，等待者共享同一条失败。
+          // 本次调用没有启动或接管任何进程，旧范围失败不能反过来阻止本次确认。
+          notifyBootstrapExit()
           throw retirement.failure
         }
-        await raceAbort(retirement.promise, signal)
+        try {
+          await raceAbort(retirement.promise, signal)
+        } catch (error) {
+          if (error instanceof WaiterAbortError) {
+            // 等待旧退休结束的调用尚未启动或接管进程，旧 stop 的成败不是本次调用的退出证据。
+            notifyBootstrapExit()
+            throw error.isTimeout
+              ? new LspTimeoutError('Operation timed out')
+              : abortError()
+          }
+          throw error
+        }
         continue
       }
 
       let boot = this.boots.get(key)
       if (boot?.cleanupFailure) {
+        // 本次调用被旧 boot 的失败清理直接拒绝：它没有参与该启动，目标也从未发出。
+        notifyBootstrapExit()
         throw boot.cleanupFailure
       }
       if (boot && boot.cancelled) {
@@ -223,8 +238,8 @@ export class LspClientPool {
           await raceAbort(boot.promise.catch(() => {}), signal)
         } catch (error) {
           if (error instanceof WaiterAbortError) {
-            // 共享 boot 的清理尚未收敛：现在不能确认退出，只能在清理最终成功时由回调确认。
-            registerBootstrapExit(boot)
+            // 本次等待尚未加入该 boot，旧清理不是它的退出证据；直接确认本次未启动。
+            notifyBootstrapExit()
             throw error.isTimeout
               ? new LspTimeoutError('Operation timed out')
               : abortError()
