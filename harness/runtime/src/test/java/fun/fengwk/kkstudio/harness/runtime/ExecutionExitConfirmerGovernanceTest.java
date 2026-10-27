@@ -45,7 +45,7 @@ import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/** 退出确认治理：首次落盘失败保留进程内 proof、永久暂停、Clock 退避、坏文件隔离与删除失败重试。 */
+/** 退出确认治理：首次落盘失败保留进程内 proof、不变量慢速核对、Clock 退避、坏文件隔离与删除失败重试。 */
 class ExecutionExitConfirmerGovernanceTest {
 
   @Test
@@ -138,8 +138,36 @@ class ExecutionExitConfirmerGovernanceTest {
   }
 
   @Test
-  void directPermanentFailureStaysPausedAfterExplicitRecheck() {
-    // 直接确认产生的永久失败不能被外层 catch 改成瞬态；显式重核对失败后也不能自动重试。
+  void rejectedColdCallbackDoesNotBlockTheDurableCanonicalProof() {
+    // 冷启动时磁盘已有 canonical proof，错误新回调不得先占住内存队列或污染它的退避状态。
+    Fixture fixture = Fixture.create();
+    FaultJournal journal = new FaultJournal(TestExecutionExitConfirmer.memoryJournal());
+    journal.write(recordFor(fixture.fact));
+    AtomicInteger transactions = new AtomicInteger();
+    ExecutionExitConfirmer confirmer =
+        new ExecutionExitConfirmer(
+            countingStore(fixture.store, transactions, new AtomicInteger()),
+            journal,
+            fixture.clock);
+
+    assertThrows(
+        ExecutionExitJournalConflictException.class,
+        () -> confirmer.confirm(fixture.fact, ExecutionExitState.NOT_STARTED));
+    assertEquals(0, transactions.get());
+    assertEquals(
+        ExecutionExitState.STUDIO_EXITED, journal.loadAll().records().getFirst().targetState());
+
+    confirmer.replayPending();
+    assertEquals(1, transactions.get(), "a rejected candidate must not delay the durable proof");
+    ExecutionExitFact confirmed = execution(fixture.store, fixture.fact.executionId());
+    assertEquals(ExecutionExitState.STUDIO_EXITED, confirmed.state());
+    assertEquals(T0, confirmed.confirmedAt());
+    assertTrue(journal.loadAll().records().isEmpty());
+  }
+
+  @Test
+  void invariantFailureUsesSlowRechecksAndCleansAfterDeepDeletion() {
+    // 不变量错误不能误归类为瞬态；低频核对仍须识别合法深删，避免永久遗留 journal。
     Fixture fixture = Fixture.create();
     ExecutionExitFact missing = expected(fixture.baseline.threadId(), TestIds.id(25), T0);
     FaultJournal journal = new FaultJournal(TestExecutionExitConfirmer.memoryJournal());
@@ -158,26 +186,39 @@ class ExecutionExitConfirmerGovernanceTest {
       assertTrue(logs.matching("reason=DATABASE").isEmpty());
       assertEquals(1, logs.matching("reason=FACT_MISSING").size());
 
-      fixture.clock.advance(Duration.ofSeconds(30));
+      fixture.clock.advance(Duration.ofSeconds(29));
       confirmer.replayPending();
-      assertEquals(1, transactions.get(), "direct permanent failure must remain suspended");
+      assertEquals(
+          1, transactions.get(), "invariant failure must not retry at transient frequency");
       assertEquals(1, journal.writes());
 
-      assertThrows(
-          IllegalStateException.class,
-          () -> confirmer.confirm(missing, ExecutionExitState.STUDIO_EXITED));
-      assertEquals(2, transactions.get(), "explicit confirmation may recheck the invariant");
-      fixture.clock.advance(Duration.ofSeconds(30));
+      fixture.clock.advance(Duration.ofSeconds(1));
       confirmer.replayPending();
-      assertEquals(2, transactions.get(), "failed explicit recheck must remain permanent");
+      assertEquals(2, transactions.get(), "invariant failure is rechecked after thirty seconds");
       assertEquals(2, journal.writes());
       assertTrue(logs.matching("reason=DATABASE").isEmpty());
+      assertEquals(1, logs.matching("reason=FACT_MISSING").size());
       assertEquals(1, journal.delegate.loadAll().records().size());
+
+      fixture.store.transaction(
+          tx -> {
+            tx.lockTree(fixture.baseline.threadId());
+            tx.lockThread(fixture.baseline.threadId());
+            tx.deleteThreads(List.of(fixture.baseline.threadId()));
+            return null;
+          });
+      fixture.clock.advance(Duration.ofSeconds(30));
+      confirmer.replayPending();
+      assertEquals(3, transactions.get(), "deep deletion must be observed before journal cleanup");
+      assertTrue(journal.delegate.loadAll().records().isEmpty());
+      assertTrue(
+          fixture.store.transaction(tx -> tx.findExecution(missing.executionId())).isEmpty());
+      assertEquals(1, logs.matching("reason=FACT_MISSING").size());
     }
   }
 
   @Test
-  void permanentFailureAlertsOnceAndDoesNotBlockOtherExecutions() {
+  void invariantFailureAlertsOnceAndDoesNotBlockOtherExecutions() {
     Fixture fixture = Fixture.create();
     ExecutionExitFact missing = expected(fixture.baseline.threadId(), TestIds.id(20), T0);
     ExecutionExitFact present =
@@ -204,10 +245,13 @@ class ExecutionExitConfirmerGovernanceTest {
       assertEquals(1, logs.matching("executionId=" + missing.executionId()).size());
 
       databaseTransactions.set(0);
-      fixture.clock.advance(Duration.ofSeconds(30));
+      fixture.clock.advance(Duration.ofSeconds(29));
       confirmer.replayPending();
 
-      assertEquals(0, databaseTransactions.get(), "permanent failure must not be replayed");
+      assertEquals(0, databaseTransactions.get(), "invariant failure waits for its slow recheck");
+      fixture.clock.advance(Duration.ofSeconds(1));
+      confirmer.replayPending();
+      assertEquals(1, databaseTransactions.get(), "only the unresolved record needs rechecking");
       assertEquals(1, logs.matching("executionId=" + missing.executionId()).size());
       assertEquals(
           ExecutionExitState.STUDIO_EXITED,
