@@ -166,9 +166,9 @@ Model / Tool Processor 的本地准入与 execution 登记由同一类级强类�
 
 ### 退出确认与放弃
 
-真实退出证据只有 `STUDIO_EXITED`、`REMOTE_ACKNOWLEDGED` 与 `NOT_STARTED` 三种。确认入口在读取或提交数据库之前先把完整执行身份与证据时刻写入本机 write-ahead journal；只有确认与结算事务提交成功后才删除记录。同一 execution 的首次 canonical proof 在进程内按 identity、target 与观测时刻冻结，并发回调与内存重试复用该时刻，不因后一次重试刷新 `confirmedAt`。进程重启后每 1 秒在 worker 线程重放一次；读取 journal 时健康记录继续重放，无法解码、身份不符或类型异常的文件只进入逐文件失败快照，原文件保留且按文件身份去重告警；目录无法枚举、journal 已关闭或目录锁占用仍整体失败。journal 目录由单个 Studio 实例独占并持久化，文件锁在进程生命周期内持有；journal 写入只证明正向证据已落盘，不证明远端进程已经退出。
+真实退出证据只有 `STUDIO_EXITED`、`REMOTE_ACKNOWLEDGED` 与 `NOT_STARTED` 三种。确认入口在读取或提交数据库之前先把完整执行身份与证据时刻写入本机 write-ahead journal；只有确认与结算事务提交成功后才删除记录。同一 execution 的首次 canonical proof 在进程内按 identity、target 与观测时刻冻结，并发回调与内存重试复用该时刻，不因后一次重试刷新 `confirmedAt`。worker 每 1 秒调度一次待重放扫描，只尝试已到重试时刻的记录；读取 journal 时健康记录继续重放，无法解码、身份不符或类型异常的文件只进入逐文件失败快照，原文件保留且按文件身份去重告警；目录无法枚举、journal 已关闭或目录锁占用仍整体失败。journal 目录由单个 Studio 实例独占并持久化，文件锁在进程生命周期内持有；journal 写入只证明正向证据已落盘，不证明远端进程已经退出。
 
-同一 execution 的确认在 64 个稳定 stripe 上以 `ReentrantLock` 串行化，journal 的全局锁也使用 `ReentrantLock`，避免这两处 monitor 在阻塞时固定载体线程；文件 I/O 本身仍可能阻塞载体，不代表消除了全部阻塞来源。数据库或文件瞬态失败按 1/2/4/8/16/30 秒上限退避，持续故障只首轮告警，成功后重置；目录枚举失败也按该退避重试，但不阻断内存 proof。事实缺失以及 canonical proof 与 journal/数据库的真实 identity/target 冲突只暂停该 execution 的自动重放并告警一次；被拒绝的新输入不改变原 proof 的退避状态，显式再次确认仍会重新核对数据库。journal 删除失败不回滚已提交的确认事实，保留 proof 并按退避重试。首次 journal 写入失败时 proof 仅保存在本进程内等待重试，不能据此宣称跨进程 durable。
+同一 execution 的确认在 64 个稳定 stripe 上以 `ReentrantLock` 串行化，journal 的全局锁也使用 `ReentrantLock`，避免这两处 monitor 在阻塞时固定载体线程；文件 I/O 本身仍可能阻塞载体，不代表消除了全部阻塞来源。数据库或文件瞬态失败按 1/2/4/8/16/30 秒上限退避，持续故障只首轮告警，成功后重置；目录枚举失败也按该退避重试，但不阻断内存 proof。事实缺失以及 canonical proof 与 journal/数据库的真实 identity/target 冲突保留证明并按每 30 秒低频核对，同一原因只告警一次，不阻断其它记录；人工修复后可恢复确认。通过 journal 持久化与身份校验的证明，也能在观察到合法深删且核对事务提交后清理。被拒绝的新输入不改变原 proof 的退避状态，显式再次确认仍会立即重新核对。journal 删除失败不回滚已提交的确认事实，保留 proof 并按退避重试。首次 journal 写入失败时 proof 仅保存在本进程内等待重试，不能据此宣称跨进程 durable。
 
 `ABANDONED` 是用户显式放弃继续等待确认的独立事实，不是物理退出，也不能伪造 ACK。只有 `UNCONFIRMED` 阻止收敛；首次放弃要求 Thread 已 `STOPPED`、执行属于该 Thread 且 `expectedVersion` 精确匹配，重复放弃或已真实确认是安全 replay，容忍旧 version。真实证据到达后可以把 `ABANDONED` 升级为已确认状态并保留原 `abandonedAt`；两种时刻都不得早于 `registeredAt`，但 `confirmedAt` 可以早于 `abandonedAt`，绝不改写观测时间。退出事实行（包括放弃行）保留到 Thread 深删除，没有 TTL，也不以 lease 到期、`cluster_node` 路由记录或 journal 存在推断宿主已死亡。
 

@@ -8,7 +8,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;
@@ -29,7 +28,7 @@ import java.util.function.Supplier;
  *
  * <p>同一 execution 的确认在进程内按稳定 stripe 串行化，事实与 version 推进幂等，并始终复用待确认记录的第一次 canonical proof
  * 的身份、目标和确认时刻。首次 journal 写入失败时 proof 只保留在本进程内等待重试，不能宣称跨进程 durable。事实缺失或 canonical proof 与
- * journal/数据库的真实 identity/target 冲突只暂停该 execution 的自动重放；被拒绝的新输入不改变原 proof。其它数据库或文件失败按 {@link
+ * journal/数据库的真实 identity/target 冲突只对该 execution 每 30 秒低频核对；被拒绝的新输入不改变原 proof。其它数据库或文件失败按 {@link
  * #BACKOFF_SECONDS} 退避，成功后重置。
  */
 @Slf4j
@@ -144,30 +143,34 @@ public final class ExecutionExitConfirmer {
   private Result confirmInLock(ExecutionExitJournalRecord candidate, String phase, Instant now) {
     UUID executionId = candidate.executionId();
     PendingProof pending = proofs.get(executionId);
-    if (pending == null) {
-      pending = new PendingProof(candidate);
-      proofs.put(executionId, pending);
-    } else if (!pending.record().sameIdentity(candidate)) {
+    if (pending != null && !pending.record().sameIdentity(candidate)) {
       throw new ExecutionExitJournalConflictException(
           ExecutionExitJournalConflictException.Conflict.IDENTITY,
           "execution " + executionId + " identity cannot be replaced");
-    } else if (pending.record().targetState() != candidate.targetState()) {
+    }
+    if (pending != null && pending.record().targetState() != candidate.targetState()) {
       throw new ExecutionExitJournalConflictException(
           ExecutionExitJournalConflictException.Conflict.TARGET,
           "execution " + executionId + " target cannot be replaced");
     }
 
+    ExecutionExitJournalRecord offered = pending == null ? candidate : pending.record();
     ExecutionExitJournalRecord canonical;
     try {
-      canonical = journal.write(pending.record());
+      canonical = journal.write(offered);
       proofs.put(executionId, new PendingProof(canonical));
     } catch (ExecutionExitJournalConflictException conflict) {
+      if (pending == null) {
+        // 新输入未被 journal 接纳，不得阻塞磁盘已有 canonical proof 的正常重放。
+        throw conflict;
+      }
       FailureReason reason =
           conflict.conflict() == ExecutionExitJournalConflictException.Conflict.IDENTITY
               ? FailureReason.IDENTITY_CONFLICT
               : FailureReason.TARGET_CONFLICT;
-      throw permanent(executionId, reason, phase, now, conflict);
+      throw invariantFailure(executionId, reason, phase, now, conflict);
     } catch (RuntimeException failure) {
+      proofs.put(executionId, new PendingProof(offered));
       recordFailure(executionId, FailureReason.JOURNAL_WRITE, phase, now, failure);
       throw failure;
     }
@@ -211,14 +214,14 @@ public final class ExecutionExitConfirmer {
         deleteJournal(executionId, phase, now);
         yield new Result(Outcome.THREAD_MISSING);
       }
-      case FACT_MISSING -> throw permanent(
+      case FACT_MISSING -> throw invariantFailure(
           executionId,
           FailureReason.FACT_MISSING,
           phase,
           now,
           new IllegalStateException(
               "thread still exists but execution " + executionId + " is missing"));
-      case CONFLICT -> throw permanent(
+      case CONFLICT -> throw invariantFailure(
           executionId,
           FailureReason.CONFLICT,
           phase,
@@ -349,10 +352,10 @@ public final class ExecutionExitConfirmer {
 
   private boolean shouldAttempt(UUID executionId, Instant now) {
     Failure failure = failures.get(executionId);
-    return failure == null || (!failure.permanent() && !now.isBefore(failure.nextAttemptAt()));
+    return failure == null || !now.isBefore(failure.nextAttemptAt());
   }
 
-  private RuntimeException permanent(
+  private RuntimeException invariantFailure(
       UUID executionId, FailureReason reason, String phase, Instant now, RuntimeException failure) {
     recordFailure(executionId, reason, phase, now, failure);
     return failure;
@@ -363,14 +366,15 @@ public final class ExecutionExitConfirmer {
     Failure previous = failures.get(executionId);
     boolean sameReason = previous != null && previous.reason() == reason;
     int attempts = sameReason ? previous.attempts() + 1 : 1;
-    boolean permanent =
+    boolean invariantFailure =
         reason == FailureReason.FACT_MISSING
             || reason == FailureReason.IDENTITY_CONFLICT
             || reason == FailureReason.TARGET_CONFLICT
             || reason == FailureReason.CONFLICT;
-    Instant nextAttemptAt =
-        permanent ? Instant.MAX : now.plus(Duration.ofSeconds(backoffSeconds(attempts)));
-    failures.put(executionId, new Failure(reason, permanent, attempts, nextAttemptAt));
+    // 不变量错误不高频重放，但仍需识别人工修复和合法深删，不能永久停止核对。
+    int backoffStep = invariantFailure ? BACKOFF_SECONDS.length : attempts;
+    Instant nextAttemptAt = now.plusSeconds(backoffSeconds(backoffStep));
+    failures.put(executionId, new Failure(reason, attempts, nextAttemptAt));
     if (!sameReason) {
       log.warn(
           "cannot resolve execution exit confirmation;"
@@ -422,6 +426,5 @@ public final class ExecutionExitConfirmer {
 
   private record DirectoryFailure(int attempts, Instant nextAttemptAt) {}
 
-  private record Failure(
-      FailureReason reason, boolean permanent, int attempts, Instant nextAttemptAt) {}
+  private record Failure(FailureReason reason, int attempts, Instant nextAttemptAt) {}
 }
