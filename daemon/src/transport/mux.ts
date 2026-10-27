@@ -22,11 +22,13 @@ import {
  * stream's earlier DATA. A rejected send is terminal: the sender is disabled, queued work is rejected and
  * {@link MuxConnectionOptions.onFatal} fires once. There is no retry or replay.
  *
- * <p>Inbound DATA is delivered to {@link MuxConnectionOptions.onData}; credit is returned only after that
- * callback's promise settles. Per-stream and per-connection credits are enforced in both directions, DATA
- * and management queues are bounded, and RESET discards unsent/undelivered buffers while returning connection
- * credit. The monotonic stream-id high-water mark identifies closed streams for late DATA without retaining
- * per-stream tombstones.
+ * <p>DATA and END are accounted when handed to the sender, before its promise settles, because the peer may
+ * receive the bytes and answer with WINDOW or COMPLETE first. Completion still waits for send success. Inbound
+ * DATA is delivered to {@link MuxConnectionOptions.onData}; credit is returned only after that callback's
+ * promise settles. Per-stream and per-connection credits are enforced in both directions, DATA and management
+ * queues are bounded, and RESET discards queued buffers while returning their connection credit. An inbound
+ * buffer already being delivered keeps its credit charge until its callback settles. The monotonic stream-id
+ * high-water mark identifies closed streams for late DATA without retaining per-stream tombstones.
  *
  * <p>Roles follow the data wire: a server calls {@link MuxConnection.open}; a daemon receives OPEN through
  * {@link MuxConnectionOptions.onOpen}, then accepts with {@link MuxStream.accept} or replies with
@@ -71,13 +73,26 @@ export interface MuxConnectionOptions {
   onReady?: (stream: MuxStream) => void
   /** Server only: response headers or the WS 101 handshake result arrived. */
   onHeaders?: (stream: MuxStream, headers: HeadersPayload) => void
-  /** DATA is consumed here. Credit returns after the returned promise settles; omitting it discards DATA. */
+  /**
+   * DATA is consumed here. Credit returns after the returned promise settles; omitting it discards DATA.
+   * Rejection resets the stream and notifies {@link MuxConnectionOptions.onReset}.
+   */
   onData?: (stream: MuxStream, data: DataFrame) => void | Promise<void>
-  /** The peer ended this HTTP direction; queued DATA was already consumed. */
+  /**
+   * The peer ended this HTTP direction; queued DATA was already consumed. Rejection resets the stream and
+   * notifies {@link MuxConnectionOptions.onReset}.
+   */
   onEnd?: (stream: MuxStream) => void | Promise<void>
-  /** Daemon only: the server confirmed the response END was flushed to the browser. */
+  /**
+   * Daemon only: COMPLETE arrived and the response END send also succeeded. It may arrive before the END send
+   * callback settles, but completion waits for both.
+   */
   onComplete?: (stream: MuxStream) => void
-  /** The peer reset an active stream; late RESET frames for closed ids are ignored. */
+  /**
+   * The peer reset an active stream, or local downstream delivery failed. The wire RESET is already queued for a
+   * local failure; the adapter can cancel whatever consumes the stream. Late RESET frames for closed ids are
+   * ignored.
+   */
   onReset?: (streamId: number, reset: ResetPayload) => void
   /** WS close arrived after queued DATA was consumed. Call {@link MuxStream.close} to complete the handshake. */
   onClose?: (stream: MuxStream, close: ClosePayload) => void | Promise<void>
@@ -105,7 +120,7 @@ export interface MuxStream {
   complete(): Promise<void>
   /** WS: send CLOSE after all earlier DATA. */
   close(code: number, reason?: string): Promise<void>
-  /** Reset both directions immediately and discard unsent/undelivered stream data. */
+  /** Reset both directions immediately and discard queued stream data not yet handed to the sender. */
   reset(code: string, message: string): Promise<void>
 }
 
@@ -153,6 +168,9 @@ interface ManagementJob {
   preserveOnClose?: boolean
   resolve(): void
   reject(error: Error): void
+  /** Called immediately before the frame is handed to the physical sender. */
+  onDispatch?: () => void
+  /** Called only after the physical sender confirms the write. */
   onSent?: () => void
 }
 
@@ -186,8 +204,10 @@ class MuxStreamState implements MuxStream {
   accepted = false
   ready = false
   headersSent = false
+  headersDispatched = false
   headersReceived = false
   localEndQueued = false
+  localEndDispatched = false
   localEndSent = false
   remoteEndReceived = false
   remoteEndConsumed = false
@@ -208,6 +228,7 @@ class MuxStreamState implements MuxStream {
   dataQueue: DataJob[] = []
   delivery: InboundData[] = []
   deliveryRunning = false
+  deliveringInbound: InboundData | null = null
   terminal: Terminal | null = null
   creditWaiter: CreditWaiter | null = null
 
@@ -397,7 +418,9 @@ class DefaultMuxConnection implements MuxConnection {
     }
     const frame = encodeFrame({ type: 'HEADERS', streamId: stream.id, headers })
     stream.headersSent = true
-    return this.enqueueManagement(frame, stream, false)
+    return this.enqueueManagement(frame, stream, false, undefined, false, () => {
+      stream.headersDispatched = true
+    })
   }
 
   private async writeStreamData(stream: MuxStreamState, payload: Uint8Array, options: MuxWriteOptions): Promise<void> {
@@ -453,12 +476,21 @@ class DefaultMuxConnection implements MuxConnection {
     this.cancelCreditWaiter(stream, new MuxError('stream ended while waiting for credit'))
     stream.localEndQueued = true
     const frame = encodeFrame({ type: 'END', streamId: stream.id })
-    return this.enqueueManagement(frame, stream, true, () => {
-      if (!stream.closed) {
-        stream.localEndSent = true
-        this.maybeFinishHttp(stream)
-      }
-    })
+    return this.enqueueManagement(
+      frame,
+      stream,
+      true,
+      () => {
+        if (!stream.closed) {
+          stream.localEndSent = true
+          this.maybeFinishHttp(stream)
+        }
+      },
+      false,
+      () => {
+        stream.localEndDispatched = true
+      },
+    )
   }
 
   private async completeHttpStream(stream: MuxStreamState): Promise<void> {
@@ -638,6 +670,7 @@ class DefaultMuxConnection implements MuxConnection {
     barrier: boolean,
     onSent?: () => void,
     preserveOnClose = false,
+    onDispatch?: () => void,
   ): Promise<void> {
     if (this.failed || this.closed) {
       return Promise.reject(new MuxError('mux connection is closed'))
@@ -651,7 +684,7 @@ class DefaultMuxConnection implements MuxConnection {
       return Promise.reject(error)
     }
     return new Promise<void>((resolve, reject) => {
-      this.management.push({ frame, stream, barrier, resolve, reject, onSent, preserveOnClose })
+      this.management.push({ frame, stream, barrier, resolve, reject, onDispatch, onSent, preserveOnClose })
       this.managementBytes += frame.byteLength
       this.pump()
     })
@@ -670,6 +703,11 @@ class DefaultMuxConnection implements MuxConnection {
     this.currentJob = job
     let sent: Promise<void> | void
     try {
+      if ('stream' in job && 'cost' in job) {
+        this.accountDispatchedData(job)
+      } else {
+        job.onDispatch?.()
+      }
       sent = this.options.send(job.frame)
     } catch (error) {
       this.sending = false
@@ -685,9 +723,7 @@ class DefaultMuxConnection implements MuxConnection {
         if (this.failed || this.closed) {
           return
         }
-        if ('stream' in job && 'cost' in job) {
-          this.afterDataSent(job)
-        } else {
+        if (!('stream' in job && 'cost' in job)) {
           job.onSent?.()
         }
         job.resolve()
@@ -707,7 +743,7 @@ class DefaultMuxConnection implements MuxConnection {
     if (this.management.length > 0) {
       const head = this.management[0]!
       if (head.barrier && head.stream !== null && !head.stream.closed && head.stream.dataQueue.length > 0) {
-        return this.takeSpecificData(head.stream)
+        return this.takeRoundRobinData() ?? this.takeSpecificData(head.stream)
       }
       this.management.shift()
       this.managementBytes -= head.frame.byteLength
@@ -740,12 +776,12 @@ class DefaultMuxConnection implements MuxConnection {
     return job
   }
 
-  private afterDataSent(job: DataJob): void {
+  private accountDispatchedData(job: DataJob): void {
+    // The peer can receive and acknowledge the frame before send() resolves, so account at handoff.
     this.outboundConnectionSentUnacked += job.cost
     if (!job.stream.closed) {
       job.stream.sentUnacked += job.cost
     }
-    this.wakeCreditWaiter(job.stream)
   }
 
   private notifyDrain(): void {
@@ -900,6 +936,9 @@ class DefaultMuxConnection implements MuxConnection {
     if (!stream.accepted) {
       throw new MuxError('request DATA arrived before READY')
     }
+    if (stream.mode === 'WS' && !stream.headersDispatched) {
+      throw new MuxError('WS request DATA arrived before HEADERS 101')
+    }
   }
 
   private validateInboundDataFlags(stream: MuxStreamState, flags: DataFlags): void {
@@ -993,12 +1032,11 @@ class DefaultMuxConnection implements MuxConnection {
     if (stream.mode !== 'HTTP' || stream.completeReceived) {
       throw new MuxError('invalid COMPLETE')
     }
-    if (!stream.localEndSent) {
+    if (!stream.localEndDispatched) {
       throw new MuxError('COMPLETE arrived before response END')
     }
     stream.completeReceived = true
-    this.options.onComplete?.(stream)
-    this.finishStream(stream, false)
+    this.maybeFinishHttp(stream)
   }
 
   private handleReset(streamId: number, reset: ResetPayload): void {
@@ -1045,28 +1083,44 @@ class DefaultMuxConnection implements MuxConnection {
     }
     this.inboundQueuedCount--
     stream.deliveryRunning = true
+    stream.deliveringInbound = item
     let consumed: Promise<void> | void
     try {
       consumed = this.options.onData?.(stream, item.frame)
     } catch {
       stream.deliveryRunning = false
-      this.downstreamFailure(stream)
+      stream.deliveringInbound = null
+      this.afterInboundFailure(stream, item)
       return
     }
     Promise.resolve(consumed).then(
       () => {
         stream.deliveryRunning = false
+        stream.deliveringInbound = null
         this.afterInboundConsumed(stream, item)
       },
       () => {
         stream.deliveryRunning = false
-        this.downstreamFailure(stream)
+        stream.deliveringInbound = null
+        this.afterInboundFailure(stream, item)
       },
     )
   }
 
+  private afterInboundFailure(stream: MuxStreamState, item: InboundData): void {
+    if (!this.failed && !this.closed && !stream.closed) {
+      this.downstreamFailure(stream)
+      return
+    }
+    this.releaseInboundBuffer(stream, item)
+  }
+
   private afterInboundConsumed(stream: MuxStreamState, item: InboundData): void {
-    if (this.failed || this.closed || stream.closed) {
+    if (this.failed || this.closed) {
+      return
+    }
+    if (stream.closed) {
+      this.releaseInboundBuffer(stream, item)
       return
     }
     stream.receiveAckPending += item.cost
@@ -1139,13 +1193,15 @@ class DefaultMuxConnection implements MuxConnection {
     if (this.failed || this.closed || stream.closed) {
       return
     }
-    const frame = encodeFrame({
-      type: 'RESET',
-      streamId: stream.id,
-      reset: { code: 'DOWNSTREAM_ERROR', message: 'downstream consumption failed' },
-    })
+    const reset: ResetPayload = { code: 'DOWNSTREAM_ERROR', message: 'downstream consumption failed' }
+    const frame = encodeFrame({ type: 'RESET', streamId: stream.id, reset })
     this.finishStream(stream, true)
     rejectLater(this.enqueueManagement(frame, null, false))
+    try {
+      this.options.onReset?.(stream.id, reset)
+    } catch (error) {
+      this.fail(new MuxError('reset notification callback failed', error))
+    }
   }
 
   private flushStreamAck(stream: MuxStreamState): void {
@@ -1196,9 +1252,25 @@ class DefaultMuxConnection implements MuxConnection {
   }
 
   private maybeFinishHttp(stream: MuxStreamState): void {
-    if (this.role === 'server' && stream.completeSent && stream.remoteEndConsumed && stream.localEndSent) {
-      this.finishStream(stream, false)
+    if (stream.closed) {
+      return
     }
+    if (this.role === 'server') {
+      if (stream.completeSent && stream.remoteEndConsumed && stream.localEndSent) {
+        this.finishStream(stream, false)
+      }
+      return
+    }
+    if (!stream.completeReceived || !stream.localEndSent) {
+      return
+    }
+    try {
+      this.options.onComplete?.(stream)
+    } catch (error) {
+      this.fail(new MuxError('downstream completion callback failed', error))
+      return
+    }
+    this.finishStream(stream, false)
   }
 
   private maybeFinishWebSocket(stream: MuxStreamState): void {
@@ -1262,12 +1334,13 @@ class DefaultMuxConnection implements MuxConnection {
   }
 
   private abandonInbound(stream: MuxStreamState, forceConnectionAck: boolean): void {
+    const inFlight = stream.deliveringInbound?.cost ?? 0
     const consumedNotAcked = stream.receiveAckPending + stream.receiveAckInFlight
-    const unconsumed = Math.max(0, stream.receiveReserved - consumedNotAcked)
-    if (unconsumed > 0) {
-      this.inboundConnectionAckPending += unconsumed
+    const released = Math.max(0, stream.receiveReserved - consumedNotAcked - inFlight)
+    if (released > 0) {
+      this.inboundConnectionAckPending += released
     }
-    stream.receiveReserved = 0
+    stream.receiveReserved = inFlight
     stream.receiveAckPending = 0
     stream.receiveAckInFlight = 0
     if (stream.delivery.length > 0) {
@@ -1275,6 +1348,15 @@ class DefaultMuxConnection implements MuxConnection {
     }
     stream.delivery = []
     this.flushConnectionAck(forceConnectionAck)
+  }
+
+  private releaseInboundBuffer(stream: MuxStreamState, item: InboundData): void {
+    stream.receiveReserved = Math.max(0, stream.receiveReserved - item.cost)
+    if (this.failed || this.closed) {
+      return
+    }
+    this.inboundConnectionAckPending += item.cost
+    this.flushConnectionAck(false)
   }
 
   private ensureActive(stream: MuxStreamState): void {
@@ -1321,6 +1403,7 @@ class DefaultMuxConnection implements MuxConnection {
       }
       stream.dataQueue = []
       stream.delivery = []
+      stream.deliveringInbound = null
     }
     this.streams.clear()
     this.dataRoundRobin = []
