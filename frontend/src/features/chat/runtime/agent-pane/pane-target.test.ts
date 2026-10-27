@@ -11,6 +11,7 @@ import {
   isNewThreadTarget,
   isNewSessionTarget,
   isPaneTarget,
+  inspectPendingAcceptanceSlot,
   loadBoundPendingMessage,
   loadPendingAcceptance,
   normalizePaneTarget,
@@ -195,11 +196,9 @@ describe('PaneTarget durable-local FSM', () => {
       generation: 3,
       unknownOutcome: true,
     }
-    savePendingAcceptance(owner, 'pane-1', pending, storage)
+    expect(savePendingAcceptance(owner, 'pane-1', pending, storage)).toBe(true)
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toEqual(pending)
     expect(storage.length).toBe(1)
-    clearPendingAcceptance(owner, 'pane-1', storage)
-    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
 
     const forkPending: PendingAcceptance = {
       ...pending,
@@ -222,7 +221,20 @@ describe('PaneTarget durable-local FSM', () => {
         commands: pending.request.commands,
       },
     }
-    savePendingAcceptance(owner, 'pane-1', forkPending, storage)
+    const originalRaw = storage.getItem(
+      'kk-studio.agent-pane-acceptance.CHAT:chat-1:pane-1',
+    )
+    // 不同请求不能覆盖同一槽位；原记录逐字节保留。
+    expect(savePendingAcceptance(owner, 'pane-1', forkPending, storage)).toBe(false)
+    expect(storage.getItem('kk-studio.agent-pane-acceptance.CHAT:chat-1:pane-1'))
+      .toBe(originalRaw)
+    expect(clearPendingAcceptance(owner, 'pane-1', forkPending, storage)).toBe(false)
+    expect(storage.getItem('kk-studio.agent-pane-acceptance.CHAT:chat-1:pane-1'))
+      .toBe(originalRaw)
+    expect(clearPendingAcceptance(owner, 'pane-1', pending, storage)).toBe(true)
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
+
+    expect(savePendingAcceptance(owner, 'pane-1', forkPending, storage)).toBe(true)
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toEqual(forkPending)
     // NEW_FORKED_SESSION 绝不接受 rootSettings 或 threadName 等越界字段。
     storage.setItem(
@@ -239,6 +251,12 @@ describe('PaneTarget durable-local FSM', () => {
       }),
     )
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
+    expect(inspectPendingAcceptanceSlot(owner, 'pane-1', storage).status).toBe('invalid')
+    const malformedRaw = storage.getItem('kk-studio.agent-pane-acceptance.CHAT:chat-1:pane-1')
+    expect(savePendingAcceptance(owner, 'pane-1', forkPending, storage)).toBe(false)
+    expect(clearPendingAcceptance(owner, 'pane-1', forkPending, storage)).toBe(false)
+    expect(storage.getItem('kk-studio.agent-pane-acceptance.CHAT:chat-1:pane-1'))
+      .toBe(malformedRaw)
   })
 
   it('matches pending recovery by its original target, not by pane id alone', () => {
@@ -320,7 +338,8 @@ describe('PaneTarget durable-local FSM', () => {
       },
     }
     expect(loadPendingAcceptance(owner, 'pane-1', failingStorage)).toBeNull()
-    expect(() => savePendingAcceptance(owner, 'pane-1', {
+    expect(inspectPendingAcceptanceSlot(owner, 'pane-1', failingStorage).status).toBe('unavailable')
+    const pending: PendingAcceptance = {
       owner,
       target: { kind: 'NEW_SESSION_DRAFT' },
       request: {
@@ -352,8 +371,11 @@ describe('PaneTarget durable-local FSM', () => {
       composerParts: [],
       generation: 0,
       unknownOutcome: true,
-    }, failingStorage)).not.toThrow()
-    expect(() => clearPendingAcceptance(owner, 'pane-1', failingStorage)).not.toThrow()
+    }
+    expect(() => savePendingAcceptance(owner, 'pane-1', pending, failingStorage)).not.toThrow()
+    expect(savePendingAcceptance(owner, 'pane-1', pending, failingStorage)).toBe(false)
+    expect(() => clearPendingAcceptance(owner, 'pane-1', pending, failingStorage)).not.toThrow()
+    expect(clearPendingAcceptance(owner, 'pane-1', pending, failingStorage)).toBe(false)
   })
 
   it('rejects pending storage unless owner, commands, generation, and outcome are valid', () => {

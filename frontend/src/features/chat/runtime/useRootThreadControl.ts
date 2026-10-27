@@ -376,7 +376,7 @@ export function useRootThreadControl({
     openRename: rename.openRename,
     setRenameError: rename.setRenameError,
   })
-  const { pendingAcceptance, submitGoal } = acceptance
+  const { pendingAcceptance, pendingAcceptanceBlocked, submitGoal } = acceptance
 
   function selectAgent(agentName: string): void {
     if (capabilities?.allowSwitchAgent === false) {
@@ -440,7 +440,10 @@ export function useRootThreadControl({
     ? trimMessageParts(controller.draft).length > 0
     : trimMessageParts(parts).length > 0
   const reportDraftKey = partsKey(isBoundTarget(target) ? controller.draft : parts)
-  const reportPending = pending || rename.renamePending || controller.queuedCommands.length > 0
+  const reportPending = pending
+    || pendingAcceptanceBlocked
+    || rename.renamePending
+    || controller.queuedCommands.length > 0
   const reportSessionId = currentSessionId
   const reportBranchName = isBoundTarget(target)
     ? boundThreadName
@@ -679,6 +682,7 @@ export function useRootThreadControl({
     composer,
     restoreComposerFocus: () => setFocusIntent(target),
     pendingAcceptance,
+    pendingAcceptanceBlocked,
     pendingMessage: isBoundTarget(target) ? controller.pendingMessage : null,
     draftRestoreError: isBoundTarget(target) ? controller.draftRestoreError : null,
     retryDraftRestore: () => {
