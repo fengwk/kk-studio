@@ -335,10 +335,13 @@ Environment 管理面展示宿主事实与有界运维事件窗口，并提供�
 `/environment-ide` 代理通过 `changeOrigin: false, ws: true` 保留 Host 与 Origin 并透传 WebSocket。
 视图存在期间，前端把已校验 `entryUrl` 的 `__ide/bootstrap` 改写为同源 `__ide/session`（丢弃一次性 token 与查询串、保留部署前缀），
 用 `credentials: 'same-origin'`、`cache: 'no-store'` 的 `fetch` 读取状态码；网络错误或有界超时视为未知。
-每 10 秒探测一次，`environment.ready` 由 false 变 true 时立即探测一次，每次 iframe 加载后再探测一次；
-401/409（以及加载后的非 204）标记需要重开，503 或未知只等待。需要重开时用同一 `viewId`、不传 directory 调用
-`createIdeView`，校验新 `entryUrl` 后才替换 iframe；失败保留旧 iframe 并在下一周期重试。重开与首次打开共用单飞状态，
-关闭会等待在途重开，迟到的探测或重开结果不能复活已关闭视图。刷新或关闭页面时（`pagehide` 且 `persisted=false`）
+每 10 秒探测一次，`environment.ready` 由 false 变 true 时立即探测一次，每次 iframe 加载后再探测一次。
+周期与 ready 探测在 401/409 时标记需要重开；加载探测只把非 204 记录为需要重开，绝不在加载链中直接重开，
+避免错误页反复 load 形成重开反馈循环。加载时若已有探测在途，其状态按同一“加载后非 204”规则合并进标记，不丢失意图。
+需要重开时，下一次周期或 ready 探测在状态非 503/未知时用同一 `viewId`、不传 directory 调用
+`createIdeView`，校验新 `entryUrl` 后才替换 iframe；503 或未知保留旧 iframe 与标记，失败同样保留并在下一周期重试。
+重开与首次打开共用单飞状态，关闭会等待在途重开，迟到的探测或重开结果不能复活已关闭视图，
+关闭或换视图也会清空旧视图的加载意图与重开标记。刷新或关闭页面时（`pagehide` 且 `persisted=false`）
 以 keepalive DELETE 释放当前视图，避免 view 在 Daemon 与网关侧累积；Daemon 仍按 dirty 语义拒绝关闭，bfcache 恢复不释放。
 
 Projects 使用权威 ProjectSnapshot/IssueDetail，按 workflow states 分列，
