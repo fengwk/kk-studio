@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -54,9 +55,13 @@ class PostgresqlHarnessStoreFixtureResetTest {
     try (Connection ignored = PostgresqlHarnessStoreFixture.dataSource().getConnection()) {
       IllegalStateException error =
           assertThrows(IllegalStateException.class, PostgresqlHarnessStoreFixture::reset);
-      assertTrue(
-          error.getMessage().contains("connection(s) remain"),
-          "reset must report the leaked connection instead of forcing the drop");
+      SQLException databaseFailure =
+          assertInstanceOf(
+              SQLException.class, error.getCause(), "reset must keep the database cause");
+      assertEquals(
+          "55006",
+          databaseFailure.getSQLState(),
+          "PostgreSQL must reject DROP DATABASE while a test session remains");
     }
     // 显式关闭后 reset 可以继续，证明失败没有破坏后续隔离重建。
     PostgresqlHarnessStoreFixture.reset();
@@ -64,31 +69,31 @@ class PostgresqlHarnessStoreFixtureResetTest {
 
   private static void assertBaseline(JdbcTemplate jdbc, List<String> baselineHistory) {
     PostgresqlHarnessStoreFixture.reset();
+    assertEquals(
+        new UUID(0L, 1L),
+        PostgresqlHarnessStoreFixture.idGenerator().get(),
+        "reset must restart the deterministic UUID sequence");
     assertEquals(0, probeRows(jdbc));
     assertEquals(0, probeColumns(jdbc));
     assertEquals(baselineHistory, migrationHistory(jdbc));
   }
 
   private static int probeRows(JdbcTemplate jdbc) {
-    Integer rows =
-        jdbc.queryForObject(
-            "select count(*) from environment where name = ?", Integer.class, PROBE_NAME);
-    return rows == null ? 0 : rows;
+    return jdbc.queryForObject(
+        "select count(*) from environment where name = ?", Integer.class, PROBE_NAME);
   }
 
   private static int probeColumns(JdbcTemplate jdbc) {
-    Integer columns =
-        jdbc.queryForObject(
-            """
-            select count(*)
-            from information_schema.columns
-            where table_schema = 'public'
-              and table_name = 'environment'
-              and column_name = ?
-            """,
-            Integer.class,
-            PROBE_COLUMN);
-    return columns == null ? 0 : columns;
+    return jdbc.queryForObject(
+        """
+        select count(*)
+        from information_schema.columns
+        where table_schema = 'public'
+          and table_name = 'environment'
+          and column_name = ?
+        """,
+        Integer.class,
+        PROBE_COLUMN);
   }
 
   private static List<String> migrationHistory(JdbcTemplate jdbc) {

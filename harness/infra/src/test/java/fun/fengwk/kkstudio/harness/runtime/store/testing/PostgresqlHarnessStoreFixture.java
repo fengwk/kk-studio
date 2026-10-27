@@ -14,8 +14,6 @@ import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import javax.sql.DataSource;
 
 import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.UUID;
@@ -108,8 +106,8 @@ final class PostgresqlHarnessStoreFixture {
   /**
    * 删除并重建固定测试库，使其回到模板库的完整 V1 baseline。
    *
-   * <p>串行化与 UUID 重置保持原有契约。存在遗留连接时显式失败，绝不 terminate backend 或用 {@code DROP DATABASE ... WITH FORCE}
-   * 掩盖测试资源泄漏。
+   * <p>串行化与 UUID 重置保持原有契约。遗留连接由 PostgreSQL {@code DROP DATABASE} 自身的活动连接约束拒绝（SQLSTATE 55006），
+   * 异常保留数据库 cause；绝不 terminate backend、预查会话或用 {@code DROP DATABASE ... WITH FORCE} 掩盖测试资源泄漏。
    */
   static synchronized void reset() {
     UUID_GENERATOR.set(1L);
@@ -118,31 +116,10 @@ final class PostgresqlHarnessStoreFixture {
     try (Connection connection = ADMIN_DATA_SOURCE.getConnection();
         Statement statement = connection.createStatement()) {
       connection.setAutoCommit(true);
-      assertNoTestDatabaseSessions(connection);
       statement.execute("DROP DATABASE IF EXISTS " + test);
       statement.execute("CREATE DATABASE " + test + " TEMPLATE " + template);
     } catch (SQLException error) {
       throw new IllegalStateException("cannot reset PostgreSQL Harness Store test database", error);
-    }
-  }
-
-  private static void assertNoTestDatabaseSessions(Connection adminConnection) throws SQLException {
-    try (PreparedStatement statement =
-        adminConnection.prepareStatement(
-            "select count(*) from pg_stat_activity where datname = ?")) {
-      statement.setString(1, TEST_DATABASE);
-      try (ResultSet resultSet = statement.executeQuery()) {
-        resultSet.next();
-        long connections = resultSet.getLong(1);
-        if (connections != 0) {
-          throw new IllegalStateException(
-              "refusing to drop "
-                  + TEST_DATABASE
-                  + ": "
-                  + connections
-                  + " connection(s) remain; close test resources instead of forcing the drop");
-        }
-      }
     }
   }
 
