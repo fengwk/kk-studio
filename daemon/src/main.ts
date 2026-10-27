@@ -4,6 +4,7 @@ import { pathToFileURL } from 'node:url'
 
 import type { CapabilityExecutor, DaemonConfig } from './contracts.js'
 import {
+  DAEMON_VERSION,
   checkConfig,
   invalidConfigurationLine,
   loadDaemonConfig,
@@ -29,6 +30,7 @@ import { releaseTextOutputStore, sweepTextOutputStores } from './coding/output.j
 import { createSkillCapability } from './skill/sync.js'
 import { createIdeService } from './ide/service.js'
 import { handleUpdate } from './update.js'
+import { awaitStartupHandoff } from './update-entry.js'
 
 /**
  * Environment Daemon 独立进程入口与依赖装配。
@@ -114,6 +116,25 @@ async function runDaemon(config: DaemonConfig): Promise<number> {
     const dataDir = await ensurePrivateDirectory(config.dataDir)
     // 目录锁的参数是数据目录本身：native 边界会在其中创建并持有 daemon.lock。
     lock = await acquireDirectoryLock(dataDir)
+    // 新进程在装配任何业务能力之前完成更新交接：目标版本预检、私有启动确认、等待 updater
+    // 写出 result 并释放安装目录互斥。任何失败结果都必须在 READY 前终止当前进程。
+    const handoff = await awaitStartupHandoff({
+      dataDir,
+      distributionDir: config.distributionDir,
+      configPath: config.configPath,
+    })
+    if (handoff.state === 'failed') {
+      // 交接失败已经由更新器持久化并标记消费；当前进程没有可信的新版本，不得进入 READY。
+      process.stderr.write(`daemon failed: update handoff failed: ${handoff.message}\n`)
+      outcome = 1
+      return outcome
+    }
+    if (handoff.state === 'updated' && handoff.targetVersion !== DAEMON_VERSION) {
+      // 本进程不是已安装的目标版本（例如旧服务在替换后被重启）：不得以旧代码进入 READY。
+      process.stderr.write('daemon failed: this process is not the installed update target\n')
+      outcome = 1
+      return outcome
+    }
 
     const systemProxy = createSystemProxyResolver()
     let closeNetwork = (): Promise<void> => systemProxy.close()
@@ -149,8 +170,15 @@ async function runDaemon(config: DaemonConfig): Promise<number> {
       processes: supervisor,
       environment: detectEnvironmentInfo(config, join(dataDir, 'tmp')),
       ide,
-      // 受管更新以 supervisor 运行受控子进程；装配层绑定 native 端口。
-      update: { handleUpdate: (command, cfg, signal) => handleUpdate(command, cfg, signal, supervisor) },
+      // 受管更新以 supervisor 运行受控子进程；报告器只接收发行归档 body 的累计字节。
+      update: {
+        handleUpdate: (
+          command: Record<string, unknown>,
+          cfg: DaemonConfig,
+          signal: AbortSignal,
+          reportProgress?: (progress: { downloadedBytes: number; totalBytes: number | null }) => void,
+        ) => handleUpdate(command, cfg, signal, supervisor, reportProgress),
+      },
       // WELCOME 下发的 TTL 热更直接驱动 Files 受控临时输出的同一份 lease 清扫。
       temporaryResources: {
         async sweep(ttlSeconds: number): Promise<void> {

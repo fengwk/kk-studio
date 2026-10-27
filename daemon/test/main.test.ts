@@ -318,6 +318,62 @@ describe('daemon main information commands', () => {
 
 // 装配/释放在 Linux 与 macOS 上都走真实 POSIX supervisor。macOS 没有子进程收养，但不拒绝启动。
 describe('daemon main real assembly', () => {
+  it('fails before transport or READY when the startup handoff result is failed', async () => {
+    const fixture = await createControlServer()
+    cleans.push(() => fixture.dispose())
+    await writeConfig(fixture)
+
+    const operationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+    const updatesDir = await native.ensurePrivateDirectory(join(fixture.dataDir, 'updates'))
+    const operationDir = await native.ensurePrivateDirectory(join(updatesDir, operationId))
+    const handoff = {
+      state: 'ACCEPTED',
+      operationId,
+      targetVersion: '9.9.9',
+      artifactUrl: 'https://example.invalid/kk-studio.tar.gz',
+      artifactSha256: 'a'.repeat(64),
+      extractDir: join(operationDir, 'extract'),
+      installedDir: fixture.dataDir,
+      configFile: fixture.configPath,
+      updateScript: join(operationDir, 'update.sh'),
+      permitFile: join(operationDir, 'permit'),
+      startupToken: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    }
+    await native.writePrivateFile(join(operationDir, 'handoff.json'), `${JSON.stringify(handoff)}\n`)
+    await native.writePrivateFile(
+      join(operationDir, 'update-result.json'),
+      `${JSON.stringify({
+        operationId,
+        phase: 'FAILED',
+        message: 'startup handoff test failure',
+      })}\n`,
+    )
+
+    const beforeInt = new Set<Listener>(process.listeners('SIGINT') as Listener[])
+    const beforeTerm = new Set<Listener>(process.listeners('SIGTERM') as Listener[])
+    const transportSpy = vi.spyOn(control, 'createWebSocketTransport')
+    const captured = capture()
+    let code: number
+    let transportCalls = -1
+    try {
+      code = await main(['--config', fixture.configPath])
+      transportCalls = transportSpy.mock.calls.length
+    } finally {
+      captured.restore()
+      transportSpy.mockRestore()
+    }
+
+    expect(code).toBe(1)
+    expect(transportCalls).toBe(0)
+    expect(fixture.received).toEqual([])
+    expect(captured.out.join('')).toBe('')
+    expect(captured.err.join('')).toContain('daemon failed: update handoff failed: startup handoff test failure')
+    expect(new Set(process.listeners('SIGINT'))).toEqual(beforeInt)
+    expect(new Set(process.listeners('SIGTERM'))).toEqual(beforeTerm)
+    // main 已退出且释放目录锁；能够重新取得锁证明失败路径没有把进程锁遗留在原实例。
+    const lock = await native.acquireDirectoryLock(fixture.dataDir)
+    await lock.close()
+  })
 
   it('rejects invalid proxies before connecting and closes the resolver and data lock', async () => {
     const fixture = await createControlServer()
