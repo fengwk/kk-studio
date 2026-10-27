@@ -6,7 +6,7 @@ import java.util.Objects;
  * 一个已接收的 DATA 片段。
  *
  * <p>对象本身不计费；连接在接收时已经占用流与连接 credit。下游必须真实消费后调用 {@link #consumed()}，且同一对象重复调用只生效一次。流被
- * RESET/关闭后，未消费片段由连接统一丢弃并归还连接级 credit，此时再调用 {@link #consumed()} 不会重复归还。
+ * RESET/关闭后，已投递但未消费的片段继续占用连接 credit；此时调用 {@link #consumed()} 只归还连接级额度，不再发送流级 WINDOW。
  */
 public final class MuxReceivedData {
 
