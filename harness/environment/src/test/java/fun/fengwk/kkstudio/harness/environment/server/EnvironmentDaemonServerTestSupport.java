@@ -13,15 +13,20 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityE
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilitiesCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilityResultCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelope;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelopeCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonHeartbeat;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonHeartbeatCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonPresignedPut;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonReady;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonReadyCodec;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonRuntimeSnapshot;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonRuntimeStatus;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateResult;
 
 import java.time.Duration;
@@ -61,7 +66,8 @@ final class EnvironmentDaemonServerTestSupport {
   /** 测试 Daemon 上报的构建版本。 */
   static final String DAEMON_VERSION = "1.0.9";
 
-  private static final DaemonCapabilitiesCodec CAPABILITIES_CODEC = new DaemonCapabilitiesCodec();
+  private static final DaemonReadyCodec READY_CODEC = new DaemonReadyCodec();
+  private static final DaemonHeartbeatCodec HEARTBEAT_CODEC = new DaemonHeartbeatCodec();
   private static final DaemonEnvelopeCodec ENVELOPE_CODEC = new DaemonEnvelopeCodec();
   private static final DaemonCapabilityResultCodec RESULT_CODEC = new DaemonCapabilityResultCodec();
 
@@ -95,7 +101,21 @@ final class EnvironmentDaemonServerTestSupport {
   }
 
   static String readyPayload() {
-    return CAPABILITIES_CODEC.encode(CAPABILITIES);
+    return readyPayload(1L, DaemonRuntimeStatus.running(DAEMON_VERSION));
+  }
+
+  static String readyPayload(long revision, DaemonRuntimeStatus status) {
+    return READY_CODEC.encode(
+        new DaemonReady(CAPABILITIES, new DaemonRuntimeSnapshot(revision, status)));
+  }
+
+  static String heartbeatPayload() {
+    return heartbeatPayload(1L, DaemonRuntimeStatus.running(DAEMON_VERSION));
+  }
+
+  static String heartbeatPayload(long revision, DaemonRuntimeStatus status) {
+    return HEARTBEAT_CODEC.encode(
+        new DaemonHeartbeat(new DaemonRuntimeSnapshot(revision, status), null));
   }
 
   static String completedPayload(UUID invocationId, String text) {

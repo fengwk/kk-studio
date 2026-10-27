@@ -112,7 +112,7 @@ class EnvironmentRegistryChangeNotificationIntegrationTest
     }
   }
 
-  /** 测试意图：markReady/heartbeat/recordSkillEvent/replaceSkillState/disconnect 各自成功时通知，0 行围栏静默。 */
+  /** 测试意图：markReady/heartbeat/recordEvent/replaceSkillState/disconnect 各自成功时通知，0 行围栏静默。 */
   @Test
   void fencedConnectionWritesNotifyOnlyWhenTheyWrite() throws Exception {
     try (EnvironmentChannelListener listener = listen()) {
@@ -140,9 +140,9 @@ class EnvironmentRegistryChangeNotificationIntegrationTest
       assertTrue(environmentRegistry.heartbeat(DEV, token, LEASE_DURATION));
       listener.assertNotification(DEV.toString());
 
-      assertFalse(environmentRegistry.recordSkillEvent(DEV, UUID.randomUUID(), skillEvent));
+      assertFalse(environmentRegistry.recordEvent(DEV, UUID.randomUUID(), skillEvent));
       listener.assertSilent();
-      assertTrue(environmentRegistry.recordSkillEvent(DEV, token, skillEvent));
+      assertTrue(environmentRegistry.recordEvent(DEV, token, skillEvent));
       listener.assertNotification(DEV.toString());
 
       assertFalse(
@@ -162,7 +162,7 @@ class EnvironmentRegistryChangeNotificationIntegrationTest
       assertFalse(environmentRegistry.markReady(DEV, token, CAPABILITIES, LEASE_DURATION));
       assertFalse(environmentRegistry.heartbeat(DEV, token, LEASE_DURATION));
       assertFalse(environmentRegistry.disconnect(DEV, token, LEASE_DURATION));
-      assertFalse(environmentRegistry.recordSkillEvent(DEV, token, skillEvent));
+      assertFalse(environmentRegistry.recordEvent(DEV, token, skillEvent));
       assertFalse(environmentRegistry.replaceSkillState(DEV, token, List.of(), skillEvent));
       listener.assertSilent();
     }

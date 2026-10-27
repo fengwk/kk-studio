@@ -2,9 +2,11 @@ package fun.fengwk.kkstudio.web.controller;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
+import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -25,6 +27,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
+import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentService;
 import fun.fengwk.kkstudio.platform.environment.update.EnvironmentUpdateService;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
@@ -33,11 +37,18 @@ import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCardDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCreateDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentEventDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallCodeDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRuntimeDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRuntimeStatusDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentUpdateProgressDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentUpdateStartDTO;
 import fun.fengwk.kkstudio.web.advice.StudioDomainErrorAdvice;
+import fun.fengwk.kkstudio.web.environment.cluster.EnvironmentRuntimeOwnerClient;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 
+import java.net.URI;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 class StudioEnvironmentControllerTest {
@@ -45,15 +56,22 @@ class StudioEnvironmentControllerTest {
   private static final UUID ENV_ID = UUID.fromString("11111111-1111-1111-1111-111111111111");
   private EnvironmentService environmentService;
   private EnvironmentUpdateService environmentUpdateService;
+  private ClusterNodeRegistry clusterNodeRegistry;
+  private EnvironmentRuntimeOwnerClient runtimeOwnerClient;
   private MockMvc mockMvc;
 
   @BeforeEach
   void setUp() {
     environmentService = mock(EnvironmentService.class);
     environmentUpdateService = mock(EnvironmentUpdateService.class);
+    clusterNodeRegistry = mock(ClusterNodeRegistry.class);
+    runtimeOwnerClient = mock(EnvironmentRuntimeOwnerClient.class);
+    when(clusterNodeRegistry.route(any()))
+        .thenReturn(Optional.of(ClusterOwnerRoute.local(UUID.randomUUID())));
 
     StudioEnvironmentController controller =
-        new StudioEnvironmentController(environmentService, environmentUpdateService);
+        new StudioEnvironmentController(
+            environmentService, environmentUpdateService, clusterNodeRegistry, runtimeOwnerClient);
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(
@@ -357,12 +375,89 @@ class StudioEnvironmentControllerTest {
         .andExpect(jsonPath("$.errors.resource").value("operatingSystem"));
   }
 
-  /** 意图：runtime 端点已随持久 runtime 报告一起移除，访问必须 404。 */
+  /** 意图：local owner 直接返回内存 runtime 快照，revision/status 与显式 null update 都按 wire 输出。 */
   @Test
-  void runtimeEndpointIsGone() throws Exception {
+  void runtimeEndpointReturnsCurrentSnapshotFromLocalOwner() throws Exception {
+    when(environmentUpdateService.runtimeStatus(EnvironmentId.of(ENV_ID)))
+        .thenReturn(runtimeStatus("7", "1.0.9", null));
+
     mockMvc
         .perform(get("/api/environments/" + ENV_ID + "/runtime"))
-        .andExpect(status().isNotFound());
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.revision").value("7"))
+        .andExpect(jsonPath("$.data.status.daemonVersion").value("1.0.9"))
+        .andExpect(jsonPath("$.data.status.update").value(nullValue()));
+  }
+
+  /** 意图：没有 READY owner 路由时明确返回 environment_unavailable，不能伪造空 update 快照。 */
+  @Test
+  void runtimeEndpointReturnsUnavailableWithoutOwnerRoute() throws Exception {
+    when(clusterNodeRegistry.route(any())).thenReturn(Optional.empty());
+
+    mockMvc
+        .perform(get("/api/environments/" + ENV_ID + "/runtime"))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("environment_unavailable"));
+  }
+
+  /** 意图：非 owner 的 runtime 读取同样只做一次内部 HMAC 调用，不回退本地更新服务。 */
+  @Test
+  void runtimeEndpointUsesOwnerSingleHop() throws Exception {
+    ClusterOwnerRoute remote =
+        ClusterOwnerRoute.remote(UUID.randomUUID(), URI.create("https://owner.internal"));
+    when(clusterNodeRegistry.route(any())).thenReturn(Optional.of(remote));
+    when(runtimeOwnerClient.runtimeStatus(remote, EnvironmentId.of(ENV_ID)))
+        .thenReturn(runtimeStatus("9", "1.0.9", null));
+
+    mockMvc
+        .perform(get("/api/environments/" + ENV_ID + "/runtime"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.revision").value("9"));
+    verify(environmentUpdateService, never()).runtimeStatus(any());
+  }
+
+  /** 意图：start update 必须显式表达命令仅进入发送队列，不得让 UI 把发送前快照误报为已启动。 */
+  @Test
+  void startUpdateReturnsUnconfirmedCommandStatus() throws Exception {
+    EnvironmentUpdateStartDTO started = new EnvironmentUpdateStartDTO();
+    started.setCommandStatus(EnvironmentUpdateStartDTO.SENT_UNCONFIRMED);
+    started.setRuntimeStatus(runtimeStatus("7", "1.0.9", null));
+    when(environmentUpdateService.startUpdate(EnvironmentId.of(ENV_ID))).thenReturn(started);
+
+    mockMvc
+        .perform(post("/api/environments/" + ENV_ID + "/update"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.commandStatus").value("SENT_UNCONFIRMED"))
+        .andExpect(jsonPath("$.data.runtimeStatus.status.daemonVersion").value("1.0.9"));
+  }
+
+  /** 意图：非 owner 节点只做一次 HMAC 内部调用，不在本地执行更新。 */
+  @Test
+  void updateUsesOwnerSingleHop() throws Exception {
+    ClusterOwnerRoute remote =
+        ClusterOwnerRoute.remote(UUID.randomUUID(), URI.create("https://owner.internal"));
+    when(clusterNodeRegistry.route(any())).thenReturn(Optional.of(remote));
+    EnvironmentUpdateStartDTO started = new EnvironmentUpdateStartDTO();
+    started.setCommandStatus(EnvironmentUpdateStartDTO.SENT_UNCONFIRMED);
+    started.setRuntimeStatus(runtimeStatus("8", "1.0.9", null));
+    when(runtimeOwnerClient.startUpdate(remote, EnvironmentId.of(ENV_ID))).thenReturn(started);
+
+    mockMvc
+        .perform(post("/api/environments/" + ENV_ID + "/update"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.commandStatus").value("SENT_UNCONFIRMED"));
+    verify(environmentUpdateService, never()).startUpdate(any());
+  }
+
+  private static EnvironmentRuntimeStatusDTO runtimeStatus(
+      String revision, String daemonVersion, EnvironmentUpdateProgressDTO update) {
+    EnvironmentRuntimeDTO status = new EnvironmentRuntimeDTO();
+    status.setDaemonVersion(daemonVersion);
+    status.setUpdate(update);
+    EnvironmentRuntimeStatusDTO snapshot = new EnvironmentRuntimeStatusDTO();
+    snapshot.setRevision(revision);
+    snapshot.setStatus(status);
+    return snapshot;
   }
 
   /** 意图：Environment 异步管理操作端点已随 environment_operation 表一起移除，访问必须 404。 */

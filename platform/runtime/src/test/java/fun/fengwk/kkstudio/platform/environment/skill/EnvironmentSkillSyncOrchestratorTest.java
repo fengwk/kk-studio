@@ -121,7 +121,7 @@ class EnvironmentSkillSyncOrchestratorTest {
 
     when(registry.find(any()))
         .thenAnswer(invocation -> Optional.of(row(invocation.getArgument(0))));
-    when(registry.recordSkillEvent(any(), any(), any())).thenReturn(true);
+    when(registry.recordEvent(any(), any(), any())).thenReturn(true);
     when(registry.replaceSkillState(any(), any(), any(), any()))
         .thenAnswer(
             invocation -> {
@@ -341,7 +341,7 @@ class EnvironmentSkillSyncOrchestratorTest {
   @Test
   void fenceLostBeforeSendSkipsInvocationEntirely() {
     catalog.put("aaa", skillPackage("aaa", COMMIT_A));
-    when(registry.recordSkillEvent(any(), any(), any())).thenReturn(false);
+    when(registry.recordEvent(any(), any(), any())).thenReturn(false);
 
     orchestrator.onEnvironmentReady(ENV);
 
@@ -763,7 +763,7 @@ class EnvironmentSkillSyncOrchestratorTest {
   private List<EnvironmentEvent> recordedEvents() {
     @SuppressWarnings("unchecked")
     ArgumentCaptor<EnvironmentEvent> captor = ArgumentCaptor.forClass(EnvironmentEvent.class);
-    verify(registry, atLeast(0)).recordSkillEvent(any(), any(), captor.capture());
+    verify(registry, atLeast(0)).recordEvent(any(), any(), captor.capture());
     List<EnvironmentEvent> events = new ArrayList<>(captor.getAllValues());
     @SuppressWarnings("unchecked")
     ArgumentCaptor<EnvironmentEvent> terminalCaptor =

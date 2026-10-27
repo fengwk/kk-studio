@@ -438,7 +438,7 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
     assertFalse(registry1.replaceSkillState(DEV, UUID.randomUUID(), state, event));
     assertFalse(registry2.replaceSkillState(DEV, token1, state, event));
     assertFalse(
-        registry2.recordSkillEvent(
+        registry2.recordEvent(
             DEV,
             token1,
             new EnvironmentEvent(
@@ -467,7 +467,7 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
     // 重新 CONNECTING（断线）后同一 leaseToken 也不得再写入。
     assertTrue(registry1.disconnect(DEV, token2, LEASE_DURATION));
     assertFalse(registry1.replaceSkillState(DEV, token2, state, event));
-    assertFalse(registry1.recordSkillEvent(DEV, token2, event));
+    assertFalse(registry1.recordEvent(DEV, token2, event));
     assertEquals(state, registry1.find(DEV).orElseThrow().skillState());
   }
 
@@ -477,7 +477,7 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
     UUID token = acquireReady(registry1, DEV, DEV_TOKEN);
     for (int index = 0; index < 250; index++) {
       assertTrue(
-          registry1.recordSkillEvent(
+          registry1.recordEvent(
               DEV,
               token,
               new EnvironmentEvent(

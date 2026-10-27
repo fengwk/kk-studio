@@ -17,13 +17,18 @@ import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilitiesCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelope;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelopeCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonHeartbeat;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonHeartbeatCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonReady;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonReadyCodec;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonRuntimeSnapshot;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonRuntimeStatus;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonChannel;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonOfferResult;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonResourceTicketService;
@@ -76,6 +81,8 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
               "amd64"));
 
   private static final DaemonEnvelopeCodec ENVELOPE_CODEC = new DaemonEnvelopeCodec();
+  private static final DaemonReadyCodec READY_CODEC = new DaemonReadyCodec();
+  private static final DaemonHeartbeatCodec HEARTBEAT_CODEC = new DaemonHeartbeatCodec();
 
   /** 本测试只验证路由租约，不涉及资源上传；任何票据请求都是测试自身的错误。 */
   private static final DaemonResourceTicketService UNUSED_TICKET_SERVICE =
@@ -457,13 +464,25 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
             DaemonMessageType.READY,
             environmentId,
             null,
-            CAPABILITIES_CODEC.encode(CAPABILITIES)));
+            READY_CODEC.encode(
+                new DaemonReady(
+                    CAPABILITIES,
+                    new DaemonRuntimeSnapshot(
+                        1L, DaemonRuntimeStatus.running(CAPABILITIES.daemonVersion()))))));
   }
 
   private static String heartbeat(EnvironmentId environmentId) {
     return ENVELOPE_CODEC.encode(
         new DaemonEnvelope(
-            DaemonProtocol.VERSION, DaemonMessageType.HEARTBEAT, environmentId, null, "{}"));
+            DaemonProtocol.VERSION,
+            DaemonMessageType.HEARTBEAT,
+            environmentId,
+            null,
+            HEARTBEAT_CODEC.encode(
+                new DaemonHeartbeat(
+                    new DaemonRuntimeSnapshot(
+                        1L, DaemonRuntimeStatus.running(CAPABILITIES.daemonVersion())),
+                    null))));
   }
 
   private static final class FakeConnection implements DaemonChannel {
@@ -510,8 +529,6 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
       return List.copyOf(envelopes);
     }
   }
-
-  private static final DaemonCapabilitiesCodec CAPABILITIES_CODEC = new DaemonCapabilitiesCodec();
 
   /** 固定取值的 {@link ObjectProvider}：测试用它表达「没有装配受管更新监听器」。 */
   private static final class StaticObjectProvider<T> implements ObjectProvider<T> {
