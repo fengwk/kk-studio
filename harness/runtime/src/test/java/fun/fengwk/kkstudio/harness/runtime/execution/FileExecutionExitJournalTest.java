@@ -30,6 +30,41 @@ class FileExecutionExitJournalTest {
   private static final Instant T0 = Instant.parse("2026-07-01T00:00:00Z");
 
   @Test
+  void invalidTimestampIsIsolatedAndCannotBeOverwritten(@TempDir Path directory)
+      throws IOException {
+    // 时间解析异常也是单文件损坏，不能逃出 snapshot 阻断健康记录或允许覆盖坏证明。
+    ExecutionExitJournalRecord bad =
+        record(
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            ExecutionExitState.STUDIO_EXITED,
+            T0);
+    ExecutionExitJournalRecord healthy =
+        record(
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            ExecutionExitState.STUDIO_EXITED,
+            T0);
+    try (FileExecutionExitJournal journal = new FileExecutionExitJournal(directory)) {
+      journal.write(bad);
+      journal.write(healthy);
+      Path entry = directory.resolve(bad.executionId() + ".json");
+      String corrupted =
+          Files.readString(entry)
+              .replace("\"confirmedAt\":\"" + T0 + "\"", "\"confirmedAt\":\"not-an-instant\"");
+      Files.writeString(entry, corrupted);
+
+      ExecutionExitJournalSnapshot snapshot = journal.loadAll();
+      assertEquals(List.of(healthy), snapshot.records());
+      assertSingleFailure(snapshot, ExecutionExitJournalFailure.Reason.CORRUPT);
+      assertThrows(ExecutionExitJournalException.class, () -> journal.write(bad));
+      assertEquals(corrupted, Files.readString(entry));
+    }
+  }
+
+  @Test
   void writesCanonicalRecordReusesSameProofAndRejectsConflicts(@TempDir Path directory) {
     UUID executionId = UUID.randomUUID();
     UUID threadId = UUID.randomUUID();

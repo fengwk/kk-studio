@@ -27,8 +27,8 @@ import java.util.function.Supplier;
  * 删除记录。快路径只锁本 Thread，Thread 为 RUNNABLE 且没有未完成 Join 时只推进 version；需要祖先结算时先结束只读探测事务，再以 {@link
  * ExecutionExitLedger#lockAncestorChain} 作为新事务第一把锁重新确认。
  *
- * <p>同一 execution 的确认在进程内按稳定 stripe 串行化，保证并发回调只产生一次 version 推进与一次 journal 删除，并始终复用第一次 canonical
- * proof 的身份、目标和确认时刻。首次 journal 写入失败时 proof 只保留在本进程内等待重试，不能宣称跨进程 durable。事实缺失或 canonical proof 与
+ * <p>同一 execution 的确认在进程内按稳定 stripe 串行化，事实与 version 推进幂等，并始终复用待确认记录的第一次 canonical proof
+ * 的身份、目标和确认时刻。首次 journal 写入失败时 proof 只保留在本进程内等待重试，不能宣称跨进程 durable。事实缺失或 canonical proof 与
  * journal/数据库的真实 identity/target 冲突只暂停该 execution 的自动重放；被拒绝的新输入不改变原 proof。其它数据库或文件失败按 {@link
  * #BACKOFF_SECONDS} 退避，成功后重置。
  */
@@ -176,20 +176,18 @@ public final class ExecutionExitConfirmer {
     ExecutionExitFact confirmedFact = canonicalProof.expected(canonicalProof.confirmedAt());
     ExecutionExitState targetState = canonicalProof.targetState();
     Instant confirmedAt = canonicalProof.confirmedAt();
+    Attempt attempt;
     try {
-      Attempt fast =
-          store.transaction(tx -> attemptFast(tx, confirmedFact, targetState, confirmedAt));
-      if (fast == Attempt.RETRY_SLOW) {
-        fast = store.transaction(tx -> attemptSlow(tx, confirmedFact, targetState, confirmedAt));
+      attempt = store.transaction(tx -> attemptFast(tx, confirmedFact, targetState, confirmedAt));
+      if (attempt == Attempt.RETRY_SLOW) {
+        attempt = store.transaction(tx -> attemptSlow(tx, confirmedFact, targetState, confirmedAt));
       }
-      return complete(executionId, fast, phase, now);
     } catch (RuntimeException failure) {
-      Failure current = failures.get(executionId);
-      if (current == null || !current.permanent() || PHASE_CONFIRM.equals(phase)) {
-        recordFailure(executionId, FailureReason.DATABASE, phase, now, failure);
-      }
+      recordFailure(executionId, FailureReason.DATABASE, phase, now, failure);
       throw failure;
     }
+    // 事务结果中的不变量冲突不是数据库瞬态故障，必须在事务异常分类之外处理。
+    return complete(executionId, attempt, phase, now);
   }
 
   private void replayOne(ExecutionExitJournalRecord record, Instant now) {

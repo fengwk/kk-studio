@@ -24,6 +24,7 @@ import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.time.DateTimeException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -314,7 +315,7 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
         throw new IllegalArgumentException("journal entry must be a JSON object");
       }
       return decode(node);
-    } catch (JacksonException | IllegalArgumentException error) {
+    } catch (JacksonException | IllegalArgumentException | DateTimeException error) {
       throw new EntryReadFailure(ExecutionExitJournalFailure.Reason.CORRUPT, error);
     }
   }

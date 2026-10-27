@@ -138,6 +138,45 @@ class ExecutionExitConfirmerGovernanceTest {
   }
 
   @Test
+  void directPermanentFailureStaysPausedAfterExplicitRecheck() {
+    // 直接确认产生的永久失败不能被外层 catch 改成瞬态；显式重核对失败后也不能自动重试。
+    Fixture fixture = Fixture.create();
+    ExecutionExitFact missing = expected(fixture.baseline.threadId(), TestIds.id(25), T0);
+    FaultJournal journal = new FaultJournal(TestExecutionExitConfirmer.memoryJournal());
+    AtomicInteger transactions = new AtomicInteger();
+    ExecutionExitConfirmer confirmer =
+        new ExecutionExitConfirmer(
+            countingStore(fixture.store, transactions, new AtomicInteger()),
+            journal,
+            fixture.clock);
+
+    try (LogCapture logs = LogCapture.attach()) {
+      assertThrows(
+          IllegalStateException.class,
+          () -> confirmer.confirm(missing, ExecutionExitState.STUDIO_EXITED));
+      assertEquals(1, transactions.get());
+      assertTrue(logs.matching("reason=DATABASE").isEmpty());
+      assertEquals(1, logs.matching("reason=FACT_MISSING").size());
+
+      fixture.clock.advance(Duration.ofSeconds(30));
+      confirmer.replayPending();
+      assertEquals(1, transactions.get(), "direct permanent failure must remain suspended");
+      assertEquals(1, journal.writes());
+
+      assertThrows(
+          IllegalStateException.class,
+          () -> confirmer.confirm(missing, ExecutionExitState.STUDIO_EXITED));
+      assertEquals(2, transactions.get(), "explicit confirmation may recheck the invariant");
+      fixture.clock.advance(Duration.ofSeconds(30));
+      confirmer.replayPending();
+      assertEquals(2, transactions.get(), "failed explicit recheck must remain permanent");
+      assertEquals(2, journal.writes());
+      assertTrue(logs.matching("reason=DATABASE").isEmpty());
+      assertEquals(1, journal.delegate.loadAll().records().size());
+    }
+  }
+
+  @Test
   void permanentFailureAlertsOnceAndDoesNotBlockOtherExecutions() {
     Fixture fixture = Fixture.create();
     ExecutionExitFact missing = expected(fixture.baseline.threadId(), TestIds.id(20), T0);
