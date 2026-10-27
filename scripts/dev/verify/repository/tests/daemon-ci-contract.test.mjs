@@ -463,13 +463,14 @@ test('full repository validation reuses the daemon matrix and installs archive p
 test('the release version gate reads real project files and fails on any drift', () => {
     const step = stepNamed(RELEASE, 'stage', 'Verify the repository version alignment')
     assert.doesNotMatch(stepField(step, 'name'), /\d+\.\d+\.\d+/u, 'the gate must not pin a version in its name')
-    // 版本来自真实文件，由仓库脚本读取 pom.xml 的元素与属性、daemon/package.json 与 tag；工作流不写死任何版本。
+    // 版本来自真实文件，由仓库脚本读取 pom.xml 的元素与属性、daemon/package.json、运行时常量与 tag；工作流不写死任何版本。
     assert.equal(
         dedent(stepRun(step), 10).trim(),
         'set -euo pipefail\nnode scripts/dev/verify/repository/check-version-alignment.mjs',
     )
     const gate = readFileSync(path.join(ROOT, 'scripts/dev/verify/repository/check-version-alignment.mjs'), 'utf8')
     assert.match(gate, /daemon\/package\.json/u)
+    assert.match(gate, /daemon\/src\/config\.ts/u)
     assert.match(gate, /RELEASE_TAG/u)
     assert.doesNotMatch(gate, /["']\d+\.\d+\.\d+["']/u, 'the gate must not hardcode a version')
 
@@ -479,9 +480,9 @@ test('the release version gate reads real project files and fails on any drift',
         encoding: 'utf8',
     })
 
-    const fixture = (version, propertyVersion = version, packageVersion = version) => {
+    const fixture = (version, propertyVersion = version, packageVersion = version, runtimeVersion = version) => {
         const directory = mkdtempSync(path.join(os.tmpdir(), 'kk-studio-version-gate-'))
-        mkdirSync(path.join(directory, 'daemon'), { recursive: true })
+        mkdirSync(path.join(directory, 'daemon/src'), { recursive: true })
         writeFileSync(path.join(directory, 'pom.xml'), `<?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0">
     <modelVersion>4.0.0</modelVersion>
@@ -496,6 +497,10 @@ test('the release version gate reads real project files and fails on any drift',
         writeFileSync(
             path.join(directory, 'daemon/package.json'),
             `${JSON.stringify({ name: '@kk-studio/daemon', version: packageVersion }, null, 2)}\n`,
+        )
+        writeFileSync(
+            path.join(directory, 'daemon/src/config.ts'),
+            `export const DAEMON_VERSION = '${runtimeVersion}'\n`,
         )
         return directory
     }
@@ -513,11 +518,12 @@ test('the release version gate reads real project files and fails on any drift',
         assert.match(driftedTag.stderr, /alignment failed/u)
         assert.match(driftedTag.stderr, /2\.3\.5/u)
 
-        for (const [label, propertyVersion, packageVersion] of [
-            ['kk-studio.version drift', '2.3.5', '2.3.4'],
-            ['daemon package drift', '2.3.4', '2.3.5'],
+        for (const [label, propertyVersion, packageVersion, runtimeVersion] of [
+            ['kk-studio.version drift', '2.3.5', '2.3.4', '2.3.4'],
+            ['daemon package drift', '2.3.4', '2.3.5', '2.3.4'],
+            ['daemon runtime constant drift', '2.3.4', '2.3.4', '2.3.3'],
         ]) {
-            const directory = fixture('2.3.4', propertyVersion, packageVersion)
+            const directory = fixture('2.3.4', propertyVersion, packageVersion, runtimeVersion)
             try {
                 const result = runGate(directory, 'v2.3.4')
                 assert.equal(result.status, 1, `${label} must fail`)
@@ -529,13 +535,14 @@ test('the release version gate reads real project files and fails on any drift',
 
         // 属性缺失必须显式失败，不能被当成「没有可比较的版本」而静默通过。
         const missing = mkdtempSync(path.join(os.tmpdir(), 'kk-studio-version-gate-'))
-        mkdirSync(path.join(missing, 'daemon'), { recursive: true })
+        mkdirSync(path.join(missing, 'daemon/src'), { recursive: true })
         writeFileSync(
             path.join(missing, 'pom.xml'),
             '<?xml version="1.0" encoding="UTF-8"?>\n'
             + '<project xmlns="http://maven.apache.org/POM/4.0.0"><version>2.3.4</version></project>\n',
         )
         writeFileSync(path.join(missing, 'daemon/package.json'), '{"name":"@kk-studio/daemon","version":"2.3.4"}\n')
+        writeFileSync(path.join(missing, 'daemon/src/config.ts'), "export const DAEMON_VERSION = '2.3.4'\n")
         try {
             const result = runGate(missing, 'v2.3.4')
             assert.equal(result.status, 1, 'a missing kk-studio.version property must fail')
@@ -544,7 +551,7 @@ test('the release version gate reads real project files and fails on any drift',
             rmSync(missing, { recursive: true, force: true })
         }
 
-        // 真实仓库必须自洽：用 daemon 包版本推导 tag，证明 POM 与包版本没有漂移。
+        // 真实仓库必须自洽：用 daemon 包版本推导 tag，证明 POM、包与运行时常量没有漂移。
         const real = runGate(ROOT, `v${PACKAGE.version}`)
         assert.equal(real.status, 0, `${real.stdout}\n${real.stderr}`)
     } finally {
