@@ -8,23 +8,14 @@
 # 平台特有用例由用例自己决定是否执行，不做整体跳过。安装器 Python fixture 与 shell 替换
 # 只证明脚本契约，不是真实 code-server 归档或真实 launchd/systemd 验收。
 #
-# 本工作流既是 `push`/`pull_request` 上的独立门禁（替代原 Java process-scope 矩阵），也以
-# `workflow_call` 被 daemon-release 与 docker-publish 复用，保证 tag 发布、分支推送与主分支
-# 镜像发布跑的是同一套门禁。
+# 本工作流既是 `pull_request` 上的独立门禁（替代原 Java process-scope 矩阵），也以
+# `workflow_call` 被 daemon-release 与 docker-publish 复用：tag 发布、PR 验收与主分支镜像
+# 发布跑的是同一套门禁。main 镜像与 tag 发布分别由 docker-publish / daemon-release 调用，
+# 不再额外监听 push，避免同一提交重复执行整个矩阵。
 name: daemon-ci
 
 on:
   workflow_call:
-  push:
-    branches:
-      - main
-      - dev
-    paths:
-      - 'daemon/**'
-      - 'scripts/daemon/**'
-      - '.github/workflows/daemon-ci.yml'
-      - '.github/workflows/daemon-release.yml'
-      - '.github/workflows/docker-publish.yml'
   pull_request:
     paths:
       - 'daemon/**'

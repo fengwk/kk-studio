@@ -2,9 +2,9 @@
  * Keep the Unix/Windows daemon script suites wired into the real CI gates.
  *
  * The install/update fixtures no longer import the removed Java harness. These tests pin the
- * remaining platform-level facts: every publication path runs the Node script suite with the
- * host's system Bash, both Windows PowerShell hosts run the native installer/update suites, and a
- * failed platform job blocks publication.
+ * remaining platform-level facts: every publication path runs the repository script suite (including
+ * Unix fixtures), the daemon matrix runs the macOS system-Bash contract, both Windows PowerShell
+ * hosts run the native installer/update suites, and a failed gate blocks publication.
  */
 
 import assert from 'node:assert/strict'
@@ -27,24 +27,18 @@ function jobBlock(text, name) {
   return match[1]
 }
 
-test('test intent: every publication path runs the script suite with system Bash', () => {
-  // Ubuntu/macOS system Bash must run the complete install/update script suite.
-  const docker = jobBlock(workflow('docker-publish.yml'), 'validate_unix_daemon')
-  for (const expected of [
-    'os: [ubuntu-latest, macos-latest]',
-    'runs-on: ${{ matrix.os }}',
-    'fail-fast: false',
-    'shell: /bin/bash --noprofile --norc -eo pipefail {0}',
-    '/bin/bash --version',
-    SUITE_COMMAND,
+test('test intent: every publication path runs the repository script suite', () => {
+  // Docker validate and release stage run the complete repository discovery, which includes the
+  // daemon install/update fixtures; the daemon matrix additionally runs the macOS system Bash path.
+  for (const [name, jobName] of [
+    ['docker-publish.yml', 'validate'],
+    ['daemon-release.yml', 'stage'],
   ]) {
-    assert.ok(docker.includes(expected), expected)
+    const job = jobBlock(workflow(name), jobName)
+    assert.ok(job.includes('Run repository script tests'), `${name}: missing repository script tests`)
+    assert.ok(job.includes('scripts/*/tests/*.test.mjs'), `${name}: missing daemon fixture discovery`)
+    assert.ok(job.indexOf('npm --prefix daemon ci') < job.indexOf('Run repository script tests'))
   }
-
-  const release = jobBlock(workflow('daemon-release.yml'), 'validate_daemon')
-  assert.ok(release.includes('Test Unix installer and packaging with system Bash'))
-  assert.ok(release.includes(SUITE_COMMAND))
-  assert.ok(release.indexOf('npm --prefix daemon ci') < release.indexOf(SUITE_COMMAND))
 
   const ci = jobBlock(workflow('daemon-ci.yml'), 'node_daemon')
   for (const expected of [
@@ -58,16 +52,17 @@ test('test intent: every publication path runs the script suite with system Bash
 })
 
 test('test intent: the Windows gate runs both PowerShell hosts', () => {
-  // PS 5.1 is the floor; the PS7 result is collected even when PS 5.1 fails.
+  // PS 5.1 is the floor; the PS7 result is collected even when PS 5.1 fails. The reusable daemon
+  // matrix is the single native Windows gate for both image publishing and tag releases.
+  const job = jobBlock(workflow('daemon-ci.yml'), 'windows_daemon_installer')
+  for (const expected of ['shell: powershell', 'shell: pwsh', 'test_daemon_install_windows.ps1', 'if: ${{ !cancelled() }}']) {
+    assert.ok(job.includes(expected), expected)
+  }
   for (const [name, jobName] of [
     ['docker-publish.yml', 'validate_windows_daemon'],
     ['daemon-release.yml', 'validate_windows_daemon'],
-    ['daemon-ci.yml', 'windows_daemon_installer'],
   ]) {
-    const job = jobBlock(workflow(name), jobName)
-    for (const expected of ['shell: powershell', 'shell: pwsh', 'test_daemon_install_windows.ps1', 'if: ${{ !cancelled() }}']) {
-      assert.ok(job.includes(expected), `${name}: ${expected}`)
-    }
+    assert.throws(() => jobBlock(workflow(name), jobName), /missing job/u, `${name}: duplicate Windows job must stay removed`)
   }
 })
 
@@ -81,24 +76,26 @@ test('test intent: the Windows gate chains the managed-update native suite', () 
   assert.ok(update.includes('WINDOWS_UPDATE_SCRIPT'))
 })
 
-test('test intent: publish and release require both platform jobs', () => {
+test('test intent: publish and release require the shared gates', () => {
   const docker = workflow('docker-publish.yml')
   const publish = jobBlock(docker, 'publish')
   const dockerNeeds = publish.split('needs:\n')[1].split('    if:')[0]
-  for (const name of ['validate', 'daemon_ci', 'validate_unix_daemon', 'validate_windows_daemon']) {
+  for (const name of ['preflight', 'validate', 'validate_frontend', 'daemon_ci']) {
     assert.ok(dockerNeeds.includes(`      - ${name}\n`), name)
+  }
+  assert.ok(publish.includes("needs.preflight.result == 'success'"))
+  for (const name of ['validate', 'validate_frontend', 'daemon_ci']) {
     assert.ok(publish.includes(`needs.${name}.result == 'success'`), name)
     assert.ok(publish.includes(`needs.${name}.result == 'skipped'`), name)
   }
   assert.ok(publish.includes('&& !cancelled()'))
+  for (const name of ['validate_unix_daemon', 'validate_windows_daemon']) {
+    assert.throws(() => jobBlock(docker, name), /missing job/u)
+  }
 
   const stage = jobBlock(workflow('daemon-release.yml'), 'stage')
   const stageNeeds = stage.split('needs:\n')[1].split('    runs-on:')[0]
-  assert.deepEqual([...stageNeeds.matchAll(/^      - (.+)$/gm)].map((match) => match[1]), [
-    'validate_daemon',
-    'validate_windows_daemon',
-    'daemon_ci',
-  ])
+  assert.deepEqual([...stageNeeds.matchAll(/^      - (.+)$/gm)].map((match) => match[1]), ['daemon_ci'])
   assert.doesNotMatch(stage, /^ {4}if:/m)
 })
 

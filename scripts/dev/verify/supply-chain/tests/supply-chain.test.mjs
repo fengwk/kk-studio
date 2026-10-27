@@ -898,7 +898,10 @@ test('keeps runtime apt upgrade before install in both image Dockerfiles', () =>
         path.join(REPOSITORY_ROOT, 'deploy/reliability/daemon.Dockerfile'),
     ]) {
         const source = readFileSync(dockerfile, 'utf8')
-        const runtime = source.slice(source.lastIndexOf('\nFROM '))
+        // Runtime stages can be followed by artifact-only stages, so locate the stage that upgrades
+        // the runtime base instead of assuming it is the last FROM block.
+        const runtime = source.split(/\n(?=FROM )/).find((stage) => stage.includes('apt-get upgrade --yes'))
+        assert.ok(runtime, dockerfile)
         const updateIndex = runtime.indexOf('apt-get update')
         const upgradeIndex = runtime.indexOf('DEBIAN_FRONTEND=noninteractive apt-get upgrade --yes')
         const installIndex = runtime.indexOf('apt-get install')
