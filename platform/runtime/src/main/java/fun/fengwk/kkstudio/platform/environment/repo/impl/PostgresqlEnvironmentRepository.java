@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.platform.environment.repo.impl;
 
-import static fun.fengwk.kkstudio.platform.persistence.PostgresJdbcTypes.toOffsetDateTime;
-
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -21,32 +19,35 @@ import java.util.stream.Collectors;
 /**
  * 基于 PostgreSQL 的 Environment 仓库实现。
  *
- * <p>三个写方法都要求调用方已开启真实外层事务：SQL 执行前先校验事务，写入成功后再在同一事务连接上发布 {@code
- * environment_changed}，因此通知失败会连同写入一起回滚。
+ * <p>所有写方法都要求调用方已开启真实外层事务。稳定 Card 的 create/update/delete 在写入成功后于同一事务连接发布 {@code
+ * environment_changed}，通知失败会连同写入一起回滚；安装 code 只写入 Environment 行，签发不推进版本，兑换在同一语句中清空 code、轮换 token
+ * 并递增版本。
  */
 @Repository
 public class PostgresqlEnvironmentRepository implements EnvironmentRepository {
 
   private static final String SAVE_INSTALL_CODE_SQL =
       """
-      insert into environment_install_code (
-          environment_id, code_hash, registration_token_hash, expires_at
-      ) values (
-          :environmentId, :codeHash, :registrationTokenHash, :expiresAt
+      update environment
+      set install_code = jsonb_build_object(
+          'codeHash', :codeHash,
+          'expiresAt', :expiresAt
       )
-      on conflict (environment_id) do update set
-          code_hash = excluded.code_hash,
-          registration_token_hash = excluded.registration_token_hash,
-          expires_at = excluded.expires_at
+      where id = :environmentId and version = :expectedVersion
       """;
 
-  private static final String CONSUME_INSTALL_CODE_SQL =
+  private static final String REDEEM_INSTALL_CODE_SQL =
       """
-      delete from environment_install_code
-      where environment_id = :environmentId
-        and code_hash = :codeHash
-        and registration_token_hash = :registrationTokenHash
-        and expires_at > :now
+      update environment
+      set install_code = null,
+          registration_token_hash = :registrationTokenHash,
+          updated_at = greatest(updated_at, current_timestamp),
+          version = version + 1
+      where id = :environmentId
+        and version = :expectedVersion
+        and install_code is not null
+        and install_code ->> 'codeHash' = :codeHash
+        and (install_code ->> 'expiresAt')::timestamptz > statement_timestamp()
       """;
 
   private final EnvironmentJdbcStore environmentJdbcStore;
@@ -138,36 +139,42 @@ public class PostgresqlEnvironmentRepository implements EnvironmentRepository {
   }
 
   @Override
-  public void saveInstallCode(
-      UUID environmentId, String codeHash, String registrationTokenHash, Instant expiresAt) {
+  public boolean saveInstallCode(
+      UUID environmentId, long expectedVersion, String codeHash, Instant expiresAt) {
     Objects.requireNonNull(environmentId, "environmentId");
     Objects.requireNonNull(codeHash, "codeHash");
-    Objects.requireNonNull(registrationTokenHash, "registrationTokenHash");
     Objects.requireNonNull(expiresAt, "expiresAt");
-    jdbcClient
-        .sql(SAVE_INSTALL_CODE_SQL)
-        .param("environmentId", environmentId)
-        .param("codeHash", codeHash)
-        .param("registrationTokenHash", registrationTokenHash)
-        .param("expiresAt", toOffsetDateTime(expiresAt))
-        .update();
+    PostgresqlEnvironmentChangeNotifier.requireTransaction();
+    return jdbcClient
+            .sql(SAVE_INSTALL_CODE_SQL)
+            .param("environmentId", environmentId)
+            .param("expectedVersion", expectedVersion)
+            .param("codeHash", codeHash)
+            .param("expiresAt", expiresAt.toString())
+            .update()
+        == 1;
   }
 
   @Override
-  public boolean consumeInstallCode(
-      UUID environmentId, String codeHash, String registrationTokenHash, Instant now) {
+  public boolean redeemInstallCode(
+      UUID environmentId, long expectedVersion, String codeHash, String registrationTokenHash) {
     Objects.requireNonNull(environmentId, "environmentId");
     Objects.requireNonNull(codeHash, "codeHash");
     Objects.requireNonNull(registrationTokenHash, "registrationTokenHash");
-    Objects.requireNonNull(now, "now");
-    return jdbcClient
-            .sql(CONSUME_INSTALL_CODE_SQL)
-            .param("environmentId", environmentId)
-            .param("codeHash", codeHash)
-            .param("registrationTokenHash", registrationTokenHash)
-            .param("now", toOffsetDateTime(now))
-            .update()
-        == 1;
+    PostgresqlEnvironmentChangeNotifier.requireTransaction();
+    boolean redeemed =
+        jdbcClient
+                .sql(REDEEM_INSTALL_CODE_SQL)
+                .param("environmentId", environmentId)
+                .param("expectedVersion", expectedVersion)
+                .param("codeHash", codeHash)
+                .param("registrationTokenHash", registrationTokenHash)
+                .update()
+            == 1;
+    if (redeemed) {
+      notifier.environmentChanged(environmentId);
+    }
+    return redeemed;
   }
 
   private EnvironmentDO toDO(Environment model) {

@@ -42,10 +42,10 @@ public interface EnvironmentService {
    */
   List<EnvironmentEventDTO> listEvents(EnvironmentId id);
 
-  /** 签发五分钟安装 code。校验当前版本和已保存安装设置，不写库、不轮换凭证。 */
+  /** 签发五分钟安装 code。校验当前版本和已保存安装设置，写入 Environment.install_code 摘要与有效期，不递增版本、不轮换凭证。 */
   EnvironmentInstallCodeDTO issueInstallCode(EnvironmentId id, String expectedVersion);
 
-  /** 校验安装 code 后签发新凭证并渲染安装脚本；兑换即轮换，因此 code 只能使用一次，旧凭证的 Daemon 下次握手被拒绝。 */
+  /** 在数据库时间下校验安装 code 后签发新凭证并渲染安装脚本；兑换即原子清空 code 并轮换凭证，因此 code 只能使用一次。 */
   String installationScript(EnvironmentId id, String code);
 
   /** 按操作系统返回卸载脚本；不需要 token，也不读取或修改 Environment。 */
