@@ -70,6 +70,10 @@ export const environmentCatalog = {
     'en-US': 'Failed to open workspace IDE',
     'zh-CN': '打开工作区 IDE 失败',
   },
+  'ai.ide.sessionRecoveryFailed': {
+    'en-US': 'Could not restore the IDE session. Check browser cookies or network settings, then retry.',
+    'zh-CN': 'IDE 会话未能恢复，请检查浏览器 Cookie 或网络设置后重试。',
+  },
   'ai.ide.offline': {
     'en-US': 'Environment is currently offline',
     'zh-CN': '环境当前处于离线状态',

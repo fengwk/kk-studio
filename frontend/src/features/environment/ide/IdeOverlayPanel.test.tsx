@@ -1393,6 +1393,382 @@ describe('IdeOverlayPanel', () => {
       }
     })
 
+    it('stops after three recovery attempts, keeps the last iframe, and retries manually', async () => {
+      // 测试意图：连续 401 只允许 3 次真实 create；随后保留最近 iframe 与目录并显示手动重试。
+      // 手动重试开启新预算，但 HTTP create 成功本身不隐藏失败提示，仍等待健康 204。
+      const user = userEvent.setup()
+      const setIntervalSpy = vi.spyOn(window, 'setInterval')
+      try {
+        let createCount = 0
+        vi.mocked(environmentService.createIdeView).mockImplementation(async () => {
+          createCount += 1
+          return {
+            viewId,
+            environmentId: readyEnv.id,
+            directory: '/home/user',
+            entryUrl: `/environment-ide/${readyEnv.id}/__ide/bootstrap?token=attempt-${createCount}`,
+          }
+        })
+        vi.mocked(environmentService.probeIdeSession).mockResolvedValue(401)
+
+        renderOpenPanel()
+        const iframe = await screen.findByTestId('ide-iframe')
+        fireEvent.load(iframe)
+        await waitFor(() => {
+          expect(environmentService.probeIdeSession).toHaveBeenCalledTimes(1)
+        })
+        await act(async () => {
+          await Promise.resolve()
+        })
+        expect(environmentService.createIdeView).toHaveBeenCalledOnce()
+
+        const interval = setIntervalSpy.mock.calls.find(([, delay]) => delay === 10_000)
+        expect(interval).toBeDefined()
+        for (let attempt = 1; attempt <= 3; attempt += 1) {
+          await act(async () => {
+            ;(interval?.[0] as () => void)()
+          })
+          await waitFor(() => {
+            expect(environmentService.createIdeView).toHaveBeenCalledTimes(1 + attempt)
+          })
+        }
+
+        await waitFor(() => {
+          expect(screen.getByTestId('ide-recovery-error'))
+            .toHaveTextContent('IDE 会话未能恢复')
+        })
+        const stableIframe = screen.getByTestId('ide-iframe')
+        expect(stableIframe).toHaveAttribute(
+          'src',
+          `/environment-ide/${readyEnv.id}/__ide/bootstrap?token=attempt-4`,
+        )
+        expect(screen.getByTestId('ide-directory-badge')).toHaveTextContent('/home/user')
+
+        // 预算耗尽后，即使继续探测 401 也不得再自动 create。
+        await act(async () => {
+          ;(interval?.[0] as () => void)()
+        })
+        await waitFor(() => {
+          expect(environmentService.probeIdeSession).toHaveBeenCalledTimes(5)
+        })
+        await act(async () => {
+          await Promise.resolve()
+        })
+        expect(environmentService.createIdeView).toHaveBeenCalledTimes(4)
+        expect(screen.getByTestId('ide-iframe')).toBe(stableIframe)
+
+        await user.click(screen.getByTestId('ide-session-retry-btn'))
+        await waitFor(() => {
+          expect(environmentService.createIdeView).toHaveBeenCalledTimes(5)
+        })
+        expect(screen.getByTestId('ide-iframe')).toHaveAttribute(
+          'src',
+          `/environment-ide/${readyEnv.id}/__ide/bootstrap?token=attempt-5`,
+        )
+        expect(screen.getByTestId('ide-recovery-error')).toBeInTheDocument()
+      } finally {
+        setIntervalSpy.mockRestore()
+      }
+    })
+
+    it('counts failed recovery requests toward the three-attempt limit', async () => {
+      // 测试意图：createIdeView 请求失败也消耗一次预算，3 次后停止自动重开并提示。
+      const setIntervalSpy = vi.spyOn(window, 'setInterval')
+      try {
+        vi.mocked(environmentService.createIdeView)
+          .mockResolvedValueOnce({
+            viewId,
+            environmentId: readyEnv.id,
+            directory: '/home/user',
+            entryUrl,
+          })
+          .mockRejectedValue(new Error('recovery request failed'))
+        vi.mocked(environmentService.probeIdeSession).mockResolvedValue(401)
+
+        renderOpenPanel()
+        const iframe = await screen.findByTestId('ide-iframe')
+        fireEvent.load(iframe)
+        await waitFor(() => {
+          expect(environmentService.probeIdeSession).toHaveBeenCalledTimes(1)
+        })
+        await act(async () => {
+          await Promise.resolve()
+        })
+
+        const interval = setIntervalSpy.mock.calls.find(([, delay]) => delay === 10_000)
+        expect(interval).toBeDefined()
+        for (let attempt = 1; attempt <= 3; attempt += 1) {
+          await act(async () => {
+            ;(interval?.[0] as () => void)()
+          })
+          await waitFor(() => {
+            expect(environmentService.createIdeView).toHaveBeenCalledTimes(1 + attempt)
+          })
+        }
+        await waitFor(() => {
+          expect(screen.getByTestId('ide-recovery-error')).toBeInTheDocument()
+        })
+        expect(screen.getByTestId('ide-iframe')).toHaveAttribute('src', entryUrl)
+
+        await act(async () => {
+          ;(interval?.[0] as () => void)()
+        })
+        await act(async () => {
+          await Promise.resolve()
+        })
+        expect(environmentService.createIdeView).toHaveBeenCalledTimes(4)
+      } finally {
+        setIntervalSpy.mockRestore()
+      }
+    })
+
+    it('resets the recovery budget only after a healthy 204 probe', async () => {
+      // 测试意图：3 次耗尽后 204 清除失败状态并开启新预算；后续仍可再经历完整 3 次尝试。
+      const setIntervalSpy = vi.spyOn(window, 'setInterval')
+      try {
+        let createCount = 0
+        vi.mocked(environmentService.createIdeView).mockImplementation(async () => {
+          createCount += 1
+          return {
+            viewId,
+            environmentId: readyEnv.id,
+            directory: '/home/user',
+            entryUrl: `/environment-ide/${readyEnv.id}/__ide/bootstrap?token=healthy-${createCount}`,
+          }
+        })
+        let probeStatus: number | null = 401
+        vi.mocked(environmentService.probeIdeSession).mockImplementation(async () => probeStatus)
+
+        renderOpenPanel()
+        const iframe = await screen.findByTestId('ide-iframe')
+        fireEvent.load(iframe)
+        await waitFor(() => {
+          expect(environmentService.probeIdeSession).toHaveBeenCalledTimes(1)
+        })
+        await act(async () => {
+          await Promise.resolve()
+        })
+
+        const interval = setIntervalSpy.mock.calls.find(([, delay]) => delay === 10_000)
+        expect(interval).toBeDefined()
+        for (let attempt = 1; attempt <= 3; attempt += 1) {
+          await act(async () => {
+            ;(interval?.[0] as () => void)()
+          })
+          await waitFor(() => {
+            expect(environmentService.createIdeView).toHaveBeenCalledTimes(1 + attempt)
+          })
+        }
+        await waitFor(() => {
+          expect(screen.getByTestId('ide-recovery-error')).toBeInTheDocument()
+        })
+
+        // 204 确认会话健康：清空失败状态并复位预算；当前没有待重开标记，因此不会额外 create。
+        probeStatus = 204
+        await act(async () => {
+          ;(interval?.[0] as () => void)()
+        })
+        await waitFor(() => {
+          expect(screen.queryByTestId('ide-recovery-error')).not.toBeInTheDocument()
+        })
+        expect(environmentService.createIdeView).toHaveBeenCalledTimes(4)
+        expect(screen.getByTestId('ide-iframe')).toHaveAttribute(
+          'src',
+          `/environment-ide/${readyEnv.id}/__ide/bootstrap?token=healthy-4`,
+        )
+
+        // 新预算仍允许完整的 3 次自动重开，随后再次停止。
+        probeStatus = 401
+        for (let attempt = 1; attempt <= 3; attempt += 1) {
+          await act(async () => {
+            ;(interval?.[0] as () => void)()
+          })
+          await waitFor(() => {
+            expect(environmentService.createIdeView).toHaveBeenCalledTimes(4 + attempt)
+          })
+        }
+        await waitFor(() => {
+          expect(screen.getByTestId('ide-recovery-error')).toBeInTheDocument()
+        })
+        await act(async () => {
+          ;(interval?.[0] as () => void)()
+        })
+        await act(async () => {
+          await Promise.resolve()
+        })
+        expect(environmentService.createIdeView).toHaveBeenCalledTimes(7)
+      } finally {
+        setIntervalSpy.mockRestore()
+      }
+    })
+
+    it('does not spend recovery attempts on 503 or unknown probes', async () => {
+      // 测试意图：503/null 只等待，不重开也不消耗预算；之后仍允许完整的 3 次真实恢复。
+      const setIntervalSpy = vi.spyOn(window, 'setInterval')
+      try {
+        let createCount = 0
+        vi.mocked(environmentService.createIdeView).mockImplementation(async () => {
+          createCount += 1
+          return {
+            viewId,
+            environmentId: readyEnv.id,
+            directory: '/home/user',
+            entryUrl: `/environment-ide/${readyEnv.id}/__ide/bootstrap?token=budget-${createCount}`,
+          }
+        })
+        let probeStatus: number | null = 401
+        vi.mocked(environmentService.probeIdeSession).mockImplementation(async () => probeStatus)
+
+        renderOpenPanel()
+        const iframe = await screen.findByTestId('ide-iframe')
+        fireEvent.load(iframe)
+        await waitFor(() => {
+          expect(environmentService.probeIdeSession).toHaveBeenCalledTimes(1)
+        })
+        await act(async () => {
+          await Promise.resolve()
+        })
+
+        const interval = setIntervalSpy.mock.calls.find(([, delay]) => delay === 10_000)
+        expect(interval).toBeDefined()
+
+        for (const status of [503, null]) {
+          probeStatus = status
+          await act(async () => {
+            ;(interval?.[0] as () => void)()
+          })
+          await act(async () => {
+            await Promise.resolve()
+          })
+          expect(environmentService.createIdeView).toHaveBeenCalledOnce()
+        }
+
+        probeStatus = 401
+        for (let attempt = 1; attempt <= 3; attempt += 1) {
+          await act(async () => {
+            ;(interval?.[0] as () => void)()
+          })
+          await waitFor(() => {
+            expect(environmentService.createIdeView).toHaveBeenCalledTimes(1 + attempt)
+          })
+        }
+        await waitFor(() => {
+          expect(screen.getByTestId('ide-recovery-error')).toBeInTheDocument()
+        })
+      } finally {
+        setIntervalSpy.mockRestore()
+      }
+    })
+
+    it('ignores manual retry while probing or reopening, and never resurrects a closed view', async () => {
+      // 测试意图：手动重试共享 probe/open/close 防线；探测在途时不发 create，重开在途时关闭必须等待，
+      // 迟到的重开结果不能复活已关闭视图。
+      const user = userEvent.setup()
+      const setIntervalSpy = vi.spyOn(window, 'setInterval')
+      try {
+        let createCount = 0
+        vi.mocked(environmentService.createIdeView).mockImplementation(async () => {
+          createCount += 1
+          return {
+            viewId,
+            environmentId: readyEnv.id,
+            directory: '/home/user',
+            entryUrl: `/environment-ide/${readyEnv.id}/__ide/bootstrap?token=guard-${createCount}`,
+          }
+        })
+        vi.mocked(environmentService.probeIdeSession).mockResolvedValue(401)
+
+        const onClose = vi.fn()
+        render(
+          <IdeOverlayPanel
+            isOpen={true}
+            viewId={viewId}
+            environment={readyEnv}
+            availableEnvironments={availableEnvironments}
+            action={{ id: 1, mode: 'files' }}
+            onCollapse={vi.fn()}
+            onClose={onClose}
+          />,
+        )
+        const iframe = await screen.findByTestId('ide-iframe')
+        fireEvent.load(iframe)
+        await waitFor(() => {
+          expect(environmentService.probeIdeSession).toHaveBeenCalledTimes(1)
+        })
+        await act(async () => {
+          await Promise.resolve()
+        })
+
+        const interval = setIntervalSpy.mock.calls.find(([, delay]) => delay === 10_000)
+        expect(interval).toBeDefined()
+        for (let attempt = 1; attempt <= 3; attempt += 1) {
+          await act(async () => {
+            ;(interval?.[0] as () => void)()
+          })
+          await waitFor(() => {
+            expect(environmentService.createIdeView).toHaveBeenCalledTimes(1 + attempt)
+          })
+        }
+        await waitFor(() => {
+          expect(screen.getByTestId('ide-recovery-error')).toBeInTheDocument()
+        })
+
+        // 周期探测在途时点击手动重试：不得额外 create，也不得重置正在观察的预算。
+        let resolveProbe: (value: number | null) => void = () => {}
+        vi.mocked(environmentService.probeIdeSession).mockReturnValueOnce(new Promise<number | null>((resolve) => {
+          resolveProbe = resolve
+        }))
+        await act(async () => {
+          ;(interval?.[0] as () => void)()
+        })
+        await waitFor(() => {
+          expect(environmentService.probeIdeSession).toHaveBeenCalledTimes(5)
+        })
+        await user.click(screen.getByTestId('ide-session-retry-btn'))
+        expect(environmentService.createIdeView).toHaveBeenCalledTimes(4)
+        await act(async () => {
+          resolveProbe(401)
+        })
+        await act(async () => {
+          await Promise.resolve()
+        })
+        expect(environmentService.createIdeView).toHaveBeenCalledTimes(4)
+
+        // 手动重开在途：按钮进入 loading，关闭等待该请求，迟到结果不得复活视图。
+        let resolveReopen: (value: unknown) => void = () => {}
+        const pendingReopen = new Promise((resolve) => {
+          resolveReopen = resolve
+        })
+        vi.mocked(environmentService.createIdeView).mockReturnValueOnce(pendingReopen as never)
+        await user.click(screen.getByTestId('ide-session-retry-btn'))
+        await waitFor(() => {
+          expect(environmentService.createIdeView).toHaveBeenCalledTimes(5)
+        })
+        expect(screen.getByTestId('ide-session-retry-btn')).toBeDisabled()
+
+        await user.click(screen.getByTestId('ide-close-btn'))
+        await user.click(screen.getByTestId('ide-confirm-close-btn'))
+        expect(environmentService.closeIdeView).not.toHaveBeenCalled()
+
+        await act(async () => {
+          resolveReopen({
+            viewId,
+            environmentId: readyEnv.id,
+            directory: '/home/user',
+            entryUrl: `/environment-ide/${readyEnv.id}/__ide/bootstrap?token=late-guard`,
+          })
+        })
+        await waitFor(() => {
+          expect(environmentService.closeIdeView).toHaveBeenCalledWith(readyEnv.id, viewId)
+          expect(onClose).toHaveBeenCalledOnce()
+        })
+        expect(screen.queryByTestId('ide-iframe')).not.toBeInTheDocument()
+        expect(screen.queryByTestId('ide-recovery-error')).not.toBeInTheDocument()
+      } finally {
+        setIntervalSpy.mockRestore()
+      }
+    })
+
     it('waits for an in-flight reopen before closing, and never resurrects the closed view', async () => {
       // 测试意图：requestClose 必须等待重开完成再关闭；迟到重开结果不能复活已关闭视图。
       const user = userEvent.setup()
