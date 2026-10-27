@@ -1,5 +1,7 @@
 import { Buffer } from 'node:buffer'
 
+import { parseStrictJson } from '../protocol.js'
+
 /**
  * IDE data mux v2 wire codec.
  *
@@ -169,202 +171,14 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const POSITIVE_DECIMAL = /^[1-9][0-9]*$/
 const RESET_CODE = /^[A-Z][A-Z0-9_]*$/
 const JSON_CONTROL = /[\u0000-\u001f\u007f-\u009f]/
-const MAX_JSON_DEPTH = 32
-
-type JsonObject = { [key: string]: JsonValue }
-type JsonValue = null | boolean | number | string | JsonValue[] | JsonObject
-
-class StrictJsonParser {
-  private index = 0
-
-  constructor(private readonly text: string) {}
-
-  parse(): JsonValue {
-    const value = this.parseValue(0)
-    this.skipWhitespace()
-    if (this.index !== this.text.length) {
-      throw new MuxWireError('metadata has trailing JSON data')
-    }
-    return value
-  }
-
-  private parseValue(depth: number): JsonValue {
-    if (depth > MAX_JSON_DEPTH) {
-      throw new MuxWireError('metadata JSON is nested too deeply')
-    }
-    this.skipWhitespace()
-    const character = this.text[this.index]
-    if (character === '{') {
-      return this.parseObject(depth)
-    }
-    if (character === '[') {
-      return this.parseArray(depth)
-    }
-    if (character === '"') {
-      return this.parseString()
-    }
-    if (character === 't') {
-      return this.parseLiteral('true', true)
-    }
-    if (character === 'f') {
-      return this.parseLiteral('false', false)
-    }
-    if (character === 'n') {
-      return this.parseLiteral('null', null)
-    }
-    if (character === '-' || (character !== undefined && character >= '0' && character <= '9')) {
-      return this.parseNumber()
-    }
-    throw new MuxWireError('metadata contains invalid JSON')
-  }
-
-  private parseObject(depth: number): JsonObject {
-    this.index++
-    const value: JsonObject = Object.create(null) as JsonObject
-    this.skipWhitespace()
-    if (this.text[this.index] === '}') {
-      this.index++
-      return value
-    }
-    for (;;) {
-      this.skipWhitespace()
-      if (this.text[this.index] !== '"') {
-        throw new MuxWireError('metadata JSON object key must be a string')
-      }
-      const key = this.parseString()
-      if (Object.hasOwn(value, key)) {
-        throw new MuxWireError('metadata contains a duplicate key')
-      }
-      this.skipWhitespace()
-      if (this.text[this.index] !== ':') {
-        throw new MuxWireError('metadata JSON object is missing a colon')
-      }
-      this.index++
-      value[key] = this.parseValue(depth + 1)
-      this.skipWhitespace()
-      const separator = this.text[this.index]
-      if (separator === '}') {
-        this.index++
-        return value
-      }
-      if (separator !== ',') {
-        throw new MuxWireError('metadata JSON object is missing a comma')
-      }
-      this.index++
-    }
-  }
-
-  private parseArray(depth: number): JsonValue[] {
-    this.index++
-    const value: JsonValue[] = []
-    this.skipWhitespace()
-    if (this.text[this.index] === ']') {
-      this.index++
-      return value
-    }
-    for (;;) {
-      value.push(this.parseValue(depth + 1))
-      this.skipWhitespace()
-      const separator = this.text[this.index]
-      if (separator === ']') {
-        this.index++
-        return value
-      }
-      if (separator !== ',') {
-        throw new MuxWireError('metadata JSON array is missing a comma')
-      }
-      this.index++
-    }
-  }
-
-  private parseString(): string {
-    this.index++
-    let value = ''
-    for (;;) {
-      const character = this.text[this.index]
-      if (character === undefined) {
-        throw new MuxWireError('metadata JSON string is unterminated')
-      }
-      this.index++
-      if (character === '"') {
-        return value
-      }
-      if (character === '\\') {
-        const escape = this.text[this.index]
-        this.index++
-        switch (escape) {
-          case '"':
-          case '\\':
-          case '/':
-            value += escape
-            break
-          case 'b':
-            value += '\b'
-            break
-          case 'f':
-            value += '\f'
-            break
-          case 'n':
-            value += '\n'
-            break
-          case 'r':
-            value += '\r'
-            break
-          case 't':
-            value += '\t'
-            break
-          case 'u': {
-            const hex = this.text.slice(this.index, this.index + 4)
-            if (!/^[0-9a-fA-F]{4}$/.test(hex)) {
-              throw new MuxWireError('metadata JSON has an invalid unicode escape')
-            }
-            value += String.fromCharCode(Number.parseInt(hex, 16))
-            this.index += 4
-            break
-          }
-          default:
-            throw new MuxWireError('metadata JSON has an invalid string escape')
-        }
-        continue
-      }
-      if (character.charCodeAt(0) < 0x20) {
-        throw new MuxWireError('metadata JSON string contains a control character')
-      }
-      value += character
-    }
-  }
-
-  private parseNumber(): number {
-    const match = /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/.exec(this.text.slice(this.index))
-    if (match === null) {
-      throw new MuxWireError('metadata contains an invalid JSON number')
-    }
-    this.index += match[0].length
-    const value = Number(match[0])
-    if (!Number.isFinite(value)) {
-      throw new MuxWireError('metadata number is not finite')
-    }
-    return value
-  }
-
-  private parseLiteral<T extends JsonValue>(literal: string, value: T): T {
-    if (this.text.slice(this.index, this.index + literal.length) !== literal) {
-      throw new MuxWireError('metadata contains invalid JSON')
-    }
-    this.index += literal.length
-    return value
-  }
-
-  private skipWhitespace(): void {
-    while (true) {
-      const character = this.text[this.index]
-      if (character !== ' ' && character !== '\t' && character !== '\n' && character !== '\r') {
-        return
-      }
-      this.index++
-    }
-  }
+const METADATA_JSON_LIMITS = {
+  maxBytes: MUX_MAX_METADATA_BYTES,
+  maxNestingDepth: 32,
+  maxNumberLength: 64,
+  maxStringBytes: MUX_MAX_METADATA_BYTES,
 }
+
+type JsonObject = Record<string, unknown>
 
 function parseMetadata(payload: Uint8Array): JsonObject {
   if (payload.byteLength > MUX_MAX_METADATA_BYTES) {
@@ -376,11 +190,16 @@ function parseMetadata(payload: Uint8Array): JsonObject {
   } catch (error) {
     throw new MuxWireError('metadata is not valid UTF-8', error)
   }
-  const value = new StrictJsonParser(text).parse()
+  let value: unknown
+  try {
+    value = parseStrictJson(text, 'metadata', METADATA_JSON_LIMITS)
+  } catch (error) {
+    throw new MuxWireError(error instanceof Error ? error.message : 'metadata must be valid JSON', error)
+  }
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new MuxWireError('metadata must be a JSON object')
   }
-  return value
+  return value as JsonObject
 }
 
 function expectExactKeys(value: JsonObject, allowed: readonly string[], what: string): void {
@@ -396,7 +215,7 @@ function expectExactKeys(value: JsonObject, allowed: readonly string[], what: st
   }
 }
 
-function expectString(value: JsonValue | undefined, what: string): string {
+function expectString(value: unknown, what: string): string {
   if (typeof value !== 'string') {
     throw new MuxWireError(`${what} must be a string`)
   }
@@ -404,14 +223,14 @@ function expectString(value: JsonValue | undefined, what: string): string {
   return value
 }
 
-function expectInteger(value: JsonValue | undefined, what: string): number {
+function expectInteger(value: unknown, what: string): number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value)) {
     throw new MuxWireError(`${what} must be an integer`)
   }
   return value
 }
 
-function expectArray(value: JsonValue | undefined, what: string): JsonValue[] {
+function expectArray(value: unknown, what: string): unknown[] {
   if (!Array.isArray(value)) {
     throw new MuxWireError(`${what} must be an array`)
   }
@@ -442,7 +261,7 @@ function assertToken(value: string, what: string, maxBytes: number): void {
   }
 }
 
-function decodeHeaderPairs(value: JsonValue | undefined, what: string, maxItems?: number): HeaderPair[] {
+function decodeHeaderPairs(value: unknown, what: string, maxItems?: number): HeaderPair[] {
   const array = expectArray(value, what)
   if (maxItems !== undefined && array.length > maxItems) {
     throw new MuxWireError(`${what} exceeds ${maxItems} entries`)
