@@ -1,12 +1,15 @@
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { crc32 } from 'node:zlib'
 import {
   appendFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   rmSync,
   symlinkSync,
   unlinkSync,
@@ -22,6 +25,11 @@ const ROOT = repositoryRoot()
 const SCRIPT = path.join(ROOT, 'scripts/dev/ci/app-artifact.mjs')
 const VERSION = '4.0.1'
 const COMMIT = '0123456789abcdef0123456789abcdef01234567'
+const AGENT_VERSION = '1.2.3'
+const AGENT_NAME = `convention4j-agent-${AGENT_VERSION}.jar`
+const AGENT_ENTRY = `BOOT-INF/lib/${AGENT_NAME}`
+const STABLE_AGENT = 'convention4j-agent/convention4j-agent.jar'
+const VERSIONED_AGENT = `convention4j-agent/${AGENT_NAME}`
 
 /** Build a stored-only ZIP so the test does not depend on a JDK or external unzip. */
 function storedZip(entries) {
@@ -69,21 +77,79 @@ function writeArchive(file, entries) {
   writeFileSync(file, storedZip(entries))
 }
 
+/** Minimal agent bytes keep a Boot-Class-Path like the real artifact while staying byte-stable. */
+function agentArchive() {
+  return storedZip({
+    'META-INF/MANIFEST.MF': `Manifest-Version: 1.0\nBoot-Class-Path: ${AGENT_NAME}\n`,
+  })
+}
+
 function run(...args) {
   return spawnSync(process.execPath, [SCRIPT, ...args], { encoding: 'utf8' })
+}
+
+/** Resolve the real JDK 21 `jar`, which the extractor and synthetic boot JAR require. */
+function jdk21Jar() {
+  for (const home of [process.env.JAVA_HOME_21, process.env.JAVA_HOME_21_X64, process.env.JAVA_HOME]) {
+    if (!home) {
+      continue
+    }
+    const jar = path.join(home, 'bin/jar')
+    const version = existsSync(jar) ? spawnSync(jar, ['--version'], { encoding: 'utf8' }) : null
+    if (version?.status === 0 && /^jar 21\./u.test(version.stdout.trim())) {
+      return jar
+    }
+  }
+  throw new Error('JDK 21 is required to run the agent extraction regression')
+}
+
+/** Build an actual JAR via the JDK so the extractor exercises its real archive commands. */
+function writeJdkJar(jar, archive, entries) {
+  const staging = mkdtempSync(path.join(os.tmpdir(), 'kk-studio-jar-'))
+  try {
+    for (const [name, content] of Object.entries(entries)) {
+      const file = path.join(staging, name)
+      mkdirSync(path.dirname(file), { recursive: true })
+      writeFileSync(file, content)
+    }
+    execFileSync(jar, ['--create', '--file', archive, '-C', staging, '.'])
+  } finally {
+    rmSync(staging, { recursive: true, force: true })
+  }
+}
+
+/** Extract the workflow's real stage shell so the regression cannot drift from production. */
+function workflowStageShell() {
+  const workflow = readFileSync(path.join(ROOT, '.github/workflows/docker-publish.yml'), 'utf8')
+  const start = workflow.indexOf('      - name: Stage the verified distribution artifact\n')
+  assert.ok(start >= 0, 'missing workflow stage step')
+  const lines = workflow.slice(start).split('\n')
+  const runIndex = lines.indexOf('        run: |')
+  assert.ok(runIndex >= 0, 'missing workflow stage run block')
+  const body = []
+  for (const line of lines.slice(runIndex + 1)) {
+    if (!line.startsWith('          ')) {
+      break
+    }
+    body.push(line.slice(10))
+  }
+  assert.ok(body.length > 0, 'empty workflow stage run block')
+  return body.join('\n')
 }
 
 function workspace() {
   const directory = mkdtempSync(path.join(os.tmpdir(), 'kk-studio-app-artifact-'))
   const jar = path.join(directory, 'distribution.jar')
-  const agent = path.join(directory, 'convention4j-agent.jar')
+  const agent = path.join(directory, AGENT_NAME)
   const output = path.join(directory, 'verified-app')
+  const agentBytes = agentArchive()
   writeArchive(jar, {
     'META-INF/MANIFEST.MF': 'Manifest-Version: 1.0\n',
     'BOOT-INF/classes/static/index.html': '<div id="root"></div>\n',
     'BOOT-INF/classes/static/assets/index-abc123.js': 'console.log("app")\n',
+    [AGENT_ENTRY]: agentBytes,
   })
-  writeArchive(agent, { 'META-INF/MANIFEST.MF': 'Manifest-Version: 1.0\n' })
+  writeFileSync(agent, agentBytes)
   return { directory, jar, agent, output }
 }
 
@@ -111,8 +177,9 @@ test('stage writes the closed artifact contract and verify accepts it', () => {
     assert.equal(manifest.sourceCommit, COMMIT)
     assert.deepEqual(Object.keys(manifest.sha256).sort(), [
       'app.jar',
-      'convention4j-agent/convention4j-agent.jar',
-    ])
+      STABLE_AGENT,
+      VERSIONED_AGENT,
+    ].sort())
     const verified = run(
       'verify',
       '--dir', fixture.output,
@@ -179,7 +246,7 @@ test('verify fails closed on a damaged artifact and a missing file', () => {
     assert.match(damaged.stderr, /integrity check failed for app\.jar/u)
 
     stageFixture(fixture)
-    unlinkSync(path.join(fixture.output, 'convention4j-agent/convention4j-agent.jar'))
+    unlinkSync(path.join(fixture.output, STABLE_AGENT))
     const missing = run(
       'verify',
       '--dir', fixture.output,
@@ -208,8 +275,8 @@ test('verify fails closed on extra files, corrupt manifests and symlinks', () =>
     assert.match(result.stderr, /not valid JSON/u)
 
     stageFixture(fixture)
-    unlinkSync(path.join(fixture.output, 'convention4j-agent/convention4j-agent.jar'))
-    symlinkSync('/etc/hostname', path.join(fixture.output, 'convention4j-agent/convention4j-agent.jar'))
+    unlinkSync(path.join(fixture.output, STABLE_AGENT))
+    symlinkSync('/etc/hostname', path.join(fixture.output, STABLE_AGENT))
     result = run('verify', '--dir', fixture.output, '--version', VERSION, '--source-commit', COMMIT)
     assert.equal(result.status, 1)
     assert.match(result.stderr, /must not contain symlinks/u)
@@ -224,6 +291,7 @@ test('stage rejects a JAR without the embedded frontend or with an invalid commi
     writeArchive(fixture.jar, {
       'META-INF/MANIFEST.MF': 'Manifest-Version: 1.0\n',
       'BOOT-INF/classes/static/assets/index-abc123.js': 'console.log("app")\n',
+      [AGENT_ENTRY]: agentArchive(),
     })
     let result = run(
       'stage',
@@ -239,6 +307,7 @@ test('stage rejects a JAR without the embedded frontend or with an invalid commi
     writeArchive(fixture.jar, {
       'META-INF/MANIFEST.MF': 'Manifest-Version: 1.0\n',
       'BOOT-INF/classes/static/index.html': '<div id="root"></div>\n',
+      [AGENT_ENTRY]: agentArchive(),
     })
     result = run(
       'stage',
@@ -254,6 +323,7 @@ test('stage rejects a JAR without the embedded frontend or with an invalid commi
     writeArchive(fixture.jar, {
       'BOOT-INF/classes/static/index.html': '<div id="root"></div>\n',
       'BOOT-INF/classes/static/assets/index-abc123.js': 'console.log("app")\n',
+      [AGENT_ENTRY]: agentArchive(),
     })
     result = run(
       'stage',
@@ -267,5 +337,117 @@ test('stage rejects a JAR without the embedded frontend or with an invalid commi
     assert.match(result.stderr, /full 40-character Git SHA/u)
   } finally {
     rmSync(fixture.directory, { recursive: true, force: true })
+  }
+})
+
+test('stage rejects an agent whose basename does not match the application dependency', () => {
+  const fixture = workspace()
+  try {
+    const mismatched = path.join(fixture.directory, 'convention4j-agent-1.2.2.jar')
+    writeFileSync(mismatched, readFileSync(fixture.agent))
+    const result = run(
+      'stage',
+      '--jar', fixture.jar,
+      '--agent', mismatched,
+      '--output', fixture.output,
+      '--version', VERSION,
+      '--source-commit', COMMIT,
+    )
+    assert.equal(result.status, 1)
+    assert.match(result.stderr, /does not match the application dependency/u)
+    assert.equal(existsSync(fixture.output), false)
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true })
+  }
+})
+
+test('verify requires the derived versioned agent and identical agent bytes', () => {
+  const fixture = stageFixture()
+  try {
+    unlinkSync(path.join(fixture.output, VERSIONED_AGENT))
+    let result = run('verify', '--dir', fixture.output, '--version', VERSION, '--source-commit', COMMIT)
+    assert.equal(result.status, 1)
+    assert.match(result.stderr, /closed contract/u)
+
+    stageFixture(fixture)
+    renameSync(
+      path.join(fixture.output, VERSIONED_AGENT),
+      path.join(fixture.output, 'convention4j-agent/convention4j-agent-1.2.4.jar'),
+    )
+    result = run('verify', '--dir', fixture.output, '--version', VERSION, '--source-commit', COMMIT)
+    assert.equal(result.status, 1)
+    assert.match(result.stderr, /closed contract/u)
+
+    stageFixture(fixture)
+    const versioned = path.join(fixture.output, VERSIONED_AGENT)
+    appendFileSync(versioned, 'tampered')
+    const manifestPath = path.join(fixture.output, 'manifest.json')
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+    manifest.sha256[VERSIONED_AGENT] = createHash('sha256').update(readFileSync(versioned)).digest('hex')
+    writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
+    result = run('verify', '--dir', fixture.output, '--version', VERSION, '--source-commit', COMMIT)
+    assert.equal(result.status, 1)
+    assert.match(result.stderr, /stable and versioned files differ/u)
+  } finally {
+    rmSync(fixture.directory, { recursive: true, force: true })
+  }
+})
+
+test('the workflow stage keeps both the stable and versioned agent files', () => {
+  // Regression for hosted CI: the stable agent is a symlink, while Boot-Class-Path needs the
+  // versioned file. Run the actual workflow stage shell against a synthetic Spring Boot JAR built
+  // by the real JDK and extracted by the real shell extractor.
+  const jar = jdk21Jar()
+  const directory = mkdtempSync(path.join(os.tmpdir(), 'kk-studio-app-artifact-integration-'))
+  try {
+    const version = '9.9.9'
+    const agentName = `convention4j-agent-${version}.jar`
+    const agent = path.join(directory, agentName)
+    const appJar = path.join(directory, `kk-studio-web-${VERSION}.jar`)
+    writeJdkJar(jar, agent, {
+      'META-INF/MANIFEST.MF': `Manifest-Version: 1.0\nBoot-Class-Path: ${agentName}\n`,
+    })
+    const agentBytes = readFileSync(agent)
+    writeJdkJar(jar, appJar, {
+      'BOOT-INF/classes/static/index.html': '<div id="root"></div>\n',
+      'BOOT-INF/classes/static/assets/index-abc123.js': 'console.log("app")\n',
+      [`BOOT-INF/lib/${agentName}`]: agentBytes,
+    })
+
+    const runnerTemp = path.join(directory, 'runner-temp')
+    const output = path.join(runnerTemp, 'verified-app')
+    mkdirSync(runnerTemp)
+    const staged = spawnSync('bash', ['-e', '-c', workflowStageShell()], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        APP_JAR: appJar,
+        APP_VERSION: VERSION,
+        RUNNER_TEMP: runnerTemp,
+        GITHUB_SHA: COMMIT,
+        PATH: `${path.dirname(jar)}:${process.env.PATH ?? ''}`,
+      },
+    })
+    assert.equal(staged.status, 0, staged.stderr)
+
+    const stable = path.join(output, STABLE_AGENT)
+    const versioned = path.join(output, 'convention4j-agent', agentName)
+    for (const file of [stable, versioned]) {
+      assert.equal(lstatSync(file).isFile(), true, `${file} must be a regular file`)
+      assert.equal(lstatSync(file).isSymbolicLink(), false, `${file} must not be a symlink`)
+      assert.deepEqual(readFileSync(file), agentBytes)
+    }
+    const manifest = JSON.parse(readFileSync(path.join(output, 'manifest.json'), 'utf8'))
+    assert.deepEqual(Object.keys(manifest.sha256).sort(), [
+      'app.jar',
+      STABLE_AGENT,
+      `convention4j-agent/${agentName}`,
+    ].sort())
+
+    const verified = run('verify', '--dir', output, '--version', VERSION, '--source-commit', COMMIT)
+    assert.equal(verified.status, 0, verified.stderr)
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
   }
 })

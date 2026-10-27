@@ -395,6 +395,8 @@ test('publish reuses only the same-run, same-SHA verified artifact', () => {
   assert.ok(stage)
   const stageRun = stepField(stage, 'run')
   assert.match(stageRun, /extract-convention4j-agent\.sh/u)
+  assert.match(stageRun, /agent="\$\(readlink -f "\$\{agent_alias\}"\)"/u)
+  assert.match(stageRun, /--agent "\$\{agent\}"/u)
   assert.match(stageRun, /node scripts\/dev\/ci\/app-artifact\.mjs stage/u)
   assert.match(stageRun, /--source-commit "\$GITHUB_SHA"/u)
   const upload = validate.find((step) => stepField(step, 'name') === 'Upload the verified distribution artifact')
