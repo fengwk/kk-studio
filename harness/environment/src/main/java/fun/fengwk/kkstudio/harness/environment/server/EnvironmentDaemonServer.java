@@ -23,16 +23,25 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityT
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTransport;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilitiesCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilityInvokeCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilityResultCodec;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonDataBind;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonDataBindCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelope;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelopeCodec;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonHeartbeat;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonHeartbeatCodec;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonIdeLease;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonIdeLeaseCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocolException;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonReady;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonReadyCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceTransferCodec;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonRuntimeSnapshot;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonRuntimeStatusCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateCommand;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateCommandCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateResult;
@@ -120,7 +129,11 @@ public final class EnvironmentDaemonServer
   private final EnvironmentUpdateListener updateListener;
   private final DaemonResourceTicketService ticketService;
   private final Supplier<EnvironmentServerSettings> settings;
-  private final DaemonCapabilitiesCodec capabilitiesCodec = new DaemonCapabilitiesCodec();
+  private final DaemonReadyCodec readyCodec = new DaemonReadyCodec();
+  private final DaemonHeartbeatCodec heartbeatCodec = new DaemonHeartbeatCodec();
+  private final DaemonRuntimeStatusCodec runtimeStatusCodec = new DaemonRuntimeStatusCodec();
+  private final DaemonDataBindCodec dataBindCodec = new DaemonDataBindCodec();
+  private final DaemonIdeLeaseCodec ideLeaseCodec = new DaemonIdeLeaseCodec();
   private final DaemonCapabilityInvokeCodec capabilityInvokeCodec =
       new DaemonCapabilityInvokeCodec();
   private final DaemonCapabilityResultCodec resultCodec = new DaemonCapabilityResultCodec();
@@ -319,6 +332,43 @@ public final class EnvironmentDaemonServer
     }
   }
 
+  /**
+   * 返回当前 READY 连接代际缓存的完整 runtimeStatus。
+   *
+   * <p>只有本地连接仍 READY、数据库侧 READY 租约仍归本节点且缓存存在时才返回；断线、换代或租约丢失后立即 unavailable，绝不回放旧内存
+   * 任务或持久进度。读取本身不写数据库。
+   */
+  public Optional<DaemonRuntimeSnapshot> runtimeStatus(EnvironmentId environmentId) {
+    Objects.requireNonNull(environmentId, "environmentId");
+    ConnectionState state;
+    synchronized (inventory) {
+      state = connectionOf(environmentId);
+    }
+    if (state == null) {
+      return Optional.empty();
+    }
+    UUID leaseToken;
+    synchronized (state) {
+      if (!state.isReady()) {
+        return Optional.empty();
+      }
+      leaseToken = state.leaseToken;
+    }
+    try {
+      if (leaseToken == null || !leaseStore.holdsReadyLease(environmentId, leaseToken)) {
+        return Optional.empty();
+      }
+    } catch (RuntimeException error) {
+      return Optional.empty();
+    }
+    synchronized (state) {
+      if (!state.isReady() || !leaseToken.equals(state.leaseToken)) {
+        return Optional.empty();
+      }
+      return Optional.ofNullable(state.runtimeStatus);
+    }
+  }
+
   /** 当前节点全部 READY 的 Environment 快照。 */
   public Set<EnvironmentId> readyEnvironments() {
     Set<EnvironmentId> ready = new HashSet<>();
@@ -336,8 +386,9 @@ public final class EnvironmentDaemonServer
   /**
    * 开始一次受管更新的准入：要求目标 Environment 在当前节点 READY，且没有在途普通调用。
    *
-   * <p>成功后在目录锁内登记 {@code operationId}，此后新的普通调用在起点即被拒绝（跨重启的持久事实由上层 operation 行承担）。同一 operationId
-   * 的重复准入是幂等的；已有其它 operation 或存在在途调用时拒绝，保证「一个 Environment 同一时刻至多一次更新」。
+   * <p>成功后在目录锁内登记 {@code operationId}，此后新的普通调用在起点即被拒绝。该登记只覆盖命令下发的瞬时窗口， 由调用方在 {@code finally}
+   * 中释放；最终「同一 Environment 同一时刻至多一次更新」由 Daemon 的本机互斥保证。 同一 operationId 的重复准入是幂等的；已有其它 operation
+   * 或存在在途调用时拒绝。
    *
    * @throws EnvironmentCapabilityUnavailableException 目标当前不在本节点 READY
    * @throws EnvironmentCapabilityBusyException 已有其它更新在途或存在在途普通调用
@@ -459,6 +510,81 @@ public final class EnvironmentDaemonServer
           "daemon outbound queue is full for environment " + environmentId);
     }
     throw new EnvironmentCapabilityUnavailableException(environmentId + " is not ready for update");
+  }
+
+  /**
+   * 向已 READY 的当前连接下发数据连接绑定。
+   *
+   * <p>这是下一批数据面业务的发送扩展点：本轮只做严格 codec 与代际/租约准入，不生成票据，也不会在未配置数据面时伪造成功。
+   */
+  public void sendDataBind(EnvironmentId environmentId, DaemonDataBind dataBind) {
+    Objects.requireNonNull(dataBind, "dataBind");
+    sendBoundControl(environmentId, DaemonMessageType.DATA_BIND, dataBindCodec.encode(dataBind));
+  }
+
+  /**
+   * 向已 READY 的当前连接批量下发 IDE 使用证明。
+   *
+   * <p>证明只由业务层查询后传入；本层不创建视图、不续租快照查询，也不在没有绑定处理器时返回伪成功。
+   */
+  public void sendIdeLease(EnvironmentId environmentId, DaemonIdeLease ideLease) {
+    Objects.requireNonNull(ideLease, "ideLease");
+    sendBoundControl(environmentId, DaemonMessageType.IDE_LEASE, ideLeaseCodec.encode(ideLease));
+  }
+
+  private void sendBoundControl(
+      EnvironmentId environmentId, DaemonMessageType messageType, String payloadJson) {
+    Objects.requireNonNull(environmentId, "environmentId");
+    ConnectionState state;
+    UUID leaseToken;
+    synchronized (inventory) {
+      EnvironmentState environment = environments.get(environmentId);
+      if (environment != null && environment.updatingOperationId != null) {
+        throw new EnvironmentCapabilityBusyException(
+            "environment " + environmentId + " is being updated");
+      }
+      state = environment == null ? null : environment.connection;
+      leaseToken = state == null ? null : state.leaseToken;
+    }
+    if (state == null || leaseToken == null || !state.isReady()) {
+      throw new EnvironmentCapabilityUnavailableException(
+          environmentId + " is not ready for " + messageType);
+    }
+    boolean holdsReady;
+    try {
+      holdsReady = leaseStore.holdsReadyLease(environmentId, leaseToken);
+    } catch (RuntimeException error) {
+      throw new EnvironmentCapabilityUnavailableException(
+          "database unavailable: " + error.getMessage(), error);
+    }
+    if (!holdsReady) {
+      throw new EnvironmentCapabilityUnavailableException(
+          environmentId + " is not ready for " + messageType);
+    }
+    DaemonOfferResult outcome;
+    synchronized (state) {
+      if (!state.isReady() || !leaseToken.equals(state.leaseToken)) {
+        throw new EnvironmentCapabilityUnavailableException(
+            environmentId + " is not ready for " + messageType);
+      }
+      synchronized (inventory) {
+        EnvironmentState environment = environments.get(environmentId);
+        if (environment != null && environment.updatingOperationId != null) {
+          throw new EnvironmentCapabilityBusyException(
+              "environment " + environmentId + " is being updated");
+        }
+      }
+      outcome = state.offer(messageType, null, payloadJson);
+    }
+    if (outcome == DaemonOfferResult.ACCEPTED) {
+      return;
+    }
+    if (outcome == DaemonOfferResult.BUSY) {
+      throw new EnvironmentCapabilityBusyException(
+          "daemon outbound queue is full for environment " + environmentId);
+    }
+    throw new EnvironmentCapabilityUnavailableException(
+        environmentId + " is not ready for " + messageType);
   }
 
   /**
@@ -889,6 +1015,7 @@ public final class EnvironmentDaemonServer
       case HELLO -> handleHello(state, envelope, deferred);
       case READY -> handleReady(state, envelope, deferred);
       case HEARTBEAT -> handleHeartbeat(state, envelope);
+      case RUNTIME_STATUS -> handleRuntimeStatus(state, envelope);
       case STARTED -> handleStarted(state, envelope);
       case PROGRESS -> handleProgress(state, envelope, deferred);
       case COMPLETED -> handleCompleted(state, envelope, deferred);
@@ -906,7 +1033,9 @@ public final class EnvironmentDaemonServer
           RECOVER,
           RESOURCE_UPLOAD_TICKET,
           UPDATE,
-          IDE_COMMAND -> throw new DaemonProtocolException(
+          IDE_COMMAND,
+          DATA_BIND,
+          IDE_LEASE -> throw new DaemonProtocolException(
           "daemon must not send " + envelope.messageType() + " to server");
     }
   }
@@ -1206,7 +1335,8 @@ public final class EnvironmentDaemonServer
     if (leaseToken == null) {
       throw new DaemonProtocolException("leaseToken missing on READY");
     }
-    DaemonCapabilities capabilities = capabilitiesCodec.decode(envelope.payloadJson());
+    DaemonReady ready = readyCodec.decode(envelope.payloadJson());
+    DaemonCapabilities capabilities = ready.capabilities();
     boolean ok = leaseStore.markReady(environmentId, leaseToken, capabilities, timeout());
     if (!ok) {
       throw new DaemonProtocolException("route fence lost for environment " + environmentId);
@@ -1216,7 +1346,9 @@ public final class EnvironmentDaemonServer
         throw new DaemonProtocolException("route fence lost for environment " + environmentId);
       }
       state.ready = true;
+      state.daemonVersion = capabilities.daemonVersion();
       state.daemonOperatingSystem = capabilities.environment().operatingSystem();
+      state.runtimeStatus = ready.runtimeStatus();
     }
     deferred.add(() -> notifyEnvironmentReady(environmentId));
     recoverActiveInvocations(state, environmentId);
@@ -1278,7 +1410,7 @@ public final class EnvironmentDaemonServer
   private void handleHeartbeat(ConnectionState state, DaemonEnvelope envelope) {
     requireReady(state);
     requireNoInvocationId(envelope);
-    rejectUnexpectedFields(envelopeCodec.readPayload(envelope), Set.of(), "HEARTBEAT payload");
+    DaemonHeartbeat heartbeat = heartbeatCodec.decode(envelope.payloadJson());
     EnvironmentId environmentId = state.environmentId;
     UUID leaseToken = state.leaseToken;
     if (leaseToken == null) {
@@ -1288,7 +1420,61 @@ public final class EnvironmentDaemonServer
     if (!ok) {
       throw new DaemonProtocolException("route fence lost for environment " + environmentId);
     }
+    applyRuntimeStatus(state, heartbeat.runtimeStatus());
     reconcileTemporaryResourcePolicy(state);
+  }
+
+  /** 处理关键变化时立即上报的 runtimeStatus；必须属于当前 READY 代际且租约仍归本节点。 */
+  private void handleRuntimeStatus(ConnectionState state, DaemonEnvelope envelope) {
+    requireReady(state);
+    requireNoInvocationId(envelope);
+    DaemonRuntimeSnapshot snapshot = runtimeStatusCodec.decode(envelope.payloadJson());
+    EnvironmentId environmentId = state.environmentId;
+    UUID leaseToken = state.leaseToken;
+    if (leaseToken == null) {
+      throw new DaemonProtocolException("leaseToken missing on RUNTIME_STATUS");
+    }
+    boolean holdsReady;
+    try {
+      holdsReady = leaseStore.holdsReadyLease(environmentId, leaseToken);
+    } catch (RuntimeException error) {
+      throw new DaemonProtocolException("database unavailable: " + error.getMessage(), error);
+    }
+    if (!holdsReady) {
+      throw new DaemonProtocolException("route fence lost for environment " + environmentId);
+    }
+    synchronized (state) {
+      if (!state.isReady() || !leaseToken.equals(state.leaseToken)) {
+        throw new DaemonProtocolException("route fence lost for environment " + environmentId);
+      }
+    }
+    applyRuntimeStatus(state, snapshot);
+  }
+
+  /**
+   * 只接受当前连接代际的 runtimeStatus：更高 revision 替换，同 revision 内容不同为协议错误，更低 revision 视为迟到快照忽略。
+   *
+   * <p>状态只保存在连接内存中；断线或换代后不可读取，也不写 {@code runtime_info} 或任何数据库进度列。
+   */
+  private void applyRuntimeStatus(ConnectionState state, DaemonRuntimeSnapshot snapshot) {
+    synchronized (state) {
+      if (!state.isReady()) {
+        throw new DaemonProtocolException("runtimeStatus arrived after connection left READY");
+      }
+      if (!snapshot.status().daemonVersion().equals(state.daemonVersion)) {
+        throw new DaemonProtocolException(
+            "runtimeStatus.daemonVersion does not match the READY daemonVersion");
+      }
+      DaemonRuntimeSnapshot current = state.runtimeStatus;
+      if (current == null || snapshot.revision() > current.revision()) {
+        state.runtimeStatus = snapshot;
+        return;
+      }
+      if (snapshot.revision() == current.revision() && !snapshot.equals(current)) {
+        throw new DaemonProtocolException(
+            "runtimeStatus revision " + snapshot.revision() + " changed without advancing");
+      }
+    }
   }
 
   /**
@@ -2265,7 +2451,9 @@ public final class EnvironmentDaemonServer
     private volatile boolean helloReceived;
     private volatile String capabilityCatalogVersion;
     private volatile String daemonInstanceId;
+    private volatile String daemonVersion;
     private volatile DaemonOperatingSystem daemonOperatingSystem;
+    private volatile DaemonRuntimeSnapshot runtimeStatus;
     private volatile boolean ready;
     private volatile boolean cleaned;
 

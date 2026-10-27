@@ -62,7 +62,6 @@ import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterRealtimePayloadClient;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestrator;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestratorFactory;
-import fun.fengwk.kkstudio.platform.environment.update.EnvironmentUpdateService;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessDispatcherProperties;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessExecutionAdmissionProperties;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperties;
@@ -562,19 +561,18 @@ public class HarnessRuntimeConfiguration {
   }
 
   /**
-   * 会话事件的组合宿主：READY 唤醒可选的 HarnessWorkDispatcher，触发该 Environment 的 Skill 全量同步，并让受管更新服务判定最终成功； Daemon
-   * 实例接管时关闭旧代际的 IDE 数据面。
+   * 会话事件的组合宿主：READY 唤醒可选的 HarnessWorkDispatcher，并触发该 Environment 的 Skill 全量同步； Daemon 实例接管时关闭旧代际的
+   * IDE 数据面。
    *
    * <p>每个动作都立刻返回且各自隔离异常：会话状态推进会先完成，任何宿主回调失败都不得影响会话本身。
    *
-   * <p>三个协作者都用延迟解析：dispatcher、Skill 同步编排器与更新服务都经由 capability 传输间接依赖本监听器（daemon server → listener →
-   * 协作者），启动期直接注入会形成环。
+   * <p>协作者都用延迟解析：dispatcher、Skill 同步编排器与 IDE 换代监听器都经由 capability 传输间接依赖本监听器（daemon server →
+   * listener → 协作者），启动期直接注入会形成环。
    */
   @Bean
   public EnvironmentSessionListener compositeEnvironmentSessionListener(
       ObjectProvider<HarnessWorkDispatcher> dispatcherProvider,
       ObjectProvider<EnvironmentSkillSyncOrchestrator> orchestratorProvider,
-      ObjectProvider<EnvironmentUpdateService> updateServiceProvider,
       ObjectProvider<IdeGenerationCloseListener> ideGenerationCloseProvider) {
     return new EnvironmentSessionListener() {
       @Override
@@ -586,11 +584,6 @@ public class HarnessRuntimeConfiguration {
         try {
           orchestratorProvider.ifAvailable(
               orchestrator -> orchestrator.onEnvironmentReady(environmentId));
-        } catch (RuntimeException ignored) {
-        }
-        try {
-          updateServiceProvider.ifAvailable(
-              updateService -> updateService.onEnvironmentReady(environmentId));
         } catch (RuntimeException ignored) {
         }
       }

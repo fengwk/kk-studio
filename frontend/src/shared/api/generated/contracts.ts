@@ -864,7 +864,6 @@ export interface EnvironmentCardDTO {
   homeDirectory?: string | null
   note?: string | null
   daemonVersion?: string | null
-  update?: EnvironmentUpdateDTO | null
   capabilities: LiveEnvironmentCapabilityDTO[]
   version: string
   createTime: number
@@ -925,6 +924,18 @@ export interface EnvironmentRotateTokenDTO {
   expectedVersion: string
 }
 
+/** Java：fun.fengwk.kkstudio.share.ai.environment.EnvironmentRuntimeDTO */
+export interface EnvironmentRuntimeDTO {
+  daemonVersion: string
+  update: EnvironmentUpdateProgressDTO | null
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.environment.EnvironmentRuntimeStatusDTO */
+export interface EnvironmentRuntimeStatusDTO {
+  revision: string
+  status: EnvironmentRuntimeDTO
+}
+
 /** Java：fun.fengwk.kkstudio.share.ai.catalog.EnvironmentSupportDTO */
 export type EnvironmentSupportDTO =
   | 'NONE'
@@ -937,14 +948,17 @@ export const ENVIRONMENT_SUPPORT_DTO_VALUES: readonly EnvironmentSupportDTO[] = 
   'REQUIRED',
 ]
 
-/** Java：fun.fengwk.kkstudio.share.ai.environment.EnvironmentUpdateDTO */
-export interface EnvironmentUpdateDTO {
-  operationId: string
+/** Java：fun.fengwk.kkstudio.share.ai.environment.EnvironmentUpdateProgressDTO */
+export interface EnvironmentUpdateProgressDTO {
   targetVersion: string
-  phase: string
-  error?: string | null
-  createdAt: number
-  updatedAt: number
+  downloadedBytes: string
+  totalBytes: string | null
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.environment.EnvironmentUpdateStartDTO */
+export interface EnvironmentUpdateStartDTO {
+  runtimeStatus: EnvironmentRuntimeStatusDTO
+  commandStatus: string
 }
 
 /** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessAcceptedCommandsDTO */

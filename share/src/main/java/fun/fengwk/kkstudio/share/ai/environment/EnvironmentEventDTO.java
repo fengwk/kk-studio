@@ -21,7 +21,7 @@ public class EnvironmentEventDTO {
 
   /**
    * 事件类型，取 {@code CONNECTING / READY / DISCONNECTED / SKILL_SYNC_STARTED / SKILL_SYNC_SUCCEEDED /
-   * SKILL_SYNC_FAILED}。
+   * SKILL_SYNC_FAILED / UPDATE_FAILED}。
    */
   private String type;
 
