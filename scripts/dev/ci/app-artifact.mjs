@@ -2,16 +2,18 @@
 /**
  * Stage and verify the application artifact shared by the Docker validation and publish jobs.
  *
- * The staged directory is a closed contract: `app.jar`, `convention4j-agent/convention4j-agent.jar`
- * and `manifest.json`. The output directory must not already exist; stage creates it and the required
- * parent directories, never replacing existing content. The manifest binds both files to the
- * distribution version and source commit, so the publish job can reject an artifact from another run,
- * commit or version without rebuilding the application.
+ * The staged directory is a closed contract: `app.jar`, the stable agent alias
+ * `convention4j-agent/convention4j-agent.jar`, the versioned agent file required by the agent
+ * manifest's `Boot-Class-Path`, and `manifest.json`. The output directory must not already exist;
+ * stage creates it and the required parent directories, never replacing existing content. The
+ * manifest binds all three payloads to the distribution version and source commit, so the publish
+ * job can reject an artifact from another run, commit or version without rebuilding the
+ * application.
  *
  * Usage:
  *   node scripts/dev/ci/app-artifact.mjs stage \
  *     --jar web/target/kk-studio-web-<version>.jar \
- *     --agent <path>/convention4j-agent.jar \
+ *     --agent <path>/convention4j-agent-<version>.jar \
  *     --output <artifact-dir> --version <version> --source-commit <sha>
  *   node scripts/dev/ci/app-artifact.mjs verify \
  *     --dir <artifact-dir> --version <version> --source-commit <sha>
@@ -33,12 +35,14 @@ import { pathToFileURL } from 'node:url'
 import { parseArgs } from 'node:util'
 
 export const APP_FILE = 'app.jar'
-export const AGENT_FILE = 'convention4j-agent/convention4j-agent.jar'
+export const AGENT_DIR = 'convention4j-agent'
+export const AGENT_FILE = `${AGENT_DIR}/convention4j-agent.jar`
 export const MANIFEST_FILE = 'manifest.json'
-export const ARTIFACT_FILES = [APP_FILE, AGENT_FILE, MANIFEST_FILE]
 
 const STATIC_INDEX = 'BOOT-INF/classes/static/index.html'
 const STATIC_ASSETS = 'BOOT-INF/classes/static/assets/'
+const AGENT_LIBRARY_ENTRY = /^BOOT-INF\/lib\/convention4j-agent-[^/]+\.jar$/u
+const AGENT_LIBRARY_NAME = /^convention4j-agent-[0-9A-Za-z][0-9A-Za-z._+-]*\.jar$/u
 const SOURCE_COMMIT = /^[0-9a-f]{40}$/u
 const VERSION = /^[0-9A-Za-z][0-9A-Za-z._-]*$/u
 const SHA256 = /^[0-9a-f]{64}$/u
@@ -121,6 +125,31 @@ function requireFrontendEntries(archive) {
   }
 }
 
+/** Derive the single versioned agent name that the application manifest must boot. */
+function convention4jAgentName(archive) {
+  const matches = listZipEntries(archive).filter((entry) => AGENT_LIBRARY_ENTRY.test(entry))
+  if (matches.length !== 1) {
+    throw new Error(`expected exactly one convention4j-agent dependency in ${archive}`)
+  }
+  const name = matches[0].slice('BOOT-INF/lib/'.length)
+  if (!AGENT_LIBRARY_NAME.test(name) || path.posix.basename(name) !== name) {
+    throw new Error(`convention4j agent dependency has an unsafe filename: ${JSON.stringify(name)}`)
+  }
+  return name
+}
+
+function versionedAgentFile(name) {
+  return `${AGENT_DIR}/${name}`
+}
+
+function payloadFiles(versionedAgent) {
+  return [APP_FILE, AGENT_FILE, versionedAgentFile(versionedAgent)]
+}
+
+function expectedArtifactFiles(versionedAgent) {
+  return [...payloadFiles(versionedAgent), MANIFEST_FILE].sort()
+}
+
 function sha256(file) {
   return createHash('sha256').update(readFileSync(file)).digest('hex')
 }
@@ -148,7 +177,7 @@ function artifactFiles(root) {
   return files.sort()
 }
 
-function requireExactManifest(manifest) {
+function requireExactManifest(manifest, versionedAgent) {
   if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) {
     throw new Error('manifest.json must contain an object')
   }
@@ -159,8 +188,8 @@ function requireExactManifest(manifest) {
   if (typeof manifest.sha256 !== 'object' || manifest.sha256 === null || Array.isArray(manifest.sha256)) {
     throw new Error('manifest.json sha256 must contain the artifact file digests')
   }
-  if (Object.keys(manifest.sha256).sort().join(',') !== [APP_FILE, AGENT_FILE].sort().join(',')) {
-    throw new Error('manifest.json sha256 must cover exactly app.jar and the convention4j agent')
+  if (Object.keys(manifest.sha256).sort().join(',') !== payloadFiles(versionedAgent).sort().join(',')) {
+    throw new Error('manifest.json sha256 must cover exactly app.jar and both convention4j agent files')
   }
   return manifest
 }
@@ -171,6 +200,13 @@ export function stage({ jar, agent, output, version, sourceCommit }) {
   requireReadableFile(jar, 'application JAR')
   requireReadableFile(agent, 'convention4j agent')
   requireFrontendEntries(jar)
+  const expectedAgentName = convention4jAgentName(jar)
+  const actualAgentName = path.basename(agent)
+  if (actualAgentName !== expectedAgentName) {
+    throw new Error(
+      `convention4j agent basename ${JSON.stringify(actualAgentName)} does not match the application dependency ${JSON.stringify(expectedAgentName)}`,
+    )
+  }
   if (listZipEntries(agent).length === 0) {
     throw new Error('convention4j agent is not a readable JAR')
   }
@@ -179,17 +215,17 @@ export function stage({ jar, agent, output, version, sourceCommit }) {
   if (lstatSync(resolvedOutput, { throwIfNoEntry: false })) {
     throw new Error(`output directory already exists: ${resolvedOutput}`)
   }
-  mkdirSync(path.join(resolvedOutput, path.dirname(AGENT_FILE)), { recursive: true })
+  mkdirSync(path.join(resolvedOutput, AGENT_DIR), { recursive: true })
   copyFileSync(jar, path.join(resolvedOutput, APP_FILE))
   copyFileSync(agent, path.join(resolvedOutput, AGENT_FILE))
+  copyFileSync(agent, path.join(resolvedOutput, versionedAgentFile(expectedAgentName)))
 
   const manifest = {
     version,
     sourceCommit,
-    sha256: {
-      [APP_FILE]: sha256(path.join(resolvedOutput, APP_FILE)),
-      [AGENT_FILE]: sha256(path.join(resolvedOutput, AGENT_FILE)),
-    },
+    sha256: Object.fromEntries(
+      payloadFiles(expectedAgentName).map((file) => [file, sha256(path.join(resolvedOutput, file))]),
+    ),
   }
   writeFileSync(
     path.join(resolvedOutput, MANIFEST_FILE),
@@ -207,8 +243,11 @@ export function verify({ dir, version, sourceCommit }) {
   if (!stat || !stat.isDirectory()) {
     throw new Error(`artifact directory is missing: ${root}`)
   }
+  const appJar = path.join(root, APP_FILE)
+  requireReadableFile(appJar, 'application JAR')
+  const versionedAgent = convention4jAgentName(appJar)
   const actual = artifactFiles(root)
-  const expected = [...ARTIFACT_FILES].sort()
+  const expected = expectedArtifactFiles(versionedAgent)
   if (actual.join('\n') !== expected.join('\n')) {
     throw new Error(
       `artifact file set is not the closed contract: expected ${expected.join(', ')}, got ${actual.join(', ')}`,
@@ -217,7 +256,10 @@ export function verify({ dir, version, sourceCommit }) {
 
   let manifest
   try {
-    manifest = requireExactManifest(JSON.parse(readFileSync(path.join(root, MANIFEST_FILE), 'utf8')))
+    manifest = requireExactManifest(
+      JSON.parse(readFileSync(path.join(root, MANIFEST_FILE), 'utf8')),
+      versionedAgent,
+    )
   } catch (error) {
     if (error instanceof SyntaxError) {
       throw new Error('manifest.json is not valid JSON')
@@ -230,7 +272,7 @@ export function verify({ dir, version, sourceCommit }) {
   if (manifest.sourceCommit !== sourceCommit) {
     throw new Error('artifact source commit does not match this workflow run')
   }
-  for (const file of [APP_FILE, AGENT_FILE]) {
+  for (const file of payloadFiles(versionedAgent)) {
     const digest = manifest.sha256[file]
     if (typeof digest !== 'string' || !SHA256.test(digest)) {
       throw new Error(`manifest.json has an invalid sha256 for ${file}`)
@@ -240,8 +282,13 @@ export function verify({ dir, version, sourceCommit }) {
       throw new Error(`artifact integrity check failed for ${file}`)
     }
   }
-  requireFrontendEntries(path.join(root, APP_FILE))
-  if (listZipEntries(path.join(root, AGENT_FILE)).length === 0) {
+  const stableAgent = readFileSync(path.join(root, AGENT_FILE))
+  const versionedAgentBytes = readFileSync(path.join(root, versionedAgentFile(versionedAgent)))
+  if (!stableAgent.equals(versionedAgentBytes)) {
+    throw new Error('convention4j agent stable and versioned files differ')
+  }
+  requireFrontendEntries(appJar)
+  if (listZipEntries(path.join(root, versionedAgentFile(versionedAgent))).length === 0) {
     throw new Error('convention4j agent is not a readable JAR')
   }
   return manifest

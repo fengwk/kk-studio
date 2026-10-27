@@ -181,9 +181,13 @@ jobs:
           APP_JAR: ${{ steps.distribution.outputs.jar }}
         run: |
           set -euo pipefail
-          agent="$RUNNER_TEMP/convention4j-agent/convention4j-agent.jar"
-          mkdir -p "$(dirname "${agent}")"
-          sh scripts/dev/lib/extract-convention4j-agent.sh "$(command -v jar)" "${APP_JAR}" "${agent}"
+          agent_alias="$RUNNER_TEMP/convention4j-agent/convention4j-agent.jar"
+          mkdir -p "$(dirname "${agent_alias}")"
+          sh scripts/dev/lib/extract-convention4j-agent.sh "$(command -v jar)" "${APP_JAR}" "${agent_alias}"
+          # The extractor exposes a stable symlink; stage must copy the versioned regular file
+          # because the agent manifest's Boot-Class-Path keeps that filename.
+          agent="$(readlink -f "${agent_alias}")"
+          test -f "${agent}"
           node scripts/dev/ci/app-artifact.mjs stage \
             --jar "${APP_JAR}" \
             --agent "${agent}" \
@@ -333,7 +337,8 @@ jobs:
           name: kk-studio-app-${{ github.sha }}
           path: ${{ runner.temp }}/verified-app
       - name: Verify the downloaded distribution artifact
-        # 校验封闭文件集合、版本、source commit 与两份文件的 SHA256；缺失或损坏直接失败。
+        # 校验封闭文件集合、版本、source commit 与 app.jar/稳定 agent/版本化 agent 的 SHA256；
+        # 缺失、同名不一致或损坏直接失败。
         if: github.ref_name == 'main'
         env:
           APP_VERSION: ${{ steps.distribution.outputs.version }}
