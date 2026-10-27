@@ -106,7 +106,7 @@ export function usePaneAcceptance(options: PaneAcceptanceOptions) {
       if (!owner) {
         return null
       }
-      const pending = loadPendingAcceptance(owner, paneId)
+      const pending = loadPendingAcceptance(owner, paneId, undefined, target)
       const restored = pending == null ? null : { ...pending, unknownOutcome: true }
       // 栅栏 ref 与 state 同步起步：首帧 hasPendingOperation 就必须看到恢复的未决验收。
       pendingAcceptanceRef.current = restored

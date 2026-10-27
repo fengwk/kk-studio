@@ -146,6 +146,10 @@ export const chatCatalog = {
     'en-US': 'Layout',
     'zh-CN': '布局',
   },
+  'ai.chat.tabStateNotSaved': {
+    'en-US': 'This page’s recovery state is not saved',
+    'zh-CN': '本页恢复状态未保存',
+  },
   'ai.chat.loadingList': {
     'en-US': 'Loading…',
     'zh-CN': '加载中…',

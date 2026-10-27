@@ -19,6 +19,8 @@ export function ChatWorkspacePane({
   onValidateDraftName,
   onFocus,
   initialTarget,
+  target,
+  onTargetChange,
   onTargetConsumed,
   onRequestBranch,
   onPaneReport,
@@ -34,6 +36,9 @@ export function ChatWorkspacePane({
   onValidateDraftName?: (target: PaneTarget, name: string) => Promise<string | null>
   onFocus: () => void
   initialTarget?: PaneTarget
+  /** 由 ChatWorkspacePage 的 tab 呈现状态唯一持有。 */
+  target: PaneTarget
+  onTargetChange: (target: PaneTarget) => void
   onTargetConsumed?: (target: PaneTarget) => void
   /** 新建分支请求（已绑定来源 pane id）：命名与目标 pane 由 workspace 统一决定。 */
   onRequestBranch?: (sourcePaneId: string, request: BranchRequestInput) => void
@@ -58,6 +63,8 @@ export function ChatWorkspacePane({
       onValidateDraftName={onValidateDraftName}
       onFocus={onFocus}
       initialTarget={initialTarget}
+      target={target}
+      onTargetChange={onTargetChange}
       onTargetConsumed={onTargetConsumed}
       onRequestBranch={onRequestBranch == null
         ? undefined
