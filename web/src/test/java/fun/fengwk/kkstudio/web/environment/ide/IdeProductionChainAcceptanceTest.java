@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.web.environment.ide;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -576,7 +577,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
   }
 
   /**
-   * 真正的 Chromium 工作台和终端：dirty 拒绝不得中断两个视图，discard 只结束对应 shell。
+   * 真正的 Chromium 工作台和终端：切换 A 目录后，dirty 拒绝不得中断两个视图，discard 只结束对应 shell。
    *
    * <p>浏览器经 Studio 外部 view 入口访问，不拦截任何网络请求。入口票据只经 stdin 传给驱动，进程参数和诊断均不包含票据。
    */
@@ -591,6 +592,17 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
     String environmentId = startEnvironmentAndDaemon();
     Path workspace = daemon.workspaceDirectory();
     Files.writeString(workspace.resolve("draft.txt"), "fixture draft\n", StandardCharsets.UTF_8);
+    Files.writeString(
+        workspace.resolve("original-only.txt"), "original view\n", StandardCharsets.UTF_8);
+    Path target = Files.createDirectory(workspace.resolve("target-project")).toRealPath();
+    Path draft = target.resolve("draft.txt");
+    Files.writeString(draft, "fixture target draft\n", StandardCharsets.UTF_8);
+    Files.writeString(target.resolve("target-only.txt"), "target view\n", StandardCharsets.UTF_8);
+    Path settings = Files.createDirectory(target.resolve(".vscode")).resolve("settings.json");
+    // Web VS Code defaults to after-delay auto-save; keep the intentional draft dirty.
+    Files.writeString(settings, "{\"files.autoSave\":\"off\"}\n", StandardCharsets.UTF_8);
+    Path alias = Files.createSymbolicLink(workspace.resolve("target-alias"), target);
+    assertNotEquals(alias.toString(), target.toString(), "the requested path must be a symlink");
     Path browserTemp = Files.createDirectory(workspace.resolve(".browser-tmp"));
     Files.setPosixFilePermissions(browserTemp, PosixFilePermissions.fromString("rwx------"));
     UUID documentId = UUID.randomUUID();
@@ -608,6 +620,15 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
               new IntentView(environmentId, viewB, claimB, null)));
       JsonNode openedA = openView(environmentId, viewA, documentId, identity, claimA);
       JsonNode openedB = openView(environmentId, viewB, documentId, identity, claimB);
+      long epochA = Long.parseLong(openedA.path("bindingEpoch").asText());
+      long epochB = Long.parseLong(openedB.path("bindingEpoch").asText());
+      assertTrue(epochA > 0 && epochB > 0, "both opened views must have binding epochs");
+      events.registerUsage(
+          documentId,
+          2L,
+          List.of(
+              new IntentView(environmentId, viewA, claimA, epochA),
+              new IntentView(environmentId, viewB, claimB, epochB)));
       browserDriver = BrowserDriver.start(nodeBinary(), recordsDir());
       browserDriver.send(
           Map.of(
@@ -623,6 +644,12 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
               workspace.toString(),
               "browserTempDirectory",
               browserTemp.toString(),
+              "requestedDirectory",
+              alias.toString(),
+              "canonicalDirectory",
+              target.toString(),
+              "draftPath",
+              draft.toString(),
               "views",
               List.of(browserView(viewA, openedA), browserView(viewB, openedB))));
 
@@ -1410,11 +1437,25 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
       }
       builder.append("]}");
       assertTrue(socket.send(builder.toString()), "the ide-use frame must be sent");
-      JsonNode ack = awaitFrame();
+      JsonNode ack = awaitUsageAck();
       assertEquals(
           "ide-use-accepted",
           ack.path("type").asText(),
           "the ide-use frame must be accepted: " + ack);
+      assertEquals(Long.toString(revision), ack.path("revision").asText());
+    }
+
+    /** 心跳可在本次使用证明的 ACK 前到达；只过滤心跳，不忽略其它协议帧。 */
+    private JsonNode awaitUsageAck() throws InterruptedException {
+      long deadline = System.nanoTime() + FRAME_TIMEOUT.toNanos();
+      JsonNode frame;
+      do {
+        long remaining = deadline - System.nanoTime();
+        assertTrue(remaining > 0, "the event channel produced no ide-use acknowledgement");
+        frame = frames.poll(remaining, TimeUnit.NANOSECONDS);
+        assertNotNull(frame, "the event channel produced no ide-use acknowledgement");
+      } while ("heartbeat".equals(frame.path("type").asText()));
+      return frame;
     }
 
     private JsonNode awaitFrame() throws InterruptedException {
