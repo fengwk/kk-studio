@@ -85,6 +85,15 @@ const openViewPayload = {
 }
 
 /** Complete IDE test double; lifecycle-focused tests override only the port they exercise. */
+function dataBindHandler(overrides: Partial<DataBindHandler> = {}): DataBindHandler {
+  return {
+    bind() {},
+    activeStreamCount: () => 0,
+    async close() {},
+    ...overrides,
+  }
+}
+
 function ideService(overrides: Partial<IdeService> = {}): IdeService {
   const base: IdeService = {
     async handle() {
@@ -1687,11 +1696,11 @@ describe('runtime extension handlers', () => {
   it('validates DATA_BIND same-origin before invoking the configured handler', async () => {
     const seen: unknown[] = []
     const setup = buildRuntime({
-      dataBind: {
+      dataBind: dataBindHandler({
         bind(value) {
           seen.push(value)
         },
-      },
+      }),
     })
     await handshake(setup)
     setup.transport.receive(
@@ -1712,17 +1721,59 @@ describe('runtime extension handlers', () => {
     setup.runtime.close()
   })
 
-  it('keeps an active data connection in the UPDATE busy check until it converges', async () => {
+  it('closes an idle data connection before starting the updater', async () => {
     const bindGate = Promise.withResolvers<void>()
-    const seenSignals: AbortSignal[] = []
+    const events: string[] = []
+    let bindStarted = false
     let updateCalls = 0
     const setup = buildRuntime({
-      dataBind: {
-        async bind(_value, signal) {
-          seenSignals.push(signal)
+      dataBind: dataBindHandler({
+        async bind() {
+          bindStarted = true
           await bindGate.promise
         },
+        async close() {
+          events.push('data-close')
+          bindGate.resolve()
+        },
+      }),
+      update: {
+        async handleUpdate() {
+          updateCalls++
+          events.push('update')
+          return { phase: 'PREPARED' }
+        },
       },
+    })
+    await handshake(setup)
+    setup.transport.receive(serverMessage('DATA_BIND', { environmentId: ENV, payload: binding }))
+    await waitFor(() => bindStarted)
+
+    // 物理连接即使由 bind 的存续 Promise 表示，只要没有活动逻辑流就不阻止更新。
+    setup.transport.receive(serverMessage('UPDATE', { environmentId: ENV, payload: command }))
+    await waitFor(
+      () =>
+        sent(setup.transport).some(
+          (envelope) =>
+            envelope.messageType === 'UPDATE_RESULT' &&
+            (envelope.payload as { phase: string }).phase === 'PREPARED',
+        ),
+    )
+    expect(events).toEqual(['data-close', 'update'])
+    expect(updateCalls).toBe(1)
+    setup.runtime.close()
+  })
+
+  it('rejects UPDATE while data streams are active without closing the connection', async () => {
+    let closeCalls = 0
+    let updateCalls = 0
+    const setup = buildRuntime({
+      dataBind: dataBindHandler({
+        activeStreamCount: () => 1,
+        async close() {
+          closeCalls++
+        },
+      }),
       update: {
         async handleUpdate() {
           updateCalls++
@@ -1731,10 +1782,6 @@ describe('runtime extension handlers', () => {
       },
     })
     await handshake(setup)
-    setup.transport.receive(serverMessage('DATA_BIND', { environmentId: ENV, payload: binding }))
-    await waitFor(() => seenSignals.length === 1)
-    expect(seenSignals[0]?.aborted).toBe(false)
-
     setup.transport.receive(serverMessage('UPDATE', { environmentId: ENV, payload: command }))
     await waitFor(
       () =>
@@ -1742,14 +1789,49 @@ describe('runtime extension handlers', () => {
           (envelope) =>
             envelope.messageType === 'UPDATE_RESULT' &&
             (envelope.payload as { phase: string }).phase === 'FAILED' &&
-            (envelope.payload as { message: string }).message.includes('data connection'),
+            (envelope.payload as { message: string }).message.includes('data streams are active'),
+        ),
+    )
+    expect(closeCalls).toBe(0)
+    expect(updateCalls).toBe(0)
+    setup.runtime.close()
+  })
+
+  it('fails UPDATE and clears admission when closing an idle data connection fails', async () => {
+    let closeCalls = 0
+    let failClose = true
+    let updateCalls = 0
+    const setup = buildRuntime({
+      dataBind: dataBindHandler({
+        async close() {
+          closeCalls++
+          if (failClose) {
+            throw new Error('data close failed')
+          }
+        },
+      }),
+      update: {
+        async handleUpdate() {
+          updateCalls++
+          return { phase: 'PREPARED' }
+        },
+      },
+    })
+    await handshake(setup)
+    setup.transport.receive(serverMessage('UPDATE', { environmentId: ENV, payload: command }))
+    await waitFor(
+      () =>
+        sent(setup.transport).some(
+          (envelope) =>
+            envelope.messageType === 'UPDATE_RESULT' &&
+            (envelope.payload as { phase: string }).phase === 'FAILED' &&
+            (envelope.payload as { message: string }).message.includes('data close failed'),
         ),
     )
     expect(updateCalls).toBe(0)
 
-    bindGate.resolve()
-    await tick()
-    await tick()
+    // 失败已清准入门闩：修复 close 后同一目标的新 operation 可以重新准入并执行。
+    failClose = false
     setup.transport.receive(
       serverMessage('UPDATE', {
         environmentId: ENV,
@@ -1766,16 +1848,17 @@ describe('runtime extension handlers', () => {
         ),
     )
     expect(updateCalls).toBe(1)
+    expect(closeCalls).toBe(2)
     setup.runtime.close()
   })
 
   it('reports asynchronous DATA_BIND failures as control errors', async () => {
     const setup = buildRuntime({
-      dataBind: {
+      dataBind: dataBindHandler({
         async bind() {
           throw new Error('stream setup failed')
         },
-      },
+      }),
     })
     await handshake(setup)
     setup.transport.receive(serverMessage('DATA_BIND', { environmentId: ENV, payload: binding }))

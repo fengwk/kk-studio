@@ -1053,6 +1053,11 @@ export class Runtime {
       if (update === null) {
         throw new Error('managed update is not configured')
       }
+      // 更新门闩已经同步建立：不再接受新 DATA_BIND，且活动逻辑流已在准入前拒绝。
+      // 先关闭空闲物理数据连接并等待收敛，再停止 IDE 与启动 updater；close 失败不得继续替换。
+      if (this.dataBind !== null) {
+        await this.dataBind.close()
+      }
       // The update gate is already held, so no new view can appear while the idle IDE
       // process scope is stopped and confirmed before the updater starts.
       const signal = active.controller?.signal ?? AbortSignal.abort('SHUTDOWN')
@@ -1152,8 +1157,8 @@ export class Runtime {
     if (this.ideInFlight.size > 0) {
       return 'IDE command is in progress'
     }
-    if (this.dataBindInFlight.size > 0) {
-      return 'IDE data connection is active'
+    if (this.dataBind !== null && this.dataBind.activeStreamCount() > 0) {
+      return 'IDE data streams are active'
     }
     if (this.ide !== null && !this.ide.canStartUpdate()) {
       return 'IDE views, cleanup or data streams are active'
