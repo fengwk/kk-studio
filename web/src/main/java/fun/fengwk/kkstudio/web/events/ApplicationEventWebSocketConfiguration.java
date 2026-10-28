@@ -5,7 +5,7 @@ import org.springframework.web.socket.config.annotation.EnableWebSocket;
 import org.springframework.web.socket.config.annotation.WebSocketConfigurer;
 import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry;
 
-/** 浏览器事件通道的 WebSocket 传输注册（{@code /api/events/v1}）。 */
+/** 浏览器事件通道的 WebSocket 传输注册（{@code /api/events/v2}）。 */
 @Configuration(proxyBeanMethods = false)
 @EnableWebSocket
 public class ApplicationEventWebSocketConfiguration implements WebSocketConfigurer {

@@ -24,6 +24,8 @@ export interface ApplicationEventConnectionOptions {
   onOpen?: () => void
   /** 严格解码后的 server 消息；畸形帧不会到达这里。 */
   onMessage?: (message: ApplicationEventServerMessage) => void
+  /** 当前物理 socket 结束（断线、主动关闭或协议终止）时触发一次；Manager 借此清空连接身份与未确认请求。 */
+  onClose?: () => void
 }
 
 /** 退避序列：250ms..10s，之后保持 10s cap。 */
@@ -50,6 +52,7 @@ export class ApplicationEventConnection {
   private readonly socketFactory: ApplicationEventSocketFactory
   private readonly onOpen?: () => void
   private readonly onMessage?: (message: ApplicationEventServerMessage) => void
+  private readonly onClose?: () => void
 
   private socket: WebSocket | null = null
   private generation = 0
@@ -59,12 +62,14 @@ export class ApplicationEventConnection {
   private stopped = true
   private terminal = false
   private listenersAttached = false
+  private closeNotified = false
 
   constructor(options: ApplicationEventConnectionOptions) {
     this.url = options.url
     this.socketFactory = options.socketFactory ?? ((url) => new WebSocket(url))
     this.onOpen = options.onOpen
     this.onMessage = options.onMessage
+    this.onClose = options.onClose
   }
 
   getStatus(): ApplicationEventConnectionStatus {
@@ -79,6 +84,7 @@ export class ApplicationEventConnection {
     this.attachLifecycleListeners()
     this.stopped = false
     this.generation += 1
+    this.closeNotified = false
     const generation = this.generation
     let socket: WebSocket
     try {
@@ -126,6 +132,7 @@ export class ApplicationEventConnection {
         return
       }
       this.socket = null
+      this.notifyClosed()
       if (CLOSE_CODES_TERMINAL.has(event.code)) {
         // 协议错误/策略违规：terminal，不无限重试。
         this.stopTerminal()
@@ -153,6 +160,7 @@ export class ApplicationEventConnection {
     }
     this.safeClose(this.socket)
     this.socket = null
+    this.notifyClosed()
     this.setStatus('closed')
   }
 
@@ -235,6 +243,7 @@ export class ApplicationEventConnection {
     }
     this.generation += 1
     this.socket = null
+    this.notifyClosed()
     this.setStatus('backoff')
     this.scheduleReconnect()
   }
@@ -254,7 +263,16 @@ export class ApplicationEventConnection {
     }
     this.safeClose(this.socket)
     this.socket = null
+    this.notifyClosed()
     this.setStatus('closed')
+  }
+
+  private notifyClosed(): void {
+    if (this.closeNotified) {
+      return
+    }
+    this.closeNotified = true
+    this.onClose?.()
   }
 
   private isCurrent(generation: number): boolean {
@@ -294,10 +312,10 @@ export class ApplicationEventConnection {
   }
 }
 
-/** 由当前 api base（/api）构造 ws(s)://<host>/api/events/v1；清除 search/hash。 */
+/** 由当前 api base（/api）构造 ws(s)://<host>/api/events/v2；清除 search/hash。 */
 export function createApplicationEventUrl(): string {
   const base = new URL(apiBaseUrl, window.location.href)
-  base.pathname = `${base.pathname.replace(/\/+$/, '')}/events/v1`
+  base.pathname = `${base.pathname.replace(/\/+$/, '')}/events/v2`
   base.protocol = base.protocol === 'https:' ? 'wss:' : 'ws:'
   base.search = ''
   base.hash = ''

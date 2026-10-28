@@ -1,15 +1,19 @@
 /**
- * 应用事件 WebSocket 协议（/api/events/v1）。
+ * 应用事件 WebSocket 协议（/api/events/v2）。
  *
- * client -> server（JSON 文本，所有帧带 version=1）：
- * - {"version":1,"type":"subscribe","resource":{"kind":"thread"|"canvas"|"tree","id":"<UUID>"}}
- * - {"version":1,"type":"subscribe","resource":{"kind":"projects"|"interactions"|"environments"}}
- * - {"version":1,"type":"unsubscribe","resource":{...}}
+ * client -> server（JSON 文本，所有帧带 version=2）：
+ * - {"version":2,"type":"subscribe","resource":{"kind":"thread"|"canvas"|"tree","id":"<UUID>"}}
+ * - {"version":2,"type":"subscribe","resource":{"kind":"projects"|"interactions"|"environments"}}
+ * - {"version":2,"type":"unsubscribe","resource":{...}}
+ * - {"version":2,"type":"ide-use","documentId":"<UUID>","revision":"<positive decimal>",
+ *    "views":[{"environmentId":"<UUID>","viewId":"<UUID>","claimId":"<UUID>","bindingEpoch":"<positive decimal>"}]}
  *
- * server -> client（JSON 文本，所有帧带 version=1）：
- * - {"version":1,"type":"subscribed","resource":{...},"cursor":"<canonical>"}
+ * server -> client（JSON 文本，所有帧带 version=2）：
+ * - {"version":2,"type":"connected","eventNodeId":"<UUID>","connectionId":"<UUID>"}
+ *   连接建立后的第一帧；每次重连都是新的 connectionId。
+ * - {"version":2,"type":"subscribed","resource":{...},"cursor":"<canonical>"}
  *   订阅已在 wire 上建立（首次与重连后都会发送）；cursor 是资源当前游标。
- * - {"version":1,"type":"event","resource":{...},"name":"version"|"realtime"|"changed","data":{...},"cursor":"<canonical>"}
+ * - {"version":2,"type":"event","resource":{...},"name":"version"|"realtime"|"changed"|"revision","data":{...},"cursor":"<canonical>"}
  *   - thread version：data {"version":"N"}，cursor 必带且与 data.version 完全相等；服务端通过
  *     PostgreSQL notification 感知持久化变更，浏览器只依赖此 version/cursor 契约。
  *   - thread realtime：data 为 lossy realtime delta envelope 的 JSON 对象（如 MODEL_DELTA），
@@ -19,11 +23,12 @@
  *   - tree changed：resource 带真实执行根 id，data 恒为 {}，只提示回读该根的执行树，不带 cursor。
  *   - interactions changed：data {"rootThreadId":"<UUID>"}，只提示回读待处理交互与全局角标，不带 cursor。
  *   - environments changed：data 恒为 {}，只提示回读环境列表，不带 cursor。
- * - {"version":1,"type":"resync","resource":{...}}：需要整体替换为全量快照。
- * - {"version":1,"type":"heartbeat"}：连接级保活；客户端严格解码后静默消费。
- * - {"version":1,"type":"error","resource"?:{...},"code":"<string>","message":"<string>"}
+ * - {"version":2,"type":"resync","resource":{...}}：需要整体替换为全量快照。
+ * - {"version":2,"type":"heartbeat"}：连接级文本保活；客户端严格解码后静默消费。
+ * - {"version":2,"type":"ide-use-accepted","revision":"<positive decimal>"}：ide-use 列表已确认。
+ * - {"version":2,"type":"error","resource"?:{...},"code":"<string>","message":"<string>"}
  *
- * 解码是真正严格的：version 必须为 1、每种 type/name 只接受精确字段集、
+ * 解码是真正严格的：version 必须为 2、每种 type/name 只接受精确字段集、
  * 多余/未知字段一律拒绝；resource 精确只有 kind+id 且 id 必须是 canonical
  * UUID（小写十六进制）；全局 projects/interactions/environments resource 不带 id；
  * resource/name 组合必须合法（thread 仅 version|realtime，canvas 仅 revision，
@@ -31,7 +36,9 @@
  * version data 必须是 canonical 非负十进制字符串，durable 事件的 cursor 必须
  * 存在且与 data 值完全相等，提示型资源（projects/tree/interactions/environments）
  * 的 ack cursor 恒为 '0' 且事件绝不携带 cursor；realtime data 必须是非数组 JSON
- * 对象且不得携带 cursor。畸形消息永远不会到达 listeners。
+ * 对象且不得携带 cursor。connected 的两个身份、revision 与 bindingEpoch 都是
+ * canonical UUID / 正十进制字符串（不超过 9223372036854775807）。畸形消息永远不会
+ * 到达 listeners。
  */
 
 export type ApplicationEventResourceKind =
@@ -55,9 +62,40 @@ export type ApplicationEventName = 'version' | 'realtime' | 'changed' | 'revisio
 /** canonical 非负十进制字符串：'0' 或非零开头，无前导零、无符号、无空白。 */
 export type ApplicationEventCursor = string
 
+/** ide-use revision：canonical 正十进制字符串，不超过 9223372036854775807。 */
+export type ApplicationEventRevision = string
+
+/** 当前物理事件连接的关联身份；不是认证凭据，每次重连都会变化。 */
+export interface ApplicationEventConnectionIdentity {
+  eventNodeId: string
+  connectionId: string
+}
+
+/** 一项 IDE 使用意图；没有 bindingEpoch 的项不能用于续租。 */
+export interface ApplicationEventIdeUseView {
+  environmentId: string
+  viewId: string
+  claimId: string
+  bindingEpoch?: string
+}
+
+/** 一个浏览器 document 的完整 IDE 持有列表；revision 在同一连接内单调递增。 */
+export interface ApplicationEventIdeUse {
+  documentId: string
+  revision: ApplicationEventRevision
+  views: ApplicationEventIdeUseView[]
+}
+
 export type ApplicationEventClientMessage =
-  | { version: 1; type: 'subscribe'; resource: ApplicationEventResource }
-  | { version: 1; type: 'unsubscribe'; resource: ApplicationEventResource }
+  | { version: 2; type: 'subscribe'; resource: ApplicationEventResource }
+  | { version: 2; type: 'unsubscribe'; resource: ApplicationEventResource }
+  | {
+      version: 2
+      type: 'ide-use'
+      documentId: string
+      revision: ApplicationEventRevision
+      views: ApplicationEventIdeUseView[]
+    }
 
 /** thread 的持久 version 事件：cursor 必带且与 data.version 完全相等。 */
 type ApplicationEventThreadVersionEvent = {
@@ -133,6 +171,7 @@ type ApplicationEventEnvironmentsChangedEvent = {
 }
 
 export type ApplicationEventServerMessage =
+  | { type: 'connected'; eventNodeId: string; connectionId: string }
   | { type: 'heartbeat' }
   | { type: 'subscribed'; resource: ApplicationEventResource; cursor: ApplicationEventCursor }
   | ApplicationEventThreadVersionEvent
@@ -143,10 +182,13 @@ export type ApplicationEventServerMessage =
   | ApplicationEventInteractionsChangedEvent
   | ApplicationEventEnvironmentsChangedEvent
   | { type: 'resync'; resource: ApplicationEventResource }
+  | { type: 'ide-use-accepted'; revision: ApplicationEventRevision }
   | { type: 'error'; resource?: ApplicationEventResource; code: string; message: string }
 
 const CANONICAL_DECIMAL = /^(0|[1-9][0-9]*)$/
+const CANONICAL_POSITIVE_DECIMAL = /^[1-9][0-9]*$/
 const CANONICAL_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+const MAX_SIGNED_LONG_DECIMAL = '9223372036854775807'
 const EVENT_FIELDS = ['version', 'type', 'resource', 'name', 'data', 'cursor'] as const
 
 export function encodeClientMessage(message: ApplicationEventClientMessage): string {
@@ -160,15 +202,36 @@ export function decodeServerMessage(raw: string): ApplicationEventServerMessage 
   } catch {
     return null
   }
-  if (!isRecord(parsed) || parsed.version !== 1 || typeof parsed.type !== 'string') {
+  if (!isRecord(parsed) || parsed.version !== 2 || typeof parsed.type !== 'string') {
     return null
   }
   switch (parsed.type) {
+    case 'connected': {
+      if (!hasOnlyFields(parsed, ['version', 'type', 'eventNodeId', 'connectionId'])) {
+        return null
+      }
+      const eventNodeId = parseUuid(parsed.eventNodeId)
+      const connectionId = parseUuid(parsed.connectionId)
+      if (eventNodeId == null || connectionId == null) {
+        return null
+      }
+      return { type: 'connected', eventNodeId, connectionId }
+    }
     case 'heartbeat': {
       if (!hasOnlyFields(parsed, ['version', 'type'])) {
         return null
       }
       return { type: 'heartbeat' }
+    }
+    case 'ide-use-accepted': {
+      if (!hasOnlyFields(parsed, ['version', 'type', 'revision'])) {
+        return null
+      }
+      const revision = parseRevision(parsed.revision)
+      if (revision == null) {
+        return null
+      }
+      return { type: 'ide-use-accepted', revision }
     }
     case 'subscribed': {
       if (!hasOnlyFields(parsed, ['version', 'type', 'resource', 'cursor'])) {
@@ -352,6 +415,20 @@ function parseCursor(value: unknown): ApplicationEventCursor | null {
   return typeof value === 'string' && CANONICAL_DECIMAL.test(value) ? value : null
 }
 
+/** revision 只接受正 canonical 十进制，且必须不超过有符号 64 位上限。 */
+function parseRevision(value: unknown): ApplicationEventRevision | null {
+  if (typeof value !== 'string' || !CANONICAL_POSITIVE_DECIMAL.test(value)) {
+    return null
+  }
+  if (
+    value.length > MAX_SIGNED_LONG_DECIMAL.length
+    || (value.length === MAX_SIGNED_LONG_DECIMAL.length && value > MAX_SIGNED_LONG_DECIMAL)
+  ) {
+    return null
+  }
+  return value
+}
+
 /** durable version 事件的精确 data：单字段对象且字段值为 canonical 十进制字符串。 */
 function parseSingleCursorField(
   data: unknown,
@@ -368,6 +445,10 @@ function parseSingleUuidField(data: unknown, key: 'projectId' | 'rootThreadId'):
     return null
   }
   const value = (data as Record<string, unknown>)[key]
+  return parseUuid(value)
+}
+
+function parseUuid(value: unknown): string | null {
   return typeof value === 'string' && CANONICAL_UUID.test(value) ? value : null
 }
 

@@ -18,6 +18,9 @@ import jakarta.websocket.Session;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -205,6 +208,69 @@ class AsyncTextSenderTest {
     remote.complete(0);
   }
 
+  @Test
+  void nativePingSharesTheSerialChainAndBoundedCapacity() {
+    FakeAsyncRemote remote = new FakeAsyncRemote();
+    AsyncTextSender sender =
+        new AsyncTextSender(session(remote), 3, DEFAULT_MAX_BYTES, SEND_TIMEOUT_MILLIS);
+
+    assertTrue(sender.enqueue("a"));
+    assertTrue(sender.enqueuePing());
+    assertTrue(sender.enqueue("b"));
+    assertEquals(1, remote.sent.size(), "text is the only in-flight frame");
+    assertEquals("a", remote.sent.getFirst().text);
+    assertTrue(remote.pings.isEmpty(), "ping waits behind in-flight text");
+
+    remote.complete(0);
+    assertEquals(1, remote.pings.size(), "ping uses the same serial drain");
+    assertEquals("b", remote.sent.get(1).text);
+    remote.complete(1);
+  }
+
+  @Test
+  void pingCountsAgainstTheQueueEvenWithZeroBytes() {
+    FakeAsyncRemote remote = new FakeAsyncRemote();
+    AsyncTextSender sender =
+        new AsyncTextSender(session(remote), 2, DEFAULT_MAX_BYTES, SEND_TIMEOUT_MILLIS);
+
+    assertTrue(sender.enqueue("a")); // in-flight
+    assertTrue(sender.enqueuePing()); // queued
+    assertFalse(sender.enqueuePing(), "ping consumes a queue slot");
+  }
+
+  @Test
+  void pingFailureClosesTheSharedWriterAndStopsTheChain() throws Exception {
+    FakeAsyncRemote remote = new FakeAsyncRemote();
+    remote.pingThrows = true;
+    Session session = session(remote);
+    AsyncTextSender sender =
+        new AsyncTextSender(session, 4, DEFAULT_MAX_BYTES, SEND_TIMEOUT_MILLIS);
+
+    assertTrue(sender.enqueue("a"));
+    assertTrue(sender.enqueuePing());
+    assertTrue(sender.enqueue("b"));
+    remote.complete(0); // drain ping -> IOException -> close
+
+    verify(session).close(any(CloseReason.class));
+    assertEquals(1, remote.sent.size(), "text after the failed ping must not be sent");
+    assertFalse(sender.enqueue("c"));
+  }
+
+  @Test
+  void discardDropsQueuedFramesAndStopsTheChain() {
+    FakeAsyncRemote remote = new FakeAsyncRemote();
+    AsyncTextSender sender =
+        new AsyncTextSender(session(remote), 4, DEFAULT_MAX_BYTES, SEND_TIMEOUT_MILLIS);
+
+    assertTrue(sender.enqueue("a"));
+    assertTrue(sender.enqueue("b"));
+    sender.discard();
+    remote.complete(0);
+
+    assertEquals(1, remote.sent.size(), "queued frames must be released on discard");
+    assertFalse(sender.enqueue("c"), "discard must stop further enqueues");
+  }
+
   private static Session session(FakeAsyncRemote remote) {
     Async async = mock(Async.class);
     doAnswer(
@@ -216,6 +282,20 @@ class AsyncTextSenderTest {
             })
         .when(async)
         .sendText(any(String.class), any(SendHandler.class));
+    try {
+      doAnswer(
+              inv -> {
+                if (remote.pingThrows) {
+                  throw new IOException("ping failed");
+                }
+                remote.pings.add(inv.getArgument(0));
+                return null;
+              })
+          .when(async)
+          .sendPing(any(ByteBuffer.class));
+    } catch (IOException error) {
+      throw new UncheckedIOException(error);
+    }
     Session session = mock(Session.class);
     when(session.getAsyncRemote()).thenReturn(async);
     return session;
@@ -233,6 +313,8 @@ class AsyncTextSenderTest {
 
   private static final class FakeAsyncRemote {
     private final List<Sent> sent = new ArrayList<>();
+    private final List<ByteBuffer> pings = new ArrayList<>();
+    private boolean pingThrows;
 
     private void complete(int index) {
       assertNotNull(sent.get(index).handler, "no handler recorded for frame " + index);
