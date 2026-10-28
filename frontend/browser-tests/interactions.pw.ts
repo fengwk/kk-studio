@@ -139,7 +139,7 @@ function buildItems(): InteractionDTO[] {
 async function mockPendingApi(page: Page, options: PendingApiOptions = {}): Promise<void> {
   const targetWrites: string[] = []
   targetWritesByPage.set(page, targetWrites)
-  await page.routeWebSocket(/\/api\/events\/v1$/, () => {})
+  await page.routeWebSocket(/\/api\/events\/v2$/, () => {})
   const state: PendingApiState = {
     listCalls: 0,
     decidedApprovals: new Set(),
