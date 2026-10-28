@@ -190,7 +190,8 @@ public final class IdeGatewayDataPlane {
       if (!response.isCommitted()) {
         IdeDataHeaderPolicy.sendError(response, failure.status());
       } else {
-        throw new IOException("IDE HTTP exchange failed after the browser response was committed");
+        throw new IOException(
+            "IDE HTTP exchange failed after the browser response was committed", failure);
       }
     }
   }
