@@ -7,15 +7,19 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEventJsonCodec;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
+import fun.fengwk.kkstudio.ide.browser.IdeBrowserUse;
+import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseView;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKey;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKind;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.Signal;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -33,42 +37,49 @@ class EventFrameCodecTest {
   private static final ResourceKey ENVIRONMENTS_KEY =
       new ResourceKey(ResourceKind.ENVIRONMENTS, null);
   private static final EventFrameCodec CODEC = new EventFrameCodec(new RealtimeEventJsonCodec());
+  private static final UUID ENVIRONMENT = UUID.fromString("33333333-3333-3333-3333-333333333333");
+  private static final UUID DOCUMENT = UUID.fromString("44444444-4444-4444-4444-444444444444");
+  private static final UUID VIEW = UUID.fromString("55555555-5555-5555-5555-555555555555");
+  private static final UUID CLAIM = UUID.fromString("66666666-6666-6666-6666-666666666666");
 
   @Test
   void decodesSubscribeAndUnsubscribeFrames() {
     assertEquals(
-        new EventFrameCodec.ClientFrame(EventFrameCodec.ClientFrame.Type.SUBSCRIBE, THREAD_KEY),
+        new EventFrameCodec.SubscriptionFrame(
+            EventFrameCodec.SubscriptionType.SUBSCRIBE, THREAD_KEY),
         CODEC.decode(
-            "{\"version\":1,\"type\":\"subscribe\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+            "{\"version\":2,\"type\":\"subscribe\",\"resource\":{\"kind\":\"thread\",\"id\":\""
                 + THREAD
                 + "\"}}"));
     assertEquals(
-        new EventFrameCodec.ClientFrame(EventFrameCodec.ClientFrame.Type.UNSUBSCRIBE, CANVAS_KEY),
+        new EventFrameCodec.SubscriptionFrame(
+            EventFrameCodec.SubscriptionType.UNSUBSCRIBE, CANVAS_KEY),
         CODEC.decode(
-            "{\"version\":1,\"type\":\"unsubscribe\",\"resource\":{\"kind\":\"canvas\",\"id\":\""
+            "{\"version\":2,\"type\":\"unsubscribe\",\"resource\":{\"kind\":\"canvas\",\"id\":\""
                 + CANVAS
                 + "\"}}"));
     assertEquals(
-        new EventFrameCodec.ClientFrame(EventFrameCodec.ClientFrame.Type.SUBSCRIBE, PROJECTS_KEY),
+        new EventFrameCodec.SubscriptionFrame(
+            EventFrameCodec.SubscriptionType.SUBSCRIBE, PROJECTS_KEY),
         CODEC.decode(
-            "{\"version\":1,\"type\":\"subscribe\",\"resource\":{\"kind\":\"projects\"}}"));
+            "{\"version\":2,\"type\":\"subscribe\",\"resource\":{\"kind\":\"projects\"}}"));
     // 执行树按真实根 id 订阅；交互与 Environment 是无 id 的全局资源。
     assertEquals(
-        new EventFrameCodec.ClientFrame(EventFrameCodec.ClientFrame.Type.SUBSCRIBE, TREE_KEY),
+        new EventFrameCodec.SubscriptionFrame(EventFrameCodec.SubscriptionType.SUBSCRIBE, TREE_KEY),
         CODEC.decode(
-            "{\"version\":1,\"type\":\"subscribe\",\"resource\":{\"kind\":\"tree\",\"id\":\""
+            "{\"version\":2,\"type\":\"subscribe\",\"resource\":{\"kind\":\"tree\",\"id\":\""
                 + THREAD
                 + "\"}}"));
     assertEquals(
-        new EventFrameCodec.ClientFrame(
-            EventFrameCodec.ClientFrame.Type.SUBSCRIBE, INTERACTIONS_KEY),
+        new EventFrameCodec.SubscriptionFrame(
+            EventFrameCodec.SubscriptionType.SUBSCRIBE, INTERACTIONS_KEY),
         CODEC.decode(
-            "{\"version\":1,\"type\":\"subscribe\",\"resource\":{\"kind\":\"interactions\"}}"));
+            "{\"version\":2,\"type\":\"subscribe\",\"resource\":{\"kind\":\"interactions\"}}"));
     assertEquals(
-        new EventFrameCodec.ClientFrame(
-            EventFrameCodec.ClientFrame.Type.SUBSCRIBE, ENVIRONMENTS_KEY),
+        new EventFrameCodec.SubscriptionFrame(
+            EventFrameCodec.SubscriptionType.SUBSCRIBE, ENVIRONMENTS_KEY),
         CODEC.decode(
-            "{\"version\":1,\"type\":\"subscribe\",\"resource\":{\"kind\":\"environments\"}}"));
+            "{\"version\":2,\"type\":\"subscribe\",\"resource\":{\"kind\":\"environments\"}}"));
   }
 
   @Test
@@ -88,28 +99,28 @@ class EventFrameCodecTest {
         "\"type\":\"subscribe\",\"resource\":{\"kind\":\"thread\",\"id\":\"" + THREAD + "\"}";
     assertThrows(IllegalArgumentException.class, () -> CODEC.decode("{" + base + "}"));
     assertThrows(
-        IllegalArgumentException.class, () -> CODEC.decode("{\"version\":2," + base + "}"));
+        IllegalArgumentException.class, () -> CODEC.decode("{\"version\":1," + base + "}"));
     assertThrows(
-        IllegalArgumentException.class, () -> CODEC.decode("{\"version\":\"1\"," + base + "}"));
-    // version 必须是精确 integer 1：溢出整数（低 64 位截断为 1）与浮点 1.0 均拒绝。
+        IllegalArgumentException.class, () -> CODEC.decode("{\"version\":\"2\"," + base + "}"));
+    // version 必须是精确 integer 2：溢出整数（低 64 位截断）与浮点 2.0 均拒绝。
     assertThrows(
         IllegalArgumentException.class,
-        () -> CODEC.decode("{\"version\":18446744073709551617," + base + "}"));
+        () -> CODEC.decode("{\"version\":28446744073709551618," + base + "}"));
     assertThrows(
-        IllegalArgumentException.class, () -> CODEC.decode("{\"version\":1.0," + base + "}"));
+        IllegalArgumentException.class, () -> CODEC.decode("{\"version\":2.0," + base + "}"));
   }
 
-  /** 帧版本只接受整数 token 1，不能把小数、指数形式或超宽整数强制转换为有效版本。 */
+  /** 帧版本只接受整数 token 2，不能把小数、指数形式或超宽整数强制转换为有效版本。 */
   @Test
   void rejectsEveryNonIntegerVersionTokenWithoutReadingItAsAFloat() {
     String resource = "{\"kind\":\"thread\",\"id\":\"" + THREAD + "\"}";
     for (String token :
         List.of(
-            "1.0",
-            "1.00",
-            "0.99999999999999999",
-            "1e0",
-            "1E0",
+            "2.0",
+            "2.00",
+            "1.99999999999999999",
+            "2e0",
+            "2E0",
             "9007199254740992",
             "9007199254740993",
             "-0.0")) {
@@ -130,19 +141,19 @@ class EventFrameCodecTest {
   @Test
   void roundTripsExactExtremeCursorAndCoordinateStrings() {
     String expectedMaxCursor =
-        "{\"version\":1,\"type\":\"subscribed\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+        "{\"version\":2,\"type\":\"subscribed\",\"resource\":{\"kind\":\"thread\",\"id\":\""
             + THREAD
             + "\"},\"cursor\":\"9223372036854775807\"}";
     assertEquals(expectedMaxCursor, CODEC.subscribed(THREAD_KEY, Long.MAX_VALUE));
     assertEquals(
-        "{\"version\":1,\"type\":\"subscribed\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+        "{\"version\":2,\"type\":\"subscribed\",\"resource\":{\"kind\":\"thread\",\"id\":\""
             + THREAD
             + "\"},\"cursor\":\"9007199254740993\"}",
         CODEC.subscribed(THREAD_KEY, 9007199254740993L));
 
     // 前进坐标是 canonical 十进制字符串（runtime 侧不变量），codec 原样放入 cursor 与 data。
     assertEquals(
-        "{\"version\":1,\"type\":\"event\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+        "{\"version\":2,\"type\":\"event\",\"resource\":{\"kind\":\"thread\",\"id\":\""
             + THREAD
             + "\"},\"name\":\"version\",\"cursor\":\"9007199254740993\",\"data\":{\"version\":\"9007199254740993\"}}",
         CODEC.event(THREAD_KEY, new Signal.Version("9007199254740993")));
@@ -153,15 +164,15 @@ class EventFrameCodecTest {
     String resource = "{\"kind\":\"thread\",\"id\":\"" + THREAD + "\"}";
     assertThrows(
         IllegalArgumentException.class,
-        () -> CODEC.decode("{\"version\":1,\"type\":\"SUBSCRIBE\",\"resource\":" + resource + "}"));
+        () -> CODEC.decode("{\"version\":2,\"type\":\"SUBSCRIBE\",\"resource\":" + resource + "}"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> CODEC.decode("{\"version\":1,\"type\":\"Subscribe\",\"resource\":" + resource + "}"));
+        () -> CODEC.decode("{\"version\":2,\"type\":\"Subscribe\",\"resource\":" + resource + "}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
-                "{\"version\":1,\"type\":\"UNSUBSCRIBE\",\"resource\":{\"kind\":\"canvas\",\"id\":\""
+                "{\"version\":2,\"type\":\"UNSUBSCRIBE\",\"resource\":{\"kind\":\"canvas\",\"id\":\""
                     + CANVAS
                     + "\"}}"));
   }
@@ -173,21 +184,21 @@ class EventFrameCodecTest {
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
-                "{\"version\":1,\"type\":\"subscribe\",\"resource\":"
+                "{\"version\":2,\"type\":\"subscribe\",\"resource\":"
                     + resource
                     + ",\"after\":\"0\"}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
-                "{\"version\":1,\"type\":\"subscribe\",\"resource\":"
+                "{\"version\":2,\"type\":\"subscribe\",\"resource\":"
                     + resource
                     + ",\"extra\":\"x\"}"));
   }
 
   @Test
   void rejectsMalformedResources() {
-    String prefix = "{\"version\":1,\"type\":\"subscribe\",\"resource\":";
+    String prefix = "{\"version\":2,\"type\":\"subscribe\",\"resource\":";
     assertThrows(
         IllegalArgumentException.class,
         () -> CODEC.decode(prefix + "{\"kind\":\"agent\",\"id\":\"" + THREAD + "\"}}"));
@@ -231,7 +242,7 @@ class EventFrameCodecTest {
     String resource = "{\"kind\":\"thread\",\"id\":\"" + THREAD + "\"}";
     assertThrows(
         IllegalArgumentException.class,
-        () -> CODEC.decode("{\"version\":1,\"type\":\"ping\",\"resource\":" + resource + "}"));
+        () -> CODEC.decode("{\"version\":2,\"type\":\"ping\",\"resource\":" + resource + "}"));
     IllegalArgumentException invalidJson =
         assertThrows(IllegalArgumentException.class, () -> CODEC.decode("{not json"));
     assertEquals("malformed client frame JSON", invalidJson.getMessage());
@@ -240,12 +251,12 @@ class EventFrameCodecTest {
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
-                "{\"version\":1,\"type\":\"subscribe\",\"resource\":" + resource + "} trailing"));
+                "{\"version\":2,\"type\":\"subscribe\",\"resource\":" + resource + "} trailing"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
-                "{\"version\":1,\"type\":\"subscribe\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+                "{\"version\":2,\"type\":\"subscribe\",\"resource\":{\"kind\":\"thread\",\"id\":\""
                     + THREAD
                     + "\",\"id\":\""
                     + THREAD
@@ -255,23 +266,23 @@ class EventFrameCodecTest {
   @Test
   void encodesSubscribedFrameWithVersionAndCanonicalCursor() {
     assertEquals(
-        "{\"version\":1,\"type\":\"subscribed\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+        "{\"version\":2,\"type\":\"subscribed\",\"resource\":{\"kind\":\"thread\",\"id\":\""
             + THREAD
             + "\"},\"cursor\":\"7\"}",
         CODEC.subscribed(THREAD_KEY, 7L));
     assertEquals(
-        "{\"version\":1,\"type\":\"subscribed\",\"resource\":{\"kind\":\"projects\"},\"cursor\":\"0\"}",
+        "{\"version\":2,\"type\":\"subscribed\",\"resource\":{\"kind\":\"projects\"},\"cursor\":\"0\"}",
         CODEC.subscribed(PROJECTS_KEY, 0L));
     assertEquals(
-        "{\"version\":1,\"type\":\"subscribed\",\"resource\":{\"kind\":\"tree\",\"id\":\""
+        "{\"version\":2,\"type\":\"subscribed\",\"resource\":{\"kind\":\"tree\",\"id\":\""
             + THREAD
             + "\"},\"cursor\":\"0\"}",
         CODEC.subscribed(TREE_KEY, 0L));
     assertEquals(
-        "{\"version\":1,\"type\":\"subscribed\",\"resource\":{\"kind\":\"interactions\"},\"cursor\":\"0\"}",
+        "{\"version\":2,\"type\":\"subscribed\",\"resource\":{\"kind\":\"interactions\"},\"cursor\":\"0\"}",
         CODEC.subscribed(INTERACTIONS_KEY, 0L));
     assertEquals(
-        "{\"version\":1,\"type\":\"subscribed\",\"resource\":{\"kind\":\"environments\"},\"cursor\":\"0\"}",
+        "{\"version\":2,\"type\":\"subscribed\",\"resource\":{\"kind\":\"environments\"},\"cursor\":\"0\"}",
         CODEC.subscribed(ENVIRONMENTS_KEY, 0L));
     assertThrows(IllegalArgumentException.class, () -> CODEC.subscribed(THREAD_KEY, -1L));
     assertThrows(IllegalArgumentException.class, () -> CODEC.subscribed(PROJECTS_KEY, 1L));
@@ -283,12 +294,12 @@ class EventFrameCodecTest {
   @Test
   void encodesEventFramesWithUnifiedNameAndDataShape() {
     assertEquals(
-        "{\"version\":1,\"type\":\"event\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+        "{\"version\":2,\"type\":\"event\",\"resource\":{\"kind\":\"thread\",\"id\":\""
             + THREAD
             + "\"},\"name\":\"version\",\"cursor\":\"8\",\"data\":{\"version\":\"8\"}}",
         CODEC.event(THREAD_KEY, new Signal.Version("8")));
     assertEquals(
-        "{\"version\":1,\"type\":\"event\",\"resource\":{\"kind\":\"canvas\",\"id\":\""
+        "{\"version\":2,\"type\":\"event\",\"resource\":{\"kind\":\"canvas\",\"id\":\""
             + CANVAS
             + "\"},\"name\":\"revision\",\"cursor\":\"3\",\"data\":{\"revision\":\"3\"}}",
         CODEC.event(CANVAS_KEY, new Signal.Version("3")));
@@ -302,7 +313,7 @@ class EventFrameCodecTest {
             new ProviderStreamEvent.TextDelta("hi"),
             Instant.parse("2026-08-05T00:00:00Z"));
     assertEquals(
-        "{\"version\":1,\"type\":\"event\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+        "{\"version\":2,\"type\":\"event\",\"resource\":{\"kind\":\"thread\",\"id\":\""
             + THREAD
             + "\"},\"name\":\"realtime\",\"data\":"
             + new RealtimeEventJsonCodec().encode(delta)
@@ -311,22 +322,22 @@ class EventFrameCodecTest {
 
     UUID projectId = new UUID(0L, 8L);
     assertEquals(
-        "{\"version\":1,\"type\":\"event\",\"resource\":{\"kind\":\"projects\"},\"name\":\"changed\",\"data\":{\"projectId\":\""
+        "{\"version\":2,\"type\":\"event\",\"resource\":{\"kind\":\"projects\"},\"name\":\"changed\",\"data\":{\"projectId\":\""
             + projectId
             + "\"}}",
         CODEC.event(PROJECTS_KEY, new Signal.ProjectChanged(projectId)));
 
     // 提示型资源：执行树/Environment 的 data 为空对象（标识只在 resource），交互携带真实执行根。
     assertEquals(
-        "{\"version\":1,\"type\":\"event\",\"resource\":{\"kind\":\"tree\",\"id\":\""
+        "{\"version\":2,\"type\":\"event\",\"resource\":{\"kind\":\"tree\",\"id\":\""
             + THREAD
             + "\"},\"name\":\"changed\",\"data\":{}}",
         CODEC.event(TREE_KEY, new Signal.TreeChanged()));
     assertEquals(
-        "{\"version\":1,\"type\":\"event\",\"resource\":{\"kind\":\"environments\"},\"name\":\"changed\",\"data\":{}}",
+        "{\"version\":2,\"type\":\"event\",\"resource\":{\"kind\":\"environments\"},\"name\":\"changed\",\"data\":{}}",
         CODEC.event(ENVIRONMENTS_KEY, new Signal.EnvironmentChanged()));
     assertEquals(
-        "{\"version\":1,\"type\":\"event\",\"resource\":{\"kind\":\"interactions\"},\"name\":\"changed\",\"data\":{\"rootThreadId\":\""
+        "{\"version\":2,\"type\":\"event\",\"resource\":{\"kind\":\"interactions\"},\"name\":\"changed\",\"data\":{\"rootThreadId\":\""
             + THREAD
             + "\"}}",
         CODEC.event(INTERACTIONS_KEY, new Signal.InteractionsChanged(THREAD)));
@@ -350,25 +361,199 @@ class EventFrameCodecTest {
   @Test
   void encodesResyncHeartbeatAndErrorFrames() {
     assertEquals(
-        "{\"version\":1,\"type\":\"resync\",\"resource\":{\"kind\":\"canvas\",\"id\":\""
+        "{\"version\":2,\"type\":\"resync\",\"resource\":{\"kind\":\"canvas\",\"id\":\""
             + CANVAS
             + "\"}}",
         CODEC.resync(CANVAS_KEY));
-    assertEquals("{\"version\":1,\"type\":\"heartbeat\"}", CODEC.heartbeat());
+    assertEquals("{\"version\":2,\"type\":\"heartbeat\"}", CODEC.heartbeat());
     assertEquals(
-        "{\"version\":1,\"type\":\"error\",\"code\":\"INVALID_FRAME\",\"message\":\"boom\"}",
+        "{\"version\":2,\"type\":\"error\",\"code\":\"INVALID_FRAME\",\"message\":\"boom\"}",
         CODEC.error(EventFrameCodec.INVALID_FRAME, "boom"));
     assertEquals(
-        "{\"version\":1,\"type\":\"error\",\"code\":\"RESOURCE_NOT_FOUND\",\"message\":\"missing\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+        "{\"version\":2,\"type\":\"error\",\"code\":\"RESOURCE_NOT_FOUND\",\"message\":\"missing\",\"resource\":{\"kind\":\"thread\",\"id\":\""
             + THREAD
             + "\"}}",
         CODEC.error(EventFrameCodec.RESOURCE_NOT_FOUND, "missing", THREAD_KEY));
   }
 
   @Test
+  void encodesConnectedAndIdeUseAcceptedFrames() {
+    assertEquals(
+        "{\"version\":2,\"type\":\"connected\",\"eventNodeId\":\""
+            + THREAD
+            + "\",\"connectionId\":\""
+            + CANVAS
+            + "\"}",
+        CODEC.connected(THREAD, CANVAS));
+    assertEquals(
+        "{\"version\":2,\"type\":\"ide-use-accepted\",\"revision\":\"9223372036854775807\"}",
+        CODEC.ideUseAccepted(Long.MAX_VALUE));
+    assertThrows(IllegalArgumentException.class, () -> CODEC.ideUseAccepted(0));
+  }
+
+  @Test
+  void decodesIdeUseWithOptionalBindingEpochAndCanonicalValues() {
+    String json =
+        """
+        {"version":2,"type":"ide-use","documentId":"%s","revision":"3","views":[
+          {"environmentId":"%s","viewId":"%s","claimId":"%s"},
+          {"environmentId":"%s","viewId":"%s","claimId":"%s","bindingEpoch":"9223372036854775807"}
+        ]}
+        """
+            .formatted(DOCUMENT, ENVIRONMENT, VIEW, CLAIM, ENVIRONMENT, THREAD, CANVAS);
+    EventFrameCodec.IdeUseFrame frame = (EventFrameCodec.IdeUseFrame) CODEC.decode(json);
+    assertEquals(
+        new IdeBrowserUse(
+            DOCUMENT,
+            3,
+            List.of(
+                new IdeBrowserUseView(
+                    EnvironmentId.of(ENVIRONMENT), THREAD, CANVAS, Long.MAX_VALUE),
+                new IdeBrowserUseView(EnvironmentId.of(ENVIRONMENT), VIEW, CLAIM, null))),
+        frame.use());
+  }
+
+  @Test
+  void rejectsMalformedIdeUseFrames() {
+    String validViews =
+        "[{\"environmentId\":\""
+            + ENVIRONMENT
+            + "\",\"viewId\":\""
+            + VIEW
+            + "\",\"claimId\":\""
+            + CLAIM
+            + "\"}]";
+    String prefix =
+        "{\"version\":2,\"type\":\"ide-use\",\"documentId\":\"" + DOCUMENT + "\",\"revision\":\"";
+    String suffix = "\",\"views\":" + validViews + "}";
+    for (String revision : List.of("0", "01", "-1", "9223372036854775808", "1.0")) {
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> CODEC.decode(prefix + revision + suffix),
+          "revision must be canonical positive long: " + revision);
+    }
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CODEC.decode(
+                "{\"version\":2,\"type\":\"ide-use\",\"documentId\":\""
+                    + DOCUMENT
+                    + "\",\"revision\":1,\"views\":"
+                    + validViews
+                    + "}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CODEC.decode(
+                "{\"version\":2,\"type\":\"ide-use\",\"documentId\":\""
+                    + DOCUMENT
+                    + "\",\"revision\":\"1\"}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CODEC.decode(
+                "{\"version\":2,\"type\":\"ide-use\",\"documentId\":\""
+                    + DOCUMENT
+                    + "\",\"revision\":\"1\",\"views\":[{\"environmentId\":\""
+                    + ENVIRONMENT
+                    + "\",\"viewId\":\""
+                    + VIEW
+                    + "\",\"claimId\":\""
+                    + CLAIM
+                    + "\",\"bindingEpoch\":\"0\"}]}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CODEC.decode(
+                "{\"version\":2,\"type\":\"ide-use\",\"documentId\":\""
+                    + DOCUMENT
+                    + "\",\"revision\":\"1\",\"views\":[{\"environmentId\":\""
+                    + ENVIRONMENT
+                    + "\",\"viewId\":\""
+                    + VIEW
+                    + "\",\"claimId\":\""
+                    + CLAIM
+                    + "\",\"extra\":true}]}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CODEC.decode(
+                "{\"version\":2,\"type\":\"ide-use\",\"documentId\":\""
+                    + DOCUMENT
+                    + "\",\"revision\":\"1\",\"views\":[{\"environmentId\":\""
+                    + ENVIRONMENT
+                    + "\",\"viewId\":\""
+                    + VIEW
+                    + "\",\"claimId\":\""
+                    + CLAIM
+                    + "\"},{\"environmentId\":\""
+                    + ENVIRONMENT
+                    + "\",\"viewId\":\""
+                    + VIEW
+                    + "\",\"claimId\":\""
+                    + CLAIM
+                    + "\"}]}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CODEC.decode(
+                "{\"version\":2,\"type\":\"ide-use\",\"documentId\":\""
+                    + DOCUMENT
+                    + "\",\"revision\":\"1\",\"views\":"
+                    + oversizedViews()
+                    + "}"));
+  }
+
+  @Test
+  void ideUseValidationDoesNotEchoRejectedInput() {
+    String invalidEnvironment = "not-a-uuid-" + "x".repeat(1024);
+    IllegalArgumentException viewError =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                CODEC.decode(
+                    "{\"version\":2,\"type\":\"ide-use\",\"documentId\":\""
+                        + DOCUMENT
+                        + "\",\"revision\":\"1\",\"views\":[{\"environmentId\":\""
+                        + invalidEnvironment
+                        + "\",\"viewId\":\""
+                        + VIEW
+                        + "\",\"claimId\":\""
+                        + CLAIM
+                        + "\"}]}"));
+    assertEquals("frame.views[] is invalid", viewError.getMessage());
+
+    String invalidDocument = "not-a-uuid-" + "y".repeat(1024);
+    IllegalArgumentException documentError =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                CODEC.decode(
+                    "{\"version\":2,\"type\":\"ide-use\",\"documentId\":\""
+                        + invalidDocument
+                        + "\",\"revision\":\"1\",\"views\":[]}"));
+    assertEquals("frame ide-use is invalid", documentError.getMessage());
+  }
+
+  @Test
   void resyncSignalIsNotAnEventFrame() {
     assertThrows(
         IllegalArgumentException.class, () -> CODEC.event(THREAD_KEY, new Signal.Resync()));
+  }
+
+  private static String oversizedViews() {
+    List<String> views = new ArrayList<>();
+    for (int i = 0; i < IdeBrowserUse.MAX_VIEWS + 1; i++) {
+      views.add(
+          "{\"environmentId\":\""
+              + ENVIRONMENT
+              + "\",\"viewId\":\""
+              + new UUID(0L, i + 1)
+              + "\",\"claimId\":\""
+              + CLAIM
+              + "\"}");
+    }
+    return "[" + String.join(",", views) + "]";
   }
 
   /**
@@ -387,7 +572,7 @@ class EventFrameCodecTest {
     String data = new RealtimeEventJsonCodec().encode(partial);
 
     assertEquals(
-        "{\"version\":1,\"type\":\"event\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+        "{\"version\":2,\"type\":\"event\",\"resource\":{\"kind\":\"thread\",\"id\":\""
             + THREAD
             + "\"},\"name\":\"realtime\",\"data\":"
             + data

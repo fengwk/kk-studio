@@ -2,11 +2,33 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApplicationEventManager } from '@/shared/app-events/manager'
 import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
 
-const URL = 'ws://test/api/events/v1'
+const URL = 'ws://test/api/events/v2'
 const THREAD_A = { kind: 'thread', id: 'aaaaaaaa-0000-4000-8000-000000000001' } as const
 const THREAD_B = { kind: 'thread', id: 'bbbbbbbb-0000-4000-8000-000000000002' } as const
 const CANVAS_A = { kind: 'canvas', id: 'cccccccc-0000-4000-8000-000000000003' } as const
 const PROJECTS = { kind: 'projects' } as const
+const EVENT_NODE_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+const EVENT_NODE_B = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab'
+const CONNECTION_A = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+const CONNECTION_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbc'
+const DOCUMENT_A = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
+const DOCUMENT_B = 'dddddddd-dddd-4ddd-8ddd-ddddddddddde'
+const ENVIRONMENT_A = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'
+const VIEW_A = 'ffffffff-ffff-4fff-8fff-ffffffffffff'
+const CLAIM_A = '99999999-9999-4999-8999-999999999999'
+const CLAIM_B = '99999999-9999-4999-8999-999999999998'
+
+function connectLatest(socket: ReturnType<FakeWebSocketHarness['openLatest']>, node = EVENT_NODE_A, connection = CONNECTION_A) {
+  socket.emitServer({ type: 'connected', eventNodeId: node, connectionId: connection })
+}
+
+function usage(revision = '1', documentId = DOCUMENT_A, claimId = CLAIM_A) {
+  return {
+    documentId,
+    revision,
+    views: [{ environmentId: ENVIRONMENT_A, viewId: VIEW_A, claimId }],
+  }
+}
 
 function setup() {
   const harness = new FakeWebSocketHarness()
@@ -35,8 +57,8 @@ describe('ApplicationEventManager', () => {
     const releaseB = manager.subscribe(THREAD_B, {})
 
     expect(socket.sentMessages()).toEqual([
-      { version: 1, type: 'subscribe', resource: THREAD_A },
-      { version: 1, type: 'subscribe', resource: THREAD_B },
+      { version: 2, type: 'subscribe', resource: THREAD_A },
+      { version: 2, type: 'subscribe', resource: THREAD_B },
     ])
 
     // 同资源第二消费者不产生新 wire 消息；释放一个仍保持订阅。
@@ -44,9 +66,9 @@ describe('ApplicationEventManager', () => {
     expect(socket.sentMessages()).toHaveLength(2)
     releaseA1()
     expect(socket.sentMessages()).toEqual([
-      { version: 1, type: 'subscribe', resource: THREAD_A },
-      { version: 1, type: 'subscribe', resource: THREAD_B },
-      { version: 1, type: 'unsubscribe', resource: THREAD_A },
+      { version: 2, type: 'subscribe', resource: THREAD_A },
+      { version: 2, type: 'subscribe', resource: THREAD_B },
+      { version: 2, type: 'unsubscribe', resource: THREAD_A },
     ])
     // 幂等释放。
     releaseA1()
@@ -54,7 +76,7 @@ describe('ApplicationEventManager', () => {
 
     releaseB()
     expect(socket.sentMessages().at(-1)).toEqual({
-      version: 1,
+      version: 2,
       type: 'unsubscribe',
       resource: THREAD_B,
     })
@@ -67,7 +89,7 @@ describe('ApplicationEventManager', () => {
     const listener = { onEvent: vi.fn() }
     const release1 = manager.subscribe(THREAD_A, listener)
     const release2 = manager.subscribe(THREAD_A, listener)
-    expect(socket.sentMessages()).toEqual([{ version: 1, type: 'subscribe', resource: THREAD_A }])
+    expect(socket.sentMessages()).toEqual([{ version: 2, type: 'subscribe', resource: THREAD_A }])
 
     // 第一个 unsubscribe 不能错误拆 wire：同一 listener 仍有真实 refcount。
     release1()
@@ -78,7 +100,7 @@ describe('ApplicationEventManager', () => {
     // 末 ref 才 unsubscribe，之后不再派发。
     release2()
     expect(socket.sentMessages().at(-1)).toEqual({
-      version: 1,
+      version: 2,
       type: 'unsubscribe',
       resource: THREAD_A,
     })
@@ -108,8 +130,8 @@ describe('ApplicationEventManager', () => {
     // 首次 open：重发全部 active subscriptions。
     harness.openLatest()
     expect(harness.latest?.sentMessages()).toEqual([
-      { version: 1, type: 'subscribe', resource: THREAD_A },
-      { version: 1, type: 'subscribe', resource: CANVAS_A },
+      { version: 2, type: 'subscribe', resource: THREAD_A },
+      { version: 2, type: 'subscribe', resource: CANVAS_A },
     ])
 
     // 断线重连：新 socket open 后再次重发。
@@ -118,9 +140,104 @@ describe('ApplicationEventManager', () => {
     expect(harness.sockets).toHaveLength(2)
     harness.openLatest()
     expect(harness.latest?.sentMessages()).toEqual([
-      { version: 1, type: 'subscribe', resource: THREAD_A },
-      { version: 1, type: 'subscribe', resource: CANVAS_A },
+      { version: 2, type: 'subscribe', resource: THREAD_A },
+      { version: 2, type: 'subscribe', resource: CANVAS_A },
     ])
+  })
+
+  it('publishes a fresh connection identity after every reconnect and clears it on close', () => {
+    vi.useFakeTimers()
+    const { manager, harness } = setup()
+    const socket = harness.openLatest()
+    expect(manager.getIdentity()).toBeNull()
+    const identities: unknown[] = []
+    const unsubscribe = manager.subscribeIdentity((identity) => identities.push(identity))
+
+    connectLatest(socket)
+    expect(manager.getIdentity()).toEqual({
+      eventNodeId: EVENT_NODE_A,
+      connectionId: CONNECTION_A,
+    })
+
+    socket.fail()
+    expect(manager.getIdentity()).toBeNull()
+    vi.advanceTimersByTime(250)
+    const reconnected = harness.openLatest()
+    expect(manager.getIdentity()).toBeNull()
+    connectLatest(reconnected, EVENT_NODE_B, CONNECTION_B)
+    expect(manager.getIdentity()).toEqual({
+      eventNodeId: EVENT_NODE_B,
+      connectionId: CONNECTION_B,
+    })
+    expect(identities).toEqual([
+      null,
+      { eventNodeId: EVENT_NODE_A, connectionId: CONNECTION_A },
+      null,
+      { eventNodeId: EVENT_NODE_B, connectionId: CONNECTION_B },
+    ])
+    unsubscribe()
+  })
+
+  it('registerUsage waits for the ack, resends an identical pending revision and rejects conflicts', async () => {
+    const { manager, harness } = setup()
+    const socket = harness.openLatest()
+    connectLatest(socket)
+
+    const first = manager.registerUsage(usage())
+    const duplicate = manager.registerUsage(usage())
+    expect(duplicate).toBe(first)
+    expect(socket.sentMessages()).toEqual([
+      {
+        version: 2,
+        type: 'ide-use',
+        documentId: DOCUMENT_A,
+        revision: '1',
+        views: [{ environmentId: ENVIRONMENT_A, viewId: VIEW_A, claimId: CLAIM_A }],
+      },
+      {
+        version: 2,
+        type: 'ide-use',
+        documentId: DOCUMENT_A,
+        revision: '1',
+        views: [{ environmentId: ENVIRONMENT_A, viewId: VIEW_A, claimId: CLAIM_A }],
+      },
+    ])
+    await expect(manager.registerUsage(usage('1', DOCUMENT_A, CLAIM_B))).rejects.toThrow(
+      'already pending with different content',
+    )
+
+    socket.emitServer({ type: 'ide-use-accepted', revision: '1' })
+    await expect(first).resolves.toEqual({ revision: '1' })
+
+    // 服务端已接受后，同一物理连接仍只能绑定一个 document。
+    await expect(manager.registerUsage(usage('2', DOCUMENT_B))).rejects.toThrow(
+      'documentId is fixed for this connection',
+    )
+  })
+
+  it('rejects a pending usage on connection loss and never replays it after reconnect', async () => {
+    vi.useFakeTimers()
+    const { manager, harness } = setup()
+    const socket = harness.openLatest()
+    connectLatest(socket)
+    const pending = manager.registerUsage(usage())
+    const rejected = expect(pending).rejects.toThrow('connection closed')
+
+    socket.fail()
+    await rejected
+    vi.advanceTimersByTime(250)
+    const reconnected = harness.openLatest()
+    connectLatest(reconnected, EVENT_NODE_B, CONNECTION_B)
+    expect(reconnected.sentMessages()).toEqual([])
+  })
+
+  it('rejects pending usage on a connection-level server error', async () => {
+    const { manager, harness } = setup()
+    const socket = harness.openLatest()
+    connectLatest(socket)
+    const pending = manager.registerUsage(usage())
+    socket.emitServer({ type: 'error', code: 'IDE_USE_REJECTED', message: 'conflict' })
+    await expect(pending).rejects.toThrow('IDE_USE_REJECTED: conflict')
   })
 
   it('dispatches subscribed/event/resync/error to the resource listeners and exposes cursors', () => {
@@ -171,7 +288,7 @@ describe('ApplicationEventManager', () => {
     manager.subscribe(PROJECTS, { onEvent: projectChanged })
 
     expect(socket.sentMessages()).toEqual([
-      { version: 1, type: 'subscribe', resource: PROJECTS },
+      { version: 2, type: 'subscribe', resource: PROJECTS },
     ])
 
     socket.emitServer({
@@ -259,7 +376,7 @@ describe('ApplicationEventManager', () => {
     expect(onEvent2).toHaveBeenCalledTimes(1)
     // 最后一个 listener 释放后 wire 上出现 unsubscribe。
     expect(socket.sentMessages().at(-1)).toEqual({
-      version: 1,
+      version: 2,
       type: 'unsubscribe',
       resource: THREAD_A,
     })
