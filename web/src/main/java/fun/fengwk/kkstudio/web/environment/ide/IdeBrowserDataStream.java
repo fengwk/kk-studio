@@ -208,6 +208,7 @@ final class IdeBrowserDataStream implements MuxStreamListener {
               this);
       if (stopped.get()) {
         resetQuietly(opened, "CLIENT_CLOSED", "browser websocket closed before stream attach");
+        attach(opened);
         return;
       }
       attach(opened);
@@ -372,16 +373,22 @@ final class IdeBrowserDataStream implements MuxStreamListener {
     dispatch(
         () -> {
           if (stopped.get()) {
+            data.consumed();
             return;
           }
           if (data.kind() == MuxDataKind.HTTP) {
             fail("PROTOCOL_ERROR", "HTTP DATA received on a websocket stream", null);
+            data.consumed();
             return;
           }
-          if (!sendToBrowser(data)) {
-            return;
+          try {
+            sendToBrowser(data);
+          } catch (RuntimeException error) {
+            fail("BROWSER_SEND_FAILED", "browser websocket write failed", error);
+          } finally {
+            // The synchronous send no longer uses the buffer; discard after failure/RESET.
+            data.consumed();
           }
-          data.consumed();
         });
   }
 

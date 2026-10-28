@@ -35,6 +35,7 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -650,7 +651,7 @@ class IdeDataPlaneIntegrationTest extends WebPostgresTestSupport {
               remoteRegistry,
               forwarder,
               mock(IdeDataConnectionRegistry.class),
-              null,
+              (environment, view, cookie) -> Optional.empty(),
               new IdeBrowserSessionHandler(
                   mock(IdeBootstrapTicketService.class),
                   mock(IdeBrowserSessionRegistry.class),
@@ -664,7 +665,7 @@ class IdeDataPlaneIntegrationTest extends WebPostgresTestSupport {
               remoteRegistry,
               client,
               webSocketClient,
-              Optional.empty());
+              (environment, view, cookie) -> Optional.empty());
       IdeGatewayFilter filter = new IdeGatewayFilter(dataPlane, browserGateway);
       ScheduledExecutorService heartbeat = Executors.newSingleThreadScheduledExecutor();
       IdeDataPhysicalWebSocketHandler publicData =
@@ -738,6 +739,7 @@ class IdeDataPlaneIntegrationTest extends WebPostgresTestSupport {
   static class AuthorizerConfiguration {
 
     @Bean
+    @Primary
     IdeDataViewAuthorizer testIdeDataViewAuthorizer() {
       return (environmentId, requestedViewId, cookieHeader) -> {
         if (!ENVIRONMENT.equals(environmentId) || cookieHeader == null) {

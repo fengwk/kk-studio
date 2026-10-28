@@ -11,7 +11,7 @@ import java.util.UUID;
 /**
  * 浏览器入口的视图授权端口：数据面只接受绑定到当前 Environment、Daemon 实例、viewId 与 bindingEpoch 的入口凭据。
  *
- * <p>本切片不实现 bootstrap、cookie 与视图登记；它们由浏览器会话/管理切片提供。实现必须：
+ * <p>生产实现 {@link SessionIdeDataViewAuthorizer} 从浏览器会话登记读取授权。实现必须：
  *
  * <ul>
  *   <li>只解析名为 {@code ide-gateway.session-cookie-name} 的 IDE 会话 cookie，不把 Studio 域其它 cookie 当凭据；
@@ -19,7 +19,7 @@ import java.util.UUID;
  *   <li>在视图关闭、epoch 换代或 Daemon 实例被接管后返回 empty；不得凭 workspace 路径或请求 Host 推断授权。
  * </ul>
  *
- * <p>缺失实现时数据面 fail-closed（401），不会回退到任何旧 cookie 或 per-exchange 通路。
+ * <p>HTTP 与 WS 数据入口均要求装配此端口，不保留可缺失实现或旧数据通路。
  */
 @FunctionalInterface
 public interface IdeDataViewAuthorizer {
