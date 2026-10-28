@@ -45,6 +45,8 @@ export function AgentPane({
   onValidateDraftName,
   onFocus,
   initialTarget,
+  target: sharedTarget,
+  onTargetChange,
   onTargetConsumed,
   capabilities,
   onRequestBranch,
@@ -62,6 +64,9 @@ export function AgentPane({
   onValidateDraftName?: (target: PaneTarget, name: string) => Promise<string | null>
   onFocus?: () => void
   initialTarget?: PaneTarget
+  /** Chat workspace 持有的共享呈现目标；提供时本面板不再自行持久化目标。 */
+  target?: PaneTarget
+  onTargetChange?: (next: PaneTarget) => void
   onTargetConsumed?: (target: PaneTarget) => void
   capabilities?: AgentPaneCapabilities
   /** 新建分支入口；由 Chat workspace 提供（命名与目标 pane 在 workspace 统一决定）。 */
@@ -118,7 +123,12 @@ export function AgentPane({
     [onIdeMounted],
   )
 
-  const { target, targetRef, setTarget } = usePaneTarget({ owner, paneId, initialTarget })
+  const { target, targetRef, setTarget } = usePaneTarget({
+    initialTarget: initialTarget
+      ?? (owner == null ? { kind: 'BOUND_THREAD', threadId: paneId } : undefined),
+    target: sharedTarget,
+    onTargetChange,
+  })
   const [focusTarget, setFocusTarget] = useState<PaneTarget | null>(initialTarget ?? null)
   const lastRoutedTarget = useRef(initialTarget)
   useEffect(() => {
