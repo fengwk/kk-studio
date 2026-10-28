@@ -45,21 +45,32 @@ import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewsDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * 生产链路验收：真实 Server ↔ 生产 Node 24 Daemon ↔ 已构建的受管 code-server。
@@ -73,7 +84,7 @@ import java.util.concurrent.TimeUnit;
  *   <li><b>浏览器入口用例</b>（{@code servesRealManagedCodeServerViewsThroughTheProductionDataPlane}、{@code
  *       servesTheManagedViewThroughTheRealBrowserEntryAndDataPlane}）：走真实浏览器协议——事件通道 {@code
  *       /api/events/v2} 登记打开意图、REST {@code /api/environments/{id}/ide/views} 领取视图、一次性 bootstrap 票据换
- *       view 级 cookie、view 基址取 workbench HTML 与静态/worker 资源、浏览器 WebSocket 升级。这是「浏览器验收」口径。
+ *       view 级 cookie、view 基址取 workbench HTML 与静态/worker 资源、浏览器 WebSocket 升级。这只验证浏览器协议入口，不运行真实工作台。
  *   <li><b>数据面用例</b>（{@code streamsRealCodeServerContentOverTheReusedMuxDataConnection}、{@code
  *       servesTwoManagedViewsOverOneReusedDataConnection}）：直接经产品自己的数据连接注册表打开 mux 逻辑流，覆盖真实 DATA_BIND
  *       回连、真实 mux 编解码、Daemon 真实视图解析与真实受管 code-server。<b>它们不经过浏览器会话与 cookie
@@ -87,7 +98,8 @@ import java.util.concurrent.TimeUnit;
  *
  * <p><b>opt-in：</b>本类只在显式给出已构建 code-server 路径时运行（{@code
  * -Dkk-studio.it.ide.code-server-release=<release 目录>}）。默认测试运行不含本类，因此既有测试行为不变；一旦显式指定路径而该路径缺失或不是可用的
- * code-server 发行目录，测试<b>失败</b>而不是跳过，避免把未验收当成已验收。
+ * code-server 发行目录，测试<b>失败</b>而不是跳过，避免把未验收当成已验收。 真实 Chromium 用例还需 {@code
+ * -Dkk-studio.it.ide.playwright-module=<已安装的 @playwright/test 包目录>}。
  *
  * <p><b>隔离与凭据：</b>每个用例自行创建 Environment 与 Daemon；Daemon 发行根、数据目录、受管工作目录全部是夹具自有的临时目录
  * （不使用用户主目录）。注册凭据只写进私有 {@code daemon.token}（0600）；进程日志落在工作区 {@code records} 目录
@@ -95,7 +107,7 @@ import java.util.concurrent.TimeUnit;
  */
 @EnabledIfSystemProperty(
     named = IdeProductionChainAcceptanceTest.CODE_SERVER_RELEASE_PROPERTY,
-    matches = ".+")
+    matches = ".*")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
 
@@ -104,6 +116,9 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
 
   /** Node 24 可执行文件；默认使用工作区约定的本地安装。 */
   static final String NODE_BINARY_PROPERTY = "kk-studio.it.ide.node";
+
+  /** 显式指定已安装的 Playwright 包目录，才运行真实 Chromium 用例。 */
+  static final String PLAYWRIGHT_MODULE_PROPERTY = "kk-studio.it.ide.playwright-module";
 
   private static final String DEFAULT_NODE_BINARY = "/home/fengwk/.local/node-v24/bin/node";
 
@@ -140,14 +155,41 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
 
   private ProductionDaemonFixture daemon;
 
+  private BrowserDriver browserDriver;
+
   @AfterEach
   void tearDown() {
-    if (daemon != null) {
-      daemon.close();
-      daemon = null;
+    RuntimeException failure = null;
+    try {
+      if (browserDriver != null) {
+        try {
+          browserDriver.close();
+        } catch (RuntimeException error) {
+          failure = error;
+          if (daemon != null) {
+            daemon.preserveWorkspace();
+          }
+        }
+      }
+      try {
+        if (daemon != null) {
+          daemon.close();
+          daemon = null;
+        }
+      } catch (RuntimeException error) {
+        if (failure == null) {
+          failure = error;
+        } else {
+          failure.addSuppressed(error);
+        }
+      }
+    } finally {
+      browser.dispatcher().executorService().shutdown();
+      browser.connectionPool().evictAll();
     }
-    browser.dispatcher().executorService().shutdown();
-    browser.connectionPool().evictAll();
+    if (failure != null) {
+      throw failure;
+    }
   }
 
   /**
@@ -245,19 +287,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
           documentId, 1L, List.of(new IntentView(environmentId, viewId, claimId, null)));
 
       // 领取视图：真实下发 IDE_COMMAND，Daemon 启动受管 code-server 并登记视图。
-      Response open =
-          browser
-              .newCall(
-                  new Request.Builder()
-                      .url(baseUrl() + "/api/environments/" + environmentId + "/ide/views")
-                      .post(
-                          RequestBody.create(
-                              openViewBody(
-                                  environmentId, viewId, documentId, identity, claimId, "create"),
-                              JSON))
-                      .build())
-              .execute();
-      open.close();
+      openView(environmentId, viewId, documentId, identity, claimId);
 
       EnvironmentIdeViewsDTO snapshot =
           localIdeService.listViews(EnvironmentId.parse(environmentId));
@@ -329,19 +359,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
           documentId, 1L, List.of(new IntentView(environmentId, viewId, claimId, null)));
 
       // 领取视图：真实下发 IDE_COMMAND，Daemon 启动受管 code-server 并登记视图。
-      Response open =
-          browser
-              .newCall(
-                  new Request.Builder()
-                      .url(baseUrl() + "/api/environments/" + environmentId + "/ide/views")
-                      .post(
-                          RequestBody.create(
-                              openViewBody(
-                                  environmentId, viewId, documentId, identity, claimId, "create"),
-                              JSON))
-                      .build())
-              .execute();
-      open.close();
+      openView(environmentId, viewId, documentId, identity, claimId);
 
       EnvironmentIdeViewsDTO snapshot =
           localIdeService.listViews(EnvironmentId.parse(environmentId));
@@ -557,6 +575,253 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
     }
   }
 
+  /**
+   * 真正的 Chromium 工作台和终端：dirty 拒绝不得中断两个视图，discard 只结束对应 shell。
+   *
+   * <p>浏览器经 Studio 外部 view 入口访问，不拦截任何网络请求。入口票据只经 stdin 传给驱动，进程参数和诊断均不包含票据。
+   */
+  @Test
+  @Order(8)
+  @EnabledIfSystemProperty(named = PLAYWRIGHT_MODULE_PROPERTY, matches = ".*")
+  void realWorkbenchKeepsBothTerminalsAfterDirtyRefusalAndClosesOnlyOne() throws Exception {
+    Path playwright = Path.of(System.getProperty(PLAYWRIGHT_MODULE_PROPERTY)).toAbsolutePath();
+    assertTrue(
+        Files.isRegularFile(playwright.resolve("package.json")),
+        "the explicitly configured Playwright package directory must exist");
+    String environmentId = startEnvironmentAndDaemon();
+    Path workspace = daemon.workspaceDirectory();
+    Files.writeString(workspace.resolve("draft.txt"), "fixture draft\n", StandardCharsets.UTF_8);
+    Path browserTemp = Files.createDirectory(workspace.resolve(".browser-tmp"));
+    Files.setPosixFilePermissions(browserTemp, PosixFilePermissions.fromString("rwx------"));
+    UUID documentId = UUID.randomUUID();
+    try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/api/events/v2"))) {
+      EventIdentity identity = events.awaitConnected();
+      UUID viewA = UUID.randomUUID();
+      UUID viewB = UUID.randomUUID();
+      UUID claimA = UUID.randomUUID();
+      UUID claimB = UUID.randomUUID();
+      events.registerUsage(
+          documentId,
+          1L,
+          List.of(
+              new IntentView(environmentId, viewA, claimA, null),
+              new IntentView(environmentId, viewB, claimB, null)));
+      JsonNode openedA = openView(environmentId, viewA, documentId, identity, claimA);
+      JsonNode openedB = openView(environmentId, viewB, documentId, identity, claimB);
+      browserDriver = BrowserDriver.start(nodeBinary(), recordsDir());
+      browserDriver.send(
+          Map.of(
+              "playwrightModule",
+              playwright.toString(),
+              "baseUrl",
+              baseUrl(),
+              "environmentId",
+              environmentId,
+              "documentId",
+              documentId.toString(),
+              "workspaceDirectory",
+              workspace.toString(),
+              "browserTempDirectory",
+              browserTemp.toString(),
+              "views",
+              List.of(browserView(viewA, openedA), browserView(viewB, openedB))));
+
+      JsonNode shellEvent = browserDriver.await("shell");
+      long pid = shellEvent.path("pid").asLong();
+      ProcessHandle shell =
+          ProcessHandle.of(pid)
+              .filter(ProcessHandle::isAlive)
+              .orElseThrow(() -> new AssertionError("view A terminal shell must be alive"));
+      assertTrue(
+          daemon.descendants().contains(shell),
+          "the shell PID from the browser marker must belong to this daemon");
+      browserDriver.proceed();
+      browserDriver.await("closed");
+      shell.onExit().get(30, TimeUnit.SECONDS);
+      assertFalse(shell.isAlive(), "discard must actually terminate view A's original shell");
+      browserDriver.proceed();
+      browserDriver.await("done");
+      browserDriver.finish();
+    }
+  }
+
+  private static Map<String, String> browserView(UUID viewId, JsonNode opened) {
+    String epoch = opened.path("bindingEpoch").asText();
+    String entryUrl = opened.path("entryUrl").asText();
+    assertFalse(epoch.isBlank(), "the browser view must have an epoch");
+    assertFalse(entryUrl.isBlank(), "the browser view must have a bootstrap entry");
+    return Map.of("viewId", viewId.toString(), "bindingEpoch", epoch, "entryUrl", entryUrl);
+  }
+
+  /** 拥有 Node/Chromium 进程并使用不含 URL 的行协议同步 shell 退出证明。 */
+  private static final class BrowserDriver implements AutoCloseable {
+
+    private final Process process;
+    private final BufferedReader output;
+    private final BufferedWriter input;
+    private final Path stderrLog;
+    private final Set<ProcessHandle> owned = new LinkedHashSet<>();
+    private final ExecutorService reader =
+        Executors.newSingleThreadExecutor(
+            task -> {
+              Thread thread = new Thread(task, "ide-browser-events");
+              thread.setDaemon(true);
+              return thread;
+            });
+    private final JsonMapper mapper = JsonMapper.builder().build();
+    private String stage = "starting";
+
+    private BrowserDriver(Process process, Path stderrLog) {
+      this.process = process;
+      this.stderrLog = stderrLog;
+      this.output =
+          new BufferedReader(
+              new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
+      this.input =
+          new BufferedWriter(
+              new OutputStreamWriter(process.getOutputStream(), StandardCharsets.UTF_8));
+    }
+
+    static BrowserDriver start(Path node, Path records) throws IOException {
+      Path script =
+          repoRoot()
+              .resolve(
+                  "web/src/test/resources/fun/fengwk/kkstudio/web/environment/ide/ide-production-browser.mjs");
+      Path log = Files.createTempFile(records, "ide-browser-", ".err.log");
+      Files.setPosixFilePermissions(log, PosixFilePermissions.fromString("rw-------"));
+      ProcessBuilder builder = new ProcessBuilder(node.toString(), script.toString());
+      builder.redirectError(log.toFile());
+      builder.environment().put("no_proxy", "127.0.0.1,localhost,::1");
+      builder.environment().put("NO_PROXY", "127.0.0.1,localhost,::1");
+      return new BrowserDriver(builder.start(), log);
+    }
+
+    void send(Object value) throws IOException {
+      input.write(mapper.writeValueAsString(value));
+      input.newLine();
+      input.flush();
+    }
+
+    void proceed() throws IOException {
+      send(Map.of("continue", true));
+    }
+
+    JsonNode await(String expected) throws Exception {
+      while (true) {
+        Future<String> line = reader.submit(output::readLine);
+        String event = line.get(90, TimeUnit.SECONDS);
+        captureDescendants();
+        if (event == null) {
+          throw new AssertionError("browser driver exited during " + stage + "; see " + stderrLog);
+        }
+        JsonNode frame;
+        try {
+          frame = mapper.readTree(event);
+        } catch (RuntimeException error) {
+          throw new AssertionError("invalid browser driver event at " + stage);
+        }
+        String type = safeLabel(frame.path("event").asText());
+        if ("stage".equals(type)) {
+          stage = safeLabel(frame.path("stage").asText());
+          continue;
+        }
+        if ("failure".equals(type)) {
+          throw new AssertionError(
+              "browser driver failed at "
+                  + safeLabel(frame.path("stage").asText())
+                  + " ("
+                  + safeLabel(frame.path("detail").asText())
+                  + "); see "
+                  + stderrLog);
+        }
+        assertEquals(expected, type, "unexpected browser driver event at " + stage);
+        return frame;
+      }
+    }
+
+    private static String safeLabel(String value) {
+      return value.matches("[A-Za-z0-9 -]{1,60}") ? value : "invalid";
+    }
+
+    void finish() throws Exception {
+      input.close();
+      assertTrue(process.waitFor(30, TimeUnit.SECONDS), "browser driver must exit after closing");
+      assertEquals(0, process.exitValue(), "browser driver must exit cleanly; see " + stderrLog);
+    }
+
+    private void captureDescendants() {
+      owned.addAll(process.toHandle().descendants().toList());
+    }
+
+    @Override
+    public void close() {
+      List<String> unresolved = new ArrayList<>();
+      try {
+        captureDescendants();
+      } catch (RuntimeException error) {
+        unresolved.add("browser descendant snapshot failed");
+      }
+      try {
+        input.close();
+      } catch (IOException error) {
+        unresolved.add("stdin close failed");
+      }
+      try {
+        if (!waitFor(process.toHandle(), 10) && !stopHandle(process.toHandle())) {
+          unresolved.add("browser driver pid " + process.pid());
+        }
+      } catch (RuntimeException error) {
+        unresolved.add("browser driver exit unconfirmed");
+      }
+      for (ProcessHandle handle : owned) {
+        if (!stopHandle(handle)) {
+          unresolved.add("browser descendant pid " + handle.pid());
+        }
+      }
+      try {
+        output.close();
+      } catch (IOException error) {
+        unresolved.add("stdout close failed");
+      }
+      reader.shutdownNow();
+      if (!unresolved.isEmpty()) {
+        throw new IllegalStateException(
+            "browser cleanup could not be confirmed: " + String.join(", ", unresolved));
+      }
+    }
+
+    private static boolean stopHandle(ProcessHandle handle) {
+      try {
+        if (!handle.isAlive()) {
+          return true;
+        }
+        handle.destroy();
+        if (waitFor(handle, 10)) {
+          return true;
+        }
+        handle.destroyForcibly();
+        return waitFor(handle, 10);
+      } catch (RuntimeException error) {
+        return false;
+      }
+    }
+
+    private static boolean waitFor(ProcessHandle handle, long seconds) {
+      if (!handle.isAlive()) {
+        return true;
+      }
+      try {
+        handle.onExit().get(seconds, TimeUnit.SECONDS);
+        return true;
+      } catch (InterruptedException error) {
+        Thread.currentThread().interrupt();
+        return false;
+      } catch (ExecutionException | TimeoutException error) {
+        return false;
+      }
+    }
+  }
+
   /** 存活等待 daemon 完成崩溃收敛：权威视图快照不再包含该 view。 */
   private void awaitViewReleased(String environmentId, UUID viewId) throws Exception {
     long deadline = System.nanoTime() + RECOVERY_TIMEOUT.toNanos();
@@ -588,19 +853,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
   private long claimView(
       String environmentId, UUID viewId, UUID documentId, EventIdentity identity, UUID claimId)
       throws IOException {
-    Response open =
-        browser
-            .newCall(
-                new Request.Builder()
-                    .url(baseUrl() + "/api/environments/" + environmentId + "/ide/views")
-                    .post(
-                        RequestBody.create(
-                            openViewBody(
-                                environmentId, viewId, documentId, identity, claimId, "create"),
-                            JSON))
-                    .build())
-            .execute();
-    open.close();
+    openView(environmentId, viewId, documentId, identity, claimId);
 
     EnvironmentIdeViewsDTO snapshot = localIdeService.listViews(EnvironmentId.parse(environmentId));
     EnvironmentIdeViewDTO view =
@@ -653,7 +906,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
             });
     stream.sendEnd().toCompletableFuture().get(30, TimeUnit.SECONDS);
     MuxResponse response = collected.await(Duration.ofSeconds(60));
-    stream.complete();
+    stream.complete().toCompletableFuture().get(30, TimeUnit.SECONDS);
     return response;
   }
 
@@ -847,7 +1100,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
     Response response = postOpenView(environmentId, viewId, documentId, identity, claimId, mode);
     try (response) {
       String text = response.body().string();
-      assertEquals(200, response.code(), "OPEN_VIEW (" + mode + ") must succeed: " + text);
+      assertEquals(200, response.code(), "OPEN_VIEW (" + mode + ") must succeed");
       return JsonMapper.builder().build().readTree(text).path("data");
     }
   }
