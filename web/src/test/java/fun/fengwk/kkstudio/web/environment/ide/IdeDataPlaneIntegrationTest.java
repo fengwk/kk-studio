@@ -239,6 +239,33 @@ class IdeDataPlaneIntegrationTest extends WebPostgresTestSupport {
   }
 
   @Test
+  void confinesWorkerScopeLocallyAndAcrossNodes() throws Exception {
+    forwarder = ForwarderNode.start(ownerPort, clusterNodeRegistry.localNodeId(), ENVIRONMENT);
+    String base = "/environment-ide/" + ENVIRONMENT + "/" + viewId + "/";
+    // 真实 HTTP 响应边界：内部挂载、根、别 view 和合法相对范围都不得逃出当前 view。
+    for (String origin : List.of(ownerUrl(""), forwarder.url())) {
+      for (String scope : List.of("internal", "root", "other", "relative")) {
+        try (Response response =
+            browser
+                .newCall(
+                    new Request.Builder()
+                        .url(origin + base + "worker.js?scope=" + scope)
+                        .header("Cookie", "kk_ide_session=test-" + viewId)
+                        .header("Origin", origin)
+                        .build())
+                .execute()) {
+          assertEquals(200, response.code());
+          assertEquals(
+              base + ("relative".equals(scope) ? "workers/" : ""),
+              response.header("Service-Worker-Allowed"));
+          assertNull(response.header("Set-Cookie"));
+          assertEquals("hello", response.body().string());
+        }
+      }
+    }
+  }
+
+  @Test
   void rewritesInternalMountLocationForHttpData() throws Exception {
     String cookie = "kk_ide_session=test-" + viewId;
     OkHttpClient noRedirect = new OkHttpClient.Builder().followRedirects(false).build();

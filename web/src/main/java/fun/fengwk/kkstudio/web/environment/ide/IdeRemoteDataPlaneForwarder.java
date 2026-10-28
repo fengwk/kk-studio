@@ -223,6 +223,9 @@ public final class IdeRemoteDataPlaneForwarder {
         if (!legacy && "location".equals(lower)) {
           value = IdeGatewayDataPlane.rebaseLocation(value, request, environmentId, viewId);
         }
+        if (!legacy && "service-worker-allowed".equals(lower)) {
+          value = IdeGatewayDataPlane.rebaseWorkerScope(value, request, environmentId, viewId);
+        }
         response.addHeader(name, value);
       }
     }

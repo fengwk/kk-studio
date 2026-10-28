@@ -29,6 +29,7 @@ import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.SocketTimeoutException;
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -322,6 +323,39 @@ public final class IdeGatewayDataPlane {
       return base + relative.substring(1);
     }
     return location;
+  }
+
+  /** Worker scope 只能落在当前浏览器 view；无效或越界声明收窄到 view 根。 */
+  static String rebaseWorkerScope(
+      String scope, HttpServletRequest request, EnvironmentId environmentId, UUID viewId) {
+    String base = viewBase(request, environmentId, viewId);
+    if (viewId == null || scope.indexOf('?') >= 0 || scope.indexOf('#') >= 0) {
+      return base;
+    }
+    String relative = internalViewRelative(scope, viewId);
+    if (!relative.equals(scope) && IdeDataInternalPaths.isSafeViewPath(relative)) {
+      return base + relative.substring(1);
+    }
+    try {
+      URI uri = URI.create(scope);
+      if (uri.isAbsolute()
+          || uri.getRawAuthority() != null
+          || uri.getRawQuery() != null
+          || uri.getRawFragment() != null) {
+        return base;
+      }
+      String path = uri.getRawPath();
+      if (path != null && path.startsWith("./")) {
+        path = path.substring(2);
+      }
+      if (path == null || !IdeDataInternalPaths.isSafeViewPath("/" + path)) {
+        return base;
+      }
+      String resolved = URI.create(request.getRequestURI()).resolve(uri).getRawPath();
+      return resolved.startsWith(base) ? resolved : base;
+    } catch (IllegalArgumentException error) {
+      return base;
+    }
   }
 
   /** 真实 code-server 的绝对 Location 带内部挂载；只剥离当前 view 的 `/__kk/ide/view/...` 基址。 */

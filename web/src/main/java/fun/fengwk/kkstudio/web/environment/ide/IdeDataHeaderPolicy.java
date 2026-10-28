@@ -195,6 +195,13 @@ final class IdeDataHeaderPolicy {
                 : IdeGatewayDataPlane.rebaseLocation(
                     header.value(), request, environmentId, viewId);
         response.addHeader(header.name(), location);
+      } else if ("service-worker-allowed".equals(lower)) {
+        response.addHeader(
+            header.name(),
+            request instanceof IdeForwardedRequest
+                ? header.value()
+                : IdeGatewayDataPlane.rebaseWorkerScope(
+                    header.value(), request, environmentId, viewId));
       } else {
         response.addHeader(header.name(), header.value());
       }
