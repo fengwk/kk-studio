@@ -1,9 +1,11 @@
+import { spawnSync } from 'node:child_process'
 import { createServer } from 'node:http'
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { Readable, Writable } from 'node:stream'
+import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DaemonConfig, ManagedProcess, ProcessExit, ProcessSpec, ProcessSupervisor } from '../src/contracts.js'
 import { acquireFileLock, type DirectoryLock } from '../src/native/index.js'
@@ -148,6 +150,70 @@ async function expectOwnerOnlyFile(target: string): Promise<void> {
   if (process.platform !== 'win32') {
     expect((await stat(target)).mode & 0o777).toBe(0o600)
   }
+}
+
+const WINDOWS_UPDATE_SCRIPT_RUNNER = fileURLToPath(
+  new URL('./resources/update/windows-update-script-runner.ps1', import.meta.url),
+)
+
+interface WindowsScriptFixture {
+  root: string
+  script: string
+  log: string
+  installed: string
+  operation: string
+  staged: string
+}
+
+/** 真实 Windows PowerShell 只替换计划任务 cmdlet；生产脚本文本原样执行。 */
+async function createWindowsScriptFixture(): Promise<WindowsScriptFixture> {
+  const root = await mkdtemp(path.join(tmpdir(), 'kk-update-script-'))
+  const installed = path.join(root, 'lib')
+  const operation = path.join(root, 'updates', OPERATION_ID)
+  const staged = path.join(operation, 'extract')
+  await mkdir(path.join(installed, 'runtime', 'code-server', 'lib'), { recursive: true })
+  await writeFile(path.join(installed, 'runtime', 'code-server', 'lib', 'node.exe'), '')
+  await writeFile(path.join(root, 'daemon.json'), '{}')
+  await mkdir(staged, { recursive: true })
+  const log = path.join(root, 'calls.log')
+  await writeFile(log, '')
+  const script = path.join(root, 'kk-studio-daemon-update.ps1')
+  await writeFile(script, WINDOWS_UPDATE_SCRIPT)
+  return { root, script, log, installed, operation, staged }
+}
+
+function runWindowsScript(
+  fixture: WindowsScriptFixture,
+  action: 'stop' | 'start',
+  overrides: Record<string, string> = {},
+) {
+  const result = spawnSync(
+    'powershell.exe',
+    ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', WINDOWS_UPDATE_SCRIPT_RUNNER],
+    {
+      env: {
+        ...process.env,
+        KK_TEST_SCRIPT: fixture.script,
+        KK_TEST_LOG: fixture.log,
+        KK_TEST_INSTALLED: fixture.installed,
+        KK_TEST_OPERATION: fixture.operation,
+        KK_TEST_STAGED: fixture.staged,
+        KK_TEST_ACTION: action,
+        ...overrides,
+      },
+      encoding: 'utf8',
+      timeout: 15_000,
+      windowsHide: true,
+    },
+  )
+  if (result.error !== undefined) {
+    throw result.error
+  }
+  return result
+}
+
+async function readWindowsScriptCalls(fixture: WindowsScriptFixture): Promise<string[]> {
+  return (await readFile(fixture.log, 'utf8')).split(/\r?\n/u).filter(Boolean)
 }
 
 function config(dataDir: string): DaemonConfig {
@@ -371,6 +437,17 @@ describe('update handler', () => {
     await expect(stat(path.join(dataDir, 'updates', OPERATION_ID, HANDOFF_FILE))).rejects.toThrow()
   })
 
+  it('keeps the update -Action parameter separate from the scheduled task action', () => {
+    // PowerShell 变量名大小写不敏感：$action 会覆盖参数 $Action，使 stop 分支永远无法命中。
+    expect(WINDOWS_UPDATE_SCRIPT).toContain("[ValidateSet('run', 'stop', 'start')][string]$Action")
+    expect(WINDOWS_UPDATE_SCRIPT).toContain('$taskAction = $actions[0]')
+    expect(WINDOWS_UPDATE_SCRIPT).not.toMatch(/\$action\s*=\s*\$actions\[0\]/iu)
+    for (const property of ['Execute', 'Arguments', 'WorkingDirectory']) {
+      expect(WINDOWS_UPDATE_SCRIPT).toContain(`$taskAction.${property}`)
+    }
+    expect(WINDOWS_UPDATE_SCRIPT).toContain("if ($Action -eq 'stop')")
+  })
+
   it('matches the installer quoted direct argv exactly in the Windows ownership check', () => {
     // 配置路径是真实 Windows 路径且以 daemon.json 结尾，不含双引号或尾随反斜杠。
     const installedDir = 'C:\\Users\\环境\\用户\\.kk-studio\\lib'
@@ -382,13 +459,13 @@ describe('update handler', () => {
     )
     // 运行时身份按规范化路径比较（Windows 大小写不敏感），但仍必须是冻结的受管 node.exe。
     expect(WINDOWS_UPDATE_SCRIPT).toContain(
-      "if (-not (Test-SamePath -Left ([string]$action.Execute) -Right $expectedNode)) {",
+      "if (-not (Test-SamePath -Left ([string]$taskAction.Execute) -Right $expectedNode)) {",
     )
     expect(WINDOWS_UPDATE_SCRIPT).toContain(
       "Write-Failure 'managed scheduled task does not run the managed runtime'",
     )
     expect(WINDOWS_UPDATE_SCRIPT).toContain(
-      "if ([string]$action.Arguments -ne $expectedArguments) {",
+      "if ([string]$taskAction.Arguments -ne $expectedArguments) {",
     )
     expect(WINDOWS_UPDATE_SCRIPT).toContain(
       "Write-Failure 'managed scheduled task arguments do not match the managed configuration'",
@@ -1077,5 +1154,41 @@ describe('managed process lifecycle', () => {
 describe('result file contract', () => {
   it('names the update result file used by the detached updater', () => {
     expect(RESULT_FILE).toBe('update-result.json')
+  })
+})
+
+describe.runIf(process.platform === 'win32')('Windows update script action dispatch', () => {
+  it('stop stops the installer-owned task and never starts it', async () => {
+    const fixture = await createWindowsScriptFixture()
+    try {
+      const result = runWindowsScript(fixture, 'stop', { KK_TEST_STATE: 'Running' })
+      expect(result.status, result.stderr).toBe(0)
+      expect(await readWindowsScriptCalls(fixture)).toEqual(['get:Running', 'stop', 'get:Ready'])
+    } finally {
+      await rm(fixture.root, { recursive: true, force: true })
+    }
+  })
+
+  it('start starts the installer-owned task and never stops it', async () => {
+    const fixture = await createWindowsScriptFixture()
+    try {
+      const result = runWindowsScript(fixture, 'start')
+      expect(result.status, result.stderr).toBe(0)
+      expect(await readWindowsScriptCalls(fixture)).toEqual(['get:Ready', 'start'])
+    } finally {
+      await rm(fixture.root, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects a foreign task before any stop or start', async () => {
+    const fixture = await createWindowsScriptFixture()
+    try {
+      const result = runWindowsScript(fixture, 'stop', { KK_TEST_OWNERSHIP: 'foreign' })
+      expect(result.status).not.toBe(0)
+      expect(result.stderr).toContain('managed scheduled task is not owned by the installer')
+      expect(await readWindowsScriptCalls(fixture)).toEqual(['get:Ready'])
+    } finally {
+      await rm(fixture.root, { recursive: true, force: true })
+    }
   })
 })
