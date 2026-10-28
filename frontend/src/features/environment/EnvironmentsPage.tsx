@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Badge } from '@/shared/ui/data/Badge'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Box, Download, KeyRound, SlidersHorizontal, Trash2 } from 'lucide-react'
 import {
   filterEnvironments,
   formatTimestamp,
+  isEnvironmentRuntimeUnavailableError,
+  presentUpdateProgress,
   timestampMillis,
 } from '@/features/environment/environment-utils'
 import { EnvironmentInstallModal } from '@/features/environment/EnvironmentInstallModal'
@@ -26,37 +28,34 @@ import { presentConflict, type ConflictPresentation } from '@/shared/conflict/co
 import { ConflictPresenter } from '@/shared/conflict/ConflictPresenter'
 import { AiNavigation } from '@/app/ai-console/AiNavigation'
 import { queryKeys } from '@/shared/lib/query-keys'
-import { useI18n, type TranslationKey } from '@/shared/i18n'
-import type { EnvironmentCardDTO, EnvironmentUpdateDTO } from '@/shared/api/generated/contracts'
+import { useI18n, type InterpolationValues, type TranslationKey } from '@/shared/i18n'
+import type {
+  EnvironmentCardDTO,
+  EnvironmentUpdateProgressDTO,
+} from '@/shared/api/generated/contracts'
 
-const IN_PROGRESS_UPDATE_PHASES = new Set<string>([
-  'PENDING',
-  'RUNNING',
-  'PREPARED',
-  'UNKNOWN',
-])
+/**
+ * runtime 进度只存在于 READY owner 内存，服务端不持久化也不为每条进度广播事件；
+ * 因此只在 READY 卡片上回读当前快照，列表事实本身仍由 changed 事件驱动。
+ */
+const RUNTIME_REFRESH_INTERVAL_MS = 5_000
 
-const UPDATE_PHASE_KEYS: Partial<Record<string, TranslationKey>> = {
-  PENDING: 'ai.environment.update.phase.PENDING',
-  RUNNING: 'ai.environment.update.phase.RUNNING',
-  PREPARED: 'ai.environment.update.phase.PREPARED',
-  SUCCEEDED: 'ai.environment.update.phase.SUCCEEDED',
-  FAILED: 'ai.environment.update.phase.FAILED',
-  UNKNOWN: 'ai.environment.update.phase.UNKNOWN',
-}
+type Translate = (key: TranslationKey, values?: InterpolationValues) => string
 
-function isUpdateInProgress(phase?: string | null): boolean {
-  return typeof phase === 'string' && IN_PROGRESS_UPDATE_PHASES.has(phase.toUpperCase())
-}
-
-function formatUpdateStatus(
-  update: EnvironmentUpdateDTO,
-  t: (key: TranslationKey) => string,
-): string {
-  const phaseKey = UPDATE_PHASE_KEYS[update.phase]
-  const phaseLabel = phaseKey ? t(phaseKey) : update.phase
-  const errorText = update.error?.trim()
-  return errorText ? `${phaseLabel}: ${errorText}` : phaseLabel
+function formatUpdateProgress(update: EnvironmentUpdateProgressDTO, t: Translate): string {
+  const progress = presentUpdateProgress(update)
+  if (progress.percent == null || progress.total == null) {
+    return t('ai.environment.update.progressUnknownTotal', {
+      targetVersion: update.targetVersion,
+      downloaded: progress.downloaded,
+    })
+  }
+  return t('ai.environment.update.progressKnownTotal', {
+    targetVersion: update.targetVersion,
+    downloaded: progress.downloaded,
+    total: progress.total,
+    percent: progress.percent,
+  })
 }
 
 /**
@@ -123,6 +122,16 @@ export function EnvironmentsPage() {
     [environmentsQuery.data],
   )
 
+  // 运行快照只对当前 READY 的连接存在；非 READY 时直接呈现不可用，不请求端点伪造空进度。
+  const runtimeQueries = useQueries({
+    queries: environments.map((environment) => ({
+      queryKey: queryKeys.environments.runtime(environment.id),
+      queryFn: () => environmentService.getEnvironmentRuntime(environment.id),
+      enabled: environment.ready === true,
+      refetchInterval: RUNTIME_REFRESH_INTERVAL_MS,
+    })),
+  })
+
   // 连接失效是时间事实，不是写入事实：服务端已给出每个有效状态的截止时间，这里只按最早的截止点排一次回读，
   // 不轮询、也不维护客户端过期集合。心跳续租或任何 changed 推送更新权威数据后，这个定时器会被取消并按新截止点重排；
   // 回读得到 OFFLINE（statusExpiresAt 为 null）后自然停止。
@@ -166,12 +175,18 @@ export function EnvironmentsPage() {
 
   const updateMutation = useMutation({
     mutationFn: (id: string) => environmentService.startEnvironmentUpdate(id),
-    onSuccess: () => {
+    onSuccess: (result, id) => {
+      // 命令回执携带当前快照；先写入缓存再回读列表，界面不会把发送前状态误标成已启动。
+      queryClient.setQueryData(queryKeys.environments.runtime(id), result.runtimeStatus)
       setUpdateTarget(null)
       setUpdateError(null)
       void queryClient.invalidateQueries({ queryKey: queryKeys.environments.all })
     },
     onError: (err: unknown) => {
+      if (isEnvironmentRuntimeUnavailableError(err)) {
+        setUpdateError(t('ai.environment.runtime.unavailable'))
+        return
+      }
       if (isConflictError(err)) {
         setConflict(presentConflict(err))
         setUpdateTarget(null)
@@ -261,7 +276,7 @@ export function EnvironmentsPage() {
               setCreateModalOpen(true)
             }}
           />
-          {environments.map((environment) => {
+          {environments.map((environment, index) => {
             const status = String(environment.status).toUpperCase()
             const ready = environment.ready === true
             const displayStatus = status === 'READY' && !ready ? 'UNAVAILABLE' : status
@@ -270,13 +285,43 @@ export function EnvironmentsPage() {
               .filter(Boolean)
             const lastSeen = formatTimestamp(environment.lastSeen, locale)
 
+            const runtimeQuery = runtimeQueries[index]
+            const runtimeStatus = runtimeQuery.data?.status
+            const runtimeUnavailable =
+              !ready ||
+              (runtimeQuery.isError &&
+                isEnvironmentRuntimeUnavailableError(runtimeQuery.error))
+            // 当前版本只采用 Daemon 上报：live 快照优先，不可用时回退到最后一次 READY 上报值。
+            const liveDaemonVersion = runtimeStatus?.daemonVersion?.trim()
+            const lastReportedDaemonVersion = environment.daemonVersion?.trim()
+            const daemonVersion =
+              liveDaemonVersion ||
+              (runtimeStatus == null ? lastReportedDaemonVersion : undefined) ||
+              t('ai.environment.runtime.unreported')
+            let runtimeText: string
+            if (runtimeUnavailable) {
+              runtimeText = t('ai.environment.runtime.unavailable')
+            } else if (runtimeQuery.isError) {
+              const errorText =
+                runtimeQuery.error instanceof Error
+                  ? runtimeQuery.error.message.trim()
+                  : ''
+              runtimeText = errorText || t('ai.environment.runtime.loadFailed')
+            } else if (runtimeStatus == null) {
+              runtimeText = t('ai.environment.runtime.loading')
+            } else if (runtimeStatus.update) {
+              runtimeText = formatUpdateProgress(runtimeStatus.update, t)
+            } else {
+              runtimeText = t('ai.environment.update.none')
+            }
+
             const rows: ResourceCardMetaRow[] = []
-            if (environment.daemonVersion) {
-              rows.push([t('ai.environment.daemonVersion'), environment.daemonVersion])
-            }
-            if (environment.update) {
-              rows.push([t('ai.environment.updateStatus'), formatUpdateStatus(environment.update, t)])
-            }
+            rows.push([t('ai.environment.daemonVersion'), daemonVersion])
+            rows.push({
+              label: t('ai.environment.updateStatus'),
+              value: runtimeText,
+              wrap: true,
+            })
             if (environment.userName) {
               rows.push([t('ai.environment.userName'), environment.userName])
             }
@@ -328,10 +373,6 @@ export function EnvironmentsPage() {
                       variant="ghost"
                       size="compact"
                       aria-label={`${t('ai.environment.update')} ${environment.name}`}
-                      disabled={
-                        isUpdateInProgress(environment.update?.phase) ||
-                        (updateMutation.isPending && updateTarget?.id === environment.id)
-                      }
                       onClick={() => {
                         setConflict(null)
                         setUpdateError(null)

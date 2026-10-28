@@ -358,29 +358,17 @@ export const environmentCatalog = {
     'en-US': 'Update Status',
     'zh-CN': '更新状态',
   },
-  'ai.environment.update.phase.PENDING': {
-    'en-US': 'Pending',
-    'zh-CN': '等待中',
+  'ai.environment.update.none': {
+    'en-US': 'No update in progress',
+    'zh-CN': '无进行中的更新',
   },
-  'ai.environment.update.phase.RUNNING': {
-    'en-US': 'Running',
-    'zh-CN': '更新中',
+  'ai.environment.update.progressKnownTotal': {
+    'en-US': 'Updating to {{targetVersion}} · {{downloaded}} / {{total}} ({{percent}}%)',
+    'zh-CN': '正在更新至 {{targetVersion}} · {{downloaded}} / {{total}}（{{percent}}%）',
   },
-  'ai.environment.update.phase.PREPARED': {
-    'en-US': 'Prepared',
-    'zh-CN': '准备切换',
-  },
-  'ai.environment.update.phase.SUCCEEDED': {
-    'en-US': 'Succeeded',
-    'zh-CN': '更新成功',
-  },
-  'ai.environment.update.phase.FAILED': {
-    'en-US': 'Failed',
-    'zh-CN': '更新失败',
-  },
-  'ai.environment.update.phase.UNKNOWN': {
-    'en-US': 'Awaiting Reconnect',
-    'zh-CN': '等待重连确认',
+  'ai.environment.update.progressUnknownTotal': {
+    'en-US': 'Updating to {{targetVersion}} · {{downloaded}} downloaded (total size unknown)',
+    'zh-CN': '正在更新至 {{targetVersion}} · 已下载 {{downloaded}}（总大小未知）',
   },
   'ai.environment.manage': {
     'en-US': 'Manage',
@@ -393,6 +381,22 @@ export const environmentCatalog = {
   'ai.environment.runtime.title': {
     'en-US': 'Host Information',
     'zh-CN': '宿主信息',
+  },
+  'ai.environment.runtime.unavailable': {
+    'en-US': 'Status unavailable until the Daemon reconnects',
+    'zh-CN': '状态不可用，等待 Daemon 重连',
+  },
+  'ai.environment.runtime.loading': {
+    'en-US': 'Loading runtime status',
+    'zh-CN': '正在读取运行状态',
+  },
+  'ai.environment.runtime.loadFailed': {
+    'en-US': 'Failed to read runtime status',
+    'zh-CN': '运行状态读取失败',
+  },
+  'ai.environment.runtime.unreported': {
+    'en-US': 'Not reported',
+    'zh-CN': '未上报',
   },
   'ai.environment.runtime.daemonVersion': {
     'en-US': 'Daemon Version',

@@ -10,7 +10,8 @@ import type {
   EnvironmentIdeViewDTO,
   EnvironmentInstallCodeDTO,
   EnvironmentInstallConfigDTO,
-  EnvironmentUpdateDTO,
+  EnvironmentRuntimeStatusDTO,
+  EnvironmentUpdateStartDTO,
 } from '@/shared/api/generated/contracts'
 
 export function createEnvironmentService(client: HttpClient = apiClient) {
@@ -23,12 +24,18 @@ export function createEnvironmentService(client: HttpClient = apiClient) {
     getEnvironment: (id: string): Promise<EnvironmentCardDTO> =>
       client.get(`/environments/${encodeURIComponent(id)}`),
 
-    /** Read the latest managed Daemon update operation; returns null when never updated. */
-    getEnvironmentUpdate: (id: string): Promise<EnvironmentUpdateDTO | null> =>
-      client.get(`/environments/${encodeURIComponent(id)}/update`),
+    /**
+     * 读取当前 READY 连接代际的运行快照。没有有效 READY owner 时服务端返回
+     * {@code environment_unavailable}，调用方必须展示不可用而不是伪造空的 update 状态。
+     */
+    getEnvironmentRuntime: (id: string): Promise<EnvironmentRuntimeStatusDTO> =>
+      client.get(`/environments/${encodeURIComponent(id)}/runtime`),
 
-    /** Start a managed Daemon update to the platform-controlled release and return the refreshed card. */
-    startEnvironmentUpdate: (id: string): Promise<EnvironmentCardDTO> =>
+    /**
+     * 请求当前 READY owner 发起受管更新，返回命令接收状态和当前运行快照。
+     * {@code SENT_UNCONFIRMED} 不代表 Daemon 已接受或更新已开始，后续进度仍以 runtime 快照为准。
+     */
+    startEnvironmentUpdate: (id: string): Promise<EnvironmentUpdateStartDTO> =>
       client.post(`/environments/${encodeURIComponent(id)}/update`),
 
     createEnvironment: (data: EnvironmentCreateDTO): Promise<EnvironmentCardDTO> =>
