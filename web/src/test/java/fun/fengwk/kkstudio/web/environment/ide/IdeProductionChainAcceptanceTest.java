@@ -33,6 +33,7 @@ import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.ide.EnvironmentIdeServiceImpl;
 import fun.fengwk.kkstudio.ide.IdeBootstrapTicketService;
+import fun.fengwk.kkstudio.ide.IdeCommandTransport;
 import fun.fengwk.kkstudio.ide.data.IdeDataConnectionRegistry;
 import fun.fengwk.kkstudio.ide.mux.MuxHeader;
 import fun.fengwk.kkstudio.ide.mux.MuxHeaders;
@@ -41,6 +42,8 @@ import fun.fengwk.kkstudio.ide.mux.MuxReceivedData;
 import fun.fengwk.kkstudio.ide.mux.MuxReset;
 import fun.fengwk.kkstudio.ide.mux.MuxStream;
 import fun.fengwk.kkstudio.ide.mux.MuxStreamListener;
+import fun.fengwk.kkstudio.ide.protocol.IdeCommand;
+import fun.fengwk.kkstudio.ide.protocol.IdeReply;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewsDTO;
@@ -148,6 +151,8 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
 
   @Autowired private IdeDataConnectionRegistry dataConnections;
 
+  @Autowired private IdeCommandTransport ideCommands;
+
   @Autowired
   @Qualifier("localEnvironmentIdeService")
   private EnvironmentIdeServiceImpl localIdeService;
@@ -190,6 +195,81 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
     }
     if (failure != null) {
       throw failure;
+    }
+  }
+
+  /**
+   * READY owner 上的真实拒绝：同一事件连接仅登记 claim1，claim2 不得创建视图，claim1 仍可创建并清理。
+   *
+   * <p>直接通过生产命令传输发送 LIST_VIEWS，检查 Daemon 原始快照，避免路由授权过滤掩盖意外创建。
+   */
+  @Test
+  @Order(9)
+  void rejectsUnregisteredClaimOnReadyOwnerWithoutCreatingView() throws Exception {
+    String environmentId = startEnvironmentAndDaemon();
+    EnvironmentId environment = EnvironmentId.parse(environmentId);
+    UUID documentId = UUID.randomUUID();
+    UUID viewId = UUID.randomUUID();
+    UUID registeredClaim = UUID.randomUUID();
+    UUID otherClaim = UUID.randomUUID();
+    try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/api/events/v2"))) {
+      EventIdentity identity = events.awaitConnected();
+      events.registerUsage(
+          documentId, 1L, List.of(new IntentView(environmentId, viewId, registeredClaim, null)));
+
+      try (Response rejected =
+          postOpenView(environmentId, viewId, documentId, identity, otherClaim, "create")) {
+        assertEquals(409, rejected.code(), "an unregistered claim must be rejected");
+        JsonNode error = JsonMapper.builder().build().readTree(rejected.body().string());
+        assertEquals("ide_unavailable", error.path("code").asText());
+        assertEquals(
+            "IDE view is gone; open a new view before retrying",
+            error.path("errors").path("detail").asText());
+      }
+
+      IdeReply afterRejected =
+          ideCommands
+              .requestIde(environment, IdeCommand.listViews())
+              .reply()
+              .get(30, TimeUnit.SECONDS);
+      assertTrue(afterRejected.ok(), "the ready Daemon must return LIST_VIEWS");
+      assertNotNull(afterRejected.views(), "LIST_VIEWS must contain its authoritative snapshot");
+      assertTrue(
+          afterRejected.views().stream().noneMatch(view -> view.viewId().equals(viewId)),
+          "the rejected claim must not create a Daemon view");
+
+      JsonNode opened = openView(environmentId, viewId, documentId, identity, registeredClaim);
+      long epoch = Long.parseLong(opened.path("bindingEpoch").asText());
+      assertTrue(epoch > 0, "the registered claim must create a view with a binding epoch");
+      IdeReply afterOpened =
+          ideCommands
+              .requestIde(environment, IdeCommand.listViews())
+              .reply()
+              .get(30, TimeUnit.SECONDS);
+      assertTrue(afterOpened.ok(), "the ready Daemon must return LIST_VIEWS after OPEN_VIEW");
+      assertNotNull(afterOpened.views());
+      assertTrue(
+          afterOpened.views().stream()
+              .anyMatch(
+                  view ->
+                      view.viewId().equals(viewId)
+                          && view.claimId().equals(registeredClaim)
+                          && view.bindingEpoch() == epoch),
+          "the exact registered claim must create the matching Daemon view");
+
+      try (Response closed = deleteView(environmentId, viewId, documentId, epoch)) {
+        assertEquals(204, closed.code(), "discard must close the created view");
+      }
+      IdeReply afterClosed =
+          ideCommands
+              .requestIde(environment, IdeCommand.listViews())
+              .reply()
+              .get(30, TimeUnit.SECONDS);
+      assertTrue(afterClosed.ok(), "the ready Daemon must return LIST_VIEWS after close");
+      assertNotNull(afterClosed.views());
+      assertTrue(
+          afterClosed.views().stream().noneMatch(view -> view.viewId().equals(viewId)),
+          "discard must remove the Daemon view");
     }
   }
 
