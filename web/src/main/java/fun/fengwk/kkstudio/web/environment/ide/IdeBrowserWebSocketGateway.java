@@ -57,14 +57,14 @@ public final class IdeBrowserWebSocketGateway {
       ClusterNodeRegistry clusterNodeRegistry,
       IdeClusterClient clusterInternalClient,
       WebSocketClient webSocketClient,
-      Optional<IdeDataViewAuthorizer> viewAuthorizer) {
+      IdeDataViewAuthorizer viewAuthorizer) {
     this.properties = Objects.requireNonNull(properties, "properties");
     this.dataConnections = Objects.requireNonNull(dataConnections, "dataConnections");
     this.clusterNodeRegistry = Objects.requireNonNull(clusterNodeRegistry, "clusterNodeRegistry");
     this.clusterInternalClient =
         Objects.requireNonNull(clusterInternalClient, "clusterInternalClient");
     this.webSocketClient = Objects.requireNonNull(webSocketClient, "webSocketClient");
-    this.viewAuthorizer = viewAuthorizer.orElse(null);
+    this.viewAuthorizer = Objects.requireNonNull(viewAuthorizer, "viewAuthorizer");
   }
 
   /** 该请求是否为浏览器 WebSocket 升级。 */
@@ -169,9 +169,6 @@ public final class IdeBrowserWebSocketGateway {
 
   private IdeDataViewAuthorizer.IdeDataViewAccess authorize(
       EnvironmentId environmentId, UUID viewId, String cookieHeader) {
-    if (viewAuthorizer == null) {
-      return null;
-    }
     return viewAuthorizer
         .authorize(environmentId, viewId, cookieHeader)
         .filter(access -> access.viewId().equals(viewId))
