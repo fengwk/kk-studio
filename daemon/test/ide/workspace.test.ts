@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { DaemonConfig } from '../../src/contracts.js'
 import { IdeError, safeMessage } from '../../src/ide/errors.js'
+import { verifyPrivateFile } from '../../src/native/index.js'
 import {
   RecoveryQuotaError,
   canonicalDirectory,
@@ -101,7 +102,8 @@ describe('private recovery backups', () => {
     await writeRecoveryBackup(cfg, backup(viewId), 1024 * 1024)
     expect(await readRecoveryBackup(cfg, viewId, 1024 * 1024)).toEqual(backup(viewId))
     const file = join(recoveryDirectory(cfg), `${viewId}.json`)
-    expect((await stat(file)).mode & 0o777).toBe(0o600)
+    // POSIX 验证属主和 0600；Windows 验证实际 owner-only DACL，而不是无此语义的 mode 位。
+    await expect(verifyPrivateFile(file)).resolves.toBeUndefined()
     await writeRecoveryBackup(cfg, backup(viewId, 'replacement'), 1024 * 1024)
     expect((await readRecoveryBackup(cfg, viewId, 1024 * 1024))?.documents[0]?.text).toBe('replacement')
     expect(await readRecoveryBackup(cfg, newViewId(), 1024 * 1024)).toBeNull()
