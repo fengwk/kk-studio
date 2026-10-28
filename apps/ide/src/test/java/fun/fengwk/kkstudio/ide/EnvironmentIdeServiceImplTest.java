@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.ide;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -10,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonIdeLease;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
+import fun.fengwk.kkstudio.ide.protocol.DaemonIdeCodec;
 import fun.fengwk.kkstudio.ide.protocol.IdeAction;
 import fun.fengwk.kkstudio.ide.protocol.IdeCommand;
 import fun.fengwk.kkstudio.ide.protocol.IdeReply;
@@ -54,6 +56,7 @@ class EnvironmentIdeServiceImplTest {
   private FakeBrowserUse browserUse;
   private FakeAuthorization authorization;
   private InMemoryIdeBootstrapTicketService tickets;
+  private IdeViewBindingRegistry bindings;
   private EnvironmentIdeServiceImpl service;
 
   @BeforeEach
@@ -62,14 +65,10 @@ class EnvironmentIdeServiceImplTest {
     browserUse = new FakeBrowserUse();
     authorization = new FakeAuthorization();
     tickets = new InMemoryIdeBootstrapTicketService();
+    bindings = new IdeViewBindingRegistry();
     service =
         new EnvironmentIdeServiceImpl(
-            transport,
-            tickets,
-            browserUse,
-            new IdeViewBindingRegistry(),
-            Duration.ofMillis(200),
-            authorization);
+            transport, tickets, browserUse, bindings, Duration.ofMillis(200), authorization);
   }
 
   @Test
@@ -257,13 +256,14 @@ class EnvironmentIdeServiceImplTest {
     EnvironmentIdeChangeDirectoryDTO request = new EnvironmentIdeChangeDirectoryDTO();
     request.setDocumentId(DOCUMENT.toString());
     request.setBindingEpoch("7");
-    request.setDirectory("/next");
-    transport.replies.add(
-        new IdeReply(
-            true, VIEW, null, null, null, null, null, "/daemon/next", null, null, null, null));
+    request.setDirectory("/client/link/.");
+    transport.wireReplies.add(
+        "{\"ok\":true,\"viewId\":\"" + VIEW + "\",\"directory\":\"/daemon/next\"}");
 
     EnvironmentIdeViewDTO changed = service.changeDirectory(ENV, VIEW.toString(), request);
     assertEquals("/daemon/next", changed.getDirectory());
+    assertEquals("/daemon/next", bindings.find(ENV, VIEW).orElseThrow().directory());
+    assertEquals("/client/link/.", transport.commands.getLast().directory());
 
     transport.replies.add(
         viewsReply(
@@ -301,6 +301,55 @@ class EnvironmentIdeServiceImplTest {
             .noneMatch(
                 command ->
                     command.action() == IdeAction.FOCUS_TERMINAL && command.bindingEpoch() == 7L));
+  }
+
+  @Test
+  void changeDirectoryRejectsUnconfirmedOrMismatchedReplyWithoutUpdatingBinding() {
+    open();
+    EnvironmentIdeChangeDirectoryDTO request = new EnvironmentIdeChangeDirectoryDTO();
+    request.setDocumentId(DOCUMENT.toString());
+    request.setBindingEpoch("7");
+    request.setDirectory("/client/link/.");
+    // Missing and blank directory are not confirmation, and neither is another view's reply.
+    for (IdeReply reply :
+        List.of(
+            success(VIEW),
+            new IdeReply(true, VIEW, null, null, null, null, null, "   ", null, null, null, null),
+            new IdeReply(
+                true, null, null, null, null, null, null, "/daemon/next", null, null, null, null),
+            new IdeReply(
+                true,
+                UUID.fromString("99999999-2222-3333-4444-555555555555"),
+                null,
+                null,
+                null,
+                null,
+                null,
+                "/daemon/next",
+                null,
+                null,
+                null,
+                null))) {
+      transport.replies.add(reply);
+      int before = transport.commands.size();
+      AiEnvironmentIdeUnavailableException error =
+          assertThrows(
+              AiEnvironmentIdeUnavailableException.class,
+              () -> service.changeDirectory(ENV, VIEW.toString(), request));
+      assertFalse(error.getMessage().contains(request.getDirectory()));
+      assertEquals(before + 1, transport.commands.size(), "no automatic command retry");
+      assertEquals("/daemon/dir", bindings.find(ENV, VIEW).orElseThrow().directory());
+    }
+    // The production transport decodes the wire reply in the completion stage.
+    transport.wireReplies.add("{\"ok\":true,\"viewId\":\"" + VIEW + "\",\"directory\":42}");
+    int before = transport.commands.size();
+    AiEnvironmentIdeUnavailableException error =
+        assertThrows(
+            AiEnvironmentIdeUnavailableException.class,
+            () -> service.changeDirectory(ENV, VIEW.toString(), request));
+    assertFalse(error.getMessage().contains(request.getDirectory()));
+    assertEquals(before + 1, transport.commands.size(), "no automatic command retry");
+    assertEquals("/daemon/dir", bindings.find(ENV, VIEW).orElseThrow().directory());
   }
 
   @Test
@@ -525,6 +574,7 @@ class EnvironmentIdeServiceImplTest {
 
     private final List<IdeCommand> commands = new ArrayList<>();
     private final Deque<IdeReply> replies = new ArrayDeque<>();
+    private final Deque<String> wireReplies = new ArrayDeque<>();
     private final AtomicBoolean neverCompletes = new AtomicBoolean();
     private final AtomicReference<IdeAction> failNext = new AtomicReference<>();
     private DaemonConnectionIdentity identity = new DaemonConnectionIdentity(ENV, DAEMON_INSTANCE);
@@ -538,7 +588,13 @@ class EnvironmentIdeServiceImplTest {
       if (failAction == command.action() && failNext.compareAndSet(failAction, null)) {
         // 只让指定命令一次结果不确定；后续对账命令使用脚本化回执。
       } else if (!neverCompletes.get()) {
-        future.complete(replies.removeFirst());
+        if (wireReplies.isEmpty()) {
+          future.complete(replies.removeFirst());
+        } else {
+          future =
+              CompletableFuture.completedFuture(wireReplies.removeFirst())
+                  .thenApply(new DaemonIdeCodec()::decodeReply);
+        }
       }
       return new IdeRequest(identity, UUID.randomUUID(), future);
     }

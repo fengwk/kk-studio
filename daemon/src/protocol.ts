@@ -1567,8 +1567,16 @@ function ideReplyValue(raw: unknown): IdeReply {
     }
     return { ok: true, views }
   }
-  if (IDE_VIEW_FIELDS.some((field) => field !== 'viewId' && field in raw) || 'directory' in raw || 'workspacePath' in raw) {
+  if (IDE_VIEW_FIELDS.some((field) => field !== 'viewId' && field in raw) || 'workspacePath' in raw) {
     return ideOpenReply(raw)
+  }
+  if ('directory' in raw) {
+    rejectUnknownFields(raw, new Set(['ok', 'viewId', 'directory']), 'IDE result')
+    return {
+      ok: true,
+      viewId: ideUuid(raw, 'viewId', 'IDE result'),
+      directory: boundedIdeText(raw.directory, 'directory', 'IDE result', IDE_MAX_PATH_CHARS),
+    }
   }
   if ('viewId' in raw) {
     rejectUnknownFields(raw, new Set(['ok', 'viewId']), 'IDE result')

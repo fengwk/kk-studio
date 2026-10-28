@@ -1008,7 +1008,7 @@ export async function createIdeService(
       }
       await writePrivateFile(view.workspacePath, workspaceFileContent(directory))
       view.directory = directory
-      return { ok: true, viewId: view.viewId }
+      return { ok: true, viewId: view.viewId, directory: view.directory }
     })
   }
 
