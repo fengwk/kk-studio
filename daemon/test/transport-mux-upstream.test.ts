@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from 'node:net'
 
 import { afterEach, describe, expect, it } from 'vitest'
-import { WebSocketServer, type WebSocket } from 'ws'
+import { WebSocket, WebSocketServer } from 'ws'
 
 import { decodeDataBind, type DataBind } from '../src/protocol.js'
 import {
@@ -249,6 +249,44 @@ describe('mux upstream service', () => {
     await bind
     await waitFor(() => closes.length === 1, 5_000)
     expect(closes[0]).toBeNull()
+  })
+
+  it('reuses one physical data websocket for sequential HTTP streams', async () => {
+    const data = await startDataServer()
+    const upstream = await startHttp('reuse')
+    let idle = 0
+    const service = createMuxUpstreamService({
+      studioUrl: data.studioUrl,
+      resolveView: resolverFor(upstream),
+      onIdle: () => {
+        idle++
+      },
+      connectTimeoutMillis: 2_000,
+    })
+    cleanups.push(() => service.shutdown())
+    const bind = service.bind(binding('1', TICKET_1, data.streamUrl), new AbortController().signal)
+    const peer = await data.waitPeer(0)
+
+    const exchange = async (streamId: number, path: string): Promise<void> => {
+      peer.send({ type: 'OPEN', streamId, request: httpOpen(path) })
+      await peer.waitFor((frame) => frame.type === 'READY' && frame.streamId === streamId, `READY ${streamId}`)
+      peer.send({ type: 'END', streamId })
+      await peer.waitFor((frame) => frame.type === 'HEADERS' && frame.streamId === streamId, `HEADERS ${streamId}`)
+      await peer.waitFor((frame) => frame.type === 'DATA' && frame.streamId === streamId, `DATA ${streamId}`)
+      await peer.waitFor((frame) => frame.type === 'END' && frame.streamId === streamId, `END ${streamId}`)
+      peer.send({ type: 'COMPLETE', streamId })
+      await waitFor(() => idle === streamId, 5_000)
+    }
+
+    await exchange(1, '/first')
+    expect(peer.socket.readyState).toBe(WebSocket.OPEN)
+    await exchange(2, '/second')
+    expect(peer.socket.readyState).toBe(WebSocket.OPEN)
+    expect(data.peers).toHaveLength(1)
+    expect(upstream.requests).toEqual(['/first', '/second'])
+
+    await service.shutdown()
+    await bind
   })
 
   it('accepts the first peer frame sent immediately after the physical handshake', async () => {

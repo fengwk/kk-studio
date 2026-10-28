@@ -470,7 +470,7 @@ describe('runtime IDE branches', () => {
       async close() {},
     }
     const { runtime, transport } = await ready({ ide, ideCommandTimeoutMillis: 60_000 })
-    transport.receive(serverMessage('IDE_COMMAND', { environmentId: ENV, invocationId: 'ide-1', payload: { action: 'OPEN_VIEW' } }))
+    transport.receive(serverMessage('IDE_COMMAND', { environmentId: ENV, invocationId: 'ide-1', payload: { action: 'LIST_VIEWS' } }))
     await tick()
     runtime.close()
     await waitFor(() => aborted)
