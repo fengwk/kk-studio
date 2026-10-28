@@ -23,11 +23,15 @@ class FakeApplicationEventSocket {
   static instances = []
 
   constructor(url) {
+    assert.equal(new URL(url).pathname, '/api/events/v2')
     this.url = url
     this.listeners = new Map()
     this.sent = []
     FakeApplicationEventSocket.instances.push(this)
-    queueMicrotask(() => this.dispatch('open', {}))
+    queueMicrotask(() => {
+      this.dispatch('open', {})
+      this.emit({ version: 2, type: 'connected', eventNodeId: randomUUID(), connectionId: randomUUID() })
+    })
   }
 
   static latest() {
@@ -49,10 +53,11 @@ class FakeApplicationEventSocket {
 
   send(text) {
     const frame = JSON.parse(text)
+    assert.equal(frame.version, 2)
     this.sent.push(frame)
     if (frame.type === 'subscribe') {
       const ack = {
-        version: 1,
+        version: 2,
         type: 'subscribed',
         resource: frame.resource,
         cursor: '0',
@@ -303,7 +308,7 @@ function createStopCaseContext({ exitConverges = true } = {}) {
           }
           phase = 'initial-running'
           FakeApplicationEventSocket.latest().emit({
-            version: 1,
+            version: 2,
             type: 'event',
             name: 'realtime',
             resource: { kind: 'thread', id: threadId },

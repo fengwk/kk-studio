@@ -30,7 +30,7 @@ registerCase({
   // 本 case 把 Provider baseUrl 指向 case 内自建的宿主 127.0.0.1 mock；App 在
   // distributed 容器内无法回连宿主 loopback，因此必须排除 host-mock capability。
   requires: ['host-mock'],
-  docs: '本地 node:http OpenAI Chat Completions SSE mock：先建立 /api/events/v1 Thread 订阅并收到 ack，首次 Provider attempt 在 checkpoint 窗口内输出确定性 partial 后断连，未提交尾部只冻结到 modelAttemptFailures、不作为活动 MODEL_DELTA 发布；后续自动重试成功，首条 live text 来自 attempt 2。断言 MODEL_ATTEMPT_FAILURE durable 顺序/精确 payload、失败 partial 不拼入 assistant，第二 turn 的 Provider messages 排除失败 partial/thinking/error',
+  docs: '本地 node:http OpenAI Chat Completions SSE mock：先建立 /api/events/v2 Thread 订阅并收到 ack，首次 Provider attempt 在 checkpoint 窗口内输出确定性 partial 后断连，未提交尾部只冻结到 modelAttemptFailures、不作为活动 MODEL_DELTA 发布；后续自动重试成功，首条 live text 来自 attempt 2。断言 MODEL_ATTEMPT_FAILURE durable 顺序/精确 payload、失败 partial 不拼入 assistant，第二 turn 的 Provider messages 排除失败 partial/thinking/error',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     const initialMarker = `ATTEMPT-VISIBILITY-FIRST-${suffix}`

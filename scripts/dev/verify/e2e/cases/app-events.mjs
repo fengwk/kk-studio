@@ -5,7 +5,7 @@ registerCase({
   id: 'events.heartbeat_keepalive',
   level: 'L1',
   title: '应用事件 WebSocket 周期 heartbeat 保活',
-  docs: '原生 WebSocket 直连 /api/events/v1，不建立资源订阅；等待连接级 heartbeat，严格断言 {version:1,type:"heartbeat"} 且连接保持打开',
+  docs: '原生 WebSocket 直连 /api/events/v2，不建立资源订阅；验证首帧 connected 的 eventNodeId/connectionId，再等待严格 {version:2,type:"heartbeat"} 且连接保持打开',
   async run(ctx) {
     const socket = new WebSocket(applicationEventUrl(ctx.baseUrl))
     const startedAt = Date.now()
@@ -21,7 +21,7 @@ registerCase({
         && typeof frame === 'object'
         && !Array.isArray(frame)
         && Object.keys(frame).sort().join(',') === 'type,version'
-        && frame.version === 1
+        && frame.version === 2
         && frame.type === 'heartbeat',
         `invalid heartbeat frame: ${JSON.stringify(frame)}`,
       )
@@ -56,7 +56,7 @@ registerCase({
       await waitForSocketOpen(socket, 5_000)
 
       socket.send(
-        JSON.stringify({ version: 1, type: 'subscribe', resource: { kind: 'projects' } }),
+        JSON.stringify({ version: 2, type: 'subscribe', resource: { kind: 'projects' } }),
       )
       const projectsAck = await takeFrame(
         frames,
@@ -85,7 +85,7 @@ registerCase({
       assertExactKeys(projectEvent, ['version', 'type', 'resource', 'name', 'data'], 'project event')
       assertExactKeys(projectEvent.resource, ['kind'], 'project event resource')
       assertExactKeys(projectEvent.data, ['projectId'], 'project event data')
-      assert(projectEvent.version === 1, JSON.stringify(projectEvent))
+      assert(projectEvent.version === 2, JSON.stringify(projectEvent))
 
       ctx.writeArtifact(
         'global-invalidation.json',
@@ -110,7 +110,7 @@ registerCase({
 function applicationEventUrl(baseUrl) {
   const url = new URL(baseUrl)
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
-  url.pathname = '/api/events/v1'
+  url.pathname = '/api/events/v2'
   url.search = ''
   url.hash = ''
   return url.toString()
@@ -159,7 +159,7 @@ function assertGlobalSubscriptionAck(frame, kind) {
   assertExactKeys(frame, ['version', 'type', 'resource', 'cursor'], `${kind} subscribed frame`)
   assertExactKeys(frame.resource, ['kind'], `${kind} subscribed resource`)
   assert(
-    frame.version === 1
+    frame.version === 2
       && frame.type === 'subscribed'
       && frame.resource.kind === kind
       && frame.cursor === '0',
@@ -180,6 +180,7 @@ function assertExactKeys(value, expected, label) {
 
 async function waitForHeartbeat(socket, timeoutMs) {
   return new Promise((resolve, reject) => {
+    let connected = false
     const timer = setTimeout(() => {
       cleanup()
       reject(new Error(`timed out waiting ${timeoutMs}ms for application heartbeat`))
@@ -189,6 +190,19 @@ async function waitForHeartbeat(socket, timeoutMs) {
       try {
         frame = JSON.parse(String(event.data))
       } catch {
+        return
+      }
+      if (!connected) {
+        try {
+          assertExactKeys(frame, ['version', 'type', 'eventNodeId', 'connectionId'], 'connected')
+          const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+          assert(frame.version === 2 && frame.type === 'connected'
+            && uuid.test(frame.eventNodeId) && uuid.test(frame.connectionId), 'invalid connected identity')
+          connected = true
+        } catch (error) {
+          cleanup()
+          reject(error)
+        }
         return
       }
       if (frame?.type !== 'heartbeat') {

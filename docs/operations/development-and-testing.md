@@ -409,6 +409,11 @@ Linux 脚本只下载并检查保存配置与响应头，不执行安装；卸�
 无 owner 时请求先被路由拒绝，因此这不证明已 READY 场景的 exact-intent 校验、
 视图占用、续租或真实数据面行为。脚本 fixture 测试也不替代对真实测试服务执行这些 L1 case。
 
+事件 L1 使用 `/api/events/v2`：heartbeat case 校验首帧 `connected` 的
+`eventNodeId` / `connectionId` 与 version 2 保活帧，Project case 验证全局失效通知。
+L4 `daemon.ready` 与 L5 租约投影校验 catalog 3（含内部 `fs.edit.preview`、`skill.sync`）；
+它们分别要求 tools / distributed，不进入默认免费 L1 的真实 Daemon 路径。
+
 case 的 `requires` 决定默认是否执行：`real`、`tools`、`branch`、`canvas-storage`、`canvas-function` 与
 `distributed` 分别对应上表的 flag；`host-mock` 表示 case 在宿主 `127.0.0.1` 自建 mock Provider，不读取真实凭据，
 但在 distributed 容器拓扑下不可用。API 契约断言不能替代真实 Agent 的 Issue 接受、阶段交接与 Goal 进度验收，
