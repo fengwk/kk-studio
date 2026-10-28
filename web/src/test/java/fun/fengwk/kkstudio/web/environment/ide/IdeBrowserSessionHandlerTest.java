@@ -64,9 +64,9 @@ class IdeBrowserSessionHandlerTest {
 
   @Test
   void bootstrapSetsViewScopedCookieAndRedirectsToManagedWorkspace() throws Exception {
-    String token =
-        tickets.issue(
-            new DaemonConnectionIdentity(ENV, DAEMON), VIEW.toString(), 4L, "/managed/ws");
+    DaemonConnectionIdentity identity = new DaemonConnectionIdentity(ENV, DAEMON);
+    sessions.viewOpened(identity, VIEW.toString(), 4L, "/managed/ws");
+    String token = tickets.issue(identity, VIEW.toString(), 4L, "/managed/ws");
     HttpServletRequest request = request(token);
     HttpServletResponse response = mock(HttpServletResponse.class);
 
@@ -123,8 +123,9 @@ class IdeBrowserSessionHandlerTest {
 
   @Test
   void sessionRejectsCrossViewCookieAndReportsReplacedGeneration() throws Exception {
-    String token =
-        tickets.issue(new DaemonConnectionIdentity(ENV, DAEMON), VIEW.toString(), 4L, "/ws");
+    DaemonConnectionIdentity identity = new DaemonConnectionIdentity(ENV, DAEMON);
+    sessions.viewOpened(identity, VIEW.toString(), 4L, "/ws");
+    String token = tickets.issue(identity, VIEW.toString(), 4L, "/ws");
     HttpServletResponse bootstrapResponse = mock(HttpServletResponse.class);
     handler.handleBootstrap(ENV, VIEW, request(token), bootstrapResponse);
     ArgumentCaptor<String> cookie = ArgumentCaptor.forClass(String.class);

@@ -40,10 +40,8 @@ class IdeBrowserUseClientGatewayTest {
       EnvironmentId.parse("22222222-2222-2222-2222-222222222222");
   private static final UUID VIEW = UUID.fromString("33333333-3333-3333-3333-333333333333");
   private static final UUID CLAIM = UUID.fromString("44444444-4444-4444-4444-444444444444");
-  private static final UUID UNBOUND_VIEW =
-      UUID.fromString("55555555-5555-5555-5555-555555555555");
-  private static final UUID UNBOUND_CLAIM =
-      UUID.fromString("66666666-6666-6666-6666-666666666666");
+  private static final UUID UNBOUND_VIEW = UUID.fromString("55555555-5555-5555-5555-555555555555");
+  private static final UUID UNBOUND_CLAIM = UUID.fromString("66666666-6666-6666-6666-666666666666");
 
   private IdeBrowserUseRegistry registry;
   private ClusterNodeRegistry nodes;
@@ -78,22 +76,19 @@ class IdeBrowserUseClientGatewayTest {
                 new IdeBrowserUseView(ENV, VIEW, CLAIM, 7L),
                 new IdeBrowserUseView(ENV, UNBOUND_VIEW, UNBOUND_CLAIM, null))));
 
-    assertTrue(
-        gateway.findExactIntent(LOCAL_NODE, CONNECTION, DOCUMENT, ENV, VIEW, CLAIM));
+    assertTrue(gateway.findExactIntent(LOCAL_NODE, CONNECTION, DOCUMENT, ENV, VIEW, CLAIM));
     IdeBrowserUseGateway.Proofs proofs =
         gateway.activeBoundProofs(LOCAL_NODE, CONNECTION, DOCUMENT).orElseThrow();
 
     assertEquals(DOCUMENT, proofs.documentId());
     assertEquals(4L, proofs.revision());
-    assertEquals(
-        List.of(new IdeBrowserUseGateway.Proof(ENV, VIEW, DOCUMENT, 7L)), proofs.views());
+    assertEquals(List.of(new IdeBrowserUseGateway.Proof(ENV, VIEW, DOCUMENT, 7L)), proofs.views());
     verifyNoMoreInteractions(nodes);
   }
 
   @Test
   void missingConnectionIsEmptyNotFabricatedUsage() {
-    assertFalse(
-        gateway.findExactIntent(LOCAL_NODE, CONNECTION, DOCUMENT, ENV, VIEW, CLAIM));
+    assertFalse(gateway.findExactIntent(LOCAL_NODE, CONNECTION, DOCUMENT, ENV, VIEW, CLAIM));
     assertTrue(gateway.activeBoundProofs(LOCAL_NODE, CONNECTION, DOCUMENT).isEmpty());
   }
 

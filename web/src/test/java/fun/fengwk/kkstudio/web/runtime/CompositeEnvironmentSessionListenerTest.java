@@ -15,6 +15,7 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentSessionListener;
 import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcher;
+import fun.fengwk.kkstudio.ide.IdeLeaseCoordinator;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestrator;
 import fun.fengwk.kkstudio.web.environment.ide.IdeGenerationCloseListener;
 
@@ -72,9 +73,13 @@ class CompositeEnvironmentSessionListenerTest {
         .when(generationCloseProvider)
         .ifAvailable(any());
 
+    ObjectProvider<IdeLeaseCoordinator> leaseCoordinatorProvider = mock(ObjectProvider.class);
     listener =
         config.compositeEnvironmentSessionListener(
-            dispatcherProvider, orchestratorProvider, generationCloseProvider);
+            dispatcherProvider,
+            orchestratorProvider,
+            generationCloseProvider,
+            leaseCoordinatorProvider);
   }
 
   @Test

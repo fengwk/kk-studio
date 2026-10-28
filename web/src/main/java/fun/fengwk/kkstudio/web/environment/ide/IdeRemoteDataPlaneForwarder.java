@@ -73,7 +73,7 @@ public final class IdeRemoteDataPlaneForwarder {
     this.httpClient = Objects.requireNonNull(httpClient, "httpClient");
   }
 
-  /** 浏览器视图作用域 HTTP 的单跳转发。 */
+  /** 浏览器视图作用域 HTTP 的单跳转发；普通数据响应不得把上游 {@code Set-Cookie} 带回浏览器。 */
   void forwardDataHttp(
       ClusterOwnerRoute owner,
       EnvironmentId environmentId,
@@ -81,6 +81,30 @@ public final class IdeRemoteDataPlaneForwarder {
       String rawPathAndQuery,
       HttpServletRequest request,
       HttpServletResponse response)
+      throws IOException {
+    forwardViewScopedHttp(owner, environmentId, viewId, rawPathAndQuery, request, response, false);
+  }
+
+  /** view 作用域 bootstrap/session 的单跳转发；管理入口必须原样保留 owner 设置的 cookie。 */
+  void forwardManagementHttp(
+      ClusterOwnerRoute owner,
+      EnvironmentId environmentId,
+      UUID viewId,
+      String rawPathAndQuery,
+      HttpServletRequest request,
+      HttpServletResponse response)
+      throws IOException {
+    forwardViewScopedHttp(owner, environmentId, viewId, rawPathAndQuery, request, response, true);
+  }
+
+  private void forwardViewScopedHttp(
+      ClusterOwnerRoute owner,
+      EnvironmentId environmentId,
+      UUID viewId,
+      String rawPathAndQuery,
+      HttpServletRequest request,
+      HttpServletResponse response,
+      boolean management)
       throws IOException {
     String canonicalPath =
         IdeDataInternalPaths.dataHttpPath(environmentId, viewId, rawPathAndQuery);
@@ -92,7 +116,7 @@ public final class IdeRemoteDataPlaneForwarder {
         forwardedBrowserHeaders(request, properties, false),
         environmentId,
         viewId,
-        false);
+        management);
   }
 
   /**

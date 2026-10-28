@@ -72,17 +72,6 @@ public final class IdeGatewayFilter extends OncePerRequestFilter {
       return;
     }
     String query = request.getQueryString();
-    if (BOOTSTRAP_ENDPOINT.equals(remainder) || SESSION_ENDPOINT.equals(remainder)) {
-      String rawPathAndQuery =
-          (query == null || query.isEmpty()) ? remainder : remainder + "?" + query;
-      if (BOOTSTRAP_ENDPOINT.equals(remainder)) {
-        dataPlane.handleBootstrap(environmentId, rawPathAndQuery, request, response);
-      } else {
-        dataPlane.handleSession(environmentId, rawPathAndQuery, request, response);
-      }
-      return;
-    }
-
     String tail = remainder.substring(1);
     int slash = tail.indexOf('/');
     String viewSegment = slash < 0 ? tail : tail.substring(0, slash);
@@ -115,6 +104,14 @@ public final class IdeGatewayFilter extends OncePerRequestFilter {
 
     String viewPath = tail.substring(slash);
     String rawPathAndQuery = (query == null || query.isEmpty()) ? viewPath : viewPath + "?" + query;
+    if (BOOTSTRAP_ENDPOINT.equals(viewPath)) {
+      dataPlane.handleBootstrap(environmentId, viewId, rawPathAndQuery, request, response);
+      return;
+    }
+    if (SESSION_ENDPOINT.equals(viewPath)) {
+      dataPlane.handleSession(environmentId, viewId, rawPathAndQuery, request, response);
+      return;
+    }
     if (IdeBrowserWebSocketGateway.isWebSocketUpgrade(request)) {
       browserGateway.handleUpgrade(environmentId, viewId, rawPathAndQuery, request, response);
       return;

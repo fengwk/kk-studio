@@ -81,12 +81,17 @@ public final class IdeInternalDataPlaneController {
     requireLocalOwner(environment);
     UUID viewId = requireViewId(request);
     String rawPathAndQuery = requirePathParameter(request);
-    dataPlane.handleInternalHttp(
-        environment,
-        viewId,
-        rawPathAndQuery,
-        IdeForwardedRequest.of(request, rawPathAndQuery),
-        response);
+    IdeForwardedRequest forwarded = IdeForwardedRequest.of(request, rawPathAndQuery);
+    String path = pathOf(rawPathAndQuery);
+    if (BOOTSTRAP_PATH.equals(path)) {
+      dataPlane.handleLocalBootstrap(environment, viewId, forwarded, response);
+      return;
+    }
+    if (SESSION_PATH.equals(path)) {
+      dataPlane.handleLocalSession(environment, viewId, forwarded, response);
+      return;
+    }
+    dataPlane.handleInternalHttp(environment, viewId, rawPathAndQuery, forwarded, response);
   }
 
   @RequestMapping(
@@ -110,17 +115,7 @@ public final class IdeInternalDataPlaneController {
     EnvironmentId environment = parseEnvironmentId(environmentId);
     requireLocalOwner(environment);
     String rawPathAndQuery = requirePathParameter(request);
-    IdeForwardedRequest forwarded = IdeForwardedRequest.of(request, rawPathAndQuery);
-    String path = pathOf(rawPathAndQuery);
-    if (BOOTSTRAP_PATH.equals(path)) {
-      dataPlane.handleBootstrap(environment, forwarded, response);
-      return;
-    }
-    if (SESSION_PATH.equals(path)) {
-      dataPlane.handleSession(environment, rawPathAndQuery, forwarded, response);
-      return;
-    }
-    throw new AiValidationException("environment", "internal IDE path is not a management entry");
+    throw new AiValidationException("environment", "legacy internal IDE path is not supported");
   }
 
   private static String pathOf(String rawPathAndQuery) {

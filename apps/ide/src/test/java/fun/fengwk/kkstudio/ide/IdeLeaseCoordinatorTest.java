@@ -117,8 +117,7 @@ class IdeLeaseCoordinatorTest {
     views.response = views(view(VIEW_1, 7L));
     gateway.proofs.put(
         new Group(EVENT_NODE, CONNECTION, DOCUMENT),
-        new IdeBrowserUseGateway.Proofs(
-            DOCUMENT, 1L, List.of(proof(VIEW_1, DOCUMENT, 7L))));
+        new IdeBrowserUseGateway.Proofs(DOCUMENT, 1L, List.of(proof(VIEW_1, DOCUMENT, 7L))));
     gateway.afterQuery =
         () -> transport.identity = new DaemonConnectionIdentity(ENV, "other-daemon");
 

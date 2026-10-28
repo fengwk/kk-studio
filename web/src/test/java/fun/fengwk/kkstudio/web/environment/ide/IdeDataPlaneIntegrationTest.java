@@ -3,6 +3,8 @@ package fun.fengwk.kkstudio.web.environment.ide;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -112,6 +114,10 @@ class IdeDataPlaneIntegrationTest extends WebPostgresTestSupport {
 
   @Autowired private IdeDataConnectionRegistry dataConnections;
 
+  @Autowired private IdeBootstrapTicketService bootstrapTickets;
+
+  @Autowired private IdeBrowserSessionRegistry sessionRegistry;
+
   private final OkHttpClient browser = new OkHttpClient();
   private MuxDaemonPeer daemon;
   private DaemonConnectionIdentity identity;
@@ -156,6 +162,7 @@ class IdeDataPlaneIntegrationTest extends WebPostgresTestSupport {
     }
     if (identity != null) {
       dataConnections.closeGeneration(identity);
+      sessionRegistry.closeGeneration(identity);
     }
     browser.dispatcher().executorService().shutdown();
     browser.connectionPool().evictAll();
@@ -249,6 +256,8 @@ class IdeDataPlaneIntegrationTest extends WebPostgresTestSupport {
             .execute()) {
       assertEquals(200, response.code());
       assertEquals("cross-node", response.body().string());
+      assertNull(
+          response.header("Set-Cookie"), "ordinary data responses must filter upstream cookies");
     }
     assertTrue(daemon.awaitCompleted(10), "HTTP COMPLETE must follow browser flush");
 
@@ -280,6 +289,68 @@ class IdeDataPlaneIntegrationTest extends WebPostgresTestSupport {
     assertEquals(2, daemon.opens().size());
     assertEquals(1, daemon.connectionCount());
     assertTrue(daemon.failure() == null, () -> "mux peer failure: " + daemon.failure());
+  }
+
+  @Test
+  void forwardsBootstrapAndSessionThroughNonOwnerNodePreservingSetCookie() throws Exception {
+    forwarder = ForwarderNode.start(ownerPort, clusterNodeRegistry.localNodeId(), ENVIRONMENT);
+    String workspace = "/home/dev/project";
+    sessionRegistry.viewOpened(identity, viewId.toString(), 1L, workspace);
+    String token = bootstrapTickets.issue(identity, viewId.toString(), 1L, workspace);
+    OkHttpClient noRedirect = browser.newBuilder().followRedirects(false).build();
+    String cookie;
+    try {
+      try (Response response =
+          noRedirect
+              .newCall(
+                  new Request.Builder()
+                      .url(
+                          forwarder.url()
+                              + "/environment-ide/"
+                              + ENVIRONMENT
+                              + "/"
+                              + viewId
+                              + "/__ide/bootstrap?token="
+                              + token)
+                      .header("Origin", forwarder.origin())
+                      .build())
+              .execute()) {
+        assertEquals(303, response.code());
+        String setCookie = response.header("Set-Cookie");
+        assertNotNull(setCookie, "management forward must preserve the owner session cookie");
+        assertTrue(setCookie.startsWith("kk_ide_session="));
+        assertTrue(
+            setCookie.contains("; Path=/environment-ide/" + ENVIRONMENT + "/" + viewId + "/"));
+        assertEquals(
+            "/environment-ide/"
+                + ENVIRONMENT
+                + "/"
+                + viewId
+                + "/?workspace=%2Fhome%2Fdev%2Fproject",
+            response.header("Location"));
+        cookie = setCookie.substring(0, setCookie.indexOf(';'));
+      }
+      try (Response response =
+          noRedirect
+              .newCall(
+                  new Request.Builder()
+                      .url(
+                          forwarder.url()
+                              + "/environment-ide/"
+                              + ENVIRONMENT
+                              + "/"
+                              + viewId
+                              + "/__ide/session")
+                      .header("Cookie", cookie)
+                      .build())
+              .execute()) {
+        assertEquals(204, response.code());
+      }
+      assertTrue(daemon.opens().isEmpty(), "management entries must not open a data stream");
+    } finally {
+      noRedirect.dispatcher().executorService().shutdown();
+      noRedirect.connectionPool().evictAll();
+    }
   }
 
   @Test
@@ -477,12 +548,15 @@ class IdeDataPlaneIntegrationTest extends WebPostgresTestSupport {
           new IdeGatewayDataPlane(
               mock(IdeCommandTransport.class),
               properties,
-              mock(IdeBrowserSessionRegistry.class),
-              mock(IdeBootstrapTicketService.class),
               remoteRegistry,
               forwarder,
               mock(IdeDataConnectionRegistry.class),
-              null);
+              null,
+              new IdeBrowserSessionHandler(
+                  mock(IdeBootstrapTicketService.class),
+                  mock(IdeBrowserSessionRegistry.class),
+                  mock(IdeCommandTransport.class),
+                  properties));
       StandardWebSocketClient webSocketClient = new StandardWebSocketClient();
       IdeBrowserWebSocketGateway browserGateway =
           new IdeBrowserWebSocketGateway(

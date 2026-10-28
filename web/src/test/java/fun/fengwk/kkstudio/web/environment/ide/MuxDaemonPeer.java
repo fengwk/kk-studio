@@ -184,10 +184,12 @@ final class MuxDaemonPeer implements AutoCloseable {
         state.request.path().contains("/echo")
             ? state.requestBody.toByteArray()
             : "hello".getBytes(StandardCharsets.UTF_8);
-    send(
-        new MuxFrame.Headers(
-            end.streamId(),
-            MuxHeaders.http(200, List.of(new MuxHeader("content-type", "text/plain")))));
+    List<MuxHeader> responseHeaders = new ArrayList<>();
+    responseHeaders.add(new MuxHeader("content-type", "text/plain"));
+    if (state.request.path().contains("/echo")) {
+      responseHeaders.add(new MuxHeader("set-cookie", "upstream=forbidden; Path=/"));
+    }
+    send(new MuxFrame.Headers(end.streamId(), MuxHeaders.http(200, responseHeaders)));
     send(new MuxFrame.Data(end.streamId(), MuxDataKind.HTTP, false, body));
     send(new MuxFrame.End(end.streamId()));
   }

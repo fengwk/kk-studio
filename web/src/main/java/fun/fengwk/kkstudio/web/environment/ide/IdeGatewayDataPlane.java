@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.web.environment.ide;
 
-import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
@@ -8,9 +7,7 @@ import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.ide.IdeBootstrapTicketService;
 import fun.fengwk.kkstudio.ide.IdeCommandTransport;
-import fun.fengwk.kkstudio.ide.IdeGenerationState;
 import fun.fengwk.kkstudio.ide.data.IdeDataConnectTimeoutException;
 import fun.fengwk.kkstudio.ide.data.IdeDataConnectionRegistry;
 import fun.fengwk.kkstudio.ide.data.IdeDataGenerationReplacedException;
@@ -32,8 +29,6 @@ import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.SocketTimeoutException;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -67,8 +62,7 @@ public final class IdeGatewayDataPlane {
 
   private final IdeCommandTransport transport;
   private final IdeGatewayProperties properties;
-  private final IdeBrowserSessionRegistry sessions;
-  private final IdeBootstrapTicketService bootstrapTickets;
+  private final IdeBrowserSessionHandler browserSessionHandler;
   private final ClusterNodeRegistry clusterNodeRegistry;
   private final IdeRemoteDataPlaneForwarder remoteForwarder;
   private final IdeDataConnectionRegistry dataConnections;
@@ -77,16 +71,15 @@ public final class IdeGatewayDataPlane {
   public IdeGatewayDataPlane(
       IdeCommandTransport transport,
       IdeGatewayProperties properties,
-      IdeBrowserSessionRegistry sessions,
-      IdeBootstrapTicketService bootstrapTickets,
       ClusterNodeRegistry clusterNodeRegistry,
       IdeRemoteDataPlaneForwarder remoteForwarder,
       IdeDataConnectionRegistry dataConnections,
-      @Nullable IdeDataViewAuthorizer viewAuthorizer) {
+      @Nullable IdeDataViewAuthorizer viewAuthorizer,
+      IdeBrowserSessionHandler browserSessionHandler) {
     this.transport = Objects.requireNonNull(transport, "transport");
     this.properties = Objects.requireNonNull(properties, "properties");
-    this.sessions = Objects.requireNonNull(sessions, "sessions");
-    this.bootstrapTickets = Objects.requireNonNull(bootstrapTickets, "bootstrapTickets");
+    this.browserSessionHandler =
+        Objects.requireNonNull(browserSessionHandler, "browserSessionHandler");
     this.clusterNodeRegistry = Objects.requireNonNull(clusterNodeRegistry, "clusterNodeRegistry");
     this.remoteForwarder = Objects.requireNonNull(remoteForwarder, "remoteForwarder");
     this.dataConnections = Objects.requireNonNull(dataConnections, "dataConnections");
@@ -228,100 +221,77 @@ public final class IdeGatewayDataPlane {
     return true;
   }
 
-  /**
-   * 消费一次性 bootstrap ticket，设置 host-only/HttpOnly 会话 cookie 并跳转到受管 workspace。
-   *
-   * <p>workspace 路径来自 Daemon 的 {@code OPEN_VIEW} 元数据（ticket 绑定），不接受浏览器提供的任意 path。入口授权实现归属浏览器会话切片，
-   * 本类只保留既有路径以维持独立编译边界。
-   */
-  public void handleBootstrap(
-      EnvironmentId environmentId, HttpServletRequest request, HttpServletResponse response)
-      throws IOException {
-    handleBootstrap(environmentId, rawPathAndQuery(request), request, response);
-  }
-
+  /** 视图作用域的 bootstrap 入口；非 owner 节点单跳到 owner 后由浏览器会话切片消费票据。 */
   public void handleBootstrap(
       EnvironmentId environmentId,
+      UUID viewId,
       String rawPathAndQuery,
       HttpServletRequest request,
       HttpServletResponse response)
       throws IOException {
     Objects.requireNonNull(environmentId, "environmentId");
-    if (forwardLegacyRemote(environmentId, rawPathAndQuery, request, response)) {
+    Objects.requireNonNull(viewId, "viewId");
+    if (forwardManagementRemote(environmentId, viewId, rawPathAndQuery, request, response)) {
       return;
     }
-    Optional<IdeBootstrapTicketService.Ticket> consumed =
-        bootstrapTickets.consume(request.getParameter("token"));
-    if (consumed.isEmpty() || !consumed.get().environmentId().equals(environmentId)) {
-      IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_GONE);
-      return;
-    }
-    IdeBootstrapTicketService.Ticket ticket = consumed.get();
-    if (IdeGenerationState.of(transport, ticket.identity()) == IdeGenerationState.REPLACED) {
-      IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_GONE);
-      return;
-    }
-    String cookieValue;
-    try {
-      cookieValue = sessions.open(ticket.identity(), ticket.viewId(), ticket.workspacePath());
-    } catch (IllegalStateException error) {
-      IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_GONE);
-      return;
-    }
-    String routeBase = routeBase(request, environmentId);
-    StringBuilder cookie =
-        new StringBuilder(properties.requireSessionCookieName())
-            .append('=')
-            .append(cookieValue)
-            .append("; Path=")
-            .append(routeBase)
-            .append("; HttpOnly; SameSite=Strict");
-    if (request.isSecure()) {
-      cookie.append("; Secure");
-    }
-    response.addHeader("Set-Cookie", cookie.toString());
-    response.setStatus(HttpServletResponse.SC_SEE_OTHER);
-    response.setHeader(
-        "Location",
-        routeBase
-            + "?workspace="
-            + URLEncoder.encode(ticket.workspacePath(), StandardCharsets.UTF_8));
+    browserSessionHandler.handleBootstrap(environmentId, viewId, request, response);
   }
 
-  /** 浏览器探测当前 IDE 会话；入口授权仍由浏览器会话切片负责。 */
+  /** 视图作用域的会话探测入口；非 owner 节点单跳到 owner 后执行同一会话校验。 */
   public void handleSession(
       EnvironmentId environmentId,
+      UUID viewId,
       String rawPathAndQuery,
       HttpServletRequest request,
       HttpServletResponse response)
       throws IOException {
     Objects.requireNonNull(environmentId, "environmentId");
-    if (forwardLegacyRemote(environmentId, rawPathAndQuery, request, response)) {
+    Objects.requireNonNull(viewId, "viewId");
+    if (forwardManagementRemote(environmentId, viewId, rawPathAndQuery, request, response)) {
       return;
     }
-    IdeBrowserSessionRegistry.Session session = requireSession(environmentId, request);
-    int rejection =
-        session == null
-            ? HttpServletResponse.SC_UNAUTHORIZED
-            : generationRejection(IdeGenerationState.of(transport, session.identity()));
-    response.setHeader("Cache-Control", "no-store");
-    response.setStatus(rejection == 0 ? HttpServletResponse.SC_NO_CONTENT : rejection);
+    browserSessionHandler.handleSession(environmentId, viewId, request, response);
   }
 
-  /** 会话代际不能建立新反向流时的 HTTP 状态：被另一个实例接管为 409，暂无 READY 连接为 503。 */
-  static int generationRejection(IdeGenerationState state) {
-    return switch (state) {
-      case CURRENT -> 0;
-      case DISCONNECTED -> HttpServletResponse.SC_SERVICE_UNAVAILABLE;
-      case REPLACED -> HttpServletResponse.SC_CONFLICT;
-    };
+  /** owner 内部入口：view、owner 与 HMAC 已由 controller 校验，直接执行浏览器会话逻辑。 */
+  public void handleLocalBootstrap(
+      EnvironmentId environmentId,
+      UUID viewId,
+      HttpServletRequest request,
+      HttpServletResponse response)
+      throws IOException {
+    browserSessionHandler.handleBootstrap(environmentId, viewId, request, response);
   }
 
-  public static String routeBase(HttpServletRequest request, EnvironmentId environmentId) {
-    return viewBase(request, environmentId, null);
+  public void handleLocalSession(
+      EnvironmentId environmentId,
+      UUID viewId,
+      HttpServletRequest request,
+      HttpServletResponse response) {
+    browserSessionHandler.handleSession(environmentId, viewId, request, response);
   }
 
-  /** 浏览器 view 基址；{@code viewId == null} 时只返回 Environment 根路径（管理入口）。 */
+  private boolean forwardManagementRemote(
+      EnvironmentId environmentId,
+      UUID viewId,
+      String rawPathAndQuery,
+      HttpServletRequest request,
+      HttpServletResponse response)
+      throws IOException {
+    Optional<ClusterOwnerRoute> route = clusterNodeRegistry.route(environmentId);
+    if (route.isEmpty()) {
+      IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+      return true;
+    }
+    if (route.get().local()) {
+      return false;
+    }
+    remoteForwarder.forwardManagementHttp(
+        route.get(), environmentId, viewId, rawPathAndQuery, request, response);
+    return true;
+  }
+
+  /** 浏览器 view 基址；{@code viewId == null} 时只返回 Environment 根路径。 */
   public static String viewBase(
       HttpServletRequest request, EnvironmentId environmentId, UUID viewId) {
     String contextPath = request.getContextPath();
@@ -351,46 +321,6 @@ public final class IdeGatewayDataPlane {
       return base + location.substring(1);
     }
     return location;
-  }
-
-  private boolean forwardLegacyRemote(
-      EnvironmentId environmentId,
-      String rawPathAndQuery,
-      HttpServletRequest request,
-      HttpServletResponse response)
-      throws IOException {
-    Optional<ClusterOwnerRoute> route = clusterNodeRegistry.route(environmentId);
-    if (route.isEmpty() || route.get().local()) {
-      return false;
-    }
-    remoteForwarder.forwardLegacyHttp(
-        route.get(), environmentId, rawPathAndQuery, request, response);
-    return true;
-  }
-
-  static String rawPathAndQuery(HttpServletRequest request) {
-    String uri = request.getRequestURI();
-    String query = request.getQueryString();
-    return query == null || query.isEmpty() ? uri : uri + "?" + query;
-  }
-
-  private IdeBrowserSessionRegistry.Session requireSession(
-      EnvironmentId environmentId, HttpServletRequest request) {
-    Cookie[] cookies = request.getCookies();
-    if (cookies == null) {
-      return null;
-    }
-    String name = properties.requireSessionCookieName();
-    for (Cookie cookie : cookies) {
-      if (!name.equals(cookie.getName())) {
-        continue;
-      }
-      Optional<IdeBrowserSessionRegistry.Session> session = sessions.lookup(cookie.getValue());
-      if (session.isPresent() && session.get().environmentId().equals(environmentId)) {
-        return session.get();
-      }
-    }
-    return null;
   }
 
   static final class IdeHttpFailure extends Exception {
