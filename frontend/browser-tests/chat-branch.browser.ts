@@ -1,5 +1,7 @@
 import { expect, test, type Page } from './fixture'
 import type { Route, WebSocketRoute } from '@playwright/test'
+import type { ChatLayout, ChatPaneState, ChatTabSnapshot } from '@/features/chat/chat-pane-state'
+import type { PaneTarget } from '@/features/chat/runtime/agent-pane/pane-target'
 import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 
 /**
@@ -479,38 +481,59 @@ async function installChatApi(
   return recorded
 }
 
+async function seedChatTab(
+  page: Page,
+  layout: ChatLayout,
+  focusedPaneId: string,
+  targets: Record<string, PaneTarget> = {},
+) {
+  const presentation: ChatPaneState = {
+    layout,
+    focusedPaneId,
+    panes: Array.from({ length: 9 }, (_, index) => {
+      const id = `pane-${index + 1}`
+      return { id, target: targets[id] ?? { kind: 'NEW_SESSION_DRAFT' } }
+    }),
+  }
+  const snapshot: ChatTabSnapshot = { version: 1, presentation }
+  const key = `kk-studio.tab-state.v1:chat:${CHAT_ID}`
+  await page.addInitScript(({ key, snapshot }) => {
+    // 仅初始化空 tab；刷新必须恢复用户操作后写入的快照。
+    if (window.top === window && sessionStorage.getItem(key) == null) {
+      sessionStorage.setItem(key, JSON.stringify(snapshot))
+    }
+  }, { key, snapshot })
+}
+
+async function readPaneTarget(
+  page: Page,
+  paneId: string,
+  store: 'session' | 'local' = 'session',
+): Promise<PaneTarget | null> {
+  return page.evaluate(({ key, paneId, store }) => {
+    const storage = store === 'session' ? sessionStorage : localStorage
+    const raw = storage.getItem(key)
+    if (raw == null) return null
+    const snapshot = JSON.parse(raw) as ChatTabSnapshot
+    return snapshot.presentation.panes.find((pane) => pane.id === paneId)?.target ?? null
+  }, {
+    key: `kk-studio.${store === 'session' ? 'tab' : 'last'}-state.v1:chat:${CHAT_ID}`,
+    paneId,
+    store,
+  })
+}
+
 async function bindFirstPaneToThread(page: Page) {
-  await page.addInitScript(({ chatId, threadId }) => {
-    window.localStorage.setItem(
-      `kk-studio.agent-pane-target.CHAT:${chatId}:pane-1`,
-      JSON.stringify({ kind: 'BOUND_THREAD', threadId }),
-    )
-    window.localStorage.setItem(`kk-studio.chat-pane.${chatId}`, JSON.stringify({
-      layout: 'single',
-      focusedPaneId: 'pane-1',
-      panes: Array.from({ length: 9 }, (_, index) => ({ id: `pane-${index + 1}` })),
-    }))
-  }, { chatId: CHAT_ID, threadId: THREAD_ID })
+  await seedChatTab(page, 'single', 'pane-1', {
+    'pane-1': { kind: 'BOUND_THREAD', threadId: THREAD_ID },
+  })
 }
 
 /** 单 pane 的本地分支草稿目标：会话与分叉点已定，Thread 尚未创建。 */
 async function bindFirstPaneToBranchDraft(page: Page, startEntryId: string) {
-  await page.addInitScript(({ chatId, sessionId, startEntry }) => {
-    window.localStorage.setItem(
-      `kk-studio.agent-pane-target.CHAT:${chatId}:pane-1`,
-      JSON.stringify({
-        kind: 'NEW_THREAD_DRAFT',
-        sessionId,
-        startEntryId: startEntry,
-        threadName: 'browser-draft',
-      }),
-    )
-    window.localStorage.setItem(`kk-studio.chat-pane.${chatId}`, JSON.stringify({
-      layout: 'single',
-      focusedPaneId: 'pane-1',
-      panes: Array.from({ length: 9 }, (_, index) => ({ id: `pane-${index + 1}` })),
-    }))
-  }, { chatId: CHAT_ID, sessionId: SESSION_ID, startEntry: startEntryId })
+  await seedChatTab(page, 'single', 'pane-1', {
+    'pane-1': { kind: 'NEW_THREAD_DRAFT', sessionId: SESSION_ID, startEntryId, threadName: 'browser-draft' },
+  })
 }
 
 /**
@@ -555,9 +578,9 @@ test('the local branch draft Debug provides read-only overlay with clean exit wi
   await expect(page.getByRole('listbox', { name: '事件' })).toHaveCount(0)
   await expect(controlArea).toBeVisible()
   await expect(page.getByLabel('给 AI 发送消息').first()).toContainText('branch draft preview')
-  const target = await page.evaluate(({ chatId }) =>
-    window.localStorage.getItem(`kk-studio.agent-pane-target.CHAT:${chatId}:pane-1`), { chatId: CHAT_ID })
-  expect(target).toContain('NEW_THREAD_DRAFT')
+  expect(await readPaneTarget(page, 'pane-1')).toEqual({
+    kind: 'NEW_THREAD_DRAFT', sessionId: SESSION_ID, startEntryId: 'entry-2', threadName: 'browser-draft',
+  })
   expect(recorded.commandBatches).toEqual([])
 })
 
@@ -655,10 +678,9 @@ test.describe('新建分支命名与目标路由（真实浏览器）', () => {
     await expect(breadcrumb.locator('[data-breadcrumb="branch"]')).toHaveText('browser-branch')
 
     // 目标 pane 的本地草稿目标已写为 NEW_THREAD_DRAFT，但绝不预创建 Thread。
-    const target = await page.evaluate(({ chatId }) =>
-      window.localStorage.getItem(`kk-studio.agent-pane-target.CHAT:${chatId}:pane-3`), { chatId: CHAT_ID })
-    expect(target).toContain('NEW_THREAD_DRAFT')
-    expect(target).toContain('browser-branch')
+    const target = { kind: 'NEW_THREAD_DRAFT', sessionId: SESSION_ID, startEntryId: 'entry-2', threadName: 'browser-branch' }
+    await expect.poll(() => readPaneTarget(page, 'pane-3')).toEqual(target)
+    await expect.poll(() => readPaneTarget(page, 'pane-3', 'local')).toEqual(target)
     expect(recorded.commandBatches).toEqual([])
     const third = page.locator('[data-pane-id="pane-3"]')
     await expect(third.getByLabel('给 AI 发送消息')).toBeFocused()
@@ -666,6 +688,15 @@ test.describe('新建分支命名与目标路由（真实浏览器）', () => {
     await expect(third.getByText('hello', { exact: true })).toHaveCount(0)
     await expect(third.getByText('Sibling must stay hidden', { exact: true })).toHaveCount(0)
     await page.screenshot({ path: testInfo.outputPath('hidden-pane-history-focus.png') })
+
+    // 重载必须恢复刚刚路由的目标，而不是重放初始 pane fixture。
+    const lastKey = `kk-studio.last-state.v1:chat:${CHAT_ID}`
+    const lastBeforeReload = await page.evaluate((key) => localStorage.getItem(key), lastKey)
+    await page.reload()
+    await expect(page.locator('.chat-pane-grid.layout-split-3')).toBeVisible()
+    await expect.poll(() => readPaneTarget(page, 'pane-3')).toEqual(target)
+    expect(await page.evaluate((key) => localStorage.getItem(key), lastKey)).toBe(lastBeforeReload)
+    await expect(page.locator('[data-pane-id="pane-3"]').getByText('Real selected ancestor', { exact: true })).toBeVisible()
   })
 
   test('Debug covers the pane with a real return action and restores the draft on exit', async ({
@@ -735,19 +766,19 @@ test('409 competition keeps history, text and settings; local rename recovers th
   })
   await expect(page.locator('[data-breadcrumb="branch"]')).toHaveText('renamed browser')
   await expect(page.getByText('Real selected ancestor', { exact: true })).toBeVisible()
-  await expect.poll(() => page.evaluate((chatId) =>
-    localStorage.getItem(`kk-studio.agent-pane-target.CHAT:${chatId}:pane-1`), CHAT_ID)).toContain('BOUND_THREAD')
+  const accepted = recorded.commandBatches[1] as { target: { threadId: string } }
+  await expect.poll(() => readPaneTarget(page, 'pane-1')).toEqual({
+    kind: 'BOUND_THREAD', threadId: accepted.target.threadId,
+  })
+  await expect.poll(() => readPaneTarget(page, 'pane-1', 'local')).toEqual({
+    kind: 'BOUND_THREAD', threadId: accepted.target.threadId,
+  })
 })
 
 test('selecting a Thread waits for readiness, preserves its text and never steals focus after another pane is chosen', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   const recorded = await installChatApi(page)
-  await page.addInitScript(({ chatId }) => {
-    localStorage.setItem(`kk-studio.chat-pane.${chatId}`, JSON.stringify({
-      layout: 'split-2', focusedPaneId: 'pane-1',
-      panes: Array.from({ length: 9 }, (_, index) => ({ id: `pane-${index + 1}` })),
-    }))
-  }, { chatId: CHAT_ID })
+  await seedChatTab(page, 'split-2', 'pane-1')
   let release!: () => void
   const gate = new Promise<void>((resolve) => { release = resolve })
   let requested = false
@@ -818,9 +849,7 @@ test('selecting a Thread waits for readiness, preserves its text and never steal
 test('root slash selectors preserve the draft, close on Escape and keep Debug exclusive', async ({ page }) => {
   const recorded = await installChatApi(page)
   await page.setViewportSize({ width: 1440, height: 900 })
-  await page.addInitScript(({ chatId, threadId }) => {
-    localStorage.setItem(`kk-studio.agent-pane-target.CHAT:${chatId}:pane-1`, JSON.stringify({ kind: 'BOUND_THREAD', threadId }))
-  }, { chatId: CHAT_ID, threadId: THREAD_ID })
+  await bindFirstPaneToThread(page)
   await page.goto(HARNESS_URL)
   const editor = page.getByRole('textbox', { name: '给 AI 发送消息' })
   await expect(editor).toBeEditable()
@@ -865,12 +894,9 @@ for (const [layout, width] of [['split-3', 1440], ['grid-4', 360], ['grid-4', 32
         writes.push(`${request.method()} ${new URL(request.url()).pathname}`)
       }
     })
-    await page.addInitScript(({ chatId, threadId, layout }) => {
-      localStorage.setItem(`kk-studio.agent-pane-target.CHAT:${chatId}:pane-2`, JSON.stringify({ kind: 'BOUND_THREAD', threadId }))
-      localStorage.setItem(`kk-studio.chat-pane.${chatId}`, JSON.stringify({
-        layout, focusedPaneId: 'pane-2', panes: Array.from({ length: 9 }, (_, index) => ({ id: `pane-${index + 1}` })),
-      }))
-    }, { chatId: CHAT_ID, threadId: THREAD_ID, layout })
+    await seedChatTab(page, layout, 'pane-2', {
+      'pane-2': { kind: 'BOUND_THREAD', threadId: THREAD_ID },
+    })
     await page.goto(HARNESS_URL)
     const first = page.locator('.chat-pane[data-pane-id="pane-1"]')
     const source = page.locator('.chat-pane[data-pane-id="pane-2"]')
