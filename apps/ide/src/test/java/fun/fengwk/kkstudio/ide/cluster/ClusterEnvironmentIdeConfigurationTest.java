@@ -18,6 +18,7 @@ import fun.fengwk.kkstudio.ide.EnvironmentIdeConfiguration;
 import fun.fengwk.kkstudio.ide.EnvironmentIdeService;
 import fun.fengwk.kkstudio.ide.EnvironmentIdeServiceImpl;
 import fun.fengwk.kkstudio.ide.IdeBootstrapTicketService;
+import fun.fengwk.kkstudio.ide.IdeBrowserUseGateway;
 import fun.fengwk.kkstudio.ide.IdeCommandTransport;
 import fun.fengwk.kkstudio.ide.InMemoryIdeBootstrapTicketService;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthentication;
@@ -70,6 +71,8 @@ class ClusterEnvironmentIdeConfigurationTest {
             context.registerBean(
                 JdbcTemplate.class, () -> new JdbcTemplate(mock(DataSource.class)));
             context.registerBean(IdeCommandTransport.class, () -> mock(IdeCommandTransport.class));
+            context.registerBean(
+                IdeBrowserUseGateway.class, () -> mock(IdeBrowserUseGateway.class));
             context.registerBean(
                 IdeBootstrapTicketService.class, () -> new InMemoryIdeBootstrapTicketService());
             context.registerBean(Clock.class, () -> Clock.systemUTC());

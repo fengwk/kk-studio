@@ -48,6 +48,7 @@ import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyProvider;
 import fun.fengwk.kkstudio.harness.runtime.retry.ModelHttpErrorPolicy;
 import fun.fengwk.kkstudio.harness.runtime.retry.ModelHttpErrorPolicyProvider;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.ide.IdeLeaseCoordinator;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
@@ -573,7 +574,8 @@ public class HarnessRuntimeConfiguration {
   public EnvironmentSessionListener compositeEnvironmentSessionListener(
       ObjectProvider<HarnessWorkDispatcher> dispatcherProvider,
       ObjectProvider<EnvironmentSkillSyncOrchestrator> orchestratorProvider,
-      ObjectProvider<IdeGenerationCloseListener> ideGenerationCloseProvider) {
+      ObjectProvider<IdeGenerationCloseListener> ideGenerationCloseProvider,
+      ObjectProvider<IdeLeaseCoordinator> ideLeaseCoordinatorProvider) {
     return new EnvironmentSessionListener() {
       @Override
       public void onEnvironmentReady(EnvironmentId environmentId) {
@@ -584,6 +586,17 @@ public class HarnessRuntimeConfiguration {
         try {
           orchestratorProvider.ifAvailable(
               orchestrator -> orchestrator.onEnvironmentReady(environmentId));
+        } catch (RuntimeException ignored) {
+        }
+      }
+
+      @Override
+      public void onHeartbeat(
+          EnvironmentId environmentId, DaemonConnectionIdentity identity, Long ideLeaseRound) {
+        // 心跳本身只负责投递轮次；使用证明必须由协调器回查事件节点后才可续租。
+        try {
+          ideLeaseCoordinatorProvider.ifAvailable(
+              coordinator -> coordinator.onHeartbeat(environmentId, identity, ideLeaseRound));
         } catch (RuntimeException ignored) {
         }
       }

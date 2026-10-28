@@ -1014,7 +1014,7 @@ public final class EnvironmentDaemonServer
     switch (envelope.messageType()) {
       case HELLO -> handleHello(state, envelope, deferred);
       case READY -> handleReady(state, envelope, deferred);
-      case HEARTBEAT -> handleHeartbeat(state, envelope);
+      case HEARTBEAT -> handleHeartbeat(state, envelope, deferred);
       case RUNTIME_STATUS -> handleRuntimeStatus(state, envelope);
       case STARTED -> handleStarted(state, envelope);
       case PROGRESS -> handleProgress(state, envelope, deferred);
@@ -1407,7 +1407,8 @@ public final class EnvironmentDaemonServer
     }
   }
 
-  private void handleHeartbeat(ConnectionState state, DaemonEnvelope envelope) {
+  private void handleHeartbeat(
+      ConnectionState state, DaemonEnvelope envelope, List<Runnable> deferred) {
     requireReady(state);
     requireNoInvocationId(envelope);
     DaemonHeartbeat heartbeat = heartbeatCodec.decode(envelope.payloadJson());
@@ -1422,6 +1423,14 @@ public final class EnvironmentDaemonServer
     }
     applyRuntimeStatus(state, heartbeat.runtimeStatus());
     reconcileTemporaryResourcePolicy(state);
+    String daemonInstanceId = state.daemonInstanceId;
+    if (daemonInstanceId != null) {
+      DaemonConnectionIdentity identity =
+          new DaemonConnectionIdentity(environmentId, daemonInstanceId);
+      Long ideLeaseRound = heartbeat.ideLeaseRound();
+      // 回调在 gate 之外执行：LIST_VIEWS/跨节点使用证明查询不得阻塞心跳与连接处理。
+      deferred.add(() -> sessionListener.onHeartbeat(environmentId, identity, ideLeaseRound));
+    }
   }
 
   /** 处理关键变化时立即上报的 runtimeStatus；必须属于当前 READY 代际且租约仍归本节点。 */

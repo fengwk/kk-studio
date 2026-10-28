@@ -114,9 +114,17 @@ final class EnvironmentDaemonServerTestSupport {
   }
 
   static String heartbeatPayload(long revision, DaemonRuntimeStatus status) {
-    return HEARTBEAT_CODEC.encode(
-        new DaemonHeartbeat(new DaemonRuntimeSnapshot(revision, status), null));
+    return heartbeatPayload(revision, status, null);
   }
+
+  static String heartbeatPayload(long revision, DaemonRuntimeStatus status, Long ideLeaseRound) {
+    return HEARTBEAT_CODEC.encode(
+        new DaemonHeartbeat(new DaemonRuntimeSnapshot(revision, status), ideLeaseRound));
+  }
+
+  /** 心跳监听观察到的轮次；用于验证核心只在有效 READY/租约心跳后投递回调。 */
+  record HeartbeatNotification(
+      EnvironmentId environmentId, DaemonConnectionIdentity identity, Long ideLeaseRound) {}
 
   static String completedPayload(UUID invocationId, String text) {
     return RESULT_CODEC.encodeCompleted(
@@ -191,6 +199,7 @@ final class EnvironmentDaemonServerTestSupport {
     final FakeTicketService ticketService = new FakeTicketService();
     final List<EnvironmentId> readyNotifications = new ArrayList<>();
     final List<DaemonConnectionIdentity> replacedInstances = new ArrayList<>();
+    final List<HeartbeatNotification> heartbeatNotifications = new ArrayList<>();
     final List<EnvironmentId> updateResultEnvironments = new ArrayList<>();
     final List<DaemonUpdateResult> updateResults = new ArrayList<>();
     final AtomicReference<EnvironmentServerSettings> settings =
@@ -238,6 +247,15 @@ final class EnvironmentDaemonServerTestSupport {
                   if (replacedNotificationFailure != null) {
                     throwUnchecked(replacedNotificationFailure);
                   }
+                }
+
+                @Override
+                public void onHeartbeat(
+                    EnvironmentId environmentId,
+                    DaemonConnectionIdentity identity,
+                    Long ideLeaseRound) {
+                  heartbeatNotifications.add(
+                      new HeartbeatNotification(environmentId, identity, ideLeaseRound));
                 }
               },
               (environmentId, result) -> {

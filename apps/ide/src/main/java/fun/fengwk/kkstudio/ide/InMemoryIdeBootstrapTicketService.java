@@ -13,11 +13,12 @@ public final class InMemoryIdeBootstrapTicketService implements IdeBootstrapTick
   private final OneTimeTicketStore<Ticket> store = new OneTimeTicketStore<>();
 
   @Override
-  public String issue(DaemonConnectionIdentity identity, String viewId, String workspacePath) {
+  public String issue(
+      DaemonConnectionIdentity identity, String viewId, long bindingEpoch, String workspacePath) {
     Objects.requireNonNull(identity, "identity");
     Objects.requireNonNull(viewId, "viewId");
     Objects.requireNonNull(workspacePath, "workspacePath");
-    return store.issue(new Ticket(identity, viewId, workspacePath));
+    return store.issue(new Ticket(identity, viewId, bindingEpoch, workspacePath));
   }
 
   @Override

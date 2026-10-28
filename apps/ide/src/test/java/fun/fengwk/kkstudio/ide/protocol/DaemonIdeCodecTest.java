@@ -8,284 +8,284 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocolException;
 
 import java.util.List;
+import java.util.UUID;
 
 /**
- * 意图：IDE 控制命令/回执的 wire 边界必须严格 —— 固定字段、拒绝未知字段/重复键/尾随内容，且各 action 只允许其语义对应的 字段组合；viewId 必须是规范
- * UUID，streamUrl/path/ticket/header 必须是安全形态，避免命令穿越到任意地址或注入 header。
+ * 意图：IDE 控制命令/回执的 wire 边界必须严格 —— 固定字段、拒绝未知字段/重复键/尾随内容，各 action 只允许其语义对应的字段组合； UUID/epoch
+ * 必须是规范形式，失败回执只携带安全 code/message。
  */
 class DaemonIdeCodecTest {
 
   private static final String VIEW = "11111111-2222-3333-4444-555555555555";
-  private static final String TICKET = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG";
+  private static final String DOCUMENT = "66666666-7777-8888-9999-aaaaaaaaaaaa";
+  private static final String EVENT_NODE = "bbbbbbbb-cccc-dddd-eeee-ffffffffffff";
+  private static final String CONNECTION = "12345678-1234-1234-1234-123456789abc";
+  private static final String CLAIM = "87654321-4321-4321-4321-cba987654321";
 
   private final DaemonIdeCodec codec = new DaemonIdeCodec();
 
   @Test
-  void roundTripsOpenViewWithAndWithoutDirectory() {
-    IdeCommand withDirectory =
-        new IdeCommand(
-            IdeAction.OPEN_VIEW,
-            VIEW,
-            "/home/user/project",
-            null,
-            null,
-            null,
-            null,
-            null,
-            List.of());
-    assertEquals(withDirectory, codec.decodeCommand(codec.encodeCommand(withDirectory)));
-    IdeCommand withoutDirectory = IdeCommand.view(IdeAction.OPEN_VIEW, VIEW, null);
-    assertEquals(withoutDirectory, codec.decodeCommand(codec.encodeCommand(withoutDirectory)));
+  void roundTripsOpenViewCreateAndResume() {
+    IdeCommand create =
+        IdeCommand.openView(
+            VIEW, DOCUMENT, EVENT_NODE, CONNECTION, CLAIM, IdeOpenMode.CREATE, "/home/user");
+    assertEquals(create, codec.decodeCommand(codec.encodeCommand(create)));
+    IdeCommand resume =
+        IdeCommand.openView(
+            VIEW, DOCUMENT, EVENT_NODE, CONNECTION, CLAIM, IdeOpenMode.RESUME, null);
+    assertEquals(resume, codec.decodeCommand(codec.encodeCommand(resume)));
   }
 
   @Test
-  void roundTripsChangeDirectoryFocusAndClose() {
+  void roundTripsBoundIdentityCommands() {
     for (IdeCommand command :
         List.of(
-            IdeCommand.view(IdeAction.CHANGE_DIRECTORY, VIEW, "/tmp"),
-            IdeCommand.view(IdeAction.FOCUS_TERMINAL, VIEW, null),
-            IdeCommand.view(IdeAction.CLOSE_VIEW, VIEW, null))) {
+            IdeCommand.changeDirectory(VIEW, DOCUMENT, 3L, "/tmp"),
+            IdeCommand.focusTerminal(VIEW, DOCUMENT, 3L),
+            IdeCommand.detachView(VIEW, DOCUMENT, 3L),
+            IdeCommand.closeView(VIEW, DOCUMENT, 3L, true),
+            IdeCommand.closeView(VIEW, DOCUMENT, 3L, false),
+            IdeCommand.listViews())) {
       assertEquals(command, codec.decodeCommand(codec.encodeCommand(command)));
     }
   }
 
   @Test
-  void roundTripsHttpOpenStreamWithQueryAndHeaders() {
+  void encodesFrozenOpenViewShape() {
     IdeCommand command =
-        new IdeCommand(
-            IdeAction.OPEN_STREAM,
-            VIEW,
-            null,
-            TICKET,
-            "/api/harness/environment-stream/v1/" + TICKET + "?environment=" + VIEW,
-            IdeStreamMode.HTTP,
-            "GET",
-            "/?folder=/home/user/project&t=1",
-            List.of(new IdeHeader("Accept", "application/json")));
-    assertEquals(command, codec.decodeCommand(codec.encodeCommand(command)));
+        IdeCommand.openView(
+            VIEW, DOCUMENT, EVENT_NODE, CONNECTION, CLAIM, IdeOpenMode.CREATE, null);
+    assertEquals(
+        "{\"action\":\"OPEN_VIEW\",\"viewId\":\""
+            + VIEW
+            + "\",\"documentId\":\""
+            + DOCUMENT
+            + "\",\"eventNodeId\":\""
+            + EVENT_NODE
+            + "\",\"connectionId\":\""
+            + CONNECTION
+            + "\",\"claimId\":\""
+            + CLAIM
+            + "\",\"mode\":\"create\"}",
+        codec.encodeCommand(command));
   }
 
   @Test
-  void roundTripsWsOpenStream() {
-    IdeCommand command =
-        new IdeCommand(
-            IdeAction.OPEN_STREAM,
-            VIEW,
+  void roundTripsOpenAndListReplies() {
+    UUID viewId = UUID.fromString(VIEW);
+    UUID documentId = UUID.fromString(DOCUMENT);
+    UUID eventNodeId = UUID.fromString(EVENT_NODE);
+    UUID connectionId = UUID.fromString(CONNECTION);
+    UUID claimId = UUID.fromString(CLAIM);
+    IdeViewSummary summary =
+        new IdeViewSummary(
+            viewId,
+            documentId,
+            eventNodeId,
+            connectionId,
+            claimId,
+            9L,
+            "/home/user",
+            "/daemon/views/" + VIEW,
+            IdeViewState.OPEN);
+    IdeReply open =
+        new IdeReply(
+            true,
+            viewId,
+            documentId,
+            eventNodeId,
+            connectionId,
+            claimId,
+            9L,
+            "/home/user",
+            "/daemon/views/" + VIEW,
             null,
-            TICKET,
-            "/api/harness/environment-stream/v1/" + TICKET + "?environment=" + VIEW,
-            IdeStreamMode.WS,
             null,
-            "/ws/echo",
-            List.of());
-    assertEquals(command, codec.decodeCommand(codec.encodeCommand(command)));
-  }
-
-  @Test
-  void roundTripsReplyVariants() {
-    IdeReply ok = IdeReply.ok(VIEW, "/home/user/project", "/daemon/workspaces/" + VIEW);
-    assertEquals(ok, codec.decodeReply(codec.encodeReply(ok)));
-    IdeReply failure = IdeReply.failure("directory is not accessible");
+            null);
+    assertEquals(open, codec.decodeReply(codec.encodeReply(open)));
+    IdeReply list =
+        new IdeReply(
+            true, null, null, null, null, null, null, null, null, List.of(summary), null, null);
+    assertEquals(list, codec.decodeReply(codec.encodeReply(list)));
+    IdeReply failure =
+        new IdeReply(
+            false,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            "VIEW_GONE",
+            "view is gone");
     assertEquals(failure, codec.decodeReply(codec.encodeReply(failure)));
   }
 
   @Test
-  void rejectsUnknownCommandField() {
-    String json = "{\"action\":\"FOCUS_TERMINAL\",\"viewId\":\"" + VIEW + "\",\"extra\":1}";
-    assertThrows(DaemonProtocolException.class, () -> codec.decodeCommand(json));
-  }
-
-  @Test
-  void rejectsDuplicateKeyAndTrailingContent() {
-    String duplicate =
-        "{\"action\":\"FOCUS_TERMINAL\",\"action\":\"CLOSE_VIEW\",\"viewId\":\"" + VIEW + "\"}";
-    assertThrows(DaemonProtocolException.class, () -> codec.decodeCommand(duplicate));
-    String json = "{\"action\":\"FOCUS_TERMINAL\",\"viewId\":\"" + VIEW + "\"}";
-    assertThrows(DaemonProtocolException.class, () -> codec.decodeCommand(json + " {}"));
-  }
-
-  @Test
-  void rejectsUnknownReplyFieldAndNonBooleanOk() {
+  void rejectsUnknownFieldsDuplicateKeysAndTrailingContent() {
+    String base =
+        "{\"action\":\"OPEN_VIEW\",\"viewId\":\""
+            + VIEW
+            + "\",\"documentId\":\""
+            + DOCUMENT
+            + "\",\"eventNodeId\":\""
+            + EVENT_NODE
+            + "\",\"connectionId\":\""
+            + CONNECTION
+            + "\",\"claimId\":\""
+            + CLAIM
+            + "\",\"mode\":\"create\"";
+    assertThrows(DaemonProtocolException.class, () -> codec.decodeCommand(base + ",\"extra\":1}"));
     assertThrows(
-        DaemonProtocolException.class, () -> codec.decodeReply("{\"ok\":true,\"extra\":1}"));
+        DaemonProtocolException.class,
+        () ->
+            codec.decodeCommand(
+                base.replace("\"mode\":\"create\"", "\"mode\":\"create\",\"mode\":\"resume\"")
+                    + "}"));
+    assertThrows(DaemonProtocolException.class, () -> codec.decodeCommand(base + "} trailing"));
+    assertThrows(
+        DaemonProtocolException.class,
+        () -> codec.decodeReply("{\"ok\":true,\"views\":[],\"extra\":1}"));
     assertThrows(DaemonProtocolException.class, () -> codec.decodeReply("{\"ok\":\"yes\"}"));
   }
 
   @Test
-  void rejectsNonCanonicalViewId() {
-    for (String viewId :
-        new String[] {"", "123", "../escape", "ABCDEF01-2345-6789-ABCD-EF0123456789"}) {
+  void enforcesActionSpecificFields() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new IdeCommand(
+                IdeAction.OPEN_VIEW,
+                VIEW,
+                DOCUMENT,
+                EVENT_NODE,
+                CONNECTION,
+                null,
+                null,
+                IdeOpenMode.CREATE,
+                null,
+                null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new IdeCommand(
+                IdeAction.CHANGE_DIRECTORY,
+                VIEW,
+                DOCUMENT,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "/tmp",
+                null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new IdeCommand(
+                IdeAction.CLOSE_VIEW, VIEW, DOCUMENT, null, null, null, 1L, null, null, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new IdeCommand(
+                IdeAction.LIST_VIEWS, VIEW, null, null, null, null, null, null, null, null));
+  }
+
+  @Test
+  void rejectsNonCanonicalIdentityAndEpoch() {
+    for (String viewId : List.of("", "123", "../escape", "AAAAAAAA-2222-3333-4444-555555555555")) {
       assertThrows(
           IllegalArgumentException.class,
-          () -> IdeCommand.view(IdeAction.CLOSE_VIEW, viewId, null),
-          "viewId must be rejected: " + viewId);
+          () ->
+              new IdeCommand(
+                  IdeAction.FOCUS_TERMINAL,
+                  viewId,
+                  DOCUMENT,
+                  null,
+                  null,
+                  null,
+                  1L,
+                  null,
+                  null,
+                  null));
+    }
+    for (String epoch : List.of("", "0", "01", "-1", "9223372036854775808", "1.0")) {
+      assertThrows(IllegalArgumentException.class, () -> IdeCommand.parseBindingEpoch(epoch));
     }
   }
 
   @Test
-  void rejectsStreamFieldsOnNonStreamActions() {
+  void rejectsInvalidModeAndUnknownActionOnWire() {
+    String command =
+        "{\"action\":\"OPEN_VIEW\",\"viewId\":\""
+            + VIEW
+            + "\",\"documentId\":\""
+            + DOCUMENT
+            + "\",\"eventNodeId\":\""
+            + EVENT_NODE
+            + "\",\"connectionId\":\""
+            + CONNECTION
+            + "\",\"claimId\":\""
+            + CLAIM
+            + "\",\"mode\":\"replace\"}";
+    assertThrows(DaemonProtocolException.class, () -> codec.decodeCommand(command));
     assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new IdeCommand(
-                IdeAction.OPEN_VIEW, VIEW, null, TICKET, null, null, null, null, List.of()));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new IdeCommand(
-                IdeAction.CLOSE_VIEW,
-                VIEW,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                List.of(new IdeHeader("Accept", "*/*"))));
+        DaemonProtocolException.class, () -> codec.decodeCommand("{\"action\":\"OPEN_STREAM\"}"));
   }
 
   @Test
-  void changeDirectoryRequiresDirectory() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> IdeCommand.view(IdeAction.CHANGE_DIRECTORY, VIEW, null));
-  }
-
-  @Test
-  void openStreamRequiresTicketUrlAndMode() {
+  void rejectsUnsafeFailureReplyAndDuplicateViewSummaries() {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            new IdeCommand(
-                IdeAction.OPEN_STREAM,
-                VIEW,
-                null,
-                TICKET,
-                null,
-                IdeStreamMode.WS,
-                null,
-                null,
-                List.of()));
+            new IdeReply(
+                false, null, null, null, null, null, null, null, null, null, "view gone", "x"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            new IdeCommand(
-                IdeAction.OPEN_STREAM,
-                VIEW,
+            new IdeReply(
+                false,
                 null,
                 null,
-                "/api/harness/environment-stream/v1/" + TICKET + "?environment=" + VIEW,
-                IdeStreamMode.WS,
                 null,
                 null,
-                List.of()));
+                null,
+                null,
+                null,
+                null,
+                null,
+                "VIEW_GONE",
+                "x".repeat(501)));
+    UUID viewId = UUID.fromString(VIEW);
+    IdeViewSummary summary =
+        new IdeViewSummary(
+            viewId,
+            UUID.fromString(DOCUMENT),
+            UUID.fromString(EVENT_NODE),
+            UUID.fromString(CONNECTION),
+            UUID.fromString(CLAIM),
+            1L,
+            "/tmp",
+            "/daemon/views/" + VIEW,
+            IdeViewState.OPEN);
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            new IdeCommand(
-                IdeAction.OPEN_STREAM,
-                VIEW,
-                null,
-                TICKET,
-                "/api/harness/environment-stream/v1/" + TICKET + "?environment=" + VIEW,
+            new IdeReply(
+                true,
                 null,
                 null,
                 null,
-                List.of()));
-  }
-
-  @Test
-  void httpOpenStreamRequiresMethodAndPath() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new IdeCommand(
-                IdeAction.OPEN_STREAM,
-                VIEW,
-                null,
-                TICKET,
-                "/api/harness/environment-stream/v1/" + TICKET + "?environment=" + VIEW,
-                IdeStreamMode.HTTP,
-                null,
-                "/",
-                List.of()));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new IdeCommand(
-                IdeAction.OPEN_STREAM,
-                VIEW,
-                null,
-                TICKET,
-                "/api/harness/environment-stream/v1/" + TICKET + "?environment=" + VIEW,
-                IdeStreamMode.HTTP,
-                "GET",
-                null,
-                List.of()));
-  }
-
-  @Test
-  void rejectsUnsafePathAndStreamUrl() {
-    for (String path : new String[] {"//evil.example/", "http://evil.example/", "relative"}) {
-      assertThrows(IllegalArgumentException.class, () -> IdeCommand.validatePath(path), path);
-    }
-    for (String url :
-        new String[] {
-          "ftp://x.example/s",
-          "http://x.example/api/harness/environment-stream/v1/" + TICKET,
-          "ws://x.example/api/harness/environment-stream/v1/" + TICKET,
-          "wss://x.example/api/harness/environment-stream/v1/" + TICKET,
-          "wss://user:pw@x.example/s",
-          "wss://x.example/s#frag",
-          "//evil.example/s",
-          "relative",
-          "/relative#frag",
-          "/api/harness/environment-stream/v1/" + TICKET + "#frag",
-          "/api/harness/environment-stream/v1/" + TICKET + "\\bad",
-          "/api/harness/environment-stream/v1/../other",
-          "/api/harness/environment-stream/v1/" + TICKET + "/extra",
-          "/api/other/stream/v1/" + TICKET,
-          "/api/harness/environment-stream/v1/",
-          "/api/harness/environment-stream/v1/" + TICKET + "?other=1",
-          "/api/harness/environment-stream/v1/" + TICKET + "?environment=not-a-uuid",
-          "/api/harness/environment-stream/v1/"
-              + TICKET
-              + "?environment=11111111-2222-3333-4444-55555555555G"
-        }) {
-      assertThrows(IllegalArgumentException.class, () -> IdeCommand.validateStreamUrl(url), url);
-    }
-    assertEquals(
-        "/api/harness/environment-stream/v1/" + TICKET + "?environment=" + VIEW,
-        IdeCommand.validateStreamUrl(
-            "/api/harness/environment-stream/v1/" + TICKET + "?environment=" + VIEW));
-    assertEquals(
-        "/api/harness/environment-stream/v1/" + TICKET,
-        IdeCommand.validateStreamUrl("/api/harness/environment-stream/v1/" + TICKET));
-  }
-
-  @Test
-  void rejectsNonBase64UrlTicketAndBadHeaders() {
-    assertThrows(IllegalArgumentException.class, () -> IdeCommand.validateTicket("has space"));
-    assertThrows(IllegalArgumentException.class, () -> IdeCommand.validateTicket("../path"));
-    assertThrows(IllegalArgumentException.class, () -> new IdeHeader("Bad Name", "v"));
-    assertThrows(IllegalArgumentException.class, () -> new IdeHeader("X-Test", "v\r\nInjected"));
-  }
-
-  @Test
-  void wsOpenStreamRequiresPath() {
-    // 与 Node peer 一致：WS 模式必须携带上游请求 path（method 可缺省为 GET）。
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new IdeCommand(
-                IdeAction.OPEN_STREAM,
-                VIEW,
-                null,
-                TICKET,
-                "/api/harness/environment-stream/v1/" + TICKET + "?environment=" + VIEW,
-                IdeStreamMode.WS,
                 null,
                 null,
-                List.of()));
+                null,
+                null,
+                null,
+                List.of(summary, summary),
+                null,
+                null));
   }
 }
