@@ -216,14 +216,14 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
           }
 
           @Override
-          public void saveInstallCode(
-              UUID id, String codeHash, String registrationTokenHash, Instant expiresAt) {
+          public boolean saveInstallCode(
+              UUID id, long expectedVersion, String codeHash, Instant expiresAt) {
             throw new UnsupportedOperationException();
           }
 
           @Override
-          public boolean consumeInstallCode(
-              UUID id, String codeHash, String registrationTokenHash, Instant now) {
+          public boolean redeemInstallCode(
+              UUID id, long expectedVersion, String codeHash, String registrationTokenHash) {
             throw new UnsupportedOperationException();
           }
         };
