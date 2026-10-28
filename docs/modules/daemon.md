@@ -80,10 +80,13 @@ POSIX 目录权限为 0700、敏感文件为 0600。`tmp/workspaces` 由受控�
 
 检索（[`search.ts`](../../daemon/src/coding/search.ts)）在进程内直接完成遍历与匹配，默认超时 15 秒（可由 `timeout_seconds` 覆盖），worker 共享原子 flag 在目录、行与 8KiB 块等检查点协作检查中断，超时保留 partial 匹配并标记 `search.incomplete`；非响应 stop 给予 5 秒清理宽限才 await terminate（非额外更短执行预算），清理失败明确暴露；支持分层 `.gitignore` 与 `.git/info/exclude`，不依赖外部 ripgrep/fd 二进制。
 
-### 受管 IDE 与反向数据流
+### 受管 IDE 与复用数据连接
 
-Daemon 受管运行内置的 code-server，响应 `IDE_COMMAND` 的 `OPEN_VIEW`、`CHANGE_DIRECTORY`、`FOCUS_TERMINAL`、`CLOSE_VIEW` 与 `OPEN_STREAM`，返回 `IDE_RESULT`。
-`OPEN_STREAM` 使用根相对路径 `/api/harness/environment-stream/v1/{ticket}?environment={id}`；Daemon 基于由 `studioUrl` 派生的 `gatewayUri` 解析目标地址与 TLS 端点，在 code-server 与 Studio 之间透传 HTTP 和 WebSocket 数据。
+Daemon 受管运行内置的 code-server，响应 `IDE_COMMAND` 的视图创建、恢复、切换、聚焦、分离与关闭等元数据动作，返回 `IDE_RESULT`；
+数据面不再通过控制命令请求 per-exchange 物理流。控制通道下发 `DATA_BIND` 时携带 generation、一次性票据和受控 `streamUrl`，
+Daemon 连接 `/api/harness/environment-data/v2/{environmentId}?ticket=...`，在一条物理 WebSocket 内复用多条 HTTP/WS mux 流。
+每条 OPEN 必须匹配仍有效的 `viewId` 与 `bindingEpoch`，Daemon 只访问该视图作用域的私有 code-server 路径；第一次物理写失败即
+终止连接，不自动重连或重放请求。
 
 ### IDE 轻量默认值与按需能力
 

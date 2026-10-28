@@ -241,10 +241,12 @@ Studio 当前没有内置登录鉴权。向局域网或公网暴露前，必须�
 | UI 与 REST API | 全部路径，含 SPA 深层路径 | 透传到 App `8080`；App 自行返回 `index.html` fallback |
 | Environment Daemon gateway | `/api/harness/environment-daemon/v1` | 透传 WebSocket，并协商 `permessage-deflate`；未协商时 Daemon 以 RFC 6455 close code `1010` 断开，不会退化为未压缩会话 |
 | 浏览器 Application Event WebSocket | `/api/events/v1` | 透传 WebSocket；断线后客户端靠 REST snapshot 重新同步 |
-| 同源 IDE 数据面与固定入口 | `/environment-ide/{environmentId}/` | 透传 HTTP 与 WebSocket upgrade；Studio 与受管环境在可信浏览器边界（非沙箱）内协作，不需独立域名；保持 route base 与 Host/Origin 转发 |
+| 同源 IDE 数据面与固定入口 | `/environment-ide/{environmentId}/{viewId}/` | 透传 HTTP 与 WebSocket upgrade；保持 view route base 与 Host/Origin 转发 |
+| Daemon IDE 复用数据连接 | `/api/harness/environment-data/v2/{environmentId}?ticket=...` | 透传 WebSocket；票据一次性、30 秒有效，Daemon 只连接 DATA_BIND 下发的受控地址 |
 
-Daemon 建立的 IDE 反向 stream 端点固定为根相对路径 `/api/harness/environment-stream/v1/{ticket}?environment={id}`，
-由 Daemon 按既有 gateway 相对解析，不需配置独立的公共 stream URL 模板。
+Daemon 的 IDE 数据连接地址由 `DATA_BIND` 下发，生产通过
+`kk-studio.harness.ide-gateway.data-stream-base-url` 指向 Daemon 可达的 Studio 同源 origin；路径固定为
+`/api/harness/environment-data/v2/{environmentId}`。票据只在查询中传递一次，不写入日志，跨节点时由非 owner 单跳桥接到 owner。
 
 `prod` profile 启用 `server.forward-headers-strategy=framework`，因此代理必须正确设置
 `X-Forwarded-Proto`/`X-Forwarded-Host`，否则重定向与 cookies 会指向内部地址。

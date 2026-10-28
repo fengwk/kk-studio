@@ -326,7 +326,7 @@ Environment 按数据类型使用四条路径：
 | Blob 数据面 | Backend 分配预签名 PUT，Daemon 直接流式上传 S3 |
 
 协议与路由租约见 [Harness Environment](modules/harness-environment.md)，主机执行见
-[Environment Daemon](modules/daemon.md)；同源 IDE 的命令通道与反向数据流见 [IDE](modules/ide.md)。
+[Environment Daemon](modules/daemon.md)；同源 IDE 的命令通道与复用数据连接见 [IDE](modules/ide.md)。
 
 ## 部署与安全条件
 

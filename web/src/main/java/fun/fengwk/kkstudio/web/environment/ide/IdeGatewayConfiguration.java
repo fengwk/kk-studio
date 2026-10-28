@@ -7,18 +7,19 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.web.socket.client.WebSocketClient;
 import org.springframework.web.socket.client.standard.StandardWebSocketClient;
 
+import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.ide.IdeBootstrapTicketService;
-import fun.fengwk.kkstudio.ide.stream.IdeStreamPairingRegistry;
-import fun.fengwk.kkstudio.ide.stream.IdeStreamTicketService;
-import fun.fengwk.kkstudio.ide.stream.InMemoryIdeStreamTicketService;
+import fun.fengwk.kkstudio.ide.data.IdeDataConnectionRegistry;
 
 import java.util.Map;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 
 /**
- * IDE 网关数据面的 Web 装配：绑定 {@link IdeGatewayProperties}，提供进程内 stream ticket 服务、反向连接配对注册表， 以及代际关闭时的清理钩子。
+ * IDE 数据面的 Web 装配：复用数据连接注册表、原生 WS 客户端与数据连接心跳调度器。
  *
- * <p>无 cluster 配置时即单节点直连：本节点的 {@link IdeStreamTicketService}/{@link IdeStreamPairingRegistry}
- * 只服务本节点 建立的流。跨节点路由由 cluster 切片在 owner 定位层处理，本装配不做任何跨节点假设。
+ * <p>每个 Environment 只在当前 READY 控制身份下维持一条已接受的数据连接；代际结束时关闭该连接、撤销浏览器会话与入口票据。这里不注册任何 per-exchange
+ * ticket/pairing 设施。
  */
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(IdeGatewayProperties.class)
@@ -38,10 +39,7 @@ public class IdeGatewayConfiguration {
   static final String TOMCAT_HANDSHAKE_IO_TIMEOUT_MS =
       "org.apache.tomcat.websocket" + ".IO_TIMEOUT_MS";
 
-  /**
-   * 跨节点拨号共用的 WS 客户端：把握手 I/O 超时对齐到 {@code pairing-timeout}（默认 10s），使底层库自身也有与网关 deadline 一致的
-   * 上限，而不是各库缺省（Tomcat 缺省 5s、且不同容器不一致）。
-   */
+  /** 跨节点拨号共用的 WS 客户端：握手 I/O 超时与 DATA_BIND 回连等待保持一致。 */
   @Bean
   @ConditionalOnMissingBean
   public WebSocketClient ideWebSocketClient(IdeGatewayProperties properties) {
@@ -49,35 +47,40 @@ public class IdeGatewayConfiguration {
     client.setUserProperties(
         Map.of(
             TOMCAT_HANDSHAKE_IO_TIMEOUT_MS,
-            String.valueOf(properties.requirePairingTimeout().toMillis())));
+            String.valueOf(properties.requireDataConnectTimeout().toMillis())));
     return client;
   }
 
   @Bean
   @ConditionalOnMissingBean
-  public IdeStreamTicketService ideStreamTicketService() {
-    return new InMemoryIdeStreamTicketService();
+  public IdeDataConnectionRegistry ideDataConnectionRegistry(
+      EnvironmentDaemonServer server, IdeGatewayProperties properties) {
+    return new IdeDataConnectionRegistry(server, properties::dataStreamUrl);
   }
 
-  @Bean
-  public IdeStreamPairingRegistry<IdeStreamPeer> ideStreamPairingRegistry() {
-    return new IdeStreamPairingRegistry<>();
+  @Bean(name = "ideDataHeartbeatScheduler", destroyMethod = "shutdownNow")
+  public ScheduledExecutorService ideDataHeartbeatScheduler() {
+    return Executors.newScheduledThreadPool(
+        2,
+        runnable -> {
+          Thread thread = new Thread(runnable, "ide-data-heartbeat");
+          thread.setDaemon(true);
+          return thread;
+        });
   }
 
   /**
-   * 代际结束清理：关闭该 Daemon 实例代际的全部反向流配对，并撤销 stream/bootstrap 票据与浏览器会话。
+   * 代际结束清理：关闭当前数据连接、撤销入口票据与旧浏览器会话。
    *
    * <p>任一子步骤异常都不影响其它清理与会话状态推进，因此整体隔离。
    */
   @Bean
   public IdeGenerationCloseListener ideGenerationCloseListener(
-      IdeStreamPairingRegistry<IdeStreamPeer> pairings,
-      IdeStreamTicketService streamTickets,
+      IdeDataConnectionRegistry dataConnections,
       IdeBootstrapTicketService bootstrapTickets,
       IdeBrowserSessionRegistry sessions) {
     return generation -> {
-      closeQuietly(() -> pairings.closeGeneration(generation));
-      closeQuietly(() -> streamTickets.revoke(generation));
+      closeQuietly(() -> dataConnections.closeGeneration(generation));
       closeQuietly(() -> bootstrapTickets.revoke(generation));
       closeQuietly(() -> sessions.closeGeneration(generation));
     };
