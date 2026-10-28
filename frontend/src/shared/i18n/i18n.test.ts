@@ -86,4 +86,16 @@ describe('i18n catalog locale alignment', () => {
       expect(placeholderNames(messages['zh-CN']), key).toEqual(placeholderNames(messages['en-US']))
     }
   })
+
+  it('describes current runtime and update progress without task phase states', () => {
+    // 运行状态只表达当前快照与下载进度：无历史任务阶段，也不把 100% 下载写成更新成功。
+    expect(catalog['ai.environment.runtime.unavailable']?.['zh-CN']).toContain('不可用')
+    expect(catalog['ai.environment.update.none']?.['zh-CN']).toBe('无进行中的更新')
+    expect(catalog['ai.environment.update.progressUnknownTotal']?.['zh-CN']).toContain(
+      '总大小未知',
+    )
+    expect(
+      Object.keys(catalog).filter((key) => key.startsWith('ai.environment.update.phase.')),
+    ).toEqual([])
+  })
 })

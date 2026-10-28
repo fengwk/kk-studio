@@ -16,7 +16,7 @@ import type {
 vi.mock('@/shared/api/environment-service', () => ({
   environmentService: {
     getEnvironment: vi.fn(),
-    getEnvironmentUpdate: vi.fn(),
+    getEnvironmentRuntime: vi.fn(),
     startEnvironmentUpdate: vi.fn(),
     saveInstallConfig: vi.fn(),
     createInstallCode: vi.fn(),

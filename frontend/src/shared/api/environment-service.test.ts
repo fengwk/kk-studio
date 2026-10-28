@@ -115,32 +115,42 @@ describe('environmentService', () => {
     expect(result).toEqual(events)
   })
 
-  it('reads managed daemon update status via GET /environments/{id}/update', async () => {
-    const update = {
-      operationId: 'op-1',
-      targetVersion: '1.3.0',
-      phase: 'RUNNING' as const,
-      createdAt: '2026-10-09T00:00:00.000Z',
-      updatedAt: '2026-10-09T00:01:00.000Z',
+  it('reads the current runtime snapshot via GET /environments/{id}/runtime', async () => {
+    const runtime = {
+      revision: '7',
+      status: {
+        daemonVersion: '1.2.3',
+        update: {
+          targetVersion: '1.3.0',
+          downloadedBytes: '8388608',
+          totalBytes: null,
+        },
+      },
     }
     const client = createMockHttpClient()
-    client.get.mockResolvedValue(update)
+    client.get.mockResolvedValue(runtime)
     const service = createEnvironmentService(client)
-    const result = await service.getEnvironmentUpdate('env/a')
-    expect(client.get).toHaveBeenCalledWith('/environments/env%2Fa/update')
+    const result = await service.getEnvironmentRuntime('env/a')
+    expect(client.get).toHaveBeenCalledWith('/environments/env%2Fa/runtime')
     expect(client.post).not.toHaveBeenCalled()
-    expect(result).toEqual(update)
+    expect(result).toEqual(runtime)
   })
 
-  it('starts managed daemon update via POST /environments/{id}/update with no body', async () => {
-    const card = { id: 'env/a', name: 'local', version: '2' }
+  it('starts a managed daemon update via POST /environments/{id}/update and returns command status with the snapshot', async () => {
+    const started = {
+      commandStatus: 'SENT_UNCONFIRMED',
+      runtimeStatus: {
+        revision: '8',
+        status: { daemonVersion: '1.2.3', update: null },
+      },
+    }
     const client = createMockHttpClient()
-    client.post.mockResolvedValue(card)
+    client.post.mockResolvedValue(started)
     const service = createEnvironmentService(client)
     const result = await service.startEnvironmentUpdate('env/a')
     expect(client.post).toHaveBeenCalledWith('/environments/env%2Fa/update')
     expect(client.get).not.toHaveBeenCalled()
-    expect(result).toEqual(card)
+    expect(result).toEqual(started)
   })
 
   it('creates an ide view via POST /environments/{id}/ide/views', async () => {
