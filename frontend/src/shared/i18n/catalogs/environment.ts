@@ -14,6 +14,62 @@ export const environmentCatalog = {
     'en-US': 'Close',
     'zh-CN': '关闭',
   },
+  'ai.ide.dismiss': {
+    'en-US': 'Dismiss',
+    'zh-CN': '忽略',
+  },
+  'ai.ide.environmentSelector': {
+    'en-US': 'Environment',
+    'zh-CN': '环境',
+  },
+  'ai.ide.reconnecting': {
+    'en-US': 'Connection lost. Reconnecting; the IDE will resume automatically.',
+    'zh-CN': '连接已断开，正在重连，IDE 将自动恢复。',
+  },
+  'ai.ide.storageUnavailable': {
+    'en-US': 'Browser storage is unavailable; IDE recovery and last-used state will not persist.',
+    'zh-CN': '浏览器存储不可用，IDE 恢复信息与最近使用状态将不会保留。',
+  },
+  'ai.ide.claimUnknown': {
+    'en-US': 'The IDE view result is unknown. Reconcile the original claim before continuing.',
+    'zh-CN': 'IDE 视图结果未知，请先对账原 claim 再继续。',
+  },
+  'ai.ide.retryClaim': {
+    'en-US': 'Reconcile',
+    'zh-CN': '对账',
+  },
+  'ai.ide.viewGone': {
+    'en-US': 'The IDE view is gone and was not recreated automatically.',
+    'zh-CN': 'IDE 视图已不存在，未自动创建替代视图。',
+  },
+  'ai.ide.openNewView': {
+    'en-US': 'Open New View',
+    'zh-CN': '打开新视图',
+  },
+  'ai.ide.viewNotReady': {
+    'en-US': 'The IDE view is not ready',
+    'zh-CN': 'IDE 视图尚未就绪',
+  },
+  'ai.ide.commandResultUnknown': {
+    'en-US': 'The command result is unknown; check the IDE before continuing.',
+    'zh-CN': '命令结果未知，请先在 IDE 中确认再继续。',
+  },
+  'ai.ide.bindingChanged': {
+    'en-US': 'The IDE binding changed, so the result was not applied.',
+    'zh-CN': 'IDE 绑定已变化，结果未应用。',
+  },
+  'ai.ide.dirtyDiscardTitle': {
+    'en-US': 'Discard unsaved changes?',
+    'zh-CN': '放弃未保存的修改？',
+  },
+  'ai.ide.dirtyDiscardMessage': {
+    'en-US': 'The IDE has unsaved changes and rejected the close. Discard them and close this view?',
+    'zh-CN': 'IDE 中存在未保存的修改，已拒绝关闭。放弃这些修改并关闭视图？',
+  },
+  'ai.ide.discardAndClose': {
+    'en-US': 'Discard and Close',
+    'zh-CN': '放弃并关闭',
+  },
   'ai.ide.openTerminal': {
     'en-US': 'Open Terminal',
     'zh-CN': '打开终端',

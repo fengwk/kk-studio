@@ -4,7 +4,10 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider, useNavigate } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { IdeLifecycleProvider } from '@/features/environment/ide/IdeLifecycleProvider'
+import {
+  IdePanelContext,
+  type IdeOpenEnvironmentRequest,
+} from '@/features/environment/ide/ide-panel-context'
 import { ChatWorkspacePage } from '@/features/chat/ChatWorkspacePage'
 import {
   applyChatLayout,
@@ -56,12 +59,6 @@ vi.mock('@/shared/api/chat-service', () => ({
 vi.mock('@/shared/api/environment-service', () => ({
   environmentService: {
     listEnvironments: vi.fn(),
-    getEnvironmentUpdate: vi.fn(),
-    startEnvironmentUpdate: vi.fn(),
-    createIdeView: vi.fn().mockResolvedValue({}),
-    changeIdeViewDirectory: vi.fn().mockResolvedValue({}),
-    openIdeViewTerminal: vi.fn().mockResolvedValue(undefined),
-    closeIdeView: vi.fn().mockResolvedValue(undefined),
   },
 }))
 vi.mock('@/shared/api/harness-service', () => ({
@@ -225,6 +222,7 @@ beforeEach(() => {
 function renderWorkspaceRouter(
   initialEntries: string[],
   element: React.ReactNode = <ChatWorkspacePage />,
+  openEnvironment: (request: IdeOpenEnvironmentRequest) => void = vi.fn(),
 ) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -233,7 +231,7 @@ function renderWorkspaceRouter(
     [
       {
         path: '/chats/:chatId',
-        element: <IdeLifecycleProvider>{element}</IdeLifecycleProvider>,
+        element,
       },
       {
         path: '/chats',
@@ -244,7 +242,9 @@ function renderWorkspaceRouter(
   )
   return render(
     <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
+      <IdePanelContext.Provider value={{ openEnvironment }}>
+        <RouterProvider router={router} />
+      </IdePanelContext.Provider>
     </QueryClientProvider>,
   )
 }
@@ -1072,8 +1072,9 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     expect(document.querySelector('[data-breadcrumb="branch"]')).toBeNull()
   })
 
-  it('retains pane in DOM when it has an active IDE view after layout shrinks, without fake pending effect', async () => {
+  it('does not retain a hidden pane after IDE was opened because the global panel owns the view', async () => {
     const user = userEvent.setup()
+    const openEnvironment = vi.fn<(request: IdeOpenEnvironmentRequest) => void>()
     seedLayout('split-2')
     bindPaneThread('pane-1', [ROOT_ENTRY, TURN_END_ENTRY, MESSAGE_ENTRY], 'entry-3')
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([
@@ -1091,56 +1092,37 @@ describe('ChatWorkspacePage 新建分支路由', () => {
         homeDirectory: '/home/user',
       },
     ])
-    vi.mocked(environmentService.createIdeView).mockResolvedValue({
-      viewId: 'v-pane-2',
-      environmentId: 'a1000000-0000-4000-8000-000000000001',
-      directory: '/home/user',
-      entryUrl: '/environment-ide/a1000000-0000-4000-8000-000000000001/__ide/bootstrap?token=p2',
-    })
 
-    renderWorkspace()
+    renderWorkspaceRouter([`/chats/${CHAT_ID}`], <ChatWorkspacePage />, openEnvironment)
     await screen.findByRole('heading', { name: 'Workspace' })
     await waitFor(() => expect(screen.getAllByLabelText('给 AI 发送消息')).toHaveLength(2))
 
-    // Open IDE on pane-2
     const plusButtons = screen.getAllByRole('button', { name: '打开命令表' })
     await user.click(plusButtons[1]!)
-    const filesCommands = await screen.findAllByText('files')
-    await user.click(filesCommands[0]!)
+    await user.click((await screen.findAllByText('files'))[0]!)
+    await waitFor(() => {
+      expect(openEnvironment).toHaveBeenCalledWith({ environment: null, mode: 'files' })
+    })
 
-    // Pane-2 has no bound environment, so it presents the inline environment selector. Confirming starts the view.
-    const confirmBtn = await screen.findByRole('button', { name: '确认' })
-    await user.click(confirmBtn)
-
-    // Wait for pane-2 IDE view to mount
-    await screen.findByTestId('ide-iframe')
-
-    // Switch layout to 1 pane
     const layoutTrigger = screen.getByRole('button', { name: '布局' })
     await user.click(layoutTrigger)
     await user.click(screen.getByRole('option', { name: '1' }))
 
-    // Pane-2 must still be retained in mountedPanes with hidden and inert
-    const paneElements = document.querySelectorAll('.chat-pane')
-    expect(paneElements.length).toBe(2)
-    const hiddenPane = Array.from(paneElements).find((el) => el.getAttribute('data-pane-id') === 'pane-2')
-    expect(hiddenPane).toHaveAttribute('hidden')
-    expect(hiddenPane).toHaveAttribute('inert')
+    // 全局面板脱离 pane 生命周期；隐藏 pane 不因 IDE 曾打开而继续挂载。
+    expect(document.querySelectorAll('.chat-pane')).toHaveLength(1)
 
-    // And it must NOT block new branch dialog destination (not fake pending effect)
     const dialog = await openBranchDialogFromTree(user)
     await user.type(dialog.querySelector<HTMLInputElement>('.new-branch-name')!, 'branch-to-hidden')
     await chooseDestination(user, 2)
     await confirmBranch(user)
-
-    // Branch creation succeeds and closes dialog without blocking on destination
     await waitFor(() => {
       expect(document.querySelector('.new-branch-dialog')).toBeNull()
     })
   })
 
-  it('prompts confirmation when leaving workspace with mounted IDE, and cancels navigation on cancel', async () => {
+  it('navigates away without a pane-owned IDE leave confirmation or close request', async () => {
     const user = userEvent.setup()
+    const openEnvironment = vi.fn<(request: IdeOpenEnvironmentRequest) => void>()
     seedLayout('split-2')
     bindPaneThread('pane-1', [ROOT_ENTRY, TURN_END_ENTRY, MESSAGE_ENTRY], 'entry-3')
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([
@@ -1158,41 +1140,22 @@ describe('ChatWorkspacePage 新建分支路由', () => {
         homeDirectory: '/home/user',
       },
     ])
-    vi.mocked(environmentService.createIdeView).mockResolvedValue({
-      viewId: 'v-pane-2',
-      environmentId: 'a1000000-0000-4000-8000-000000000001',
-      directory: '/home/user',
-      entryUrl: '/environment-ide/a1000000-0000-4000-8000-000000000001/__ide/bootstrap?token=p2',
-    })
 
-    renderWorkspace()
+    renderWorkspaceRouter([`/chats/${CHAT_ID}`], <ChatWorkspacePage />, openEnvironment)
     await screen.findByRole('heading', { name: 'Workspace' })
     await waitFor(() => expect(screen.getAllByLabelText('给 AI 发送消息')).toHaveLength(2))
 
-    // Open IDE on pane-2
     const plusButtons = screen.getAllByRole('button', { name: '打开命令表' })
     await user.click(plusButtons[1]!)
-    const filesCommands = await screen.findAllByText('files')
-    await user.click(filesCommands[0]!)
-    const confirmBtn = await screen.findByRole('button', { name: '确认' })
-    await user.click(confirmBtn)
+    await user.click((await screen.findAllByText('files'))[0]!)
+    await waitFor(() => {
+      expect(openEnvironment).toHaveBeenCalledWith({ environment: null, mode: 'files' })
+    })
 
-    await screen.findByTestId('ide-iframe')
-
-    // Click back to conversation ("回到对话")
-    const backBtn = screen.getByRole('link', { name: '回到对话' })
-    await user.click(backBtn)
-
-    // Confirmation dialog appears
-    expect(screen.getByText('离开将关闭文件面板，未保存内容需先保存。确认离开？')).toBeInTheDocument()
-
-    // Click cancel in leave dialog
-    await user.click(screen.getByRole('button', { name: '取消' }))
-
-    // Workspace and panes remain in document, navigation did not happen
+    await user.click(screen.getByRole('link', { name: '回到对话' }))
+    await screen.findByText('Chats List')
     expect(screen.queryByText('离开将关闭文件面板，未保存内容需先保存。确认离开？')).not.toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Workspace' })).toBeInTheDocument()
-    expect(document.querySelectorAll('.chat-pane')).toHaveLength(2)
+    expect(openEnvironment).toHaveBeenCalledTimes(1)
   })
 
   // 回合 footer 的 GitBranch 由 usage-owner 的 MetaMessageBlock 渲染，它消费本切片

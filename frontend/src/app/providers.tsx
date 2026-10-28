@@ -4,7 +4,7 @@ import { applicationContributions } from '@/app/application-contributions'
 import { BrowserPreferencesProvider } from '@/features/settings/browser-preferences'
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { ApplicationContributionsProvider } from '@/platform/extensions/ApplicationContributionsContext'
-import { IdeLifecycleProvider } from '@/features/environment/ide/IdeLifecycleProvider'
+import { IdePanelProvider } from '@/features/environment/ide/IdePanelProvider'
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } },
@@ -16,7 +16,7 @@ export function AppProviders({ children }: PropsWithChildren) {
       <ApplicationContributionsProvider contributions={applicationContributions}>
         <BrowserPreferencesProvider>
           <ApplicationEventProvider>
-            <IdeLifecycleProvider>{children}</IdeLifecycleProvider>
+            <IdePanelProvider>{children}</IdePanelProvider>
           </ApplicationEventProvider>
         </BrowserPreferencesProvider>
       </ApplicationContributionsProvider>

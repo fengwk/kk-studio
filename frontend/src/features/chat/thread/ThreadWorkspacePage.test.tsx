@@ -3,7 +3,6 @@ import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider, useNavigate } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { IdeLifecycleProvider } from '@/features/environment/ide/IdeLifecycleProvider'
 import { ThreadWorkspacePage } from '@/features/chat/thread/ThreadWorkspacePage'
 import { agentService } from '@/shared/api/agent-service'
 import { chatService } from '@/shared/api/chat-service'
@@ -176,11 +175,7 @@ function renderPage(initialEntry: string) {
     [
       {
         path: '/threads/:threadId',
-        element: (
-          <IdeLifecycleProvider>
-            <ThreadRouteHarness />
-          </IdeLifecycleProvider>
-        ),
+        element: <ThreadRouteHarness />,
       },
       {
         path: '/chats',

@@ -25,7 +25,6 @@ export function ChatWorkspacePane({
   onRequestBranch,
   onPaneReport,
   onPresentation,
-  onIdeMounted,
 }: {
   chat: ChatDTO
   agents: AgentDefinitionDTO[]
@@ -45,7 +44,6 @@ export function ChatWorkspacePane({
   /** 面板运行时摘要：workspace 只用它做目标路由与顶栏面包屑。 */
   onPaneReport?: (paneId: string, report: PaneReport) => void
   onPresentation?: (paneId: string, report: ThreadPresentation | null) => void
-  onIdeMounted?: (paneId: string, mounted: boolean) => void
 }) {
   return (
     <AgentPane
@@ -73,7 +71,6 @@ export function ChatWorkspacePane({
         ? undefined
         : (report) => onPaneReport(pane.id, report)}
       onPresentation={onPresentation == null ? undefined : (report) => onPresentation(pane.id, report)}
-      onIdeMounted={onIdeMounted == null ? undefined : (mounted) => onIdeMounted(pane.id, mounted)}
     />
   )
 }

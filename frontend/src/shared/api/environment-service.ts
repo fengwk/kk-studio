@@ -1,10 +1,12 @@
-import { apiBaseUrl, apiClient, type HttpClient } from '@/shared/api/client'
+import { apiClient, type HttpClient } from '@/shared/api/client'
 import type {
   EnvironmentCardDTO,
   EnvironmentCreateDTO,
   EnvironmentEventDTO,
   EnvironmentIdeChangeDirectoryDTO,
+  EnvironmentIdeCloseViewDTO,
   EnvironmentIdeOpenViewDTO,
+  EnvironmentIdeViewBindingDTO,
   EnvironmentIdeViewDTO,
   EnvironmentInstallCodeDTO,
   EnvironmentInstallConfigDTO,
@@ -61,7 +63,8 @@ export function createEnvironmentService(client: HttpClient = apiClient) {
         `/environments/${encodeURIComponent(id)}?expectedVersion=${encodeURIComponent(expectedVersion)}`,
       ),
 
-    createIdeView: (environmentId: string, data: EnvironmentIdeOpenViewDTO): Promise<EnvironmentIdeViewDTO> =>
+    /** 打开或恢复 view：claimId 与 mode 由调用方持有，失败后只允许按原 claimId 对账。 */
+    openIdeView: (environmentId: string, data: EnvironmentIdeOpenViewDTO): Promise<EnvironmentIdeViewDTO> =>
       client.post(`/environments/${encodeURIComponent(environmentId)}/ide/views`, data),
 
     changeIdeViewDirectory: (
@@ -74,47 +77,28 @@ export function createEnvironmentService(client: HttpClient = apiClient) {
         data,
       ),
 
-    openIdeViewTerminal: (environmentId: string, viewId: string): Promise<void> =>
+    openIdeViewTerminal: (
+      environmentId: string,
+      viewId: string,
+      data: EnvironmentIdeViewBindingDTO,
+    ): Promise<void> =>
       client.post(
         `/environments/${encodeURIComponent(environmentId)}/ide/views/${encodeURIComponent(viewId)}/terminal`,
+        data,
       ),
 
-    closeIdeView: (environmentId: string, viewId: string): Promise<void> =>
-      client.delete(ideViewPath(environmentId, viewId)),
-
-    /**
-     * 只读探测同源 IDE 会话；网络错误或超时返回 null（未知），不做重试。
-     * 探测地址由已校验的 entryUrl 从 __ide/bootstrap 改写为 __ide/session，不带 bootstrap token。
-     */
-    probeIdeSession: (sessionUrl: string, signal?: AbortSignal): Promise<number | null> =>
-      probeIdeSession(sessionUrl, signal),
-
-    /** pagehide 时用 keepalive DELETE 释放视图；Daemon 仍按 dirty 语义拒绝关闭。 */
-    closeIdeViewKeepalive: (environmentId: string, viewId: string): Promise<void> =>
-      fetch(`${apiBaseUrl}${ideViewPath(environmentId, viewId)}`, {
-        method: 'DELETE',
-        credentials: 'same-origin',
-        keepalive: true,
-      }).then(() => undefined),
+    /** 普通关闭传 discard=false；只有用户明确放弃未保存内容才传 true。 */
+    closeIdeView: (
+      environmentId: string,
+      viewId: string,
+      data: EnvironmentIdeCloseViewDTO,
+    ): Promise<void> =>
+      client.delete(ideViewPath(environmentId, viewId), { data }),
   }
 }
 
 function ideViewPath(environmentId: string, viewId: string): string {
   return `/environments/${encodeURIComponent(environmentId)}/ide/views/${encodeURIComponent(viewId)}`
-}
-
-async function probeIdeSession(sessionUrl: string, signal?: AbortSignal): Promise<number | null> {
-  try {
-    const response = await fetch(sessionUrl, {
-      method: 'GET',
-      credentials: 'same-origin',
-      cache: 'no-store',
-      signal,
-    })
-    return response.status
-  } catch {
-    return null
-  }
 }
 
 export const environmentService = createEnvironmentService()
