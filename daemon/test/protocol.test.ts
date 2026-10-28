@@ -4,6 +4,7 @@ import type { CapabilityResult } from '../src/contracts.js'
 import {
   CAPABILITY_CATALOG_VERSION,
   PROTOCOL_VERSION,
+  READY_CAPABILITIES_VERSION,
   ProtocolError,
   decodeCapabilities,
   decodeCompleted,
@@ -31,10 +32,15 @@ import {
   encodeUploadTicket,
   errorPayload,
   utf8ByteLength,
+  type RuntimeStatus,
 } from '../src/protocol.js'
 import { artifactFixture } from './support/update-fixture.js'
 
 const ENVIRONMENT_ID = '11111111-2222-4333-8444-555555555555'
+
+function runtimeStatus(daemonVersion: string): RuntimeStatus {
+  return { revision: '1', status: { daemonVersion, update: null } }
+}
 
 function envelope(messageType: string, extra: Record<string, unknown> = {}): string {
   return JSON.stringify({ protocolVersion: PROTOCOL_VERSION, messageType, payload: {}, ...extra })
@@ -156,32 +162,77 @@ describe('READY capabilities codec', () => {
     tempDirectory: '/home/dev/.kk-studio/tmp',
   }
 
-  it('round-trips capabilities', () => {
-    const text = encodeCapabilities({ version: 5, daemonVersion: '1.0.14', environment })
+  it('round-trips capabilities with the complete runtime status', () => {
+    const text = encodeCapabilities({
+      version: READY_CAPABILITIES_VERSION,
+      daemonVersion: '1.0.14',
+      environment,
+      runtimeStatus: runtimeStatus('1.0.14'),
+    })
     const decoded = decodeCapabilities(text)
-    expect(decoded.version).toBe(5)
+    expect(decoded.version).toBe(READY_CAPABILITIES_VERSION)
     expect(decoded.daemonVersion).toBe('1.0.14')
     expect(decoded.environment).toEqual(environment)
+    expect(decoded.runtimeStatus).toEqual(runtimeStatus('1.0.14'))
   })
 
   it('rejects unknown fields, wrong version and invalid OS/daemonVersion', () => {
-    expect(() => decodeCapabilities(JSON.stringify({ version: 5, daemonVersion: '1.0.14', environment, x: 1 }))).toThrow(
-      /unexpected|unknown/,
-    )
+    const status = runtimeStatus('1.0.14')
     expect(() =>
-      decodeCapabilities(JSON.stringify({ version: 4, daemonVersion: '1.0.14', environment })),
+      decodeCapabilities(
+        JSON.stringify({ version: READY_CAPABILITIES_VERSION, daemonVersion: '1.0.14', environment, runtimeStatus: status, x: 1 }),
+      ),
+    ).toThrow(/unexpected|unknown/)
+    expect(() =>
+      decodeCapabilities(
+        JSON.stringify({ version: 4, daemonVersion: '1.0.14', environment, runtimeStatus: status }),
+      ),
     ).toThrow(/unsupported READY capabilities version/)
     expect(() =>
       decodeCapabilities(
-        JSON.stringify({ version: 5, daemonVersion: '1.0.14', environment: { ...environment, operatingSystem: 'plan9' } }),
+        JSON.stringify({
+          version: READY_CAPABILITIES_VERSION,
+          daemonVersion: '1.0.14',
+          environment: { ...environment, operatingSystem: 'plan9' },
+          runtimeStatus: status,
+        }),
       ),
     ).toThrow(/unsupported daemon operating system/)
     expect(() =>
-      decodeCapabilities(JSON.stringify({ version: 5, daemonVersion: '1.0.14', environment: { ...environment, architecture: 'ia32' } })),
+      decodeCapabilities(
+        JSON.stringify({
+          version: READY_CAPABILITIES_VERSION,
+          daemonVersion: '1.0.14',
+          environment: { ...environment, architecture: 'ia32' },
+          runtimeStatus: status,
+        }),
+      ),
     ).toThrow(/unsupported daemon architecture/)
     expect(() =>
-      decodeCapabilities(JSON.stringify({ version: 5, daemonVersion: 'bad version', environment })),
+      decodeCapabilities(
+        JSON.stringify({
+          version: READY_CAPABILITIES_VERSION,
+          daemonVersion: 'bad version',
+          environment,
+          runtimeStatus: status,
+        }),
+      ),
     ).toThrow(ProtocolError)
+    expect(() =>
+      decodeCapabilities(
+        JSON.stringify({ version: READY_CAPABILITIES_VERSION, daemonVersion: '1.0.14', environment }),
+      ),
+    ).toThrow(/runtimeStatus must be a JSON object/)
+    expect(() =>
+      decodeCapabilities(
+        JSON.stringify({
+          version: READY_CAPABILITIES_VERSION,
+          daemonVersion: '1.0.14',
+          environment,
+          runtimeStatus: runtimeStatus('2.0.0'),
+        }),
+      ),
+    ).toThrow(/must match READY daemonVersion/)
   })
 })
 

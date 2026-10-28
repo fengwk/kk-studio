@@ -1,550 +1,617 @@
 package fun.fengwk.kkstudio.ide;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.MethodSource;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonIdeLease;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.ide.protocol.IdeAction;
 import fun.fengwk.kkstudio.ide.protocol.IdeCommand;
 import fun.fengwk.kkstudio.ide.protocol.IdeReply;
+import fun.fengwk.kkstudio.ide.protocol.IdeViewState;
+import fun.fengwk.kkstudio.ide.protocol.IdeViewSummary;
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeChangeDirectoryDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeCloseViewDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeOpenViewDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewsDTO;
 
 import java.time.Duration;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
-import java.util.stream.Stream;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * 意图：IDE 控制服务必须把 view 请求精确翻译为对应 action 的 IDE 命令，不伪造结果：Daemon 拒绝原样上报，通道不可用/超时/中断
- * 明确失败并放弃在途命令；OPEN_VIEW 还须在缺 Origin 配置、视图容量耗尽或授权失败时于任何 Daemon 副作用之前 fail-closed，成功后铸造一次性 bootstrap
- * 入口并按真实视图 生命周期通知授权。
+ * 意图：控制服务只在事件节点确认 exact 浏览器意图后下发命令；成功绑定完全采用 Daemon 回执，所有文档命令必须绑定 document+epoch， 旧 epoch 的
+ * detach/close 立即冻结本地授权且不重放不确定结果。
  */
 class EnvironmentIdeServiceImplTest {
 
   private static final EnvironmentId ENV =
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
-  private static final String VIEW = "11111111-2222-3333-4444-555555555555";
-  private static final String INSTANCE = "33333333-3333-3333-3333-333333333333";
+  private static final UUID VIEW = UUID.fromString("11111111-2222-3333-4444-555555555555");
+  private static final UUID DOCUMENT = UUID.fromString("66666666-7777-8888-9999-aaaaaaaaaaaa");
+  private static final UUID EVENT_NODE = UUID.fromString("bbbbbbbb-cccc-dddd-eeee-ffffffffffff");
+  private static final UUID CONNECTION = UUID.fromString("12345678-1234-1234-1234-123456789abc");
+  private static final UUID CLAIM = UUID.fromString("87654321-4321-4321-4321-cba987654321");
+  private static final String DAEMON_INSTANCE = "daemon-instance";
 
-  private EnvironmentIdeServiceImpl service(
-      FakeTransport transport, IdeBootstrapTicketService bootstrap, Duration timeout) {
-    return new EnvironmentIdeServiceImpl(transport, bootstrap, timeout);
-  }
+  private FakeTransport transport;
+  private FakeBrowserUse browserUse;
+  private FakeAuthorization authorization;
+  private InMemoryIdeBootstrapTicketService tickets;
+  private EnvironmentIdeServiceImpl service;
 
-  private EnvironmentIdeServiceImpl service(
-      FakeTransport transport,
-      IdeBootstrapTicketService bootstrap,
-      Duration timeout,
-      IdeViewAuthorizationListener viewAuthorization) {
-    return new EnvironmentIdeServiceImpl(transport, bootstrap, timeout, viewAuthorization);
+  @BeforeEach
+  void setUp() {
+    transport = new FakeTransport();
+    browserUse = new FakeBrowserUse();
+    authorization = new FakeAuthorization();
+    tickets = new InMemoryIdeBootstrapTicketService();
+    service =
+        new EnvironmentIdeServiceImpl(
+            transport,
+            tickets,
+            browserUse,
+            new IdeViewBindingRegistry(),
+            Duration.ofMillis(200),
+            authorization);
   }
 
   @Test
-  void openViewSendsCommandAndReturnsBootstrapEntry() {
-    FakeTransport transport = new FakeTransport();
-    transport.reply =
-        new IdeReply(true, VIEW, "/home/dev/project", "/daemon/workspaces/" + VIEW, null);
-    InMemoryIdeBootstrapTicketService bootstrap = new InMemoryIdeBootstrapTicketService();
+  void openViewUsesDaemonMetadataAndIssuesViewScopedBootstrapEntry() {
+    transport.replies.add(
+        openReply(VIEW, DOCUMENT, EVENT_NODE, CONNECTION, CLAIM, 7L, "/daemon/dir", "/daemon/ws"));
 
-    EnvironmentIdeViewDTO dto =
-        service(transport, bootstrap, Duration.ofSeconds(5))
-            .openView(ENV, openViewRequest("/home/dev/project"));
+    EnvironmentIdeViewDTO dto = service.openView(ENV, openRequest("/client/dir"));
 
-    assertEquals(IdeAction.OPEN_VIEW, transport.command.action());
-    assertEquals(VIEW, transport.command.viewId());
-    assertEquals("/home/dev/project", transport.command.directory());
-    assertEquals(ENV, transport.environment);
-    assertEquals(VIEW, dto.getViewId());
+    assertEquals(VIEW.toString(), dto.getViewId());
     assertEquals(ENV.toString(), dto.getEnvironmentId());
-    assertEquals("/home/dev/project", dto.getDirectory());
-    assertTrue(dto.getEntryUrl().startsWith("/environment-ide/" + ENV + "/__ide/bootstrap?token="));
-    // entryUrl 内的票据一次性绑定 workspace 路径。
-    String token = tokenFrom(dto.getEntryUrl());
-    IdeBootstrapTicketService.Ticket ticket = bootstrap.consume(token).orElseThrow();
-    assertEquals(ENV, ticket.environmentId());
-    assertEquals(VIEW, ticket.viewId());
-    assertEquals("/daemon/workspaces/" + VIEW, ticket.workspacePath());
-    // 入口绑定命令进入传输时的 Daemon 实例代际。
-    assertEquals(new DaemonConnectionIdentity(ENV, INSTANCE), ticket.identity());
-    assertTrue(bootstrap.consume(token).isEmpty());
-  }
+    assertEquals(DOCUMENT.toString(), dto.getDocumentId());
+    assertEquals(EVENT_NODE.toString(), dto.getEventNodeId());
+    assertEquals(CONNECTION.toString(), dto.getConnectionId());
+    assertEquals(CLAIM.toString(), dto.getClaimId());
+    assertEquals(DAEMON_INSTANCE, dto.getDaemonInstanceId());
+    assertEquals("7", dto.getBindingEpoch());
+    assertEquals("/daemon/dir", dto.getDirectory());
+    assertEquals("/daemon/ws", dto.getWorkspacePath());
+    assertEquals("OPEN", dto.getState());
+    assertTrue(
+        dto.getEntryUrl()
+            .startsWith(
+                EnvironmentIdeServiceImpl.IDE_ROUTE_PREFIX
+                    + ENV
+                    + "/"
+                    + VIEW
+                    + "/"
+                    + EnvironmentIdeServiceImpl.BOOTSTRAP_PATH
+                    + "?token="),
+        () -> "entry URL must be view scoped: " + dto.getEntryUrl());
 
-  @Test
-  void openViewFailsClosedWhenDaemonOmitsWorkspacePath() {
-    FakeTransport transport = new FakeTransport();
-    transport.reply = new IdeReply(true, VIEW, "/home/dev", null, null);
+    assertEquals(1, transport.commands.size());
+    IdeCommand command = transport.commands.get(0);
+    assertEquals(IdeAction.OPEN_VIEW, command.action());
+    assertEquals("/client/dir", command.directory());
+    assertEquals(1, browserUse.queries.size());
+    assertEquals(
+        new IntentQuery(EVENT_NODE, CONNECTION, DOCUMENT, VIEW, CLAIM), browserUse.queries.get(0));
+    assertEquals(List.of(new OpenedEvent(VIEW, 7L, "/daemon/ws")), authorization.opened);
+    assertEquals(1, tickets.pendingCount());
 
-    assertThrows(
-        AiEnvironmentIdeUnavailableException.class,
-        () ->
-            service(transport, new InMemoryIdeBootstrapTicketService(), Duration.ofSeconds(5))
-                .openView(ENV, openViewRequest("/home/dev")));
-  }
-
-  @Test
-  void changeDirectorySendsCommandWithoutEntryUrl() {
-    FakeTransport transport = new FakeTransport();
-    transport.reply = new IdeReply(true, VIEW, "/tmp", "/daemon/workspaces/" + VIEW, null);
-
-    EnvironmentIdeChangeDirectoryDTO request = new EnvironmentIdeChangeDirectoryDTO();
-    request.setDirectory("/tmp");
-    EnvironmentIdeViewDTO dto =
-        service(transport, new InMemoryIdeBootstrapTicketService(), Duration.ofSeconds(5))
-            .changeDirectory(ENV, VIEW, request);
-
-    assertEquals(IdeAction.CHANGE_DIRECTORY, transport.command.action());
-    assertEquals("/tmp", transport.command.directory());
-    assertEquals("/tmp", dto.getDirectory());
-    assertNull(dto.getEntryUrl());
-  }
-
-  @Test
-  void focusTerminalAndCloseViewSendMatchingActions() {
-    FakeTransport transport = new FakeTransport();
-    transport.reply = IdeReply.ok(VIEW, null, null);
-    EnvironmentIdeServiceImpl service =
-        service(transport, new InMemoryIdeBootstrapTicketService(), Duration.ofSeconds(5));
-
-    service.focusTerminal(ENV, VIEW);
-    assertEquals(IdeAction.FOCUS_TERMINAL, transport.command.action());
-    service.closeView(ENV, VIEW);
-    assertEquals(IdeAction.CLOSE_VIEW, transport.command.action());
-  }
-
-  @Test
-  void daemonRejectionIsSurfacedAsValidationWithDaemonMessage() {
-    FakeTransport transport = new FakeTransport();
-    transport.reply = IdeReply.failure("directory is not accessible");
-
-    AiValidationException error =
-        assertThrows(
-            AiValidationException.class,
-            () ->
-                service(transport, new InMemoryIdeBootstrapTicketService(), Duration.ofSeconds(5))
-                    .focusTerminal(ENV, VIEW));
-    assertTrue(error.getMessage().contains("directory is not accessible"));
-  }
-
-  @Test
-  void unavailableTransportMapsToIdeUnavailable() {
-    FakeTransport transport = new FakeTransport();
-    transport.requestFailure = new EnvironmentCapabilityUnavailableException("not ready");
-
-    assertThrows(
-        AiEnvironmentIdeUnavailableException.class,
-        () ->
-            service(transport, new InMemoryIdeBootstrapTicketService(), Duration.ofSeconds(5))
-                .focusTerminal(ENV, VIEW));
-  }
-
-  @Test
-  void timeoutAbandonsPendingCallAndFailsClosed() {
-    FakeTransport transport = new FakeTransport();
-    transport.leavePending = true;
-
-    AiEnvironmentIdeUnavailableException error =
-        assertThrows(
-            AiEnvironmentIdeUnavailableException.class,
-            () ->
-                service(transport, new InMemoryIdeBootstrapTicketService(), Duration.ofMillis(50))
-                    .closeView(ENV, VIEW));
-    assertTrue(error.getMessage().contains("timed out"));
-    assertEquals(List.of(transport.invocationId), transport.abandoned);
-  }
-
-  @Test
-  void disconnectFailureMapsToIdeUnavailable() {
-    FakeTransport transport = new FakeTransport();
-    transport.completeExceptionally = true;
-    transport.replyFailure = new RuntimeException("connection closed");
-
-    assertThrows(
-        AiEnvironmentIdeUnavailableException.class,
-        () ->
-            service(transport, new InMemoryIdeBootstrapTicketService(), Duration.ofSeconds(5))
-                .closeView(ENV, VIEW));
-  }
-
-  @Test
-  void invalidViewIdIsRejectedBeforeSending() {
-    FakeTransport transport = new FakeTransport();
-    transport.reply = IdeReply.ok(VIEW, null, null);
-    EnvironmentIdeServiceImpl service =
-        service(transport, new InMemoryIdeBootstrapTicketService(), Duration.ofSeconds(5));
-
-    assertThrows(AiValidationException.class, () -> service.closeView(ENV, "not-a-uuid"));
-    assertNull(transport.command);
-  }
-
-  @Test
-  void constructorRejectsNonPositiveCommandTimeout() {
-    FakeTransport transport = new FakeTransport();
-    InMemoryIdeBootstrapTicketService bootstrap = new InMemoryIdeBootstrapTicketService();
-
-    // 非正超时会让等待立刻超时并放大重试压力，构造时即拒绝。
-    assertThrows(
-        IllegalArgumentException.class, () -> service(transport, bootstrap, Duration.ZERO));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> service(transport, bootstrap, Duration.ofSeconds(-1)));
-  }
-
-  @Test
-  void defaultConstructorAppliesDocumentedCommandTimeout() {
-    FakeTransport transport = new FakeTransport();
-    transport.reply = new IdeReply(true, VIEW, "/home/dev", "/daemon/workspaces/" + VIEW, null);
-
-    EnvironmentIdeServiceImpl service =
-        new EnvironmentIdeServiceImpl(transport, new InMemoryIdeBootstrapTicketService());
-
-    assertEquals(Duration.ofSeconds(30), EnvironmentIdeServiceImpl.DEFAULT_COMMAND_TIMEOUT);
-    assertEquals(VIEW, service.openView(ENV, openViewRequest("/home/dev")).getViewId());
-  }
-
-  @Test
-  void changeDirectoryRejectsMissingDirectoryBeforeSending() {
-    FakeTransport transport = new FakeTransport();
-    transport.reply = IdeReply.ok(VIEW, "/tmp", null);
-    EnvironmentIdeServiceImpl service =
-        service(transport, new InMemoryIdeBootstrapTicketService(), Duration.ofSeconds(5));
-
-    // CHANGE_DIRECTORY 必须携带目录：缺失时类型化校验错误，且不得把命令送进传输。
-    assertThrows(
-        AiValidationException.class,
-        () -> service.changeDirectory(ENV, VIEW, changeDirectoryRequest(null)));
-    assertNull(transport.command);
-  }
-
-  /**
-   * 意图：目录是外部输入，wire 校验（空白/超长/控制字符）必须在任何传输之前翻译为类型化校验错误，不允许把 {@link IllegalArgumentException}
-   * 泄漏为未分类失败（HTTP 500），也不回显输入值。
-   */
-  @ParameterizedTest
-  @MethodSource("invalidDirectories")
-  void openViewRejectsInvalidDirectoryBeforeSending(String directory) {
-    FakeTransport transport = new FakeTransport();
-    transport.reply = new IdeReply(true, VIEW, "/home/dev", "/daemon/workspaces/" + VIEW, null);
-    EnvironmentIdeServiceImpl service =
-        service(transport, new InMemoryIdeBootstrapTicketService(), Duration.ofSeconds(5));
-
-    AiValidationException error =
-        assertThrows(
-            AiValidationException.class, () -> service.openView(ENV, openViewRequest(directory)));
-
-    assertTrue(error.getMessage().contains("directory"));
-    assertFalse(error.getMessage().contains(directory));
-    assertNull(transport.command);
-  }
-
-  /** 意图：CHANGE_DIRECTORY 的目录校验同样在传输之前完成，保持与 OPEN_VIEW 同一事实源。 */
-  @ParameterizedTest
-  @MethodSource("invalidDirectories")
-  void changeDirectoryRejectsInvalidDirectoryBeforeSending(String directory) {
-    FakeTransport transport = new FakeTransport();
-    transport.reply = IdeReply.ok(VIEW, "/tmp", null);
-    EnvironmentIdeServiceImpl service =
-        service(transport, new InMemoryIdeBootstrapTicketService(), Duration.ofSeconds(5));
-
-    AiValidationException error =
-        assertThrows(
-            AiValidationException.class,
-            () -> service.changeDirectory(ENV, VIEW, changeDirectoryRequest(directory)));
-
-    assertTrue(error.getMessage().contains("directory"));
-    assertNull(transport.command);
-  }
-
-  @Test
-  void openViewAllowsMissingDirectory() {
-    FakeTransport transport = new FakeTransport();
-    transport.reply = new IdeReply(true, VIEW, null, "/daemon/workspaces/" + VIEW, null);
-
-    EnvironmentIdeViewDTO dto =
-        service(transport, new InMemoryIdeBootstrapTicketService(), Duration.ofSeconds(5))
-            .openView(ENV, openViewRequest(null));
-
-    // 缺省目录是合法请求（由宿主校验 HOME 后决定），只是不携带目录字段。
-    assertEquals(IdeAction.OPEN_VIEW, transport.command.action());
-    assertNull(transport.command.directory());
-    assertEquals(VIEW, dto.getViewId());
-  }
-
-  @Test
-  void changeDirectoryFallsBackToRequestedValuesWhenReplyOmitsThem() {
-    FakeTransport transport = new FakeTransport();
-    transport.reply = new IdeReply(true, null, null, null, null);
-
-    EnvironmentIdeViewDTO dto =
-        service(transport, new InMemoryIdeBootstrapTicketService(), Duration.ofSeconds(5))
-            .changeDirectory(ENV, VIEW, changeDirectoryRequest("/tmp"));
-
-    // Daemon 回执缺省时沿用请求身份，不制造空 view/目录。
-    assertEquals(VIEW, dto.getViewId());
-    assertEquals("/tmp", dto.getDirectory());
-  }
-
-  @Test
-  void daemonRejectionWithoutMessageUsesFixedFallbackText() {
-    FakeTransport transport = new FakeTransport();
-    transport.reply = IdeReply.failure(null);
-
-    AiValidationException error =
-        assertThrows(
-            AiValidationException.class,
-            () ->
-                service(transport, new InMemoryIdeBootstrapTicketService(), Duration.ofSeconds(5))
-                    .focusTerminal(ENV, VIEW));
-    assertTrue(error.getMessage().contains("IDE command was rejected"));
-  }
-
-  @Test
-  void openViewFallsBackToRequestedViewIdWhenReplyOmitsIt() {
-    FakeTransport transport = new FakeTransport();
-    transport.reply = new IdeReply(true, null, "/home/dev", "/daemon/workspaces/" + VIEW, null);
-
-    EnvironmentIdeViewDTO dto =
-        service(transport, new InMemoryIdeBootstrapTicketService(), Duration.ofSeconds(5))
-            .openView(ENV, openViewRequest("/home/dev"));
-
-    assertEquals(VIEW, dto.getViewId());
-  }
-
-  @Test
-  void openViewFailsClosedWhenDaemonReturnsBlankWorkspacePath() {
-    FakeTransport transport = new FakeTransport();
-    transport.reply = new IdeReply(true, VIEW, "/home/dev", " ", null);
-
-    // 没有受管 workspace 就没有可授权的边界，不能退回未受控路径。
-    assertThrows(
-        AiEnvironmentIdeUnavailableException.class,
-        () ->
-            service(transport, new InMemoryIdeBootstrapTicketService(), Duration.ofSeconds(5))
-                .openView(ENV, openViewRequest("/home/dev")));
-  }
-
-  @Test
-  void openViewFailsClosedWhenViewCapacityIsExhausted() {
-    FakeTransport transport = new FakeTransport();
-    transport.reply = new IdeReply(true, VIEW, "/home/dev", "/daemon/workspaces/" + VIEW, null);
-    InMemoryIdeBootstrapTicketService bootstrap = new InMemoryIdeBootstrapTicketService();
-    FakeViewAuthorization authorization = new FakeViewAuthorization();
-    authorization.capacityExhausted = true;
-
-    AiEnvironmentIdeUnavailableException error =
-        assertThrows(
-            AiEnvironmentIdeUnavailableException.class,
-            () ->
-                service(transport, bootstrap, Duration.ofSeconds(5), authorization)
-                    .openView(ENV, openViewRequest("/home/dev")));
-
-    assertTrue(error.getMessage().contains("capacity"));
-    // 容量预检必须在任何 Daemon 副作用之前：不发送命令、不授权、不铸造入口票据。
-    assertEquals(1, authorization.ensureCapacityCalls);
-    assertNull(transport.command);
-    assertNull(authorization.openedViewId);
-    assertEquals(0, bootstrap.pendingCount());
-  }
-
-  @Test
-  void openViewNotifiesListenerAndIssuesBootstrapTicket() {
-    FakeTransport transport = new FakeTransport();
-    transport.reply = new IdeReply(true, VIEW, "/home/dev", "/daemon/workspaces/" + VIEW, null);
-    InMemoryIdeBootstrapTicketService bootstrap = new InMemoryIdeBootstrapTicketService();
-    FakeViewAuthorization authorization = new FakeViewAuthorization();
-
-    EnvironmentIdeViewDTO dto =
-        service(transport, bootstrap, Duration.ofSeconds(5), authorization)
-            .openView(ENV, openViewRequest("/home/dev"));
-
-    // 授权跟随真实视图生命周期，并绑定命令进入传输时的连接代际。
-    assertEquals(new DaemonConnectionIdentity(ENV, INSTANCE), authorization.openedIdentity);
-    assertEquals(VIEW, authorization.openedViewId);
-    assertEquals("/daemon/workspaces/" + VIEW, authorization.openedWorkspace);
     IdeBootstrapTicketService.Ticket ticket =
-        bootstrap.consume(tokenFrom(dto.getEntryUrl())).orElseThrow();
-    assertEquals(authorization.openedIdentity, ticket.identity());
+        tickets
+            .consume(dto.getEntryUrl().substring(dto.getEntryUrl().indexOf("token=") + 6))
+            .orElseThrow();
+    assertEquals(VIEW.toString(), ticket.viewId());
+    assertEquals(7L, ticket.bindingEpoch());
+    assertEquals("/daemon/ws", ticket.workspacePath());
   }
 
   @Test
-  void openViewFailsClosedWhenListenerRejectsOpenedView() {
-    FakeTransport transport = new FakeTransport();
-    transport.reply = new IdeReply(true, VIEW, "/home/dev", "/daemon/workspaces/" + VIEW, null);
-    InMemoryIdeBootstrapTicketService bootstrap = new InMemoryIdeBootstrapTicketService();
-    FakeViewAuthorization authorization = new FakeViewAuthorization();
-    authorization.openedRejected = true;
+  void openViewFailsClosedWithoutExactBrowserIntent() {
+    browserUse.matched = false;
+
+    assertThrows(
+        AiEnvironmentIdeUnavailableException.class, () -> service.openView(ENV, openRequest(null)));
+
+    assertTrue(transport.commands.isEmpty());
+    assertTrue(authorization.opened.isEmpty());
+    assertEquals(0, tickets.pendingCount());
+  }
+
+  @Test
+  void authorizationFailureLeavesNoRoutableBinding() {
+    authorization.failOpened = true;
+    transport.replies.add(
+        openReply(VIEW, DOCUMENT, EVENT_NODE, CONNECTION, CLAIM, 7L, "/daemon/dir", "/daemon/ws"));
+
+    assertThrows(
+        AiEnvironmentIdeUnavailableException.class, () -> service.openView(ENV, openRequest(null)));
+    assertEquals(0, tickets.pendingCount());
+    assertTrue(authorization.opened.isEmpty());
+
+    // Daemon 端已创建但授权失败的视图，即使被权威 LIST_VIEWS 快照发现，也不能进入 owner 路由缓存。
+    List<IdeViewSummary> orphan =
+        List.of(
+            summary(
+                VIEW,
+                DOCUMENT,
+                EVENT_NODE,
+                CONNECTION,
+                CLAIM,
+                7L,
+                "/daemon/dir",
+                "/daemon/ws",
+                IdeViewState.OPEN));
+    transport.replies.add(viewsReply(orphan));
+    assertTrue(service.listViews(ENV).getViews().isEmpty());
+
+    transport.replies.add(viewsReply(orphan));
+    assertThrows(
+        AiEnvironmentIdeUnavailableException.class,
+        () -> service.focusTerminal(ENV, VIEW.toString(), binding(7L)));
+    assertEquals(IdeAction.LIST_VIEWS, transport.commands.getLast().action());
+  }
+
+  @Test
+  void openViewRejectsDaemonIdentityDriftAndDoesNotAuthorize() {
+    transport.replies.add(
+        openReply(
+            UUID.fromString("99999999-2222-3333-4444-555555555555"),
+            DOCUMENT,
+            EVENT_NODE,
+            CONNECTION,
+            CLAIM,
+            7L,
+            "/daemon/dir",
+            "/daemon/ws"));
+
+    assertThrows(
+        AiEnvironmentIdeUnavailableException.class, () -> service.openView(ENV, openRequest(null)));
+
+    assertTrue(authorization.opened.isEmpty());
+    assertEquals(0, tickets.pendingCount());
+  }
+
+  @Test
+  void allBoundCommandsCarryDocumentAndEpochAndDetachFreezesTheEpoch() {
+    open();
+
+    EnvironmentIdeViewBindingDTO binding = binding(7L);
+    transport.replies.add(success(VIEW));
+    service.focusTerminal(ENV, VIEW.toString(), binding);
+    IdeCommand focus = transport.commands.getLast();
+    assertEquals(IdeAction.FOCUS_TERMINAL, focus.action());
+    assertEquals(DOCUMENT.toString(), focus.documentId());
+    assertEquals(7L, focus.bindingEpoch());
+
+    transport.replies.add(success(VIEW));
+    service.detachView(ENV, VIEW.toString(), binding);
+    IdeCommand detach = transport.commands.getLast();
+    assertEquals(IdeAction.DETACH_VIEW, detach.action());
+    assertEquals(DOCUMENT.toString(), detach.documentId());
+    assertEquals(7L, detach.bindingEpoch());
+    assertTrue(authorization.closed.contains(new Closed(VIEW, 7L)));
+
+    int before = transport.commands.size();
+    transport.replies.add(viewsReply(List.of()));
+    assertThrows(
+        AiEnvironmentIdeUnavailableException.class,
+        () -> service.focusTerminal(ENV, VIEW.toString(), binding));
+    assertEquals(before + 1, transport.commands.size());
+    assertEquals(IdeAction.LIST_VIEWS, transport.commands.getLast().action());
+  }
+
+  @Test
+  void closeRequiresDiscardAndRevokesAuthorizationOnViewGone() {
+    open();
+    EnvironmentIdeCloseViewDTO request = new EnvironmentIdeCloseViewDTO();
+    request.setDocumentId(DOCUMENT.toString());
+    request.setBindingEpoch("7");
+
+    assertThrows(
+        AiValidationException.class, () -> service.closeView(ENV, VIEW.toString(), request));
+    assertTrue(
+        transport.commands.stream().noneMatch(command -> command.action() == IdeAction.CLOSE_VIEW));
+
+    request.setDiscard(false);
+    transport.replies.add(
+        new IdeReply(
+            false,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            "VIEW_GONE",
+            "view is gone"));
+    assertThrows(
+        AiEnvironmentIdeUnavailableException.class,
+        () -> service.closeView(ENV, VIEW.toString(), request));
+
+    assertTrue(authorization.closed.contains(new Closed(VIEW, 7L)));
+    assertEquals(0, tickets.pendingCount());
+  }
+
+  @Test
+  void changeDirectoryUsesConfirmedDirectoryAndRejectsOldEpochAfterResume() {
+    open();
+    EnvironmentIdeChangeDirectoryDTO request = new EnvironmentIdeChangeDirectoryDTO();
+    request.setDocumentId(DOCUMENT.toString());
+    request.setBindingEpoch("7");
+    request.setDirectory("/next");
+    transport.replies.add(
+        new IdeReply(
+            true, VIEW, null, null, null, null, null, "/daemon/next", null, null, null, null));
+
+    EnvironmentIdeViewDTO changed = service.changeDirectory(ENV, VIEW.toString(), request);
+    assertEquals("/daemon/next", changed.getDirectory());
+
+    transport.replies.add(
+        viewsReply(
+            List.of(
+                summary(
+                    VIEW,
+                    DOCUMENT,
+                    EVENT_NODE,
+                    CONNECTION,
+                    CLAIM,
+                    8L,
+                    "/daemon/next",
+                    "/daemon/ws",
+                    IdeViewState.OPEN))));
+    service.listViews(ENV);
+    transport.replies.add(
+        viewsReply(
+            List.of(
+                summary(
+                    VIEW,
+                    DOCUMENT,
+                    EVENT_NODE,
+                    CONNECTION,
+                    CLAIM,
+                    8L,
+                    "/daemon/next",
+                    "/daemon/ws",
+                    IdeViewState.OPEN))));
+    assertThrows(
+        AiEnvironmentIdeUnavailableException.class,
+        () -> service.focusTerminal(ENV, VIEW.toString(), binding(7L)));
+    assertEquals(IdeAction.LIST_VIEWS, transport.commands.getLast().action());
+    assertTrue(
+        transport.commands.stream()
+            .noneMatch(
+                command ->
+                    command.action() == IdeAction.FOCUS_TERMINAL && command.bindingEpoch() == 7L));
+  }
+
+  @Test
+  void listViewsRebuildsRegistryAndRevokesStaleAuthorization() {
+    open();
+    transport.replies.add(
+        viewsReply(
+            List.of(
+                summary(
+                    VIEW,
+                    DOCUMENT,
+                    EVENT_NODE,
+                    CONNECTION,
+                    CLAIM,
+                    8L,
+                    "/daemon/dir",
+                    "/daemon/ws",
+                    IdeViewState.OPEN))));
+
+    EnvironmentIdeViewsDTO views = service.listViews(ENV);
+
+    assertEquals(1, views.getViews().size());
+    assertEquals("8", views.getViews().get(0).getBindingEpoch());
+    assertTrue(authorization.closed.contains(new Closed(VIEW, 7L)));
+  }
+
+  @Test
+  void daemonGenerationReplacementInvalidatesCachedBindings() {
+    open();
+    transport.identity = new DaemonConnectionIdentity(ENV, "replacement-daemon");
+    transport.replies.add(viewsReply(List.of()));
 
     assertThrows(
         AiEnvironmentIdeUnavailableException.class,
-        () ->
-            service(transport, bootstrap, Duration.ofSeconds(5), authorization)
-                .openView(ENV, openViewRequest("/home/dev")));
+        () -> service.focusTerminal(ENV, VIEW.toString(), binding(7L)));
 
-    // 授权未成立时不得伪造成功入口票据（否则未授权 workspace 仍可换 cookie）。
-    assertEquals(0, bootstrap.pendingCount());
+    assertEquals(IdeAction.LIST_VIEWS, transport.commands.getLast().action());
+    assertTrue(
+        transport.commands.stream()
+            .noneMatch(command -> command.action() == IdeAction.FOCUS_TERMINAL));
   }
 
   @Test
-  void closeViewNotifiesListenerAndRevokesIssuedTicket() {
-    FakeTransport transport = new FakeTransport();
-    transport.reply = new IdeReply(true, VIEW, "/home/dev", "/daemon/workspaces/" + VIEW, null);
-    InMemoryIdeBootstrapTicketService bootstrap = new InMemoryIdeBootstrapTicketService();
-    FakeViewAuthorization authorization = new FakeViewAuthorization();
-    EnvironmentIdeServiceImpl service =
-        service(transport, bootstrap, Duration.ofSeconds(5), authorization);
+  void unknownOutcomeIsNotReplayed() {
+    transport.neverCompletes.set(true);
 
-    String token = tokenFrom(service.openView(ENV, openViewRequest("/home/dev")).getEntryUrl());
-    assertEquals(1, bootstrap.pendingCount());
+    assertThrows(
+        AiEnvironmentIdeUnavailableException.class, () -> service.openView(ENV, openRequest(null)));
 
-    service.closeView(ENV, VIEW);
-
-    assertEquals(IdeAction.CLOSE_VIEW, transport.command.action());
-    assertEquals(new DaemonConnectionIdentity(ENV, INSTANCE), authorization.closedIdentity);
-    assertEquals(VIEW, authorization.closedViewId);
-    // 关闭后旧票据必须失效，否则同一 viewId 重开时旧入口仍能换到 cookie。
-    assertTrue(bootstrap.consume(token).isEmpty());
+    // 原 claim 超时后只追加一次 LIST_VIEWS 对账，不重发 OPEN_VIEW；对账也超时则保持不可用。
+    assertEquals(List.of(IdeAction.OPEN_VIEW, IdeAction.LIST_VIEWS), actions());
+    assertEquals(2, transport.abandoned);
   }
 
+  /** 原 claim 结果未知时只读 LIST_VIEWS 对账，不重发 OPEN_VIEW；完全匹配的回执可直接完成入口签发。 */
   @Test
-  void interruptedReplyWaitRestoresCallerInterruptAndAbandonsCommand() {
-    FakeTransport transport = new FakeTransport();
-    transport.leavePending = true;
-    EnvironmentIdeServiceImpl service =
-        service(transport, new InMemoryIdeBootstrapTicketService(), Duration.ofSeconds(30));
+  void unknownClaimReconcilesByOriginalClaimWithoutReplayingOpenView() {
+    transport.failNext.set(IdeAction.OPEN_VIEW);
+    transport.replies.add(
+        viewsReply(
+            List.of(
+                summary(
+                    VIEW,
+                    DOCUMENT,
+                    EVENT_NODE,
+                    CONNECTION,
+                    CLAIM,
+                    7L,
+                    "/daemon/dir",
+                    "/daemon/ws",
+                    IdeViewState.OPEN))));
 
-    // 等待回执的线程已被中断：CompletableFuture.get 立即抛 InterruptedException，无需猜时序。
-    Thread.currentThread().interrupt();
-    try {
-      AiEnvironmentIdeUnavailableException error =
-          assertThrows(
-              AiEnvironmentIdeUnavailableException.class, () -> service.closeView(ENV, VIEW));
+    EnvironmentIdeViewDTO dto = service.openView(ENV, openRequest(null));
 
-      assertTrue(error.getMessage().contains("interrupted"));
-      // 服务吞掉 InterruptedException 后必须恢复调用方的中断标记。
-      assertTrue(Thread.currentThread().isInterrupted());
-      // 中断等待与超时一样必须放弃在途命令，且恰好一次。
-      assertEquals(List.of(transport.invocationId), transport.abandoned);
-    } finally {
-      // 清掉本测试设置的中断标记，避免泄漏到后续测试。
-      Thread.interrupted();
-    }
+    assertEquals("7", dto.getBindingEpoch());
+    assertEquals(List.of(IdeAction.OPEN_VIEW, IdeAction.LIST_VIEWS), actions());
+    assertEquals(1, transport.abandoned);
+    assertEquals(2, browserUse.queries.size(), "claim 与对账后都必须核对 exact intent");
+    assertEquals(1, tickets.pendingCount());
   }
 
-  private static EnvironmentIdeOpenViewDTO openViewRequest(String directory) {
-    EnvironmentIdeOpenViewDTO request = new EnvironmentIdeOpenViewDTO();
-    request.setViewId(VIEW);
-    request.setDirectory(directory);
-    return request;
+  /** 对账快照里的 claim 身份漂移时保持结果不确定，不认领其它 claim 的绑定。 */
+  @Test
+  void unknownClaimWithDriftedSnapshotIsNotAdopted() {
+    transport.failNext.set(IdeAction.OPEN_VIEW);
+    transport.replies.add(
+        viewsReply(
+            List.of(
+                summary(
+                    VIEW,
+                    DOCUMENT,
+                    EVENT_NODE,
+                    CONNECTION,
+                    UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"),
+                    7L,
+                    "/daemon/dir",
+                    "/daemon/ws",
+                    IdeViewState.OPEN))));
+
+    assertThrows(
+        AiEnvironmentIdeUnavailableException.class, () -> service.openView(ENV, openRequest(null)));
+
+    assertEquals(List.of(IdeAction.OPEN_VIEW, IdeAction.LIST_VIEWS), actions());
+    assertEquals(0, tickets.pendingCount());
   }
 
-  private static EnvironmentIdeChangeDirectoryDTO changeDirectoryRequest(String directory) {
+  /** 终端/目录命令没有 claim 对账语义：超时后只失败，不得自动重发。 */
+  @Test
+  void terminalAndChangeOutcomesAreNotReplayed() {
+    open();
+    transport.failNext.set(IdeAction.FOCUS_TERMINAL);
+    assertThrows(
+        AiEnvironmentIdeUnavailableException.class,
+        () -> service.focusTerminal(ENV, VIEW.toString(), binding(7L)));
+    assertEquals(IdeAction.FOCUS_TERMINAL, transport.commands.getLast().action());
+    assertEquals(2, transport.commands.size());
+
     EnvironmentIdeChangeDirectoryDTO request = new EnvironmentIdeChangeDirectoryDTO();
+    request.setDocumentId(DOCUMENT.toString());
+    request.setBindingEpoch("7");
+    request.setDirectory("/next");
+    transport.failNext.set(IdeAction.CHANGE_DIRECTORY);
+    assertThrows(
+        AiEnvironmentIdeUnavailableException.class,
+        () -> service.changeDirectory(ENV, VIEW.toString(), request));
+    assertEquals(IdeAction.CHANGE_DIRECTORY, transport.commands.getLast().action());
+    assertEquals(3, transport.commands.size());
+    assertEquals(IdeAction.OPEN_VIEW, transport.commands.getFirst().action());
+  }
+
+  private List<IdeAction> actions() {
+    return transport.commands.stream().map(IdeCommand::action).toList();
+  }
+
+  private void open() {
+    transport.replies.add(
+        openReply(VIEW, DOCUMENT, EVENT_NODE, CONNECTION, CLAIM, 7L, "/daemon/dir", "/daemon/ws"));
+    service.openView(ENV, openRequest(null));
+  }
+
+  private static EnvironmentIdeOpenViewDTO openRequest(String directory) {
+    EnvironmentIdeOpenViewDTO request = new EnvironmentIdeOpenViewDTO();
+    request.setViewId(VIEW.toString());
+    request.setDocumentId(DOCUMENT.toString());
+    request.setEventNodeId(EVENT_NODE.toString());
+    request.setConnectionId(CONNECTION.toString());
+    request.setClaimId(CLAIM.toString());
+    request.setMode("create");
     request.setDirectory(directory);
     return request;
   }
 
-  private static String tokenFrom(String entryUrl) {
-    return entryUrl.substring(entryUrl.indexOf("token=") + "token=".length());
+  private static EnvironmentIdeViewBindingDTO binding(long epoch) {
+    EnvironmentIdeViewBindingDTO binding = new EnvironmentIdeViewBindingDTO();
+    binding.setDocumentId(DOCUMENT.toString());
+    binding.setBindingEpoch(Long.toString(epoch));
+    return binding;
   }
 
-  /** 目录输入的 wire 非法集合：空白、超过 4096 字符、含控制字符。 */
-  private static Stream<String> invalidDirectories() {
-    return Stream.of("   ", "a".repeat(4097), "/tmp/\u0001");
+  private static IdeReply openReply(
+      UUID viewId,
+      UUID documentId,
+      UUID eventNodeId,
+      UUID connectionId,
+      UUID claimId,
+      long epoch,
+      String directory,
+      String workspacePath) {
+    return new IdeReply(
+        true,
+        viewId,
+        documentId,
+        eventNodeId,
+        connectionId,
+        claimId,
+        epoch,
+        directory,
+        workspacePath,
+        null,
+        null,
+        null);
   }
 
-  /** 可编程 IDE 命令传输：记录发送的命令并立即（或延后）收敛，用于驱动控制服务的全部分支。 */
+  private static IdeReply success(UUID viewId) {
+    return new IdeReply(true, viewId, null, null, null, null, null, null, null, null, null, null);
+  }
+
+  private static IdeReply viewsReply(List<IdeViewSummary> views) {
+    return new IdeReply(true, null, null, null, null, null, null, null, null, views, null, null);
+  }
+
+  private static IdeViewSummary summary(
+      UUID viewId,
+      UUID documentId,
+      UUID eventNodeId,
+      UUID connectionId,
+      UUID claimId,
+      long epoch,
+      String directory,
+      String workspacePath,
+      IdeViewState state) {
+    return new IdeViewSummary(
+        viewId,
+        documentId,
+        eventNodeId,
+        connectionId,
+        claimId,
+        epoch,
+        directory,
+        workspacePath,
+        state);
+  }
+
+  private record IntentQuery(
+      UUID eventNodeId, UUID connectionId, UUID documentId, UUID viewId, UUID claimId) {}
+
+  private record Closed(UUID viewId, long epoch) {}
+
+  private record OpenedEvent(UUID viewId, long epoch, String workspacePath) {}
+
   private static final class FakeTransport implements IdeCommandTransport {
 
-    IdeCommand command;
-    EnvironmentId environment;
-    UUID invocationId;
-    IdeReply reply;
-    RuntimeException requestFailure;
-    boolean completeExceptionally;
-    RuntimeException replyFailure;
-    boolean leavePending;
-    final List<UUID> abandoned = new ArrayList<>();
+    private final List<IdeCommand> commands = new ArrayList<>();
+    private final Deque<IdeReply> replies = new ArrayDeque<>();
+    private final AtomicBoolean neverCompletes = new AtomicBoolean();
+    private final AtomicReference<IdeAction> failNext = new AtomicReference<>();
+    private DaemonConnectionIdentity identity = new DaemonConnectionIdentity(ENV, DAEMON_INSTANCE);
+    private int abandoned;
 
     @Override
-    public IdeRequest requestIde(EnvironmentId environmentId, IdeCommand ideCommand) {
-      if (requestFailure != null) {
-        throw requestFailure;
-      }
-      this.environment = environmentId;
-      this.command = ideCommand;
-      this.invocationId = UUID.randomUUID();
+    public IdeRequest requestIde(EnvironmentId environmentId, IdeCommand command) {
+      commands.add(command);
       CompletableFuture<IdeReply> future = new CompletableFuture<>();
-      if (!leavePending) {
-        if (completeExceptionally) {
-          future.completeExceptionally(replyFailure);
-        } else {
-          future.complete(reply);
-        }
+      IdeAction failAction = failNext.get();
+      if (failAction == command.action() && failNext.compareAndSet(failAction, null)) {
+        // 只让指定命令一次结果不确定；后续对账命令使用脚本化回执。
+      } else if (!neverCompletes.get()) {
+        future.complete(replies.removeFirst());
       }
-      DaemonConnectionIdentity identity = new DaemonConnectionIdentity(environmentId, INSTANCE);
-      return new IdeRequest(identity, invocationId, future);
-    }
-
-    @Override
-    public void abandonIde(UUID id) {
-      abandoned.add(id);
+      return new IdeRequest(identity, UUID.randomUUID(), future);
     }
 
     @Override
     public Optional<DaemonConnectionIdentity> connectionIdentity(EnvironmentId environmentId) {
-      return Optional.of(new DaemonConnectionIdentity(environmentId, INSTANCE));
+      return Optional.of(identity);
+    }
+
+    @Override
+    public void sendIdeLease(
+        EnvironmentId environmentId,
+        DaemonConnectionIdentity expectedIdentity,
+        DaemonIdeLease lease) {
+      throw new AssertionError("control service must not send leases");
+    }
+
+    @Override
+    public void abandonIde(UUID invocationId) {
+      abandoned++;
     }
   }
 
-  /** 可编程视图授权监听器：记录回调入参，并可模拟容量耗尽与授权失败。 */
-  private static final class FakeViewAuthorization implements IdeViewAuthorizationListener {
+  private static final class FakeBrowserUse implements IdeBrowserUseGateway {
 
-    boolean capacityExhausted;
-    boolean openedRejected;
-    int ensureCapacityCalls;
-    DaemonConnectionIdentity openedIdentity;
-    String openedViewId;
-    String openedWorkspace;
-    DaemonConnectionIdentity closedIdentity;
-    String closedViewId;
+    private final List<IntentQuery> queries = new ArrayList<>();
+    private boolean matched = true;
+
+    @Override
+    public boolean findExactIntent(
+        UUID eventNodeId,
+        UUID connectionId,
+        UUID documentId,
+        EnvironmentId environmentId,
+        UUID viewId,
+        UUID claimId) {
+      queries.add(new IntentQuery(eventNodeId, connectionId, documentId, viewId, claimId));
+      return matched;
+    }
+
+    @Override
+    public Optional<Proofs> activeBoundProofs(
+        UUID eventNodeId, UUID connectionId, UUID documentId) {
+      return Optional.empty();
+    }
+  }
+
+  private static final class FakeAuthorization implements IdeViewAuthorizationListener {
+
+    private final List<OpenedEvent> opened = new ArrayList<>();
+    private final List<Closed> closed = new ArrayList<>();
+    private boolean capacityExhausted;
+    private boolean failOpened;
 
     @Override
     public void ensureViewCapacity(EnvironmentId environmentId) {
-      ensureCapacityCalls++;
       if (capacityExhausted) {
-        throw new IllegalStateException("view capacity is exhausted");
+        throw new IllegalStateException("capacity exhausted");
       }
     }
 
     @Override
-    public void viewOpened(DaemonConnectionIdentity identity, String viewId, String workspacePath) {
-      if (openedRejected) {
-        throw new IllegalStateException("view is no longer authorizable");
+    public void viewOpened(
+        DaemonConnectionIdentity identity, String viewId, long bindingEpoch, String workspacePath) {
+      if (failOpened) {
+        throw new IllegalStateException("authorization capacity exhausted");
       }
-      openedIdentity = identity;
-      openedViewId = viewId;
-      openedWorkspace = workspacePath;
+      opened.add(new OpenedEvent(UUID.fromString(viewId), bindingEpoch, workspacePath));
     }
 
     @Override
-    public void viewClosed(DaemonConnectionIdentity identity, String viewId) {
-      closedIdentity = identity;
-      closedViewId = viewId;
+    public void viewClosed(DaemonConnectionIdentity identity, String viewId, long bindingEpoch) {
+      closed.add(new Closed(UUID.fromString(viewId), bindingEpoch));
     }
   }
 }

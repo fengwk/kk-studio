@@ -9,17 +9,19 @@ import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeChangeDirectoryDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeCloseViewDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeOpenViewDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewsDTO;
 
 import java.util.Objects;
 
 /**
- * {@link EnvironmentIdeService} 的跨节点组合实现：按当前 owner 快照决定本地交付还是单跳内部转发，不改变 PG 不含字节设计。
+ * {@link EnvironmentIdeService} 的跨节点组合实现：按当前 owner 快照决定本地交付还是单跳内部转发。
  *
- * <p>本地 owner 直接调用同一 JVM 的 {@link EnvironmentIdeServiceImpl}（不会递归回组合实现）；远端 owner 最多一次认证 HTTP 转发到目标的
- * 内部 REST，绝不自动重放，失败即上抛不可用。无 READY/租约、注册过期或本节点缺少内部配置时 {@link ClusterNodeRegistry#route} 返回空， 请求在任何
- * Daemon 副作用之前明确不可用。
+ * <p>本地 owner 直接调用同一 JVM 的 {@link EnvironmentIdeServiceImpl}；远端 owner 最多一次认证 HTTP 转发到目标的内部
+ * REST，绝不自动重放。 浏览器请求可以落在第三节点，claim 前的事件节点核对在 owner 完成。
  */
 public final class ClusterEnvironmentIdeService implements EnvironmentIdeService {
 
@@ -60,27 +62,55 @@ public final class ClusterEnvironmentIdeService implements EnvironmentIdeService
   }
 
   @Override
-  public void focusTerminal(EnvironmentId environmentId, String viewId) {
+  public void focusTerminal(
+      EnvironmentId environmentId, String viewId, EnvironmentIdeViewBindingDTO request) {
     Objects.requireNonNull(environmentId, "environmentId");
+    Objects.requireNonNull(request, "request");
     String parsedViewId = parseViewId(viewId);
     ClusterOwnerRoute route = requireRoute(environmentId);
     if (route.local()) {
-      local.focusTerminal(environmentId, parsedViewId);
+      local.focusTerminal(environmentId, parsedViewId, request);
       return;
     }
-    client.focusTerminal(environmentId, route, parsedViewId);
+    client.focusTerminal(environmentId, route, parsedViewId, request);
   }
 
   @Override
-  public void closeView(EnvironmentId environmentId, String viewId) {
+  public void closeView(
+      EnvironmentId environmentId, String viewId, EnvironmentIdeCloseViewDTO request) {
     Objects.requireNonNull(environmentId, "environmentId");
+    Objects.requireNonNull(request, "request");
     String parsedViewId = parseViewId(viewId);
     ClusterOwnerRoute route = requireRoute(environmentId);
     if (route.local()) {
-      local.closeView(environmentId, parsedViewId);
+      local.closeView(environmentId, parsedViewId, request);
       return;
     }
-    client.closeView(environmentId, route, parsedViewId);
+    client.closeView(environmentId, route, parsedViewId, request);
+  }
+
+  @Override
+  public void detachView(
+      EnvironmentId environmentId, String viewId, EnvironmentIdeViewBindingDTO request) {
+    Objects.requireNonNull(environmentId, "environmentId");
+    Objects.requireNonNull(request, "request");
+    String parsedViewId = parseViewId(viewId);
+    ClusterOwnerRoute route = requireRoute(environmentId);
+    if (route.local()) {
+      local.detachView(environmentId, parsedViewId, request);
+      return;
+    }
+    client.detachView(environmentId, route, parsedViewId, request);
+  }
+
+  @Override
+  public EnvironmentIdeViewsDTO listViews(EnvironmentId environmentId) {
+    Objects.requireNonNull(environmentId, "environmentId");
+    ClusterOwnerRoute route = requireRoute(environmentId);
+    if (route.local()) {
+      return local.listViews(environmentId);
+    }
+    return client.listViews(environmentId, route);
   }
 
   private ClusterOwnerRoute requireRoute(EnvironmentId environmentId) {

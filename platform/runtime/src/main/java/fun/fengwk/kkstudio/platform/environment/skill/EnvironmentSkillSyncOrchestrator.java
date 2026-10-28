@@ -262,7 +262,7 @@ public class EnvironmentSkillSyncOrchestrator {
       EnvironmentId environmentId, UUID leaseToken, String level, String type, String message) {
     try {
       boolean recorded =
-          environmentRegistry.recordSkillEvent(
+          environmentRegistry.recordEvent(
               environmentId,
               leaseToken,
               new EnvironmentEvent(clock.instant(), level, type, message));

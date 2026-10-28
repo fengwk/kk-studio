@@ -45,6 +45,10 @@ public final class IdeInternalPaths {
     return viewsPath(environmentId) + "/" + viewId + "/terminal";
   }
 
+  public static String detachPath(EnvironmentId environmentId, String viewId) {
+    return viewsPath(environmentId) + "/" + viewId + "/detach";
+  }
+
   public static String viewPath(EnvironmentId environmentId, String viewId) {
     return viewsPath(environmentId) + "/" + viewId;
   }

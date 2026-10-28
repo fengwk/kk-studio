@@ -5,6 +5,8 @@ public enum DaemonMessageType {
   HELLO,
   READY,
   HEARTBEAT,
+  /** Daemon 在关键状态变化时立即上报的完整 runtimeStatus；不带 invocationId。 */
+  RUNTIME_STATUS,
   STARTED,
   PROGRESS,
   COMPLETED,
@@ -25,5 +27,9 @@ public enum DaemonMessageType {
   UPDATE_RESULT,
   IDE_COMMAND,
   IDE_RESULT,
+  /** Server 下发的受控数据连接绑定；不带 invocationId。 */
+  DATA_BIND,
+  /** Server 下发的批量 IDE 使用证明；不带 invocationId。 */
+  IDE_LEASE,
   ERROR
 }

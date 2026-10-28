@@ -17,9 +17,12 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
+import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentInstallConfigs;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentService;
 import fun.fengwk.kkstudio.platform.environment.update.EnvironmentUpdateService;
+import fun.fengwk.kkstudio.platform.error.AiEnvironmentUnavailableException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCardDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCreateDTO;
@@ -27,7 +30,9 @@ import fun.fengwk.kkstudio.share.ai.environment.EnvironmentEventDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallCodeDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallCodeRequestDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRotateTokenDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentUpdateDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRuntimeStatusDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentUpdateStartDTO;
+import fun.fengwk.kkstudio.web.environment.cluster.EnvironmentRuntimeOwnerClient;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -38,7 +43,8 @@ import java.util.Map;
  *
  * <p>{@code registrationToken} 仅在 create、rotate-token 和经安装 code 授权的脚本响应中返回；这些响应均带 {@code
  * Cache-Control: no-store}，避免敏感凭据进入 HTTP 缓存。列表与普通详情永不返回 token。最近一次 READY 的宿主 metadata 直接随 Card
- * 返回，因此没有独立端点；最近 200 条以内的运维事件走只读 events 端点，Card 只投影最近一条 WARN/ERROR。
+ * 返回，因此没有独立端点；最近 200 条以内的运维事件走只读 events 端点，Card 只投影最近一条 WARN/ERROR。当前 Daemon 运行版本与更新进度走 runtime
+ * 端点，不在 Card 上保留历史更新任务。
  */
 @AllArgsConstructor
 @RequestMapping("/api/environments")
@@ -51,15 +57,17 @@ public class StudioEnvironmentController {
 
   private final EnvironmentService environmentService;
   private final EnvironmentUpdateService environmentUpdateService;
+  private final ClusterNodeRegistry clusterNodeRegistry;
+  private final EnvironmentRuntimeOwnerClient runtimeOwnerClient;
 
   @GetMapping
   public Result<List<EnvironmentCardDTO>> listEnvironments() {
-    return Results.ok(environmentService.list().stream().map(this::withUpdate).toList());
+    return Results.ok(environmentService.list());
   }
 
   @GetMapping("/{environmentId}")
   public Result<EnvironmentCardDTO> getEnvironment(@PathVariable String environmentId) {
-    return Results.ok(withUpdate(environmentService.get(parseEnvironmentId(environmentId))));
+    return Results.ok(environmentService.get(parseEnvironmentId(environmentId)));
   }
 
   @PostMapping
@@ -76,26 +84,27 @@ public class StudioEnvironmentController {
   }
 
   /**
-   * 只读该 Environment 最近一次受管更新操作；从未更新时 body 为 null。
+   * 读取当前运行快照：owner 返回 revision/status；没有本代 READY 快照时返回明确的 unavailable 错误，绝不伪造 update=null。
    *
-   * <p>它是持久事实投影：不触发任何探测，也不改变准入。
+   * <p>非 owner 请求经内部 HMAC 单跳到 owner；不缓存正文，也不在 Server 持久化进度。
    */
-  @GetMapping("/{environmentId}/update")
-  public Result<EnvironmentUpdateDTO> getEnvironmentUpdate(@PathVariable String environmentId) {
-    return Results.ok(
-        environmentUpdateService.describe(parseEnvironmentId(environmentId)).orElse(null));
+  @GetMapping("/{environmentId}/runtime")
+  public Result<EnvironmentRuntimeStatusDTO> getEnvironmentRuntime(
+      @PathVariable String environmentId) {
+    EnvironmentId id = parseEnvironmentId(environmentId);
+    return Results.ok(runtimeStatus(id));
   }
 
   /**
    * 发起一次受管 Daemon 更新：目标版本由平台固定官方发布决定，请求体不接受版本或 URL。
    *
-   * <p>这是专用管理路径（不是 Agent 工具，也不经 process.exec）；目标不可用、已有更新在途或存在在途调用/工作时以冲突拒绝。
+   * <p>返回当前运行快照；Server 不插入任务行。目标不可用、已有更新在途或存在在途调用/工作时以冲突拒绝。
    */
   @PostMapping("/{environmentId}/update")
-  public Result<EnvironmentCardDTO> startEnvironmentUpdate(@PathVariable String environmentId) {
+  public Result<EnvironmentUpdateStartDTO> startEnvironmentUpdate(
+      @PathVariable String environmentId) {
     EnvironmentId id = parseEnvironmentId(environmentId);
-    environmentUpdateService.startUpdate(id);
-    return Results.ok(withUpdate(environmentService.get(id)));
+    return Results.ok(startUpdate(id));
   }
 
   /** 签发五分钟安装 code；校验当前版本和已保存设置，不写环境状态。 */
@@ -155,10 +164,31 @@ public class StudioEnvironmentController {
     }
   }
 
-  /** 在稳定 Card 上叠加最近一次更新投影：更新事实持久在 operation 行，Card 只做只读合并，不改变任何 Environment 状态。 */
-  private EnvironmentCardDTO withUpdate(EnvironmentCardDTO card) {
-    environmentUpdateService.describe(EnvironmentId.parse(card.getId())).ifPresent(card::setUpdate);
-    return card;
+  /** owner 单跳：本节点为 READY owner 时直接读取本地缓存，否则经内部 HMAC 调 owner；无路由即明确 unavailable。 */
+  private EnvironmentRuntimeStatusDTO runtimeStatus(EnvironmentId environmentId) {
+    ClusterOwnerRoute route = requireOwnerRoute(environmentId);
+    if (route.local()) {
+      return environmentUpdateService.runtimeStatus(environmentId);
+    }
+    return runtimeOwnerClient.runtimeStatus(route, environmentId);
+  }
+
+  /** owner 单跳发起更新；只在 READY owner 上执行一次严格准入，不向其它节点扇出。 */
+  private EnvironmentUpdateStartDTO startUpdate(EnvironmentId environmentId) {
+    ClusterOwnerRoute route = requireOwnerRoute(environmentId);
+    if (route.local()) {
+      return environmentUpdateService.startUpdate(environmentId);
+    }
+    return runtimeOwnerClient.startUpdate(route, environmentId);
+  }
+
+  private ClusterOwnerRoute requireOwnerRoute(EnvironmentId environmentId) {
+    return clusterNodeRegistry
+        .route(environmentId)
+        .orElseThrow(
+            () ->
+                new AiEnvironmentUnavailableException(
+                    "environment has no current READY owner route"));
   }
 
   /** 脚本按原文字节返回，禁止缓存，并阻止浏览器按附件内容嗅探。 */

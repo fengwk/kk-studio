@@ -11,8 +11,11 @@ import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeChangeDirectoryDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeCloseViewDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeOpenViewDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewsDTO;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -116,12 +119,37 @@ public class IdeClusterClient {
         EnvironmentIdeViewDTO.class);
   }
 
-  public void focusTerminal(EnvironmentId environmentId, ClusterOwnerRoute owner, String viewId) {
-    exchange("POST", IdeInternalPaths.terminalPath(environmentId, viewId), owner, null, null);
+  public EnvironmentIdeViewsDTO listViews(EnvironmentId environmentId, ClusterOwnerRoute owner) {
+    return exchange(
+        "GET",
+        IdeInternalPaths.viewsPath(environmentId),
+        owner,
+        null,
+        EnvironmentIdeViewsDTO.class);
   }
 
-  public void closeView(EnvironmentId environmentId, ClusterOwnerRoute owner, String viewId) {
-    exchange("DELETE", IdeInternalPaths.viewPath(environmentId, viewId), owner, null, null);
+  public void focusTerminal(
+      EnvironmentId environmentId,
+      ClusterOwnerRoute owner,
+      String viewId,
+      EnvironmentIdeViewBindingDTO request) {
+    exchange("POST", IdeInternalPaths.terminalPath(environmentId, viewId), owner, request, null);
+  }
+
+  public void closeView(
+      EnvironmentId environmentId,
+      ClusterOwnerRoute owner,
+      String viewId,
+      EnvironmentIdeCloseViewDTO request) {
+    exchange("DELETE", IdeInternalPaths.viewPath(environmentId, viewId), owner, request, null);
+  }
+
+  public void detachView(
+      EnvironmentId environmentId,
+      ClusterOwnerRoute owner,
+      String viewId,
+      EnvironmentIdeViewBindingDTO request) {
+    exchange("POST", IdeInternalPaths.detachPath(environmentId, viewId), owner, request, null);
   }
 
   private <T> T exchange(

@@ -405,7 +405,7 @@ Daemon 在同一准入门闩下检查并进入更新：没有未收敛普通执�
 按四个可验收的交付推进：
 
 1. **Environment 与更新**：事务、Schema、runtime snapshot 和更新器互斥同时完成，删除更新历史查询及“最近更新任务”UI；已有无进展下载修复作为该行为的一部分。
-2. **数据通道**：先冻结 codec golden fixtures，再同时实现 Java/Node、总量背压和多节点桥接；替换 per-exchange `OPEN_STREAM`、配对表和单流物理关闭成功语义。
+2. **数据通道**：Java/Node 共用 mux codec golden fixtures，已实现总量背压与多节点桥接；不再使用 per-exchange 物理连接、配对表或单流物理关闭语义。
 3. **受管 IDE 生命周期**：先交付 code-server 精确资源管理接口，再接入 Daemon 视图租约/回收和视图作用域网关，不能只做前端定时删除。
 4. **tab 面板与状态**：全局面板、session/local 双写、恢复竞争和页面交互一起更新。同步 i18n、API 契约、浏览器矩阵及操作文档。
 

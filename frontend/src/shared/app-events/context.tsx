@@ -2,6 +2,7 @@
 import { createContext, useContext, useEffect, useState, type PropsWithChildren } from 'react'
 import { createApplicationEventUrl, type ApplicationEventSocketFactory } from '@/shared/app-events/connection'
 import { ApplicationEventManager } from '@/shared/app-events/manager'
+import type { ApplicationEventConnectionIdentity } from '@/shared/app-events/protocol'
 
 const ApplicationEventContext = createContext<ApplicationEventManager | null>(null)
 
@@ -43,4 +44,17 @@ export function useApplicationEvents(): ApplicationEventManager {
     throw new Error('ApplicationEventProvider is required')
   }
   return manager
+}
+
+/**
+ * 当前应用事件连接的 eventNodeId/connectionId；尚未收到 connected 或断线时为 null。
+ * 仅用于全局 IDE 面板的关联与使用登记，不是认证凭据。
+ */
+export function useApplicationEventIdentity(): ApplicationEventConnectionIdentity | null {
+  const manager = useApplicationEvents()
+  const [identity, setIdentity] = useState<ApplicationEventConnectionIdentity | null>(() =>
+    manager.getIdentity(),
+  )
+  useEffect(() => manager.subscribeIdentity(setIdentity), [manager])
+  return identity
 }

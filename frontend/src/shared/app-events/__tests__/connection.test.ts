@@ -6,7 +6,7 @@ import {
 import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
 import type { ApplicationEventServerMessage } from '@/shared/app-events/protocol'
 
-const URL = 'ws://test/api/events/v1'
+const URL = 'ws://test/api/events/v2'
 const THREAD_ID = '11111111-2222-4333-8444-555555555555'
 const CANVAS_ID = 'cccccccc-0000-4000-8000-000000000001'
 
@@ -85,15 +85,15 @@ describe('ApplicationEventConnection', () => {
     const { connection, harness } = openConnection()
     connection.connect()
     expect(
-      connection.send({ version: 1, type: 'subscribe', resource: { kind: 'thread', id: THREAD_ID } }),
+      connection.send({ version: 2, type: 'subscribe', resource: { kind: 'thread', id: THREAD_ID } }),
     ).toBe(false)
 
     const socket = harness.openLatest()
     expect(
-      connection.send({ version: 1, type: 'unsubscribe', resource: { kind: 'canvas', id: CANVAS_ID } }),
+      connection.send({ version: 2, type: 'unsubscribe', resource: { kind: 'canvas', id: CANVAS_ID } }),
     ).toBe(true)
     expect(socket.sentMessages()).toEqual([
-      { version: 1, type: 'unsubscribe', resource: { kind: 'canvas', id: CANVAS_ID } },
+      { version: 2, type: 'unsubscribe', resource: { kind: 'canvas', id: CANVAS_ID } },
     ])
   })
 
@@ -106,10 +106,10 @@ describe('ApplicationEventConnection', () => {
 
     // 异常绝不逃逸到调用方（React effect）。
     expect(() =>
-      connection.send({ version: 1, type: 'subscribe', resource: { kind: 'thread', id: THREAD_ID } }),
+      connection.send({ version: 2, type: 'subscribe', resource: { kind: 'thread', id: THREAD_ID } }),
     ).not.toThrow()
     expect(
-      connection.send({ version: 1, type: 'subscribe', resource: { kind: 'thread', id: THREAD_ID } }),
+      connection.send({ version: 2, type: 'subscribe', resource: { kind: 'thread', id: THREAD_ID } }),
     ).toBe(false)
     // close 是权威清理点：触发统一重连路径。
     expect(socket.closed).toBe(true)
@@ -295,7 +295,7 @@ describe('ApplicationEventConnection', () => {
     let sent: boolean | undefined
     expect(() => {
       sent = connection.send({
-        version: 1,
+        version: 2,
         type: 'subscribe',
         resource: { kind: 'thread', id: THREAD_ID },
       })
@@ -373,10 +373,10 @@ describe('ApplicationEventConnection', () => {
 })
 
 describe('createApplicationEventUrl', () => {
-  it('builds ws://<origin>/api/events/v1 and clears search/hash', () => {
+  it('builds ws://<origin>/api/events/v2 and clears search/hash', () => {
     window.history.replaceState({}, '', '/chats/abc?session=1#top')
     const url = createApplicationEventUrl()
-    expect(url).toBe(`ws://${window.location.host}/api/events/v1`)
+    expect(url).toBe(`ws://${window.location.host}/api/events/v2`)
     expect(url).not.toContain('?')
     expect(url).not.toContain('#')
   })

@@ -23,14 +23,18 @@ import fun.fengwk.kkstudio.web.environment.cluster.ClusterInternalRequests;
 
 import java.io.IOException;
 import java.util.Map;
+import java.util.UUID;
 
 /**
- * 跨节点浏览器 HTTP 数据面的 owner 入口：{@code /internal/environment-ide/{env}/http?path=<原始path/query>}。
+ * 跨节点浏览器数据面的 owner HTTP 入口。
  *
- * <p>安全顺序固定为「认证 → 目标解析 → 本节点 owner 核对 → 还原原始 path → 数据面」：HMAC 覆盖 method 与完整内部 path/query，任何校验都在读取
- * 请求体之前完成，因此未认证的大请求体不会被解析、也不会触发任何 Daemon 副作用。本节点不是 READY owner（陈旧/已接管）时以 409 未受理返回， 绝不递归转发、绝不自动重放。
+ * <ul>
+ *   <li>{@code /internal/environment-ide/{env}/data-http?viewId=...&path=...}：视图作用域数据流；
+ *   <li>{@code /internal/environment-ide/{env}/http?path=...}：既有 bootstrap/session 管理路径。
+ * </ul>
  *
- * <p>请求体与响应体都由数据面流式搬运（bootstrap 跳转只回 303 与 Set-Cookie，会话探测只回状态码），不整包缓冲、不落 SQL/PG。
+ * <p>安全顺序固定为「认证 → 目标解析 → 本节点 owner 核对 → 数据面」：HMAC 覆盖 method 与完整内部 path/query，任何校验都在读取请求体之前 完成。本节点不是
+ * READY owner 时返回 409，绝不递归转发、绝不自动重放。
  */
 @Slf4j
 @RestController
@@ -55,6 +59,43 @@ public final class IdeInternalDataPlaneController {
 
   @RequestMapping(
       value =
+          IdeInternalPaths.INTERNAL_IDE_PREFIX
+              + "/{environmentId}"
+              + IdeDataInternalPaths.DATA_HTTP_SUFFIX,
+      method = {
+        RequestMethod.GET,
+        RequestMethod.POST,
+        RequestMethod.PUT,
+        RequestMethod.PATCH,
+        RequestMethod.DELETE,
+        RequestMethod.HEAD
+      })
+  public void dataHttp(
+      @PathVariable String environmentId, HttpServletRequest request, HttpServletResponse response)
+      throws IOException {
+    authentication.verify(
+        request.getMethod(),
+        ClusterInternalRequests.canonicalPath(request),
+        ClusterInternalRequests.authHeaders(request));
+    EnvironmentId environment = parseEnvironmentId(environmentId);
+    requireLocalOwner(environment);
+    UUID viewId = requireViewId(request);
+    String rawPathAndQuery = requirePathParameter(request);
+    IdeForwardedRequest forwarded = IdeForwardedRequest.of(request, rawPathAndQuery);
+    String path = pathOf(rawPathAndQuery);
+    if (BOOTSTRAP_PATH.equals(path)) {
+      dataPlane.handleLocalBootstrap(environment, viewId, forwarded, response);
+      return;
+    }
+    if (SESSION_PATH.equals(path)) {
+      dataPlane.handleLocalSession(environment, viewId, forwarded, response);
+      return;
+    }
+    dataPlane.handleInternalHttp(environment, viewId, rawPathAndQuery, forwarded, response);
+  }
+
+  @RequestMapping(
+      value =
           IdeInternalPaths.INTERNAL_IDE_PREFIX + "/{environmentId}" + IdeInternalPaths.HTTP_SUFFIX,
       method = {
         RequestMethod.GET,
@@ -64,7 +105,7 @@ public final class IdeInternalDataPlaneController {
         RequestMethod.DELETE,
         RequestMethod.HEAD
       })
-  public void http(
+  public void legacyHttp(
       @PathVariable String environmentId, HttpServletRequest request, HttpServletResponse response)
       throws IOException {
     authentication.verify(
@@ -74,18 +115,7 @@ public final class IdeInternalDataPlaneController {
     EnvironmentId environment = parseEnvironmentId(environmentId);
     requireLocalOwner(environment);
     String rawPathAndQuery = requirePathParameter(request);
-    IdeForwardedRequest forwarded = IdeForwardedRequest.of(request, rawPathAndQuery);
-    String path = pathOf(rawPathAndQuery);
-    if (BOOTSTRAP_PATH.equals(path)) {
-      // bootstrap 消费（一次性票据 + Set-Cookie + 跳转）同样只在 owner 执行。
-      dataPlane.handleBootstrap(environment, forwarded, response);
-      return;
-    }
-    if (SESSION_PATH.equals(path)) {
-      dataPlane.handleSession(environment, rawPathAndQuery, forwarded, response);
-      return;
-    }
-    dataPlane.handleInternalHttp(environment, rawPathAndQuery, forwarded, response);
+    throw new AiValidationException("environment", "legacy internal IDE path is not supported");
   }
 
   private static String pathOf(String rawPathAndQuery) {
@@ -95,11 +125,27 @@ public final class IdeInternalDataPlaneController {
 
   /** 原始 path 必须存在；缺失即 fail-closed（认证通过也不放行）。 */
   private static String requirePathParameter(HttpServletRequest request) {
-    String rawPathAndQuery = request.getParameter(IdeInternalPaths.PATH_PARAMETER);
+    String rawPathAndQuery = request.getParameter(IdeDataInternalPaths.PATH_PARAMETER);
     if (rawPathAndQuery == null || rawPathAndQuery.isEmpty() || !rawPathAndQuery.startsWith("/")) {
       throw new AiValidationException("environment", "internal IDE path is invalid");
     }
     return rawPathAndQuery;
+  }
+
+  private static UUID requireViewId(HttpServletRequest request) {
+    String value = request.getParameter(IdeDataInternalPaths.VIEW_ID_PARAMETER);
+    if (value == null) {
+      throw new AiValidationException("environment", "internal IDE viewId is missing");
+    }
+    try {
+      UUID parsed = UUID.fromString(value);
+      if (!parsed.toString().equals(value)) {
+        throw new IllegalArgumentException("viewId is not canonical");
+      }
+      return parsed;
+    } catch (IllegalArgumentException error) {
+      throw new AiValidationException("environment", "internal IDE viewId is invalid");
+    }
   }
 
   private void requireLocalOwner(EnvironmentId environmentId) {

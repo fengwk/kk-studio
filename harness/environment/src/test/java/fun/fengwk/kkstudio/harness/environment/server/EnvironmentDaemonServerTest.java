@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.environment.server;
 
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.CALL_ONE;
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.CALL_TWO;
+import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.DAEMON_VERSION;
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.ENVIRONMENT_ID;
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.INSTANCE_ID;
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.OTHER_ENVIRONMENT_ID;
@@ -11,6 +12,7 @@ import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonSe
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.capabilityRequest;
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.completedPayload;
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.encode;
+import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.heartbeatPayload;
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.helloPayload;
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.partialPayload;
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.readyPayload;
@@ -43,14 +45,19 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityS
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTerminationCause;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonArchitecture;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonDataBind;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelope;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonIdeLease;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceTransferCodec;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonRuntimeSnapshot;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonRuntimeStatus;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateArtifact;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateCommand;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdatePhase;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateProgress;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateResult;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateResultCodec;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.FakeChannel;
@@ -58,6 +65,7 @@ import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTes
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.RecordingListener;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.SerialListener;
 
+import java.net.URI;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -1828,7 +1836,7 @@ class EnvironmentDaemonServerTest {
 
     // 旧代际已解绑：迟到帧被直接丢弃，不产生协议错误帧，也不影响新代际。
     int secondEnvelopes = second.envelopes().size();
-    fixture.receive(first, DaemonMessageType.HEARTBEAT, null, "{}");
+    fixture.receive(first, DaemonMessageType.HEARTBEAT, null, heartbeatPayload());
     assertEquals(secondEnvelopes, second.envelopes().size());
     assertTrue(second.isOpen());
     assertTrue(fixture.server.isReady(ENVIRONMENT_ID));
@@ -1841,7 +1849,7 @@ class EnvironmentDaemonServerTest {
     FakeChannel channel = fixture.connectReady("channel-fence-lost");
     fixture.leaseStore.heartbeatResult = false;
 
-    fixture.receive(channel, DaemonMessageType.HEARTBEAT, null, "{}");
+    fixture.receive(channel, DaemonMessageType.HEARTBEAT, null, heartbeatPayload());
 
     assertTrue(channel.closed());
     assertEquals(DaemonMessageType.ERROR, channel.lastEnvelope().messageType());
@@ -1855,12 +1863,12 @@ class EnvironmentDaemonServerTest {
     assertEquals(List.of(DaemonMessageType.WELCOME), channel.messageTypes(), "建连只通告一次策略");
 
     // 设置未变：心跳不得产生策略帧。
-    fixture.receive(channel, DaemonMessageType.HEARTBEAT, null, "{}");
+    fixture.receive(channel, DaemonMessageType.HEARTBEAT, null, heartbeatPayload());
     assertEquals(0, channel.countOf(DaemonMessageType.TEMPORARY_RESOURCE_POLICY));
 
     // 设置热更后，下一次心跳把当前策略推送给已 READY 连接。
     fixture.updateSettings(1L, 2L);
-    fixture.receive(channel, DaemonMessageType.HEARTBEAT, null, "{}");
+    fixture.receive(channel, DaemonMessageType.HEARTBEAT, null, heartbeatPayload());
 
     assertEquals(1, channel.countOf(DaemonMessageType.TEMPORARY_RESOURCE_POLICY));
     DaemonEnvelope policy =
@@ -1877,7 +1885,7 @@ class EnvironmentDaemonServerTest {
         policy.payloadJson());
 
     // 已送达的策略不再重复推送。
-    fixture.receive(channel, DaemonMessageType.HEARTBEAT, null, "{}");
+    fixture.receive(channel, DaemonMessageType.HEARTBEAT, null, heartbeatPayload());
     assertEquals(1, channel.countOf(DaemonMessageType.TEMPORARY_RESOURCE_POLICY));
   }
 
@@ -2189,7 +2197,7 @@ class EnvironmentDaemonServerTest {
     FakeChannel heartbeatChannel = new FakeChannel("channel-heartbeat-first");
     heartbeatFirst.server.open(heartbeatChannel);
     heartbeatFirst.receiveHello(heartbeatChannel);
-    heartbeatFirst.receive(heartbeatChannel, DaemonMessageType.HEARTBEAT, null, "{}");
+    heartbeatFirst.receive(heartbeatChannel, DaemonMessageType.HEARTBEAT, null, heartbeatPayload());
     assertTrue(heartbeatChannel.closed());
   }
 
@@ -2283,7 +2291,7 @@ class EnvironmentDaemonServerTest {
     mismatched.server.receive(
         mismatchedChannel.connectionId(),
         EnvironmentDaemonServerTestSupport.encode(
-            OTHER_ENVIRONMENT_ID, DaemonMessageType.HEARTBEAT, null, "{}"));
+            OTHER_ENVIRONMENT_ID, DaemonMessageType.HEARTBEAT, null, heartbeatPayload()));
     assertTrue(mismatchedChannel.closed());
 
     // 方向错误：daemon 不得向服务端发送 INVOKE。
@@ -2538,7 +2546,7 @@ class EnvironmentDaemonServerTest {
     fixture.server.receive(
         "missing-connection",
         EnvironmentDaemonServerTestSupport.encode(
-            ENVIRONMENT_ID, DaemonMessageType.HEARTBEAT, null, "{}"));
+            ENVIRONMENT_ID, DaemonMessageType.HEARTBEAT, null, heartbeatPayload()));
     fixture.server.close("missing-connection");
     assertEquals(Set.of(), fixture.server.readyEnvironments());
   }
@@ -2574,7 +2582,7 @@ class EnvironmentDaemonServerTest {
     Fixture fixture = new Fixture();
     FakeChannel channel = new FakeChannel("channel-error-scope");
     fixture.server.open(channel);
-    fixture.receive(channel, DaemonMessageType.HEARTBEAT, null, "{}");
+    fixture.receive(channel, DaemonMessageType.HEARTBEAT, null, heartbeatPayload());
 
     assertEquals(ENVIRONMENT_ID, channel.lastEnvelope().environmentId());
   }
@@ -2943,7 +2951,7 @@ class EnvironmentDaemonServerTest {
     fixture.server.receive(
         "stale-connection",
         EnvironmentDaemonServerTestSupport.encode(
-            ENVIRONMENT_ID, DaemonMessageType.HEARTBEAT, null, "{}"));
+            ENVIRONMENT_ID, DaemonMessageType.HEARTBEAT, null, heartbeatPayload()));
 
     assertTrue(channel.isOpen());
     assertTrue(fixture.server.isReady(ENVIRONMENT_ID));
@@ -3538,6 +3546,153 @@ class EnvironmentDaemonServerTest {
    *
    * <p>{@link #close()} 恢复级别与父处理器设置，避免影响其它测试。
    */
+
+  /** 意图：DATA_BIND/IDE_LEASE 只能发往当前 READY 且仍持有租约的连接；payload 严格编码且不携带 invocationId。 */
+  @Test
+  void boundRuntimeControlsRequireCurrentLeaseAndEncodeStrictPayloads() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-runtime-controls");
+    DaemonDataBind dataBind =
+        new DaemonDataBind(
+            5L, "A".repeat(43), URI.create("https://studio.example/internal/environment-data"));
+    UUID viewId = UUID.fromString("11111111-1111-1111-1111-111111111111");
+    UUID documentId = UUID.fromString("22222222-2222-2222-2222-222222222222");
+    DaemonIdeLease ideLease =
+        new DaemonIdeLease(2L, List.of(new DaemonIdeLease.Binding(viewId, documentId, 3L)));
+
+    fixture.server.sendDataBind(ENVIRONMENT_ID, dataBind);
+    fixture.server.sendIdeLease(
+        ENVIRONMENT_ID, new DaemonConnectionIdentity(ENVIRONMENT_ID, INSTANCE_ID), ideLease);
+
+    DaemonEnvelope bindFrame = channel.envelopes().get(channel.envelopes().size() - 2);
+    assertEquals(DaemonMessageType.DATA_BIND, bindFrame.messageType());
+    assertEquals(ENVIRONMENT_ID, bindFrame.environmentId());
+    assertNull(bindFrame.invocationId());
+    assertTrue(bindFrame.payloadJson().contains("\"ticket\":\"AAAAAAAA"));
+    DaemonEnvelope leaseFrame = channel.lastEnvelope();
+    assertEquals(DaemonMessageType.IDE_LEASE, leaseFrame.messageType());
+    assertNull(leaseFrame.invocationId());
+    assertTrue(leaseFrame.payloadJson().contains("\"bindingEpoch\":\"3\""));
+
+    fixture.leaseStore.holdsReadyLease = false;
+    assertThrows(
+        EnvironmentCapabilityUnavailableException.class,
+        () -> fixture.server.sendDataBind(ENVIRONMENT_ID, dataBind));
+    assertThrows(
+        EnvironmentCapabilityUnavailableException.class,
+        () ->
+            fixture.server.sendIdeLease(
+                ENVIRONMENT_ID,
+                new DaemonConnectionIdentity(ENVIRONMENT_ID, INSTANCE_ID),
+                ideLease));
+
+    // 新实例接管后，旧代际轮次不得落入当前连接；当前代际的轮次仍可发送。
+    fixture.leaseStore.holdsReadyLease = true;
+    fixture.server.close("channel-runtime-controls");
+    FakeChannel replacement =
+        fixture.connectReady("channel-runtime-controls-takeover", OTHER_INSTANCE_ID);
+    assertEquals(
+        OTHER_INSTANCE_ID,
+        fixture.server.connectionIdentity(ENVIRONMENT_ID).orElseThrow().daemonInstanceId());
+    assertThrows(
+        EnvironmentCapabilityUnavailableException.class,
+        () ->
+            fixture.server.sendIdeLease(
+                ENVIRONMENT_ID,
+                new DaemonConnectionIdentity(ENVIRONMENT_ID, INSTANCE_ID),
+                ideLease));
+    assertTrue(
+        replacement.envelopes().stream()
+            .noneMatch(envelope -> envelope.messageType() == DaemonMessageType.IDE_LEASE));
+
+    fixture.server.sendIdeLease(
+        ENVIRONMENT_ID, new DaemonConnectionIdentity(ENVIRONMENT_ID, OTHER_INSTANCE_ID), ideLease);
+    assertEquals(DaemonMessageType.IDE_LEASE, replacement.lastEnvelope().messageType());
+  }
+
+  /** 意图：READY 缓存当前运行快照；RUNTIME_STATUS 仅在更高 revision 时替换，同 revision 同内容幂等。 */
+  @Test
+  void runtimeStatusIsCachedPerGenerationAndRejectsConflictingRevision() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-runtime-status");
+
+    DaemonRuntimeSnapshot ready = fixture.server.runtimeStatus(ENVIRONMENT_ID).orElseThrow();
+    assertEquals(1L, ready.revision());
+    assertEquals(DAEMON_VERSION, ready.status().daemonVersion());
+    assertNull(ready.status().update());
+
+    fixture.receive(
+        channel,
+        DaemonMessageType.RUNTIME_STATUS,
+        null,
+        runtimeStatusPayload(2L, DAEMON_VERSION, "1.0.10", 10L));
+    assertEquals(
+        new DaemonUpdateProgress("1.0.10", 10L, null),
+        fixture.server.runtimeStatus(ENVIRONMENT_ID).orElseThrow().status().update());
+
+    // 同 revision 完全相同内容重复到达不改变状态。
+    fixture.receive(
+        channel,
+        DaemonMessageType.RUNTIME_STATUS,
+        null,
+        runtimeStatusPayload(2L, DAEMON_VERSION, "1.0.10", 10L));
+    assertTrue(channel.isOpen());
+
+    // 更低 revision 是迟到快照，忽略而不关闭连接。
+    fixture.receive(
+        channel,
+        DaemonMessageType.RUNTIME_STATUS,
+        null,
+        runtimeStatusPayload(1L, DAEMON_VERSION, "1.0.8", 1L));
+    assertTrue(channel.isOpen());
+    assertEquals(
+        new DaemonUpdateProgress("1.0.10", 10L, null),
+        fixture.server.runtimeStatus(ENVIRONMENT_ID).orElseThrow().status().update());
+
+    // 同 revision 内容不同是协议错误。
+    fixture.receive(
+        channel,
+        DaemonMessageType.RUNTIME_STATUS,
+        null,
+        runtimeStatusPayload(2L, DAEMON_VERSION, "1.0.10", 11L));
+    assertTrue(channel.closed());
+    assertEquals(DaemonMessageType.ERROR, channel.lastEnvelope().messageType());
+  }
+
+  /** 意图：HEARTBEAT 的 runtimeStatus 同样推进缓存；租约失效后 runtimeStatus 立即 unavailable。 */
+  @Test
+  void heartbeatRuntimeStatusIsCachedAndLeaseLossMakesSnapshotUnavailable() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-runtime-heartbeat");
+
+    fixture.receive(
+        channel,
+        DaemonMessageType.HEARTBEAT,
+        null,
+        heartbeatPayload(5L, new DaemonRuntimeStatus(DAEMON_VERSION, null)));
+    assertEquals(5L, fixture.server.runtimeStatus(ENVIRONMENT_ID).orElseThrow().revision());
+
+    fixture.leaseStore.holdsReadyLease = false;
+    assertTrue(fixture.server.runtimeStatus(ENVIRONMENT_ID).isEmpty());
+  }
+
+  private static String runtimeStatusPayload(
+      long revision, String daemonVersion, String targetVersion, long downloadedBytes) {
+    return "{\"revision\":\""
+        + revision
+        + "\",\"status\":{\"daemonVersion\":\""
+        + daemonVersion
+        + "\",\"update\":"
+        + (targetVersion == null
+            ? "null"
+            : "{\"targetVersion\":\""
+                + targetVersion
+                + "\",\"downloadedBytes\":"
+                + downloadedBytes
+                + ",\"totalBytes\":null}")
+        + "}}";
+  }
+
   private static final class ThrowingLogHandler implements AutoCloseable {
 
     private final Logger logger = Logger.getLogger(EnvironmentDaemonServer.class.getName());
