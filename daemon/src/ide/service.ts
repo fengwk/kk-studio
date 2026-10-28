@@ -787,7 +787,7 @@ export async function createIdeService(
       // same canonical file so a symlinked data directory cannot produce two identities.
       workspacePath = await realpath(workspaceFile)
       epoch = allocateEpoch()
-      bridge.assign(viewId, workspacePath, epoch)
+      bridge.assign(viewId, workspacePath, epoch, directory)
       const session = await manager.ensureStarted(signal)
       sessionGeneration = session.generation
       if (crashEpoch !== crashAtStart) {
@@ -931,7 +931,7 @@ export async function createIdeService(
     view.createdAt = scheduler.now()
     view.sessionGeneration = sessionGeneration
     dropClaimsForView(view.viewId)
-    bridge.assign(view.viewId, view.workspacePath, epoch)
+    bridge.assign(view.viewId, view.workspacePath, epoch, view.directory)
     scheduleExpiry(view)
     const reply = openReply(view)
     rememberClaim(claimId, {
