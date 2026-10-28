@@ -437,9 +437,11 @@ public final class IdeGatewayDataPlane {
     private volatile boolean headersReceived;
     private volatile boolean responseEnded;
     private volatile boolean completeWriteSucceeded;
+    private volatile boolean completionInProgress;
     private volatile Thread sender;
     private MuxStream stream;
     private boolean attached;
+    private boolean draining;
 
     private HttpExchange(
         EnvironmentId environmentId,
@@ -456,23 +458,41 @@ public final class IdeGatewayDataPlane {
     /** OPEN 返回后绑定流，并按 wire 顺序重放等待期间到达的回调。 */
     private void attach(MuxStream stream) {
       this.stream = Objects.requireNonNull(stream, "stream");
-      List<Runnable> callbacks;
       synchronized (dispatchLock) {
         attached = true;
-        callbacks = List.copyOf(pendingCallbacks);
-        pendingCallbacks.clear();
       }
-      callbacks.forEach(Runnable::run);
+      drainCallbacks();
     }
 
     private void dispatch(Runnable callback) {
       synchronized (dispatchLock) {
-        if (!attached) {
-          pendingCallbacks.add(callback);
+        pendingCallbacks.add(callback);
+      }
+      drainCallbacks();
+    }
+
+    private void drainCallbacks() {
+      synchronized (dispatchLock) {
+        if (!attached || draining) {
           return;
         }
+        draining = true;
       }
-      callback.run();
+      while (true) {
+        Runnable callback;
+        synchronized (dispatchLock) {
+          if (pendingCallbacks.isEmpty()) {
+            draining = false;
+            return;
+          }
+          callback = pendingCallbacks.removeFirst();
+        }
+        try {
+          callback.run();
+        } catch (RuntimeException error) {
+          fail(error, 502);
+        }
+      }
     }
 
     private void run() throws IdeHttpFailure {
@@ -658,17 +678,23 @@ public final class IdeGatewayDataPlane {
               fail(error, 502);
               return;
             }
-            stream
-                .complete()
-                .whenComplete(
-                    (ignored, error) -> {
-                      if (error == null) {
-                        completeWriteSucceeded = true;
-                        success();
-                      } else {
-                        fail(error, 502);
-                      }
-                    });
+            completionInProgress = true;
+            try {
+              stream
+                  .complete()
+                  .whenComplete(
+                      (ignored, error) -> {
+                        if (error == null) {
+                          completeWriteSucceeded = true;
+                          success();
+                        } else {
+                          fail(error, 502);
+                        }
+                      });
+            } catch (RuntimeException error) {
+              // Early responses before request END cannot COMPLETE; fail only this stream.
+              fail(error, 502);
+            }
           });
     }
 
@@ -692,6 +718,10 @@ public final class IdeGatewayDataPlane {
         fail(error, 502);
       } else if (completeWriteSucceeded) {
         success();
+      } else if (completionInProgress) {
+        // complete() may close synchronously before its returned future can be observed.
+        // Only that actual write future may decide success or failure.
+        return;
       } else {
         fail(new IOException("IDE HTTP stream closed before COMPLETE was written"), 502);
       }
