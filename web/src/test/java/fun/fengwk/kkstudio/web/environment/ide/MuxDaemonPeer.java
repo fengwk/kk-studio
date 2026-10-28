@@ -187,6 +187,22 @@ final class MuxDaemonPeer implements AutoCloseable {
     List<MuxHeader> responseHeaders = new ArrayList<>();
     responseHeaders.add(new MuxHeader("content-type", "text/plain"));
     int status = 200;
+    if (state.request.path().startsWith("/worker.js")) {
+      String scope =
+          state.request.path().contains("root")
+              ? "/"
+              : state.request.path().contains("other")
+                  ? "/__kk/ide/view/00000000-0000-0000-0000-000000000001/1/"
+                  : state.request.path().contains("relative")
+                      ? "./workers/"
+                      : "/__kk/ide/view/"
+                          + state.request.viewId()
+                          + "/"
+                          + state.request.bindingEpoch()
+                          + "/";
+      responseHeaders.add(new MuxHeader("Service-Worker-Allowed", scope));
+      responseHeaders.add(new MuxHeader("set-cookie", "upstream=forbidden; Path=/"));
+    }
     if (state.request.path().contains("/echo")) {
       responseHeaders.add(new MuxHeader("set-cookie", "upstream=forbidden; Path=/"));
     }
