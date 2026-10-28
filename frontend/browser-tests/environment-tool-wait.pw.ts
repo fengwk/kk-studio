@@ -19,7 +19,7 @@ for (const scenario of ['pane-root', 'pane-child']) {
     let socketCount = 0
     const subscriptions = new Set<string>()
     const writes: string[] = []
-    await page.routeWebSocket(/\/api\/events\/v1$/, (ws) => {
+    await page.routeWebSocket(/\/api\/events\/v2$/, (ws) => {
       socket = ws
       socketCount += 1
       ws.onMessage((raw) => {
@@ -119,7 +119,7 @@ for (const scenario of ['pane-root', 'pane-child']) {
       await expect(page.locator('.thread-composer')).toHaveCount(0)
     }
     const changed = (rootThreadId: string) => socket!.send(JSON.stringify({
-      version: 1, type: 'event', resource: { kind: 'interactions' }, name: 'changed', data: { rootThreadId },
+      version: 2, type: 'event', resource: { kind: 'interactions' }, name: 'changed', data: { rootThreadId },
     }))
     // 错根提示不触发 snapshot GET；让浏览器完成事件调度而非任意 sleep。
     changed(OTHER)

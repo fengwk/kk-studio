@@ -21,7 +21,7 @@ describe('platform invalidation bridges', () => {
 
     render(
       <QueryClientProvider client={queryClient}>
-        <ApplicationEventProvider url="ws://test/events/v1" socketFactory={sockets.factory}>
+        <ApplicationEventProvider url="ws://test/api/events/v2" socketFactory={sockets.factory}>
           <ProjectsInvalidationBridge />
         </ApplicationEventProvider>
       </QueryClientProvider>,
@@ -29,7 +29,7 @@ describe('platform invalidation bridges', () => {
 
     const socket = sockets.openLatest()
     expect(socket.sentMessages()).toEqual([
-      { version: 1, type: 'subscribe', resource: { kind: 'projects' } },
+      { version: 2, type: 'subscribe', resource: { kind: 'projects' } },
     ])
 
     // 1. subscribed 事件 -> 全量失效 projects.all
@@ -130,7 +130,7 @@ describe('platform invalidation bridges', () => {
 
     const { findByText } = render(
       <QueryClientProvider client={queryClient}>
-        <ApplicationEventProvider url="ws://test/events/v1" socketFactory={sockets.factory}>
+        <ApplicationEventProvider url="ws://test/api/events/v2" socketFactory={sockets.factory}>
           <ProjectsInvalidationBridge />
           <TestConsumer />
         </ApplicationEventProvider>

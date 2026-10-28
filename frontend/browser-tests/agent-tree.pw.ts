@@ -115,7 +115,7 @@ function snapshot(threadId: string, parentThreadId: string | null, name: string,
 async function installAgentTreeMock(page: Page) {
   const treeCalls: string[] = []
   let nodes = treeNodes()
-  await page.routeWebSocket(/\/api\/events\/v1$/, () => {})
+  await page.routeWebSocket(/\/api\/events\/v2$/, () => {})
   await page.route((url) => new URL(url).pathname.startsWith('/api/'), async (route: Route) => {
     const path = new URL(route.request().url()).pathname
     if (path === `/api/threads/${THREAD_ID}/tree`) {
