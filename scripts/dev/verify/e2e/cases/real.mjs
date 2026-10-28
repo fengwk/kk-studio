@@ -1749,7 +1749,7 @@ registerCase({
   level: 'L4',
   title: 'Environment GET capability 投影与 canonical 路由名称',
   requires: ['tools'],
-  docs: 'Environment READY；Card UUID id 是 canonical 路由身份，name 是 display name，ready 是统一可用性标记；投影 10 项 capability（9 项模型可见 + 内部 skill.sync），descriptor version 与 catalog VERSION 同为 2，并投影宿主事实 userName/homeDirectory，且不公开产品目录、raw READY environment metadata、工具或凭据',
+  docs: 'Environment READY（控制 wire 7、READY 6）；Card UUID id 是 canonical 路由身份，name 是 display name，ready 是统一可用性标记；投影 11 项 capability（9 项模型可见 + 内部 fs.edit.preview/skill.sync），descriptor version 与 catalog VERSION 同为 3，并投影宿主事实 userName/homeDirectory，且不公开产品目录、raw READY environment metadata、工具或凭据',
   async run(ctx) {
     const environments = await listEnvironments(ctx)
     const match = environments.find((environment) => environment.name === ctx.daemonEnv)
@@ -1775,11 +1775,13 @@ registerCase({
       'lsp.workspace-symbols',
       'lsp.java-decompile',
     ]
-    // descriptor version 就是 catalog VERSION（当前为 2）；内部 skill.sync 是 catalog 的一部分但
+    // descriptor version 就是 catalog VERSION（当前为 3）；内部能力是 catalog 的一部分但
     // 不注册为模型工具，因此同样出现在 canonical 投影里。
-    const expectedCapabilities = [...modelCapabilityIds, 'skill.sync'].map((id) => ({
+    const expectedIds = [...modelCapabilityIds]
+    expectedIds.splice(3, 0, 'fs.edit.preview')
+    const expectedCapabilities = [...expectedIds, 'skill.sync'].map((id) => ({
       id,
-      version: '2',
+      version: '3',
     }))
     const actualCapabilities = match.capabilities || []
     const actualIdentity = actualCapabilities.map(({ id, version }) => ({ id, version }))

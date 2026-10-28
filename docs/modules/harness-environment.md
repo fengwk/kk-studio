@@ -111,15 +111,16 @@ Daemon Runtime 的唯一 invoke timer 通过 `context.signal` 区分 `TIMED_OUT`
 
 ## daemon wire 协议会话与消息流
 
-[`DaemonProtocol.VERSION`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonProtocol.java) 固定为 `6`，消息集合为：
+[`DaemonProtocol.VERSION`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonProtocol.java) 固定为 `7`，消息集合为：
 
 ```text
-HELLO / WELCOME / READY / HEARTBEAT
+HELLO / WELCOME / READY / HEARTBEAT / RUNTIME_STATUS
 INVOKE / STARTED / PROGRESS / COMPLETED / FAILED
 CANCEL / RECOVER / CANCELLED / EXECUTION_EXITED / ERROR
 RESOURCE_UPLOAD_REQUEST / RESOURCE_UPLOAD_TICKET / RESOURCE_UPLOAD_COMMIT
 TEMPORARY_RESOURCE_POLICY / UPDATE / UPDATE_RESULT
 IDE_COMMAND / IDE_RESULT
+DATA_BIND / IDE_LEASE
 ```
 
 [`DaemonEnvelope`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonEnvelope.java) 的固定字段为：
@@ -128,17 +129,18 @@ IDE_COMMAND / IDE_RESULT
 protocolVersion / messageType / environmentId / invocationId? / payload
 ```
 
-`environmentId` 是可空 scope：`HELLO` 在认证前不知道目标 Environment，必须为 null；`WELCOME`、`READY`、`HEARTBEAT`、`IDE_COMMAND`、`IDE_RESULT` 与全部调用消息由已绑定连接发出，必须非空；`ERROR` 在握手失败时可能没有绑定 scope。除 `HELLO`、`WELCOME`、`READY`、`HEARTBEAT`、`ERROR`、`TEMPORARY_RESOURCE_POLICY` 外的全部消息都必须携带非空的 `invocationId`（IDE 消息携带 IDE 请求 UUID）；`TEMPORARY_RESOURCE_POLICY` 由已绑定连接发出，只携带非空 `environmentId`，`invocationId` 为 null。资源上传控制消息也以 `invocationId` 关联调用，`transferId` 只存在于 payload。`payload` 必须是 JSON 对象。
+`environmentId` 是可空 scope：`HELLO` 在认证前不知道目标 Environment，必须为 null；`WELCOME`、`READY`、`HEARTBEAT`、`RUNTIME_STATUS`、`IDE_COMMAND`、`IDE_RESULT`、`DATA_BIND`、`IDE_LEASE` 与全部调用消息由已绑定连接发出，必须非空；`ERROR` 在握手失败时可能没有绑定 scope。除 `HELLO`、`WELCOME`、`READY`、`HEARTBEAT`、`RUNTIME_STATUS`、`ERROR`、`TEMPORARY_RESOURCE_POLICY`、`DATA_BIND`、`IDE_LEASE` 外的全部消息都必须携带非空的 `invocationId`（IDE 消息携带 IDE 请求 UUID）；`TEMPORARY_RESOURCE_POLICY`、`RUNTIME_STATUS`、`DATA_BIND` 与 `IDE_LEASE` 由已绑定连接发出，只携带非空 `environmentId`，`invocationId` 为 null。资源上传控制消息也以 `invocationId` 关联调用，`transferId` 只存在于 payload。`payload` 必须是 JSON 对象。
 
 重连恢复按 `invocationId` 以不终止执行的 `RECOVER` 取回在途调用（Daemon 回放 STARTED，或重放冻结的终态与退出确认），只有调用方已表达取消意图的调用才重放 `CANCEL`；各调用沿自己的 STARTED/PROGRESS/终态推进。[`DaemonEnvelopeCodec`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonEnvelopeCodec.java) 严格拒绝未知字段、重复键、尾随字符、非 canonical scope 和错误 protocolVersion。同实例恢复的进程生命周期限制见下文。
 
 握手与调用时序：
 
 ```text
-Daemon -> HELLO(protocolVersion=6, registrationToken, capabilityCatalogVersion=3, daemonVersion, daemonInstanceId)
+Daemon -> HELLO(protocolVersion=7, registrationToken, capabilityCatalogVersion=3, daemonVersion, daemonInstanceId)
 Gateway -> WELCOME(environmentId, name, maxResourceBytes, temporaryResourceTtlSeconds, temporaryResourceCleanupIntervalSeconds)
-Daemon -> READY(version=5, daemonVersion, environment)
-Daemon -> HEARTBEAT*
+Daemon -> READY(version=6, daemonVersion, environment, runtimeStatus)
+Daemon -> HEARTBEAT(runtimeStatus, ideLeaseRound)*
+Daemon -> RUNTIME_STATUS(runtimeStatus)
 
 Gateway -> INVOKE
 Daemon -> STARTED
@@ -160,6 +162,8 @@ Daemon -> EXECUTION_EXITED | 已保存的退出确认重放
 
 Gateway -> IDE_COMMAND
 Daemon -> IDE_RESULT
+Gateway -> DATA_BIND(generation, ticket, streamUrl)
+Gateway -> IDE_LEASE(round, bindings)
 ```
 
 `WELCOME` payload 携带认证结果 `environmentId`、展示用 `name`、本连接的资源字节预算 `maxResourceBytes` 与临时资源 `temporaryResourceTtlSeconds` / `temporaryResourceCleanupIntervalSeconds`（缺失或非正数是协议错误）；Daemon 在收到它之前不接受任何 resource/binary 结果。TTL 或扫描间隔变化时 Gateway 在同一心跳通道推送 `TEMPORARY_RESOURCE_POLICY`，热更只作用于尚未回收的 workspace。
@@ -170,13 +174,16 @@ Daemon -> IDE_RESULT
 
 ## 载荷编解码器
 
-[`DaemonCapabilitiesCodec`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilitiesCodec.java) 编解码 READY 载荷：
+[`DaemonReadyCodec`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonReadyCodec.java) 编解码 READY 载荷：
 
 ```text
-version=5
+version=6
 daemonVersion=构建版本
 environment: operatingSystem / timeZone / userName / homeDirectory / note / tempDirectory / architecture
+runtimeStatus: revision / status(daemonVersion / update)
 ```
+
+[`DaemonCapabilitiesCodec`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilitiesCodec.java) 只编解码宿主 metadata 这一段，它也是 Server 持久化到 `runtime_info` 的形状；当前运行状态只留在连接内存里。
 
 READY 只公开宿主侧的七项环境元数据与 Daemon 自身构建版本，**不发送 capability descriptor 列表或 LSP 可用性**；能力集合由 HELLO 中的 catalog 版本与两端固定目录约定。`daemonVersion` 取自 Daemon 构建版本（对齐 `package.json` 版本），未打包运行时为固定标记 `development`（明确表示不是发布版本），与 Card 上的 CAS
 `version` 是两个不同事实。七项数据为目标操作系统、时区、Daemon 进程用户、该用户的
@@ -186,8 +193,28 @@ OS 依据；`userName`、`homeDirectory` 与 `architecture` 只用于 Card 和�
 （例如 `amd64`、`arm64`），JSON `null` 明确表示该事实未知，绝不填造取值。`environment` 是必填对象且字段固定；未知字段、必填
 字段缺失或类型错误都是协议错误，其中 `architecture` 的键必须存在且值允许明确 JSON `null`。
 
-载荷的硬约束：`userName` 与 `homeDirectory` 非空、单行且无控制字符，`note` 必填、非空白、无周边空白、单行且不超过 512 字符，`architecture` 是 `null` 或有界非空的单行标识；未指定 note 时 Daemon 按 OS 生成默认说明。当前 codec 只接受版本 5，不双读或兼容旧 V4 payload。凭证、请求头、环境变量、命令与 Git URL/ref 都不进入 READY；
+载荷的硬约束：`userName` 与 `homeDirectory` 非空、单行且无控制字符，`note` 必填、非空白、无周边空白、单行且不超过 512 字符，`architecture` 是 `null` 或有界非空的单行标识；未指定 note 时 Daemon 按 OS 生成默认说明。当前 codec 只接受版本 6，不双读或兼容旧 V5 payload。凭证、请求头、环境变量、命令与 Git URL/ref 都不进入 READY；
 Skill 安装状态通过内部 `skill.sync` 调用结果报告，MCP 目录完全属于 Platform。
+
+### 运行状态、心跳与 IDE 绑定载荷
+
+[`DaemonRuntimeStatusCodec`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonRuntimeStatusCodec.java)
+编解码完整运行状态 `{revision, status}`：`revision` 是规范正十进制字符串且不超过 Java long 上限，`status` 固定为
+`{daemonVersion, update}`；`update` 为 null，或 `{targetVersion, downloadedBytes, totalBytes}`。字节计数是非负安全整数，
+`totalBytes` 为 null 或不小于 `downloadedBytes`。`status.daemonVersion` 必须与 READY 的 `daemonVersion` 一致。
+
+READY v6 携带必需的 `runtimeStatus`；[`DaemonHeartbeatCodec`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonHeartbeatCodec.java)
+的心跳载荷固定为 `{runtimeStatus, ideLeaseRound}`，`ideLeaseRound` 为 null 或规范正十进制字符串。关键变化时 Daemon 另发
+`RUNTIME_STATUS`，payload 就是同一段 `runtimeStatus`。Server 只在当前 READY 代际内比较 revision：更高 revision 替换缓存，
+同 revision 内容不同是协议错误，更低 revision 视为迟到快照忽略。运行状态只存在于当前连接代际，不落库。
+
+[`DaemonDataBindCodec`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonDataBindCodec.java)
+编解码 `DATA_BIND` 的 `{generation, ticket, streamUrl}`：`generation` 是规范正十进制字符串，`ticket` 是 43 字符 base64url，
+`streamUrl` 是受控同源的绝对 http(s) 地址（不超过 2048 字符、无控制字符、不带凭据或 fragment）。
+
+[`DaemonIdeLeaseCodec`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonIdeLeaseCodec.java)
+编解码 `IDE_LEASE` 的 `{round, bindings}`：`round` 是规范正十进制字符串，`bindings` 最多 64 条且不重复 `viewId`，
+每条绑定固定为 `{viewId, documentId, bindingEpoch}`，ID 为规范小写 UUID，`bindingEpoch` 为规范正十进制字符串。
 
 [`DaemonCapabilityInvokeCodec`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilityInvokeCodec.java)
 规定 INVOKE payload 固定包含 `capabilityId`、`capabilityVersion`、`arguments` 与
@@ -199,7 +226,7 @@ INVOKE 外壳不携带目录字段；能力自己的 arguments 若含 `workdir`�
 目标 Daemon 上的绝对目录。`timeoutMillis` 是 Platform 解析完成的唯一有效超时，`0`
 表示没有 execution deadline，Daemon 原样消费它。
 
-`IDE_COMMAND`（Server → Daemon）与 `IDE_RESULT`（Daemon → Server）是同一连接上的 IDE 通道：内核只校验 envelope、按 `invocationId` 匹配在途请求并原样交付 JSON 载荷，不解释其内容，也不写入 Agent journal。载荷协议属于 [IDE](ide.md) 应用。
+`IDE_COMMAND`（Server → Daemon）与 `IDE_RESULT`（Daemon → Server）是同一连接上的 IDE 通道：内核只校验 envelope、按 `invocationId` 匹配在途请求并原样交付 JSON 载荷，不解释其内容，也不写入 Agent journal。`DATA_BIND` 与 `IDE_LEASE` 是同一连接上的 IDE 控制消息：前者下发受控数据连接的代际与一次性票据，后者批量下发浏览器使用证明，两者都不带 `invocationId`，也不进入 Agent journal。载荷协议属于 [IDE](ide.md) 应用。
 
 [`DaemonCapabilityResultCodec`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilityResultCodec.java) 编解码流式与终态结果：
 
@@ -263,10 +290,10 @@ Daemon -> HELLO(registrationToken, capabilityCatalogVersion, daemonVersion, daem
   核心 -> leaseStore.hasActiveLeaseToken                 # 本节点同节点活跃连接防冲突
   核心 -> leaseStore.tryAcquire                          # 原子抢占/接管
   Gateway -> WELCOME(environmentId, name, maxResourceBytes, temporaryResourceTtlSeconds, temporaryResourceCleanupIntervalSeconds)
-Daemon -> READY(version, daemonVersion, environment)
+Daemon -> READY(version, daemonVersion, environment, runtimeStatus)
   -> leaseStore.markReady                                # 围栏失效即协议错误
   -> 未终结在途调用发送 RECOVER（已取消的发送 CANCEL），不重发 INVOKE
-Daemon -> HEARTBEAT*
+Daemon -> HEARTBEAT(runtimeStatus, ideLeaseRound)*
   -> reconcileTemporaryResourcePolicy                    # TTL/扫描间隔变化时推送 TEMPORARY_RESOURCE_POLICY
   -> leaseStore.heartbeat                                # 围栏失效即协议错误
 close(connectionId)
@@ -332,7 +359,7 @@ COMPLETED
 - `endUpdate(environmentId, operationId)`：只有与当前登记一致的 operationId 才释放准入，旧 operation 不能释放新 operation。
 - `UPDATE_RESULT` 只做协议校验后转交 `EnvironmentUpdateListener` 在核心锁外消费；核心不判定最终成功。
 
-「一个 Environment 同一时刻至多一次更新」由内存准入与 Platform 侧持久 operation 行（部分唯一索引）双重保证；更新期间对旧二进制的
+「一个 Environment 同一时刻至多一次更新」由核心内存准入保证：`UPDATE` / `UPDATE_RESULT` 不落任务表，Server 只保留当前命令的有界回执，不提供更新历史查询。更新期间对旧二进制的
 任何替换都由 Daemon 与独立 OS 更新器完成，核心只负责准入、下发与回执转发。
 
 ### 终态唯一与迟到帧
@@ -396,7 +423,7 @@ listener 在锁外收到 `onDaemonInstanceReplaced(previous)`，宿主据此关�
 
 ## 源码与测试
 
-主要源码入口：[`EnvironmentId.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/EnvironmentId.java)、[`EnvironmentCapabilityCatalog.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCatalog.java)、[`EnvironmentCapabilityTransport.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityTransport.java)、[`DaemonProtocol.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonProtocol.java)、[`DaemonEnvelopeCodec.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonEnvelopeCodec.java)、[`DaemonCapabilitiesCodec.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilitiesCodec.java)、[`DaemonCapabilityResultCodec.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilityResultCodec.java)、[`DaemonResourceTransferCodec.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonResourceTransferCodec.java)。
+主要源码入口：[`EnvironmentId.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/EnvironmentId.java)、[`EnvironmentCapabilityCatalog.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCatalog.java)、[`EnvironmentCapabilityTransport.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityTransport.java)、[`DaemonProtocol.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonProtocol.java)、[`DaemonEnvelopeCodec.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonEnvelopeCodec.java)、[`DaemonReadyCodec.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonReadyCodec.java)、[`DaemonCapabilitiesCodec.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilitiesCodec.java)、[`DaemonCapabilityResultCodec.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilityResultCodec.java)、[`DaemonResourceTransferCodec.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonResourceTransferCodec.java)、[`DaemonRuntimeStatusCodec.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonRuntimeStatusCodec.java)、[`DaemonHeartbeatCodec.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonHeartbeatCodec.java)、[`DaemonDataBindCodec.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonDataBindCodec.java)、[`DaemonIdeLeaseCodec.java`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonIdeLeaseCodec.java)。
 
 测试守卫：
 
@@ -404,7 +431,8 @@ listener 在锁外收到 `onDaemonInstanceReplaced(previous)`，宿主据此关�
 - [`EnvironmentCapabilityCatalogTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCatalogTest.java)：11 项能力的固定顺序与版本、workdir schema 边界与模型/内部能力映射。
 - [`EnvironmentCapabilityContractTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityContractTest.java) 与 [`EnvironmentCapabilityTransportTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityTransportTest.java)：请求归一化与 timeout 原样传递、结果体积边界、发送异常分类、事件顺序与终态唯一。
 - [`DaemonEnvelopeCodecTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonEnvelopeCodecTest.java)、[`DaemonEnvelopeTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonEnvelopeTest.java)：协议版本、scope 与 invocationId 规则、未知/重复/尾随字段拒绝。
-- [`DaemonCapabilitiesCodecTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilitiesCodecTest.java)：READY 只接受 `{version, environment}` wire 形状，未知字段、缺失字段与非法值都被拒绝。
+- [`DaemonCapabilitiesCodecTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilitiesCodecTest.java)：宿主 metadata 只接受 `{version, daemonVersion, environment}` wire 形状，未知字段、缺失字段与非法值都被拒绝。
+- [`DaemonRuntimeControlCodecTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonRuntimeControlCodecTest.java)：READY v6 与运行状态的往返、同 revision 漂移、更新字节边界、心跳必需字段、`DATA_BIND` 票据与同源地址、`IDE_LEASE` 的规范绑定与 64 条上限。
 - [`DaemonCapabilityInvokeCodecTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilityInvokeCodecTest.java) 与 [`DaemonCapabilityResultCodecTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilityResultCodecTest.java)：INVOKE 四个必填字段、PROGRESS 内容限制、终态预算预检先于上传、无字节 resource wire。
 - [`DaemonResourceTransferCodecTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonResourceTransferCodecTest.java) 与 [`DaemonWorkdirSyntaxTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonWorkdirSyntaxTest.java)：票据三态互斥字段与预签名 PUT 约束；workdir 占位符、长度、跨 OS 与分隔符归一规则。
 - [`EnvironmentDaemonServerTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentDaemonServerTest.java)：以内存 fake 验证握手/租约围栏、并发调用、终态与 expire 竞争、同实例恢复/异实例接管、上传幂等/绑定校验/清理，以及回调保序、重入和积压超限失败关闭；[`EnvironmentDaemonServerIdeTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentDaemonServerIdeTest.java) 覆盖 IDE 通道的准入、单次回执与断线收尾。基座 [`EnvironmentDaemonServerTestSupport.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentDaemonServerTestSupport.java) 只表达核心依赖的窄端口语义。

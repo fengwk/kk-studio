@@ -61,9 +61,11 @@ Java long 游标保持字符串，版本比较使用长度与字典序，保留�
 
 ## Snapshot、realtime 与恢复
 
-Thread/Canvas 先读取 Snapshot，再订阅 `/api/events/v1`。
+Thread/Canvas 先读取 Snapshot，再订阅 `/api/events/v2`。
 浏览器只有一个应用事件 WebSocket，连接与订阅由应用级 manager 按资源引用计数管理：
 同一资源无论多少消费者只有一条 wire 订阅，重连后自动重发全部订阅，恢复在线或回到前台立即重试。
+连接建立后服务端先发 `connected` 帧，manager 用它给出本次物理连接的 `eventNodeId` 与 `connectionId`；
+每次重连都是新身份，需要绑定到连接的 IDE 视图必须按新身份重新登记，旧身份不续用。
 资源只声明自身语义：thread 带 version 与 lossy realtime delta，canvas 带 revision，
 projects/tree/interactions/environments 只发 changed 提示、不携带 cursor。
 subscribed（含重连）、resync、资源 error 和版本提示触发回读；
@@ -330,23 +332,34 @@ Skill Check 只更新候选，用户确认 exact commit 后 Update 发布。
 Environment 管理面展示宿主事实与有界运维事件窗口，并提供“安装 / 覆盖”与“卸载”入口：安装弹窗
 保存安装设置后签发一次性安装码，生成安装/卸载命令并复制到剪贴板；下载安装脚本时服务端轮换注册凭证，安装码随即失效；
 卸载命令不需要安装码或注册凭证。前端不读取长期注册凭据，保存只写设置、不代表已部署。
-工作区内的受管 Environment 支持同源 IDE 嵌入：前端接收服务端的根相对 `entryUrl`（`/environment-ide/{id}/__ide/bootstrap?token=...`），
-直接通过普通 iframe 嵌入；Studio 与受管环境属于同一可信浏览器边界，不要求独立域名。本地开发环境由 Vite 的
-`/environment-ide` 代理通过 `changeOrigin: false, ws: true` 保留 Host 与 Origin 并透传 WebSocket。
-视图存在期间，前端把已校验 `entryUrl` 的 `__ide/bootstrap` 改写为同源 `__ide/session`（丢弃一次性 token 与查询串、保留部署前缀），
-用 `credentials: 'same-origin'`、`cache: 'no-store'` 的 `fetch` 读取状态码；网络错误或有界超时视为未知。
-每 10 秒探测一次，`environment.ready` 由 false 变 true 时立即探测一次，每次 iframe 加载后再探测一次。
-周期与 ready 探测在 401/409 时标记需要重开；加载探测只把非 204 记录为需要重开，绝不在加载链中直接重开，
-避免错误页反复 load 形成重开反馈循环。加载时若已有探测在途，其状态按同一“加载后非 204”规则合并进标记，不丢失意图。
-需要重开时，下一次周期或 ready 探测在状态非 503/未知时用同一 `viewId`、不传 directory 调用
-`createIdeView`，校验新 `entryUrl` 后才替换 iframe；503 或未知保留旧 iframe 与标记，也不消耗恢复预算。
-每个活跃视图的连续自动恢复最多发起 3 次真实 `createIdeView`：失败请求和成功重开但会话仍未恢复都计入，
-HTTP 创建成功本身不重置预算。达到上限后停止自动创建，保留最近 iframe 与目录，提示会话未能恢复并提供
-手动“重试”；手动重试开启新一轮预算，同时仍受单飞与 epoch 约束，不能在探测、重开或关闭在途时并发恢复。
-只有探测返回 204 确认当前会话健康、关闭视图或新开视图时才清理失败状态并复位预算。
-重开与首次打开共用单飞状态，关闭会等待在途重开，迟到的探测或重开结果不能复活已关闭视图，
-关闭或换视图也会清空旧视图的加载意图与重开标记。刷新或关闭页面时（`pagehide` 且 `persisted=false`）
-以 keepalive DELETE 释放当前视图，避免 view 在 Daemon 与网关侧累积；Daemon 仍按 dirty 语义拒绝关闭，bfcache 恢复不释放。
+管理面按 Environment 读取当前运行快照：没有本代 READY 快照时服务端返回 `environment_unavailable`，
+前端展示“运行状态不可用”，不伪造空快照，也不据此判定已更新或未更新；更新进度只在快照里出现，
+按已下载字节与可选总量展示，总量未知时只显示字节数。
+
+### tab 全局 IDE 面板
+
+IDE 是 tab 全局面板，不在工作区内嵌视图：[`IdePanelProvider`](../../frontend/src/features/environment/ide/IdePanelProvider.tsx)
+由应用外壳装配，一个 Environment 在同一 tab 内最多一个视图。面板收起只隐藏，关闭视图才释放资源；
+切换环境只改变可见性，已打开的 iframe 保持挂载。入口只表达“打开这个环境的工作台”：
+Chat 入口经 [`ide-panel-context`](../../frontend/src/features/environment/ide/ide-panel-context.ts)
+请求面板聚焦已有视图，不预创建 iframe，也不在入口处声明目录。
+
+视图绑定跟随事件通道的连接身份：前端先用 `connected` 帧的 `eventNodeId` 与 `connectionId` 登记
+IDE 使用列表，再以同一身份 claim 视图；服务端核对 environment、view 与 claim 全部匹配才建立绑定。
+迟到的成功来自旧连接时，视图保留原 `viewId` 并按 resume 重新绑定到当前连接。
+入口 URL 必须是同源 bootstrap 路径（`/environment-ide/{environmentId}/{viewId}/__ide/bootstrap?token=...`），
+前端逐项校验后用普通 iframe 嵌入；Studio 与受管环境属于同一可信浏览器边界，不要求独立域名。
+本地开发环境由 Vite 的 `/environment-ide` 代理通过 `changeOrigin: false, ws: true` 保留 Host 与 Origin
+并透传 WebSocket。
+
+恢复身份只保存在 sessionStorage：`viewId`、`daemonInstanceId` 与目录；
+epoch、claimId、iframe 与票据不持久化。localStorage 只保存最后展示意图（面板是否展开、当前选定与
+已打开环境），供新 tab 继承同一 scope 的最后状态，不提供 `viewId` 或任何运行身份。
+页面隐藏时只撤回使用证明，不删除视图；bfcache 恢复后重新登记，视图由 Daemon 按租约回收。
+
+视图被其它连接占用（`VIEW_IN_USE`）时，前端保留原 `viewId` 与目录，绝不静默替换成新视图：
+面板只提供“重试恢复”（以新 claimId 恢复同一视图）与“新建视图”两个人工动作，由用户明确选择。
+其余不确定结果（视图消失、结果未知）同样保留恢复线索，替代视图必须由用户显式打开。
 
 Projects 使用权威 ProjectSnapshot/IssueDetail，按 workflow states 分列，
 通过 version CAS 提交控制、阶段额度、Activity 与 Evidence。

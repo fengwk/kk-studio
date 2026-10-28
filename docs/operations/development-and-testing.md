@@ -85,7 +85,9 @@ Vite 默认只监听 `127.0.0.1` 并使用自带 Host allowlist。需要容器�
 | 触发关键类覆盖率门禁 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp verify` |
 | 当前空库启动与旧库拒绝验收（classpath 模式） | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl web -am test -Dtest=WebApplicationStartupSubprocessTest -Dsurefire.failIfNoSpecifiedTests=false` |
 | 当前启动验收（Fat JAR 产物模式） | 同上追加 `'-Dkkstudio.startup.test.jar=<absolute web/target/kk-studio-web-<version>.jar>'`；两种模式都要求全部用例真实通过 |
-| 同源 IDE 真实整链验收（需独立 Postgres 与受控 code-server） | `env JAVA_HOME="$JAVA_HOME_21" KK_STUDIO_IDE_ACCEPTANCE_DIR=<dir> KK_STUDIO_PLAYWRIGHT_MODULE_DIR=<dir> mvn -B -ntp -pl web -am test -Dtest=IdeRealBrowserAcceptanceTest -Dsurefire.failIfNoSpecifiedTests=false` |
+| 同源 IDE 数据面真实链（真实 Tomcat HTTP/WS 与 mux peer，需 Docker） | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl web -am test -Dtest=IdeDataPlaneIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false` |
+| 跨语言 mux 互通（Java 引擎与 Node 24 Daemon 传输，需先构建 Daemon） | 先 `npm --prefix daemon ci && npm --prefix daemon run build`，再 `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl web -am test -Dtest=MuxCrossLanguageIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false` |
+| 受管 code-server 真实视图验收（需冻结发行目录，默认跳过） | `KK_STUDIO_IDE_ACCEPTANCE_DIR=<dir> npm --prefix daemon run test -- test/ide/acceptance.test.ts`（Node 24；未设置该变量时用例整组跳过） |
 | 只格式化本次改动的 Java 文件 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl <module> spotless:apply '-DspotlessFiles=<file-regex>'` |
 | 前端单元测试 / lint / 类型与构建 / 覆盖率 | `npm --prefix frontend run test`、`run lint`、`run typecheck`、`run typecheck:test`、`run build`、`run coverage` |
 | Daemon 单元测试与覆盖率 | 先 `npm --prefix daemon ci`，再 `npm --prefix daemon run test`、`run coverage`（Node 24）
@@ -398,6 +400,19 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 Linux 脚本只下载并检查保存配置与响应头，不执行安装；卸载脚本检查不携带 secret。
 该入口需要真实测试服务；`node --test scripts/dev/verify/e2e/tests/environment-install-config.test.mjs`
 只验证用例与 HTTP mock 的契约，不能替代真实 HTTP L1 验收。
+
+运行快照与 IDE 拒绝路径也属于免费 L1：
+`environment.runtime_absent_unavailable` 验证无本代 READY 时返回 canonical
+`409 environment_unavailable`，而不是伪造空快照；`environment.ide_view_no_ready_owner_rejected`
+使用合法视图命令输入验证无 READY owner 时的 `409 ide_unavailable`，并验证非法环境 ID
+返回 `400 validation`。二者均创建并清理独立 Environment，不连接 Daemon 或模型。
+无 owner 时请求先被路由拒绝，因此这不证明已 READY 场景的 exact-intent 校验、
+视图占用、续租或真实数据面行为。脚本 fixture 测试也不替代对真实测试服务执行这些 L1 case。
+
+事件 L1 使用 `/api/events/v2`：heartbeat case 校验首帧 `connected` 的
+`eventNodeId` / `connectionId` 与 version 2 保活帧，Project case 验证全局失效通知。
+L4 `daemon.ready` 与 L5 租约投影校验 catalog 3（含内部 `fs.edit.preview`、`skill.sync`）；
+它们分别要求 tools / distributed，不进入默认免费 L1 的真实 Daemon 路径。
 
 case 的 `requires` 决定默认是否执行：`real`、`tools`、`branch`、`canvas-storage`、`canvas-function` 与
 `distributed` 分别对应上表的 flag；`host-mock` 表示 case 在宿主 `127.0.0.1` 自建 mock Provider，不读取真实凭据，
