@@ -153,7 +153,7 @@ const DEFAULT_INITIAL_RECONNECT_DELAY_MILLIS = 1_000
 const DEFAULT_MAX_RECONNECT_DELAY_MILLIS = 30_000
 const DEFAULT_MAX_CONCURRENT_INVOCATIONS = 64
 const DEFAULT_IDE_COMMAND_TIMEOUT_MILLIS = 30_000
-/** 在途 IDE 请求条数上界：OPEN_STREAM 可无限存活，必须以此硬上限防止无界 map 与资源耗尽。 */
+/** 在途 IDE 请求条数上界，防止无界 map 与资源耗尽。 */
 const MAX_IN_FLIGHT_IDE_COMMANDS = 256
 const IDE_BUSY_MESSAGE = 'too many in-flight IDE commands'
 /** IDE_LEASE 轮次在下一心跳或 15 秒后失效，二者先到为准。 */
@@ -1053,6 +1053,12 @@ export class Runtime {
       if (update === null) {
         throw new Error('managed update is not configured')
       }
+      // The update gate is already held, so no new view can appear while the idle IDE
+      // process scope is stopped and confirmed before the updater starts.
+      const signal = active.controller?.signal ?? AbortSignal.abort('SHUTDOWN')
+      if (this.ide !== null) {
+        await this.ide.stopForUpdate(signal)
+      }
       const raw = await update.handleUpdate(
         command as unknown as Record<string, unknown>,
         this.config,
@@ -1149,8 +1155,8 @@ export class Runtime {
     if (this.dataBindInFlight.size > 0) {
       return 'IDE data connection is active'
     }
-    if (this.ide?.canStartUpdate !== undefined && !this.ide.canStartUpdate()) {
-      return 'IDE views or cleanup are active'
+    if (this.ide !== null && !this.ide.canStartUpdate()) {
+      return 'IDE views, cleanup or data streams are active'
     }
     return null
   }
@@ -1259,8 +1265,9 @@ export class Runtime {
       throw new ProtocolError('IDE_LEASE round is not the current unexpired round')
     }
     // 一轮只接受一次证明；处理器失败也不重放旧轮次，等待下一次正常心跳。
+    // 以本轮发出时的本机单调时间作为使用证明，而不是以延迟到达时间重新获得完整 600 秒。
     active.consumed = true
-    this.runExtensionHandler('IDE_LEASE', () => this.ideLease?.apply(lease))
+    this.runExtensionHandler('IDE_LEASE', () => this.ideLease?.apply(lease, active.sentAt))
   }
 
   /** 数据连接的生命周期代表绑定存续；未收敛前不得开始更新。 */
@@ -1295,7 +1302,7 @@ export class Runtime {
   }
 
   // -------------------------------------------------------------------------
-  // IDE 请求（元数据动作有独立 deadline；OPEN_STREAM 是活动通道，不进入 Agent journal，
+  // IDE 请求（管理动作有独立 deadline；不进入 Agent journal，
   // 断线/停机中止而不跨代际重放副作用）
   // -------------------------------------------------------------------------
 
@@ -1310,26 +1317,30 @@ export class Runtime {
       return
     }
     if (this.updateAdmissionHeld() && command.action === 'OPEN_VIEW') {
-      this.send('IDE_RESULT', invocationId, encodeIdeReply({ ok: false, message: 'environment update is in progress' }))
+      this.send(
+        'IDE_RESULT',
+        invocationId,
+        encodeIdeReply({ ok: false, code: 'BUSY', message: 'environment update is in progress' }),
+      )
       return
     }
     if (this.ide === null) {
-      this.send('IDE_RESULT', invocationId, encodeIdeReply({ ok: false, message: 'IDE service is unavailable' }))
+      this.send(
+        'IDE_RESULT',
+        invocationId,
+        encodeIdeReply({ ok: false, code: 'UNAVAILABLE', message: 'IDE service is unavailable' }),
+      )
       return
     }
     // 硬上限在插入前判定：同 ID 重复已在上面去重、不占名额；不同 ID 洪泛到上限一律固定 busy，绝不无界增长。
     if (this.ideInFlight.size >= MAX_IN_FLIGHT_IDE_COMMANDS) {
-      this.send('IDE_RESULT', invocationId, encodeIdeReply({ ok: false, message: IDE_BUSY_MESSAGE }))
+      this.send('IDE_RESULT', invocationId, encodeIdeReply({ ok: false, code: 'BUSY', message: IDE_BUSY_MESSAGE }))
       return
     }
     const controller = new AbortController()
     this.ideInFlight.set(invocationId, controller)
-    // 只有元数据动作有固定 deadline；OPEN_STREAM 是活动通道，其寿命由 IDE 流传输的 connect 超时与
-    // peer/控制代际失效决定，绝不被运行时 30s 上限切断。
-    const timer =
-      command.action === 'OPEN_STREAM'
-        ? null
-        : setTimeout(() => controller.abort('IDE_COMMAND_TIMEOUT'), this.ideCommandTimeoutMillis)
+    // 所有 IDE 管理命令都有固定 deadline；数据面逻辑流不占用 IDE_COMMAND 调用。
+    const timer = setTimeout(() => controller.abort('IDE_COMMAND_TIMEOUT'), this.ideCommandTimeoutMillis)
     void this.track(this.runIdeCommand(invocationId, command, controller, timer))
   }
 
@@ -1343,7 +1354,15 @@ export class Runtime {
       const reply = await (this.ide as IdeService).handle(command, controller.signal)
       this.send('IDE_RESULT', invocationId, encodeIdeReply(reply))
     } catch (error) {
-      this.send('IDE_RESULT', invocationId, encodeIdeReply({ ok: false, message: safeMessage(error) }))
+      this.send(
+        'IDE_RESULT',
+        invocationId,
+        encodeIdeReply({
+          ok: false,
+          code: error instanceof Error && error.name === 'AbortError' ? 'BUSY' : 'UNAVAILABLE',
+          message: safeMessage(error),
+        }),
+      )
     } finally {
       if (timer !== null) {
         clearTimeout(timer)

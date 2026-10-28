@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import type { AddressInfo } from 'node:net'
-import { resolve as resolvePath } from 'node:path'
+import { isAbsolute, resolve as resolvePath } from 'node:path'
 import { IdeError } from './errors.js'
 
 /**
@@ -13,14 +13,24 @@ import { IdeError } from './errors.js'
  * assigned workspace file so the daemon can bind the window to a view id.
  */
 
+export interface BridgeDocument {
+  path: string
+  text: string
+}
+
 export interface BridgeCommand {
-  op: 'changeDirectory' | 'focusTerminal' | 'closeView'
+  op: 'changeDirectory' | 'focusTerminal' | 'inspect' | 'closeView' | 'snapshot' | 'restore'
   directory?: string
+  discard?: boolean
+  maxBytes?: number
+  documents?: BridgeDocument[]
 }
 
 export interface BridgeRequestOptions {
   /** The directory the window must actually report for a changeDirectory to count as applied. */
   expectedDirectory?: string
+  /** The daemon binding the command was issued for; a newer epoch discards the late result. */
+  expectedEpoch?: string
 }
 
 export interface BridgeResult {
@@ -29,14 +39,23 @@ export interface BridgeResult {
   message?: string
   /** For a confirmed directory change, the directory the window actually reports. */
   directory?: string
+  /** Explicit clean-state observation; absent means the bridge cannot prove cleanliness. */
+  clean?: boolean
+  documents?: BridgeDocument[]
+  bytes?: number
+  omitted?: number
+  complete?: boolean
+  restored?: number
+  skipped?: number
 }
 
 export interface IdeBridge {
   readonly url: string
   readonly secret: string
-  assign(viewId: string, workspacePath: string): void
-  revoke(viewId: string): void
-  isConnected(viewId: string): boolean
+  assign(viewId: string, workspacePath: string, bindingEpoch?: string): void
+  /** Revokes only the expected epoch when supplied; an old close cannot revoke a newer binding. */
+  revoke(viewId: string, expectedEpoch?: string): void
+  isConnected(viewId: string, bindingEpoch?: string): boolean
   /** Resolves once a window stream for the view is registered; rejects when aborted or closed. */
   waitForConnection(viewId: string, signal: AbortSignal): Promise<void>
   onPty(listener: (viewId: string, pid: number) => void | Promise<void>): void
@@ -49,7 +68,10 @@ export interface IdeBridge {
   close(): Promise<void>
 }
 
-const MAX_BODY_BYTES = 64 * 1024
+const MAX_BODY_BYTES = 8 * 1024 * 1024
+const MAX_SNAPSHOT_DOCUMENTS = 256
+const MAX_SNAPSHOT_PATH_CHARS = 4096
+const MAX_COMMAND_DOCUMENTS = 256
 const COMMAND_TIMEOUT_MILLIS = 20_000
 
 function pathKey(path: string): string {
@@ -87,11 +109,13 @@ async function readBody(request: IncomingMessage): Promise<Buffer> {
 interface ViewState {
   workspacePath: string
   key: string
+  bindingEpoch: string
   stream?: ServerResponse
 }
 
 interface Pending {
   viewId: string
+  bindingEpoch: string
   op: BridgeCommand['op']
   expectedDirectory?: string
   resolve: (result: BridgeResult) => void
@@ -129,11 +153,17 @@ export async function createIdeBridge(): Promise<IdeBridge> {
 
   const resolvePending = (id: string, result: BridgeResult): void => {
     const entry = pending.get(id)
-    if (entry) {
-      pending.delete(id)
-      clearTimeout(entry.timer)
-      entry.resolve(result)
+    if (!entry) {
+      return
     }
+    pending.delete(id)
+    clearTimeout(entry.timer)
+    const current = views.get(entry.viewId)
+    if (current === undefined || current.bindingEpoch !== entry.bindingEpoch) {
+      entry.resolve({ ok: false, code: 'VIEW_GONE', message: 'view binding changed' })
+      return
+    }
+    entry.resolve(result)
   }
 
   const settleView = (viewId: string, result: BridgeResult): void => {
@@ -167,6 +197,18 @@ export async function createIdeBridge(): Promise<IdeBridge> {
     connectionWaiters.delete(viewId)
     for (const waiter of waiters) {
       waiter.resolve()
+    }
+  }
+
+  /** A binding change invalidates waiters; waiting through a newer epoch would misroute commands. */
+  const rejectWaiters = (viewId: string, error: unknown): void => {
+    const waiters = connectionWaiters.get(viewId)
+    if (!waiters) {
+      return
+    }
+    connectionWaiters.delete(viewId)
+    for (const waiter of waiters) {
+      waiter.reject(error)
     }
   }
 
@@ -283,12 +325,62 @@ export async function createIdeBridge(): Promise<IdeBridge> {
       respond(response, 204)
       return
     }
+    let documents: BridgeDocument[] | undefined
+    if ('documents' in result) {
+      if (!Array.isArray(result.documents) || result.documents.length > MAX_SNAPSHOT_DOCUMENTS) {
+        respond(response, 400, 'invalid snapshot documents')
+        return
+      }
+      documents = []
+      let bytes = 0
+      for (const document of result.documents) {
+        if (
+          typeof document !== 'object' ||
+          document === null ||
+          typeof (document as BridgeDocument).path !== 'string' ||
+          typeof (document as BridgeDocument).text !== 'string'
+        ) {
+          respond(response, 400, 'invalid snapshot document')
+          return
+        }
+        const snapshot = document as BridgeDocument
+        if (
+          !isAbsolute(snapshot.path) ||
+          snapshot.path.length > MAX_SNAPSHOT_PATH_CHARS ||
+          /[\u0000-\u001f\u007f]/.test(snapshot.path)
+        ) {
+          respond(response, 400, 'invalid snapshot path')
+          return
+        }
+        bytes += Buffer.byteLength(snapshot.text, 'utf8')
+        if (bytes > MAX_BODY_BYTES) {
+          respond(response, 413, 'snapshot exceeds bridge limit')
+          return
+        }
+        documents.push({ path: snapshot.path, text: snapshot.text })
+      }
+    }
     resolvePending(id, {
       ok: result.ok === true,
       code: typeof result.code === 'string' ? result.code : undefined,
       message: typeof result.message === 'string' ? result.message : undefined,
       // Carry the confirmed directory through so callers see what the window reported.
       directory: result.ok === true ? actualDirectory : undefined,
+      ...(typeof result.clean === 'boolean' ? { clean: result.clean } : {}),
+      ...(documents === undefined ? {} : { documents }),
+      ...(typeof result.bytes === 'number' && Number.isSafeInteger(result.bytes) && result.bytes >= 0
+        ? { bytes: result.bytes }
+        : {}),
+      ...(typeof result.omitted === 'number' && Number.isSafeInteger(result.omitted) && result.omitted >= 0
+        ? { omitted: result.omitted }
+        : {}),
+      ...(typeof result.complete === 'boolean' ? { complete: result.complete } : {}),
+      ...(typeof result.restored === 'number' && Number.isSafeInteger(result.restored) && result.restored >= 0
+        ? { restored: result.restored }
+        : {}),
+      ...(typeof result.skipped === 'number' && Number.isSafeInteger(result.skipped) && result.skipped >= 0
+        ? { skipped: result.skipped }
+        : {}),
     })
     respond(response, 204)
   }
@@ -338,18 +430,31 @@ export async function createIdeBridge(): Promise<IdeBridge> {
   return {
     url: `http://127.0.0.1:${port}`,
     secret,
-    assign(viewId, workspacePath) {
+    assign(viewId, workspacePath, bindingEpoch = '1') {
       const key = pathKey(workspacePath)
       const existing = views.get(viewId)
+      if (existing && existing.bindingEpoch !== bindingEpoch) {
+        // A new epoch invalidates the old window channel and every command still waiting on it.
+        existing.stream?.end()
+        existing.stream = undefined
+        rejectWaiters(viewId, new IdeError('view binding changed', 'VIEW_GONE'))
+      }
       if (existing && existing.key !== key) {
         byKey.delete(existing.key)
       }
-      views.set(viewId, { workspacePath, key })
+      views.set(viewId, { workspacePath, key, bindingEpoch })
       byKey.set(key, viewId)
+      if (existing !== undefined && existing.bindingEpoch !== bindingEpoch) {
+        settleView(viewId, { ok: false, code: 'VIEW_GONE', message: 'view binding changed' })
+      }
     },
-    revoke(viewId) {
-      settleView(viewId, { ok: false, message: 'ide window was closed' })
+    revoke(viewId, expectedEpoch) {
       const view = views.get(viewId)
+      if (view !== undefined && expectedEpoch !== undefined && view.bindingEpoch !== expectedEpoch) {
+        return
+      }
+      settleView(viewId, { ok: false, code: 'VIEW_GONE', message: 'ide window was closed' })
+      rejectWaiters(viewId, new IdeError('ide window was closed', 'VIEW_GONE'))
       if (view) {
         view.stream?.end()
         byKey.delete(view.key)
@@ -359,8 +464,9 @@ export async function createIdeBridge(): Promise<IdeBridge> {
     onPty(listener) {
       ptyListeners.add(listener)
     },
-    isConnected(viewId) {
-      return views.get(viewId)?.stream !== undefined
+    isConnected(viewId, bindingEpoch) {
+      const view = views.get(viewId)
+      return view?.stream !== undefined && (bindingEpoch === undefined || view.bindingEpoch === bindingEpoch)
     },
     waitForConnection(viewId, signal) {
       if (views.get(viewId)?.stream) {
@@ -400,8 +506,16 @@ export async function createIdeBridge(): Promise<IdeBridge> {
       if (!stream) {
         return Promise.reject(new IdeError('ide window is not connected'))
       }
+      if (options?.expectedEpoch !== undefined && view.bindingEpoch !== options.expectedEpoch) {
+        return Promise.reject(new IdeError('view binding changed', 'VIEW_GONE'))
+      }
       if (signal.aborted) {
         return Promise.resolve({ ok: false, message: 'ide request was cancelled' })
+      }
+      if (command.documents !== undefined) {
+        if (command.documents.length > MAX_COMMAND_DOCUMENTS) {
+          return Promise.reject(new IdeError('too many recovery documents'))
+        }
       }
       const id = randomUUID()
       return new Promise<BridgeResult>((resolve) => {
@@ -415,6 +529,7 @@ export async function createIdeBridge(): Promise<IdeBridge> {
         signal.addEventListener('abort', onAbort, { once: true })
         pending.set(id, {
           viewId,
+          bindingEpoch: view.bindingEpoch,
           op: command.op,
           expectedDirectory: options?.expectedDirectory,
           timer,

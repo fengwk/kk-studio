@@ -132,7 +132,13 @@ async function runDaemon(config: DaemonConfig): Promise<number> {
       fileChanged: (file) => lspGroup.fileChanged(file),
     })
 
-    const ide = await createIdeService(config, supervisor)
+    const ide = await createIdeService(config, supervisor, {
+      // IDE 生命周期事件必须显式落到诊断出口；消息由 service 生成且不含凭据或任意上游正文。
+      onEvent: (event) => {
+        const view = event.viewId === undefined ? '' : ` view=${event.viewId}`
+        process.stderr.write(`daemon ide ${event.kind}${view}: ${event.message}\n`)
+      },
+    })
     closers.push(() => ide.close())
 
     const capabilities: Record<string, CapabilityExecutor> = {
@@ -149,6 +155,10 @@ async function runDaemon(config: DaemonConfig): Promise<number> {
       processes: supervisor,
       environment: detectEnvironmentInfo(config, join(dataDir, 'tmp')),
       ide,
+      // IDE_LEASE 的 round 起点由 Runtime 心跳时钟传入；证明不能创建或续租视图。
+      ideLease: ide,
+      // DATA_BIND 的 mux-connection 适配器仍由 node-upstream 切片提供。该模块尚未合入时
+      // 不注册 dataBind，Runtime 对 DATA_BIND 明确报 handler 未配置，而不是伪造成功。
       // 受管更新以 supervisor 运行受控子进程；装配层绑定 native 端口。
       update: { handleUpdate: (command, cfg, signal) => handleUpdate(command, cfg, signal, supervisor) },
       // WELCOME 下发的 TTL 热更直接驱动 Files 受控临时输出的同一份 lease 清扫。

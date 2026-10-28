@@ -1,38 +1,35 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { existsSync } from 'node:fs'
-import { cp, mkdir, mkdtemp, readFile, rm, symlink } from 'node:fs/promises'
-import { createServer } from 'node:http'
-import type { AddressInfo } from 'node:net'
+import { cp, mkdtemp, mkdir, readFile, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { WebSocketServer, type WebSocket } from 'ws'
 import type { DaemonConfig, ManagedProcess, ProcessSpec, ProcessSupervisor } from '../../src/contracts.js'
 import { createProcessSupervisor } from '../../src/native/index.js'
 import { createIdeService } from '../../src/ide/service.js'
-import { decodeBinaryFrame, decodeTextFrame, encodeWsFrame } from '../../src/ide/wire.js'
+import { exchangeUpstreamWebSocket, requestUpstream } from './acceptance-helpers.js'
 import { awaitGone, isAlive } from '../native/process-test-util.js'
 
 /**
- * Opt-in acceptance test that drives the real, frozen code-server through the actual native
- * POSIX process supervisor (compiled helper), not a plain process-group wrapper.
+ * Opt-in acceptance test that drives two frozen private views through the actual native POSIX
+ * supervisor (compiled helper), not a plain process-group wrapper.
  *
- * Set KK_STUDIO_IDE_ACCEPTANCE_DIR to the extracted code-server 4.141.0 distribution (the
- * directory that contains `lib/node` and `out/node/entry.js`). This exercises the real
- * manager/bridge/wire stack, two UUID views with private `.code-workspace` files, real HTTP
- * and WebSocket data-plane exchanges against the bundled Node CLI, and proves the supervisor
- * converges the whole code-server scope on shutdown (no orphans). The model/tool plane is
- * never touched; the browser-driven two-window flow lives in the IDE acceptance suite.
+ * Set KK_STUDIO_IDE_ACCEPTANCE_DIR to the extracted code-server 4.141.0 distribution. This
+ * exercises the real manager/bridge stack, real HTTP and WebSocket exchanges (via
+ * `resolveView`), per-view close and native scope convergence on shutdown. The mux transport
+ * and browser flow are covered by their own slices.
  */
 
 const ACCEPTANCE_DIR = process.env.KK_STUDIO_IDE_ACCEPTANCE_DIR
 const VIEW_ONE = '11111111-1111-4111-8111-111111111111'
 const VIEW_TWO = '22222222-2222-4222-8222-222222222222'
+const DOCUMENT_ONE = '33333333-4444-4555-8666-777777777777'
+const DOCUMENT_TWO = '44444444-5555-4666-8777-888888888888'
 
-const cleans: (() => Promise<void> | void)[] = []
+const cleanups: (() => Promise<void> | void)[] = []
 afterEach(async () => {
-  for (const clean of cleans.splice(0).reverse()) {
-    await clean()
+  for (const cleanup of cleanups.splice(0).reverse()) {
+    await cleanup()
   }
 })
 
@@ -77,18 +74,9 @@ function createObservedSupervisor(): ObservedSupervisor {
   return { supervisor, pids }
 }
 
-interface Captured {
-  status?: number
-  headers: [string, string][]
-  body: string
-  ended: boolean
-  errors: string[]
-  wsMessages: string[]
-}
-
 async function createDistribution(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'kk-ide-native-'))
-  cleans.push(() => rm(root, { recursive: true, force: true }))
+  cleanups.push(() => rm(root, { recursive: true, force: true }))
   await mkdir(join(root, 'runtime'), { recursive: true })
   await symlink(ACCEPTANCE_DIR as string, join(root, 'runtime', 'code-server'), 'dir')
   const extensionSource = fileURLToPath(new URL('../../ide-extension', import.meta.url))
@@ -96,13 +84,13 @@ async function createDistribution(): Promise<string> {
   return root
 }
 
-function makeConfig(distributionDir: string, gatewayHost: string): DaemonConfig {
+function makeConfig(distributionDir: string): DaemonConfig {
   return {
     configPath: join(distributionDir, 'daemon.json'),
     dataDir: join(distributionDir, 'data'),
     tokenPath: join(distributionDir, 'daemon.token'),
-    studioUrl: `http://${gatewayHost}`,
-    gatewayUri: `ws://${gatewayHost}/api/harness/environment-daemon/v1`,
+    studioUrl: 'http://127.0.0.1:9999',
+    gatewayUri: 'ws://127.0.0.1:9999/api/harness/environment-daemon/v1',
     bashExecutable: 'bash',
     note: null,
     lsp: {},
@@ -112,102 +100,60 @@ function makeConfig(distributionDir: string, gatewayHost: string): DaemonConfig 
 
 const signal = (): AbortSignal => new AbortController().signal
 
-interface Gateway {
-  host: string
-  endpoint: string
-  captured: Captured
-  sockets: WebSocket[]
-  close(): Promise<void>
-}
-
-async function createGateway(): Promise<Gateway> {
-  const server = createServer()
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
-  const port = (server.address() as AddressInfo).port
-  const wss = new WebSocketServer({ server })
-  const captured: Captured = { headers: [], body: '', ended: false, errors: [], wsMessages: [] }
-  const sockets: WebSocket[] = []
-  wss.on('connection', (socket) => {
-    sockets.push(socket)
-    socket.on('error', (error) => captured.errors.push(error.message))
-    socket.on('message', (data, isBinary) => {
-      if (!isBinary) {
-        const frame = decodeTextFrame(data.toString('utf8'))
-        if (frame.type === 'HTTP_RESPONSE') {
-          captured.status = frame.status
-          captured.headers = frame.headers
-        } else if (frame.type === 'ERROR') {
-          captured.errors.push(frame.message)
-        }
-        return
-      }
-      const frame = decodeBinaryFrame(data as Buffer)
-      if (frame.kind === 'http-body') {
-        captured.body += frame.payload.toString('utf8')
-      } else if (frame.kind === 'http-end') {
-        captured.ended = true
-        socket.close(1000)
-      } else if (frame.kind === 'ws-text' || frame.kind === 'ws-binary') {
-        captured.wsMessages.push(frame.payload.toString('utf8'))
-      }
-    })
-  })
-  const host = `127.0.0.1:${port}`
-  const gateway: Gateway = {
-    host,
-    endpoint: `/api/harness/environment-stream/v1/ticket-native`,
-    captured,
-    sockets,
-    async close() {
-      for (const client of wss.clients) {
-        client.terminate()
-      }
-      await new Promise<void>((resolve) => wss.close(() => server.close(() => resolve())))
-    },
-  }
-  cleans.push(() => gateway.close())
-  return gateway
-}
-
-function reset(captured: Captured): void {
-  captured.status = undefined
-  captured.headers = []
-  captured.body = ''
-  captured.ended = false
-  captured.errors = []
-  captured.wsMessages = []
-}
-
 describe.skipIf(!ACCEPTANCE_DIR)('real code-server over the native supervisor', () => {
   it(
-    'runs two private views through the real data plane and converges the native scope on close',
+    'runs two private views and converges the native scope on close',
     async () => {
       const distribution = await createDistribution()
       const observed = createObservedSupervisor()
-      cleans.push(() => observed.supervisor.close())
-      const gateway = await createGateway()
+      cleanups.push(() => observed.supervisor.close())
+      const service = await createIdeService(makeConfig(distribution), observed.supervisor)
+      cleanups.push(() => service.close())
 
-      const service = await createIdeService(makeConfig(distribution, gateway.host), observed.supervisor)
-      cleans.push(() => service.close())
-
-      // Two UUID views with separate managed workspace identities over the same, real on-disk dirs.
       const dirOne = join(distribution, 'workspace-one')
       const dirTwo = join(distribution, 'workspace-two')
       await mkdir(dirOne, { recursive: true })
       await mkdir(dirTwo, { recursive: true })
 
-      const one = await service.handle({ action: 'OPEN_VIEW', viewId: VIEW_ONE, directory: dirOne }, signal())
+      const claimOne = '55555555-6666-4777-8888-999999999999'
+      const claimTwo = '66666666-7777-4888-8999-aaaaaaaaaaaa'
+      const one = await service.handle(
+        {
+          action: 'OPEN_VIEW',
+          viewId: VIEW_ONE,
+          documentId: DOCUMENT_ONE,
+          eventNodeId: '77777777-8888-4999-8aaa-bbbbbbbbbbbb',
+          connectionId: '88888888-9999-4aaa-8bbb-cccccccccccc',
+          claimId: claimOne,
+          mode: 'create',
+          directory: dirOne,
+        },
+        signal(),
+      )
       expect(one.ok).toBe(true)
-      expect(one.workspacePath).toBe(join(distribution, 'data', 'ide', 'views', `${VIEW_ONE}.code-workspace`))
-      const two = await service.handle({ action: 'OPEN_VIEW', viewId: VIEW_TWO, directory: dirTwo }, signal())
+      const two = await service.handle(
+        {
+          action: 'OPEN_VIEW',
+          viewId: VIEW_TWO,
+          documentId: DOCUMENT_TWO,
+          eventNodeId: '99999999-aaaa-4bbb-8ccc-dddddddddddd',
+          connectionId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+          claimId: claimTwo,
+          mode: 'create',
+          directory: dirTwo,
+        },
+        signal(),
+      )
       expect(two.ok).toBe(true)
       expect(two.workspacePath).not.toBe(one.workspacePath)
 
-      // Managed workspace files point at the real, canonical folders and never share identity.
-      expect(JSON.parse(await readFile(one.workspacePath as string, 'utf8'))).toEqual({ folders: [{ path: dirOne }] })
-      expect(JSON.parse(await readFile(two.workspacePath as string, 'utf8'))).toEqual({ folders: [{ path: dirTwo }] })
+      expect(JSON.parse(await readFile(one.workspacePath as string, 'utf8'))).toEqual({
+        folders: [{ path: dirOne }],
+      })
+      expect(JSON.parse(await readFile(two.workspacePath as string, 'utf8'))).toEqual({
+        folders: [{ path: dirTwo }],
+      })
 
-      // Exactly one code-server process backs both views, launched through the native scope.
       const extensionManifest = join(
         distribution,
         'data',
@@ -222,49 +168,53 @@ describe.skipIf(!ACCEPTANCE_DIR)('real code-server over the native supervisor', 
       expect(observed.pids.length).toBe(1)
       expect(isAlive(observed.pids[0] as number)).toBe(true)
 
-      // Real health probe proxied through the reverse data plane.
-      const healthy = await service.handle(
-        { action: 'OPEN_STREAM', viewId: VIEW_ONE, streamUrl: gateway.endpoint, ticket: 'ticket-native', mode: 'HTTP', method: 'GET', path: '/healthz', headers: [] },
+      const health = await requestUpstream(
+        await service.resolveView(VIEW_ONE, one.bindingEpoch as string, {
+          mode: 'HTTP',
+          method: 'GET',
+          path: '/healthz',
+          headers: [],
+        }),
+      )
+      expect(health.status).toBe(200)
+      expect(health.body).toContain('"status":"alive"')
+
+      const workbench = await requestUpstream(
+        await service.resolveView(VIEW_TWO, two.bindingEpoch as string, {
+          mode: 'HTTP',
+          method: 'GET',
+          path: '/',
+          headers: [],
+        }),
+      )
+      expect(workbench.status).toBe(200)
+      expect(workbench.body.toLowerCase()).toContain('<html')
+
+      const message = await exchangeUpstreamWebSocket(
+        await service.resolveView(VIEW_ONE, one.bindingEpoch as string, {
+          mode: 'WS',
+          method: 'GET',
+          path: '/healthz',
+          headers: [],
+        }),
+        'ping',
+      )
+      expect(message).toContain('"event":"health"')
+
+      const closed = await service.handle(
+        {
+          action: 'CLOSE_VIEW',
+          viewId: VIEW_ONE,
+          documentId: DOCUMENT_ONE,
+          bindingEpoch: one.bindingEpoch as string,
+          discard: true,
+        },
         signal(),
       )
-      expect(healthy.ok).toBe(true)
-      await waitFor(() => gateway.captured.ended)
-      expect(gateway.captured.status).toBe(200)
-      expect(gateway.captured.body).toContain('"status":"alive"')
-
-      // The authenticated workbench HTML is served from the real process through the same plane.
-      reset(gateway.captured)
-      const workbench = await service.handle(
-        { action: 'OPEN_STREAM', viewId: VIEW_TWO, streamUrl: gateway.endpoint, ticket: 'ticket-native', mode: 'HTTP', method: 'GET', path: '/', headers: [] },
-        signal(),
-      )
-      expect(workbench.ok).toBe(true)
-      await waitFor(() => gateway.captured.ended)
-      expect(gateway.captured.status).toBe(200)
-      expect(gateway.captured.body.toLowerCase()).toContain('<html')
-
-      // A real WebSocket upgrade is proxied and answered by code-server's health route.
-      reset(gateway.captured)
-      const beforeSockets = gateway.sockets.length
-      const wsStream = service.handle(
-        { action: 'OPEN_STREAM', viewId: VIEW_ONE, streamUrl: gateway.endpoint, ticket: 'ticket-native', mode: 'WS', method: 'GET', path: '/healthz', headers: [] },
-        signal(),
-      )
-      await waitFor(() => gateway.sockets.length > beforeSockets)
-      const wsSocket = gateway.sockets[gateway.sockets.length - 1] as WebSocket
-      wsSocket.send(encodeWsFrame('text', Buffer.from('ping'), true))
-      await waitFor(() => gateway.captured.wsMessages.length > 0)
-      expect(gateway.captured.wsMessages.join('')).toContain('"event":"health"')
-      wsSocket.close()
-      expect((await wsStream).ok).toBe(true)
-
-      // Closing one view removes only its managed workspace; the other view remains open.
-      const closed = await service.handle({ action: 'CLOSE_VIEW', viewId: VIEW_ONE }, signal())
       expect(closed.ok).toBe(true)
       await waitFor(() => !existsSync(one.workspacePath as string))
       expect(existsSync(two.workspacePath as string)).toBe(true)
 
-      // Shutdown converges the entire native scope: no code-server helper survives.
       const codeServerPid = observed.pids[0] as number
       await service.close()
       await observed.supervisor.close()

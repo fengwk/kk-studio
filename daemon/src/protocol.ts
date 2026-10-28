@@ -1,6 +1,6 @@
 import { visit as jsoncVisit, type JSONPath } from 'jsonc-parser'
 
-import type { CapabilityResult, ExpectedFile, IdeCommand, IdeReply, ResultContent } from './contracts.js'
+import type { CapabilityResult, ExpectedFile, IdeCommand, IdeReply, IdeViewSummary, ResultContent } from './contracts.js'
 import { parseReleaseArtifactUrl } from './release.js'
 import {
   ARCHITECTURES,
@@ -1348,96 +1348,242 @@ export function decodeUpdateResult(text: string): UpdateResult {
 // IDE metadata (IDE_COMMAND / IDE_RESULT)
 // ---------------------------------------------------------------------------
 
-const IDE_ACTIONS = new Set(['OPEN_VIEW', 'CHANGE_DIRECTORY', 'FOCUS_TERMINAL', 'CLOSE_VIEW', 'OPEN_STREAM'])
-const IDE_COMMAND_FIELDS = new Set([
-  'action',
+const IDE_ACTIONS = new Set(['OPEN_VIEW', 'CHANGE_DIRECTORY', 'FOCUS_TERMINAL', 'CLOSE_VIEW', 'DETACH_VIEW', 'LIST_VIEWS'])
+const IDE_VIEW_FIELDS = ['viewId', 'documentId', 'eventNodeId', 'connectionId', 'claimId', 'bindingEpoch'] as const
+const IDE_OPEN_FIELDS = new Set(['action', 'viewId', 'documentId', 'eventNodeId', 'connectionId', 'claimId', 'mode', 'directory'])
+const IDE_BOUND_FIELDS = new Set(['action', 'viewId', 'documentId', 'bindingEpoch'])
+const IDE_CHANGE_FIELDS = new Set([...IDE_BOUND_FIELDS, 'directory'])
+const IDE_CLOSE_FIELDS = new Set(['action', 'viewId', 'documentId', 'bindingEpoch', 'discard'])
+const IDE_LIST_FIELDS = new Set(['action'])
+const IDE_REPLY_FIELDS = new Set([
+  'ok',
+  'code',
+  'message',
   'viewId',
+  'documentId',
+  'eventNodeId',
+  'connectionId',
+  'claimId',
+  'bindingEpoch',
   'directory',
-  'ticket',
-  'streamUrl',
-  'mode',
-  'method',
-  'path',
-  'headers',
+  'workspacePath',
+  'views',
 ])
-const IDE_REPLY_FIELDS = new Set(['ok', 'viewId', 'directory', 'workspacePath', 'message'])
+const IDE_VIEW_SUMMARY_FIELDS = new Set([
+  'viewId',
+  'documentId',
+  'eventNodeId',
+  'connectionId',
+  'claimId',
+  'bindingEpoch',
+  'directory',
+  'workspacePath',
+  'state',
+])
+const IDE_REPLY_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/
+const IDE_MAX_MESSAGE_CHARS = 500
+const IDE_MAX_PATH_CHARS = 4096
+const MAX_LISTED_IDE_VIEWS = 64
+
+function boundedIdeText(value: unknown, field: string, context: string, maximum: number): string {
+  if (typeof value !== 'string' || value.trim() === '' || value.length > maximum) {
+    throw new ProtocolError(`${context}.${field} must be a bounded non-blank string`)
+  }
+  if (/[\u0000-\u001f\u007f]/.test(value)) {
+    throw new ProtocolError(`${context}.${field} must not contain control characters`)
+  }
+  return value
+}
+
+function ideUuid(value: Record<string, unknown>, field: string, context: string): string {
+  return requiredCanonicalUuid(value, field, context)
+}
+
+function ideEpoch(value: Record<string, unknown>, field: string, context: string): string {
+  return requirePositiveDecimal(value[field], `${context}.${field}`)
+}
+
+function ideDirectory(root: Record<string, unknown>, context: string): string | undefined {
+  if (!('directory' in root)) {
+    return undefined
+  }
+  return boundedIdeText(root.directory, 'directory', context, IDE_MAX_PATH_CHARS)
+}
 
 export function decodeIdeCommand(text: string): IdeCommand {
   const root = parseStrictObject(text, 'IDE command payload', ENVELOPE_LIMITS)
-  rejectUnknownFields(root, IDE_COMMAND_FIELDS, 'IDE command')
   const action = requiredText(root, 'action', 'IDE command')
   if (!IDE_ACTIONS.has(action)) {
     throw new ProtocolError(`IDE command.action is unknown: ${action}`)
   }
-  const command: IdeCommand = { action: action as IdeCommand['action'] }
-  for (const field of ['viewId', 'directory', 'ticket', 'streamUrl', 'method', 'path'] as const) {
-    const value = optionalText(root, field, 'IDE command')
-    if (value !== null) {
-      if (value.trim() === '') {
-        throw new ProtocolError(`IDE command.${field} must not be blank`)
+  switch (action) {
+    case 'OPEN_VIEW': {
+      rejectUnknownFields(root, IDE_OPEN_FIELDS, 'IDE command')
+      const mode = requiredText(root, 'mode', 'IDE command')
+      if (mode !== 'create' && mode !== 'resume') {
+        throw new ProtocolError(`IDE command.mode is unknown: ${mode}`)
       }
-      command[field] = value
-    }
-  }
-  const mode = optionalText(root, 'mode', 'IDE command')
-  if (mode !== null) {
-    if (mode !== 'HTTP' && mode !== 'WS') {
-      throw new ProtocolError(`IDE command.mode is unknown: ${mode}`)
-    }
-    command.mode = mode
-  }
-  if ('headers' in root && root.headers !== null) {
-    const headers = root.headers
-    if (!Array.isArray(headers)) {
-      throw new ProtocolError('IDE command.headers must be an array of [name, value] pairs')
-    }
-    const pairs: [string, string][] = []
-    for (const entry of headers) {
-      if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== 'string' || typeof entry[1] !== 'string') {
-        throw new ProtocolError('IDE command.headers must be an array of [name, value] pairs')
+      const directory = ideDirectory(root, 'IDE command')
+      return {
+        action: 'OPEN_VIEW',
+        viewId: ideUuid(root, 'viewId', 'IDE command'),
+        documentId: ideUuid(root, 'documentId', 'IDE command'),
+        eventNodeId: ideUuid(root, 'eventNodeId', 'IDE command'),
+        connectionId: ideUuid(root, 'connectionId', 'IDE command'),
+        claimId: ideUuid(root, 'claimId', 'IDE command'),
+        mode,
+        ...(directory === undefined ? {} : { directory }),
       }
-      pairs.push([entry[0], entry[1]])
     }
-    command.headers = pairs
+    case 'CHANGE_DIRECTORY': {
+      rejectUnknownFields(root, IDE_CHANGE_FIELDS, 'IDE command')
+      const directory = ideDirectory(root, 'IDE command')
+      if (directory === undefined) {
+        throw new ProtocolError('IDE command.directory is required')
+      }
+      return {
+        action: 'CHANGE_DIRECTORY',
+        viewId: ideUuid(root, 'viewId', 'IDE command'),
+        documentId: ideUuid(root, 'documentId', 'IDE command'),
+        bindingEpoch: ideEpoch(root, 'bindingEpoch', 'IDE command'),
+        directory,
+      }
+    }
+    case 'FOCUS_TERMINAL':
+    case 'DETACH_VIEW':
+      rejectUnknownFields(root, IDE_BOUND_FIELDS, 'IDE command')
+      return {
+        action,
+        viewId: ideUuid(root, 'viewId', 'IDE command'),
+        documentId: ideUuid(root, 'documentId', 'IDE command'),
+        bindingEpoch: ideEpoch(root, 'bindingEpoch', 'IDE command'),
+      }
+    case 'CLOSE_VIEW':
+      rejectUnknownFields(root, IDE_CLOSE_FIELDS, 'IDE command')
+      return {
+        action: 'CLOSE_VIEW',
+        viewId: ideUuid(root, 'viewId', 'IDE command'),
+        documentId: ideUuid(root, 'documentId', 'IDE command'),
+        bindingEpoch: ideEpoch(root, 'bindingEpoch', 'IDE command'),
+        discard: requiredBoolean(root, 'discard', 'IDE command'),
+      }
+    case 'LIST_VIEWS':
+      rejectUnknownFields(root, IDE_LIST_FIELDS, 'IDE command')
+      return { action: 'LIST_VIEWS' }
+    default:
+      throw new ProtocolError(`IDE command.action is unknown: ${action}`)
   }
-  return command
+}
+
+function ideCommandValue(command: IdeCommand): IdeCommand {
+  return decodeIdeCommand(JSON.stringify(command))
 }
 
 export function encodeIdeCommand(command: IdeCommand): string {
-  const root: Record<string, unknown> = { action: command.action }
-  for (const field of ['viewId', 'directory', 'ticket', 'streamUrl', 'mode', 'method', 'path'] as const) {
-    if (command[field] !== undefined) {
-      root[field] = command[field]
+  return JSON.stringify(ideCommandValue(command))
+}
+
+function ideViewSummary(value: unknown, context: string): IdeViewSummary {
+  if (!isPlainObject(value)) {
+    throw new ProtocolError(`${context} must be a JSON object`)
+  }
+  rejectUnknownFields(value, IDE_VIEW_SUMMARY_FIELDS, context)
+  const state = requiredText(value, 'state', context)
+  if (state !== 'OPEN' && state !== 'CLOSING') {
+    throw new ProtocolError(`${context}.state is unknown: ${state}`)
+  }
+  return {
+    viewId: ideUuid(value, 'viewId', context),
+    documentId: ideUuid(value, 'documentId', context),
+    eventNodeId: ideUuid(value, 'eventNodeId', context),
+    connectionId: ideUuid(value, 'connectionId', context),
+    claimId: ideUuid(value, 'claimId', context),
+    bindingEpoch: ideEpoch(value, 'bindingEpoch', context),
+    directory: boundedIdeText(value.directory, 'directory', context, IDE_MAX_PATH_CHARS),
+    workspacePath: boundedIdeText(value.workspacePath, 'workspacePath', context, IDE_MAX_PATH_CHARS),
+    state,
+  }
+}
+
+function ideOpenReply(root: Record<string, unknown>): IdeReply {
+  const required = [...IDE_VIEW_FIELDS, 'directory', 'workspacePath'] as const
+  for (const field of required) {
+    if (!(field in root)) {
+      throw new ProtocolError(`IDE result.${field} is required for a view binding`)
     }
   }
-  if (command.headers !== undefined) {
-    root.headers = command.headers
+  rejectUnknownFields(root, new Set(['ok', ...required]), 'IDE result')
+  return {
+    ok: true,
+    viewId: ideUuid(root, 'viewId', 'IDE result'),
+    documentId: ideUuid(root, 'documentId', 'IDE result'),
+    eventNodeId: ideUuid(root, 'eventNodeId', 'IDE result'),
+    connectionId: ideUuid(root, 'connectionId', 'IDE result'),
+    claimId: ideUuid(root, 'claimId', 'IDE result'),
+    bindingEpoch: ideEpoch(root, 'bindingEpoch', 'IDE result'),
+    directory: boundedIdeText(root.directory, 'directory', 'IDE result', IDE_MAX_PATH_CHARS),
+    workspacePath: boundedIdeText(root.workspacePath, 'workspacePath', 'IDE result', IDE_MAX_PATH_CHARS),
   }
-  return JSON.stringify(root)
+}
+
+function ideReplyValue(raw: unknown): IdeReply {
+  if (!isPlainObject(raw)) {
+    throw new ProtocolError('IDE result payload must be a JSON object')
+  }
+  rejectUnknownFields(raw, IDE_REPLY_FIELDS, 'IDE result')
+  const ok = requiredBoolean(raw, 'ok', 'IDE result')
+  if (!ok) {
+    rejectUnknownFields(raw, new Set(['ok', 'code', 'message']), 'IDE result')
+    const code = boundedIdeText(raw.code, 'code', 'IDE result', 64)
+    if (!IDE_REPLY_CODE_PATTERN.test(code)) {
+      throw new ProtocolError('IDE result.code must be a safe uppercase token')
+    }
+    return {
+      ok: false,
+      code,
+      message: boundedIdeText(raw.message, 'message', 'IDE result', IDE_MAX_MESSAGE_CHARS),
+    }
+  }
+  if ('code' in raw || 'message' in raw) {
+    throw new ProtocolError('IDE result success must not declare code or message')
+  }
+  if ('views' in raw) {
+    rejectUnknownFields(raw, new Set(['ok', 'views']), 'IDE result')
+    if (!Array.isArray(raw.views)) {
+      throw new ProtocolError('IDE result.views must be an array')
+    }
+    if (raw.views.length > MAX_LISTED_IDE_VIEWS) {
+      throw new ProtocolError(`IDE result.views must not exceed ${MAX_LISTED_IDE_VIEWS} entries`)
+    }
+    const views: IdeViewSummary[] = []
+    const viewIds = new Set<string>()
+    for (let index = 0; index < raw.views.length; index++) {
+      const view = ideViewSummary(raw.views[index], `IDE result.views[${index}]`)
+      if (viewIds.has(view.viewId)) {
+        throw new ProtocolError('IDE result.views must not repeat viewId')
+      }
+      viewIds.add(view.viewId)
+      views.push(view)
+    }
+    return { ok: true, views }
+  }
+  if (IDE_VIEW_FIELDS.some((field) => field in raw)) {
+    return ideOpenReply(raw)
+  }
+  if ('viewId' in raw) {
+    rejectUnknownFields(raw, new Set(['ok', 'viewId']), 'IDE result')
+    return { ok: true, viewId: ideUuid(raw, 'viewId', 'IDE result') }
+  }
+  rejectUnknownFields(raw, new Set(['ok']), 'IDE result')
+  return { ok: true }
 }
 
 export function encodeIdeReply(reply: IdeReply): string {
-  const root: Record<string, unknown> = { ok: reply.ok }
-  for (const field of ['viewId', 'directory', 'workspacePath', 'message'] as const) {
-    if (reply[field] !== undefined) {
-      root[field] = reply[field]
-    }
-  }
-  return JSON.stringify(root)
+  return JSON.stringify(ideReplyValue(reply))
 }
 
 export function decodeIdeReply(text: string): IdeReply {
-  const root = parseStrictObject(text, 'IDE result payload', ENVELOPE_LIMITS)
-  rejectUnknownFields(root, IDE_REPLY_FIELDS, 'IDE result')
-  const ok = requiredBoolean(root, 'ok', 'IDE result')
-  const reply: IdeReply = { ok }
-  for (const field of ['viewId', 'directory', 'workspacePath', 'message'] as const) {
-    const value = optionalText(root, field, 'IDE result')
-    if (value !== null) {
-      reply[field] = value
-    }
-  }
-  return reply
+  return ideReplyValue(parseStrictObject(text, 'IDE result payload', ENVELOPE_LIMITS))
 }
 
 // ---------------------------------------------------------------------------
