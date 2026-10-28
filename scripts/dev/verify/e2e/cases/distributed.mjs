@@ -28,7 +28,7 @@ registerCase({
   level: 'L5',
   title: '双节点共享状态：跨节点 Environment 创建/token 轮换 CAS/删除与 404',
   requires: ['distributed'],
-  docs: '在 node A 创建临时 Environment Card，在 node B 读取并轮换 registrationToken（CAS 推进 version、name 恒定），回 node A 用陈旧 version 轮换得 409、用新 version 轮换取到不同 token，再跨节点删除并在两节点验证 404；finally 尽力清理，禁止将一次性 registrationToken 写入 artifact/log',
+  docs: '在 node A 创建临时 Environment Card，在 node B 读取并轮换 registrationToken（CAS 推进 version、name 恒定），回 node A 用陈旧 version 轮换得 409、用新 version 轮换取到不同 token；只读 registration token 端点已删除（404），token 只在创建/轮换/安装码兑换时返回；再跨节点删除并在两节点验证 404；finally 尽力清理，禁止将一次性 registrationToken 写入 artifact/log',
   async run(ctx) {
     assertDistributedContext(ctx)
 
@@ -103,22 +103,15 @@ registerCase({
       assertDecimalVersion(rotatedOnA.version, 'rotatedOnA.version')
       latestVersion = rotatedOnA.version
 
-      // 4b. 只读 token 端点跨节点一致：返回当前值，且绝不推进 version
-      const tokenOnBRes = await ctx.callNode(
-        'b',
-        'GET',
-        `/api/environments/${encodeURIComponent(createdId)}/token`,
-      )
-      const tokenOnB = envelopeData(tokenOnBRes.json)
-      assert(tokenOnB.id === createdId, 'node B token read: id mismatch')
-      assert(tokenOnB.version === latestVersion, 'node B token read: version mismatch')
-      assert(
-        tokenOnB.registrationToken === rotatedOnA.registrationToken,
-        'node B token read: must observe the value written by node A',
-      )
-      assert(
-        tokenOnBRes.headers.get('cache-control') === 'no-store',
-        `expected Cache-Control no-store, got ${tokenOnBRes.headers.get('cache-control')}`,
+      // 4b. 只读 registration token 端点已删除：token 只在创建、轮换与安装码兑换时返回
+      await expectHttpError(
+        () =>
+          ctx.callNode(
+            'b',
+            'GET',
+            `/api/environments/${encodeURIComponent(createdId)}/token`,
+          ),
+        { status: 404 },
       )
 
       // 4c. 改名端点已彻底移除：Environment name 是不可变身份
@@ -194,7 +187,7 @@ registerCase({
   level: 'L5',
   title: '双节点租约路由：DB 权威投影跨节点一致',
   requires: ['distributed'],
-  docs: '固定环境 distributed-a=33333333-3333-3333-3333-333333333333 连 app-a，distributed-b=44444444-4444-4444-4444-444444444444 连 app-b；两个 App 都投影两者 READY，且同一 Environment 在两个节点上的 id/name/version/status/ready/userName/homeDirectory/capabilities 逐项一致（路由事实来自 DB，不依赖本机 websocket），coding capability 为 fs.read@2',
+  docs: '固定环境 distributed-a=33333333-3333-3333-3333-333333333333 连 app-a，distributed-b=44444444-4444-4444-4444-444444444444 连 app-b；两个 App 都投影两者 READY，且同一 Environment 在两个节点上的 id/name/version/status/ready/userName/homeDirectory/capabilities 逐项一致（路由事实来自 DB，不依赖本机 websocket），coding capability 为 fs.read@3',
   async run(ctx) {
     assertDistributedContext(ctx)
 
@@ -230,7 +223,7 @@ registerCase({
         fromA.homeDirectory === fromB.homeDirectory && fromA.userName === fromB.userName,
         `${label}: host facts must come from DB routing, not the caller's local socket`,
       )
-      // live 投影的原子能力来自权威 catalog，因此必然包含 descriptor version=2（即 catalog VERSION）的 coding capability。
+      // live 投影的原子能力来自权威 catalog 3。
       const capabilityKey = (card) =>
         (card.capabilities || [])
           .map((capability) => `${capability.id}@${capability.version}`)
@@ -242,9 +235,9 @@ registerCase({
       )
       assert(
         (fromA.capabilities || []).some(
-          (capability) => capability.id === 'fs.read' && capability.version === '2',
+          (capability) => capability.id === 'fs.read' && capability.version === '3',
         ),
-        `${label}: coding capabilities must advertise fs.read@2, got ${capabilityKey(fromA)}`,
+        `${label}: coding capabilities must advertise fs.read@3, got ${capabilityKey(fromA)}`,
       )
     }
 

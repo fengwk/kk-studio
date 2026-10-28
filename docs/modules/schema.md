@@ -28,7 +28,7 @@ V1 写入单行 SystemSettings 默认聚合；Java 解码与 profile 默认契�
 | Catalog | agent_provider、agent_model（MODEL/GROUP 共用名称空间）、agent_model_group_cooldown、agent_definition、skill_package | [Platform Catalog](platform.md#catalog) |
 | Plugin | plugin_configuration：每个 Plugin 的当前普通配置与修订；plugin_credential：凭据载荷、状态、refresh lease；plugin_auth_attempt：待完成的交互式认证 | [Plugin 配置存储](platform.md#plugin-配置存储)、[Plugin credential](platform.md#plugin-credential) |
 | MCP | mcp_server、mcp_tool：配置与原子发现快照 | [Platform MCP](platform.md#mcp-server-与运行时工具目录) |
-| Environment | environment、environment_connection：注册与环境路由租约、保存的安装设置（`install_config`）、宿主/Skill 投影；environment_install_code：临时一次性安装 code 摘要与有效期；environment_update_operation：受管更新操作；cluster_node：App 节点内部 IDE 路由 origin 与心跳租约 | [Environment](harness-environment.md) |
+| Environment | environment：注册身份、保存的安装设置（`install_config`）与一次性安装 code 摘要（`install_code`）；environment_connection：环境路由租约、最近 READY 宿主信息、Skill 同步投影与运维事件；cluster_node：App 节点内部 IDE 路由 origin 与心跳租约 | [Environment](harness-environment.md) |
 | Chat | chat、chat_session：owner 关系 | [Platform](platform.md#命令接受产品归属与派发) |
 | Canvas | canvas_document/group/node/resource、function_run、command_dedup、function_resource_pin | [Canvas](canvas.md) |
 | Project | project、project_issue 与 agent_thread/stage_budget/run/activity/evidence | [Project](project.md) |
@@ -66,9 +66,13 @@ Work lease 成对，required_environment_id 非空仅适用于 TOOL。Fill First
 费用按实际执行的单模型配置读取。Harness 的 Entry `payload` jsonb 保存 assistant 用量（`stopReason` / `usage` / 可选 `decodeDurationMillis`）与压缩摘要等事实，schema 不设金额或价格列；费用由应用在读取时按当前 catalog 现算。
 `environment.install_config` 只允许 NULL 或 JSON object；数据库只兜底这一形状，字段结构与取值由
 应用 codec 在读写时校验，非法的历史行会在读取时失败而不是被宽容读出。
-`environment_install_code` 以环境 ID 为主键并级联删除，只保存随机一次性安装 code 的 SHA-256、
-签发时的注册凭证摘要及有效期；新签发覆盖旧记录，兑换要求凭证代际一致且严格未过期，并原子删除。
-该临时表不参与配置导出，不保存 code 明文。
+`environment.install_code` 是同一行上的 jsonb 列，只保存随机一次性安装 code 的 SHA-256 摘要与
+UTC 失效时间（对象只有 `codeHash` 与 `expiresAt` 两个键），null 表示没有未核销的 code；
+CHECK 只兜底对象形状、摘要格式与时间格式。签发按版本 CAS 覆盖旧值且不推进版本；
+兑换要求注册凭证代际一致、摘要匹配且严格未过期，成功后原子清空该列并推进版本；
+任何注册凭证变更在同一条 UPDATE 中清空它。该列不参与配置导出，不保存 code 明文。
+Environment 的当前运行状态与更新进度不入库：只存在于 Daemon 内存与 Server 当前控制代际的缓存，
+没有更新历史表，也没有历史查询接口。
 
 ACTIVE Blob 必须有正引用，DELETING 必须零引用，ACTIVE 内容以 hash/size 部分唯一。
 PENDING upload 的 candidate id 在 complete 创建 Blob 后才绑定真实外键。
@@ -83,8 +87,8 @@ Plugin 配置与凭据写入也在同一事务发出 `plugin_changed`。
 
 修改 V1 后同步领域校验、mapper、结构测试与新库安装测试。
 已有数据库记录 Flyway checksum，源码变更须通过批准的数据库维护操作才能应用；
-当前 V1 的插件表与 ThreadJoin 结构需要空库初始化或批准的迁移与备份，不能用 `flyway repair`
-代替结构转换。ThreadJoin 不再保存 `counts_toward_quota`，已匹配的 `NOTIFY_PARENT` 行必须同时具有
+当前 V1 的插件表、ThreadJoin 与 Environment 安装 code/更新操作结构需要空库初始化或批准的迁移与备份，
+不能用 `flyway repair` 代替结构转换。ThreadJoin 不再保存 `counts_toward_quota`，已匹配的 `NOTIFY_PARENT` 行必须同时具有
 交付命令序号；既有库不能仅更新应用镜像后继续启动。应用发布本身不授权修改已有库。
 共享环境的 Review、维护窗口、备份保密与恢复步骤以
 [共享数据库重建](../operations/development-and-testing.md#共享数据库重建) 为准。

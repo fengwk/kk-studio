@@ -22,7 +22,7 @@ import {
  * - PUT  /api/threads/{id}/tool-invocations/{toolInvocationId}/approval
  * - PUT  /api/sessions/{id}/name       {name}（200 权威 HarnessSessionDTO）
  * - PUT  /api/threads/{id}/name        {name}（200 权威 HarnessThreadDTO）
- * - WS   /api/events/v1                        应用级 Thread/Canvas 事件订阅
+ * - WS   /api/events/v2                        应用级 Thread/Canvas 事件订阅
  * - GET  /api/environments             只读 Environment 注册表（Card UUID id = canonical 路由身份）
  *
  * 创建型 owner 只接受 CHAT（ISSUE_AGENT 由 Issue 业务工作流拥有）；已有 Thread 的 Continue/Preview 不再需要 owner：
@@ -1177,7 +1177,7 @@ async function waitForModelDeltaAfterEventSubscribed(
   try {
     await waitForSocketOpen(socket, deadline, controller.signal)
     socket.send(JSON.stringify({
-      version: 1,
+      version: 2,
       type: 'subscribe',
       resource: { kind: 'thread', id: expectedThreadId },
     }))
@@ -1187,7 +1187,7 @@ async function waitForModelDeltaAfterEventSubscribed(
       controller.signal,
       (frame) => {
         if (
-          frame?.version === 1
+          frame?.version === 2
           && frame.type === 'subscribed'
           && sameThreadResource(frame.resource, expectedThreadId)
           && /^(0|[1-9]\d*)$/.test(String(frame.cursor ?? ''))
@@ -1205,7 +1205,7 @@ async function waitForModelDeltaAfterEventSubscribed(
       controller.signal,
       (frame) => {
         if (
-          frame?.version === 1
+          frame?.version === 2
           && frame.type === 'event'
           && frame.name === 'realtime'
           && sameThreadResource(frame.resource, expectedThreadId)
@@ -1244,7 +1244,7 @@ async function waitForModelDeltaAfterEventSubscribed(
 function applicationEventUrl(baseUrl) {
   const url = new URL(baseUrl)
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
-  url.pathname = '/api/events/v1'
+  url.pathname = '/api/events/v2'
   url.search = ''
   url.hash = ''
   return url.toString()
@@ -1302,7 +1302,7 @@ function waitForApplicationEvent(socket, deadline, signal, matcher, description)
         finish(reject, new Error(`malformed application event frame: ${String(event.data)}`))
         return
       }
-      if (frame?.version === 1 && frame.type === 'error') {
+      if (frame?.version === 2 && frame.type === 'error') {
         finish(
           reject,
           new Error(`application event error ${frame.code}: ${frame.message}`),

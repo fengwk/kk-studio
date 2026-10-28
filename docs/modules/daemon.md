@@ -24,22 +24,25 @@ Environment Daemon 是目标宿主上的独立 Node.js 进程，把 Platform 的
   skills/<package>/          # 已安装技能包
   skill-work/staging/        # 技能安装暂存
   skill-work/backup/         # 技能替换备份
-  updates/<operation-id>/    # 受管在线更新工作目录
+  updates/install.lock       # 安装目录级内核互斥（独立更新器持有）
+  updates/<operation-id>/    # 受管在线更新工作目录（handoff / permit / takeover / steps / result）
 ```
 
-POSIX 目录权限为 0700、敏感文件为 0600。`tmp/workspaces` 由受控临时存储按 TTL 自动清扫；技能安装器负责恢复或清理 staging/backup；已发布技能包不随服务卸载自动删除。
+POSIX 目录权限为 0700、敏感文件为 0600。`tmp/workspaces` 由受控临时存储按 TTL 自动清扫；技能安装器负责恢复或清理 staging/backup；已发布技能包不随服务卸载自动删除。更新目录只保存本机交接事实，不承载凭据，也不进入 Server 状态。
 
 ## 能力装配与运行时调度
 
-装配阶段冻结 11 项原子能力（9 项模型工具与 2 项内部能力）；IDE 是独立受管服务。能力目录版本为 3，envelope wire 版本为 5，READY payload 版本为 5（这些版本、payload 上限、错误码与枚举 wire 值都来自由 Java 协议常量生成的 [`protocol-contract.ts`](../../daemon/src/generated/protocol-contract.ts)）：
+装配阶段冻结 11 项原子能力（9 项模型工具与 2 项内部能力）；IDE 是独立受管服务。控制 wire 版本为 7，READY payload 版本为 6，能力目录版本为 3（这些版本、payload 上限、错误码与枚举 wire 值都来自由 Java 协议常量生成的 [`protocol-contract.ts`](../../daemon/src/generated/protocol-contract.ts)）；IDE 数据 wire 版本为 2，由 [`mux-wire.ts`](../../daemon/src/transport/mux-wire.ts) 与 Java 侧 mux codec 共同实现：
 - 编码能力：文件读写编辑（`fs.read`、`fs.write`、`fs.edit`、内部审查能力 `fs.edit.preview`）、文件与内容检索（`fs.find`、`fs.grep`）、命令执行（`process.exec`）；
 - 语言服务：`lsp.goto-definition`、`lsp.workspace-symbols`、`lsp.java-decompile`；
-- 扩展与受管服务：内部 `skill.sync` 以及受管 IDE 服务（code-server，通过 `IDE_COMMAND` 与 `IDE_RESULT` 进行生命周期与流控制）。
+- 扩展与受管服务：内部 `skill.sync` 以及受管 IDE 服务（code-server：`IDE_COMMAND` / `IDE_RESULT` 承载视图生命周期，`DATA_BIND` 承载复用数据连接，`IDE_LEASE` 承载使用证明）。
 
 运行时 [`Runtime`](../../daemon/src/runtime.ts) 通过 WebSocket 保持控制连接：
 - 连接握手强制协商 `permessage-deflate`，缺失时以 1010 关闭；仅传输文本帧，超阈值单帧以 1008 关闭。
 - `daemonInstanceId` 在构造时随机生成，同进程所有 HELLO 复用。连接断开指数退避重连，上限为 30 秒；重连不改变进程内已有执行事实。
 - 注册被拒（REJECTED）进入 FAILED 状态、停止重连并退出进程；临时不可用（RETRY_LATER）退避重连。
+- 运行状态：READY v6 携带必需的 `runtimeStatus`，HEARTBEAT 固定携带 `{runtimeStatus, ideLeaseRound}`，关键变化立即另发 `RUNTIME_STATUS`（[`runtime-status.ts`](../../daemon/src/runtime-status.ts)）。`runtimeStatus` 是 `{revision, status}`，`status` 固定 `{daemonVersion, update}`；`update` 为 null 或 `{targetVersion, downloadedBytes, totalBytes}`，`totalBytes` 为 null 或不小于已下载量。revision 只在状态内容变化时递增，心跳重发同一内容沿用同一 revision。运行状态只在内存中，没有更新历史。
+- IDE 使用证明：有活跃视图时每次心跳递增 `ideLeaseRound` 并与本轮发出时的单调时间一起记录；没有视图时该轮次为 null。Daemon 只接受当前未过期轮次、且 documentId 与 bindingEpoch 完全相符的 `IDE_LEASE` 批次；证明只为已有视图续期，不创建视图，也不复活已分离的 epoch。
 - INVOKE 经过严格 JSON 解码后，以 [`Journal`](../../daemon/src/journal.ts) 的 `start(invocationId)` 原子去重。已有条目直接重放：RUNNING 状态重放 `STARTED(replayed=true)`，已完成条目重放冻结终态，副作用不再重复执行。退出确认单独保存在同一条目里，重复 INVOKE 或 CANCEL 时随条目重放 `EXECUTION_EXITED`；不能从终态报文推断。有界 journal 淘汰条目后不再重放该确认。
 - 同实例重连后，Server 对在途调用发送 `RECOVER`：Runtime 只重放 journal，运行中的条目回放 `STARTED(replayed=true)` 并继续执行，已终结条目重放冻结终态与退出确认，未知条目保持静默；只有 `CANCEL` 会请求停止。
 - 超时与取消：Runtime 维护唯一的 invoke timer，超时或取消时通过同一 `context.signal` 请求停止（`TIMED_OUT` / `CANCELLED`），不提前抢占终态；由 process、search 等执行器在 cleanup 后交付真实结果，已完成的文件修改提交成功决不能被 late abort 覆盖。系统不对 OS 阻塞做严格硬中止或承诺 60 秒内一定回包。部分结果编码失败时封存 `FAILED`，并通过同一 signal 请求中断；失败结果不代替执行范围退出。
@@ -82,11 +85,27 @@ POSIX 目录权限为 0700、敏感文件为 0600。`tmp/workspaces` 由受控�
 
 ### 受管 IDE 与复用数据连接
 
-Daemon 受管运行内置的 code-server，响应 `IDE_COMMAND` 的视图创建、恢复、切换、聚焦、分离与关闭等元数据动作，返回 `IDE_RESULT`；
+Daemon 受管运行内置的 code-server，响应 `IDE_COMMAND` 的视图创建、恢复、切换目录、聚焦终端、分离与关闭等元数据动作，返回 `IDE_RESULT`；
 数据面不再通过控制命令请求 per-exchange 物理流。控制通道下发 `DATA_BIND` 时携带 generation、一次性票据和受控 `streamUrl`，
 Daemon 连接 `/api/harness/environment-data/v2/{environmentId}?ticket=...`，在一条物理 WebSocket 内复用多条 HTTP/WS mux 流。
-每条 OPEN 必须匹配仍有效的 `viewId` 与 `bindingEpoch`，Daemon 只访问该视图作用域的私有 code-server 路径；第一次物理写失败即
-终止连接，不自动重连或重放请求。
+每条 OPEN 必须匹配仍有效的 `viewId` 与 `bindingEpoch`，Daemon 只访问该视图作用域的私有 code-server 路径
+`/__kk/ide/view/{viewId}/{bindingEpoch}`；第一次物理写失败即终止连接，不自动重连或重放请求。
+
+视图权威在 Daemon 进程内（[`service.ts`](../../daemon/src/ide/service.ts)）：每个 Environment 最多 64 个视图，
+OPEN/CLOSING/创建预留都由本进程裁决；claim 在任何进程或文件系统工作之前占用额度。绑定身份是
+`viewId` + `documentId` + `bindingEpoch`，`bindingEpoch` 由 Daemon 在成功绑定时递增。
+`mode=create` 未指定目录时使用宿主 HOME，`mode=resume` 不隐式创建视图也不改目录；相同 `claimId` 的完全相同请求返回同一绑定，
+参数漂移被拒绝。失败回执只携带安全大写 code 与去敏 message（如 `VIEW_GONE`、`VIEW_IN_USE`、`DIRTY`、`CLEANUP_FAILED`、`BUSY`、`UNAVAILABLE`）。
+
+使用证明只来自 `IDE_LEASE` 批次：45 秒没有任何有效证明即不再视为活跃占用并允许恢复竞争；最后一次有效证明起 600 秒仍无新证明进入到期释放；
+创建成功但一直没有浏览器证明的视图最多保留 600 秒；`DETACH_VIEW` 立即冻结该 epoch 的续租，迟到证明不能复活它。释放走 `OPEN → CLOSING` 门闩：
+先做 dirty 检查，再以 10 秒上限等待工作台同步，之后关闭该视图的 HTTP/WS 流并调用 code-server 的视图终止接口，最后释放 view map、锁、计时器与受管句柄。
+终止失败保持 CLOSING 并报告 `CLEANUP_FAILED`，不误报已释放。最后一个视图释放且无在途数据流后，闲置 60 秒停止整个 code-server 与数据连接。
+普通文本的未保存内容写入私有受管恢复文件，总量上限 16 MiB；备份失败产生有界事件，不伪报完成。
+
+Daemon 通过 code-server 的本机管理接口操作视图（[`codeServer.ts`](../../daemon/src/ide/codeServer.ts)）：`GET /__kk/ide/views`、
+`GET /__kk/ide/views/{viewId}?bindingEpoch=...`、`POST /__kk/ide/views/{viewId}` 与 `DELETE /__kk/ide/views/{viewId}`，
+请求头携带本次启动生成的 `x-kk-studio-management-token`，只监听私有 loopback。
 
 ### IDE 轻量默认值与按需能力
 
@@ -110,7 +129,18 @@ LSP 组（[`lsp.ts`](../../daemon/src/coding/lsp.ts)）从配置中的 `lsp.serv
 
 二进制文件与媒体结果先向服务端申请预签名上传票据，通过 [`transport/resources.ts`](../../daemon/src/transport/resources.ts) 直接 HTTP PUT 上传对象存储，字节不经过 WebSocket 控制管道。
 
-受管更新由 [`update.ts`](../../daemon/src/update.ts) 驱动：校验官方发布物 URL、SHA-256 摘要与发行清单后，将暂存产物交给操作系统级独立瞬时任务（Linux `systemd-run`、macOS `launchctl submit`、Windows 临时计划任务）执行二进制目录原子替换并重启受管服务。
+受管更新由 [`update.ts`](../../daemon/src/update.ts) 驱动：校验官方发布物 URL、SHA-256 摘要与发行清单后，将暂存产物交给操作系统级独立任务
+（Linux `systemd-run`、macOS `launchctl`、Windows 计划任务）执行二进制目录原子替换并重启受管服务。
+下载 watchdog 只由非空 body chunk 刷新：连续 300 秒没有有效数据才中止，headers、redirect 与空 chunk 不算进展，累计下载时长不设硬上限。
+body 完整交付后先停止 watchdog，再关闭 dispatcher；外部取消、无进展超时与网络失败分别报告，不自动重试或续传，也不泄漏 URL 与凭据。
+
+更新是当前状态而不是任务流水：Daemon 只在内存里维护 `runtimeStatus`，没有更新历史表，也没有历史查询接口。
+替换由本机更新器完成，它持有安装目录级内核互斥（`updates/install.lock`）贯穿旧进程退出、备份与替换：
+Daemon 先把本次交接冻结为私有 `handoff.json`，再写出许可 `permit` 与接管确认 `update-takeover.json`，独立更新器据此停止旧受管范围、
+把旧发行改名为备份、再把暂存目录改名为发行位置，每一步写入 `update-steps.json`。
+新 Daemon 完成本机版本与配置预检后写入 `startup-ack.json`，并等待更新器写出 `update-result.json` 且释放互斥，之后才进入正常 READY。
+崩溃后只能凭明确的 handoff、目录布局与进程事实完成或拒绝恢复；失败路径保持旧归档可用，不承诺任意失败点都能自动回滚。
+正式的成功证据来自目标版本 Daemon 的 READY，而不是文件下载完成或连接断开。
 
 ## 质量守卫与验证
 

@@ -2003,7 +2003,7 @@ function chunkText(text, size) {
   return chunks
 }
 
-function waitForThreadSubscription(page, threadId, timeoutMs = 15_000) {
+export function waitForThreadSubscription(page, threadId, timeoutMs = 15_000) {
   return new Promise((resolve, reject) => {
     const sockets = new Set()
     let settled = false
@@ -2028,7 +2028,8 @@ function waitForThreadSubscription(page, threadId, timeoutMs = 15_000) {
         return
       }
       if (
-        message?.type === 'subscribed'
+        message?.version === 2
+        && message.type === 'subscribed'
         && message.resource?.kind === 'thread'
         && message.resource?.id === threadId
       ) {
@@ -2036,7 +2037,7 @@ function waitForThreadSubscription(page, threadId, timeoutMs = 15_000) {
       }
     }
     const onWebSocket = (socket) => {
-      if (!socket.url().endsWith('/api/events/v1')) return
+      if (new URL(socket.url()).pathname !== '/api/events/v2') return
       sockets.add(socket)
       socket.on('framereceived', onFrame)
     }
