@@ -202,7 +202,17 @@ function summary(view: ViewRecord): IdeViewSummary {
 }
 
 function openReply(view: ViewRecord): IdeReply {
-  return { ok: true, ...summary(view) }
+  return {
+    ok: true,
+    viewId: view.viewId,
+    documentId: view.documentId,
+    eventNodeId: view.eventNodeId,
+    connectionId: view.connectionId,
+    claimId: view.claimId,
+    bindingEpoch: view.bindingEpoch,
+    directory: view.directory,
+    workspacePath: view.workspacePath,
+  }
 }
 
 function openCommandShape(command: IdeCommand): string {
