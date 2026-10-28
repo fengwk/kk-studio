@@ -613,6 +613,12 @@ describe('IDE metadata codec', () => {
     expect(() => decodeIdeReply(JSON.stringify({ ok: 'yes' }))).toThrow(/boolean/)
     expect(() => decodeIdeReply(JSON.stringify({ ok: false, message: 'no code' }))).toThrow(/code/)
     expect(() => decodeIdeReply(JSON.stringify({ ...binding, extra: true }))).toThrow(/unknown field/)
+    expect(() => decodeIdeReply(JSON.stringify({ ...binding, state: 'OPEN' }))).toThrow(/unknown field/)
+    for (const field of ['documentId', 'eventNodeId', 'connectionId', 'claimId', 'bindingEpoch', 'directory', 'workspacePath']) {
+      const partial = { ok: true, viewId: ids.viewId, [field]: binding[field as keyof typeof binding] }
+      expect(() => decodeIdeReply(JSON.stringify(partial))).toThrow()
+      expect(() => encodeIdeReply(partial)).toThrow()
+    }
     expect(() => decodeIdeReply(JSON.stringify({ ...list, views: [...list.views, ...list.views] }))).toThrow(/repeat/)
   })
 })

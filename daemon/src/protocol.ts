@@ -1567,7 +1567,7 @@ function ideReplyValue(raw: unknown): IdeReply {
     }
     return { ok: true, views }
   }
-  if (IDE_VIEW_FIELDS.some((field) => field in raw)) {
+  if (IDE_VIEW_FIELDS.some((field) => field !== 'viewId' && field in raw) || 'directory' in raw || 'workspacePath' in raw) {
     return ideOpenReply(raw)
   }
   if ('viewId' in raw) {
