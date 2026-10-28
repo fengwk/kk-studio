@@ -146,6 +146,10 @@ export const chatCatalog = {
     'en-US': 'Layout',
     'zh-CN': '布局',
   },
+  'ai.chat.tabStateNotSaved': {
+    'en-US': 'This page’s recovery state is not saved',
+    'zh-CN': '本页恢复状态未保存',
+  },
   'ai.chat.loadingList': {
     'en-US': 'Loading…',
     'zh-CN': '加载中…',
@@ -2036,6 +2040,14 @@ export const chatCatalog = {
   'ai.runtime.action.operationPending': {
     'en-US': 'This Thread has a pending operation; wait for it to finish or retry the original operation',
     'zh-CN': '当前 Thread 仍有未完成的操作，请等待完成或重试原操作',
+  },
+  'ai.runtime.action.pendingAcceptanceBlocked': {
+    'en-US': 'This pane has an unresolved earlier request. Return to its original target to reconcile it before submitting again.',
+    'zh-CN': '此位置存在未完成或无法校验的原始请求，请恢复原目标并完成对账后再提交。',
+  },
+  'ai.runtime.action.pendingAcceptanceNotSaved': {
+    'en-US': 'The unresolved request could not be saved, so new submissions are blocked. Check browser storage and retry.',
+    'zh-CN': '未完成请求未能保存，已阻止新提交，请检查浏览器存储后重试。',
   },
   'ai.interaction.pendingTitle': {
     'en-US': 'Pending Interactions',

@@ -6,6 +6,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { IdeLifecycleProvider } from '@/features/environment/ide/IdeLifecycleProvider'
 import { ChatWorkspacePage } from './ChatWorkspacePage'
 import type { ChatWorkspacePane } from './ChatWorkspacePane'
+import {
+  applyChatLayout,
+  chatTabLastStorageKey,
+  createDefaultChatPaneState,
+} from './chat-pane-state'
 import { agentService } from '@/shared/api/agent-service'
 import { chatService } from '@/shared/api/chat-service'
 import { environmentService } from '@/shared/api/environment-service'
@@ -87,9 +92,11 @@ function openWorkspace(search = '') {
 beforeEach(() => {
   vi.clearAllMocks()
   localStorage.clear()
+  sessionStorage.clear()
   setLocale('zh-CN')
-  localStorage.setItem(`kk-studio.chat-pane.${CHAT_ID}`, JSON.stringify({
-    layout: 'split-2', focusedPaneId: 'pane-1', panes: [{ id: 'pane-1' }, { id: 'pane-2' }],
+  localStorage.setItem(chatTabLastStorageKey(CHAT_ID), JSON.stringify({
+    version: 1,
+    presentation: applyChatLayout(createDefaultChatPaneState(), 'split-2'),
   }))
   vi.mocked(chatService.getChat).mockResolvedValue({
     id: CHAT_ID, title: 'Workspace', agentName: 'assistant',

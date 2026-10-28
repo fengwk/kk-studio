@@ -4,7 +4,7 @@ import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'reac
 import { ArrowLeft } from 'lucide-react'
 import { ChatWorkspacePane } from '@/features/chat/ChatWorkspacePane'
 import { NewBranchDialog } from '@/features/chat/NewBranchDialog'
-import { loadPaneTarget, samePaneTarget, type PaneTarget } from '@/features/chat/runtime/agent-pane'
+import { samePaneTarget, type PaneTarget } from '@/features/chat/runtime/agent-pane'
 import { hasThreadNameConflict } from '@/features/chat/thread-name-conflict'
 import { harnessService } from '@/shared/api/harness-service'
 import { loadPendingAcceptance } from '@/features/chat/runtime/agent-pane'
@@ -14,11 +14,13 @@ import type { BranchRequestInput, PaneReport } from '@/features/chat/runtime/roo
 import {
   applyChatLayout,
   chatPanePosition,
+  chatPaneTarget,
   focusPane,
   loadChatPaneState,
   parseLayout,
   revealChatPane,
   saveChatPaneState,
+  setChatPaneTarget,
   visibleChatPanes,
   type ChatLayout,
   type ChatPaneState,
@@ -98,11 +100,23 @@ function ChatWorkspaceContent({
   const targetThreadId = searchParams.get('thread')
   const { t } = useI18n()
   const location = useLocation()
-  const [paneState, setPaneState] = useState<ChatPaneState>(() => loadChatPaneState(chat.id))
+  const [initialPaneLoad] = useState(() => loadChatPaneState(chat.id))
+  const [paneState, setPaneState] = useState<ChatPaneState>(initialPaneLoad.state)
   const [presentations, setPresentations] = useState<Record<string, ThreadPresentation | null>>({})
   const [debugSource, setDebugSource] = useState<{ paneId: string; viewKey: string } | null>(null)
+  const [storageUnavailable, setStorageUnavailable] = useState(!initialPaneLoad.saved)
   const paneStateRef = useRef(paneState)
-  useLayoutEffect(() => { paneStateRef.current = paneState }, [paneState])
+  // tab 呈现状态的唯一提交入口：同步镜像内存状态，再由同一完整快照双写。
+  const commitPaneState = useCallback((update: (current: ChatPaneState) => ChatPaneState) => {
+    const current = paneStateRef.current
+    const next = update(current)
+    if (next === current) {
+      return
+    }
+    paneStateRef.current = next
+    setPaneState(next)
+    setStorageUnavailable(!saveChatPaneState(chat.id, next))
+  }, [chat.id])
   const handlePresentation = useCallback((paneId: string, report: ThreadPresentation | null) => {
     setPresentations((current) => current[paneId] === report ? current : { ...current, [paneId]: report })
     setDebugSource((current) => {
@@ -137,19 +151,15 @@ function ChatWorkspaceContent({
   const [branchChecking, setBranchChecking] = useState(false)
   const branchCheckId = useRef(0)
   // Bootstrap hidden local drafts without loading any Thread snapshots. Subsequent
-  // target changes come exclusively through PaneReport (including before unmount).
-  const [storedTargets] = useState(() => Object.fromEntries(
-    paneState.panes.map((pane) => [pane.id, loadPaneTarget({ type: 'CHAT', chatId: chat.id }, pane.id)]),
-  ))
-  const localTargets = useRef<Record<string, PaneTarget>>(storedTargets)
+  // target changes flow through the shared tab state and PaneReport only.
   const [paneReports, setPaneReports] = useState<Record<string, PaneReport>>(() => Object.fromEntries(
     paneState.panes.map((pane) => {
-      const target = storedTargets[pane.id]!
+      const target = pane.target
       const parts = target.kind === 'BOUND_THREAD' ? [] : restoreComposerDraft(`agent-pane:CHAT:${chat.id}:${pane.id}`, [])
       return [pane.id, {
         target,
         draftKey: partsKey(parts),
-        pending: loadPendingAcceptance({ type: 'CHAT', chatId: chat.id }, pane.id) != null,
+        pending: loadPendingAcceptance({ type: 'CHAT', chatId: chat.id }, pane.id, undefined, target) != null,
         hasUnsentDraft: trimMessageParts(parts).length > 0,
         sessionId: target.kind === 'NEW_THREAD_DRAFT' ? target.sessionId : null,
         branchName: target.kind === 'NEW_THREAD_DRAFT' ? target.threadName : null,
@@ -176,10 +186,6 @@ function ChatWorkspaceContent({
     }
   }
 
-  useEffect(() => {
-    saveChatPaneState(chat.id, paneState)
-  }, [chat.id, paneState])
-
   const focusedReport = paneReports[paneState.focusedPaneId] ?? null
   const focusedSessionId = focusedReport?.sessionId ?? null
   // 只用于顶栏面包屑的 Session 名称；按需查询，不参与目标路由。
@@ -192,8 +198,7 @@ function ChatWorkspaceContent({
     ? null
     : sessionsQuery.data?.find((session) => session.sessionId === focusedSessionId)?.name ?? null
 
-  // 目标 pane 成功消费（挂载初始化或无 pending 切换成功）后清空该 pane 的待应用目标；
-  // 命中 deep-link query 时一并清掉 URL 参数。
+  // 目标 pane 成功消费后清空该 pane 的待应用目标；命中 deep-link query 时一并清 URL。
   const handleTargetConsumed = useCallback((paneId: string, consumed: PaneTarget) => {
     setPendingTargets((current) => {
       const pending = current[paneId]
@@ -213,7 +218,6 @@ function ChatWorkspaceContent({
   }, [searchParams, setSearchParams])
 
   const handlePaneReport = useCallback((paneId: string, report: PaneReport) => {
-    localTargets.current[paneId] = report.target
     setPaneReports((current) => {
       const previous = current[paneId]
       if (
@@ -231,6 +235,10 @@ function ChatWorkspaceContent({
     })
   }, [])
 
+  const handlePaneTargetChange = useCallback((paneId: string, target: PaneTarget) => {
+    commitPaneState((current) => setChatPaneTarget(current, paneId, target))
+  }, [commitPaneState])
+
   const handleRequestBranch = useCallback((sourcePaneId: string, request: BranchRequestInput) => {
     branchCheckId.current += 1
     setBranchChecking(false)
@@ -243,9 +251,12 @@ function ChatWorkspaceContent({
   const validateDraftName = useCallback(async (paneId: string, sessionId: string, name: string) => {
     try {
       const threads = await harnessService.listSessionThreads(sessionId)
-      return hasThreadNameConflict(name, sessionId, paneId, threads, {
-        ...localTargets.current, ...pendingTargetsRef.current,
-      }) ? t('ai.chat.branch.nameConflict') : null
+      const targets = {
+        ...Object.fromEntries(paneStateRef.current.panes.map((pane) => [pane.id, pane.target])),
+        ...pendingTargetsRef.current,
+      }
+      return hasThreadNameConflict(name, sessionId, paneId, threads, targets)
+        ? t('ai.chat.branch.nameConflict') : null
     } catch {
       return t('ai.chat.branch.nameCheckFailed')
     }
@@ -271,8 +282,10 @@ function ChatWorkspaceContent({
       return
     }
     const requestId = ++branchCheckId.current
-    const sourceTarget = branchSourcePaneId == null ? null : localTargets.current[branchSourcePaneId]
-    const destinationTarget = localTargets.current[input.paneId]
+    const currentTarget = (paneId: string): PaneTarget =>
+      chatPaneTarget(paneStateRef.current, paneId) ?? { kind: 'NEW_SESSION_DRAFT' }
+    const sourceTarget = branchSourcePaneId == null ? null : currentTarget(branchSourcePaneId)
+    const destinationTarget = currentTarget(input.paneId)
     const destinationDraftKey = report?.draftKey
     setBranchChecking(true)
     setBranchFormError(null)
@@ -282,8 +295,8 @@ function ChatWorkspaceContent({
         return
       }
       if ((sourceTarget != null && branchSourcePaneId != null
-          && !samePaneTarget(sourceTarget, localTargets.current[branchSourcePaneId]))
-        || !samePaneTarget(destinationTarget, localTargets.current[input.paneId])
+          && !samePaneTarget(sourceTarget, currentTarget(branchSourcePaneId)))
+        || !samePaneTarget(destinationTarget, currentTarget(input.paneId))
         || destinationDraftKey !== reportsRef.current[input.paneId]?.draftKey) {
         setOverwritePaneId(null)
         setBranchFormError(t('ai.chat.branch.targetChanged'))
@@ -307,7 +320,7 @@ function ChatWorkspaceContent({
         startEntryId: branchRequest.startEntryId,
         threadName: input.name,
       }
-      setPaneState((current) => focusPane(revealChatPane(current, input.paneId), input.paneId))
+      commitPaneState((current) => focusPane(revealChatPane(current, input.paneId), input.paneId))
       setPendingTargets((current) => ({ ...current, [input.paneId]: nextTarget }))
       setBranchRequest(null)
       setBranchSourcePaneId(null)
@@ -318,7 +331,7 @@ function ChatWorkspaceContent({
         setBranchChecking(false)
       }
     }
-  }, [branchRequest, branchSourcePaneId, branchChecking, overwritePaneId, validateDraftName, t])
+  }, [branchRequest, branchSourcePaneId, branchChecking, commitPaneState, overwritePaneId, validateDraftName, t])
 
   const closeBranchDialog = useCallback(() => {
     branchCheckId.current += 1
@@ -405,11 +418,14 @@ function ChatWorkspaceContent({
           {debugSource == null ? <ChatLayoutSelector
             layout={paneState.layout}
             onChange={(nextLayout) => {
-              setPaneState((current) => applyChatLayout(current, nextLayout))
+              commitPaneState((current) => applyChatLayout(current, nextLayout))
             }}
           /> : null}
         </div>
       </header>
+      {storageUnavailable ? (
+        <div className="form-error-banner" role="status">{t('ai.chat.tabStateNotSaved')}</div>
+      ) : null}
       <div className={`chat-pane-grid layout-${debugSource ? 'single' : paneState.layout}`}>
         {mountedPanes.map((pane, index) => {
           const isFocused = paneState.focusedPaneId === pane.id || (index === 0 && !paneState.focusedPaneId)
@@ -425,8 +441,10 @@ function ChatWorkspaceContent({
               onValidateDraftName={(target, name) => target.kind === 'NEW_THREAD_DRAFT'
                 ? validateDraftName(pane.id, target.sessionId, name)
                 : Promise.resolve(t('ai.chat.branch.targetChanged'))}
-              onFocus={() => setPaneState((current) => focusPane(current, pane.id))}
+              onFocus={() => commitPaneState((current) => focusPane(current, pane.id))}
               initialTarget={pendingTargets[pane.id]}
+              target={pane.target}
+              onTargetChange={(target) => handlePaneTargetChange(pane.id, target)}
               onTargetConsumed={(consumed) => handleTargetConsumed(pane.id, consumed)}
               onRequestBranch={handleRequestBranch}
               onPaneReport={handlePaneReport}

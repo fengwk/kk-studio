@@ -1,44 +1,41 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import {
-  loadPaneTarget,
-  savePaneTarget,
-} from '@/features/chat/runtime/agent-pane'
+import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import type { PaneTarget } from '@/features/chat/runtime/agent-pane'
-import type { AgentRuntimeOwnerDTO } from '@/shared/api/contracts/ai-runtime'
 
 /**
- * Pane 绑定目标：父面板唯一持有的目标状态与持久化。
+ * Pane 绑定目标：有共享 tab 状态时完全受控，没有时保持宿主内局部状态。
  *
- * 只有目标与持久化在这里；控制面（草稿、上传、人工执行与命令）由根控组件按目标
- * 身份挂载，子代理目标与身份未确认时不会挂载它们。
+ * Chat workspace 由父页唯一持有呈现状态；本 Hook 只镜像最新目标并在用户事件中
+ * 请求父页提交。它不读取也不写任何旧的 per-pane 呈现键。
  */
 export function usePaneTarget({
-  owner,
-  paneId,
   initialTarget,
+  target: sharedTarget,
+  onTargetChange,
 }: {
-  owner?: AgentRuntimeOwnerDTO
-  paneId: string
   initialTarget?: PaneTarget
+  target?: PaneTarget
+  onTargetChange?: (next: PaneTarget) => void
 }) {
-  const [target, setTargetState] = useState<PaneTarget>(
-    () => initialTarget ?? (owner
-      ? (owner.type === 'CHAT' ? loadPaneTarget(owner, paneId) : { kind: 'NEW_SESSION_DRAFT' })
-      : { kind: 'BOUND_THREAD', threadId: paneId }),
+  const [localTarget, setLocalTarget] = useState<PaneTarget>(
+    () => initialTarget ?? { kind: 'NEW_SESSION_DRAFT' },
   )
+  const controlled = sharedTarget !== undefined
+  const target = controlled ? sharedTarget : localTarget
   const targetRef = useRef(target)
-  useEffect(() => {
+  // layout effect 在子级 effect 前同步镜像，避免父级提交后旧目标仍被消费一次。
+  useLayoutEffect(() => {
     targetRef.current = target
-    if (owner?.type === 'CHAT') {
-      savePaneTarget(owner, paneId, target)
-    }
-  }, [owner, paneId, target])
+  }, [target])
 
-  // 同步更新镜像：控制面在 state commit 之前读到的必须已是新绑定。
   const setTarget = useCallback((next: PaneTarget) => {
+    // 同步更新镜像：控制面在 state commit 之前读到的必须已是新绑定。
     targetRef.current = next
-    setTargetState(next)
-  }, [])
+    if (controlled) {
+      onTargetChange?.(next)
+      return
+    }
+    setLocalTarget(next)
+  }, [controlled, onTargetChange])
 
   return { target, targetRef, setTarget }
 }

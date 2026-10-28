@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useState, type ComponentProps, type ReactNode } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -34,7 +34,7 @@ import { useRootThreadControl, type UseRootThreadControlOptions } from '@/featur
 import { branchDraftFromEntry, branchDraftFromEntryPath } from '@/features/chat/runtime/root-thread/branch-draft-replay'
 import { sessionSelectionItem, threadSelectionItem } from '@/features/chat/runtime/root-thread/session-selection-items'
 import { usePaneTarget } from '@/features/chat/runtime/usePaneTarget'
-import { isBoundTarget, type PaneTarget } from '@/features/chat/runtime/agent-pane'
+import { isBoundTarget, isPaneTarget, savePendingAcceptance, type PaneTarget, type PendingAcceptance } from '@/features/chat/runtime/agent-pane'
 import { useThreadProjection } from '@/features/chat/runtime/useThreadProjection'
 import type { BranchDraft } from '@/features/chat/branch-draft'
 import { createTextPart, partsToText } from '@/features/chat/composer/composer-parts'
@@ -75,6 +75,72 @@ import type {
 
 const CHAT_ID = 'chat-1'
 const THREAD_ID = '11111111-2222-4333-8444-555555555555'
+const TEST_TARGET_PREFIX = 'kk-studio.agent-pane-target.'
+
+function testTargetKey(owner: NonNullable<ComponentProps<typeof AgentPane>['owner']>, paneId: string): string {
+  const identity = owner.type === 'CHAT'
+    ? `CHAT:${owner.chatId}`
+    : `ISSUE_AGENT:${owner.issueId}:${owner.agentName}`
+  return `${TEST_TARGET_PREFIX}${identity}:${paneId}`
+}
+
+function readTestTarget(
+  owner: NonNullable<ComponentProps<typeof AgentPane>['owner']>,
+  paneId: string,
+): PaneTarget | null {
+  try {
+    const raw = localStorage.getItem(testTargetKey(owner, paneId))
+    const parsed: unknown = raw == null ? null : JSON.parse(raw)
+    return isPaneTarget(parsed) ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 测试宿主：模拟 Chat workspace 对 pane target 的父级持有与提交。
+ * 生产 AgentPane 只接收共享 target，不再自行读取旧 per-pane 键。
+ */
+function TestAgentPane({
+  owner,
+  paneId,
+  initialTarget,
+  target: sharedTarget,
+  onTargetChange,
+  ...rest
+}: ComponentProps<typeof AgentPane>) {
+  const [localTarget, setLocalTarget] = useState<PaneTarget>(
+    () => initialTarget
+      ?? (owner == null
+        ? { kind: 'BOUND_THREAD', threadId: paneId }
+        : readTestTarget(owner, paneId) ?? { kind: 'NEW_SESSION_DRAFT' }),
+  )
+  const commitTarget = (next: PaneTarget) => {
+    if (owner != null) {
+      localStorage.setItem(testTargetKey(owner, paneId), JSON.stringify(next))
+    }
+    setLocalTarget(next)
+    onTargetChange?.(next)
+  }
+  useEffect(() => {
+    if (owner == null) {
+      return
+    }
+    // 模拟父级挂载时已有的目标快照；生产写入由 workspace 的统一提交入口负责。
+    localStorage.setItem(testTargetKey(owner, paneId), JSON.stringify(localTarget))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  return (
+    <AgentPane
+      {...rest}
+      owner={owner}
+      paneId={paneId}
+      initialTarget={initialTarget}
+      target={sharedTarget ?? localTarget}
+      onTargetChange={commitTarget}
+    />
+  )
+}
 
 /**
  * 根控制面与上传注册表的挂载探针：包装真实实现，只统计挂载/卸载次数，不改变行为。
@@ -381,6 +447,73 @@ function interactionPage(
     nextCursor,
     total,
     freshnessAt: null,
+  }
+}
+
+function pendingAcceptanceFor(
+  owner: AgentRuntimeOwnerDTO,
+  idempotencyKey = 'original-request',
+): PendingAcceptance {
+  return {
+    owner,
+    target: {
+      kind: 'NEW_THREAD_DRAFT',
+      sessionId: 'session-1',
+      startEntryId: 'entry-1',
+      threadName: 'pending-branch',
+    },
+    request: {
+      owner,
+      target: {
+        type: 'NEW_THREAD',
+        sessionId: 'session-1',
+        startEntryId: 'entry-1',
+        threadId: 'pending-thread',
+        threadName: 'pending-branch',
+        yoloEnabled: false,
+      },
+      commands: [{
+        type: 'USER_MESSAGE',
+        idempotencyKey,
+        contents: [{ type: 'TEXT', text: 'original request' }],
+      }],
+    },
+    branchDraft: {
+      agentName: 'assistant',
+      model: { modelName: 'MiniMax', variant: 'default' },
+      environmentName: null,
+      yoloEnabled: false,
+    },
+    composerParts: [createTextPart('original request')],
+    generation: 0,
+    unknownOutcome: true,
+  }
+}
+
+function pendingNewSessionAcceptanceFor(
+  owner: AgentRuntimeOwnerDTO,
+  idempotencyKey = 'original-request',
+): PendingAcceptance {
+  const base = pendingAcceptanceFor(owner, idempotencyKey)
+  return {
+    ...base,
+    target: { kind: 'NEW_SESSION_DRAFT' },
+    request: {
+      owner,
+      target: {
+        type: 'NEW_SESSION',
+        sessionId: 'session-1',
+        threadId: 'pending-thread',
+        rootSettings: {
+          agentName: 'assistant',
+          model: { modelName: 'MiniMax', variant: 'default' },
+          environmentName: null,
+          goal: null,
+        },
+        yoloEnabled: false,
+      },
+      commands: base.request.commands,
+    },
   }
 }
 
@@ -906,7 +1039,7 @@ describe('AgentPane orchestration', () => {
     render(
       <QueryClientProvider client={client}>
         <MemoryRouter>
-          <AgentPane
+          <TestAgentPane
             owner={{ type: 'CHAT', chatId: CHAT_ID }}
             paneId="pane-1"
             agents={agents}
@@ -1276,7 +1409,7 @@ describe('AgentPane orchestration', () => {
     view.rerender(
       <QueryClientProvider client={replacementClient}>
         <MemoryRouter>
-          <AgentPane owner={{ type: 'CHAT', chatId: CHAT_ID }} paneId="pane-1" agents={agents} focused />
+          <TestAgentPane owner={{ type: 'CHAT', chatId: CHAT_ID }} paneId="pane-1" agents={agents} focused />
         </MemoryRouter>
       </QueryClientProvider>,
     )
@@ -1401,6 +1534,75 @@ describe('AgentPane orchestration', () => {
     await waitFor(() => expect(hook.result.current.pendingAcceptance).toBeNull())
     expect(hook.result.current.target.kind).toBe('BOUND_THREAD')
     act(() => hook.result.current.abandonPendingAcceptance())
+  })
+
+  it('keeps a foreign pending request in its slot and reconciles only after returning to its target', async () => {
+    const owner = { type: 'CHAT' as const, chatId: CHAT_ID }
+    const pending = pendingNewSessionAcceptanceFor(owner)
+    expect(savePendingAcceptance(owner, 'probe', pending)).toBe(true)
+    localStorage.setItem(testTargetKey(owner, 'probe'), JSON.stringify({
+      kind: 'NEW_THREAD_DRAFT',
+      sessionId: 'session-1',
+      startEntryId: 'entry-1',
+      threadName: 'other-branch',
+    }))
+    const key = `kk-studio.agent-pane-acceptance.CHAT:${CHAT_ID}:probe`
+    const before = localStorage.getItem(key)
+
+    const hook = renderController()
+    await waitFor(() => expect(hook.result.current.activeDraft).not.toBeNull())
+    // 当前 tab 是 NEW_THREAD_DRAFT；旧记录属于 NEW_SESSION_DRAFT，只能阻塞槽位。
+    expect(hook.result.current.target.kind).toBe('NEW_THREAD_DRAFT')
+    expect(hook.result.current.pendingAcceptance).toBeNull()
+    expect(hook.result.current.pendingAcceptanceBlocked).toBe(true)
+
+    act(() => hook.result.current.composer.onSubmit(
+      [createTextPart('blocked new request')],
+      [createTextPart('blocked new request')],
+    ))
+    expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
+    expect(localStorage.getItem(key)).toBe(before)
+    expect(hook.result.current.pendingAcceptance).toBeNull()
+    expect(hook.result.current.error).toContain('原目标')
+
+    // 通过 /new 回到记录自己的目标后，才恢复原请求供重试；不按当前 pane 伪造新 ID。
+    act(() => hook.result.current.composer.onCommand(testCommand('new')))
+    await waitFor(() => expect(hook.result.current.target.kind).toBe('NEW_SESSION_DRAFT'))
+    await waitFor(() => expect(hook.result.current.pendingAcceptance).not.toBeNull())
+    expect(hook.result.current.pendingAcceptanceBlocked).toBe(false)
+    expect(hook.result.current.pendingAcceptance?.request.commands[0]?.idempotencyKey)
+      .toBe('original-request')
+
+    let resolve!: (value: ReturnType<typeof acceptedResponse>) => void
+    vi.mocked(harnessService.acceptCommandBatch).mockImplementationOnce(
+      () => new Promise((complete) => {
+        resolve = complete
+      }),
+    )
+    act(() => hook.result.current.retryAcceptance())
+    await waitFor(() => expect(harnessService.acceptCommandBatch).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(harnessService.acceptCommandBatch).mock.calls[0]?.[0].commands[0]?.idempotencyKey)
+      .toBe('original-request')
+    act(() => resolve(acceptedResponse()))
+    await waitFor(() => expect(hook.result.current.pendingAcceptance).toBeNull())
+  })
+
+  it('renders a visible reconciliation block for a pending request from another target', async () => {
+    const owner = { type: 'CHAT' as const, chatId: CHAT_ID }
+    const pending = pendingAcceptanceFor(owner)
+    expect(savePendingAcceptance(owner, 'pane-1', pending)).toBe(true)
+    const key = `kk-studio.agent-pane-acceptance.CHAT:${CHAT_ID}:pane-1`
+    const before = localStorage.getItem(key)
+    const user = userEvent.setup()
+
+    renderPane(owner)
+
+    expect(await screen.findByTestId('pending-acceptance-blocked')).toHaveTextContent('恢复原目标')
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+    await user.type(composer, 'blocked new request')
+    await user.click(screen.getByRole('button', { name: '发送消息' }))
+    expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
+    expect(localStorage.getItem(key)).toBe(before)
   })
 
   it('takes the unbound submit early returns and yolo null-draft path', async () => {
@@ -2579,7 +2781,7 @@ describe('AgentPane orchestration', () => {
     render(
       <QueryClientProvider client={client}>
         <MemoryRouter>
-          <AgentPane
+          <TestAgentPane
             owner={issueOwner}
             paneId="pane-issue"
             agents={agents}
@@ -2617,7 +2819,7 @@ function renderPane(
   const result = render(
     <QueryClientProvider client={client}>
       <MemoryRouter>
-        <AgentPane
+        <TestAgentPane
           owner={owner}
           paneId="pane-1"
           agents={agents}
@@ -2637,10 +2839,13 @@ function renderPane(
 function useRootControlProbe(
   options: Omit<UseRootThreadControlOptions, 'target' | 'setTarget' | 'projection'>,
 ) {
+  const fixtureTarget = options.owner == null
+    ? null
+    : readTestTarget(options.owner, options.paneId)
   const paneTarget = usePaneTarget({
-    owner: options.owner,
-    paneId: options.paneId,
-    initialTarget: options.initialTarget,
+    initialTarget: options.initialTarget
+      ?? fixtureTarget
+      ?? (options.owner == null ? { kind: 'BOUND_THREAD', threadId: options.paneId } : undefined),
   })
   const projection = useThreadProjection(
     isBoundTarget(paneTarget.target) ? paneTarget.target.threadId : '',
@@ -2727,7 +2932,7 @@ describe('TURN_END 绑定与 Debug 只读退出', () => {
     const result = render(
       <QueryClientProvider client={client}>
         <MemoryRouter>
-          <AgentPane
+          <TestAgentPane
             owner={{ type: 'CHAT', chatId: CHAT_ID }}
             paneId="pane-1"
             agents={agents}
@@ -3504,7 +3709,7 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
       render(
         <QueryClientProvider client={client}>
           <MemoryRouter>
-            <AgentPane
+            <TestAgentPane
               paneId={THREAD_ID}
               agents={agents}
               environments={[]}
@@ -4577,7 +4782,7 @@ describe('AgentPane root control mounting', () => {
         <QueryClientProvider client={client}>
           <MemoryRouter>
             <button type="button">outside button</button>
-            <AgentPane
+            <TestAgentPane
               owner={{ type: 'CHAT', chatId: CHAT_ID }}
               paneId="pane-1"
               agents={agents}
@@ -4631,7 +4836,7 @@ describe('AgentPane root control mounting', () => {
       return (
         <QueryClientProvider client={client}>
           <MemoryRouter>
-            <AgentPane
+            <TestAgentPane
               owner={{ type: 'CHAT', chatId: CHAT_ID }}
               paneId="pane-1"
               agents={agents}
@@ -5015,7 +5220,7 @@ describe('AgentPane root control mounting', () => {
     render(
       <QueryClientProvider client={client}>
         <MemoryRouter>
-          <AgentPane
+          <TestAgentPane
             owner={{ type: 'CHAT', chatId: CHAT_ID }}
             paneId="pane-1"
             agents={agents}
@@ -5115,7 +5320,7 @@ describe('AgentPane root control mounting', () => {
     const { rerender } = render(
       <QueryClientProvider client={client}>
         <MemoryRouter>
-          <AgentPane
+          <TestAgentPane
             owner={{ type: 'CHAT', chatId: CHAT_ID }}
             paneId="pane-1"
             agents={agents}
@@ -5151,7 +5356,7 @@ describe('AgentPane root control mounting', () => {
     rerender(
       <QueryClientProvider client={client}>
         <MemoryRouter>
-          <AgentPane
+          <TestAgentPane
             owner={{ type: 'CHAT', chatId: CHAT_ID }}
             paneId="pane-1"
             agents={agents}
@@ -5210,7 +5415,7 @@ describe('AgentPane root control mounting', () => {
     render(
       <QueryClientProvider client={client}>
         <MemoryRouter>
-          <AgentPane
+          <TestAgentPane
             owner={{ type: 'CHAT', chatId: CHAT_ID }}
             paneId="pane-1"
             agents={agents}
