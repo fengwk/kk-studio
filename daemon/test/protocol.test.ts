@@ -614,12 +614,35 @@ describe('IDE metadata codec', () => {
     expect(() => decodeIdeReply(JSON.stringify({ ok: false, message: 'no code' }))).toThrow(/code/)
     expect(() => decodeIdeReply(JSON.stringify({ ...binding, extra: true }))).toThrow(/unknown field/)
     expect(() => decodeIdeReply(JSON.stringify({ ...binding, state: 'OPEN' }))).toThrow(/unknown field/)
-    for (const field of ['documentId', 'eventNodeId', 'connectionId', 'claimId', 'bindingEpoch', 'directory', 'workspacePath']) {
+    for (const field of ['documentId', 'eventNodeId', 'connectionId', 'claimId', 'bindingEpoch', 'workspacePath']) {
       const partial = { ok: true, viewId: ids.viewId, [field]: binding[field as keyof typeof binding] }
       expect(() => decodeIdeReply(JSON.stringify(partial))).toThrow()
       expect(() => encodeIdeReply(partial)).toThrow()
     }
     expect(() => decodeIdeReply(JSON.stringify({ ...list, views: [...list.views, ...list.views] }))).toThrow(/repeat/)
+  })
+
+  it('strictly round-trips a directory acknowledgement without accepting mixed binding shapes', () => {
+    const reply = { ok: true, viewId: ids.viewId, directory: '/canonical/project' }
+    expect(decodeIdeReply(encodeIdeReply(reply))).toEqual(reply)
+    expect(decodeIdeReply(JSON.stringify(reply))).toEqual(reply)
+    const invalid = [
+      { ok: true, directory: '/p' },
+      { ...reply, directory: '' },
+      { ...reply, directory: '   ' },
+      { ...reply, directory: '/p\nbad' },
+      { ...reply, directory: 'x'.repeat(4097) },
+      { ...reply, directory: null },
+      { ...reply, viewId: 'AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE' },
+      { ...reply, documentId: ids.documentId },
+      { ...reply, workspacePath: '/w' },
+      { ...reply, views: [] },
+      { ...reply, extra: true },
+    ]
+    for (const payload of invalid) {
+      expect(() => decodeIdeReply(JSON.stringify(payload))).toThrow()
+      expect(() => encodeIdeReply(payload as never)).toThrow()
+    }
   })
 })
 
