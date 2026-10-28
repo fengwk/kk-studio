@@ -9,15 +9,20 @@ import { chatService } from '@/shared/api/chat-service'
 import { environmentService } from '@/shared/api/environment-service'
 import { interactionService } from '@/shared/api/interaction-service'
 
-const { fakeApplicationEvents } = vi.hoisted(() => {
-  const manager = { subscribe: () => () => undefined }
-  return { fakeApplicationEvents: { useApplicationEvents: () => manager } }
+// 保留真实事件管理器及 IDE 身份契约，仅替换 WebSocket，避免连接真实服务。
+vi.mock('@/shared/app-events', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/shared/app-events')>()
+  const { FakeWebSocketHarness } = await import('@/shared/app-events/__tests__/fake-websocket')
+  const sockets = new FakeWebSocketHarness()
+  return {
+    ...actual,
+    ApplicationEventProvider: ({ children }: { children: ReactNode }) => (
+      <actual.ApplicationEventProvider url="ws://test/api/events/v2" socketFactory={sockets.factory}>
+        {children}
+      </actual.ApplicationEventProvider>
+    ),
+  }
 })
-// jsdom 没有 WebSocket：应用事件 Provider 在 App 级测试中退化为透传。
-vi.mock('@/shared/app-events', () => ({
-  ApplicationEventProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
-  useApplicationEvents: fakeApplicationEvents.useApplicationEvents,
-}))
 
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: { listProviders: vi.fn(), listModels: vi.fn(), listAgents: vi.fn() },

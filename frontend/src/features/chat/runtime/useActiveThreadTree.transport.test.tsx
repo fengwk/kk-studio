@@ -45,7 +45,7 @@ function renderPanel() {
   const sockets = new FakeWebSocketHarness()
   render(
     <QueryClientProvider client={client}>
-      <ApplicationEventProvider url="ws://test/events/v1" socketFactory={sockets.factory}>
+      <ApplicationEventProvider url="ws://test/api/events/v2" socketFactory={sockets.factory}>
         <MemoryRouter><Panel /></MemoryRouter>
       </ApplicationEventProvider>
     </QueryClientProvider>,
@@ -66,7 +66,7 @@ describe('execution tree HTTP Instant contract', () => {
     expect(client.getQueryData(['threads', 'tree', CHILD])).toEqual([node(ROOT, null), node(CHILD, ROOT)])
     const socket = sockets.openLatest()
     await waitFor(() => expect(socket.sentMessages()).toEqual([
-      { version: 1, type: 'subscribe', resource: { kind: 'tree', id: ROOT } },
+      { version: 2, type: 'subscribe', resource: { kind: 'tree', id: ROOT } },
     ]))
   })
 
@@ -101,7 +101,7 @@ describe('execution tree HTTP Instant contract', () => {
     expect(client.getQueryData(['threads', 'tree', CHILD])).toEqual(valid)
     expect(screen.getByRole('link')).toBeInTheDocument()
     expect(socket.sentMessages()).toEqual([
-      { version: 1, type: 'subscribe', resource: { kind: 'tree', id: ROOT } },
+      { version: 2, type: 'subscribe', resource: { kind: 'tree', id: ROOT } },
     ])
   })
 })
