@@ -26,7 +26,8 @@ import { repositoryRoot } from '../../../dev/lib/repo-root.mjs'
 import { treeEntries, writeTarGz } from './tar.mjs'
 
 export const DAEMON_VERSION = '1.1.1'
-export const CODE_SERVER_VERSION = '4.141.0-kk.1'
+// This version is for simulated archives only and does not imply a published release.
+export const CODE_SERVER_VERSION = '4.143.1-kk.2'
 export const RELEASE_TAG = `v${DAEMON_VERSION}`
 export const RELEASE_BASE = 'https://github.com/fengwk/kk-studio/releases'
 export const PLATFORMS = ['linux-amd64', 'linux-arm64', 'macos-amd64', 'macos-arm64', 'windows-amd64']

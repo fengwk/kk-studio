@@ -13,6 +13,7 @@ import path from 'node:path'
 import { describe, it } from 'node:test'
 
 import {
+  CODE_SERVER_VERSION,
   DAEMON_VERSION,
   PLATFORMS,
   RELEASE_TAG,
@@ -206,8 +207,8 @@ describe('prepare-release.sh', () => {
   it('rejects a code-server link that escapes the archive', () =>
     withFixture((fixture, tmp) => {
       const platform = 'linux-amd64'
-      const runtime = path.join(fixture.httpDir, `code-server-4.141.0-kk.1-${platform}.tar.gz`)
-      const rootName = `code-server-4.141.0-kk.1-${platform}`
+      const runtime = path.join(fixture.httpDir, `code-server-${CODE_SERVER_VERSION}-${platform}.tar.gz`)
+      const rootName = `code-server-${CODE_SERVER_VERSION}-${platform}`
       rmSync(runtime)
       writeTarGz(runtime, [
         { name: rootName, type: 'dir' },
