@@ -1,6 +1,6 @@
 {
   "name": "@kk-studio/daemon",
-  "version": "4.0.3",
+  "version": "5.0.0",
   "private": true,
   "type": "module",
   "engines": {
