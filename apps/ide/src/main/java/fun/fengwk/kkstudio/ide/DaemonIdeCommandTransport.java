@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.ide;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonIdeLease;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonIdeCall;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServer;
@@ -40,5 +41,10 @@ public class DaemonIdeCommandTransport implements IdeCommandTransport {
   @Override
   public Optional<DaemonConnectionIdentity> connectionIdentity(EnvironmentId environmentId) {
     return server.connectionIdentity(environmentId);
+  }
+
+  @Override
+  public void sendIdeLease(EnvironmentId environmentId, DaemonIdeLease lease) {
+    server.sendIdeLease(environmentId, lease);
   }
 }

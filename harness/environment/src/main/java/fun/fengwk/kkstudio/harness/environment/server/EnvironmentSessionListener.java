@@ -19,4 +19,13 @@ public interface EnvironmentSessionListener {
    * 撤销只是其中一环，已建立的流也必须关闭）。默认空实现，不强制所有宿主关心 IDE 数据面。
    */
   default void onDaemonInstanceReplaced(DaemonConnectionIdentity previous) {}
+
+  /**
+   * 当前 READY 连接的一次有效心跳已推进租约与运行状态。
+   *
+   * <p>回调在会话锁外执行；{@code ideLeaseRound} 是 Daemon 本轮发出的使用证明轮次，没有 IDE 视图时为 {@code null}。实现不得在该回调中阻塞
+   * 心跳路径，也不得把心跳本身当作浏览器活跃证明。
+   */
+  default void onHeartbeat(
+      EnvironmentId environmentId, DaemonConnectionIdentity identity, Long ideLeaseRound) {}
 }
