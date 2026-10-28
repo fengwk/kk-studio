@@ -29,6 +29,7 @@ import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.SocketTimeoutException;
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -148,10 +149,9 @@ public final class IdeGatewayDataPlane {
     }
 
     List<MuxHeader> headers = IdeDataHeaderPolicy.forwardRequestHeaders(request, false);
-    String upstreamPath;
+    String requestPath;
     try {
-      upstreamPath =
-          IdeDataInternalPaths.upstreamPath(viewId, access.bindingEpoch(), rawPathAndQuery);
+      requestPath = IdeDataInternalPaths.viewPath(rawPathAndQuery);
     } catch (IllegalArgumentException error) {
       IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_BAD_REQUEST);
       return;
@@ -165,7 +165,7 @@ public final class IdeGatewayDataPlane {
               viewId,
               access.bindingEpoch(),
               request.getMethod(),
-              upstreamPath,
+              requestPath,
               headers,
               access.controlIdentity(),
               exchange);
@@ -191,7 +191,8 @@ public final class IdeGatewayDataPlane {
       if (!response.isCommitted()) {
         IdeDataHeaderPolicy.sendError(response, failure.status());
       } else {
-        throw new IOException("IDE HTTP exchange failed after the browser response was committed");
+        throw new IOException(
+            "IDE HTTP exchange failed after the browser response was committed", failure);
       }
     }
   }
@@ -317,10 +318,88 @@ public final class IdeGatewayDataPlane {
       return location;
     }
     if (location.startsWith("/") && !location.startsWith("//")) {
+      String relative = internalViewRelative(location, viewId);
       String base = viewBase(request, environmentId, viewId);
-      return base + location.substring(1);
+      return base + relative.substring(1);
     }
     return location;
+  }
+
+  /** Worker scope 只能落在当前浏览器 view；无效或越界声明收窄到 view 根。 */
+  static String rebaseWorkerScope(
+      String scope, HttpServletRequest request, EnvironmentId environmentId, UUID viewId) {
+    String base = viewBase(request, environmentId, viewId);
+    if (viewId == null || scope.indexOf('?') >= 0 || scope.indexOf('#') >= 0) {
+      return base;
+    }
+    String relative = internalViewRelative(scope, viewId);
+    if (!relative.equals(scope) && IdeDataInternalPaths.isSafeViewPath(relative)) {
+      return base + relative.substring(1);
+    }
+    try {
+      URI uri = URI.create(scope);
+      if (uri.isAbsolute()
+          || uri.getRawAuthority() != null
+          || uri.getRawQuery() != null
+          || uri.getRawFragment() != null) {
+        return base;
+      }
+      String path = uri.getRawPath();
+      if (path != null && path.startsWith("./")) {
+        path = path.substring(2);
+      }
+      if (path == null || !IdeDataInternalPaths.isSafeViewPath("/" + path)) {
+        return base;
+      }
+      String resolved = URI.create(request.getRequestURI()).resolve(uri).getRawPath();
+      return resolved.startsWith(base) ? resolved : base;
+    } catch (IllegalArgumentException error) {
+      return base;
+    }
+  }
+
+  /** 真实 code-server 的绝对 Location 带内部挂载；只剥离当前 view 的 `/__kk/ide/view/...` 基址。 */
+  private static String internalViewRelative(String location, UUID viewId) {
+    if (viewId == null) {
+      return location;
+    }
+    String prefix = "/__kk/ide/view/" + viewId + "/";
+    if (!location.startsWith(prefix)) {
+      return location;
+    }
+    int slash = location.indexOf('/', prefix.length());
+    int question = location.indexOf('?', prefix.length());
+    int end;
+    if (slash < 0 && question < 0) {
+      end = location.length();
+    } else if (slash < 0) {
+      end = question;
+    } else if (question < 0) {
+      end = slash;
+    } else {
+      end = Math.min(slash, question);
+    }
+    if (!positiveDecimal(location.substring(prefix.length(), end))) {
+      return location;
+    }
+    String tail = location.substring(end);
+    if (tail.isEmpty()) {
+      return "/";
+    }
+    return tail.charAt(0) == '?' ? "/" + tail : tail;
+  }
+
+  private static boolean positiveDecimal(String value) {
+    if (value.isEmpty() || value.charAt(0) == '0') {
+      return false;
+    }
+    for (int i = 0; i < value.length(); i++) {
+      char c = value.charAt(i);
+      if (c < '0' || c > '9') {
+        return false;
+      }
+    }
+    return true;
   }
 
   static final class IdeHttpFailure extends Exception {
@@ -358,9 +437,11 @@ public final class IdeGatewayDataPlane {
     private volatile boolean headersReceived;
     private volatile boolean responseEnded;
     private volatile boolean completeWriteSucceeded;
+    private volatile boolean completionInProgress;
     private volatile Thread sender;
     private MuxStream stream;
     private boolean attached;
+    private boolean draining;
 
     private HttpExchange(
         EnvironmentId environmentId,
@@ -377,23 +458,41 @@ public final class IdeGatewayDataPlane {
     /** OPEN 返回后绑定流，并按 wire 顺序重放等待期间到达的回调。 */
     private void attach(MuxStream stream) {
       this.stream = Objects.requireNonNull(stream, "stream");
-      List<Runnable> callbacks;
       synchronized (dispatchLock) {
         attached = true;
-        callbacks = List.copyOf(pendingCallbacks);
-        pendingCallbacks.clear();
       }
-      callbacks.forEach(Runnable::run);
+      drainCallbacks();
     }
 
     private void dispatch(Runnable callback) {
       synchronized (dispatchLock) {
-        if (!attached) {
-          pendingCallbacks.add(callback);
+        pendingCallbacks.add(callback);
+      }
+      drainCallbacks();
+    }
+
+    private void drainCallbacks() {
+      synchronized (dispatchLock) {
+        if (!attached || draining) {
           return;
         }
+        draining = true;
       }
-      callback.run();
+      while (true) {
+        Runnable callback;
+        synchronized (dispatchLock) {
+          if (pendingCallbacks.isEmpty()) {
+            draining = false;
+            return;
+          }
+          callback = pendingCallbacks.removeFirst();
+        }
+        try {
+          callback.run();
+        } catch (RuntimeException error) {
+          fail(error, 502);
+        }
+      }
     }
 
     private void run() throws IdeHttpFailure {
@@ -579,17 +678,23 @@ public final class IdeGatewayDataPlane {
               fail(error, 502);
               return;
             }
-            stream
-                .complete()
-                .whenComplete(
-                    (ignored, error) -> {
-                      if (error == null) {
-                        completeWriteSucceeded = true;
-                        success();
-                      } else {
-                        fail(error, 502);
-                      }
-                    });
+            completionInProgress = true;
+            try {
+              stream
+                  .complete()
+                  .whenComplete(
+                      (ignored, error) -> {
+                        if (error == null) {
+                          completeWriteSucceeded = true;
+                          success();
+                        } else {
+                          fail(error, 502);
+                        }
+                      });
+            } catch (RuntimeException error) {
+              // Early responses before request END cannot COMPLETE; fail only this stream.
+              fail(error, 502);
+            }
           });
     }
 
@@ -613,6 +718,10 @@ public final class IdeGatewayDataPlane {
         fail(error, 502);
       } else if (completeWriteSucceeded) {
         success();
+      } else if (completionInProgress) {
+        // complete() may close synchronously before its returned future can be observed.
+        // Only that actual write future may decide success or failure.
+        return;
       } else {
         fail(new IOException("IDE HTTP stream closed before COMPLETE was written"), 502);
       }

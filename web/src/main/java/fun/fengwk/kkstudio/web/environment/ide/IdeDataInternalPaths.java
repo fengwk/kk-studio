@@ -27,9 +27,6 @@ final class IdeDataInternalPaths {
 
   static final String PATH_PARAMETER = "path";
 
-  /** code-server 内部固定 view 级基址；浏览器相对路径只能落在该前缀之下。 */
-  static final String CODE_SERVER_VIEW_PREFIX = "/__kk/ide/view/";
-
   private IdeDataInternalPaths() {}
 
   static String dataHttpPath(EnvironmentId environmentId, UUID viewId, String rawPathAndQuery) {
@@ -41,21 +38,17 @@ final class IdeDataInternalPaths {
     return dataPath(environmentId, viewId, rawPathAndQuery, DATA_WS_SUFFIX);
   }
 
-  /** 把浏览器 view 基址之后的原始 path/query 映射到内部 code-server 固定基址。 */
-  static String upstreamPath(UUID viewId, long bindingEpoch, String rawPathAndQuery) {
-    Objects.requireNonNull(viewId, "viewId");
+  /** 校验浏览器 view 基址之后的原始 path/query；内部 code-server 基址只由 Daemon 构造。 */
+  static String viewPath(String rawPathAndQuery) {
     Objects.requireNonNull(rawPathAndQuery, "rawPathAndQuery");
-    if (bindingEpoch <= 0L) {
-      throw new IllegalArgumentException("bindingEpoch must be positive");
-    }
     if (!isSafeViewPath(rawPathAndQuery)) {
       throw new IllegalArgumentException("IDE view path must stay within the view base path");
     }
-    return CODE_SERVER_VIEW_PREFIX + viewId + "/" + bindingEpoch + rawPathAndQuery;
+    return rawPathAndQuery;
   }
 
   /**
-   * 浏览器 path 只能落在固定 view 基址下；拒绝点段、反斜杠与编码分隔符，避免 code-server 归一化后跳出 {@code
+   * 浏览器 path 必须是以 {@code /} 起始的 view 相对路径；拒绝点段、反斜杠与编码分隔符，避免 Daemon 拼接内部基址后被归一化 跳出 {@code
    * /__kk/ide/view/{viewId}/{epoch}}。
    */
   static boolean isSafeViewPath(String rawPathAndQuery) {

@@ -186,10 +186,39 @@ final class MuxDaemonPeer implements AutoCloseable {
             : "hello".getBytes(StandardCharsets.UTF_8);
     List<MuxHeader> responseHeaders = new ArrayList<>();
     responseHeaders.add(new MuxHeader("content-type", "text/plain"));
+    int status = 200;
+    if (state.request.path().startsWith("/worker.js")) {
+      String scope =
+          state.request.path().contains("root")
+              ? "/"
+              : state.request.path().contains("other")
+                  ? "/__kk/ide/view/00000000-0000-0000-0000-000000000001/1/"
+                  : state.request.path().contains("relative")
+                      ? "./workers/"
+                      : "/__kk/ide/view/"
+                          + state.request.viewId()
+                          + "/"
+                          + state.request.bindingEpoch()
+                          + "/";
+      responseHeaders.add(new MuxHeader("Service-Worker-Allowed", scope));
+      responseHeaders.add(new MuxHeader("set-cookie", "upstream=forbidden; Path=/"));
+    }
     if (state.request.path().contains("/echo")) {
       responseHeaders.add(new MuxHeader("set-cookie", "upstream=forbidden; Path=/"));
     }
-    send(new MuxFrame.Headers(end.streamId(), MuxHeaders.http(200, responseHeaders)));
+    if (state.request.path().contains("/redirect")) {
+      // 真实 code-server 在内部挂载下返回带 `/__kk/ide/view/...` 的 Location。
+      status = 302;
+      responseHeaders.add(
+          new MuxHeader(
+              "location",
+              "/__kk/ide/view/"
+                  + state.request.viewId()
+                  + "/"
+                  + state.request.bindingEpoch()
+                  + "/target?x=1"));
+    }
+    send(new MuxFrame.Headers(end.streamId(), MuxHeaders.http(status, responseHeaders)));
     send(new MuxFrame.Data(end.streamId(), MuxDataKind.HTTP, false, body));
     send(new MuxFrame.End(end.streamId()));
   }
