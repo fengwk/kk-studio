@@ -26,6 +26,7 @@ import {
   type IdeServiceEvent,
 } from '../../src/ide/service.js'
 import { listViews, openCommand, signal } from './lifecycle-fixtures.js'
+import { decodeIdeReply, encodeIdeReply } from '../../src/protocol.js'
 
 const cleanups: Array<() => Promise<void> | void> = []
 afterEach(async () => {
@@ -283,6 +284,7 @@ const processes: ProcessSupervisor = {
     throw new Error('fake manager does not start processes')
   },
   async close() {},
+  async trackDescendant() {},
 }
 
 async function setup(options: { maxViews?: number } = {}) {
@@ -369,6 +371,41 @@ async function openStreamingView() {
 }
 
 describe('managed IDE claim and tenant lifecycle', () => {
+  it('round-trips actual OPEN and RESUME service replies without list-only state', async () => {
+    const { service, project } = await setup()
+    const viewId = randomUUID()
+    const documentId = randomUUID()
+    for (const mode of ['create', 'resume'] as const) {
+      const reply = await service.handle(open(viewId, documentId, randomUUID(), project, mode), signal())
+      expect(reply.ok).toBe(true)
+      expect(decodeIdeReply(JSON.stringify(reply))).toEqual(reply)
+      expect(decodeIdeReply(encodeIdeReply(reply))).toEqual(reply)
+      expect(reply).not.toHaveProperty('state')
+    }
+    const listed = await listViews(service)
+    expect(listed.views?.[0]?.state).toBe('OPEN')
+    expect(decodeIdeReply(JSON.stringify(listed))).toEqual(listed)
+    expect(decodeIdeReply(encodeIdeReply(listed))).toEqual(listed)
+  })
+
+  it.each(['CHANGE_DIRECTORY', 'FOCUS_TERMINAL', 'DETACH_VIEW', 'CLOSE_VIEW'] as const)(
+    'round-trips the actual %s service command acknowledgement',
+    async (action) => {
+      const { service, project } = await setup()
+      const viewId = randomUUID()
+      const documentId = randomUUID()
+      const opened = await service.handle(open(viewId, documentId, randomUUID(), project), signal())
+      const state = { viewId, documentId, bindingEpoch: opened.bindingEpoch as string }
+      const reply = await service.handle(
+        boundCommand(action, state, { directory: project, discard: true }),
+        signal(),
+      )
+      expect(reply).toEqual({ ok: true, viewId })
+      expect(decodeIdeReply(JSON.stringify(reply))).toEqual(reply)
+      expect(decodeIdeReply(encodeIdeReply(reply))).toEqual(reply)
+    },
+  )
+
   it('keeps a view recoverable at 599s and releases it at 600s from the accepted round start', async () => {
     const { service, scheduler, manager } = await setup()
     const viewId = randomUUID()
