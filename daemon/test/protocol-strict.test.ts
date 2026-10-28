@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { CapabilityResult } from '../src/contracts.js'
 import {
   PROTOCOL_VERSION,
+  READY_CAPABILITIES_VERSION,
   ProtocolError,
   decodeCapabilities,
   decodeCompleted,
@@ -25,6 +26,10 @@ import { artifactFixture } from './support/update-fixture.js'
 
 const UUID = '11111111-2222-4333-8444-555555555555'
 const SHA = 'a'.repeat(64)
+
+function runtimeStatus(daemonVersion: string): Record<string, unknown> {
+  return { revision: '1', status: { daemonVersion, update: null } }
+}
 
 const TINY_LIMITS = { maxBytes: 64, maxNestingDepth: 4, maxNumberLength: 8, maxStringBytes: 4 }
 
@@ -141,10 +146,19 @@ describe('READY capabilities validation branches', () => {
 
   it('rejects a non-integer version and an invalid daemonVersion', () => {
     expect(() =>
-      decodeCapabilities(JSON.stringify({ version: 'four', daemonVersion: '1.0.14', environment })),
+      decodeCapabilities(
+        JSON.stringify({ version: 'four', daemonVersion: '1.0.14', environment, runtimeStatus: runtimeStatus('1.0.14') }),
+      ),
     ).toThrow(/version must be an integer/)
     expect(() =>
-      decodeCapabilities(JSON.stringify({ version: 5, daemonVersion: 'bad version', environment })),
+      decodeCapabilities(
+        JSON.stringify({
+          version: READY_CAPABILITIES_VERSION,
+          daemonVersion: 'bad version',
+          environment,
+          runtimeStatus: runtimeStatus('1.0.14'),
+        }),
+      ),
     ).toThrow(/READY capabilities validation failed/)
   })
 })
