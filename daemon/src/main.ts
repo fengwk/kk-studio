@@ -4,6 +4,7 @@ import { pathToFileURL } from 'node:url'
 
 import type { CapabilityExecutor, DaemonConfig } from './contracts.js'
 import {
+  DAEMON_VERSION,
   checkConfig,
   invalidConfigurationLine,
   loadDaemonConfig,
@@ -12,6 +13,7 @@ import {
 } from './config.js'
 import { Runtime, detectEnvironmentInfo } from './runtime.js'
 import { createWebSocketTransport } from './transport/control.js'
+import { createMuxUpstreamService } from './transport/mux-upstream.js'
 import { installOutboundNetwork, ProxyConfigurationError } from './network.js'
 import {
   UnsupportedPlatformError,
@@ -29,6 +31,7 @@ import { releaseTextOutputStore, sweepTextOutputStores } from './coding/output.j
 import { createSkillCapability } from './skill/sync.js'
 import { createIdeService } from './ide/service.js'
 import { handleUpdate } from './update.js'
+import { awaitStartupHandoff } from './update-entry.js'
 
 /**
  * Environment Daemon 独立进程入口与依赖装配。
@@ -114,6 +117,25 @@ async function runDaemon(config: DaemonConfig): Promise<number> {
     const dataDir = await ensurePrivateDirectory(config.dataDir)
     // 目录锁的参数是数据目录本身：native 边界会在其中创建并持有 daemon.lock。
     lock = await acquireDirectoryLock(dataDir)
+    // 新进程在装配任何业务能力之前完成更新交接：目标版本预检、私有启动确认、等待 updater
+    // 写出 result 并释放安装目录互斥。任何失败结果都必须在 READY 前终止当前进程。
+    const handoff = await awaitStartupHandoff({
+      dataDir,
+      distributionDir: config.distributionDir,
+      configPath: config.configPath,
+    })
+    if (handoff.state === 'failed') {
+      // 交接失败已经由更新器持久化并标记消费；当前进程没有可信的新版本，不得进入 READY。
+      process.stderr.write(`daemon failed: update handoff failed: ${handoff.message}\n`)
+      outcome = 1
+      return outcome
+    }
+    if (handoff.state === 'updated' && handoff.targetVersion !== DAEMON_VERSION) {
+      // 本进程不是已安装的目标版本（例如旧服务在替换后被重启）：不得以旧代码进入 READY。
+      process.stderr.write('daemon failed: this process is not the installed update target\n')
+      outcome = 1
+      return outcome
+    }
 
     const systemProxy = createSystemProxyResolver()
     let closeNetwork = (): Promise<void> => systemProxy.close()
@@ -141,6 +163,17 @@ async function runDaemon(config: DaemonConfig): Promise<number> {
     })
     closers.push(() => ide.close())
 
+    // 一条 DATA_BIND 承载当前控制代际内的共享数据面；最后一个逻辑流收敛后关闭物理连接，
+    // 让 Runtime 的数据绑定在途门禁解除。后续代际必须由新的 DATA_BIND 与一次性票据重新建立。
+    const dataUpstream = createMuxUpstreamService({
+      studioUrl: config.studioUrl,
+      resolveView: ide.resolveView,
+      onIdle: () => {
+        void dataUpstream.close()
+      },
+    })
+    closers.push(() => dataUpstream.shutdown())
+
     const capabilities: Record<string, CapabilityExecutor> = {
       ...fileCapabilities,
       ...searchCapabilities,
@@ -157,10 +190,13 @@ async function runDaemon(config: DaemonConfig): Promise<number> {
       ide,
       // IDE_LEASE 的 round 起点由 Runtime 心跳时钟传入；证明不能创建或续租视图。
       ideLease: ide,
-      // DATA_BIND 的 mux-connection 适配器仍由 node-upstream 切片提供。该模块尚未合入时
-      // 不注册 dataBind，Runtime 对 DATA_BIND 明确报 handler 未配置，而不是伪造成功。
-      // 受管更新以 supervisor 运行受控子进程；装配层绑定 native 端口。
-      update: { handleUpdate: (command, cfg, signal) => handleUpdate(command, cfg, signal, supervisor) },
+      // DATA_BIND 的共享 mux 数据面；解析目标只经由 IDE service 的视图校验，不接受任意 host/port。
+      dataBind: dataUpstream,
+      // 受管更新以 supervisor 运行受控子进程；报告器只接收发行归档 body 的累计字节。
+      update: {
+        handleUpdate: (command, cfg, signal, reportProgress) =>
+          handleUpdate(command, cfg, signal, supervisor, reportProgress),
+      },
       // WELCOME 下发的 TTL 热更直接驱动 Files 受控临时输出的同一份 lease 清扫。
       temporaryResources: {
         async sweep(ttlSeconds: number): Promise<void> {

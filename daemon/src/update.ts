@@ -1,13 +1,20 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { createWriteStream } from 'node:fs'
-import { lstat, open, readFile, rm } from 'node:fs/promises'
+import { chmod, copyFile, cp, lstat, open, readdir, readFile, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
+import { setTimeout as sleep } from 'node:timers/promises'
 import type { DaemonConfig, ManagedProcess, ProcessSpec, ProcessSupervisor } from './contracts.js'
 import { extractArchive as extractArchiveSafely, MAX_ARCHIVE_BYTES, MAX_CHECKSUM_BYTES, MAX_MANIFEST_BYTES } from './archive.js'
 import { getOutboundNetwork } from './network.js'
-import { ensurePrivateDirectory, verifyPrivateFile, writePrivateFile } from './native/index.js'
+import {
+  acquireFileLock,
+  ensurePrivateDirectory,
+  verifyPrivateFile,
+  writePrivateFile,
+  type DirectoryLock,
+} from './native/index.js'
 import {
   PUBLISHED_PLATFORMS,
   artifactFileName,
@@ -16,31 +23,47 @@ import {
   type ReleaseArch,
   type ReleaseOs,
 } from './release.js'
+import {
+  HANDOFF_FILE,
+  MANAGED_ENTRY,
+  PERMIT_FILE,
+  RESULT_FILE,
+  RUNTIME_MANIFEST,
+  TAKEOVER_FILE,
+  UNIX_UPDATE_SCRIPT_NAME,
+  UPDATE_DIRECTORY,
+  UPDATE_LOCK_FILE,
+  WINDOWS_UPDATE_SCRIPT_NAME,
+} from './update-entry.js'
 import { UNIX_UPDATE_SCRIPT, WINDOWS_UPDATE_SCRIPT } from './update-scripts.js'
 
-/** 受管程序入口（发行根下）。 */
-export const MANAGED_ENTRY = 'main.js'
+export {
+  HANDOFF_FILE,
+  MANAGED_ENTRY,
+  PERMIT_FILE,
+  RESULT_FILE,
+  RUNTIME_MANIFEST,
+  STARTUP_ACK_FILE,
+  STEPS_FILE,
+  TAKEOVER_FILE,
+  UNIX_UPDATE_SCRIPT_NAME,
+  UPDATE_DIRECTORY,
+  UPDATE_LOCK_FILE,
+  WINDOWS_UPDATE_SCRIPT_NAME,
+} from './update-entry.js'
+
 /** 受管配置文件相对数据目录的固定名。 */
 export const MANAGED_CONFIG_NAME = 'daemon.json'
-/** 暂存与 handoff 的进程私有子目录。 */
-export const UPDATE_DIRECTORY = 'updates'
-/** handoff 元数据文件名；独立 OS 更新器按它执行替换与重启。 */
-export const HANDOFF_FILE = 'handoff.json'
-/** 更新许可文件名；独立 OS 更新器必须等它出现才可替换发行目录。 */
-export const PERMIT_FILE = 'permit'
-/** 独立更新器读取的最小证据文件名（阶段与去敏说明）。 */
-export const RESULT_FILE = 'update-result.json'
-/** 冻结发行清单文件名（发行根下），承载 daemon 版本与平台运行时。 */
-export const RUNTIME_MANIFEST = 'runtime-manifest.json'
-/** Unix 更新脚本在暂存目录内的固定文件名。 */
-export const UNIX_UPDATE_SCRIPT_NAME = 'kk-studio-daemon-update.sh'
-/** Windows 更新脚本在暂存目录内的固定文件名。 */
-export const WINDOWS_UPDATE_SCRIPT_NAME = 'kk-studio-daemon-update.ps1'
 
 /** 子进程每条流的保留上限：64 KiB。 */
 export const STREAM_LIMIT_BYTES = 64 * 1024
-/** 归档下载固定超时：300 秒。 */
-export const DOWNLOAD_TIMEOUT_MILLIS = 300_000
+/** 归档下载连续无有效数据的最长等待：300 秒；累计下载时长不设硬上限。 */
+export const DOWNLOAD_IDLE_TIMEOUT_MILLIS = 300_000
+/** 下载结果分类：调用方必须能区分无进展、外部取消与普通网络失败。 */
+export const DOWNLOAD_NO_PROGRESS_MESSAGE = 'official artifact download timed out after 300 seconds without progress'
+export const DOWNLOAD_CANCELLED_MESSAGE = 'official artifact download was cancelled'
+export const DOWNLOAD_FAILED_MESSAGE = 'official artifact download failed'
+export const DOWNLOAD_FINALIZE_MESSAGE = 'official artifact download could not be finalized'
 /** 官方下载重定向上限：标准有界 20 跳，每跳按 URL 重新选择代理。 */
 export const MAX_DOWNLOAD_REDIRECTS = 20
 
@@ -50,6 +73,8 @@ const CHECK_CONFIG_SUCCESS = 'Daemon configuration is valid'
 const EXTRACT_DIRECTORY = 'extract'
 const CHECK_CONFIG_TIMEOUT_MILLIS = 60_000
 const LAUNCH_TIMEOUT_MILLIS = 15_000
+const PERMIT_TAKEOVER_TIMEOUT_MILLIS = 30_000
+const PERMIT_TAKEOVER_POLL_MILLIS = 50
 
 const VERSION_PATTERN = /^[0-9A-Za-z._+-]{1,64}$/
 const OPERATION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
@@ -70,6 +95,14 @@ export interface UpdateOutcome {
   releasePermit?: () => Promise<void>
 }
 
+/** 发行归档下载进度；只统计归档 body，校验文件不混入。 */
+export interface UpdateProgress {
+  downloadedBytes: number
+  totalBytes: number | null
+}
+
+export type UpdateProgressReporter = (progress: UpdateProgress) => void
+
 export interface RunResult {
   code: number | null
   stdout: string
@@ -86,7 +119,13 @@ export interface RunOptions {
 export interface UpdateDependencies {
   releaseOs: ReleaseOs
   releaseArch: ReleaseArch
-  fetchTo(url: string, destination: string, signal: AbortSignal, maxBytes: number): Promise<void>
+  fetchTo(
+    url: string,
+    destination: string,
+    signal: AbortSignal,
+    maxBytes: number,
+    reportProgress?: (downloadedBytes: number, totalBytes: number | null) => void,
+  ): Promise<void>
   extractArchive(archive: string, destination: string, signal: AbortSignal): Promise<void>
   run(command: string, args: string[], options: RunOptions): Promise<RunResult>
   id(): string
@@ -94,8 +133,8 @@ export interface UpdateDependencies {
 
 /** 预期的期望失败；消息只承载去敏、有界说明，绝不携带输入值。 */
 class UpdateFailure extends Error {
-  constructor(message: string) {
-    super(message)
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options)
     this.name = 'UpdateFailure'
   }
 }
@@ -441,11 +480,102 @@ export function powerShellLiteral(value: string): string {
   return `'${value.replace(/'/g, "''")}'`
 }
 
+const UPDATER_DIRECTORY = 'updater'
+const UPDATER_MARKER = 'updater.json'
+
+interface StagedUpdater {
+  node: string
+  entry: string
+}
+
+function updaterNodeName(os: ReleaseOs): string {
+  return os === 'windows' ? 'node.exe' : 'node'
+}
+
+/**
+ * 把更新器运行时从已校验的暂存发行复制到 operation 私有目录。
+ *
+ * <p>更新器不能从 staged/installed 目录运行：Windows 不允许在可执行文件仍被映射时整体 rename 其目录。复制只取
+ * {@code dist}、koffi 原生绑定和冻结 Node 可执行文件，并对 marker 做精确复用；复制完成前 marker 不存在，后续重放不会把
+ * 半成品当成可用更新器。
+ */
+async function stageUpdater(
+  extractDir: string,
+  operationDir: string,
+  os: ReleaseOs,
+  operationId: string,
+  targetVersion: string,
+): Promise<StagedUpdater> {
+  const sourceNodeModules = path.join(extractDir, 'node_modules')
+  const sourceKoffi = path.join(sourceNodeModules, 'koffi')
+  const sourceKoffiPlatforms = path.join(sourceNodeModules, '@koromix')
+  const sourceDist = path.join(extractDir, 'dist')
+  const sourceNode = path.join(extractDir, 'runtime', 'code-server', 'lib', updaterNodeName(os))
+  if (
+    !(await isRealDirectory(sourceDist)) ||
+    !(await isRealRegularFile(path.join(sourceDist, 'update-entry.js'))) ||
+    !(await isRealDirectory(sourceKoffi)) ||
+    !(await isRealDirectory(sourceKoffiPlatforms)) ||
+    !(await isRealRegularFile(sourceNode))
+  ) {
+    throw new UpdateFailure('staged distribution is missing the updater runtime')
+  }
+  const platformPackages = await readdirKoffiPlatforms(sourceKoffiPlatforms)
+  if (platformPackages.length === 0) {
+    throw new UpdateFailure('staged distribution is missing the updater native binding')
+  }
+  const updaterRoot = path.join(operationDir, UPDATER_DIRECTORY)
+  const node = path.join(updaterRoot, updaterNodeName(os))
+  const entry = path.join(updaterRoot, 'dist', 'update-entry.js')
+  const markerPath = path.join(updaterRoot, UPDATER_MARKER)
+  if (
+    (await isRealDirectory(updaterRoot)) &&
+    (await isRealRegularFile(markerPath)) &&
+    (await isRealRegularFile(node)) &&
+    (await isRealRegularFile(entry))
+  ) {
+    const marker = await readBoundedJsonObject(markerPath, MAX_MANIFEST_BYTES).catch(() => null)
+    if (marker?.operationId === operationId && marker?.targetVersion === targetVersion) {
+      return { node, entry }
+    }
+  }
+  await rm(updaterRoot, { recursive: true, force: true })
+  await ensurePrivateDirectory(updaterRoot)
+  const destinationDist = path.join(updaterRoot, 'dist')
+  const destinationKoffi = path.join(updaterRoot, 'node_modules', 'koffi')
+  const destinationPlatforms = path.join(updaterRoot, 'node_modules', '@koromix')
+  await ensurePrivateDirectory(path.join(updaterRoot, 'node_modules'))
+  await cp(sourceDist, destinationDist, { recursive: true, force: true, dereference: false })
+  await cp(sourceKoffi, destinationKoffi, { recursive: true, force: true, dereference: false })
+  for (const name of platformPackages) {
+    await cp(path.join(sourceKoffiPlatforms, name), path.join(destinationPlatforms, name), {
+      recursive: true,
+      force: true,
+      dereference: false,
+    })
+  }
+  await copyFile(sourceNode, node)
+  if (os !== 'windows') {
+    await chmod(node, 0o700)
+  }
+  await writePrivateFile(path.join(updaterRoot, 'package.json'), '{"type":"module","private":true}\n')
+  await writePrivateFile(markerPath, `${JSON.stringify({ operationId, targetVersion }, null, 2)}\n`)
+  return { node, entry }
+}
+
+async function readdirKoffiPlatforms(directory: string): Promise<string[]> {
+  const entries = await readdir(directory, { withFileTypes: true })
+  return entries
+    .filter(entry => entry.isDirectory() && /^koffi-[a-z0-9-]+$/.test(entry.name))
+    .map(entry => entry.name)
+}
+
 /**
  * 分离更新器命令：独立于旧 Daemon 生命周期的短生命周期 OS 作业。
  *
- * 三种平台都把 `<operation-dir> <staged-dir> <installed-dir>` 三个参数原样交给更新脚本；Windows 的
- * 注册/启动脚本以 UTF-16LE Base64 的 `-EncodedCommand` 传递，避免任何 shell 引号注入。
+ * <p>三种平台都以 {@code run <operation-dir> <staged-dir> <installed-dir> <updater-node> <updater-entry>}
+ * 调用同一脚本；脚本的 run 动作只 exec operation 私有目录中的更新器，不自行替换发行。Windows 的注册/启动脚本以
+ * UTF-16LE Base64 的 `-EncodedCommand` 传递，避免任何 shell 引号注入。
  */
 export function detachedLaunchCommand(
   os: ReleaseOs,
@@ -453,16 +583,33 @@ export function detachedLaunchCommand(
   script: string,
   stagedDir: string,
   installedDir: string,
+  updaterNode: string,
+  updaterEntry: string,
 ): string[] {
   const unit = `kk-studio-daemon-update-${operationId}`
   const operationDir = path.dirname(stagedDir)
   if (os === 'macos') {
-    return ['launchctl', 'submit', '-l', unit, '--', 'bash', script, operationDir, stagedDir, installedDir]
+    return [
+      'launchctl',
+      'submit',
+      '-l',
+      unit,
+      '--',
+      'bash',
+      script,
+      'run',
+      operationDir,
+      stagedDir,
+      installedDir,
+      updaterNode,
+      updaterEntry,
+    ]
   }
   if (os === 'windows') {
     const action =
       `-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${script}" ` +
-      `-OperationDir "${operationDir}" -StagedDir "${stagedDir}" -InstalledDir "${installedDir}"`
+      `-Action run -OperationDir "${operationDir}" -StagedDir "${stagedDir}" -InstalledDir "${installedDir}" ` +
+      `-UpdaterNode "${updaterNode}" -UpdaterEntry "${updaterEntry}"`
     const inner = [
       `$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ${powerShellLiteral(action)}`,
       `$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(10)`,
@@ -473,7 +620,20 @@ export function detachedLaunchCommand(
     return ['powershell', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(inner, 'utf16le').toString('base64')]
   }
   // The staged directory lives at <operation>/extract, so <operation> is its parent.
-  return ['systemd-run', '--user', '--collect', `--unit=${unit}`, 'bash', script, operationDir, stagedDir, installedDir]
+  return [
+    'systemd-run',
+    '--user',
+    '--collect',
+    `--unit=${unit}`,
+    'bash',
+    script,
+    'run',
+    operationDir,
+    stagedDir,
+    installedDir,
+    updaterNode,
+    updaterEntry,
+  ]
 }
 
 function boundedMessage(error: unknown): string {
@@ -505,17 +665,23 @@ type HandoffState = 'ABSENT' | 'PREPARING' | 'ACCEPTED' | 'FAILED'
 /** 构建更新处理器；生产 `handleUpdate` 使用真实依赖，测试注入确定依赖。 */
 export function createUpdateHandler(
   deps: UpdateDependencies,
-): (command: Record<string, unknown>, config: DaemonConfig, signal: AbortSignal) => Promise<UpdateOutcome> {
+): (
+  command: Record<string, unknown>,
+  config: DaemonConfig,
+  signal: AbortSignal,
+  reportProgress?: UpdateProgressReporter,
+) => Promise<UpdateOutcome> {
   async function update(
     command: Record<string, unknown>,
     config: DaemonConfig,
     signal: AbortSignal,
+    reportProgress?: UpdateProgressReporter,
   ): Promise<UpdateOutcome> {
     let operationId: string | undefined
     try {
       const parsed = parseUpdateCommand(command)
       operationId = parsed.operationId
-      return await prepare(parsed, config, signal)
+      return await prepare(parsed, config, signal, reportProgress)
     } catch (error) {
       if (error instanceof UpdateFailure) {
         const echoed = operationId ?? safeOperationId(command)
@@ -529,6 +695,7 @@ export function createUpdateHandler(
     parsed: ParsedCommand,
     config: DaemonConfig,
     signal: AbortSignal,
+    reportProgress?: UpdateProgressReporter,
   ): Promise<UpdateOutcome> {
     const dataDir = path.resolve(config.dataDir)
     if (!(await isRealDirectory(dataDir))) {
@@ -568,12 +735,15 @@ export function createUpdateHandler(
     const state = await readHandoffState(handoffPath, parsed)
     if (state === 'ACCEPTED') {
       if (await isRealRegularFile(path.join(extractDir, MANAGED_ENTRY))) {
+        const startupToken = await readHandoffStartupToken(handoffPath)
+        await stageUpdater(extractDir, updateRoot, deps.releaseOs, parsed.operationId, parsed.targetVersion)
         await writePrivateFile(scriptPath, scriptContent(deps.releaseOs))
         return {
           operationId: parsed.operationId,
           phase: 'PREPARED',
           targetVersion: parsed.targetVersion,
-          releasePermit: () => releasePermit(permitPath, parsed.operationId),
+          releasePermit: () =>
+            releasePermit(permitPath, parsed.operationId, startupToken, parsed.targetVersion),
         }
       }
       throw new UpdateFailure('the update operation is not in a reusable state')
@@ -585,7 +755,9 @@ export function createUpdateHandler(
     const archive = path.join(updateRoot, artifactFileName(parsed.targetVersion, deps.releaseOs, deps.releaseArch))
     const checksum = `${archive}.sha256`
     try {
-      await deps.fetchTo(parsed.artifactUrl, archive, signal, MAX_ARCHIVE_BYTES)
+      await deps.fetchTo(parsed.artifactUrl, archive, signal, MAX_ARCHIVE_BYTES, (downloadedBytes, totalBytes) => {
+        reportProgress?.({ downloadedBytes, totalBytes })
+      })
       await deps.fetchTo(checksumUrl(parsed.targetVersion, deps.releaseOs, deps.releaseArch), checksum, signal, MAX_CHECKSUM_BYTES)
       if (!(await isRealRegularFile(archive)) || !(await isRealRegularFile(checksum))) {
         throw new UpdateFailure('downloaded artifact is not a real file')
@@ -608,28 +780,44 @@ export function createUpdateHandler(
       }
       await verifyStagedManifest(extractDir, deps.releaseOs, deps.releaseArch, parsed.targetVersion)
       await verifyStagedConfiguration(extractDir, configFile, deps, signal)
+      const updater = await stageUpdater(extractDir, updateRoot, deps.releaseOs, parsed.operationId, parsed.targetVersion)
       await writePrivateFile(scriptPath, scriptContent(deps.releaseOs))
+      return await accept(parsed, extractDir, lib, configFile, scriptPath, permitPath, handoffPath, dataDir, updater)
     } catch (error) {
       await cleanupDownload(archive, checksum)
       throw error
     }
+  }
 
+  async function accept(
+    parsed: ParsedCommand,
+    extractDir: string,
+    lib: string,
+    configFile: string,
+    scriptPath: string,
+    permitPath: string,
+    handoffPath: string,
+    dataDir: string,
+    updater: StagedUpdater,
+  ): Promise<UpdateOutcome> {
+    const startupToken = randomUUID()
     // handoff 必须先于 OS 作业持久化（PREPARING），作业只有等到许可文件才可替换发行目录。
-    await writeHandoff(handoffPath, 'PREPARING', parsed, extractDir, lib, configFile, scriptPath, permitPath)
+    await writeHandoff(handoffPath, 'PREPARING', parsed, extractDir, lib, configFile, scriptPath, permitPath, startupToken)
     try {
-      await launch(deps, scriptPath, extractDir, lib, dataDir)
+      await launch(deps, scriptPath, extractDir, lib, dataDir, updater.node, updater.entry)
     } catch (error) {
-      await writeHandoff(handoffPath, 'FAILED', parsed, extractDir, lib, configFile, scriptPath, permitPath)
+      await writeHandoff(handoffPath, 'FAILED', parsed, extractDir, lib, configFile, scriptPath, permitPath, startupToken)
       throw error
     }
     // 作业已接受：切换 handoff 为 ACCEPTED，把 PREPARED 回执连同许可释放步骤交给 Runtime。
     // 许可绝不在本模块内释放：Runtime 必须在回执入缓存并完成一次出站尝试后才释放它，重放与重连重发据此重试。
-    await writeHandoff(handoffPath, 'ACCEPTED', parsed, extractDir, lib, configFile, scriptPath, permitPath)
+    await writeHandoff(handoffPath, 'ACCEPTED', parsed, extractDir, lib, configFile, scriptPath, permitPath, startupToken)
     return {
       operationId: parsed.operationId,
       phase: 'PREPARED',
       targetVersion: parsed.targetVersion,
-      releasePermit: () => releasePermit(permitPath, parsed.operationId),
+      releasePermit: () =>
+        releasePermit(permitPath, parsed.operationId, startupToken, parsed.targetVersion),
     }
   }
 
@@ -639,10 +827,53 @@ export function createUpdateHandler(
 /**
  * 幂等释放匹配 operation 的许可：独立 OS 更新器只在看到它之后才可替换发行目录。
  *
- * <p>释放动作本身幂等（重复写入同一内容），因此同 operation 的重放与重连重发都能安全地重试一次失败的释放。
+ * <p>释放前必须在有界时间内观察到同一 operation 的 takeover，并确认安装目录内核互斥已被持有：takeover 由更新器在拿到
+ * 互斥后写入，二者同时成立才证明更新器已经接管，旧进程不会把许可释放给一个尚未启动或已经退出的旁观者。释放动作本身
+ * 幂等（重复写入同一内容），因此同 operation 的重放与重连重发都能安全地重试一次失败的释放。
  */
-async function releasePermit(permitPath: string, operationId: string): Promise<void> {
-  await writePrivateFile(permitPath, `${operationId}\n`)
+async function releasePermit(
+  permitPath: string,
+  operationId: string,
+  startupToken: string,
+  targetVersion: string,
+): Promise<void> {
+  const operationDir = path.dirname(permitPath)
+  const takeoverPath = path.join(operationDir, TAKEOVER_FILE)
+  const lockPath = path.join(path.dirname(operationDir), UPDATE_LOCK_FILE)
+  const deadline = Date.now() + PERMIT_TAKEOVER_TIMEOUT_MILLIS
+  for (;;) {
+    if (await isRealRegularFile(takeoverPath)) {
+      let takeover: Record<string, unknown>
+      try {
+        takeover = await readBoundedJsonObject(takeoverPath, MAX_MANIFEST_BYTES)
+      } catch {
+        throw new UpdateFailure('the update takeover record is malformed')
+      }
+      if (
+        takeover.operationId !== operationId ||
+        takeover.token !== startupToken ||
+        takeover.targetVersion !== targetVersion
+      ) {
+        throw new UpdateFailure('the update takeover record does not match the operation')
+      }
+      let lock: DirectoryLock
+      try {
+        lock = await acquireFileLock(lockPath)
+      } catch (error) {
+        if (error instanceof Error && error.message.includes('already locked')) {
+          await writePrivateFile(permitPath, `${operationId}\n`)
+          return
+        }
+        throw error
+      }
+      // takeover 存在但互斥已空闲：更新器尚未接管或已经退出，绝不能把许可释放给未知状态。
+      await lock.close()
+    }
+    if (Date.now() >= deadline) {
+      throw new UpdateFailure('the updater did not acquire the installation lock in time')
+    }
+    await sleep(PERMIT_TAKEOVER_POLL_MILLIS)
+  }
 }
 
 function scriptContent(os: ReleaseOs): string {
@@ -702,6 +933,7 @@ async function writeHandoff(
   configFile: string,
   scriptPath: string,
   permitPath: string,
+  startupToken: string,
 ): Promise<void> {
   const handoff = {
     state,
@@ -714,8 +946,18 @@ async function writeHandoff(
     configFile,
     updateScript: scriptPath,
     permitFile: permitPath,
+    startupToken,
   }
   await writePrivateFile(handoffPath, `${JSON.stringify(handoff, null, 2)}\n`)
+}
+
+async function readHandoffStartupToken(handoffPath: string): Promise<string> {
+  const metadata = await readBoundedJsonObject(handoffPath, MAX_MANIFEST_BYTES)
+  const token = metadata.startupToken
+  if (typeof token !== 'string' || !OPERATION_ID_PATTERN.test(token)) {
+    throw new UpdateFailure('the accepted handoff has no startup token')
+  }
+  return token
 }
 
 async function verifyStagedManifest(
@@ -802,9 +1044,11 @@ async function launch(
   stagedDir: string,
   installedDir: string,
   cwd: string,
+  updaterNode: string,
+  updaterEntry: string,
 ): Promise<void> {
   const operationId = path.basename(path.dirname(scriptPath))
-  const command = detachedLaunchCommand(deps.releaseOs, operationId, scriptPath, stagedDir, installedDir)
+  const command = detachedLaunchCommand(deps.releaseOs, operationId, scriptPath, stagedDir, installedDir, updaterNode, updaterEntry)
   const executable = command[0]
   if (executable === undefined) {
     throw new UpdateFailure('update launcher command is empty')
@@ -815,6 +1059,51 @@ async function launch(
   }
 }
 
+/** 失败时移除部分文件；清理失败不能覆盖固定的取消/超时/网络说明，只作为 cause 保留。 */
+async function removePartialDownload(destination: string, failure: UpdateFailure): Promise<never> {
+  let cleanupError: unknown
+  try {
+    await rm(destination, { force: true })
+  } catch (error) {
+    cleanupError = error
+  }
+  if (cleanupError !== undefined) {
+    throw new UpdateFailure(failure.message, {
+      cause: new AggregateError([failure, cleanupError], 'official artifact download and cleanup failed'),
+    })
+  }
+  throw failure
+}
+
+/**
+ * 把下载阶段异常收敛为三个可区分、去敏的类别；原始网络/清理错误只保留在 cause 中，不进入对外消息。
+ *
+ * <p>body 已经完整交付时，后续只剩 dispatcher 清理，失败必须报告为 finalize 失败，不能被误判成下载停滞。
+ */
+function downloadFailure(error: unknown, signal: AbortSignal, idle: AbortSignal, bodyComplete: boolean): UpdateFailure {
+  if (signal.aborted) {
+    return new UpdateFailure(DOWNLOAD_CANCELLED_MESSAGE, { cause: error })
+  }
+  if (idle.aborted) {
+    return new UpdateFailure(DOWNLOAD_NO_PROGRESS_MESSAGE, { cause: error })
+  }
+  if (error instanceof UpdateFailure) {
+    return error
+  }
+  return new UpdateFailure(bodyComplete ? DOWNLOAD_FINALIZE_MESSAGE : DOWNLOAD_FAILED_MESSAGE, { cause: error })
+}
+
+/** 只接受可安全表示为非负整数的 Content-Length；其它值让 totalBytes 保持 unknown。 */
+function declaredContentLength(headers: { 'content-length'?: string | string[] }): number | null {
+  const raw = headers['content-length']
+  const text = Array.isArray(raw) ? raw[0] : raw
+  if (typeof text !== 'string' || !/^[0-9]+$/.test(text)) {
+    return null
+  }
+  const value = Number(text)
+  return Number.isSafeInteger(value) ? value : null
+}
+
 /** 生产依赖：官方 HTTPS 下载、受控归档解包、原生 supervisor 与 UUID。 */
 export function productionDependencies(processes: ProcessSupervisor): UpdateDependencies {
   const platform = releasePlatformFor(process.platform, process.arch)
@@ -822,50 +1111,75 @@ export function productionDependencies(processes: ProcessSupervisor): UpdateDepe
     releaseOs: platform.os,
     releaseArch: platform.arch,
     id: () => randomUUID(),
-    async fetchTo(url, destination, signal, maxBytes) {
-      const effective = AbortSignal.any([signal, AbortSignal.timeout(DOWNLOAD_TIMEOUT_MILLIS)])
-      const network = getOutboundNetwork()
-      let current = url
-      for (let hop = 0; ; hop += 1) {
-        const response = await network.openResponse(current, { method: 'GET', redirect: 'manual' }, effective)
-        try {
-          if (REDIRECT_STATUS.has(response.statusCode)) {
-            const location = response.headers.location
-            if (typeof location !== 'string' || hop >= MAX_DOWNLOAD_REDIRECTS) {
-              throw new UpdateFailure('official artifact download failed')
-            }
-            // 逐跳按新 URL 重新选择代理；GET 不携带任何凭证或 body 到重定向目标。
-            current = new URL(location, current).toString()
-            continue
-          }
-          if (response.statusCode < 200 || response.statusCode >= 300) {
-            throw new UpdateFailure('official artifact download failed')
-          }
-          let received = 0
-          const counter = new Transform({
-            transform(chunk: Buffer, _encoding, callback) {
-              received += chunk.length
-              if (received > maxBytes) {
-                callback(new UpdateFailure('official artifact download exceeds the size budget'))
-                return
+    async fetchTo(url, destination, signal, maxBytes, reportProgress) {
+      const idle = new AbortController()
+      const watchdog = setTimeout(() => idle.abort(), DOWNLOAD_IDLE_TIMEOUT_MILLIS)
+      const effective = AbortSignal.any([signal, idle.signal])
+      let bodyComplete = false
+      try {
+        const network = getOutboundNetwork()
+        let current = url
+        for (let hop = 0; ; hop += 1) {
+          const next = await network.withResponse(
+            current,
+            { method: 'GET', redirect: 'manual' },
+            effective,
+            async response => {
+              let completed = false
+              try {
+                if (REDIRECT_STATUS.has(response.statusCode)) {
+                  const location = response.headers.location
+                  if (typeof location !== 'string' || hop >= MAX_DOWNLOAD_REDIRECTS) {
+                    throw new UpdateFailure(DOWNLOAD_FAILED_MESSAGE)
+                  }
+                  // 逐跳按新 URL 重新选择代理；GET 不携带任何凭证或 body 到重定向目标。
+                  // headers 与 redirect 都不刷新 watchdog，避免把停滞伪装成进展。
+                  return new URL(location, current).toString()
+                }
+                if (response.statusCode < 200 || response.statusCode >= 300) {
+                  throw new UpdateFailure(DOWNLOAD_FAILED_MESSAGE)
+                }
+                const totalBytes = declaredContentLength(response.headers)
+                let received = 0
+                const counter = new Transform({
+                  transform(chunk: Buffer, _encoding, callback) {
+                    if (chunk.length > 0) {
+                      watchdog.refresh()
+                    }
+                    received += chunk.length
+                    if (received > maxBytes) {
+                      callback(new UpdateFailure('official artifact download exceeds the size budget'))
+                      return
+                    }
+                    if (chunk.length > 0) {
+                      // 只有非空 body chunk 才算进度；headers/redirect/空 chunk 不刷新也不上报。
+                      reportProgress?.(received, totalBytes !== null && totalBytes >= received ? totalBytes : null)
+                    }
+                    callback(null, chunk)
+                  },
+                })
+                await pipeline(response.body, counter, createWriteStream(destination, { mode: 0o600 }), {
+                  signal: effective,
+                })
+                // body 已完整交付：先停止 watchdog，再让 withResponse 关闭 dispatcher。
+                completed = true
+                clearTimeout(watchdog)
+                return undefined
+              } finally {
+                bodyComplete = completed
               }
-              callback(null, chunk)
             },
-          })
-          try {
-            await pipeline(response.body, counter, createWriteStream(destination, { mode: 0o600 }))
-          } catch (error) {
-            await rm(destination, { force: true }).catch(() => undefined)
-            if (effective.aborted) {
-              throw new UpdateFailure('official artifact download was aborted')
-            }
-            throw error
+          )
+          if (next === undefined) {
+            return
           }
-          return
-        } finally {
-          // dispose 先取消/释放可能未消费的 body，再关闭独占 dispatcher，绝不在 header 返回后就 await close。
-          await response.dispose()
+          current = next
         }
+      } catch (error) {
+        clearTimeout(watchdog)
+        throw await removePartialDownload(destination, downloadFailure(error, signal, idle.signal, bodyComplete))
+      } finally {
+        clearTimeout(watchdog)
       }
     },
     async extractArchive(archive, destination, signal) {
@@ -888,9 +1202,10 @@ export async function handleUpdate(
   config: DaemonConfig,
   signal: AbortSignal,
   processes: ProcessSupervisor,
+  reportProgress?: UpdateProgressReporter,
 ): Promise<UpdateOutcome> {
   try {
-    return await createUpdateHandler(productionDependencies(processes))(command, config, signal)
+    return await createUpdateHandler(productionDependencies(processes))(command, config, signal, reportProgress)
   } catch (error) {
     if (error instanceof UpdateFailure) {
       return failure(safeOperationId(command), boundedMessage(error))

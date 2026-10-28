@@ -736,16 +736,26 @@ function createEnvironmentBlock(env: NodeJS.ProcessEnv): Buffer {
 }
 
 /**
- * 目录锁：先把目录收紧为属主独占，再创建/打开锁文件并读回核验其 DACL，最后用 `LockFileEx` 取得独占锁。
+ * 目录锁：先把目录收紧为属主独占，再在目录内创建固定名称的锁文件并交给 {@link lockFile}。
  *
  * <p>锁文件与目录都走同一套真实私有原语：不跟随 reparse 点（`GetFileAttributesW` 判定 + `FILE_FLAG_OPEN_REPARSE_POINT`）。
  * `OPEN_ALWAYS` 之后必须立刻读 `GetLastError`：只有 `ERROR_ALREADY_EXISTS` 才是既有锁文件，先确认当前用户属主再只改 DACL；
  * 本次新建的锁文件才显式设置当前用户属主。释放时无论解锁是否成功都会继续关闭句柄，并把两者的失败一起上报。
  */
 export async function lockDirectory(path: string): Promise<WindowsDirectoryLock> {
-  const kernel32 = await kernel()
   await ensurePrivateDirectory(path)
-  const lockPath = joinPath(path, LOCK_FILE_NAME)
+  return lockFile(joinPath(path, LOCK_FILE_NAME))
+}
+
+/**
+ * 文件锁：确认锁文件所在目录私有后，打开锁文件、核验 DACL 并用 `LockFileEx` 取得独占锁。
+ *
+ * <p>错误文案保留「directory is already locked」，使目录锁的既有诊断契约不因实现复用而变化。
+ */
+export async function lockFile(lockPath: string): Promise<WindowsDirectoryLock> {
+  const pathModule = await import('node:path')
+  await ensurePrivateDirectory(pathModule.dirname(lockPath))
+  const kernel32 = await kernel()
   await rejectReparsePoint(lockPath)
   const handle = kernel32.CreateFileW(
     lockPath,
@@ -778,7 +788,7 @@ export async function lockDirectory(path: string): Promise<WindowsDirectoryLock>
   const overlapped = { Internal: 0n, InternalHigh: 0n, Offset: 0, OffsetHigh: 0, hEvent: null }
   if (kernel32.LockFileEx(handle, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, overlapped) === 0) {
     kernel32.CloseHandle(handle)
-    throw new Error(`the directory is already locked by another process: ${path}`)
+    throw new Error(`the directory is already locked by another process: ${lockPath}`)
   }
   let closed = false
   return {
