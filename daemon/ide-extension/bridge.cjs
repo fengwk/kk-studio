@@ -23,6 +23,7 @@ const MAX_SNAPSHOT_BYTES = 4 * 1024 * 1024
 const MAX_SNAPSHOT_DOCUMENTS = 256
 /** Bounds how long a bridge POST may occupy the extension host. */
 const POST_TIMEOUT_MILLIS = 5_000
+const FOLDER_OBSERVATION_TIMEOUT_MILLIS = 15_000
 
 function createBridgeHost(vscode, options) {
   const config = options || {}
@@ -33,17 +34,27 @@ function createBridgeHost(vscode, options) {
   const reconnectMillis = config.reconnectMillis || DEFAULT_RECONNECT_MILLIS
 
   let disposed = false
+  let retired = false
   let streamRequest = null
   let reconnectTimer = null
   let buffer = ''
   let terminal = null
   const terminals = []
   const pendingPosts = new Set()
+  const folderObservations = new Set()
 
   const folderPaths = () => {
     const folders = vscode.workspace.workspaceFolders || []
     return folders.map((folder) => folder.uri.fsPath).filter((path) => typeof path === 'string' && path.length > 0)
   }
+
+  // A registration describes live folders, even when they change after a cancelled command.
+  const folderSubscription = vscode.workspace.onDidChangeWorkspaceFolders(() => {
+    failStream()
+    for (const finish of [...folderObservations]) {
+      finish(folderPaths())
+    }
+  })
 
   const workspacePath = () => {
     const file = vscode.workspace.workspaceFile
@@ -271,15 +282,56 @@ function createBridgeHost(vscode, options) {
     }
     const folders = vscode.workspace.workspaceFolders || []
     const uri = vscode.Uri.file(message.directory)
-    // The daemon owns the durable `.code-workspace` file. `updateWorkspaceFolders` returning
-    // true is the public API's acceptance of the change; a folder change that reloads the
-    // extension host never replies here, and the reconnected window confirms instead.
-    const updated = vscode.workspace.updateWorkspaceFolders(0, folders.length, { uri })
+    const sameDirectory = (actual) => {
+      const normalize = (path) => {
+        const resolved = nodePath.resolve(path)
+        return process.platform === 'win32' ? resolved.toLowerCase() : resolved
+      }
+      return actual.length === 1 && normalize(actual[0]) === normalize(message.directory)
+    }
+    if (sameDirectory(folderPaths())) {
+      await reply(message.id, { ok: true, directory: folderPaths()[0] })
+      return
+    }
+    // The API returning true only accepts the request. Observe the public folder-change event;
+    // if this host reloads, the daemon instead confirms the matching new registration.
+    let finishObservation
+    let timer
+    const observation = new Promise((resolve) => {
+      finishObservation = (actual) => {
+        if (timer) {
+          clearTimeout(timer)
+        }
+        folderObservations.delete(finishObservation)
+        resolve(actual)
+      }
+      folderObservations.add(finishObservation)
+      timer = setTimeout(() => finishObservation(null), FOLDER_OBSERVATION_TIMEOUT_MILLIS)
+      if (timer.unref) {
+        timer.unref()
+      }
+    })
+    let updated
+    try {
+      updated = vscode.workspace.updateWorkspaceFolders(0, folders.length, { uri })
+    } catch (error) {
+      finishObservation(null)
+      throw error
+    }
     if (updated === false) {
+      finishObservation(null)
       await reply(message.id, { ok: false, message: 'directory change was rejected' })
       return
     }
-    await reply(message.id, { ok: true, directory: message.directory })
+    const actual = await observation
+    if (disposed || retired) {
+      return
+    }
+    if (actual === null || !sameDirectory(actual)) {
+      await reply(message.id, { ok: false, message: 'directory change was not applied' })
+      return
+    }
+    await reply(message.id, { ok: true, directory: actual[0] })
   }
 
   const focusTerminal = async (message) => {
@@ -396,7 +448,7 @@ function createBridgeHost(vscode, options) {
   }
 
   const scheduleReconnect = () => {
-    if (disposed || reconnectTimer) {
+    if (disposed || retired || reconnectTimer) {
       return
     }
     reconnectTimer = setTimeout(() => {
@@ -409,7 +461,7 @@ function createBridgeHost(vscode, options) {
   }
 
   const connect = () => {
-    if (disposed || !url || !token) {
+    if (disposed || retired || !url || !token) {
       return
     }
     const path = workspacePath()
@@ -424,18 +476,46 @@ function createBridgeHost(vscode, options) {
       params.append('folder', folder)
     }
     const target = `${url}/bridge/stream?${params.toString()}`
-    streamRequest = http.get(target, { headers: { authorization: `Bearer ${token}` } }, (response) => {
+    const request = http.get(target, { headers: { authorization: `Bearer ${token}` } }, (response) => {
+      if (streamRequest !== request || disposed || retired) {
+        response.resume()
+        return
+      }
       if (response.statusCode !== 200) {
         response.resume()
-        scheduleReconnect()
+        if (response.statusCode === 410) {
+          // A retired host stops only its control channel; the managed process owns terminals.
+          retired = true
+          for (const finish of [...folderObservations]) {
+            finish(null)
+          }
+        } else {
+          scheduleReconnect()
+        }
         return
       }
       response.setEncoding('utf8')
-      response.on('data', onData)
-      response.on('end', scheduleReconnect)
-      response.on('error', scheduleReconnect)
+      response.on('data', (chunk) => {
+        if (streamRequest === request) {
+          onData(chunk)
+        }
+      })
+      const disconnected = () => {
+        if (streamRequest === request) {
+          streamRequest = null
+          scheduleReconnect()
+        }
+      }
+      response.on('end', disconnected)
+      response.on('error', disconnected)
     })
-    streamRequest.on('error', scheduleReconnect)
+    streamRequest = request
+    request.on('error', () => {
+      if (streamRequest === request) {
+        streamRequest = null
+        scheduleReconnect()
+      }
+    })
   }
 
   return {
@@ -444,6 +524,10 @@ function createBridgeHost(vscode, options) {
     },
     dispose() {
       disposed = true
+      folderSubscription.dispose()
+      for (const finish of [...folderObservations]) {
+        finish(null)
+      }
       if (reconnectTimer) {
         clearTimeout(reconnectTimer)
         reconnectTimer = null
@@ -464,7 +548,11 @@ function createBridgeHost(vscode, options) {
         }
       }
       pendingPosts.clear()
-      disposeTerminals()
+      // The managed code-server scope owns terminals; retirement must not tear them down,
+      // including when VS Code subsequently deactivates this superseded extension host.
+      if (!retired) {
+        disposeTerminals()
+      }
     },
   }
 }

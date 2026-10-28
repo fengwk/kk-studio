@@ -51,7 +51,7 @@ function openStream(
   base: string,
   token: string,
   workspacePath: string,
-  folders: string[] = [],
+  folders: string[] = ['/managed'],
 ): Promise<http.IncomingMessage> {
   const params = new URLSearchParams({ workspacePath })
   for (const folder of folders) {
@@ -78,10 +78,127 @@ function openStream(
 
 const signal = (): AbortSignal => new AbortController().signal
 
+/** Read a complete command frame without assuming TCP chunk boundaries. */
+function nextCommand(stream: http.IncomingMessage): Promise<{ id: string; op: string }> {
+  return new Promise((resolve, reject) => {
+    let buffer = ''
+    const onData = (chunk: string): void => {
+      buffer += chunk
+      let end = buffer.indexOf('\n')
+      while (end >= 0) {
+        const line = buffer.slice(0, end)
+        buffer = buffer.slice(end + 1)
+        const value = JSON.parse(line) as { type: string; id: string; op: string }
+        if (value.type === 'command') {
+          stream.off('data', onData)
+          stream.off('error', reject)
+          resolve(value)
+          return
+        }
+        end = buffer.indexOf('\n')
+      }
+    }
+    stream.on('data', onData)
+    stream.once('error', reject)
+  })
+}
+
 describe('loopback IDE bridge', () => {
+  it.each(['aborted', 'rejected'] as const)(
+    'does not admit a target registration after a directory change is %s',
+    async (outcome) => {
+      const instance = await bridge()
+      const viewId = '11111111-1111-4111-8111-111111111111'
+      const workspace = '/managed/one.code-workspace'
+      instance.assign(viewId, workspace, '1', '/old')
+      const stream = await openStream(instance.url, instance.secret, workspace, ['/old'])
+      const controller = new AbortController()
+      const command = nextCommand(stream)
+      const changed = instance.request(viewId, { op: 'changeDirectory', directory: '/target' }, controller.signal, {
+        expectedDirectory: '/target',
+      })
+      const id = (await command).id
+      await expect(
+        instance.request(viewId, { op: 'changeDirectory', directory: '/another' }, signal(), {
+          expectedDirectory: '/another',
+        }),
+      ).rejects.toMatchObject({ code: 'BUSY' })
+      if (outcome === 'aborted') {
+        controller.abort()
+      } else {
+        await request(`${instance.url}/bridge/result`, {
+          method: 'POST',
+          body: JSON.stringify({ id, ok: false, code: 'DIRTY', message: 'unsaved changes' }),
+          headers: jsonAuth(instance.secret),
+        })
+      }
+      expect(await changed).toMatchObject({ ok: false })
+      // A late success from that command cannot resurrect its transition.
+      await request(`${instance.url}/bridge/result`, {
+        method: 'POST',
+        body: JSON.stringify({ id, ok: true, directory: '/target' }),
+        headers: jsonAuth(instance.secret),
+      })
+      await expect(openStream(instance.url, instance.secret, workspace, ['/target'])).rejects.toThrow('status 410')
+      await expect(openStream(instance.url, instance.secret, workspace, ['/old', '/target'])).rejects.toThrow('status 410')
+      if (outcome === 'aborted') {
+        expect(instance.isConnected(viewId, '1')).toBe(false)
+        await openStream(instance.url, instance.secret, workspace, ['/old'])
+      }
+      expect(instance.isConnected(viewId, '1')).toBe(true)
+    },
+  )
+
+  it('retires an old-folder reconnect after the target stream confirms a directory change', async () => {
+    const instance = await bridge()
+    const viewId = '11111111-1111-4111-8111-111111111111'
+    const workspace = '/managed/one.code-workspace'
+    instance.assign(viewId, workspace, '1', '/old')
+    const oldStream = await openStream(instance.url, instance.secret, workspace, ['/old'])
+    const oldEnded = new Promise<void>((resolve) => oldStream.once('end', resolve))
+    const oldCommand = nextCommand(oldStream)
+    const oldInspect = instance.request(viewId, { op: 'inspect' }, signal())
+    const oldId = (await oldCommand).id
+    const changeCommand = nextCommand(oldStream)
+    const changed = instance.request(viewId, { op: 'changeDirectory', directory: '/new' }, signal(), {
+      expectedDirectory: '/new',
+    })
+    await changeCommand
+    const openingTarget = openStream(instance.url, instance.secret, workspace, ['/new'])
+    expect(await changed).toMatchObject({ ok: true, directory: '/new' })
+    expect(await oldInspect).toMatchObject({ ok: false })
+
+    // A delayed result from the displaced host cannot answer a command on the target stream.
+    const targetInspect = instance.request(viewId, { op: 'inspect' }, signal())
+    const targetStream = await openingTarget
+    const targetCommand = nextCommand(targetStream)
+    oldStream.resume()
+    await oldEnded
+    const targetId = (await targetCommand).id
+    await request(`${instance.url}/bridge/result`, {
+      method: 'POST',
+      body: JSON.stringify({ id: oldId, ok: true, clean: true }),
+      headers: jsonAuth(instance.secret),
+    })
+    const staleStatus = await openStream(instance.url, instance.secret, workspace, ['/old']).then(
+      (stream) => {
+        stream.destroy()
+        return 200
+      },
+      (error: Error) => Number(error.message.replace('status ', '')),
+    )
+    expect(staleStatus).toBe(410)
+    await request(`${instance.url}/bridge/result`, {
+      method: 'POST',
+      body: JSON.stringify({ id: targetId, ok: true, clean: false }),
+      headers: jsonAuth(instance.secret),
+    })
+    expect(await targetInspect).toMatchObject({ ok: true, clean: false })
+  })
+
   it('enforces loopback token and routing', async () => {
     const instance = await bridge()
-    instance.assign('11111111-1111-4111-8111-111111111111', '/managed/one.code-workspace')
+    instance.assign('11111111-1111-4111-8111-111111111111', '/managed/one.code-workspace', '1', '/managed')
 
     // No credentials, wrong credentials, unknown route and a missing workspace argument.
     expect((await request(`${instance.url}/bridge/stream?workspacePath=/x`)).status).toBe(401)
@@ -100,7 +217,7 @@ describe('loopback IDE bridge', () => {
     const instance = await bridge()
     const viewId = '11111111-1111-4111-8111-111111111111'
     const workspacePath = '/managed/one.code-workspace'
-    instance.assign(viewId, workspacePath)
+    instance.assign(viewId, workspacePath, '1', '/managed')
     expect(instance.isConnected(viewId)).toBe(false)
 
     const stream = await openStream(instance.url, instance.secret, workspacePath)
@@ -116,14 +233,29 @@ describe('loopback IDE bridge', () => {
   it('rejects requests when no window is connected', async () => {
     const instance = await bridge()
     const viewId = '11111111-1111-4111-8111-111111111111'
-    instance.assign(viewId, '/managed/one.code-workspace')
+    instance.assign(viewId, '/managed/one.code-workspace', '1', '/managed')
     await expect(instance.request(viewId, { op: 'focusTerminal' }, signal())).rejects.toThrow(/not connected/)
+  })
+
+  it('requires the explicitly expected directory before dispatching a transition', async () => {
+    const instance = await bridge()
+    const viewId = '11111111-1111-4111-8111-111111111111'
+    instance.assign(viewId, '/managed/one.code-workspace', '1', '/managed')
+    await openStream(instance.url, instance.secret, '/managed/one.code-workspace')
+    await expect(
+      instance.request(viewId, { op: 'changeDirectory', directory: '/target' }, signal()),
+    ).rejects.toThrow('expected directory is invalid')
+    await expect(
+      instance.request(viewId, { op: 'changeDirectory', directory: '/target' }, signal(), {
+        expectedDirectory: '/different',
+      }),
+    ).rejects.toThrow('expected directory is invalid')
   })
 
   it('resolves a command as cancelled when the caller aborts', async () => {
     const instance = await bridge()
     const viewId = '11111111-1111-4111-8111-111111111111'
-    instance.assign(viewId, '/managed/one.code-workspace')
+    instance.assign(viewId, '/managed/one.code-workspace', '1', '/managed')
     await openStream(instance.url, instance.secret, '/managed/one.code-workspace')
 
     const controller = new AbortController()
@@ -143,7 +275,7 @@ describe('loopback IDE bridge', () => {
   it('validates result and pty payloads', async () => {
     const instance = await bridge()
     const viewId = '11111111-1111-4111-8111-111111111111'
-    instance.assign(viewId, '/managed/one.code-workspace')
+    instance.assign(viewId, '/managed/one.code-workspace', '1', '/managed')
     await openStream(instance.url, instance.secret, '/managed/one.code-workspace')
 
     expect(
@@ -172,7 +304,7 @@ describe('loopback IDE bridge', () => {
   it('delivers pty events and resolves a command result', async () => {
     const instance = await bridge()
     const viewId = '11111111-1111-4111-8111-111111111111'
-    instance.assign(viewId, '/managed/one.code-workspace')
+    instance.assign(viewId, '/managed/one.code-workspace', '1', '/managed')
     const ptyEvents: { viewId: string; pid: number }[] = []
     instance.onPty((id, pid) => ptyEvents.push({ viewId: id, pid }))
 
@@ -187,7 +319,9 @@ describe('loopback IDE bridge', () => {
     })
     await new Promise((resolve) => setTimeout(resolve, 20))
 
-    const pending = instance.request(viewId, { op: 'changeDirectory', directory: '/other' }, signal())
+    const pending = instance.request(viewId, { op: 'changeDirectory', directory: '/other' }, signal(), {
+      expectedDirectory: '/other',
+    })
     await new Promise((resolve) => setTimeout(resolve, 20))
     const command = lines.find((line) => line.type === 'command') as { id: string; op: string }
     expect(command.op).toBe('changeDirectory')
@@ -210,7 +344,7 @@ describe('loopback IDE bridge', () => {
   it('releases pending commands on close', async () => {
     const instance = await bridge()
     const viewId = '11111111-1111-4111-8111-111111111111'
-    instance.assign(viewId, '/managed/one.code-workspace')
+    instance.assign(viewId, '/managed/one.code-workspace', '1', '/managed')
     await openStream(instance.url, instance.secret, '/managed/one.code-workspace')
 
     const pending = instance.request(viewId, { op: 'focusTerminal' }, signal())
@@ -221,7 +355,7 @@ describe('loopback IDE bridge', () => {
   it('rejects a directory change whose reply reports a different folder', async () => {
     const instance = await bridge()
     const viewId = '11111111-1111-4111-8111-111111111111'
-    instance.assign(viewId, '/managed/one.code-workspace')
+    instance.assign(viewId, '/managed/one.code-workspace', '1', '/managed')
     const stream = await openStream(instance.url, instance.secret, '/managed/one.code-workspace')
     const lines: { id: string }[] = []
     stream.on('data', (chunk: string) => {
@@ -250,7 +384,7 @@ describe('loopback IDE bridge', () => {
   it('confirms a directory change only when the reconnected window reports the folder', async () => {
     const instance = await bridge()
     const viewId = '11111111-1111-4111-8111-111111111111'
-    instance.assign(viewId, '/managed/one.code-workspace')
+    instance.assign(viewId, '/managed/one.code-workspace', '1', '/managed')
     const stream = await openStream(instance.url, instance.secret, '/managed/one.code-workspace')
 
     // The extension host restarts after accepting the command and never replies on the old stream.
@@ -263,7 +397,7 @@ describe('loopback IDE bridge', () => {
 
     // The reconnected window reports the new folder, which is the actual confirmation.
     await openStream(instance.url, instance.secret, '/managed/one.code-workspace', ['/other'])
-    expect(await changed).toEqual({ ok: true, code: undefined, message: undefined, directory: '/other' })
+    expect(await changed).toEqual({ ok: true, directory: '/other' })
 
     // A reconnect that never reports the folder is a failure, not a silent success.
     const rejected = instance.request(viewId, { op: 'changeDirectory', directory: '/third' }, signal(), {
@@ -274,7 +408,7 @@ describe('loopback IDE bridge', () => {
     expect(await rejected).toEqual({ ok: false, message: 'directory change was not applied' })
 
     // A command that needs an answer still fails once the window is gone.
-    const stream3 = await openStream(instance.url, instance.secret, '/managed/one.code-workspace')
+    const stream3 = await openStream(instance.url, instance.secret, '/managed/one.code-workspace', ['/other'])
     const focused = instance.request(viewId, { op: 'focusTerminal' }, signal())
     await new Promise((resolve) => setTimeout(resolve, 20))
     stream3.destroy()
@@ -284,7 +418,7 @@ describe('loopback IDE bridge', () => {
   it('fails the pty registration when supervision throws', async () => {
     const instance = await bridge()
     const viewId = '11111111-1111-4111-8111-111111111111'
-    instance.assign(viewId, '/managed/one.code-workspace')
+    instance.assign(viewId, '/managed/one.code-workspace', '1', '/managed')
     instance.onPty(async () => {
       throw new Error('no supervision')
     })
@@ -302,8 +436,8 @@ describe('loopback IDE bridge', () => {
     const instance = await bridge()
     const viewId = '11111111-1111-4111-8111-111111111111'
     // Re-assigning the same view to another workspace must drop the stale key binding.
-    instance.assign(viewId, '/managed/one.code-workspace')
-    instance.assign(viewId, '/managed/two.code-workspace')
+    instance.assign(viewId, '/managed/one.code-workspace', '1', '/managed')
+    instance.assign(viewId, '/managed/two.code-workspace', '2', '/managed')
     await openStream(instance.url, instance.secret, '/managed/two.code-workspace')
     expect(instance.isConnected(viewId)).toBe(true)
     expect(
@@ -324,7 +458,7 @@ describe('loopback IDE bridge', () => {
   it('waits for the window stream and rejects a cancelled wait', async () => {
     const instance = await bridge()
     const viewId = '11111111-1111-4111-8111-111111111111'
-    instance.assign(viewId, '/managed/one.code-workspace')
+    instance.assign(viewId, '/managed/one.code-workspace', '1', '/managed')
 
     // Cancelling before the window connects surfaces the cancellation.
     const aborted = new AbortController()
@@ -342,7 +476,7 @@ describe('loopback IDE bridge', () => {
   it('releases a pending connection wait on close', async () => {
     const instance = await bridge()
     const viewId = '11111111-1111-4111-8111-111111111111'
-    instance.assign(viewId, '/managed/one.code-workspace')
+    instance.assign(viewId, '/managed/one.code-workspace', '1', '/managed')
 
     const waiting = instance.waitForConnection(viewId, signal())
     await instance.close()
@@ -352,7 +486,7 @@ describe('loopback IDE bridge', () => {
   it('fails a pending command when its view is revoked', async () => {
     const instance = await bridge()
     const viewId = '11111111-1111-4111-8111-111111111111'
-    instance.assign(viewId, '/managed/one.code-workspace')
+    instance.assign(viewId, '/managed/one.code-workspace', '1', '/managed')
     await openStream(instance.url, instance.secret, '/managed/one.code-workspace')
 
     const pending = instance.request(viewId, { op: 'focusTerminal' }, signal())
