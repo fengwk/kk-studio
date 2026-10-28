@@ -120,8 +120,27 @@ async function focusTerminal(config, view) {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ documentId: config.documentId, bindingEpoch: view.bindingEpoch }),
   })
-  await response.text()
+  const text = await response.text()
   if (!response.ok) {
+    let result
+    try {
+      result = JSON.parse(text)
+    } catch {
+      result = {}
+    }
+    const details = new Map([
+      ['terminal supervision failed', 'supervision-failed'],
+      ['terminal supervision is unavailable', 'supervision-unavailable'],
+      ['terminal could not be focused', 'focus-failed'],
+      ['ide window did not respond', 'window-timeout'],
+      ['ide window is not connected', 'window-disconnected'],
+      ['ide window closed', 'window-closed'],
+      ['ide bridge closed', 'bridge-closed'],
+      ['IDE view is gone; open a new view before retrying', 'view-gone'],
+    ])
+    const code = result.code === 'ide_unavailable' ? 'ide-unavailable'
+      : result.code === 'validation' ? 'validation' : 'other'
+    stage(`focus-code-${code}-detail-${details.get(result.errors?.detail) || 'other'}`)
     throw new HttpStatusError(response.status)
   }
 }
@@ -325,7 +344,10 @@ async function run(config, lines) {
 
   let browser = null
   let failure = null
+  let failureStage = null
   let cleanupFailure = null
+  let workerPage = null
+  let workerScope = null
   try {
     // The Java fixture owns this directory and deletes it only after child processes have exited.
     const browserTemp = config.browserTempDirectory
@@ -368,15 +390,18 @@ async function run(config, lines) {
     await b.page.locator('.explorer-folders-view .monaco-list-row', { hasText: 'original-only.txt' })
       .first().waitFor({ state: 'visible', timeout: WORKBENCH_TIMEOUT })
 
+    // Regression blocker: keep the worker registered through the dirty normal-close request.
     stage('worker-register')
-    const workerScope = await registerViewWorker(a.page, config, viewA)
-    stage('worker-unregister')
-    const unregistered = await a.page.evaluate(async (scope) => {
+    workerPage = a.page
+    workerScope = `/environment-ide/${config.environmentId}/${viewA.viewId}/`
+    await registerViewWorker(a.page, config, viewA)
+    const workerActive = await a.page.evaluate(async (scope) => {
       const registration = await navigator.serviceWorker.getRegistration(scope)
-      return registration ? registration.unregister() : false
+      return registration?.scope === new URL(scope, location.origin).href &&
+        registration.active?.state === 'activated'
     }, workerScope)
-    if (!unregistered) {
-      throw namedError('WorkerUnregisterError')
+    if (!workerActive) {
+      throw namedError('WorkerInactiveError')
     }
 
     stage('markers')
@@ -396,11 +421,17 @@ async function run(config, lines) {
     ) {
       throw namedError('DraftWasSavedError')
     }
+    stage('normal-close-render-dirty-worker-active-target-original')
 
     stage('close-rejected')
     const rejected = await closeView(config, viewA, false)
+    const targetUnchanged = await readFile(config.draftPath, 'utf8') === 'fixture target draft\n'
+    stage(`normal-close-http-${rejected.status}-target-${targetUnchanged ? 'original' : 'changed'}`)
     if (rejected.status !== 400) {
       throw new HttpStatusError(rejected.status)
+    }
+    if (!targetUnchanged) {
+      throw namedError('DraftWasSavedError')
     }
     let detail = null
     try {
@@ -443,7 +474,23 @@ async function run(config, lines) {
     }
   } catch (error) {
     failure = error
+    failureStage = currentStage
   } finally {
+    if (workerScope !== null) {
+      try {
+        const unregistered = await workerPage.evaluate(async (scope) => {
+          const registration = await navigator.serviceWorker.getRegistration(scope)
+          return registration ? registration.unregister() : true
+        }, workerScope)
+        if (!unregistered) {
+          throw namedError('WorkerUnregisterError')
+        }
+        stage('worker-finalcleanup-unregistered')
+      } catch (error) {
+        cleanupFailure = error
+        stage('worker-finalcleanup-failed')
+      }
+    }
     if (browser !== null) {
       try {
         await browser.close()
@@ -453,6 +500,10 @@ async function run(config, lines) {
     }
   }
   if (failure !== null) {
+    currentStage = failureStage
+    if (cleanupFailure !== null) {
+      throw namedError('ScenarioAndCleanupError')
+    }
     throw failure
   }
   if (cleanupFailure !== null) {
