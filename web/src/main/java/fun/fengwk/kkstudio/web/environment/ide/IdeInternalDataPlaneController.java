@@ -28,10 +28,8 @@ import java.util.UUID;
 /**
  * 跨节点浏览器数据面的 owner HTTP 入口。
  *
- * <ul>
- *   <li>{@code /internal/environment-ide/{env}/data-http?viewId=...&path=...}：视图作用域数据流；
- *   <li>{@code /internal/environment-ide/{env}/http?path=...}：既有 bootstrap/session 管理路径。
- * </ul>
+ * <p>{@code /internal/environment-ide/{env}/data-http?viewId=...&path=...} 同时承载视图数据流与
+ * bootstrap/session 管理入口。
  *
  * <p>安全顺序固定为「认证 → 目标解析 → 本节点 owner 核对 → 数据面」：HMAC 覆盖 method 与完整内部 path/query，任何校验都在读取请求体之前 完成。本节点不是
  * READY owner 时返回 409，绝不递归转发、绝不自动重放。
@@ -92,30 +90,6 @@ public final class IdeInternalDataPlaneController {
       return;
     }
     dataPlane.handleInternalHttp(environment, viewId, rawPathAndQuery, forwarded, response);
-  }
-
-  @RequestMapping(
-      value =
-          IdeInternalPaths.INTERNAL_IDE_PREFIX + "/{environmentId}" + IdeInternalPaths.HTTP_SUFFIX,
-      method = {
-        RequestMethod.GET,
-        RequestMethod.POST,
-        RequestMethod.PUT,
-        RequestMethod.PATCH,
-        RequestMethod.DELETE,
-        RequestMethod.HEAD
-      })
-  public void legacyHttp(
-      @PathVariable String environmentId, HttpServletRequest request, HttpServletResponse response)
-      throws IOException {
-    authentication.verify(
-        request.getMethod(),
-        ClusterInternalRequests.canonicalPath(request),
-        ClusterInternalRequests.authHeaders(request));
-    EnvironmentId environment = parseEnvironmentId(environmentId);
-    requireLocalOwner(environment);
-    String rawPathAndQuery = requirePathParameter(request);
-    throw new AiValidationException("environment", "legacy internal IDE path is not supported");
   }
 
   private static String pathOf(String rawPathAndQuery) {
