@@ -87,6 +87,7 @@ final class IdeBrowserDataStream implements MuxStreamListener {
   private long inboundBytes;
   private byte[] textPending = new byte[0];
   private boolean attached;
+  private boolean draining;
   private boolean headersReceived;
   private boolean closeReceived;
   private boolean closeSent;
@@ -201,7 +202,7 @@ final class IdeBrowserDataStream implements MuxStreamListener {
               environmentId,
               viewId,
               bindingEpoch,
-              IdeDataInternalPaths.upstreamPath(viewId, bindingEpoch, rawPathAndQuery),
+              IdeDataInternalPaths.viewPath(rawPathAndQuery),
               headers,
               controlIdentity,
               this);
@@ -247,24 +248,42 @@ final class IdeBrowserDataStream implements MuxStreamListener {
   }
 
   private void attach(MuxStream opened) {
-    List<Runnable> callbacks;
     synchronized (lock) {
       stream = opened;
       attached = true;
-      callbacks = List.copyOf(pendingCallbacks);
-      pendingCallbacks.clear();
     }
-    callbacks.forEach(Runnable::run);
+    drainCallbacks();
   }
 
   private void dispatch(Runnable callback) {
     synchronized (lock) {
-      if (!attached) {
-        pendingCallbacks.addLast(callback);
+      pendingCallbacks.addLast(callback);
+    }
+    drainCallbacks();
+  }
+
+  private void drainCallbacks() {
+    synchronized (lock) {
+      if (!attached || draining) {
         return;
       }
+      draining = true;
     }
-    callback.run();
+    while (true) {
+      Runnable callback;
+      synchronized (lock) {
+        if (pendingCallbacks.isEmpty()) {
+          draining = false;
+          return;
+        }
+        callback = pendingCallbacks.removeFirst();
+      }
+      try {
+        callback.run();
+      } catch (RuntimeException error) {
+        fail("DOWNSTREAM_FAILED", "browser callback failed", error);
+      }
+    }
   }
 
   private boolean sendFrame(Frame frame) {

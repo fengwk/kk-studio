@@ -42,8 +42,10 @@ GET /api/harness/environment-data/v2/{environmentId}?ticket=<opaque>
 [`MuxConnection`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/mux/MuxConnection.java)。迟到的旧代际 ticket、
 已消费 ticket、租约失效或控制身份替换都 fail-closed；旧连接被关闭，新逻辑流必须走新票据，不自动重连或重放。
 
-逻辑流 OPEN 携带 `viewId`、正的 `bindingEpoch`、模式、方法、内部路径和已过滤 headers。浏览器 view 基址之后的路径固定映射到
-`/__kk/ide/view/{viewId}/{bindingEpoch}/...`；Daemon 只在该 view/epoch 仍有效时访问私有 code-server。
+逻辑流 OPEN 携带 `viewId`、正的 `bindingEpoch`、模式、方法、浏览器 view 基址之后的原始相对 `path`（含 query）和已过滤
+headers。Server 只校验该相对路径不越出 view 作用域；Daemon 校验 view/epoch 后自行构造内部基址
+`/__kk/ide/view/{viewId}/{bindingEpoch}` 并访问私有 code-server，响应中的内部挂载 `Location` 由 Web 适配层映射回浏览器 view 基址。
+`Service-Worker-Allowed` 同样在浏览器出口映射：当前 view 的内部挂载与合法相对范围保留其作用域，根路径、其他 view 或非法范围收窄到当前浏览器 view 根；直连与跨节点执行相同规则。
 [`IdeBrowserDataStream`](../../web/src/main/java/fun/fengwk/kkstudio/web/environment/ide/IdeBrowserDataStream.java)
 保持浏览器 TEXT/BINARY/FIN 分段边界，文本跨分段按 UTF-8 流式解码；WebSocket 关闭码映射回逻辑流 CLOSE。
 [`IdeGatewayDataPlane`](../../web/src/main/java/fun/fengwk/kkstudio/web/environment/ide/IdeGatewayDataPlane.java)
