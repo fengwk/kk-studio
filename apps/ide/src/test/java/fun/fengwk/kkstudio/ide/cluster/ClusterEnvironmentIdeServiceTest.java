@@ -10,10 +10,14 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonIdeLease;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.ide.EnvironmentIdeServiceImpl;
+import fun.fengwk.kkstudio.ide.IdeBrowserUseGateway;
 import fun.fengwk.kkstudio.ide.IdeCommandTransport;
 import fun.fengwk.kkstudio.ide.IdeRequest;
+import fun.fengwk.kkstudio.ide.IdeViewAuthorizationListener;
+import fun.fengwk.kkstudio.ide.IdeViewBindingRegistry;
 import fun.fengwk.kkstudio.ide.InMemoryIdeBootstrapTicketService;
 import fun.fengwk.kkstudio.ide.protocol.IdeAction;
 import fun.fengwk.kkstudio.ide.protocol.IdeCommand;
@@ -24,8 +28,11 @@ import fun.fengwk.kkstudio.platform.environment.cluster.HmacClusterInternalAuthe
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeChangeDirectoryDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeCloseViewDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeOpenViewDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewsDTO;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -38,8 +45,8 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * 意图：组合服务必须按 owner 快照决定本地/远端交付——本地直接委托本地 delegate 且不触碰内部客户端，远端恰好一次内部调用；无路由时在任何 交付前 fail-closed，非法
- * viewId 在路由查询前拒绝。
+ * 意图：组合服务按 owner 快照决定本地/远端交付——本地直接委托且不触碰内部客户端，远端恰好一次内部调用；无路由时在交付前 fail-closed， 非法 viewId
+ * 在路由查询前拒绝，所有带文档命令都保留 document+epoch。
  */
 class ClusterEnvironmentIdeServiceTest {
 
@@ -48,6 +55,10 @@ class ClusterEnvironmentIdeServiceTest {
   private static final UUID NODE_A = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
   private static final UUID NODE_B = UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
   private static final String VIEW = "11111111-2222-3333-4444-555555555555";
+  private static final String DOCUMENT = "66666666-7777-8888-9999-aaaaaaaaaaaa";
+  private static final String EVENT_NODE = "bbbbbbbb-cccc-dddd-eeee-ffffffffffff";
+  private static final String CONNECTION = "12345678-1234-1234-1234-123456789abc";
+  private static final String CLAIM = "87654321-4321-4321-4321-cba987654321";
   private static final String SECRET = "test-cluster-secret-0123456789abcdef";
 
   private final StubRegistry registry = new StubRegistry();
@@ -58,7 +69,13 @@ class ClusterEnvironmentIdeServiceTest {
   @BeforeEach
   void setUp() {
     EnvironmentIdeServiceImpl local =
-        new EnvironmentIdeServiceImpl(localTransport, new InMemoryIdeBootstrapTicketService());
+        new EnvironmentIdeServiceImpl(
+            localTransport,
+            new InMemoryIdeBootstrapTicketService(),
+            new AllowGateway(),
+            new IdeViewBindingRegistry(),
+            Duration.ofSeconds(1),
+            new NoopAuthorization());
     service = new ClusterEnvironmentIdeService(registry, client, local);
   }
 
@@ -107,19 +124,40 @@ class ClusterEnvironmentIdeServiceTest {
   }
 
   @Test
-  void terminalAndCloseRouteToClientWhenRemote() {
+  void boundCommandsAndListRouteToClientWhenRemote() {
     registry.current =
         Optional.of(ClusterOwnerRoute.remote(NODE_B, URI.create("http://b.internal")));
+    EnvironmentIdeViewBindingDTO binding = new EnvironmentIdeViewBindingDTO();
+    binding.setDocumentId(DOCUMENT);
+    binding.setBindingEpoch("3");
+    EnvironmentIdeCloseViewDTO close = new EnvironmentIdeCloseViewDTO();
+    close.setDocumentId(DOCUMENT);
+    close.setBindingEpoch("3");
+    close.setDiscard(false);
+    EnvironmentIdeChangeDirectoryDTO directory = new EnvironmentIdeChangeDirectoryDTO();
+    directory.setDocumentId(DOCUMENT);
+    directory.setBindingEpoch("3");
+    directory.setDirectory("/tmp");
 
-    service.focusTerminal(ENV, VIEW);
-    service.closeView(ENV, VIEW);
+    service.changeDirectory(ENV, VIEW, directory);
+    service.focusTerminal(ENV, VIEW, binding);
+    service.detachView(ENV, VIEW, binding);
+    service.closeView(ENV, VIEW, close);
+    service.listViews(ENV);
 
-    assertEquals(List.of("focusTerminal", "closeView"), client.calls);
+    assertEquals(
+        List.of("changeDirectory", "focusTerminal", "detachView", "closeView", "listViews"),
+        client.calls);
   }
 
   private static EnvironmentIdeOpenViewDTO openViewRequest() {
     EnvironmentIdeOpenViewDTO request = new EnvironmentIdeOpenViewDTO();
     request.setViewId(VIEW);
+    request.setDocumentId(DOCUMENT);
+    request.setEventNodeId(EVENT_NODE);
+    request.setConnectionId(CONNECTION);
+    request.setClaimId(CLAIM);
+    request.setMode("create");
     request.setDirectory("/home/dev/project");
     return request;
   }
@@ -175,13 +213,36 @@ class ClusterEnvironmentIdeServiceTest {
     }
 
     @Override
-    public void focusTerminal(EnvironmentId environmentId, ClusterOwnerRoute owner, String viewId) {
+    public void focusTerminal(
+        EnvironmentId environmentId,
+        ClusterOwnerRoute owner,
+        String viewId,
+        EnvironmentIdeViewBindingDTO request) {
       calls.add("focusTerminal");
     }
 
     @Override
-    public void closeView(EnvironmentId environmentId, ClusterOwnerRoute owner, String viewId) {
+    public void closeView(
+        EnvironmentId environmentId,
+        ClusterOwnerRoute owner,
+        String viewId,
+        EnvironmentIdeCloseViewDTO request) {
       calls.add("closeView");
+    }
+
+    @Override
+    public void detachView(
+        EnvironmentId environmentId,
+        ClusterOwnerRoute owner,
+        String viewId,
+        EnvironmentIdeViewBindingDTO request) {
+      calls.add("detachView");
+    }
+
+    @Override
+    public EnvironmentIdeViewsDTO listViews(EnvironmentId environmentId, ClusterOwnerRoute owner) {
+      calls.add("listViews");
+      return new EnvironmentIdeViewsDTO();
     }
   }
 
@@ -193,7 +254,20 @@ class ClusterEnvironmentIdeServiceTest {
     public IdeRequest requestIde(EnvironmentId environmentId, IdeCommand command) {
       commands.add(command);
       CompletableFuture<IdeReply> reply = new CompletableFuture<>();
-      reply.complete(IdeReply.ok(VIEW, "/home/dev/project", "/daemon/workspaces/" + VIEW));
+      reply.complete(
+          new IdeReply(
+              true,
+              UUID.fromString(command.viewId()),
+              command.documentId() == null ? null : UUID.fromString(command.documentId()),
+              command.eventNodeId() == null ? null : UUID.fromString(command.eventNodeId()),
+              command.connectionId() == null ? null : UUID.fromString(command.connectionId()),
+              command.claimId() == null ? null : UUID.fromString(command.claimId()),
+              1L,
+              "/home/dev/project",
+              "/daemon/workspaces/" + command.viewId(),
+              null,
+              null,
+              null));
       return new IdeRequest(
           new DaemonConnectionIdentity(environmentId, "daemon-instance"), UUID.randomUUID(), reply);
     }
@@ -204,6 +278,50 @@ class ClusterEnvironmentIdeServiceTest {
     }
 
     @Override
+    public void sendIdeLease(
+        EnvironmentId environmentId,
+        DaemonConnectionIdentity expectedIdentity,
+        DaemonIdeLease lease) {
+      throw new AssertionError("unexpected lease");
+    }
+
+    @Override
     public void abandonIde(UUID invocationId) {}
+  }
+
+  private static final class AllowGateway implements IdeBrowserUseGateway {
+
+    @Override
+    public boolean findExactIntent(
+        UUID eventNodeId,
+        UUID connectionId,
+        UUID documentId,
+        EnvironmentId environmentId,
+        UUID viewId,
+        UUID claimId) {
+      return true;
+    }
+
+    @Override
+    public Optional<Proofs> activeBoundProofs(
+        UUID eventNodeId, UUID connectionId, UUID documentId) {
+      return Optional.empty();
+    }
+  }
+
+  private static final class NoopAuthorization implements IdeViewAuthorizationListener {
+
+    @Override
+    public void ensureViewCapacity(EnvironmentId environmentId) {}
+
+    @Override
+    public void viewOpened(
+        DaemonConnectionIdentity identity,
+        String viewId,
+        long bindingEpoch,
+        String workspacePath) {}
+
+    @Override
+    public void viewClosed(DaemonConnectionIdentity identity, String viewId, long bindingEpoch) {}
   }
 }

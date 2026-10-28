@@ -1,127 +1,188 @@
 package fun.fengwk.kkstudio.ide.protocol;
 
-import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.regex.Pattern;
 
 /**
  * 一条 IDE 控制命令（Server → Daemon，{@code IDE_COMMAND} 的 payload）。
  *
- * <p>字段与跨切片契约 {@code daemon/src/contracts.ts} 的 {@code IdeCommand} 一一对应；本类型承担 wire 边界校验： 只保证语义安全（规范
- * UUID、合法 URL/路径/header、未知组合拒绝），不解释宿主文件系统事实——目录是否可访问、文档是否 dirty 一律由 Daemon 按 Node 标准失败回执，Server
- * 不伪造结果。
- *
- * <p>{@code OPEN_STREAM} 的 {@code streamUrl} 统一使用受控的根相对路径 {@code
- * /api/harness/environment-stream/v1/{ticket}?environment={canonicalUuid}}；拒绝
- * authority、fragment、反斜杠、traversal 与非受控 endpoint（Daemon 结合已配置的 Studio 网关解析并建立直连）。
+ * <p>字段与冻结契约 {@code daemon/src/contracts.ts} 的 {@code IdeCommand} 一一对应。{@code OPEN_VIEW}
+ * 携带浏览器事件连接身份与 claimId；需要绑定身份的其它命令必须携带 {@code documentId} 与 {@code bindingEpoch}。Server 只做 wire
+ * 语义校验，目录是否可访问、文档是否 dirty 一律由 Daemon 回执，不在这里推断。
  */
 public record IdeCommand(
     IdeAction action,
     String viewId,
+    String documentId,
+    String eventNodeId,
+    String connectionId,
+    String claimId,
+    Long bindingEpoch,
+    IdeOpenMode mode,
     String directory,
-    String ticket,
-    String streamUrl,
-    IdeStreamMode mode,
-    String method,
-    String path,
-    List<IdeHeader> headers) {
+    Boolean discard) {
 
-  /** 与 {@code EnvironmentId} 一致的规范 UUID 文本长度。 */
   private static final int MAX_DIRECTORY_CHARS = 4096;
-
-  private static final int MAX_TICKET_CHARS = 512;
-  private static final int MAX_URL_CHARS = 2048;
-  private static final int MAX_METHOD_CHARS = 16;
-  private static final int MAX_PATH_CHARS = 8192;
-  private static final int MAX_HEADERS = 64;
-  private static final Pattern STREAM_URL =
-      Pattern.compile(
-          "/api/harness/environment-stream/v1/[A-Za-z0-9_-]+"
-              + "(?:\\?environment=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?");
 
   public IdeCommand {
     action = Objects.requireNonNull(action, "action");
-    viewId = validateOptionalViewId(viewId);
+    viewId = validateOptionalUuid(viewId, "viewId");
+    documentId = validateOptionalUuid(documentId, "documentId");
+    eventNodeId = validateOptionalUuid(eventNodeId, "eventNodeId");
+    connectionId = validateOptionalUuid(connectionId, "connectionId");
+    claimId = validateOptionalUuid(claimId, "claimId");
+    if (bindingEpoch != null && bindingEpoch <= 0) {
+      throw new IllegalArgumentException("bindingEpoch must be a positive long");
+    }
     directory = validateOptionalDirectory(directory);
-    headers = headers == null ? List.of() : List.copyOf(headers);
-    if (headers.size() > MAX_HEADERS) {
-      throw new IllegalArgumentException("headers must not exceed " + MAX_HEADERS + " entries");
-    }
     switch (action) {
-      case OPEN_VIEW -> requireAbsent(ticket, streamUrl, mode, method, path, "OPEN_VIEW");
+      case OPEN_VIEW -> {
+        require(viewId, "viewId");
+        require(documentId, "documentId");
+        require(eventNodeId, "eventNodeId");
+        require(connectionId, "connectionId");
+        require(claimId, "claimId");
+        require(mode, "mode");
+        requireAbsent(bindingEpoch, discard, "OPEN_VIEW");
+      }
       case CHANGE_DIRECTORY -> {
-        if (directory == null) {
-          throw new IllegalArgumentException("CHANGE_DIRECTORY requires directory");
-        }
-        requireAbsent(ticket, streamUrl, mode, method, path, "CHANGE_DIRECTORY");
+        requireBoundIdentity(viewId, documentId, bindingEpoch, "CHANGE_DIRECTORY");
+        require(directory, "directory");
+        requireAbsent(mode, eventNodeId, connectionId, claimId, discard, "CHANGE_DIRECTORY");
       }
-      case FOCUS_TERMINAL, CLOSE_VIEW -> {
-        if (directory != null) {
-          throw new IllegalArgumentException(action + " must not declare directory");
-        }
-        requireAbsent(ticket, streamUrl, mode, method, path, action.name());
+      case FOCUS_TERMINAL, DETACH_VIEW -> {
+        requireBoundIdentity(viewId, documentId, bindingEpoch, action.name());
+        requireAbsent(mode, directory, eventNodeId, connectionId, claimId, discard, action.name());
       }
-      case OPEN_STREAM -> {
-        if (directory != null) {
-          throw new IllegalArgumentException("OPEN_STREAM must not declare directory");
-        }
-        ticket = validateTicket(ticket);
-        streamUrl = validateStreamUrl(streamUrl);
-        if (mode == null) {
-          throw new IllegalArgumentException("OPEN_STREAM requires mode");
-        }
-        if (mode == IdeStreamMode.HTTP) {
-          method = validateMethod(method);
-          path = validatePath(path);
-        } else {
-          // WS 与 Node peer 一致：path 必填（上游 WS 请求路径），method 可缺省为 GET。
-          if (method != null) {
-            method = validateMethod(method);
-          }
-          path = validatePath(path);
+      case CLOSE_VIEW -> {
+        requireBoundIdentity(viewId, documentId, bindingEpoch, "CLOSE_VIEW");
+        require(discard, "discard");
+        requireAbsent(mode, directory, eventNodeId, connectionId, claimId, "CLOSE_VIEW");
+      }
+      case LIST_VIEWS -> {
+        if (viewId != null
+            || documentId != null
+            || eventNodeId != null
+            || connectionId != null
+            || claimId != null
+            || bindingEpoch != null
+            || mode != null
+            || directory != null
+            || discard != null) {
+          throw new IllegalArgumentException("LIST_VIEWS must not declare identity fields");
         }
       }
     }
-    // 非流式动作不允许携带 headers：headers 只在 OPEN_STREAM 的原始请求转发中使用。
-    if (action != IdeAction.OPEN_STREAM && !headers.isEmpty()) {
-      throw new IllegalArgumentException(action + " must not declare headers");
-    }
   }
 
-  /** 简单构造 OPEN_VIEW / CHANGE_DIRECTORY / FOCUS_TERMINAL / CLOSE_VIEW 命令。 */
-  public static IdeCommand view(IdeAction action, String viewId, String directory) {
-    return new IdeCommand(action, viewId, directory, null, null, null, null, null, List.of());
+  public static IdeCommand openView(
+      String viewId,
+      String documentId,
+      String eventNodeId,
+      String connectionId,
+      String claimId,
+      IdeOpenMode mode,
+      String directory) {
+    return new IdeCommand(
+        IdeAction.OPEN_VIEW,
+        viewId,
+        documentId,
+        eventNodeId,
+        connectionId,
+        claimId,
+        null,
+        mode,
+        directory,
+        null);
   }
 
-  /** 校验 viewId 为规范小写 UUID。 */
+  public static IdeCommand changeDirectory(
+      String viewId, String documentId, long bindingEpoch, String directory) {
+    return new IdeCommand(
+        IdeAction.CHANGE_DIRECTORY,
+        viewId,
+        documentId,
+        null,
+        null,
+        null,
+        bindingEpoch,
+        null,
+        directory,
+        null);
+  }
+
+  public static IdeCommand focusTerminal(String viewId, String documentId, long bindingEpoch) {
+    return new IdeCommand(
+        IdeAction.FOCUS_TERMINAL,
+        viewId,
+        documentId,
+        null,
+        null,
+        null,
+        bindingEpoch,
+        null,
+        null,
+        null);
+  }
+
+  public static IdeCommand closeView(
+      String viewId, String documentId, long bindingEpoch, boolean discard) {
+    return new IdeCommand(
+        IdeAction.CLOSE_VIEW,
+        viewId,
+        documentId,
+        null,
+        null,
+        null,
+        bindingEpoch,
+        null,
+        null,
+        discard);
+  }
+
+  public static IdeCommand detachView(String viewId, String documentId, long bindingEpoch) {
+    return new IdeCommand(
+        IdeAction.DETACH_VIEW,
+        viewId,
+        documentId,
+        null,
+        null,
+        null,
+        bindingEpoch,
+        null,
+        null,
+        null);
+  }
+
+  public static IdeCommand listViews() {
+    return new IdeCommand(
+        IdeAction.LIST_VIEWS, null, null, null, null, null, null, null, null, null);
+  }
+
+  /** 校验 viewId 为规范小写 UUID；供 REST 路径与命令共用。 */
   public static String validateViewId(String value) {
-    Objects.requireNonNull(value, "viewId");
-    return requireCanonicalViewId(value);
+    return validateOptionalUuid(value, "viewId");
   }
 
-  /** 校验可选 viewId：{@code null} 保留为 {@code null}（如 OPEN_STREAM 不携带 view），否则必须是规范小写 UUID。 */
-  static String validateOptionalViewId(String value) {
+  /** 校验 UUID 文本为规范小写形式；{@code null} 保留为 {@code null}。 */
+  static String validateOptionalUuid(String value, String field) {
     if (value == null) {
       return null;
     }
-    return requireCanonicalViewId(value);
-  }
-
-  private static String requireCanonicalViewId(String value) {
     UUID parsed;
     try {
       parsed = UUID.fromString(value);
     } catch (IllegalArgumentException error) {
-      throw new IllegalArgumentException("viewId must be a canonical UUID");
+      throw new IllegalArgumentException(field + " must be a canonical UUID");
     }
     if (!parsed.toString().equals(value)) {
-      throw new IllegalArgumentException("viewId must be a canonical lowercase UUID");
+      throw new IllegalArgumentException(field + " must be a canonical lowercase UUID");
     }
     return value;
   }
 
-  static String validateOptionalDirectory(String value) {
+  /** 校验目录字段：非空白、无控制字符且不超长。 */
+  public static String validateOptionalDirectory(String value) {
     if (value == null) {
       return null;
     }
@@ -138,77 +199,100 @@ public record IdeCommand(
     return value;
   }
 
-  static String validateTicket(String value) {
-    if (value == null || value.isEmpty()) {
-      throw new IllegalArgumentException("OPEN_STREAM requires a ticket");
+  /** 校验 wire 的规范正十进制 epoch 字符串，并解析为 long。 */
+  public static long parseBindingEpoch(String value) {
+    if (value == null || value.isEmpty() || value.charAt(0) < '1' || value.charAt(0) > '9') {
+      throw new IllegalArgumentException("bindingEpoch must be a canonical positive decimal");
     }
-    if (value.length() > MAX_TICKET_CHARS) {
-      throw new IllegalArgumentException("ticket exceeds " + MAX_TICKET_CHARS + " characters");
-    }
-    for (int i = 0; i < value.length(); i++) {
+    for (int i = 1; i < value.length(); i++) {
       char c = value.charAt(i);
-      boolean base64UrlChar =
-          (c >= 'a' && c <= 'z')
-              || (c >= 'A' && c <= 'Z')
-              || (c >= '0' && c <= '9')
-              || c == '-'
-              || c == '_';
-      if (!base64UrlChar) {
-        throw new IllegalArgumentException("ticket must be base64url text");
+      if (c < '0' || c > '9') {
+        throw new IllegalArgumentException("bindingEpoch must be a canonical positive decimal");
       }
     }
-    return value;
+    try {
+      return Long.parseLong(value);
+    } catch (NumberFormatException error) {
+      throw new IllegalArgumentException("bindingEpoch must fit in a signed 64-bit decimal");
+    }
   }
 
-  static String validateStreamUrl(String value) {
-    if (value == null || value.isBlank()) {
-      throw new IllegalArgumentException("OPEN_STREAM requires a streamUrl");
+  private static void requireBoundIdentity(
+      String viewId, String documentId, Long bindingEpoch, String context) {
+    require(viewId, "viewId");
+    require(documentId, "documentId");
+    if (bindingEpoch == null) {
+      throw new IllegalArgumentException(context + " requires bindingEpoch");
     }
-    if (value.length() > MAX_URL_CHARS) {
-      throw new IllegalArgumentException("streamUrl exceeds " + MAX_URL_CHARS + " characters");
-    }
-    if (!STREAM_URL.matcher(value).matches()) {
-      throw new IllegalArgumentException(
-          "streamUrl must be a controlled root-relative stream endpoint");
-    }
-    return value;
   }
 
-  static String validateMethod(String value) {
-    if (value == null || value.isEmpty() || value.length() > MAX_METHOD_CHARS) {
-      throw new IllegalArgumentException("HTTP OPEN_STREAM requires a bounded method");
+  private static void require(Object value, String field) {
+    if (value == null) {
+      throw new IllegalArgumentException(field + " is required");
     }
-    for (int i = 0; i < value.length(); i++) {
-      char c = value.charAt(i);
-      if (c < 'A' || c > 'Z') {
-        throw new IllegalArgumentException("method must be an uppercase HTTP token");
+  }
+
+  private static void requireAbsent(Object... fields) {
+    for (Object field : fields) {
+      if (field != null) {
+        throw new IllegalArgumentException("command declares a field that is not allowed");
       }
     }
-    return value;
   }
 
-  static String validatePath(String value) {
-    if (value == null || value.isEmpty() || value.length() > MAX_PATH_CHARS) {
-      throw new IllegalArgumentException("HTTP OPEN_STREAM requires a bounded path");
+  private static void requireAbsent(Long bindingEpoch, Boolean discard, String context) {
+    if (bindingEpoch != null || discard != null) {
+      throw new IllegalArgumentException(context + " must not declare binding fields");
     }
-    if (!value.startsWith("/") || value.startsWith("//")) {
-      throw new IllegalArgumentException("path must be an IDE-relative URL path");
-    }
-    if (IdeHeader.containsControlCharacters(value)) {
-      throw new IllegalArgumentException("path must not contain control characters");
-    }
-    return value;
   }
 
   private static void requireAbsent(
-      String ticket,
-      String streamUrl,
-      IdeStreamMode mode,
-      String method,
-      String path,
+      IdeOpenMode mode,
+      String eventNodeId,
+      String connectionId,
+      String claimId,
+      Boolean discard,
       String context) {
-    if (ticket != null || streamUrl != null || mode != null || method != null || path != null) {
-      throw new IllegalArgumentException(context + " must not declare stream fields");
+    if (mode != null
+        || eventNodeId != null
+        || connectionId != null
+        || claimId != null
+        || discard != null) {
+      throw new IllegalArgumentException(context + " must not declare open/close fields");
+    }
+  }
+
+  private static void requireAbsent(
+      IdeOpenMode mode,
+      String directory,
+      String eventNodeId,
+      String connectionId,
+      String claimId,
+      Boolean discard,
+      String context) {
+    if (mode != null
+        || directory != null
+        || eventNodeId != null
+        || connectionId != null
+        || claimId != null
+        || discard != null) {
+      throw new IllegalArgumentException(context + " must not declare open/close fields");
+    }
+  }
+
+  private static void requireAbsent(
+      IdeOpenMode mode,
+      String directory,
+      String eventNodeId,
+      String connectionId,
+      String claimId,
+      String context) {
+    if (mode != null
+        || directory != null
+        || eventNodeId != null
+        || connectionId != null
+        || claimId != null) {
+      throw new IllegalArgumentException(context + " must not declare open/directory fields");
     }
   }
 }

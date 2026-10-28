@@ -12,7 +12,7 @@ public final class DaemonProtocol {
    * 反向数据流的每个数据帧至少消耗一个最小 credit（见 {@code IdeStreamCreditWindow}），同实例重连用不终止执行的 {@code RECOVER}
    * 取回在途调用。其他版本帧一律拒绝，不做双协议 fallback。
    */
-  public static final int VERSION = 6;
+  public static final int VERSION = 7;
 
   /**
    * ERROR payload 的可选 {@code code}：目标 Environment 当前已有活跃连接租约，daemon 应按配置退避重连 （同 registration token

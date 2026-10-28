@@ -15,7 +15,9 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.EnvironmentIdeService;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeChangeDirectoryDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeCloseViewDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeOpenViewDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
 
 /**
@@ -48,14 +50,19 @@ public class StudioEnvironmentIdeController {
 
   @PostMapping("/{viewId}/terminal")
   public Result<Void> focusTerminal(
-      @PathVariable String environmentId, @PathVariable String viewId) {
-    environmentIdeService.focusTerminal(parseEnvironmentId(environmentId), viewId);
+      @PathVariable String environmentId,
+      @PathVariable String viewId,
+      @RequestBody EnvironmentIdeViewBindingDTO request) {
+    environmentIdeService.focusTerminal(parseEnvironmentId(environmentId), viewId, request);
     return Results.noContent();
   }
 
   @DeleteMapping("/{viewId}")
-  public Result<Void> closeView(@PathVariable String environmentId, @PathVariable String viewId) {
-    environmentIdeService.closeView(parseEnvironmentId(environmentId), viewId);
+  public Result<Void> closeView(
+      @PathVariable String environmentId,
+      @PathVariable String viewId,
+      @RequestBody EnvironmentIdeCloseViewDTO request) {
+    environmentIdeService.closeView(parseEnvironmentId(environmentId), viewId, request);
     return Results.noContent();
   }
 

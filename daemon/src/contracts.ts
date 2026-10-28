@@ -1,5 +1,7 @@
 import type { Readable, Writable } from 'node:stream'
 
+import type { DataBind, IdeLease } from './protocol.js'
+
 /** Runtime boundaries shared by capability, native process and transport implementations. */
 export interface DaemonConfig {
   configPath: string
@@ -150,7 +152,25 @@ export interface IdeReply {
 
 export interface IdeService {
   handle(command: IdeCommand, signal: AbortSignal): Promise<IdeReply>
+  /** Optional synchronous admission view; a configured IDE service must answer false while views/cleanup/streams exist. */
+  canStartUpdate?(): boolean
   close(): Promise<void>
+}
+
+/** 受控 Studio 数据连接绑定处理器；由 data transport 片实现，Runtime 只做严格解码与代际内派发。 */
+export interface DataBindHandler {
+  bind(binding: DataBind, signal: AbortSignal): Promise<void> | void
+}
+
+/**
+ * IDE 使用证明处理器；由 IDE 视图权威片实现。
+ *
+ * <p>Runtime 负责只发送当前控制代际内未过期的轮次并保证一轮最多派发一次；处理器负责核对 round 内的绑定是否是当前视图，
+ * 证明本身不能创建或续期视图。
+ */
+export interface IdeLeaseHandler {
+  hasActiveViews(): boolean
+  apply(lease: IdeLease): Promise<void> | void
 }
 
 export function textResult(callId: string, text: string, details: Record<string, unknown> = {}): CapabilityResult {

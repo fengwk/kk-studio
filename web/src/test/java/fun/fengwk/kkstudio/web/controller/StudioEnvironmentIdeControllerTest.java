@@ -29,18 +29,23 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonIdeLease;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.ide.EnvironmentIdeService;
 import fun.fengwk.kkstudio.ide.EnvironmentIdeServiceImpl;
+import fun.fengwk.kkstudio.ide.IdeBrowserUseGateway;
 import fun.fengwk.kkstudio.ide.IdeCommandTransport;
 import fun.fengwk.kkstudio.ide.IdeRequest;
+import fun.fengwk.kkstudio.ide.IdeViewBindingRegistry;
 import fun.fengwk.kkstudio.ide.InMemoryIdeBootstrapTicketService;
 import fun.fengwk.kkstudio.ide.protocol.IdeCommand;
 import fun.fengwk.kkstudio.ide.protocol.IdeReply;
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeChangeDirectoryDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeCloseViewDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeOpenViewDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
 import fun.fengwk.kkstudio.web.advice.StudioDomainErrorAdvice;
 import fun.fengwk.kkstudio.web.advice.StudioResponseStatusErrorAdvice;
@@ -61,6 +66,7 @@ class StudioEnvironmentIdeControllerTest {
 
   private static final UUID ENV_ID = UUID.fromString("55555555-5555-4555-8555-555555555555");
   private static final String VIEW_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  private static final String DOCUMENT_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
   private static final String DIRTY_REJECTION =
       "save or discard unsaved changes before switching directory";
   private static final ObjectMapper OBJECT_MAPPER = JsonMapper.builder().build();
@@ -135,7 +141,7 @@ class StudioEnvironmentIdeControllerTest {
 
   /** 意图：CHANGE_DIRECTORY 成功时返回 200 与更新后的目录，不伪造新的 bootstrap 入口。 */
   @Test
-  void changeDirectoryReturnsUpdatedDirectory() throws Exception {
+  void changeDirectoryReturnsUpdatedDirectoryAndForwardsDocumentEpoch() throws Exception {
     when(environmentIdeService.changeDirectory(eq(EnvironmentId.of(ENV_ID)), eq(VIEW_ID), any()))
         .thenReturn(view("/workspace/subdir"));
 
@@ -144,7 +150,10 @@ class StudioEnvironmentIdeControllerTest {
             put("/api/environments/" + ENV_ID + "/ide/views/" + VIEW_ID + "/directory")
                 .locale(Locale.US)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"directory\":\"/workspace/subdir\"}"))
+                .content(
+                    "{\"documentId\":\""
+                        + DOCUMENT_ID
+                        + "\",\"bindingEpoch\":\"7\",\"directory\":\"/workspace/subdir\"}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.viewId").value(VIEW_ID))
         .andExpect(jsonPath("$.data.directory").value("/workspace/subdir"))
@@ -154,6 +163,8 @@ class StudioEnvironmentIdeControllerTest {
         ArgumentCaptor.forClass(EnvironmentIdeChangeDirectoryDTO.class);
     verify(environmentIdeService)
         .changeDirectory(eq(EnvironmentId.of(ENV_ID)), eq(VIEW_ID), request.capture());
+    assertEquals(DOCUMENT_ID, request.getValue().getDocumentId());
+    assertEquals("7", request.getValue().getBindingEpoch());
     assertEquals("/workspace/subdir", request.getValue().getDirectory());
   }
 
@@ -219,23 +230,40 @@ class StudioEnvironmentIdeControllerTest {
     verifyNoInteractions(environmentIdeService);
   }
 
-  /** 意图：FOCUS_TERMINAL 语义为无响应体的 204，CLOSE_VIEW 幂等清理并同样返回 204，两者都只转发 viewId。 */
+  /** 意图：终端/关闭 204 且请求体中的 document 与 epoch 原样转发，旧代际不能作用到新绑定。 */
   @Test
   void focusTerminalAndCloseViewReturnNoContent() throws Exception {
     mockMvc
         .perform(
             post("/api/environments/" + ENV_ID + "/ide/views/" + VIEW_ID + "/terminal")
-                .locale(Locale.US))
+                .locale(Locale.US)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"documentId\":\"" + DOCUMENT_ID + "\",\"bindingEpoch\":\"7\"}"))
         .andExpect(status().isNoContent());
     mockMvc
         .perform(
             delete("/api/environments/" + ENV_ID + "/ide/views/" + VIEW_ID)
                 .locale(Locale.US)
-                .content(""))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"documentId\":\""
+                        + DOCUMENT_ID
+                        + "\",\"bindingEpoch\":\"7\",\"discard\":false}"))
         .andExpect(status().isNoContent());
 
-    verify(environmentIdeService).focusTerminal(EnvironmentId.of(ENV_ID), VIEW_ID);
-    verify(environmentIdeService).closeView(EnvironmentId.of(ENV_ID), VIEW_ID);
+    ArgumentCaptor<EnvironmentIdeViewBindingDTO> focus =
+        ArgumentCaptor.forClass(EnvironmentIdeViewBindingDTO.class);
+    ArgumentCaptor<EnvironmentIdeCloseViewDTO> close =
+        ArgumentCaptor.forClass(EnvironmentIdeCloseViewDTO.class);
+    verify(environmentIdeService)
+        .focusTerminal(eq(EnvironmentId.of(ENV_ID)), eq(VIEW_ID), focus.capture());
+    verify(environmentIdeService)
+        .closeView(eq(EnvironmentId.of(ENV_ID)), eq(VIEW_ID), close.capture());
+    assertEquals(DOCUMENT_ID, focus.getValue().getDocumentId());
+    assertEquals("7", focus.getValue().getBindingEpoch());
+    assertEquals(DOCUMENT_ID, close.getValue().getDocumentId());
+    assertEquals("7", close.getValue().getBindingEpoch());
+    assertEquals(Boolean.FALSE, close.getValue().getDiscard());
   }
 
   /** 意图：未知字段必须被严格拒绝，避免 IDE 契约静默漂移。 */
@@ -265,7 +293,12 @@ class StudioEnvironmentIdeControllerTest {
     RecordingIdeTransport transport = new RecordingIdeTransport();
     EnvironmentIdeService service =
         new EnvironmentIdeServiceImpl(
-            transport, new InMemoryIdeBootstrapTicketService(), Duration.ofSeconds(5));
+            transport,
+            new InMemoryIdeBootstrapTicketService(),
+            mock(IdeBrowserUseGateway.class),
+            new IdeViewBindingRegistry(),
+            Duration.ofSeconds(5),
+            null);
     MockMvc realChain =
         MockMvcBuilders.standaloneSetup(new StudioEnvironmentIdeController(service))
             .setControllerAdvice(
@@ -276,6 +309,11 @@ class StudioEnvironmentIdeControllerTest {
 
     EnvironmentIdeOpenViewDTO openRequest = new EnvironmentIdeOpenViewDTO();
     openRequest.setViewId(VIEW_ID);
+    openRequest.setDocumentId(DOCUMENT_ID);
+    openRequest.setEventNodeId(UUID.randomUUID().toString());
+    openRequest.setConnectionId(UUID.randomUUID().toString());
+    openRequest.setClaimId(UUID.randomUUID().toString());
+    openRequest.setMode("create");
     openRequest.setDirectory(directory);
     realChain
         .perform(
@@ -289,6 +327,8 @@ class StudioEnvironmentIdeControllerTest {
         .andExpect(jsonPath("$.errors.detail", containsString("directory")));
 
     EnvironmentIdeChangeDirectoryDTO changeRequest = new EnvironmentIdeChangeDirectoryDTO();
+    changeRequest.setDocumentId(DOCUMENT_ID);
+    changeRequest.setBindingEpoch("7");
     changeRequest.setDirectory(directory);
     realChain
         .perform(
@@ -329,10 +369,19 @@ class StudioEnvironmentIdeControllerTest {
       command = ideCommand;
       CompletableFuture<IdeReply> reply = new CompletableFuture<>();
       reply.complete(
-          IdeReply.ok(
-              ideCommand.viewId(),
-              ideCommand.directory(),
-              "/daemon/workspaces/" + ideCommand.viewId()));
+          new IdeReply(
+              false,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              "UNAVAILABLE",
+              "not used by this test"));
       return new IdeRequest(
           new DaemonConnectionIdentity(environmentId, DAEMON_INSTANCE), UUID.randomUUID(), reply);
     }
@@ -345,6 +394,14 @@ class StudioEnvironmentIdeControllerTest {
     @Override
     public Optional<DaemonConnectionIdentity> connectionIdentity(EnvironmentId environmentId) {
       return Optional.empty();
+    }
+
+    @Override
+    public void sendIdeLease(
+        EnvironmentId environmentId,
+        DaemonConnectionIdentity expectedIdentity,
+        DaemonIdeLease lease) {
+      // 这里的替身只验证坏目录不进入传输，不需要租约发送。
     }
   }
 }

@@ -22,6 +22,7 @@ public record EnvironmentEvent(Instant time, String level, String type, String m
   public static final String TYPE_SKILL_SYNC_STARTED = "SKILL_SYNC_STARTED";
   public static final String TYPE_SKILL_SYNC_SUCCEEDED = "SKILL_SYNC_SUCCEEDED";
   public static final String TYPE_SKILL_SYNC_FAILED = "SKILL_SYNC_FAILED";
+  public static final String TYPE_UPDATE_FAILED = "UPDATE_FAILED";
 
   /** 事件说明的字符上限。 */
   public static final int MAX_MESSAGE_CHARS = 500;
@@ -34,7 +35,8 @@ public record EnvironmentEvent(Instant time, String level, String type, String m
           TYPE_DISCONNECTED,
           TYPE_SKILL_SYNC_STARTED,
           TYPE_SKILL_SYNC_SUCCEEDED,
-          TYPE_SKILL_SYNC_FAILED);
+          TYPE_SKILL_SYNC_FAILED,
+          TYPE_UPDATE_FAILED);
 
   public EnvironmentEvent {
     time = Objects.requireNonNull(time, "time");

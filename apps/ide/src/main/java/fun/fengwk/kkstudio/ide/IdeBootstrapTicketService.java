@@ -6,26 +6,32 @@ import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
 import java.util.Optional;
 
 /**
- * IDE 同源网关的一次性 bootstrap 票据：{@code OPEN_VIEW} 返回的 entryUrl 携带该票据，同源网关消费后设置 HttpOnly 且限定 Path 的
- * cookie 再跳转官方 {@code /?workspace=<encoded>}。
+ * IDE 同源网关的一次性 bootstrap 票据：claim 成功后的 entryUrl 携带该票据，网关消费后设置绑定 view+epoch 的 HttpOnly cookie。
  *
- * <p>票据绑定 Environment、view、受管 workspace 路径与命令进入传输时的 Daemon 实例代际（{@link
- * DaemonConnectionIdentity}）；一次性、短时、消费即删除。{@link #revoke} 在另一个 Daemon
- * 实例接管时按代际作废旧票据，避免跨进程接管后旧入口继续有效。
+ * <p>票据绑定 Environment、Daemon 实例、viewId、bindingEpoch 与受管 workspace，一次性且短时；消费时仍须复核当前 {@link
+ * IdeGenerationState} 与视图绑定。关闭/恢复换代/实例接管都会撤销尚未消费的旧票据。
  */
 public interface IdeBootstrapTicketService {
 
-  String issue(DaemonConnectionIdentity identity, String viewId, String workspacePath);
+  String issue(
+      DaemonConnectionIdentity identity, String viewId, long bindingEpoch, String workspacePath);
 
   Optional<Ticket> consume(String ticket);
 
   /** 撤销某代际尚未消费的票据（另一个 Daemon 实例接管时调用）。 */
   void revoke(DaemonConnectionIdentity identity);
 
-  /** 撤销某视图尚未消费的入口票据（视图关闭时调用）；同一视图再次打开时旧票据不得继续有效。 */
+  /** 撤销某视图全部尚未消费的入口票据（关闭、恢复换代时调用）。 */
   void revokeView(EnvironmentId environmentId, String viewId);
 
-  record Ticket(DaemonConnectionIdentity identity, String viewId, String workspacePath) {
+  record Ticket(
+      DaemonConnectionIdentity identity, String viewId, long bindingEpoch, String workspacePath) {
+
+    public Ticket {
+      if (bindingEpoch <= 0) {
+        throw new IllegalArgumentException("bindingEpoch must be positive");
+      }
+    }
 
     public EnvironmentId environmentId() {
       return identity.environmentId();

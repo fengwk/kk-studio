@@ -41,7 +41,7 @@ import java.util.function.Supplier;
  * <p>连接生命周期事件（CONNECTING/READY/DISCONNECTED）在推进状态的同一条围栏语句里原子追加到 {@code recent_events}， 数组始终是 200
  * 条以内的按时间正序窗口；READY 同时把 {@code skill_state} 清空，随后由 Skill 同步编排器全量重建。
  *
- * <p>六组连接写（tryAcquire/markReady/heartbeat/disconnect/recordSkillEvent/replaceSkillState）各自在一个真实短事务内执行
+ * <p>六组连接写（tryAcquire/markReady/heartbeat/disconnect/recordEvent/replaceSkillState）各自在一个真实短事务内执行
  * 「围栏 SQL + environment_changed 发布」：只有实际写入成功才发布，0 行围栏与拒绝结果静默；发布失败连同围栏写一起回滚，
  * 绝不出现「租约已提交、通知未发出」的窗口。自然到期没有数据库写事件，仍由读取时判定与重连单次对账处理。
  */
@@ -486,13 +486,12 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
   }
 
   /**
-   * 围栏追加一条 Skill 同步运维事件（不改变 skill_state）。
+   * 围栏追加一条运维事件（不改变 {@code skill_state}）。
    *
    * <p>事件写入与连接状态推进共用同一个 owner + lease token + 未过期 READY 围栏；围栏失效时返回 false（fail-closed），
    * 绝不把过期持有者的事件写进新持有者的行。
    */
-  public boolean recordSkillEvent(
-      EnvironmentId environmentId, UUID leaseToken, EnvironmentEvent event) {
+  public boolean recordEvent(EnvironmentId environmentId, UUID leaseToken, EnvironmentEvent event) {
     Objects.requireNonNull(environmentId, "environmentId");
     Objects.requireNonNull(leaseToken, "leaseToken");
     Objects.requireNonNull(event, "event");

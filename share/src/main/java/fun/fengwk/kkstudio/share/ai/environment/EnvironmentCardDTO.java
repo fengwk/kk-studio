@@ -56,13 +56,6 @@ public class EnvironmentCardDTO {
    */
   private @Nullable String daemonVersion;
 
-  /**
-   * 该 Environment 最近一次受管 Daemon 更新操作（含终态）；从未发起更新时为 null。
-   *
-   * <p>它是持久事实投影：卡片只在有更新历史时携带，避免为每个 Environment 引入额外端点轮询。
-   */
-  private @Nullable EnvironmentUpdateDTO update;
-
   /** 支持的原子能力列表。 */
   private List<LiveEnvironmentCapabilityDTO> capabilities;
 

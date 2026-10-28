@@ -7,6 +7,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -29,8 +30,11 @@ import fun.fengwk.kkstudio.platform.error.AiDomainException;
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeChangeDirectoryDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeCloseViewDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeOpenViewDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewsDTO;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -86,6 +90,13 @@ public class ClusterEnvironmentIdeInternalController {
     return localEnvironmentIdeService.openView(environment, body);
   }
 
+  @GetMapping("/views")
+  public EnvironmentIdeViewsDTO listViews(
+      @PathVariable String environmentId, HttpServletRequest request) {
+    EnvironmentId environment = authenticateAndAuthorize(request, environmentId);
+    return localEnvironmentIdeService.listViews(environment);
+  }
+
   @PutMapping("/{viewId:" + VIEW_ID + "}/directory")
   public EnvironmentIdeViewDTO changeDirectory(
       @PathVariable String environmentId, @PathVariable String viewId, HttpServletRequest request) {
@@ -99,14 +110,24 @@ public class ClusterEnvironmentIdeInternalController {
   public void focusTerminal(
       @PathVariable String environmentId, @PathVariable String viewId, HttpServletRequest request) {
     EnvironmentId environment = authenticateAndAuthorize(request, environmentId);
-    localEnvironmentIdeService.focusTerminal(environment, viewId);
+    EnvironmentIdeViewBindingDTO body = readBody(request, EnvironmentIdeViewBindingDTO.class);
+    localEnvironmentIdeService.focusTerminal(environment, viewId, body);
+  }
+
+  @PostMapping("/{viewId:" + VIEW_ID + "}/detach")
+  public void detachView(
+      @PathVariable String environmentId, @PathVariable String viewId, HttpServletRequest request) {
+    EnvironmentId environment = authenticateAndAuthorize(request, environmentId);
+    EnvironmentIdeViewBindingDTO body = readBody(request, EnvironmentIdeViewBindingDTO.class);
+    localEnvironmentIdeService.detachView(environment, viewId, body);
   }
 
   @DeleteMapping("/{viewId:" + VIEW_ID + "}")
   public void closeView(
       @PathVariable String environmentId, @PathVariable String viewId, HttpServletRequest request) {
     EnvironmentId environment = authenticateAndAuthorize(request, environmentId);
-    localEnvironmentIdeService.closeView(environment, viewId);
+    EnvironmentIdeCloseViewDTO body = readBody(request, EnvironmentIdeCloseViewDTO.class);
+    localEnvironmentIdeService.closeView(environment, viewId, body);
   }
 
   /** 认证 + owner 核对先于请求体读取；任一失败都不会有任何 daemon 副作用。 */

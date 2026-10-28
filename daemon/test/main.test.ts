@@ -28,7 +28,7 @@ vi.mock('../src/native/process-supervisor-windows.js', async (importOriginal) =>
 
 import { main } from '../src/main.js'
 import { DAEMON_VERSION } from '../src/config.js'
-import type { Envelope } from '../src/protocol.js'
+import { READY_CAPABILITIES_VERSION, type Envelope } from '../src/protocol.js'
 import * as native from '../src/native/index.js'
 import * as control from '../src/transport/control.js'
 import type { ProcessSpec, ProcessSupervisor } from '../src/contracts.js'
@@ -361,11 +361,15 @@ describe('daemon main real assembly', () => {
       expect(helloPayload.daemonVersion).toBe(DAEMON_VERSION)
       expect(typeof helloPayload.daemonInstanceId).toBe('string')
 
-      // READY 是严格 schema v5：平台归一化与真实 detectEnvironmentInfo 规范一致，不硬编码单一平台。
+      // READY 是严格 schema v6：平台归一化与真实 detectEnvironmentInfo 规范一致，不硬编码单一平台。
       const ready = fixture.received.find((envelope) => envelope.messageType === 'READY') as Envelope
       const readyPayload = ready.payload as Record<string, unknown>
-      expect(readyPayload.version).toBe(5)
+      expect(readyPayload.version).toBe(READY_CAPABILITIES_VERSION)
       expect(readyPayload.daemonVersion).toBe(DAEMON_VERSION)
+      expect(readyPayload.runtimeStatus).toEqual({
+        revision: '1',
+        status: { daemonVersion: DAEMON_VERSION, update: null },
+      })
       const environment = readyPayload.environment as Record<string, unknown>
       const operatingSystem = environment.operatingSystem
       expect(['windows', 'wsl', 'linux', 'macos']).toContain(operatingSystem)
