@@ -371,6 +371,45 @@ describe('IdePanelProvider', () => {
     expect(localStorage.getItem(IDE_TAB_LAST_KEY)).toBeNull()
   })
 
+  it('requires an explicit open-new-view action after VIEW_GONE', async () => {
+    const user = userEvent.setup()
+    sessionStorage.setItem(IDE_TAB_SESSION_KEY, sessionSnapshot({
+      panelVisible: true,
+      selectedEnvironmentId: ENV_A,
+      openedEnvironmentIds: [ENV_A],
+    }, {
+      [ENV_A]: {
+        viewId: VIEW_A,
+        daemonInstanceId: DAEMON_A,
+        directory: DIRECTORY_A,
+      },
+    }))
+    service.openIdeView
+      .mockRejectedValueOnce(new ApiError('IDE view is gone', 409, 'IDE_UNAVAILABLE', {
+        detail: 'VIEW_GONE',
+      }))
+
+    const { sockets } = renderPanel()
+    connect(sockets)
+    await waitFor(() => {
+      expect(screen.getByTestId('ide-view-gone')).toBeVisible()
+    })
+    expect(service.openIdeView).toHaveBeenCalledTimes(1)
+    expect(screen.queryByTestId('ide-iframe')).not.toBeInTheDocument()
+
+    await user.click(screen.getByTestId('ide-open-new-view-btn'))
+    await waitFor(() => {
+      expect(service.openIdeView).toHaveBeenCalledTimes(2)
+    })
+    const calls = service.openIdeView.mock.calls as Array<[string, EnvironmentIdeOpenViewDTO]>
+    expect(calls[0]?.[1]).toMatchObject({ mode: 'resume', viewId: VIEW_A })
+    expect(calls[1]?.[1].mode).toBe('create')
+    expect(calls[1]?.[1].viewId).not.toBe(VIEW_A)
+    await waitFor(() => {
+      expect(screen.getByTestId('ide-iframe')).toBeInTheDocument()
+    })
+  })
+
   it('reconciles an unknown HTTP result only with the original claimId and request identity', async () => {
     const user = userEvent.setup()
     service.openIdeView.mockRejectedValueOnce(new ApiError('network unavailable'))
