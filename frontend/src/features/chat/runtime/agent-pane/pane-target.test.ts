@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   clearBoundPendingMessage,
-  clearPaneTarget,
   clearPendingAcceptance,
   isBoundPendingMessageValue,
   isBoundTarget,
@@ -12,14 +11,13 @@ import {
   isNewThreadTarget,
   isNewSessionTarget,
   isPaneTarget,
+  inspectPendingAcceptanceSlot,
   loadBoundPendingMessage,
-  loadPaneTarget,
   loadPendingAcceptance,
   normalizePaneTarget,
   sameBatchRequestIdentity,
   saveBoundPendingMessage,
   samePaneTarget,
-  savePaneTarget,
   savePendingAcceptance,
   targetIdentity,
   type BoundPendingMessage,
@@ -162,21 +160,7 @@ describe('PaneTarget durable-local FSM', () => {
     expect(targetIdentity(forkDraft)).toBe('fork-session-draft:s1:t-source:e1')
   })
 
-  it('persists only target, while PendingAcceptance remains a separate sidecar', () => {
-    const storage = memoryStorage()
-    const owner = { type: 'CHAT' as const, chatId: 'chat-1' }
-    const target: PaneTarget = {
-      kind: 'NEW_THREAD_DRAFT',
-      sessionId: 's1',
-      startEntryId: 'e1',
-      threadName: 'branch-1',
-    }
-    savePaneTarget(owner, 'pane-1', target, storage)
-    expect(loadPaneTarget(owner, 'pane-1', storage)).toEqual(target)
-    expect(storage.length).toBe(1)
-  })
-
-  it('persists an exact pending request independently from the target', () => {
+  it('persists an exact pending request independently from the presentation target', () => {
     const storage = memoryStorage()
     const owner = { type: 'CHAT' as const, chatId: 'chat-1' }
     const pending: PendingAcceptance = {
@@ -212,13 +196,9 @@ describe('PaneTarget durable-local FSM', () => {
       generation: 3,
       unknownOutcome: true,
     }
-    savePendingAcceptance(owner, 'pane-1', pending, storage)
+    expect(savePendingAcceptance(owner, 'pane-1', pending, storage)).toBe(true)
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toEqual(pending)
     expect(storage.length).toBe(1)
-    clearPendingAcceptance(owner, 'pane-1', storage)
-    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
-    clearPaneTarget(owner, 'pane-1', storage)
-    expect(loadPaneTarget(owner, 'pane-1', storage)).toEqual({ kind: 'NEW_SESSION_DRAFT' })
 
     const forkPending: PendingAcceptance = {
       ...pending,
@@ -241,7 +221,20 @@ describe('PaneTarget durable-local FSM', () => {
         commands: pending.request.commands,
       },
     }
-    savePendingAcceptance(owner, 'pane-1', forkPending, storage)
+    const originalRaw = storage.getItem(
+      'kk-studio.agent-pane-acceptance.CHAT:chat-1:pane-1',
+    )
+    // 不同请求不能覆盖同一槽位；原记录逐字节保留。
+    expect(savePendingAcceptance(owner, 'pane-1', forkPending, storage)).toBe(false)
+    expect(storage.getItem('kk-studio.agent-pane-acceptance.CHAT:chat-1:pane-1'))
+      .toBe(originalRaw)
+    expect(clearPendingAcceptance(owner, 'pane-1', forkPending, storage)).toBe(false)
+    expect(storage.getItem('kk-studio.agent-pane-acceptance.CHAT:chat-1:pane-1'))
+      .toBe(originalRaw)
+    expect(clearPendingAcceptance(owner, 'pane-1', pending, storage)).toBe(true)
+    expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
+
+    expect(savePendingAcceptance(owner, 'pane-1', forkPending, storage)).toBe(true)
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toEqual(forkPending)
     // NEW_FORKED_SESSION 绝不接受 rootSettings 或 threadName 等越界字段。
     storage.setItem(
@@ -258,19 +251,64 @@ describe('PaneTarget durable-local FSM', () => {
       }),
     )
     expect(loadPendingAcceptance(owner, 'pane-1', storage)).toBeNull()
+    expect(inspectPendingAcceptanceSlot(owner, 'pane-1', storage).status).toBe('invalid')
+    const malformedRaw = storage.getItem('kk-studio.agent-pane-acceptance.CHAT:chat-1:pane-1')
+    expect(savePendingAcceptance(owner, 'pane-1', forkPending, storage)).toBe(false)
+    expect(clearPendingAcceptance(owner, 'pane-1', forkPending, storage)).toBe(false)
+    expect(storage.getItem('kk-studio.agent-pane-acceptance.CHAT:chat-1:pane-1'))
+      .toBe(malformedRaw)
   })
 
-  it('isolates ISSUE_AGENT target storage by issue and agent', () => {
-    // 测试意图：同一 Issue 的不同 Agent 不得共享绑定线程草稿。
-    const owner = { type: 'ISSUE_AGENT' as const, issueId: 'issue-1', agentName: 'coder' }
+  it('matches pending recovery by its original target, not by pane id alone', () => {
+    // paneId 只定位槽位：同一 pane 已切到别的展示目标时，旧记录不得套用到新目标，
+    // 也不得被删除或改写，必须留给原操作对账。
+    const owner = { type: 'CHAT' as const, chatId: 'chat-1' }
     const storage = memoryStorage()
-    savePaneTarget(owner, 'pane-coordinator', { kind: 'BOUND_THREAD', threadId: 'thread-p1' }, storage)
-    expect(loadPaneTarget(owner, 'pane-coordinator', storage)).toEqual({
+    const pending: PendingAcceptance = {
+      owner,
+      target: { kind: 'NEW_SESSION_DRAFT' },
+      request: {
+        owner,
+        target: {
+          type: 'NEW_SESSION',
+          sessionId: 's1',
+          threadId: 't1',
+          rootSettings: {
+            agentName: 'assistant',
+            model: { modelName: 'm', variant: 'v' },
+            environmentName: null,
+            goal: null,
+          },
+          yoloEnabled: false,
+        },
+        commands: [{
+          type: 'USER_MESSAGE',
+          idempotencyKey: 'c1',
+          contents: [{ type: 'TEXT', text: 'hello' }],
+        }],
+      },
+      branchDraft: {
+        agentName: 'assistant',
+        model: { modelName: 'm', variant: 'v' },
+        environmentName: null,
+        yoloEnabled: false,
+      },
+      composerParts: [createTextPart('hello')],
+      generation: 0,
+      unknownOutcome: true,
+    }
+    savePendingAcceptance(owner, 'pane-1', pending, storage)
+    const recordKey = 'kk-studio.agent-pane-acceptance.CHAT:chat-1:pane-1'
+    const before = storage.getItem(recordKey)
+
+    expect(loadPendingAcceptance(owner, 'pane-1', storage, {
       kind: 'BOUND_THREAD',
-      threadId: 'thread-p1',
-    })
-    expect(loadPaneTarget({ ...owner, agentName: 'reviewer' }, 'pane-coordinator', storage))
-      .toEqual({ kind: 'NEW_SESSION_DRAFT' })
+      threadId: 't1',
+    })).toBeNull()
+    expect(storage.getItem(recordKey)).toBe(before)
+    expect(loadPendingAcceptance(owner, 'pane-1', storage, { kind: 'NEW_SESSION_DRAFT' }))
+      .toEqual(pending)
+    expect(loadPendingAcceptance({ ...owner, chatId: 'chat-2' }, 'pane-1', storage)).toBeNull()
   })
 
   it('fails closed when browser storage is unavailable or contains malformed pending data', () => {
@@ -299,11 +337,45 @@ describe('PaneTarget durable-local FSM', () => {
         throw new Error('storage unavailable')
       },
     }
-    expect(loadPaneTarget(owner, 'pane-1', failingStorage)).toEqual({ kind: 'NEW_SESSION_DRAFT' })
     expect(loadPendingAcceptance(owner, 'pane-1', failingStorage)).toBeNull()
-    expect(() => savePaneTarget(owner, 'pane-1', { kind: 'BOUND_THREAD', threadId: 't1' }, failingStorage)).not.toThrow()
-    expect(() => clearPaneTarget(owner, 'pane-1', failingStorage)).not.toThrow()
-    expect(() => clearPendingAcceptance(owner, 'pane-1', failingStorage)).not.toThrow()
+    expect(inspectPendingAcceptanceSlot(owner, 'pane-1', failingStorage).status).toBe('unavailable')
+    const pending: PendingAcceptance = {
+      owner,
+      target: { kind: 'NEW_SESSION_DRAFT' },
+      request: {
+        owner,
+        target: {
+          type: 'NEW_SESSION',
+          sessionId: 's1',
+          threadId: 't1',
+          rootSettings: {
+            agentName: 'assistant',
+            model: { modelName: 'm', variant: 'v' },
+            environmentName: null,
+            goal: null,
+          },
+          yoloEnabled: false,
+        },
+        commands: [{
+          type: 'USER_MESSAGE',
+          idempotencyKey: 'c1',
+          contents: [{ type: 'TEXT', text: 'hello' }],
+        }],
+      },
+      branchDraft: {
+        agentName: 'assistant',
+        model: { modelName: 'm', variant: 'v' },
+        environmentName: null,
+        yoloEnabled: false,
+      },
+      composerParts: [],
+      generation: 0,
+      unknownOutcome: true,
+    }
+    expect(() => savePendingAcceptance(owner, 'pane-1', pending, failingStorage)).not.toThrow()
+    expect(savePendingAcceptance(owner, 'pane-1', pending, failingStorage)).toBe(false)
+    expect(() => clearPendingAcceptance(owner, 'pane-1', pending, failingStorage)).not.toThrow()
+    expect(clearPendingAcceptance(owner, 'pane-1', pending, failingStorage)).toBe(false)
   })
 
   it('rejects pending storage unless owner, commands, generation, and outcome are valid', () => {

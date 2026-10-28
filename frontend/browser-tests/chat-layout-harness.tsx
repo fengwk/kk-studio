@@ -5,6 +5,7 @@ import { setLocale } from '@/shared/i18n'
 import { ChatLayoutSelector } from '@/features/chat/ChatWorkspacePage'
 import {
   applyChatLayout,
+  createDefaultChatPaneState,
   visibleChatPanes,
   type ChatLayout,
   type ChatPaneState,
@@ -27,21 +28,7 @@ import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 
 setLocale('zh-CN')
 
-const INITIAL_PANE_STATE: ChatPaneState = {
-  focusedPaneId: 'pane-1',
-  layout: 'split-2',
-  panes: [
-    { id: 'pane-1' },
-    { id: 'pane-2' },
-    { id: 'pane-3' },
-    { id: 'pane-4' },
-    { id: 'pane-5' },
-    { id: 'pane-6' },
-    { id: 'pane-7' },
-    { id: 'pane-8' },
-    { id: 'pane-9' },
-  ],
-}
+const INITIAL_PANE_STATE: ChatPaneState = applyChatLayout(createDefaultChatPaneState(), 'split-2')
 
 const SAMPLE_USER_MESSAGE: TextDialogueMessage = {
   id: 'msg-user-1',

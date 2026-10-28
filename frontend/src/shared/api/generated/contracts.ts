@@ -885,21 +885,54 @@ export interface EnvironmentEventDTO {
 
 /** Java：fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeChangeDirectoryDTO */
 export interface EnvironmentIdeChangeDirectoryDTO {
+  documentId: string
+  bindingEpoch: string
   directory: string
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeCloseViewDTO */
+export interface EnvironmentIdeCloseViewDTO {
+  documentId: string
+  bindingEpoch: string
+  discard: boolean
 }
 
 /** Java：fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeOpenViewDTO */
 export interface EnvironmentIdeOpenViewDTO {
   viewId: string
+  documentId: string
+  eventNodeId: string
+  connectionId: string
+  claimId: string
+  mode: string
   directory?: string | null
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewBindingDTO */
+export interface EnvironmentIdeViewBindingDTO {
+  documentId: string
+  bindingEpoch: string
 }
 
 /** Java：fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO */
 export interface EnvironmentIdeViewDTO {
   viewId: string
   environmentId: string
+  documentId: string
+  eventNodeId: string
+  connectionId: string
+  claimId: string
+  daemonInstanceId: string
+  bindingEpoch: string
   directory: string
+  workspacePath: string
+  state: string
   entryUrl?: string | null
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewsDTO */
+export interface EnvironmentIdeViewsDTO {
+  views: EnvironmentIdeViewDTO[]
 }
 
 /** Java：fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallCodeDTO */

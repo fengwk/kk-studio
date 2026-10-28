@@ -4,7 +4,6 @@ import { createMemoryRouter, RouterProvider } from 'react-router'
 import '@/styles.css'
 import { setLocale } from '@/shared/i18n'
 import { ApplicationEventProvider } from '@/shared/app-events'
-import { IdeLifecycleProvider } from '@/features/environment/ide/IdeLifecycleProvider'
 import { ChatWorkspacePage } from '@/features/chat/ChatWorkspacePage'
 
 setLocale('zh-CN')
@@ -33,11 +32,9 @@ const scenario = new URLSearchParams(window.location.search).get('scenario') ?? 
 const router = createMemoryRouter([{
   path: '/chats/:chatId',
   element: (
-    <IdeLifecycleProvider>
-      <div className="chat-branch-harness-frame" data-testid="scenario" data-scenario={scenario}>
-        <ChatWorkspacePage />
-      </div>
-    </IdeLifecycleProvider>
+    <div className="chat-branch-harness-frame" data-testid="scenario" data-scenario={scenario}>
+      <ChatWorkspacePage />
+    </div>
   ),
 }], { initialEntries: [`/chats/${HARNESS_CHAT_ID}`] })
 

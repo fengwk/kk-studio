@@ -262,6 +262,19 @@ export function RootAgentPane({
           </Button>
         </div>
       ) : null}
+      {pane.pendingAcceptanceBlocked ? (
+        <div
+          className="thread-acceptance-retry"
+          data-testid="pending-acceptance-blocked"
+          role="status"
+          hidden={debugActive}
+          inert={debugActive}
+        >
+          <span className="thread-acceptance-retry-text">
+            {t('ai.runtime.action.pendingAcceptanceBlocked')}
+          </span>
+        </div>
+      ) : null}
       {pane.draftRestoreError ? (
         <div className="thread-acceptance-retry" data-testid="draft-restore-retry" hidden={debugActive} inert={debugActive}>
           <span className="thread-acceptance-retry-text">{pane.draftRestoreError}</span>

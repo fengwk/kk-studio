@@ -4,8 +4,20 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider, useNavigate } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { IdeLifecycleProvider } from '@/features/environment/ide/IdeLifecycleProvider'
+import {
+  IdePanelContext,
+  type IdeOpenEnvironmentRequest,
+} from '@/features/environment/ide/ide-panel-context'
 import { ChatWorkspacePage } from '@/features/chat/ChatWorkspacePage'
+import {
+  applyChatLayout,
+  chatTabLastStorageKey,
+  chatTabSessionStorageKey,
+  createDefaultChatPaneState,
+  setChatPaneTarget,
+  type ChatPaneState,
+} from '@/features/chat/chat-pane-state'
+import type { PaneTarget } from '@/features/chat/runtime/agent-pane'
 import { agentService } from '@/shared/api/agent-service'
 import { chatService } from '@/shared/api/chat-service'
 import { environmentService } from '@/shared/api/environment-service'
@@ -47,12 +59,8 @@ vi.mock('@/shared/api/chat-service', () => ({
 vi.mock('@/shared/api/environment-service', () => ({
   environmentService: {
     listEnvironments: vi.fn(),
-    getEnvironmentUpdate: vi.fn(),
+    getEnvironmentRuntime: vi.fn(),
     startEnvironmentUpdate: vi.fn(),
-    createIdeView: vi.fn().mockResolvedValue({}),
-    changeIdeViewDirectory: vi.fn().mockResolvedValue({}),
-    openIdeViewTerminal: vi.fn().mockResolvedValue(undefined),
-    closeIdeView: vi.fn().mockResolvedValue(undefined),
   },
 }))
 vi.mock('@/shared/api/harness-service', () => ({
@@ -168,6 +176,7 @@ function acceptedResponse(currentThread = thread()): HarnessAcceptedCommandsDTO 
 beforeEach(() => {
   vi.clearAllMocks()
   localStorage.clear()
+  sessionStorage.clear()
   setLocale('zh-CN')
   vi.mocked(chatService.getChat).mockResolvedValue({
     id: CHAT_ID,
@@ -215,6 +224,7 @@ beforeEach(() => {
 function renderWorkspaceRouter(
   initialEntries: string[],
   element: React.ReactNode = <ChatWorkspacePage />,
+  openEnvironment: (request: IdeOpenEnvironmentRequest) => void = vi.fn(),
 ) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -223,7 +233,7 @@ function renderWorkspaceRouter(
     [
       {
         path: '/chats/:chatId',
-        element: <IdeLifecycleProvider>{element}</IdeLifecycleProvider>,
+        element,
       },
       {
         path: '/chats',
@@ -234,13 +244,43 @@ function renderWorkspaceRouter(
   )
   return render(
     <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
+      <IdePanelContext.Provider value={{ openEnvironment }}>
+        <RouterProvider router={router} />
+      </IdePanelContext.Provider>
     </QueryClientProvider>,
   )
 }
 
 function renderWorkspace(chatId = CHAT_ID) {
   return renderWorkspaceRouter([`/chats/${chatId}`])
+}
+
+function paneState(
+  layout: ChatPaneState['layout'] = 'single',
+  targets: Record<string, PaneTarget> = {},
+): ChatPaneState {
+  let state = applyChatLayout(createDefaultChatPaneState(), layout)
+  for (const [paneId, target] of Object.entries(targets)) {
+    state = setChatPaneTarget(state, paneId, target)
+  }
+  return state
+}
+
+function snapshotOf(state: ChatPaneState) {
+  return { version: 1, presentation: state }
+}
+
+function seedLastState(chatId: string, state: ChatPaneState) {
+  localStorage.setItem(chatTabLastStorageKey(chatId), JSON.stringify(snapshotOf(state)))
+}
+
+function readStoredSnapshot(store: Storage, key: string) {
+  const raw = store.getItem(key)
+  return raw == null ? null : JSON.parse(raw) as ReturnType<typeof snapshotOf>
+}
+
+function bindThread(threadId: string): PaneTarget {
+  return { kind: 'BOUND_THREAD', threadId }
 }
 
 describe('ChatWorkspacePage', () => {
@@ -262,18 +302,23 @@ describe('ChatWorkspacePage', () => {
     expect(screen.getAllByLabelText('给 AI 发送消息')).toHaveLength(5)
   })
 
-  it('uses the shared AgentPane target store instead of duplicating target fields in Chat layout state', async () => {
-    localStorage.setItem(
-      `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
-      JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
-    )
+  it('restores layout and pane targets from one bounded tab snapshot without legacy keys', async () => {
+    seedLastState(CHAT_ID, paneState('split-2', { 'pane-1': bindThread(THREAD_ID) }))
     renderWorkspace()
     await waitFor(() =>
       expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(THREAD_ID),
     )
-    const layout = localStorage.getItem(`kk-studio.chat-pane.${CHAT_ID}`)
-    expect(layout).not.toContain('threadId')
-    expect(layout).not.toContain('"target"')
+    const localSnapshot = readStoredSnapshot(localStorage, chatTabLastStorageKey(CHAT_ID))
+    const sessionSnapshot = readStoredSnapshot(sessionStorage, chatTabSessionStorageKey(CHAT_ID))
+    expect(localSnapshot).toMatchObject({
+      version: 1,
+      presentation: { layout: 'split-2' },
+    })
+    expect(sessionSnapshot).toEqual(localSnapshot)
+    expect(localSnapshot?.presentation.panes[0].target).toEqual(bindThread(THREAD_ID))
+    // 旧的布局/目标呈现键不再读写。
+    expect(localStorage.getItem(`kk-studio.chat-pane.${CHAT_ID}`)).toBeNull()
+    expect(localStorage.getItem(`kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`)).toBeNull()
   })
 
   it('creates a NEW_SESSION on first send and binds the pane to its response', async () => {
@@ -290,19 +335,19 @@ describe('ChatWorkspacePage', () => {
     expect(request.target.type).toBe('NEW_SESSION')
     expect(request.commands).toHaveLength(1)
     expect(request.commands[0]?.type).toBe('USER_MESSAGE')
-    await waitFor(() =>
-      expect(localStorage.getItem(
-        `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
-      )).toContain('BOUND_THREAD'),
-    )
+    await waitFor(() => {
+      expect(
+        readStoredSnapshot(sessionStorage, chatTabSessionStorageKey(CHAT_ID))
+          ?.presentation.panes[0].target,
+      ).toEqual(bindThread(THREAD_ID))
+    })
+    expect(readStoredSnapshot(localStorage, chatTabLastStorageKey(CHAT_ID))?.presentation.panes[0].target)
+      .toEqual(bindThread(THREAD_ID))
   })
 
   it('sends an existing BOUND_THREAD through the per-thread command-batches endpoint', async () => {
     const user = userEvent.setup()
-    localStorage.setItem(
-      `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
-      JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
-    )
+    seedLastState(CHAT_ID, paneState('single', { 'pane-1': bindThread(THREAD_ID) }))
     renderWorkspace()
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await waitFor(() => expect(harnessService.getThreadSnapshot).toHaveBeenCalledWith(THREAD_ID))
@@ -322,33 +367,25 @@ describe('ChatWorkspacePage', () => {
 
   it('keeps independent target persistence for two visible Chat panes', async () => {
     const user = userEvent.setup()
-    localStorage.setItem(
-      `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
-      JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
-    )
+    seedLastState(CHAT_ID, paneState('single', { 'pane-1': bindThread(THREAD_ID) }))
     renderWorkspace()
     await screen.findByRole('heading', { name: 'Workspace' })
     const trigger = screen.getByRole('button', { name: '布局' })
     await user.click(trigger)
     await user.click(screen.getByRole('option', { name: '2' }))
     await waitFor(() => expect(screen.getAllByLabelText('给 AI 发送消息')).toHaveLength(2))
-    expect(localStorage.getItem(
-      `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-2`,
-    )).toContain('NEW_SESSION_DRAFT')
+    const snapshot = readStoredSnapshot(localStorage, chatTabLastStorageKey(CHAT_ID))
+    expect(snapshot?.presentation.panes[0].target).toEqual(bindThread(THREAD_ID))
+    expect(snapshot?.presentation.panes[1].target).toEqual({ kind: 'NEW_SESSION_DRAFT' })
   })
 
   it('consumes deep-link thread query only once on initial target pane and does not rebind on focus change', async () => {
     // 测试意图：验证 ?thread= deep-link 仅由初始目标 pane 消费一次，多 pane 切换焦点不会重复绑定该 thread
     const user = userEvent.setup()
-    localStorage.setItem(
-      `kk-studio.chat-pane.${CHAT_ID}`,
-      JSON.stringify({ layout: 'split-2', focusedPaneId: 'pane-1', panes: [{ id: 'pane-1' }, { id: 'pane-2' }] }),
-    )
     const OTHER_THREAD = '22222222-3333-4444-5555-666666666666'
-    localStorage.setItem(
-      `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-2`,
-      JSON.stringify({ kind: 'BOUND_THREAD', threadId: OTHER_THREAD }),
-    )
+    seedLastState(CHAT_ID, paneState('split-2', {
+      'pane-2': bindThread(OTHER_THREAD),
+    }))
     renderWorkspaceRouter([`/chats/${CHAT_ID}?thread=${THREAD_ID}`])
 
     await screen.findByRole('heading', { name: 'Workspace' })
@@ -362,7 +399,12 @@ describe('ChatWorkspacePage', () => {
     await user.click(composers[1]!)
 
     // pane-2 保持其原有的 target，不会被 deep-link 的 THREAD_ID 覆盖
-    expect(localStorage.getItem(`kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-2`)).toContain(OTHER_THREAD)
+    await waitFor(() => {
+      expect(
+        readStoredSnapshot(sessionStorage, chatTabSessionStorageKey(CHAT_ID))
+          ?.presentation.panes[1].target,
+      ).toEqual(bindThread(OTHER_THREAD))
+    })
   })
 
   it('supports in-component navigation to new thread via searchParams and consumes it via callback', async () => {
@@ -385,7 +427,10 @@ describe('ChatWorkspacePage', () => {
     })
 
     await waitFor(() => {
-      expect(localStorage.getItem(`kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`)).toContain(NEW_THREAD)
+      expect(
+        readStoredSnapshot(sessionStorage, chatTabSessionStorageKey(CHAT_ID))
+          ?.presentation.panes[0].target,
+      ).toEqual(bindThread(NEW_THREAD))
     })
   })
 
@@ -428,7 +473,10 @@ describe('ChatWorkspacePage', () => {
     })
 
     // 门禁拦截：目标未切换为 NEW_THREAD，仍保持原有目标
-    expect(localStorage.getItem(`kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`)).not.toContain(NEW_THREAD)
+    expect(
+      readStoredSnapshot(sessionStorage, chatTabSessionStorageKey(CHAT_ID))
+        ?.presentation.panes[0].target,
+    ).not.toEqual(bindThread(NEW_THREAD))
 
     // 释放挂起请求
     act(() => {
@@ -454,15 +502,8 @@ describe('ChatWorkspacePage', () => {
       updateTime: 0,
     }))
 
-    // chat-B 预先存好 grid-4 布局
-    localStorage.setItem(
-      `kk-studio.chat-pane.${CHAT_B}`,
-      JSON.stringify({
-        layout: 'grid-4',
-        focusedPaneId: 'pane-2',
-        panes: Array.from({ length: 9 }, (_, i) => ({ id: `pane-${i + 1}` })),
-      }),
-    )
+    // chat-B 预先存好 grid-4 布局与焦点
+    seedLastState(CHAT_B, { ...paneState('grid-4'), focusedPaneId: 'pane-2' })
 
     let testNavigate!: (to: string) => void
     function SwitchTestBridge() {
@@ -485,8 +526,8 @@ describe('ChatWorkspacePage', () => {
 
     // 检查 chat A 的持久化确实更新为 split-2
     await waitFor(() => {
-      const savedA = JSON.parse(localStorage.getItem(`kk-studio.chat-pane.${CHAT_A}`) || '{}')
-      expect(savedA.layout).toBe('split-2')
+      const savedA = readStoredSnapshot(localStorage, chatTabLastStorageKey(CHAT_A))
+      expect(savedA?.presentation.layout).toBe('split-2')
     })
 
     // 切换到 chat B
@@ -499,9 +540,9 @@ describe('ChatWorkspacePage', () => {
     expect(document.querySelector('.chat-pane-grid.layout-grid-4')).not.toBeNull()
 
     // 关键断言：chat B 的持久化存储绝对不能被 chat A 的 split-2 覆盖，必须保持 grid-4
-    const savedB = JSON.parse(localStorage.getItem(`kk-studio.chat-pane.${CHAT_B}`) || '{}')
-    expect(savedB.layout).toBe('grid-4')
-    expect(savedB.focusedPaneId).toBe('pane-2')
+    const savedB = readStoredSnapshot(localStorage, chatTabLastStorageKey(CHAT_B))
+    expect(savedB?.presentation.layout).toBe('grid-4')
+    expect(savedB?.presentation.focusedPaneId).toBe('pane-2')
 
     // 切回 chat A
     act(() => {
@@ -512,10 +553,82 @@ describe('ChatWorkspacePage', () => {
     expect(document.querySelector('.chat-pane-grid.layout-split-2')).not.toBeNull()
 
     // 再次断言两者的 key 绝未互相污染
-    const finalA = JSON.parse(localStorage.getItem(`kk-studio.chat-pane.${CHAT_A}`) || '{}')
-    const finalB = JSON.parse(localStorage.getItem(`kk-studio.chat-pane.${CHAT_B}`) || '{}')
-    expect(finalA.layout).toBe('split-2')
-    expect(finalB.layout).toBe('grid-4')
+    const finalA = readStoredSnapshot(localStorage, chatTabLastStorageKey(CHAT_A))
+    const finalB = readStoredSnapshot(localStorage, chatTabLastStorageKey(CHAT_B))
+    expect(finalA?.presentation.layout).toBe('split-2')
+    expect(finalB?.presentation.layout).toBe('grid-4')
+  })
+
+  it('initializes a new tab from last state while writing only its session recovery snapshot', async () => {
+    const seeded = paneState('split-2', { 'pane-1': bindThread(THREAD_ID) })
+    seedLastState(CHAT_ID, seeded)
+    const lastBefore = localStorage.getItem(chatTabLastStorageKey(CHAT_ID))
+    expect(sessionStorage.getItem(chatTabSessionStorageKey(CHAT_ID))).toBeNull()
+
+    renderWorkspace()
+
+    expect(await screen.findByRole('heading', { name: 'Workspace' })).toBeInTheDocument()
+    expect(document.querySelector('.chat-pane-grid.layout-split-2')).not.toBeNull()
+    await waitFor(() => {
+      expect(readStoredSnapshot(sessionStorage, chatTabSessionStorageKey(CHAT_ID)))
+        .toEqual(snapshotOf(seeded))
+    })
+    // 刷新/初始化不得把恢复结果当作新的用户操作写回全局最后状态。
+    expect(localStorage.getItem(chatTabLastStorageKey(CHAT_ID))).toBe(lastBefore)
+  })
+
+  it('ignores another tab writing last state and restores its own session snapshot on refresh', async () => {
+    const user = userEvent.setup()
+    const view = renderWorkspace()
+    await screen.findByRole('heading', { name: 'Workspace' })
+    await user.click(screen.getByRole('button', { name: '布局' }))
+    await user.click(screen.getByRole('option', { name: '2' }))
+    expect(document.querySelector('.chat-pane-grid.layout-split-2')).not.toBeNull()
+    expect(readStoredSnapshot(sessionStorage, chatTabSessionStorageKey(CHAT_ID))?.presentation.layout)
+      .toBe('split-2')
+
+    // 另一个 tab 把更“新”的最后状态写成 grid-4；已初始化 tab 不监听 storage 事件。
+    seedLastState(CHAT_ID, paneState('grid-4'))
+    expect(document.querySelector('.chat-pane-grid.layout-split-2')).not.toBeNull()
+    expect(document.querySelector('.chat-pane-grid.layout-grid-4')).toBeNull()
+
+    view.unmount()
+    renderWorkspace()
+
+    // 刷新仍读自己的 session 快照，不继承更新更晚的 last state。
+    expect(await screen.findByRole('heading', { name: 'Workspace' })).toBeInTheDocument()
+    expect(document.querySelector('.chat-pane-grid.layout-split-2')).not.toBeNull()
+    expect(document.querySelector('.chat-pane-grid.layout-grid-4')).toBeNull()
+  })
+
+  it('falls back to defaults for malformed tab snapshots and rewrites only the session index', async () => {
+    localStorage.setItem(chatTabLastStorageKey(CHAT_ID), '{not-json')
+    sessionStorage.setItem(chatTabSessionStorageKey(CHAT_ID), '{"version":99,"presentation":{}}')
+    const lastCorrupt = localStorage.getItem(chatTabLastStorageKey(CHAT_ID))
+
+    renderWorkspace()
+
+    expect(await screen.findByRole('heading', { name: 'Workspace' })).toBeInTheDocument()
+    expect(document.querySelector('.chat-pane-grid.layout-single')).not.toBeNull()
+    await waitFor(() => {
+      expect(readStoredSnapshot(sessionStorage, chatTabSessionStorageKey(CHAT_ID))?.presentation.layout)
+        .toBe('single')
+    })
+    expect(localStorage.getItem(chatTabLastStorageKey(CHAT_ID))).toBe(lastCorrupt)
+  })
+
+  it('keeps in-memory presentation and warns when storage writes fail', async () => {
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('QuotaExceededError')
+    })
+    try {
+      renderWorkspace()
+      expect(await screen.findByRole('heading', { name: 'Workspace' })).toBeInTheDocument()
+      expect(await screen.findByText('本页恢复状态未保存')).toBeInTheDocument()
+      expect(document.querySelector('.chat-pane-grid.layout-single')).not.toBeNull()
+    } finally {
+      setItem.mockRestore()
+    }
   })
 })
 
@@ -550,19 +663,28 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     usageCost: null,
   }
 
-  function paneTargetKey(paneId: string) {
-    return `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:${paneId}`
+  function seedLayout(layout: string, focusedPaneId = 'pane-1') {
+    seedLastState(CHAT_ID, {
+      ...paneState(layout as ChatPaneState['layout']),
+      focusedPaneId,
+    })
   }
 
-  function seedLayout(layout: string, focusedPaneId = 'pane-1') {
-    localStorage.setItem(
-      `kk-studio.chat-pane.${CHAT_ID}`,
-      JSON.stringify({
-        layout,
-        focusedPaneId,
-        panes: Array.from({ length: 9 }, (_, index) => ({ id: `pane-${index + 1}` })),
-      }),
-    )
+  function storedPresentation(): ChatPaneState {
+    return readStoredSnapshot(localStorage, chatTabLastStorageKey(CHAT_ID))?.presentation
+      ?? paneState()
+  }
+
+  function storedPaneTarget(paneId: string): PaneTarget | null {
+    return storedPresentation().panes.find((pane) => pane.id === paneId)?.target ?? null
+  }
+
+  function seedPaneTargets(targets: Record<string, PaneTarget>) {
+    let state = storedPresentation()
+    for (const [paneId, target] of Object.entries(targets)) {
+      state = setChatPaneTarget(state, paneId, target)
+    }
+    seedLastState(CHAT_ID, state)
   }
 
   /** 绑定 pane 到既有 Thread，并让快照/entries 反映给定的分支结构。 */
@@ -571,10 +693,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     entries: HarnessSessionEntryDTO[],
     headEntryId: string,
   ) {
-    localStorage.setItem(
-      paneTargetKey(paneId),
-      JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
-    )
+    seedPaneTargets({ [paneId]: bindThread(THREAD_ID) })
     vi.mocked(harnessService.getThreadSnapshot).mockImplementation(async (threadId: string) => ({
       ...snapshot(),
       thread: { ...snapshot().thread, threadId, headEntryId, sessionId: 'session-1' },
@@ -643,10 +762,11 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     expect(document.querySelector('.chat-workspace-breadcrumb')?.getAttribute('data-focused-pane'))
       .toBe('pane-3')
     await waitFor(() => {
-      expect(localStorage.getItem(paneTargetKey('pane-3')))
-        .toContain('"threadName":"branch-1"')
+      expect(storedPaneTarget('pane-3')).toMatchObject({
+        kind: 'NEW_THREAD_DRAFT',
+        threadName: 'branch-1',
+      })
     })
-    expect(localStorage.getItem(paneTargetKey('pane-3'))).toContain('NEW_THREAD_DRAFT')
     expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
     expect(document.querySelector('.new-branch-dialog')).toBeNull()
     // 顶栏面包屑跟随聚焦 pane 展示分支名（规范化后的权威名称）。
@@ -676,7 +796,10 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     expect(document.querySelector('.chat-pane-grid.layout-single')).not.toBeNull()
     vi.mocked(harnessService.listSessionThreads).mockResolvedValue([{ ...summary, parentThreadId: 'root' }])
     await confirmBranch(user)
-    await waitFor(() => expect(localStorage.getItem(paneTargetKey('pane-3'))).toContain('"threadName":"duplicate"'))
+    await waitFor(() => expect(storedPaneTarget('pane-3')).toMatchObject({
+      kind: 'NEW_THREAD_DRAFT',
+      threadName: 'duplicate',
+    }))
     expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
   })
 
@@ -686,9 +809,11 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     ['session-1', 9, false],
   ])('checks hidden local drafts by Session, excluding the target itself (%s -> %i)', async (sessionId, destination, conflict) => {
     const user = userEvent.setup()
-    localStorage.setItem(paneTargetKey('pane-9'), JSON.stringify({
-      kind: 'NEW_THREAD_DRAFT', sessionId, startEntryId: 'entry-2', threadName: 'local',
-    }))
+    seedPaneTargets({
+      'pane-9': {
+        kind: 'NEW_THREAD_DRAFT', sessionId, startEntryId: 'entry-2', threadName: 'local',
+      },
+    })
     bindPaneThread('pane-1', [ROOT_ENTRY, TURN_END_ENTRY, MESSAGE_ENTRY], 'entry-3')
     renderWorkspace()
     const dialog = await openBranchDialogFromTree(user)
@@ -700,7 +825,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
       expect(document.querySelector('.new-branch-dialog')).not.toBeNull()
     } else {
       await waitFor(() => expect(document.querySelector('.new-branch-dialog')).toBeNull())
-      expect(localStorage.getItem(paneTargetKey(`pane-${destination}`))).toContain('"sessionId":"session-1"')
+      expect(storedPaneTarget(`pane-${destination}`)).toMatchObject({ sessionId: 'session-1' })
     }
   })
 
@@ -720,10 +845,13 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     await chooseDestination(user, 2)
     await act(async () => resolve([]))
     expect(document.querySelector('.new-branch-dialog')).not.toBeNull()
-    expect(localStorage.getItem(paneTargetKey('pane-3'))).toBeNull()
+    expect(storedPaneTarget('pane-3')).toEqual({ kind: 'NEW_SESSION_DRAFT' })
     vi.mocked(harnessService.listSessionThreads).mockResolvedValue([])
     await confirmBranch(user)
-    await waitFor(() => expect(localStorage.getItem(paneTargetKey('pane-2'))).toContain('"threadName":"safe"'))
+    await waitFor(() => expect(storedPaneTarget('pane-2')).toMatchObject({
+      kind: 'NEW_THREAD_DRAFT',
+      threadName: 'safe',
+    }))
   })
 
   it.each(['close', 'input'])('discards a pending name check when the dialog closes or destination input changes (%s)', async (action) => {
@@ -748,7 +876,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
       fireEvent.input(destination)
     }
     await act(async () => resolve([]))
-    expect(localStorage.getItem(paneTargetKey('pane-3'))).toContain('NEW_SESSION_DRAFT')
+    expect(storedPaneTarget('pane-3')).toEqual({ kind: 'NEW_SESSION_DRAFT' })
     expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
     if (action === 'close') {
       expect(document.querySelector('.new-branch-dialog')).toBeNull()
@@ -809,22 +937,26 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     await chooseDestination(user, 3)
     await confirmBranch(user)
     expect(await screen.findByText('目标位置正忙，请选择其它位置。')).toBeInTheDocument()
-    expect(localStorage.getItem(paneTargetKey('pane-3'))).not.toContain('not-overwritten')
+    expect(storedPaneTarget('pane-3')).not.toMatchObject({ threadName: 'not-overwritten' })
     await act(async () => settle())
     await waitFor(() => expect(document.querySelector('[data-pane-id="pane-3"]')).toBeNull())
   })
 
   it.each(['root', 'local', 'subagent', 'cross-session', 'self', 'offline'])('validates in-place draft rename in the workspace namespace (%s)', async (scenario) => {
     const user = userEvent.setup()
-    localStorage.setItem(paneTargetKey('pane-1'), JSON.stringify({
-      kind: 'NEW_THREAD_DRAFT', sessionId: 'session-1', startEntryId: 'entry-1', threadName: 'original',
-    }))
+    seedPaneTargets({
+      'pane-1': {
+        kind: 'NEW_THREAD_DRAFT', sessionId: 'session-1', startEntryId: 'entry-1', threadName: 'original',
+      },
+    })
     vi.mocked(harnessService.listSessionEntries).mockResolvedValue([ROOT_ENTRY])
     if (scenario === 'local' || scenario === 'cross-session') {
-      localStorage.setItem(paneTargetKey('pane-9'), JSON.stringify({
-        kind: 'NEW_THREAD_DRAFT', sessionId: scenario === 'local' ? 'session-1' : 'other',
-        startEntryId: 'entry-1', threadName: 'duplicate',
-      }))
+      seedPaneTargets({
+        'pane-9': {
+          kind: 'NEW_THREAD_DRAFT', sessionId: scenario === 'local' ? 'session-1' : 'other',
+          startEntryId: 'entry-1', threadName: 'duplicate',
+        },
+      })
     }
     if (scenario === 'root' || scenario === 'subagent') {
       vi.mocked(harnessService.listSessionThreads).mockResolvedValue([{
@@ -850,11 +982,11 @@ describe('ChatWorkspacePage 新建分支路由', () => {
       expect(await screen.findByRole('alert')).toHaveTextContent(scenario === 'offline'
         ? '无法检查 thread 名称' : '此 Session 已有同名')
       expect(name).toHaveValue(proposed)
-      expect(localStorage.getItem(paneTargetKey('pane-1'))).toContain('"threadName":"original"')
+      expect(storedPaneTarget('pane-1')).toMatchObject({ threadName: 'original' })
       expect(screen.queryByText('private network detail')).not.toBeInTheDocument()
     } else {
       await waitFor(() => expect(screen.queryByRole('textbox', { name: '名称' })).not.toBeInTheDocument())
-      expect(localStorage.getItem(paneTargetKey('pane-1'))).toContain(`"threadName":"${proposed}"`)
+      expect(storedPaneTarget('pane-1')).toMatchObject({ threadName: proposed })
     }
     expect(harnessService.renameThread).not.toHaveBeenCalled()
     expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
@@ -880,12 +1012,14 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     await waitFor(() =>
       expect(document.querySelector('.new-branch-overwrite')).not.toBeNull())
     expect(document.querySelector('.new-branch-dialog')).not.toBeNull()
-    expect(localStorage.getItem(paneTargetKey('pane-3'))).toContain('NEW_SESSION_DRAFT')
+    expect(storedPaneTarget('pane-3')).toEqual({ kind: 'NEW_SESSION_DRAFT' })
 
     await confirmBranch(user)
     await waitFor(() => {
-      expect(localStorage.getItem(paneTargetKey('pane-3')))
-        .toContain('"threadName":"branch-1"')
+      expect(storedPaneTarget('pane-3')).toMatchObject({
+        kind: 'NEW_THREAD_DRAFT',
+        threadName: 'branch-1',
+      })
     })
     expect(document.querySelector('.new-branch-dialog')).toBeNull()
   })
@@ -912,8 +1046,8 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     await waitFor(() =>
       expect(document.querySelector('.new-branch-dialog .form-error-banner')).not.toBeNull())
     expect(document.querySelector('.new-branch-dialog')).not.toBeNull()
-    expect(localStorage.getItem(paneTargetKey('pane-3'))).not.toContain('NEW_THREAD_DRAFT')
-    expect(localStorage.getItem(paneTargetKey('pane-3'))).toContain('NEW_SESSION_DRAFT')
+    expect(storedPaneTarget('pane-3')).not.toMatchObject({ kind: 'NEW_THREAD_DRAFT' })
+    expect(storedPaneTarget('pane-3')).toEqual({ kind: 'NEW_SESSION_DRAFT' })
   })
 
   it('follows the focused pane in the topbar breadcrumb', async () => {
@@ -940,8 +1074,9 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     expect(document.querySelector('[data-breadcrumb="branch"]')).toBeNull()
   })
 
-  it('retains pane in DOM when it has an active IDE view after layout shrinks, without fake pending effect', async () => {
+  it('does not retain a hidden pane after IDE was opened because the global panel owns the view', async () => {
     const user = userEvent.setup()
+    const openEnvironment = vi.fn<(request: IdeOpenEnvironmentRequest) => void>()
     seedLayout('split-2')
     bindPaneThread('pane-1', [ROOT_ENTRY, TURN_END_ENTRY, MESSAGE_ENTRY], 'entry-3')
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([
@@ -959,56 +1094,37 @@ describe('ChatWorkspacePage 新建分支路由', () => {
         homeDirectory: '/home/user',
       },
     ])
-    vi.mocked(environmentService.createIdeView).mockResolvedValue({
-      viewId: 'v-pane-2',
-      environmentId: 'a1000000-0000-4000-8000-000000000001',
-      directory: '/home/user',
-      entryUrl: '/environment-ide/a1000000-0000-4000-8000-000000000001/__ide/bootstrap?token=p2',
-    })
 
-    renderWorkspace()
+    renderWorkspaceRouter([`/chats/${CHAT_ID}`], <ChatWorkspacePage />, openEnvironment)
     await screen.findByRole('heading', { name: 'Workspace' })
     await waitFor(() => expect(screen.getAllByLabelText('给 AI 发送消息')).toHaveLength(2))
 
-    // Open IDE on pane-2
     const plusButtons = screen.getAllByRole('button', { name: '打开命令表' })
     await user.click(plusButtons[1]!)
-    const filesCommands = await screen.findAllByText('files')
-    await user.click(filesCommands[0]!)
+    await user.click((await screen.findAllByText('files'))[0]!)
+    await waitFor(() => {
+      expect(openEnvironment).toHaveBeenCalledWith({ environment: null, mode: 'files' })
+    })
 
-    // Pane-2 has no bound environment, so it presents the inline environment selector. Confirming starts the view.
-    const confirmBtn = await screen.findByRole('button', { name: '确认' })
-    await user.click(confirmBtn)
-
-    // Wait for pane-2 IDE view to mount
-    await screen.findByTestId('ide-iframe')
-
-    // Switch layout to 1 pane
     const layoutTrigger = screen.getByRole('button', { name: '布局' })
     await user.click(layoutTrigger)
     await user.click(screen.getByRole('option', { name: '1' }))
 
-    // Pane-2 must still be retained in mountedPanes with hidden and inert
-    const paneElements = document.querySelectorAll('.chat-pane')
-    expect(paneElements.length).toBe(2)
-    const hiddenPane = Array.from(paneElements).find((el) => el.getAttribute('data-pane-id') === 'pane-2')
-    expect(hiddenPane).toHaveAttribute('hidden')
-    expect(hiddenPane).toHaveAttribute('inert')
+    // 全局面板脱离 pane 生命周期；隐藏 pane 不因 IDE 曾打开而继续挂载。
+    expect(document.querySelectorAll('.chat-pane')).toHaveLength(1)
 
-    // And it must NOT block new branch dialog destination (not fake pending effect)
     const dialog = await openBranchDialogFromTree(user)
     await user.type(dialog.querySelector<HTMLInputElement>('.new-branch-name')!, 'branch-to-hidden')
     await chooseDestination(user, 2)
     await confirmBranch(user)
-
-    // Branch creation succeeds and closes dialog without blocking on destination
     await waitFor(() => {
       expect(document.querySelector('.new-branch-dialog')).toBeNull()
     })
   })
 
-  it('prompts confirmation when leaving workspace with mounted IDE, and cancels navigation on cancel', async () => {
+  it('navigates away without a pane-owned IDE leave confirmation or close request', async () => {
     const user = userEvent.setup()
+    const openEnvironment = vi.fn<(request: IdeOpenEnvironmentRequest) => void>()
     seedLayout('split-2')
     bindPaneThread('pane-1', [ROOT_ENTRY, TURN_END_ENTRY, MESSAGE_ENTRY], 'entry-3')
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([
@@ -1026,41 +1142,22 @@ describe('ChatWorkspacePage 新建分支路由', () => {
         homeDirectory: '/home/user',
       },
     ])
-    vi.mocked(environmentService.createIdeView).mockResolvedValue({
-      viewId: 'v-pane-2',
-      environmentId: 'a1000000-0000-4000-8000-000000000001',
-      directory: '/home/user',
-      entryUrl: '/environment-ide/a1000000-0000-4000-8000-000000000001/__ide/bootstrap?token=p2',
-    })
 
-    renderWorkspace()
+    renderWorkspaceRouter([`/chats/${CHAT_ID}`], <ChatWorkspacePage />, openEnvironment)
     await screen.findByRole('heading', { name: 'Workspace' })
     await waitFor(() => expect(screen.getAllByLabelText('给 AI 发送消息')).toHaveLength(2))
 
-    // Open IDE on pane-2
     const plusButtons = screen.getAllByRole('button', { name: '打开命令表' })
     await user.click(plusButtons[1]!)
-    const filesCommands = await screen.findAllByText('files')
-    await user.click(filesCommands[0]!)
-    const confirmBtn = await screen.findByRole('button', { name: '确认' })
-    await user.click(confirmBtn)
+    await user.click((await screen.findAllByText('files'))[0]!)
+    await waitFor(() => {
+      expect(openEnvironment).toHaveBeenCalledWith({ environment: null, mode: 'files' })
+    })
 
-    await screen.findByTestId('ide-iframe')
-
-    // Click back to conversation ("回到对话")
-    const backBtn = screen.getByRole('link', { name: '回到对话' })
-    await user.click(backBtn)
-
-    // Confirmation dialog appears
-    expect(screen.getByText('离开将关闭文件面板，未保存内容需先保存。确认离开？')).toBeInTheDocument()
-
-    // Click cancel in leave dialog
-    await user.click(screen.getByRole('button', { name: '取消' }))
-
-    // Workspace and panes remain in document, navigation did not happen
+    await user.click(screen.getByRole('link', { name: '回到对话' }))
+    await screen.findByText('Chats List')
     expect(screen.queryByText('离开将关闭文件面板，未保存内容需先保存。确认离开？')).not.toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Workspace' })).toBeInTheDocument()
-    expect(document.querySelectorAll('.chat-pane')).toHaveLength(2)
+    expect(openEnvironment).toHaveBeenCalledTimes(1)
   })
 
   // 回合 footer 的 GitBranch 由 usage-owner 的 MetaMessageBlock 渲染，它消费本切片

@@ -1,14 +1,24 @@
 import { describe, expect, it } from 'vitest'
 import {
+  CHAT_TAB_STATE_MAX_BYTES,
   applyChatLayout,
   chatLayoutForPaneCount,
   chatPanePosition,
+  chatPaneTarget,
+  chatTabLastStorageKey,
+  chatTabSessionStorageKey,
+  createDefaultChatPaneState,
   focusPane,
   loadChatPaneState,
+  parseChatPaneState,
   revealChatPane,
   saveChatPaneState,
+  setChatPaneTarget,
   visibleChatPanes,
+  type ChatPaneState,
+  type ChatTabStorage,
 } from '@/features/chat/chat-pane-state'
+import type { PaneTarget } from '@/features/chat/runtime/agent-pane'
 
 function storage(): Storage {
   const values = new Map<string, string>()
@@ -24,138 +34,251 @@ function storage(): Storage {
   }
 }
 
-describe('Chat pane layout state', () => {
-  it('persists layout and focus without duplicating PaneTarget storage', () => {
-    const store = storage()
-    let state = loadChatPaneState('chat-1', store)
-    state = applyChatLayout(state, 'split-2')
-    state = focusPane(state, 'pane-2')
-    saveChatPaneState('chat-1', state, store)
-    expect(loadChatPaneState('chat-1', store)).toMatchObject({
-      layout: 'split-2',
-      focusedPaneId: 'pane-2',
-    })
-    expect(loadChatPaneState('chat-1', store).panes[0]).toEqual({ id: 'pane-1' })
-  })
+function tabStorage(local: Storage, session: Storage = storage()): ChatTabStorage {
+  return { localStorage: local, sessionStorage: session }
+}
 
-  it('keeps pane slots through layout changes and focuses only visible panes', () => {
-    let state = loadChatPaneState('chat-1', storage())
-    state = applyChatLayout(state, 'split-2')
-    state = focusPane(state, 'pane-2')
-    expect(visibleChatPanes(state).map((pane) => pane.id)).toEqual(['pane-1', 'pane-2'])
-    expect(state.focusedPaneId).toBe('pane-2')
-  })
+function bindThread(threadId: string): PaneTarget {
+  return { kind: 'BOUND_THREAD', threadId }
+}
 
-  it('reuses the same state object when the layout does not change', () => {
-    const state = loadChatPaneState('chat-1', storage())
-    // 切换为当前已生效布局是幂等 no-op：调用方（布局按钮连点）不应触发重渲染。
-    expect(applyChatLayout(state, 'single')).toBe(state)
-  })
+function snapshotOf(state: ChatPaneState) {
+  return { version: 1, presentation: state }
+}
 
-  it('shows exactly the capacity of panes for every layout', () => {
-    let state = loadChatPaneState('chat-1', storage())
-    const expectations: Array<[Parameters<typeof applyChatLayout>[1], number]> = [
-      ['single', 1],
-      ['split-2', 2],
-      ['split-3', 3],
-      ['grid-4', 4],
-      ['grid-5', 5],
-      ['grid-6', 6],
-      ['grid-7', 7],
-      ['grid-8', 8],
-      ['grid-9', 9],
-    ]
-    for (const [layout, capacity] of expectations) {
-      state = applyChatLayout(state, layout)
-      expect(visibleChatPanes(state)).toHaveLength(capacity)
-      expect(visibleChatPanes(state)[0]).toEqual({ id: 'pane-1' })
-    }
-    // 收缩到 single 再扩张：pane 槽位从未丢失。
-    expect(state.panes).toHaveLength(9)
-  })
+function readSnapshot(store: Storage, chatId: string) {
+  const raw = store.getItem(chatTabLastStorageKey(chatId))
+    ?? store.getItem(chatTabSessionStorageKey(chatId))
+  return raw == null ? null : JSON.parse(raw) as ReturnType<typeof snapshotOf>
+}
 
-  it('drops focus that points at a pane hidden by the smaller layout', () => {
-    let state = loadChatPaneState('chat-1', storage())
-    state = applyChatLayout(state, 'split-3')
-    state = focusPane(state, 'pane-3')
-    expect(state.focusedPaneId).toBe('pane-3')
-    // 收缩后 pane-3 不再可见：焦点必须回退到第一个可见 pane。
-    state = applyChatLayout(state, 'split-2')
-    expect(state.focusedPaneId).toBe('pane-1')
-  })
-
-  it('ignores focus requests for panes outside the current layout capacity', () => {
-    const state = loadChatPaneState('chat-1', storage())
-    // 无变化的新对象才表示焦点真正切换；不可见 pane 的请求必须原样返回。
-    expect(focusPane(state, 'pane-4')).toBe(state)
-    expect(focusPane(state, 'missing')).toBe(state)
-  })
-
-  it('falls back to defaults when the persisted value is corrupt or not an object', () => {
-    const store = storage()
-    store.setItem('kk-studio.chat-pane.chat-1', 'not-json')
-    const corrupt = loadChatPaneState('chat-1', store)
-    expect(corrupt.layout).toBe('single')
-    expect(corrupt.focusedPaneId).toBe('pane-1')
-
-    store.setItem('kk-studio.chat-pane.chat-1', JSON.stringify([1, 2, 3]))
-    expect(loadChatPaneState('chat-1', store)).toEqual(corrupt)
-
-    // 数组/字符串等非对象 raw 值同样回退默认值。
-    store.setItem('kk-studio.chat-pane.chat-1', '"oops"')
-    expect(loadChatPaneState('chat-1', store)).toEqual(corrupt)
-  })
-
-  it('normalizes an unknown layout and non-record panes to defaults', () => {
-    const store = storage()
-    store.setItem(
-      'kk-studio.chat-pane.chat-1',
-      JSON.stringify({
-        layout: 'tiles-16',
-        focusedPaneId: 'pane-2',
-        panes: ['not-a-pane', null, { id: 'custom' }],
-      }),
-    )
-    const state = loadChatPaneState('chat-1', store)
+describe('Chat tab presentation storage', () => {
+  it('creates nine canonical pane slots with safe draft targets', () => {
+    const state = createDefaultChatPaneState()
     expect(state.layout).toBe('single')
-    // 焦点 pane 不存在于 single 容量内：回退第一个 pane。
     expect(state.focusedPaneId).toBe('pane-1')
-    expect(state.panes[0]).toEqual({ id: 'pane-1' })
-    expect(state.panes[1]).toEqual({ id: 'pane-2' })
-    // 非 record pane 一律重建为规范 id；panes 始终补齐 9 个槽位。
-    expect(state.panes[2]).toEqual({ id: 'pane-3' })
     expect(state.panes).toHaveLength(9)
+    expect(state.panes[8]).toEqual({ id: 'pane-9', target: { kind: 'NEW_SESSION_DRAFT' } })
   })
 
-  it('skips storage entirely for an empty chat id', () => {
+  it('initializes from session, then last state, then defaults; only session is written', () => {
+    const local = storage()
+    const session = storage()
+    const state = createDefaultChatPaneState('split-2')
+    local.setItem(chatTabLastStorageKey('chat-1'), JSON.stringify(snapshotOf(state)))
+    const beforeLocal = local.getItem(chatTabLastStorageKey('chat-1'))
+
+    const loaded = loadChatPaneState('chat-1', tabStorage(local, session))
+
+    expect(loaded.saved).toBe(true)
+    expect(loaded.state.layout).toBe('split-2')
+    expect(session.getItem(chatTabSessionStorageKey('chat-1'))).not.toBeNull()
+    // 初始化只补写本 tab 的恢复索引，不把刷新结果写回全局最后状态。
+    expect(local.getItem(chatTabLastStorageKey('chat-1'))).toBe(beforeLocal)
+  })
+
+  it('prefers a valid session snapshot over a newer last state', () => {
+    const local = storage()
+    const session = storage()
+    const own = applyChatLayout(createDefaultChatPaneState(), 'split-2')
+    session.setItem(chatTabSessionStorageKey('chat-1'), JSON.stringify(snapshotOf(own)))
+    local.setItem(
+      chatTabLastStorageKey('chat-1'),
+      JSON.stringify(snapshotOf(applyChatLayout(createDefaultChatPaneState(), 'grid-4'))),
+    )
+
+    expect(loadChatPaneState('chat-1', tabStorage(local, session)).state.layout).toBe('split-2')
+  })
+
+  it('falls through an invalid session snapshot to last state, and to defaults when both fail', () => {
+    const local = storage()
+    const session = storage()
+    session.setItem(chatTabSessionStorageKey('chat-1'), '{"version":999,"presentation":{}}')
+    local.setItem(
+      chatTabLastStorageKey('chat-1'),
+      JSON.stringify(snapshotOf(applyChatLayout(createDefaultChatPaneState(), 'split-3'))),
+    )
+    expect(loadChatPaneState('chat-1', tabStorage(local, session)).state.layout).toBe('split-3')
+
+    session.setItem(chatTabSessionStorageKey('chat-2'), 'not-json')
+    local.setItem(chatTabLastStorageKey('chat-2'), '{"version":1,"presentation":{"layout":"grid-4"}}')
+    const fallback = loadChatPaneState('chat-2', tabStorage(local, session))
+    expect(fallback.state.layout).toBe('single')
+    expect(fallback.saved).toBe(true)
+    // 损坏来源被本 tab 的默认快照替换，但仍不触碰 localStorage。
+    expect(JSON.parse(session.getItem(chatTabSessionStorageKey('chat-2'))!)).toMatchObject({
+      version: 1,
+      presentation: { layout: 'single' },
+    })
+  })
+
+  it('dual-writes the exact same bounded snapshot for user commits', () => {
+    const local = storage()
+    const session = storage()
+    let state = loadChatPaneState('chat-1', tabStorage(local, session)).state
+    state = applyChatLayout(state, 'split-2')
+    state = focusPane(state, 'pane-2')
+    state = setChatPaneTarget(state, 'pane-1', bindThread('thread-1'))
+
+    expect(saveChatPaneState('chat-1', state, tabStorage(local, session))).toBe(true)
+    const localRaw = local.getItem(chatTabLastStorageKey('chat-1'))
+    const sessionRaw = session.getItem(chatTabSessionStorageKey('chat-1'))
+    expect(localRaw).toBe(sessionRaw)
+    expect(JSON.parse(localRaw!)).toEqual(snapshotOf(state))
+    expect(loadChatPaneState('chat-1', tabStorage(local, session)).state).toEqual(state)
+  })
+
+  it('keeps pending side-effect records untouched when presentation state switches target', () => {
     const store = storage()
-    expect(loadChatPaneState('', store)).toMatchObject({ layout: 'single', focusedPaneId: 'pane-1' })
-    expect(saveChatPaneState('', applyChatLayout(loadChatPaneState('', store), 'split-2'), store)).toBeUndefined()
-    expect(store.length).toBe(0)
+    const pendingKey = 'kk-studio.agent-pane-acceptance.CHAT:chat-1:pane-1'
+    store.setItem(pendingKey, '{"opaque":"sidecar"}')
+    const state = setChatPaneTarget(createDefaultChatPaneState(), 'pane-1', bindThread('thread-1'))
+    expect(saveChatPaneState('chat-1', state, tabStorage(store, store))).toBe(true)
+    // 展示目标切换不清理属于原操作对账的独立记录。
+    expect(store.getItem(pendingKey)).toBe('{"opaque":"sidecar"}')
   })
 
-  it('safely handles storage write and read exceptions without throwing', () => {
-    // 测试意图：验证 Storage 在 setItem 抛出 QuotaExceededError / SecurityError 时 fail-open，不抛出异常破坏页面 effect
-    const throwingStore: Storage = {
+  it('ignores legacy presentation keys', () => {
+    const local = storage()
+    local.setItem('kk-studio.chat-pane.chat-1', JSON.stringify({ layout: 'grid-4', focusedPaneId: 'pane-1', panes: [] }))
+    local.setItem('kk-studio.agent-pane-target.CHAT:chat-1:pane-1', JSON.stringify(bindThread('thread-1')))
+    const loaded = loadChatPaneState('chat-1', { localStorage: local, sessionStorage: storage() })
+    expect(loaded.state.layout).toBe('single')
+    expect(chatPaneTarget(loaded.state, 'pane-1')).toEqual({ kind: 'NEW_SESSION_DRAFT' })
+  })
+
+  it('rejects malformed, version-mismatched, unknown-field, and out-of-range snapshots', () => {
+    const base = snapshotOf(createDefaultChatPaneState())
+    const malformed: unknown[] = [
+      { version: 2, presentation: base.presentation },
+      { ...base, extra: true },
+      { version: 1, presentation: { ...base.presentation, extra: true } },
+      { version: 1, presentation: { ...base.presentation, layout: 'tiles-16' } },
+      { version: 1, presentation: { ...base.presentation, focusedPaneId: 'pane-9' } },
+      { version: 1, presentation: { ...base.presentation, panes: base.presentation.panes.slice(0, 8) } },
+      {
+        version: 1,
+        presentation: {
+          ...base.presentation,
+          panes: [{ ...base.presentation.panes[0], id: 'pane-x' }, ...base.presentation.panes.slice(1)],
+        },
+      },
+      {
+        version: 1,
+        presentation: {
+          ...base.presentation,
+          panes: [{ ...base.presentation.panes[0], target: { kind: 'BOUND_THREAD', threadId: 't1', extra: true } },
+            ...base.presentation.panes.slice(1)],
+        },
+      },
+      {
+        version: 1,
+        presentation: {
+          ...base.presentation,
+          panes: [{ ...base.presentation.panes[0], target: { kind: 'BOUND_THREAD', threadId: '' } },
+            ...base.presentation.panes.slice(1)],
+        },
+      },
+    ]
+    for (const value of malformed) {
+      expect(parseChatPaneState(value)).toBeNull()
+    }
+    expect(parseChatPaneState(base.presentation)).toEqual(base.presentation)
+  })
+
+  it('rejects oversized snapshots before writing either storage', () => {
+    const local = storage()
+    const session = storage()
+    const huge = setChatPaneTarget(
+      createDefaultChatPaneState(),
+      'pane-1',
+      bindThread('x'.repeat(CHAT_TAB_STATE_MAX_BYTES)),
+    )
+    expect(saveChatPaneState('chat-1', huge, tabStorage(local, session))).toBe(false)
+    expect(local.length).toBe(0)
+    expect(session.length).toBe(0)
+
+    // 已经越界的来源也不能被读回内存。
+    const oversized = JSON.stringify(snapshotOf(huge))
+    session.setItem(chatTabSessionStorageKey('chat-1'), oversized)
+    expect(loadChatPaneState('chat-1', tabStorage(local, session)).state.layout).toBe('single')
+  })
+
+  it('simulates two independent tabs: new tab inherits once, stale refresh keeps its own snapshot', () => {
+    const sharedLocal = storage()
+    const tabASession = storage()
+    const tabBSession = storage()
+
+    let stateA = loadChatPaneState('chat-1', tabStorage(sharedLocal, tabASession)).state
+    stateA = applyChatLayout(stateA, 'split-2')
+    stateA = setChatPaneTarget(stateA, 'pane-1', bindThread('thread-a'))
+    expect(saveChatPaneState('chat-1', stateA, tabStorage(sharedLocal, tabASession))).toBe(true)
+
+    // 新 tab 没有 session 恢复索引，只继承一次最后状态，然后建立自己的索引。
+    let stateB = loadChatPaneState('chat-1', tabStorage(sharedLocal, tabBSession)).state
+    expect(stateB.layout).toBe('split-2')
+    expect(chatPaneTarget(stateB, 'pane-1')).toEqual(bindThread('thread-a'))
+    stateB = applyChatLayout(stateB, 'grid-4')
+    stateB = setChatPaneTarget(stateB, 'pane-1', bindThread('thread-b'))
+    expect(saveChatPaneState('chat-1', stateB, tabStorage(sharedLocal, tabBSession))).toBe(true)
+
+    // tab A 刷新时 session 仍优先；不因另一个 tab 更新了 last state 而改布局或目标。
+    const refreshedA = loadChatPaneState('chat-1', tabStorage(sharedLocal, tabASession)).state
+    expect(refreshedA.layout).toBe('split-2')
+    expect(chatPaneTarget(refreshedA, 'pane-1')).toEqual(bindThread('thread-a'))
+  })
+
+  it('keeps in-memory state usable and reports save failure when storage is unavailable', () => {
+    const throwing: Storage = {
       length: 0,
-      clear: () => {},
+      clear: () => {
+        throw new Error('SecurityError')
+      },
       getItem: () => {
-        throw new Error('SecurityError: access denied')
+        throw new Error('SecurityError')
       },
       key: () => null,
-      removeItem: () => {},
+      removeItem: () => {
+        throw new Error('SecurityError')
+      },
       setItem: () => {
         throw new Error('QuotaExceededError')
       },
     }
-    const defaultState = loadChatPaneState('chat-1', throwingStore)
-    expect(defaultState.layout).toBe('single')
-    expect(defaultState.focusedPaneId).toBe('pane-1')
-    expect(() => saveChatPaneState('chat-1', defaultState, throwingStore)).not.toThrow()
+    const loaded = loadChatPaneState('chat-1', tabStorage(throwing, throwing))
+    expect(loaded.state.layout).toBe('single')
+    expect(loaded.saved).toBe(false)
+    expect(() => saveChatPaneState('chat-1', loaded.state, tabStorage(throwing, throwing))).not.toThrow()
+    expect(saveChatPaneState('chat-1', loaded.state, tabStorage(throwing, throwing))).toBe(false)
+    expect(loadChatPaneState('chat-1', { sessionStorage: null, localStorage: null }).saved).toBe(false)
+  })
+
+  it('serializes only the fixed versioned shape', () => {
+    const store = storage()
+    const state = setChatPaneTarget(createDefaultChatPaneState(), 'pane-2', bindThread('thread-2'))
+    expect(saveChatPaneState('chat-1', state, tabStorage(store, store))).toBe(true)
+    expect(readSnapshot(store, 'chat-1')).toEqual(snapshotOf(state))
   })
 })
 
-describe('Chat pane destination routing helpers', () => {
+describe('Chat pane layout helpers', () => {
+  it('keeps pane targets through layout changes and focuses only visible panes', () => {
+    let state = setChatPaneTarget(createDefaultChatPaneState(), 'pane-2', bindThread('thread-2'))
+    state = applyChatLayout(state, 'split-2')
+    expect(visibleChatPanes(state).map((pane) => pane.id)).toEqual(['pane-1', 'pane-2'])
+    expect(chatPaneTarget(state, 'pane-2')).toEqual(bindThread('thread-2'))
+    state = focusPane(state, 'pane-2')
+    expect(state.focusedPaneId).toBe('pane-2')
+  })
+
+  it('leaves state unchanged for idempotent layout and target commits', () => {
+    const state = setChatPaneTarget(createDefaultChatPaneState(), 'pane-1', bindThread('thread-1'))
+    expect(applyChatLayout(state, 'single')).toBe(state)
+    expect(setChatPaneTarget(state, 'pane-1', bindThread('thread-1'))).toBe(state)
+    expect(setChatPaneTarget(state, 'unknown', bindThread('thread-2'))).toBe(state)
+    expect(focusPane(state, 'pane-4')).toBe(state)
+  })
+
   it('maps pane ids to positions 1..9 and rejects unknown ids', () => {
     expect(chatPanePosition('pane-1')).toBe(1)
     expect(chatPanePosition('pane-9')).toBe(9)
@@ -175,9 +298,8 @@ describe('Chat pane destination routing helpers', () => {
   })
 
   it('reveals a hidden destination pane by expanding the layout', () => {
-    const single = loadChatPaneState('chat-1', storage())
+    const single = createDefaultChatPaneState()
     expect(visibleChatPanes(single).map((pane) => pane.id)).toEqual(['pane-1'])
-
     const revealed = revealChatPane(single, 'pane-5')
     expect(revealed.layout).toBe('grid-5')
     expect(visibleChatPanes(revealed).map((pane) => pane.id)).toEqual([
@@ -187,11 +309,9 @@ describe('Chat pane destination routing helpers', () => {
       'pane-4',
       'pane-5',
     ])
-
-    // 已在容量内的目标位置与未知位置都不改变布局。
     expect(revealChatPane(revealed, 'pane-2')).toBe(revealed)
-    expect(revealChatPane(revealed, 'pane-9').layout).toBe('grid-9')
     const nine = revealChatPane(revealed, 'pane-9')
+    expect(nine.layout).toBe('grid-9')
     expect(revealChatPane(nine, 'unknown')).toBe(nine)
   })
 })

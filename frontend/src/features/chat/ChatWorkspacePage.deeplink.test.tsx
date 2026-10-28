@@ -3,9 +3,13 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider, useLocation, useNavigate } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { IdeLifecycleProvider } from '@/features/environment/ide/IdeLifecycleProvider'
 import { ChatWorkspacePage } from './ChatWorkspacePage'
 import type { ChatWorkspacePane } from './ChatWorkspacePane'
+import {
+  applyChatLayout,
+  chatTabLastStorageKey,
+  createDefaultChatPaneState,
+} from './chat-pane-state'
 import { agentService } from '@/shared/api/agent-service'
 import { chatService } from '@/shared/api/chat-service'
 import { environmentService } from '@/shared/api/environment-service'
@@ -23,7 +27,7 @@ vi.mock('@/shared/api/chat-service', () => ({
 vi.mock('@/shared/api/environment-service', () => ({
   environmentService: {
     listEnvironments: vi.fn(),
-    getEnvironmentUpdate: vi.fn(),
+    getEnvironmentRuntime: vi.fn(),
     startEnvironmentUpdate: vi.fn(),
   },
 }))
@@ -68,10 +72,10 @@ function openWorkspace(search = '') {
       {
         path: '/chats/:chatId',
         element: (
-          <IdeLifecycleProvider>
+          <>
             <NavigationControls />
             <ChatWorkspacePage />
-          </IdeLifecycleProvider>
+          </>
         ),
       },
     ],
@@ -87,9 +91,11 @@ function openWorkspace(search = '') {
 beforeEach(() => {
   vi.clearAllMocks()
   localStorage.clear()
+  sessionStorage.clear()
   setLocale('zh-CN')
-  localStorage.setItem(`kk-studio.chat-pane.${CHAT_ID}`, JSON.stringify({
-    layout: 'split-2', focusedPaneId: 'pane-1', panes: [{ id: 'pane-1' }, { id: 'pane-2' }],
+  localStorage.setItem(chatTabLastStorageKey(CHAT_ID), JSON.stringify({
+    version: 1,
+    presentation: applyChatLayout(createDefaultChatPaneState(), 'split-2'),
   }))
   vi.mocked(chatService.getChat).mockResolvedValue({
     id: CHAT_ID, title: 'Workspace', agentName: 'assistant',
