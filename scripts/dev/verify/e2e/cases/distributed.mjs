@@ -28,7 +28,7 @@ registerCase({
   level: 'L5',
   title: '双节点共享状态：跨节点 Environment 创建/token 轮换 CAS/删除与 404',
   requires: ['distributed'],
-  docs: '在 node A 创建临时 Environment Card，在 node B 读取并轮换 registrationToken（CAS 推进 version、name 恒定），回 node A 用陈旧 version 轮换得 409、用新 version 轮换取到不同 token，再跨节点删除并在两节点验证 404；finally 尽力清理，禁止将一次性 registrationToken 写入 artifact/log',
+  docs: '在 node A 创建临时 Environment Card，在 node B 读取并轮换 registrationToken（CAS 推进 version、name 恒定），回 node A 用陈旧 version 轮换得 409、用新 version 轮换取到不同 token；只读 registration token 端点已删除（404），token 只在创建/轮换/安装码兑换时返回；再跨节点删除并在两节点验证 404；finally 尽力清理，禁止将一次性 registrationToken 写入 artifact/log',
   async run(ctx) {
     assertDistributedContext(ctx)
 
@@ -103,22 +103,15 @@ registerCase({
       assertDecimalVersion(rotatedOnA.version, 'rotatedOnA.version')
       latestVersion = rotatedOnA.version
 
-      // 4b. 只读 token 端点跨节点一致：返回当前值，且绝不推进 version
-      const tokenOnBRes = await ctx.callNode(
-        'b',
-        'GET',
-        `/api/environments/${encodeURIComponent(createdId)}/token`,
-      )
-      const tokenOnB = envelopeData(tokenOnBRes.json)
-      assert(tokenOnB.id === createdId, 'node B token read: id mismatch')
-      assert(tokenOnB.version === latestVersion, 'node B token read: version mismatch')
-      assert(
-        tokenOnB.registrationToken === rotatedOnA.registrationToken,
-        'node B token read: must observe the value written by node A',
-      )
-      assert(
-        tokenOnBRes.headers.get('cache-control') === 'no-store',
-        `expected Cache-Control no-store, got ${tokenOnBRes.headers.get('cache-control')}`,
+      // 4b. 只读 registration token 端点已删除：token 只在创建、轮换与安装码兑换时返回
+      await expectHttpError(
+        () =>
+          ctx.callNode(
+            'b',
+            'GET',
+            `/api/environments/${encodeURIComponent(createdId)}/token`,
+          ),
+        { status: 404 },
       )
 
       // 4c. 改名端点已彻底移除：Environment name 是不可变身份

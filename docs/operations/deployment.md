@@ -234,13 +234,13 @@ reset 不删除 S3 对象；这些对象仍受备份恢复策略保护，不能�
 Studio 当前没有内置登录鉴权。向局域网或公网暴露前，必须在外部入口配置 TLS 和访问控制；
 容器本身保持 `127.0.0.1` 或内部网络绑定，由反向代理承担对外职责。
 
-反向代理需要覆盖四类流量：
+反向代理需要覆盖以下流量：
 
 | 流量 | 端点 | 要求 |
 | --- | --- | --- |
 | UI 与 REST API | 全部路径，含 SPA 深层路径 | 透传到 App `8080`；App 自行返回 `index.html` fallback |
 | Environment Daemon gateway | `/api/harness/environment-daemon/v1` | 透传 WebSocket，并协商 `permessage-deflate`；未协商时 Daemon 以 RFC 6455 close code `1010` 断开，不会退化为未压缩会话 |
-| 浏览器 Application Event WebSocket | `/api/events/v1` | 透传 WebSocket；断线后客户端靠 REST snapshot 重新同步 |
+| 浏览器 Application Event WebSocket | `/api/events/v2` | 透传 WebSocket；断线后客户端靠 REST snapshot 重新同步，并以新连接身份登记 IDE 使用证明 |
 | 同源 IDE 数据面与固定入口 | `/environment-ide/{environmentId}/{viewId}/` | 透传 HTTP 与 WebSocket upgrade；保持 view route base 与 Host/Origin 转发 |
 | Daemon IDE 复用数据连接 | `/api/harness/environment-data/v2/{environmentId}?ticket=...` | 透传 WebSocket；票据一次性、30 秒有效，Daemon 只连接 DATA_BIND 下发的受控地址 |
 

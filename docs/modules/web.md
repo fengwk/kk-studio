@@ -68,7 +68,7 @@ health、资源下载和 WebSocket 使用各自传输形式。公开路由如下
 | Issue | `/api/issues/{issueId}` | CRUD、活动/证据、流转、阻塞/恢复、暂停/继续、stop、UNKNOWN 核查、额度重置、重开、归档 |
 | Settings | `/api/settings`、`/api/settings/schema` | 聚合 GET/CAS PUT、编辑 schema |
 | Configuration sync | `/api/settings/sync`、`/export`、`/import/check`、`/import` | GET 清单、POST 选择导出、导入检查与确认执行；响应禁止缓存 |
-| Environment | `/api/environments`、`/{id}/install`、`/{id}/update`、`/uninstall/{os}` | Card、注册令牌轮换（明文只在创建与轮换响应中返回一次）、安装设置保存、安装命令与一次性安装码、卸载脚本、受管二进制在线更新（POST 发起、GET 只读投影）、运维 events |
+| Environment | `/api/environments`、`/{id}/runtime`、`/{id}/install`、`/{id}/update`、`/uninstall/{os}` | Card、当前运行状态快照、注册令牌轮换（明文只在创建与轮换响应中返回一次）、安装设置保存、安装命令与一次性安装码、卸载脚本、受管二进制在线更新（POST 发起并返回当前运行快照）、运维 events |
 | Environment IDE | `/api/environments/{id}/ide/views`、`/environment-ide/{environmentId}/{viewId}/` | 打开/关闭视图、切换目录与终端；同源 IDE 固定入口、bootstrap 票据与 HTTP/WebSocket 数据面 |
 | Environment data | `/api/harness/environment-data/v2/{environmentId}?ticket=...` | Daemon 复用数据 WebSocket（DATA_BIND）入口 |
 
@@ -201,7 +201,9 @@ invocation 归属与 attempt，再让本地 active owner 立即提交 checkpoint
 该 channel 与 `harness_realtime` 共用独立 realtime LISTEN 连接。接收节点只对本地 active owner 执行
 attempt fence，不回广播、不回查 head；连接重连不重放追帧提示。数据库查询/发布失败直接向上传播为 5xx。
 
-`/api/events/v1` 是唯一的浏览器事件通道，采用严格 version 1 帧。
+`/api/events/v2` 是唯一的浏览器事件通道，采用严格 version 2 帧。
+连接建立后的第一帧是 `connected`，携带本次物理连接的 `eventNodeId` 与 `connectionId`；每次重连都是新身份，
+浏览器据此把 IDE 视图绑定到当前连接，而不是沿用旧代际。
 资源为 `{kind:thread|canvas|tree,id}` 或全局 `{kind:projects|interactions|environments}`；
 Thread `version` 与 Canvas `revision` 携 durable cursor，Thread `realtime` 是唯一的真负载事件，
 `projects` / `tree` / `interactions` / `environments` 只发失效提示，由客户端回读权威事实。
@@ -210,6 +212,12 @@ Thread `version` 与 Canvas `revision` 携 durable cursor，Thread `realtime` �
 Environment 的连接状态不做推送：Card 的 `status` / `statusExpiresAt` 在读取时由
 `min(leaseUntil, lastSeen + heartbeatTimeout)` 派生，浏览器只按 `environments` 失效提示回读。
 非法帧、过载和关闭按稳定错误与 WebSocket close code 收尾。
+
+IDE 使用证明走同一条通道：客户端发送 `ide-use`，携带 `documentId`、同一连接内单调递增的 `revision`
+与 `views[]`（每项是 `environmentId`、`viewId`、`claimId`，已绑定视图再带 `bindingEpoch`）；
+服务端回 `ide-use-accepted` 只确认 revision。帧字段集精确，多余或未知字段一律拒绝；
+同一 revision 的相同内容幂等，不同内容是连接级冲突错误，更高 revision 原子替换整份列表。
+缺 `bindingEpoch` 的项只是使用意图，不能用于续租；每个连接的 `documentId` 固定。
 
 AsyncTextSender 每连接一个 in-flight frame，frame 数和 UTF-8 字节预算包含在途帧，
 完成回调驱动下一帧。锁内转移队列，网络发送在锁外；失败关闭入队围栏并清理订阅。
@@ -245,9 +253,12 @@ SPA fallback 仅适用于 GET、非 API/actuator 且末段无扩展名的路径�
 [`web/src/test`](../../web/src/test/java/fun/fengwk/kkstudio/web) 覆盖组合与依赖方向、Flyway、
 HTTP mapper/advice、owner 事务、Snapshot、ack-before-event、bounded sender、
 通知重连、Daemon 帧与静态 SPA。Spring 集成基座使用真实 PostgreSQL。
-[`IdeRealBrowserAcceptanceTest`](../../web/src/test/java/fun/fengwk/kkstudio/web/environment/ide/IdeRealBrowserAcceptanceTest.java)
-覆盖真实同源 IDE 网关、真实 Node Daemon、冻结 code-server 与 Chromium 的整链端到端交互（需独立 PostgreSQL 与受控 code-server 目录）；
-执行命令和 E2E 分类见 [开发与测试](../operations/development-and-testing.md)。
+同源 IDE 数据面的真实链路由三个入口覆盖：[`IdeDataPlaneIntegrationTest`](../../web/src/test/java/fun/fengwk/kkstudio/web/environment/ide/IdeDataPlaneIntegrationTest.java)
+用真实 Tomcat HTTP/WS 与 mux peer 覆盖本地与非 owner 单跳；
+[`MuxCrossLanguageIntegrationTest`](../../web/src/test/java/fun/fengwk/kkstudio/web/environment/ide/MuxCrossLanguageIntegrationTest.java)
+让 Java mux 引擎与 Node 24 Daemon 传输跨进程互通；
+真实冻结 code-server 的视图验收在 Daemon 侧（[`acceptance.test.ts`](../../daemon/test/ide/acceptance.test.ts)），
+浏览器侧回归在 Frontend 的 Playwright 套件。执行命令和 E2E 分类见 [开发与测试](../operations/development-and-testing.md)。
 
 上级：[系统设计](../system-design.md)。相关文档：[Platform](platform.md)、[Share](share.md)、
 [Harness Infra](harness-infra.md)、[Canvas](canvas.md)、[IDE](ide.md)、[Frontend](frontend.md)。
