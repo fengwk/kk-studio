@@ -1,373 +1,250 @@
 /**
  * Managed UNIX update script contracts extracted from the shipped Node Daemon source.
  *
- * `daemon/src/update-scripts.ts` is the only source of the UNIX update script. The tests import
- * `UNIX_UPDATE_SCRIPT` from that module through Node and execute it with the system Bash, so there
- * is no second copy of the update facts and no Java/JAR fixture.
+ * The script owns only two things: launching the independent updater (`run`) and stopping or
+ * starting the installer-owned systemd/launchd service. Handoff, permit, replacement and result
+ * state belong to the Node updater and are covered by daemon/test/update-entry.test.ts; these
+ * shell tests must not recreate that state machine.
  *
- * Covered: the handoff identity/state gate, the private permit wait (missing, symlinked and
- * directory permits fail closed; a late permit is awaited), managed unit/agent ownership,
- * stop/backup/replace/restart ordering and failures, the unique backup that never reuses a previous
- * one, and the fact that every rejected input performs zero stop/backup/replace.
+ * Covered here: exact private-updater argv and exit propagation, systemd/launchd stop and start,
+ * installer ownership markers, foreign/missing definitions failing closed before any service
+ * command, stop wait timeout, and start/stop failure boundaries.
  */
 
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
-import path from 'node:path'
 import { describe, it } from 'node:test'
 
-import { LAUNCHD_LABEL, SERVICE_NAME, sleep, withUpdateFixtures } from './support/update-fixture.mjs'
+import { nodeExport } from './support/release-fixture.mjs'
+import {
+  LAUNCHD_LABEL,
+  PLIST_MARKER,
+  SERVICE_NAME,
+  UNIT_MARKER,
+  withUpdateFixtures,
+} from './support/update-fixture.mjs'
 
-const INSTALLED = 'installed-release-main-js\n'
-const STAGED = 'staged-release-main-js\n'
-const text = (file) => readFileSync(file, 'utf8')
-const installedMain = (fixture) => text(path.join(fixture.installed, 'main.js'))
+const scriptText = nodeExport('UNIX_UPDATE_SCRIPT')
+const describePosix = process.platform === 'win32' ? describe.skip : describe
 
-function assertFailed(fixture, result, message) {
+function assertFailed(result, message) {
   assert.notEqual(result.status, 0, result.stdout + result.stderr)
-  const document = fixture.resultDocument()
-  assert.equal(document.phase, 'FAILED')
-  assert.equal(document.operationId, fixture.operationId)
-  assert.ok(document.message.includes(message), document.message)
+  assert.ok(result.stderr.includes(message), result.stderr)
 }
 
-/** A rejected handoff/permit must produce zero stop, backup or replace. */
-function assertNoDestructiveAction(fixture) {
-  assert.deepEqual(fixture.backupDirectories(), [])
-  assert.equal(installedMain(fixture), INSTALLED)
-  assert.ok(existsSync(path.join(fixture.staged, 'main.js')), 'the staged distribution must not be consumed')
-  for (const call of fixture.calls()) {
-    assert.ok(!` ${call} `.includes(' stop '), 'no service may be stopped')
-    assert.ok(!call.includes('bootout'), 'no launch agent may be booted out')
+function assertNoServiceMutation(calls) {
+  for (const call of calls) {
+    assert.ok(!/systemctl .* (stop|start) /u.test(call), `unexpected service mutation: ${call}`)
+    assert.ok(!/launchctl (bootout|bootstrap) /u.test(call), `unexpected service mutation: ${call}`)
   }
 }
 
-const OTHER_OPERATION = '22222222-2222-2222-2222-222222222222'
+function assertStoppedWithoutStarting(calls) {
+  assert.ok(
+    calls.some((call) => call === `systemctl --user stop ${SERVICE_NAME}` || call.startsWith('launchctl bootout ')),
+    calls.join('\n'),
+  )
+  assert.ok(!calls.some((call) => /systemctl .* start |launchctl bootstrap /u.test(call)), calls.join('\n'))
+}
 
-describe('handoff gate: only an operation with a matching private permit and an ACCEPTED handoff may replace anything', () => {
-  it('missing handoff performs no destructive action', () =>
-    withUpdateFixtures(({ prepared }) => {
-      const fixture = prepared({ handoffState: 'missing' })
-      assertFailed(fixture, fixture.run(), 'handoff metadata is missing')
-      assertNoDestructiveAction(fixture)
+function launchAgentPath(fixture) {
+  return `${fixture.domain}/${LAUNCHD_LABEL}`
+}
+
+describe('UNIX update source: run and service actions remain separate security boundaries', () => {
+  it('launches only the private updater from the run action', () => {
+    assert.match(scriptText, /if \[ "\$action" = "run" \]; then/u)
+    assert.match(scriptText, /\[ "\$#" -eq 6 \]/u)
+    assert.match(scriptText, /exec "\$updater_node" "\$updater_entry" \\/u)
+    for (const flag of ['--operation-dir', '--staged-dir', '--installed-dir']) {
+      assert.ok(scriptText.includes(flag), flag)
+    }
+    assert.ok(scriptText.includes('--update-script "$0"'))
+    assert.match(scriptText, /\[ "\$action" = "stop" \] \|\| \[ "\$action" = "start" \]/u)
+  })
+
+  it('checks the installer marker before either service action', () => {
+    assert.ok(scriptText.includes(`UNIT_MARKER='${UNIT_MARKER}'`))
+    assert.ok(scriptText.includes(`PLIST_MARKER='${PLIST_MARKER}'`))
+    assert.match(scriptText, /systemctl --user stop "\$SERVICE_NAME"/u)
+    assert.match(scriptText, /systemctl --user start "\$SERVICE_NAME"/u)
+    assert.match(scriptText, /launchctl bootout "\$domain\/\$LAUNCHD_LABEL"/u)
+    assert.match(scriptText, /launchctl bootstrap "\$domain" "\$plist"/u)
+    assert.ok(scriptText.includes('if [ "$waited" -ge "$STOP_WAIT_SECONDS" ]; then'))
+  })
+
+  it('does not read credentials or own handoff/replacement state', () => {
+    assert.doesNotMatch(scriptText, /handoff|permit|update-result|backup/u)
+    assert.doesNotMatch(scriptText, /daemon\.token|ReadAllText|ConvertFrom-SecureString/u)
+    assert.doesNotMatch(scriptText, /source |eval /u)
+  })
+})
+
+describePosix('UNIX update run action: only the private updater is launched', () => {
+  it('execs the updater with fixed absolute paths and propagates its exit code', () =>
+    withUpdateFixtures(({ create }) => {
+      const fixture = create()
+      const result = fixture.run('run', { env: { FAKE_UPDATER_EXIT: '7' } })
+      assert.equal(result.status, 7, result.stderr)
+      const expected = [
+        'updater',
+        fixture.updaterEntry,
+        '--operation-dir',
+        fixture.updateDir,
+        '--staged-dir',
+        fixture.staged,
+        '--installed-dir',
+        fixture.installed,
+        '--update-script',
+        fixture.script,
+      ].join('|')
+      const calls = fixture.calls()
+      assert.deepEqual(calls, [expected])
+      assertNoServiceMutation(calls)
     }))
 
-  it('mismatched operation performs no destructive action', () =>
-    withUpdateFixtures(({ prepared }) => {
-      const fixture = prepared({ handoffOperation: OTHER_OPERATION })
-      assertFailed(fixture, fixture.run(), 'handoff metadata does not match the operation')
-      assertNoDestructiveAction(fixture)
+  it('rejects run without both updater arguments', () =>
+    withUpdateFixtures(({ create }) => {
+      const fixture = create()
+      const result = fixture.invoke([
+        fixture.script,
+        'run',
+        fixture.updateDir,
+        fixture.staged,
+        fixture.installed,
+      ])
+      assert.equal(result.status, 2)
+      assert.match(result.stderr, /run requires updater node and entry/u)
+      assert.deepEqual(fixture.calls(), [])
     }))
 
-  for (const state of ['PREPARING', 'FAILED']) {
-    it(`a ${state} handoff performs no destructive action`, () =>
-      withUpdateFixtures(({ prepared }) => {
-        const fixture = prepared({ handoffState: state })
-        assertFailed(fixture, fixture.run(), 'handoff metadata is not accepted')
-        assertNoDestructiveAction(fixture)
-      }))
-  }
-
-  it('an early PREPARING without a permit fails closed at the permit wait', () =>
-    withUpdateFixtures(({ prepared }) => {
-      // The job starts while the daemon still persists PREPARING, so the operation identity alone
-      // is checked first: an early PREPARING must reach the permit wait (and only the missing
-      // permit may fail) instead of being rejected as an identity mismatch.
-      const fixture = prepared({ handoffState: 'PREPARING', permit: 'absent', fastSleep: true })
-      assertFailed(fixture, fixture.run(), 'the daemon did not release the update permit in time')
-      assertNoDestructiveAction(fixture)
-    }))
-
-  it('a permit naming another operation is never a release for this one', () =>
-    withUpdateFixtures(({ prepared }) => {
-      const fixture = prepared()
-      writeFileSync(fixture.permit, `${OTHER_OPERATION}\n`)
-      assertFailed(fixture, fixture.run(), 'the update permit does not match the operation')
-      assertNoDestructiveAction(fixture)
-    }))
-
-  it('an empty permit performs no destructive action', () =>
-    withUpdateFixtures(({ prepared }) => {
-      const fixture = prepared()
-      writeFileSync(fixture.permit, '')
-      assertFailed(fixture, fixture.run(), 'the update permit does not match the operation')
-      assertNoDestructiveAction(fixture)
-    }))
-
-  it('a handoff identity change during the permit wait is rejected', () =>
-    withUpdateFixtures(async ({ prepared }) => {
-      // The snapshot is re-read after the permit: an identity that changed while waiting must still
-      // fail closed with zero stop/backup/replace.
-      const fixture = prepared({ permit: 'absent' })
-      const { finished } = fixture.start()
-      await sleep(500)
-      fixture.writeHandoff('ACCEPTED', OTHER_OPERATION)
-      writeFileSync(fixture.permit, `${fixture.operationId}\n`)
-      const result = await finished
-      assert.notEqual(result.status, 0, result.stdout + result.stderr)
-      assert.equal(fixture.resultDocument().phase, 'FAILED')
-      assert.ok(fixture.resultDocument().message.includes('handoff metadata does not match the operation'))
-      assertNoDestructiveAction(fixture)
-    }))
-
-  it('an early PREPARING handoff applies once the permit arrives after acceptance', () =>
-    withUpdateFixtures(async ({ prepared }) => {
-      // The production sequence: the job starts with PREPARING, the daemon then freezes ACCEPTED and
-      // releases the permit, and only then does the job stop and replace.
-      const fixture = prepared({ handoffState: 'PREPARING', permit: 'absent' })
-      const { finished } = fixture.start()
-      await sleep(500)
-      assert.ok(!existsSync(fixture.result), 'an early PREPARING must not report a failure')
-      fixture.writeHandoff('ACCEPTED')
-      writeFileSync(fixture.permit, `${fixture.operationId}\n`)
-      const result = await finished
-      assert.equal(result.status, 0, result.stdout + result.stderr)
-      assert.equal(fixture.resultDocument().phase, 'PREPARED')
-      assert.ok(fixture.calls().includes(`systemctl --user stop ${SERVICE_NAME}`))
-      assert.equal(installedMain(fixture), STAGED)
-    }))
-
-  it('a missing permit times out without destructive action', () =>
-    withUpdateFixtures(({ prepared }) => {
-      // Negative control for the permit gate: no permit means no replacement, even with an ACCEPTED handoff.
-      const fixture = prepared({ permit: 'absent', fastSleep: true })
-      assertFailed(fixture, fixture.run(), 'the daemon did not release the update permit in time')
-      assertNoDestructiveAction(fixture)
-    }))
-
-  it('a directory permit is not a release', () =>
-    withUpdateFixtures(({ prepared }) => {
-      const fixture = prepared({ permit: 'directory', fastSleep: true })
-      assertFailed(fixture, fixture.run(), 'the daemon did not release the update permit in time')
-      assertNoDestructiveAction(fixture)
-    }))
-
-  it('a symlinked permit is rejected', () =>
-    withUpdateFixtures(({ prepared }) => {
-      const fixture = prepared({ permit: 'symlink' })
-      assertFailed(fixture, fixture.run(), 'the update permit is not a regular file')
-      assertNoDestructiveAction(fixture)
-    }))
-
-  it('a late permit is awaited then applied', () =>
-    withUpdateFixtures(async ({ prepared }) => {
-      const fixture = prepared({ permit: 'absent' })
-      const { finished } = fixture.start()
-      // The script must be blocked in its permit wait; the permit is released afterwards.
-      await sleep(500)
-      writeFileSync(fixture.permit, `${fixture.operationId}\n`)
-      const result = await finished
-      assert.equal(result.status, 0, result.stdout + result.stderr)
-      assert.equal(fixture.resultDocument().phase, 'PREPARED')
-      assert.ok(fixture.calls().includes(`systemctl --user stop ${SERVICE_NAME}`))
-    }))
-
-  it('an early PREPARING handoff is not rejected after acceptance', () =>
-    withUpdateFixtures(({ prepared }) => {
-      // A permit is not released until the daemon successfully starts the job and freezes ACCEPTED,
-      // so a later re-run sees the accepted handoff and applies normally.
-      const fixture = prepared({ handoffState: 'PREPARING', permit: 'absent' })
-      fixture.writeHandoff('ACCEPTED')
-      writeFileSync(fixture.permit, `${fixture.operationId}\n`)
-      const result = fixture.run()
-      assert.equal(result.status, 0, result.stderr)
-      assert.equal(fixture.resultDocument().phase, 'PREPARED')
+  it('rejects an unknown action before touching a service', () =>
+    withUpdateFixtures(({ create }) => {
+      const fixture = create()
+      const result = fixture.invoke([
+        fixture.script,
+        'pause',
+        fixture.updateDir,
+        fixture.staged,
+        fixture.installed,
+      ])
+      assert.equal(result.status, 2)
+      assert.match(result.stderr, /unknown update script action/u)
+      assert.deepEqual(fixture.calls(), [])
     }))
 })
 
-describe('systemd update', () => {
-  const stop = `systemctl --user stop ${SERVICE_NAME}`
-  const start = `systemctl --user start ${SERVICE_NAME}`
-
-  it('success backs up, replaces and restarts the managed service', () =>
+describePosix('systemd update:', () => {
+  it('stop stops the installer-owned unit and never starts it', () =>
     withUpdateFixtures(({ prepared }) => {
       const fixture = prepared()
-      const result = fixture.run()
+      const result = fixture.run('stop')
       assert.equal(result.status, 0, result.stderr)
-      assert.equal(fixture.resultDocument().phase, 'PREPARED')
-      assert.ok(!existsSync(fixture.staged), 'staged distribution must be consumed')
-      assert.equal(installedMain(fixture), STAGED)
-      const backups = fixture.backupDirectories()
-      assert.equal(backups.length, 1)
-      assert.equal(text(path.join(backups[0], 'previous/main.js')), INSTALLED)
       const calls = fixture.calls()
-      assert.ok(calls.includes(stop))
-      assert.ok(calls.includes(start))
-      assert.ok(calls.indexOf(stop) < calls.indexOf(start))
+      assert.equal(calls[0], `systemctl --user stop ${SERVICE_NAME}`)
+      assert.ok(calls.some((call) => call.includes('is-active')), calls.join('\n'))
+      assertStoppedWithoutStarting(calls)
     }))
 
-  it('each run creates a unique backup and keeps the previous one', () =>
+  it('start starts the installer-owned unit and never stops it', () =>
     withUpdateFixtures(({ prepared }) => {
       const fixture = prepared()
-      assert.equal(fixture.run().status, 0)
-      // Reset the staged input for a second applied update of the same operation.
-      mkdirSync(fixture.staged)
-      writeFileSync(path.join(fixture.staged, 'main.js'), 'second-staged-main-js\n')
-      assert.equal(fixture.run().status, 0)
-      const backups = fixture.backupDirectories()
-      assert.equal(backups.length, 2, 'every run must leave its own unique backup')
-      assert.deepEqual(
-        new Set(backups.map((backup) => text(path.join(backup, 'previous/main.js')))),
-        new Set([INSTALLED, STAGED]),
-      )
+      const result = fixture.run('start', { active: false })
+      assert.equal(result.status, 0, result.stderr)
+      const calls = fixture.calls()
+      assert.deepEqual(calls, [`systemctl --user start ${SERVICE_NAME}`])
     }))
 
-  it('a missing staged distribution is reported without touching installed', () =>
-    withUpdateFixtures(({ prepared }) => {
-      const fixture = prepared()
-      unlinkSync(path.join(fixture.staged, 'main.js'))
-      assertFailed(fixture, fixture.run(), 'staged distribution is missing')
-      assert.equal(installedMain(fixture), INSTALLED)
-    }))
-
-  it('a missing installed distribution is reported', () =>
-    withUpdateFixtures(({ prepared }) => {
-      const fixture = prepared()
-      rmSync(fixture.installed, { recursive: true })
-      assertFailed(fixture, fixture.run(), 'installed distribution is missing')
-    }))
-
-  it('a missing unit is reported before any destructive action', () =>
+  it('a missing unit fails closed before any service command', () =>
     withUpdateFixtures(({ create }) => {
       const fixture = create()
-      assertFailed(fixture, fixture.run(), 'managed systemd unit is missing')
-      assert.ok(existsSync(fixture.staged), 'no destructive action before ownership check')
+      assertFailed(fixture.run('stop'), 'managed systemd unit is missing')
+      assert.deepEqual(fixture.calls(), [])
     }))
 
-  it('a unit not owned by the installer is rejected', () =>
+  it('a unit not owned by the installer fails closed before any service command', () =>
     withUpdateFixtures(({ create }) => {
       const fixture = create()
       fixture.writeServiceDefinition("# someone else's unit")
-      assertFailed(fixture, fixture.run(), 'systemd unit is not owned by the installer')
-      assert.equal(installedMain(fixture), INSTALLED)
+      assertFailed(fixture.run('stop'), 'systemd unit is not owned by the installer')
+      assert.deepEqual(fixture.calls(), [])
     }))
 
-  it('a stop failure is reported', () =>
+  it('a stop failure is reported and never becomes a start', () =>
     withUpdateFixtures(({ prepared }) => {
       const fixture = prepared({ serviceMode: 'stop-fail' })
-      assertFailed(fixture, fixture.run(), 'managed service did not stop')
+      assertFailed(fixture.run('stop'), 'managed service did not stop')
+      assertStoppedWithoutStarting(fixture.calls())
     }))
 
-  it('the stop wait times out when the service stays active', () =>
+  it('the stop wait times out when the unit stays active', () =>
     withUpdateFixtures(({ prepared }) => {
-      // `systemctl stop` returns success but the unit never becomes inactive: the bounded wait must
-      // fail closed instead of replacing a running program's files.
-      const fixture = prepared({ serviceMode: 'stop-stuck', fastSleep: true })
-      assertFailed(fixture, fixture.run(), 'managed service did not stop')
-      assert.deepEqual(fixture.backupDirectories(), [])
-      assert.equal(installedMain(fixture), INSTALLED)
+      const fixture = prepared({ serviceMode: 'stop-stuck' })
+      assertFailed(fixture.run('stop'), 'managed service did not stop')
+      const calls = fixture.calls()
+      assert.ok(calls.filter((call) => call.includes('is-active')).length > 1, calls.join('\n'))
+      assertStoppedWithoutStarting(calls)
     }))
 
-  it('a backup directory creation failure leaves installed untouched', () =>
+  it('a start failure is reported and never becomes a stop', () =>
     withUpdateFixtures(({ prepared }) => {
-      const fixture = prepared({ mktempMode: 'fail' })
-      assertFailed(fixture, fixture.run(), 'could not create the backup directory')
-      assert.equal(installedMain(fixture), INSTALLED)
-    }))
-
-  it('a backup move failure leaves installed untouched', () =>
-    withUpdateFixtures(({ prepared }) => {
-      const fixture = prepared({ mvMode: 'backup-fail' })
-      assertFailed(fixture, fixture.run(), 'could not back up the installed distribution')
-      assert.equal(installedMain(fixture), INSTALLED)
-      assert.ok(existsSync(path.join(fixture.staged, 'main.js')))
-    }))
-
-  it('a replace failure keeps the previous distribution in its backup', () =>
-    withUpdateFixtures(({ prepared }) => {
-      // There is no automatic rollback: the old distribution stays in the unique backup, the staged
-      // distribution stays intact, the service stays stopped and recovery is manual.
-      const fixture = prepared({ mvMode: 'replace-fail' })
-      assertFailed(fixture, fixture.run(), 'could not replace the installed distribution')
-      const backups = fixture.backupDirectories()
-      assert.equal(backups.length, 1)
-      assert.equal(text(path.join(backups[0], 'previous/main.js')), INSTALLED)
-      assert.ok(!existsSync(fixture.installed), 'the backup move already vacated the target')
-      assert.ok(existsSync(path.join(fixture.staged, 'main.js')))
-      assert.ok(fixture.calls().includes(stop))
-      assert.ok(!fixture.calls().includes(start))
-    }))
-
-  it('an unexpected exit leaves a durable FAILED receipt', () =>
-    withUpdateFixtures(({ prepared }) => {
-      // `os=$(uname -s)` is outside fail_closed: an abort there must still leave a durable,
-      // de-sensitised FAILED receipt through the EXIT trap, with zero destructive action.
-      const fixture = prepared({ unameMode: 'fail' })
-      const result = fixture.run()
-      assert.notEqual(result.status, 0)
-      assert.equal(fixture.resultDocument().phase, 'FAILED')
-      assert.ok(fixture.resultDocument().message.includes('update aborted unexpectedly (exit'))
-      assertNoDestructiveAction(fixture)
-    }))
-
-  it('an unwritable FAILED receipt is reported without masking the reason', () =>
-    withUpdateFixtures(({ prepared }) => {
-      // A receipt that cannot be written must be reported, must not truncate the diagnostic and must
-      // not hide the fail-closed decision.
-      const fixture = prepared({ handoffState: 'missing', resultMode: 'unwritable' })
-      const result = fixture.run()
-      assert.notEqual(result.status, 0)
-      assert.ok(result.stderr.includes('could not write the FAILED receipt'))
-      assert.ok(result.stderr.includes('failed: handoff metadata is missing'))
-      assertNoDestructiveAction(fixture)
-    }))
-
-  it('an unwritable PREPARED receipt does not falsify a completed update', () =>
-    withUpdateFixtures(({ prepared }) => {
-      // The distribution is already replaced and the service restarted, so a receipt that cannot be
-      // written is reported but never turned into a false failure.
-      const fixture = prepared({ resultMode: 'unwritable' })
-      const result = fixture.run()
-      assert.equal(result.status, 0, result.stdout + result.stderr)
-      assert.ok(result.stderr.includes('could not write the PREPARED receipt'))
-      assert.ok(!result.stderr.includes('aborted unexpectedly'))
-      assert.ok(!existsSync(fixture.staged), 'the staged distribution must be consumed')
-      assert.equal(installedMain(fixture), STAGED)
-      assert.ok(fixture.calls().includes(start))
-    }))
-
-  it('a restart failure reports and keeps the replaced distribution', () =>
-    withUpdateFixtures(({ prepared }) => {
-      // The update never rolls back automatically: the new distribution is installed, the failure is
-      // reported and the previous distribution remains in the backup directory.
       const fixture = prepared({ serviceMode: 'start-fail' })
-      assertFailed(fixture, fixture.run(), 'could not restart the managed service')
-      assert.equal(installedMain(fixture), STAGED)
-      const backups = fixture.backupDirectories()
-      assert.equal(backups.length, 1)
-      assert.equal(text(path.join(backups[0], 'previous/main.js')), INSTALLED)
+      assertFailed(fixture.run('start', { active: false }), 'could not restart the managed service')
+      assert.deepEqual(fixture.calls(), [`systemctl --user start ${SERVICE_NAME}`])
     }))
 })
 
-describe('launchd update', () => {
-  it('success boots out and bootstraps the managed agent', () =>
+describePosix('launchd update:', () => {
+  it('stop boots out the installer-owned agent and never bootstraps it', () =>
     withUpdateFixtures(({ prepared }) => {
       const fixture = prepared({ operatingSystem: 'Darwin' })
-      const result = fixture.run()
+      const result = fixture.run('stop')
       assert.equal(result.status, 0, result.stderr)
-      assert.equal(fixture.resultDocument().phase, 'PREPARED')
       const calls = fixture.calls()
-      assert.ok(calls.includes(`launchctl bootout ${fixture.domain}/${LAUNCHD_LABEL}`))
-      assert.ok(calls.includes(`launchctl bootstrap ${fixture.domain} ${fixture.plist}`))
+      assert.equal(calls[0], `launchctl bootout ${launchAgentPath(fixture)}`)
+      assert.ok(calls.some((call) => call.startsWith('launchctl print ')), calls.join('\n'))
+      assertStoppedWithoutStarting(calls)
     }))
 
-  it('an agent not owned by the installer is rejected', () =>
+  it('start bootstraps the installer-owned agent and never boots it out', () =>
+    withUpdateFixtures(({ prepared }) => {
+      const fixture = prepared({ operatingSystem: 'Darwin' })
+      const result = fixture.run('start', { active: false })
+      assert.equal(result.status, 0, result.stderr)
+      assert.deepEqual(fixture.calls(), [
+        `launchctl bootstrap ${fixture.domain} ${fixture.plist}`,
+      ])
+    }))
+
+  it('a missing plist fails closed before any service command', () =>
+    withUpdateFixtures(({ create }) => {
+      const fixture = create({ operatingSystem: 'Darwin' })
+      assertFailed(fixture.run('stop'), 'managed launch agent definition is missing')
+      assert.deepEqual(fixture.calls(), [])
+    }))
+
+  it('an agent not owned by the installer fails closed before any service command', () =>
     withUpdateFixtures(({ create }) => {
       const fixture = create({ operatingSystem: 'Darwin' })
       fixture.writeServiceDefinition("<!-- someone else's agent -->")
-      assertFailed(fixture, fixture.run(), 'launch agent is not owned by the installer')
+      assertFailed(fixture.run('stop'), 'launch agent is not owned by the installer')
+      assert.deepEqual(fixture.calls(), [])
     }))
 
   it('the stop wait times out when the agent stays loaded', () =>
     withUpdateFixtures(({ prepared }) => {
-      const fixture = prepared({ operatingSystem: 'Darwin', serviceMode: 'stop-stuck', fastSleep: true })
-      assertFailed(fixture, fixture.run(), 'managed launch agent did not stop')
-      assert.deepEqual(fixture.backupDirectories(), [])
+      const fixture = prepared({ operatingSystem: 'Darwin', serviceMode: 'stop-stuck' })
+      assertFailed(fixture.run('stop'), 'managed launch agent did not stop')
+      const calls = fixture.calls()
+      assert.ok(calls.filter((call) => call.startsWith('launchctl print ')).length > 1, calls.join('\n'))
+      assertStoppedWithoutStarting(calls)
     }))
 
-  it('a restart failure is reported', () =>
+  it('a start failure is reported and never becomes a stop', () =>
     withUpdateFixtures(({ prepared }) => {
       const fixture = prepared({ operatingSystem: 'Darwin', serviceMode: 'start-fail' })
-      assertFailed(fixture, fixture.run(), 'could not restart the managed launch agent')
+      assertFailed(fixture.run('start', { active: false }), 'could not restart the managed launch agent')
+      assert.deepEqual(fixture.calls(), [
+        `launchctl bootstrap ${fixture.domain} ${fixture.plist}`,
+      ])
     }))
 })
