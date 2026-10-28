@@ -138,17 +138,19 @@ function Start-ScheduledTask {
     $global:fixtureState = 'Running'
 }
 
-$scriptArguments = @(
-    '-Action', $env:KK_TEST_ACTION,
-    '-OperationDir', $env:KK_TEST_OPERATION,
-    '-StagedDir', $env:KK_TEST_STAGED,
-    '-InstalledDir', $env:KK_TEST_INSTALLED
-)
+# Hashtable splatting binds named parameters such as -Action, -UpdaterNode and -UpdaterEntry;
+# a string array would pass their names as positional values instead.
+$scriptArguments = @{
+    Action       = $env:KK_TEST_ACTION
+    OperationDir = $env:KK_TEST_OPERATION
+    StagedDir    = $env:KK_TEST_STAGED
+    InstalledDir = $env:KK_TEST_INSTALLED
+}
 if (-not [string]::IsNullOrEmpty($env:KK_TEST_UPDATER_NODE)) {
-    $scriptArguments += @('-UpdaterNode', $env:KK_TEST_UPDATER_NODE)
+    $scriptArguments.UpdaterNode = $env:KK_TEST_UPDATER_NODE
 }
 if (-not [string]::IsNullOrEmpty($env:KK_TEST_UPDATER_ENTRY)) {
-    $scriptArguments += @('-UpdaterEntry', $env:KK_TEST_UPDATER_ENTRY)
+    $scriptArguments.UpdaterEntry = $env:KK_TEST_UPDATER_ENTRY
 }
 $global:LASTEXITCODE = 1
 & $env:KK_TEST_SCRIPT @scriptArguments
@@ -158,6 +160,7 @@ exit $LASTEXITCODE
 
 $script:checks = 0
 $script:failures = 0
+$script:currentCase = $null
 
 function Assert-True([bool]$Condition, [string]$Message) {
     $script:checks++
@@ -165,6 +168,12 @@ function Assert-True([bool]$Condition, [string]$Message) {
         Write-Host "ok: $Message"
     } else {
         Write-Host "FAIL: $Message"
+        if ($null -ne $script:currentCase) {
+            Write-Host ("case: {0}, exit: {1}" -f $script:currentCase.Name, $script:currentCase.Status)
+            if (-not [string]::IsNullOrWhiteSpace($script:currentCase.Stderr)) {
+                Write-Host ("stderr:`n{0}" -f $script:currentCase.Stderr)
+            }
+        }
         $script:failures++
     }
 }
@@ -226,13 +235,14 @@ function Invoke-Case([string]$Name, [hashtable]$Env = @{}) {
     if ($null -eq $process.ExitCode) {
         throw "cannot read the exit code of case '$Name'; the native process handle was lost"
     }
-    return [pscustomobject]@{
+    $script:currentCase = [pscustomobject]@{
         Name   = $Name
         Status = [int] $process.ExitCode
         Stdout = (Read-Text $stdout)
         Stderr = (Read-Text $stderr)
-        Log    = (Read-Log)
+        Log    = @(Read-Log)
     }
+    return $script:currentCase
 }
 
 function Assert-Log([object]$Case, [string]$Expected) {
@@ -259,6 +269,8 @@ try {
     $case = Invoke-Case 'stop' @{ KK_TEST_ACTION = 'stop'; KK_TEST_STATE = 'Running' }
     Assert-True ($case.Status -eq 0) 'stop exits 0'
     Assert-Log $case 'get:Running|stop|get:Ready'
+    # PowerShell pipelines unwrap empty and singleton arrays; verify each log cardinality.
+    Assert-True (($case.Log -is [array]) -and ($case.Log.Count -eq 3)) 'multiple log entries remain an array'
     Assert-True (-not ($case.Log -contains 'start')) 'stop never starts the task'
 
     # 2. Queued is treated like Running: the task must not be restarted while it still holds the
@@ -289,6 +301,7 @@ try {
     Assert-True ($case.Status -ne 0) 'a missing task exits non-zero'
     Assert-True ($case.Stderr -match 'managed scheduled task is missing') 'a missing task reports its reason'
     Assert-Log $case 'get:Ready'
+    Assert-True (($case.Log -is [array]) -and ($case.Log.Count -eq 1)) 'one log entry remains an array'
     Assert-NoServiceAction $case
 
     $case = Invoke-Case 'foreign-description' @{
@@ -388,6 +401,7 @@ try {
     $case = Invoke-Case 'run-missing-arguments' @{ KK_TEST_ACTION = 'run' }
     Assert-True ($case.Status -ne 0) 'run without updater arguments exits non-zero'
     Assert-True ($case.Stderr -match 'run requires updater node and entry') 'run reports missing updater arguments'
+    Assert-True ($case.Log -is [array]) 'an empty log remains an array'
     Assert-True ($case.Log.Count -eq 0) 'run without arguments touches no task'
 
     $case = Invoke-Case 'run-missing-runtime' @{
