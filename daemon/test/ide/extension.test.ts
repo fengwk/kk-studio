@@ -44,16 +44,48 @@ function fakeVscode(
   const calls = {
     updateWorkspaceFolders: [] as unknown[],
     createTerminal: [] as { name: string; cwd?: string }[],
+    applyEdit: [] as unknown[],
   }
   const terminals: FakeTerminal[] = []
+  const openedDocuments = new Map<string, Record<string, unknown>>()
   let nextPid = 4242
 
+  class FakePosition {
+    constructor(readonly line: number, readonly character: number) {}
+  }
+  class FakeRange {
+    constructor(readonly start: FakePosition, readonly end: FakePosition) {}
+  }
+  class FakeWorkspaceEdit {
+    readonly edits: Array<{ uri: { fsPath: string }; range: FakeRange; text: string }> = []
+    replace(uri: { fsPath: string }, range: FakeRange, text: string): void {
+      this.edits.push({ uri, range, text })
+    }
+  }
   const vscode = {
     Uri: { file: (path: string) => ({ fsPath: path, scheme: 'file' }) },
+    Range: FakeRange,
+    Position: FakePosition,
+    WorkspaceEdit: FakeWorkspaceEdit,
     workspace: {
       workspaceFile: workspaceFile === undefined ? undefined : { fsPath: workspaceFile },
       workspaceFolders: folders.map((path) => ({ uri: { fsPath: path } })),
-      textDocuments: [] as { isDirty: boolean }[],
+      textDocuments: [] as Array<Record<string, unknown>>,
+      async openTextDocument(uri: { fsPath: string }) {
+        return (
+          openedDocuments.get(uri.fsPath) ?? {
+            uri,
+            isDirty: false,
+            isClosed: false,
+            getText: () => '',
+            positionAt: (offset: number) => new FakePosition(0, offset),
+          }
+        )
+      },
+      async applyEdit(edit: FakeWorkspaceEdit): Promise<boolean> {
+        calls.applyEdit.push(edit)
+        return true
+      },
       updateWorkspaceFolders(start: number, remove: number, ...added: { uri: { fsPath: string } }[]): boolean {
         calls.updateWorkspaceFolders.push([start, remove, added])
         if (options.updateWorkspaceFolders) {
@@ -65,6 +97,7 @@ function fakeVscode(
     },
     window: {
       terminals,
+      async showTextDocument(): Promise<void> {},
       createTerminal(options_: { name: string; cwd?: string }): FakeTerminal {
         calls.createTerminal.push({ name: options_.name, cwd: options_.cwd })
         const terminal: FakeTerminal = {
@@ -89,7 +122,7 @@ function fakeVscode(
       },
     },
   }
-  return { vscode, calls, terminals }
+  return { vscode, calls, terminals, openedDocuments }
 }
 
 async function setupWith(fake: ReturnType<typeof fakeVscode>, workspacePath: string) {
@@ -237,6 +270,81 @@ describe('VS Code bridge extension host', () => {
     expect(result.ok).toBe(false)
     expect(result.message).toBe('terminal supervision failed')
     expect(fake.terminals).toHaveLength(0)
+  })
+
+  it('observes dirty state, snapshots ordinary text and reports opaque editors as incomplete', async () => {
+    const { bridge, viewId, fake } = await setup('/managed/one.code-workspace')
+    const fileUri = { scheme: 'file', fsPath: '/home/user/draft.txt' }
+    fake.vscode.workspace.textDocuments.push({
+      uri: fileUri,
+      isDirty: true,
+      isClosed: false,
+      getText: () => 'unsaved text',
+    })
+    fake.vscode.workspace.textDocuments.push({
+      uri: { scheme: 'untitled', fsPath: '' },
+      isDirty: true,
+      isClosed: false,
+      getText: () => 'renderer only',
+    })
+    const inspected = await bridge.request(viewId, { op: 'inspect' }, signal())
+    expect(inspected).toMatchObject({ ok: true, clean: false })
+
+    const snapshot = await bridge.request(viewId, { op: 'snapshot', maxBytes: 1024 }, signal())
+    expect(snapshot.ok).toBe(true)
+    expect(snapshot.documents).toEqual([{ path: '/home/user/draft.txt', text: 'unsaved text' }])
+    expect(snapshot.complete).toBe(true)
+
+    class TabInputCustom {}
+    ;(fake.vscode.window as unknown as { tabGroups: unknown }).tabGroups = {
+      all: [{ tabs: [{ input: new TabInputCustom() }] }],
+    }
+    ;(fake.vscode as unknown as { TabInputCustom: unknown }).TabInputCustom = TabInputCustom
+    expect(await bridge.request(viewId, { op: 'inspect' }, signal())).toMatchObject({ ok: true, clean: false })
+    const opaqueSnapshot = await bridge.request(viewId, { op: 'snapshot', maxBytes: 1024 }, signal())
+    expect(opaqueSnapshot.complete).toBe(false)
+    expect(opaqueSnapshot.omitted).toBeGreaterThan(0)
+    const closeResult = await bridge.request(viewId, { op: 'closeView' }, signal())
+    expect(closeResult).toMatchObject({ ok: false, code: 'DIRTY' })
+  })
+
+  it('restores only into clean ordinary text buffers and never saves them', async () => {
+    const { bridge, viewId, fake } = await setup('/managed/one.code-workspace')
+    fake.openedDocuments.set('/home/user/clean.txt', {
+      uri: { scheme: 'file', fsPath: '/home/user/clean.txt' },
+      isDirty: false,
+      isClosed: false,
+      getText: () => 'original',
+      positionAt: (offset: number) => ({ line: 0, character: offset }),
+    })
+    fake.openedDocuments.set('/home/user/dirty.txt', {
+      uri: { scheme: 'file', fsPath: '/home/user/dirty.txt' },
+      isDirty: true,
+      isClosed: false,
+      getText: () => 'current dirty work',
+      positionAt: (offset: number) => ({ line: 0, character: offset }),
+    })
+
+    const result = await bridge.request(
+      viewId,
+      {
+        op: 'restore',
+        documents: [
+          { path: '/home/user/clean.txt', text: 'recovered text' },
+          { path: '/home/user/dirty.txt', text: 'must not overwrite' },
+          { path: 'relative.txt', text: 'invalid' },
+        ],
+      },
+      signal(),
+    )
+    expect(result).toMatchObject({ ok: true, restored: 1, skipped: 2 })
+    const edits = fake.calls.applyEdit as Array<{ edits: Array<{ uri: { fsPath: string }; text: string }> }>
+    expect(edits).toHaveLength(1)
+    expect(edits[0]?.edits).toEqual([
+      expect.objectContaining({ uri: { scheme: 'file', fsPath: '/home/user/clean.txt' }, text: 'recovered text' }),
+    ])
+    // Restore only creates unsaved editor state; no file write/save API is called.
+    expect(fake.openedDocuments.get('/home/user/clean.txt')?.isDirty).toBe(false)
   })
 
   it('keeps retrying after a rejected handshake without crashing', async () => {

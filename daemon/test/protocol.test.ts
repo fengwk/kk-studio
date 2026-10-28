@@ -564,25 +564,56 @@ describe('managed update codec', () => {
 })
 
 describe('IDE metadata codec', () => {
-  it('round-trips an OPEN_VIEW command', () => {
-    const text = encodeIdeCommand({ action: 'OPEN_VIEW', viewId: ENVIRONMENT_ID, directory: '/tmp' })
-    const decoded = decodeIdeCommand(text)
-    expect(decoded.action).toBe('OPEN_VIEW')
-    expect(decoded.directory).toBe('/tmp')
+  const ids = {
+    viewId: '11111111-2222-4333-8444-555555555555',
+    documentId: '22222222-3333-4444-8555-666666666666',
+    eventNodeId: '33333333-4444-4555-8666-777777777777',
+    connectionId: '44444444-5555-4666-8777-888888888888',
+    claimId: '55555555-6666-4777-8888-999999999999',
+  }
+
+  it('round-trips a fully bound OPEN_VIEW command', () => {
+    const command = { action: 'OPEN_VIEW' as const, ...ids, mode: 'create' as const, directory: '/tmp' }
+    expect(decodeIdeCommand(encodeIdeCommand(command))).toEqual(command)
+    expect(decodeIdeCommand(encodeIdeCommand({ ...command, directory: undefined as never }))).toEqual({
+      action: 'OPEN_VIEW',
+      ...ids,
+      mode: 'create',
+    })
   })
 
-  it('rejects unknown actions and malformed headers', () => {
+  it('round-trips bound commands and rejects unknown or missing fields', () => {
+    const bound = {
+      action: 'CLOSE_VIEW' as const,
+      viewId: ids.viewId,
+      documentId: ids.documentId,
+      bindingEpoch: '7',
+      discard: true,
+    }
+    expect(decodeIdeCommand(encodeIdeCommand(bound))).toEqual(bound)
+    expect(decodeIdeCommand(encodeIdeCommand({ action: 'LIST_VIEWS' }))).toEqual({ action: 'LIST_VIEWS' })
     expect(() => decodeIdeCommand(JSON.stringify({ action: 'NOPE' }))).toThrow(/unknown/)
-    expect(() =>
-      decodeIdeCommand(JSON.stringify({ action: 'OPEN_STREAM', headers: [['x']] })),
-    ).toThrow(/\[name, value\]/)
-    expect(() => decodeIdeCommand(JSON.stringify({ action: 'OPEN_STREAM', mode: 'TCP' }))).toThrow(/mode/)
+    expect(() => decodeIdeCommand(JSON.stringify({ ...bound, extra: true }))).toThrow(/unknown field/)
+    expect(() => decodeIdeCommand(JSON.stringify({ ...bound, bindingEpoch: '01' }))).toThrow(/positive decimal/)
+    expect(() => decodeIdeCommand(JSON.stringify({ ...bound, discard: undefined }))).toThrow(/boolean/)
   })
 
-  it('round-trips an IDE reply', () => {
-    const text = encodeIdeReply({ ok: true, viewId: ENVIRONMENT_ID, workspacePath: '/w' })
-    expect(decodeIdeReply(text)).toEqual({ ok: true, viewId: ENVIRONMENT_ID, workspacePath: '/w' })
+  it('round-trips a binding reply, a view list and a failure reply', () => {
+    const binding = { ok: true, ...ids, bindingEpoch: '9', directory: '/p', workspacePath: '/w.code-workspace' }
+    expect(decodeIdeReply(encodeIdeReply(binding))).toEqual(binding)
+    const list = {
+      ok: true,
+      views: [
+        { ...ids, bindingEpoch: '9', directory: '/p', workspacePath: '/w.code-workspace', state: 'OPEN' as const },
+      ],
+    }
+    expect(decodeIdeReply(encodeIdeReply(list))).toEqual(list)
+    const failure = { ok: false, code: 'VIEW_IN_USE', message: 'view is already open' }
+    expect(decodeIdeReply(encodeIdeReply(failure))).toEqual(failure)
     expect(() => decodeIdeReply(JSON.stringify({ ok: 'yes' }))).toThrow(/boolean/)
+    expect(() => decodeIdeReply(JSON.stringify({ ok: false, message: 'no code' }))).toThrow(/code/)
+    expect(() => decodeIdeReply(JSON.stringify({ ...binding, extra: true }))).toThrow(/unknown field/)
+    expect(() => decodeIdeReply(JSON.stringify({ ...list, views: [...list.views, ...list.views] }))).toThrow(/repeat/)
   })
 })
 

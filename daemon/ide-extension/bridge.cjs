@@ -14,8 +14,13 @@
  */
 
 const DEFAULT_RECONNECT_MILLIS = 500
-/** A command line is a small JSON object; anything larger is a protocol violation. */
-const MAX_LINE_BYTES = 16 * 1024
+/**
+ * A command line is a bounded JSON object. Snapshot/restore carry ordinary dirty text,
+ * so the line budget matches the daemon's fixed recovery quota rather than a control-only 16 KiB.
+ */
+const MAX_LINE_BYTES = 8 * 1024 * 1024
+const MAX_SNAPSHOT_BYTES = 4 * 1024 * 1024
+const MAX_SNAPSHOT_DOCUMENTS = 256
 /** Bounds how long a bridge POST may occupy the extension host. */
 const POST_TIMEOUT_MILLIS = 5_000
 
@@ -23,6 +28,7 @@ function createBridgeHost(vscode, options) {
   const config = options || {}
   const url = config.url || process.env.KK_STUDIO_IDE_BRIDGE_URL
   const token = config.token || process.env.KK_STUDIO_IDE_BRIDGE_TOKEN
+  const nodePath = require('node:path')
   const http = config.http || require('node:http')
   const reconnectMillis = config.reconnectMillis || DEFAULT_RECONNECT_MILLIS
 
@@ -120,8 +126,142 @@ function createBridgeHost(vscode, options) {
     return documents.some((document) => document.isDirty)
   }
 
+  /**
+   * Custom editors, webviews and notebooks can hold unsaved renderer-side state that the ordinary
+   * text-document API cannot inspect. Their presence makes "clean" unprovable, so a normal close
+   * must never claim it.
+   */
+  const hasUnknownEditorState = () => {
+    const groups = vscode.window && vscode.window.tabGroups && vscode.window.tabGroups.all
+    if (!Array.isArray(groups)) {
+      return false
+    }
+    const opaqueInputs = [
+      vscode.TabInputCustom,
+      vscode.TabInputWebview,
+      vscode.TabInputNotebook,
+      vscode.TabInputNotebookDiff,
+    ].filter((constructor) => typeof constructor === 'function')
+    if (opaqueInputs.length === 0) {
+      return false
+    }
+    return groups.some(
+      (group) =>
+        Array.isArray(group && group.tabs) &&
+        group.tabs.some((tab) => {
+          const input = tab && tab.input
+          return input !== undefined && opaqueInputs.some((constructor) => input instanceof constructor)
+        }),
+    )
+  }
+
+  const canProveClean = () => !hasDirtyDocuments() && !hasUnknownEditorState()
+
+  // Only ordinary on-disk text documents visible through the public textDocument API.
+  // Renderer-only buffers and custom editors are not observable and are never claimed clean.
+  const ordinaryDirtyDocuments = () => {
+    const documents = vscode.workspace.textDocuments || []
+    return documents.filter((document) => {
+      if (!document || document.isDirty !== true || document.isClosed === true) {
+        return false
+      }
+      const uri = document.uri
+      return Boolean(uri && uri.scheme === 'file' && typeof uri.fsPath === 'string' && uri.fsPath.length > 0)
+    })
+  }
+
+  const inspectView = async (message) => {
+    await reply(message.id, { ok: true, clean: canProveClean() })
+  }
+
+  const snapshot = async (message) => {
+    const maxBytes =
+      typeof message.maxBytes === 'number' && Number.isSafeInteger(message.maxBytes) && message.maxBytes > 0
+        ? Math.min(message.maxBytes, MAX_SNAPSHOT_BYTES)
+        : MAX_SNAPSHOT_BYTES
+    const documents = []
+    let bytes = 0
+    // An unobservable custom editor is explicitly reported as an omission, never as a complete backup.
+    let omitted = hasUnknownEditorState() ? 1 : 0
+    for (const document of ordinaryDirtyDocuments()) {
+      if (documents.length >= MAX_SNAPSHOT_DOCUMENTS) {
+        omitted += 1
+        continue
+      }
+      let text
+      try {
+        text = document.getText()
+      } catch {
+        omitted += 1
+        continue
+      }
+      const size = Buffer.byteLength(text, 'utf8')
+      if (bytes + size > maxBytes) {
+        omitted += 1
+        continue
+      }
+      documents.push({ path: document.uri.fsPath, text })
+      bytes += size
+    }
+    await reply(message.id, { ok: true, documents, bytes, omitted, complete: omitted === 0 })
+  }
+
+  const restore = async (message) => {
+    const documents = Array.isArray(message.documents) ? message.documents : []
+    if (documents.length > MAX_SNAPSHOT_DOCUMENTS) {
+      await reply(message.id, { ok: false, code: 'UNAVAILABLE', message: 'too many recovery documents' })
+      return
+    }
+    const workspaceEdit = vscode.WorkspaceEdit
+    const range = vscode.Range
+    const position = vscode.Position
+    if (!workspaceEdit || !range || !position || typeof vscode.workspace.openTextDocument !== 'function') {
+      await reply(message.id, { ok: false, code: 'UNAVAILABLE', message: 'text restore is unavailable' })
+      return
+    }
+    let restored = 0
+    let skipped = 0
+    for (const entry of documents) {
+      if (
+        !entry ||
+        typeof entry.path !== 'string' ||
+        typeof entry.text !== 'string' ||
+        entry.path.length === 0 ||
+        !nodePath.isAbsolute(entry.path) ||
+        /[\u0000-\u001f\u007f]/.test(entry.path)
+      ) {
+        skipped += 1
+        continue
+      }
+      try {
+        const uri = vscode.Uri.file(entry.path)
+        const document = await vscode.workspace.openTextDocument(uri)
+        // Never overwrite unsaved work that already exists in the window.
+        if (document.isDirty === true) {
+          skipped += 1
+          continue
+        }
+        const edit = new workspaceEdit()
+        const end = document.positionAt(document.getText().length)
+        edit.replace(uri, new range(new position(0, 0), end), entry.text)
+        const applied = await vscode.workspace.applyEdit(edit)
+        if (applied === false) {
+          skipped += 1
+          continue
+        }
+        if (typeof vscode.window.showTextDocument === 'function') {
+          await vscode.window.showTextDocument(document, { preview: false })
+        }
+        restored += 1
+      } catch {
+        skipped += 1
+      }
+    }
+    await reply(message.id, { ok: true, restored, skipped })
+  }
+
   const changeDirectory = async (message) => {
-    if (hasDirtyDocuments()) {
+    if (!canProveClean()) {
       await reply(message.id, {
         ok: false,
         code: 'DIRTY',
@@ -174,8 +314,9 @@ function createBridgeHost(vscode, options) {
   }
 
   const closeView = async (message) => {
-    // Never tear a window down with unsaved work; the daemon keeps the workspace on refusal.
-    if (hasDirtyDocuments()) {
+    // A normal close requires an explicit clean observation. Unknown/custom editor state is not clean;
+    // discard/expiry is an explicit decision that the daemon made after its own backup attempt.
+    if (message.discard !== true && !canProveClean()) {
       await reply(message.id, {
         ok: false,
         code: 'DIRTY',
@@ -193,8 +334,14 @@ function createBridgeHost(vscode, options) {
         await changeDirectory(message)
       } else if (message.op === 'focusTerminal') {
         await focusTerminal(message)
+      } else if (message.op === 'inspect') {
+        await inspectView(message)
       } else if (message.op === 'closeView') {
         await closeView(message)
+      } else if (message.op === 'snapshot') {
+        await snapshot(message)
+      } else if (message.op === 'restore') {
+        await restore(message)
       } else {
         await reply(message.id, { ok: false, message: 'unsupported command' })
       }

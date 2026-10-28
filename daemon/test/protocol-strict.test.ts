@@ -365,22 +365,45 @@ describe('managed update validation branches', () => {
 })
 
 describe('IDE command validation branches', () => {
-  it('rejects blank optional fields, unknown mode and malformed headers', () => {
-    expect(() => decodeIdeCommand(JSON.stringify({ action: 'OPEN_VIEW', viewId: '  ' }))).toThrow(
-      /viewId must not be blank/,
+  const viewId = 'abcdefab-cdef-4abc-8def-abcdefabcdef'
+  const documentId = '22222222-3333-4444-8555-666666666666'
+  const eventNodeId = '33333333-4444-4555-8666-777777777777'
+  const connectionId = '44444444-5555-4666-8777-888888888888'
+  const claimId = '55555555-6666-4777-8888-999999999999'
+  const open = { action: 'OPEN_VIEW', viewId, documentId, eventNodeId, connectionId, claimId, mode: 'create' }
+
+  it('rejects missing ids, unknown mode and non-canonical values', () => {
+    expect(() => decodeIdeCommand(JSON.stringify({ action: 'OPEN_VIEW', ...open, viewId: '  ' }))).toThrow(
+      /canonical UUID/,
     )
-    expect(() => decodeIdeCommand(JSON.stringify({ action: 'OPEN_VIEW', mode: 'TCP' }))).toThrow(/mode is unknown/)
-    expect(() => decodeIdeCommand(JSON.stringify({ action: 'OPEN_VIEW', headers: {} }))).toThrow(
-      /headers must be an array/,
+    expect(() => decodeIdeCommand(JSON.stringify({ ...open, mode: 'TCP' }))).toThrow(/mode is unknown/)
+    expect(() => decodeIdeCommand(JSON.stringify({ ...open, viewId: viewId.toUpperCase() }))).toThrow(
+      /canonical UUID/,
     )
-    expect(() => decodeIdeCommand(JSON.stringify({ action: 'OPEN_VIEW', headers: [['a']] }))).toThrow(
-      /headers must be an array/,
-    )
+    expect(() => decodeIdeCommand(JSON.stringify({ ...open, directory: '../../tmp' }))).not.toThrow()
+    expect(() => decodeIdeCommand(JSON.stringify({ ...open, directory: null }))).toThrow(/bounded non-blank/)
   })
 
-  it('round-trips valid mode and headers', () => {
-    const command = { action: 'OPEN_STREAM' as const, mode: 'WS' as const, headers: [['a', 'b']] as [string, string][] }
-    const decoded = decodeIdeCommand(encodeIdeCommand(command))
-    expect(decoded).toEqual(command)
+  it('round-trips each frozen action shape', () => {
+    const bound = { viewId, documentId, bindingEpoch: '42' }
+    expect(decodeIdeCommand(encodeIdeCommand({ action: 'CHANGE_DIRECTORY', ...bound, directory: '/p' }))).toEqual({
+      action: 'CHANGE_DIRECTORY',
+      ...bound,
+      directory: '/p',
+    })
+    expect(decodeIdeCommand(encodeIdeCommand({ action: 'FOCUS_TERMINAL', ...bound }))).toEqual({
+      action: 'FOCUS_TERMINAL',
+      ...bound,
+    })
+    expect(decodeIdeCommand(encodeIdeCommand({ action: 'DETACH_VIEW', ...bound }))).toEqual({
+      action: 'DETACH_VIEW',
+      ...bound,
+    })
+    expect(decodeIdeCommand(encodeIdeCommand({ action: 'CLOSE_VIEW', ...bound, discard: false }))).toEqual({
+      action: 'CLOSE_VIEW',
+      ...bound,
+      discard: false,
+    })
+    expect(decodeIdeCommand(encodeIdeCommand({ action: 'LIST_VIEWS' }))).toEqual({ action: 'LIST_VIEWS' })
   })
 })

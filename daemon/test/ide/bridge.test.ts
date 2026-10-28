@@ -358,6 +358,6 @@ describe('loopback IDE bridge', () => {
     const pending = instance.request(viewId, { op: 'focusTerminal' }, signal())
     await new Promise((resolve) => setTimeout(resolve, 20))
     instance.revoke(viewId)
-    expect(await pending).toEqual({ ok: false, message: 'ide window was closed' })
+    expect(await pending).toEqual({ ok: false, code: 'VIEW_GONE', message: 'ide window was closed' })
   })
 })
