@@ -101,8 +101,9 @@ import java.util.concurrent.TimeoutException;
  * 崩溃后旧绑定判为 VIEW_GONE，新视图在替代实例上恢复服务）。
  *
  * <p><b>opt-in：</b>本类只在显式给出已构建 code-server 路径时运行（{@code
- * -Dkk-studio.it.ide.code-server-release=<release 目录>}）。默认测试运行不含本类，因此既有测试行为不变；一旦显式指定路径而该路径缺失或不是可用的
- * code-server 发行目录，测试<b>失败</b>而不是跳过，避免把未验收当成已验收。 真实 Chromium 用例还需 {@code
+ * -Dkk-studio.it.ide.code-server-release=<release 目录>}），同时以 {@code -Dkk-studio.it.ide.node=<Node 24
+ * 可执行文件绝对路径>} 指定运行时。默认测试运行不含本类，因此既有测试行为不变；一旦显式指定路径而该路径缺失或不是可用的 code-server
+ * 发行目录，测试<b>失败</b>而不是跳过，避免把未验收当成已验收。 真实 Chromium 用例还需 {@code
  * -Dkk-studio.it.ide.playwright-module=<已安装的 @playwright/test 包目录>}。
  *
  * <p><b>隔离与凭据：</b>每个用例自行创建 Environment 与 Daemon；Daemon 发行根、数据目录、受管工作目录全部是夹具自有的临时目录
@@ -118,13 +119,11 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
   /** 已构建 code-server 发行目录；显式提供时缺失即失败。 */
   static final String CODE_SERVER_RELEASE_PROPERTY = "kk-studio.it.ide.code-server-release";
 
-  /** Node 24 可执行文件；默认使用工作区约定的本地安装。 */
+  /** 显式指定 Node 24 可执行文件，不依赖开发机器的安装目录。 */
   static final String NODE_BINARY_PROPERTY = "kk-studio.it.ide.node";
 
   /** 显式指定已安装的 Playwright 包目录，才运行真实 Chromium 用例。 */
   static final String PLAYWRIGHT_MODULE_PROPERTY = "kk-studio.it.ide.playwright-module";
-
-  private static final String DEFAULT_NODE_BINARY = "/home/fengwk/.local/node-v24/bin/node";
 
   private static final String CLUSTER_SECRET = "ide-production-chain-acceptance-secret";
 
@@ -1079,7 +1078,11 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
   }
 
   private Path nodeBinary() {
-    String configured = System.getProperty(NODE_BINARY_PROPERTY, DEFAULT_NODE_BINARY);
+    String configured = System.getProperty(NODE_BINARY_PROPERTY);
+    assertNotNull(
+        configured,
+        "explicit Node 24 binary path is required: -Dkk-studio.it.ide.node=<absolute-node-path>");
+    assertFalse(configured.isBlank(), "the explicitly configured Node 24 binary path is blank");
     Path binary = Path.of(configured).toAbsolutePath().normalize();
     assertTrue(Files.isExecutable(binary), "the Node 24 binary is not executable: " + binary);
     return binary;
