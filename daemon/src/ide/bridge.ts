@@ -52,7 +52,8 @@ export interface BridgeResult {
 export interface IdeBridge {
   readonly url: string
   readonly secret: string
-  assign(viewId: string, workspacePath: string, bindingEpoch?: string): void
+  /** The workspace file and current single canonical directory are both required for admission. */
+  assign(viewId: string, workspacePath: string, bindingEpoch: string, directory: string): void
   /** Revokes only the expected epoch when supplied; an old close cannot revoke a newer binding. */
   revoke(viewId: string, expectedEpoch?: string): void
   isConnected(viewId: string, bindingEpoch?: string): boolean
@@ -72,6 +73,8 @@ const MAX_BODY_BYTES = 8 * 1024 * 1024
 const MAX_SNAPSHOT_DOCUMENTS = 256
 const MAX_SNAPSHOT_PATH_CHARS = 4096
 const MAX_COMMAND_DOCUMENTS = 256
+const MAX_VIEW_HOSTS = 256
+const HOST_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const COMMAND_TIMEOUT_MILLIS = 20_000
 
 function pathKey(path: string): string {
@@ -110,6 +113,9 @@ interface ViewState {
   workspacePath: string
   key: string
   bindingEpoch: string
+  directory: string
+  hosts: Set<string>
+  hostId?: string
   stream?: ServerResponse
 }
 
@@ -117,6 +123,8 @@ interface Pending {
   viewId: string
   bindingEpoch: string
   op: BridgeCommand['op']
+  stream: ServerResponse
+  hostId: string
   expectedDirectory?: string
   resolve: (result: BridgeResult) => void
   timer: NodeJS.Timeout
@@ -132,6 +140,11 @@ function abortError(): Error {
   const error = new Error('ide request was cancelled')
   error.name = 'AbortError'
   return error
+}
+
+/** A managed workspace has one confirmed folder, not merely a shared workspace file. */
+function matchesDirectory(folders: string[], directory: string): boolean {
+  return folders.length === 1 && isAbsolute(folders[0]!) && pathKey(folders[0]!) === pathKey(directory)
 }
 
 export async function createIdeBridge(): Promise<IdeBridge> {
@@ -151,6 +164,16 @@ export async function createIdeBridge(): Promise<IdeBridge> {
     response.end(body)
   }
 
+  const retireHost = (view: ViewState): void => {
+    view.hostId = undefined
+    const stream = view.stream
+    view.stream = undefined
+    if (stream !== undefined) {
+      stream.write(`${JSON.stringify({ type: 'retired' })}\n`)
+      stream.end()
+    }
+  }
+
   const resolvePending = (id: string, result: BridgeResult): void => {
     const entry = pending.get(id)
     if (!entry) {
@@ -163,6 +186,14 @@ export async function createIdeBridge(): Promise<IdeBridge> {
       entry.resolve({ ok: false, code: 'VIEW_GONE', message: 'view binding changed' })
       return
     }
+    if (result.ok && entry.op === 'changeDirectory' && entry.expectedDirectory !== undefined) {
+      // Fence old-folder reconnects before the awaiting service resumes.
+      current.directory = entry.expectedDirectory
+    } else if (!result.ok && entry.op === 'changeDirectory' && result.code !== 'DIRTY' && current.stream === entry.stream) {
+      // After an unconfirmed transition, the old registration is no longer evidence of its
+      // live folders. A fresh registration must prove the still-assigned directory.
+      retireHost(current)
+    }
     entry.resolve(result)
   }
 
@@ -170,20 +201,6 @@ export async function createIdeBridge(): Promise<IdeBridge> {
     for (const [id, entry] of pending) {
       if (entry.viewId === viewId) {
         resolvePending(id, result)
-      }
-    }
-  }
-
-  /** Confirms a pending directory change once a (re)connected window reports the new folder. */
-  const settleReconnect = (viewId: string, folders: string[]): void => {
-    for (const [id, entry] of pending) {
-      if (entry.viewId === viewId && entry.op === 'changeDirectory' && entry.expectedDirectory !== undefined) {
-        resolvePending(
-          id,
-          folders.includes(entry.expectedDirectory)
-            ? { ok: true, directory: entry.expectedDirectory }
-            : { ok: false, message: 'directory change was not applied' },
-        )
       }
     }
   }
@@ -266,27 +283,86 @@ export async function createIdeBridge(): Promise<IdeBridge> {
       respond(response, 403, 'workspace is not assigned')
       return
     }
-    // A newer window replaces a stale stream for the same view.
-    view.stream?.end()
+    const hostIds = url.searchParams.getAll('hostId')
+    const hostId = hostIds[0]
+    if (hostIds.length !== 1 || hostId === undefined || !HOST_ID_PATTERN.test(hostId)) {
+      respond(response, 400, 'hostId must be a canonical lowercase UUID')
+      return
+    }
+    if (hostId !== view.hostId && view.hosts.has(hostId)) {
+      respond(response, 410, 'workspace host is retired')
+      return
+    }
+    if (!view.hosts.has(hostId) && view.hosts.size >= MAX_VIEW_HOSTS) {
+      respond(response, 503, 'workspace host limit reached')
+      return
+    }
+    const ownTransition = [...pending.entries()].find(
+      ([, entry]) => entry.viewId === viewId && entry.op === 'changeDirectory' && entry.hostId === hostId,
+    )
+    if (ownTransition !== undefined) {
+      // Reconnecting an initiating host cannot prove whether its first-folder update applied.
+      resolvePending(ownTransition[0], { ok: false, message: 'directory change was not applied' })
+      respond(response, 410, 'workspace host is retired')
+      return
+    }
+    const folders = url.searchParams.getAll('folder')
+    const target = [...pending.entries()].find(
+      ([, entry]) =>
+        entry.viewId === viewId &&
+        entry.bindingEpoch === view.bindingEpoch &&
+        entry.op === 'changeDirectory' &&
+        entry.hostId !== hostId &&
+        entry.expectedDirectory !== undefined &&
+        matchesDirectory(folders, entry.expectedDirectory),
+    )
+    if (!matchesDirectory(folders, view.directory) && target === undefined) {
+      // This workspace file also exists in retired extension hosts. They must not reconnect.
+      respond(response, 410, 'workspace folder is retired')
+      return
+    }
+    const previous = view.stream
+    const previousHost = view.hostId
+    // Commit incarnation history before writing the registration acknowledgement.
+    view.hosts.add(hostId)
+    view.hostId = hostId
+    view.stream = response
+    // Fail requests sent to displaced registrations, except the change confirmed by this
+    // target registration. Late results and old close callbacks cannot affect the new stream.
+    for (const [id, entry] of pending) {
+      if (entry.viewId === viewId && entry.stream !== response && id !== target?.[0]) {
+        resolvePending(id, {
+          ok: false,
+          message: entry.op === 'changeDirectory' ? 'directory change was not applied' : 'ide window closed',
+        })
+      }
+    }
+    if (target !== undefined) {
+      resolvePending(target[0], { ok: true, directory: target[1].expectedDirectory })
+    }
+    if (previous !== undefined) {
+      if (previousHost !== hostId) {
+        previous.write(`${JSON.stringify({ type: 'retired' })}\n`)
+      }
+      previous.end()
+    }
     response.writeHead(200, {
       'content-type': 'application/x-ndjson',
       'cache-control': 'no-store',
       connection: 'keep-alive',
     })
-    view.stream = response
     response.write(`${JSON.stringify({ type: 'registered', viewId })}\n`)
-    // Waking readiness waiters must happen before reconnect settlement so a caller that was
-    // waiting to send a command proceeds with the freshly bound stream.
     notifyConnected(viewId)
-    // The reconnecting window reports its live folders; only an actual match confirms a
-    // pending directory change. A disconnect is never treated as success.
-    settleReconnect(viewId, url.searchParams.getAll('folder'))
     response.on('close', () => {
       if (view.stream === response) {
         view.stream = undefined
+        if ([...pending.values()].some((entry) => entry.stream === response && entry.op === 'changeDirectory')) {
+          // A disconnected initiating host cannot reclaim the view during a folder transition.
+          view.hostId = undefined
+        }
       }
       for (const [id, entry] of pending) {
-        if (entry.viewId === viewId && entry.op !== 'changeDirectory') {
+        if (entry.viewId === viewId && entry.stream === response && entry.op !== 'changeDirectory') {
           resolvePending(id, { ok: false, message: 'ide window closed' })
         }
       }
@@ -313,13 +389,20 @@ export async function createIdeBridge(): Promise<IdeBridge> {
       return
     }
     const entry = pending.get(id)
+    if (entry !== undefined && views.get(entry.viewId)?.stream !== entry.stream) {
+      // A result belongs to the registration on which its command was sent.
+      respond(response, 204)
+      return
+    }
     const actualDirectory = typeof result.directory === 'string' ? result.directory : undefined
     // A directory change only succeeds when the window reports the exact expected directory.
     if (
       entry?.op === 'changeDirectory' &&
       entry.expectedDirectory !== undefined &&
       result.ok === true &&
-      actualDirectory !== entry.expectedDirectory
+      (actualDirectory === undefined ||
+        !matchesDirectory([actualDirectory], entry.expectedDirectory) ||
+        !matchesDirectory([actualDirectory], views.get(entry.viewId)!.directory))
     ) {
       resolvePending(id, { ok: false, message: 'directory change was not applied' })
       respond(response, 204)
@@ -430,21 +513,20 @@ export async function createIdeBridge(): Promise<IdeBridge> {
   return {
     url: `http://127.0.0.1:${port}`,
     secret,
-    assign(viewId, workspacePath, bindingEpoch = '1') {
+    assign(viewId, workspacePath, bindingEpoch, directory) {
       const key = pathKey(workspacePath)
       const existing = views.get(viewId)
-      if (existing && existing.bindingEpoch !== bindingEpoch) {
-        // A new epoch invalidates the old window channel and every command still waiting on it.
-        existing.stream?.end()
-        existing.stream = undefined
+      if (existing) {
+        // A new assignment invalidates the previous channel and its pending commands.
+        retireHost(existing)
         rejectWaiters(viewId, new IdeError('view binding changed', 'VIEW_GONE'))
       }
       if (existing && existing.key !== key) {
         byKey.delete(existing.key)
       }
-      views.set(viewId, { workspacePath, key, bindingEpoch })
+      views.set(viewId, { workspacePath, key, bindingEpoch, directory, hosts: existing?.hosts ?? new Set() })
       byKey.set(key, viewId)
-      if (existing !== undefined && existing.bindingEpoch !== bindingEpoch) {
+      if (existing !== undefined) {
         settleView(viewId, { ok: false, code: 'VIEW_GONE', message: 'view binding changed' })
       }
     },
@@ -503,7 +585,7 @@ export async function createIdeBridge(): Promise<IdeBridge> {
     request(viewId, command, signal, options) {
       const view = views.get(viewId)
       const stream = view?.stream
-      if (!stream) {
+      if (!stream || view?.hostId === undefined) {
         return Promise.reject(new IdeError('ide window is not connected'))
       }
       if (options?.expectedEpoch !== undefined && view.bindingEpoch !== options.expectedEpoch) {
@@ -516,6 +598,23 @@ export async function createIdeBridge(): Promise<IdeBridge> {
         if (command.documents.length > MAX_COMMAND_DOCUMENTS) {
           return Promise.reject(new IdeError('too many recovery documents'))
         }
+      }
+      const expectedDirectory = options?.expectedDirectory
+      if (
+        command.op === 'changeDirectory' &&
+        (command.directory === undefined ||
+          expectedDirectory === undefined ||
+          !isAbsolute(command.directory) ||
+          !isAbsolute(expectedDirectory) ||
+          pathKey(command.directory) !== pathKey(expectedDirectory))
+      ) {
+        return Promise.reject(new IdeError('expected directory is invalid'))
+      }
+      if (
+        command.op === 'changeDirectory' &&
+        [...pending.values()].some((entry) => entry.viewId === viewId && entry.op === 'changeDirectory')
+      ) {
+        return Promise.reject(new IdeError('a directory change is already pending', 'BUSY'))
       }
       const id = randomUUID()
       return new Promise<BridgeResult>((resolve) => {
@@ -531,7 +630,9 @@ export async function createIdeBridge(): Promise<IdeBridge> {
           viewId,
           bindingEpoch: view.bindingEpoch,
           op: command.op,
-          expectedDirectory: options?.expectedDirectory,
+          stream,
+          hostId: view.hostId!,
+          expectedDirectory,
           timer,
           resolve: (result) => {
             signal.removeEventListener('abort', onAbort)
