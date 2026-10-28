@@ -122,11 +122,11 @@ async function startEntry(): Promise<EntryHarness> {
         JSON.stringify({
           schemaVersion: 1,
           daemonVersion: TARGET_VERSION,
-          codeServerVersion: '4.141.0-kk.1',
+          codeServerVersion: '4.143.1-kk.1',
           codeServer: {
             'linux-amd64': {
-              url: 'https://github.com/fengwk/code-server/releases/download/v4.141.0-kk.1/code-server-4.141.0-kk.1-linux-amd64.tar.gz',
-              sha256: '16d9f302fae3fe3670e6478a020da36021031ceb055d8198807ddf4b03fe0fc6',
+              url: 'https://github.com/fengwk/code-server/releases/download/v4.143.1-kk.1/code-server-4.143.1-kk.1-linux-amd64.tar.gz',
+              sha256: '727fc431726f9e2b0b54d01adc4a0ffd31c2c1acb4522567076d490d52f6de9c',
             },
           },
         }),
