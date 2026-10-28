@@ -11,10 +11,12 @@ import org.springframework.jdbc.datasource.SimpleDriverDataSource;
 
 import fun.fengwk.kkstudio.platform.environment.RegistrationTokens;
 import fun.fengwk.kkstudio.platform.environment.repo.impl.model.EnvironmentDO;
+import fun.fengwk.kkstudio.platform.environment.service.EnvironmentInstallCodes;
 import fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport;
 
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.time.Instant;
 import java.util.UUID;
 
 /** {@code environment} 读取路径与两种行锁的真实 SQL 覆盖：按名/按注册令牌查询、排序与 KEY SHARE 读取。 */
@@ -77,6 +79,43 @@ class EnvironmentJdbcStoreIntegrationTest {
     assertThat(store.listNewestFirst())
         .extracting(EnvironmentDO::getName)
         .containsExactly("beta", "alpha");
+  }
+
+  /** 安装 code 与稳定行同表：仅 token 变化时清空，配置更新保留未核销 code。 */
+  @Test
+  void updateByIdClearsInstallCodeOnlyWhenRegistrationTokenChanges() {
+    UUID id = insert("gamma", "token-gamma");
+    setInstallCode(id, EnvironmentInstallCodes.hash("install-code"));
+    EnvironmentDO configUpdate = store.getById(id);
+    configUpdate.setInstallConfigJson("{\"operatingSystem\":\"macos\"}");
+
+    assertThat(store.updateById(configUpdate, configUpdate.getVersion())).isEqualTo(1);
+    assertThat(readInstallCode(id)).isNotNull();
+
+    EnvironmentDO tokenUpdate = store.getById(id);
+    tokenUpdate.setRegistrationTokenHash(RegistrationTokens.hash("rotated-token"));
+    assertThat(store.updateById(tokenUpdate, tokenUpdate.getVersion())).isEqualTo(1);
+    assertThat(readInstallCode(id)).isNull();
+  }
+
+  private void setInstallCode(UUID id, String codeHash) {
+    jdbcClient
+        .sql(
+            "update environment set install_code = jsonb_build_object("
+                + "'codeHash', :codeHash, 'expiresAt', :expiresAt) where id = :id")
+        .param("codeHash", codeHash)
+        .param("expiresAt", Instant.now().plusSeconds(300).toString())
+        .param("id", id)
+        .update();
+  }
+
+  private String readInstallCode(UUID id) {
+    return jdbcClient
+        .sql("select install_code::text from environment where id = :id")
+        .param("id", id)
+        .query(String.class)
+        .optional()
+        .orElse(null);
   }
 
   private UUID insert(String name, String token) {

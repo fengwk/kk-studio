@@ -34,25 +34,30 @@ public interface EnvironmentRepository {
   boolean deleteById(UUID id, long expectedVersion);
 
   /**
-   * 保存或覆盖 Environment 的临时安装 code 记录（upsert）。
+   * 保存或覆盖 Environment 行上的临时安装 code；不修改安装配置，不递增 CAS 版本。
+   *
+   * <p>调用方必须在锁定同一 Environment 行的事务中执行，并通过 {@code expectedVersion} 证明签发基于当前配置版本。
    *
    * @param environmentId 目标 Environment ID
+   * @param expectedVersion 签发时校验过的 Environment 版本
    * @param codeHash 临时安装 code 的 SHA-256 小写十六进制摘要
-   * @param registrationTokenHash 签发时对应的 registrationTokenHash
    * @param expiresAt 过期时间戳
+   * @return 目标行存在且版本仍匹配时返回 true
    */
-  void saveInstallCode(
-      UUID environmentId, String codeHash, String registrationTokenHash, Instant expiresAt);
+  boolean saveInstallCode(
+      UUID environmentId, long expectedVersion, String codeHash, Instant expiresAt);
 
   /**
-   * 原子核销临时安装 code：仅当目标环境存在、codeHash 与 registrationTokenHash 完全一致且尚未过期（expires_at > now）时删除并返回 true。
+   * 原子兑换安装 code：在数据库时间下严格校验摘要与有效期后，清空 install_code、轮换注册凭证并递增版本。
+   *
+   * <p>调用方必须在锁定同一 Environment 行的事务中执行；摘要不匹配、已过期或版本不匹配时返回 false 且不写入任何字段。
    *
    * @param environmentId 目标 Environment ID
+   * @param expectedVersion 兑换时锁定行给出的 Environment 版本
    * @param codeHash 临时安装 code 的 SHA-256 小写十六进制摘要
-   * @param registrationTokenHash 签发时对应的 registrationTokenHash
-   * @param now 当前时间戳，必须严格小于 expires_at
-   * @return 若成功核销并删除返回 true，否则返回 false
+   * @param registrationTokenHash 新注册凭证的 SHA-256 小写十六进制摘要
+   * @return 成功兑换返回 true，否则返回 false
    */
-  boolean consumeInstallCode(
-      UUID environmentId, String codeHash, String registrationTokenHash, Instant now);
+  boolean redeemInstallCode(
+      UUID environmentId, long expectedVersion, String codeHash, String registrationTokenHash);
 }

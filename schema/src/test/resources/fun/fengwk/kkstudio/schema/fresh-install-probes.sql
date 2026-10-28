@@ -54,6 +54,13 @@ insert into environment (id, name, registration_token_hash)
     values (pg_temp.uid(9000), 'install-fixture', repeat('a', 64));
 select pg_temp.assert_true('environment install settings default null',
     (select install_config is null from environment where id = pg_temp.uid(9000)));
+select pg_temp.assert_true('environment install code is nullable jsonb',
+    exists(select 1 from information_schema.columns
+        where table_schema = 'public' and table_name = 'environment'
+        and column_name = 'install_code' and data_type = 'jsonb'
+        and is_nullable = 'YES'));
+select pg_temp.assert_true('separate install code table is absent',
+    to_regclass('public.environment_install_code') is null);
 update environment set install_config = '{"operatingSystem":"linux"}'::jsonb
     where id = pg_temp.uid(9000);
 select pg_temp.assert_true('environment install settings accept object',
@@ -62,30 +69,60 @@ select pg_temp.rejects('environment install settings reject array',
     $$update environment set install_config = '[]'::jsonb where id = pg_temp.uid(9000)$$,
     '23514', 'ck_environment_install_config_object');
 
--- Installation codes: direct SQL writes must obey hash shape and Environment ownership.
-insert into environment_install_code (environment_id, code_hash, registration_token_hash, expires_at)
-    values (pg_temp.uid(9000), repeat('0123456789abcdef', 4), repeat('abcdef0123456789', 4), now());
-select pg_temp.assert_true('installation code accepts lowercase SHA-256 hashes',
-    (select code_hash = repeat('0123456789abcdef', 4)
-        and registration_token_hash = repeat('abcdef0123456789', 4)
-        from environment_install_code where environment_id = pg_temp.uid(9000)));
-select pg_temp.rejects('installation code rejects malformed code hash',
-    $$update environment_install_code set code_hash = repeat('A', 64)
-        where environment_id = pg_temp.uid(9000)$$,
+-- Installation code: one nullable object on the Environment row, no separate table.
+update environment set install_code = jsonb_build_object(
+    'codeHash', repeat('0123456789abcdef', 4),
+    'expiresAt', '2026-10-23T10:00:00.123Z')
+    where id = pg_temp.uid(9000);
+select pg_temp.assert_true('environment install code accepts canonical hash and UTC instant',
+    (select install_code->>'codeHash' = repeat('0123456789abcdef', 4)
+        and install_code->>'expiresAt' = '2026-10-23T10:00:00.123Z'
+        from environment where id = pg_temp.uid(9000)));
+select pg_temp.rejects('environment install code rejects array',
+    $$update environment set install_code = '[]'::jsonb where id = pg_temp.uid(9000)$$,
+    '23514', 'ck_environment_install_code_object');
+select pg_temp.rejects('environment install code rejects JSON null as absence',
+    $$update environment set install_code = 'null'::jsonb where id = pg_temp.uid(9000)$$,
+    '23514', 'ck_environment_install_code_object');
+select pg_temp.rejects('environment install code rejects a missing field',
+    $$update environment set install_code =
+        '{"codeHash":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}'::jsonb
+        where id = pg_temp.uid(9000)$$,
+    '23514', 'ck_environment_install_code_object');
+select pg_temp.rejects('environment install code rejects an unknown field',
+    $$update environment set install_code =
+        '{"codeHash":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+          "expiresAt":"2026-10-23T10:00:00Z","extra":true}'::jsonb
+        where id = pg_temp.uid(9000)$$,
+    '23514', 'ck_environment_install_code_object');
+select pg_temp.rejects('environment install code rejects malformed code hash',
+    $$update environment set install_code =
+        jsonb_set(install_code, '{codeHash}', to_jsonb(repeat('A', 64)))
+        where id = pg_temp.uid(9000)$$,
     '23514', 'ck_environment_install_code_hash');
-select pg_temp.rejects('installation code rejects malformed registration token hash',
-    $$update environment_install_code set registration_token_hash = 'abc'
-        where environment_id = pg_temp.uid(9000)$$,
-    '23514', 'ck_environment_install_code_registration_token_hash');
-select pg_temp.rejects('installation code requires an existing Environment',
-    $$update environment_install_code set environment_id = pg_temp.uid(9001)
-        where environment_id = pg_temp.uid(9000)$$,
-    '23503', 'fk_environment_install_code_environment');
-delete from environment where id = pg_temp.uid(9000);
-select pg_temp.assert_true('deleting an Environment cascades to its installation code',
-    not exists(select 1 from environment_install_code where environment_id = pg_temp.uid(9000)));
-insert into environment (id, name, registration_token_hash)
-    values (pg_temp.uid(9000), 'install-fixture', repeat('a', 64));
+select pg_temp.rejects('environment install code rejects non-string code hash',
+    $$update environment set install_code =
+        jsonb_set(install_code, '{codeHash}', '123'::jsonb)
+        where id = pg_temp.uid(9000)$$,
+    '23514', 'ck_environment_install_code_hash');
+select pg_temp.rejects('environment install code rejects a non-UTC instant',
+    $$update environment set install_code =
+        jsonb_set(install_code, '{expiresAt}', to_jsonb('2026-10-23T10:00:00+00:00'::text))
+        where id = pg_temp.uid(9000)$$,
+    '23514', 'ck_environment_install_code_expires_at');
+select pg_temp.rejects('environment install code rejects an invalid calendar instant',
+    $$update environment set install_code =
+        jsonb_set(install_code, '{expiresAt}', to_jsonb('2026-02-30T10:00:00Z'::text))
+        where id = pg_temp.uid(9000)$$,
+    '23514', 'ck_environment_install_code_expires_at');
+select pg_temp.rejects('environment install code rejects a non-string instant',
+    $$update environment set install_code =
+        jsonb_set(install_code, '{expiresAt}', '123'::jsonb)
+        where id = pg_temp.uid(9000)$$,
+    '23514', 'ck_environment_install_code_expires_at');
+update environment set install_code = null where id = pg_temp.uid(9000);
+select pg_temp.assert_true('environment install code clears to SQL NULL',
+    (select install_code is null from environment where id = pg_temp.uid(9000)));
 
 -- cluster_node: node registry carries only reachability origin + lease metadata, not liveness bytes.
 insert into cluster_node (instance_id, internal_url, lease_until, last_seen)

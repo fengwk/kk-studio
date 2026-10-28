@@ -41,6 +41,7 @@ create table environment (
     name                varchar(64)   not null,
     registration_token_hash char(64)  not null,
     install_config      jsonb,
+    install_code        jsonb,
     created_at          timestamptz(3) not null default current_timestamp,
     updated_at          timestamptz(3) not null default current_timestamp,
     version             bigint        not null default 0,
@@ -58,6 +59,28 @@ create table environment (
     constraint ck_environment_version_nonneg check (version >= 0),
     constraint ck_environment_install_config_object check (
         install_config is null or jsonb_typeof(install_config) = 'object'
+    ),
+    constraint ck_environment_install_code_object check (
+        install_code is null or (
+            jsonb_typeof(install_code) = 'object'
+            and install_code ? 'codeHash'
+            and install_code ? 'expiresAt'
+            and install_code - 'codeHash' - 'expiresAt' = '{}'::jsonb
+        )
+    ),
+    constraint ck_environment_install_code_hash check (
+        install_code is null or (
+            jsonb_typeof(install_code -> 'codeHash') = 'string'
+            and install_code ->> 'codeHash' ~ '^[0-9a-f]{64}$'
+        )
+    ),
+    constraint ck_environment_install_code_expires_at check (
+        install_code is null or (
+            jsonb_typeof(install_code -> 'expiresAt') = 'string'
+            and install_code ->> 'expiresAt'
+                ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?Z$'
+            and pg_input_is_valid(install_code ->> 'expiresAt', 'timestamptz')
+        )
     )
 );
 
@@ -66,6 +89,7 @@ comment on column environment.id is 'Environment 的全局唯一 UUID（服务�
 comment on column environment.name is 'Environment 唯一名称（NFKC trim，<= 64 字符，不含空白或斜杠）';
 comment on column environment.registration_token_hash is 'Daemon HELLO 注册凭证的 SHA-256（小写十六进制）；明文只在创建、轮换与安装脚本中出现一次，不落库';
 comment on column environment.install_config is '保存的安装设置（不含 token，不表示已部署）';
+comment on column environment.install_code is '一次性安装 code 摘要与 UTC 失效时间（JSON object：codeHash、expiresAt）；null 表示没有未核销 code';
 comment on column environment.created_at is '创建时间（毫秒精度）';
 comment on column environment.updated_at is '最后更新时间（毫秒精度），应用侧维护';
 comment on column environment.version is 'CAS 乐观锁版本：非负，从 0 开始，每次更新 +1';
@@ -772,26 +796,55 @@ comment on column cluster_node.internal_url is '该节点对外可达的 HTTP(S)
 comment on column cluster_node.lease_until is '注册租约到期时间（毫秒精度），过期节点的路由不被选中';
 comment on column cluster_node.last_seen is '最后一次心跳时间（毫秒精度），必须早于 lease_until';
 
-create table environment_install_code (
-    environment_id          uuid           primary key,
-    code_hash               char(64)       not null,
-    registration_token_hash char(64)       not null,
-    expires_at              timestamptz(3) not null,
-    constraint fk_environment_install_code_environment foreign key (environment_id)
+create table environment_update_operation (
+    operation_id   uuid           primary key,
+    environment_id uuid           not null,
+    target_version varchar(64)    not null,
+    phase          varchar(32)    not null,
+    error          varchar(500),
+    created_at     timestamptz(3) not null default current_timestamp,
+    updated_at     timestamptz(3) not null default current_timestamp,
+    constraint fk_environment_update_operation_environment foreign key (environment_id)
         references environment (id) on delete cascade,
-    constraint ck_environment_install_code_hash check (
-        code_hash ~ '^[0-9a-f]{64}$'
+    constraint ck_environment_update_operation_phase check (
+        phase in ('PENDING', 'RUNNING', 'PREPARED', 'SUCCEEDED', 'FAILED')
     ),
-    constraint ck_environment_install_code_registration_token_hash check (
-        registration_token_hash ~ '^[0-9a-f]{64}$'
+    constraint ck_environment_update_operation_target_version check (
+        target_version = btrim(target_version)
+        and char_length(target_version) between 1 and 64
+        and target_version ~ '^[0-9A-Za-z._+-]+$'
+    ),
+    constraint ck_environment_update_operation_error check (
+        error is null
+        or (
+            btrim(error) <> ''
+            and char_length(error) <= 500
+            and error !~ '[\x00-\x1F\x7F]'
+        )
+    ),
+    constraint ck_environment_update_operation_terminal_error check (
+        phase <> 'FAILED' or error is not null
+    ),
+    constraint ck_environment_update_operation_updated check (
+        updated_at >= created_at
     )
 );
 
-comment on table environment_install_code is 'Environment 临时安装 code 记录：每环境至多一条未核销记录，核销时严格匹配 code_hash、registration_token_hash 且 expires_at > now';
-comment on column environment_install_code.environment_id is 'Environment 的全局唯一 UUID（PK，FK cascade）';
-comment on column environment_install_code.code_hash is '临时安装 code 的 SHA-256（小写十六进制）；明文仅返回给调用方一次';
-comment on column environment_install_code.registration_token_hash is '签发 code 时 Environment 持有的 registration_token_hash，用于确保兑换时环境未发生并发轮换';
-comment on column environment_install_code.expires_at is '临时安装 code 的过期时间（毫秒精度）';
+comment on table environment_update_operation is '受管 Daemon 更新操作：唯一 operationId、固定目标版本、持久阶段与有界错误；活动行由部分唯一索引保证每个 Environment 至多一条';
+comment on column environment_update_operation.operation_id is '更新操作 UUID（平台生成，幂等键：同一 operation 的重发不产生第二次下载）';
+comment on column environment_update_operation.environment_id is '目标 Environment UUID（FK cascade）';
+comment on column environment_update_operation.target_version is '固定官方发布目标版本（与项目版本一致），不接受任意版本或 latest';
+comment on column environment_update_operation.phase is '持久阶段：PENDING / RUNNING / PREPARED / SUCCEEDED / FAILED；派生 UNKNOWN 不落库';
+comment on column environment_update_operation.error is '仅失败时的去敏有界说明（<= 500 字符，不含控制字符）';
+comment on column environment_update_operation.created_at is '创建时间（毫秒精度）';
+comment on column environment_update_operation.updated_at is '最后推进时间（毫秒精度）';
+
+create unique index uk_environment_update_active
+    on environment_update_operation (environment_id)
+    where phase in ('PENDING', 'RUNNING', 'PREPARED');
+
+create index idx_environment_update_operation_recent
+    on environment_update_operation (environment_id, created_at desc, operation_id desc);
 
 ------------------------------------------------------------------------------
 -- 1c. Singleton system settings (id=1)

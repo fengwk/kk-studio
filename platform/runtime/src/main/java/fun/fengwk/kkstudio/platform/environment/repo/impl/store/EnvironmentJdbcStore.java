@@ -14,7 +14,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
-/** {@code environment} 的 JdbcClient 入口：读取、两种行锁、CAS 写与硬删除。 */
+/** {@code environment} 的 JdbcClient 入口：读取、两种行锁、CAS 写与硬删除；token 变更在同一 CAS 语句中清空安装 code。 */
 @Repository
 public class EnvironmentJdbcStore {
 
@@ -27,6 +27,10 @@ public class EnvironmentJdbcStore {
       update environment
       set registration_token_hash = :registrationTokenHash,
           install_config = cast(:installConfigJson as jsonb),
+          install_code = case
+              when registration_token_hash is distinct from :registrationTokenHash then null
+              else install_code
+          end,
           updated_at = greatest(updated_at, current_timestamp),
           version = version + 1
       where id = :id and version = :expectedVersion
