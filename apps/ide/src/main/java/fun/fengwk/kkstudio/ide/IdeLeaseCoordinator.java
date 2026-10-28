@@ -135,8 +135,7 @@ public final class IdeLeaseCoordinator {
       return;
     }
     try {
-      transport.sendIdeLease(
-          environmentId, identity, new DaemonIdeLease(ideLeaseRound, bindings));
+      transport.sendIdeLease(environmentId, identity, new DaemonIdeLease(ideLeaseRound, bindings));
     } catch (RuntimeException error) {
       // 发送失败只影响本轮；下一次正常心跳重新核对，不自动重试旧轮次。
     }

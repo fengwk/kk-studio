@@ -3580,8 +3580,11 @@ class EnvironmentDaemonServerTest {
         () -> fixture.server.sendDataBind(ENVIRONMENT_ID, dataBind));
     assertThrows(
         EnvironmentCapabilityUnavailableException.class,
-        () -> fixture.server.sendIdeLease(
-            ENVIRONMENT_ID, new DaemonConnectionIdentity(ENVIRONMENT_ID, INSTANCE_ID), ideLease));
+        () ->
+            fixture.server.sendIdeLease(
+                ENVIRONMENT_ID,
+                new DaemonConnectionIdentity(ENVIRONMENT_ID, INSTANCE_ID),
+                ideLease));
 
     // 新实例接管后，旧代际轮次不得落入当前连接；当前代际的轮次仍可发送。
     fixture.leaseStore.holdsReadyLease = true;
@@ -3593,10 +3596,11 @@ class EnvironmentDaemonServerTest {
         fixture.server.connectionIdentity(ENVIRONMENT_ID).orElseThrow().daemonInstanceId());
     assertThrows(
         EnvironmentCapabilityUnavailableException.class,
-        () -> fixture.server.sendIdeLease(
-            ENVIRONMENT_ID,
-            new DaemonConnectionIdentity(ENVIRONMENT_ID, INSTANCE_ID),
-            ideLease));
+        () ->
+            fixture.server.sendIdeLease(
+                ENVIRONMENT_ID,
+                new DaemonConnectionIdentity(ENVIRONMENT_ID, INSTANCE_ID),
+                ideLease));
     assertTrue(
         replacement.envelopes().stream()
             .noneMatch(envelope -> envelope.messageType() == DaemonMessageType.IDE_LEASE));

@@ -492,8 +492,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     try {
       request = transport.requestIde(environmentId, command);
     } catch (EnvironmentCapabilitySendUncertainException error) {
-      throw new IdeOutcomeUnknownException(
-          "environment IDE command outcome is uncertain", error);
+      throw new IdeOutcomeUnknownException("environment IDE command outcome is uncertain", error);
     } catch (EnvironmentCapabilityUnavailableException | EnvironmentCapabilityBusyException error) {
       throw new AiEnvironmentIdeUnavailableException(
           "environment IDE channel is unavailable", error);
@@ -651,7 +650,8 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
   private record IdeCall(IdeReply reply, DaemonConnectionIdentity identity) {}
 
   /** 命令可能已到达 Daemon 但未收到确定回执；只允许 claim 按原身份对账，其它副作用不得重放。 */
-  private static final class IdeOutcomeUnknownException extends AiEnvironmentIdeUnavailableException {
+  private static final class IdeOutcomeUnknownException
+      extends AiEnvironmentIdeUnavailableException {
 
     private IdeOutcomeUnknownException(String message, Throwable cause) {
       super(message, cause);

@@ -16,8 +16,8 @@ import java.util.UUID;
 /**
  * 生产 gateway：把事件节点 typed usage 查询映射为控制服务只需要的窄意图/证明。
  *
- * <p>连接身份由 {@code eventNodeId,connectionId} 组成；查询失败保持不可用语义，绝不把“没有结果”伪造成“没有使用”。证明只保留带正 epoch
- * 的持有项，并按 client 返回的 revision 原样交给租约协调器。
+ * <p>连接身份由 {@code eventNodeId,connectionId} 组成；查询失败保持不可用语义，绝不把“没有结果”伪造成“没有使用”。证明只保留带正 epoch 的持有项，并按
+ * client 返回的 revision 原样交给租约协调器。
  */
 public final class IdeBrowserUseClientGateway implements IdeBrowserUseGateway {
 
@@ -56,15 +56,13 @@ public final class IdeBrowserUseClientGateway implements IdeBrowserUseGateway {
   }
 
   @Override
-  public Optional<Proofs> activeBoundProofs(
-      UUID eventNodeId, UUID connectionId, UUID documentId) {
+  public Optional<Proofs> activeBoundProofs(UUID eventNodeId, UUID connectionId, UUID documentId) {
     Objects.requireNonNull(eventNodeId, "eventNodeId");
     Objects.requireNonNull(connectionId, "connectionId");
     Objects.requireNonNull(documentId, "documentId");
     try {
       Optional<IdeBrowserUse> usage =
-          client.activeBoundProofs(
-              new ConnectionIdentity(eventNodeId, connectionId), documentId);
+          client.activeBoundProofs(new ConnectionIdentity(eventNodeId, connectionId), documentId);
       return usage.map(value -> toProofs(documentId, value));
     } catch (AiEnvironmentIdeUnavailableException error) {
       throw error;
@@ -84,8 +82,7 @@ public final class IdeBrowserUseClientGateway implements IdeBrowserUseGateway {
         // activeBoundProofs 只应返回已绑定项；未绑定意图不能成为续租证明。
         continue;
       }
-      proofs.add(
-          new Proof(view.environmentId(), view.viewId(), usage.documentId(), bindingEpoch));
+      proofs.add(new Proof(view.environmentId(), view.viewId(), usage.documentId(), bindingEpoch));
     }
     if (proofs.isEmpty()) {
       throw unavailable("browser event node returned no active binding proof", null);
