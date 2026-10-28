@@ -22,13 +22,15 @@ import java.util.concurrent.TimeUnit;
 /**
  * Transport-neutral IDE 数据连接 mux v2 引擎（Server 角色）。
  *
- * <p>职责：严格解码入站帧、为 Server 主动流分配单调连续 streamId、维护每流与整连接两个方向的 credit、把管理帧与 DATA 按优先级和同流顺序交给唯一物理写入者。 物理
- * {@link MuxTransport#write(byte[])} 异步完成；任何一次异常完成立即 fail-stop，排队与等待中的 future 全部异常结束，绝不重试或重放请求。
+ * <p>职责：严格解码入站帧、为 Server 主动流分配单调连续 streamId、维护每流与整连接两个方向的 credit、把管理帧与 DATA 按优先级和同流顺序交给唯一物理写入者，且同流
+ * CLOSE/COMPLETE 不越过先前 DATA/END 的物理写完成回调。 物理 {@link MuxTransport#write(byte[])} 异步完成；任何一次异常完成立即
+ * fail-stop，排队与等待中的 future 全部异常结束，绝不重试或重放请求。
  *
  * <p>背压：管理帧队列固定 256 帧 / 256 KiB；DATA 等待队列按流 256 KiB credit 成本、整连接 4 MiB credit 成本定界，满时同步抛 {@link
  * MuxBackpressureException}。每个 DATA 必须同时取得流与连接发送 credit 才会被选中；接收端只有在调用方对 {@link
- * MuxReceivedData#consumed()} 后才能归还 credit。流 RESET/关闭时，未消费接收缓冲立即折算为连接级 WINDOW 归还，不保留按流
- * tombstone；已分配但关闭的 streamId 仅由单调上界识别。
+ * MuxReceivedData#consumed()} 后才能归还 credit。流 RESET/关闭时，已消费但尚未 flush 的接收额度折算为连接级
+ * WINDOW；已投递但未消费的片段继续占用连接额度，直到调用方消费；迟到 DATA 同样先计入连接额度，并在其 WINDOW 物理写完成后释放。关闭流不保留按流 tombstone，已分配的
+ * streamId 仅由单调上界识别。
  *
  * <p>入站回调在连接状态锁外按 wire 顺序投递。适配器必须在单线程内调用 {@link #receive(byte[])}，并在物理连接断开时调用 {@link
  * #fail(Throwable)} 或 {@link #close()}；WebSocket 原生 Ping/Pong 与 HTTP 超时属于适配器职责。
@@ -308,6 +310,9 @@ public final class MuxConnection implements AutoCloseable {
         if (stream.mode() != MuxMode.HTTP) {
           throw new IllegalStateException("COMPLETE requires an HTTP stream");
         }
+        if (!stream.outboundEnded) {
+          throw new IllegalStateException("request END has not been queued");
+        }
         if (!stream.inboundEnded) {
           throw new IllegalStateException("response END has not been received");
         }
@@ -333,7 +338,6 @@ public final class MuxConnection implements AutoCloseable {
     Objects.requireNonNull(stream, "stream");
     Objects.requireNonNull(close, "close");
     CompletableFuture<Void> completion = new CompletableFuture<>();
-    List<Runnable> after = new ArrayList<>();
     try {
       synchronized (lock) {
         requireSendableLocked(stream);
@@ -348,15 +352,11 @@ public final class MuxConnection implements AutoCloseable {
         }
         stream.closeSent = true;
         enqueueManagementLocked(Outbound.close(this, stream, close, completion));
-        dropQueuedDataLocked(
-            stream, new MuxStreamClosedException("WS close superseded queued DATA"), after);
       }
     } catch (MuxProtocolException error) {
-      runAllQuietly(after);
       failConnection(error);
       throw error;
     }
-    runAll(after);
     pump();
     return completion;
   }
@@ -398,16 +398,25 @@ public final class MuxConnection implements AutoCloseable {
         }
         MuxStream stream = data.stream();
         if (!stream.active) {
-          // RESET/关闭时已把未归还接收 credit 一次性折算为连接级 WINDOW。
-          return;
-        }
-        stream.pendingWindow += data.creditCost();
-        if (stream.unconsumedFrames > 0) {
-          stream.unconsumedFrames--;
-        }
-        if (stream.pendingWindow >= MuxLimits.WINDOW_ACK_THRESHOLD
-            || stream.unconsumedFrames == 0) {
-          flushWindowLocked(stream);
+          // 已关闭流只归还连接级额度；不再发送流级 WINDOW。
+          if (stream.receiveUnacked < data.creditCost()
+              || connectionReceiveUnacked < data.creditCost()) {
+            throw new MuxProtocolException("internal receive credit underflow");
+          }
+          stream.receiveUnacked -= data.creditCost();
+          if (stream.unconsumedFrames > 0) {
+            stream.unconsumedFrames--;
+          }
+          enqueueConnectionWindowLocked(data.creditCost());
+        } else {
+          stream.pendingWindow += data.creditCost();
+          if (stream.unconsumedFrames > 0) {
+            stream.unconsumedFrames--;
+          }
+          if (stream.pendingWindow >= MuxLimits.WINDOW_ACK_THRESHOLD
+              || stream.unconsumedFrames == 0) {
+            flushWindowLocked(stream);
+          }
         }
       }
     } catch (MuxProtocolException error) {
@@ -580,7 +589,9 @@ public final class MuxConnection implements AutoCloseable {
     if (connectionReceiveUnacked + cost > MuxLimits.INITIAL_CONNECTION_CREDIT) {
       throw new MuxProtocolException("connection receive credit exceeded by late DATA");
     }
-    // 迟到的 DATA 只占连接额度；丢弃即消费，立即归还连接级 credit。
+    // 迟到 DATA 不进入流账本，但必须先占用连接额度；WINDOW 物理写完成后才归还，
+    // 防止写端阻塞时对端通过无界迟到帧绕过 aggregate credit。
+    connectionReceiveUnacked += cost;
     enqueueConnectionWindowLocked(cost);
   }
 
@@ -738,15 +749,17 @@ public final class MuxConnection implements AutoCloseable {
   }
 
   private void dropInboundLocked(MuxStream stream) {
-    long credit = stream.receiveUnacked;
-    stream.receiveUnacked = 0;
-    stream.pendingWindow = 0;
-    stream.unconsumedFrames = 0;
-    if (credit == 0) {
-      return;
+    long pending = stream.pendingWindow;
+    if (pending != 0) {
+      if (stream.receiveUnacked < pending || connectionReceiveUnacked < pending) {
+        throw new MuxProtocolException("internal receive credit underflow");
+      }
+      stream.pendingWindow = 0;
+      stream.receiveUnacked -= pending;
+      enqueueConnectionWindowLocked(pending);
     }
-    connectionReceiveUnacked -= credit;
-    enqueueConnectionWindowLocked(credit);
+    // 尚未消费的片段继续占用连接额度；适配器之后对每个 MuxReceivedData 调用 consumed()
+    // 时只归还连接级 WINDOW，不保留按流 tombstone。
   }
 
   private void flushWindowLocked(MuxStream stream) {
@@ -759,8 +772,7 @@ public final class MuxConnection implements AutoCloseable {
       throw new MuxProtocolException("internal receive credit underflow");
     }
     stream.receiveUnacked -= amount;
-    connectionReceiveUnacked -= amount;
-    enqueueManagementLocked(Outbound.window(this, stream, stream.streamId, amount));
+    enqueueManagementLocked(Outbound.window(this, stream, stream.streamId, amount, 0));
     enqueueConnectionWindowLocked(amount);
   }
 
@@ -768,7 +780,8 @@ public final class MuxConnection implements AutoCloseable {
     if (amount <= 0) {
       return;
     }
-    enqueueManagementLocked(Outbound.window(this, null, 0, amount));
+    // 连接额度延迟到 WINDOW 物理写成功后才释放；队列/写端阻塞期间继续计入 aggregate。
+    enqueueManagementLocked(Outbound.window(this, null, 0, amount, amount));
   }
 
   private void enqueueManagementLocked(Outbound outbound) {
@@ -964,10 +977,6 @@ public final class MuxConnection implements AutoCloseable {
         return;
       }
       if (error == null) {
-        writing = false;
-        if (inFlight == outbound) {
-          inFlight = null;
-        }
         if (outbound.completion != null && !outbound.completion.isDone()) {
           after.add(() -> outbound.completion.complete(null));
         }
@@ -1005,7 +1014,16 @@ public final class MuxConnection implements AutoCloseable {
                   after,
                   true);
             }
-            case DATA, END, WINDOW -> {}
+            case DATA, END -> {}
+            case WINDOW -> {
+              long credit = outbound.connectionReceiveCredit;
+              if (credit != 0) {
+                if (connectionReceiveUnacked < credit) {
+                  throw new MuxProtocolException("internal receive credit underflow");
+                }
+                connectionReceiveUnacked -= credit;
+              }
+            }
           }
         } catch (MuxProtocolException protocolError) {
           failureToApply = protocolError;
@@ -1016,7 +1034,23 @@ public final class MuxConnection implements AutoCloseable {
       failConnection(failureToApply);
       return;
     }
-    runAll(after);
+    // 写成功仍保持 writing=true，直到本帧完成回调全部返回；并发的 pump 不会在
+    // DATA/END 回调结束前写出同流 CLOSE/COMPLETE。
+    try {
+      runAll(after);
+    } catch (RuntimeException callbackError) {
+      failConnection(callbackError);
+      return;
+    }
+    synchronized (lock) {
+      if (stopped) {
+        return;
+      }
+      writing = false;
+      if (inFlight == outbound) {
+        inFlight = null;
+      }
+    }
     pump();
   }
 
@@ -1152,6 +1186,7 @@ public final class MuxConnection implements AutoCloseable {
     final MuxReset reset;
     final long windowStreamId;
     final long windowIncrement;
+    final long connectionReceiveCredit;
     final int dataCost;
     final int wireSize;
     final boolean ordered;
@@ -1168,6 +1203,7 @@ public final class MuxConnection implements AutoCloseable {
         MuxReset reset,
         long windowStreamId,
         long windowIncrement,
+        long connectionReceiveCredit,
         int dataCost,
         int wireSize,
         boolean ordered,
@@ -1182,6 +1218,7 @@ public final class MuxConnection implements AutoCloseable {
       this.reset = reset;
       this.windowStreamId = windowStreamId;
       this.windowIncrement = windowIncrement;
+      this.connectionReceiveCredit = connectionReceiveCredit;
       this.dataCost = dataCost;
       this.wireSize = wireSize;
       this.ordered = ordered;
@@ -1200,6 +1237,7 @@ public final class MuxConnection implements AutoCloseable {
           null,
           null,
           null,
+          0,
           0,
           0,
           0,
@@ -1225,6 +1263,7 @@ public final class MuxConnection implements AutoCloseable {
           payload,
           null,
           null,
+          0,
           0,
           0,
           dataCost,
@@ -1262,6 +1301,7 @@ public final class MuxConnection implements AutoCloseable {
           0,
           0,
           0,
+          0,
           wireSize,
           true,
           completion);
@@ -1286,13 +1326,18 @@ public final class MuxConnection implements AutoCloseable {
           0,
           0,
           0,
+          0,
           wireSize,
           true,
           completion);
     }
 
     static Outbound window(
-        MuxConnection connection, MuxStream stream, long streamId, long increment) {
+        MuxConnection connection,
+        MuxStream stream,
+        long streamId,
+        long increment,
+        long connectionReceiveCredit) {
       int wireSize = MuxLimits.HEADER_BYTES + 4;
       return new Outbound(
           OutboundKind.WINDOW,
@@ -1305,6 +1350,7 @@ public final class MuxConnection implements AutoCloseable {
           null,
           streamId,
           increment,
+          connectionReceiveCredit,
           0,
           wireSize,
           false,
@@ -1326,6 +1372,7 @@ public final class MuxConnection implements AutoCloseable {
           null,
           close,
           reset,
+          0,
           0,
           0,
           0,

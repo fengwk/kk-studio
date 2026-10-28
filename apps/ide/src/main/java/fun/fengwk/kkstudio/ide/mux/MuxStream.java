@@ -109,13 +109,16 @@ public final class MuxStream {
     return connection.sendHttpEnd(this);
   }
 
-  /** HTTP 响应已成功消费并 flush；发送 COMPLETE 并结束该流。 */
+  /**
+   * HTTP 响应已成功消费并 flush；发送 COMPLETE 并结束该流。COMPLETE 要求请求 END 已排队、响应 END 已收到且响应 DATA
+   * 已全部消费并归还额度，并严格排在同流 END 之后。
+   */
   public CompletableFuture<Void> complete() {
     return connection.sendComplete(this);
   }
 
   /**
-   * WS 主动关闭；尚未进入物理写入的 DATA 会被放弃，已交给传输的 DATA 不能撤回。
+   * WS 主动关闭；等所有先前 DATA 的物理写完成回调返回后才写 CLOSE，已交给传输的 DATA 不能撤回。
    *
    * <p>等待对端 CLOSE，默认最多 5 秒（可由连接构造参数调整）。
    */
