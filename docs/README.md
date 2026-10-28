@@ -61,7 +61,7 @@
 | --- | --- |
 | [Canvas](modules/canvas.md) | Graph 聚合、typed command 与 Function run 如何定义、持久化和终结？ |
 | [Project](modules/project.md) | 配置化阶段、Issue 预算、稳定 Agent Thread 与 Run 如何调度和交接？ |
-| [IDE](modules/ide.md) | 同源 code-server 视图如何经 Daemon 命令通道与反向数据流打开和转发？ |
+| [IDE](modules/ide.md) | 同源 code-server 视图如何经 Daemon 命令通道与复用数据连接打开和转发？ |
 
 ### 组合根与前端
 

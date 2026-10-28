@@ -21,15 +21,12 @@ final class IdeOriginPolicy {
 
   private IdeOriginPolicy() {}
 
-  /** 非 WS 的 HTTP 请求准入：安全方法放行，OPTIONS 不代理，unsafe 方法要求精确同源。 */
+  /** 非 WS 的 HTTP 请求准入：所有方法都要求同源声明，OPTIONS 不代理。 */
   static boolean httpRequestAllowed(HttpServletRequest request) {
     String method = request.getMethod();
     if ("OPTIONS".equalsIgnoreCase(method)) {
       // IDE 数据面只服务同源请求，不需要 CORS 预检；不代理 OPTIONS。
       return false;
-    }
-    if ("GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method)) {
-      return true;
     }
     String site = request.getHeader("Sec-Fetch-Site");
     if (site != null && !isSameSite(site)) {
