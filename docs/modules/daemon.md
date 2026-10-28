@@ -99,13 +99,20 @@ OPEN/CLOSING/创建预留都由本进程裁决；claim 在任何进程或文件�
 
 使用证明只来自 `IDE_LEASE` 批次：45 秒没有任何有效证明即不再视为活跃占用并允许恢复竞争；最后一次有效证明起 600 秒仍无新证明进入到期释放；
 创建成功但一直没有浏览器证明的视图最多保留 600 秒；`DETACH_VIEW` 立即冻结该 epoch 的续租，迟到证明不能复活它。释放走 `OPEN → CLOSING` 门闩：
-先做 dirty 检查，再以 10 秒上限等待工作台同步，之后关闭该视图的 HTTP/WS 流并调用 code-server 的视图终止接口，最后释放 view map、锁、计时器与受管句柄。
+正常关闭先由当前桥接宿主检查未保存内容并接受关闭，随后才中止该视图的 HTTP/WS 流，以 10 秒上限等待流收敛，再调用 code-server 的视图终止接口，最后释放 view map、锁、计时器与受管句柄。dirty 或未知状态的拒绝不释放流或终端。
 终止失败保持 CLOSING 并报告 `CLEANUP_FAILED`，不误报已释放。最后一个视图释放且无在途数据流后，闲置 60 秒停止整个 code-server 与数据连接。
 普通文本的未保存内容写入私有受管恢复文件，总量上限 16 MiB；备份失败产生有界事件，不伪报完成。
 
 Daemon 通过 code-server 的本机管理接口操作视图（[`codeServer.ts`](../../daemon/src/ide/codeServer.ts)）：`GET /__kk/ide/views`、
 `GET /__kk/ide/views/{viewId}?bindingEpoch=...`、`POST /__kk/ide/views/{viewId}` 与 `DELETE /__kk/ide/views/{viewId}`，
 请求头携带本次启动生成的 `x-kk-studio-management-token`，只监听私有 loopback。
+
+工作台桥接还区分扩展宿主实例（[`bridge.ts`](../../daemon/src/ide/bridge.ts) 与
+[`bridge.cjs`](../../daemon/ide-extension/bridge.cjs)）：每个宿主生成稳定 `hostId`，普通断线沿用它重连；
+被替换或退役的宿主不能重新取得控制，即使它报告相同目录。命令及结果绑定具体注册流，旧流的关闭和迟到回执不作用于新流。
+替换受管工作区的首目录时，旧宿主在公共 API 接受请求后退役控制通道；只有新宿主实际登记目标目录才确认切换。
+目录成功回执包含 Daemon 确认的规范路径，Server 不回填客户端输入。宿主退役不终止保留的终端，终端仍由受管视图负责。
+每个 view 最多记录 256 个宿主身份，跨重绑保留、释放视图时清空；达到上限后只允许当前宿主重连，不淘汰旧身份来接纳新宿主。
 
 ### IDE 轻量默认值与按需能力
 

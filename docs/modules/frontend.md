@@ -355,10 +355,10 @@ IDE 使用列表，再以同一身份 claim 视图；服务端核对 environment
 恢复身份只保存在 sessionStorage：`viewId`、`daemonInstanceId` 与目录；
 epoch、claimId、iframe 与票据不持久化。localStorage 只保存最后展示意图（面板是否展开、当前选定与
 已打开环境），供新 tab 继承同一 scope 的最后状态，不提供 `viewId` 或任何运行身份。
-页面隐藏时只撤回使用证明，不删除视图；bfcache 恢复后重新登记，视图由 Daemon 按租约回收。
+页面触发 `pagehide` 时只撤回使用证明，不删除视图；bfcache 恢复后重新登记，视图由 Daemon 按租约回收。仅切换到后台或收起面板不撤回证明。
 
 视图被其它连接占用（`VIEW_IN_USE`）时，前端保留原 `viewId` 与目录，绝不静默替换成新视图：
-面板只提供“重试恢复”（以新 claimId 恢复同一视图）与“新建视图”两个人工动作，由用户明确选择。
+面板只提供“重试恢复”（以新 claimId 恢复同一视图）与“打开新视图”两个人工动作，由用户明确选择。
 其余不确定结果（视图消失、结果未知）同样保留恢复线索，替代视图必须由用户显式打开。
 
 Projects 使用权威 ProjectSnapshot/IssueDetail，按 workflow states 分列，
