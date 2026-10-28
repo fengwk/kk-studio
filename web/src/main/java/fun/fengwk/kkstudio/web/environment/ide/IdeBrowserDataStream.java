@@ -201,7 +201,7 @@ final class IdeBrowserDataStream implements MuxStreamListener {
               environmentId,
               viewId,
               bindingEpoch,
-              IdeDataInternalPaths.upstreamPath(viewId, bindingEpoch, rawPathAndQuery),
+              IdeDataInternalPaths.viewPath(rawPathAndQuery),
               headers,
               controlIdentity,
               this);

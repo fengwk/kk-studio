@@ -151,8 +151,9 @@ Evidence 接收 READY uploadId，在事务内转移引用并返回规范资源�
 - **会话探测**：`__ide/session` 只读、不触达 Daemon，返回 204（会话有效）、401（无会话）、409（代际已被另一个 Daemon 实例接管）或 503（暂无 READY 连接，同一实例重连后原 cookie 继续有效）。前端据此决定等待还是重新打开视图。
 - **HTTP 与 WebSocket 数据面**：普通 HTTP 请求由 [`IdeGatewayDataPlane`](../../web/src/main/java/fun/fengwk/kkstudio/web/environment/ide/IdeGatewayDataPlane.java)
   映射为同一条 mux 逻辑流；WebSocket upgrade 请求由 [`IdeBrowserWebSocketGateway`](../../web/src/main/java/fun/fengwk/kkstudio/web/environment/ide/IdeBrowserWebSocketGateway.java)
-  处理并保持 TEXT/BINARY/FIN 边界。每条流 OPEN 都带 `viewId` 与 `bindingEpoch`，内部路径固定为
-  `/__kk/ide/view/{viewId}/{bindingEpoch}/...`。跨节点场景通过内部端点
+  处理并保持 TEXT/BINARY/FIN 边界。每条流 OPEN 都带 `viewId` 与 `bindingEpoch`，路径保留浏览器 view 基址之后的原始
+  path/query；内部挂载 `/__kk/ide/view/{viewId}/{bindingEpoch}/...` 由 Daemon 构造。上游 `Location` 中的内部挂载由 Web
+  适配层映射回浏览器 view 基址。跨节点场景通过内部端点
   `/internal/environment-ide/{env}/data-http` 与 `/data-ws` 单跳转发至 owner，不使用粘性会话。
 - **复用数据连接**：owner 首次需要逻辑流时经控制通道下发 `DATA_BIND`，Daemon 连接
   `/api/harness/environment-data/v2/{environmentId}?ticket=...`。票据一次性、30 秒有效并绑定 READY 控制身份与 generation；

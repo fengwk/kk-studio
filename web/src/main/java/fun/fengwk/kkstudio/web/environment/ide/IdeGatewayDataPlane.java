@@ -148,10 +148,9 @@ public final class IdeGatewayDataPlane {
     }
 
     List<MuxHeader> headers = IdeDataHeaderPolicy.forwardRequestHeaders(request, false);
-    String upstreamPath;
+    String requestPath;
     try {
-      upstreamPath =
-          IdeDataInternalPaths.upstreamPath(viewId, access.bindingEpoch(), rawPathAndQuery);
+      requestPath = IdeDataInternalPaths.viewPath(rawPathAndQuery);
     } catch (IllegalArgumentException error) {
       IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_BAD_REQUEST);
       return;
@@ -165,7 +164,7 @@ public final class IdeGatewayDataPlane {
               viewId,
               access.bindingEpoch(),
               request.getMethod(),
-              upstreamPath,
+              requestPath,
               headers,
               access.controlIdentity(),
               exchange);
@@ -317,10 +316,55 @@ public final class IdeGatewayDataPlane {
       return location;
     }
     if (location.startsWith("/") && !location.startsWith("//")) {
+      String relative = internalViewRelative(location, viewId);
       String base = viewBase(request, environmentId, viewId);
-      return base + location.substring(1);
+      return base + relative.substring(1);
     }
     return location;
+  }
+
+  /** 真实 code-server 的绝对 Location 带内部挂载；只剥离当前 view 的 `/__kk/ide/view/...` 基址。 */
+  private static String internalViewRelative(String location, UUID viewId) {
+    if (viewId == null) {
+      return location;
+    }
+    String prefix = "/__kk/ide/view/" + viewId + "/";
+    if (!location.startsWith(prefix)) {
+      return location;
+    }
+    int slash = location.indexOf('/', prefix.length());
+    int question = location.indexOf('?', prefix.length());
+    int end;
+    if (slash < 0 && question < 0) {
+      end = location.length();
+    } else if (slash < 0) {
+      end = question;
+    } else if (question < 0) {
+      end = slash;
+    } else {
+      end = Math.min(slash, question);
+    }
+    if (!positiveDecimal(location.substring(prefix.length(), end))) {
+      return location;
+    }
+    String tail = location.substring(end);
+    if (tail.isEmpty()) {
+      return "/";
+    }
+    return tail.charAt(0) == '?' ? "/" + tail : tail;
+  }
+
+  private static boolean positiveDecimal(String value) {
+    if (value.isEmpty() || value.charAt(0) == '0') {
+      return false;
+    }
+    for (int i = 0; i < value.length(); i++) {
+      char c = value.charAt(i);
+      if (c < '0' || c > '9') {
+        return false;
+      }
+    }
+    return true;
   }
 
   static final class IdeHttpFailure extends Exception {

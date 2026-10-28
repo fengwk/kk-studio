@@ -177,7 +177,13 @@ class IdeDataPlaneIntegrationTest extends WebPostgresTestSupport {
         browser
             .newCall(
                 new Request.Builder()
-                    .url(ownerUrl("/environment-ide/" + ENVIRONMENT + "/" + viewId + "/hello"))
+                    .url(
+                        ownerUrl(
+                            "/environment-ide/"
+                                + ENVIRONMENT
+                                + "/"
+                                + viewId
+                                + "/hello?client=studio&lang=zh-CN"))
                     .header("Cookie", cookie)
                     .header("Sec-Fetch-Site", "same-origin")
                     .header("Accept-Language", "zh-CN")
@@ -191,8 +197,7 @@ class IdeDataPlaneIntegrationTest extends WebPostgresTestSupport {
 
     assertTrue(daemon.awaitConnected(10));
     assertEquals(1, daemon.opens().size());
-    assertEquals(
-        "/__kk/ide/view/" + viewId + "/1/hello", daemon.opens().getFirst().request().path());
+    assertEquals("/hello?client=studio&lang=zh-CN", daemon.opens().getFirst().request().path());
     List<MuxHeader> firstHeaders = daemon.opens().getFirst().request().headers();
     assertTrue(
         firstHeaders.stream()
@@ -211,11 +216,13 @@ class IdeDataPlaneIntegrationTest extends WebPostgresTestSupport {
 
     String echoed =
         sendWebSocket(
-            ownerUrl("/environment-ide/" + ENVIRONMENT + "/" + viewId + "/ws"),
+            ownerUrl(
+                "/environment-ide/" + ENVIRONMENT + "/" + viewId + "/ws?client=studio&mode=full"),
             cookie,
             "hello over ws");
     assertEquals("hello over ws", echoed);
     assertEquals(2, daemon.opens().size());
+    assertEquals("/ws?client=studio&mode=full", daemon.opens().get(1).request().path());
     assertEquals(1, daemon.connectionCount(), "one Environment keeps one physical data connection");
     assertTrue(daemon.failure() == null, () -> "mux peer failure: " + daemon.failure());
 
@@ -229,6 +236,38 @@ class IdeDataPlaneIntegrationTest extends WebPostgresTestSupport {
                 + "?ticket="
                 + issuedTicket.get());
     assertNotEquals(1000, replayCode, "a consumed DATA_BIND ticket must not be reusable");
+  }
+
+  @Test
+  void rewritesInternalMountLocationForHttpData() throws Exception {
+    String cookie = "kk_ide_session=test-" + viewId;
+    OkHttpClient noRedirect = new OkHttpClient.Builder().followRedirects(false).build();
+    try (Response response =
+        noRedirect
+            .newCall(
+                new Request.Builder()
+                    .url(
+                        ownerUrl(
+                            "/environment-ide/"
+                                + ENVIRONMENT
+                                + "/"
+                                + viewId
+                                + "/redirect?from=local"))
+                    .header("Cookie", cookie)
+                    .header("Sec-Fetch-Site", "same-origin")
+                    .build())
+            .execute()) {
+      assertEquals(302, response.code());
+      assertEquals(
+          "/environment-ide/" + ENVIRONMENT + "/" + viewId + "/target?x=1",
+          response.header("Location"));
+    } finally {
+      noRedirect.dispatcher().executorService().shutdown();
+      noRedirect.connectionPool().evictAll();
+    }
+    assertTrue(daemon.awaitCompleted(10), "HTTP COMPLETE must follow browser flush");
+    assertEquals(1, daemon.opens().size());
+    assertEquals("/redirect?from=local", daemon.opens().getFirst().request().path());
   }
 
   @Test
@@ -247,7 +286,7 @@ class IdeDataPlaneIntegrationTest extends WebPostgresTestSupport {
                             + ENVIRONMENT
                             + "/"
                             + viewId
-                            + "/echo")
+                            + "/echo?trace=cross-node")
                     .header("Cookie", cookie)
                     .header("Sec-Fetch-Site", "same-origin")
                     .post(RequestBody.create("cross-node", MediaType.parse("text/plain")))
@@ -263,18 +302,44 @@ class IdeDataPlaneIntegrationTest extends WebPostgresTestSupport {
 
     assertTrue(daemon.awaitConnected(10));
     assertEquals(1, daemon.opens().size());
-    assertEquals(
-        "/__kk/ide/view/" + viewId + "/1/echo", daemon.opens().getFirst().request().path());
+    assertEquals("/echo?trace=cross-node", daemon.opens().getFirst().request().path());
     assertTrue(dataConnections.activeConnection(ENVIRONMENT).isPresent());
     assertFalse(
         daemon.opens().getFirst().request().headers().stream()
             .anyMatch(header -> header.name().equalsIgnoreCase("cookie")),
         "the Studio session cookie must be consumed by the owner, not code-server");
 
+    OkHttpClient noRedirect = new OkHttpClient.Builder().followRedirects(false).build();
+    try (Response response =
+        noRedirect
+            .newCall(
+                new Request.Builder()
+                    .url(
+                        forwarder.url()
+                            + "/environment-ide/"
+                            + ENVIRONMENT
+                            + "/"
+                            + viewId
+                            + "/redirect?from=cross-node")
+                    .header("Cookie", cookie)
+                    .header("Origin", forwarder.origin())
+                    .build())
+            .execute()) {
+      assertEquals(302, response.code());
+      assertEquals(
+          "/environment-ide/" + ENVIRONMENT + "/" + viewId + "/target?x=1",
+          response.header("Location"));
+    } finally {
+      noRedirect.dispatcher().executorService().shutdown();
+      noRedirect.connectionPool().evictAll();
+    }
+    assertEquals(2, daemon.opens().size());
+    assertEquals("/redirect?from=cross-node", daemon.opens().get(1).request().path());
+
     String payload = "世界".repeat(40_000);
     String echoed =
         sendWebSocket(
-            forwarder.url() + "/environment-ide/" + ENVIRONMENT + "/" + viewId + "/ws",
+            forwarder.url() + "/environment-ide/" + ENVIRONMENT + "/" + viewId + "/ws?trace=ws",
             cookie,
             payload);
     assertEquals(payload, echoed);
@@ -286,7 +351,8 @@ class IdeDataPlaneIntegrationTest extends WebPostgresTestSupport {
         "exactly the final segment carries FIN");
     assertTrue(segments.stream().allMatch(MuxDaemonPeer.WsSegment::text));
     assertTrue(segments.getLast().fin());
-    assertEquals(2, daemon.opens().size());
+    assertEquals(3, daemon.opens().size());
+    assertEquals("/ws?trace=ws", daemon.opens().get(2).request().path());
     assertEquals(1, daemon.connectionCount());
     assertTrue(daemon.failure() == null, () -> "mux peer failure: " + daemon.failure());
   }
@@ -297,7 +363,7 @@ class IdeDataPlaneIntegrationTest extends WebPostgresTestSupport {
     String workspace = "/home/dev/project";
     sessionRegistry.viewOpened(identity, viewId.toString(), 1L, workspace);
     String token = bootstrapTickets.issue(identity, viewId.toString(), 1L, workspace);
-    OkHttpClient noRedirect = browser.newBuilder().followRedirects(false).build();
+    OkHttpClient noRedirect = new OkHttpClient.Builder().followRedirects(false).build();
     String cookie;
     try {
       try (Response response =
@@ -367,12 +433,18 @@ class IdeDataPlaneIntegrationTest extends WebPostgresTestSupport {
             .execute()) {
       assertEquals(403, response.code());
     }
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> IdeDataInternalPaths.upstreamPath(viewId, 1L, "/../outside"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> IdeDataInternalPaths.upstreamPath(viewId, 1L, "/%2e%2e/outside"));
+    assertEquals("/assets/app.js?v=1", IdeDataInternalPaths.viewPath("/assets/app.js?v=1"));
+    for (String unsafe :
+        List.of(
+            "/../outside",
+            "/%2e%2e/outside",
+            "/assets/%2fsecret",
+            "/assets/%5Csecret",
+            "/assets\\secret",
+            "//evil.example/x")) {
+      assertThrows(
+          IllegalArgumentException.class, () -> IdeDataInternalPaths.viewPath(unsafe), unsafe);
+    }
     assertTrue(daemon.opens().isEmpty(), "rejected requests must not create a mux stream");
   }
 
