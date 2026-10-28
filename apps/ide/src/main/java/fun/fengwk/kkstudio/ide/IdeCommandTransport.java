@@ -28,6 +28,7 @@ public interface IdeCommandTransport {
    */
   Optional<DaemonConnectionIdentity> connectionIdentity(EnvironmentId environmentId);
 
-  /** 向当前 READY 连接批量下发一轮使用证明；没有有效租约/连接时抛不可用且不重放。 */
-  void sendIdeLease(EnvironmentId environmentId, DaemonIdeLease lease);
+  /** 向指定 READY Daemon 代际批量下发一轮使用证明；代际/租约已变化时抛不可用且不重放。 */
+  void sendIdeLease(
+      EnvironmentId environmentId, DaemonConnectionIdentity expectedIdentity, DaemonIdeLease lease);
 }

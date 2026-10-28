@@ -33,6 +33,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 意图：控制服务只在事件节点确认 exact 浏览器意图后下发命令；成功绑定完全采用 Daemon 回执，所有文档命令必须绑定 document+epoch， 旧 epoch 的
@@ -143,7 +144,23 @@ class EnvironmentIdeServiceImplTest {
     assertEquals(0, tickets.pendingCount());
     assertTrue(authorization.opened.isEmpty());
 
-    transport.replies.add(viewsReply(List.of()));
+    // Daemon 端已创建但授权失败的视图，即使被权威 LIST_VIEWS 快照发现，也不能进入 owner 路由缓存。
+    List<IdeViewSummary> orphan =
+        List.of(
+            summary(
+                VIEW,
+                DOCUMENT,
+                EVENT_NODE,
+                CONNECTION,
+                CLAIM,
+                7L,
+                "/daemon/dir",
+                "/daemon/ws",
+                IdeViewState.OPEN));
+    transport.replies.add(viewsReply(orphan));
+    assertTrue(service.listViews(ENV).getViews().isEmpty());
+
+    transport.replies.add(viewsReply(orphan));
     assertThrows(
         AiEnvironmentIdeUnavailableException.class,
         () -> service.focusTerminal(ENV, VIEW.toString(), binding(7L)));
@@ -333,8 +350,89 @@ class EnvironmentIdeServiceImplTest {
     assertThrows(
         AiEnvironmentIdeUnavailableException.class, () -> service.openView(ENV, openRequest(null)));
 
-    assertEquals(1, transport.commands.size());
+    // 原 claim 超时后只追加一次 LIST_VIEWS 对账，不重发 OPEN_VIEW；对账也超时则保持不可用。
+    assertEquals(List.of(IdeAction.OPEN_VIEW, IdeAction.LIST_VIEWS), actions());
+    assertEquals(2, transport.abandoned);
+  }
+
+  /** 原 claim 结果未知时只读 LIST_VIEWS 对账，不重发 OPEN_VIEW；完全匹配的回执可直接完成入口签发。 */
+  @Test
+  void unknownClaimReconcilesByOriginalClaimWithoutReplayingOpenView() {
+    transport.failNext.set(IdeAction.OPEN_VIEW);
+    transport.replies.add(
+        viewsReply(
+            List.of(
+                summary(
+                    VIEW,
+                    DOCUMENT,
+                    EVENT_NODE,
+                    CONNECTION,
+                    CLAIM,
+                    7L,
+                    "/daemon/dir",
+                    "/daemon/ws",
+                    IdeViewState.OPEN))));
+
+    EnvironmentIdeViewDTO dto = service.openView(ENV, openRequest(null));
+
+    assertEquals("7", dto.getBindingEpoch());
+    assertEquals(List.of(IdeAction.OPEN_VIEW, IdeAction.LIST_VIEWS), actions());
     assertEquals(1, transport.abandoned);
+    assertEquals(2, browserUse.queries.size(), "claim 与对账后都必须核对 exact intent");
+    assertEquals(1, tickets.pendingCount());
+  }
+
+  /** 对账快照里的 claim 身份漂移时保持结果不确定，不认领其它 claim 的绑定。 */
+  @Test
+  void unknownClaimWithDriftedSnapshotIsNotAdopted() {
+    transport.failNext.set(IdeAction.OPEN_VIEW);
+    transport.replies.add(
+        viewsReply(
+            List.of(
+                summary(
+                    VIEW,
+                    DOCUMENT,
+                    EVENT_NODE,
+                    CONNECTION,
+                    UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"),
+                    7L,
+                    "/daemon/dir",
+                    "/daemon/ws",
+                    IdeViewState.OPEN))));
+
+    assertThrows(
+        AiEnvironmentIdeUnavailableException.class, () -> service.openView(ENV, openRequest(null)));
+
+    assertEquals(List.of(IdeAction.OPEN_VIEW, IdeAction.LIST_VIEWS), actions());
+    assertEquals(0, tickets.pendingCount());
+  }
+
+  /** 终端/目录命令没有 claim 对账语义：超时后只失败，不得自动重发。 */
+  @Test
+  void terminalAndChangeOutcomesAreNotReplayed() {
+    open();
+    transport.failNext.set(IdeAction.FOCUS_TERMINAL);
+    assertThrows(
+        AiEnvironmentIdeUnavailableException.class,
+        () -> service.focusTerminal(ENV, VIEW.toString(), binding(7L)));
+    assertEquals(IdeAction.FOCUS_TERMINAL, transport.commands.getLast().action());
+    assertEquals(2, transport.commands.size());
+
+    EnvironmentIdeChangeDirectoryDTO request = new EnvironmentIdeChangeDirectoryDTO();
+    request.setDocumentId(DOCUMENT.toString());
+    request.setBindingEpoch("7");
+    request.setDirectory("/next");
+    transport.failNext.set(IdeAction.CHANGE_DIRECTORY);
+    assertThrows(
+        AiEnvironmentIdeUnavailableException.class,
+        () -> service.changeDirectory(ENV, VIEW.toString(), request));
+    assertEquals(IdeAction.CHANGE_DIRECTORY, transport.commands.getLast().action());
+    assertEquals(3, transport.commands.size());
+    assertEquals(IdeAction.OPEN_VIEW, transport.commands.getFirst().action());
+  }
+
+  private List<IdeAction> actions() {
+    return transport.commands.stream().map(IdeCommand::action).toList();
   }
 
   private void open() {
@@ -428,6 +526,7 @@ class EnvironmentIdeServiceImplTest {
     private final List<IdeCommand> commands = new ArrayList<>();
     private final Deque<IdeReply> replies = new ArrayDeque<>();
     private final AtomicBoolean neverCompletes = new AtomicBoolean();
+    private final AtomicReference<IdeAction> failNext = new AtomicReference<>();
     private DaemonConnectionIdentity identity = new DaemonConnectionIdentity(ENV, DAEMON_INSTANCE);
     private int abandoned;
 
@@ -435,7 +534,10 @@ class EnvironmentIdeServiceImplTest {
     public IdeRequest requestIde(EnvironmentId environmentId, IdeCommand command) {
       commands.add(command);
       CompletableFuture<IdeReply> future = new CompletableFuture<>();
-      if (!neverCompletes.get()) {
+      IdeAction failAction = failNext.get();
+      if (failAction == command.action() && failNext.compareAndSet(failAction, null)) {
+        // 只让指定命令一次结果不确定；后续对账命令使用脚本化回执。
+      } else if (!neverCompletes.get()) {
         future.complete(replies.removeFirst());
       }
       return new IdeRequest(identity, UUID.randomUUID(), future);
@@ -447,7 +549,10 @@ class EnvironmentIdeServiceImplTest {
     }
 
     @Override
-    public void sendIdeLease(EnvironmentId environmentId, DaemonIdeLease lease) {
+    public void sendIdeLease(
+        EnvironmentId environmentId,
+        DaemonConnectionIdentity expectedIdentity,
+        DaemonIdeLease lease) {
       throw new AssertionError("control service must not send leases");
     }
 

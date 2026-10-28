@@ -98,7 +98,14 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
                     claimId.toString(),
                     mode,
                     directory));
-    IdeCall result = call(environmentId, command);
+    IdeCall result;
+    try {
+      result = call(environmentId, command);
+    } catch (IdeOutcomeUnknownException error) {
+      // 结果不确定时只按原 claimId 读权威快照对账；绝不重发 OPEN_VIEW 或任何终端/目录副作用。
+      return reconcileOpen(
+          environmentId, viewId, documentId, eventNodeId, connectionId, claimId, error);
+    }
     if (!result.reply().ok()) {
       throw rejection(result.reply());
     }
@@ -121,22 +128,56 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
             confirmedDirectory,
             workspacePath,
             IdeViewState.OPEN);
-    // 先落实本地授权，再发布路由缓存；授权容量竞争失败时不能留下可被后续命令命中的半绑定。
-    if (viewAuthorization != null) {
-      try {
-        viewAuthorization.viewOpened(
-            result.identity(), viewId.toString(), bindingEpoch, workspacePath);
-      } catch (IllegalStateException error) {
-        throw new AiEnvironmentIdeUnavailableException(
-            "environment IDE view capacity is exhausted", error);
-      }
+    return publishOpen(binding);
+  }
+
+  /**
+   * 原 claim 结果未知时通过 {@code LIST_VIEWS} 对账：只有 view/document/eventNode/connection/claim 全部一致才认领。
+   *
+   * <p>快照缺失、参数漂移或浏览器意图已消失都保持原结果不确定错误，不把猜测当成成功，也不重放 claim 本身。
+   */
+  private EnvironmentIdeViewDTO reconcileOpen(
+      EnvironmentId environmentId,
+      UUID viewId,
+      UUID documentId,
+      UUID eventNodeId,
+      UUID connectionId,
+      UUID claimId,
+      IdeOutcomeUnknownException unknown) {
+    List<IdeViewBindingRegistry.Binding> current;
+    try {
+      current = loadViews(environmentId);
+    } catch (RuntimeException error) {
+      unknown.addSuppressed(error);
+      throw unknown;
     }
-    bindings.record(binding);
+    IdeViewBindingRegistry.Binding binding =
+        current.stream()
+            .filter(candidate -> candidate.viewId().equals(viewId))
+            .filter(candidate -> candidate.documentId().equals(documentId))
+            .filter(candidate -> candidate.eventNodeId().equals(eventNodeId))
+            .filter(candidate -> candidate.connectionId().equals(connectionId))
+            .filter(candidate -> candidate.claimId().equals(claimId))
+            .findFirst()
+            .orElseThrow(() -> unknown);
+    requireIntent(eventNodeId, connectionId, documentId, environmentId, viewId, claimId);
+    return publishOpen(binding);
+  }
+
+  /** 落实本地授权、路由缓存与一次性入口票据；任何一步失败都不得留下可被命令命中的半绑定。 */
+  private EnvironmentIdeViewDTO publishOpen(IdeViewBindingRegistry.Binding binding) {
+    recordAuthorized(binding);
+    UUID viewId = binding.viewId();
+    EnvironmentId environmentId = binding.environmentId();
     bootstrapTickets.revokeView(environmentId, viewId.toString());
     String ticket;
     try {
       ticket =
-          bootstrapTickets.issue(result.identity(), viewId.toString(), bindingEpoch, workspacePath);
+          bootstrapTickets.issue(
+              binding.daemonIdentity(),
+              viewId.toString(),
+              binding.bindingEpoch(),
+              binding.workspacePath());
     } catch (RuntimeException error) {
       // 出票失败时回滚本地授权/路由；Daemon 视图留给其正常过期回收，不伪造成功入口。
       revokeLocal(binding);
@@ -154,6 +195,23 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
             + "?token="
             + ticket);
     return dto;
+  }
+
+  /** 授权与路由缓存只能成对发布；授权失败时该视图不得出现在任何后续命令的缓存中。 */
+  private void recordAuthorized(IdeViewBindingRegistry.Binding binding) {
+    if (viewAuthorization != null) {
+      try {
+        viewAuthorization.viewOpened(
+            binding.daemonIdentity(),
+            binding.viewId().toString(),
+            binding.bindingEpoch(),
+            binding.workspacePath());
+      } catch (IllegalStateException error) {
+        throw new AiEnvironmentIdeUnavailableException(
+            "environment IDE view capacity is exhausted", error);
+      }
+    }
+    bindings.record(binding);
   }
 
   @Override
@@ -289,9 +347,9 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     if (views == null) {
       throw protocolFailure("daemon did not return a view list");
     }
-    List<IdeViewBindingRegistry.Binding> current = new ArrayList<>(views.size());
+    List<IdeViewBindingRegistry.Binding> authorized = new ArrayList<>(views.size());
     for (IdeViewSummary view : views) {
-      current.add(
+      IdeViewBindingRegistry.Binding binding =
           new IdeViewBindingRegistry.Binding(
               result.identity(),
               view.viewId(),
@@ -302,10 +360,31 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
               view.bindingEpoch(),
               view.directory(),
               view.workspacePath(),
-              view.state()));
+              view.state());
+      // 权威快照同样必须先取得本地授权才能进入路由缓存；容量失败时该视图不参与任何后续命令。
+      if (authorizeForRouting(binding)) {
+        authorized.add(binding);
+      }
     }
-    revokeStaleAuthorizations(environmentId, current);
-    return bindings.replaceEnvironment(environmentId, current);
+    revokeStaleAuthorizations(environmentId, authorized);
+    return bindings.replaceEnvironment(environmentId, authorized);
+  }
+
+  /** 快照重建时对仍存在的视图补授权；失败只拒绝该视图，不影响其它视图与快照读取。 */
+  private boolean authorizeForRouting(IdeViewBindingRegistry.Binding binding) {
+    if (viewAuthorization == null) {
+      return true;
+    }
+    try {
+      viewAuthorization.viewOpened(
+          binding.daemonIdentity(),
+          binding.viewId().toString(),
+          binding.bindingEpoch(),
+          binding.workspacePath());
+      return true;
+    } catch (IllegalStateException error) {
+      return false;
+    }
   }
 
   /** 权威列表缺少的视图或 epoch 已换代时，撤销旧会话；新绑定自己的会话不受影响。只比对 Daemon 实际返回的 view+epoch。 */
@@ -412,9 +491,10 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     IdeRequest request;
     try {
       request = transport.requestIde(environmentId, command);
-    } catch (EnvironmentCapabilityUnavailableException
-        | EnvironmentCapabilityBusyException
-        | EnvironmentCapabilitySendUncertainException error) {
+    } catch (EnvironmentCapabilitySendUncertainException error) {
+      throw new IdeOutcomeUnknownException(
+          "environment IDE command outcome is uncertain", error);
+    } catch (EnvironmentCapabilityUnavailableException | EnvironmentCapabilityBusyException error) {
       throw new AiEnvironmentIdeUnavailableException(
           "environment IDE channel is unavailable", error);
     }
@@ -423,15 +503,14 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
       reply = request.reply().get(commandTimeout.toMillis(), TimeUnit.MILLISECONDS);
     } catch (TimeoutException error) {
       transport.abandonIde(request.invocationId());
-      throw new AiEnvironmentIdeUnavailableException("environment IDE command timed out", error);
+      throw new IdeOutcomeUnknownException("environment IDE command timed out", error);
     } catch (InterruptedException error) {
       Thread.currentThread().interrupt();
       transport.abandonIde(request.invocationId());
-      throw new AiEnvironmentIdeUnavailableException(
-          "environment IDE command was interrupted", error);
+      throw new IdeOutcomeUnknownException("environment IDE command was interrupted", error);
     } catch (ExecutionException error) {
-      throw new AiEnvironmentIdeUnavailableException(
-          "environment IDE command failed", error.getCause());
+      throw new IdeOutcomeUnknownException(
+          "environment IDE command failed without a confirmed outcome", error.getCause());
     }
     return new IdeCall(reply, request.identity());
   }
@@ -570,4 +649,12 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
   }
 
   private record IdeCall(IdeReply reply, DaemonConnectionIdentity identity) {}
+
+  /** 命令可能已到达 Daemon 但未收到确定回执；只允许 claim 按原身份对账，其它副作用不得重放。 */
+  private static final class IdeOutcomeUnknownException extends AiEnvironmentIdeUnavailableException {
+
+    private IdeOutcomeUnknownException(String message, Throwable cause) {
+      super(message, cause);
+    }
+  }
 }

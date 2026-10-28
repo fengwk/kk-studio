@@ -3561,7 +3561,8 @@ class EnvironmentDaemonServerTest {
         new DaemonIdeLease(2L, List.of(new DaemonIdeLease.Binding(viewId, documentId, 3L)));
 
     fixture.server.sendDataBind(ENVIRONMENT_ID, dataBind);
-    fixture.server.sendIdeLease(ENVIRONMENT_ID, ideLease);
+    fixture.server.sendIdeLease(
+        ENVIRONMENT_ID, new DaemonConnectionIdentity(ENVIRONMENT_ID, INSTANCE_ID), ideLease);
 
     DaemonEnvelope bindFrame = channel.envelopes().get(channel.envelopes().size() - 2);
     assertEquals(DaemonMessageType.DATA_BIND, bindFrame.messageType());
@@ -3579,7 +3580,30 @@ class EnvironmentDaemonServerTest {
         () -> fixture.server.sendDataBind(ENVIRONMENT_ID, dataBind));
     assertThrows(
         EnvironmentCapabilityUnavailableException.class,
-        () -> fixture.server.sendIdeLease(ENVIRONMENT_ID, ideLease));
+        () -> fixture.server.sendIdeLease(
+            ENVIRONMENT_ID, new DaemonConnectionIdentity(ENVIRONMENT_ID, INSTANCE_ID), ideLease));
+
+    // 新实例接管后，旧代际轮次不得落入当前连接；当前代际的轮次仍可发送。
+    fixture.leaseStore.holdsReadyLease = true;
+    fixture.server.close("channel-runtime-controls");
+    FakeChannel replacement =
+        fixture.connectReady("channel-runtime-controls-takeover", OTHER_INSTANCE_ID);
+    assertEquals(
+        OTHER_INSTANCE_ID,
+        fixture.server.connectionIdentity(ENVIRONMENT_ID).orElseThrow().daemonInstanceId());
+    assertThrows(
+        EnvironmentCapabilityUnavailableException.class,
+        () -> fixture.server.sendIdeLease(
+            ENVIRONMENT_ID,
+            new DaemonConnectionIdentity(ENVIRONMENT_ID, INSTANCE_ID),
+            ideLease));
+    assertTrue(
+        replacement.envelopes().stream()
+            .noneMatch(envelope -> envelope.messageType() == DaemonMessageType.IDE_LEASE));
+
+    fixture.server.sendIdeLease(
+        ENVIRONMENT_ID, new DaemonConnectionIdentity(ENVIRONMENT_ID, OTHER_INSTANCE_ID), ideLease);
+    assertEquals(DaemonMessageType.IDE_LEASE, replacement.lastEnvelope().messageType());
   }
 
   /** 意图：READY 缓存当前运行快照；RUNTIME_STATUS 仅在更高 revision 时替换，同 revision 同内容幂等。 */
