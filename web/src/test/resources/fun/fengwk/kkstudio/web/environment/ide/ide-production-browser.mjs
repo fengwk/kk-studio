@@ -6,6 +6,7 @@
 //
 // Protocol (stdin): the first line is the JSON configuration
 //   {playwrightModule, baseUrl, environmentId, documentId, workspaceDirectory,
+//    requestedDirectory, canonicalDirectory, draftPath,
 //    views: [{viewId, bindingEpoch, entryUrl}, ...]}
 // every later line is {"continue":true} and releases the next synchronisation point.
 //
@@ -71,7 +72,10 @@ function parseConfig(raw) {
   if (typeof config !== 'object' || config === null) {
     throw namedError('ConfigurationError')
   }
-  const keys = ['playwrightModule', 'baseUrl', 'environmentId', 'documentId', 'workspaceDirectory', 'browserTempDirectory']
+  const keys = [
+    'playwrightModule', 'baseUrl', 'environmentId', 'documentId', 'workspaceDirectory',
+    'browserTempDirectory', 'requestedDirectory', 'canonicalDirectory', 'draftPath',
+  ]
   if (keys.some((key) => typeof config[key] !== 'string' || config[key].length === 0)) {
     throw namedError('ConfigurationError')
   }
@@ -98,6 +102,9 @@ function parseConfig(raw) {
     documentId: config.documentId,
     workspaceDirectory: resolve(config.workspaceDirectory),
     browserTempDirectory: resolve(config.browserTempDirectory),
+    requestedDirectory: resolve(config.requestedDirectory),
+    canonicalDirectory: resolve(config.canonicalDirectory),
+    draftPath: resolve(config.draftPath),
     views,
   }
 }
@@ -113,10 +120,85 @@ async function focusTerminal(config, view) {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ documentId: config.documentId, bindingEpoch: view.bindingEpoch }),
   })
-  await response.text().catch(() => '')
+  const text = await response.text()
   if (!response.ok) {
+    let result
+    try {
+      result = JSON.parse(text)
+    } catch {
+      result = {}
+    }
+    const details = new Map([
+      ['terminal supervision failed', 'supervision-failed'],
+      ['terminal supervision is unavailable', 'supervision-unavailable'],
+      ['terminal could not be focused', 'focus-failed'],
+      ['ide window did not respond', 'window-timeout'],
+      ['ide window is not connected', 'window-disconnected'],
+      ['ide window closed', 'window-closed'],
+      ['ide bridge closed', 'bridge-closed'],
+      ['IDE view is gone; open a new view before retrying', 'view-gone'],
+    ])
+    const code = result.code === 'ide_unavailable' ? 'ide-unavailable'
+      : result.code === 'validation' ? 'validation' : 'other'
+    stage(`focus-code-${code}-detail-${details.get(result.errors?.detail) || 'other'}`)
     throw new HttpStatusError(response.status)
   }
+}
+
+/** The actual daemon-confirmed directory must be the canonical target, not the symlink input. */
+async function changeDirectory(config, view) {
+  if (config.requestedDirectory === config.canonicalDirectory) {
+    throw namedError('ConfigurationError')
+  }
+  const response = await fetch(`${viewUrl(config, view)}/directory`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      documentId: config.documentId,
+      bindingEpoch: view.bindingEpoch,
+      directory: config.requestedDirectory,
+    }),
+  })
+  if (response.status !== 200) {
+    throw new HttpStatusError(response.status)
+  }
+  const body = await response.json()
+  if (body.data?.directory !== config.canonicalDirectory) {
+    throw namedError('DirectoryReplyError')
+  }
+}
+
+/** Register the real code-server service worker only within this Studio view. */
+async function registerViewWorker(page, config, view) {
+  const base = `/environment-ide/${config.environmentId}/${view.viewId}/`
+  const scope = await page.evaluate(async (viewBase) => {
+    const script = `${viewBase}_static/out/browser/serviceWorker.js`
+    const registration = await navigator.serviceWorker.register(script, { scope: viewBase })
+    const worker = registration.active || registration.installing || registration.waiting
+    if (!worker || worker.scriptURL !== new URL(script, location.origin).href) {
+      throw new Error('worker script mismatch')
+    }
+    if (worker.state !== 'activated') {
+      await new Promise((accept, reject) => {
+        const timer = setTimeout(() => reject(new Error('worker activation timeout')), 30000)
+        const changed = () => {
+          if (worker.state === 'activated' || worker.state === 'redundant') {
+            clearTimeout(timer)
+            worker.removeEventListener('statechange', changed)
+            if (worker.state === 'activated') accept()
+            else reject(new Error('worker became redundant'))
+          }
+        }
+        worker.addEventListener('statechange', changed)
+        changed()
+      })
+    }
+    return registration.scope
+  }, base)
+  if (scope !== new URL(base, config.baseUrl).href) {
+    throw namedError('WorkerScopeError')
+  }
+  return base
 }
 
 /** Clicks the real xterm surface of a view so keystrokes reach the managed shell. */
@@ -193,6 +275,13 @@ async function makeDirty(page) {
   stage('dirty-focus-editor')
   const editor = page.locator('.monaco-editor .view-lines').first()
   await editor.waitFor({ state: 'visible', timeout: EDITOR_TIMEOUT })
+  stage('dirty-target-content')
+  await page.waitForFunction(
+    () => document.querySelector('.monaco-editor .view-lines')?.textContent
+      ?.replaceAll('\u00a0', ' ').includes('fixture target draft'),
+    undefined,
+    { timeout: EDITOR_TIMEOUT },
+  )
   await editor.click()
   stage('dirty-type')
   await page.keyboard.type('kk-studio-unsaved-edit', { delay: 20 })
@@ -205,6 +294,9 @@ async function makeDirty(page) {
     undefined,
     { timeout: EDITOR_TIMEOUT },
   )
+  stage('dirty-indicator')
+  await page.locator('.part.editor .title.dirty, .part.editor .tab.dirty')
+    .first().waitFor({ state: 'visible', timeout: EDITOR_TIMEOUT })
 }
 
 /** Closes one view through the product's own REST API and returns the raw outcome. */
@@ -252,7 +344,10 @@ async function run(config, lines) {
 
   let browser = null
   let failure = null
+  let failureStage = null
   let cleanupFailure = null
+  let workerPage = null
+  let workerScope = null
   try {
     // The Java fixture owns this directory and deletes it only after child processes have exited.
     const browserTemp = config.browserTempDirectory
@@ -285,6 +380,30 @@ async function run(config, lines) {
     stage('terminal-b')
     await focusTerminal(config, viewB)
 
+    stage('directory-change')
+    await changeDirectory(config, viewA)
+    stage('directory-explorer')
+    await a.page.locator('.explorer-folders-view .monaco-list-row', { hasText: 'target-project' })
+      .first().waitFor({ state: 'visible', timeout: WORKBENCH_TIMEOUT })
+    await a.page.locator('.explorer-folders-view .monaco-list-row', { hasText: 'target-only.txt' })
+      .first().waitFor({ state: 'visible', timeout: WORKBENCH_TIMEOUT })
+    await b.page.locator('.explorer-folders-view .monaco-list-row', { hasText: 'original-only.txt' })
+      .first().waitFor({ state: 'visible', timeout: WORKBENCH_TIMEOUT })
+
+    // Regression blocker: keep the worker registered through the dirty normal-close request.
+    stage('worker-register')
+    workerPage = a.page
+    workerScope = `/environment-ide/${config.environmentId}/${viewA.viewId}/`
+    await registerViewWorker(a.page, config, viewA)
+    const workerActive = await a.page.evaluate(async (scope) => {
+      const registration = await navigator.serviceWorker.getRegistration(scope)
+      return registration?.scope === new URL(scope, location.origin).href &&
+        registration.active?.state === 'activated'
+    }, workerScope)
+    if (!workerActive) {
+      throw namedError('WorkerInactiveError')
+    }
+
     stage('markers')
     await focusTerminalSurface(a.page)
     const pidA = await writeMarker(a.page, join(config.workspaceDirectory, 'terminal-a.pid'), 'a')
@@ -296,14 +415,23 @@ async function run(config, lines) {
 
     stage('dirty-edit')
     await makeDirty(a.page)
-    if (await readFile(join(config.workspaceDirectory, 'draft.txt'), 'utf8') !== 'fixture draft\n') {
+    if (
+      await readFile(config.draftPath, 'utf8') !== 'fixture target draft\n' ||
+      await readFile(join(config.workspaceDirectory, 'draft.txt'), 'utf8') !== 'fixture draft\n'
+    ) {
       throw namedError('DraftWasSavedError')
     }
+    stage('normal-close-render-dirty-worker-active-target-original')
 
     stage('close-rejected')
     const rejected = await closeView(config, viewA, false)
+    const targetUnchanged = await readFile(config.draftPath, 'utf8') === 'fixture target draft\n'
+    stage(`normal-close-http-${rejected.status}-target-${targetUnchanged ? 'original' : 'changed'}`)
     if (rejected.status !== 400) {
       throw new HttpStatusError(rejected.status)
+    }
+    if (!targetUnchanged) {
+      throw namedError('DraftWasSavedError')
     }
     let detail = null
     try {
@@ -346,7 +474,23 @@ async function run(config, lines) {
     }
   } catch (error) {
     failure = error
+    failureStage = currentStage
   } finally {
+    if (workerScope !== null) {
+      try {
+        const unregistered = await workerPage.evaluate(async (scope) => {
+          const registration = await navigator.serviceWorker.getRegistration(scope)
+          return registration ? registration.unregister() : true
+        }, workerScope)
+        if (!unregistered) {
+          throw namedError('WorkerUnregisterError')
+        }
+        stage('worker-finalcleanup-unregistered')
+      } catch (error) {
+        cleanupFailure = error
+        stage('worker-finalcleanup-failed')
+      }
+    }
     if (browser !== null) {
       try {
         await browser.close()
@@ -356,6 +500,10 @@ async function run(config, lines) {
     }
   }
   if (failure !== null) {
+    currentStage = failureStage
+    if (cleanupFailure !== null) {
+      throw namedError('ScenarioAndCleanupError')
+    }
     throw failure
   }
   if (cleanupFailure !== null) {
