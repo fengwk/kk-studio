@@ -9,7 +9,6 @@ import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.cluster.IdeClusterClient;
-import fun.fengwk.kkstudio.ide.cluster.IdeInternalPaths;
 import fun.fengwk.kkstudio.ide.mux.MuxHeader;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
 
@@ -23,12 +22,10 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Enumeration;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
 
@@ -119,30 +116,6 @@ public final class IdeRemoteDataPlaneForwarder {
         management);
   }
 
-  /**
-   * 旧 bootstrap/session 管理路径的单跳转发；入口迁移由浏览器会话切片完成。
-   *
-   * <p>与数据面不同，bootstrap 的 {@code Set-Cookie} 必须原样回到浏览器。
-   */
-  void forwardLegacyHttp(
-      ClusterOwnerRoute owner,
-      EnvironmentId environmentId,
-      String rawPathAndQuery,
-      HttpServletRequest request,
-      HttpServletResponse response)
-      throws IOException {
-    String canonicalPath = IdeInternalPaths.dataHttpPath(environmentId, rawPathAndQuery);
-    forward(
-        owner,
-        canonicalPath,
-        request,
-        response,
-        legacyForwardedBrowserHeaders(request, properties.requireSessionCookieName()),
-        environmentId,
-        null,
-        true);
-  }
-
   private void forward(
       ClusterOwnerRoute owner,
       String canonicalPath,
@@ -151,7 +124,7 @@ public final class IdeRemoteDataPlaneForwarder {
       List<MuxHeader> forwardedHeaders,
       EnvironmentId environmentId,
       UUID viewId,
-      boolean legacyResponse)
+      boolean management)
       throws IOException {
     URI target;
     try {
@@ -187,7 +160,7 @@ public final class IdeRemoteDataPlaneForwarder {
       response.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
       return;
     }
-    copyResponse(upstream, response, request, environmentId, viewId, legacyResponse);
+    copyResponse(upstream, response, request, environmentId, viewId, management);
   }
 
   /** 请求体来源：把 servlet 输入流按需交给内部 HTTP 客户端（流式，不整包缓冲）。 */
@@ -207,7 +180,7 @@ public final class IdeRemoteDataPlaneForwarder {
       HttpServletRequest request,
       EnvironmentId environmentId,
       UUID viewId,
-      boolean legacy)
+      boolean management)
       throws IOException {
     response.setStatus(upstream.statusCode());
     for (Map.Entry<String, List<String>> header : upstream.headers().map().entrySet()) {
@@ -216,14 +189,14 @@ public final class IdeRemoteDataPlaneForwarder {
       if (lower == null
           || lower.equals("content-length")
           || IdeDataHeaderPolicy.isHopByHop(lower)
-          || (!legacy && "set-cookie".equals(lower))) {
+          || (!management && "set-cookie".equals(lower))) {
         continue;
       }
       for (String value : header.getValue()) {
-        if (!legacy && "location".equals(lower)) {
+        if (!management && "location".equals(lower)) {
           value = IdeGatewayDataPlane.rebaseLocation(value, request, environmentId, viewId);
         }
-        if (!legacy && "service-worker-allowed".equals(lower)) {
+        if (!management && "service-worker-allowed".equals(lower)) {
           value = IdeGatewayDataPlane.rebaseWorkerScope(value, request, environmentId, viewId);
         }
         response.addHeader(name, value);
@@ -257,57 +230,6 @@ public final class IdeRemoteDataPlaneForwarder {
         headers.add(new MuxHeader("Cookie", cookie));
       } catch (IllegalArgumentException ignored) {
         // 非法 cookie 值不进入内部请求。
-      }
-    }
-    return headers;
-  }
-
-  /** bootstrap/session 的旧转发头：保留原语义并由 owner 重新执行会话校验。 */
-  private static List<MuxHeader> legacyForwardedBrowserHeaders(
-      HttpServletRequest request, String cookieName) {
-    List<MuxHeader> headers = new ArrayList<>();
-    Set<String> connectionTokens = IdeDataHeaderPolicy.connectionTokens(request);
-    Enumeration<String> names = request.getHeaderNames();
-    if (names == null) {
-      return headers;
-    }
-    while (names.hasMoreElements() && headers.size() < MAX_FORWARDED_HEADERS) {
-      String name = names.nextElement();
-      String lower = name.toLowerCase(Locale.ROOT);
-      if (lower.startsWith("x-kk-cluster-")
-          || lower.startsWith("x-forwarded-")
-          || lower.equals("cookie")
-          || lower.equals("authorization")
-          || lower.equals("proxy-authorization")
-          || lower.equals("host")
-          || lower.equals("content-length")
-          || lower.equals("connection")
-          || lower.equals("upgrade")
-          || lower.equals("transfer-encoding")
-          || connectionTokens.contains(lower)) {
-        continue;
-      }
-      Enumeration<String> values = request.getHeaders(name);
-      while (values.hasMoreElements() && headers.size() < MAX_FORWARDED_HEADERS) {
-        try {
-          headers.add(new MuxHeader(name, values.nextElement()));
-        } catch (IllegalArgumentException ignored) {
-          // 非法 header 不进入内部请求。
-        }
-      }
-    }
-    Cookie[] cookies = request.getCookies();
-    if (cookies != null) {
-      for (Cookie cookie : cookies) {
-        if (!cookie.getName().equals(cookieName)) {
-          continue;
-        }
-        try {
-          headers.add(new MuxHeader("Cookie", cookie.getName() + "=" + cookie.getValue()));
-        } catch (IllegalArgumentException ignored) {
-          // 非法 cookie 值不进入内部请求。
-        }
-        break;
       }
     }
     return headers;

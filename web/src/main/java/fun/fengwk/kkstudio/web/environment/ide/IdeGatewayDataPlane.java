@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.web.environment.ide;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
@@ -75,7 +74,7 @@ public final class IdeGatewayDataPlane {
       ClusterNodeRegistry clusterNodeRegistry,
       IdeRemoteDataPlaneForwarder remoteForwarder,
       IdeDataConnectionRegistry dataConnections,
-      @Nullable IdeDataViewAuthorizer viewAuthorizer,
+      IdeDataViewAuthorizer viewAuthorizer,
       IdeBrowserSessionHandler browserSessionHandler) {
     this.transport = Objects.requireNonNull(transport, "transport");
     this.properties = Objects.requireNonNull(properties, "properties");
@@ -84,7 +83,7 @@ public final class IdeGatewayDataPlane {
     this.clusterNodeRegistry = Objects.requireNonNull(clusterNodeRegistry, "clusterNodeRegistry");
     this.remoteForwarder = Objects.requireNonNull(remoteForwarder, "remoteForwarder");
     this.dataConnections = Objects.requireNonNull(dataConnections, "dataConnections");
-    this.viewAuthorizer = viewAuthorizer;
+    this.viewAuthorizer = Objects.requireNonNull(viewAuthorizer, "viewAuthorizer");
   }
 
   /**
@@ -199,9 +198,6 @@ public final class IdeGatewayDataPlane {
 
   private IdeDataViewAuthorizer.IdeDataViewAccess authorize(
       EnvironmentId environmentId, UUID viewId, String cookieHeader) {
-    if (viewAuthorizer == null) {
-      return null;
-    }
     Optional<IdeDataViewAuthorizer.IdeDataViewAccess> access =
         viewAuthorizer.authorize(environmentId, viewId, cookieHeader);
     if (access.isEmpty() || !access.get().viewId().equals(viewId)) {
@@ -647,18 +643,21 @@ public final class IdeGatewayDataPlane {
       dispatch(
           () -> {
             if (terminal.isDone()) {
+              data.consumed();
               return;
             }
             if (data.kind() != MuxDataKind.HTTP) {
               fail(new IOException("WS DATA received on an HTTP stream"), 502);
+              data.consumed();
               return;
             }
             try {
               response.getOutputStream().write(data.payload());
-              data.consumed();
               progressed();
-            } catch (IOException error) {
+            } catch (IOException | RuntimeException error) {
               fail(error, 502);
+            } finally {
+              data.consumed();
             }
           });
     }
