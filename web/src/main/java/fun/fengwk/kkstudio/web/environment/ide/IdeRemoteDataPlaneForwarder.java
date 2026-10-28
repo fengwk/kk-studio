@@ -10,7 +10,7 @@ import org.springframework.stereotype.Component;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.cluster.IdeClusterClient;
 import fun.fengwk.kkstudio.ide.cluster.IdeInternalPaths;
-import fun.fengwk.kkstudio.ide.protocol.IdeHeader;
+import fun.fengwk.kkstudio.ide.mux.MuxHeader;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
 
 import java.io.IOException;
@@ -29,17 +29,15 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 import java.util.function.Supplier;
 
 /**
- * 非 owner 节点把浏览器 HTTP 数据面（含 bootstrap/cookie 消费）单跳到 READY owner 的客户端。
+ * 非 owner 节点把浏览器 HTTP 数据面单跳到 READY owner 的客户端。
  *
- * <p>每个 exchange 建一条内部认证 HTTP 连接、结束即关闭：请求体与响应体都以流的方式双向搬运，不做整包缓冲、不落 SQL/PG；响应状态与 多值头（含 {@code
- * Set-Cookie}）原样回传，hop-by-hop 头被过滤。原始 path/query 只放在被 HMAC 覆盖的 {@code ?path=} 里，绝不放进未签名 的额外
- * header；不自动重放、不重试、不在失败时回退本地。
- *
- * <p>转发方只携带 IDE 会话 cookie（按 cookie 名精确匹配）与安全头：Studio 域 cookie、{@code Authorization}、内部路由头与代理链一律不
- * 透传。浏览器侧链路的 TLS 状态用固定头显式声明，owner 据此决定 cookie 的 {@code Secure} 属性。
+ * <p>数据流使用 {@code /internal/environment-ide/{env}/data-http}，只有 IDE 会话 cookie
+ * 与安全头跨节点；请求体与响应体始终流式搬运， 不整包缓冲、不落 SQL/PG。每次 exchange 最多一次认证请求，失败即上抛，绝不自动重放或回退本地。bootstrap/session
+ * 等管理路径保留独立入口。
  */
 @Slf4j
 @Component
@@ -47,7 +45,7 @@ public final class IdeRemoteDataPlaneForwarder {
 
   private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
 
-  private static final int MAX_FORWARDED_HEADERS = 64;
+  private static final int MAX_FORWARDED_HEADERS = 100;
 
   private final IdeClusterClient clusterInternalClient;
   private final IdeGatewayProperties properties;
@@ -75,12 +73,34 @@ public final class IdeRemoteDataPlaneForwarder {
     this.httpClient = Objects.requireNonNull(httpClient, "httpClient");
   }
 
+  /** 浏览器视图作用域 HTTP 的单跳转发。 */
+  void forwardDataHttp(
+      ClusterOwnerRoute owner,
+      EnvironmentId environmentId,
+      UUID viewId,
+      String rawPathAndQuery,
+      HttpServletRequest request,
+      HttpServletResponse response)
+      throws IOException {
+    String canonicalPath =
+        IdeDataInternalPaths.dataHttpPath(environmentId, viewId, rawPathAndQuery);
+    forward(
+        owner,
+        canonicalPath,
+        request,
+        response,
+        forwardedBrowserHeaders(request, properties, false),
+        environmentId,
+        viewId,
+        false);
+  }
+
   /**
-   * 把一个浏览器 HTTP exchange（含 bootstrap）单跳转发到 owner 的内部数据入口。
+   * 旧 bootstrap/session 管理路径的单跳转发；入口迁移由浏览器会话切片完成。
    *
-   * @param rawPathAndQuery 浏览器原始 path（含 query）
+   * <p>与数据面不同，bootstrap 的 {@code Set-Cookie} 必须原样回到浏览器。
    */
-  void forwardHttp(
+  void forwardLegacyHttp(
       ClusterOwnerRoute owner,
       EnvironmentId environmentId,
       String rawPathAndQuery,
@@ -88,6 +108,27 @@ public final class IdeRemoteDataPlaneForwarder {
       HttpServletResponse response)
       throws IOException {
     String canonicalPath = IdeInternalPaths.dataHttpPath(environmentId, rawPathAndQuery);
+    forward(
+        owner,
+        canonicalPath,
+        request,
+        response,
+        legacyForwardedBrowserHeaders(request, properties.requireSessionCookieName()),
+        environmentId,
+        null,
+        true);
+  }
+
+  private void forward(
+      ClusterOwnerRoute owner,
+      String canonicalPath,
+      HttpServletRequest request,
+      HttpServletResponse response,
+      List<MuxHeader> forwardedHeaders,
+      EnvironmentId environmentId,
+      UUID viewId,
+      boolean legacyResponse)
+      throws IOException {
     URI target;
     try {
       target = owner.internalUrl().resolve(canonicalPath);
@@ -100,7 +141,7 @@ public final class IdeRemoteDataPlaneForwarder {
             .timeout(properties.requireRequestTimeout())
             .method(
                 request.getMethod(), HttpRequest.BodyPublishers.ofInputStream(bodySource(request)));
-    for (IdeHeader header : forwardedBrowserHeaders(request, properties)) {
+    for (MuxHeader header : forwardedHeaders) {
       builder.header(header.name(), header.value());
     }
     clusterInternalClient
@@ -122,7 +163,7 @@ public final class IdeRemoteDataPlaneForwarder {
       response.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
       return;
     }
-    copyResponse(upstream, response);
+    copyResponse(upstream, response, request, environmentId, viewId, legacyResponse);
   }
 
   /** 请求体来源：把 servlet 输入流按需交给内部 HTTP 客户端（流式，不整包缓冲）。 */
@@ -136,15 +177,28 @@ public final class IdeRemoteDataPlaneForwarder {
     };
   }
 
-  private void copyResponse(HttpResponse<InputStream> upstream, HttpServletResponse response)
+  private static void copyResponse(
+      HttpResponse<InputStream> upstream,
+      HttpServletResponse response,
+      HttpServletRequest request,
+      EnvironmentId environmentId,
+      UUID viewId,
+      boolean legacy)
       throws IOException {
     response.setStatus(upstream.statusCode());
     for (Map.Entry<String, List<String>> header : upstream.headers().map().entrySet()) {
       String name = header.getKey();
-      if (name == null || IdeGatewayDataPlane.isNeverForwarded(name.toLowerCase(Locale.ROOT))) {
+      String lower = name == null ? null : name.toLowerCase(Locale.ROOT);
+      if (lower == null
+          || lower.equals("content-length")
+          || IdeDataHeaderPolicy.isHopByHop(lower)
+          || (!legacy && "set-cookie".equals(lower))) {
         continue;
       }
       for (String value : header.getValue()) {
+        if (!legacy && "location".equals(lower)) {
+          value = IdeGatewayDataPlane.rebaseLocation(value, request, environmentId, viewId);
+        }
         response.addHeader(name, value);
       }
     }
@@ -155,43 +209,78 @@ public final class IdeRemoteDataPlaneForwarder {
     }
   }
 
-  /**
-   * 浏览器 → owner 的转发头（HTTP 与 WS 两条路径共用）：屏蔽凭据/内部/代理链头，并只补一个 IDE 会话 cookie。
-   *
-   * <p>Studio 域 cookie 与 {@code Authorization} 绝不跨越节点边界。
-   */
-  static List<IdeHeader> forwardedBrowserHeaders(
+  /** 浏览器 → owner 的转发头：只补一个 IDE 会话 cookie，凭据/内部/代理链头不跨节点。 */
+  static List<MuxHeader> forwardedBrowserHeaders(
       HttpServletRequest request, IdeGatewayProperties properties) {
-    return forwardedHeaders(request, properties.requireSessionCookieName());
+    return forwardedBrowserHeaders(request, properties, true);
   }
 
-  private static List<IdeHeader> forwardedHeaders(HttpServletRequest request, String cookieName) {
-    List<IdeHeader> headers = new ArrayList<>();
-    Set<String> connectionTokens = IdeGatewayDataPlane.connectionTokens(request);
+  private static List<MuxHeader> forwardedBrowserHeaders(
+      HttpServletRequest request, IdeGatewayProperties properties, boolean webSocket) {
+    return forwardedHeaders(request, properties.requireSessionCookieName(), webSocket);
+  }
+
+  private static List<MuxHeader> forwardedHeaders(
+      HttpServletRequest request, String cookieName, boolean webSocket) {
+    List<MuxHeader> headers =
+        new ArrayList<>(IdeDataHeaderPolicy.forwardRequestHeaders(request, webSocket));
+    String cookie = ideCookie(request, cookieName);
+    if (cookie != null && headers.size() < MAX_FORWARDED_HEADERS) {
+      try {
+        headers.add(new MuxHeader("Cookie", cookie));
+      } catch (IllegalArgumentException ignored) {
+        // 非法 cookie 值不进入内部请求。
+      }
+    }
+    return headers;
+  }
+
+  /** bootstrap/session 的旧转发头：保留原语义并由 owner 重新执行会话校验。 */
+  private static List<MuxHeader> legacyForwardedBrowserHeaders(
+      HttpServletRequest request, String cookieName) {
+    List<MuxHeader> headers = new ArrayList<>();
+    Set<String> connectionTokens = IdeDataHeaderPolicy.connectionTokens(request);
     Enumeration<String> names = request.getHeaderNames();
-    if (names != null) {
-      while (names.hasMoreElements() && headers.size() < MAX_FORWARDED_HEADERS) {
-        String name = names.nextElement();
-        String lower = name.toLowerCase(Locale.ROOT);
-        if (IdeGatewayDataPlane.isNeverForwarded(lower) || connectionTokens.contains(lower)) {
-          continue;
-        }
-        Enumeration<String> values = request.getHeaders(name);
-        while (values.hasMoreElements() && headers.size() < MAX_FORWARDED_HEADERS) {
-          try {
-            headers.add(new IdeHeader(name, values.nextElement()));
-          } catch (IllegalArgumentException ignored) {
-            // 非法 header 名/值不进入内部请求。
-          }
+    if (names == null) {
+      return headers;
+    }
+    while (names.hasMoreElements() && headers.size() < MAX_FORWARDED_HEADERS) {
+      String name = names.nextElement();
+      String lower = name.toLowerCase(Locale.ROOT);
+      if (lower.startsWith("x-kk-cluster-")
+          || lower.startsWith("x-forwarded-")
+          || lower.equals("cookie")
+          || lower.equals("authorization")
+          || lower.equals("proxy-authorization")
+          || lower.equals("host")
+          || lower.equals("content-length")
+          || lower.equals("connection")
+          || lower.equals("upgrade")
+          || lower.equals("transfer-encoding")
+          || connectionTokens.contains(lower)) {
+        continue;
+      }
+      Enumeration<String> values = request.getHeaders(name);
+      while (values.hasMoreElements() && headers.size() < MAX_FORWARDED_HEADERS) {
+        try {
+          headers.add(new MuxHeader(name, values.nextElement()));
+        } catch (IllegalArgumentException ignored) {
+          // 非法 header 不进入内部请求。
         }
       }
     }
-    String cookie = ideCookie(request, cookieName);
-    if (cookie != null) {
-      try {
-        headers.add(new IdeHeader("Cookie", cookie));
-      } catch (IllegalArgumentException ignored) {
-        // 非法 cookie 值不进入内部请求。
+    Cookie[] cookies = request.getCookies();
+    if (cookies != null) {
+      for (Cookie cookie : cookies) {
+        if (!cookie.getName().equals(cookieName)) {
+          continue;
+        }
+        try {
+          headers.add(new MuxHeader("Cookie", cookie.getName() + "=" + cookie.getValue()));
+        } catch (IllegalArgumentException ignored) {
+          // 非法 cookie 值不进入内部请求。
+        }
+        break;
       }
     }
     return headers;

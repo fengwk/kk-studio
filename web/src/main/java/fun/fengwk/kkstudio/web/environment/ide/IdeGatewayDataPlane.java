@@ -4,28 +4,28 @@ import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Component;
-import org.springframework.web.socket.CloseStatus;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityBusyException;
-import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilitySendUncertainException;
-import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
 import fun.fengwk.kkstudio.ide.IdeBootstrapTicketService;
 import fun.fengwk.kkstudio.ide.IdeCommandTransport;
 import fun.fengwk.kkstudio.ide.IdeGenerationState;
-import fun.fengwk.kkstudio.ide.IdeRequest;
-import fun.fengwk.kkstudio.ide.protocol.DaemonIdeStreamCodec;
-import fun.fengwk.kkstudio.ide.protocol.IdeAction;
-import fun.fengwk.kkstudio.ide.protocol.IdeCommand;
-import fun.fengwk.kkstudio.ide.protocol.IdeHeader;
-import fun.fengwk.kkstudio.ide.protocol.IdeStreamBinaryFrame;
-import fun.fengwk.kkstudio.ide.protocol.IdeStreamControlFrame;
-import fun.fengwk.kkstudio.ide.protocol.IdeStreamMode;
-import fun.fengwk.kkstudio.ide.stream.IdeStreamPairingException;
-import fun.fengwk.kkstudio.ide.stream.IdeStreamPairingRegistry;
-import fun.fengwk.kkstudio.ide.stream.IdeStreamRelay;
-import fun.fengwk.kkstudio.ide.stream.IdeStreamTicketService;
+import fun.fengwk.kkstudio.ide.data.IdeDataConnectTimeoutException;
+import fun.fengwk.kkstudio.ide.data.IdeDataConnectionRegistry;
+import fun.fengwk.kkstudio.ide.data.IdeDataGenerationReplacedException;
+import fun.fengwk.kkstudio.ide.data.IdeDataUnavailableException;
+import fun.fengwk.kkstudio.ide.mux.MuxBackpressureException;
+import fun.fengwk.kkstudio.ide.mux.MuxClose;
+import fun.fengwk.kkstudio.ide.mux.MuxConnectionClosedException;
+import fun.fengwk.kkstudio.ide.mux.MuxDataKind;
+import fun.fengwk.kkstudio.ide.mux.MuxHeader;
+import fun.fengwk.kkstudio.ide.mux.MuxHeaders;
+import fun.fengwk.kkstudio.ide.mux.MuxReceivedData;
+import fun.fengwk.kkstudio.ide.mux.MuxReset;
+import fun.fengwk.kkstudio.ide.mux.MuxStream;
+import fun.fengwk.kkstudio.ide.mux.MuxStreamClosedException;
+import fun.fengwk.kkstudio.ide.mux.MuxStreamListener;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
 
@@ -34,254 +34,205 @@ import java.io.InputStream;
 import java.net.SocketTimeoutException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Enumeration;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * IDE 同源网关的数据面：把浏览器 HTTP exchange 经一次性 ticket 与 Daemon 反向连接配对后双向转发。
+ * IDE 同源网关的 HTTP 数据面：在 owner 上把浏览器 HTTP 逻辑流映射到当前复用数据连接的一条 mux 流。
  *
- * <p>每个请求：解析 host-only 会话 cookie → 复核其绑定的 Daemon 实例代际（{@link IdeGenerationState}）→ 铸造一次性 stream
- * ticket 并登记 pending 配对 → 通过 {@code OPEN_STREAM} 命令把 ticket + 受控 streamUrl 交给 Daemon → 等待反向连接后按
- * credit 双向转发请求体与响应。 请求/响应头都过滤 hop-by-hop 与 {@code content-length}；IDE 数据不进入 SQL/PG。
+ * <p>浏览器入口是 {@code /environment-ide/{environmentId}/{viewId}/...}。非 owner 节点先按 owner 路由把请求单跳转发到
+ * {@code /internal/environment-ide/{environmentId}/data-http?viewId=...&path=...}，owner
+ * 再用同一套视图授权与数据面执行； 不依赖粘性会话，也不在非 owner 保存浏览器会话状态。
  *
- * <p>失败一律 fail-closed：无 cookie → 401；代际已被另一个 Daemon 实例接管 → 409；暂无 READY 连接或通道不可用 → 503（同一实例重连后 原
- * cookie 继续有效）；等待反向连接超时 → 504 并放弃在途 {@code OPEN_STREAM}。任何路径都不重放副作用、不伪造响应体。浏览器侧用 {@link
- * #handleSession} 探测会话，据此决定等待还是重新打开视图。
+ * <p>每个 exchange 的请求与响应共享一条逻辑流：请求体与 END 由独立虚拟线程有序发送，响应 DATA 只有真实写入 servlet 输出后才归还 credit。收到响应 END
+ * 后先 flush 浏览器输出，成功才发送 COMPLETE；任何失败都用 RESET 结束该流，物理写失败不重试、不重放。
  */
 @Slf4j
 @Component
 public final class IdeGatewayDataPlane {
 
-  private static final Set<String> HOP_BY_HOP =
-      Set.of(
-          "connection",
-          "keep-alive",
-          "proxy-authenticate",
-          "proxy-authorization",
-          "te",
-          "trailer",
-          "transfer-encoding",
-          "upgrade");
+  private static final int MAX_REQUEST_CHUNK_BYTES = 64 * 1024;
 
-  private static final Set<String> DROPPED_REQUEST_HEADERS =
-      Set.of("host", "content-length", "connection", "upgrade", "transfer-encoding");
+  private static final long WAIT_SLICE_MILLIS = 100L;
 
-  /** 绝不进入 Daemon 的请求头：浏览器凭据、内部认证、代理链与 WS 握手材料。 */
-  private static final Set<String> NEVER_FORWARDED_REQUEST_HEADERS =
-      Set.of(
-          "cookie",
-          // 浏览器 Origin/Referer 只在浏览器面向的边缘有意义；内部单跳由 HMAC 认证，绝不携带浏览器来源。
-          "origin",
-          "referer",
-          "authorization",
-          "proxy-authorization",
-          "forwarded",
-          "sec-websocket-key",
-          "sec-websocket-version",
-          "sec-websocket-extensions",
-          "sec-websocket-protocol");
-
-  /** 前缀级屏蔽：内部路由头与 {@code X-Forwarded-*} 代理链绝不透传。 */
-  private static final List<String> NEVER_FORWARDED_REQUEST_HEADER_PREFIXES =
-      List.of("x-kk-cluster-", "x-forwarded-");
-
-  private static final int MAX_FORWARDED_HEADERS = 64;
-
-  /** 单次入站轮询间隔：空闲轮询必须远小于 exchange 的真实 deadline，从而既能及时反应关闭也不误判慢速上游。 */
-  private static final long POLL_INTERVAL_NANOS = 200_000_000L;
+  private static final long BACKPRESSURE_RETRY_MILLIS = 5L;
 
   private final IdeCommandTransport transport;
-  private final IdeStreamTicketService streamTickets;
-  private final IdeStreamPairingRegistry<IdeStreamPeer> pairings;
   private final IdeGatewayProperties properties;
   private final IdeBrowserSessionRegistry sessions;
   private final IdeBootstrapTicketService bootstrapTickets;
   private final ClusterNodeRegistry clusterNodeRegistry;
   private final IdeRemoteDataPlaneForwarder remoteForwarder;
+  private final IdeDataConnectionRegistry dataConnections;
+  private final IdeDataViewAuthorizer viewAuthorizer;
 
   public IdeGatewayDataPlane(
       IdeCommandTransport transport,
-      IdeStreamTicketService streamTickets,
-      IdeStreamPairingRegistry<IdeStreamPeer> pairings,
       IdeGatewayProperties properties,
       IdeBrowserSessionRegistry sessions,
       IdeBootstrapTicketService bootstrapTickets,
       ClusterNodeRegistry clusterNodeRegistry,
-      IdeRemoteDataPlaneForwarder remoteForwarder) {
+      IdeRemoteDataPlaneForwarder remoteForwarder,
+      IdeDataConnectionRegistry dataConnections,
+      @Nullable IdeDataViewAuthorizer viewAuthorizer) {
     this.transport = Objects.requireNonNull(transport, "transport");
-    this.streamTickets = Objects.requireNonNull(streamTickets, "streamTickets");
-    this.pairings = Objects.requireNonNull(pairings, "pairings");
     this.properties = Objects.requireNonNull(properties, "properties");
     this.sessions = Objects.requireNonNull(sessions, "sessions");
     this.bootstrapTickets = Objects.requireNonNull(bootstrapTickets, "bootstrapTickets");
     this.clusterNodeRegistry = Objects.requireNonNull(clusterNodeRegistry, "clusterNodeRegistry");
     this.remoteForwarder = Objects.requireNonNull(remoteForwarder, "remoteForwarder");
+    this.dataConnections = Objects.requireNonNull(dataConnections, "dataConnections");
+    this.viewAuthorizer = viewAuthorizer;
   }
 
   /**
-   * 处理一个 IDE 网关路径上的浏览器 HTTP exchange。
+   * 处理一个浏览器视图作用域的 HTTP exchange。
    *
-   * @param rawPathAndQuery 原始 path（含 query），直接转发给 Daemon 侧的 code-server
+   * @param rawPathAndQuery view 基址之后的原始 path（含 query），例如 {@code /src/main.ts?x=1}
    */
   public void handleHttp(
       EnvironmentId environmentId,
+      UUID viewId,
       String rawPathAndQuery,
       HttpServletRequest request,
       HttpServletResponse response)
-      throws IOException {
-    handleHttp(environmentId, rawPathAndQuery, request, response, true);
-  }
-
-  /**
-   * 内部（已 HMAC 认证 + owner 核对）的 HTTP 数据面入口：跳过浏览器 Origin 校验，其余 cookie/代际/workspace 鉴权与转发完全一致。
-   *
-   * <p>owner 在这里消费 bootstrap/cookie 并执行数据面，因此非 owner 节点无需持有浏览器会话状态。
-   */
-  public void handleInternalHttp(
-      EnvironmentId environmentId,
-      String rawPathAndQuery,
-      HttpServletRequest request,
-      HttpServletResponse response)
-      throws IOException {
-    handleHttp(environmentId, rawPathAndQuery, request, response, false);
-  }
-
-  private void handleHttp(
-      EnvironmentId environmentId,
-      String rawPathAndQuery,
-      HttpServletRequest request,
-      HttpServletResponse response,
-      boolean requireOrigin)
       throws IOException {
     Objects.requireNonNull(environmentId, "environmentId");
+    Objects.requireNonNull(viewId, "viewId");
     Objects.requireNonNull(rawPathAndQuery, "rawPathAndQuery");
-    if (requireOrigin && !IdeOriginPolicy.httpRequestAllowed(request)) {
-      sendError(response, HttpServletResponse.SC_FORBIDDEN);
+    if (!IdeOriginPolicy.httpRequestAllowed(request)) {
+      IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_FORBIDDEN);
       return;
     }
-    if (requireOrigin && forwardRemote(environmentId, rawPathAndQuery, request, response)) {
+    Optional<ClusterOwnerRoute> route = clusterNodeRegistry.route(environmentId);
+    if (route.isEmpty()) {
+      IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_SERVICE_UNAVAILABLE);
       return;
     }
-    IdeBrowserSessionRegistry.Session session = requireSession(environmentId, request);
-    if (session == null) {
-      sendError(response, HttpServletResponse.SC_UNAUTHORIZED);
+    if (!route.get().local()) {
+      remoteForwarder.forwardDataHttp(
+          route.get(), environmentId, viewId, rawPathAndQuery, request, response);
       return;
     }
-    int rejection = generationRejection(IdeGenerationState.of(transport, session.identity()));
-    if (rejection != 0) {
-      sendError(response, rejection);
+    executeHttp(environmentId, viewId, rawPathAndQuery, request, response);
+  }
+
+  /** owner 内部入口：HMAC 与本节点 owner 归属已由 controller 校验；不重复做浏览器 Origin 与跨节点转发。 */
+  public void handleInternalHttp(
+      EnvironmentId environmentId,
+      UUID viewId,
+      String rawPathAndQuery,
+      HttpServletRequest request,
+      HttpServletResponse response)
+      throws IOException {
+    executeHttp(environmentId, viewId, rawPathAndQuery, request, response);
+  }
+
+  private void executeHttp(
+      EnvironmentId environmentId,
+      UUID viewId,
+      String rawPathAndQuery,
+      HttpServletRequest request,
+      HttpServletResponse response)
+      throws IOException {
+    IdeDataViewAuthorizer.IdeDataViewAccess access =
+        authorize(environmentId, viewId, request.getHeader("Cookie"));
+    if (access == null) {
+      IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_UNAUTHORIZED);
       return;
     }
-    if (!workspaceQueryAllowed(session, request)) {
-      sendError(response, HttpServletResponse.SC_FORBIDDEN);
+    if (!workspaceQueryAllowed(access, request)) {
+      IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_FORBIDDEN);
       return;
     }
 
-    IdeStreamTicketService.Issued issued =
-        streamTickets.issue(session.identity(), IdeStreamMode.HTTP);
-    AtomicReference<UUID> invocation = new AtomicReference<>();
-    AtomicBoolean abandoned = new AtomicBoolean();
-    Runnable abandonOnce =
-        () -> {
-          UUID id = invocation.get();
-          if (id != null && abandoned.compareAndSet(false, true)) {
-            transport.abandonIde(id);
-          }
-        };
-    IdeStreamPairingRegistry<IdeStreamPeer>.Pairing pairing =
-        pairings.open(
-            issued.ticket(), session.identity(), properties.requirePairingTimeout(), abandonOnce);
-    IdeStreamPeer peer = null;
-    IdeRequest ideRequest = null;
-    Exchange exchange = null;
-    boolean completed = false;
-    long startedNanos = System.nanoTime();
+    List<MuxHeader> headers = IdeDataHeaderPolicy.forwardRequestHeaders(request, false);
+    String upstreamPath;
     try {
-      String streamUrl = properties.streamUrl(environmentId, issued.ticket());
-      IdeCommand command =
-          new IdeCommand(
-              IdeAction.OPEN_STREAM,
-              null,
-              null,
-              issued.ticket(),
-              streamUrl,
-              IdeStreamMode.HTTP,
+      upstreamPath =
+          IdeDataInternalPaths.upstreamPath(viewId, access.bindingEpoch(), rawPathAndQuery);
+    } catch (IllegalArgumentException error) {
+      IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_BAD_REQUEST);
+      return;
+    }
+    HttpExchange exchange = new HttpExchange(environmentId, viewId, request, response);
+    MuxStream stream;
+    try {
+      stream =
+          dataConnections.openHttp(
+              environmentId,
+              viewId,
+              access.bindingEpoch(),
               request.getMethod(),
-              rawPathAndQuery,
-              forwardRequestHeaders(request));
-      ideRequest = transport.requestIde(environmentId, command);
-      invocation.set(ideRequest.invocationId());
-      peer = pairing.awaitPeer();
-      exchange =
-          new Exchange(request, response, environmentId, peer, properties.requireRequestTimeout());
-      exchange.run(request);
-      completed = true;
-    } catch (IdeStreamPairingException error) {
-      logFailedExchange(environmentId, "PAIRING_FAILED", null, ideRequest, startedNanos);
-      sendError(response, HttpServletResponse.SC_GATEWAY_TIMEOUT);
-    } catch (EnvironmentCapabilityUnavailableException
-        | EnvironmentCapabilityBusyException
-        | EnvironmentCapabilitySendUncertainException error) {
-      sendError(response, HttpServletResponse.SC_SERVICE_UNAVAILABLE);
-    } catch (IOException | RuntimeException error) {
-      if (exchange == null || !exchange.browserFailed) {
-        // 浏览器自行离开属于正常结束；其余失败来自 Daemon 侧或网关，必须留下可判定关闭方的诊断。
-        logFailedExchange(
-            environmentId, error.getClass().getSimpleName(), exchange, ideRequest, startedNanos);
-      }
-      // 上游/传输失败：尚未提交时清理已被 forward 写入的响应头与缓冲，避免残留 Content-Encoding/ETag/Location 污染错误响应；
-      // 已提交的截断响应无法回滚，保持异常中止（绝不伪造已完整收到的压缩字节）。
-      resetUncommitted(response);
-      throw error;
-    } finally {
-      abandonOnce.run();
-      try {
-        if (peer != null) {
-          // 必须先选择关闭状态，配对回收会再次幂等关闭 peer。
-          // 1000 确认响应 END 与浏览器输出 flush 均成功，失败不能被 Daemon 当作正常完成。
-          peer.close(completed ? CloseStatus.NORMAL : CloseStatus.SERVER_ERROR);
-        }
-      } finally {
-        pairing.close();
+              upstreamPath,
+              headers,
+              access.controlIdentity(),
+              exchange);
+    } catch (IdeDataConnectTimeoutException error) {
+      IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_GATEWAY_TIMEOUT);
+      return;
+    } catch (IdeDataGenerationReplacedException error) {
+      IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_CONFLICT);
+      return;
+    } catch (IdeDataUnavailableException | MuxBackpressureException error) {
+      IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+      return;
+    } catch (IllegalArgumentException error) {
+      IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_BAD_REQUEST);
+      return;
+    }
+
+    exchange.attach(stream);
+    stream.closed().whenComplete((ignored, error) -> exchange.onStreamClosed(error));
+    try {
+      exchange.run();
+    } catch (IdeHttpFailure failure) {
+      if (!response.isCommitted()) {
+        IdeDataHeaderPolicy.sendError(response, failure.status());
+      } else {
+        throw new IOException("IDE HTTP exchange failed after the browser response was committed");
       }
     }
   }
 
-  /** 一条 HTTP exchange 非正常结束时的安全诊断；不记录 URL、异常消息或对端回执文本。 */
-  private static void logFailedExchange(
-      EnvironmentId environmentId,
-      String outcome,
-      Exchange exchange,
-      IdeRequest ideRequest,
-      long startedNanos) {
-    log.info(
-        "ide http exchange failed: environment={} invocation={} outcome={} daemonClose={}"
-            + " daemonReply={} responseStarted={} fromDaemon={} frames/{} bytes durationMs={}",
-        environmentId,
-        ideRequest == null ? "-" : ideRequest.invocationId(),
-        outcome,
-        exchange == null ? "-" : IdeStreamDiagnostics.describe(exchange.peer.remoteCloseStatus()),
-        IdeStreamDiagnostics.replyFailure(ideRequest, IdeStreamDiagnostics.REPLY_GRACE),
-        exchange != null && exchange.responseStarted,
-        exchange == null ? 0 : exchange.fromDaemonFrames,
-        exchange == null ? 0 : exchange.fromDaemonBytes,
-        Duration.ofNanos(System.nanoTime() - startedNanos).toMillis());
+  private IdeDataViewAuthorizer.IdeDataViewAccess authorize(
+      EnvironmentId environmentId, UUID viewId, String cookieHeader) {
+    if (viewAuthorizer == null) {
+      return null;
+    }
+    Optional<IdeDataViewAuthorizer.IdeDataViewAccess> access =
+        viewAuthorizer.authorize(environmentId, viewId, cookieHeader);
+    if (access.isEmpty() || !access.get().viewId().equals(viewId)) {
+      return null;
+    }
+    return access.get();
+  }
+
+  /** IDE 根路径上的 {@code workspace}/{@code folder} 只能指向本视图已授权的受管 workspace。 */
+  private static boolean workspaceQueryAllowed(
+      IdeDataViewAuthorizer.IdeDataViewAccess access, HttpServletRequest request) {
+    for (String name : List.of("workspace", "folder")) {
+      String value = request.getParameter(name);
+      if (value != null && !access.authorizedWorkspaces().contains(value)) {
+        return false;
+      }
+    }
+    return true;
   }
 
   /**
    * 消费一次性 bootstrap ticket，设置 host-only/HttpOnly 会话 cookie 并跳转到受管 workspace。
    *
-   * <p>workspace 路径来自 Daemon 的 {@code OPEN_VIEW} 元数据（ticket 绑定），不接受浏览器提供的任意 path。
+   * <p>workspace 路径来自 Daemon 的 {@code OPEN_VIEW} 元数据（ticket 绑定），不接受浏览器提供的任意 path。入口授权实现归属浏览器会话切片，
+   * 本类只保留既有路径以维持独立编译边界。
    */
   public void handleBootstrap(
       EnvironmentId environmentId, HttpServletRequest request, HttpServletResponse response)
@@ -296,26 +247,25 @@ public final class IdeGatewayDataPlane {
       HttpServletResponse response)
       throws IOException {
     Objects.requireNonNull(environmentId, "environmentId");
-    if (forwardRemote(environmentId, rawPathAndQuery, request, response)) {
+    if (forwardLegacyRemote(environmentId, rawPathAndQuery, request, response)) {
       return;
     }
     Optional<IdeBootstrapTicketService.Ticket> consumed =
         bootstrapTickets.consume(request.getParameter("token"));
     if (consumed.isEmpty() || !consumed.get().environmentId().equals(environmentId)) {
-      sendError(response, HttpServletResponse.SC_GONE);
+      IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_GONE);
       return;
     }
     IdeBootstrapTicketService.Ticket ticket = consumed.get();
     if (IdeGenerationState.of(transport, ticket.identity()) == IdeGenerationState.REPLACED) {
-      sendError(response, HttpServletResponse.SC_GONE);
+      IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_GONE);
       return;
     }
     String cookieValue;
     try {
       cookieValue = sessions.open(ticket.identity(), ticket.viewId(), ticket.workspacePath());
     } catch (IllegalStateException error) {
-      // 票据对应的视图已关闭/workspace 不匹配：该入口凭据永久失效（与未知票据同一语义），绝不建立会话。
-      sendError(response, HttpServletResponse.SC_GONE);
+      IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_GONE);
       return;
     }
     String routeBase = routeBase(request, environmentId);
@@ -338,12 +288,7 @@ public final class IdeGatewayDataPlane {
             + URLEncoder.encode(ticket.workspacePath(), StandardCharsets.UTF_8));
   }
 
-  /**
-   * 浏览器探测当前 IDE 会话：204 有效；401 无会话（cookie 缺失、过期或代际已关闭）；409 代际已被另一个 Daemon 实例接管；503 暂无 READY
-   * 连接，同一实例重连后继续有效。401/409 需要重新打开视图换取新入口，503 只需等待。
-   *
-   * <p>只读、无副作用，不触达 Daemon；非 owner 节点同样单跳到 owner 裁决。
-   */
+  /** 浏览器探测当前 IDE 会话；入口授权仍由浏览器会话切片负责。 */
   public void handleSession(
       EnvironmentId environmentId,
       String rawPathAndQuery,
@@ -351,7 +296,7 @@ public final class IdeGatewayDataPlane {
       HttpServletResponse response)
       throws IOException {
     Objects.requireNonNull(environmentId, "environmentId");
-    if (forwardRemote(environmentId, rawPathAndQuery, request, response)) {
+    if (forwardLegacyRemote(environmentId, rawPathAndQuery, request, response)) {
       return;
     }
     IdeBrowserSessionRegistry.Session session = requireSession(environmentId, request);
@@ -363,7 +308,7 @@ public final class IdeGatewayDataPlane {
     response.setStatus(rejection == 0 ? HttpServletResponse.SC_NO_CONTENT : rejection);
   }
 
-  /** 会话代际不能建立新反向流时的 HTTP 状态：被另一个实例接管为 409（凭据永久失效），暂无 READY 连接为 503（同一实例重连后继续）；可以建立时返回 0。 */
+  /** 会话代际不能建立新反向流时的 HTTP 状态：被另一个实例接管为 409，暂无 READY 连接为 503。 */
   static int generationRejection(IdeGenerationState state) {
     return switch (state) {
       case CURRENT -> 0;
@@ -373,29 +318,42 @@ public final class IdeGatewayDataPlane {
   }
 
   public static String routeBase(HttpServletRequest request, EnvironmentId environmentId) {
+    return viewBase(request, environmentId, null);
+  }
+
+  /** 浏览器 view 基址；{@code viewId == null} 时只返回 Environment 根路径（管理入口）。 */
+  public static String viewBase(
+      HttpServletRequest request, EnvironmentId environmentId, UUID viewId) {
     String contextPath = request.getContextPath();
-    if (contextPath == null || contextPath.isEmpty()) {
-      return "/environment-ide/" + environmentId + "/";
-    }
-    return contextPath.endsWith("/")
-        ? contextPath + "environment-ide/" + environmentId + "/"
-        : contextPath + "/environment-ide/" + environmentId + "/";
+    String base =
+        contextPath == null || contextPath.isEmpty()
+            ? "/environment-ide/" + environmentId + "/"
+            : (contextPath.endsWith("/") ? contextPath : contextPath + "/")
+                + "environment-ide/"
+                + environmentId
+                + "/";
+    return viewId == null ? base : base + viewId + "/";
   }
 
   public static String rebaseLocation(
       String location, HttpServletRequest request, EnvironmentId environmentId) {
+    return rebaseLocation(location, request, environmentId, null);
+  }
+
+  /** 把上游绝对 path 重定位到当前浏览器 view 基址；绝对 URL 保持不变。 */
+  public static String rebaseLocation(
+      String location, HttpServletRequest request, EnvironmentId environmentId, UUID viewId) {
     if (location == null || location.isBlank()) {
       return location;
     }
     if (location.startsWith("/") && !location.startsWith("//")) {
-      String base = routeBase(request, environmentId);
+      String base = viewBase(request, environmentId, viewId);
       return base + location.substring(1);
     }
     return location;
   }
 
-  /** 非 owner 节点把整个浏览器 exchange 单跳到 READY owner；本地 owner 或未配置集群时返回 false 走本地交付。 */
-  private boolean forwardRemote(
+  private boolean forwardLegacyRemote(
       EnvironmentId environmentId,
       String rawPathAndQuery,
       HttpServletRequest request,
@@ -405,11 +363,11 @@ public final class IdeGatewayDataPlane {
     if (route.isEmpty() || route.get().local()) {
       return false;
     }
-    remoteForwarder.forwardHttp(route.get(), environmentId, rawPathAndQuery, request, response);
+    remoteForwarder.forwardLegacyHttp(
+        route.get(), environmentId, rawPathAndQuery, request, response);
     return true;
   }
 
-  /** 原始 path（含 query）；对内部入口即转发方还原出的浏览器原始 path。 */
   static String rawPathAndQuery(HttpServletRequest request) {
     String uri = request.getRequestURI();
     String query = request.getQueryString();
@@ -435,335 +393,330 @@ public final class IdeGatewayDataPlane {
     return null;
   }
 
-  /** IDE 根路径上的 {@code workspace}/{@code folder} 只能指向本代际已授权的受管 workspace（支持多面板）。 */
-  private static boolean workspaceQueryAllowed(
-      IdeBrowserSessionRegistry.Session session, HttpServletRequest request) {
-    for (String name : List.of("workspace", "folder")) {
-      String value = request.getParameter(name);
-      if (value != null && !session.authorizesWorkspace(value)) {
-        return false;
-      }
-    }
-    return true;
-  }
+  static final class IdeHttpFailure extends Exception {
 
-  static List<IdeHeader> forwardRequestHeaders(HttpServletRequest request) {
-    List<IdeHeader> headers = new ArrayList<>();
-    Enumeration<String> names = request.getHeaderNames();
-    if (names == null) {
-      return headers;
-    }
-    Set<String> connectionTokens = connectionTokens(request);
-    while (names.hasMoreElements() && headers.size() < MAX_FORWARDED_HEADERS) {
-      String name = names.nextElement();
-      String lower = name.toLowerCase(Locale.ROOT);
-      if (isNeverForwarded(lower) || connectionTokens.contains(lower)) {
-        continue;
-      }
-      Enumeration<String> values = request.getHeaders(name);
-      while (values.hasMoreElements() && headers.size() < MAX_FORWARDED_HEADERS) {
-        String value = values.nextElement();
-        try {
-          headers.add(new IdeHeader(name, value));
-        } catch (IllegalArgumentException ignored) {
-          // 非法 header 名/值不进入 wire；丢弃而不是让整个请求失败。
-        }
-      }
-    }
-    return headers;
-  }
+    private final int status;
 
-  private static boolean isHopByHop(String name) {
-    return HOP_BY_HOP.contains(name.toLowerCase(Locale.ROOT));
-  }
+    IdeHttpFailure(int status, String message) {
+      super(message);
+      this.status = status;
+    }
 
-  /** 该请求头名是否永不转发给 Daemon（含 hop-by-hop、凭据、内部/代理链与 WS 握手材料）。 */
-  static boolean isNeverForwarded(String lowerName) {
-    if (HOP_BY_HOP.contains(lowerName) || DROPPED_REQUEST_HEADERS.contains(lowerName)) {
-      return true;
+    IdeHttpFailure(int status, String message, Throwable cause) {
+      super(message, cause);
+      this.status = status;
     }
-    if (NEVER_FORWARDED_REQUEST_HEADERS.contains(lowerName)) {
-      return true;
-    }
-    for (String prefix : NEVER_FORWARDED_REQUEST_HEADER_PREFIXES) {
-      if (lowerName.startsWith(prefix)) {
-        return true;
-      }
-    }
-    return false;
-  }
 
-  /** {@code Connection} 头列出的连接级头名（逗号分隔），这些头本身也必须按 hop-by-hop 处理。 */
-  static Set<String> connectionTokens(HttpServletRequest request) {
-    Set<String> tokens = new LinkedHashSet<>();
-    Enumeration<String> values = request.getHeaders("Connection");
-    if (values == null) {
-      return tokens;
-    }
-    while (values.hasMoreElements()) {
-      for (String token : values.nextElement().split(",")) {
-        String trimmed = token.trim().toLowerCase(Locale.ROOT);
-        if (!trimmed.isEmpty()) {
-          tokens.add(trimmed);
-        }
-      }
-    }
-    return tokens;
-  }
-
-  /** 尚未提交时发出错误响应：先 reset 清除任何已写入的响应头/缓冲（如上游转发的 Content-Encoding），再 sendError。 */
-  private static void sendError(HttpServletResponse response, int status) throws IOException {
-    if (!response.isCommitted()) {
-      response.reset();
-      response.sendError(status);
+    int status() {
+      return status;
     }
   }
 
-  /** 尚未提交时回滚响应状态/头/缓冲；已提交的响应无法回滚。 */
-  private static void resetUncommitted(HttpServletResponse response) {
-    if (!response.isCommitted()) {
-      response.reset();
-    }
-  }
+  /** 单条 HTTP 逻辑流的请求发送与响应交付状态机。 */
+  private final class HttpExchange implements MuxStreamListener {
 
-  /** 单条 exchange 的转发状态：请求体发送与响应读取共用同一入站泵，保证 credit 与顺序一致。 */
-  private final class Exchange {
-
+    private final EnvironmentId environmentId;
+    private final UUID viewId;
     private final HttpServletRequest request;
     private final HttpServletResponse response;
-    private final EnvironmentId environmentId;
-    private final IdeStreamRelay relay;
-    private final IdeStreamPeer peer;
+    private final Object dispatchLock = new Object();
+    private final List<Runnable> pendingCallbacks = new ArrayList<>();
     private final long idleTimeoutNanos;
-    private long lastProgressNanos;
-    private boolean responseStarted;
-    private boolean done;
-    private boolean failed;
-    private boolean closed;
-    private boolean browserFailed;
-    private long fromDaemonFrames;
-    private long fromDaemonBytes;
+    private final AtomicReference<Throwable> failure = new AtomicReference<>();
+    private final CompletableFuture<Void> terminal = new CompletableFuture<>();
+    private volatile long lastProgressNanos = System.nanoTime();
+    private volatile boolean headersReceived;
+    private volatile boolean responseEnded;
+    private volatile boolean completeWriteSucceeded;
+    private volatile Thread sender;
+    private MuxStream stream;
+    private boolean attached;
 
-    /**
-     * @param idleTimeout 等待首帧以及两帧之间的最长空闲；只要 Daemon 持续有帧到达（数据或 ACK），长时间的传输不受整体时长限制
-     */
-    private Exchange(
-        HttpServletRequest request,
-        HttpServletResponse response,
+    private HttpExchange(
         EnvironmentId environmentId,
-        IdeStreamPeer peer,
-        Duration idleTimeout) {
+        UUID viewId,
+        HttpServletRequest request,
+        HttpServletResponse response) {
+      this.environmentId = environmentId;
+      this.viewId = viewId;
       this.request = request;
       this.response = response;
-      this.environmentId = environmentId;
-      this.peer = peer;
-      this.idleTimeoutNanos = idleTimeout.toNanos();
-      this.lastProgressNanos = System.nanoTime();
-      this.relay =
-          new IdeStreamRelay(
-              new IdeStreamRelay.Sink() {
-                @Override
-                public void sendText(String frame) {
-                  peer.sendText(frame);
-                }
-
-                @Override
-                public void sendBinary(byte[] frame) {
-                  peer.sendBinary(frame);
-                }
-
-                @Override
-                public void sendAcknowledgement(byte[] encodedAck) {
-                  peer.sendAcknowledgement(encodedAck);
-                }
-              });
+      this.idleTimeoutNanos = properties.requireRequestTimeout().toNanos();
     }
 
-    private void run(HttpServletRequest request) throws IOException {
-      sendRequestBody(request);
-      readResponse();
-      if (!failed) {
-        try {
-          response.getOutputStream().flush();
-        } catch (IOException error) {
-          browserFailed = true;
-          throw error;
-        }
+    /** OPEN 返回后绑定流，并按 wire 顺序重放等待期间到达的回调。 */
+    private void attach(MuxStream stream) {
+      this.stream = Objects.requireNonNull(stream, "stream");
+      List<Runnable> callbacks;
+      synchronized (dispatchLock) {
+        attached = true;
+        callbacks = List.copyOf(pendingCallbacks);
+        pendingCallbacks.clear();
       }
+      callbacks.forEach(Runnable::run);
     }
 
-    /**
-     * 转发请求体并在结束后发送 HTTP END。
-     *
-     * <p>与 Node peer 一致：所有 method（含 GET/HEAD）都走同一条「流式 body + END」路径，绝不因为 method 丢弃 body；无 body 时
-     * {@code read} 立即返回 -1，只发送 END。
-     */
-    private void sendRequestBody(HttpServletRequest request) throws IOException {
-      try (InputStream input = request.getInputStream()) {
-        byte[] buffer = new byte[DaemonIdeStreamCodec.MAX_PAYLOAD_BYTES];
-        int read;
-        while ((read = readBrowser(input, buffer)) > 0) {
-          ensureCredit(read);
-          if (failed || closed || done) {
-            return;
-          }
-          byte[] chunk = new byte[read];
-          System.arraycopy(buffer, 0, chunk, 0, read);
-          if (!sendToDaemon(() -> relay.sendHttpBody(chunk))) {
-            return;
-          }
-        }
-      }
-      sendToDaemon(relay::sendHttpEnd);
-    }
-
-    /** 读取浏览器请求体；浏览器中途离开属于浏览器侧结束，不记为 Daemon 侧失败。 */
-    private int readBrowser(InputStream input, byte[] buffer) throws IOException {
-      try {
-        return input.read(buffer);
-      } catch (IOException error) {
-        browserFailed = true;
-        throw error;
-      }
-    }
-
-    /**
-     * 发送请求方向的一帧。
-     *
-     * <p>上游可以不读完请求就交付完整响应并关闭反向流：peer 已关闭时停止发送请求，已入队的响应仍由 {@link #readResponse} 交付或判定不完整；peer
-     * 仍存活时的发送失败原样抛出。
-     */
-    private boolean sendToDaemon(Runnable send) {
-      try {
-        send.run();
-        return true;
-      } catch (IllegalStateException error) {
-        if (peer.closed()) {
-          return false;
-        }
-        throw error;
-      }
-    }
-
-    private void readResponse() throws IOException {
-      while (!done && !failed && !closed) {
-        pump();
-      }
-      if (failed) {
-        throw new IOException("ide reverse stream reported a failure");
-      }
-      if (!done) {
-        throw new IOException("ide reverse stream closed before the response completed");
-      }
-    }
-
-    /** 等待足够发送一个载荷为 {@code payloadBytes} 的数据帧的 credit（期间继续处理 Daemon 的响应与 ACK）。 */
-    private void ensureCredit(int payloadBytes) throws IOException {
-      while (!done && !failed && !closed && !relay.canSendToDaemon(payloadBytes)) {
-        pump();
-      }
-    }
-
-    private void pump() throws IOException {
-      IdeStreamPeer.Inbound inbound = nextInbound();
-      if (inbound == null) {
-        // 空闲轮询（非关闭）不应终止 exchange：nextInbound 只在 peer.closed() 时置位 closed。
-        return;
-      }
-      if (inbound instanceof IdeStreamPeer.Inbound.Text text) {
-        handleText(text.json());
-      } else {
-        handleBinary(((IdeStreamPeer.Inbound.Binary) inbound).frame());
-      }
-    }
-
-    /**
-     * 取下一个入站帧。
-     *
-     * <p>{@code poll} 返回 {@code null} 只表示本次没有入站帧（空闲），不是连接关闭：慢速 IDE 可能超过一个 poll 间隔才产生首字节。只有 {@link
-     * IdeStreamPeer#closed()} 才视为关闭；其余情况继续等待，直到连续空闲超过本次 exchange 的空闲上限。每个到达的帧都重新计时。
-     */
-    private IdeStreamPeer.Inbound nextInbound() throws IOException {
-      long remaining = lastProgressNanos + idleTimeoutNanos - System.nanoTime();
-      if (remaining <= 0L) {
-        throw new SocketTimeoutException("ide exchange idle timeout");
-      }
-      Duration wait = Duration.ofNanos(Math.min(remaining, POLL_INTERVAL_NANOS));
-      try {
-        IdeStreamPeer.Inbound inbound = peer.poll(wait);
-        if (inbound != null) {
-          lastProgressNanos = System.nanoTime();
-        } else if (peer.closed()) {
-          closed = true;
-        }
-        return inbound;
-      } catch (InterruptedException error) {
-        Thread.currentThread().interrupt();
-        throw new IOException("ide exchange was interrupted", error);
-      }
-    }
-
-    private void handleText(String json) {
-      IdeStreamControlFrame frame = relay.receiveText(json);
-      if (frame instanceof IdeStreamControlFrame.HttpResponse httpResponse) {
-        if (responseStarted) {
-          // 一条 exchange 只允许一个响应头：重复 HTTP_RESPONSE 是协议错误，绝不静默覆盖状态/headers。
-          failed = true;
+    private void dispatch(Runnable callback) {
+      synchronized (dispatchLock) {
+        if (!attached) {
+          pendingCallbacks.add(callback);
           return;
         }
-        applyResponse(httpResponse);
-      } else {
-        // ERROR 或 HTTP 模式下的 WS_READY 都属于不可继续的失败。
-        failed = true;
+      }
+      callback.run();
+    }
+
+    private void run() throws IdeHttpFailure {
+      sender =
+          Thread.ofVirtual().name("ide-http-request-" + stream.hashCode()).start(this::sendRequest);
+      try {
+        while (!terminal.isDone()) {
+          long remaining = lastProgressNanos + idleTimeoutNanos - System.nanoTime();
+          if (remaining <= 0L) {
+            fail(new SocketTimeoutException("IDE HTTP exchange idle timeout"), 504);
+            break;
+          }
+          try {
+            terminal.get(
+                Math.min(remaining, TimeUnit.MILLISECONDS.toNanos(WAIT_SLICE_MILLIS)),
+                TimeUnit.NANOSECONDS);
+          } catch (TimeoutException ignored) {
+            // 继续等待；持续有响应进展会刷新 lastProgressNanos。
+          } catch (ExecutionException error) {
+            // 失败由下方统一映射。
+            break;
+          } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+            fail(error, 503);
+            break;
+          }
+        }
+      } finally {
+        Thread current = sender;
+        if (current != null) {
+          current.interrupt();
+        }
+      }
+      Throwable error = failure.get();
+      if (error != null) {
+        int status = error instanceof IdeHttpFailure failureError ? failureError.status() : 502;
+        throw new IdeHttpFailure(status, "IDE HTTP exchange failed", error);
       }
     }
 
-    private void handleBinary(byte[] frame) throws IOException {
-      IdeStreamBinaryFrame decoded = relay.receiveBinary(frame);
-      switch (decoded) {
-        case IdeStreamBinaryFrame.HttpBody body -> {
-          if (!responseStarted) {
-            failed = true;
+    private void sendRequest() {
+      try (InputStream input = request.getInputStream()) {
+        byte[] buffer = new byte[MAX_REQUEST_CHUNK_BYTES];
+        int read;
+        while (!terminal.isDone() && (read = input.read(buffer)) > 0) {
+          byte[] chunk = new byte[read];
+          System.arraycopy(buffer, 0, chunk, 0, read);
+          if (!sendData(chunk)) {
             return;
           }
-          fromDaemonFrames++;
-          fromDaemonBytes += body.bytes().length;
-          try {
-            response.getOutputStream().write(body.bytes());
-          } catch (IOException error) {
-            browserFailed = true;
-            throw error;
-          }
-          relay.acknowledge(body);
         }
-        case IdeStreamBinaryFrame.HttpEnd ignored -> {
-          // HTTP_END 只在已收到 HTTP_RESPONSE 且尚未结束时有效；先于元数据的 END 不得默认成 200 空 body。
-          if (!responseStarted || done) {
-            failed = true;
-          } else {
-            done = true;
-          }
+        if (!terminal.isDone()) {
+          sendEnd();
         }
-        case IdeStreamBinaryFrame.Ack ignored -> {
-          // 仅用于释放发送 credit。
-        }
-        case IdeStreamBinaryFrame.WsSegment ignored -> failed = true;
+      } catch (MuxStreamClosedException | MuxConnectionClosedException ignored) {
+        // 响应先结束或连接已 fail-stop；无需重放请求。
+      } catch (IOException error) {
+        fail(error, 400);
+      } catch (RuntimeException error) {
+        fail(error, 502);
       }
     }
 
-    private void applyResponse(IdeStreamControlFrame.HttpResponse httpResponse) {
-      response.setStatus(httpResponse.status());
-      for (IdeHeader header : httpResponse.headers()) {
-        if (isHopByHop(header.name()) || "content-length".equalsIgnoreCase(header.name())) {
-          continue;
-        }
-        if ("location".equalsIgnoreCase(header.name())) {
-          response.addHeader(header.name(), rebaseLocation(header.value(), request, environmentId));
-        } else {
-          response.addHeader(header.name(), header.value());
+    private boolean sendData(byte[] chunk) {
+      while (!terminal.isDone() && stream.isOpen()) {
+        try {
+          return awaitWrite(stream.sendHttpData(chunk), 502);
+        } catch (MuxBackpressureException error) {
+          sleepBeforeRetry();
+        } catch (MuxStreamClosedException | MuxConnectionClosedException error) {
+          return false;
+        } catch (RuntimeException error) {
+          fail(error, 502);
+          return false;
         }
       }
-      responseStarted = true;
+      return false;
+    }
+
+    private void sendEnd() {
+      for (int attempt = 0; attempt < 2; attempt++) {
+        try {
+          awaitWrite(stream.sendEnd(), 502);
+          return;
+        } catch (MuxBackpressureException ignored) {
+          sleepBeforeRetry();
+        } catch (MuxStreamClosedException | MuxConnectionClosedException ignored) {
+          return;
+        } catch (RuntimeException error) {
+          fail(error, 502);
+          return;
+        }
+      }
+      fail(new MuxStreamClosedException("request END could not be sent"), 502);
+    }
+
+    private boolean awaitWrite(CompletableFuture<Void> write, int failureStatus) {
+      while (true) {
+        if (terminal.isDone()) {
+          write.cancel(true);
+          return false;
+        }
+        try {
+          write.get(WAIT_SLICE_MILLIS, TimeUnit.MILLISECONDS);
+          return !terminal.isDone();
+        } catch (TimeoutException ignored) {
+          // 等待物理写或上游 credit；期间仍响应终端状态。
+        } catch (ExecutionException error) {
+          fail(error.getCause(), failureStatus);
+          return false;
+        } catch (InterruptedException error) {
+          Thread.currentThread().interrupt();
+          fail(error, 503);
+          return false;
+        } catch (RuntimeException error) {
+          fail(error, failureStatus);
+          return false;
+        }
+      }
+    }
+
+    private void sleepBeforeRetry() {
+      try {
+        Thread.sleep(BACKPRESSURE_RETRY_MILLIS);
+      } catch (InterruptedException error) {
+        Thread.currentThread().interrupt();
+        fail(error, 503);
+      }
+    }
+
+    @Override
+    public void onReady(MuxStream stream) {
+      dispatch(() -> progressed());
+    }
+
+    @Override
+    public void onHeaders(MuxStream stream, MuxHeaders headers) {
+      dispatch(
+          () -> {
+            if (terminal.isDone() || headersReceived) {
+              return;
+            }
+            IdeDataHeaderPolicy.applyResponseHeaders(
+                headers, request, response, environmentId, viewId);
+            headersReceived = true;
+            progressed();
+          });
+    }
+
+    @Override
+    public void onData(MuxStream stream, MuxReceivedData data) {
+      dispatch(
+          () -> {
+            if (terminal.isDone()) {
+              return;
+            }
+            if (data.kind() != MuxDataKind.HTTP) {
+              fail(new IOException("WS DATA received on an HTTP stream"), 502);
+              return;
+            }
+            try {
+              response.getOutputStream().write(data.payload());
+              data.consumed();
+              progressed();
+            } catch (IOException error) {
+              fail(error, 502);
+            }
+          });
+    }
+
+    @Override
+    public void onEnd(MuxStream stream) {
+      dispatch(
+          () -> {
+            if (terminal.isDone()) {
+              return;
+            }
+            responseEnded = true;
+            progressed();
+            try {
+              response.getOutputStream().flush();
+            } catch (IOException error) {
+              fail(error, 502);
+              return;
+            }
+            stream
+                .complete()
+                .whenComplete(
+                    (ignored, error) -> {
+                      if (error == null) {
+                        completeWriteSucceeded = true;
+                        success();
+                      } else {
+                        fail(error, 502);
+                      }
+                    });
+          });
+    }
+
+    @Override
+    public void onReset(MuxStream stream, MuxReset reset) {
+      if (!terminal.isDone()) {
+        fail(new IOException("IDE data stream was reset"), 502);
+      }
+    }
+
+    @Override
+    public void onClose(MuxStream stream, MuxClose close) {
+      fail(new IOException("CLOSE received on an HTTP stream"), 502);
+    }
+
+    void onStreamClosed(Throwable error) {
+      if (terminal.isDone()) {
+        return;
+      }
+      if (error != null) {
+        fail(error, 502);
+      } else if (completeWriteSucceeded) {
+        success();
+      } else {
+        fail(new IOException("IDE HTTP stream closed before COMPLETE was written"), 502);
+      }
+    }
+
+    private void progressed() {
+      lastProgressNanos = System.nanoTime();
+    }
+
+    private void success() {
+      terminal.complete(null);
+    }
+
+    private void fail(Throwable error, int status) {
+      if (error == null) {
+        error = new IOException("IDE HTTP exchange failed");
+      }
+      if (!failure.compareAndSet(
+          null, new IdeHttpFailure(status, "IDE HTTP exchange failed", error))) {
+        return;
+      }
+      terminal.completeExceptionally(error);
+      MuxStream activeStream = stream;
+      if (activeStream != null && activeStream.isOpen()) {
+        try {
+          activeStream.reset("HTTP_FAILED", "IDE HTTP exchange failed");
+        } catch (RuntimeException ignored) {
+          // 连接/流已收敛或管理队列耗尽；fail-stop 已由相应路径负责。
+        }
+      }
+      Thread current = sender;
+      if (current != null) {
+        current.interrupt();
+      }
     }
   }
 }

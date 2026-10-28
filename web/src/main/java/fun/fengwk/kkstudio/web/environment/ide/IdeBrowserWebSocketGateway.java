@@ -2,15 +2,14 @@ package fun.fengwk.kkstudio.web.environment.ide;
 
 import jakarta.servlet.ServletContext;
 import jakarta.servlet.ServletException;
-import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.BinaryMessage;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
+import org.springframework.web.socket.WebSocketMessage;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.client.WebSocketClient;
 import org.springframework.web.socket.handler.AbstractWebSocketHandler;
@@ -18,67 +17,54 @@ import org.springframework.web.socket.server.support.DefaultHandshakeHandler;
 import org.springframework.web.socket.server.support.WebSocketHttpRequestHandler;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.ide.IdeCommandTransport;
-import fun.fengwk.kkstudio.ide.IdeGenerationState;
 import fun.fengwk.kkstudio.ide.cluster.IdeClusterClient;
-import fun.fengwk.kkstudio.ide.protocol.IdeHeader;
-import fun.fengwk.kkstudio.ide.stream.IdeStreamPairingRegistry;
-import fun.fengwk.kkstudio.ide.stream.IdeStreamTicketService;
+import fun.fengwk.kkstudio.ide.data.IdeDataConnectionRegistry;
+import fun.fengwk.kkstudio.ide.mux.MuxHeader;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterOwnerRoute;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
+import java.util.ArrayDeque;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.UUID;
 
 /**
- * IDE 网关上浏览器原生 WebSocket 的数据面：本节点是 READY owner 时直接配对 Daemon 反向连接；不是 owner 时把浏览器 WS 单跳到 owner
- * 的内部数据端点（owner 侧做 cookie/代际鉴权与 Daemon 配对），本节点只做有界原生分段桥接。
+ * IDE 网关上浏览器原生 WebSocket 的数据面入口。
  *
- * <p>两条路径都保持原生分段语义（partial + FIN、≤64 KiB），因此大文件/长连接编辑不会造成整包内存峰值。握手前一律完成精确同源校验； 本地路径额外校验 host-only
- * 会话 cookie 与代际，远端路径由 owner 完成同样的校验。任何失败都以 HTTP 状态码 fail-closed，绝不回退到本地或 其它节点。
+ * <p>本地 READY owner 直接用 {@link IdeDataViewAuthorizer} 校验 cookie 的 view+epoch 授权，再为同源浏览器会话建立一条 mux
+ * 逻辑流；非 owner 把浏览器 partial 分段单跳到 owner 的内部 {@code data-ws}，不解析帧、不持有浏览器会话状态。任何路径都不在节点间重放请求。
  */
-@Slf4j
 @Component
 public final class IdeBrowserWebSocketGateway {
 
-  private final IdeCommandTransport transport;
-  private final IdeStreamTicketService streamTickets;
-  private final IdeStreamPairingRegistry<IdeStreamPeer> pairings;
   private final IdeGatewayProperties properties;
-  private final IdeBrowserSessionRegistry sessions;
+  private final IdeDataConnectionRegistry dataConnections;
   private final ClusterNodeRegistry clusterNodeRegistry;
   private final IdeClusterClient clusterInternalClient;
   private final WebSocketClient webSocketClient;
-  private final Map<String, IdeBrowserStreamSession> active = new ConcurrentHashMap<>();
+  private final IdeDataViewAuthorizer viewAuthorizer;
 
   private volatile DefaultHandshakeHandler handshakeHandler;
 
   @Autowired
   public IdeBrowserWebSocketGateway(
-      IdeCommandTransport transport,
-      IdeStreamTicketService streamTickets,
-      IdeStreamPairingRegistry<IdeStreamPeer> pairings,
       IdeGatewayProperties properties,
-      IdeBrowserSessionRegistry sessions,
+      IdeDataConnectionRegistry dataConnections,
       ClusterNodeRegistry clusterNodeRegistry,
       IdeClusterClient clusterInternalClient,
-      WebSocketClient webSocketClient) {
-    this.transport = Objects.requireNonNull(transport, "transport");
-    this.streamTickets = Objects.requireNonNull(streamTickets, "streamTickets");
-    this.pairings = Objects.requireNonNull(pairings, "pairings");
+      WebSocketClient webSocketClient,
+      Optional<IdeDataViewAuthorizer> viewAuthorizer) {
     this.properties = Objects.requireNonNull(properties, "properties");
-    this.sessions = Objects.requireNonNull(sessions, "sessions");
+    this.dataConnections = Objects.requireNonNull(dataConnections, "dataConnections");
     this.clusterNodeRegistry = Objects.requireNonNull(clusterNodeRegistry, "clusterNodeRegistry");
     this.clusterInternalClient =
         Objects.requireNonNull(clusterInternalClient, "clusterInternalClient");
     this.webSocketClient = Objects.requireNonNull(webSocketClient, "webSocketClient");
+    this.viewAuthorizer = viewAuthorizer.orElse(null);
   }
 
   /** 该请求是否为浏览器 WebSocket 升级。 */
@@ -96,49 +82,100 @@ public final class IdeBrowserWebSocketGateway {
   }
 
   /**
-   * 处理一个 IDE 网关路径上的浏览器 WS 升级：先做精确同源校验（本地路径还要 cookie/代际），再执行容器级握手。
+   * 处理一个视图作用域的浏览器 WS 升级。
    *
-   * <p>校验失败直接以 HTTP 状态码拒绝，不建立任何反向连接。
+   * @param rawPathAndQuery view 基址之后的原始 path（含 query）
    */
   public void handleUpgrade(
       EnvironmentId environmentId,
+      UUID viewId,
       String rawPathAndQuery,
       HttpServletRequest request,
       HttpServletResponse response)
       throws ServletException, IOException {
     Objects.requireNonNull(environmentId, "environmentId");
+    Objects.requireNonNull(viewId, "viewId");
     if (!IdeOriginPolicy.webSocketHandshakeAllowed(request)) {
       response.sendError(HttpServletResponse.SC_FORBIDDEN);
       return;
     }
     Optional<ClusterOwnerRoute> route = clusterNodeRegistry.route(environmentId);
+    if (route.isEmpty()) {
+      response.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+      return;
+    }
     AbstractWebSocketHandler handler;
-    if (route.isPresent() && !route.get().local()) {
-      // 非 owner：cookie/代际由 owner 校验；本节点只做原生分段桥接。
-      handler = new RemoteBridgeHandler(route.get(), environmentId, rawPathAndQuery, request);
+    if (!route.get().local()) {
+      handler =
+          new RemoteUpgradeHandler(
+              route.get(),
+              environmentId,
+              viewId,
+              rawPathAndQuery,
+              IdeRemoteDataPlaneForwarder.forwardedBrowserHeaders(request, properties),
+              IdeRemoteDataPlaneForwarder.browserScheme(request));
     } else {
-      IdeBrowserSessionRegistry.Session session = requireSession(environmentId, request);
-      if (session == null) {
+      IdeDataViewAuthorizer.IdeDataViewAccess access =
+          authorize(environmentId, viewId, request.getHeader("Cookie"));
+      if (access == null) {
         response.sendError(HttpServletResponse.SC_UNAUTHORIZED);
         return;
       }
-      int rejection =
-          IdeGatewayDataPlane.generationRejection(
-              IdeGenerationState.of(transport, session.identity()));
-      if (rejection != 0) {
-        response.sendError(rejection);
-        return;
-      }
       handler =
-          new BrowserHandler(
+          new IdeBrowserDataSessionHandler(
               environmentId,
-              session,
+              viewId,
+              access.bindingEpoch(),
               rawPathAndQuery,
-              IdeGatewayDataPlane.forwardRequestHeaders(request));
+              IdeDataHeaderPolicy.forwardRequestHeaders(request, true),
+              access.controlIdentity(),
+              dataConnections);
     }
     WebSocketHttpRequestHandler upgrade =
         new WebSocketHttpRequestHandler(handler, handshakeHandler(request.getServletContext()));
     upgrade.handleRequest(request, response);
+  }
+
+  /** owner 内部代理入口：HMAC/owner 归属已由握手拦截器校验。 */
+  IdeBrowserDataSessionHandler handleInternalUpgrade(
+      WebSocketSession session,
+      EnvironmentId environmentId,
+      UUID viewId,
+      String rawPathAndQuery,
+      String cookieHeader,
+      List<MuxHeader> headers) {
+    IdeDataViewAuthorizer.IdeDataViewAccess access = authorize(environmentId, viewId, cookieHeader);
+    if (access == null) {
+      closeQuietly(session, CloseStatus.POLICY_VIOLATION.withReason("ide view is not active"));
+      return null;
+    }
+    IdeBrowserDataSessionHandler handler =
+        new IdeBrowserDataSessionHandler(
+            environmentId,
+            viewId,
+            access.bindingEpoch(),
+            rawPathAndQuery,
+            headers,
+            access.controlIdentity(),
+            dataConnections);
+    try {
+      handler.afterConnectionEstablished(session);
+      return handler;
+    } catch (RuntimeException error) {
+      closeQuietly(session, CloseStatus.SERVER_ERROR.withReason("ide gateway unavailable"));
+      return null;
+    }
+  }
+
+  private IdeDataViewAuthorizer.IdeDataViewAccess authorize(
+      EnvironmentId environmentId, UUID viewId, String cookieHeader) {
+    if (viewAuthorizer == null) {
+      return null;
+    }
+    return viewAuthorizer
+        .authorize(environmentId, viewId, cookieHeader)
+        .filter(access -> access.viewId().equals(viewId))
+        .orElse(null);
   }
 
   private DefaultHandshakeHandler handshakeHandler(ServletContext servletContext) {
@@ -157,135 +194,36 @@ public final class IdeBrowserWebSocketGateway {
     return handler;
   }
 
-  private IdeBrowserSessionRegistry.Session requireSession(
-      EnvironmentId environmentId, HttpServletRequest request) {
-    Cookie[] cookies = request.getCookies();
-    if (cookies == null) {
-      return null;
-    }
-    String name = properties.requireSessionCookieName();
-    for (Cookie cookie : cookies) {
-      if (!name.equals(cookie.getName())) {
-        continue;
-      }
-      Optional<IdeBrowserSessionRegistry.Session> session = sessions.lookup(cookie.getValue());
-      if (session.isPresent() && session.get().environmentId().equals(environmentId)) {
-        return session.get();
-      }
-    }
-    return null;
-  }
-
-  private IdeStreamDeps deps() {
-    return new IdeStreamDeps(transport, streamTickets, pairings, properties);
-  }
-
-  /** 本地 owner 的浏览器连接侧：入站分段进入按字节有界的队列，出站用原生 basicRemote 分段发送。 */
-  private final class BrowserHandler extends AbstractWebSocketHandler {
-
-    private final EnvironmentId environmentId;
-    private final IdeBrowserSessionRegistry.Session session;
-    private final String rawPathAndQuery;
-    private final List<IdeHeader> headers;
-
-    private BrowserHandler(
-        EnvironmentId environmentId,
-        IdeBrowserSessionRegistry.Session session,
-        String rawPathAndQuery,
-        List<IdeHeader> headers) {
-      this.environmentId = environmentId;
-      this.session = session;
-      this.rawPathAndQuery = rawPathAndQuery;
-      this.headers = headers;
-    }
-
-    @Override
-    public boolean supportsPartialMessages() {
-      return true;
-    }
-
-    @Override
-    public void afterConnectionEstablished(WebSocketSession browser) {
-      browser.setTextMessageSizeLimit(IdeBrowserStreamSession.SEGMENT_BYTES);
-      browser.setBinaryMessageSizeLimit(IdeBrowserStreamSession.SEGMENT_BYTES);
-      IdeBrowserStreamSession stream =
-          new IdeBrowserStreamSession(
-              browser,
-              environmentId,
-              session,
-              rawPathAndQuery,
-              headers,
-              deps(),
-              () -> active.remove(browser.getId()));
-      active.put(browser.getId(), stream);
-      stream.start();
-    }
-
-    @Override
-    protected void handleTextMessage(WebSocketSession browser, TextMessage message) {
-      offer(
-          browser,
-          new IdeBrowserStreamSession.Frame(
-              true, message.getPayload().getBytes(StandardCharsets.UTF_8), message.isLast()));
-    }
-
-    @Override
-    protected void handleBinaryMessage(WebSocketSession browser, BinaryMessage message) {
-      ByteBuffer payload = message.getPayload();
-      byte[] bytes = new byte[payload.remaining()];
-      payload.get(bytes);
-      offer(browser, new IdeBrowserStreamSession.Frame(false, bytes, message.isLast()));
-    }
-
-    @Override
-    public void afterConnectionClosed(WebSocketSession browser, CloseStatus status) {
-      detach(browser, false);
-    }
-
-    @Override
-    public void handleTransportError(WebSocketSession browser, Throwable exception) {
-      detach(browser, true);
-    }
-
-    private void offer(WebSocketSession browser, IdeBrowserStreamSession.Frame frame) {
-      IdeBrowserStreamSession stream = active.get(browser.getId());
-      if (stream != null && !stream.offer(frame)) {
-        // 有界入站预算/关闭：fail-closed 关闭浏览器连接，绝不无界缓冲。
-        closeBrowser(browser, CloseStatus.POLICY_VIOLATION);
-      }
-    }
-
-    private void detach(WebSocketSession browser, boolean error) {
-      IdeBrowserStreamSession stream = active.remove(browser.getId());
-      if (stream != null) {
-        stream.onBrowserDetached();
-      }
-      if (error) {
-        closeBrowser(browser, CloseStatus.SERVER_ERROR);
-      }
-    }
-  }
-
-  /** 非 owner 的浏览器连接侧：把浏览器 partial 帧透传给 owner 的内部 WS，并回传 owner 的分段。 */
-  private final class RemoteBridgeHandler extends AbstractWebSocketHandler {
+  /** 非 owner 的浏览器侧入口：握手完成后按 owner 路由建立单跳桥。 */
+  private final class RemoteUpgradeHandler extends AbstractWebSocketHandler {
 
     private final ClusterOwnerRoute owner;
     private final EnvironmentId environmentId;
+    private final UUID viewId;
     private final String rawPathAndQuery;
-    private final List<IdeHeader> headers;
+    private final List<MuxHeader> headers;
     private final String browserScheme;
-    private volatile IdeRemoteBrowserBridge bridge;
+    private volatile IdeRemoteBrowserDataBridge bridge;
+    private final ArrayDeque<WebSocketMessage<?>> pending = new ArrayDeque<>();
+    private long pendingBytes;
+    private boolean browserClosed;
+    private CloseStatus browserCloseStatus;
+    private static final int MAX_PENDING_MESSAGES = 64;
+    private static final long MAX_PENDING_BYTES = 1024L * 1024L;
 
-    private RemoteBridgeHandler(
+    private RemoteUpgradeHandler(
         ClusterOwnerRoute owner,
         EnvironmentId environmentId,
+        UUID viewId,
         String rawPathAndQuery,
-        HttpServletRequest request) {
+        List<MuxHeader> headers,
+        String browserScheme) {
       this.owner = owner;
       this.environmentId = environmentId;
+      this.viewId = viewId;
       this.rawPathAndQuery = rawPathAndQuery;
-      this.headers = IdeRemoteDataPlaneForwarder.forwardedBrowserHeaders(request, properties);
-      this.browserScheme = IdeRemoteDataPlaneForwarder.browserScheme(request);
+      this.headers = headers;
+      this.browserScheme = browserScheme;
     }
 
     @Override
@@ -295,70 +233,139 @@ public final class IdeBrowserWebSocketGateway {
 
     @Override
     public void afterConnectionEstablished(WebSocketSession browser) {
-      browser.setTextMessageSizeLimit(IdeBrowserStreamSession.SEGMENT_BYTES);
-      browser.setBinaryMessageSizeLimit(IdeBrowserStreamSession.SEGMENT_BYTES);
-      IdeRemoteBrowserBridge current =
-          new IdeRemoteBrowserBridge(
+      IdeRemoteBrowserDataBridge current =
+          new IdeRemoteBrowserDataBridge(
               webSocketClient,
               clusterInternalClient,
               owner,
               environmentId,
+              viewId,
               rawPathAndQuery,
               headers,
               browserScheme,
-              properties.requirePairingTimeout(),
+              properties.requireDataConnectTimeout(),
               browser);
-      bridge = current;
-      current.start();
+      current.afterConnectionEstablished(browser);
+      publishAndDrain(current, browser);
     }
 
     @Override
-    protected void handleTextMessage(WebSocketSession browser, TextMessage message) {
-      IdeRemoteBrowserBridge current = bridge;
+    protected void handleTextMessage(WebSocketSession session, TextMessage message) {
+      IdeRemoteBrowserDataBridge current;
+      boolean overflow = false;
+      synchronized (pending) {
+        current = bridge;
+        if (current == null) {
+          overflow = !enqueueLocked(new TextMessage(message.getPayload(), message.isLast()));
+        }
+      }
+      if (current == null) {
+        if (overflow) {
+          closeQuietly(session, CloseStatus.POLICY_VIOLATION);
+        }
+        return;
+      }
+      current.handleTextMessage(session, message);
+    }
+
+    @Override
+    protected void handleBinaryMessage(WebSocketSession session, BinaryMessage message) {
+      IdeRemoteBrowserDataBridge current;
+      boolean overflow = false;
+      synchronized (pending) {
+        current = bridge;
+        if (current == null) {
+          ByteBuffer payload = message.getPayload();
+          byte[] bytes = new byte[payload.remaining()];
+          payload.get(bytes);
+          overflow = !enqueueLocked(new BinaryMessage(ByteBuffer.wrap(bytes), message.isLast()));
+        }
+      }
+      if (current == null) {
+        if (overflow) {
+          closeQuietly(session, CloseStatus.POLICY_VIOLATION);
+        }
+        return;
+      }
+      current.handleBinaryMessage(session, message);
+    }
+
+    /** 在 pending 锁内发布 bridge；只有队列排空后才允许新消息绕过队列。 */
+    private void publishAndDrain(IdeRemoteBrowserDataBridge current, WebSocketSession browser) {
+      while (true) {
+        WebSocketMessage<?> message;
+        boolean closedEarly;
+        synchronized (pending) {
+          closedEarly = browserClosed;
+          if (!closedEarly) {
+            message = pending.pollFirst();
+            if (message == null) {
+              bridge = current;
+              return;
+            }
+            pendingBytes -= message.getPayloadLength();
+          } else {
+            message = null;
+          }
+        }
+        if (closedEarly) {
+          current.afterConnectionClosed(browser, browserCloseStatus);
+          return;
+        }
+        if (message instanceof TextMessage text) {
+          current.handleTextMessage(browser, text);
+        } else if (message instanceof BinaryMessage binary) {
+          current.handleBinaryMessage(browser, binary);
+        }
+      }
+    }
+
+    private boolean enqueueLocked(WebSocketMessage<?> message) {
+      long bytes = message.getPayloadLength();
+      if (pending.size() >= MAX_PENDING_MESSAGES || pendingBytes + bytes > MAX_PENDING_BYTES) {
+        return false;
+      }
+      pending.addLast(message);
+      pendingBytes += bytes;
+      return true;
+    }
+
+    @Override
+    public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
+      IdeRemoteBrowserDataBridge current;
+      synchronized (pending) {
+        browserClosed = true;
+        browserCloseStatus = status;
+        current = bridge;
+      }
       if (current != null) {
-        current.forwardBrowserText(message.getPayload(), message.isLast());
+        current.afterConnectionClosed(session, status);
       }
     }
 
     @Override
-    protected void handleBinaryMessage(WebSocketSession browser, BinaryMessage message) {
-      ByteBuffer payload = message.getPayload();
-      byte[] bytes = new byte[payload.remaining()];
-      payload.get(bytes);
-      IdeRemoteBrowserBridge current = bridge;
-      if (current != null) {
-        current.forwardBrowserBinary(bytes, message.isLast());
+    public void handleTransportError(WebSocketSession session, Throwable exception) {
+      IdeRemoteBrowserDataBridge current;
+      synchronized (pending) {
+        browserClosed = true;
+        browserCloseStatus = CloseStatus.SERVER_ERROR;
+        current = bridge;
       }
-    }
-
-    @Override
-    public void afterConnectionClosed(WebSocketSession browser, CloseStatus status) {
-      closeBridge();
-    }
-
-    @Override
-    public void handleTransportError(WebSocketSession browser, Throwable exception) {
-      closeBridge();
-      closeBrowser(browser, CloseStatus.SERVER_ERROR);
-    }
-
-    private void closeBridge() {
-      IdeRemoteBrowserBridge current = bridge;
       if (current != null) {
-        current.closeOwner();
+        current.handleTransportError(session, exception);
       }
     }
   }
 
-  /** 直接关闭浏览器连接（原始句柄，用于握手后无会话的 fail-closed 场景）。 */
-  private static void closeBrowser(WebSocketSession browser, CloseStatus status) {
-    synchronized (browser) {
-      if (browser.isOpen()) {
-        try {
-          browser.close(status);
-        } catch (IOException ignored) {
-          // 浏览器侧已断开。
-        }
+  private static void closeQuietly(WebSocketSession session, CloseStatus status) {
+    synchronized (session) {
+      if (!session.isOpen()) {
+        return;
+      }
+      try {
+        session.close(status);
+      } catch (IOException ignored) {
+        // 对端已断开。
       }
     }
   }
