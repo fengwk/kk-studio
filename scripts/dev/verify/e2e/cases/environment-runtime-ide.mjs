@@ -73,12 +73,12 @@ registerCase({
 })
 
 registerCase({
-  id: 'environment.ide_view_exact_intent_rejected',
+  id: 'environment.ide_view_no_ready_owner_rejected',
   level: 'L1',
-  title: 'IDE 视图在缺少精确浏览器意图时被明确拒绝，不伪造绑定',
-  docs: 'POST /api/environments/{id}/ide/views 必须先经事件节点核对精确浏览器意图（environment/view/claim 全部匹配）；没有 READY owner 或精确意图时返回 409 + canonical code ide_unavailable，响应不含 entryUrl/bindingEpoch 等绑定结果，绝不把没有的视图当作已打开；PUT 目录、POST 终端、DELETE 关闭同样返回 409 ide_unavailable；非 canonical environmentId 返回 400 validation；用例创建的 Environment 在结束时按权威 version 清理',
+  title: 'IDE 视图在没有 READY owner 时明确拒绝，不伪造绑定',
+  docs: '在新建且没有 READY owner 的 Environment 上，以合法 canonical 输入请求 POST /api/environments/{id}/ide/views，返回 409 + canonical code ide_unavailable，响应不含 entryUrl/bindingEpoch 等绑定结果；PUT 目录、POST 终端、DELETE 关闭同样返回 409 ide_unavailable；非 canonical environmentId 返回 400 validation；结束时按权威 version 清理。本用例只证明无 owner 路由拒绝，不证明 exact-intent 强制校验；READY owner 下的精确意图校验需单独验收，此处未验证',
   async run(ctx) {
-    const card = await createEnvironmentFixture(ctx, `e2e-ide-intent-${cid().slice(0, 8)}`)
+    const card = await createEnvironmentFixture(ctx, `e2e-ide-no-owner-${cid().slice(0, 8)}`)
     const viewsPath = `/api/environments/${encodeURIComponent(card.id)}/ide/views`
     const openBody = {
       viewId: IDE_VIEW_ID,
@@ -101,7 +101,7 @@ registerCase({
         `rejected open must not fabricate a view binding: ${openError.body}`,
       )
 
-      // 同一前置条件覆盖同一视图的其它命令：目录切换、终端聚焦与关闭都不得在没有精确意图时成功。
+      // 没有 READY owner 时，目录切换、终端聚焦与关闭同样由路由拒绝。
       const directoryError = await expectHttpError(
         () =>
           ctx.call('PUT', `${viewsPath}/${IDE_VIEW_ID}/directory`, {
