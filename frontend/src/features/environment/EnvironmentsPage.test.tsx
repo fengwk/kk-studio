@@ -7,13 +7,18 @@ import { environmentService } from '@/shared/api/environment-service'
 import { ApiError } from '@/shared/api/client'
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
-import type { EnvironmentCardDTO } from '@/shared/api/generated/contracts'
+import { queryKeys } from '@/shared/lib/query-keys'
+import type {
+  EnvironmentCardDTO,
+  EnvironmentRuntimeStatusDTO,
+  EnvironmentUpdateProgressDTO,
+} from '@/shared/api/generated/contracts'
 
 vi.mock('@/shared/api/environment-service', () => ({
   environmentService: {
     listEnvironments: vi.fn(),
     getEnvironment: vi.fn(),
-    getEnvironmentUpdate: vi.fn(),
+    getEnvironmentRuntime: vi.fn(),
     startEnvironmentUpdate: vi.fn(),
     saveInstallConfig: vi.fn(),
     createEnvironment: vi.fn(),
@@ -58,6 +63,21 @@ function environment(overrides: Partial<EnvironmentCardDTO>): EnvironmentCardDTO
   }
 }
 
+function runtimeStatus(
+  daemonVersion: string,
+  update: EnvironmentUpdateProgressDTO | null = null,
+  revision = '1',
+): EnvironmentRuntimeStatusDTO {
+  return { revision, status: { daemonVersion, update } }
+}
+
+function runtimeUnavailableError(): ApiError {
+  return new ApiError('environment runtime unavailable', 409, 'environment_unavailable', {
+    resource: 'environment',
+    detail: 'environment runtime snapshot is unavailable; wait for READY or reconnect',
+  })
+}
+
 /**
  * jsdom 不提供 Clipboard API；测试显式注入 stub，使复制成功/失败都可断言。
  *
@@ -90,6 +110,8 @@ describe('EnvironmentsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(environmentService.getEnvironment).mockResolvedValue(environment({}))
+    // 默认没有本代 READY 运行快照；具体用例按需覆盖为 live runtime 或更新进度。
+    vi.mocked(environmentService.getEnvironmentRuntime).mockRejectedValue(runtimeUnavailableError())
   })
 
   // 验证渲染环境卡片及其状态与能力，底部提供「安装 / 卸载 / 管理 / 轮换 / 删除」动作
@@ -149,10 +171,13 @@ describe('EnvironmentsPage', () => {
     // 卡片展示最近一次 READY 的宿主进程用户，且不再展示任何 Root 路径。
     expect(screen.getByText('dev-user')).toBeInTheDocument()
     expect(screen.getByText('ops-user')).toBeInTheDocument()
-    // 卡片展示实际 daemon 构建版本；development 如实展示而不是伪装成发布版本。
-    expect(screen.getAllByText('Daemon 版本')).toHaveLength(2)
+    // 卡片展示实际 daemon 构建版本；development 如实展示，缺失时明确未上报而不是伪装成发布版本。
+    expect(screen.getAllByText('Daemon 版本')).toHaveLength(3)
     expect(screen.getByText('1.2.3')).toBeInTheDocument()
     expect(screen.getByText('development')).toBeInTheDocument()
+    expect(screen.getByText('未上报')).toBeInTheDocument()
+    // 没有本代 READY 运行快照时明确展示不可用，不把缺失的 update 伪造成无更新或成功。
+    expect(await screen.findAllByText('状态不可用，等待 Daemon 重连')).toHaveLength(3)
     expect(screen.queryByText('/workspace/local-dev')).toBeNull()
     expect(screen.queryByText('Root 路径')).toBeNull()
     // 卡片不展示 skills 字段
@@ -160,7 +185,7 @@ describe('EnvironmentsPage', () => {
     expect(screen.getByText('CONNECTING')).toBeInTheDocument()
     expect(screen.getAllByText('Capabilities').length).toBe(3)
 
-    // 验证每个环境卡片底部有「安装 / 卸载 / 管理 / 重新生成 Token / 删除」五个动作；
+    // 验证每个环境卡片底部有「安装 / 卸载 / 管理 / 更新 / 重新生成 Token / 删除」六个动作；
     // 加载列表和打开表单都不得预取 token，仅显式生成安装命令时读取。
     const cards = screen.getAllByRole('article')
     expect(cards).toHaveLength(3)
@@ -295,29 +320,27 @@ describe('EnvironmentsPage', () => {
     expect(environmentService.deleteEnvironment).toHaveBeenCalledWith('env-1', '1')
   })
 
-  it('starts a managed Daemon update after confirmation and invalidates environment queries', async () => {
+  it('starts a managed Daemon update after confirmation and applies the returned runtime snapshot', async () => {
     const user = userEvent.setup()
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([
       environment({ id: 'env-1', name: 'my-box', daemonVersion: '1.2.0', version: '1' }),
     ])
-    vi.mocked(environmentService.startEnvironmentUpdate).mockResolvedValue(
-      environment({
-        id: 'env-1',
-        name: 'my-box',
-        daemonVersion: '1.2.0',
-        update: {
-          operationId: 'op-1',
-          targetVersion: '1.3.0',
-          phase: 'PENDING',
-          createdAt: 1791504000,
-          updatedAt: 1791504000,
-        },
-        version: '1',
-      }),
+    const started = runtimeStatus(
+      '1.2.0',
+      { targetVersion: '1.3.0', downloadedBytes: '0', totalBytes: null },
+      '2',
     )
-    renderPage()
+    vi.mocked(environmentService.getEnvironmentRuntime)
+      .mockResolvedValueOnce(runtimeStatus('1.2.0'))
+      .mockResolvedValue(started)
+    vi.mocked(environmentService.startEnvironmentUpdate).mockResolvedValue({
+      commandStatus: 'SENT_UNCONFIRMED',
+      runtimeStatus: started,
+    })
+    const { queryClient } = renderPage()
 
     const card = await screen.findByRole('article')
+    expect(await within(card).findByText('无进行中的更新')).toBeInTheDocument()
     const updateBtn = within(card).getByRole('button', { name: '更新 Daemon my-box' })
     expect(updateBtn).not.toBeDisabled()
     await user.click(updateBtn)
@@ -330,69 +353,188 @@ describe('EnvironmentsPage', () => {
     expect(environmentService.startEnvironmentUpdate).toHaveBeenCalledWith('env-1')
     await waitFor(() => expect(screen.queryByRole('alertdialog', { name: '更新 Daemon' })).toBeNull())
     await waitFor(() => expect(environmentService.listEnvironments).toHaveBeenCalledTimes(2))
+    expect(
+      await within(card).findByText('正在更新至 1.3.0 · 已下载 0 B（总大小未知）'),
+    ).toBeInTheDocument()
+    expect(queryClient.getQueryData(queryKeys.environments.runtime('env-1'))).toEqual(started)
   })
 
-  it('disables the update action for in-progress phases and renders update status and failure error on the card', async () => {
+  it('closes the update confirmation without starting a command when canceled', async () => {
+    const user = userEvent.setup()
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([
-      environment({
-        id: 'env-running',
-        name: 'box-running',
-        update: {
-          operationId: 'op-run',
-          targetVersion: '1.3.0',
-          phase: 'RUNNING',
-          createdAt: 1791504000,
-          updatedAt: 1791504001,
-        },
-      }),
-      environment({
-        id: 'env-unknown',
-        name: 'box-unknown',
-        update: {
-          operationId: 'op-unk',
-          targetVersion: '1.3.0',
-          phase: 'UNKNOWN',
-          createdAt: 1791504000,
-          updatedAt: 1791504002,
-        },
-      }),
-      environment({
-        id: 'env-failed',
-        name: 'box-failed',
-        update: {
-          operationId: 'op-fail',
-          targetVersion: '1.3.0',
-          phase: 'FAILED',
-          error: 'checksum mismatch',
-          createdAt: 1791504000,
-          updatedAt: 1791504003,
-        },
-      }),
-      environment({
-        id: 'env-succeeded',
-        name: 'box-succeeded',
-        update: {
-          operationId: 'op-ok',
-          targetVersion: '1.3.0',
-          phase: 'SUCCEEDED',
-          createdAt: 1791504000,
-          updatedAt: 1791504004,
-        },
-      }),
+      environment({ id: 'env-1', name: 'cancel-box', daemonVersion: '1.2.0' }),
     ])
     renderPage()
 
-    expect(await screen.findByText('box-running')).toBeInTheDocument()
-    expect(screen.getAllByText('更新状态')).toHaveLength(4)
-    expect(screen.getByText('更新中')).toBeInTheDocument()
-    expect(screen.getByText('等待重连确认')).toBeInTheDocument()
-    expect(screen.getByText('更新失败: checksum mismatch')).toBeInTheDocument()
-    expect(screen.getByText('更新成功')).toBeInTheDocument()
+    const updateBtn = await screen.findByRole('button', { name: '更新 Daemon cancel-box' })
+    await user.click(updateBtn)
 
-    expect(screen.getByRole('button', { name: '更新 Daemon box-running' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '更新 Daemon box-unknown' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '更新 Daemon box-failed' })).not.toBeDisabled()
-    expect(screen.getByRole('button', { name: '更新 Daemon box-succeeded' })).not.toBeDisabled()
+    const modal = await screen.findByRole('alertdialog', { name: '更新 Daemon' })
+    await user.click(within(modal).getByRole('button', { name: '取消' }))
+
+    await waitFor(() => expect(screen.queryByRole('alertdialog', { name: '更新 Daemon' })).toBeNull())
+    expect(environmentService.startEnvironmentUpdate).not.toHaveBeenCalled()
+  })
+
+  it('shows the live Daemon version and known download progress without treating 100% download as success', async () => {
+    vi.mocked(environmentService.listEnvironments).mockResolvedValue([
+      environment({ id: 'env-1', name: 'live-box', daemonVersion: '1.2.0' }),
+    ])
+    vi.mocked(environmentService.getEnvironmentRuntime).mockResolvedValue(
+      runtimeStatus('1.2.1', {
+        targetVersion: '1.3.0',
+        downloadedBytes: '1048576',
+        totalBytes: '1048576',
+      }),
+    )
+    renderPage()
+
+    expect(await screen.findByText('1.2.1')).toBeInTheDocument()
+    expect(screen.queryByText('1.2.0')).not.toBeInTheDocument()
+    expect(
+      screen.getByText('正在更新至 1.3.0 · 1 MB / 1 MB（100%）'),
+    ).toBeInTheDocument()
+    expect(screen.queryByText('更新成功')).not.toBeInTheDocument()
+    // 当前更新快照不锁定按钮；重复请求由 Server/Daemon 的互斥与幂等语义裁决。
+    expect(screen.getByRole('button', { name: '更新 Daemon live-box' })).not.toBeDisabled()
+  })
+
+  it('shows downloaded bytes without fabricating a percentage when total size is unknown', async () => {
+    vi.mocked(environmentService.listEnvironments).mockResolvedValue([
+      environment({ id: 'env-1', name: 'unknown-total-box', daemonVersion: '1.2.0' }),
+    ])
+    vi.mocked(environmentService.getEnvironmentRuntime).mockResolvedValue(
+      runtimeStatus('1.2.0', {
+        targetVersion: '1.3.0',
+        downloadedBytes: '8388608',
+        totalBytes: null,
+      }),
+    )
+    renderPage()
+
+    const progress = await screen.findByText(
+      '正在更新至 1.3.0 · 已下载 8 MB（总大小未知）',
+    )
+    expect(progress).not.toHaveTextContent('%')
+  })
+
+  it('shows runtime read failures instead of claiming no update is in progress', async () => {
+    vi.mocked(environmentService.listEnvironments).mockResolvedValue([
+      environment({ id: 'env-error', name: 'error-box', daemonVersion: '1.2.0' }),
+      environment({ id: 'env-rejected', name: 'rejected-box', daemonVersion: '1.2.0' }),
+    ])
+    vi.mocked(environmentService.getEnvironmentRuntime).mockImplementation(async (id) => {
+      if (id === 'env-error') {
+        throw new Error('runtime route failed')
+      }
+      throw new Error('')
+    })
+    renderPage()
+
+    expect(await screen.findByText('runtime route failed')).toBeInTheDocument()
+    expect(await screen.findByText('运行状态读取失败')).toBeInTheDocument()
+    expect(screen.queryByText('无进行中的更新')).not.toBeInTheDocument()
+  })
+
+  it('refreshes active update progress from the live runtime snapshot', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.mocked(environmentService.listEnvironments).mockResolvedValue([
+        environment({ id: 'env-1', name: 'progress-box', daemonVersion: '1.2.0' }),
+      ])
+      vi.mocked(environmentService.getEnvironmentRuntime)
+        .mockResolvedValueOnce(
+          runtimeStatus(
+            '1.2.0',
+            { targetVersion: '1.3.0', downloadedBytes: '524288', totalBytes: '1048576' },
+            '2',
+          ),
+        )
+        .mockResolvedValue(
+          runtimeStatus(
+            '1.2.0',
+            { targetVersion: '1.3.0', downloadedBytes: '1048576', totalBytes: '1048576' },
+            '3',
+          ),
+        )
+      renderPage()
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1)
+      })
+      await flushUntil(
+        () => screen.queryByText('正在更新至 1.3.0 · 512 KB / 1 MB（50%）') != null,
+      )
+      expect(
+        screen.getByText('正在更新至 1.3.0 · 512 KB / 1 MB（50%）'),
+      ).toBeInTheDocument()
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5000)
+      })
+      await flushUntil(
+        () => screen.queryByText('正在更新至 1.3.0 · 1 MB / 1 MB（100%）') != null,
+      )
+      expect(
+        screen.getByText('正在更新至 1.3.0 · 1 MB / 1 MB（100%）'),
+      ).toBeInTheDocument()
+      expect(screen.queryByText('更新成功')).not.toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('marks runtime unavailable after a refetch failure instead of inferring update success or failure', async () => {
+    vi.mocked(environmentService.listEnvironments).mockResolvedValue([
+      environment({ id: 'env-1', name: 'disconnecting-box', daemonVersion: '1.2.0' }),
+    ])
+    vi.mocked(environmentService.getEnvironmentRuntime)
+      .mockResolvedValueOnce(
+        runtimeStatus(
+          '1.2.0',
+          { targetVersion: '1.3.0', downloadedBytes: '524288', totalBytes: '1048576' },
+          '2',
+        ),
+      )
+      .mockRejectedValue(runtimeUnavailableError())
+    const { queryClient } = renderPage()
+
+    expect(
+      await screen.findByText('正在更新至 1.3.0 · 512 KB / 1 MB（50%）'),
+    ).toBeInTheDocument()
+
+    await act(async () => {
+      await queryClient.refetchQueries({
+        queryKey: queryKeys.environments.runtime('env-1'),
+      })
+    })
+
+    expect(await screen.findByText('状态不可用，等待 Daemon 重连')).toBeInTheDocument()
+    expect(screen.queryByText(/更新成功|更新失败/u)).not.toBeInTheDocument()
+    expect(screen.queryByText(/正在更新至/u)).not.toBeInTheDocument()
+  })
+
+  it('keeps the update modal open with the unavailable message instead of presenting a data conflict', async () => {
+    const user = userEvent.setup()
+    vi.mocked(environmentService.listEnvironments).mockResolvedValue([
+      environment({ id: 'env-1', name: 'offline-box', version: '1' }),
+    ])
+    vi.mocked(environmentService.startEnvironmentUpdate).mockRejectedValueOnce(
+      runtimeUnavailableError(),
+    )
+    renderPage()
+
+    const updateBtn = await screen.findByRole('button', { name: '更新 Daemon offline-box' })
+    await user.click(updateBtn)
+
+    const modal = await screen.findByRole('alertdialog', { name: '更新 Daemon' })
+    const confirmBtn = within(modal).getByRole('button', { name: '更新 Daemon' })
+    await user.click(confirmBtn)
+
+    expect(await within(modal).findByRole('alert')).toHaveTextContent(
+      '状态不可用，等待 Daemon 重连',
+    )
+    expect(screen.queryByRole('alertdialog', { name: '数据已发生变化' })).toBeNull()
   })
 
   it('shows visible error on update failure and handles 409 conflict refresh', async () => {
