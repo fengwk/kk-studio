@@ -4,6 +4,8 @@
 // `-e 'import { pathToFileURL } ...'` 到 Node 只剩碎片；PS 5.1 还会用控制台代码页解码
 // native stdout，把正文里的中文注释改写成乱码。因此导出必须走「路径进、UTF-8 文件出」的
 // 单一入口，本测试逐字节证明它与模块导出完全相等，并证明未知导出名失败关闭。
+//
+// UTF-8 断言只检查脚本仍然具有的必要动作契约，不锁定可被替换的具体注释或说明文案。
 
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
@@ -17,6 +19,21 @@ const testsDir = path.dirname(fileURLToPath(import.meta.url))
 const repositoryRoot = path.resolve(testsDir, '..', '..', '..')
 const exporter = path.join(testsDir, 'export-update-script.mjs')
 const updateScripts = path.join(repositoryRoot, 'daemon', 'src', 'update-scripts.ts')
+
+/** 必须由两种脚本保留的动作边界；注释和说明文案可以随实现演进。 */
+const REQUIRED_ACTION_CONTRACT = {
+  UNIX_UPDATE_SCRIPT: [
+    '[ "$action" = "run" ]',
+    'exec "$updater_node" "$updater_entry" \\',
+    'systemctl --user stop "$SERVICE_NAME"',
+    'launchctl bootstrap "$domain" "$plist"',
+  ],
+  WINDOWS_UPDATE_SCRIPT: [
+    "[ValidateSet('run', 'stop', 'start')][string]$Action",
+    'Stop-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath',
+    'Start-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath',
+  ],
+}
 
 /** 真实生产模块本身是唯一事实源：同一进程内导入作为逐字节对照基准。 */
 const updateScriptModule = await import(pathToFileURL(updateScripts).href)
@@ -37,12 +54,12 @@ function exportToFile(name) {
 }
 
 test('the exporter reproduces every known update script byte for byte', () => {
-  for (const name of ['UNIX_UPDATE_SCRIPT', 'WINDOWS_UPDATE_SCRIPT']) {
+  for (const [name, required] of Object.entries(REQUIRED_ACTION_CONTRACT)) {
     const expected = Buffer.from(updateScriptModule[name], 'utf8')
-    assert.ok(
-      expected.includes(Buffer.from('许可', 'utf8')),
-      `${name}: the production export must carry its multi-byte comments`,
-    )
+    const text = expected.toString('utf8')
+    for (const needle of required) {
+      assert.ok(text.includes(needle), `${name}: missing required script behavior ${JSON.stringify(needle)}`)
+    }
     const { bytes } = exportToFile(name)
     assert.ok(
       bytes.equals(expected),

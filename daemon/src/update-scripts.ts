@@ -155,14 +155,15 @@ if ($null -eq $task) { Write-Failure 'managed scheduled task is missing' }
 if ([string]$task.Description -ne $TaskDescription) { Write-Failure 'managed scheduled task is not owned by the installer' }
 $actions = @($task.Actions)
 if ($actions.Count -ne 1) { Write-Failure 'managed scheduled task does not have exactly one action' }
-$action = $actions[0]
-if (-not (Test-SamePath -Left ([string]$action.Execute) -Right $expectedNode)) {
+# 变量名与参数 $Action 区分：PowerShell 大小写不敏感，$action 会覆盖动作参数并绕过 stop 分支。
+$taskAction = $actions[0]
+if (-not (Test-SamePath -Left ([string]$taskAction.Execute) -Right $expectedNode)) {
     Write-Failure 'managed scheduled task does not run the managed runtime'
 }
-if ([string]$action.Arguments -ne $expectedArguments) {
+if ([string]$taskAction.Arguments -ne $expectedArguments) {
     Write-Failure 'managed scheduled task arguments do not match the managed configuration'
 }
-if (-not (Test-SamePath -Left ([string]$action.WorkingDirectory) -Right $InstalledDir)) {
+if (-not (Test-SamePath -Left ([string]$taskAction.WorkingDirectory) -Right $InstalledDir)) {
     Write-Failure 'managed scheduled task working directory does not match the managed installation'
 }
 
