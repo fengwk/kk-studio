@@ -329,7 +329,10 @@ describe('official artifact download progress budget', () => {
     )
     await flushIo()
     download.deliver('partial')
-    await flushIo()
+    // 事件循环轮次不保证文件写入完成；先观察真实的 partial，再推进 idle 时钟。
+    await vi.waitFor(async () => {
+      expect((await stat(destination)).size).toBe(7)
+    })
     await vi.advanceTimersByTimeAsync(DOWNLOAD_IDLE_TIMEOUT_MILLIS)
 
     const result = await outcome

@@ -151,6 +151,7 @@ class FlywayAutoConfigurationIntegrationTest {
             chatSessionForeignKeys.getLong(1),
             "the chat_session association keeps the Harness Session FK and Chat FK");
       }
+      // 安装授权合入 environment、更新状态不再建历史表；与当前 V1 的业务表清单保持一致。
       try (ResultSet businessTables =
           st.executeQuery(
               "select count(*) from information_schema.tables"
@@ -158,9 +159,9 @@ class FlywayAutoConfigurationIntegrationTest {
                   + " and table_name <> 'flyway_schema_history'")) {
         assertTrue(businessTables.next());
         assertEquals(
-            46L,
+            44L,
             businessTables.getLong(1),
-            "the canonical V1 baseline must expose exactly 46 business tables");
+            "the canonical V1 baseline must expose exactly 44 business tables");
       }
       try (ResultSet clusterNode =
           st.executeQuery(
