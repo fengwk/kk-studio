@@ -158,6 +158,266 @@ async function setup(workspacePath: string) {
 const signal = (): AbortSignal => new AbortController().signal
 
 describe('VS Code bridge extension host', () => {
+  it('cancels pending control POSTs on retirement without disposing the terminal', async () => {
+    const bridge = await createIdeBridge()
+    cleanups.push(() => bridge.close())
+    const viewId = '11111111-1111-4111-8111-111111111111'
+    const workspace = '/managed/one.code-workspace'
+    bridge.assign(viewId, workspace, '1', '/target')
+    const old = fakeVscode(workspace, ['/target'])
+    const target = fakeVscode(workspace, ['/target'])
+    let postStarted: () => void = () => {}
+    let postClosed: () => void = () => {}
+    const started = new Promise<void>((resolve) => { postStarted = resolve })
+    const closed = new Promise<void>((resolve) => { postClosed = resolve })
+    const observedHttp = {
+      get: http.get,
+      request(url: string, options: http.RequestOptions, callback: (response: http.IncomingMessage) => void) {
+        const req = http.request(url, options, callback)
+        req.once('close', postClosed)
+        // Hold the outbound POST until retirement, without using a timer.
+        req.end = (() => { postStarted(); return req }) as typeof req.end
+        return req
+      },
+    }
+    const oldHost = createBridgeHost(old.vscode, { url: bridge.url, token: bridge.secret, http: observedHttp })
+    const targetHost = createBridgeHost(target.vscode, { url: bridge.url, token: bridge.secret })
+    cleanups.push(() => oldHost.dispose(), () => targetHost.dispose())
+    const connected = bridge.waitForConnection(viewId, signal())
+    oldHost.start()
+    await connected
+    const focused = bridge.request(viewId, { op: 'focusTerminal' }, signal())
+    await started
+    targetHost.start()
+    expect(await focused).toMatchObject({ ok: false })
+    await closed
+    expect(old.terminals[0]?.disposed).toBe(false)
+    oldHost.dispose()
+    expect(old.terminals[0]?.disposed).toBe(false)
+  })
+
+  it('honours an explicit retirement frame for a displaced host without disposing its terminal', async () => {
+    const bridge = await createIdeBridge()
+    cleanups.push(() => bridge.close())
+    const viewId = '11111111-1111-4111-8111-111111111111'
+    const workspace = '/managed/one.code-workspace'
+    bridge.assign(viewId, workspace, '1', '/target')
+    let deliverPid: (pid: number) => void = () => {}
+    const pid = new Promise<number>((resolve) => { deliverPid = resolve })
+    const old = fakeVscode(workspace, ['/target'], { processId: () => pid })
+    const target = fakeVscode(workspace, ['/target'])
+    target.vscode.workspace.textDocuments.push({ isDirty: true })
+    let oldClosed: () => void = () => {}
+    const closed = new Promise<void>((resolve) => { oldClosed = resolve })
+    let attempts = 0
+    let ptyCalls = 0
+    bridge.onPty(() => { ptyCalls++ })
+    const observedHttp = {
+      request: http.request,
+      get(url: string, options: http.RequestOptions, callback: (response: http.IncomingMessage) => void) {
+        attempts++
+        return http.get(url, options, (response) => {
+          response.once('close', oldClosed)
+          callback(response)
+        })
+      },
+    }
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const oldHost = createBridgeHost(old.vscode, { url: bridge.url, token: bridge.secret, http: observedHttp, reconnectMillis: 10 })
+      const targetHost = createBridgeHost(target.vscode, { url: bridge.url, token: bridge.secret, reconnectMillis: 10 })
+      cleanups.push(() => oldHost.dispose(), () => targetHost.dispose())
+      const connected = bridge.waitForConnection(viewId, signal())
+      oldHost.start()
+      await connected
+      const focused = bridge.request(viewId, { op: 'focusTerminal' }, signal())
+      // Command arrival is observed by public API use, not a timing sleep.
+      const terminalCreated = new Promise<void>((resolve) => {
+        const create = old.vscode.window.createTerminal
+        old.vscode.window.createTerminal = (options) => {
+          const terminal = create(options)
+          resolve()
+          return terminal
+        }
+      })
+      await terminalCreated
+      targetHost.start()
+      expect(await focused).toMatchObject({ ok: false })
+      await closed
+      deliverPid(4242)
+      await Promise.resolve()
+      await vi.advanceTimersByTimeAsync(100)
+      expect(attempts).toBe(1)
+      expect(ptyCalls).toBe(0)
+      expect(old.terminals[0]?.disposed).toBe(false)
+      expect(await bridge.request(viewId, { op: 'closeView' }, signal())).toMatchObject({ ok: false, code: 'DIRTY' })
+      oldHost.dispose()
+      expect(old.terminals[0]?.disposed).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('reconnects the same host identity after an ordinary network disconnect', async () => {
+    const bridge = await createIdeBridge()
+    cleanups.push(() => bridge.close())
+    const viewId = '11111111-1111-4111-8111-111111111111'
+    const workspace = '/managed/one.code-workspace'
+    bridge.assign(viewId, workspace, '1', '/home/user')
+    bridge.onPty(() => {})
+    const fake = fakeVscode(workspace, ['/home/user'])
+    const hostIds: string[] = []
+    let firstRequest: http.ClientRequest | undefined
+    let reconnected: (status: number) => void = () => {}
+    const second = new Promise<number>((resolve) => { reconnected = resolve })
+    const observedHttp = {
+      request: http.request,
+      get(url: string, options: http.RequestOptions, callback: (response: http.IncomingMessage) => void) {
+        hostIds.push(new URL(url).searchParams.get('hostId') ?? '')
+        const attempt = hostIds.length
+        const req = http.get(url, options, (response) => {
+          if (attempt === 2) {
+            reconnected(response.statusCode ?? 0)
+          }
+          callback(response)
+        })
+        if (attempt === 1) {
+          firstRequest = req
+        }
+        return req
+      },
+    }
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const host = createBridgeHost(fake.vscode, {
+        url: bridge.url, token: bridge.secret, reconnectMillis: 10, http: observedHttp,
+      })
+      cleanups.push(() => host.dispose())
+      const connected = bridge.waitForConnection(viewId, signal())
+      host.start()
+      await connected
+      expect((await bridge.request(viewId, { op: 'focusTerminal' }, signal())).ok).toBe(true)
+      const terminal = fake.terminals[0]!
+      const closed = new Promise<void>((resolve) => firstRequest!.once('close', resolve))
+      firstRequest!.destroy()
+      await closed
+      await vi.advanceTimersByTimeAsync(10)
+      expect(await second).toBe(200)
+      expect(hostIds).toHaveLength(2)
+      expect(hostIds[0]).toMatch(/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/)
+      expect(hostIds[1]).toBe(hostIds[0])
+      expect(terminal.disposed).toBe(false)
+      expect(await bridge.request(viewId, { op: 'inspect' }, signal())).toMatchObject({ ok: true, clean: true })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('stops retrying on 410 when a disconnected host was superseded', async () => {
+    const bridge = await createIdeBridge()
+    cleanups.push(() => bridge.close())
+    const viewId = '11111111-1111-4111-8111-111111111111'
+    const workspace = '/managed/one.code-workspace'
+    bridge.assign(viewId, workspace, '1', '/target')
+    bridge.onPty(() => {})
+    const old = fakeVscode(workspace, ['/target'])
+    const target = fakeVscode(workspace, ['/target'])
+    target.vscode.workspace.textDocuments.push({ isDirty: true })
+    let initial: http.ClientRequest | undefined
+    let result: (status: number) => void = () => {}
+    const rejected = new Promise<number>((resolve) => { result = resolve })
+    let attempts = 0
+    const observedHttp = {
+      request: http.request,
+      get(url: string, options: http.RequestOptions, callback: (response: http.IncomingMessage) => void) {
+        const attempt = ++attempts
+        const req = http.get(url, options, (response) => {
+          if (attempt === 2) {
+            result(response.statusCode ?? 0)
+          }
+          callback(response)
+        })
+        if (attempt === 1) {
+          initial = req
+        }
+        return req
+      },
+    }
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const oldHost = createBridgeHost(old.vscode, { url: bridge.url, token: bridge.secret, http: observedHttp, reconnectMillis: 10 })
+      cleanups.push(() => oldHost.dispose())
+      const connected = bridge.waitForConnection(viewId, signal())
+      oldHost.start()
+      await connected
+      expect((await bridge.request(viewId, { op: 'focusTerminal' }, signal())).ok).toBe(true)
+      const terminal = old.terminals[0]!
+      const disconnected = new Promise<void>((resolve) => initial!.once('close', resolve))
+      initial!.destroy()
+      await disconnected
+      // A separate observed registration proves the target took control before retry.
+      let targetConnected: () => void = () => {}
+      const targetReady = new Promise<void>((resolve) => { targetConnected = resolve })
+      const targetHttp = {
+        request: http.request,
+        get(url: string, options: http.RequestOptions, callback: (response: http.IncomingMessage) => void) {
+          return http.get(url, options, (response) => {
+            targetConnected()
+            callback(response)
+          })
+        },
+      }
+      const replacement = createBridgeHost(target.vscode, { url: bridge.url, token: bridge.secret, http: targetHttp })
+      cleanups.push(() => replacement.dispose())
+      replacement.start()
+      await targetReady
+      await vi.advanceTimersByTimeAsync(10)
+      expect(await rejected).toBe(410)
+      await vi.advanceTimersByTimeAsync(100)
+      expect(attempts).toBe(2)
+      expect(terminal.disposed).toBe(false)
+      expect(await bridge.request(viewId, { op: 'closeView' }, signal())).toMatchObject({ ok: false, code: 'DIRTY' })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('retires control immediately after the public folder API accepts, before a folder event', async () => {
+    let updateCalled: () => void = () => {}
+    let streamDestroyed: () => void = () => {}
+    const observed = new Promise<void>((resolve) => { updateCalled = resolve })
+    const destroyed = new Promise<void>((resolve) => { streamDestroyed = resolve })
+    const fake = fakeVscode('/managed/one.code-workspace', ['/home/user'], {
+      updateWorkspaceFolders: () => { updateCalled(); return true },
+    })
+    const bridge = await createIdeBridge()
+    cleanups.push(() => bridge.close())
+    const viewId = '11111111-1111-4111-8111-111111111111'
+    bridge.assign(viewId, '/managed/one.code-workspace', '1', '/home/user')
+    const observedHttp = {
+      request: http.request,
+      get(url: string, options: http.RequestOptions, callback: (response: http.IncomingMessage) => void) {
+        const req = http.get(url, options, callback)
+        req.once('close', streamDestroyed)
+        return req
+      },
+    }
+    const host = createBridgeHost(fake.vscode, { url: bridge.url, token: bridge.secret, http: observedHttp })
+    cleanups.push(() => host.dispose())
+    const connected = bridge.waitForConnection(viewId, signal())
+    host.start()
+    await connected
+    const controller = new AbortController()
+    const changed = bridge.request(viewId, { op: 'changeDirectory', directory: '/target' }, controller.signal, {
+      expectedDirectory: '/target',
+    })
+    await observed
+    await destroyed
+    controller.abort()
+    expect(await changed).toMatchObject({ ok: false })
+    expect(bridge.isConnected(viewId)).toBe(false)
+  })
+
   it('retires the old host control reconnect without disposing terminals or closing a dirty target', async () => {
     const bridge: IdeBridge = await createIdeBridge()
     cleanups.push(() => bridge.close())
@@ -179,12 +439,8 @@ describe('VS Code bridge extension host', () => {
     target.vscode.workspace.textDocuments.push({ isDirty: true })
     let attempts = 0
     let endOld: () => void = () => {}
-    let reportStatus: (status: number) => void = () => {}
     const oldEnded = new Promise<void>((resolve) => {
       endOld = resolve
-    })
-    const retiredStatus = new Promise<number>((resolve) => {
-      reportStatus = resolve
     })
     const observedHttp = {
       request: http.request,
@@ -192,9 +448,7 @@ describe('VS Code bridge extension host', () => {
         const attempt = ++attempts
         return http.get(url, options, (response) => {
           if (attempt === 1) {
-            response.once('end', endOld)
-          } else if (attempt === 2) {
-            reportStatus(response.statusCode ?? 0)
+            response.once('close', endOld)
           }
           callback(response)
         })
@@ -223,10 +477,8 @@ describe('VS Code bridge extension host', () => {
       targetHost.start()
       expect(await changed).toMatchObject({ ok: true, directory: '/target' })
       await oldEnded
-      await vi.advanceTimersByTimeAsync(10)
-      expect(await retiredStatus).toBe(410)
       await vi.advanceTimersByTimeAsync(100)
-      expect(attempts).toBe(2)
+      expect(attempts).toBe(1)
       expect(oldTerminal.disposed).toBe(false)
       expect(old.terminals).toContain(oldTerminal)
       expect(await bridge.request(viewId, { op: 'closeView' }, signal())).toMatchObject({ ok: false, code: 'DIRTY' })
@@ -252,17 +504,19 @@ describe('VS Code bridge extension host', () => {
       },
     })
     const { bridge, viewId } = await setupWith(fake, '/managed/one.code-workspace')
-    const changed = bridge.request(viewId, { op: 'changeDirectory', directory: '/target' }, signal(), {
+    const controller = new AbortController()
+    const changed = bridge.request(viewId, { op: 'changeDirectory', directory: '/target' }, controller.signal, {
       expectedDirectory: '/target',
     })
     await updateCalled
     // A public folder-change event that still reports the old folder is not confirmation.
     fake.fireFolders()
+    controller.abort()
     expect(await changed).toMatchObject({ ok: false })
     expect(fake.folderListeners.size).toBe(1)
   })
 
-  it('confirms an accepted change only after the public folder event reports the target', async () => {
+  it('does not confirm an accepted change from the initiating host folder event alone', async () => {
     let updateCalled: () => void = () => {}
     const updateObserved = new Promise<void>((resolve) => {
       updateCalled = resolve
@@ -274,18 +528,20 @@ describe('VS Code bridge extension host', () => {
       },
     })
     const { bridge, viewId } = await setupWith(fake, '/managed/one.code-workspace')
-    const changed = bridge.request(viewId, { op: 'changeDirectory', directory: '/target' }, signal(), {
+    const controller = new AbortController()
+    const changed = bridge.request(viewId, { op: 'changeDirectory', directory: '/target' }, controller.signal, {
       expectedDirectory: '/target',
     })
     await updateObserved
     expect(fake.folderListeners.size).toBe(1)
     fake.vscode.workspace.workspaceFolders = [{ uri: { fsPath: '/target' } }]
     fake.fireFolders()
-    expect(await changed).toMatchObject({ ok: true, directory: '/target' })
+    controller.abort()
+    expect(await changed).toMatchObject({ ok: false })
     expect(fake.folderListeners.size).toBe(1)
   })
 
-  it('times out an accepted update with no folder observation instead of reporting success', async () => {
+  it('times out an accepted update with no replacement host instead of reporting success', async () => {
     const bridge: IdeBridge = await createIdeBridge()
     cleanups.push(() => bridge.close())
     const viewId = '11111111-1111-4111-8111-111111111111'
@@ -316,93 +572,11 @@ describe('VS Code bridge extension host', () => {
         settled = true
       })
       await updateObserved
-      await vi.advanceTimersByTimeAsync(14_999)
+      await vi.advanceTimersByTimeAsync(19_999)
       expect(settled).toBe(false)
       await vi.advanceTimersByTimeAsync(1)
-      expect(await changed).toMatchObject({ ok: false, message: 'directory change was not applied' })
+      expect(await changed).toMatchObject({ ok: false, message: 'ide window did not respond' })
       expect(fake.folderListeners.size).toBe(1)
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it('revalidates a later folder event after a cancelled change, even after an old-folder reconnect', async () => {
-    const bridge: IdeBridge = await createIdeBridge()
-    cleanups.push(() => bridge.close())
-    const viewId = '11111111-1111-4111-8111-111111111111'
-    const workspace = '/managed/one.code-workspace'
-    bridge.assign(viewId, workspace, '1', '/old')
-    let updateCalled: () => void = () => {}
-    let firstEnded: () => void = () => {}
-    let secondConnected: (status: number) => void = () => {}
-    let thirdConnected: (status: number) => void = () => {}
-    const updateObserved = new Promise<void>((resolve) => {
-      updateCalled = resolve
-    })
-    const oldEnded = new Promise<void>((resolve) => {
-      firstEnded = resolve
-    })
-    const secondStatus = new Promise<number>((resolve) => {
-      secondConnected = resolve
-    })
-    const thirdStatus = new Promise<number>((resolve) => {
-      thirdConnected = resolve
-    })
-    const fake = fakeVscode(workspace, ['/old'], {
-      updateWorkspaceFolders: () => {
-        updateCalled()
-        return true
-      },
-    })
-    let attempts = 0
-    const observedHttp = {
-      request: http.request,
-      get(url: string, options: http.RequestOptions, callback: (response: http.IncomingMessage) => void) {
-        const attempt = ++attempts
-        return http.get(url, options, (response) => {
-          if (attempt === 1) {
-            response.once('end', firstEnded)
-          } else if (attempt === 2) {
-            secondConnected(response.statusCode ?? 0)
-          } else if (attempt === 3) {
-            thirdConnected(response.statusCode ?? 0)
-          }
-          callback(response)
-        })
-      },
-    }
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
-    try {
-      const host = createBridgeHost(fake.vscode, {
-        url: bridge.url,
-        token: bridge.secret,
-        reconnectMillis: 10,
-        http: observedHttp,
-      })
-      cleanups.push(() => host.dispose())
-      const connected = bridge.waitForConnection(viewId, signal())
-      host.start()
-      await connected
-      const controller = new AbortController()
-      const changed = bridge.request(viewId, { op: 'changeDirectory', directory: '/target' }, controller.signal, {
-        expectedDirectory: '/target',
-      })
-      await updateObserved
-      controller.abort()
-      expect(await changed).toMatchObject({ ok: false })
-      await oldEnded
-      await vi.advanceTimersByTimeAsync(10)
-      expect(await secondStatus).toBe(200)
-      expect(bridge.isConnected(viewId, '1')).toBe(true)
-
-      // The accepted API call applies after cancellation; its old registration must not survive.
-      fake.vscode.workspace.workspaceFolders = [{ uri: { fsPath: '/target' } }]
-      fake.fireFolders()
-      await vi.advanceTimersByTimeAsync(10)
-      expect(await thirdStatus).toBe(410)
-      expect(bridge.isConnected(viewId, '1')).toBe(false)
-      await vi.advanceTimersByTimeAsync(100)
-      expect(attempts).toBe(3)
     } finally {
       vi.useRealTimers()
     }
@@ -418,16 +592,13 @@ describe('VS Code bridge extension host', () => {
     expect(ptyEvents).toEqual([{ viewId, pid: 4242 }])
   })
 
-  it('switches directory through the public updateWorkspaceFolders API', async () => {
+  it('confirms a no-op directory change without restarting the host', async () => {
     const { bridge, viewId, fake } = await setup('/managed/one.code-workspace')
-
-    // The daemon only accepts a change the window confirms with the expected directory.
-    const result = await bridge.request(viewId, { op: 'changeDirectory', directory: '/home/kkdaemon' }, signal(), {
-      expectedDirectory: '/home/kkdaemon',
+    const result = await bridge.request(viewId, { op: 'changeDirectory', directory: '/home/user' }, signal(), {
+      expectedDirectory: '/home/user',
     })
-    expect(result.ok).toBe(true)
-    expect(result.directory).toBe('/home/kkdaemon')
-    expect(fake.calls.updateWorkspaceFolders).toEqual([[0, 1, [{ uri: { fsPath: '/home/kkdaemon', scheme: 'file' } }]]])
+    expect(result).toMatchObject({ ok: true, directory: '/home/user' })
+    expect(fake.calls.updateWorkspaceFolders).toEqual([])
   })
 
   it('refuses to switch directory while documents are dirty', async () => {

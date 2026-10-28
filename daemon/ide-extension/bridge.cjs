@@ -23,13 +23,13 @@ const MAX_SNAPSHOT_BYTES = 4 * 1024 * 1024
 const MAX_SNAPSHOT_DOCUMENTS = 256
 /** Bounds how long a bridge POST may occupy the extension host. */
 const POST_TIMEOUT_MILLIS = 5_000
-const FOLDER_OBSERVATION_TIMEOUT_MILLIS = 15_000
 
 function createBridgeHost(vscode, options) {
   const config = options || {}
   const url = config.url || process.env.KK_STUDIO_IDE_BRIDGE_URL
   const token = config.token || process.env.KK_STUDIO_IDE_BRIDGE_TOKEN
   const nodePath = require('node:path')
+  const hostId = require('node:crypto').randomUUID()
   const http = config.http || require('node:http')
   const reconnectMillis = config.reconnectMillis || DEFAULT_RECONNECT_MILLIS
 
@@ -41,7 +41,6 @@ function createBridgeHost(vscode, options) {
   let terminal = null
   const terminals = []
   const pendingPosts = new Set()
-  const folderObservations = new Set()
 
   const folderPaths = () => {
     const folders = vscode.workspace.workspaceFolders || []
@@ -51,9 +50,6 @@ function createBridgeHost(vscode, options) {
   // A registration describes live folders, even when they change after a cancelled command.
   const folderSubscription = vscode.workspace.onDidChangeWorkspaceFolders(() => {
     failStream()
-    for (const finish of [...folderObservations]) {
-      finish(folderPaths())
-    }
   })
 
   const workspacePath = () => {
@@ -67,7 +63,7 @@ function createBridgeHost(vscode, options) {
   // Resolves with the HTTP status code, or 0 when the bridge is unreachable or times out.
   const post = (path, payload) => {
     return new Promise((resolve) => {
-      if (!url || !token) {
+      if (disposed || retired || !url || !token) {
         resolve(0)
         return
       }
@@ -119,6 +115,27 @@ function createBridgeHost(vscode, options) {
   }
 
   const reply = (id, result) => post('/bridge/result', Object.assign({ id }, result))
+
+  // Retire only the control host; code-server retains ownership of its terminals.
+  const retire = () => {
+    if (retired) {
+      return
+    }
+    retired = true
+    buffer = ''
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
+    if (streamRequest) {
+      streamRequest.destroy()
+      streamRequest = null
+    }
+    for (const request of pendingPosts) {
+      request.destroy()
+    }
+    pendingPosts.clear()
+  }
 
   const disposeTerminals = () => {
     terminal = null
@@ -233,6 +250,9 @@ function createBridgeHost(vscode, options) {
     let restored = 0
     let skipped = 0
     for (const entry of documents) {
+      if (disposed || retired) {
+        return
+      }
       if (
         !entry ||
         typeof entry.path !== 'string' ||
@@ -247,6 +267,9 @@ function createBridgeHost(vscode, options) {
       try {
         const uri = vscode.Uri.file(entry.path)
         const document = await vscode.workspace.openTextDocument(uri)
+        if (disposed || retired) {
+          return
+        }
         // Never overwrite unsaved work that already exists in the window.
         if (document.isDirty === true) {
           skipped += 1
@@ -256,12 +279,18 @@ function createBridgeHost(vscode, options) {
         const end = document.positionAt(document.getText().length)
         edit.replace(uri, new range(new position(0, 0), end), entry.text)
         const applied = await vscode.workspace.applyEdit(edit)
+        if (disposed || retired) {
+          return
+        }
         if (applied === false) {
           skipped += 1
           continue
         }
         if (typeof vscode.window.showTextDocument === 'function') {
           await vscode.window.showTextDocument(document, { preview: false })
+        }
+        if (disposed || retired) {
+          return
         }
         restored += 1
       } catch {
@@ -293,45 +322,13 @@ function createBridgeHost(vscode, options) {
       await reply(message.id, { ok: true, directory: folderPaths()[0] })
       return
     }
-    // The API returning true only accepts the request. Observe the public folder-change event;
-    // if this host reloads, the daemon instead confirms the matching new registration.
-    let finishObservation
-    let timer
-    const observation = new Promise((resolve) => {
-      finishObservation = (actual) => {
-        if (timer) {
-          clearTimeout(timer)
-        }
-        folderObservations.delete(finishObservation)
-        resolve(actual)
-      }
-      folderObservations.add(finishObservation)
-      timer = setTimeout(() => finishObservation(null), FOLDER_OBSERVATION_TIMEOUT_MILLIS)
-      if (timer.unref) {
-        timer.unref()
-      }
-    })
-    let updated
-    try {
-      updated = vscode.workspace.updateWorkspaceFolders(0, folders.length, { uri })
-    } catch (error) {
-      finishObservation(null)
-      throw error
-    }
+    // Replacing the first folder restarts extension hosts; only the new host can confirm it.
+    const updated = vscode.workspace.updateWorkspaceFolders(0, folders.length, { uri })
     if (updated === false) {
-      finishObservation(null)
       await reply(message.id, { ok: false, message: 'directory change was rejected' })
       return
     }
-    const actual = await observation
-    if (disposed || retired) {
-      return
-    }
-    if (actual === null || !sameDirectory(actual)) {
-      await reply(message.id, { ok: false, message: 'directory change was not applied' })
-      return
-    }
-    await reply(message.id, { ok: true, directory: actual[0] })
+    retire()
   }
 
   const focusTerminal = async (message) => {
@@ -349,6 +346,9 @@ function createBridgeHost(vscode, options) {
     } catch {
       pid = undefined
     }
+    if (disposed || retired) {
+      return
+    }
     const path = workspacePath()
     // A shell that cannot be handed to the daemon for supervision must not be left running.
     if (!(typeof pid === 'number' && pid > 0) || !path) {
@@ -357,6 +357,9 @@ function createBridgeHost(vscode, options) {
       return
     }
     const status = await post('/bridge/pty', { workspacePath: path, pid })
+    if (disposed || retired) {
+      return
+    }
     if (status >= 400 || status === 0) {
       disposeTerminals()
       await reply(message.id, { ok: false, message: 'terminal supervision failed' })
@@ -381,6 +384,9 @@ function createBridgeHost(vscode, options) {
   }
 
   const handleCommand = async (message) => {
+    if (disposed || retired) {
+      return
+    }
     try {
       if (message.op === 'changeDirectory') {
         await changeDirectory(message)
@@ -441,6 +447,10 @@ function createBridgeHost(vscode, options) {
         failStream()
         return
       }
+      if (message && message.type === 'retired') {
+        retire()
+        return
+      }
       if (message && message.type === 'command' && typeof message.id === 'string') {
         void handleCommand(message)
       }
@@ -472,6 +482,7 @@ function createBridgeHost(vscode, options) {
     buffer = ''
     const params = new URLSearchParams()
     params.set('workspacePath', path)
+    params.set('hostId', hostId)
     for (const folder of folderPaths()) {
       params.append('folder', folder)
     }
@@ -485,10 +496,7 @@ function createBridgeHost(vscode, options) {
         response.resume()
         if (response.statusCode === 410) {
           // A retired host stops only its control channel; the managed process owns terminals.
-          retired = true
-          for (const finish of [...folderObservations]) {
-            finish(null)
-          }
+          retire()
         } else {
           scheduleReconnect()
         }
@@ -525,9 +533,6 @@ function createBridgeHost(vscode, options) {
     dispose() {
       disposed = true
       folderSubscription.dispose()
-      for (const finish of [...folderObservations]) {
-        finish(null)
-      }
       if (reconnectTimer) {
         clearTimeout(reconnectTimer)
         reconnectTimer = null
