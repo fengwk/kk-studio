@@ -10,6 +10,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
 import java.time.Instant;
 import java.util.List;
 
@@ -63,15 +64,62 @@ class EnvironmentDtoContractTest {
     assertEquals(String.class, EnvironmentCardDTO.class.getDeclaredField("version").getType());
   }
 
-  /** 意图：Card 携带最近一次受管更新投影；它是独立于 daemonVersion/CAS version 的第三个事实。 */
+  /** 意图：Card 不再携带历史更新任务，当前运行信息只经 runtime 端点投影。 */
   @Test
-  void environmentCardExposesManagedUpdateProjection() throws Exception {
+  void environmentCardCarriesNoManagedUpdateProjection() throws Exception {
+    assertThrows(
+        NoSuchFieldException.class, () -> EnvironmentCardDTO.class.getDeclaredField("update"));
+    assertThrows(
+        NoSuchMethodException.class, () -> EnvironmentCardDTO.class.getMethod("getUpdate"));
+    assertTrue(
+        List.of(EnvironmentCardDTO.class.getMethods()).stream()
+            .noneMatch(method -> method.getName().equals("setUpdate")));
+  }
+
+  /** 意图：runtime wire 保留 revision/status，且无更新与未知总长都必须显式输出 null。 */
+  @Test
+  void runtimeStatusExplicitlySerializesNullableUpdateAndTotalBytes() {
+    EnvironmentRuntimeDTO status = new EnvironmentRuntimeDTO();
+    status.setDaemonVersion("1.0.9");
+    status.setUpdate(null);
+    EnvironmentRuntimeStatusDTO snapshot = new EnvironmentRuntimeStatusDTO();
+    snapshot.setRevision("1");
+    snapshot.setStatus(status);
+
+    JsonNode json = MAPPER.readTree(MAPPER.writeValueAsString(snapshot));
+
+    assertEquals("1", json.get("revision").stringValue());
+    assertEquals("1.0.9", json.get("status").get("daemonVersion").stringValue());
+    assertTrue(json.get("status").has("update"));
+    assertTrue(json.get("status").get("update").isNull());
+
+    EnvironmentUpdateProgressDTO progress = new EnvironmentUpdateProgressDTO();
+    progress.setTargetVersion("1.0.10");
+    progress.setDownloadedBytes(12L);
+    progress.setTotalBytes(null);
+    status.setUpdate(progress);
+    JsonNode withProgress = MAPPER.readTree(MAPPER.writeValueAsString(snapshot));
+    assertTrue(withProgress.get("status").get("update").has("totalBytes"));
+    assertTrue(withProgress.get("status").get("update").get("totalBytes").isNull());
+  }
+
+  /** 意图：start update 响应必须显式区分命令是否已确认，不能只靠快照推断启动成功。 */
+  @Test
+  void updateStartResponseCarriesCommandStatus() throws Exception {
     assertEquals(
-        EnvironmentUpdateDTO.class, EnvironmentCardDTO.class.getDeclaredField("update").getType());
-    assertEquals(
-        List.of("operationId", "targetVersion", "phase", "error", "createdAt", "updatedAt"),
-        List.of(EnvironmentUpdateDTO.class.getDeclaredFields()).stream()
+        List.of("runtimeStatus", "commandStatus"),
+        List.of(EnvironmentUpdateStartDTO.class.getDeclaredFields()).stream()
+            .filter(field -> !Modifier.isStatic(field.getModifiers()))
             .map(Field::getName)
+            .toList());
+    assertEquals(
+        List.of("CURRENT", "IN_PROGRESS", "SENT_UNCONFIRMED"),
+        List.of(
+                EnvironmentUpdateStartDTO.class.getField("CURRENT").get(null),
+                EnvironmentUpdateStartDTO.class.getField("IN_PROGRESS").get(null),
+                EnvironmentUpdateStartDTO.class.getField("SENT_UNCONFIRMED").get(null))
+            .stream()
+            .map(Object::toString)
             .toList());
   }
 

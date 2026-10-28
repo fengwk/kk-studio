@@ -5,27 +5,39 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityB
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilitySendUncertainException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
-import fun.fengwk.kkstudio.ide.protocol.IdeAction;
 import fun.fengwk.kkstudio.ide.protocol.IdeCommand;
+import fun.fengwk.kkstudio.ide.protocol.IdeOpenMode;
 import fun.fengwk.kkstudio.ide.protocol.IdeReply;
+import fun.fengwk.kkstudio.ide.protocol.IdeViewState;
+import fun.fengwk.kkstudio.ide.protocol.IdeViewSummary;
+import fun.fengwk.kkstudio.platform.error.AiDomainException;
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeChangeDirectoryDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeCloseViewDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeOpenViewDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewsDTO;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Supplier;
 
 /**
- * IDE 视图控制服务实现：一次 IDE 命令 = 一条 {@code IDE_COMMAND} + 一条匹配 {@code IDE_RESULT}。
+ * IDE 视图控制服务实现：owner 在发任何命令前经事件节点核对 exact intent，然后通过既有 lease/READY 围栏下发一条 {@code IDE_COMMAND}。
  *
- * <p>命令超时/断线/排队拒绝映射为 IDE 通道不可用（客户端可重试）；Daemon 明确拒绝（dirty、目录不可访问等）映射为校验错误并保留 Daemon
- * 文案。所有失败路径都不重放副作用，也不伪造成功结果；{@code OPEN_VIEW} 在任何副作用之前先校验 Independent Origin 配置（缺配置
- * fail-closed），并把入口凭据绑定到命令进入传输时的 Daemon 实例代际。
+ * <p>绑定身份命令必须匹配 owner 缓存的 document+epoch，且缓存缺失/漂移时先用 {@code LIST_VIEWS} 重建再重判；旧 epoch 的关闭、目录与终端请求不得
+ * 作用于新绑定。命令超时/断线映射为不可用；Daemon 的 VIEW_GONE 立即拒绝并撤销本地授权，其它拒绝保留安全文案。所有失败路径都不重放副作用。
  */
 public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
 
@@ -34,34 +46,26 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
 
   public static final String IDE_ROUTE_PREFIX = "/environment-ide/";
   public static final String BOOTSTRAP_PATH = "__ide/bootstrap";
-
-  /** 浏览器探测 IDE 会话的网关路径，与 {@link #BOOTSTRAP_PATH} 同在保留的 {@code __ide/} 前缀下。 */
   public static final String SESSION_PATH = "__ide/session";
 
   private final IdeCommandTransport transport;
   private final IdeBootstrapTicketService bootstrapTickets;
+  private final IdeBrowserUseGateway browserUse;
+  private final IdeViewBindingRegistry bindings;
   private final Duration commandTimeout;
   private final IdeViewAuthorizationListener viewAuthorization;
 
   public EnvironmentIdeServiceImpl(
-      IdeCommandTransport transport, IdeBootstrapTicketService bootstrapTickets) {
-    this(transport, bootstrapTickets, DEFAULT_COMMAND_TIMEOUT, null);
-  }
-
-  public EnvironmentIdeServiceImpl(
       IdeCommandTransport transport,
       IdeBootstrapTicketService bootstrapTickets,
-      Duration commandTimeout) {
-    this(transport, bootstrapTickets, commandTimeout, null);
-  }
-
-  public EnvironmentIdeServiceImpl(
-      IdeCommandTransport transport,
-      IdeBootstrapTicketService bootstrapTickets,
+      IdeBrowserUseGateway browserUse,
+      IdeViewBindingRegistry bindings,
       Duration commandTimeout,
       IdeViewAuthorizationListener viewAuthorization) {
     this.transport = Objects.requireNonNull(transport, "transport");
     this.bootstrapTickets = Objects.requireNonNull(bootstrapTickets, "bootstrapTickets");
+    this.browserUse = Objects.requireNonNull(browserUse, "browserUse");
+    this.bindings = Objects.requireNonNull(bindings, "bindings");
     this.commandTimeout = Objects.requireNonNull(commandTimeout, "commandTimeout");
     this.viewAuthorization = viewAuthorization;
     if (commandTimeout.isZero() || commandTimeout.isNegative()) {
@@ -74,34 +78,81 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
       EnvironmentId environmentId, EnvironmentIdeOpenViewDTO request) {
     Objects.requireNonNull(environmentId, "environmentId");
     Objects.requireNonNull(request, "request");
-    String viewId = parseViewId(request.getViewId());
-    // 容量预检在任何 Daemon 副作用之前：视图/代际额度耗尽时显式失败，绝不先建 Native 视图再静默不授权。
-    if (viewAuthorization != null) {
-      try {
-        viewAuthorization.ensureViewCapacity(environmentId);
-      } catch (IllegalStateException error) {
-        throw new AiEnvironmentIdeUnavailableException(
-            "environment IDE view capacity is exhausted", error);
-      }
-    }
-    IdeCommand command = directoryCommand(IdeAction.OPEN_VIEW, viewId, request.getDirectory());
+    UUID viewId = parseUuid(request.getViewId(), "viewId");
+    UUID documentId = parseUuid(request.getDocumentId(), "documentId");
+    UUID eventNodeId = parseUuid(request.getEventNodeId(), "eventNodeId");
+    UUID connectionId = parseUuid(request.getConnectionId(), "connectionId");
+    UUID claimId = parseUuid(request.getClaimId(), "claimId");
+    IdeOpenMode mode = parseMode(request.getMode());
+    String directory = parseDirectory(request.getDirectory());
+    requireIntent(eventNodeId, connectionId, documentId, environmentId, viewId, claimId);
+    ensureCapacity(environmentId);
+    IdeCommand command =
+        command(
+            () ->
+                IdeCommand.openView(
+                    viewId.toString(),
+                    documentId.toString(),
+                    eventNodeId.toString(),
+                    connectionId.toString(),
+                    claimId.toString(),
+                    mode,
+                    directory));
     IdeCall result = call(environmentId, command);
-    IdeReply reply = result.reply();
-    EnvironmentIdeViewDTO dto =
-        toDto(environmentId, reply.viewId() == null ? viewId : reply.viewId(), reply.directory());
-    String workspacePath = requireWorkspace(reply);
-    // 视图授权跟随真实视图生命周期：创建即授权，关闭即撤销（不使用空闲超时推断）。
+    if (!result.reply().ok()) {
+      throw rejection(result.reply());
+    }
+    requireMatchingIdentity(result.reply(), viewId, documentId, eventNodeId, connectionId, claimId);
+    Long bindingEpoch = result.reply().bindingEpoch();
+    if (bindingEpoch == null || bindingEpoch <= 0) {
+      throw protocolFailure("daemon did not return a binding epoch");
+    }
+    String confirmedDirectory = requirePath(result.reply().directory(), "directory");
+    String workspacePath = requirePath(result.reply().workspacePath(), "workspacePath");
+    IdeViewBindingRegistry.Binding binding =
+        new IdeViewBindingRegistry.Binding(
+            result.identity(),
+            viewId,
+            documentId,
+            eventNodeId,
+            connectionId,
+            claimId,
+            bindingEpoch,
+            confirmedDirectory,
+            workspacePath,
+            IdeViewState.OPEN);
+    // 先落实本地授权，再发布路由缓存；授权容量竞争失败时不能留下可被后续命令命中的半绑定。
     if (viewAuthorization != null) {
       try {
-        viewAuthorization.viewOpened(result.identity(), dto.getViewId(), workspacePath);
+        viewAuthorization.viewOpened(
+            result.identity(), viewId.toString(), bindingEpoch, workspacePath);
       } catch (IllegalStateException error) {
         throw new AiEnvironmentIdeUnavailableException(
             "environment IDE view capacity is exhausted", error);
       }
     }
-    // 入口凭据绑定命令的代际；另一个 Daemon 实例接管时由宿主依代际关闭并 revoke。
-    String ticket = bootstrapTickets.issue(result.identity(), dto.getViewId(), workspacePath);
-    dto.setEntryUrl(IDE_ROUTE_PREFIX + environmentId + "/" + BOOTSTRAP_PATH + "?token=" + ticket);
+    bindings.record(binding);
+    bootstrapTickets.revokeView(environmentId, viewId.toString());
+    String ticket;
+    try {
+      ticket =
+          bootstrapTickets.issue(result.identity(), viewId.toString(), bindingEpoch, workspacePath);
+    } catch (RuntimeException error) {
+      // 出票失败时回滚本地授权/路由；Daemon 视图留给其正常过期回收，不伪造成功入口。
+      revokeLocal(binding);
+      throw new AiEnvironmentIdeUnavailableException(
+          "environment IDE bootstrap ticket could not be issued", error);
+    }
+    EnvironmentIdeViewDTO dto = toDto(binding);
+    dto.setEntryUrl(
+        IDE_ROUTE_PREFIX
+            + environmentId
+            + "/"
+            + viewId
+            + "/"
+            + BOOTSTRAP_PATH
+            + "?token="
+            + ticket);
     return dto;
   }
 
@@ -110,36 +161,251 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
       EnvironmentId environmentId, String viewId, EnvironmentIdeChangeDirectoryDTO request) {
     Objects.requireNonNull(environmentId, "environmentId");
     Objects.requireNonNull(request, "request");
-    String parsedViewId = parseViewId(viewId);
-    String directory = request.getDirectory();
-    if (directory == null || directory.isBlank()) {
+    UUID parsedViewId = parseViewId(viewId);
+    UUID documentId = parseUuid(request.getDocumentId(), "documentId");
+    long bindingEpoch = parseEpoch(request.getBindingEpoch());
+    String directory = parseDirectory(request.getDirectory());
+    if (directory == null) {
       throw new AiValidationException("environment", "directory must not be blank");
     }
-    IdeCommand command = directoryCommand(IdeAction.CHANGE_DIRECTORY, parsedViewId, directory);
-    IdeReply reply = call(environmentId, command).reply();
-    // 无需更换 iframe URL：entryUrl 保持 null，同 workspace 身份继续。
-    return toDto(
-        environmentId,
-        reply.viewId() == null ? parsedViewId : reply.viewId(),
-        reply.directory() == null ? directory : reply.directory());
-  }
-
-  @Override
-  public void focusTerminal(EnvironmentId environmentId, String viewId) {
-    Objects.requireNonNull(environmentId, "environmentId");
-    call(environmentId, IdeCommand.view(IdeAction.FOCUS_TERMINAL, parseViewId(viewId), null));
-  }
-
-  @Override
-  public void closeView(EnvironmentId environmentId, String viewId) {
-    Objects.requireNonNull(environmentId, "environmentId");
-    String parsedViewId = parseViewId(viewId);
-    IdeCall result = call(environmentId, IdeCommand.view(IdeAction.CLOSE_VIEW, parsedViewId, null));
-    if (viewAuthorization != null) {
-      viewAuthorization.viewClosed(result.identity(), parsedViewId);
+    IdeViewBindingRegistry.Binding binding =
+        requireBinding(environmentId, parsedViewId, documentId, bindingEpoch);
+    IdeCommand command =
+        command(
+            () ->
+                IdeCommand.changeDirectory(
+                    parsedViewId.toString(), documentId.toString(), bindingEpoch, directory));
+    IdeCall result = call(environmentId, command);
+    if (!result.reply().ok()) {
+      throw rejection(result.reply());
     }
-    // 撤销该视图尚未消费的入口票据：否则视图关闭后（尤其同一 viewId 再次打开时）旧票据仍能换到 cookie。
-    bootstrapTickets.revokeView(environmentId, parsedViewId);
+    requireReplyView(result.reply(), parsedViewId);
+    String confirmed = result.reply().directory() == null ? directory : result.reply().directory();
+    if (!bindings.updateDirectory(
+        environmentId, parsedViewId, documentId, bindingEpoch, confirmed)) {
+      throw viewGone();
+    }
+    IdeViewBindingRegistry.Binding current =
+        bindings
+            .find(environmentId, parsedViewId)
+            .filter(candidate -> candidate.matches(documentId, bindingEpoch))
+            .orElseThrow(EnvironmentIdeServiceImpl::viewGone);
+    return toDto(current);
+  }
+
+  @Override
+  public void focusTerminal(
+      EnvironmentId environmentId, String viewId, EnvironmentIdeViewBindingDTO request) {
+    Objects.requireNonNull(environmentId, "environmentId");
+    Objects.requireNonNull(request, "request");
+    UUID parsedViewId = parseViewId(viewId);
+    UUID documentId = parseUuid(request.getDocumentId(), "documentId");
+    long bindingEpoch = parseEpoch(request.getBindingEpoch());
+    requireBinding(environmentId, parsedViewId, documentId, bindingEpoch);
+    IdeCall result =
+        call(
+            environmentId,
+            command(
+                () ->
+                    IdeCommand.focusTerminal(
+                        parsedViewId.toString(), documentId.toString(), bindingEpoch)));
+    if (!result.reply().ok()) {
+      throw rejection(result.reply());
+    }
+    requireReplyView(result.reply(), parsedViewId);
+  }
+
+  @Override
+  public void closeView(
+      EnvironmentId environmentId, String viewId, EnvironmentIdeCloseViewDTO request) {
+    Objects.requireNonNull(environmentId, "environmentId");
+    Objects.requireNonNull(request, "request");
+    UUID parsedViewId = parseViewId(viewId);
+    UUID documentId = parseUuid(request.getDocumentId(), "documentId");
+    long bindingEpoch = parseEpoch(request.getBindingEpoch());
+    boolean discard = requireDiscard(request.getDiscard());
+    IdeViewBindingRegistry.Binding binding =
+        requireBinding(environmentId, parsedViewId, documentId, bindingEpoch);
+    IdeCall result =
+        call(
+            environmentId,
+            command(
+                () ->
+                    IdeCommand.closeView(
+                        parsedViewId.toString(), documentId.toString(), bindingEpoch, discard)));
+    if (!result.reply().ok()) {
+      if (isViewGone(result.reply())) {
+        revokeLocal(binding);
+      }
+      throw rejection(result.reply());
+    }
+    requireReplyView(result.reply(), parsedViewId);
+    revokeLocal(binding);
+  }
+
+  @Override
+  public void detachView(
+      EnvironmentId environmentId, String viewId, EnvironmentIdeViewBindingDTO request) {
+    Objects.requireNonNull(environmentId, "environmentId");
+    Objects.requireNonNull(request, "request");
+    UUID parsedViewId = parseViewId(viewId);
+    UUID documentId = parseUuid(request.getDocumentId(), "documentId");
+    long bindingEpoch = parseEpoch(request.getBindingEpoch());
+    IdeViewBindingRegistry.Binding binding =
+        requireBinding(environmentId, parsedViewId, documentId, bindingEpoch);
+    IdeCall result =
+        call(
+            environmentId,
+            command(
+                () ->
+                    IdeCommand.detachView(
+                        parsedViewId.toString(), documentId.toString(), bindingEpoch)));
+    if (!result.reply().ok()) {
+      if (isViewGone(result.reply())) {
+        revokeLocal(binding);
+      }
+      throw rejection(result.reply());
+    }
+    requireReplyView(result.reply(), parsedViewId);
+    // detach 冻结该 epoch 的使用证明：本地不得再允许旧 cookie/旧请求进入；视图资源在 Daemon 恢复窗口内保留。
+    revokeLocal(binding);
+  }
+
+  @Override
+  public EnvironmentIdeViewsDTO listViews(EnvironmentId environmentId) {
+    Objects.requireNonNull(environmentId, "environmentId");
+    List<IdeViewBindingRegistry.Binding> current = loadViews(environmentId);
+    EnvironmentIdeViewsDTO dto = new EnvironmentIdeViewsDTO();
+    dto.setViews(current.stream().map(EnvironmentIdeServiceImpl::toDto).toList());
+    return dto;
+  }
+
+  private List<IdeViewBindingRegistry.Binding> loadViews(EnvironmentId environmentId) {
+    IdeCall result = call(environmentId, IdeCommand.listViews());
+    if (!result.reply().ok()) {
+      throw rejection(result.reply());
+    }
+    List<IdeViewSummary> views = result.reply().views();
+    if (views == null) {
+      throw protocolFailure("daemon did not return a view list");
+    }
+    List<IdeViewBindingRegistry.Binding> current = new ArrayList<>(views.size());
+    for (IdeViewSummary view : views) {
+      current.add(
+          new IdeViewBindingRegistry.Binding(
+              result.identity(),
+              view.viewId(),
+              view.documentId(),
+              view.eventNodeId(),
+              view.connectionId(),
+              view.claimId(),
+              view.bindingEpoch(),
+              view.directory(),
+              view.workspacePath(),
+              view.state()));
+    }
+    revokeStaleAuthorizations(environmentId, current);
+    return bindings.replaceEnvironment(environmentId, current);
+  }
+
+  /** 权威列表缺少的视图或 epoch 已换代时，撤销旧会话；新绑定自己的会话不受影响。只比对 Daemon 实际返回的 view+epoch。 */
+  private void revokeStaleAuthorizations(
+      EnvironmentId environmentId, List<IdeViewBindingRegistry.Binding> current) {
+    if (viewAuthorization == null) {
+      return;
+    }
+    Map<UUID, Long> epochs = new HashMap<>();
+    for (IdeViewBindingRegistry.Binding binding : current) {
+      epochs.put(binding.viewId(), binding.bindingEpoch());
+    }
+    for (IdeViewBindingRegistry.Binding existing : bindings.listEnvironment(environmentId)) {
+      Long currentEpoch = epochs.get(existing.viewId());
+      if (currentEpoch == null || currentEpoch != existing.bindingEpoch()) {
+        viewAuthorization.viewClosed(
+            existing.daemonIdentity(), existing.viewId().toString(), existing.bindingEpoch());
+        bootstrapTickets.revokeView(environmentId, existing.viewId().toString());
+      }
+    }
+  }
+
+  private IdeViewBindingRegistry.Binding requireBinding(
+      EnvironmentId environmentId, UUID viewId, UUID documentId, long bindingEpoch) {
+    Optional<IdeViewBindingRegistry.Binding> cached = bindings.find(environmentId, viewId);
+    IdeViewBindingRegistry.Binding binding =
+        cached
+            .filter(candidate -> candidate.matches(documentId, bindingEpoch))
+            .filter(this::isCurrentGeneration)
+            .orElse(null);
+    if (binding == null) {
+      // 本地缓存缺失/漂移：以 Daemon 的 LIST_VIEWS 为权威重建后再判定；旧 epoch 仍不匹配即拒绝。
+      loadViews(environmentId);
+      binding =
+          bindings
+              .find(environmentId, viewId)
+              .filter(candidate -> candidate.matches(documentId, bindingEpoch))
+              .orElseThrow(EnvironmentIdeServiceImpl::viewGone);
+    }
+    requireIntent(
+        binding.eventNodeId(),
+        binding.connectionId(),
+        binding.documentId(),
+        environmentId,
+        binding.viewId(),
+        binding.claimId());
+    return binding;
+  }
+
+  private void requireIntent(
+      UUID eventNodeId,
+      UUID connectionId,
+      UUID documentId,
+      EnvironmentId environmentId,
+      UUID viewId,
+      UUID claimId) {
+    boolean matched;
+    try {
+      matched =
+          browserUse.findExactIntent(
+              eventNodeId, connectionId, documentId, environmentId, viewId, claimId);
+    } catch (AiEnvironmentIdeUnavailableException error) {
+      throw error;
+    } catch (RuntimeException error) {
+      throw new AiEnvironmentIdeUnavailableException(
+          "browser IDE usage intent is unavailable", error);
+    }
+    if (!matched) {
+      throw viewGone();
+    }
+  }
+
+  private void ensureCapacity(EnvironmentId environmentId) {
+    if (viewAuthorization == null) {
+      return;
+    }
+    try {
+      viewAuthorization.ensureViewCapacity(environmentId);
+    } catch (IllegalStateException error) {
+      throw new AiEnvironmentIdeUnavailableException(
+          "environment IDE view capacity is exhausted", error);
+    }
+  }
+
+  private void revokeLocal(IdeViewBindingRegistry.Binding binding) {
+    bindings.removeIfMatches(
+        binding.environmentId(), binding.viewId(), binding.documentId(), binding.bindingEpoch());
+    if (viewAuthorization != null) {
+      viewAuthorization.viewClosed(
+          binding.daemonIdentity(), binding.viewId().toString(), binding.bindingEpoch());
+    }
+    bootstrapTickets.revokeView(binding.environmentId(), binding.viewId().toString());
+  }
+
+  /** 缓存绑定必须仍属于当前 READY Daemon 代际；实例接管后旧 epoch 立即失效。 */
+  private boolean isCurrentGeneration(IdeViewBindingRegistry.Binding binding) {
+    return transport
+        .connectionIdentity(binding.environmentId())
+        .map(binding.daemonIdentity()::equals)
+        .orElse(false);
   }
 
   private IdeCall call(EnvironmentId environmentId, IdeCommand command) {
@@ -167,49 +433,140 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
       throw new AiEnvironmentIdeUnavailableException(
           "environment IDE command failed", error.getCause());
     }
-    if (!reply.ok()) {
-      String message = reply.message() == null ? "IDE command was rejected" : reply.message();
-      throw new AiValidationException("environment", message);
-    }
     return new IdeCall(reply, request.identity());
   }
 
-  private static EnvironmentIdeViewDTO toDto(
-      EnvironmentId environmentId, String viewId, String directory) {
+  private static void requireMatchingIdentity(
+      IdeReply reply,
+      UUID viewId,
+      UUID documentId,
+      UUID eventNodeId,
+      UUID connectionId,
+      UUID claimId) {
+    if (!viewId.equals(reply.viewId())
+        || !documentId.equals(reply.documentId())
+        || !eventNodeId.equals(reply.eventNodeId())
+        || !connectionId.equals(reply.connectionId())
+        || !claimId.equals(reply.claimId())) {
+      throw protocolFailure("daemon returned a different IDE view binding");
+    }
+  }
+
+  private static void requireReplyView(IdeReply reply, UUID viewId) {
+    if (!viewId.equals(reply.viewId())) {
+      throw protocolFailure("daemon returned a different IDE view");
+    }
+  }
+
+  private static String requirePath(String value, String field) {
+    if (value == null || value.isBlank()) {
+      throw protocolFailure("daemon did not return " + field);
+    }
+    return value;
+  }
+
+  private static boolean isViewGone(IdeReply reply) {
+    return "VIEW_GONE".equals(reply.code());
+  }
+
+  private static AiDomainException rejection(IdeReply reply) {
+    String message =
+        reply.message() == null || reply.message().isBlank()
+            ? "IDE command was rejected"
+            : reply.message();
+    if (isViewGone(reply)) {
+      return viewGone();
+    }
+    if ("VIEW_IN_USE".equals(reply.code())
+        || "BUSY".equals(reply.code())
+        || "CLAIM_CONFLICT".equals(reply.code())
+        || "UNAVAILABLE".equals(reply.code())
+        || "CLEANUP_FAILED".equals(reply.code())) {
+      return new AiEnvironmentIdeUnavailableException(message);
+    }
+    return new AiValidationException("environment", message);
+  }
+
+  private static AiEnvironmentIdeUnavailableException viewGone() {
+    return new AiEnvironmentIdeUnavailableException(
+        "IDE view is gone; open a new view before retrying");
+  }
+
+  private static AiEnvironmentIdeUnavailableException protocolFailure(String message) {
+    return new AiEnvironmentIdeUnavailableException(message);
+  }
+
+  private static EnvironmentIdeViewDTO toDto(IdeViewBindingRegistry.Binding binding) {
     EnvironmentIdeViewDTO dto = new EnvironmentIdeViewDTO();
-    dto.setViewId(viewId);
-    dto.setEnvironmentId(environmentId.toString());
-    dto.setDirectory(directory);
+    dto.setViewId(binding.viewId().toString());
+    dto.setEnvironmentId(binding.environmentId().toString());
+    dto.setDocumentId(binding.documentId().toString());
+    dto.setEventNodeId(binding.eventNodeId().toString());
+    dto.setConnectionId(binding.connectionId().toString());
+    dto.setClaimId(binding.claimId().toString());
+    dto.setDaemonInstanceId(binding.daemonIdentity().daemonInstanceId());
+    dto.setBindingEpoch(Long.toString(binding.bindingEpoch()));
+    dto.setDirectory(binding.directory());
+    dto.setWorkspacePath(binding.workspacePath());
+    dto.setState(binding.state().name());
     return dto;
   }
 
-  private static String requireWorkspace(IdeReply reply) {
-    String workspacePath = reply.workspacePath();
-    if (workspacePath == null || workspacePath.isBlank()) {
-      throw new AiEnvironmentIdeUnavailableException(
-          "daemon did not return a managed workspace path for the IDE view");
-    }
-    return workspacePath;
-  }
-
-  private static String parseViewId(String viewId) {
+  private static IdeCommand command(Supplier<IdeCommand> supplier) {
     try {
-      return IdeCommand.validateViewId(viewId);
-    } catch (IllegalArgumentException | NullPointerException error) {
-      throw new AiValidationException("environment", "viewId must be a canonical UUID");
-    }
-  }
-
-  /**
-   * 构造携带目录的视图命令。目录来自外部输入，{@link IdeCommand} 的 wire 校验（空白/长度/控制字符）必须翻译为类型化校验错误，而不是把 {@link
-   * IllegalArgumentException} 泄漏成未分类失败（HTTP 500）；错误只携带固定校验原因，不回显输入值。
-   */
-  private static IdeCommand directoryCommand(IdeAction action, String viewId, String directory) {
-    try {
-      return IdeCommand.view(action, viewId, directory);
+      return supplier.get();
     } catch (IllegalArgumentException error) {
       throw new AiValidationException("environment", error.getMessage());
     }
+  }
+
+  private static UUID parseUuid(String value, String field) {
+    UUID parsed;
+    try {
+      parsed = UUID.fromString(Objects.requireNonNull(value, field));
+    } catch (IllegalArgumentException | NullPointerException error) {
+      throw new AiValidationException("environment", field + " must be a canonical UUID");
+    }
+    if (!parsed.toString().equals(value)) {
+      throw new AiValidationException("environment", field + " must be a canonical lowercase UUID");
+    }
+    return parsed;
+  }
+
+  private static UUID parseViewId(String value) {
+    return parseUuid(value, "viewId");
+  }
+
+  private static long parseEpoch(String value) {
+    try {
+      return IdeCommand.parseBindingEpoch(value);
+    } catch (IllegalArgumentException error) {
+      throw new AiValidationException(
+          "environment", "bindingEpoch must be a canonical positive decimal");
+    }
+  }
+
+  private static IdeOpenMode parseMode(String value) {
+    try {
+      return IdeOpenMode.fromWire(value);
+    } catch (IllegalArgumentException | NullPointerException error) {
+      throw new AiValidationException("environment", "mode must be create or resume");
+    }
+  }
+
+  private static String parseDirectory(String value) {
+    try {
+      return IdeCommand.validateOptionalDirectory(value);
+    } catch (IllegalArgumentException error) {
+      throw new AiValidationException("environment", error.getMessage());
+    }
+  }
+
+  private static boolean requireDiscard(Boolean value) {
+    if (value == null) {
+      throw new AiValidationException("environment", "discard is required");
+    }
+    return value;
   }
 
   private record IdeCall(IdeReply reply, DaemonConnectionIdentity identity) {}

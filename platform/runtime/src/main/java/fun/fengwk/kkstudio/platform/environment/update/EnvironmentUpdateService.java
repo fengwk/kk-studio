@@ -5,45 +5,49 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityBusyException;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonArchitecture;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonRuntimeSnapshot;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateArtifact;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateCommand;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdatePhase;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateProgress;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateResult;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentUpdateListener;
 import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentDaemonGateway;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
+import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentEvent;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
+import fun.fengwk.kkstudio.platform.error.AiEnvironmentUnavailableException;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentUpdateDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRuntimeDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRuntimeStatusDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentUpdateProgressDTO;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentUpdateStartDTO;
 
 import java.time.Clock;
 import java.time.Duration;
-import java.time.Instant;
-import java.util.EnumSet;
 import java.util.Objects;
-import java.util.Optional;
-import java.util.Set;
 import java.util.UUID;
 
 /**
- * 受管 Daemon 更新的单一产品路径：准入、持久阶段推进与最终成功判定。
+ * 受管 Daemon 更新的单一产品路径：当前运行快照读取、准入与命令下发。
  *
  * <p>不变量：
  *
  * <ul>
- *   <li>一个 Environment 同一时刻至多一次更新：内存准入（{@code EnvironmentDaemonServer}）与持久 operation 行双重保证；任一在途普通调用
- *       （含 Skill 同步）或活动 harness work 都忙拒绝。
- *   <li>更新期间普通 capability 调用在起点被拒绝：{@code EnvironmentDaemonServer.beginUpdate} 登记 operationId 后，
- *       core 对该 Environment 的普通调用 fail-closed。
- *   <li>最终成功只由「更新后 Daemon 以目标版本重新 READY」确认；Daemon 的阶段回执只表达准备进度，连接断开映射为派生 UNKNOWN（等待重连），
- *       绝不据此判定失败或重试。
- *   <li>失败保留旧二进制：命令不可达、准入被拒或 Daemon 预检失败都只终结 operation 并解除准入。
+ *   <li>当前版本、更新进度和更新是否在途都来自 Daemon 的 runtimeStatus；Server 不持久化更新任务、阶段或历史。
+ *   <li>一个 Environment 同一时刻至多一次更新最终由 Daemon 的本机准入门闩保证；Server 只在命令下发的短暂窗口内登记准入， 发送返回后立即释放，丢失回执不会永久锁住
+ *       Platform。
+ *   <li>UPDATE_RESULT 只是有界接收回执，不推进任务状态机；FAILED 只追加一条固定的去敏运维事件，不保留任何 Server 侧更新锁。
+ *   <li>最终成功只由目标版本 Daemon 重新 READY 后的 runtimeStatus 证明，不由下载完成或回执推断。
  * </ul>
  *
  * <p>是否「受管安装」由 Daemon 侧布局检查最终裁定，Platform 只下发固定官方发布目标。
@@ -54,30 +58,12 @@ public class EnvironmentUpdateService implements EnvironmentUpdateListener {
 
   private static final String RESOURCE = "environment";
 
-  /** 允许推进为 RUNNING 的来源。 */
-  private static final Set<EnvironmentUpdatePhase> RUNNING_FROM =
-      EnumSet.of(EnvironmentUpdatePhase.PENDING);
-
-  /** 允许推进为 PREPARED 的来源（ACCEPTED 回执可能丢失，因此也接受 PENDING）。 */
-  private static final Set<EnvironmentUpdatePhase> PREPARED_FROM =
-      EnumSet.of(EnvironmentUpdatePhase.PENDING, EnvironmentUpdatePhase.RUNNING);
-
-  /** 允许终结或成功的来源。 */
-  private static final Set<EnvironmentUpdatePhase> ACTIVE_FROM =
-      EnumSet.of(
-          EnvironmentUpdatePhase.PENDING,
-          EnvironmentUpdatePhase.RUNNING,
-          EnvironmentUpdatePhase.PREPARED);
-
-  private static final int MAX_ERROR_CHARS = 500;
-
   private static final String ACTIVE_WORK_SQL =
       "select count(1) from durable_work where required_environment_id = ?";
 
   private final EnvironmentDaemonGateway gateway;
   private final EnvironmentRegistry registry;
   private final EnvironmentRepository environmentRepository;
-  private final EnvironmentUpdateRepository updateRepository;
   private final DaemonReleaseProvider releaseProvider;
   private final SystemSettingsSnapshot snapshot;
   private final JdbcTemplate jdbcTemplate;
@@ -87,7 +73,6 @@ public class EnvironmentUpdateService implements EnvironmentUpdateListener {
       EnvironmentDaemonGateway gateway,
       EnvironmentRegistry registry,
       EnvironmentRepository environmentRepository,
-      EnvironmentUpdateRepository updateRepository,
       DaemonReleaseProvider releaseProvider,
       SystemSettingsSnapshot snapshot,
       JdbcTemplate jdbcTemplate,
@@ -96,38 +81,40 @@ public class EnvironmentUpdateService implements EnvironmentUpdateListener {
     this.registry = Objects.requireNonNull(registry, "registry");
     this.environmentRepository =
         Objects.requireNonNull(environmentRepository, "environmentRepository");
-    this.updateRepository = Objects.requireNonNull(updateRepository, "updateRepository");
     this.releaseProvider = Objects.requireNonNull(releaseProvider, "releaseProvider");
     this.snapshot = Objects.requireNonNull(snapshot, "snapshot");
     this.jdbcTemplate = Objects.requireNonNull(jdbcTemplate, "jdbcTemplate");
     this.clock = Objects.requireNonNull(clock, "clock");
   }
 
+  /** 读取本节点当前 READY 连接代际缓存；没有可用快照时返回明确的 unavailable 错误。 */
+  public EnvironmentRuntimeStatusDTO runtimeStatus(EnvironmentId environmentId) {
+    Objects.requireNonNull(environmentId, "environmentId");
+    return gateway
+        .server()
+        .runtimeStatus(environmentId)
+        .map(EnvironmentUpdateService::toDto)
+        .orElseThrow(EnvironmentUpdateService::unavailable);
+  }
+
   /**
    * 对目标 Environment 发起一次受管更新。
    *
+   * <p>当前已是目标版本或同一目标正在更新时返回当前快照，不重复下发；不同目标、在途调用或 durable work 明确 busy。
+   *
    * @throws AiResourceNotFoundException 目标不存在
-   * @throws AiInUseException 目标不可用、已有更新在途、存在在途调用/工作，或官方发布不可用
+   * @throws AiEnvironmentUnavailableException 目标没有当前 READY 运行快照
+   * @throws AiInUseException 目标已有其它更新、存在在途调用/工作，或官方发布不可用
    */
-  public EnvironmentUpdateDTO startUpdate(EnvironmentId environmentId) {
+  public EnvironmentUpdateStartDTO startUpdate(EnvironmentId environmentId) {
     Objects.requireNonNull(environmentId, "environmentId");
     Environment environment = environmentRepository.getById(environmentId.value());
     if (environment == null) {
       throw new AiResourceNotFoundException(RESOURCE);
     }
-    if (updateRepository.findActive(environmentId).isPresent()) {
-      throw new AiInUseException(RESOURCE, "an update is already in progress for this environment");
-    }
-    EnvironmentConnection connection =
-        registry
-            .find(environmentId)
-            .filter(
-                candidate ->
-                    candidate.isReady(
-                        clock.instant(),
-                        Duration.ofMillis(snapshot.get().environment().heartbeatTimeoutMillis())))
-            .orElseThrow(
-                () -> new AiInUseException(RESOURCE, "environment is not ready for update"));
+    EnvironmentConnection connection = requireReadyConnection(environmentId);
+    EnvironmentRuntimeStatusDTO current = runtimeStatus(environmentId);
+
     DaemonEnvironmentInfo host = connection.daemonCapabilities().environment();
     DaemonOperatingSystem operatingSystem = host.operatingSystem();
     DaemonArchitecture architecture = canonicalArchitecture(host.architecture());
@@ -139,13 +126,6 @@ public class EnvironmentUpdateService implements EnvironmentUpdateListener {
               + "-"
               + architecture.wireValue());
     }
-    if (gateway.server().activeInvocationCount(environmentId) > 0) {
-      throw new AiInUseException(RESOURCE, "cannot update environment with in-flight invocations");
-    }
-    if (hasActiveWork(environmentId)) {
-      throw new AiInUseException(
-          RESOURCE, "cannot update environment required by active harness work");
-    }
     DaemonReleaseTarget target =
         releaseProvider
             .resolveTarget(operatingSystem, architecture)
@@ -153,26 +133,32 @@ public class EnvironmentUpdateService implements EnvironmentUpdateListener {
                 () ->
                     new AiInUseException(RESOURCE, "the official daemon release is not available"));
 
-    String operationId = UUID.randomUUID().toString();
-    Instant now = clock.instant();
-    EnvironmentUpdateOperation operation =
-        new EnvironmentUpdateOperation(
-            operationId,
-            environmentId,
-            target.targetVersion(),
-            EnvironmentUpdatePhase.PENDING,
-            null,
-            now,
-            now);
-    if (!updateRepository.insertPending(operation)) {
-      throw new AiInUseException(RESOURCE, "an update is already in progress for this environment");
+    if (target.targetVersion().equals(current.getStatus().getDaemonVersion())) {
+      return startResult(EnvironmentUpdateStartDTO.CURRENT, current);
     }
+    DaemonUpdateProgress progress = toProgress(current.getStatus().getUpdate());
+    if (progress != null) {
+      if (target.targetVersion().equals(progress.targetVersion())) {
+        return startResult(EnvironmentUpdateStartDTO.IN_PROGRESS, current);
+      }
+      throw new AiInUseException(
+          RESOURCE, "an update to " + progress.targetVersion() + " is already in progress");
+    }
+    if (gateway.server().activeInvocationCount(environmentId) > 0) {
+      throw new AiInUseException(RESOURCE, "cannot update environment with in-flight invocations");
+    }
+    if (hasActiveWork(environmentId)) {
+      throw new AiInUseException(
+          RESOURCE, "cannot update environment required by active harness work");
+    }
+
+    String operationId = UUID.randomUUID().toString();
     try {
       gateway.server().beginUpdate(environmentId, operationId);
-    } catch (RuntimeException error) {
-      updateRepository.advance(
-          operationId, EnvironmentUpdatePhase.FAILED, bounded(error.getMessage()), ACTIVE_FROM);
-      throw error;
+    } catch (EnvironmentCapabilityBusyException error) {
+      throw new AiInUseException(RESOURCE, "an update is already in progress for this environment");
+    } catch (EnvironmentCapabilityUnavailableException error) {
+      throw unavailable();
     }
     try {
       gateway
@@ -184,88 +170,110 @@ public class EnvironmentUpdateService implements EnvironmentUpdateListener {
                   target.targetVersion(),
                   target.artifactUrl(),
                   target.artifactSha256()));
+      return startResult(
+          EnvironmentUpdateStartDTO.SENT_UNCONFIRMED, runtimeStatusOr(environmentId, current));
+    } catch (EnvironmentCapabilityBusyException error) {
+      recordUpdateFailure(environmentId);
+      throw new AiInUseException(RESOURCE, "daemon is not ready to accept the update command");
+    } catch (EnvironmentCapabilityUnavailableException error) {
+      recordUpdateFailure(environmentId);
+      throw unavailable();
     } catch (RuntimeException error) {
+      recordUpdateFailure(environmentId);
+      throw new AiInUseException(
+          RESOURCE, "the update command could not be delivered with a confirmed outcome");
+    } finally {
+      // Daemon 持有最终本机互斥；Server 的准入只覆盖命令下发的瞬时窗口。
       gateway.server().endUpdate(environmentId, operationId);
-      updateRepository.advance(
-          operationId,
-          EnvironmentUpdatePhase.FAILED,
-          bounded("update command could not be delivered"),
-          ACTIVE_FROM);
-      throw error;
     }
-    updateRepository.advance(operationId, EnvironmentUpdatePhase.RUNNING, null, RUNNING_FROM);
-    return describe(environmentId).orElseThrow();
-  }
-
-  /** 读取该 Environment 最近一次更新操作投影；从未更新时为 empty。 */
-  public Optional<EnvironmentUpdateDTO> describe(EnvironmentId environmentId) {
-    Objects.requireNonNull(environmentId, "environmentId");
-    return updateRepository.findLatest(environmentId).map(this::toDto);
   }
 
   @Override
   public void onUpdateResult(EnvironmentId environmentId, DaemonUpdateResult result) {
-    Optional<EnvironmentUpdateOperation> found = updateRepository.find(result.operationId());
-    if (found.isEmpty() || !found.get().environmentId().equals(environmentId)) {
-      // 迟到的回执或不属于该 Environment 的 operation：不产生任何状态变更。
+    Objects.requireNonNull(environmentId, "environmentId");
+    Objects.requireNonNull(result, "result");
+    if (result.phase() != DaemonUpdatePhase.FAILED) {
       return;
     }
-    switch (result.phase()) {
-      case ACCEPTED -> updateRepository.advance(
-          result.operationId(), EnvironmentUpdatePhase.RUNNING, null, RUNNING_FROM);
-      case PREPARED -> updateRepository.advance(
-          result.operationId(), EnvironmentUpdatePhase.PREPARED, null, PREPARED_FROM);
-      case FAILED -> {
-        updateRepository.advance(
-            result.operationId(),
-            EnvironmentUpdatePhase.FAILED,
-            bounded(result.message()),
-            ACTIVE_FROM);
-        gateway.server().endUpdate(environmentId, result.operationId());
-      }
+    // 回执只是接收事实：失败统一收敛为一条去敏、有界运维事件，不建立任务状态。
+    recordUpdateFailure(environmentId);
+  }
+
+  private EnvironmentConnection requireReadyConnection(EnvironmentId environmentId) {
+    Duration timeout = Duration.ofMillis(snapshot.get().environment().heartbeatTimeoutMillis());
+    return registry
+        .find(environmentId)
+        .filter(candidate -> candidate.isReady(clock.instant(), timeout))
+        .orElseThrow(EnvironmentUpdateService::unavailable);
+  }
+
+  private EnvironmentRuntimeStatusDTO runtimeStatusOr(
+      EnvironmentId environmentId, EnvironmentRuntimeStatusDTO fallback) {
+    return gateway
+        .server()
+        .runtimeStatus(environmentId)
+        .map(EnvironmentUpdateService::toDto)
+        .orElse(fallback);
+  }
+
+  private void recordUpdateFailure(EnvironmentId environmentId) {
+    try {
+      registry
+          .find(environmentId)
+          .filter(connection -> connection.ownerNodeId().equals(registry.ownerNodeId()))
+          .ifPresent(
+              connection ->
+                  registry.recordEvent(
+                      environmentId,
+                      connection.leaseToken(),
+                      new EnvironmentEvent(
+                          clock.instant(),
+                          EnvironmentEvent.LEVEL_WARN,
+                          EnvironmentEvent.TYPE_UPDATE_FAILED,
+                          "daemon update failed")));
+    } catch (RuntimeException error) {
+      log.warn(
+          "failed to record update failure for environment {}: {}",
+          environmentId,
+          error.getClass().getSimpleName());
     }
   }
 
-  /** READY 会话事件驱动的最终成功判定：只有目标版本与运行版本一致才终结为 SUCCEEDED 并解除准入；版本不一致只记录，不清除准入。 */
-  public void onEnvironmentReady(EnvironmentId environmentId) {
-    Optional<EnvironmentUpdateOperation> active = updateRepository.findActive(environmentId);
-    if (active.isEmpty()) {
-      return;
-    }
-    EnvironmentUpdateOperation operation = active.get();
-    String actualVersion =
-        registry.find(environmentId).map(EnvironmentConnection::daemonVersion).orElse(null);
-    if (operation.targetVersion().equals(actualVersion)) {
-      updateRepository.advance(
-          operation.operationId(), EnvironmentUpdatePhase.SUCCEEDED, null, ACTIVE_FROM);
-      gateway.server().endUpdate(environmentId, operation.operationId());
-      return;
-    }
-    log.info(
-        "environment {} is ready with daemon version {} while update {} targets {}",
-        environmentId,
-        actualVersion,
-        operation.operationId(),
-        operation.targetVersion());
-  }
-
-  private EnvironmentUpdateDTO toDto(EnvironmentUpdateOperation operation) {
-    EnvironmentUpdateDTO dto = new EnvironmentUpdateDTO();
-    dto.setOperationId(operation.operationId());
-    dto.setTargetVersion(operation.targetVersion());
-    dto.setPhase(derivePhase(operation).name());
-    dto.setError(operation.error());
-    dto.setCreatedAt(operation.createdAt());
-    dto.setUpdatedAt(operation.updatedAt());
+  private static EnvironmentRuntimeStatusDTO toDto(DaemonRuntimeSnapshot snapshot) {
+    EnvironmentRuntimeDTO status = new EnvironmentRuntimeDTO();
+    status.setDaemonVersion(snapshot.status().daemonVersion());
+    status.setUpdate(toProgressDto(snapshot.status().update()));
+    EnvironmentRuntimeStatusDTO dto = new EnvironmentRuntimeStatusDTO();
+    dto.setRevision(Long.toString(snapshot.revision()));
+    dto.setStatus(status);
     return dto;
   }
 
-  /** 推进中的操作在宿主不可达时派生 UNKNOWN：断开不等于失败，等待重连确认。 */
-  private EnvironmentUpdatePhase derivePhase(EnvironmentUpdateOperation operation) {
-    if (operation.phase().isActive() && !isReadyNow(operation.environmentId())) {
-      return EnvironmentUpdatePhase.UNKNOWN;
+  private static EnvironmentUpdateStartDTO startResult(
+      String commandStatus, EnvironmentRuntimeStatusDTO runtimeStatus) {
+    EnvironmentUpdateStartDTO dto = new EnvironmentUpdateStartDTO();
+    dto.setCommandStatus(commandStatus);
+    dto.setRuntimeStatus(runtimeStatus);
+    return dto;
+  }
+
+  private static EnvironmentUpdateProgressDTO toProgressDto(DaemonUpdateProgress progress) {
+    if (progress == null) {
+      return null;
     }
-    return operation.phase();
+    EnvironmentUpdateProgressDTO dto = new EnvironmentUpdateProgressDTO();
+    dto.setTargetVersion(progress.targetVersion());
+    dto.setDownloadedBytes(progress.downloadedBytes());
+    dto.setTotalBytes(progress.totalBytes());
+    return dto;
+  }
+
+  private static DaemonUpdateProgress toProgress(EnvironmentUpdateProgressDTO progress) {
+    if (progress == null) {
+      return null;
+    }
+    return new DaemonUpdateProgress(
+        progress.getTargetVersion(), progress.getDownloadedBytes(), progress.getTotalBytes());
   }
 
   /**
@@ -284,30 +292,14 @@ public class EnvironmentUpdateService implements EnvironmentUpdateListener {
     }
   }
 
-  private boolean isReadyNow(EnvironmentId environmentId) {
-    return registry
-        .find(environmentId)
-        .map(
-            connection ->
-                connection.isReady(
-                    clock.instant(),
-                    Duration.ofMillis(snapshot.get().environment().heartbeatTimeoutMillis())))
-        .orElse(false);
-  }
-
   private boolean hasActiveWork(EnvironmentId environmentId) {
     Integer count =
         jdbcTemplate.queryForObject(ACTIVE_WORK_SQL, Integer.class, environmentId.value());
     return count != null && count > 0;
   }
 
-  private static String bounded(String message) {
-    if (message == null || message.isBlank()) {
-      return null;
-    }
-    String sanitized = message.replaceAll("\\p{Cntrl}", " ").trim();
-    return sanitized.length() > MAX_ERROR_CHARS
-        ? sanitized.substring(0, MAX_ERROR_CHARS)
-        : sanitized;
+  private static AiEnvironmentUnavailableException unavailable() {
+    return new AiEnvironmentUnavailableException(
+        "environment runtime snapshot is unavailable; wait for READY or reconnect");
   }
 }

@@ -15,6 +15,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 import fun.fengwk.kkstudio.platform.error.AiDomainException;
 import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
+import fun.fengwk.kkstudio.platform.error.AiEnvironmentUnavailableException;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiUpstreamException;
@@ -45,7 +46,8 @@ import java.util.Map;
  *       MethodArgumentTypeMismatchException} → 400
  *   <li>{@link AiResourceNotFoundException} → 404
  *   <li>{@link AiVersionConflictException}, {@link AiDuplicateException}, {@link AiInUseException},
- *       {@link AiEnvironmentIdeUnavailableException} → 409
+ *       {@link AiEnvironmentIdeUnavailableException}, {@link AiEnvironmentUnavailableException} →
+ *       409
  *   <li>{@link AiUpstreamException} → 502
  * </ul>
  *
@@ -101,6 +103,12 @@ public class StudioDomainErrorAdvice {
   @ExceptionHandler(AiEnvironmentIdeUnavailableException.class)
   public ResponseEntity<Result<Void>> handleIdeUnavailable(
       AiEnvironmentIdeUnavailableException error) {
+    return build(HttpStatus.CONFLICT, error);
+  }
+
+  @ExceptionHandler(AiEnvironmentUnavailableException.class)
+  public ResponseEntity<Result<Void>> handleEnvironmentUnavailable(
+      AiEnvironmentUnavailableException error) {
     return build(HttpStatus.CONFLICT, error);
   }
 

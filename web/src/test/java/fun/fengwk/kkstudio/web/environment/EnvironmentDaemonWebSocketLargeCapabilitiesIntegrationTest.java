@@ -24,13 +24,16 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
-import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilitiesCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelope;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelopeCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocol;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonReady;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonReadyCodec;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonRuntimeSnapshot;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonRuntimeStatus;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentSessionListener;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
@@ -55,7 +58,7 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
   private static final int TOMCAT_DEFAULT_TEXT_BUFFER_BYTES = 8 * 1024;
   private static final ObjectMapper OBJECT_MAPPER = JsonMapper.builder().build();
   private static final DaemonEnvelopeCodec ENVELOPE_CODEC = new DaemonEnvelopeCodec();
-  private static final DaemonCapabilitiesCodec CAPABILITIES_CODEC = new DaemonCapabilitiesCodec();
+  private static final DaemonReadyCodec READY_CODEC = new DaemonReadyCodec();
 
   @LocalServerPort private int port;
 
@@ -174,7 +177,7 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
   }
 
   private static String readyPayload() {
-    return CAPABILITIES_CODEC.encode(
+    DaemonCapabilities capabilities =
         new DaemonCapabilities(
             DaemonCapabilities.VERSION,
             "1.0.9",
@@ -185,7 +188,12 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
                 "/home/dev",
                 "Linux environment.",
                 "/tmp/kk-studio",
-                "amd64")));
+                "amd64"));
+    return READY_CODEC.encode(
+        new DaemonReady(
+            capabilities,
+            new DaemonRuntimeSnapshot(
+                1L, DaemonRuntimeStatus.running(capabilities.daemonVersion()))));
   }
 
   private static DaemonEnvelope helloEnvelope() {

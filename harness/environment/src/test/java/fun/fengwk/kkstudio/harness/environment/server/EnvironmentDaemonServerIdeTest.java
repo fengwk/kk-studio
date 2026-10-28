@@ -15,6 +15,7 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityB
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilitySendUncertainException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonRuntimeStatus;
 
 import java.util.List;
 import java.util.Optional;
@@ -189,6 +190,45 @@ class EnvironmentDaemonServerIdeTest {
 
   private static String requestId() {
     return "77777777-8888-9999-aaaa-bbbbbbbbbbbb";
+  }
+
+  @Test
+  void heartbeatPublishesLeaseRoundOnlyAfterAcceptedReadyHeartbeat() {
+    EnvironmentDaemonServerTestSupport.Fixture fixture =
+        new EnvironmentDaemonServerTestSupport.Fixture();
+    EnvironmentDaemonServerTestSupport.FakeChannel channel = fixture.connectReady("c1");
+
+    fixture.receive(
+        channel,
+        DaemonMessageType.HEARTBEAT,
+        null,
+        EnvironmentDaemonServerTestSupport.heartbeatPayload(
+            2L,
+            DaemonRuntimeStatus.running(EnvironmentDaemonServerTestSupport.DAEMON_VERSION),
+            7L));
+
+    assertEquals(
+        List.of(
+            new EnvironmentDaemonServerTestSupport.HeartbeatNotification(
+                ENVIRONMENT_ID,
+                new DaemonConnectionIdentity(
+                    ENVIRONMENT_ID, EnvironmentDaemonServerTestSupport.INSTANCE_ID),
+                7L)),
+        fixture.heartbeatNotifications);
+
+    // 租约失效的心跳不得推进状态，也不得向宿主投递可被误当活跃证明的轮次。
+    fixture.leaseStore.heartbeatResult = false;
+    fixture.receive(
+        channel,
+        DaemonMessageType.HEARTBEAT,
+        null,
+        EnvironmentDaemonServerTestSupport.heartbeatPayload(
+            3L,
+            DaemonRuntimeStatus.running(EnvironmentDaemonServerTestSupport.DAEMON_VERSION),
+            8L));
+
+    assertEquals(1, fixture.heartbeatNotifications.size());
+    assertTrue(channel.closed());
   }
 
   @Test
