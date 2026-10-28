@@ -61,7 +61,7 @@ function renderTree(rootId: string, currentThreadId?: string, history = false) {
     sockets,
     ...render(
       <QueryClientProvider client={queryClient}>
-        <ApplicationEventProvider url="ws://test/events/v1" socketFactory={sockets.factory}>
+        <ApplicationEventProvider url="ws://test/api/events/v2" socketFactory={sockets.factory}>
           <MemoryRouter>
             <TreeHarness rootId={rootId} currentThreadId={currentThreadId} history={history} />
           </MemoryRouter>
@@ -125,7 +125,7 @@ describe('ActiveThreadTree', () => {
     expect(link.closest('li')).toHaveAttribute('aria-current', 'true')
     const socket = sockets.openLatest()
     await waitFor(() => expect(socket.sentMessages()).toEqual([
-      { version: 1, type: 'subscribe', resource: { kind: 'tree', id: ROOT_ID } },
+      { version: 2, type: 'subscribe', resource: { kind: 'tree', id: ROOT_ID } },
     ]))
     vi.mocked(harnessService.getThreadTree).mockResolvedValue([
       treeNode(ROOT_ID, null, false, 'root'), { ...worker, status: 'IDLE', outcome: 'STOPPED' },
@@ -190,7 +190,7 @@ describe('ActiveThreadTree', () => {
     expect(container.querySelector('.thread-widget-panel')).toBeNull()
     const socket = sockets.openLatest()
     await waitFor(() => expect(socket.sentMessages()).toEqual([
-      { version: 1, type: 'subscribe', resource: { kind: 'tree', id: ROOT_ID } },
+      { version: 2, type: 'subscribe', resource: { kind: 'tree', id: ROOT_ID } },
     ]))
 
     // 子代理写入由服务端聚合到真实执行根后推送：changed 只提示回读该根，不需要固定轮询。
@@ -223,7 +223,7 @@ describe('ActiveThreadTree', () => {
     const sockets = new FakeWebSocketHarness()
     render(
       <QueryClientProvider client={queryClient}>
-        <ApplicationEventProvider url="ws://test/events/v1" socketFactory={sockets.factory}>
+        <ApplicationEventProvider url="ws://test/api/events/v2" socketFactory={sockets.factory}>
           <MemoryRouter>
             <ThreadNavigationContext.Provider value={observe}>
               <TreeHarness rootId={ROOT_ID} currentThreadId={WORKER_ID} />
@@ -336,7 +336,7 @@ describe('ActiveThreadTree', () => {
     expect(harnessService.getThreadTree).toHaveBeenCalledTimes(1)
     const first = sockets.openLatest()
     expect(first.sentMessages()).toEqual([
-      { version: 1, type: 'subscribe', resource: { kind: 'tree', id: ROOT_ID } },
+      { version: 2, type: 'subscribe', resource: { kind: 'tree', id: ROOT_ID } },
     ])
 
     // 断线后管理器按退避重连：重连必须重新订阅同一执行根，并在服务端 ack 后回读，
@@ -352,7 +352,7 @@ describe('ActiveThreadTree', () => {
       const reconnected = sockets.openLatest()
       await flushApplicationEvents()
       expect(reconnected.sentMessages()).toEqual([
-        { version: 1, type: 'subscribe', resource: { kind: 'tree', id: ROOT_ID } },
+        { version: 2, type: 'subscribe', resource: { kind: 'tree', id: ROOT_ID } },
       ])
 
       act(() => {
@@ -397,7 +397,7 @@ describe('ActiveThreadTree', () => {
     const sockets = new FakeWebSocketHarness()
     const { unmount } = render(
       <QueryClientProvider client={queryClient}>
-        <ApplicationEventProvider url="ws://test/events/v1" socketFactory={sockets.factory}>
+        <ApplicationEventProvider url="ws://test/api/events/v2" socketFactory={sockets.factory}>
           <MemoryRouter>
             <RefcountHarness rootId={ROOT_ID} />
           </MemoryRouter>
@@ -413,7 +413,7 @@ describe('ActiveThreadTree', () => {
     const socket = sockets.openLatest()
     await flushMicrotasks()
     expect(socket.sentMessages()).toEqual([
-      { version: 1, type: 'subscribe', resource: { kind: 'tree', id: ROOT_ID } },
+      { version: 2, type: 'subscribe', resource: { kind: 'tree', id: ROOT_ID } },
     ])
 
     // 释放一个面板：仍有消费者，wire 订阅不拆，也不产生多余回读。
@@ -421,15 +421,15 @@ describe('ActiveThreadTree', () => {
     await flushMicrotasks()
     expect(harnessService.getThreadTree).toHaveBeenCalledTimes(1)
     expect(socket.sentMessages()).toEqual([
-      { version: 1, type: 'subscribe', resource: { kind: 'tree', id: ROOT_ID } },
+      { version: 2, type: 'subscribe', resource: { kind: 'tree', id: ROOT_ID } },
     ])
 
     // 末次释放拆掉 wire 订阅；此后的迟到事件不得触发任何回读。
     fireEvent.click(screen.getByRole('button', { name: 'remove-all-panes' }))
     await flushMicrotasks()
     expect(socket.sentMessages()).toEqual([
-      { version: 1, type: 'subscribe', resource: { kind: 'tree', id: ROOT_ID } },
-      { version: 1, type: 'unsubscribe', resource: { kind: 'tree', id: ROOT_ID } },
+      { version: 2, type: 'subscribe', resource: { kind: 'tree', id: ROOT_ID } },
+      { version: 2, type: 'unsubscribe', resource: { kind: 'tree', id: ROOT_ID } },
     ])
     act(() => {
       socket.emitServer({
