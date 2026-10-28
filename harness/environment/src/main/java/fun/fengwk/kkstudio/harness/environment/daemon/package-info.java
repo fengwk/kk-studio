@@ -5,9 +5,9 @@
  * EnvironmentId}（Environment 的唯一路由 UUID）。
  *
  * <p>当前 {@code READY} payload 由 {@link
- * fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilitiesCodec} 编解码，是版本化/类型化的宿主 metadata
- * 对象： {@code
- * {"version":5,"daemonVersion","environment":{"operatingSystem","timeZone","userName","homeDirectory","note","tempDirectory","architecture"}}}。它是
+ * fun.fengwk.kkstudio.harness.environment.daemon.DaemonReadyCodec} 编解码，是版本化/类型化的宿主 metadata
+ * 与当前运行快照： {@code
+ * {"version":6,"daemonVersion","environment":{"operatingSystem","timeZone","userName","homeDirectory","note","tempDirectory","architecture"},"runtimeStatus":{"revision","status"}}}。它是
  * READY 的唯一 wire 形状：Daemon 不再上报任何目录或 Skill 事实。
  *
  * <p>Capability INVOKE payload 由 {@link

@@ -30,6 +30,7 @@ public record DaemonEnvelope(
           DaemonMessageType.WELCOME,
           DaemonMessageType.READY,
           DaemonMessageType.HEARTBEAT,
+          DaemonMessageType.RUNTIME_STATUS,
           DaemonMessageType.INVOKE,
           DaemonMessageType.CANCEL,
           DaemonMessageType.RECOVER,
@@ -45,7 +46,9 @@ public record DaemonEnvelope(
           DaemonMessageType.UPDATE,
           DaemonMessageType.UPDATE_RESULT,
           DaemonMessageType.IDE_COMMAND,
-          DaemonMessageType.IDE_RESULT);
+          DaemonMessageType.IDE_RESULT,
+          DaemonMessageType.DATA_BIND,
+          DaemonMessageType.IDE_LEASE);
 
   private static final Set<DaemonMessageType> INVOCATION_MESSAGES =
       Set.of(

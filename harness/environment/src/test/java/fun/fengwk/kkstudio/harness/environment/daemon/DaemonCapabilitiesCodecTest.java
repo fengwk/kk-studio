@@ -49,7 +49,7 @@ class DaemonCapabilitiesCodecTest {
     String encoded = codec.encode(original);
 
     assertEquals(original, codec.decode(encoded));
-    assertEquals("{\"version\":5," + DAEMON_VERSION_JSON + ENVIRONMENT_JSON + "}", encoded);
+    assertEquals("{\"version\":6," + DAEMON_VERSION_JSON + ENVIRONMENT_JSON + "}", encoded);
   }
 
   /** 明确未知的宿主架构必须显式编码为 JSON null 并原样往返，不能被省略或被填造成某个取值。 */
@@ -70,18 +70,18 @@ class DaemonCapabilitiesCodecTest {
     String encoded = codec.encode(original);
 
     assertEquals(
-        "{\"version\":5," + DAEMON_VERSION_JSON + UNKNOWN_ARCHITECTURE_ENVIRONMENT_JSON + "}",
+        "{\"version\":6," + DAEMON_VERSION_JSON + UNKNOWN_ARCHITECTURE_ENVIRONMENT_JSON + "}",
         encoded);
     assertNull(codec.decode(encoded).environment().architecture());
     assertEquals(original, codec.decode(encoded));
   }
 
-  /** 旧 MAIN 下发的 V5 metadata 保留原生 architecture 字符串，必须原样可读与往返，不因字段顺序或取值不同而丢失。 */
+  /** 旧 MAIN 下发的 V6 metadata 保留原生 architecture 字符串，必须原样可读与往返，不因字段顺序或取值不同而丢失。 */
   @Test
-  void readsMainV5NativeArchitectureMetadata() {
+  void readsMainV6NativeArchitectureMetadata() {
     for (String architecture : new String[] {"amd64", "arm64"}) {
       String payload =
-          "{\"version\":5,"
+          "{\"version\":6,"
               + DAEMON_VERSION_JSON
               + "\"environment\":{\"operatingSystem\":\"linux\",\"architecture\":\""
               + architecture
@@ -138,7 +138,7 @@ class DaemonCapabilitiesCodecTest {
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":5,"
+                "{\"version\":6,"
                     + DAEMON_VERSION_JSON
                     + ENVIRONMENT_JSON
                     + ",\"sourceSetVersion\":0,\"skillSources\":[]}"));
@@ -146,7 +146,7 @@ class DaemonCapabilitiesCodecTest {
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":5,"
+                "{\"version\":6,"
                     + DAEMON_VERSION_JSON
                     + ENVIRONMENT_JSON
                     + ",\"skillSources\":[{\"sourceId\":\"x\"}]}"));
@@ -154,7 +154,7 @@ class DaemonCapabilitiesCodecTest {
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":5,"
+                "{\"version\":6,"
                     + DAEMON_VERSION_JSON
                     + ENVIRONMENT_JSON
                     + ",\"sourceSetVersion\":0,\"skills\":[]}"));
@@ -178,7 +178,7 @@ class DaemonCapabilitiesCodecTest {
             DaemonProtocolException.class,
             () ->
                 codec.decode(
-                    "{\"version\":5,"
+                    "{\"version\":6,"
                         + DAEMON_VERSION_JSON
                         + "\"environment\":{\"operatingSystem\":\"linux\","
                         + "\"timeZone\":\"Asia/Shanghai\",\"userName\":\"dev\","
@@ -210,7 +210,7 @@ class DaemonCapabilitiesCodecTest {
   @Test
   void rejectsUnsupportedVersionsAndShapes() {
     for (String version :
-        new String[] {"0", "1", "2", "3", "4", "\"5\"", "null", "true", "{}", "[]"}) {
+        new String[] {"0", "1", "2", "3", "4", "5", "\"6\"", "null", "true", "{}", "[]"}) {
       assertThrows(
           DaemonProtocolException.class,
           () ->
@@ -223,14 +223,14 @@ class DaemonCapabilitiesCodecTest {
         () -> codec.decode("{" + DAEMON_VERSION_JSON + ENVIRONMENT_JSON + "}"));
     assertThrows(
         DaemonProtocolException.class,
-        () -> codec.decode("{\"version\":5," + ENVIRONMENT_JSON + "}"));
+        () -> codec.decode("{\"version\":6," + ENVIRONMENT_JSON + "}"));
     assertThrows(
         DaemonProtocolException.class,
-        () -> codec.decode("{\"version\":5," + DAEMON_VERSION_JSON + "\"environment\":null}"));
-    assertThrows(DaemonProtocolException.class, () -> codec.decode("{\"version\":5}"));
+        () -> codec.decode("{\"version\":6," + DAEMON_VERSION_JSON + "\"environment\":null}"));
+    assertThrows(DaemonProtocolException.class, () -> codec.decode("{\"version\":6}"));
     assertThrows(
         DaemonProtocolException.class,
-        () -> codec.decode("{\"version\":5," + DAEMON_VERSION_JSON + "\"environment\":[]}"));
+        () -> codec.decode("{\"version\":6," + DAEMON_VERSION_JSON + "\"environment\":[]}"));
     assertThrows(
         IllegalArgumentException.class,
         () -> new DaemonCapabilities(2, DAEMON_VERSION, ENVIRONMENT));
@@ -251,14 +251,14 @@ class DaemonCapabilitiesCodecTest {
           DaemonProtocolException.class,
           () ->
               codec.decode(
-                  "{\"version\":5,\"daemonVersion\":\"" + invalid + "\"," + ENVIRONMENT_JSON + "}"),
+                  "{\"version\":6,\"daemonVersion\":\"" + invalid + "\"," + ENVIRONMENT_JSON + "}"),
           invalid);
     }
     assertThrows(
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":5,\"daemonVersion\":\""
+                "{\"version\":6,\"daemonVersion\":\""
                     + "x".repeat(DaemonCapabilities.MAX_DAEMON_VERSION_CHARS + 1)
                     + "\","
                     + ENVIRONMENT_JSON
@@ -278,15 +278,15 @@ class DaemonCapabilitiesCodecTest {
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":5," + DAEMON_VERSION_JSON + ENVIRONMENT_JSON + ",\"secret\":\"x\"}"));
+                "{\"version\":6," + DAEMON_VERSION_JSON + ENVIRONMENT_JSON + ",\"secret\":\"x\"}"));
     assertThrows(
         DaemonProtocolException.class,
-        () -> codec.decode("{\"version\":5," + DAEMON_VERSION_JSON + ENVIRONMENT_JSON + "} x"));
+        () -> codec.decode("{\"version\":6," + DAEMON_VERSION_JSON + ENVIRONMENT_JSON + "} x"));
     assertThrows(
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":5,"
+                "{\"version\":6,"
                     + DAEMON_VERSION_JSON
                     + "\"environment\":{\"operatingSystem\":\"linux\","
                     + "\"timeZone\":\"UTC\",\"userName\":\"dev\",\"homeDirectory\":\"/home/dev\","
@@ -296,7 +296,7 @@ class DaemonCapabilitiesCodecTest {
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":5,"
+                "{\"version\":6,"
                     + DAEMON_VERSION_JSON
                     + "\"environment\":{\"operatingSystem\":\"linux\","
                     + "\"workingDirectory\":\"/workspace\",\"timeZone\":\"UTC\","
@@ -307,7 +307,7 @@ class DaemonCapabilitiesCodecTest {
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":5,"
+                "{\"version\":6,"
                     + DAEMON_VERSION_JSON
                     + "\"environment\":{\"operatingSystem\":\"linux\","
                     + "\"timeZone\":\"UTC\",\"userName\":\"dev\",\"homeDirectory\":\"/home/dev\","
@@ -317,12 +317,12 @@ class DaemonCapabilitiesCodecTest {
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":5,\"version\":5," + DAEMON_VERSION_JSON + ENVIRONMENT_JSON + "}"));
+                "{\"version\":6,\"version\":6," + DAEMON_VERSION_JSON + ENVIRONMENT_JSON + "}"));
     assertThrows(
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":5,"
+                "{\"version\":6,"
                     + DAEMON_VERSION_JSON
                     + DAEMON_VERSION_JSON
                     + ENVIRONMENT_JSON
@@ -346,13 +346,13 @@ class DaemonCapabilitiesCodecTest {
           DaemonProtocolException.class,
           () ->
               codec.decode(
-                  "{\"version\":5," + DAEMON_VERSION_JSON + environmentWithout(omitted) + "}"),
+                  "{\"version\":6," + DAEMON_VERSION_JSON + environmentWithout(omitted) + "}"),
           omitted);
       assertThrows(
           DaemonProtocolException.class,
           () ->
               codec.decode(
-                  "{\"version\":5," + DAEMON_VERSION_JSON + environmentBlank(omitted) + "}"),
+                  "{\"version\":6," + DAEMON_VERSION_JSON + environmentBlank(omitted) + "}"),
           omitted);
     }
   }
@@ -547,7 +547,7 @@ class DaemonCapabilitiesCodecTest {
         DaemonProtocolException.class,
         () ->
             codec.decode(
-                "{\"version\":5,"
+                "{\"version\":6,"
                     + DAEMON_VERSION_JSON
                     + "\"environment\":{\"operatingSystem\":\"linux\","
                     + "\"timeZone\":\"UTC\",\"userName\":\"dev\",\"homeDirectory\":\"/home/dev\","

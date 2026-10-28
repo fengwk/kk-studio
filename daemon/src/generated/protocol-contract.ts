@@ -7,13 +7,13 @@
  */
 
 /** 当前 Daemon wire 协议版本；其他版本一律拒绝，不做双协议 fallback。 */
-export const PROTOCOL_VERSION = 6
+export const PROTOCOL_VERSION = 7
 
 /** capability catalog 版本；HELLO 上报，Platform 据此判定能否执行普通能力调用。 */
 export const CAPABILITY_CATALOG_VERSION = '3'
 
 /** READY capabilities 协议版本。 */
-export const READY_CAPABILITIES_VERSION = 5
+export const READY_CAPABILITIES_VERSION = 6
 
 /** 结果 payload 的 UTF-8 上限（解码前与最终编码输出）。 */
 export const MAX_PAYLOAD_UTF8_BYTES = 16777216
@@ -71,6 +71,7 @@ export const MESSAGE_TYPES = [
   'HELLO',
   'READY',
   'HEARTBEAT',
+  'RUNTIME_STATUS',
   'STARTED',
   'PROGRESS',
   'COMPLETED',
@@ -89,6 +90,8 @@ export const MESSAGE_TYPES = [
   'UPDATE_RESULT',
   'IDE_COMMAND',
   'IDE_RESULT',
+  'DATA_BIND',
+  'IDE_LEASE',
   'ERROR',
 ] as const
 

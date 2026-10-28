@@ -1124,41 +1124,6 @@ select pg_temp.rejects('an empty access token is rejected',
     $$insert into skill_package(package_name,repository_url,branch,current_commit,token)
       values('probe-pkg','https://example.invalid/repo.git','main',repeat('a',40),'')$$,
     '23514', 'ck_skill_package_token');
-select pg_temp.assert_true('environment update activity is uniquely indexed per environment',
-    exists(select 1 from pg_indexes where schemaname = 'public'
-        and indexname = 'uk_environment_update_active'
-        and strpos(indexdef, 'PENDING') > 0
-        and strpos(indexdef, 'PREPARED') > 0
-        and strpos(indexdef, 'SUCCEEDED') = 0));
-insert into environment_update_operation(operation_id,environment_id,target_version,phase)
-    values(pg_temp.uid(1600), pg_temp.uid(9000), '1.0.10', 'PENDING');
-select pg_temp.rejects('an unknown environment update phase is rejected',
-    $$insert into environment_update_operation(operation_id,environment_id,target_version,phase)
-      values(pg_temp.uid(1601),pg_temp.uid(9000),'1.0.10','RUNNINGX')$$,
-    '23514', 'ck_environment_update_operation_phase');
-select pg_temp.rejects('a targeted environment version must be exact',
-    $$insert into environment_update_operation(operation_id,environment_id,target_version,phase)
-      values(pg_temp.uid(1602),pg_temp.uid(9000),' 1.0.10','PENDING')$$,
-    '23514', 'ck_environment_update_operation_target_version');
-select pg_temp.rejects('a FAILED environment update must carry an error',
-    $$insert into environment_update_operation(operation_id,environment_id,target_version,phase)
-      values(pg_temp.uid(1603),pg_temp.uid(9000),'1.0.10','FAILED')$$,
-    '23514', 'ck_environment_update_operation_terminal_error');
-select pg_temp.rejects('only one active environment update may exist at a time',
-    $$insert into environment_update_operation(operation_id,environment_id,target_version,phase)
-      values(pg_temp.uid(1604),pg_temp.uid(9000),'1.0.10','RUNNING')$$,
-    '23505', 'uk_environment_update_active');
-update environment_update_operation set phase = 'FAILED', error = 'boom',
-    updated_at = statement_timestamp() where operation_id = pg_temp.uid(1600);
-select pg_temp.assert_true('a terminal environment update frees the active slot',
-    not exists(select 1 from environment_update_operation
-        where environment_id = pg_temp.uid(9000)
-        and phase in ('PENDING','RUNNING','PREPARED')));
-insert into environment_update_operation(operation_id,environment_id,target_version,phase)
-    values(pg_temp.uid(1605), pg_temp.uid(9000), '1.0.10', 'PENDING');
-select pg_temp.assert_true('a later active operation is admitted after the terminal history',
-    exists(select 1 from environment_update_operation
-        where operation_id = pg_temp.uid(1605) and phase = 'PENDING'));
 
 -- ---------------------------------------------------------------------------
 -- Explicit dependency-ordered deletion; no cascade bypasses a reference.

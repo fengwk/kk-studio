@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.ide;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonIdeLease;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.ide.protocol.IdeCommand;
 
@@ -26,4 +27,7 @@ public interface IdeCommandTransport {
    * <p>IDE 入口与反向流据此把 cookie/流绑定到具体 Daemon 实例，并用 {@link IdeGenerationState} 裁决既有凭据。
    */
   Optional<DaemonConnectionIdentity> connectionIdentity(EnvironmentId environmentId);
+
+  /** 向当前 READY 连接批量下发一轮使用证明；没有有效租约/连接时抛不可用且不重放。 */
+  void sendIdeLease(EnvironmentId environmentId, DaemonIdeLease lease);
 }
