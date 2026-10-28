@@ -403,7 +403,7 @@ test.describe('tab-global IDE panel', () => {
       .toContain(viewA)
   })
 
-  test('a duplicated tab cannot steal the original view and creates an independent view', async ({ page, context }) => {
+  test('a duplicated tab cannot steal the original view and requires an explicit new view', async ({ page, context }) => {
     const state = createState()
     await openHarness(page, state)
     await openEnvironment(page, 'A')
@@ -424,6 +424,16 @@ test.describe('tab-global IDE panel', () => {
     state.failNextOpen = 'view-in-use'
     await duplicate.goto(HARNESS_URL)
     await expect(duplicate.getByTestId('harness-event-status')).toHaveAttribute('data-connected', 'true')
+
+    // 与刷新相同的 VIEW_IN_USE 只进入等待态，不自动创建替代视图。
+    await expect(duplicate.getByTestId('ide-view-in-use')).toBeVisible()
+    await expect(duplicate.getByTestId('ide-iframe')).toHaveCount(0)
+    await expect(duplicate.getByTestId('ide-open-new-view-btn')).toBeVisible()
+    await duplicate.waitForTimeout(300)
+    expect(state.openCalls).toHaveLength(2)
+    expect((await session(duplicate)).recoveryByEnvironment[ENV_A]?.viewId).toBe(originalViewId)
+
+    await duplicate.getByTestId('ide-open-new-view-btn').click()
     await expect(duplicate.getByTestId('ide-iframe')).toHaveCount(1)
     await expect.poll(() => state.openCalls.length).toBe(3)
 
@@ -434,6 +444,7 @@ test.describe('tab-global IDE panel', () => {
     expect(replacement.body.mode).toBe('create')
     expect(replacement.body.viewId).not.toBe(originalViewId)
     expect(replacement.body.directory).toBe(DIRECTORY_A)
+    expect(state.closeCalls).toHaveLength(0)
 
     await expect.poll(async () => {
       const stored = await duplicate.evaluate(
@@ -443,6 +454,43 @@ test.describe('tab-global IDE panel', () => {
       return stored.recoveryByEnvironment?.[ENV_A]?.viewId
     }).toBe(replacement.body.viewId)
     expect((await session(page)).recoveryByEnvironment[ENV_A]?.viewId).toBe(originalViewId)
+  })
+
+  test('a refresh while the old connection still holds the view waits for explicit resume', async ({ page }) => {
+    const state = createState()
+    await openHarness(page, state)
+    await openEnvironment(page, 'A')
+    await expect(page.getByTestId('ide-iframe')).toHaveCount(1)
+    await expect.poll(() => state.openCalls.length).toBe(1)
+    const viewId = String(state.openCalls[0]!.body.viewId)
+    const localBefore = await page.evaluate((key) => localStorage.getItem(key), LAST_KEY)
+
+    state.failNextOpen = 'view-in-use'
+    await page.reload()
+    await expect(page.getByTestId('harness-event-status')).toHaveAttribute('data-connected', 'true')
+
+    await expect(page.getByTestId('ide-view-in-use')).toBeVisible()
+    await expect(page.getByTestId('ide-retry-resume-btn')).toBeVisible()
+    await expect(page.getByTestId('ide-open-new-view-btn')).toBeVisible()
+    await expect(page.getByTestId('ide-iframe')).toHaveCount(0)
+    await page.waitForTimeout(300)
+    expect(state.openCalls).toHaveLength(2)
+    expect(state.openCalls[1]!.body).toMatchObject({ mode: 'resume', viewId })
+    expect((await session(page)).recoveryByEnvironment[ENV_A]?.viewId).toBe(viewId)
+    expect(state.closeCalls).toHaveLength(0)
+
+    const resumeClaimId = state.openCalls[1]!.body.claimId
+    await page.getByTestId('ide-retry-resume-btn').click()
+    await expect(page.getByTestId('ide-iframe')).toHaveCount(1)
+    await expect.poll(() => state.openCalls.length).toBe(3)
+
+    const retry = state.openCalls[2]!
+    expect(retry.body.mode).toBe('resume')
+    expect(retry.body.viewId).toBe(viewId)
+    expect(retry.body.claimId).not.toBe(resumeClaimId)
+    expect(state.closeCalls).toHaveLength(0)
+    expect((await session(page)).recoveryByEnvironment[ENV_A]?.viewId).toBe(viewId)
+    expect(await page.evaluate((key) => localStorage.getItem(key), LAST_KEY)).toBe(localBefore)
   })
 
   test('an unknown claim result keeps the original request and reconciles it without another operation', async ({ page }) => {

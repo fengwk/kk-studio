@@ -184,6 +184,39 @@ describe('IdeOverlayPanel', () => {
     expect(screen.queryByTestId('ide-open-new-view-btn')).not.toBeInTheDocument()
   })
 
+  it('shows a distinct in-use state with explicit resume and new-view actions', async () => {
+    const user = userEvent.setup()
+    const onRetryClaim = vi.fn()
+    const onOpenNewView = vi.fn()
+    const inUse = view({
+      environmentId: ENV_A,
+      viewId: VIEW_A,
+      status: 'in-use',
+      entryUrl: undefined,
+      bindingEpoch: undefined,
+    })
+    render(
+      <IdeOverlayPanel {...baseProps({
+        views: { [ENV_A]: inUse },
+        openedEnvironmentIds: [ENV_A],
+        environments: [{ id: ENV_A, name: 'local-node', ready: true }],
+        onRetryClaim,
+        onOpenNewView,
+      })} />,
+    )
+
+    const banner = screen.getByTestId('ide-view-in-use')
+    expect(banner).toBeVisible()
+    expect(banner).toHaveTextContent('旧标签页可能仍在使用')
+    expect(screen.getByTestId('ide-view-in-use-state')).toBeVisible()
+    expect(screen.queryByTestId('ide-iframe')).not.toBeInTheDocument()
+
+    await user.click(screen.getByTestId('ide-retry-resume-btn'))
+    await user.click(screen.getByTestId('ide-open-new-view-btn'))
+    expect(onRetryClaim).toHaveBeenCalledWith(ENV_A)
+    expect(onOpenNewView).toHaveBeenCalledWith(ENV_A)
+  })
+
   it('renders the environment selector when no environment was supplied', () => {
     render(
       <IdeOverlayPanel {...baseProps({

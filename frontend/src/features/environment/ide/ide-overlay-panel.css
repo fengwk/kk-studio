@@ -154,7 +154,7 @@
 }
 
 .ide-panel-state.is-warning {
-  color: var(--warning, var(--fg-muted));
+  color: var(--warning);
 }
 
 .ide-panel-state.is-error,
@@ -234,6 +234,13 @@
 
 .ide-panel-recovery-banner span {
   min-width: 0;
+}
+
+.ide-panel-recovery-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
 }
 
 .ide-panel-recovery-banner .ghost-btn {

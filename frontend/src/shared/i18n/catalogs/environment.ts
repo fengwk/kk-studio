@@ -42,6 +42,14 @@ export const environmentCatalog = {
     'en-US': 'The IDE view is gone and was not recreated automatically.',
     'zh-CN': 'IDE 视图已不存在，未自动创建替代视图。',
   },
+  'ai.ide.viewInUse': {
+    'en-US': 'This IDE view is still held by another tab or an unreleased connection. The old tab may still be active. Wait for it to release, then retry resume, or open a new view.',
+    'zh-CN': '该 IDE 视图仍被其他标签页或尚未释放的连接占用，旧标签页可能仍在使用。请等待释放后重试恢复，或打开新视图。',
+  },
+  'ai.ide.retryResume': {
+    'en-US': 'Retry Resume',
+    'zh-CN': '重试恢复',
+  },
   'ai.ide.openNewView': {
     'en-US': 'Open New View',
     'zh-CN': '打开新视图',
