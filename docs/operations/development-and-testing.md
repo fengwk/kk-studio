@@ -403,7 +403,7 @@ Linux 脚本只下载并检查保存配置与响应头，不执行安装；卸�
 
 运行快照与 IDE 拒绝路径也属于免费 L1：
 `environment.runtime_absent_unavailable` 验证无本代 READY 时返回 canonical
-`409 environment_unavailable`，而不是伪造空快照；`environment.ide_view_exact_intent_rejected`
+`409 environment_unavailable`，而不是伪造空快照；`environment.ide_view_no_ready_owner_rejected`
 使用合法视图命令输入验证无 READY owner 时的 `409 ide_unavailable`，并验证非法环境 ID
 返回 `400 validation`。二者均创建并清理独立 Environment，不连接 Daemon 或模型。
 无 owner 时请求先被路由拒绝，因此这不证明已 READY 场景的 exact-intent 校验、

@@ -1766,7 +1766,7 @@ async function expectComposerText(page, expected) {
   )
 }
 
-async function expectStorage(page, key, expected) {
+export async function expectStorage(page, key, expected) {
   let actual = null
   try {
     if (expected === null) {
@@ -1777,7 +1777,7 @@ async function expectStorage(page, key, expected) {
       )
       return
     }
-    // draft v1 envelope 严格校验：exact keys version/parts、version=1、恰一个 text part。
+    // localStorage 草稿格式为 v1（不是 events-v2 帧）：exact keys version/parts、恰一个 text part。
     await page.waitForFunction(
       ({ storageKey, text }) => {
         const raw = localStorage.getItem(storageKey)

@@ -11,7 +11,7 @@ import { ALL_CASES, getCase } from '../lib/registry.mjs'
 import '../cases/environment-runtime-ide.mjs'
 
 const RUNTIME_CASE_ID = 'environment.runtime_absent_unavailable'
-const IDE_CASE_ID = 'environment.ide_view_exact_intent_rejected'
+const IDE_CASE_ID = 'environment.ide_view_no_ready_owner_rejected'
 const ENVIRONMENT_ID = '00000000-0000-4000-8000-000000000abc'
 const CASES_DIR = fileURLToPath(new URL('../cases/', import.meta.url))
 
@@ -104,8 +104,8 @@ test('runtime absence case rejects with the canonical code and never fabricates 
   assert.ok(isDeleted(), 'runtime case must delete the environment it created')
 })
 
-test('IDE view case refuses every view command without an exact browser intent', async () => {
-  // 测试意图：真实执行 IDE case，证明打开/目录/终端/关闭在缺少精确意图时都以 409 ide_unavailable 拒绝，
+test('IDE view case checks no-READY-owner rejection for canonical view commands', async () => {
+  // 以 HTTP recorder 执行 IDE case，检查无 READY owner 时各命令的 409 ide_unavailable 断言；
   // 不返回任何绑定结果，并且非 canonical environmentId 走 400 validation。
   const { ctx, calls, isDeleted } = environmentWithoutDaemon()
 
@@ -114,6 +114,11 @@ test('IDE view case refuses every view command without an exact browser intent',
   const ideCalls = calls.filter((call) => call.path.includes('/ide/views'))
   assert.equal(ideCalls.length, 5, `IDE case must exercise five view requests: ${JSON.stringify(ideCalls)}`)
   const viewsPath = `/api/environments/${ENVIRONMENT_ID}/ide/views`
+  const open = ideCalls.find((call) => call.method === 'POST' && call.path === viewsPath)
+  for (const field of ['viewId', 'documentId', 'eventNodeId', 'connectionId', 'claimId']) {
+    assert.match(open.body[field], /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/)
+  }
+  assert.equal(open.body.mode, 'create')
   assert.equal(
     ideCalls.filter((call) => call.method === 'POST' && call.path === viewsPath).length,
     1,
