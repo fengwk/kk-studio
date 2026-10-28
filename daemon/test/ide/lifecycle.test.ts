@@ -215,7 +215,7 @@ class FakeManager implements CodeServerManager {
 class FakeBridge implements IdeBridge {
   readonly url = 'http://127.0.0.1:1'
   readonly secret = 'secret'
-  readonly assignments = new Map<string, { workspacePath: string; bindingEpoch: string }>()
+  readonly assignments = new Map<string, { workspacePath: string; bindingEpoch: string; directory: string }>()
   readonly commands: Array<{ viewId: string; command: BridgeCommand; options?: BridgeRequestOptions }> = []
   snapshotDocuments: Array<{ path: string; text: string }> = []
   snapshotComplete = true
@@ -224,8 +224,8 @@ class FakeBridge implements IdeBridge {
   closeViewResult?: BridgeResult
   closeViewError?: Error
 
-  assign(viewId: string, workspacePath: string, bindingEpoch = '1'): void {
-    this.assignments.set(viewId, { workspacePath, bindingEpoch })
+  assign(viewId: string, workspacePath: string, bindingEpoch: string, directory: string): void {
+    this.assignments.set(viewId, { workspacePath, bindingEpoch, directory })
   }
 
   revoke(viewId: string, expectedEpoch?: string): void {
@@ -272,6 +272,12 @@ class FakeBridge implements IdeBridge {
     }
     if (command.op === 'restore') {
       return { ok: true, restored: command.documents?.length ?? 0, skipped: 0 }
+    }
+    if (command.op === 'changeDirectory' && command.directory !== undefined) {
+      const assignment = this.assignments.get(viewId)
+      if (assignment !== undefined) {
+        assignment.directory = command.directory
+      }
     }
     return { ok: true, ...(command.op === 'changeDirectory' ? { directory: command.directory } : {}) }
   }
@@ -371,6 +377,32 @@ async function openStreamingView() {
 }
 
 describe('managed IDE claim and tenant lifecycle', () => {
+  it('assigns the confirmed directory to the bridge on create and resume', async () => {
+    const { service, bridge, project } = await setup()
+    const nextDirectory = join(project, 'next')
+    await mkdir(nextDirectory)
+    const viewId = randomUUID()
+    const documentId = randomUUID()
+    const opened = await service.handle(open(viewId, documentId, randomUUID(), project), signal())
+    expect(bridge.assignments.get(viewId)).toMatchObject({
+      bindingEpoch: opened.bindingEpoch,
+      directory: await realpath(project),
+    })
+    const changed = await service.handle(
+      boundCommand('CHANGE_DIRECTORY', { viewId, documentId, bindingEpoch: opened.bindingEpoch as string }, {
+        directory: nextDirectory,
+      }),
+      signal(),
+    )
+    expect(changed.ok).toBe(true)
+    const resumed = await service.handle(open(viewId, documentId, randomUUID(), undefined, 'resume'), signal())
+    expect(resumed.ok).toBe(true)
+    expect(bridge.assignments.get(viewId)).toMatchObject({
+      bindingEpoch: resumed.bindingEpoch,
+      directory: await realpath(nextDirectory),
+    })
+  })
+
   it('round-trips actual OPEN and RESUME service replies without list-only state', async () => {
     const { service, project } = await setup()
     const viewId = randomUUID()

@@ -29,10 +29,12 @@ function createBridgeHost(vscode, options) {
   const url = config.url || process.env.KK_STUDIO_IDE_BRIDGE_URL
   const token = config.token || process.env.KK_STUDIO_IDE_BRIDGE_TOKEN
   const nodePath = require('node:path')
+  const hostId = require('node:crypto').randomUUID()
   const http = config.http || require('node:http')
   const reconnectMillis = config.reconnectMillis || DEFAULT_RECONNECT_MILLIS
 
   let disposed = false
+  let retired = false
   let streamRequest = null
   let reconnectTimer = null
   let buffer = ''
@@ -45,6 +47,11 @@ function createBridgeHost(vscode, options) {
     return folders.map((folder) => folder.uri.fsPath).filter((path) => typeof path === 'string' && path.length > 0)
   }
 
+  // A registration describes live folders, even when they change after a cancelled command.
+  const folderSubscription = vscode.workspace.onDidChangeWorkspaceFolders(() => {
+    failStream()
+  })
+
   const workspacePath = () => {
     const file = vscode.workspace.workspaceFile
     if (file) {
@@ -56,7 +63,7 @@ function createBridgeHost(vscode, options) {
   // Resolves with the HTTP status code, or 0 when the bridge is unreachable or times out.
   const post = (path, payload) => {
     return new Promise((resolve) => {
-      if (!url || !token) {
+      if (disposed || retired || !url || !token) {
         resolve(0)
         return
       }
@@ -108,6 +115,27 @@ function createBridgeHost(vscode, options) {
   }
 
   const reply = (id, result) => post('/bridge/result', Object.assign({ id }, result))
+
+  // Retire only the control host; code-server retains ownership of its terminals.
+  const retire = () => {
+    if (retired) {
+      return
+    }
+    retired = true
+    buffer = ''
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
+    if (streamRequest) {
+      streamRequest.destroy()
+      streamRequest = null
+    }
+    for (const request of pendingPosts) {
+      request.destroy()
+    }
+    pendingPosts.clear()
+  }
 
   const disposeTerminals = () => {
     terminal = null
@@ -222,6 +250,9 @@ function createBridgeHost(vscode, options) {
     let restored = 0
     let skipped = 0
     for (const entry of documents) {
+      if (disposed || retired) {
+        return
+      }
       if (
         !entry ||
         typeof entry.path !== 'string' ||
@@ -236,6 +267,9 @@ function createBridgeHost(vscode, options) {
       try {
         const uri = vscode.Uri.file(entry.path)
         const document = await vscode.workspace.openTextDocument(uri)
+        if (disposed || retired) {
+          return
+        }
         // Never overwrite unsaved work that already exists in the window.
         if (document.isDirty === true) {
           skipped += 1
@@ -245,12 +279,18 @@ function createBridgeHost(vscode, options) {
         const end = document.positionAt(document.getText().length)
         edit.replace(uri, new range(new position(0, 0), end), entry.text)
         const applied = await vscode.workspace.applyEdit(edit)
+        if (disposed || retired) {
+          return
+        }
         if (applied === false) {
           skipped += 1
           continue
         }
         if (typeof vscode.window.showTextDocument === 'function') {
           await vscode.window.showTextDocument(document, { preview: false })
+        }
+        if (disposed || retired) {
+          return
         }
         restored += 1
       } catch {
@@ -271,15 +311,24 @@ function createBridgeHost(vscode, options) {
     }
     const folders = vscode.workspace.workspaceFolders || []
     const uri = vscode.Uri.file(message.directory)
-    // The daemon owns the durable `.code-workspace` file. `updateWorkspaceFolders` returning
-    // true is the public API's acceptance of the change; a folder change that reloads the
-    // extension host never replies here, and the reconnected window confirms instead.
+    const sameDirectory = (actual) => {
+      const normalize = (path) => {
+        const resolved = nodePath.resolve(path)
+        return process.platform === 'win32' ? resolved.toLowerCase() : resolved
+      }
+      return actual.length === 1 && normalize(actual[0]) === normalize(message.directory)
+    }
+    if (sameDirectory(folderPaths())) {
+      await reply(message.id, { ok: true, directory: folderPaths()[0] })
+      return
+    }
+    // Replacing the first folder restarts extension hosts; only the new host can confirm it.
     const updated = vscode.workspace.updateWorkspaceFolders(0, folders.length, { uri })
     if (updated === false) {
       await reply(message.id, { ok: false, message: 'directory change was rejected' })
       return
     }
-    await reply(message.id, { ok: true, directory: message.directory })
+    retire()
   }
 
   const focusTerminal = async (message) => {
@@ -297,6 +346,9 @@ function createBridgeHost(vscode, options) {
     } catch {
       pid = undefined
     }
+    if (disposed || retired) {
+      return
+    }
     const path = workspacePath()
     // A shell that cannot be handed to the daemon for supervision must not be left running.
     if (!(typeof pid === 'number' && pid > 0) || !path) {
@@ -305,6 +357,9 @@ function createBridgeHost(vscode, options) {
       return
     }
     const status = await post('/bridge/pty', { workspacePath: path, pid })
+    if (disposed || retired) {
+      return
+    }
     if (status >= 400 || status === 0) {
       disposeTerminals()
       await reply(message.id, { ok: false, message: 'terminal supervision failed' })
@@ -329,6 +384,9 @@ function createBridgeHost(vscode, options) {
   }
 
   const handleCommand = async (message) => {
+    if (disposed || retired) {
+      return
+    }
     try {
       if (message.op === 'changeDirectory') {
         await changeDirectory(message)
@@ -389,6 +447,10 @@ function createBridgeHost(vscode, options) {
         failStream()
         return
       }
+      if (message && message.type === 'retired') {
+        retire()
+        return
+      }
       if (message && message.type === 'command' && typeof message.id === 'string') {
         void handleCommand(message)
       }
@@ -396,7 +458,7 @@ function createBridgeHost(vscode, options) {
   }
 
   const scheduleReconnect = () => {
-    if (disposed || reconnectTimer) {
+    if (disposed || retired || reconnectTimer) {
       return
     }
     reconnectTimer = setTimeout(() => {
@@ -409,7 +471,7 @@ function createBridgeHost(vscode, options) {
   }
 
   const connect = () => {
-    if (disposed || !url || !token) {
+    if (disposed || retired || !url || !token) {
       return
     }
     const path = workspacePath()
@@ -420,22 +482,48 @@ function createBridgeHost(vscode, options) {
     buffer = ''
     const params = new URLSearchParams()
     params.set('workspacePath', path)
+    params.set('hostId', hostId)
     for (const folder of folderPaths()) {
       params.append('folder', folder)
     }
     const target = `${url}/bridge/stream?${params.toString()}`
-    streamRequest = http.get(target, { headers: { authorization: `Bearer ${token}` } }, (response) => {
+    const request = http.get(target, { headers: { authorization: `Bearer ${token}` } }, (response) => {
+      if (streamRequest !== request || disposed || retired) {
+        response.resume()
+        return
+      }
       if (response.statusCode !== 200) {
         response.resume()
-        scheduleReconnect()
+        if (response.statusCode === 410) {
+          // A retired host stops only its control channel; the managed process owns terminals.
+          retire()
+        } else {
+          scheduleReconnect()
+        }
         return
       }
       response.setEncoding('utf8')
-      response.on('data', onData)
-      response.on('end', scheduleReconnect)
-      response.on('error', scheduleReconnect)
+      response.on('data', (chunk) => {
+        if (streamRequest === request) {
+          onData(chunk)
+        }
+      })
+      const disconnected = () => {
+        if (streamRequest === request) {
+          streamRequest = null
+          scheduleReconnect()
+        }
+      }
+      response.on('end', disconnected)
+      response.on('error', disconnected)
     })
-    streamRequest.on('error', scheduleReconnect)
+    streamRequest = request
+    request.on('error', () => {
+      if (streamRequest === request) {
+        streamRequest = null
+        scheduleReconnect()
+      }
+    })
   }
 
   return {
@@ -444,6 +532,7 @@ function createBridgeHost(vscode, options) {
     },
     dispose() {
       disposed = true
+      folderSubscription.dispose()
       if (reconnectTimer) {
         clearTimeout(reconnectTimer)
         reconnectTimer = null
@@ -464,7 +553,11 @@ function createBridgeHost(vscode, options) {
         }
       }
       pendingPosts.clear()
-      disposeTerminals()
+      // The managed code-server scope owns terminals; retirement must not tear them down,
+      // including when VS Code subsequently deactivates this superseded extension host.
+      if (!retired) {
+        disposeTerminals()
+      }
     },
   }
 }
