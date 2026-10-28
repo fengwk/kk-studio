@@ -295,6 +295,25 @@ public final class EnvironmentDaemonServer
     state.drainCallbacks();
   }
 
+  /** 证明只能发给发起轮次时的同一 Daemon 实例；接管后旧轮次不得落入新代际。 */
+  private static void requireExpectedIdentity(
+      EnvironmentId environmentId,
+      EnvironmentState environment,
+      ConnectionState state,
+      DaemonConnectionIdentity expectedIdentity) {
+    if (expectedIdentity == null) {
+      return;
+    }
+    String daemonInstanceId = environment == null ? null : environment.daemonInstanceId;
+    if (daemonInstanceId == null) {
+      daemonInstanceId = state == null ? null : state.daemonInstanceId;
+    }
+    if (!expectedIdentity.equals(new DaemonConnectionIdentity(environmentId, daemonInstanceId))) {
+      throw new EnvironmentCapabilityUnavailableException(
+          environmentId + " daemon generation changed before IDE lease delivery");
+    }
+  }
+
   /** 当前节点该 Environment 是否已有 READY 的活跃连接代际。 */
   public boolean isReady(EnvironmentId environmentId) {
     Objects.requireNonNull(environmentId, "environmentId");
@@ -527,13 +546,29 @@ public final class EnvironmentDaemonServer
    *
    * <p>证明只由业务层查询后传入；本层不创建视图、不续租快照查询，也不在没有绑定处理器时返回伪成功。
    */
-  public void sendIdeLease(EnvironmentId environmentId, DaemonIdeLease ideLease) {
+  public void sendIdeLease(
+      EnvironmentId environmentId,
+      DaemonConnectionIdentity expectedIdentity,
+      DaemonIdeLease ideLease) {
+    Objects.requireNonNull(expectedIdentity, "expectedIdentity");
     Objects.requireNonNull(ideLease, "ideLease");
-    sendBoundControl(environmentId, DaemonMessageType.IDE_LEASE, ideLeaseCodec.encode(ideLease));
+    sendBoundControl(
+        environmentId,
+        DaemonMessageType.IDE_LEASE,
+        ideLeaseCodec.encode(ideLease),
+        expectedIdentity);
   }
 
   private void sendBoundControl(
       EnvironmentId environmentId, DaemonMessageType messageType, String payloadJson) {
+    sendBoundControl(environmentId, messageType, payloadJson, null);
+  }
+
+  private void sendBoundControl(
+      EnvironmentId environmentId,
+      DaemonMessageType messageType,
+      String payloadJson,
+      DaemonConnectionIdentity expectedIdentity) {
     Objects.requireNonNull(environmentId, "environmentId");
     ConnectionState state;
     UUID leaseToken;
@@ -545,6 +580,7 @@ public final class EnvironmentDaemonServer
       }
       state = environment == null ? null : environment.connection;
       leaseToken = state == null ? null : state.leaseToken;
+      requireExpectedIdentity(environmentId, environment, state, expectedIdentity);
     }
     if (state == null || leaseToken == null || !state.isReady()) {
       throw new EnvironmentCapabilityUnavailableException(
@@ -573,6 +609,7 @@ public final class EnvironmentDaemonServer
           throw new EnvironmentCapabilityBusyException(
               "environment " + environmentId + " is being updated");
         }
+        requireExpectedIdentity(environmentId, environment, state, expectedIdentity);
       }
       outcome = state.offer(messageType, null, payloadJson);
     }

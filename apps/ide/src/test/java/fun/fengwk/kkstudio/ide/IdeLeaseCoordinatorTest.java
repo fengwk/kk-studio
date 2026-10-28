@@ -78,6 +78,7 @@ class IdeLeaseCoordinatorTest {
     assertEquals(
         List.of(new DaemonIdeLease.Binding(VIEW_1, DOCUMENT, 7L)),
         transport.leases.getFirst().bindings());
+    assertEquals(List.of(IDENTITY), transport.expectedIdentities);
   }
 
   @Test
@@ -108,6 +109,24 @@ class IdeLeaseCoordinatorTest {
 
     assertEquals(0, views.calls);
     assertTrue(transport.leases.isEmpty());
+  }
+
+  /** 对账查询进行中发生换代的场景：查询返回后必须再次核对身份，旧轮次不得落入新连接。 */
+  @Test
+  void generationReplacedDuringProofQueryDoesNotSendLateLease() {
+    views.response = views(view(VIEW_1, 7L));
+    gateway.proofs.put(
+        new Group(EVENT_NODE, CONNECTION, DOCUMENT),
+        new IdeBrowserUseGateway.Proofs(
+            DOCUMENT, 1L, List.of(proof(VIEW_1, DOCUMENT, 7L))));
+    gateway.afterQuery =
+        () -> transport.identity = new DaemonConnectionIdentity(ENV, "other-daemon");
+
+    coordinator.onHeartbeat(ENV, IDENTITY, 44L);
+
+    assertEquals(1, views.calls);
+    assertTrue(transport.leases.isEmpty());
+    assertTrue(transport.expectedIdentities.isEmpty());
   }
 
   @Test
@@ -210,6 +229,7 @@ class IdeLeaseCoordinatorTest {
   private static final class FakeTransport implements IdeCommandTransport {
 
     private final List<DaemonIdeLease> leases = new ArrayList<>();
+    private final List<DaemonConnectionIdentity> expectedIdentities = new ArrayList<>();
     private DaemonConnectionIdentity identity = IDENTITY;
 
     @Override
@@ -223,7 +243,11 @@ class IdeLeaseCoordinatorTest {
     }
 
     @Override
-    public void sendIdeLease(EnvironmentId environmentId, DaemonIdeLease lease) {
+    public void sendIdeLease(
+        EnvironmentId environmentId,
+        DaemonConnectionIdentity expectedIdentity,
+        DaemonIdeLease lease) {
+      expectedIdentities.add(expectedIdentity);
       leases.add(lease);
     }
 
@@ -235,6 +259,7 @@ class IdeLeaseCoordinatorTest {
 
     private final Map<Group, Proofs> proofs = new HashMap<>();
     private final Set<Group> failures = new HashSet<>();
+    private Runnable afterQuery = () -> {};
 
     @Override
     public boolean findExactIntent(
@@ -254,7 +279,9 @@ class IdeLeaseCoordinatorTest {
       if (failures.contains(group)) {
         throw new IllegalStateException("event node unavailable");
       }
-      return Optional.ofNullable(proofs.get(group));
+      Optional<Proofs> result = Optional.ofNullable(proofs.get(group));
+      afterQuery.run();
+      return result;
     }
   }
 }

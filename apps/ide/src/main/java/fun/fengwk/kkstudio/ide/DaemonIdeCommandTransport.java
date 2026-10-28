@@ -44,7 +44,8 @@ public class DaemonIdeCommandTransport implements IdeCommandTransport {
   }
 
   @Override
-  public void sendIdeLease(EnvironmentId environmentId, DaemonIdeLease lease) {
-    server.sendIdeLease(environmentId, lease);
+  public void sendIdeLease(
+      EnvironmentId environmentId, DaemonConnectionIdentity expectedIdentity, DaemonIdeLease lease) {
+    server.sendIdeLease(environmentId, expectedIdentity, lease);
   }
 }

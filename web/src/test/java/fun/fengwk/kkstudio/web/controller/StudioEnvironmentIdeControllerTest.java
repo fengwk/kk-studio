@@ -61,6 +61,7 @@ class StudioEnvironmentIdeControllerTest {
 
   private static final UUID ENV_ID = UUID.fromString("55555555-5555-4555-8555-555555555555");
   private static final String VIEW_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  private static final String DOCUMENT_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
   private static final String DIRTY_REJECTION =
       "save or discard unsaved changes before switching directory";
   private static final ObjectMapper OBJECT_MAPPER = JsonMapper.builder().build();
@@ -135,7 +136,7 @@ class StudioEnvironmentIdeControllerTest {
 
   /** 意图：CHANGE_DIRECTORY 成功时返回 200 与更新后的目录，不伪造新的 bootstrap 入口。 */
   @Test
-  void changeDirectoryReturnsUpdatedDirectory() throws Exception {
+  void changeDirectoryReturnsUpdatedDirectoryAndForwardsDocumentEpoch() throws Exception {
     when(environmentIdeService.changeDirectory(eq(EnvironmentId.of(ENV_ID)), eq(VIEW_ID), any()))
         .thenReturn(view("/workspace/subdir"));
 
@@ -144,7 +145,10 @@ class StudioEnvironmentIdeControllerTest {
             put("/api/environments/" + ENV_ID + "/ide/views/" + VIEW_ID + "/directory")
                 .locale(Locale.US)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"directory\":\"/workspace/subdir\"}"))
+                .content(
+                    "{\"documentId\":\""
+                        + DOCUMENT_ID
+                        + "\",\"bindingEpoch\":\"7\",\"directory\":\"/workspace/subdir\"}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.viewId").value(VIEW_ID))
         .andExpect(jsonPath("$.data.directory").value("/workspace/subdir"))
@@ -154,6 +158,8 @@ class StudioEnvironmentIdeControllerTest {
         ArgumentCaptor.forClass(EnvironmentIdeChangeDirectoryDTO.class);
     verify(environmentIdeService)
         .changeDirectory(eq(EnvironmentId.of(ENV_ID)), eq(VIEW_ID), request.capture());
+    assertEquals(DOCUMENT_ID, request.getValue().getDocumentId());
+    assertEquals("7", request.getValue().getBindingEpoch());
     assertEquals("/workspace/subdir", request.getValue().getDirectory());
   }
 

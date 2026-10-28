@@ -278,7 +278,10 @@ class ClusterEnvironmentIdeServiceTest {
     }
 
     @Override
-    public void sendIdeLease(EnvironmentId environmentId, DaemonIdeLease lease) {
+    public void sendIdeLease(
+        EnvironmentId environmentId,
+        DaemonConnectionIdentity expectedIdentity,
+        DaemonIdeLease lease) {
       throw new AssertionError("unexpected lease");
     }
 
