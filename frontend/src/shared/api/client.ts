@@ -6,7 +6,7 @@ export interface HttpClient {
   get<T>(url: string, config?: { params?: Record<string, unknown>; headers?: Record<string, string> }): Promise<T>
   post<T>(url: string, data?: unknown, config?: { timeout?: number }): Promise<T>
   put<T>(url: string, data?: unknown, config?: { timeout?: number }): Promise<T>
-  delete<T>(url: string, config?: { params?: Record<string, unknown>; headers?: Record<string, string> }): Promise<T>
+  delete<T>(url: string, config?: { params?: Record<string, unknown>; headers?: Record<string, string>; data?: unknown }): Promise<T>
 }
 
 export const apiBaseUrl = '/api'

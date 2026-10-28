@@ -9,7 +9,7 @@ import type { EnvironmentCardDTO, EnvironmentEventDTO } from '@/shared/api/gener
 vi.mock('@/shared/api/environment-service', () => ({
   environmentService: {
     listEnvironmentEvents: vi.fn(),
-    getEnvironmentUpdate: vi.fn(),
+    getEnvironmentRuntime: vi.fn(),
     startEnvironmentUpdate: vi.fn(),
   },
 }))

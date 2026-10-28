@@ -14,6 +14,70 @@ export const environmentCatalog = {
     'en-US': 'Close',
     'zh-CN': '关闭',
   },
+  'ai.ide.dismiss': {
+    'en-US': 'Dismiss',
+    'zh-CN': '忽略',
+  },
+  'ai.ide.environmentSelector': {
+    'en-US': 'Environment',
+    'zh-CN': '环境',
+  },
+  'ai.ide.reconnecting': {
+    'en-US': 'Connection lost. Reconnecting; the IDE will resume automatically.',
+    'zh-CN': '连接已断开，正在重连，IDE 将自动恢复。',
+  },
+  'ai.ide.storageUnavailable': {
+    'en-US': 'Browser storage is unavailable; IDE recovery and last-used state will not persist.',
+    'zh-CN': '浏览器存储不可用，IDE 恢复信息与最近使用状态将不会保留。',
+  },
+  'ai.ide.claimUnknown': {
+    'en-US': 'The IDE view result is unknown. Reconcile the original claim before continuing.',
+    'zh-CN': 'IDE 视图结果未知，请先对账原 claim 再继续。',
+  },
+  'ai.ide.retryClaim': {
+    'en-US': 'Reconcile',
+    'zh-CN': '对账',
+  },
+  'ai.ide.viewGone': {
+    'en-US': 'The IDE view is gone and was not recreated automatically.',
+    'zh-CN': 'IDE 视图已不存在，未自动创建替代视图。',
+  },
+  'ai.ide.viewInUse': {
+    'en-US': 'This IDE view is still held by another tab or an unreleased connection. The old tab may still be active. Wait for it to release, then retry resume, or open a new view.',
+    'zh-CN': '该 IDE 视图仍被其他标签页或尚未释放的连接占用，旧标签页可能仍在使用。请等待释放后重试恢复，或打开新视图。',
+  },
+  'ai.ide.retryResume': {
+    'en-US': 'Retry Resume',
+    'zh-CN': '重试恢复',
+  },
+  'ai.ide.openNewView': {
+    'en-US': 'Open New View',
+    'zh-CN': '打开新视图',
+  },
+  'ai.ide.viewNotReady': {
+    'en-US': 'The IDE view is not ready',
+    'zh-CN': 'IDE 视图尚未就绪',
+  },
+  'ai.ide.commandResultUnknown': {
+    'en-US': 'The command result is unknown; check the IDE before continuing.',
+    'zh-CN': '命令结果未知，请先在 IDE 中确认再继续。',
+  },
+  'ai.ide.bindingChanged': {
+    'en-US': 'The IDE binding changed, so the result was not applied.',
+    'zh-CN': 'IDE 绑定已变化，结果未应用。',
+  },
+  'ai.ide.dirtyDiscardTitle': {
+    'en-US': 'Discard unsaved changes?',
+    'zh-CN': '放弃未保存的修改？',
+  },
+  'ai.ide.dirtyDiscardMessage': {
+    'en-US': 'The IDE has unsaved changes and rejected the close. Discard them and close this view?',
+    'zh-CN': 'IDE 中存在未保存的修改，已拒绝关闭。放弃这些修改并关闭视图？',
+  },
+  'ai.ide.discardAndClose': {
+    'en-US': 'Discard and Close',
+    'zh-CN': '放弃并关闭',
+  },
   'ai.ide.openTerminal': {
     'en-US': 'Open Terminal',
     'zh-CN': '打开终端',
@@ -302,29 +366,17 @@ export const environmentCatalog = {
     'en-US': 'Update Status',
     'zh-CN': '更新状态',
   },
-  'ai.environment.update.phase.PENDING': {
-    'en-US': 'Pending',
-    'zh-CN': '等待中',
+  'ai.environment.update.none': {
+    'en-US': 'No update in progress',
+    'zh-CN': '无进行中的更新',
   },
-  'ai.environment.update.phase.RUNNING': {
-    'en-US': 'Running',
-    'zh-CN': '更新中',
+  'ai.environment.update.progressKnownTotal': {
+    'en-US': 'Updating to {{targetVersion}} · {{downloaded}} / {{total}} ({{percent}}%)',
+    'zh-CN': '正在更新至 {{targetVersion}} · {{downloaded}} / {{total}}（{{percent}}%）',
   },
-  'ai.environment.update.phase.PREPARED': {
-    'en-US': 'Prepared',
-    'zh-CN': '准备切换',
-  },
-  'ai.environment.update.phase.SUCCEEDED': {
-    'en-US': 'Succeeded',
-    'zh-CN': '更新成功',
-  },
-  'ai.environment.update.phase.FAILED': {
-    'en-US': 'Failed',
-    'zh-CN': '更新失败',
-  },
-  'ai.environment.update.phase.UNKNOWN': {
-    'en-US': 'Awaiting Reconnect',
-    'zh-CN': '等待重连确认',
+  'ai.environment.update.progressUnknownTotal': {
+    'en-US': 'Updating to {{targetVersion}} · {{downloaded}} downloaded (total size unknown)',
+    'zh-CN': '正在更新至 {{targetVersion}} · 已下载 {{downloaded}}（总大小未知）',
   },
   'ai.environment.manage': {
     'en-US': 'Manage',
@@ -337,6 +389,22 @@ export const environmentCatalog = {
   'ai.environment.runtime.title': {
     'en-US': 'Host Information',
     'zh-CN': '宿主信息',
+  },
+  'ai.environment.runtime.unavailable': {
+    'en-US': 'Status unavailable until the Daemon reconnects',
+    'zh-CN': '状态不可用，等待 Daemon 重连',
+  },
+  'ai.environment.runtime.loading': {
+    'en-US': 'Loading runtime status',
+    'zh-CN': '正在读取运行状态',
+  },
+  'ai.environment.runtime.loadFailed': {
+    'en-US': 'Failed to read runtime status',
+    'zh-CN': '运行状态读取失败',
+  },
+  'ai.environment.runtime.unreported': {
+    'en-US': 'Not reported',
+    'zh-CN': '未上报',
   },
   'ai.environment.runtime.daemonVersion': {
     'en-US': 'Daemon Version',

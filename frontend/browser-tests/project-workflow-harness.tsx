@@ -5,7 +5,6 @@ import { createBrowserRouter, RouterProvider, Route, Routes, useNavigate } from 
 import '@/styles.css'
 import { setLocale } from '@/shared/i18n'
 import { ApplicationEventProvider } from '@/shared/app-events'
-import { IdeLifecycleProvider } from '@/features/environment/ide/IdeLifecycleProvider'
 import { ProjectsInvalidationBridge } from '@/features/projects/extensions/projects-extension'
 import { ProjectDetailPage } from '@/features/projects/ProjectDetailPage'
 import { ProjectsPage } from '@/features/projects/ProjectsPage'
@@ -44,10 +43,10 @@ function IssueVisualHarness() {
 const router = createBrowserRouter([{
   path: '*',
   element: (
-    <IdeLifecycleProvider>
+    <>
       <ProjectsInvalidationBridge />
       <HarnessRoutes />
-    </IdeLifecycleProvider>
+    </>
   ),
 }])
 

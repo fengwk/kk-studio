@@ -19,11 +19,12 @@ export function ChatWorkspacePane({
   onValidateDraftName,
   onFocus,
   initialTarget,
+  target,
+  onTargetChange,
   onTargetConsumed,
   onRequestBranch,
   onPaneReport,
   onPresentation,
-  onIdeMounted,
 }: {
   chat: ChatDTO
   agents: AgentDefinitionDTO[]
@@ -34,13 +35,15 @@ export function ChatWorkspacePane({
   onValidateDraftName?: (target: PaneTarget, name: string) => Promise<string | null>
   onFocus: () => void
   initialTarget?: PaneTarget
+  /** 由 ChatWorkspacePage 的 tab 呈现状态唯一持有。 */
+  target: PaneTarget
+  onTargetChange: (target: PaneTarget) => void
   onTargetConsumed?: (target: PaneTarget) => void
   /** 新建分支请求（已绑定来源 pane id）：命名与目标 pane 由 workspace 统一决定。 */
   onRequestBranch?: (sourcePaneId: string, request: BranchRequestInput) => void
   /** 面板运行时摘要：workspace 只用它做目标路由与顶栏面包屑。 */
   onPaneReport?: (paneId: string, report: PaneReport) => void
   onPresentation?: (paneId: string, report: ThreadPresentation | null) => void
-  onIdeMounted?: (paneId: string, mounted: boolean) => void
 }) {
   return (
     <AgentPane
@@ -58,6 +61,8 @@ export function ChatWorkspacePane({
       onValidateDraftName={onValidateDraftName}
       onFocus={onFocus}
       initialTarget={initialTarget}
+      target={target}
+      onTargetChange={onTargetChange}
       onTargetConsumed={onTargetConsumed}
       onRequestBranch={onRequestBranch == null
         ? undefined
@@ -66,7 +71,6 @@ export function ChatWorkspacePane({
         ? undefined
         : (report) => onPaneReport(pane.id, report)}
       onPresentation={onPresentation == null ? undefined : (report) => onPresentation(pane.id, report)}
-      onIdeMounted={onIdeMounted == null ? undefined : (mounted) => onIdeMounted(pane.id, mounted)}
     />
   )
 }
