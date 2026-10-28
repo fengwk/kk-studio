@@ -223,6 +223,10 @@ export interface IdeService extends IdeLeaseHandler {
 /** 受控 Studio 数据连接绑定处理器；由 data transport 片实现，Runtime 只做严格解码与代际内派发。 */
 export interface DataBindHandler {
   bind(binding: DataBind, signal: AbortSignal): Promise<void> | void
+  /** 当前物理绑定上的活动逻辑流数量；仅用于更新准入，不表示物理连接是否建立。 */
+  activeStreamCount(): number
+  /** 关闭当前物理绑定并等待其收敛；成功返回后仍可接受后续代际的 bind。 */
+  close(): Promise<void>
 }
 
 /**

@@ -163,14 +163,11 @@ async function runDaemon(config: DaemonConfig): Promise<number> {
     })
     closers.push(() => ide.close())
 
-    // 一条 DATA_BIND 承载当前控制代际内的共享数据面；最后一个逻辑流收敛后关闭物理连接，
-    // 让 Runtime 的数据绑定在途门禁解除。后续代际必须由新的 DATA_BIND 与一次性票据重新建立。
+    // 一条 DATA_BIND 承载当前控制代际内的共享数据面，非重叠逻辑流复用同一物理连接。
+    // 更新准入时由 Runtime 关闭空闲连接，控制代际中止时由 bind signal 收敛。
     const dataUpstream = createMuxUpstreamService({
       studioUrl: config.studioUrl,
       resolveView: ide.resolveView,
-      onIdle: () => {
-        void dataUpstream.close()
-      },
     })
     closers.push(() => dataUpstream.shutdown())
 
