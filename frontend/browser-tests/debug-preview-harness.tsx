@@ -32,44 +32,44 @@ const queryClient = new QueryClient({
 const router = createMemoryRouter([{
   path: '*',
   element: (
-      <div className="preview-harness-frame" data-testid="preview-harness-frame">
-        <AgentPane
-          paneId={PREVIEW_HARNESS_THREAD_ID}
-          focused
-          initialTarget={{ kind: 'BOUND_THREAD', threadId: PREVIEW_HARNESS_THREAD_ID }}
-          agents={[
-            {
-              name: 'assistant',
-              description: '通用助手',
-              systemPrompt: 'You are a precise coding assistant.',
-              type: 'BUILTIN',
-              model: 'minimax-m2.7',
-              variant: 'default',
-              config: {
-                inheritParentEnvironment: true,
-                tools: ['read', 'bash'],
-                skills: [],
-                subagents: [],
-              },
-              version: '1',
-              createTime: 1790812800,
-              updateTime: 1790812800,
+    <div className="preview-harness-frame" data-testid="preview-harness-frame">
+      <AgentPane
+        paneId={PREVIEW_HARNESS_THREAD_ID}
+        focused
+        initialTarget={{ kind: 'BOUND_THREAD', threadId: PREVIEW_HARNESS_THREAD_ID }}
+        agents={[
+          {
+            name: 'assistant',
+            description: '通用助手',
+            systemPrompt: 'You are a precise coding assistant.',
+            type: 'BUILTIN',
+            model: 'minimax-m2.7',
+            variant: 'default',
+            config: {
+              inheritParentEnvironment: true,
+              tools: ['read', 'bash'],
+              skills: [],
+              subagents: [],
             },
-            ...['coder', 'broken-agent'].map((name): AgentDefinitionDTO => ({
-              name,
-              description: name,
-              systemPrompt: null,
-              type: 'USER',
-              model: name === 'coder' ? 'anthropic/Claude' : 'missing/model',
-              variant: 'fast',
-              config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
-              version: '1',
-              createTime: 1790812800,
-              updateTime: 1790812800,
-            })),
-          ]}
-        />
-      </div>
+            version: '1',
+            createTime: 1790812800,
+            updateTime: 1790812800,
+          },
+          ...['coder', 'broken-agent'].map((name): AgentDefinitionDTO => ({
+            name,
+            description: name,
+            systemPrompt: null,
+            type: 'USER',
+            model: name === 'coder' ? 'anthropic/Claude' : 'missing/model',
+            variant: 'fast',
+            config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
+            version: '1',
+            createTime: 1790812800,
+            updateTime: 1790812800,
+          })),
+        ]}
+      />
+    </div>
   ),
 }])
 
