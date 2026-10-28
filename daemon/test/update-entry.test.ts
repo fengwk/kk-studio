@@ -1,14 +1,24 @@
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import type { DaemonConfig } from '../src/contracts.js'
+import { acquireFileLock, type DirectoryLock } from '../src/native/index.js'
 import { encodeUpdateCommand, PROTOCOL_VERSION, encodeEnvelope } from '../src/protocol.js'
 import { Runtime, type UpdatePort } from '../src/runtime.js'
-import { MANAGED_ENTRY, PERMIT_FILE, RUNTIME_MANIFEST, createUpdateHandler, type UpdateDependencies } from '../src/update.js'
+import {
+  HANDOFF_FILE,
+  MANAGED_ENTRY,
+  PERMIT_FILE,
+  RUNTIME_MANIFEST,
+  TAKEOVER_FILE,
+  UPDATE_LOCK_FILE,
+  createUpdateHandler,
+  type UpdateDependencies,
+} from '../src/update.js'
 import { FakeTransport, serverMessage, tick, waitFor } from './helpers.js'
 import { artifactFixture } from './support/update-fixture.js'
 
@@ -100,6 +110,13 @@ async function startEntry(): Promise<EntryHarness> {
       await writeFile(path.join(destination, MANAGED_ENTRY), '// staged entry')
       await writeFile(path.join(destination, 'runtime', 'code-server', 'lib', 'node'), '')
       await writeFile(path.join(destination, 'runtime', 'code-server', 'out', 'node', 'entry.js'), '')
+      await mkdir(path.join(destination, 'dist'), { recursive: true })
+      await writeFile(path.join(destination, 'dist', 'update-entry.js'), '// updater entry')
+      await mkdir(path.join(destination, 'node_modules', 'koffi'), { recursive: true })
+      await writeFile(path.join(destination, 'node_modules', 'koffi', 'package.json'), '{}')
+      const platformPackage = path.join(destination, 'node_modules', '@koromix', 'koffi-linux-x64')
+      await mkdir(platformPackage, { recursive: true })
+      await writeFile(path.join(platformPackage, 'package.json'), '{}')
       await writeFile(
         path.join(destination, RUNTIME_MANIFEST),
         JSON.stringify({
@@ -128,15 +145,38 @@ async function startEntry(): Promise<EntryHarness> {
 
   const transport = new FakeTransport()
   const permitPath = path.join(dataDir, 'updates', OPERATION_ID, PERMIT_FILE)
+  const handoffPath = path.join(dataDir, 'updates', OPERATION_ID, HANDOFF_FILE)
+  const takeoverPath = path.join(dataDir, 'updates', OPERATION_ID, TAKEOVER_FILE)
+  const installLockPath = path.join(dataDir, 'updates', UPDATE_LOCK_FILE)
   const permitAtReceipt: boolean[] = []
+  let updaterLock: DirectoryLock | null = null
+  cleans.push(async () => {
+    await updaterLock?.close()
+  })
   const originalConnect = transport.connect.bind(transport)
   transport.connect = async (listener) => {
     const connection = await originalConnect(listener)
     const originalSend = connection.sendText.bind(connection)
     // 同步判定：sendText 在同一同步块内先于许可释放被调用，因此这里读取的就是「回执到达时」的真实状态。
-    connection.sendText = (message: string): Promise<void> => {
-      if (message.includes('UPDATE_RESULT')) {
+    // PREPARED 出站时模拟已接管互斥的更新器，确保真实的 releasePermit 只有在 takeover + kernel lock 后释放。
+    connection.sendText = async (message: string): Promise<void> => {
+      const envelope = JSON.parse(message) as { messageType?: string; payload?: { phase?: string } }
+      if (envelope.messageType === 'UPDATE_RESULT') {
         permitAtReceipt.push(existsSync(permitPath))
+        if (envelope.payload?.phase === 'PREPARED') {
+          const handoff = JSON.parse(await readFile(handoffPath, 'utf8')) as { startupToken: string }
+          await writeFile(
+            takeoverPath,
+            `${JSON.stringify({
+              operationId: OPERATION_ID,
+              targetVersion: TARGET_VERSION,
+              token: handoff.startupToken,
+              pid: process.pid,
+            })}\n`,
+            { mode: 0o600 },
+          )
+          updaterLock = await acquireFileLock(installLockPath)
+        }
       }
       return originalSend(message)
     }
@@ -204,6 +244,7 @@ describe('managed update real entry', () => {
     expect(phases).toEqual(['ACCEPTED', 'PREPARED'])
     // 许可必须在 PREPARED 回执出站之后才释放，且此时确实已释放。
     expect(harness.permitAtReceipt).toEqual([false, false])
+    await waitFor(() => existsSync(harness.permitPath))
     expect((await stat(harness.permitPath)).isFile()).toBe(true)
 
     harness.runtime.close()

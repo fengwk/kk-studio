@@ -74,6 +74,48 @@ function textResult(callId: string, text = 'ok'): CapabilityResult {
   return { callId, error: false, details: {}, contents: [{ type: 'text', text }] }
 }
 
+const openViewPayload = {
+  action: 'OPEN_VIEW',
+  viewId: ENV,
+  documentId: '22222222-3333-4444-8555-666666666666',
+  eventNodeId: '33333333-4444-4555-8666-777777777777',
+  connectionId: '44444444-5555-4666-8777-888888888888',
+  claimId: '55555555-6666-4777-8888-999999999999',
+  mode: 'create',
+}
+
+/** Complete IDE test double; lifecycle-focused tests override only the port they exercise. */
+function dataBindHandler(overrides: Partial<DataBindHandler> = {}): DataBindHandler {
+  return {
+    bind() {},
+    activeStreamCount: () => 0,
+    async close() {},
+    ...overrides,
+  }
+}
+
+function ideService(overrides: Partial<IdeService> = {}): IdeService {
+  const base: IdeService = {
+    async handle() {
+      return { ok: true }
+    },
+    canStartUpdate: () => true,
+    async stopForUpdate() {},
+    getViewState: () => null,
+    activeStreamCount: () => 0,
+    async resolveView() {
+      throw new Error('view resolution is not used by this test')
+    },
+    async restoreBackup() {
+      return { restored: 0, skipped: 0 }
+    },
+    hasActiveViews: () => false,
+    apply() {},
+    async close() {},
+  }
+  return { ...base, ...overrides }
+}
+
 interface Setup {
   transport: FakeTransport
   runtime: Runtime
@@ -1221,13 +1263,12 @@ describe('runtime update handling', () => {
           return textResult(call.invocationId)
         },
       },
-      ide: {
+      ide: ideService({
         async handle() {
           ideCalls++
           return { ok: true }
         },
-        async close() {},
-      },
+      }),
     })
     await handshake(setup)
     setup.transport.receive(serverMessage('UPDATE', { environmentId: ENV, payload: command }))
@@ -1245,7 +1286,7 @@ describe('runtime update handling', () => {
       serverMessage('IDE_COMMAND', {
         environmentId: ENV,
         invocationId: 'ide-blocked',
-        payload: { action: 'OPEN_VIEW', viewId: ENV },
+        payload: openViewPayload,
       }),
     )
     await waitFor(() =>
@@ -1303,13 +1344,12 @@ describe('runtime update handling', () => {
     }
     const setup = buildRuntime({
       update,
-      ide: {
+      ide: ideService({
         async handle() {
           ideCalls++
           return { ok: true }
         },
-        async close() {},
-      },
+      }),
     })
     await handshake(setup)
     setup.transport.receive(serverMessage('UPDATE', { environmentId: ENV, payload: command }))
@@ -1327,7 +1367,7 @@ describe('runtime update handling', () => {
       serverMessage('IDE_COMMAND', {
         environmentId: ENV,
         invocationId: 'ide-after-prepared',
-        payload: { action: 'OPEN_VIEW', viewId: ENV },
+        payload: openViewPayload,
       }),
     )
     setup.transport.receive(
@@ -1399,13 +1439,12 @@ describe('runtime update handling', () => {
     let canStart = false
     let updateCalls = 0
     const setup = buildRuntime({
-      ide: {
+      ide: ideService({
         async handle() {
           return { ok: true }
         },
         canStartUpdate: () => canStart,
-        async close() {},
-      },
+      }),
       update: {
         async handleUpdate() {
           updateCalls++
@@ -1657,11 +1696,11 @@ describe('runtime extension handlers', () => {
   it('validates DATA_BIND same-origin before invoking the configured handler', async () => {
     const seen: unknown[] = []
     const setup = buildRuntime({
-      dataBind: {
+      dataBind: dataBindHandler({
         bind(value) {
           seen.push(value)
         },
-      },
+      }),
     })
     await handshake(setup)
     setup.transport.receive(
@@ -1682,17 +1721,59 @@ describe('runtime extension handlers', () => {
     setup.runtime.close()
   })
 
-  it('keeps an active data connection in the UPDATE busy check until it converges', async () => {
+  it('closes an idle data connection before starting the updater', async () => {
     const bindGate = Promise.withResolvers<void>()
-    const seenSignals: AbortSignal[] = []
+    const events: string[] = []
+    let bindStarted = false
     let updateCalls = 0
     const setup = buildRuntime({
-      dataBind: {
-        async bind(_value, signal) {
-          seenSignals.push(signal)
+      dataBind: dataBindHandler({
+        async bind() {
+          bindStarted = true
           await bindGate.promise
         },
+        async close() {
+          events.push('data-close')
+          bindGate.resolve()
+        },
+      }),
+      update: {
+        async handleUpdate() {
+          updateCalls++
+          events.push('update')
+          return { phase: 'PREPARED' }
+        },
       },
+    })
+    await handshake(setup)
+    setup.transport.receive(serverMessage('DATA_BIND', { environmentId: ENV, payload: binding }))
+    await waitFor(() => bindStarted)
+
+    // 物理连接即使由 bind 的存续 Promise 表示，只要没有活动逻辑流就不阻止更新。
+    setup.transport.receive(serverMessage('UPDATE', { environmentId: ENV, payload: command }))
+    await waitFor(
+      () =>
+        sent(setup.transport).some(
+          (envelope) =>
+            envelope.messageType === 'UPDATE_RESULT' &&
+            (envelope.payload as { phase: string }).phase === 'PREPARED',
+        ),
+    )
+    expect(events).toEqual(['data-close', 'update'])
+    expect(updateCalls).toBe(1)
+    setup.runtime.close()
+  })
+
+  it('rejects UPDATE while data streams are active without closing the connection', async () => {
+    let closeCalls = 0
+    let updateCalls = 0
+    const setup = buildRuntime({
+      dataBind: dataBindHandler({
+        activeStreamCount: () => 1,
+        async close() {
+          closeCalls++
+        },
+      }),
       update: {
         async handleUpdate() {
           updateCalls++
@@ -1701,10 +1782,6 @@ describe('runtime extension handlers', () => {
       },
     })
     await handshake(setup)
-    setup.transport.receive(serverMessage('DATA_BIND', { environmentId: ENV, payload: binding }))
-    await waitFor(() => seenSignals.length === 1)
-    expect(seenSignals[0]?.aborted).toBe(false)
-
     setup.transport.receive(serverMessage('UPDATE', { environmentId: ENV, payload: command }))
     await waitFor(
       () =>
@@ -1712,14 +1789,49 @@ describe('runtime extension handlers', () => {
           (envelope) =>
             envelope.messageType === 'UPDATE_RESULT' &&
             (envelope.payload as { phase: string }).phase === 'FAILED' &&
-            (envelope.payload as { message: string }).message.includes('data connection'),
+            (envelope.payload as { message: string }).message.includes('data streams are active'),
+        ),
+    )
+    expect(closeCalls).toBe(0)
+    expect(updateCalls).toBe(0)
+    setup.runtime.close()
+  })
+
+  it('fails UPDATE and clears admission when closing an idle data connection fails', async () => {
+    let closeCalls = 0
+    let failClose = true
+    let updateCalls = 0
+    const setup = buildRuntime({
+      dataBind: dataBindHandler({
+        async close() {
+          closeCalls++
+          if (failClose) {
+            throw new Error('data close failed')
+          }
+        },
+      }),
+      update: {
+        async handleUpdate() {
+          updateCalls++
+          return { phase: 'PREPARED' }
+        },
+      },
+    })
+    await handshake(setup)
+    setup.transport.receive(serverMessage('UPDATE', { environmentId: ENV, payload: command }))
+    await waitFor(
+      () =>
+        sent(setup.transport).some(
+          (envelope) =>
+            envelope.messageType === 'UPDATE_RESULT' &&
+            (envelope.payload as { phase: string }).phase === 'FAILED' &&
+            (envelope.payload as { message: string }).message.includes('data close failed'),
         ),
     )
     expect(updateCalls).toBe(0)
 
-    bindGate.resolve()
-    await tick()
-    await tick()
+    // 失败已清准入门闩：修复 close 后同一目标的新 operation 可以重新准入并执行。
+    failClose = false
     setup.transport.receive(
       serverMessage('UPDATE', {
         environmentId: ENV,
@@ -1736,16 +1848,17 @@ describe('runtime extension handlers', () => {
         ),
     )
     expect(updateCalls).toBe(1)
+    expect(closeCalls).toBe(2)
     setup.runtime.close()
   })
 
   it('reports asynchronous DATA_BIND failures as control errors', async () => {
     const setup = buildRuntime({
-      dataBind: {
+      dataBind: dataBindHandler({
         async bind() {
           throw new Error('stream setup failed')
         },
-      },
+      }),
     })
     await handshake(setup)
     setup.transport.receive(serverMessage('DATA_BIND', { environmentId: ENV, payload: binding }))
@@ -1774,9 +1887,10 @@ describe('runtime extension handlers', () => {
     const setup = buildRuntime({
       ideLease: {
         hasActiveViews: () => activeViews,
-        apply(value) {
-          applied.push(value)
+        apply(value, roundStartedAt) {
+          applied.push({ value, roundStartedAt })
         },
+        getViewState: () => null,
       },
       monotonicNow: () => now,
     })
@@ -1800,7 +1914,7 @@ describe('runtime extension handlers', () => {
     expect(heartbeat().ideLeaseRound).toBe('1')
     setup.transport.receive(serverMessage('IDE_LEASE', { environmentId: ENV, payload: lease }))
     await waitFor(() => applied.length === 1)
-    expect(applied[0]).toEqual(lease)
+    expect(applied[0]).toEqual({ value: lease, roundStartedAt: 0 })
 
     // 同一轮只接受一次证明。
     setup.transport.receive(serverMessage('IDE_LEASE', { environmentId: ENV, payload: lease }))
@@ -1811,6 +1925,8 @@ describe('runtime extension handlers', () => {
     expect(heartbeat().ideLeaseRound).toBe('2')
     setup.transport.receive(serverMessage('IDE_LEASE', { environmentId: ENV, payload: { ...lease, round: '2' } }))
     await waitFor(() => applied.length === 2)
+    // 使用证明使用轮次发出时的本机单调时间，而不是证明到达时间。
+    expect(applied[1]).toEqual({ value: { ...lease, round: '2' }, roundStartedAt: 15_000 })
 
     now = 30_000
     expect(heartbeat().ideLeaseRound).toBe('3')
@@ -1831,22 +1947,21 @@ describe('runtime IDE commands', () => {
   it('dispatches IDE_COMMAND and replies with IDE_RESULT', async () => {
     let handled = 0
     const setup = buildRuntime({
-      ide: {
+      ide: ideService({
         async handle() {
           handled++
-          return { ok: true, viewId: ENV }
+          return { ok: true, views: [] }
         },
-        async close() {},
-      },
+      }),
     })
     await handshake(setup)
     setup.transport.receive(
-      serverMessage('IDE_COMMAND', { environmentId: ENV, invocationId: 'ide-1', payload: { action: 'OPEN_VIEW', viewId: ENV } }),
+      serverMessage('IDE_COMMAND', { environmentId: ENV, invocationId: 'ide-1', payload: { action: 'LIST_VIEWS' } }),
     )
     await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'IDE_RESULT'))
     const result = sent(setup.transport).find((envelope) => envelope.messageType === 'IDE_RESULT')
     expect(result?.invocationId).toBe('ide-1')
-    expect(result?.payload).toMatchObject({ ok: true })
+    expect(result?.payload).toEqual({ ok: true, views: [] })
     expect(handled).toBe(1)
     setup.runtime.close()
   })
@@ -1858,17 +1973,20 @@ describe('runtime IDE commands', () => {
       release = resolve
     })
     const setup = buildRuntime({
-      ide: {
+      ide: ideService({
         async handle() {
           handled++
           await gate
           return { ok: true }
         },
-        async close() {},
-      },
+      }),
     })
     await handshake(setup)
-    const message = serverMessage('IDE_COMMAND', { environmentId: ENV, invocationId: 'ide-1', payload: { action: 'FOCUS_TERMINAL', viewId: ENV } })
+    const message = serverMessage('IDE_COMMAND', {
+      environmentId: ENV,
+      invocationId: 'ide-1',
+      payload: { action: 'LIST_VIEWS' },
+    })
     setup.transport.receive(message)
     await tick()
     setup.transport.receive(message)
@@ -1881,11 +1999,21 @@ describe('runtime IDE commands', () => {
     const withoutService = buildRuntime()
     await handshake(withoutService)
     withoutService.transport.receive(
-      serverMessage('IDE_COMMAND', { environmentId: ENV, invocationId: 'ide-2', payload: { action: 'CLOSE_VIEW', viewId: ENV } }),
+      serverMessage('IDE_COMMAND', {
+        environmentId: ENV,
+        invocationId: 'ide-2',
+        payload: {
+          action: 'CLOSE_VIEW',
+          viewId: ENV,
+          documentId: '22222222-3333-4444-8555-666666666666',
+          bindingEpoch: '1',
+          discard: true,
+        },
+      }),
     )
     await waitFor(() => sent(withoutService.transport).some((envelope) => envelope.messageType === 'IDE_RESULT'))
     const result = sent(withoutService.transport).find((envelope) => envelope.messageType === 'IDE_RESULT')
-    expect(result?.payload).toMatchObject({ ok: false })
+    expect(result?.payload).toMatchObject({ ok: false, code: 'UNAVAILABLE' })
     withoutService.runtime.close()
   })
 
@@ -1893,21 +2021,22 @@ describe('runtime IDE commands', () => {
     let aborted = false
     const setup = buildRuntime({
       ideCommandTimeoutMillis: 20,
-      ide: {
+      ide: ideService({
         async handle(_command, signal) {
           await new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }))
           aborted = true
           throw new Error('aborted')
         },
-        async close() {},
-      },
+      }),
     })
     await handshake(setup)
     setup.transport.receive(
-      serverMessage('IDE_COMMAND', { environmentId: ENV, invocationId: 'ide-1', payload: { action: 'OPEN_VIEW', viewId: ENV } }),
+      serverMessage('IDE_COMMAND', { environmentId: ENV, invocationId: 'ide-1', payload: { action: 'LIST_VIEWS' } }),
     )
     await waitFor(() => aborted)
     await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'IDE_RESULT'))
+    const result = sent(setup.transport).find((envelope) => envelope.messageType === 'IDE_RESULT')
+    expect(result?.payload).toMatchObject({ ok: false })
     setup.runtime.close()
   })
 })
@@ -2049,67 +2178,36 @@ describe('runtime protocol version and scope', () => {
   })
 })
 
-describe('runtime IDE stream lifetime and shutdown convergence', () => {
+describe('runtime IDE command lifetime and shutdown convergence', () => {
   /**
-   * 元数据动作受 ideCommandTimeoutMillis 约束，OPEN_STREAM 是活动通道不受该 deadline 约束，
-   * 连接失效即中止，且两类 IDE 请求都不进入 Agent journal、也不跨代际重放。
+   * IDE 管理请求不进入 Agent journal；连接失效即中止在途请求，且不跨代际重放。
    */
-  it('exempts OPEN_STREAM from the metadata deadline and aborts it on disconnect without journaling', async () => {
-    let metadataAborted = false
-    let streamAborted = false
+  it('aborts an in-flight IDE command on disconnect without journaling or replay', async () => {
+    let aborted = false
     const setup = buildRuntime({
-      ideCommandTimeoutMillis: 30,
-      ide: {
-        async handle(command, signal) {
+      ideCommandTimeoutMillis: 60_000,
+      ide: ideService({
+        async handle(_command, signal) {
           await new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }))
-          if (command.action === 'OPEN_STREAM') {
-            streamAborted = true
-          } else {
-            metadataAborted = true
-          }
-          return { ok: false, message: 'aborted' }
+          aborted = true
+          return { ok: true, views: [] }
         },
-        async close() {},
-      },
+      }),
     })
     await handshake(setup)
     setup.transport.receive(
-      serverMessage('IDE_COMMAND', { environmentId: ENV, invocationId: 'meta-1', payload: { action: 'OPEN_VIEW' } }),
+      serverMessage('IDE_COMMAND', { environmentId: ENV, invocationId: 'ide-1', payload: { action: 'LIST_VIEWS' } }),
     )
-    setup.transport.receive(
-      serverMessage('IDE_COMMAND', {
-        environmentId: ENV,
-        invocationId: 'stream-1',
-        payload: { action: 'OPEN_STREAM', mode: 'WS', streamUrl: 'https://stream.example/s', path: '/' },
-      }),
-    )
-    await waitFor(() => metadataAborted)
-    expect(
-      sent(setup.transport)
-        .filter((envelope) => envelope.messageType === 'IDE_RESULT')
-        .map((envelope) => envelope.invocationId),
-    ).toEqual(['meta-1'])
-
-    // 超过 2 倍元数据 deadline 后 OPEN_STREAM 仍在途，且没有结果帧。
-    await new Promise((resolve) => setTimeout(resolve, 90))
-    expect(streamAborted).toBe(false)
-    expect(
-      sent(setup.transport).some(
-        (envelope) => envelope.messageType === 'IDE_RESULT' && envelope.invocationId === 'stream-1',
-      ),
-    ).toBe(false)
-
-    // IDE 请求既不进入 Agent journal，也不会被重放。
-    expect(setup.runtime.getJournal().find('stream-1')).toBeUndefined()
-    expect(setup.runtime.getJournal().find('meta-1')).toBeUndefined()
-
+    await tick()
+    expect(setup.runtime.getJournal().find('ide-1')).toBeUndefined()
     setup.transport.disconnect()
-    await waitFor(() => streamAborted)
+    await waitFor(() => aborted)
 
     await waitFor(() => setup.transport.connectCount >= 2)
     setup.transport.receive(serverMessage('WELCOME', { environmentId: ENV, payload: welcomePayload }))
     await waitFor(() => setup.runtime.getState() === 'READY')
     expect(sent(setup.transport).some((envelope) => envelope.messageType === 'IDE_RESULT')).toBe(false)
+    expect(setup.runtime.getJournal().find('ide-1')).toBeUndefined()
     setup.runtime.close()
   })
 
@@ -2123,14 +2221,13 @@ describe('runtime IDE stream lifetime and shutdown convergence', () => {
     })
     const setup = buildRuntime({
       ideCommandTimeoutMillis: 60_000,
-      ide: {
+      ide: ideService({
         async handle(_command, signal) {
           await new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }))
           streamAborted = true
-          return { ok: false, message: 'aborted' }
+          return { ok: false, code: 'BUSY', message: 'aborted' }
         },
-        async close() {},
-      },
+      }),
       capabilities: {
         'fs.read': async (call, context) => {
           await new Promise<void>((resolve) => {
@@ -2153,8 +2250,8 @@ describe('runtime IDE stream lifetime and shutdown convergence', () => {
     setup.transport.receive(
       serverMessage('IDE_COMMAND', {
         environmentId: ENV,
-        invocationId: 'stream-1',
-        payload: { action: 'OPEN_STREAM', mode: 'HTTP', streamUrl: 'https://stream.example/s', path: '/' },
+        invocationId: 'ide-1',
+        payload: { action: 'LIST_VIEWS' },
       }),
     )
     setup.transport.receive(
@@ -2230,43 +2327,42 @@ describe('runtime IDE stream lifetime and shutdown convergence', () => {
   })
 
   /**
-   * OPEN_STREAM 可无限存活：在途 IDE 请求必须有硬上限。同 ID 重复不占名额，不同 ID 洪泛到上限一律固定 busy，
+   * 在途 IDE 请求必须有硬上限。同 ID 重复不占名额，不同 ID 洪泛到上限一律固定 busy，
    * 释放名额后可再接新请求。
    */
   it('bounds in-flight IDE commands, reports busy on overflow and accepts again after release', async () => {
     const releases: Array<() => void> = []
-    const ide: IdeService = {
+    const ide = ideService({
       async handle(_command, signal) {
         await new Promise<void>((resolve) => {
           releases.push(resolve)
           signal.addEventListener('abort', () => resolve(), { once: true })
         })
-        return { ok: true }
+        return { ok: true, views: [] }
       },
-      async close() {},
-    }
+    })
     const setup = buildRuntime({ ideCommandTimeoutMillis: 60_000, ide })
     await handshake(setup)
     const uuid = (n: number): string => `00000000-0000-4000-8000-${n.toString(16).padStart(12, '0')}`
     const cap = 256
-    const streamPayload = { action: 'OPEN_STREAM', mode: 'WS', streamUrl: 'https://stream.example/s', path: '/' }
+    const commandPayload = { action: 'LIST_VIEWS' }
     for (let index = 0; index < cap; index++) {
       setup.transport.receive(
-        serverMessage('IDE_COMMAND', { environmentId: ENV, invocationId: uuid(index), payload: streamPayload }),
+        serverMessage('IDE_COMMAND', { environmentId: ENV, invocationId: uuid(index), payload: commandPayload }),
       )
     }
     expect(releases.length).toBe(cap)
 
     // 同 ID 重复不占新名额。
     setup.transport.receive(
-      serverMessage('IDE_COMMAND', { environmentId: ENV, invocationId: uuid(0), payload: streamPayload }),
+      serverMessage('IDE_COMMAND', { environmentId: ENV, invocationId: uuid(0), payload: commandPayload }),
     )
     await tick()
     expect(releases.length).toBe(cap)
 
     // 不同 ID 超过上限：固定 busy，绝不执行副作用。
     setup.transport.receive(
-      serverMessage('IDE_COMMAND', { environmentId: ENV, invocationId: uuid(cap), payload: streamPayload }),
+      serverMessage('IDE_COMMAND', { environmentId: ENV, invocationId: uuid(cap), payload: commandPayload }),
     )
     await waitFor(() =>
       sent(setup.transport).some(
@@ -2285,7 +2381,7 @@ describe('runtime IDE stream lifetime and shutdown convergence', () => {
       ),
     )
     setup.transport.receive(
-      serverMessage('IDE_COMMAND', { environmentId: ENV, invocationId: uuid(cap + 1), payload: streamPayload }),
+      serverMessage('IDE_COMMAND', { environmentId: ENV, invocationId: uuid(cap + 1), payload: commandPayload }),
     )
     await waitFor(() => releases.length === cap + 1)
     setup.runtime.close()

@@ -8,5 +8,5 @@
 export { createProcessSupervisor, UnsupportedPlatformError } from './process-supervisor.js'
 export { createSystemProxyResolver } from './system-proxy.js'
 export { ensurePrivateDirectory, writePrivateFile, verifyPrivateFile } from './private-fs.js'
-export { acquireDirectoryLock, type DirectoryLock } from './lock.js'
+export { acquireDirectoryLock, acquireFileLock, type DirectoryLock } from './lock.js'
 export { processScopeCapabilities, type ProcessScopeCapabilities } from './capabilities.js'

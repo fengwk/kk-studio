@@ -334,6 +334,29 @@ describe('code-server process manager', () => {
     await manager.close()
   })
 
+  it('reports only unexpected exits, not intentional idle/update stops', async () => {
+    const root = await distribution(READY_SERVER)
+    const supervisor = new TestSupervisor()
+    cleanups.push(() => supervisor.close())
+    const manager = createCodeServerManager(config(root), supervisor, credentials)
+    const exited: number[] = []
+    manager.onUnexpectedExit((generation) => exited.push(generation))
+    const first = await manager.ensureStarted(signal())
+
+    await manager.stop()
+    await delay(0)
+    expect(exited).toEqual([])
+
+    const replacement = await manager.ensureStarted(signal())
+    expect(replacement.generation).toBeGreaterThan(first.generation)
+    const child = supervisor.children[1]!
+    child.kill('SIGKILL')
+    await new Promise<void>((resolve) => child.once('exit', () => resolve()))
+    await delay(0)
+    expect(exited.length).toBe(1)
+    await manager.close()
+  })
+
   it('surfaces a termination failure on close', async () => {
     const root = await distribution(READY_SERVER)
     const supervisor = new TestSupervisor()

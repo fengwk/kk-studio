@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
-import { acquireDirectoryLock } from '../../src/native/index.js'
+import { acquireDirectoryLock, acquireFileLock } from '../../src/native/index.js'
 import { awaitGone, fixturePath, isAlive } from './process-test-util.js'
 
 // 目录锁必须是内核锁：同一目录竞争时第二个持有者失败，持有进程崩溃时由内核释放。
@@ -93,6 +93,57 @@ describe.skipIf(process.platform === 'win32')('native directory lock', () => {
 
     // 内核在进程崩溃时已经释放 flock：这里必须能重新取得。
     const lock = await acquireDirectoryLock(workdir)
+    await lock.close()
+  })
+})
+
+// 安装目录互斥使用独立锁文件，不能把 daemon.lock 的文件名或目录当作唯一键。
+describe.skipIf(process.platform === 'win32')('native file lock', () => {
+  let workdir: string
+
+  beforeEach(() => {
+    workdir = mkdtempSync(join(tmpdir(), 'kk-studio-native-file-lock-'))
+  })
+
+  afterEach(() => {
+    rmSync(workdir, { recursive: true, force: true })
+  })
+
+  test('a second acquisition of the same lock file fails and close is idempotent', async () => {
+    const lockPath = join(workdir, 'install.lock')
+    const lock = await acquireFileLock(lockPath)
+    await expect(acquireFileLock(lockPath)).rejects.toThrow(/already locked/)
+    await lock.close()
+    await lock.close()
+    const again = await acquireFileLock(lockPath)
+    await again.close()
+  })
+
+  test('the lock file and its directory are owner-only', async () => {
+    const lockPath = join(workdir, 'install.lock')
+    const lock = await acquireFileLock(lockPath)
+    expect(statSync(workdir).mode & 0o777).toBe(0o700)
+    expect(statSync(lockPath).mode & 0o777).toBe(0o600)
+    await lock.close()
+  })
+
+  test('an external holder of the install lock blocks and is released on crash', async () => {
+    const ready = join(workdir, 'holder.ready')
+    const holder = spawn(
+      process.execPath,
+      [fixturePath('lock-holder.mjs'), workdir, ready, 'install.lock'],
+      { stdio: 'ignore' },
+    )
+    const pid = Number(await waitForReady(ready))
+    const lockPath = join(workdir, 'install.lock')
+    try {
+      await expect(acquireFileLock(lockPath)).rejects.toThrow(/already locked/)
+    } finally {
+      holder.kill('SIGKILL')
+      await promiseFromExit(holder)
+    }
+    expect(await awaitGone(pid)).toBe(true)
+    const lock = await acquireFileLock(lockPath)
     await lock.close()
   })
 })
