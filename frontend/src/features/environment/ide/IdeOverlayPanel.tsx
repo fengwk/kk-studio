@@ -352,6 +352,37 @@ export function IdeOverlayPanel({
           </Button>
         </div>
       ) : null}
+      {selectedView?.status === 'in-use' ? (
+        <div className="ide-panel-recovery-banner" role="status" data-testid="ide-view-in-use">
+          <span>{t('ai.ide.viewInUse')}</span>
+          <div className="ide-panel-recovery-actions">
+            <Button
+              variant="ghost"
+              size="compact"
+              onClick={() => {
+                if (selectedEnvironmentId != null) {
+                  onRetryClaim(selectedEnvironmentId)
+                }
+              }}
+              data-testid="ide-retry-resume-btn"
+            >
+              {t('ai.ide.retryResume')}
+            </Button>
+            <Button
+              variant="ghost"
+              size="compact"
+              onClick={() => {
+                if (selectedEnvironmentId != null) {
+                  onOpenNewView(selectedEnvironmentId)
+                }
+              }}
+              data-testid="ide-open-new-view-btn"
+            >
+              {t('ai.ide.openNewView')}
+            </Button>
+          </div>
+        </div>
+      ) : null}
       {selectedView?.status === 'gone' ? (
         <div className="ide-panel-recovery-banner" role="alert" data-testid="ide-view-gone">
           <span>{t('ai.ide.viewGone')}</span>
@@ -453,6 +484,10 @@ export function IdeOverlayPanel({
             <div className="ide-panel-state" data-testid="ide-opening-state">
               <LoadingSpinner />
               <p>{t('ai.ide.loading')}</p>
+            </div>
+          ) : selectedView.status === 'in-use' ? (
+            <div className="ide-panel-state is-warning" data-testid="ide-view-in-use-state">
+              <p>{t('ai.ide.viewInUse')}</p>
             </div>
           ) : selectedView.status === 'gone' ? (
             <div className="ide-panel-state is-warning" data-testid="ide-view-gone-state">

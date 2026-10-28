@@ -49,6 +49,7 @@ type IdeViewStatus =
   | 'offline'
   | 'unknown'
   | 'gone'
+  | 'in-use'
   | 'error'
 
 export interface IdeViewState {
@@ -543,8 +544,14 @@ export function IdePanelProvider({
       return
     }
     if (mode === 'resume' && isViewInUse(error)) {
-      // 新 tab 持有复制来的 session viewId 时不能抢占原 document；同一环境改用新 view。
-      startCreate(environmentId, current.directory)
+      // 刷新与复制 tab 无法仅凭 VIEW_IN_USE 区分：保留原 viewId，等待用户明确重试或新建，绝不静默替换。
+      updateView(environmentId, (view) => ({
+        ...view,
+        status: 'in-use',
+        claimInFlight: false,
+        errorMessage: undefined,
+      }))
+      registerUsageQuiet()
       return
     }
     const gone = isViewGone(error)
@@ -739,6 +746,11 @@ export function IdePanelProvider({
   function retryClaim(environmentId: string): void {
     const view = viewsRef.current[environmentId]
     if (view == null || view.claimInFlight) {
+      return
+    }
+    if (view.status === 'in-use') {
+      // 占用不是未决结果；用户明确重试时以新 claimId 恢复同一 viewId。
+      startResume(environmentId, view)
       return
     }
     if (

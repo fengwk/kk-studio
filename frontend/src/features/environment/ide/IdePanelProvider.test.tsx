@@ -102,6 +102,13 @@ function lastSnapshot(presentation: IdePresentation): string {
   return JSON.stringify({ version: 1, presentation })
 }
 
+function sessionRecovery(environmentId: string): IdeRecovery | undefined {
+  const snapshot = JSON.parse(sessionStorage.getItem(IDE_TAB_SESSION_KEY) ?? '{}') as {
+    recoveryByEnvironment?: Record<string, IdeRecovery>
+  }
+  return snapshot.recoveryByEnvironment?.[environmentId]
+}
+
 function Harness() {
   const { openEnvironment } = useIdePanel()
   return (
@@ -331,7 +338,8 @@ describe('IdePanelProvider', () => {
     expect(screen.getAllByTestId('ide-iframe')).toHaveLength(2)
   })
 
-  it('replaces a copied-tab session view only after VIEW_IN_USE and never claims the original view', async () => {
+  it('preserves the session view on VIEW_IN_USE and retries it only after the user asks', async () => {
+    const user = userEvent.setup()
     sessionStorage.setItem(IDE_TAB_SESSION_KEY, sessionSnapshot({
       panelVisible: true,
       selectedEnvironmentId: ENV_A,
@@ -351,24 +359,75 @@ describe('IdePanelProvider', () => {
     const { sockets } = renderPanel()
     connect(sockets)
     await waitFor(() => {
-      expect(service.openIdeView).toHaveBeenCalledTimes(2)
+      expect(screen.getByTestId('ide-view-in-use')).toBeVisible()
     })
+    expect(service.openIdeView).toHaveBeenCalledTimes(1)
+    expect(screen.queryByTestId('ide-iframe')).not.toBeInTheDocument()
+    expect(screen.getByTestId('ide-view-in-use')).toHaveTextContent('旧标签页可能仍在使用')
+
+    const firstRequest = service.openIdeView.mock.calls[0]?.[1] as EnvironmentIdeOpenViewDTO
+    expect(firstRequest).toMatchObject({ viewId: VIEW_A, mode: 'resume' })
+    expect(sessionRecovery(ENV_A)?.viewId).toBe(VIEW_A)
+
+    await user.click(screen.getByTestId('ide-retry-resume-btn'))
     await waitFor(() => {
       expect(screen.getByTestId('ide-iframe')).toBeInTheDocument()
     })
 
     const calls = service.openIdeView.mock.calls as Array<[string, EnvironmentIdeOpenViewDTO]>
+    expect(calls).toHaveLength(2)
+    expect(calls[1]?.[1]).toMatchObject({ viewId: VIEW_A, mode: 'resume' })
+    expect(calls[1]?.[1]).not.toHaveProperty('directory')
+    expect(calls[1]?.[1].claimId).not.toBe(firstRequest.claimId)
+    expect(sessionRecovery(ENV_A)?.viewId).toBe(VIEW_A)
+    expect(service.closeIdeView).not.toHaveBeenCalled()
+  })
+
+  it('requires an explicit open-new-view action after VIEW_IN_USE and keeps the copied identity until then', async () => {
+    const user = userEvent.setup()
+    sessionStorage.setItem(IDE_TAB_SESSION_KEY, sessionSnapshot({
+      panelVisible: true,
+      selectedEnvironmentId: ENV_A,
+      openedEnvironmentIds: [ENV_A],
+    }, {
+      [ENV_A]: {
+        viewId: VIEW_A,
+        daemonInstanceId: DAEMON_A,
+        directory: DIRECTORY_A,
+      },
+    }))
+    service.openIdeView
+      .mockRejectedValueOnce(new ApiError('IDE view is in use', 409, 'IDE_UNAVAILABLE', {
+        detail: 'VIEW_IN_USE',
+      }))
+
+    const { sockets } = renderPanel()
+    connect(sockets)
+    await waitFor(() => {
+      expect(screen.getByTestId('ide-view-in-use')).toBeVisible()
+    })
+    expect(service.openIdeView).toHaveBeenCalledTimes(1)
+    expect(screen.queryByTestId('ide-iframe')).not.toBeInTheDocument()
+    expect(sessionRecovery(ENV_A)?.viewId).toBe(VIEW_A)
+    expect(localStorage.getItem(IDE_TAB_LAST_KEY)).toBeNull()
+
+    await user.click(screen.getByTestId('ide-open-new-view-btn'))
+    await waitFor(() => {
+      expect(screen.getByTestId('ide-iframe')).toBeInTheDocument()
+    })
+
+    const calls = service.openIdeView.mock.calls as Array<[string, EnvironmentIdeOpenViewDTO]>
+    expect(calls).toHaveLength(2)
     expect(calls[0]?.[1]).toMatchObject({ viewId: VIEW_A, mode: 'resume' })
     expect(calls[1]?.[1].mode).toBe('create')
     expect(calls[1]?.[1].viewId).not.toBe(VIEW_A)
     expect(calls[1]?.[1].directory).toBe(DIRECTORY_A)
     expect(calls[1]?.[1].claimId).not.toBe(calls[0]?.[1].claimId)
+    expect(service.closeIdeView).not.toHaveBeenCalled()
 
-    const recovery = JSON.parse(sessionStorage.getItem(IDE_TAB_SESSION_KEY) ?? '{}')
-      .recoveryByEnvironment[ENV_A] as IdeRecovery
-    expect(recovery.viewId).toBe(calls[1]?.[1].viewId)
-    expect(recovery.daemonInstanceId).toBe(DAEMON_A)
-    expect(localStorage.getItem(IDE_TAB_LAST_KEY)).toBeNull()
+    const recovery = sessionRecovery(ENV_A)
+    expect(recovery?.viewId).toBe(calls[1]?.[1].viewId)
+    expect(recovery?.daemonInstanceId).toBe(DAEMON_A)
   })
 
   it('requires an explicit open-new-view action after VIEW_GONE', async () => {
