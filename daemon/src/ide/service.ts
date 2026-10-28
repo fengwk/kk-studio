@@ -567,8 +567,13 @@ export async function createIdeService(
     const operation = (async (): Promise<IdeReply> => {
       const viewId = view.viewId
       const epoch = view.bindingEpoch
+      // A normal close that can still be rolled back must not abort streams until the bridge has
+      // accepted the final close. Discard, expiry and retry-after-failure are irreversible modes.
+      const rollbackableNormalClose = mode === 'normal' && !view.cleanupFailed
       try {
-        await waitForViewStreams(view)
+        if (!rollbackableNormalClose) {
+          await waitForViewStreams(view)
+        }
         if (views.get(viewId) !== view || view.bindingEpoch !== epoch) {
           return { ok: false, code: 'VIEW_GONE', message: 'view binding changed' }
         }
@@ -616,6 +621,14 @@ export async function createIdeService(
         }
         if (views.get(viewId) !== view || view.bindingEpoch !== epoch) {
           return { ok: false, code: 'VIEW_GONE', message: 'view binding changed' }
+        }
+        if (rollbackableNormalClose) {
+          // The bridge has now accepted the final close; only from this point is aborting the
+          // target view's data streams an accepted, irreversible cleanup step.
+          await waitForViewStreams(view)
+          if (views.get(viewId) !== view || view.bindingEpoch !== epoch) {
+            return { ok: false, code: 'VIEW_GONE', message: 'view binding changed' }
+          }
         }
         const serverMode: ManagedViewCloseMode = mode === 'normal' ? 'discard' : mode
         const result = await manager.closeView(viewId, epoch, serverMode, lifetime.signal)

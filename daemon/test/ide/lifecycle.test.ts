@@ -220,6 +220,8 @@ class FakeBridge implements IdeBridge {
   snapshotComplete = true
   connected = true
   dirty = true
+  closeViewResult?: BridgeResult
+  closeViewError?: Error
 
   assign(viewId: string, workspacePath: string, bindingEpoch = '1'): void {
     this.assignments.set(viewId, { workspacePath, bindingEpoch })
@@ -251,6 +253,12 @@ class FakeBridge implements IdeBridge {
     this.commands.push({ viewId, command, ...(options === undefined ? {} : { options }) })
     if (command.op === 'inspect') {
       return { ok: true, clean: !this.dirty }
+    }
+    if (command.op === 'closeView') {
+      if (this.closeViewError !== undefined) {
+        throw this.closeViewError
+      }
+      return this.closeViewResult ?? { ok: true }
     }
     if (command.op === 'snapshot') {
       return {
@@ -330,6 +338,34 @@ function boundCommand(
     bindingEpoch: state.bindingEpoch,
     ...extra,
   }
+}
+
+/** Models the data adapter: observing the abort releases the upstream after the stream stops. */
+function releaseWhenAborted(upstream: { signal: AbortSignal; release: () => void }): void {
+  upstream.signal.addEventListener(
+    'abort',
+    () => {
+      queueMicrotask(() => upstream.release())
+    },
+    { once: true },
+  )
+}
+
+async function openStreamingView() {
+  const context = await setup()
+  const viewId = randomUUID()
+  const documentId = randomUUID()
+  const opened = await context.service.handle(open(viewId, documentId, randomUUID(), context.project), signal())
+  expect(opened.ok).toBe(true)
+  const state = { viewId, documentId, bindingEpoch: opened.bindingEpoch as string }
+  const upstream = await context.service.resolveView(viewId, state.bindingEpoch, {
+    mode: 'HTTP',
+    method: 'GET',
+    path: '/',
+    headers: [],
+  })
+  releaseWhenAborted(upstream)
+  return { ...context, viewId, documentId, state, opened, upstream }
 }
 
 describe('managed IDE claim and tenant lifecycle', () => {
@@ -622,6 +658,112 @@ describe('managed IDE claim and tenant lifecycle', () => {
     expect(manager.closes[0]?.mode).toBe('discard')
     const bridgeClose = bridge.commands.find((entry) => entry.command.op === 'closeView')
     expect(bridgeClose?.command.discard).toBeUndefined()
+  })
+
+  it('keeps streams and binding when an inspection is clean but the final bridge close rejects', async () => {
+    const { service, manager, bridge, viewId, state, opened, upstream } = await openStreamingView()
+    bridge.dirty = false
+    bridge.closeViewResult = {
+      ok: false,
+      code: 'DIRTY',
+      message: 'save or discard unsaved changes before closing the view',
+    }
+
+    const rejected = await service.handle(boundCommand('CLOSE_VIEW', state, { discard: false }), signal())
+
+    expect(rejected).toMatchObject({ ok: false, code: 'DIRTY' })
+    expect(bridge.commands.filter((entry) => entry.command.op === 'inspect')).toHaveLength(1)
+    expect(service.getViewState(viewId)).toMatchObject({ state: 'OPEN', bindingEpoch: state.bindingEpoch })
+    expect(upstream.signal.aborted).toBe(false)
+    expect(service.activeStreamCount()).toBe(1)
+    expect(manager.closes).toHaveLength(0)
+    expect(bridge.isConnected(viewId, state.bindingEpoch)).toBe(true)
+    expect(await readFile(opened.workspacePath as string, 'utf8')).toContain('folders')
+
+    // The view stays admissible on the same epoch, while the original stream remains usable.
+    const reopened = await service.resolveView(viewId, state.bindingEpoch, {
+      mode: 'HTTP',
+      method: 'GET',
+      path: '/',
+      headers: [],
+    })
+    expect(reopened.signal.aborted).toBe(false)
+    reopened.release()
+    expect(service.activeStreamCount()).toBe(1)
+    upstream.release()
+    expect(service.activeStreamCount()).toBe(0)
+  })
+
+  it('preserves streams when the final bridge close throws or reports an unknown result', async () => {
+    const scenarios: Array<{ configure: (bridge: FakeBridge) => void }> = [
+      {
+        configure: (bridge) => {
+          bridge.closeViewError = new Error('bridge close timed out')
+        },
+      },
+      {
+        configure: (bridge) => {
+          bridge.closeViewResult = { ok: false, code: 'UNCONFIRMED', message: 'window state is unknown' }
+        },
+      },
+    ]
+    for (const scenario of scenarios) {
+      const { service, manager, bridge, viewId, state, opened, upstream } = await openStreamingView()
+      bridge.dirty = false
+      scenario.configure(bridge)
+
+      const rejected = await service.handle(boundCommand('CLOSE_VIEW', state, { discard: false }), signal())
+
+      expect(rejected).toMatchObject({ ok: false, code: 'UNAVAILABLE' })
+      expect(service.getViewState(viewId)).toMatchObject({ state: 'OPEN', bindingEpoch: state.bindingEpoch })
+      expect(upstream.signal.aborted).toBe(false)
+      expect(service.activeStreamCount()).toBe(1)
+      expect(manager.closes).toHaveLength(0)
+      expect(bridge.isConnected(viewId, state.bindingEpoch)).toBe(true)
+      expect(await readFile(opened.workspacePath as string, 'utf8')).toContain('folders')
+      upstream.release()
+    }
+  })
+
+  it('aborts only the accepted view stream and removes only its managed resources', async () => {
+    const { service, manager, bridge, project } = await setup()
+    bridge.dirty = false
+    const targetId = randomUUID()
+    const targetDocument = randomUUID()
+    const otherId = randomUUID()
+    const targetOpened = await service.handle(open(targetId, targetDocument, randomUUID(), project), signal())
+    const otherOpened = await service.handle(open(otherId, randomUUID(), randomUUID(), project), signal())
+    const targetState = { viewId: targetId, documentId: targetDocument, bindingEpoch: targetOpened.bindingEpoch as string }
+    const otherEpoch = otherOpened.bindingEpoch as string
+    const targetStream = await service.resolveView(targetId, targetState.bindingEpoch, {
+      mode: 'HTTP',
+      method: 'GET',
+      path: '/',
+      headers: [],
+    })
+    const otherStream = await service.resolveView(otherId, otherEpoch, {
+      mode: 'HTTP',
+      method: 'GET',
+      path: '/',
+      headers: [],
+    })
+    releaseWhenAborted(targetStream)
+
+    const closed = await service.handle(boundCommand('CLOSE_VIEW', targetState, { discard: false }), signal())
+
+    expect(closed).toMatchObject({ ok: true, viewId: targetId })
+    expect(targetStream.signal.aborted).toBe(true)
+    expect(otherStream.signal.aborted).toBe(false)
+    expect(service.activeStreamCount()).toBe(1)
+    expect(service.getViewState(targetId)).toBeNull()
+    expect(service.getViewState(otherId)).toMatchObject({ state: 'OPEN', bindingEpoch: otherEpoch })
+    expect(manager.closes).toEqual([{ viewId: targetId, bindingEpoch: targetState.bindingEpoch, mode: 'discard' }])
+    expect(bridge.isConnected(targetId, targetState.bindingEpoch)).toBe(false)
+    expect(bridge.isConnected(otherId, otherEpoch)).toBe(true)
+    expect(await readFile(targetOpened.workspacePath as string, 'utf8').catch(() => null)).toBeNull()
+    expect(await readFile(otherOpened.workspacePath as string, 'utf8')).toContain('folders')
+    otherStream.release()
+    expect(service.activeStreamCount()).toBe(0)
   })
 
   it('snapshots ordinary dirty text privately on expiry and restores it into a new binding', async () => {
