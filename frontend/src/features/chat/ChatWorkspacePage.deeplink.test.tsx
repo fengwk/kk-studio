@@ -3,7 +3,6 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider, useLocation, useNavigate } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { IdeLifecycleProvider } from '@/features/environment/ide/IdeLifecycleProvider'
 import { ChatWorkspacePage } from './ChatWorkspacePage'
 import type { ChatWorkspacePane } from './ChatWorkspacePane'
 import {
@@ -73,10 +72,10 @@ function openWorkspace(search = '') {
       {
         path: '/chats/:chatId',
         element: (
-          <IdeLifecycleProvider>
+          <>
             <NavigationControls />
             <ChatWorkspacePage />
-          </IdeLifecycleProvider>
+          </>
         ),
       },
     ],

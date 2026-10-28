@@ -15,8 +15,8 @@ import {
 import { usePaneTarget } from '@/features/chat/runtime/usePaneTarget'
 import { useThreadProjection } from '@/features/chat/runtime/useThreadProjection'
 import { isBoundTarget, samePaneTarget } from '@/features/chat/runtime/agent-pane'
-import { createUuid, isCanonicalUuid } from '@/shared/lib/uuid'
-import { IdeOverlayPanel, type IdeCommandAction, type ResolvedEnvironmentInfo } from '@/features/environment/ide/IdeOverlayPanel'
+import { isCanonicalUuid } from '@/shared/lib/uuid'
+import { useOptionalIdePanel, type IdeEnvironmentInfo } from '@/features/environment/ide/ide-panel-context'
 import type { AgentPaneCapabilities, AgentPaneDefaults, BranchRequestInput, PaneReport } from '@/features/chat/runtime/root-thread/types'
 import type { AgentRuntimeOwnerDTO } from '@/shared/api/contracts/ai-runtime'
 import type { PaneTarget } from '@/features/chat/runtime/agent-pane'
@@ -52,7 +52,6 @@ export function AgentPane({
   onRequestBranch,
   onReport,
   onPresentation,
-  onIdeMounted,
 }: {
   owner?: AgentRuntimeOwnerDTO
   paneId: string
@@ -74,17 +73,10 @@ export function AgentPane({
   /** 面板运行时摘要上报；只读路径由本组件按投影派生。 */
   onReport?: (report: PaneReport) => void
   onPresentation?: (report: ThreadPresentation | null) => void
-  onIdeMounted?: (mounted: boolean) => void
 }) {
   const paneSectionRef = useRef<HTMLElement | null>(null)
   const { t } = useI18n()
-
-  // 每个前端 pane 挂载分配随机 UUID viewId，不用固定 pane-1 作为跨 tab 身份
-  const [viewId] = useState(() => createUuid())
-
-  const [ideOpen, setIdeOpen] = useState(false)
-  const [ideAction, setIdeAction] = useState<IdeCommandAction | null>(null)
-  const ideActionIdRef = useRef(0)
+  const idePanel = useOptionalIdePanel()
   const [layoutMode, setLayoutMode] = useState<'wide' | 'narrow'>('wide')
 
   useEffect(() => {
@@ -105,23 +97,6 @@ export function AgentPane({
     observer.observe(el)
     return () => observer.disconnect()
   }, [])
-
-  const handleOpenIde = useCallback(
-    (options: { mode: 'files' | 'shell' }) => {
-      ideActionIdRef.current += 1
-      setIdeAction({ id: ideActionIdRef.current, mode: options.mode })
-      setIdeOpen(true)
-      onFocus?.()
-    },
-    [onFocus],
-  )
-
-  const handleIdeMountedChange = useCallback(
-    (mounted: boolean) => {
-      onIdeMounted?.(mounted)
-    },
-    [onIdeMounted],
-  )
 
   const { target, targetRef, setTarget } = usePaneTarget({
     initialTarget: initialTarget
@@ -233,7 +208,7 @@ export function AgentPane({
     ? environments.find((env) => env.name === activeLayerEnvironmentName) ?? null
     : null
 
-  const resolvedEnvironment: ResolvedEnvironmentInfo | null = useMemo(() => {
+  const resolvedEnvironment: IdeEnvironmentInfo | null = useMemo(() => {
     if (matchedEnvCard == null || !isCanonicalUuid(matchedEnvCard.id)) {
       return null
     }
@@ -241,14 +216,19 @@ export function AgentPane({
       id: matchedEnvCard.id,
       name: matchedEnvCard.name,
       ready: matchedEnvCard.ready,
-      homeDirectory: matchedEnvCard.homeDirectory,
     }
   }, [matchedEnvCard])
 
-  const handleCloseIde = useCallback(() => {
-    setIdeOpen(false)
-    handleIdeMountedChange(false)
-  }, [handleIdeMountedChange])
+  const handleOpenIde = useCallback(
+    (options: { mode: 'files' | 'shell' }) => {
+      onFocus?.()
+      idePanel?.openEnvironment({
+        environment: resolvedEnvironment,
+        mode: options.mode,
+      })
+    },
+    [idePanel, onFocus, resolvedEnvironment],
+  )
 
   // 只有根面板能接管 pane 内导航；只读路径不提供接管者（ThreadLink 保留独立地址）。
   return (
@@ -340,21 +320,6 @@ export function AgentPane({
             />
           </div>
         ))}
-        <IdeOverlayPanel
-          isOpen={ideOpen}
-          viewId={viewId}
-          paneId={paneId}
-          environment={resolvedEnvironment}
-          availableEnvironments={environments}
-          action={ideAction}
-          isNarrow={layoutMode === 'narrow'}
-          onCollapse={() => setIdeOpen(false)}
-          onClose={handleCloseIde}
-          onRestoreFocus={() => {
-            visiblePresentation?.act(visiblePresentation.viewKey, 'restore-focus')
-          }}
-          onIdeMountedChange={handleIdeMountedChange}
-        />
       </section>
     </ThreadNavigationContext.Provider>
   )

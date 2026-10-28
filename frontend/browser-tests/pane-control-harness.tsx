@@ -5,7 +5,6 @@ import { createBrowserRouter, RouterProvider, Route, Routes, useNavigate } from 
 import '@/styles.css'
 import { setLocale } from '@/shared/i18n'
 import { ApplicationEventProvider } from '@/shared/app-events'
-import { IdeLifecycleProvider } from '@/features/environment/ide/IdeLifecycleProvider'
 import { AgentPane } from '@/features/chat/runtime/AgentPane'
 import { ThreadWorkspacePage } from '@/features/chat/thread/ThreadWorkspacePage'
 import type { AgentDefinitionDTO } from '@/shared/api/generated/contracts'
@@ -87,7 +86,7 @@ function PaneControlRoutes() {
 
 const router = createBrowserRouter([{
   path: '*',
-  element: <IdeLifecycleProvider><PaneControlRoutes /></IdeLifecycleProvider>,
+  element: <PaneControlRoutes />,
 }])
 
 export function PaneControlHarnessApp() {

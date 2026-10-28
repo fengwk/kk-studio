@@ -143,93 +143,94 @@ describe('environmentService', () => {
     expect(result).toEqual(card)
   })
 
-  it('creates an ide view via POST /environments/{id}/ide/views', async () => {
+  it('opens or resumes an ide view with the full binding identity', async () => {
     const environmentId = 'a1000000-0000-4000-8000-000000000001'
+    const viewId = 'c1000000-0000-4000-8000-000000000001'
+    const request = {
+      viewId,
+      documentId: 'd1000000-0000-4000-8000-000000000001',
+      eventNodeId: 'e1000000-0000-4000-8000-000000000001',
+      connectionId: 'f1000000-0000-4000-8000-000000000001',
+      claimId: '91000000-0000-4000-8000-000000000001',
+      mode: 'resume',
+    }
     const view = {
-      viewId: 'v-1',
+      ...request,
       environmentId,
+      daemonInstanceId: '92000000-0000-4000-8000-000000000001',
+      bindingEpoch: '7',
       directory: '/home/user/workspace',
-      entryUrl: `/environment-ide/${environmentId}/__ide/bootstrap?token=xyz`,
+      workspacePath: '/home/user/workspace',
+      state: 'OPEN',
+      entryUrl: `/environment-ide/${environmentId}/${viewId}/__ide/bootstrap?token=xyz`,
     }
     const client = createMockHttpClient()
     client.post.mockResolvedValue(view)
     const service = createEnvironmentService(client)
-    const result = await service.createIdeView(environmentId, { viewId: 'v-1' })
-    expect(client.post).toHaveBeenCalledWith(`/environments/${environmentId}/ide/views`, { viewId: 'v-1' })
+    const result = await service.openIdeView(environmentId, request)
+    expect(client.post).toHaveBeenCalledWith(`/environments/${environmentId}/ide/views`, request)
     expect(result).toEqual(view)
   })
 
-  it('changes ide view directory via PUT /environments/{id}/ide/views/{viewId}/directory', async () => {
+  it('changes ide view directory with the current document and binding epoch', async () => {
     const updated = {
-      viewId: 'v-1',
-      environmentId: 'env-1',
+      viewId: 'c1000000-0000-4000-8000-000000000001',
+      environmentId: 'a1000000-0000-4000-8000-000000000001',
+      documentId: 'd1000000-0000-4000-8000-000000000001',
+      eventNodeId: 'e1000000-0000-4000-8000-000000000001',
+      connectionId: 'f1000000-0000-4000-8000-000000000001',
+      claimId: '91000000-0000-4000-8000-000000000001',
+      daemonInstanceId: '92000000-0000-4000-8000-000000000001',
+      bindingEpoch: '8',
       directory: '/new/path',
+      workspacePath: '/new/path',
+      state: 'OPEN',
       entryUrl: null,
+    }
+    const binding = {
+      documentId: updated.documentId,
+      bindingEpoch: '7',
+      directory: '/new/path',
     }
     const client = createMockHttpClient()
     client.put.mockResolvedValue(updated)
     const service = createEnvironmentService(client)
-    const result = await service.changeIdeViewDirectory('env-1', 'v-1', { directory: '/new/path' })
-    expect(client.put).toHaveBeenCalledWith('/environments/env-1/ide/views/v-1/directory', {
-      directory: '/new/path',
-    })
+    const result = await service.changeIdeViewDirectory('env-1', updated.viewId, binding)
+    expect(client.put).toHaveBeenCalledWith(
+      `/environments/env-1/ide/views/${updated.viewId}/directory`,
+      binding,
+    )
     expect(result).toEqual(updated)
   })
 
-  it('opens an ide view terminal via POST /environments/{id}/ide/views/{viewId}/terminal', async () => {
+  it('opens an ide view terminal with the current binding identity', async () => {
+    const binding = {
+      documentId: 'd1000000-0000-4000-8000-000000000001',
+      bindingEpoch: '7',
+    }
     const client = createMockHttpClient()
     client.post.mockResolvedValue(undefined)
     const service = createEnvironmentService(client)
-    await service.openIdeViewTerminal('env-1', 'v-1')
-    expect(client.post).toHaveBeenCalledWith('/environments/env-1/ide/views/v-1/terminal')
+    await service.openIdeViewTerminal('env-1', 'c1000000-0000-4000-8000-000000000001', binding)
+    expect(client.post).toHaveBeenCalledWith(
+      '/environments/env-1/ide/views/c1000000-0000-4000-8000-000000000001/terminal',
+      binding,
+    )
   })
 
-  it('closes an ide view via DELETE /environments/{id}/ide/views/{viewId}', async () => {
+  it('closes an ide view with an explicit discard flag in the DELETE body', async () => {
+    const binding = {
+      documentId: 'd1000000-0000-4000-8000-000000000001',
+      bindingEpoch: '7',
+      discard: true,
+    }
     const client = createMockHttpClient()
     client.delete.mockResolvedValue(undefined)
     const service = createEnvironmentService(client)
-    await service.closeIdeView('env-1', 'v-1')
-    expect(client.delete).toHaveBeenCalledWith('/environments/env-1/ide/views/v-1')
-  })
-
-  it('probes the ide session with same-origin no-store fetch and reports its status', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ status: 401 })
-    vi.stubGlobal('fetch', fetchMock)
-    const signal = new AbortController().signal
-
-    const status = await createEnvironmentService(createMockHttpClient())
-      .probeIdeSession('/studio/environment-ide/env-1/__ide/session', signal)
-
-    expect(status).toBe(401)
-    expect(fetchMock).toHaveBeenCalledWith('/studio/environment-ide/env-1/__ide/session', {
-      method: 'GET',
-      credentials: 'same-origin',
-      cache: 'no-store',
-      signal,
-    })
-  })
-
-  it('treats an ide session probe network failure as unknown without retrying', async () => {
-    const fetchMock = vi.fn().mockRejectedValue(new TypeError('network down'))
-    vi.stubGlobal('fetch', fetchMock)
-
-    const status = await createEnvironmentService(createMockHttpClient())
-      .probeIdeSession('/environment-ide/env-1/__ide/session')
-
-    expect(status).toBeNull()
-    expect(fetchMock).toHaveBeenCalledOnce()
-  })
-
-  it('releases an ide view with a keepalive DELETE on page hide', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ status: 204 })
-    vi.stubGlobal('fetch', fetchMock)
-
-    await createEnvironmentService(createMockHttpClient()).closeIdeViewKeepalive('env/a', 'v/1')
-
-    expect(fetchMock).toHaveBeenCalledWith('/api/environments/env%2Fa/ide/views/v%2F1', {
-      method: 'DELETE',
-      credentials: 'same-origin',
-      keepalive: true,
-    })
+    await service.closeIdeView('env/a', 'c1000000-0000-4000-8000-000000000001', binding)
+    expect(client.delete).toHaveBeenCalledWith(
+      '/environments/env%2Fa/ide/views/c1000000-0000-4000-8000-000000000001',
+      { data: binding },
+    )
   })
 })

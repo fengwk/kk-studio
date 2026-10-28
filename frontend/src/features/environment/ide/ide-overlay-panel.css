@@ -1,23 +1,24 @@
 .ide-overlay-panel {
-  position: absolute;
+  position: fixed;
   top: 0;
   right: 0;
   bottom: 0;
-  z-index: var(--z-raised);
+  z-index: var(--z-sticky);
   display: flex;
   flex-direction: column;
   background: var(--surface);
   border-left: 1px solid var(--border);
   box-shadow: var(--shadow-drawer);
-  width: min(640px, 60%);
+  width: min(720px, 60vw);
   max-width: 100%;
   overflow: hidden;
 }
 
-.ide-overlay-panel[data-layout='narrow'],
-.chat-pane[data-pane-layout='narrow'] .ide-overlay-panel {
-  width: 100%;
-  border-left: none;
+@media (max-width: 760px) {
+  .ide-overlay-panel {
+    width: 100%;
+    border-left: none;
+  }
 }
 
 .ide-overlay-panel[hidden] {
@@ -42,6 +43,11 @@
   flex: 1 1 0;
   min-width: 0;
   overflow: hidden;
+}
+
+.ide-toolbar-info .ide-environment-selector {
+  flex: 0 1 220px;
+  min-width: 120px;
 }
 
 .ide-toolbar-title {
@@ -100,6 +106,24 @@
   display: flex;
   flex-direction: column;
   position: relative;
+  overflow: hidden;
+}
+
+.ide-global-view-stack {
+  position: absolute;
+  inset: 0;
+}
+
+.ide-global-view {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.ide-global-view[hidden] {
+  display: none !important;
 }
 
 .ide-panel-iframe {
@@ -122,8 +146,29 @@
   color: var(--fg-muted);
 }
 
+.ide-panel-body > .ide-panel-state,
+.ide-global-view > .ide-panel-state {
+  position: absolute;
+  inset: 0;
+  background: var(--surface);
+}
+
+.ide-panel-state.is-warning {
+  color: var(--warning, var(--fg-muted));
+}
+
+.ide-panel-state.is-error,
 .ide-panel-state.error {
   color: var(--danger);
+}
+
+.ide-select-env-row {
+  width: min(320px, 100%);
+}
+
+.ide-state-muted {
+  color: var(--fg-muted);
+  font-size: var(--font-size-sm);
 }
 
 .ide-directory-form {
@@ -149,6 +194,14 @@
   justify-content: flex-end;
   gap: 8px;
   margin-top: 8px;
+}
+
+.ide-panel-warning-banner {
+  padding: 6px 12px;
+  background: var(--surface-hover);
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+  border-bottom: 1px solid var(--border);
 }
 
 .ide-panel-terminal-error {

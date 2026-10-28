@@ -1,48 +1,51 @@
+/* eslint-disable react-refresh/only-export-components */
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { createMemoryRouter, RouterProvider } from 'react-router'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import '@/styles.css'
-import '@/features/environment/ide/ide-overlay-panel.css'
+import { useApplicationEventIdentity, useApplicationEvents, ApplicationEventProvider } from '@/shared/app-events'
 import { setLocale } from '@/shared/i18n'
-import { IdeLifecycleProvider } from '@/features/environment/ide/IdeLifecycleProvider'
-import { IdeOverlayPanel, type IdeCommandAction, type ResolvedEnvironmentInfo } from '@/features/environment/ide/IdeOverlayPanel'
 import { Button } from '@/shared/ui/controls/Button'
+import { IdePanelProvider } from '@/features/environment/ide/IdePanelProvider'
+import { useIdePanel } from '@/features/environment/ide/ide-panel-context'
 import type { EnvironmentCardDTO } from '@/shared/api/generated/contracts'
 
 setLocale('zh-CN')
 
 /**
- * 声明：此基座仅供 UI 响应式布局与 iframe 节点生命周期保活验证。
- * 所使用的 API 拦截与 iframe 页面皆为轻量 UI fixture，不证明后端真实 code-server 接入或脏稿协议；
- * 容器内 mock composer 仅为辅助 DOM 挂载探针，不声称真实 AgentPane 端到端回归已完成。
+ * 全局面板浏览器基座。真实挂载 ApplicationEventProvider 与 IdePanelProvider；
+ * WS/HTTP/iframe 全由 Playwright 路由提供，不启动后端或 code-server。
  */
-export const HARNESS_ENV_ID = 'e1000000-0000-4000-8000-000000000001'
-export const PANE_1_VIEW_ID = 'c1000000-0000-4000-8000-000000000001'
-export const PANE_2_VIEW_ID = 'c2000000-0000-4000-8000-000000000002'
+export const ENV_A = 'a1000000-0000-4000-8000-000000000001'
+export const ENV_B = 'a1000000-0000-4000-8000-000000000002'
 
-const TEST_ENV: ResolvedEnvironmentInfo = {
-  id: HARNESS_ENV_ID,
-  name: 'Isolated Dev Node',
+export const CARD_A: EnvironmentCardDTO = {
+  id: ENV_A,
+  name: 'local-node',
   ready: true,
-  homeDirectory: '/workspace/project',
+  status: 'READY',
+  version: '1',
+  createTime: 1790812800,
+  updateTime: 1790812800,
+  capabilities: [],
+  statusExpiresAt: null,
+  lastSeen: null,
+  homeDirectory: '/workspace/a',
 }
 
-const AVAILABLE_ENVS: EnvironmentCardDTO[] = [
-  {
-    id: HARNESS_ENV_ID,
-    name: 'Isolated Dev Node',
-    ready: true,
-    status: 'READY',
-    version: '1',
-    createTime: 1790812800,
-    updateTime: 1790812800,
-    capabilities: [],
-    statusExpiresAt: null,
-    lastSeen: null,
-    homeDirectory: '/workspace/project',
-  },
-]
+export const CARD_B: EnvironmentCardDTO = {
+  id: ENV_B,
+  name: 'remote-node',
+  ready: true,
+  status: 'READY',
+  version: '1',
+  createTime: 1790812800,
+  updateTime: 1790812800,
+  capabilities: [],
+  statusExpiresAt: null,
+  lastSeen: null,
+  homeDirectory: '/workspace/b',
+}
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -53,231 +56,114 @@ const queryClient = new QueryClient({
   },
 })
 
-export function IdeHarnessApp() {
-  const [environmentReady, setEnvironmentReady] = useState<boolean>(true)
-  const [pane1Width, setPane1Width] = useState<number>(1000)
-  const [pane1Narrow, setPane1Narrow] = useState<boolean>(false)
-  const [pane1Open, setPane1Open] = useState<boolean>(false)
-  const [pane1Action, setPane1Action] = useState<IdeCommandAction | null>(null)
-
-  const [pane2Width, setPane2Width] = useState<number>(1000)
-  const [pane2Narrow, setPane2Narrow] = useState<boolean>(false)
-  const [pane2Open, setPane2Open] = useState<boolean>(false)
-  const [pane2Action, setPane2Action] = useState<IdeCommandAction | null>(null)
-
-  const environment: ResolvedEnvironmentInfo = { ...TEST_ENV, ready: environmentReady }
+function Harness() {
+  const { openEnvironment } = useIdePanel()
+  const identity = useApplicationEventIdentity()
+  const events = useApplicationEvents()
+  const [pane1Draft, setPane1Draft] = useState('pane 1 initial text')
+  const [pane2Draft, setPane2Draft] = useState('pane 2 initial text')
 
   return (
     <div className="harness-container" data-testid="ide-harness-root">
       <div className="harness-controls">
-        <span style={{ fontWeight: 600 }}>IDE Overlay UI Test Controls</span>
+        <span style={{ fontWeight: 600 }}>Global IDE Panel Harness</span>
+        <span data-testid="harness-event-status" data-connected={identity != null ? 'true' : 'false'}>
+          {identity != null ? 'connected' : 'reconnecting'}
+        </span>
         <Button
           size="compact"
           variant="ghost"
-          data-testid="p1-set-wide"
+          data-testid="disconnect-events"
           onClick={() => {
-            setPane1Width(1000)
-            setPane1Narrow(false)
+            events.disconnect()
+            window.setTimeout(() => events.connect(), 250)
           }}
         >
-          P1 宽桌面 (1000px)
-        </Button>
-        <Button
-          size="compact"
-          variant="ghost"
-          data-testid="p1-set-narrow"
-          onClick={() => {
-            setPane1Width(360)
-            setPane1Narrow(true)
-          }}
-        >
-          P1 窄屏 (360px)
-        </Button>
-        <Button
-          size="compact"
-          variant="primary"
-          data-testid="p1-open-btn"
-          onClick={() => {
-            setPane1Open(true)
-            setPane1Action({ id: Date.now(), mode: 'files' })
-          }}
-        >
-          打开 P1
-        </Button>
-        <Button
-          size="compact"
-          variant="ghost"
-          data-testid="p1-collapse-btn"
-          onClick={() => setPane1Open(false)}
-        >
-          收起 P1
-        </Button>
-        <Button
-          size="compact"
-          variant="ghost"
-          data-testid="p1-restore-btn"
-          onClick={() => setPane1Open(true)}
-        >
-          恢复 P1
-        </Button>
-
-        <span style={{ borderLeft: '1px solid rgba(255,255,255,0.2)', height: 20, margin: '0 8px' }} />
-
-        <Button
-          size="compact"
-          variant="ghost"
-          data-testid="ide-set-environment-offline"
-          onClick={() => setEnvironmentReady(false)}
-        >
-          环境离线
-        </Button>
-        <Button
-          size="compact"
-          variant="ghost"
-          data-testid="ide-set-environment-ready"
-          onClick={() => setEnvironmentReady(true)}
-        >
-          环境就绪
-        </Button>
-
-        <span style={{ borderLeft: '1px solid rgba(255,255,255,0.2)', height: 20, margin: '0 8px' }} />
-
-        <Button
-          size="compact"
-          variant="ghost"
-          data-testid="p2-set-wide"
-          onClick={() => {
-            setPane2Width(1000)
-            setPane2Narrow(false)
-          }}
-        >
-          P2 宽桌面 (1000px)
-        </Button>
-        <Button
-          size="compact"
-          variant="ghost"
-          data-testid="p2-set-narrow"
-          onClick={() => {
-            setPane2Width(360)
-            setPane2Narrow(true)
-          }}
-        >
-          P2 窄屏 (360px)
-        </Button>
-        <Button
-          size="compact"
-          variant="primary"
-          data-testid="p2-open-btn"
-          onClick={() => {
-            setPane2Open(true)
-            setPane2Action({ id: Date.now(), mode: 'files' })
-          }}
-        >
-          打开 P2
-        </Button>
-        <Button
-          size="compact"
-          variant="ghost"
-          data-testid="p2-collapse-btn"
-          onClick={() => setPane2Open(false)}
-        >
-          收起 P2
-        </Button>
-        <Button
-          size="compact"
-          variant="ghost"
-          data-testid="p2-restore-btn"
-          onClick={() => setPane2Open(true)}
-        >
-          恢复 P2
+          断开并重连事件
         </Button>
       </div>
 
       <div className="harness-panes">
-        <div
-          className="test-chat-pane"
-          data-testid="test-pane-1"
-          data-pane-id="pane-1"
-          data-pane-layout={pane1Narrow ? 'narrow' : 'wide'}
-          style={{ width: `${pane1Width}px`, height: '100%', flexShrink: 0 }}
-        >
+        <div className="test-chat-pane" data-testid="test-pane-1" data-pane-id="pane-1" style={{ flex: 1 }}>
           <div className="test-chat-pane-body">
             <h3>Pane 1</h3>
-            <p>UI 隔离探针：验证主 Pane DOM 节点在 Overlay 打开时保留。</p>
+            <p>全局 IDE 不属于 pane；此输入在面板打开、切换环境时保持挂载。</p>
+            <Button
+              size="compact"
+              variant="primary"
+              data-testid="pane-1-open-a"
+              onClick={() => openEnvironment({
+                environment: { id: CARD_A.id, name: CARD_A.name, ready: CARD_A.ready },
+                mode: 'files',
+              })}
+            >
+              打开环境 A
+            </Button>
             <div className="test-pane-composer">
               <textarea
                 data-testid="composer-input-pane-1"
-                placeholder="Pane 1 Composer Draft"
-                defaultValue="pane 1 initial text"
+                value={pane1Draft}
+                onChange={(event) => setPane1Draft(event.target.value)}
               />
             </div>
           </div>
-          <IdeOverlayPanel
-            isOpen={pane1Open}
-            viewId={PANE_1_VIEW_ID}
-            paneId="pane-1"
-            environment={environment}
-            availableEnvironments={AVAILABLE_ENVS}
-            action={pane1Action}
-            isNarrow={pane1Narrow}
-            onCollapse={() => setPane1Open(false)}
-            onClose={() => setPane1Open(false)}
-          />
         </div>
 
-        <div
-          className="test-chat-pane"
-          data-testid="test-pane-2"
-          data-pane-id="pane-2"
-          data-pane-layout={pane2Narrow ? 'narrow' : 'wide'}
-          style={{ width: `${pane2Width}px`, height: '100%', flexShrink: 0 }}
-        >
+        <div className="test-chat-pane" data-testid="test-pane-2" data-pane-id="pane-2" style={{ flex: 1 }}>
           <div className="test-chat-pane-body">
             <h3>Pane 2</h3>
-            <p>UI 隔离探针：验证双 Pane 独立 viewId 与状态不串扰。</p>
+            <p>同一 tab 的第二个环境入口仍打开同一个全局面板。</p>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Button
+                size="compact"
+                variant="primary"
+                data-testid="pane-2-open-b"
+                onClick={() => openEnvironment({
+                  environment: { id: CARD_B.id, name: CARD_B.name, ready: CARD_B.ready },
+                  mode: 'files',
+                })}
+              >
+                打开环境 B
+              </Button>
+              <Button
+                size="compact"
+                variant="ghost"
+                data-testid="pane-2-open-b-shell"
+                onClick={() => openEnvironment({
+                  environment: { id: CARD_B.id, name: CARD_B.name, ready: CARD_B.ready },
+                  mode: 'shell',
+                })}
+              >
+                打开 B 终端
+              </Button>
+            </div>
             <div className="test-pane-composer">
               <textarea
                 data-testid="composer-input-pane-2"
-                placeholder="Pane 2 Composer Draft"
-                defaultValue="pane 2 initial text"
+                value={pane2Draft}
+                onChange={(event) => setPane2Draft(event.target.value)}
               />
             </div>
           </div>
-          <IdeOverlayPanel
-            isOpen={pane2Open}
-            viewId={PANE_2_VIEW_ID}
-            paneId="pane-2"
-            environment={environment}
-            availableEnvironments={AVAILABLE_ENVS}
-            action={pane2Action}
-            isNarrow={pane2Narrow}
-            onCollapse={() => setPane2Open(false)}
-            onClose={() => setPane2Open(false)}
-          />
         </div>
       </div>
     </div>
   )
 }
 
-function HarnessAppWithProviders() {
+function HarnessApp() {
   return (
     <QueryClientProvider client={queryClient}>
-      <IdeLifecycleProvider>
-        <IdeHarnessApp />
-      </IdeLifecycleProvider>
+      <ApplicationEventProvider>
+        <IdePanelProvider>
+          <Harness />
+        </IdePanelProvider>
+      </ApplicationEventProvider>
     </QueryClientProvider>
   )
 }
 
-const router = createMemoryRouter([
-  {
-    path: '*',
-    element: <HarnessAppWithProviders />,
-  },
-])
-
 const rootEl = document.getElementById('root')
 if (rootEl) {
-  createRoot(rootEl).render(<RouterProvider router={router} />)
+  createRoot(rootEl).render(<HarnessApp />)
 }
