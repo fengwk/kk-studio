@@ -125,6 +125,27 @@ class DaemonIdeCodecTest {
   }
 
   @Test
+  void decodesDirectoryAcknowledgementAndRejectsMalformedDirectory() {
+    // The value on the wire is the daemon-confirmed directory, not the browser request.
+    String reply = "{\"ok\":true,\"viewId\":\"" + VIEW + "\",\"directory\":\"/canonical/project\"}";
+    IdeReply decoded = codec.decodeReply(reply);
+    assertEquals(UUID.fromString(VIEW), decoded.viewId());
+    assertEquals("/canonical/project", decoded.directory());
+    assertEquals(decoded, codec.decodeReply(codec.encodeReply(decoded)));
+    assertThrows(
+        DaemonProtocolException.class,
+        () -> codec.decodeReply("{\"ok\":true,\"viewId\":\"" + VIEW + "\",\"directory\":42}"));
+    assertThrows(
+        DaemonProtocolException.class,
+        () -> codec.decodeReply("{\"ok\":true,\"viewId\":\"" + VIEW + "\",\"directory\":\"\"}"));
+    assertThrows(
+        DaemonProtocolException.class,
+        () ->
+            codec.decodeReply(
+                "{\"ok\":true,\"viewId\":\"" + VIEW + "\",\"directory\":\"/bad\\npath\"}"));
+  }
+
+  @Test
   void rejectsUnknownFieldsDuplicateKeysAndTrailingContent() {
     String base =
         "{\"action\":\"OPEN_VIEW\",\"viewId\":\""

@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { randomUUID } from 'node:crypto'
-import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import type {
   DaemonConfig,
   IdeCommand,
@@ -388,7 +388,30 @@ describe('managed IDE claim and tenant lifecycle', () => {
     expect(decodeIdeReply(encodeIdeReply(listed))).toEqual(listed)
   })
 
-  it.each(['CHANGE_DIRECTORY', 'FOCUS_TERMINAL', 'DETACH_VIEW', 'CLOSE_VIEW'] as const)(
+  it('round-trips the actual CHANGE_DIRECTORY service reply with its confirmed canonical directory', async () => {
+    const { service, bridge, project } = await setup()
+    const viewId = randomUUID()
+    const documentId = randomUUID()
+    const opened = await service.handle(open(viewId, documentId, randomUUID(), project), signal())
+    expect(opened.ok).toBe(true)
+    const requested = `${project}${sep}.`
+    const confirmed = await realpath(project)
+    expect(requested).not.toBe(confirmed)
+    const reply = await service.handle(
+      boundCommand('CHANGE_DIRECTORY', { viewId, documentId, bindingEpoch: opened.bindingEpoch as string }, {
+        directory: requested,
+      }),
+      signal(),
+    )
+    // The service sends the realpath to the bridge, not the browser-supplied spelling.
+    expect(bridge.commands.at(-1)?.command).toEqual({ op: 'changeDirectory', directory: confirmed })
+    const encoded = encodeIdeReply(reply)
+    expect(decodeIdeReply(encoded)).toEqual({ ok: true, viewId, directory: confirmed })
+    expect(JSON.parse(encoded)).toEqual({ ok: true, viewId, directory: confirmed })
+    expect(service.getViewState(viewId)?.directory).toBe(confirmed)
+  })
+
+  it.each(['FOCUS_TERMINAL', 'DETACH_VIEW', 'CLOSE_VIEW'] as const)(
     'round-trips the actual %s service command acknowledgement',
     async (action) => {
       const { service, project } = await setup()
@@ -396,10 +419,7 @@ describe('managed IDE claim and tenant lifecycle', () => {
       const documentId = randomUUID()
       const opened = await service.handle(open(viewId, documentId, randomUUID(), project), signal())
       const state = { viewId, documentId, bindingEpoch: opened.bindingEpoch as string }
-      const reply = await service.handle(
-        boundCommand(action, state, { directory: project, discard: true }),
-        signal(),
-      )
+      const reply = await service.handle(boundCommand(action, state, action === 'CLOSE_VIEW' ? { discard: true } : {}), signal())
       expect(reply).toEqual({ ok: true, viewId })
       expect(decodeIdeReply(JSON.stringify(reply))).toEqual(reply)
       expect(decodeIdeReply(encodeIdeReply(reply))).toEqual(reply)

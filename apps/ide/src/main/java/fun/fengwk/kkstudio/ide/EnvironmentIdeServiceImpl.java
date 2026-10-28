@@ -238,7 +238,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
       throw rejection(result.reply());
     }
     requireReplyView(result.reply(), parsedViewId);
-    String confirmed = result.reply().directory() == null ? directory : result.reply().directory();
+    String confirmed = requirePath(result.reply().directory(), "directory");
     if (!bindings.updateDirectory(
         environmentId, parsedViewId, documentId, bindingEpoch, confirmed)) {
       throw viewGone();
