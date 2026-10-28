@@ -214,7 +214,7 @@ vi.mock('@/shared/api/agent-service', () => ({
 vi.mock('@/shared/api/environment-service', () => ({
   environmentService: {
     listEnvironments: vi.fn(),
-    getEnvironmentUpdate: vi.fn(),
+    getEnvironmentRuntime: vi.fn(),
     startEnvironmentUpdate: vi.fn(),
     createIdeView: vi.fn().mockResolvedValue({}),
     changeIdeViewDirectory: vi.fn().mockResolvedValue({}),
