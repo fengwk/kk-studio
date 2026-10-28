@@ -27,8 +27,8 @@
 # 锁定清单里的预编译成品（koffi 运行时直接 require `@koromix/koffi-<os>-<arch>`，不依赖脚本
 # 产物），所以目标平台的生命周期脚本一律不在构建宿主上执行。
 #
-# code-server 只来自 `runtime-manifest.json` 里冻结的 GitHub Release（fengwk/code-server 的
-# `v4.141.0-kk.1`）。清单里的 URL 与 SHA256 在构建期原样使用；本脚本不查询 latest、不回退官方
+# code-server 只来自 `runtime-manifest.json` 里冻结的 fengwk/code-server GitHub Release；
+# 清单里的版本、URL 与 SHA256 在构建期原样使用。本脚本不查询 latest、不回退官方
 # coder/code-server 归档，也不在缺少正式摘要时编造哈希。
 #
 # 暂存资产（输出目录每次整体重建，因此每次恰好只包含下列五个文件）：
