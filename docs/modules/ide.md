@@ -19,6 +19,17 @@ IDE 让用户在 Studio 同源下打开某个 Environment 上由 Daemon 托管�
 
 载荷属于 IDE 应用：[`DaemonIdeCommandTransport`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/DaemonIdeCommandTransport.java) 用 [`DaemonIdeCodec`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/protocol/DaemonIdeCodec.java) 编码 [`IdeCommand`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/protocol/IdeCommand.java)、解码 [`IdeReply`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/protocol/IdeReply.java)。控制命令只承载视图的创建、恢复、切换、聚焦、分离与关闭等元数据；数据流不再由控制命令按 exchange 请求。回执载荷不合法只让这一条 IDE 调用失败，不影响同一连接上的 Agent 能力调用。
 
+成功回执按动作区分，目录和 workspace 均由 Daemon 确认：
+
+| 命令 | 成功 `IDE_RESULT` |
+| --- | --- |
+| `OPEN_VIEW` | `{ok:true,viewId,documentId,eventNodeId,connectionId,claimId,bindingEpoch,directory,workspacePath}` |
+| `CHANGE_DIRECTORY` | `{ok:true,viewId,directory}`，其中 `directory` 是 Daemon 确认的规范目录 |
+| `FOCUS_TERMINAL`、`CLOSE_VIEW`、`DETACH_VIEW` | `{ok:true,viewId}` |
+| `LIST_VIEWS` | `{ok:true,views:[{viewId,documentId,eventNodeId,connectionId,claimId,bindingEpoch,directory,workspacePath,state}]}` |
+
+Server 只用 `CHANGE_DIRECTORY` 的确认回执更新缓存和 DTO；缺失或无效的确认目录使调用不可用，不回退到客户端请求，也不自动重试。
+
 每条命令进入传输时冻结代际 [`DaemonConnectionIdentity`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonConnectionIdentity.java)，即 Environment 当前 READY 连接背后的 Daemon 实例。所有 IDE 凭据都绑定这个代际：同一 Daemon 进程断线重连后，它的 code-server 与视图都还在，凭据继续有效；另一个实例在本节点接管时，内核发出 `onDaemonInstanceReplaced`，旧代际的凭据与流一律作废。每个 Environment 在本节点至多保留一个代际。各入口按 [`IdeGenerationState`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/IdeGenerationState.java) 统一裁决：当前实例可以建立新的数据逻辑流；暂无 READY 连接时返回 503，等待同一实例重连；已被接管时返回 409，浏览器需要重新打开视图。
 
 ## 元数据服务
