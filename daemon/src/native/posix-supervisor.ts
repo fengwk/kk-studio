@@ -350,13 +350,14 @@ export class PosixManagedProcess implements ManagedProcess {
       await this.awaitHelperExit(graceMillis)
     }
     let proven = await this.drainSession(this.sessionId)
-    proven = (await this.drainTrackedSessions()) && proven
     // helper 崩溃时，本次调用新增的、被内核收养到父进程名下的直接子进程才需要父进程收尾；基线子进程与其它活动 helper 一律排除。
     // 基线采样不可判定时不做这一步：宁可留下一个未收敛的孤儿（如实计入 remaining），也绝不误杀陌生进程。
     if (this.adoptsOrphans && this.baselinePids !== null) {
       const excluded = [...this.excludedHelpers(), ...this.baselinePids]
       proven = (await posix.convergeAdoptedChildren(process.pid, graceMillis, excluded)) && proven
     }
+    // 收养收尾可能清空身份已失效的登记会话；最终只读核验必须在它之后进行。
+    proven = (await this.drainTrackedSessions()) && proven
     if (!proven) {
       throw new Error('the process scope could not be proven converged')
     }
@@ -372,6 +373,11 @@ export class PosixManagedProcess implements ManagedProcess {
     for (const tracked of [...this.extraSessions.values()]) {
       const identity = posix.processIdentity(tracked.childPid)
       if (identity === null || identity !== tracked.identity || posix.sessionOf(tracked.childPid) !== tracked.session) {
+        // 身份失效不授权发信号，但只有旧会话的空快照才能证明它已经消失。
+        const members = posix.membersSnapshot(tracked.session, posix.NO_PROCESS)
+        if (members === null || members.length > 0) {
+          proven = false
+        }
         continue
       }
       proven = (await this.drainSession(tracked.session)) && proven
