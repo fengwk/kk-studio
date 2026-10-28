@@ -76,7 +76,7 @@ headers。Server 只校验该相对路径不越出 view 作用域；Daemon 校�
 flush 成功才发送 COMPLETE；任何写入、超时或协议错误都 RESET 该流，不重试、不重放。
 
 mux 为每条流和整条连接分别维护有界 credit 与有界队列：每流每方向初始 credit 256 KiB，整连接每方向初始 credit 4 MiB，
-单流上限 64 条，管理帧队列上限 256 帧/256 KiB。管理帧和 DATA 由唯一物理写入者按顺序发送；第一次物理写失败立即终止整条
+并发逻辑流上限 64 条，管理帧队列上限 256 帧/256 KiB。管理帧和 DATA 由唯一物理写入者按顺序发送；第一次物理写失败立即终止整条
 连接，所有等待中的 future 失败，已排队但未写出的请求不会改投其它节点。入站 DATA 只有下游实际消费后才 ACK，避免无界排队。
 数据 wire 版本为 2（[`MuxLimits`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/mux/MuxLimits.java)）：12 字节头
 `version | type | flags | streamId | payloadLength`，帧类型固定为 OPEN/READY/HEADERS/DATA/WINDOW/END/COMPLETE/RESET/CLOSE，

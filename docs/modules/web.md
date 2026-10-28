@@ -253,12 +253,15 @@ SPA fallback 仅适用于 GET、非 API/actuator 且末段无扩展名的路径�
 [`web/src/test`](../../web/src/test/java/fun/fengwk/kkstudio/web) 覆盖组合与依赖方向、Flyway、
 HTTP mapper/advice、owner 事务、Snapshot、ack-before-event、bounded sender、
 通知重连、Daemon 帧与静态 SPA。Spring 集成基座使用真实 PostgreSQL。
-同源 IDE 数据面的真实链路由三个入口覆盖：[`IdeDataPlaneIntegrationTest`](../../web/src/test/java/fun/fengwk/kkstudio/web/environment/ide/IdeDataPlaneIntegrationTest.java)
+同源 IDE 的测试按边界选择：[`IdeDataPlaneIntegrationTest`](../../web/src/test/java/fun/fengwk/kkstudio/web/environment/ide/IdeDataPlaneIntegrationTest.java)
 用真实 Tomcat HTTP/WS 与 mux peer 覆盖本地与非 owner 单跳；
 [`MuxCrossLanguageIntegrationTest`](../../web/src/test/java/fun/fengwk/kkstudio/web/environment/ide/MuxCrossLanguageIntegrationTest.java)
 让 Java mux 引擎与 Node 24 Daemon 传输跨进程互通；
-真实冻结 code-server 的视图验收在 Daemon 侧（[`acceptance.test.ts`](../../daemon/test/ide/acceptance.test.ts)），
-浏览器侧回归在 Frontend 的 Playwright 套件。执行命令和 E2E 分类见 [开发与测试](../operations/development-and-testing.md)。
+[`IdeProductionChainAcceptanceTest`](../../web/src/test/java/fun/fengwk/kkstudio/web/environment/ide/IdeProductionChainAcceptanceTest.java)
+在显式提供 code-server 发行目录时启动真实 Spring/Tomcat、临时 PostgreSQL 和生产 Daemon，覆盖浏览器协议入口、目录规范化、恢复换代与崩溃失效；
+另提供 Playwright 包目录时运行真实 Chromium 工作台、worker 注册、终端、dirty 拒绝与单视图 shell 退出验证。
+Daemon 侧的 [`acceptance.test.ts`](../../daemon/test/ide/acceptance.test.ts) 直接验证受管视图；
+Frontend 的 Playwright 回归使用路由夹具，不替代真实 code-server 链路。执行命令和 E2E 分类见 [开发与测试](../operations/development-and-testing.md)。
 
 上级：[系统设计](../system-design.md)。相关文档：[Platform](platform.md)、[Share](share.md)、
 [Harness Infra](harness-infra.md)、[Canvas](canvas.md)、[IDE](ide.md)、[Frontend](frontend.md)。
