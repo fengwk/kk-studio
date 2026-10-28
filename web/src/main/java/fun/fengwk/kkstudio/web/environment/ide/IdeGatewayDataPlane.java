@@ -647,18 +647,21 @@ public final class IdeGatewayDataPlane {
       dispatch(
           () -> {
             if (terminal.isDone()) {
+              data.consumed();
               return;
             }
             if (data.kind() != MuxDataKind.HTTP) {
               fail(new IOException("WS DATA received on an HTTP stream"), 502);
+              data.consumed();
               return;
             }
             try {
               response.getOutputStream().write(data.payload());
-              data.consumed();
               progressed();
-            } catch (IOException error) {
+            } catch (IOException | RuntimeException error) {
               fail(error, 502);
+            } finally {
+              data.consumed();
             }
           });
     }
