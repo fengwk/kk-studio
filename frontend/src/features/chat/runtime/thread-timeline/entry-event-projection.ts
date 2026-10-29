@@ -119,10 +119,10 @@ export function projectEmptyMessageEntry(
   return event(
     entry,
     'empty_message',
-    translate('ai.runtime.entry.emptyTitle', {
-      role: role || translate('ai.runtime.entry.unknownRole'),
-    }),
-    translate('ai.runtime.entry.emptyText'),
+    translate(role === 'ASSISTANT'
+      ? 'ai.runtime.entry.emptyAssistant'
+      : 'ai.runtime.entry.emptyMessage'),
+    '',
   )
 }
 

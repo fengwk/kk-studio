@@ -278,6 +278,15 @@ function TurnUsageHarness() {
     })
     append(`end-${id}`, 'TURN_END', { outcome: 'FAILED', continueModel: false })
   }
+  append('start-empty', 'TURN_START', { reason: 'USER_MESSAGE', settings })
+  append('assistant-empty', 'MESSAGE', {
+    message: { role: 'ASSISTANT', contents: [] },
+    assistantMetadata: {
+      usage: { inputTokens: 10, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      decodeDurationMillis: 1000,
+    },
+  })
+  append('end-empty', 'TURN_END', { outcome: 'COMPLETED' })
   const timeline = buildThreadTimeline(entries, [], [])
   return (
     <main style={{ padding: 24, maxWidth: 720 }}>

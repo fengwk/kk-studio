@@ -636,6 +636,6 @@ export function formatTurnUsageText(
         : `cache ${noData}`,
   )
   const speed = calculateDecodeTokensPerSecond(usage)
-  parts.push(speed != null ? `${speed} tok/s` : noData)
+  parts.push(`${speed ?? noData} tok/s`)
   return parts.join(' · ')
 }
