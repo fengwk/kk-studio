@@ -9,9 +9,9 @@ Pane 布局、未发送输入、上传进度与编辑草稿由浏览器保存。
 
 ## 组装与路由
 
-[`main.tsx`](../../frontend/src/main.tsx) 在 StrictMode 下挂载
+[`main.tsx`](../../frontend/src/main.tsx) 在 StrictMode 下用 BrowserRouter 包裹
 [`AppProviders`](../../frontend/src/app/providers.tsx)：
-BrowserRouter → QueryClient → ApplicationContributions → BrowserPreferences → ApplicationEvent → IdePanel。
+QueryClient → ApplicationContributions → BrowserPreferences → ApplicationEvent → IdePanel。
 查询默认关闭自动 retry 与窗口聚焦刷新；共享 ApplicationEvent manager 管理订阅。
 
 [`AppRouter`](../../frontend/src/app/router.tsx) 将 `/` 转至 `/chats`，`/interactions` 由应用层
@@ -36,6 +36,8 @@ i18n 文案按同一划分放在 [`catalogs`](../../frontend/src/shared/i18n/cat
 tool renderer id 对应后端冻结 rendererKey，缺失时使用默认展示。
 
 shared 提供通用协议与 UI，feature 拥有自己的 controller、query key、业务 mutation 和样式。
+feature 之间只能依赖 [`eslint.config.js`](../../frontend/eslint.config.js) 允许清单中登记的入口；
+新增跨 feature 依赖须先登记，否则 lint 失败。
 Thread panel 消费 timeline presentation 类型，宿主负责 API、realtime 和控制器。
 
 ## API 与 wire 校验
