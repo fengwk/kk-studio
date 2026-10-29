@@ -98,7 +98,7 @@ test('daemon-ci runs the full Node daemon suite on the five release targets', ()
     assert.deepEqual(runners, [
         'linux-amd64@ubuntu-latest',
         'linux-arm64@ubuntu-24.04-arm',
-        'macos-arm64@macos-14',
+        'macos-arm64@macos-15',
         'macos-amd64@macos-15-intel',
         'windows-amd64@windows-latest',
     ])
@@ -214,7 +214,7 @@ test('the release pipeline smoke-tests every staged archive on its own host', ()
     assert.deepEqual(targets, [
         'linux-amd64@ubuntu-latest',
         'linux-arm64@ubuntu-24.04-arm',
-        'macos-arm64@macos-14',
+        'macos-arm64@macos-15',
         'macos-amd64@macos-15-intel',
         'windows-amd64@windows-latest',
     ])

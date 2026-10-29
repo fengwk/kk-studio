@@ -2,7 +2,7 @@
 #
 # Node Daemon 的平台行为不能只在一台 runner 上验证。矩阵覆盖五个官方目标：
 #   linux amd64（ubuntu-latest）、linux arm64（ubuntu-24.04-arm）、
-#   macOS arm64（macos-14）、macOS Intel（macos-15-intel）、
+#   macOS arm64（macos-15）、macOS Intel（macos-15-intel）、
 #   windows amd64（windows-latest）。
 # 每个目标都真跑完整 Node 套件（类型检查、构建、native 进程范围与能力层、覆盖率），
 # 平台特有用例由用例自己决定是否执行，不做整体跳过。安装器 Python fixture 与 shell 替换
@@ -53,7 +53,7 @@ jobs:
             platform: linux-amd64
           - os: ubuntu-24.04-arm
             platform: linux-arm64
-          - os: macos-14
+          - os: macos-15
             platform: macos-arm64
           - os: macos-15-intel
             platform: macos-amd64
