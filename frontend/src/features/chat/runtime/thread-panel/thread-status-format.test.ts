@@ -3,31 +3,9 @@ import {
   buildThreadStatusModel,
   formatThreadStatusLabel,
   formatUsageDetails,
-  type TranslateFn,
 } from '@/features/chat/runtime/thread-panel/thread-status-format'
 import type { UsageCost } from '@/features/chat/runtime/thread-timeline-types'
-
-/**
- * 待 parent 落库的新 catalog 文案（本切片只引用 key）：用注入式 t 做确定性验证，
- * 保证 hover 组合正确，而不依赖 catalog 是否已合入。
- */
-const MESSAGES: Record<string, string> = {
-  'ai.runtime.status.noData': '暂无数据',
-  'ai.runtime.status.contextText': 'ctx {{used}}/{{total}}',
-  'ai.runtime.status.contextUsageTitleKnown':
-    '上下文占用（最近一次调用估算）：约 {{used}} / {{total}} tokens',
-  'ai.runtime.status.contextUsageTitleUnknown': '上下文占用：暂无数据（上限 {{total}} tokens）',
-  'ai.runtime.status.usageTokensDetail':
-    '无缓存输入：{{input}} tokens；输出：{{output}} tokens；推理：{{reasoning}} tokens',
-  'ai.runtime.status.usageCacheDetail': '缓存读取：{{cacheRead}} tokens；缓存写入：{{cacheWrite}} tokens',
-  'ai.runtime.status.usageCostDetail': '估算费用：{{cost}}；缓存命中率：{{cache}}；生成速度：{{speed}}',
-}
-
-const t: TranslateFn = (key, values) =>
-  (MESSAGES[key] ?? `⟦missing:${key}⟧`).replace(
-    /\{\{\s*([\w.-]+)\s*\}\}/gu,
-    (_match, name: string) => String(values?.[name] ?? ''),
-  )
+import { setLocale, translate as t } from '@/shared/i18n'
 
 const EMPTY_USAGE = {
   input: 0,
@@ -77,7 +55,7 @@ describe('thread status formatting', () => {
   ])('formats context window %s as %s', (contextWindow, text) => {
     const context = buildThreadStatusModel({ contextWindow }, t).segments
       .find((segment) => segment.key === 'context')
-    expect(context?.text).toBe(`ctx 0/${text}`)
+    expect(context?.text).toBe(`ctx —/${text}`)
   })
 
   // 上下文占用：已知/未知必须区分，且只使用最近一次调用的估计，绝不用累计输入冒充
@@ -86,11 +64,11 @@ describe('thread status formatting', () => {
       contextWindow: 128_000,
       branchUsage: { ...EMPTY_USAGE, contextInputTokens: 61 },
     }, t).segments.find((segment) => segment.key === 'context')
-    expect(known?.title).toBe('上下文占用（最近一次调用估算）：约 61 / 128000 tokens')
+    expect(known?.title).toBe('上下文占用（最近一次模型调用估算）：约 61 / 128000 tokens')
 
     const unknown = buildThreadStatusModel({ contextWindow: 128_000 }, t).segments
       .find((segment) => segment.key === 'context')
-    expect(unknown?.title).toBe('上下文占用：暂无数据（上限 128000 tokens）')
+    expect(unknown?.title).toBe('上下文占用：尚未测量（上限 128000 tokens）')
   })
 
   // hover：完整数字 + 全称字段（含推理），无冗余的累计标题；主行保持紧凑
@@ -114,7 +92,7 @@ describe('thread status formatting', () => {
     expect(usage?.text).toBe('↑30 · ↓9 · R14 · W17 · $0.5 · cache 22.95% · 18 tok/s')
     expect(usage?.title).toBe(
       [
-        '无缓存输入：30 tokens；输出：9 tokens；推理：4 tokens',
+        '未缓存输入：30 tokens；输出：9 tokens；推理：4 tokens',
         '缓存读取：14 tokens；缓存写入：17 tokens',
         '估算费用：$0.5；缓存命中率：22.95%；生成速度：18 tok/s',
       ].join('\n'),
@@ -122,24 +100,24 @@ describe('thread status formatting', () => {
     expect(usage?.title).not.toContain('累计')
   })
 
-  // 缺费用与速率显示暂无数据，不可显示 0；hover 仍区分未计量的事实。
+  // 缺费用与速率不可显示 0；hover 仍区分未计量的事实。
   it('displays no-data for missing cost and speed metrics while preserving real zero', () => {
     const usage = buildThreadStatusModel({
       branchUsage: { ...EMPTY_USAGE, contextInputTokens: 0 },
     }, t).segments.find((segment) => segment.key === 'usage')
 
-    expect(usage?.text).toBe('↑0 · ↓0 · R0 · W0 · 暂无数据 · cache 0.00% · 暂无数据')
-    expect(usage?.title).toContain('估算费用：暂无数据；缓存命中率：暂无数据；生成速度：暂无数据')
+    expect(usage?.text).toBe('↑0 · ↓0 · R0 · W0 · — · cache 0.00% · — tok/s')
+    expect(usage?.title).toContain('估算费用：—；缓存命中率：—；生成速度：— tok/s')
   })
 
   it.each([undefined, null, -1, NaN, Infinity])(
-    'defaults a missing or invalid context estimate to zero: %s',
+    'marks a missing or invalid context estimate as unknown: %s',
     (contextInputTokens) => {
       const branchUsage = { ...EMPTY_USAGE, input: 100, contextInputTokens }
       const context = buildThreadStatusModel({ contextWindow: 256_000, branchUsage }, t)
         .segments.find((segment) => segment.key === 'context')
 
-      expect(context?.text).toBe('ctx 0/256k')
+      expect(context?.text).toBe('ctx —/256k')
       expect(branchUsage.contextInputTokens).toBe(contextInputTokens)
     },
   )
@@ -163,7 +141,7 @@ describe('turn usage details', () => {
     const title = formatUsageDetails(usage, t)
 
     expect(title.split('\n')).toEqual([
-      '无缓存输入：1200 tokens；输出：340 tokens；推理：7 tokens',
+      '未缓存输入：1200 tokens；输出：340 tokens；推理：7 tokens',
       '缓存读取：0 tokens；缓存写入：0 tokens',
       '估算费用：$0.0012；缓存命中率：0.00%；生成速度：347 tok/s',
     ])
@@ -177,7 +155,7 @@ describe('turn usage details', () => {
       t,
     )
 
-    expect(title).toContain('估算费用：暂无数据；缓存命中率：0.00%；生成速度：暂无数据')
+    expect(title).toContain('估算费用：—；缓存命中率：0.00%；生成速度：— tok/s')
     expect(title).not.toContain('$0')
   })
 
@@ -187,8 +165,30 @@ describe('turn usage details', () => {
       t,
     )
 
-    expect(title).toContain('推理：暂无数据 tokens')
+    expect(title).toContain('推理：— tokens')
     expect(title).not.toContain('null')
+  })
+
+  it('distinguishes unknown English details from a valid zero-speed sample', () => {
+    // hover 的未知用量和真实零样本均使用 catalog，而不是测试翻译桩。
+    try {
+      setLocale('en-US')
+      const unknown = formatUsageDetails({
+        input: null, output: null, cacheRead: null, cacheWrite: null,
+        reasoning: null, providerTotal: null, cost: null,
+      }, t)
+      expect(unknown.split('\n')).toEqual([
+        'Uncached input: — tokens; output: — tokens; reasoning: — tokens',
+        'Cache read: — tokens; write: — tokens',
+        'Estimated cost: —; cache hit rate: —; generation speed: — tok/s',
+      ])
+      const zero = formatUsageDetails({
+        ...usage, cost: { currency: 'USD', amount: '0' }, decodeTokens: 0, decodeDurationMillis: 1000,
+      }, t)
+      expect(zero).toContain('Estimated cost: $0; cache hit rate: 0.00%; generation speed: 0 tok/s')
+    } finally {
+      setLocale('zh-CN')
+    }
   })
 
   it('formats a quarter cache hit rate with two decimals', () => {

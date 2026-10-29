@@ -179,8 +179,9 @@ describe('SubagentReceipt collapsed summary', () => {
     expect(container.querySelector('.thread-entry-row')).toBeNull()
     expect(container.querySelector('.thread-entry-icon')).toBeNull()
 
-    const link = screen.getByRole('link')
+    const link = screen.getByRole('link', { name: '查看 subagent (child-thread-1) 执行' })
     expect(link).toHaveAttribute('href', '/threads/child-thread-1')
+    expect(link).toHaveAttribute('title', '查看 subagent (child-thread-1) 执行')
     expect(link.nextElementSibling).toBe(toggle)
     expect(toggle.parentElement?.lastElementChild).toBe(toggle)
   })
@@ -352,6 +353,19 @@ describe('SubagentReceipt identity and safety', () => {
     expect(screen.getByText('subagent 回执不是合法的 XML 信封，无法展示。')).toBeInTheDocument()
     expect(container.querySelector('.thread-subagent-receipt-detail')).toBeNull()
     expect(screen.queryByRole('link')).toBeNull()
+  })
+
+  it('uses the actual fallback source thread for the label, title and navigation', () => {
+    // 未提供通知来源时，信封中的线程成为实际导航来源，三处必须一致。
+    renderNotification(
+      subagentMessage(receiptEnvelope({
+        threadId: '00000000-0000-4000-8000-000000000004', state: 'completed', result: 'done',
+      }), null),
+    )
+    const label = '查看 subagent (00000000-0000-4000-8000-000000000004) 执行'
+    const link = screen.getByRole('link', { name: label })
+    expect(link).toHaveAttribute('title', label)
+    expect(link).toHaveAttribute('href', '/threads/00000000-0000-4000-8000-000000000004')
   })
 
   it('keeps decoded markup as inert text and makes no request when expanded', async () => {

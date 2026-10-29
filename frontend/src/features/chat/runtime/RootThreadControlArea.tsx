@@ -163,13 +163,13 @@ function RootInteractionList({
                   className="interaction-source-link"
                   title={item.threadId === rootThreadId
                     ? t('ai.interaction.viewSource')
-                    : t('ai.runtime.notification.entry.viewSubagentExecution')}
+                    : t('ai.runtime.notification.entry.viewSubagentExecution', { threadId: item.threadId })}
                 >
                   <GitBranch size={14} aria-hidden="true" />
                   <span className="interaction-source-name">
                     {item.threadId === rootThreadId
                       ? source?.name ?? item.owner.rootThreadName ?? t('ai.interaction.viewSource')
-                      : t('ai.runtime.notification.entry.viewSubagentExecution')}
+                      : t('ai.runtime.notification.entry.viewSubagentExecution', { threadId: item.threadId })}
                   </span>
                   {item.threadId !== rootThreadId && source?.name
                     ? <span>{source.name}</span> : null}

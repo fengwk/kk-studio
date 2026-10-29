@@ -311,6 +311,21 @@ describe('buildThreadEventTimeline', () => {
     ])
   })
 
+  it('retains raw empty assistant and completed turn facts in debug events', () => {
+    // 展示空消息不改变 Debug 中的原始内容、用量与完成事实。
+    const payload = messagePayload('ASSISTANT', [], {
+      usage: { inputTokens: 10, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      decodeDurationMillis: 1000,
+    })
+    const events = build([
+      entry('assistant-empty', 'MESSAGE', payload),
+      entry('end-empty', 'TURN_END', { outcome: 'COMPLETED' }),
+    ])
+    expect(JSON.parse(events[0]!.rawJson!)).toEqual(payload)
+    expect(JSON.parse(events[1]!.rawJson!)).toEqual({ outcome: 'COMPLETED' })
+    expect(events[1]!.details.find((row) => row.label === '输出 tokens')?.value).toBe('0')
+  })
+
   it('projects TURN_END with the turn usage summary and the read-time cost projection', () => {
     const usage = {
       usage: {
@@ -363,10 +378,10 @@ describe('buildThreadEventTimeline', () => {
     ]
     const eventsForward = build(entriesForward)
     const turnEndForward = eventsForward.find((e) => e.id === 'entry:end-1')!
-    expect(turnEndForward.details.find((row) => row.label === '输入 tokens')?.value).toBe('暂无数据')
-    expect(turnEndForward.details.find((row) => row.label === '输出 tokens')?.value).toBe('暂无数据')
-    expect(turnEndForward.details.find((row) => row.label === '费用')?.value).toBe('暂无数据')
-    expect(turnEndForward.details.find((row) => row.label === '缓存写 tokens')?.value).toBe('暂无数据')
+    expect(turnEndForward.details.find((row) => row.label === '输入 tokens')?.value).toBe('—')
+    expect(turnEndForward.details.find((row) => row.label === '输出 tokens')?.value).toBe('—')
+    expect(turnEndForward.details.find((row) => row.label === '费用')?.value).toBe('—')
+    expect(turnEndForward.details.find((row) => row.label === '缓存写 tokens')?.value).toBe('—')
 
     // 2. 顺序 B: missing + known（双向一致性）
     const entriesBackward = [
@@ -380,9 +395,9 @@ describe('buildThreadEventTimeline', () => {
     ]
     const eventsBackward = build(entriesBackward)
     const turnEndBackward = eventsBackward.find((e) => e.id === 'entry:end-1')!
-    expect(turnEndBackward.details.find((row) => row.label === '输入 tokens')?.value).toBe('暂无数据')
-    expect(turnEndBackward.details.find((row) => row.label === '输出 tokens')?.value).toBe('暂无数据')
-    expect(turnEndBackward.details.find((row) => row.label === '费用')?.value).toBe('暂无数据')
+    expect(turnEndBackward.details.find((row) => row.label === '输入 tokens')?.value).toBe('—')
+    expect(turnEndBackward.details.find((row) => row.label === '输出 tokens')?.value).toBe('—')
+    expect(turnEndBackward.details.find((row) => row.label === '费用')?.value).toBe('—')
     expect(turnEndBackward.details).toEqual(turnEndForward.details)
   })
 
@@ -456,8 +471,8 @@ describe('buildThreadEventTimeline', () => {
     expect(events[2]!.summary).toBe(JSON.stringify({ outcome: 'COMPLETED' }))
     // 真实 0 保留
     expect(events[2]!.details.find((row) => row.label === '推理 tokens')?.value).toBe('0')
-    // 无定价事实：如实标注暂无数据，绝不伪装成 $0
-    expect(events[2]!.details.find((row) => row.label === '费用')?.value).toBe('暂无数据')
+    // 无定价事实不能伪装成 $0。
+    expect(events[2]!.details.find((row) => row.label === '费用')?.value).toBe('—')
   })
 
   it('marks unknown reasoning and providerTotal as noData when omitted in usage facts', () => {
@@ -470,8 +485,8 @@ describe('buildThreadEventTimeline', () => {
       entry('end-1', 'TURN_END', { outcome: 'COMPLETED' }),
     ]
     const events = build(entries)
-    expect(events[2]!.details.find((row) => row.label === '推理 tokens')?.value).toBe('暂无数据')
-    expect(events[2]!.details.find((row) => row.label === 'Provider 总 tokens')?.value).toBe('暂无数据')
+    expect(events[2]!.details.find((row) => row.label === '推理 tokens')?.value).toBe('—')
+    expect(events[2]!.details.find((row) => row.label === 'Provider 总 tokens')?.value).toBe('—')
   })
 
   it('keeps TURN_END summary as the bare outcome when the turn has no usage', () => {

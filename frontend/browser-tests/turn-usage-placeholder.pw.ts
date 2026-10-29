@@ -45,3 +45,30 @@ test('failed turn usage placeholder preserves error cards and TURN_END fork', as
   await expect(errors.first()).toBeVisible()
   await page.screenshot({ path: testInfo.outputPath('failed-turn-usage-readonly.png'), fullPage: true })
 })
+
+test('empty assistant stays one inline row with its real turn usage and branch', async ({ page }, testInfo) => {
+  // 离线 durable Entry 经真实投影和 CSS，验证窄屏也不出现第二行或内部标题。
+  await page.goto('/browser-tests/chat-layout-harness.html?scenario=turn-usage')
+  for (const width of [1280, 375]) {
+    await page.setViewportSize({ width, height: 800 })
+    const empty = page.locator('[data-entry-kind="empty_message"]')
+    await expect(empty).toHaveCount(1)
+    await expect(empty).toHaveClass(/is-inline/)
+    await expect(empty).toHaveText('返回内容为空')
+    await expect(empty.locator('.thread-entry-text, button')).toHaveCount(0)
+    const title = empty.locator('.thread-entry-title')
+    await expect(title).toHaveCount(1)
+    const metrics = await title.evaluate((element) => {
+      const style = getComputedStyle(element)
+      return { whiteSpace: style.whiteSpace, height: element.getBoundingClientRect().height, lineHeight: parseFloat(style.lineHeight) }
+    })
+    expect(metrics.whiteSpace).toBe('nowrap')
+    expect(metrics.height).toBeLessThanOrEqual(metrics.lineHeight + 1)
+    const usage = page.locator('[data-turn-end="end-empty"]')
+    await expect(usage.locator('.thread-meta-text')).toHaveText('↑10 · ↓0 · R0 · W0 · — · cache 0.00% · 0 tok/s')
+    await usage.getByTestId('thread-turn-end-branch').click()
+    await expect(page.getByTestId('fork-entry-id')).toHaveText('end-empty')
+    await empty.scrollIntoViewIfNeeded()
+    await page.screenshot({ path: testInfo.outputPath(`empty-assistant-${width}.png`) })
+  }
+})

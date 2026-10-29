@@ -2,7 +2,7 @@ import { Buffer } from 'node:buffer'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { WebSocket, WebSocketServer } from 'ws'
 
 import { decodeDataBind, type DataBind } from '../src/protocol.js'
@@ -544,12 +544,74 @@ describe('mux upstream service', () => {
       pongTimeoutMillis: 80,
     })
     cleanups.push(() => service.shutdown())
-    const bind = service.bind(binding('1', TICKET_1, data.streamUrl), new AbortController().signal)
-    await data.waitPeer(0)
-    await waitFor(() => data.pingCount() >= 1, 5_000)
-    await bind
-    await waitFor(() => closes.length === 1, 5_000)
-    expect(closes[0]).toBeInstanceOf(Error)
+    // Only heartbeat time is controlled; socket events and their timeout remain real.
+    const waitForIO = async (promise: Promise<void>, label: string): Promise<void> => {
+      let timeout: ReturnType<typeof setTimeout> | undefined
+      try {
+        await Promise.race([
+          promise,
+          new Promise<never>((_resolve, reject) => {
+            timeout = setTimeout(() => reject(new Error(`timed out waiting for ${label}`)), 5_000)
+          }),
+        ])
+      } finally {
+        clearTimeout(timeout)
+      }
+    }
+
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] })
+    try {
+      let heartbeatInstalled!: () => void
+      const heartbeatReady = new Promise<void>((resolve) => {
+        heartbeatInstalled = resolve
+      })
+      const fakeSetInterval = globalThis.setInterval
+      const interval = vi.spyOn(globalThis, 'setInterval').mockImplementation((callback, delay, ...args) => {
+        const timer = fakeSetInterval(callback, delay, ...args)
+        if (delay === 20) {
+          heartbeatInstalled()
+        }
+        return timer
+      })
+      try {
+        const bind = service.bind(binding('1', TICKET_1, data.streamUrl), new AbortController().signal)
+        // The server's upgrade alone does not mean the client has installed its heartbeat.
+        await waitForIO(heartbeatReady, 'client heartbeat installation')
+        expect(vi.getTimerCount()).toBe(1)
+        expect(data.peers).toHaveLength(1)
+        const peer = data.peers[0]!
+        const pingReceived = new Promise<void>((resolve) => peer.socket.once('ping', () => resolve()))
+
+        expect(data.pingCount()).toBe(0)
+        vi.advanceTimersByTime(20)
+        await waitForIO(pingReceived, 'server ping')
+        expect(data.pingCount()).toBeGreaterThanOrEqual(1)
+
+        vi.advanceTimersByTime(59)
+        expect(closes).toHaveLength(0)
+        expect(peer.socket.readyState).toBe(WebSocket.OPEN)
+        const peerClosed = new Promise<void>((resolve) => peer.socket.once('close', () => resolve()))
+
+        vi.advanceTimersByTime(1)
+        await waitForIO(bind, 'binding completion')
+        await waitForIO(peerClosed, 'server socket close')
+        expect(peer.socket.readyState).toBe(WebSocket.CLOSED)
+        expect(closes).toHaveLength(1)
+        expect(closes[0]).toBeInstanceOf(Error)
+        expect(closes[0]?.message).toBe('data websocket pong timeout')
+        expect(vi.getTimerCount()).toBe(0)
+      } finally {
+        interval.mockRestore()
+      }
+    } finally {
+      try {
+        for (const cleanup of cleanups.splice(0).reverse()) {
+          await cleanup()
+        }
+      } finally {
+        vi.useRealTimers()
+      }
+    }
   })
 
   it('reports the exact wire limits and URL conversion without leaking the ticket into changes', () => {
