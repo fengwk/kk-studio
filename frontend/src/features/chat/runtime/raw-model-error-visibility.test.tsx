@@ -10,9 +10,9 @@ import { ModelAttemptFailureMessageBlock } from '@/features/chat/runtime/thread-
 import { ThreadEventDetail } from '@/features/chat/runtime/thread-panel/ThreadEventDetail'
 import { translate } from '@/shared/i18n'
 import type {
+  HarnessActiveAssistantOutputDTO,
+  HarnessGenerationFailureDTO,
   HarnessSessionEntryDTO,
-  ModelAttemptFailureDTO,
-  ModelInvocationDTO,
 } from '@/shared/api/generated/contracts'
 
 /** 供应商原始多行 JSON 错误（HTTP <status>\n<body> 格式，>128 字符）。 */
@@ -131,10 +131,10 @@ describe('raw model error visibility (所见即所得：真实错误不脱敏、
       expect(message.text).toBe(RAW_VENDOR_ERROR_BODY)
     })
 
-    it('preserves raw multiline error in snapshot modelAttemptFailures', () => {
-      // 验证快照阶段 ModelAttemptFailureDTO 投影至 timeline 时保留完整错误
-      const failureDto: ModelAttemptFailureDTO = {
-        modelInvocationId: 'model-inv-1',
+    it('preserves raw multiline error in snapshot generationFailures', () => {
+      // 验证快照阶段 HarnessGenerationFailureDTO 投影至 timeline 时保留完整错误
+      const failureDto: HarnessGenerationFailureDTO = {
+        generationId: 'model-inv-1',
         turnStartEntryId: 'turn-1',
         requestHeadEntryId: 'head-1',
         attempt: 1,
@@ -229,7 +229,7 @@ describe('raw model error visibility (所见即所得：真实错误不脱敏、
 
       const records = buildThreadEventTimeline({
         entries: [entry],
-        modelInvocation: null,
+        activeAssistantOutput: null,
         toolInvocations: [],
       })
 
@@ -257,7 +257,7 @@ describe('raw model error visibility (所见即所得：真实错误不脱敏、
 
       const records = buildThreadEventTimeline({
         entries: [entry],
-        modelInvocation: null,
+        activeAssistantOutput: null,
         toolInvocations: [],
       })
 
@@ -277,8 +277,8 @@ describe('raw model error visibility (所见即所得：真实错误不脱敏、
 
     it('preserves full untruncated error in synthetic attempt-failure event details and rawJson', () => {
       // 验证未物化的活动失败快照在 /debug 中完整保留 rawJson 与 details
-      const failureDto: ModelAttemptFailureDTO = {
-        modelInvocationId: 'inv-synth-1',
+      const failureDto: HarnessGenerationFailureDTO = {
+        generationId: 'inv-synth-1',
         turnStartEntryId: 'turn-1',
         requestHeadEntryId: 'head-1',
         attempt: 1,
@@ -293,9 +293,9 @@ describe('raw model error visibility (所见即所得：真实错误不脱敏、
 
       const records = buildThreadEventTimeline({
         entries: [],
-        modelInvocation: null,
+        activeAssistantOutput: null,
         toolInvocations: [],
-        modelAttemptFailures: [failureDto],
+        generationFailures: [failureDto],
       })
 
       expect(records).toHaveLength(1)
@@ -309,21 +309,20 @@ describe('raw model error visibility (所见即所得：真实错误不脱敏、
       expect(parsedRaw.errorMessage).toBe(RAW_VENDOR_ERROR_BODY)
     })
 
-    it('preserves full untruncated errorJson in ACTIVE_MODEL_INVOCATION details and rawJson', () => {
-      // 验证活动的 ModelInvocation errorJson 在 /debug 中完整呈现
-      const invocation: ModelInvocationDTO = {
-        id: 'inv-active-1',
-        threadId: 'thread-1',
+    it('preserves full untruncated typed error in ACTIVE_MODEL_INVOCATION details and rawJson', () => {
+      // 验证活动的 typed activeAssistantOutput.error 在 /debug 中完整呈现
+      const activeOutput: HarnessActiveAssistantOutputDTO = {
+        generationId: 'inv-active-1',
         turnStartEntryId: 'turn-1',
         requestHeadEntryId: 'head-1',
         status: 'FAILED',
         attempt: 1,
-        streamCheckpointJson: null,
-        resultJson: null,
-        errorJson: JSON.stringify({
-          kind: 'PROVIDER_ERROR',
+        sequence: '0',
+        contents: [],
+        error: {
+          code: 'PROVIDER_ERROR',
           message: RAW_VENDOR_ERROR_BODY,
-        }),
+        },
         resultEntryId: null,
         createTime: 1789473600,
         updateTime: 1789473601,
@@ -331,22 +330,19 @@ describe('raw model error visibility (所见即所得：真实错误不脱敏、
 
       const records = buildThreadEventTimeline({
         entries: [],
-        modelInvocation: invocation,
+        activeAssistantOutput: activeOutput,
         toolInvocations: [],
       })
 
       expect(records).toHaveLength(1)
       const record = records[0]!
       expect(record.kind).toBe('ACTIVE_MODEL_INVOCATION')
-      const errorDetail = record.details.find((row) => row.label === '错误')
-      expect(errorDetail).toBeDefined()
-      const parsedDetail = JSON.parse(errorDetail!.value)
-      expect(parsedDetail.message).toBe(RAW_VENDOR_ERROR_BODY)
+      const errorDetail = record.details.find((row) => row.label === '错误信息')
+      expect(errorDetail?.value).toBe(RAW_VENDOR_ERROR_BODY)
 
       expect(record.rawJson).not.toBeNull()
       const parsedRaw = JSON.parse(record.rawJson!)
-      const parsedError = JSON.parse(parsedRaw.errorJson)
-      expect(parsedError.message).toBe(RAW_VENDOR_ERROR_BODY)
+      expect(parsedRaw.error.message).toBe(RAW_VENDOR_ERROR_BODY)
     })
 
     it('renders untruncated error details and exact rawJson payload in ThreadEventDetail widget', () => {
@@ -359,7 +355,7 @@ describe('raw model error visibility (所见即所得：真实错误不脱敏、
 
       const records = buildThreadEventTimeline({
         entries: [entry],
-        modelInvocation: null,
+        activeAssistantOutput: null,
         toolInvocations: [],
       })
       const record = records[0]!

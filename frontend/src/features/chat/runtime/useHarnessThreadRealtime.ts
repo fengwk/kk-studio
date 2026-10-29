@@ -9,7 +9,7 @@ import {
   type RealtimeToolStream,
 } from '@/features/chat/runtime/thread-realtime/tool-stream'
 import {
-  isActiveModelAttempt,
+  isActiveModelGeneration,
   type ModelRecovery,
 } from '@/features/chat/runtime/thread-realtime/model-recovery'
 import {
@@ -21,13 +21,13 @@ import { useRealtimeFrameScheduler } from '@/features/chat/runtime/thread-realti
 import { harnessService } from '@/shared/api/harness-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import type {
-  ModelAttemptFailureDTO,
-  ModelInvocationDTO,
+  HarnessActiveAssistantOutputDTO,
+  HarnessGenerationFailureDTO,
   ToolInvocationDTO,
 } from '@/shared/api/generated/contracts'
 
 export interface HarnessThreadRealtimeState {
-  /** 当前 ModelInvocation attempt 的瞬态 model overlay（无则 null）。 */
+  /** 当前 generation 的瞬态 model overlay（无则 null）。 */
   modelStream: RealtimeModelStream | null
   /** 按 ToolInvocation id 索引的瞬态 tool 结果 overlay。 */
   toolStreams: ReadonlyMap<string, RealtimeToolStream>
@@ -45,9 +45,9 @@ export function useHarnessThreadRealtime(
   threadId: string,
   enabled: boolean,
   version: string | undefined,
-  modelInvocation: ModelInvocationDTO | null,
+  activeAssistantOutput: HarnessActiveAssistantOutputDTO | null,
   toolInvocations: ToolInvocationDTO[],
-  modelAttemptFailures: readonly ModelAttemptFailureDTO[] = [],
+  generationFailures: readonly HarnessGenerationFailureDTO[] = [],
   schedulerOptions?: Partial<RealtimeFrameSchedulerOptions>,
 ): HarnessThreadRealtimeState {
   const queryClient = useQueryClient()
@@ -63,9 +63,9 @@ export function useHarnessThreadRealtime(
   const modelStreamRef = useRef<RealtimeModelStream | null>(null)
   const toolStreamsRef = useRef<Map<string, RealtimeToolStream>>(new Map())
   const snapshotModelStreamRef = useRef<RealtimeModelStream | null>(null)
-  const invocationRef = useRef<ModelInvocationDTO | null>(modelInvocation)
+  const activeOutputRef = useRef<HarnessActiveAssistantOutputDTO | null>(activeAssistantOutput)
   const toolInvocationsRef = useRef<ToolInvocationDTO[]>(toolInvocations)
-  const modelAttemptFailuresRef = useRef<readonly ModelAttemptFailureDTO[]>(modelAttemptFailures)
+  const generationFailuresRef = useRef<readonly HarnessGenerationFailureDTO[]>(generationFailures)
   const modelRecoveryRef = useRef<ModelRecovery | null>(null)
   const catchupInFlightRef = useRef<{
     key: string
@@ -79,8 +79,8 @@ export function useHarnessThreadRealtime(
 
   const scheduler = useRealtimeFrameScheduler(
     modelStreamRef,
-    invocationRef,
-    modelAttemptFailuresRef,
+    activeOutputRef,
+    generationFailuresRef,
     toolStreamsRef,
     setModelStream,
     setToolStreams,
@@ -144,9 +144,9 @@ export function useHarnessThreadRealtime(
       modelStreamRef,
       toolStreamsRef,
       snapshotModelStreamRef,
-      invocationRef,
+      activeOutputRef,
       toolInvocationsRef,
-      modelAttemptFailuresRef,
+      generationFailuresRef,
       modelRecoveryRef,
       toolPartialSeenEventIdsRef,
       clearModelRecovery,
@@ -155,19 +155,19 @@ export function useHarnessThreadRealtime(
   )
 
   useEffect(() => {
-    invocationRef.current = modelInvocation
+    activeOutputRef.current = activeAssistantOutput
     toolInvocationsRef.current = toolInvocations
-    modelAttemptFailuresRef.current = modelAttemptFailures
+    generationFailuresRef.current = generationFailures
     reconcileSnapshotStreams(streamContext, {
-      modelInvocation,
+      activeAssistantOutput,
       toolInvocations,
-      modelAttemptFailures,
+      generationFailures,
       modelStream,
       toolStreams,
       setModelStream,
       setToolStreams,
     })
-  }, [modelAttemptFailures, modelInvocation, modelStream, streamContext, toolInvocations, toolStreams])
+  }, [generationFailures, activeAssistantOutput, modelStream, streamContext, toolInvocations, toolStreams])
 
   useEffect(() => {
     // 只有 Thread 消失或订阅真正被禁用才清空 overlays；`subscription == null` 或
@@ -210,19 +210,18 @@ export function useHarnessThreadRealtime(
           invalidateSnapshot()
           // 新订阅（含每次重连）若仍有 RUNNING model，只请求一次 best-effort
           // 追帧；202 不表示 owner 在线，后续完全由 checkpoint/终态驱动。
-          const durable = invocationRef.current
+          const durable = activeOutputRef.current
           if (
             durable != null
             && durable.status === 'RUNNING'
-            && isActiveModelAttempt(
+            && isActiveModelGeneration(
               durable,
-              subscription.threadId,
-              durable.id,
+              durable.generationId,
               durable.attempt,
-              modelAttemptFailuresRef.current,
+              generationFailuresRef.current,
             )
           ) {
-            requestCatchup(subscription.threadId, durable.id, durable.attempt, true)
+            requestCatchup(subscription.threadId, durable.generationId, durable.attempt, true)
           }
         },
         onEvent: (name, data) => {

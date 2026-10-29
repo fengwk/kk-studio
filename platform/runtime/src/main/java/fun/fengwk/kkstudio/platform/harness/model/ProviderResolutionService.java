@@ -1,9 +1,9 @@
 package fun.fengwk.kkstudio.platform.harness.model;
 
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelProvider;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
+import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
+import fun.fengwk.kkstudio.harness.model.provider.ModelProvider;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 
 import java.util.Objects;
 import java.util.UUID;
@@ -59,8 +59,7 @@ public interface ProviderResolutionService {
      * affinity）。本入口不解析 endpoint、不创建 {@link ModelProvider}、不触发 transport、不生成任何认证 Header。
      *
      * <p>adapter 未实现请求体预览时原样抛出 {@link UnsupportedOperationException}，调用方必须显式拒绝而不是把请求当作可预览。
-     * 编码失败（例如超限或非法请求）原样抛出 {@link
-     * fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException}。
+     * 编码失败（例如超限或非法请求）原样抛出 {@link fun.fengwk.kkstudio.harness.model.provider.ProviderException}。
      */
     public byte[] encodeRequestBody() {
       return Objects.requireNonNull(

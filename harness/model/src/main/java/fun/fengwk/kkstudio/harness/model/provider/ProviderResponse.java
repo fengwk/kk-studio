@@ -1,0 +1,206 @@
+package fun.fengwk.kkstudio.harness.model.provider;
+
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+
+import fun.fengwk.kkstudio.harness.model.ModelUsage;
+
+import java.util.HashSet;
+import java.util.List;
+import java.util.Objects;
+import java.util.Set;
+
+/**
+ * Provider 流完成时提供的完整响应快照。
+ *
+ * <p>{@code stopReason} 是规范化生成结束原因（{@link GenerationStopReason}），与 tool calls 正交：{@code COMPLETE}
+ * 可以有或没有 calls，{@code LENGTH} 可以有或没有已观测 calls，{@code FILTERED} 的 calls 与 diagnostics 必须为空， {@code
+ * CONTINUE} 的 calls 与 diagnostics 同样必须为空（协议要求续写时不得同时表达工具意图）。{@code usage} 是 Provider 归一化后的实际 token
+ * 用量。{@code requestId}、{@code serviceTier} 由 Provider 报告，可为空。{@code rawUsageJson} 是 Provider usage
+ * 段的原始 JSON 序列化（必须是合法 JSON object 或 array，null 规范化为 {@code "{}"}），仅承载 usage 元数据， 不包含 prompt 或响应正文。
+ *
+ * <p>{@code decodeDurationMillis} 是 Harness 观测的流式生成计时（首个非空输出 delta 到成功回调观察时间的毫秒数），不是 Provider
+ * 报告的事实：Provider 构造响应时一律为 null，仅 runtime 在成功提交前冻结。null 表示无可信流计时。
+ */
+public record ProviderResponse(
+    String text,
+    String thinking,
+    List<ProviderToolCall> toolCalls,
+    GenerationStopReason stopReason,
+    ModelUsage usage,
+    String requestId,
+    String serviceTier,
+    String rawUsageJson,
+    List<ProviderToolCallDiagnostic> toolCallDiagnostics,
+    Long decodeDurationMillis) {
+
+  private static final ObjectMapper OBJECT_MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .build();
+
+  private static final String EMPTY_USAGE_JSON = "{}";
+
+  public ProviderResponse {
+    text = text == null ? "" : text;
+    thinking = thinking == null ? "" : thinking;
+    toolCalls = List.copyOf(Objects.requireNonNull(toolCalls, "toolCalls"));
+    stopReason = Objects.requireNonNull(stopReason, "stopReason");
+    usage = Objects.requireNonNull(usage, "usage");
+    requestId = optionalNonBlank(requestId, "requestId");
+    serviceTier = optionalNonBlank(serviceTier, "serviceTier");
+    rawUsageJson = normalizeRawUsageJson(rawUsageJson);
+    toolCallDiagnostics =
+        toolCallDiagnostics == null ? List.of() : List.copyOf(toolCallDiagnostics);
+    if (decodeDurationMillis != null && decodeDurationMillis < 0) {
+      throw new IllegalArgumentException("decodeDurationMillis must be null or non-negative");
+    }
+    validateToolOutcomes(toolCalls, toolCallDiagnostics, stopReason);
+  }
+
+  public ProviderResponse(
+      String text,
+      String thinking,
+      List<ProviderToolCall> toolCalls,
+      GenerationStopReason stopReason,
+      ModelUsage usage,
+      String requestId,
+      String serviceTier,
+      String rawUsageJson,
+      List<ProviderToolCallDiagnostic> toolCallDiagnostics) {
+    this(
+        text,
+        thinking,
+        toolCalls,
+        stopReason,
+        usage,
+        requestId,
+        serviceTier,
+        rawUsageJson,
+        toolCallDiagnostics,
+        null);
+  }
+
+  public ProviderResponse(
+      String text,
+      String thinking,
+      List<ProviderToolCall> toolCalls,
+      GenerationStopReason stopReason,
+      ModelUsage usage,
+      String requestId,
+      String serviceTier,
+      String rawUsageJson) {
+    this(
+        text,
+        thinking,
+        toolCalls,
+        stopReason,
+        usage,
+        requestId,
+        serviceTier,
+        rawUsageJson,
+        List.of());
+  }
+
+  /** 返回以给定 toolCalls 替换后的副本；其余事实（含 diagnostics 与 usage/计时）原样保留。 */
+  public ProviderResponse withToolCalls(List<ProviderToolCall> value) {
+    return new ProviderResponse(
+        text,
+        thinking,
+        value,
+        stopReason,
+        usage,
+        requestId,
+        serviceTier,
+        rawUsageJson,
+        toolCallDiagnostics,
+        decodeDurationMillis);
+  }
+
+  /** 返回以给定 Harness 观测计时替换后的副本；其余事实原样保留（{@code null} 表示无可信流计时）。 */
+  public ProviderResponse withDecodeDurationMillis(Long value) {
+    if (Objects.equals(decodeDurationMillis, value)) {
+      return this;
+    }
+    return new ProviderResponse(
+        text,
+        thinking,
+        toolCalls,
+        stopReason,
+        usage,
+        requestId,
+        serviceTier,
+        rawUsageJson,
+        toolCallDiagnostics,
+        value);
+  }
+
+  private static String optionalNonBlank(String value, String name) {
+    if (value != null && value.isBlank()) {
+      throw new IllegalArgumentException(name + " must be null or non-blank");
+    }
+    return value;
+  }
+
+  private static String normalizeRawUsageJson(String value) {
+    if (value == null) {
+      return EMPTY_USAGE_JSON;
+    }
+    if (value.isBlank()) {
+      throw new IllegalArgumentException("rawUsageJson must contain JSON");
+    }
+    JsonNode node;
+    try {
+      node = OBJECT_MAPPER.readTree(value);
+    } catch (JacksonException exception) {
+      throw new IllegalArgumentException("rawUsageJson must contain JSON");
+    }
+    if (!node.isObject() && !node.isArray()) {
+      throw new IllegalArgumentException("rawUsageJson must be a JSON object or array");
+    }
+    return value;
+  }
+
+  private static void validateToolOutcomes(
+      List<ProviderToolCall> toolCalls,
+      List<ProviderToolCallDiagnostic> diagnostics,
+      GenerationStopReason stopReason) {
+    if (stopReason == GenerationStopReason.FILTERED && !diagnostics.isEmpty()) {
+      throw new IllegalArgumentException(
+          "FILTERED responses must not contain tool call diagnostics");
+    }
+    // CONTINUE 是纯协议续写终止态：既不能表达已观测工具意图，也不能表达被丢弃的工具意图。
+    if (stopReason == GenerationStopReason.CONTINUE) {
+      if (!toolCalls.isEmpty()) {
+        throw new IllegalArgumentException("CONTINUE responses must not contain tool calls");
+      }
+      if (!diagnostics.isEmpty()) {
+        throw new IllegalArgumentException(
+            "CONTINUE responses must not contain tool call diagnostics");
+      }
+    }
+    int totalOutcomes = toolCalls.size() + diagnostics.size();
+    Set<Integer> seenIndices = new HashSet<>();
+    for (ProviderToolCallDiagnostic diagnostic : diagnostics) {
+      if (diagnostic == null) {
+        throw new IllegalArgumentException("toolCallDiagnostic must not be null");
+      }
+      int index = diagnostic.callIndex();
+      if (index < 0 || index >= totalOutcomes) {
+        throw new IllegalArgumentException(
+            "toolCallDiagnostic callIndex out of bounds: "
+                + index
+                + ", totalOutcomes: "
+                + totalOutcomes);
+      }
+      if (!seenIndices.add(index)) {
+        throw new IllegalArgumentException("duplicate toolCallDiagnostic callIndex: " + index);
+      }
+    }
+  }
+}

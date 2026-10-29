@@ -382,9 +382,10 @@ function snapshot(
     thread: currentThread,
     entries: [],
     queuedCommands: [],
-    modelInvocation: null,
+    executionStatus: 'IDLE',
+    activeAssistantOutput: null,
     toolInvocations: [],
-    modelAttemptFailures: [],
+    generationFailures: [],
     manualCompaction: { available: false, disabledReason: 'not available' },
     stopReceipts: [],
     unconfirmedExecutions: [],
@@ -394,7 +395,7 @@ function snapshot(
 
 function pendingInvocation(): ToolInvocationDTO {
   return {
-    id: 'waiting-tool', modelInvocationId: 'model-1', assistantEntryId: 'assistant-1', callIndex: 0,
+    id: 'waiting-tool', threadId: 'thread-1', turnStartEntryId: 'turn-1', assistantEntryId: 'assistant-1', callIndex: 0,
     status: 'READY', attempt: 1, toolCallId: 'call-1', toolName: 'bash', rendererKey: 'bash',
     environmentId: null, requiredEnvironmentId: 'frozen-env', waitingForEnvironment: false,
     requiredEnvironmentName: 'archlinux', environmentWaitFreshnessAt: null,
@@ -2723,16 +2724,15 @@ describe('AgentPane orchestration', () => {
       snapshot(
         threadFixture(THREAD_ID, { status: 'RUNNING', executionControl: 'STOPPED' }),
         {
-          modelInvocation: {
-            id: 'running-model',
-            threadId: THREAD_ID,
+          activeAssistantOutput: {
+            generationId: 'running-model',
             turnStartEntryId: 'turn-1',
             requestHeadEntryId: 'head-1',
             status: 'RUNNING',
             attempt: 1,
-            streamCheckpointJson: null,
-            resultJson: null,
-            errorJson: null,
+            sequence: '0',
+            contents: [],
+            error: null,
             resultEntryId: null,
             createTime: 0,
             updateTime: 0,
@@ -4679,10 +4679,11 @@ describe('AgentPane root control mounting', () => {
       queryKeys.threads.snapshot(NEW_ROOT_ID),
     )
     expect(Object.keys(seeded ?? {}).sort()).toEqual([
+      'activeAssistantOutput',
       'entries',
+      'executionStatus',
+      'generationFailures',
       'manualCompaction',
-      'modelAttemptFailures',
-      'modelInvocation',
       'queuedCommands',
       'stopReceipts',
       'thread',

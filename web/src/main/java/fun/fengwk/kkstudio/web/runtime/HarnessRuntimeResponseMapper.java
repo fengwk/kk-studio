@@ -5,11 +5,12 @@ import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.CancelledThreadInput;
 import fun.fengwk.kkstudio.harness.runtime.CompactThreadResult;
 import fun.fengwk.kkstudio.harness.runtime.ManualCompactionAvailability;
-import fun.fengwk.kkstudio.harness.runtime.ModelAttemptFailureProjection;
 import fun.fengwk.kkstudio.harness.runtime.StopResult;
 import fun.fengwk.kkstudio.harness.runtime.StoppedThreadReceipt;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.ToolInputAcceptance;
+import fun.fengwk.kkstudio.harness.runtime.driver.FailureProjection;
+import fun.fengwk.kkstudio.harness.runtime.driver.GenerationProjection;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.GoalSetting;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
@@ -18,20 +19,25 @@ import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryEntryPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolApprovalJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderResponseJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
+import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
 import fun.fengwk.kkstudio.share.ai.interaction.HarnessToolInputResultDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessAcceptedCommandsDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessActiveAssistantOutputDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessAgentMessageContentDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessAssistantErrorDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessBranchSettingsDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCancelledInputDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessExecutionExitDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessGenerationFailureDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessGoalSettingDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessManualCompactionDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessModelSelectionDTO;
@@ -45,8 +51,6 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSnapshotDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadStopResultDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadTreeNodeDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessUsageCostDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.ModelAttemptFailureDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.ModelInvocationDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.ToolInvocationDTO;
 
 import java.util.ArrayList;
@@ -62,7 +66,6 @@ public final class HarnessRuntimeResponseMapper {
       new HistoryEntryPayloadJsonCodec();
   private static final ThreadCommandPayloadJsonCodec COMMAND_PAYLOADS =
       new ThreadCommandPayloadJsonCodec();
-  private static final ProviderResponseJsonCodec MODEL_RESULTS = new ProviderResponseJsonCodec();
   private static final ToolApprovalJsonCodec TOOL_APPROVALS = new ToolApprovalJsonCodec();
   private static final StrictJson JSON = StrictJson.standard();
 
@@ -191,27 +194,45 @@ public final class HarnessRuntimeResponseMapper {
     return dto;
   }
 
-  static ModelInvocationDTO toModelInvocationDto(ModelInvocation invocation) {
-    Objects.requireNonNull(invocation, "invocation");
-    ModelInvocationDTO dto = new ModelInvocationDTO();
-    dto.setId(invocation.id().toString());
-    dto.setThreadId(invocation.threadId().toString());
-    dto.setTurnStartEntryId(invocation.turnStartEntryId().toString());
-    dto.setRequestHeadEntryId(invocation.requestHeadEntryId().toString());
-    dto.setStatus(invocation.status().name());
-    dto.setAttempt(invocation.attempt());
-    dto.setStreamCheckpointJson(
-        invocation.streamCheckpoint() == null
-            ? null
-            : JSON.write(invocation.streamCheckpoint(), "streamCheckpoint"));
-    dto.setResultJson(
-        invocation.result() == null ? null : MODEL_RESULTS.encode(invocation.result()));
-    dto.setErrorJson(
-        invocation.error() == null ? null : JSON.write(invocation.error(), "modelInvocationError"));
+  static HarnessActiveAssistantOutputDTO toActiveAssistantOutputDto(
+      GenerationProjection generation) {
+    Objects.requireNonNull(generation, "generation");
+    HarnessActiveAssistantOutputDTO dto = new HarnessActiveAssistantOutputDTO();
+    dto.setGenerationId(generation.generationId().toString());
+    dto.setTurnStartEntryId(generation.turnStartEntryId().toString());
+    dto.setRequestHeadEntryId(generation.requestHeadEntryId().toString());
+    dto.setStatus(generation.status().name());
+    dto.setAttempt(generation.attempt());
+    dto.setSequence(Long.toString(generation.sequence()));
+    List<HarnessAgentMessageContentDTO> contents =
+        new ArrayList<>(generation.outputContents().size());
+    for (AgentMessageContent content : generation.outputContents()) {
+      HarnessAgentMessageContentDTO contentDto = new HarnessAgentMessageContentDTO();
+      switch (content) {
+        case TextMessageContent text -> {
+          contentDto.setType("text");
+          contentDto.setText(text.text());
+        }
+        case ThinkingMessageContent thinking -> {
+          contentDto.setType("thinking");
+          contentDto.setText(thinking.text());
+        }
+        default -> throw new IllegalStateException(
+            "unsupported public assistant output content: " + content.getClass().getName());
+      }
+      contents.add(contentDto);
+    }
+    dto.setContents(List.copyOf(contents));
+    if (generation.error() != null) {
+      HarnessAssistantErrorDTO error = new HarnessAssistantErrorDTO();
+      error.setCode(generation.error().code());
+      error.setMessage(generation.error().message());
+      dto.setError(error);
+    }
     dto.setResultEntryId(
-        invocation.resultEntryId() == null ? null : invocation.resultEntryId().toString());
-    dto.setCreateTime(invocation.createdAt());
-    dto.setUpdateTime(invocation.updatedAt());
+        generation.resultEntryId() == null ? null : generation.resultEntryId().toString());
+    dto.setCreateTime(generation.createdAt());
+    dto.setUpdateTime(generation.updatedAt());
     return dto;
   }
 
@@ -231,7 +252,8 @@ public final class HarnessRuntimeResponseMapper {
     Objects.requireNonNull(invocation, "invocation");
     ToolInvocationDTO dto = new ToolInvocationDTO();
     dto.setId(invocation.id().toString());
-    dto.setModelInvocationId(invocation.modelInvocationId().toString());
+    dto.setThreadId(invocation.threadId().toString());
+    dto.setTurnStartEntryId(invocation.turnStartEntryId().toString());
     dto.setAssistantEntryId(invocation.assistantEntryId().toString());
     dto.setCallIndex(invocation.callIndex());
     dto.setStatus(invocation.status().name());
@@ -284,30 +306,36 @@ public final class HarnessRuntimeResponseMapper {
       queued.add(toCommandDto(command));
     }
     dto.setQueuedCommands(List.copyOf(queued));
-    dto.setModelInvocation(
-        snapshot.model() == null ? null : toModelInvocationDto(snapshot.model()));
+    dto.setExecutionStatus(snapshot.runtimeStatus().name());
+    GenerationProjection generation = snapshot.generation();
+    dto.setActiveAssistantOutput(
+        generation == null ? null : toActiveAssistantOutputDto(generation));
     List<ToolInvocationDTO> tools = new ArrayList<>(snapshot.toolSiblings().size());
     for (ToolInvocation invocation : snapshot.toolSiblings()) {
       tools.add(toToolInvocationDto(invocation));
     }
     dto.setToolInvocations(List.copyOf(tools));
-    List<ModelAttemptFailureDTO> failures = new ArrayList<>(snapshot.modelAttemptFailures().size());
-    for (ModelAttemptFailureProjection failure : snapshot.modelAttemptFailures()) {
-      ModelAttemptFailureDTO failureDto = new ModelAttemptFailureDTO();
-      failureDto.setModelInvocationId(failure.modelInvocationId().toString());
-      failureDto.setTurnStartEntryId(failure.turnStartEntryId().toString());
-      failureDto.setRequestHeadEntryId(failure.requestHeadEntryId().toString());
+    List<HarnessGenerationFailureDTO> failures =
+        new ArrayList<>(snapshot.generationFailures().size());
+    for (FailureProjection failure : snapshot.generationFailures()) {
+      if (generation == null) {
+        throw new IllegalStateException("failure projection requires a generation projection");
+      }
+      HarnessGenerationFailureDTO failureDto = new HarnessGenerationFailureDTO();
+      failureDto.setGenerationId(generation.generationId().toString());
+      failureDto.setTurnStartEntryId(generation.turnStartEntryId().toString());
+      failureDto.setRequestHeadEntryId(generation.requestHeadEntryId().toString());
       failureDto.setAttempt(failure.attempt());
       failureDto.setSequence(Long.toString(failure.sequence()));
       failureDto.setText(failure.text());
       failureDto.setThinking(failure.thinking());
-      failureDto.setErrorCode(failure.error().kind().name());
-      failureDto.setErrorMessage(failure.error().message());
+      failureDto.setErrorCode(failure.errorCode());
+      failureDto.setErrorMessage(failure.errorMessage());
       failureDto.setFailedAt(failure.failedAt());
       failureDto.setRetryAt(failure.retryAt());
       failures.add(failureDto);
     }
-    dto.setModelAttemptFailures(List.copyOf(failures));
+    dto.setGenerationFailures(List.copyOf(failures));
     HarnessManualCompactionDTO manualCompactionDto = new HarnessManualCompactionDTO();
     manualCompactionDto.setAvailable(manualCompaction.available());
     manualCompactionDto.setDisabledReason(

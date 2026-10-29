@@ -5,46 +5,35 @@ import fun.fengwk.kkstudio.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.common.result.ResultContent;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.model.ImageInputTier;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCallDiagnostic;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderToolCallDiagnosticJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.JsonMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
-import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
 /**
- * 从 Provider / invocation 事实到 immutable history Entry payload 的聚焦纯 mapper。
+ * 从 terminal ToolInvocation / history normalization 事实到 immutable history Entry payload 的聚焦纯
+ * mapper。
  *
- * <p>只做类型化映射，不做任何持久化决策：{@link ProviderResponse} 投影为 ASSISTANT {@link MessagePayload}（内容顺序为
- * thinking、text、tool calls，全部为空时回退为空 text，metadata 直接快照 usage/stopReason）；terminal Model 错误投影为
- * {@link AssistantErrorPayload}（code 使用 {@code error.kind().name()}）；terminal {@link
- * ToolInvocation} 投影为 TOOL {@link MessagePayload}（SUCCEEDED 把 Text/JSON/Resource {@link
- * ResultContent}（含 Resource preview）映射为对应 {@link AgentMessageContent} 并回退空 text，error 标志原样保留，Binary
- * / 未知 content 显式 {@link IllegalArgumentException} 失败而不是静默丢失；非成功使用 error message + {@link
- * ToolInvocationError} JSON 详情且 error=true，metadata.status 精确映射 invocation terminal status）；history
- * normalization 的 synthetic 结果固定为 UNKNOWN / HISTORY_CUT / "No result provided"，不关联任何
- * ToolInvocation。
+ * <p>只做类型化映射，不做任何持久化决策：terminal {@link ToolInvocation} 投影为 TOOL {@link MessagePayload} （SUCCEEDED 把
+ * Text/JSON/Resource {@link ResultContent}（含 Resource preview）映射为对应 {@link AgentMessageContent}
+ * 并回退空 text，error 标志原样保留，Binary / 未知 content 显式 {@link IllegalArgumentException} 失败而不是静默丢失；非成功使用
+ * error message + {@link ToolInvocationError} JSON 详情且 error=true，metadata.status 精确映射 invocation
+ * terminal status）；history normalization 的 synthetic 结果固定为 UNKNOWN / HISTORY_CUT / "No result
+ * provided"，不关联任何 ToolInvocation。
  */
 public final class HistoryPayloadMapper {
 
@@ -56,90 +45,10 @@ public final class HistoryPayloadMapper {
 
   private static final String EMPTY_DETAILS_JSON = "{}";
 
-  private final ProviderToolCallDiagnosticJsonCodec diagnosticCodec =
-      new ProviderToolCallDiagnosticJsonCodec();
-
   /**
-   * ASSISTANT MESSAGE payload：ToolCall 的 rendererKey 来自本次 ModelInvocation 冻结的 Tool
-   * binding；historyAction 与 environmentName 同样来自该 binding（renderer 返回的 action 与冻结 Environment
-   * 名在响应持久化前已写入 ProviderToolCall）。
-   */
-  public MessagePayload assistantPayload(ProviderResponse response, List<ToolBinding> bindings) {
-    return assistantPayload(response, bindings, null, null);
-  }
-
-  /** 成功响应携带真实执行 ModelSelection 与请求起始时间；serviceTier 只取 Provider 报告值。 */
-  public MessagePayload assistantPayload(
-      ProviderResponse response,
-      List<ToolBinding> bindings,
-      ModelSelection model,
-      Instant requestedAt) {
-    Objects.requireNonNull(response, "response");
-    Objects.requireNonNull(bindings, "bindings");
-    List<AgentMessageContent> contents = new ArrayList<>();
-    if (!response.thinking().isEmpty()) {
-      contents.add(new ThinkingMessageContent(response.thinking()));
-    }
-    if (!response.text().isEmpty()) {
-      contents.add(new TextMessageContent(response.text()));
-    }
-    int totalOutcomes = response.toolCalls().size() + response.toolCallDiagnostics().size();
-    Map<Integer, ProviderToolCallDiagnostic> diagnosticByIndex = new HashMap<>();
-    for (ProviderToolCallDiagnostic diagnostic : response.toolCallDiagnostics()) {
-      diagnosticByIndex.put(diagnostic.callIndex(), diagnostic);
-    }
-    int toolCallIndex = 0;
-    for (int i = 0; i < totalOutcomes; i++) {
-      ProviderToolCallDiagnostic diagnostic = diagnosticByIndex.get(i);
-      if (diagnostic != null) {
-        contents.add(new JsonMessageContent(diagnosticCodec.encode(diagnostic)));
-      } else {
-        ProviderToolCall call = response.toolCalls().get(toolCallIndex++);
-        ToolBinding binding = boundedBinding(call.name(), bindings);
-        contents.add(
-            new ToolCallMessageContent(
-                call.id(),
-                call.name(),
-                binding == null ? UNBOUND_RENDERER_KEY : binding.descriptor().rendererKey(),
-                call.argumentsJson(),
-                call.historyAction(),
-                binding == null ? null : binding.environmentName()));
-      }
-    }
-    if (contents.isEmpty()) {
-      contents.add(new TextMessageContent(""));
-    }
-    return new MessagePayload(
-        new AgentMessage(AgentMessageRole.ASSISTANT, contents),
-        new AssistantMessageMetadata(
-            response.stopReason(),
-            response.usage(),
-            response.decodeDurationMillis(),
-            model,
-            requestedAt,
-            response.serviceTier()),
-        null);
-  }
-
-  /** 非 Model attempt 的 ASSISTANT_ERROR payload，例如 planning / stop barrier。 */
-  public AssistantErrorPayload assistantErrorPayload(ModelInvocationError error) {
-    Objects.requireNonNull(error, "error");
-    return new AssistantErrorPayload(
-        new AssistantError(error.kind().name(), error.message()), null);
-  }
-
-  /** terminal Model 错误的 provider-transparent ASSISTANT_ERROR payload：保留已 durable 的完整 partial。 */
-  public AssistantErrorPayload assistantErrorPayload(
-      ModelInvocationError error, ModelAttemptSnapshot attempt) {
-    Objects.requireNonNull(error, "error");
-    return new AssistantErrorPayload(
-        new AssistantError(error.kind().name(), error.message()), attempt);
-  }
-
-  /**
-   * terminal ToolInvocation 的 TOOL MESSAGE payload：SUCCEEDED 映射 Text/JSON content；无资源物化端口时 Resource
-   * 安全降级为不含瞬时 URI 的 metadata-only 文本；空结果回退空 text。FAILED / CANCELLED / UNKNOWN 使用 error message +
-   * codec 详情且 error=true。metadata 精确映射 invocation terminal status。
+   * terminal ToolInvocation 的 TOOL MESSAGE payload：SUCCEEDED 映射稳定的 Text/JSON/Resource 内容（Resource
+   * 必须是 Session 已持有的 {@code kkstudio} 引用）；空结果回退空 text。FAILED / CANCELLED / UNKNOWN 使用 error message
+   * + codec 详情且 error=true。metadata 精确映射 invocation terminal status。
    */
   public MessagePayload toolResultPayload(ToolInvocation invocation) {
     Objects.requireNonNull(invocation, "invocation");
@@ -201,50 +110,6 @@ public final class HistoryPayloadMapper {
         new AgentMessage(AgentMessageRole.TOOL, List.of(content)), null, metadata);
   }
 
-  /**
-   * 用调用方物化好的 contents 构建 SUCCEEDED ToolResult payload（contents 为空时回退为空文本）。
-   *
-   * <p>物化路径（注入 {@link ToolResultHistoryMaterializer}）由物化端口完成 Resource 内容的 blob 外部化；本方法只做
-   * 语义消息组装，不再接受 ResourceResultContent。
-   */
-  public MessagePayload toolResultPayload(
-      ToolInvocation invocation, List<AgentMessageContent> contents) {
-    Objects.requireNonNull(invocation, "invocation");
-    Objects.requireNonNull(contents, "contents");
-    if (!invocation.status().isTerminal()) {
-      throw new IllegalArgumentException("tool result payload requires a terminal invocation");
-    }
-    if (invocation.status() != ToolInvocationStatus.SUCCEEDED) {
-      throw new IllegalArgumentException(
-          "materialized contents are only valid for succeeded tool results");
-    }
-    List<AgentMessageContent> effective = List.copyOf(contents);
-    if (effective.isEmpty()) {
-      effective = List.of(new TextMessageContent(""));
-    }
-    ToolResultMessageContent content =
-        new ToolResultMessageContent(
-            invocation.call().id(),
-            invocation.call().toolName(),
-            invocation.binding().descriptor().rendererKey(),
-            effective,
-            invocation.result().error(),
-            invocation.result().detailsJson());
-    return new MessagePayload(
-        new AgentMessage(AgentMessageRole.TOOL, List.of(content)),
-        null,
-        new ToolResultMetadata(
-            invocation.id(),
-            invocation.assistantEntryId(),
-            invocation.call().id(),
-            invocation.callIndex(),
-            statusOf(invocation),
-            false,
-            null,
-            invocation.inputReceipt(),
-            invocation.binding()));
-  }
-
   private ToolResultMessageContent succeededContent(ToolInvocation invocation, ToolResult result) {
     List<AgentMessageContent> contents = new ArrayList<>();
     for (ResultContent toolContent : result.contents()) {
@@ -253,7 +118,7 @@ public final class HistoryPayloadMapper {
       } else if (toolContent instanceof JsonResultContent json) {
         contents.add(new JsonMessageContent(json.json()));
       } else if (toolContent instanceof ResourceResultContent resource) {
-        contents.add(new TextMessageContent(resourceFallbackText(resource)));
+        contents.add(stableResourceContent(resource));
       } else {
         // BinaryResultContent 不能进入 Session 语义消息；未知 content 也不得静默丢失字节——显式失败让调用方事务回滚。
         throw new IllegalArgumentException(
@@ -272,21 +137,41 @@ public final class HistoryPayloadMapper {
         result.detailsJson());
   }
 
-  /** 无 blob 物化端口时只保留稳定名称、媒体类型与有界 preview；不自动序列化 ResourceRef URI、size 或 hash。 */
-  private static String resourceFallbackText(ResourceResultContent content) {
+  /**
+   * 稳定 Resource 直接映射为 durable 消息内容：文本工件保留字节/行数事实，普通媒体按平台默认图片档位冻结。此处绝不再消费 upload 或执行 metadata-only
+   * 降级。
+   */
+  private static ResourceMessageContent stableResourceContent(ResourceResultContent content) {
     var resource = content.resource();
-    String name = resource.name() == null ? "unnamed" : resource.name();
-    StringBuilder text =
-        new StringBuilder()
-            .append("[Resource result available as metadata only: ")
-            .append(name)
-            .append(" (")
-            .append(resource.mediaType())
-            .append(")]");
-    if (content.preview() != null && !content.preview().isBlank()) {
-      text.append('\n').append(content.preview());
+    if (resource.sessionBlobId() == null) {
+      throw new IllegalArgumentException(
+          "succeeded tool resource must be a stable session resource");
     }
-    return text.toString();
+    if (resource.name() == null || resource.name().isBlank()) {
+      throw new IllegalArgumentException("succeeded tool resource must declare a filename");
+    }
+    if (content.textMetadata() != null) {
+      if (resource.size() != null && content.textMetadata().totalBytes() != resource.size()) {
+        throw new IllegalArgumentException(
+            "succeeded tool text resource size must match its metadata");
+      }
+      return ResourceMessageContent.externalizedText(
+          resource.sessionBlobId(),
+          resource.name(),
+          content.textMetadata().totalBytes(),
+          content.textMetadata().totalLines(),
+          content.preview());
+    }
+    return ResourceMessageContent.media(
+        resource.sessionBlobId(),
+        resource.name(),
+        content.preview(),
+        defaultImageTier(resource.mediaType()));
+  }
+
+  /** 工具结果图片没有用户选择：冻结平台默认档位（720P）；非图片媒体不带档位。 */
+  private static ImageInputTier defaultImageTier(String mediaType) {
+    return mediaType != null && mediaType.startsWith("image/") ? ImageInputTier.P720 : null;
   }
 
   private ToolResultMessageContent failedContent(ToolInvocation invocation) {
@@ -317,15 +202,5 @@ public final class HistoryPayloadMapper {
       default -> throw new IllegalArgumentException(
           "tool result payload requires a terminal invocation status");
     };
-  }
-
-  /** ToolCall 的 rendererKey：优先 frozen binding；unknown tool 槽位 fallback 固定为 {@code tool}。 */
-  private static ToolBinding boundedBinding(String toolName, List<ToolBinding> bindings) {
-    for (ToolBinding binding : bindings) {
-      if (binding.descriptor().name().equals(toolName)) {
-        return binding;
-      }
-    }
-    return null;
   }
 }

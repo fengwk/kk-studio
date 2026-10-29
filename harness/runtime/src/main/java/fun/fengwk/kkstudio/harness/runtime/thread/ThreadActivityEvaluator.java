@@ -16,22 +16,19 @@ public final class ThreadActivityEvaluator {
   /** 评估 Thread 当前运行状态（RUNNING / WAITING / IDLE）。 */
   public static ThreadRuntimeStatus evaluate(
       ThreadExecutionControl control,
-      ThreadContext context,
+      boolean hasLiveContext,
       boolean hasCompactionObligation,
       boolean hasInputDemand,
       int incompleteChildJoins,
       boolean hasUnconfirmedExecution) {
     Objects.requireNonNull(control, "control");
-    Objects.requireNonNull(context, "context");
     if (incompleteChildJoins < 0) {
       throw new IllegalArgumentException("incompleteChildJoins must not be negative");
     }
 
     // 本地在途活跃执行、自身 open owner compaction 或尚未冻结的 owner 结算子 Join，以及已登记但尚未确认退出的具体代次，
     // 都不因 STOPPED 虚构外部退出事实。
-    if (!(context instanceof ThreadContext.IdleOrHistorical)
-        || hasCompactionObligation
-        || hasUnconfirmedExecution) {
+    if (hasLiveContext || hasCompactionObligation || hasUnconfirmedExecution) {
       return ThreadRuntimeStatus.RUNNING;
     }
 
@@ -56,18 +53,17 @@ public final class ThreadActivityEvaluator {
    */
   public static boolean isQuiescent(
       ThreadExecutionControl control,
-      ThreadContext context,
+      boolean hasLiveContext,
       boolean hasCompactionObligation,
       boolean hasInputDemand,
       int incompleteChildJoins,
       boolean hasUnconfirmedExecution) {
     Objects.requireNonNull(control, "control");
-    Objects.requireNonNull(context, "context");
     if (incompleteChildJoins < 0) {
       throw new IllegalArgumentException("incompleteChildJoins must not be negative");
     }
     boolean blockedInput = hasInputDemand && control == ThreadExecutionControl.RUNNABLE;
-    return (context instanceof ThreadContext.IdleOrHistorical)
+    return !hasLiveContext
         && !hasCompactionObligation
         && !blockedInput
         && incompleteChildJoins == 0

@@ -1,13 +1,13 @@
 package fun.fengwk.kkstudio.platform.harness.model;
 
+import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
+import fun.fengwk.kkstudio.harness.model.provider.ModelProvider;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelProvider;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderCompletion;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
 
 import java.time.Duration;
@@ -19,8 +19,8 @@ import java.util.function.Supplier;
  * 以 PostgreSQL provider 资源为支撑的生产 {@link ModelGateway} 适配器。
  *
  * <p>{@link #admit} 通过 {@link ProviderResolutionService} 同步解析冻结 {@link
- * fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType} 与内存 {@link
- * fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest}（含 connection generation
+ * fun.fengwk.kkstudio.harness.model.provider.ProviderType} 与内存 {@link
+ * fun.fengwk.kkstudio.harness.model.provider.ProviderRequest}（含 connection generation
  * 校验），并无等待取得一个并发名额；不发出任何请求。 确定性解析失败（{@link IllegalArgumentException}）返回携带 {@link
  * ProviderErrorKind#INVALID_REQUEST} 的 {@link Rejected}；其他解析失败原样传播，由 Processor 重新调度；容量耗尽返回携带配置延迟的
  * {@link Busy}。

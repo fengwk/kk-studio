@@ -6,7 +6,7 @@ import {
   parseRealtimeModelDelta,
   reduceRealtimeModelStream,
   snapshotModelStream,
-  isFailedAttempt,
+  isFailedGeneration,
   type RealtimeModelStream,
 } from '@/features/chat/runtime/thread-realtime/model-stream'
 import {
@@ -23,7 +23,7 @@ import {
   createModelRecovery,
   dropBufferedThrough,
   hasVisibleModelOverlay,
-  isActiveModelAttempt,
+  isActiveModelGeneration,
   type ModelRecovery,
 } from '@/features/chat/runtime/thread-realtime/model-recovery'
 import {
@@ -32,8 +32,8 @@ import {
   sameToolStreamMap,
 } from '@/features/chat/runtime/thread-realtime/stream-equality'
 import type {
-  ModelAttemptFailureDTO,
-  ModelInvocationDTO,
+  HarnessActiveAssistantOutputDTO,
+  HarnessGenerationFailureDTO,
   ToolInvocationDTO,
 } from '@/shared/api/generated/contracts'
 
@@ -49,9 +49,9 @@ export interface RealtimeStreamContext {
   modelStreamRef: Ref<RealtimeModelStream | null>
   toolStreamsRef: Ref<Map<string, RealtimeToolStream>>
   snapshotModelStreamRef: Ref<RealtimeModelStream | null>
-  invocationRef: Ref<ModelInvocationDTO | null>
+  activeOutputRef: Ref<HarnessActiveAssistantOutputDTO | null>
   toolInvocationsRef: Ref<ToolInvocationDTO[]>
-  modelAttemptFailuresRef: Ref<readonly ModelAttemptFailureDTO[]>
+  generationFailuresRef: Ref<readonly HarnessGenerationFailureDTO[]>
   modelRecoveryRef: Ref<ModelRecovery | null>
   toolPartialSeenEventIdsRef: Ref<Map<string, Set<string>>>
   clearModelRecovery: () => void
@@ -61,9 +61,9 @@ export interface RealtimeStreamContext {
 export function reconcileSnapshotStreams(
   ctx: RealtimeStreamContext,
   input: {
-    modelInvocation: ModelInvocationDTO | null
+    activeAssistantOutput: HarnessActiveAssistantOutputDTO | null
     toolInvocations: ToolInvocationDTO[]
-    modelAttemptFailures: readonly ModelAttemptFailureDTO[]
+    generationFailures: readonly HarnessGenerationFailureDTO[]
     modelStream: RealtimeModelStream | null
     toolStreams: ReadonlyMap<string, RealtimeToolStream>
     setModelStream: (stream: RealtimeModelStream | null) => void
@@ -71,22 +71,26 @@ export function reconcileSnapshotStreams(
   },
 ): void {
   const {
-    threadId, scheduler, modelStreamRef, toolStreamsRef, snapshotModelStreamRef, invocationRef,
-    toolInvocationsRef, modelAttemptFailuresRef, modelRecoveryRef, toolPartialSeenEventIdsRef,
+    threadId, scheduler, modelStreamRef, toolStreamsRef, snapshotModelStreamRef, activeOutputRef,
+    toolInvocationsRef, generationFailuresRef, modelRecoveryRef, toolPartialSeenEventIdsRef,
     clearModelRecovery,
   } = ctx
   const {
-    modelInvocation, toolInvocations, modelAttemptFailures, modelStream, toolStreams,
+    activeAssistantOutput, toolInvocations, generationFailures, modelStream, toolStreams,
     setModelStream, setToolStreams,
   } = input
-  invocationRef.current = modelInvocation
+  activeOutputRef.current = activeAssistantOutput
   toolInvocationsRef.current = toolInvocations
-  modelAttemptFailuresRef.current = modelAttemptFailures
-  const snapshot = snapshotModelStream(threadId, modelInvocation)
+  generationFailuresRef.current = generationFailures
+  const snapshot = snapshotModelStream(threadId, activeAssistantOutput)
   snapshotModelStreamRef.current = snapshot
   const attemptFailed =
-    modelInvocation != null
-    && isFailedAttempt(modelInvocation.attempt, modelInvocation, modelAttemptFailures)
+    activeAssistantOutput != null
+    && isFailedGeneration(
+      activeAssistantOutput.generationId,
+      activeAssistantOutput.attempt,
+      generationFailures,
+    )
   if (attemptFailed) {
     clearModelRecovery()
   }
@@ -248,8 +252,8 @@ export function createRealtimeEventHandler(
   },
 ): (data: unknown) => void {
   const {
-    threadId, scheduler, modelStreamRef, toolStreamsRef, snapshotModelStreamRef, invocationRef,
-    toolInvocationsRef, modelAttemptFailuresRef, modelRecoveryRef, toolPartialSeenEventIdsRef,
+    threadId, scheduler, modelStreamRef, toolStreamsRef, snapshotModelStreamRef, activeOutputRef,
+    toolInvocationsRef, generationFailuresRef, modelRecoveryRef, toolPartialSeenEventIdsRef,
     clearModelRecovery,
   } = ctx
   const { refetchSnapshot, requestCatchup } = deps
@@ -258,14 +262,13 @@ export function createRealtimeEventHandler(
     const raw = JSON.stringify(data)
     const checkpoint = parseRealtimeModelCheckpoint(raw)
     if (checkpoint != null && checkpoint.threadId === threadId) {
-      const durable = invocationRef.current
+      const durable = activeOutputRef.current
       if (
-        !isActiveModelAttempt(
+        !isActiveModelGeneration(
           durable,
-          threadId,
           checkpoint.invocationId,
           checkpoint.attempt,
-          modelAttemptFailuresRef.current,
+          generationFailuresRef.current,
         )
       ) {
         return
@@ -333,17 +336,16 @@ export function createRealtimeEventHandler(
     }
     const delta = parseRealtimeModelDelta(raw)
     if (delta != null && delta.threadId === threadId) {
-      // 持久化终态 fence：终态 ModelInvocation（result/error/已挂接 result
-      // Entry）拒绝所有迟到的 MODEL_DELTA。冻结的 checkpoint overlay 在
-      // Entry 到达前保持可见，但终态输出永远不会再追加。
-      const durable = invocationRef.current
+      // 持久化终态 fence：终态 activeAssistantOutput（resultEntryId 已挂接或
+      // SUCCEEDED/FAILED/CANCELLED/BLOCKED）拒绝所有迟到的 MODEL_DELTA。冻结的
+      // typed overlay 在 Entry 到达前保持可见，但终态输出永远不会再追加。
+      const durable = activeOutputRef.current
       if (
-        !isActiveModelAttempt(
+        !isActiveModelGeneration(
           durable,
-          threadId,
           delta.invocationId,
           delta.attempt,
-          modelAttemptFailuresRef.current,
+          generationFailuresRef.current,
         )
       ) {
         return

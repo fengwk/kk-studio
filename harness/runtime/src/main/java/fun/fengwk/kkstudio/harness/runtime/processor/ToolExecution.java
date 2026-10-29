@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 import lombok.extern.slf4j.Slf4j;
 
 import fun.fengwk.kkstudio.common.result.BinaryResultContent;
+import fun.fengwk.kkstudio.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.common.result.ResultContent;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
@@ -15,6 +16,8 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
+import fun.fengwk.kkstudio.harness.runtime.port.ToolOutcomeMaterializationException;
+import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolSuccess;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryDecision;
@@ -82,6 +85,7 @@ final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution {
 
   private final ToolInvocationRequest request;
   private final ToolProcessorConfig config;
+  private final ToolResultHistoryMaterializer toolResultHistoryMaterializer;
   private final Clock clock;
   private final WorkHeartbeat heartbeat;
   private final Consumer<ToolExecution> ownerRelease;
@@ -111,7 +115,8 @@ final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution {
       ScheduledExecutorService scheduler,
       Executor heartbeatWorker,
       Consumer<ToolExecution> ownerRelease,
-      ExecutionExitConfirmer exitConfirmer) {
+      ExecutionExitConfirmer exitConfirmer,
+      ToolResultHistoryMaterializer toolResultHistoryMaterializer) {
     this.store = Objects.requireNonNull(store, "store");
     this.exitConfirmer = Objects.requireNonNull(exitConfirmer, "exitConfirmer");
     this.realtimeEventSink = Objects.requireNonNull(realtimeEventSink, "realtimeEventSink");
@@ -130,6 +135,8 @@ final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution {
             config.leaseConfig(),
             this::abandon);
     this.ownerRelease = Objects.requireNonNull(ownerRelease, "ownerRelease");
+    this.toolResultHistoryMaterializer =
+        Objects.requireNonNull(toolResultHistoryMaterializer, "toolResultHistoryMaterializer");
   }
 
   UUID invocationId() {
@@ -540,6 +547,10 @@ final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution {
             }));
   }
 
+  /**
+   * RUNNING -&gt; SUCCEEDED：在同一事务内先把结果物化为 Session 稳定引用，再保存该唯一稳定结果与 SUCCEEDED。物化永久失败时回滚整个
+   * 成功事务，并以独立的无资源 UNKNOWN 收敛，绝不重试外部副作用或再次消费同一 upload。
+   */
   private boolean commitSuccess(ToolResult result, ToolEffectBatch effects) {
     try {
       return Boolean.TRUE.equals(
@@ -561,13 +572,58 @@ final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution {
                 if (tx.lockClaimedWork(claim).isEmpty()) {
                   throw new ClaimLostSignal();
                 }
-                tx.updateToolInvocations(List.of(tool.succeed(result, effects, now)));
+                ToolResult stable =
+                    toolResultHistoryMaterializer.materialize(
+                        thread.sessionId(), request.call().toolName(), result);
+                requireStableResult(stable, request.call().id());
+                if (ToolResultJsonCodec.exceedsEncodedUtf8Bytes(
+                    stable, ToolResultSizeLimits.MAX_TERMINAL_RESULT_UTF8_BYTES)) {
+                  throw new ToolOutcomeMaterializationException(
+                      "stable tool outcome exceeds "
+                          + ToolResultSizeLimits.MAX_TERMINAL_RESULT_UTF8_BYTES
+                          + " bytes");
+                }
+                tx.updateToolInvocations(List.of(tool.succeed(stable, effects, now)));
                 tx.updateThread(thread.touchVersion(now));
                 tx.completeWork(claim);
                 return true;
               }));
     } catch (ClaimLostSignal ignored) {
       return false;
+    } catch (ToolOutcomeMaterializationException failure) {
+      log.warn(
+          "cannot materialize stable tool outcome for {}: {}",
+          invocationId,
+          ProcessorExceptions.describe(failure));
+      String message =
+          failure.getMessage() == null || failure.getMessage().isBlank()
+              ? "tool result resource persistence failed"
+              : failure.getMessage();
+      return commitTerminal(
+          TerminalKind.UNKNOWN,
+          new ToolInvocationError("RESOURCE_MATERIALIZATION_FAILED", message));
+    }
+  }
+
+  /** 稳定结果再校验：同一调用、仅 Text/JSON/Session Resource，且绝不再含 inline binary 或瞬时 upload。 */
+  private static void requireStableResult(ToolResult result, String toolCallId) {
+    if (result == null) {
+      throw new ToolOutcomeMaterializationException("stable tool outcome must not be null");
+    }
+    if (!result.toolCallId().equals(toolCallId)) {
+      throw new ToolOutcomeMaterializationException(
+          "stable tool outcome toolCallId does not match the request call");
+    }
+    for (ResultContent content : result.contents()) {
+      if (content instanceof BinaryResultContent) {
+        throw new ToolOutcomeMaterializationException(
+            "stable tool outcome must not carry inline binary content");
+      }
+      if (content instanceof ResourceResultContent resource
+          && resource.resource().sessionBlobId() == null) {
+        throw new ToolOutcomeMaterializationException(
+            "stable tool outcome resources must be session resources");
+      }
     }
   }
 

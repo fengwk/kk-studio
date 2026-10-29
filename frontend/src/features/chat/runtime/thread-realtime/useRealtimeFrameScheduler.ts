@@ -5,18 +5,22 @@ import {
   type RealtimeFrameSchedulerOptions,
 } from '@/features/chat/runtime/realtime-frame-scheduler'
 import {
-  isFailedAttempt,
+  isFailedGeneration,
+  isTerminalAssistantOutputStatus,
   type RealtimeModelStream,
 } from '@/features/chat/runtime/thread-realtime/model-stream'
 import {
   type RealtimeToolStream,
 } from '@/features/chat/runtime/thread-realtime/tool-stream'
-import type { ModelAttemptFailureDTO, ModelInvocationDTO } from '@/shared/api/generated/contracts'
+import type {
+  HarnessActiveAssistantOutputDTO,
+  HarnessGenerationFailureDTO,
+} from '@/shared/api/generated/contracts'
 
 export function useRealtimeFrameScheduler(
   modelStreamRef: { readonly current: RealtimeModelStream | null },
-  invocationRef: { readonly current: ModelInvocationDTO | null },
-  modelAttemptFailuresRef: { readonly current: readonly ModelAttemptFailureDTO[] },
+  activeOutputRef: { readonly current: HarnessActiveAssistantOutputDTO | null },
+  generationFailuresRef: { readonly current: readonly HarnessGenerationFailureDTO[] },
   toolStreamsRef: { readonly current: Map<string, RealtimeToolStream> },
   setModelStream: (stream: RealtimeModelStream | null) => void,
   setToolStreams: (streams: ReadonlyMap<string, RealtimeToolStream>) => void,
@@ -30,14 +34,16 @@ export function useRealtimeFrameScheduler(
     scheduler.setOnFlush(({ modelDirty, toolDirty }) => {
       if (modelDirty) {
         const current = modelStreamRef.current
-        const durable = invocationRef.current
+        const durable = activeOutputRef.current
         const isTerminal =
-          durable != null
-          && (durable.resultJson != null || durable.errorJson != null || durable.resultEntryId != null)
+          durable == null
+          || durable.resultEntryId != null
+          || isTerminalAssistantOutputStatus(durable.status)
         const isFailed =
           current != null
           && durable != null
-          && isFailedAttempt(current.attempt, durable, modelAttemptFailuresRef.current)
+          && current.invocationId === durable.generationId
+          && isFailedGeneration(durable.generationId, current.attempt, generationFailuresRef.current)
         if (!isTerminal && !isFailed) {
           setModelStream(current)
         }
@@ -47,8 +53,8 @@ export function useRealtimeFrameScheduler(
       }
     })
   }, [
-    invocationRef,
-    modelAttemptFailuresRef,
+    activeOutputRef,
+    generationFailuresRef,
     modelStreamRef,
     scheduler,
     setModelStream,

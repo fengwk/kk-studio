@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.BuiltinTestTransactions.builtin;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.BuiltinTestTransactions.builtinDriver;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T2;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -8,6 +10,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
@@ -19,8 +23,6 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessResult;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
@@ -83,27 +85,28 @@ class PostgresqlAssistantErrorSettlementTest {
               tx.lockThread(baseline.threadId()).orElseThrow();
               UUID id = tx.nextId();
               ModelRequestSpec request = StoreTestSupport.modelRequest();
-              tx.insertModelInvocation(
-                  new ModelInvocation(
-                      id,
-                      baseline.threadId(),
-                      baseline.turnStartEntryId(),
-                      userEntryId,
-                      request,
-                      ModelInvocationStatus.READY,
-                      0,
-                      null,
-                      null,
-                      null,
-                      null,
-                      List.of(),
-                      T2,
-                      T2));
+              builtin(tx)
+                  .insertModelInvocation(
+                      new ModelInvocation(
+                          id,
+                          baseline.threadId(),
+                          baseline.turnStartEntryId(),
+                          userEntryId,
+                          request,
+                          ModelInvocationStatus.READY,
+                          0,
+                          null,
+                          null,
+                          null,
+                          null,
+                          List.of(),
+                          T2,
+                          T2));
               // 与生产一致：dispatch 已开始、上游返回 HTTP 404，invocation 终结为 FAILED(INVALID_REQUEST)。
-              var model = tx.lockModelInvocation(id).orElseThrow();
-              tx.updateModelInvocation(model.markRunning(T2));
-              model = tx.lockModelInvocation(id).orElseThrow();
-              tx.updateModelInvocation(model.fail(error, T2));
+              var model = builtin(tx).lockModelInvocation(id).orElseThrow();
+              builtin(tx).updateModelInvocation(model.markRunning(T2));
+              model = builtin(tx).lockModelInvocation(id).orElseThrow();
+              builtin(tx).updateModelInvocation(model.fail(error, T2));
               tx.requestWork(target);
               return id;
             });
@@ -120,7 +123,8 @@ class PostgresqlAssistantErrorSettlementTest {
     Clock clock = Clock.fixed(now, ZoneOffset.UTC);
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
     try {
-      ThreadProcessor processor = new ThreadProcessor(store, resolver, config);
+      ThreadProcessor processor =
+          new ThreadProcessor(store, builtinDriver(store, resolver), config);
       ClaimedWork claimed =
           store
               .transaction(
@@ -131,7 +135,7 @@ class PostgresqlAssistantErrorSettlementTest {
       assertEquals(ThreadProcessResult.COMPLETED, processor.process(claimed));
 
       assertFalse(resolved.get());
-      assertTrue(store.transaction(tx -> tx.findModelInvocation(modelId)).isEmpty());
+      assertTrue(store.transaction(tx -> builtin(tx).findModelInvocation(modelId)).isEmpty());
       assertTrue(store.transaction(tx -> tx.findWork(target)).isEmpty());
       EntryPath path = loadPath(store, baseline.threadId());
       TurnEndPayload end = assertInstanceOf(TurnEndPayload.class, path.head().payload());
@@ -147,7 +151,8 @@ class PostgresqlAssistantErrorSettlementTest {
 
       // durable 状态经既有 snapshot 投影读到 IDLE（不再 RUNNABLE/挂起）。
       HarnessRuntime snapshotRuntime =
-          new HarnessRuntime(store, resolver, () -> new CompactionConfig(20_000));
+          new HarnessRuntime(
+              store, builtinDriver(store, resolver), () -> new CompactionConfig(20_000));
       assertEquals(
           ThreadRuntimeStatus.IDLE,
           snapshotRuntime.getThreadSnapshot(baseline.threadId()).runtimeStatus());

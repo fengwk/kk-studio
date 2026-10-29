@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.web.interaction;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.BuiltinTestTransactions.builtin;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -28,6 +29,15 @@ import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcherConfig;
+import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
+import fun.fengwk.kkstudio.harness.model.ModelInputModality;
+import fun.fengwk.kkstudio.harness.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
+import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
@@ -40,8 +50,8 @@ import fun.fengwk.kkstudio.harness.runtime.ToolInputSubmissionCommand;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.runtime.history.BuiltinHistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
@@ -54,15 +64,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
@@ -1085,7 +1086,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
             assistantEntryId,
             sessionId,
             userEntryId,
-            new HistoryPayloadMapper()
+            new BuiltinHistoryPayloadMapper()
                 .assistantPayload(
                     response,
                     requestSpec.toolBindings(),
@@ -1093,17 +1094,19 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
                     running.requestedAt()),
             now));
 
-    tx.insertModelInvocation(model);
-    tx.updateModelInvocation(running);
-    tx.updateModelInvocation(running.succeed(response, now));
-    tx.updateModelInvocation(
-        running.succeed(response, now).attachResultEntry(assistantEntryId, now));
+    builtin(tx).insertModelInvocation(model);
+    builtin(tx).updateModelInvocation(running);
+    builtin(tx).updateModelInvocation(running.succeed(response, now));
+    builtin(tx)
+        .updateModelInvocation(
+            running.succeed(response, now).attachResultEntry(assistantEntryId, now));
 
     UUID toolId = tx.nextId();
     ToolInvocation ready =
         new ToolInvocation(
             toolId,
-            modelId,
+            model.threadId(),
+            model.turnStartEntryId(),
             assistantEntryId,
             0,
             new ToolCall(callId, toolName, argumentsJson),

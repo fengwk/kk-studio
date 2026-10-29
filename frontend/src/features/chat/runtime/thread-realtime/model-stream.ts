@@ -1,5 +1,4 @@
 import {
-  getString,
   hasOnlyFields,
   isNonBlankString,
   isNonNegativeInteger,
@@ -8,10 +7,10 @@ import {
   nullableString,
   toEpochMillis,
 } from '@/features/chat/runtime/thread-realtime/realtime-values'
-import {
-  parseToolErrorText,
-} from '@/features/chat/runtime/thread-realtime/tool-stream'
-import type { ModelAttemptFailureDTO, ModelInvocationDTO } from '@/shared/api/generated/contracts'
+import type {
+  HarnessActiveAssistantOutputDTO,
+  HarnessGenerationFailureDTO,
+} from '@/shared/api/generated/contracts'
 
 export interface RealtimeToolCallDraft {
   index: number
@@ -332,141 +331,102 @@ export function isRealtimeModelDeltaGap(
 }
 
 /**
- * 判断指定 attempt 是否属于当前 invocation 已在 Snapshot 中由 durable failedAttempts 记录的旧 attempt。
- * 仅按 modelInvocationId + 正整数 attempt 匹配，遵循 fail-safe 原则。
+ * 判断指定 generation attempt 是否已被公共 Snapshot 的 failed attempt 审计记录。
+ * 仅按 generationId + 正整数 attempt 匹配，遵循 fail-safe 原则。
  */
-export function isFailedAttempt(
+export function isFailedGeneration(
+  generationId: string | null | undefined,
   attempt: number,
-  invocation: ModelInvocationDTO | null,
-  modelAttemptFailures: readonly ModelAttemptFailureDTO[] = [],
+  generationFailures: readonly HarnessGenerationFailureDTO[] = [],
 ): boolean {
-  if (invocation == null || !Number.isSafeInteger(attempt) || attempt <= 0) {
+  if (!generationId || !Number.isSafeInteger(attempt) || attempt <= 0) {
     return false
   }
-  return modelAttemptFailures.some(
+  return generationFailures.some(
     (failure) =>
-      failure?.modelInvocationId === invocation.id
+      failure?.generationId === generationId
       && failure.attempt === attempt,
   )
 }
 
-/**
- * 提取一次 ModelInvocation 规范的持久流式 checkpoint（如果有）。
- * 与 Java codec + record 构造函数保持一致：text/thinking 仅接受 string 或 null
- * （数字/对象视为格式错误），且二者至少有一个必须非空；纯空白是合法内容。
- * 合法的 null 在此处统一规范化为空字符串。
- */
-export function parseStreamCheckpoint(
-  json: string | null,
-): { attempt: number; sequence: number; text: string; thinking: string } | null {
-  if (json == null) {
-    return null
-  }
-  try {
-    const value: unknown = JSON.parse(json)
-    if (!isRecord(value)) {
-      return null
-    }
-    if (!isPositiveInteger(value.attempt) || !isNonNegativeInteger(value.sequence)) {
-      return null
-    }
-    const text = nullableString(value.text)
-    const thinking = nullableString(value.thinking)
-    if (text === undefined || thinking === undefined) {
-      // 类型不合法：Java codec 的 nullableText 仅接受 string 或 null。
-      return null
-    }
-    const normalizedText = text ?? ''
-    const normalizedThinking = thinking ?? ''
-    if (!normalizedText && !normalizedThinking) {
-      // Java record 构造函数只禁止两侧均为空；不会裁剪合法空白。
-      return null
-    }
-    return {
-      attempt: value.attempt,
-      sequence: value.sequence,
-      text: normalizedText,
-      thinking: normalizedThinking,
-    }
-  } catch {
-    return null
-  }
+/** 公共输出状态是否为冻结终态；终态投影不再接受任何迟到 delta。 */
+export function isTerminalAssistantOutputStatus(status: string): boolean {
+  return status === 'SUCCEEDED'
+    || status === 'FAILED'
+    || status === 'CANCELLED'
+    || status === 'BLOCKED'
 }
 
 /**
- * 从活动 ModelInvocation 的持久 checkpoint 中派生瞬态 model overlay。
+ * 从冻结的公共 activeAssistantOutput 投影瞬态 model overlay。
  *
- * - RUNNING 状态的 invocation 若 checkpoint 尚未 flush（checkpoint flush 不会
- *   提升 version），会得到一个 sequence 为 0 的空 base，确保第一条
- *   realtime delta 不会被永久丢弃；其 attempt 始终等于 invocation.attempt。
- * - 若 checkpoint 的 attempt 与 invocation.attempt 不一致，同样视为陈旧并忽略。
- * - 终止态的 result/error 若 resultEntryId 仍为 null，绝不能误以为是已落地的
- *   持久 Entry：安全起见，checkpoint overlay 会一直保留，直到 resultEntryId 被
- *   设置（或 invocation 消失）。
+ * <p>contents 只承载已完成的 text/thinking 片段，按服务端顺序拼接；sequence 是
+ * canonical 非负十进制字符串，只有可安全表示的整数才接受。resultEntryId 到达后由
+ * durable Entry 接管，投影立即消失。前端不再解析任何 Provider 原始 JSON。
  */
 export function snapshotModelStream(
   threadId: string,
-  invocation: ModelInvocationDTO | null,
+  activeOutput: HarnessActiveAssistantOutputDTO | null,
 ): RealtimeModelStream | null {
-  if (invocation == null || invocation.threadId !== threadId) {
+  if (
+    activeOutput == null
+    || !activeOutput.generationId.trim()
+    || !Number.isSafeInteger(activeOutput.attempt)
+    || activeOutput.attempt < 0
+  ) {
     return null
   }
-  if (invocation.resultEntryId != null) {
+  if (activeOutput.resultEntryId != null) {
     // 已应用持久的 result Entry：Entry 才是 transcript 的真实来源。
     return null
   }
-  const checkpoint = parseStreamCheckpoint(invocation.streamCheckpointJson)
-  const base = {
+  const sequence = parseCanonicalSequence(activeOutput.sequence)
+  if (sequence == null) {
+    return null
+  }
+  let text = ''
+  let thinking = ''
+  for (const content of activeOutput.contents) {
+    if (content.type === 'text') {
+      text += content.text ?? ''
+    } else if (content.type === 'thinking') {
+      thinking += content.text ?? ''
+    }
+  }
+  const failed = activeOutput.status === 'FAILED'
+    || activeOutput.status === 'CANCELLED'
+    || activeOutput.status === 'BLOCKED'
+  return {
     threadId,
-    invocationId: invocation.id,
-    attempt: invocation.attempt,
-    sequence: checkpoint?.attempt === invocation.attempt ? checkpoint.sequence : 0,
-    text: '',
-    thinking: '',
+    invocationId: activeOutput.generationId,
+    attempt: activeOutput.attempt,
+    sequence,
+    text,
+    thinking,
     toolCalls: [],
     // HTTP 快照不携带流事件时间；之后的实时事件按各自的 createdAt 排序。
     createdAt: '',
+    status: activeOutput.status === 'SUCCEEDED'
+      ? 'done'
+      : failed
+        ? 'error'
+        : 'streaming',
+    ...(failed
+      ? {
+          errorCode: activeOutput.error?.code || undefined,
+          errorText: activeOutput.error?.message || undefined,
+        }
+      : {}),
   }
-  const resultJson = invocation.resultJson
-  if (resultJson != null && resultJson.trim()) {
-    // 持久终止态边界：规范的 ProviderResponse 投影无条件覆盖
-    // 任何更高 sequence 的 lossy realtime overlay。当 result payload 格式不合法时，
-    // text/thinking 回退到冻结的 checkpoint（绝不是仅有 lossy realtime delta 的片段）。
-    const result = parseModelResultPayload(resultJson)
-    return {
-      ...base,
-      text: result?.text ?? checkpoint?.text ?? '',
-      thinking: result?.thinking ?? checkpoint?.thinking ?? '',
-      toolCalls: result?.toolCalls ?? [],
-      status: 'done',
-    }
+}
+
+/** canonical 非负十进制字符串 -> 安全整数；非规范或溢出值一律拒绝。 */
+function parseCanonicalSequence(value: string): number | null {
+  if (!/^(?:0|[1-9]\d*)$/.test(value)) {
+    return null
   }
-  const errorJson = invocation.errorJson
-  if (errorJson != null && errorJson.trim()) {
-    // 持久终止态错误：checkpoint 仍是用户已见 partial，错误 kind/message
-    // 单独携带；timeline 决定 FAILED/UNKNOWN/CANCELLED 的最终可见形态。
-    const error = parseModelErrorPayload(errorJson)
-    return {
-      ...base,
-      text: checkpoint?.text ?? '',
-      thinking: checkpoint?.thinking ?? '',
-      status: 'error',
-      errorCode: error?.code || undefined,
-      errorText: error?.message ?? parseToolErrorText(errorJson) ?? undefined,
-    }
-  }
-  if (checkpoint == null || checkpoint.attempt !== invocation.attempt) {
-    // 尚未 flush 或 attempt 已陈旧：保持空的 streaming base，以确保活动
-    // attempt 的第一条 delta 不丢失（checkpoint flush 不会提升 version）。
-    return { ...base, status: 'streaming' }
-  }
-  return {
-    ...base,
-    sequence: checkpoint.sequence,
-    text: checkpoint.text,
-    thinking: checkpoint.thinking,
-    status: 'streaming',
-  }
+  const parsed = Number(value)
+  return Number.isSafeInteger(parsed) ? parsed : null
 }
 
 /**
@@ -514,65 +474,4 @@ export function mergeRealtimeModelStreamAfterCheckpoint(
     missingSequence = stream.sequence + 1
   }
   return { stream, missingSequence }
-}
-
-/**
- * 将规范的持久 ProviderResponse JSON（{text, thinking, toolCalls, stopReason,
- * usage, cost}）解析为完整的终止态投影。仅在 JSON 格式不合法时返回 null；
- * 空 text/thinking 视为有效（Java codec 会无条件写入这两个键）。
- */
-function parseModelResultPayload(json: string): {
-  text: string
-  thinking: string
-  toolCalls: RealtimeToolCallDraft[]
-} | null {
-  try {
-    const value: unknown = JSON.parse(json)
-    if (!isRecord(value)) {
-      return null
-    }
-    return {
-      text: getString(value.text),
-      thinking: getString(value.thinking),
-      toolCalls: parseCompletedToolCalls(value.toolCalls),
-    }
-  } catch {
-    return null
-  }
-}
-
-function parseCompletedToolCalls(value: unknown): RealtimeToolCallDraft[] {
-  if (!Array.isArray(value)) {
-    return []
-  }
-  const calls: RealtimeToolCallDraft[] = []
-  for (const [index, item] of value.entries()) {
-    if (!isRecord(item)) {
-      continue
-    }
-    const id = getString(item.id)
-    const name = getString(item.name)
-    const argumentsJson = getString(item.argumentsJson)
-    if (!id && !name && !argumentsJson) {
-      continue
-    }
-    calls.push({ index, id, name, argumentsJson })
-  }
-  return calls
-}
-
-function parseModelErrorPayload(json: string): { code: string; message: string } | null {
-  try {
-    const value: unknown = JSON.parse(json)
-    if (!isRecord(value)) {
-      return null
-    }
-    const message = getString(value.message)
-    if (!message.trim()) {
-      return null
-    }
-    return { code: getString(value.kind), message }
-  } catch {
-    return null
-  }
 }

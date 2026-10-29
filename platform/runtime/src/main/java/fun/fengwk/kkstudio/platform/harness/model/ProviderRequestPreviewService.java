@@ -1,11 +1,15 @@
 package fun.fengwk.kkstudio.platform.harness.model;
 
+import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderAdapter;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.compaction.AutomaticCompactionPlanner;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTurns;
@@ -21,17 +25,11 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestMaterial
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAdapter;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.processor.TurnPlanPreview;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextClassifier;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLiveState;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
@@ -84,8 +82,6 @@ public final class ProviderRequestPreviewService {
   private final StorageUploadService uploadService;
   private final Clock clock;
   private final ModelRequestMaterializer materializer = new ModelRequestMaterializer();
-  private final AutomaticCompactionPlanner compactionPlanner = new AutomaticCompactionPlanner();
-  private final ThreadContextClassifier contextClassifier = new ThreadContextClassifier();
   private final UserMessageContentPreparer contentPreparer;
 
   public ProviderRequestPreviewService(
@@ -604,14 +600,11 @@ public final class ProviderRequestPreviewService {
           Reason.PREVIEW_QUEUED_COMMANDS,
           "thread still has queued commands; the preview would not reflect them");
     }
-    ThreadContext context =
-        contextClassifier.classify(
-            thread, snapshot.entryPath(), snapshot.model(), snapshot.toolSiblings());
-    if (!(context instanceof ThreadContext.IdleOrHistorical)) {
+    if (snapshot.liveState() != ThreadLiveState.IDLE_OR_HISTORICAL) {
       throw new ProviderRequestPreviewUnavailableException(
           Reason.PREVIEW_THREAD_BUSY, "thread is not idle; the next step is not an input turn");
     }
-    if (compactionPlanner.plan(
+    if (runtime.prepareAutomaticCompaction(
             thread, snapshot.entryPath(), compactionConfigProvider.compactionConfig(), true)
         != null) {
       throw new ProviderRequestPreviewUnavailableException(

@@ -75,7 +75,7 @@ export function ThreadPane({
   )
   const executing = projection.toolInvocations.some(
     (invocation) => invocation.status === 'RUNNING',
-  ) || projection.modelInvocation?.status === 'RUNNING'
+  ) || projection.activeAssistantOutput?.status === 'RUNNING'
   const pendingToolState = pendingTool ? toolExecutionState({
     invocationStatus: pendingTool.status,
     waitingForEnvironment: pendingTool.waitingForEnvironment,

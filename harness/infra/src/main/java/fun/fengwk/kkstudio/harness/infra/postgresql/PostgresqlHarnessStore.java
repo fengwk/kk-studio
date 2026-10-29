@@ -7,6 +7,7 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import fun.fengwk.kkstudio.harness.builtin.store.BuiltinStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 
 import javax.sql.DataSource;
@@ -29,11 +30,12 @@ import java.util.function.Supplier;
  * <p>同一 Store 实例通过 {@link ThreadLocal} 显式拒绝嵌套事务（nested transactions are not supported）， 并在 callback
  * 正常执行完毕后统一触发 {@link PostgresqlHarnessTransaction#rethrowDatabaseFailure()} 实施首个数据库故障 poisoning 校验。
  */
-public final class PostgresqlHarnessStore implements HarnessStore {
+public final class PostgresqlHarnessStore implements HarnessStore, BuiltinStore {
 
   private final JdbcTemplate jdbc;
   private final TransactionTemplate transactions;
   private final Supplier<UUID> idGenerator;
+  private final Object transactionSource = new Object();
   private final ThreadLocal<Boolean> active = new ThreadLocal<>();
   private final ThreadLocal<List<Runnable>> afterCommitActions = new ThreadLocal<>();
 
@@ -51,6 +53,22 @@ public final class PostgresqlHarnessStore implements HarnessStore {
     this.idGenerator = Objects.requireNonNull(idGenerator, "idGenerator");
   }
 
+  /** 把同一 Runtime 事务投影为 Builtin 领域窄视图。 */
+  @Override
+  public BuiltinStore.Transaction in(HarnessStore.Transaction tx) {
+    return requireTransaction(tx);
+  }
+
+  private PostgresqlHarnessTransaction requireTransaction(HarnessStore.Transaction tx) {
+    Objects.requireNonNull(tx, "tx");
+    if (!(tx instanceof PostgresqlHarnessTransaction transaction)) {
+      throw new IllegalArgumentException(
+          "store view requires a transaction created by this PostgresqlHarnessStore");
+    }
+    transaction.requireView(transactionSource);
+    return transaction;
+  }
+
   /**
    * 在受管的 PostgreSQL 事务边界中执行 Store 操作回调。
    *
@@ -60,7 +78,7 @@ public final class PostgresqlHarnessStore implements HarnessStore {
    * @throws IllegalStateException 若当前线程在同一 Store 实例中尝试嵌套开启事务
    */
   @Override
-  public <T> T transaction(Function<Transaction, T> callback) {
+  public <T> T transaction(Function<HarnessStore.Transaction, T> callback) {
     Objects.requireNonNull(callback, "callback");
     if (Boolean.TRUE.equals(active.get())) {
       throw new IllegalStateException("nested transactions are not supported");
@@ -75,7 +93,7 @@ public final class PostgresqlHarnessStore implements HarnessStore {
           transactions.execute(
               status -> {
                 PostgresqlHarnessTransaction transaction =
-                    new PostgresqlHarnessTransaction(jdbc, idGenerator);
+                    new PostgresqlHarnessTransaction(jdbc, idGenerator, transactionSource);
                 try {
                   T value = callback.apply(transaction);
                   transaction.rethrowDatabaseFailure();

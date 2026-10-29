@@ -21,12 +21,14 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinAgentDriver;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentSessionListener;
 import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlHarnessStore;
 import fun.fengwk.kkstudio.harness.infra.realtime.RealtimeBus;
 import fun.fengwk.kkstudio.harness.infra.realtime.RealtimeEventSource;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.harness.runtime.driver.AgentDriver;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
@@ -124,6 +126,7 @@ class HarnessRuntimeConfigurationTest {
   @Autowired private HarnessRuntime harnessRuntime;
   @Autowired private ModelRequestDebugService modelRequestDebugService;
   @Autowired private HarnessWorkDispatcher harnessWorkDispatcher;
+  @Autowired private AgentDriver agentDriver;
   @Autowired private HarnessDispatcherProperties harnessDispatcherProperties;
   @Autowired private RuntimeToolCatalogSource runtimeToolCatalogSource;
   @Autowired private ApplicationContext applicationContext;
@@ -173,6 +176,7 @@ class HarnessRuntimeConfigurationTest {
     assertNotNull(processorScheduler);
     assertNotNull(heartbeatWorkerExecutor);
     assertNotNull(harnessRuntime);
+    assertInstanceOf(BuiltinAgentDriver.class, agentDriver);
     assertNotNull(modelRequestDebugService);
     assertNotNull(harnessWorkDispatcher);
     assertNotNull(harnessDispatcherProperties);

@@ -1,29 +1,27 @@
 package fun.fengwk.kkstudio.harness.runtime.port;
 
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
-import java.util.List;
 import java.util.UUID;
 
 /**
- * terminal ToolResult 的 durable history 物化端口：在 Tool outcome Entry 插入前、同一 store 事务内调用，把已上传的瞬时 {@code
- * blob-upload} 引用转为 Session 持有的全局 Blob 引用并返回 durable 内容列表。
+ * 单工具 terminal 的稳定 outcome 物化端口：在同一 store 事务内校验并消费已上传的瞬时 {@code blob-upload} 引用，返回可直接持久化、 也可直接写入
+ * Entry 的稳定 {@link ToolResult}。
  *
- * <p>实现不得自行解析或访问任意 data/http/https URI。任何一步失败都让调用方事务回滚，绝不写入部分 history；持久化 message 只能携带 durable
- * {@code ResourceMessageContent}。
+ * <p>返回结果的 Text/JSON 内容保持不变；Resource 必须改为 Session 已持有或已转移的 {@code kkstudio:/resources/<blobId>}
+ * 引用，并携带权威文件名与 blob 事实。实现不得自行访问 data/http/https URI。任何确定性拒绝抛 {@link
+ * ToolOutcomeMaterializationException}；数据库或存储基础设施失败必须原样传播，由调用方等待恢复。
  */
 public interface ToolResultHistoryMaterializer {
 
   /**
-   * 事务内把 {@link ToolResult} 的全部 content 映射为 durable {@link AgentMessageContent} 列表（与输入 content
-   * 一一对应，顺序不变）：Text/Json 原样映射，Resource 内容物化为 blob-backed 内容。
+   * 事务内把终态工具结果转换为稳定 outcome。
    *
-   * @param sessionId 会话标识
+   * @param sessionId 结果归属的 Session
    * @param toolName 工具名称
-   * @param result 终态工具结果
-   * @return 非空列表（调用方在为空时回退为空文本，与无物化路径一致）
-   * @throws IllegalArgumentException 引用不是已上传的 Blob、完整性校验失败或内容不可外部化
+   * @param result Gateway 已终态化的工具结果
+   * @return 稳定结果；所有 Resource 已指向 Session 持有的 Blob
+   * @throws ToolOutcomeMaterializationException 引用不可稳定表达
    */
-  List<AgentMessageContent> materialize(UUID sessionId, String toolName, ToolResult result);
+  ToolResult materialize(UUID sessionId, String toolName, ToolResult result);
 }

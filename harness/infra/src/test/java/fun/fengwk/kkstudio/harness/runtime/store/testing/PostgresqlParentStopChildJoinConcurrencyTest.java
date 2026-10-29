@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.BuiltinTestTransactions.builtin;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.BuiltinTestTransactions.builtinDriver;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.CREATION_REQUEST_HASH;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T1;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T3;
@@ -17,6 +19,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.builtin.store.BuiltinStore;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.StopCommand;
@@ -36,7 +40,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatu
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessResult;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
@@ -98,7 +101,10 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
   void setUp() {
     store = PostgresqlHarnessStoreFixture.resetAndCreate();
     runtime =
-        new HarnessRuntime(store, (threadId, path, prep) -> null, () -> CompactionConfig.DEFAULT);
+        new HarnessRuntime(
+            store,
+            builtinDriver(store, (threadId, path, prep) -> null),
+            () -> CompactionConfig.DEFAULT);
   }
 
   private static EntryPayload userMessagePayload(String text) {
@@ -212,12 +218,12 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
                   List.of(),
                   now,
                   now);
-          tx.insertModelInvocation(model);
+          builtin(tx).insertModelInvocation(model);
           var running = model.markRunning(now);
-          tx.updateModelInvocation(running);
+          builtin(tx).updateModelInvocation(running);
           if (modelSucceeded) {
             var succeeded = running.succeed(response, now);
-            tx.updateModelInvocation(succeeded);
+            builtin(tx).updateModelInvocation(succeeded);
           }
 
           UUID joinInvocationId = tx.nextId();
@@ -260,7 +266,7 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
                 new AssistantError("RESOLVER_REJECT", "no continuation in test"));
     return new ThreadProcessor(
         store,
-        resolver,
+        builtinDriver(store, resolver),
         new ThreadProcessorConfig(Duration.ofSeconds(5), () -> new CompactionConfig(20_000)));
   }
 
@@ -269,22 +275,31 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
       UUID targetRoot,
       CountDownLatch treeLockedLatch,
       CountDownLatch canCommitLatch) {
+    ThreadLocal<BuiltinStore.Transaction> active = new ThreadLocal<>();
     return (HarnessStore)
         Proxy.newProxyInstance(
             HarnessStore.class.getClassLoader(),
-            new Class<?>[] {HarnessStore.class},
+            new Class<?>[] {HarnessStore.class, BuiltinStore.class},
             (proxy, method, args) -> {
+              if (method.getDeclaringClass() == BuiltinStore.class
+                  && method.getName().equals("in")) {
+                if (active.get() == null || active.get() != args[0]) {
+                  throw new IllegalArgumentException("transaction is not owned by this test store");
+                }
+                return active.get();
+              }
               if (method.getName().equals("transaction")) {
                 @SuppressWarnings("unchecked")
                 Function<HarnessStore.Transaction, Object> callback =
                     (Function<HarnessStore.Transaction, Object>) args[0];
                 return delegate.transaction(
                     tx -> {
-                      HarnessStore.Transaction wrapped =
-                          (HarnessStore.Transaction)
+                      ((BuiltinStore) delegate).in(tx);
+                      BuiltinStore.Transaction wrapped =
+                          (BuiltinStore.Transaction)
                               Proxy.newProxyInstance(
                                   HarnessStore.Transaction.class.getClassLoader(),
-                                  new Class<?>[] {HarnessStore.Transaction.class},
+                                  new Class<?>[] {BuiltinStore.Transaction.class},
                                   (txProxy, txMethod, txArgs) -> {
                                     Object res = txMethod.invoke(tx, txArgs);
                                     if (txMethod.getName().equals("lockTree")
@@ -304,7 +319,12 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
                                     }
                                     return res;
                                   });
-                      return callback.apply(wrapped);
+                      active.set(wrapped);
+                      try {
+                        return callback.apply(wrapped);
+                      } finally {
+                        active.remove();
+                      }
                     });
               }
               return method.invoke(delegate, args);
@@ -336,7 +356,10 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
     HarnessStore latchingStore =
         latchingTreeLockStore(store, fixture.parentThreadId(), parentTreeLocked, parentCanCommit);
     HarnessRuntime latchingRuntime =
-        new HarnessRuntime(latchingStore, (t, p, c) -> null, () -> CompactionConfig.DEFAULT);
+        new HarnessRuntime(
+            latchingStore,
+            builtinDriver(latchingStore, (t, p, c) -> null),
+            () -> CompactionConfig.DEFAULT);
 
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
     try (ExecutorService executor = Executors.newFixedThreadPool(2)) {

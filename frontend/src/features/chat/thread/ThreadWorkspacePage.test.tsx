@@ -85,7 +85,7 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
     branchSettings: {
       agentName: 'assistant',
       model: {
-                modelName: 'MiniMax',
+        modelName: 'MiniMax',
         variant: 'default',
       },
       environmentName: null,
@@ -129,7 +129,8 @@ function snapshotWithPendingTool(targetThreadId: string): HarnessThreadSnapshotD
     toolInvocations: [
       {
         id: 'inv-bash-1',
-        modelInvocationId: 'm-1',
+        threadId: 'thread-1',
+        turnStartEntryId: 'turn-1',
         assistantEntryId: 'entry-tool-1',
         callIndex: 0,
         status: 'WAITING_APPROVAL',
@@ -155,8 +156,9 @@ function snapshotWithPendingTool(targetThreadId: string): HarnessThreadSnapshotD
         updateTime: 1785232801,
       },
     ],
-    modelInvocation: null,
-    modelAttemptFailures: [],
+    executionStatus: 'IDLE',
+    activeAssistantOutput: null,
+    generationFailures: [],
     manualCompaction: { available: true, disabledReason: null },
     stopReceipts: [],
     unconfirmedExecutions: [],

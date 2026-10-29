@@ -149,6 +149,8 @@ function createDebugData(): ThreadModelRequestDebugData {
     planningError: null,
     frozenInvocation: {
       kind: 'FROZEN_INVOCATION',
+      generationId: 'generation-1',
+      attempt: 1,
       requestJson: JSON.stringify({
         model: 'minimax-m2.7',
         messages: [{ role: 'user', content: 'Execute responsive layout verification.' }],

@@ -14,6 +14,9 @@ import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.common.json.StrictJson;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
+import fun.fengwk.kkstudio.harness.model.provider.codec.ProviderReplayStateJsonCodec;
+import fun.fengwk.kkstudio.harness.model.provider.codec.ProviderResponseJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.CancelledThreadInput;
 import fun.fengwk.kkstudio.harness.runtime.StoppedThreadReceipt;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
@@ -36,9 +39,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderReplayStateJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderResponseJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.store.EnvironmentToolWaitRow;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
@@ -300,7 +300,8 @@ final class PostgresqlHarnessRows {
       (resultSet, rowNumber) ->
           new ToolInvocation(
               uuid(resultSet, "id"),
-              uuid(resultSet, "model_invocation_id"),
+              uuid(resultSet, "thread_id"),
+              uuid(resultSet, "turn_start_entry_id"),
               uuid(resultSet, "assistant_entry_id"),
               resultSet.getInt("call_index"),
               JSON.read(resultSet.getString("call"), ToolCall.class, "toolCall"),

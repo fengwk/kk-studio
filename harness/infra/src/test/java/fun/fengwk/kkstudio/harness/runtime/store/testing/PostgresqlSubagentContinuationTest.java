@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.BuiltinTestTransactions.builtin;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.BuiltinTestTransactions.builtinDriver;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.CREATION_REQUEST_HASH;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T1;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.assistantResponse;
@@ -19,6 +21,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
@@ -27,6 +30,7 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadLifecycleCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
+import fun.fengwk.kkstudio.harness.runtime.driver.GenerationStatus;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomMessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.SettingsPayload;
@@ -35,7 +39,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinOutcome;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessResult;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
@@ -84,12 +87,13 @@ class PostgresqlSubagentContinuationTest {
     TurnResolver resolver =
         (threadId, path, preparation) ->
             new TurnResolver.Resolved(succeededRequest(), 100_000, 16_384);
-    runtime = new HarnessRuntime(store, resolver, () -> CompactionConfig.DEFAULT);
+    runtime =
+        new HarnessRuntime(store, builtinDriver(store, resolver), () -> CompactionConfig.DEFAULT);
     scheduler = Executors.newSingleThreadScheduledExecutor();
     processor =
         new ThreadProcessor(
             store,
-            resolver,
+            builtinDriver(store, resolver),
             new ThreadProcessorConfig(Duration.ofSeconds(5), () -> new CompactionConfig(20_000)));
   }
 
@@ -168,7 +172,9 @@ class PostgresqlSubagentContinuationTest {
     assertEquals(
         new CustomMessageCommandPayload(AgentMessage.user("second task")), secondInput.payload());
     assertEquals(
-        running.model(), queued.model(), "resume must not replace or cancel the running model");
+        running.generation().generationId(),
+        queued.generation().generationId(),
+        "resume must not replace or cancel the running model");
     assertEquals(running.thread().headEntryId(), queued.thread().headEntryId());
     assertEquals(1L, queued.thread().inputThroughSequence());
     assertUnmatchedWithoutReceipts(delegation, secondJoin);
@@ -193,7 +199,7 @@ class PostgresqlSubagentContinuationTest {
     assertInstanceOf(SettingsPayload.class, appliedSettings.entryPath().head().payload());
     assertEquals(1L, appliedSettings.thread().inputThroughSequence());
     assertEquals(List.of(secondInput), appliedSettings.queuedCommands());
-    assertNull(appliedSettings.model());
+    assertNull(appliedSettings.generation());
     assertUnmatchedWithoutReceipts(delegation, secondJoin);
 
     processNext(childId);
@@ -202,7 +208,7 @@ class PostgresqlSubagentContinuationTest {
     assertEquals(5L, secondTurn.thread().inputThroughSequence());
     assertEquals(settings, secondTurn.entryPath().baseSettings());
     assertTrue(secondTurn.queuedCommands().isEmpty());
-    assertNotEquals(running.model().id(), secondTurn.model().id());
+    assertNotEquals(running.generation().generationId(), secondTurn.generation().generationId());
     assertTrue(
         secondTurn.entryPath().entries().stream()
             .anyMatch(
@@ -419,25 +425,27 @@ class PostgresqlSubagentContinuationTest {
         tx -> {
           ThreadState thread = ThreadLifecycleCoordinator.lockThreadWithParent(tx, threadId);
           UUID turn = tx.loadEntryPath(thread.headEntryId()).openTurnStart().orElseThrow().id();
-          ModelInvocation model = tx.findModelInvocationByTurn(threadId, turn).orElseThrow();
+          ModelInvocation model =
+              builtin(tx).findModelInvocationByTurn(threadId, turn).orElseThrow();
           assertEquals(ModelInvocationStatus.READY, model.status());
-          tx.lockModelInvocation(model.id());
-          tx.updateModelInvocation(model.markRunning(T1));
+          builtin(tx).lockModelInvocation(model.id());
+          builtin(tx).updateModelInvocation(model.markRunning(T1));
           return null;
         });
   }
 
   private void finishModel(UUID threadId, String text) {
-    if (snapshot(threadId).model().status() == ModelInvocationStatus.READY) {
+    if (snapshot(threadId).generation().status() == GenerationStatus.READY) {
       startModel(threadId);
     }
     store.transaction(
         tx -> {
           ThreadState thread = ThreadLifecycleCoordinator.lockThreadWithParent(tx, threadId);
           UUID turn = tx.loadEntryPath(thread.headEntryId()).openTurnStart().orElseThrow().id();
-          ModelInvocation model = tx.findModelInvocationByTurn(threadId, turn).orElseThrow();
+          ModelInvocation model =
+              builtin(tx).findModelInvocationByTurn(threadId, turn).orElseThrow();
           assertEquals(ModelInvocationStatus.RUNNING, model.status());
-          tx.lockModelInvocation(model.id());
+          builtin(tx).lockModelInvocation(model.id());
           ProviderResponse template = assistantResponse();
           ProviderResponse response =
               new ProviderResponse(
@@ -449,7 +457,7 @@ class PostgresqlSubagentContinuationTest {
                   template.requestId(),
                   template.serviceTier(),
                   template.rawUsageJson());
-          tx.updateModelInvocation(model.succeed(response, T1));
+          builtin(tx).updateModelInvocation(model.succeed(response, T1));
           tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId));
           return null;
         });

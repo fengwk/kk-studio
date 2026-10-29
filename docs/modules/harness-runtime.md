@@ -1,15 +1,18 @@
 # Harness Runtime
 
-`harness-runtime` 是 Agent 执行内核。它定义会话执行协议：Session 的只追加 Entry Tree 保存历史，Thread 的命令邮箱保存已接受的输入，Invocation 保存在途调用，Work 保存调度义务；用户输入、模型结果、工具副作用与控制操作都沿这些持久事实推进，崩溃恢复复用同一组状态转换。同一模块还承载三类面向扩展的契约：Tool 值契约、Contributor SPI 与第一方内置工具，以及 prompt 模板。
+`harness-runtime` 是 Agent 执行内核的公共层。它定义与具体执行后端无关的会话协议：Session 的只追加 Entry Tree 保存历史，Thread 的命令邮箱保存已接受的输入，ToolInvocation 保存工具在途调用，Work 保存调度义务；用户输入、工具副作用与控制操作都沿这些持久事实推进，崩溃恢复复用同一组状态转换。同一模块还承载三类面向扩展的契约：Tool 值契约、Contributor SPI 与第一方内置工具，以及 prompt 模板。
 
-模块是纯 Java：生产依赖只有 [Common](common.md)、[Harness Environment](harness-environment.md)、Jackson 3、SLF4J 与 JGit（仅用于权限路径匹配），不感知 Spring、JDBC、HTTP 或模型 SDK。持久化与调度分发在 [Harness Infra](harness-infra.md)，模型协议编码在 [Harness Provider](harness-provider.md)，网关、目录与产品用例在 [Platform](platform.md)，组合根在 [Web](web.md)。
+具体模型生成由 Builtin Driver 实现：组合根直接装配，Runtime 通过 [`runtime.driver`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/driver/) 的窄契约调用它，不动态加载、不读取 Driver 私有状态。Builtin 的模型状态、请求物化、MODEL Work 与自动压缩策略见 [Harness Agent Builtin](harness-agent-builtin.md)。
+
+模块是纯 Java：生产依赖只有 [Common](common.md)、[Harness Environment](harness-environment.md)、[Harness Model](harness-model.md)、Jackson 3、SLF4J 与 JGit（仅用于权限路径匹配），不感知 Spring、JDBC、HTTP 或模型 SDK。持久化与调度分发在 [Harness Infra](harness-infra.md)，模型契约与协议编码在 [Harness Model](harness-model.md)，网关、目录与产品用例在 [Platform](platform.md)，组合根在 [Web](web.md)。
 
 ## 持久模型
 
 ```text
 Session ─ Entry Tree        只追加的对话历史；分支 = 从 ROOT 到某个 head 的路径
 Thread  ─ head + 邮箱        指向自己的 head，持有执行控制、输入水位与已接受的 Command
-ModelInvocation / ToolInvocation   当前回合在途调用的状态机行，终态物化进历史后删除
+ToolInvocation              工具在途调用、审批记录、结果与副作用批次
+ModelInvocation（Builtin Driver 私有）  当前回合在途模型生成的状态机行，终态物化进历史后删除
 Work                         每个 target（THREAD / MODEL / TOOL）至多一行的调度义务与租约
 Join                         一次子执行委派的票据，只记凭据与冻结的终态坐标
 ```
@@ -71,7 +74,7 @@ tree 锁只用于结构或跨 Thread 的写操作（spawn、Stop、删除、fork
 
 对外状态都从 Thread 自身事实派生，不递归子树。[`ThreadSnapshot`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ThreadSnapshot.java) 的 `runtimeStatus()` 统一为严格三态：`RUNNING`、`WAITING` 与 `IDLE`，与 `executionControl`（`RUNNABLE` / `STOPPED`）完全正交。由 [`ThreadActivityEvaluator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/ThreadActivityEvaluator.java) 共享最小客观事实判定：本地活跃执行、自身 open owner compaction 或仍有未完成的直接 `SETTLE_OWNER_TURN` 子 Join 始终为 `RUNNING`；待启动输入需求（排队命令或未消费的已应用通知水位）仅在 `RUNNABLE` 下体现为 `RUNNING`，在 `STOPPED` 下保留通知但不自启（明确抑制本地回合启动，不冒充 RUNNING）；本地已让出执行但存在未完成直接 `NOTIFY_PARENT` 子 Join（`incompleteChildJoins > 0`）体现为 `WAITING`；其余完全静止为空闲 `IDLE`。非 `IDLE` 状态下 `outcome()` 强制抑制为 null，严禁在等待子任务或活跃时宣称 `COMPLETED`。需要注意：未确认执行（`UNCONFIRMED`）会让 Thread 保持非空闲；显式 `ABANDONED` 或已确认真实退出不再阻塞，但退出 ACK 只证明本地 body 返回与资源释放完成，不扩张为对远端进程或副作用的普遍事实，因此三态仍不能单独证明外部进程已退出。`executionFacts()` 另给三个独立事实：`hasWork`、`waitingForHuman` 与 `hasUnknownToolOutcome`。
 
-[`ThreadContextClassifier`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/ThreadContextClassifier.java) 是纯函数：输入 ThreadState、root-to-head 路径、open 回合的 ModelInvocation 及其 Tool siblings，输出唯一的 [`ThreadContext`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/ThreadContext.java)（`IdleOrHistorical`、`ContinuationDue`、`ModelActive`、`ModelTerminalPending`、`ToolActive`、`ToolTerminalPending`）；任何所有权或配对不一致都直接抛 `IllegalStateException`。快照与 Processor 共用这一分类。
+[`ThreadContextClassifier`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/ThreadContextClassifier.java) 是纯函数：输入 ThreadState、root-to-head 路径、Driver 按 open 回合锁定的中立状态与 Tool siblings，输出唯一的 [`ThreadContext`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/ThreadContext.java)（`IdleOrHistorical`、`ContinuationDue`、`ModelActive`、`ModelTerminalPending`、`ToolActive`、`ToolTerminalPending`）；任何所有权或配对不一致都直接抛 `IllegalStateException`。快照与 Processor 共用这一分类。
 
 ## 命令邮箱
 
@@ -93,36 +96,7 @@ tree 锁只用于结构或跨 Thread 的写操作（spawn、Stop、删除、fork
 
 `getThreadSnapshot` 只锁目标 Thread 及其当前适用的 Model/Tool，返回事务内最新已提交的 checkpoint。`getThreadTree` 持执行根的 tree 锁读取同根全部 Thread（同 Session 的其它执行根不在其中），节点上的 `turnCount`、`toolCallCount` 与 `outcome` 只按各自 root-to-head 路径计算，查询不写任何事实。
 
-## Invocation
-
-### ModelInvocation
-
-[`ModelInvocation`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelInvocation.java) 记录一次模型调用的冻结请求契约、状态、`attempt`、流式 checkpoint、终态结果与重试审计：
-
-```text
-READY   -> RUNNING（准入通过）/ FAILED（准入拒绝或请求物化失败）/ CANCELLED
-RUNNING -> SUCCEEDED / FAILED / CANCELLED / UNKNOWN / READY（重试）
-```
-
-`attempt` 只在 `READY -> RUNNING` 上 +1，且该转换在请求发出之前持久化。重试时追加一条 `ModelAttemptFailure` 并清空活动 checkpoint，下次用同一冻结参数重新发起。checkpoint 只能在 RUNNING 中增长：同 sequence 精确重放，更大 sequence 必须保留已有 text/thinking 前缀。失败按唯一决策点判定是否重试：`TRANSIENT`、`INVALID_RESPONSE` 与配置允许的 HTTP 状态共用一份预算，`OVERFLOW`、`CANCELLED` 与其它状态直接终态；Thread 消费失败终态时在同一事务追加 `ASSISTANT_ERROR` 与 `TURN_END(FAILED)`。
-
-[`ModelRequestSpec`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelRequestSpec.java) 冻结一次调用不可变的请求契约：
-
-```text
-providerType / providerConnectionGenerationId / model / variant / outputTokens
-systemInstruction / toolBindings / subagentBindings / cacheControl
-```
-
-完整历史、可由 bindings 派生的 Provider tools、YOLO、凭证与端点都留在各自的事实源里；Skill 的名称、描述与稳定路径已写入 `systemInstruction`。[`ModelRequestMaterializer`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelRequestMaterializer.java) 每次 attempt 从不可变 `EntryPath` 与冻结 Spec 纯内存重建供应商中立的 `ProviderRequest`。
-
-[`ProviderMessageProjector`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/ProviderMessageProjector.java) 把语义上下文投影为 `ProviderMessage`，投影只影响本次请求，从不改写 durable 历史：
-
-- 会话角色只有 `USER`、`ASSISTANT`、`TOOL`，系统指令由顶层 `systemInstruction` 承载。
-- native 资格按本次 `toolBindings` 与调用冻结的 Environment name 判断；工具未绑定、未知或环境变化时，调用与结果降级为 USER `Previous context:` 语义上下文。降级项的动作文本取调用成功时冻结的 `historyAction`，没有时用逐字保留 arguments 的中性描述；逐字内容用动态长度的反引号围栏。
-- 需要改写的 assistant 消息只在本次请求中放弃不兼容的 opaque replay；未配对的 native 调用在本次请求中合成 error 结果 `No result provided`，不写历史。
-- 编辑类结果的模型可见 diff 从持久化的 `details.editReview` 纯内存派生；投影、压缩预算估算与请求预览共用同一派生内容。
-
-### ToolInvocation
+## ToolInvocation
 
 [`ToolInvocation`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolInvocation.java) 记录冻结的 `ToolCall`、[`ToolBinding`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolBinding.java)、所属 Assistant 与 `callIndex`、审批记录、结果与副作用批次：
 
@@ -134,6 +108,8 @@ RUNNING          -> SUCCEEDED / FAILED / CANCELLED / UNKNOWN / READY（重试）
 ```
 
 `attempt` 同样在副作用之前持久化；RUNNING 的旧租约恢复一律收敛为 `UNKNOWN`，绝不重放。`WAITING_INPUT` 与 `WAITING_APPROVAL` 刻意分离：问卷不能授权工具，审批也不能代替回答，两者都只占 durable 行，不占 Worker。`ToolBinding` 冻结工具定义、Contributor 归属、环境支持级别与 Environment id/name；无环境选择的 `REQUIRED` 工具在规划时已被过滤，网关对已移除或定义已变化的 binding 返回确定性失败。执行端不写 Store：[`ToolEffectBatch`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolEffectBatch.java) 只在成功时携带至多 16 条 CUSTOM 副作用，由 ThreadProcessor 在同一事务把结果与副作用物化为 Entry 并删除临时行；真实工具的所有终态都把原 binding 写入结果元数据，删除临时行或 fork 不会丢失原定义。
+
+[`ToolOutcomeQuery`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ToolOutcomeQuery.java) 按 Thread 和 invocation 身份查询稳定终态：调用行仍在时读取 terminal Invocation，物化后从当前路径的 ToolResult Entry 读取，并校验所属 Thread 与 Turn。返回的 [`ToolOutcomeView`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ToolOutcomeView.java) 保留调用身份、终态与稳定内容；`resultError` 是模型可见的业务错误标志，与生命周期 `status` 正交，执行 `SUCCEEDED` 也可能携带业务错误。
 
 ## Work
 
@@ -152,11 +128,7 @@ Thread claim 只归约一个持久化动作；Model / Tool claim 驱动一次外
 - `MODEL_ACTIVE` / `TOOL_ACTIVE`：外部执行仍在进行，归还 claim。
 - `CONTINUATION_DUE` / `IDLE_OR_HISTORICAL`：先处理适用的自动压缩；有排队输入或通知需求时启动 `INPUT` 回合并一次性消费冻结 cutoff 内的完整队列，否则偿还续写义务或直接完成。
 
-需要规划的回合在单个事务内完成：锁 Thread、捕获命令快照、构造只存在于内存的 candidate 路径，同步调用 `TurnResolver`，机械校验其结果与 candidate 一致后提交 `TURN_START`、消息、命令标记与 ModelInvocation。只有显式的 `TurnResolveTransientException` 在回滚后按失败延迟重排，其它解析失败落 durable `FAILED` 终态，绝不静默丢失 Work。
-
-[`ModelProcessor`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ModelProcessor.java) 的短事务只锁 own Thread -> Model -> Work。它先物化请求并调用 `ModelGateway.admit`：`Busy` 按 `retryAfter` 重排，`Rejected` 与物化失败转 `FAILED`（都确定未发出请求），`Admitted` 后先持久化 `READY -> RUNNING`——这一步同时是陈旧启动围栏。随后 [`ModelExecution`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ModelExecution.java) 在独占虚拟线程上阻塞执行，结束后在同一线程提交终态；取消（Stop、租约丢失、关闭）只需 interrupt，之后到达的结果被丢弃。旧租约过期的 RUNNING 按当前 attempt 计入 [`InvocationRetryPolicy`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/retry/InvocationRetryPolicy.java)：允许重试则记一条失败 attempt 回到 READY，预算耗尽才终止，同一 attempt 绝不重放。
-
-流式增量在内存合并，按 [`ModelStreamConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ModelStreamConfig.java) 的窗口推送有损的 `MODEL_DELTA`；累计文本按独立节奏落库为 checkpoint，提交成功后才发布 `MODEL_CHECKPOINT`，集成方也可以请求当前 owner 立即追帧。旧 attempt、租约丢失或 Stop 竞态立即停止发布，绝不补写未提交的批次。成功响应在落库前先冻结每个工具调用的历史动作：经 [`ToolHistoryActionResolver`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/ToolHistoryActionResolver.java) 调用 Tool 的历史渲染器；任何缺失或失败都退化为不冻结，绝不阻断模型调用。
+需要规划的回合在单个事务内完成：锁 Thread、捕获命令快照、构造只存在于内存的 candidate 路径，同步调用 Driver 解析，机械校验其结果与 candidate 一致后提交 `TURN_START`、消息、命令标记与 Driver 私有 generation。只有显式的 `TurnResolveTransientException` 在回滚后按失败延迟重排，其它解析失败落 durable `FAILED` 终态，绝不静默丢失 Work。
 
 [`ToolProcessor`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolProcessor.java) 的短事务只锁 own Thread -> Model -> Tool -> Work。执行根开启 YOLO 时直接放行，否则在事务外调用 `ToolGateway.preflight`：`Allow` 进入执行，`Ask` 转 `WAITING_APPROVAL`（可附带编辑审查），`Deny` 转 `FAILED`。放行后同样经 `admit` 准入、先持久化 RUNNING，再由 [`ToolExecution`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolExecution.java) 在独占虚拟线程上执行；终态提交之后才释放并发租约与目录租用，因此取消只需 interrupt。只有 `retryable` 且工具为 `READ_ONLY` / `IDEMPOTENT` 的失败才重试；`UNKNOWN` 是终态，与其它终态一样物化为失败结果交给下一轮模型，不阻塞 Thread。工具增量只支持文本与 JSON，作为有损 `TOOL_PARTIAL` 发布。
 
@@ -186,8 +158,10 @@ preflight 创建的 execution 在返回 `STARTED` 前由 Processor 负责清理�
 
 ```text
 父 TURN_START(COMPACTION) -> COMPACTION(summaryText) -> TURN_END
-子 TURN_START(INPUT)      -> ModelInvocation（Compaction Agent）-> ASSISTANT MESSAGE(summaryText) -> TURN_END
+子 TURN_START(INPUT)      -> Driver generation（Compaction Agent）-> ASSISTANT MESSAGE(summaryText) -> TURN_END
 ```
+
+自动压缩的阈值判定由各 Driver 通过 `AgentDriver.prepareAutomaticCompaction` 提供；Builtin 的 owned `HISTORY` -> hard overflow -> eligible threshold 策略见 [Harness Agent Builtin](harness-agent-builtin.md#自动压缩)。Runtime 只负责压缩回合结构与子执行结算。
 
 子执行使用目录中的 `Compaction` 内置 Agent，约束为父回合的输出预算、禁用 prompt cache、禁止自动压缩；[`CompactionStart`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionStart.java) 冻结阶段、触发原因、执行模型、输出预算、切分锚点与子身份，后来排队的输入不会污染它。
 
@@ -240,8 +214,6 @@ Stop 在 tree 锁内校验目标 version 与 `stopRequestId`，按 `parentThread
 
 | 端口 | 契约 |
 | --- | --- |
-| [`TurnResolver`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/TurnResolver.java) | 在调用方事务内同步、无副作用地把 candidate 路径解析为冻结 Spec 与上下文窗口/输出预算，或确定性 `Rejected`；临时故障只用 typed `TurnResolveTransientException` 表达 |
-| [`ModelGateway`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/ModelGateway.java) | `admit` 做纯本地准入，返回 `Admitted` / `Busy(retryAfter)` / `Rejected`；`Admitted.run` 在调用线程上阻塞执行并同步交出增量 |
 | [`ToolGateway`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/ToolGateway.java) | `preflight` 返回 `Allow` / `Ask` / `Deny`；`admit` 接收携带审批快照的执行请求，返回 `Admitted(run)` / `Busy` / `Rejected`；`Run.close` 释放本地资源 |
 | [`ToolResultHistoryMaterializer`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/ToolResultHistoryMaterializer.java) | 在 Tool 结果 Entry 插入前、同一事务内把瞬时 Resource 外部化为 durable 内容 |
 | [`ToolHistoryActionResolver`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/ToolHistoryActionResolver.java) | 按冻结 binding 找到 Tool 并渲染历史动作文本 |
@@ -249,9 +221,7 @@ Stop 在 tree 锁内校验目标 version 与 `stopRequestId`，按 `parentThread
 
 三种准入结论各对应唯一的 durable 后续：`Busy` 确定未开始，安全重排；`Rejected` 是确定性失败；`Admitted` 先落 RUNNING 再执行，此后请求或副作用都可能已发生，Model 记一次失败 attempt、Tool 收敛为 `UNKNOWN`，严禁盲目重放。内核不反查 owner、Issue 或阶段等产品门禁，需要终止在途执行时由业务显式调用 Stop。
 
-[`ConcurrencyAdmission`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/admission/ConcurrencyAdmission.java) 提供无等待队列的进程内并发槽位；`InvocationRetryPolicy` 只计算是否允许下一次重试及其延迟（`FIXED` / `EXPONENTIAL`），不读时钟、不写状态。策略对象全部构造注入：[`ThreadProcessorConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ThreadProcessorConfig.java)、[`ModelProcessorConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ModelProcessorConfig.java)、[`ToolProcessorConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolProcessorConfig.java) 与共用的 [`ProcessorLeaseConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ProcessorLeaseConfig.java)（heartbeat 间隔必须严格小于租约时长），重试与压缩配置在每个决策点现读。
-
-费用不是 durable 事实：ASSISTANT 消息只保存 `stopReason`、七维 `ModelUsage`、可选解码时长，以及实际执行的模型、请求时刻与 Provider 报告的 service tier；读取时按当前目录定价用 [`ModelCost`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/ModelCost.java) 精确现算（`BigDecimal`，总额等于六个互斥计费类别之和）。[`ModelPricing`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/ModelPricing.java) 由基础费率与按顺序应用的覆盖、倍率规则组成，规则条件可匹配上下文 token、service tier、UTC 日期与时区时间段。[`ProviderCacheControl`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/cache/ProviderCacheControl.java) 冻结留存档位（`NONE` / `SHORT` / `LONG`）与会话 key（Session UUID），压缩回合固定 `NONE`；协议映射由 [Harness Provider](harness-provider.md) 承担。
+[`ConcurrencyAdmission`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/admission/ConcurrencyAdmission.java) 提供无等待队列的进程内并发槽位；`InvocationRetryPolicy` 只计算是否允许下一次重试及其延迟（`FIXED` / `EXPONENTIAL`），不读时钟、不写状态。策略对象全部构造注入：[`ThreadProcessorConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ThreadProcessorConfig.java)、[`ToolProcessorConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolProcessorConfig.java) 与共用的 [`ProcessorLeaseConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ProcessorLeaseConfig.java)（heartbeat 间隔必须严格小于租约时长），重试与压缩配置在每个决策点现读。Builtin 的 `ModelProcessorConfig` 与模型重试策略在 [Harness Agent Builtin](harness-agent-builtin.md) 维护。
 
 ## Tool 契约
 
@@ -328,31 +298,27 @@ Goal 正文由用户经 typed `GOAL` 命令写入 branch settings，Agent 只能
 
 | 包名 | 职责与边界 |
 | --- | --- |
-| `runtime` | 同步控制面 `HarnessRuntime` 与包私有控制事务（接受、停止、手工压缩、人工输入）；守卫锁序，执行状态流转委托 `runtime.processor` |
+| `runtime` | 同步控制面 `HarnessRuntime` 与包私有控制事务（接受、停止、手工压缩、人工输入）；守卫锁序，执行状态流转委托 `runtime.driver` 与 `runtime.processor` |
 | `runtime.admission` | 进程内无等待的并发槽位，不持久化、不跨进程协调 |
-| `runtime.compaction` | 压缩阈值、切分规划、结果评估与子执行 spawn；规划与评估是纯函数 |
+| `runtime.compaction` | 压缩阈值、切分规划、结果评估与子执行 spawn；规划与评估是纯函数，具体自动压缩策略由 Driver 提供 |
+| `runtime.driver` | 内部 Agent Driver 契约与中立投影：Turn 解析/提交、锁定状态、活动投影与 Stop 结果；不读取具体 Driver 私有状态 |
 | `runtime.entry` | 分支配置与回合生命周期值：`BranchSettings`、`GoalSetting`、启动原因与结局 |
 | `runtime.execution` | 具体执行代次的窄退出账本：身份登记、单向真实 ACK、显式放弃、journal write-ahead 重放与确认后的 Join 结算推进；不复制 Invocation 状态机 |
 | `runtime.history` | Entry、`EntryPath`、回合文法校验与历史 JSON 编解码 |
 | `runtime.input` | `ask_user` 问卷与答案的纯值校验和规范化 |
 | `runtime.interaction` | 等待输入/审批的只读投影与稳定分页，不持有产品归属 |
-| `runtime.invocation.codec` | Model / Tool 持久化列的严格确定性 JSON 编解码 |
-| `runtime.invocation.model` | `ModelInvocation` 状态机、冻结的 `ModelRequestSpec`、重试审计与请求物化 |
+| `runtime.invocation.codec` | Tool 持久化列的严格确定性 JSON 编解码；Builtin 的 `ModelRequestSpec` codec 在 driver 模块 |
+| `runtime.invocation.model` | 公共子代理绑定值 `SubagentBinding`；Builtin 的 `ModelInvocation` 与 `ModelRequestSpec` 在 driver 模块 |
 | `runtime.invocation.tool` | `ToolInvocation` 状态机、`ToolBinding`、审批状态与副作用批次；不执行工具 |
 | `runtime.join` | Join 票据、一次终态冻结、回执投影与完成通知渲染的纯函数 |
-| `runtime.model` | 模型描述、Variant、定价、用量与精确计费、调用错误 |
-| `runtime.model.cache` | prompt cache 留存档位与会话 key 的静态契约 |
-| `runtime.model.codec` | 模型描述与 Variant 的权威 JSON 编解码 |
-| `runtime.model.provider` | 供应商中立的请求、响应、流事件、`ProviderAdapter` 与 replay state；wire 编码归 Harness Provider |
-| `runtime.model.provider.codec` | Provider 请求、响应与 replay state 的严格编解码 |
 | `runtime.permission` | 权限规则模型与求值、Bash 命令面分析；只产出策略候选 |
-| `runtime.port` | 内核对外部设施的窄端口 |
-| `runtime.processor` | Thread / Model / Tool Processor、准入后的阻塞执行、租约心跳与 Processor 配置 |
+| `runtime.port` | 内核对外部设施的窄端口：Tool 网关、结果物化、历史动作与实时事件；Model/Turn 端口在 driver 模块 |
+| `runtime.processor` | Thread / Tool Processor、准入后的阻塞执行、租约心跳与 Processor 配置；MODEL Work 在 driver 模块 |
 | `runtime.realtime` | 有损实时事件及其编解码；恢复以 durable 快照为准 |
 | `runtime.retry` | 调用重试与 HTTP 状态策略，只计算可行性与延迟 |
 | `runtime.session` | Session 实体、不可变消息内容块与 Assistant 元数据 |
 | `runtime.store` | `HarnessStore` 事务原语，领域模型与物理持久化的唯一边界 |
-| `runtime.thread` | Thread 状态、执行控制、上下文分类、状态投影与 Provider 消息投影 |
+| `runtime.thread` | Thread 状态、执行控制、上下文分类与状态投影 |
 | `runtime.thread.command` | 命令邮箱实体与 typed 字段归约 |
 | `runtime.tool` | 工具调用错误值及其编解码 |
 | `runtime.work` | 调度邮箱的纯函数跃迁、租约与环境亲和标记 |
@@ -370,15 +336,14 @@ Goal 正文由用户经 typed `GOAL` 命令写入 branch settings，Agent 只能
 
 ## 源码与测试
 
-- 控制面与 Store 契约：[`HarnessRuntimeAcceptInitialTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntimeAcceptInitialTest.java)、[`HarnessRuntimeStopReplayTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntimeStopReplayTest.java)，以及在内存与 PostgreSQL 上共用的 [`HarnessStoreContractTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/HarnessStoreContractTest.java)。
-- 历史、Thread 与邮箱：[`EntryPathTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/history/EntryPathTest.java)、[`ThreadContextClassifierTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/thread/ThreadContextClassifierTest.java)、[`CommandHarvestReducerTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/thread/command/CommandHarvestReducerTest.java)。
-- 委派与 Join：[`HarnessRuntimeJoinAcceptanceTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntimeJoinAcceptanceTest.java)、[`ThreadLifecycleCoordinatorJoinTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/ThreadLifecycleCoordinatorJoinTest.java)、[`HarnessRuntimeStopSubtreeTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntimeStopSubtreeTest.java)。
-- 调用、Work 与 Processor：[`ModelInvocationTransitionTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelInvocationTransitionTest.java)、[`ToolInvocationTransitionTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolInvocationTransitionTest.java)、[`WorkTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/work/WorkTest.java) 与 [`processor` 测试目录](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/processor/)。
-- 压缩与权限：[`CompactionPlannerTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionPlannerTest.java)、[`PermissionEvaluatorTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/permission/PermissionEvaluatorTest.java)。
-- 扩展契约：[`ToolContractTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/tool/ToolContractTest.java)、[`HarnessCatalogTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/contributor/api/HarnessCatalogTest.java)、[`BuiltinHarnessContributorTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/builtin/BuiltinHarnessContributorTest.java)、[`PromptTemplateTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/prompt/PromptTemplateTest.java)。
+- 模块边界：[`RuntimeModuleArchitectureTest.java`](../../harness/runtime/src/test/java/fun/fengwk/kkstudio/harness/runtime/RuntimeModuleArchitectureTest.java) 校验公共 runtime 不反向依赖具体 Driver 实现。
+- Runtime 业务测试随实现迁移集中在 [`harness/agent-builtin` 测试目录](../../harness/agent-builtin/src/test/java/)：控制面与 Store 契约见 [`HarnessRuntimeAcceptInitialTest.java`](../../harness/agent-builtin/src/test/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntimeAcceptInitialTest.java) 与 [`HarnessStoreContractTest.java`](../../harness/agent-builtin/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/HarnessStoreContractTest.java)。
+- 历史、Thread、邮箱、委派与 Join：[`EntryPathTest.java`](../../harness/agent-builtin/src/test/java/fun/fengwk/kkstudio/harness/runtime/history/EntryPathTest.java)、[`ThreadContextClassifierTest.java`](../../harness/agent-builtin/src/test/java/fun/fengwk/kkstudio/harness/runtime/thread/ThreadContextClassifierTest.java)、[`CommandHarvestReducerTest.java`](../../harness/agent-builtin/src/test/java/fun/fengwk/kkstudio/harness/runtime/thread/command/CommandHarvestReducerTest.java)、[`HarnessRuntimeJoinAcceptanceTest.java`](../../harness/agent-builtin/src/test/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntimeJoinAcceptanceTest.java)。
+- Work、Tool 与权限：[`WorkTest.java`](../../harness/agent-builtin/src/test/java/fun/fengwk/kkstudio/harness/runtime/work/WorkTest.java)、[`ToolInvocationTransitionTest.java`](../../harness/agent-builtin/src/test/java/fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolInvocationTransitionTest.java)、[`PermissionEvaluatorTest.java`](../../harness/agent-builtin/src/test/java/fun/fengwk/kkstudio/harness/runtime/permission/PermissionEvaluatorTest.java)。
+- 扩展契约：[`ToolContractTest.java`](../../harness/agent-builtin/src/test/java/fun/fengwk/kkstudio/harness/tool/ToolContractTest.java)、[`HarnessCatalogTest.java`](../../harness/agent-builtin/src/test/java/fun/fengwk/kkstudio/harness/contributor/api/HarnessCatalogTest.java)、[`BuiltinHarnessContributorTest.java`](../../harness/agent-builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/BuiltinHarnessContributorTest.java)、[`PromptTemplateTest.java`](../../harness/agent-builtin/src/test/java/fun/fengwk/kkstudio/harness/prompt/PromptTemplateTest.java)。
 
-模块 POM 把 JaCoCo `check` 绑定到 `verify`，被检查的关键类与包以 [`harness/runtime/pom.xml`](../../harness/runtime/pom.xml) 为准；真实 PostgreSQL 上的 claim / lease / notify 契约由 [Harness Infra](harness-infra.md) 的测试守护，运行方式见 [开发与测试](../operations/development-and-testing.md)。
+Builtin 的模型状态、MODEL Work 与自动压缩测试见 [Harness Agent Builtin](harness-agent-builtin.md#源码与测试)。公共 Runtime 与 Builtin 的关键类由 [`harness/agent-builtin/pom.xml`](../../harness/agent-builtin/pom.xml) 中官方 JaCoCo Ant report/check 在同一 `verify` 内联合门禁；Runtime 不再保留失效的本地 check。真实 PostgreSQL 上的 claim / lease / notify 契约由 [Harness Infra](harness-infra.md) 的测试守护，运行方式见 [开发与测试](../operations/development-and-testing.md)。
 
 ---
 
-上级：[系统设计](../system-design.md)。相关文档：[Harness Infra](harness-infra.md)、[Harness Provider](harness-provider.md)、[Harness Environment](harness-environment.md)、[Common](common.md)、[Platform](platform.md)。
+上级：[系统设计](../system-design.md)。相关文档：[Harness Infra](harness-infra.md)、[Harness Model](harness-model.md)、[Harness Environment](harness-environment.md)、[Common](common.md)、[Platform](platform.md)。

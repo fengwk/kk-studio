@@ -1,13 +1,24 @@
 package fun.fengwk.kkstudio.harness.infra.dispatch;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.BuiltinTestTransactions.builtin;
+
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
+import fun.fengwk.kkstudio.harness.model.ModelInputModality;
+import fun.fengwk.kkstudio.harness.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
+import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.runtime.history.BuiltinHistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
@@ -19,15 +30,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
@@ -153,22 +155,23 @@ final class DispatcherTestSupport {
           tx.insertEntry(rootEntry(rootEntryId, sessionId));
           tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, threadId));
           tx.insertThread(thread(threadId, sessionId, turnStartEntryId));
-          tx.insertModelInvocation(
-              new ModelInvocation(
-                  modelId,
-                  threadId,
-                  turnStartEntryId,
-                  turnStartEntryId,
-                  modelRequest(),
-                  ModelInvocationStatus.READY,
-                  0,
-                  null,
-                  null,
-                  null,
-                  null,
-                  List.of(),
-                  NOW,
-                  NOW));
+          builtin(tx)
+              .insertModelInvocation(
+                  new ModelInvocation(
+                      modelId,
+                      threadId,
+                      turnStartEntryId,
+                      turnStartEntryId,
+                      modelRequest(),
+                      ModelInvocationStatus.READY,
+                      0,
+                      null,
+                      null,
+                      null,
+                      null,
+                      List.of(),
+                      NOW,
+                      NOW));
           tx.requestWork(new WorkTarget(WorkTargetType.MODEL, modelId));
           return new ModelSeed(threadId, modelId);
         });
@@ -218,18 +221,19 @@ final class DispatcherTestSupport {
               assistantEntry(
                   assistantEntryId, sessionId, userEntryId, ready.markRunning(NOW), response));
           tx.insertThread(thread(threadId, sessionId, turnStartEntryId));
-          tx.insertModelInvocation(ready);
-          ModelInvocation current = tx.lockModelInvocation(modelId).orElseThrow();
-          tx.updateModelInvocation(current.markRunning(NOW));
-          current = tx.lockModelInvocation(modelId).orElseThrow();
-          tx.updateModelInvocation(current.succeed(response, NOW));
-          current = tx.lockModelInvocation(modelId).orElseThrow();
-          tx.updateModelInvocation(current.attachResultEntry(assistantEntryId, NOW));
+          builtin(tx).insertModelInvocation(ready);
+          ModelInvocation current = builtin(tx).lockModelInvocation(modelId).orElseThrow();
+          builtin(tx).updateModelInvocation(current.markRunning(NOW));
+          current = builtin(tx).lockModelInvocation(modelId).orElseThrow();
+          builtin(tx).updateModelInvocation(current.succeed(response, NOW));
+          current = builtin(tx).lockModelInvocation(modelId).orElseThrow();
+          builtin(tx).updateModelInvocation(current.attachResultEntry(assistantEntryId, NOW));
           tx.insertToolInvocations(
               List.of(
                   new ToolInvocation(
                       toolId,
-                      modelId,
+                      threadId,
+                      turnStartEntryId,
                       assistantEntryId,
                       0,
                       toolRequest().call(),
@@ -620,7 +624,7 @@ final class DispatcherTestSupport {
         id,
         sessionId,
         parentId,
-        new HistoryPayloadMapper()
+        new BuiltinHistoryPayloadMapper()
             .assistantPayload(
                 response,
                 running.requestSpec().toolBindings(),

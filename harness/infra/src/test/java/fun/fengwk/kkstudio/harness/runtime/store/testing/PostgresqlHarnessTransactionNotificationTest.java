@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.BuiltinTestTransactions.builtin;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.ASK_USER_QUESTIONNAIRE;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.CREATION_REQUEST_HASH;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T0;
@@ -31,6 +32,7 @@ import org.postgresql.PGNotification;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
@@ -40,7 +42,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
@@ -523,33 +524,35 @@ class PostgresqlHarnessTransactionNotificationTest {
                   T0,
                   T0));
           tx.lockThread(threadId).orElseThrow();
-          tx.insertModelInvocation(
-              new ModelInvocation(
-                  modelId,
-                  threadId,
-                  turnStartId,
-                  turnStartId,
-                  spec.request(),
-                  ModelInvocationStatus.READY,
-                  0,
-                  null,
-                  null,
-                  null,
-                  null,
-                  List.of(),
-                  T1,
-                  T1));
-          ModelInvocation model = tx.lockModelInvocation(modelId).orElseThrow();
-          tx.updateModelInvocation(model.markRunning(T1));
-          model = tx.lockModelInvocation(modelId).orElseThrow();
-          tx.updateModelInvocation(model.succeed(spec.response(), T1));
-          model = tx.lockModelInvocation(modelId).orElseThrow();
-          tx.updateModelInvocation(model.attachResultEntry(assistantEntryId, T1));
+          builtin(tx)
+              .insertModelInvocation(
+                  new ModelInvocation(
+                      modelId,
+                      threadId,
+                      turnStartId,
+                      turnStartId,
+                      spec.request(),
+                      ModelInvocationStatus.READY,
+                      0,
+                      null,
+                      null,
+                      null,
+                      null,
+                      List.of(),
+                      T1,
+                      T1));
+          ModelInvocation model = builtin(tx).lockModelInvocation(modelId).orElseThrow();
+          builtin(tx).updateModelInvocation(model.markRunning(T1));
+          model = builtin(tx).lockModelInvocation(modelId).orElseThrow();
+          builtin(tx).updateModelInvocation(model.succeed(spec.response(), T1));
+          model = builtin(tx).lockModelInvocation(modelId).orElseThrow();
+          builtin(tx).updateModelInvocation(model.attachResultEntry(assistantEntryId, T1));
           tx.insertToolInvocations(
               List.of(
                   new ToolInvocation(
                       toolId,
-                      modelId,
+                      threadId,
+                      turnStartId,
                       assistantEntryId,
                       0,
                       spec.call(),

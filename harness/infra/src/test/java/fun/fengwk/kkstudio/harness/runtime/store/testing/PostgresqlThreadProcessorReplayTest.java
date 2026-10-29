@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.BuiltinTestTransactions.builtin;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.BuiltinTestTransactions.builtinDriver;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T2;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T3;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -11,6 +13,10 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.node.JsonNodeFactory;
 
 import fun.fengwk.kkstudio.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
@@ -24,10 +30,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatu
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayAffinity;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayFormat;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayState;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessResult;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
@@ -52,7 +54,9 @@ class PostgresqlThreadProcessorReplayTest {
   @Test
   void toolSiblingBatchWithTransferredReplayStateAdvancesAndWakesContinuation() {
     HarnessStore store = PostgresqlHarnessStoreFixture.resetAndCreate();
-    StoreTestSupport.TurnBaseline baseline = StoreTestSupport.seedTurnBaseline(store);
+    StoreTestSupport.TurnBaseline baseline =
+        StoreTestSupport.seedTurnBaseline(
+            store, StoreTestSupport.succeededRequest().toolBindings());
     Instant now = Instant.now().minusSeconds(1).truncatedTo(ChronoUnit.MILLIS);
     WorkTarget target = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
     UUID userId =
@@ -90,26 +94,27 @@ class PostgresqlThreadProcessorReplayTest {
             tx -> {
               tx.lockThread(baseline.threadId()).orElseThrow();
               UUID id = tx.nextId();
-              tx.insertModelInvocation(
-                  new ModelInvocation(
-                      id,
-                      baseline.threadId(),
-                      baseline.turnStartEntryId(),
-                      userId,
-                      request,
-                      ModelInvocationStatus.READY,
-                      0,
-                      null,
-                      null,
-                      null,
-                      null,
-                      List.of(),
-                      T2,
-                      T2));
-              var model = tx.lockModelInvocation(id).orElseThrow();
-              tx.updateModelInvocation(model.markRunning(T2));
-              model = tx.lockModelInvocation(id).orElseThrow();
-              tx.updateModelInvocation(model.succeed(response, null, replay, T2));
+              builtin(tx)
+                  .insertModelInvocation(
+                      new ModelInvocation(
+                          id,
+                          baseline.threadId(),
+                          baseline.turnStartEntryId(),
+                          userId,
+                          request,
+                          ModelInvocationStatus.READY,
+                          0,
+                          null,
+                          null,
+                          null,
+                          null,
+                          List.of(),
+                          T2,
+                          T2));
+              var model = builtin(tx).lockModelInvocation(id).orElseThrow();
+              builtin(tx).updateModelInvocation(model.markRunning(T2));
+              model = builtin(tx).lockModelInvocation(id).orElseThrow();
+              builtin(tx).updateModelInvocation(model.succeed(response, null, replay, T2));
               return id;
             });
 
@@ -117,7 +122,7 @@ class PostgresqlThreadProcessorReplayTest {
         store.transaction(
             tx -> {
               var thread = tx.lockThread(baseline.threadId()).orElseThrow();
-              var model = tx.lockModelInvocation(modelId).orElseThrow();
+              var model = builtin(tx).lockModelInvocation(modelId).orElseThrow();
               UUID id = tx.nextId();
               tx.insertEntry(
                   new Entry(
@@ -127,14 +132,28 @@ class PostgresqlThreadProcessorReplayTest {
                       StoreTestSupport.mappedAssistant(request, response),
                       T3,
                       replay));
-              tx.updateModelInvocation(model.attachResultEntry(id, T3));
+              builtin(tx).updateModelInvocation(model.attachResultEntry(id, T3));
               tx.updateThread(thread.advanceHead(id, T3));
               tx.insertToolInvocations(
                   List.of(
                       StoreTestSupport.toolInvocation(
-                          tx.nextId(), modelId, id, 0, "call-0", ToolInvocationStatus.READY, T3),
+                          tx.nextId(),
+                          baseline.threadId(),
+                          baseline.turnStartEntryId(),
+                          id,
+                          0,
+                          "call-0",
+                          ToolInvocationStatus.READY,
+                          T3),
                       StoreTestSupport.toolInvocation(
-                          tx.nextId(), modelId, id, 1, "call-1", ToolInvocationStatus.READY, T3)));
+                          tx.nextId(),
+                          baseline.threadId(),
+                          baseline.turnStartEntryId(),
+                          id,
+                          1,
+                          "call-1",
+                          ToolInvocationStatus.READY,
+                          T3)));
               return id;
             });
 
@@ -160,7 +179,7 @@ class PostgresqlThreadProcessorReplayTest {
         });
     assertNull(
         store.transaction(
-            tx -> tx.findModelInvocation(modelId).orElseThrow().providerReplayState()));
+            tx -> builtin(tx).findModelInvocation(modelId).orElseThrow().providerReplayState()));
     assertEquals(
         replay,
         store.transaction(tx -> tx.findEntry(assistantId).orElseThrow().providerReplayState()));
@@ -174,7 +193,7 @@ class PostgresqlThreadProcessorReplayTest {
       ThreadProcessor processor =
           new ThreadProcessor(
               store,
-              resolver,
+              builtinDriver(store, resolver),
               new ThreadProcessorConfig(Duration.ofSeconds(5), () -> new CompactionConfig(20_000)));
       ClaimedWork first =
           store
@@ -202,7 +221,7 @@ class PostgresqlThreadProcessorReplayTest {
       TurnEndPayload batchEnd = assertInstanceOf(TurnEndPayload.class, applied.head().payload());
       assertEquals(TurnEndOutcome.COMPLETED, batchEnd.outcome());
       assertTrue(batchEnd.continueModel());
-      assertTrue(store.transaction(tx -> tx.findModelInvocation(modelId)).isEmpty());
+      assertTrue(store.transaction(tx -> builtin(tx).findModelInvocation(modelId)).isEmpty());
       assertTrue(
           store.transaction(tx -> tx.loadToolInvocationsByAssistantEntryId(assistantId)).isEmpty());
       assertTrue(store.transaction(tx -> tx.findWork(target)).isPresent());

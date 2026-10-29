@@ -88,9 +88,9 @@ export function usePaneDraftHistory(options: {
   const draftTimeline = useMemo(() => buildThreadTimeline(draftHistory.entries, [], []), [draftHistory.entries])
   const draftEvents = useMemo(() => buildThreadEventTimeline({
     entries: draftHistory.entries,
-    modelInvocation: null,
+    activeAssistantOutput: null,
     toolInvocations: [],
-    modelAttemptFailures: [],
+    generationFailures: [],
     modelStream: null,
     toolStreams: null,
   }), [draftHistory.entries])

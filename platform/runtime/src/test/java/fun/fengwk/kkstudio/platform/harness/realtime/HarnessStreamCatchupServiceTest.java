@@ -29,12 +29,23 @@ import org.springframework.jdbc.core.PreparedStatementCallback;
 
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.driver.GenerationProjection;
+import fun.fengwk.kkstudio.harness.runtime.driver.GenerationStatus;
+import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessor;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLiveState;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodePresence;
 
 import java.sql.PreparedStatement;
+import java.time.Instant;
+import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -57,7 +68,7 @@ class HarnessStreamCatchupServiceTest {
   private ClusterNodePresence clusterNodePresence;
   private JdbcTemplate jdbcTemplate;
   private ThreadSnapshot snapshot;
-  private ModelInvocation model;
+  private GenerationProjection generation;
   private HarnessStreamCatchupNotificationCodec codec;
   private HarnessStreamCatchupService service;
 
@@ -68,14 +79,13 @@ class HarnessStreamCatchupServiceTest {
     clusterNodePresence = mock(ClusterNodePresence.class);
     jdbcTemplate = mock(JdbcTemplate.class);
     snapshot = mock(ThreadSnapshot.class);
-    model = mock(ModelInvocation.class);
+    generation = mock(GenerationProjection.class);
     codec = new HarnessStreamCatchupNotificationCodec();
     when(runtime.getThreadSnapshot(THREAD)).thenReturn(snapshot);
-    when(snapshot.model()).thenReturn(model);
-    when(model.threadId()).thenReturn(THREAD);
-    when(model.id()).thenReturn(INVOCATION);
-    when(model.attempt()).thenReturn(ATTEMPT);
-    when(model.status()).thenReturn(ModelInvocationStatus.RUNNING);
+    when(snapshot.generation()).thenReturn(generation);
+    when(generation.generationId()).thenReturn(INVOCATION);
+    when(generation.attempt()).thenReturn(ATTEMPT);
+    when(generation.status()).thenReturn(GenerationStatus.RUNNING);
     service =
         new HarnessStreamCatchupService(
             runtime, modelProcessor, clusterNodePresence, jdbcTemplate, LOCAL, codec);
@@ -122,20 +132,71 @@ class HarnessStreamCatchupServiceTest {
   }
 
   @Test
-  void staleAttemptWrongInvocationOrWrongThreadIsBestEffortNoOp() {
+  void staleAttemptOrMismatchedInvocationIsBestEffortNoOp() {
     service.catchUp(THREAD, INVOCATION, ATTEMPT - 1);
     service.catchUp(THREAD, OTHER_INVOCATION, ATTEMPT);
-    when(model.threadId()).thenReturn(OTHER_THREAD);
+    when(generation.generationId()).thenReturn(OTHER_INVOCATION);
     service.catchUp(THREAD, INVOCATION, ATTEMPT);
 
     verifyNoInteractions(modelProcessor);
     verifyNoInteractions(clusterNodePresence);
     verifyNoInteractions(jdbcTemplate);
+  }
+
+  /** 跨 Thread 的 generation 必须由 ThreadSnapshot 的 ownership 约束拒绝，不能靠 catch-up 服务在运行时猜测归属。 */
+  @Test
+  void foreignGenerationOwnershipIsRejectedBeforeCatchup() {
+    UUID foreignThreadId = OTHER_THREAD;
+    UUID foreignTurnId = new UUID(0L, 10L);
+    UUID ownerTurnId = new UUID(0L, 11L);
+    ThreadState foreignThread = mock(ThreadState.class);
+    when(foreignThread.id()).thenReturn(foreignThreadId);
+    Entry foreignTurn = mock(Entry.class);
+    when(foreignTurn.id()).thenReturn(foreignTurnId);
+    when(foreignTurn.payload())
+        .thenReturn(
+            new TurnStartPayload(
+                TurnStartReason.INPUT,
+                new BranchSettings("agent", new ModelSelection("model", "v1"), null),
+                foreignThreadId));
+    EntryPath foreignPath = mock(EntryPath.class);
+    when(foreignPath.openTurnStart()).thenReturn(Optional.of(foreignTurn));
+    when(foreignPath.entries()).thenReturn(List.of(foreignTurn));
+    GenerationProjection foreignGeneration =
+        new GenerationProjection(
+            INVOCATION,
+            ownerTurnId,
+            ownerTurnId,
+            GenerationStatus.RUNNING,
+            ATTEMPT,
+            0L,
+            List.of(),
+            null,
+            null,
+            Instant.EPOCH,
+            Instant.EPOCH,
+            List.of());
+
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            new ThreadSnapshot(
+                foreignThread,
+                foreignPath,
+                List.of(),
+                foreignGeneration,
+                List.of(),
+                ThreadLiveState.IDLE_OR_HISTORICAL,
+                List.of(),
+                0,
+                false,
+                List.of(),
+                false));
   }
 
   @Test
   void noModelContextIsBestEffortNoOp() {
-    when(snapshot.model()).thenReturn(null);
+    when(snapshot.generation()).thenReturn(null);
 
     service.catchUp(THREAD, INVOCATION, ATTEMPT);
 
@@ -145,13 +206,13 @@ class HarnessStreamCatchupServiceTest {
   }
 
   @Test
-  void everyNonRunningDurableStatusIsBestEffortNoOp() {
-    // 只有 durable RUNNING 才允许追帧；READY 与全部终态都不得触达 owner、presence 或 NOTIFY。
-    for (ModelInvocationStatus status : ModelInvocationStatus.values()) {
-      if (status == ModelInvocationStatus.RUNNING) {
+  void everyNonRunningGenerationStatusIsBestEffortNoOp() {
+    // 只有 RUNNING 才允许追帧；READY、等待与全部终态都不得触达 owner、presence 或 NOTIFY。
+    for (GenerationStatus status : GenerationStatus.values()) {
+      if (status == GenerationStatus.RUNNING) {
         continue;
       }
-      when(model.status()).thenReturn(status);
+      when(generation.status()).thenReturn(status);
       service.catchUp(THREAD, INVOCATION, ATTEMPT);
     }
 

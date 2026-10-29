@@ -18,7 +18,7 @@ export function ModelAttemptFailureMessageBlock({
   const text = message.text
   const hasText = text.length > 0
   const terminal = message.nextAttempt == null
-  const liveRetry = message.modelInvocationId != null
+  const liveRetry = message.generationId != null
   const retry = useRetryCountdown(liveRetry ? message.retryAt : null)
   const errorCode = message.errorCode.trim()
 

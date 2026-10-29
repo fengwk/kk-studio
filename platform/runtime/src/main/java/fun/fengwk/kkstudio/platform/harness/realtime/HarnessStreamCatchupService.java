@@ -5,8 +5,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.PreparedStatementCallback;
 
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.driver.GenerationProjection;
+import fun.fengwk.kkstudio.harness.runtime.driver.GenerationStatus;
 import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessor;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodePresence;
 
@@ -56,9 +56,9 @@ public final class HarnessStreamCatchupService {
   /**
    * 请求追帧；事前只信任目标 Thread 的 durable 快照，不信任客户端 UUID 或 head 事实。
    *
-   * <p>只有 durable 状态仍为 {@link ModelInvocationStatus#RUNNING} 且 attempt 精确匹配时才请求 checkpoint；终态、过期
-   * attempt 或不匹配关联都是 no-op，不创建 Entry / Command / Work，也不推进 Thread version。Thread 不存在时仍由 Runtime
-   * typed 异常向上翻译为 404；数据库查询或跨节点发布失败直接向上传播，不伪造成功。
+   * <p>只有 durable 状态仍为 {@code RUNNING} 且 attempt 精确匹配时才请求 checkpoint；终态、过期 attempt 或不匹配关联都是
+   * no-op，不创建 Entry / Command / Work，也不推进 Thread version。Thread 不存在时仍由 Runtime typed 异常向上翻译为
+   * 404；数据库查询或跨节点发布失败直接向上传播，不伪造成功。
    */
   public void catchUp(UUID threadId, UUID invocationId, int attempt) {
     Objects.requireNonNull(threadId, "threadId");
@@ -66,12 +66,11 @@ public final class HarnessStreamCatchupService {
     if (attempt <= 0) {
       throw new IllegalArgumentException("attempt must be positive");
     }
-    ModelInvocation model = runtime.getThreadSnapshot(threadId).model();
-    if (model == null
-        || !threadId.equals(model.threadId())
-        || !invocationId.equals(model.id())
-        || attempt != model.attempt()
-        || model.status() != ModelInvocationStatus.RUNNING) {
+    GenerationProjection generation = runtime.getThreadSnapshot(threadId).generation();
+    if (generation == null
+        || !invocationId.equals(generation.generationId())
+        || attempt != generation.attempt()
+        || generation.status() != GenerationStatus.RUNNING) {
       // 非 RUNNING（含终态）、过期 attempt、其它 Thread 的 invocation 或当前并非 Model 上下文：不触碰任何执行状态。
       return;
     }

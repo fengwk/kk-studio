@@ -12,6 +12,8 @@ import static fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.s
 import static fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.seedThread;
 import static fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.seedTool;
 import static fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.work;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.BuiltinTestTransactions.builtin;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.BuiltinTestTransactions.builtinDriver;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -406,9 +408,11 @@ class HarnessWorkDispatcherHandoffTest {
     ThreadProcessor threadProcessor =
         new ThreadProcessor(
             store,
-            (threadId, path, preparation) -> {
-              throw new AssertionError("resolver must not be called for a quiescent thread");
-            },
+            builtinDriver(
+                store,
+                (threadId, path, preparation) -> {
+                  throw new AssertionError("resolver must not be called for a quiescent thread");
+                }),
             new ThreadProcessorConfig(Duration.ofSeconds(1), () -> CompactionConfig.DEFAULT));
     ModelProcessor modelProcessor =
         new ModelProcessor(
@@ -431,7 +435,8 @@ class HarnessWorkDispatcherHandoffTest {
             clock,
             processorScheduler,
             Runnable::run,
-            ExecutionExitTestSupport.confirmer(store, clock));
+            ExecutionExitTestSupport.confirmer(store, clock),
+            (sessionId, toolName, result) -> result);
     HarnessWorkDispatcher dispatcher =
         new HarnessWorkDispatcher(
             store,
@@ -455,7 +460,9 @@ class HarnessWorkDispatcherHandoffTest {
             store
                         .transaction(
                             tx ->
-                                tx.findModelInvocation(modelSeed.modelInvocationId()).orElseThrow())
+                                builtin(tx)
+                                    .findModelInvocation(modelSeed.modelInvocationId())
+                                    .orElseThrow())
                         .status()
                     == ModelInvocationStatus.READY
                 && store
@@ -472,7 +479,7 @@ class HarnessWorkDispatcherHandoffTest {
     // 两个 invocation 都被 Busy bounce 回 READY（未开始执行）。
     ModelInvocation model =
         store
-            .transaction(tx -> tx.findModelInvocation(modelSeed.modelInvocationId()))
+            .transaction(tx -> builtin(tx).findModelInvocation(modelSeed.modelInvocationId()))
             .orElseThrow();
     assertEquals(ModelInvocationStatus.READY, model.status());
     ToolInvocation tool =
@@ -530,7 +537,8 @@ class HarnessWorkDispatcherHandoffTest {
             clock,
             processorScheduler,
             Runnable::run,
-            ExecutionExitTestSupport.confirmer(store, clock));
+            ExecutionExitTestSupport.confirmer(store, clock),
+            (sessionId, toolName, result) -> result);
     CopyOnWriteArrayList<UUID> threadHandoffs = new CopyOnWriteArrayList<>();
     Consumer<ClaimedWork> recordThreadHandoff =
         claim -> {
@@ -580,7 +588,8 @@ class HarnessWorkDispatcherHandoffTest {
           ModelInvocationStatus.FAILED,
           store
               .transaction(
-                  tx -> tx.findModelInvocation(modelSeed.modelInvocationId()).orElseThrow())
+                  tx ->
+                      builtin(tx).findModelInvocation(modelSeed.modelInvocationId()).orElseThrow())
               .status());
       assertEquals(ToolInvocationStatus.UNKNOWN, tool(store, toolSeed.toolInvocationId()));
       assertEquals(ToolInvocationStatus.WAITING_INPUT, tool(store, waitingSeed.toolInvocationId()));
@@ -596,8 +605,8 @@ class HarnessWorkDispatcherHandoffTest {
       InMemoryHarnessStore store, UUID modelInvocationId, Instant now) {
     store.transaction(
         tx -> {
-          ModelInvocation model = tx.lockModelInvocation(modelInvocationId).orElseThrow();
-          tx.updateModelInvocation(model.markRunning(now));
+          ModelInvocation model = builtin(tx).lockModelInvocation(modelInvocationId).orElseThrow();
+          builtin(tx).updateModelInvocation(model.markRunning(now));
           return null;
         });
   }

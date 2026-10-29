@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.BuiltinTestTransactions.builtinDriver;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -63,7 +64,9 @@ class PostgresqlForkContractTest {
     store = PostgresqlHarnessStoreFixture.create();
     runtime =
         new HarnessRuntime(
-            store, (threadId, path, preparation) -> null, () -> CompactionConfig.DEFAULT);
+            store,
+            builtinDriver(store, (threadId, path, preparation) -> null),
+            () -> CompactionConfig.DEFAULT);
   }
 
   /** 会话 fork：ROOT + FORK 往返保真，branch settings 从来源切点推导，且 initial creation replay 幂等。 */

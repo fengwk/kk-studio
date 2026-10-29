@@ -261,7 +261,8 @@ describe('InteractionsPage', () => {
     // 审批仍写原始调用并只移除完成的条目，不影响问卷。
     const decision = vi.spyOn(harnessService, 'decideApproval').mockResolvedValue({
       id: 'int-2',
-      modelInvocationId: 'model-2',
+      threadId: 'thread-1',
+      turnStartEntryId: 'turn-1',
       assistantEntryId: 'entry-2',
       callIndex: 0,
       status: 'PENDING',

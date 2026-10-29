@@ -9,9 +9,9 @@ import type {
   RealtimeModelStream,
 } from '@/features/chat/runtime/thread-realtime/model-stream'
 import type {
+  HarnessActiveAssistantOutputDTO,
+  HarnessGenerationFailureDTO,
   HarnessSessionEntryDTO,
-  ModelAttemptFailureDTO,
-  ModelInvocationDTO,
   ToolInvocationDTO,
 } from '@/shared/api/generated/contracts'
 
@@ -47,17 +47,21 @@ function messagePayload(role: string, contents: Array<Record<string, unknown>>, 
   return payload
 }
 
-function modelInvocation(status: string, attempt: number, overrides: Partial<ModelInvocationDTO> = {}): ModelInvocationDTO {
+/** 当前 generation 的公共活跃输出快照：只有 typed 字段，没有 Provider 原始 JSON。 */
+function activeAssistantOutput(
+  status: string,
+  attempt: number,
+  overrides: Partial<HarnessActiveAssistantOutputDTO> = {},
+): HarnessActiveAssistantOutputDTO {
   return {
-    id: 'model-1',
-    threadId: 'thread-1',
+    generationId: 'model-1',
     turnStartEntryId: 'turn-1',
     requestHeadEntryId: 'head-1',
     status,
     attempt,
-    streamCheckpointJson: null,
-    resultJson: null,
-    errorJson: null,
+    sequence: '0',
+    contents: [],
+    error: null,
     resultEntryId: null,
     createTime: 1785232800,
     updateTime: 1785232800,
@@ -65,9 +69,11 @@ function modelInvocation(status: string, attempt: number, overrides: Partial<Mod
   }
 }
 
-function attemptFailure(overrides: Partial<ModelAttemptFailureDTO> = {}): ModelAttemptFailureDTO {
+function generationFailure(
+  overrides: Partial<HarnessGenerationFailureDTO> = {},
+): HarnessGenerationFailureDTO {
   return {
-    modelInvocationId: 'model-1',
+    generationId: 'model-1',
     turnStartEntryId: 'turn-1',
     requestHeadEntryId: 'head-1',
     attempt: 1,
@@ -85,7 +91,8 @@ function attemptFailure(overrides: Partial<ModelAttemptFailureDTO> = {}): ModelA
 function toolInvocation(overrides: Partial<ToolInvocationDTO> = {}): ToolInvocationDTO {
   return {
     id: 'inv-1',
-    modelInvocationId: 'model-1',
+    threadId: 'thread-1',
+    turnStartEntryId: 'turn-1',
     assistantEntryId: 'assistant-1',
     callIndex: 0,
     status: 'RUNNING',
@@ -129,7 +136,7 @@ function build(
 ): ThreadEventRecord[] {
   return buildThreadEventTimeline({
     entries,
-    modelInvocation: null,
+    activeAssistantOutput: null,
     toolInvocations: [],
     ...overrides,
   })
@@ -488,7 +495,7 @@ describe('buildThreadEventTimeline', () => {
       entry('end-1', 'TURN_END', { outcome: 'COMPLETED' }),
     ]
     const stream = modelStream({ sequence: 5, text: 'ok', thinking: '' })
-    const events = build(entries, { modelInvocation: modelInvocation('RUNNING', 2), modelStream: stream })
+    const events = build(entries, { activeAssistantOutput: activeAssistantOutput('RUNNING', 2), modelStream: stream })
 
     // 活跃 model 事件锚定在 turn start 之后，且只出现一条（delta token 不逐条成行）。
     expect(events.map((event) => event.id)).toEqual([
@@ -504,7 +511,7 @@ describe('buildThreadEventTimeline', () => {
     expect(modelEvent.kind).toBe('ACTIVE_MODEL_INVOCATION')
     expect(modelEvent.status).toBe('running')
     const modelPayload = JSON.parse(modelEvent.rawJson ?? '{}')
-    expect(modelPayload.id).toBe('model-1')
+    expect(modelPayload.generationId).toBe('model-1')
     expect(modelPayload.status).toBe('RUNNING')
     expect(modelPayload.realtimeStream?.text).toBe('ok')
     expect(modelEvent.entryId).toBeNull()
@@ -513,8 +520,9 @@ describe('buildThreadEventTimeline', () => {
       expect.arrayContaining([
         { label: '状态', value: '运行中' },
         { label: '原始状态', value: 'RUNNING' },
-        { label: '调用 ID', value: 'model-1' },
+        { label: '生成 ID', value: 'model-1' },
         { label: '尝试次数', value: '2' },
+        { label: '序号', value: '0' },
         { label: '已流式字符数', value: '2' },
       ]),
     )
@@ -526,32 +534,38 @@ describe('buildThreadEventTimeline', () => {
       entry('user-1', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'go' }])),
     ]
     const byStatus = (raw: string) =>
-      build(entries, { modelInvocation: modelInvocation(raw, 1) }).find(
+      build(entries, { activeAssistantOutput: activeAssistantOutput(raw, 1) }).find(
         (event) => event.source === 'active-model',
       )!.status
     expect(byStatus('READY')).toBe('pending')
+    expect(byStatus('WAITING_RETRY')).toBe('pending')
     expect(byStatus('RUNNING')).toBe('running')
     expect(byStatus('SUCCEEDED')).toBe('completed')
     expect(byStatus('FAILED')).toBe('failed')
+    expect(byStatus('BLOCKED')).toBe('failed')
     expect(byStatus('CANCELLED')).toBe('stopped')
-    // realtime stream error 覆盖 invocation 状态。
+    // realtime stream error 覆盖 active output 状态。
     const streamError = build(entries, {
-      modelInvocation: modelInvocation('RUNNING', 1),
+      activeAssistantOutput: activeAssistantOutput('RUNNING', 1),
       modelStream: modelStream({ status: 'error' }),
     })
     expect(streamError.find((event) => event.source === 'active-model')!.status).toBe('failed')
   })
 
-  it('drops the active model invocation when its resultEntryId already exists in entries', () => {
+  it('drops the active model output when its resultEntryId already exists in entries', () => {
     const entries = [
       entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
       entry('user-1', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'go' }])),
       entry('assistant-1', 'MESSAGE', messagePayload('ASSISTANT', [{ type: 'text', text: 'ok' }])),
       entry('end-1', 'TURN_END', { outcome: 'COMPLETED' }),
     ]
-    const materialized = build(entries, { modelInvocation: modelInvocation('SUCCEEDED', 1, { resultEntryId: 'end-1' }) })
+    const materialized = build(entries, {
+      activeAssistantOutput: activeAssistantOutput('SUCCEEDED', 1, { resultEntryId: 'end-1' }),
+    })
     expect(materialized.some((event) => event.source === 'active-model')).toBe(false)
-    const pending = build(entries, { modelInvocation: modelInvocation('SUCCEEDED', 1, { resultEntryId: 'end-404' }) })
+    const pending = build(entries, {
+      activeAssistantOutput: activeAssistantOutput('SUCCEEDED', 1, { resultEntryId: 'end-404' }),
+    })
     expect(pending.some((event) => event.source === 'active-model')).toBe(true)
   })
 
@@ -594,12 +608,12 @@ describe('buildThreadEventTimeline', () => {
       entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
       entry('assistant-1', 'MESSAGE', messagePayload('ASSISTANT', [{ type: 'text', text: 'ok' }])),
     ]
-    const failure = attemptFailure({ attempt: 1 })
+    const failure = generationFailure({ attempt: 1 })
     const events = build(
       entries,
       {
-        modelInvocation: modelInvocation('RUNNING', 2),
-        modelAttemptFailures: [failure, failure, attemptFailure({ attempt: 1, sequence: '4' })],
+        activeAssistantOutput: activeAssistantOutput('RUNNING', 2),
+        generationFailures: [failure, failure, generationFailure({ attempt: 1, sequence: '4' })],
         modelStream: modelStream(),
       },
     )
@@ -628,13 +642,13 @@ describe('buildThreadEventTimeline', () => {
       entry('turn-2', 'TURN_START', { reason: 'USER_MESSAGE' }),
       entry('assistant-2', 'MESSAGE', messagePayload('ASSISTANT', [{ type: 'text', text: 'ok' }])),
     ]
-    const newTurnFailure = attemptFailure({
-      modelInvocationId: 'model-2',
+    const newTurnFailure = generationFailure({
+      generationId: 'model-2',
       turnStartEntryId: 'turn-2',
       attempt: 1,
       sequence: '3',
     })
-    const events = build(entries, { modelAttemptFailures: [newTurnFailure] })
+    const events = build(entries, { generationFailures: [newTurnFailure] })
     expect(events.map((event) => event.id)).toEqual([
       'entry:turn-1',
       'entry:fail-1',
@@ -657,11 +671,14 @@ describe('buildThreadEventTimeline', () => {
       }),
       entry('assistant-1', 'MESSAGE', messagePayload('ASSISTANT', [{ type: 'text', text: 'ok' }])),
     ]
-    const materialized = attemptFailure({ attempt: 1, sequence: '3' })
-    const pending = attemptFailure({ attempt: 2, sequence: '7' })
+    const materialized = generationFailure({ attempt: 1, sequence: '3' })
+    const pending = generationFailure({ attempt: 2, sequence: '7' })
     const events = build(
       entries,
-      { modelInvocation: modelInvocation('RUNNING', 3), modelAttemptFailures: [materialized, pending] },
+      {
+        activeAssistantOutput: activeAssistantOutput('RUNNING', 3),
+        generationFailures: [materialized, pending],
+      },
     )
     expect(events.map((event) => event.id)).toEqual([
       'entry:turn-1',
@@ -766,9 +783,9 @@ describe('buildThreadEventTimeline', () => {
     const events = build(
       entries,
       {
-        modelInvocation: modelInvocation('RUNNING', 1),
+        activeAssistantOutput: activeAssistantOutput('RUNNING', 1),
         toolInvocations: [toolInvocation()],
-        modelAttemptFailures: [attemptFailure()],
+        generationFailures: [generationFailure()],
       },
     )
     expect(events.map((event) => event.id)).toEqual([
@@ -806,8 +823,8 @@ describe('buildThreadEventTimeline', () => {
       entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
       entry('user-1', 'MESSAGE', messagePayload('USER', [{ type: 'text', text: 'go' }])),
     ]
-    // 未知 invocation 状态冻结为 pending（不做猜测）。
-    const unknown = build(entries, { modelInvocation: modelInvocation('STRANGE', 1) }).find(
+    // 未知 active output 状态冻结为 pending（不做猜测）。
+    const unknown = build(entries, { activeAssistantOutput: activeAssistantOutput('STRANGE', 1) }).find(
       (event) => event.source === 'active-model',
     )!
     expect(unknown.status).toBe('pending')
@@ -857,13 +874,13 @@ describe('buildThreadEventTimeline', () => {
       entry('assistant-1', 'MESSAGE', messagePayload('ASSISTANT', [{ type: 'text', text: 'ok' }])),
     ]
     const failures = [
-      attemptFailure({ attempt: 2, sequence: '6', failedAt: 1785232800 }),
-      attemptFailure({ attempt: 2, sequence: '5', failedAt: 1785232700.5, retryAt: 1785232701 }),
-      attemptFailure({ attempt: 2, sequence: '7', failedAt: 1785232900 }),
+      generationFailure({ attempt: 2, sequence: '6', failedAt: 1785232800 }),
+      generationFailure({ attempt: 2, sequence: '5', failedAt: 1785232700.5, retryAt: 1785232701 }),
+      generationFailure({ attempt: 2, sequence: '7', failedAt: 1785232900 }),
     ]
     const events = build(entries, {
-      modelAttemptFailures: failures,
-      modelInvocation: modelInvocation('RUNNING', 3),
+      generationFailures: failures,
+      activeAssistantOutput: activeAssistantOutput('RUNNING', 3),
     })
     // attempt 相同 → 三个失败共享同一 identity，只保留 failedAt 最早的一条活跃 overlay。
     const attemptFailures = events.filter((event) => event.source === 'attempt-failure')
@@ -944,7 +961,8 @@ describe('buildThreadEventTimeline', () => {
     ]
     const fullInvocation = toolInvocation({
       id: 'inv-full',
-      modelInvocationId: 'model-123',
+      threadId: 'thread-1',
+      turnStartEntryId: 'turn-1',
       assistantEntryId: 'assistant-1',
       callIndex: 2,
       status: 'COMPLETED',
@@ -975,7 +993,7 @@ describe('buildThreadEventTimeline', () => {
 
     const events = buildThreadEventTimeline({
       entries,
-      modelInvocation: null,
+      activeAssistantOutput: null,
       toolInvocations: [fullInvocation],
       toolStreams: toolStreamMap,
     })
@@ -990,7 +1008,8 @@ describe('buildThreadEventTimeline', () => {
     expect(detailMap.get('状态')).toBe('已完成')
     expect(detailMap.get('原始状态')).toBe('COMPLETED')
     expect(detailMap.get('调用 ID')).toBe('inv-full')
-    expect(detailMap.get('模型调用 ID')).toBe('model-123')
+    expect(detailMap.get('会话线程 ID')).toBe('thread-1')
+    expect(detailMap.get('回合起始 Entry ID')).toBe('turn-1')
     expect(detailMap.get('助手 Entry ID')).toBe('assistant-1')
     expect(detailMap.get('工具')).toBe('bash')
     expect(detailMap.get('工具调用 ID')).toBe('call-full')
@@ -1010,7 +1029,8 @@ describe('buildThreadEventTimeline', () => {
     expect(toolEvent!.rawJson).not.toBeNull()
     const rawParsed = JSON.parse(toolEvent!.rawJson!)
     expect(rawParsed.id).toBe('inv-full')
-    expect(rawParsed.modelInvocationId).toBe('model-123')
+    expect(rawParsed.threadId).toBe('thread-1')
+    expect(rawParsed.turnStartEntryId).toBe('turn-1')
     expect(rawParsed.argumentsJson).toBe(fullInvocation.argumentsJson)
     expect(rawParsed.resultJson).toBe(fullInvocation.resultJson)
     expect(rawParsed.approvalJson).toBe(fullInvocation.approvalJson)
@@ -1027,7 +1047,7 @@ describe('buildThreadEventTimeline', () => {
     })
     const failedEvents = buildThreadEventTimeline({
       entries,
-      modelInvocation: null,
+      activeAssistantOutput: null,
       toolInvocations: [failedInvocation],
     })
     const failedEvent = failedEvents.find((e) => e.id === 'active:tool:inv-failed')!
@@ -1067,8 +1087,8 @@ describe('buildThreadEventTimeline', () => {
     const entries = [
       entry('turn-1', 'TURN_START', { reason: 'USER_MESSAGE' }),
     ]
-    const failure = attemptFailure({
-      modelInvocationId: 'model-fail-1',
+    const failure = generationFailure({
+      generationId: 'model-fail-1',
       turnStartEntryId: 'turn-1',
       requestHeadEntryId: 'head-fail-1',
       attempt: 3,
@@ -1080,8 +1100,8 @@ describe('buildThreadEventTimeline', () => {
     })
 
     const events = build(entries, {
-      modelInvocation: modelInvocation('FAILED', 3),
-      modelAttemptFailures: [failure],
+      activeAssistantOutput: activeAssistantOutput('FAILED', 3),
+      generationFailures: [failure],
     })
 
     const failureEvent = events.find((e) => e.source === 'attempt-failure')
@@ -1089,7 +1109,7 @@ describe('buildThreadEventTimeline', () => {
     expect(failureEvent!.status).toBe('failed')
 
     const detailMap = new Map(failureEvent!.details.map((d) => [d.label, d.value]))
-    expect(detailMap.get('模型调用 ID')).toBe('model-fail-1')
+    expect(detailMap.get('生成 ID')).toBe('model-fail-1')
     expect(detailMap.get('回合起始 Entry ID')).toBe('turn-1')
     expect(detailMap.get('请求头 Entry ID')).toBe('head-fail-1')
     expect(detailMap.get('尝试次数')).toBe('3')
@@ -1101,7 +1121,7 @@ describe('buildThreadEventTimeline', () => {
 
     expect(failureEvent!.rawJson).not.toBeNull()
     const rawParsed = JSON.parse(failureEvent!.rawJson!)
-    expect(rawParsed.modelInvocationId).toBe('model-fail-1')
+    expect(rawParsed.generationId).toBe('model-fail-1')
     expect(rawParsed.errorCode).toBe('CONTEXT_LENGTH_EXCEEDED')
     expect(rawParsed.text).toBe('partial stream output text')
   })

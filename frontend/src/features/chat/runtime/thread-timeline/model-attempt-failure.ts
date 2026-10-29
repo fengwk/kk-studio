@@ -13,7 +13,7 @@ export interface ModelAttemptFailureMessageInput {
   failedAt: ModelAttemptFailureDialogueMessage['failedAt']
   retryAt: ModelAttemptFailureDialogueMessage['retryAt']
   nextAttempt: number | null
-  modelInvocationId?: string
+  generationId?: string
   turnStartEntryId?: string
   requestHeadEntryId?: string
 }
@@ -36,9 +36,9 @@ export function createModelAttemptFailureMessage(
     failedAt: input.failedAt,
     retryAt: input.retryAt,
     nextAttempt: input.nextAttempt,
-    ...(input.modelInvocationId == null
+    ...(input.generationId == null
       ? {}
-      : { modelInvocationId: input.modelInvocationId }),
+      : { generationId: input.generationId }),
     ...(input.turnStartEntryId == null
       ? {}
       : { turnStartEntryId: input.turnStartEntryId }),

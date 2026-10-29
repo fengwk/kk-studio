@@ -443,7 +443,8 @@ describe('真实 AgentMessageJsonCodec 历史生命周期与真实组件验收�
   ): ToolInvocationDTO {
     return {
       id,
-      modelInvocationId: `model-${id}`,
+      threadId: 'thread-1',
+      turnStartEntryId: 'turn-1',
       assistantEntryId,
       callIndex: 0,
       status: 'RUNNING',

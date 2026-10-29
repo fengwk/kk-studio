@@ -60,8 +60,9 @@ flowchart LR
 ```
 
 [`web`](modules/web.md) 是生产 Spring Boot composition root，装配 HTTP、WebSocket、
-Worker 与生命周期。依赖只由外向内：应用依赖平台，平台依赖 Harness 内核，内核只依赖 Common；
-平台需要应用参与的地方由平台定义 SPI、应用实现，平台从不依赖应用：
+Worker 与生命周期。依赖只由外向内：应用依赖平台，平台依赖 Harness 内核，内核依赖 Common、Environment 与 Model；
+具体模型生成由 Builtin Driver 承接，Driver 不反向依赖 Platform 或应用；平台需要应用参与的地方由平台定义 SPI、
+应用实现，平台从不依赖应用：
 
 ```text
 frontend -> web
@@ -69,8 +70,13 @@ web -> 应用：canvas-infra -> canvas-core、project、ide
 应用 -> platform-runtime -> platform-plugin-api
 web -(runtime)-> 选定插件 -> platform-plugin-api
 platform-plugin-api -> harness-runtime（Tool / Contributor 契约）
-platform-runtime -> harness-provider -> harness-runtime -> harness-environment -> common
+platform-runtime -> harness-runtime -> harness-model
+platform-runtime -> harness-agent-builtin -> harness-runtime / harness-model
+platform-runtime -> harness-model
+harness-runtime -> harness-environment -> common
 web -> harness-infra -> harness-runtime
+harness-infra -> harness-model
+harness-infra -> harness-agent-builtin
 canvas-infra / project / harness-infra -> work（共享调度邮箱）
 daemon -> harness-environment（通过 wire 协议消费共享契约）
 ```
@@ -237,8 +243,9 @@ Thread version 用于结构和控制状态 CAS。模型 checkpoint 可在同一 
 流式输出在当前 execution 内有界聚合并推送有损的 `MODEL_DELTA`；checkpoint、retry 和 terminal
 在短事务中复验 attempt 与 Work ownership，提交后才发布对应的 realtime 事件。审批和 `ask_user` 是持久等待，
 等待期间释放 Worker；人工决定按冻结调用、身份与提交约束接受后登记后续 Work。
-详细状态机见 [Harness Runtime](modules/harness-runtime.md)，协议适配见
-[Harness Provider](modules/harness-provider.md)。
+详细状态机见 [Harness Runtime](modules/harness-runtime.md)，Builtin 的请求冻结、MODEL Work 与流式投影见
+[Harness Agent Builtin](modules/harness-agent-builtin.md)，协议适配见
+[Harness Model](modules/harness-model.md)。
 
 模型输出把真实 `usage`（连同 stop reason 与可选流式计时）作为 durable 事实随 assistant Entry 保存，
 金额不是 durable 事实：读取时按当前 catalog pricing 用精确十进制现算，压缩输出按其冻结的执行模型计价；

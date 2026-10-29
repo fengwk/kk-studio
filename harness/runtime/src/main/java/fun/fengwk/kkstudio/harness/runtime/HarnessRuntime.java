@@ -3,7 +3,11 @@ package fun.fengwk.kkstudio.harness.runtime;
 import lombok.extern.slf4j.Slf4j;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
+import fun.fengwk.kkstudio.harness.runtime.driver.AgentDriver;
+import fun.fengwk.kkstudio.harness.runtime.driver.GenerationProjection;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitLedger;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState;
@@ -15,8 +19,6 @@ import fun.fengwk.kkstudio.harness.runtime.interaction.PendingEnvironmentWaitPag
 import fun.fengwk.kkstudio.harness.runtime.interaction.PendingInteraction;
 import fun.fengwk.kkstudio.harness.runtime.interaction.PendingInteractionPage;
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolApprovalJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelAttemptFailure;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
@@ -24,9 +26,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinProjector;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinReceipt;
-import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryMaterializer;
-import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
-import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.store.EnvironmentToolWaitRow;
@@ -36,6 +35,7 @@ import fun.fengwk.kkstudio.harness.runtime.store.PendingToolInvocationRow;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextProbe;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLiveState;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -73,57 +73,38 @@ public final class HarnessRuntime {
   private static final ToolApprovalJsonCodec APPROVAL_JSON = new ToolApprovalJsonCodec();
 
   private final HarnessStore store;
+  private final AgentDriver driver;
   private final AcceptCommandsControl acceptCommandsControl;
   private final StopControl stopControl;
   private final ToolInputControl toolInputControl;
+  private final ToolOutcomeQuery toolOutcomeQuery;
   private final ManualCompactionControl manualCompactionControl;
   private final Consumer<UUID> modelExecutionCanceller;
   private final Consumer<UUID> toolExecutionCanceller;
 
   /** 创建仅含 control 面的 Runtime，不承载本地 Model/Tool execution。 */
   public HarnessRuntime(
-      HarnessStore store,
-      TurnResolver resolver,
-      CompactionConfigProvider compactionConfigProvider) {
-    this(store, resolver, compactionConfigProvider, null, NO_OP_CANCELLER, NO_OP_CANCELLER);
+      HarnessStore store, AgentDriver driver, CompactionConfigProvider compactionConfigProvider) {
+    this(store, driver, compactionConfigProvider, NO_OP_CANCELLER, NO_OP_CANCELLER);
   }
 
-  /**
-   * 创建完整 Runtime facade，并注入 Tool outcome 的 durable history 物化端口（可为 null：ToolResult 含 Resource 引用时
-   * fail-closed）以及非空的本地 Model/Tool processors。
-   */
+  /** 由具体 Driver/Processor wiring 与 local execution adapter 共用的构造方法。 */
   public HarnessRuntime(
       HarnessStore store,
-      TurnResolver resolver,
+      AgentDriver driver,
       CompactionConfigProvider compactionConfigProvider,
-      ToolResultHistoryMaterializer toolResultHistoryMaterializer,
-      ModelProcessor modelProcessor,
-      ToolProcessor toolProcessor) {
-    this(
-        store,
-        resolver,
-        compactionConfigProvider,
-        toolResultHistoryMaterializer,
-        modelExecutionCanceller(modelProcessor),
-        toolExecutionCanceller(toolProcessor));
-  }
-
-  /** 由具体 Processor wiring 与 local execution adapter 共用的内部构造方法。 */
-  HarnessRuntime(
-      HarnessStore store,
-      TurnResolver resolver,
-      CompactionConfigProvider compactionConfigProvider,
-      ToolResultHistoryMaterializer toolResultHistoryMaterializer,
       Consumer<UUID> modelExecutionCanceller,
       Consumer<UUID> toolExecutionCanceller) {
     this.store = Objects.requireNonNull(store, "store");
+    this.driver = Objects.requireNonNull(driver, "driver");
     this.acceptCommandsControl = new AcceptCommandsControl(store);
-    this.stopControl = new StopControl(store, toolResultHistoryMaterializer);
+    this.stopControl = new StopControl(store, driver);
     this.toolInputControl = new ToolInputControl(this.store);
+    this.toolOutcomeQuery = new ToolOutcomeQuery(this.store);
     this.manualCompactionControl =
         new ManualCompactionControl(
             this.store,
-            Objects.requireNonNull(resolver, "resolver"),
+            Objects.requireNonNull(driver, "driver"),
             Objects.requireNonNull(compactionConfigProvider, "compactionConfigProvider"));
     this.modelExecutionCanceller =
         Objects.requireNonNull(modelExecutionCanceller, "modelExecutionCanceller");
@@ -185,6 +166,20 @@ public final class HarnessRuntime {
     return store.transaction(tx -> tx.findJoin(invocationId));
   }
 
+  /**
+   * 统一读取一次工具调用的 terminal outcome：优先读取本 Thread 尚存的 terminal Invocation，行已删除时按 Session 反查已物化的
+   * ToolResult Entry。
+   *
+   * <p>严格归属校验：Invocation 经其 ModelInvocation 归属该 Thread；历史 Entry 必须位于该 Thread 发起的 Turn 父链上。不属于该
+   * Thread、尚未 terminal 或不存在时返回 empty；Thread 本身不存在抛 {@link
+   * HarnessRuntimeNotFoundException}。非成功结果同时返回 durable error kind/message，人工输入返回 durable receipt。
+   */
+  public Optional<ToolOutcomeView> findToolOutcome(UUID threadId, UUID invocationId) {
+    Objects.requireNonNull(threadId, "threadId");
+    Objects.requireNonNull(invocationId, "invocationId");
+    return toolOutcomeQuery.find(threadId, invocationId);
+  }
+
   /** 从已匹配的固定结果 head 和原始源 command 投影回执，不读取子线程当前 head。 */
   public Optional<ThreadJoinReceipt> projectJoinReceipt(UUID invocationId) {
     Objects.requireNonNull(invocationId, "invocationId");
@@ -225,7 +220,7 @@ public final class HarnessRuntime {
           for (UUID id : lockOrder) {
             locked.add(tx.lockThread(id).orElseThrow());
           }
-          ThreadContextProbe probe = new ThreadContextProbe();
+          ThreadContextProbe probe = new ThreadContextProbe(driver);
           List<ThreadSnapshot> snapshots = new ArrayList<>(locked.size());
           for (ThreadState thread : locked) {
             List<ThreadCommand> queued = tx.loadQueuedCommands(thread.id());
@@ -369,6 +364,16 @@ public final class HarnessRuntime {
   /** 返回 Thread 当前的手动压缩可用性；结果是瞬时 projection，提交仍由 expectedVersion 做最终 CAS。 */
   public ManualCompactionAvailability manualCompactionAvailability(UUID threadId) {
     return manualCompactionControl.manualCompactionAvailability(threadId);
+  }
+
+  /** 以当前 Driver 自己的策略判断是否需要自动压缩；Runtime 不自行选择阈值或 fallback。返回 null 表示无需压缩。 */
+  public CompactionPreparation prepareAutomaticCompaction(
+      ThreadState thread, EntryPath path, CompactionConfig config, boolean hasQueuedMessage) {
+    return driver.prepareAutomaticCompaction(
+        Objects.requireNonNull(thread, "thread"),
+        Objects.requireNonNull(path, "path"),
+        Objects.requireNonNull(config, "config"),
+        hasQueuedMessage);
   }
 
   /**
@@ -620,9 +625,7 @@ public final class HarnessRuntime {
             throw approvalNotApplicable(
                 "tool invocation " + command.toolInvocationId() + " does not exist");
           }
-          ModelInvocation probeModel =
-              tx.findModelInvocation(probe.modelInvocationId()).orElse(null);
-          if (probeModel == null || !probeModel.threadId().equals(command.threadId())) {
+          if (!probe.threadId().equals(command.threadId())) {
             throw approvalNotApplicable(
                 "tool invocation "
                     + probe.id()
@@ -667,10 +670,9 @@ public final class HarnessRuntime {
   }
 
   /** 已锁定 Thread 的当前适用快照；调用方必须已持有该 Thread 行锁（整树查询另持有树锁）。 */
-  private static ThreadSnapshot snapshotLockedThread(
-      HarnessStore.Transaction tx, ThreadState thread) {
+  private ThreadSnapshot snapshotLockedThread(HarnessStore.Transaction tx, ThreadState thread) {
     List<ThreadCommand> queued = tx.loadQueuedCommands(thread.id());
-    LockedThreadContext locked = ThreadContextLock.load(tx, thread);
+    LockedThreadContext locked = ThreadContextLock.load(tx, thread, driver);
     int incompleteChildJoins = tx.countIncompleteChildJoins(thread.id());
     boolean unconsumedAppliedNotifications =
         ThreadInputDemand.hasUnconsumedNotification(tx, thread);
@@ -699,79 +701,105 @@ public final class HarnessRuntime {
       List<ExecutionExitFact> unconfirmedExecutions,
       boolean hasIncompleteOwnerChildJoin) {
     return switch (context) {
-      case ThreadContext.IdleOrHistorical ignored -> new ThreadSnapshot(
+      case ThreadContext.IdleOrHistorical ignored -> snapshot(
           thread,
           path,
           queued,
           null,
           List.of(),
-          List.of(),
+          ThreadLiveState.IDLE_OR_HISTORICAL,
           stopReceipts,
           incompleteChildJoins,
           unconsumedAppliedNotifications,
           unconfirmedExecutions,
           hasIncompleteOwnerChildJoin);
-      case ThreadContext.ContinuationDue ignored -> new ThreadSnapshot(
+      case ThreadContext.ContinuationDue ignored -> snapshot(
           thread,
           path,
           queued,
           null,
           List.of(),
-          List.of(),
+          ThreadLiveState.CONTINUATION_DUE,
           stopReceipts,
           incompleteChildJoins,
           unconsumedAppliedNotifications,
           unconfirmedExecutions,
           hasIncompleteOwnerChildJoin);
-      case ThreadContext.ModelActive active -> new ThreadSnapshot(
+      case ThreadContext.ModelActive active -> snapshot(
           thread,
           path,
           queued,
-          active.model(),
+          active.driverState().projection(),
           List.of(),
-          projectModelAttemptFailures(active.model(), path),
+          ThreadLiveState.DRIVER_ACTIVE,
           stopReceipts,
           incompleteChildJoins,
           unconsumedAppliedNotifications,
           unconfirmedExecutions,
           hasIncompleteOwnerChildJoin);
-      case ThreadContext.ModelTerminalPending pending -> new ThreadSnapshot(
+      case ThreadContext.ModelTerminalPending pending -> snapshot(
           thread,
           path,
           queued,
-          pending.model(),
+          pending.driverState().projection(),
           List.of(),
-          projectModelAttemptFailures(pending.model(), path),
+          ThreadLiveState.DRIVER_RESPONSE_PENDING,
           stopReceipts,
           incompleteChildJoins,
           unconsumedAppliedNotifications,
           unconfirmedExecutions,
           hasIncompleteOwnerChildJoin);
-      case ThreadContext.ToolActive active -> new ThreadSnapshot(
+      case ThreadContext.ToolActive active -> snapshot(
           thread,
           path,
           queued,
-          active.model(),
+          null,
           active.siblings(),
-          List.of(),
+          ThreadLiveState.TOOL_ACTIVE,
           stopReceipts,
           incompleteChildJoins,
           unconsumedAppliedNotifications,
           unconfirmedExecutions,
           hasIncompleteOwnerChildJoin);
-      case ThreadContext.ToolTerminalPending pending -> new ThreadSnapshot(
+      case ThreadContext.ToolTerminalPending pending -> snapshot(
           thread,
           path,
           queued,
-          pending.model(),
+          null,
           pending.siblings(),
-          List.of(),
+          ThreadLiveState.TOOL_TERMINAL_PENDING,
           stopReceipts,
           incompleteChildJoins,
           unconsumedAppliedNotifications,
           unconfirmedExecutions,
           hasIncompleteOwnerChildJoin);
     };
+  }
+
+  private static ThreadSnapshot snapshot(
+      ThreadState thread,
+      EntryPath path,
+      List<ThreadCommand> queued,
+      GenerationProjection generation,
+      List<ToolInvocation> toolSiblings,
+      ThreadLiveState liveState,
+      List<StoppedThreadReceipt> stopReceipts,
+      int incompleteChildJoins,
+      boolean unconsumedAppliedNotifications,
+      List<ExecutionExitFact> unconfirmedExecutions,
+      boolean hasIncompleteOwnerChildJoin) {
+    return new ThreadSnapshot(
+        thread,
+        path,
+        queued,
+        generation,
+        toolSiblings,
+        liveState,
+        stopReceipts,
+        incompleteChildJoins,
+        unconsumedAppliedNotifications,
+        unconfirmedExecutions,
+        hasIncompleteOwnerChildJoin);
   }
 
   /** 按永久 {@code parentThreadId} 深度优先收集整棵树；重复出现即环路，fail closed。 */
@@ -799,48 +827,12 @@ public final class HarnessRuntime {
         });
   }
 
-  private static List<ModelAttemptFailureProjection> projectModelAttemptFailures(
-      ModelInvocation invocation, EntryPath path) {
-    if (invocation.failedAttempts().isEmpty()) {
-      return List.of();
-    }
-    List<ModelAttemptFailureProjection> projections = new ArrayList<>();
-    for (ModelAttemptFailure failure : invocation.failedAttempts()) {
-      projections.add(
-          new ModelAttemptFailureProjection(
-              invocation.id(),
-              invocation.turnStartEntryId(),
-              invocation.requestHeadEntryId(),
-              failure.attempt(),
-              failure.sequence(),
-              failure.text(),
-              failure.thinking(),
-              failure.error(),
-              failure.failedAt(),
-              failure.retryAt()));
-    }
-    return List.copyOf(projections);
-  }
-
   /**
-   * 已决策 approval：按规范 Thread -&gt; Model -&gt; Tool 顺序锁定 owning Model 与 target Tool，并对照已锁定的当前
-   * approval 验证精确 replay，返回已锁定的当前 ToolInvocation。
+   * 已决策 approval：按公共锁序 Thread -&gt; Tool 锁定 target，并对照已锁定的当前 approval 验证精确 replay，返回已锁定的当前
+   * ToolInvocation。工具归属固定在 Thread/TurnStart/Assistant，不读取 Model。
    */
   private ToolInvocation replayDecidedApproval(
       HarnessStore.Transaction tx, ToolInvocation probe, ToolApprovalCommand command) {
-    ModelInvocation model =
-        tx.lockModelInvocation(probe.modelInvocationId())
-            .orElseThrow(
-                () ->
-                    new IllegalStateException(
-                        "model "
-                            + probe.modelInvocationId()
-                            + " could not be locked for approval replay of tool "
-                            + probe.id()));
-    if (!model.threadId().equals(command.threadId())) {
-      throw approvalNotApplicable(
-          "tool invocation " + probe.id() + " does not belong to thread " + command.threadId());
-    }
     ToolInvocation tool =
         tx.lockToolInvocation(probe.id())
             .orElseThrow(
@@ -849,9 +841,11 @@ public final class HarnessRuntime {
                         "tool invocation "
                             + probe.id()
                             + " could not be locked for approval replay"));
-    if (!tool.modelInvocationId().equals(probe.modelInvocationId())) {
+    if (!tool.threadId().equals(command.threadId())
+        || !tool.turnStartEntryId().equals(probe.turnStartEntryId())
+        || !tool.assistantEntryId().equals(probe.assistantEntryId())) {
       throw new IllegalStateException(
-          "tool invocation " + tool.id() + " changed its model attachment during approval replay");
+          "tool invocation " + tool.id() + " changed its ownership during approval replay");
     }
     ToolApproval approval = tool.approval();
     if (approval == null || !approval.required() || approval.decision() == null) {
@@ -883,7 +877,7 @@ public final class HarnessRuntime {
       ThreadState thread,
       ToolInvocation probe,
       ToolApprovalCommand command) {
-    LockedThreadContext locked = ThreadContextLock.load(tx, thread);
+    LockedThreadContext locked = ThreadContextLock.loadTools(tx, thread);
     if (!(locked.context() instanceof ThreadContext.ToolActive active)) {
       throw approvalNotApplicable(
           "tool invocation " + probe.id() + " is not in the current tool context");
@@ -925,11 +919,6 @@ public final class HarnessRuntime {
       tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()));
     }
     return updated;
-  }
-
-  private static Consumer<UUID> modelExecutionCanceller(ModelProcessor processor) {
-    Objects.requireNonNull(processor, "modelProcessor");
-    return processor::cancel;
   }
 
   private static Consumer<UUID> toolExecutionCanceller(ToolProcessor processor) {

@@ -16,14 +16,14 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
+import fun.fengwk.kkstudio.harness.model.ModelInputModality;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
+import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnCapabilities;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnMediaCapabilities;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
@@ -63,7 +63,7 @@ class PlatformResourceContentReaderMediaTest {
   private UUID sessionId;
   private UUID blobId;
   private UUID invocationId;
-  private UUID modelInvocationId;
+  private UUID turnStartEntryId;
 
   @BeforeEach
   void setUp() {
@@ -84,7 +84,7 @@ class PlatformResourceContentReaderMediaTest {
     sessionId = UUID.randomUUID();
     blobId = UUID.randomUUID();
     invocationId = UUID.randomUUID();
-    modelInvocationId = UUID.randomUUID();
+    turnStartEntryId = UUID.randomUUID();
 
     ThreadState thread = mock(ThreadState.class);
     when(thread.sessionId()).thenReturn(sessionId);
@@ -93,7 +93,8 @@ class PlatformResourceContentReaderMediaTest {
 
     ToolInvocation invocation = mock(ToolInvocation.class);
     when(invocation.call()).thenReturn(new ToolCall(CALL_ID, "read", "{}"));
-    when(invocation.modelInvocationId()).thenReturn(modelInvocationId);
+    when(invocation.threadId()).thenReturn(threadId);
+    when(invocation.turnStartEntryId()).thenReturn(turnStartEntryId);
     when(transaction.findToolInvocation(invocationId)).thenReturn(Optional.of(invocation));
   }
 
@@ -372,22 +373,21 @@ class PlatformResourceContentReaderMediaTest {
   }
 
   private void stubFrozenSpec(ProviderType type, Set<ModelInputModality> modalities) {
-    ModelDescriptor descriptor =
-        new ModelDescriptor("provider", "model", "model-id", modalities, true, false);
-    ModelRequestSpec spec =
-        new ModelRequestSpec(
-            type,
-            UUID.randomUUID(),
-            descriptor,
-            new ModelVariant("default"),
-            1024,
-            "instruction",
+    TurnCapabilities capabilities =
+        new TurnCapabilities(
             List.of(),
             List.of(),
-            ProviderCacheControl.none());
-    ModelInvocation model = mock(ModelInvocation.class);
-    when(model.threadId()).thenReturn(threadId);
-    when(model.requestSpec()).thenReturn(spec);
-    when(transaction.findModelInvocation(modelInvocationId)).thenReturn(Optional.of(model));
+            new TurnMediaCapabilities(
+                modalities,
+                type.mediaCapabilities().userModalities(),
+                type.mediaCapabilities().toolResultModalities()));
+    TurnStartPayload start = mock(TurnStartPayload.class);
+    when(start.ownerThreadId()).thenReturn(threadId);
+    when(start.capabilities()).thenReturn(capabilities);
+    Entry entry = mock(Entry.class);
+    when(entry.payload()).thenReturn(start);
+    EntryPath path = mock(EntryPath.class);
+    when(path.head()).thenReturn(entry);
+    when(transaction.loadEntryPath(turnStartEntryId)).thenReturn(path);
   }
 }

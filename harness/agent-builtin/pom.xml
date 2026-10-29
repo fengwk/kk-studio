@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>fun.fengwk.kk-studio</groupId>
+        <artifactId>kk-studio-harness</artifactId>
+        <version>5.0.0</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>kk-studio-harness-agent-builtin</artifactId>
+
+    <dependencies>
+        <dependency>
+            <groupId>fun.fengwk.kk-studio</groupId>
+            <artifactId>kk-studio-common</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>fun.fengwk.kk-studio</groupId>
+            <artifactId>kk-studio-harness-model</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>fun.fengwk.kk-studio</groupId>
+            <artifactId>kk-studio-harness-runtime</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>tools.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>fun.fengwk.kk-studio</groupId>
+            <artifactId>kk-studio-harness-runtime</artifactId>
+            <version>${kk-studio.version}</version>
+            <type>test-jar</type>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>3.4.2</version>
+                <executions>
+                    <execution>
+                        <id>builtin-test-support</id>
+                        <phase>process-test-classes</phase>
+                        <goals>
+                            <goal>test-jar</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <version>3.1.0</version>
+                <dependencies>
+                    <dependency>
+                        <groupId>org.jacoco</groupId>
+                        <artifactId>org.jacoco.ant</artifactId>
+                        <version>0.8.11</version>
+                    </dependency>
+                </dependencies>
+                <executions>
+                    <execution>
+                        <id>check-critical-class-line-coverage</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <taskdef name="jacoco-report"
+                                         classname="org.jacoco.ant.ReportTask"
+                                         classpathref="maven.plugin.classpath"/>
+                                <mkdir dir="${project.build.directory}/jacoco-report"/>
+                                <jacoco-report>
+                                    <executiondata>
+                                        <file file="${project.build.directory}/jacoco.exec"/>
+                                    </executiondata>
+                                    <structure name="kk-studio-harness-agent-builtin">
+                                        <group name="harness-runtime">
+                                            <classfiles>
+                                                <fileset dir="${project.basedir}/../runtime/target/classes"/>
+                                            </classfiles>
+                                            <sourcefiles encoding="UTF-8">
+                                                <fileset dir="${project.basedir}/../runtime/src/main/java"/>
+                                            </sourcefiles>
+                                        </group>
+                                        <group name="harness-agent-builtin">
+                                            <classfiles>
+                                                <fileset dir="${project.build.directory}/classes"/>
+                                            </classfiles>
+                                            <sourcefiles encoding="UTF-8">
+                                                <fileset dir="${project.basedir}/src/main/java"/>
+                                            </sourcefiles>
+                                        </group>
+                                    </structure>
+                                    <xml destfile="${project.build.directory}/jacoco-report/jacoco.xml"/>
+                                    <csv destfile="${project.build.directory}/jacoco-report/jacoco.csv"/>
+                                    <html destdir="${project.build.directory}/jacoco-report/html"/>
+                                    <check failonviolation="true">
+                                        <rule element="CLASS" includes="fun.fengwk.kkstudio.harness.runtime.ManualCompactionControl:fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot:fun.fengwk.kkstudio.harness.runtime.compaction.CompactionHistory:fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextProbe:fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding:fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolBindingJsonCodec:fun.fengwk.kkstudio.harness.runtime.AcceptCommandsControl:fun.fengwk.kkstudio.harness.runtime.AgentSpawner:fun.fengwk.kkstudio.harness.runtime.SpawnRequest:fun.fengwk.kkstudio.harness.runtime.SpawnRequest.Continuation:fun.fengwk.kkstudio.harness.runtime.SpawnRequest.Budget:fun.fengwk.kkstudio.harness.runtime.SpawnTickets:fun.fengwk.kkstudio.harness.runtime.compaction.CompactionChildSpawn:fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin:fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints:fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl:fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionFacts:fun.fengwk.kkstudio.harness.runtime.thread.ThreadState:fun.fengwk.kkstudio.harness.tool.ToolCall:fun.fengwk.kkstudio.harness.tool.codec.AgentToolDefinitionJsonCodec:fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec:fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec:fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog:fun.fengwk.kkstudio.harness.builtin.BuiltinHarnessContributor:fun.fengwk.kkstudio.harness.builtin.goal.GoalProgressCodec:fun.fengwk.kkstudio.harness.prompt.PromptTemplate:fun.fengwk.kkstudio.harness.prompt.PromptTemplateLoader:fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation:fun.fengwk.kkstudio.harness.runtime.processor.ModelExecution:fun.fengwk.kkstudio.harness.builtin.compaction.AutomaticCompactionPlanner:fun.fengwk.kkstudio.harness.runtime.thread.ResolvedRequestValidator:fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec">
+                                            <limit counter="LINE" value="COVEREDRATIO" minimum="0.90"/>
+                                        </rule>
+                                    </check>
+                                </jacoco-report>
+                            </target>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

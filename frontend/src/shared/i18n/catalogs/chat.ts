@@ -1797,9 +1797,13 @@ export const chatCatalog = {
     'en-US': 'Invocation ID',
     'zh-CN': '调用 ID',
   },
-  'ai.runtime.event.detail.modelInvocationId': {
-    'en-US': 'Model invocation ID',
-    'zh-CN': '模型调用 ID',
+  'ai.runtime.event.detail.threadId': {
+    'en-US': 'Thread ID',
+    'zh-CN': '会话线程 ID',
+  },
+  'ai.runtime.event.detail.generationId': {
+    'en-US': 'Generation ID',
+    'zh-CN': '生成 ID',
   },
   'ai.runtime.event.detail.assistantEntryId': {
     'en-US': 'Assistant entry ID',

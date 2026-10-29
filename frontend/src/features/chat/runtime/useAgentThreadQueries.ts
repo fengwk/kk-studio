@@ -36,9 +36,12 @@ export function useAgentThreadQueries(threadId: string) {
   const entries = useMemo(() => snapshot?.entries ?? [], [snapshot])
   const queuedCommands = useMemo(() => snapshot?.queuedCommands ?? [], [snapshot])
   const toolInvocations = useMemo(() => snapshot?.toolInvocations ?? [], [snapshot])
-  const modelInvocation = useMemo(() => snapshot?.modelInvocation ?? null, [snapshot])
-  const modelAttemptFailures = useMemo(
-    () => snapshot?.modelAttemptFailures ?? [],
+  const activeAssistantOutput = useMemo(
+    () => snapshot?.activeAssistantOutput ?? null,
+    [snapshot],
+  )
+  const generationFailures = useMemo(
+    () => snapshot?.generationFailures ?? [],
     [snapshot],
   )
   const stopReceipts = useMemo(() => snapshot?.stopReceipts ?? [], [snapshot])
@@ -72,9 +75,9 @@ export function useAgentThreadQueries(threadId: string) {
     sessionId,
     entries,
     queuedCommands,
-    modelInvocation,
+    activeAssistantOutput,
     toolInvocations,
-    modelAttemptFailures,
+    generationFailures,
     stopReceipts,
     unconfirmedExecutions,
     manualCompaction: snapshot?.manualCompaction ?? {

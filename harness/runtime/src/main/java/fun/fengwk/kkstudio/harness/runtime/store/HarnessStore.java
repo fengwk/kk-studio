@@ -8,7 +8,6 @@ import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
@@ -362,54 +361,6 @@ public interface HarnessStore {
      */
     void updateCommands(List<ThreadCommand> commands);
 
-    /** 按 id 读取 ModelInvocation；不存在返回 {@link Optional#empty()}。 */
-    Optional<ModelInvocation> findModelInvocation(UUID id);
-
-    /** 锁定 ModelInvocation 行并返回；不存在返回 {@link Optional#empty()} 且不产生锁。 */
-    Optional<ModelInvocation> lockModelInvocation(UUID id);
-
-    /** 按 (threadId, turnStartEntryId) 查找 ModelInvocation；不存在返回 {@link Optional#empty()}。 */
-    Optional<ModelInvocation> findModelInvocationByTurn(UUID threadId, UUID turnStartEntryId);
-
-    /**
-     * 插入新 ModelInvocation（初始状态不变量：只能 READY / attempt=0 / 无 terminal facts）。约束：thread 存在且已在本事务锁定
-     * （{@link #lockThread} 或同事务 {@link #insertThread}，request head CAS 才能原子成立，未锁定抛 {@link
-     * IllegalStateException}）； requestHeadEntryId 必须等于 Thread 当前 head（创建时精确 request head
-     * CAS）；turnStartEntryId 指向 TURN_START Entry 且必须位于 requestHeadEntryId 的 EntryPath 上；{@code
-     * (threadId, turnStartEntryId)} 唯一；resultEntryId 全局 唯一、必须是与 invocation 用途一致的结果 Entry（正常
-     * invocation：Assistant / AssistantError / AssistantAborted；压缩 invocation：COMPACTION /
-     * AssistantError / AssistantAborted），且其 path 同时包含 requestHeadEntryId 与 turnStartEntryId（同
-     * branch descendant）。违反抛 {@link IllegalArgumentException}。插入后本事务内可更新。
-     */
-    void insertModelInvocation(ModelInvocation invocation);
-
-    /**
-     * 更新 ModelInvocation current state。要求行存在且已在本事务锁定，并通过共享 transition validation（{@link
-     * ModelInvocation#validateTransition}）：threadId / turnStartEntryId / requestHeadEntryId /
-     * requestSpec / createdAt 不得 改变，attempt 只在 READY-&gt;RUNNING 时 +1，terminal facts
-     * 不可变（resultEntryId 仅允许 null-&gt;non-null），checkpoint 允许在 RUNNING-&gt;RUNNING 或
-     * RUNNING-&gt;terminal 单调新增/增长、进入 terminal 或 retry 时保留 exact 或清空。分支校验不重复依赖 Thread 当前 head /
-     * session（relocation 后 terminal exact replay 仍合法）；仅当 resultEntryId 出现时校验其类型、path 同时包含 request
-     * head 与 turnStart、全局唯一。未锁定抛 {@link IllegalStateException}，身份改变、非法 transition 或行不存在抛 {@link
-     * IllegalArgumentException}。
-     */
-    void updateModelInvocation(ModelInvocation invocation);
-
-    /** 当前组版本内该成员在事务时间 {@link #now()} 是否仍在冷却。组版本不一致（配置已变更）或截止时间已到都返回 false；只读，不改变状态。 */
-    boolean isGroupMemberCooling(
-        String groupName, long groupVersion, String memberModelName, String memberVariant);
-
-    /**
-     * 以「较晚截止时间胜出」写入成员冷却，并仅当 {@code agent_model.version == groupVersion} 时生效。旧版本在途 callback
-     * 无法为新配置写入或延长冷却；调用方必须在写入 ModelInvocation 进度的同一事务内调用。
-     */
-    void freezeGroupMember(
-        String groupName,
-        long groupVersion,
-        String memberModelName,
-        String memberVariant,
-        Instant cooldownUntil);
-
     /** 按 id 读取 ToolInvocation；不存在返回 {@link Optional#empty()}。 */
     Optional<ToolInvocation> findToolInvocation(UUID id);
 
@@ -476,19 +427,20 @@ public interface HarnessStore {
     Optional<Entry> findToolResultEntryByInvocationId(UUID sessionId, UUID invocationId);
 
     /**
-     * 批量插入新 ToolInvocation（初始状态只能是 READY，或用于 sibling 静态拒绝的 unattached FAILED；两者均
+     * 批量插入新 ToolInvocation（初始状态为 READY，或用于 sibling 静态拒绝的 unattached FAILED；均为
      * attempt=0、approval=null、effects 为空）；逐条校验 id、{@code (assistantEntryId, callIndex)}
-     * 唯一性，并要求：modelInvocation 存在且其 resultEntryId 等于 assistantEntryId；assistantEntryId 指向 Assistant
-     * MESSAGE Entry 且 call 与其中按 callIndex 提取的 ToolCall（id / toolName / argumentsJson）精确一致。完整预校验后按
-     * {@code (assistantEntryId, callIndex)} 稳定顺序写入；违反抛 {@link IllegalArgumentException}；入参 list
-     * 被防御性拷贝且拒绝 null 元素。插入后本事务内可更新。
+     * 唯一性，并要求：threadId 存在且已锁定；turnStartEntryId 属于该 Thread/Session、ownerThreadId 匹配，且是
+     * assistantEntryId 所在分支的 open turn；assistantEntryId 指向同一 Session 的 Assistant MESSAGE Entry 且
+     * call 与其中按 callIndex 提取的 ToolCall（id / toolName / argumentsJson）精确一致；除 terminal FAILED 外
+     * binding 必须存在（unknown 无 binding 只能形成 terminal 失败槽）。完整预校验后按 {@code (assistantEntryId,
+     * callIndex)} 稳定顺序写入；违反抛 {@link IllegalArgumentException}；入参 list 被防御性拷贝且拒绝 null 元素。插入后本事务内可更新。
      */
     void insertToolInvocations(List<ToolInvocation> invocations);
 
     /**
      * 批量更新 ToolInvocation current state。要求每行存在且已在本事务锁定，并通过共享 transition validation（{@link
-     * ToolInvocation#validateTransition}）：id / modelInvocationId / assistantEntryId / callIndex /
-     * call / binding / createdAt 不得改变，attempt 只在确认 start 时 +1，approval 一旦决定不可变，terminal
+     * ToolInvocation#validateTransition}）：id / threadId / turnStartEntryId / assistantEntryId /
+     * callIndex / call / binding / createdAt 不得改变，attempt 只在确认 start 时 +1，approval 一旦决定不可变，terminal
      * facts（result/effects/error）不可变。未锁定抛 {@link IllegalStateException}，身份改变、非法 transition 或行不存在抛
      * {@link IllegalArgumentException}。
      */
@@ -599,18 +551,9 @@ public interface HarnessStore {
      * #lockToolInvocationsByAssistantEntryId} 或 {@link #lockToolInvocation}），未锁定抛 {@link
      * IllegalStateException}；任一 id 对应行不存在抛 {@link IllegalArgumentException} 且不删除任何行（完整事务回滚，
      * 绝不部分删除）；入参出现重复 id 抛 {@link IllegalArgumentException}（调用方错误必须显式暴露，禁止静默去重）；入参 list 被防御性拷贝且拒绝
-     * null 元素。调用方必须保证调用顺序 children 先于 parent（ModelInvocation），残留引用使事务回滚。
+     * null 元素。调用方必须保证调用顺序 children 先于 parent，残留引用使事务回滚。
      */
     int deleteToolInvocationsByIds(List<UUID> toolInvocationIds);
-
-    /**
-     * 删除已锁定的单条 ModelInvocation 行并返回是否删除（TURN_END / Stop 的 parent 清理）。要求该行已在本事务锁定（{@link
-     * #lockModelInvocation}），未锁定抛 {@link IllegalStateException}；行不存在抛 {@link
-     * IllegalArgumentException}。存在引用本行的 ToolInvocation 子行时抛 {@link IllegalArgumentException} 且
-     * parent/child 均保留（显式 child 检查、不依赖底层 FK，保证所有实现语义一致；Model 锁已阻止并发 child insert）。
-     * 删除后该行不存在。调用方必须在删除前完成严格物化校验。
-     */
-    boolean deleteModelInvocation(UUID modelInvocationId);
 
     /**
      * 在已锁定的 Thread 内登记一次具体执行代次。身份不可更换：相同 executionId 必须携带完全相同的身份并返回已有事实；同一 executionId 的不同身份抛

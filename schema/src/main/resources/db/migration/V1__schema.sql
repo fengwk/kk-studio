@@ -1179,7 +1179,8 @@ comment on index uk_harness_model_invocation_result is 'resultEntryId 全局唯�
 
 create table harness_tool_invocation (
     id uuid primary key,
-    model_invocation_id uuid not null,
+    thread_id uuid not null,
+    turn_start_entry_id uuid not null,
     assistant_entry_id uuid not null,
     call_index integer not null check (call_index >= 0),
     call jsonb not null check (jsonb_typeof(call) = 'object'),
@@ -1193,11 +1194,16 @@ create table harness_tool_invocation (
     created_at timestamptz(3) not null,
     updated_at timestamptz(3) not null,
     input_receipt jsonb,
-    constraint fk_harness_tool_invocation_model foreign key (model_invocation_id)
-        references harness_model_invocation (id),
+    constraint fk_harness_tool_invocation_thread foreign key (thread_id)
+        references harness_thread (id),
+    constraint fk_harness_tool_invocation_turn_start foreign key (turn_start_entry_id)
+        references harness_entry (id),
     constraint fk_harness_tool_invocation_assistant foreign key (assistant_entry_id)
         references harness_entry (id),
     constraint uk_harness_tool_invocation_call_index unique (assistant_entry_id, call_index),
+    constraint ck_harness_tool_invocation_binding check (
+        binding is not null or status in ('FAILED', 'CANCELLED', 'UNKNOWN')
+    ),
     constraint ck_harness_tool_invocation_status check (
         status in (
             'WAITING_APPROVAL',
@@ -1239,10 +1245,11 @@ create table harness_tool_invocation (
     )
 );
 
-comment on table harness_tool_invocation is 'ToolInvocation：一次 tool 调用的 durable 生命周期记录，按 (assistant_entry_id, call_index) 与 assistant 消息对齐；WAITING_INPUT 冻结 binding 等待人输入，batch apply 后行被物理删除';
+comment on table harness_tool_invocation is 'ToolInvocation：一次 tool 调用的 durable 生命周期记录，按 (thread_id, turn_start_entry_id, assistant_entry_id, call_index) 对齐；WAITING_INPUT 冻结 binding 等待人输入，batch apply 后行被物理删除';
 comment on column harness_tool_invocation.id is 'ToolInvocation 的全局唯一 UUID';
-comment on column harness_tool_invocation.model_invocation_id is '所属 ModelInvocation';
-comment on column harness_tool_invocation.assistant_entry_id is '携带对应 ToolCall 的 Assistant MESSAGE Entry';
+comment on column harness_tool_invocation.thread_id is '公共归属 ThreadId；工具能力从该 Thread 的 turn_start_entry_id 冻结快照读取，不依赖 ModelInvocation';
+comment on column harness_tool_invocation.turn_start_entry_id is '公共归属 TurnStart；必须属于 thread_id 且是 assistant_entry_id 所在分支的 open turn';
+comment on column harness_tool_invocation.assistant_entry_id is '携带对应 ToolCall 的 Assistant MESSAGE Entry，必须位于同一 Thread/Session 与 Turn 分支';
 comment on column harness_tool_invocation.call_index is 'assistant 消息内 tool call 的下标（从 0 递增）';
 comment on column harness_tool_invocation.call is '冻结的 ToolCall（JSON object）';
 comment on column harness_tool_invocation.binding is '冻结的 tool binding（JSON object，仅在 immediate FAILED attempt=0 槽位可空）';
@@ -1256,11 +1263,11 @@ comment on column harness_tool_invocation.created_at is '创建时间（毫秒�
 comment on column harness_tool_invocation.updated_at is '最后更新时间（毫秒精度）';
 comment on column harness_tool_invocation.input_receipt is '交互回执（JSON object，可空）：仅在 SUCCEEDED 且 result 非空时存在，携带 submissionId/actor/acceptedAt，历史物化前由 runtime 持有';
 
-create index idx_harness_tool_invocation_model_nonterminal
-    on harness_tool_invocation (model_invocation_id)
+create index idx_harness_tool_invocation_thread_nonterminal
+    on harness_tool_invocation (thread_id)
     where status in ('WAITING_APPROVAL', 'WAITING_INPUT', 'READY', 'RUNNING');
 
-comment on index idx_harness_tool_invocation_model_nonterminal is '未收尾 ToolInvocation 按所属 ModelInvocation 的查找路径（已终态行在 batch apply 后物理删除，不需要覆盖）';
+comment on index idx_harness_tool_invocation_thread_nonterminal is '未收尾 ToolInvocation 按公共 Thread 归属的查找路径（已终态行在 batch apply 后物理删除，不需要覆盖）';
 
 -- Pending input/approval paging uses one stable ordinal, not two status queries.
 create index idx_harness_tool_invocation_pending
@@ -1491,8 +1498,8 @@ comment on column harness_execution_exit.thread_id is '所属 Thread；按 Threa
 comment on column harness_execution_exit.invocation_id is '关联的逻辑 Model 或 Tool invocation';
 comment on column harness_execution_exit.attempt is '该 invocation 的具体执行代次，从 1 开始';
 comment on column harness_execution_exit.owner_lease_token is '登记时持有的 Work lease token';
-comment on column harness_execution_exit.kind is 'MODEL、TOOL 或挂在本地 Tool 代次上的 REMOTE';
-comment on column harness_execution_exit.parent_execution_id is 'REMOTE 关联的本地 Tool 执行代次；本地执行为空';
+comment on column harness_execution_exit.kind is 'MODEL、TOOL 或挂在本地 TOOL 代次上的 REMOTE';
+comment on column harness_execution_exit.parent_execution_id is 'REMOTE 关联的本地 TOOL 执行代次；本地执行为空';
 comment on column harness_execution_exit.state is '退出证据：未确认、Studio 退出、远端 ACK、确定未启动，或用户显式放弃（ABANDONED 不代表物理退出）';
 comment on column harness_execution_exit.registered_at is '登记时间（毫秒精度）';
 comment on column harness_execution_exit.confirmed_at is '真实退出证据确认时间（毫秒精度）；未确认或放弃时为空';
@@ -1512,7 +1519,7 @@ create index idx_harness_execution_exit_parent
     where parent_execution_id is not null;
 
 comment on index idx_harness_execution_exit_thread is 'Thread 深删按 thread_id 删除执行代次，并服务删除 Thread 时的外键检查';
-comment on index idx_harness_execution_exit_parent is '删除执行代次时服务 REMOTE 指向本地 Tool 代次的自引用外键检查';
+comment on index idx_harness_execution_exit_parent is '删除执行代次时服务 REMOTE 指向本地 TOOL 代次的自引用外键检查';
 
 ------------------------------------------------------------------------------
 -- 3. Project / Issue business facts

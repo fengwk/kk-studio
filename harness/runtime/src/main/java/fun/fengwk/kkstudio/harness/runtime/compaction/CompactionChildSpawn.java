@@ -3,9 +3,9 @@ package fun.fengwk.kkstudio.harness.runtime.compaction;
 import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.runtime.AgentSpawner;
 import fun.fengwk.kkstudio.harness.runtime.SpawnRequest;
+import fun.fengwk.kkstudio.harness.runtime.driver.CompactionResolution;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
-import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
@@ -34,7 +34,7 @@ public final class CompactionChildSpawn {
   public static CompactionStart start(
       HarnessStore.Transaction tx,
       ThreadState parentThread,
-      TurnResolver.CompactionResolved resolved,
+      CompactionResolution resolved,
       CompactionPreparation preparation) {
     Objects.requireNonNull(tx, "tx");
     Objects.requireNonNull(parentThread, "parentThread");

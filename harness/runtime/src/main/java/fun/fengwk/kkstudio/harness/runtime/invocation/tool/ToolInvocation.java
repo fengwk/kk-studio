@@ -1,5 +1,8 @@
 package fun.fengwk.kkstudio.harness.runtime.invocation.tool;
 
+import fun.fengwk.kkstudio.common.result.BinaryResultContent;
+import fun.fengwk.kkstudio.common.result.ResourceResultContent;
+import fun.fengwk.kkstudio.common.result.ResultContent;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -21,7 +24,8 @@ import java.util.UUID;
  */
 public record ToolInvocation(
     UUID id,
-    UUID modelInvocationId,
+    UUID threadId,
+    UUID turnStartEntryId,
     UUID assistantEntryId,
     int callIndex,
     ToolCall call,
@@ -39,7 +43,8 @@ public record ToolInvocation(
   /** 构造不携带 branch effects 与人工输入回执的 invocation；普通 Tool 与非成功状态使用此便捷入口。 */
   public ToolInvocation(
       UUID id,
-      UUID modelInvocationId,
+      UUID threadId,
+      UUID turnStartEntryId,
       UUID assistantEntryId,
       int callIndex,
       ToolCall call,
@@ -53,7 +58,8 @@ public record ToolInvocation(
       Instant updatedAt) {
     this(
         id,
-        modelInvocationId,
+        threadId,
+        turnStartEntryId,
         assistantEntryId,
         callIndex,
         call,
@@ -72,7 +78,8 @@ public record ToolInvocation(
   /** 构造携带 branch effects、但不携带人工输入回执的 invocation。 */
   public ToolInvocation(
       UUID id,
-      UUID modelInvocationId,
+      UUID threadId,
+      UUID turnStartEntryId,
       UUID assistantEntryId,
       int callIndex,
       ToolCall call,
@@ -87,7 +94,8 @@ public record ToolInvocation(
       Instant updatedAt) {
     this(
         id,
-        modelInvocationId,
+        threadId,
+        turnStartEntryId,
         assistantEntryId,
         callIndex,
         call,
@@ -105,7 +113,8 @@ public record ToolInvocation(
 
   public ToolInvocation {
     Objects.requireNonNull(id, "id");
-    Objects.requireNonNull(modelInvocationId, "modelInvocationId");
+    Objects.requireNonNull(threadId, "threadId");
+    Objects.requireNonNull(turnStartEntryId, "turnStartEntryId");
     Objects.requireNonNull(assistantEntryId, "assistantEntryId");
     if (callIndex < 0) {
       throw new IllegalArgumentException("callIndex must not be negative");
@@ -151,7 +160,8 @@ public record ToolInvocation(
 
   private static void requireStableIdentity(ToolInvocation stored, ToolInvocation next) {
     if (!stored.id().equals(next.id())
-        || !stored.modelInvocationId().equals(next.modelInvocationId())
+        || !stored.threadId().equals(next.threadId())
+        || !stored.turnStartEntryId().equals(next.turnStartEntryId())
         || !stored.assistantEntryId().equals(next.assistantEntryId())
         || stored.callIndex() != next.callIndex()
         || !stored.call().equals(next.call())
@@ -159,7 +169,8 @@ public record ToolInvocation(
         || !stored.createdAt().equals(next.createdAt())) {
       throw new IllegalArgumentException(
           "tool invocation identity"
-              + " (id/modelInvocation/assistantEntry/callIndex/call/binding/createdAt) must not change");
+              + " (id/thread/turnStart/assistantEntry/callIndex/call/binding/createdAt) must not"
+              + " change");
     }
   }
 
@@ -459,7 +470,7 @@ public record ToolInvocation(
   }
 
   /**
-   * READY / RUNNING -&gt; FAILED，并附带一个 terminal error；attempt 不变。WAITING_APPROVAL 被拒绝：undecided
+   * READY / RUNNING -&gt; FAILED，并附带一个 terminal error；attempt 不变。WAITING_APPROVAL 被拒绝： undecided
    * approval 只能通过已决定的 DENIED 决策来拒绝，或被作为 CANCELLED 终止。
    */
   public ToolInvocation fail(ToolInvocationError error, Instant now) {
@@ -517,7 +528,8 @@ public record ToolInvocation(
     ToolInvocation next =
         new ToolInvocation(
             id,
-            modelInvocationId,
+            threadId,
+            turnStartEntryId,
             assistantEntryId,
             callIndex,
             call,
@@ -620,6 +632,7 @@ public record ToolInvocation(
         throw new IllegalArgumentException(
             "SUCCEEDED result toolCallId must match the invocation call");
       }
+      requireStableSuccessResult(result);
       if (error != null) {
         throw new IllegalArgumentException("SUCCEEDED must not carry an error");
       }
@@ -671,6 +684,20 @@ public record ToolInvocation(
       }
       requireNoInputReceipt(status, inputReceipt);
       requireEmptyEffects(status, effects);
+    }
+  }
+
+  /** SUCCEEDED 结果必须已稳定：不得含 inline binary，Resource 只能是当前 Session 的 kkstudio 引用。 */
+  private static void requireStableSuccessResult(ToolResult result) {
+    for (ResultContent content : result.contents()) {
+      if (content instanceof BinaryResultContent) {
+        throw new IllegalArgumentException("SUCCEEDED result must not carry inline binary content");
+      }
+      if (content instanceof ResourceResultContent resource
+          && resource.resource().sessionBlobId() == null) {
+        throw new IllegalArgumentException(
+            "SUCCEEDED result resources must be stable session resources");
+      }
     }
   }
 

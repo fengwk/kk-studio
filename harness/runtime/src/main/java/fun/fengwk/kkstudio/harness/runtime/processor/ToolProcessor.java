@@ -5,13 +5,13 @@ import lombok.extern.slf4j.Slf4j;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.input.HumanInputJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.input.HumanInputTool;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
+import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
@@ -35,9 +35,9 @@ import java.util.concurrent.ScheduledExecutorService;
  * Target Tool processor：消费 dispatcher 已 claim 的 TOOL Work，驱动一次 Tool invocation 的完整生命周期。
  *
  * <p>只依赖单一 {@link HarnessStore} + {@link ToolGateway} + {@link RealtimeEventSink}，不自行全局 poll；不做任何
- * Entry / head / ToolResult Entry / Usage 写入。短事务只锁 own Thread -&gt; ModelInvocation -&gt;
- * ToolInvocation -&gt; Work（同事务需要 THREAD Work 时先 request/upsert 并锁定 THREAD Work，再 lockClaimed TOOL
- * Work）；不取执行树锁、Session 锁或祖先锁。公共所有权与准入协议见包说明。
+ * Entry / head / ToolResult Entry / Usage 写入。短事务只锁 own Thread -&gt; ToolInvocation -&gt; Work（同事务需要
+ * THREAD Work 时先 request/upsert 并锁定 THREAD Work，再 lockClaimed TOOL Work）；不取执行树锁、Session
+ * 锁或祖先锁；工具能力来自 TurnStart 冻结快照，不读取 Model。公共所有权与准入协议见包说明。
  *
  * <p>状态机：READY + approval null 在 ensure 完整 lease margin 后于事务外执行 {@link ToolGateway#preflight}
  * （preflight 期间由本地 heartbeat 维持 lease）；锁内解析实际 YOLO 开关（执行根读自身，子代理读执行根）为 true 时跳过 preflight 直接
@@ -63,6 +63,7 @@ public final class ToolProcessor implements AutoCloseable {
   private final Clock clock;
   private final ScheduledExecutorService scheduler;
   private final Executor heartbeatWorker;
+  private final ToolResultHistoryMaterializer toolResultHistoryMaterializer;
   private final ClaimAdmissionGuard<ToolExecution> admissionGuard = new ClaimAdmissionGuard<>();
 
   public ToolProcessor(
@@ -73,7 +74,8 @@ public final class ToolProcessor implements AutoCloseable {
       Clock clock,
       ScheduledExecutorService scheduler,
       Executor heartbeatWorker,
-      ExecutionExitConfirmer exitConfirmer) {
+      ExecutionExitConfirmer exitConfirmer,
+      ToolResultHistoryMaterializer toolResultHistoryMaterializer) {
     this.store = Objects.requireNonNull(store, "store");
     this.exitConfirmer = Objects.requireNonNull(exitConfirmer, "exitConfirmer");
     this.gateway = Objects.requireNonNull(gateway, "gateway");
@@ -82,6 +84,8 @@ public final class ToolProcessor implements AutoCloseable {
     this.clock = HarnessStoreTime.millisecondClock(clock);
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
     this.heartbeatWorker = Objects.requireNonNull(heartbeatWorker, "heartbeatWorker");
+    this.toolResultHistoryMaterializer =
+        Objects.requireNonNull(toolResultHistoryMaterializer, "toolResultHistoryMaterializer");
   }
 
   /**
@@ -157,31 +161,28 @@ public final class ToolProcessor implements AutoCloseable {
     return Boolean.TRUE.equals(store.transaction(tx -> !tx.lockClaimedWork(claim).isEmpty()));
   }
 
-  /** 按锁序 Thread -&gt; Model -&gt; Tool -&gt; Work 读取并分支当前 durable 状态；不重放、不重复 bump version。 */
+  /** 按锁序 Thread -&gt; Tool -&gt; Work 读取并分支当前 durable 状态；不重放、不重复 bump version。 */
   private Prepare prepareLocked(HarnessStore.Transaction tx, ClaimedWork claim, Instant now) {
     UUID invocationId = claim.target().id();
     ToolInvocation peek = tx.findToolInvocation(invocationId).orElse(null);
     if (peek == null) {
       return new Prepare.Lost();
     }
-    ModelInvocation modelPeek = tx.findModelInvocation(peek.modelInvocationId()).orElse(null);
-    if (modelPeek == null) {
-      return new Prepare.Lost();
-    }
-    ThreadState thread = tx.lockThread(modelPeek.threadId()).orElse(null);
+    ThreadState thread = tx.lockThread(peek.threadId()).orElse(null);
     if (thread == null) {
-      return new Prepare.Lost();
-    }
-    ModelInvocation model = tx.lockModelInvocation(peek.modelInvocationId()).orElse(null);
-    if (model == null) {
       return new Prepare.Lost();
     }
     ToolInvocation tool = tx.lockToolInvocation(invocationId).orElse(null);
     if (tool == null) {
       return new Prepare.Lost();
     }
+    // 公共工具归属与能力已冻结在 TurnStart；执行路径不读取/锁定 ModelInvocation。
+    if (!tool.threadId().equals(thread.id())) {
+      throw new IllegalStateException(
+          "tool invocation " + tool.id() + " changed its thread during preparation");
+    }
     return switch (tool.status()) {
-      case READY -> prepareReady(tx, claim, thread, model, tool, now);
+      case READY -> prepareReady(tx, claim, thread, tool, now);
       case WAITING_APPROVAL, WAITING_INPUT -> waitingForHuman(tx, claim, now);
       case RUNNING -> recoverUnknown(tx, claim, thread, tool, now);
       case SUCCEEDED, FAILED, CANCELLED, UNKNOWN -> cleanupTerminal(tx, claim, thread, tool, now);
@@ -200,7 +201,6 @@ public final class ToolProcessor implements AutoCloseable {
       HarnessStore.Transaction tx,
       ClaimedWork claim,
       ThreadState thread,
-      ModelInvocation model,
       ToolInvocation tool,
       Instant now) {
     Optional<Work> claimed = tx.lockClaimedWork(claim);
@@ -227,7 +227,7 @@ public final class ToolProcessor implements AutoCloseable {
 
   /**
    * WAITING_APPROVAL / WAITING_INPUT 不应执行：仅在 ownership 有效时 complete TOOL Work，不 bump version、不
-   * request THREAD。两类等待都由用户侧显式决策/作答唤醒，不占用 Worker、不重排执行。
+   * request THREAD。审批与问卷由用户侧显式决策/作答唤醒。
    */
   private Prepare waitingForHuman(HarnessStore.Transaction tx, ClaimedWork claim, Instant now) {
     if (tx.lockClaimedWork(claim).isEmpty()) {
@@ -693,7 +693,8 @@ public final class ToolProcessor implements AutoCloseable {
         scheduler,
         heartbeatWorker,
         this::release,
-        exitConfirmer);
+        exitConfirmer,
+        toolResultHistoryMaterializer);
   }
 
   /** 有效 YOLO 只由执行根的开关决定；子代理读取其不可变执行根。 */

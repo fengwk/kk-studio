@@ -8,12 +8,8 @@ import fun.fengwk.kkstudio.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.common.result.ResultContent;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
-import fun.fengwk.kkstudio.harness.runtime.model.ImageInputTier;
+import fun.fengwk.kkstudio.harness.runtime.port.ToolOutcomeMaterializationException;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryMaterializer;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.JsonMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageVerificationException;
@@ -31,14 +27,14 @@ import java.util.UUID;
 /**
  * 基于全局 Blob 存储的 {@link ToolResultHistoryMaterializer}。
  *
- * <p>在 Tool outcome Entry 插入前、同一 store 事务内：
+ * <p>在单工具 terminal 的同一 store 事务内：
  *
  * <ul>
- *   <li>只接受 Gateway 已准备的 {@code blob-upload} 引用，不执行对象 I/O；
- *   <li>引用走 {@code lockReady → retainRef → delete} 原子转移；
- *   <li>以权威 blob 事实复核 ref size/sha/mediaType，并保留宿主已验证的文本 metadata；
- *   <li>构造并返回携带完整结构化 facts 的 durable {@link ResourceMessageContent}；
- *   <li>任一项失败整体回滚事务，绝不产生部分 history。
+ *   <li>只接受 Gateway 已准备的 {@code blob-upload} 或已授权的 {@code kkstudio} 引用，不执行对象 I/O；
+ *   <li>上传引用走 {@code lockReady → 校验权威事实 → retainRef → delete} 原子转移；
+ *   <li>结果为稳定的 {@link ToolResult}：Resource 只携带 {@code kkstudio:/resources/<blobId>}，绝不保留临时 upload
+ *       URI；
+ *   <li>任一项确定性校验失败抛 {@link ToolOutcomeMaterializationException} 并整体回滚，绝不产生部分 history。
  * </ul>
  */
 public class GlobalStorageToolResultHistoryMaterializer implements ToolResultHistoryMaterializer {
@@ -64,68 +60,62 @@ public class GlobalStorageToolResultHistoryMaterializer implements ToolResultHis
 
   @Override
   @Transactional(propagation = Propagation.MANDATORY)
-  public List<AgentMessageContent> materialize(UUID sessionId, String toolName, ToolResult result) {
+  public ToolResult materialize(UUID sessionId, String toolName, ToolResult result) {
     Objects.requireNonNull(sessionId, "sessionId");
     Objects.requireNonNull(toolName, "toolName");
     Objects.requireNonNull(result, "result");
     List<ResultContent> source = result.contents();
-    List<AgentMessageContent> contents = new ArrayList<>(source.size());
-    for (int index = 0; index < source.size(); index++) {
-      ResultContent content = source.get(index);
-      if (content instanceof TextResultContent text) {
-        contents.add(new TextMessageContent(text.text()));
-      } else if (content instanceof JsonResultContent json) {
-        contents.add(new JsonMessageContent(json.json()));
+    List<ResultContent> stable = new ArrayList<>(source.size());
+    for (ResultContent content : source) {
+      if (content instanceof TextResultContent || content instanceof JsonResultContent) {
+        stable.add(content);
       } else if (content instanceof ResourceResultContent resource) {
-        if (resource.resource().sessionBlobId() != null) {
-          contents.add(reuseSessionResource(sessionId, resource));
-        } else if (resource.resource().blobUploadId() != null) {
-          contents.add(consumeUploadedResource(sessionId, resource));
-        } else {
-          throw new IllegalArgumentException(
-              "tool resource must be staged or an authorized session resource before history"
-                  + " materialization");
-        }
+        stable.add(stableResource(sessionId, resource));
       } else {
-        throw new IllegalArgumentException(
-            "unsupported tool content kind for history materialization: "
+        throw new ToolOutcomeMaterializationException(
+            "unsupported tool content kind for stable outcome: "
                 + content.getClass().getSimpleName());
       }
     }
-    return List.copyOf(contents);
+    return new ToolResult(
+        result.toolCallId(), List.copyOf(stable), result.error(), result.detailsJson());
+  }
+
+  private ResourceResultContent stableResource(UUID sessionId, ResourceResultContent resource) {
+    ResourceRef ref = resource.resource();
+    if (ref.sessionBlobId() != null) {
+      return reuseSessionResource(sessionId, resource);
+    }
+    if (ref.blobUploadId() != null) {
+      return consumeUploadedResource(sessionId, resource);
+    }
+    throw new ToolOutcomeMaterializationException(
+        "tool resource must be staged or an authorized session resource");
   }
 
   /**
    * 消费一个由 Daemon 直传的上传：在同一事务内把它原子转移为 Session 引用。
    *
-   * <p>顺序固定为 {@code lockReady → 校验 blob 权威事实 → retainRef → delete}：先锁定上传行并取得权威 blobId 与文件名， 再用不可变
-   * blob 行复核媒体类型/字节数/摘要与终态声明完全一致，然后为新 owner retain，最后请求释放上传 owner。任一步失败都让调用方 事务整体回滚，绝不产生部分 history
-   * 或悬空引用。
-   *
-   * <p><b>权威文件名：</b>durable history 的文件名一律取自上传行（{@link
-   * StorageUploadService.ReadyUpload#filename()}），绝不信任 终态消息中的 {@code ref.name()}。Daemon
-   * 是不可信输入方：展示名可能被伪造、与其声明的内容不符，或试图注入路径/协议语义。
-   *
-   * <p><b>尺寸上界：</b>所有 staged 引用施加同一个 {@code resourceMaxBytes} 上限，声明尺寸超限时在锁定上传行之前拒绝， 不产生任何存储副作用。
-   *
-   * <p>资源最终只为 Session 保留 {@code blobId}：上传行、bucket、对象物理 key 与任何 Daemon 本地事实都不进入 durable history。
+   * <p>顺序固定为 {@code lockReady → 校验 blob 权威事实与文件名 → retainRef → delete}：新 owner 建立之前拒绝任何无效输入，
+   * 任一步失败都让调用方 事务整体回滚，绝不产生部分 history 或悬空引用。
    */
-  private ResourceMessageContent consumeUploadedResource(
+  private ResourceResultContent consumeUploadedResource(
       UUID sessionId, ResourceResultContent resource) {
     ResourceRef ref = resource.resource();
     UUID uploadId = ref.blobUploadId();
     if (ref.size() == null || ref.sha256() == null) {
-      throw new IllegalArgumentException("uploaded resource must declare size and sha256");
+      throw new ToolOutcomeMaterializationException(
+          "uploaded resource must declare size and sha256");
     }
     if (ref.size() > resourceMaxBytes) {
-      throw new IllegalArgumentException(
+      throw new ToolOutcomeMaterializationException(
           "uploaded resource must not exceed " + resourceMaxBytes + " bytes");
     }
     StorageUploadService.ReadyUpload ready;
     try {
       ready = uploadService.lockReady(uploadId);
     } catch (StorageResourceNotFoundException | StorageVerificationException error) {
-      throw new IllegalArgumentException("uploaded resource is not ready for history");
+      throw new ToolOutcomeMaterializationException("uploaded resource is not ready for history");
     }
     StorageBlob blob = blobManager.getBlob(ready.blobId());
     if (blob == null
@@ -133,57 +123,41 @@ public class GlobalStorageToolResultHistoryMaterializer implements ToolResultHis
         || !ref.mediaType().equals(blob.getMediaType())
         || ref.size() != blob.getSizeBytes()
         || !ref.sha256().equals(blob.getSha256())) {
-      throw new IllegalArgumentException("uploaded resource failed integrity validation");
+      throw new ToolOutcomeMaterializationException(
+          "uploaded resource failed integrity validation");
+    }
+    String filename = ready.filename();
+    if (filename == null || filename.isBlank()) {
+      throw new ToolOutcomeMaterializationException(
+          "uploaded resource has no authoritative filename");
+    }
+    if (resource.textMetadata() != null
+        && resource.textMetadata().totalBytes() != blob.getSizeBytes()) {
+      throw new ToolOutcomeMaterializationException(
+          "text artifact metadata failed integrity validation");
     }
     refManager.retainRef(sessionId, ready.blobId());
     uploadService.delete(uploadId);
-    String filename = ready.filename();
-    if (filename == null || filename.isBlank()) {
-      throw new IllegalArgumentException("uploaded resource has no authoritative filename");
-    }
-    if (resource.textMetadata() != null) {
-      if (resource.textMetadata().totalBytes() != blob.getSizeBytes()) {
-        throw new IllegalArgumentException("text artifact metadata failed integrity validation");
-      }
-      return ResourceMessageContent.externalizedText(
-          ready.blobId(),
-          filename,
-          blob.getSizeBytes(),
-          resource.textMetadata().totalLines(),
-          resource.preview());
-    }
-    // 工具结果图片没有用户选择：冻结平台默认档位（720P）；非图片媒体不带档位。
-    return ResourceMessageContent.media(
-        ready.blobId(), filename, resource.preview(), defaultImageTier(blob.getMediaType()));
+    return new ResourceResultContent(
+        stableRef(blob, filename), resource.preview(), resource.textMetadata());
   }
 
-  /** 图片工具结果的默认输入档位；非 image/* 媒体不携带档位。 */
-  private static ImageInputTier defaultImageTier(String mediaType) {
-    return mediaType != null && mediaType.startsWith("image/") ? ImageInputTier.P720 : null;
-  }
-
-  /**
-   * 复用一个已授权的 Session Blob 作为 durable 工具结果资源。
-   *
-   * <p>只复用当前 Session 已授权的既有 Blob，并按权威 blob 事实复核 {@code ref} 的媒体类型/体积/摘要与终态声明完全一致；随后复用既有 Session
-   * 引用（{@link SessionBlobRefManager#retainRef} 对同一 Session/Blob 幂等），绝不读取或写入对象存储、绝不重新上传。未授权（含 Daemon
-   * 注入此 scheme）与不存在的 Blob 在任何元数据读取或引用写入之前以不可区分的错误拒绝。只接受可送达模型的媒体类型（{@code image/*}、{@code
-   * audio/*}、{@code video/*} 与 {@code application/pdf}），任意其它文件一律拒绝。
-   */
-  private ResourceMessageContent reuseSessionResource(
+  /** 复用一个已授权的 Session Blob：只接受当前 Session 已持有且与权威 blob facts 一致的引用，随后幂等 retain；绝不读取或写入对象存储。 */
+  private ResourceResultContent reuseSessionResource(
       UUID sessionId, ResourceResultContent resource) {
     ResourceRef ref = resource.resource();
     UUID blobId = ref.sessionBlobId();
     if (ref.size() == null || ref.sha256() == null) {
-      throw new IllegalArgumentException("session resource must declare size and sha256");
+      throw new ToolOutcomeMaterializationException(
+          "session resource must declare size and sha256");
     }
     if (resource.textMetadata() != null) {
-      throw new IllegalArgumentException("session media resource must not declare text metadata");
+      throw new ToolOutcomeMaterializationException(
+          "session media resource must not declare text metadata");
     }
-    // kkstudio 引用只可复用当前 Session 已有的授权：调用方是否已鉴权不改变本边界的职责，且 Daemon 结果也可能注入此 scheme。
-    // 未授权与不存在返回不可区分的错误，且发生在任何元数据读取 / retainRef / 资源写入之前。
     if (!refManager.contains(sessionId, blobId)) {
-      throw new IllegalArgumentException("session resource is not referenced by this session");
+      throw new ToolOutcomeMaterializationException(
+          "session resource is not referenced by this session");
     }
     StorageBlob blob = blobManager.getBlob(blobId);
     if (blob == null
@@ -191,14 +165,27 @@ public class GlobalStorageToolResultHistoryMaterializer implements ToolResultHis
         || !ref.mediaType().equals(blob.getMediaType())
         || ref.size() != blob.getSizeBytes()
         || !ref.sha256().equals(blob.getSha256())) {
-      throw new IllegalArgumentException("session resource failed integrity validation");
+      throw new ToolOutcomeMaterializationException("session resource failed integrity validation");
     }
     if (!isSupportedReadMedia(blob.getMediaType())) {
-      throw new IllegalArgumentException("session resource is not a supported model media type");
+      throw new ToolOutcomeMaterializationException(
+          "session resource is not a supported model media type");
+    }
+    if (ref.name() == null || ref.name().isBlank()) {
+      throw new ToolOutcomeMaterializationException(
+          "session resource must declare a durable filename");
     }
     refManager.retainRef(sessionId, blobId);
-    return ResourceMessageContent.media(
-        blobId, ref.name(), resource.preview(), defaultImageTier(blob.getMediaType()));
+    return new ResourceResultContent(stableRef(blob, ref.name()), resource.preview(), null);
+  }
+
+  private static ResourceRef stableRef(StorageBlob blob, String filename) {
+    return new ResourceRef(
+        ResourceRef.sessionResourceUri(blob.getId()),
+        blob.getMediaType(),
+        filename,
+        blob.getSizeBytes(),
+        blob.getSha256());
   }
 
   /** 可作为模型输入的媒体类型：图片、音频、视频与 PDF 文档。 */

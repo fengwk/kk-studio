@@ -1,0 +1,844 @@
+package fun.fengwk.kkstudio.harness.provider.openai.chat;
+
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
+
+import fun.fengwk.kkstudio.harness.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallDiagnostic;
+import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
+
+import java.math.BigInteger;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+
+/**
+ * OpenAI Chat Completions SSE 流式事件状态机与响应累积器。
+ *
+ * <p>支持 content、tool_calls fragments、reasoning_content delta、reasoning_details、 尾部 usage、终态校验、截断诊断及
+ * native replay 构造。
+ */
+final class OpenAiChatStreamAccumulator {
+
+  private static final ObjectMapper OBJECT_MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+          .build();
+  private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
+
+  private static final Set<String> VALID_FINISH_REASONS =
+      Set.of("stop", "tool_calls", "length", "content_filter");
+
+  /** known assistant 字段：replay 时由规范化 durable 事实重新写入，不沿用 native 片段形状。 */
+  private static final Set<String> KNOWN_ASSISTANT_FIELDS =
+      Set.of("content", "refusal", "reasoning_content", "reasoning_details", "tool_calls");
+
+  private final ProviderRequest request;
+  private final ProviderDescriptor descriptor;
+  private final OpenAiChatConfiguration config;
+  private final ProviderStreamBridge bridge;
+
+  private String messageId = null;
+  private String serviceTier = null;
+  private GenerationStopReason stopReason = null;
+  private boolean seenDone = false;
+
+  /** {@code choices[0]} 首个有效 finish_reason 之后语义封闭：只允许无语义尾帧，绝不再改写任何已累积事实。 */
+  private boolean choiceFinalized = false;
+
+  /** 冻结时的原始 finish_reason 文本与 choices[0] index，用于判定重复终止标记是否为幂等冗余。 */
+  private String finalizedFinishReason = null;
+
+  private int finalizedChoiceIndex = 0;
+
+  private final StringBuilder contentBuilder = new StringBuilder();
+  private final StringBuilder refusalBuilder = new StringBuilder();
+  private final StringBuilder reasoningContentBuilder = new StringBuilder();
+  private JsonNode reasoningDetailsNode = null;
+
+  /** 按首次确认 function 意图的顺序分配连续的 runtime ordinal；key 仍为原生 wire index。 */
+  private final Map<Integer, ToolCallBuilder> toolCallBuilders = new LinkedHashMap<>();
+
+  /**
+   * provider 原生 assistant message：只合并 {@code choices[0].delta}，绝不混入 chunk 级 transport
+   * metadata（id、object、usage 等）。
+   *
+   * <p>它保留规范化通道之外的官方事实（function_call、未来字段），audio 在冻结时仅保留请求侧 id， 并在终态作为 replay payload 的基座。
+   */
+  private final ObjectNode nativeAssistantMessage = NODES.objectNode();
+
+  private long promptTokens = 0L;
+  private long cachedTokens = 0L;
+  private long cacheWriteTokens = 0L;
+  private long completionTokens = 0L;
+  private Long reasoningTokens = null;
+  private Long totalTokens = null;
+  private String rawUsageJson = "{}";
+
+  OpenAiChatStreamAccumulator(
+      ProviderRequest request,
+      ProviderDescriptor descriptor,
+      OpenAiChatConfiguration config,
+      ProviderStreamBridge bridge) {
+    this.request = Objects.requireNonNull(request, "request");
+    this.descriptor = Objects.requireNonNull(descriptor, "descriptor");
+    this.config = Objects.requireNonNull(config, "config");
+    this.bridge = Objects.requireNonNull(bridge, "bridge");
+  }
+
+  void handleData(String data) {
+    if (bridge.isClosed()) {
+      return;
+    }
+    if (data == null || data.isBlank()) {
+      return;
+    }
+    String trimmed = data.trim();
+    if ("[DONE]".equals(trimmed)) {
+      seenDone = true;
+      return;
+    }
+    if (seenDone) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "semantic payload received after [DONE]");
+    }
+
+    JsonNode root;
+    try {
+      root = OBJECT_MAPPER.readTree(trimmed);
+    } catch (JacksonException exception) {
+      throw new ProviderException(ProviderErrorKind.INVALID_RESPONSE, "invalid SSE JSON payload");
+    }
+
+    if (!root.isObject()) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "SSE data must be a JSON object");
+    }
+
+    if (root.has("error")) {
+      throw OpenAiChatErrorMapper.mapSseErrorEnvelope(root);
+    }
+
+    if (root.has("id") && root.get("id").isString()) {
+      this.messageId = root.get("id").asString("");
+    }
+    if (root.has("service_tier") && root.get("service_tier").isString()) {
+      this.serviceTier = root.get("service_tier").asString("");
+    }
+
+    // 处理 usage；流式中间块允许显式 null，其他非 Object 形态严格拒绝。
+    if (root.has("usage") && !root.get("usage").isNull()) {
+      if (!root.get("usage").isObject()) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_RESPONSE, "usage must be a JSON object");
+      }
+      parseUsageSnapshot(root.get("usage"));
+    }
+
+    // 处理 choices
+    if (root.has("choices") && root.get("choices").isArray()) {
+      ArrayNode choices = (ArrayNode) root.get("choices");
+      if (!choices.isEmpty()) {
+        JsonNode firstChoice = choices.get(0);
+        if (firstChoice.isObject()) {
+          parseChoice(firstChoice);
+        }
+      }
+    }
+  }
+
+  private void parseChoice(JsonNode choice) {
+    if (choiceFinalized) {
+      // 语义终态已封闭：重复终止标记只有与冻结结果完全一致（同一有效 finish_reason、同一有效 choice index、无 delta）
+      // 才是幂等冗余，不追加内容/增量/改写 replay；任何语义 delta、变更 reason 或不同 index 都 fail closed。
+      boolean carriesReason = carriesFinishReason(choice);
+      if (!isEmptyTailDelta(choice)) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_RESPONSE, "semantic delta received after finalized choice");
+      }
+      if (carriesReason) {
+        String repeatedReason = choice.get("finish_reason").stringValue();
+        if (!repeatedReason.equals(finalizedFinishReason)
+            || choiceIndexOf(choice) != finalizedChoiceIndex) {
+          throw new ProviderException(
+              ProviderErrorKind.INVALID_RESPONSE,
+              "conflicting finish_reason after finalized choice");
+        }
+      }
+      return;
+    }
+
+    if (choice.has("delta") && choice.get("delta").isObject()) {
+      JsonNode delta = choice.get("delta");
+      mergeNativeDelta(delta);
+
+      // 1. content
+      if (delta.has("content") && delta.get("content").isString()) {
+        String contentDelta = delta.get("content").stringValue();
+        if (!contentDelta.isEmpty()) {
+          contentBuilder.append(contentDelta);
+          bridge.emitEvent(new ProviderStreamEvent.TextDelta(contentDelta));
+        }
+      }
+
+      // 2. refusal：协议中的成功助手输出，归一化到可见文本通道
+      if (delta.has("refusal") && delta.get("refusal").isString()) {
+        String refusalDelta = delta.get("refusal").stringValue();
+        if (!refusalDelta.isEmpty()) {
+          refusalBuilder.append(refusalDelta);
+          bridge.emitEvent(new ProviderStreamEvent.TextDelta(refusalDelta));
+        }
+      }
+
+      // 3. reasoning_content
+      if (delta.has("reasoning_content") && delta.get("reasoning_content").isString()) {
+        String reasoningDelta = delta.get("reasoning_content").stringValue();
+        if (!reasoningDelta.isEmpty()) {
+          reasoningContentBuilder.append(reasoningDelta);
+          bridge.emitEvent(new ProviderStreamEvent.ThinkingDelta(reasoningDelta));
+        }
+      }
+
+      // 4. reasoning_details: 仅保留至 native replay
+      if (delta.has("reasoning_details") && !delta.get("reasoning_details").isNull()) {
+        mergeReasoningDetails(delta.get("reasoning_details"));
+      }
+
+      // 5. tool_calls
+      if (delta.has("tool_calls") && delta.get("tool_calls").isArray()) {
+        ArrayNode toolCallsArray = (ArrayNode) delta.get("tool_calls");
+        for (JsonNode tcNode : toolCallsArray) {
+          if (tcNode.isObject() && tcNode.has("index") && tcNode.get("index").isInt()) {
+            int wireIndex = tcNode.get("index").asInt(0);
+            JsonNode nativeSlot = nativeToolCall(wireIndex);
+            // type=function 可以先于 function 对象到达；无已知 function 意图的调用只保留原生事实。
+            if (nativeSlot == null
+                || (nativeSlot.path("type").isString()
+                    && !"function".equals(nativeSlot.path("type").stringValue()))
+                || (tcNode.path("type").isString()
+                    && !"function".equals(tcNode.path("type").stringValue()))) {
+              continue;
+            }
+            ToolCallBuilder builder = toolCallBuilders.get(wireIndex);
+            if (builder == null) {
+              if (!"function".equals(nativeSlot.path("type").asString(""))
+                  && !nativeSlot.path("function").isObject()) {
+                continue;
+              }
+              builder = new ToolCallBuilder(wireIndex, toolCallBuilders.size());
+              toolCallBuilders.put(wireIndex, builder);
+              // native 已合并本帧：首次确认 function 时用完整槽位一次性补齐此前 identity-only 片段。
+              JsonNode fn = nativeSlot.path("function");
+              String id = textualValue(nativeSlot.get("id"));
+              String name = textualValue(fn.get("name"));
+              String args = textualValue(fn.get("arguments"));
+              builder.appendId(id);
+              builder.appendName(name);
+              builder.appendArguments(args);
+              String projectedId = id == null || id.isBlank() ? null : id;
+              String projectedName = name == null || name.isBlank() ? null : name;
+              if (projectedId != null || projectedName != null || args != null) {
+                bridge.emitEvent(
+                    new ProviderStreamEvent.ToolCallDelta(
+                        builder.ordinal(), projectedId, projectedName, args));
+              }
+              continue;
+            }
+
+            String idDelta = null;
+            if (tcNode.has("id") && tcNode.get("id").isString()) {
+              idDelta = tcNode.get("id").stringValue();
+              builder.appendId(idDelta);
+            }
+
+            String nameDelta = null;
+            String argsDelta = null;
+            JsonNode fn = tcNode.get("function");
+            if (fn != null) {
+              if (fn.isNull() || !fn.isObject()) {
+                throw new ProviderException(
+                    ProviderErrorKind.INVALID_RESPONSE, "tool call function must be an object");
+              }
+              if (fn.has("name") && fn.get("name").isString()) {
+                nameDelta = fn.get("name").stringValue();
+                builder.appendName(nameDelta);
+              }
+              if (fn.has("arguments") && fn.get("arguments").isString()) {
+                argsDelta = fn.get("arguments").stringValue();
+                builder.appendArguments(argsDelta);
+              }
+            }
+
+            String projectedId = idDelta == null || builder.id().isBlank() ? null : builder.id();
+            String projectedName =
+                nameDelta == null || builder.name().isBlank() ? null : builder.name();
+            if (projectedId != null || projectedName != null || argsDelta != null) {
+              bridge.emitEvent(
+                  new ProviderStreamEvent.ToolCallDelta(
+                      builder.ordinal(), projectedId, projectedName, argsDelta));
+            }
+          }
+        }
+      }
+    }
+
+    // 检查 finish_reason：首个非 null 有效值即封闭该 choice 的语义；同帧尾随 content 已在上方正常累积后才封闭
+    if (carriesFinishReason(choice)) {
+      String reasonText = choice.get("finish_reason").stringValue();
+      if (!VALID_FINISH_REASONS.contains(reasonText)) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_RESPONSE, "unsupported finish_reason: " + reasonText);
+      }
+      this.stopReason = mapFinishReason(reasonText);
+      this.finalizedFinishReason = reasonText;
+      this.finalizedChoiceIndex = choiceIndexOf(choice);
+      this.choiceFinalized = true;
+    }
+  }
+
+  /** 缺失 index 视为主 choice 默认 0；一旦提供，必须是可转 int 的非负整数，否则 fail closed 且不回显原始值。 */
+  private static int choiceIndexOf(JsonNode choice) {
+    JsonNode index = choice.get("index");
+    if (index == null) {
+      return 0;
+    }
+    if (!index.isIntegralNumber() || !index.canConvertToInt() || index.intValue() < 0) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "choice index must be a non-negative integer");
+    }
+    return index.intValue();
+  }
+
+  /**
+   * 判定 choice 是否携带有效 finish_reason：非 null 且非空白字符串。非字符串形态一律 fail closed，绝不被 {@code asString} 静默吞掉；显式
+   * null 与空白字符串属于无语义尾帧。
+   */
+  private static boolean carriesFinishReason(JsonNode choice) {
+    JsonNode node = choice.get("finish_reason");
+    if (node == null || node.isNull()) {
+      return false;
+    }
+    if (!node.isString()) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "finish_reason must be a string");
+    }
+    return !node.stringValue().isBlank();
+  }
+
+  /** 无语义尾帧：{@code delta} 缺失、null，或所有字段都是 null、空字符串、空容器。 */
+  private static boolean isEmptyTailDelta(JsonNode choice) {
+    return isEmptyValue(choice.get("delta"));
+  }
+
+  private static boolean isEmptyValue(JsonNode node) {
+    if (node == null || node.isNull()) {
+      return true;
+    }
+    if (node.isString()) {
+      return node.stringValue().isEmpty();
+    }
+    if (node.isArray() || node.isObject()) {
+      for (JsonNode child : node) {
+        if (!isEmptyValue(child)) {
+          return false;
+        }
+      }
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * 把一条 {@code choices[0].delta} 合并进原生 assistant message。
+   *
+   * <p>合并规则只描述「同名字段如何叠加」：字符串增量追加，带 {@code index} 的数组按 index 合并条目（tool_calls 片段因此按 index 累加）， object
+   * 递归合并，其余标量覆盖。因此未规范化的官方字段与未来字段都能无损保留到 replay，而 chunk 级 transport metadata 不在合并范围内。
+   */
+  private void mergeNativeDelta(JsonNode delta) {
+    for (Map.Entry<String, JsonNode> field : delta.properties()) {
+      mergeNativeField(nativeAssistantMessage, field.getKey(), field.getValue());
+    }
+  }
+
+  private static void mergeNativeField(ObjectNode target, String field, JsonNode incoming) {
+    JsonNode existing = target.get(field);
+    if (incoming.isString() && existing != null && existing.isString()) {
+      target.put(field, existing.stringValue() + incoming.stringValue());
+      return;
+    }
+    if (incoming.isObject() && existing != null && existing.isObject()) {
+      mergeNativeObject((ObjectNode) existing, (ObjectNode) incoming);
+      return;
+    }
+    if (incoming.isArray()
+        && existing != null
+        && existing.isArray()
+        && isIndexedArray((ArrayNode) incoming)) {
+      mergeNativeIndexedArray((ArrayNode) existing, (ArrayNode) incoming);
+      return;
+    }
+    target.set(field, incoming.deepCopy());
+  }
+
+  private static void mergeNativeObject(ObjectNode target, ObjectNode incoming) {
+    for (Map.Entry<String, JsonNode> field : incoming.properties()) {
+      mergeNativeField(target, field.getKey(), field.getValue());
+    }
+  }
+
+  private static boolean isIndexedArray(ArrayNode array) {
+    if (array.isEmpty()) {
+      return false;
+    }
+    for (JsonNode item : array) {
+      if (!item.isObject()) {
+        return false;
+      }
+      JsonNode index = item.get("index");
+      if (index == null || !index.isIntegralNumber()) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * 按条目自身的 {@code index} 定位既有槽位并递归合并，槽位不存在时追加，保持 provider 给出的片段顺序。
+   *
+   * <p>槽位坐标是任意宽度的整数：索引按 {@code BigInteger} 读出并精确比对/写回，超出 int 范围的原生索引不会因截断被并进别的槽位。
+   */
+  private static void mergeNativeIndexedArray(ArrayNode target, ArrayNode incoming) {
+    for (JsonNode item : incoming) {
+      BigInteger index = item.get("index").bigIntegerValue();
+      ObjectNode slot = indexedSlot(target, index);
+      mergeNativeObject(slot, (ObjectNode) item);
+    }
+  }
+
+  private static ObjectNode indexedSlot(ArrayNode target, BigInteger index) {
+    for (JsonNode item : target) {
+      if (!item.isObject()) {
+        continue;
+      }
+      JsonNode itemIndex = item.get("index");
+      if (itemIndex != null
+          && itemIndex.isIntegralNumber()
+          && itemIndex.bigIntegerValue().equals(index)) {
+        return (ObjectNode) item;
+      }
+    }
+    ObjectNode slot = target.addObject();
+    slot.put("index", index);
+    return slot;
+  }
+
+  private JsonNode nativeToolCall(int wireIndex) {
+    JsonNode calls = nativeAssistantMessage.path("tool_calls");
+    if (calls.isArray()) {
+      for (JsonNode call : calls) {
+        if (call.path("index").isInt() && call.path("index").intValue() == wireIndex) {
+          return call;
+        }
+      }
+    }
+    return null;
+  }
+
+  private static String textualValue(JsonNode node) {
+    return node != null && node.isString() ? node.stringValue() : null;
+  }
+
+  private void mergeReasoningDetails(JsonNode incoming) {
+    if (this.reasoningDetailsNode == null) {
+      this.reasoningDetailsNode = incoming.deepCopy();
+    } else if (this.reasoningDetailsNode.isArray() && incoming.isArray()) {
+      ArrayNode currentArr = (ArrayNode) this.reasoningDetailsNode;
+      for (JsonNode item : incoming) {
+        currentArr.add(item.deepCopy());
+      }
+    } else {
+      this.reasoningDetailsNode = incoming.deepCopy();
+    }
+  }
+
+  private void parseUsageSnapshot(JsonNode usageNode) {
+    this.promptTokens = requiredNonNegativeLong(usageNode.get("prompt_tokens"), "prompt_tokens");
+    this.completionTokens =
+        requiredNonNegativeLong(usageNode.get("completion_tokens"), "completion_tokens");
+    this.totalTokens =
+        usageNode.has("total_tokens") && !usageNode.get("total_tokens").isNull()
+            ? requiredNonNegativeLong(usageNode.get("total_tokens"), "total_tokens")
+            : null;
+
+    JsonNode promptDetails = optionalObject(usageNode, "prompt_tokens_details");
+    if (promptDetails != null && promptDetails.has("cached_tokens")) {
+      this.cachedTokens =
+          requiredNonNegativeLong(
+              promptDetails.get("cached_tokens"), "prompt_tokens_details.cached_tokens");
+    } else if (usageNode.has("prompt_cache_hit_tokens")) {
+      this.cachedTokens =
+          requiredNonNegativeLong(
+              usageNode.get("prompt_cache_hit_tokens"), "prompt_cache_hit_tokens");
+    } else if (usageNode.has("cached_tokens")) {
+      this.cachedTokens = requiredNonNegativeLong(usageNode.get("cached_tokens"), "cached_tokens");
+    } else {
+      this.cachedTokens = 0L;
+    }
+
+    if (promptDetails != null && promptDetails.has("cache_write_tokens")) {
+      this.cacheWriteTokens =
+          requiredNonNegativeLong(
+              promptDetails.get("cache_write_tokens"), "prompt_tokens_details.cache_write_tokens");
+    } else if (promptDetails != null && promptDetails.has("cache_creation_input_tokens")) {
+      this.cacheWriteTokens =
+          requiredNonNegativeLong(
+              promptDetails.get("cache_creation_input_tokens"),
+              "prompt_tokens_details.cache_creation_input_tokens");
+    } else {
+      this.cacheWriteTokens = 0L;
+    }
+
+    JsonNode completionDetails = optionalObject(usageNode, "completion_tokens_details");
+    if (completionDetails != null && completionDetails.has("reasoning_tokens")) {
+      this.reasoningTokens =
+          requiredNonNegativeLong(
+              completionDetails.get("reasoning_tokens"),
+              "completion_tokens_details.reasoning_tokens");
+    } else {
+      this.reasoningTokens = null;
+    }
+
+    try {
+      this.rawUsageJson = OBJECT_MAPPER.writeValueAsString(usageNode);
+    } catch (JacksonException exception) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "cannot preserve provider usage payload");
+    }
+  }
+
+  private static JsonNode optionalObject(JsonNode parent, String field) {
+    JsonNode value = parent.get(field);
+    if (value == null || value.isNull()) {
+      return null;
+    }
+    if (!value.isObject()) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "invalid usage field: " + field);
+    }
+    return value;
+  }
+
+  private static long requiredNonNegativeLong(JsonNode value, String field) {
+    if (value == null
+        || !value.isIntegralNumber()
+        || !value.canConvertToLong()
+        || value.longValue() < 0L) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "invalid usage field: " + field);
+    }
+    return value.longValue();
+  }
+
+  private static long addUsageValues(long left, long right) {
+    try {
+      return Math.addExact(left, right);
+    } catch (ArithmeticException exception) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "provider usage values overflow");
+    }
+  }
+
+  private static long uncachedTokens(long total, long firstExcluded, long secondExcluded) {
+    long excluded = addUsageValues(firstExcluded, secondExcluded);
+    if (excluded > total) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "provider usage breakdown exceeds prompt tokens");
+    }
+    return total - excluded;
+  }
+
+  private static GenerationStopReason mapFinishReason(String reason) {
+    return switch (reason) {
+      case "stop", "tool_calls" -> GenerationStopReason.COMPLETE;
+      case "length" -> GenerationStopReason.LENGTH;
+      case "content_filter" -> GenerationStopReason.FILTERED;
+      default -> throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "unsupported finish_reason: " + reason);
+    };
+  }
+
+  ProviderCompletion finish() {
+    if ("{}".equals(rawUsageJson)) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE,
+          "missing complete usage: OpenAI Chat model " + request.model().modelId());
+    }
+    if (config.requireDone()) {
+      if (!seenDone) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_RESPONSE, "stream completed without [DONE]");
+      }
+      if (stopReason == null) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_RESPONSE, "stream completed without valid finish_reason");
+      }
+    } else {
+      if (stopReason == null) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_RESPONSE, "stream ended with EOF before valid finish_reason");
+      }
+    }
+
+    boolean canReplay = (stopReason == GenerationStopReason.COMPLETE);
+    List<ProviderToolCall> toolCalls = new ArrayList<>();
+    Map<Integer, ProviderToolCall> completedCalls = new LinkedHashMap<>();
+    List<ProviderToolCallDiagnostic> diagnostics = new ArrayList<>();
+
+    if (stopReason == GenerationStopReason.FILTERED) {
+      // FILTERED 时 toolCalls 必须为空，不生成 replayState
+      canReplay = false;
+    } else {
+      for (ToolCallBuilder b : toolCallBuilders.values()) {
+        String id = b.id();
+        String name = b.name();
+        String args = b.arguments();
+
+        boolean idValid = (id != null && !id.isBlank());
+        boolean nameValid = (name != null && !name.isBlank());
+        JsonNode parsedJson = tryParseJsonObject(args);
+
+        if (stopReason == GenerationStopReason.LENGTH) {
+          if (!idValid || !nameValid || parsedJson == null) {
+            diagnostics.add(
+                new ProviderToolCallDiagnostic(
+                    b.ordinal(),
+                    idValid ? id : null,
+                    nameValid ? name : null,
+                    args,
+                    "tool call truncated due to max tokens"));
+            canReplay = false;
+          } else {
+            ProviderToolCall call = new ProviderToolCall(id, name, args);
+            toolCalls.add(call);
+            completedCalls.put(b.wireIndex(), call);
+          }
+        } else {
+          // COMPLETE
+          if (!idValid || !nameValid || parsedJson == null) {
+            throw new ProviderException(
+                ProviderErrorKind.INVALID_RESPONSE, "invalid tool call arguments JSON");
+          }
+          ProviderToolCall call = new ProviderToolCall(id, name, args);
+          toolCalls.add(call);
+          completedCalls.put(b.wireIndex(), call);
+        }
+      }
+    }
+
+    // 输出总量包含 reasoning；reasoning 只作为其可信子集记录，绝不从输出中扣除。
+    if (reasoningTokens != null && reasoningTokens > completionTokens) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "reasoning tokens exceed completion tokens");
+    }
+    long ordinaryInput = uncachedTokens(promptTokens, cachedTokens, cacheWriteTokens);
+
+    ModelUsage usage =
+        new ModelUsage(
+            ordinaryInput,
+            completionTokens,
+            cachedTokens,
+            cacheWriteTokens,
+            Map.of(),
+            reasoningTokens,
+            totalTokens);
+
+    ProviderResponse response =
+        new ProviderResponse(
+            contentBuilder.toString() + refusalBuilder,
+            reasoningContentBuilder.toString(),
+            Collections.unmodifiableList(toolCalls),
+            stopReason,
+            usage,
+            messageId,
+            serviceTier,
+            rawUsageJson,
+            Collections.unmodifiableList(diagnostics));
+
+    ProviderReplayState replayState = null;
+    if (canReplay) {
+      // replay 以 provider 原生 assistant message 为基座保留官方非规范化字段，known 字段再以 durable 事实补齐
+      ObjectNode payload = nativeAssistantMessage.deepCopy();
+      payload.put("role", "assistant");
+      payload.remove("annotations");
+      JsonNode audio = payload.get("audio");
+      if (audio != null) {
+        if (audio.isNull()) {
+          payload.remove("audio");
+        } else if (!audio.isObject()
+            || !audio.path("id").isString()
+            || audio.path("id").stringValue().isBlank()) {
+          throw new ProviderException(
+              ProviderErrorKind.INVALID_RESPONSE, "invalid assistant audio id");
+        } else {
+          payload.putObject("audio").put("id", audio.path("id").stringValue());
+        }
+      }
+      JsonNode nativeCalls = payload.get("tool_calls");
+      for (String knownField : KNOWN_ASSISTANT_FIELDS) {
+        payload.remove(knownField);
+      }
+      if (!contentBuilder.isEmpty() || (refusalBuilder.isEmpty() && toolCalls.isEmpty())) {
+        payload.put("content", contentBuilder.toString());
+      }
+      if (!refusalBuilder.isEmpty()) {
+        payload.put("refusal", refusalBuilder.toString());
+      }
+      if (nativeCalls != null && nativeCalls.isArray()) {
+        ArrayNode tcArr = payload.putArray("tool_calls");
+        for (JsonNode nativeCall : nativeCalls) {
+          if (nativeCall.isObject()) {
+            ObjectNode call = (ObjectNode) nativeCall.deepCopy();
+            JsonNode index = call.remove("index");
+            ProviderToolCall normalized =
+                index != null
+                        && index.isInt()
+                        && call.path("function").isObject()
+                        && (!call.path("type").isString()
+                            || "function".equals(call.path("type").stringValue()))
+                    ? completedCalls.remove(index.intValue())
+                    : null;
+            if (normalized != null) {
+              call.put("id", normalized.id());
+              call.put("type", "function");
+              ObjectNode fn = (ObjectNode) call.get("function");
+              fn.put("name", normalized.name());
+              fn.put("arguments", normalized.argumentsJson());
+            }
+            tcArr.add(call);
+          } else {
+            tcArr.add(nativeCall.deepCopy());
+          }
+        }
+      }
+      if (!completedCalls.isEmpty()) {
+        ArrayNode tcArr = (ArrayNode) payload.get("tool_calls");
+        if (tcArr == null) {
+          tcArr = payload.putArray("tool_calls");
+        }
+        for (ProviderToolCall tc : completedCalls.values()) {
+          ObjectNode call = tcArr.addObject();
+          call.put("id", tc.id());
+          call.put("type", "function");
+          ObjectNode fn = call.putObject("function");
+          fn.put("name", tc.name());
+          fn.put("arguments", tc.argumentsJson());
+        }
+      }
+      if (!reasoningContentBuilder.isEmpty()) {
+        payload.put("reasoning_content", reasoningContentBuilder.toString());
+      }
+      if (reasoningDetailsNode != null && !reasoningDetailsNode.isNull()) {
+        payload.set("reasoning_details", reasoningDetailsNode.deepCopy());
+      }
+
+      replayState =
+          new ProviderReplayState(
+              ProviderReplayFormat.OPENAI_CHAT,
+              descriptor.affinity(request.model().modelId()),
+              payload);
+    }
+
+    return new ProviderCompletion(response, replayState);
+  }
+
+  private static JsonNode tryParseJsonObject(String text) {
+    if (text == null || text.isBlank()) {
+      return null;
+    }
+    try {
+      JsonNode node = OBJECT_MAPPER.readTree(text);
+      if (node.isObject()) {
+        return node;
+      }
+    } catch (JacksonException ignored) {
+      // Not a valid JSON object
+    }
+    return null;
+  }
+
+  private static final class ToolCallBuilder {
+    private final int wireIndex;
+    private final int ordinal;
+    private final StringBuilder id = new StringBuilder();
+    private final StringBuilder name = new StringBuilder();
+    private final StringBuilder arguments = new StringBuilder();
+
+    ToolCallBuilder(int wireIndex, int ordinal) {
+      this.wireIndex = wireIndex;
+      this.ordinal = ordinal;
+    }
+
+    int wireIndex() {
+      return wireIndex;
+    }
+
+    int ordinal() {
+      return ordinal;
+    }
+
+    void appendId(String val) {
+      if (val != null) {
+        id.append(val);
+      }
+    }
+
+    void appendName(String val) {
+      if (val != null) {
+        name.append(val);
+      }
+    }
+
+    void appendArguments(String val) {
+      if (val != null) {
+        arguments.append(val);
+      }
+    }
+
+    String id() {
+      return id.toString();
+    }
+
+    String name() {
+      return name.toString();
+    }
+
+    String arguments() {
+      return arguments.toString();
+    }
+  }
+}

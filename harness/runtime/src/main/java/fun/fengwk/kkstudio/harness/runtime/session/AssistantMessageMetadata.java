@@ -1,8 +1,8 @@
 package fun.fengwk.kkstudio.harness.runtime.session;
 
+import fun.fengwk.kkstudio.harness.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 
 import java.time.Instant;
 import java.util.Objects;

@@ -32,7 +32,7 @@ class FreshInstallSchemaContractTest {
   private static final String PROBE_RESOURCE =
       "fun/fengwk/kkstudio/schema/fresh-install-probes.sql";
   private static final String PROBE_CONTAINER_PATH = "/tmp/fresh-install-probes.sql";
-  private static final int PROBE_ASSERTION_COUNT = 214;
+  private static final int PROBE_ASSERTION_COUNT = 227;
 
   @SuppressWarnings("resource")
   private static final PostgreSQLContainer POSTGRES =

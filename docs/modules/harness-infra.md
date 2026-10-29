@@ -148,4 +148,4 @@ PostgreSQL `jsonb` 会按自身规则规范化极端量级的数字文本（例�
 
 ---
 
-上级：[系统设计](../system-design.md)。相关文档：[Harness Runtime](harness-runtime.md)、[Harness Provider](harness-provider.md)、[Common](common.md)、[Harness Environment](harness-environment.md)、[Schema](schema.md)、[Web](web.md)。
+上级：[系统设计](../system-design.md)。相关文档：[Harness Runtime](harness-runtime.md)、[Harness Model](harness-model.md)、[Common](common.md)、[Harness Environment](harness-environment.md)、[Schema](schema.md)、[Web](web.md)。

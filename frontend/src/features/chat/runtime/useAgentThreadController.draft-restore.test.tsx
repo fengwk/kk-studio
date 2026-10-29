@@ -143,7 +143,7 @@ function threadFixture(
     branchSettings: {
       agentName: 'assistant',
       model: {
-                modelName: 'MiniMax',
+        modelName: 'MiniMax',
         variant: 'default',
       },
       environmentName: null,
@@ -164,9 +164,10 @@ function snapshotOf(
     thread: currentThread,
     entries: [],
     queuedCommands: [],
-    modelInvocation: null,
+    executionStatus: 'IDLE',
+    activeAssistantOutput: null,
     toolInvocations: [],
-    modelAttemptFailures: [],
+    generationFailures: [],
     manualCompaction: {
       available: false,
       disabledReason: null,

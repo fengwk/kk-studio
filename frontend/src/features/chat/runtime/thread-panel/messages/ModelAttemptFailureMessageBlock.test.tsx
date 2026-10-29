@@ -22,7 +22,7 @@ function message(
     failedAt: '2026-07-28T10:00:00Z',
     retryAt: '2026-07-28T10:00:05Z',
     nextAttempt: 2,
-    modelInvocationId: 'model-1',
+    generationId: 'model-1',
     ...overrides,
   }
 }
@@ -81,7 +81,7 @@ describe('ModelAttemptFailureMessageBlock', () => {
       <ModelAttemptFailureMessageBlock
         message={message({
           subjectEntryId: 'entry-1',
-          modelInvocationId: undefined,
+          generationId: undefined,
         })}
       />,
     )

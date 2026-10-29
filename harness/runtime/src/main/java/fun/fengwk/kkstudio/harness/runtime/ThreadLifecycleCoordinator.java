@@ -6,6 +6,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.NotificationKind;
 import fun.fengwk.kkstudio.harness.runtime.history.NotificationPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinCompletion;
@@ -177,11 +178,21 @@ public final class ThreadLifecycleCoordinator {
   private static boolean isQuiescent(HarnessStore.Transaction tx, ThreadState child) {
     int incompleteChildJoins = tx.countIncompleteChildJoins(child.id());
     boolean hasInputDemand = ThreadInputDemand.hasInputDemand(tx, child);
-    LockedThreadContext locked = ThreadContextLock.load(tx, child);
+    EntryPath path = tx.loadEntryPath(child.headEntryId());
+    boolean hasLiveContext = path.openTurnStart().isPresent();
+    if (!hasLiveContext
+        && path.headIgnoringTrailingControlEntries().payload() instanceof TurnEndPayload end
+        && end.continueModel()) {
+      for (Entry entry : path.entries()) {
+        if (entry.id().equals(end.turnStartEntryId())
+            && entry.payload() instanceof TurnStartPayload start) {
+          hasLiveContext = child.id().equals(start.ownerThreadId());
+          break;
+        }
+      }
+    }
     boolean hasOpenCompaction =
-        locked
-            .path()
-            .openTurnStart()
+        path.openTurnStart()
             .map(
                 entry ->
                     entry.payload() instanceof TurnStartPayload start
@@ -192,7 +203,7 @@ public final class ThreadLifecycleCoordinator {
         hasOpenCompaction || tx.hasIncompleteOwnerChildJoin(child.id());
     return ThreadActivityEvaluator.isQuiescent(
         child.executionControl(),
-        locked.context(),
+        hasLiveContext,
         hasCompactionObligation,
         hasInputDemand,
         incompleteChildJoins,

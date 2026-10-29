@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.runtime.SpawnRequest;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
@@ -281,12 +282,26 @@ public class SubagentTaskRunner implements SubagentRunner {
     } catch (HarnessRuntimeNotFoundException notFound) {
       throw reject("task invocation is no longer attached to its parent Thread context", notFound);
     }
-    if (parent.model() == null
-        || parent.toolSiblings().stream()
-            .noneMatch(tool -> tool.id().equals(request.invocationId()))) {
+    if (parent.toolSiblings().stream()
+        .noneMatch(tool -> tool.id().equals(request.invocationId()))) {
       throw reject("task invocation is no longer attached to its parent Thread context");
     }
-    List<SubagentBinding> allowed = parent.model().requestSpec().subagentBindings();
+    TurnStartPayload turnStart =
+        parent
+            .entryPath()
+            .openTurnStart()
+            .map(
+                entry -> {
+                  if (!(entry.payload() instanceof TurnStartPayload start)) {
+                    throw reject("parent turn start is not a valid turn capability snapshot");
+                  }
+                  return start;
+                })
+            .orElseThrow(() -> reject("parent turn has no open turn capability snapshot"));
+    if (turnStart.capabilities() == null) {
+      throw reject("parent turn has no frozen subagent capabilities");
+    }
+    List<SubagentBinding> allowed = turnStart.capabilities().subagentBindings();
     if (allowed.stream().noneMatch(binding -> binding.name().equals(request.subagentType()))) {
       throw reject(
           "subagent_type \""

@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.BuiltinTestTransactions.builtinDriver;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.loadCommandsByThread;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -31,7 +32,10 @@ class PostgresqlThreadNameTest {
     var store = PostgresqlHarnessStoreFixture.resetAndCreate();
     var baseline = seedThreadBaseline(store);
     var runtime =
-        new HarnessRuntime(store, (threadId, path, prep) -> null, () -> CompactionConfig.DEFAULT);
+        new HarnessRuntime(
+            store,
+            builtinDriver(store, (threadId, path, prep) -> null),
+            () -> CompactionConfig.DEFAULT);
     UUID createdId = UUID.randomUUID();
     var commands =
         List.of(

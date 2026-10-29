@@ -3,16 +3,19 @@ import type { EntryType } from '@/shared/api/contracts/ai-runtime'
 import type {
   RealtimeModelStream,
 } from '@/features/chat/runtime/thread-realtime/model-stream'
+import {
+  snapshotModelStream,
+} from '@/features/chat/runtime/thread-realtime/model-stream'
 import type {
   RealtimeToolStream,
 } from '@/features/chat/runtime/thread-realtime/tool-stream'
 import type { ToolDialogueMessage } from '@/features/chat/runtime/thread-timeline-types'
 import { buildThreadTimeline, isThreadWorking } from '@/features/chat/runtime/thread-timeline'
 import type {
+  HarnessActiveAssistantOutputDTO,
+  HarnessGenerationFailureDTO,
   HarnessSessionEntryDTO,
   HarnessThreadCommandDTO,
-  ModelAttemptFailureDTO,
-  ModelInvocationDTO,
   ToolInvocationDTO,
 } from '@/shared/api/generated/contracts'
 
@@ -369,7 +372,7 @@ describe('thread timeline', () => {
       [],
       stream,
       null,
-      [modelAttemptFailure()],
+      [generationFailure()],
     )
 
     expect(timeline.messages).toMatchObject([
@@ -420,7 +423,7 @@ describe('thread timeline', () => {
       [],
       stale,
       null,
-      [modelAttemptFailure()],
+      [generationFailure()],
     )
 
     expect(timeline.messages).toMatchObject([
@@ -446,8 +449,9 @@ describe('thread timeline', () => {
       createdAt: '2026-07-28T10:00:00Z',
       status: 'streaming',
     }
-    const malformed = modelAttemptFailure({
-      sequence: 3 as unknown as ModelAttemptFailureDTO['sequence'],
+    // 非 canonical sequence（带前导零）不是合法失败事实，必须被整条丢弃。
+    const malformed = generationFailure({
+      sequence: '03',
     })
 
     const timeline = buildThreadTimeline([], [], [], current, null, [malformed])
@@ -462,7 +466,7 @@ describe('thread timeline', () => {
   })
 
   it('only marks a failure as live while its next Provider attempt is still pending', () => {
-    const failure = modelAttemptFailure()
+    const failure = generationFailure()
     const pending = buildThreadTimeline(
       [],
       [],
@@ -470,7 +474,7 @@ describe('thread timeline', () => {
       null,
       null,
       [failure],
-      modelInvocation('READY', 1),
+      activeAssistantOutput('READY', 1),
     )
     const running = buildThreadTimeline(
       [],
@@ -479,44 +483,40 @@ describe('thread timeline', () => {
       null,
       null,
       [failure],
-      modelInvocation('RUNNING', 2),
+      activeAssistantOutput('RUNNING', 2),
     )
 
     expect(pending.messages[0]).toMatchObject({
       role: 'model_attempt_failure',
-      modelInvocationId: 'model-1',
+      generationId: 'model-1',
       nextAttempt: 2,
     })
     expect(running.messages[0]).toMatchObject({
       role: 'model_attempt_failure',
       nextAttempt: 2,
     })
-    expect(running.messages[0]).not.toHaveProperty('modelInvocationId')
+    expect(running.messages[0]).not.toHaveProperty('generationId')
   })
 
   it('projects a terminal pending attempt as partial content plus a separate error', () => {
-    const terminal: RealtimeModelStream = {
-      threadId: 'thread-1',
-      invocationId: 'model-1',
-      attempt: 2,
-      sequence: 7,
-      text: 'terminal partial',
-      thinking: 'terminal thinking',
-      toolCalls: [],
-      createdAt: '2026-07-28T10:00:00Z',
-      status: 'error',
-      errorCode: 'INVALID_REQUEST',
-      errorText: 'terminal failure',
-    }
+    // 终止态 typed 输出：contents 承载 partial 正文，error 承载稳定错误码与原文。
+    const terminal = activeAssistantOutput('FAILED', 2, {
+      sequence: '7',
+      contents: [
+        { type: 'text', text: 'terminal partial' },
+        { type: 'thinking', text: 'terminal thinking' },
+      ],
+      error: { code: 'INVALID_REQUEST', message: 'terminal failure' },
+    })
 
     const timeline = buildThreadTimeline(
       [],
       [],
       [],
-      terminal,
+      activeOutputStream(terminal),
       null,
       [],
-      modelInvocation('FAILED', 2),
+      terminal,
     )
 
     expect(timeline.messages).toMatchObject([
@@ -535,28 +535,18 @@ describe('thread timeline', () => {
   })
 
   it('keeps the terminal barrier visible when its attempt was already recorded as failed', () => {
-    const terminal: RealtimeModelStream = {
-      threadId: 'thread-1',
-      invocationId: 'model-1',
-      attempt: 1,
-      sequence: 0,
-      text: '',
-      thinking: '',
-      toolCalls: [],
-      createdAt: '2026-07-28T10:00:06Z',
-      status: 'error',
-      errorCode: 'INVALID_REQUEST',
-      errorText: 'retry budget exhausted',
-    }
+    const terminal = activeAssistantOutput('FAILED', 1, {
+      error: { code: 'INVALID_REQUEST', message: 'retry budget exhausted' },
+    })
 
     const timeline = buildThreadTimeline(
       [],
       [],
       [],
-      terminal,
+      activeOutputStream(terminal),
       null,
-      [modelAttemptFailure()],
-      modelInvocation('FAILED', 1),
+      [generationFailure()],
+      terminal,
     )
 
     expect(timeline.messages.map((message) => message.role)).toEqual([
@@ -571,28 +561,22 @@ describe('thread timeline', () => {
   })
 
   it('projects a pending cancellation checkpoint like the durable aborted Entry', () => {
-    const cancelled: RealtimeModelStream = {
-      threadId: 'thread-1',
-      invocationId: 'model-1',
-      attempt: 1,
-      sequence: 4,
-      text: 'stopped partial',
-      thinking: 'stopped thinking',
-      toolCalls: [],
-      createdAt: '2026-07-28T10:00:00Z',
-      status: 'error',
-      errorCode: 'CANCELLED',
-      errorText: 'stopped by user',
-    }
+    const cancelled = activeAssistantOutput('CANCELLED', 1, {
+      sequence: '4',
+      contents: [
+        { type: 'text', text: 'stopped partial' },
+        { type: 'thinking', text: 'stopped thinking' },
+      ],
+    })
 
     const timeline = buildThreadTimeline(
       [],
       [],
       [],
-      cancelled,
+      activeOutputStream(cancelled),
       null,
       [],
-      modelInvocation('CANCELLED', 1),
+      cancelled,
     )
 
     expect(timeline.messages).toMatchObject([
@@ -606,17 +590,70 @@ describe('thread timeline', () => {
     ])
   })
 
+  it('projects typed active output contents as streaming and done assistant cards', () => {
+    // 意图：公共活跃输出的 contents 才是 transcript 正文来源；READY（尚无内容）
+    // 不产生任何 transcript 正文，只在事件视图里保持 pending。
+    const running = activeAssistantOutput('RUNNING', 1, {
+      sequence: '4',
+      contents: [
+        { type: 'text', text: '正在输出' },
+        { type: 'thinking', text: '正在思考' },
+      ],
+    })
+    const streaming = buildThreadTimeline(
+      [],
+      [],
+      [],
+      activeOutputStream(running),
+      null,
+      [],
+      running,
+    )
+    expect(streaming.messages).toMatchObject([
+      { role: 'assistant', text: '正在输出', thinking: '正在思考', status: 'streaming' },
+    ])
+
+    const succeeded = activeAssistantOutput('SUCCEEDED', 1, {
+      sequence: '5',
+      contents: [{ type: 'text', text: '完成' }],
+    })
+    const done = buildThreadTimeline(
+      [],
+      [],
+      [],
+      activeOutputStream(succeeded),
+      null,
+      [],
+      succeeded,
+    )
+    expect(done.messages).toMatchObject([
+      { role: 'assistant', text: '完成', status: 'done' },
+    ])
+
+    const ready = activeAssistantOutput('READY', 1)
+    const pending = buildThreadTimeline(
+      [],
+      [],
+      [],
+      activeOutputStream(ready),
+      null,
+      [],
+      ready,
+    )
+    expect(pending.messages).toEqual([])
+  })
+
   it('keeps multiple active failed attempts ordered and separate', () => {
     const failures = [
-      modelAttemptFailure({
+      generationFailure({
         attempt: 2,
         sequence: '4',
         text: 'second partial',
         thinking: 'second thinking',
         errorMessage: 'second error',
       }),
-      modelAttemptFailure(),
-      modelAttemptFailure(),
+      generationFailure(),
+      generationFailure(),
     ]
 
     const timeline = buildThreadTimeline([], [], [], null, null, failures)
@@ -900,7 +937,8 @@ describe('thread timeline', () => {
     const invocations: ToolInvocationDTO[] = [
       {
         id: 'inv-1',
-        modelInvocationId: 'm-1',
+        threadId: 'thread-1',
+        turnStartEntryId: 'turn-1',
         assistantEntryId: '40',
         callIndex: 0,
         status: 'WAITING_APPROVAL',
@@ -969,7 +1007,8 @@ describe('thread timeline', () => {
   it('projects overlays by durable identity, never by reused toolCallId on an older Entry', () => {
     const invocation: ToolInvocationDTO = {
       id: 'inv-2',
-      modelInvocationId: 'm-2',
+      threadId: 'thread-1',
+      turnStartEntryId: 'turn-1',
       assistantEntryId: '41',
       callIndex: 0,
       status: 'WAITING_APPROVAL',
@@ -1061,7 +1100,8 @@ describe('thread timeline', () => {
   it('does not project an invocation whose toolCallId disagrees with the durable call', () => {
     const invocation: ToolInvocationDTO = {
       id: 'inv-3',
-      modelInvocationId: 'm-3',
+      threadId: 'thread-1',
+      turnStartEntryId: 'turn-1',
       assistantEntryId: '42',
       callIndex: 0,
       status: 'WAITING_APPROVAL',
@@ -1397,7 +1437,7 @@ describe('thread timeline', () => {
       null,
       null,
       [],
-      modelInvocation('RUNNING', 1),
+      activeAssistantOutput('RUNNING', 1),
     )
     const tools = timeline.messages.filter((message) => message.role === 'tool')
     expect(tools).toMatchObject([
@@ -2032,11 +2072,11 @@ function assistantCalls(toolCallIds: string[]): HarnessSessionEntryDTO {
   ))
 }
 
-function modelAttemptFailure(
-  overrides: Partial<ModelAttemptFailureDTO> = {},
-): ModelAttemptFailureDTO {
+function generationFailure(
+  overrides: Partial<HarnessGenerationFailureDTO> = {},
+): HarnessGenerationFailureDTO {
   return {
-    modelInvocationId: 'model-1',
+    generationId: 'model-1',
     turnStartEntryId: 'turn-1',
     requestHeadEntryId: 'head-1',
     attempt: 1,
@@ -2051,21 +2091,38 @@ function modelAttemptFailure(
   }
 }
 
-function modelInvocation(status: string, attempt: number): ModelInvocationDTO {
+/**
+ * 当前 generation 的公共活跃输出快照：只有 typed 字段，没有 Provider 原始 JSON。
+ * contents 承载已完成的 text/thinking 片段。
+ */
+function activeAssistantOutput(
+  status: string,
+  attempt: number,
+  overrides: Partial<HarnessActiveAssistantOutputDTO> = {},
+): HarnessActiveAssistantOutputDTO {
   return {
-    id: 'model-1',
-    threadId: 'thread-1',
+    generationId: 'model-1',
     turnStartEntryId: 'turn-1',
     requestHeadEntryId: 'head-1',
     status,
     attempt,
-    streamCheckpointJson: null,
-    resultJson: null,
-    errorJson: null,
+    sequence: '0',
+    contents: [],
+    error: null,
     resultEntryId: null,
     createTime: 1785232800,
     updateTime: 1785232800,
+    ...overrides,
   }
+}
+
+/** 公共活跃输出 -> 瞬态 model overlay（与生产 snapshot 投影同路径）。 */
+function activeOutputStream(output: HarnessActiveAssistantOutputDTO): RealtimeModelStream {
+  const stream = snapshotModelStream('thread-1', output)
+  if (stream == null) {
+    throw new Error('active assistant output must project to a realtime model stream')
+  }
+  return stream
 }
 
 function invocation(
@@ -2076,7 +2133,8 @@ function invocation(
 ): ToolInvocationDTO {
   return {
     id,
-    modelInvocationId: `m-${id}`,
+    threadId: 'thread-1',
+    turnStartEntryId: 'turn-1',
     assistantEntryId,
     callIndex: 0,
     status: 'RUNNING',

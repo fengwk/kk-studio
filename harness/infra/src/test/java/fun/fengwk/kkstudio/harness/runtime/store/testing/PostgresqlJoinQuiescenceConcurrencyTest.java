@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.BuiltinTestTransactions.builtin;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.BuiltinTestTransactions.builtinDriver;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.CREATION_REQUEST_HASH;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T1;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.assistantPayload;
@@ -25,6 +27,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import fun.fengwk.kkstudio.harness.builtin.store.BuiltinStore;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadLifecycleCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
@@ -38,7 +42,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatu
 import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinOutcome;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessResult;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
@@ -103,7 +106,9 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
     jdbc = new JdbcTemplate(PostgresqlHarnessStoreFixture.dataSource());
     runtime =
         new HarnessRuntime(
-            store, (threadId, path, preparation) -> null, () -> CompactionConfig.DEFAULT);
+            store,
+            builtinDriver(store, (threadId, path, preparation) -> null),
+            () -> CompactionConfig.DEFAULT);
   }
 
   private record Tree(
@@ -290,7 +295,7 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
       TurnResolver resolver) {
     return new ThreadProcessor(
         targetStore,
-        resolver,
+        builtinDriver(targetStore, resolver),
         new ThreadProcessorConfig(Duration.ofSeconds(5), () -> new CompactionConfig(20_000)));
   }
 
@@ -312,15 +317,15 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
             List.of(),
             now,
             now);
-    tx.insertModelInvocation(model);
+    builtin(tx).insertModelInvocation(model);
     succeedModel(tx, model, assistantResponse(), now);
   }
 
   private static void succeedModel(
       HarnessStore.Transaction tx, ModelInvocation model, ProviderResponse response, Instant now) {
     ModelInvocation running = model.markRunning(now);
-    tx.updateModelInvocation(running);
-    tx.updateModelInvocation(running.succeed(response, now));
+    builtin(tx).updateModelInvocation(running);
+    builtin(tx).updateModelInvocation(running.succeed(response, now));
   }
 
   /** 不调用外部 Gateway，沿真实模型状态转换提交响应，再让 Processor 应用终态。 */
@@ -329,8 +334,9 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
         tx -> {
           ThreadState thread = ThreadLifecycleCoordinator.lockThreadWithParent(tx, threadId);
           UUID start = tx.loadEntryPath(thread.headEntryId()).openTurnStart().orElseThrow().id();
-          ModelInvocation model = tx.findModelInvocationByTurn(threadId, start).orElseThrow();
-          tx.lockModelInvocation(model.id());
+          ModelInvocation model =
+              builtin(tx).findModelInvocationByTurn(threadId, start).orElseThrow();
+          builtin(tx).lockModelInvocation(model.id());
           succeedModel(tx, model, assistantResponse(), now);
           tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId));
           return null;
@@ -408,11 +414,19 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
       CountDownLatch matched,
       CountDownLatch release,
       boolean failInsteadOfBlock) {
+    ThreadLocal<BuiltinStore.Transaction> active = new ThreadLocal<>();
     return (HarnessStore)
         Proxy.newProxyInstance(
             HarnessStore.class.getClassLoader(),
-            new Class<?>[] {HarnessStore.class},
+            new Class<?>[] {HarnessStore.class, BuiltinStore.class},
             (proxy, method, args) -> {
+              if (method.getDeclaringClass() == BuiltinStore.class
+                  && method.getName().equals("in")) {
+                if (active.get() == null || active.get() != args[0]) {
+                  throw new IllegalArgumentException("transaction is not owned by this test store");
+                }
+                return active.get();
+              }
               if (!method.getName().equals("transaction")) {
                 return invokeUnwrapped(method, delegate, args);
               }
@@ -421,12 +435,13 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
                   (Function<HarnessStore.Transaction, Object>) args[0];
               return delegate.transaction(
                   tx -> {
+                    ((BuiltinStore) delegate).in(tx);
                     AtomicBoolean paused = new AtomicBoolean(false);
-                    HarnessStore.Transaction wrapped =
-                        (HarnessStore.Transaction)
+                    BuiltinStore.Transaction wrapped =
+                        (BuiltinStore.Transaction)
                             Proxy.newProxyInstance(
                                 HarnessStore.Transaction.class.getClassLoader(),
-                                new Class<?>[] {HarnessStore.Transaction.class},
+                                new Class<?>[] {BuiltinStore.Transaction.class},
                                 (txProxy, txMethod, txArgs) -> {
                                   Object result = invokeUnwrapped(txMethod, tx, txArgs);
                                   if (txMethod.getName().equals("updateJoin")
@@ -440,7 +455,12 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
                                   }
                                   return result;
                                 });
-                    return callback.apply(wrapped);
+                    active.set(wrapped);
+                    try {
+                      return callback.apply(wrapped);
+                    } finally {
+                      active.remove();
+                    }
                   });
             });
   }

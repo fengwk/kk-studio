@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.platform.harness.model;
 
-import fun.fengwk.kkstudio.harness.runtime.model.ImageInputTier;
+import fun.fengwk.kkstudio.harness.model.ImageInputTier;
 
 import javax.imageio.IIOImage;
 import javax.imageio.ImageIO;

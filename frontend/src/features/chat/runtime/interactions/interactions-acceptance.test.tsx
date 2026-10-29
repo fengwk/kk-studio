@@ -220,7 +220,8 @@ describe('Interactions Acceptance Suite (Spec §5)', () => {
   it('Scenario 4: 权限结果 — WAITING_APPROVAL 卡片允许与拒绝正确调用 decideApproval', async () => {
     const decideSpy = vi.spyOn(harnessService, 'decideApproval').mockResolvedValue({
       id: 'inv-app-1',
-      modelInvocationId: 'm-1',
+      threadId: 'thread-1',
+      turnStartEntryId: 'turn-1',
       assistantEntryId: 'a-1',
       callIndex: 0,
       status: 'READY',

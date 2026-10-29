@@ -245,6 +245,8 @@ env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp checkstyle:check
 根 [pom.xml](../../pom.xml) 的 JaCoCo 为测试 JVM 注入 agent，在 `test` 阶段生成各模块的
 `target/site/jacoco/`。配置了 `check` 的模块在 `verify` 阶段执行覆盖率门禁；
 检查范围、CLASS/BUNDLE 口径与阈值以对应模块 POM 为准，定向测试报告只代表选中的集合。
+Harness 的公共 Runtime 与 Builtin Driver 由 [`harness/agent-builtin/pom.xml`](../../harness/agent-builtin/pom.xml)
+中的官方 JaCoCo Ant report/check 联合分析两个 classfiles 目录，Runtime 的旧本地 check 不再执行。
 
 ```bash
 env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl web -am verify
@@ -253,6 +255,9 @@ find . -path '*/target/site/jacoco/index.html' -print
 
 关键逻辑改动查看本次报告的行覆盖率与未覆盖路径，分支覆盖率作为参考；
 低于模块配置的门禁会使 `verify` 失败。不要把静态检查、跳过测试或其它平台的结果算作本次覆盖。
+Harness 的公共内核与 Builtin Driver 分属 [`harness/runtime`](../../harness/runtime) 与
+[`harness/agent-builtin`](../../harness/agent-builtin) 两个模块，
+模型执行、MODEL Work 与自动压缩的契约和定向测试入口见 [Harness Agent Builtin](../modules/harness-agent-builtin.md)。
 
 ### Fat JAR
 
@@ -494,13 +499,13 @@ Gemini implicit cache 是机会性能力，零缓存不会导致失败：**Gemin
 尚无后续观测时为 `NOT_EVALUATED`。它与 case PASS/FAIL 独立。每轮成功观测立即写入白名单 artifact，
 强缓存断言前已落盘；失败也保留此前完成轮次的数值，不输出原始 provider 配置、URL、错误或模型回复。
 
-独立的 [`AnthropicHistoryCacheLiveProbeTest`](../../harness/provider/src/test/java/fun/fengwk/kkstudio/harness/provider/anthropic/AnthropicHistoryCacheLiveProbeTest.java)
+独立的 [`AnthropicHistoryCacheLiveProbeTest`](../../harness/model/src/test/java/fun/fengwk/kkstudio/harness/provider/anthropic/AnthropicHistoryCacheLiveProbeTest.java)
 用于测量历史断点，而非仅验证 system 前缀命中。它直接调用 Provider，不启动应用或数据库；默认只执行免费 wire 形状检查。
 已授权付费、且 `TEST_ANTHROPIC_BASE_URL` / `TEST_ANTHROPIC_API_KEY` 完整时，可显式运行：
 
 ```bash
 env JAVA_HOME=$JAVA_HOME_21 KK_STUDIO_REAL_CACHE_PROBE=true \
-  mvn -pl harness/provider -am -Dtest=AnthropicHistoryCacheLiveProbeTest \
+  mvn -pl harness/model -am -Dtest=AnthropicHistoryCacheLiveProbeTest \
   -Dsurefire.failIfNoSpecifiedTests=false test
 ```
 

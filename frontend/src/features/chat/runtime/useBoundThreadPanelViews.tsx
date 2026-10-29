@@ -21,7 +21,7 @@ import type {
  */
 export type BoundThreadPanelController = Pick<
   ThreadProjection,
-  'bodyRef' | 'events' | 'sessionId' | 'thread' | 'modelInvocation' | 'models'
+  'bodyRef' | 'events' | 'sessionId' | 'thread' | 'activeAssistantOutput' | 'models'
 >
 
 /** Bound Thread 共用的 Conversation/Debug 视图和 Footer 投影（只读视图状态）。 */
@@ -98,9 +98,9 @@ export function useBoundThreadPanelViews(
       controller.thread?.version ?? '',
       controller.thread?.status ?? '',
       controller.thread?.headEntryId ?? '',
-      controller.modelInvocation?.id ?? '',
-      controller.modelInvocation?.status ?? '',
-      controller.modelInvocation?.requestHeadEntryId ?? '',
+      controller.activeAssistantOutput?.generationId ?? '',
+      controller.activeAssistantOutput?.status ?? '',
+      controller.activeAssistantOutput?.requestHeadEntryId ?? '',
       model?.modelName ?? '',
       model?.variant ?? '',
       settings?.agentName ?? '',
@@ -108,7 +108,7 @@ export function useBoundThreadPanelViews(
       environmentName ?? '',
       catalog,
     ].join('|')
-  }, [controller.modelInvocation, controller.thread, controller.models, debugRequest, viewKey])
+  }, [controller.activeAssistantOutput, controller.thread, controller.models, debugRequest, viewKey])
 
   const {
     debug,

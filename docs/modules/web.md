@@ -183,7 +183,7 @@ Daemon registration token 在 HELLO 中绑定 Environment，通用 Card 只返�
 Plugin auth 请求 no-store，凭据只在数据库中保存，任何响应都不回显。
 Storage/Canvas 签发有限期 URL，客户端使用受控存储入口。
 Provider 上游错误正文沿其协议契约进入持久记录与客户端，可能包含上游回显的敏感信息；
-处理边界见 [Harness Provider](harness-provider.md#上游错误原样透传)。
+处理边界见 [Harness Model](harness-model.md#上游错误原样透传)。
 
 ## 通知与浏览器事件
 

@@ -1,11 +1,10 @@
 package fun.fengwk.kkstudio.platform.harness.read;
 
 import fun.fengwk.kkstudio.common.resource.ResourceRef;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
+import fun.fengwk.kkstudio.harness.model.ModelInputModality;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnMediaCapabilities;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMediaCapabilities;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderResourceMaterializer;
@@ -114,14 +113,13 @@ public class PlatformResourceContentReader {
     if (blob.getState() != StorageBlobState.ACTIVE) {
       throw new PlatformReadException("resource is not available: " + blobId);
     }
-    ModelRequestSpec spec = resolveFrozenSpec(store, invocationId, callId, threadId);
-    ProviderMediaCapabilities capabilities = spec.providerType().mediaCapabilities();
-    boolean modelDeclares = spec.model().inputModalities().contains(modality);
-    boolean protocolAccepts =
-        capabilities.supports(modality, true) || capabilities.supports(modality, false);
-    if (!modelDeclares || !protocolAccepts) {
+    TurnMediaCapabilities capabilities =
+        resolveFrozenMediaCapabilities(store, invocationId, callId, threadId);
+    boolean consumerDeclares = capabilities.declares(modality);
+    boolean protocolAccepts = capabilities.acceptsProtocolPosition(modality);
+    if (!consumerDeclares || !protocolAccepts) {
       throw new PlatformReadException(
-          unsupportedMediaMessage(blob, modality, modelDeclares, protocolAccepts));
+          unsupportedMediaMessage(blob, modality, consumerDeclares, protocolAccepts));
     }
     long sizeBytes = blob.getSizeBytes();
     long maxBlobBytes = ProviderResourceMaterializer.maxInlineBlobBytes();
@@ -185,12 +183,12 @@ public class PlatformResourceContentReader {
     }
   }
 
-  /** 通过调用工具槽位解析唯一冻结的调用模型 spec，并校验 thread 与 call 绑定。 */
-  private static ModelRequestSpec resolveFrozenSpec(
+  /** 通过调用工具槽位解析其所属 Turn 已冻结的媒体能力，并校验 thread 与 call 绑定。读取路径绝不反查 ModelInvocation。 */
+  private static TurnMediaCapabilities resolveFrozenMediaCapabilities(
       HarnessStore store, UUID invocationId, String callId, UUID threadId) {
     if (invocationId == null) {
       throw new PlatformReadException(
-          "cannot resolve the calling model: tool invocation identity is unavailable");
+          "cannot resolve the calling turn capabilities: tool invocation identity is unavailable");
     }
     return store.transaction(
         tx -> {
@@ -202,12 +200,18 @@ public class PlatformResourceContentReader {
             throw new PlatformReadException(
                 "calling tool invocation does not match the requested call");
           }
-          ModelInvocation model =
-              tx.findModelInvocation(invocation.modelInvocationId()).orElse(null);
-          if (model == null || !model.threadId().equals(threadId)) {
-            throw new PlatformReadException("calling model invocation is not bound to this thread");
+          if (!invocation.threadId().equals(threadId)) {
+            throw new PlatformReadException("calling tool invocation is not bound to this thread");
           }
-          return model.requestSpec();
+          if (!(tx.loadEntryPath(invocation.turnStartEntryId()).head().payload()
+              instanceof TurnStartPayload start)) {
+            throw new PlatformReadException("calling tool turn start is invalid");
+          }
+          if (!start.ownerThreadId().equals(threadId) || start.capabilities() == null) {
+            throw new PlatformReadException(
+                "calling turn has no frozen media capabilities for this thread");
+          }
+          return start.capabilities().mediaCapabilities();
         });
   }
 

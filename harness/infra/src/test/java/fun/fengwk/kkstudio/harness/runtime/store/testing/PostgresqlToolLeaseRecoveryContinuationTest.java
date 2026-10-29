@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.BuiltinTestTransactions.builtin;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.BuiltinTestTransactions.builtinDriver;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T2;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T3;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -11,6 +13,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
@@ -24,7 +27,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.processor.ProcessResult;
@@ -79,13 +81,16 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
 
   @Test
   void expiredToolRecoveryFeedsHonestResultAndContinuesModelLoop() {
-    StoreTestSupport.TurnBaseline turn = StoreTestSupport.seedTurnBaseline(store);
+    StoreTestSupport.TurnBaseline turn =
+        StoreTestSupport.seedTurnBaseline(
+            store, StoreTestSupport.succeededRequest().toolBindings());
     UUID userId = seedUserEntry(turn);
     ModelRequestSpec request = StoreTestSupport.succeededRequest();
     ProviderResponse response = StoreTestSupport.assistantResponse("call-0");
     UUID modelId = seedRunningModelWithToolCall(turn, userId, request, response);
     UUID assistantId =
-        store.transaction(tx -> tx.findModelInvocation(modelId).orElseThrow().resultEntryId());
+        store.transaction(
+            tx -> builtin(tx).findModelInvocation(modelId).orElseThrow().resultEntryId());
     UUID toolId =
         store.transaction(
             tx -> tx.loadToolInvocationsByAssistantEntryId(assistantId).getFirst().id());
@@ -138,7 +143,7 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
             .contains("cannot be confirmed"));
     TurnEndPayload batchEnd = assertInstanceOf(TurnEndPayload.class, applied.head().payload());
     assertTrue(batchEnd.continueModel());
-    assertTrue(store.transaction(tx -> tx.findModelInvocation(modelId)).isEmpty());
+    assertTrue(store.transaction(tx -> builtin(tx).findModelInvocation(modelId)).isEmpty());
     assertTrue(
         store.transaction(tx -> tx.loadToolInvocationsByAssistantEntryId(assistantId)).isEmpty());
     assertTrue(findWork(threadTarget).isPresent());
@@ -150,7 +155,8 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
     UUID continuationEntryId = threadHead(turn.threadId());
     ModelInvocation continuation =
         store
-            .transaction(tx -> tx.findModelInvocationByTurn(turn.threadId(), continuationEntryId))
+            .transaction(
+                tx -> builtin(tx).findModelInvocationByTurn(turn.threadId(), continuationEntryId))
             .orElseThrow();
     assertEquals(ModelInvocationStatus.READY, continuation.status());
     assertNotEquals(modelId, continuation.id());
@@ -174,7 +180,8 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
         Clock.systemUTC(),
         scheduler,
         Runnable::run,
-        ExecutionExitTestSupport.confirmer(store, Clock.systemUTC()));
+        ExecutionExitTestSupport.confirmer(store, Clock.systemUTC()),
+        (sessionId, toolName, result) -> result);
   }
 
   private ThreadProcessor newThreadProcessor() {
@@ -183,7 +190,7 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
             new TurnResolver.Resolved(StoreTestSupport.succeededRequest(), 100_000, 16_384);
     return new ThreadProcessor(
         store,
-        resolver,
+        builtinDriver(store, resolver),
         new ThreadProcessorConfig(Duration.ofSeconds(5), () -> new CompactionConfig(20_000)));
   }
 
@@ -218,28 +225,31 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
             tx -> {
               tx.lockThread(turn.threadId()).orElseThrow();
               UUID id = tx.nextId();
-              tx.insertModelInvocation(
-                  new ModelInvocation(
-                      id,
-                      turn.threadId(),
-                      turn.turnStartEntryId(),
-                      requestHeadEntryId,
-                      request,
-                      ModelInvocationStatus.READY,
-                      0,
-                      null,
-                      null,
-                      null,
-                      null,
-                      List.of(),
-                      T2,
-                      T2));
+              builtin(tx)
+                  .insertModelInvocation(
+                      new ModelInvocation(
+                          id,
+                          turn.threadId(),
+                          turn.turnStartEntryId(),
+                          requestHeadEntryId,
+                          request,
+                          ModelInvocationStatus.READY,
+                          0,
+                          null,
+                          null,
+                          null,
+                          null,
+                          List.of(),
+                          T2,
+                          T2));
               return id;
             });
     store.transaction(
         tx -> {
           var thread = tx.lockThread(turn.threadId()).orElseThrow();
-          tx.updateModelInvocation(tx.lockModelInvocation(modelId).orElseThrow().markRunning(T3));
+          builtin(tx)
+              .updateModelInvocation(
+                  builtin(tx).lockModelInvocation(modelId).orElseThrow().markRunning(T3));
           UUID assistantId = tx.nextId();
           tx.insertEntry(
               new Entry(
@@ -248,16 +258,31 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
                   requestHeadEntryId,
                   StoreTestSupport.mappedAssistant(request, response, T3),
                   T3));
-          tx.updateModelInvocation(
-              tx.lockModelInvocation(modelId).orElseThrow().succeed(response, null, null, T3));
-          tx.updateModelInvocation(
-              tx.lockModelInvocation(modelId).orElseThrow().attachResultEntry(assistantId, T3));
+          builtin(tx)
+              .updateModelInvocation(
+                  builtin(tx)
+                      .lockModelInvocation(modelId)
+                      .orElseThrow()
+                      .succeed(response, null, null, T3));
+          builtin(tx)
+              .updateModelInvocation(
+                  builtin(tx)
+                      .lockModelInvocation(modelId)
+                      .orElseThrow()
+                      .attachResultEntry(assistantId, T3));
           tx.updateThread(thread.advanceHead(assistantId, T3));
           UUID toolId = tx.nextId();
           tx.insertToolInvocations(
               List.of(
                   StoreTestSupport.toolInvocation(
-                      toolId, modelId, assistantId, 0, "call-0", ToolInvocationStatus.READY, T3)));
+                      toolId,
+                      turn.threadId(),
+                      turn.turnStartEntryId(),
+                      assistantId,
+                      0,
+                      "call-0",
+                      ToolInvocationStatus.READY,
+                      T3)));
           ToolInvocation ready =
               tx.lockToolInvocationsByAssistantEntryId(assistantId)
                   .getFirst()

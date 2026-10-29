@@ -17,6 +17,9 @@ import java.util.UUID;
  *
  * <p>{@code settings} 始终是 Thread 自己的设置，后续 turn 由它继承，因此模型失效时也不改写。{@code fallbackModel} 只在 Resolver
  * 发现 {@code settings.model()} 不可用、改用 Agent 默认模型执行时非空，记录本 turn 实际调用的型号，用于界面提示与按实际型号计价。
+ *
+ * <p>{@code capabilities} 在 Resolver 成功、Turn 与 ModelInvocation 同事务提交时冻结；pending / rejected
+ * TurnStart 允许为 null。工具执行、审批、{@code task} 父权限与媒体读取只读取该快照，不再沿 ToolInvocation 反查 Model。
  */
 public record TurnStartPayload(
     TurnStartReason reason,
@@ -25,12 +28,33 @@ public record TurnStartPayload(
     Integer contextWindow,
     Integer maxOutputTokens,
     CompactionStart compaction,
-    ModelSelection fallbackModel)
+    ModelSelection fallbackModel,
+    TurnCapabilities capabilities)
     implements EntryPayload {
 
-  /** 候补 path / rejected turn：contextWindow 与 maxOutputTokens 尚未补齐，无压缩元数据。 */
+  /** 候补 path / rejected turn：contextWindow 与 maxOutputTokens 尚未补齐，无压缩元数据与冻结能力。 */
   public TurnStartPayload(TurnStartReason reason, BranchSettings settings, UUID ownerThreadId) {
-    this(reason, settings, ownerThreadId, null, null, null, null);
+    this(reason, settings, ownerThreadId, null, null, null, null, null);
+  }
+
+  /** 尚未冻结公共能力的已解析形状（Stop / Compaction barrier 等不执行工具的 Turn）。 */
+  public TurnStartPayload(
+      TurnStartReason reason,
+      BranchSettings settings,
+      UUID ownerThreadId,
+      Integer contextWindow,
+      Integer maxOutputTokens,
+      CompactionStart compaction,
+      ModelSelection fallbackModel) {
+    this(
+        reason,
+        settings,
+        ownerThreadId,
+        contextWindow,
+        maxOutputTokens,
+        compaction,
+        fallbackModel,
+        null);
   }
 
   public TurnStartPayload {

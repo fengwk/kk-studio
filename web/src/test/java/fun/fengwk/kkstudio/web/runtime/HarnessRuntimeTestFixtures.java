@@ -2,6 +2,10 @@ package fun.fengwk.kkstudio.web.runtime;
 
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
+import fun.fengwk.kkstudio.harness.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
@@ -19,10 +23,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
@@ -32,6 +32,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLiveState;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
@@ -73,11 +74,16 @@ public final class HarnessRuntimeTestFixtures {
   }
 
   public static Entry turnStartEntry() {
+    return turnStartEntry(OWNER_THREAD_ID);
+  }
+
+  /** 指定 owner 的 TURN_START：generation 归属校验要求 Thread、open Turn 与 generation 三者一致。 */
+  public static Entry turnStartEntry(UUID ownerThreadId) {
     return new Entry(
         id(2),
         id(1),
         id(1),
-        new TurnStartPayload(TurnStartReason.INPUT, settings(), OWNER_THREAD_ID),
+        new TurnStartPayload(TurnStartReason.INPUT, settings(), ownerThreadId),
         NOW);
   }
 
@@ -174,7 +180,7 @@ public final class HarnessRuntimeTestFixtures {
         List.of(),
         null,
         List.of(),
-        List.of(),
+        ThreadLiveState.IDLE_OR_HISTORICAL,
         List.of(),
         0,
         false,
@@ -191,7 +197,7 @@ public final class HarnessRuntimeTestFixtures {
         List.of(),
         null,
         List.of(),
-        List.of(),
+        ThreadLiveState.IDLE_OR_HISTORICAL,
         List.of(),
         0,
         false,
@@ -208,7 +214,7 @@ public final class HarnessRuntimeTestFixtures {
         List.of(),
         null,
         List.of(),
-        List.of(),
+        ThreadLiveState.IDLE_OR_HISTORICAL,
         List.of(),
         0,
         false,
@@ -225,7 +231,7 @@ public final class HarnessRuntimeTestFixtures {
         List.of(),
         null,
         List.of(),
-        List.of(),
+        ThreadLiveState.IDLE_OR_HISTORICAL,
         List.of(),
         0,
         false,
@@ -242,7 +248,7 @@ public final class HarnessRuntimeTestFixtures {
         List.of(),
         null,
         List.of(),
-        List.of(),
+        ThreadLiveState.IDLE_OR_HISTORICAL,
         List.of(),
         0,
         false,
@@ -259,7 +265,7 @@ public final class HarnessRuntimeTestFixtures {
         List.of(queuedUserMessageCommand()),
         null,
         List.of(),
-        List.of(),
+        ThreadLiveState.IDLE_OR_HISTORICAL,
         List.of(),
         0,
         false,
@@ -297,7 +303,7 @@ public final class HarnessRuntimeTestFixtures {
         List.of(),
         null,
         List.of(),
-        List.of(),
+        ThreadLiveState.CONTINUATION_DUE,
         List.of(),
         0,
         false,
@@ -329,7 +335,7 @@ public final class HarnessRuntimeTestFixtures {
         List.of(),
         null,
         List.of(),
-        List.of(),
+        ThreadLiveState.IDLE_OR_HISTORICAL,
         List.of(),
         0,
         false,
@@ -388,6 +394,7 @@ public final class HarnessRuntimeTestFixtures {
     return new ToolInvocation(
         id(100),
         id(10),
+        id(11),
         id(4),
         0,
         request.call(),
@@ -406,6 +413,7 @@ public final class HarnessRuntimeTestFixtures {
     return new ToolInvocation(
         id(101),
         id(10),
+        id(11),
         id(4),
         0,
         new ToolCall("call-77", "unknown_tool", "{\"x\":1}"),

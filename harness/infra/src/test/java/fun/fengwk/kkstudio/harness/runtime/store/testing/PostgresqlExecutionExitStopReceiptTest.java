@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.BuiltinTestTransactions.builtinDriver;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.CREATION_REQUEST_HASH;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T0;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.loadCommandsByThread;
@@ -68,7 +69,9 @@ class PostgresqlExecutionExitStopReceiptTest {
     jdbcTemplate = new JdbcTemplate(PostgresqlHarnessStoreFixture.dataSource());
     runtime =
         new HarnessRuntime(
-            store, (threadId, path, preparation) -> null, () -> CompactionConfig.DEFAULT);
+            store,
+            builtinDriver(store, (threadId, path, preparation) -> null),
+            () -> CompactionConfig.DEFAULT);
   }
 
   @Test

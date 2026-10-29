@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.agenttask;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.BuiltinTestTransactions.builtinDriver;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.loadCommandsByThread;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -56,7 +57,9 @@ class AgentTaskExternalRuntimeTest {
   @SuppressWarnings("unchecked")
   void setUp() {
     store = new InMemoryHarnessStore();
-    runtime = new HarnessRuntime(store, (tid, path, prep) -> null, () -> CompactionConfig.DEFAULT);
+    runtime =
+        new HarnessRuntime(
+            store, builtinDriver(store, (tid, path, prep) -> null), () -> CompactionConfig.DEFAULT);
     ObjectProvider<HarnessRuntime> provider = mock(ObjectProvider.class);
     when(provider.getIfAvailable()).thenReturn(runtime);
     service = new AgentTaskService(provider);

@@ -32,7 +32,8 @@ function toolInvocation(
 ): ToolInvocationDTO {
   return {
     id,
-    modelInvocationId: `m-${id}`,
+    threadId: 'thread-1',
+    turnStartEntryId: 'turn-1',
     assistantEntryId,
     callIndex: 0,
     status: 'SUCCEEDED',

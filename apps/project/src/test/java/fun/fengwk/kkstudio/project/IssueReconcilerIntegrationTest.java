@@ -18,6 +18,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
+import fun.fengwk.kkstudio.harness.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.StopCommand;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
@@ -31,8 +33,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -141,7 +141,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     when(snapshot.thread()).thenReturn(thread);
     when(snapshot.entryPath()).thenReturn(path);
     when(snapshot.queuedCommands()).thenReturn(List.of());
-    when(snapshot.model()).thenReturn(null);
+    when(snapshot.generation()).thenReturn(null);
     when(snapshot.toolSiblings()).thenReturn(List.of());
     when(snapshot.executionFacts()).thenReturn(new ThreadExecutionFacts(false, false, false));
     return snapshot;
@@ -216,7 +216,6 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     when(snapshot.thread()).thenReturn(thread);
     when(snapshot.entryPath()).thenReturn(entryPath);
     when(snapshot.queuedCommands()).thenReturn(commands);
-    when(snapshot.model()).thenReturn(model);
     when(snapshot.toolSiblings()).thenReturn(tools);
     when(snapshot.executionFacts()).thenReturn(executionFacts);
     return snapshot;
@@ -1593,7 +1592,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     when(stillRunning.thread()).thenReturn(settledThread);
     when(stillRunning.entryPath()).thenReturn(settledPath);
     when(stillRunning.queuedCommands()).thenReturn(List.of(mock(ThreadCommand.class)));
-    when(stillRunning.model()).thenReturn(null);
+    when(stillRunning.generation()).thenReturn(null);
     when(stillRunning.toolSiblings()).thenReturn(unknownTools);
     when(stillRunning.executionFacts()).thenReturn(new ThreadExecutionFacts(true, false, true));
     when(harnessRuntime.getThreadSnapshot(run.getThreadId())).thenReturn(stillRunning);

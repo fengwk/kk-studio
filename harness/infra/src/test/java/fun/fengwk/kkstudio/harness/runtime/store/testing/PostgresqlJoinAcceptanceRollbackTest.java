@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.BuiltinTestTransactions.builtin;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.BuiltinTestTransactions.builtinDriver;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.CREATION_REQUEST_HASH;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T0;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T1;
@@ -87,7 +89,10 @@ class PostgresqlJoinAcceptanceRollbackTest {
   void setUp() {
     store = PostgresqlHarnessStoreFixture.resetAndCreate();
     runtime =
-        new HarnessRuntime(store, (threadId, path, prep) -> null, () -> CompactionConfig.DEFAULT);
+        new HarnessRuntime(
+            store,
+            builtinDriver(store, (threadId, path, prep) -> null),
+            () -> CompactionConfig.DEFAULT);
     jdbcTemplate = new JdbcTemplate(PostgresqlHarnessStoreFixture.dataSource());
   }
 
@@ -647,7 +652,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
       ThreadProcessor processor =
           new ThreadProcessor(
               store,
-              resolver,
+              builtinDriver(store, resolver),
               new ThreadProcessorConfig(Duration.ofSeconds(5), () -> new CompactionConfig(20_000)));
 
       ClaimedWork childWork1 =
@@ -668,11 +673,12 @@ class PostgresqlJoinAcceptanceRollbackTest {
                     tx.loadEntryPath(tx.findThread(childThreadId).orElseThrow().headEntryId());
                 UUID turnStartId = path.openTurnStart().orElseThrow().id();
                 ModelInvocation found =
-                    tx.findModelInvocationByTurn(childThreadId, turnStartId).orElseThrow();
-                ModelInvocation model = tx.lockModelInvocation(found.id()).orElseThrow();
-                tx.updateModelInvocation(model.markRunning(T2));
-                model = tx.lockModelInvocation(found.id()).orElseThrow();
-                tx.updateModelInvocation(model.succeed(StoreTestSupport.assistantResponse(), T2));
+                    builtin(tx).findModelInvocationByTurn(childThreadId, turnStartId).orElseThrow();
+                ModelInvocation model = builtin(tx).lockModelInvocation(found.id()).orElseThrow();
+                builtin(tx).updateModelInvocation(model.markRunning(T2));
+                model = builtin(tx).lockModelInvocation(found.id()).orElseThrow();
+                builtin(tx)
+                    .updateModelInvocation(model.succeed(StoreTestSupport.assistantResponse(), T2));
                 tx.requestWork(new WorkTarget(WorkTargetType.THREAD, childThreadId));
                 return found.id();
               });

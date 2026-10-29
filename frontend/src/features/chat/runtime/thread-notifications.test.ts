@@ -233,7 +233,7 @@ describe('useThreadNotifications', () => {
       failedAt: null,
       retryAt: null,
       nextAttempt: 2,
-      modelInvocationId: 'model-1',
+      generationId: 'model-1',
     }
     const { rerender } = renderHook(
       ({ working }: { working: boolean }) =>

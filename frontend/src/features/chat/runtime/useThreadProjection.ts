@@ -34,9 +34,9 @@ export function useThreadProjection(threadId: string) {
     sessionId,
     entries,
     queuedCommands,
-    modelInvocation,
+    activeAssistantOutput,
     toolInvocations,
-    modelAttemptFailures,
+    generationFailures,
     stopReceipts,
     unconfirmedExecutions,
     manualCompaction,
@@ -47,9 +47,9 @@ export function useThreadProjection(threadId: string) {
     threadId,
     Boolean(threadId) && snapshotQuery.isSuccess,
     thread?.version,
-    modelInvocation,
+    activeAssistantOutput,
     toolInvocations,
-    modelAttemptFailures,
+    generationFailures,
   )
   const timeline = buildThreadTimeline(
     entries,
@@ -57,8 +57,8 @@ export function useThreadProjection(threadId: string) {
     toolInvocations,
     realtime.modelStream,
     realtime.toolStreams,
-    modelAttemptFailures,
-    modelInvocation,
+    generationFailures,
+    activeAssistantOutput,
   )
   // Footer 累计用量直接由全部 Entry 事实派生：不依赖对话消息、卡片 visible 或 TURN_END 投影，
   // compaction 等隐藏内容里真实发生的 usage 也一并进入累计。
@@ -68,13 +68,13 @@ export function useThreadProjection(threadId: string) {
   const events = useMemo(
     () => buildThreadEventTimeline({
       entries,
-      modelInvocation,
+      activeAssistantOutput,
       toolInvocations,
-      modelAttemptFailures,
+      generationFailures,
       modelStream: realtime.modelStream,
       toolStreams: realtime.toolStreams,
     }),
-    [entries, modelAttemptFailures, modelInvocation, realtime.modelStream, realtime.toolStreams, toolInvocations],
+    [entries, generationFailures, activeAssistantOutput, realtime.modelStream, realtime.toolStreams, toolInvocations],
   )
   const working = isThreadWorking(thread, timeline)
   const runtimeLabels = resolveRuntimeLabels(thread, models)
@@ -109,9 +109,9 @@ export function useThreadProjection(threadId: string) {
     manualCompaction,
     stopReceipts,
     unconfirmedExecutions,
-    modelInvocation,
+    activeAssistantOutput,
     toolInvocations,
-    modelAttemptFailures,
+    generationFailures,
     snapshotQuery,
   }
 }

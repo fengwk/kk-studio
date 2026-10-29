@@ -1,9 +1,13 @@
 import {
-  isFailedAttempt,
+  isFailedGeneration,
+  isTerminalAssistantOutputStatus,
   type RealtimeModelDelta,
   type RealtimeModelStream,
 } from '@/features/chat/runtime/thread-realtime/model-stream'
-import type { ModelAttemptFailureDTO, ModelInvocationDTO } from '@/shared/api/generated/contracts'
+import type {
+  HarnessActiveAssistantOutputDTO,
+  HarnessGenerationFailureDTO,
+} from '@/shared/api/generated/contracts'
 
 /** 每个 thread:invocation:attempt 保留的已见 eventId 上限；仅 best-effort 防重投递。 */
 export const TOOL_PARTIAL_SEEN_EVENT_ID_LIMIT = 256
@@ -105,19 +109,16 @@ export function hasVisibleModelOverlay(stream: RealtimeModelStream): boolean {
     || stream.toolCalls.length > 0
 }
 
-export function isActiveModelAttempt(
-  invocation: ModelInvocationDTO | null,
-  threadId: string,
-  invocationId: string,
+export function isActiveModelGeneration(
+  activeOutput: HarnessActiveAssistantOutputDTO | null,
+  generationId: string,
   attempt: number,
-  failures: readonly ModelAttemptFailureDTO[],
-): invocation is ModelInvocationDTO {
-  return invocation != null
-    && invocation.threadId === threadId
-    && invocation.id === invocationId
-    && invocation.attempt === attempt
-    && invocation.resultJson == null
-    && invocation.errorJson == null
-    && invocation.resultEntryId == null
-    && !isFailedAttempt(attempt, invocation, failures)
+  failures: readonly HarnessGenerationFailureDTO[],
+): activeOutput is HarnessActiveAssistantOutputDTO {
+  return activeOutput != null
+    && activeOutput.generationId === generationId
+    && activeOutput.attempt === attempt
+    && activeOutput.resultEntryId == null
+    && !isTerminalAssistantOutputStatus(activeOutput.status)
+    && !isFailedGeneration(generationId, attempt, failures)
 }
