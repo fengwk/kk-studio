@@ -1,3 +1,5 @@
+import type { LocaleCatalog } from '@/shared/i18n/types'
+
 export const projectsCatalog = {
   'projects.edit.referencesLoading': {
     'zh-CN': '正在读取阶段引用，读取完成后才能删除阶段或保存工作流',
@@ -1284,4 +1286,4 @@ export const projectsCatalog = {
     'zh-CN': 'Issue #{{number}} 详情',
     'en-US': 'Issue #{{number}} details',
   },
-} as const
+} satisfies LocaleCatalog
