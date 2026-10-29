@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.realtime;
 
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 

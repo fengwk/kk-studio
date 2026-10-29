@@ -3,35 +3,26 @@ package fun.fengwk.kkstudio.harness.runtime;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTurns;
+import fun.fengwk.kkstudio.harness.runtime.driver.AgentDriver;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverApplied;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverCommit;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverStopResult;
+import fun.fengwk.kkstudio.harness.runtime.driver.LockedDriverState;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
-import fun.fengwk.kkstudio.harness.runtime.history.AssistantAbortedPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryNormalization;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
-import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptMaterialization;
 import fun.fengwk.kkstudio.harness.runtime.history.NotificationPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.StreamCheckpoint;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
-import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryMaterializer;
-import fun.fengwk.kkstudio.harness.runtime.processor.ModelAttemptFailureAppender;
-import fun.fengwk.kkstudio.harness.runtime.processor.ModelOutcomeAppender;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolOutcomeAppender;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
@@ -87,13 +78,11 @@ final class StopControl {
   private static final ThreadContextClassifier CLASSIFIER = new ThreadContextClassifier();
 
   private final HarnessStore store;
-  private final ToolResultHistoryMaterializer toolResultHistoryMaterializer;
-  private final ModelOutcomeAppender modelOutcomeAppender;
+  private final AgentDriver driver;
 
-  StopControl(HarnessStore store, ToolResultHistoryMaterializer toolResultHistoryMaterializer) {
+  StopControl(HarnessStore store, AgentDriver driver) {
     this.store = Objects.requireNonNull(store, "store");
-    this.toolResultHistoryMaterializer = toolResultHistoryMaterializer;
-    this.modelOutcomeAppender = new ModelOutcomeAppender(toolResultHistoryMaterializer);
+    this.driver = Objects.requireNonNull(driver, "driver");
   }
 
   Commit stop(StopCommand command, Consumer<Commit> afterCommit) {
@@ -123,24 +112,17 @@ final class StopControl {
       boolean isTarget,
       EntryPath path,
       List<ThreadCommand> queued,
-      ModelInvocation model,
+      LockedDriverState driverState,
       List<ToolInvocation> toolSiblings,
       ThreadContext context) {}
 
   /** 单个节点收敛后的状态与其自身停止边界（共享历史无自有边界时为空）。 */
   private record NodeStop(ThreadState thread, UUID stoppedTurnEndEntryId) {}
 
-  /** terminal Model 物化后的事实：推进后的 Thread，以及仍 active 的 Model 与其新物化 siblings（无则 null/空）。 */
-  private record Materialized(
-      ThreadState thread,
-      ModelInvocation model,
-      List<ToolInvocation> toolSiblings,
-      UUID terminalEntryId,
-      UUID finalAnswerEntryId) {
-    Materialized {
-      toolSiblings = List.copyOf(toolSiblings);
-    }
-  }
+  private record MaterializedNotifications(UUID headEntryId, long inputThroughSequence) {}
+
+  /** terminal Driver generation 物化后的事实：推进后的 Thread 与可结算的终止边界。 */
+  private record Materialized(ThreadState thread, UUID terminalEntryId, UUID finalAnswerEntryId) {}
 
   private Commit stop(HarnessStore.Transaction tx, StopCommand command) {
     // 树锁必须在任何业务行锁之前获取
@@ -279,27 +261,12 @@ final class StopControl {
       queuedByThread.put(candidate.thread().id(), queued);
     }
 
-    // Stage 5: Models 锁
-    Map<UUID, ModelInvocation> modelsByThread = new HashMap<>();
+    // Stage 5: Driver 状态锁
+    Map<UUID, LockedDriverState> driverStatesByThread = new HashMap<>();
     for (ThreadStopCandidate candidate : toStop) {
       EntryPath path = pathsByThread.get(candidate.thread().id());
-      Optional<Entry> openTurn = path.openTurnStart();
-      if (openTurn.isPresent()) {
-        Optional<ModelInvocation> found =
-            tx.findModelInvocationByTurn(candidate.thread().id(), openTurn.get().id());
-        if (found.isPresent()) {
-          ModelInvocation model =
-              tx.lockModelInvocation(found.get().id())
-                  .orElseThrow(
-                      () ->
-                          new IllegalStateException(
-                              "model "
-                                  + found.get().id()
-                                  + " could not be locked for thread "
-                                  + candidate.thread().id()));
-          modelsByThread.put(candidate.thread().id(), model);
-        }
-      }
+      driverStatesByThread.put(
+          candidate.thread().id(), driver.lockState(tx, candidate.thread(), path));
     }
 
     // Stage 6: Tools 锁与 ThreadContext 分类（只读：不在遍历中 mutation；terminal 结果物化与收敛统一留到
@@ -308,9 +275,10 @@ final class StopControl {
     for (ThreadStopCandidate candidate : toStop) {
       EntryPath path = pathsByThread.get(candidate.thread().id());
       List<ThreadCommand> queued = queuedByThread.get(candidate.thread().id());
-      ModelInvocation model = modelsByThread.get(candidate.thread().id());
-      List<ToolInvocation> siblings = loadAssistantSiblings(tx, candidate.thread(), path, model);
-      ThreadContext context = CLASSIFIER.classify(candidate.thread(), path, model, siblings);
+      LockedDriverState driverState = driverStatesByThread.get(candidate.thread().id());
+      List<ToolInvocation> siblings =
+          loadAssistantSiblings(tx, candidate.thread(), path, driverState);
+      ThreadContext context = CLASSIFIER.classify(candidate.thread(), path, driverState, siblings);
       contexts.add(
           new ThreadStopContext(
               candidate.thread(),
@@ -318,7 +286,7 @@ final class StopControl {
               candidate.isTarget(),
               path,
               queued,
-              model,
+              driverState,
               siblings,
               context));
     }
@@ -327,8 +295,8 @@ final class StopControl {
     List<WorkTarget> allWorkTargets = new ArrayList<>();
     for (ThreadStopContext ctx : contexts) {
       allWorkTargets.add(new WorkTarget(WorkTargetType.THREAD, ctx.thread().id()));
-      if (ctx.model() != null) {
-        allWorkTargets.add(new WorkTarget(WorkTargetType.MODEL, ctx.model().id()));
+      if (ctx.driverState().executionId() != null) {
+        allWorkTargets.add(new WorkTarget(WorkTargetType.MODEL, ctx.driverState().executionId()));
       }
       for (ToolInvocation sibling : ctx.toolSiblings()) {
         allWorkTargets.add(new WorkTarget(WorkTargetType.TOOL, sibling.id()));
@@ -359,27 +327,27 @@ final class StopControl {
       UUID stopRequestId = original.stopRequestId();
       EntryPath path = tx.loadEntryPath(thread.headEntryId());
       List<ThreadCommand> queued = original.queued();
-      ModelInvocation model = original.model();
+      LockedDriverState driverState = original.driverState();
       List<ToolInvocation> siblings = original.toolSiblings();
-      ThreadContext context = CLASSIFIER.classify(thread, path, model, siblings);
+      ThreadContext context = CLASSIFIER.classify(thread, path, driverState, siblings);
       if (context instanceof ThreadContext.ModelTerminalPending pending) {
-        // 提交先于 Stop：用共享 appender 把已提交的 terminal Model 结果物化进历史（绝不 409），再正常 Stop。
-        Materialized materialized = materializeTerminalModel(tx, thread, path, pending.model());
+        // 提交先于 Stop：用 Driver 的公共物化把已提交的 terminal 结果写入历史（绝不 409），再正常 Stop。
+        Materialized materialized =
+            materializeTerminalModel(tx, thread, path, pending.driverState());
         if (materialized.terminalEntryId() != null) {
           committedTerminals.add(materialized);
         }
         thread = materialized.thread();
         path = tx.loadEntryPath(thread.headEntryId());
-        model = materialized.model();
-        siblings = materialized.toolSiblings();
-        context = CLASSIFIER.classify(thread, path, model, siblings);
+        driverState = driver.lockState(tx, thread, path);
+        siblings = loadAssistantSiblings(tx, thread, path, driverState);
+        context = CLASSIFIER.classify(thread, path, driverState, siblings);
       } else if (context instanceof ThreadContext.ToolTerminalPending pending) {
-        thread =
-            materializeTerminalToolBatch(tx, thread, path, pending.model(), pending.siblings());
+        thread = materializeTerminalToolBatch(tx, thread, path, driverState, pending.siblings());
         path = tx.loadEntryPath(thread.headEntryId());
-        model = null;
+        driverState = driver.lockState(tx, thread, path);
         siblings = List.of();
-        context = CLASSIFIER.classify(thread, path, model, siblings);
+        context = CLASSIFIER.classify(thread, path, driverState, siblings);
       }
       if (context instanceof ThreadContext.ModelTerminalPending
           || context instanceof ThreadContext.ToolTerminalPending) {
@@ -399,9 +367,7 @@ final class StopControl {
       List<ThreadCommand> queuedNotifications =
           queued.stream().filter(queuedCommand -> queuedCommand.type().isNotification()).toList();
 
-      if (context instanceof ThreadContext.ModelActive active) {
-        modelExecutionIds.add(active.model().id());
-      } else if (context instanceof ThreadContext.ToolActive active) {
+      if (context instanceof ThreadContext.ToolActive active) {
         for (ToolInvocation sibling : active.siblings()) {
           if (!sibling.status().isTerminal()) {
             toolExecutionIds.add(sibling.id());
@@ -409,23 +375,31 @@ final class StopControl {
         }
       }
 
+      // 所有上下文都先撤销 Driver 执行权：Model/Tool 由 Driver 写私有边界，idle/continuation 只收敛私有状态。
+      // 返回的 opaque executionId 在本事务提交后交给既有本地 canceller。
+      DriverStopResult driverStop =
+          driver.stop(tx, thread, path, driverState, commit(tx), stopRequestId);
+      modelExecutionIds.addAll(driverStop.executionIds());
+
       NodeStop node =
           switch (context) {
             case ThreadContext.IdleOrHistorical ignored -> stopIdle(
-                tx, thread, path, stopRequestId, now);
+                tx, thread, path, queuedNotifications, stopRequestId, now);
             case ThreadContext.ContinuationDue ignored -> stopContinuation(
                 tx, thread, path, stopRequestId, now);
             case ThreadContext.ModelActive active -> stopModel(
-                tx, thread, path, active.model(), stopRequestId, now);
+                tx, thread, path, driverStop, stopRequestId, now);
             case ThreadContext.ToolActive active -> stopTools(
-                tx, thread, path, active, stopRequestId, now);
+                tx, thread, path, driverState, active, stopRequestId, now);
             case ThreadContext.ModelTerminalPending ignored -> throw new IllegalStateException(
                 "terminal Model context escaped the Stop guard");
             case ThreadContext.ToolTerminalPending ignored -> throw new IllegalStateException(
                 "terminal Tool context escaped the Stop guard");
           };
       ThreadState stoppedThread =
-          materializeQueuedNotifications(tx, node.thread(), queuedNotifications, now);
+          isForeignOpenTurn(path, thread.id())
+              ? node.thread()
+              : materializeQueuedNotifications(tx, node.thread(), queuedNotifications, now);
       stoppedStates.add(stoppedThread);
       receipts.add(
           new StoppedThreadReceipt(
@@ -460,7 +434,7 @@ final class StopControl {
         }
       }
       if (boundary == null) {
-        // 共享历史中属于其它 Thread 的 open Turn：本节点没有自有停止边界可用于冻结 Join 结果。
+        // 没有自有停止边界时不能冻结 Join 结果。
         continue;
       }
       ThreadLifecycleCoordinator.matchAndDeliverTerminalJoins(
@@ -488,19 +462,38 @@ final class StopControl {
   /**
    * 空闲（无 live Invocation）Stop：写一个完整的 STOP barrier Turn —— TURN_START({@code STOP}) →
    * ASSISTANT_ERROR(CANCELLED) → TURN_END(STOPPED, closeRequestId) —— 并同事务把 head 推进到该
-   * TURN_END、恰好递增一次 version、把执行控制置为 STOPPED。它不消费 Command、从不调度模型，也不计入模型工作轮数。
+   * TURN_END、恰好递增一次 version、把执行控制置为 STOPPED。共享 open Turn 仅在有排队通知时在本分支做 history cut， 并在 STOP turn
+   * 前物化通知；它不消费人工输入、从不调度模型，也不计入模型工作轮数。
    */
   private static NodeStop stopIdle(
       HarnessStore.Transaction tx,
       ThreadState thread,
       EntryPath path,
+      List<ThreadCommand> queuedNotifications,
       UUID stopRequestId,
       Instant now) {
     Optional<Entry> openTurn = path.openTurnStart();
-    if (openTurn.isPresent() && !isOwnedBy(openTurn.get(), thread.id())) {
-      // 共享历史上属于其它 Thread 的 open Turn：本 Thread 没有自己的 live 执行，也无权替换别人的 Turn，因此没有本 Thread
-      // 自己的停止边界可写（所有权各自独立），只取消排队 Command 并置 STOPPED。
-      return new NodeStop(touchVersionAsStopped(tx, thread, now), null);
+    if (isForeignOpenTurn(path, thread.id())) {
+      if (queuedNotifications.isEmpty()) {
+        return new NodeStop(touchVersionAsStopped(tx, thread, now), null);
+      }
+      TurnStartPayload start = (TurnStartPayload) openTurn.orElseThrow().payload();
+      if (start.reason() == TurnStartReason.STOP) {
+        // 公开 fork 入口只接受闭合边界；不为异常共享 STOP 前缀伪造原 owner 的关闭身份。
+        throw new IllegalStateException(
+            "cannot materialize queued notifications after a foreign open STOP turn");
+      }
+      // 仅在当前分支补 history cut，不改变原 owner 的 head 或执行状态；通知放在切断后的回合之间。
+      EntryPath normalized = normalizeOpenTurn(tx, path, now);
+      MaterializedNotifications notifications =
+          appendQueuedNotifications(tx, thread, normalized.head().id(), queuedNotifications, now);
+      return appendStopBoundaryTurn(
+          tx,
+          thread,
+          tx.loadEntryPath(notifications.headEntryId()),
+          stopRequestId,
+          now,
+          notifications.inputThroughSequence());
     }
     EntryPath base = path;
     if (openTurn.isPresent()) {
@@ -514,7 +507,7 @@ final class StopControl {
       // 前缀不能按 STOPPED 关闭（尚无输入的空 INPUT Turn，或工具结果缺失的 assistant 结果）：先按既有 history normalization
       // 语义收尾（必要时补写 synthetic HISTORY_CUT ToolResult，再以 CANCELLED/HISTORY_CUT 关闭），随后照常写 STOP
       // boundary Turn 承载 durable 停止事实。
-      base = normalizeOpenOwnTurn(tx, path, now);
+      base = normalizeOpenTurn(tx, path, now);
     }
     return appendStopBoundaryTurn(tx, thread, base, stopRequestId, now);
   }
@@ -542,8 +535,8 @@ final class StopControl {
     return new NodeStop(stopped, turnEndId);
   }
 
-  /** 本 Thread 的 open Turn 前缀不足以按 STOPPED 关闭：按既有 history cut 语义收尾并返回收尾后的 EntryPath。 */
-  private static EntryPath normalizeOpenOwnTurn(
+  /** 按既有 history cut 语义收尾当前分支的 open Turn，并返回收尾后的 EntryPath。 */
+  private static EntryPath normalizeOpenTurn(
       HarnessStore.Transaction tx, EntryPath path, Instant now) {
     List<Entry> suffix = HistoryNormalization.suffix(path, tx::nextId, now);
     for (Entry entry : suffix) {
@@ -562,6 +555,17 @@ final class StopControl {
       EntryPath path,
       UUID stopRequestId,
       Instant now) {
+    return appendStopBoundaryTurn(
+        tx, thread, path, stopRequestId, now, thread.inputThroughSequence());
+  }
+
+  private static NodeStop appendStopBoundaryTurn(
+      HarnessStore.Transaction tx,
+      ThreadState thread,
+      EntryPath path,
+      UUID stopRequestId,
+      Instant now,
+      long inputThroughSequence) {
     UUID sessionId = path.root().sessionId();
     UUID turnStartId = tx.nextId();
     tx.insertEntry(
@@ -576,7 +580,7 @@ final class StopControl {
     tx.insertEntry(
         new Entry(
             turnEndId, sessionId, barrierId, stoppedTurnEnd(turnStartId, stopRequestId), now));
-    ThreadState stopped = advanceStopped(thread, turnEndId, now);
+    ThreadState stopped = advanceStopped(thread, turnEndId, inputThroughSequence, now);
     tx.updateThread(stopped);
     return new NodeStop(stopped, turnEndId);
   }
@@ -596,10 +600,11 @@ final class StopControl {
     return barrierId;
   }
 
-  /**
-   * open Turn 属于其它 Thread 时本 Thread 既没有自己的 live 执行，也没有本 Thread 自己的停止边界可写（Turn 与停止边界的所有权都归 拥有它的
-   * Thread），因此只把执行控制置为 STOPPED。
-   */
+  private static boolean isOwnedBy(Entry openTurn, UUID threadId) {
+    return openTurn.payload() instanceof TurnStartPayload start
+        && threadId.equals(start.ownerThreadId());
+  }
+
   private static ThreadState touchVersionAsStopped(
       HarnessStore.Transaction tx, ThreadState thread, Instant now) {
     if (thread.executionControl().isStopped()) {
@@ -610,9 +615,8 @@ final class StopControl {
     return stopped;
   }
 
-  private static boolean isOwnedBy(Entry openTurn, UUID threadId) {
-    return openTurn.payload() instanceof TurnStartPayload start
-        && threadId.equals(start.ownerThreadId());
+  private static boolean isForeignOpenTurn(EntryPath path, UUID threadId) {
+    return path.openTurnStart().filter(turn -> !isOwnedBy(turn, threadId)).isPresent();
   }
 
   private static NodeStop stopContinuation(
@@ -698,33 +702,32 @@ final class StopControl {
       HarnessStore.Transaction tx,
       ThreadState thread,
       EntryPath path,
-      ModelInvocation model,
+      DriverStopResult driverStop,
       UUID stopRequestId,
       Instant now) {
-    StreamCheckpoint checkpoint = model.streamCheckpoint();
-    EntryPayload barrier = modelStopBarrier(checkpoint);
-    ModelInvocationError error =
-        new ModelInvocationError(ProviderErrorKind.CANCELLED, CANCELLED_MESSAGE);
-    UUID parentId =
-        ModelAttemptFailureAppender.append(
-            tx, path.root().sessionId(), path.head().id(), model, false);
-    UUID barrierId = tx.nextId();
-    tx.insertEntry(new Entry(barrierId, path.root().sessionId(), parentId, barrier, now));
-    // attach 转换触发与 ModelAttemptMaterialization 等价的严格校验（failed attempts 与 terminal 结果逐条比对）。
-    ModelInvocation cancelled = model.cancel(error, now).attachResultEntry(barrierId, now);
-    tx.updateModelInvocation(cancelled);
+    Entry turn =
+        path.openTurnStart()
+            .orElseThrow(() -> new IllegalStateException("model stop requires an open TURN_START"));
+    UUID barrierId = driverStop.barrierEntryId();
+    if (barrierId == null) {
+      if (!isOwnedBy(turn, thread.id())
+          || HistoryNormalization.stopClose(path, turn)
+              != HistoryNormalization.StopClose.REUSE_ASSISTANT_RESULT) {
+        throw new IllegalStateException(
+            "active driver generation must provide a stop barrier for thread " + thread.id());
+      }
+      barrierId = path.head().id();
+    }
     UUID turnEndId = tx.nextId();
     tx.insertEntry(
         new Entry(
             turnEndId,
             path.root().sessionId(),
             barrierId,
-            stoppedTurnEnd(model.turnStartEntryId(), stopRequestId),
+            stoppedTurnEnd(turn.id(), stopRequestId),
             now));
     ThreadState stopped = advanceStopped(thread, turnEndId, now);
     tx.updateThread(stopped);
-    // 严格校验通过后同事务删除 ModelInvocation（closed turn 不保留 Invocation；Work 由调用方删除）。
-    tx.deleteModelInvocation(model.id());
     return new NodeStop(stopped, turnEndId);
   }
 
@@ -732,11 +735,14 @@ final class StopControl {
       HarnessStore.Transaction tx,
       ThreadState thread,
       EntryPath path,
+      LockedDriverState driverState,
       ThreadContext.ToolActive active,
       UUID stopRequestId,
       Instant now) {
-    // 删除 parent 前的严格物化校验：attached Assistant/result 与已物化失败 attempt 前缀必须与 immutable 事实一致。
-    ModelAttemptMaterialization.validateAttached(active.model(), path);
+    UUID turnStartEntryId =
+        path.openTurnStart()
+            .orElseThrow(() -> new IllegalStateException("tool stop requires an open TURN_START"))
+            .id();
     UUID parentId = active.assistant().id();
     for (ToolInvocation sibling : active.siblings()) {
       ToolInvocation terminal =
@@ -747,8 +753,7 @@ final class StopControl {
             case SUCCEEDED, FAILED, CANCELLED, UNKNOWN -> sibling;
           };
       ToolOutcomeAppender.Applied applied =
-          ToolOutcomeAppender.append(
-              tx, path.root().sessionId(), parentId, terminal, now, toolResultHistoryMaterializer);
+          ToolOutcomeAppender.append(tx, path.root().sessionId(), parentId, terminal, now);
       parentId = applied.headEntryId();
     }
     UUID turnEndId = tx.nextId();
@@ -757,18 +762,21 @@ final class StopControl {
             turnEndId,
             path.root().sessionId(),
             parentId,
-            stoppedTurnEnd(active.model().turnStartEntryId(), stopRequestId),
+            stoppedTurnEnd(turnStartEntryId, stopRequestId),
             now));
     ThreadState stopped = advanceStopped(thread, turnEndId, now);
     tx.updateThread(stopped);
-    // children 先于 parent 删除（FK 顺序）；Work 由调用方删除。
     tx.deleteToolInvocationsByIds(active.siblings().stream().map(ToolInvocation::id).toList());
-    tx.deleteModelInvocation(active.model().id());
     return new NodeStop(stopped, turnEndId);
   }
 
   /** 把 Thread 置为 STOPPED 并推进 head；输入水位、nextCommandSequence 不变，version 严格 +1。 */
   private static ThreadState advanceStopped(ThreadState thread, UUID headEntryId, Instant now) {
+    return advanceStopped(thread, headEntryId, thread.inputThroughSequence(), now);
+  }
+
+  private static ThreadState advanceStopped(
+      ThreadState thread, UUID headEntryId, long inputThroughSequence, Instant now) {
     ThreadState next =
         new ThreadState(
             thread.id(),
@@ -782,7 +790,7 @@ final class StopControl {
             thread.spawnTrigger(),
             thread.constraints(),
             ThreadExecutionControl.STOPPED,
-            thread.inputThroughSequence(),
+            inputThroughSequence,
             thread.nextCommandSequence(),
             Math.addExact(thread.version(), 1L),
             thread.createdAt(),
@@ -818,7 +826,21 @@ final class StopControl {
     if (notifications.isEmpty()) {
       return thread;
     }
-    UUID head = thread.headEntryId();
+    MaterializedNotifications materialized =
+        appendQueuedNotifications(tx, thread, thread.headEntryId(), notifications, now);
+    ThreadState advanced =
+        thread.advanceHeadAndInputThroughSequence(
+            materialized.headEntryId(), materialized.inputThroughSequence(), now);
+    tx.updateThread(advanced);
+    return advanced;
+  }
+
+  private static MaterializedNotifications appendQueuedNotifications(
+      HarnessStore.Transaction tx,
+      ThreadState thread,
+      UUID head,
+      List<ThreadCommand> notifications,
+      Instant now) {
     long inputThroughSequence = thread.inputThroughSequence();
     List<ThreadCommand> applied = new ArrayList<>(notifications.size());
     for (ThreadCommand command : notifications) {
@@ -839,95 +861,105 @@ final class StopControl {
       head = entryId;
       inputThroughSequence = Math.max(inputThroughSequence, command.sequence());
     }
-    tx.updateCommands(applied);
-    ThreadState advanced =
-        thread.advanceHeadAndInputThroughSequence(head, inputThroughSequence, now);
-    tx.updateThread(advanced);
-    return advanced;
+    if (!applied.isEmpty()) {
+      tx.updateCommands(applied);
+    }
+    return new MaterializedNotifications(head, inputThroughSequence);
   }
 
   /**
-   * 提交先于 Stop：把已提交的 terminal ModelInvocation 结果交给共享 {@link ModelOutcomeAppender} 物化进历史（ASSISTANT 结果
-   * + TURN_END，或 tool batch 的 siblings），关闭 turn 时删除 Model 行，并在终止边界结算已应用 Join。返回推进 head 后的
-   * Thread；不产生任何 wake / compaction 计划 （Stop 随后自行收敛该节点）。
+   * 提交先于 Stop：让 Driver 把已提交的 terminal generation 物化进历史（ASSISTANT 结果 + TURN_END，或 tool batch 的
+   * siblings），关闭 turn 时由 Driver 删除私有状态；Stop 随后自行收敛该节点。
    */
   private Materialized materializeTerminalModel(
-      HarnessStore.Transaction tx, ThreadState thread, EntryPath path, ModelInvocation model) {
+      HarnessStore.Transaction tx,
+      ThreadState thread,
+      EntryPath path,
+      LockedDriverState driverState) {
     Instant mutationNow = tx.now();
-    TurnStartPayload turnStart =
-        (TurnStartPayload)
-            path.openTurnStart()
-                .orElseThrow(
-                    () ->
-                        new IllegalStateException(
-                            "terminal model must belong to an open TURN_START"))
-                .payload();
-    ModelOutcomeAppender.Applied applied =
-        modelOutcomeAppender.appendModel(tx, path, model, mutationNow);
-    ThreadState advanced = thread.advanceHead(applied.headEntryId(), mutationNow);
-    tx.updateThread(advanced);
-    // ToolBatch：Model 行被 attach 保留、新 siblings 进入 active Tool phase；其余结果已关闭 turn 且删除 Model 行。
-    return applied.toolPhase()
-        ? new Materialized(
-            advanced,
-            model.attachResultEntry(applied.headEntryId(), mutationNow),
-            applied.toolInvocations(),
-            null,
-            null)
-        : new Materialized(
-            advanced,
-            null,
-            List.of(),
-            applied.terminal() ? applied.headEntryId() : null,
-            applied.finalAnswerEntryId());
+    DriverApplied applied = driver.applyResponse(tx, thread, path, driverState, commit(tx));
+    ThreadState current = tx.findThread(thread.id()).orElseThrow();
+    ThreadState advanced;
+    if (current.headEntryId().equals(applied.headEntryId())) {
+      advanced = current;
+    } else {
+      if (!current.equals(thread)) {
+        throw new IllegalStateException(
+            "driver changed the thread without applying its declared head");
+      }
+      advanced = thread.advanceHead(applied.headEntryId(), mutationNow);
+      tx.updateThread(advanced);
+    }
+    return new Materialized(
+        advanced, applied.terminal() ? applied.headEntryId() : null, applied.finalAnswerEntryId());
   }
 
-  /**
-   * 全部 terminal 的 Tool sibling batch 物化：交给共享 {@link ModelOutcomeAppender} 按 callIndex 追加 ToolResult
-   * 与 COMPLETED TURN_END 并删除行，再推进 head。
-   */
+  /** 全部 terminal 的 Tool sibling batch 物化：公共结果追加后由 Driver 完成附加校验与私有状态清理。 */
   private ThreadState materializeTerminalToolBatch(
       HarnessStore.Transaction tx,
       ThreadState thread,
       EntryPath path,
-      ModelInvocation model,
+      LockedDriverState driverState,
       List<ToolInvocation> siblings) {
     Instant mutationNow = tx.now();
-    ModelOutcomeAppender.Applied applied =
-        modelOutcomeAppender.appendToolBatch(tx, path, model, siblings, mutationNow);
-    ThreadState advanced = thread.advanceHead(applied.headEntryId(), mutationNow);
+    UUID turnStartEntryId =
+        path.openTurnStart()
+            .orElseThrow(() -> new IllegalStateException("tool batch requires an open TURN_START"))
+            .id();
+    UUID parentId = path.head().id();
+    for (ToolInvocation sibling : siblings) {
+      parentId =
+          ToolOutcomeAppender.append(tx, path.root().sessionId(), parentId, sibling, mutationNow)
+              .headEntryId();
+    }
+    UUID turnEndId = tx.nextId();
+    tx.insertEntry(
+        new Entry(
+            turnEndId,
+            path.root().sessionId(),
+            parentId,
+            new TurnEndPayload(turnStartEntryId, TurnEndOutcome.COMPLETED, true, null, null),
+            mutationNow));
+    tx.deleteToolInvocationsByIds(siblings.stream().map(ToolInvocation::id).toList());
+    ThreadState advanced = thread.advanceHead(turnEndId, mutationNow);
     tx.updateThread(advanced);
+    driver.completeToolBatch(tx, thread, path, driverState, siblings, commit(tx));
     return advanced;
   }
 
-  /** Model 结果恰为当前 ASSISTANT head 时锁定其 Tool siblings；否则返回空。 */
+  /** Assistant head 上属于本 Thread 的 Tool siblings；共享的 foreign turn 不得锁定原 owner 的工具。 */
   private static List<ToolInvocation> loadAssistantSiblings(
-      HarnessStore.Transaction tx, ThreadState thread, EntryPath path, ModelInvocation model) {
-    if (model == null
-        || model.resultEntryId() == null
-        || !model.resultEntryId().equals(thread.headEntryId())
-        || !(path.head().payload() instanceof MessagePayload message)
+      HarnessStore.Transaction tx,
+      ThreadState thread,
+      EntryPath path,
+      LockedDriverState driverState) {
+    Entry semanticHead = path.headIgnoringTrailingControlEntries();
+    if (isForeignOpenTurn(path, thread.id())
+        || (driverState.requestHeadEntryId() != null && !driverState.resultAt(thread.headEntryId()))
+        || !(semanticHead.payload() instanceof MessagePayload message)
         || message.message().role() != AgentMessageRole.ASSISTANT) {
       return List.of();
     }
-    return tx.lockToolInvocationsByAssistantEntryId(path.head().id());
+    return tx.lockToolInvocationsByAssistantEntryId(semanticHead.id());
   }
 
-  private static EntryPayload modelStopBarrier(StreamCheckpoint checkpoint) {
-    if (checkpoint == null) {
-      return new AssistantErrorPayload(new AssistantError("CANCELLED", CANCELLED_MESSAGE), null);
-    }
-    List<AgentMessageContent> contents = new ArrayList<>(2);
-    if (!checkpoint.thinking().isEmpty()) {
-      contents.add(new ThinkingMessageContent(checkpoint.thinking()));
-    }
-    if (!checkpoint.text().isEmpty()) {
-      contents.add(new TextMessageContent(checkpoint.text()));
-    }
-    if (contents.isEmpty()) {
-      return new AssistantErrorPayload(new AssistantError("CANCELLED", CANCELLED_MESSAGE), null);
-    }
-    return new AssistantAbortedPayload(new AgentMessage(AgentMessageRole.ASSISTANT, contents));
+  private static DriverCommit commit(HarnessStore.Transaction tx) {
+    return new DriverCommit() {
+      @Override
+      public UUID nextId() {
+        return tx.nextId();
+      }
+
+      @Override
+      public Instant now() {
+        return tx.now();
+      }
+
+      @Override
+      public void insertEntry(Entry entry) {
+        tx.insertEntry(entry);
+      }
+    };
   }
 
   private static TurnEndPayload stoppedTurnEnd(UUID turnStartEntryId, UUID stopRequestId) {

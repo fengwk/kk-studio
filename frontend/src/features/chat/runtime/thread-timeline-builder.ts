@@ -31,10 +31,10 @@ import { contentText } from '@/features/chat/runtime/thread-timeline/content-uti
 import { createModelAttemptFailureMessage } from '@/features/chat/runtime/thread-timeline/model-attempt-failure'
 import { translate } from '@/shared/i18n'
 import type {
+  HarnessActiveAssistantOutputDTO,
+  HarnessGenerationFailureDTO,
   HarnessSessionEntryDTO,
   HarnessThreadCommandDTO,
-  ModelAttemptFailureDTO,
-  ModelInvocationDTO,
   ToolInvocationDTO,
 } from '@/shared/api/generated/contracts'
 
@@ -61,7 +61,7 @@ function isSuccessfulCompactionPhase(phase: string): boolean {
  * 持久路径的 Entries 是 transcript 的唯一权威来源；
  * 仅 QUEUED USER_MESSAGE 命令会作为可编辑的装饰性 overlay 渲染；NOTIFICATION 等系统事实
  * 与 CUSTOM_MESSAGE 编排产物只出现在持久 transcript 中，不进入可编辑队列、草稿与上下键历史；
- * 活动 ModelInvocation 的 checkpoint/stream 以及 ToolInvocation 的 partial，作为
+ * 活动 generation 的 typed activeAssistantOutput 以及 ToolInvocation 的 partial，作为
  * 瞬态 overlay 渲染，直到对应的持久 Entry 到达为止。
  */
 export function buildThreadTimeline(
@@ -70,8 +70,8 @@ export function buildThreadTimeline(
   toolInvocations: ToolInvocationDTO[],
   modelStream: RealtimeModelStream | null = null,
   toolStreams: ReadonlyMap<string, RealtimeToolStream> | null = null,
-  modelAttemptFailures: readonly ModelAttemptFailureDTO[] = [],
-  modelInvocation: ModelInvocationDTO | null = null,
+  generationFailures: readonly HarnessGenerationFailureDTO[] = [],
+  activeAssistantOutput: HarnessActiveAssistantOutputDTO | null = null,
 ): ThreadTimeline {
   const messages: DialogueMessage[] = []
   const queuedMessages: QueuedThreadMessage[] = []
@@ -155,18 +155,23 @@ export function buildThreadTimeline(
     hasPendingInputs = true
   }
 
-  projectInvocationOverlays(messages, toolInvocations, toolStreams, modelInvocation?.threadId)
+  projectInvocationOverlays(
+    messages,
+    toolInvocations,
+    toolStreams,
+    toolInvocations[0]?.threadId,
+  )
 
   if (!latestTurnIsCompaction) {
-    projectModelAttemptFailures(messages, modelAttemptFailures, modelInvocation)
+    projectGenerationFailures(messages, generationFailures, activeAssistantOutput)
   }
 
   const modelStreamAttemptFailed =
     modelStream != null
-    && modelAttemptFailures.some(
+    && generationFailures.some(
       (failure) =>
-        isProjectableModelAttemptFailure(failure)
-        && failure.modelInvocationId === modelStream.invocationId
+        isProjectableGenerationFailure(failure)
+        && failure.generationId === modelStream.invocationId
         && failure.attempt === modelStream.attempt,
     )
   if (!latestTurnIsCompaction && modelStream != null) {
@@ -174,7 +179,7 @@ export function buildThreadTimeline(
       messages,
       modelStream,
       modelStreamAttemptFailed,
-      modelInvocation,
+      activeAssistantOutput,
     )
   }
 
@@ -185,23 +190,23 @@ export function buildThreadTimeline(
   }
 }
 
-function projectModelAttemptFailures(
+function projectGenerationFailures(
   messages: DialogueMessage[],
-  failures: readonly ModelAttemptFailureDTO[],
-  modelInvocation: ModelInvocationDTO | null,
+  failures: readonly HarnessGenerationFailureDTO[],
+  activeAssistantOutput: HarnessActiveAssistantOutputDTO | null,
 ): void {
   const identities = new Set<string>()
   const orderedFailures = [...failures].sort((left, right) => left.attempt - right.attempt)
   for (const failure of orderedFailures) {
-    if (!isProjectableModelAttemptFailure(failure)) {
+    if (!isProjectableGenerationFailure(failure)) {
       continue
     }
-    const identity = `${failure.modelInvocationId}:${failure.attempt}`
+    const identity = `${failure.generationId}:${failure.attempt}`
     if (identities.has(identity)) {
       continue
     }
     identities.add(identity)
-    const liveRetry = isLiveRetryPending(failure, modelInvocation)
+    const liveRetry = isLiveRetryPending(failure, activeAssistantOutput)
     messages.push(
       createModelAttemptFailureMessage({
         id: `snapshot:model-attempt-failure:${identity}`,
@@ -216,7 +221,7 @@ function projectModelAttemptFailures(
         failedAt: failure.failedAt,
         retryAt: failure.retryAt,
         nextAttempt: failure.attempt + 1,
-        modelInvocationId: liveRetry ? failure.modelInvocationId : undefined,
+        generationId: liveRetry ? failure.generationId : undefined,
         turnStartEntryId: failure.turnStartEntryId,
         requestHeadEntryId: failure.requestHeadEntryId,
       }),
@@ -225,27 +230,28 @@ function projectModelAttemptFailures(
 }
 
 function isLiveRetryPending(
-  failure: ModelAttemptFailureDTO,
-  invocation: ModelInvocationDTO | null,
+  failure: HarnessGenerationFailureDTO,
+  activeAssistantOutput: HarnessActiveAssistantOutputDTO | null,
 ): boolean {
-  return invocation != null
-    && invocation.id === failure.modelInvocationId
-    && invocation.attempt === failure.attempt
-    && invocation.status === 'READY'
+  return activeAssistantOutput != null
+    && activeAssistantOutput.generationId === failure.generationId
+    && activeAssistantOutput.attempt === failure.attempt
+    && activeAssistantOutput.status === 'READY'
 }
 
 function projectModelStream(
   messages: DialogueMessage[],
   stream: RealtimeModelStream,
   attemptAlreadyFailed: boolean,
-  invocation: ModelInvocationDTO | null,
+  activeAssistantOutput: HarnessActiveAssistantOutputDTO | null,
 ): void {
   const id = `realtime:model:${stream.invocationId}:${stream.attempt}`
   if (stream.status === 'error') {
     const errorText =
       stream.errorText || translate('ai.runtime.entry.assistantRequestFailed')
     const cancelled =
-      invocation?.id === stream.invocationId && invocation.status === 'CANCELLED'
+      activeAssistantOutput?.generationId === stream.invocationId
+      && activeAssistantOutput.status === 'CANCELLED'
     if (cancelled && (stream.text || stream.thinking)) {
       messages.push({
         id,
@@ -337,9 +343,9 @@ function projectStreamingToolCalls(messages: DialogueMessage[], stream: Realtime
   }
 }
 
-function isProjectableModelAttemptFailure(failure: ModelAttemptFailureDTO): boolean {
+function isProjectableGenerationFailure(failure: HarnessGenerationFailureDTO): boolean {
   return Boolean(
-    failure.modelInvocationId
+    failure.generationId
     && failure.turnStartEntryId
     && failure.requestHeadEntryId
     && Number.isSafeInteger(failure.attempt)

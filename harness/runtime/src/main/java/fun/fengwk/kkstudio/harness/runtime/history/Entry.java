@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.history;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayState;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 
 import java.time.Instant;

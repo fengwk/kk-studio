@@ -497,7 +497,7 @@ ps -eo pid,args | grep -E '\.workspace/|mvn|surefire|playwright' | grep -v grep
 ### 16.3 实际读到的范围
 
 - 用 `git diff a300679d9 7ba0f167e -- <path>` 逐文件读完的生产差异：harness/runtime 29 个文件、harness/infra 2、schema V1、
-  harness/environment 6、harness/provider 4、platform/runtime 7、share 3、web 2、daemon/src 13（`config.ts` 一行版本号除外）。
+  harness/environment 6、harness/model（当时名为 provider）4、platform/runtime 7、share 3、web 2、daemon/src 13（`config.ts` 一行版本号除外）。
   大 diff 分窗读取：`EnvironmentDaemonServer` 603 行分 3 窗、provider 347 行分 2 窗；输出没有截断标记。
 - 前端生产 29 个文件全部读完（usage 解析/合并、三态展示、STOPPED 未确认提示、排队补充消息、task 回执只读
   `details.kind == task.accepted`、生成契约；2 个 CSS 文件与 i18n `catalogs/chat.ts`：状态文案 key 全部静态引用且有定义，旧细分状态 key 与
@@ -582,7 +582,7 @@ journal 去重。于是一次控制连接抖动就会取消正在运行的命令
 
 **H3 `openAiChatIncludeUsage=false` 与强制 usage 冲突（配置缺陷，需用户决策）。** 四个累积器现在缺少完整 usage 即
 `INVALID_RESPONSE: missing complete usage`；但 `OpenAiChatConfiguration` 仍接受 `openAiChatIncludeUsage=false`，
-`docs/modules/harness-provider.md` 也仍把它列为可配置项。设为 false 时编码器仍发送 `stream_options`（`include_usage: false`，
+`docs/modules/harness-model.md` 也仍把它列为可配置项。设为 false 时编码器仍发送 `stream_options`（`include_usage: false`，
 `OpenAiChatRequestEncoder`），所以它也帮不了拒绝 `stream_options` 的上游；只有无条件返回 usage 的上游还能工作。需要决定：删除该选项
 （运行时恒发 `include_usage=true`，同时决定已有配置里的该字段如何处理），或在配置校验期拒绝 false，并同步配置同步、文档与测试。
 
@@ -716,7 +716,7 @@ invocation 抛 `DaemonProtocolException` 并关闭连接；`MAX_INVOCATION_TOMBS
    `finalAnswerEntryId`。抽成共享函数，两处共用。
 6. **A8：从 store 接口删除 `loadCommandsByThread`。** 生产代码已不调用（16.4 第 8 项）；约 40 处测试改用测试辅助方法。
 7. **A9：`harness_execution_exit` 的保留策略。** 目前只有深删会清理这些行。与 H1 一起决定清理时机，或写入文档。
-8. **H3：删除 `openAiChatIncludeUsage`。** 编码器恒发 `include_usage=true`；同步配置同步、`docs/modules/harness-provider.md` 与测试，并决定已有配置中该字段的处理方式。
+8. **H3：删除 `openAiChatIncludeUsage`。** 编码器恒发 `include_usage=true`；同步配置同步、`docs/modules/harness-model.md` 与测试，并决定已有配置中该字段的处理方式。
 9. **M1：** 在文档与发布说明写明 usage 现在是必需字段，上游缺失即调用失败；发布前核对生产 Provider。
 10. **A3 / A4：定价条件文案改为单一静态映射。** 根因（16.4 第 2、3 项的源头）：i18n key 由字符串动态拼接，编译器查不到缺失的 key。在
     `AiModelPricingEditor` 用一张 `CONDITION_LABELS` 表覆盖全部条件文案，并把 `translate` 的参数收紧为目录 key 联合类型（约 19 处动态 key 需改写）。

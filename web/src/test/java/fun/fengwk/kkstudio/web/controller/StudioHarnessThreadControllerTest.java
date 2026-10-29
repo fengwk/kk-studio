@@ -39,13 +39,15 @@ import fun.fengwk.kkstudio.harness.runtime.StopResult;
 import fun.fengwk.kkstudio.harness.runtime.StoppedThreadReceipt;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.ToolApprovalCommand;
+import fun.fengwk.kkstudio.harness.runtime.driver.GenerationProjection;
+import fun.fengwk.kkstudio.harness.runtime.driver.GenerationStatus;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.interaction.EnvironmentToolWait;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLiveState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugService;
 import fun.fengwk.kkstudio.platform.harness.thread.query.UsageCostProjectionService;
@@ -150,25 +152,31 @@ class StudioHarnessThreadControllerTest {
   /** sidecar 一次批量回填所有调用；默认 HTTP mapper 的 ISO Instant 语义不需字段专属转换。 */
   @Test
   void snapshotBatchFillsEnvironmentNamesAndDeadlines() throws Exception {
-    ModelInvocation model = mock(ModelInvocation.class);
-    when(model.id()).thenReturn(id(10));
-    when(model.threadId()).thenReturn(id(1));
-    when(model.turnStartEntryId()).thenReturn(id(2));
-    when(model.requestHeadEntryId()).thenReturn(id(3));
-    when(model.resultEntryId()).thenReturn(id(4));
-    when(model.status()).thenReturn(ModelInvocationStatus.SUCCEEDED);
-    when(model.result()).thenReturn(HarnessRuntimeTestFixtures.toolCallResponse());
+    GenerationProjection generation =
+        new GenerationProjection(
+            id(10),
+            id(2),
+            id(3),
+            GenerationStatus.SUCCEEDED,
+            1,
+            0L,
+            List.of(new TextMessageContent("answer")),
+            null,
+            id(4),
+            HarnessRuntimeTestFixtures.NOW,
+            HarnessRuntimeTestFixtures.NOW.plusSeconds(1),
+            List.of());
     ThreadSnapshot snapshot =
         new ThreadSnapshot(
             HarnessRuntimeTestFixtures.activeThread(id(1), id(4)),
             new EntryPath(
                 List.of(
                     HarnessRuntimeTestFixtures.rootEntry(),
-                        HarnessRuntimeTestFixtures.turnStartEntry(),
+                    HarnessRuntimeTestFixtures.turnStartEntry(id(1)),
                     HarnessRuntimeTestFixtures.userMessageEntry(),
-                        HarnessRuntimeTestFixtures.assistantEntry())),
+                    HarnessRuntimeTestFixtures.assistantEntry())),
             List.of(),
-            model,
+            generation,
             List.of(
                 HarnessRuntimeTestFixtures.waitingApprovalTool()
                     .decideApproval(
@@ -178,7 +186,7 @@ class StudioHarnessThreadControllerTest {
                         null,
                         Instant.parse("2026-10-08T10:00:00Z"),
                         Instant.parse("2026-10-08T10:00:00Z"))),
-            List.of(),
+            ThreadLiveState.TOOL_ACTIVE,
             List.of(),
             0,
             false,

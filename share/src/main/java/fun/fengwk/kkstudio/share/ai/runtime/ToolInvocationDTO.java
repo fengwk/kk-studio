@@ -20,13 +20,16 @@ public class ToolInvocationDTO {
   /** Invocation 主键：canonical UUID string。 */
   private String id;
 
-  /** 所属 ModelInvocation 主键：canonical UUID string。 */
-  private String modelInvocationId;
+  /** 所属 Thread 主键：canonical UUID string。 */
+  private String threadId;
+
+  /** 所属 TurnStart Entry 主键：canonical UUID string。 */
+  private String turnStartEntryId;
 
   /** 携带 tool calls 的 ASSISTANT Message Entry 主键：canonical UUID string。 */
   private String assistantEntryId;
 
-  /** 在同一 Model 结果 tool calls 中的下标（非负整数，0..N-1 连续前缀）。 */
+  /** 在所属 Assistant 结果 tool calls 中的下标（非负整数，0..N-1 连续前缀）。 */
   private Integer callIndex;
 
   /**

@@ -15,40 +15,41 @@ import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.CancelledThreadInput;
 import fun.fengwk.kkstudio.harness.runtime.CompactThreadResult;
 import fun.fengwk.kkstudio.harness.runtime.ManualCompactionAvailability;
-import fun.fengwk.kkstudio.harness.runtime.ModelAttemptFailureProjection;
 import fun.fengwk.kkstudio.harness.runtime.StopResult;
 import fun.fengwk.kkstudio.harness.runtime.StoppedThreadReceipt;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.driver.FailureProjection;
+import fun.fengwk.kkstudio.harness.runtime.driver.GenerationProjection;
+import fun.fengwk.kkstudio.harness.runtime.driver.GenerationStatus;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.GoalSetting;
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolApprovalJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.StreamCheckpoint;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderResponseJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLiveState;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
@@ -62,6 +63,8 @@ import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessAcceptedCommandsDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessActiveAssistantOutputDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessAgentMessageContentDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionEntryDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessStoppedThreadReceiptDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCommandDTO;
@@ -71,7 +74,6 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadSnapshotDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadStopResultDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadTreeNodeDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessUsageCostDTO;
-import fun.fengwk.kkstudio.share.ai.runtime.ModelInvocationDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.ToolInvocationDTO;
 
 import java.time.Duration;
@@ -125,13 +127,13 @@ class HarnessRuntimeResponseMapperTest {
             List.of(),
             null,
             List.of(),
-            List.of(),
+            ThreadLiveState.IDLE_OR_HISTORICAL,
             List.of(),
             1,
             false,
             List.of(),
             false);
-    ThreadSnapshot running = modelSnapshot(ModelInvocationStatus.RUNNING, List.of());
+    ThreadSnapshot running = modelSnapshot(GenerationStatus.RUNNING);
 
     Map<ThreadRuntimeStatus, ThreadSnapshot> cases = new LinkedHashMap<>();
     cases.put(ThreadRuntimeStatus.IDLE, idle);
@@ -162,7 +164,7 @@ class HarnessRuntimeResponseMapperTest {
             List.of(),
             null,
             List.of(),
-            List.of(),
+            ThreadLiveState.IDLE_OR_HISTORICAL,
             List.of(),
             1,
             false,
@@ -257,49 +259,62 @@ class HarnessRuntimeResponseMapperTest {
   }
 
   @Test
-  void projectsModelInvocationCodecFieldsByLifecycleShape() {
-    // RUNNING/SUCCEEDED/FAILED 三种合法形状共同覆盖 checkpoint/result/error/resultEntry nullable 契约。
-    StreamCheckpoint checkpoint = new StreamCheckpoint(1, 2, "partial", "thinking");
-    ModelInvocation running =
-        modelInvocation(ModelInvocationStatus.RUNNING, checkpoint, null, null, null, 1, id(3));
-    ModelInvocationDTO runningDto = HarnessRuntimeResponseMapper.toModelInvocationDto(running);
+  void projectsActiveAssistantOutputTypedContentErrorAndResultEntry() {
+    // RUNNING/SUCCEEDED/FAILED 三种合法形状共同覆盖 contents/sequence/error/resultEntry 契约。
+    GenerationProjection running =
+        generation(
+            GenerationStatus.RUNNING,
+            1,
+            7L,
+            List.of(new TextMessageContent("partial"), new ThinkingMessageContent("thinking")),
+            null,
+            null,
+            List.of());
+    HarnessActiveAssistantOutputDTO runningDto =
+        HarnessRuntimeResponseMapper.toActiveAssistantOutputDto(running);
+    assertEquals(idText(10), runningDto.getGenerationId());
+    assertEquals(idText(2), runningDto.getTurnStartEntryId());
+    assertEquals(idText(3), runningDto.getRequestHeadEntryId());
+    assertEquals("RUNNING", runningDto.getStatus());
+    assertEquals(1, runningDto.getAttempt());
+    assertEquals("7", runningDto.getSequence());
     assertEquals(
-        checkpoint,
-        StrictJson.standard()
-            .read(runningDto.getStreamCheckpointJson(), StreamCheckpoint.class, "checkpoint"));
-    assertNull(runningDto.getResultJson());
-    assertNull(runningDto.getErrorJson());
+        List.of("text", "thinking"),
+        runningDto.getContents().stream().map(HarnessAgentMessageContentDTO::getType).toList());
+    assertEquals("partial", runningDto.getContents().get(0).getText());
+    assertEquals("thinking", runningDto.getContents().get(1).getText());
+    assertNull(runningDto.getError());
     assertNull(runningDto.getResultEntryId());
+    assertEquals(NOW, runningDto.getCreateTime());
+    assertEquals(NOW.plusSeconds(1), runningDto.getUpdateTime());
 
-    ProviderResponse result = fullProviderResponse();
-    ModelInvocation succeeded =
-        modelInvocation(ModelInvocationStatus.SUCCEEDED, null, result, null, id(4), 1, id(3));
-    ModelInvocationDTO succeededDto = HarnessRuntimeResponseMapper.toModelInvocationDto(succeeded);
-    assertEquals(result, new ProviderResponseJsonCodec().decode(succeededDto.getResultJson()));
+    GenerationProjection succeeded =
+        generation(
+            GenerationStatus.SUCCEEDED,
+            2,
+            8L,
+            List.of(new TextMessageContent("answer")),
+            null,
+            id(4),
+            List.of());
+    HarnessActiveAssistantOutputDTO succeededDto =
+        HarnessRuntimeResponseMapper.toActiveAssistantOutputDto(succeeded);
+    assertEquals("SUCCEEDED", succeededDto.getStatus());
+    assertEquals("8", succeededDto.getSequence());
+    assertEquals("answer", succeededDto.getContents().getFirst().getText());
     assertEquals(idText(4), succeededDto.getResultEntryId());
-    assertNull(succeededDto.getStreamCheckpointJson());
-    assertNull(succeededDto.getErrorJson());
+    assertNull(succeededDto.getError());
 
-    ModelInvocationError error =
-        new ModelInvocationError(ProviderErrorKind.TRANSIENT, "provider unavailable");
-    ModelInvocation failed =
-        modelInvocation(ModelInvocationStatus.FAILED, null, null, error, null, 1, id(3));
-    ModelInvocationDTO failedDto = HarnessRuntimeResponseMapper.toModelInvocationDto(failed);
-    assertEquals(
-        error,
-        StrictJson.standard().read(failedDto.getErrorJson(), ModelInvocationError.class, "error"));
-    assertNull(failedDto.getStreamCheckpointJson());
-    assertNull(failedDto.getResultJson());
-    assertNull(failedDto.getResultEntryId());
-
-    assertEquals(idText(10), failedDto.getId());
-    assertEquals(idText(1), failedDto.getThreadId());
-    assertEquals(idText(2), failedDto.getTurnStartEntryId());
-    assertEquals(idText(3), failedDto.getRequestHeadEntryId());
+    AssistantError error = new AssistantError("TRANSIENT", "provider unavailable");
+    GenerationProjection failed =
+        generation(GenerationStatus.FAILED, 3, 9L, List.of(), error, null, List.of());
+    HarnessActiveAssistantOutputDTO failedDto =
+        HarnessRuntimeResponseMapper.toActiveAssistantOutputDto(failed);
     assertEquals("FAILED", failedDto.getStatus());
-    assertEquals(1, failedDto.getAttempt());
-    assertEquals(NOW, failedDto.getCreateTime());
-    assertEquals(NOW.plusSeconds(1), failedDto.getUpdateTime());
+    assertEquals("TRANSIENT", failedDto.getError().getCode());
+    assertEquals("provider unavailable", failedDto.getError().getMessage());
+    assertTrue(failedDto.getContents().isEmpty());
+    assertNull(failedDto.getResultEntryId());
   }
 
   @Test
@@ -340,7 +355,8 @@ class HarnessRuntimeResponseMapperTest {
         error,
         StrictJson.standard().read(unboundDto.getErrorJson(), ToolInvocationError.class, "error"));
     assertEquals(idText(100), unboundDto.getId());
-    assertEquals(idText(10), unboundDto.getModelInvocationId());
+    assertEquals(idText(10), unboundDto.getThreadId());
+    assertEquals(idText(11), unboundDto.getTurnStartEntryId());
     assertEquals(idText(4), unboundDto.getAssistantEntryId());
     assertEquals(0, unboundDto.getCallIndex());
     assertEquals("call-1", unboundDto.getToolCallId());
@@ -351,31 +367,20 @@ class HarnessRuntimeResponseMapperTest {
 
   @Test
   void projectsModelSnapshotQueuesFailuresAndDisabledCompaction() {
-    // Model phase snapshot 必须按稳定顺序返回 entries/queue/checkpoint/failed attempts。
-    ModelInvocation model =
-        modelInvocation(
-            ModelInvocationStatus.RUNNING,
-            new StreamCheckpoint(1, 4, "partial", ""),
-            null,
-            null,
-            null,
-            1,
-            id(3));
-    ModelAttemptFailureProjection failure =
-        new ModelAttemptFailureProjection(
-            id(10),
-            id(2),
-            id(3),
+    // Model phase snapshot 必须按稳定顺序返回 entries/queue/active output/failed attempts。
+    FailureProjection failure =
+        new FailureProjection(
             1,
             3,
             "first partial",
             "first thought",
-            new ModelInvocationError(ProviderErrorKind.TRANSIENT, "retry"),
+            ProviderErrorKind.TRANSIENT.name(),
+            "retry",
             NOW,
             NOW.plusSeconds(2));
     ThreadSnapshot snapshot =
         modelSnapshot(
-            model,
+            GenerationStatus.RUNNING,
             List.of(HarnessRuntimeTestFixtures.queuedUserMessageCommand()),
             List.of(failure));
 
@@ -400,14 +405,21 @@ class HarnessRuntimeResponseMapperTest {
     assertNull(dto.getEntries().get(0).getUsageCost());
     assertNull(dto.getEntries().get(1).getUsageCost());
     assertEquals(1, dto.getQueuedCommands().size());
-    assertEquals("RUNNING", dto.getModelInvocation().getStatus());
+    assertEquals("RUNNING", dto.getActiveAssistantOutput().getStatus());
+    assertEquals("partial", dto.getActiveAssistantOutput().getContents().getFirst().getText());
     assertTrue(dto.getToolInvocations().isEmpty());
-    assertEquals(1, dto.getModelAttemptFailures().size());
-    assertEquals("3", dto.getModelAttemptFailures().getFirst().getSequence());
-    assertEquals("TRANSIENT", dto.getModelAttemptFailures().getFirst().getErrorCode());
-    assertEquals("retry", dto.getModelAttemptFailures().getFirst().getErrorMessage());
-    assertEquals(NOW, dto.getModelAttemptFailures().getFirst().getFailedAt());
-    assertEquals(NOW.plusSeconds(2), dto.getModelAttemptFailures().getFirst().getRetryAt());
+    assertEquals(1, dto.getGenerationFailures().size());
+    assertEquals(idText(10), dto.getGenerationFailures().getFirst().getGenerationId());
+    assertEquals(idText(2), dto.getGenerationFailures().getFirst().getTurnStartEntryId());
+    assertEquals(idText(3), dto.getGenerationFailures().getFirst().getRequestHeadEntryId());
+    assertEquals(1, dto.getGenerationFailures().getFirst().getAttempt());
+    assertEquals("3", dto.getGenerationFailures().getFirst().getSequence());
+    assertEquals("first partial", dto.getGenerationFailures().getFirst().getText());
+    assertEquals("first thought", dto.getGenerationFailures().getFirst().getThinking());
+    assertEquals("TRANSIENT", dto.getGenerationFailures().getFirst().getErrorCode());
+    assertEquals("retry", dto.getGenerationFailures().getFirst().getErrorMessage());
+    assertEquals(NOW, dto.getGenerationFailures().getFirst().getFailedAt());
+    assertEquals(NOW.plusSeconds(2), dto.getGenerationFailures().getFirst().getRetryAt());
     assertFalse(dto.getManualCompaction().getAvailable());
     assertEquals("THREAD_BUSY", dto.getManualCompaction().getDisabledReason());
   }
@@ -436,10 +448,10 @@ class HarnessRuntimeResponseMapperTest {
             snapshot, ManualCompactionAvailability.enabled(), Map.of());
 
     assertEquals(4, dto.getEntries().size());
-    assertEquals("SUCCEEDED", dto.getModelInvocation().getStatus());
+    assertEquals("SUCCEEDED", dto.getActiveAssistantOutput().getStatus());
     assertEquals(1, dto.getToolInvocations().size());
     assertEquals("WAITING_APPROVAL", dto.getToolInvocations().getFirst().getStatus());
-    assertTrue(dto.getModelAttemptFailures().isEmpty());
+    assertTrue(dto.getGenerationFailures().isEmpty());
     assertTrue(dto.getManualCompaction().getAvailable());
     assertNull(dto.getManualCompaction().getDisabledReason());
   }
@@ -565,7 +577,7 @@ class HarnessRuntimeResponseMapperTest {
             List.of(),
             null,
             List.of(),
-            List.of(),
+            ThreadLiveState.IDLE_OR_HISTORICAL,
             List.of(receipt),
             0,
             false,
@@ -625,7 +637,7 @@ class HarnessRuntimeResponseMapperTest {
         List.of(),
         null,
         List.of(),
-        List.of(),
+        ThreadLiveState.IDLE_OR_HISTORICAL,
         List.of(),
         0,
         false,
@@ -633,31 +645,39 @@ class HarnessRuntimeResponseMapperTest {
         false);
   }
 
-  private static ThreadSnapshot modelSnapshot(
-      ModelInvocationStatus status, List<ModelAttemptFailureProjection> failures) {
-    return modelSnapshot(
-        modelInvocation(status, null, null, terminalError(status), null, attempt(status), id(3)),
-        List.of(),
-        failures);
+  private static ThreadSnapshot modelSnapshot(GenerationStatus status) {
+    return modelSnapshot(status, List.of(), List.of());
   }
 
   private static ThreadSnapshot modelSnapshot(
-      ModelInvocation model,
-      List<ThreadCommand> queued,
-      List<ModelAttemptFailureProjection> failures) {
+      GenerationStatus status, List<ThreadCommand> queued, List<FailureProjection> failures) {
+    return modelSnapshot(
+        generation(
+            status,
+            attempt(status),
+            4L,
+            List.of(new TextMessageContent("partial")),
+            terminalError(status),
+            null,
+            failures),
+        queued);
+  }
+
+  private static ThreadSnapshot modelSnapshot(
+      GenerationProjection generation, List<ThreadCommand> queued) {
     EntryPath path =
         new EntryPath(
             List.of(
                 HarnessRuntimeTestFixtures.rootEntry(),
-                HarnessRuntimeTestFixtures.turnStartEntry(),
+                turnStartEntryForThread(id(1)),
                 HarnessRuntimeTestFixtures.userMessageEntry()));
     return new ThreadSnapshot(
-        HarnessRuntimeTestFixtures.activeThread(model.threadId(), id(3)),
+        HarnessRuntimeTestFixtures.activeThread(id(1), id(3)),
         path,
         queued,
-        model,
+        generation,
         List.of(),
-        failures,
+        ThreadLiveState.DRIVER_ACTIVE,
         List.of(),
         0,
         false,
@@ -666,15 +686,15 @@ class HarnessRuntimeResponseMapperTest {
   }
 
   private static ThreadSnapshot toolSnapshot(ToolInvocationStatus status) {
-    ModelInvocation model =
-        modelInvocation(
-            ModelInvocationStatus.SUCCEEDED,
-            null,
-            HarnessRuntimeTestFixtures.toolCallResponse(),
+    GenerationProjection generation =
+        generation(
+            GenerationStatus.SUCCEEDED,
+            1,
+            5L,
+            List.of(new TextMessageContent("answer")),
             null,
             id(4),
-            1,
-            id(3));
+            List.of());
     ToolInvocation tool =
         toolInvocation(
             status,
@@ -687,16 +707,16 @@ class HarnessRuntimeResponseMapperTest {
         new EntryPath(
             List.of(
                 HarnessRuntimeTestFixtures.rootEntry(),
-                HarnessRuntimeTestFixtures.turnStartEntry(),
+                turnStartEntryForThread(id(1)),
                 HarnessRuntimeTestFixtures.userMessageEntry(),
                 HarnessRuntimeTestFixtures.assistantEntry()));
     return new ThreadSnapshot(
-        HarnessRuntimeTestFixtures.activeThread(model.threadId(), id(4)),
+        HarnessRuntimeTestFixtures.activeThread(id(1), id(4)),
         path,
         List.of(),
-        model,
+        generation,
         List.of(tool),
-        List.of(),
+        ThreadLiveState.TOOL_ACTIVE,
         List.of(),
         0,
         false,
@@ -704,28 +724,38 @@ class HarnessRuntimeResponseMapperTest {
         false);
   }
 
-  private static ModelInvocation modelInvocation(
-      ModelInvocationStatus status,
-      StreamCheckpoint checkpoint,
-      ProviderResponse result,
-      ModelInvocationError error,
-      UUID resultEntryId,
+  private static GenerationProjection generation(
+      GenerationStatus status,
       int attempt,
-      UUID requestHeadEntryId) {
-    ModelInvocation invocation = mock(ModelInvocation.class);
-    when(invocation.id()).thenReturn(id(10));
-    when(invocation.threadId()).thenReturn(id(1));
-    when(invocation.turnStartEntryId()).thenReturn(id(2));
-    when(invocation.requestHeadEntryId()).thenReturn(requestHeadEntryId);
-    when(invocation.status()).thenReturn(status);
-    when(invocation.attempt()).thenReturn(attempt);
-    when(invocation.streamCheckpoint()).thenReturn(checkpoint);
-    when(invocation.result()).thenReturn(result);
-    when(invocation.error()).thenReturn(error);
-    when(invocation.resultEntryId()).thenReturn(resultEntryId);
-    when(invocation.createdAt()).thenReturn(NOW);
-    when(invocation.updatedAt()).thenReturn(NOW.plusSeconds(1));
-    return invocation;
+      long sequence,
+      List<AgentMessageContent> outputContents,
+      AssistantError error,
+      UUID resultEntryId,
+      List<FailureProjection> failures) {
+    return new GenerationProjection(
+        id(10),
+        id(2),
+        id(3),
+        status,
+        attempt,
+        sequence,
+        outputContents,
+        error,
+        resultEntryId,
+        NOW,
+        NOW.plusSeconds(1),
+        failures);
+  }
+
+  /** TURN_START 必须归属本次快照的 Thread；generation 归属校验要求二者一致。 */
+  private static Entry turnStartEntryForThread(UUID threadId) {
+    return new Entry(
+        id(2),
+        id(1),
+        id(1),
+        new TurnStartPayload(
+            TurnStartReason.INPUT, HarnessRuntimeTestFixtures.settings(), threadId),
+        NOW);
   }
 
   private static ToolInvocation toolInvocation(
@@ -737,7 +767,8 @@ class HarnessRuntimeResponseMapperTest {
       int attempt) {
     ToolInvocation invocation = mock(ToolInvocation.class);
     when(invocation.id()).thenReturn(id(100));
-    when(invocation.modelInvocationId()).thenReturn(id(10));
+    when(invocation.threadId()).thenReturn(id(10));
+    when(invocation.turnStartEntryId()).thenReturn(id(11));
     when(invocation.assistantEntryId()).thenReturn(id(4));
     when(invocation.callIndex()).thenReturn(0);
     when(invocation.status()).thenReturn(status);
@@ -750,18 +781,6 @@ class HarnessRuntimeResponseMapperTest {
     when(invocation.createdAt()).thenReturn(NOW);
     when(invocation.updatedAt()).thenReturn(NOW.plusSeconds(1));
     return invocation;
-  }
-
-  private static ProviderResponse fullProviderResponse() {
-    return new ProviderResponse(
-        "answer",
-        "reasoning",
-        List.of(new ProviderToolCall("call-1", "bash", "{\"x\":1}")),
-        GenerationStopReason.COMPLETE,
-        HarnessRuntimeTestFixtures.usage(),
-        "request-1",
-        "priority",
-        "{\"inputTokens\":11}");
   }
 
   private static ToolBinding environmentToolBinding() {
@@ -792,9 +811,9 @@ class HarnessRuntimeResponseMapperTest {
         Duration.ofSeconds(30));
   }
 
-  private static ModelInvocationError terminalError(ModelInvocationStatus status) {
-    return status == ModelInvocationStatus.FAILED
-        ? new ModelInvocationError(ProviderErrorKind.TRANSIENT, "failed")
+  private static AssistantError terminalError(GenerationStatus status) {
+    return status == GenerationStatus.FAILED
+        ? new AssistantError(ProviderErrorKind.TRANSIENT.name(), "failed")
         : null;
   }
 
@@ -818,8 +837,8 @@ class HarnessRuntimeResponseMapperTest {
         : null;
   }
 
-  private static int attempt(ModelInvocationStatus status) {
-    return status == ModelInvocationStatus.READY ? 0 : 1;
+  private static int attempt(GenerationStatus status) {
+    return status == GenerationStatus.READY ? 0 : 1;
   }
 
   private static int attempt(ToolInvocationStatus status) {
@@ -854,9 +873,9 @@ class HarnessRuntimeResponseMapperTest {
         changed,
         snapshot.entryPath(),
         snapshot.queuedCommands(),
-        snapshot.model(),
+        snapshot.generation(),
         snapshot.toolSiblings(),
-        snapshot.modelAttemptFailures(),
+        snapshot.liveState(),
         snapshot.stopReceipts(),
         snapshot.incompleteChildJoins(),
         snapshot.unconsumedAppliedNotifications(),

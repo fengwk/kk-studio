@@ -78,15 +78,24 @@
         </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
+            <artifactId>kk-studio-harness-model</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>fun.fengwk.kk-studio</groupId>
             <artifactId>kk-studio-harness-runtime</artifactId>
         </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
             <artifactId>kk-studio-harness-infra</artifactId>
         </dependency>
+        <!-- Web 是 Builtin Driver 的 Spring 组合根，不依赖 Platform 的传递依赖完成装配。 -->
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
-            <artifactId>kk-studio-harness-runtime</artifactId>
+            <artifactId>kk-studio-harness-agent-builtin</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>fun.fengwk.kk-studio</groupId>
+            <artifactId>kk-studio-harness-agent-builtin</artifactId>
             <version>${kk-studio.version}</version>
             <type>test-jar</type>
             <scope>test</scope>

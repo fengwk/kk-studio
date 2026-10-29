@@ -7,10 +7,12 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.cfg.JsonNodeFeature;
 import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.common.json.StrictJson;
+import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
@@ -18,12 +20,17 @@ import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolBindingJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInputReceipt;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
@@ -63,7 +70,13 @@ public final class HistoryEntryPayloadJsonCodec {
           "contextWindow",
           "maxOutputTokens",
           "compaction",
-          "fallbackModel");
+          "fallbackModel",
+          "capabilities");
+  private static final Set<String> TURN_CAPABILITIES_FIELDS =
+      orderedSet("toolBindings", "subagentBindings", "mediaCapabilities");
+  private static final Set<String> SUBAGENT_BINDING_FIELDS = orderedSet("name", "description");
+  private static final Set<String> TURN_MEDIA_CAPABILITIES_FIELDS =
+      orderedSet("inputModalities", "userModalities", "toolResultModalities");
   private static final Set<String> MESSAGE_FIELDS =
       orderedSet("message", "assistantMetadata", "toolResultMetadata");
   private static final Set<String> CUSTOM_FIELDS =
@@ -204,7 +217,42 @@ public final class HistoryEntryPayloadJsonCodec {
     } else {
       node.set("fallbackModel", HistoryValueCodecs.encodeModelSelection(value.fallbackModel()));
     }
+    if (value.capabilities() == null) {
+      node.putNull("capabilities");
+    } else {
+      node.set("capabilities", encodeTurnCapabilities(value.capabilities()));
+    }
     return node;
+  }
+
+  private static ObjectNode encodeTurnCapabilities(TurnCapabilities value) {
+    ObjectNode node = NODES.objectNode();
+    var tools = node.putArray("toolBindings");
+    for (ToolBinding binding : value.toolBindings()) {
+      tools.add(TOOL_BINDING_CODEC.encodeNode(binding));
+    }
+    var subagents = node.putArray("subagentBindings");
+    for (SubagentBinding binding : value.subagentBindings()) {
+      ObjectNode item = subagents.addObject();
+      item.put("name", binding.name());
+      item.put("description", binding.description());
+    }
+    node.set("mediaCapabilities", encodeTurnMediaCapabilities(value.mediaCapabilities()));
+    return node;
+  }
+
+  private static ObjectNode encodeTurnMediaCapabilities(TurnMediaCapabilities value) {
+    ObjectNode node = NODES.objectNode();
+    node.set("inputModalities", encodeModalities(value.inputModalities()));
+    node.set("userModalities", encodeModalities(value.userModalities()));
+    node.set("toolResultModalities", encodeModalities(value.toolResultModalities()));
+    return node;
+  }
+
+  private static ArrayNode encodeModalities(Set<ModelInputModality> modalities) {
+    ArrayNode array = NODES.arrayNode();
+    modalities.stream().map(Enum::name).sorted().forEach(array::add);
+    return array;
   }
 
   private static ObjectNode encodeMessage(MessagePayload value) {
@@ -413,7 +461,68 @@ public final class HistoryEntryPayloadJsonCodec {
         node.get("fallbackModel").isNull()
             ? null
             : HistoryValueCodecs.decodeModelSelection(
-                node.get("fallbackModel"), "TURN_START.fallbackModel"));
+                node.get("fallbackModel"), "TURN_START.fallbackModel"),
+        node.get("capabilities").isNull()
+            ? null
+            : decodeTurnCapabilities(node.get("capabilities")));
+  }
+
+  private static TurnCapabilities decodeTurnCapabilities(JsonNode value) {
+    ObjectNode node = HistoryValueCodecs.requireObject(value, "TURN_START.capabilities");
+    HistoryValueCodecs.requireExactFields(
+        node, TURN_CAPABILITIES_FIELDS, "TURN_START.capabilities");
+    ArrayNode toolValues =
+        HistoryValueCodecs.requireArray(
+            node.get("toolBindings"), "TURN_START.capabilities.toolBindings");
+    List<ToolBinding> toolBindings = new ArrayList<>(toolValues.size());
+    for (JsonNode toolValue : toolValues) {
+      toolBindings.add(TOOL_BINDING_CODEC.decodeNode(toolValue));
+    }
+    ArrayNode subagentValues =
+        HistoryValueCodecs.requireArray(
+            node.get("subagentBindings"), "TURN_START.capabilities.subagentBindings");
+    List<SubagentBinding> subagentBindings = new ArrayList<>(subagentValues.size());
+    for (JsonNode subagentValue : subagentValues) {
+      String context = "TURN_START.capabilities.subagentBindings[]";
+      ObjectNode subagent = HistoryValueCodecs.requireObject(subagentValue, context);
+      HistoryValueCodecs.requireExactFields(subagent, SUBAGENT_BINDING_FIELDS, context);
+      subagentBindings.add(
+          new SubagentBinding(
+              HistoryValueCodecs.requiredText(subagent, "name", context),
+              HistoryValueCodecs.requiredText(subagent, "description", context)));
+    }
+    return new TurnCapabilities(
+        toolBindings, subagentBindings, decodeTurnMediaCapabilities(node.get("mediaCapabilities")));
+  }
+
+  private static TurnMediaCapabilities decodeTurnMediaCapabilities(JsonNode value) {
+    String context = "TURN_START.capabilities.mediaCapabilities";
+    ObjectNode node = HistoryValueCodecs.requireObject(value, context);
+    HistoryValueCodecs.requireExactFields(node, TURN_MEDIA_CAPABILITIES_FIELDS, context);
+    return new TurnMediaCapabilities(
+        decodeModalities(node.get("inputModalities"), context + ".inputModalities"),
+        decodeModalities(node.get("userModalities"), context + ".userModalities"),
+        decodeModalities(node.get("toolResultModalities"), context + ".toolResultModalities"));
+  }
+
+  private static Set<ModelInputModality> decodeModalities(JsonNode value, String context) {
+    ArrayNode array = HistoryValueCodecs.requireArray(value, context);
+    Set<ModelInputModality> modalities = new LinkedHashSet<>();
+    for (JsonNode item : array) {
+      if (!item.isString()) {
+        throw new IllegalArgumentException(context + "[] must be text");
+      }
+      ModelInputModality modality;
+      try {
+        modality = ModelInputModality.valueOf(item.stringValue());
+      } catch (IllegalArgumentException error) {
+        throw new IllegalArgumentException(context + "[] is not a known modality", error);
+      }
+      if (!modalities.add(modality)) {
+        throw new IllegalArgumentException(context + "[] must not repeat");
+      }
+    }
+    return Set.copyOf(modalities);
   }
 
   private static MessagePayload decodeMessage(JsonNode value) {

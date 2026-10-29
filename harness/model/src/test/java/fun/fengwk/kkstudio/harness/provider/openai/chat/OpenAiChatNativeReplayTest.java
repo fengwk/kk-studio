@@ -1,0 +1,808 @@
+package fun.fengwk.kkstudio.harness.provider.openai.chat;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
+
+import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
+import fun.fengwk.kkstudio.harness.model.ModelInputModality;
+import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
+import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
+import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamHandler;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
+import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
+
+import java.time.Duration;
+import java.util.List;
+import java.util.Set;
+import java.util.UUID;
+
+/**
+ * 测试意图：验证 provider 原生 assistant message 的累积与 replay 语义——delta 的字符串/对象/标量按规则合并，audio 仅回放 id，
+ * function_call、未来字段在 affinity 匹配时经次轮编码器原样 opaque 回放（跨 system/date 前缀变化不丢失），affinity 失配时退回 语义编码，而
+ * malformed payload 或 known 字段与 durable 不一致时无论 affinity 是否匹配都必须 INVALID_REQUEST。
+ */
+class OpenAiChatNativeReplayTest {
+
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
+
+  private OpenAiChatRequestEncoder encoder;
+  private ProviderDescriptor descriptor;
+  private ModelDescriptor modelDesc;
+  private ModelVariant defaultVariant;
+  private ProviderStreamBridge bridge;
+
+  @BeforeEach
+  void setUp() {
+    encoder = new OpenAiChatRequestEncoder();
+    descriptor =
+        new ProviderDescriptor(
+            "openai",
+            ProviderType.OPENAI,
+            "https://api.openai.com/v1",
+            new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)));
+    modelDesc =
+        new ModelDescriptor(
+            "openai", "gpt-4o-audio", "gpt-4o-audio", Set.of(ModelInputModality.TEXT), true, false);
+    defaultVariant = new ModelVariant("default");
+    bridge =
+        new ProviderStreamBridge(
+            new ProviderStreamHandler() {
+              @Override
+              public void onEvent(ProviderStreamEvent event) {}
+
+              @Override
+              public void onComplete(ProviderCompletion completion) {}
+
+              @Override
+              public void onError(ProviderException error) {}
+            });
+  }
+
+  @Test
+  @DisplayName("audio 仅回放 id；function_call / 未来字段可在次轮原样回放")
+  void replaysProviderNativeAssistantFieldsThroughNextTurn() throws Exception {
+    ProviderMessage turn1User =
+        new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Say hi")));
+    ProviderRequest turn1Req = request(turn1User);
+    OpenAiChatStreamAccumulator accumulator =
+        new OpenAiChatStreamAccumulator(
+            turn1Req, descriptor, OpenAiChatConfiguration.defaults(), bridge);
+    // chunk 级 transport metadata（id/object/created/model/service_tier/usage）不得进入 assistant message
+    accumulator.handleData(
+        """
+        {
+          "id": "c-audio",
+          "object": "chat.completion.chunk",
+          "created": 1758880000,
+          "model": "gpt-4o-audio",
+          "service_tier": "default",
+          "choices": [{
+            "index": 0,
+            "delta": {
+              "role": "assistant",
+              "content": "Hello ",
+              "audio": {"id": "audio_1", "data": "AAA", "transcript": "Hello "},
+              "annotations": [{"type": "url_citation", "url": "https://example.com"}],
+              "function_call": {"name": "legacy_lookup", "arguments": "{\\"q\\":"},
+              "vendor_future_field": {"trace_id": "t-1", "attempt": 1}
+            },
+            "finish_reason": null
+          }]
+        }
+        """);
+    accumulator.handleData(
+        """
+        {
+          "id": "c-audio",
+          "choices": [{
+            "index": 0,
+            "delta": {
+              "content": "world",
+              "audio": {"data": "AAABBB", "transcript": "world", "expires_at": 1758889999},
+              "function_call": {"arguments": "\\"hi\\"}"},
+              "vendor_future_field": {"attempt": 2}
+            },
+            "finish_reason": "stop"
+          }],
+          "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+        }
+        """);
+    accumulator.handleData("[DONE]");
+
+    ProviderCompletion completion = accumulator.finish();
+    assertEquals("Hello world", completion.response().text());
+    assertEquals(GenerationStopReason.COMPLETE, completion.response().stopReason());
+
+    JsonNode payload = completion.replayState().payload();
+    // 字符串增量追加、object 递归合并、标量覆盖
+    assertEquals("Hello world", payload.path("content").asString(""));
+    assertEquals(MAPPER.readTree("{\"id\":\"audio_1\"}"), payload.path("audio"));
+    assertFalse(payload.has("annotations"));
+    assertEquals("legacy_lookup", payload.path("function_call").path("name").asString(""));
+    assertEquals("{\"q\":\"hi\"}", payload.path("function_call").path("arguments").asString(""));
+    assertEquals("t-1", payload.path("vendor_future_field").path("trace_id").asString(""));
+    assertEquals(2, payload.path("vendor_future_field").path("attempt").asInt(0));
+
+    // chunk 级 transport metadata 不进入 assistant message
+    for (String transportField :
+        List.of("id", "object", "created", "model", "service_tier", "usage")) {
+      assertFalse(payload.has(transportField), transportField);
+    }
+
+    // 次轮请求：原生字段与 known 字段一起原样回放到 wire
+    ProviderMessage turn1Asst =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT,
+            List.of(new ProviderTextBlock("Hello world")),
+            completion.replayState());
+    ProviderMessage turn2User =
+        new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Again")));
+    JsonNode wireRoot =
+        MAPPER.readTree(
+            encoder
+                .encode(
+                    request(turn1User, turn1Asst, turn2User),
+                    descriptor,
+                    OpenAiChatConfiguration.defaults())
+                .bodyUtf8Bytes());
+    JsonNode wireAsst = wireRoot.path("messages").get(2);
+    assertEquals("assistant", wireAsst.path("role").asString(""));
+    assertEquals("Hello world", wireAsst.path("content").asString(""));
+    assertEquals(MAPPER.readTree("{\"id\":\"audio_1\"}"), wireAsst.path("audio"));
+    assertFalse(wireAsst.has("annotations"));
+    assertEquals("legacy_lookup", wireAsst.path("function_call").path("name").asString(""));
+    assertEquals("t-1", wireAsst.path("vendor_future_field").path("trace_id").asString(""));
+  }
+
+  /** 测试意图：缺失有效 audio id 的上游响应不能冻结；持久化后篡改为响应 audio 或 annotations 不能进入下一轮请求。 */
+  @Test
+  void rejectsMalformedAudioAndResponseOnlyReplayFields() throws Exception {
+    ProviderMessage user =
+        new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
+    for (String audio : List.of("{}", "{\"id\":\"  \"}", "\"audio_1\"")) {
+      OpenAiChatStreamAccumulator accumulator =
+          new OpenAiChatStreamAccumulator(
+              request(user), descriptor, OpenAiChatConfiguration.defaults(), bridge);
+      accumulator.handleData(
+          "{\"choices\":[{\"delta\":{\"audio\":" + audio + "},\"finish_reason\":\"stop\"}]}");
+      accumulator.handleData("[DONE]");
+      ProviderException error = assertThrows(ProviderException.class, accumulator::finish);
+      assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind());
+    }
+    for (String added :
+        List.of(
+            "\"audio\":{\"id\":\"audio_1\",\"data\":\"AAA\"}",
+            "\"audio\":{\"data\":\"AAA\"}",
+            "\"audio\":null",
+            "\"annotations\":[]",
+            "\"annotations\":null")) {
+      ObjectNode payload =
+          (ObjectNode) MAPPER.readTree("{\"role\":\"assistant\",\"content\":\"Hi\"}");
+      ObjectNode extra = (ObjectNode) MAPPER.readTree("{" + added + "}");
+      extra.properties().forEach(field -> payload.set(field.getKey(), field.getValue()));
+      ProviderMessage assistant =
+          assistant(
+              List.of(new ProviderTextBlock("Hi")),
+              new ProviderReplayState(ProviderReplayFormat.OPENAI_CHAT, modelAffinity(), payload));
+      ProviderException error =
+          assertThrows(
+              ProviderException.class,
+              () ->
+                  encoder.encode(
+                      request(user, assistant), descriptor, OpenAiChatConfiguration.defaults()));
+      assertEquals(ProviderErrorKind.INVALID_REQUEST, error.kind());
+    }
+  }
+
+  /** 测试意图：custom-only 调用始终保持 raw/native-only，既不变成可执行 function，也不丢失次轮 wire。 */
+  @Test
+  void preservesCustomOnlyCallWithoutNormalizingIt() throws Exception {
+    ProviderMessage user =
+        new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
+    OpenAiChatStreamAccumulator accumulator =
+        new OpenAiChatStreamAccumulator(
+            request(user), descriptor, OpenAiChatConfiguration.defaults(), bridge);
+    accumulator.handleData(
+        """
+        {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"custom_1","type":"custom",
+        "custom":{"name":"code","input":"print(1)"}}]},"finish_reason":"tool_calls"}]}
+        """);
+    accumulator.handleData("{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}");
+    accumulator.handleData("[DONE]");
+    ProviderCompletion completion = accumulator.finish();
+    assertEquals(List.of(), completion.response().toolCalls());
+    JsonNode nativeCall = completion.replayState().payload().path("tool_calls").get(0);
+    assertEquals("custom_1", nativeCall.path("id").asString(""));
+    assertEquals("print(1)", nativeCall.path("custom").path("input").asString(""));
+    assertFalse(nativeCall.has("index"));
+    JsonNode wire =
+        MAPPER.readTree(
+            encoder
+                .encode(
+                    request(
+                        user,
+                        assistant(List.of(new ProviderTextBlock("")), completion.replayState())),
+                    descriptor,
+                    OpenAiChatConfiguration.defaults())
+                .bodyUtf8Bytes());
+    assertEquals(nativeCall, wire.path("messages").get(2).path("tool_calls").get(0));
+  }
+
+  /** 测试意图：混合调用保留原始顺序及 function 扩展成员，覆盖规范化字段并剔除所有 stream index。 */
+  @Test
+  void preservesFunctionExtrasAndCustomCallInOriginalOrder() throws Exception {
+    ProviderMessage user =
+        new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
+    OpenAiChatStreamAccumulator accumulator =
+        new OpenAiChatStreamAccumulator(
+            request(user), descriptor, OpenAiChatConfiguration.defaults(), bridge);
+    accumulator.handleData(
+        """
+        {"choices":[{"delta":{"tool_calls":[
+        {"index":4,"id":"custom_1","type":"custom","custom":{"input":"x"}},
+        {"index":7,"id":"fn_1","type":"function","future":"retained",
+        "function":{"name":"lookup","arguments":"{","futureFn":{"value":1}}}
+        ]},"finish_reason":null}]}
+        """);
+    accumulator.handleData(
+        """
+        {"choices":[{"delta":{"tool_calls":[{"index":7,
+        "function":{"arguments":"\\"q\\":1}"}}]},"finish_reason":"tool_calls"}]}
+        """);
+    accumulator.handleData("{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}");
+    accumulator.handleData("[DONE]");
+    ProviderCompletion completion = accumulator.finish();
+    assertEquals(1, completion.response().toolCalls().size());
+    assertEquals("{\"q\":1}", completion.response().toolCalls().get(0).argumentsJson());
+    JsonNode calls = completion.replayState().payload().path("tool_calls");
+    assertEquals(2, calls.size());
+    assertEquals("custom", calls.get(0).path("type").asString(""));
+    assertEquals("fn_1", calls.get(1).path("id").asString(""));
+    assertEquals("retained", calls.get(1).path("future").asString(""));
+    assertEquals(1, calls.get(1).path("function").path("futureFn").path("value").asInt(0));
+    assertEquals("{\"q\":1}", calls.get(1).path("function").path("arguments").asString(""));
+    assertFalse(calls.get(0).has("index"));
+    assertFalse(calls.get(1).has("index"));
+    ProviderMessage assistant =
+        assistant(
+            List.of(new ProviderToolCallBlock(completion.response().toolCalls().get(0))),
+            completion.replayState());
+    JsonNode wire =
+        MAPPER.readTree(
+            encoder
+                .encode(request(user, assistant), descriptor, OpenAiChatConfiguration.defaults())
+                .bodyUtf8Bytes());
+    assertEquals(calls, wire.path("messages").get(2).path("tool_calls"));
+
+    ObjectNode tampered = (ObjectNode) completion.replayState().payload().deepCopy();
+    ((ObjectNode) tampered.path("tool_calls").get(1)).put("index", 7);
+    ProviderReplayState badIndex =
+        new ProviderReplayState(ProviderReplayFormat.OPENAI_CHAT, modelAffinity(), tampered);
+    ProviderException error =
+        assertThrows(
+            ProviderException.class,
+            () ->
+                encoder.encode(
+                    request(
+                        user,
+                        assistant(
+                            List.of(
+                                new ProviderToolCallBlock(
+                                    completion.response().toolCalls().get(0))),
+                            badIndex)),
+                    descriptor,
+                    OpenAiChatConfiguration.defaults()));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, error.kind());
+  }
+
+  /** 测试意图：原生快照未包含已规范化 function 时，冻结仍追加标准调用而不丢失 durable 意图。 */
+  @Test
+  void appendsCanonicalFunctionCallWhenNativeEntryIsMissing() throws Exception {
+    ProviderMessage user =
+        new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
+    OpenAiChatStreamAccumulator accumulator =
+        new OpenAiChatStreamAccumulator(
+            request(user), descriptor, OpenAiChatConfiguration.defaults(), bridge);
+    accumulator.handleData(
+        """
+        {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"fn_1","type":"function",
+        "function":{"name":"lookup","arguments":"{}"}}]},"finish_reason":null}]}
+        """);
+    accumulator.handleData(
+        "{\"choices\":[{\"delta\":{\"tool_calls\":[]},\"finish_reason\":\"tool_calls\"}]}");
+    accumulator.handleData("{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}");
+    accumulator.handleData("[DONE]");
+    ProviderCompletion completion = accumulator.finish();
+    assertEquals(1, completion.response().toolCalls().size());
+    assertEquals(
+        MAPPER.readTree(
+            "{\"id\":\"fn_1\",\"type\":\"function\",\"function\":{\"name\":\"lookup\",\"arguments\":\"{}\"}}"),
+        completion.replayState().payload().path("tool_calls").get(0));
+  }
+
+  /** 测试意图：废弃的 finish_reason=function_call 仍被显式拒绝，不因保留原生 function_call 字段而开放执行。 */
+  @Test
+  void rejectsDeprecatedFunctionCallFinishReason() {
+    OpenAiChatStreamAccumulator accumulator =
+        new OpenAiChatStreamAccumulator(
+            request(
+                new ProviderMessage(
+                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
+            descriptor,
+            OpenAiChatConfiguration.defaults(),
+            bridge);
+    ProviderException error =
+        assertThrows(
+            ProviderException.class,
+            () ->
+                accumulator.handleData(
+                    "{\"choices\":[{\"delta\":{\"function_call\":{\"name\":\"old\"}},"
+                        + "\"finish_reason\":\"function_call\"}]}"));
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind());
+  }
+
+  @Test
+  @DisplayName("only choices[0] 进入 normalized 与 replay，n>1 的其他 choice 不混入")
+  void ignoresNonZeroChoiceDeltas() {
+    ProviderRequest turn1Req =
+        request(
+            new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi"))));
+    OpenAiChatStreamAccumulator accumulator =
+        new OpenAiChatStreamAccumulator(
+            turn1Req, descriptor, OpenAiChatConfiguration.defaults(), bridge);
+    // 一帧携带 n=2：只有 choices[0] 的 delta 与 finish_reason 被消费
+    accumulator.handleData(
+        """
+        {
+          "id": "c-n",
+          "choices": [
+            {"index": 0, "delta": {"role": "assistant", "content": "main"}, "finish_reason": null},
+            {"index": 1, "delta": {"role": "assistant", "content": "other"}, "finish_reason": null}
+          ]
+        }
+        """);
+    accumulator.handleData(
+        """
+        {
+          "id": "c-n",
+          "choices": [
+            {"index": 0, "delta": {"content": " answer"}, "finish_reason": "stop"},
+            {"index": 1, "delta": {"content": "secondary"}, "finish_reason": "stop"}
+          ]
+        }
+        """);
+    accumulator.handleData("{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}");
+    accumulator.handleData("[DONE]");
+
+    ProviderCompletion completion = accumulator.finish();
+    assertNotNull(completion.replayState());
+    assertEquals("main answer", completion.response().text());
+    JsonNode payload = completion.replayState().payload();
+    assertEquals("main answer", payload.path("content").asString(""));
+    assertFalse(payload.toString().contains("other"));
+    assertFalse(payload.toString().contains("secondary"));
+  }
+
+  @Test
+  @DisplayName("未知未来字段的 indexed array 片段按 index 合并，新 index 追加为独立槽位")
+  void mergesFutureIndexedArrayFragmentsByIndex() {
+    ProviderRequest turn1Req =
+        request(
+            new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi"))));
+    OpenAiChatStreamAccumulator accumulator =
+        new OpenAiChatStreamAccumulator(
+            turn1Req, descriptor, OpenAiChatConfiguration.defaults(), bridge);
+    accumulator.handleData(
+        """
+        {
+          "id": "c-steps",
+          "choices": [{
+            "index": 0,
+            "delta": {
+              "role": "assistant",
+              "content": "done",
+              "vendor_steps": [{"index": 0, "text": "a"}]
+            },
+            "finish_reason": null
+          }]
+        }
+        """);
+    accumulator.handleData(
+        """
+        {
+          "id": "c-steps",
+          "choices": [{
+            "index": 0,
+            "delta": {
+              "vendor_steps": [
+                {"index": 1, "text": "b"},
+                {"index": 0, "text": "c", "state": {"phase": "second"}}
+              ]
+            },
+            "finish_reason": "stop"
+          }]
+        }
+        """);
+    accumulator.handleData("{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}");
+    accumulator.handleData("[DONE]");
+
+    JsonNode payload = accumulator.finish().replayState().payload();
+    JsonNode steps = payload.path("vendor_steps");
+    assertEquals(2, steps.size());
+    assertEquals("ac", steps.get(0).path("text").asString(""));
+    assertEquals("second", steps.get(0).path("state").path("phase").asString(""));
+    assertEquals(1, steps.get(1).path("index").asInt(0));
+    assertEquals("b", steps.get(1).path("text").asString(""));
+  }
+
+  @Test
+  @DisplayName("replay 中 known 字段与 durable 不一致时即使携带未知字段也严格失败")
+  void rejectsKnownMismatchEvenWithNativeFields() throws Exception {
+    ProviderRequest turn1Req =
+        request(
+            new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi"))));
+    OpenAiChatStreamAccumulator accumulator =
+        new OpenAiChatStreamAccumulator(
+            turn1Req, descriptor, OpenAiChatConfiguration.defaults(), bridge);
+    accumulator.handleData(
+        """
+        {"id":"c-tamper","choices":[{"index":0,"delta":{"role":"assistant","content":"honest"},
+        "finish_reason":"stop"}]}
+        """);
+    accumulator.handleData("{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5}}");
+    accumulator.handleData("[DONE]");
+    ProviderCompletion completion = accumulator.finish();
+
+    // 篡改 known 字段但保留原生未知字段：affinity/hash 匹配也必须以 durable 一致性为准拒绝
+    ObjectNode tampered = (ObjectNode) completion.replayState().payload().deepCopy();
+    tampered.put("content", "tampered");
+    tampered.put("vendor_future_field", "kept");
+    ProviderReplayState tamperedState =
+        new ProviderReplayState(
+            ProviderReplayFormat.OPENAI_CHAT, descriptor.affinity(modelDesc.modelId()), tampered);
+    ProviderMessage tamperedAsst =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT, List.of(new ProviderTextBlock("honest")), tamperedState);
+    ProviderRequest tamperedReq = request(turn1Req.messages().get(0), tamperedAsst);
+    ProviderException error =
+        assertThrows(
+            ProviderException.class,
+            () -> encoder.encode(tamperedReq, descriptor, OpenAiChatConfiguration.defaults()));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, error.kind());
+
+    // 未篡改时同一 payload 可正常回放，证明失败来自 durable 不一致而非未知字段
+    ProviderMessage honestAsst =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT,
+            List.of(new ProviderTextBlock("honest")),
+            completion.replayState());
+    JsonNode honestRoot =
+        MAPPER.readTree(
+            encoder
+                .encode(
+                    request(turn1Req.messages().get(0), honestAsst),
+                    descriptor,
+                    OpenAiChatConfiguration.defaults())
+                .bodyUtf8Bytes());
+    JsonNode honestWire = honestRoot.path("messages").get(2);
+    assertEquals("assistant", honestWire.path("role").asString(""));
+    assertEquals("honest", honestWire.path("content").asString(""));
+  }
+
+  /**
+   * 测试意图：无法由 durable 语义重建的原生字段在 affinity 失配时退回语义编码（既不丢失 durable 语义，也不外泄 native 事实）， 而 malformed
+   * payload 无论 affinity 是否匹配都必须以 INVALID_REQUEST 明确失败。
+   */
+  @Test
+  @DisplayName("affinity 失配时 native-only 字段退回语义编码；malformed payload 一律拒绝")
+  void fallsBackSemanticallyOnAffinityMismatchAndRejectsMalformed() throws Exception {
+    ProviderMessage user =
+        new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
+    ProviderReplayAffinity other = descriptor.affinity("another-model");
+
+    // 1. audio 仅请求侧 id 引用属于 native 事实：affinity 失配时退回语义编码而不是外泄
+    ObjectNode audioPayload = MAPPER.createObjectNode();
+    audioPayload.put("role", "assistant");
+    audioPayload.put("content", "Hello");
+    audioPayload.putObject("audio").put("id", "audio_1");
+    JsonNode audioAsst =
+        assistantNode(wire(user, List.of(new ProviderTextBlock("Hello")), other, audioPayload));
+    assertEquals("Hello", audioAsst.path("content").asString(""));
+    assertFalse(audioAsst.has("audio"));
+
+    // 2. 已废弃的 function_call 属于 native 事实：affinity 失配时丢弃
+    ObjectNode legacyCallPayload = MAPPER.createObjectNode();
+    legacyCallPayload.put("role", "assistant");
+    legacyCallPayload.put("content", "Hello");
+    legacyCallPayload.putObject("function_call").put("name", "legacy_lookup");
+    JsonNode legacyAsst =
+        assistantNode(
+            wire(user, List.of(new ProviderTextBlock("Hello")), other, legacyCallPayload));
+    assertEquals("Hello", legacyAsst.path("content").asString(""));
+    assertFalse(legacyAsst.has("function_call"));
+
+    // 3. reasoning_content 即使与 durable thinking 一致，也不跨 affinity 转移；可读思考改以带来源标记的普通文本保留
+    ObjectNode reasoningPayload = MAPPER.createObjectNode();
+    reasoningPayload.put("role", "assistant");
+    reasoningPayload.put("content", "Hello");
+    reasoningPayload.put("reasoning_content", "hidden chain");
+    JsonNode reasoningAsst =
+        assistantNode(
+            wire(
+                user,
+                List.of(new ProviderThinkingBlock("hidden chain"), new ProviderTextBlock("Hello")),
+                other,
+                reasoningPayload));
+    assertEquals(
+        "<thinking>\nhidden chain\n</thinking>\nHello", reasoningAsst.path("content").asString(""));
+    assertFalse(reasoningAsst.has("reasoning_content"));
+
+    // 4. refusal 属于 native 事实：affinity 失配时退回纯文本
+    ObjectNode refusalPayload = MAPPER.createObjectNode();
+    refusalPayload.put("role", "assistant");
+    refusalPayload.put("refusal", "I cannot help");
+    JsonNode refusalAsst =
+        assistantNode(
+            wire(user, List.of(new ProviderTextBlock("I cannot help")), other, refusalPayload));
+    assertEquals("I cannot help", refusalAsst.path("content").asString(""));
+    assertFalse(refusalAsst.has("refusal"));
+
+    // 5. tool_calls 的额外嵌套字段属于 native 事实：affinity 失配时只保留 durable 标准调用
+    ObjectNode extendedCallPayload = MAPPER.createObjectNode();
+    extendedCallPayload.put("role", "assistant");
+    ObjectNode extendedCall = extendedCallPayload.putArray("tool_calls").addObject();
+    extendedCall.put("id", "c1").put("type", "function");
+    ObjectNode extendedFn = extendedCall.putObject("function");
+    extendedFn.put("name", "fn");
+    extendedFn.put("arguments", "{}");
+    extendedFn.put("vendorField", "v");
+    JsonNode extendedAsst =
+        assistantNode(
+            wire(
+                user,
+                List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{}"))),
+                other,
+                extendedCallPayload));
+    assertFalse(extendedAsst.path("tool_calls").get(0).path("function").has("vendorField"));
+
+    // 6. malformed payload：即使 affinity 失配也必须严格拒绝
+    ObjectNode badContent = MAPPER.createObjectNode();
+    badContent.put("role", "assistant");
+    badContent.put("content", 123);
+    assertRejected(user, List.of(new ProviderTextBlock("x")), other, badContent);
+
+    ObjectNode badRole = MAPPER.createObjectNode();
+    badRole.put("role", "system");
+    badRole.put("content", "text");
+    assertRejected(user, List.of(new ProviderTextBlock("text")), other, badRole);
+
+    ObjectNode badIndex = MAPPER.createObjectNode();
+    badIndex.put("role", "assistant");
+    ObjectNode badIndexCall = badIndex.putArray("tool_calls").addObject();
+    badIndexCall.put("id", "c1").put("type", "function").put("index", 0);
+    badIndexCall.putObject("function").put("name", "fn").put("arguments", "{}");
+    assertRejected(
+        user,
+        List.of(new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{}"))),
+        other,
+        badIndex);
+
+    // 7. 最小可重建 payload：affinity 失配退回语义编码，affinity 匹配原样 opaque 回放
+    ObjectNode minimalPayload = MAPPER.createObjectNode();
+    minimalPayload.put("role", "assistant");
+    minimalPayload.put("content", "Hello");
+    ArrayNode minimalCalls = minimalPayload.putArray("tool_calls");
+    ObjectNode minimalCall = minimalCalls.addObject();
+    minimalCall.put("id", "c1").put("type", "function");
+    ObjectNode minimalFn = minimalCall.putObject("function");
+    minimalFn.put("name", "fn");
+    minimalFn.put("arguments", "{}");
+    List<ProviderContentBlock> durableBlocks =
+        List.of(
+            new ProviderTextBlock("Hello"),
+            new ProviderToolCallBlock(new ProviderToolCall("c1", "fn", "{}")));
+    for (ProviderReplayAffinity affinity : List.of(other, modelAffinity())) {
+      JsonNode wireAsst = assistantNode(wire(user, durableBlocks, affinity, minimalPayload));
+      assertEquals("Hello", wireAsst.path("content").asString(""));
+      assertEquals("c1", wireAsst.path("tool_calls").get(0).path("id").asString(""));
+      assertEquals(
+          "fn", wireAsst.path("tool_calls").get(0).path("function").path("name").asString(""));
+    }
+  }
+
+  /** 普通思考不绑定 system 日期或工具定义前缀：affinity 匹配时原样 opaque 回放且不修改 durable replay。 */
+  @Test
+  @DisplayName("affinity 匹配时跨 system/date 前缀变化仍原样 opaque 回放")
+  void preservesPlainReasoningAcrossSystemPrefixChanges() throws Exception {
+    ProviderMessage user =
+        new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
+    ObjectNode payload = MAPPER.createObjectNode();
+    payload.put("role", "assistant");
+    payload.put("content", "Hello");
+    payload.put("reasoning_content", "先分析\nthen answer");
+    ProviderReplayState replay =
+        new ProviderReplayState(ProviderReplayFormat.OPENAI_CHAT, modelAffinity(), payload);
+    ProviderMessage assistant =
+        assistant(
+            List.of(new ProviderThinkingBlock("先分析\nthen answer"), new ProviderTextBlock("Hello")),
+            replay);
+    ProviderToolDefinition tool =
+        new ProviderToolDefinition("read", "Read a file", "{\"type\":\"object\"}");
+    for (boolean changeSystem : List.of(true, false)) {
+      String system = changeSystem ? "Today is 2026-10-07." : "Test system instruction.";
+      ProviderRequest changed =
+          new ProviderRequest(
+              modelDesc,
+              defaultVariant,
+              1024,
+              system,
+              List.of(user, assistant),
+              changeSystem ? List.of() : List.of(tool),
+              ProviderCacheControl.none());
+      JsonNode wire =
+          MAPPER.readTree(
+              encoder
+                  .encode(changed, descriptor, OpenAiChatConfiguration.defaults())
+                  .bodyUtf8Bytes());
+      assertEquals(system, wire.at("/messages/0/content").asString(""));
+      assertEquals(payload, wire.path("messages").get(2));
+      assertEquals(payload, replay.payload());
+    }
+  }
+
+  /** affinity 失配（不同 provider、连接 generation 或 wire 模型）时普通思考降级为带来源标记的语义文本，不跨边界转移原生字段。 */
+  @Test
+  @DisplayName("affinity 变化时普通思考降级为带标记的语义文本")
+  void fallsBackPlainReasoningAcrossAffinityChanges() throws Exception {
+    ProviderMessage user =
+        new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
+    ObjectNode payload = MAPPER.createObjectNode();
+    payload.put("role", "assistant");
+    payload.put("content", "Hello");
+    payload.put("reasoning_content", "reasoning");
+    List<ProviderContentBlock> durable =
+        List.of(new ProviderThinkingBlock("reasoning"), new ProviderTextBlock("Hello"));
+    ProviderReplayAffinity original = modelAffinity();
+    for (ProviderReplayAffinity other :
+        List.of(
+            descriptor.affinity("another-model"),
+            new ProviderReplayAffinity(
+                original.providerType(),
+                "other-provider",
+                original.connectionGenerationId(),
+                original.modelId()),
+            new ProviderReplayAffinity(
+                original.providerType(),
+                original.providerName(),
+                new UUID(0L, 1L),
+                original.modelId()))) {
+      JsonNode asst = assistantNode(wire(user, durable, other, payload));
+      assertEquals("<thinking>\nreasoning\n</thinking>\nHello", asst.path("content").asString(""));
+      assertFalse(asst.has("reasoning_content"));
+    }
+  }
+
+  /** affinity 匹配时 opaque 原生字段原样透传；reasoning_content 损坏或与 durable 不一致一律拒绝。 */
+  @Test
+  @DisplayName("affinity 匹配时 opaque 字段原样透传，reasoning 损坏或与 durable 不一致拒绝")
+  void replaysOpaqueFieldsAtSameAffinityButRejectsCorruptReasoning() throws Exception {
+    ProviderMessage user =
+        new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")));
+    List<ProviderContentBlock> contents =
+        List.of(new ProviderThinkingBlock("reasoning"), new ProviderTextBlock("Hello"));
+
+    ObjectNode payload = MAPPER.createObjectNode();
+    payload.put("role", "assistant");
+    payload.put("content", "Hello");
+    payload.put("reasoning_content", "reasoning");
+    payload.putArray("reasoning_details").addObject().put("signature", "opaque");
+    payload.put("vendor_future_field", "opaque");
+    JsonNode asst = assistantNode(wire(user, contents, modelAffinity(), payload));
+    assertEquals("opaque", asst.path("reasoning_details").get(0).path("signature").asString(""));
+    assertEquals("opaque", asst.path("vendor_future_field").asString(""));
+    assertEquals("reasoning", asst.path("reasoning_content").asString(""));
+
+    // reasoning_content 形态损坏（非文本）拒绝
+    ObjectNode objectReasoning = MAPPER.createObjectNode();
+    objectReasoning.put("role", "assistant");
+    objectReasoning.put("content", "Hello");
+    objectReasoning.putObject("reasoning_content").put("bad", "shape");
+    assertRejected(user, contents, modelAffinity(), objectReasoning);
+
+    // reasoning_content 与 durable thinking 不一致拒绝
+    ObjectNode mismatchedThinking = MAPPER.createObjectNode();
+    mismatchedThinking.put("role", "assistant");
+    mismatchedThinking.put("content", "Hello");
+    mismatchedThinking.put("reasoning_content", "tampered");
+    assertRejected(user, contents, modelAffinity(), mismatchedThinking);
+  }
+
+  private ProviderReplayAffinity modelAffinity() {
+    return descriptor.affinity(modelDesc.modelId());
+  }
+
+  private ProviderMessage assistant(
+      List<ProviderContentBlock> durableBlocks, ProviderReplayState replayState) {
+    return new ProviderMessage(ProviderMessageRole.ASSISTANT, durableBlocks, replayState);
+  }
+
+  private JsonNode wire(
+      ProviderMessage user,
+      List<ProviderContentBlock> durableBlocks,
+      ProviderReplayAffinity affinity,
+      ObjectNode payload)
+      throws Exception {
+    ProviderReplayState replayState =
+        new ProviderReplayState(ProviderReplayFormat.OPENAI_CHAT, affinity, payload);
+    return MAPPER.readTree(
+        encoder
+            .encode(
+                request(user, assistant(durableBlocks, replayState)),
+                descriptor,
+                OpenAiChatConfiguration.defaults())
+            .bodyUtf8Bytes());
+  }
+
+  private static JsonNode assistantNode(JsonNode wire) {
+    return wire.path("messages").get(2);
+  }
+
+  private void assertRejected(
+      ProviderMessage user,
+      List<ProviderContentBlock> durableBlocks,
+      ProviderReplayAffinity affinity,
+      ObjectNode payload) {
+    ProviderReplayState replayState =
+        new ProviderReplayState(ProviderReplayFormat.OPENAI_CHAT, affinity, payload);
+    ProviderException error =
+        assertThrows(
+            ProviderException.class,
+            () ->
+                encoder.encode(
+                    request(user, assistant(durableBlocks, replayState)),
+                    descriptor,
+                    OpenAiChatConfiguration.defaults()));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, error.kind());
+  }
+
+  private ProviderRequest request(ProviderMessage... messages) {
+    return new ProviderRequest(
+        modelDesc,
+        defaultVariant,
+        1024,
+        "Test system instruction.",
+        List.of(messages),
+        List.of(),
+        ProviderCacheControl.none());
+  }
+}

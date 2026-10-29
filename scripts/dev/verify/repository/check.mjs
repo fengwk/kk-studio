@@ -41,9 +41,10 @@ const moduleDocuments = [
   'environment-ide-design.md',
   'frontend-design-language.md',
   'frontend.md',
+  'harness-agent-builtin.md',
   'harness-environment.md',
   'harness-infra.md',
-  'harness-provider.md',
+  'harness-model.md',
   'harness-runtime.md',
   'ide.md',
   'model-pricing.md',
@@ -435,7 +436,8 @@ function extractPomModules(pomRelativePath) {
 
 /**
  * Maven 模块与分层：apps -> platform -> harness -> common。表中是每个模块允许声明的内部生产依赖（artifactId 去掉
- * `kk-studio-` 前缀，test scope 不受限）；platform 与 harness 从不依赖 apps，web 是唯一组合根（`null`）。
+ * `kk-studio-` 前缀，test scope 不受限）；platform 与 harness 从不依赖 apps，platform-runtime 装配
+ * agent-builtin，web 是唯一应用组合根（`null`）。
  */
 const moduleDependencies = {
   common: [],
@@ -443,16 +445,25 @@ const moduleDependencies = {
   share: [],
   work: [],
   'harness/environment': ['common'],
-  'harness/runtime': ['common', 'harness-environment'],
-  'harness/provider': ['harness-runtime'],
-  'harness/infra': ['common', 'work', 'harness-environment', 'harness-runtime'],
+  'harness/model': [],
+  'harness/runtime': ['common', 'harness-environment', 'harness-model'],
+  'harness/agent-builtin': ['common', 'harness-model', 'harness-runtime'],
+  'harness/infra': [
+    'common',
+    'work',
+    'harness-environment',
+    'harness-model',
+    'harness-runtime',
+    'harness-agent-builtin',
+  ],
   'platform/plugin-api': ['common', 'harness-runtime'],
   'platform/runtime': [
     'common',
     'share',
     'harness-environment',
+    'harness-model',
     'harness-runtime',
-    'harness-provider',
+    'harness-agent-builtin',
     'platform-plugin-api',
   ],
   'apps/canvas/core': ['common', 'platform-plugin-api'],
@@ -611,10 +622,10 @@ function checkModuleBoundaries() {
     }
   }
 
-  // web 测试只能经运行时反射接触 opencli，保证发行物可以不带该 Plugin。
-  for (const { file, imported } of javaImports(path.join(repositoryRoot, 'web/src/test/java'))) {
+  // web 生产源码不得编译期接触 opencli；发行物按 web/pom.xml 的 runtime 依赖装配，可以不带该 Plugin。
+  for (const { file, imported } of javaImports(path.join(repositoryRoot, 'web/src/main/java'))) {
     if (imported.startsWith('fun.fengwk.kkstudio.plugin.opencli.')) {
-      addError(`${file}: forbidden compile import of opencli plugin class; use runtime reflection`)
+      addError(`${file}: web production must not compile-import opencli plugin classes`)
     }
   }
 }
@@ -653,8 +664,8 @@ function checkNoHarnessModuleDocs() {
 const packageDocumentedModules = {
   common: 'docs/modules/common.md',
   'harness/environment': 'docs/modules/harness-environment.md',
+  'harness/model': 'docs/modules/harness-model.md',
   'harness/runtime': 'docs/modules/harness-runtime.md',
-  'harness/provider': 'docs/modules/harness-provider.md',
   'harness/infra': 'docs/modules/harness-infra.md',
 }
 

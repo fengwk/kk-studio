@@ -1,18 +1,16 @@
 package fun.fengwk.kkstudio.platform.harness.thread.query;
 
+import fun.fengwk.kkstudio.harness.builtin.query.BuiltinRequestQuery;
+import fun.fengwk.kkstudio.harness.builtin.query.BuiltinRequestView;
+import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
-import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestMaterializer;
+import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ModelRequestSpecJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderRequestJsonCodec;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
@@ -40,13 +38,11 @@ import java.util.UUID;
  * <p>确定性 planning 拒绝只回显稳定 error code，并给出安全的空投影；自由文本拒绝详情绝不外泄。repository / registry / projector
  * 等基础设施或编程异常照常传播，绝不伪装成 planning 失败。
  *
- * <p>只要 snapshot 暴露活动 ModelInvocation，就独立附加可空的 {@code FROZEN_INVOCATION}：它把冻结 {@link
- * ModelRequestSpec} 物化到该 invocation 的 request head 前缀上，再以 canonical {@link
- * ProviderRequestJsonCodec} 编码。冻结事实只来自原始 snapshot 与原始 path，与草稿 model / environment 无关。request head
- * 是当时 Basis 的精确边界，绝不使用会包含 Tool context 后续 Entry 的当前 head。
+ * <p>只要 snapshot 暴露活动 Driver generation，就独立附加可空的 {@code FROZEN_INVOCATION}：它直接使用 Driver 冻结的
+ * canonical request-spec 诊断 JSON，不再读取任何 Provider DTO 或 Driver 私有状态。冻结事实只来自原始 snapshot，与草稿 model /
+ * environment 无关，也不新建、复制或延长任何持久事实的寿命。
  *
- * <p>冻结请求视图只读取已经存在的活动 Invocation：它不新建、不复制也不延长任何持久事实的寿命（已结束的 Invocation 行由 attach-then-delete
- * 在自己事务内删除，这里读不到就如实缺席），{@code frozenInvocation} 与顶层现算预览相互独立——预览被拒绝时冻结事实 仍然成立。
+ * <p>冻结请求视图与顶层现算预览相互独立——预览被拒绝时冻结事实仍然成立。
  *
  * <p>每个 subagent binding 额外附带目标 Agent 当前配置声明（tools/skills/subagents 与 canonical config JSON）：它只读
  * {@link AgentDefinitionRepository} 与 {@link AgentDefinitionConfigCodec}，同名缺失或配置非法时明确拒绝，绝不静默返回空数组，
@@ -62,25 +58,28 @@ public final class ModelRequestDebugService {
   /** 活动 ModelInvocation 冻结请求的视图判别符。 */
   public static final String FROZEN_INVOCATION_KIND = "FROZEN_INVOCATION";
 
+  private static final ModelRequestSpecJsonCodec BUILTIN_REQUESTS = new ModelRequestSpecJsonCodec();
+
   private final HarnessRuntime runtime;
   private final DatabaseTurnResolver turnResolver;
   private final AgentDefinitionRepository agentDefinitionRepository;
   private final AgentDefinitionConfigCodec agentConfigCodec;
+  private final BuiltinRequestQuery builtinRequests;
   private final Clock clock;
-  private final ModelRequestMaterializer materializer = new ModelRequestMaterializer();
-  private final ProviderRequestJsonCodec requestCodec = new ProviderRequestJsonCodec();
 
   public ModelRequestDebugService(
       HarnessRuntime runtime,
       DatabaseTurnResolver turnResolver,
       AgentDefinitionRepository agentDefinitionRepository,
       AgentDefinitionConfigCodec agentConfigCodec,
+      BuiltinRequestQuery builtinRequests,
       Clock clock) {
     this.runtime = Objects.requireNonNull(runtime, "runtime");
     this.turnResolver = Objects.requireNonNull(turnResolver, "turnResolver");
     this.agentDefinitionRepository =
         Objects.requireNonNull(agentDefinitionRepository, "agentDefinitionRepository");
     this.agentConfigCodec = Objects.requireNonNull(agentConfigCodec, "agentConfigCodec");
+    this.builtinRequests = Objects.requireNonNull(builtinRequests, "builtinRequests");
     this.clock = Objects.requireNonNull(clock, "clock");
   }
 
@@ -111,7 +110,7 @@ public final class ModelRequestDebugService {
       projectPlanningError(dto, (LiveTurnPlan.Rejected) plan);
     }
     // 冻结请求与预览相互独立：当前预览被拒绝时活动 Invocation 的冻结事实仍然成立。
-    dto.setFrozenInvocation(frozenInvocation(snapshot, path));
+    dto.setFrozenInvocation(frozenInvocation(threadId));
     return dto;
   }
 
@@ -213,37 +212,18 @@ public final class ModelRequestDebugService {
     return dto;
   }
 
-  /** 没有活动 ModelInvocation 时为 null；否则返回冻结 spec 在 request head 前缀上的 canonical 重建。 */
-  private HarnessModelRequestDebugDTO.FrozenInvocationDTO frozenInvocation(
-      ThreadSnapshot snapshot, EntryPath path) {
-    ModelInvocation model = snapshot.model();
-    if (model == null) {
+  /** 没有 Builtin 当前 generation 时为 null（空闲 Thread），不生成占位请求。 */
+  private HarnessModelRequestDebugDTO.FrozenInvocationDTO frozenInvocation(UUID threadId) {
+    BuiltinRequestView view = builtinRequests.findCurrent(threadId).orElse(null);
+    if (view == null) {
       return null;
     }
-    ProviderRequest request =
-        materializer.materialize(
-            requestHeadPrefix(path, model.requestHeadEntryId()), model.requestSpec());
     HarnessModelRequestDebugDTO.FrozenInvocationDTO dto =
         new HarnessModelRequestDebugDTO.FrozenInvocationDTO();
     dto.setKind(FROZEN_INVOCATION_KIND);
-    dto.setRequestJson(requestCodec.encode(request));
+    dto.setGenerationId(view.generationId().toString());
+    dto.setAttempt(view.attempt());
+    dto.setRequestJson(BUILTIN_REQUESTS.encode(view.requestSpec()));
     return dto;
-  }
-
-  /**
-   * root-to-requestHead 前缀：request head 就是本次请求冻结时的 Basis，Tool context 的当前 head 是它的后代，直接用当前 head 会把
-   * Assistant 结果投影进请求。request head 不在同一条不可变路径上说明 durable 不变量已破坏，必须 fail closed。
-   */
-  private static EntryPath requestHeadPrefix(EntryPath path, UUID requestHeadEntryId) {
-    List<Entry> entries = path.entries();
-    for (int index = 0; index < entries.size(); index++) {
-      if (entries.get(index).id().equals(requestHeadEntryId)) {
-        return new EntryPath(entries.subList(0, index + 1));
-      }
-    }
-    throw new IllegalStateException(
-        "model invocation request head "
-            + requestHeadEntryId
-            + " is not on the current thread path");
   }
 }

@@ -142,6 +142,21 @@ describe('BranchDraft materialization failures', () => {
     expect(defaultNull?.yoloEnabled).toBe(false)
   })
 
+  it('keeps a group selection variant-free through draft, queued command and HTTP snapshot', () => {
+    // 组不拥有 variant；初始化、持久命令回放和 HTTP 省略 null 时都不能继承旧模型的 variant。
+    const group = { ...model, kind: 'GROUP' as const, name: 'group' }
+    const draft = materializeBlankBranchDraft({ ...agent([], [], []), model: 'group' }, false, [group])
+    expect(draft?.model).toEqual({ modelName: 'group', variant: null })
+    const base = draftWith()
+    const projected = projectPendingTarget(base, [
+      queuedSettingCommand('1', 'SET_MODEL', { model: { modelName: 'group', variant: null } }),
+    ])
+    expect(projected.model).toEqual({ modelName: 'group', variant: null })
+    expect(branchDraftFromBranchSettings({
+      agentName: 'root', model: { modelName: 'group' }, environmentName: null, goal: null,
+    }, false).model).toEqual({ modelName: 'group', variant: null })
+  })
+
   it('preserves existing draft environment when switching Agent and does not overwrite with Chat fallback', () => {
     const existing: BranchDraft = {
       agentName: 'assistant',

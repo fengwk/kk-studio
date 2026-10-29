@@ -353,7 +353,7 @@ describe('thread timeline edge branches', () => {
       null,
       [
         {
-          modelInvocationId: 'model-1',
+          generationId: 'model-1',
           turnStartEntryId: 'compaction-start',
           requestHeadEntryId: 'head-1',
           attempt: 1,
@@ -444,7 +444,8 @@ describe('thread timeline edge branches', () => {
     // （L313-314 只处理 phase 'call' 的 tool 消息），不会因此抛出或篡改。
     const invocation: ToolInvocationDTO = {
       id: 'inv-1',
-      modelInvocationId: 'm-1',
+      threadId: 'thread-1',
+      turnStartEntryId: 'turn-1',
       assistantEntryId: 'assistant-1',
       callIndex: 0,
       status: 'RUNNING',

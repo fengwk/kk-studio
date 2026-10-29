@@ -256,8 +256,9 @@ select pg_temp.assert_true('exactly the 15 target domain tables exist',
     (select count(*) = 15 from pg_tables where schemaname = 'public'
         and (tablename like 'canvas_%' or tablename = 'project' or tablename like 'project_%'
             or tablename = 'chat_session')));
-select pg_temp.assert_true('removed product tables and pointers are gone',
-    to_regclass('public.canvas_link') is null
+select pg_temp.assert_true('removed product and runtime tables are gone',
+    to_regclass('public.harness_claude_execution') is null
+    and to_regclass('public.canvas_link') is null
     and to_regclass('public.project_state') is null
     and to_regclass('public.project_transition') is null
     and to_regclass('public.project_issue_dependency') is null
@@ -732,6 +733,9 @@ select pg_temp.rejects('only TOOL work may require an Environment',
           required_environment_id)
       values ('CANVAS_RUN', pg_temp.uid(700), now(), 1, pg_temp.uid(9000))$$, '23514',
     'ck_durable_work_required_environment');
+select pg_temp.rejects('AGENT is not a durable work target',
+    $$insert into durable_work (target_type, target_id, available_at, wake_version)
+      values ('AGENT', pg_temp.uid(700), now(), 1)$$, '23514', 'ck_durable_work_target_type');
 insert into canvas_function_resource_pin (canvas_id, node_id, request_id, role, resource_id)
     values (pg_temp.uid(800), pg_temp.uid(700), pg_temp.uid(1000), 'INPUT', pg_temp.uid(900));
 select pg_temp.rejects('a pin cannot reference a missing Resource',
@@ -791,39 +795,85 @@ select pg_temp.rejects('an accepted revision is non-negative',
     'ck_canvas_command_dedup_revision');
 
 -- ---------------------------------------------------------------------------
--- Harness: WAITING_INPUT shape and pending paging (full model/thread/entry).
+-- Harness: public Tool owner, WAITING_INPUT shape and pending paging.
 -- ---------------------------------------------------------------------------
 insert into harness_entry(id,session_id,parent_entry_id,entry_type,payload,created_at) values
     (pg_temp.uid(210),pg_temp.uid(102),pg_temp.uid(202),'TURN_START','{}',now()),
     (pg_temp.uid(211),pg_temp.uid(102),pg_temp.uid(210),'MESSAGE',
         '{"message":{"role":"ASSISTANT"}}',now());
+select pg_temp.rejects('native compaction is not a public Entry type',
+    $$insert into harness_entry(id,session_id,parent_entry_id,entry_type,payload,created_at)
+      values(pg_temp.uid(212),pg_temp.uid(102),pg_temp.uid(211),'NATIVE_COMPACTION','{}',now())$$,
+    '23514', 'ck_harness_entry_type');
 insert into harness_model_invocation (id, thread_id, turn_start_entry_id, request_head_entry_id,
     request_spec, status, attempt, failed_attempts, result, result_entry_id, created_at, updated_at)
     values (pg_temp.uid(1100), pg_temp.uid(302), pg_temp.uid(210), pg_temp.uid(210),
         '{}', 'SUCCEEDED', 1, '[]', '{}', pg_temp.uid(211), now(), now());
-insert into harness_tool_invocation (id, model_invocation_id, assistant_entry_id, call_index, call,
-    binding, status, attempt, effects, created_at, updated_at)
-    values (pg_temp.uid(1200), pg_temp.uid(1100), pg_temp.uid(211), 0,
+select pg_temp.assert_true('Tool ownership is public and has no Model parent column',
+    (select count(*) = 16 from information_schema.columns
+        where table_name = 'harness_tool_invocation')
+    and exists(select 1 from information_schema.columns
+        where table_name = 'harness_tool_invocation' and column_name = 'thread_id')
+    and exists(select 1 from information_schema.columns
+        where table_name = 'harness_tool_invocation' and column_name = 'turn_start_entry_id')
+    and not exists(select 1 from information_schema.columns
+        where table_name = 'harness_tool_invocation' and column_name = 'model_invocation_id'));
+select pg_temp.assert_true('Tool ownership has Thread, TurnStart and Assistant foreign keys',
+    (select count(*) = 3 from pg_constraint
+        where conrelid = 'harness_tool_invocation'::regclass
+            and contype = 'f'
+            and conname in ('fk_harness_tool_invocation_thread',
+                'fk_harness_tool_invocation_turn_start',
+                'fk_harness_tool_invocation_assistant')));
+insert into harness_tool_invocation (id, thread_id, turn_start_entry_id, assistant_entry_id,
+    call_index, call, binding, status, attempt, effects, created_at, updated_at)
+    values (pg_temp.uid(1200), pg_temp.uid(302), pg_temp.uid(210), pg_temp.uid(211), 0,
         jsonb_build_object('id','call-question','toolName','ask_user',
             'argumentsJson','{"questions":[{"question":"Which?","options":[{"label":"A"}]}]}'::text),
         '{"thread":{}}', 'WAITING_INPUT', 0, '{"version":1,"customEntries":[]}', now(), now());
+select pg_temp.rejects('WAITING_REQUEST is not a Tool status',
+    $$update harness_tool_invocation set status='WAITING_REQUEST' where id=pg_temp.uid(1200)$$,
+    '23514', 'ck_harness_tool_invocation_status');
 select pg_temp.assert_true('waiting tools remain queryable after their model has succeeded',
     (select status = 'WAITING_INPUT' from harness_tool_invocation where id = pg_temp.uid(1200))
     and (select status = 'SUCCEEDED' from harness_model_invocation where id = pg_temp.uid(1100)));
-select pg_temp.assert_true('pending input joins back to its Session for paging',
+select pg_temp.assert_true('pending input joins back through the public Tool owner',
     (select count(*) = 1 from harness_tool_invocation t
-        join harness_model_invocation m on m.id = t.model_invocation_id
-        join harness_thread th on th.id = m.thread_id
+        join harness_thread th on th.id = t.thread_id
         where t.status = 'WAITING_INPUT' and th.session_id = pg_temp.uid(102)));
+select pg_temp.rejects('a Tool cannot reference a missing public Thread',
+    $$insert into harness_tool_invocation(id,thread_id,turn_start_entry_id,assistant_entry_id,call_index,call,binding,status,attempt,effects,created_at,updated_at)
+      values(pg_temp.uid(1203),pg_temp.uid(9999),pg_temp.uid(210),pg_temp.uid(211),3,'{}','{}','READY',0,'{"version":1,"customEntries":[]}',now(),now())$$,
+    '23503', 'fk_harness_tool_invocation_thread');
+select pg_temp.rejects('a Tool cannot reference a missing TurnStart',
+    $$insert into harness_tool_invocation(id,thread_id,turn_start_entry_id,assistant_entry_id,call_index,call,binding,status,attempt,effects,created_at,updated_at)
+      values(pg_temp.uid(1204),pg_temp.uid(302),pg_temp.uid(9998),pg_temp.uid(211),4,'{}','{}','READY',0,'{"version":1,"customEntries":[]}',now(),now())$$,
+    '23503', 'fk_harness_tool_invocation_turn_start');
+select pg_temp.rejects('a Tool cannot reference a missing Assistant',
+    $$insert into harness_tool_invocation(id,thread_id,turn_start_entry_id,assistant_entry_id,call_index,call,binding,status,attempt,effects,created_at,updated_at)
+      values(pg_temp.uid(1205),pg_temp.uid(302),pg_temp.uid(210),pg_temp.uid(9997),5,'{}','{}','READY',0,'{"version":1,"customEntries":[]}',now(),now())$$,
+    '23503', 'fk_harness_tool_invocation_assistant');
+select pg_temp.rejects('a nonterminal Tool requires a frozen binding',
+    $$insert into harness_tool_invocation(id,thread_id,turn_start_entry_id,assistant_entry_id,call_index,call,status,attempt,effects,created_at,updated_at)
+      values(pg_temp.uid(1206),pg_temp.uid(302),pg_temp.uid(210),pg_temp.uid(211),6,'{}','READY',0,'{"version":1,"customEntries":[]}',now(),now())$$,
+    '23514', 'ck_harness_tool_invocation_binding');
+insert into harness_tool_invocation (id, thread_id, turn_start_entry_id, assistant_entry_id,
+    call_index, call, status, attempt, effects, error, created_at, updated_at)
+    values (pg_temp.uid(1207), pg_temp.uid(302), pg_temp.uid(210), pg_temp.uid(211), 7,
+        '{}', 'FAILED', 0, '{"version":1,"customEntries":[]}',
+        '{"code":"UNKNOWN_TOOL","message":"unknown"}', now(), now());
+select pg_temp.assert_true('a terminal unknown Tool may have no binding',
+    (select binding is null and status = 'FAILED'
+        from harness_tool_invocation where id = pg_temp.uid(1207)));
 -- The bad calls stay in their real Session: the assistant Entry belongs to the
 -- same Thread/Session as the model invocation, so only the tested shape fails.
-select pg_temp.rejects('WAITING_INPUT requires a frozen binding',
-    $$insert into harness_tool_invocation(id,model_invocation_id,assistant_entry_id,call_index,call,status,attempt,effects,created_at,updated_at)
-      values(pg_temp.uid(1201),pg_temp.uid(1100),pg_temp.uid(211),1,'{}','WAITING_INPUT',0,'{"version":1,"customEntries":[]}',now(),now())$$,
-    '23514', 'ck_harness_tool_waiting_input');
+select pg_temp.rejects('WAITING_INPUT cannot lack a frozen binding',
+    $$insert into harness_tool_invocation(id,thread_id,turn_start_entry_id,assistant_entry_id,call_index,call,status,attempt,effects,created_at,updated_at)
+      values(pg_temp.uid(1201),pg_temp.uid(302),pg_temp.uid(210),pg_temp.uid(211),1,'{}','WAITING_INPUT',0,'{"version":1,"customEntries":[]}',now(),now())$$,
+    '23514', 'ck_harness_tool_invocation_binding');
 select pg_temp.rejects('WAITING_INPUT cannot carry a terminal result',
-    $$insert into harness_tool_invocation(id,model_invocation_id,assistant_entry_id,call_index,call,binding,result,status,attempt,effects,created_at,updated_at)
-      values(pg_temp.uid(1202),pg_temp.uid(1100),pg_temp.uid(211),2,'{}','{}','{"ok":true}','WAITING_INPUT',0,'{"version":1,"customEntries":[]}',now(),now())$$,
+    $$insert into harness_tool_invocation(id,thread_id,turn_start_entry_id,assistant_entry_id,call_index,call,binding,result,status,attempt,effects,created_at,updated_at)
+      values(pg_temp.uid(1202),pg_temp.uid(302),pg_temp.uid(210),pg_temp.uid(211),2,'{}','{}','{"ok":true}','WAITING_INPUT',0,'{"version":1,"customEntries":[]}',now(),now())$$,
     '23514', 'ck_harness_tool_waiting_input');
 select pg_temp.rejects('WAITING_INPUT cannot carry a terminal error',
     $$update harness_tool_invocation set error='{"message":"x"}' where id=pg_temp.uid(1200)$$, '23514',
@@ -920,6 +970,18 @@ insert into harness_thread_command (thread_id, sequence, command_type, payload, 
     request_hash, created_at) values
     (pg_temp.uid(310), 1, 'USER_MESSAGE', '{"text":"go"}', pg_temp.uid(1310), repeat('3', 64), now()),
     (pg_temp.uid(311), 1, 'CUSTOM_MESSAGE', '{"text":"done"}', pg_temp.uid(1311), repeat('4', 64), now());
+insert into harness_thread_command (thread_id, sequence, command_type, payload, idempotency_key,
+    request_hash, created_at) values
+    (pg_temp.uid(310), 2, 'SET_MODEL', '{"model":{"modelName":"m","variant":null}}',
+        pg_temp.uid(1312), repeat('7', 64), now());
+select pg_temp.assert_true('SET_MODEL is a supported command',
+    (select command_type = 'SET_MODEL' from harness_thread_command
+        where thread_id = pg_temp.uid(310) and sequence = 2));
+select pg_temp.rejects('SET_EXECUTION is not a command type',
+    $$update harness_thread_command set command_type='SET_EXECUTION'
+      where thread_id=pg_temp.uid(310) and sequence=2$$,
+    '23514', 'ck_harness_thread_command_type');
+delete from harness_thread_command where thread_id = pg_temp.uid(310) and sequence = 2;
 insert into harness_thread_join (invocation_id, request_hash, parent_thread_id, child_thread_id,
     source_command_sequence, agent, max_turns, reminder_turn, terminal_entry_id,
     final_answer_entry_id, delivery_command_sequence, created_at, updated_at, delivery) values
@@ -1057,6 +1119,9 @@ insert into harness_execution_exit (execution_id, thread_id, invocation_id, atte
     owner_lease_token, kind, parent_execution_id, state, registered_at, confirmed_at, abandoned_at)
     values (pg_temp.uid(1700), pg_temp.uid(310), pg_temp.uid(1701), 1, 'lease-1', 'TOOL',
         null, 'UNCONFIRMED', '2026-01-01 00:00:00.123+00', null, null);
+select pg_temp.rejects('AGENT is not an execution exit kind',
+    $$update harness_execution_exit set kind='AGENT' where execution_id=pg_temp.uid(1700)$$,
+    '23514', 'ck_harness_execution_exit_kind');
 select pg_temp.assert_true('execution exit stores an optional millisecond abandonment time',
     (select is_nullable = 'YES' and data_type = 'timestamp with time zone'
         and datetime_precision = 3

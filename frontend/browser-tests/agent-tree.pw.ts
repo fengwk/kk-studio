@@ -104,11 +104,13 @@ function snapshot(threadId: string, parentThreadId: string | null, name: string,
     thread,
     entries: [],
     queuedCommands: [],
-    modelInvocation: null,
+    executionStatus: status,
+    activeAssistantOutput: null,
     toolInvocations: [],
-    modelAttemptFailures: [],
+    generationFailures: [],
     manualCompaction: { available: false, disabledReason: null },
     stopReceipts: [],
+    unconfirmedExecutions: [],
   }
 }
 

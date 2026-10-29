@@ -179,7 +179,7 @@ Dispatcher、admission、gateway 上限属于启动配置，subagent 预算由�
 `INVALID_RESPONSE` 失败，不再按零用量继续。发布前必须逐个核对将在生产中使用的 Provider，
 脱敏 fixture 与历史探针只证明已覆盖样本，不构成对其余上游、代理或模型组合的兼容承诺。
 旧 Provider 配置中的 `openAiChatIncludeUsage` 已无作用，会按未知字段忽略；升级时从配置中删除，
-不要依赖它关闭 usage 请求。协议字段清单见 [Harness Provider](../modules/harness-provider.md#原生事件与流式聚合)
+不要依赖它关闭 usage 请求。协议字段清单见 [Harness Model](../modules/harness-model.md#原生事件与流式聚合)
 与[模型用量与计价](../modules/model-pricing.md#协议来源)。
 
 兼容的数据面继续复用。停止 Worker 领取新 Work，排空在途调用，在批准的窗口替换 App 镜像；

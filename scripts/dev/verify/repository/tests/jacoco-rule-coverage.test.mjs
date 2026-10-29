@@ -417,6 +417,12 @@ test('every repository CLASS/PACKAGE/BUNDLE JaCoCo rule matches the element name
   assert.deepEqual(violations, [])
   assert.ok(stats.classOrPackageRuleCount >= 10, `expected >= 10 rules, got ${stats.classOrPackageRuleCount}`)
   assert.ok(stats.includePatternCount >= 50, `expected >= 50 include patterns, got ${stats.includePatternCount}`)
+
+  // 双 bundle 的关键类覆盖由 agent-builtin 的官方 JaCoCo Ant report/check 承担，不能再保留无效的 Maven 本地 check。
+  const runtimePom = readFileSync(path.join(REPOSITORY_ROOT, 'harness/runtime/pom.xml'), 'utf8')
+  const builtinPom = readFileSync(path.join(REPOSITORY_ROOT, 'harness/agent-builtin/pom.xml'), 'utf8')
+  assert.deepEqual(parseJacocoRules(runtimePom), [], 'runtime must not retain a local JaCoCo check')
+  assert.deepEqual(parseJacocoRules(builtinPom), [], 'builtin coverage must use the official Ant report')
 })
 
 test('dotted and wildcard CLASS patterns matching main sources are accepted', () => {

@@ -14,16 +14,29 @@ import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import tools.jackson.databind.MapperFeature;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.harness.builtin.query.BuiltinRequestQuery;
+import fun.fengwk.kkstudio.harness.builtin.query.BuiltinRequestView;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
+import fun.fengwk.kkstudio.harness.model.ModelInputModality;
+import fun.fengwk.kkstudio.harness.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
+import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
+import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.driver.GenerationProjection;
+import fun.fengwk.kkstudio.harness.runtime.driver.GenerationStatus;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.GoalSetting;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
@@ -33,21 +46,9 @@ import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ModelRequestSpecJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderRequestJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
@@ -55,6 +56,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLiveState;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
@@ -77,13 +79,14 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Stream;
 
 /**
  * ModelRequestDebugService 契约：以草稿 model / environment 在单次不可变 snapshot 上投影共享规划结果、把确定性拒绝降级为稳定 code
- * 与安全空投影、只按 request head 前缀物化活动 Invocation 的冻结请求、按同名 Agent definition 补齐 subagent 配置，并且全程只读。
+ * 与安全空投影、通过 Builtin 查询附加当前冻结请求、按同名 Agent definition 补齐 subagent 配置，并且全程只读。
  */
 class ModelRequestDebugServiceTest {
 
@@ -93,7 +96,7 @@ class ModelRequestDebugServiceTest {
   private static final UUID TURN_START_ID = new UUID(0L, 2L);
   private static final UUID USER_ENTRY_ID = new UUID(0L, 3L);
   private static final UUID ASSISTANT_ENTRY_ID = new UUID(0L, 4L);
-  private static final UUID MISSING_ENTRY_ID = new UUID(0L, 99L);
+  private static final UUID BUILTIN_GENERATION_ID = new UUID(0L, 50L);
   private static final String CREATION_REQUEST_HASH =
       "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
   private static final EnvironmentId ENV_B =
@@ -130,6 +133,7 @@ class ModelRequestDebugServiceTest {
   private final AgentDefinitionConfigCodec agentConfigCodec =
       new AgentDefinitionConfigCodec(
           JsonMapper.builder().disable(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY).build());
+  private final BuiltinRequestQuery builtinRequestQuery = mock(BuiltinRequestQuery.class);
 
   private final ModelRequestDebugService service =
       new ModelRequestDebugService(
@@ -137,7 +141,13 @@ class ModelRequestDebugServiceTest {
           turnResolver,
           agentDefinitionRepository,
           agentConfigCodec,
+          builtinRequestQuery,
           Clock.fixed(NOW, ZoneOffset.UTC));
+
+  @BeforeEach
+  void noFrozenInvocationByDefault() {
+    when(builtinRequestQuery.findCurrent(THREAD_ID)).thenReturn(Optional.empty());
+  }
 
   @Test
   void projectsTheSharedPlanIntoTheStructuredContract() {
@@ -295,33 +305,36 @@ class ModelRequestDebugServiceTest {
   }
 
   /**
-   * 测试意图：活动 Invocation 的冻结请求必须物化在 root-to-requestHead 前缀上。Tool context 的当前 head 是 Assistant
-   * 结果（request head 的后代），用当前 head 会把后续结果投影进请求，因此这里显式断言它不出现。
+   * 测试意图：冻结请求直接来自 Builtin 当前 generation 的 canonical request-spec，不基于 Tool context 的当前 head
+   * 重新物化；这里断言完整 spec 往返而非仅字符串透传，并确认身份/attempt 原样透传。
    */
   @Test
-  void materializesFrozenInvocationAgainstTheRequestHeadPrefixInsteadOfTheToolContextHead() {
+  void exposesBuiltinFrozenRequestSpecInsteadOfMaterializingToolContext() {
     ThreadSnapshot snapshot = toolContextSnapshot(USER_ENTRY_ID);
     when(runtime.getThreadSnapshot(THREAD_ID)).thenReturn(snapshot);
     when(turnResolver.planLiveWithSettings(eq(THREAD_ID), eq(snapshot.entryPath()), any()))
         .thenReturn(successfulPlan());
+    when(builtinRequestQuery.findCurrent(THREAD_ID))
+        .thenReturn(Optional.of(builtinRequestView(BUILTIN_GENERATION_ID, 2)));
     stubCoderDefinition();
 
     HarnessModelRequestDebugDTO.FrozenInvocationDTO frozen =
         service.getModelRequestDebug(THREAD_ID, DRAFT_MODEL, DRAFT_ENV).getFrozenInvocation();
 
     assertEquals("FROZEN_INVOCATION", frozen.getKind());
-    ProviderRequest materialized = new ProviderRequestJsonCodec().decode(frozen.getRequestJson());
-    assertEquals("system instruction", materialized.systemInstruction());
-    assertEquals(1, materialized.messages().size());
+    assertEquals(BUILTIN_GENERATION_ID.toString(), frozen.getGenerationId());
+    assertEquals(2, frozen.getAttempt());
+    ModelRequestSpec frozenSpec = new ModelRequestSpecJsonCodec().decode(frozen.getRequestJson());
+    assertEquals("system instruction", frozenSpec.systemInstruction());
+    assertEquals(512, frozenSpec.outputTokens());
+    assertTrue(frozenSpec.toolBindings().isEmpty());
     assertEquals(
-        "user-1",
-        ((ProviderTextBlock) materialized.messages().getFirst().contents().getFirst()).text());
-    assertFalse(frozen.getRequestJson().contains("assistant-reply"), frozen.getRequestJson());
+        List.of(new SubagentBinding("coder", "Codes solutions.")), frozenSpec.subagentBindings());
   }
 
   /**
-   * 测试意图：冻结事实只来自原始 snapshot 与原始 path——换草稿 model / environment 不改变冻结请求 JSON；预览被确定性拒绝时冻结事实 仍独立成立，没有活动
-   * Model 时冻结视图缺席。
+   * 测试意图：冻结事实来自 Builtin 查询而非 snapshot generation——换草稿 model / environment 不改变冻结请求
+   * JSON；预览被确定性拒绝时冻结事实 仍独立成立，Builtin 查询为空时冻结视图缺席。
    */
   @Test
   void keepsFrozenInvocationStableAcrossDraftSelectionsAndWhenPreviewRejects() throws IOException {
@@ -329,6 +342,8 @@ class ModelRequestDebugServiceTest {
     when(runtime.getThreadSnapshot(THREAD_ID)).thenReturn(snapshot);
     when(turnResolver.planLiveWithSettings(eq(THREAD_ID), eq(snapshot.entryPath()), any()))
         .thenReturn(successfulPlan());
+    when(builtinRequestQuery.findCurrent(THREAD_ID))
+        .thenReturn(Optional.of(builtinRequestView(BUILTIN_GENERATION_ID, 2)));
     stubCoderDefinition();
 
     String firstFrozen =
@@ -343,6 +358,7 @@ class ModelRequestDebugServiceTest {
             .getFrozenInvocation()
             .getRequestJson();
     assertEquals(firstFrozen, secondFrozen);
+    assertEquals(frozenRequestSpecJson(), firstFrozen);
 
     // 预览被拒绝：冻结事实仍然成立。
     when(turnResolver.planLiveWithSettings(eq(THREAD_ID), eq(snapshot.entryPath()), any()))
@@ -353,12 +369,13 @@ class ModelRequestDebugServiceTest {
     assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejected.getPlanningError());
     assertEquals("FROZEN_INVOCATION", rejected.getFrozenInvocation().getKind());
 
-    // 没有活动 Model：冻结视图必须缺席。
+    // 没有 Builtin 当前 generation：冻结视图必须缺席。
     ThreadSnapshot idle = idleSnapshot();
     when(runtime.getThreadSnapshot(THREAD_ID)).thenReturn(idle);
     when(turnResolver.planLiveWithSettings(eq(THREAD_ID), eq(idle.entryPath()), any()))
         .thenReturn(
             new LiveTurnPlan.Rejected(DatabaseTurnResolver.REJECTION_CODE, "agent not found"));
+    when(builtinRequestQuery.findCurrent(THREAD_ID)).thenReturn(Optional.empty());
     assertNull(
         service.getModelRequestDebug(THREAD_ID, DRAFT_MODEL, DRAFT_ENV).getFrozenInvocation());
   }
@@ -420,18 +437,24 @@ class ModelRequestDebugServiceTest {
         broken.getMessage());
   }
 
-  /** 测试意图：request head 不在当前 Thread 路径上说明 durable 不变量已破坏，必须 fail closed 而不是投影错误请求。 */
+  /** 测试意图：冻结 spec 由 Builtin 查询提供，与 snapshot generation 的 ID/attempt 相互独立；平台侧只做稳定透传。 */
   @Test
-  void failsClosedWhenTheFrozenRequestHeadIsNotOnTheThreadPath() {
-    ThreadSnapshot snapshot = toolContextSnapshot(MISSING_ENTRY_ID);
+  void readsFrozenInvocationFromBuiltinQueryIndependentlyOfSnapshotGeneration() {
+    ThreadSnapshot snapshot = toolContextSnapshot(USER_ENTRY_ID);
     when(runtime.getThreadSnapshot(THREAD_ID)).thenReturn(snapshot);
     when(turnResolver.planLiveWithSettings(eq(THREAD_ID), eq(snapshot.entryPath()), any()))
         .thenReturn(successfulPlan());
+    UUID queriedGenerationId = new UUID(0L, 51L);
+    when(builtinRequestQuery.findCurrent(THREAD_ID))
+        .thenReturn(Optional.of(builtinRequestView(queriedGenerationId, 3)));
     stubCoderDefinition();
 
-    assertThrows(
-        IllegalStateException.class,
-        () -> service.getModelRequestDebug(THREAD_ID, DRAFT_MODEL, DRAFT_ENV));
+    HarnessModelRequestDebugDTO.FrozenInvocationDTO frozen =
+        service.getModelRequestDebug(THREAD_ID, DRAFT_MODEL, DRAFT_ENV).getFrozenInvocation();
+    assertEquals("FROZEN_INVOCATION", frozen.getKind());
+    assertEquals(queriedGenerationId.toString(), frozen.getGenerationId());
+    assertEquals(3, frozen.getAttempt());
+    assertEquals(frozenRequestSpecJson(), frozen.getRequestJson());
   }
 
   /** 测试意图：基础设施/编程异常必须原样传播，绝不被误分类为 planning 失败。 */
@@ -486,7 +509,7 @@ class ModelRequestDebugServiceTest {
         List.of(),
         null,
         List.of(),
-        List.of(),
+        ThreadLiveState.IDLE_OR_HISTORICAL,
         List.of(),
         0,
         false,
@@ -494,37 +517,43 @@ class ModelRequestDebugServiceTest {
         false);
   }
 
-  /** Tool context：head 是 Assistant 结果，而活动 Invocation 的 request head 是更早的 USER Entry。 */
+  /** Tool context：head 是 Assistant 结果，generation 的 request head 是更早的 USER Entry。 */
   private static ThreadSnapshot toolContextSnapshot(UUID requestHeadEntryId) {
     EntryPath path = assistantHeadPath();
-    ModelInvocation model =
-        new ModelInvocation(
-            new UUID(0L, 50L),
-            THREAD_ID,
+    GenerationProjection generation =
+        new GenerationProjection(
+            BUILTIN_GENERATION_ID,
             TURN_START_ID,
             requestHeadEntryId,
-            requestSpec(),
-            ModelInvocationStatus.READY,
+            GenerationStatus.READY,
             0,
-            null,
-            null,
-            null,
-            null,
+            0L,
             List.of(),
+            null,
+            null,
             NOW,
-            NOW);
+            NOW,
+            List.of());
     return new ThreadSnapshot(
         thread(ASSISTANT_ENTRY_ID),
         path,
         List.of(),
-        model,
+        generation,
         List.of(),
-        List.of(),
+        ThreadLiveState.TOOL_ACTIVE,
         List.of(),
         0,
         false,
         List.of(),
         false);
+  }
+
+  private static BuiltinRequestView builtinRequestView(UUID generationId, int attempt) {
+    return new BuiltinRequestView(generationId, attempt, requestSpec());
+  }
+
+  private static String frozenRequestSpecJson() {
+    return new ModelRequestSpecJsonCodec().encode(requestSpec());
   }
 
   private static EntryPath basePath() {

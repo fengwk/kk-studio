@@ -25,7 +25,12 @@ const DEBUG: HarnessModelRequestDebugDTO = {
   model: { modelName: 'm', variant: 'default' },
   environmentName: null, systemInstruction: 'prompt', tools: [], skills: [], subagents: [],
   cacheControl: null, planningError: null,
-  frozenInvocation: { kind: 'FROZEN_INVOCATION', requestJson: '{"model":"first"}' },
+  frozenInvocation: {
+    kind: 'FROZEN_INVOCATION',
+    generationId: 'generation-1',
+    attempt: 1,
+    requestJson: '{"model":"first"}',
+  },
 }
 
 function boundController(): BoundThreadPanelController {
@@ -44,10 +49,10 @@ function boundController(): BoundThreadPanelController {
         agentName: 'agent', model: DEBUG.model, environmentName: null, goal: null,
       }, createTime: 1790504400, updateTime: 1790504400,
     },
-    modelInvocation: {
-      id: 'model-1', threadId: 'thread', turnStartEntryId: 'turn', requestHeadEntryId: 'head',
-      status: 'READY', attempt: 1, streamCheckpointJson: null, resultJson: null,
-      errorJson: null, resultEntryId: null, createTime: 1790504400, updateTime: 1790504400,
+    activeAssistantOutput: {
+      generationId: 'generation-1', turnStartEntryId: 'turn', requestHeadEntryId: 'head',
+      status: 'READY', attempt: 1, sequence: '0', contents: [],
+      error: null, resultEntryId: null, createTime: 1790504400, updateTime: 1790504400,
     },
   }
 }
@@ -65,10 +70,10 @@ it('refreshes authoritative invocation, phase, version and planner settings with
   act(() => result.current.switchMode('debug'))
   await waitFor(() => expect(result.current.debug?.frozenInvocation).toEqual(DEBUG.frozenInvocation))
   const changes: BoundThreadPanelController[] = [
-    { ...initial, modelInvocation: { ...initial.modelInvocation!, status: 'RUNNING' } },
+    { ...initial, activeAssistantOutput: { ...initial.activeAssistantOutput!, status: 'RUNNING' } },
     { ...initial, thread: { ...initial.thread!, status: 'IDLE' } },
-    { ...initial, modelInvocation: null },
-    { ...initial, modelInvocation: { ...initial.modelInvocation!, id: 'model-2' } },
+    { ...initial, activeAssistantOutput: null },
+    { ...initial, activeAssistantOutput: { ...initial.activeAssistantOutput!, generationId: 'generation-2' } },
     { ...initial, thread: { ...initial.thread!, version: '2' } },
     { ...initial, thread: { ...initial.thread!, branchSettings: { ...initial.thread!.branchSettings, agentName: 'other' } } },
   ]
@@ -259,7 +264,7 @@ describe('useBoundThreadPanelViews view identity', () => {
       events: [] as ThreadEventRecord[],
       sessionId: 'session',
       thread: undefined,
-      modelInvocation: null,
+      activeAssistantOutput: null,
       models: [],
     }
     return renderHook(

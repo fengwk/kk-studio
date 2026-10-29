@@ -73,6 +73,8 @@ function sampleDebug(overrides: Partial<ThreadModelRequestDebugData> = {}): Thre
     planningError: null,
     frozenInvocation: {
       kind: 'FROZEN_INVOCATION',
+      generationId: 'generation-1',
+      attempt: 1,
       requestJson: '{"model":"minimax","messages":[{"role":"user","content":"hi"}]}',
     },
     ...overrides,

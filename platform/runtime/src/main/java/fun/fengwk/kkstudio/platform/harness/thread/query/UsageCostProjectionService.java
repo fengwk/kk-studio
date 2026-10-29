@@ -2,12 +2,12 @@ package fun.fengwk.kkstudio.platform.harness.thread.query;
 
 import org.springframework.stereotype.Component;
 
+import fun.fengwk.kkstudio.harness.model.ModelCost;
+import fun.fengwk.kkstudio.harness.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.CompactionPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
@@ -43,14 +43,10 @@ public class UsageCostProjectionService {
   /**
    * 返回 {@code entryId -> 费用投影} 的不可变映射；无法定价的 Entry 不出现在结果里。
    *
-   * @param entries 同一 Session 的 Entry 集合，且包含每个待计价 Entry 的完整祖先链
+   * @param entries 同一 Session 的 Entry 集合
    */
   public Map<UUID, HarnessUsageCostDTO> project(List<Entry> entries) {
     Objects.requireNonNull(entries, "entries");
-    Map<UUID, Entry> entriesById = new HashMap<>(entries.size());
-    for (Entry entry : entries) {
-      entriesById.put(entry.id(), entry);
-    }
     Map<String, ModelPricing> pricingByModel = new HashMap<>();
     Map<UUID, HarnessUsageCostDTO> costs = new HashMap<>();
     for (Entry entry : entries) {

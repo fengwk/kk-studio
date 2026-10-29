@@ -353,9 +353,9 @@ async function installChatApi(
             createTime: 1790813040,
             usageCost: null,
           }] : []),
-        ], queuedCommands: [],
-        modelInvocation: null, toolInvocations: [], modelAttemptFailures: [],
-        manualCompaction: { available: false, disabledReason: 'readonly' }, stopReceipts: [],
+        ], queuedCommands: [], executionStatus: grandchild && !grandCompleted ? 'RUNNING' : 'IDLE',
+        activeAssistantOutput: null, toolInvocations: [], generationFailures: [],
+        manualCompaction: { available: false, disabledReason: 'readonly' }, stopReceipts: [], unconfirmedExecutions: [],
       } } })
       return
     }
@@ -370,11 +370,13 @@ async function installChatApi(
             thread: currentThread,
             entries: isCreated ? entryList.filter((entry) => ['entry-1', 'entry-ancestor', 'entry-2'].includes(entry.entryId)) : entryList.filter((entry) => entry.entryId !== 'entry-sibling'),
             queuedCommands: isCreated ? [] : queuedCommands,
-            modelInvocation: null,
+            executionStatus: currentThread.status,
+            activeAssistantOutput: null,
             toolInvocations: [],
-            modelAttemptFailures: [],
+            generationFailures: [],
             manualCompaction: { available: false, disabledReason: 'not available' },
             stopReceipts: [],
+            unconfirmedExecutions: [],
           },
         },
       })

@@ -35,6 +35,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.SystemReminder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLiveState;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatSessionRepository;
@@ -192,7 +193,7 @@ class HarnessOwnerQueryServiceTest {
                 List.of(),
                 null,
                 List.of(),
-                List.of(),
+                ThreadLiveState.IDLE_OR_HISTORICAL,
                 List.of(),
                 0,
                 false,
@@ -262,7 +263,7 @@ class HarnessOwnerQueryServiceTest {
             List.of(),
             null,
             List.of(),
-            List.of(),
+            ThreadLiveState.IDLE_OR_HISTORICAL,
             List.of(),
             0,
             false,
@@ -291,7 +292,7 @@ class HarnessOwnerQueryServiceTest {
                 List.of(),
                 null,
                 List.of(),
-                List.of(),
+                ThreadLiveState.IDLE_OR_HISTORICAL,
                 List.of(),
                 0,
                 false,
@@ -339,7 +340,7 @@ class HarnessOwnerQueryServiceTest {
                   List.of(),
                   null,
                   List.of(),
-                  List.of(),
+                  ThreadLiveState.IDLE_OR_HISTORICAL,
                   List.of(),
                   0,
                   false,
@@ -379,7 +380,7 @@ class HarnessOwnerQueryServiceTest {
                 List.of(),
                 null,
                 List.of(),
-                List.of(),
+                ThreadLiveState.IDLE_OR_HISTORICAL,
                 List.of(),
                 0,
                 false,

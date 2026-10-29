@@ -1,9 +1,11 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
-import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.driver.AgentDriver;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverActivity;
+import fun.fengwk.kkstudio.harness.runtime.driver.GenerationProjection;
+import fun.fengwk.kkstudio.harness.runtime.driver.LockedDriverState;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
@@ -12,17 +14,16 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextClassifier;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 
 import java.util.List;
-import java.util.Optional;
+import java.util.Objects;
+import java.util.UUID;
 
 /**
- * 小型 package-private HarnessStore transaction 辅助工具，被所有 control-plane 入口（以及后续的 Stop slice）共用，不是框架或
- * repository。
+ * 小型 HarnessStore transaction 辅助工具，被所有 control-plane 入口共用。
  *
- * <p>从调用方已锁定的 Thread 出发，加载 root-to-head {@link EntryPath}，仅通过 {@code (threadId, open TURN_START)}
- * 查找 Model 并锁定该适用 Model；只有当该 Model 的 result 恰为 当前 Assistant head 时，才加载/锁定 Tool siblings（Tool
- * siblings 存在即 outcome 尚未物化）；随后在已锁定的行上运行纯 {@link ThreadContextClassifier}，从而保证各操作之间的分类不发生漂移。同时需要
- * Commands 的调用方必须 先锁定已入队 Commands，保持规范顺序 Thread -&gt; Commands -&gt; Model -&gt; Tool siblings
- * -&gt; Work。
+ * <p>从调用方已锁定的 Thread 出发，加载 root-to-head {@link EntryPath}，经 {@link AgentDriver#lockState} 取得中立的
+ * Runtime 视图，并仅在当前 Assistant head 上加载/锁定 Tool siblings；随后在已锁定的行上运行纯 {@link
+ * ThreadContextClassifier}。公共工具操作使用 {@link #loadTools(HarnessStore.Transaction, ThreadState)}，不读取
+ * Driver。
  */
 final class ThreadContextLock {
 
@@ -30,38 +31,79 @@ final class ThreadContextLock {
 
   private ThreadContextLock() {}
 
-  /** 加载已锁定 Thread 的当前 root-to-head path，并在锁内对其进行分类。 */
-  static LockedThreadContext load(HarnessStore.Transaction tx, ThreadState thread) {
-    return load(tx, thread, tx.loadEntryPath(thread.headEntryId()));
+  static LockedThreadContext load(
+      HarnessStore.Transaction tx, ThreadState thread, AgentDriver driver) {
+    return load(tx, thread, tx.loadEntryPath(thread.headEntryId()), driver);
   }
 
-  /** 在锁内分类，并允许调用方复用已加载的 head path。 */
-  static LockedThreadContext load(HarnessStore.Transaction tx, ThreadState thread, EntryPath path) {
-    ModelInvocation model = null;
+  static LockedThreadContext load(
+      HarnessStore.Transaction tx, ThreadState thread, EntryPath path, AgentDriver driver) {
+    Objects.requireNonNull(driver, "driver");
+    LockedDriverState driverState = driver.lockState(tx, thread, path);
     List<ToolInvocation> siblings = List.of();
-    Optional<Entry> openTurn = path.openTurnStart();
-    if (openTurn.isPresent()) {
-      Optional<ModelInvocation> found =
-          tx.findModelInvocationByTurn(thread.id(), openTurn.get().id());
-      if (found.isPresent()) {
-        model =
-            tx.lockModelInvocation(found.get().id())
-                .orElseThrow(
-                    () ->
-                        new IllegalStateException(
-                            "model "
-                                + found.get().id()
-                                + " could not be locked for thread "
-                                + thread.id()));
-        if (model.resultEntryId() != null
-            && model.resultEntryId().equals(thread.headEntryId())
-            && path.head().payload() instanceof MessagePayload message
-            && message.message().role() == AgentMessageRole.ASSISTANT) {
-          siblings = tx.lockToolInvocationsByAssistantEntryId(path.head().id());
-        }
-      }
+    if (path.openTurnStart().isPresent() && assistantHead(path)) {
+      siblings =
+          tx.lockToolInvocationsByAssistantEntryId(path.head().id()).stream()
+              .filter(
+                  sibling ->
+                      sibling.threadId().equals(thread.id())
+                          && sibling
+                              .turnStartEntryId()
+                              .equals(path.openTurnStart().orElseThrow().id())
+                          && sibling.assistantEntryId().equals(path.head().id()))
+              .toList();
     }
-    ThreadContext context = CLASSIFIER.classify(thread, path, model, siblings);
-    return new LockedThreadContext(path, context);
+    ThreadContext context = CLASSIFIER.classify(thread, path, driverState, siblings);
+    return new LockedThreadContext(path, context, driverState);
+  }
+
+  /** 公共 Tool 分类：只加载并锁定 Thread 与 Tool siblings，不读取 Driver。 */
+  static LockedThreadContext loadTools(HarnessStore.Transaction tx, ThreadState thread) {
+    EntryPath path = tx.loadEntryPath(thread.headEntryId());
+    List<ToolInvocation> siblings =
+        path.openTurnStart().isPresent() && assistantHead(path)
+            ? tx.lockToolInvocationsByAssistantEntryId(path.head().id()).stream()
+                .filter(
+                    sibling ->
+                        sibling.threadId().equals(thread.id())
+                            && sibling
+                                .turnStartEntryId()
+                                .equals(path.openTurnStart().orElseThrow().id())
+                            && sibling.assistantEntryId().equals(path.head().id()))
+                .toList()
+            : List.of();
+    ThreadContext context = CLASSIFIER.classify(thread, path, NoDriverState.INSTANCE, siblings);
+    return new LockedThreadContext(path, context, NoDriverState.INSTANCE);
+  }
+
+  private static boolean assistantHead(EntryPath path) {
+    return path.head().payload() instanceof MessagePayload message
+        && message.message().role() == AgentMessageRole.ASSISTANT;
+  }
+
+  /** 无 Driver 的公共工具视图。 */
+  private static final class NoDriverState implements LockedDriverState {
+
+    private static final NoDriverState INSTANCE = new NoDriverState();
+
+    @Override
+    public DriverActivity activity() {
+      return DriverActivity.NONE;
+    }
+
+    @Override
+    public UUID requestHeadEntryId() {
+      return null;
+    }
+
+    @Override
+    public UUID resultEntryId() {
+      return null;
+    }
+
+    @Override
+    public GenerationProjection projection() {
+      return null;
+    }
   }
 }

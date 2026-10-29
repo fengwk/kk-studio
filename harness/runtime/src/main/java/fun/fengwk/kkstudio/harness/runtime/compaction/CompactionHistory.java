@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.compaction;
 
+import fun.fengwk.kkstudio.harness.model.provider.ContextPressureDetector;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantAbortedPayload;
@@ -10,8 +12,6 @@ import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ContextPressureDetector;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 
@@ -74,7 +74,8 @@ public final class CompactionHistory {
   }
 
   /** 根据 startEntryId 查找对应的 CompactionTurn 事实。 */
-  static CompactionTurns.CompactionTurn compactionTurnAtStart(EntryPath path, UUID startEntryId) {
+  public static CompactionTurns.CompactionTurn compactionTurnAtStart(
+      EntryPath path, UUID startEntryId) {
     Objects.requireNonNull(path, "path");
     Objects.requireNonNull(startEntryId, "startEntryId");
     for (CompactionTurns.CompactionTurn turn : CompactionTurns.scan(path)) {
@@ -89,7 +90,7 @@ public final class CompactionHistory {
    * 路径上指定 turn 的 assistant 结果 Entry（ASSISTANT MESSAGE / ASSISTANT_ERROR / ASSISTANT_ABORTED）；无则返回
    * null。
    */
-  static Entry turnResultEntry(EntryPath path, Entry turn) {
+  public static Entry turnResultEntry(EntryPath path, Entry turn) {
     Objects.requireNonNull(path, "path");
     Objects.requireNonNull(turn, "turn");
     boolean inTurn = false;
@@ -147,7 +148,7 @@ public final class CompactionHistory {
   }
 
   /** 当前失败 turn 是否正是 complete OVERFLOW compaction 创建的 immediate CONTINUATION 重试。 */
-  static boolean isOverflowRecoveryRetry(EntryPath path, ClosedTurn latestTurn) {
+  public static boolean isOverflowRecoveryRetry(EntryPath path, ClosedTurn latestTurn) {
     Objects.requireNonNull(path, "path");
     Objects.requireNonNull(latestTurn, "latestTurn");
     if (((TurnStartPayload) latestTurn.start().payload()).reason()
@@ -173,7 +174,7 @@ public final class CompactionHistory {
   }
 
   /** 判断是否达到上下文边界/溢出墙（ProviderErrorKind.OVERFLOW 或 ContextPressureDetector 判定）。 */
-  static boolean isContextWall(TurnStartPayload start, Entry resultEntry) {
+  public static boolean isContextWall(TurnStartPayload start, Entry resultEntry) {
     if (resultEntry == null) {
       return false;
     }

@@ -28,7 +28,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * <p>所有权丢失围栏：续租事务异常、调度器启动拒绝或分派执行器拒绝，均视为所有权无法维系； 统一触发停止并确保 {@link #onLostOwnership} 恰好执行一次。
  */
 @Slf4j
-final class WorkHeartbeat {
+public final class WorkHeartbeat {
 
   private final HarnessStore store;
   private final ScheduledExecutorService scheduler;
@@ -44,7 +44,7 @@ final class WorkHeartbeat {
   private ScheduledFuture<?> future;
   private boolean started;
 
-  WorkHeartbeat(
+  public WorkHeartbeat(
       HarnessStore store,
       ScheduledExecutorService scheduler,
       Executor heartbeatWorker,
@@ -58,7 +58,7 @@ final class WorkHeartbeat {
   }
 
   /** 启动固定频率 renew；已 stop / 已 start / scheduler 拒绝时返回 false。 */
-  boolean start(ClaimedWork claim) {
+  public boolean start(ClaimedWork claim) {
     Objects.requireNonNull(claim, "claim");
     boolean lost = false;
     synchronized (stateLock) {
@@ -89,7 +89,7 @@ final class WorkHeartbeat {
    *
    * <p>等待在途 renewal 结束；返回后绝无在途或排队任务能够再次续租。
    */
-  void stop() {
+  public void stop() {
     stoppedNormally.set(true);
     stopScheduled();
     synchronized (renewalLock) {

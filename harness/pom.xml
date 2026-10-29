@@ -15,8 +15,9 @@
 
     <modules>
         <module>environment</module>
+        <module>model</module>
         <module>runtime</module>
-        <module>provider</module>
+        <module>agent-builtin</module>
         <module>infra</module>
     </modules>
 </project>

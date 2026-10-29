@@ -7,6 +7,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 
+import fun.fengwk.kkstudio.harness.builtin.store.BuiltinStore;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.StoppedThreadReceipt;
@@ -132,7 +133,7 @@ import java.util.function.Supplier;
  * #rescheduleWork} 在执行终态更新前先由 {@link #lockWork} 获取 Work 行级排他锁，再由 Work 领域跃迁校验 {@code lease_token} 与
  * {@code claimedWakeVersion}。若租约丢失则抛出异常导致整个事务回滚；若执行期间有新 wake 到达使版本递增，则清除租约保留行，防止并发工作被静默覆盖。
  */
-final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
+final class PostgresqlHarnessTransaction implements BuiltinStore.Transaction {
 
   /**
    * Work claim-only 短事务候选选取与租约写入 SQL。
@@ -223,8 +224,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
                  t.root_thread_id as root_thread_id,
                  w.required_environment_id as environment_id
           from harness_tool_invocation i
-          join harness_model_invocation m on m.id = i.model_invocation_id
-          join harness_thread t on t.id = m.thread_id
+          join harness_thread t on t.id = i.thread_id
           join durable_work w on w.target_type = 'TOOL' and w.target_id = i.id
           where i.status = 'READY'
             and w.required_environment_id is not null
@@ -374,6 +374,9 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   /** 外部注入的 UUID 生成器。 */
   private final Supplier<UUID> idGenerator;
 
+  /** 创建本事务的 Store 身份 token；typed view 必须与当前 Store 精确同源。 */
+  private final Object storeToken;
+
   /** 当前事务已成功获取锁的实体资源标识集合，用于支持加锁幂等并防范重入。 */
   private final Set<LockKey> locked = new HashSet<>();
 
@@ -409,9 +412,19 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   /** 本事务首次读取的数据库时间；之后的 {@link #now()} 返回同一值。 */
   private Instant transactionNow;
 
-  PostgresqlHarnessTransaction(JdbcTemplate jdbc, Supplier<UUID> idGenerator) {
+  PostgresqlHarnessTransaction(JdbcTemplate jdbc, Supplier<UUID> idGenerator, Object storeToken) {
     this.jdbc = Objects.requireNonNull(jdbc, "jdbc");
     this.idGenerator = Objects.requireNonNull(idGenerator, "idGenerator");
+    this.storeToken = Objects.requireNonNull(storeToken, "storeToken");
+  }
+
+  /** 校验 typed view 来自当前 Store、仍在本回调生命周期内且由 owner thread 使用。 */
+  void requireView(Object expectedStoreToken) {
+    checkOpen();
+    if (storeToken != expectedStoreToken) {
+      throw new IllegalArgumentException(
+          "store view requires a transaction created by this PostgresqlHarnessStore");
+    }
   }
 
   /** 关闭事务 handle 并清空事务内 EntryPath 局部缓存。 */
@@ -1851,7 +1864,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   @Override
   public List<ToolInvocation> lockToolInvocationsByAssistantEntryId(UUID assistantEntryId) {
     checkOpen();
-    requireCanLockRank(LockRank.TOOL);
+    // Work-stage reentry requires every current sibling to be already locked.
     List<ToolInvocation> current = loadToolInvocationsByAssistantEntryId(assistantEntryId);
     requireCanLockTools(current);
     List<ToolInvocation> invocations =
@@ -1882,10 +1895,9 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     }
     return queryList(
         """
-        select t.*, m.thread_id as pending_thread_id, th.session_id as pending_session_id
+        select t.*, t.thread_id as pending_thread_id, th.session_id as pending_session_id
         from harness_tool_invocation t
-        join harness_model_invocation m on m.id = t.model_invocation_id
-        join harness_thread th on th.id = m.thread_id
+        join harness_thread th on th.id = t.thread_id
         where t.status in ('WAITING_APPROVAL', 'WAITING_INPUT')
           and (t.created_at, t.id) > (?, ?)
         order by t.created_at, t.id
@@ -2025,15 +2037,16 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       update(
           """
           insert into harness_tool_invocation (
-              id, model_invocation_id, assistant_entry_id, call_index, call, binding, status, attempt,
+              id, thread_id, turn_start_entry_id, assistant_entry_id, call_index, call, binding, status, attempt,
               approval, result, effects, error, created_at, updated_at, input_receipt
           ) values (
-              ?, ?, ?, ?, cast(? as jsonb), cast(? as jsonb), ?, ?, cast(? as jsonb),
+              ?, ?, ?, ?, ?, cast(? as jsonb), cast(? as jsonb), ?, ?, cast(? as jsonb),
               cast(? as jsonb), cast(? as jsonb), cast(? as jsonb), ?, ?, cast(? as jsonb)
           )
           """,
           invocation.id(),
-          invocation.modelInvocationId(),
+          invocation.threadId(),
+          invocation.turnStartEntryId(),
           invocation.assistantEntryId(),
           invocation.callIndex(),
           PostgresqlHarnessRows.JSON.write(invocation.call(), "toolCall"),
@@ -2299,12 +2312,12 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     }
 
     List<ToolInvocation> tools = new ArrayList<>();
-    for (ModelInvocation model : lockedModels) {
+    for (UUID threadId : copied) {
       tools.addAll(
           queryList(
-              "select * from harness_tool_invocation where model_invocation_id = ?",
+              "select * from harness_tool_invocation where thread_id = ?",
               PostgresqlHarnessRows.TOOL_INVOCATION,
-              model.id()));
+              threadId));
     }
     tools.sort(TOOL_LOCK_ORDER);
     List<ToolInvocation> lockedTools = new ArrayList<>(tools.size());
@@ -2807,17 +2820,24 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   private boolean hasToolInvocationChildren(UUID modelInvocationId) {
+    ModelInvocation model =
+        findModelInvocation(modelInvocationId)
+            .orElseThrow(
+                () ->
+                    new IllegalArgumentException(
+                        "model invocation " + modelInvocationId + " does not exist"));
     Boolean exists =
         queryForObject(
             """
             select exists (
                 select 1
                 from harness_tool_invocation
-                where model_invocation_id = ?
+                where thread_id = ? and turn_start_entry_id = ?
             )
             """,
             Boolean.class,
-            modelInvocationId);
+            model.threadId(),
+            model.turnStartEntryId());
     return Boolean.TRUE.equals(exists);
   }
 
@@ -3069,21 +3089,39 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   private void requireValidToolReferences(ToolInvocation invocation) {
-    ModelInvocation model =
-        findModelInvocation(invocation.modelInvocationId())
+    ThreadState thread =
+        findThread(invocation.threadId())
             .orElseThrow(
                 () ->
                     new IllegalArgumentException(
-                        "model invocation " + invocation.modelInvocationId() + " does not exist"));
-    if (model.resultEntryId() == null
-        || !model.resultEntryId().equals(invocation.assistantEntryId())) {
+                        "thread " + invocation.threadId() + " does not exist"));
+    if (invocation.binding() == null && invocation.status() != ToolInvocationStatus.FAILED) {
+      throw new IllegalArgumentException("unbound tool invocations must be terminal FAILED slots");
+    }
+    Entry turnStart = requireExistingEntry(invocation.turnStartEntryId());
+    if (turnStart.payload().type() != EntryType.TURN_START
+        || !(turnStart.payload() instanceof TurnStartPayload start)) {
+      throw new IllegalArgumentException("turnStartEntryId must reference a TURN_START entry");
+    }
+    if (!start.ownerThreadId().equals(thread.id())
+        || !turnStart.sessionId().equals(thread.sessionId())) {
       throw new IllegalArgumentException(
-          "model invocation resultEntryId must equal the tool assistantEntryId");
+          "turn start must belong to the tool invocation thread and session");
     }
     Entry assistant = requireExistingEntry(invocation.assistantEntryId());
     if (!isAssistantEntry(assistant)) {
       throw new IllegalArgumentException(
           "assistantEntryId must reference an assistant MESSAGE entry");
+    }
+    if (!assistant.sessionId().equals(thread.sessionId())) {
+      throw new IllegalArgumentException(
+          "assistantEntryId must belong to the tool invocation thread session");
+    }
+    EntryPath assistantPath = loadEntryPath(assistant.id());
+    if (assistantPath.openTurnStart().map(Entry::id).orElse(null) == null
+        || !assistantPath.openTurnStart().orElseThrow().id().equals(turnStart.id())) {
+      throw new IllegalArgumentException(
+          "assistantEntryId must be on the branch opened by turnStartEntryId");
     }
     requireMatchingAssistantToolCall(invocation, assistant);
   }
@@ -3138,33 +3176,29 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
                     .orElseThrow(
                         () ->
                             new IllegalArgumentException("work target does not exist: " + target));
-            yield findModelInvocation(tool.modelInvocationId())
-                .orElseThrow(
-                    () ->
-                        new IllegalArgumentException(
-                            "model invocation "
-                                + tool.modelInvocationId()
-                                + " does not exist for work target "
-                                + target))
-                .threadId();
+            yield tool.threadId();
           }
         };
     requireLocked(LockKey.thread(threadId));
   }
 
   private void requireTargetExists(WorkTarget target) {
-    String table =
+    boolean exists =
         switch (target.type()) {
-          case THREAD -> "harness_thread";
-          case MODEL -> "harness_model_invocation";
-          case TOOL -> "harness_tool_invocation";
+          case THREAD -> queryExists(
+              "select exists (select 1 from harness_thread where id = ?)", target.id());
+          case MODEL -> queryExists(
+              "select exists (select 1 from harness_model_invocation where id = ?)", target.id());
+          case TOOL -> queryExists(
+              "select exists (select 1 from harness_tool_invocation where id = ?)", target.id());
         };
-    Boolean exists =
-        queryForObject(
-            "select exists (select 1 from " + table + " where id = ?)", Boolean.class, target.id());
-    if (!Boolean.TRUE.equals(exists)) {
+    if (!exists) {
       throw new IllegalArgumentException("work target does not exist: " + target);
     }
+  }
+
+  private boolean queryExists(String sql, UUID id) {
+    return Boolean.TRUE.equals(queryForObject(sql, Boolean.class, id));
   }
 
   /** 读取数据库权威时间（毫秒精度），作为 Work lease 有效性与 deadline 的唯一时间域。 */
@@ -3333,9 +3367,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     Optional<UUID> sourceThreadId =
         queryOne(
             """
-            select m.thread_id
+            select i.thread_id
             from harness_tool_invocation i
-            join harness_model_invocation m on m.id = i.model_invocation_id
             where i.id = ?
             """,
             (resultSet, rowNumber) -> resultSet.getObject("thread_id", UUID.class),

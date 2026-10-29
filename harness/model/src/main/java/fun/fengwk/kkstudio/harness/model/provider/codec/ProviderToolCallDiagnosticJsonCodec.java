@@ -1,0 +1,168 @@
+package fun.fengwk.kkstudio.harness.model.provider.codec;
+
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
+
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallDiagnostic;
+
+import java.util.Collections;
+import java.util.LinkedHashSet;
+import java.util.Objects;
+import java.util.Set;
+
+/**
+ * {@link ProviderToolCallDiagnostic} 的严格、确定性 JSON codec。
+ *
+ * <p>用于物化为 Assistant 历史中的 {@code JsonMessageContent} warning 节点。
+ */
+public final class ProviderToolCallDiagnosticJsonCodec {
+
+  public static final String TYPE_TAG = "tool_call_diagnostic";
+
+  private static final ObjectMapper OBJECT_MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .build();
+
+  private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
+
+  private static final Set<String> FIELDS =
+      orderedSet("type", "callIndex", "id", "name", "partialArguments", "message");
+
+  public String encode(ProviderToolCallDiagnostic diagnostic) {
+    Objects.requireNonNull(diagnostic, "diagnostic");
+    return write(encodeNode(diagnostic));
+  }
+
+  public ObjectNode encodeNode(ProviderToolCallDiagnostic diagnostic) {
+    Objects.requireNonNull(diagnostic, "diagnostic");
+    ObjectNode node = NODES.objectNode();
+    node.put("type", TYPE_TAG);
+    node.put("callIndex", diagnostic.callIndex());
+    if (diagnostic.id() == null) {
+      node.putNull("id");
+    } else {
+      node.put("id", diagnostic.id());
+    }
+    if (diagnostic.name() == null) {
+      node.putNull("name");
+    } else {
+      node.put("name", diagnostic.name());
+    }
+    if (diagnostic.partialArguments() == null) {
+      node.putNull("partialArguments");
+    } else {
+      node.put("partialArguments", diagnostic.partialArguments());
+    }
+    node.put("message", diagnostic.message());
+    return node;
+  }
+
+  public ProviderToolCallDiagnostic decode(String json) {
+    Objects.requireNonNull(json, "json");
+    return decodeNode(parse(json));
+  }
+
+  public ProviderToolCallDiagnostic decodeNode(JsonNode node) {
+    ObjectNode root = object(node, "toolCallDiagnostic");
+    requireFields(root, FIELDS, "toolCallDiagnostic");
+
+    String type = text(root, "type");
+    if (!TYPE_TAG.equals(type)) {
+      throw new IllegalArgumentException("expected diagnostic type " + TYPE_TAG);
+    }
+    long callIndex = nonNegativeLong(root, "callIndex");
+    if (callIndex > Integer.MAX_VALUE) {
+      throw new IllegalArgumentException("callIndex overflow");
+    }
+    String id = decodeNullableText(root, "id");
+    String name = decodeNullableText(root, "name");
+    String partialArguments = decodeNullableText(root, "partialArguments");
+    String message = text(root, "message");
+
+    return new ProviderToolCallDiagnostic((int) callIndex, id, name, partialArguments, message);
+  }
+
+  private static JsonNode parse(String json) {
+    try {
+      JsonNode node = OBJECT_MAPPER.readTree(json);
+      // Jackson 3 空白输入返回 MissingNode（Jackson 2 返回 null），两者都必须判为 empty document。
+      if (node == null || node.isMissingNode()) {
+        throw new IllegalArgumentException("empty JSON document");
+      }
+      return node;
+    } catch (JacksonException error) {
+      throw new IllegalArgumentException("malformed tool call diagnostic JSON");
+    }
+  }
+
+  private static String write(JsonNode node) {
+    try {
+      return OBJECT_MAPPER.writeValueAsString(node);
+    } catch (JacksonException error) {
+      throw new IllegalStateException("cannot encode tool call diagnostic JSON");
+    }
+  }
+
+  private static ObjectNode object(JsonNode value, String context) {
+    if (value == null || !value.isObject()) {
+      throw new IllegalArgumentException(context + " must be a JSON object");
+    }
+    return (ObjectNode) value;
+  }
+
+  private static String text(ObjectNode node, String field) {
+    JsonNode value = node.get(field);
+    if (value == null || !value.isString()) {
+      throw new IllegalArgumentException(field + " must be text");
+    }
+    return value.stringValue();
+  }
+
+  private static String decodeNullableText(ObjectNode node, String field) {
+    JsonNode value = node.get(field);
+    if (value == null || value.isNull()) {
+      return null;
+    }
+    if (!value.isString()) {
+      throw new IllegalArgumentException(field + " must be text or null");
+    }
+    return value.stringValue();
+  }
+
+  private static long nonNegativeLong(ObjectNode node, String field) {
+    JsonNode value = node.get(field);
+    if (value == null || !value.isIntegralNumber() || !value.canConvertToLong()) {
+      throw new IllegalArgumentException(field + " must be an integer");
+    }
+    long converted = value.asLong();
+    if (converted < 0L) {
+      throw new IllegalArgumentException(field + " must not be negative");
+    }
+    return converted;
+  }
+
+  private static void requireFields(ObjectNode node, Set<String> expected, String context) {
+    if (node.size() != expected.size()) {
+      throw new IllegalArgumentException(context + " field count mismatch");
+    }
+    for (String name : expected) {
+      if (!node.has(name)) {
+        throw new IllegalArgumentException(context + " missing required field: " + name);
+      }
+    }
+  }
+
+  private static Set<String> orderedSet(String... values) {
+    Set<String> set = new LinkedHashSet<>();
+    Collections.addAll(set, values);
+    return Collections.unmodifiableSet(set);
+  }
+}

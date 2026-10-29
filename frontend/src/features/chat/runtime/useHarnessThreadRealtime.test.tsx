@@ -12,8 +12,8 @@ import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websock
 import { useHarnessThreadRealtime } from '@/features/chat/runtime/useHarnessThreadRealtime'
 import type { RealtimeFrameSchedulerOptions } from '@/features/chat/runtime/realtime-frame-scheduler'
 import type {
-  ModelAttemptFailureDTO,
-  ModelInvocationDTO,
+  HarnessActiveAssistantOutputDTO,
+  HarnessGenerationFailureDTO,
   ToolInvocationDTO,
 } from '@/shared/api/generated/contracts'
 
@@ -30,9 +30,9 @@ interface RealtimeProps {
   threadId?: string
   version?: string
   enabled?: boolean
-  invocation?: ModelInvocationDTO | null
+  activeAssistantOutput?: HarnessActiveAssistantOutputDTO | null
   invocations?: ToolInvocationDTO[]
-  modelAttemptFailures?: ModelAttemptFailureDTO[]
+  generationFailures?: HarnessGenerationFailureDTO[]
   schedulerOptions?: Partial<RealtimeFrameSchedulerOptions>
 }
 
@@ -44,9 +44,9 @@ function renderRealtime(client: QueryClient, initialProps: RealtimeProps = {}) {
         props.threadId ?? THREAD_ID,
         props.enabled ?? true,
         props.version ?? '42',
-        props.invocation ?? modelInvocation(),
+        props.activeAssistantOutput ?? activeAssistantOutput(),
         props.invocations ?? [],
-        props.modelAttemptFailures ?? [],
+        props.generationFailures ?? [],
         props.schedulerOptions,
       ),
     {
@@ -119,7 +119,7 @@ describe('useHarnessThreadRealtime', () => {
   it('requests one catchup per subscription and reconnect while the model is RUNNING', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const invalidate = vi.spyOn(client, 'invalidateQueries')
-    const { rerender, sockets } = renderRealtime(client, { invocation: modelInvocation() })
+    const { rerender, sockets } = renderRealtime(client, { activeAssistantOutput: activeAssistantOutput() })
     const socket = sockets.openLatest()
     expect(requestStreamCatchup).not.toHaveBeenCalled()
 
@@ -142,7 +142,7 @@ describe('useHarnessThreadRealtime', () => {
     expect(invalidate).toHaveBeenCalledTimes(2)
 
     // 非 RUNNING 的模型不再请求追帧，但 subscribed 仍执行 snapshot 对账。
-    rerender({ invocation: { ...modelInvocation(), status: 'READY' } })
+    rerender({ activeAssistantOutput: { ...activeAssistantOutput(), status: 'READY' } })
     act(() => socket.emitServer({ type: 'subscribed', resource: threadResource, cursor: '42' }))
     await sleep(50)
     expect(requestStreamCatchup).toHaveBeenCalledTimes(2)
@@ -152,14 +152,15 @@ describe('useHarnessThreadRealtime', () => {
   it('coalesces gap catchups and appends the buffered suffix after a covering checkpoint', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const invalidate = vi.spyOn(client, 'invalidateQueries')
-    const { result, rerender, sockets } = renderRealtime(client, { invocation: modelInvocation() })
+    const { result, rerender, sockets } = renderRealtime(client, { activeAssistantOutput: activeAssistantOutput() })
     sockets.openLatest()
 
     // 已显示 current seq2；首次观察到 seq5 时缺 3/4，覆盖阈值必须是 5-1=4。
     rerender({
-      invocation: {
-        ...modelInvocation(),
-        streamCheckpointJson: '{"attempt":1,"text":"ab","thinking":"","sequence":2}',
+      activeAssistantOutput: {
+        ...activeAssistantOutput(),
+        sequence: '2',
+        contents: [{ type: 'text', text: 'ab' }],
       },
     })
     await waitFor(() => expect(result.current?.modelStream?.text).toBe('ab'))
@@ -188,9 +189,10 @@ describe('useHarnessThreadRealtime', () => {
     // 回读暂时仍返回 seq2：保留已显示 "ab"，并把阈值稳定在 5-1=4；
     // 此时 checkpoint3 仍不得触发第二次回读。
     rerender({
-      invocation: {
-        ...modelInvocation(),
-        streamCheckpointJson: '{"attempt":1,"text":"ab","thinking":"","sequence":2}',
+      activeAssistantOutput: {
+        ...activeAssistantOutput(),
+        sequence: '2',
+        contents: [{ type: 'text', text: 'ab' }],
       },
     })
     await waitFor(() => expect(result.current?.modelStream?.text).toBe('ab'))
@@ -199,9 +201,10 @@ describe('useHarnessThreadRealtime', () => {
     expect(invalidate).toHaveBeenCalledTimes(1)
 
     rerender({
-      invocation: {
-        ...modelInvocation(),
-        streamCheckpointJson: '{"attempt":1,"text":"abcd","thinking":"","sequence":4}',
+      activeAssistantOutput: {
+        ...activeAssistantOutput(),
+        sequence: '4',
+        contents: [{ type: 'text', text: 'abcd' }],
       },
     })
     await waitFor(() =>
@@ -224,7 +227,7 @@ describe('useHarnessThreadRealtime', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const invalidate = vi.spyOn(client, 'invalidateQueries')
     requestStreamCatchup.mockRejectedValueOnce(new Error('catchup unavailable'))
-    const { result, rerender, sockets } = renderRealtime(client, { invocation: modelInvocation() })
+    const { result, rerender, sockets } = renderRealtime(client, { activeAssistantOutput: activeAssistantOutput() })
     sockets.openLatest()
 
     emitRealtime(sockets, realtime(3, 'three'))
@@ -239,9 +242,10 @@ describe('useHarnessThreadRealtime', () => {
     emitRealtime(sockets, checkpoint(3))
     await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(1))
     rerender({
-      invocation: {
-        ...modelInvocation(),
-        streamCheckpointJson: '{"attempt":1,"text":"recovered","thinking":"","sequence":3}',
+      activeAssistantOutput: {
+        ...activeAssistantOutput(),
+        sequence: '3',
+        contents: [{ type: 'text', text: 'recovered' }],
       },
     })
     await waitFor(() => expect(result.current?.modelStream?.text).toBe('recovered'))
@@ -250,20 +254,20 @@ describe('useHarnessThreadRealtime', () => {
 
   it('rejects late MODEL_DELTA after a durable terminal result and after the Entry lands', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const { result, rerender, sockets } = renderRealtime(client, { invocation: modelInvocation() })
+    const { result, rerender, sockets } = renderRealtime(client, { activeAssistantOutput: activeAssistantOutput() })
     sockets.openLatest()
 
     // 进行中的 delta 按正常方式叠加。
     emitRealtime(sockets, realtime(1, 'first'))
     await waitFor(() => expect(result.current?.modelStream?.text).toBe('first'))
 
-    // resultJson 到达（终止态，尚未有 Entry）：完整的持久 result 投影会
+    // SUCCEEDED 到达（终止态，尚未有 Entry）：完整的持久投影会
     // 替换 overlay；迟到的 delta 永远不会追加到终止态输出。
     rerender({
-      invocation: {
-        ...modelInvocation(),
-        resultJson:
-          '{"text":"first","thinking":"","toolCalls":[],"stopReason":"stop","usage":{},"cost":{}}',
+      activeAssistantOutput: {
+        ...activeAssistantOutput(),
+        status: 'SUCCEEDED',
+        contents: [{ type: 'text', text: 'first' }],
       },
     })
     await waitFor(() =>
@@ -275,12 +279,13 @@ describe('useHarnessThreadRealtime', () => {
       expect(result.current?.modelStream?.text).toBe('first'),
     )
 
-    // errorJson 也是终止态栅栏：checkpoint partial 与错误详情保持分离；
+    // FAILED 也是终止态栅栏：已完成的片段与错误详情保持分离；
     // status 为 'error'，绝不会是 'streaming'。
     rerender({
-      invocation: {
-        ...modelInvocation(),
-        errorJson: '{"kind":"TRANSIENT","message":"boom"}',
+      activeAssistantOutput: {
+        ...activeAssistantOutput(),
+        status: 'FAILED',
+        error: { code: 'TRANSIENT', message: 'boom' },
       },
     })
     await waitFor(() => expect(result.current?.modelStream?.status).toBe('error'))
@@ -294,9 +299,10 @@ describe('useHarnessThreadRealtime', () => {
 
     // Entry 落地：overlay 被清空，此后的迟到 delta 一律被拒绝。
     rerender({
-      invocation: {
-        ...modelInvocation(),
-        resultJson: '{"text":"first","thinking":""}',
+      activeAssistantOutput: {
+        ...activeAssistantOutput(),
+        status: 'SUCCEEDED',
+        contents: [{ type: 'text', text: 'first' }],
         resultEntryId: 'e-9',
       },
     })
@@ -309,20 +315,19 @@ describe('useHarnessThreadRealtime', () => {
     // 验证 READY retry 状态收到已失败 attempt 的 delta 时：既不更新 overlay，也不错误启动 gap recovery
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const invalidate = vi.spyOn(client, 'invalidateQueries')
-    const retryInvocation: ModelInvocationDTO = {
-      ...modelInvocation(),
+    const retryOutput: HarnessActiveAssistantOutputDTO = {
+      ...activeAssistantOutput(),
       status: 'READY',
       attempt: 1,
-      streamCheckpointJson: null,
     }
-    const failures = [modelAttemptFailure(1, 'inv-1', '2')]
+    const failures = [generationFailure(1, 'inv-1', '2')]
     const { result, sockets } = renderRealtime(client, {
-      invocation: retryInvocation,
-      modelAttemptFailures: failures,
+      activeAssistantOutput: retryOutput,
+      generationFailures: failures,
     })
     sockets.openLatest()
 
-    // 初始状态下 READY 无 checkpoint，overlay 保持为 null
+    // 初始状态下 READY 尚无已完成片段，overlay 保持为 null
     expect(result.current?.modelStream).toBeNull()
 
     // 1. 旧 attempt 1 的 sequence = 1 迟到 delta：不追加 overlay，overlay 保持 null
@@ -341,7 +346,7 @@ describe('useHarnessThreadRealtime', () => {
   it('stops waiting when the attempt is recorded as failed and ignores its late checkpoint', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const invalidate = vi.spyOn(client, 'invalidateQueries')
-    const { result, rerender, sockets } = renderRealtime(client, { invocation: modelInvocation() })
+    const { result, rerender, sockets } = renderRealtime(client, { activeAssistantOutput: activeAssistantOutput() })
     sockets.openLatest()
 
     emitRealtime(sockets, realtime(3, 'missing'))
@@ -349,8 +354,8 @@ describe('useHarnessThreadRealtime', () => {
 
     // attempt 1 已进入 durable failedAttempts：恢复终止，旧 attempt checkpoint 被丢弃。
     rerender({
-      invocation: { ...modelInvocation(), status: 'READY', streamCheckpointJson: null },
-      modelAttemptFailures: [modelAttemptFailure(1, 'inv-1', '2')],
+      activeAssistantOutput: { ...activeAssistantOutput(), status: 'READY' },
+      generationFailures: [generationFailure(1, 'inv-1', '2')],
     })
     emitRealtime(sockets, checkpoint(3))
     await sleep(300)
@@ -362,16 +367,16 @@ describe('useHarnessThreadRealtime', () => {
   it('allows MODEL_DELTA for active attempt while rejecting late MODEL_DELTA for previously failed attempts', async () => {
     // 验证当前 attempt 2 为活跃流式时，既能拒绝旧 attempt 1 的迟到 delta，又可正常应用当前 attempt 2 的 delta
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const runningAttempt2: ModelInvocationDTO = {
-      ...modelInvocation(),
+    const runningAttempt2: HarnessActiveAssistantOutputDTO = {
+      ...activeAssistantOutput(),
       status: 'RUNNING',
       attempt: 2,
-      streamCheckpointJson: '{"attempt":2,"text":"","thinking":"","sequence":0}',
+      sequence: '0',
     }
-    const failures = [modelAttemptFailure(1, 'inv-1', '2')]
+    const failures = [generationFailure(1, 'inv-1', '2')]
     const { result, sockets } = renderRealtime(client, {
-      invocation: runningAttempt2,
-      modelAttemptFailures: failures,
+      activeAssistantOutput: runningAttempt2,
+      generationFailures: failures,
     })
     sockets.openLatest()
 
@@ -386,24 +391,24 @@ describe('useHarnessThreadRealtime', () => {
     expect(result.current?.modelStream?.attempt).toBe(2)
   })
 
-  it('does not reject MODEL_DELTA when failure belongs to a different invocation', async () => {
-    // 验证 modelAttemptFailures 中若属于其他 invocationId，不误伤当前 invocation 的相同 attempt 序号
+  it('does not reject MODEL_DELTA when failure belongs to a different generation', async () => {
+    // 验证 generationFailures 中若属于其他 generationId，不误伤当前 generation 的相同 attempt 序号
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const runningInvocation: ModelInvocationDTO = {
-      ...modelInvocation('inv-current'),
+    const runningOutput: HarnessActiveAssistantOutputDTO = {
+      ...activeAssistantOutput('inv-current'),
       status: 'RUNNING',
       attempt: 1,
-      streamCheckpointJson: '{"attempt":1,"text":"","thinking":"","sequence":0}',
+      sequence: '0',
     }
-    // 属于另一个 invocation 的 attempt 1 失败记录
-    const otherFailures = [modelAttemptFailure(1, 'inv-other', '2')]
+    // 属于另一个 generation 的 attempt 1 失败记录
+    const otherFailures = [generationFailure(1, 'inv-other', '2')]
     const { result, sockets } = renderRealtime(client, {
-      invocation: runningInvocation,
-      modelAttemptFailures: otherFailures,
+      activeAssistantOutput: runningOutput,
+      generationFailures: otherFailures,
     })
     sockets.openLatest()
 
-    // 当前 invocation 'inv-current' 的 attempt 1 delta 应当被正常接收与应用
+    // 当前 generation 'inv-current' 的 attempt 1 delta 应当被正常接收与应用
     emitRealtime(sockets, realtime(1, 'hello-current', THREAD_ID, 'inv-current', 1))
     await waitFor(() => expect(result.current?.modelStream?.text).toBe('hello-current'))
   })
@@ -411,15 +416,15 @@ describe('useHarnessThreadRealtime', () => {
   it('drops checkpoints for a previous attempt before they trigger snapshot reads', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const invalidate = vi.spyOn(client, 'invalidateQueries')
-    const runningAttempt2: ModelInvocationDTO = {
-      ...modelInvocation(),
+    const runningAttempt2: HarnessActiveAssistantOutputDTO = {
+      ...activeAssistantOutput(),
       status: 'RUNNING',
       attempt: 2,
-      streamCheckpointJson: '{"attempt":2,"text":"","thinking":"","sequence":0}',
+      sequence: '0',
     }
     const { sockets } = renderRealtime(client, {
-      invocation: runningAttempt2,
-      modelAttemptFailures: [modelAttemptFailure(1, 'inv-1', '2')],
+      activeAssistantOutput: runningAttempt2,
+      generationFailures: [generationFailure(1, 'inv-1', '2')],
     })
     sockets.openLatest()
 
@@ -436,14 +441,15 @@ describe('useHarnessThreadRealtime', () => {
 
   it('replaces a higher-sequence streaming overlay with the durable terminal projection', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const { result, rerender, sockets } = renderRealtime(client, { invocation: modelInvocation() })
+    const { result, rerender, sockets } = renderRealtime(client, { activeAssistantOutput: activeAssistantOutput() })
     sockets.openLatest()
 
-    // 持久化 checkpoint 在 seq5；lossy realtime delta 流式到达 seq8。
+    // 持久化输出在 seq5；lossy realtime delta 流式到达 seq8。
     rerender({
-      invocation: {
-        ...modelInvocation(),
-        streamCheckpointJson: '{"attempt":1,"text":"safe five","thinking":"","sequence":5}',
+      activeAssistantOutput: {
+        ...activeAssistantOutput(),
+        sequence: '5',
+        contents: [{ type: 'text', text: 'safe five' }],
       },
     })
     await waitFor(() => expect(result.current?.modelStream?.text).toBe('safe five'))
@@ -455,14 +461,17 @@ describe('useHarnessThreadRealtime', () => {
     )
     expect(result.current?.modelStream?.status).toBe('streaming')
 
-    // checkpoint 仍落后于 seq5 时终态 resultJson 到达：完整的
+    // 输出仍落后于 seq5 时终态 SUCCEEDED 到达：完整的
     // 持久化投影必须无条件取代 seq8 的 lossy realtime overlay。
     rerender({
-      invocation: {
-        ...modelInvocation(),
-        streamCheckpointJson: '{"attempt":1,"text":"safe five","thinking":"","sequence":5}',
-        resultJson:
-          '{"text":"durable complete answer","thinking":"durable plan","toolCalls":[],"stopReason":"stop","usage":{},"cost":{}}',
+      activeAssistantOutput: {
+        ...activeAssistantOutput(),
+        status: 'SUCCEEDED',
+        sequence: '5',
+        contents: [
+          { type: 'text', text: 'durable complete answer' },
+          { type: 'thinking', text: 'durable plan' },
+        ],
       },
     })
     await waitFor(() =>
@@ -476,12 +485,14 @@ describe('useHarnessThreadRealtime', () => {
       expect(result.current?.modelStream?.text).toBe('durable complete answer'),
     )
 
-    // errorJson：checkpoint 冻结，status 为 'error'，解析出的消息对外可见，不再追加。
+    // FAILED：已完成的片段被冻结，status 为 'error'，类型化错误对外可见，不再追加。
     rerender({
-      invocation: {
-        ...modelInvocation(),
-        streamCheckpointJson: '{"attempt":1,"text":"frozen text","thinking":"","sequence":5}',
-        errorJson: '{"kind":"INVALID_REQUEST","message":"provider exploded"}',
+      activeAssistantOutput: {
+        ...activeAssistantOutput(),
+        status: 'FAILED',
+        sequence: '5',
+        contents: [{ type: 'text', text: 'frozen text' }],
+        error: { code: 'INVALID_REQUEST', message: 'provider exploded' },
       },
     })
     await waitFor(() => expect(result.current?.modelStream?.status).toBe('error'))
@@ -495,9 +506,10 @@ describe('useHarnessThreadRealtime', () => {
 
     // 持久化 result Entry 到达：Entry 才是 transcript 的事实来源；overlay 消失。
     rerender({
-      invocation: {
-        ...modelInvocation(),
-        resultJson: '{"text":"x","thinking":""}',
+      activeAssistantOutput: {
+        ...activeAssistantOutput(),
+        status: 'SUCCEEDED',
+        contents: [{ type: 'text', text: 'x' }],
         resultEntryId: 'e-9',
       },
     })
@@ -616,10 +628,14 @@ describe('useHarnessThreadRealtime', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const invalidate = vi.spyOn(client, 'invalidateQueries')
     const restored = {
-      ...modelInvocation(),
-      streamCheckpointJson: '{"attempt":1,"text":"safe","thinking":"plan","sequence":2}',
+      ...activeAssistantOutput(),
+      sequence: '2',
+      contents: [
+        { type: 'text', text: 'safe' },
+        { type: 'thinking', text: 'plan' },
+      ],
     }
-    const { result, sockets } = renderRealtime(client, { invocation: restored })
+    const { result, sockets } = renderRealtime(client, { activeAssistantOutput: restored })
     const first = sockets.openLatest()
 
     await waitFor(() =>
@@ -766,7 +782,7 @@ describe('useHarnessThreadRealtime', () => {
   it('keeps the snapshot-seeded terminal tool overlay across the disabled -> ready transition', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     // 稳定引用：过渡 render 期间 reconcile effect 依赖不变，不会重新播种。
-    const invocation = modelInvocation()
+    const activeOutput = activeAssistantOutput()
     const noInvocations: ToolInvocationDTO[] = []
     const terminal = toolInvocation({
       resultJson: JSON.stringify({
@@ -782,13 +798,13 @@ describe('useHarnessThreadRealtime', () => {
     // null 的过渡 render 不得清空它（下一 render 依赖不变不会重新播种）。
     const { result, rerender, sockets } = renderRealtime(client, {
       enabled: false,
-      invocation,
+      activeAssistantOutput: activeOutput,
       invocations: noInvocations,
     })
     sockets.openLatest()
     expect(sockets.latest?.sentMessages() ?? []).toHaveLength(0)
 
-    rerender({ enabled: true, invocation, invocations: [terminal] })
+    rerender({ enabled: true, activeAssistantOutput: activeOutput, invocations: [terminal] })
     // 订阅初始化完成（wire 上出现 subscribe）后，snapshot-seeded overlay 仍在。
     await waitFor(() =>
       expect(sockets.latest?.sentMessages()).toEqual([
@@ -805,7 +821,7 @@ describe('useHarnessThreadRealtime', () => {
     try {
       const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
       const invalidate = vi.spyOn(client, 'invalidateQueries')
-      const { result, rerender, sockets } = renderRealtime(client, { invocation: modelInvocation() })
+      const { result, rerender, sockets } = renderRealtime(client, { activeAssistantOutput: activeAssistantOutput() })
       sockets.openLatest()
 
       emitRealtime(sockets, realtime(3, 'three'))
@@ -826,9 +842,10 @@ describe('useHarnessThreadRealtime', () => {
       })
       expect(invalidate).toHaveBeenCalledTimes(1)
       rerender({
-        invocation: {
-          ...modelInvocation(),
-          streamCheckpointJson: '{"attempt":1,"text":"base","thinking":"","sequence":3}',
+        activeAssistantOutput: {
+          ...activeAssistantOutput(),
+          sequence: '3',
+          contents: [{ type: 'text', text: 'base' }],
         },
       })
       await act(async () => {
@@ -843,9 +860,10 @@ describe('useHarnessThreadRealtime', () => {
       })
       expect(invalidate).toHaveBeenCalledTimes(2)
       rerender({
-        invocation: {
-          ...modelInvocation(),
-          streamCheckpointJson: '{"attempt":1,"text":"complete","thinking":"","sequence":300}',
+        activeAssistantOutput: {
+          ...activeAssistantOutput(),
+          sequence: '300',
+          contents: [{ type: 'text', text: 'complete' }],
         },
       })
       await act(async () => {
@@ -862,7 +880,7 @@ describe('useHarnessThreadRealtime', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const invalidate = vi.spyOn(client, 'invalidateQueries')
     const { result, rerender, sockets } = renderRealtime(client, {
-      invocation: modelInvocationAt(2, 'ab'),
+      activeAssistantOutput: activeAssistantOutputAt(2, 'ab'),
     })
     sockets.openLatest()
 
@@ -874,7 +892,7 @@ describe('useHarnessThreadRealtime', () => {
 
     emitRealtime(sockets, checkpoint(3))
     await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(1))
-    rerender({ invocation: modelInvocationAt(3, 'abc') })
+    rerender({ activeAssistantOutput: activeAssistantOutputAt(3, 'abc') })
     await waitFor(() => expect(result.current?.modelStream?.sequence).toBe(4))
     expect(result.current?.modelStream?.text).toBe(`abc${exact}`)
   })
@@ -883,7 +901,7 @@ describe('useHarnessThreadRealtime', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const invalidate = vi.spyOn(client, 'invalidateQueries')
     const { result, rerender, sockets } = renderRealtime(client, {
-      invocation: modelInvocationAt(2, 'ab'),
+      activeAssistantOutput: activeAssistantOutputAt(2, 'ab'),
     })
     sockets.openLatest()
 
@@ -895,7 +913,7 @@ describe('useHarnessThreadRealtime', () => {
 
     emitRealtime(sockets, checkpoint(3))
     await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(1))
-    rerender({ invocation: modelInvocationAt(3, 'abc') })
+    rerender({ activeAssistantOutput: activeAssistantOutputAt(3, 'abc') })
     // 超限后 suffix 已丢弃：只显示 checkpoint 基线，不拼接任何缓存片段。
     await waitFor(() => expect(result.current?.modelStream?.sequence).toBe(3))
     expect(result.current?.modelStream?.text).toBe('abc')
@@ -905,7 +923,7 @@ describe('useHarnessThreadRealtime', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const invalidate = vi.spyOn(client, 'invalidateQueries')
     const { result, rerender, sockets } = renderRealtime(client, {
-      invocation: modelInvocationAt(2, 'ab'),
+      activeAssistantOutput: activeAssistantOutputAt(2, 'ab'),
     })
     sockets.openLatest()
 
@@ -917,7 +935,7 @@ describe('useHarnessThreadRealtime', () => {
 
     emitRealtime(sockets, checkpoint(3))
     await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(1))
-    rerender({ invocation: modelInvocationAt(3, 'abc') })
+    rerender({ activeAssistantOutput: activeAssistantOutputAt(3, 'abc') })
     await waitFor(() => expect(result.current?.modelStream?.sequence).toBe(3))
     expect(result.current?.modelStream?.text).toBe('abc')
   })
@@ -926,7 +944,7 @@ describe('useHarnessThreadRealtime', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const invalidate = vi.spyOn(client, 'invalidateQueries')
     const { result, sockets } = renderRealtime(client, {
-      invocation: modelInvocationAt(2, 'ab'),
+      activeAssistantOutput: activeAssistantOutputAt(2, 'ab'),
     })
     sockets.openLatest()
 
@@ -952,7 +970,7 @@ describe('useHarnessThreadRealtime', () => {
       .spyOn(client, 'invalidateQueries')
       .mockRejectedValueOnce(new Error('snapshot unavailable'))
     const { result, sockets } = renderRealtime(client, {
-      invocation: modelInvocationAt(2, 'ab'),
+      activeAssistantOutput: activeAssistantOutputAt(2, 'ab'),
     })
     sockets.openLatest()
 
@@ -977,7 +995,7 @@ describe('useHarnessThreadRealtime', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const invalidate = vi.spyOn(client, 'invalidateQueries')
     const { result, sockets } = renderRealtime(client, {
-      invocation: modelInvocationAt(2, 'ab'),
+      activeAssistantOutput: activeAssistantOutputAt(2, 'ab'),
     })
     sockets.openLatest()
 
@@ -999,7 +1017,7 @@ describe('useHarnessThreadRealtime', () => {
   it('ignores checkpoints at or behind a contiguous overlay and refreshes only when ahead', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const invalidate = vi.spyOn(client, 'invalidateQueries')
-    const { result, sockets } = renderRealtime(client, { invocation: modelInvocation() })
+    const { result, sockets } = renderRealtime(client, { activeAssistantOutput: activeAssistantOutput() })
     sockets.openLatest()
 
     // 纯 delta 连续流到 seq3，没有缺口。
@@ -1029,7 +1047,7 @@ describe('useHarnessThreadRealtime', () => {
       .spyOn(client, 'invalidateQueries')
       .mockImplementationOnce(() => pendingRefresh.promise)
     const { result, sockets } = renderRealtime(client, {
-      invocation: modelInvocationAt(2, 'ab'),
+      activeAssistantOutput: activeAssistantOutputAt(2, 'ab'),
     })
     sockets.openLatest()
 
@@ -1067,7 +1085,7 @@ describe('useHarnessThreadRealtime', () => {
       .mockImplementationOnce(() => firstRefresh.promise)
       .mockImplementationOnce(() => secondRefresh.promise)
     const { result, rerender, sockets } = renderRealtime(client, {
-      invocation: modelInvocationAt(2, 'ab'),
+      activeAssistantOutput: activeAssistantOutputAt(2, 'ab'),
     })
     sockets.openLatest()
 
@@ -1077,7 +1095,7 @@ describe('useHarnessThreadRealtime', () => {
     await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(1))
 
     // attempt 2 建立新的 recovery 与在途回读。
-    rerender({ invocation: modelInvocationAt(2, 'ab', 2) })
+    rerender({ activeAssistantOutput: activeAssistantOutputAt(2, 'ab', 2) })
     await waitFor(() => expect(result.current?.modelStream?.attempt).toBe(2))
     emitRealtime(sockets, realtime(5, 'five', THREAD_ID, 'inv-1', 2))
     emitRealtime(sockets, checkpoint(4, THREAD_ID, 'inv-1', 2))
@@ -1111,7 +1129,7 @@ describe('useHarnessThreadRealtime', () => {
       .mockImplementationOnce(() => firstRefresh.promise)
       .mockImplementationOnce(() => secondRefresh.promise)
     const { result, rerender, sockets } = renderRealtime(client, {
-      invocation: modelInvocationAt(2, 'ab'),
+      activeAssistantOutput: activeAssistantOutputAt(2, 'ab'),
     })
     sockets.openLatest()
 
@@ -1123,7 +1141,7 @@ describe('useHarnessThreadRealtime', () => {
     // 切到另一个 Thread，建立新的 recovery 与在途回读。
     rerender({
       threadId: THREAD_B_ID,
-      invocation: modelInvocationAt(2, 'ab', 1, 'inv-1', THREAD_B_ID),
+      activeAssistantOutput: activeAssistantOutputAt(2, 'ab', 1, 'inv-1'),
     })
     await waitFor(() => expect(result.current?.modelStream?.threadId).toBe(THREAD_B_ID))
     emitRealtime(
@@ -1168,13 +1186,14 @@ describe('useHarnessThreadRealtime', () => {
   it('keeps the displayed suffix when the post-checkpoint snapshot is still behind it', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const invalidate = vi.spyOn(client, 'invalidateQueries')
-    const { result, rerender, sockets } = renderRealtime(client, { invocation: modelInvocation() })
+    const { result, rerender, sockets } = renderRealtime(client, { activeAssistantOutput: activeAssistantOutput() })
     sockets.openLatest()
 
     rerender({
-      invocation: {
-        ...modelInvocation(),
-        streamCheckpointJson: '{"attempt":1,"text":"safe","thinking":"","sequence":5}',
+      activeAssistantOutput: {
+        ...activeAssistantOutput(),
+        sequence: '5',
+        contents: [{ type: 'text', text: 'safe' }],
       },
     })
     await waitFor(() => expect(result.current?.modelStream?.text).toBe('safe'))
@@ -1192,9 +1211,10 @@ describe('useHarnessThreadRealtime', () => {
 
     // 回读到的 snapshot 仍停在 seq5：保留已显示 seq7，绝不回退或丢字。
     rerender({
-      invocation: {
-        ...modelInvocation(),
-        streamCheckpointJson: '{"attempt":1,"text":"safe","thinking":"","sequence":5}',
+      activeAssistantOutput: {
+        ...activeAssistantOutput(),
+        sequence: '5',
+        contents: [{ type: 'text', text: 'safe' }],
       },
     })
     await waitFor(() =>
@@ -1205,9 +1225,10 @@ describe('useHarnessThreadRealtime', () => {
     emitRealtime(sockets, checkpoint(8))
     await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(2))
     rerender({
-      invocation: {
-        ...modelInvocation(),
-        streamCheckpointJson: '{"attempt":1,"text":"safe-six-seven-eight","thinking":"","sequence":8}',
+      activeAssistantOutput: {
+        ...activeAssistantOutput(),
+        sequence: '8',
+        contents: [{ type: 'text', text: 'safe-six-seven-eight' }],
       },
     })
     await waitFor(() =>
@@ -1221,21 +1242,22 @@ describe('useHarnessThreadRealtime', () => {
       const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
       const invalidate = vi.spyOn(client, 'invalidateQueries')
       const { result, rerender, sockets } = renderRealtime(client, {
-        invocation: modelInvocation(),
+        activeAssistantOutput: activeAssistantOutput(),
       })
       sockets.openLatest()
 
-      // seq3 gap 记录后，持久化终态 resultJson 到达（streaming 之外的
+      // seq3 gap 记录后，持久化终态 typed output 到达（streaming 之外的
       // terminal 分支）：非 streaming 投影无条件取代 overlay，并清空 gapRef。
       emitRealtime(sockets, realtime(3, 'missing'))
       await act(async () => {
         await vi.advanceTimersByTimeAsync(200)
       })
       rerender({
-        invocation: {
-          ...modelInvocation(),
-          streamCheckpointJson: '{"attempt":1,"text":"frozen","thinking":"","sequence":2}',
-          resultJson: '{"text":"durable done","thinking":"","toolCalls":[],"stopReason":"stop","usage":{},"cost":{}}',
+        activeAssistantOutput: {
+          ...activeAssistantOutput(),
+          status: 'SUCCEEDED',
+          sequence: '2',
+          contents: [{ type: 'text', text: 'durable done' }],
         },
       })
       await act(async () => {
@@ -1259,7 +1281,7 @@ describe('useHarnessThreadRealtime', () => {
       const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
       const invalidate = vi.spyOn(client, 'invalidateQueries')
       const { result, rerender, sockets } = renderRealtime(client, {
-        invocation: modelInvocation(),
+        activeAssistantOutput: activeAssistantOutput(),
       })
       sockets.openLatest()
 
@@ -1270,12 +1292,14 @@ describe('useHarnessThreadRealtime', () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(200)
       })
-      // 终态 snapshot：sequence 2 >= gap 2？不 —— 用 sequence 3 的 checkpoint。
+      // 终态 snapshot：sequence 3 的 terminal output。
       rerender({
-        invocation: {
-          ...modelInvocation(),
-          streamCheckpointJson: '{"attempt":1,"text":"frozen","thinking":"","sequence":3}',
-          errorJson: '{"kind":"TRANSIENT","message":"boom"}',
+        activeAssistantOutput: {
+          ...activeAssistantOutput(),
+          status: 'FAILED',
+          sequence: '3',
+          contents: [{ type: 'text', text: 'frozen' }],
+          error: { code: 'TRANSIENT', message: 'boom' },
         },
       })
       await act(async () => {
@@ -1302,7 +1326,7 @@ describe('useHarnessThreadRealtime', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const invalidate = vi.spyOn(client, 'invalidateQueries')
     const { result, sockets } = renderRealtime(client, {
-      invocation: modelInvocation('inv-1'),
+      activeAssistantOutput: activeAssistantOutput('inv-1'),
     })
     sockets.openLatest()
 
@@ -1364,7 +1388,7 @@ describe('useHarnessThreadRealtime', () => {
   it('reuses the same overlay object when the durable snapshot is re-seeded identically', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const { result, rerender, sockets } = renderRealtime(client, {
-      invocation: modelInvocation(),
+      activeAssistantOutput: activeAssistantOutput(),
     })
     sockets.openLatest()
 
@@ -1380,14 +1404,14 @@ describe('useHarnessThreadRealtime', () => {
       ]),
     )
     const before = result.current?.modelStream
-    rerender({ invocation: { ...modelInvocation(), streamCheckpointJson: '{"attempt":1,"text":"","thinking":"","sequence":1}' } })
+    rerender({ activeAssistantOutput: { ...activeAssistantOutput(), sequence: '1' } })
     await waitFor(() => expect(result.current?.modelStream).toBe(before))
   })
 
   it('clears gap state and stops acting after subscription cleanup', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const invalidate = vi.spyOn(client, 'invalidateQueries')
-    const { result, rerender, sockets } = renderRealtime(client, { invocation: modelInvocation() })
+    const { result, rerender, sockets } = renderRealtime(client, { activeAssistantOutput: activeAssistantOutput() })
     sockets.openLatest()
 
     emitRealtime(sockets, realtime(3, 'missing'))
@@ -1412,7 +1436,7 @@ describe('useHarnessThreadRealtime', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const toolInv = toolInvocation({ toolName: 'testTool', rendererKey: 'testTool' })
     const { result, sockets } = renderRealtime(client, {
-      invocation: modelInvocation(),
+      activeAssistantOutput: activeAssistantOutput(),
       invocations: [toolInv],
       schedulerOptions: { raf, caf },
     })
@@ -1452,7 +1476,7 @@ describe('useHarnessThreadRealtime', () => {
     const caf = vi.fn()
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const { result, rerender, sockets } = renderRealtime(client, {
-      invocation: modelInvocation(),
+      activeAssistantOutput: activeAssistantOutput(),
       schedulerOptions: { raf, caf },
     })
     sockets.openLatest()
@@ -1470,12 +1494,12 @@ describe('useHarnessThreadRealtime', () => {
     // 下一个 delta 调度新帧，但在帧触发前，权威快照已变为 COMPLETED
     emitRealtime(sockets, realtime(2, 'B'.repeat(100)))
 
-    const doneInvocation: ModelInvocationDTO = {
-      ...modelInvocation(),
-      status: 'COMPLETED',
-      resultJson: JSON.stringify({ text: 'Authoritative completed text', thinking: '', toolCalls: [] }),
+    const doneInvocation: HarnessActiveAssistantOutputDTO = {
+      ...activeAssistantOutput(),
+      status: 'SUCCEEDED',
+      contents: [{ type: 'text', text: 'Authoritative completed text' }],
     }
-    rerender({ invocation: doneInvocation })
+    rerender({ activeAssistantOutput: doneInvocation })
 
     // 快照对账立即生效权威终态
     expect(result.current.modelStream?.status).toBe('done')
@@ -1501,7 +1525,7 @@ describe('useHarnessThreadRealtime', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const invalidateSpy = vi.spyOn(client, 'invalidateQueries')
     const { result, sockets } = renderRealtime(client, {
-      invocation: modelInvocation(),
+      activeAssistantOutput: activeAssistantOutput(),
       schedulerOptions: { raf, caf },
     })
     const socket = sockets.openLatest()
@@ -1539,9 +1563,9 @@ describe('useHarnessThreadRealtime', () => {
     })
     const caf = vi.fn()
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const initialInvocation = modelInvocation()
+    const initialInvocation = activeAssistantOutput()
     const { result, rerender, sockets } = renderRealtime(client, {
-      invocation: initialInvocation,
+      activeAssistantOutput: initialInvocation,
       schedulerOptions: { raf, caf },
     })
     sockets.openLatest()
@@ -1550,7 +1574,7 @@ describe('useHarnessThreadRealtime', () => {
     emitRealtime(sockets, realtime(1, 'accumulated content'))
 
     // 发生无关父组件重新渲染（传入相同的 snapshot 引用与内容）
-    rerender({ invocation: { ...initialInvocation } })
+    rerender({ activeAssistantOutput: { ...initialInvocation } })
 
     // 审查保证：未发布的最新 ref 不被 snapshot 的 seq 0 回退
     // 触发帧发布后，依然是最新的 'accumulated content'
@@ -1569,7 +1593,7 @@ describe('useHarnessThreadRealtime', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const toolInv = toolInvocation({ toolName: 'testTool', rendererKey: 'testTool' })
     const { result, rerender, sockets } = renderRealtime(client, {
-      invocation: modelInvocation(),
+      activeAssistantOutput: activeAssistantOutput(),
       invocations: [toolInv],
       schedulerOptions: { raf, caf },
     })
@@ -1579,12 +1603,12 @@ describe('useHarnessThreadRealtime', () => {
     emitRealtime(sockets, toolPartial('tool partial data', 'inv-tool-1', 1))
 
     // Model 到达终态快照，但 Tool 依然活跃
-    const terminalModel: ModelInvocationDTO = {
-      ...modelInvocation(),
-      status: 'COMPLETED',
-      resultJson: JSON.stringify({ text: 'Model done', thinking: '', toolCalls: [] }),
+    const terminalModel: HarnessActiveAssistantOutputDTO = {
+      ...activeAssistantOutput(),
+      status: 'SUCCEEDED',
+      contents: [{ type: 'text', text: 'Model done' }],
     }
-    rerender({ invocation: terminalModel, invocations: [toolInv] })
+    rerender({ activeAssistantOutput: terminalModel, invocations: [toolInv] })
 
     // 审查保证：Model 到达终态不能导致 Tool dirty partial 永久丢失！
     expect(result.current.modelStream?.status).toBe('done')
@@ -1598,7 +1622,7 @@ describe('useHarnessThreadRealtime', () => {
     const caf = vi.fn()
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const { result, rerender, unmount, sockets } = renderRealtime(client, {
-      invocation: modelInvocation(),
+      activeAssistantOutput: activeAssistantOutput(),
       schedulerOptions: { raf, caf },
     })
     sockets.openLatest()
@@ -1607,7 +1631,7 @@ describe('useHarnessThreadRealtime', () => {
     expect(raf).toHaveBeenCalled()
 
     // 切换到新线程
-    rerender({ threadId: THREAD_B_ID, invocation: modelInvocation('inv-2', THREAD_B_ID) })
+    rerender({ threadId: THREAD_B_ID, activeAssistantOutput: activeAssistantOutput('inv-2') })
     expect(caf).toHaveBeenCalled()
     expect(result.current.modelStream).toBeNull()
 
@@ -1820,13 +1844,13 @@ function thinkingRealtime(
   })
 }
 
-function modelAttemptFailure(
+function generationFailure(
   attempt = 1,
-  invocationId = 'inv-1',
+  generationId = 'inv-1',
   sequence = '2',
-): ModelAttemptFailureDTO {
+): HarnessGenerationFailureDTO {
   return {
-    modelInvocationId: invocationId,
+    generationId,
     turnStartEntryId: 'entry-1',
     requestHeadEntryId: 'entry-1',
     attempt,
@@ -1874,23 +1898,18 @@ function hash32(value: string): number {
   return hash >>> 0
 }
 
-function modelInvocationAt(
+/** 带已完成文本片段的公共输出夹具：sequence 是 canonical 十进制字符串。 */
+function activeAssistantOutputAt(
   sequence: number,
   text: string,
   attempt = 1,
-  invocationId = 'inv-1',
-  threadId = THREAD_ID,
-): ModelInvocationDTO {
-  return {
-    ...modelInvocation(invocationId, threadId),
+  generationId = 'inv-1',
+): HarnessActiveAssistantOutputDTO {
+  return activeAssistantOutput(generationId, {
     attempt,
-    streamCheckpointJson: JSON.stringify({
-      attempt,
-      text,
-      thinking: '',
-      sequence,
-    }),
-  }
+    sequence: String(sequence),
+    contents: [{ type: 'text', text }],
+  })
 }
 
 function deferredVoid(): { promise: Promise<void>; resolve: () => void } {
@@ -1901,30 +1920,32 @@ function deferredVoid(): { promise: Promise<void>; resolve: () => void } {
   return { promise, resolve }
 }
 
-function modelInvocation(
-  invocationId = 'inv-1',
-  threadId = THREAD_ID,
-): ModelInvocationDTO {
+/** 公共 active assistant output 夹具：默认是一个尚无输出的 RUNNING generation。 */
+function activeAssistantOutput(
+  generationId = 'inv-1',
+  overrides: Partial<HarnessActiveAssistantOutputDTO> = {},
+): HarnessActiveAssistantOutputDTO {
   return {
-    id: invocationId,
-    threadId,
+    generationId,
     turnStartEntryId: 'entry-1',
     requestHeadEntryId: 'entry-1',
     status: 'RUNNING',
     attempt: 1,
-    streamCheckpointJson: '{"attempt":1,"text":"","thinking":"","sequence":0}',
-    resultJson: null,
-    errorJson: null,
+    sequence: '0',
+    contents: [],
+    error: null,
     resultEntryId: null,
     createTime: 1767225600,
     updateTime: 1767225600,
+    ...overrides,
   }
 }
 
 function toolInvocation(overrides: Partial<ToolInvocationDTO> = {}): ToolInvocationDTO {
   return {
     id: 'inv-tool-1',
-    modelInvocationId: 'inv-1',
+    threadId: 'thread-1',
+    turnStartEntryId: 'turn-1',
     assistantEntryId: 'entry-2',
     callIndex: 0,
     status: 'RUNNING',

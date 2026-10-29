@@ -143,11 +143,13 @@ function createThreadSnapshot() {
         },
       ],
       queuedCommands: [],
-      modelInvocation: null,
+      executionStatus: 'IDLE',
+      activeAssistantOutput: null,
       toolInvocations: [],
-      modelAttemptFailures: [],
+      generationFailures: [],
       manualCompaction: { available: false, disabledReason: 'idle' },
       stopReceipts: [],
+      unconfirmedExecutions: [],
     },
   }
 }

@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.BuiltinTestTransactions.builtin;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.BuiltinTestTransactions.builtinDriver;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.CREATION_REQUEST_HASH;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T1;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.branchSettings;
@@ -17,6 +19,18 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
+import fun.fengwk.kkstudio.harness.model.ModelInputModality;
+import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
+import fun.fengwk.kkstudio.harness.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
+import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
+import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
@@ -30,6 +44,7 @@ import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
+import fun.fengwk.kkstudio.harness.runtime.driver.GenerationStatus;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
@@ -53,18 +68,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderCompletion;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
@@ -292,7 +295,8 @@ class PostgresqlCompactionChildTest {
         Clock.fixed(T1, ZoneOffset.UTC),
         scheduler,
         Runnable::run,
-        ExecutionExitTestSupport.confirmer(store, Clock.fixed(T1, ZoneOffset.UTC)));
+        ExecutionExitTestSupport.confirmer(store, Clock.fixed(T1, ZoneOffset.UTC)),
+        (sessionId, toolName, result) -> result);
   }
 
   /** 处理 THREAD Work 直到目标 owner 被处理；Stop 提前投递的父通知 Work 一并 drain，避免污染目标断言。 */
@@ -438,11 +442,12 @@ class PostgresqlCompactionChildTest {
               CONTEXT_WINDOW,
               resolvedOutputTokens != null ? resolvedOutputTokens : MAX_OUTPUT_TOKENS);
         };
-    runtime = new HarnessRuntime(store, resolver, () -> CompactionConfig.DEFAULT);
+    runtime =
+        new HarnessRuntime(store, builtinDriver(store, resolver), () -> CompactionConfig.DEFAULT);
     processor =
         new ThreadProcessor(
             store,
-            resolver,
+            builtinDriver(store, resolver),
             new ThreadProcessorConfig(Duration.ofSeconds(5), () -> CompactionConfig.DEFAULT));
     gateway = new ScriptedChildGateway();
     modelProcessor =
@@ -575,7 +580,7 @@ class PostgresqlCompactionChildTest {
               ThreadState childThread = tx.lockThread(childThreadId).orElseThrow();
               UUID childTurn =
                   tx.loadEntryPath(childThread.headEntryId()).openTurnStart().orElseThrow().id();
-              return tx.findModelInvocationByTurn(childThreadId, childTurn).orElseThrow();
+              return builtin(tx).findModelInvocationByTurn(childThreadId, childTurn).orElseThrow();
             });
     assertEquals(ModelInvocationStatus.READY, childModel.status());
 
@@ -998,11 +1003,10 @@ class PostgresqlCompactionChildTest {
       HarnessRuntime stoppingRuntime =
           new HarnessRuntime(
               store,
-              resolver,
+              builtinDriver(store, resolver),
               () -> CompactionConfig.DEFAULT,
-              null,
-              stoppingModelProcessor,
-              toolProcessor);
+              stoppingModelProcessor::cancel,
+              toolProcessor::cancel);
       runtime = stoppingRuntime;
       modelProcessor = stoppingModelProcessor;
       StoreTestSupport.Baseline outer = seedThreadBaseline(store);
@@ -1248,7 +1252,7 @@ class PostgresqlCompactionChildTest {
           ThreadState child = tx.findThread(childThreadId).orElseThrow();
           UUID childTurn = tx.loadEntryPath(child.headEntryId()).openTurnStart().orElseThrow().id();
           ModelInvocation invocation =
-              tx.findModelInvocationByTurn(childThreadId, childTurn).orElseThrow();
+              builtin(tx).findModelInvocationByTurn(childThreadId, childTurn).orElseThrow();
           assertEquals(ModelInvocationStatus.READY, invocation.status());
           return invocation.id();
         });
@@ -1415,7 +1419,7 @@ class PostgresqlCompactionChildTest {
   }
 
   private ModelInvocation findModel(UUID invocationId) {
-    return store.transaction(tx -> tx.findModelInvocation(invocationId)).orElseThrow();
+    return store.transaction(tx -> builtin(tx).findModelInvocation(invocationId)).orElseThrow();
   }
 
   /** 压缩子在 OVERFLOW 后不得递归创建压缩子，也不得出现第二条压缩 TURN_START。 */
@@ -1750,26 +1754,28 @@ class PostgresqlCompactionChildTest {
         tx -> {
           ThreadState thread = ThreadLifecycleCoordinator.lockThreadWithParent(tx, threadId);
           UUID turn = tx.loadEntryPath(thread.headEntryId()).openTurnStart().orElseThrow().id();
-          ModelInvocation model = tx.findModelInvocationByTurn(threadId, turn).orElseThrow();
+          ModelInvocation model =
+              builtin(tx).findModelInvocationByTurn(threadId, turn).orElseThrow();
           assertEquals(ModelInvocationStatus.READY, model.status());
-          tx.lockModelInvocation(model.id());
-          tx.updateModelInvocation(model.markRunning(T1));
+          builtin(tx).lockModelInvocation(model.id());
+          builtin(tx).updateModelInvocation(model.markRunning(T1));
           return null;
         });
   }
 
   private void finishModel(UUID threadId, String text) {
     ThreadSnapshot current = snapshot(threadId);
-    if (current.model() != null && current.model().status() == ModelInvocationStatus.READY) {
+    if (current.generation() != null && current.generation().status() == GenerationStatus.READY) {
       startModel(threadId);
     }
     store.transaction(
         tx -> {
           ThreadState thread = ThreadLifecycleCoordinator.lockThreadWithParent(tx, threadId);
           UUID turn = tx.loadEntryPath(thread.headEntryId()).openTurnStart().orElseThrow().id();
-          ModelInvocation model = tx.findModelInvocationByTurn(threadId, turn).orElseThrow();
+          ModelInvocation model =
+              builtin(tx).findModelInvocationByTurn(threadId, turn).orElseThrow();
           assertEquals(ModelInvocationStatus.RUNNING, model.status());
-          tx.lockModelInvocation(model.id());
+          builtin(tx).lockModelInvocation(model.id());
           ProviderResponse response =
               new ProviderResponse(
                   text,
@@ -1780,7 +1786,7 @@ class PostgresqlCompactionChildTest {
                   "req-compaction-child",
                   null,
                   "{}");
-          tx.updateModelInvocation(model.succeed(response, T1));
+          builtin(tx).updateModelInvocation(model.succeed(response, T1));
           tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId));
           return null;
         });
@@ -1816,7 +1822,7 @@ class PostgresqlCompactionChildTest {
   }
 
   private Optional<ModelInvocation> findModelInvocationByTurn(UUID threadId, UUID turnStartId) {
-    return store.transaction(tx -> tx.findModelInvocationByTurn(threadId, turnStartId));
+    return store.transaction(tx -> builtin(tx).findModelInvocationByTurn(threadId, turnStartId));
   }
 
   private static ModelRequestSpec requestFor(BranchSettings settings) {

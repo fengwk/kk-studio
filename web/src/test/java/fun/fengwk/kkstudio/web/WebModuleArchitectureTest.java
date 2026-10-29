@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.web;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -10,14 +11,15 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 
 /**
  * web 模块的轻量架构守护。
  *
  * <p>生产源码不得引用 Harness Tool execution/Daemon 包或选定的 Core 基础设施实现；DTO mapping 只放行列出的 canonical Tool
- * 类型；web.controller 包不得引用 Harness runtime processor。web 模块是 Harness 组合根：它按设计将 Runtime 契约与 infra
- * 传输适配器声明为直接依赖，且 {@code web/pom.xml} 必须保留该声明。
+ * 类型；Driver 类型只允许精确的组合根使用；web.controller 包不得引用 Harness runtime processor。web 模块是 Harness 组合根：它按设计将
+ * Runtime、Builtin Driver 与 infra 适配器声明为直接依赖。
  */
 class WebModuleArchitectureTest {
 
@@ -30,6 +32,7 @@ class WebModuleArchitectureTest {
   private static final String HARNESS_ENVIRONMENT_PREFIX =
       "fun.fengwk.kkstudio.harness.environment.";
   private static final String HARNESS_TOOL_PREFIX = "fun.fengwk.kkstudio.harness.tool.";
+  private static final String HARNESS_MODEL_PREFIX = "fun.fengwk.kkstudio.harness.model.";
   private static final String PLATFORM_ENVIRONMENT_PREFIX =
       "fun.fengwk.kkstudio.platform.environment.";
   private static final List<String> ALLOWED_HARNESS_PACKAGE_PREFIXES =
@@ -39,9 +42,22 @@ class WebModuleArchitectureTest {
           HARNESS_CONTRIBUTOR_API_PREFIX,
           HARNESS_ENVIRONMENT_PREFIX);
 
-  /** Web mapper 直接使用的 canonical tool types (ToolResultJsonCodec). */
-  private static final List<String> ALLOWED_HARNESS_TOOL_IMPORTS =
-      List.of(HARNESS_TOOL_PREFIX + "codec." + "ToolResultJsonCodec");
+  /** Web DTO 适配直接使用的公共值类型，不包含 Model/Driver 的私有执行实现。 */
+  private static final List<String> ALLOWED_HARNESS_VALUE_IMPORTS =
+      List.of(
+          HARNESS_TOOL_PREFIX + "codec.ToolResultJsonCodec",
+          HARNESS_MODEL_PREFIX + "ImageInputTier");
+
+  private static final String WEB_SOURCE_ROOT = "fun/fengwk/kkstudio/web/";
+  private static final String BUILTIN_PREFIX = "fun.fengwk.kkstudio.harness.builtin.";
+
+  /** 精确按文件和类型放行真实装配；不为 controller、普通 mapper 或任意 Driver 私有包开通配。 */
+  private static final Map<String, List<String>> ALLOWED_DRIVER_IMPORTS =
+      Map.of(
+          WEB_SOURCE_ROOT + "runtime/HarnessRuntimeConfiguration.java",
+          List.of(
+              BUILTIN_PREFIX + "driver.BuiltinAgentDriver",
+              BUILTIN_PREFIX + "query.BuiltinRequestQuery"));
 
   private static final List<String> FORBIDDEN_IMPORT_PREFIXES =
       List.of(
@@ -64,7 +80,9 @@ class WebModuleArchitectureTest {
           "kk-studio-canvas-infra",
           "kk-studio-harness-infra",
           "kk-studio-harness-environment",
-          "kk-studio-harness-runtime");
+          "kk-studio-harness-runtime",
+          "kk-studio-harness-agent-builtin",
+          "kk-studio-harness-model");
 
   @Test
   void webMainSourcesUseCoreBoundariesAndAvoidDirectHarnessDependencies() throws IOException {
@@ -96,6 +114,18 @@ class WebModuleArchitectureTest {
     assertTrue(
         pomViolations.isEmpty(),
         () -> "web pom harness dependency violations:\n" + String.join("\n", pomViolations));
+  }
+
+  /** 迁移后的组合根白名单不能放开普通 controller/mapper。 */
+  @Test
+  void driverCompositionPermissionsDoNotEscapeTheirDeclaredSourceFiles() {
+    String composition = WEB_SOURCE_ROOT + "runtime/HarnessRuntimeConfiguration.java";
+    String controller = WEB_SOURCE_ROOT + "controller/StudioHarnessThreadController.java";
+    assertFalse(
+        isForbiddenHarnessImport(composition, BUILTIN_PREFIX + "driver.BuiltinAgentDriver"));
+    assertTrue(isForbiddenHarnessImport(controller, BUILTIN_PREFIX + "driver.BuiltinAgentDriver"));
+    assertTrue(
+        isForbiddenHarnessImport(composition, HARNESS_MODEL_PREFIX + "provider.ProviderResponse"));
   }
 
   private static final List<String> FORBIDDEN_MAIN_SOURCE_TOKENS =
@@ -235,7 +265,7 @@ class WebModuleArchitectureTest {
                     String trimmed = line.trim();
                     if (trimmed.startsWith("import ")) {
                       String imported = normalizeImport(trimmed);
-                      if (isForbiddenHarnessImport(imported)) {
+                      if (isForbiddenHarnessImport(relative(main, path), imported)) {
                         violations.add(relative(main, path) + ": " + trimmed);
                       }
                       for (String prefix : FORBIDDEN_IMPORT_PREFIXES) {
@@ -256,15 +286,16 @@ class WebModuleArchitectureTest {
     return violations;
   }
 
-  /** 组合根只直接引用 Runtime、Infra、Contributor API 和规范化的 Tool 类型。 */
-  private static boolean isForbiddenHarnessImport(String imported) {
+  /** 公共类型沿用公开边界；Driver 实现只能出现在声明的组合根中。 */
+  private static boolean isForbiddenHarnessImport(String source, String imported) {
     if (ALLOWED_HARNESS_PACKAGE_PREFIXES.stream().anyMatch(imported::startsWith)) {
       return false;
     }
     if (!imported.startsWith("fun.fengwk.kkstudio.harness.")) {
       return false;
     }
-    return ALLOWED_HARNESS_TOOL_IMPORTS.stream().noneMatch(imported::equals);
+    return !ALLOWED_HARNESS_VALUE_IMPORTS.contains(imported)
+        && !ALLOWED_DRIVER_IMPORTS.getOrDefault(source, List.of()).contains(imported);
   }
 
   private static boolean isForbiddenHarnessReference(String line) {
@@ -289,7 +320,7 @@ class WebModuleArchitectureTest {
 
   private static String relative(Path main, Path path) {
     try {
-      return main.relativize(path).toString();
+      return main.relativize(path).toString().replace('\\', '/');
     } catch (IllegalArgumentException ignored) {
       return path.getFileName().toString();
     }

@@ -136,8 +136,8 @@ export interface ModelAttemptFailureDialogueMessage extends BaseDialogueMessage 
   retryAt: DialogueTimestamp
   /** 活动态为 attempt + 1；terminal ASSISTANT_ERROR 没有后续重试。 */
   nextAttempt: number | null
-  /** 活动 snapshot 的稳定来源身份；durable Entry 不携带这些字段。 */
-  modelInvocationId?: string
+  /** 活动 snapshot 的稳定 generation 身份；durable Entry 不携带这些字段。 */
+  generationId?: string
   turnStartEntryId?: string
   requestHeadEntryId?: string
 }
@@ -332,6 +332,10 @@ export interface ThreadModelRequestDebugCacheControl {
 
 export interface ThreadModelRequestDebugFrozenInvocation {
   kind: string
+  /** Builtin generation 的稳定身份（canonical UUID string）。 */
+  generationId: string
+  /** 冻结请求所属 generation 的 attempt。 */
+  attempt: number
   requestJson: string
 }
 

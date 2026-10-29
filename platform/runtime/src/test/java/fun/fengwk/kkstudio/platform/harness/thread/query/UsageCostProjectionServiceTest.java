@@ -8,12 +8,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.harness.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
@@ -25,8 +28,6 @@ import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
@@ -51,7 +52,7 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * 读取时费用投影契约：按每个 ASSISTANT 结果<b>祖先</b>记录的真实型号取<b>当前</b> catalog 价格并现算，且整次投影只读。
+ * 读取时费用投影契约：按每个 ASSISTANT 结果 metadata 记录的真实型号取<b>当前</b> catalog 价格并现算，且整次投影只读。
  *
  * <p>测试固定三件容易被后续实现悄悄弄错的事实：模型中途切换时逐条按各自当时的型号计价；无法定价（模型已删除或定义损坏）绝不伪装成 0 费用；每个出现过的模型在一次投影里至多查一次
  * catalog。
@@ -80,7 +81,7 @@ class UsageCostProjectionServiceTest {
       new UsageCostProjectionService(modelRepository, configParser);
 
   /**
-   * 测试意图：同一 Session 内模型切换时，每条 Assistant 结果都按自己所在 Turn 记录的型号与当前价格计价——证明解析来自祖先快照而不是 「当前 branch
+   * 测试意图：同一 Session 内模型切换时，每条 Assistant 结果都按自己 metadata 记录的型号与当前价格计价，而不是「当前 branch
    * settings」或最后一条消息。
    */
   @Test
@@ -279,16 +280,15 @@ class UsageCostProjectionServiceTest {
     verifyNoMoreInteractions(modelRepository);
   }
 
-  /** 测试意图：Assistant 之前没有任何 TURN_START 时回落到 ROOT 的 branch settings 快照，而不是放弃计价。 */
+  /** 没有 TURN_START 时也必须按实际型号而非 ROOT 的选择计价。 */
   @Test
-  void resolvesRootSettingsWhenNoTurnPrecedesTheAssistant() {
+  void pricesRecordedModelWhenNoTurnPrecedesTheAssistant() {
     stubModel("provider-a", "model-a", pricing(BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ZERO));
 
-    // 真实树上第一个 Turn 一定由 TURN_START 开启；这里显式固定 ROOT 回落分支这一独立事实。
     Map<UUID, HarnessUsageCostDTO> costs =
         service.project(
             List.of(
-                root(settings("provider-a", "model-a")),
+                root(settings("provider-b", "model-b")),
                 user(USER_A_ID, ROOT_ID),
                 assistant(
                     ASSISTANT_A_ID,
@@ -297,6 +297,8 @@ class UsageCostProjectionServiceTest {
                     new ModelUsage(1_000_000, 0, 0, 0, Map.of(), 0L, 1_000_000L))));
 
     assertEquals("1", costs.get(ASSISTANT_A_ID).getAmount());
+    verify(modelRepository).getByName("model-a");
+    verifyNoMoreInteractions(modelRepository);
   }
 
   /** 测试意图：同一模型的多条结果共用一次 catalog 读取——整棵 Entry tree 的投影成本与消息数无关，绝不能逐消息请求。 */
@@ -365,7 +367,28 @@ class UsageCostProjectionServiceTest {
 
     IllegalStateException error =
         assertThrows(IllegalStateException.class, () -> service.project(entries));
-    assertTrue(error.getMessage().contains(ASSISTANT_A_ID.toString()), error.getMessage());
+    assertEquals(
+        "assistant metadata is missing the actual model selection: entry=" + ASSISTANT_A_ID,
+        error.getMessage());
+    verifyNoInteractions(modelRepository);
+  }
+
+  /** Compaction 的 metadata 同样必须记录实际型号，不能通过 Turn 设置猜测。 */
+  @Test
+  void rejectsCompactionMetadataWithoutActualModel() {
+    List<Entry> entries =
+        List.of(
+            root(settings("provider-a", "model-a")),
+            compactionTurnStart(TURN_A_ID, ROOT_ID),
+            compactionResult(
+                ASSISTANT_A_ID, TURN_A_ID, null, new ModelUsage(1, 0, 0, 0, Map.of(), 0L, 1L)));
+
+    IllegalStateException error =
+        assertThrows(IllegalStateException.class, () -> service.project(entries));
+    assertEquals(
+        "assistant metadata is missing the actual model selection: entry=" + ASSISTANT_A_ID,
+        error.getMessage());
+    verifyNoInteractions(modelRepository);
   }
 
   /** 测试意图：catalog 定义本身非法属于数据损坏，照常抛出而不是静默把该 Entry 降级为「未计价」。 */

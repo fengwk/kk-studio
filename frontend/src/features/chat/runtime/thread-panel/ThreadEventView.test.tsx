@@ -526,6 +526,8 @@ describe('ThreadEventView', () => {
       const debug = sampleDebugData({
         frozenInvocation: {
           kind: 'FROZEN_INVOCATION',
+          generationId: 'generation-1',
+          attempt: 1,
           requestJson: '{"model":"minimax"}',
         },
       })

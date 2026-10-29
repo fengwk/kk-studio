@@ -23,7 +23,7 @@ class PostgresqlHarnessSchemaTest {
    * harness_%} 全量查询结果必须精确等于这九张表。
    *
    * <p>{@code harness_thread_join} 是原子源 prompt 接受与 join 契约的持久事实（无独立状态枚举，无 prompt/report 冗余）， {@code
-   * harness_thread_stop_receipt} 是 Stop 回执集合的持久事实，属于 runtime 协议空间。
+   * harness_thread_stop_receipt} 是 Stop 回执集合的持久事实，均属于 runtime 协议空间。
    */
   private static final List<String> RUNTIME_TABLES =
       List.of(
@@ -364,8 +364,8 @@ class PostgresqlHarnessSchemaTest {
             "idx_harness_thread_root",
             "idx_harness_thread_session",
             "idx_harness_thread_stop_receipt_root",
-            "idx_harness_tool_invocation_model_nonterminal",
             "idx_harness_tool_invocation_pending",
+            "idx_harness_tool_invocation_thread_nonterminal",
             "pk_harness_thread_stop_receipt",
             "uk_harness_entry_session_id",
             "uk_harness_entry_single_root",
@@ -384,7 +384,8 @@ class PostgresqlHarnessSchemaTest {
     String threadSession = indexDefinition("idx_harness_thread_session");
     String stopRequest = indexDefinition("idx_harness_thread_command_stop_request");
     String childPending = indexDefinition("idx_harness_thread_join_child_pending");
-    String toolNonterminal = indexDefinition("idx_harness_tool_invocation_model_nonterminal");
+    String toolNonterminal = indexDefinition("idx_harness_tool_invocation_thread_nonterminal");
+    // 同一 Environment 内只允许一个 native writer 的唯一键已随 Claude 执行表移除；剩余索引必须保持既定形状。
     assertTrue(modelResult.contains("WHERE (result_entry_id IS NOT NULL)"));
     assertTrue(workAvailable.contains("(available_at, target_type, target_id)"));
     assertTrue(workLease.contains("(lease_until, target_type, target_id)"));
@@ -411,8 +412,8 @@ class PostgresqlHarnessSchemaTest {
     // Stop 回执集合索引必须按 (root_thread_id, root_stop_request_id) 建键，隔离不同树复用同一请求 UUID。
     String stopReceiptRoot = indexDefinition("idx_harness_thread_stop_receipt_root");
     assertTrue(stopReceiptRoot.contains("(root_thread_id, root_stop_request_id)"));
-    // 未收尾 ToolInvocation 的按 ModelInvocation 查找路径必须只覆盖全部非终态（含人工输入等待），且按 model_invocation_id 建键。
-    assertTrue(toolNonterminal.contains("(model_invocation_id)"));
+    // 未收尾 ToolInvocation 的公共查找路径必须只覆盖全部非终态（含人工输入等待），且按 thread_id 建键。
+    assertTrue(toolNonterminal.contains("(thread_id)"));
     for (String nonterminal : List.of("WAITING_APPROVAL", "WAITING_INPUT", "READY", "RUNNING")) {
       assertTrue(toolNonterminal.contains("'" + nonterminal + "'"));
     }
@@ -487,7 +488,7 @@ class PostgresqlHarnessSchemaTest {
         "{\"submissionId\":\"11111111-1111-1111-1111-111111111111\",\"actor\":\"alice\","
             + "\"acceptedAt\":\"2026-09-27T00:00:00Z\"}";
 
-    // 1. WAITING_INPUT 必须携带 binding（ck_harness_tool_waiting_input）
+    // 1. WAITING_INPUT 必须携带 binding（通用 ck_harness_tool_invocation_binding 先生效）
     DataIntegrityViolationException exNoBinding =
         assertThrows(
             DataIntegrityViolationException.class,
@@ -495,7 +496,8 @@ class PostgresqlHarnessSchemaTest {
                 insertToolInvocation(
                     UUID.randomUUID(),
                     0,
-                    modelId,
+                    threadId,
+                    turnStartEntryId,
                     assistantEntryId,
                     callJson,
                     null,
@@ -505,8 +507,9 @@ class PostgresqlHarnessSchemaTest {
                     null),
             "WAITING_INPUT without binding must be rejected");
     assertTrue(
-        exNoBinding.getMessage().contains("ck_harness_tool_waiting_input"),
-        "expected violation of ck_harness_tool_waiting_input but got: " + exNoBinding.getMessage());
+        exNoBinding.getMessage().contains("ck_harness_tool_invocation_binding"),
+        "expected violation of ck_harness_tool_invocation_binding but got: "
+            + exNoBinding.getMessage());
     // 2. WAITING_INPUT 不得携带 result（等待尚未产生业务结果）
     assertThrows(
         DataIntegrityViolationException.class,
@@ -514,7 +517,8 @@ class PostgresqlHarnessSchemaTest {
             insertToolInvocation(
                 UUID.randomUUID(),
                 0,
-                modelId,
+                threadId,
+                turnStartEntryId,
                 assistantEntryId,
                 callJson,
                 bindingJson,
@@ -529,7 +533,8 @@ class PostgresqlHarnessSchemaTest {
             insertToolInvocation(
                 UUID.randomUUID(),
                 0,
-                modelId,
+                threadId,
+                turnStartEntryId,
                 assistantEntryId,
                 callJson,
                 bindingJson,
@@ -545,7 +550,8 @@ class PostgresqlHarnessSchemaTest {
                 insertToolInvocation(
                     UUID.randomUUID(),
                     1,
-                    modelId,
+                    threadId,
+                    turnStartEntryId,
                     assistantEntryId,
                     callJson,
                     bindingJson,
@@ -565,7 +571,8 @@ class PostgresqlHarnessSchemaTest {
             insertToolInvocation(
                 UUID.randomUUID(),
                 1,
-                modelId,
+                threadId,
+                turnStartEntryId,
                 assistantEntryId,
                 callJson,
                 bindingJson,
@@ -589,7 +596,8 @@ class PostgresqlHarnessSchemaTest {
               insertToolInvocation(
                   UUID.randomUUID(),
                   1,
-                  modelId,
+                  threadId,
+                  turnStartEntryId,
                   assistantEntryId,
                   callJson,
                   bindingJson,
@@ -605,7 +613,8 @@ class PostgresqlHarnessSchemaTest {
             insertToolInvocation(
                 UUID.randomUUID(),
                 1,
-                modelId,
+                threadId,
+                turnStartEntryId,
                 assistantEntryId,
                 callJson,
                 bindingJson,
@@ -618,7 +627,8 @@ class PostgresqlHarnessSchemaTest {
   private void insertToolInvocation(
       UUID id,
       int callIndex,
-      UUID modelId,
+      UUID threadId,
+      UUID turnStartEntryId,
       UUID assistantEntryId,
       String callJson,
       String bindingJson,
@@ -627,14 +637,15 @@ class PostgresqlHarnessSchemaTest {
       String approvalJson,
       String receiptJson) {
     jdbc.update(
-        "insert into harness_tool_invocation (id, model_invocation_id, assistant_entry_id, call_index, call, binding,"
+        "insert into harness_tool_invocation (id, thread_id, turn_start_entry_id, assistant_entry_id, call_index, call, binding,"
             + " status, attempt, approval, result, effects, error, created_at, updated_at, input_receipt)"
-            + " values (?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, 0, ?::jsonb, ?::jsonb,"
+            + " values (?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, 0, ?::jsonb, ?::jsonb,"
             // 非 SUCCEEDED 行的 effects 必须是空批（ck_harness_tool_invocation_effects_status）。
             + " '{\"version\":1,\"customEntries\":[]}'::jsonb, null,"
             + " statement_timestamp(), statement_timestamp(), ?::jsonb)",
         id,
-        modelId,
+        threadId,
+        turnStartEntryId,
         assistantEntryId,
         callIndex,
         callJson,

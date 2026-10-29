@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.platform.harness.tool.gateway;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -18,8 +17,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import fun.fengwk.kkstudio.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.common.result.TextArtifactMetadata;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.port.ToolOutcomeMaterializationException;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.platform.storage.InMemoryS3StorageService;
@@ -71,7 +69,7 @@ class GlobalStorageToolResultHistoryMaterializerIntegrationTest extends Postgres
     StorageUploadService.StagedUpload staged = stage("result.txt", "text/plain", bytes);
     s3Storage.clearNetworkCalls();
 
-    List<AgentMessageContent> contents =
+    ToolResult stable =
         inTransaction(
             new ToolResult(
                 "call-1",
@@ -81,11 +79,13 @@ class GlobalStorageToolResultHistoryMaterializerIntegrationTest extends Postgres
                 false,
                 "{}"));
 
-    ResourceMessageContent content =
-        assertInstanceOf(ResourceMessageContent.class, contents.getFirst());
-    assertTrue(content.isExternalizedText());
-    assertEquals(staged.blobId(), content.blobId());
-    assertEquals("result.txt", content.name());
+    ResourceResultContent content =
+        assertInstanceOf(ResourceResultContent.class, stable.contents().getFirst());
+    assertEquals(staged.blobId(), content.resource().sessionBlobId());
+    assertEquals("result.txt", content.resource().name());
+    assertEquals("hello\nworld", content.preview());
+    assertEquals(bytes.length, content.resource().size());
+    assertEquals(2L, content.textMetadata().totalLines());
     assertEquals(0, s3Storage.networkCalls().size());
     assertEquals(
         1,
@@ -119,7 +119,7 @@ class GlobalStorageToolResultHistoryMaterializerIntegrationTest extends Postgres
             "a".repeat(64));
 
     assertThrows(
-        IllegalArgumentException.class,
+        ToolOutcomeMaterializationException.class,
         () ->
             inTransaction(
                 new ToolResult(
@@ -176,7 +176,7 @@ class GlobalStorageToolResultHistoryMaterializerIntegrationTest extends Postgres
         staged.sha256());
   }
 
-  private List<AgentMessageContent> inTransaction(ToolResult result) {
+  private ToolResult inTransaction(ToolResult result) {
     return transaction.execute(status -> materializer.materialize(SESSION_ID, "tool", result));
   }
 }

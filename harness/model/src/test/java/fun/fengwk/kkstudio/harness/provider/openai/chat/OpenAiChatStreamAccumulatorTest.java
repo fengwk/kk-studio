@@ -1,0 +1,1375 @@
+package fun.fengwk.kkstudio.harness.provider.openai.chat;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
+
+import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
+import fun.fengwk.kkstudio.harness.model.ModelInputModality;
+import fun.fengwk.kkstudio.harness.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
+import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
+import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
+import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamHandler;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
+import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
+
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
+
+/** 测试意图：全面验证 OpenAI Chat 流式累积器状态机、事件派发、终态映射、截断诊断、互斥用量度量及 Replay 保真。 */
+class OpenAiChatStreamAccumulatorTest {
+
+  private static final String MSG_CONFLICTING_FINISH_REASON =
+      "conflicting finish_reason after finalized choice";
+  private static final String MSG_INVALID_CHOICE_INDEX =
+      "choice index must be a non-negative integer";
+  private static final String MSG_SEMANTIC_DELTA_AFTER_FINALIZE =
+      "semantic delta received after finalized choice";
+
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
+
+  private ProviderDescriptor descriptor;
+  private ModelDescriptor modelDesc;
+  private ProviderRequest request;
+  private List<ProviderStreamEvent> recordedEvents;
+  private ProviderStreamBridge bridge;
+
+  @BeforeEach
+  void setUp() {
+    descriptor =
+        new ProviderDescriptor(
+            "openai",
+            ProviderType.OPENAI,
+            "https://api.openai.com/v1",
+            new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)));
+    modelDesc =
+        new ModelDescriptor(
+            "openai", "gpt-4o", "gpt-4o", Set.of(ModelInputModality.TEXT), true, false);
+    ProviderMessage userMsg =
+        new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hello")));
+    ModelVariant defaultVariant = new ModelVariant("default");
+    request =
+        new ProviderRequest(
+            modelDesc,
+            defaultVariant,
+            1024,
+            "Test system instruction.",
+            List.of(userMsg),
+            List.of(),
+            ProviderCacheControl.none());
+
+    recordedEvents = new ArrayList<>();
+    ProviderStreamHandler handler =
+        new ProviderStreamHandler() {
+          @Override
+          public void onEvent(ProviderStreamEvent event) {
+            recordedEvents.add(event);
+          }
+
+          @Override
+          public void onComplete(ProviderCompletion completion) {}
+
+          @Override
+          public void onError(ProviderException error) {}
+        };
+    bridge = new ProviderStreamBridge(handler);
+  }
+
+  /** 测试意图：[DONE] 后重复终止帧无操作，非空语义帧必须拒绝且不能改写已累积文本。 */
+  @Test
+  void rejectsSemanticPayloadAfterDone() {
+    OpenAiChatStreamAccumulator accumulator = createAccumulator();
+    accumulator.handleData("{\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}");
+    accumulator.handleData("[DONE]");
+    accumulator.handleData("  [DONE]  ");
+    ProviderException error =
+        assertThrows(
+            ProviderException.class,
+            () -> accumulator.handleData("{\"choices\":[{\"delta\":{\"content\":\" again\"}}]}"));
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind());
+  }
+
+  /**
+   * 测试意图：choice 首个有效 finish_reason 后语义封闭——usage-only 空 choices、无语义尾帧、与冻结结果完全一致的 重复终止标记（同 choice
+   * index、同 finish_reason、无 delta）以及重复 [DONE] 都合法；之后的文本/refusal/reasoning/ tool/native-only 增量、变更的
+   * finish_reason 或不同 choice index 一律 fail closed，且已累积结果不可改写。
+   */
+  @Test
+  void finalizesChoiceAfterFirstFinishReasonAndRejectsLaterSemanticFrames() {
+    OpenAiChatStreamAccumulator accumulator = createAccumulator();
+
+    // 同帧「尾随 content + finish_reason」：先正常累积，再在本帧末尾封闭
+    accumulator.handleData(
+        "{\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}]}");
+
+    // 合法尾帧：usage-only 空 choices、空 delta、delta 为 null、空字符串内容
+    accumulator.handleData("{\"choices\":[{\"index\":0,\"delta\":null}]}");
+    accumulator.handleData(
+        "{\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":1,\"total_tokens\":4}}");
+    accumulator.handleData("{\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":null}]}");
+    accumulator.handleData("{\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\"}}]}");
+
+    // 幂等冗余终止标记：与冻结结果同一 choice index、同一 finish_reason 且无 delta，不追加内容也不重发增量
+    int eventsAfterFinalize = recordedEvents.size();
+    accumulator.handleData("{\"choices\":[{\"index\":0,\"finish_reason\":\"stop\"}]}");
+    accumulator.handleData("{\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}");
+    assertEquals(eventsAfterFinalize, recordedEvents.size());
+
+    // 封闭后的语义帧：content / refusal / reasoning_content / reasoning_details / tool_calls / native-only
+    assertSemanticDeltaRejected(accumulator, "{\"choices\":[{\"delta\":{\"content\":\" more\"}}]}");
+    assertSemanticDeltaRejected(accumulator, "{\"choices\":[{\"delta\":{\"refusal\":\"no\"}}]}");
+    assertSemanticDeltaRejected(
+        accumulator, "{\"choices\":[{\"delta\":{\"reasoning_content\":\"more\"}}]}");
+    assertSemanticDeltaRejected(
+        accumulator, "{\"choices\":[{\"delta\":{\"reasoning_details\":[{\"type\":\"x\"}]}}]}");
+    assertSemanticDeltaRejected(
+        accumulator,
+        "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"type\":\"function\","
+            + "\"function\":{\"name\":\"f\",\"arguments\":\"{}\"}}]}}]}");
+    assertSemanticDeltaRejected(
+        accumulator, "{\"choices\":[{\"delta\":{\"vendor_field\":\"x\"}}]}");
+    // 嵌套容器与非字符串标量同样视为语义载荷，不被当作空尾帧放行
+    assertSemanticDeltaRejected(
+        accumulator, "{\"choices\":[{\"delta\":{\"vendor_nested\":{\"inner\":\"x\"}}}]}");
+    assertSemanticDeltaRejected(accumulator, "{\"choices\":[{\"delta\":{\"vendor_count\":3}}]}");
+    // 重复但已变更的 finish_reason（含映射到同一 COMPLETE 的 tool_calls）与不同 choice index 都不允许
+    assertInvalidAfterFinalize(
+        accumulator,
+        "{\"choices\":[{\"finish_reason\":\"length\"}]}",
+        MSG_CONFLICTING_FINISH_REASON);
+    assertInvalidAfterFinalize(
+        accumulator,
+        "{\"choices\":[{\"finish_reason\":\"tool_calls\"}]}",
+        MSG_CONFLICTING_FINISH_REASON);
+    assertInvalidAfterFinalize(
+        accumulator,
+        "{\"choices\":[{\"index\":1,\"finish_reason\":\"stop\"}]}",
+        MSG_CONFLICTING_FINISH_REASON);
+
+    // finish_reason 闸门之后仍允许 [DONE] 与重复 [DONE]，且已封闭事实保持第一份
+    accumulator.handleData("[DONE]");
+    accumulator.handleData("  [DONE]  ");
+    ProviderCompletion completion = accumulator.finish();
+    assertEquals("hi", completion.response().text());
+    assertEquals(GenerationStopReason.COMPLETE, completion.response().stopReason());
+    assertEquals(4L, completion.response().usage().providerTotalTokens());
+    assertEquals("hi", completion.replayState().payload().path("content").asString(""));
+  }
+
+  /**
+   * 测试意图：真实形态的重复终止标记——完整文本后同帧/尾帧重复 finish_reason=stop（其中一帧同行携带 usage）必须正常完成， 只派发一次文本增量并保留
+   * usage，不产生第二次终态。
+   */
+  @Test
+  void redundantRepeatedFinishStopWithUsageCompletesNormally() {
+    OpenAiChatStreamAccumulator accumulator = createAccumulator();
+    accumulator.handleData(
+        "{\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"hi\"},"
+            + "\"finish_reason\":null}]}");
+    accumulator.handleData(
+        "{\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],"
+            + "\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":1,\"total_tokens\":4}}");
+    // 同一 usage 的再次重复终止标记：usage 允许更新，但语义载荷与增量不得变化
+    accumulator.handleData(
+        "{\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],"
+            + "\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":1,\"total_tokens\":4}}");
+    accumulator.handleData("[DONE]");
+
+    ProviderCompletion completion = accumulator.finish();
+    assertEquals("hi", completion.response().text());
+    assertEquals(GenerationStopReason.COMPLETE, completion.response().stopReason());
+    assertEquals(4L, completion.response().usage().providerTotalTokens());
+    assertEquals(1, recordedEvents.size());
+    assertEquals("hi", ((ProviderStreamEvent.TextDelta) recordedEvents.get(0)).text());
+    assertEquals("hi", completion.replayState().payload().path("content").asString(""));
+  }
+
+  /** 测试意图：tool_calls 终态后的冗余 finish_reason=tool_calls 幂等——不重复累积工具调用，也不重发 ToolCallDelta。 */
+  @Test
+  void redundantRepeatedToolCallsFinishDoesNotDuplicateToolCalls() {
+    OpenAiChatStreamAccumulator accumulator = createAccumulator();
+    accumulator.handleData(
+        "{\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\","
+            + "\"type\":\"function\",\"function\":{\"name\":\"f\",\"arguments\":\"{}\"}}]},"
+            + "\"finish_reason\":\"tool_calls\"}]}");
+    int eventsAfterFinalize = recordedEvents.size();
+    accumulator.handleData(
+        "{\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}");
+    accumulator.handleData(
+        "{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}");
+    accumulator.handleData("[DONE]");
+
+    ProviderCompletion completion = accumulator.finish();
+    assertEquals(GenerationStopReason.COMPLETE, completion.response().stopReason());
+    assertEquals(1, completion.response().toolCalls().size());
+    assertEquals("call_1", completion.response().toolCalls().get(0).id());
+    assertEquals(eventsAfterFinalize, recordedEvents.size());
+  }
+
+  /** 测试意图：length / content_filter 终态后的同一 stop reason 冗余标记幂等，变更 reason 仍 fail closed。 */
+  @Test
+  void redundantRepeatedLengthAndFilteredFinishReasonsRemainConsistent() {
+    OpenAiChatStreamAccumulator length = createAccumulator();
+    length.handleData(
+        "{\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial\"},\"finish_reason\":\"length\"}]}");
+    length.handleData("{\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"length\"}]}");
+    assertInvalidAfterFinalize(
+        length,
+        "{\"choices\":[{\"index\":0,\"finish_reason\":\"stop\"}]}",
+        MSG_CONFLICTING_FINISH_REASON);
+    length.handleData(
+        "{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}");
+    length.handleData("[DONE]");
+    assertEquals(GenerationStopReason.LENGTH, length.finish().response().stopReason());
+
+    OpenAiChatStreamAccumulator filtered = createAccumulator();
+    filtered.handleData(
+        "{\"choices\":[{\"index\":0,\"delta\":{\"content\":\"censored\"},"
+            + "\"finish_reason\":\"content_filter\"}]}");
+    filtered.handleData("{\"choices\":[{\"index\":0,\"finish_reason\":\"content_filter\"}]}");
+    filtered.handleData(
+        "{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}");
+    filtered.handleData("[DONE]");
+    ProviderCompletion completion = filtered.finish();
+    assertEquals(GenerationStopReason.FILTERED, completion.response().stopReason());
+    assertNull(completion.replayState());
+  }
+
+  /**
+   * 测试意图：index 缺失视为主 choice 默认 0；一旦显式提供，畸形形态（显式 null/字符串/布尔/小数/负数/超 int）在首次 冻结与重复终止标记两条路径都必须 fail
+   * closed 且不回显原始值；缺失 index 与 index:0 视为同一 choice 仍接受。
+   */
+  @Test
+  void rejectsMalformedChoiceIndexOnFreezeAndRepeat() {
+    for (String index : List.of("null", "\"abc\"", "true", "1.5", "-1", "4294967296")) {
+      assertInvalidAfterFinalize(
+          createAccumulator(),
+          "{\"choices\":[{\"index\":" + index + ",\"finish_reason\":\"stop\"}]}",
+          MSG_INVALID_CHOICE_INDEX);
+      OpenAiChatStreamAccumulator repeated = createAccumulator();
+      repeated.handleData("{\"choices\":[{\"index\":0,\"finish_reason\":\"stop\"}]}");
+      assertInvalidAfterFinalize(
+          repeated,
+          "{\"choices\":[{\"index\":" + index + ",\"finish_reason\":\"stop\"}]}",
+          MSG_INVALID_CHOICE_INDEX);
+    }
+
+    // 缺失 index 与显式 index:0 都视为主 choice，冗余重复标记依旧幂等接受
+    OpenAiChatStreamAccumulator accumulator = createAccumulator();
+    accumulator.handleData("{\"choices\":[{\"finish_reason\":\"stop\"}]}");
+    accumulator.handleData("{\"choices\":[{\"index\":0,\"finish_reason\":\"stop\"}]}");
+    accumulator.handleData(
+        "{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}");
+    accumulator.handleData("[DONE]");
+    assertEquals(GenerationStopReason.COMPLETE, accumulator.finish().response().stopReason());
+  }
+
+  /** 测试意图：finish_reason 的非字符串形态绝不被 asText 静默吞掉；null 与空白字符串仍是合法无语义尾帧。 */
+  @Test
+  void rejectsNonTextualFinishReasonInsteadOfSwallowingIt() {
+    for (String payload :
+        List.of(
+            "{\"choices\":[{\"finish_reason\":{}}]}",
+            "{\"choices\":[{\"finish_reason\":[]}]}",
+            "{\"choices\":[{\"finish_reason\":5}]}")) {
+      assertInvalidAfterFinalize(createAccumulator(), payload, "finish_reason must be a string");
+    }
+
+    OpenAiChatStreamAccumulator accumulator = createAccumulator();
+    accumulator.handleData("{\"choices\":[{\"finish_reason\":null}]}");
+    accumulator.handleData("{\"choices\":[{\"finish_reason\":\"\"}]}");
+  }
+
+  private static void assertSemanticDeltaRejected(
+      OpenAiChatStreamAccumulator accumulator, String payload) {
+    assertInvalidAfterFinalize(accumulator, payload, MSG_SEMANTIC_DELTA_AFTER_FINALIZE);
+  }
+
+  private static void assertInvalidAfterFinalize(
+      OpenAiChatStreamAccumulator accumulator, String payload, String expectedMessage) {
+    ProviderException error =
+        assertThrows(ProviderException.class, () -> accumulator.handleData(payload));
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind());
+    assertEquals(expectedMessage, error.getMessage());
+  }
+
+  @Test
+  @DisplayName("文本 content delta 派发与尾部 usage 读取")
+  void testContentDeltaAndTrailingUsage() {
+    OpenAiChatStreamAccumulator accumulator =
+        new OpenAiChatStreamAccumulator(
+            request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
+
+    accumulator.handleData(
+        "{\"id\":\"c1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hello\"}}]}");
+    accumulator.handleData(
+        "{\"id\":\"c1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" world!\"},\"finish_reason\":\"stop\"}]}");
+    accumulator.handleData(
+        """
+        {
+          "id": "c1",
+          "choices": [],
+          "usage": {
+            "prompt_tokens": 10,
+            "completion_tokens": 5,
+            "total_tokens": 15,
+            "prompt_tokens_details": {"cached_tokens": 2}
+          }
+        }
+        """);
+    accumulator.handleData("[DONE]");
+
+    ProviderCompletion completion = accumulator.finish();
+    assertEquals("Hello world!", completion.response().text());
+    assertEquals(GenerationStopReason.COMPLETE, completion.response().stopReason());
+
+    // 验证事件流派发
+    assertEquals(2, recordedEvents.size());
+    assertEquals("Hello", ((ProviderStreamEvent.TextDelta) recordedEvents.get(0)).text());
+    assertEquals(" world!", ((ProviderStreamEvent.TextDelta) recordedEvents.get(1)).text());
+
+    // 验证互斥用量
+    ModelUsage usage = completion.response().usage();
+    assertEquals(8, usage.inputTokens()); // 10 - 2
+    assertEquals(5, usage.outputTokens());
+    assertEquals(2, usage.cacheReadTokens());
+    assertEquals(0, usage.cacheWriteTokens());
+    assertNull(usage.reasoningTokens());
+    assertEquals(15L, usage.providerTotalTokens());
+    assertEquals(15, usage.categorizedTokens());
+
+    // 验证生成了合法的 ReplayState
+    assertNotNull(completion.replayState());
+    assertEquals(ProviderReplayFormat.OPENAI_CHAT, completion.replayState().format());
+    assertEquals("Hello world!", completion.replayState().payload().path("content").asString(""));
+  }
+
+  /** 验证 refusal 是正常完成的可见助手文本，并以原生字段进入 replay。 */
+  @Test
+  @DisplayName("refusal delta 进入可见文本通道并保留原生 replay")
+  void testRefusalDeltaIsVisibleCompletedText() {
+    OpenAiChatStreamAccumulator accumulator =
+        new OpenAiChatStreamAccumulator(
+            request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
+
+    accumulator.handleData(
+        "{\"id\":\"refusal-1\",\"choices\":[{\"index\":0,\"delta\":{\"refusal\":\"I cannot\"}}]}");
+    accumulator.handleData(
+        "{\"id\":\"refusal-1\",\"choices\":[{\"index\":0,\"delta\":{\"refusal\":\" help with that.\"},\"finish_reason\":\"stop\"}]}");
+    accumulator.handleData(
+        "{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":6,\"total_tokens\":16}}");
+    accumulator.handleData("[DONE]");
+
+    ProviderCompletion completion = accumulator.finish();
+    assertEquals("I cannot help with that.", completion.response().text());
+    assertEquals(GenerationStopReason.COMPLETE, completion.response().stopReason());
+    assertEquals(2, recordedEvents.size());
+    assertEquals("I cannot", ((ProviderStreamEvent.TextDelta) recordedEvents.get(0)).text());
+    assertEquals(
+        " help with that.", ((ProviderStreamEvent.TextDelta) recordedEvents.get(1)).text());
+    assertNotNull(completion.replayState());
+    assertFalse(completion.replayState().payload().has("content"));
+    assertEquals(
+        "I cannot help with that.",
+        completion.replayState().payload().path("refusal").asString(""));
+  }
+
+  @Test
+  @DisplayName("reasoning_content 派发 ThinkingDelta，reasoning_details 仅存 native replay")
+  void testReasoningContentAndDetails() {
+    OpenAiChatStreamAccumulator accumulator =
+        new OpenAiChatStreamAccumulator(
+            request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
+
+    accumulator.handleData(
+        """
+        {
+          "id": "c2",
+          "choices": [{
+            "index": 0,
+            "delta": {
+              "role": "assistant",
+              "reasoning_content": "Pondering problem...",
+              "reasoning_details": [{"step": 1, "status": "ok"}]
+            }
+          }]
+        }
+        """);
+    accumulator.handleData(
+        """
+        {
+          "id": "c2",
+          "choices": [{
+            "index": 0,
+            "delta": {
+              "content": "42",
+              "reasoning_details": [{"step": 2, "status": "done"}]
+            },
+            "finish_reason": "stop"
+          }],
+          "usage": {
+            "prompt_tokens": 20,
+            "completion_tokens": 10,
+            "total_tokens": 30,
+            "completion_tokens_details": {"reasoning_tokens": 8}
+          }
+        }
+        """);
+    accumulator.handleData("[DONE]");
+
+    ProviderCompletion completion = accumulator.finish();
+    assertEquals("42", completion.response().text());
+    assertEquals("Pondering problem...", completion.response().thinking());
+
+    // 验证派发了 ThinkingDelta 与 TextDelta，reasoning_details 未被拼为普通文本
+    assertEquals(2, recordedEvents.size());
+    assertTrue(recordedEvents.get(0) instanceof ProviderStreamEvent.ThinkingDelta);
+    assertEquals(
+        "Pondering problem...", ((ProviderStreamEvent.ThinkingDelta) recordedEvents.get(0)).text());
+    assertTrue(recordedEvents.get(1) instanceof ProviderStreamEvent.TextDelta);
+    assertEquals("42", ((ProviderStreamEvent.TextDelta) recordedEvents.get(1)).text());
+
+    // 验证 usage
+    ModelUsage usage = completion.response().usage();
+    assertEquals(20, usage.inputTokens());
+    assertEquals(10, usage.outputTokens()); // completion includes reasoning tokens
+    assertEquals(8, usage.reasoningTokens());
+
+    // 验证 replay payload 保真了 reasoning_content 与 reasoning_details
+    assertNotNull(completion.replayState());
+    assertEquals(
+        "Pondering problem...",
+        completion.replayState().payload().path("reasoning_content").asString(""));
+    assertEquals(2, completion.replayState().payload().path("reasoning_details").size());
+  }
+
+  @Test
+  @DisplayName("单工具与并行工具片段聚合与完成")
+  void testToolCallsAggregation() {
+    OpenAiChatStreamAccumulator accumulator =
+        new OpenAiChatStreamAccumulator(
+            request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
+
+    accumulator.handleData(
+        """
+        {
+          "id": "c3",
+          "choices": [{
+            "index": 0,
+            "delta": {
+              "tool_calls": [
+                {"index": 0, "id": "call_1", "type": "function", "function": {"name": "f1", "arguments": "{\\"a\\":"}},
+                {"index": 1, "id": "call_2", "type": "function", "function": {"name": "f2", "arguments": "{\\"b\\":"}}
+              ]
+            }
+          }]
+        }
+        """);
+    accumulator.handleData(
+        """
+        {
+          "id": "c3",
+          "choices": [{
+            "index": 0,
+            "delta": {
+              "tool_calls": [
+                {"index": 0, "function": {"arguments": "1}"}},
+                {"index": 1, "function": {"arguments": "2}"}}
+              ]
+            },
+            "finish_reason": "tool_calls"
+          }]
+        }
+        """);
+    accumulator.handleData(
+        "{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}");
+    accumulator.handleData("[DONE]");
+
+    ProviderCompletion completion = accumulator.finish();
+    assertEquals(GenerationStopReason.COMPLETE, completion.response().stopReason());
+    assertEquals(2, completion.response().toolCalls().size());
+    assertEquals("call_1", completion.response().toolCalls().get(0).id());
+    assertEquals("f1", completion.response().toolCalls().get(0).name());
+    assertEquals("{\"a\":1}", completion.response().toolCalls().get(0).argumentsJson());
+
+    assertEquals("call_2", completion.response().toolCalls().get(1).id());
+    assertEquals("f2", completion.response().toolCalls().get(1).name());
+    assertEquals("{\"b\":2}", completion.response().toolCalls().get(1).argumentsJson());
+
+    // 验证 replay payload
+    assertNotNull(completion.replayState());
+    assertEquals(2, completion.replayState().payload().path("tool_calls").size());
+  }
+
+  /** 测试意图：无 type 的 identity-only 帧暂不投射；function 意图确定后从原生槽位一次补齐，满足 runtime 的 0 起连续序号与终态一致性。 */
+  @Test
+  void seedsFunctionAfterUntypedIdentityOnlyFrameFollowingCustomCall() {
+    OpenAiChatStreamAccumulator accumulator =
+        new OpenAiChatStreamAccumulator(
+            request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
+    accumulator.handleData(
+        """
+        {"choices":[{"delta":{"tool_calls":[
+        {"index":0,"id":"custom_1","type":"custom","custom":{"input":"x"}},
+        {"index":1,"id":"fn_"}
+        ]}}]}
+        """);
+    assertEquals(List.of(), recordedEvents);
+    accumulator.handleData(
+        """
+        {"choices":[{"delta":{"tool_calls":[
+        {"index":1,"id":"1","function":{"name":"lookup","arguments":"{"}}
+        ]}}]}
+        """);
+    accumulator.handleData(
+        """
+        {"choices":[{"delta":{"tool_calls":[
+        {"index":1,"function":{"arguments":"}"}}
+        ]},"finish_reason":"tool_calls"}]}
+        """);
+    accumulator.handleData(
+        "{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}");
+    accumulator.handleData("[DONE]");
+    ProviderCompletion completion = accumulator.finish();
+
+    // ModelStreamAccumulator 按 ordinal=0 对齐 response.toolCalls[0]，不得按 wire index=1 投射。
+    assertEquals(
+        List.of(
+            new ProviderStreamEvent.ToolCallDelta(0, "fn_1", "lookup", "{"),
+            new ProviderStreamEvent.ToolCallDelta(0, null, null, "}")),
+        recordedEvents);
+    assertEquals(1, completion.response().toolCalls().size());
+    assertEquals("fn_1", completion.response().toolCalls().get(0).id());
+    assertEquals("lookup", completion.response().toolCalls().get(0).name());
+    assertEquals("{}", completion.response().toolCalls().get(0).argumentsJson());
+    JsonNode nativeCalls = completion.replayState().payload().path("tool_calls");
+    assertEquals(2, nativeCalls.size());
+    assertEquals("custom", nativeCalls.get(0).path("type").asString(""));
+    assertEquals("fn_1", nativeCalls.get(1).path("id").asString(""));
+    assertFalse(nativeCalls.get(0).has("index"));
+    assertFalse(nativeCalls.get(1).has("index"));
+  }
+
+  /** 测试意图：已声明 type=function 的 identity-only 帧可提前投射，后续分段 id 必须发布累计前缀以兼容 runtime identity 校验。 */
+  @Test
+  void retainsTypedFunctionIdentityBeforeFunctionFragments() {
+    OpenAiChatStreamAccumulator accumulator =
+        new OpenAiChatStreamAccumulator(
+            request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
+    accumulator.handleData(
+        """
+        {"choices":[{"delta":{"tool_calls":[
+        {"index":1,"id":"fn_","type":"function"}]}}]}
+        """);
+    accumulator.handleData(
+        """
+        {"choices":[{"delta":{"tool_calls":[
+        {"index":1,"id":"1","function":{"name":"lookup","arguments":"{}"}}
+        ]},"finish_reason":"tool_calls"}]}
+        """);
+    accumulator.handleData(
+        "{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}");
+    accumulator.handleData("[DONE]");
+    ProviderCompletion completion = accumulator.finish();
+
+    assertEquals(
+        List.of(
+            new ProviderStreamEvent.ToolCallDelta(0, "fn_", null, null),
+            new ProviderStreamEvent.ToolCallDelta(0, "fn_1", "lookup", "{}")),
+        recordedEvents);
+    assertEquals("fn_1", completion.response().toolCalls().get(0).id());
+    assertEquals(
+        "fn_1",
+        completion.replayState().payload().path("tool_calls").get(0).path("id").asString(""));
+  }
+
+  /** 测试意图：builder 建立后的 identity-only 片段只累积 id，不得因缺少 function 触发 NPE；明确 null 与标量 function 则是非法响应。 */
+  @Test
+  void identityOnlyFragmentAfterFunctionBuilderDoesNotFail() {
+    OpenAiChatStreamAccumulator accumulator =
+        new OpenAiChatStreamAccumulator(
+            request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
+    accumulator.handleData(
+        """
+        {"choices":[{"delta":{"tool_calls":[
+        {"index":0,"id":"call_","type":"function","function":{"name":"lookup"}}
+        ]}}]}
+        """);
+    accumulator.handleData(
+        """
+        {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"1"}]}}]}
+        """);
+    accumulator.handleData(
+        """
+        {"choices":[{"delta":{"tool_calls":[
+        {"index":0,"function":{"arguments":"{}"}}
+        ]},"finish_reason":"tool_calls"}]}
+        """);
+    accumulator.handleData(
+        "{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}");
+    accumulator.handleData("[DONE]");
+    ProviderCompletion completion = accumulator.finish();
+
+    assertEquals("call_1", completion.response().toolCalls().get(0).id());
+    assertEquals("lookup", completion.response().toolCalls().get(0).name());
+    assertEquals("{}", completion.response().toolCalls().get(0).argumentsJson());
+  }
+
+  @Test
+  void nullOrScalarFunctionFragmentIsInvalidResponse() {
+    OpenAiChatStreamAccumulator nullFunction =
+        new OpenAiChatStreamAccumulator(
+            request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
+    nullFunction.handleData(
+        """
+        {"choices":[{"delta":{"tool_calls":[
+        {"index":0,"id":"call_1","type":"function","function":{"name":"lookup"}}
+        ]}}]}
+        """);
+    ProviderException nullError =
+        assertThrows(
+            ProviderException.class,
+            () ->
+                nullFunction.handleData(
+                    """
+                    {"choices":[{"delta":{"tool_calls":[
+                    {"index":0,"function":null}
+                    ]}}]}
+                    """));
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, nullError.kind());
+
+    OpenAiChatStreamAccumulator scalarFunction =
+        new OpenAiChatStreamAccumulator(
+            request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
+    scalarFunction.handleData(
+        """
+        {"choices":[{"delta":{"tool_calls":[
+        {"index":0,"id":"call_1","type":"function","function":{"name":"lookup"}}
+        ]}}]}
+        """);
+    ProviderException scalarError =
+        assertThrows(
+            ProviderException.class,
+            () ->
+                scalarFunction.handleData(
+                    """
+                    {"choices":[{"delta":{"tool_calls":[
+                    {"index":0,"function":"lookup"}
+                    ]}}]}
+                    """));
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, scalarError.kind());
+  }
+
+  /** 测试意图：custom 占据 wire index=0 时，LENGTH 诊断与已发布 function delta 均使用 runtime ordinal=0。 */
+  @Test
+  void usesNormalizedOrdinalForLengthDiagnosticAfterCustomCall() {
+    OpenAiChatStreamAccumulator accumulator =
+        new OpenAiChatStreamAccumulator(
+            request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
+    accumulator.handleData(
+        """
+        {"choices":[{"delta":{"tool_calls":[
+        {"index":0,"id":"custom_1","type":"custom","custom":{"input":"x"}},
+        {"index":1,"id":"fn_1","type":"function",
+         "function":{"name":"lookup","arguments":"{\\"q\\":"}}
+        ]},"finish_reason":"length"}]}
+        """);
+    accumulator.handleData(
+        "{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}");
+    accumulator.handleData("[DONE]");
+    ProviderCompletion completion = accumulator.finish();
+
+    assertEquals(
+        List.of(new ProviderStreamEvent.ToolCallDelta(0, "fn_1", "lookup", "{\"q\":")),
+        recordedEvents);
+    assertEquals(List.of(), completion.response().toolCalls());
+    assertEquals(1, completion.response().toolCallDiagnostics().size());
+    assertEquals(0, completion.response().toolCallDiagnostics().get(0).callIndex());
+    assertEquals("fn_1", completion.response().toolCallDiagnostics().get(0).id());
+    assertEquals("lookup", completion.response().toolCallDiagnostics().get(0).name());
+    assertEquals("{\"q\":", completion.response().toolCallDiagnostics().get(0).partialArguments());
+    assertNull(completion.replayState());
+  }
+
+  /**
+   * 测试意图：两条 function 调用穿插 custom 与跨帧片段时，事件 ordinal 连续且与 response 顺序一致，符合 ModelStreamAccumulator 契约。
+   */
+  @Test
+  void keepsContiguousOrdinalsForInterleavedFunctionCalls() {
+    OpenAiChatStreamAccumulator accumulator =
+        new OpenAiChatStreamAccumulator(
+            request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
+    accumulator.handleData(
+        """
+        {"choices":[{"delta":{"tool_calls":[
+        {"index":0,"id":"a","type":"function","function":{"name":"fir","arguments":"{"}},
+        {"index":1,"id":"c","type":"custom","custom":{"input":"x"}},
+        {"index":2,"id":"b","type":"function","function":{"name":"second","arguments":"{"}}
+        ]}}]}
+        """);
+    accumulator.handleData(
+        """
+        {"choices":[{"delta":{"tool_calls":[
+        {"index":2,"function":{"arguments":"}"}},
+        {"index":0,"function":{"name":"st","arguments":"}"}}
+        ]},"finish_reason":"tool_calls"}]}
+        """);
+    accumulator.handleData(
+        "{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}");
+    accumulator.handleData("[DONE]");
+    ProviderCompletion completion = accumulator.finish();
+
+    assertEquals(
+        List.of(
+            new ProviderStreamEvent.ToolCallDelta(0, "a", "fir", "{"),
+            new ProviderStreamEvent.ToolCallDelta(1, "b", "second", "{"),
+            new ProviderStreamEvent.ToolCallDelta(1, null, null, "}"),
+            new ProviderStreamEvent.ToolCallDelta(0, null, "first", "}")),
+        recordedEvents);
+    assertEquals(
+        List.of("a", "b"),
+        completion.response().toolCalls().stream().map(call -> call.id()).toList());
+    assertEquals("first", completion.response().toolCalls().get(0).name());
+    assertEquals("{}", completion.response().toolCalls().get(0).argumentsJson());
+    assertEquals("second", completion.response().toolCalls().get(1).name());
+    assertEquals("{}", completion.response().toolCalls().get(1).argumentsJson());
+    JsonNode nativeCalls = completion.replayState().payload().path("tool_calls");
+    assertEquals(
+        List.of("a", "c", "b"),
+        List.of(
+            nativeCalls.get(0).path("id").asString(""),
+            nativeCalls.get(1).path("id").asString(""),
+            nativeCalls.get(2).path("id").asString("")));
+    for (JsonNode call : nativeCalls) {
+      assertFalse(call.has("index"));
+    }
+  }
+
+  @Test
+  @DisplayName("LENGTH 截断：未闭合工具调用转诊断，不补 JSON，不执行，不存 replay")
+  void testLengthTruncationDiagnostics() {
+    OpenAiChatStreamAccumulator accumulator =
+        new OpenAiChatStreamAccumulator(
+            request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
+
+    accumulator.handleData(
+        """
+        {
+          "id": "c4",
+          "choices": [{
+            "index": 0,
+            "delta": {
+              "tool_calls": [
+                {"index": 0, "id": "call_trunc", "function": {"name": "bash", "arguments": "{\\"cmd\\":\\"cat /var/log"}}
+              ]
+            },
+            "finish_reason": "length"
+          }]
+        }
+        """);
+    accumulator.handleData(
+        "{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}");
+    accumulator.handleData("[DONE]");
+
+    ProviderCompletion completion = accumulator.finish();
+    assertEquals(GenerationStopReason.LENGTH, completion.response().stopReason());
+    assertTrue(completion.response().toolCalls().isEmpty()); // 未闭合工具调用不进入 toolCalls
+    assertEquals(1, completion.response().toolCallDiagnostics().size());
+    assertEquals(
+        "{\"cmd\":\"cat /var/log",
+        completion.response().toolCallDiagnostics().get(0).partialArguments());
+    assertNull(completion.replayState()); // LENGTH 截断不可保存 replay
+  }
+
+  @Test
+  @DisplayName("FILTERED 终态：清空 toolCalls，不存 replay")
+  void testContentFilterFinalState() {
+    OpenAiChatStreamAccumulator accumulator =
+        new OpenAiChatStreamAccumulator(
+            request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
+
+    accumulator.handleData(
+        "{\"id\":\"c5\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"censored\"},\"finish_reason\":\"content_filter\"}]}");
+    accumulator.handleData(
+        "{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}");
+    accumulator.handleData("[DONE]");
+
+    ProviderCompletion completion = accumulator.finish();
+    assertEquals(GenerationStopReason.FILTERED, completion.response().stopReason());
+    assertTrue(completion.response().toolCalls().isEmpty());
+    assertNull(completion.replayState());
+  }
+
+  @Test
+  @DisplayName("未知 finish_reason 明确报错")
+  void testUnsupportedFinishReason() {
+    OpenAiChatStreamAccumulator accumulator =
+        new OpenAiChatStreamAccumulator(
+            request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
+
+    assertThrows(
+        ProviderException.class,
+        () -> accumulator.handleData("{\"choices\":[{\"finish_reason\":\"unknown_reason\"}]}"));
+  }
+
+  @Test
+  @DisplayName("openAiChatRequireDone 缺省为 true 时缺少 [DONE] 报错")
+  void testMissingDoneWhenRequired() {
+    OpenAiChatStreamAccumulator accumulator =
+        new OpenAiChatStreamAccumulator(
+            request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
+
+    accumulator.handleData(
+        "{\"choices\":[{\"delta\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}],"
+            + "\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}");
+    ProviderException ex = assertThrows(ProviderException.class, accumulator::finish);
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
+    assertEquals("stream completed without [DONE]", ex.getMessage());
+  }
+
+  @Test
+  @DisplayName("openAiChatRequireDone 为 false 时已看到有效 finish_reason 且 EOF 可完成")
+  void testOptionalDoneWithValidFinishReason() {
+    OpenAiChatConfiguration config = new OpenAiChatConfiguration(false, PromptCacheRetention.NONE);
+    OpenAiChatStreamAccumulator accumulator =
+        new OpenAiChatStreamAccumulator(request, descriptor, config, bridge);
+
+    accumulator.handleData(
+        "{\"choices\":[{\"delta\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}]}");
+    accumulator.handleData(
+        "{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}");
+    // 没有 [DONE]，直接 EOF finish
+    ProviderCompletion completion = accumulator.finish();
+    assertEquals("hi", completion.response().text());
+    assertEquals(GenerationStopReason.COMPLETE, completion.response().stopReason());
+  }
+
+  @Test
+  @DisplayName("openAiChatRequireDone 为 false 时未见有效 finish_reason 单纯 EOF 报错")
+  void testOptionalDoneWithoutFinishReasonFailsOnEof() {
+    OpenAiChatConfiguration config = new OpenAiChatConfiguration(false, PromptCacheRetention.NONE);
+    OpenAiChatStreamAccumulator accumulator =
+        new OpenAiChatStreamAccumulator(request, descriptor, config, bridge);
+
+    accumulator.handleData(
+        "{\"choices\":[{\"delta\":{\"content\":\"incomplete\"}}],"
+            + "\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}");
+    ProviderException ex = assertThrows(ProviderException.class, accumulator::finish);
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
+    assertEquals("stream ended with EOF before valid finish_reason", ex.getMessage());
+  }
+
+  @Test
+  @DisplayName("三种 read placement 之标准 nested prompt_tokens_details.cached_tokens 互斥度量与原始 JSON 保持")
+  void testUsageReadPlacementNestedPromptTokensDetails() throws Exception {
+    // 测试意图：验证标准 nested prompt_tokens_details.cached_tokens 正确解析为 cacheReadTokens，
+    // 按 ordinaryInput = max(0, prompt_tokens - cacheRead - cacheWrite) 规则互斥扣减，并完整保真 rawUsageJson。
+    OpenAiChatStreamAccumulator accumulator = createAccumulator();
+    accumulator.handleData(
+        "{\"choices\":[{\"delta\":{\"content\":\"nested\"},\"finish_reason\":\"stop\"}]}");
+    accumulator.handleData(
+        """
+        {
+          "usage": {
+            "prompt_tokens": 100,
+            "completion_tokens": 30,
+            "total_tokens": 130,
+            "prompt_tokens_details": {
+              "cached_tokens": 40
+            }
+          }
+        }
+        """);
+    accumulator.handleData("[DONE]");
+
+    ProviderCompletion completion = accumulator.finish();
+    ModelUsage usage = completion.response().usage();
+    assertEquals(40L, usage.cacheReadTokens());
+    assertEquals(0L, usage.cacheWriteTokens());
+    assertEquals(60L, usage.inputTokens());
+    assertEquals(30L, usage.outputTokens());
+    assertEquals(130L, usage.providerTotalTokens());
+    assertEquals(130L, usage.categorizedTokens());
+
+    JsonNode rawUsage = MAPPER.readTree(completion.response().rawUsageJson());
+    assertEquals(40L, rawUsage.path("prompt_tokens_details").path("cached_tokens").asLong(0L));
+  }
+
+  @Test
+  @DisplayName("三种 read placement 之 DeepSeek 顶层 prompt_cache_hit_tokens 互斥度量与 miss tokens 隔离")
+  void testUsageReadPlacementDeepSeekTopLevelHitAndMissMutualExclusion() throws Exception {
+    // 测试意图：验证 DeepSeek 风格顶层 prompt_cache_hit_tokens 解析为 cacheReadTokens，
+    // prompt_cache_miss_tokens 作为普通未缓存输入由 ordinaryInput 吸收且绝不误算为 cacheWriteTokens，
+    // rawUsageJson 保留 hit 与 miss 原始事实。
+    OpenAiChatStreamAccumulator accumulator = createAccumulator();
+    accumulator.handleData(
+        "{\"choices\":[{\"delta\":{\"content\":\"deepseek\"},\"finish_reason\":\"stop\"}]}");
+    accumulator.handleData(
+        """
+        {
+          "usage": {
+            "prompt_tokens": 100,
+            "completion_tokens": 20,
+            "total_tokens": 120,
+            "prompt_cache_hit_tokens": 75,
+            "prompt_cache_miss_tokens": 25
+          }
+        }
+        """);
+    accumulator.handleData("[DONE]");
+
+    ProviderCompletion completion = accumulator.finish();
+    ModelUsage usage = completion.response().usage();
+    assertEquals(75L, usage.cacheReadTokens());
+    assertEquals(0L, usage.cacheWriteTokens());
+    assertEquals(25L, usage.inputTokens());
+    assertEquals(20L, usage.outputTokens());
+    assertEquals(120L, usage.providerTotalTokens());
+    assertEquals(120L, usage.categorizedTokens());
+
+    JsonNode rawUsage = MAPPER.readTree(completion.response().rawUsageJson());
+    assertEquals(75L, rawUsage.path("prompt_cache_hit_tokens").asLong(0L));
+    assertEquals(25L, rawUsage.path("prompt_cache_miss_tokens").asLong(0L));
+  }
+
+  @Test
+  @DisplayName("三种 read placement 之兼容顶层 cached_tokens 互斥度量与 rawUsageJson 保持")
+  void testUsageReadPlacementTopLevelCachedTokens() throws Exception {
+    // 测试意图：验证部分兼容实现（如 Kimi）顶层 cached_tokens 正确解析为 cacheReadTokens，
+    // 完成 ordinaryInput 互斥扣减并保真 rawUsageJson。
+    OpenAiChatStreamAccumulator accumulator = createAccumulator();
+    accumulator.handleData(
+        "{\"choices\":[{\"delta\":{\"content\":\"kimi\"},\"finish_reason\":\"stop\"}]}");
+    accumulator.handleData(
+        """
+        {
+          "usage": {
+            "prompt_tokens": 80,
+            "completion_tokens": 15,
+            "total_tokens": 95,
+            "cached_tokens": 30
+          }
+        }
+        """);
+    accumulator.handleData("[DONE]");
+
+    ProviderCompletion completion = accumulator.finish();
+    ModelUsage usage = completion.response().usage();
+    assertEquals(30L, usage.cacheReadTokens());
+    assertEquals(0L, usage.cacheWriteTokens());
+    assertEquals(50L, usage.inputTokens());
+    assertEquals(15L, usage.outputTokens());
+    assertEquals(95L, usage.providerTotalTokens());
+    assertEquals(95L, usage.categorizedTokens());
+
+    JsonNode rawUsage = MAPPER.readTree(completion.response().rawUsageJson());
+    assertEquals(30L, rawUsage.path("cached_tokens").asLong(0L));
+  }
+
+  @Test
+  @DisplayName("优先级覆盖：标准 nested 字段优先于顶层 prompt_cache_hit_tokens 与 cached_tokens")
+  void testUsageNestedPriorityOverTopLevelHitAndTopLevelCached() {
+    // 测试意图：验证明确优先级：当 nested prompt_tokens_details.cached_tokens、顶层 prompt_cache_hit_tokens
+    // 与顶层 cached_tokens 同时存在时，必须严格取 nested cached_tokens。
+    OpenAiChatStreamAccumulator accumulator = createAccumulator();
+    accumulator.handleData(
+        "{\"choices\":[{\"delta\":{\"content\":\"priority\"},\"finish_reason\":\"stop\"}]}");
+    accumulator.handleData(
+        """
+        {
+          "usage": {
+            "prompt_tokens": 100,
+            "completion_tokens": 10,
+            "total_tokens": 110,
+            "prompt_cache_hit_tokens": 50,
+            "cached_tokens": 60,
+            "prompt_tokens_details": {
+              "cached_tokens": 20
+            }
+          }
+        }
+        """);
+    accumulator.handleData("[DONE]");
+
+    ProviderCompletion completion = accumulator.finish();
+    ModelUsage usage = completion.response().usage();
+    assertEquals(20L, usage.cacheReadTokens());
+    assertEquals(80L, usage.inputTokens());
+  }
+
+  @Test
+  @DisplayName("优先级覆盖：无 nested 时顶层 prompt_cache_hit_tokens 优先于顶层 cached_tokens")
+  void testUsageTopLevelHitPriorityOverTopLevelCached() {
+    // 测试意图：验证在无 nested 缓存字段时，顶层 prompt_cache_hit_tokens 优先级高于顶层 cached_tokens。
+    OpenAiChatStreamAccumulator accumulator = createAccumulator();
+    accumulator.handleData(
+        "{\"choices\":[{\"delta\":{\"content\":\"fallback\"},\"finish_reason\":\"stop\"}]}");
+    accumulator.handleData(
+        """
+        {
+          "usage": {
+            "prompt_tokens": 100,
+            "completion_tokens": 10,
+            "total_tokens": 110,
+            "prompt_cache_hit_tokens": 45,
+            "cached_tokens": 55
+          }
+        }
+        """);
+    accumulator.handleData("[DONE]");
+
+    ProviderCompletion completion = accumulator.finish();
+    ModelUsage usage = completion.response().usage();
+    assertEquals(45L, usage.cacheReadTokens());
+    assertEquals(55L, usage.inputTokens());
+  }
+
+  @Test
+  @DisplayName("支持 nested cache_write_tokens 与 cache_creation_input_tokens")
+  void testUsageCacheWriteTokensSupport() {
+    // 测试意图：验证 cache write 支持 nested cache_write_tokens 与 cache_creation_input_tokens 两种命名，
+    // 并与 prompt_tokens 构成三方互斥度量。
+    OpenAiChatStreamAccumulator accumulator1 = createAccumulator();
+    accumulator1.handleData(
+        "{\"choices\":[{\"delta\":{\"content\":\"w1\"},\"finish_reason\":\"stop\"}]}");
+    accumulator1.handleData(
+        """
+        {
+          "usage": {
+            "prompt_tokens": 100,
+            "completion_tokens": 20,
+            "total_tokens": 120,
+            "prompt_tokens_details": {
+              "cached_tokens": 30,
+              "cache_write_tokens": 20
+            }
+          }
+        }
+        """);
+    accumulator1.handleData("[DONE]");
+
+    ProviderCompletion completion1 = accumulator1.finish();
+    ModelUsage usage1 = completion1.response().usage();
+    assertEquals(30L, usage1.cacheReadTokens());
+    assertEquals(20L, usage1.cacheWriteTokens());
+    assertEquals(50L, usage1.inputTokens()); // 100 - 30 - 20
+
+    OpenAiChatStreamAccumulator accumulator2 = createAccumulator();
+    accumulator2.handleData(
+        "{\"choices\":[{\"delta\":{\"content\":\"w2\"},\"finish_reason\":\"stop\"}]}");
+    accumulator2.handleData(
+        """
+        {
+          "usage": {
+            "prompt_tokens": 100,
+            "completion_tokens": 20,
+            "total_tokens": 120,
+            "prompt_tokens_details": {
+              "cached_tokens": 15,
+              "cache_creation_input_tokens": 25
+            }
+          }
+        }
+        """);
+    accumulator2.handleData("[DONE]");
+
+    ProviderCompletion completion2 = accumulator2.finish();
+    ModelUsage usage2 = completion2.response().usage();
+    assertEquals(15L, usage2.cacheReadTokens());
+    assertEquals(25L, usage2.cacheWriteTokens());
+    assertEquals(60L, usage2.inputTokens()); // 100 - 15 - 25
+  }
+
+  @Test
+  @DisplayName("无缓存字段时 cache 用量默认为 0，完全无 usage 时 finish 抛出 INVALID_RESPONSE")
+  void testUsageWithoutCacheFieldsDefaultsToZero() {
+    // 测试意图：验证 usage 中不存在任何缓存字段时，cacheRead 与 cacheWrite 默认为 0，
+    // inputTokens 与 prompt_tokens 完全一致；且流中未发送 usage 块时 finish 抛出 INVALID_RESPONSE 拒绝。
+    OpenAiChatStreamAccumulator accumulator1 = createAccumulator();
+    accumulator1.handleData(
+        "{\"choices\":[{\"delta\":{\"content\":\"plain\"},\"finish_reason\":\"stop\"}]}");
+    accumulator1.handleData(
+        """
+        {
+          "usage": {
+            "prompt_tokens": 50,
+            "completion_tokens": 10,
+            "total_tokens": 60
+          }
+        }
+        """);
+    accumulator1.handleData("[DONE]");
+
+    ProviderCompletion completion1 = accumulator1.finish();
+    ModelUsage usage1 = completion1.response().usage();
+    assertEquals(0L, usage1.cacheReadTokens());
+    assertEquals(0L, usage1.cacheWriteTokens());
+    assertEquals(50L, usage1.inputTokens());
+    assertEquals(10L, usage1.outputTokens());
+    assertEquals(60L, usage1.providerTotalTokens());
+
+    OpenAiChatStreamAccumulator accumulator2 = createAccumulator();
+    accumulator2.handleData(
+        "{\"choices\":[{\"delta\":{\"content\":\"no_usage\"},\"finish_reason\":\"stop\"}]}");
+    accumulator2.handleData("[DONE]");
+
+    ProviderException error = assertThrows(ProviderException.class, accumulator2::finish);
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind());
+    assertTrue(error.getMessage().contains("missing complete usage"));
+  }
+
+  @Test
+  @DisplayName(
+      "缺失 total_tokens 时 providerTotalTokens 严格为 null，不合成 prompt+completion，保留原生 rawUsageJson")
+  void missingTotalTokensRemainsUnknownWithoutSynthesis() {
+    OpenAiChatStreamAccumulator accumulator = createAccumulator();
+    accumulator.handleData(
+        """
+        {"id":"chat-no-total","choices":[{"index":0,"delta":{"content":"Hi"},"finish_reason":"stop"}],"usage":{"prompt_tokens":15,"completion_tokens":25}}
+        """);
+    accumulator.handleData("[DONE]");
+
+    ProviderCompletion completion = accumulator.finish();
+    ModelUsage usage = completion.response().usage();
+    assertEquals(15L, usage.inputTokens());
+    assertEquals(25L, usage.outputTokens());
+    // 关键断言：缺失 total_tokens 时保持 unknown，不合成 40
+    assertNull(usage.providerTotalTokens());
+    assertEquals(40L, usage.categorizedTokens());
+
+    // 验证 rawUsageJson 原样保留，未合成 total_tokens 字段
+    String rawJson = completion.response().rawUsageJson();
+    assertTrue(rawJson.contains("\"prompt_tokens\":15"));
+    assertTrue(rawJson.contains("\"completion_tokens\":25"));
+    assertFalse(rawJson.contains("total_tokens"));
+  }
+
+  @Test
+  @DisplayName("非法负数严格映射为 INVALID_RESPONSE，绝不被静默篡改")
+  void testUsageNegativeFieldsFailStrictResponseValidation() {
+    // 测试意图：验证所有计量维度的非法负数在接收 usage 块时立即失败，确保异步回调可稳定映射为
+    // INVALID_RESPONSE，而不是让未检查异常逃逸或将负数静默截断。
+    assertInvalidUsage(
+        "{\"prompt_tokens\":-1,\"completion_tokens\":10,\"total_tokens\":9}", "prompt_tokens");
+    assertInvalidUsage(
+        "{\"prompt_tokens\":10,\"completion_tokens\":10,\"total_tokens\":20,"
+            + "\"prompt_tokens_details\":{\"cached_tokens\":-1}}",
+        "prompt_tokens_details.cached_tokens");
+    assertInvalidUsage(
+        "{\"prompt_tokens\":10,\"completion_tokens\":10,\"total_tokens\":20,"
+            + "\"prompt_cache_hit_tokens\":-1}",
+        "prompt_cache_hit_tokens");
+    assertInvalidUsage(
+        "{\"prompt_tokens\":10,\"completion_tokens\":10,\"total_tokens\":20,"
+            + "\"cached_tokens\":-1}",
+        "cached_tokens");
+    assertInvalidUsage(
+        "{\"prompt_tokens\":10,\"completion_tokens\":-1,\"total_tokens\":9}", "completion_tokens");
+    assertInvalidUsage(
+        "{\"prompt_tokens\":10,\"completion_tokens\":10,\"total_tokens\":-1}", "total_tokens");
+  }
+
+  @Test
+  @DisplayName("usage 非整数或 details 非 Object 时严格映射为 INVALID_RESPONSE")
+  void testUsageInvalidShapesFailStrictResponseValidation() {
+    // 测试意图：验证字符串、浮点数、null 计量值及错误 details shape 不会被 Jackson asLong
+    // 宽松转换为 0；流式中间块的 usage:null 仍按协议允许。
+    assertInvalidUsage(
+        "{\"prompt_tokens\":\"10\",\"completion_tokens\":1,\"total_tokens\":11}", "prompt_tokens");
+    assertInvalidUsage(
+        "{\"prompt_tokens\":10.5,\"completion_tokens\":1,\"total_tokens\":11}", "prompt_tokens");
+    assertInvalidUsage(
+        "{\"prompt_tokens\":null,\"completion_tokens\":1,\"total_tokens\":1}", "prompt_tokens");
+    assertInvalidUsage(
+        "{\"prompt_tokens\":10,\"completion_tokens\":1,\"total_tokens\":11,"
+            + "\"prompt_tokens_details\":[]}",
+        "prompt_tokens_details");
+
+    OpenAiChatStreamAccumulator accumulator = createAccumulator();
+    accumulator.handleData("{\"usage\":null,\"choices\":[]}");
+  }
+
+  @Test
+  @DisplayName("promptTokens 小于 cachedTokens 时抛出 INVALID_RESPONSE 拒绝")
+  void usageBreakdownExceedingPromptTokensIsRejected() {
+    // 测试意图：验证当上游报告的 cachedTokens 大于 promptTokens 时，
+    // uncachedTokens 抛出 INVALID_RESPONSE 拒绝响应，不静默截断为 0。
+    OpenAiChatStreamAccumulator accumulator = createAccumulator();
+    accumulator.handleData(
+        "{\"choices\":[{\"delta\":{\"content\":\"clamp\"},\"finish_reason\":\"stop\"}]}");
+    accumulator.handleData(
+        """
+        {
+          "usage": {
+            "prompt_tokens": 20,
+            "completion_tokens": 10,
+            "total_tokens": 30,
+            "prompt_cache_hit_tokens": 30
+          }
+        }
+        """);
+    accumulator.handleData("[DONE]");
+
+    ProviderException error = assertThrows(ProviderException.class, accumulator::finish);
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind());
+    assertEquals("provider usage breakdown exceeds prompt tokens", error.getMessage());
+  }
+
+  @Test
+  @DisplayName("缺少 mandatory prompt_tokens 或 completion_tokens 严格报错")
+  void testUsageMissingMandatoryTokensThrowsInvalidResponse() {
+    assertInvalidUsage("{\"completion_tokens\":10,\"total_tokens\":10}", "prompt_tokens");
+    assertInvalidUsage("{\"prompt_tokens\":10,\"total_tokens\":10}", "completion_tokens");
+  }
+
+  @Test
+  @DisplayName("真实 0 tokens 正常完成且 ModelUsage 归零")
+  void testUsageRealZeroTokensCompletesSuccessfully() {
+    OpenAiChatStreamAccumulator accumulator = createAccumulator();
+    accumulator.handleData(
+        "{\"choices\":[{\"delta\":{\"content\":\"zero\"},\"finish_reason\":\"stop\"}]}");
+    accumulator.handleData(
+        """
+        {
+          "usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0
+          }
+        }
+        """);
+    accumulator.handleData("[DONE]");
+
+    ProviderCompletion completion = accumulator.finish();
+    ModelUsage usage = completion.response().usage();
+    assertEquals(0L, usage.inputTokens());
+    assertEquals(0L, usage.outputTokens());
+    assertEquals(0L, usage.cacheReadTokens());
+    assertEquals(0L, usage.cacheWriteTokens());
+    assertEquals(0L, usage.providerTotalTokens());
+  }
+
+  @Test
+  @DisplayName("nullable total_tokens 与 reasoning_tokens 解析")
+  void testUsageNullableTotalAndReasoningTokens() {
+    OpenAiChatStreamAccumulator accumulator = createAccumulator();
+    accumulator.handleData(
+        "{\"choices\":[{\"delta\":{\"content\":\"reason\"},\"finish_reason\":\"stop\"}]}");
+    accumulator.handleData(
+        """
+        {
+          "usage": {
+            "prompt_tokens": 30,
+            "completion_tokens": 20,
+            "total_tokens": null,
+            "completion_tokens_details": {
+              "reasoning_tokens": 12
+            }
+          }
+        }
+        """);
+    accumulator.handleData("[DONE]");
+
+    ProviderCompletion completion = accumulator.finish();
+    ModelUsage usage = completion.response().usage();
+    assertEquals(30L, usage.inputTokens());
+    assertEquals(20L, usage.outputTokens());
+    assertNull(usage.providerTotalTokens());
+    assertEquals(12L, usage.reasoningTokens());
+  }
+
+  /**
+   * 测试意图：合法终止与完整 mandatory usage 下，reasoning_tokens 超出 completion_tokens 属于协议非法值， 必须由 finish() 以
+   * INVALID_RESPONSE 报告，而不是泄漏 ModelUsage 构造器的 IllegalArgumentException。
+   */
+  @Test
+  @DisplayName("reasoning_tokens 超过 completion_tokens 映射为 INVALID_RESPONSE")
+  void rejectsReasoningTokensExceedingCompletionTokens() {
+    OpenAiChatStreamAccumulator accumulator = createAccumulator();
+    accumulator.handleData(
+        "{\"choices\":[{\"delta\":{\"content\":\"answer\"},\"finish_reason\":\"stop\"}]}");
+    accumulator.handleData(
+        """
+        {
+          "usage": {
+            "prompt_tokens": 10,
+            "completion_tokens": 5,
+            "total_tokens": 15,
+            "completion_tokens_details": {
+              "reasoning_tokens": 6
+            }
+          }
+        }
+        """);
+    accumulator.handleData("[DONE]");
+
+    ProviderException error = assertThrows(ProviderException.class, accumulator::finish);
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind());
+    assertEquals("reasoning tokens exceed completion tokens", error.getMessage());
+  }
+
+  /** 2026-10-24 DeepSeek 代表的真实 usage 数字；终止帧是合成外壳，不是完整原始响应。 */
+  @Test
+  void deepseekObservedUsageKeepsReasoningInsideOutput() throws Exception {
+    JsonNode usage =
+        MAPPER
+            .readTree(
+                OpenAiChatStreamAccumulatorTest.class.getResourceAsStream(
+                    "deepseek-chat-usage-2026-10-24.json"))
+            .path("usage");
+    OpenAiChatStreamAccumulator accumulator = createAccumulator();
+    ObjectNode frame = MAPPER.createObjectNode();
+    frame.putArray("choices").addObject().put("finish_reason", "stop").putObject("delta");
+    frame.set("usage", usage);
+    accumulator.handleData(frame.toString());
+    accumulator.handleData("[DONE]");
+    ModelUsage parsed = accumulator.finish().response().usage();
+    assertEquals(48L, parsed.inputTokens());
+    assertEquals(25L, parsed.outputTokens());
+    assertEquals(23L, parsed.reasoningTokens());
+    assertTrue(parsed.reasoningTokens() <= parsed.outputTokens());
+    assertEquals(73L, parsed.providerTotalTokens());
+    JsonNode raw = MAPPER.readTree(accumulator.finish().response().rawUsageJson());
+    assertEquals(23L, raw.path("completion_tokens_details").path("reasoning_tokens").asLong(0L));
+  }
+
+  private OpenAiChatStreamAccumulator createAccumulator() {
+    return new OpenAiChatStreamAccumulator(
+        request, descriptor, OpenAiChatConfiguration.defaults(), bridge);
+  }
+
+  private void assertInvalidUsage(String usageJson, String field) {
+    OpenAiChatStreamAccumulator accumulator = createAccumulator();
+    ProviderException failure =
+        assertThrows(
+            ProviderException.class, () -> accumulator.handleData("{\"usage\":" + usageJson + "}"));
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, failure.kind());
+    assertTrue(failure.getMessage().contains(field));
+  }
+}

@@ -1003,6 +1003,33 @@ export interface HarnessAcceptedCommandsDTO {
   replayed: boolean
 }
 
+/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessActiveAssistantOutputDTO */
+export interface HarnessActiveAssistantOutputDTO {
+  generationId: string
+  turnStartEntryId: string
+  requestHeadEntryId: string
+  status: string
+  attempt: number
+  sequence: string
+  contents: HarnessAgentMessageContentDTO[]
+  error: HarnessAssistantErrorDTO | null
+  resultEntryId: string | null
+  createTime: number
+  updateTime: number
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessAgentMessageContentDTO */
+export interface HarnessAgentMessageContentDTO {
+  type: string
+  text?: string | null
+}
+
+/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessAssistantErrorDTO */
+export interface HarnessAssistantErrorDTO {
+  code: string
+  message: string
+}
+
 /** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessBranchSettingsDTO */
 export interface HarnessBranchSettingsDTO {
   agentName: string
@@ -1077,6 +1104,21 @@ export interface HarnessExecutionExitDTO {
   registeredAt: number
 }
 
+/** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessGenerationFailureDTO */
+export interface HarnessGenerationFailureDTO {
+  generationId: string
+  turnStartEntryId: string
+  requestHeadEntryId: string
+  attempt: number
+  sequence: string
+  text: string
+  thinking: string
+  errorCode: string
+  errorMessage: string
+  failedAt: number
+  retryAt: number
+}
+
 /** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessGoalSettingDTO */
 export interface HarnessGoalSettingDTO {
   id: string
@@ -1113,6 +1155,8 @@ export interface HarnessModelRequestDebugDTO {
 /** Java：fun.fengwk.kkstudio.share.ai.runtime.HarnessModelRequestDebugDTO.FrozenInvocationDTO */
 export interface HarnessModelRequestDebugFrozenInvocationDTO {
   kind: string
+  generationId: string
+  attempt: number
   requestJson: string
 }
 
@@ -1272,9 +1316,10 @@ export interface HarnessThreadSnapshotDTO {
   thread: HarnessThreadDTO
   entries: HarnessSessionEntryDTO[]
   queuedCommands: HarnessThreadCommandDTO[]
-  modelInvocation: ModelInvocationDTO | null
+  executionStatus: string
+  activeAssistantOutput: HarnessActiveAssistantOutputDTO | null
+  generationFailures: HarnessGenerationFailureDTO[]
   toolInvocations: ToolInvocationDTO[]
-  modelAttemptFailures: ModelAttemptFailureDTO[]
   manualCompaction: HarnessManualCompactionDTO
   stopReceipts: HarnessStoppedThreadReceiptDTO[]
   unconfirmedExecutions: HarnessExecutionExitDTO[]
@@ -1560,21 +1605,6 @@ export interface McpServerUpdateDTO {
   timeoutMillis?: number | null
 }
 
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.ModelAttemptFailureDTO */
-export interface ModelAttemptFailureDTO {
-  modelInvocationId: string
-  turnStartEntryId: string
-  requestHeadEntryId: string
-  attempt: number
-  sequence: string
-  text: string
-  thinking: string
-  errorCode: string
-  errorMessage: string
-  failedAt: number
-  retryAt: number
-}
-
 /** Java：fun.fengwk.kkstudio.share.ai.catalog.ModelCatalogPageDTO */
 export interface ModelCatalogPageDTO {
   source: ModelCatalogSource
@@ -1622,22 +1652,6 @@ export interface ModelDefaultCandidateDTO {
 export interface ModelDefaultLimitDTO {
   context?: number | null
   output?: number | null
-}
-
-/** Java：fun.fengwk.kkstudio.share.ai.runtime.ModelInvocationDTO */
-export interface ModelInvocationDTO {
-  id: string
-  threadId: string
-  turnStartEntryId: string
-  requestHeadEntryId: string
-  status: string
-  attempt: number
-  streamCheckpointJson: string | null
-  resultJson: string | null
-  errorJson: string | null
-  resultEntryId: string | null
-  createTime: number
-  updateTime: number
 }
 
 /** Java：fun.fengwk.kkstudio.share.project.PauseIssueRequestDTO */
@@ -2144,7 +2158,8 @@ export interface ToolCatalogEntryDTO {
 /** Java：fun.fengwk.kkstudio.share.ai.runtime.ToolInvocationDTO */
 export interface ToolInvocationDTO {
   id: string
-  modelInvocationId: string
+  threadId: string
+  turnStartEntryId: string
   assistantEntryId: string
   callIndex: number
   status: string

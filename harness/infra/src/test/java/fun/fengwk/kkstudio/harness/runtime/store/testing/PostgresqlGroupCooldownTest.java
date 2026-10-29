@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.BuiltinTestTransactions.builtin;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -146,13 +147,13 @@ class PostgresqlGroupCooldownTest {
   private void freeze(String member, Instant until) {
     store.transaction(
         tx -> {
-          tx.freezeGroupMember("group", 0L, member, "v1", until);
+          builtin(tx).freezeGroupMember("group", 0L, member, "v1", until);
           return null;
         });
   }
 
   private static boolean cooling(HarnessStore target, String member) {
-    return target.transaction(tx -> tx.isGroupMemberCooling("group", 0L, member, "v1"));
+    return target.transaction(tx -> builtin(tx).isGroupMemberCooling("group", 0L, member, "v1"));
   }
 
   private static int cooldownRows() {

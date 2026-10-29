@@ -9,7 +9,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlRealtimeEventSource;
 import fun.fengwk.kkstudio.harness.infra.postgresql.RealtimeNotificationCodec;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimePayloadFetcher;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;

@@ -21,7 +21,7 @@ class ProviderTypeArchitectureTest {
     assertTrue(
         Files.isRegularFile(
             root.resolve(
-                "harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderType.java")));
+                "harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/ProviderType.java")));
     assertFalse(
         Files.exists(
             root.resolve(

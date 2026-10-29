@@ -166,12 +166,18 @@ public class HarnessModelRequestDebugDTO {
     private @Nullable String key;
   }
 
-  /** 活动 ModelInvocation 的冻结请求。 */
+  /** 活动 Builtin generation 的冻结请求。 */
   @Data
   public static class FrozenInvocationDTO {
 
     /** 视图判别符：恒为 {@code FROZEN_INVOCATION}。 */
     private String kind;
+
+    /** Builtin generation 的稳定身份（canonical UUID string）。 */
+    private String generationId;
+
+    /** 冻结请求所属 generation 的 attempt。 */
+    private Integer attempt;
 
     /** 由冻结 ModelRequestSpec 与 request head 物化的 canonical ProviderRequest JSON。 */
     private String requestJson;

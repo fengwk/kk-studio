@@ -21,6 +21,18 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
+import fun.fengwk.kkstudio.harness.model.ModelInputModality;
+import fun.fengwk.kkstudio.harness.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
+import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
+import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
+import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
@@ -28,6 +40,7 @@ import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
@@ -46,18 +59,6 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -70,6 +71,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLiveState;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
@@ -216,6 +218,8 @@ class ProviderRequestPreviewServiceTest {
     verify(runtime, atLeast(0)).getThreadSnapshot(any());
     verify(runtime, atLeast(0)).getSessionEntries(any());
     verify(runtime, atLeast(0)).findJoin(any());
+    // 预览的下一步压缩判定必须走真实 Runtime/Driver API；stub 返回值只影响判定结果，不绕过调用。
+    verify(runtime, atLeast(0)).prepareAutomaticCompaction(any(), any(), any(), any(Boolean.class));
     verify(uploadService, atLeast(0)).peekReady(any());
     verify(refManager, atLeast(0)).contains(any(), any());
     verify(blobManager, atLeast(0)).getBlob(any());
@@ -369,7 +373,12 @@ class ProviderRequestPreviewServiceTest {
   void rejectsThreadThatIsNotIdle() {
     EntryPath continuationDue = continuationDuePath();
     when(runtime.getThreadSnapshot(THREAD_ID))
-        .thenReturn(snapshot(thread(TURN_TWO_END_ID, 1L), continuationDue, List.of()));
+        .thenReturn(
+            snapshot(
+                thread(TURN_TWO_END_ID, 1L),
+                continuationDue,
+                List.of(),
+                ThreadLiveState.CONTINUATION_DUE));
 
     ProviderRequestPreviewUnavailableException error =
         assertThrows(
@@ -392,6 +401,17 @@ class ProviderRequestPreviewServiceTest {
 
     when(runtime.getThreadSnapshot(THREAD_ID))
         .thenReturn(snapshot(thread, closedTurnPath(OVER_THRESHOLD_USAGE), List.of()));
+    when(runtime.prepareAutomaticCompaction(eq(thread), any(), any(), eq(true)))
+        .thenReturn(
+            new CompactionPreparation(
+                CompactionPhase.FULL,
+                CompactionTrigger.THRESHOLD,
+                id(99L),
+                null,
+                null,
+                null,
+                List.of(AgentMessage.user("summarize")),
+                100L));
     ProviderRequestPreviewUnavailableException compaction =
         assertThrows(
             ProviderRequestPreviewUnavailableException.class,
@@ -408,6 +428,7 @@ class ProviderRequestPreviewServiceTest {
     // 阴性对照：同一形状但 usage 远低于阈值时压缩门放行，拒绝只来自真实的规划结果（证明这是一个真实判定而非恒真拒绝）。
     when(runtime.getThreadSnapshot(THREAD_ID))
         .thenReturn(snapshot(thread, closedTurnPath(BELOW_THRESHOLD_USAGE), List.of()));
+    when(runtime.prepareAutomaticCompaction(eq(thread), any(), any(), eq(true))).thenReturn(null);
     when(turnResolver.planLive(eq(THREAD_ID), any(), eq(NOW)))
         .thenReturn(new LiveTurnPlan.Rejected("PLANNING_FAILED", "provider detail leaked"));
     ProviderRequestPreviewUnavailableException planning =
@@ -1334,8 +1355,13 @@ class ProviderRequestPreviewServiceTest {
 
   private static ThreadSnapshot snapshot(
       ThreadState thread, EntryPath path, List<ThreadCommand> queued) {
+    return snapshot(thread, path, queued, ThreadLiveState.IDLE_OR_HISTORICAL);
+  }
+
+  private static ThreadSnapshot snapshot(
+      ThreadState thread, EntryPath path, List<ThreadCommand> queued, ThreadLiveState liveState) {
     return new ThreadSnapshot(
-        thread, path, queued, null, List.of(), List.of(), List.of(), 0, false, List.of(), false);
+        thread, path, queued, null, List.of(), liveState, List.of(), 0, false, List.of(), false);
   }
 
   private static ThreadState thread(UUID headEntryId, long nextCommandSequence) {

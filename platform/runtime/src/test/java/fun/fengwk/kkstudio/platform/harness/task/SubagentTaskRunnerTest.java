@@ -29,9 +29,10 @@ import fun.fengwk.kkstudio.harness.runtime.SpawnRequest;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnCapabilities;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
@@ -93,10 +94,10 @@ class SubagentTaskRunnerTest {
   /** 父快照：存在冻结的 Model 调用，允许 AGENT 委派，environment 为 env。 */
   private void stubParent(List<String> allowedSubagents) {
     ThreadSnapshot parent = mock(ThreadSnapshot.class);
-    ModelInvocation model = mock(ModelInvocation.class);
-    ModelRequestSpec spec = mock(ModelRequestSpec.class);
     ToolInvocation tool = mock(ToolInvocation.class);
     EntryPath path = mock(EntryPath.class);
+    Entry turnStartEntry = mock(Entry.class);
+    TurnStartPayload turnStart = mock(TurnStartPayload.class);
     when(parent.thread())
         .thenReturn(
             new ThreadState(
@@ -116,15 +117,15 @@ class SubagentTaskRunnerTest {
                 3L,
                 NOW,
                 NOW));
-    when(parent.model()).thenReturn(model);
     when(parent.toolSiblings()).thenReturn(List.of(tool));
     when(tool.id()).thenReturn(invocationId);
-    when(model.requestSpec()).thenReturn(spec);
-    when(spec.subagentBindings())
-        .thenReturn(
-            allowedSubagents.stream().map(name -> new SubagentBinding(name, name)).toList());
     when(parent.entryPath()).thenReturn(path);
     when(path.baseSettings()).thenReturn(new BranchSettings("parent-agent", MODEL, "parent-env"));
+    List<SubagentBinding> allowed =
+        allowedSubagents.stream().map(name -> new SubagentBinding(name, name)).toList();
+    when(turnStartEntry.payload()).thenReturn(turnStart);
+    when(turnStart.capabilities()).thenReturn(new TurnCapabilities(List.of(), allowed));
+    when(path.openTurnStart()).thenReturn(Optional.of(turnStartEntry));
     when(runtime.getThreadSnapshot(parentThreadId)).thenReturn(parent);
     when(materializer.materializeSubagent(AGENT, "parent-env")).thenReturn(target);
   }

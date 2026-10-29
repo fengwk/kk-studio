@@ -1,0 +1,3074 @@
+package fun.fengwk.kkstudio.harness.runtime.store.testing;
+
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.BuiltinTestTransactions.builtin;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.ASK_USER_QUESTIONNAIRE;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T0;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T1;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T2;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T3;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T4;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.askUserBinding;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.askUserRequest;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.askUserResponse;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.assistantAbortedPayload;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.assistantErrorPayload;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.assistantPayload;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.assistantResponse;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.hostBinding;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.inTransaction;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.insertChildEntry;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.mappedAssistant;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.modelInvocation;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.modelRequest;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.resolvedTurnStartPayload;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedTurnBaseline;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.succeededRequest;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.syntheticToolResultPayload;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.toolCall;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.toolInvocation;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.toolResultPayload;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.turnStartPayload;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.userMessagePayload;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.withRendererKey;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import tools.jackson.databind.node.JsonNodeFactory;
+
+import fun.fengwk.kkstudio.common.result.JsonResultContent;
+import fun.fengwk.kkstudio.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
+import fun.fengwk.kkstudio.harness.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.runtime.history.CompactionPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.runtime.history.ToolResultStatus;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelAttemptFailure;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.StreamCheckpoint;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInputReceipt;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.PendingToolInvocationRow;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.TurnBaseline;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
+import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
+import fun.fengwk.kkstudio.harness.tool.ToolCall;
+import fun.fengwk.kkstudio.harness.tool.ToolResult;
+
+import java.time.Instant;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.function.UnaryOperator;
+
+/**
+ * ModelInvocation / ToolInvocation FK、唯一 key、result-entry 类型 与 branch 约束。
+ *
+ * <p>Fixture chain 遵循 turn 协议：每个 INPUT TURN_START 都需要一条 USER message 作为前置，再接 assistant
+ * result；ToolResult entry 追加在其 assistant entry 之下（callIndex 前缀）。
+ */
+public abstract class HarnessStoreInvocationContract {
+
+  private HarnessStore store;
+  private TurnBaseline baseline;
+
+  @BeforeEach
+  void setUp() {
+    store = createStore();
+    baseline = seedTurnBaseline(store);
+  }
+
+  abstract HarnessStore createStore();
+
+  // ---- 模型调用 ----
+
+  @Test
+  void modelInvocationAndEntryRoundtripProviderReplayState() {
+    ProviderReplayState replayState = sampleReplayState();
+
+    ModelRequestSpec requestSpec = modelRequest();
+    ProviderResponse response = assistantResponse();
+
+    // 1. 插入 READY modelInvocation 并推进到带有 replayState 的 SUCCEEDED
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          builtin(tx)
+              .insertModelInvocation(
+                  modelInvocation(
+                      TestIds.id(101),
+                      baseline.threadId(),
+                      baseline.turnStartEntryId(),
+                      baseline.turnStartEntryId(),
+                      ModelInvocationStatus.READY,
+                      null,
+                      T1));
+          ModelInvocation current = builtin(tx).lockModelInvocation(TestIds.id(101)).orElseThrow();
+          builtin(tx).updateModelInvocation(current.markRunning(T2));
+          current = builtin(tx).lockModelInvocation(TestIds.id(101)).orElseThrow();
+          builtin(tx).updateModelInvocation(current.succeed(response, null, replayState, T2));
+        });
+
+    ModelInvocation foundModel =
+        store.transaction(tx -> builtin(tx).findModelInvocation(TestIds.id(101)).orElseThrow());
+    assertEquals(replayState, foundModel.providerReplayState());
+
+    // 2. 插入按照 turn 协议合法的 user entry 与带有 matching replayState 的 assistant entry
+    UUID userEntryId =
+        insertChildEntry(
+            store, baseline.sessionId(), baseline.turnStartEntryId(), userMessagePayload());
+    UUID assistantEntryId = TestIds.id(102);
+    Entry assistant =
+        new Entry(
+            assistantEntryId,
+            baseline.sessionId(),
+            userEntryId,
+            mappedAssistant(requestSpec, response, T2),
+            T2,
+            replayState);
+
+    inTransaction(store, tx -> tx.insertEntry(assistant));
+
+    Entry foundEntry = store.transaction(tx -> tx.findEntry(assistantEntryId).orElseThrow());
+    assertEquals(replayState, foundEntry.providerReplayState());
+    assertEquals(
+        "gemini-function-call-signature",
+        foundEntry
+            .providerReplayState()
+            .payload()
+            .path("parts")
+            .path(0)
+            .path("thoughtSignature")
+            .asText());
+
+    var loadedPath = store.transaction(tx -> tx.loadEntryPath(assistantEntryId));
+    assertEquals(replayState, loadedPath.head().providerReplayState());
+
+    // 3. attachResultEntry 清空 invocation replayState
+    inTransaction(
+        store,
+        tx -> {
+          ModelInvocation current = builtin(tx).lockModelInvocation(TestIds.id(101)).orElseThrow();
+          builtin(tx).updateModelInvocation(current.attachResultEntry(assistantEntryId, T3));
+        });
+
+    ModelInvocation foundAttached =
+        store.transaction(tx -> builtin(tx).findModelInvocation(TestIds.id(101)).orElseThrow());
+    assertNull(foundAttached.providerReplayState());
+    assertEquals(assistantEntryId, foundAttached.resultEntryId());
+  }
+
+  private static ProviderReplayState sampleReplayState() {
+    var payload = JsonNodeFactory.instance.objectNode().put("role", "model");
+    var functionCall = payload.putArray("parts").addObject();
+    functionCall.putObject("functionCall").put("name", "bash").putObject("args");
+    functionCall.put("thoughtSignature", "gemini-function-call-signature");
+    return new ProviderReplayState(
+        ProviderReplayFormat.GEMINI_CONTENT,
+        new ProviderReplayAffinity(
+            ProviderType.GOOGLE, "google", UUID.randomUUID(), "gemini-3.8-flash"),
+        payload);
+  }
+
+  @Test
+  void modelAndToolTimestampsRejectSubMillisecondPrecision() {
+    ModelInvocation model =
+        modelInvocation(
+            TestIds.id(1),
+            baseline.threadId(),
+            baseline.turnStartEntryId(),
+            baseline.turnStartEntryId(),
+            ModelInvocationStatus.READY,
+            null,
+            T1);
+    ModelInvocation nonCanonicalModel =
+        new ModelInvocation(
+            model.id(),
+            model.threadId(),
+            model.turnStartEntryId(),
+            model.requestHeadEntryId(),
+            model.requestSpec(),
+            model.status(),
+            model.attempt(),
+            model.streamCheckpoint(),
+            model.result(),
+            model.error(),
+            model.resultEntryId(),
+            List.of(),
+            model.createdAt().plusNanos(1),
+            model.updatedAt().plusNanos(1));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockThread(baseline.threadId()).orElseThrow();
+                  builtin(tx).insertModelInvocation(nonCanonicalModel);
+                }));
+
+    UUID assistantEntryId = seedAssistantAndModel();
+    ToolInvocation tool =
+        toolInvocation(
+            TestIds.id(10),
+            baseline.threadId(),
+            baseline.turnStartEntryId(),
+            assistantEntryId,
+            0,
+            "call-1",
+            ToolInvocationStatus.READY,
+            T2);
+    ToolInvocation nonCanonicalTool =
+        new ToolInvocation(
+            tool.id(),
+            tool.threadId(),
+            tool.turnStartEntryId(),
+            tool.assistantEntryId(),
+            tool.callIndex(),
+            tool.call(),
+            tool.binding(),
+            tool.status(),
+            tool.attempt(),
+            tool.approval(),
+            tool.result(),
+            tool.error(),
+            tool.createdAt().plusNanos(1),
+            tool.updatedAt().plusNanos(1));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> inTransaction(store, tx -> tx.insertToolInvocations(List.of(nonCanonicalTool))));
+  }
+
+  @Test
+  void modelInvocationRoundTripAndUniqueTurnKey() {
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          builtin(tx)
+              .insertModelInvocation(
+                  modelInvocation(
+                      TestIds.id(1),
+                      baseline.threadId(),
+                      baseline.turnStartEntryId(),
+                      baseline.turnStartEntryId(),
+                      ModelInvocationStatus.READY,
+                      null,
+                      T1));
+        });
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockThread(baseline.threadId());
+                  builtin(tx)
+                      .insertModelInvocation(
+                          modelInvocation(
+                              TestIds.id(2),
+                              baseline.threadId(),
+                              baseline.turnStartEntryId(),
+                              baseline.turnStartEntryId(),
+                              ModelInvocationStatus.READY,
+                              null,
+                              T2));
+                }));
+    assertTrue(
+        store
+            .transaction(
+                tx ->
+                    builtin(tx)
+                        .findModelInvocationByTurn(
+                            baseline.threadId(), baseline.turnStartEntryId()))
+            .isPresent());
+    assertTrue(
+        store
+            .transaction(
+                tx -> builtin(tx).findModelInvocationByTurn(baseline.threadId(), TestIds.id(42)))
+            .isEmpty());
+  }
+
+  /** 非空 failedAttempts 必须在 InMemory/PostgreSQL 两个 Store 实现中无损往返。 */
+  @Test
+  void modelFailedAttemptsRoundTripAfterRetryTransition() {
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          builtin(tx)
+              .insertModelInvocation(
+                  modelInvocation(
+                      TestIds.id(1),
+                      baseline.threadId(),
+                      baseline.turnStartEntryId(),
+                      baseline.turnStartEntryId(),
+                      ModelInvocationStatus.READY,
+                      null,
+                      T1));
+        });
+    ModelAttemptFailure failure =
+        new ModelAttemptFailure(
+            1,
+            7,
+            "partial",
+            "thinking",
+            ModelSelection.model("model", "v1"),
+            null,
+            new ModelInvocationError(ProviderErrorKind.TRANSIENT, "provider unavailable"),
+            T3,
+            T4);
+    inTransaction(
+        store,
+        tx -> {
+          ModelInvocation model = builtin(tx).lockModelInvocation(TestIds.id(1)).orElseThrow();
+          ModelInvocation running = model.markRunning(T2);
+          builtin(tx).updateModelInvocation(running);
+          builtin(tx).updateModelInvocation(running.retryReady(failure, T3));
+        });
+
+    ModelInvocation stored =
+        store.transaction(tx -> builtin(tx).findModelInvocation(TestIds.id(1)).orElseThrow());
+    assertEquals(ModelInvocationStatus.READY, stored.status());
+    assertEquals(1, stored.attempt());
+    assertEquals(List.of(failure), stored.failedAttempts());
+    assertThrows(UnsupportedOperationException.class, () -> stored.failedAttempts().add(failure));
+  }
+
+  @Test
+  void modelInvocationRequiresExistingThreadAndTurnStartAndBasisHead() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx ->
+                    builtin(tx)
+                        .insertModelInvocation(
+                            modelInvocation(
+                                TestIds.id(1),
+                                TestIds.id(999),
+                                baseline.turnStartEntryId(),
+                                baseline.turnStartEntryId(),
+                                ModelInvocationStatus.READY,
+                                null,
+                                T1))));
+    // ROOT 不是 TURN_START
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockThread(baseline.threadId());
+                  builtin(tx)
+                      .insertModelInvocation(
+                          modelInvocation(
+                              TestIds.id(2),
+                              baseline.threadId(),
+                              baseline.rootEntryId(),
+                              baseline.rootEntryId(),
+                              ModelInvocationStatus.READY,
+                              null,
+                              T1));
+                }));
+    // requestHead 不等于 thread 当前 head，requestHead CAS 失败
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockThread(baseline.threadId());
+                  builtin(tx)
+                      .insertModelInvocation(
+                          modelInvocation(
+                              TestIds.id(3),
+                              baseline.threadId(),
+                              baseline.turnStartEntryId(),
+                              TestIds.id(999),
+                              ModelInvocationStatus.READY,
+                              null,
+                              T1));
+                }));
+  }
+
+  @Test
+  void modelInvocationRejectsOwnerMismatchAndMissingContextWindow() {
+    Baseline root = seedThreadBaseline(store);
+    UUID foreignOwner = TestIds.id(99);
+    UUID mismatchedStart =
+        store.transaction(
+            tx -> {
+              UUID id = tx.nextId();
+              tx.insertEntry(
+                  new Entry(
+                      id,
+                      root.sessionId(),
+                      root.rootEntryId(),
+                      new TurnStartPayload(
+                          TurnStartReason.INPUT,
+                          StoreTestSupport.branchSettings(),
+                          foreignOwner,
+                          StoreTestSupport.CONTEXT_WINDOW,
+                          StoreTestSupport.MAX_OUTPUT_TOKENS,
+                          null,
+                          null),
+                      T1));
+              ThreadState locked = tx.lockThread(root.threadId()).orElseThrow();
+              tx.updateThread(locked.advanceHead(id, T1));
+              return id;
+            });
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockThread(root.threadId());
+                  builtin(tx)
+                      .insertModelInvocation(
+                          modelInvocation(
+                              TestIds.id(1),
+                              root.threadId(),
+                              mismatchedStart,
+                              mismatchedStart,
+                              ModelInvocationStatus.READY,
+                              null,
+                              T2));
+                }));
+
+    Baseline otherRoot = seedThreadBaseline(store);
+    UUID missingWindowStart =
+        store.transaction(
+            tx -> {
+              UUID id = tx.nextId();
+              tx.insertEntry(
+                  new Entry(
+                      id,
+                      otherRoot.sessionId(),
+                      otherRoot.rootEntryId(),
+                      new TurnStartPayload(
+                          TurnStartReason.INPUT,
+                          StoreTestSupport.branchSettings(),
+                          otherRoot.threadId()),
+                      T1));
+              ThreadState locked = tx.lockThread(otherRoot.threadId()).orElseThrow();
+              tx.updateThread(locked.advanceHead(id, T1));
+              return id;
+            });
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockThread(otherRoot.threadId());
+                  builtin(tx)
+                      .insertModelInvocation(
+                          modelInvocation(
+                              TestIds.id(2),
+                              otherRoot.threadId(),
+                              missingWindowStart,
+                              missingWindowStart,
+                              ModelInvocationStatus.READY,
+                              null,
+                              T2));
+                }));
+  }
+
+  @Test
+  void modelInvocationInsertRequiresBasisEqualToCurrentThreadHead() {
+    // 创建时 requestHead CAS：不是 thread head 的 requestHead 会被拒绝
+    Baseline other = seedThreadBaseline(store);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockThread(other.threadId());
+                  builtin(tx)
+                      .insertModelInvocation(
+                          modelInvocation(
+                              TestIds.id(1),
+                              other.threadId(),
+                              baseline.turnStartEntryId(),
+                              baseline.turnStartEntryId(),
+                              ModelInvocationStatus.READY,
+                              null,
+                              T2));
+                }));
+    // requestHead 指向 thread 自身 head 是合法的
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          builtin(tx)
+              .insertModelInvocation(
+                  modelInvocation(
+                      TestIds.id(2),
+                      baseline.threadId(),
+                      baseline.turnStartEntryId(),
+                      baseline.turnStartEntryId(),
+                      ModelInvocationStatus.READY,
+                      null,
+                      T2));
+        });
+  }
+
+  @Test
+  void modelInvocationRequiresTurnStartOnBasisPath() {
+    // 同一 ROOT 下的第二个 TURN_START 形成独立 branch
+    UUID turnStartB =
+        insertChildEntry(store, baseline.sessionId(), baseline.rootEntryId(), turnStartPayload());
+    // turnStartB 不在 requestHead path [root, turnStartA] 上
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockThread(baseline.threadId());
+                  builtin(tx)
+                      .insertModelInvocation(
+                          modelInvocation(
+                              TestIds.id(1),
+                              baseline.threadId(),
+                              turnStartB,
+                              baseline.turnStartEntryId(),
+                              ModelInvocationStatus.READY,
+                              null,
+                              T2));
+                }));
+    // requestHead 位于 thread 自身 branch 上是合法的
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          builtin(tx)
+              .insertModelInvocation(
+                  modelInvocation(
+                      TestIds.id(3),
+                      baseline.threadId(),
+                      baseline.turnStartEntryId(),
+                      baseline.turnStartEntryId(),
+                      ModelInvocationStatus.READY,
+                      null,
+                      T2));
+        });
+  }
+
+  @Test
+  void modelResultEntryTypeAndUniquenessAreEnforced() {
+    // 链 A：root -> turnStartA -> userA -> assistantA(call-1) -> toolResult(0, call-1)
+    ModelRequestSpec requestSpec = succeededRequest();
+    ProviderResponse response = assistantResponse("call-1");
+    UUID userEntryId =
+        insertChildEntry(
+            store, baseline.sessionId(), baseline.turnStartEntryId(), userMessagePayload());
+    UUID assistantEntryId =
+        insertChildEntry(
+            store, baseline.sessionId(), userEntryId, mappedAssistant(requestSpec, response, T1));
+    UUID toolResultEntryId =
+        insertChildEntry(
+            store,
+            baseline.sessionId(),
+            assistantEntryId,
+            toolResultPayload(new UUID(0L, 9501L), assistantEntryId, 0, "call-1"));
+    // 链 B：root -> turnStartB -> userB -> errorB
+    UUID thread5 = store.transaction(HarnessStore.Transaction::nextId);
+    UUID turnStartB =
+        insertChildEntry(
+            store, baseline.sessionId(), baseline.rootEntryId(), resolvedTurnStartPayload(thread5));
+    UUID userB = insertChildEntry(store, baseline.sessionId(), turnStartB, userMessagePayload());
+    UUID errorEntryId =
+        insertChildEntry(store, baseline.sessionId(), userB, assistantErrorPayload());
+    // 链 C：root -> turnStartC -> userC -> abortedC
+    UUID thread6 = store.transaction(HarnessStore.Transaction::nextId);
+    UUID turnStartC =
+        insertChildEntry(
+            store, baseline.sessionId(), baseline.rootEntryId(), resolvedTurnStartPayload(thread6));
+    UUID userC = insertChildEntry(store, baseline.sessionId(), turnStartC, userMessagePayload());
+    UUID abortedEntryId =
+        insertChildEntry(store, baseline.sessionId(), userC, assistantAbortedPayload());
+
+    // ROOT / USER MESSAGE / TOOL MESSAGE 不允许作为 result entry 类型
+    for (UUID rejected : List.of(baseline.rootEntryId(), userEntryId, toolResultEntryId)) {
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              inTransaction(
+                  store,
+                  tx -> {
+                    UUID id = tx.nextId();
+                    tx.lockThread(baseline.threadId());
+                    builtin(tx)
+                        .insertModelInvocation(
+                            modelInvocation(
+                                id,
+                                baseline.threadId(),
+                                baseline.turnStartEntryId(),
+                                baseline.turnStartEntryId(),
+                                ModelInvocationStatus.READY,
+                                null,
+                                T1));
+                    builtin(tx).lockModelInvocation(id);
+                    builtin(tx)
+                        .updateModelInvocation(
+                            modelInvocation(
+                                id,
+                                baseline.threadId(),
+                                baseline.turnStartEntryId(),
+                                baseline.turnStartEntryId(),
+                                ModelInvocationStatus.CANCELLED,
+                                rejected,
+                                T1));
+                  }));
+    }
+
+    // assistant / assistant-error / assistant-aborted 在其自身 turn/branch 上被接受
+    insertTerminalModel(
+        TestIds.id(4),
+        baseline.threadId(),
+        baseline.turnStartEntryId(),
+        baseline.turnStartEntryId(),
+        ModelInvocationStatus.SUCCEEDED,
+        requestSpec,
+        response,
+        assistantEntryId,
+        T1);
+    inTransaction(
+        store,
+        tx ->
+            tx.insertThread(
+                StoreTestSupport.siblingRoot(
+                    thread5, baseline.sessionId(), turnStartB, "sibling-5")));
+    insertTerminalModel(
+        TestIds.id(5),
+        thread5,
+        turnStartB,
+        turnStartB,
+        ModelInvocationStatus.FAILED,
+        errorEntryId,
+        T2);
+    inTransaction(
+        store,
+        tx ->
+            tx.insertThread(
+                StoreTestSupport.siblingRoot(
+                    thread6, baseline.sessionId(), turnStartC, "sibling-6")));
+    insertTerminalModel(
+        TestIds.id(6),
+        thread6,
+        turnStartC,
+        turnStartC,
+        ModelInvocationStatus.CANCELLED,
+        abortedEntryId,
+        T3);
+
+    // resultEntryId 在所有 model invocation 之间全局唯一
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  UUID thread7 = tx.nextId();
+                  tx.insertThread(
+                      StoreTestSupport.siblingRoot(
+                          thread7, baseline.sessionId(), baseline.turnStartEntryId(), "sibling-7"));
+                  builtin(tx)
+                      .insertModelInvocation(
+                          modelInvocation(
+                              TestIds.id(7),
+                              thread7,
+                              baseline.turnStartEntryId(),
+                              baseline.turnStartEntryId(),
+                              ModelInvocationStatus.READY,
+                              null,
+                              T4));
+                  builtin(tx).lockModelInvocation(TestIds.id(7));
+                  builtin(tx)
+                      .updateModelInvocation(
+                          modelInvocation(
+                              TestIds.id(7),
+                              thread7,
+                              baseline.turnStartEntryId(),
+                              baseline.turnStartEntryId(),
+                              ModelInvocationStatus.CANCELLED,
+                              assistantEntryId,
+                              T4));
+                }));
+  }
+
+  @Test
+  void modelResultEntryMustBeOnTheBasisPathAndInTheSameTurn() {
+    // 链 B：root -> turnStartB -> userB -> assistantB
+    UUID turnStartB =
+        insertChildEntry(store, baseline.sessionId(), baseline.rootEntryId(), turnStartPayload());
+    UUID userB = insertChildEntry(store, baseline.sessionId(), turnStartB, userMessagePayload());
+    UUID assistantB = insertChildEntry(store, baseline.sessionId(), userB, assistantPayload());
+    // 同 session 中跨 turn 的 result 会被拒绝
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  UUID id = tx.nextId();
+                  tx.lockThread(baseline.threadId());
+                  builtin(tx)
+                      .insertModelInvocation(
+                          modelInvocation(
+                              id,
+                              baseline.threadId(),
+                              baseline.turnStartEntryId(),
+                              baseline.turnStartEntryId(),
+                              ModelInvocationStatus.READY,
+                              null,
+                              T1));
+                  builtin(tx).lockModelInvocation(id);
+                  builtin(tx)
+                      .updateModelInvocation(
+                          modelInvocation(
+                              id,
+                              baseline.threadId(),
+                              baseline.turnStartEntryId(),
+                              baseline.turnStartEntryId(),
+                              ModelInvocationStatus.CANCELLED,
+                              assistantB,
+                              T1));
+                }));
+    // 跨 session 的 result 会被拒绝
+    Baseline other = seedThreadBaseline(store);
+    UUID otherTurnStart =
+        insertChildEntry(store, other.sessionId(), other.rootEntryId(), turnStartPayload());
+    UUID otherUser =
+        insertChildEntry(store, other.sessionId(), otherTurnStart, userMessagePayload());
+    UUID otherAssistant = insertChildEntry(store, other.sessionId(), otherUser, assistantPayload());
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  UUID id = tx.nextId();
+                  tx.lockThread(baseline.threadId());
+                  builtin(tx)
+                      .insertModelInvocation(
+                          modelInvocation(
+                              id,
+                              baseline.threadId(),
+                              baseline.turnStartEntryId(),
+                              baseline.turnStartEntryId(),
+                              ModelInvocationStatus.READY,
+                              null,
+                              T1));
+                  builtin(tx).lockModelInvocation(id);
+                  builtin(tx)
+                      .updateModelInvocation(
+                          modelInvocation(
+                              id,
+                              baseline.threadId(),
+                              baseline.turnStartEntryId(),
+                              baseline.turnStartEntryId(),
+                              ModelInvocationStatus.CANCELLED,
+                              otherAssistant,
+                              T1));
+                }));
+  }
+
+  @Test
+  void modelResultEntryMustBeABasisPathDescendantNotAnAncestor() {
+    // 链：root -> turnStartA -> userA -> assistantA(call-1) -> toolResult(0, call-1)
+    UUID userA =
+        insertChildEntry(
+            store, baseline.sessionId(), baseline.turnStartEntryId(), userMessagePayload());
+    UUID assistantA =
+        insertChildEntry(store, baseline.sessionId(), userA, assistantPayload("call-1"));
+    UUID toolResultA =
+        insertChildEntry(
+            store,
+            baseline.sessionId(),
+            assistantA,
+            toolResultPayload(new UUID(0L, 9502L), assistantA, 0, "call-1"));
+    // 将 thread head 迁到 tool result 并在那里创建 model
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          tx.updateThread(
+              StoreTestSupport.threadState(
+                  baseline.threadId(), baseline.sessionId(), toolResultA, 1, 1, T0, T2));
+        });
+    // assistantA 与 requestHead 处于同一 turn，但位于 requestHead 的祖先一侧：sibling branch 仍会被拒绝，
+    // 即便它本身是合法的 assistant result entry
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  UUID id = tx.nextId();
+                  tx.lockThread(baseline.threadId());
+                  builtin(tx)
+                      .insertModelInvocation(
+                          modelInvocation(
+                              id,
+                              baseline.threadId(),
+                              baseline.turnStartEntryId(),
+                              toolResultA,
+                              ModelInvocationStatus.READY,
+                              null,
+                              T2));
+                  builtin(tx).lockModelInvocation(id);
+                  builtin(tx)
+                      .updateModelInvocation(
+                          modelInvocation(
+                              id,
+                              baseline.threadId(),
+                              baseline.turnStartEntryId(),
+                              toolResultA,
+                              ModelInvocationStatus.CANCELLED,
+                              assistantA,
+                              T2));
+                }));
+  }
+
+  @Test
+  void modelResultEntryCannotBeTheBasisHeadItself() {
+    // 链：root -> turnStartA -> userA -> assistantA；thread head 迁移到 assistantA 后以 assistantA 为
+    // requestHead
+    // 建 model。
+    UUID userA =
+        insertChildEntry(
+            store, baseline.sessionId(), baseline.turnStartEntryId(), userMessagePayload());
+    UUID assistantA = insertChildEntry(store, baseline.sessionId(), userA, assistantPayload());
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          tx.updateThread(
+              StoreTestSupport.threadState(
+                  baseline.threadId(), baseline.sessionId(), assistantA, 1, 1, T0, T2));
+        });
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          builtin(tx)
+              .insertModelInvocation(
+                  modelInvocation(
+                      TestIds.id(1),
+                      baseline.threadId(),
+                      baseline.turnStartEntryId(),
+                      assistantA,
+                      ModelInvocationStatus.READY,
+                      null,
+                      T2));
+        });
+    // 把 result 挂到 requestHead 自身（assistantA）：result 必须是 requestHead 的严格 descendant，不允许 attach 到
+    // requestHead。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  ModelInvocation current =
+                      builtin(tx).lockModelInvocation(TestIds.id(1)).orElseThrow();
+                  builtin(tx).updateModelInvocation(current.markRunning(T2));
+                  current = builtin(tx).lockModelInvocation(TestIds.id(1)).orElseThrow();
+                  builtin(tx)
+                      .updateModelInvocation(
+                          current.succeed(successResponse(), T2).attachResultEntry(assistantA, T2));
+                }));
+  }
+
+  @Test
+  void terminalReplayAndAttachStayLegalAfterTheThreadHeadRelocates() {
+    // 链：root -> turnStartA -> userA -> assistantA
+    ModelRequestSpec requestSpec = modelRequest();
+    // SUCCEEDED assistant 由同一 request/response 经 mapper 派生（strict attach 校验要求全等）。
+    ProviderResponse response = assistantResponse();
+    UUID userA =
+        insertChildEntry(
+            store, baseline.sessionId(), baseline.turnStartEntryId(), userMessagePayload());
+    UUID assistantA =
+        insertChildEntry(
+            store, baseline.sessionId(), userA, mappedAssistant(requestSpec, response));
+    // terminal invocation 不带关联 result entry
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          builtin(tx)
+              .insertModelInvocation(
+                  modelInvocation(
+                      TestIds.id(1),
+                      baseline.threadId(),
+                      baseline.turnStartEntryId(),
+                      baseline.turnStartEntryId(),
+                      ModelInvocationStatus.READY,
+                      null,
+                      T1));
+          ModelInvocation current = builtin(tx).lockModelInvocation(TestIds.id(1)).orElseThrow();
+          builtin(tx).updateModelInvocation(current.markRunning(T2));
+          current = builtin(tx).lockModelInvocation(TestIds.id(1)).orElseThrow();
+          builtin(tx).updateModelInvocation(current.succeed(response, T2));
+        });
+    ModelInvocation committed =
+        store.transaction(tx -> builtin(tx).findModelInvocation(TestIds.id(1)).orElseThrow());
+    // 将 thread head 迁移到同一 session 中无关 branch（Session -> head 必须同 Session 的新契约）。
+    UUID otherTurnStart =
+        insertChildEntry(store, baseline.sessionId(), baseline.rootEntryId(), turnStartPayload());
+    UUID otherUser =
+        insertChildEntry(store, baseline.sessionId(), otherTurnStart, userMessagePayload());
+    UUID otherAssistant =
+        insertChildEntry(
+            store, baseline.sessionId(), otherUser, mappedAssistant(requestSpec, response));
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          tx.updateThread(
+              StoreTestSupport.threadState(
+                  baseline.threadId(), baseline.sessionId(), otherAssistant, 1, 1, T0, T2));
+        });
+    // relocation 之后 terminal exact replay 仍合法，不依赖当前 head
+    inTransaction(
+        store,
+        tx -> {
+          builtin(tx).lockModelInvocation(TestIds.id(1));
+          builtin(tx).updateModelInvocation(committed);
+        });
+    // relocation 之后附加 requestHead/turn path 之外的 entry 仍会被拒绝
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  ModelInvocation locked =
+                      builtin(tx).lockModelInvocation(TestIds.id(1)).orElseThrow();
+                  builtin(tx).updateModelInvocation(locked.attachResultEntry(otherAssistant, T3));
+                }));
+    // relocation 之后在原始 turn 上附加 result entry 仍合法
+    inTransaction(
+        store,
+        tx -> {
+          ModelInvocation locked = builtin(tx).lockModelInvocation(TestIds.id(1)).orElseThrow();
+          builtin(tx).updateModelInvocation(locked.attachResultEntry(assistantA, T3));
+        });
+    UUID committedResultEntryId =
+        store.transaction(
+            tx -> builtin(tx).findModelInvocation(TestIds.id(1)).orElseThrow().resultEntryId());
+    assertEquals(assistantA, committedResultEntryId);
+  }
+
+  @Test
+  void updateModelInvocationMovesToTerminalWithResultEntry() {
+    ModelRequestSpec requestSpec = modelRequest();
+    // SUCCEEDED assistant 由同一 request/response 经 mapper 派生（strict attach 校验要求全等）。
+    ProviderResponse response = assistantResponse();
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          builtin(tx)
+              .insertModelInvocation(
+                  modelInvocation(
+                      TestIds.id(1),
+                      baseline.threadId(),
+                      baseline.turnStartEntryId(),
+                      baseline.turnStartEntryId(),
+                      ModelInvocationStatus.READY,
+                      null,
+                      T1));
+        });
+    UUID userEntryId =
+        insertChildEntry(
+            store, baseline.sessionId(), baseline.turnStartEntryId(), userMessagePayload());
+    UUID assistantEntryId =
+        insertChildEntry(
+            store, baseline.sessionId(), userEntryId, mappedAssistant(requestSpec, response));
+    inTransaction(
+        store,
+        tx -> {
+          ModelInvocation current = builtin(tx).lockModelInvocation(TestIds.id(1)).orElseThrow();
+          builtin(tx).updateModelInvocation(current.markRunning(T2));
+          current = builtin(tx).lockModelInvocation(TestIds.id(1)).orElseThrow();
+          builtin(tx).updateModelInvocation(current.succeed(response, T2));
+          current = builtin(tx).lockModelInvocation(TestIds.id(1)).orElseThrow();
+          builtin(tx).updateModelInvocation(current.attachResultEntry(assistantEntryId, T2));
+        });
+    ModelInvocation committed =
+        store.transaction(tx -> builtin(tx).findModelInvocation(TestIds.id(1)).orElseThrow());
+    assertEquals(ModelInvocationStatus.SUCCEEDED, committed.status());
+    assertEquals(assistantEntryId, committed.resultEntryId());
+  }
+
+  @Test
+  void updateModelInvocationSupportsRunningToTerminalCheckpointTransition() {
+    ProviderResponse response = assistantResponse();
+    ModelInvocationError error = new ModelInvocationError(ProviderErrorKind.TRANSIENT, "boom");
+
+    // Case 1: RUNNING (null checkpoint) -> SUCCEEDED (new checkpoint) in a single update
+    StoreTestSupport.TurnBaseline turn1 = seedTurnBaseline(store);
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(turn1.threadId());
+          builtin(tx)
+              .insertModelInvocation(
+                  modelInvocation(
+                      TestIds.id(10),
+                      turn1.threadId(),
+                      turn1.turnStartEntryId(),
+                      turn1.turnStartEntryId(),
+                      ModelInvocationStatus.READY,
+                      null,
+                      T1));
+        });
+    inTransaction(
+        store,
+        tx -> {
+          ModelInvocation current = builtin(tx).lockModelInvocation(TestIds.id(10)).orElseThrow();
+          builtin(tx).updateModelInvocation(current.markRunning(T2));
+          current = builtin(tx).lockModelInvocation(TestIds.id(10)).orElseThrow();
+          StreamCheckpoint finalCheckpoint = new StreamCheckpoint(1, 10L, "hello", "");
+          builtin(tx).updateModelInvocation(current.succeed(response, finalCheckpoint, T3));
+        });
+    ModelInvocation committed10 =
+        store.transaction(tx -> builtin(tx).findModelInvocation(TestIds.id(10)).orElseThrow());
+    assertEquals(ModelInvocationStatus.SUCCEEDED, committed10.status());
+    assertNotNull(committed10.streamCheckpoint());
+    assertEquals(10L, committed10.streamCheckpoint().sequence());
+    assertEquals("hello", committed10.streamCheckpoint().text());
+
+    // Case 2: RUNNING (checkpoint 1) -> SUCCEEDED (grown checkpoint 2) in a single update
+    StoreTestSupport.TurnBaseline turn2 = seedTurnBaseline(store);
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(turn2.threadId());
+          builtin(tx)
+              .insertModelInvocation(
+                  modelInvocation(
+                      TestIds.id(11),
+                      turn2.threadId(),
+                      turn2.turnStartEntryId(),
+                      turn2.turnStartEntryId(),
+                      ModelInvocationStatus.READY,
+                      null,
+                      T1));
+        });
+    inTransaction(
+        store,
+        tx -> {
+          ModelInvocation current = builtin(tx).lockModelInvocation(TestIds.id(11)).orElseThrow();
+          builtin(tx).updateModelInvocation(current.markRunning(T2));
+          current = builtin(tx).lockModelInvocation(TestIds.id(11)).orElseThrow();
+          builtin(tx)
+              .updateModelInvocation(
+                  current.checkpoint(new StreamCheckpoint(1, 5L, "hel", ""), T2));
+          current = builtin(tx).lockModelInvocation(TestIds.id(11)).orElseThrow();
+          StreamCheckpoint grown = new StreamCheckpoint(1, 12L, "hello world", "");
+          builtin(tx).updateModelInvocation(current.succeed(response, grown, T3));
+        });
+    ModelInvocation committed11 =
+        store.transaction(tx -> builtin(tx).findModelInvocation(TestIds.id(11)).orElseThrow());
+    assertEquals(ModelInvocationStatus.SUCCEEDED, committed11.status());
+    assertEquals(12L, committed11.streamCheckpoint().sequence());
+    assertEquals("hello world", committed11.streamCheckpoint().text());
+
+    // Case 3: RUNNING (checkpoint 1) -> FAILED (grown checkpoint 2) in a single update
+    StoreTestSupport.TurnBaseline turn3 = seedTurnBaseline(store);
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(turn3.threadId());
+          builtin(tx)
+              .insertModelInvocation(
+                  modelInvocation(
+                      TestIds.id(12),
+                      turn3.threadId(),
+                      turn3.turnStartEntryId(),
+                      turn3.turnStartEntryId(),
+                      ModelInvocationStatus.READY,
+                      null,
+                      T1));
+        });
+    inTransaction(
+        store,
+        tx -> {
+          ModelInvocation current = builtin(tx).lockModelInvocation(TestIds.id(12)).orElseThrow();
+          builtin(tx).updateModelInvocation(current.markRunning(T2));
+          current = builtin(tx).lockModelInvocation(TestIds.id(12)).orElseThrow();
+          StreamCheckpoint failureCheckpoint = new StreamCheckpoint(1, 3L, "partial error", "");
+          builtin(tx).updateModelInvocation(current.fail(error, failureCheckpoint, T3));
+        });
+    ModelInvocation committed12 =
+        store.transaction(tx -> builtin(tx).findModelInvocation(TestIds.id(12)).orElseThrow());
+    assertEquals(ModelInvocationStatus.FAILED, committed12.status());
+    assertEquals(3L, committed12.streamCheckpoint().sequence());
+    assertEquals("partial error", committed12.streamCheckpoint().text());
+
+    // Case 4: Sequence regression from RUNNING to terminal update is rejected by store
+    StoreTestSupport.TurnBaseline turn4 = seedTurnBaseline(store);
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(turn4.threadId());
+          builtin(tx)
+              .insertModelInvocation(
+                  modelInvocation(
+                      TestIds.id(13),
+                      turn4.threadId(),
+                      turn4.turnStartEntryId(),
+                      turn4.turnStartEntryId(),
+                      ModelInvocationStatus.READY,
+                      null,
+                      T1));
+        });
+    inTransaction(
+        store,
+        tx -> {
+          ModelInvocation current = builtin(tx).lockModelInvocation(TestIds.id(13)).orElseThrow();
+          builtin(tx).updateModelInvocation(current.markRunning(T2));
+          current = builtin(tx).lockModelInvocation(TestIds.id(13)).orElseThrow();
+          builtin(tx)
+              .updateModelInvocation(
+                  current.checkpoint(new StreamCheckpoint(1, 10L, "hello world", ""), T2));
+        });
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  ModelInvocation current =
+                      builtin(tx).lockModelInvocation(TestIds.id(13)).orElseThrow();
+                  // current is RUNNING with sequence 10; terminal update with sequence 5 must be
+                  // rejected
+                  StreamCheckpoint regression = new StreamCheckpoint(1, 5L, "hello", "");
+                  builtin(tx).updateModelInvocation(current.succeed(response, regression, T3));
+                }));
+  }
+
+  @Test
+  void updateModelInvocationRequiresLockAndStableIdentity() {
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          builtin(tx)
+              .insertModelInvocation(
+                  modelInvocation(
+                      TestIds.id(1),
+                      baseline.threadId(),
+                      baseline.turnStartEntryId(),
+                      baseline.turnStartEntryId(),
+                      ModelInvocationStatus.READY,
+                      null,
+                      T1));
+        });
+    ModelInvocation stored =
+        store.transaction(tx -> builtin(tx).findModelInvocation(TestIds.id(1)).orElseThrow());
+
+    // 未持有锁
+    assertThrows(
+        IllegalStateException.class,
+        () -> inTransaction(store, tx -> builtin(tx).updateModelInvocation(stored)));
+    // 修改了 requestHeadEntryId
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  builtin(tx).lockModelInvocation(TestIds.id(1));
+                  builtin(tx)
+                      .updateModelInvocation(
+                          new ModelInvocation(
+                              stored.id(),
+                              stored.threadId(),
+                              stored.turnStartEntryId(),
+                              TestIds.id(888), // changed requestHeadEntryId
+                              stored.requestSpec(),
+                              stored.status(),
+                              stored.attempt(),
+                              stored.streamCheckpoint(),
+                              stored.result(),
+                              stored.error(),
+                              stored.resultEntryId(),
+                              stored.failedAttempts(),
+                              stored.createdAt(),
+                              T2));
+                }));
+    // 修改了 createdAt
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  builtin(tx).lockModelInvocation(TestIds.id(1));
+                  builtin(tx)
+                      .updateModelInvocation(
+                          new ModelInvocation(
+                              stored.id(),
+                              stored.threadId(),
+                              stored.turnStartEntryId(),
+                              stored.requestHeadEntryId(),
+                              stored.requestSpec(),
+                              stored.status(),
+                              stored.attempt(),
+                              stored.streamCheckpoint(),
+                              stored.result(),
+                              stored.error(),
+                              stored.resultEntryId(),
+                              stored.failedAttempts(),
+                              T2,
+                              T2));
+                }));
+  }
+
+  @Test
+  void findAndLockModelInvocationReturnEmptyForMissingIds() {
+    UUID missingId = TestIds.id(1);
+    assertTrue(
+        store.<Boolean>transaction(tx -> builtin(tx).findModelInvocation(missingId).isEmpty()));
+    assertTrue(
+        store.<Boolean>transaction(tx -> builtin(tx).lockModelInvocation(missingId).isEmpty()));
+  }
+
+  @Test
+  void newInvocationInsertAcceptsOnlyTheInitialState() {
+    // model insert 时拒绝非 READY status 或 正 attempt
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockThread(baseline.threadId());
+                  builtin(tx)
+                      .insertModelInvocation(
+                          modelInvocation(
+                              TestIds.id(1),
+                              baseline.threadId(),
+                              baseline.turnStartEntryId(),
+                              baseline.turnStartEntryId(),
+                              ModelInvocationStatus.CANCELLED,
+                              null,
+                              T1));
+                }));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockThread(baseline.threadId());
+                  builtin(tx)
+                      .insertModelInvocation(
+                          new ModelInvocation(
+                              TestIds.id(2),
+                              baseline.threadId(),
+                              baseline.turnStartEntryId(),
+                              baseline.turnStartEntryId(),
+                              modelRequest(),
+                              ModelInvocationStatus.READY,
+                              1,
+                              null,
+                              null,
+                              null,
+                              null,
+                              List.of(
+                                  new ModelAttemptFailure(
+                                      1,
+                                      0,
+                                      "",
+                                      "",
+                                      ModelSelection.model("model", "v1"),
+                                      null,
+                                      new ModelInvocationError(
+                                          ProviderErrorKind.TRANSIENT, "provider unavailable"),
+                                      T1,
+                                      T1)),
+                              T1,
+                              T1));
+                }));
+    // tool insert 时拒绝非 READY status / 正 attempt / 非 null approval
+    UUID assistantEntryId = seedAssistantAndModel();
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx ->
+                    tx.insertToolInvocations(
+                        List.of(
+                            toolInvocation(
+                                TestIds.id(10),
+                                baseline.threadId(),
+                                baseline.turnStartEntryId(),
+                                assistantEntryId,
+                                0,
+                                "call-1",
+                                ToolInvocationStatus.CANCELLED,
+                                T2)))));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx ->
+                    tx.insertToolInvocations(
+                        List.of(
+                            new ToolInvocation(
+                                TestIds.id(11),
+                                baseline.threadId(),
+                                baseline.turnStartEntryId(),
+                                assistantEntryId,
+                                0,
+                                toolCall("call-1"),
+                                hostBinding(),
+                                ToolInvocationStatus.READY,
+                                1,
+                                null,
+                                null,
+                                null,
+                                T2,
+                                T2)))));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx ->
+                    tx.insertToolInvocations(
+                        List.of(
+                            new ToolInvocation(
+                                TestIds.id(12),
+                                baseline.threadId(),
+                                baseline.turnStartEntryId(),
+                                assistantEntryId,
+                                0,
+                                toolCall("call-1"),
+                                hostBinding(),
+                                ToolInvocationStatus.READY,
+                                0,
+                                new ToolApproval(false, null, null, null, null, null, null),
+                                null,
+                                null,
+                                T2,
+                                T2)))));
+    // 通过 update 走 terminal apply 不受初始状态不变量约束（Stop / apply）
+    inTransaction(
+        store,
+        tx -> {
+          tx.insertToolInvocations(
+              List.of(
+                  toolInvocation(
+                      TestIds.id(13),
+                      baseline.threadId(),
+                      baseline.turnStartEntryId(),
+                      assistantEntryId,
+                      0,
+                      "call-1",
+                      ToolInvocationStatus.READY,
+                      T2)));
+          tx.lockToolInvocationsByAssistantEntryId(assistantEntryId);
+          tx.updateToolInvocations(
+              List.of(
+                  toolInvocation(
+                      TestIds.id(13),
+                      baseline.threadId(),
+                      baseline.turnStartEntryId(),
+                      assistantEntryId,
+                      0,
+                      "call-1",
+                      ToolInvocationStatus.CANCELLED,
+                      T2)));
+        });
+  }
+
+  // ---- 运行期 TURN_END / Stop 精确删除 ----
+
+  /** deleteToolInvocationsByIds：只删除入参中存在的已锁定行并返回精确数量，未入参的 sibling 保留且删除后行不存在。 */
+  @Test
+  void deleteToolInvocationsByIdsDeletesExactlyTheLockedRows() {
+    UUID assistantEntryId = seedAssistantAndModel();
+    inTransaction(
+        store,
+        tx ->
+            tx.insertToolInvocations(
+                List.of(
+                    toolInvocation(
+                        TestIds.id(10),
+                        baseline.threadId(),
+                        baseline.turnStartEntryId(),
+                        assistantEntryId,
+                        0,
+                        "call-1",
+                        ToolInvocationStatus.READY,
+                        T2),
+                    toolInvocation(
+                        TestIds.id(11),
+                        baseline.threadId(),
+                        baseline.turnStartEntryId(),
+                        assistantEntryId,
+                        1,
+                        "call-2",
+                        ToolInvocationStatus.READY,
+                        T2),
+                    toolInvocation(
+                        TestIds.id(12),
+                        baseline.threadId(),
+                        baseline.turnStartEntryId(),
+                        assistantEntryId,
+                        2,
+                        "call-3",
+                        ToolInvocationStatus.READY,
+                        T2))));
+    int deleted =
+        store.transaction(
+            tx -> {
+              tx.lockToolInvocationsByAssistantEntryId(assistantEntryId);
+              return tx.deleteToolInvocationsByIds(List.of(TestIds.id(10), TestIds.id(12)));
+            });
+    assertEquals(2, deleted);
+    assertTrue(store.transaction(tx -> tx.findToolInvocation(TestIds.id(10))).isEmpty());
+    assertTrue(store.transaction(tx -> tx.findToolInvocation(TestIds.id(12))).isEmpty());
+    assertTrue(store.transaction(tx -> tx.findToolInvocation(TestIds.id(11))).isPresent());
+  }
+
+  /** deleteToolInvocationsByIds：未锁定行抛 ISE，不删除任何行。 */
+  @Test
+  void deleteToolInvocationsByIdsRequiresLockedRows() {
+    UUID assistantEntryId = seedAssistantAndModel();
+    inTransaction(
+        store,
+        tx ->
+            tx.insertToolInvocations(
+                List.of(
+                    toolInvocation(
+                        TestIds.id(10),
+                        baseline.threadId(),
+                        baseline.turnStartEntryId(),
+                        assistantEntryId,
+                        0,
+                        "call-1",
+                        ToolInvocationStatus.READY,
+                        T2))));
+    assertThrows(
+        IllegalStateException.class,
+        () -> inTransaction(store, tx -> tx.deleteToolInvocationsByIds(List.of(TestIds.id(10)))));
+    assertTrue(store.transaction(tx -> tx.findToolInvocation(TestIds.id(10))).isPresent());
+  }
+
+  /** deleteToolInvocationsByIds：入参含缺失行时抛 IAE（公开契约 missing -> IAE）且事务不部分删除。 */
+  @Test
+  void deleteToolInvocationsByIdsRejectsMissingRowWithoutPartialDelete() {
+    UUID assistantEntryId = seedAssistantAndModel();
+    inTransaction(
+        store,
+        tx ->
+            tx.insertToolInvocations(
+                List.of(
+                    toolInvocation(
+                        TestIds.id(10),
+                        baseline.threadId(),
+                        baseline.turnStartEntryId(),
+                        assistantEntryId,
+                        0,
+                        "call-1",
+                        ToolInvocationStatus.READY,
+                        T2),
+                    toolInvocation(
+                        TestIds.id(11),
+                        baseline.threadId(),
+                        baseline.turnStartEntryId(),
+                        assistantEntryId,
+                        1,
+                        "call-2",
+                        ToolInvocationStatus.READY,
+                        T2))));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockToolInvocationsByAssistantEntryId(assistantEntryId);
+                  tx.deleteToolInvocationsByIds(List.of(TestIds.id(10), TestIds.id(999)));
+                }));
+    assertTrue(store.transaction(tx -> tx.findToolInvocation(TestIds.id(10))).isPresent());
+    assertTrue(store.transaction(tx -> tx.findToolInvocation(TestIds.id(11))).isPresent());
+  }
+
+  /** deleteToolInvocationsByIds：入参重复 id 显式拒绝，绝不静默去重后删除。 */
+  @Test
+  void deleteToolInvocationsByIdsRejectsDuplicateIds() {
+    UUID assistantEntryId = seedAssistantAndModel();
+    inTransaction(
+        store,
+        tx ->
+            tx.insertToolInvocations(
+                List.of(
+                    toolInvocation(
+                        TestIds.id(10),
+                        baseline.threadId(),
+                        baseline.turnStartEntryId(),
+                        assistantEntryId,
+                        0,
+                        "call-1",
+                        ToolInvocationStatus.READY,
+                        T2))));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockToolInvocation(TestIds.id(10));
+                  tx.deleteToolInvocationsByIds(List.of(TestIds.id(10), TestIds.id(10)));
+                }));
+    assertTrue(store.transaction(tx -> tx.findToolInvocation(TestIds.id(10))).isPresent());
+  }
+
+  /** deleteModelInvocation：缺失行抛 IAE（公开契约 missing -> IAE）；未锁定行抛 ISE；已锁定且无 child 时删除并在删除后不存在。 */
+  @Test
+  void deleteModelInvocationDeletesWhenLockedAndBecomesAbsent() {
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          builtin(tx)
+              .insertModelInvocation(
+                  modelInvocation(
+                      TestIds.id(1),
+                      baseline.threadId(),
+                      baseline.turnStartEntryId(),
+                      baseline.turnStartEntryId(),
+                      ModelInvocationStatus.READY,
+                      null,
+                      T1));
+        });
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> inTransaction(store, tx -> builtin(tx).deleteModelInvocation(TestIds.id(999))));
+    assertThrows(
+        IllegalStateException.class,
+        () -> inTransaction(store, tx -> builtin(tx).deleteModelInvocation(TestIds.id(1))));
+    boolean deletedAndAbsent =
+        store.<Boolean>transaction(
+            tx -> {
+              builtin(tx).lockModelInvocation(TestIds.id(1)).orElseThrow();
+              assertTrue(builtin(tx).deleteModelInvocation(TestIds.id(1)));
+              return builtin(tx).findModelInvocation(TestIds.id(1)).isEmpty();
+            });
+    assertTrue(deletedAndAbsent);
+  }
+
+  /** deleteModelInvocation：存在 child ToolInvocation 时明确拒绝，parent 与 child 均保留（不依赖底层 FK）。 */
+  @Test
+  void deleteModelInvocationRejectsChildToolInvocationAndPreservesBoth() {
+    UUID assistantEntryId = seedAssistantAndModel();
+    inTransaction(
+        store,
+        tx ->
+            tx.insertToolInvocations(
+                List.of(
+                    toolInvocation(
+                        TestIds.id(10),
+                        baseline.threadId(),
+                        baseline.turnStartEntryId(),
+                        assistantEntryId,
+                        0,
+                        "call-1",
+                        ToolInvocationStatus.READY,
+                        T2))));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  builtin(tx).lockModelInvocation(TestIds.id(1));
+                  builtin(tx).deleteModelInvocation(TestIds.id(1));
+                }));
+    assertTrue(store.transaction(tx -> builtin(tx).findModelInvocation(TestIds.id(1))).isPresent());
+    assertTrue(store.transaction(tx -> tx.findToolInvocation(TestIds.id(10))).isPresent());
+  }
+
+  // ---- 工具调用 ----
+
+  /**
+   * terminal model 种子；SUCCEEDED 使用默认 fixture（modelRequest + successResponse，assistant 必须与其经 mapper
+   * 派生全等）；FAILED / CANCELLED 语义固定。
+   */
+  private void insertTerminalModel(
+      UUID id,
+      UUID threadId,
+      UUID turnStartEntryId,
+      UUID requestHeadEntryId,
+      ModelInvocationStatus status,
+      UUID resultEntryId,
+      Instant createdAt) {
+    insertTerminalModel(
+        id,
+        threadId,
+        turnStartEntryId,
+        requestHeadEntryId,
+        status,
+        modelRequest(),
+        successResponse(),
+        resultEntryId,
+        createdAt);
+  }
+
+  /**
+   * terminal model 种子；SUCCEEDED 必须提供与 assistant 事实机械一致的 request+response（assistant 由同一对经 {@link
+   * HistoryPayloadMapper} 派生，strict attach 校验要求全等）。
+   */
+  private void insertTerminalModel(
+      UUID id,
+      UUID threadId,
+      UUID turnStartEntryId,
+      UUID requestHeadEntryId,
+      ModelInvocationStatus status,
+      ModelRequestSpec requestSpec,
+      ProviderResponse response,
+      UUID resultEntryId,
+      Instant createdAt) {
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(threadId);
+          builtin(tx)
+              .insertModelInvocation(
+                  new ModelInvocation(
+                      id,
+                      threadId,
+                      turnStartEntryId,
+                      requestHeadEntryId,
+                      requestSpec,
+                      ModelInvocationStatus.READY,
+                      0,
+                      null,
+                      null,
+                      null,
+                      null,
+                      List.of(),
+                      createdAt,
+                      createdAt));
+          ModelInvocation current = builtin(tx).lockModelInvocation(id).orElseThrow();
+          if (status == ModelInvocationStatus.SUCCEEDED) {
+            builtin(tx).updateModelInvocation(current.markRunning(createdAt));
+            current = builtin(tx).lockModelInvocation(id).orElseThrow();
+            builtin(tx).updateModelInvocation(current.succeed(response, createdAt));
+          } else if (status == ModelInvocationStatus.FAILED) {
+            builtin(tx)
+                .updateModelInvocation(
+                    current.fail(
+                        new ModelInvocationError(ProviderErrorKind.INVALID_REQUEST, "model failed"),
+                        createdAt));
+          } else if (status == ModelInvocationStatus.CANCELLED) {
+            builtin(tx).updateModelInvocation(current.markRunning(createdAt));
+            current = builtin(tx).lockModelInvocation(id).orElseThrow();
+            builtin(tx)
+                .updateModelInvocation(
+                    current.checkpoint(new StreamCheckpoint(1, 1, "partial", ""), createdAt));
+            current = builtin(tx).lockModelInvocation(id).orElseThrow();
+            builtin(tx)
+                .updateModelInvocation(
+                    current
+                        .cancel(
+                            new ModelInvocationError(ProviderErrorKind.CANCELLED, "cancelled"),
+                            createdAt)
+                        .attachResultEntry(resultEntryId, createdAt));
+            return;
+          } else {
+            throw new IllegalArgumentException("unsupported terminal model status " + status);
+          }
+          current = builtin(tx).lockModelInvocation(id).orElseThrow();
+          builtin(tx).updateModelInvocation(current.attachResultEntry(resultEntryId, createdAt));
+        });
+  }
+
+  private ToolInvocation updateTool(UUID invocationId, UnaryOperator<ToolInvocation> transition) {
+    return store.transaction(
+        tx -> {
+          ToolInvocation current = tx.lockToolInvocation(invocationId).orElseThrow();
+          ToolInvocation updated = transition.apply(current);
+          tx.updateToolInvocations(List.of(updated));
+          return updated;
+        });
+  }
+
+  /** 合法 turn 链 TURN_START -> USER -> ASSISTANT(call-1..call-3)，并附带一个 terminal model result。 */
+  private UUID seedAssistantAndModel() {
+    ModelRequestSpec requestSpec = succeededRequest();
+    ProviderResponse response = assistantResponse("call-1", "call-2", "call-3");
+    UUID userEntryId =
+        insertChildEntry(
+            store, baseline.sessionId(), baseline.turnStartEntryId(), userMessagePayload());
+    UUID assistantEntryId =
+        insertChildEntry(
+            store, baseline.sessionId(), userEntryId, mappedAssistant(requestSpec, response, T1));
+    insertTerminalModel(
+        TestIds.id(1),
+        baseline.threadId(),
+        baseline.turnStartEntryId(),
+        baseline.turnStartEntryId(),
+        ModelInvocationStatus.SUCCEEDED,
+        requestSpec,
+        response,
+        assistantEntryId,
+        T1);
+    return assistantEntryId;
+  }
+
+  @Test
+  void reversedToolBatchIsCanonicalizedAndReverseSiblingLockIsRejected() {
+    UUID assistantEntryId = seedAssistantAndModel();
+    inTransaction(
+        store,
+        tx ->
+            tx.insertToolInvocations(
+                List.of(
+                    toolInvocation(
+                        TestIds.id(11),
+                        baseline.threadId(),
+                        baseline.turnStartEntryId(),
+                        assistantEntryId,
+                        1,
+                        "call-2",
+                        ToolInvocationStatus.READY,
+                        T2),
+                    toolInvocation(
+                        TestIds.id(10),
+                        baseline.threadId(),
+                        baseline.turnStartEntryId(),
+                        assistantEntryId,
+                        0,
+                        "call-1",
+                        ToolInvocationStatus.READY,
+                        T2))));
+
+    List<ToolInvocation> stored =
+        store.transaction(tx -> tx.loadToolInvocationsByAssistantEntryId(assistantEntryId));
+    assertEquals(List.of(0, 1), stored.stream().map(ToolInvocation::callIndex).toList());
+    store.transaction(
+        tx -> {
+          tx.lockToolInvocation(TestIds.id(11)).orElseThrow();
+          assertThrows(IllegalStateException.class, () -> tx.lockToolInvocation(TestIds.id(10)));
+          return null;
+        });
+  }
+
+  @Test
+  void toolWorkRequiresItsOwningThreadLock() {
+    UUID assistantEntryId = seedAssistantAndModel();
+    inTransaction(
+        store,
+        tx ->
+            tx.insertToolInvocations(
+                List.of(
+                    toolInvocation(
+                        TestIds.id(10),
+                        baseline.threadId(),
+                        baseline.turnStartEntryId(),
+                        assistantEntryId,
+                        0,
+                        "call-1",
+                        ToolInvocationStatus.READY,
+                        T2))));
+    WorkTarget target = new WorkTarget(WorkTargetType.TOOL, TestIds.id(10));
+
+    assertThrows(
+        IllegalStateException.class, () -> inTransaction(store, tx -> tx.requestWork(target)));
+    inTransaction(
+        store,
+        tx -> {
+          tx.lockThread(baseline.threadId()).orElseThrow();
+          tx.requestWork(target);
+        });
+    assertTrue(store.transaction(tx -> tx.findWork(target)).isPresent());
+  }
+
+  @Test
+  void toolArgumentsJsonPreservesItsExactLexicalForm() {
+    String argumentsJson = "{   }";
+    ModelRequestSpec requestSpec = succeededRequest();
+    ProviderResponse response = succeededResponseWithArguments("call-1", argumentsJson);
+    UUID userEntryId =
+        insertChildEntry(
+            store, baseline.sessionId(), baseline.turnStartEntryId(), userMessagePayload());
+    UUID assistantEntryId =
+        insertChildEntry(
+            store, baseline.sessionId(), userEntryId, mappedAssistant(requestSpec, response, T1));
+    insertTerminalModel(
+        TestIds.id(1),
+        baseline.threadId(),
+        baseline.turnStartEntryId(),
+        baseline.turnStartEntryId(),
+        ModelInvocationStatus.SUCCEEDED,
+        requestSpec,
+        response,
+        assistantEntryId,
+        T1);
+    ToolInvocation invocation =
+        new ToolInvocation(
+            TestIds.id(10),
+            baseline.threadId(),
+            baseline.turnStartEntryId(),
+            assistantEntryId,
+            0,
+            toolCall("call-1", argumentsJson),
+            hostBinding(),
+            ToolInvocationStatus.READY,
+            0,
+            null,
+            null,
+            null,
+            T2,
+            T2);
+
+    inTransaction(store, tx -> tx.insertToolInvocations(List.of(invocation)));
+
+    ToolInvocation stored =
+        store.transaction(tx -> tx.findToolInvocation(TestIds.id(10))).orElseThrow();
+    assertEquals(argumentsJson, stored.call().argumentsJson());
+  }
+
+  @Test
+  void successfulToolEffectsRoundTripAsOneTerminalFact() {
+    UUID assistantEntryId = seedAssistantAndModel();
+    ToolInvocation ready =
+        toolInvocation(
+            TestIds.id(10),
+            baseline.threadId(),
+            baseline.turnStartEntryId(),
+            assistantEntryId,
+            0,
+            "call-1",
+            ToolInvocationStatus.READY,
+            T2);
+    inTransaction(store, tx -> tx.insertToolInvocations(List.of(ready)));
+    updateTool(TestIds.id(10), tool -> tool.markApprovalNotRequired(T2));
+    updateTool(TestIds.id(10), tool -> tool.markRunning(T2));
+    ToolEffectBatch effects =
+        new ToolEffectBatch(
+            List.of(
+                new CustomEntryPayload("goal", "state", 1, "{\"objective\":\"ship\"}"),
+                new CustomEntryPayload("goal", "state", 1, "{\"objective\":\"verify\"}")));
+    ToolResult result =
+        new ToolResult("call-1", List.of(new TextResultContent("ok")), false, "{\"done\":true}");
+    updateTool(TestIds.id(10), tool -> tool.succeed(result, effects, T3));
+
+    ToolInvocation stored =
+        store.transaction(tx -> tx.findToolInvocation(TestIds.id(10))).orElseThrow();
+    assertEquals(ToolInvocationStatus.SUCCEEDED, stored.status());
+    assertEquals(result, stored.result());
+    assertEquals(effects, stored.effects());
+  }
+
+  /**
+   * 人工输入回答的 durable 形状：READY -&gt; WAITING_INPUT -&gt; SUCCEEDED + 结果 + 回执必须在两种 store 上无损往返。
+   *
+   * <p>该形状同时受物理约束保护：WAITING_INPUT 必须有 binding 且无 result，回执只能与 SUCCEEDED + result 同存。
+   */
+  @Test
+  void answeredToolInputRoundTripsResultAndReceipt() {
+    UUID assistantEntryId = seedAskUserAssistantAndModel();
+    ToolInvocation ready =
+        new ToolInvocation(
+            TestIds.id(10),
+            baseline.threadId(),
+            baseline.turnStartEntryId(),
+            assistantEntryId,
+            0,
+            new ToolCall("call-1", "ask_user", ASK_USER_QUESTIONNAIRE),
+            askUserBinding(),
+            ToolInvocationStatus.READY,
+            0,
+            null,
+            null,
+            null,
+            T2,
+            T2);
+    inTransaction(store, tx -> tx.insertToolInvocations(List.of(ready)));
+
+    updateTool(TestIds.id(10), tool -> tool.requestInput(T2));
+    ToolInvocation waiting =
+        store.transaction(tx -> tx.findToolInvocation(TestIds.id(10))).orElseThrow();
+    assertEquals(ToolInvocationStatus.WAITING_INPUT, waiting.status());
+    assertEquals(0, waiting.attempt());
+    assertNull(waiting.approval());
+    assertNull(waiting.result());
+    assertNull(waiting.inputReceipt());
+
+    ToolInputReceipt receipt = new ToolInputReceipt(TestIds.id(31), "alice", T3);
+    ToolResult result =
+        new ToolResult(
+            "call-1",
+            List.of(new JsonResultContent("{\"answers\":[[\"fast\"]]}")),
+            false,
+            "{\"answers\":[[\"fast\"]]}");
+    updateTool(TestIds.id(10), tool -> tool.acceptInput(result, receipt, T3));
+
+    ToolInvocation stored =
+        store.transaction(tx -> tx.findToolInvocation(TestIds.id(10))).orElseThrow();
+    assertEquals(ToolInvocationStatus.SUCCEEDED, stored.status());
+    assertEquals(0, stored.attempt());
+    assertNull(stored.approval());
+    assertEquals(result, stored.result());
+    assertEquals(receipt, stored.inputReceipt());
+  }
+
+  /**
+   * 合法 turn 链 + {@code ask_user} 的 assistant ToolCall 与 terminal model result（call/binding 必须全等）。
+   */
+  private UUID seedAskUserAssistantAndModel() {
+    ModelRequestSpec requestSpec = askUserRequest();
+    ProviderResponse response = askUserResponse("call-1");
+    UUID userEntryId =
+        insertChildEntry(
+            store, baseline.sessionId(), baseline.turnStartEntryId(), userMessagePayload());
+    UUID assistantEntryId =
+        insertChildEntry(
+            store, baseline.sessionId(), userEntryId, mappedAssistant(requestSpec, response, T1));
+    insertTerminalModel(
+        TestIds.id(1),
+        baseline.threadId(),
+        baseline.turnStartEntryId(),
+        baseline.turnStartEntryId(),
+        ModelInvocationStatus.SUCCEEDED,
+        requestSpec,
+        response,
+        assistantEntryId,
+        T1);
+    return assistantEntryId;
+  }
+
+  @Test
+  void caughtLateToolInsertValidationFailureDoesNotCommitAnEarlierBatchItem() {
+    UUID assistantEntryId = seedAssistantAndModel();
+    ToolInvocation first =
+        toolInvocation(
+            TestIds.id(10),
+            baseline.threadId(),
+            baseline.turnStartEntryId(),
+            assistantEntryId,
+            0,
+            "call-1",
+            ToolInvocationStatus.READY,
+            T2);
+    ToolInvocation duplicateOrdinal =
+        toolInvocation(
+            TestIds.id(11),
+            baseline.threadId(),
+            baseline.turnStartEntryId(),
+            assistantEntryId,
+            0,
+            "call-1",
+            ToolInvocationStatus.READY,
+            T2);
+
+    store.transaction(
+        tx -> {
+          try {
+            tx.insertToolInvocations(List.of(first, duplicateOrdinal));
+          } catch (IllegalArgumentException ignored) {
+            // 整个 sibling batch 必须在第一次 insert 之前完成全部校验
+          }
+          return null;
+        });
+
+    assertTrue(
+        store
+            .transaction(tx -> tx.loadToolInvocationsByAssistantEntryId(assistantEntryId))
+            .isEmpty());
+  }
+
+  @Test
+  void caughtLateToolUpdateValidationFailureDoesNotCommitAnEarlierBatchItem() {
+    UUID assistantEntryId = seedAssistantAndModel();
+    inTransaction(
+        store,
+        tx ->
+            tx.insertToolInvocations(
+                List.of(
+                    toolInvocation(
+                        TestIds.id(10),
+                        baseline.threadId(),
+                        baseline.turnStartEntryId(),
+                        assistantEntryId,
+                        0,
+                        "call-1",
+                        ToolInvocationStatus.READY,
+                        T2),
+                    toolInvocation(
+                        TestIds.id(11),
+                        baseline.threadId(),
+                        baseline.turnStartEntryId(),
+                        assistantEntryId,
+                        1,
+                        "call-2",
+                        ToolInvocationStatus.READY,
+                        T2))));
+
+    store.transaction(
+        tx -> {
+          tx.lockToolInvocationsByAssistantEntryId(assistantEntryId);
+          ToolInvocation valid =
+              toolInvocation(
+                  TestIds.id(10),
+                  baseline.threadId(),
+                  baseline.turnStartEntryId(),
+                  assistantEntryId,
+                  0,
+                  "call-1",
+                  ToolInvocationStatus.CANCELLED,
+                  T2);
+          ToolInvocation forgedIdentity =
+              toolInvocation(
+                  TestIds.id(11),
+                  baseline.threadId(),
+                  baseline.turnStartEntryId(),
+                  assistantEntryId,
+                  2,
+                  "call-3",
+                  ToolInvocationStatus.READY,
+                  T2);
+          try {
+            tx.updateToolInvocations(List.of(valid, forgedIdentity));
+          } catch (IllegalArgumentException ignored) {
+            // 第二个 sibling 身份非法时，不应让第一个 sibling 进入 terminal
+          }
+          return null;
+        });
+
+    List<ToolInvocationStatus> statuses =
+        store.transaction(
+            tx ->
+                tx.loadToolInvocationsByAssistantEntryId(assistantEntryId).stream()
+                    .map(ToolInvocation::status)
+                    .toList());
+    assertEquals(List.of(ToolInvocationStatus.READY, ToolInvocationStatus.READY), statuses);
+  }
+
+  @Test
+  void toolInvocationRequiresExistingThreadAndAssistantMessageEntry() {
+    UUID assistantEntryId = seedAssistantAndModel();
+    // 缺少 thread
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx ->
+                    tx.insertToolInvocations(
+                        List.of(
+                            toolInvocation(
+                                TestIds.id(10),
+                                TestIds.id(999),
+                                baseline.turnStartEntryId(),
+                                assistantEntryId,
+                                0,
+                                "call-1",
+                                ToolInvocationStatus.READY,
+                                T2)))));
+  }
+
+  @Test
+  void toolAssistantEntryMustBeAnAssistantMessage() {
+    // 一个 result 为 ASSISTANT_ERROR entry 的 model：合法的 model result，但不是 assistant MESSAGE 来源
+    UUID userEntryId =
+        insertChildEntry(
+            store, baseline.sessionId(), baseline.turnStartEntryId(), userMessagePayload());
+    UUID errorEntryId =
+        insertChildEntry(store, baseline.sessionId(), userEntryId, assistantErrorPayload());
+    insertTerminalModel(
+        TestIds.id(1),
+        baseline.threadId(),
+        baseline.turnStartEntryId(),
+        baseline.turnStartEntryId(),
+        ModelInvocationStatus.FAILED,
+        errorEntryId,
+        T1);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx ->
+                    tx.insertToolInvocations(
+                        List.of(
+                            toolInvocation(
+                                TestIds.id(10),
+                                baseline.threadId(),
+                                baseline.turnStartEntryId(),
+                                errorEntryId,
+                                0,
+                                "call-1",
+                                ToolInvocationStatus.READY,
+                                T2)))));
+  }
+
+  @Test
+  void toolInvocationRequiresModelResultEntryEqualsAssistantEntry() {
+    // model result 是 assistantA，从 assistantB 发起 tool 会被拒绝
+    seedAssistantAndModel();
+    UUID turnStartB =
+        insertChildEntry(store, baseline.sessionId(), baseline.rootEntryId(), turnStartPayload());
+    UUID userB = insertChildEntry(store, baseline.sessionId(), turnStartB, userMessagePayload());
+    UUID assistantB =
+        insertChildEntry(store, baseline.sessionId(), userB, assistantPayload("call-1"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx ->
+                    tx.insertToolInvocations(
+                        List.of(
+                            toolInvocation(
+                                TestIds.id(10),
+                                baseline.threadId(),
+                                baseline.turnStartEntryId(),
+                                assistantB,
+                                0,
+                                "call-1",
+                                ToolInvocationStatus.READY,
+                                T2)))));
+  }
+
+  @Test
+  void toolInvocationUniqueKeysAreEnforced() {
+    UUID assistantEntryId = seedAssistantAndModel();
+    inTransaction(
+        store,
+        tx ->
+            tx.insertToolInvocations(
+                List.of(
+                    toolInvocation(
+                        TestIds.id(12),
+                        baseline.threadId(),
+                        baseline.turnStartEntryId(),
+                        assistantEntryId,
+                        0,
+                        "call-1",
+                        ToolInvocationStatus.READY,
+                        T2))));
+    // 重复的 (assistantEntryId, callIndex)
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx ->
+                    tx.insertToolInvocations(
+                        List.of(
+                            toolInvocation(
+                                TestIds.id(13),
+                                baseline.threadId(),
+                                baseline.turnStartEntryId(),
+                                assistantEntryId,
+                                0,
+                                "call-2",
+                                ToolInvocationStatus.READY,
+                                T3)))));
+    // 重复的 id
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx ->
+                    tx.insertToolInvocations(
+                        List.of(
+                            toolInvocation(
+                                TestIds.id(12),
+                                baseline.threadId(),
+                                baseline.turnStartEntryId(),
+                                assistantEntryId,
+                                1,
+                                "call-2",
+                                ToolInvocationStatus.READY,
+                                T3)))));
+  }
+
+  @Test
+  void toolRequestCallMustExactlyMatchTheAssistantToolCallAtTheSameOrdinal() {
+    UUID assistantEntryId = seedAssistantAndModel(); // assistant calls: call-1, call-2, call-3
+    // 同 callIndex 处 call id 不匹配
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx ->
+                    tx.insertToolInvocations(
+                        List.of(
+                            toolInvocation(
+                                TestIds.id(10),
+                                baseline.threadId(),
+                                baseline.turnStartEntryId(),
+                                assistantEntryId,
+                                1,
+                                "call-other",
+                                ToolInvocationStatus.READY,
+                                T2)))));
+    // callIndex 超过 assistant tool calls 范围
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx ->
+                    tx.insertToolInvocations(
+                        List.of(
+                            toolInvocation(
+                                TestIds.id(11),
+                                baseline.threadId(),
+                                baseline.turnStartEntryId(),
+                                assistantEntryId,
+                                5,
+                                "call-5",
+                                ToolInvocationStatus.READY,
+                                T2)))));
+    // rendererKey 必须匹配 Assistant 中冻结的 renderer 身份
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx ->
+                    tx.insertToolInvocations(
+                        List.of(
+                            withRendererKey(
+                                toolInvocation(
+                                    TestIds.id(13),
+                                    baseline.threadId(),
+                                    baseline.turnStartEntryId(),
+                                    assistantEntryId,
+                                    0,
+                                    "call-1",
+                                    ToolInvocationStatus.READY,
+                                    T2),
+                                "other-renderer")))));
+    // 精确匹配被接受
+    inTransaction(
+        store,
+        tx ->
+            tx.insertToolInvocations(
+                List.of(
+                    toolInvocation(
+                        TestIds.id(12),
+                        baseline.threadId(),
+                        baseline.turnStartEntryId(),
+                        assistantEntryId,
+                        1,
+                        "call-2",
+                        ToolInvocationStatus.READY,
+                        T2))));
+  }
+
+  @Test
+  void loadToolInvocationsByAssistantEntryIdReturnsOrdinalOrder() {
+    UUID assistantEntryId = seedAssistantAndModel();
+    inTransaction(
+        store,
+        tx ->
+            tx.insertToolInvocations(
+                List.of(
+                    toolInvocation(
+                        TestIds.id(10),
+                        baseline.threadId(),
+                        baseline.turnStartEntryId(),
+                        assistantEntryId,
+                        2,
+                        "call-3",
+                        ToolInvocationStatus.READY,
+                        T2),
+                    toolInvocation(
+                        TestIds.id(11),
+                        baseline.threadId(),
+                        baseline.turnStartEntryId(),
+                        assistantEntryId,
+                        0,
+                        "call-1",
+                        ToolInvocationStatus.READY,
+                        T2),
+                    toolInvocation(
+                        TestIds.id(12),
+                        baseline.threadId(),
+                        baseline.turnStartEntryId(),
+                        assistantEntryId,
+                        1,
+                        "call-2",
+                        ToolInvocationStatus.READY,
+                        T2))));
+    List<Integer> callIndexes =
+        store.transaction(
+            tx ->
+                tx.loadToolInvocationsByAssistantEntryId(assistantEntryId).stream()
+                    .map(ToolInvocation::callIndex)
+                    .toList());
+    assertEquals(List.of(0, 1, 2), callIndexes);
+  }
+
+  @Test
+  void updateToolInvocationsRequiresLockAndStableIdentity() {
+    UUID assistantEntryId = seedAssistantAndModel();
+    inTransaction(
+        store,
+        tx ->
+            tx.insertToolInvocations(
+                List.of(
+                    toolInvocation(
+                        TestIds.id(10),
+                        baseline.threadId(),
+                        baseline.turnStartEntryId(),
+                        assistantEntryId,
+                        0,
+                        "call-1",
+                        ToolInvocationStatus.READY,
+                        T2))));
+    ToolInvocation stored =
+        store.transaction(tx -> tx.findToolInvocation(TestIds.id(10)).orElseThrow());
+
+    // 未持有锁
+    assertThrows(
+        IllegalStateException.class,
+        () -> inTransaction(store, tx -> tx.updateToolInvocations(List.of(stored))));
+    // 修改了 frozen 的 request identity
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            inTransaction(
+                store,
+                tx -> {
+                  tx.lockToolInvocationsByAssistantEntryId(assistantEntryId);
+                  tx.updateToolInvocations(
+                      List.of(
+                          new ToolInvocation(
+                              stored.id(),
+                              stored.threadId(),
+                              stored.turnStartEntryId(),
+                              stored.assistantEntryId(),
+                              stored.callIndex(),
+                              toolCall("call-other"),
+                              hostBinding(),
+                              stored.status(),
+                              stored.attempt(),
+                              stored.approval(),
+                              stored.result(),
+                              stored.error(),
+                              stored.createdAt(),
+                              T3)));
+                }));
+  }
+
+  @Test
+  void toolListResultsAreImmutableAndNullElementsAreRejected() {
+    UUID assistantEntryId = seedAssistantAndModel();
+    inTransaction(
+        store,
+        tx ->
+            tx.insertToolInvocations(
+                List.of(
+                    toolInvocation(
+                        TestIds.id(10),
+                        baseline.threadId(),
+                        baseline.turnStartEntryId(),
+                        assistantEntryId,
+                        0,
+                        "call-1",
+                        ToolInvocationStatus.READY,
+                        T2))));
+    List<ToolInvocation> loaded =
+        store.transaction(tx -> tx.loadToolInvocationsByAssistantEntryId(assistantEntryId));
+    assertThrows(
+        UnsupportedOperationException.class,
+        () ->
+            loaded.add(
+                toolInvocation(
+                    TestIds.id(11),
+                    baseline.threadId(),
+                    baseline.turnStartEntryId(),
+                    assistantEntryId,
+                    1,
+                    "call-2",
+                    ToolInvocationStatus.READY,
+                    T2)));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            inTransaction(
+                store,
+                tx ->
+                    tx.insertToolInvocations(
+                        Arrays.asList(
+                            toolInvocation(
+                                TestIds.id(11),
+                                baseline.threadId(),
+                                baseline.turnStartEntryId(),
+                                assistantEntryId,
+                                1,
+                                "call-2",
+                                ToolInvocationStatus.READY,
+                                T2),
+                            null))));
+  }
+
+  // ---- 压缩调用 ----
+
+  /** 关闭 baseline INPUT turn，并按 immutable TURN_START 事实打开一个 COMPACTION turn。 */
+  private UUID openCompactionTurn() {
+    return openCompactionTurn(CompactionPhase.HISTORY, null);
+  }
+
+  private UUID openCompactionTurn(CompactionPhase phase, UUID requestedCutEntryId) {
+    return store.transaction(
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          UUID userEntryId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  userEntryId,
+                  baseline.sessionId(),
+                  baseline.turnStartEntryId(),
+                  userMessagePayload(),
+                  T1));
+          UUID assistantEntryId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  assistantEntryId, baseline.sessionId(), userEntryId, assistantPayload(), T1));
+          UUID endEntryId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  endEntryId,
+                  baseline.sessionId(),
+                  assistantEntryId,
+                  new TurnEndPayload(
+                      baseline.turnStartEntryId(), TurnEndOutcome.COMPLETED, false, null, null),
+                  T1));
+          UUID start = tx.nextId();
+          UUID cutEntryId = requestedCutEntryId == null ? endEntryId : requestedCutEntryId;
+          UUID turnPrefixStartEntryId = phase == CompactionPhase.FULL ? null : userEntryId;
+          CompactionStart compaction =
+              CompactionStart.pending(
+                  phase, CompactionTrigger.THRESHOLD, cutEntryId, turnPrefixStartEntryId, null);
+          tx.insertEntry(
+              new Entry(
+                  start,
+                  baseline.sessionId(),
+                  endEntryId,
+                  new TurnStartPayload(
+                      TurnStartReason.COMPACTION,
+                      StoreTestSupport.branchSettings(),
+                      baseline.threadId(),
+                      StoreTestSupport.CONTEXT_WINDOW,
+                      16_384,
+                      compaction,
+                      null),
+                  T1));
+          tx.updateThread(tx.findThread(baseline.threadId()).orElseThrow().advanceHead(start, T2));
+          return start;
+        });
+  }
+
+  /** 在打开的 COMPACTION turn（head == turnStart）下插入 READY compaction invocation，返回 model id。 */
+  private UUID insertCompactionInvocation(UUID turnStart, ModelRequestSpec requestSpec) {
+    return store.transaction(
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          UUID modelId = tx.nextId();
+          builtin(tx)
+              .insertModelInvocation(
+                  new ModelInvocation(
+                      modelId,
+                      baseline.threadId(),
+                      turnStart,
+                      turnStart,
+                      requestSpec,
+                      ModelInvocationStatus.READY,
+                      0,
+                      null,
+                      null,
+                      null,
+                      null,
+                      List.of(),
+                      T2,
+                      T2));
+          return modelId;
+        });
+  }
+
+  /** 完整压缩 turn 种子：打开 COMPACTION turn、执行 invocation 并附加 SUCCEEDED result。 */
+  private UUID seedDurableCompletedCompactionTurn(CompactionPayload resultPayload) {
+    return store.transaction(
+        tx -> {
+          tx.lockThread(baseline.threadId());
+          UUID userEntryId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  userEntryId,
+                  baseline.sessionId(),
+                  baseline.turnStartEntryId(),
+                  userMessagePayload(),
+                  T1));
+          UUID assistantEntryId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  assistantEntryId, baseline.sessionId(), userEntryId, assistantPayload(), T1));
+          UUID endEntryId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  endEntryId,
+                  baseline.sessionId(),
+                  assistantEntryId,
+                  new TurnEndPayload(
+                      baseline.turnStartEntryId(), TurnEndOutcome.COMPLETED, false, null, null),
+                  T1));
+          UUID start = tx.nextId();
+          UUID cutEntryId = endEntryId;
+          UUID childThreadId = tx.nextId();
+          UUID joinInvocationId = tx.nextId();
+          CompactionStart compaction =
+              new CompactionStart(
+                  CompactionPhase.FULL,
+                  CompactionTrigger.THRESHOLD,
+                  StoreTestSupport.builtinExecutionModel(),
+                  4096L,
+                  cutEntryId,
+                  null,
+                  null,
+                  childThreadId,
+                  joinInvocationId);
+          tx.insertEntry(
+              new Entry(
+                  start,
+                  baseline.sessionId(),
+                  endEntryId,
+                  new TurnStartPayload(
+                      TurnStartReason.COMPACTION,
+                      StoreTestSupport.branchSettings(),
+                      baseline.threadId(),
+                      StoreTestSupport.CONTEXT_WINDOW,
+                      16_384,
+                      compaction,
+                      null),
+                  T1));
+          UUID resultEntryId = tx.nextId();
+          tx.insertEntry(new Entry(resultEntryId, baseline.sessionId(), start, resultPayload, T2));
+          UUID turnEndId = tx.nextId();
+          tx.insertEntry(
+              new Entry(
+                  turnEndId,
+                  baseline.sessionId(),
+                  resultEntryId,
+                  new TurnEndPayload(start, TurnEndOutcome.COMPLETED, false, null, null),
+                  T2));
+          tx.updateThread(
+              tx.findThread(baseline.threadId()).orElseThrow().advanceHead(turnEndId, T2));
+          return resultEntryId;
+        });
+  }
+
+  private static ProviderResponse successResponse() {
+    return new ProviderResponse(
+        "summary",
+        "",
+        List.of(),
+        GenerationStopReason.COMPLETE,
+        new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L),
+        "req-1",
+        null,
+        "{}");
+  }
+
+  /** 带冻结 argumentsJson 的 SUCCEEDED response（工具调用参数必须逐字保留进 assistant）。 */
+  private static ProviderResponse succeededResponseWithArguments(
+      String toolCallId, String argumentsJson) {
+    return new ProviderResponse(
+        "assistant reply",
+        "",
+        List.of(new ProviderToolCall(toolCallId, "bash", argumentsJson)),
+        GenerationStopReason.COMPLETE,
+        new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L),
+        "req-1",
+        null,
+        "{}");
+  }
+
+  private static ModelRequestSpec compactionRequest() {
+    return modelRequest();
+  }
+
+  @Test
+  void normalTurnRejectsCompactionPayload() {
+    // 普通 TURN_START 即使 request 没有压缩字段，也不能挂载 COMPACTION Entry。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            insertChildEntry(
+                store,
+                baseline.sessionId(),
+                baseline.turnStartEntryId(),
+                new CompactionPayload("summary", null)));
+  }
+
+  @Test
+  void modelInvocationOnCompactionTurnCanNeverMaterializeAResult() {
+    // 父 COMPACTION turn 不创建 ModelInvocation：任何挂载结果的尝试都被确定性拒绝，唯一合法形状是
+    // 「TURN_START(run group) -> CompactionPayload -> TURN_END」这条无 invocation 的父回合路径。
+    ModelRequestSpec requestSpec = compactionRequest();
+    CompactionPayload result = new CompactionPayload("summary", null);
+
+    // FAILED invocation 携带 COMPACTION result -> 拒绝（result entry 形状不属于任何合法 model 结果）。
+    UUID turnStart = openCompactionTurn();
+    UUID modelId = insertCompactionInvocation(turnStart, requestSpec);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            store.transaction(
+                tx -> {
+                  tx.lockThread(baseline.threadId());
+                  UUID resultEntryId = tx.nextId();
+                  tx.insertEntry(
+                      new Entry(resultEntryId, baseline.sessionId(), turnStart, result, T2));
+                  ModelInvocation locked = builtin(tx).lockModelInvocation(modelId).orElseThrow();
+                  builtin(tx)
+                      .updateModelInvocation(
+                          locked.fail(
+                              new ModelInvocationError(ProviderErrorKind.INVALID_REQUEST, "boom"),
+                              T3));
+                  locked = builtin(tx).lockModelInvocation(modelId).orElseThrow();
+                  builtin(tx).updateModelInvocation(locked.attachResultEntry(resultEntryId, T3));
+                  return null;
+                }));
+
+    // SUCCEEDED invocation + ASSISTANT result 同样不允许：压缩 turn 的模型调用形状被物化校验确定性拒绝。
+    UUID succeededTurnStart = openCompactionTurn();
+    UUID succeededModelId = insertCompactionInvocation(succeededTurnStart, requestSpec);
+    IllegalArgumentException ex =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                store.transaction(
+                    tx -> {
+                      tx.lockThread(baseline.threadId());
+                      UUID assistantEntryId = tx.nextId();
+                      tx.insertEntry(
+                          new Entry(
+                              assistantEntryId,
+                              baseline.sessionId(),
+                              succeededTurnStart,
+                              assistantPayload(),
+                              T2));
+                      ModelInvocation current =
+                          builtin(tx).lockModelInvocation(succeededModelId).orElseThrow();
+                      builtin(tx).updateModelInvocation(current.markRunning(T2));
+                      current = builtin(tx).lockModelInvocation(succeededModelId).orElseThrow();
+                      builtin(tx).updateModelInvocation(current.succeed(successResponse(), T3));
+                      current = builtin(tx).lockModelInvocation(succeededModelId).orElseThrow();
+                      builtin(tx)
+                          .updateModelInvocation(current.attachResultEntry(assistantEntryId, T3));
+                      return null;
+                    }));
+    // 内存与 PG 共享同一结构性禁令（TurnPathValidator）：COMPACTION 父 turn 的结果只能是 COMPACTION payload，
+    // 任何 ASSISTANT 结果（无论是否来自 ModelInvocation）都被确定性拒绝。
+    assertTrue(ex.getMessage().contains("compaction turns require a COMPACTION result"));
+
+    // 唯一合法路径：父回合自身直接写入 CompactionPayload（无 ModelInvocation）。
+    UUID resultEntryId = seedDurableCompletedCompactionTurn(result);
+    Entry stored = store.transaction(tx -> tx.findEntry(resultEntryId).orElseThrow());
+    assertEquals(result, stored.payload());
+  }
+
+  // ---- 待处理 ToolInvocation 分页与结果反查 ----
+
+  /**
+   * listPendingToolInvocations：只返回 WAITING_INPUT 与 WAITING_APPROVAL 状态的调用行， 严格按 (createdAt, id)
+   * 升序排列，并携带正确的 threadId 与 sessionId 投影。
+   */
+  @Test
+  void listPendingToolInvocationsReturnsOnlyWaitingInputAndWaitingApprovalRows() {
+    UUID assistantEntryId = seedAssistantAndModel();
+    // 1. 在当前 thread 上插入 3 个不同状态的调用
+    ToolInvocation toolWaitingInput =
+        new ToolInvocation(
+            TestIds.id(10),
+            baseline.threadId(),
+            baseline.turnStartEntryId(),
+            assistantEntryId,
+            0,
+            toolCall("call-1"),
+            hostBinding(),
+            ToolInvocationStatus.READY,
+            0,
+            null,
+            null,
+            null,
+            T1,
+            T1);
+    ToolInvocation toolWaitingApproval =
+        toolInvocation(
+            TestIds.id(11),
+            baseline.threadId(),
+            baseline.turnStartEntryId(),
+            assistantEntryId,
+            1,
+            "call-2",
+            ToolInvocationStatus.READY,
+            T2);
+    ToolInvocation toolReady =
+        toolInvocation(
+            TestIds.id(12),
+            baseline.threadId(),
+            baseline.turnStartEntryId(),
+            assistantEntryId,
+            2,
+            "call-3",
+            ToolInvocationStatus.READY,
+            T3);
+    inTransaction(
+        store,
+        tx -> tx.insertToolInvocations(List.of(toolWaitingInput, toolWaitingApproval, toolReady)));
+
+    updateTool(TestIds.id(10), tool -> tool.requestInput(T2));
+    updateTool(TestIds.id(11), tool -> tool.requestApproval("approval needed", T3));
+
+    // 2. 在第二个 session/thread 上插入一个更早创建的 WAITING_APPROVAL 调用
+    TurnBaseline baseline2 = seedTurnBaseline(store);
+    ModelRequestSpec requestSpec2 = succeededRequest();
+    ProviderResponse response2 = assistantResponse("call-1");
+    UUID userEntryId2 =
+        insertChildEntry(
+            store, baseline2.sessionId(), baseline2.turnStartEntryId(), userMessagePayload());
+    UUID assistantEntryId2 =
+        insertChildEntry(
+            store,
+            baseline2.sessionId(),
+            userEntryId2,
+            mappedAssistant(requestSpec2, response2, T0));
+    insertTerminalModel(
+        TestIds.id(2),
+        baseline2.threadId(),
+        baseline2.turnStartEntryId(),
+        baseline2.turnStartEntryId(),
+        ModelInvocationStatus.SUCCEEDED,
+        requestSpec2,
+        response2,
+        assistantEntryId2,
+        T0);
+    ToolInvocation tool2 =
+        toolInvocation(
+            TestIds.id(20),
+            baseline2.threadId(),
+            baseline2.turnStartEntryId(),
+            assistantEntryId2,
+            0,
+            "call-1",
+            ToolInvocationStatus.READY,
+            T0);
+    inTransaction(store, tx -> tx.insertToolInvocations(List.of(tool2)));
+    updateTool(TestIds.id(20), tool -> tool.requestApproval("approval needed on t2", T1));
+
+    // 3. 查询全量待处理：READY 的 toolReady(TestIds.id(12)) 必须被排除，按 (createdAt, id) 升序返回 3 条
+    List<PendingToolInvocationRow> rows =
+        store.transaction(tx -> tx.listPendingToolInvocations(Instant.EPOCH, TestIds.id(0), 10));
+    assertEquals(3, rows.size());
+
+    assertEquals(TestIds.id(20), rows.get(0).invocation().id());
+    assertEquals(baseline2.threadId(), rows.get(0).threadId());
+    assertEquals(baseline2.sessionId(), rows.get(0).sessionId());
+    assertEquals(ToolInvocationStatus.WAITING_APPROVAL, rows.get(0).invocation().status());
+    assertEquals(T0, rows.get(0).invocation().createdAt());
+
+    assertEquals(TestIds.id(10), rows.get(1).invocation().id());
+    assertEquals(baseline.threadId(), rows.get(1).threadId());
+    assertEquals(baseline.sessionId(), rows.get(1).sessionId());
+    assertEquals(ToolInvocationStatus.WAITING_INPUT, rows.get(1).invocation().status());
+    assertEquals(T1, rows.get(1).invocation().createdAt());
+
+    assertEquals(TestIds.id(11), rows.get(2).invocation().id());
+    assertEquals(baseline.threadId(), rows.get(2).threadId());
+    assertEquals(baseline.sessionId(), rows.get(2).sessionId());
+    assertEquals(ToolInvocationStatus.WAITING_APPROVAL, rows.get(2).invocation().status());
+    assertEquals(T2, rows.get(2).invocation().createdAt());
+  }
+
+  /**
+   * listPendingToolInvocations：游标 (afterCreatedAt, afterId) 是严格下界， 传入某行的精确 (createdAt, id)
+   * 时必须严格排除该行。
+   */
+  @Test
+  void listPendingToolInvocationsCursorIsStrictLowerBound() {
+    UUID assistantEntryId = seedAssistantAndModel();
+    // 插入 3 条 WAITING 状态的调用行（同 createdAt 与不同 createdAt 组合）
+    ToolInvocation tool1 =
+        new ToolInvocation(
+            TestIds.id(10),
+            baseline.threadId(),
+            baseline.turnStartEntryId(),
+            assistantEntryId,
+            0,
+            toolCall("call-1"),
+            hostBinding(),
+            ToolInvocationStatus.READY,
+            0,
+            null,
+            null,
+            null,
+            T1,
+            T1);
+    ToolInvocation tool2 =
+        toolInvocation(
+            TestIds.id(11),
+            baseline.threadId(),
+            baseline.turnStartEntryId(),
+            assistantEntryId,
+            1,
+            "call-2",
+            ToolInvocationStatus.READY,
+            T1);
+    ToolInvocation tool3 =
+        toolInvocation(
+            TestIds.id(12),
+            baseline.threadId(),
+            baseline.turnStartEntryId(),
+            assistantEntryId,
+            2,
+            "call-3",
+            ToolInvocationStatus.READY,
+            T2);
+    inTransaction(store, tx -> tx.insertToolInvocations(List.of(tool1, tool2, tool3)));
+    updateTool(TestIds.id(10), tool -> tool.requestInput(T2));
+    updateTool(TestIds.id(11), tool -> tool.requestApproval("approval 1", T2));
+    updateTool(TestIds.id(12), tool -> tool.requestApproval("approval 2", T3));
+
+    // 首屏返回 3 条：(T1, id10), (T1, id11), (T2, id12)
+    List<PendingToolInvocationRow> all =
+        store.transaction(tx -> tx.listPendingToolInvocations(Instant.EPOCH, TestIds.id(0), 10));
+    assertEquals(3, all.size());
+
+    // 以第一条 (T1, id10) 为游标：严格排除第一条，返回第二、第三条
+    List<PendingToolInvocationRow> afterFirst =
+        store.transaction(tx -> tx.listPendingToolInvocations(T1, TestIds.id(10), 10));
+    assertEquals(2, afterFirst.size());
+    assertEquals(TestIds.id(11), afterFirst.get(0).invocation().id());
+    assertEquals(TestIds.id(12), afterFirst.get(1).invocation().id());
+
+    // 以第二条 (T1, id11) 为游标：严格排除前两条，返回第三条
+    List<PendingToolInvocationRow> afterSecond =
+        store.transaction(tx -> tx.listPendingToolInvocations(T1, TestIds.id(11), 10));
+    assertEquals(1, afterSecond.size());
+    assertEquals(TestIds.id(12), afterSecond.get(0).invocation().id());
+
+    // 以第三条 (T2, id12) 为游标：返回空
+    List<PendingToolInvocationRow> afterThird =
+        store.transaction(tx -> tx.listPendingToolInvocations(T2, TestIds.id(12), 10));
+    assertTrue(afterThird.isEmpty());
+  }
+
+  /** listPendingToolInvocations：limit 参数截断结果数量且保持排序不变。 */
+  @Test
+  void listPendingToolInvocationsLimitTruncatesWithoutReordering() {
+    UUID assistantEntryId = seedAssistantAndModel();
+    ToolInvocation tool1 =
+        new ToolInvocation(
+            TestIds.id(10),
+            baseline.threadId(),
+            baseline.turnStartEntryId(),
+            assistantEntryId,
+            0,
+            toolCall("call-1"),
+            hostBinding(),
+            ToolInvocationStatus.READY,
+            0,
+            null,
+            null,
+            null,
+            T1,
+            T1);
+    ToolInvocation tool2 =
+        toolInvocation(
+            TestIds.id(11),
+            baseline.threadId(),
+            baseline.turnStartEntryId(),
+            assistantEntryId,
+            1,
+            "call-2",
+            ToolInvocationStatus.READY,
+            T2);
+    ToolInvocation tool3 =
+        toolInvocation(
+            TestIds.id(12),
+            baseline.threadId(),
+            baseline.turnStartEntryId(),
+            assistantEntryId,
+            2,
+            "call-3",
+            ToolInvocationStatus.READY,
+            T3);
+    inTransaction(store, tx -> tx.insertToolInvocations(List.of(tool1, tool2, tool3)));
+    updateTool(TestIds.id(10), tool -> tool.requestInput(T2));
+    updateTool(TestIds.id(11), tool -> tool.requestApproval("approval 1", T3));
+    updateTool(TestIds.id(12), tool -> tool.requestApproval("approval 2", T4));
+
+    List<PendingToolInvocationRow> limit1 =
+        store.transaction(tx -> tx.listPendingToolInvocations(Instant.EPOCH, TestIds.id(0), 1));
+    assertEquals(1, limit1.size());
+    assertEquals(TestIds.id(10), limit1.get(0).invocation().id());
+
+    List<PendingToolInvocationRow> limit2 =
+        store.transaction(tx -> tx.listPendingToolInvocations(Instant.EPOCH, TestIds.id(0), 2));
+    assertEquals(2, limit2.size());
+    assertEquals(TestIds.id(10), limit2.get(0).invocation().id());
+    assertEquals(TestIds.id(11), limit2.get(1).invocation().id());
+
+    List<PendingToolInvocationRow> limit3 =
+        store.transaction(tx -> tx.listPendingToolInvocations(Instant.EPOCH, TestIds.id(0), 3));
+    assertEquals(3, limit3.size());
+    assertEquals(TestIds.id(10), limit3.get(0).invocation().id());
+    assertEquals(TestIds.id(11), limit3.get(1).invocation().id());
+    assertEquals(TestIds.id(12), limit3.get(2).invocation().id());
+  }
+
+  /** listPendingToolInvocations：非法 limit（<= 0）与 null 游标参数抛出异常。 */
+  @Test
+  void listPendingToolInvocationsRejectsInvalidArguments() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            store.transaction(
+                tx -> tx.listPendingToolInvocations(Instant.EPOCH, TestIds.id(0), 0)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            store.transaction(
+                tx -> tx.listPendingToolInvocations(Instant.EPOCH, TestIds.id(0), -1)));
+    assertThrows(
+        NullPointerException.class,
+        () -> store.transaction(tx -> tx.listPendingToolInvocations(null, TestIds.id(0), 10)));
+    assertThrows(
+        NullPointerException.class,
+        () -> store.transaction(tx -> tx.listPendingToolInvocations(Instant.EPOCH, null, 10)));
+  }
+
+  /**
+   * findToolResultEntryByInvocationId：当 session 内存在携带真实 invocationId 的 TOOL 结果 Entry 时，返回该 Entry。
+   */
+  @Test
+  void findToolResultEntryByInvocationIdReturnsMatchingEntry() {
+    UUID assistantEntryId = seedAssistantAndModel();
+    UUID toolInvocationId = TestIds.id(10);
+    UUID toolResultEntryId =
+        insertChildEntry(
+            store,
+            baseline.sessionId(),
+            assistantEntryId,
+            toolResultPayload(
+                toolInvocationId, assistantEntryId, 0, "call-1", ToolResultStatus.SUCCEEDED));
+
+    Optional<Entry> found =
+        store.transaction(
+            tx -> tx.findToolResultEntryByInvocationId(baseline.sessionId(), toolInvocationId));
+    assertTrue(found.isPresent());
+    assertEquals(toolResultEntryId, found.get().id());
+    assertEquals(baseline.sessionId(), found.get().sessionId());
+    assertTrue(found.get().payload() instanceof MessagePayload);
+    MessagePayload message = (MessagePayload) found.get().payload();
+    assertNotNull(message.toolResultMetadata());
+    assertEquals(toolInvocationId, message.toolResultMetadata().invocationId());
+  }
+
+  /**
+   * findToolResultEntryByInvocationId：合成（synthetic）ToolResult Entry 不携带 invocationId，反查返回 empty；未知的
+   * invocationId 也返回 empty。
+   */
+  @Test
+  void findToolResultEntryByInvocationIdReturnsEmptyForSyntheticOrUnknownInvocation() {
+    UUID assistantEntryId = seedAssistantAndModel();
+    insertChildEntry(
+        store,
+        baseline.sessionId(),
+        assistantEntryId,
+        syntheticToolResultPayload(assistantEntryId, 0, "call-1"));
+
+    // 合成 Entry 不携带 invocationId，反查任意 ID 都应返回 empty
+    Optional<Entry> syntheticSearch =
+        store.transaction(
+            tx -> tx.findToolResultEntryByInvocationId(baseline.sessionId(), TestIds.id(10)));
+    assertTrue(syntheticSearch.isEmpty());
+
+    // 未知 invocationId 返回 empty
+    Optional<Entry> unknownSearch =
+        store.transaction(
+            tx -> tx.findToolResultEntryByInvocationId(baseline.sessionId(), TestIds.id(999)));
+    assertTrue(unknownSearch.isEmpty());
+  }
+
+  /** findToolResultEntryByInvocationId：在其他 Session 查询相同 invocationId 返回 empty（Session 间严格隔离）。 */
+  @Test
+  void findToolResultEntryByInvocationIdReturnsEmptyForDifferentSession() {
+    UUID assistantEntryId = seedAssistantAndModel();
+    UUID toolInvocationId = TestIds.id(10);
+    insertChildEntry(
+        store,
+        baseline.sessionId(),
+        assistantEntryId,
+        toolResultPayload(
+            toolInvocationId, assistantEntryId, 0, "call-1", ToolResultStatus.SUCCEEDED));
+
+    // 第二个 session
+    TurnBaseline baseline2 = seedTurnBaseline(store);
+    Optional<Entry> foundInOtherSession =
+        store.transaction(
+            tx -> tx.findToolResultEntryByInvocationId(baseline2.sessionId(), toolInvocationId));
+    assertTrue(foundInOtherSession.isEmpty());
+  }
+}

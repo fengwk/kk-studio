@@ -78,11 +78,13 @@ function threadSnapshot(cursor: Cursor, entries: unknown[] = []) {
       },
       entries,
       queuedCommands: [],
-      modelInvocation: null,
+      executionStatus: 'IDLE',
+      activeAssistantOutput: null,
       toolInvocations: [],
-      modelAttemptFailures: [],
+      generationFailures: [],
       manualCompaction: { available: false, disabledReason: null },
       stopReceipts: [],
+      unconfirmedExecutions: [],
     },
   }
 }
@@ -137,6 +139,8 @@ function modelRequestDebug(draft?: DebugRequest['body']) {
       planningError: null,
       frozenInvocation: {
         kind: 'FROZEN_INVOCATION',
+        generationId: 'generation-1',
+        attempt: 1,
         requestJson: JSON.stringify({ model: 'minimax-m2.7', messages: [] }, null, 2),
       },
     },

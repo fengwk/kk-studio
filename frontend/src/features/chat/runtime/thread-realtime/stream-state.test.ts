@@ -1,14 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import {
-  isFailedAttempt,
+  isFailedGeneration,
   isRealtimeModelDeltaGap,
+  isTerminalAssistantOutputStatus,
   mergeRealtimeModelStreamAfterCheckpoint,
   parseRealtimeModelCheckpoint,
   parseRealtimeModelDelta,
-  parseStreamCheckpoint,
   reduceRealtimeModelStream,
   snapshotModelStream,
 } from '@/features/chat/runtime/thread-realtime/model-stream'
+import {
+  isActiveModelGeneration,
+} from '@/features/chat/runtime/thread-realtime/model-recovery'
 import {
   boundProcessOutputText,
   isProcessOutputPartial,
@@ -26,8 +29,9 @@ import type {
   RealtimeToolStream,
 } from '@/features/chat/runtime/thread-realtime/tool-stream'
 import type {
-  ModelAttemptFailureDTO,
-  ModelInvocationDTO,
+  HarnessActiveAssistantOutputDTO,
+  HarnessAgentMessageContentDTO,
+  HarnessGenerationFailureDTO,
   ToolInvocationDTO,
 } from '@/shared/api/generated/contracts'
 
@@ -194,27 +198,6 @@ describe('thread realtime state', () => {
     }])
   })
 
-  it('mirrors the Java checkpoint codec: nullable string-only text/thinking with one non-empty', () => {
-    expect(
-      parseStreamCheckpoint('{"attempt":1,"sequence":0,"text":null,"thinking":"x"}'),
-    ).toEqual({ attempt: 1, sequence: 0, text: '', thinking: 'x' })
-    expect(
-      parseStreamCheckpoint('{"attempt":1,"sequence":0,"text":"y","thinking":null}'),
-    ).toEqual({ attempt: 1, sequence: 0, text: 'y', thinking: '' })
-    // 与 Java record 构造函数一致：只有两侧均为空才拒绝，纯空白合法且不裁剪。
-    expect(parseStreamCheckpoint('{"attempt":1,"sequence":0,"text":null,"thinking":null}')).toBeNull()
-    expect(
-      parseStreamCheckpoint('{"attempt":1,"sequence":0,"text":"  ","thinking":""}'),
-    ).toEqual({ attempt: 1, sequence: 0, text: '  ', thinking: '' })
-    // 非字符串类型视为格式错误（nullableText 拒绝数字/对象），不会取默认值。
-    expect(parseStreamCheckpoint('{"attempt":1,"sequence":0,"text":5,"thinking":"x"}')).toBeNull()
-    expect(parseStreamCheckpoint('{"attempt":1,"sequence":0,"text":null,"thinking":{"a":1}}')).toBeNull()
-    expect(parseStreamCheckpoint('{"attempt":1,"sequence":0,"text":[],"thinking":"x"}')).toBeNull()
-    // attempt/sequence 校验保持严格。
-    expect(parseStreamCheckpoint('{"attempt":0,"sequence":0,"text":"x","thinking":null}')).toBeNull()
-    expect(parseStreamCheckpoint('{"attempt":1,"sequence":-1,"text":"x","thinking":null}')).toBeNull()
-  })
-
   it('parses only strict TOOL_PARTIAL envelopes into their canonical payload', () => {
     const partial = parseRealtimeToolPartial(toolPartialEvent({
       threadId: '7',
@@ -272,48 +255,11 @@ describe('thread realtime state', () => {
     expect(parseRealtimeToolPartial(JSON.stringify({ ...base, eventId: 'A0000000-0000-4000-8000-000000000001' }))).toBeNull()
   })
 
-  it('rejects stream checkpoints that are absent, unparsable, or non-record', () => {
-    expect(parseStreamCheckpoint(null)).toBeNull()
-    expect(parseStreamCheckpoint('')).toBeNull()
-    expect(parseStreamCheckpoint('not-json')).toBeNull()
-    expect(parseStreamCheckpoint('[]')).toBeNull()
-    expect(parseStreamCheckpoint('"str"')).toBeNull()
-    // 非安全整数的 attempt/sequence 与负数 sequence 都被拒绝。
-    expect(
-      parseStreamCheckpoint('{"attempt":1.5,"sequence":0,"text":"x","thinking":null}'),
-    ).toBeNull()
-    expect(
-      parseStreamCheckpoint('{"attempt":1,"sequence":0.5,"text":"x","thinking":null}'),
-    ).toBeNull()
-  })
-
-  it('uses the invocation attempt for the empty base and tolerates stale checkpoint attempts', () => {
-    const invocation = {
-      id: 'inv-1',
-      threadId: '7',
-      turnStartEntryId: '1',
-      requestHeadEntryId: '1',
-      status: 'RUNNING',
-      attempt: 3,
-      streamCheckpointJson: '{"attempt":2,"sequence":5,"text":"stale","thinking":null}',
-      resultJson: null,
-      errorJson: null,
-      resultEntryId: null,
-      createTime: 1785232800,
-      updateTime: 1785232800,
-    }
-    expect(snapshotModelStream('7', invocation)).toMatchObject({
-      attempt: 3,
-      sequence: 0,
-      text: '',
-      thinking: '',
-    })
-  })
-
   it('projects terminal tool resultJson/errorJson while the durable result Entry is pending', () => {
     const base: ToolInvocationDTO = {
       id: 'inv-t',
-      modelInvocationId: 'inv-1',
+      threadId: 'thread-1',
+      turnStartEntryId: 'turn-1',
       assistantEntryId: 'e-1',
       callIndex: 0,
       status: 'RUNNING',
@@ -383,7 +329,8 @@ describe('thread realtime state', () => {
   it('projects managed resources and tolerates invalid terminal payloads for tools', () => {
     const base: ToolInvocationDTO = {
       id: 'inv-t2',
-      modelInvocationId: 'inv-1',
+      threadId: 'thread-1',
+      turnStartEntryId: 'turn-1',
       assistantEntryId: 'e-1',
       callIndex: 0,
       status: 'RUNNING',
@@ -468,204 +415,102 @@ describe('thread realtime state', () => {
     expect(stream.text).toBe('one')
   })
 
-  it('restores the stream from the single snapshot ModelInvocation checkpoint', () => {
-    const invocation = {
-      id: '9007199254740995',
-      threadId: '7',
-      turnStartEntryId: '1',
-      requestHeadEntryId: '2',
-      status: 'RUNNING',
-      attempt: 1,
-      streamCheckpointJson: '{"attempt":1,"text":"new","thinking":"","sequence":2}',
-      resultJson: null,
-      errorJson: null,
-      resultEntryId: null,
-      createTime: 1785232800,
-      updateTime: 1785232800,
-    }
-    const stream = snapshotModelStream('7', invocation)
-
-    expect(stream).toMatchObject({
-      invocationId: '9007199254740995',
-      text: 'new',
-      sequence: 2,
-    })
-    // 非法的 checkpoint JSON 视为不存在 -> RUNNING 保持空 base，确保
-    // 第一条 realtime delta 不会丢失（checkpoint flush 不会提升 version）。
-    expect(snapshotModelStream('7', { ...invocation, streamCheckpointJson: 'not-json' })).toMatchObject({
-      attempt: 1,
-      sequence: 0,
-      text: '',
-      thinking: '',
-    })
-    // 终止态结果但没有 resultEntryId：完整的持久 result 投影会替换
-    // overlay（status 'done'）并一直保留，直到 resultEntryId 被设置。
-    expect(
-      snapshotModelStream('7', {
-        ...invocation,
-        resultJson:
-          '{"text":"new","thinking":"","toolCalls":[],"stopReason":"stop","usage":{},"cost":{}}',
-      }),
-    ).toMatchObject({
-      attempt: 1,
-      sequence: 2,
-      text: 'new',
-      status: 'done',
-    })
-    expect(
-      snapshotModelStream('7', {
-        ...invocation,
-        resultJson: null,
-        errorJson: '{"kind":"INVALID_REQUEST","message":"terminal failure"}',
-      }),
-    ).toMatchObject({
-      attempt: 1,
-      sequence: 2,
-      text: 'new',
-      thinking: '',
-      status: 'error',
-      errorCode: 'INVALID_REQUEST',
-      errorText: 'terminal failure',
-    })
-    // 设置 resultEntryId 后：持久 Entry 才是 transcript 的真实来源。
-    expect(
-      snapshotModelStream('7', {
-        ...invocation,
-        resultJson: '{"text":"new","thinking":""}',
-        resultEntryId: '9',
-      }),
-    ).toBeNull()
-  })
-
-  it('returns no model overlay for a missing or foreign-thread invocation', () => {
-    const invocation: ModelInvocationDTO = {
-      id: 'inv-1',
-      threadId: '7',
-      turnStartEntryId: '1',
-      requestHeadEntryId: '1',
-      status: 'RUNNING',
-      attempt: 1,
-      streamCheckpointJson: null,
-      resultJson: null,
-      errorJson: null,
-      resultEntryId: null,
-      createTime: 1785232800,
-      updateTime: 1785232800,
-    }
-    expect(snapshotModelStream('7', null)).toBeNull()
-    expect(snapshotModelStream('other', invocation)).toBeNull()
-  })
-
-  it('keeps frozen checkpoint text when the durable result payload is malformed', () => {
-    const invocation: ModelInvocationDTO = {
-      id: 'inv-1',
-      threadId: '7',
-      turnStartEntryId: '1',
-      requestHeadEntryId: '1',
-      status: 'RUNNING',
-      attempt: 1,
-      streamCheckpointJson: '{"attempt":1,"text":"frozen","thinking":"plan","sequence":4}',
-      resultJson: '[not-json',
-      errorJson: null,
-      resultEntryId: null,
-      createTime: 1785232800,
-      updateTime: 1785232800,
-    }
-    // result payload 非法时回退到冻结的 checkpoint，绝不是空或仅有 lossy realtime delta 的片段。
-    expect(snapshotModelStream('7', invocation)).toMatchObject({
-      attempt: 1,
-      sequence: 4,
-      text: 'frozen',
-      thinking: 'plan',
-      status: 'done',
-      toolCalls: [],
-    })
-  })
-
-  it('projects complete tool calls from a durable result and ignores malformed entries', () => {
-    const invocation: ModelInvocationDTO = {
-      id: 'inv-1',
-      threadId: '7',
-      turnStartEntryId: '1',
-      requestHeadEntryId: '1',
-      status: 'RUNNING',
-      attempt: 2,
-      streamCheckpointJson: null,
-      resultJson: JSON.stringify({
-        text: 'done',
-        thinking: '',
-        toolCalls: [
-          { id: 'call-1', name: 'read', argumentsJson: '{"path":"a"}' },
-          { id: 'call-2', name: 'bash', argumentsJson: '{"command":"ls"}' },
-          // 缺少 id/name/arguments 的畸形条目被丢弃。
-          { id: 'call-3', name: 'write', argumentsJson: null },
+  describe('active assistant output projection', () => {
+    it('concatenates ordered text/thinking contents into the model overlay', () => {
+      // contents 按服务端顺序拼接：text 与 thinking 各自累积，null 片段视为空文本。
+      const stream = snapshotModelStream('7', activeOutput({
+        sequence: '2',
+        contents: [
+          content('text', 'new'),
+          content('thinking', 'plan'),
+          content('text', null),
+          content('text', 'er'),
         ],
-        stopReason: 'stop',
-        usage: {},
-        cost: {},
-      }),
-      errorJson: null,
-      resultEntryId: null,
-      createTime: 1785232800,
-      updateTime: 1785232800,
-    }
-    // 终止态 result 投影中的 toolCalls 使用条目自身的 index（数组下标）。
-    expect(snapshotModelStream('7', invocation)).toMatchObject({
-      attempt: 2,
-      status: 'done',
-      text: 'done',
-      toolCalls: [
-        { index: 0, id: 'call-1', name: 'read', argumentsJson: '{"path":"a"}' },
-        { index: 1, id: 'call-2', name: 'bash', argumentsJson: '{"command":"ls"}' },
-        // 只有全部字段为空才丢弃；argumentsJson 缺失会规范化为空串保留。
-        { index: 2, id: 'call-3', name: 'write', argumentsJson: '' },
-      ],
+      }))
+
+      expect(stream).toMatchObject({
+        threadId: '7',
+        invocationId: 'gen-1',
+        attempt: 1,
+        sequence: 2,
+        text: 'newer',
+        thinking: 'plan',
+        // 公共快照不携带 Provider toolCalls：tool 调用只来自 realtime TOOL_CALL_DELTA。
+        toolCalls: [],
+        status: 'streaming',
+        createdAt: '',
+      })
+    })
+
+    it('converts only canonical non-negative decimal sequences', () => {
+      expect(snapshotModelStream('7', activeOutput({ sequence: '0' }))?.sequence).toBe(0)
+      expect(snapshotModelStream('7', activeOutput({ sequence: '12' }))?.sequence).toBe(12)
+      // 非 canonical 写法（前导零、负数、小数、空串）一律拒绝。
+      expect(snapshotModelStream('7', activeOutput({ sequence: '01' }))).toBeNull()
+      expect(snapshotModelStream('7', activeOutput({ sequence: '-1' }))).toBeNull()
+      expect(snapshotModelStream('7', activeOutput({ sequence: '1.5' }))).toBeNull()
+      expect(snapshotModelStream('7', activeOutput({ sequence: '' }))).toBeNull()
+      // 超出安全整数范围的 canonical 十进制字符串同样拒绝。
+      expect(snapshotModelStream('7', activeOutput({ sequence: '9007199254740992' }))).toBeNull()
+    })
+
+    it('maps the typed output status onto the overlay status', () => {
+      expect(snapshotModelStream('7', activeOutput({ status: 'SUCCEEDED' }))?.status).toBe('done')
+      expect(snapshotModelStream('7', activeOutput({ status: 'FAILED' }))?.status).toBe('error')
+      expect(snapshotModelStream('7', activeOutput({ status: 'CANCELLED' }))?.status).toBe('error')
+      expect(snapshotModelStream('7', activeOutput({ status: 'BLOCKED' }))?.status).toBe('error')
+      expect(snapshotModelStream('7', activeOutput({ status: 'READY' }))?.status).toBe('streaming')
+      expect(snapshotModelStream('7', activeOutput({ status: 'RUNNING' }))?.status).toBe('streaming')
+      expect(snapshotModelStream('7', activeOutput({ status: 'WAITING_RETRY' }))?.status).toBe('streaming')
+    })
+
+    it('projects the typed terminal error fields only for failed statuses', () => {
+      expect(
+        snapshotModelStream('7', activeOutput({
+          status: 'FAILED',
+          error: { code: 'INVALID_REQUEST', message: 'provider exploded' },
+        })),
+      ).toMatchObject({
+        status: 'error',
+        errorCode: 'INVALID_REQUEST',
+        errorText: 'provider exploded',
+      })
+      // 终止态没有 error：错误字段保持 undefined。
+      const cancelled = snapshotModelStream('7', activeOutput({ status: 'CANCELLED' }))
+      expect(cancelled?.errorCode).toBeUndefined()
+      expect(cancelled?.errorText).toBeUndefined()
+      // 非终止态即使携带 error 也不暴露错误字段。
+      const running = snapshotModelStream('7', activeOutput({
+        status: 'RUNNING',
+        error: { code: 'INVALID_REQUEST', message: 'provider exploded' },
+      }))
+      expect(running?.errorCode).toBeUndefined()
+      expect(running?.errorText).toBeUndefined()
+    })
+
+    it('drops the overlay once the durable result entry is attached', () => {
+      // resultEntryId 到达后由 durable Entry 接管：公共投影立即消失。
+      expect(
+        snapshotModelStream('7', activeOutput({
+          status: 'SUCCEEDED',
+          resultEntryId: 'entry-9',
+          contents: [content('text', 'durable')],
+        })),
+      ).toBeNull()
     })
   })
 
-  it('keeps frozen checkpoint text when the durable result payload is malformed', () => {
-    const invocation: ModelInvocationDTO = {
-      id: 'inv-1',
-      threadId: '7',
-      turnStartEntryId: '1',
-      requestHeadEntryId: '1',
-      status: 'RUNNING',
-      attempt: 1,
-      streamCheckpointJson: '{"attempt":1,"text":"frozen","thinking":"plan","sequence":4}',
-      resultJson: '[not-json',
-      errorJson: null,
-      resultEntryId: null,
-      createTime: 1785232800,
-      updateTime: 1785232800,
-    }
-    // result payload 非法时回退到冻结的 checkpoint，绝不是空或仅有 lossy realtime delta 的片段。
-    expect(snapshotModelStream('7', invocation)).toMatchObject({
-      attempt: 1,
-      sequence: 4,
-      text: 'frozen',
-      thinking: 'plan',
-      status: 'done',
-      toolCalls: [],
-    })
+  it('returns no model overlay without a usable active assistant output', () => {
+    expect(snapshotModelStream('7', null)).toBeNull()
+    // generationId 为空白或 attempt 非法时不存在可投影的公共输出。
+    expect(snapshotModelStream('7', activeOutput({ generationId: ' ' }))).toBeNull()
+    expect(snapshotModelStream('7', activeOutput({ attempt: -1 }))).toBeNull()
+    expect(snapshotModelStream('7', activeOutput({ attempt: 1.5 }))).toBeNull()
   })
 
-  it('keeps an empty streaming base when checkpoint json is blank and no terminal payload exists', () => {
-    const invocation: ModelInvocationDTO = {
-      id: 'inv-1',
-      threadId: '7',
-      turnStartEntryId: '1',
-      requestHeadEntryId: '1',
-      status: 'RUNNING',
-      attempt: 1,
-      streamCheckpointJson: '',
-      resultJson: '',
-      errorJson: ' ',
-      resultEntryId: null,
-      createTime: 1785232800,
-      updateTime: 1785232800,
-    }
-    // 空白的 result/error 不算终止态；空 base 保证第一条 realtime delta 不丢失。
-    expect(snapshotModelStream('7', invocation)).toMatchObject({
+  it('keeps an empty streaming base until the typed output has finished contents', () => {
+    // 还没有已完成片段时保持空 base（sequence 0），保证第一条 realtime delta 不丢失。
+    expect(snapshotModelStream('7', activeOutput())).toMatchObject({
       attempt: 1,
       sequence: 0,
       text: '',
@@ -934,92 +779,19 @@ describe('thread realtime state', () => {
     ])
   })
 
-  it('returns the invocation-attempt base and strict checkpoint error paths', () => {
-    const baseInvocation = (overrides: Partial<ModelInvocationDTO> = {}): ModelInvocationDTO => ({
-      id: 'inv-1',
-      threadId: '7',
-      turnStartEntryId: '1',
-      requestHeadEntryId: '1',
-      status: 'RUNNING',
-      attempt: 1,
-      streamCheckpointJson: null,
-      resultJson: null,
-      errorJson: null,
-      resultEntryId: null,
-      createTime: 1785232800,
-      updateTime: 1785232800,
-      ...overrides,
-    })
+  it('projects the active attempt and leaves the HTTP snapshot free of stream event time', () => {
     // HTTP 快照不携带流事件时间：createdAt 留空，由之后的实时事件按自身时间排序。
-    expect(snapshotModelStream('7', baseInvocation())).toMatchObject({
-      attempt: 1,
+    expect(snapshotModelStream('7', activeOutput({ attempt: 3 }))).toMatchObject({
+      invocationId: 'gen-1',
+      attempt: 3,
       sequence: 0,
       text: '',
       thinking: '',
       createdAt: '',
     })
-    // 合法的非终止 error payload：kind/message 均缺失时，errorCode 留空，
-    // errorText 回退到原始 JSON（parseToolErrorText 的 fallback 分支）。
-    expect(
-      snapshotModelStream('7', baseInvocation({ errorJson: '{"foo":"bar"}' })),
-    ).toMatchObject({
-      status: 'error',
-      errorCode: undefined,
-      errorText: '{"foo":"bar"}',
-    })
   })
 
-  it('tolerates malformed terminal result/error payloads and non-record contents', () => {
-    const baseInvocation = (overrides: Partial<ModelInvocationDTO> = {}): ModelInvocationDTO => ({
-      id: 'inv-1',
-      threadId: '7',
-      turnStartEntryId: '1',
-      requestHeadEntryId: '1',
-      status: 'RUNNING',
-      attempt: 1,
-      streamCheckpointJson: '{"attempt":1,"text":"frozen","thinking":"plan","sequence":4}',
-      resultJson: null,
-      errorJson: null,
-      resultEntryId: null,
-      createTime: 1785232800,
-      updateTime: 1785232800,
-      ...overrides,
-    })
-    // 终止态 result 的 JSON 是数组（非 record）：整体视为格式错误，回退冻结 checkpoint。
-    expect(
-      snapshotModelStream('7', baseInvocation({ resultJson: '[1]' })),
-    ).toMatchObject({ text: 'frozen', thinking: 'plan', status: 'done' })
-    // result toolCalls 含非 record 条目与全空条目：非 record 跳过、全空条目丢弃。
-    expect(
-      snapshotModelStream('7', baseInvocation({
-        resultJson: JSON.stringify({
-          text: 'done',
-          thinking: '',
-          toolCalls: [null, { id: '', name: '', argumentsJson: '' }, { id: 'c', name: 'r', argumentsJson: '{}' }],
-        }),
-      })),
-    ).toMatchObject({
-      text: 'done',
-      toolCalls: [{ index: 2, id: 'c', name: 'r', argumentsJson: '{}' }],
-    })
-    // result toolCalls 不是数组：整体按空数组处理（parseCompletedToolCalls 非数组分支）。
-    expect(
-      snapshotModelStream('7', baseInvocation({
-        resultJson: JSON.stringify({ text: 'x', thinking: '', toolCalls: 'nope' }),
-      })),
-    ).toMatchObject({ text: 'x', toolCalls: [] })
-    // error payload 是数组：解析为 null，errorText 回退到原始 JSON。
-    expect(
-      snapshotModelStream('7', baseInvocation({ errorJson: '[1]' })),
-    ).toMatchObject({ status: 'error', errorText: '[1]' })
-    // error payload 是合法 record 但 message 为空：解析失败，同样回退原始 JSON。
-    expect(
-      snapshotModelStream('7', baseInvocation({ errorJson: '{"kind":"X","message":" "}' })),
-    ).toMatchObject({ status: 'error', errorCode: undefined, errorText: '{"kind":"X","message":" "}' })
-    // 非法 JSON 的 error payload：JSON.parse 抛错，回退原始 JSON。
-    expect(
-      snapshotModelStream('7', baseInvocation({ errorJson: 'not-json' })),
-    ).toMatchObject({ status: 'error', errorCode: undefined, errorText: 'not-json' })
+  it('tolerates malformed tool result/error payloads and non-record contents', () => {
     // tool resultJson 是数组：非 record 回退为空文本 base（error 保持 false）。
     expect(
       snapshotToolStream(
@@ -1079,7 +851,8 @@ describe('thread realtime state', () => {
   it('accepts a tool overlay only for the matching invocation attempt', () => {
     const invocation = (attempt: number) => ({
       id: 'inv-t',
-      modelInvocationId: 'inv-1',
+      threadId: 'thread-1',
+      turnStartEntryId: 'turn-1',
       assistantEntryId: 'e-1',
       callIndex: 0,
       status: 'RUNNING',
@@ -1114,24 +887,10 @@ describe('thread realtime state', () => {
     expect(isRealtimeToolStreamActive(overlay, null)).toBe(false)
   })
 
-  it('checks if an attempt was recorded as failed for the current invocation', () => {
-    // 验证 isFailedAttempt 精确按 modelInvocationId + attempt 匹配，不误伤其他 invocation 或未失败 attempt
-    const invocation: ModelInvocationDTO = {
-      id: 'inv-1',
-      threadId: '7',
-      turnStartEntryId: 'entry-1',
-      requestHeadEntryId: 'entry-1',
-      status: 'READY',
-      attempt: 1,
-      streamCheckpointJson: null,
-      resultJson: null,
-      errorJson: null,
-      resultEntryId: null,
-      createTime: 1785232800,
-      updateTime: 1785232800,
-    }
-    const failureForCurrent: ModelAttemptFailureDTO = {
-      modelInvocationId: 'inv-1',
+  it('matches failed generations by generation id and attempt', () => {
+    // 验证 isFailedGeneration 精确按 generationId + attempt 匹配，不误伤其他 generation 或未失败 attempt
+    const failureForCurrent: HarnessGenerationFailureDTO = {
+      generationId: 'gen-1',
       turnStartEntryId: 'entry-1',
       requestHeadEntryId: 'entry-1',
       attempt: 1,
@@ -1143,23 +902,54 @@ describe('thread realtime state', () => {
       failedAt: 1785232801,
       retryAt: 1785232803,
     }
-    const failureForOther: ModelAttemptFailureDTO = {
+    const failureForOther: HarnessGenerationFailureDTO = {
       ...failureForCurrent,
-      modelInvocationId: 'inv-other',
+      generationId: 'gen-other',
       attempt: 1,
     }
 
-    // 1. 匹配当前 invocation 的失败 attempt
-    expect(isFailedAttempt(1, invocation, [failureForCurrent])).toBe(true)
-    // 2. 跨 invocation failure 不误判
-    expect(isFailedAttempt(1, invocation, [failureForOther])).toBe(false)
-    // 3. 当前 invocation 的其他 attempt（未记录失败）不被拦截
-    expect(isFailedAttempt(2, invocation, [failureForCurrent])).toBe(false)
-    // 4. invocation 为 null 或 attempt 非正整数时的安全边界
-    expect(isFailedAttempt(1, null, [failureForCurrent])).toBe(false)
-    expect(isFailedAttempt(0, invocation, [failureForCurrent])).toBe(false)
-    expect(isFailedAttempt(-1, invocation, [failureForCurrent])).toBe(false)
-    expect(isFailedAttempt(1, invocation, [])).toBe(false)
+    // 1. 匹配当前 generation 的失败 attempt
+    expect(isFailedGeneration('gen-1', 1, [failureForCurrent])).toBe(true)
+    // 2. 跨 generation failure 不误判
+    expect(isFailedGeneration('gen-1', 1, [failureForOther])).toBe(false)
+    // 3. 当前 generation 的其他 attempt（未记录失败）不被拦截
+    expect(isFailedGeneration('gen-1', 2, [failureForCurrent])).toBe(false)
+    // 4. generationId 缺失或 attempt 非正整数时的安全边界
+    expect(isFailedGeneration(null, 1, [failureForCurrent])).toBe(false)
+    expect(isFailedGeneration('', 1, [failureForCurrent])).toBe(false)
+    expect(isFailedGeneration('gen-1', 0, [failureForCurrent])).toBe(false)
+    expect(isFailedGeneration('gen-1', -1, [failureForCurrent])).toBe(false)
+    expect(isFailedGeneration('gen-1', 1, [])).toBe(false)
+  })
+
+  it('classifies the frozen assistant output statuses', () => {
+    expect(isTerminalAssistantOutputStatus('SUCCEEDED')).toBe(true)
+    expect(isTerminalAssistantOutputStatus('FAILED')).toBe(true)
+    expect(isTerminalAssistantOutputStatus('CANCELLED')).toBe(true)
+    expect(isTerminalAssistantOutputStatus('BLOCKED')).toBe(true)
+    expect(isTerminalAssistantOutputStatus('READY')).toBe(false)
+    expect(isTerminalAssistantOutputStatus('RUNNING')).toBe(false)
+    expect(isTerminalAssistantOutputStatus('WAITING_RETRY')).toBe(false)
+  })
+
+  it('accepts only a live, unfrozen generation attempt as active', () => {
+    // 其它 generation 的失败记录不影响当前 generation。
+    const otherFailure = generationFailure(1, 'gen-other')
+    // 活跃 attempt：generationId 与 attempt 都匹配，且尚未进入终态。
+    expect(isActiveModelGeneration(activeOutput(), 'gen-1', 1, [otherFailure])).toBe(true)
+    // 终态状态拒绝一切迟到 delta。
+    expect(isActiveModelGeneration(activeOutput({ status: 'SUCCEEDED' }), 'gen-1', 1, [otherFailure])).toBe(false)
+    expect(isActiveModelGeneration(activeOutput({ status: 'FAILED' }), 'gen-1', 1, [otherFailure])).toBe(false)
+    expect(isActiveModelGeneration(activeOutput({ status: 'CANCELLED' }), 'gen-1', 1, [otherFailure])).toBe(false)
+    expect(isActiveModelGeneration(activeOutput({ status: 'BLOCKED' }), 'gen-1', 1, [otherFailure])).toBe(false)
+    // resultEntryId 挂接后由 durable Entry 接管，不再接受实时 delta。
+    expect(isActiveModelGeneration(activeOutput({ resultEntryId: 'entry-9' }), 'gen-1', 1, [otherFailure])).toBe(false)
+    // 已记录失败的 attempt 不再是活跃 generation。
+    expect(isActiveModelGeneration(activeOutput(), 'gen-1', 1, [generationFailure(1, 'gen-1')])).toBe(false)
+    // generationId 或 attempt 不匹配时同样不是活跃 generation。
+    expect(isActiveModelGeneration(activeOutput(), 'gen-other', 1, [otherFailure])).toBe(false)
+    expect(isActiveModelGeneration(activeOutput(), 'gen-1', 2, [otherFailure])).toBe(false)
+    expect(isActiveModelGeneration(null, 'gen-1', 1, [otherFailure])).toBe(false)
   })
 
   describe('process.output bounded real-time stream', () => {
@@ -1894,7 +1684,8 @@ function toolPartialEvent({
 function toolInvocation(overrides: Partial<ToolInvocationDTO> = {}): ToolInvocationDTO {
   return {
     id: 'inv-t',
-    modelInvocationId: 'inv-1',
+    threadId: 'thread-1',
+    turnStartEntryId: 'turn-1',
     assistantEntryId: 'e-1',
     callIndex: 0,
     status: 'RUNNING',
@@ -1914,5 +1705,54 @@ function toolInvocation(overrides: Partial<ToolInvocationDTO> = {}): ToolInvocat
     createTime: 1785232800,
     updateTime: 1785232800,
     ...overrides,
+  }
+}
+
+/** 公共 active assistant output 夹具：默认是一个尚无输出的 RUNNING generation。 */
+function activeOutput(
+  overrides: Partial<HarnessActiveAssistantOutputDTO> = {},
+): HarnessActiveAssistantOutputDTO {
+  return {
+    generationId: 'gen-1',
+    turnStartEntryId: 'entry-1',
+    requestHeadEntryId: 'entry-1',
+    status: 'RUNNING',
+    attempt: 1,
+    sequence: '0',
+    contents: [],
+    error: null,
+    resultEntryId: null,
+    createTime: 1785232800,
+    updateTime: 1785232800,
+    ...overrides,
+  }
+}
+
+/** 已完成的 text/thinking 片段夹具。 */
+function content(
+  type: 'text' | 'thinking',
+  text: string | null,
+): HarnessAgentMessageContentDTO {
+  return { type, text }
+}
+
+/** generation 的 failed attempt 审计夹具。 */
+function generationFailure(
+  attempt = 1,
+  generationId = 'gen-1',
+  sequence = '2',
+): HarnessGenerationFailureDTO {
+  return {
+    generationId,
+    turnStartEntryId: 'entry-1',
+    requestHeadEntryId: 'entry-1',
+    attempt,
+    sequence,
+    text: 'partial',
+    thinking: '',
+    errorCode: 'TRANSIENT',
+    errorMessage: 'failure',
+    failedAt: 1785232801,
+    retryAt: 1785232803,
   }
 }

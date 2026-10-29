@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.platform.catalog.provider;
 
 import lombok.Builder;
 
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 
 import java.time.Instant;
 import java.util.UUID;

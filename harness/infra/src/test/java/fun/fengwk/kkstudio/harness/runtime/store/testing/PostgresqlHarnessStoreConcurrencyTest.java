@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.BuiltinTestTransactions.builtin;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T1;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T2;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.assistantResponse;
@@ -430,15 +431,16 @@ class PostgresqlHarnessStoreConcurrencyTest {
         store,
         tx -> {
           tx.lockThread(baseline.threadId()).orElseThrow();
-          tx.insertModelInvocation(
-              modelInvocation(
-                  modelId,
-                  baseline.threadId(),
-                  baseline.turnStartEntryId(),
-                  baseline.turnStartEntryId(),
-                  ModelInvocationStatus.READY,
-                  null,
-                  T1));
+          builtin(tx)
+              .insertModelInvocation(
+                  modelInvocation(
+                      modelId,
+                      baseline.threadId(),
+                      baseline.turnStartEntryId(),
+                      baseline.turnStartEntryId(),
+                      ModelInvocationStatus.READY,
+                      null,
+                      T1));
           tx.requestWork(target);
         });
     ClaimedWork claim =
@@ -456,7 +458,7 @@ class PostgresqlHarnessStoreConcurrencyTest {
               () ->
                   store.transaction(
                       tx -> {
-                        tx.lockModelInvocation(modelId).orElseThrow();
+                        builtin(tx).lockModelInvocation(modelId).orElseThrow();
                         modelLocked.countDown();
                         await(continueToWork);
                         return tx.lockClaimedWork(claim).isPresent();
@@ -483,7 +485,7 @@ class PostgresqlHarnessStoreConcurrencyTest {
     }
 
     assertTrue(store.transaction(tx -> tx.findThread(baseline.threadId())).isEmpty());
-    assertTrue(store.transaction(tx -> tx.findModelInvocation(modelId)).isEmpty());
+    assertTrue(store.transaction(tx -> builtin(tx).findModelInvocation(modelId)).isEmpty());
     assertTrue(store.transaction(tx -> tx.findWork(target)).isEmpty());
   }
 
@@ -504,35 +506,50 @@ class PostgresqlHarnessStoreConcurrencyTest {
         store,
         tx -> {
           tx.lockThread(baseline.threadId()).orElseThrow();
-          tx.insertModelInvocation(
-              new ModelInvocation(
-                  id(1L),
-                  baseline.threadId(),
-                  baseline.turnStartEntryId(),
-                  baseline.turnStartEntryId(),
-                  request,
-                  ModelInvocationStatus.READY,
-                  0,
-                  null,
-                  null,
-                  null,
-                  null,
-                  List.of(),
-                  T1,
-                  T1));
-          ModelInvocation model = tx.lockModelInvocation(id(1L)).orElseThrow();
-          tx.updateModelInvocation(model.markRunning(T1));
-          model = tx.lockModelInvocation(id(1L)).orElseThrow();
-          tx.updateModelInvocation(model.succeed(response, T1));
-          model = tx.lockModelInvocation(id(1L)).orElseThrow();
-          tx.updateModelInvocation(model.attachResultEntry(assistantEntryId, T1));
+          builtin(tx)
+              .insertModelInvocation(
+                  new ModelInvocation(
+                      id(1L),
+                      baseline.threadId(),
+                      baseline.turnStartEntryId(),
+                      baseline.turnStartEntryId(),
+                      request,
+                      ModelInvocationStatus.READY,
+                      0,
+                      null,
+                      null,
+                      null,
+                      null,
+                      List.of(),
+                      T1,
+                      T1));
+          ModelInvocation model = builtin(tx).lockModelInvocation(id(1L)).orElseThrow();
+          builtin(tx).updateModelInvocation(model.markRunning(T1));
+          model = builtin(tx).lockModelInvocation(id(1L)).orElseThrow();
+          builtin(tx).updateModelInvocation(model.succeed(response, T1));
+          model = builtin(tx).lockModelInvocation(id(1L)).orElseThrow();
+          builtin(tx).updateModelInvocation(model.attachResultEntry(assistantEntryId, T1));
         });
     ToolInvocation first =
         toolInvocation(
-            id(10L), id(1L), assistantEntryId, 0, "call-1", ToolInvocationStatus.READY, T2);
+            id(10L),
+            baseline.threadId(),
+            baseline.turnStartEntryId(),
+            assistantEntryId,
+            0,
+            "call-1",
+            ToolInvocationStatus.READY,
+            T2);
     ToolInvocation second =
         toolInvocation(
-            id(11L), id(1L), assistantEntryId, 1, "call-2", ToolInvocationStatus.READY, T2);
+            id(11L),
+            baseline.threadId(),
+            baseline.turnStartEntryId(),
+            assistantEntryId,
+            1,
+            "call-2",
+            ToolInvocationStatus.READY,
+            T2);
 
     CountDownLatch ready = new CountDownLatch(2);
     CountDownLatch start = new CountDownLatch(1);

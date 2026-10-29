@@ -115,9 +115,10 @@ function snapshotOf(
     thread: currentThread,
     entries: [],
     queuedCommands: [],
-    modelInvocation: null,
+    executionStatus: 'IDLE',
+    activeAssistantOutput: null,
     toolInvocations: [],
-    modelAttemptFailures: [],
+    generationFailures: [],
     manualCompaction: {
       available: false,
       disabledReason: 'Thread snapshot is not loaded',
@@ -149,7 +150,8 @@ function acceptedResponse(currentThread = threadFixture()): HarnessAcceptedComma
 function toolInvocationFixture(overrides: Partial<ToolInvocationDTO> = {}): ToolInvocationDTO {
   return {
     id: 'tool-1',
-    modelInvocationId: 'm1',
+    threadId: 'thread-1',
+    turnStartEntryId: 'turn-1',
     assistantEntryId: 'a1',
     callIndex: 0,
     status: 'APPROVED',

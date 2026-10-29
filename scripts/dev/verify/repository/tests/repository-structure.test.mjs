@@ -84,7 +84,13 @@ test('repository structure guard verifies root, harness and apps POM module list
     'plugins',
     'web',
   ])
-  assert.deepEqual(modulesOf('harness/pom.xml'), ['environment', 'runtime', 'provider', 'infra'])
+  assert.deepEqual(modulesOf('harness/pom.xml'), [
+    'environment',
+    'model',
+    'runtime',
+    'agent-builtin',
+    'infra',
+  ])
   assert.deepEqual(modulesOf('platform/pom.xml'), ['plugin-api', 'runtime'])
   assert.deepEqual(modulesOf('apps/pom.xml'), ['canvas', 'project', 'ide'])
 })
@@ -501,7 +507,7 @@ const CORE_STATE_ENUMS = [
     constants: ['RUNNING', 'WAITING', 'IDLE'],
   },
   {
-    path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelInvocationStatus.java',
+    path: 'harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelInvocationStatus.java',
     enumName: 'ModelInvocationStatus',
     constants: ['READY', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN'],
   },
@@ -577,12 +583,12 @@ const CORE_STATE_ENUMS = [
     constants: ['THRESHOLD', 'OVERFLOW', 'MANUAL'],
   },
   {
-    path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/GenerationStopReason.java',
+    path: 'harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/GenerationStopReason.java',
     enumName: 'GenerationStopReason',
     constants: ['COMPLETE', 'LENGTH', 'FILTERED', 'CONTINUE'],
   },
   {
-    path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderErrorKind.java',
+    path: 'harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/ProviderErrorKind.java',
     enumName: 'ProviderErrorKind',
     constants: [
       'TRANSIENT',
@@ -609,12 +615,12 @@ const CORE_STATE_ENUMS = [
     ],
   },
   {
-    path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ModelExecution.java',
+    path: 'harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ModelExecution.java',
     enumName: 'Applied',
     constants: ['RETRY', 'TERMINAL', 'LOST'],
   },
   {
-    path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ModelExecution.java',
+    path: 'harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ModelExecution.java',
     enumName: 'TerminalKind',
     constants: ['FAILED', 'CANCELLED', 'UNKNOWN'],
   },
@@ -955,10 +961,11 @@ test('repository structure guard rejects missing or empty core state enum consta
   }
 })
 
-test('web test suite must not compile-import opencli plugin classes', () => {
-  // Test intent: verify web tests interact with opencli via reflection runtime-only, without compile-time imports or static imports.
-  const webTestDir = path.join(REPOSITORY_ROOT, 'web/src/test/java')
-  if (!existsSync(webTestDir)) {
+test('web production must not compile-import opencli plugin classes', () => {
+  // Test intent: the shipped web artifact must keep opencli a runtime-scoped choice; production sources
+  // may never compile against it, while test-only composition roots are not part of the artifact boundary.
+  const webMainDir = path.join(REPOSITORY_ROOT, 'web/src/main/java')
+  if (!existsSync(webMainDir)) {
     return
   }
   function scan(dir) {
@@ -976,7 +983,7 @@ test('web test suite must not compile-import opencli plugin classes', () => {
       }
     }
   }
-  scan(webTestDir)
+  scan(webMainDir)
 })
 
 test('module boundary guard rejects a plugin depending on the platform runtime in isolation', () => {
@@ -1015,7 +1022,7 @@ test('module boundary guard rejects a plugin depending on the platform runtime i
 })
 
 test('plugin dependency guard rejects forbidden static import in isolation', () => {
-  // Test intent: verify check.mjs rejects static compile-import of opencli plugin classes.
+  // Test intent: production code compiling against opencli must fail closed, keeping the artifact boundary strict.
   const mirrorRoot = createRepositoryMirror()
   try {
     const mirrorWeb = path.join(mirrorRoot, 'web')
@@ -1024,12 +1031,12 @@ test('plugin dependency guard rejects forbidden static import in isolation', () 
       recursive: true,
       filter: (source) => path.basename(source) !== 'target',
     })
-    const mirrorWebTestDir = path.join(mirrorWeb, 'src/test/java/fun/fengwk/kkstudio/web/plugin')
-    mkdirSync(mirrorWebTestDir, { recursive: true })
-    const testFile = path.join(mirrorWebTestDir, 'StaticImportGuardTest.java')
+    const mirrorWebMainDir = path.join(mirrorWeb, 'src/main/java/fun/fengwk/kkstudio/web/plugin')
+    mkdirSync(mirrorWebMainDir, { recursive: true })
+    const mainFile = path.join(mirrorWebMainDir, 'StaticImportGuard.java')
     writeFileSync(
-      testFile,
-      'package fun.fengwk.kkstudio.web.plugin;\nimport static fun.fengwk.kkstudio.plugin.opencli.OpenCliHubClient.ExecutionStatus.*;\npublic class StaticImportGuardTest {}\n',
+      mainFile,
+      'package fun.fengwk.kkstudio.web.plugin;\nimport static fun.fengwk.kkstudio.plugin.opencli.OpenCliHubClient.ExecutionStatus.*;\npublic class StaticImportGuard {}\n',
     )
     assert.throws(
       () => {
@@ -1041,8 +1048,41 @@ test('plugin dependency guard rejects forbidden static import in isolation', () 
       },
       (error) => {
         const stderr = error.stderr || ''
-        return stderr.includes('forbidden compile import of opencli plugin class')
+        return stderr.includes(
+          'web production must not compile-import opencli plugin classes',
+        )
       },
+    )
+  } finally {
+    rmSync(mirrorRoot, { recursive: true, force: true })
+  }
+})
+
+test('module boundary guard rejects a harness driver depending on the platform runtime in isolation', () => {
+  // Test intent: agent-builtin may only reach runtime/model/common; platform composition must not become a
+  // reverse dependency for drivers, so the new allowlist entry must still fail closed.
+  const mirrorRoot = createRepositoryMirror()
+  try {
+    const driverPom = path.join(mirrorRoot, 'harness/agent-builtin/pom.xml')
+    const original = readFileSync(driverPom, 'utf8')
+    writeFileSync(
+      driverPom,
+      original.replace(
+        '</dependencies>',
+        '    <dependency><groupId>fun.fengwk.kk-studio</groupId><artifactId>kk-studio-platform-runtime</artifactId></dependency>\n    </dependencies>',
+      ),
+    )
+    assert.throws(
+      () =>
+        execFileSync('node', [CHECK_SCRIPT, '--root', mirrorRoot], {
+          cwd: mirrorRoot,
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+        }),
+      (error) =>
+        (error.stderr || '').includes(
+          'harness/agent-builtin must not depend on kk-studio-platform-runtime',
+        ),
     )
   } finally {
     rmSync(mirrorRoot, { recursive: true, force: true })

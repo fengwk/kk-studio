@@ -11,6 +11,8 @@ import org.springframework.context.annotation.DependsOn;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinAgentDriver;
+import fun.fengwk.kkstudio.harness.builtin.query.BuiltinRequestQuery;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTransport;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
@@ -25,6 +27,7 @@ import fun.fengwk.kkstudio.harness.infra.realtime.RealtimeBus;
 import fun.fengwk.kkstudio.harness.infra.realtime.RealtimePayloadBuffer;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
+import fun.fengwk.kkstudio.harness.runtime.driver.AgentDriver;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitConfirmationRetry;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitJournal;
@@ -134,9 +137,25 @@ public class HarnessRuntimeConfiguration {
   }
 
   @Bean
-  public HarnessStore harnessStore(
+  public PostgresqlHarnessStore harnessStore(
       DataSource dataSource, PlatformTransactionManager transactionManager) {
     return new PostgresqlHarnessStore(dataSource, transactionManager, UUID::randomUUID);
+  }
+
+  /**
+   * 唯一的 Agent Driver：A 只存在 Builtin 实现，组合根直接装配，不做 kind 分发、不注入 no-op 或备用 Driver。
+   *
+   * <p>Driver 只在 Runtime 已开启的事务内工作，不执行外部 I/O。
+   */
+  @Bean
+  public AgentDriver agentDriver(PostgresqlHarnessStore store, TurnResolver turnResolver) {
+    return new BuiltinAgentDriver(store, turnResolver);
+  }
+
+  /** Builtin debug 专属只读查询；公共快照不暴露 ModelRequestSpec。 */
+  @Bean
+  public BuiltinRequestQuery builtinRequestQuery(PostgresqlHarnessStore store) {
+    return new BuiltinRequestQuery(store, store);
   }
 
   /** Plugin 资源端口依赖 HarnessStore，因此由完整 Harness Runtime 的组合根创建；媒体传输构造前先安装统一代理。 */
@@ -338,11 +357,8 @@ public class HarnessRuntimeConfiguration {
 
   @Bean
   public ThreadProcessor threadProcessor(
-      HarnessStore store,
-      TurnResolver turnResolver,
-      ThreadProcessorConfig config,
-      ToolResultHistoryMaterializer materializer) {
-    return new ThreadProcessor(store, turnResolver, config, materializer);
+      HarnessStore store, AgentDriver agentDriver, ThreadProcessorConfig config) {
+    return new ThreadProcessor(store, agentDriver, config);
   }
 
   /** Model 执行线程与定时刷新任务：每个任务一个虚拟线程（执行线程在 Provider 调用期间阻塞）。 */
@@ -403,7 +419,8 @@ public class HarnessRuntimeConfiguration {
       Clock clock,
       @Qualifier("harnessProcessorScheduler") ScheduledExecutorService scheduler,
       @Qualifier("harnessHeartbeatWorkerExecutor") Executor heartbeatWorker,
-      ExecutionExitConfirmer executionExitConfirmer) {
+      ExecutionExitConfirmer executionExitConfirmer,
+      ToolResultHistoryMaterializer materializer) {
     return new ToolProcessor(
         store,
         toolGateway,
@@ -412,20 +429,24 @@ public class HarnessRuntimeConfiguration {
         clock,
         scheduler,
         heartbeatWorker,
-        executionExitConfirmer);
+        executionExitConfirmer,
+        materializer);
   }
 
   @Bean
   public HarnessRuntime harnessRuntime(
       HarnessStore store,
       Clock clock,
-      TurnResolver turnResolver,
+      AgentDriver agentDriver,
       CompactionConfigProvider compactionConfigProvider,
       ModelProcessor modelProcessor,
-      ToolProcessor toolProcessor,
-      ToolResultHistoryMaterializer materializer) {
+      ToolProcessor toolProcessor) {
     return new HarnessRuntime(
-        store, turnResolver, compactionConfigProvider, materializer, modelProcessor, toolProcessor);
+        store,
+        agentDriver,
+        compactionConfigProvider,
+        modelProcessor::cancel,
+        toolProcessor::cancel);
   }
 
   /** 结构化 Model Request Debug 只读服务：依赖完整 Runtime，因此只在 Web 组合根创建。 */
@@ -435,9 +456,15 @@ public class HarnessRuntimeConfiguration {
       DatabaseTurnResolver turnResolver,
       AgentDefinitionRepository agentDefinitionRepository,
       AgentDefinitionConfigCodec agentDefinitionConfigCodec,
+      BuiltinRequestQuery builtinRequestQuery,
       Clock clock) {
     return new ModelRequestDebugService(
-        runtime, turnResolver, agentDefinitionRepository, agentDefinitionConfigCodec, clock);
+        runtime,
+        turnResolver,
+        agentDefinitionRepository,
+        agentDefinitionConfigCodec,
+        builtinRequestQuery,
+        clock);
   }
 
   /**

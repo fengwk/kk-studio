@@ -2,14 +2,14 @@ package fun.fengwk.kkstudio.platform.harness.model;
 
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelProvider;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAdapter;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDescriptor;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactories;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactory;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
+import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
+import fun.fengwk.kkstudio.harness.model.provider.ModelProvider;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderAdapter;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderFactories;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderFactory;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;

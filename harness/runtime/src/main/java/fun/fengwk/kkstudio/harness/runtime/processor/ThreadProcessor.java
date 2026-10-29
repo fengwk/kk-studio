@@ -5,7 +5,6 @@ import lombok.extern.slf4j.Slf4j;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.ThreadInputDemand;
 import fun.fengwk.kkstudio.harness.runtime.ThreadLifecycleCoordinator;
-import fun.fengwk.kkstudio.harness.runtime.compaction.AutomaticCompactionPlanner;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionChildSpawn;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionHistory;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
@@ -13,6 +12,14 @@ import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionResultEvaluator;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
+import fun.fengwk.kkstudio.harness.runtime.driver.AgentDriver;
+import fun.fengwk.kkstudio.harness.runtime.driver.CompactionResolution;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverActivity;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverApplied;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverCommit;
+import fun.fengwk.kkstudio.harness.runtime.driver.GenerationProjection;
+import fun.fengwk.kkstudio.harness.runtime.driver.LockedDriverState;
+import fun.fengwk.kkstudio.harness.runtime.driver.TurnResolution;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
@@ -24,16 +31,10 @@ import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
-import fun.fengwk.kkstudio.harness.runtime.history.ModelAttemptMaterialization;
 import fun.fengwk.kkstudio.harness.runtime.history.SettingsPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelGroupExecution;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelGroupProgress;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
@@ -41,16 +42,11 @@ import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinOutcome;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinProjector;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinReceipt;
-import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
-import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolveTransientException;
-import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
-import fun.fengwk.kkstudio.harness.runtime.thread.ResolvedRequestValidator;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextProbe;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
@@ -131,31 +127,19 @@ public final class ThreadProcessor {
           "Turn planning failed before the model was invoked. Send a new message to retry.");
 
   private final HarnessStore store;
-  private final TurnResolver resolver;
+  private final AgentDriver driver;
   private final ThreadProcessorConfig config;
-  private final ModelOutcomeAppender modelOutcomeAppender;
   private final TurnPlanBuilder planBuilder = new TurnPlanBuilder();
   private final CommandHarvestReducer settingsReducer = new CommandHarvestReducer();
   private final ThreadAdmissionGuard admissionGuard = new ThreadAdmissionGuard();
-  private final ThreadContextProbe threadContextProbe = new ThreadContextProbe();
-  private final AutomaticCompactionPlanner automaticCompactionPlanner =
-      new AutomaticCompactionPlanner();
+  private final ThreadContextProbe threadContextProbe;
   private final ThreadLifecycleCoordinator coordinator;
 
-  public ThreadProcessor(HarnessStore store, TurnResolver resolver, ThreadProcessorConfig config) {
-    this(store, resolver, config, null);
-  }
-
-  /** 注入 Tool outcome 的 durable history 物化端口（可为 null：ToolResult 含 Resource 引用时 fail-closed）。 */
-  public ThreadProcessor(
-      HarnessStore store,
-      TurnResolver resolver,
-      ThreadProcessorConfig config,
-      ToolResultHistoryMaterializer toolResultHistoryMaterializer) {
+  public ThreadProcessor(HarnessStore store, AgentDriver driver, ThreadProcessorConfig config) {
     this.store = Objects.requireNonNull(store, "store");
-    this.resolver = Objects.requireNonNull(resolver, "resolver");
+    this.driver = Objects.requireNonNull(driver, "driver");
     this.config = Objects.requireNonNull(config, "config");
-    this.modelOutcomeAppender = new ModelOutcomeAppender(toolResultHistoryMaterializer);
+    this.threadContextProbe = new ThreadContextProbe(driver);
     this.coordinator = new ThreadLifecycleCoordinator();
   }
 
@@ -215,11 +199,12 @@ public final class ThreadProcessor {
   }
 
   private void stepTx(HarnessStore.Transaction tx, ClaimedWork claim) {
-    Instant now = tx.now();
     ThreadState thread = ThreadLifecycleCoordinator.lockThreadWithParent(tx, claim.target().id());
     if (thread == null) {
       throw new ClaimLostSignal();
     }
+    // 等待 Thread 锁期间，原 owner 可能提交更新；取得锁后再冻结本事务的权威时间。
+    Instant now = tx.now();
     EntryPath path = tx.loadEntryPath(thread.headEntryId());
     Optional<Entry> openTurn = path.openTurnStart();
     if (openTurn.isPresent() && openTurn.get().payload() instanceof TurnStartPayload startPayload) {
@@ -244,23 +229,28 @@ public final class ThreadProcessor {
     ThreadContext context = threadContextProbe.probe(tx, thread, path);
     switch (context) {
       case ThreadContext.ModelTerminalPending pending -> {
-        // 锁序 Thread -> Commands -> Model：判断 pre-existing queued message 必须在 lock Model 前加载。
+        // 锁序 Thread -> Commands -> Driver：判断 pre-existing queued message 必须在 lock Driver 前加载。
         boolean hasQueuedMessage =
             ThreadInputDemand.hasQueuedDemand(tx.loadQueuedCommands(thread.id()));
-        ModelInvocation locked = tx.lockModelInvocation(pending.model().id()).orElse(null);
-        if (locked == null) {
-          throw new ClaimLostSignal();
+        LockedDriverState driverState = driver.lockState(tx, thread, path);
+        GenerationProjection projection = driverState.projection();
+        if (openTurn.isEmpty()
+            || !(openTurn.get().payload() instanceof TurnStartPayload start)
+            || !thread.id().equals(start.ownerThreadId())
+            || !thread.headEntryId().equals(path.head().id())
+            || driverState.activity() != DriverActivity.RESPONSE_PENDING
+            || !driverState.atBasis(path.head().id())
+            || projection == null
+            || !openTurn.get().id().equals(projection.turnStartEntryId())
+            || !Objects.equals(pending.driverState().generationId(), driverState.generationId())) {
+          throw new IllegalStateException("locked driver state no longer matches the pending turn");
         }
-        applyModel(tx, claim, thread, path, locked, now, hasQueuedMessage);
+        applyModel(tx, claim, thread, path, driverState, now, hasQueuedMessage);
       }
       case ThreadContext.ModelActive ignored -> completeClaim(tx, claim, now);
       case ThreadContext.ToolTerminalPending pending -> {
-        // 锁序 Thread -> Model -> Tool：Tool batch 固定 self-wake 下一 claim 的 continuation，不消费任何
-        // Command，因此无需加载 Command 快照（不为形式锁序锁无关行）。
-        ModelInvocation locked = tx.lockModelInvocation(pending.model().id()).orElse(null);
-        if (locked == null) {
-          throw new ClaimLostSignal();
-        }
+        // 锁序 Thread -> Driver -> Tools：公共工具批次不要求 Model；Driver 只在存在时参与附加校验。
+        LockedDriverState driverState = driver.lockState(tx, thread, path);
         List<ToolInvocation> lockedSiblings =
             tx.lockToolInvocationsByAssistantEntryId(pending.assistant().id());
         applyToolBatch(
@@ -268,7 +258,7 @@ public final class ThreadProcessor {
             claim,
             thread,
             path,
-            locked,
+            driverState,
             pending.assistant(),
             pending.calls(),
             lockedSiblings,
@@ -280,7 +270,7 @@ public final class ThreadProcessor {
         // 在越过 soft threshold 时先压缩，成功后再由 durable continueModel obligation 恢复。
         CompactionPreparation preparation =
             thread.constraints().allowAutoCompaction()
-                ? automaticCompactionPlanner.plan(
+                ? driver.prepareAutomaticCompaction(
                     thread, path, config.compactionProvider().compactionConfig(), true)
                 : null;
         if (preparation != null) {
@@ -302,7 +292,7 @@ public final class ThreadProcessor {
         // owned HISTORY / fallback / hard overflow 优先；idle soft threshold 只有真实 user demand 存在时才启动。
         CompactionPreparation preparation =
             thread.constraints().allowAutoCompaction()
-                ? automaticCompactionPlanner.plan(
+                ? driver.prepareAutomaticCompaction(
                     thread, path, config.compactionProvider().compactionConfig(), userDemand)
                 : null;
         if (preparation != null) {
@@ -393,78 +383,53 @@ public final class ThreadProcessor {
   }
 
   /**
-   * Terminal Model 原子应用（Thread -&gt; Model -&gt; Tool -&gt; Work 锁序），单 action 恰好执行一次并完成 claim。
-   *
-   * <p>关闭 turn 的路径（COMPLETE 无 calls / CONTINUE / LENGTH 无 calls / FILTERED / terminal failure /
-   * cancel / unknown / compaction 关闭结果）在同一事务追加 TURN_END 后执行严格物化校验（attach-then-delete，经 Store 的
-   * {@link ModelAttemptMaterialization} 校验）并物理删除 ModelInvocation；只有 active Tool phase （SUCCEEDED 带
-   * calls）保留 parent 并 attach resultEntryId。CONTINUE 以 COMPLETED + continueModel=true 关闭 turn，与 Tool
-   * sibling batch 一致地机械请求 THREAD，续写由既有 durable continuation 机制在下一 claim 启动。
-   *
-   * <p>wake 决定：active Tool phase 只为 READY 槽位请求 TOOL Work（全部 immediate terminal 则请求 THREAD 让 batch 经
-   * ToolTerminalPending 应用并反馈模型）；完全结束的 closed turn 在新 Entries 插入、Thread advanced 后，只在已有 queued user
-   * demand、fallback/hard-overflow obligation 或 CONTINUE 的 continueModel obligation 已确定时请求
-   * THREAD。soft threshold 没有新 demand 时保持 idle；新命令在事务后到达会自行 requestWork。
+   * Terminal Driver generation 原子应用（Thread -&gt; Driver -&gt; Tool -&gt; Work 锁序），单 action
+   * 恰好执行一次并完成 claim。结果物化、attempt 审计与私有 terminal 行清理全部由 Driver 在同一事务内完成；Runtime 只推进公共 Thread、结算 Join
+   * 与规划 Work。
    */
   private void applyModel(
       HarnessStore.Transaction tx,
       ClaimedWork claim,
       ThreadState thread,
       EntryPath path,
-      ModelInvocation model,
+      LockedDriverState driverState,
       Instant now,
       boolean hasQueuedMessage) {
-    if (!model.status().isTerminal()
-        || model.resultEntryId() != null
-        || !thread.headEntryId().equals(model.requestHeadEntryId())) {
-      // 决策与执行同事务，理论不可达；改为明确的不变量失败，绝不降级为循环重试。
-      throw new IllegalStateException(
-          "terminal model apply preconditions changed under the same transaction for model "
-              + model.id());
-    }
-    TurnStartPayload turnStart =
-        (TurnStartPayload)
-            path.openTurnStart()
-                .orElseThrow(
-                    () ->
-                        new IllegalStateException(
-                            "terminal model must belong to an open TURN_START"))
-                .payload();
-    ModelOutcomeAppender.Applied applied = modelOutcomeAppender.appendModel(tx, path, model, now);
+    DriverApplied applied = driver.applyResponse(tx, thread, path, driverState, commit(tx));
     UUID head = applied.headEntryId();
     UUID finalAnswerEntryId = applied.finalAnswerEntryId();
     boolean terminal = applied.terminal();
     boolean continueModel = applied.continueModel();
     boolean toolPhase = applied.toolPhase();
     List<ToolInvocation> invocations = applied.toolInvocations();
+    // 公共 Assistant 追加器允许 Driver 在同一事务内推进 head；只接受精确的新 head，不能覆盖其版本。
+    ThreadState current = tx.findThread(thread.id()).orElseThrow();
     ThreadState advancedThread;
-    boolean requestThread = false;
-    if (toolPhase) {
+    if (current.headEntryId().equals(head)) {
+      advancedThread = current;
+    } else {
+      if (!current.equals(thread)) {
+        throw new IllegalStateException(
+            "driver changed the thread without applying its declared head");
+      }
       advancedThread = thread.advanceHead(head, now);
       tx.updateThread(advancedThread);
-    } else {
-      // 完全结束的 closed turn 只重建 queued demand / fallback / hard-overflow obligation；soft threshold
-      // 无新 demand 时不 self-wake。CONTINUE 例外：必须机械请求 THREAD，下一 claim 才偿还 continueModel
-      // obligation 并启动续写。
-      advancedThread = thread.advanceHead(head, now);
-      // hard overflow / fallback obligation 与 idle soft threshold 都必须遵守同一条祖先链 guard：位于 COMPACTION
-      // 子执行树内的
-      // Thread（含压缩子自身的超限失败回合）绝不再次规划压缩，从而不产生递归压缩子、也不原样重复超限请求。
+    }
+    boolean requestThread = false;
+    if (!toolPhase) {
       boolean compactionDue =
           advancedThread.constraints().allowAutoCompaction()
-              && automaticCompactionPlanner.plan(
+              && driver.prepareAutomaticCompaction(
                       advancedThread,
                       tx.loadEntryPath(head),
                       config.compactionProvider().compactionConfig(),
                       hasQueuedMessage)
                   != null;
       requestThread = continueModel || hasQueuedMessage || compactionDue;
-      tx.updateThread(advancedThread);
       if (continueModel) {
         coordinator.remindSoftBudgetIfDue(tx, advancedThread, tx.loadEntryPath(head), now);
       }
       if (terminal) {
-        // 执行终止边界：首次最终回答 / 不可继续失败与 Join 冻结、父通知接受原子提交。
         ThreadLifecycleCoordinator.matchAndDeliverTerminalJoins(
             tx, advancedThread, head, finalAnswerEntryId, now, false);
       }
@@ -486,8 +451,6 @@ public final class ThreadProcessor {
         }
       }
       if (!readyRequested) {
-        // 全部 immediate terminal（schema-invalid / unknown / truncated）：不请求 TOOL Work，自唤醒 THREAD
-        // 让 batch 经下一 claim 的 ToolTerminalPending 应用并把错误反馈给模型。
         requestThread = true;
       }
     }
@@ -495,6 +458,25 @@ public final class ThreadProcessor {
       tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()));
     }
     tx.completeWork(claim);
+  }
+
+  private static DriverCommit commit(HarnessStore.Transaction tx) {
+    return new DriverCommit() {
+      @Override
+      public UUID nextId() {
+        return tx.nextId();
+      }
+
+      @Override
+      public Instant now() {
+        return tx.now();
+      }
+
+      @Override
+      public void insertEntry(Entry entry) {
+        tx.insertEntry(entry);
+      }
+    };
   }
 
   /**
@@ -616,7 +598,7 @@ public final class ThreadProcessor {
     boolean compactionDue =
         !stopped
             && thread.constraints().allowAutoCompaction()
-            && automaticCompactionPlanner.plan(
+            && driver.prepareAutomaticCompaction(
                     advanced,
                     tx.loadEntryPath(turnEndId),
                     config.compactionProvider().compactionConfig(),
@@ -642,19 +624,15 @@ public final class ThreadProcessor {
   }
 
   /**
-   * Tool sibling 原子应用：全部 terminal 才执行，按 callIndex 通过统一 appender 追加 effects + ToolResult，再追加
-   * COMPLETED TURN_END(continueModel=true)；同一事务删除全部 child ToolInvocation 与 parent
-   * ModelInvocation并固定先请求 THREAD 再 complete，下一 claim 才做 continuation。数量 / callIndex 前缀 / ownership
-   * / terminal 任一违反即抛错回滚；删除 parent 前先执行 与 {@link ModelAttemptMaterialization} 等价的最小严格校验（attached
-   * Assistant/result 与已物化失败 attempt 前缀），绝不 绕过校验直接 delete。低序 mutation 完成后最后执行 claimed THREAD Work
-   * fence。
+   * Tool sibling 原子应用：全部 terminal 才执行，按 callIndex 追加 effects + ToolResult，再追加 COMPLETED
+   * TURN_END(continueModel=true)；同一事务删除全部 child ToolInvocation，并由 Driver 完成附加校验与私有状态清理。
    */
   private void applyToolBatch(
       HarnessStore.Transaction tx,
       ClaimedWork claim,
       ThreadState thread,
       EntryPath path,
-      ModelInvocation model,
+      LockedDriverState driverState,
       Entry assistant,
       List<ToolCallMessageContent> calls,
       List<ToolInvocation> siblings,
@@ -663,29 +641,45 @@ public final class ThreadProcessor {
       throw new IllegalStateException(
           "tool sibling count must match the assistant tool calls of entry " + assistant.id());
     }
+    UUID turnStartEntryId =
+        path.openTurnStart()
+            .orElseThrow(() -> new IllegalStateException("tool batch requires an open TURN_START"))
+            .id();
     for (int i = 0; i < siblings.size(); i++) {
-      if (siblings.get(i).callIndex() != i) {
-        throw new IllegalStateException(
-            "tool siblings must be a contiguous callIndex prefix of entry " + assistant.id());
-      }
       ToolInvocation sibling = siblings.get(i);
-      if (!sibling.modelInvocationId().equals(model.id()) || !sibling.status().isTerminal()) {
-        // 锁内复查：任何不一致都是不变量违反，回滚（绝不部分 apply）。
+      if (sibling.callIndex() != i
+          || !sibling.threadId().equals(thread.id())
+          || !sibling.turnStartEntryId().equals(turnStartEntryId)
+          || !sibling.assistantEntryId().equals(assistant.id())
+          || !sibling.status().isTerminal()) {
         throw new IllegalStateException(
             "tool siblings changed under lock for assistant entry " + assistant.id());
       }
     }
-    ModelOutcomeAppender.Applied applied =
-        modelOutcomeAppender.appendToolBatch(tx, path, model, siblings, now);
-    UUID turnEndId = applied.headEntryId();
+    UUID parentId = path.head().id();
+    for (ToolInvocation sibling : siblings) {
+      parentId =
+          ToolOutcomeAppender.append(tx, path.root().sessionId(), parentId, sibling, now)
+              .headEntryId();
+    }
+    UUID turnEndId = tx.nextId();
+    tx.insertEntry(
+        new Entry(
+            turnEndId,
+            path.root().sessionId(),
+            parentId,
+            new TurnEndPayload(turnStartEntryId, TurnEndOutcome.COMPLETED, true, null, null),
+            now));
+    tx.deleteToolInvocationsByIds(siblings.stream().map(ToolInvocation::id).toList());
     ThreadState advanced = thread.advanceHead(turnEndId, now);
     tx.updateThread(advanced);
+    // Driver 回调必须看到已提交的 Thread head；Builtin 仍用原 path 校验已挂接结果。
+    driver.completeToolBatch(tx, thread, path, driverState, siblings, commit(tx));
     EntryPath updatedPath = tx.loadEntryPath(turnEndId);
     coordinator.remindSoftBudgetIfDue(tx, advanced, updatedPath, now);
     if (tx.lockClaimedWork(claim).isEmpty()) {
       throw new ClaimLostSignal();
     }
-    // batch 关闭 turn 固定产生 continueModel 义务：先 request THREAD 再 complete，下一 claim 才做 continuation。
     tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()));
     tx.completeWork(claim);
   }
@@ -748,77 +742,56 @@ public final class ThreadProcessor {
    */
   private void resolveAndCommitTx(
       HarnessStore.Transaction tx, ClaimedWork claim, ThreadState thread, TurnPlan plan) {
-    TurnResolver.Result result;
+    TurnResolution resolution;
     try {
-      result = resolver.resolve(plan.threadId(), plan.candidatePath(), plan.preparation());
+      resolution = driver.resolveTurn(tx, thread, plan.candidatePath(), plan.preparation());
     } catch (TurnResolveTransientException transientFailure) {
-      // 事务边界必须整体回滚；在 rollback-only 事务里继续写错误终态既不安全也不真实。
       throw transientFailure;
     } catch (RuntimeException deterministicFailure) {
-      // 确定性 resolver 失败（含编程 / 契约错误）：落 durable FAILED 并结算 Join，绝不无限 reschedule。
       log.warn(
           "turn resolver failed deterministically for thread {}; failing the turn",
           plan.threadId(),
           deterministicFailure);
-      result = new TurnResolver.Rejected(DETERMINISTIC_FAILURE);
+      resolution = new TurnResolution.Rejected(DETERMINISTIC_FAILURE);
     }
-    if (result == null) {
-      // null 违反 Resolver 契约：确定性失败，落 durable FAILED 而非无限重排。
+    if (resolution == null) {
       log.warn("turn resolver returned null for thread {}; failing the turn", plan.threadId());
-      result = new TurnResolver.Rejected(DETERMINISTIC_FAILURE);
-    } else if (result instanceof TurnResolver.Resolved resolved) {
-      try {
-        // Harness 边界校验：不一致即 Resolver 契约错误，此刻尚无 durable mutation，转为 FAILED 而非抛异常。
-        ResolvedRequestValidator.validate(plan.candidatePath(), resolved);
-      } catch (RuntimeException contractFailure) {
-        log.warn(
-            "resolved request violated the harness contract for thread {}; failing the turn",
-            plan.threadId(),
-            contractFailure);
-        result = new TurnResolver.Rejected(DETERMINISTIC_FAILURE);
-      }
+      resolution = new TurnResolution.Rejected(DETERMINISTIC_FAILURE);
     }
-    commitTx(tx, claim, thread, plan, result);
+    commitTx(tx, claim, thread, plan, resolution);
   }
 
   /**
    * 在已锁定 Session / Thread / Claim 的当前事务中按低序 mutation 原子提交 TURN_START + Message + Command markers +
-   * Thread 更新 + ModelInvocation/MODEL Work（resolved）或 AssistantError + FAILED TURN_END（rejected）。最终
-   * Claim 围栏失败会回滚全部变更。
+   * Thread 更新 + Driver 私有 Turn 状态与 Work（accepted）或 AssistantError + FAILED TURN_END（rejected）。
    */
   private void commitTx(
       HarnessStore.Transaction tx,
       ClaimedWork claim,
       ThreadState thread,
       TurnPlan plan,
-      TurnResolver.Result result) {
+      TurnResolution resolution) {
     Instant now = tx.now();
     Integer contextWindow = null;
     Integer maxOutputTokens = null;
     CompactionStart compactionStart = null;
-    ModelRequestSpec invocationSpec = null;
-    if (result instanceof TurnResolver.Resolved resolved) {
-      contextWindow = resolved.contextWindow();
-      // Thread 冻结的创建约束（压缩子的输出预算、cache 禁用）作用于它的每一次请求（含工具 loop turn 与失败重试）：
-      // TURN_START 冻结的 maxOutputTokens 必须等于实际 spec。
-      ThreadConstraints constraints = thread.constraints();
-      invocationSpec = applyConstraints(resolved.spec(), constraints);
-      maxOutputTokens =
-          constraints.maxOutputTokens() != null
-              ? invocationSpec.outputTokens()
-              : resolved.maxOutputTokens();
-    } else if (result instanceof TurnResolver.CompactionResolved compactionResolved) {
-      contextWindow = compactionResolved.contextWindow();
-      maxOutputTokens = compactionResolved.maxOutputTokens();
-      compactionStart =
-          CompactionChildSpawn.start(tx, thread, compactionResolved, plan.preparation());
+    TurnResolution.Accepted accepted = null;
+    CompactionResolution compaction = null;
+    if (resolution instanceof TurnResolution.Accepted acceptedTurn) {
+      accepted = acceptedTurn;
+      contextWindow = accepted.contextWindow();
+      maxOutputTokens = accepted.maxOutputTokens();
+    } else if (resolution instanceof TurnResolution.Compaction compactionTurn) {
+      compaction = compactionTurn.resolution();
+      contextWindow = compaction.contextWindow();
+      maxOutputTokens = compaction.maxOutputTokens();
+      compactionStart = CompactionChildSpawn.start(tx, thread, compaction, plan.preparation());
     }
-    // 低序 mutation（Entries / Commands / Thread / ModelInvocation）先完成。
     for (Entry entry : plan.candidateEntries()) {
       tx.insertEntry(
           withCreatedAt(
               withResolvedTurnStart(
-                  entry, plan, contextWindow, maxOutputTokens, compactionStart, invocationSpec),
+                  entry, plan, contextWindow, maxOutputTokens, compactionStart, accepted),
               now));
     }
     List<ThreadCommand> consumed = new ArrayList<>(plan.consumedCommands().size());
@@ -826,36 +799,17 @@ public final class ThreadProcessor {
       consumed.add(command.markApplied(plan.appliedEntryId(command.sequence())));
     }
     tx.updateCommands(consumed);
-    if (result instanceof TurnResolver.Resolved resolved) {
+    if (accepted != null) {
       ThreadState advanced =
           thread.advanceHeadAndInputThroughSequence(
               plan.candidateHeadEntryId(), nextWatermark(plan, thread), now);
       tx.updateThread(advanced);
-      UUID invocationId = tx.nextId();
-      tx.insertModelInvocation(
-          new ModelInvocation(
-              invocationId,
-              thread.id(),
-              plan.turnStartEntryId(),
-              plan.candidateHeadEntryId(),
-              invocationSpec,
-              ModelInvocationStatus.READY,
-              0,
-              null,
-              null,
-              null,
-              null,
-              List.of(),
-              now,
-              now,
-              null,
-              groupProgress(invocationSpec)));
+      accepted.install(tx, thread.id(), plan.turnStartEntryId(), plan.candidateHeadEntryId());
       if (tx.lockClaimedWork(claim).isEmpty()) {
         throw new ClaimLostSignal();
       }
-      tx.requestWork(new WorkTarget(WorkTargetType.MODEL, invocationId));
       tx.completeWork(claim);
-    } else if (result instanceof TurnResolver.CompactionResolved) {
+    } else if (compaction != null) {
       ThreadState advanced =
           thread.advanceHeadAndInputThroughSequence(
               plan.candidateHeadEntryId(), nextWatermark(plan, thread), now);
@@ -865,7 +819,7 @@ public final class ThreadProcessor {
       }
       tx.completeWork(claim);
     } else {
-      TurnResolver.Rejected rejected = (TurnResolver.Rejected) result;
+      TurnResolution.Rejected rejected = (TurnResolution.Rejected) resolution;
       UUID errorEntryId = tx.nextId();
       tx.insertEntry(
           new Entry(
@@ -887,32 +841,20 @@ public final class ThreadProcessor {
                   TurnEndReason.TURN_FAILED,
                   null),
               now));
-      // 确定性 Rejected 失败绝不立即 self-wake 同一自动压缩：失败 turn 已落 durable，马上重排可能再次规划同一压缩而空转。
-      // 只保留合法 queued user 需求——它会在下一 claim 作为 INPUT 正常处理（或同样落 durable 失败）；新的自动压缩只由后续真实
-      // 输入 / 唤醒重新驱动。
       boolean requestThread = plan.hasDeferredUserMessages();
       ThreadState advanced =
           thread.advanceHeadAndInputThroughSequence(turnEndId, nextWatermark(plan, thread), now);
       tx.updateThread(advanced);
-      // Rejected 是源输入的不可继续失败：执行终止边界结算本次 Join。
       ThreadLifecycleCoordinator.matchAndDeliverTerminalJoins(
           tx, advanced, turnEndId, null, now, false);
       if (tx.lockClaimedWork(claim).isEmpty()) {
         throw new ClaimLostSignal();
       }
-      // rejected：仅在仍有合法 user 需求时先请求 THREAD 再 complete。
       if (requestThread) {
         tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()));
       }
       tx.completeWork(claim);
     }
-  }
-
-  private static ModelGroupProgress groupProgress(ModelRequestSpec spec) {
-    ModelGroupExecution group = spec.groupExecution();
-    return group == null
-        ? null
-        : new ModelGroupProgress(group.groupName(), group.groupVersion(), 0, 0);
   }
 
   /** 只有普通 INPUT 把输入水位推进到冻结 cutoff；CONTINUATION / COMPACTION 不推进，保留尚待接纳通知的原始尾部。 */
@@ -929,33 +871,8 @@ public final class ThreadProcessor {
   }
 
   /**
-   * 把 Thread 的冻结约束作用于请求 spec：输出预算取 min 收紧，{@code promptCacheDisabled} 时把 cache 固定为 NONE；其余字段（模型、
-   * variant、system instruction、tools、subagents）原样保留。
-   */
-  private static ModelRequestSpec applyConstraints(
-      ModelRequestSpec spec, ThreadConstraints constraints) {
-    if (constraints.maxOutputTokens() == null && !constraints.promptCacheDisabled()) {
-      return spec;
-    }
-    int outputTokens =
-        constraints.maxOutputTokens() == null
-            ? spec.outputTokens()
-            : Math.min(spec.outputTokens(), constraints.maxOutputTokens());
-    return new ModelRequestSpec(
-        spec.providerType(),
-        spec.providerConnectionGenerationId(),
-        spec.model(),
-        spec.variant(),
-        outputTokens,
-        spec.systemInstruction(),
-        spec.toolBindings(),
-        spec.subagentBindings(),
-        constraints.promptCacheDisabled() ? ProviderCacheControl.none() : spec.cacheControl());
-  }
-
-  /**
-   * 第二阶段 commit 在插入前补齐 Resolver 成功时的 contextWindow/maxOutputTokens/compactionStart；rejected 保持
-   * null。Resolver 改用 Agent 默认模型时（实际调用型号不同于 Thread 设置），把实际型号记为 fallbackModel。
+   * 第二阶段 commit 在插入前补齐 Driver 解析成功时的 contextWindow/maxOutputTokens/compactionStart；rejected 保持
+   * null。Driver 实际执行的模型不同于 Thread 设置时记为 fallbackModel。
    */
   static Entry withResolvedTurnStart(
       Entry entry,
@@ -963,18 +880,13 @@ public final class ThreadProcessor {
       Integer contextWindow,
       Integer maxOutputTokens,
       CompactionStart compactionStart,
-      ModelRequestSpec resolvedSpec) {
+      TurnResolution.Accepted accepted) {
     if (!entry.id().equals(plan.turnStartEntryId())
         || !(entry.payload() instanceof TurnStartPayload start)) {
       return entry;
     }
-    ModelSelection executed =
-        resolvedSpec == null
-            ? null
-            : resolvedSpec.groupExecution() != null
-                ? ModelSelection.group(resolvedSpec.groupExecution().groupName())
-                : ModelSelection.model(
-                    resolvedSpec.model().modelName(), resolvedSpec.variant().id());
+    ModelSelection executed = accepted == null ? null : accepted.executedSelection();
+    ModelSelection selectedModel = start.settings().model();
     return new Entry(
         entry.id(),
         entry.sessionId(),
@@ -986,7 +898,10 @@ public final class ThreadProcessor {
             contextWindow,
             maxOutputTokens,
             compactionStart != null ? compactionStart : start.compaction(),
-            executed == null || executed.equals(start.settings().model()) ? null : executed),
+            executed == null || selectedModel == null || executed.equals(selectedModel)
+                ? null
+                : executed,
+            accepted == null ? null : accepted.capabilities()),
         entry.createdAt());
   }
 

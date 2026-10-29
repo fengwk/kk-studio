@@ -18,17 +18,17 @@ import type {
 } from '@/features/chat/runtime/thread-timeline-types'
 import { translate, type TranslationKey } from '@/shared/i18n'
 import type {
+  HarnessActiveAssistantOutputDTO,
+  HarnessGenerationFailureDTO,
   HarnessSessionEntryDTO,
-  ModelAttemptFailureDTO,
-  ModelInvocationDTO,
   ToolInvocationDTO,
 } from '@/shared/api/generated/contracts'
 
 /**
  * Event 投影的独立模型：不依赖 DialogueMessage 与 transcript 渲染。
  *
- * 输入持久 Entries 与活跃 overlay（modelInvocation / toolInvocations /
- * modelAttemptFailures / realtime streams），输出有序的 ThreadEventRecord 列表。
+ * 输入持久 Entries 与活跃 overlay（activeAssistantOutput / toolInvocations /
+ * generationFailures / realtime streams），输出有序的 ThreadEventRecord 列表。
  * durable Entry 全类型都会保留且**恰好一条记录**（含控制边界 TURN_START /
  * TURN_END / COMPACTION）；活跃 model/tool invocation 是单条 synthetic 记录
  * （Provider delta token 绝不逐条成行），并锚定在所属 durable Entry 之后。
@@ -91,9 +91,9 @@ export interface ThreadEventRecord {
 
 export interface ThreadEventTimelineInput {
   entries: HarnessSessionEntryDTO[]
-  modelInvocation: ModelInvocationDTO | null
+  activeAssistantOutput: HarnessActiveAssistantOutputDTO | null
   toolInvocations: ToolInvocationDTO[]
-  modelAttemptFailures?: readonly ModelAttemptFailureDTO[]
+  generationFailures?: readonly HarnessGenerationFailureDTO[]
   modelStream?: RealtimeModelStream | null
   toolStreams?: ReadonlyMap<string, RealtimeToolStream> | null
 }
@@ -203,9 +203,9 @@ export function buildThreadEventTimeline(
 ): ThreadEventRecord[] {
   const {
     entries,
-    modelInvocation,
+    activeAssistantOutput,
     toolInvocations,
-    modelAttemptFailures = [],
+    generationFailures = [],
     modelStream = null,
     toolStreams = null,
   } = input
@@ -296,13 +296,13 @@ export function buildThreadEventTimeline(
     }
   }
 
-  const orderedFailures = [...modelAttemptFailures].sort(
+  const orderedFailures = [...generationFailures].sort(
     (left, right) => left.attempt - right.attempt || left.failedAt - right.failedAt,
   )
   const seenFailures = new Set<string>()
   for (const failure of orderedFailures) {
-    // 同 identity（modelInvocationId:attempt）只保留一条活跃失败记录。
-    const identity = `${failure.modelInvocationId}:${failure.attempt}`
+    // 同 identity（generationId:attempt）只保留一条活跃失败记录。
+    const identity = `${failure.generationId}:${failure.attempt}`
     if (seenFailures.has(identity)) {
       continue
     }
@@ -317,15 +317,19 @@ export function buildThreadEventTimeline(
     }
     anchor(failure.turnStartEntryId, projectAttemptFailureRecord(failure, turnOf(failure.turnStartEntryId)))
   }
-  // 活跃 model invocation synthetic；resultEntryId 已对应现存 Entry 时消失。
+  // 活跃 model generation synthetic；resultEntryId 已对应现存 Entry 时消失。
   const modelMaterialized =
-    modelInvocation != null
-    && modelInvocation.resultEntryId != null
-    && entries.some((entry) => entry.entryId === modelInvocation.resultEntryId)
-  if (modelInvocation != null && !modelMaterialized) {
+    activeAssistantOutput != null
+    && activeAssistantOutput.resultEntryId != null
+    && entries.some((entry) => entry.entryId === activeAssistantOutput.resultEntryId)
+  if (activeAssistantOutput != null && !modelMaterialized) {
     anchor(
-      modelInvocation.turnStartEntryId,
-      projectActiveModelRecord(modelInvocation, modelStream, turnOf(modelInvocation.turnStartEntryId)),
+      activeAssistantOutput.turnStartEntryId,
+      projectActiveModelRecord(
+        activeAssistantOutput,
+        modelStream,
+        turnOf(activeAssistantOutput.turnStartEntryId),
+      ),
     )
   }
   for (const invocation of toolInvocations) {
@@ -727,11 +731,11 @@ function projectToolResultRecord(
 }
 
 function projectAttemptFailureRecord(
-  failure: ModelAttemptFailureDTO,
+  failure: HarnessGenerationFailureDTO,
   turn: { turnStartEntryId: string | null; turnNumber: number },
 ): ThreadEventRecord {
   const details: ThreadEventDetailRow[] = [
-    { label: translate('ai.runtime.event.detail.modelInvocationId'), value: failure.modelInvocationId },
+    { label: translate('ai.runtime.event.detail.generationId'), value: failure.generationId },
     { label: translate('ai.runtime.event.detail.turnStartEntryId'), value: failure.turnStartEntryId },
     { label: translate('ai.runtime.event.detail.requestHeadEntryId'), value: failure.requestHeadEntryId },
     { label: translate('ai.runtime.event.detail.attempt'), value: String(failure.attempt) },
@@ -754,7 +758,7 @@ function projectAttemptFailureRecord(
     })
   }
   return {
-    id: `active:attempt-failure:${failure.modelInvocationId}:${failure.attempt}`,
+    id: `active:attempt-failure:${failure.generationId}:${failure.attempt}`,
     source: 'attempt-failure',
     entryId: null,
     turnStartEntryId: turn.turnStartEntryId,
@@ -770,41 +774,36 @@ function projectAttemptFailureRecord(
 }
 
 function projectActiveModelRecord(
-  invocation: ModelInvocationDTO,
+  activeOutput: HarnessActiveAssistantOutputDTO,
   stream: RealtimeModelStream | null,
   turn: { turnStartEntryId: string | null; turnNumber: number },
 ): ThreadEventRecord {
   const status =
     stream?.status === 'error'
       ? 'failed'
-      : mapActiveStatus(invocation.status)
+      : mapActiveStatus(activeOutput.status)
   const chars = (stream?.text.length ?? 0) + (stream?.thinking.length ?? 0)
   const details: ThreadEventDetailRow[] = [
     { label: translate('ai.runtime.event.detail.status'), value: eventStatusText(status) },
-    ...(invocation.status
-      ? [{ label: translate('ai.runtime.event.detail.rawStatus'), value: invocation.status }]
+    ...(activeOutput.status
+      ? [{ label: translate('ai.runtime.event.detail.rawStatus'), value: activeOutput.status }]
       : []),
-    { label: translate('ai.runtime.event.detail.invocationId'), value: invocation.id },
-    { label: translate('ai.runtime.event.detail.turnStartEntryId'), value: invocation.turnStartEntryId },
-    { label: translate('ai.runtime.event.detail.requestHeadEntryId'), value: invocation.requestHeadEntryId },
-    { label: translate('ai.runtime.event.detail.attempt'), value: String(invocation.attempt) },
+    { label: translate('ai.runtime.event.detail.generationId'), value: activeOutput.generationId },
+    { label: translate('ai.runtime.event.detail.turnStartEntryId'), value: activeOutput.turnStartEntryId },
+    { label: translate('ai.runtime.event.detail.requestHeadEntryId'), value: activeOutput.requestHeadEntryId },
+    { label: translate('ai.runtime.event.detail.attempt'), value: String(activeOutput.attempt) },
+    { label: translate('ai.runtime.event.detail.sequence'), value: activeOutput.sequence },
   ]
-  if (invocation.streamCheckpointJson != null) {
-    details.push({
-      label: translate('ai.runtime.event.detail.checkpoint'),
-      value: formatDisplayJson(invocation.streamCheckpointJson),
-    })
+  if (activeOutput.error != null) {
+    details.push(
+      { label: translate('ai.runtime.event.detail.errorCode'), value: activeOutput.error.code },
+      { label: translate('ai.runtime.event.detail.errorMessage'), value: activeOutput.error.message },
+    )
   }
-  if (invocation.resultJson != null) {
+  if (activeOutput.resultEntryId != null) {
     details.push({
       label: translate('ai.runtime.event.detail.result'),
-      value: formatDisplayJson(invocation.resultJson),
-    })
-  }
-  if (invocation.errorJson != null) {
-    details.push({
-      label: translate('ai.runtime.event.detail.error'),
-      value: formatDisplayJson(invocation.errorJson),
+      value: activeOutput.resultEntryId,
     })
   }
   if (chars > 0) {
@@ -817,11 +816,11 @@ function projectActiveModelRecord(
     })
   }
   const rawPayload = stream != null
-    ? { ...invocation, realtimeStream: stream }
-    : invocation
+    ? { ...activeOutput, realtimeStream: stream }
+    : activeOutput
 
   return {
-    id: `active:model:${invocation.id}`,
+    id: `active:model:${activeOutput.generationId}`,
     source: 'active-model',
     entryId: null,
     turnStartEntryId: turn.turnStartEntryId,
@@ -829,9 +828,9 @@ function projectActiveModelRecord(
     kind: 'ACTIVE_MODEL_INVOCATION',
     status,
     title: kindTitle('ACTIVE_MODEL_INVOCATION'),
-    summary: `${eventStatusText(status)} · ${translate('ai.runtime.event.detail.attempt')} ${invocation.attempt}`,
-    createdAt: invocation.createTime,
-    details: withTime(details, invocation.createTime),
+    summary: `${eventStatusText(status)} · ${translate('ai.runtime.event.detail.attempt')} ${activeOutput.attempt}`,
+    createdAt: activeOutput.createTime,
+    details: withTime(details, activeOutput.createTime),
     rawJson: formatDisplayJson(rawPayload),
   }
 }
@@ -848,7 +847,8 @@ function projectActiveToolRecord(
       ? [{ label: translate('ai.runtime.event.detail.rawStatus'), value: invocation.status }]
       : []),
     { label: translate('ai.runtime.event.detail.invocationId'), value: invocation.id },
-    { label: translate('ai.runtime.event.detail.modelInvocationId'), value: invocation.modelInvocationId },
+    { label: translate('ai.runtime.event.detail.threadId'), value: invocation.threadId },
+    { label: translate('ai.runtime.event.detail.turnStartEntryId'), value: invocation.turnStartEntryId },
     { label: translate('ai.runtime.event.detail.assistantEntryId'), value: invocation.assistantEntryId },
     { label: translate('ai.runtime.event.detail.toolName'), value: invocation.toolName || '' },
     { label: translate('ai.runtime.event.detail.toolCallId'), value: invocation.toolCallId || '' },
@@ -913,6 +913,7 @@ function mapActiveStatus(raw: string | undefined | null): ThreadEventStatus {
   switch ((raw ?? '').toLowerCase()) {
     case 'waiting_approval':
     case 'ready':
+    case 'waiting_retry':
     case 'dispatching':
     case 'queued':
     case 'pending':
@@ -927,6 +928,7 @@ function mapActiveStatus(raw: string | undefined | null): ThreadEventStatus {
     case 'success':
       return 'completed'
     case 'failed':
+    case 'blocked':
     case 'error':
       return 'failed'
     case 'cancelled':

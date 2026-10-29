@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
-import fun.fengwk.kkstudio.harness.runtime.compaction.AutomaticCompactionPlanner;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionChildSpawn;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
@@ -9,6 +8,9 @@ import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPlanner;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
+import fun.fengwk.kkstudio.harness.runtime.driver.AgentDriver;
+import fun.fengwk.kkstudio.harness.runtime.driver.CompactionResolution;
+import fun.fengwk.kkstudio.harness.runtime.driver.TurnResolution;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
@@ -17,7 +19,6 @@ import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextProbe;
@@ -37,25 +38,23 @@ import java.util.UUID;
  *
  * <p>执行顺序：单 store transaction 内按 Session KEY SHARE -&gt; Thread 顺序加锁，校验 expected version /
  * availability / boundary，构造 candidate COMPACTION TURN_START，随后在同一事务内同步调用 {@link
- * TurnResolver}，最后原子提交 COMPACTION Turn 与 MODEL Work（或失败终态）。expectedVersion 仍是对外 CAS：version 不匹配直接返回
+ * AgentDriver}，最后原子提交 COMPACTION Turn 与子执行 Work（或失败终态）。expectedVersion 仍是对外 CAS：version 不匹配直接返回
  * typed conflict； 不存在第二阶段 head / Command snapshot CAS，也不存在事务外 resolve。失败与取消保持与自动压缩一致的单一事实源。
  */
 final class ManualCompactionControl {
 
   private final HarnessStore store;
-  private final TurnResolver resolver;
+  private final AgentDriver driver;
   private final CompactionConfigProvider compactionConfigProvider;
-  private final ThreadContextProbe threadContextProbe = new ThreadContextProbe();
-  private final AutomaticCompactionPlanner automaticPlanner = new AutomaticCompactionPlanner();
+  private final ThreadContextProbe threadContextProbe;
 
   ManualCompactionControl(
-      HarnessStore store,
-      TurnResolver resolver,
-      CompactionConfigProvider compactionConfigProvider) {
+      HarnessStore store, AgentDriver driver, CompactionConfigProvider compactionConfigProvider) {
     this.store = Objects.requireNonNull(store, "store");
-    this.resolver = Objects.requireNonNull(resolver, "resolver");
+    this.driver = Objects.requireNonNull(driver, "driver");
     this.compactionConfigProvider =
         Objects.requireNonNull(compactionConfigProvider, "compactionConfigProvider");
+    this.threadContextProbe = new ThreadContextProbe(driver);
   }
 
   ManualCompactionAvailability manualCompactionAvailability(UUID threadId) {
@@ -74,9 +73,9 @@ final class ManualCompactionControl {
     return store.transaction(
         tx -> {
           ManualPlan manualPlan = planManual(tx, command);
-          TurnResolver.Result result =
-              resolver.resolve(
-                  manualPlan.threadId(), manualPlan.candidatePath(), manualPlan.preparation());
+          TurnResolution result =
+              driver.resolveTurn(
+                  tx, manualPlan.thread(), manualPlan.candidatePath(), manualPlan.preparation());
           if (result == null) {
             throw new IllegalStateException("turn resolver returned null for manual compaction");
           }
@@ -141,7 +140,7 @@ final class ManualCompactionControl {
         // 手动入口使用与自动压缩相同的约束 guard：创建约束不允许压缩的 Thread（压缩子自身及其后代）一律不可手动压缩，
         // 不依赖上层调用方（Web root guard）拦截，runtime primitive 自身绝不递归创建压缩子。
         || !thread.constraints().allowAutoCompaction()
-        || automaticPlanner.plan(thread, path, compactionConfig, false) != null) {
+        || driver.prepareAutomaticCompaction(thread, path, compactionConfig, false) != null) {
       return ManualDecision.disabled(ManualCompactionAvailability.DisabledReason.THREAD_BUSY);
     }
     CompactionHistory.ClosedTurn candidate = CompactionHistory.latestClosedTurn(path);
@@ -187,10 +186,11 @@ final class ManualCompactionControl {
 
   /** 在当前已锁定事务中原子提交压缩 Turn 及其 Model Work 或失败终态；不再重验 version / head / Command 快照。 */
   private CompactThreadResult commitManual(
-      HarnessStore.Transaction tx, ManualPlan plan, TurnResolver.Result result) {
+      HarnessStore.Transaction tx, ManualPlan plan, TurnResolution result) {
     Instant now = tx.now();
     ThreadState thread = plan.thread();
-    if (result instanceof TurnResolver.CompactionResolved compactionResolved) {
+    if (result instanceof TurnResolution.Compaction compactionTurn) {
+      CompactionResolution compactionResolved = compactionTurn.resolution();
       CompactionStart frozenStart =
           CompactionChildSpawn.start(tx, thread, compactionResolved, plan.preparation());
       TurnStartPayload startPayload = (TurnStartPayload) plan.candidateTurnStartEntry().payload();
@@ -215,7 +215,7 @@ final class ManualCompactionControl {
       return new CompactThreadResult(
           advanced, plan.turnStartEntryId(), frozenStart.childThreadId());
     }
-    TurnResolver.Rejected rejected = (TurnResolver.Rejected) result;
+    TurnResolution.Rejected rejected = (TurnResolution.Rejected) result;
     tx.insertEntry(
         new Entry(
             plan.turnStartEntryId(),
