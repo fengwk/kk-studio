@@ -774,7 +774,7 @@ describe('ToolMessageBlock per-tool bodies', () => {
     expect(container.textContent).not.toContain('后台执行')
   })
 
-  it('renders task with canonical details receipt link, preserves resume argument link, and falls back cleanly on missing/bad details', () => {
+  it('renders only the canonical receipt link for resume and falls back cleanly on missing/bad details', () => {
     const resumeArguments = JSON.stringify({
       subagent_type: 'coder',
       prompt: 'continue working on subtask',
@@ -799,7 +799,7 @@ describe('ToolMessageBlock per-tool bodies', () => {
       contents: [text('Subagent accepted execution.')],
     })
 
-    const { unmount } = render(
+    const { container, unmount } = render(
       <MemoryRouter>
         <ToolMessageBlock
           message={callMessage}
@@ -809,16 +809,21 @@ describe('ToolMessageBlock per-tool bodies', () => {
       </MemoryRouter>,
     )
 
-    // resume 参数链接与受理收据链接同时存在，指向各自的 UUID
-    const links = screen.getAllByRole('link', { name: '查看 subagent 执行' })
-    expect(links).toHaveLength(2)
-    expect(links[0]).toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000001')
-    expect(links[1]).toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000002')
+    // 即使调用与收据的 UUID 不同，也仅能导航至收据指定的线程。
+    const link = screen.getByRole('link')
+    expect(link).toHaveAccessibleName('查看 subagent (00000000-0000-0000-0000-000000000002) 执行')
+    expect(link).toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000002')
+    const prompt = screen.getByText('continue working on subtask')
+    expect(prompt.compareDocumentPosition(link) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(container.querySelector('.thread-tool-call-body')).not.toContainElement(link)
+    expect(container.querySelector('.thread-tool-body')?.lastElementChild).toContainElement(link)
+    expect(container.querySelector('.thread-tool-summary-detail'))
+      .toHaveTextContent('coder [thread_id=00000000-0000-0000-0000-000000000001]')
     // 自然语言正文在受理成功时被链接收敛，不重复展示
     expect(screen.queryByText('Subagent accepted execution.')).not.toBeInTheDocument()
     unmount()
 
-    // 缺少 details 时：无 receipt 链接，保留原始自然语言正文；call 的 resume 参数链接仍然保留
+    // 缺少 details 时不伪造链接，保留原始自然语言正文。
     const resultWithoutDetails = message({
       phase: 'result',
       toolName: 'task',
@@ -835,11 +840,24 @@ describe('ToolMessageBlock per-tool bodies', () => {
         />
       </MemoryRouter>,
     )
-    const singleResumeLink = screen.getAllByRole('link', { name: '查看 subagent 执行' })
-    expect(singleResumeLink).toHaveLength(1)
-    expect(singleResumeLink[0]).toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000001')
+    expect(screen.queryByRole('link')).not.toBeInTheDocument()
     expect(screen.getByText('Raw output without details receipt.')).toBeInTheDocument()
     unmount2()
+
+    // 非法 UUID 收据也不能借用调用参数伪造导航。
+    const { unmount: unmount3 } = render(
+      <MemoryRouter>
+        <ToolMessageBlock
+          message={callMessage}
+          result={{ ...resultWithCanonicalDetails, details: { kind: 'task.accepted', thread_id: 'invalid' },
+            contents: [text('Invalid receipt output')] }}
+          renderer={TaskToolRenderer}
+        />
+      </MemoryRouter>,
+    )
+    expect(screen.queryByRole('link')).not.toBeInTheDocument()
+    expect(screen.getByText('Invalid receipt output')).toBeInTheDocument()
+    unmount3()
 
     // 失败（error）时：即使有 details 也不生成收据链接，错误原文完整保留
     const failedResult = message({
@@ -864,10 +882,89 @@ describe('ToolMessageBlock per-tool bodies', () => {
         />
       </MemoryRouter>,
     )
-    const errorLinks = screen.getAllByRole('link', { name: '查看 subagent 执行' })
-    expect(errorLinks).toHaveLength(1)
-    expect(errorLinks[0]).toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000001')
+    expect(screen.queryByRole('link')).not.toBeInTheDocument()
     expect(screen.getByText('Failure explanation detail')).toBeInTheDocument()
+  })
+
+  it('keeps pending resume navigation absent until the accepted result arrives', () => {
+    const call = message({
+      phase: 'call', toolName: 'task', rendererKey: 'task', invocationStatus: 'RUNNING',
+      arguments: JSON.stringify({
+        subagent_type: 'coder', prompt: 'resume pending',
+        thread_id: '00000000-0000-0000-0000-000000000001',
+      }),
+    })
+    const { rerender } = render(
+      <MemoryRouter><ToolMessageBlock message={call} renderer={TaskToolRenderer} /></MemoryRouter>,
+    )
+    expect(screen.getByText('resume pending')).toBeInTheDocument()
+    expect(screen.queryByRole('link')).not.toBeInTheDocument()
+    rerender(
+      <MemoryRouter>
+        <ToolMessageBlock message={call} renderer={TaskToolRenderer} result={message({
+          phase: 'result', toolName: 'task', rendererKey: 'task',
+          details: { kind: 'task.accepted', thread_id: '00000000-0000-0000-0000-000000000002' },
+          contents: [text('accepted')],
+        })} />
+      </MemoryRouter>,
+    )
+    expect(screen.getByRole('link', { name: '查看 subagent (00000000-0000-0000-0000-000000000002) 执行' }))
+      .toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000002')
+  })
+
+  it('puts the first task receipt link after its prompt', () => {
+    const { container } = render(
+      <MemoryRouter>
+        <ToolMessageBlock message={message({
+          phase: 'call', toolName: 'task', rendererKey: 'task',
+          arguments: JSON.stringify({ subagent_type: 'explorer', prompt: 'first task prompt' }),
+        })} renderer={TaskToolRenderer} result={message({
+          phase: 'result', toolName: 'task', rendererKey: 'task',
+          details: { kind: 'task.accepted', thread_id: '00000000-0000-0000-0000-000000000002' },
+          contents: [text('accepted')],
+        })} />
+      </MemoryRouter>,
+    )
+    const prompt = screen.getByText('first task prompt')
+    const link = screen.getByRole('link')
+    expect(link).toHaveAccessibleName('查看 subagent (00000000-0000-0000-0000-000000000002) 执行')
+    expect(link).toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000002')
+    expect(prompt.compareDocumentPosition(link) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(container.querySelector('.thread-tool-call-body')).not.toContainElement(link)
+    expect(container.querySelector('.thread-tool-body')?.lastElementChild).toContainElement(link)
+  })
+
+  it('shows streaming task arguments once and retains collapse across completed arguments', async () => {
+    const user = userEvent.setup()
+    const partial = String.raw`{"max_turns":15,"prompt":"Objective\n...未闭合片段`
+    const call = message({
+      phase: 'call', toolName: 'task', rendererKey: 'task',
+      status: 'streaming', subjectEntryId: null, arguments: partial,
+    })
+    const { container, rerender } = render(<ToolMessageBlock message={call} renderer={TaskToolRenderer} />)
+    const header = container.querySelector('.thread-tool-summary')!
+    const body = container.querySelector('.thread-tool-body')!
+    // 未闭合参数原样仅出现在正文；已解析的短参数仍留在标题。
+    expect(header).toHaveTextContent('task [max_turns=15]')
+    expect(header.textContent).not.toContain('Objective')
+    expect(body.querySelectorAll('.thread-tool-output')).toHaveLength(1)
+    expect(body.querySelector('.thread-tool-output')?.textContent).toBe(partial)
+    expect(container.textContent?.split(partial)).toHaveLength(2)
+
+    // 流式时主动收起，完整参数到达后仍保留用户选择。
+    await user.click(collapseButton()!)
+    const complete = {
+      ...call, status: 'done' as const, subjectEntryId: 'assistant-1',
+      arguments: JSON.stringify({ max_turns: 15, prompt: 'Objective\ncompleted prompt', subagent_type: 'Searcher' }),
+    }
+    rerender(<ToolMessageBlock message={complete} renderer={TaskToolRenderer} />)
+    expect(header).toHaveTextContent('task Searcher [max_turns=15]')
+    expect(header.textContent).not.toContain('Objective')
+    expect(expandButton()).toHaveAttribute('aria-expanded', 'false')
+    expect(container.querySelector('.thread-tool-body')).toBeNull()
+    await user.click(expandButton()!)
+    expect(screen.getAllByText('Objective completed prompt')).toHaveLength(1)
+    expect(container.querySelector('.thread-tool-output')?.textContent).toBe('Objective\ncompleted prompt')
   })
 
   it('renders ask_user as a read-only record without a submission path', () => {

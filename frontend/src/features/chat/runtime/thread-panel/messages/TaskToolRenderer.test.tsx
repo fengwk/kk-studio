@@ -7,6 +7,7 @@ import {
   parseTaskReceipt,
 } from '@/features/chat/runtime/task-tool-parser'
 import type { ToolRendererMessage } from '@/platform/extensions/types'
+import { setLocale } from '@/shared/i18n'
 
 function message(overrides: Partial<ToolRendererMessage> = {}): ToolRendererMessage {
   return {
@@ -155,7 +156,7 @@ describe('TaskToolRenderer call phase', () => {
     expect(container.querySelector('.task-tool-renderer')).toBeInTheDocument()
   })
 
-  it('renders the prompt and a clickable thread id without repeating header params', () => {
+  it('renders the prompt without a call-side thread link or repeated header params', () => {
     render(
       <MemoryRouter>
         <TaskToolRenderer
@@ -167,8 +168,8 @@ describe('TaskToolRenderer call phase', () => {
         />
       </MemoryRouter>,
     )
-    const threadLink = screen.getByRole('link', { name: '查看 subagent 执行' })
-    expect(threadLink).toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000101')
+    // 导航只能由结果中的受理收据提供，调用阶段不能提前生成链接。
+    expect(screen.queryByRole('link')).not.toBeInTheDocument()
     expect(screen.getByText('inspect the workspace')).toBeInTheDocument()
     // subagent_type / max_turns 已在 Header 展示，正文不重复。
     expect(screen.queryByText('explorer')).not.toBeInTheDocument()
@@ -177,6 +178,16 @@ describe('TaskToolRenderer call phase', () => {
     // 受理不代表完成：不出现任何完成/后台执行暗示。
     expect(screen.queryByText(/已接受|后台执行|已完成/)).not.toBeInTheDocument()
     expect(screen.queryByText(/运行中/)).not.toBeInTheDocument()
+  })
+
+  it('does not repeat a thread-only call as raw arguments', () => {
+    const args = '{"thread_id":"00000000-0000-0000-0000-000000000101"}'
+    const { container } = render(
+      <MemoryRouter><TaskToolRenderer message={message({ arguments: args })} /></MemoryRouter>,
+    )
+    // thread_id 已在 Header 显示，缺少 prompt 不应触发原始参数回退。
+    expect(container.querySelector('.thread-tool-output')).toBeNull()
+    expect(screen.queryByRole('link')).not.toBeInTheDocument()
   })
 
   it('does not render fields for legacy session_id or maxTurns aliases', () => {
@@ -223,7 +234,7 @@ describe('TaskToolRenderer result phase', () => {
         />
       </MemoryRouter>,
     )
-    expect(screen.getByRole('link', { name: '查看 subagent 执行' }))
+    expect(screen.getByRole('link', { name: '查看 subagent (00000000-0000-4000-8000-000000000004) 执行' }))
       .toHaveAttribute('href', '/threads/00000000-0000-4000-8000-000000000004')
     rerender(
       <MemoryRouter>
@@ -239,15 +250,16 @@ describe('TaskToolRenderer result phase', () => {
     expect(screen.queryByRole('link')).toBeNull()
   })
 
-  it('preserves user-owned Thread ID text in the prompt while hiding navigation UUID text', () => {
+  it('preserves user-owned Thread ID text including a UUID in the prompt', () => {
     const { container } = render(<MemoryRouter><TaskToolRenderer message={message({
       arguments: JSON.stringify({
         subagent_type: 'Explorer', thread_id: '00000000-0000-4000-8000-000000000004',
-        prompt: 'Thread ID user-owned-content must remain verbatim',
+        prompt: 'Thread ID 00000000-0000-4000-8000-000000000004 user-owned-content must remain verbatim',
       }),
     })} /></MemoryRouter>)
-    expect(container.textContent).toContain('Thread ID user-owned-content must remain verbatim')
-    expect(container.textContent).not.toContain('00000000-0000-4000-8000-000000000004')
+    expect(container.textContent)
+      .toContain('Thread ID 00000000-0000-4000-8000-000000000004 user-owned-content must remain verbatim')
+    expect(screen.queryByRole('link')).not.toBeInTheDocument()
     expect(container.querySelector('dt')).toBeNull()
   })
 
@@ -270,11 +282,26 @@ describe('TaskToolRenderer result phase', () => {
         />
       </MemoryRouter>,
     )
-    const link = screen.getByRole('link', { name: '查看 subagent 执行' })
+    const link = screen.getByRole('link', { name: '查看 subagent (00000000-0000-0000-0000-000000000202) 执行' })
     expect(link).toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000202')
     // 受理收据既不重复打印正文，也不宣称子任务完成。
     expect(screen.queryByText('Subagent execution started.')).not.toBeInTheDocument()
     expect(screen.queryByText(/已接受|后台执行|已完成|报告/)).not.toBeInTheDocument()
+  })
+
+  it('shows the full receipt thread ID in the English link label', () => {
+    // 英文插值必须与实际导航目标一致，不能显示未替换的占位符。
+    setLocale('en-US')
+    render(
+      <MemoryRouter>
+        <TaskToolRenderer message={message({
+          phase: 'result',
+          details: { kind: 'task.accepted', thread_id: '00000000-0000-4000-8000-000000000004' },
+        })} />
+      </MemoryRouter>,
+    )
+    expect(screen.getByRole('link', { name: 'View subagent (00000000-0000-4000-8000-000000000004) execution' }))
+      .toHaveAttribute('href', '/threads/00000000-0000-4000-8000-000000000004')
   })
 
   it('falls back to the full contents when details is missing or invalid', () => {

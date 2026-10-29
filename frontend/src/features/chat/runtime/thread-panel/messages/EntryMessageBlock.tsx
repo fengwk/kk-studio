@@ -37,6 +37,7 @@ export function EntryMessageBlock({ message }: { message: EntryEventDialogueMess
   const singleLine = message.kind === 'root'
     || message.kind === 'settings_change'
     || message.kind === 'invalid_settings'
+    || message.kind === 'empty_message'
   return (
     <section
       className={`thread-block thread-block-entry kind-${message.kind}${singleLine ? ' is-inline' : ''}`}

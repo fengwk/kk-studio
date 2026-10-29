@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { EntryType } from '@/shared/api/contracts/ai-runtime'
+import { setLocale } from '@/shared/i18n'
 import {
   buildThreadTimeline,
   parseApproval,
@@ -567,8 +568,8 @@ describe('thread timeline edge branches', () => {
     expect(timeline.messages[3]).toMatchObject({ title: '未识别 Entry：CUSTOM' })
     expect(timeline.messages[4]).toMatchObject({ title: '未识别 Entry：SOMETHING_ELSE' })
     expect(timeline.messages[0]).toMatchObject({
-      title: 'USER 消息',
-      text: '该消息 Entry 没有可展示的文本、思考、工具调用或工具结果。',
+      title: '此消息没有可展示内容。',
+      text: '',
     })
     // 无 text 且有 tool_call 的 ASSISTANT（含无 toolCallId 的残缺调用）：
     // tool call 正常投影，空 arguments 使用 queue 默认值，title 的 role 插值。
@@ -812,6 +813,38 @@ describe('thread timeline edge branches', () => {
         text: '消息角色或数据无效。',
       },
     ])
+  })
+
+  it('projects localized empty assistant and other messages without losing their identity', () => {
+    // 两种角色和两种语言走同一真实投影，且不改变完成语义。
+    const entries = [
+      entry('empty-assistant', 'MESSAGE', {
+        message: { role: 'ASSISTANT', contents: [] },
+        assistantMetadata: {
+          usage: { inputTokens: 10, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+          decodeDurationMillis: 1000,
+        },
+      }),
+      entry('empty-user', 'MESSAGE', { message: { role: 'USER', contents: [] } }),
+      entry('end', 'TURN_END', { outcome: 'COMPLETED' }),
+    ]
+    const zh = buildThreadTimeline(entries, [], []).messages
+    expect(zh).toMatchObject([
+      { id: 'entry:empty-assistant', subjectEntryId: 'empty-assistant', kind: 'empty_message', title: '返回内容为空', text: '' },
+      { id: 'entry:empty-user', subjectEntryId: 'empty-user', kind: 'empty_message', title: '此消息没有可展示内容。', text: '' },
+      { role: 'meta', endEntryId: 'end', turnUsage: { input: 10, output: 0, decodeTokens: 0 } },
+    ])
+    try {
+      setLocale('en-US')
+      const en = buildThreadTimeline(entries, [], []).messages
+      expect(en).toMatchObject([
+        { title: 'Empty response', text: '' },
+        { title: 'This message has no displayable content.', text: '' },
+        { role: 'meta', endEntryId: 'end', turnUsage: { input: 10, output: 0, decodeTokens: 0 } },
+      ])
+    } finally {
+      setLocale('zh-CN')
+    }
   })
 
   it('normalizes approval JSON defensively across shape and garbage inputs', () => {

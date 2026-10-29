@@ -65,9 +65,9 @@ test.describe('Subagent receipt card', () => {
       .toBe(scrim)
 
     // 同一来源 subagent 的两条回执各自保留身份与独立来源链接。
-    await expect(cards.nth(0).getByRole('link', { name: '查看 subagent 执行' }))
+    await expect(cards.nth(0).getByRole('link', { name: '查看 subagent (child-thread-1) 执行' }))
       .toHaveAttribute('href', '/threads/child-thread-1')
-    await expect(cards.nth(4).getByRole('link', { name: '查看 subagent 执行' }))
+    await expect(cards.nth(4).getByRole('link', { name: '查看 subagent (child-thread-1) 执行' }))
       .toHaveAttribute('href', '/threads/child-thread-1')
 
     await page.screenshot({ path: testInfo.outputPath('subagent-receipt-collapsed.png') })

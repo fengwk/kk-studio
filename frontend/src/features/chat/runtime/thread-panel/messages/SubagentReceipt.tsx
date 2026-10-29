@@ -94,10 +94,10 @@ export function SubagentReceipt({
           <ThreadLink
             className="thread-subagent-receipt-source"
             threadId={sourceThreadId}
-            title={t('ai.runtime.notification.entry.viewSubagentExecution')}
+            title={t('ai.runtime.notification.entry.viewSubagentExecution', { threadId: sourceThreadId })}
           >
             <ArrowUpRight aria-hidden="true" />
-            {t('ai.runtime.notification.entry.viewSubagentExecution')}
+            {t('ai.runtime.notification.entry.viewSubagentExecution', { threadId: sourceThreadId })}
           </ThreadLink>
         )}
         <button

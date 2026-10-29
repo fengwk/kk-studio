@@ -46,6 +46,17 @@ describe('tool display', () => {
       .toBe('task Explorer [max_turns=4]')
   })
 
+  it.each([
+    [String.raw`{"max_turns":15,"prompt":"Objective\n...未闭合片段`, 'task [max_turns=15]'],
+    [JSON.stringify({ max_turns: 15, thread_id: 'child-1', prompt: 'Objective\ncomplete' }),
+      'task [max_turns=15 thread_id=child-1]'],
+    [JSON.stringify({ prompt: 'Objective\nprompt only' }), 'task'],
+    ['not-json {', 'task'],
+  ])('keeps task raw arguments out of the header without subagent_type', (argumentsValue, expected) => {
+    // 不完整或缺少类型的调用仍只在标题显示已知短参数。
+    expect(formatToolCallSummary('task', argumentsValue).text).toBe(expected)
+  })
+
   it('keeps the ask_user question out of the header', () => {
     // 问题/选项/答案整体下移到只读记录，Header 不重复问题文本。
     expect(formatToolCallSummary('ask_user', JSON.stringify({
