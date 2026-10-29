@@ -48,7 +48,7 @@ function TaskToolResult({ message }: { message: ToolRendererMessage }) {
   return (
     <div className="task-tool-renderer">
       <ThreadLink threadId={receipt.threadId} className="task-tool-thread-link">
-        {translate('ai.runtime.notification.entry.viewSubagentExecution')}
+        {translate('ai.runtime.notification.entry.viewSubagentExecution', { threadId: receipt.threadId })}
       </ThreadLink>
     </div>
   )

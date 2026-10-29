@@ -1262,8 +1262,8 @@ export const chatCatalog = {
     'zh-CN': '已返回',
   },
   'ai.runtime.notification.entry.viewSubagentExecution': {
-    'en-US': 'View subagent execution',
-    'zh-CN': '查看 subagent 执行',
+    'en-US': 'View subagent ({{threadId}}) execution',
+    'zh-CN': '查看 subagent ({{threadId}}) 执行',
   },
   'ai.runtime.notification.entry.invalidReceipt': {
     'en-US': 'The subagent receipt is not a valid XML envelope and cannot be displayed.',

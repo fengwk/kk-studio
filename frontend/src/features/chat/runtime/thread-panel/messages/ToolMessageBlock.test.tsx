@@ -810,7 +810,8 @@ describe('ToolMessageBlock per-tool bodies', () => {
     )
 
     // 即使调用与收据的 UUID 不同，也仅能导航至收据指定的线程。
-    const link = screen.getByRole('link', { name: '查看 subagent 执行' })
+    const link = screen.getByRole('link')
+    expect(link).toHaveAccessibleName('查看 subagent (00000000-0000-0000-0000-000000000002) 执行')
     expect(link).toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000002')
     const prompt = screen.getByText('continue working on subtask')
     expect(prompt.compareDocumentPosition(link) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
@@ -839,7 +840,7 @@ describe('ToolMessageBlock per-tool bodies', () => {
         />
       </MemoryRouter>,
     )
-    expect(screen.queryByRole('link', { name: '查看 subagent 执行' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link')).not.toBeInTheDocument()
     expect(screen.getByText('Raw output without details receipt.')).toBeInTheDocument()
     unmount2()
 
@@ -854,7 +855,7 @@ describe('ToolMessageBlock per-tool bodies', () => {
         />
       </MemoryRouter>,
     )
-    expect(screen.queryByRole('link', { name: '查看 subagent 执行' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link')).not.toBeInTheDocument()
     expect(screen.getByText('Invalid receipt output')).toBeInTheDocument()
     unmount3()
 
@@ -881,7 +882,7 @@ describe('ToolMessageBlock per-tool bodies', () => {
         />
       </MemoryRouter>,
     )
-    expect(screen.queryByRole('link', { name: '查看 subagent 执行' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link')).not.toBeInTheDocument()
     expect(screen.getByText('Failure explanation detail')).toBeInTheDocument()
   })
 
@@ -897,7 +898,7 @@ describe('ToolMessageBlock per-tool bodies', () => {
       <MemoryRouter><ToolMessageBlock message={call} renderer={TaskToolRenderer} /></MemoryRouter>,
     )
     expect(screen.getByText('resume pending')).toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: '查看 subagent 执行' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link')).not.toBeInTheDocument()
     rerender(
       <MemoryRouter>
         <ToolMessageBlock message={call} renderer={TaskToolRenderer} result={message({
@@ -907,7 +908,7 @@ describe('ToolMessageBlock per-tool bodies', () => {
         })} />
       </MemoryRouter>,
     )
-    expect(screen.getByRole('link', { name: '查看 subagent 执行' }))
+    expect(screen.getByRole('link', { name: '查看 subagent (00000000-0000-0000-0000-000000000002) 执行' }))
       .toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000002')
   })
 
@@ -925,7 +926,8 @@ describe('ToolMessageBlock per-tool bodies', () => {
       </MemoryRouter>,
     )
     const prompt = screen.getByText('first task prompt')
-    const link = screen.getByRole('link', { name: '查看 subagent 执行' })
+    const link = screen.getByRole('link')
+    expect(link).toHaveAccessibleName('查看 subagent (00000000-0000-0000-0000-000000000002) 执行')
     expect(link).toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000002')
     expect(prompt.compareDocumentPosition(link) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(container.querySelector('.thread-tool-call-body')).not.toContainElement(link)
