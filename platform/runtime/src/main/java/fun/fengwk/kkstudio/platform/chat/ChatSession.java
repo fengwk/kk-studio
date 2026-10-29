@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.chat.repo;
+package fun.fengwk.kkstudio.platform.chat;
 
 import java.util.Objects;
 import java.util.UUID;

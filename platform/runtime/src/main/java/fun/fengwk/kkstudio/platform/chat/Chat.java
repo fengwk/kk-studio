@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.chat.service.model;
+package fun.fengwk.kkstudio.platform.chat;
 
 import lombok.Data;
 
