@@ -4388,6 +4388,8 @@ describe('AgentPane root control and child observation', () => {
 
     const source = await screen.findByRole('link', { name: /worker/ })
     expect(source).toHaveAttribute('href', `/threads/${CHILD_THREAD_ID}`)
+    expect(source).toHaveAttribute('title', `查看 subagent (${CHILD_THREAD_ID}) 执行`)
+    expect(source).toHaveTextContent(`查看 subagent (${CHILD_THREAD_ID}) 执行`)
     const composer = await screen.findByLabelText('给 AI 发送消息')
     await user.type(composer, 'root draft kept')
     const unmountsBeforeObservation = controlMounts.unmount.mock.calls.length
@@ -4434,6 +4436,23 @@ describe('AgentPane root control and child observation', () => {
     // 优先级高于触发点恢复），不停留在隐藏层，也不丢到 body。
     expect(layers[0].contains(document.activeElement)).toBe(true)
     expect(document.activeElement).not.toBe(document.body)
+  })
+
+  it('keeps the root interaction source label unchanged', async () => {
+    // 根自身的交互仍用查看来源，而非子代理执行链接文案。
+    vi.mocked(harnessService.getThreadTree).mockResolvedValue([
+      treeNode(THREAD_ID, null, 'root thread', false),
+    ])
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshotForThread(THREAD_ID))
+    vi.mocked(interactionService.listInteractions).mockResolvedValue(
+      interactionPage([approvalInteraction(THREAD_ID)]),
+    )
+    bindPaneToRoot()
+    renderPane({ type: 'CHAT', chatId: CHAT_ID })
+
+    const source = await screen.findByRole('link', { name: 'root thread' })
+    expect(source).toHaveAttribute('title', '查看来源')
+    expect(source).toHaveAttribute('href', `/threads/${THREAD_ID}`)
   })
 
   it('keeps the covered root composer inert, unfocusable and out of global shortcuts', async () => {
@@ -4952,8 +4971,8 @@ describe('AgentPane root control mounting', () => {
     await waitFor(() => expect(composer).toHaveTextContent('排队中的输入'))
   })
 
-  it('keeps the original source target without exposing a UUID when its tree name is missing', async () => {
-    // 无来源名称仍保留原始跳转身份，不借用根名称，也不向用户展示裸 UUID。
+  it('shows the original source UUID when its tree name is missing', async () => {
+    // 无来源名称仍展示原始跳转身份，标签与 href 一致且不借用根名称。
     const unknownSourceId = '44444444-5555-4666-8777-888888888888'
     bindPaneTarget({ kind: 'BOUND_THREAD', threadId: THREAD_ID })
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot(thread()))
@@ -4966,9 +4985,10 @@ describe('AgentPane root control mounting', () => {
 
     renderPane({ type: 'CHAT', chatId: CHAT_ID })
 
-    const source = await screen.findByRole('link', { name: '查看 subagent 执行' })
-    expect(source).toHaveAttribute('title', '查看 subagent 执行')
-    expect(source).not.toHaveTextContent(unknownSourceId)
+    const label = `查看 subagent (${unknownSourceId}) 执行`
+    const source = await screen.findByRole('link', { name: label })
+    expect(source).toHaveAttribute('title', label)
+    expect(source).toHaveTextContent(label)
     expect(source).toHaveAttribute('href', `/threads/${unknownSourceId}`)
   })
 

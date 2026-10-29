@@ -89,10 +89,11 @@ for (const width of [1440, 360, 320]) {
     )
     await expect(card.locator('.thread-tool-state-label, .thread-tool-tail > svg, .task-tool-fields')).toHaveCount(0)
     await expect(card).toContainText('Keep this user text: Thread ID user-owned-marker')
-    const links = card.getByRole('link', { name: 'View subagent execution' })
-    await expect(links).toHaveCount(2)
-    await expect(links.nth(1)).toHaveAttribute('href', '/threads/00000000-0000-4000-8000-000000000005')
-    const typography = await links.nth(1).evaluate((element) => {
+    const links = card.getByRole('link')
+    await expect(links).toHaveCount(1)
+    await expect(links).toHaveAccessibleName('View subagent (00000000-0000-4000-8000-000000000005) execution')
+    await expect(links).toHaveAttribute('href', '/threads/00000000-0000-4000-8000-000000000005')
+    const typography = await links.evaluate((element) => {
       const style = getComputedStyle(element)
       const body = getComputedStyle(document.querySelector('.task-tool-renderer .thread-tool-pre')!)
       return {
@@ -102,7 +103,7 @@ for (const width of [1440, 360, 320]) {
     })
     expect(typography.link).toEqual(typography.body)
     expect(typography.link[0].toLowerCase()).not.toContain('monospace')
-    await links.nth(1).click()
+    await links.click()
     await expect(page.getByLabel('selected thread')).toHaveText('00000000-0000-4000-8000-000000000005')
     await expect(card.locator('.thread-tool-toggle')).toHaveAttribute('aria-expanded', 'true')
     await page.screenshot({ path: testInfo.outputPath(`task-card-expanded-${width}.png`) })

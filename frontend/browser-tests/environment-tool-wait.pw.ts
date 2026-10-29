@@ -99,10 +99,11 @@ for (const scenario of ['pane-root', 'pane-child']) {
     await expect(page.locator('.thread-status-footer')).not.toContainText('等待环境')
     if (scenario === 'pane-root') {
       const approval = page.locator('.interaction-feed-item')
-      await expect(approval.locator('.interaction-source-link')).toContainText('查看 subagent 执行')
+      await expect(approval.locator('.interaction-source-link')).toContainText(`查看 subagent (${CHILD}) 执行`)
       await expect(approval.locator('.interaction-source-link')).toContainText('worker')
       await expect(approval.locator('.interaction-source-link')).toHaveAttribute('href', `/threads/${CHILD}`)
-      await expect(approval).not.toContainText(CHILD)
+      await expect(approval.locator('.interaction-source-link'))
+        .toHaveAttribute('title', `查看 subagent (${CHILD}) 执行`)
       await expect(approval.locator('.interaction-deny-btn')).toHaveClass(/btn-primary danger/)
       await expect(approval.locator('pre')).toHaveCount(1)
       await expect(approval.locator('pre')).toHaveText('{"command":"deploy --dry-run","workdir":"/srv/approval-workdir"}')

@@ -273,8 +273,9 @@ describe('NotificationEntryBlock', () => {
     expect(block?.querySelector('.thread-subagent-receipt-toggle'))
       .toHaveAttribute('aria-expanded', 'false')
 
-    const link = screen.getByRole('link', { name: '查看 subagent 执行' })
+    const link = screen.getByRole('link', { name: '查看 subagent (child-thread-1) 执行' })
     expect(link).toHaveAttribute('href', '/threads/child-thread-1')
+    expect(link).toHaveAttribute('title', '查看 subagent (child-thread-1) 执行')
 
     // 折叠态只出现截断后的任务预览，完整任务原文与报告都还没渲染。
     expect(container.textContent).not.toContain(SECRET_TASK_TAIL)
@@ -314,7 +315,7 @@ describe('NotificationEntryBlock', () => {
       onOpenThread,
     )
 
-    fireEvent.click(screen.getByRole('link', { name: '查看 subagent 执行' }))
+    fireEvent.click(screen.getByRole('link', { name: '查看 subagent (child-thread-1) 执行' }))
     expect(onOpenThread).toHaveBeenCalledWith('child-thread-1')
   })
 
