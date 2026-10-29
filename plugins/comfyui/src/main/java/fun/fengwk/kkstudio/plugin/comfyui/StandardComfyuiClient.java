@@ -10,11 +10,12 @@ import tools.jackson.databind.cfg.JsonNodeFeature;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.common.io.DeadlineResponseBody;
 import fun.fengwk.kkstudio.common.json.JsonValues;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialSnapshot;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableException;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialAccess;
+import fun.fengwk.kkstudio.platform.plugin.support.CredentialRejection;
+import fun.fengwk.kkstudio.platform.plugin.support.DeadlineResponseBody;
 
 import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
@@ -410,11 +411,13 @@ public final class StandardComfyuiClient implements Closeable {
   }
 
   private void rejectUsed(PluginCredentialSnapshot snapshot) {
-    try {
-      credentialAccess.rejectUsed(snapshot, AUTH_REJECTED_ERROR);
-    } catch (RuntimeException error) {
-      log.debug("ComfyUI credential rejection failed type={}", error.getClass().getSimpleName());
-    }
+    CredentialRejection.rejectUsed(
+        credentialAccess,
+        snapshot,
+        AUTH_REJECTED_ERROR,
+        error ->
+            log.debug(
+                "ComfyUI credential rejection failed type={}", error.getClass().getSimpleName()));
   }
 
   private record ComfyResponse(int statusCode, HttpHeaders headers, DeadlineResponseBody body) {}
