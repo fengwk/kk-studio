@@ -11,6 +11,9 @@ Environment、Settings 和 Harness 产品用例。它负责跨资源事务、实
 扫描 service、repository 和 JdbcStore。生产组合根是 [Web](web.md)。
 PostgreSQL 保存业务事实，内存 registry、执行句柄和通知承担可重建的运行状态。
 
+[`EnvironmentConfiguration`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/environment/EnvironmentConfiguration.java)
+由上述组件扫描装配，提供默认 UTC 时钟和节点身份；它不是独立的 Boot 自动配置入口。
+
 [`PostgresqlPersistenceConfiguration`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/persistence/PostgresqlPersistenceConfiguration.java)
 提供 PostgreSQL 异常翻译器，Boot 自动配置的 `JdbcTemplate`、`NamedParameterJdbcTemplate` 和
 `JdbcClient` 共用它。普通 SQL 使用 `JdbcClient` 命名参数与显式 `RowMapper`；异常翻译固定唯一数据库产品
@@ -36,7 +39,7 @@ PostgreSQL 保存业务事实，内存 registry、执行句柄和通知承担可
 | [environment](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/environment) | Card、注册令牌、路由租约、宿主信息和 Skill 同步 |
 | [plugin](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/plugin) | PluginProperties、安全管理面、凭据存储/刷新与资源传输实现；纯 SPI 契约见 [Platform Plugin API](platform-plugin-api.md) |
 | [settings](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/settings) | 全局设置、严格 codec、编辑 schema、版本快照与运行时现读的全局代理装配 |
-| [configsync](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/configsync) | 八类配置的 YAML 读写、依赖闭包与原子导入 |
+| [configsync](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/configsync) | 具体的 `ConfigSyncService` 编排八类配置的 YAML 读写、依赖闭包与原子导入 |
 
 ## 待处理交互
 

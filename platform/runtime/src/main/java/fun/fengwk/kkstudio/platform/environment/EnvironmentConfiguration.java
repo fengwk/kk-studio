@@ -7,9 +7,9 @@ import org.springframework.context.annotation.Configuration;
 import java.time.Clock;
 import java.util.UUID;
 
-/** 启用 Environment gateway 组件。 */
+/** 由 Platform 组件扫描装配的 Environment 时钟与节点身份。 */
 @Configuration(proxyBeanMethods = false)
-public class EnvironmentAutoConfiguration {
+public class EnvironmentConfiguration {
 
   @Bean
   @ConditionalOnMissingBean
