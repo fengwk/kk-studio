@@ -301,7 +301,7 @@ test('the five-platform Node matrix builds and covers every official target', ()
   assert.deepEqual(included, [
     'ubuntu-latest:linux-amd64',
     'ubuntu-24.04-arm:linux-arm64',
-    'macos-14:macos-arm64',
+    'macos-15:macos-arm64',
     'macos-15-intel:macos-amd64',
     'windows-latest:windows-amd64',
   ])
