@@ -11,7 +11,7 @@ Pane 布局、未发送输入、上传进度与编辑草稿由浏览器保存。
 
 [`main.tsx`](../../frontend/src/main.tsx) 在 StrictMode 下挂载
 [`AppProviders`](../../frontend/src/app/providers.tsx)：
-QueryClient → ApplicationContributions → BrowserPreferences → ApplicationEvent → BrowserRouter。
+BrowserRouter → QueryClient → ApplicationContributions → BrowserPreferences → ApplicationEvent → IdePanel。
 查询默认关闭自动 retry 与窗口聚焦刷新；共享 ApplicationEvent manager 管理订阅。
 
 [`AppRouter`](../../frontend/src/app/router.tsx) 将 `/` 转至 `/chats`，`/interactions` 由应用层
@@ -40,7 +40,7 @@ Thread panel 消费 timeline presentation 类型，宿主负责 API、realtime �
 
 ## API 与 wire 校验
 
-[`client.ts`](../../frontend/src/shared/api/client.ts) 使用 `/api`、60 秒 timeout，
+[`client.ts`](../../frontend/src/shared/api/client.ts) 使用 `/api` 并设置请求超时，
 注入 Accept-Language 并解包 ResultEnvelope。ApiError 保留 status、code、errors；
 恢复逻辑按精确 reason 判断，未知 reason 使用安全提示。
 
@@ -53,7 +53,7 @@ Thread panel 消费 timeline presentation 类型，宿主负责 API、realtime �
 
 [`contracts`](../../frontend/src/shared/api/contracts) 只保留前端细化：Java 侧带 `type` 字段的扁平类
 （Harness 命令、交互、上传）写成同名判别联合，前端依赖的封闭取值集合写成常量与类型守卫；
-service 按 Catalog、Chat、Harness、Environment、MCP、Interaction、Plugin、Canvas、Storage、Settings 分组，
+service 按 Agent、Chat、Harness、Environment、MCP Server、Interaction、Plugins、Studio、Storage、System Settings 与配置同步分组，
 Project codec 在 [Projects feature](../../frontend/src/features/projects) 就近维护。
 HTTP 路由事实源见 [Web](web.md)，JSON 字段规则见 [Share](share.md)。
 codec 校验 canonical UUID、十进字符串、枚举、可空性和嵌套结构；
@@ -406,7 +406,7 @@ REFRESH_UNCERTAIN/REAUTH_REQUIRED 要求重新连接，Disconnect 二次确认�
 [`shared/ui`](../../frontend/src/shared/ui) 只提供中性组件：controls（Button、IconButton、Checkbox、
 Select、Switch、NumberInput、SearchField、TextInput、TextArea、TagInput、FieldLabel、Tabs）、cards（ResourceCard、
 ResourceGrid）、overlays（Dialog、ConfirmActionModal）、feedback（Toast、StateBlock、EmptyState、CreateCard）、
-data（Badge、Mono/Code、KeyValue、Table）、layout（Panel、Toolbar），
+data（Badge、Mono/Code、KeyValue）、layout（Panel、Toolbar），
 以及 markdown 与 media 内容组件；不引入外部 UI 组件库，
 生产代码禁用原生 `<select>`，下拉统一走自研 listbox。
 [`Dialog`](../../frontend/src/shared/ui/overlays/Dialog.tsx) portal 到 body，提供焦点陷阱与关闭后
