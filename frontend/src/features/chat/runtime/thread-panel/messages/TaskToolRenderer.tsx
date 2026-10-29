@@ -6,7 +6,7 @@ import type { ToolRendererMessage, ToolRendererProps } from '@/platform/extensio
 import { translate } from '@/shared/i18n'
 
 /**
- * task renderer：Header 展示小参数，正文展示 prompt 与可点击 Thread 链接。
+ * task renderer：Header 展示小参数，调用正文展示 prompt，受理收据提供 Thread 链接。
  * 受理只说明子线程已创建，绝不显示「已受理/后台执行」之类的完成暗示，也不展示子任务报告。
  */
 export function TaskToolRenderer({ message }: ToolRendererProps) {
@@ -21,15 +21,10 @@ function TaskToolCall({ message }: { message: ToolRendererMessage }) {
   const hasParsedField = args.prompt != null || args.threadId != null
   return (
     <div className="task-tool-renderer">
-      {args.threadId != null ? (
-        <ThreadLink threadId={args.threadId} className="task-tool-thread-link">
-          {translate('ai.runtime.notification.entry.viewSubagentExecution')}
-        </ThreadLink>
-      ) : null}
       {args.prompt != null ? (
         <ToolOutputViewport followKey={args.prompt}>{args.prompt}</ToolOutputViewport>
       ) : null}
-      {/* 参数不是合法 JSON 时回退展示原始参数。 */}
+      {/* 没有可解析的 prompt 或 thread_id 时回退展示原始参数。 */}
       {!hasParsedField && message.arguments.trim() ? (
         <ToolOutputViewport followKey={message.arguments}>
           {message.arguments}
