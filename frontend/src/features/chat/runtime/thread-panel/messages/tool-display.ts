@@ -109,9 +109,6 @@ function formatKnownToolDetail(
       return ''
     case 'task': {
       const subagentType = stringField(values.subagent_type)
-      if (!subagentType) {
-        return null
-      }
       return withOptions(subagentType, [
         ['max_turns', values.max_turns],
         ['thread_id', values.thread_id],
