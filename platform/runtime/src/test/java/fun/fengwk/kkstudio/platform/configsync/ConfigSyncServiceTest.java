@@ -42,7 +42,7 @@ import java.util.Map;
  * 测试意图：锁定应用服务编排——inventory/export 在单一只读快照上构图与展开依赖；import 把解析、计划与事务写入串起来，并保证
  * 下游校验失败只暴露安全错误文本（不透传可能含真实值的下游消息）。
  */
-class ConfigSyncServiceImplTest {
+class ConfigSyncServiceTest {
 
   private final ConfigSyncYaml yaml = new ConfigSyncYaml();
   private final ConfigSyncGraph graph =
@@ -80,8 +80,8 @@ class ConfigSyncServiceImplTest {
           ConfigSyncFixtures.GROUP_CONFIG_CODEC,
           ConfigSyncFixtures.agentDependencies());
 
-  private final ConfigSyncServiceImpl service =
-      new ConfigSyncServiceImpl(snapshotReader, graph, exporter, parser, planner, applier);
+  private final ConfigSyncService service =
+      new ConfigSyncService(snapshotReader, graph, exporter, parser, planner, applier);
 
   private ConfigSyncSnapshot richSnapshot() {
     return snapshot(
