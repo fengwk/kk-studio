@@ -1,13 +1,8 @@
-package fun.fengwk.kkstudio.platform.chat.service.impl;
+package fun.fengwk.kkstudio.platform.chat;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import fun.fengwk.kkstudio.platform.chat.repo.ChatRepository;
-import fun.fengwk.kkstudio.platform.chat.service.ChatIds;
-import fun.fengwk.kkstudio.platform.chat.service.ChatService;
-import fun.fengwk.kkstudio.platform.chat.service.converter.ChatConverter;
-import fun.fengwk.kkstudio.platform.chat.service.model.Chat;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
@@ -27,42 +22,36 @@ import java.util.stream.Collectors;
  * Chat CRUD 服务；deleteChat 是深删除：排他锁定 Chat 后经共享 {@link SessionDeletionOrchestrator} 删除全部归属 Session。
  */
 @Service
-public class ChatServiceImpl implements ChatService {
+public class ChatService {
 
   private static final String RESOURCE = "chat";
 
   private final ChatRepository repository;
-  private final ChatConverter converter;
   private final ChatMutationFactory mutationFactory;
   private final ChatGuard guard;
   private final SessionDeletionOrchestrator sessionDeletionService;
 
-  public ChatServiceImpl(
+  public ChatService(
       ChatRepository repository,
-      ChatConverter converter,
       ChatMutationFactory mutationFactory,
       ChatGuard guard,
       SessionDeletionOrchestrator sessionDeletionService) {
     this.repository = repository;
-    this.converter = converter;
     this.mutationFactory = mutationFactory;
     this.guard = guard;
     this.sessionDeletionService = Objects.requireNonNull(sessionDeletionService);
   }
 
-  @Override
   public List<ChatDTO> listChats() {
     return repository.listNewestFirst().stream()
-        .map(converter::convert)
+        .map(ChatService::convert)
         .collect(Collectors.toList());
   }
 
-  @Override
   public ChatDTO getChat(String id) {
-    return converter.convert(guard.requireChat(id));
+    return convert(guard.requireChat(id));
   }
 
-  @Override
   @Transactional
   public ChatDTO createChat(ChatCreateDTO createDTO) {
     Chat chat = mutationFactory.newChat(createDTO);
@@ -71,10 +60,9 @@ public class ChatServiceImpl implements ChatService {
     if (!repository.create(chat)) {
       throw new IllegalStateException("create chat failed");
     }
-    return converter.convert(repository.getById(chat.getId()));
+    return convert(repository.getById(chat.getId()));
   }
 
-  @Override
   @Transactional
   public ChatDTO updateChat(String id, ChatUpdateDTO updateDTO) {
     String rawExpected = updateDTO == null ? null : updateDTO.getExpectedVersion();
@@ -101,7 +89,7 @@ public class ChatServiceImpl implements ChatService {
       throw new AiVersionConflictException(
           RESOURCE, rawExpected, CatalogVersions.format(reread.getVersion()));
     }
-    return converter.convert(repository.getById(existing.getId()));
+    return convert(repository.getById(existing.getId()));
   }
 
   /**
@@ -109,7 +97,6 @@ public class ChatServiceImpl implements ChatService {
    * Session（Work/Invocation/Command/Thread/Entry/Session 与 relation、blob 引用对账）→ CAS 删除 Chat 行。 绝不依赖
    * ON DELETE CASCADE 旁路 blob 引用计数。
    */
-  @Override
   @Transactional
   public void deleteChat(String id, String expectedVersion) {
     long expected = CatalogVersions.parse(expectedVersion, "expectedVersion");
@@ -123,6 +110,22 @@ public class ChatServiceImpl implements ChatService {
     if (!repository.deleteById(locked.getId(), expected)) {
       throw new IllegalStateException("chat " + id + " changed under lock");
     }
+  }
+
+  private static ChatDTO convert(Chat chat) {
+    if (chat == null) {
+      return null;
+    }
+    ChatDTO dto = new ChatDTO();
+    dto.setId(ChatIds.format(chat.getId()));
+    dto.setTitle(chat.getTitle());
+    dto.setAgentName(chat.getAgentName());
+    dto.setEnvironmentName(chat.getEnvironmentName());
+    dto.setYoloEnabled(chat.isYoloEnabled());
+    dto.setVersion(CatalogVersions.format(chat.getVersion()));
+    dto.setCreateTime(chat.getCreateTime());
+    dto.setUpdateTime(chat.getUpdateTime());
+    return dto;
   }
 
   private static void ensureExpectedVersion(

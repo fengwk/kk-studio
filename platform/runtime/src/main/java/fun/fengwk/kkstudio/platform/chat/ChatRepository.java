@@ -1,10 +1,9 @@
-package fun.fengwk.kkstudio.platform.chat.repo.impl.store;
+package fun.fengwk.kkstudio.platform.chat;
 
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
-import fun.fengwk.kkstudio.platform.chat.repo.impl.model.ChatDO;
 import fun.fengwk.kkstudio.platform.persistence.PostgresJdbcTypes;
 
 import java.sql.ResultSet;
@@ -14,9 +13,9 @@ import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
-/** {@code chat} 的 JdbcClient 入口：读取、两种行锁与 CAS 写。 */
+/** {@code chat} 的 JdbcClient 仓库：读取、两种行锁与 CAS 写。 */
 @Repository
-public class ChatJdbcStore {
+public class ChatRepository {
 
   private static final String COLUMNS =
       "id, title, agent_name, environment_name, yolo_enabled, version, "
@@ -43,15 +42,15 @@ public class ChatJdbcStore {
       where id = :id and version = :expectedVersion
       """;
 
-  private static final RowMapper<ChatDO> ROW_MAPPER = ChatJdbcStore::mapRow;
+  private static final RowMapper<Chat> ROW_MAPPER = ChatRepository::mapRow;
 
   private final JdbcClient jdbcClient;
 
-  public ChatJdbcStore(JdbcClient jdbcClient) {
+  public ChatRepository(JdbcClient jdbcClient) {
     this.jdbcClient = Objects.requireNonNull(jdbcClient, "jdbcClient");
   }
 
-  public List<ChatDO> listNewestFirst() {
+  public List<Chat> listNewestFirst() {
     return jdbcClient
         .sql(
             "select " + COLUMNS + " from chat order by updated_at desc, created_at desc, title asc")
@@ -59,19 +58,49 @@ public class ChatJdbcStore {
         .list();
   }
 
-  public ChatDO getById(UUID id) {
+  public Chat getById(UUID id) {
     return findOne("select " + COLUMNS + " from chat where id = :id", id);
   }
 
-  public ChatDO lockById(UUID id) {
+  /** 行级锁定读取（{@code for update}），用于深删除时固定 Chat 版本与关联枚举。 */
+  public Chat lockById(UUID id) {
     return findOne("select " + COLUMNS + " from chat where id = :id for update", id);
   }
 
-  public ChatDO lockForKeyShare(UUID id) {
+  /** KEY SHARE 锁定读取：归属授权路径用于阻止 Chat 删除但不串行化同 Chat 的并发接受。 */
+  public Chat lockForKeyShare(UUID id) {
     return findOne("select " + COLUMNS + " from chat where id = :id for key share", id);
   }
 
-  public int insert(ChatDO chat) {
+  public boolean create(Chat chat) {
+    return insert(chat) == 1;
+  }
+
+  /** 基于 (id, expectedVersion) 的原子 CAS 更新。 */
+  public boolean updateById(Chat chat, long expectedVersion) {
+    return jdbcClient
+            .sql(UPDATE_BY_ID_SQL)
+            .param("title", chat.getTitle())
+            .param("agentName", chat.getAgentName())
+            .param("environmentName", chat.getEnvironmentName())
+            .param("yoloEnabled", chat.isYoloEnabled())
+            .param("id", chat.getId())
+            .param("expectedVersion", expectedVersion)
+            .update()
+        == 1;
+  }
+
+  /** 基于 (id, expectedVersion) 的原子 CAS 删除。 */
+  public boolean deleteById(UUID id, long expectedVersion) {
+    return jdbcClient
+            .sql("delete from chat where id = :id and version = :expectedVersion")
+            .param("id", id)
+            .param("expectedVersion", expectedVersion)
+            .update()
+        == 1;
+  }
+
+  private int insert(Chat chat) {
     return jdbcClient
         .sql(INSERT_SQL)
         .param("id", chat.getId())
@@ -82,42 +111,22 @@ public class ChatJdbcStore {
         .update();
   }
 
-  public int updateById(ChatDO chat, long expectedVersion) {
-    return jdbcClient
-        .sql(UPDATE_BY_ID_SQL)
-        .param("title", chat.getTitle())
-        .param("agentName", chat.getAgentName())
-        .param("environmentName", chat.getEnvironmentName())
-        .param("yoloEnabled", chat.isYoloEnabled())
-        .param("id", chat.getId())
-        .param("expectedVersion", expectedVersion)
-        .update();
-  }
-
-  public int deleteById(UUID id, long expectedVersion) {
-    return jdbcClient
-        .sql("delete from chat where id = :id and version = :expectedVersion")
-        .param("id", id)
-        .param("expectedVersion", expectedVersion)
-        .update();
-  }
-
-  private ChatDO findOne(String sql, UUID id) {
+  private Chat findOne(String sql, UUID id) {
     return jdbcClient.sql(sql).param("id", id).query(ROW_MAPPER).optional().orElse(null);
   }
 
-  private static ChatDO mapRow(ResultSet rs, int rowNum) throws SQLException {
-    ChatDO row = new ChatDO();
-    row.setId(rs.getObject("id", UUID.class));
-    row.setTitle(rs.getString("title"));
-    row.setAgentName(rs.getString("agent_name"));
-    row.setEnvironmentName(rs.getString("environment_name"));
-    row.setYoloEnabled(rs.getBoolean("yolo_enabled"));
-    row.setVersion(rs.getLong("version"));
-    row.setCreateTime(
+  private static Chat mapRow(ResultSet rs, int rowNum) throws SQLException {
+    Chat chat = new Chat();
+    chat.setId(rs.getObject("id", UUID.class));
+    chat.setTitle(rs.getString("title"));
+    chat.setAgentName(rs.getString("agent_name"));
+    chat.setEnvironmentName(rs.getString("environment_name"));
+    chat.setYoloEnabled(rs.getBoolean("yolo_enabled"));
+    chat.setVersion(rs.getLong("version"));
+    chat.setCreateTime(
         PostgresJdbcTypes.toInstant(rs.getObject("create_time", OffsetDateTime.class)));
-    row.setUpdateTime(
+    chat.setUpdateTime(
         PostgresJdbcTypes.toInstant(rs.getObject("update_time", OffsetDateTime.class)));
-    return row;
+    return chat;
   }
 }

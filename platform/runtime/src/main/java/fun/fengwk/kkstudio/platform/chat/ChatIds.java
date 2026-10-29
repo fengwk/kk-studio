@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.chat.service;
+package fun.fengwk.kkstudio.platform.chat;
 
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 
