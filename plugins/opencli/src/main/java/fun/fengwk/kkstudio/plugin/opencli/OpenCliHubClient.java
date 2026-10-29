@@ -13,7 +13,6 @@ import tools.jackson.databind.node.ObjectNode;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialSnapshot;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableException;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialAccess;
-import fun.fengwk.kkstudio.platform.plugin.support.CredentialRejection;
 import fun.fengwk.kkstudio.platform.plugin.support.DeadlineResponseBody;
 import fun.fengwk.kkstudio.plugin.opencli.OpenCliHubException.Kind;
 
@@ -483,14 +482,13 @@ public class OpenCliHubClient implements AutoCloseable {
   }
 
   private void rejectUsed(PluginCredentialSnapshot snapshot) {
-    CredentialRejection.rejectUsed(
-        credentials,
-        snapshot,
-        AUTH_REJECTED_ERROR,
-        exception ->
-            log.debug(
-                "failed to reject used OpenCLI Hub credential type={}",
-                exception.getClass().getSimpleName()));
+    try {
+      credentials.rejectUsed(snapshot, AUTH_REJECTED_ERROR);
+    } catch (RuntimeException exception) {
+      log.debug(
+          "failed to reject used OpenCLI Hub credential type={}",
+          exception.getClass().getSimpleName());
+    }
   }
 
   private Execution parseExecution(JsonNode data) {
