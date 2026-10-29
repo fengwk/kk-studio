@@ -26,7 +26,7 @@ describe('EntryMessageBlock', () => {
     // 空输出仍是独立事实；关闭回合的统计及分支必须绑定真实 TURN_END。
     const messages: DialogueMessage[] = [
       {
-        ...event('empty_message', '模型未返回可展示内容。'),
+        ...event('empty_message', '返回内容为空'),
         id: 'entry:assistant-empty',
         subjectEntryId: 'assistant-empty',
         text: '',
@@ -50,7 +50,7 @@ describe('EntryMessageBlock', () => {
     const empty = container.querySelector('[data-entry-kind="empty_message"]')
     expect(empty).toHaveClass('is-inline')
     expect(empty?.querySelectorAll('.thread-entry-title')).toHaveLength(1)
-    expect(empty).toHaveTextContent('模型未返回可展示内容。')
+    expect(empty).toHaveTextContent('返回内容为空')
     expect(empty).not.toHaveTextContent('ASSISTANT')
     expect(empty).not.toHaveTextContent('Entry')
     expect(empty?.querySelector('.thread-entry-text')).toBeNull()
