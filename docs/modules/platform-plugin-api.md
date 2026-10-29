@@ -8,8 +8,6 @@
 
 `fun.fengwk.kkstudio.platform.plugin.support` 提供插件共享的纯辅助，不引入实例基类。`DeadlineResponseBody` 把发送前冻结的单一截止点延伸到响应体读取，到期关闭底层流，长度不符与底层读取失败使用固定去敏错误。`CanvasArguments` 读取字符串参数，仅在字段缺失时使用默认值，显式 null 或错误类型仍拒绝。
 
-`CredentialRejection` 只作废调用方传入的已用快照，不重新解析凭据；次要存储运行时失败交由调用方记录去敏诊断，不覆盖远端认证拒绝，`Error` 继续传播。
-
 ## 定义与配置实例
 
 [`StudioPlugin`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/StudioPlugin.java) 是安装期定义，由插件 JAR 的 auto-configuration 注册。它声明唯一 [`PluginDescriptor`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginDescriptor.java)（pluginId、展示名、代码版本）、配置 Schema、认证形态，并通过 `configure(config, context)` 构建 [`PluginInstance`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginInstance.java)。
