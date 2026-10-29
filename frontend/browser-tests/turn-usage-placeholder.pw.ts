@@ -54,7 +54,7 @@ test('empty assistant stays one inline row with its real turn usage and branch',
     const empty = page.locator('[data-entry-kind="empty_message"]')
     await expect(empty).toHaveCount(1)
     await expect(empty).toHaveClass(/is-inline/)
-    await expect(empty).toHaveText('模型未返回可展示内容。')
+    await expect(empty).toHaveText('返回内容为空')
     await expect(empty.locator('.thread-entry-text, button')).toHaveCount(0)
     const title = empty.locator('.thread-entry-title')
     await expect(title).toHaveCount(1)

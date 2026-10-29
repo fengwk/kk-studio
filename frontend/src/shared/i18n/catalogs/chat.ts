@@ -1334,8 +1334,8 @@ export const chatCatalog = {
     'zh-CN': '未知角色',
   },
   'ai.runtime.entry.emptyAssistant': {
-    'en-US': 'The model returned no displayable content.',
-    'zh-CN': '模型未返回可展示内容。',
+    'en-US': 'Empty response',
+    'zh-CN': '返回内容为空',
   },
   'ai.runtime.entry.emptyMessage': {
     'en-US': 'This message has no displayable content.',

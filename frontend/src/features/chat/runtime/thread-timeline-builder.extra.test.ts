@@ -829,7 +829,7 @@ describe('thread timeline edge branches', () => {
     ]
     const zh = buildThreadTimeline(entries, [], []).messages
     expect(zh).toMatchObject([
-      { id: 'entry:empty-assistant', subjectEntryId: 'empty-assistant', kind: 'empty_message', title: '模型未返回可展示内容。', text: '' },
+      { id: 'entry:empty-assistant', subjectEntryId: 'empty-assistant', kind: 'empty_message', title: '返回内容为空', text: '' },
       { id: 'entry:empty-user', subjectEntryId: 'empty-user', kind: 'empty_message', title: '此消息没有可展示内容。', text: '' },
       { role: 'meta', endEntryId: 'end', turnUsage: { input: 10, output: 0, decodeTokens: 0 } },
     ])
@@ -837,7 +837,7 @@ describe('thread timeline edge branches', () => {
       setLocale('en-US')
       const en = buildThreadTimeline(entries, [], []).messages
       expect(en).toMatchObject([
-        { title: 'The model returned no displayable content.', text: '' },
+        { title: 'Empty response', text: '' },
         { title: 'This message has no displayable content.', text: '' },
         { role: 'meta', endEntryId: 'end', turnUsage: { input: 10, output: 0, decodeTokens: 0 } },
       ])
