@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableException;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableReason;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialAccess;
 import fun.fengwk.kkstudio.platform.plugin.resource.PluginResourceUnavailableException;
+import fun.fengwk.kkstudio.platform.plugin.support.CredentialRejection;
 import fun.fengwk.kkstudio.plugin.minimaxmavis.MavisAuthException;
 import fun.fengwk.kkstudio.plugin.minimaxmavis.MavisCapability;
 import fun.fengwk.kkstudio.plugin.minimaxmavis.MavisCapabilityCatalog;
@@ -304,11 +305,12 @@ public final class MiniMaxMavisTool implements Tool {
    * <p>作废失败（并发重新登录已经换了 token）不影响本次调用的错误结果，且不得把秘密写进日志。
    */
   private void rejectUsed(PluginCredentialSnapshot snapshot) {
-    try {
-      credentialAccess.rejectUsed(snapshot, MavisAuthException.REJECTED_MESSAGE);
-    } catch (RuntimeException error) {
-      log.debug("Cannot mark the rejected MiniMax Mavis credential for re-authentication");
-    }
+    CredentialRejection.rejectUsed(
+        credentialAccess,
+        snapshot,
+        MavisAuthException.REJECTED_MESSAGE,
+        error ->
+            log.debug("Cannot mark the rejected MiniMax Mavis credential for re-authentication"));
   }
 
   private MavisCredential toCredential(PluginCredentialSnapshot snapshot) {

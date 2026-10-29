@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.plugin.comfyui;
 
+import static fun.fengwk.kkstudio.platform.plugin.support.CanvasArguments.extractText;
+
 import lombok.extern.slf4j.Slf4j;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ArrayNode;
@@ -15,7 +17,6 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionUnknownException;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonNumber;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonObject;
-import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonText;
 import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptContent;
 import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptResources;
 import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptTasks;
@@ -576,25 +577,6 @@ public final class ComfyuiCanvasFunctionAdapter implements CanvasFunctionAdapter
       Thread.currentThread().interrupt();
       throw new IllegalStateException("ComfyUI polling was interrupted", interrupted);
     }
-  }
-
-  private static String extractText(JsonObject args, String field) {
-    CanvasJson json = args.values().get(field);
-    if (json instanceof JsonText text) {
-      return text.value();
-    }
-    throw new IllegalArgumentException(field + " must be a string");
-  }
-
-  private static String extractText(JsonObject args, String field, String defaultValue) {
-    CanvasJson json = args.values().get(field);
-    if (json instanceof JsonText text) {
-      return text.value();
-    }
-    if (json == null) {
-      return defaultValue;
-    }
-    throw new IllegalArgumentException(field + " must be a string");
   }
 
   private static int extractInt(JsonObject args, String field, int defaultValue) {

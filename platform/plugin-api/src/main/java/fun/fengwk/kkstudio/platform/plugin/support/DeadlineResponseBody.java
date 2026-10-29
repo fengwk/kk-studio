@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.common.io;
+package fun.fengwk.kkstudio.platform.plugin.support;
 
 import java.io.IOException;
 import java.io.InputStream;
