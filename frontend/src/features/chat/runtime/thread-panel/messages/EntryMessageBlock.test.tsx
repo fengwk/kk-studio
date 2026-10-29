@@ -1,7 +1,9 @@
-import { render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { fireEvent, render, screen } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
 import { EntryMessageBlock } from '@/features/chat/runtime/thread-panel/messages/EntryMessageBlock'
-import type { EntryEventDialogueMessage } from '@/features/chat/runtime/thread-timeline-types'
+import { MessageList } from '@/features/chat/runtime/thread-panel/messages/MessageList'
+import { EntryBranchContext } from '@/features/chat/runtime/thread-panel/entry-branch-context'
+import type { DialogueMessage, EntryEventDialogueMessage } from '@/features/chat/runtime/thread-timeline-types'
 
 function event(
   kind: EntryEventDialogueMessage['kind'],
@@ -20,6 +22,44 @@ function event(
 }
 
 describe('EntryMessageBlock', () => {
+  it('renders an empty assistant as one line while preserving its turn usage and branch action', () => {
+    // 空输出仍是独立事实；关闭回合的统计及分支必须绑定真实 TURN_END。
+    const messages: DialogueMessage[] = [
+      {
+        ...event('empty_message', '模型未返回可展示内容。'),
+        id: 'entry:assistant-empty',
+        subjectEntryId: 'assistant-empty',
+        text: '',
+      },
+      {
+        id: 'usage', role: 'meta', kind: 'turn_usage', subjectEntryId: 'assistant-empty',
+        endEntryId: 'turn-end', text: '↑10 · ↓0 · R0 · W0 · — · cache 0.00% · 0 tok/s',
+        turnUsage: {
+          input: 10, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: null,
+          providerTotal: null, cost: null, decodeTokens: 0, decodeDurationMillis: 1000,
+        },
+        createdAt: 1000,
+      },
+    ]
+    const request = vi.fn()
+    const { container } = render(
+      <EntryBranchContext.Provider value={request}>
+        <MessageList messages={messages} />
+      </EntryBranchContext.Provider>,
+    )
+    const empty = container.querySelector('[data-entry-kind="empty_message"]')
+    expect(empty).toHaveClass('is-inline')
+    expect(empty?.querySelectorAll('.thread-entry-title')).toHaveLength(1)
+    expect(empty).toHaveTextContent('模型未返回可展示内容。')
+    expect(empty).not.toHaveTextContent('ASSISTANT')
+    expect(empty).not.toHaveTextContent('Entry')
+    expect(empty?.querySelector('.thread-entry-text')).toBeNull()
+    expect(empty?.querySelector('button')).toBeNull()
+    expect(container.querySelector('[data-turn-end="turn-end"]')).toHaveTextContent('↑10 · ↓0')
+    fireEvent.click(screen.getByTestId('thread-turn-end-branch'))
+    expect(request).toHaveBeenCalledExactlyOnceWith('turn-end')
+  })
+
   it('shows setting events as a single accessible line', () => {
     // 测试意图：配置变更只占一行，完整值保留在 title 属性以便悬停查看。
     const { container } = render(<EntryMessageBlock message={event('settings_change', '模型改为 p/m (high)')} />)

@@ -1174,8 +1174,8 @@ export const chatCatalog = {
     'zh-CN': '未选择环境',
   },
   'ai.runtime.status.noData': {
-    'en-US': 'No data',
-    'zh-CN': '暂无数据',
+    'en-US': '—',
+    'zh-CN': '—',
   },
   'ai.runtime.status.contextText': {
     'en-US': 'ctx {{used}}/{{total}}',
@@ -1186,8 +1186,8 @@ export const chatCatalog = {
     'zh-CN': '上下文占用（最近一次模型调用估算）：约 {{used}} / {{total}} tokens',
   },
   'ai.runtime.status.contextUsageTitleUnknown': {
-    'en-US': 'Context occupancy (latest model call estimate): no data (limit {{total}} tokens)',
-    'zh-CN': '上下文占用（最近一次模型调用估算）：暂无数据（上限 {{total}} tokens）',
+    'en-US': 'Context occupancy: not yet measured (limit {{total}} tokens)',
+    'zh-CN': '上下文占用：尚未测量（上限 {{total}} tokens）',
   },
   'ai.runtime.status.usageTokensDetail': {
     'en-US': 'Uncached input: {{input}} tokens; output: {{output}} tokens; reasoning: {{reasoning}} tokens',
@@ -1333,13 +1333,13 @@ export const chatCatalog = {
     'en-US': 'Unknown role',
     'zh-CN': '未知角色',
   },
-  'ai.runtime.entry.emptyTitle': {
-    'en-US': '{{role}} message',
-    'zh-CN': '{{role}} 消息',
+  'ai.runtime.entry.emptyAssistant': {
+    'en-US': 'The model returned no displayable content.',
+    'zh-CN': '模型未返回可展示内容。',
   },
-  'ai.runtime.entry.emptyText': {
-    'en-US': 'This Entry has no displayable text, thinking, Tool call, or Tool result.',
-    'zh-CN': '该消息 Entry 没有可展示的文本、思考、工具调用或工具结果。',
+  'ai.runtime.entry.emptyMessage': {
+    'en-US': 'This message has no displayable content.',
+    'zh-CN': '此消息没有可展示内容。',
   },
   'ai.runtime.entry.unsupportedTitle': {
     'en-US': 'Unrecognized message',

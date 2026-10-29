@@ -5,8 +5,7 @@ import { setLocale } from '@/shared/i18n'
 
 /**
  * hover 只读明细按段分行：环境 / 上下文 / 用量（token、cache、费用）共 5 行，且没有冗余标题行。
- * 逐字文案由 catalog 拥有（新 key 见交付报告），此处只验证 Footer 的接线与结构；
- * 文案组合本身在 thread-status-format.test.ts 用注入式 t 做确定性验证。
+ * 逐字文案由 catalog 拥有，Footer 与格式化测试均使用真实 catalog 验证。
  */
 function hoverLines(element: Element): string[] {
   return (element.getAttribute('title') ?? '').split('\n')
@@ -25,13 +24,12 @@ describe('ThreadStatusFooter', () => {
       />,
     )
     const footer = screen.getByLabelText('会话状态')
-    expect(footer).toHaveTextContent('ctx 0/128k')
+    expect(footer).toHaveTextContent('ctx —/128k')
     const title = hoverLines(lineOf(footer))
     expect(title).toHaveLength(5)
     expect(title[0]).toBe('未选择环境')
-    // 未知即如实说明无数据：分支累计输入 300000 绝不能冒充上下文占用。
-    // 上下文段如实标注无数据，累计用量只在独立的用量段里以完整数字出现。
-    expect(title[1]).toContain('暂无数据')
+    // 分支累计输入 300000 绝不能冒充上下文占用。
+    expect(title[1]).toBe('上下文占用：尚未测量（上限 128000 tokens）')
     expect(title[1]).not.toContain('300000')
     expect(title[2]).toContain('300000')
   })
@@ -42,8 +40,8 @@ describe('ThreadStatusFooter', () => {
     const footer = screen.getByLabelText('会话状态')
     const lines = [...footer.querySelectorAll('.thread-status-line')]
     expect(lines).toHaveLength(1)
-    // 缺失的费用与速率显示暂无数据，不显示 0。
-    expect(lines[0].textContent).toBe('未选择环境 ∣ ↑0 · ↓0 · R0 · W0 · 暂无数据 · cache 0.00% · 暂无数据')
+    // 缺失的费用与速率不显示 0。
+    expect(lines[0].textContent).toBe('未选择环境 ∣ ↑0 · ↓0 · R0 · W0 · — · cache 0.00% · — tok/s')
     expect(footer).not.toHaveTextContent('ctx')
     expect(footer.querySelector('button')).toBeNull()
   })
@@ -150,7 +148,7 @@ describe('ThreadStatusFooter', () => {
     expect(footer.querySelector('button')).toBeNull()
   })
 
-  // 零用量/无定价/无测速样本时，hover 仍给出完整数字并把缺失项标注为暂无数据。
+  // 零用量/无定价/无测速样本时，hover 仍给出完整数字并标注缺失项。
   it('renders zero usage, context and localized no-data placeholders on one line', () => {
     render(
       <ThreadStatusFooter
@@ -173,9 +171,9 @@ describe('ThreadStatusFooter', () => {
     const lines = [...footer.querySelectorAll('.thread-status-line')]
     expect(lines).toHaveLength(1)
     expect(lines[0].textContent).toBe(
-      '未选择环境 ∣ ctx 0/128k ∣ ↑0 · ↓0 · R0 · W0 · 暂无数据 · cache 0.00% · 暂无数据',
+      '未选择环境 ∣ ctx 0/128k ∣ ↑0 · ↓0 · R0 · W0 · — · cache 0.00% · — tok/s',
     )
-    // 零用量/无定价/无测速样本时 hover 仍有完整 5 行结构（缺失项由 catalog 文案标注暂无数据）。
+    // 零用量/无定价/无测速样本时 hover 仍有完整 5 行结构。
     expect(hoverLines(lines[0])).toHaveLength(5)
   })
 
@@ -191,11 +189,12 @@ describe('ThreadStatusFooter', () => {
     act(() => setLocale('en-US'))
     const line = lineOf(screen.getByLabelText('Thread status'))
     expect(line.textContent).toBe(
-      'dev (unavailable) ∣ ctx 0/128k ∣ ↑0 · ↓0 · R0 · W0 · No data · cache 0.00% · No data',
+      'dev (unavailable) ∣ ctx —/128k ∣ ↑0 · ↓0 · R0 · W0 · — · cache 0.00% · — tok/s',
     )
     const unavailableTitle = hoverLines(line)
     expect(unavailableTitle).toHaveLength(5)
     expect(unavailableTitle[0]).toBe('Environment: dev (unavailable)')
+    expect(unavailableTitle[1]).toBe('Context occupancy: not yet measured (limit 128000 tokens)')
 
     rerender(
       <ThreadStatusFooter

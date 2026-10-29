@@ -376,9 +376,9 @@ test.describe('Chat Workspace 1-9 Panes Layout, Footer & User Attachments', () =
     const pane3Line = page.locator('[data-testid="pane-3-footer"] .thread-status-line')
     await expect(pane3Line).toHaveCount(1)
     await expect(pane3Line).toHaveText(
-      '未选择环境 ∣ ↑0 · ↓0 · R0 · W0 · 暂无数据 · cache 0.00% · 暂无数据',
+      '未选择环境 ∣ ↑0 · ↓0 · R0 · W0 · — · cache 0.00% · — tok/s',
     )
-    expect((await pane3Line.getAttribute('title')) ?? '').toContain('生成速度：暂无数据')
+    expect((await pane3Line.getAttribute('title')) ?? '').toContain('生成速度：— tok/s')
 
     // 桌面分屏截图
     await page.screenshot({

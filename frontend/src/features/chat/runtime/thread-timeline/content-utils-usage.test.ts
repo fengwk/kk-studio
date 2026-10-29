@@ -12,6 +12,7 @@ import {
   parseAssistantUsage,
 } from '@/features/chat/runtime/thread-timeline/content-utils'
 import type { TurnUsage } from '@/features/chat/runtime/thread-timeline-types'
+import { setLocale } from '@/shared/i18n'
 
 function usage(overrides: Partial<TurnUsage> = {}): TurnUsage {
   return {
@@ -33,7 +34,7 @@ describe('content-utils usage & speed & cache calculations', () => {
     it('does not turn an overflowing cache denominator into a measured zero', () => {
       const tokens = { input: Number.MAX_SAFE_INTEGER, output: 0, cacheRead: 1, cacheWrite: 0, cost: null }
       expect(calculateCacheHitRate(tokens)).toBeNull()
-      expect(formatTurnUsageText(tokens)).toContain('cache 暂无数据')
+      expect(formatTurnUsageText(tokens)).toContain('cache —')
     })
     it('returns null when denominator is 0', () => {
       expect(calculateCacheHitRate({ input: 0, cacheRead: 0, cacheWrite: 0 })).toBeNull()
@@ -575,8 +576,8 @@ describe('content-utils usage & speed & cache calculations', () => {
       expect(formatTurnUsageText({
         input: 150, output: 50, cacheRead: 50, cacheWrite: 0,
         cost: { currency: 'USD', amount: '0.005' },
-      }, (k) => k === 'ai.runtime.status.noData' ? '暂无数据' : k)).toBe(
-        '↑150 · ↓50 · R50 · W0 · $0.005 · cache 25.00% · 暂无数据',
+      })).toBe(
+        '↑150 · ↓50 · R50 · W0 · $0.005 · cache 25.00% · — tok/s',
       )
     })
 
@@ -584,14 +585,8 @@ describe('content-utils usage & speed & cache calculations', () => {
       // 缺失费用和速率：显示 noData，不可显示 0
       expect(formatTurnUsageText({
         input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: null,
-      }, (k) => k === 'ai.runtime.status.noData' ? '暂无数据' : k)).toBe(
-        '↑0 · ↓0 · R0 · W0 · 暂无数据 · cache 0.00% · 暂无数据',
-      )
-      // 英文 noData
-      expect(formatTurnUsageText({
-        input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: null,
-      }, (k) => k === 'ai.runtime.status.noData' ? 'No data' : k)).toBe(
-        '↑0 · ↓0 · R0 · W0 · No data · cache 0.00% · No data',
+      })).toBe(
+        '↑0 · ↓0 · R0 · W0 · — · cache 0.00% · — tok/s',
       )
 
       // 真实 0：费用 $0，速率 0 tok/s，真实 0 保留
@@ -600,7 +595,7 @@ describe('content-utils usage & speed & cache calculations', () => {
         cost: { currency: 'USD', amount: '0' },
         decodeTokens: 0,
         decodeDurationMillis: 1000,
-      }, (k) => k === 'ai.runtime.status.noData' ? '暂无数据' : k)).toBe(
+      })).toBe(
         '↑0 · ↓0 · R0 · W0 · $0 · cache 0.00% · 0 tok/s',
       )
     })
@@ -625,14 +620,24 @@ describe('content-utils usage & speed & cache calculations', () => {
         decodeTokens: null,
         decodeDurationMillis: null,
       }
-      // 中文
-      expect(formatTurnUsageText(unknownUsage, (k) => k === 'ai.runtime.status.noData' ? '暂无数据' : k)).toBe(
-        '↑暂无数据 · ↓暂无数据 · R暂无数据 · W暂无数据 · 暂无数据 · cache 暂无数据 · 暂无数据',
-      )
-      // 英文
-      expect(formatTurnUsageText(unknownUsage, (k) => k === 'ai.runtime.status.noData' ? 'No data' : k)).toBe(
-        '↑No data · ↓No data · RNo data · WNo data · No data · cache No data · No data',
-      )
+      const expected = '↑— · ↓— · R— · W— · — · cache — · — tok/s'
+      expect(formatTurnUsageText(unknownUsage)).toBe(expected)
+      try {
+        setLocale('en-US')
+        expect(formatTurnUsageText(unknownUsage)).toBe(expected)
+      } finally {
+        setLocale('zh-CN')
+      }
+    })
+
+    it('does not turn a duration without output tokens into a zero speed sample', () => {
+      const parsed = parseAssistantUsage({
+        usage: { inputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        decodeDurationMillis: 1000,
+      })!
+      expect(parsed.output).toBeNull()
+      expect(calculateDecodeTokensPerSecond(parsed)).toBeNull()
+      expect(formatTurnUsageText(parsed)).toBe('↑— · ↓— · R— · W— · — · cache — · — tok/s')
     })
   })
 })
