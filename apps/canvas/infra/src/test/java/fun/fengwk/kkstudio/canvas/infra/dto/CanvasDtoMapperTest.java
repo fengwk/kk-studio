@@ -57,7 +57,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
-/** 验证 CanvasDtoMapper 的权威媒体事实、命令入参、冲突投影与 canonical UUID 语义。 */
+/** 验证 CanvasDtoMapper 的权威媒体事实、命令入参、冲突投影与版本指纹语义。 */
 class CanvasDtoMapperTest {
 
   private static final Instant NOW = Instant.parse("2026-01-02T03:04:05Z");
@@ -68,17 +68,7 @@ class CanvasDtoMapperTest {
   private final CanvasDtoMapper mapper = new CanvasDtoMapper(blobManager);
 
   @Test
-  void parseUuidAndVersionKeepCanonicalSemantics() {
-    // canonical UUID 大小写必须与 UUID.toString() 往返一致，不在这里做大小写归一。
-    UUID id = UUID.fromString("12345678-1234-1234-1234-123456789abc");
-    assertEquals(id, CanvasDtoMapper.parseUuid(id.toString(), "canvasId"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> CanvasDtoMapper.parseUuid(id.toString().toUpperCase(), "canvasId"));
-    assertThrows(IllegalArgumentException.class, () -> CanvasDtoMapper.parseUuid(null, "canvasId"));
-    assertThrows(
-        IllegalArgumentException.class, () -> CanvasDtoMapper.parseUuid("not-a-uuid", "canvasId"));
-
+  void parseVersionKeepsCanonicalSemantics() {
     String fingerprint = "a".repeat(64);
     CanvasFunctionVersionDTO version = new CanvasFunctionVersionDTO();
     version.setDefinitionFingerprint(fingerprint);

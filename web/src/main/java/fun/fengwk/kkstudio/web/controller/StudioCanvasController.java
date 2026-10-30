@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.canvas.CanvasCommandService;
 import fun.fengwk.kkstudio.canvas.CanvasConflictException;
 import fun.fengwk.kkstudio.canvas.CanvasQueryService;
 import fun.fengwk.kkstudio.canvas.infra.dto.CanvasDtoMapper;
+import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.share.canvas.ApplyCanvasCommandsRequestDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasConflictDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasDocumentDTO;
@@ -78,7 +79,7 @@ public class StudioCanvasController {
   @GetMapping("/{canvasId}")
   public ApiResponse<CanvasSnapshotDTO> get(@PathVariable("canvasId") String canvasIdText) {
     try {
-      UUID canvasId = CanvasDtoMapper.parseUuid(canvasIdText, "canvasId");
+      UUID canvasId = Uuids.parseCanonical(canvasIdText, "canvasId");
       return canvasQueryService
           .findSnapshot(canvasId)
           .map(snapshot -> ApiResponse.ok(mapper.toDto(snapshot)))
@@ -104,9 +105,8 @@ public class StudioCanvasController {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "missing body");
     }
     try {
-      UUID canvasId = CanvasDtoMapper.parseUuid(canvasIdText, "canvasId");
-      UUID idempotencyKey =
-          CanvasDtoMapper.parseUuid(request.getIdempotencyKey(), "idempotencyKey");
+      UUID canvasId = Uuids.parseCanonical(canvasIdText, "canvasId");
+      UUID idempotencyKey = Uuids.parseCanonical(request.getIdempotencyKey(), "idempotencyKey");
       CanvasCommandResult result =
           canvasCommandService.applyCommands(
               canvasId, idempotencyKey, mapper.toCommands(request.getCommands()));
@@ -130,7 +130,7 @@ public class StudioCanvasController {
   @DeleteMapping("/{canvasId}")
   public ApiResponse<Void> delete(@PathVariable("canvasId") String canvasIdText) {
     try {
-      UUID canvasId = CanvasDtoMapper.parseUuid(canvasIdText, "canvasId");
+      UUID canvasId = Uuids.parseCanonical(canvasIdText, "canvasId");
       canvasCommandService.deleteCanvas(canvasId);
       return ApiResponse.noContent();
     } catch (IllegalArgumentException ex) {
