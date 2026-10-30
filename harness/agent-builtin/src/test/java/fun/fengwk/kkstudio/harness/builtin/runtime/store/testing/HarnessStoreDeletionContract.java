@@ -43,11 +43,11 @@ import java.util.List;
 import java.util.UUID;
 
 /** Thread 深删除必须在所有 Store 实现中原子移除 owned mutable facts，并保留 Session Entry 历史。 */
-abstract class HarnessStoreDeletionContract {
+public abstract class HarnessStoreDeletionContract {
 
   private HarnessStore store;
 
-  abstract HarnessStore createStore();
+  protected abstract HarnessStore createStore();
 
   @BeforeEach
   void setUpStore() {

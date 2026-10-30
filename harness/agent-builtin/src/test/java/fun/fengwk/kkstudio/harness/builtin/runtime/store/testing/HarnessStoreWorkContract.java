@@ -70,7 +70,7 @@ public abstract class HarnessStoreWorkContract {
     store = createStore();
   }
 
-  abstract HarnessStore createStore();
+  protected abstract HarnessStore createStore();
 
   /**
    * 实现用于 Work 排期的权威时间域「此刻」快照：内存实现返回测试注入的时钟（它同时就是调用方传入的 {@code now}），生产实现返回数据库时钟。
@@ -891,7 +891,7 @@ public abstract class HarnessStoreWorkContract {
   }
 
   @Test
-  void claimNextWorkReturnsClaimedWorkWithEnvironmentAffinity() {
+  protected void claimNextWorkReturnsClaimedWorkWithEnvironmentAffinity() {
     SeededTool seeded = seedTool(store);
     WorkTarget toolTarget = new WorkTarget(WorkTargetType.TOOL, seeded.toolId());
     EnvironmentId env = EnvironmentId.parse("11111111-1111-1111-1111-111111111111");

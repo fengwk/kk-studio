@@ -6,7 +6,7 @@ import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 class InMemoryDeletionTest extends HarnessStoreDeletionContract {
 
   @Override
-  HarnessStore createStore() {
+  protected HarnessStore createStore() {
     return new InMemoryBuiltinHarnessStore();
   }
 }

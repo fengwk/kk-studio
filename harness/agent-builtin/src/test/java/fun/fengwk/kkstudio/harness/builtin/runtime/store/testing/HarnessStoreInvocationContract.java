@@ -112,7 +112,7 @@ public abstract class HarnessStoreInvocationContract {
     baseline = seedTurnBaseline(store);
   }
 
-  abstract HarnessStore createStore();
+  protected abstract HarnessStore createStore();
 
   // ---- 模型调用 ----
 
