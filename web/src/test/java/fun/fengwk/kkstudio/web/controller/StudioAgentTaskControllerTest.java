@@ -15,7 +15,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import fun.fengwk.convention4j.springboot.starter.web.result.ResultResponseBodyAdvice;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -33,6 +32,7 @@ import fun.fengwk.kkstudio.platform.agenttask.AgentTaskRequest;
 import fun.fengwk.kkstudio.platform.agenttask.AgentTaskService;
 import fun.fengwk.kkstudio.platform.agenttask.AgentTaskStatus;
 import fun.fengwk.kkstudio.platform.harness.task.AgentBranchSettingsMaterializer;
+import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
 import fun.fengwk.kkstudio.web.advice.StudioResponseStatusErrorAdvice;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 
@@ -68,7 +68,7 @@ class StudioAgentTaskControllerTest {
         MockMvcBuilders.standaloneSetup(new StudioAgentTaskController(agentTasks, materializer))
             .setControllerAdvice(
                 new StudioResponseStatusErrorAdvice(new StudioMessageService()),
-                new ResultResponseBodyAdvice())
+                new ApiResponseStatusAdvice())
             .build();
   }
 

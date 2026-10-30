@@ -9,7 +9,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
-import fun.fengwk.convention4j.springboot.starter.web.result.ResultResponseBodyAdvice;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -64,6 +63,7 @@ import fun.fengwk.kkstudio.platform.pluginhost.service.PluginManagementService;
 import fun.fengwk.kkstudio.platform.settings.HttpProxySelector;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
+import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
 import fun.fengwk.kkstudio.web.plugin.StudioPluginController;
 
 import javax.sql.DataSource;
@@ -268,7 +268,7 @@ class ComfyuiPluginPostgresIntegrationTest {
               MockMvc mockMvc =
                   MockMvcBuilders.standaloneSetup(new StudioPluginController(management))
                       .setMessageConverters(HTTP_CONVERTER)
-                      .setControllerAdvice(new ResultResponseBodyAdvice())
+                      .setControllerAdvice(new ApiResponseStatusAdvice())
                       .build();
               MockHttpServletResponse response =
                   mockMvc.perform(get("/api/plugins/" + COMFYUI)).andReturn().getResponse();

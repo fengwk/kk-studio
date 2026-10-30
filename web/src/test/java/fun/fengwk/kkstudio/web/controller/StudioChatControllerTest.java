@@ -16,7 +16,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import fun.fengwk.convention4j.springboot.starter.web.result.ResultResponseBodyAdvice;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -30,6 +29,7 @@ import fun.fengwk.kkstudio.share.ai.chat.ChatCreateDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionSummaryDTO;
+import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
 
 import java.util.List;
 import java.util.UUID;
@@ -55,7 +55,7 @@ class StudioChatControllerTest {
     harnessQueryService = mock(HarnessOwnerQueryService.class);
     mockMvc =
         MockMvcBuilders.standaloneSetup(new StudioChatController(chatService, harnessQueryService))
-            .setControllerAdvice(new ResultResponseBodyAdvice())
+            .setControllerAdvice(new ApiResponseStatusAdvice())
             .build();
   }
 

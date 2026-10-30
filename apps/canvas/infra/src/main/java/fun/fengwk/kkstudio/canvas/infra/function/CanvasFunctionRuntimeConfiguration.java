@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.canvas.infra.function;
 
+import io.micrometer.context.ContextExecutorService;
+import io.micrometer.context.ContextSnapshotFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -32,16 +34,19 @@ public class CanvasFunctionRuntimeConfiguration {
   }
 
   @Bean(name = "canvasFunctionWorkerExecutor", destroyMethod = "shutdownNow")
-  public ExecutorService canvasFunctionWorkerExecutor(CanvasFunctionRuntimeProperties properties) {
+  public ExecutorService canvasFunctionWorkerExecutor(
+      CanvasFunctionRuntimeProperties properties, ContextSnapshotFactory contextSnapshotFactory) {
     properties.validate();
-    return new ThreadPoolExecutor(
-        properties.getWorkerConcurrency(),
-        properties.getWorkerConcurrency(),
-        0L,
-        TimeUnit.MILLISECONDS,
-        new SynchronousQueue<>(),
-        Thread.ofPlatform().name("canvas-function-worker-", 0L).daemon(true).factory(),
-        new ThreadPoolExecutor.AbortPolicy());
+    return ContextExecutorService.wrap(
+        new ThreadPoolExecutor(
+            properties.getWorkerConcurrency(),
+            properties.getWorkerConcurrency(),
+            0L,
+            TimeUnit.MILLISECONDS,
+            new SynchronousQueue<>(),
+            Thread.ofPlatform().name("canvas-function-worker-", 0L).daemon(true).factory(),
+            new ThreadPoolExecutor.AbortPolicy()),
+        contextSnapshotFactory);
   }
 
   @Bean(name = "canvasFunctionPollScheduler", destroyMethod = "shutdownNow")

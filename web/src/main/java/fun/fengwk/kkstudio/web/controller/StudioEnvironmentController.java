@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.web.controller;
 
-import fun.fengwk.convention4j.api.result.Result;
-import fun.fengwk.convention4j.common.result.Results;
 import lombok.AllArgsConstructor;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -32,6 +30,7 @@ import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallCodeRequestDTO
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRotateTokenDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRuntimeStatusDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentUpdateStartDTO;
+import fun.fengwk.kkstudio.web.api.ApiResponse;
 import fun.fengwk.kkstudio.web.environment.cluster.EnvironmentRuntimeOwnerClient;
 
 import java.nio.charset.StandardCharsets;
@@ -61,26 +60,26 @@ public class StudioEnvironmentController {
   private final EnvironmentRuntimeOwnerClient runtimeOwnerClient;
 
   @GetMapping
-  public Result<List<EnvironmentCardDTO>> listEnvironments() {
-    return Results.ok(environmentService.list());
+  public ApiResponse<List<EnvironmentCardDTO>> listEnvironments() {
+    return ApiResponse.ok(environmentService.list());
   }
 
   @GetMapping("/{environmentId}")
-  public Result<EnvironmentCardDTO> getEnvironment(@PathVariable String environmentId) {
-    return Results.ok(environmentService.get(parseEnvironmentId(environmentId)));
+  public ApiResponse<EnvironmentCardDTO> getEnvironment(@PathVariable String environmentId) {
+    return ApiResponse.ok(environmentService.get(parseEnvironmentId(environmentId)));
   }
 
   @PostMapping
-  public ResponseEntity<Result<EnvironmentCardDTO>> createEnvironment(
+  public ResponseEntity<ApiResponse<EnvironmentCardDTO>> createEnvironment(
       @RequestBody EnvironmentCreateDTO request) {
-    return noStore(Results.created(environmentService.create(request)));
+    return noStore(ApiResponse.created(environmentService.create(request)));
   }
 
   /** 按时间正序返回最近的事件窗口（最多 200 条）；管理面按需轮询，不引入实时协议。 */
   @GetMapping("/{environmentId}/events")
-  public Result<List<EnvironmentEventDTO>> listEnvironmentEvents(
+  public ApiResponse<List<EnvironmentEventDTO>> listEnvironmentEvents(
       @PathVariable String environmentId) {
-    return Results.ok(environmentService.listEvents(parseEnvironmentId(environmentId)));
+    return ApiResponse.ok(environmentService.listEvents(parseEnvironmentId(environmentId)));
   }
 
   /**
@@ -89,10 +88,10 @@ public class StudioEnvironmentController {
    * <p>非 owner 请求经内部 HMAC 单跳到 owner；不缓存正文，也不在 Server 持久化进度。
    */
   @GetMapping("/{environmentId}/runtime")
-  public Result<EnvironmentRuntimeStatusDTO> getEnvironmentRuntime(
+  public ApiResponse<EnvironmentRuntimeStatusDTO> getEnvironmentRuntime(
       @PathVariable String environmentId) {
     EnvironmentId id = parseEnvironmentId(environmentId);
-    return Results.ok(runtimeStatus(id));
+    return ApiResponse.ok(runtimeStatus(id));
   }
 
   /**
@@ -101,24 +100,24 @@ public class StudioEnvironmentController {
    * <p>返回当前运行快照；Server 不插入任务行。目标不可用、已有更新在途或存在在途调用/工作时以冲突拒绝。
    */
   @PostMapping("/{environmentId}/update")
-  public Result<EnvironmentUpdateStartDTO> startEnvironmentUpdate(
+  public ApiResponse<EnvironmentUpdateStartDTO> startEnvironmentUpdate(
       @PathVariable String environmentId) {
     EnvironmentId id = parseEnvironmentId(environmentId);
-    return Results.ok(startUpdate(id));
+    return ApiResponse.ok(startUpdate(id));
   }
 
   /** 签发五分钟安装 code；校验当前版本和已保存设置，不写环境状态。 */
   @PostMapping("/{environmentId}/install-code")
-  public ResponseEntity<Result<EnvironmentInstallCodeDTO>> issueInstallCode(
+  public ResponseEntity<ApiResponse<EnvironmentInstallCodeDTO>> issueInstallCode(
       @PathVariable String environmentId, @RequestBody EnvironmentInstallCodeRequestDTO request) {
     String expectedVersion = request != null ? request.getExpectedVersion() : null;
     return noStore(
-        Results.ok(
+        ApiResponse.ok(
             environmentService.issueInstallCode(
                 parseEnvironmentId(environmentId), expectedVersion)));
   }
 
-  /** 校验 code 后签发新凭证并返回完整安装脚本；code 随即失效。响应不经 Result 包装。 */
+  /** 校验 code 后签发新凭证并返回完整安装脚本；code 随即失效。响应不经 ApiResponse 包装。 */
   @GetMapping(value = "/{environmentId}/install", produces = MediaType.TEXT_PLAIN_VALUE)
   public ResponseEntity<String> installationScript(
       @PathVariable String environmentId, @RequestParam String code) {
@@ -132,25 +131,25 @@ public class StudioEnvironmentController {
   }
 
   @PostMapping("/{environmentId}/registration-token")
-  public ResponseEntity<Result<EnvironmentCardDTO>> rotateToken(
+  public ResponseEntity<ApiResponse<EnvironmentCardDTO>> rotateToken(
       @PathVariable String environmentId, @RequestBody EnvironmentRotateTokenDTO request) {
     String expectedVersion = request != null ? request.getExpectedVersion() : null;
     return noStore(
-        Results.ok(
+        ApiResponse.ok(
             environmentService.rotateToken(parseEnvironmentId(environmentId), expectedVersion)));
   }
 
   @DeleteMapping("/{environmentId}")
-  public Result<Void> deleteEnvironment(
+  public ApiResponse<Void> deleteEnvironment(
       @PathVariable String environmentId, @RequestParam String expectedVersion) {
     environmentService.delete(parseEnvironmentId(environmentId), expectedVersion);
-    return Results.noContent();
+    return ApiResponse.noContent();
   }
 
   @PutMapping("/{environmentId}/install-config")
-  public Result<EnvironmentCardDTO> updateInstallConfig(
+  public ApiResponse<EnvironmentCardDTO> updateInstallConfig(
       @PathVariable String environmentId, @RequestBody Map<String, Object> request) {
-    return Results.ok(
+    return ApiResponse.ok(
         environmentService.updateInstallConfig(
             parseEnvironmentId(environmentId),
             EnvironmentInstallConfigs.parseUpdate(EnvironmentInstallConfigs.tree(request))));
@@ -201,7 +200,7 @@ public class StudioEnvironmentController {
   }
 
   /** 携带凭据的响应必须禁止任何中间缓存。 */
-  private static <T> ResponseEntity<Result<T>> noStore(Result<T> body) {
+  private static <T> ResponseEntity<ApiResponse<T>> noStore(ApiResponse<T> body) {
     return ResponseEntity.status(body.getStatus())
         .header(HttpHeaders.CACHE_CONTROL, NO_STORE)
         .body(body);

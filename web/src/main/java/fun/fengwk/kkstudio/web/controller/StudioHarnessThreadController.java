@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.web.controller;
 
-import fun.fengwk.convention4j.api.result.Result;
-import fun.fengwk.convention4j.common.result.Results;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -43,6 +41,7 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadYoloUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessToolApprovalDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessUsageCostDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.ToolInvocationDTO;
+import fun.fengwk.kkstudio.web.api.ApiResponse;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapper;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapper;
 
@@ -57,9 +56,9 @@ import java.util.function.Supplier;
 /**
  * 基于根 {@link HarnessRuntime} 控制/查询平面的 Thread API。
  *
- * <p>统一返回 {@link Result}，HTTP 状态由 convention4j {@code ResultResponseBodyAdvice} 按 {@code
- * result.status} 对齐。类型化 runtime 拒绝在此统一翻译：未找到 {@literal ->} 404、业务冲突 {@literal ->} 409、非法请求/DTO
- * {@literal ->} 400。控制面不再按 Thread 的产品归属（Issue/Chat）拒绝：认证、实际资源权限与请求格式仍是硬边界，业务规则由对应业务工作流显式编排。
+ * <p>统一返回 {@link ApiResponse}，HTTP 状态由 {@code ApiResponseStatusAdvice} 按 {@code response.status}
+ * 对齐。类型化 runtime 拒绝在此统一翻译：未找到 {@literal ->} 404、业务冲突 {@literal ->} 409、非法请求/DTO {@literal ->}
+ * 400。控制面不再按 Thread 的产品归属（Issue/Chat）拒绝：认证、实际资源权限与请求格式仍是硬边界，业务规则由对应业务工作流显式编排。
  */
 @RestController
 @RequestMapping("/api/threads")
@@ -93,8 +92,8 @@ public class StudioHarnessThreadController {
    * <p>纯查询，不创建 Command / Entry / Work，也不触碰 version。可见性与 Thread 快照相同。
    */
   @GetMapping("/{threadId}/tree")
-  public Result<List<HarnessThreadTreeNodeDTO>> getTree(@PathVariable String threadId) {
-    return Results.ok(
+  public ApiResponse<List<HarnessThreadTreeNodeDTO>> getTree(@PathVariable String threadId) {
+    return ApiResponse.ok(
         withRuntimeTranslation(
             () ->
                 HarnessRuntimeResponseMapper.toThreadTreeDtos(
@@ -104,8 +103,8 @@ public class StudioHarnessThreadController {
 
   /** 查询一个一致性的 Thread 快照（单事务）；entryPath 的每个 Entry 都带上读取时费用投影。 */
   @GetMapping("/{threadId}")
-  public Result<HarnessThreadSnapshotDTO> getSnapshot(@PathVariable String threadId) {
-    return Results.ok(
+  public ApiResponse<HarnessThreadSnapshotDTO> getSnapshot(@PathVariable String threadId) {
+    return ApiResponse.ok(
         withRuntimeTranslation(
             () ->
                 snapshotResponse(
@@ -120,11 +119,11 @@ public class StudioHarnessThreadController {
    * 精确匹配，重复放弃或已真实确认是安全 replay。
    */
   @PostMapping("/{threadId}/executions/{executionId}/abandon")
-  public Result<HarnessThreadSnapshotDTO> abandonExecution(
+  public ApiResponse<HarnessThreadSnapshotDTO> abandonExecution(
       @PathVariable String threadId,
       @PathVariable String executionId,
       @RequestBody HarnessExecutionAbandonDTO request) {
-    return Results.ok(
+    return ApiResponse.ok(
         withRuntimeTranslation(
             () -> {
               HarnessRuntimeRequestMapper.AbandonExecutionTarget target =
@@ -166,9 +165,9 @@ public class StudioHarnessThreadController {
    * canonical、未知字段 -&gt; 400），缺失 Thread 由 {@link HarnessRuntime} 的 typed 异常翻译为 404。
    */
   @PostMapping("/{threadId}/model-request-debug")
-  public Result<HarnessModelRequestDebugDTO> previewModelRequest(
+  public ApiResponse<HarnessModelRequestDebugDTO> previewModelRequest(
       @PathVariable String threadId, @RequestBody HarnessModelRequestDebugRequestDTO request) {
-    return Results.ok(
+    return ApiResponse.ok(
         withRuntimeTranslation(
             () -> {
               HarnessRuntimeRequestMapper.ModelRequestDebugSelection selection =
@@ -186,9 +185,9 @@ public class StudioHarnessThreadController {
    * <p>认证、实际资源权限与请求形状是硬边界；不再按 Thread 所属产品拒绝，业务命名规则由对应业务工作流显式维护。
    */
   @PutMapping("/{threadId}/name")
-  public Result<HarnessThreadDTO> rename(
+  public ApiResponse<HarnessThreadDTO> rename(
       @PathVariable String threadId, @RequestBody HarnessNameUpdateDTO request) {
-    return Results.ok(
+    return ApiResponse.ok(
         withRuntimeTranslation(
             () -> {
               RenameThreadCommand command =
@@ -206,9 +205,9 @@ public class StudioHarnessThreadController {
    * <p>压缩会产生 Turn / model invocation / 后续 work；通用入口不再按 Thread 归属拒绝，认证与请求格式照常校验。
    */
   @PostMapping("/{threadId}/compact")
-  public Result<HarnessThreadCompactResultDTO> compact(
+  public ApiResponse<HarnessThreadCompactResultDTO> compact(
       @PathVariable String threadId, @RequestBody HarnessThreadCompactDTO request) {
-    return Results.accepted(
+    return ApiResponse.accepted(
         withRuntimeTranslation(
             () -> {
               CompactThreadCommand command =
@@ -228,9 +227,9 @@ public class StudioHarnessThreadController {
    * {@link HarnessRuntime} 翻译为 404。控制面不再按产品归属拒绝，业务默认策略由对应业务工作流显式维护。
    */
   @PutMapping("/{threadId}/yolo")
-  public Result<HarnessThreadDTO> updateYolo(
+  public ApiResponse<HarnessThreadDTO> updateYolo(
       @PathVariable String threadId, @RequestBody HarnessThreadYoloUpdateDTO request) {
-    return Results.ok(
+    return ApiResponse.ok(
         withRuntimeTranslation(
             () -> {
               SetThreadYoloCommand command =
@@ -244,9 +243,9 @@ public class StudioHarnessThreadController {
 
   /** 停止当前 Thread 与完整后代，返回聚合回执（stopRequestId + version CAS 幂等）。 */
   @PostMapping("/{threadId}/stop")
-  public Result<HarnessThreadStopResultDTO> stop(
+  public ApiResponse<HarnessThreadStopResultDTO> stop(
       @PathVariable String threadId, @RequestBody HarnessThreadStopDTO request) {
-    return Results.ok(
+    return ApiResponse.ok(
         withRuntimeTranslation(
             () -> {
               StopCommand command = HarnessRuntimeRequestMapper.toStopCommand(threadId, request);
@@ -263,13 +262,13 @@ public class StudioHarnessThreadController {
    * <p>操作者只取自服务端认证上下文；请求形状与资源归属照常校验，不再按 Thread 产品归属拒绝。
    */
   @PutMapping("/{threadId}/tool-invocations/{toolInvocationId}/approval")
-  public Result<ToolInvocationDTO> decideApproval(
+  public ApiResponse<ToolInvocationDTO> decideApproval(
       @PathVariable String threadId,
       @PathVariable String toolInvocationId,
       @RequestBody HarnessToolApprovalDTO request,
       HttpServletRequest httpRequest) {
     String operator = resolveOperator(httpRequest);
-    return Results.ok(
+    return ApiResponse.ok(
         withRuntimeTranslation(
             () ->
                 HarnessRuntimeResponseMapper.toToolInvocationDto(

@@ -31,16 +31,16 @@
             <artifactId>kk-studio-common</artifactId>
         </dependency>
         <dependency>
-            <groupId>fun.fengwk.convention4j</groupId>
-            <artifactId>convention4j-spring-boot-starter</artifactId>
+            <groupId>io.micrometer</groupId>
+            <artifactId>context-propagation</artifactId>
         </dependency>
         <dependency>
             <groupId>tools.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
         </dependency>
         <dependency>
-            <groupId>fun.fengwk.convention4j</groupId>
-            <artifactId>convention4j-spring-boot-starter-test</artifactId>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>

@@ -4,7 +4,6 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import fun.fengwk.convention4j.springboot.starter.json.JacksonAutoConfiguration;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
@@ -20,7 +19,7 @@ import software.amazon.awssdk.services.s3.model.HeadBucketResponse;
  *
  * <p>提供测试专用 {@code S3Client} mock 假件，使启动期 S3 readiness probe 顺利通过而不进行真实网络调用。
  */
-@SpringBootApplication(exclude = JacksonAutoConfiguration.class)
+@SpringBootApplication
 public class WebTestApplication {
 
   @Bean

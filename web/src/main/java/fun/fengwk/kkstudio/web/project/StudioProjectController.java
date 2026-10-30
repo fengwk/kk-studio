@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.web.project;
 
-import fun.fengwk.convention4j.api.result.Result;
-import fun.fengwk.convention4j.common.result.Results;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -27,6 +25,7 @@ import fun.fengwk.kkstudio.share.project.ProjectVersionRequestDTO;
 import fun.fengwk.kkstudio.share.project.UpdateProjectRequestDTO;
 import fun.fengwk.kkstudio.share.project.UpdateProjectWorkflowRequestDTO;
 import fun.fengwk.kkstudio.share.project.UpdateProjectYoloRequestDTO;
+import fun.fengwk.kkstudio.web.api.ApiResponse;
 
 import java.util.List;
 import java.util.Objects;
@@ -63,36 +62,37 @@ public class StudioProjectController {
   }
 
   @GetMapping
-  public Result<List<ProjectDTO>> listProjects(
+  public ApiResponse<List<ProjectDTO>> listProjects(
       @RequestParam(value = "includeArchived", required = false, defaultValue = "false")
           boolean includeArchived) {
     List<Project> list = projectService.listProjects(includeArchived);
-    return Results.ok(list.stream().map(mapper::toDto).toList());
+    return ApiResponse.ok(list.stream().map(mapper::toDto).toList());
   }
 
   @PostMapping
-  public ResponseEntity<Result<ProjectDTO>> createProject(
+  public ResponseEntity<ApiResponse<ProjectDTO>> createProject(
       @RequestBody CreateProjectRequestDTO request) {
     Objects.requireNonNull(request, "request");
     boolean yoloEnabled =
         request.getYoloEnabled() == null ? DEFAULT_YOLO_ENABLED : request.getYoloEnabled();
     Project created =
         projectService.createProject(request.getTitle(), request.getDescription(), yoloEnabled);
-    return ResponseEntity.status(HttpStatus.CREATED).body(Results.ok(mapper.toDto(created)));
+    return ResponseEntity.status(HttpStatus.CREATED)
+        .body(ApiResponse.created(mapper.toDto(created)));
   }
 
   @GetMapping("/{projectId}")
-  public Result<ProjectDTO> getProject(@PathVariable("projectId") String projectIdStr) {
+  public ApiResponse<ProjectDTO> getProject(@PathVariable("projectId") String projectIdStr) {
     UUID projectId = ProjectDtoMapper.parseUuid(projectIdStr, "projectId");
     Project project = projectService.getProject(projectId);
     if (project == null) {
       throw new ProjectNotFoundException("project");
     }
-    return Results.ok(mapper.toDto(project));
+    return ApiResponse.ok(mapper.toDto(project));
   }
 
   @PutMapping("/{projectId}")
-  public Result<ProjectDTO> updateProject(
+  public ApiResponse<ProjectDTO> updateProject(
       @PathVariable("projectId") String projectIdStr,
       @RequestBody UpdateProjectRequestDTO request) {
     Objects.requireNonNull(request, "request");
@@ -102,11 +102,11 @@ public class StudioProjectController {
     Project updated =
         projectService.updateConfiguration(
             projectId, expectedVersion, request.getTitle(), request.getDescription());
-    return Results.ok(mapper.toDto(updated));
+    return ApiResponse.ok(mapper.toDto(updated));
   }
 
   @PutMapping("/{projectId}/workflow")
-  public Result<ProjectDTO> updateWorkflow(
+  public ApiResponse<ProjectDTO> updateWorkflow(
       @PathVariable("projectId") String projectIdStr,
       @RequestBody UpdateProjectWorkflowRequestDTO request) {
     Objects.requireNonNull(request, "request");
@@ -119,11 +119,11 @@ public class StudioProjectController {
     ProjectWorkflow workflow = mapper.toWorkflow(request.getWorkflow());
     String workflowJson = workflowCodec.encode(workflow);
     Project updated = projectService.updateWorkflow(projectId, expectedVersion, workflowJson);
-    return Results.ok(mapper.toDto(updated));
+    return ApiResponse.ok(mapper.toDto(updated));
   }
 
   @PutMapping("/{projectId}/yolo")
-  public Result<ProjectDTO> updateYolo(
+  public ApiResponse<ProjectDTO> updateYolo(
       @PathVariable("projectId") String projectIdStr,
       @RequestBody UpdateProjectYoloRequestDTO request) {
     Objects.requireNonNull(request, "request");
@@ -135,7 +135,7 @@ public class StudioProjectController {
         ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
     Project updated =
         projectService.updateYolo(projectId, expectedVersion, request.getYoloEnabled());
-    return Results.ok(mapper.toDto(updated));
+    return ApiResponse.ok(mapper.toDto(updated));
   }
 
   @DeleteMapping("/{projectId}")
@@ -150,7 +150,7 @@ public class StudioProjectController {
   }
 
   @PostMapping("/{projectId}/archive")
-  public Result<ProjectDTO> archiveProject(
+  public ApiResponse<ProjectDTO> archiveProject(
       @PathVariable("projectId") String projectIdStr,
       @RequestBody ProjectVersionRequestDTO request) {
     Objects.requireNonNull(request, "request");
@@ -158,11 +158,11 @@ public class StudioProjectController {
     long expectedVersion =
         ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
     Project archived = projectService.archiveProject(projectId, expectedVersion);
-    return Results.ok(mapper.toDto(archived));
+    return ApiResponse.ok(mapper.toDto(archived));
   }
 
   @PostMapping("/{projectId}/unarchive")
-  public Result<ProjectDTO> unarchiveProject(
+  public ApiResponse<ProjectDTO> unarchiveProject(
       @PathVariable("projectId") String projectIdStr,
       @RequestBody ProjectVersionRequestDTO request) {
     Objects.requireNonNull(request, "request");
@@ -170,13 +170,14 @@ public class StudioProjectController {
     long expectedVersion =
         ProjectDtoMapper.parseNonNegativeLong(request.getExpectedVersion(), "expectedVersion");
     Project unarchived = projectService.unarchiveProject(projectId, expectedVersion);
-    return Results.ok(mapper.toDto(unarchived));
+    return ApiResponse.ok(mapper.toDto(unarchived));
   }
 
   @GetMapping("/{projectId}/snapshot")
-  public Result<ProjectSnapshotDTO> getSnapshot(@PathVariable("projectId") String projectIdStr) {
+  public ApiResponse<ProjectSnapshotDTO> getSnapshot(
+      @PathVariable("projectId") String projectIdStr) {
     UUID projectId = ProjectDtoMapper.parseUuid(projectIdStr, "projectId");
     ProjectSnapshotDTO snapshot = projectSnapshotAssembler.assemble(projectId);
-    return Results.ok(snapshot);
+    return ApiResponse.ok(snapshot);
   }
 }

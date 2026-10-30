@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
+import io.micrometer.context.ContextSnapshotFactory;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -77,7 +78,8 @@ class IdeHttpCompletionTest {
             mock(IdeRemoteDataPlaneForwarder.class),
             registry,
             authorizer,
-            mock(IdeBrowserSessionHandler.class));
+            mock(IdeBrowserSessionHandler.class),
+            ContextSnapshotFactory.builder().clearMissing(true).build());
     MockHttpServletRequest request = new MockHttpServletRequest("GET", "/");
     request.addHeader("Sec-Fetch-Site", "same-origin");
     MockHttpServletResponse response = new MockHttpServletResponse();

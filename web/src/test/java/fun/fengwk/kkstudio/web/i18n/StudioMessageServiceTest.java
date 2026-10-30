@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.web.i18n;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -13,6 +14,7 @@ import fun.fengwk.kkstudio.platform.error.DomainErrorCode;
 
 import java.util.Locale;
 import java.util.Map;
+import java.util.MissingResourceException;
 
 class StudioMessageServiceTest {
 
@@ -22,8 +24,7 @@ class StudioMessageServiceTest {
 
   @BeforeEach
   void pinDefaultLocaleToEnglish() {
-    // 回退契约（缺失/不支持 locale -> 英文）依赖 JVM default locale；显式锚定为 US，
-    // 避免宿主环境（如 zh_CN）使回退语义不确定。
+    // LocaleContextHolder 未绑定请求时使用 JVM 默认语言；为无请求上下文的用例固定输入。
     originalDefault = Locale.getDefault();
     Locale.setDefault(Locale.US);
   }
@@ -43,6 +44,8 @@ class StudioMessageServiceTest {
             DomainErrorCode.VERSION_CONFLICT, Map.of("resource", "agent_model")));
     assertEquals("The request is invalid.", messageService.httpMessage(400));
     assertEquals("Bad Request", messageService.httpTitle(400));
+    assertEquals("The server encountered an unexpected error.", messageService.httpMessage(500));
+    assertEquals("Internal Server Error", messageService.httpTitle(500));
 
     LocaleContextHolder.setLocale(Locale.SIMPLIFIED_CHINESE);
     assertEquals(
@@ -53,6 +56,8 @@ class StudioMessageServiceTest {
     assertEquals("limit 参数的值无效。", messageService.validationTypeMismatch("limit"));
     assertEquals("请求无效。", messageService.httpMessage(400));
     assertEquals("请求错误", messageService.httpTitle(400));
+    assertEquals("服务器发生意外错误。", messageService.httpMessage(500));
+    assertEquals("服务器错误", messageService.httpTitle(500));
   }
 
   @Test
@@ -62,6 +67,33 @@ class StudioMessageServiceTest {
 
     LocaleContextHolder.setLocale(Locale.FRANCE);
     assertEquals("The requested resource was not found.", messageService.httpMessage(404));
+  }
+
+  @Test
+  void missingKeyFailsInsteadOfReturningRawKeyOrBlankText() {
+    LocaleContextHolder.setLocale(Locale.US);
+    assertThrows(
+        MissingResourceException.class,
+        () -> messageService.message("studio.error.missing.key", Map.of()));
+
+    LocaleContextHolder.setLocale(Locale.SIMPLIFIED_CHINESE);
+    assertThrows(
+        MissingResourceException.class,
+        () -> messageService.message("studio.error.missing.key", Map.of()));
+  }
+
+  @Test
+  void explicitEnglishAndUnsupportedLocalesIgnoreTheJvmDefaultLanguage() {
+    Locale.setDefault(Locale.SIMPLIFIED_CHINESE);
+    // 独立 loader 隔离 ResourceBundle 缓存，验证中文宿主上的首次装配。
+    StudioMessageService service =
+        new StudioMessageService(new ClassLoader(getClass().getClassLoader()) {});
+
+    String key = "studio.error.http.not_found.message";
+    assertEquals(
+        "The requested resource was not found.", service.message(Locale.US, key, Map.of()));
+    assertEquals(
+        "The requested resource was not found.", service.message(Locale.FRANCE, key, Map.of()));
   }
 
   @Test
