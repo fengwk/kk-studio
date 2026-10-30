@@ -84,8 +84,8 @@ class ToolOutcomeQueryTest {
     advanceHead(store, chain.turn().threadId(), resultEntryId);
     store.transaction(
         tx -> {
-          tx.lockToolInvocationsByAssistantEntryId(chain.assistantEntryId());
-          tx.deleteToolInvocationsByIds(List.of(toolId));
+          tx.tools().lockByAssistantEntry(chain.assistantEntryId());
+          tx.tools().deleteByIds(List.of(toolId));
           return null;
         });
 
@@ -135,8 +135,8 @@ class ToolOutcomeQueryTest {
     advanceHead(store, chain.turn().threadId(), resultEntryId);
     store.transaction(
         tx -> {
-          tx.lockToolInvocationsByAssistantEntryId(chain.assistantEntryId());
-          tx.deleteToolInvocationsByIds(List.of(toolId));
+          tx.tools().lockByAssistantEntry(chain.assistantEntryId());
+          tx.tools().deleteByIds(List.of(toolId));
           return null;
         });
 
@@ -194,14 +194,15 @@ class ToolOutcomeQueryTest {
         store.transaction(
             tx -> {
               UUID id = tx.nextId();
-              tx.insertEntry(new Entry(id, sessionId, chain.assistantEntryId(), corrupted, NOW));
+              tx.entries()
+                  .insert(new Entry(id, sessionId, chain.assistantEntryId(), corrupted, NOW));
               return id;
             });
     advanceHead(store, chain.turn().threadId(), resultEntryId);
     store.transaction(
         tx -> {
-          tx.lockToolInvocationsByAssistantEntryId(chain.assistantEntryId());
-          tx.deleteToolInvocationsByIds(List.of(toolId));
+          tx.tools().lockByAssistantEntry(chain.assistantEntryId());
+          tx.tools().deleteByIds(List.of(toolId));
           return null;
         });
 
@@ -269,8 +270,8 @@ class ToolOutcomeQueryTest {
         tx -> ToolOutcomeAppender.append(tx, sessionId, chain.assistantEntryId(), invocation, NOW));
     store.transaction(
         tx -> {
-          tx.lockToolInvocationsByAssistantEntryId(chain.assistantEntryId());
-          tx.deleteToolInvocationsByIds(List.of(toolId));
+          tx.tools().lockByAssistantEntry(chain.assistantEntryId());
+          tx.tools().deleteByIds(List.of(toolId));
           return null;
         });
 
@@ -313,52 +314,57 @@ class ToolOutcomeQueryTest {
           UUID assistantEntryId = tx.nextId();
           UUID invocationId = tx.nextId();
           UUID resultEntryId = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  turnStartEntryId,
-                  parent.sessionId(),
-                  parent.turnEndEntryId(),
-                  resolvedInputTurnStart(childThreadId),
-                  NOW));
-          tx.insertEntry(
-              new Entry(
-                  userEntryId,
-                  parent.sessionId(),
-                  turnStartEntryId,
-                  userMessagePayload("child input"),
-                  NOW));
-          tx.insertEntry(
-              new Entry(
-                  assistantEntryId,
-                  parent.sessionId(),
-                  userEntryId,
-                  assistantPayload(List.of(callId)),
-                  NOW));
-          tx.insertEntry(
-              new Entry(
-                  resultEntryId,
-                  parent.sessionId(),
-                  assistantEntryId,
-                  realToolResultPayload(invocationId, assistantEntryId, 0, callId),
-                  NOW));
-          tx.insertThread(
-              new ThreadState(
-                  childThreadId,
-                  parent.sessionId(),
-                  parent.threadId(),
-                  resultEntryId,
-                  "a".repeat(64),
-                  name,
-                  parent.threadId(),
-                  false,
-                  SpawnTrigger.MODEL_TOOL,
-                  ThreadConstraints.NONE,
-                  ThreadExecutionControl.RUNNABLE,
-                  0L,
-                  1L,
-                  0L,
-                  NOW,
-                  NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStartEntryId,
+                      parent.sessionId(),
+                      parent.turnEndEntryId(),
+                      resolvedInputTurnStart(childThreadId),
+                      NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      userEntryId,
+                      parent.sessionId(),
+                      turnStartEntryId,
+                      userMessagePayload("child input"),
+                      NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      assistantEntryId,
+                      parent.sessionId(),
+                      userEntryId,
+                      assistantPayload(List.of(callId)),
+                      NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      resultEntryId,
+                      parent.sessionId(),
+                      assistantEntryId,
+                      realToolResultPayload(invocationId, assistantEntryId, 0, callId),
+                      NOW));
+          tx.threads()
+              .insert(
+                  new ThreadState(
+                      childThreadId,
+                      parent.sessionId(),
+                      parent.threadId(),
+                      resultEntryId,
+                      "a".repeat(64),
+                      name,
+                      parent.threadId(),
+                      false,
+                      SpawnTrigger.MODEL_TOOL,
+                      ThreadConstraints.NONE,
+                      ThreadExecutionControl.RUNNABLE,
+                      0L,
+                      1L,
+                      0L,
+                      NOW,
+                      NOW));
           return new ChildOutcome(childThreadId, invocationId, assistantEntryId, resultEntryId);
         });
   }
@@ -383,8 +389,8 @@ class ToolOutcomeQueryTest {
       InMemoryBuiltinHarnessStore store, UUID threadId, UUID resultEntryId) {
     store.transaction(
         tx -> {
-          ThreadState thread = tx.lockThread(threadId).orElseThrow();
-          tx.updateThread(thread.advanceHead(resultEntryId, NOW));
+          ThreadState thread = tx.threads().lock(threadId).orElseThrow();
+          tx.threads().update(thread.advanceHead(resultEntryId, NOW));
           return null;
         });
   }

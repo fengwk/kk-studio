@@ -73,10 +73,11 @@ class PostgresqlHarnessStoreConcurrencyTest {
           1,
           (first.get(10, TimeUnit.SECONDS) ? 1 : 0) + (second.get(10, TimeUnit.SECONDS) ? 1 : 0));
     }
-    assertEquals(2, store.transaction(tx -> tx.listThreadsBySession(baseline.sessionId())).size());
+    assertEquals(
+        2, store.transaction(tx -> tx.threads().listBySession(baseline.sessionId())).size());
     assertEquals(
         1L,
-        store.transaction(tx -> tx.listThreadsBySession(baseline.sessionId())).stream()
+        store.transaction(tx -> tx.threads().listBySession(baseline.sessionId())).stream()
             .filter(t -> t.name().equals("contended"))
             .count());
   }
@@ -85,13 +86,14 @@ class PostgresqlHarnessStoreConcurrencyTest {
     try {
       return store.transaction(
           tx -> {
-            tx.lockSessionForKeyShare(baseline.sessionId()).orElseThrow();
+            tx.sessions().lockForKeyShare(baseline.sessionId()).orElseThrow();
             UUID threadId = tx.nextId();
             ready.countDown();
             await(start);
-            tx.insertThread(
-                StoreTestSupport.siblingRoot(
-                    threadId, baseline.sessionId(), baseline.rootEntryId(), "contended"));
+            tx.threads()
+                .insert(
+                    StoreTestSupport.siblingRoot(
+                        threadId, baseline.sessionId(), baseline.rootEntryId(), "contended"));
             return true;
           });
     } catch (HarnessRuntimeConflictException conflict) {
@@ -107,8 +109,8 @@ class PostgresqlHarnessStoreConcurrencyTest {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(baseline.threadId());
-          tx.requestWork(target);
+          tx.threads().lock(baseline.threadId());
+          tx.work().request(target);
         });
 
     CountDownLatch ready = new CountDownLatch(2);
@@ -136,9 +138,10 @@ class PostgresqlHarnessStoreConcurrencyTest {
         store.transaction(
             tx -> {
               UUID id = tx.nextId();
-              tx.insertThread(
-                  StoreTestSupport.siblingRoot(
-                      id, baseline.sessionId(), baseline.rootEntryId(), "sibling"));
+              tx.threads()
+                  .insert(
+                      StoreTestSupport.siblingRoot(
+                          id, baseline.sessionId(), baseline.rootEntryId(), "sibling"));
               return id;
             });
     WorkTarget firstTarget = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
@@ -146,14 +149,14 @@ class PostgresqlHarnessStoreConcurrencyTest {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(baseline.threadId());
-          tx.requestWork(firstTarget);
+          tx.threads().lock(baseline.threadId());
+          tx.work().request(firstTarget);
         });
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(secondThreadId);
-          tx.requestWork(secondTarget);
+          tx.threads().lock(secondThreadId);
+          tx.work().request(secondTarget);
         });
 
     CountDownLatch firstLocked = new CountDownLatch(1);
@@ -164,7 +167,7 @@ class PostgresqlHarnessStoreConcurrencyTest {
               () ->
                   store.transaction(
                       tx -> {
-                        tx.lockWork(firstTarget).orElseThrow();
+                        tx.work().lock(firstTarget).orElseThrow();
                         firstLocked.countDown();
                         await(releaseFirst);
                         return null;
@@ -176,8 +179,9 @@ class PostgresqlHarnessStoreConcurrencyTest {
               () ->
                   store.transaction(
                       tx ->
-                          tx.claimNextWork(
-                              WorkTargetType.THREAD, "lease-next", Duration.ofSeconds(60))));
+                          tx.work()
+                              .claimNext(
+                                  WorkTargetType.THREAD, "lease-next", Duration.ofSeconds(60))));
       try {
         ClaimedWork claimed = claimer.get(3, TimeUnit.SECONDS).orElseThrow();
         assertEquals(secondTarget, claimed.target());
@@ -195,9 +199,10 @@ class PostgresqlHarnessStoreConcurrencyTest {
         store.transaction(
             tx -> {
               UUID id = tx.nextId();
-              tx.insertThread(
-                  StoreTestSupport.siblingRoot(
-                      id, baseline.sessionId(), baseline.rootEntryId(), "sibling"));
+              tx.threads()
+                  .insert(
+                      StoreTestSupport.siblingRoot(
+                          id, baseline.sessionId(), baseline.rootEntryId(), "sibling"));
               return id;
             });
     CountDownLatch firstLocksAcquired = new CountDownLatch(2);
@@ -227,9 +232,10 @@ class PostgresqlHarnessStoreConcurrencyTest {
         store.transaction(
             tx -> {
               UUID id = tx.nextId();
-              tx.insertThread(
-                  StoreTestSupport.siblingRoot(
-                      id, baseline.sessionId(), baseline.rootEntryId(), "sibling"));
+              tx.threads()
+                  .insert(
+                      StoreTestSupport.siblingRoot(
+                          id, baseline.sessionId(), baseline.rootEntryId(), "sibling"));
               return id;
             });
 
@@ -241,12 +247,12 @@ class PostgresqlHarnessStoreConcurrencyTest {
               () ->
                   store.transaction(
                       tx -> {
-                        tx.lockSessionForKeyShare(baseline.sessionId()).orElseThrow();
-                        tx.lockThread(baseline.threadId()).orElseThrow();
+                        tx.sessions().lockForKeyShare(baseline.sessionId()).orElseThrow();
+                        tx.threads().lock(baseline.threadId()).orElseThrow();
                         bothAcquired.countDown();
                         await(releaseBoth);
                         // 按 accept 阻塞式取回自己的 Thread 行锁完成收尾。
-                        tx.lockThread(baseline.threadId()).orElseThrow();
+                        tx.threads().lock(baseline.threadId()).orElseThrow();
                         return true;
                       }));
       Future<Boolean> second =
@@ -254,11 +260,11 @@ class PostgresqlHarnessStoreConcurrencyTest {
               () ->
                   store.transaction(
                       tx -> {
-                        tx.lockSessionForKeyShare(baseline.sessionId()).orElseThrow();
-                        tx.lockThread(siblingId).orElseThrow();
+                        tx.sessions().lockForKeyShare(baseline.sessionId()).orElseThrow();
+                        tx.threads().lock(siblingId).orElseThrow();
                         bothAcquired.countDown();
                         await(releaseBoth);
-                        tx.lockThread(siblingId).orElseThrow();
+                        tx.threads().lock(siblingId).orElseThrow();
                         return true;
                       }));
       // 双方都拿到同一 Session 的 KEY SHARE + 各自 Thread 的 FOR UPDATE：sibling 不互斥、不 deadlock。
@@ -293,7 +299,8 @@ class PostgresqlHarnessStoreConcurrencyTest {
       second.get(10, TimeUnit.SECONDS);
     }
     // 两个新 Thread 都落库，且属于同一 Session。
-    assertEquals(3, store.transaction(tx -> tx.listThreadsBySession(baseline.sessionId())).size());
+    assertEquals(
+        3, store.transaction(tx -> tx.threads().listBySession(baseline.sessionId())).size());
   }
 
   private UUID createNewThread(
@@ -301,14 +308,16 @@ class PostgresqlHarnessStoreConcurrencyTest {
     return store.transaction(
         tx -> {
           // NEW_THREAD 路径：KEY SHARE Session（不 FOR UPDATE），新 Thread 直接指向既有 Entry（不复制 Entry）。
-          tx.lockSessionForKeyShare(sessionId).orElseThrow();
+          tx.sessions().lockForKeyShare(sessionId).orElseThrow();
           UUID threadId = tx.nextId();
-          tx.insertThread(
-              StoreTestSupport.siblingRoot(threadId, sessionId, rootEntryId, "new-" + threadId));
+          tx.threads()
+              .insert(
+                  StoreTestSupport.siblingRoot(
+                      threadId, sessionId, rootEntryId, "new-" + threadId));
           bothAcquired.countDown();
           await(releaseBoth);
           // 收尾：阻塞式取回自己的 Thread 行锁（与接受路径的锁持有语义一致）。
-          tx.lockThread(threadId).orElseThrow();
+          tx.threads().lock(threadId).orElseThrow();
           return threadId;
         });
   }
@@ -320,15 +329,16 @@ class PostgresqlHarnessStoreConcurrencyTest {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(baseline.threadId());
-          tx.requestWork(target);
+          tx.threads().lock(baseline.threadId());
+          tx.work().request(target);
         });
     // accept 的 due 由数据库权威时间写入，先记录初始值用于断言后置 min 语义（不在 JVM 侧假设绝对时刻）。
-    Work initial = store.transaction(tx -> tx.findWork(target)).orElseThrow();
+    Work initial = store.transaction(tx -> tx.work().find(target)).orElseThrow();
     ClaimedWork claim =
         store
             .transaction(
-                tx -> tx.claimNextWork(WorkTargetType.THREAD, "lease-old", Duration.ofSeconds(60)))
+                tx ->
+                    tx.work().claimNext(WorkTargetType.THREAD, "lease-old", Duration.ofSeconds(60)))
             .orElseThrow();
 
     CountDownLatch wakeWritten = new CountDownLatch(1);
@@ -340,8 +350,8 @@ class PostgresqlHarnessStoreConcurrencyTest {
               () ->
                   store.transaction(
                       tx -> {
-                        tx.lockThread(baseline.threadId()).orElseThrow();
-                        tx.requestWork(target);
+                        tx.threads().lock(baseline.threadId()).orElseThrow();
+                        tx.work().request(target);
                         wakeWritten.countDown();
                         await(releaseWake);
                         return null;
@@ -354,7 +364,7 @@ class PostgresqlHarnessStoreConcurrencyTest {
                   store.transaction(
                       tx -> {
                         completionStarted.countDown();
-                        return tx.completeWork(claim);
+                        return tx.work().complete(claim);
                       }));
       assertTrue(completionStarted.await(10, TimeUnit.SECONDS));
       try {
@@ -369,7 +379,7 @@ class PostgresqlHarnessStoreConcurrencyTest {
       assertNull(remaining.leaseUntil());
     }
 
-    Work stored = store.transaction(tx -> tx.findWork(target).orElseThrow());
+    Work stored = store.transaction(tx -> tx.work().find(target).orElseThrow());
     assertEquals(2L, stored.wakeVersion());
     assertEquals(initial.availableAt(), stored.availableAt());
     assertNull(stored.leaseToken());
@@ -382,8 +392,8 @@ class PostgresqlHarnessStoreConcurrencyTest {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(baseline.threadId()).orElseThrow();
-          tx.requestWork(target);
+          tx.threads().lock(baseline.threadId()).orElseThrow();
+          tx.work().request(target);
         });
 
     CountDownLatch deleted = new CountDownLatch(1);
@@ -394,8 +404,8 @@ class PostgresqlHarnessStoreConcurrencyTest {
               () ->
                   store.transaction(
                       tx -> {
-                        tx.lockThread(baseline.threadId()).orElseThrow();
-                        assertTrue(tx.deleteWork(target));
+                        tx.threads().lock(baseline.threadId()).orElseThrow();
+                        assertTrue(tx.work().delete(target));
                         deleted.countDown();
                         await(releaseDelete);
                         return null;
@@ -407,7 +417,7 @@ class PostgresqlHarnessStoreConcurrencyTest {
               () ->
                   store.transaction(
                       tx -> {
-                        tx.requestWork(target);
+                        tx.work().request(target);
                         return null;
                       }));
       try {
@@ -419,7 +429,7 @@ class PostgresqlHarnessStoreConcurrencyTest {
       }
       control.get(10, TimeUnit.SECONDS);
     }
-    assertTrue(store.transaction(tx -> tx.findWork(target)).isEmpty());
+    assertTrue(store.transaction(tx -> tx.work().find(target)).isEmpty());
   }
 
   @Test
@@ -431,7 +441,7 @@ class PostgresqlHarnessStoreConcurrencyTest {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(baseline.threadId()).orElseThrow();
+          tx.threads().lock(baseline.threadId()).orElseThrow();
           builtin(tx)
               .insertModelInvocation(
                   modelInvocation(
@@ -442,13 +452,14 @@ class PostgresqlHarnessStoreConcurrencyTest {
                       ModelInvocationStatus.READY,
                       null,
                       T1));
-          tx.requestWork(target);
+          tx.work().request(target);
         });
     ClaimedWork claim =
         store
             .transaction(
                 tx ->
-                    tx.claimNextWork(WorkTargetType.MODEL, "lease-delete", Duration.ofSeconds(60)))
+                    tx.work()
+                        .claimNext(WorkTargetType.MODEL, "lease-delete", Duration.ofSeconds(60)))
             .orElseThrow();
 
     CountDownLatch modelLocked = new CountDownLatch(1);
@@ -462,7 +473,7 @@ class PostgresqlHarnessStoreConcurrencyTest {
                         builtin(tx).lockModelInvocation(modelId).orElseThrow();
                         modelLocked.countDown();
                         await(continueToWork);
-                        return tx.lockClaimedWork(claim).isPresent();
+                        return tx.work().lockClaimed(claim).isPresent();
                       }));
       assertTrue(modelLocked.await(10, TimeUnit.SECONDS));
 
@@ -471,9 +482,9 @@ class PostgresqlHarnessStoreConcurrencyTest {
               () ->
                   store.transaction(
                       tx -> {
-                        tx.lockTree(baseline.threadId());
-                        tx.lockThread(baseline.threadId()).orElseThrow();
-                        return tx.deleteThreads(List.of(baseline.threadId())) == 1;
+                        tx.threads().lockTree(baseline.threadId());
+                        tx.threads().lock(baseline.threadId()).orElseThrow();
+                        return tx.threads().delete(List.of(baseline.threadId())) == 1;
                       }));
       try {
         assertThrows(TimeoutException.class, () -> deletion.get(200, TimeUnit.MILLISECONDS));
@@ -485,9 +496,9 @@ class PostgresqlHarnessStoreConcurrencyTest {
       assertTrue(deletion.get(10, TimeUnit.SECONDS));
     }
 
-    assertTrue(store.transaction(tx -> tx.findThread(baseline.threadId())).isEmpty());
+    assertTrue(store.transaction(tx -> tx.threads().find(baseline.threadId())).isEmpty());
     assertTrue(store.transaction(tx -> builtin(tx).findModelInvocation(modelId)).isEmpty());
-    assertTrue(store.transaction(tx -> tx.findWork(target)).isEmpty());
+    assertTrue(store.transaction(tx -> tx.work().find(target)).isEmpty());
   }
 
   @Test
@@ -506,7 +517,7 @@ class PostgresqlHarnessStoreConcurrencyTest {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(baseline.threadId()).orElseThrow();
+          tx.threads().lock(baseline.threadId()).orElseThrow();
           builtin(tx)
               .insertModelInvocation(
                   new ModelInvocation(
@@ -568,7 +579,7 @@ class PostgresqlHarnessStoreConcurrencyTest {
     }
     assertEquals(
         List.of(0, 1),
-        store.transaction(tx -> tx.loadToolInvocationsByAssistantEntryId(assistantEntryId)).stream()
+        store.transaction(tx -> tx.tools().loadByAssistantEntry(assistantEntryId)).stream()
             .map(ToolInvocation::callIndex)
             .toList());
   }
@@ -578,7 +589,7 @@ class PostgresqlHarnessStoreConcurrencyTest {
     ready.countDown();
     await(start);
     try {
-      inTransaction(store, tx -> tx.insertToolInvocations(invocations));
+      inTransaction(store, tx -> tx.tools().insert(invocations));
       return true;
     } catch (IllegalArgumentException expected) {
       return false;
@@ -590,10 +601,10 @@ class PostgresqlHarnessStoreConcurrencyTest {
     try {
       store.transaction(
           tx -> {
-            tx.lockThread(firstThreadId).orElseThrow();
+            tx.threads().lock(firstThreadId).orElseThrow();
             firstLocks.countDown();
             await(firstLocks);
-            tx.lockThread(secondThreadId).orElseThrow();
+            tx.threads().lock(secondThreadId).orElseThrow();
             return null;
           });
       return true;
@@ -607,7 +618,7 @@ class PostgresqlHarnessStoreConcurrencyTest {
     ready.countDown();
     await(start);
     return store.transaction(
-        tx -> tx.claimNextWork(WorkTargetType.THREAD, token, Duration.ofSeconds(60)));
+        tx -> tx.work().claimNext(WorkTargetType.THREAD, token, Duration.ofSeconds(60)));
   }
 
   private static void await(CountDownLatch latch) {

@@ -160,9 +160,9 @@ class PostgresqlCompactionChildTest {
     store.transaction(
         tx -> {
           ThreadState owner = ThreadLifecycleCoordinator.lockThreadWithParent(tx, ownerThreadId);
-          BranchSettings settings = tx.loadEntryPath(owner.headEntryId()).baseSettings();
+          BranchSettings settings = tx.entries().loadPath(owner.headEntryId()).baseSettings();
           ThreadCommand source =
-              tx.loadQueuedCommands(ownerThreadId).stream()
+              tx.commands().loadQueued(ownerThreadId).stream()
                   .filter(command -> command.sequence() == 1L)
                   .findFirst()
                   .orElseThrow();
@@ -175,86 +175,94 @@ class PostgresqlCompactionChildTest {
           UUID turn2UserId = tx.nextId();
           UUID turn2AssistantId = tx.nextId();
           UUID turn2EndId = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  turn1StartId,
-                  owner.sessionId(),
-                  owner.headEntryId(),
-                  inputTurnStart(settings, ownerThreadId),
-                  T1));
-          tx.insertEntry(
-              new Entry(
-                  turn1UserId,
-                  owner.sessionId(),
-                  turn1StartId,
-                  new MessagePayload(sourcePayload.message(), null, null),
-                  T1));
-          tx.insertEntry(
-              new Entry(
-                  turn1AssistantId,
-                  owner.sessionId(),
-                  turn1UserId,
-                  new MessagePayload(
-                      new AgentMessage(
-                          AgentMessageRole.ASSISTANT,
-                          List.of(
-                              new TextMessageContent(
-                                  "historical assistant " + "a".repeat(50_000)))),
-                      new AssistantMessageMetadata(
-                          GenerationStopReason.COMPLETE,
-                          new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L)),
-                      null),
-                  T1));
-          tx.insertEntry(
-              new Entry(
-                  turn1EndId,
-                  owner.sessionId(),
-                  turn1AssistantId,
-                  new TurnEndPayload(turn1StartId, TurnEndOutcome.COMPLETED, false, null, null),
-                  T1));
-          tx.insertEntry(
-              new Entry(
-                  turn2StartId,
-                  owner.sessionId(),
-                  turn1EndId,
-                  inputTurnStart(settings, ownerThreadId),
-                  T1));
-          tx.insertEntry(
-              new Entry(
-                  turn2UserId,
-                  owner.sessionId(),
-                  turn2StartId,
-                  new MessagePayload(
-                      new AgentMessage(
-                          AgentMessageRole.USER,
-                          List.of(
-                              new TextMessageContent(
-                                  "user asks a very long question" + "x".repeat(90_000)))),
-                      null,
-                      null),
-                  T1));
-          tx.insertEntry(
-              new Entry(
-                  turn2AssistantId,
-                  owner.sessionId(),
-                  turn2UserId,
-                  new MessagePayload(
-                      new AgentMessage(
-                          AgentMessageRole.ASSISTANT,
-                          List.of(new TextMessageContent("historical reply"))),
-                      new AssistantMessageMetadata(
-                          GenerationStopReason.COMPLETE, OVER_THRESHOLD_USAGE),
-                      null),
-                  T1));
-          tx.insertEntry(
-              new Entry(
-                  turn2EndId,
-                  owner.sessionId(),
-                  turn2AssistantId,
-                  new TurnEndPayload(turn2StartId, TurnEndOutcome.COMPLETED, false, null, null),
-                  T1));
-          tx.updateCommands(List.of(source.markApplied(turn1StartId)));
-          tx.updateThread(owner.advanceHeadAndInputThroughSequence(turn2EndId, 1L, T1));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turn1StartId,
+                      owner.sessionId(),
+                      owner.headEntryId(),
+                      inputTurnStart(settings, ownerThreadId),
+                      T1));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turn1UserId,
+                      owner.sessionId(),
+                      turn1StartId,
+                      new MessagePayload(sourcePayload.message(), null, null),
+                      T1));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turn1AssistantId,
+                      owner.sessionId(),
+                      turn1UserId,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.ASSISTANT,
+                              List.of(
+                                  new TextMessageContent(
+                                      "historical assistant " + "a".repeat(50_000)))),
+                          new AssistantMessageMetadata(
+                              GenerationStopReason.COMPLETE,
+                              new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L)),
+                          null),
+                      T1));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turn1EndId,
+                      owner.sessionId(),
+                      turn1AssistantId,
+                      new TurnEndPayload(turn1StartId, TurnEndOutcome.COMPLETED, false, null, null),
+                      T1));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turn2StartId,
+                      owner.sessionId(),
+                      turn1EndId,
+                      inputTurnStart(settings, ownerThreadId),
+                      T1));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turn2UserId,
+                      owner.sessionId(),
+                      turn2StartId,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.USER,
+                              List.of(
+                                  new TextMessageContent(
+                                      "user asks a very long question" + "x".repeat(90_000)))),
+                          null,
+                          null),
+                      T1));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turn2AssistantId,
+                      owner.sessionId(),
+                      turn2UserId,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.ASSISTANT,
+                              List.of(new TextMessageContent("historical reply"))),
+                          new AssistantMessageMetadata(
+                              GenerationStopReason.COMPLETE, OVER_THRESHOLD_USAGE),
+                          null),
+                      T1));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turn2EndId,
+                      owner.sessionId(),
+                      turn2AssistantId,
+                      new TurnEndPayload(turn2StartId, TurnEndOutcome.COMPLETED, false, null, null),
+                      T1));
+          tx.commands().update(List.of(source.markApplied(turn1StartId)));
+          tx.threads().update(owner.advanceHeadAndInputThroughSequence(turn2EndId, 1L, T1));
           return null;
         });
   }
@@ -320,20 +328,21 @@ class PostgresqlCompactionChildTest {
   private Optional<ClaimedWork> claimNextThreadWork() {
     return store.transaction(
         tx ->
-            tx.claimNextWork(
-                WorkTargetType.THREAD, UUID.randomUUID().toString(), Duration.ofSeconds(30)));
+            tx.work()
+                .claimNext(
+                    WorkTargetType.THREAD, UUID.randomUUID().toString(), Duration.ofSeconds(30)));
   }
 
   private List<ExecutionExitFact> loadUnconfirmedExecutions(UUID threadId) {
-    return store.transaction(tx -> tx.loadUnconfirmedExecutions(threadId));
+    return store.transaction(tx -> tx.exits().loadUnconfirmed(threadId));
   }
 
   private int countIncompleteChildJoins(UUID parentThreadId) {
-    return store.transaction(tx -> tx.countIncompleteChildJoins(parentThreadId));
+    return store.transaction(tx -> tx.joins().countIncompleteChildren(parentThreadId));
   }
 
   private long version(UUID threadId) {
-    return store.transaction(tx -> tx.findThread(threadId).orElseThrow().version());
+    return store.transaction(tx -> tx.threads().find(threadId).orElseThrow().version());
   }
 
   /** 外层父 Thread 上按 notificationId 去重的通知数量（含已物化与仍为命令的交付）。 */
@@ -348,7 +357,7 @@ class PostgresqlCompactionChildTest {
             }
           }
           EntryPath path =
-              tx.loadEntryPath(tx.findThread(parentThreadId).orElseThrow().headEntryId());
+              tx.entries().loadPath(tx.threads().find(parentThreadId).orElseThrow().headEntryId());
           for (Entry entry : path.entries()) {
             if (entry.payload() instanceof NotificationPayload notification) {
               notificationIds.add(notification.notificationId());
@@ -516,11 +525,11 @@ class PostgresqlCompactionChildTest {
     // 新建了子 Session/ROOT Entry/子 Thread（parentThreadId = 父）
     store.transaction(
         tx -> {
-          ThreadState childThread = tx.lockThread(childThreadId).orElseThrow();
+          ThreadState childThread = tx.threads().lock(childThreadId).orElseThrow();
           assertEquals(parentId, childThread.parentThreadId());
-          Session childSession = tx.findSession(childThread.sessionId()).orElseThrow();
+          Session childSession = tx.sessions().find(childThread.sessionId()).orElseThrow();
           assertNotNull(childSession);
-          Entry rootEntry = tx.findEntry(childThread.headEntryId()).orElseThrow();
+          Entry rootEntry = tx.entries().find(childThread.headEntryId()).orElseThrow();
           assertInstanceOf(RootPayload.class, rootEntry.payload());
 
           // 子第一条 command 的 payload 是 CustomMessageCommandPayload（摘要 prompt，非空）
@@ -537,7 +546,7 @@ class PostgresqlCompactionChildTest {
           assertFalse(textContent.text().isBlank());
 
           // 存在 delivery == SETTLE_OWNER_TURN、childThreadId = 子、未 matched 的 join
-          ThreadJoin join = tx.findJoin(joinInvocationId).orElseThrow();
+          ThreadJoin join = tx.joins().find(joinInvocationId).orElseThrow();
           assertEquals(JoinDelivery.SETTLE_OWNER_TURN, join.delivery());
           // 压缩子的创建来源与约束经 PostgreSQL 持久化后原样读回。
           assertEquals(SpawnTrigger.RUNTIME, childThread.spawnTrigger());
@@ -565,8 +574,8 @@ class PostgresqlCompactionChildTest {
     List<ThreadCommand> parentQueued =
         store.transaction(
             tx -> {
-              tx.lockThread(parentId);
-              return tx.loadQueuedCommands(parentId);
+              tx.threads().lock(parentId);
+              return tx.commands().loadQueued(parentId);
             });
     assertEquals(1, parentQueued.size());
     assertEquals(userCommandId, parentQueued.getFirst().idempotencyKey());
@@ -578,9 +587,13 @@ class PostgresqlCompactionChildTest {
     ModelInvocation childModel =
         store.transaction(
             tx -> {
-              ThreadState childThread = tx.lockThread(childThreadId).orElseThrow();
+              ThreadState childThread = tx.threads().lock(childThreadId).orElseThrow();
               UUID childTurn =
-                  tx.loadEntryPath(childThread.headEntryId()).openTurnStart().orElseThrow().id();
+                  tx.entries()
+                      .loadPath(childThread.headEntryId())
+                      .openTurnStart()
+                      .orElseThrow()
+                      .id();
               return builtin(tx).findModelInvocationByTurn(childThreadId, childTurn).orElseThrow();
             });
     assertEquals(ModelInvocationStatus.READY, childModel.status());
@@ -626,7 +639,8 @@ class PostgresqlCompactionChildTest {
     assertFalse(endPayload.continueModel());
 
     // 父 head 推进
-    ThreadState finalParentThread = store.transaction(tx -> tx.findThread(parentId).orElseThrow());
+    ThreadState finalParentThread =
+        store.transaction(tx -> tx.threads().find(parentId).orElseThrow());
     assertEquals(turnEndEntry.id(), finalParentThread.headEntryId());
 
     // 父无 ModelInvocation
@@ -690,8 +704,8 @@ class PostgresqlCompactionChildTest {
     List<ThreadCommand> stillQueued =
         store.transaction(
             tx -> {
-              tx.lockThread(parentId);
-              return tx.loadQueuedCommands(parentId);
+              tx.threads().lock(parentId);
+              return tx.commands().loadQueued(parentId);
             });
     assertEquals(1, stillQueued.size());
   }
@@ -1116,7 +1130,7 @@ class PostgresqlCompactionChildTest {
       ExecutionExitFact childExecutionAfter =
           childExecutionId == null
               ? null
-              : store.transaction(tx -> tx.findExecution(childExecutionId).orElse(null));
+              : store.transaction(tx -> tx.exits().find(childExecutionId).orElse(null));
       ThreadJoin childJoinAfter = findJoin(child.joinInvocationId());
       ThreadJoin outerJoinAfter = stoppingRuntime.findJoin(outerJoinId).orElseThrow();
       int outerNotificationsAfter = notificationCount(outerThreadId);
@@ -1233,14 +1247,15 @@ class PostgresqlCompactionChildTest {
   private CompactionChild compactionChildOf(UUID parentId) {
     return store.transaction(
         tx -> {
-          ThreadState parent = tx.findThread(parentId).orElseThrow();
-          EntryPath parentPath = tx.loadEntryPath(parent.headEntryId());
+          ThreadState parent = tx.threads().find(parentId).orElseThrow();
+          EntryPath parentPath = tx.entries().loadPath(parent.headEntryId());
           Entry startEntry = parentPath.head();
           assertInstanceOf(TurnStartPayload.class, startEntry.payload());
           TurnStartPayload startPayload = (TurnStartPayload) startEntry.payload();
           assertNotNull(startPayload.compaction(), "compaction turn must own a compaction child");
           UUID childThreadId = startPayload.compaction().childThreadId();
-          ThreadJoin join = tx.findJoin(startPayload.compaction().joinInvocationId()).orElseThrow();
+          ThreadJoin join =
+              tx.joins().find(startPayload.compaction().joinInvocationId()).orElseThrow();
           assertEquals(JoinDelivery.SETTLE_OWNER_TURN, join.delivery());
           return new CompactionChild(childThreadId, join.invocationId(), startEntry.id());
         });
@@ -1250,8 +1265,9 @@ class PostgresqlCompactionChildTest {
   private UUID openChildModel(UUID childThreadId) {
     return store.transaction(
         tx -> {
-          ThreadState child = tx.findThread(childThreadId).orElseThrow();
-          UUID childTurn = tx.loadEntryPath(child.headEntryId()).openTurnStart().orElseThrow().id();
+          ThreadState child = tx.threads().find(childThreadId).orElseThrow();
+          UUID childTurn =
+              tx.entries().loadPath(child.headEntryId()).openTurnStart().orElseThrow().id();
           ModelInvocation invocation =
               builtin(tx).findModelInvocationByTurn(childThreadId, childTurn).orElseThrow();
           assertEquals(ModelInvocationStatus.READY, invocation.status());
@@ -1281,9 +1297,9 @@ class PostgresqlCompactionChildTest {
   private long frozenOutputBudget(UUID parentId) {
     return store.transaction(
         tx -> {
-          ThreadState parent = tx.findThread(parentId).orElseThrow();
+          ThreadState parent = tx.threads().find(parentId).orElseThrow();
           TurnStartPayload start =
-              (TurnStartPayload) tx.findEntry(parent.headEntryId()).orElseThrow().payload();
+              (TurnStartPayload) tx.entries().find(parent.headEntryId()).orElseThrow().payload();
           assertNotNull(start.compaction(), "parent head must be a compaction turn start");
           return start.compaction().outputBudget();
         });
@@ -1293,10 +1309,14 @@ class PostgresqlCompactionChildTest {
   private int childTurnStartMaxOutputTokens(UUID childThreadId) {
     return store.transaction(
         tx -> {
-          ThreadState child = tx.findThread(childThreadId).orElseThrow();
+          ThreadState child = tx.threads().find(childThreadId).orElseThrow();
           TurnStartPayload start =
               (TurnStartPayload)
-                  tx.loadEntryPath(child.headEntryId()).openTurnStart().orElseThrow().payload();
+                  tx.entries()
+                      .loadPath(child.headEntryId())
+                      .openTurnStart()
+                      .orElseThrow()
+                      .payload();
           assertNotNull(start.maxOutputTokens(), "open child turn must freeze maxOutputTokens");
           return start.maxOutputTokens();
         });
@@ -1310,98 +1330,103 @@ class PostgresqlCompactionChildTest {
     store.transaction(
         tx -> {
           ThreadState child = ThreadLifecycleCoordinator.lockThreadWithParent(tx, childThreadId);
-          BranchSettings settings = tx.loadEntryPath(child.headEntryId()).baseSettings();
+          BranchSettings settings = tx.entries().loadPath(child.headEntryId()).baseSettings();
           String callId = "call-1";
           UUID startId = tx.nextId();
           UUID inputId = tx.nextId();
           UUID assistantId = tx.nextId();
           UUID toolResultId = tx.nextId();
           UUID endId = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  startId,
-                  child.sessionId(),
-                  child.headEntryId(),
-                  new TurnStartPayload(
-                      TurnStartReason.INPUT,
-                      settings,
-                      childThreadId,
-                      CONTEXT_WINDOW,
-                      MAX_OUTPUT_TOKENS,
-                      null,
-                      null),
-                  T1));
-          tx.insertEntry(
-              new Entry(
-                  inputId,
-                  child.sessionId(),
-                  startId,
-                  new MessagePayload(
-                      new AgentMessage(
-                          AgentMessageRole.USER,
-                          List.of(new TextMessageContent("compaction instruction"))),
-                      null,
-                      null),
-                  T1));
-          tx.insertEntry(
-              new Entry(
-                  assistantId,
-                  child.sessionId(),
-                  inputId,
-                  new MessagePayload(
-                      new AgentMessage(
-                          AgentMessageRole.ASSISTANT,
-                          List.of(
-                              new ToolCallMessageContent(callId, "bash", "bash", "{}"),
-                              new TextMessageContent("working"))),
-                      new AssistantMessageMetadata(
-                          GenerationStopReason.COMPLETE,
-                          new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L)),
-                      null),
-                  T1));
-          tx.insertEntry(
-              new Entry(
-                  toolResultId,
-                  child.sessionId(),
-                  assistantId,
-                  new MessagePayload(
-                      new AgentMessage(
-                          AgentMessageRole.TOOL,
-                          List.of(
-                              new ToolResultMessageContent(
-                                  callId,
-                                  "bash",
-                                  "bash",
-                                  List.of(new TextMessageContent("tool output")),
-                                  false,
-                                  "{}"))),
-                      null,
-                      new ToolResultMetadata(
-                          new UUID(0L, 8888L),
-                          assistantId,
-                          callId,
-                          0,
-                          ToolResultStatus.SUCCEEDED,
-                          false,
+          tx.entries()
+              .insert(
+                  new Entry(
+                      startId,
+                      child.sessionId(),
+                      child.headEntryId(),
+                      new TurnStartPayload(
+                          TurnStartReason.INPUT,
+                          settings,
+                          childThreadId,
+                          CONTEXT_WINDOW,
+                          MAX_OUTPUT_TOKENS,
                           null,
+                          null),
+                      T1));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      inputId,
+                      child.sessionId(),
+                      startId,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.USER,
+                              List.of(new TextMessageContent("compaction instruction"))),
                           null,
-                          null)),
-                  T1));
-          tx.insertEntry(
-              new Entry(
-                  endId,
-                  child.sessionId(),
-                  toolResultId,
-                  new TurnEndPayload(startId, TurnEndOutcome.COMPLETED, true, null, null),
-                  T1));
+                          null),
+                      T1));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      assistantId,
+                      child.sessionId(),
+                      inputId,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.ASSISTANT,
+                              List.of(
+                                  new ToolCallMessageContent(callId, "bash", "bash", "{}"),
+                                  new TextMessageContent("working"))),
+                          new AssistantMessageMetadata(
+                              GenerationStopReason.COMPLETE,
+                              new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L)),
+                          null),
+                      T1));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      toolResultId,
+                      child.sessionId(),
+                      assistantId,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.TOOL,
+                              List.of(
+                                  new ToolResultMessageContent(
+                                      callId,
+                                      "bash",
+                                      "bash",
+                                      List.of(new TextMessageContent("tool output")),
+                                      false,
+                                      "{}"))),
+                          null,
+                          new ToolResultMetadata(
+                              new UUID(0L, 8888L),
+                              assistantId,
+                              callId,
+                              0,
+                              ToolResultStatus.SUCCEEDED,
+                              false,
+                              null,
+                              null,
+                              null)),
+                      T1));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      endId,
+                      child.sessionId(),
+                      toolResultId,
+                      new TurnEndPayload(startId, TurnEndOutcome.COMPLETED, true, null, null),
+                      T1));
           ThreadCommand childCommand =
-              tx.loadQueuedCommands(childThreadId).stream()
+              tx.commands().loadQueued(childThreadId).stream()
                   .filter(command -> command.sequence() == 1L)
                   .findFirst()
                   .orElseThrow();
-          tx.updateCommands(List.of(childCommand.markApplied(startId)));
-          tx.updateThread(child.advanceHeadAndInputThroughSequence(endId, 1L, T1));
-          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, childThreadId));
+          tx.commands().update(List.of(childCommand.markApplied(startId)));
+          tx.threads().update(child.advanceHeadAndInputThroughSequence(endId, 1L, T1));
+          tx.work().request(new WorkTarget(WorkTargetType.THREAD, childThreadId));
           return null;
         });
   }
@@ -1412,8 +1437,11 @@ class PostgresqlCompactionChildTest {
         store
             .transaction(
                 tx ->
-                    tx.claimNextWork(
-                        WorkTargetType.MODEL, UUID.randomUUID().toString(), Duration.ofSeconds(30)))
+                    tx.work()
+                        .claimNext(
+                            WorkTargetType.MODEL,
+                            UUID.randomUUID().toString(),
+                            Duration.ofSeconds(30)))
             .orElseThrow();
     assertEquals(invocationId, claim.target().id());
     return modelProcessor.process(claim);
@@ -1579,105 +1607,117 @@ class PostgresqlCompactionChildTest {
           UUID turn2EndId = tx.nextId();
           UUID threadId = tx.nextId();
 
-          tx.insertSession(new Session(sessionId, "session-" + sessionId, T1));
-          tx.insertEntry(
-              new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), T1));
+          tx.sessions().insert(new Session(sessionId, "session-" + sessionId, T1));
+          tx.entries()
+              .insert(
+                  new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), T1));
 
           // turn1：可摘要历史显著大于测试摘要 wrapper，确保成功摘要有真实 gain
-          tx.insertEntry(
-              new Entry(
-                  turn1StartId, sessionId, rootEntryId, resolvedInputTurnStart(threadId), T1));
-          tx.insertEntry(
-              new Entry(
-                  turn1UserId,
-                  sessionId,
-                  turn1StartId,
-                  new MessagePayload(
-                      new AgentMessage(
-                          AgentMessageRole.USER,
-                          List.of(new TextMessageContent("historical user " + "h".repeat(50_000)))),
-                      null,
-                      null),
-                  T1));
-          tx.insertEntry(
-              new Entry(
-                  turn1AssistantId,
-                  sessionId,
-                  turn1UserId,
-                  new MessagePayload(
-                      new AgentMessage(
-                          AgentMessageRole.ASSISTANT,
-                          List.of(
-                              new TextMessageContent(
-                                  "historical assistant " + "a".repeat(50_000)))),
-                      new AssistantMessageMetadata(
-                          GenerationStopReason.COMPLETE,
-                          new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L)),
-                      null),
-                  T1));
-          tx.insertEntry(
-              new Entry(
-                  turn1EndId,
-                  sessionId,
-                  turn1AssistantId,
-                  new TurnEndPayload(turn1StartId, TurnEndOutcome.COMPLETED, false, null, null),
-                  T1));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turn1StartId, sessionId, rootEntryId, resolvedInputTurnStart(threadId), T1));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turn1UserId,
+                      sessionId,
+                      turn1StartId,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.USER,
+                              List.of(
+                                  new TextMessageContent("historical user " + "h".repeat(50_000)))),
+                          null,
+                          null),
+                      T1));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turn1AssistantId,
+                      sessionId,
+                      turn1UserId,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.ASSISTANT,
+                              List.of(
+                                  new TextMessageContent(
+                                      "historical assistant " + "a".repeat(50_000)))),
+                          new AssistantMessageMetadata(
+                              GenerationStopReason.COMPLETE,
+                              new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L)),
+                          null),
+                      T1));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turn1EndId,
+                      sessionId,
+                      turn1AssistantId,
+                      new TurnEndPayload(turn1StartId, TurnEndOutcome.COMPLETED, false, null, null),
+                      T1));
 
           // turn2：长 USER + 短 ASSISTANT（携带越过阈值的 usage）
-          tx.insertEntry(
-              new Entry(turn2StartId, sessionId, turn1EndId, resolvedInputTurnStart(threadId), T1));
-          tx.insertEntry(
-              new Entry(
-                  turn2UserId,
-                  sessionId,
-                  turn2StartId,
-                  new MessagePayload(
-                      new AgentMessage(
-                          AgentMessageRole.USER,
-                          List.of(
-                              new TextMessageContent(
-                                  "user asks a very long question" + "x".repeat(90_000)))),
-                      null,
-                      null),
-                  T1));
-          tx.insertEntry(
-              new Entry(
-                  turn2AssistantId,
-                  sessionId,
-                  turn2UserId,
-                  new MessagePayload(
-                      new AgentMessage(
-                          AgentMessageRole.ASSISTANT,
-                          List.of(new TextMessageContent(response.text()))),
-                      new AssistantMessageMetadata(response.stopReason(), response.usage()),
-                      null),
-                  T1));
-          tx.insertEntry(
-              new Entry(
-                  turn2EndId,
-                  sessionId,
-                  turn2AssistantId,
-                  new TurnEndPayload(turn2StartId, TurnEndOutcome.COMPLETED, false, null, null),
-                  T1));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turn2StartId, sessionId, turn1EndId, resolvedInputTurnStart(threadId), T1));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turn2UserId,
+                      sessionId,
+                      turn2StartId,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.USER,
+                              List.of(
+                                  new TextMessageContent(
+                                      "user asks a very long question" + "x".repeat(90_000)))),
+                          null,
+                          null),
+                      T1));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turn2AssistantId,
+                      sessionId,
+                      turn2UserId,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.ASSISTANT,
+                              List.of(new TextMessageContent(response.text()))),
+                          new AssistantMessageMetadata(response.stopReason(), response.usage()),
+                          null),
+                      T1));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turn2EndId,
+                      sessionId,
+                      turn2AssistantId,
+                      new TurnEndPayload(turn2StartId, TurnEndOutcome.COMPLETED, false, null, null),
+                      T1));
 
-          tx.insertThread(
-              new ThreadState(
-                  threadId,
-                  sessionId,
-                  null,
-                  turn2EndId,
-                  CREATION_REQUEST_HASH,
-                  "main",
-                  threadId,
-                  false,
-                  SpawnTrigger.USER,
-                  ThreadConstraints.NONE,
-                  ThreadExecutionControl.RUNNABLE,
-                  0L,
-                  1L,
-                  0L,
-                  T1,
-                  T1));
+          tx.threads()
+              .insert(
+                  new ThreadState(
+                      threadId,
+                      sessionId,
+                      null,
+                      turn2EndId,
+                      CREATION_REQUEST_HASH,
+                      "main",
+                      threadId,
+                      false,
+                      SpawnTrigger.USER,
+                      ThreadConstraints.NONE,
+                      ThreadExecutionControl.RUNNABLE,
+                      0L,
+                      1L,
+                      0L,
+                      T1,
+                      T1));
 
           return new ClosedTurnBaseline(
               sessionId,
@@ -1704,7 +1744,7 @@ class PostgresqlCompactionChildTest {
   private UUID seedUserCommand(UUID threadId, String text) {
     return store.transaction(
         tx -> {
-          ThreadState thread = tx.lockThread(threadId).orElseThrow();
+          ThreadState thread = tx.threads().lock(threadId).orElseThrow();
           UUID idempotencyKey = tx.nextId();
           long seq = thread.nextCommandSequence();
           UserMessageCommandPayload payload =
@@ -1720,8 +1760,8 @@ class PostgresqlCompactionChildTest {
                   null,
                   null,
                   T1);
-          tx.insertCommands(List.of(command));
-          tx.updateThread(thread.reserveCommandSequences(1, T1));
+          tx.commands().insert(List.of(command));
+          tx.threads().update(thread.reserveCommandSequences(1, T1));
           return idempotencyKey;
         });
   }
@@ -1729,8 +1769,8 @@ class PostgresqlCompactionChildTest {
   private void requestThreadWork(UUID threadId) {
     store.transaction(
         tx -> {
-          tx.lockThread(threadId).orElseThrow();
-          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId));
+          tx.threads().lock(threadId).orElseThrow();
+          tx.work().request(new WorkTarget(WorkTargetType.THREAD, threadId));
           return null;
         });
   }
@@ -1740,10 +1780,11 @@ class PostgresqlCompactionChildTest {
         store
             .transaction(
                 tx ->
-                    tx.claimNextWork(
-                        WorkTargetType.THREAD,
-                        UUID.randomUUID().toString(),
-                        Duration.ofSeconds(30)))
+                    tx.work()
+                        .claimNext(
+                            WorkTargetType.THREAD,
+                            UUID.randomUUID().toString(),
+                            Duration.ofSeconds(30)))
             .orElseThrow();
     assertEquals(expectedThreadId, claim.target().id());
     assertEquals(ThreadProcessResult.COMPLETED, processor.process(claim));
@@ -1754,7 +1795,8 @@ class PostgresqlCompactionChildTest {
     store.transaction(
         tx -> {
           ThreadState thread = ThreadLifecycleCoordinator.lockThreadWithParent(tx, threadId);
-          UUID turn = tx.loadEntryPath(thread.headEntryId()).openTurnStart().orElseThrow().id();
+          UUID turn =
+              tx.entries().loadPath(thread.headEntryId()).openTurnStart().orElseThrow().id();
           ModelInvocation model =
               builtin(tx).findModelInvocationByTurn(threadId, turn).orElseThrow();
           assertEquals(ModelInvocationStatus.READY, model.status());
@@ -1772,7 +1814,8 @@ class PostgresqlCompactionChildTest {
     store.transaction(
         tx -> {
           ThreadState thread = ThreadLifecycleCoordinator.lockThreadWithParent(tx, threadId);
-          UUID turn = tx.loadEntryPath(thread.headEntryId()).openTurnStart().orElseThrow().id();
+          UUID turn =
+              tx.entries().loadPath(thread.headEntryId()).openTurnStart().orElseThrow().id();
           ModelInvocation model =
               builtin(tx).findModelInvocationByTurn(threadId, turn).orElseThrow();
           assertEquals(ModelInvocationStatus.RUNNING, model.status());
@@ -1788,7 +1831,7 @@ class PostgresqlCompactionChildTest {
                   null,
                   "{}");
           builtin(tx).updateModelInvocation(model.succeed(response, T1));
-          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId));
+          tx.work().request(new WorkTarget(WorkTargetType.THREAD, threadId));
           return null;
         });
   }
@@ -1800,26 +1843,26 @@ class PostgresqlCompactionChildTest {
   private EntryPath path(UUID threadId) {
     return store.transaction(
         tx -> {
-          ThreadState thread = tx.findThread(threadId).orElseThrow();
-          return tx.loadEntryPath(thread.headEntryId());
+          ThreadState thread = tx.threads().find(threadId).orElseThrow();
+          return tx.entries().loadPath(thread.headEntryId());
         });
   }
 
   private int queuedCommandCount(UUID threadId) {
     return store.transaction(
         tx -> {
-          tx.lockThread(threadId);
-          return tx.loadQueuedCommands(threadId).size();
+          tx.threads().lock(threadId);
+          return tx.commands().loadQueued(threadId).size();
         });
   }
 
   private boolean hasWork(WorkTargetType type, UUID targetId) {
     return store.<Boolean>transaction(
-        tx -> tx.findWork(new WorkTarget(type, targetId)).isPresent());
+        tx -> tx.work().find(new WorkTarget(type, targetId)).isPresent());
   }
 
   private ThreadJoin findJoin(UUID invocationId) {
-    return store.transaction(tx -> tx.findJoin(invocationId)).orElseThrow();
+    return store.transaction(tx -> tx.joins().find(invocationId)).orElseThrow();
   }
 
   private Optional<ModelInvocation> findModelInvocationByTurn(UUID threadId, UUID turnStartId) {

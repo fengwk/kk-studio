@@ -118,23 +118,24 @@ class HarnessRuntimeStopReplayTest {
     inTransaction(
         store,
         tx -> {
-          tx.insertSession(session(sessionId));
-          tx.insertEntry(rootEntry(rootId, sessionId));
-          tx.insertEntry(turnStartEntry(turnStart1, sessionId, rootId, T1, threadId));
-          tx.insertEntry(userMessageEntry(user1, sessionId, turnStart1, T1));
-          tx.insertEntry(assistantEntry(assistant1, sessionId, user1, T1));
-          tx.insertEntry(
-              new Entry(
-                  turnEnd1,
-                  sessionId,
-                  assistant1,
-                  new TurnEndPayload(
-                      turnStart1, TurnEndOutcome.STOPPED, false, TurnEndReason.USER_STOP, key),
-                  T1));
-          tx.insertEntry(turnStartEntry(turnStart2, sessionId, turnEnd1, T1, threadId));
-          tx.insertEntry(userMessageEntry(user2, sessionId, turnStart2, T1));
+          tx.sessions().insert(session(sessionId));
+          tx.entries().insert(rootEntry(rootId, sessionId));
+          tx.entries().insert(turnStartEntry(turnStart1, sessionId, rootId, T1, threadId));
+          tx.entries().insert(userMessageEntry(user1, sessionId, turnStart1, T1));
+          tx.entries().insert(assistantEntry(assistant1, sessionId, user1, T1));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnEnd1,
+                      sessionId,
+                      assistant1,
+                      new TurnEndPayload(
+                          turnStart1, TurnEndOutcome.STOPPED, false, TurnEndReason.USER_STOP, key),
+                      T1));
+          tx.entries().insert(turnStartEntry(turnStart2, sessionId, turnEnd1, T1, threadId));
+          tx.entries().insert(userMessageEntry(user2, sessionId, turnStart2, T1));
           // 新活跃 open Turn：head 停在 user2，Model 以 head（turned 2）为基础在跑。
-          tx.insertThread(thread(threadId, sessionId, user2));
+          tx.threads().insert(thread(threadId, sessionId, user2));
           ModelInvocation model = modelInvocation(modelId, threadId, turnStart2, user2, T1);
           builtin(tx).insertModelInvocation(model);
           builtin(tx).updateModelInvocation(model.markRunning(T2));
@@ -142,11 +143,12 @@ class HarnessRuntimeStopReplayTest {
     // 该 STOP 边界已持久保存回执：replay 完全由 (threadId, stopRequestId) 回执驱动，不读当前 head。
     store.transaction(
         tx -> {
-          tx.lockThread(threadId);
-          tx.insertStopReceipts(
-              threadId,
-              key,
-              List.of(new StoppedThreadReceipt(threadId, key, turnEnd1, 0, List.of())));
+          tx.threads().lock(threadId);
+          tx.stops()
+              .insertReceipts(
+                  threadId,
+                  key,
+                  List.of(new StoppedThreadReceipt(threadId, key, turnEnd1, 0, List.of())));
           return null;
         });
     seedThreadWork(store, threadId);
@@ -156,7 +158,7 @@ class HarnessRuntimeStopReplayTest {
     StopResult replay = runtime.stop(new StopCommand(threadId, key, 9));
     assertReplayed(replay);
     assertEquals(turnEnd1, targetReceipt(replay).stoppedTurnEndEntryId());
-    ThreadState thread = store.transaction(tx -> tx.lockThread(threadId).orElseThrow());
+    ThreadState thread = store.transaction(tx -> tx.threads().lock(threadId).orElseThrow());
     assertEquals(user2, thread.headEntryId());
     assertEquals(0L, thread.version());
     ModelInvocation model =
@@ -165,11 +167,12 @@ class HarnessRuntimeStopReplayTest {
     assertTrue(
         Boolean.TRUE.equals(
             store.transaction(
-                tx -> tx.findWork(new WorkTarget(WorkTargetType.THREAD, threadId)).isPresent())));
+                tx ->
+                    tx.work().find(new WorkTarget(WorkTargetType.THREAD, threadId)).isPresent())));
     assertTrue(
         Boolean.TRUE.equals(
             store.transaction(
-                tx -> tx.findWork(new WorkTarget(WorkTargetType.MODEL, modelId)).isPresent())));
+                tx -> tx.work().find(new WorkTarget(WorkTargetType.MODEL, modelId)).isPresent())));
   }
 
   /** 同一 raw id 归 owner Thread；共享同一 CONTINUATION 历史的 foreign Thread 的 Stop 被忽略而非冲突/stale。 */
@@ -230,7 +233,8 @@ class HarnessRuntimeStopReplayTest {
         targetReceipt(replay).cancelledCommandCount());
     assertEquals(targetReceipt(first).cancelledInputs(), targetReceipt(replay).cancelledInputs());
     // replay 不写任何新 marker：version 与 head 保持首次 Stop 后的终态。
-    ThreadState thread = store.transaction(tx -> tx.lockThread(baseline.threadId()).orElseThrow());
+    ThreadState thread =
+        store.transaction(tx -> tx.threads().lock(baseline.threadId()).orElseThrow());
     assertEquals(replay.thread().version(), thread.version());
     assertEquals(targetReceipt(replay).stoppedTurnEndEntryId(), thread.headEntryId());
     // 取消行仍以该 stopRequestId 持久化（queued-only 维度与 live receipt 一致）。
@@ -238,7 +242,7 @@ class HarnessRuntimeStopReplayTest {
         1,
         store
             .transaction(
-                tx -> tx.loadCancelledCommandsByRequest(baseline.threadId(), TestIds.id(9)))
+                tx -> tx.commands().loadCancelledByRequest(baseline.threadId(), TestIds.id(9)))
             .size());
   }
 
@@ -258,24 +262,25 @@ class HarnessRuntimeStopReplayTest {
     inTransaction(
         store,
         tx -> {
-          tx.insertSession(session(sessionId));
-          tx.insertEntry(rootEntry(rootId, sessionId));
-          tx.insertEntry(turnStartEntry(turnStartId, sessionId, rootId, T1, threadId));
-          tx.insertEntry(userMessageEntry(userId, sessionId, turnStartId, T1));
-          tx.insertEntry(assistantEntry(assistantId, sessionId, userId, T1));
-          tx.insertEntry(
-              new Entry(
-                  turnEndId,
-                  sessionId,
-                  assistantId,
-                  new TurnEndPayload(
-                      turnStartId,
-                      TurnEndOutcome.CANCELLED,
-                      false,
-                      TurnEndReason.HISTORY_CUT,
-                      TestIds.id(1)),
-                  T1));
-          tx.insertThread(thread(threadId, sessionId, turnEndId));
+          tx.sessions().insert(session(sessionId));
+          tx.entries().insert(rootEntry(rootId, sessionId));
+          tx.entries().insert(turnStartEntry(turnStartId, sessionId, rootId, T1, threadId));
+          tx.entries().insert(userMessageEntry(userId, sessionId, turnStartId, T1));
+          tx.entries().insert(assistantEntry(assistantId, sessionId, userId, T1));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnEndId,
+                      sessionId,
+                      assistantId,
+                      new TurnEndPayload(
+                          turnStartId,
+                          TurnEndOutcome.CANCELLED,
+                          false,
+                          TurnEndReason.HISTORY_CUT,
+                          TestIds.id(1)),
+                      T1));
+          tx.threads().insert(thread(threadId, sessionId, turnEndId));
         });
 
     StopResult first = runtime.stop(new StopCommand(threadId, TestIds.id(1), 0));
@@ -300,16 +305,16 @@ class HarnessRuntimeStopReplayTest {
     inTransaction(
         store,
         tx -> {
-          tx.insertSession(session(sessionId));
-          tx.insertEntry(rootEntry(rootId, sessionId));
-          tx.insertThread(thread(threadId, sessionId, rootId));
+          tx.sessions().insert(session(sessionId));
+          tx.entries().insert(rootEntry(rootId, sessionId));
+          tx.threads().insert(thread(threadId, sessionId, rootId));
         });
     StoppedThreadReceipt receipt =
         new StoppedThreadReceipt(threadId, stopRequestId, null, 0, List.of());
     store.transaction(
         tx -> {
-          tx.lockThread(threadId);
-          tx.insertStopReceipts(threadId, stopRequestId, List.of(receipt));
+          tx.threads().lock(threadId);
+          tx.stops().insertReceipts(threadId, stopRequestId, List.of(receipt));
           return null;
         });
     IllegalArgumentException error =
@@ -318,8 +323,8 @@ class HarnessRuntimeStopReplayTest {
             () ->
                 store.transaction(
                     tx -> {
-                      tx.lockThread(threadId);
-                      tx.insertStopReceipts(threadId, stopRequestId, List.of(receipt));
+                      tx.threads().lock(threadId);
+                      tx.stops().insertReceipts(threadId, stopRequestId, List.of(receipt));
                       return null;
                     }));
     assertTrue(error.getMessage().contains("already exists"));
@@ -343,14 +348,15 @@ class HarnessRuntimeStopReplayTest {
             HarnessRuntimeConflictException.class,
             () -> runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 1)));
     assertEquals(Reason.STALE_VERSION, error.reason());
-    ToolInvocation tool =
-        store.transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow());
+    ToolInvocation tool = store.transaction(tx -> tx.tools().find(baseline.toolId()).orElseThrow());
     assertEquals(ToolInvocationStatus.READY, tool.status());
     assertEquals(
-        2L, store.transaction(tx -> tx.lockThread(baseline.threadId()).orElseThrow()).version());
+        2L,
+        store.transaction(tx -> tx.threads().lock(baseline.threadId()).orElseThrow()).version());
     assertTrue(
         store
-            .transaction(tx -> tx.findWork(new WorkTarget(WorkTargetType.TOOL, baseline.toolId())))
+            .transaction(
+                tx -> tx.work().find(new WorkTarget(WorkTargetType.TOOL, baseline.toolId())))
             .isPresent());
   }
 
@@ -360,7 +366,8 @@ class HarnessRuntimeStopReplayTest {
     StopResult first = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
     assertStopped(first);
     // ROOT + STOP TURN_START + ASSISTANT_ERROR barrier + STOPPED TURN_END。
-    EntryPath firstPath = store.transaction(tx -> tx.loadEntryPath(first.thread().headEntryId()));
+    EntryPath firstPath =
+        store.transaction(tx -> tx.entries().loadPath(first.thread().headEntryId()));
     assertEquals(4, firstPath.entries().size());
 
     // idle Stop 现在留 durable receipt（STOP barrier Turn），因此同 key 再次请求是精确重放：同一条 TURN_END、不写新 Entry、
@@ -374,7 +381,10 @@ class HarnessRuntimeStopReplayTest {
     assertEquals(0, targetReceipt(second).cancelledCommandCount());
     assertEquals(
         4,
-        store.transaction(tx -> tx.loadEntryPath(second.thread().headEntryId())).entries().size());
+        store
+            .transaction(tx -> tx.entries().loadPath(second.thread().headEntryId()))
+            .entries()
+            .size());
   }
 
   /** live receipt 与取消事实一致：idle Stop 同时取消 queued Command 时，重试必须返回同一条 TURN_END 与同一取消事实。 */

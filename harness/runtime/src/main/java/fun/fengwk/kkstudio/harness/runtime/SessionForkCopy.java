@@ -61,7 +61,7 @@ final class SessionForkCopy {
               remapPayload(source.payload(), newIds),
               now,
               source.providerReplayState());
-      tx.insertEntry(copied);
+      tx.entries().insert(copied);
       parentId = newId;
       lastCopied = copied;
     }

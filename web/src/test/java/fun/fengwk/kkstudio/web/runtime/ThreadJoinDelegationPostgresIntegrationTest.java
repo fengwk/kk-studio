@@ -300,8 +300,8 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
     assertTrue(
         store.<Boolean>transaction(
             tx -> {
-              tx.lockThread(parentThreadId);
-              return tx.loadQueuedCommands(parentThreadId).isEmpty();
+              tx.threads().lock(parentThreadId);
+              return tx.commands().loadQueued(parentThreadId).isEmpty();
             }),
         "stopped parent must not keep queued commands");
     assertFalse(hasWork(WorkTargetType.THREAD, parentThreadId));
@@ -895,11 +895,15 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
     assertTrue(resultCommands(childBThreadId).isEmpty(), "sibling B never receives C's result");
     assertEquals(
         0,
-        store.<Integer>transaction(tx -> tx.countIncompleteChildJoins(rootThreadId)).intValue(),
+        store
+            .<Integer>transaction(tx -> tx.joins().countIncompleteChildren(rootThreadId))
+            .intValue(),
         "no incomplete child join may remain on the root");
     assertEquals(
         0,
-        store.<Integer>transaction(tx -> tx.countIncompleteChildJoins(childAThreadId)).intValue(),
+        store
+            .<Integer>transaction(tx -> tx.joins().countIncompleteChildren(childAThreadId))
+            .intValue(),
         "no incomplete child join may remain on A");
     for (UUID threadId :
         List.of(rootThreadId, childAThreadId, childBThreadId, grandChildCThreadId)) {
@@ -907,8 +911,8 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
       assertTrue(
           store.<Boolean>transaction(
               tx -> {
-                tx.lockThread(threadId);
-                return tx.loadQueuedCommands(threadId).isEmpty();
+                tx.threads().lock(threadId);
+                return tx.commands().loadQueued(threadId).isEmpty();
               }),
           "no queued command may remain for " + threadId);
     }
@@ -1207,7 +1211,7 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
   }
 
   private ThreadJoin joinOf(UUID invocationId) {
-    return store.transaction(tx -> tx.findJoin(invocationId).orElseThrow());
+    return store.transaction(tx -> tx.joins().find(invocationId).orElseThrow());
   }
 
   private ThreadJoinReceipt receiptOf(UUID invocationId) {
@@ -1215,7 +1219,7 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
   }
 
   private ThreadState threadState(UUID threadId) {
-    return store.transaction(tx -> tx.findThread(threadId).orElseThrow());
+    return store.transaction(tx -> tx.threads().find(threadId).orElseThrow());
   }
 
   private UUID headEntryId(UUID threadId) {
@@ -1237,7 +1241,7 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
   }
 
   private boolean hasWork(WorkTargetType type, UUID targetId) {
-    return store.transaction(tx -> tx.findWork(new WorkTarget(type, targetId)).isPresent());
+    return store.transaction(tx -> tx.work().find(new WorkTarget(type, targetId)).isPresent());
   }
 
   /**
@@ -1247,15 +1251,15 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
   private void assertStoppedHead(UUID threadId, UUID expectedTurnEndEntryId) {
     store.transaction(
         tx -> {
-          ThreadState thread = tx.findThread(threadId).orElseThrow();
+          ThreadState thread = tx.threads().find(threadId).orElseThrow();
           assertTrue(
-              tx.loadEntryPath(thread.headEntryId()).entries().stream()
+              tx.entries().loadPath(thread.headEntryId()).entries().stream()
                   .anyMatch(entry -> entry.id().equals(expectedTurnEndEntryId)),
               "stop boundary must be on the current head path");
           TurnEndPayload boundary =
               assertInstanceOf(
                   TurnEndPayload.class,
-                  tx.findEntry(expectedTurnEndEntryId).orElseThrow().payload());
+                  tx.entries().find(expectedTurnEndEntryId).orElseThrow().payload());
           assertEquals(TurnEndOutcome.STOPPED, boundary.outcome());
           assertFalse(boundary.continueModel());
           return null;

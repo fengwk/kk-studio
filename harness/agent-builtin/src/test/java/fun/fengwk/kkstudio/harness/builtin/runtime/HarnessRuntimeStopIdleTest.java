@@ -112,15 +112,16 @@ class HarnessRuntimeStopIdleTest {
     List<ThreadCommand> commands =
         store.transaction(
             tx -> {
-              tx.lockThread(baseline.threadId());
-              return tx.loadQueuedCommands(baseline.threadId());
+              tx.threads().lock(baseline.threadId());
+              return tx.commands().loadQueued(baseline.threadId());
             });
     assertTrue(commands.isEmpty());
     for (long id : List.of(1L, 2L)) {
       ThreadCommand command =
           store.transaction(
               tx ->
-                  tx.findCommandByIdempotencyKey(
+                  tx.commands()
+                      .findByIdempotencyKey(
                           baseline.threadId(), id == 1 ? TestIds.id(1) : TestIds.id(2))
                       .orElseThrow());
       assertEquals(ThreadCommandState.CANCELLED, command.state());
@@ -142,7 +143,7 @@ class HarnessRuntimeStopIdleTest {
     assertFalse(
         store
             .transaction(
-                tx -> tx.findWork(new WorkTarget(WorkTargetType.THREAD, baseline.threadId())))
+                tx -> tx.work().find(new WorkTarget(WorkTargetType.THREAD, baseline.threadId())))
             .isPresent());
   }
 
@@ -160,11 +161,14 @@ class HarnessRuntimeStopIdleTest {
     assertFalse(
         store
             .transaction(
-                tx -> tx.findWork(new WorkTarget(WorkTargetType.THREAD, baseline.threadId())))
+                tx -> tx.work().find(new WorkTarget(WorkTargetType.THREAD, baseline.threadId())))
             .isPresent());
     ThreadCommand command =
         store.transaction(
-            tx -> tx.findCommandByIdempotencyKey(baseline.threadId(), TestIds.id(1)).orElseThrow());
+            tx ->
+                tx.commands()
+                    .findByIdempotencyKey(baseline.threadId(), TestIds.id(1))
+                    .orElseThrow());
     assertEquals(ThreadCommandState.CANCELLED, command.state());
   }
 
@@ -179,7 +183,8 @@ class HarnessRuntimeStopIdleTest {
     assertThrows(
         IllegalStateException.class,
         () -> failingRuntime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0)));
-    ThreadState thread = store.transaction(tx -> tx.lockThread(baseline.threadId()).orElseThrow());
+    ThreadState thread =
+        store.transaction(tx -> tx.threads().lock(baseline.threadId()).orElseThrow());
     assertEquals(0L, thread.version());
     assertEquals(baseline.rootEntryId(), thread.headEntryId());
     // 停止边界 Entry 与 version 一起回滚：Session 里只剩 ROOT。
@@ -187,12 +192,15 @@ class HarnessRuntimeStopIdleTest {
     assertEquals(1, path.entries().size());
     ThreadCommand command =
         store.transaction(
-            tx -> tx.findCommandByIdempotencyKey(baseline.threadId(), TestIds.id(1)).orElseThrow());
+            tx ->
+                tx.commands()
+                    .findByIdempotencyKey(baseline.threadId(), TestIds.id(1))
+                    .orElseThrow());
     assertEquals(ThreadCommandState.QUEUED, command.state());
     assertTrue(
         store
             .transaction(
-                tx -> tx.findWork(new WorkTarget(WorkTargetType.THREAD, baseline.threadId())))
+                tx -> tx.work().find(new WorkTarget(WorkTargetType.THREAD, baseline.threadId())))
             .isPresent());
   }
 
@@ -206,20 +214,22 @@ class HarnessRuntimeStopIdleTest {
     UUID turnStartId =
         store.transaction(
             tx -> {
-              ThreadState thread = tx.lockThread(baseline.threadId()).orElseThrow();
+              ThreadState thread = tx.threads().lock(baseline.threadId()).orElseThrow();
               UUID turnStart = tx.nextId();
-              tx.insertEntry(
-                  HarnessRuntimeTestSupport.turnStartEntry(
-                      turnStart,
-                      baseline.sessionId(),
-                      baseline.rootEntryId(),
-                      T3,
-                      baseline.threadId()));
+              tx.entries()
+                  .insert(
+                      HarnessRuntimeTestSupport.turnStartEntry(
+                          turnStart,
+                          baseline.sessionId(),
+                          baseline.rootEntryId(),
+                          T3,
+                          baseline.threadId()));
               UUID userId = tx.nextId();
-              tx.insertEntry(
-                  HarnessRuntimeTestSupport.userMessageEntry(
-                      userId, baseline.sessionId(), turnStart, T3));
-              tx.updateThread(thread.advanceHead(userId, T3));
+              tx.entries()
+                  .insert(
+                      HarnessRuntimeTestSupport.userMessageEntry(
+                          userId, baseline.sessionId(), turnStart, T3));
+              tx.threads().update(thread.advanceHead(userId, T3));
               return turnStart;
             });
     StopResult result = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 1));
@@ -250,24 +260,27 @@ class HarnessRuntimeStopIdleTest {
     UUID turnStartId =
         store.transaction(
             tx -> {
-              ThreadState thread = tx.lockThread(baseline.threadId()).orElseThrow();
+              ThreadState thread = tx.threads().lock(baseline.threadId()).orElseThrow();
               UUID turnStart = tx.nextId();
-              tx.insertEntry(
-                  HarnessRuntimeTestSupport.turnStartEntry(
-                      turnStart,
-                      baseline.sessionId(),
-                      baseline.rootEntryId(),
-                      T3,
-                      baseline.threadId()));
+              tx.entries()
+                  .insert(
+                      HarnessRuntimeTestSupport.turnStartEntry(
+                          turnStart,
+                          baseline.sessionId(),
+                          baseline.rootEntryId(),
+                          T3,
+                          baseline.threadId()));
               UUID userId = tx.nextId();
-              tx.insertEntry(
-                  HarnessRuntimeTestSupport.userMessageEntry(
-                      userId, baseline.sessionId(), turnStart, T3));
+              tx.entries()
+                  .insert(
+                      HarnessRuntimeTestSupport.userMessageEntry(
+                          userId, baseline.sessionId(), turnStart, T3));
               UUID assistantId = tx.nextId();
-              tx.insertEntry(
-                  HarnessRuntimeTestSupport.assistantEntry(
-                      assistantId, baseline.sessionId(), userId, T3));
-              tx.updateThread(thread.advanceHead(assistantId, T3));
+              tx.entries()
+                  .insert(
+                      HarnessRuntimeTestSupport.assistantEntry(
+                          assistantId, baseline.sessionId(), userId, T3));
+              tx.threads().update(thread.advanceHead(assistantId, T3));
               return turnStart;
             });
 
@@ -304,16 +317,17 @@ class HarnessRuntimeStopIdleTest {
     UUID turnStartId =
         store.transaction(
             tx -> {
-              ThreadState thread = tx.lockThread(baseline.threadId()).orElseThrow();
+              ThreadState thread = tx.threads().lock(baseline.threadId()).orElseThrow();
               UUID turnStart = tx.nextId();
-              tx.insertEntry(
-                  HarnessRuntimeTestSupport.turnStartEntry(
-                      turnStart,
-                      baseline.sessionId(),
-                      baseline.rootEntryId(),
-                      T3,
-                      baseline.threadId()));
-              tx.updateThread(thread.advanceHead(turnStart, T3));
+              tx.entries()
+                  .insert(
+                      HarnessRuntimeTestSupport.turnStartEntry(
+                          turnStart,
+                          baseline.sessionId(),
+                          baseline.rootEntryId(),
+                          T3,
+                          baseline.threadId()));
+              tx.threads().update(thread.advanceHead(turnStart, T3));
               return turnStart;
             });
 
@@ -344,24 +358,27 @@ class HarnessRuntimeStopIdleTest {
     UUID headId =
         store.transaction(
             tx -> {
-              ThreadState thread = tx.lockThread(baseline.threadId()).orElseThrow();
+              ThreadState thread = tx.threads().lock(baseline.threadId()).orElseThrow();
               UUID turnStart = tx.nextId();
-              tx.insertEntry(
-                  HarnessRuntimeTestSupport.turnStartEntry(
-                      turnStart,
-                      baseline.sessionId(),
-                      baseline.rootEntryId(),
-                      T3,
-                      baseline.threadId()));
+              tx.entries()
+                  .insert(
+                      HarnessRuntimeTestSupport.turnStartEntry(
+                          turnStart,
+                          baseline.sessionId(),
+                          baseline.rootEntryId(),
+                          T3,
+                          baseline.threadId()));
               UUID userId = tx.nextId();
-              tx.insertEntry(
-                  HarnessRuntimeTestSupport.userMessageEntry(
-                      userId, baseline.sessionId(), turnStart, T3));
+              tx.entries()
+                  .insert(
+                      HarnessRuntimeTestSupport.userMessageEntry(
+                          userId, baseline.sessionId(), turnStart, T3));
               UUID assistantId = tx.nextId();
-              tx.insertEntry(
-                  HarnessRuntimeTestSupport.assistantEntry(
-                      assistantId, baseline.sessionId(), userId, T3, "call-1"));
-              tx.updateThread(thread.advanceHead(assistantId, T3));
+              tx.entries()
+                  .insert(
+                      HarnessRuntimeTestSupport.assistantEntry(
+                          assistantId, baseline.sessionId(), userId, T3, "call-1"));
+              tx.threads().update(thread.advanceHead(assistantId, T3));
               return assistantId;
             });
 
@@ -370,7 +387,8 @@ class HarnessRuntimeStopIdleTest {
             IllegalStateException.class,
             () -> runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 1)));
     assertTrue(error.getMessage().contains("assistant tool calls require matching tool siblings"));
-    ThreadState thread = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
+    ThreadState thread =
+        store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow());
     assertEquals(1L, thread.version());
     assertEquals(ThreadExecutionControl.RUNNABLE, thread.executionControl());
     assertEquals(headId, thread.headEntryId());
@@ -384,11 +402,11 @@ class HarnessRuntimeStopIdleTest {
     HarnessRuntimeTestSupport.ToolBaseline owner =
         HarnessRuntimeTestSupport.seedToolBaseline(store);
     ThreadState ownerBefore =
-        store.transaction(tx -> tx.findThread(owner.threadId()).orElseThrow());
+        store.transaction(tx -> tx.threads().find(owner.threadId()).orElseThrow());
     ModelInvocation ownerModel =
         store.transaction(tx -> builtin(tx).findModelInvocation(owner.modelId()).orElseThrow());
     ToolInvocation ownerTool =
-        store.transaction(tx -> tx.findToolInvocation(owner.toolId()).orElseThrow());
+        store.transaction(tx -> tx.tools().find(owner.toolId()).orElseThrow());
     UUID sibling = HarnessRuntimeTestSupport.seedThreadAt(store, owner.assistantEntryId());
     seedQueuedCommand(store, sibling, 1L, userMessagePayload("hi"), TestIds.id(2));
 
@@ -401,12 +419,11 @@ class HarnessRuntimeStopIdleTest {
     assertEquals(owner.assistantEntryId(), result.thread().headEntryId());
     assertEquals(owner.assistantEntryId(), pathOf(owner.threadId()).head().id());
     assertEquals(
-        ownerBefore, store.transaction(tx -> tx.findThread(owner.threadId()).orElseThrow()));
+        ownerBefore, store.transaction(tx -> tx.threads().find(owner.threadId()).orElseThrow()));
     assertEquals(
         ownerModel,
         store.transaction(tx -> builtin(tx).findModelInvocation(owner.modelId()).orElseThrow()));
-    assertEquals(
-        ownerTool, store.transaction(tx -> tx.findToolInvocation(owner.toolId()).orElseThrow()));
+    assertEquals(ownerTool, store.transaction(tx -> tx.tools().find(owner.toolId()).orElseThrow()));
   }
 
   @Test
@@ -417,24 +434,25 @@ class HarnessRuntimeStopIdleTest {
     UUID continuationId =
         store.transaction(
             tx -> {
-              ThreadState thread = tx.lockThread(owner.threadId()).orElseThrow();
+              ThreadState thread = tx.threads().lock(owner.threadId()).orElseThrow();
               UUID id = tx.nextId();
-              EntryPath path = tx.loadEntryPath(thread.headEntryId());
-              tx.insertEntry(
-                  new Entry(
-                      id,
-                      owner.sessionId(),
-                      path.head().id(),
-                      new TurnStartPayload(
-                          TurnStartReason.CONTINUATION,
-                          path.baseSettings(),
-                          owner.threadId(),
-                          100_000,
-                          16_384,
-                          null,
-                          null),
-                      T3));
-              tx.updateThread(thread.advanceHead(id, T3));
+              EntryPath path = tx.entries().loadPath(thread.headEntryId());
+              tx.entries()
+                  .insert(
+                      new Entry(
+                          id,
+                          owner.sessionId(),
+                          path.head().id(),
+                          new TurnStartPayload(
+                              TurnStartReason.CONTINUATION,
+                              path.baseSettings(),
+                              owner.threadId(),
+                              100_000,
+                              16_384,
+                              null,
+                              null),
+                          T3));
+              tx.threads().update(thread.advanceHead(id, T3));
               UUID modelId = tx.nextId();
               ModelInvocation model =
                   HarnessRuntimeTestSupport.modelInvocation(modelId, owner.threadId(), id, id, T3);
@@ -443,7 +461,7 @@ class HarnessRuntimeStopIdleTest {
               return id;
             });
     ThreadState ownerBefore =
-        store.transaction(tx -> tx.findThread(owner.threadId()).orElseThrow());
+        store.transaction(tx -> tx.threads().find(owner.threadId()).orElseThrow());
     ModelInvocation ownerModel =
         store.transaction(
             tx ->
@@ -467,8 +485,8 @@ class HarnessRuntimeStopIdleTest {
     seedQueuedCommand(store, sibling, 2, userMessagePayload("later"), userKey);
     store.transaction(
         tx -> {
-          ThreadState thread = tx.lockThread(sibling).orElseThrow();
-          tx.updateThread(thread.reserveCommandSequences(2, T3));
+          ThreadState thread = tx.threads().lock(sibling).orElseThrow();
+          tx.threads().update(thread.reserveCommandSequences(2, T3));
           return null;
         });
     UUID stopId = UUID.randomUUID();
@@ -492,8 +510,8 @@ class HarnessRuntimeStopIdleTest {
     assertEquals(
         targetReceipt(result).stoppedTurnEndEntryId(),
         assertStopBarrierTurn(path, sibling, stopId));
-    ThreadCommand applied = store.transaction(tx -> tx.findCommand(sibling, 1).orElseThrow());
-    ThreadCommand cancelled = store.transaction(tx -> tx.findCommand(sibling, 2).orElseThrow());
+    ThreadCommand applied = store.transaction(tx -> tx.commands().find(sibling, 1).orElseThrow());
+    ThreadCommand cancelled = store.transaction(tx -> tx.commands().find(sibling, 2).orElseThrow());
     assertEquals(ThreadCommandState.APPLIED, applied.state());
     assertEquals(notification.id(), applied.appliedEntryId());
     assertEquals(ThreadCommandState.CANCELLED, cancelled.state());
@@ -502,7 +520,7 @@ class HarnessRuntimeStopIdleTest {
     assertEquals(userKey, targetReceipt(result).cancelledInputs().getFirst().idempotencyKey());
     assertEquals(1, result.thread().inputThroughSequence());
     assertEquals(
-        ownerBefore, store.transaction(tx -> tx.findThread(owner.threadId()).orElseThrow()));
+        ownerBefore, store.transaction(tx -> tx.threads().find(owner.threadId()).orElseThrow()));
     assertEquals(
         ownerModel,
         store.transaction(tx -> builtin(tx).findModelInvocation(ownerModel.id()).orElseThrow()));
@@ -542,8 +560,8 @@ class HarnessRuntimeStopIdleTest {
   private EntryPath pathOf(UUID threadId) {
     return store.transaction(
         tx -> {
-          ThreadState thread = tx.lockThread(threadId).orElseThrow();
-          return tx.loadEntryPath(thread.headEntryId());
+          ThreadState thread = tx.threads().lock(threadId).orElseThrow();
+          return tx.entries().loadPath(thread.headEntryId());
         });
   }
 

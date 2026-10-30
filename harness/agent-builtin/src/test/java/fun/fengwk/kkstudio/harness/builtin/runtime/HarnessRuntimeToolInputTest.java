@@ -134,7 +134,7 @@ class HarnessRuntimeToolInputTest {
     assertEquals(T5, accepted.receipt().acceptedAt());
     assertFalse(accepted.materialized());
     ToolInvocation stored =
-        store.transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow());
+        store.transaction(tx -> tx.tools().find(baseline.toolId()).orElseThrow());
     assertEquals(ToolInvocationStatus.SUCCEEDED, stored.status());
     // 人工作答不是执行：attempt 保持 0，且绝不携带 approval。
     assertEquals(0, stored.attempt());
@@ -148,19 +148,23 @@ class HarnessRuntimeToolInputTest {
     assertEquals(T5, stored.inputReceipt().acceptedAt());
     assertEquals(T5, stored.updatedAt());
     // baseline 推进一次 head（1），冻结等待再 +1（2），接受回答再 +1（3）。
-    ThreadState thread = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
+    ThreadState thread =
+        store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow());
     assertEquals(3L, thread.version());
     Work threadWork =
         store.transaction(
             tx ->
-                tx.findWork(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()))
+                tx.work()
+                    .find(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()))
                     .orElseThrow());
     assertEquals(1L, threadWork.wakeVersion());
     // 结果物化由 THREAD Work 驱动，不再重新请求 TOOL Work。
     assertNull(
         store.transaction(
             tx ->
-                tx.findWork(new WorkTarget(WorkTargetType.TOOL, baseline.toolId())).orElse(null)));
+                tx.work()
+                    .find(new WorkTarget(WorkTargetType.TOOL, baseline.toolId()))
+                    .orElse(null)));
   }
 
   /** 崩溃恢复：接受已落盘但响应丢失时，同一提交身份 + 等价答案必须精确 replay 且不产生任何新事实。 */
@@ -193,13 +197,15 @@ class HarnessRuntimeToolInputTest {
     assertEquals(T5, replayed.receipt().acceptedAt());
     assertFalse(replayed.materialized());
     assertEquals(
-        3L, store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow()).version());
+        3L,
+        store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow()).version());
     assertEquals(
         1L,
         store
             .transaction(
                 tx ->
-                    tx.findWork(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()))
+                    tx.work()
+                        .find(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()))
                         .orElseThrow())
             .wakeVersion());
   }
@@ -230,7 +236,7 @@ class HarnessRuntimeToolInputTest {
                     command(baseline.threadId(), baseline.toolId(), submissionId, "bob", answers)));
     assertEquals(Reason.INPUT_SUBMISSION_MISMATCH, anotherActor.reason());
     ToolInvocation stored =
-        store.transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow());
+        store.transaction(tx -> tx.tools().find(baseline.toolId()).orElseThrow());
     assertEquals(submissionId, stored.inputReceipt().submissionId());
     assertEquals("{\"answers\":[[\"fast\"],[\"a\"]]}", stored.result().detailsJson());
   }
@@ -288,7 +294,7 @@ class HarnessRuntimeToolInputTest {
       assertFalse(conflict.getMessage().contains(secret));
     }
     assertEquals(
-        waiting, store.transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow()));
+        waiting, store.transaction(tx -> tx.tools().find(baseline.toolId()).orElseThrow()));
   }
 
   /** 明确拒答：成功结果 {@code {"declined":true}} 并记录同样回执，绝不虚构默认答案。 */
@@ -302,7 +308,7 @@ class HarnessRuntimeToolInputTest {
             declined(baseline.threadId(), baseline.toolId(), TestIds.id(17), "alice"));
 
     ToolInvocation stored =
-        store.transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow());
+        store.transaction(tx -> tx.tools().find(baseline.toolId()).orElseThrow());
     assertEquals(ToolInvocationStatus.SUCCEEDED, stored.status());
     assertFalse(stored.result().error());
     assertEquals("{\"declined\":true}", stored.result().detailsJson());
@@ -360,7 +366,7 @@ class HarnessRuntimeToolInputTest {
             .reason());
     assertEquals(
         ToolInvocationStatus.CANCELLED,
-        store.transaction(tx -> tx.findToolInvocation(cancelled.toolId()).orElseThrow()).status());
+        store.transaction(tx -> tx.tools().find(cancelled.toolId()).orElseThrow()).status());
 
     ToolBaseline foreign = seedAskUserBaseline(store);
     parkForInput(store, foreign, T3);
@@ -437,11 +443,12 @@ class HarnessRuntimeToolInputTest {
     }
     // 恰好一次接受：Thread version 只 +1（冻结等待 2 -> 接受 3），答案只归一化一次。
     assertEquals(
-        3L, store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow()).version());
+        3L,
+        store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow()).version());
     JsonNode details =
         JsonValues.readTree(
             store
-                .transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow())
+                .transaction(tx -> tx.tools().find(baseline.toolId()).orElseThrow())
                 .result()
                 .detailsJson());
     assertEquals("fast", details.get("answers").get(0).get(0).stringValue());
@@ -477,7 +484,7 @@ class HarnessRuntimeToolInputTest {
     parkForInput(store, baseline, T3);
 
     ToolInvocation waiting =
-        store.transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow());
+        store.transaction(tx -> tx.tools().find(baseline.toolId()).orElseThrow());
 
     assertEquals(ASK_USER_QUESTIONNAIRE, waiting.call().argumentsJson());
     assertTrue(waiting.binding().contributor().contributorId().equals("builtin"));
@@ -501,17 +508,19 @@ class HarnessRuntimeToolInputTest {
     // MODEL 与 TOOL 的工作认领均为空
     Optional<ClaimedWork> modelWork =
         store.transaction(
-            tx -> tx.claimNextWork(WorkTargetType.MODEL, "probe-model", Duration.between(T5, T6)));
+            tx ->
+                tx.work().claimNext(WorkTargetType.MODEL, "probe-model", Duration.between(T5, T6)));
     assertTrue(modelWork.isEmpty());
     Optional<ClaimedWork> toolWork =
         store.transaction(
-            tx -> tx.claimNextWork(WorkTargetType.TOOL, "probe-tool", Duration.between(T5, T6)));
+            tx -> tx.work().claimNext(WorkTargetType.TOOL, "probe-tool", Duration.between(T5, T6)));
     assertTrue(toolWork.isEmpty());
     // THREAD 的工作认领存在且指向该 thread
     Optional<ClaimedWork> threadWork =
         store.transaction(
             tx ->
-                tx.claimNextWork(WorkTargetType.THREAD, "probe-thread", Duration.between(T5, T6)));
+                tx.work()
+                    .claimNext(WorkTargetType.THREAD, "probe-thread", Duration.between(T5, T6)));
     assertTrue(threadWork.isPresent());
     assertEquals(
         new WorkTarget(WorkTargetType.THREAD, baseline.threadId()), threadWork.get().target());
@@ -543,33 +552,36 @@ class HarnessRuntimeToolInputTest {
     // 2. 模拟生产物化：读取已接受的 ToolInvocation，通过生产 mapper 构建 history payload，
     // 在单个事务内追加 Entry、推进 Thread head，并物理删除 ToolInvocation 行
     ToolInvocation acceptedTool =
-        store.transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow());
+        store.transaction(tx -> tx.tools().find(baseline.toolId()).orElseThrow());
     HistoryPayloadMapper mapper = new HistoryPayloadMapper();
     MessagePayload payload = mapper.toolResultPayload(acceptedTool);
 
     UUID newEntryId = TestIds.id(50);
     store.transaction(
         tx -> {
-          ThreadState thread = tx.lockThread(baseline.threadId()).orElseThrow();
-          EntryPath path = tx.loadEntryPath(thread.headEntryId());
+          ThreadState thread = tx.threads().lock(baseline.threadId()).orElseThrow();
+          EntryPath path = tx.entries().loadPath(thread.headEntryId());
           Instant now = clock.instant();
-          tx.insertEntry(
-              new Entry(newEntryId, path.root().sessionId(), thread.headEntryId(), payload, now));
-          tx.updateThread(thread.advanceHead(newEntryId, now));
-          tx.lockToolInvocationsByAssistantEntryId(acceptedTool.assistantEntryId());
-          tx.deleteToolInvocationsByIds(List.of(baseline.toolId()));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      newEntryId, path.root().sessionId(), thread.headEntryId(), payload, now));
+          tx.threads().update(thread.advanceHead(newEntryId, now));
+          tx.tools().lockByAssistantEntry(acceptedTool.assistantEntryId());
+          tx.tools().deleteByIds(List.of(baseline.toolId()));
           return null;
         });
 
     // 确认 ToolInvocation 行已被删除
-    assertTrue(store.transaction(tx -> tx.findToolInvocation(baseline.toolId())).isEmpty());
+    assertTrue(store.transaction(tx -> tx.tools().find(baseline.toolId())).isEmpty());
 
     ThreadState threadBefore =
-        store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
+        store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow());
     Work workBefore =
         store.transaction(
             tx ->
-                tx.findWork(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()))
+                tx.work()
+                    .find(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()))
                     .orElseThrow());
 
     // 3. 物化后用完全相同的 command 重试：必须返回 materialized=true，相同回执事实，且不产生任何 version/work 变更
@@ -583,11 +595,12 @@ class HarnessRuntimeToolInputTest {
     assertEquals(initial.receipt().acceptedAt(), replayed.receipt().acceptedAt());
 
     ThreadState threadAfter =
-        store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
+        store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow());
     Work workAfter =
         store.transaction(
             tx ->
-                tx.findWork(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()))
+                tx.work()
+                    .find(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()))
                     .orElseThrow());
     assertEquals(threadBefore.version(), threadAfter.version());
     assertEquals(workBefore.wakeVersion(), workAfter.wakeVersion());
@@ -732,10 +745,10 @@ class HarnessRuntimeToolInputTest {
     // 拒绝不触碰任何 durable 事实：陈旧等待保持 WAITING_INPUT，当前调用保持 READY，Thread 不推进。
     assertEquals(
         ToolInvocationStatus.WAITING_INPUT,
-        store.transaction(tx -> tx.findToolInvocation(stale.toolId()).orElseThrow()).status());
+        store.transaction(tx -> tx.tools().find(stale.toolId()).orElseThrow()).status());
     assertEquals(
         ToolInvocationStatus.READY,
-        store.transaction(tx -> tx.findToolInvocation(liveToolId).orElseThrow()).status());
+        store.transaction(tx -> tx.tools().find(liveToolId).orElseThrow()).status());
     assertEquals(versionBefore, threadVersion(stale.threadId()));
   }
 
@@ -823,21 +836,21 @@ class HarnessRuntimeToolInputTest {
 
     assertTrue(failure.getMessage().contains("frozen questionnaire"));
     assertEquals(
-        waiting, store.transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow()));
+        waiting, store.transaction(tx -> tx.tools().find(baseline.toolId()).orElseThrow()));
     assertEquals(versionBefore, threadVersion(baseline.threadId()));
     assertTrue(threadWork(baseline.threadId()).isEmpty());
   }
 
   private ThreadExecutionControl threadStatus(UUID threadId) {
-    return store.transaction(tx -> tx.findThread(threadId).orElseThrow()).executionControl();
+    return store.transaction(tx -> tx.threads().find(threadId).orElseThrow()).executionControl();
   }
 
   private long threadVersion(UUID threadId) {
-    return store.transaction(tx -> tx.findThread(threadId).orElseThrow()).version();
+    return store.transaction(tx -> tx.threads().find(threadId).orElseThrow()).version();
   }
 
   private Optional<Work> threadWork(UUID threadId) {
-    return store.transaction(tx -> tx.findWork(new WorkTarget(WorkTargetType.THREAD, threadId)));
+    return store.transaction(tx -> tx.work().find(new WorkTarget(WorkTargetType.THREAD, threadId)));
   }
 
   private PendingInteraction pendingInteraction(UUID invocationId) {
@@ -849,18 +862,19 @@ class HarnessRuntimeToolInputTest {
 
   /** 按生产 mapper 物化 terminal 调用：追加 TOOL 结果 Entry、推进 head，并物理删除调用行。 */
   private void materializeTerminalTool(UUID threadId, UUID toolId, UUID entryId) {
-    ToolInvocation terminal = store.transaction(tx -> tx.findToolInvocation(toolId).orElseThrow());
+    ToolInvocation terminal = store.transaction(tx -> tx.tools().find(toolId).orElseThrow());
     MessagePayload payload = new HistoryPayloadMapper().toolResultPayload(terminal);
     store.transaction(
         tx -> {
-          ThreadState thread = tx.lockThread(threadId).orElseThrow();
-          EntryPath path = tx.loadEntryPath(thread.headEntryId());
+          ThreadState thread = tx.threads().lock(threadId).orElseThrow();
+          EntryPath path = tx.entries().loadPath(thread.headEntryId());
           Instant now = clock.instant();
-          tx.insertEntry(
-              new Entry(entryId, path.root().sessionId(), thread.headEntryId(), payload, now));
-          tx.updateThread(thread.advanceHead(entryId, now));
-          tx.lockToolInvocationsByAssistantEntryId(terminal.assistantEntryId());
-          tx.deleteToolInvocationsByIds(List.of(toolId));
+          tx.entries()
+              .insert(
+                  new Entry(entryId, path.root().sessionId(), thread.headEntryId(), payload, now));
+          tx.threads().update(thread.advanceHead(entryId, now));
+          tx.tools().lockByAssistantEntry(terminal.assistantEntryId());
+          tx.tools().deleteByIds(List.of(toolId));
           return null;
         });
   }
@@ -872,36 +886,45 @@ class HarnessRuntimeToolInputTest {
   private UUID seedClosedTurnWithLiveAskUser(ToolBaseline stale) {
     return store.transaction(
         tx -> {
-          ThreadState thread = tx.lockThread(stale.threadId()).orElseThrow();
+          ThreadState thread = tx.threads().lock(stale.threadId()).orElseThrow();
           UUID turnEndId = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  turnEndId,
-                  stale.sessionId(),
-                  stale.assistantEntryId(),
-                  new TurnEndPayload(
-                      stale.turnStartEntryId(),
-                      TurnEndOutcome.CANCELLED,
-                      false,
-                      TurnEndReason.HISTORY_CUT,
-                      null),
-                  T3));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnEndId,
+                      stale.sessionId(),
+                      stale.assistantEntryId(),
+                      new TurnEndPayload(
+                          stale.turnStartEntryId(),
+                          TurnEndOutcome.CANCELLED,
+                          false,
+                          TurnEndReason.HISTORY_CUT,
+                          null),
+                      T3));
           ThreadState closed = thread.advanceHead(turnEndId, T3);
-          tx.updateThread(closed);
+          tx.threads().update(closed);
           UUID turnStartId = tx.nextId();
-          tx.insertEntry(
-              turnStartEntry(turnStartId, stale.sessionId(), turnEndId, T3, stale.threadId()));
+          tx.entries()
+              .insert(
+                  turnStartEntry(turnStartId, stale.sessionId(), turnEndId, T3, stale.threadId()));
           ThreadState opened = closed.advanceHead(turnStartId, T3);
-          tx.updateThread(opened);
+          tx.threads().update(opened);
           UUID userEntryId = tx.nextId();
-          tx.insertEntry(userMessageEntry(userEntryId, stale.sessionId(), turnStartId, T3));
+          tx.entries().insert(userMessageEntry(userEntryId, stale.sessionId(), turnStartId, T3));
           ModelRequestSpec requestSpec = askUserModelRequest();
           ProviderResponse response =
               responseWithToolCall("call-2", "ask_user", ASK_USER_QUESTIONNAIRE);
           UUID assistantEntryId = tx.nextId();
-          tx.insertEntry(
-              mappedAssistantEntry(
-                  assistantEntryId, stale.sessionId(), userEntryId, T3, requestSpec, response, T3));
+          tx.entries()
+              .insert(
+                  mappedAssistantEntry(
+                      assistantEntryId,
+                      stale.sessionId(),
+                      userEntryId,
+                      T3,
+                      requestSpec,
+                      response,
+                      T3));
           UUID modelId = tx.nextId();
           ModelInvocation model =
               modelInvocationWithRequest(
@@ -912,24 +935,25 @@ class HarnessRuntimeToolInputTest {
           builtin(tx).updateModelInvocation(succeeded);
           builtin(tx).updateModelInvocation(succeeded.attachResultEntry(assistantEntryId, T3));
           UUID liveToolId = tx.nextId();
-          tx.insertToolInvocations(
-              List.of(
-                  new ToolInvocation(
-                      liveToolId,
-                      stale.threadId(),
-                      turnStartId,
-                      assistantEntryId,
-                      0,
-                      new ToolCall("call-2", "ask_user", ASK_USER_QUESTIONNAIRE),
-                      tx.findToolInvocation(stale.toolId()).orElseThrow().binding(),
-                      ToolInvocationStatus.READY,
-                      0,
-                      null,
-                      null,
-                      null,
-                      T3,
-                      T3)));
-          tx.updateThread(opened.advanceHead(assistantEntryId, T3));
+          tx.tools()
+              .insert(
+                  List.of(
+                      new ToolInvocation(
+                          liveToolId,
+                          stale.threadId(),
+                          turnStartId,
+                          assistantEntryId,
+                          0,
+                          new ToolCall("call-2", "ask_user", ASK_USER_QUESTIONNAIRE),
+                          tx.tools().find(stale.toolId()).orElseThrow().binding(),
+                          ToolInvocationStatus.READY,
+                          0,
+                          null,
+                          null,
+                          null,
+                          T3,
+                          T3)));
+          tx.threads().update(opened.advanceHead(assistantEntryId, T3));
           return liveToolId;
         });
   }

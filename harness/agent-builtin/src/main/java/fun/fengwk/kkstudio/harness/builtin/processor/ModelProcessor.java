@@ -397,7 +397,7 @@ public final class ModelProcessor implements AutoCloseable {
     if (peek == null) {
       return new Prepare.Lost();
     }
-    ThreadState thread = tx.lockThread(peek.threadId()).orElse(null);
+    ThreadState thread = tx.threads().lock(peek.threadId()).orElse(null);
     if (thread == null) {
       return new Prepare.Lost();
     }
@@ -428,8 +428,8 @@ public final class ModelProcessor implements AutoCloseable {
       memberIndex = firstAvailableMember(tx, group, progress.memberIndex());
       if (memberIndex >= group.members().size()) {
         // 全是本地候选选择失败：不伪装成上游调用错误，也不进入普通重试预算。THREAD Work 先于 MODEL Work 加锁。
-        tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()));
-        if (tx.lockClaimedWork(claim).isEmpty()) {
+        tx.work().request(new WorkTarget(WorkTargetType.THREAD, thread.id()));
+        if (tx.work().lockClaimed(claim).isEmpty()) {
           throw new ClaimLostSignal();
         }
         tx.updateModelInvocation(
@@ -438,12 +438,12 @@ public final class ModelProcessor implements AutoCloseable {
                     ProviderErrorKind.NO_AVAILABLE_MODEL,
                     "no available model in group: " + group.groupName()),
                 now));
-        tx.updateThread(thread.touchVersion(now));
-        tx.completeWork(claim);
+        tx.threads().update(thread.touchVersion(now));
+        tx.work().complete(claim);
         return new Prepare.Terminated();
       }
     }
-    Optional<Work> claimed = tx.lockClaimedWork(claim);
+    Optional<Work> claimed = tx.work().lockClaimed(claim);
     if (claimed.isEmpty()) {
       return new Prepare.Lost();
     }
@@ -452,7 +452,8 @@ public final class ModelProcessor implements AutoCloseable {
     // ModelInvocation 必须挂在真实 TURN_START 上的不变量断言：压缩子身份不再从 TURN_START payload 推导（父压缩 turn
     // 不产生 ModelInvocation），但仍拒绝引用缺失 / 类型错误的 turn start。
     Entry turnStart =
-        tx.findEntry(model.turnStartEntryId())
+        tx.entries()
+            .find(model.turnStartEntryId())
             .orElseThrow(
                 () ->
                     new IllegalStateException(
@@ -467,14 +468,14 @@ public final class ModelProcessor implements AutoCloseable {
     // 摘要特有的完整性校验只属于「本线程当前直接持有 SETTLE_OWNER_TURN 票据」的执行；约束只读本行执行语义，绝不据此推断用途，
     // 否则普通子代理继承 allowAutoCompaction=false 时会被误当成摘要 Agent。票据查询只读本线程，不回溯父历史或祖先。
     boolean ownerSettledSummary =
-        tx.loadIncompleteJoins(thread.id()).stream()
+        tx.joins().loadIncomplete(thread.id()).stream()
             .anyMatch(join -> join.delivery() == JoinDelivery.SETTLE_OWNER_TURN);
     if (group != null && memberIndex != progress.memberIndex()) {
       // 跳过冷却成员：新游标在运行前落库，执行身份与审计都来自该成员。
       progress =
           new ModelGroupProgress(progress.groupName(), progress.groupVersion(), memberIndex, 0);
       tx.updateModelInvocation(model.withGroupProgress(progress, now));
-      tx.updateThread(thread.touchVersion(now));
+      tx.threads().update(thread.touchVersion(now));
     }
     return new Prepare.Dispatched(
         thread.id(),
@@ -505,10 +506,10 @@ public final class ModelProcessor implements AutoCloseable {
     EntryPath path =
         inTransaction(
             tx -> {
-              if (tx.lockClaimedWork(claim).isEmpty()) {
+              if (tx.work().lockClaimed(claim).isEmpty()) {
                 throw new ClaimLostSignal();
               }
-              return tx.loadEntryPath(dispatched.requestHeadEntryId());
+              return tx.entries().loadPath(dispatched.requestHeadEntryId());
             });
     return materializer.materialize(path, actualRequest(dispatched));
   }
@@ -569,16 +570,16 @@ public final class ModelProcessor implements AutoCloseable {
         retried = retried.withGroupProgress(groupProgress.retryCurrent(), now);
       }
       tx.updateModelInvocation(retried);
-      tx.updateThread(thread.touchVersion(now));
-      if (tx.lockClaimedWork(claim).isEmpty()) {
+      tx.threads().update(thread.touchVersion(now));
+      if (tx.work().lockClaimed(claim).isEmpty()) {
         throw new ClaimLostSignal();
       }
-      tx.rescheduleWork(claim, decision.delay());
+      tx.work().reschedule(claim, decision.delay());
       return new Prepare.Retry();
     }
     // 预算耗尽：如实终止并唤醒 THREAD，不通过无限重试伪装持续推进。
-    tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()));
-    if (tx.lockClaimedWork(claim).isEmpty()) {
+    tx.work().request(new WorkTarget(WorkTargetType.THREAD, thread.id()));
+    if (tx.work().lockClaimed(claim).isEmpty()) {
       throw new ClaimLostSignal();
     }
     // 组的恢复失败同样计入当前成员的失败审计；仍停留在原成员，且不冻结、不降级。
@@ -587,8 +588,8 @@ public final class ModelProcessor implements AutoCloseable {
             ? model.fail(error, now)
             : model.failAfterAttempt(
                 error, attemptFailure(model, model.attempt(), error, now, now), now));
-    tx.updateThread(thread.touchVersion(now));
-    tx.completeWork(claim);
+    tx.threads().update(thread.touchVersion(now));
+    tx.work().complete(claim);
     return new Prepare.Terminated();
   }
 
@@ -622,12 +623,12 @@ public final class ModelProcessor implements AutoCloseable {
     boolean needsThreadWake = model.resultEntryId() == null;
     if (needsThreadWake) {
       // requestWork 同时 upsert 并锁定 THREAD Work；即使原行不存在，也能建立正确锁序。
-      tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()));
+      tx.work().request(new WorkTarget(WorkTargetType.THREAD, thread.id()));
     }
-    if (tx.lockClaimedWork(claim).isEmpty()) {
+    if (tx.work().lockClaimed(claim).isEmpty()) {
       throw new ClaimLostSignal();
     }
-    tx.completeWork(claim);
+    tx.work().complete(claim);
     return new Prepare.Terminated();
   }
 
@@ -636,10 +637,10 @@ public final class ModelProcessor implements AutoCloseable {
     return Boolean.TRUE.equals(
         inTransaction(
             tx -> {
-              if (tx.lockClaimedWork(claim).isEmpty()) {
+              if (tx.work().lockClaimed(claim).isEmpty()) {
                 return false;
               }
-              tx.rescheduleWork(claim, delay);
+              tx.work().reschedule(claim, delay);
               return true;
             }));
   }
@@ -652,7 +653,7 @@ public final class ModelProcessor implements AutoCloseable {
           inTransaction(
               tx -> {
                 Instant now = tx.now();
-                ThreadState thread = tx.lockThread(dispatched.threadId()).orElse(null);
+                ThreadState thread = tx.threads().lock(dispatched.threadId()).orElse(null);
                 if (thread == null) {
                   return false;
                 }
@@ -664,13 +665,13 @@ public final class ModelProcessor implements AutoCloseable {
                     || model.attempt() != dispatched.attempt()) {
                   return false;
                 }
-                tx.requestWork(new WorkTarget(WorkTargetType.THREAD, dispatched.threadId()));
-                if (tx.lockClaimedWork(claim).isEmpty()) {
+                tx.work().request(new WorkTarget(WorkTargetType.THREAD, dispatched.threadId()));
+                if (tx.work().lockClaimed(claim).isEmpty()) {
                   throw new ClaimLostSignal();
                 }
                 tx.updateModelInvocation(model.fail(error, now));
-                tx.updateThread(thread.touchVersion(now));
-                tx.completeWork(claim);
+                tx.threads().update(thread.touchVersion(now));
+                tx.work().complete(claim);
                 return true;
               }));
     } catch (ClaimLostSignal ignored) {

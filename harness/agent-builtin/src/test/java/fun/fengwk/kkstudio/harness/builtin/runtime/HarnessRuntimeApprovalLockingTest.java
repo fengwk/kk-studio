@@ -69,12 +69,12 @@ class HarnessRuntimeApprovalLockingTest {
     // ToolProcessor 风格的后续推进：READY -> RUNNING（decided approval 保持不变）。
     store.transaction(
         tx -> {
-          ToolInvocation tool = tx.lockToolInvocation(baseline.toolId()).orElseThrow();
-          tx.updateToolInvocations(List.of(tool.markRunning(T6)));
+          ToolInvocation tool = tx.tools().lock(baseline.toolId()).orElseThrow();
+          tx.tools().update(List.of(tool.markRunning(T6)));
           return null;
         });
     ToolInvocation current =
-        store.transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow());
+        store.transaction(tx -> tx.tools().find(baseline.toolId()).orElseThrow());
     ToolInvocation staleProbe =
         new ToolInvocation(
             current.id(),
@@ -115,7 +115,7 @@ class HarnessRuntimeApprovalLockingTest {
     HarnessRuntimeTestSupport.ToolBaseline baseline = seedToolBaseline(store);
     setWaitingApproval(store, baseline);
     ToolInvocation current =
-        store.transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow());
+        store.transaction(tx -> tx.tools().find(baseline.toolId()).orElseThrow());
     ToolInvocation cancelledProbe =
         new ToolInvocation(
             current.id(),
@@ -146,7 +146,7 @@ class HarnessRuntimeApprovalLockingTest {
         locks.contains("lockToolInvocationsByAssistantEntryId:" + baseline.assistantEntryId()));
     assertFalse(locks.contains("lockToolInvocation:" + baseline.toolId()));
     ToolInvocation stored =
-        store.transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow());
+        store.transaction(tx -> tx.tools().find(baseline.toolId()).orElseThrow());
     assertEquals(decided, stored);
   }
 
@@ -159,7 +159,7 @@ class HarnessRuntimeApprovalLockingTest {
     HarnessRuntimeTestSupport.ToolBaseline baseline = seedToolBaseline(store);
     setWaitingApproval(store, baseline);
     ToolInvocation current =
-        store.transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow());
+        store.transaction(tx -> tx.tools().find(baseline.toolId()).orElseThrow());
     ToolInvocation readySibling =
         new ToolInvocation(
             current.id(),
@@ -208,7 +208,7 @@ class HarnessRuntimeApprovalLockingTest {
     HarnessRuntimeTestSupport.ToolBaseline baseline = seedToolBaseline(store);
     setWaitingApproval(store, baseline);
     ToolInvocation current =
-        store.transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow());
+        store.transaction(tx -> tx.tools().find(baseline.toolId()).orElseThrow());
     // 伪造当前 assistant 的 siblings 为另一把工具（满足分类器序/归属不变量）：目标工具不在其中。
     ToolInvocation otherSibling =
         new ToolInvocation(
@@ -249,7 +249,7 @@ class HarnessRuntimeApprovalLockingTest {
     setWaitingApproval(store, baseline);
     runtime.decideToolApproval(allow(baseline.threadId(), baseline.toolId()));
     ToolInvocation current =
-        store.transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow());
+        store.transaction(tx -> tx.tools().find(baseline.toolId()).orElseThrow());
 
     IllegalStateException vanishedTool =
         assertThrows(
@@ -374,7 +374,8 @@ class HarnessRuntimeApprovalLockingTest {
         lockedRuntime.decideToolApproval(allow(baseline.threadId(), baseline.toolId()));
     assertEquals(T6, decided.approval().decidedAt());
     assertEquals(T6, decided.updatedAt());
-    ThreadState thread = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
+    ThreadState thread =
+        store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow());
     assertEquals(T6, thread.updatedAt());
   }
 

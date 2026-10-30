@@ -94,8 +94,7 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
         store.transaction(
             tx -> builtin(tx).findModelInvocation(modelId).orElseThrow().resultEntryId());
     UUID toolId =
-        store.transaction(
-            tx -> tx.loadToolInvocationsByAssistantEntryId(assistantId).getFirst().id());
+        store.transaction(tx -> tx.tools().loadByAssistantEntry(assistantId).getFirst().id());
     WorkTarget toolTarget = new WorkTarget(WorkTargetType.TOOL, toolId);
     WorkTarget threadTarget = new WorkTarget(WorkTargetType.THREAD, turn.threadId());
     requestWork(toolTarget, turn.threadId());
@@ -146,8 +145,7 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
     TurnEndPayload batchEnd = assertInstanceOf(TurnEndPayload.class, applied.head().payload());
     assertTrue(batchEnd.continueModel());
     assertTrue(store.transaction(tx -> builtin(tx).findModelInvocation(modelId)).isEmpty());
-    assertTrue(
-        store.transaction(tx -> tx.loadToolInvocationsByAssistantEntryId(assistantId)).isEmpty());
+    assertTrue(store.transaction(tx -> tx.tools().loadByAssistantEntry(assistantId)).isEmpty());
     assertTrue(findWork(threadTarget).isPresent());
 
     // 下一个 claim 真正创建下一轮 ModelInvocation（而不是只留下 TURN_END）。
@@ -199,16 +197,17 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
   private UUID seedUserEntry(StoreTestSupport.TurnBaseline turn) {
     return store.transaction(
         tx -> {
-          var thread = tx.lockThread(turn.threadId()).orElseThrow();
+          var thread = tx.threads().lock(turn.threadId()).orElseThrow();
           UUID id = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  id,
-                  turn.sessionId(),
-                  turn.turnStartEntryId(),
-                  StoreTestSupport.userMessagePayload(),
-                  T2));
-          tx.updateThread(thread.advanceHead(id, T2));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      id,
+                      turn.sessionId(),
+                      turn.turnStartEntryId(),
+                      StoreTestSupport.userMessagePayload(),
+                      T2));
+          tx.threads().update(thread.advanceHead(id, T2));
           return id;
         });
   }
@@ -225,7 +224,7 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
     UUID modelId =
         store.transaction(
             tx -> {
-              tx.lockThread(turn.threadId()).orElseThrow();
+              tx.threads().lock(turn.threadId()).orElseThrow();
               UUID id = tx.nextId();
               builtin(tx)
                   .insertModelInvocation(
@@ -248,18 +247,19 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
             });
     store.transaction(
         tx -> {
-          var thread = tx.lockThread(turn.threadId()).orElseThrow();
+          var thread = tx.threads().lock(turn.threadId()).orElseThrow();
           builtin(tx)
               .updateModelInvocation(
                   builtin(tx).lockModelInvocation(modelId).orElseThrow().markRunning(T3));
           UUID assistantId = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  assistantId,
-                  turn.sessionId(),
-                  requestHeadEntryId,
-                  mappedAssistant(request, response, T3),
-                  T3));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      assistantId,
+                      turn.sessionId(),
+                      requestHeadEntryId,
+                      mappedAssistant(request, response, T3),
+                      T3));
           builtin(tx)
               .updateModelInvocation(
                   builtin(tx)
@@ -272,25 +272,24 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
                       .lockModelInvocation(modelId)
                       .orElseThrow()
                       .attachResultEntry(assistantId, T3));
-          tx.updateThread(thread.advanceHead(assistantId, T3));
+          tx.threads().update(thread.advanceHead(assistantId, T3));
           UUID toolId = tx.nextId();
-          tx.insertToolInvocations(
-              List.of(
-                  StoreTestSupport.toolInvocation(
-                      toolId,
-                      turn.threadId(),
-                      turn.turnStartEntryId(),
-                      assistantId,
-                      0,
-                      "call-0",
-                      ToolInvocationStatus.READY,
-                      T3)));
+          tx.tools()
+              .insert(
+                  List.of(
+                      StoreTestSupport.toolInvocation(
+                          toolId,
+                          turn.threadId(),
+                          turn.turnStartEntryId(),
+                          assistantId,
+                          0,
+                          "call-0",
+                          ToolInvocationStatus.READY,
+                          T3)));
           ToolInvocation ready =
-              tx.lockToolInvocationsByAssistantEntryId(assistantId)
-                  .getFirst()
-                  .markApprovalNotRequired(T3);
-          tx.updateToolInvocations(List.of(ready));
-          tx.updateToolInvocations(List.of(ready.markRunning(T3)));
+              tx.tools().lockByAssistantEntry(assistantId).getFirst().markApprovalNotRequired(T3);
+          tx.tools().update(List.of(ready));
+          tx.tools().update(List.of(ready.markRunning(T3)));
           return null;
         });
     return modelId;
@@ -299,30 +298,30 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
   private void requestWork(WorkTarget target, UUID ownerThreadId) {
     store.transaction(
         tx -> {
-          tx.lockThread(ownerThreadId).orElseThrow();
-          tx.requestWork(target);
+          tx.threads().lock(ownerThreadId).orElseThrow();
+          tx.work().request(target);
           return null;
         });
   }
 
   private Optional<ClaimedWork> claim(WorkTargetType type, String token) {
-    return store.transaction(tx -> tx.claimNextWork(type, token, LEASE));
+    return store.transaction(tx -> tx.work().claimNext(type, token, LEASE));
   }
 
   private ToolInvocation findTool(UUID toolId) {
-    return store.transaction(tx -> tx.findToolInvocation(toolId)).orElseThrow();
+    return store.transaction(tx -> tx.tools().find(toolId)).orElseThrow();
   }
 
   private Optional<Work> findWork(WorkTarget target) {
-    return store.transaction(tx -> tx.findWork(target));
+    return store.transaction(tx -> tx.work().find(target));
   }
 
   private UUID threadHead(UUID threadId) {
-    return store.transaction(tx -> tx.findThread(threadId).orElseThrow().headEntryId());
+    return store.transaction(tx -> tx.threads().find(threadId).orElseThrow().headEntryId());
   }
 
   private EntryPath loadPath(UUID headEntryId) {
-    return store.transaction(tx -> tx.loadEntryPath(headEntryId));
+    return store.transaction(tx -> tx.entries().loadPath(headEntryId));
   }
 
   /** 恢复路径唯一允许出现的 Tool Gateway 交互是 0 次。 */

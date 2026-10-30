@@ -75,8 +75,8 @@ public abstract class HarnessStoreDeletionContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(baseline.threadId()).orElseThrow();
-          tx.insertCommands(List.of(command(baseline.threadId(), 1L, id(90L))));
+          tx.threads().lock(baseline.threadId()).orElseThrow();
+          tx.commands().insert(List.of(command(baseline.threadId(), 1L, id(90L))));
           builtin(tx)
               .insertModelInvocation(
                   new ModelInvocation(
@@ -110,31 +110,31 @@ public abstract class HarnessStoreDeletionContract {
                   "call-1",
                   ToolInvocationStatus.READY,
                   T1);
-          tx.insertToolInvocations(List.of(tool));
-          tx.requestWork(threadWork);
-          tx.requestWork(modelWork);
-          tx.requestWork(toolWork);
+          tx.tools().insert(List.of(tool));
+          tx.work().request(threadWork);
+          tx.work().request(modelWork);
+          tx.work().request(toolWork);
         });
 
     int deleted =
         store.transaction(
             tx -> {
-              tx.lockTree(baseline.threadId());
-              tx.lockThread(baseline.threadId()).orElseThrow();
-              return tx.deleteThreads(List.of(baseline.threadId()));
+              tx.threads().lockTree(baseline.threadId());
+              tx.threads().lock(baseline.threadId()).orElseThrow();
+              return tx.threads().delete(List.of(baseline.threadId()));
             });
     assertEquals(1, deleted);
 
-    assertTrue(store.transaction(tx -> tx.findThread(baseline.threadId())).isEmpty());
+    assertTrue(store.transaction(tx -> tx.threads().find(baseline.threadId())).isEmpty());
     assertTrue(store.transaction(tx -> loadCommandsByThread(tx, baseline.threadId())).isEmpty());
     assertTrue(store.transaction(tx -> builtin(tx).findModelInvocation(modelId)).isEmpty());
-    assertTrue(store.transaction(tx -> tx.findToolInvocation(toolId)).isEmpty());
-    assertTrue(store.transaction(tx -> tx.findWork(threadWork)).isEmpty());
-    assertTrue(store.transaction(tx -> tx.findWork(modelWork)).isEmpty());
-    assertTrue(store.transaction(tx -> tx.findWork(toolWork)).isEmpty());
-    assertTrue(store.transaction(tx -> tx.findSession(baseline.sessionId())).isPresent());
+    assertTrue(store.transaction(tx -> tx.tools().find(toolId)).isEmpty());
+    assertTrue(store.transaction(tx -> tx.work().find(threadWork)).isEmpty());
+    assertTrue(store.transaction(tx -> tx.work().find(modelWork)).isEmpty());
+    assertTrue(store.transaction(tx -> tx.work().find(toolWork)).isEmpty());
+    assertTrue(store.transaction(tx -> tx.sessions().find(baseline.sessionId())).isPresent());
     assertEquals(
-        4, store.transaction(tx -> tx.loadEntriesBySessionId(baseline.sessionId())).size());
+        4, store.transaction(tx -> tx.entries().loadBySession(baseline.sessionId())).size());
   }
 
   @Test
@@ -162,9 +162,9 @@ public abstract class HarnessStoreDeletionContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockTree(parentId);
-                  tx.lockThread(childId);
-                  tx.deleteJoinsForThreads(List.of(childId));
+                  tx.threads().lockTree(parentId);
+                  tx.threads().lock(childId);
+                  tx.joins().deleteForThreads(List.of(childId));
                 }));
     assertThrows(
         IllegalArgumentException.class,
@@ -172,25 +172,25 @@ public abstract class HarnessStoreDeletionContract {
             inTransaction(
                 store,
                 tx -> {
-                  tx.lockTree(parentId);
-                  tx.lockThread(childId);
-                  tx.deleteJoinsByChild(childId);
+                  tx.threads().lockTree(parentId);
+                  tx.threads().lock(childId);
+                  tx.joins().deleteByChild(childId);
                 }));
-    assertTrue(store.transaction(tx -> tx.findJoin(joinId)).isPresent());
+    assertTrue(store.transaction(tx -> tx.joins().find(joinId)).isPresent());
 
     // 父子两端同批删除时 pending join 可一并删除
     List<UUID> ordered = List.of(parentId, childId).stream().sorted(UuidOrder.COMPARATOR).toList();
     int deletedJoins =
         store.transaction(
             tx -> {
-              tx.lockTree(parentId);
+              tx.threads().lockTree(parentId);
               for (UUID threadId : ordered) {
-                tx.lockThread(threadId);
+                tx.threads().lock(threadId);
               }
-              return tx.deleteJoinsForThreads(List.of(parentId, childId));
+              return tx.joins().deleteForThreads(List.of(parentId, childId));
             });
     assertEquals(1, deletedJoins);
-    assertTrue(store.transaction(tx -> tx.findJoin(joinId)).isEmpty());
+    assertTrue(store.transaction(tx -> tx.joins().find(joinId)).isEmpty());
   }
 
   @Test
@@ -214,26 +214,26 @@ public abstract class HarnessStoreDeletionContract {
     int deleted =
         store.transaction(
             tx -> {
-              tx.lockTree(parentId);
+              tx.threads().lockTree(parentId);
               for (UUID threadId : ordered) {
-                tx.lockThread(threadId);
+                tx.threads().lock(threadId);
               }
-              assertThrows(IllegalArgumentException.class, () -> tx.deleteThreads(ordered));
-              assertEquals(1, tx.deleteJoinsForThreads(ordered));
-              return tx.deleteThreads(ordered);
+              assertThrows(IllegalArgumentException.class, () -> tx.threads().delete(ordered));
+              assertEquals(1, tx.joins().deleteForThreads(ordered));
+              return tx.threads().delete(ordered);
             });
     assertEquals(2, deleted);
 
     store.transaction(
         tx -> {
-          assertTrue(tx.findThread(parentId).isEmpty());
-          assertTrue(tx.findThread(childId).isEmpty());
-          assertTrue(tx.findJoin(joinId).isEmpty());
+          assertTrue(tx.threads().find(parentId).isEmpty());
+          assertTrue(tx.threads().find(childId).isEmpty());
+          assertTrue(tx.joins().find(joinId).isEmpty());
           assertTrue(loadCommandsByThread(tx, parentId).isEmpty());
           assertTrue(loadCommandsByThread(tx, childId).isEmpty());
           // 两个 Session 的 Entry 历史都不受影响（Session 级删除另行处理）
-          assertTrue(tx.findSession(parentBaseline.sessionId()).isPresent());
-          assertTrue(tx.findSession(childBaseline.sessionId()).isPresent());
+          assertTrue(tx.sessions().find(parentBaseline.sessionId()).isPresent());
+          assertTrue(tx.sessions().find(childBaseline.sessionId()).isPresent());
           return null;
         });
   }
@@ -247,24 +247,25 @@ public abstract class HarnessStoreDeletionContract {
     return store.transaction(
         tx -> {
           UUID childId = tx.nextId();
-          tx.insertThread(
-              new ThreadState(
-                  childId,
-                  sessionId,
-                  parentThreadId,
-                  headEntryId,
-                  "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-                  "child-branch",
-                  parentThreadId,
-                  false,
-                  SpawnTrigger.MODEL_TOOL,
-                  ThreadConstraints.NONE,
-                  executionControl,
-                  0L,
-                  1L,
-                  0L,
-                  T0,
-                  T0));
+          tx.threads()
+              .insert(
+                  new ThreadState(
+                      childId,
+                      sessionId,
+                      parentThreadId,
+                      headEntryId,
+                      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                      "child-branch",
+                      parentThreadId,
+                      false,
+                      SpawnTrigger.MODEL_TOOL,
+                      ThreadConstraints.NONE,
+                      executionControl,
+                      0L,
+                      1L,
+                      0L,
+                      T0,
+                      T0));
           return childId;
         });
   }
@@ -273,8 +274,8 @@ public abstract class HarnessStoreDeletionContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(threadId);
-          tx.insertCommands(List.of(command(threadId, sequence, idempotencyKey)));
+          tx.threads().lock(threadId);
+          tx.commands().insert(List.of(command(threadId, sequence, idempotencyKey)));
         });
   }
 
@@ -283,24 +284,25 @@ public abstract class HarnessStoreDeletionContract {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(childThreadId);
-          tx.insertJoin(
-              new ThreadJoin(
-                  joinId,
-                  "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-                  parentThreadId,
-                  childThreadId,
-                  1L,
-                  "test-agent",
-                  10,
-                  0L,
-                  null,
-                  null,
-                  null,
-                  T1,
-                  T1,
-                  JoinDelivery.NOTIFY_PARENT,
-                  null));
+          tx.threads().lock(childThreadId);
+          tx.joins()
+              .insert(
+                  new ThreadJoin(
+                      joinId,
+                      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                      parentThreadId,
+                      childThreadId,
+                      1L,
+                      "test-agent",
+                      10,
+                      0L,
+                      null,
+                      null,
+                      null,
+                      T1,
+                      T1,
+                      JoinDelivery.NOTIFY_PARENT,
+                      null));
         });
   }
 }

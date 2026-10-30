@@ -88,14 +88,14 @@ class PlatformResourceContentReaderMediaTest {
 
     ThreadState thread = mock(ThreadState.class);
     when(thread.sessionId()).thenReturn(sessionId);
-    when(transaction.findThread(threadId)).thenReturn(Optional.of(thread));
+    when(transaction.threads().find(threadId)).thenReturn(Optional.of(thread));
     when(refs.contains(sessionId, blobId)).thenReturn(true);
 
     ToolInvocation invocation = mock(ToolInvocation.class);
     when(invocation.call()).thenReturn(new ToolCall(CALL_ID, "read", "{}"));
     when(invocation.threadId()).thenReturn(threadId);
     when(invocation.turnStartEntryId()).thenReturn(turnStartEntryId);
-    when(transaction.findToolInvocation(invocationId)).thenReturn(Optional.of(invocation));
+    when(transaction.tools().find(invocationId)).thenReturn(Optional.of(invocation));
   }
 
   /** 支持的模型与协议下，媒体读取返回指向同一已授权 Blob 的 durable 引用，且不读取任何字节。 */
@@ -388,6 +388,6 @@ class PlatformResourceContentReaderMediaTest {
     when(entry.payload()).thenReturn(start);
     EntryPath path = mock(EntryPath.class);
     when(path.head()).thenReturn(entry);
-    when(transaction.loadEntryPath(turnStartEntryId)).thenReturn(path);
+    when(transaction.entries().loadPath(turnStartEntryId)).thenReturn(path);
   }
 }

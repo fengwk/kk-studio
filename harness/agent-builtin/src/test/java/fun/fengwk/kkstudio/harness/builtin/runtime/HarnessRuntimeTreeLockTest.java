@@ -362,12 +362,14 @@ class HarnessRuntimeTreeLockTest {
     assertNotNull(
         fixture.store.transaction(
             tx ->
-                tx.findWork(new WorkTarget(WorkTargetType.THREAD, result.childThreadId()))
+                tx.work()
+                    .find(new WorkTarget(WorkTargetType.THREAD, result.childThreadId()))
                     .orElse(null)));
     assertNull(
         fixture.store.transaction(
             tx ->
-                tx.findWork(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()))
+                tx.work()
+                    .find(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()))
                     .orElse(null)));
 
     // 结构性写入仍需完整锁序，但只在该事务内获取一次。
@@ -403,13 +405,13 @@ class HarnessRuntimeTreeLockTest {
         () -> sabotagedRuntime.compactThread(new CompactThreadCommand(baseline.threadId(), 0L)));
 
     ThreadState stored =
-        fixture.store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
+        fixture.store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow());
     assertEquals("main", stored.name());
     assertEquals(0L, stored.version());
     assertEquals(baseline.turnEndId(), stored.headEntryId());
     assertEquals(
         1,
-        fixture.store.transaction(tx -> tx.listThreadsBySession(baseline.sessionId())).size(),
+        fixture.store.transaction(tx -> tx.threads().listBySession(baseline.sessionId())).size(),
         "failed tree-lock plan must not create the compaction child");
   }
 
@@ -435,7 +437,8 @@ class HarnessRuntimeTreeLockTest {
                 new RenameThreadCommand(baseline.threadId(), "should-not-persist")));
 
     // 确认未持久化
-    ThreadState stored = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
+    ThreadState stored =
+        store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow());
     assertEquals("main", stored.name());
   }
 
@@ -467,7 +470,7 @@ class HarnessRuntimeTreeLockTest {
                   0L,
                   now,
                   now);
-          tx.insertThread(child);
+          tx.threads().insert(child);
           return null;
         });
     return childId;
@@ -633,128 +636,140 @@ class HarnessRuntimeTreeLockTest {
           UUID secondUserId = tx.nextId();
           UUID secondAssistantId = tx.nextId();
           UUID secondEndId = tx.nextId();
-          tx.insertSession(new Session(sessionId, "main", now));
-          tx.insertEntry(
-              new Entry(
-                  rootEntryId,
-                  sessionId,
-                  null,
-                  new RootPayload(HarnessRuntimeTestSupport.settings()),
-                  now));
-          tx.insertEntry(
-              new Entry(
-                  firstStartId,
-                  sessionId,
-                  rootEntryId,
-                  new TurnStartPayload(
-                      TurnStartReason.INPUT,
-                      HarnessRuntimeTestSupport.settings(),
-                      threadId,
-                      100_000,
-                      16_384,
+          tx.sessions().insert(new Session(sessionId, "main", now));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      rootEntryId,
+                      sessionId,
                       null,
-                      null),
-                  now));
-          tx.insertEntry(
-              new Entry(
-                  firstUserId,
-                  sessionId,
-                  firstStartId,
-                  new MessagePayload(
-                      new AgentMessage(
-                          AgentMessageRole.USER,
-                          List.of(new TextMessageContent("historical user " + "h".repeat(50_000)))),
-                      null,
-                      null),
-                  now));
+                      new RootPayload(HarnessRuntimeTestSupport.settings()),
+                      now));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      firstStartId,
+                      sessionId,
+                      rootEntryId,
+                      new TurnStartPayload(
+                          TurnStartReason.INPUT,
+                          HarnessRuntimeTestSupport.settings(),
+                          threadId,
+                          100_000,
+                          16_384,
+                          null,
+                          null),
+                      now));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      firstUserId,
+                      sessionId,
+                      firstStartId,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.USER,
+                              List.of(
+                                  new TextMessageContent("historical user " + "h".repeat(50_000)))),
+                          null,
+                          null),
+                      now));
           AssistantMessageMetadata metadata =
               new AssistantMessageMetadata(
                   GenerationStopReason.COMPLETE,
                   new ModelUsage(50_000L, 2L, 0L, 0L, Map.of(), 0L, 50_002L));
-          tx.insertEntry(
-              new Entry(
-                  firstAssistantId,
-                  sessionId,
-                  firstUserId,
-                  new MessagePayload(
-                      new AgentMessage(
-                          AgentMessageRole.ASSISTANT,
-                          List.of(
-                              new TextMessageContent(
-                                  "historical assistant " + "a".repeat(50_000)))),
-                      metadata,
-                      null),
-                  now));
-          tx.insertEntry(
-              new Entry(
-                  firstEndId,
-                  sessionId,
-                  firstAssistantId,
-                  new TurnEndPayload(firstStartId, TurnEndOutcome.COMPLETED, false, null, null),
-                  now));
-          tx.insertEntry(
-              new Entry(
-                  secondStartId,
-                  sessionId,
-                  firstEndId,
-                  new TurnStartPayload(
-                      TurnStartReason.INPUT,
-                      HarnessRuntimeTestSupport.settings(),
+          tx.entries()
+              .insert(
+                  new Entry(
+                      firstAssistantId,
+                      sessionId,
+                      firstUserId,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.ASSISTANT,
+                              List.of(
+                                  new TextMessageContent(
+                                      "historical assistant " + "a".repeat(50_000)))),
+                          metadata,
+                          null),
+                      now));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      firstEndId,
+                      sessionId,
+                      firstAssistantId,
+                      new TurnEndPayload(firstStartId, TurnEndOutcome.COMPLETED, false, null, null),
+                      now));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      secondStartId,
+                      sessionId,
+                      firstEndId,
+                      new TurnStartPayload(
+                          TurnStartReason.INPUT,
+                          HarnessRuntimeTestSupport.settings(),
+                          threadId,
+                          100_000,
+                          16_384,
+                          null,
+                          null),
+                      now));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      secondUserId,
+                      sessionId,
+                      secondStartId,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.USER,
+                              List.of(new TextMessageContent("user " + "x".repeat(90_000)))),
+                          null,
+                          null),
+                      now));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      secondAssistantId,
+                      sessionId,
+                      secondUserId,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.ASSISTANT,
+                              List.of(new TextMessageContent("assistant reply"))),
+                          metadata,
+                          null),
+                      now));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      secondEndId,
+                      sessionId,
+                      secondAssistantId,
+                      new TurnEndPayload(
+                          secondStartId, TurnEndOutcome.COMPLETED, false, null, null),
+                      now));
+          tx.threads()
+              .insert(
+                  new ThreadState(
                       threadId,
-                      100_000,
-                      16_384,
+                      sessionId,
                       null,
-                      null),
-                  now));
-          tx.insertEntry(
-              new Entry(
-                  secondUserId,
-                  sessionId,
-                  secondStartId,
-                  new MessagePayload(
-                      new AgentMessage(
-                          AgentMessageRole.USER,
-                          List.of(new TextMessageContent("user " + "x".repeat(90_000)))),
-                      null,
-                      null),
-                  now));
-          tx.insertEntry(
-              new Entry(
-                  secondAssistantId,
-                  sessionId,
-                  secondUserId,
-                  new MessagePayload(
-                      new AgentMessage(
-                          AgentMessageRole.ASSISTANT,
-                          List.of(new TextMessageContent("assistant reply"))),
-                      metadata,
-                      null),
-                  now));
-          tx.insertEntry(
-              new Entry(
-                  secondEndId,
-                  sessionId,
-                  secondAssistantId,
-                  new TurnEndPayload(secondStartId, TurnEndOutcome.COMPLETED, false, null, null),
-                  now));
-          tx.insertThread(
-              new ThreadState(
-                  threadId,
-                  sessionId,
-                  null,
-                  secondEndId,
-                  CREATION_REQUEST_HASH,
-                  "main",
-                  threadId,
-                  false,
-                  SpawnTrigger.USER,
-                  ThreadConstraints.NONE,
-                  ThreadExecutionControl.RUNNABLE,
-                  0L,
-                  1L,
-                  0L,
-                  now,
-                  now));
+                      secondEndId,
+                      CREATION_REQUEST_HASH,
+                      "main",
+                      threadId,
+                      false,
+                      SpawnTrigger.USER,
+                      ThreadConstraints.NONE,
+                      ThreadExecutionControl.RUNNABLE,
+                      0L,
+                      1L,
+                      0L,
+                      now,
+                      now));
           return new ClosedTurnBaseline(sessionId, threadId, secondEndId);
         });
   }

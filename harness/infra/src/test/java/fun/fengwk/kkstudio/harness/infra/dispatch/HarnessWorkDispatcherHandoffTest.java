@@ -192,7 +192,7 @@ class HarnessWorkDispatcherHandoffTest {
     ClaimedWork firstThreadClaim = claims.get(0);
     store.transaction(
         tx -> {
-          tx.rescheduleWork(firstThreadClaim, Duration.ZERO);
+          tx.work().reschedule(firstThreadClaim, Duration.ZERO);
           return null;
         });
     dispatcher.wake();
@@ -467,7 +467,7 @@ class HarnessWorkDispatcherHandoffTest {
                     == ModelInvocationStatus.READY
                 && store
                         .transaction(
-                            tx -> tx.findToolInvocation(toolSeed.toolInvocationId()).orElseThrow())
+                            tx -> tx.tools().find(toolSeed.toolInvocationId()).orElseThrow())
                         .status()
                     == ToolInvocationStatus.READY);
 
@@ -483,7 +483,7 @@ class HarnessWorkDispatcherHandoffTest {
             .orElseThrow();
     assertEquals(ModelInvocationStatus.READY, model.status());
     ToolInvocation tool =
-        store.transaction(tx -> tx.findToolInvocation(toolSeed.toolInvocationId())).orElseThrow();
+        store.transaction(tx -> tx.tools().find(toolSeed.toolInvocationId())).orElseThrow();
     assertEquals(ToolInvocationStatus.READY, tool.status());
     assertEquals(0, model.attempt());
     assertEquals(0, tool.attempt());
@@ -545,7 +545,7 @@ class HarnessWorkDispatcherHandoffTest {
           threadHandoffs.add(claim.target().id());
           store.transaction(
               tx -> {
-                tx.completeWork(claim);
+                tx.work().complete(claim);
                 return null;
               });
         };
@@ -615,10 +615,10 @@ class HarnessWorkDispatcherHandoffTest {
       InMemoryHarnessStore store, UUID toolInvocationId, Instant now) {
     store.transaction(
         tx -> {
-          ToolInvocation tool = tx.lockToolInvocation(toolInvocationId).orElseThrow();
+          ToolInvocation tool = tx.tools().lock(toolInvocationId).orElseThrow();
           // preflight 通过后才是 READY -> RUNNING：每一步都是 Store 认可的单个跃迁。
-          tx.updateToolInvocations(List.of(tool.markApprovalNotRequired(now)));
-          tx.updateToolInvocations(List.of(tool.markApprovalNotRequired(now).markRunning(now)));
+          tx.tools().update(List.of(tool.markApprovalNotRequired(now)));
+          tx.tools().update(List.of(tool.markApprovalNotRequired(now).markRunning(now)));
           return null;
         });
   }
@@ -627,14 +627,14 @@ class HarnessWorkDispatcherHandoffTest {
       InMemoryHarnessStore store, UUID toolInvocationId, Instant now) {
     store.transaction(
         tx -> {
-          ToolInvocation tool = tx.lockToolInvocation(toolInvocationId).orElseThrow();
-          tx.updateToolInvocations(List.of(tool.requestInput(now)));
+          ToolInvocation tool = tx.tools().lock(toolInvocationId).orElseThrow();
+          tx.tools().update(List.of(tool.requestInput(now)));
           return null;
         });
   }
 
   private static ToolInvocationStatus tool(HarnessStore store, UUID toolInvocationId) {
-    return store.transaction(tx -> tx.findToolInvocation(toolInvocationId).orElseThrow()).status();
+    return store.transaction(tx -> tx.tools().find(toolInvocationId).orElseThrow()).status();
   }
 
   @Test

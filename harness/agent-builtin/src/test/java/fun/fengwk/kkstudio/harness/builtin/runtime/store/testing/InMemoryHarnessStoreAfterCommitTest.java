@@ -28,19 +28,19 @@ class InMemoryHarnessStoreAfterCommitTest {
     InMemoryHarnessStore store = new InMemoryBuiltinHarnessStore();
     Baseline baseline = seedThreadBaseline(store);
     long before =
-        store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow().version());
+        store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow().version());
     List<String> events = new ArrayList<>();
 
     store.transaction(
         tx -> {
-          ThreadState locked = tx.lockThread(baseline.threadId()).orElseThrow();
-          tx.updateThread(locked.touchVersion(T1));
+          ThreadState locked = tx.threads().lock(baseline.threadId()).orElseThrow();
+          tx.threads().update(locked.touchVersion(T1));
           store.afterCommit(
               () -> {
                 // commit 已完成：动作内部的新事务必须能看到本事务写入的新 version。
                 long visible =
                     store.transaction(
-                        inner -> inner.findThread(baseline.threadId()).orElseThrow().version());
+                        inner -> inner.threads().find(baseline.threadId()).orElseThrow().version());
                 assertEquals(before + 1, visible);
                 events.add("after-commit");
               });
@@ -50,7 +50,7 @@ class InMemoryHarnessStoreAfterCommitTest {
 
     assertEquals(List.of("callback", "after-commit"), events);
     long after =
-        store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow().version());
+        store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow().version());
     assertEquals(before + 1, after);
   }
 

@@ -185,8 +185,8 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
     ToolInvocation ready = tool(fixture.store, chain.toolInvocationIds().getFirst());
     fixture.store.transaction(
         tx -> {
-          tx.lockToolInvocation(ready.id());
-          tx.updateToolInvocations(List.of(ready.requestApproval("needs approval", NOW)));
+          tx.tools().lock(ready.id());
+          tx.tools().update(List.of(ready.requestApproval("needs approval", NOW)));
           return null;
         });
     requestThreadWork(fixture.store, chain.turn().threadId());
@@ -199,11 +199,17 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
     ToolInvocation approved = tool(fixture.store, ready.id());
     fixture.store.transaction(
         tx -> {
-          tx.lockToolInvocation(approved.id());
-          tx.updateToolInvocations(
-              List.of(
-                  approved.decideApproval(
-                      ToolApprovalDecision.ALLOWED, UUID.randomUUID(), "tester", null, NOW, NOW)));
+          tx.tools().lock(approved.id());
+          tx.tools()
+              .update(
+                  List.of(
+                      approved.decideApproval(
+                          ToolApprovalDecision.ALLOWED,
+                          UUID.randomUUID(),
+                          "tester",
+                          null,
+                          NOW,
+                          NOW)));
           return null;
         });
     transitionTool(fixture.store, ready.id(), tool -> tool.markRunning(NOW));
@@ -259,20 +265,22 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
     UUID assistantId =
         fixture.store.transaction(
             tx -> {
-              var thread = tx.lockThread(turn.threadId()).orElseThrow();
+              var thread = tx.threads().lock(turn.threadId()).orElseThrow();
               UUID id = tx.nextId();
               ModelSelection selection =
                   ModelSelection.model(requestSpec.model().modelName(), requestSpec.variant().id());
-              tx.insertEntry(
-                  new Entry(
-                      id,
-                      turn.sessionId(),
-                      turn.userEntryId(),
-                      new BuiltinHistoryPayloadMapper()
-                          .assistantPayload(response, requestSpec.toolBindings(), selection, NOW),
-                      NOW,
-                      replayState));
-              tx.updateThread(thread.advanceHead(id, NOW));
+              tx.entries()
+                  .insert(
+                      new Entry(
+                          id,
+                          turn.sessionId(),
+                          turn.userEntryId(),
+                          new BuiltinHistoryPayloadMapper()
+                              .assistantPayload(
+                                  response, requestSpec.toolBindings(), selection, NOW),
+                          NOW,
+                          replayState));
+              tx.threads().update(thread.advanceHead(id, NOW));
               return id;
             });
     transitionModel(fixture.store, modelId, model -> model.attachResultEntry(assistantId, NOW));
@@ -477,7 +485,7 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
 
     // 临时行真实物理删除后，Entry 仍能独立核查原冻结 binding。
     for (ToolInvocation original : originals) {
-      assertTrue(fixture.store.transaction(tx -> tx.findToolInvocation(original.id())).isEmpty());
+      assertTrue(fixture.store.transaction(tx -> tx.tools().find(original.id())).isEmpty());
     }
     assertTrue(
         fixture

@@ -110,7 +110,7 @@ class ExecutionConcurrentDeletionTest {
           List.of(ExecutionExitState.UNCONFIRMED),
           fixture.rawStore.transaction(
               tx ->
-                  tx.loadUnconfirmedExecutions(fixture.threadId).stream()
+                  tx.exits().loadUnconfirmed(fixture.threadId).stream()
                       .map(fact -> fact.state())
                       .toList()),
           "a missing Thread must not manufacture an exit confirmation");
@@ -181,7 +181,7 @@ class ExecutionConcurrentDeletionTest {
         List.of(ExecutionExitState.UNCONFIRMED),
         fixture.rawStore.transaction(
             tx ->
-                tx.loadUnconfirmedExecutions(fixture.threadId).stream()
+                tx.exits().loadUnconfirmed(fixture.threadId).stream()
                     .map(fact -> fact.state())
                     .toList()));
   }
@@ -281,7 +281,7 @@ class ExecutionConcurrentDeletionTest {
     UUID invocationId =
         rawStore.transaction(
             tx -> {
-              tx.lockThread(threadId);
+              tx.threads().lock(threadId);
               UUID id = tx.nextId();
               builtin(tx)
                   .insertModelInvocation(
@@ -300,15 +300,16 @@ class ExecutionConcurrentDeletionTest {
                           List.of(),
                           ThreadProcessorTestSupport.NOW,
                           ThreadProcessorTestSupport.NOW));
-              tx.requestWork(new WorkTarget(WorkTargetType.MODEL, id));
+              tx.work().request(new WorkTarget(WorkTargetType.MODEL, id));
               return id;
             });
     ClaimedWork claim =
         rawStore
             .transaction(
                 tx ->
-                    tx.claimNextWork(
-                        WorkTargetType.MODEL, "token-" + invocationId, Duration.ofSeconds(60)))
+                    tx.work()
+                        .claimNext(
+                            WorkTargetType.MODEL, "token-" + invocationId, Duration.ofSeconds(60)))
             .orElseThrow();
     ModelExecutionFixture fixture =
         new ModelExecutionFixture(
@@ -387,7 +388,7 @@ class ExecutionConcurrentDeletionTest {
 
   private static ExecutionExitState executionState(
       InMemoryBuiltinHarnessStore store, UUID executionId) {
-    return store.transaction(tx -> tx.findExecution(executionId).orElseThrow().state());
+    return store.transaction(tx -> tx.exits().find(executionId).orElseThrow().state());
   }
 
   private static ModelInvocationStatus modelStatus(

@@ -109,8 +109,8 @@ class ExecutionTreeLockRegressionTest {
     // 请求 MODEL work（READY 状态由 execution.markRunning 推进）
     store.transaction(
         tx -> {
-          tx.lockThread(openTurn.threadId());
-          tx.requestWork(new WorkTarget(WorkTargetType.MODEL, invocationId));
+          tx.threads().lock(openTurn.threadId());
+          tx.work().request(new WorkTarget(WorkTargetType.MODEL, invocationId));
           return null;
         });
 
@@ -118,7 +118,8 @@ class ExecutionTreeLockRegressionTest {
         store
             .transaction(
                 tx ->
-                    tx.claimNextWork(WorkTargetType.MODEL, "token-model-1", Duration.ofSeconds(60)))
+                    tx.work()
+                        .claimNext(WorkTargetType.MODEL, "token-model-1", Duration.ofSeconds(60)))
             .orElseThrow();
 
     ModelExecution execution =
@@ -206,8 +207,8 @@ class ExecutionTreeLockRegressionTest {
 
     store.transaction(
         tx -> {
-          tx.lockThread(openTurn.threadId());
-          tx.requestWork(new WorkTarget(WorkTargetType.MODEL, invocationId));
+          tx.threads().lock(openTurn.threadId());
+          tx.work().request(new WorkTarget(WorkTargetType.MODEL, invocationId));
           return null;
         });
 
@@ -215,7 +216,8 @@ class ExecutionTreeLockRegressionTest {
         store
             .transaction(
                 tx ->
-                    tx.claimNextWork(WorkTargetType.MODEL, "token-model-2", Duration.ofSeconds(60)))
+                    tx.work()
+                        .claimNext(WorkTargetType.MODEL, "token-model-2", Duration.ofSeconds(60)))
             .orElseThrow();
 
     ModelStreamConfig flushConfig =

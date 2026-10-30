@@ -145,7 +145,7 @@ class PostgresqlModelLeaseRecoveryTest {
     requestWork(modelTarget, turn.threadId());
 
     UUID headBefore =
-        store.transaction(tx -> tx.findThread(turn.threadId()).orElseThrow().headEntryId());
+        store.transaction(tx -> tx.threads().find(turn.threadId()).orElseThrow().headEntryId());
     EntryPath before = loadPath(headBefore);
     long entriesBefore = before.entries().size();
 
@@ -159,7 +159,7 @@ class PostgresqlModelLeaseRecoveryTest {
         entriesBefore, loadPath(headBefore).entries().size(), "restart must not append entries");
     assertEquals(
         headBefore,
-        store.transaction(tx -> tx.findThread(turn.threadId()).orElseThrow().headEntryId()));
+        store.transaction(tx -> tx.threads().find(turn.threadId()).orElseThrow().headEntryId()));
     assertEquals(0, modelGateway.startCalls(), "committed result must not re-run the Provider");
     assertTrue(findWork(modelTarget).isEmpty());
     assertTrue(findWork(new WorkTarget(WorkTargetType.THREAD, turn.threadId())).isEmpty());
@@ -190,16 +190,17 @@ class PostgresqlModelLeaseRecoveryTest {
   private UUID seedUserEntry(StoreTestSupport.TurnBaseline turn) {
     return store.transaction(
         tx -> {
-          var thread = tx.lockThread(turn.threadId()).orElseThrow();
+          var thread = tx.threads().lock(turn.threadId()).orElseThrow();
           UUID id = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  id,
-                  turn.sessionId(),
-                  turn.turnStartEntryId(),
-                  StoreTestSupport.userMessagePayload(),
-                  T2));
-          tx.updateThread(thread.advanceHead(id, T2));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      id,
+                      turn.sessionId(),
+                      turn.turnStartEntryId(),
+                      StoreTestSupport.userMessagePayload(),
+                      T2));
+          tx.threads().update(thread.advanceHead(id, T2));
           return id;
         });
   }
@@ -207,7 +208,7 @@ class PostgresqlModelLeaseRecoveryTest {
   private UUID seedReadyModel(StoreTestSupport.TurnBaseline turn, UUID requestHeadEntryId) {
     return store.transaction(
         tx -> {
-          tx.lockThread(turn.threadId()).orElseThrow();
+          tx.threads().lock(turn.threadId()).orElseThrow();
           UUID id = tx.nextId();
           builtin(tx)
               .insertModelInvocation(
@@ -234,7 +235,7 @@ class PostgresqlModelLeaseRecoveryTest {
     UUID modelId = seedReadyModel(turn, seedUserEntry(turn));
     store.transaction(
         tx -> {
-          tx.lockThread(turn.threadId()).orElseThrow();
+          tx.threads().lock(turn.threadId()).orElseThrow();
           builtin(tx)
               .updateModelInvocation(
                   builtin(tx).lockModelInvocation(modelId).orElseThrow().markRunning(T3));
@@ -248,7 +249,7 @@ class PostgresqlModelLeaseRecoveryTest {
     UUID modelId = seedReadyModel(turn, seedUserEntry(turn));
     store.transaction(
         tx -> {
-          var thread = tx.lockThread(turn.threadId()).orElseThrow();
+          var thread = tx.threads().lock(turn.threadId()).orElseThrow();
           var response = StoreTestSupport.assistantResponse();
           builtin(tx)
               .updateModelInvocation(
@@ -260,20 +261,21 @@ class PostgresqlModelLeaseRecoveryTest {
                       .orElseThrow()
                       .succeed(response, null, null, T3));
           UUID assistantId = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  assistantId,
-                  turn.sessionId(),
-                  thread.headEntryId(),
-                  mappedAssistant(modelRequest(), response, T3),
-                  T3));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      assistantId,
+                      turn.sessionId(),
+                      thread.headEntryId(),
+                      mappedAssistant(modelRequest(), response, T3),
+                      T3));
           builtin(tx)
               .updateModelInvocation(
                   builtin(tx)
                       .lockModelInvocation(modelId)
                       .orElseThrow()
                       .attachResultEntry(assistantId, T3));
-          tx.updateThread(thread.advanceHead(assistantId, T3));
+          tx.threads().update(thread.advanceHead(assistantId, T3));
           return null;
         });
     return modelId;
@@ -283,7 +285,7 @@ class PostgresqlModelLeaseRecoveryTest {
   private void markModelRunning(StoreTestSupport.TurnBaseline turn, UUID modelId) {
     store.transaction(
         tx -> {
-          tx.lockThread(turn.threadId()).orElseThrow();
+          tx.threads().lock(turn.threadId()).orElseThrow();
           builtin(tx)
               .updateModelInvocation(
                   builtin(tx).lockModelInvocation(modelId).orElseThrow().markRunning(T4));
@@ -294,14 +296,14 @@ class PostgresqlModelLeaseRecoveryTest {
   private void requestWork(WorkTarget target, UUID ownerThreadId) {
     store.transaction(
         tx -> {
-          tx.lockThread(ownerThreadId).orElseThrow();
-          tx.requestWork(target);
+          tx.threads().lock(ownerThreadId).orElseThrow();
+          tx.work().request(target);
           return null;
         });
   }
 
   private Optional<ClaimedWork> claimModel(String token) {
-    return store.transaction(tx -> tx.claimNextWork(WorkTargetType.MODEL, token, LEASE));
+    return store.transaction(tx -> tx.work().claimNext(WorkTargetType.MODEL, token, LEASE));
   }
 
   private ModelInvocation findModel(UUID modelId) {
@@ -309,11 +311,11 @@ class PostgresqlModelLeaseRecoveryTest {
   }
 
   private Optional<Work> findWork(WorkTarget target) {
-    return store.transaction(tx -> tx.findWork(target));
+    return store.transaction(tx -> tx.work().find(target));
   }
 
   private EntryPath loadPath(UUID headEntryId) {
-    return store.transaction(tx -> tx.loadEntryPath(headEntryId));
+    return store.transaction(tx -> tx.entries().loadPath(headEntryId));
   }
 
   /** 直接改写持久化 available_at，跨越数据库时钟域的到期边界（无 JVM sleep）。 */

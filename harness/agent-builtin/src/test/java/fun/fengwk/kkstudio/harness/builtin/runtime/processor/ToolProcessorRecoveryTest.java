@@ -62,7 +62,8 @@ class ToolProcessorRecoveryTest {
             .store
             .transaction(
                 tx ->
-                    tx.claimNextWork(WorkTargetType.THREAD, "thread-token", Duration.ofSeconds(60)))
+                    tx.work()
+                        .claimNext(WorkTargetType.THREAD, "thread-token", Duration.ofSeconds(60)))
             .orElseThrow();
     assertThrows(IllegalArgumentException.class, () -> fixture.processor.process(threadClaim));
   }
@@ -254,7 +255,7 @@ class ToolProcessorRecoveryTest {
       assertTrue(
           fixture
               .store
-              .transaction(tx -> tx.loadUnconfirmedExecutions(fixture.baseline.threadId()))
+              .transaction(tx -> tx.exits().loadUnconfirmed(fixture.baseline.threadId()))
               .isEmpty());
       assertEquals(
           3, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());

@@ -282,7 +282,7 @@ class ModelExecutionDecodeDurationTest {
       this.invocationId =
           store.transaction(
               tx -> {
-                tx.lockThread(turn.threadId());
+                tx.threads().lock(turn.threadId());
                 UUID id = tx.nextId();
                 builtin(tx)
                     .insertModelInvocation(
@@ -301,15 +301,18 @@ class ModelExecutionDecodeDurationTest {
                             List.of(),
                             NOW,
                             NOW));
-                tx.requestWork(new WorkTarget(WorkTargetType.MODEL, id));
+                tx.work().request(new WorkTarget(WorkTargetType.MODEL, id));
                 return id;
               });
       ClaimedWork claim =
           store
               .transaction(
                   tx ->
-                      tx.claimNextWork(
-                          WorkTargetType.MODEL, "token-" + invocationId, Duration.ofSeconds(60)))
+                      tx.work()
+                          .claimNext(
+                              WorkTargetType.MODEL,
+                              "token-" + invocationId,
+                              Duration.ofSeconds(60)))
               .orElseThrow();
       this.execution =
           new ModelExecution(

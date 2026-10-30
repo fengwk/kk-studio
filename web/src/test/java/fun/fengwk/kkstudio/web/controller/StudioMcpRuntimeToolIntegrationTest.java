@@ -257,8 +257,8 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
 
     harnessStore.transaction(
         tx -> {
-          tx.insertSession(session);
-          tx.insertEntry(rootEntry);
+          tx.sessions().insert(session);
+          tx.entries().insert(rootEntry);
           return null;
         });
 

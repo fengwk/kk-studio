@@ -392,60 +392,65 @@ public final class ToolProcessorTestSupport {
           // model request/successResponse 严格一致（renderer bash 来自 model request 的 bash binding）。
           ModelRequestSpec modelRequest = modelRequest(scenario);
           ProviderResponse response = successResponse(scenario, "call-1");
-          tx.insertSession(new Session(sessionId, "session-" + sessionId, now));
-          tx.insertEntry(
-              new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), now));
-          tx.insertEntry(
-              new Entry(
-                  turnStartEntryId,
-                  sessionId,
-                  rootEntryId,
-                  new TurnStartPayload(
-                      TurnStartReason.INPUT,
-                      branchSettings(),
-                      threadId,
-                      100_000,
-                      16_384,
-                      null,
-                      null,
-                      new TurnCapabilities(modelRequest.toolBindings(), List.of())),
-                  now.plusMillis(1)));
-          tx.insertEntry(
-              new Entry(
-                  userEntryId,
-                  sessionId,
-                  turnStartEntryId,
-                  userMessagePayload(),
-                  now.plusMillis(2)));
+          tx.sessions().insert(new Session(sessionId, "session-" + sessionId, now));
+          tx.entries()
+              .insert(
+                  new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), now));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStartEntryId,
+                      sessionId,
+                      rootEntryId,
+                      new TurnStartPayload(
+                          TurnStartReason.INPUT,
+                          branchSettings(),
+                          threadId,
+                          100_000,
+                          16_384,
+                          null,
+                          null,
+                          new TurnCapabilities(modelRequest.toolBindings(), List.of())),
+                      now.plusMillis(1)));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      userEntryId,
+                      sessionId,
+                      turnStartEntryId,
+                      userMessagePayload(),
+                      now.plusMillis(2)));
           ModelSelection actualSelection =
               ModelSelection.model(modelRequest.model().modelName(), modelRequest.variant().id());
-          tx.insertEntry(
-              new Entry(
-                  assistantEntryId,
-                  sessionId,
-                  userEntryId,
-                  new BuiltinHistoryPayloadMapper()
-                      .assistantPayload(
-                          response, modelRequest.toolBindings(), actualSelection, now),
-                  now.plusMillis(3)));
-          tx.insertThread(
-              new ThreadState(
-                  threadId,
-                  sessionId,
-                  null,
-                  turnStartEntryId,
-                  ThreadProcessorTestSupport.CREATION_REQUEST_HASH,
-                  "main",
-                  threadId,
-                  yoloEnabled,
-                  SpawnTrigger.USER,
-                  ThreadConstraints.NONE,
-                  ThreadExecutionControl.RUNNABLE,
-                  0L,
-                  1L,
-                  0L,
-                  now,
-                  now));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      assistantEntryId,
+                      sessionId,
+                      userEntryId,
+                      new BuiltinHistoryPayloadMapper()
+                          .assistantPayload(
+                              response, modelRequest.toolBindings(), actualSelection, now),
+                      now.plusMillis(3)));
+          tx.threads()
+              .insert(
+                  new ThreadState(
+                      threadId,
+                      sessionId,
+                      null,
+                      turnStartEntryId,
+                      ThreadProcessorTestSupport.CREATION_REQUEST_HASH,
+                      "main",
+                      threadId,
+                      yoloEnabled,
+                      SpawnTrigger.USER,
+                      ThreadConstraints.NONE,
+                      ThreadExecutionControl.RUNNABLE,
+                      0L,
+                      1L,
+                      0L,
+                      now,
+                      now));
           return new Baseline(
               sessionId, rootEntryId, turnStartEntryId, userEntryId, assistantEntryId, threadId);
         });
@@ -480,87 +485,93 @@ public final class ToolProcessorTestSupport {
           UUID toolId = request == null ? null : tx.nextId();
           UUID threadId = tx.nextId();
           UUID rootThreadId =
-              root ? threadId : tx.findThread(parent.threadId()).orElseThrow().rootThreadId();
+              root ? threadId : tx.threads().find(parent.threadId()).orElseThrow().rootThreadId();
           ModelRequestSpec modelRequest = modelRequest(scenario);
-          tx.insertSession(new Session(sessionId, "session-" + sessionId, now));
-          tx.insertEntry(
-              new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), now));
-          tx.insertEntry(
-              new Entry(
-                  turnStartEntryId,
-                  sessionId,
-                  rootEntryId,
-                  new TurnStartPayload(
-                      TurnStartReason.INPUT,
-                      branchSettings(),
-                      threadId,
-                      100_000,
-                      16_384,
-                      null,
-                      null,
-                      new TurnCapabilities(modelRequest.toolBindings(), List.of())),
-                  now.plusMillis(1)));
-          tx.insertEntry(
-              new Entry(
-                  userEntryId,
-                  sessionId,
-                  turnStartEntryId,
-                  userMessagePayload(),
-                  now.plusMillis(2)));
+          tx.sessions().insert(new Session(sessionId, "session-" + sessionId, now));
+          tx.entries()
+              .insert(
+                  new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), now));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStartEntryId,
+                      sessionId,
+                      rootEntryId,
+                      new TurnStartPayload(
+                          TurnStartReason.INPUT,
+                          branchSettings(),
+                          threadId,
+                          100_000,
+                          16_384,
+                          null,
+                          null,
+                          new TurnCapabilities(modelRequest.toolBindings(), List.of())),
+                      now.plusMillis(1)));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      userEntryId,
+                      sessionId,
+                      turnStartEntryId,
+                      userMessagePayload(),
+                      now.plusMillis(2)));
           if (request != null) {
             ProviderResponse response = successResponse(scenario, request.call().id());
             ModelSelection actualSelection =
                 ModelSelection.model(modelRequest.model().modelName(), modelRequest.variant().id());
-            tx.insertEntry(
-                new Entry(
-                    assistantEntryId,
-                    sessionId,
-                    userEntryId,
-                    new BuiltinHistoryPayloadMapper()
-                        .assistantPayload(
-                            response, modelRequest.toolBindings(), actualSelection, now),
-                    now.plusMillis(3)));
-          }
-          tx.insertThread(
-              new ThreadState(
-                  threadId,
-                  sessionId,
-                  root ? null : parent.threadId(),
-                  request == null ? userEntryId : assistantEntryId,
-                  ThreadProcessorTestSupport.CREATION_REQUEST_HASH,
-                  root ? "main" : "child",
-                  rootThreadId,
-                  root && yoloEnabled,
-                  root ? SpawnTrigger.USER : SpawnTrigger.MODEL_TOOL,
-                  ThreadConstraints.NONE,
-                  ThreadExecutionControl.RUNNABLE,
-                  0L,
-                  1L,
-                  0L,
-                  now,
-                  now));
-          // 锁序与生产一致：own Thread -> Tool -> Work。
-          tx.lockThread(threadId).orElseThrow();
-          if (request != null) {
-            tx.insertToolInvocations(
-                List.of(
-                    new ToolInvocation(
-                        toolId,
-                        threadId,
-                        turnStartEntryId,
+            tx.entries()
+                .insert(
+                    new Entry(
                         assistantEntryId,
-                        0,
-                        request.call(),
-                        request.binding(),
-                        ToolInvocationStatus.READY,
-                        0,
-                        null,
-                        null,
-                        null,
-                        now,
-                        now)));
-            tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId));
-            tx.requestWork(new WorkTarget(WorkTargetType.TOOL, toolId));
+                        sessionId,
+                        userEntryId,
+                        new BuiltinHistoryPayloadMapper()
+                            .assistantPayload(
+                                response, modelRequest.toolBindings(), actualSelection, now),
+                        now.plusMillis(3)));
+          }
+          tx.threads()
+              .insert(
+                  new ThreadState(
+                      threadId,
+                      sessionId,
+                      root ? null : parent.threadId(),
+                      request == null ? userEntryId : assistantEntryId,
+                      ThreadProcessorTestSupport.CREATION_REQUEST_HASH,
+                      root ? "main" : "child",
+                      rootThreadId,
+                      root && yoloEnabled,
+                      root ? SpawnTrigger.USER : SpawnTrigger.MODEL_TOOL,
+                      ThreadConstraints.NONE,
+                      ThreadExecutionControl.RUNNABLE,
+                      0L,
+                      1L,
+                      0L,
+                      now,
+                      now));
+          // 锁序与生产一致：own Thread -> Tool -> Work。
+          tx.threads().lock(threadId).orElseThrow();
+          if (request != null) {
+            tx.tools()
+                .insert(
+                    List.of(
+                        new ToolInvocation(
+                            toolId,
+                            threadId,
+                            turnStartEntryId,
+                            assistantEntryId,
+                            0,
+                            request.call(),
+                            request.binding(),
+                            ToolInvocationStatus.READY,
+                            0,
+                            null,
+                            null,
+                            null,
+                            now,
+                            now)));
+            tx.work().request(new WorkTarget(WorkTargetType.THREAD, threadId));
+            tx.work().request(new WorkTarget(WorkTargetType.TOOL, toolId));
           }
           return new SeededChild(
               new Baseline(
@@ -618,7 +629,7 @@ public final class ToolProcessorTestSupport {
         tx -> {
           UUID modelId = tx.nextId();
           UUID toolId = tx.nextId();
-          tx.lockThread(baseline.threadId());
+          tx.threads().lock(baseline.threadId());
           ModelRequestSpec modelRequest = modelRequest(scenario);
           builtin(tx)
               .insertModelInvocation(
@@ -650,25 +661,26 @@ public final class ToolProcessorTestSupport {
           current = builtin(tx).lockModelInvocation(modelId).orElseThrow();
           builtin(tx)
               .updateModelInvocation(current.attachResultEntry(baseline.assistantEntryId(), now));
-          tx.insertToolInvocations(
-              List.of(
-                  new ToolInvocation(
-                      toolId,
-                      baseline.threadId(),
-                      baseline.turnStartEntryId(),
-                      baseline.assistantEntryId(),
-                      0,
-                      request.call(),
-                      request.binding(),
-                      ToolInvocationStatus.READY,
-                      0,
-                      null,
-                      null,
-                      null,
-                      now,
-                      now)));
-          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()));
-          tx.requestWork(new WorkTarget(WorkTargetType.TOOL, toolId));
+          tx.tools()
+              .insert(
+                  List.of(
+                      new ToolInvocation(
+                          toolId,
+                          baseline.threadId(),
+                          baseline.turnStartEntryId(),
+                          baseline.assistantEntryId(),
+                          0,
+                          request.call(),
+                          request.binding(),
+                          ToolInvocationStatus.READY,
+                          0,
+                          null,
+                          null,
+                          null,
+                          now,
+                          now)));
+          tx.work().request(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()));
+          tx.work().request(new WorkTarget(WorkTargetType.TOOL, toolId));
           return new Seeded(modelId, toolId);
         });
   }
@@ -689,7 +701,7 @@ public final class ToolProcessorTestSupport {
       String token,
       Duration leaseDuration) {
     return store
-        .transaction(tx -> tx.claimNextWork(WorkTargetType.TOOL, token, leaseDuration))
+        .transaction(tx -> tx.work().claimNext(WorkTargetType.TOOL, token, leaseDuration))
         .orElseThrow();
   }
 
@@ -699,8 +711,8 @@ public final class ToolProcessorTestSupport {
       Function<ToolInvocation, ToolInvocation> transition) {
     store.transaction(
         tx -> {
-          ToolInvocation tool = tx.lockToolInvocation(toolInvocationId).orElseThrow();
-          tx.updateToolInvocations(List.of(transition.apply(tool)));
+          ToolInvocation tool = tx.tools().lock(toolInvocationId).orElseThrow();
+          tx.tools().update(List.of(transition.apply(tool)));
           return null;
         });
   }
@@ -720,7 +732,7 @@ public final class ToolProcessorTestSupport {
   }
 
   static ToolInvocation tool(InMemoryBuiltinHarnessStore store, UUID toolInvocationId) {
-    return store.transaction(tx -> tx.findToolInvocation(toolInvocationId)).orElseThrow();
+    return store.transaction(tx -> tx.tools().find(toolInvocationId)).orElseThrow();
   }
 
   static ModelInvocation model(InMemoryBuiltinHarnessStore store, UUID modelInvocationId) {
@@ -730,11 +742,11 @@ public final class ToolProcessorTestSupport {
   }
 
   static ThreadState thread(InMemoryBuiltinHarnessStore store, UUID threadId) {
-    return store.transaction(tx -> tx.findThread(threadId)).orElseThrow();
+    return store.transaction(tx -> tx.threads().find(threadId)).orElseThrow();
   }
 
   static Work work(InMemoryBuiltinHarnessStore store, WorkTarget target) {
-    return store.transaction(tx -> tx.findWork(target)).orElse(null);
+    return store.transaction(tx -> tx.work().find(target)).orElse(null);
   }
 
   static Work toolWork(InMemoryBuiltinHarnessStore store, UUID toolInvocationId) {
@@ -744,8 +756,8 @@ public final class ToolProcessorTestSupport {
   static void deleteToolWork(Fixture fixture) {
     fixture.store.transaction(
         tx -> {
-          tx.lockThread(fixture.baseline.threadId()).orElseThrow();
-          tx.deleteWork(new WorkTarget(WorkTargetType.TOOL, fixture.toolInvocationId));
+          tx.threads().lock(fixture.baseline.threadId()).orElseThrow();
+          tx.work().delete(new WorkTarget(WorkTargetType.TOOL, fixture.toolInvocationId));
           return null;
         });
   }
@@ -753,10 +765,10 @@ public final class ToolProcessorTestSupport {
   static void replaceToolWork(Fixture fixture, Instant requestedAt) {
     fixture.store.transaction(
         tx -> {
-          tx.lockThread(fixture.baseline.threadId()).orElseThrow();
+          tx.threads().lock(fixture.baseline.threadId()).orElseThrow();
           WorkTarget target = new WorkTarget(WorkTargetType.TOOL, fixture.toolInvocationId);
-          tx.deleteWork(target);
-          tx.requestWork(target);
+          tx.work().delete(target);
+          tx.work().request(target);
           return null;
         });
   }
@@ -764,8 +776,8 @@ public final class ToolProcessorTestSupport {
   static void requestToolWork(Fixture fixture, Instant requestedAt) {
     fixture.store.transaction(
         tx -> {
-          tx.lockThread(fixture.baseline.threadId()).orElseThrow();
-          tx.requestWork(new WorkTarget(WorkTargetType.TOOL, fixture.toolInvocationId));
+          tx.threads().lock(fixture.baseline.threadId()).orElseThrow();
+          tx.work().request(new WorkTarget(WorkTargetType.TOOL, fixture.toolInvocationId));
           return null;
         });
   }

@@ -104,7 +104,8 @@ class HarnessRuntimeForkTest {
 
     assertFalse(accepted.replayed());
     assertEquals(baseline.sessionId(), accepted.session().id());
-    EntryPath path = store.transaction(tx -> tx.loadEntryPath(accepted.thread().headEntryId()));
+    EntryPath path =
+        store.transaction(tx -> tx.entries().loadPath(accepted.thread().headEntryId()));
     assertEquals(2, path.entries().size());
     Entry fork = path.head();
     ForkPayload payload = assertInstanceOf(ForkPayload.class, fork.payload());
@@ -139,7 +140,7 @@ class HarnessRuntimeForkTest {
                     AcceptancePreflight.IDENTITY));
 
     assertTrue(error.getMessage().contains("not a legal NEW_THREAD fork boundary"));
-    assertTrue(store.<Boolean>transaction(tx -> tx.findThread(threadId).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.threads().find(threadId).isEmpty()));
   }
 
   // ---------------------------------------------------------------- 会话 fork：完整历史
@@ -158,8 +159,9 @@ class HarnessRuntimeForkTest {
     assertEquals(newSessionId, accepted.thread().sessionId());
     assertNull(accepted.thread().parentThreadId());
 
-    EntryPath sourcePath = store.transaction(tx -> tx.loadEntryPath(source.lastEntryId()));
-    EntryPath path = store.transaction(tx -> tx.loadEntryPath(accepted.thread().headEntryId()));
+    EntryPath sourcePath = store.transaction(tx -> tx.entries().loadPath(source.lastEntryId()));
+    EntryPath path =
+        store.transaction(tx -> tx.entries().loadPath(accepted.thread().headEntryId()));
     List<Entry> entries = path.entries();
     // ROOT + 完整来源历史（不含来源 ROOT）+ FORK。
     assertEquals(sourcePath.entries().size() + 1, entries.size());
@@ -215,20 +217,21 @@ class HarnessRuntimeForkTest {
     UUID turnEnd = TestIds.id(936);
     store.transaction(
         tx -> {
-          tx.insertSession(session(sessionId));
-          tx.insertEntry(rootEntry(root, sessionId));
-          tx.insertEntry(turnStartEntry(turnStart, sessionId, root, T1, threadId));
-          tx.insertEntry(userEntry(user, sessionId, turnStart, T1, "u"));
-          tx.insertEntry(
-              new Entry(
-                  assistant,
-                  sessionId,
-                  user,
-                  assistantEntry(TestIds.id(937), sessionId, user, T1).payload(),
-                  T1,
-                  replayState));
-          tx.insertEntry(turnEndEntry(turnEnd, sessionId, assistant, T1, turnStart, false));
-          tx.insertThread(thread(threadId, sessionId, turnEnd));
+          tx.sessions().insert(session(sessionId));
+          tx.entries().insert(rootEntry(root, sessionId));
+          tx.entries().insert(turnStartEntry(turnStart, sessionId, root, T1, threadId));
+          tx.entries().insert(userEntry(user, sessionId, turnStart, T1, "u"));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      assistant,
+                      sessionId,
+                      user,
+                      assistantEntry(TestIds.id(937), sessionId, user, T1).payload(),
+                      T1,
+                      replayState));
+          tx.entries().insert(turnEndEntry(turnEnd, sessionId, assistant, T1, turnStart, false));
+          tx.threads().insert(thread(threadId, sessionId, turnEnd));
           return null;
         });
     UUID newSessionId = TestIds.id(938);
@@ -236,7 +239,8 @@ class HarnessRuntimeForkTest {
     AcceptedCommands accepted = acceptSessionFork(threadId, turnEnd, newSessionId, newThreadId);
     assertFalse(accepted.replayed());
 
-    EntryPath path = store.transaction(tx -> tx.loadEntryPath(accepted.thread().headEntryId()));
+    EntryPath path =
+        store.transaction(tx -> tx.entries().loadPath(accepted.thread().headEntryId()));
     Entry copiedAssistant =
         path.entries().stream()
             .filter(
@@ -248,7 +252,7 @@ class HarnessRuntimeForkTest {
     assertEquals(replayState, copiedAssistant.providerReplayState());
     assertNotEquals(assistant, copiedAssistant.id());
     // 只承载新的执行根，不克隆子执行树。
-    assertEquals(1, store.transaction(tx -> tx.listThreadsBySession(newSessionId)).size());
+    assertEquals(1, store.transaction(tx -> tx.threads().listBySession(newSessionId)).size());
   }
 
   // ---------------------------------------------------------------- 会话 fork：压缩保留尾部
@@ -261,8 +265,9 @@ class HarnessRuntimeForkTest {
     AcceptedCommands accepted =
         acceptSessionFork(source.threadId(), source.lastEntryId(), newSessionId, newThreadId);
 
-    EntryPath sourcePath = store.transaction(tx -> tx.loadEntryPath(source.lastEntryId()));
-    EntryPath path = store.transaction(tx -> tx.loadEntryPath(accepted.thread().headEntryId()));
+    EntryPath sourcePath = store.transaction(tx -> tx.entries().loadPath(source.lastEntryId()));
+    EntryPath path =
+        store.transaction(tx -> tx.entries().loadPath(accepted.thread().headEntryId()));
     List<Entry> entries = path.entries();
     int retainedStartIndex = indexOf(sourcePath, source.retainedStartEntryId());
     // ROOT + 保留尾部（含压缩 turn）+ FORK：压缩切点之前的 Turn 1 不复制。
@@ -296,7 +301,8 @@ class HarnessRuntimeForkTest {
     AcceptedCommands accepted =
         acceptSessionFork(source.threadId(), source.lastEntryId(), newSessionId, newThreadId);
 
-    EntryPath path = store.transaction(tx -> tx.loadEntryPath(accepted.thread().headEntryId()));
+    EntryPath path =
+        store.transaction(tx -> tx.entries().loadPath(accepted.thread().headEntryId()));
     List<CompactionStart> copiedStarts =
         path.entries().stream()
             .filter(
@@ -331,27 +337,28 @@ class HarnessRuntimeForkTest {
     UUID sharedRootEntryId = TestIds.id(993);
     store.transaction(
         tx -> {
-          tx.insertSession(session(sessionId));
-          tx.insertEntry(rootEntry(sharedRootEntryId, sessionId));
-          tx.insertThread(thread(parentThreadId, sessionId, sharedRootEntryId));
-          tx.insertThread(
-              new ThreadState(
-                  childThreadId,
-                  sessionId,
-                  parentThreadId,
-                  sharedRootEntryId,
-                  HarnessRuntimeTestSupport.CREATION_REQUEST_HASH,
-                  "child",
-                  parentThreadId,
-                  false,
-                  SpawnTrigger.MODEL_TOOL,
-                  ThreadConstraints.NONE,
-                  ThreadExecutionControl.RUNNABLE,
-                  0L,
-                  1L,
-                  0,
-                  T0,
-                  T0));
+          tx.sessions().insert(session(sessionId));
+          tx.entries().insert(rootEntry(sharedRootEntryId, sessionId));
+          tx.threads().insert(thread(parentThreadId, sessionId, sharedRootEntryId));
+          tx.threads()
+              .insert(
+                  new ThreadState(
+                      childThreadId,
+                      sessionId,
+                      parentThreadId,
+                      sharedRootEntryId,
+                      HarnessRuntimeTestSupport.CREATION_REQUEST_HASH,
+                      "child",
+                      parentThreadId,
+                      false,
+                      SpawnTrigger.MODEL_TOOL,
+                      ThreadConstraints.NONE,
+                      ThreadExecutionControl.RUNNABLE,
+                      0L,
+                      1L,
+                      0,
+                      T0,
+                      T0));
           return null;
         });
     UUID newSessionId = TestIds.id(994);
@@ -363,8 +370,8 @@ class HarnessRuntimeForkTest {
             () -> acceptSessionFork(childThreadId, sharedRootEntryId, newSessionId, newThreadId));
 
     assertTrue(error.getMessage().contains("must be an execution root"));
-    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(newSessionId).isEmpty()));
-    assertTrue(store.<Boolean>transaction(tx -> tx.findThread(newThreadId).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.sessions().find(newSessionId).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.threads().find(newThreadId).isEmpty()));
   }
 
   /** 切点必须位于来源 Thread 的当前 head 路径上：sibling 分支上的 Entry 必须零写入拒绝。 */
@@ -379,17 +386,18 @@ class HarnessRuntimeForkTest {
               UUID user = tx.nextId();
               UUID assistant = tx.nextId();
               UUID end = tx.nextId();
-              tx.insertEntry(
-                  turnStartEntry(
-                      turnStart,
-                      source.sessionId(),
-                      source.firstTurnEndId(),
-                      T3,
-                      source.threadId()));
-              tx.insertEntry(userEntry(user, source.sessionId(), turnStart, T3, "sibling"));
-              tx.insertEntry(assistantEntry(assistant, source.sessionId(), user, T3));
-              tx.insertEntry(
-                  turnEndEntry(end, source.sessionId(), assistant, T3, turnStart, false));
+              tx.entries()
+                  .insert(
+                      turnStartEntry(
+                          turnStart,
+                          source.sessionId(),
+                          source.firstTurnEndId(),
+                          T3,
+                          source.threadId()));
+              tx.entries().insert(userEntry(user, source.sessionId(), turnStart, T3, "sibling"));
+              tx.entries().insert(assistantEntry(assistant, source.sessionId(), user, T3));
+              tx.entries()
+                  .insert(turnEndEntry(end, source.sessionId(), assistant, T3, turnStart, false));
               return end;
             });
     UUID newSessionId = TestIds.id(996);
@@ -401,8 +409,8 @@ class HarnessRuntimeForkTest {
             () -> acceptSessionFork(source.threadId(), siblingTurnEnd, newSessionId, newThreadId));
 
     assertTrue(error.getMessage().contains("is not on the source thread path"));
-    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(newSessionId).isEmpty()));
-    assertTrue(store.<Boolean>transaction(tx -> tx.findThread(newThreadId).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.sessions().find(newSessionId).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.threads().find(newThreadId).isEmpty()));
   }
 
   /** 切点必须是 ROOT 或已闭合 TURN_END：半轮前缀必须零写入拒绝。 */
@@ -420,8 +428,8 @@ class HarnessRuntimeForkTest {
                     source.threadId(), source.assistantEntryId(), newSessionId, newThreadId));
 
     assertTrue(error.getMessage().contains("not a legal NEW_FORKED_SESSION fork boundary"));
-    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(newSessionId).isEmpty()));
-    assertTrue(store.<Boolean>transaction(tx -> tx.findThread(newThreadId).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.sessions().find(newSessionId).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.threads().find(newThreadId).isEmpty()));
   }
 
   /** 切点必须属于来源 Session：别的 Session 的 Entry 必须拒绝。 */
@@ -440,7 +448,7 @@ class HarnessRuntimeForkTest {
                     source.threadId(), other.rootEntryId(), newSessionId, newThreadId));
 
     assertTrue(error.getMessage().contains("is not in the source session"));
-    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(newSessionId).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.sessions().find(newSessionId).isEmpty()));
   }
 
   /** 来源 Thread 不存在：零写入拒绝。 */
@@ -451,8 +459,8 @@ class HarnessRuntimeForkTest {
     assertThrows(
         HarnessRuntimeNotFoundException.class,
         () -> acceptSessionFork(TestIds.id(964), TestIds.id(965), newSessionId, newThreadId));
-    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(newSessionId).isEmpty()));
-    assertTrue(store.<Boolean>transaction(tx -> tx.findThread(newThreadId).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.sessions().find(newSessionId).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.threads().find(newThreadId).isEmpty()));
   }
 
   /** 从 ROOT 切点的会话 fork：有效上下文只有新建 ROOT，FORK Entry 直接挂在 ROOT 上，模型上下文只有固定通知。 */
@@ -464,7 +472,8 @@ class HarnessRuntimeForkTest {
     AcceptedCommands accepted =
         acceptSessionFork(source.threadId(), source.rootEntryId(), newSessionId, newThreadId);
 
-    EntryPath path = store.transaction(tx -> tx.loadEntryPath(accepted.thread().headEntryId()));
+    EntryPath path =
+        store.transaction(tx -> tx.entries().loadPath(accepted.thread().headEntryId()));
     assertEquals(2, path.entries().size());
     ForkPayload payload = assertInstanceOf(ForkPayload.class, path.head().payload());
     assertEquals(ForkMode.SESSION, payload.mode());
@@ -484,7 +493,8 @@ class HarnessRuntimeForkTest {
     AcceptedCommands first =
         acceptSessionFork(source.threadId(), source.lastEntryId(), newSessionId, newThreadId);
     assertFalse(first.replayed());
-    int entriesAfterFirst = store.transaction(tx -> tx.loadEntriesBySessionId(newSessionId)).size();
+    int entriesAfterFirst =
+        store.transaction(tx -> tx.entries().loadBySession(newSessionId)).size();
 
     AcceptedCommands replay =
         acceptSessionFork(source.threadId(), source.lastEntryId(), newSessionId, newThreadId);
@@ -492,7 +502,8 @@ class HarnessRuntimeForkTest {
     assertEquals(first.thread().id(), replay.thread().id());
     assertEquals(first.session().id(), replay.session().id());
     assertEquals(
-        entriesAfterFirst, store.transaction(tx -> tx.loadEntriesBySessionId(newSessionId)).size());
+        entriesAfterFirst,
+        store.transaction(tx -> tx.entries().loadBySession(newSessionId)).size());
 
     HarnessRuntimeConflictException conflict =
         assertThrows(
@@ -508,7 +519,8 @@ class HarnessRuntimeForkTest {
                     AcceptancePreflight.IDENTITY));
     assertEquals(HarnessRuntimeConflictException.Reason.THREAD_ID_REUSED, conflict.reason());
     assertEquals(
-        entriesAfterFirst, store.transaction(tx -> tx.loadEntriesBySessionId(newSessionId)).size());
+        entriesAfterFirst,
+        store.transaction(tx -> tx.entries().loadBySession(newSessionId)).size());
   }
 
   // ---------------------------------------------------------------- 辅助
@@ -641,37 +653,41 @@ class HarnessRuntimeForkTest {
       Instant createdAt,
       boolean continueModel) {
     UUID turnStartId = tx.nextId();
-    tx.insertEntry(
-        new Entry(
-            turnStartId,
-            sessionId,
-            parentId,
-            new TurnStartPayload(
-                TurnStartReason.COMPACTION,
-                settings(),
-                ownerThreadId,
-                100_000,
-                16_384,
-                start,
-                null),
-            createdAt));
+    tx.entries()
+        .insert(
+            new Entry(
+                turnStartId,
+                sessionId,
+                parentId,
+                new TurnStartPayload(
+                    TurnStartReason.COMPACTION,
+                    settings(),
+                    ownerThreadId,
+                    100_000,
+                    16_384,
+                    start,
+                    null),
+                createdAt));
     UUID resultId = tx.nextId();
-    tx.insertEntry(
-        new Entry(
-            resultId,
-            sessionId,
-            turnStartId,
-            new CompactionPayload(
-                start.phase() == CompactionPhase.HISTORY ? "history" : "summary", null),
-            createdAt));
+    tx.entries()
+        .insert(
+            new Entry(
+                resultId,
+                sessionId,
+                turnStartId,
+                new CompactionPayload(
+                    start.phase() == CompactionPhase.HISTORY ? "history" : "summary", null),
+                createdAt));
     UUID endId = tx.nextId();
-    tx.insertEntry(
-        new Entry(
-            endId,
-            sessionId,
-            resultId,
-            new TurnEndPayload(turnStartId, TurnEndOutcome.COMPLETED, continueModel, null, null),
-            createdAt));
+    tx.entries()
+        .insert(
+            new Entry(
+                endId,
+                sessionId,
+                resultId,
+                new TurnEndPayload(
+                    turnStartId, TurnEndOutcome.COMPLETED, continueModel, null, null),
+                createdAt));
     return new CompactionTurnIds(turnStartId, resultId, endId);
   }
 
@@ -697,24 +713,24 @@ class HarnessRuntimeForkTest {
           UUID u2 = tx.nextId();
           UUID a2 = tx.nextId();
           UUID te2 = tx.nextId();
-          tx.insertSession(session(sessionId));
-          tx.insertEntry(rootEntry(root, sessionId));
-          tx.insertEntry(turnStartEntry(ts1, sessionId, root, T1, threadId));
-          tx.insertEntry(userEntry(u1, sessionId, ts1, T1, "u1"));
-          tx.insertEntry(assistantEntry(a1, sessionId, u1, T1, "call-1"));
-          tx.insertEntry(toolResultEntry(tr1, sessionId, a1, a1, 0, "call-1", T1));
-          tx.insertEntry(turnEndEntry(te1, sessionId, tr1, T1, ts1, false));
-          tx.insertEntry(turnStartEntry(ts2, sessionId, te1, T2, threadId));
-          tx.insertEntry(userEntry(u2, sessionId, ts2, T2, "u2"));
-          tx.insertEntry(assistantEntry(a2, sessionId, u2, T2));
-          tx.insertEntry(turnEndEntry(te2, sessionId, a2, T2, ts2, false));
+          tx.sessions().insert(session(sessionId));
+          tx.entries().insert(rootEntry(root, sessionId));
+          tx.entries().insert(turnStartEntry(ts1, sessionId, root, T1, threadId));
+          tx.entries().insert(userEntry(u1, sessionId, ts1, T1, "u1"));
+          tx.entries().insert(assistantEntry(a1, sessionId, u1, T1, "call-1"));
+          tx.entries().insert(toolResultEntry(tr1, sessionId, a1, a1, 0, "call-1", T1));
+          tx.entries().insert(turnEndEntry(te1, sessionId, tr1, T1, ts1, false));
+          tx.entries().insert(turnStartEntry(ts2, sessionId, te1, T2, threadId));
+          tx.entries().insert(userEntry(u2, sessionId, ts2, T2, "u2"));
+          tx.entries().insert(assistantEntry(a2, sessionId, u2, T2));
+          tx.entries().insert(turnEndEntry(te2, sessionId, a2, T2, ts2, false));
           UUID head = te2;
           if (keepOpenTail) {
             UUID openStart = tx.nextId();
-            tx.insertEntry(turnStartEntry(openStart, sessionId, te2, T3, threadId));
+            tx.entries().insert(turnStartEntry(openStart, sessionId, te2, T3, threadId));
             head = openStart;
           }
-          tx.insertThread(thread(threadId, sessionId, head));
+          tx.threads().insert(thread(threadId, sessionId, head));
           return new HistorySeed(sessionId, threadId, root, ts2, a1, te1, te2);
         });
   }
@@ -738,16 +754,16 @@ class HarnessRuntimeForkTest {
           UUID u3 = tx.nextId();
           UUID a3 = tx.nextId();
           UUID te3 = tx.nextId();
-          tx.insertSession(session(sessionId));
-          tx.insertEntry(rootEntry(root, sessionId));
-          tx.insertEntry(turnStartEntry(ts1, sessionId, root, T1, threadId));
-          tx.insertEntry(userEntry(u1, sessionId, ts1, T1, "u1"));
-          tx.insertEntry(assistantEntry(a1, sessionId, u1, T1));
-          tx.insertEntry(turnEndEntry(te1, sessionId, a1, T1, ts1, false));
-          tx.insertEntry(turnStartEntry(ts2, sessionId, te1, T2, threadId));
-          tx.insertEntry(userEntry(u2, sessionId, ts2, T2, "u2"));
-          tx.insertEntry(assistantEntry(a2, sessionId, u2, T2));
-          tx.insertEntry(turnEndEntry(te2, sessionId, a2, T2, ts2, false));
+          tx.sessions().insert(session(sessionId));
+          tx.entries().insert(rootEntry(root, sessionId));
+          tx.entries().insert(turnStartEntry(ts1, sessionId, root, T1, threadId));
+          tx.entries().insert(userEntry(u1, sessionId, ts1, T1, "u1"));
+          tx.entries().insert(assistantEntry(a1, sessionId, u1, T1));
+          tx.entries().insert(turnEndEntry(te1, sessionId, a1, T1, ts1, false));
+          tx.entries().insert(turnStartEntry(ts2, sessionId, te1, T2, threadId));
+          tx.entries().insert(userEntry(u2, sessionId, ts2, T2, "u2"));
+          tx.entries().insert(assistantEntry(a2, sessionId, u2, T2));
+          tx.entries().insert(turnEndEntry(te2, sessionId, a2, T2, ts2, false));
           UUID compactionEnd =
               insertCompactionTurn(
                       tx,
@@ -767,11 +783,11 @@ class HarnessRuntimeForkTest {
                       T2,
                       false)
                   .endId();
-          tx.insertEntry(turnStartEntry(ts3, sessionId, compactionEnd, T3, threadId));
-          tx.insertEntry(userEntry(u3, sessionId, ts3, T3, "u3"));
-          tx.insertEntry(assistantEntry(a3, sessionId, u3, T3));
-          tx.insertEntry(turnEndEntry(te3, sessionId, a3, T3, ts3, false));
-          tx.insertThread(thread(threadId, sessionId, te3));
+          tx.entries().insert(turnStartEntry(ts3, sessionId, compactionEnd, T3, threadId));
+          tx.entries().insert(userEntry(u3, sessionId, ts3, T3, "u3"));
+          tx.entries().insert(assistantEntry(a3, sessionId, u3, T3));
+          tx.entries().insert(turnEndEntry(te3, sessionId, a3, T3, ts3, false));
+          tx.threads().insert(thread(threadId, sessionId, te3));
           return new CompactionSeed(sessionId, threadId, te3, ts2);
         });
   }
@@ -795,12 +811,12 @@ class HarnessRuntimeForkTest {
           UUID u3 = tx.nextId();
           UUID a3 = tx.nextId();
           UUID te3 = tx.nextId();
-          tx.insertSession(session(sessionId));
-          tx.insertEntry(rootEntry(root, sessionId));
-          tx.insertEntry(turnStartEntry(ts1, sessionId, root, T1, threadId));
-          tx.insertEntry(userEntry(u1, sessionId, ts1, T1, "u1"));
-          tx.insertEntry(assistantEntry(a1, sessionId, u1, T1));
-          tx.insertEntry(turnEndEntry(te1, sessionId, a1, T1, ts1, false));
+          tx.sessions().insert(session(sessionId));
+          tx.entries().insert(rootEntry(root, sessionId));
+          tx.entries().insert(turnStartEntry(ts1, sessionId, root, T1, threadId));
+          tx.entries().insert(userEntry(u1, sessionId, ts1, T1, "u1"));
+          tx.entries().insert(assistantEntry(a1, sessionId, u1, T1));
+          tx.entries().insert(turnEndEntry(te1, sessionId, a1, T1, ts1, false));
           CompactionTurnIds historyTurn =
               insertCompactionTurn(
                   tx,
@@ -819,10 +835,10 @@ class HarnessRuntimeForkTest {
                       tx.nextId()),
                   T1,
                   true);
-          tx.insertEntry(turnStartEntry(ts2, sessionId, historyTurn.endId(), T2, threadId));
-          tx.insertEntry(userEntry(u2, sessionId, ts2, T2, "u2"));
-          tx.insertEntry(assistantEntry(a2, sessionId, u2, T2));
-          tx.insertEntry(turnEndEntry(te2, sessionId, a2, T2, ts2, false));
+          tx.entries().insert(turnStartEntry(ts2, sessionId, historyTurn.endId(), T2, threadId));
+          tx.entries().insert(userEntry(u2, sessionId, ts2, T2, "u2"));
+          tx.entries().insert(assistantEntry(a2, sessionId, u2, T2));
+          tx.entries().insert(turnEndEntry(te2, sessionId, a2, T2, ts2, false));
           CompactionTurnIds prefixTurn =
               insertCompactionTurn(
                   tx,
@@ -841,11 +857,11 @@ class HarnessRuntimeForkTest {
                       tx.nextId()),
                   T2,
                   false);
-          tx.insertEntry(turnStartEntry(ts3, sessionId, prefixTurn.endId(), T3, threadId));
-          tx.insertEntry(userEntry(u3, sessionId, ts3, T3, "u3"));
-          tx.insertEntry(assistantEntry(a3, sessionId, u3, T3));
-          tx.insertEntry(turnEndEntry(te3, sessionId, a3, T3, ts3, false));
-          tx.insertThread(thread(threadId, sessionId, te3));
+          tx.entries().insert(turnStartEntry(ts3, sessionId, prefixTurn.endId(), T3, threadId));
+          tx.entries().insert(userEntry(u3, sessionId, ts3, T3, "u3"));
+          tx.entries().insert(assistantEntry(a3, sessionId, u3, T3));
+          tx.entries().insert(turnEndEntry(te3, sessionId, a3, T3, ts3, false));
+          tx.threads().insert(thread(threadId, sessionId, te3));
           return new CompactionSeed(sessionId, threadId, te3, ts2);
         });
   }

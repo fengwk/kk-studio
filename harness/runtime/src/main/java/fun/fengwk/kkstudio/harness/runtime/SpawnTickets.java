@@ -32,13 +32,14 @@ final class SpawnTickets {
     UUID childId = ticket.threadId();
     UUID parentId = ticket.parentThreadId();
     // owner 的结算票据不能被续接接管；exact replay 已在调用准入前完成身份校验并返回。
-    if (tx.loadIncompleteJoins(childId).stream()
+    if (tx.joins().loadIncomplete(childId).stream()
         .anyMatch(pending -> pending.delivery() == JoinDelivery.SETTLE_OWNER_TURN)) {
       throw new IllegalArgumentException("child has an unfinished owner settlement");
     }
     if (parentId != null) {
       ThreadState parent =
-          tx.findThread(parentId)
+          tx.threads()
+              .find(parentId)
               .orElseThrow(() -> new IllegalArgumentException("join parent does not exist"));
       if (ticket.delivery() == JoinDelivery.NOTIFY_PARENT) {
         // 停止父 Thread 不再接受新的执行子任务：不能只依赖 head 变化，STOPPED 是持久的拒绝条件。
@@ -51,20 +52,23 @@ final class SpawnTickets {
       }
       if (ticket.delivery() == JoinDelivery.NOTIFY_PARENT) {
         int projectedChildren =
-            tx.countIncompleteChildJoins(parentId) - replacedQuotaJoins(tx, childId, parentId) + 1;
+            tx.joins().countIncompleteChildren(parentId)
+                - replacedQuotaJoins(tx, childId, parentId)
+                + 1;
         if (projectedChildren > ticket.budget().maxConcurrentChildren()) {
           throw new IllegalArgumentException("parent join quota exceeded");
         }
       }
     }
-    List<UUID> chain = tx.findAncestorChain(creating && parentId != null ? parentId : childId);
+    List<UUID> chain =
+        tx.threads().findAncestorChain(creating && parentId != null ? parentId : childId);
     int depth = creating ? chain.size() + 1 : chain.size();
     if (depth > ticket.budget().maxDepth()) {
       throw new IllegalArgumentException("join depth quota exceeded");
     }
     if (parentId != null && ticket.delivery() == JoinDelivery.NOTIFY_PARENT) {
       int projectedGlobal =
-          tx.countIncompleteSubagentJoins() - replacedQuotaJoins(tx, childId, parentId) + 1;
+          tx.joins().countIncompleteSubagent() - replacedQuotaJoins(tx, childId, parentId) + 1;
       if (projectedGlobal > ticket.budget().maxConcurrentThreads()) {
         throw new IllegalArgumentException("subagent concurrency quota exceeded");
       }
@@ -74,7 +78,7 @@ final class SpawnTickets {
   /** 通过准入后，同一父/子对的可替换未完成票据由新续接原子取代，配额按替换后的有效数量判定。 */
   private static int replacedQuotaJoins(HarnessStore.Transaction tx, UUID childId, UUID parentId) {
     return (int)
-        tx.loadIncompleteJoins(childId).stream()
+        tx.joins().loadIncomplete(childId).stream()
             .filter(
                 pending ->
                     parentId.equals(pending.parentThreadId())
@@ -88,7 +92,7 @@ final class SpawnTickets {
     if (ticket == null) {
       return accepted;
     }
-    ThreadJoin existing = tx.findJoin(ticket.ticketId()).orElse(null);
+    ThreadJoin existing = tx.joins().find(ticket.ticketId()).orElse(null);
     if (existing != null) {
       if (!accepted.replayed()
           || !existing.childThreadId().equals(accepted.thread().id())
@@ -108,31 +112,32 @@ final class SpawnTickets {
     }
     ThreadCommand source = accepted.acceptedCommands().get(accepted.acceptedCommands().size() - 1);
     Instant now = tx.now();
-    tx.insertJoin(
-        new ThreadJoin(
-            ticket.ticketId(),
-            ticket.requestHash(),
-            ticket.parentThreadId(),
-            accepted.thread().id(),
-            source.sequence(),
-            ticket.agent(),
-            ticket.budget().maxTurns(),
-            0,
-            null,
-            null,
-            null,
-            now,
-            now,
-            ticket.delivery(),
-            null));
+    tx.joins()
+        .insert(
+            new ThreadJoin(
+                ticket.ticketId(),
+                ticket.requestHash(),
+                ticket.parentThreadId(),
+                accepted.thread().id(),
+                source.sequence(),
+                ticket.agent(),
+                ticket.budget().maxTurns(),
+                0,
+                null,
+                null,
+                null,
+                now,
+                now,
+                ticket.delivery(),
+                null));
     // 新票据落库后才 supersede 既有未完成票据，保证 superseded_by FK 指向已存在的新行；
     // 旧票据只记录接管身份并保留其 invocation identity 与排队源命令，随后不再占用配额、不再产生重复交付。
     boolean replaced = false;
     if (ticket.parentThreadId() != null) {
-      for (ThreadJoin pending : tx.loadIncompleteJoins(accepted.thread().id())) {
+      for (ThreadJoin pending : tx.joins().loadIncomplete(accepted.thread().id())) {
         if (!pending.invocationId().equals(ticket.ticketId())
             && ticket.parentThreadId().equals(pending.parentThreadId())) {
-          tx.updateJoin(pending.superseded(ticket.ticketId(), now));
+          tx.joins().update(pending.superseded(ticket.ticketId(), now));
           replaced = true;
         }
       }

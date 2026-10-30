@@ -109,24 +109,25 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
     UUID invocationId = UUID.randomUUID();
     fixture.store.transaction(
         tx -> {
-          tx.lockThread(childId);
-          tx.insertJoin(
-              new ThreadJoin(
-                  invocationId,
-                  CREATION_REQUEST_HASH,
-                  parentId,
-                  childId,
-                  1L,
-                  "test-agent",
-                  2,
-                  0L,
-                  null,
-                  null,
-                  null,
-                  NOW,
-                  NOW,
-                  JoinDelivery.NOTIFY_PARENT,
-                  null));
+          tx.threads().lock(childId);
+          tx.joins()
+              .insert(
+                  new ThreadJoin(
+                      invocationId,
+                      CREATION_REQUEST_HASH,
+                      parentId,
+                      childId,
+                      1L,
+                      "test-agent",
+                      2,
+                      0L,
+                      null,
+                      null,
+                      null,
+                      NOW,
+                      NOW,
+                      JoinDelivery.NOTIFY_PARENT,
+                      null));
           return null;
         });
 
@@ -258,24 +259,25 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
     UUID invocationId = UUID.randomUUID();
     fixture.store.transaction(
         tx -> {
-          tx.lockThread(childId);
-          tx.insertJoin(
-              new ThreadJoin(
-                  invocationId,
-                  CREATION_REQUEST_HASH,
-                  parentId,
-                  childId,
-                  1L,
-                  "instant-agent",
-                  1,
-                  0L,
-                  null,
-                  null,
-                  null,
-                  NOW,
-                  NOW,
-                  JoinDelivery.NOTIFY_PARENT,
-                  null));
+          tx.threads().lock(childId);
+          tx.joins()
+              .insert(
+                  new ThreadJoin(
+                      invocationId,
+                      CREATION_REQUEST_HASH,
+                      parentId,
+                      childId,
+                      1L,
+                      "instant-agent",
+                      1,
+                      0L,
+                      null,
+                      null,
+                      null,
+                      NOW,
+                      NOW,
+                      JoinDelivery.NOTIFY_PARENT,
+                      null));
           return null;
         });
 
@@ -323,24 +325,25 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
     UUID invocationId = UUID.randomUUID();
     fixture.store.transaction(
         tx -> {
-          tx.lockThread(childId);
-          tx.insertJoin(
-              new ThreadJoin(
-                  invocationId,
-                  CREATION_REQUEST_HASH,
-                  parentId,
-                  childId,
-                  1L,
-                  "test-agent",
-                  1,
-                  0L,
-                  null,
-                  null,
-                  null,
-                  NOW,
-                  NOW,
-                  JoinDelivery.NOTIFY_PARENT,
-                  null));
+          tx.threads().lock(childId);
+          tx.joins()
+              .insert(
+                  new ThreadJoin(
+                      invocationId,
+                      CREATION_REQUEST_HASH,
+                      parentId,
+                      childId,
+                      1L,
+                      "test-agent",
+                      1,
+                      0L,
+                      null,
+                      null,
+                      null,
+                      NOW,
+                      NOW,
+                      JoinDelivery.NOTIFY_PARENT,
+                      null));
           return null;
         });
 
@@ -359,7 +362,7 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(childId));
 
     ThreadJoin joinAfterFirst =
-        fixture.store.transaction(tx -> tx.findJoin(invocationId).orElseThrow());
+        fixture.store.transaction(tx -> tx.joins().find(invocationId).orElseThrow());
     assertEquals(1L, joinAfterFirst.reminderTurn());
     EntryPath pathAfterFirst = path(fixture.store, childId);
     assertEquals(1, countReminders(pathAfterFirst));
@@ -369,15 +372,15 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
     // 再次手动触发同一状态下的 remindSoftBudgetIfDue
     fixture.store.transaction(
         tx -> {
-          ThreadState locked = tx.lockThread(childId).orElseThrow();
-          EntryPath currentPath = tx.loadEntryPath(locked.headEntryId());
+          ThreadState locked = tx.threads().lock(childId).orElseThrow();
+          EntryPath currentPath = tx.entries().loadPath(locked.headEntryId());
           ThreadLifecycleCoordinator coordinator = new ThreadLifecycleCoordinator();
           coordinator.remindSoftBudgetIfDue(tx, locked, currentPath, NOW);
           return null;
         });
 
     ThreadJoin joinAfterRetry =
-        fixture.store.transaction(tx -> tx.findJoin(invocationId).orElseThrow());
+        fixture.store.transaction(tx -> tx.joins().find(invocationId).orElseThrow());
     assertEquals(1L, joinAfterRetry.reminderTurn());
     EntryPath pathAfterRetry = path(fixture.store, childId);
     assertEquals(1, countReminders(pathAfterRetry));
@@ -406,24 +409,25 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
     UUID invocationId = UUID.randomUUID();
     fixture.store.transaction(
         tx -> {
-          tx.lockThread(childId);
-          tx.insertJoin(
-              new ThreadJoin(
-                  invocationId,
-                  CREATION_REQUEST_HASH,
-                  parentId,
-                  childId,
-                  2L,
-                  "test-agent",
-                  2,
-                  0L,
-                  null,
-                  null,
-                  null,
-                  NOW,
-                  NOW,
-                  JoinDelivery.NOTIFY_PARENT,
-                  null));
+          tx.threads().lock(childId);
+          tx.joins()
+              .insert(
+                  new ThreadJoin(
+                      invocationId,
+                      CREATION_REQUEST_HASH,
+                      parentId,
+                      childId,
+                      2L,
+                      "test-agent",
+                      2,
+                      0L,
+                      null,
+                      null,
+                      null,
+                      NOW,
+                      NOW,
+                      JoinDelivery.NOTIFY_PARENT,
+                      null));
           return null;
         });
 
@@ -442,7 +446,7 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
     // Turn 1 关闭：此时 source command（seq 2）尚未被应用（appliedEntryId 为空），计为 0 轮
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(childId));
     ThreadJoin joinAfterTurn1 =
-        fixture.store.transaction(tx -> tx.findJoin(invocationId).orElseThrow());
+        fixture.store.transaction(tx -> tx.joins().find(invocationId).orElseThrow());
     assertEquals(0L, joinAfterTurn1.reminderTurn());
   }
 
@@ -462,52 +466,56 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
               UUID stopTurnStartId = tx.nextId();
               UUID stopBarrierId = tx.nextId();
               UUID stopTurnEndId = tx.nextId();
-              tx.insertEntry(
-                  new Entry(
-                      stopTurnStartId,
-                      sessionId,
-                      rootEntryId,
-                      new TurnStartPayload(
-                          TurnStartReason.STOP, branchSettings(), pid, null, null, null, null),
-                      NOW));
-              tx.insertEntry(
-                  new Entry(
-                      stopBarrierId,
-                      sessionId,
-                      stopTurnStartId,
-                      new AssistantErrorPayload(
-                          new AssistantError("CANCELLED", "Explicitly stopped"), null),
-                      NOW));
-              tx.insertEntry(
-                  new Entry(
-                      stopTurnEndId,
-                      sessionId,
-                      stopBarrierId,
-                      new TurnEndPayload(
+              tx.entries()
+                  .insert(
+                      new Entry(
                           stopTurnStartId,
-                          TurnEndOutcome.STOPPED,
+                          sessionId,
+                          rootEntryId,
+                          new TurnStartPayload(
+                              TurnStartReason.STOP, branchSettings(), pid, null, null, null, null),
+                          NOW));
+              tx.entries()
+                  .insert(
+                      new Entry(
+                          stopBarrierId,
+                          sessionId,
+                          stopTurnStartId,
+                          new AssistantErrorPayload(
+                              new AssistantError("CANCELLED", "Explicitly stopped"), null),
+                          NOW));
+              tx.entries()
+                  .insert(
+                      new Entry(
+                          stopTurnEndId,
+                          sessionId,
+                          stopBarrierId,
+                          new TurnEndPayload(
+                              stopTurnStartId,
+                              TurnEndOutcome.STOPPED,
+                              false,
+                              TurnEndReason.USER_STOP,
+                              UUID.randomUUID()),
+                          NOW));
+              tx.threads()
+                  .insert(
+                      new ThreadState(
+                          pid,
+                          sessionId,
+                          null,
+                          stopTurnEndId,
+                          CREATION_REQUEST_HASH,
+                          "parent",
+                          pid,
                           false,
-                          TurnEndReason.USER_STOP,
-                          UUID.randomUUID()),
-                      NOW));
-              tx.insertThread(
-                  new ThreadState(
-                      pid,
-                      sessionId,
-                      null,
-                      stopTurnEndId,
-                      CREATION_REQUEST_HASH,
-                      "parent",
-                      pid,
-                      false,
-                      SpawnTrigger.USER,
-                      ThreadConstraints.NONE,
-                      ThreadExecutionControl.RUNNABLE,
-                      0L,
-                      1L,
-                      0L,
-                      NOW,
-                      NOW));
+                          SpawnTrigger.USER,
+                          ThreadConstraints.NONE,
+                          ThreadExecutionControl.RUNNABLE,
+                          0L,
+                          1L,
+                          0L,
+                          NOW,
+                          NOW));
               return pid;
             });
 
@@ -521,24 +529,25 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
     UUID invocationId = UUID.randomUUID();
     fixture.store.transaction(
         tx -> {
-          tx.lockThread(childId);
-          tx.insertJoin(
-              new ThreadJoin(
-                  invocationId,
-                  CREATION_REQUEST_HASH,
-                  parentId,
-                  childId,
-                  1L,
-                  "test-agent",
-                  1,
-                  0L,
-                  null,
-                  null,
-                  null,
-                  NOW,
-                  NOW,
-                  JoinDelivery.NOTIFY_PARENT,
-                  null));
+          tx.threads().lock(childId);
+          tx.joins()
+              .insert(
+                  new ThreadJoin(
+                      invocationId,
+                      CREATION_REQUEST_HASH,
+                      parentId,
+                      childId,
+                      1L,
+                      "test-agent",
+                      1,
+                      0L,
+                      null,
+                      null,
+                      null,
+                      NOW,
+                      NOW,
+                      JoinDelivery.NOTIFY_PARENT,
+                      null));
           return null;
         });
 
@@ -605,115 +614,129 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
 
     fixture.store.transaction(
         tx -> {
-          tx.lockThread(childId);
-          tx.insertEntry(
-              new Entry(
-                  turnStart1,
-                  sessionId,
-                  rootEntryId,
-                  new TurnStartPayload(
-                      TurnStartReason.INPUT,
-                      branchSettings(),
-                      childId,
-                      100_000,
-                      16_384,
-                      null,
-                      null),
-                  NOW));
-          tx.insertEntry(
-              new Entry(
-                  userEntry,
-                  sessionId,
-                  turnStart1,
-                  new MessagePayload(userMessage("initial"), null, null),
-                  NOW));
-          tx.insertEntry(
-              new Entry(
-                  assistant1,
-                  sessionId,
-                  userEntry,
-                  new MessagePayload(
-                      new AgentMessage(
-                          AgentMessageRole.ASSISTANT,
-                          List.of(new TextMessageContent("assistant 1"))),
-                      new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage),
-                      null),
-                  NOW));
-          tx.insertEntry(
-              new Entry(
-                  turnEnd1,
-                  sessionId,
-                  assistant1,
-                  new TurnEndPayload(turnStart1, TurnEndOutcome.COMPLETED, true, null, null),
-                  NOW));
-          tx.insertEntry(
-              new Entry(
-                  compactionTurnStart,
-                  sessionId,
-                  turnEnd1,
-                  new TurnStartPayload(
-                      TurnStartReason.COMPACTION,
-                      branchSettings(),
-                      childId,
-                      100_000,
-                      16_384,
-                      CompactionStart.pending(
-                          CompactionPhase.FULL, CompactionTrigger.THRESHOLD, userEntry, null, null),
-                      null),
-                  NOW));
-          tx.insertEntry(
-              new Entry(
-                  compactionEntry,
-                  sessionId,
-                  compactionTurnStart,
-                  new CompactionPayload("summary text", null),
-                  NOW));
-          tx.insertEntry(
-              new Entry(
-                  compactionTurnEnd,
-                  sessionId,
-                  compactionEntry,
-                  new TurnEndPayload(
-                      compactionTurnStart, TurnEndOutcome.COMPLETED, true, null, null),
-                  NOW));
-          tx.insertEntry(
-              new Entry(
-                  turnStart2,
-                  sessionId,
-                  compactionTurnEnd,
-                  new TurnStartPayload(
-                      TurnStartReason.CONTINUATION,
-                      branchSettings(),
-                      childId,
-                      100_000,
-                      16_384,
-                      null,
-                      null),
-                  NOW));
-          tx.insertEntry(
-              new Entry(
-                  assistant2,
-                  sessionId,
-                  turnStart2,
-                  new MessagePayload(
-                      new AgentMessage(
-                          AgentMessageRole.ASSISTANT,
-                          List.of(new TextMessageContent("assistant 2"))),
-                      new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage),
-                      null),
-                  NOW));
-          tx.insertEntry(
-              new Entry(
-                  turnEnd2,
-                  sessionId,
-                  assistant2,
-                  new TurnEndPayload(turnStart2, TurnEndOutcome.COMPLETED, true, null, null),
-                  NOW));
-          tx.updateThread(tx.findThread(childId).orElseThrow().advanceHead(turnEnd2, NOW));
+          tx.threads().lock(childId);
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStart1,
+                      sessionId,
+                      rootEntryId,
+                      new TurnStartPayload(
+                          TurnStartReason.INPUT,
+                          branchSettings(),
+                          childId,
+                          100_000,
+                          16_384,
+                          null,
+                          null),
+                      NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      userEntry,
+                      sessionId,
+                      turnStart1,
+                      new MessagePayload(userMessage("initial"), null, null),
+                      NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      assistant1,
+                      sessionId,
+                      userEntry,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.ASSISTANT,
+                              List.of(new TextMessageContent("assistant 1"))),
+                          new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage),
+                          null),
+                      NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnEnd1,
+                      sessionId,
+                      assistant1,
+                      new TurnEndPayload(turnStart1, TurnEndOutcome.COMPLETED, true, null, null),
+                      NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      compactionTurnStart,
+                      sessionId,
+                      turnEnd1,
+                      new TurnStartPayload(
+                          TurnStartReason.COMPACTION,
+                          branchSettings(),
+                          childId,
+                          100_000,
+                          16_384,
+                          CompactionStart.pending(
+                              CompactionPhase.FULL,
+                              CompactionTrigger.THRESHOLD,
+                              userEntry,
+                              null,
+                              null),
+                          null),
+                      NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      compactionEntry,
+                      sessionId,
+                      compactionTurnStart,
+                      new CompactionPayload("summary text", null),
+                      NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      compactionTurnEnd,
+                      sessionId,
+                      compactionEntry,
+                      new TurnEndPayload(
+                          compactionTurnStart, TurnEndOutcome.COMPLETED, true, null, null),
+                      NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStart2,
+                      sessionId,
+                      compactionTurnEnd,
+                      new TurnStartPayload(
+                          TurnStartReason.CONTINUATION,
+                          branchSettings(),
+                          childId,
+                          100_000,
+                          16_384,
+                          null,
+                          null),
+                      NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      assistant2,
+                      sessionId,
+                      turnStart2,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.ASSISTANT,
+                              List.of(new TextMessageContent("assistant 2"))),
+                          new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage),
+                          null),
+                      NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnEnd2,
+                      sessionId,
+                      assistant2,
+                      new TurnEndPayload(turnStart2, TurnEndOutcome.COMPLETED, true, null, null),
+                      NOW));
+          tx.threads().update(tx.threads().find(childId).orElseThrow().advanceHead(turnEnd2, NOW));
 
-          List<ThreadCommand> commands = tx.loadQueuedCommands(childId);
+          List<ThreadCommand> commands = tx.commands().loadQueued(childId);
           ThreadCommand appliedCmd = commands.get(0).markApplied(turnStart1);
-          tx.updateCommands(List.of(appliedCmd));
+          tx.commands().update(List.of(appliedCmd));
           return null;
         });
 
@@ -737,7 +760,7 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
 
     fixture.store.transaction(
         tx -> {
-          EntryPath path = tx.loadEntryPath(turnEnd2);
+          EntryPath path = tx.entries().loadPath(turnEnd2);
           int turns = ThreadLifecycleCoordinator.countActualTurns(tx, path, join);
           // 实际应该只有 Turn 1 (INPUT) 和 Turn 2 (CONTINUATION) 计入，COMPACTION 被排除，所以是 2 轮
           assertEquals(2, turns);
@@ -765,24 +788,25 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
     UUID invocationId = UUID.randomUUID();
     fixture.store.transaction(
         tx -> {
-          tx.lockThread(childId);
-          tx.insertJoin(
-              new ThreadJoin(
-                  invocationId,
-                  CREATION_REQUEST_HASH,
-                  parentId,
-                  childId,
-                  1L,
-                  "test-agent",
-                  1,
-                  0L,
-                  null,
-                  null,
-                  null,
-                  NOW,
-                  NOW,
-                  JoinDelivery.NOTIFY_PARENT,
-                  null));
+          tx.threads().lock(childId);
+          tx.joins()
+              .insert(
+                  new ThreadJoin(
+                      invocationId,
+                      CREATION_REQUEST_HASH,
+                      parentId,
+                      childId,
+                      1L,
+                      "test-agent",
+                      1,
+                      0L,
+                      null,
+                      null,
+                      null,
+                      NOW,
+                      NOW,
+                      JoinDelivery.NOTIFY_PARENT,
+                      null));
           return null;
         });
 
@@ -887,7 +911,7 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
     return store.transaction(
         tx -> {
           UUID sessionId = tx.nextId();
-          tx.insertSession(new Session(sessionId, "session-" + sessionId, NOW));
+          tx.sessions().insert(new Session(sessionId, "session-" + sessionId, NOW));
           return sessionId;
         });
   }
@@ -896,8 +920,8 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
     return store.transaction(
         tx -> {
           UUID rootId = tx.nextId();
-          tx.insertEntry(
-              new Entry(rootId, sessionId, null, new RootPayload(branchSettings()), NOW));
+          tx.entries()
+              .insert(new Entry(rootId, sessionId, null, new RootPayload(branchSettings()), NOW));
           return rootId;
         });
   }
@@ -912,24 +936,25 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
         tx -> {
           UUID threadId = tx.nextId();
           // 根线程使用独立开关；子线程的执行根即 fixture 的 parent。
-          tx.insertThread(
-              new ThreadState(
-                  threadId,
-                  sessionId,
-                  parentId,
-                  rootEntryId,
-                  CREATION_REQUEST_HASH,
-                  "thread-" + threadId,
-                  parentId == null ? threadId : parentId,
-                  false,
-                  SpawnTrigger.MODEL_TOOL,
-                  ThreadConstraints.NONE,
-                  status,
-                  0L,
-                  1L,
-                  0L,
-                  NOW,
-                  NOW));
+          tx.threads()
+              .insert(
+                  new ThreadState(
+                      threadId,
+                      sessionId,
+                      parentId,
+                      rootEntryId,
+                      CREATION_REQUEST_HASH,
+                      "thread-" + threadId,
+                      parentId == null ? threadId : parentId,
+                      false,
+                      SpawnTrigger.MODEL_TOOL,
+                      ThreadConstraints.NONE,
+                      status,
+                      0L,
+                      1L,
+                      0L,
+                      NOW,
+                      NOW));
           return threadId;
         });
   }
@@ -937,7 +962,8 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
   private ModelInvocation loadOpenModel(HarnessStore store, UUID threadId) {
     return store.transaction(
         tx -> {
-          EntryPath path = tx.loadEntryPath(tx.findThread(threadId).orElseThrow().headEntryId());
+          EntryPath path =
+              tx.entries().loadPath(tx.threads().find(threadId).orElseThrow().headEntryId());
           UUID turnStartId = path.openTurnStart().orElseThrow().id();
           return builtin(tx).findModelInvocationByTurn(threadId, turnStartId).orElseThrow();
         });
@@ -989,8 +1015,8 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
     List<ToolInvocation> tools =
         store.transaction(
             tx -> {
-              ThreadState thread = tx.findThread(threadId).orElseThrow();
-              return tx.lockToolInvocationsByAssistantEntryId(thread.headEntryId());
+              ThreadState thread = tx.threads().find(threadId).orElseThrow();
+              return tx.tools().lockByAssistantEntry(thread.headEntryId());
             });
     for (ToolInvocation tool : tools) {
       succeedToolWith(
@@ -1009,24 +1035,25 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
       Integer maxTurns) {
     fixture.store.transaction(
         tx -> {
-          tx.lockThread(childId);
-          tx.insertJoin(
-              new ThreadJoin(
-                  invocationId,
-                  CREATION_REQUEST_HASH,
-                  parentId,
-                  childId,
-                  sourceSequence,
-                  "test-agent",
-                  maxTurns,
-                  0L,
-                  null,
-                  null,
-                  null,
-                  NOW,
-                  NOW,
-                  JoinDelivery.NOTIFY_PARENT,
-                  null));
+          tx.threads().lock(childId);
+          tx.joins()
+              .insert(
+                  new ThreadJoin(
+                      invocationId,
+                      CREATION_REQUEST_HASH,
+                      parentId,
+                      childId,
+                      sourceSequence,
+                      "test-agent",
+                      maxTurns,
+                      0L,
+                      null,
+                      null,
+                      null,
+                      NOW,
+                      NOW,
+                      JoinDelivery.NOTIFY_PARENT,
+                      null));
           return null;
         });
   }
@@ -1036,15 +1063,15 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
     UUID parentId = thread(fixture.store, childId).parentThreadId();
     fixture.store.transaction(
         tx -> {
-          tx.lockThread(parentId);
-          tx.deleteWork(new WorkTarget(WorkTargetType.THREAD, parentId));
+          tx.threads().lock(parentId);
+          tx.work().delete(new WorkTarget(WorkTargetType.THREAD, parentId));
           return null;
         });
     return fixture.nextClaim(childId);
   }
 
   private ThreadJoin join(Fixture fixture, UUID invocationId) {
-    return fixture.store.transaction(tx -> tx.findJoin(invocationId).orElseThrow());
+    return fixture.store.transaction(tx -> tx.joins().find(invocationId).orElseThrow());
   }
 
   private void driveToolBoundary(Fixture fixture, UUID childId, String callId) {
@@ -1105,8 +1132,8 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
   private List<ThreadCommand> loadQueuedCommands(HarnessStore store, UUID threadId) {
     return store.transaction(
         tx -> {
-          tx.lockThread(threadId);
-          return tx.loadQueuedCommands(threadId);
+          tx.threads().lock(threadId);
+          return tx.commands().loadQueued(threadId);
         });
   }
 }

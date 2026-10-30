@@ -105,7 +105,8 @@ class BuiltinAgentDriverContractTest {
         store.transaction(
             tx -> {
               UUID id = tx.nextId();
-              tx.insertThread(thread(id, owner.sessionId(), owner.requestHeadEntryId(), "shared"));
+              tx.threads()
+                  .insert(thread(id, owner.sessionId(), owner.requestHeadEntryId(), "shared"));
               return id;
             });
     LockedDriverState state = lockState(otherThreadId, owner.requestHeadEntryId());
@@ -185,8 +186,8 @@ class BuiltinAgentDriverContractTest {
   private LockedDriverState lockState(UUID threadId, UUID headEntryId) {
     return store.transaction(
         tx -> {
-          ThreadState thread = tx.lockThread(threadId).orElseThrow();
-          EntryPath path = tx.loadEntryPath(headEntryId);
+          ThreadState thread = tx.threads().lock(threadId).orElseThrow();
+          EntryPath path = tx.entries().loadPath(headEntryId);
           return driver.lockState(tx, thread, path);
         });
   }
@@ -215,11 +216,11 @@ class BuiltinAgentDriverContractTest {
           UUID requestHeadEntryId = tx.nextId();
           UUID threadId = tx.nextId();
           UUID modelId = tx.nextId();
-          tx.insertSession(new Session(sessionId, "session-" + sessionId, T0));
-          tx.insertEntry(rootEntry(rootEntryId, sessionId));
-          tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, threadId));
-          tx.insertEntry(userEntry(requestHeadEntryId, sessionId, turnStartEntryId));
-          tx.insertThread(thread(threadId, sessionId, requestHeadEntryId, "owner"));
+          tx.sessions().insert(new Session(sessionId, "session-" + sessionId, T0));
+          tx.entries().insert(rootEntry(rootEntryId, sessionId));
+          tx.entries().insert(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, threadId));
+          tx.entries().insert(userEntry(requestHeadEntryId, sessionId, turnStartEntryId));
+          tx.threads().insert(thread(threadId, sessionId, requestHeadEntryId, "owner"));
           builtin(tx)
               .insertModelInvocation(
                   model(modelId, threadId, turnStartEntryId, requestHeadEntryId));
@@ -241,9 +242,9 @@ class BuiltinAgentDriverContractTest {
           UUID turnStartEntryId = tx.nextId();
           UUID requestHeadEntryId = tx.nextId();
           UUID threadId = tx.nextId();
-          tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, threadId));
-          tx.insertEntry(userEntry(requestHeadEntryId, sessionId, turnStartEntryId));
-          tx.insertThread(thread(threadId, sessionId, requestHeadEntryId, "other"));
+          tx.entries().insert(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, threadId));
+          tx.entries().insert(userEntry(requestHeadEntryId, sessionId, turnStartEntryId));
+          tx.threads().insert(thread(threadId, sessionId, requestHeadEntryId, "other"));
           return new Seed(
               sessionId, rootEntryId, threadId, turnStartEntryId, requestHeadEntryId, null, null);
         });
@@ -263,22 +264,24 @@ class BuiltinAgentDriverContractTest {
           UUID secondUserEntryId = tx.nextId();
           UUID threadId = tx.nextId();
           UUID modelId = tx.nextId();
-          tx.insertSession(new Session(sessionId, "session-" + sessionId, T0));
-          tx.insertEntry(rootEntry(rootEntryId, sessionId));
-          tx.insertEntry(turnStartEntry(firstTurnStartEntryId, sessionId, rootEntryId, threadId));
-          tx.insertEntry(userEntry(firstUserEntryId, sessionId, firstTurnStartEntryId));
+          tx.sessions().insert(new Session(sessionId, "session-" + sessionId, T0));
+          tx.entries().insert(rootEntry(rootEntryId, sessionId));
+          tx.entries()
+              .insert(turnStartEntry(firstTurnStartEntryId, sessionId, rootEntryId, threadId));
+          tx.entries().insert(userEntry(firstUserEntryId, sessionId, firstTurnStartEntryId));
           ThreadState thread = thread(threadId, sessionId, firstUserEntryId, "two-turns");
-          tx.insertThread(thread);
+          tx.threads().insert(thread);
           builtin(tx)
               .insertModelInvocation(
                   model(modelId, threadId, firstTurnStartEntryId, firstUserEntryId));
-          tx.insertEntry(assistantEntry(assistantEntryId, sessionId, firstUserEntryId));
-          tx.insertEntry(
-              turnEndEntry(turnEndEntryId, sessionId, assistantEntryId, firstTurnStartEntryId));
-          tx.insertEntry(
-              turnStartEntry(secondTurnStartEntryId, sessionId, turnEndEntryId, threadId));
-          tx.insertEntry(userEntry(secondUserEntryId, sessionId, secondTurnStartEntryId));
-          tx.updateThread(thread.advanceHead(secondUserEntryId, T1));
+          tx.entries().insert(assistantEntry(assistantEntryId, sessionId, firstUserEntryId));
+          tx.entries()
+              .insert(
+                  turnEndEntry(turnEndEntryId, sessionId, assistantEntryId, firstTurnStartEntryId));
+          tx.entries()
+              .insert(turnStartEntry(secondTurnStartEntryId, sessionId, turnEndEntryId, threadId));
+          tx.entries().insert(userEntry(secondUserEntryId, sessionId, secondTurnStartEntryId));
+          tx.threads().update(thread.advanceHead(secondUserEntryId, T1));
           return new Seed(
               sessionId,
               rootEntryId,

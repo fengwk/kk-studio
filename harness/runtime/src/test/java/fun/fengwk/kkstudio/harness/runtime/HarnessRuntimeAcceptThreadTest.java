@@ -94,14 +94,16 @@ class HarnessRuntimeAcceptThreadTest {
     assertEquals(1, result.acceptedCommands().size());
     assertEquals(1L, result.acceptedCommands().getFirst().sequence());
 
-    ThreadState thread = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
+    ThreadState thread =
+        store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow());
     assertEquals(2L, thread.nextCommandSequence());
     assertEquals(1L, thread.version());
     assertTrue(
         store
             .<Boolean>transaction(
                 tx ->
-                    tx.findWork(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()))
+                    tx.work()
+                        .find(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()))
                         .isPresent())
             .equals(Boolean.TRUE));
   }
@@ -130,7 +132,7 @@ class HarnessRuntimeAcceptThreadTest {
     assertEquals(1L, accepted.acceptedCommands().getFirst().sequence());
 
     ThreadState advanced =
-        store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
+        store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow());
     assertEquals(2L, advanced.nextCommandSequence());
 
     // SET 前缀混合批次仍是 cursor-bound：stale sequence 确定性拒绝且零写入。
@@ -203,7 +205,7 @@ class HarnessRuntimeAcceptThreadTest {
     assertEquals(baseline.rootEntryId(), replay.rootEntry().id());
     assertEquals(first.acceptedCommands(), replay.acceptedCommands());
     ThreadState threadState =
-        store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
+        store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow());
     assertEquals(1L, threadState.version());
   }
 
@@ -248,7 +250,7 @@ class HarnessRuntimeAcceptThreadTest {
     assertTrue(replay.replayed());
     assertEquals(first.acceptedCommands(), replay.acceptedCommands());
     ThreadState threadState =
-        store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
+        store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow());
     assertEquals(1L, threadState.version());
   }
 
@@ -345,7 +347,8 @@ class HarnessRuntimeAcceptThreadTest {
     assertEquals(
         List.of(1L, 2L), liveResult.acceptedCommands().stream().map(c -> c.sequence()).toList());
     // 当前 open Turn 不被修改：head 不变，Driver generation 仍活动。
-    ThreadState liveThread = store.transaction(tx -> tx.findThread(live.threadId()).orElseThrow());
+    ThreadState liveThread =
+        store.transaction(tx -> tx.threads().find(live.threadId()).orElseThrow());
     assertEquals(live.turnStartEntryId(), liveThread.headEntryId());
     assertEquals(
         ThreadLiveState.DRIVER_ACTIVE, liveRuntime.getThreadSnapshot(live.threadId()).liveState());
@@ -363,7 +366,8 @@ class HarnessRuntimeAcceptThreadTest {
             AcceptancePreflight.IDENTITY);
     assertFalse(idleResult.replayed());
     // 只入队 + 推进 cursor：version +1、nextSeq 1->3、head 不变。
-    ThreadState idleThread = store.transaction(tx -> tx.lockThread(idle.threadId()).orElseThrow());
+    ThreadState idleThread =
+        store.transaction(tx -> tx.threads().lock(idle.threadId()).orElseThrow());
     assertEquals(idle.rootEntryId(), idleThread.headEntryId());
     assertEquals(3L, idleThread.nextCommandSequence());
     assertEquals(1L, idleThread.version());
@@ -459,8 +463,8 @@ class HarnessRuntimeAcceptThreadTest {
         List.of(baseline.threadId(), sibling),
         store.transaction(
             tx -> {
-              tx.lockSessionForKeyShare(baseline.sessionId());
-              return tx.listThreadsBySession(baseline.sessionId()).stream()
+              tx.sessions().lockForKeyShare(baseline.sessionId());
+              return tx.threads().listBySession(baseline.sessionId()).stream()
                   .map(ThreadState::id)
                   .toList();
             }));
@@ -480,7 +484,8 @@ class HarnessRuntimeAcceptThreadTest {
   void acceptsSettingsOnlyBatchWithoutResumingStoppedThreadOrOpeningTurn() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(9), 0));
-    ThreadState stopped = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
+    ThreadState stopped =
+        store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow());
     assertTrue(stopped.executionControl().isStopped());
 
     AcceptedCommands result =
@@ -495,7 +500,8 @@ class HarnessRuntimeAcceptThreadTest {
     assertFalse(result.replayed());
     assertEquals(2, result.acceptedCommands().size());
     assertTrue(result.thread().executionControl().isStopped());
-    ThreadState after = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
+    ThreadState after =
+        store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow());
     assertTrue(after.executionControl().isStopped());
     // 未打开 INPUT turn：head 不变，设置命令仅入队等待下一个 INPUT。
     assertEquals(stopped.headEntryId(), after.headEntryId());
@@ -520,7 +526,8 @@ class HarnessRuntimeAcceptThreadTest {
                 List.of(setModelCommand(TestIds.id(1)))),
             AcceptancePreflight.IDENTITY);
     assertFalse(result.replayed());
-    ThreadState after = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
+    ThreadState after =
+        store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow());
     assertEquals(baseline.rootEntryId(), after.headEntryId());
     assertEquals(1L, after.version());
     assertEquals(ThreadExecutionControl.RUNNABLE, after.executionControl());

@@ -49,19 +49,20 @@ public final class ExecutionExitLedger {
       UUID parentExecutionId) {
     Objects.requireNonNull(tx, "tx");
     Instant now = tx.now();
-    return tx.registerExecution(
-        new ExecutionExitFact(
-            executionId,
-            threadId,
-            invocationId,
-            attempt,
-            ownerLeaseToken,
-            kind,
-            parentExecutionId,
-            ExecutionExitState.UNCONFIRMED,
-            now,
-            null,
-            null));
+    return tx.exits()
+        .register(
+            new ExecutionExitFact(
+                executionId,
+                threadId,
+                invocationId,
+                attempt,
+                ownerLeaseToken,
+                kind,
+                parentExecutionId,
+                ExecutionExitState.UNCONFIRMED,
+                now,
+                null,
+                null));
   }
 
   /**
@@ -76,10 +77,12 @@ public final class ExecutionExitLedger {
       Instant confirmedAt) {
     Objects.requireNonNull(tx, "tx");
     boolean changed =
-        tx.findExecution(expected.executionId())
+        tx.exits()
+            .find(expected.executionId())
             .map(stored -> !stored.state().confirmed())
             .orElse(false);
-    return tx.confirmExecution(expected, state, confirmedAt)
+    return tx.exits()
+        .confirm(expected, state, confirmedAt)
         .map(fact -> new Confirmation(fact, changed));
   }
 
@@ -92,10 +95,11 @@ public final class ExecutionExitLedger {
       HarnessStore.Transaction tx, ExecutionExitFact expected, Instant abandonedAt) {
     Objects.requireNonNull(tx, "tx");
     boolean changed =
-        tx.findExecution(expected.executionId())
+        tx.exits()
+            .find(expected.executionId())
             .map(stored -> stored.state() == ExecutionExitState.UNCONFIRMED)
             .orElse(false);
-    return tx.abandonExecution(expected, abandonedAt).map(fact -> new Confirmation(fact, changed));
+    return tx.exits().abandon(expected, abandonedAt).map(fact -> new Confirmation(fact, changed));
   }
 
   /** 一次确认的结果：冻结后的真实事实，以及本次是否真正改变了退出证据。 */
@@ -107,18 +111,18 @@ public final class ExecutionExitLedger {
 
   /** 当前 Thread 是否仍有未确认退出的具体执行。查询不依赖 Invocation 行是否还在。 */
   public static boolean hasUnconfirmed(HarnessStore.Transaction tx, UUID threadId) {
-    return !Objects.requireNonNull(tx, "tx").loadUnconfirmedExecutions(threadId).isEmpty();
+    return !Objects.requireNonNull(tx, "tx").exits().loadUnconfirmed(threadId).isEmpty();
   }
 
   /** 在确认事务的第一个操作中锁定执行树、祖先 Session 与 Thread。确认失败或 Thread 未停止时，这些锁不产生额外写入。 */
   public static void lockAncestorChain(HarnessStore.Transaction tx, UUID threadId) {
     Objects.requireNonNull(tx, "tx");
     ThreadTreeLocks.lockForThread(tx, threadId);
-    List<UUID> chain = tx.findAncestorChain(threadId);
+    List<UUID> chain = tx.threads().findAncestorChain(threadId);
     List<ThreadState> snapshots = new ArrayList<>();
     Set<UUID> sessionIds = new LinkedHashSet<>();
     for (UUID ancestorId : chain) {
-      ThreadState ancestor = tx.findThread(ancestorId).orElse(null);
+      ThreadState ancestor = tx.threads().find(ancestorId).orElse(null);
       if (ancestor == null) {
         break;
       }
@@ -126,11 +130,11 @@ public final class ExecutionExitLedger {
       sessionIds.add(ancestor.sessionId());
     }
     for (UUID sessionId : sessionIds.stream().sorted(UuidOrder.COMPARATOR).toList()) {
-      tx.lockSessionForKeyShare(sessionId);
+      tx.sessions().lockForKeyShare(sessionId);
     }
     snapshots.stream()
         .sorted((left, right) -> UuidOrder.COMPARATOR.compare(left.id(), right.id()))
-        .forEach(snapshot -> tx.lockThread(snapshot.id()));
+        .forEach(snapshot -> tx.threads().lock(snapshot.id()));
   }
 
   /**
@@ -145,11 +149,11 @@ public final class ExecutionExitLedger {
     if (!confirmation.changed()) {
       return;
     }
-    ThreadState thread = tx.findThread(threadId).orElse(null);
+    ThreadState thread = tx.threads().find(threadId).orElse(null);
     if (thread == null) {
       return;
     }
-    tx.updateThread(thread.touchVersion(tx.now()));
+    tx.threads().update(thread.touchVersion(tx.now()));
   }
 
   /**
@@ -163,18 +167,18 @@ public final class ExecutionExitLedger {
     if (!confirmation.changed()) {
       return;
     }
-    ThreadState thread = tx.findThread(threadId).orElse(null);
+    ThreadState thread = tx.threads().find(threadId).orElse(null);
     if (thread == null) {
       return;
     }
     ThreadState observed = thread.touchVersion(tx.now());
-    tx.updateThread(observed);
+    tx.threads().update(observed);
     if (thread.executionControl() == ThreadExecutionControl.RUNNABLE) {
       if (settleClosedTurn(tx, observed)) {
         return;
       }
       if (hasActionableIncompleteJoin(tx, observed.id())) {
-        tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()));
+        tx.work().request(new WorkTarget(WorkTargetType.THREAD, thread.id()));
       }
       return;
     }
@@ -183,9 +187,9 @@ public final class ExecutionExitLedger {
 
   /** 只有源命令已应用、可在后续处理中结算的 Join 才需要 THREAD wake；未应用源命令不得抢先唤醒。 */
   private static boolean hasActionableIncompleteJoin(HarnessStore.Transaction tx, UUID threadId) {
-    for (ThreadJoin join : tx.loadIncompleteJoins(threadId)) {
+    for (ThreadJoin join : tx.joins().loadIncomplete(threadId)) {
       ThreadCommand source =
-          tx.findCommand(join.childThreadId(), join.sourceCommandSequence()).orElse(null);
+          tx.commands().find(join.childThreadId(), join.sourceCommandSequence()).orElse(null);
       if (source != null && source.appliedEntryId() != null) {
         return true;
       }
@@ -198,10 +202,10 @@ public final class ExecutionExitLedger {
    * SETTINGS/NOTIFICATION 等尾部控制 Entry；不借用其它 Thread 的历史。
    */
   private static boolean settleClosedTurn(HarnessStore.Transaction tx, ThreadState thread) {
-    if (tx.loadIncompleteJoins(thread.id()).isEmpty()) {
+    if (tx.joins().loadIncomplete(thread.id()).isEmpty()) {
       return false;
     }
-    EntryPath path = tx.loadEntryPath(thread.headEntryId());
+    EntryPath path = tx.entries().loadPath(thread.headEntryId());
     if (path.openTurnStart().isPresent()) {
       return false;
     }
@@ -237,19 +241,20 @@ public final class ExecutionExitLedger {
   public static void settleStoppedAncestors(HarnessStore.Transaction tx, UUID threadId) {
     Objects.requireNonNull(tx, "tx");
     Objects.requireNonNull(threadId, "threadId");
-    for (UUID ancestorId : tx.findAncestorChain(threadId)) {
-      ThreadState thread = tx.findThread(ancestorId).orElse(null);
+    for (UUID ancestorId : tx.threads().findAncestorChain(threadId)) {
+      ThreadState thread = tx.threads().find(ancestorId).orElse(null);
       if (thread == null || !thread.executionControl().isStopped()) {
         return;
       }
       // 停止边界的先后由当前 head 的历史路径确定；回执时间与 UUID 顺序都不能表达 Entry 历史先后。
-      Entry terminal = tx.loadEntryPath(thread.headEntryId()).headIgnoringTrailingControlEntries();
+      Entry terminal =
+          tx.entries().loadPath(thread.headEntryId()).headIgnoringTrailingControlEntries();
       if (!(terminal.payload() instanceof TurnEndPayload end)
           || end.outcome() != TurnEndOutcome.STOPPED) {
         return;
       }
       StoppedThreadReceipt receipt =
-          tx.findStopReceipt(thread.id(), end.closeRequestId()).orElse(null);
+          tx.stops().findReceipt(thread.id(), end.closeRequestId()).orElse(null);
       if (receipt == null || !terminal.id().equals(receipt.stoppedTurnEndEntryId())) {
         return;
       }

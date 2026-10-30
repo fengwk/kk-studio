@@ -638,8 +638,8 @@ class ThreadSnapshotTest {
   private void markActive(UUID threadId, ThreadExecutionControl status) {
     store.transaction(
         tx -> {
-          ThreadState thread = tx.lockThread(threadId).orElseThrow();
-          tx.updateThread(thread.changeExecutionControl(status, T5));
+          ThreadState thread = tx.threads().lock(threadId).orElseThrow();
+          tx.threads().update(thread.changeExecutionControl(status, T5));
           return null;
         });
   }

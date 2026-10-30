@@ -250,7 +250,9 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
     String token = UUID.randomUUID().toString();
     return store.transaction(
         tx ->
-            tx.claimNextWork(type, token, config.leaseDuration(type), nodeInstanceId).orElse(null));
+            tx.work()
+                .claimNext(type, token, config.leaseDuration(type), nodeInstanceId)
+                .orElse(null));
   }
 
   private void runHandoff(ClaimedWork claim) {
@@ -278,10 +280,10 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
     try {
       store.transaction(
           tx -> {
-            if (tx.lockClaimedWork(claim).isEmpty()) {
+            if (tx.work().lockClaimed(claim).isEmpty()) {
               return null;
             }
-            tx.rescheduleWork(claim, config.executorRejectionDelay());
+            tx.work().reschedule(claim, config.executorRejectionDelay());
             return null;
           });
     } catch (RuntimeException error) {

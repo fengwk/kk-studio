@@ -72,12 +72,12 @@ public class SessionDeletionOrchestrator {
           DeletionScope scope = discoverScope(tx, sessionIds);
           // 锁序与 accept 路径一致（执行树 root -> Session -> Thread）；并发加入子树由树锁排除，加锁后复核闭包只增不减。
           for (UUID root : scope.roots()) {
-            tx.lockTree(root);
+            tx.threads().lockTree(root);
           }
           // 多 Session 深删若逐个取 SESSION 锁，第二个 Session 开始会因曾取过 THREAD 锁而违反 SESSION -> THREAD 单调锁序。
           List<UUID> presentSessions = new ArrayList<>(scope.sessions().size());
           for (UUID sessionId : scope.sessions()) {
-            if (tx.lockSessionForUpdate(sessionId).isPresent()) {
+            if (tx.sessions().lockForUpdate(sessionId).isPresent()) {
               presentSessions.add(sessionId);
             }
           }
@@ -97,8 +97,8 @@ public class SessionDeletionOrchestrator {
           // blob ref 释放与 Entry/Session 清理（均不取 harness 锁）。
           for (UUID sessionId : scope.sessions()) {
             releaseSessionBlobRefs(sessionId);
-            tx.deleteEntries(sessionId);
-            tx.deleteSession(sessionId);
+            tx.entries().delete(sessionId);
+            tx.sessions().delete(sessionId);
           }
           return null;
         });
@@ -124,7 +124,7 @@ public class SessionDeletionOrchestrator {
   /** 由稳定绑定解析其 Thread 的 Session：绑定行持有指向 Thread 的外键且归属已被排他锁定，Thread 必然存在。 */
   private UUID boundThreadSessionId(UUID threadId) {
     return requireStore()
-        .transaction(tx -> tx.findThread(threadId).map(ThreadState::sessionId))
+        .transaction(tx -> tx.threads().find(threadId).map(ThreadState::sessionId))
         .orElseThrow();
   }
 
@@ -132,15 +132,16 @@ public class SessionDeletionOrchestrator {
   private void deleteThreadsDeep(HarnessStore.Transaction tx, Set<UUID> threadIds) {
     List<UUID> ordered = threadIds.stream().sorted(UuidOrder.COMPARATOR).toList();
     for (UUID threadId : ordered) {
-      tx.lockThread(threadId).orElseThrow();
+      tx.threads().lock(threadId).orElseThrow();
     }
     for (UUID threadId : ordered) {
-      ThreadState thread = tx.findThread(threadId).orElseThrow();
+      ThreadState thread = tx.threads().find(threadId).orElseThrow();
       if (thread.parentThreadId() != null && !threadIds.contains(thread.parentThreadId())) {
         throw new IllegalStateException(
             "cannot delete a child thread while its execution parent survives");
       }
-      if (tx.listChildren(threadId).stream().anyMatch(child -> !threadIds.contains(child.id()))) {
+      if (tx.threads().listChildren(threadId).stream()
+          .anyMatch(child -> !threadIds.contains(child.id()))) {
         throw new IllegalStateException(
             "cannot delete a parent thread while its execution children survive");
       }
@@ -149,8 +150,8 @@ public class SessionDeletionOrchestrator {
       return;
     }
     // 两端都在删除集合内，因此未匹配/未交付的 pending join 也一并删除；join 引用源 Command 与结果 Entry，必须先于二者删除。
-    tx.deleteJoinsForThreads(ordered);
-    if (tx.deleteThreads(ordered) != ordered.size()) {
+    tx.joins().deleteForThreads(ordered);
+    if (tx.threads().delete(ordered) != ordered.size()) {
       throw new IllegalStateException("not all locked threads were deleted");
     }
   }
@@ -174,9 +175,9 @@ public class SessionDeletionOrchestrator {
       if (!sessions.add(sessionId)) {
         continue;
       }
-      for (ThreadState thread : tx.listThreadsBySession(sessionId)) {
+      for (ThreadState thread : tx.threads().listBySession(sessionId)) {
         threads.add(thread.id());
-        for (ThreadState child : tx.listChildren(thread.id())) {
+        for (ThreadState child : tx.threads().listChildren(thread.id())) {
           if (!sessions.contains(child.sessionId())) {
             pending.add(child.sessionId());
           }
@@ -185,7 +186,7 @@ public class SessionDeletionOrchestrator {
     }
     List<UUID> roots =
         threads.stream()
-            .map(tx::findThread)
+            .map(id -> tx.threads().find(id))
             .flatMap(Optional::stream)
             .map(ThreadState::rootThreadId)
             .distinct()

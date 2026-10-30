@@ -44,7 +44,8 @@ public final class ToolOutcomeQuery {
     return store.transaction(
         tx -> {
           ThreadState thread =
-              tx.findThread(threadId)
+              tx.threads()
+                  .find(threadId)
                   .orElseThrow(
                       () ->
                           new HarnessRuntimeNotFoundException(
@@ -59,7 +60,7 @@ public final class ToolOutcomeQuery {
     Objects.requireNonNull(tx, "tx");
     Objects.requireNonNull(thread, "thread");
     Objects.requireNonNull(invocationId, "invocationId");
-    ToolInvocation invocation = tx.findToolInvocation(invocationId).orElse(null);
+    ToolInvocation invocation = tx.tools().find(invocationId).orElse(null);
     if (invocation != null) {
       if (!invocation.status().isTerminal()
           || !invocation.threadId().equals(thread.id())
@@ -69,7 +70,8 @@ public final class ToolOutcomeQuery {
       return Optional.of(
           fromPayload(thread.id(), PAYLOAD_MAPPER.toolResultPayload(invocation), null));
     }
-    return tx.findToolResultEntryByInvocationId(thread.sessionId(), invocationId)
+    return tx.entries()
+        .findToolResultByInvocationId(thread.sessionId(), invocationId)
         .flatMap(entry -> findMaterialized(tx, thread, entry, invocationId));
   }
 
@@ -78,7 +80,7 @@ public final class ToolOutcomeQuery {
       HarnessStore.Transaction tx, UUID turnStartEntryId, UUID threadId) {
     EntryPath path;
     try {
-      path = tx.loadEntryPath(turnStartEntryId);
+      path = tx.entries().loadPath(turnStartEntryId);
     } catch (IllegalArgumentException broken) {
       throw new IllegalStateException(
           "tool invocation " + turnStartEntryId + " lost its turn start path", broken);
@@ -91,7 +93,7 @@ public final class ToolOutcomeQuery {
       HarnessStore.Transaction tx, ThreadState thread, Entry found, UUID invocationId) {
     EntryPath headPath;
     try {
-      headPath = tx.loadEntryPath(thread.headEntryId());
+      headPath = tx.entries().loadPath(thread.headEntryId());
     } catch (IllegalArgumentException broken) {
       throw new IllegalStateException(
           "thread " + thread.id() + " lost its head entry path", broken);
