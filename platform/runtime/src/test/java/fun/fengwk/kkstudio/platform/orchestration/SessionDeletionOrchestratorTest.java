@@ -22,9 +22,9 @@ import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.platform.chat.repo.ChatRepository;
-import fun.fengwk.kkstudio.platform.chat.repo.ChatSessionRepository;
-import fun.fengwk.kkstudio.platform.chat.service.model.Chat;
+import fun.fengwk.kkstudio.platform.chat.Chat;
+import fun.fengwk.kkstudio.platform.chat.ChatRepository;
+import fun.fengwk.kkstudio.platform.chat.ChatSessionRepository;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 
 import java.time.Instant;

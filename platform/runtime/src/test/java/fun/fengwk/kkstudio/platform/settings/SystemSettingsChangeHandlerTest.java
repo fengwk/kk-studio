@@ -7,6 +7,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 import java.time.Instant;
 import java.util.concurrent.CountDownLatch;
@@ -82,7 +83,10 @@ class SystemSettingsChangeHandlerTest {
     CountDownLatch releaseOldRead = new CountDownLatch(1);
     AtomicInteger reads = new AtomicInteger();
     SystemSettingsRepository repository =
-        new SystemSettingsRepository() {
+        new SystemSettingsRepository(
+            mock(JdbcClient.class),
+            new SystemSettingsCodec(),
+            mock(SystemSettingsChangeNotifier.class)) {
           @Override
           public SystemSettingsRecord get() {
             if (reads.incrementAndGet() == 1) {

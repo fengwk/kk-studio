@@ -28,9 +28,8 @@ import java.util.List;
 /**
  * System settings 生产写入口的事务内 {@code system_settings_changed} 通知验证。
  *
- * <p>意图：{@code PostgresqlSystemSettingsRepository} 的成功 CAS 与通知共用同一事务 Connection，提交后投递写后权威 {@code
- * version} 的十进制字符串；未提交不可见、回滚静默、陈旧 CAS 静默、无事务调用在写行前拒绝。{@code SystemSettingsServiceImpl}
- * 的提交后快照刷新与本通知并存。
+ * <p>意图：{@code SystemSettingsRepository} 的成功 CAS 与通知共用同一事务 Connection，提交后投递写后权威 {@code version}
+ * 的十进制字符串；未提交不可见、回滚静默、陈旧 CAS 静默、无事务调用在写行前拒绝。{@code SystemSettingsService} 的提交后快照刷新与本通知并存。
  */
 class SystemSettingsChangeNotificationIntegrationTest extends PostgresSpringTestSupport {
 
@@ -39,7 +38,7 @@ class SystemSettingsChangeNotificationIntegrationTest extends PostgresSpringTest
   @Autowired private SystemSettingsService systemSettingsService;
   @Autowired private SystemSettingsRepository systemSettingsRepository;
   @Autowired private SystemSettingsSnapshot systemSettingsSnapshot;
-  @Autowired private PostgresqlSystemSettingsChangeNotifier notifier;
+  @Autowired private SystemSettingsChangeNotifier notifier;
   @Autowired private PlatformTransactionManager transactionManager;
   @Autowired private JdbcTemplate jdbcTemplate;
 

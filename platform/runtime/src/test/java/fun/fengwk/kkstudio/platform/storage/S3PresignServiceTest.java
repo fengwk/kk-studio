@@ -114,7 +114,7 @@ public class S3PresignServiceTest {
           () ->
               context.service.presignChecksummedCreateOnlyUpload(
                   "uploads/a.bin",
-                  "a".repeat(S3PresignServiceImpl.MAX_CONTENT_TYPE_LENGTH + 1),
+                  "a".repeat(S3PresignService.MAX_CONTENT_TYPE_LENGTH + 1),
                   DEFAULT_CHECKSUM,
                   120L));
       assertThrows(
@@ -377,7 +377,7 @@ public class S3PresignServiceTest {
                           properties.getAccessKey(), properties.getSecretKey())))
               .serviceConfiguration(S3Configuration.builder().pathStyleAccessEnabled(true).build())
               .build();
-      this.service = new S3PresignServiceImpl(properties, presigner, snapshot);
+      this.service = new S3PresignService(properties, presigner, snapshot);
     }
 
     @Override

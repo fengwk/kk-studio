@@ -17,8 +17,8 @@ import org.springframework.web.server.ResponseStatusException;
 
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
-import fun.fengwk.kkstudio.platform.chat.service.ChatIds;
-import fun.fengwk.kkstudio.platform.chat.service.ChatService;
+import fun.fengwk.kkstudio.platform.chat.ChatIds;
+import fun.fengwk.kkstudio.platform.chat.ChatService;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
 import fun.fengwk.kkstudio.share.ai.chat.ChatCreateDTO;
 import fun.fengwk.kkstudio.share.ai.chat.ChatDTO;

@@ -1,5 +1,13 @@
 package fun.fengwk.kkstudio.platform.storage;
 
+import static org.mockito.Mockito.mock;
+
+import software.amazon.awssdk.services.s3.presigner.S3Presigner;
+
+import fun.fengwk.kkstudio.platform.settings.SystemSettings;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
+import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
+
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -11,7 +19,15 @@ import java.util.Map;
  *
  * @author fengwk
  */
-public class RecordingS3PresignService implements S3PresignService {
+public class RecordingS3PresignService extends S3PresignService {
+
+  public RecordingS3PresignService() {
+    // 两个预签名方法都由本假件覆盖；超类只要求有效的部署连接、签名器与设置快照引用。
+    super(
+        new S3StorageProperties(),
+        mock(S3Presigner.class),
+        new SystemSettingsSnapshot(SystemSettings.DEFAULT));
+  }
 
   private final List<PresignRecord> records = new ArrayList<>();
 

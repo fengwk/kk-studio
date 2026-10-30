@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.platform.environment.update;
 
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
@@ -17,12 +16,12 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdatePhase;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateProgress;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateResult;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentUpdateListener;
+import fun.fengwk.kkstudio.platform.environment.Environment;
+import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentDaemonGateway;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentEvent;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
-import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
-import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentUnavailableException;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
@@ -58,15 +57,11 @@ public class EnvironmentUpdateService implements EnvironmentUpdateListener {
 
   private static final String RESOURCE = "environment";
 
-  private static final String ACTIVE_WORK_SQL =
-      "select count(1) from durable_work where required_environment_id = ?";
-
   private final EnvironmentDaemonGateway gateway;
   private final EnvironmentRegistry registry;
   private final EnvironmentRepository environmentRepository;
   private final DaemonReleaseProvider releaseProvider;
   private final SystemSettingsSnapshot snapshot;
-  private final JdbcTemplate jdbcTemplate;
   private final Clock clock;
 
   public EnvironmentUpdateService(
@@ -75,7 +70,6 @@ public class EnvironmentUpdateService implements EnvironmentUpdateListener {
       EnvironmentRepository environmentRepository,
       DaemonReleaseProvider releaseProvider,
       SystemSettingsSnapshot snapshot,
-      JdbcTemplate jdbcTemplate,
       Clock clock) {
     this.gateway = Objects.requireNonNull(gateway, "gateway");
     this.registry = Objects.requireNonNull(registry, "registry");
@@ -83,7 +77,6 @@ public class EnvironmentUpdateService implements EnvironmentUpdateListener {
         Objects.requireNonNull(environmentRepository, "environmentRepository");
     this.releaseProvider = Objects.requireNonNull(releaseProvider, "releaseProvider");
     this.snapshot = Objects.requireNonNull(snapshot, "snapshot");
-    this.jdbcTemplate = Objects.requireNonNull(jdbcTemplate, "jdbcTemplate");
     this.clock = Objects.requireNonNull(clock, "clock");
   }
 
@@ -293,9 +286,7 @@ public class EnvironmentUpdateService implements EnvironmentUpdateListener {
   }
 
   private boolean hasActiveWork(EnvironmentId environmentId) {
-    Integer count =
-        jdbcTemplate.queryForObject(ACTIVE_WORK_SQL, Integer.class, environmentId.value());
-    return count != null && count > 0;
+    return environmentRepository.hasActiveWork(environmentId.value());
   }
 
   private static AiEnvironmentUnavailableException unavailable() {
