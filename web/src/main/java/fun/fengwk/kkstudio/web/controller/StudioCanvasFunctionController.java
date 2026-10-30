@@ -14,13 +14,13 @@ import fun.fengwk.kkstudio.canvas.CanvasFunctionRunException;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionService;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionUnknownResolution;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionVersion;
+import fun.fengwk.kkstudio.canvas.infra.dto.CanvasDtoMapper;
 import fun.fengwk.kkstudio.share.canvas.CanvasFunctionCancelRequestDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasFunctionDefinitionDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasFunctionRunDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasFunctionRunRequestDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasFunctionUnknownResolutionDTO;
 import fun.fengwk.kkstudio.web.api.ApiResponse;
-import fun.fengwk.kkstudio.web.mapper.WebDtoMapper;
 
 import java.util.List;
 import java.util.Objects;
@@ -37,12 +37,12 @@ public class StudioCanvasFunctionController {
 
   private final CanvasFunctionCatalogSource catalogSource;
   private final CanvasFunctionService runtimeService;
-  private final WebDtoMapper mapper;
+  private final CanvasDtoMapper mapper;
 
   public StudioCanvasFunctionController(
       CanvasFunctionCatalogSource catalogSource,
       CanvasFunctionService runtimeService,
-      WebDtoMapper mapper) {
+      CanvasDtoMapper mapper) {
     this.catalogSource = Objects.requireNonNull(catalogSource, "catalogSource");
     this.runtimeService = Objects.requireNonNull(runtimeService, "runtimeService");
     this.mapper = Objects.requireNonNull(mapper, "mapper");
@@ -72,10 +72,10 @@ public class StudioCanvasFunctionController {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "missing body");
     }
     try {
-      UUID canvasId = WebDtoMapper.parseUuid(canvasIdText, "canvasId");
-      UUID nodeId = WebDtoMapper.parseUuid(nodeIdText, "nodeId");
+      UUID canvasId = CanvasDtoMapper.parseUuid(canvasIdText, "canvasId");
+      UUID nodeId = CanvasDtoMapper.parseUuid(nodeIdText, "nodeId");
       CanvasFunctionVersion expectedVersion =
-          WebDtoMapper.parseVersion(request.getExpectedVersion(), "expectedVersion");
+          CanvasDtoMapper.parseVersion(request.getExpectedVersion(), "expectedVersion");
       return ApiResponse.accepted(
           mapper.toDto(
               runtimeService.start(canvasId, nodeId, request.getRequestId(), expectedVersion)));
@@ -90,8 +90,8 @@ public class StudioCanvasFunctionController {
   public ApiResponse<CanvasFunctionRunDTO> get(
       @PathVariable("canvasId") String canvasIdText, @PathVariable("nodeId") String nodeIdText) {
     try {
-      UUID canvasId = WebDtoMapper.parseUuid(canvasIdText, "canvasId");
-      UUID nodeId = WebDtoMapper.parseUuid(nodeIdText, "nodeId");
+      UUID canvasId = CanvasDtoMapper.parseUuid(canvasIdText, "canvasId");
+      UUID nodeId = CanvasDtoMapper.parseUuid(nodeIdText, "nodeId");
       return ApiResponse.ok(mapper.toDto(runtimeService.get(canvasId, nodeId)));
     } catch (CanvasFunctionRunException exception) {
       throw map(exception);
@@ -109,8 +109,8 @@ public class StudioCanvasFunctionController {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "missing body");
     }
     try {
-      UUID canvasId = WebDtoMapper.parseUuid(canvasIdText, "canvasId");
-      UUID nodeId = WebDtoMapper.parseUuid(nodeIdText, "nodeId");
+      UUID canvasId = CanvasDtoMapper.parseUuid(canvasIdText, "canvasId");
+      UUID nodeId = CanvasDtoMapper.parseUuid(nodeIdText, "nodeId");
       return ApiResponse.ok(
           mapper.toDto(runtimeService.cancel(canvasId, nodeId, request.getRequestId())));
     } catch (CanvasFunctionRunException exception) {
@@ -129,8 +129,8 @@ public class StudioCanvasFunctionController {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "missing body");
     }
     try {
-      UUID canvasId = WebDtoMapper.parseUuid(canvasIdText, "canvasId");
-      UUID nodeId = WebDtoMapper.parseUuid(nodeIdText, "nodeId");
+      UUID canvasId = CanvasDtoMapper.parseUuid(canvasIdText, "canvasId");
+      UUID nodeId = CanvasDtoMapper.parseUuid(nodeIdText, "nodeId");
       return ApiResponse.ok(
           mapper.toDto(
               runtimeService.resolve(

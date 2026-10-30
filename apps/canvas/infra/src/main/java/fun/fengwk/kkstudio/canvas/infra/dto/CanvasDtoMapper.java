@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.web.mapper;
+package fun.fengwk.kkstudio.canvas.infra.dto;
 
 import org.springframework.stereotype.Component;
 
@@ -65,12 +65,12 @@ import java.util.UUID;
  * 的深度与长度校验，保证 HTTP 输入不会绕过持久化形式的不变量。
  */
 @Component
-public class WebDtoMapper {
+public class CanvasDtoMapper {
 
   /** canonical 非负十进制 long：无前导零、无符号、无空白。 */
   private final StorageBlobManager blobManager;
 
-  public WebDtoMapper(StorageBlobManager blobManager) {
+  public CanvasDtoMapper(StorageBlobManager blobManager) {
     this.blobManager = Objects.requireNonNull(blobManager, "blobManager");
   }
 
@@ -109,7 +109,7 @@ public class WebDtoMapper {
     dto.setDocument(toDto(snapshot.document()));
     dto.setNodes(snapshot.nodes().stream().map(this::toDto).toList());
     dto.setGroups(snapshot.groups().stream().map(this::toDto).toList());
-    dto.setReferences(snapshot.references().stream().map(WebDtoMapper::toDto).toList());
+    dto.setReferences(snapshot.references().stream().map(CanvasDtoMapper::toDto).toList());
     return dto;
   }
 

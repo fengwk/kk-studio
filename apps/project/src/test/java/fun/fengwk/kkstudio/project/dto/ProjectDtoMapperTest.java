@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.web.project;
+package fun.fengwk.kkstudio.project.dto;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -7,7 +7,14 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import org.junit.jupiter.api.Test;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.MapperFeature;
+import tools.jackson.databind.cfg.DateTimeFeature;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.module.SimpleModule;
+import tools.jackson.databind.ser.std.ToStringSerializer;
 
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.domain.ProjectStateCode;
@@ -33,7 +40,6 @@ import fun.fengwk.kkstudio.share.project.IssueStageBudgetDTO;
 import fun.fengwk.kkstudio.share.project.ProjectDTO;
 import fun.fengwk.kkstudio.share.project.ProjectWorkflowDTO;
 import fun.fengwk.kkstudio.share.project.ProjectWorkflowStateDTO;
-import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -46,9 +52,9 @@ import java.util.UUID;
 class ProjectDtoMapperTest {
 
   private final ProjectWorkflowJsonCodec codec = new ProjectWorkflowJsonCodec();
-  // 依赖显式提供：生产 HTTP Jackson 3 mapper。
-  private final ProjectDtoMapper mapper =
-      new ProjectDtoMapper(codec, StrictHttpJsonMapperTestSupport.get());
+  // 与生产 HTTP profile 相同的 Long 字符串与 NON_NULL 规则；容器注入身份由 web 装配测试核验。
+  private final JsonMapper httpMapper = httpMapper();
+  private final ProjectDtoMapper mapper = new ProjectDtoMapper(codec, httpMapper);
 
   @Test
   void testParseUuidValidAndInvalid() {
@@ -352,7 +358,7 @@ class ProjectDtoMapperTest {
     assertEquals(new BigInteger("9223372036854775808"), data.get("wide"));
     assertEquals(List.of(precise), data.get("nested"));
 
-    String wire = StrictHttpJsonMapperTestSupport.get().writeValueAsString(dto);
+    String wire = httpMapper.writeValueAsString(dto);
     assertTrue(wire.contains("\"precise\":" + precise));
     assertTrue(wire.contains("\"huge\":1E+309"));
     assertTrue(wire.contains("\"tiny\":1E-324"));
@@ -458,5 +464,23 @@ class ProjectDtoMapperTest {
     assertEquals("4", detail.getVersion());
     assertEquals("2", detail.getObservedActivitySequence());
     assertEquals("60000", detail.getRemainingExecutionMs());
+  }
+
+  /** 复现宿主 HTTP profile 中本测试依赖的写出规则，不装配 Spring 容器。 */
+  private static JsonMapper httpMapper() {
+    SimpleModule longToString = new SimpleModule("LongToStringModule");
+    longToString.addSerializer(Long.class, new ToStringSerializer(Long.class));
+    longToString.addSerializer(Long.TYPE, new ToStringSerializer(Long.TYPE));
+    return JsonMapper.builder()
+        .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+        .enable(DateTimeFeature.WRITE_DATES_AS_TIMESTAMPS)
+        .changeDefaultPropertyInclusion(
+            inclusion ->
+                inclusion
+                    .withValueInclusion(JsonInclude.Include.NON_NULL)
+                    .withContentInclusion(JsonInclude.Include.NON_NULL))
+        .disable(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY)
+        .addModule(longToString)
+        .build();
   }
 }
