@@ -6,9 +6,8 @@
 # `:<branch>` 与 `:<commit-sha>` 两个 tag。
 #
 # 每次触发先跑低成本的版本/文档/敏感数据 preflight。`main` 随后并行执行 Java 仓库门禁、
-# 前端门禁与 daemon-ci 五平台矩阵；Java 门禁只构建一次带内嵌前端的发行 Fat JAR，并把它与
-# 匹配的 convention4j agent 作为同 run artifact 交给 publish。`dev` 不跑全量门禁，直接从
-# 源码构建镜像。真实模型 E2E 与真实端到端 UI E2E 不在本文工作流内。
+# 前端门禁与 daemon-ci 五平台矩阵；Java 门禁只构建一次带内嵌前端的发行 Fat JAR，并把它
+# 作为同 run artifact 交给 publish。`dev` 不跑全量门禁，直接从源码构建镜像。真实模型 E2E 与真实端到端 UI E2E 不在本文工作流内。
 #
 # Registry credential 只来自 Actions secrets，不作为 build arg、不进入 image layer
 # 或 build log。
@@ -145,7 +144,7 @@ jobs:
         run: node scripts/dev/verify/repository/check-canvas-project-schema.mjs
       - name: Verify Java sources, tests, coverage and package the distribution JAR
         # -Pdistribution 在同一个 reactor 中安装前端工具链并只打包一次带内嵌 React 产物的
-        # 发行 Fat JAR；后续启动、decoder、agent 提取与镜像发布都复用这个产物。
+        # 发行 Fat JAR；后续启动、decoder 与镜像发布都复用这个产物。
         run: env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -Pdistribution verify
       - name: Resolve the distribution Fat JAR
         id: distribution
@@ -174,23 +173,15 @@ jobs:
           set -euo pipefail
           node scripts/daemon/verify-java-update-commands.mjs harness/environment/target/daemon-update-java-commands.json
       - name: Stage the verified distribution artifact
-        # 只把已验收的 Fat JAR、匹配的 convention4j agent 与版本/提交/摘要清单放进 artifact；
+        # 只把已验收的 Fat JAR 与版本/提交/摘要清单放进 artifact；
         # 上传目录由脚本重建为封闭文件集合，不包含工作树、环境或凭据。
         env:
           APP_VERSION: ${{ steps.distribution.outputs.version }}
           APP_JAR: ${{ steps.distribution.outputs.jar }}
         run: |
           set -euo pipefail
-          agent_alias="$RUNNER_TEMP/convention4j-agent/convention4j-agent.jar"
-          mkdir -p "$(dirname "${agent_alias}")"
-          sh scripts/dev/lib/extract-convention4j-agent.sh "$(command -v jar)" "${APP_JAR}" "${agent_alias}"
-          # The extractor exposes a stable symlink; stage must copy the versioned regular file
-          # because the agent manifest's Boot-Class-Path keeps that filename.
-          agent="$(readlink -f "${agent_alias}")"
-          test -f "${agent}"
           node scripts/dev/ci/app-artifact.mjs stage \
             --jar "${APP_JAR}" \
-            --agent "${agent}" \
             --output "$RUNNER_TEMP/verified-app" \
             --version "${APP_VERSION}" \
             --source-commit "$GITHUB_SHA"
@@ -337,8 +328,7 @@ jobs:
           name: kk-studio-app-${{ github.sha }}
           path: ${{ runner.temp }}/verified-app
       - name: Verify the downloaded distribution artifact
-        # 校验封闭文件集合、版本、source commit 与 app.jar/稳定 agent/版本化 agent 的 SHA256；
-        # 缺失、同名不一致或损坏直接失败。
+        # 校验封闭文件集合、版本、source commit 与 app.jar 的 SHA256；缺失或损坏直接失败。
         if: github.ref_name == 'main'
         env:
           APP_VERSION: ${{ steps.distribution.outputs.version }}

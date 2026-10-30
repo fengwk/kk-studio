@@ -3,6 +3,8 @@ spring:
   autoconfigure:
     exclude:
       - fun.fengwk.convention4j.springboot.starter.web.error.WebErrorAutoConfiguration
+      - fun.fengwk.convention4j.springboot.starter.web.tracer.TracerWebAutoConfiguration
+      - fun.fengwk.convention4j.springboot.starter.tracer.ConventionSpanAspectAutoConfiguration
 
   application:
     name: kk-studio
@@ -34,3 +36,15 @@ kk-studio:
       workers-enabled: false
       # 每个测试上下文使用独立目录，避免文件锁在并行/缓存上下文间冲突。
       exit-confirmation-directory: ${java.io.tmpdir}/kk-studio-exit-confirmation-${random.uuid}
+
+management:
+  tracing:
+    sampling:
+      probability: 1.0
+    propagation:
+      type: W3C
+    baggage:
+      enabled: false
+    export:
+      otlp:
+        enabled: false

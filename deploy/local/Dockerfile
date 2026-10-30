@@ -7,15 +7,15 @@
 # embeds the React build output into BOOT-INF/classes/static.
 #
 # Runtime: Temurin JRE 21 (Ubuntu 22.04 base) with ffmpeg/ffprobe for media
-# inspection and transformation. The Fat JAR and its matching convention4j agent
-# ship in the image; no Maven, no Node, no source. Healthcheck uses `curl` (already
-# shipped in the JRE base image) against `/actuator/health`. The JVM runs as a
-# dedicated unprivileged `kkstudio` user.
+# inspection and transformation. The Fat JAR ships in the image; no Maven, no
+# Node, no source. Healthcheck uses `curl` (already shipped in the JRE base image)
+# against `/actuator/health`. The JVM runs as a dedicated unprivileged `kkstudio`
+# user.
 #
 # Two artifact targets share the same runtime stage:
 #   - `source` (default, last stage): local/dev builds, using the Maven builder below.
-#   - `verified-artifact`: CI main builds, copying the already verified app.jar and
-#     convention4j agent from the downloaded artifact context instead of rebuilding.
+#   - `verified-artifact`: CI main builds, copying the already verified app.jar
+#     from the downloaded artifact context instead of rebuilding.
 #
 # ---------- builder ----------
 FROM maven:3.9.11-eclipse-temurin-21 AS builder
@@ -50,9 +50,7 @@ RUN --mount=type=cache,id=kk-studio-maven,target=/root/.m2/repository,sharing=lo
     no_proxy="${KK_STUDIO_BUILD_NO_PROXY}" \
     MAVEN_OPTS="${MAVEN_OPTS:-} ${KK_STUDIO_MAVEN_BUILD_OPTS}" \
       mvn -U -Pdistribution -pl web -am -DskipTests -B -ntp clean package \
-    && cp web/target/kk-studio-web-*.jar /build/app.jar \
-    && sh scripts/dev/lib/extract-convention4j-agent.sh \
-         "$(command -v jar)" /build/app.jar /build/convention4j-agent/convention4j-agent.jar
+    && cp web/target/kk-studio-web-*.jar /build/app.jar
 
 # ---------- runtime ----------
 FROM eclipse-temurin:21.0.12.1_1-jre-jammy AS runtime-base
@@ -98,17 +96,14 @@ HEALTHCHECK --interval=15s --timeout=5s --start-period=60s --retries=6 \
 
 # `init: true` in docker-compose adds a tiny init that forwards signals and
 # reaps zombies, so we do not need tini inside the image.
-ENTRYPOINT ["java", "-javaagent:/app/convention4j-agent/convention4j-agent.jar", "-jar", "/app/app.jar"]
+ENTRYPOINT ["java", "-jar", "/app/app.jar"]
 
 # CI main target: the context contains only the artifact verified by validate.
 FROM runtime-base AS verified-artifact
 
 COPY --chown=kkstudio:kkstudio app.jar /app/app.jar
-COPY --chown=kkstudio:kkstudio convention4j-agent /app/convention4j-agent
 
 # Local/dev default target: build the distribution Fat JAR from the source context.
 FROM runtime-base AS source
 
 COPY --from=builder --chown=kkstudio:kkstudio /build/app.jar /app/app.jar
-COPY --from=builder --chown=kkstudio:kkstudio \
-  /build/convention4j-agent /app/convention4j-agent

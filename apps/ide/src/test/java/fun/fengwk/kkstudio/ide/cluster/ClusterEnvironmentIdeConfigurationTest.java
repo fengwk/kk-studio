@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
+import io.micrometer.context.ContextSnapshotFactory;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -78,6 +79,9 @@ class ClusterEnvironmentIdeConfigurationTest {
             context.registerBean(Clock.class, () -> Clock.systemUTC());
             context.registerBean("nodeInstanceId", UUID.class, () -> UUID.randomUUID());
             context.registerBean(ObjectMapper.class, () -> JsonMapper.builder().build());
+            context.registerBean(
+                ContextSnapshotFactory.class,
+                () -> ContextSnapshotFactory.builder().clearMissing(true).build());
             context.register(
                 EnvironmentIdeConfiguration.class,
                 ClusterEnvironmentIdeConfiguration.class,

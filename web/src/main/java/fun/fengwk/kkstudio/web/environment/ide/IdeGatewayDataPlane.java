@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.web.environment.ide;
 
+import io.micrometer.context.ContextSnapshot;
+import io.micrometer.context.ContextSnapshotFactory;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
@@ -67,6 +69,7 @@ public final class IdeGatewayDataPlane {
   private final IdeRemoteDataPlaneForwarder remoteForwarder;
   private final IdeDataConnectionRegistry dataConnections;
   private final IdeDataViewAuthorizer viewAuthorizer;
+  private final ContextSnapshotFactory contextSnapshotFactory;
 
   public IdeGatewayDataPlane(
       IdeCommandTransport transport,
@@ -75,7 +78,8 @@ public final class IdeGatewayDataPlane {
       IdeRemoteDataPlaneForwarder remoteForwarder,
       IdeDataConnectionRegistry dataConnections,
       IdeDataViewAuthorizer viewAuthorizer,
-      IdeBrowserSessionHandler browserSessionHandler) {
+      IdeBrowserSessionHandler browserSessionHandler,
+      ContextSnapshotFactory contextSnapshotFactory) {
     this.transport = Objects.requireNonNull(transport, "transport");
     this.properties = Objects.requireNonNull(properties, "properties");
     this.browserSessionHandler =
@@ -84,6 +88,8 @@ public final class IdeGatewayDataPlane {
     this.remoteForwarder = Objects.requireNonNull(remoteForwarder, "remoteForwarder");
     this.dataConnections = Objects.requireNonNull(dataConnections, "dataConnections");
     this.viewAuthorizer = Objects.requireNonNull(viewAuthorizer, "viewAuthorizer");
+    this.contextSnapshotFactory =
+        Objects.requireNonNull(contextSnapshotFactory, "contextSnapshotFactory");
   }
 
   /**
@@ -492,8 +498,11 @@ public final class IdeGatewayDataPlane {
     }
 
     private void run() throws IdeHttpFailure {
+      ContextSnapshot contextSnapshot = contextSnapshotFactory.captureAll();
       sender =
-          Thread.ofVirtual().name("ide-http-request-" + stream.hashCode()).start(this::sendRequest);
+          Thread.ofVirtual()
+              .name("ide-http-request-" + stream.hashCode())
+              .start(contextSnapshot.wrap(this::sendRequest));
       try {
         while (!terminal.isDone()) {
           long remaining = lastProgressNanos + idleTimeoutNanos - System.nanoTime();

@@ -13,6 +13,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import io.micrometer.context.ContextSnapshotFactory;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServlet;
 import jakarta.servlet.http.HttpServletRequest;
@@ -656,7 +657,8 @@ class IdeDataPlaneIntegrationTest extends WebPostgresTestSupport {
                   mock(IdeBootstrapTicketService.class),
                   mock(IdeBrowserSessionRegistry.class),
                   mock(IdeCommandTransport.class),
-                  properties));
+                  properties),
+              ContextSnapshotFactory.builder().clearMissing(true).build());
       StandardWebSocketClient webSocketClient = new StandardWebSocketClient();
       IdeBrowserWebSocketGateway browserGateway =
           new IdeBrowserWebSocketGateway(

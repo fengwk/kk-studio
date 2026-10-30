@@ -1,4 +1,86 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
-    <include resource="fun/fengwk/convention4j/springboot/starter/logback/base.xml"/>
+    <springProperty scope="context" name="LOG_LEVEL" source="logging.level.root" defaultValue="info"/>
+    <springProperty scope="context" name="APP_NAME" source="spring.application.name" defaultValue="unknown"/>
+    <springProperty scope="context" name="LOG_PATH" source="logging.file.path" defaultValue="./logs"/>
+    <springProperty scope="context" name="MAX_HISTORY" source="logging.file.max-history" defaultValue="14"/>
+    <springProperty scope="context" name="MAX_SIZE" source="logging.file.max-size" defaultValue="128MB"/>
+    <springProperty scope="context" name="TOTAL_SIZE_CAP" source="logging.file.total-size-cap" defaultValue="8GB"/>
+    <springProperty scope="context" name="DISCARDING_THRESHOLD" source="logging.async.discarding-threshold" defaultValue="0"/>
+    <springProperty scope="context" name="QUEUE_SIZE" source="logging.async.queue-size" defaultValue="4096"/>
+
+    <!-- 标准 MDC traceId/spanId 由官方 tracing handler 维护，不使用 convention 的 %trace 转换器。 -->
+    <property name="CONSOLE_LOG_PATTERN"
+              value="%clr(%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX}){faint} %clr(%5p) %clr(${PID:- }){magenta} %clr(---){faint} %clr([%15.15t]){faint} %clr(%-40.40logger{39}){cyan} %clr(:){faint} [traceId=%X{traceId:-},spanId=%X{spanId:-}] %m%n%wEx"/>
+    <property name="FILE_LOG_PATTERN"
+              value="%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %5p ${PID:- } --- [%t] %-40.40logger{39} : [traceId=%X{traceId:-},spanId=%X{spanId:-}] %m%n%wEx"/>
+    <property name="TRACE_CONSOLE_LOG_PATTERN" value="%m%n"/>
+    <property name="TRACE_FILE_LOG_PATTERN" value="%m%n"/>
+
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+    <include resource="org/springframework/boot/logging/logback/console-appender.xml"/>
+
+    <appender name="ALL" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_PATH}/${APP_NAME}-all.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <FileNamePattern>${LOG_PATH}/${APP_NAME}-all-%d{yyyy-MM-dd}.%i.gz</FileNamePattern>
+            <maxFileSize>${MAX_SIZE}</maxFileSize>
+            <maxHistory>${MAX_HISTORY}</maxHistory>
+            <cleanHistoryOnStart>true</cleanHistoryOnStart>
+            <totalSizeCap>${TOTAL_SIZE_CAP}</totalSizeCap>
+        </rollingPolicy>
+        <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
+            <pattern>${FILE_LOG_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <appender name="TRACE_CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>${TRACE_CONSOLE_LOG_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <appender name="TRACE_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_PATH}/${APP_NAME}-trace.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <FileNamePattern>${LOG_PATH}/${APP_NAME}-trace-%d{yyyy-MM-dd}.%i.gz</FileNamePattern>
+            <maxFileSize>${MAX_SIZE}</maxFileSize>
+            <maxHistory>${MAX_HISTORY}</maxHistory>
+            <cleanHistoryOnStart>true</cleanHistoryOnStart>
+            <totalSizeCap>${TOTAL_SIZE_CAP}</totalSizeCap>
+        </rollingPolicy>
+        <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
+            <pattern>${TRACE_FILE_LOG_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <appender name="ASYNC_ALL" class="ch.qos.logback.classic.AsyncAppender">
+        <discardingThreshold>${DISCARDING_THRESHOLD}</discardingThreshold>
+        <queueSize>${QUEUE_SIZE}</queueSize>
+        <appender-ref ref="ALL"/>
+    </appender>
+
+    <appender name="ASYNC_TRACE_FILE" class="ch.qos.logback.classic.AsyncAppender">
+        <discardingThreshold>${DISCARDING_THRESHOLD}</discardingThreshold>
+        <queueSize>${QUEUE_SIZE}</queueSize>
+        <appender-ref ref="TRACE_FILE"/>
+    </appender>
+
+    <root level="${LOG_LEVEL}">
+        <springProfile name="default,dev,test,pre">
+            <appender-ref ref="CONSOLE"/>
+        </springProfile>
+        <appender-ref ref="ASYNC_ALL"/>
+    </root>
+
+    <!-- 请求收尾的结构化操作/状态/耗时日志，由 ServerRequestTraceCompletionHandler 写入。 -->
+    <logger name="TRACE" level="INFO" additivity="false">
+        <springProfile name="default,dev,test">
+            <appender-ref ref="TRACE_CONSOLE"/>
+        </springProfile>
+        <appender-ref ref="ASYNC_TRACE_FILE"/>
+    </logger>
 </configuration>

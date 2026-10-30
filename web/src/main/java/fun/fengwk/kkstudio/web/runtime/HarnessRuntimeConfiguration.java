@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.web.runtime;
 
+import io.micrometer.context.ContextExecutorService;
+import io.micrometer.context.ContextSnapshotFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -199,7 +201,8 @@ public class HarnessRuntimeConfiguration {
       ClusterNodeRegistry clusterNodeRegistry,
       ClusterInternalAuthentication clusterInternalAuthentication,
       @Qualifier("clusterInternalHttpClient") HttpClient clusterInternalHttpClient,
-      RealtimePayloadBuffer realtimePayloadBuffer) {
+      RealtimePayloadBuffer realtimePayloadBuffer,
+      ContextSnapshotFactory contextSnapshotFactory) {
     JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
     ClusterRealtimePayloadClient payloadClient =
         new ClusterRealtimePayloadClient(
@@ -213,7 +216,8 @@ public class HarnessRuntimeConfiguration {
         clusterNodePresence::hasOtherActiveNodes,
         payloadClient::fetch,
         realtimePayloadBuffer,
-        Executors.newVirtualThreadPerTaskExecutor());
+        ContextExecutorService.wrap(
+            Executors.newVirtualThreadPerTaskExecutor(), contextSnapshotFactory));
   }
 
   /** 流式追帧通知的严格 envelope codec；仅供 realtime 专用 LISTEN 连接与跨节点发布使用。 */
@@ -363,8 +367,10 @@ public class HarnessRuntimeConfiguration {
 
   /** Model 执行线程与定时刷新任务：每个任务一个虚拟线程（执行线程在 Provider 调用期间阻塞）。 */
   @Bean(destroyMethod = "close")
-  public ExecutorService harnessModelExecutionExecutor() {
-    return Executors.newVirtualThreadPerTaskExecutor();
+  public ExecutorService harnessModelExecutionExecutor(
+      ContextSnapshotFactory contextSnapshotFactory) {
+    return ContextExecutorService.wrap(
+        Executors.newVirtualThreadPerTaskExecutor(), contextSnapshotFactory);
   }
 
   /** 退出确认 write-ahead journal。部署目录必须是持久卷，且每个 Studio 实例独占；文件锁在进程生命周期内持有。 */
