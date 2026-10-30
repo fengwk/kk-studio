@@ -1,0 +1,1103 @@
+package fun.fengwk.kkstudio.harness.runtime.thread;
+
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import org.junit.jupiter.api.Test;
+
+import java.time.Instant;
+import java.util.UUID;
+
+/** ThreadState durable 字段与不变量校验。 */
+class ThreadStateTest {
+
+  private static final Instant CREATED = Instant.parse("2026-01-01T00:00:00Z");
+  private static final String CREATION_REQUEST_HASH =
+      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+  private static final UUID SESSION_ID = id(1_000_000L);
+
+  @Test
+  void acceptsValidDurableFields() {
+    // 测试意图：验证合法的 ThreadState 根线程（parentThreadId 为 null）与子线程（parentThreadId 非空）能正常构造并暴露字段。
+    ThreadState rootState =
+        state(id(7), null, id(42), true, ThreadExecutionControl.RUNNABLE, 3L, 5L, CREATED);
+
+    assertEquals(id(7), rootState.id());
+    assertEquals(SESSION_ID, rootState.sessionId());
+    assertNull(rootState.parentThreadId());
+    assertEquals(id(42), rootState.headEntryId());
+    assertEquals(CREATION_REQUEST_HASH, rootState.creationRequestHash());
+    assertEquals("main", rootState.name());
+    assertTrue(rootState.yoloEnabled());
+    assertEquals(ThreadExecutionControl.RUNNABLE, rootState.executionControl());
+    assertEquals(3L, rootState.nextCommandSequence());
+    assertEquals(5L, rootState.version());
+    assertEquals(CREATED, rootState.createdAt());
+    assertEquals(CREATED, rootState.updatedAt());
+
+    assertEquals(0L, rootState.inputThroughSequence());
+    assertTrue(rootState.executionControl().isRunnable());
+    assertFalse(rootState.executionControl().isStopped());
+
+    ThreadState childState =
+        state(
+            id(8),
+            id(7),
+            id(43),
+            false,
+            ThreadExecutionControl.RUNNABLE,
+            1L,
+            0L,
+            CREATED.plusSeconds(2));
+    assertEquals(id(7), childState.parentThreadId());
+    // 子线程没有独立开关，因此 yoloEnabled 为 false。
+    assertFalse(childState.yoloEnabled());
+    assertEquals(ThreadExecutionControl.RUNNABLE, childState.executionControl());
+    assertTrue(childState.executionControl().isRunnable());
+  }
+
+  @Test
+  void rejectsInvalidIdentityAndSequence() {
+    // 测试意图：验证不可变 identity 字段校验，包括 null 拒绝、parent 指向自身拒绝以及 sequence/version 下界约束。
+    assertThrows(
+        IllegalArgumentException.class, () -> state(id(7), id(42), false, 0L, 0L, CREATED));
+    assertThrows(
+        IllegalArgumentException.class, () -> state(id(7), id(42), false, 1L, -1L, CREATED));
+    assertThrows(NullPointerException.class, () -> state(null, id(42), false, 1L, 0L, CREATED));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new ThreadState(
+                id(7),
+                null,
+                null,
+                id(42),
+                CREATION_REQUEST_HASH,
+                "main",
+                id(7),
+                false,
+                SpawnTrigger.USER,
+                ThreadConstraints.NONE,
+                ThreadExecutionControl.RUNNABLE,
+                0L,
+                1L,
+                0L,
+                CREATED,
+                CREATED));
+    assertThrows(NullPointerException.class, () -> state(id(7), null, false, 1L, 0L, CREATED));
+    // 拒绝 parentThreadId 指向自身
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ThreadState(
+                id(7),
+                SESSION_ID,
+                id(7),
+                id(42),
+                CREATION_REQUEST_HASH,
+                "main",
+                id(7),
+                false,
+                SpawnTrigger.MODEL_TOOL,
+                ThreadConstraints.NONE,
+                ThreadExecutionControl.RUNNABLE,
+                0L,
+                1L,
+                0L,
+                CREATED,
+                CREATED));
+    // 拒绝 status 为 null
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new ThreadState(
+                id(7),
+                SESSION_ID,
+                null,
+                id(42),
+                CREATION_REQUEST_HASH,
+                "main",
+                id(7),
+                false,
+                SpawnTrigger.USER,
+                ThreadConstraints.NONE,
+                null,
+                0L,
+                1L,
+                0L,
+                CREATED,
+                CREATED));
+    // 拒绝非法的 creationRequestHash
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ThreadState(
+                id(7),
+                SESSION_ID,
+                null,
+                id(42),
+                null,
+                "main",
+                id(7),
+                false,
+                SpawnTrigger.USER,
+                ThreadConstraints.NONE,
+                ThreadExecutionControl.RUNNABLE,
+                0L,
+                1L,
+                0L,
+                CREATED,
+                CREATED));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ThreadState(
+                id(7),
+                SESSION_ID,
+                null,
+                id(42),
+                "invalid-hash",
+                "main",
+                id(7),
+                false,
+                SpawnTrigger.USER,
+                ThreadConstraints.NONE,
+                ThreadExecutionControl.RUNNABLE,
+                0L,
+                1L,
+                0L,
+                CREATED,
+                CREATED));
+  }
+
+  @Test
+  void rejectsNullTimestamps() {
+    // 测试意图：验证时间戳不可空。
+    assertThrows(
+        NullPointerException.class, () -> state(id(7), id(42), false, 1L, 0L, (Instant) null));
+  }
+
+  @Test
+  void canonicalConstructorEstablishesCanonicalState() {
+    // 测试意图：验证规范全参构造器正确设置初始值（sequence=1, version=0, createdAt=updatedAt=now）。
+    Instant now = CREATED.plusSeconds(10);
+    ThreadState initialViaConstructor =
+        new ThreadState(
+            id(101),
+            SESSION_ID,
+            id(7),
+            id(42),
+            CREATION_REQUEST_HASH,
+            "child-branch",
+            id(7),
+            false,
+            SpawnTrigger.MODEL_TOOL,
+            ThreadConstraints.NONE,
+            ThreadExecutionControl.RUNNABLE,
+            0L,
+            1L,
+            0L,
+            now,
+            now);
+
+    assertEquals(id(101), initialViaConstructor.id());
+    assertEquals(SESSION_ID, initialViaConstructor.sessionId());
+    assertEquals(id(7), initialViaConstructor.parentThreadId());
+    assertEquals(id(42), initialViaConstructor.headEntryId());
+    assertEquals(CREATION_REQUEST_HASH, initialViaConstructor.creationRequestHash());
+    assertEquals("child-branch", initialViaConstructor.name());
+    assertEquals(id(7), initialViaConstructor.rootThreadId());
+    assertEquals(ThreadExecutionControl.RUNNABLE, initialViaConstructor.executionControl());
+    assertEquals(1L, initialViaConstructor.nextCommandSequence());
+    assertEquals(0L, initialViaConstructor.version());
+    assertEquals(now, initialViaConstructor.createdAt());
+    assertEquals(now, initialViaConstructor.updatedAt());
+
+    ThreadState initialRoot =
+        new ThreadState(
+            id(102),
+            SESSION_ID,
+            null,
+            id(43),
+            CREATION_REQUEST_HASH,
+            "root-thread",
+            id(102),
+            false,
+            SpawnTrigger.USER,
+            ThreadConstraints.NONE,
+            ThreadExecutionControl.RUNNABLE,
+            0L,
+            1L,
+            0L,
+            now,
+            now);
+
+    assertEquals(id(102), initialRoot.id());
+    assertNull(initialRoot.parentThreadId());
+    assertEquals(ThreadExecutionControl.RUNNABLE, initialRoot.executionControl());
+    assertEquals(1L, initialRoot.nextCommandSequence());
+    assertEquals(0L, initialRoot.version());
+    assertEquals(now, initialRoot.createdAt());
+    assertEquals(now, initialRoot.updatedAt());
+  }
+
+  @Test
+  void changeLifecycleStatusBumpsVersionByOneAndPreservesFields() {
+    // 测试意图：验证 changeLifecycleStatus 转换方法将 status 更新、version 严格 +1、并完整保留 parent 与其他 durable 字段。
+    ThreadState stored =
+        state(id(7), id(100), id(42), false, ThreadExecutionControl.RUNNABLE, 3L, 5L, CREATED);
+
+    ThreadState idle =
+        stored.changeExecutionControl(ThreadExecutionControl.RUNNABLE, CREATED.plusSeconds(1));
+    assertEquals(ThreadExecutionControl.RUNNABLE, idle.executionControl());
+    assertEquals(6L, idle.version());
+    assertEquals(stored.id(), idle.id());
+    assertEquals(stored.sessionId(), idle.sessionId());
+    assertEquals(id(100), idle.parentThreadId());
+    assertEquals(stored.headEntryId(), idle.headEntryId());
+    assertEquals(stored.creationRequestHash(), idle.creationRequestHash());
+    assertEquals(stored.name(), idle.name());
+    assertEquals(stored.rootThreadId(), idle.rootThreadId());
+    assertEquals(stored.yoloEnabled(), idle.yoloEnabled());
+    assertEquals(stored.nextCommandSequence(), idle.nextCommandSequence());
+    assertEquals(stored.createdAt(), idle.createdAt());
+    assertEquals(CREATED.plusSeconds(1), idle.updatedAt());
+
+    ThreadState stopped =
+        idle.changeExecutionControl(ThreadExecutionControl.STOPPED, CREATED.plusSeconds(2));
+    assertEquals(ThreadExecutionControl.STOPPED, stopped.executionControl());
+    assertEquals(7L, stopped.version());
+    assertEquals(id(100), stopped.parentThreadId());
+
+    // 拒绝传入 null status
+    assertThrows(
+        NullPointerException.class,
+        () -> stored.changeExecutionControl(null, CREATED.plusSeconds(1)));
+  }
+
+  @Test
+  void reserveCommandSequencesAdvancesBatchAndVersionByOne() {
+    ThreadState stored =
+        state(id(7), id(100), id(42), false, ThreadExecutionControl.RUNNABLE, 3L, 5L, CREATED);
+    ThreadState next = stored.reserveCommandSequences(3, CREATED.plusSeconds(1));
+    assertEquals(6L, next.nextCommandSequence());
+    assertEquals(6L, next.version());
+    assertEquals(CREATED.plusSeconds(1), next.updatedAt());
+    assertEquals(stored.headEntryId(), next.headEntryId());
+    assertEquals(stored.rootThreadId(), next.rootThreadId());
+    assertEquals(stored.yoloEnabled(), next.yoloEnabled());
+    assertEquals(stored.parentThreadId(), next.parentThreadId());
+    assertEquals(stored.executionControl(), next.executionControl());
+    // 单个 sequence 等价于 count=1
+    ThreadState single = stored.reserveCommandSequences(1, CREATED.plusSeconds(1));
+    assertEquals(4L, single.nextCommandSequence());
+    assertEquals(6L, single.version());
+    assertEquals(stored.parentThreadId(), single.parentThreadId());
+    assertEquals(stored.executionControl(), single.executionControl());
+  }
+
+  @Test
+  void reserveCommandSequencesRejectsNonPositiveCountAndOverflow() {
+    ThreadState stored = state(id(7), id(42), false, 3L, 5L, CREATED);
+    assertThrows(IllegalArgumentException.class, () -> stored.reserveCommandSequences(0, CREATED));
+    assertThrows(IllegalArgumentException.class, () -> stored.reserveCommandSequences(-1, CREATED));
+    assertThrows(
+        ArithmeticException.class,
+        () ->
+            state(id(7), id(42), false, Long.MAX_VALUE, 5L, CREATED)
+                .reserveCommandSequences(2, CREATED));
+  }
+
+  @Test
+  void advanceHeadPreservesRootAndYoloAndBumpsVersionByOne() {
+    ThreadState stored =
+        state(id(7), id(100), id(42), true, ThreadExecutionControl.RUNNABLE, 3L, 5L, CREATED);
+    // head 推进恒保留当前 yolo policy（不再接受外部传入值，杜绝 terminal / resolver 路径写回过期策略），仅 bump 一次 version。
+    ThreadState head = stored.advanceHead(id(99), CREATED.plusSeconds(2));
+    assertEquals(id(99), head.headEntryId());
+    // 推进 head 必须完整保留执行根。
+    assertEquals(stored.rootThreadId(), head.rootThreadId());
+    assertEquals(stored.yoloEnabled(), head.yoloEnabled());
+    assertEquals(6L, head.version());
+    assertEquals(3L, head.nextCommandSequence());
+    assertEquals(stored.parentThreadId(), head.parentThreadId());
+    assertEquals(stored.executionControl(), head.executionControl());
+    // 再次推进同样保留 policy，不因显式传入而改写。
+    ThreadState advanced = head.advanceHead(id(99), CREATED.plusSeconds(3));
+    assertEquals(head.rootThreadId(), advanced.rootThreadId());
+    assertEquals(head.yoloEnabled(), advanced.yoloEnabled());
+    assertEquals(7L, advanced.version());
+    assertEquals(id(99), advanced.headEntryId());
+    assertEquals(3L, advanced.nextCommandSequence());
+    assertEquals(stored.parentThreadId(), advanced.parentThreadId());
+    assertEquals(stored.executionControl(), advanced.executionControl());
+    // false 值同样被保留。
+    ThreadState storedDisabled = state(id(7), id(42), false, 3L, 5L, CREATED);
+    ThreadState advancedDisabled = storedDisabled.advanceHead(id(99), CREATED.plusSeconds(2));
+    assertFalse(advancedDisabled.yoloEnabled());
+    assertEquals(6L, advancedDisabled.version());
+    assertEquals(id(99), advancedDisabled.headEntryId());
+    assertEquals(storedDisabled.parentThreadId(), advancedDisabled.parentThreadId());
+    assertEquals(storedDisabled.executionControl(), advancedDisabled.executionControl());
+  }
+
+  @Test
+  void setRootYoloBumpsVersionExactlyOnceAndPreservesCursor() {
+    // setRootYolo 只作用于执行根（parentThreadId 为 null），因此 fixture 使用根线程。
+    ThreadState stored =
+        state(id(7), null, id(42), false, ThreadExecutionControl.RUNNABLE, 3L, 5L, CREATED);
+    ThreadState enabled = stored.setRootYolo(true, CREATED.plusSeconds(2));
+    assertTrue(enabled.yoloEnabled());
+    assertEquals(6L, enabled.version());
+    assertEquals(id(42), enabled.headEntryId());
+    assertEquals(3L, enabled.nextCommandSequence());
+    assertEquals(stored.parentThreadId(), enabled.parentThreadId());
+    assertEquals(stored.executionControl(), enabled.executionControl());
+    // 再次切换同样精确 +1；时间钳制与其它转换一致。
+    ThreadState disabled = enabled.setRootYolo(false, CREATED.plusSeconds(2));
+    assertFalse(disabled.yoloEnabled());
+    assertEquals(7L, disabled.version());
+    assertEquals(CREATED.plusSeconds(2), enabled.updatedAt());
+    assertEquals(CREATED.plusSeconds(2), disabled.updatedAt());
+    assertEquals(stored.parentThreadId(), disabled.parentThreadId());
+    assertEquals(stored.executionControl(), disabled.executionControl());
+  }
+
+  @Test
+  void renameThreadNormalizesNameAndBumpsVersionExactlyOnce() {
+    ThreadState stored =
+        state(id(7), id(100), id(42), false, ThreadExecutionControl.RUNNABLE, 3L, 5L, CREATED);
+    ThreadState renamed = stored.renameThread("  新 名字  ", CREATED.plusSeconds(3));
+    // 名称规范化折叠为单行；version 精确 +1；head/sequence/yolo/parent/status/createdAt 不变。
+    assertEquals("新 名字", renamed.name());
+    assertEquals(6L, renamed.version());
+    assertEquals(stored.headEntryId(), renamed.headEntryId());
+    assertEquals(stored.nextCommandSequence(), renamed.nextCommandSequence());
+    assertEquals(stored.rootThreadId(), renamed.rootThreadId());
+    assertEquals(stored.yoloEnabled(), renamed.yoloEnabled());
+    assertEquals(stored.parentThreadId(), renamed.parentThreadId());
+    assertEquals(stored.executionControl(), renamed.executionControl());
+    assertEquals(stored.createdAt(), renamed.createdAt());
+    // renamed 是同一 stored 行的合法迁移。
+    ThreadState.validateTransition(stored, renamed);
+    // rename 后对 renamed 行再做一次同名 rename 属于新迁移（由控制面负责 no-op），version 照常严格 +1。
+    ThreadState sameName = renamed.renameThread("新 名字", CREATED.plusSeconds(3));
+    assertEquals(7L, sameName.version());
+    assertEquals("新 名字", sameName.name());
+  }
+
+  @Test
+  void renameThreadRejectsOverlongName() {
+    // Thread 名称手工上限 256 码点：rename 超长直接抛 IllegalArgumentException（绝不截断）。
+    ThreadState stored = state(id(7), id(42), false, 3L, 5L, CREATED);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> stored.renameThread("x".repeat(257), CREATED.plusSeconds(1)));
+    // 恰好 256 码点可接受。
+    assertEquals(
+        "x".repeat(256), stored.renameThread("x".repeat(256), CREATED.plusSeconds(1)).name());
+  }
+
+  @Test
+  void touchVersionBumpsVersionExactlyOnceAndPreservesFields() {
+    // 测试意图：验证 touchVersion 仅递增 version 并保留 parentThreadId 与 status。
+    ThreadState stored =
+        state(id(7), id(100), id(42), false, ThreadExecutionControl.RUNNABLE, 3L, 5L, CREATED);
+    ThreadState touched = stored.touchVersion(CREATED.plusSeconds(1));
+    assertEquals(6L, touched.version());
+    assertEquals(stored.parentThreadId(), touched.parentThreadId());
+    assertEquals(stored.executionControl(), touched.executionControl());
+    assertEquals(stored.headEntryId(), touched.headEntryId());
+    assertEquals(stored.nextCommandSequence(), touched.nextCommandSequence());
+  }
+
+  @Test
+  void validateTransitionAcceptsExactReplayAndRejectsIdentityRegression() {
+    // 测试意图：验证 validateTransition 接受完全重放，并拒绝任何 identity 变更（包括 parentThreadId 不可变）。
+    ThreadState stored =
+        state(id(7), id(100), id(42), false, ThreadExecutionControl.RUNNABLE, 3L, 5L, CREATED);
+    ThreadState.validateTransition(stored, stored);
+
+    // 拒绝 id 改变
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ThreadState.validateTransition(
+                stored,
+                state(
+                    id(8),
+                    id(100),
+                    id(42),
+                    false,
+                    ThreadExecutionControl.RUNNABLE,
+                    3L,
+                    6L,
+                    CREATED)));
+    // 拒绝 sessionId 改变
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ThreadState.validateTransition(
+                stored,
+                new ThreadState(
+                    id(7),
+                    id(999_999L),
+                    id(100),
+                    id(42),
+                    CREATION_REQUEST_HASH,
+                    "main",
+                    id(100),
+                    false,
+                    SpawnTrigger.MODEL_TOOL,
+                    ThreadConstraints.NONE,
+                    ThreadExecutionControl.RUNNABLE,
+                    0L,
+                    3L,
+                    6L,
+                    CREATED,
+                    CREATED.plusSeconds(1))));
+    // 拒绝 parentThreadId 改变（从非空变空、从空变非空、变其他 parent）
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ThreadState.validateTransition(
+                stored,
+                state(
+                    id(7),
+                    null,
+                    id(42),
+                    false,
+                    ThreadExecutionControl.RUNNABLE,
+                    3L,
+                    6L,
+                    CREATED.plusSeconds(1))));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ThreadState.validateTransition(
+                stored,
+                state(
+                    id(7),
+                    id(101),
+                    id(42),
+                    false,
+                    ThreadExecutionControl.RUNNABLE,
+                    3L,
+                    6L,
+                    CREATED.plusSeconds(1))));
+    ThreadState rootStored =
+        state(id(7), null, id(42), false, ThreadExecutionControl.RUNNABLE, 3L, 5L, CREATED);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ThreadState.validateTransition(
+                rootStored,
+                state(
+                    id(7),
+                    id(100),
+                    id(42),
+                    false,
+                    ThreadExecutionControl.RUNNABLE,
+                    3L,
+                    6L,
+                    CREATED.plusSeconds(1))));
+    // 拒绝 creationRequestHash 改变
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ThreadState.validateTransition(
+                stored,
+                new ThreadState(
+                    id(7),
+                    SESSION_ID,
+                    id(100),
+                    id(42),
+                    "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+                    "main",
+                    id(100),
+                    false,
+                    SpawnTrigger.MODEL_TOOL,
+                    ThreadConstraints.NONE,
+                    ThreadExecutionControl.RUNNABLE,
+                    0L,
+                    3L,
+                    6L,
+                    CREATED,
+                    CREATED.plusSeconds(1))));
+    // 拒绝 createdAt 改变
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ThreadState.validateTransition(
+                stored,
+                new ThreadState(
+                    id(7),
+                    SESSION_ID,
+                    id(100),
+                    id(42),
+                    CREATION_REQUEST_HASH,
+                    "main",
+                    id(100),
+                    false,
+                    SpawnTrigger.MODEL_TOOL,
+                    ThreadConstraints.NONE,
+                    ThreadExecutionControl.RUNNABLE,
+                    0L,
+                    3L,
+                    6L,
+                    CREATED.plusSeconds(1),
+                    CREATED.plusSeconds(1))));
+  }
+
+  @Test
+  void validateTransitionRejectsSequenceAndVersionRegression() {
+    ThreadState stored = state(id(7), id(42), false, 3L, 5L, CREATED.plusSeconds(2));
+    // nextCommandSequence 倒退
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ThreadState.validateTransition(
+                stored, state(id(7), id(42), false, 2L, 6L, CREATED.plusSeconds(3))));
+    // version 倒退
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ThreadState.validateTransition(
+                stored, state(id(7), id(42), false, 3L, 4L, CREATED.plusSeconds(3))));
+  }
+
+  @Test
+  void validateTransitionRequiresExactVersionIncrementOnAnyChange() {
+    ThreadState stored = state(id(7), id(42), false, 3L, 5L, CREATED);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ThreadState.validateTransition(
+                stored,
+                state(
+                    id(7),
+                    null,
+                    id(42),
+                    false,
+                    ThreadExecutionControl.RUNNABLE,
+                    4L,
+                    5L,
+                    CREATED.plusSeconds(1))));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ThreadState.validateTransition(
+                stored,
+                state(
+                    id(7),
+                    null,
+                    id(43),
+                    false,
+                    ThreadExecutionControl.RUNNABLE,
+                    3L,
+                    5L,
+                    CREATED.plusSeconds(1))));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ThreadState.validateTransition(
+                stored,
+                state(
+                    id(7),
+                    null,
+                    id(42),
+                    false,
+                    ThreadExecutionControl.RUNNABLE,
+                    3L,
+                    7L,
+                    CREATED.plusSeconds(1))));
+    // status 改变但 version 未 bump 时拒绝
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ThreadState.validateTransition(
+                stored,
+                state(
+                    id(7),
+                    null,
+                    id(42),
+                    false,
+                    ThreadExecutionControl.RUNNABLE,
+                    3L,
+                    5L,
+                    CREATED.plusSeconds(1))));
+    // 即便仅修改 updatedAt，仍必须 bump version
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ThreadState.validateTransition(
+                stored,
+                state(
+                    id(7),
+                    null,
+                    id(42),
+                    false,
+                    ThreadExecutionControl.RUNNABLE,
+                    3L,
+                    5L,
+                    CREATED.plusSeconds(1))));
+    // status 改变且 version 严格 +1 允许通过
+    ThreadState.validateTransition(
+        stored,
+        state(
+            id(7),
+            null,
+            id(42),
+            false,
+            ThreadExecutionControl.RUNNABLE,
+            3L,
+            6L,
+            CREATED.plusSeconds(1)));
+    ThreadState.validateTransition(
+        stored,
+        state(
+            id(7),
+            null,
+            id(42),
+            false,
+            ThreadExecutionControl.RUNNABLE,
+            3L,
+            6L,
+            CREATED.plusSeconds(1)));
+  }
+
+  /** 执行根与 YOLO 开关在构造期强约束：根指向自身；子指向别的执行根且不持有开关。 */
+  @Test
+  void rejectsRootAndYoloShapeViolations() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ThreadState(
+                id(7),
+                SESSION_ID,
+                null,
+                id(42),
+                CREATION_REQUEST_HASH,
+                "main",
+                id(9),
+                false,
+                SpawnTrigger.USER,
+                ThreadConstraints.NONE,
+                ThreadExecutionControl.RUNNABLE,
+                0L,
+                1L,
+                0L,
+                CREATED,
+                CREATED));
+    // 子线程不能自带开关
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ThreadState(
+                id(7),
+                SESSION_ID,
+                id(9),
+                id(42),
+                CREATION_REQUEST_HASH,
+                "main",
+                id(7),
+                true,
+                SpawnTrigger.MODEL_TOOL,
+                ThreadConstraints.NONE,
+                ThreadExecutionControl.RUNNABLE,
+                0L,
+                1L,
+                0L,
+                CREATED,
+                CREATED));
+    // 子线程不能是自身的执行根
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ThreadState(
+                id(7),
+                SESSION_ID,
+                id(9),
+                id(42),
+                CREATION_REQUEST_HASH,
+                "main",
+                id(7),
+                false,
+                SpawnTrigger.MODEL_TOOL,
+                ThreadConstraints.NONE,
+                ThreadExecutionControl.RUNNABLE,
+                0L,
+                1L,
+                0L,
+                CREATED,
+                CREATED));
+  }
+
+  /** 执行根创建后不可变：validateTransition 拒绝换根，即使 version 严格 +1；同根推进仍允许。 */
+  @Test
+  void validateTransitionRejectsChangingTheExecutionRoot() {
+    ThreadState stored =
+        state(id(8), id(7), id(43), false, ThreadExecutionControl.RUNNABLE, 1L, 5L, CREATED);
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ThreadState.validateTransition(
+                stored,
+                new ThreadState(
+                    id(8),
+                    SESSION_ID,
+                    id(7),
+                    id(43),
+                    CREATION_REQUEST_HASH,
+                    "main",
+                    id(100),
+                    false,
+                    SpawnTrigger.MODEL_TOOL,
+                    ThreadConstraints.NONE,
+                    ThreadExecutionControl.RUNNABLE,
+                    0L,
+                    1L,
+                    6L,
+                    CREATED,
+                    CREATED.plusSeconds(1))));
+
+    ThreadState.validateTransition(
+        stored,
+        new ThreadState(
+            id(8),
+            SESSION_ID,
+            id(7),
+            id(43),
+            CREATION_REQUEST_HASH,
+            "main",
+            id(7),
+            false,
+            SpawnTrigger.MODEL_TOOL,
+            ThreadConstraints.NONE,
+            ThreadExecutionControl.RUNNABLE,
+            0L,
+            1L,
+            6L,
+            CREATED,
+            CREATED.plusSeconds(1)));
+  }
+
+  /** 只有执行根拥有 YOLO 开关：子线程调用 setRootYolo 必须拒绝，根调用仅切换自身 开关 且 version +1。 */
+  @Test
+  void childThreadCannotOwnYoloSwitch() {
+    ThreadState child =
+        state(id(8), id(7), id(43), false, ThreadExecutionControl.RUNNABLE, 1L, 5L, CREATED);
+    assertThrows(
+        IllegalArgumentException.class, () -> child.setRootYolo(true, CREATED.plusSeconds(1)));
+
+    ThreadState root =
+        state(id(7), null, id(42), false, ThreadExecutionControl.RUNNABLE, 3L, 5L, CREATED);
+    ThreadState enabled = root.setRootYolo(true, CREATED.plusSeconds(1));
+    assertTrue(enabled.yoloEnabled());
+    assertEquals(root.id(), enabled.rootThreadId());
+    assertEquals(6L, enabled.version());
+    assertEquals(root.headEntryId(), enabled.headEntryId());
+    assertEquals(root.nextCommandSequence(), enabled.nextCommandSequence());
+  }
+
+  @Test
+  void rejectsRootOnlyYoloAndInvalidInitialSequenceBounds() {
+    // 子线程携带 yolo、负输入水位、非法 nextCommandSequence 都必须在构造期 fail closed。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ThreadState(
+                id(7),
+                SESSION_ID,
+                id(8),
+                id(42),
+                CREATION_REQUEST_HASH,
+                "main",
+                id(8),
+                true,
+                SpawnTrigger.MODEL_TOOL,
+                ThreadConstraints.NONE,
+                ThreadExecutionControl.RUNNABLE,
+                0L,
+                1L,
+                0L,
+                CREATED,
+                CREATED));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ThreadState(
+                id(7),
+                SESSION_ID,
+                null,
+                id(42),
+                CREATION_REQUEST_HASH,
+                "main",
+                id(7),
+                false,
+                SpawnTrigger.MODEL_TOOL,
+                ThreadConstraints.NONE,
+                ThreadExecutionControl.RUNNABLE,
+                -1L,
+                1L,
+                0L,
+                CREATED,
+                CREATED));
+  }
+
+  @Test
+  void sequenceAdvanceMethodsPreserveMonotonicBounds() {
+    // 所有 cursor/输入水位推进都必须严格 +1 version，并拒绝 count=0 或水位回退。
+    ThreadState stored =
+        state(id(7), null, id(42), false, ThreadExecutionControl.RUNNABLE, 3L, 5L, CREATED);
+
+    ThreadState reserved =
+        stored.reserveCommandSequencesAndSetControl(2, ThreadExecutionControl.RUNNABLE, CREATED);
+    assertEquals(5L, reserved.nextCommandSequence());
+    assertEquals(6L, reserved.version());
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            stored.reserveCommandSequencesAndSetControl(
+                0, ThreadExecutionControl.RUNNABLE, CREATED));
+
+    ThreadState advanced = stored.advanceHeadAndInputThroughSequence(id(43), 1L, CREATED);
+    assertEquals(id(43), advanced.headEntryId());
+    assertEquals(1L, advanced.inputThroughSequence());
+    assertEquals(6L, advanced.version());
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> stored.advanceHeadAndInputThroughSequence(id(43), -1L, CREATED));
+
+    ThreadState inputAdvanced = stored.advanceInputThroughSequence(2L, CREATED);
+    assertEquals(2L, inputAdvanced.inputThroughSequence());
+    assertEquals(6L, inputAdvanced.version());
+    assertThrows(
+        IllegalArgumentException.class, () -> stored.advanceInputThroughSequence(-1L, CREATED));
+
+    ThreadState reservedHeadAndInput =
+        stored.reserveCommandSequencesAdvanceHeadAndInput(1, id(43), 1L, CREATED);
+    assertEquals(4L, reservedHeadAndInput.nextCommandSequence());
+    assertEquals(id(43), reservedHeadAndInput.headEntryId());
+    assertEquals(1L, reservedHeadAndInput.inputThroughSequence());
+    assertEquals(6L, reservedHeadAndInput.version());
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> stored.reserveCommandSequencesAdvanceHeadAndInput(0, id(43), 0L, CREATED));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> stored.reserveCommandSequencesAdvanceHeadAndInput(1, id(43), -1L, CREATED));
+  }
+
+  @Test
+  void transitionRejectsInputWatermarkRegression() {
+    ThreadState stored =
+        state(id(7), null, id(42), false, ThreadExecutionControl.RUNNABLE, 3L, 5L, CREATED)
+            .advanceInputThroughSequence(2L, CREATED);
+    ThreadState regressed =
+        new ThreadState(
+            stored.id(),
+            stored.sessionId(),
+            stored.parentThreadId(),
+            stored.headEntryId(),
+            stored.creationRequestHash(),
+            stored.name(),
+            stored.rootThreadId(),
+            stored.yoloEnabled(),
+            stored.spawnTrigger(),
+            stored.constraints(),
+            stored.executionControl(),
+            1L,
+            stored.nextCommandSequence(),
+            stored.version() + 1,
+            stored.createdAt(),
+            stored.updatedAt());
+    ThreadState next =
+        new ThreadState(
+            stored.id(),
+            stored.sessionId(),
+            stored.parentThreadId(),
+            stored.headEntryId(),
+            stored.creationRequestHash(),
+            stored.name(),
+            stored.rootThreadId(),
+            stored.yoloEnabled(),
+            stored.spawnTrigger(),
+            stored.constraints(),
+            stored.executionControl(),
+            2L,
+            stored.nextCommandSequence(),
+            stored.version() + 1,
+            stored.createdAt(),
+            stored.updatedAt());
+    assertThrows(
+        IllegalArgumentException.class, () -> ThreadState.validateTransition(stored, regressed));
+    ThreadState.validateTransition(stored, next);
+  }
+
+  private static ThreadState state(
+      UUID id,
+      UUID headEntryId,
+      boolean yoloEnabled,
+      long nextCommandSequence,
+      long version,
+      Instant updatedAt) {
+    return state(
+        id,
+        null,
+        headEntryId,
+        yoloEnabled,
+        ThreadExecutionControl.RUNNABLE,
+        nextCommandSequence,
+        version,
+        updatedAt);
+  }
+
+  private static ThreadState state(
+      UUID id,
+      UUID parentThreadId,
+      UUID headEntryId,
+      boolean yoloEnabled,
+      ThreadExecutionControl executionControl,
+      long nextCommandSequence,
+      long version,
+      Instant updatedAt) {
+    // 根线程使用独立开关，子线程的执行根即 fixture 的 parent。
+    return new ThreadState(
+        id,
+        SESSION_ID,
+        parentThreadId,
+        headEntryId,
+        CREATION_REQUEST_HASH,
+        "main",
+        parentThreadId == null ? id : parentThreadId,
+        parentThreadId == null && yoloEnabled,
+        SpawnTrigger.MODEL_TOOL,
+        ThreadConstraints.NONE,
+        executionControl,
+        0L,
+        nextCommandSequence,
+        version,
+        CREATED,
+        updatedAt);
+  }
+
+  /** 创建来源与冻结约束是持久身份的一部分：缺失、USER 带父、以及创建后改写都必须拒绝。 */
+  @Test
+  void rejectsMissingOrChangedSpawnFacts() {
+    ThreadState stored =
+        state(id(7), id(100), id(42), false, ThreadExecutionControl.RUNNABLE, 3L, 5L, CREATED);
+
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new ThreadState(
+                id(7),
+                SESSION_ID,
+                id(100),
+                id(42),
+                CREATION_REQUEST_HASH,
+                "main",
+                id(100),
+                false,
+                null,
+                ThreadConstraints.NONE,
+                ThreadExecutionControl.RUNNABLE,
+                0L,
+                3L,
+                5L,
+                CREATED,
+                CREATED));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new ThreadState(
+                id(7),
+                SESSION_ID,
+                id(100),
+                id(42),
+                CREATION_REQUEST_HASH,
+                "main",
+                id(100),
+                false,
+                SpawnTrigger.MODEL_TOOL,
+                null,
+                ThreadExecutionControl.RUNNABLE,
+                0L,
+                3L,
+                5L,
+                CREATED,
+                CREATED));
+    // USER 只直接创建执行根；带父的 USER 来源必须拒绝。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ThreadState(
+                id(7),
+                SESSION_ID,
+                id(100),
+                id(42),
+                CREATION_REQUEST_HASH,
+                "main",
+                id(100),
+                false,
+                SpawnTrigger.USER,
+                ThreadConstraints.NONE,
+                ThreadExecutionControl.RUNNABLE,
+                0L,
+                3L,
+                5L,
+                CREATED,
+                CREATED));
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ThreadState.validateTransition(
+                stored,
+                new ThreadState(
+                    id(7),
+                    SESSION_ID,
+                    id(100),
+                    id(42),
+                    CREATION_REQUEST_HASH,
+                    "main",
+                    id(100),
+                    false,
+                    SpawnTrigger.CONTROLLER,
+                    ThreadConstraints.NONE,
+                    ThreadExecutionControl.RUNNABLE,
+                    0L,
+                    3L,
+                    6L,
+                    CREATED,
+                    CREATED.plusSeconds(1))));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ThreadState.validateTransition(
+                stored,
+                new ThreadState(
+                    id(7),
+                    SESSION_ID,
+                    id(100),
+                    id(42),
+                    CREATION_REQUEST_HASH,
+                    "main",
+                    id(100),
+                    false,
+                    SpawnTrigger.MODEL_TOOL,
+                    new ThreadConstraints(128, true, false),
+                    ThreadExecutionControl.RUNNABLE,
+                    0L,
+                    3L,
+                    6L,
+                    CREATED,
+                    CREATED.plusSeconds(1))));
+  }
+}

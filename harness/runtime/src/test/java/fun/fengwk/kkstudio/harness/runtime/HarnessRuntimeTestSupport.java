@@ -1,0 +1,943 @@
+package fun.fengwk.kkstudio.harness.runtime;
+
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import fun.fengwk.kkstudio.common.result.TextResultContent;
+import fun.fengwk.kkstudio.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.model.ModelCost;
+import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
+import fun.fengwk.kkstudio.harness.model.ModelInputModality;
+import fun.fengwk.kkstudio.harness.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
+import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
+import fun.fengwk.kkstudio.harness.runtime.driver.AgentDriver;
+import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnCapabilities;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
+import fun.fengwk.kkstudio.harness.runtime.session.Session;
+import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.testing.FakeAgentDriver;
+import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.runtime.thread.SystemReminder;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
+import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
+import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
+import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
+import fun.fengwk.kkstudio.harness.tool.ToolCall;
+import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.ToolResult;
+import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
+
+import java.lang.reflect.Proxy;
+import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.function.Consumer;
+import java.util.function.Function;
+
+/**
+ * HarnessRuntime 控制面测试用的包内 fixture 构建器：基于 {@link InMemoryHarnessStore} 提供原子的
+ * Session/Entry/Thread/Invocation/Work 种子，以及小型 value 构建器。
+ */
+public final class HarnessRuntimeTestSupport {
+
+  static final CompactionConfigProvider DEFAULT_COMPACTION_PROVIDER =
+      () -> CompactionConfig.DEFAULT;
+
+  static final UUID OWNER_THREAD_ID = new UUID(0L, 1L);
+  static final Instant T0 = Instant.ofEpochMilli(1_000);
+  static final Instant T1 = Instant.ofEpochMilli(2_000);
+  static final Instant T2 = Instant.ofEpochMilli(3_000);
+  static final Instant T3 = Instant.ofEpochMilli(4_000);
+  static final Instant T5 = Instant.ofEpochMilli(6_000);
+  static final Instant T6 = Instant.ofEpochMilli(7_000);
+
+  /** 测试种子用的合法 64 位小写 SHA-256 creation request hash（非 NEW_SESSION/ENTRY 路径的任意固定值）。 */
+  public static final String CREATION_REQUEST_HASH =
+      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+  static final EnvironmentId ENV = EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
+  static final EnvironmentId ENV2 = EnvironmentId.parse("22222222-2222-2222-2222-222222222222");
+
+  private HarnessRuntimeTestSupport() {}
+
+  /** 创建仅带默认/未使用依赖的测试 Runtime 控制面。 */
+  static HarnessRuntime runtime(HarnessStore store, Clock clock) {
+    useClock(store, clock);
+    return new HarnessRuntime(store, new FakeAgentDriver(), DEFAULT_COMPACTION_PROVIDER);
+  }
+
+  /** 创建带指定 Driver 与 compaction provider 的测试 Runtime。 */
+  static HarnessRuntime runtime(
+      HarnessStore store,
+      Clock clock,
+      AgentDriver driver,
+      CompactionConfigProvider compactionConfigProvider) {
+    useClock(store, clock);
+    return new HarnessRuntime(store, driver, compactionConfigProvider);
+  }
+
+  /** 创建带 local execution canceller 的测试 Runtime。 */
+  static HarnessRuntime runtime(
+      HarnessStore store,
+      Clock clock,
+      Consumer<UUID> modelCanceller,
+      Consumer<UUID> toolCanceller) {
+    useClock(store, clock);
+    return new HarnessRuntime(
+        store, new FakeAgentDriver(), DEFAULT_COMPACTION_PROVIDER, modelCanceller, toolCanceller);
+  }
+
+  /** 测试时钟驱动内存 store 的事务时间（生产实现取数据库时钟）。 */
+  static void useClock(HarnessStore store, Clock clock) {
+    if (store instanceof InMemoryHarnessStore memory) {
+      memory.setClock(clock);
+    }
+  }
+
+  /** 测试专用：转调 StopControl 的确定性子树 stopRequestId 推导，不扩大生产 API。 */
+  public static UUID deriveChildStopRequestId(UUID parentStopRequestId, UUID childThreadId) {
+    return StopControl.deriveChildStopRequestId(parentStopRequestId, childThreadId);
+  }
+
+  /** 固定 UTC 的测试时钟，可推进 instant 用于 replay/竞态测试。 */
+  static final class TestClock extends Clock {
+    private Instant instant;
+
+    TestClock(Instant instant) {
+      this.instant = instant;
+    }
+
+    void advance(Instant value) {
+      this.instant = value;
+    }
+
+    @Override
+    public ZoneId getZone() {
+      return ZoneOffset.UTC;
+    }
+
+    @Override
+    public Clock withZone(ZoneId zone) {
+      return this;
+    }
+
+    @Override
+    public Instant instant() {
+      return instant;
+    }
+  }
+
+  public record Baseline(UUID sessionId, UUID rootEntryId, UUID threadId) {}
+
+  record TurnBaseline(UUID sessionId, UUID rootEntryId, UUID turnStartEntryId, UUID threadId) {}
+
+  record ToolBaseline(
+      UUID sessionId,
+      UUID rootEntryId,
+      UUID turnStartEntryId,
+      UUID threadId,
+      UUID assistantEntryId,
+      UUID modelId,
+      UUID toolId) {}
+
+  record MultiToolBaseline(
+      UUID sessionId,
+      UUID rootEntryId,
+      UUID turnStartEntryId,
+      UUID threadId,
+      UUID assistantEntryId,
+      UUID modelId,
+      List<UUID> toolIds) {}
+
+  record ModelFreeMultiToolBaseline(
+      UUID sessionId,
+      UUID rootEntryId,
+      UUID turnStartEntryId,
+      UUID threadId,
+      UUID assistantEntryId,
+      List<UUID> toolIds) {}
+
+  record ContinuationBaseline(
+      UUID sessionId, UUID rootEntryId, UUID turnEndEntryId, UUID threadId) {}
+
+  /** Session + ROOT + Thread(head 指向 ROOT)；静默的 IDLE_OR_HISTORICAL baseline。 */
+  public static Baseline seedBaseline(InMemoryHarnessStore store) {
+    return store.transaction(
+        tx -> {
+          UUID sessionId = tx.nextId();
+          UUID rootEntryId = tx.nextId();
+          UUID threadId = tx.nextId();
+          tx.insertSession(session(sessionId));
+          tx.insertEntry(rootEntry(rootEntryId, sessionId));
+          tx.insertThread(thread(threadId, sessionId, rootEntryId));
+          return new Baseline(sessionId, rootEntryId, threadId);
+        });
+  }
+
+  /** Session + ROOT + 打开的 TURN_START(INPUT) + Thread(head 指向 TURN_START)。 */
+  static TurnBaseline seedOpenTurn(InMemoryHarnessStore store) {
+    return store.transaction(
+        tx -> {
+          UUID sessionId = tx.nextId();
+          UUID rootEntryId = tx.nextId();
+          UUID turnStartEntryId = tx.nextId();
+          UUID threadId = tx.nextId();
+          tx.insertSession(session(sessionId));
+          tx.insertEntry(rootEntry(rootEntryId, sessionId));
+          tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1, threadId));
+          tx.insertThread(thread(threadId, sessionId, turnStartEntryId));
+          return new TurnBaseline(sessionId, rootEntryId, turnStartEntryId, threadId);
+        });
+  }
+
+  /** TOOL baseline：无 Model 父行，assistant 上挂一个 READY bash ToolInvocation。 */
+  static ToolBaseline seedToolBaseline(InMemoryHarnessStore store) {
+    MultiToolBaseline multi = seedToolBaseline(store, 1);
+    return new ToolBaseline(
+        multi.sessionId(),
+        multi.rootEntryId(),
+        multi.turnStartEntryId(),
+        multi.threadId(),
+        multi.assistantEntryId(),
+        null,
+        multi.toolIds().get(0));
+  }
+
+  /** 多 sibling 的 TOOL baseline：无 Model 父行，assistant 上携带 {@code toolCount} 个 bash tool call。 */
+  static MultiToolBaseline seedToolBaseline(InMemoryHarnessStore store, int toolCount) {
+    ModelFreeMultiToolBaseline multi = seedModelFreeToolBaseline(store, toolCount);
+    return new MultiToolBaseline(
+        multi.sessionId(),
+        multi.rootEntryId(),
+        multi.turnStartEntryId(),
+        multi.threadId(),
+        multi.assistantEntryId(),
+        null,
+        multi.toolIds());
+  }
+
+  /**
+   * 无 Model 父行的 TOOL baseline：ROOT -&gt; TURN_START(INPUT, frozen bash binding) -&gt; USER -&gt;
+   * ASSISTANT(call-1)，挂一个 READY ToolInvocation，thread head 指向 assistant entry。
+   *
+   * <p>用于验证合法 Assistant 工具批次在没有任何 ModelInvocation 时仍可审批、执行与 Stop；Tool 的路径归属完全由
+   * Thread/TurnStart/Assistant 决定。
+   */
+  static ToolBaseline seedModelFreeToolBaseline(InMemoryHarnessStore store) {
+    ModelFreeMultiToolBaseline multi = seedModelFreeToolBaseline(store, 1);
+    return new ToolBaseline(
+        multi.sessionId(),
+        multi.rootEntryId(),
+        multi.turnStartEntryId(),
+        multi.threadId(),
+        multi.assistantEntryId(),
+        null,
+        multi.toolIds().get(0));
+  }
+
+  /** 无 Model 父行的完整多工具批次，调用顺序与 sibling 序号一致。 */
+  static ModelFreeMultiToolBaseline seedModelFreeToolBaseline(
+      InMemoryHarnessStore store, int toolCount) {
+    if (toolCount <= 0) {
+      throw new IllegalArgumentException("toolCount must be positive");
+    }
+    String[] callIds = new String[toolCount];
+    for (int i = 0; i < toolCount; i++) {
+      callIds[i] = toolCount == 1 ? "call-1" : "call-" + i;
+    }
+    return store.transaction(
+        tx -> {
+          UUID sessionId = tx.nextId();
+          UUID rootEntryId = tx.nextId();
+          UUID turnStartEntryId = tx.nextId();
+          UUID threadId = tx.nextId();
+          tx.insertSession(session(sessionId));
+          tx.insertEntry(rootEntry(rootEntryId, sessionId));
+          tx.insertEntry(
+              turnStartEntry(
+                  turnStartEntryId,
+                  sessionId,
+                  rootEntryId,
+                  T1,
+                  threadId,
+                  capabilities(hostBinding())));
+          ThreadState thread = thread(threadId, sessionId, turnStartEntryId);
+          tx.insertThread(thread);
+          UUID userEntryId = tx.nextId();
+          tx.insertEntry(userMessageEntry(userEntryId, sessionId, turnStartEntryId, T1));
+          UUID assistantEntryId = tx.nextId();
+          tx.insertEntry(
+              new Entry(assistantEntryId, sessionId, userEntryId, assistantPayload(callIds), T1));
+          List<UUID> toolIds = new ArrayList<>(toolCount);
+          List<ToolInvocation> invocations = new ArrayList<>(toolCount);
+          for (int i = 0; i < toolCount; i++) {
+            UUID toolId = tx.nextId();
+            toolIds.add(toolId);
+            invocations.add(
+                toolInvocation(
+                    toolId, threadId, turnStartEntryId, assistantEntryId, i, callIds[i], T1));
+          }
+          tx.insertToolInvocations(invocations);
+          tx.updateThread(thread.advanceHead(assistantEntryId, T2));
+          return new ModelFreeMultiToolBaseline(
+              sessionId,
+              rootEntryId,
+              turnStartEntryId,
+              threadId,
+              assistantEntryId,
+              List.copyOf(toolIds));
+        });
+  }
+
+  /** 将 TOOL baseline 上的 ToolInvocation 推进到 WAITING_INPUT（人工问卷等待）。 */
+  static ToolInvocation setWaitingInput(InMemoryHarnessStore store, UUID toolId) {
+    return store.transaction(
+        tx -> {
+          ToolInvocation tool = tx.lockToolInvocation(toolId).orElseThrow();
+          ToolInvocation waiting = tool.requestInput(T3);
+          tx.updateToolInvocations(List.of(waiting));
+          return waiting;
+        });
+  }
+
+  /** 将 TOOL baseline 上的 ToolInvocation 推进到 WAITING_APPROVAL（TOOL_ACTIVE 上下文）。 */
+  static ToolInvocation setWaitingApproval(InMemoryHarnessStore store, ToolBaseline baseline) {
+    return setWaitingApproval(store, baseline.toolId());
+  }
+
+  /** 将指定 id 的 ToolInvocation 推进到 WAITING_APPROVAL（多 sibling 的 TOOL_ACTIVE 上下文）。 */
+  static ToolInvocation setWaitingApproval(InMemoryHarnessStore store, UUID toolId) {
+    return store.transaction(
+        tx -> {
+          ToolInvocation tool = tx.lockToolInvocation(toolId).orElseThrow();
+          ToolInvocation waiting = tool.requestApproval("tool approval requested", T3);
+          tx.updateToolInvocations(List.of(waiting));
+          return waiting;
+        });
+  }
+
+  /** 将 ToolInvocation 标记为 terminal 但未应用结果（TOOL_TERMINAL_PENDING）。 */
+  static ToolInvocation cancelTool(InMemoryHarnessStore store, ToolBaseline baseline) {
+    return cancelTool(store, baseline.toolId());
+  }
+
+  /** 将指定 id 的 ToolInvocation 标记为 terminal CANCELLED 但未应用结果。 */
+  static ToolInvocation cancelTool(InMemoryHarnessStore store, UUID toolId) {
+    return store.transaction(
+        tx -> {
+          ToolInvocation tool = tx.lockToolInvocation(toolId).orElseThrow();
+          ToolInvocation cancelled = tool.cancel(toolError(), T3);
+          tx.updateToolInvocations(List.of(cancelled));
+          return cancelled;
+        });
+  }
+
+  /** 将指定 id 的 ToolInvocation 从 READY 经 RUNNING 推进到 terminal UNKNOWN（outcome 尚未物化）。 */
+  static ToolInvocation unknownTool(InMemoryHarnessStore store, UUID toolId) {
+    return store.transaction(
+        tx -> {
+          ToolInvocation tool = tx.lockToolInvocation(toolId).orElseThrow();
+          ToolInvocation preflighted = tool.markApprovalNotRequired(T3);
+          tx.updateToolInvocations(List.of(preflighted));
+          ToolInvocation running = preflighted.markRunning(T3);
+          tx.updateToolInvocations(List.of(running));
+          ToolInvocation unknown = running.unknown(toolError(), T3);
+          tx.updateToolInvocations(List.of(unknown));
+          return unknown;
+        });
+  }
+
+  /** 将指定 tool 保持 READY 并完成 approval preflight（not-required approval，attempt 保持为 0）。 */
+  static ToolInvocation approveTool(InMemoryHarnessStore store, UUID toolId) {
+    return store.transaction(
+        tx -> {
+          ToolInvocation tool = tx.lockToolInvocation(toolId).orElseThrow();
+          ToolInvocation updated = tool.markApprovalNotRequired(T3);
+          tx.updateToolInvocations(List.of(updated));
+          return updated;
+        });
+  }
+
+  /** 将已完成 approval preflight 的 tool 从 READY 推进到 RUNNING（attempt 推进到 1）。 */
+  static ToolInvocation markRunningTool(InMemoryHarnessStore store, UUID toolId) {
+    return store.transaction(
+        tx -> {
+          ToolInvocation tool = tx.lockToolInvocation(toolId).orElseThrow();
+          ToolInvocation updated = tool.markRunning(T3);
+          tx.updateToolInvocations(List.of(updated));
+          return updated;
+        });
+  }
+
+  /** 在一次可重试尝试后将 RUNNING 转回 READY；已确认的 attempt 保持为正值。 */
+  static ToolInvocation retryReadyTool(InMemoryHarnessStore store, UUID toolId) {
+    return store.transaction(
+        tx -> {
+          ToolInvocation tool = tx.lockToolInvocation(toolId).orElseThrow();
+          ToolInvocation updated = tool.retryReady(T3);
+          tx.updateToolInvocations(List.of(updated));
+          return updated;
+        });
+  }
+
+  /** 将指定 tool 从 RUNNING 推进到 SUCCEEDED 并携带真实 result，但 result 尚未挂载。 */
+  static ToolInvocation succeedTool(InMemoryHarnessStore store, UUID toolId) {
+    return succeedTool(store, toolId, ToolEffectBatch.EMPTY);
+  }
+
+  /** 将指定 tool 从 RUNNING 推进到 SUCCEEDED，并原子携带真实 result 与 branch effects。 */
+  static ToolInvocation succeedTool(
+      InMemoryHarnessStore store, UUID toolId, ToolEffectBatch effects) {
+    return store.transaction(
+        tx -> {
+          ToolInvocation tool = tx.lockToolInvocation(toolId).orElseThrow();
+          ToolInvocation updated =
+              tool.succeed(
+                  new ToolResult(
+                      tool.call().id(), List.of(new TextResultContent("real result")), false, "{}"),
+                  effects,
+                  T3);
+          tx.updateToolInvocations(List.of(updated));
+          return updated;
+        });
+  }
+
+  /** 将 tool approval 标记为不需要（READY 配已决定的 neutral approval）。 */
+  static ToolInvocation markApprovalNotRequired(InMemoryHarnessStore store, ToolBaseline baseline) {
+    return store.transaction(
+        tx -> {
+          ToolInvocation tool = tx.lockToolInvocation(baseline.toolId()).orElseThrow();
+          ToolInvocation updated = tool.markApprovalNotRequired(T3);
+          tx.updateToolInvocations(List.of(updated));
+          return updated;
+        });
+  }
+
+  /** ROOT -&gt; TURN_START(INPUT) -&gt; USER -&gt; ASSISTANT -&gt; TURN_END(continueModel=true)。 */
+  static ContinuationBaseline seedContinuationChain(
+      InMemoryHarnessStore store, boolean headAtTurnEnd) {
+    return store.transaction(
+        tx -> {
+          UUID sessionId = tx.nextId();
+          UUID rootEntryId = tx.nextId();
+          UUID turnStartEntryId = tx.nextId();
+          UUID threadId = tx.nextId();
+          tx.insertSession(session(sessionId));
+          tx.insertEntry(rootEntry(rootEntryId, sessionId));
+          tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1, threadId));
+          ThreadState thread =
+              thread(threadId, sessionId, headAtTurnEnd ? turnStartEntryId : rootEntryId);
+          tx.insertThread(thread);
+          UUID userEntryId = tx.nextId();
+          tx.insertEntry(userMessageEntry(userEntryId, sessionId, turnStartEntryId, T1));
+          UUID assistantEntryId = tx.nextId();
+          tx.insertEntry(assistantEntry(assistantEntryId, sessionId, userEntryId, T1));
+          UUID turnEndEntryId = tx.nextId();
+          tx.insertEntry(
+              turnEndEntry(
+                  turnEndEntryId, sessionId, assistantEntryId, T1, turnStartEntryId, true));
+          if (headAtTurnEnd) {
+            tx.updateThread(thread.advanceHead(turnEndEntryId, T1));
+          }
+          return new ContinuationBaseline(sessionId, rootEntryId, turnEndEntryId, threadId);
+        });
+  }
+
+  /** 另一个 Session，自带 ROOT（跨 Session 所有权校验 fixture）。 */
+  static UUID seedForeignRoot(InMemoryHarnessStore store) {
+    return store.transaction(
+        tx -> {
+          UUID sessionId = tx.nextId();
+          UUID rootEntryId = tx.nextId();
+          tx.insertSession(session(sessionId));
+          tx.insertEntry(rootEntry(rootEntryId, sessionId));
+          return rootEntryId;
+        });
+  }
+
+  /** 在同一 Session 内增加一条 Thread，指向现有 head Entry；名称须与 Session 内其他根不同。 */
+  static UUID seedThreadAt(InMemoryHarnessStore store, UUID headEntryId) {
+    return store.transaction(
+        tx -> {
+          UUID id = tx.nextId();
+          UUID sessionId = tx.loadEntryPath(headEntryId).root().sessionId();
+          tx.insertThread(thread(id, sessionId, headEntryId, "sibling", false));
+          return id;
+        });
+  }
+
+  /** 在同一 Session 内增加一条启用 YOLO 的 Thread，指向现有 head Entry。 */
+  static UUID seedYoloThreadAt(InMemoryHarnessStore store, UUID headEntryId) {
+    return store.transaction(
+        tx -> {
+          UUID id = tx.nextId();
+          UUID sessionId = tx.loadEntryPath(headEntryId).root().sessionId();
+          tx.insertThread(thread(id, sessionId, headEntryId, true));
+          return id;
+        });
+  }
+
+  /**
+   * 只充当归属与递归状态坐标的父 Thread：自带 Session（与子线程的 Session 不同，覆盖祖先链多 Session 锁序）、head 停在 ROOT，
+   * 生命周期状态为等待子线程。
+   *
+   * <p>用于断言人工输入的接受只推进目标 Thread，祖先链的递归投影与 Work 不被改写。
+   */
+  static UUID seedWaitingChildrenParent(InMemoryHarnessStore store) {
+    return store.transaction(
+        tx -> {
+          UUID sessionId = tx.nextId();
+          UUID rootEntryId = tx.nextId();
+          UUID threadId = tx.nextId();
+          tx.insertSession(session(sessionId));
+          tx.insertEntry(rootEntry(rootEntryId, sessionId));
+          tx.insertThread(
+              new ThreadState(
+                  threadId,
+                  sessionId,
+                  null,
+                  rootEntryId,
+                  CREATION_REQUEST_HASH,
+                  "parent",
+                  threadId,
+                  false,
+                  SpawnTrigger.USER,
+                  ThreadConstraints.NONE,
+                  ThreadExecutionControl.RUNNABLE,
+                  0L,
+                  1,
+                  0,
+                  T0,
+                  T0));
+          return threadId;
+        });
+  }
+
+  /** 在 {@code parentEntryId} 下插入一个 TURN_START 子节点，并返回其 id。 */
+  static UUID seedChildTurnStart(InMemoryHarnessStore store, UUID sessionId, UUID parentEntryId) {
+    return store.transaction(
+        tx -> {
+          UUID id = tx.nextId();
+          tx.insertEntry(turnStartEntry(id, sessionId, parentEntryId, T1, OWNER_THREAD_ID));
+          return id;
+        });
+  }
+
+  /**
+   * 仅测试用的委托 store：其事务在 Thread 行被锁定的那一刻推进可变 {@code clock}， 因此测试可证明控制面在锁等待后才读取时间戳；使用锁前的 instant 会让行的
+   * updatedAt 倒退。
+   */
+  static HarnessStore storeAdvancingClockOnThreadLock(
+      InMemoryHarnessStore delegate, TestClock clock, Instant advanceTo) {
+    return (HarnessStore)
+        Proxy.newProxyInstance(
+            HarnessStore.class.getClassLoader(),
+            new Class<?>[] {HarnessStore.class},
+            (proxy, method, args) -> {
+              if (method.getName().equals("transaction")) {
+                @SuppressWarnings("unchecked")
+                Function<HarnessStore.Transaction, Object> callback =
+                    (Function<HarnessStore.Transaction, Object>) args[0];
+                return delegate.transaction(
+                    tx -> {
+                      HarnessStore.Transaction wrapped =
+                          (HarnessStore.Transaction)
+                              Proxy.newProxyInstance(
+                                  HarnessStore.Transaction.class.getClassLoader(),
+                                  new Class<?>[] {HarnessStore.Transaction.class},
+                                  (transactionProxy, transactionMethod, transactionArgs) -> {
+                                    if (transactionMethod.getName().equals("lockThread")) {
+                                      clock.advance(advanceTo);
+                                    }
+                                    return transactionMethod.invoke(tx, transactionArgs);
+                                  });
+                      return callback.apply(wrapped);
+                    });
+              }
+              return method.invoke(delegate, args);
+            });
+  }
+
+  /** 在 thread 上插入一条 QUEUED command（必须是尚无 command 的全新 thread）。 */
+  static void seedQueuedCommand(
+      InMemoryHarnessStore store,
+      UUID threadId,
+      long sequence,
+      ThreadCommandPayload payload,
+      UUID idempotencyKey) {
+    store.transaction(
+        tx -> {
+          tx.lockThread(threadId);
+          tx.insertCommands(
+              List.of(
+                  new ThreadCommand(
+                      threadId,
+                      sequence,
+                      payload,
+                      idempotencyKey,
+                      ThreadCommandPayloadJsonCodec.requestHash(payload),
+                      null,
+                      null,
+                      null,
+                      T1)));
+          return null;
+        });
+  }
+
+  /** 请求一条无 lease 的 THREAD Work 行（Resolver 邮箱的推测式围栏）。 */
+  static void seedThreadWork(InMemoryHarnessStore store, UUID threadId) {
+    store.transaction(
+        tx -> {
+          tx.lockThread(threadId).orElseThrow();
+          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId));
+          return null;
+        });
+  }
+
+  /** 请求一条无 lease 的 TOOL Work 行。 */
+  static void seedToolWork(InMemoryHarnessStore store, UUID toolId) {
+    store.transaction(
+        tx -> {
+          ToolInvocation tool = tx.findToolInvocation(toolId).orElseThrow();
+          tx.lockThread(tool.threadId()).orElseThrow();
+          tx.requestWork(new WorkTarget(WorkTargetType.TOOL, toolId));
+          return null;
+        });
+  }
+
+  /** Claim THREAD Work 行，使其带有 active lease 而存在。 */
+  static void seedClaimedThreadWork(InMemoryHarnessStore store, UUID threadId) {
+    seedThreadWork(store, threadId);
+    store.transaction(
+        tx -> {
+          tx.claimNextWork(WorkTargetType.THREAD, "lease-1", Duration.between(T0, T3));
+          return null;
+        });
+  }
+
+  static Session session(UUID id) {
+    return new Session(id, "session-" + id, T0);
+  }
+
+  static Entry rootEntry(UUID id, UUID sessionId) {
+    return new Entry(id, sessionId, null, new RootPayload(settings()), T0);
+  }
+
+  static Entry turnStartEntry(UUID id, UUID sessionId, UUID parentId, Instant createdAt) {
+    return turnStartEntry(id, sessionId, parentId, createdAt, OWNER_THREAD_ID);
+  }
+
+  static Entry turnStartEntry(
+      UUID id, UUID sessionId, UUID parentId, Instant createdAt, UUID ownerThreadId) {
+    return turnStartEntry(id, sessionId, parentId, createdAt, ownerThreadId, null);
+  }
+
+  static Entry turnStartEntry(
+      UUID id,
+      UUID sessionId,
+      UUID parentId,
+      Instant createdAt,
+      UUID ownerThreadId,
+      TurnCapabilities capabilities) {
+    return new Entry(
+        id,
+        sessionId,
+        parentId,
+        new TurnStartPayload(
+            TurnStartReason.INPUT,
+            settings(),
+            ownerThreadId,
+            100_000,
+            16_384,
+            null,
+            null,
+            capabilities),
+        createdAt);
+  }
+
+  static TurnCapabilities capabilities(ToolBinding... bindings) {
+    return new TurnCapabilities(List.of(bindings), List.of());
+  }
+
+  static Entry userMessageEntry(UUID id, UUID sessionId, UUID parentId, Instant createdAt) {
+    return new Entry(
+        id,
+        sessionId,
+        parentId,
+        new MessagePayload(
+            new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("hello"))),
+            null,
+            null),
+        createdAt);
+  }
+
+  static Entry assistantEntry(
+      UUID id, UUID sessionId, UUID parentId, Instant createdAt, String... toolCallIds) {
+    return new Entry(id, sessionId, parentId, assistantPayload(toolCallIds), createdAt);
+  }
+
+  static MessagePayload assistantPayload(String... toolCallIds) {
+    List<AgentMessageContent> contents = new ArrayList<>();
+    for (String toolCallId : toolCallIds) {
+      contents.add(new ToolCallMessageContent(toolCallId, "bash", "bash", "{}"));
+    }
+    contents.add(new TextMessageContent("assistant reply"));
+    GenerationStopReason stopReason =
+        toolCallIds.length > 0 ? GenerationStopReason.COMPLETE : GenerationStopReason.COMPLETE;
+    return new MessagePayload(
+        new AgentMessage(AgentMessageRole.ASSISTANT, contents),
+        assistantMetadata(stopReason),
+        null);
+  }
+
+  static Entry turnEndEntry(
+      UUID id,
+      UUID sessionId,
+      UUID parentId,
+      Instant createdAt,
+      UUID turnStartEntryId,
+      boolean continueModel) {
+    return new Entry(
+        id,
+        sessionId,
+        parentId,
+        new TurnEndPayload(turnStartEntryId, TurnEndOutcome.COMPLETED, continueModel, null, null),
+        createdAt);
+  }
+
+  static ThreadState thread(UUID id, UUID sessionId, UUID headEntryId) {
+    return thread(id, sessionId, headEntryId, "main", false);
+  }
+
+  static ThreadState thread(UUID id, UUID sessionId, UUID headEntryId, boolean yoloEnabled) {
+    return thread(id, sessionId, headEntryId, "main", yoloEnabled);
+  }
+
+  static ThreadState thread(
+      UUID id, UUID sessionId, UUID headEntryId, String name, boolean yoloEnabled) {
+    return new ThreadState(
+        id,
+        sessionId,
+        null,
+        headEntryId,
+        CREATION_REQUEST_HASH,
+        name,
+        id,
+        yoloEnabled,
+        SpawnTrigger.USER,
+        ThreadConstraints.NONE,
+        ThreadExecutionControl.RUNNABLE,
+        0L,
+        1,
+        0,
+        T0,
+        T0);
+  }
+
+  static ThreadCommand withConsumedTurnStart(ThreadCommand command, UUID turnStartEntryId) {
+    return new ThreadCommand(
+        command.threadId(),
+        command.sequence(),
+        command.payload(),
+        command.idempotencyKey(),
+        command.requestHash(),
+        turnStartEntryId,
+        null,
+        null,
+        command.createdAt());
+  }
+
+  /** 使用给定的稳定 client id 与文本构造一条 USER_MESSAGE command。 */
+  static NewThreadCommand userMessageCommand(UUID idempotencyKey, String text) {
+    UserMessageCommandPayload payload = userMessagePayload(text);
+    return new NewThreadCommand(payload, idempotencyKey);
+  }
+
+  /** 使用给定的稳定 client id 与文本构造一条 USER role 的 CUSTOM_MESSAGE command。 */
+  static NewThreadCommand userCustomMessageCommand(UUID idempotencyKey, String text) {
+    return new NewThreadCommand(
+        new CustomMessageCommandPayload(
+            new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent(text)))),
+        idempotencyKey);
+  }
+
+  /** 使用给定的稳定 client id 与文本构造一条运行时注入的 USER system-reminder CUSTOM_MESSAGE command。 */
+  static NewThreadCommand systemReminderCommand(UUID idempotencyKey, String text) {
+    return new NewThreadCommand(
+        new CustomMessageCommandPayload(SystemReminder.message(text)), idempotencyKey);
+  }
+
+  static UserMessageCommandPayload userMessagePayload(String text) {
+    return new UserMessageCommandPayload(
+        new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent(text))));
+  }
+
+  static ToolInvocation toolInvocation(
+      UUID id,
+      UUID threadId,
+      UUID turnStartEntryId,
+      UUID assistantEntryId,
+      int callIndex,
+      String toolCallId,
+      Instant createdAt) {
+    return new ToolInvocation(
+        id,
+        threadId,
+        turnStartEntryId,
+        assistantEntryId,
+        callIndex,
+        new ToolCall(toolCallId, "bash", "{}"),
+        hostBinding(),
+        ToolInvocationStatus.READY,
+        0,
+        null,
+        null,
+        null,
+        createdAt,
+        createdAt);
+  }
+
+  static ModelSelection builtinExecutionModel() {
+    return ModelSelection.model("model", "v1");
+  }
+
+  static BranchSettings settings() {
+    return new BranchSettings("agent", builtinExecutionModel(), null);
+  }
+
+  static ToolInvocationError toolError() {
+    return new ToolInvocationError("CANCELLED", "cancelled");
+  }
+
+  private static AssistantMessageMetadata assistantMetadata(GenerationStopReason stopReason) {
+    return new AssistantMessageMetadata(stopReason, usage());
+  }
+
+  private static ModelUsage usage() {
+    return new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L);
+  }
+
+  private static ModelCost cost() {
+    return new ModelCost(
+        "USD",
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        BigDecimal.ZERO);
+  }
+
+  private static ProviderRequest providerRequest() {
+    return new ProviderRequest(
+        modelDescriptor(),
+        new ModelVariant("v1"),
+        1024,
+        "Test system instruction.",
+        List.of(),
+        List.of(),
+        ProviderCacheControl.none());
+  }
+
+  private static ModelDescriptor modelDescriptor() {
+    return new ModelDescriptor(
+        "provider", "model", "model", Set.of(ModelInputModality.TEXT), true, true);
+  }
+
+  static ToolBinding hostBinding() {
+    return new ToolBinding(
+        toolDefinition("bash"),
+        new ContributorBinding("core", "bash", List.of()),
+        EnvironmentSupport.NONE,
+        null,
+        null);
+  }
+
+  private static ToolDescriptor toolDescriptor(String name) {
+    return new ToolDescriptor(
+        name,
+        "description of " + name,
+        name,
+        new InputSchema("arguments", Map.of(), Set.of(), false),
+        ToolSideEffect.READ_ONLY,
+        Duration.ofSeconds(30));
+  }
+
+  private static AgentToolDefinition toolDefinition(String name) {
+    return new AgentToolDefinition(toolDescriptor(name), ToolVisibility.SELECTABLE);
+  }
+
+  /** 在 in-memory store 上运行 void 事务体的辅助方法。 */
+  static void inTransaction(InMemoryHarnessStore store, Consumer<HarnessStore.Transaction> body) {
+    store.transaction(
+        tx -> {
+          body.accept(tx);
+          return null;
+        });
+  }
+
+  /** Stop 结果为 STOPPED（非 replay，且返回了请求目标自己的持久回执）。 */
+  static void assertStopped(StopResult result) {
+    assertFalse(result.replayed());
+    assertNotNull(targetReceipt(result));
+  }
+
+  /** 从 StopResult 取出请求目标自己的回执；缺失视为不变量破损。 */
+  static StoppedThreadReceipt targetReceipt(StopResult result) {
+    return result.stoppedThreads().stream()
+        .filter(receipt -> receipt.threadId().equals(result.thread().id()))
+        .findFirst()
+        .orElseThrow(() -> new AssertionError("target stop receipt missing"));
+  }
+
+  /** Stop 结果为 replay（幂等重放既有 STOPPED 事实）。 */
+  static void assertReplayed(StopResult result) {
+    assertTrue(result.replayed());
+  }
+}
