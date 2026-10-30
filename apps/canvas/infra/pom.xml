@@ -120,6 +120,7 @@
                                         <include>fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionRunTransactions</include>
                                         <include>fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionRuntimeService</include>
                                         <include>fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionWorker</include>
+                                        <include>fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionRuntimeConfiguration</include>
                                         <include>fun.fengwk.kkstudio.canvas.infra.platform.PluginCanvasFunctionCatalogSource*</include>
                                     </includes>
                                     <limits>

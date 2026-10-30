@@ -1,9 +1,11 @@
 package fun.fengwk.kkstudio.web.events;
 
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionDispatcher;
+import fun.fengwk.kkstudio.canvas.infra.function.ClaimedRun;
+import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasFunctionWorkStore;
 import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlRealtimeEventSource;
 import fun.fengwk.kkstudio.harness.infra.realtime.RealtimeBus;
@@ -18,11 +20,13 @@ import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRe
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsChangeHandler;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
-import fun.fengwk.kkstudio.project.reconcile.IssueReconcileDispatcher;
+import fun.fengwk.kkstudio.project.reconcile.IssueReconciler;
 import fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationHandler;
 import fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationLoop;
 import fun.fengwk.kkstudio.web.project.ProjectInvalidationHub;
+import fun.fengwk.kkstudio.work.BoundedWorkDispatcher;
 import fun.fengwk.kkstudio.work.DurableWorkStore;
+import fun.fengwk.kkstudio.work.WorkClaim;
 
 import javax.sql.DataSource;
 
@@ -70,8 +74,10 @@ public class ApplicationEventConfiguration {
   public PostgresqlNotificationLoop postgresqlNotificationLoop(
       DataSource dataSource,
       HarnessWorkDispatcher dispatcher,
-      IssueReconcileDispatcher issueReconcileDispatcher,
-      CanvasFunctionDispatcher canvasFunctionDispatcher,
+      @Qualifier("issueReconcileDispatcher")
+          BoundedWorkDispatcher<WorkClaim> issueReconcileDispatcher,
+      @Qualifier("canvasFunctionDispatcher")
+          BoundedWorkDispatcher<ClaimedRun> canvasFunctionDispatcher,
       ThreadVersionHub threadVersionHub,
       CanvasVersionHub canvasVersionHub,
       ProjectInvalidationHub projectInvalidationHub,
@@ -238,11 +244,11 @@ public class ApplicationEventConfiguration {
   private static Runnable durableWorkDispatcher(
       String targetType,
       HarnessWorkDispatcher harnessDispatcher,
-      IssueReconcileDispatcher issueReconcileDispatcher,
-      CanvasFunctionDispatcher canvasFunctionDispatcher) {
+      BoundedWorkDispatcher<WorkClaim> issueReconcileDispatcher,
+      BoundedWorkDispatcher<ClaimedRun> canvasFunctionDispatcher) {
     return switch (targetType) {
-      case IssueReconcileDispatcher.TARGET_TYPE -> issueReconcileDispatcher::wake;
-      case CanvasFunctionDispatcher.TARGET_TYPE -> canvasFunctionDispatcher::wake;
+      case IssueReconciler.TARGET_TYPE -> issueReconcileDispatcher::wake;
+      case CanvasFunctionWorkStore.TARGET_TYPE -> canvasFunctionDispatcher::wake;
       default -> harnessDispatcher::wake;
     };
   }

@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.canvas.infra.function;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -22,6 +21,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasFunctionWorkStore;
+import fun.fengwk.kkstudio.work.BoundedWorkDispatcher;
 import fun.fengwk.kkstudio.work.WorkClaim;
 
 import java.nio.charset.StandardCharsets;
@@ -38,8 +38,12 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
-/** dispatcher 只按本地容量 claim，startup/poll 恢复通知丢失，拒绝时 ownership-fenced 归还。 */
-class CanvasFunctionDispatcherTest {
+/**
+ * Canvas Function 调度配置的 claim、worker 执行与 ownership-fenced 归还。
+ *
+ * <p>共享调度骨架的合并 wake、容量与 stop 契约由 work 模块覆盖；这里只验证配置回调保持 Canvas 专有语义。
+ */
+class CanvasFunctionRuntimeConfigurationTest {
 
   private static final Instant NOW = Instant.parse("2026-02-03T04:05:06.123Z");
 
@@ -73,7 +77,7 @@ class CanvasFunctionDispatcherTest {
             })
         .when(worker)
         .run(first);
-    CanvasFunctionDispatcher dispatcher =
+    BoundedWorkDispatcher<ClaimedRun> dispatcher =
         dispatcher(store, worker, workerExecutor, properties(1_000));
 
     dispatcher.start();
@@ -120,7 +124,8 @@ class CanvasFunctionDispatcherTest {
             escaped.set(thrown);
           }
         };
-    CanvasFunctionDispatcher dispatcher = dispatcher(store, worker, workers, properties(1_000));
+    BoundedWorkDispatcher<ClaimedRun> dispatcher =
+        dispatcher(store, worker, workers, properties(1_000));
 
     dispatcher.start();
     assertTrue(secondDispatched.await(5, TimeUnit.SECONDS));
@@ -152,9 +157,8 @@ class CanvasFunctionDispatcherTest {
           task.run();
         };
     // 内联 drain：接收前 Error 直接在 start() 调用栈上被观察到。
-    CanvasFunctionDispatcher dispatcher =
-        new CanvasFunctionDispatcher(
-            store, properties(1_000), Runnable::run, workers, poll, worker);
+    BoundedWorkDispatcher<ClaimedRun> dispatcher =
+        dispatcher(store, worker, Runnable::run, workers, properties(1_000));
 
     assertSame(fatal, assertThrows(AssertionError.class, dispatcher::start));
     // claim 被 ownership-fenced 归还，且 permit 未泄漏。
@@ -179,7 +183,8 @@ class CanvasFunctionDispatcherTest {
         task -> {
           throw new RejectedExecutionException("full");
         };
-    CanvasFunctionDispatcher dispatcher = dispatcher(store, worker, rejecting, properties(1_000));
+    BoundedWorkDispatcher<ClaimedRun> dispatcher =
+        dispatcher(store, worker, rejecting, properties(1_000));
 
     dispatcher.start();
     await(
@@ -199,7 +204,8 @@ class CanvasFunctionDispatcherTest {
     ClaimedRun delayed = claim("poll");
     when(store.claimNext(any(), anyString()))
         .thenReturn(Optional.empty(), Optional.of(delayed), Optional.empty());
-    CanvasFunctionDispatcher dispatcher = dispatcher(store, worker, workerExecutor, properties(20));
+    BoundedWorkDispatcher<ClaimedRun> dispatcher =
+        dispatcher(store, worker, workerExecutor, properties(20));
 
     dispatcher.start();
     await(
@@ -212,31 +218,23 @@ class CanvasFunctionDispatcherTest {
     verify(store, atLeastOnce()).claimNext(any(), anyString());
   }
 
-  /** lifecycle 必须幂等，start 前/stop 后 wake 不触库，stop callback 必达且 stop 后禁止重启。 */
+  /** 调度器在 start 前与 stop 后都不触库，且 stop 后禁止重启。 */
   @Test
-  void lifecycleIsIdempotentAndClosesCleanly() {
+  void stoppedDispatcherDoesNotClaim() {
     CanvasFunctionWorkStore store = mock(CanvasFunctionWorkStore.class);
     CanvasFunctionWorker worker = mock(CanvasFunctionWorker.class);
     when(store.claimNext(any(), anyString())).thenReturn(Optional.empty());
-    CanvasFunctionDispatcher dispatcher =
+    BoundedWorkDispatcher<ClaimedRun> dispatcher =
         dispatcher(store, worker, workerExecutor, properties(1_000));
 
     dispatcher.wake();
     verify(store, never()).claimNext(any(), anyString());
     dispatcher.start();
-    dispatcher.start();
     dispatcher.stop();
-    dispatcher.stop();
-    AtomicBoolean callback = new AtomicBoolean();
-    dispatcher.stop(() -> callback.set(true));
     dispatcher.wake();
-
-    assertTrue(callback.get());
-    assertFalse(dispatcher.isRunning());
-    assertTrue(dispatcher.isAutoStartup());
-    assertEquals(Integer.MAX_VALUE - 1, dispatcher.getPhase());
-    assertThrows(IllegalStateException.class, dispatcher::start);
     dispatcher.close();
+
+    assertThrows(IllegalStateException.class, dispatcher::start);
   }
 
   /** drain executor 拒绝与 store 扫描异常都只放弃本次 drain，后续 wake 仍可恢复。 */
@@ -248,9 +246,8 @@ class CanvasFunctionDispatcherTest {
         task -> {
           throw new RejectedExecutionException("drain full");
         };
-    CanvasFunctionDispatcher rejected =
-        new CanvasFunctionDispatcher(
-            store, properties(1_000), rejectingDrain, workerExecutor, poll, worker);
+    BoundedWorkDispatcher<ClaimedRun> rejected =
+        dispatcher(store, worker, rejectingDrain, workerExecutor, properties(1_000));
     rejected.start();
     rejected.wake();
     verify(store, never()).claimNext(any(), anyString());
@@ -259,7 +256,7 @@ class CanvasFunctionDispatcherTest {
     when(store.claimNext(any(), anyString()))
         .thenThrow(new IllegalStateException("database unavailable"))
         .thenReturn(Optional.empty());
-    CanvasFunctionDispatcher retryable =
+    BoundedWorkDispatcher<ClaimedRun> retryable =
         dispatcher(store, worker, workerExecutor, properties(1_000));
     retryable.start();
     await(
@@ -271,12 +268,22 @@ class CanvasFunctionDispatcherTest {
     retryable.stop();
   }
 
-  private CanvasFunctionDispatcher dispatcher(
+  private BoundedWorkDispatcher<ClaimedRun> dispatcher(
       CanvasFunctionWorkStore store,
       CanvasFunctionWorker worker,
       Executor workers,
       CanvasFunctionRuntimeProperties properties) {
-    return new CanvasFunctionDispatcher(store, properties, drain, workers, poll, worker);
+    return dispatcher(store, worker, drain, workers, properties);
+  }
+
+  private BoundedWorkDispatcher<ClaimedRun> dispatcher(
+      CanvasFunctionWorkStore store,
+      CanvasFunctionWorker worker,
+      Executor drainExecutor,
+      Executor workers,
+      CanvasFunctionRuntimeProperties properties) {
+    return new CanvasFunctionRuntimeConfiguration()
+        .canvasFunctionDispatcher(store, properties, drainExecutor, workers, poll, worker);
   }
 
   private static CanvasFunctionRuntimeProperties properties(long pollMillis) {

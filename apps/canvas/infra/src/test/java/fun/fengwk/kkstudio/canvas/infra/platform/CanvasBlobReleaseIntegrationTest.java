@@ -18,9 +18,10 @@ import fun.fengwk.kkstudio.canvas.CanvasDocument;
 import fun.fengwk.kkstudio.canvas.CanvasResourceInput;
 import fun.fengwk.kkstudio.canvas.CanvasTransform;
 import fun.fengwk.kkstudio.canvas.infra.dto.CanvasDtoMapper;
-import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionDispatcher;
+import fun.fengwk.kkstudio.canvas.infra.function.ClaimedRun;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.platform.storage.StorageMaintenance;
+import fun.fengwk.kkstudio.work.BoundedWorkDispatcher;
 
 import java.util.List;
 import java.util.UUID;
@@ -43,7 +44,9 @@ class CanvasBlobReleaseIntegrationTest extends PostgresSpringTestSupport {
   @Autowired private JdbcTemplate jdbc;
   @Autowired private ApplicationContext context;
   @MockitoBean private StorageMaintenance storageBlobSweeper;
-  @MockitoBean private CanvasFunctionDispatcher canvasFunctionDispatcher;
+
+  @MockitoBean(name = "canvasFunctionDispatcher")
+  private BoundedWorkDispatcher<ClaimedRun> canvasFunctionDispatcher;
 
   /** 平台适配根显式注册唯一 mapper，Web 无需自行扫描或装配它。 */
   @Test
