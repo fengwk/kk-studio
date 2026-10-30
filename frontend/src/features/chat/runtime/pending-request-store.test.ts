@@ -327,4 +327,29 @@ describe('pending-request-store', () => {
     const mismatchOwner: AgentRuntimeOwnerDTO = { type: 'CHAT', chatId: 'chat-other' }
     expect(savePendingAcceptance(mismatchOwner, 'pane-1', pendingAcceptance, memoryStorage())).toBe(false)
   })
+
+  it('localStorage getter 抛安全异常时安全返回 false 或 null，绝不向外 throw', () => {
+    const originalDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+    try {
+      Object.defineProperty(globalThis, 'localStorage', {
+        get() {
+          throw new DOMException('The operation is insecure', 'SecurityError')
+        },
+        configurable: true,
+      })
+
+      // 不传 storage 参数调用，resolveStorage 必须在内部安全兜底并返回 false / null / unavailable
+      expect(savePendingAcceptance(owner, 'pane-sec', pendingAcceptance)).toBe(false)
+      expect(clearPendingAcceptance(owner, 'pane-sec', pendingAcceptance)).toBe(false)
+      expect(loadPendingAcceptance(owner, 'pane-sec')).toBeNull()
+      expect(inspectPendingAcceptanceSlot(owner, 'pane-sec').status).toBe('unavailable')
+      expect(loadBoundPendingMessage(threadId)).toBeNull()
+      expect(clearBoundPendingMessage(threadId)).toBe(true)
+      expect(() => saveBoundPendingMessage(threadId, boundPendingMessage)).toThrow(/Storage is unavailable/)
+    } finally {
+      if (originalDescriptor) {
+        Object.defineProperty(globalThis, 'localStorage', originalDescriptor)
+      }
+    }
+  })
 })

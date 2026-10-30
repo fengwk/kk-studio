@@ -194,11 +194,8 @@ PaneTarget 有四种状态：`NEW_SESSION_DRAFT`（尚无 Session/Thread）、
 回合间的 SETTINGS 成为最新 head 时立即展示变化；后续相同快照不重复展示。
 无效快照明确提示并中断差值基准，Debug 仍保留一条已识别的 SETTINGS 事件及完整原始数据。
 
-命令批在发送前冻结 idempotency keys、payload 与顺序；只有设置 / Goal 批次冻结 cursor。连同本地草稿写入 pending storage；
-写入失败中止发送。容器创建用带 owner/target 的 `kk-studio.agent-pane-acceptance` 记录，
-既有 Thread 的发送用只按 threadId 隔离的 `kk-studio.agent-thread-pending` 记录，互不伪造 owner。
-不确定网络结果保留 exact replay，锁定请求身份并提供相同请求重试或显式放弃。
-恢复时按 request identity 保护多 Pane 并发；放弃只清理本地记录，服务端可能已接受。
+AgentPane 是组件阅读边界的唯一投影 owner，各打开的子代理层由独立 ConnectedThreadView 入口自持投影，视图与控制 Hooks（ThreadView、useAgentThreadController、useBoundBranchPanel）均强约束消费必填 ThreadProjection，彻底去除可选注入与空串关闭技巧。命令批直接从投影纯函数构建，无 ref 循环桥。
+未决请求统一由 pending-request-store 独立持久化：未绑定目标由 owner 隔离的 acceptance 槽位管理，既有 Thread 由 threadId 槽位管理，禁止重复拥有；发送前落盘并在未知结果后精确重放，与 IndexedDB 离线草稿职责严格分离。
 单条纯 USER_MESSAGE 不依赖 cursor，过期 cursor 不会被客户端重算或重试；设置 / Goal 批次仍以精确 cursor 提交，明确 409 保留草稿并交给既有控制面处理。
 
 Stop 复用 stopRequestId 处理未知结果，覆盖当前 Thread 与完整后代。
