@@ -1,10 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import type { ThreadCommand } from '@/features/chat/runtime'
-import {
-  useThreadProjection,
-  type ThreadProjection,
-} from '@/features/chat/runtime/useThreadProjection'
+import type { ThreadProjection } from '@/features/chat/runtime/useThreadProjection'
 import { useThreadApprovals } from '@/features/chat/runtime/thread-draft/useThreadApprovals'
 import { useThreadDraftRecord } from '@/features/chat/runtime/thread-draft/useThreadDraftRecord'
 import {
@@ -19,7 +16,7 @@ import {
   saveBoundPendingMessage,
   sameBatchRequestIdentity,
   type BoundPendingMessage,
-} from '@/features/chat/runtime/agent-pane/pane-target'
+} from '@/features/chat/runtime/pending-request-store'
 import {
   isDefiniteAcceptanceFailure,
   normalizeGoalText,
