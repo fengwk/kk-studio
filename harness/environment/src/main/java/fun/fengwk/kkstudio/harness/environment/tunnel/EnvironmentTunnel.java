@@ -5,7 +5,8 @@ import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
 /**
  * 绑定一次 Daemon 连接的数据面会话。
  *
- * <p>句柄在打开时固定到 {@link #identity()}。同一 Daemon 进程重连会产生新代际，已打开的交换和字节流不迁移到新句柄。会话开始排空后拒绝新建，已经打开的流仍可完成。
+ * <p>句柄在打开时固定到当前连接。{@link #identity()} 只标识 Environment 与 Daemon
+ * 进程；同一进程重连时身份值可以不变，但连接句柄已经更换，已打开的交换和字节流不迁移。会话开始排空后拒绝新建，已经打开的流仍可完成。
  */
 public interface EnvironmentTunnel {
 

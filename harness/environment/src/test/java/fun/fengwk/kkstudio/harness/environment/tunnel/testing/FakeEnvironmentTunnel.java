@@ -8,20 +8,25 @@ import fun.fengwk.kkstudio.harness.environment.tunnel.TunnelHttpRequest;
 import fun.fengwk.kkstudio.harness.environment.tunnel.TunnelStream;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Objects;
-import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CompletableFuture;
 
 /** 固定在一个连接代际上的进程内隧道。 */
 public final class FakeEnvironmentTunnel implements EnvironmentTunnel {
 
+  private final Object lock = new Object();
   private final DaemonConnectionIdentity identity;
-  private final CopyOnWriteArrayList<FakeTunnelStream> streams = new CopyOnWriteArrayList<>();
-  private volatile boolean draining;
-  private volatile boolean disconnected;
+  private final List<FakeTunnelStream> streams = new ArrayList<>();
+  private final List<FakeTunnelExchange> exchanges = new ArrayList<>();
+  private boolean draining;
+  private boolean disconnected;
 
   FakeEnvironmentTunnel(DaemonConnectionIdentity identity) {
-    this.identity = Objects.requireNonNull(identity, "identity");
+    if (identity == null) {
+      throw new IllegalArgumentException("identity must not be null");
+    }
+    this.identity = identity;
   }
 
   @Override
@@ -31,12 +36,16 @@ public final class FakeEnvironmentTunnel implements EnvironmentTunnel {
 
   /** 会话是否已排空。排空后 {@code local} 不再返回它，已有流不受影响。 */
   public boolean draining() {
-    return draining;
+    synchronized (lock) {
+      return draining;
+    }
   }
 
   /** 拒绝新建并保留已打开的流。 */
   public void drain() {
-    draining = true;
+    synchronized (lock) {
+      draining = true;
+    }
   }
 
   /**
@@ -45,39 +54,67 @@ public final class FakeEnvironmentTunnel implements EnvironmentTunnel {
    * <p>断开同时视为排空，后续新建被拒绝。
    */
   public void disconnect() {
-    disconnected = true;
-    draining = true;
+    List<FakeTunnelExchange> pendingExchanges;
+    List<FakeTunnelStream> pendingStreams;
+    synchronized (lock) {
+      disconnected = true;
+      draining = true;
+      pendingExchanges = List.copyOf(exchanges);
+      pendingStreams = List.copyOf(streams);
+    }
     IOException failure = new IOException("environment tunnel disconnected");
-    for (FakeTunnelStream stream : streams) {
+    List<CompletableFuture<?>> headers = new ArrayList<>();
+    for (FakeTunnelExchange exchange : pendingExchanges) {
+      CompletableFuture<TunnelExchange.Response> response = exchange.responseFuture();
+      if (!response.isDone()) {
+        headers.add(response);
+      }
+    }
+    for (CompletableFuture<?> header : headers) {
+      header.completeExceptionally(new IOException(failure));
+    }
+    for (FakeTunnelStream stream : pendingStreams) {
       stream.fail(failure);
     }
   }
 
   @Override
   public TunnelExchange openHttp(TunnelHttpRequest request) {
-    Objects.requireNonNull(request, "request");
-    ensureOpen();
-    FakeTunnelExchange exchange = new FakeTunnelExchange(newStream());
-    streams.add(exchange.fakeStream());
+    if (request == null) {
+      throw new IllegalArgumentException("request must not be null");
+    }
+    FakeTunnelExchange exchange = new FakeTunnelExchange(request, new FakeTunnelStream());
+    synchronized (lock) {
+      ensureOpen();
+      exchanges.add(exchange);
+      streams.add(exchange.fakeStream());
+    }
     return exchange;
   }
 
   @Override
   public TunnelStream openRaw(String target) {
     requireRawTarget(target);
-    ensureOpen();
-    FakeTunnelStream stream = newStream();
-    streams.add(stream);
+    FakeTunnelStream stream = new FakeTunnelStream();
+    synchronized (lock) {
+      ensureOpen();
+      streams.add(stream);
+    }
     return stream;
   }
 
-  /** 当前仍由本代际持有的流，包括已关闭的历史句柄。 */
-  public List<TunnelStream> streams() {
-    return List.copyOf(streams);
+  /** 本连接句柄上按打开顺序捕获的 HTTP 交换。 */
+  public List<FakeTunnelExchange> exchanges() {
+    synchronized (lock) {
+      return List.copyOf(exchanges);
+    }
   }
 
-  private FakeTunnelStream newStream() {
-    return new FakeTunnelStream();
+  /** 当前仍由本连接句柄持有的流，包括已关闭的历史句柄。 */
+  public List<TunnelStream> streams() {
+    synchronized (lock) {
+      return List.copyOf(streams);
+    }
   }
 
   private void ensureOpen() {
@@ -90,7 +127,9 @@ public final class FakeEnvironmentTunnel implements EnvironmentTunnel {
   }
 
   static void requireRawTarget(String target) {
-    Objects.requireNonNull(target, "target");
+    if (target == null) {
+      throw new IllegalArgumentException("raw target must be ide/<canonical UUID>");
+    }
     String prefix = "ide/";
     if (!target.startsWith(prefix) || target.indexOf('/', prefix.length()) >= 0) {
       throw new IllegalArgumentException("raw target must be ide/<canonical UUID>");

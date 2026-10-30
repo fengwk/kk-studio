@@ -119,11 +119,8 @@ class TunnelPortContractTest {
     peer.write(bytes("still-open")).toCompletableFuture().get(2, TimeUnit.SECONDS);
     assertEquals("still-open", text(pendingInput.toCompletableFuture().get(2, TimeUnit.SECONDS)));
     peer.endOutput().toCompletableFuture().get(2, TimeUnit.SECONDS);
-    CompletionStage<ByteBuffer> eof = stream.read();
-    assertNull(eof.toCompletableFuture().get(2, TimeUnit.SECONDS));
-    assertSame(
-        eof.toCompletableFuture().getNow(bytes("unused")),
-        stream.read().toCompletableFuture().getNow(null));
+    assertNull(stream.read().toCompletableFuture().get(2, TimeUnit.SECONDS));
+    assertNull(stream.read().toCompletableFuture().getNow(bytes("unused")));
   }
 
   @Test
@@ -151,6 +148,25 @@ class TunnelPortContractTest {
   }
 
   @Test
+  void disconnectFailsPendingHttpWithoutReplacingSubmittedResponse() {
+    FakeEnvironmentTunnel tunnel = register(new FakeEnvironmentTunnels(), "daemon-a");
+    TunnelHttpRequest captured = request();
+    FakeTunnelExchange pending = (FakeTunnelExchange) tunnel.openHttp(captured);
+    CompletionStage<Void> body = pending.stream().write(bytes("pending"));
+    FakeTunnelExchange submitted = (FakeTunnelExchange) tunnel.openHttp(request());
+    TunnelExchange.Response response = new TunnelExchange.Response(201, Map.of());
+    submitted.respond(response);
+
+    tunnel.disconnect();
+    assertThrows(IOException.class, () -> join(pending.responseHeaders()));
+    assertThrows(IOException.class, () -> join(body));
+    assertSame(response, submitted.responseHeaders().toCompletableFuture().getNow(null));
+    assertSame(captured, pending.request());
+    assertEquals(2, tunnel.exchanges().size());
+    assertThrows(IllegalStateException.class, () -> tunnel.openHttp(request()));
+  }
+
+  @Test
   void httpExchangeKeepsNonSuccessAndRejectsInjectedHeaders() throws Exception {
     FakeEnvironmentTunnel tunnel = register(new FakeEnvironmentTunnels(), "daemon-a");
     TunnelHttpRequest request =
@@ -165,8 +181,18 @@ class TunnelPortContractTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> new TunnelHttpRequest("GET", "/v1", Map.of("Bad\rName", List.of("a"))));
-    assertThrows(NullPointerException.class, () -> new TunnelHttpRequest(null, "/v1", Map.of()));
-    assertThrows(NullPointerException.class, () -> new TunnelHttpRequest("GET", null, Map.of()));
+    assertThrows(
+        IllegalArgumentException.class, () -> new TunnelHttpRequest(null, "/v1", Map.of()));
+    assertThrows(
+        IllegalArgumentException.class, () -> new TunnelHttpRequest("GET", null, Map.of()));
+    assertThrows(IllegalArgumentException.class, () -> new TunnelHttpRequest("GET", "/v1", null));
+    assertEquals(
+        "/v1?url=https://example",
+        new TunnelHttpRequest("GET", "/v1?url=https://example", Map.of()).path());
+    assertThrows(
+        IllegalArgumentException.class, () -> new TunnelHttpRequest("GET", "/v1 bad", Map.of()));
+    assertThrows(
+        IllegalArgumentException.class, () -> new TunnelHttpRequest("GET", "/v1/%ZZ", Map.of()));
     assertThrows(IllegalArgumentException.class, () -> new TunnelHttpRequest("", "/v1", Map.of()));
     Map<String, List<String>> duplicated = new LinkedHashMap<>();
     duplicated.put("X-Trace", List.of("a"));
@@ -221,6 +247,8 @@ class TunnelPortContractTest {
     CompletionStage<ByteBuffer> retained = ((FakeTunnelStream) stream).peer().read();
     stream.write(bytes("stays")).toCompletableFuture().get(2, TimeUnit.SECONDS);
     assertSame(first, original.identity());
+    assertTrue(original.draining());
+    assertThrows(IllegalStateException.class, () -> original.openRaw(rawTarget()));
     replacement.disconnect();
     assertEquals("stays", text(retained.toCompletableFuture().get(2, TimeUnit.SECONDS)));
     assertTrue(original.streams().contains(stream));
@@ -238,6 +266,10 @@ class TunnelPortContractTest {
   private static FakeEnvironmentTunnel register(
       FakeEnvironmentTunnels tunnels, String daemonInstanceId) {
     return tunnels.register(new DaemonConnectionIdentity(ENVIRONMENT, daemonInstanceId));
+  }
+
+  private static TunnelHttpRequest request() {
+    return new TunnelHttpRequest("GET", "/v1", Map.of());
   }
 
   private static String rawTarget() {

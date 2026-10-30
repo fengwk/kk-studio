@@ -6,7 +6,8 @@ import java.util.concurrent.CompletionStage;
 /**
  * 一条可双向并发、但每个方向最多一个未完成操作的字节流。
  *
- * <p>未请求读取时不得无限预读。正常 EOF 用完成值为 {@code null} 表示，之后重复读取返回同一个已完成结果。传输背压沿用标准协议窗口，本接口不提供第二套 credit。
+ * <p>未请求读取时不得无限预读。正常 EOF 用完成值为 {@code null} 表示，之后每次读取都完成 {@code null}。传输背压沿用标准协议窗口，本接口不提供第二套
+ * credit。
  */
 public interface TunnelStream extends AutoCloseable {
 

@@ -6,7 +6,6 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Objects;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -55,7 +54,10 @@ public final class FakeTunnelStream implements TunnelStream {
 
   /** 会话断开或响应提交后的流失败；已完成操作保持原结果。 */
   public void fail(IOException failure) {
-    terminate(Objects.requireNonNull(failure, "failure"));
+    if (failure == null) {
+      throw new IllegalArgumentException("failure must not be null");
+    }
+    terminate(failure);
   }
 
   private void terminate(Throwable failure) {
@@ -150,8 +152,7 @@ public final class FakeTunnelStream implements TunnelStream {
     }
 
     private CompletionStage<Void> write(Object monitor, ByteBuffer input) {
-      Objects.requireNonNull(input, "source");
-      if (!input.hasRemaining()) {
+      if (input == null || !input.hasRemaining()) {
         throw new IllegalArgumentException("source must contain at least one byte");
       }
       CompletableFuture<ByteBuffer> waitingRead = null;

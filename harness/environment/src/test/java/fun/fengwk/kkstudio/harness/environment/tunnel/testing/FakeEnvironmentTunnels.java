@@ -5,7 +5,6 @@ import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.harness.environment.tunnel.EnvironmentTunnel;
 import fun.fengwk.kkstudio.harness.environment.tunnel.EnvironmentTunnels;
 
-import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -27,7 +26,9 @@ public final class FakeEnvironmentTunnels implements EnvironmentTunnels {
    * @throws IllegalStateException 同一 Environment 已有未替换的登记
    */
   public FakeEnvironmentTunnel register(DaemonConnectionIdentity identity) {
-    Objects.requireNonNull(identity, "identity");
+    if (identity == null) {
+      throw new IllegalArgumentException("identity must not be null");
+    }
     FakeEnvironmentTunnel tunnel = new FakeEnvironmentTunnel(identity);
     if (tunnels.putIfAbsent(identity.environmentId(), tunnel) != null) {
       throw new IllegalStateException("environment already has a local tunnel");
@@ -44,20 +45,30 @@ public final class FakeEnvironmentTunnels implements EnvironmentTunnels {
    * @return 新会话
    */
   public FakeEnvironmentTunnel replace(DaemonConnectionIdentity identity) {
-    Objects.requireNonNull(identity, "identity");
+    if (identity == null) {
+      throw new IllegalArgumentException("identity must not be null");
+    }
     FakeEnvironmentTunnel tunnel = new FakeEnvironmentTunnel(identity);
-    tunnels.put(identity.environmentId(), tunnel);
+    FakeEnvironmentTunnel previous = tunnels.put(identity.environmentId(), tunnel);
+    if (previous != null) {
+      previous.drain();
+    }
     return tunnel;
   }
 
   /** 移除本节点登记；已打开的旧句柄保持可用，直到测试对端显式断开。 */
   public void remove(EnvironmentId environmentId) {
-    tunnels.remove(Objects.requireNonNull(environmentId, "environmentId"));
+    if (environmentId == null) {
+      throw new IllegalArgumentException("environmentId must not be null");
+    }
+    tunnels.remove(environmentId);
   }
 
   @Override
   public Optional<EnvironmentTunnel> local(EnvironmentId environmentId) {
-    Objects.requireNonNull(environmentId, "environmentId");
+    if (environmentId == null) {
+      throw new IllegalArgumentException("environmentId must not be null");
+    }
     FakeEnvironmentTunnel tunnel = tunnels.get(environmentId);
     if (tunnel == null || tunnel.draining()) {
       return Optional.empty();

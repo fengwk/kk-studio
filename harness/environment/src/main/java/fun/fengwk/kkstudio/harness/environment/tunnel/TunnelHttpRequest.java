@@ -16,7 +16,7 @@ public record TunnelHttpRequest(String method, String path, Map<String, List<Str
    *
    * @param method 合法 HTTP token
    * @param path 以 {@code /} 开始的 origin-form，不含 scheme、authority 或 fragment
-   * @param headers 多值请求头；{@code null} 表示没有请求头
+   * @param headers 多值请求头；没有请求头时传 {@link Map#of()}，不能为 {@code null}
    * @throws IllegalArgumentException 任一字段不满足契约
    */
   public TunnelHttpRequest {

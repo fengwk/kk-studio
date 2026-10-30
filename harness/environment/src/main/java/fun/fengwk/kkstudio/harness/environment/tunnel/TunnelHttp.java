@@ -1,11 +1,12 @@
 package fun.fengwk.kkstudio.harness.environment.tunnel;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Objects;
 
 /** HTTP token、origin-form 与多值头的共享校验。 */
 final class TunnelHttp {
@@ -13,8 +14,7 @@ final class TunnelHttp {
   private TunnelHttp() {}
 
   static String requireToken(String token, String name) {
-    Objects.requireNonNull(token, name);
-    if (token.isEmpty()) {
+    if (token == null || token.isEmpty()) {
       throw new IllegalArgumentException(name + " must not be empty");
     }
     for (int index = 0; index < token.length(); index++) {
@@ -26,19 +26,29 @@ final class TunnelHttp {
   }
 
   static String requireOriginPath(String path) {
-    Objects.requireNonNull(path, "path");
-    if (path.isEmpty() || path.charAt(0) != '/') {
+    if (path == null || path.isEmpty()) {
       throw new IllegalArgumentException("path must be an origin-form starting with '/'");
     }
-    if (containsInjection(path) || hasSchemeOrAuthority(path) || path.indexOf('#') >= 0) {
-      throw new IllegalArgumentException("path must not contain a scheme, authority, or fragment");
+    URI uri;
+    try {
+      uri = new URI(path);
+    } catch (URISyntaxException error) {
+      throw new IllegalArgumentException("path must be a valid origin-form", error);
+    }
+    if (uri.getScheme() != null
+        || uri.getRawAuthority() != null
+        || uri.getFragment() != null
+        || uri.getRawPath() == null
+        || !uri.getRawPath().startsWith("/")
+        || !originText(uri).equals(path)) {
+      throw new IllegalArgumentException("path must be an origin-form without scheme or authority");
     }
     return path;
   }
 
   static Map<String, List<String>> freezeHeaders(Map<String, List<String>> headers) {
     if (headers == null) {
-      return Map.of();
+      throw new IllegalArgumentException("headers must not be null");
     }
     Map<String, List<String>> frozen = new LinkedHashMap<>();
     for (Map.Entry<String, List<String>> entry : headers.entrySet()) {
@@ -51,14 +61,23 @@ final class TunnelHttp {
     return Map.copyOf(frozen);
   }
 
+  private static String originText(URI uri) {
+    String query = uri.getRawQuery();
+    return query == null ? uri.getRawPath() : uri.getRawPath() + "?" + query;
+  }
+
   private static List<String> freezeValues(String name, List<String> values) {
-    Objects.requireNonNull(values, "headers[" + name + "]");
+    if (values == null) {
+      throw new IllegalArgumentException("headers[" + name + "] must not be null");
+    }
     if (values.isEmpty()) {
       throw new IllegalArgumentException("header must have at least one value: " + name);
     }
     List<String> frozen = new ArrayList<>(values.size());
     for (String value : values) {
-      Objects.requireNonNull(value, "headers[" + name + "]");
+      if (value == null) {
+        throw new IllegalArgumentException("headers[" + name + "] must not contain null");
+      }
       if (containsInjection(value)) {
         throw new IllegalArgumentException("header value must not contain CR or LF: " + name);
       }
@@ -68,8 +87,7 @@ final class TunnelHttp {
   }
 
   private static String requireHeaderName(String name) {
-    Objects.requireNonNull(name, "header name");
-    if (name.isEmpty()) {
+    if (name == null || name.isEmpty()) {
       throw new IllegalArgumentException("header name must not be empty");
     }
     for (int index = 0; index < name.length(); index++) {
@@ -78,10 +96,6 @@ final class TunnelHttp {
       }
     }
     return name.toLowerCase(Locale.ROOT);
-  }
-
-  private static boolean hasSchemeOrAuthority(String path) {
-    return path.startsWith("//") || path.indexOf("://") >= 0;
   }
 
   private static boolean containsInjection(String value) {
