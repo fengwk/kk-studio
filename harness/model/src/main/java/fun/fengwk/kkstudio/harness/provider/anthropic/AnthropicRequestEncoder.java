@@ -65,7 +65,7 @@ import java.util.Set;
  * {@code thinking} 的 signature、{@code redacted_thinking}、未知 block 与官方附加字段）。 payload 以 {@code
  * compaction} block 开头时代表历史已被摘要，校验通过后清空已编码消息使该消息成为首条消息。
  */
-final class AnthropicRequestEncoder {
+public final class AnthropicRequestEncoder {
 
   private static final ObjectMapper OBJECT_MAPPER =
       JsonMapper.builder()
@@ -92,7 +92,7 @@ final class AnthropicRequestEncoder {
 
   private final AnthropicConfiguration configuration;
 
-  AnthropicRequestEncoder() {
+  public AnthropicRequestEncoder() {
     this(AnthropicConfiguration.defaults());
   }
 
@@ -104,7 +104,7 @@ final class AnthropicRequestEncoder {
     return configuration;
   }
 
-  AnthropicEncodedRequest encode(ProviderRequest request, ProviderDescriptor descriptor) {
+  public AnthropicEncodedRequest encode(ProviderRequest request, ProviderDescriptor descriptor) {
     return encode(request, descriptor, this.configuration);
   }
 

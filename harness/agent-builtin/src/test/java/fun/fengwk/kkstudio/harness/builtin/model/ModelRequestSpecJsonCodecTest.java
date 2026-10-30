@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.builtin.model;
 
-import static fun.fengwk.kkstudio.harness.runtime.invocation.codec.InvocationCodecTestFixtures.environmentModelRequest;
-import static fun.fengwk.kkstudio.harness.runtime.invocation.codec.InvocationCodecTestFixtures.hostModelRequest;
+import static fun.fengwk.kkstudio.harness.builtin.invocation.codec.InvocationCodecTestFixtures.environmentModelRequest;
+import static fun.fengwk.kkstudio.harness.builtin.invocation.codec.InvocationCodecTestFixtures.hostModelRequest;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;

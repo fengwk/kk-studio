@@ -51,7 +51,7 @@ public abstract class HarnessStoreCommandContract {
     baseline = seedThreadBaseline(store);
   }
 
-  abstract HarnessStore createStore();
+  protected abstract HarnessStore createStore();
 
   @Test
   void loadQueuedCommandsReturnsOnlyQueuedCommandsSortedBySequence() {

@@ -46,7 +46,7 @@ import java.util.function.Consumer;
  * <p>每条 transport 帧在进入状态机之前先经 {@link ProviderStreamBridge#emitProtocolEvent} exactly-once
  * 上报原生事实；原生帧不进入 durable checkpoint、realtime 增量或任何内容缓冲。
  */
-final class OpenAiResponsesStreamAccumulator {
+public final class OpenAiResponsesStreamAccumulator {
 
   private static final ObjectMapper OBJECT_MAPPER =
       JsonMapper.builder()
@@ -147,7 +147,7 @@ final class OpenAiResponsesStreamAccumulator {
     this.bridge = Objects.requireNonNull(bridge, "bridge");
   }
 
-  OpenAiResponsesStreamAccumulator(
+  public OpenAiResponsesStreamAccumulator(
       ProviderRequest request,
       ProviderDescriptor descriptor,
       Consumer<ProviderStreamEvent> eventConsumer) {
@@ -172,7 +172,7 @@ final class OpenAiResponsesStreamAccumulator {
         });
   }
 
-  void handleEvent(String eventName, String data) {
+  public void handleEvent(String eventName, String data) {
     if (bridge.isClosed()) {
       return;
     }
@@ -217,7 +217,7 @@ final class OpenAiResponsesStreamAccumulator {
     return new ProviderProtocolEvent(UNKNOWN_PROTOCOL_EVENT_TYPE, payload);
   }
 
-  void processEvent(JsonNode node) {
+  public void processEvent(JsonNode node) {
     if (node == null || !node.isObject()) {
       return;
     }
@@ -852,11 +852,11 @@ final class OpenAiResponsesStreamAccumulator {
     }
   }
 
-  ProviderResponse response() {
+  public ProviderResponse response() {
     return finish().response();
   }
 
-  ProviderReplayState replayState() {
+  public ProviderReplayState replayState() {
     return finish().replayState();
   }
 

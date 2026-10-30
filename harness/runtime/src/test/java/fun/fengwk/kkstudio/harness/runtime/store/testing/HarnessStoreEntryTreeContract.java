@@ -59,7 +59,7 @@ public abstract class HarnessStoreEntryTreeContract {
     store = createStore();
   }
 
-  abstract HarnessStore createStore();
+  protected abstract HarnessStore createStore();
 
   /** 两个实现都必须拒绝同名根；失败的插入和重命名不能留下事实或推进版本。 */
   @Test

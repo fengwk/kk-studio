@@ -8,8 +8,7 @@ import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.mark
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.runtime;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedContinuationChain;
-import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedModel;
-import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedTerminalModel;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedOpenTurn;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedThreadAt;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedToolBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.setWaitingApproval;
@@ -27,16 +26,19 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
-import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
-import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverActivity;
 import fun.fengwk.kkstudio.harness.runtime.driver.FailureProjection;
 import fun.fengwk.kkstudio.harness.runtime.driver.GenerationProjection;
+import fun.fengwk.kkstudio.harness.runtime.driver.GenerationStatus;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.NotificationKind;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
+import fun.fengwk.kkstudio.harness.runtime.testing.FakeAgentDriver;
+import fun.fengwk.kkstudio.harness.runtime.testing.FakeAgentDriver.FakeLockedDriverState;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLiveState;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeStatus;
@@ -60,12 +62,12 @@ import java.util.UUID;
  */
 class ThreadSnapshotTest {
 
-  private InMemoryBuiltinHarnessStore store;
+  private InMemoryHarnessStore store;
   private HarnessRuntime runtime;
 
   @BeforeEach
   void setUp() {
-    store = new InMemoryBuiltinHarnessStore();
+    store = new InMemoryHarnessStore();
     runtime = runtime(store, Clock.fixed(T5, ZoneOffset.UTC));
   }
 
@@ -89,23 +91,21 @@ class ThreadSnapshotTest {
 
   @Test
   void activeLifecycleWithModelMapsToRunningStatus() {
-    // 测试意图：本地存在非终态 Model 调用时属于未结束流程，投影为 RUNNING。
-    for (ModelInvocationStatus status :
-        List.of(ModelInvocationStatus.READY, ModelInvocationStatus.RUNNING)) {
-      HarnessRuntimeTestSupport.ModelBaseline baseline = seedModel(store, status);
-      assertEquals(
-          ThreadRuntimeStatus.RUNNING,
-          runtime.getThreadSnapshot(baseline.threadId()).runtimeStatus());
-    }
+    // 测试意图：Driver generation 活动属于未结束流程，投影为 RUNNING。
+    HarnessRuntimeTestSupport.TurnBaseline baseline = seedOpenTurn(store);
+    HarnessRuntime active = runtimeWithActivity(baseline, DriverActivity.ACTIVE);
+    assertEquals(
+        ThreadRuntimeStatus.RUNNING, active.getThreadSnapshot(baseline.threadId()).runtimeStatus());
   }
 
   @Test
   void activeLifecycleWithTerminalModelMapsToRunning() {
-    // 测试意图：终态但结果尚未物化的 Model 属于待 apply 流程，投影为 RUNNING。
-    HarnessRuntimeTestSupport.ModelBaseline baseline = seedTerminalModel(store);
+    // 测试意图：终态但结果尚未物化的 Driver generation 属于待 apply 流程，投影为 RUNNING。
+    HarnessRuntimeTestSupport.TurnBaseline baseline = seedOpenTurn(store);
+    HarnessRuntime pending = runtimeWithActivity(baseline, DriverActivity.RESPONSE_PENDING);
     assertEquals(
         ThreadRuntimeStatus.RUNNING,
-        runtime.getThreadSnapshot(baseline.threadId()).runtimeStatus());
+        pending.getThreadSnapshot(baseline.threadId()).runtimeStatus());
   }
 
   @Test
@@ -416,8 +416,9 @@ class ThreadSnapshotTest {
   void generationOwnedByAnotherThreadIsRejected() {
     // 测试意图：generation 仅是中立诊断投影，但仍必须校验其 TURN_START/request head 归属；
     // 把另一个 Thread 的 generation 塞进本快照必须 fail-closed，而不是降级为 IDLE。
-    HarnessRuntimeTestSupport.ModelBaseline owner = seedModel(store, ModelInvocationStatus.RUNNING);
-    ThreadSnapshot ownerSnapshot = runtime.getThreadSnapshot(owner.threadId());
+    HarnessRuntimeTestSupport.TurnBaseline owner = seedOpenTurn(store);
+    HarnessRuntime active = runtimeWithGeneration(owner);
+    ThreadSnapshot ownerSnapshot = active.getThreadSnapshot(owner.threadId());
     UUID otherThreadId = seedThreadAt(store, ownerSnapshot.thread().headEntryId());
     ThreadSnapshot otherSnapshot = runtime.getThreadSnapshot(otherThreadId);
     assertThrows(
@@ -447,9 +448,8 @@ class ThreadSnapshotTest {
   @EnumSource(InvalidGenerationScope.class)
   void generationOutsideCurrentPathIsRejected(InvalidGenerationScope invalidScope) {
     // Each corruption isolates one boundary: closed turn, foreign request, or foreign result.
-    HarnessRuntimeTestSupport.ModelBaseline baseline =
-        seedModel(store, ModelInvocationStatus.RUNNING);
-    ThreadSnapshot active = runtime.getThreadSnapshot(baseline.threadId());
+    HarnessRuntimeTestSupport.TurnBaseline baseline = seedOpenTurn(store);
+    ThreadSnapshot active = runtimeWithGeneration(baseline).getThreadSnapshot(baseline.threadId());
     GenerationProjection original = active.generation();
     UUID offPath = TestIds.id(987654);
     GenerationProjection candidate =
@@ -486,9 +486,8 @@ class ThreadSnapshotTest {
   @Test
   void generationFailuresAreFrozenAndExposed() {
     // The public snapshot exposes the projection's immutable failure history, not the source list.
-    HarnessRuntimeTestSupport.ModelBaseline baseline =
-        seedModel(store, ModelInvocationStatus.RUNNING);
-    ThreadSnapshot active = runtime.getThreadSnapshot(baseline.threadId());
+    HarnessRuntimeTestSupport.TurnBaseline baseline = seedOpenTurn(store);
+    ThreadSnapshot active = runtimeWithGeneration(baseline).getThreadSnapshot(baseline.threadId());
     GenerationProjection original = active.generation();
     FailureProjection failure =
         new FailureProjection(1, 1, "text", "thinking", "ERROR", "failed", T5, T5);
@@ -511,6 +510,42 @@ class ThreadSnapshotTest {
     mutableFailures.clear();
     assertEquals(List.of(failure), snapshot.generationFailures());
     assertThrows(UnsupportedOperationException.class, () -> snapshot.generationFailures().clear());
+  }
+
+  /** 以固定 Driver 活动投影读取当前 open turn。 */
+  private HarnessRuntime runtimeWithActivity(
+      HarnessRuntimeTestSupport.TurnBaseline baseline, DriverActivity activity) {
+    return runtimeWithState(
+        new FakeLockedDriverState(activity, baseline.turnStartEntryId(), null, null, null));
+  }
+
+  /** 构造带稳定 generation 投影的 Driver 活动状态。 */
+  private HarnessRuntime runtimeWithGeneration(HarnessRuntimeTestSupport.TurnBaseline baseline) {
+    GenerationProjection generation =
+        new GenerationProjection(
+            TestIds.id(700),
+            baseline.turnStartEntryId(),
+            baseline.turnStartEntryId(),
+            GenerationStatus.RUNNING,
+            1,
+            1,
+            List.of(),
+            null,
+            null,
+            T5,
+            T5,
+            List.of());
+    return runtimeWithState(
+        new FakeLockedDriverState(
+            DriverActivity.ACTIVE, baseline.turnStartEntryId(), null, generation, null));
+  }
+
+  private HarnessRuntime runtimeWithState(FakeLockedDriverState state) {
+    return runtime(
+        store,
+        Clock.fixed(T5, ZoneOffset.UTC),
+        new FakeAgentDriver().withState(state),
+        HarnessRuntimeTestSupport.DEFAULT_COMPACTION_PROVIDER);
   }
 
   private static ThreadSnapshot withGeneration(

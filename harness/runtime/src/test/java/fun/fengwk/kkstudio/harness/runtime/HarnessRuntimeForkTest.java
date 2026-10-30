@@ -14,7 +14,6 @@ import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.thre
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.turnEndEntry;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.turnStartEntry;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessageCommand;
-import static fun.fengwk.kkstudio.harness.runtime.store.testing.BuiltinTestTransactions.builtin;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.loadCommandsByThread;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -29,20 +28,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.node.JsonNodeFactory;
 
-import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestMaterializer;
-import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTurns;
-import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.CompactionPayload;
@@ -60,14 +53,12 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -87,12 +78,12 @@ import java.util.UUID;
  */
 class HarnessRuntimeForkTest {
 
-  private InMemoryBuiltinHarnessStore store;
+  private InMemoryHarnessStore store;
   private HarnessRuntime runtime;
 
   @BeforeEach
   void setUp() {
-    store = new InMemoryBuiltinHarnessStore();
+    store = new InMemoryHarnessStore();
     runtime = HarnessRuntimeTestSupport.runtime(store, Clock.fixed(T0, ZoneOffset.UTC));
   }
 
@@ -151,34 +142,6 @@ class HarnessRuntimeForkTest {
     assertTrue(store.<Boolean>transaction(tx -> tx.findThread(threadId).isEmpty()));
   }
 
-  /** fork 初始 batch 的 SET_MODEL 以原子模型整体落盘，fork 来源的 Builtin 模型切换保持可用。 */
-  @Test
-  void forkAcceptsBuiltinModelSwitch() {
-    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
-
-    UUID acceptedThreadId = TestIds.id(983);
-    ModelSelection switched = ModelSelection.model("model-2", "v2");
-    AcceptedCommands accepted =
-        runtime.acceptCommands(
-            new AcceptCommandsCommand(
-                new AcceptCommandsTarget.NewThread(
-                    baseline.sessionId(),
-                    baseline.rootEntryId(),
-                    acceptedThreadId,
-                    "branch",
-                    false),
-                List.of(
-                    new NewThreadCommand(new SetModelCommandPayload(switched), TestIds.id(984)),
-                    userMessageCommand(TestIds.id(985), "hello"))),
-            AcceptancePreflight.IDENTITY);
-    assertEquals(acceptedThreadId, accepted.thread().id());
-    List<ThreadCommand> commands =
-        store.transaction(tx -> loadCommandsByThread(tx, acceptedThreadId));
-    SetModelCommandPayload queued =
-        assertInstanceOf(SetModelCommandPayload.class, commands.getFirst().payload());
-    assertEquals(switched, queued.model());
-  }
-
   // ---------------------------------------------------------------- 会话 fork：完整历史
 
   /** 无压缩时复制 ROOT 之后的完整历史：新身份、链条连续、tool pair 保留。 */
@@ -229,14 +192,6 @@ class HarnessRuntimeForkTest {
                 loadCommandsByThread(tx, newThreadId).stream()
                     .map(command -> command.sequence())
                     .toList()));
-    assertTrue(
-        store
-            .<Boolean>transaction(
-                tx ->
-                    builtin(tx)
-                        .findModelInvocationByTurn(newThreadId, entries.get(1).id())
-                        .isEmpty())
-            .equals(Boolean.TRUE));
   }
 
   /**
@@ -608,21 +563,28 @@ class HarnessRuntimeForkTest {
   }
 
   private static List<String> projectedTexts(EntryPath path) {
-    ProviderRequest request =
-        new ModelRequestMaterializer().materialize(path, HarnessRuntimeTestSupport.modelRequest());
-    List<String> texts = new ArrayList<>();
-    for (ProviderMessage message : request.messages()) {
-      texts.add(textOf(message));
+    List<String> summaries = new ArrayList<>();
+    List<String> messages = new ArrayList<>();
+    boolean forked = false;
+    for (Entry entry : path.entries()) {
+      if (entry.payload() instanceof ForkPayload) {
+        forked = true;
+      } else if (entry.payload() instanceof CompactionPayload compaction) {
+        summaries.add(compaction.summaryText());
+      } else if (entry.payload() instanceof MessagePayload message) {
+        for (var content : message.message().contents()) {
+          if (content instanceof TextMessageContent text) {
+            messages.add(text.text());
+          }
+        }
+      }
+    }
+    List<String> texts = new ArrayList<>(summaries);
+    texts.addAll(messages);
+    if (forked) {
+      texts.add(ForkPayload.NOTICE);
     }
     return texts;
-  }
-
-  private static String textOf(ProviderMessage message) {
-    StringBuilder text = new StringBuilder();
-    for (var block : message.contents()) {
-      text.append(((ProviderTextBlock) block).text());
-    }
-    return text.toString();
   }
 
   private static Entry userEntry(
@@ -665,9 +627,7 @@ class HarnessRuntimeForkTest {
                 false,
                 null,
                 null,
-                HarnessRuntimeTestSupport.tooledModelRequest(List.of("bash"))
-                    .toolBindings()
-                    .get(0))),
+                HarnessRuntimeTestSupport.hostBinding())),
         createdAt);
   }
 
@@ -722,7 +682,7 @@ class HarnessRuntimeForkTest {
    *
    * @param keepOpenTail 为 true 时末尾追加未闭合 INPUT turn（用于验证半轮切点被拒绝）
    */
-  private static HistorySeed seedHistory(InMemoryBuiltinHarnessStore store, boolean keepOpenTail) {
+  private static HistorySeed seedHistory(InMemoryHarnessStore store, boolean keepOpenTail) {
     return store.transaction(
         tx -> {
           UUID sessionId = tx.nextId();
@@ -760,7 +720,7 @@ class HarnessRuntimeForkTest {
   }
 
   /** ROOT -&gt; [T1] -&gt; [T2 u2] -&gt; COMPACTION(cut=u2) -&gt; [T3]；head = END3，保留尾部从 T2 开始。 */
-  private static CompactionSeed seedCompactedHistory(InMemoryBuiltinHarnessStore store) {
+  private static CompactionSeed seedCompactedHistory(InMemoryHarnessStore store) {
     return store.transaction(
         tx -> {
           UUID sessionId = tx.nextId();
@@ -817,7 +777,7 @@ class HarnessRuntimeForkTest {
   }
 
   /** HISTORY 压缩后紧接 TURN_PREFIX 压缩（引用 HISTORY 结果）；head = END3，保留尾部从 T2 开始。 */
-  private static CompactionSeed seedSplitCompactionHistory(InMemoryBuiltinHarnessStore store) {
+  private static CompactionSeed seedSplitCompactionHistory(InMemoryHarnessStore store) {
     return store.transaction(
         tx -> {
           UUID sessionId = tx.nextId();

@@ -1,13 +1,14 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T0;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T5;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.runtime;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedBaseline;
-import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedModel;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedOpenTurn;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedThreadAt;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedThreadWork;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.systemReminderCommand;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessageCommand;
-import static fun.fengwk.kkstudio.harness.runtime.store.testing.BuiltinTestTransactions.builtin;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.loadCommandsByThread;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -18,20 +19,22 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
-import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException.Reason;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverActivity;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AttachmentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.SpawnTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.SpawnTestSupport.Ticket;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
+import fun.fengwk.kkstudio.harness.runtime.testing.FakeAgentDriver;
+import fun.fengwk.kkstudio.harness.runtime.testing.FakeAgentDriver.FakeLockedDriverState;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLiveState;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
@@ -53,12 +56,12 @@ import java.util.UUID;
  */
 class HarnessRuntimeAcceptThreadTest {
 
-  private InMemoryBuiltinHarnessStore store;
+  private InMemoryHarnessStore store;
   private HarnessRuntime runtime;
 
   @BeforeEach
   void setUp() {
-    store = new InMemoryBuiltinHarnessStore();
+    store = new InMemoryHarnessStore();
     runtime = HarnessRuntimeTestSupport.runtime(store, Clock.fixed(T0, ZoneOffset.UTC));
   }
 
@@ -318,26 +321,34 @@ class HarnessRuntimeAcceptThreadTest {
    */
   @Test
   void setAgentDuringLiveOrWorkIsAcceptedAndOnlyAdvancesCursor() {
-    // 场景一：live MODEL_ACTIVE（当前 open Turn 在跑）+ THREAD Work 行 —— 接受且只推进 cursor。
-    HarnessRuntimeTestSupport.ModelBaseline live = seedModel(store, ModelInvocationStatus.RUNNING);
+    // 场景一：Driver generation 活动（当前 open Turn 在跑）+ THREAD Work 行 —— 接受且只推进 cursor。
+    HarnessRuntimeTestSupport.TurnBaseline live = seedOpenTurn(store);
     seedThreadWork(store, live.threadId());
-    UUID liveHead =
-        store.transaction(tx -> tx.findThread(live.threadId()).orElseThrow()).headEntryId();
+    HarnessRuntime liveRuntime =
+        runtime(
+            store,
+            Clock.fixed(T5, ZoneOffset.UTC),
+            new FakeAgentDriver()
+                .withState(
+                    new FakeLockedDriverState(
+                        DriverActivity.ACTIVE, live.turnStartEntryId(), null, null, null)),
+            HarnessRuntimeTestSupport.DEFAULT_COMPACTION_PROVIDER);
     AcceptedCommands liveResult =
-        runtime.acceptCommands(
+        liveRuntime.acceptCommands(
             thread(
                 live.threadId(),
-                liveHead,
+                live.turnStartEntryId(),
                 1,
                 List.of(setAgentCommand(TestIds.id(1)), userMessageCommand(TestIds.id(2), "hi"))),
             AcceptancePreflight.IDENTITY);
     assertFalse(liveResult.replayed());
     assertEquals(
         List.of(1L, 2L), liveResult.acceptedCommands().stream().map(c -> c.sequence()).toList());
-    // 当前 open Turn 不被修改：head 仍是原 user entry，RUNNING Model 不受影响。
-    ModelInvocation model =
-        store.transaction(tx -> builtin(tx).findModelInvocation(live.modelId()).orElseThrow());
-    assertEquals(ModelInvocationStatus.RUNNING, model.status());
+    // 当前 open Turn 不被修改：head 不变，Driver generation 仍活动。
+    ThreadState liveThread = store.transaction(tx -> tx.findThread(live.threadId()).orElseThrow());
+    assertEquals(live.turnStartEntryId(), liveThread.headEntryId());
+    assertEquals(
+        ThreadLiveState.DRIVER_ACTIVE, liveRuntime.getThreadSnapshot(live.threadId()).liveState());
 
     // 场景二：IDLE 但有 THREAD Work 行 —— 接受且只推进 cursor。
     HarnessRuntimeTestSupport.Baseline idle = seedBaseline(store);
