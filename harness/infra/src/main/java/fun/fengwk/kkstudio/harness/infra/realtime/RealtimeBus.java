@@ -11,6 +11,7 @@ import fun.fengwk.kkstudio.harness.runtime.port.RealtimePayloadFetcher;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -19,15 +20,15 @@ import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
+import java.util.function.Predicate;
 
 /**
  * 本地优先的 realtime 总线：同时实现 {@link RealtimeEventSink} 与 {@link RealtimeEventSource}。
  *
- * <p>生产事件先在本地同步投递一次，再查询节点存在快照；只有存在其它活跃 {@code cluster_node} 时才把同一事件发布到 PostgreSQL。每条远端 envelope 都携带
- * {@code originNodeId}，接收方丢弃自身回环，因此发布节点不会因 LISTEN 收到自己 的 NOTIFY 而重复投递。远端事件只触达本地订阅，不会再次发布，避免跨节点
- * echo。
+ * <p>生产事件先在本地同步投递一次，再按 Thread 查询其它节点是否存在有效订阅；只有该 Thread 存在远端订阅时才把事件发布到 PostgreSQL。批量发布先完成整批本地 投递，再按
+ * Thread 过滤并以一次批量保持输入相对顺序。每条远端 envelope 都携带 {@code originNodeId}，接收方丢弃自身回环，因此发布节点不会因 LISTEN 收到自己的
+ * NOTIFY 而重复投递。远端事件只触达本地订阅，不会再次发布，避免跨节点 echo。
  *
  * <p>PostgreSQL 放不下的 oversize 事件只以 REFERENCE 出现：总线按 origin 从可信内部地址回拉 canonical event，校验其 Thread
  * 后本地投递 一次，绝不再次发布。回拉失败时日志只记录 id，并对目标 Thread 触发 RESYNC；durable 状态与已完成的本地投递不受影响。
@@ -36,7 +37,7 @@ import java.util.function.Consumer;
  * 回拉完成前到达的同 Thread 通知排在其后依次投递，其它 Thread 不受影响。通道积压超过 {@link #MAX_PENDING_PER_THREAD} 时丢弃积压并以一条
  * RESYNC 代替，由订阅方追帧，内存始终有界。
  *
- * <p>本地投递与远端发布是两个有界步骤：本地订阅回调异常由 {@link PostgresqlRealtimeEventSource} 隔离；节点存在查询或远端
+ * <p>本地投递与远端发布是两个有界步骤：本地订阅回调异常由 {@link PostgresqlRealtimeEventSource} 隔离；远端订阅查询或远端
  * 发布失败在本地投递完成后向上抛出，由 Runtime 既有实时边界隔离，不影响已提交的 durable 状态。
  */
 public final class RealtimeBus implements RealtimeEventSink, RealtimeEventSource {
@@ -50,7 +51,7 @@ public final class RealtimeBus implements RealtimeEventSink, RealtimeEventSource
   private final RealtimeNotificationCodec notificationCodec;
   private final PostgresqlRealtimeEventSource localSource;
   private final RealtimeEventSink remoteSink;
-  private final BooleanSupplier otherActiveNodes;
+  private final Predicate<UUID> remoteThreadSubscription;
   private final RealtimePayloadFetcher payloadFetcher;
   private final RealtimePayloadBuffer payloadBuffer;
   private final ExecutorService referenceResolver;
@@ -64,7 +65,7 @@ public final class RealtimeBus implements RealtimeEventSink, RealtimeEventSource
       RealtimeNotificationCodec notificationCodec,
       PostgresqlRealtimeEventSource localSource,
       RealtimeEventSink remoteSink,
-      BooleanSupplier otherActiveNodes,
+      Predicate<UUID> remoteThreadSubscription,
       RealtimePayloadFetcher payloadFetcher,
       RealtimePayloadBuffer payloadBuffer,
       ExecutorService referenceResolver) {
@@ -72,7 +73,8 @@ public final class RealtimeBus implements RealtimeEventSink, RealtimeEventSource
     this.notificationCodec = Objects.requireNonNull(notificationCodec, "notificationCodec");
     this.localSource = Objects.requireNonNull(localSource, "localSource");
     this.remoteSink = Objects.requireNonNull(remoteSink, "remoteSink");
-    this.otherActiveNodes = Objects.requireNonNull(otherActiveNodes, "otherActiveNodes");
+    this.remoteThreadSubscription =
+        Objects.requireNonNull(remoteThreadSubscription, "remoteThreadSubscription");
     this.payloadFetcher = Objects.requireNonNull(payloadFetcher, "payloadFetcher");
     this.payloadBuffer = Objects.requireNonNull(payloadBuffer, "payloadBuffer");
     this.referenceResolver = Objects.requireNonNull(referenceResolver, "referenceResolver");
@@ -85,11 +87,11 @@ public final class RealtimeBus implements RealtimeEventSink, RealtimeEventSource
       return;
     }
     localSource.onEvent(event);
-    // 本地回调可能关闭本 bus；关闭后不得再查询 presence 或向远端发布。
+    // 本地回调可能关闭本 bus；关闭后不得再查询远端订阅或向远端发布。
     if (closed.get()) {
       return;
     }
-    if (otherActiveNodes.getAsBoolean()) {
+    if (remoteThreadSubscription.test(event.threadId())) {
       remoteSink.append(event);
     }
   }
@@ -103,12 +105,20 @@ public final class RealtimeBus implements RealtimeEventSink, RealtimeEventSource
     for (RealtimeEvent event : events) {
       localSource.onEvent(Objects.requireNonNull(event, "event"));
     }
-    // 本地回调可能关闭本 bus；关闭后不得再查询 presence 或向远端批量发布。
+    // 本地回调可能关闭本 bus；关闭后不得再查询远端订阅或向远端批量发布。
     if (closed.get()) {
       return;
     }
-    if (otherActiveNodes.getAsBoolean()) {
-      remoteSink.appendAll(events);
+    Map<UUID, Boolean> remoteByThread = new HashMap<>();
+    List<RealtimeEvent> remoteEvents = new ArrayList<>(events.size());
+    for (RealtimeEvent event : events) {
+      if (remoteByThread.computeIfAbsent(event.threadId(), remoteThreadSubscription::test)) {
+        remoteEvents.add(event);
+      }
+    }
+    if (!remoteEvents.isEmpty()) {
+      // 过滤不改变各 Thread 内相对顺序，也不把无远端订阅的 Thread 混入批次。
+      remoteSink.appendAll(remoteEvents);
     }
   }
 

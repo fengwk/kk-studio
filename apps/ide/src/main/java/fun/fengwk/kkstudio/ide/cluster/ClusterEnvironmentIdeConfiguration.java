@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.ide.cluster;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
@@ -18,6 +17,7 @@ import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterProperties;
 import fun.fengwk.kkstudio.platform.environment.cluster.HmacClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.environment.cluster.JdbcClusterNodeRegistry;
+import fun.fengwk.kkstudio.platform.environment.cluster.RealtimeSubscriptionService;
 
 import java.net.http.HttpClient;
 import java.time.Clock;
@@ -32,7 +32,6 @@ import java.util.UUID;
  * 无需改动即按 owner 单跳路由。
  */
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties(ClusterProperties.class)
 public class ClusterEnvironmentIdeConfiguration {
 
   @Bean
@@ -92,7 +91,9 @@ public class ClusterEnvironmentIdeConfiguration {
 
   @Bean
   public ClusterNodeLifecycle clusterNodeLifecycle(
-      JdbcClusterNodeRegistry clusterNodeRegistry, ClusterProperties clusterProperties) {
-    return new ClusterNodeLifecycle(clusterNodeRegistry, clusterProperties);
+      JdbcClusterNodeRegistry clusterNodeRegistry,
+      ClusterProperties clusterProperties,
+      RealtimeSubscriptionService realtimeSubscriptions) {
+    return new ClusterNodeLifecycle(clusterNodeRegistry, clusterProperties, realtimeSubscriptions);
   }
 }

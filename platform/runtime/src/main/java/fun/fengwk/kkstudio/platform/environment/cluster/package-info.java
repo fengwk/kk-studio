@@ -10,6 +10,8 @@
  *   <li>{@link fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthentication} 为内部
  *       HTTP/WS 请求提供 HMAC 头签名与校验（绑定 method、canonical requestPath、目标实例 UUID、timestamp、nonce 与 30s
  *       重放窗口）。
+ *   <li>{@link fun.fengwk.kkstudio.platform.environment.cluster.RealtimeSubscriptionService} 按
+ *       Thread 维护本机订阅租约，并在发布路径判定其它节点是否存在订阅租约与 {@code cluster_node} 租约同时有效的订阅。
  *   <li>{@link fun.fengwk.kkstudio.ide.cluster.ClusterEnvironmentIdeService} 是既有 {@code
  *       EnvironmentIdeService} 的组合实现：本地 owner 直接委托本地 delegate，远端 owner 最多一次认证 HTTP 转发，绝不自动重放。
  *   <li>{@link fun.fengwk.kkstudio.ide.cluster.IdeClusterClient} 只是小 metadata JSON 的简洁客户端，
