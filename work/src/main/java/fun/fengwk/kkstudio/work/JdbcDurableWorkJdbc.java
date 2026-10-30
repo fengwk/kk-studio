@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.work;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.Arrays;
@@ -35,6 +36,14 @@ final class JdbcDurableWorkJdbc implements DurableWorkJdbc {
 
   @Override
   public <T> T inTransaction(Supplier<T> callback) {
+    if (transactionActive()) {
+      return callback.get();
+    }
     return transactions.execute(status -> callback.get());
+  }
+
+  @Override
+  public boolean transactionActive() {
+    return TransactionSynchronizationManager.isActualTransactionActive();
   }
 }

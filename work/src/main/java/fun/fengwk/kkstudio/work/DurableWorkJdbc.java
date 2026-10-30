@@ -21,6 +21,9 @@ public interface DurableWorkJdbc {
   /** 执行更新并返回影响行数；底层异常必须原样抛出。 */
   int update(String sql, Object... arguments);
 
-  /** 在调用方物理事务中执行；没有外层事务时开启短事务。 */
+  /** 在调用方物理事务中执行；没有外层事务时开启短事务。已处于该实现自己的事务内时直接执行，禁止嵌套。 */
   <T> T inTransaction(Supplier<T> callback);
+
+  /** 当前调用是否已经处在本钩子代表的物理事务中。 */
+  boolean transactionActive();
 }
