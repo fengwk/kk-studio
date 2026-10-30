@@ -85,6 +85,7 @@ const BUSINESS_TABLES = [
   'project_issue_evidence',
   'project_issue_run',
   'project_issue_stage_budget',
+  'realtime_subscription',
   'session_blob_ref',
   'skill_package',
   'storage_blob',
@@ -105,6 +106,7 @@ const TARGET_TABLES = [
   'canvas_resource',
   'chat_session',
   'cluster_node',
+  'realtime_subscription',
   'project',
   'project_issue',
   'project_issue_activity',
@@ -187,6 +189,11 @@ const TARGET_COLUMNS = {
     'internal_url',
     'lease_until',
     'last_seen'
+  ],
+  'realtime_subscription': [
+    'thread_id',
+    'node_instance_id',
+    'lease_until'
   ],
   'project': [
     'id',
@@ -314,6 +321,9 @@ const TARGET_RELATIONS = {
     'fk_chat_session_session'
   ],
   'cluster_node': [],
+  'realtime_subscription': [
+    'fk_realtime_subscription_thread'
+  ],
   'project': [],
   'project_issue': [
     'project_issue_project_id_fkey'
@@ -389,6 +399,10 @@ const TARGET_INDEXES = {
   ],
   'cluster_node': [
     'cluster_node_pkey'
+  ],
+  'realtime_subscription': [
+    'idx_realtime_subscription_node',
+    'pk_realtime_subscription'
   ],
   'project': [
     'idx_project_updated',

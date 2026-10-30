@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.web.events;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -15,10 +16,12 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import fun.fengwk.kkstudio.harness.infra.realtime.RealtimeEventSource;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
+import fun.fengwk.kkstudio.platform.environment.cluster.RealtimeSubscriptionService;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKey;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKind;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.Signal;
@@ -55,6 +58,7 @@ class ApplicationEventHubTest {
 
   private ThreadVersionEventSource threadVersionSource;
   private RealtimeEventSource realtimeSource;
+  private RealtimeSubscriptionService realtimeSubscriptions;
   private CanvasVersionEventSource canvasVersionSource;
   private ProjectInvalidationHub projectInvalidationHub;
   private InvalidationEventSource executionTreeChangeSource;
@@ -66,6 +70,7 @@ class ApplicationEventHubTest {
   void setUp() {
     threadVersionSource = mock(ThreadVersionEventSource.class);
     realtimeSource = mock(RealtimeEventSource.class);
+    realtimeSubscriptions = mock(RealtimeSubscriptionService.class);
     canvasVersionSource = mock(CanvasVersionEventSource.class);
     projectInvalidationHub = mock(ProjectInvalidationHub.class);
     executionTreeChangeSource = mock(InvalidationEventSource.class);
@@ -87,6 +92,7 @@ class ApplicationEventHubTest {
         new ApplicationEventHub(
             threadVersionSource,
             realtimeSource,
+            realtimeSubscriptions,
             canvasVersionSource,
             projectInvalidationHub,
             executionTreeChangeSource,
@@ -116,14 +122,79 @@ class ApplicationEventHubTest {
     Subscription second = hub.subscribe(THREAD_KEY, sink());
     verify(threadVersionSource, times(1)).subscribe(any(), any());
     verify(realtimeSource, times(1)).subscribe(any(), any(), any());
+    verify(realtimeSubscriptions, times(1)).register(any(), any());
 
     first.close();
     verify(versionHandle, never()).close();
     verify(realtimeHandle, never()).close();
+    verify(realtimeSubscriptions, never()).unregister(any());
 
     second.close();
     verify(versionHandle).close();
     verify(realtimeHandle).close();
+    verify(realtimeSubscriptions).unregister(THREAD);
+  }
+
+  /** Hub close 必须释放所有仍存活的 Thread 订阅登记，而不只是关闭本地上游。 */
+  @Test
+  void closingHubUnregistersEveryLiveThreadSubscription() {
+    UUID otherThread = new UUID(0L, 9L);
+    hub.subscribe(THREAD_KEY, sink());
+    hub.subscribe(new ResourceKey(ResourceKind.THREAD, otherThread), sink());
+
+    hub.close();
+
+    verify(realtimeSubscriptions).unregister(THREAD);
+    verify(realtimeSubscriptions).unregister(otherThread);
+  }
+
+  /** 首次登记失败只影响跨节点投递：本地 realtime 上游照常建立，并向该订阅缓冲一次 resync。 */
+  @Test
+  void registrationFailureKeepsLocalRealtimeAndBuffersResync() {
+    AtomicReference<Consumer<RealtimeEvent>> realtimeConsumer = new AtomicReference<>();
+    when(realtimeSource.subscribe(any(), any(), any()))
+        .thenAnswer(
+            invocation -> {
+              realtimeConsumer.set(invocation.getArgument(1));
+              return (AutoCloseable) () -> {};
+            });
+    doThrow(new IllegalStateException("database unavailable"))
+        .when(realtimeSubscriptions)
+        .register(any(), any());
+    List<Signal> signals = new ArrayList<>();
+
+    Subscription subscription = assertDoesNotThrow(() -> hub.subscribe(THREAD_KEY, signals::add));
+    RealtimeEvent event = modelDelta("local");
+    realtimeConsumer.get().accept(event);
+    subscription.activate();
+
+    assertEquals(List.of(new Signal.Resync(), new Signal.Realtime(event)), signals);
+    verify(realtimeSubscriptions).register(any(), any());
+  }
+
+  /** 服务续租恢复时的锁外回调必须只向对应 Thread 的当前订阅投递 resync。 */
+  @Test
+  void renewalResyncCallbackFansOutToThreadSubscribers() {
+    List<Signal> signals = new ArrayList<>();
+    Subscription subscription = hub.subscribe(THREAD_KEY, signals::add);
+    subscription.activate();
+    ArgumentCaptor<Runnable> resync = ArgumentCaptor.forClass(Runnable.class);
+    verify(realtimeSubscriptions).register(any(), resync.capture());
+
+    resync.getValue().run();
+
+    assertEquals(List.of(new Signal.Resync()), signals);
+  }
+
+  /** 注销失败只依赖租约过期兜底，不能让末个本地订阅释放失败。 */
+  @Test
+  void unregisterFailureDoesNotBreakLastRelease() {
+    doThrow(new IllegalStateException("database unavailable"))
+        .when(realtimeSubscriptions)
+        .unregister(any());
+    Subscription subscription = hub.subscribe(THREAD_KEY, sink());
+
+    assertDoesNotThrow(subscription::close);
   }
 
   @Test
@@ -839,6 +910,16 @@ class ApplicationEventHubTest {
 
     assertEquals(List.of(new Signal.Resync()), received, "early overflow must fold to one resync");
     subscription.close();
+  }
+
+  private static RealtimeEvent modelDelta(String text) {
+    return new RealtimeEvent.ModelDelta(
+        THREAD,
+        new UUID(0L, 9L),
+        1,
+        1L,
+        new ProviderStreamEvent.TextDelta(text),
+        Instant.parse("2026-08-05T00:00:00Z"));
   }
 
   private static Sink sink() {
