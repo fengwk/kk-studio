@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.harness.provider.gemini;
 
 import tools.jackson.core.JacksonException;
-import tools.jackson.core.JsonParser;
 import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
@@ -35,19 +34,18 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolResultBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderVideoBlock;
+import fun.fengwk.kkstudio.harness.provider.ProviderJsonHelper;
+import fun.fengwk.kkstudio.harness.provider.ProviderMediaValidator;
 import fun.fengwk.kkstudio.harness.provider.ProviderProtocolOptionsJson;
 import fun.fengwk.kkstudio.harness.provider.RequestBodySizeGuard;
 
 import java.math.BigInteger;
 import java.net.URI;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Google AI Gemini GenerateContent 协议请求编码器。
@@ -72,10 +70,6 @@ final class GeminiRequestEncoder {
       OBJECT_MAPPER.reader().with(JsonNodeFeature.STRIP_TRAILING_BIGDECIMAL_ZEROES);
 
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
-
-  // data:<mediatype>;base64,<data>：用户内容与工具结果统一只接受内联 Base64 媒体
-  private static final Pattern BASE64_DATA_URI_PATTERN =
-      Pattern.compile("^data:([^;,]+);base64,(.*)$", Pattern.CASE_INSENSITIVE);
 
   /** 工具结果可内联的图片 MIME：只保留官方明确列举的保守集合，不扩大到全部 image/*。 */
   private static final Set<String> TOOL_RESULT_IMAGE_TYPES =
@@ -329,7 +323,8 @@ final class GeminiRequestEncoder {
         fn.put("description", tool.description());
       }
       JsonNode schemaNode =
-          parseStrictJson(tool.inputSchemaJson(), "tool inputSchemaJson is not valid JSON");
+          ProviderJsonHelper.parseStrictJson(
+              tool.inputSchemaJson(), "tool inputSchemaJson is not valid JSON");
       if (!schemaNode.isObject()) {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST, "tool parameters must be a JSON object");
@@ -375,7 +370,8 @@ final class GeminiRequestEncoder {
           ProviderErrorKind.INVALID_REQUEST, "media source URI must not be blank");
     }
     if (source.startsWith("data:")) {
-      String[] inline = parseBase64DataUri(source);
+      ProviderMediaValidator.Base64DataUri inline =
+          ProviderMediaValidator.parseBase64DataUri(source);
       if (inline == null) {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST,
@@ -383,8 +379,8 @@ final class GeminiRequestEncoder {
       }
       ObjectNode part = parts.addObject();
       ObjectNode inlineData = part.putObject("inlineData");
-      inlineData.put("mimeType", inline[0]);
-      inlineData.put("data", inline[1]);
+      inlineData.put("mimeType", inline.mediaType());
+      inlineData.put("data", inline.payload());
       return;
     }
 
@@ -478,7 +474,7 @@ final class GeminiRequestEncoder {
     }
 
     String mediaType = declaredMediaType == null ? "" : declaredMediaType.toLowerCase(Locale.ROOT);
-    if (!TOOL_RESULT_IMAGE_TYPES.contains(mediaType)
+    if (!ProviderMediaValidator.isAllowedMediaType(mediaType, TOOL_RESULT_IMAGE_TYPES)
         && !TOOL_RESULT_DOCUMENT_TYPE.equals(mediaType)) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST, "unsupported tool result media type: " + mediaType);
@@ -493,43 +489,13 @@ final class GeminiRequestEncoder {
 
   /** 工具结果媒体来源必须是 MIME 与声明一致的 Base64 data URI；任何其他形态都 fail closed。 */
   private static String extractToolResultBase64(String source, String mediaType) {
-    String[] inline = parseBase64DataUri(source);
-    if (inline != null && inline[0].equalsIgnoreCase(mediaType)) {
-      return inline[1];
+    ProviderMediaValidator.Base64DataUri inline = ProviderMediaValidator.parseBase64DataUri(source);
+    if (inline != null && inline.mediaType().equalsIgnoreCase(mediaType)) {
+      return inline.payload();
     }
     throw new ProviderException(
         ProviderErrorKind.INVALID_REQUEST,
         "tool result media source must be a base64 data URI matching mediaType");
-  }
-
-  /**
-   * 解析严格 Base64 data URI，返回 {@code [mediaType, payload]}；形态不严格、payload 为空或非法 Base64 时返回 {@code
-   * null}。 用户内容与工具结果共用同一套判定，避免两处规则漂移。
-   */
-  private static String[] parseBase64DataUri(String source) {
-    Matcher matcher = source == null ? null : BASE64_DATA_URI_PATTERN.matcher(source);
-    if (matcher == null || !matcher.matches()) {
-      return null;
-    }
-    String mediaType = matcher.group(1);
-    String payload = matcher.group(2);
-    if (mediaType == null || mediaType.isBlank() || !decodedBase64Payload(payload)) {
-      return null;
-    }
-    return new String[] {mediaType, payload};
-  }
-
-  /** 只校验 payload 可解码且非空，不保留解码后的字节。 */
-  private static boolean decodedBase64Payload(String payload) {
-    if (payload == null || payload.isEmpty()) {
-      return false;
-    }
-    try {
-      byte[] decoded = Base64.getDecoder().decode(payload);
-      return decoded.length > 0;
-    } catch (IllegalArgumentException invalid) {
-      return false;
-    }
   }
 
   private static JsonNode encodeToolResultResponse(
@@ -543,7 +509,8 @@ final class GeminiRequestEncoder {
       } else if (size == 1) {
         ProviderContentBlock single = textAndJsonBlocks.get(0);
         if (single instanceof ProviderJsonBlock jb) {
-          JsonNode parsed = parseStrictJson(jb.json(), "invalid JSON block in tool result");
+          JsonNode parsed =
+              ProviderJsonHelper.parseStrictJson(jb.json(), "invalid JSON block in tool result");
           if (parsed.isObject()) {
             // 单 JSON object 可直接作为 response object
             return parsed.deepCopy();
@@ -563,7 +530,8 @@ final class GeminiRequestEncoder {
           if (b instanceof ProviderTextBlock tb) {
             results.add(tb.text() != null ? tb.text() : "");
           } else if (b instanceof ProviderJsonBlock jb) {
-            results.add(parseStrictJson(jb.json(), "invalid JSON block in tool result"));
+            results.add(
+                ProviderJsonHelper.parseStrictJson(jb.json(), "invalid JSON block in tool result"));
           }
         }
         return NODES.objectNode().set("results", results);
@@ -577,7 +545,8 @@ final class GeminiRequestEncoder {
       } else if (size == 1) {
         ProviderContentBlock single = textAndJsonBlocks.get(0);
         if (single instanceof ProviderJsonBlock jb) {
-          JsonNode parsed = parseStrictJson(jb.json(), "invalid JSON block in tool result");
+          JsonNode parsed =
+              ProviderJsonHelper.parseStrictJson(jb.json(), "invalid JSON block in tool result");
           wrapper.set("result", parsed);
         } else {
           ProviderTextBlock tb = (ProviderTextBlock) single;
@@ -589,7 +558,8 @@ final class GeminiRequestEncoder {
           if (b instanceof ProviderTextBlock tb) {
             results.add(tb.text() != null ? tb.text() : "");
           } else if (b instanceof ProviderJsonBlock jb) {
-            results.add(parseStrictJson(jb.json(), "invalid JSON block in tool result"));
+            results.add(
+                ProviderJsonHelper.parseStrictJson(jb.json(), "invalid JSON block in tool result"));
           }
         }
         wrapper.set("results", results);
@@ -625,7 +595,8 @@ final class GeminiRequestEncoder {
         functionCall.put("id", call.id());
       }
       JsonNode argsNode =
-          parseStrictJson(call.argumentsJson(), "tool call arguments must be a valid JSON object");
+          ProviderJsonHelper.parseStrictJson(
+              call.argumentsJson(), "tool call arguments must be a valid JSON object");
       if (!argsNode.isObject()) {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST, "tool call arguments must be a valid JSON object");
@@ -794,7 +765,9 @@ final class GeminiRequestEncoder {
         durableThinking.append(tb.thinking() != null ? tb.thinking() : "");
       } else if (block instanceof ProviderToolCallBlock tcb) {
         ProviderToolCall call = tcb.toolCall();
-        JsonNode dNode = parseStrictJson(call.argumentsJson(), "invalid Gemini replay payload");
+        JsonNode dNode =
+            ProviderJsonHelper.parseStrictJson(
+                call.argumentsJson(), "invalid Gemini replay payload");
         if (!dNode.isObject()) {
           throw new ProviderException(
               ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
@@ -843,23 +816,5 @@ final class GeminiRequestEncoder {
       }
     }
     return true;
-  }
-
-  private static JsonNode parseStrictJson(String json, String fixedErrorMessage) {
-    if (json == null || json.isBlank()) {
-      throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, fixedErrorMessage);
-    }
-    try (JsonParser parser = OBJECT_MAPPER.createParser(json)) {
-      JsonNode node = OBJECT_MAPPER.readTree(parser);
-      if (node == null) {
-        throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, fixedErrorMessage);
-      }
-      if (parser.nextToken() != null) {
-        throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, fixedErrorMessage);
-      }
-      return node;
-    } catch (Exception ex) {
-      throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, fixedErrorMessage);
-    }
   }
 }

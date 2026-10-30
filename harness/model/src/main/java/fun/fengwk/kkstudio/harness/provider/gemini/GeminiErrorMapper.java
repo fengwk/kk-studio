@@ -8,7 +8,6 @@ import tools.jackson.databind.json.JsonMapper;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.provider.ProviderErrorHelper;
-import fun.fengwk.kkstudio.harness.provider.transport.TransportErrorKind;
 import fun.fengwk.kkstudio.harness.provider.transport.TransportException;
 
 import java.io.IOException;
@@ -36,6 +35,10 @@ final class GeminiErrorMapper {
   static final String MSG_INVALID_REQUEST = "Gemini invalid request";
   static final String MSG_INVALID_RESPONSE = "Gemini invalid response";
 
+  private static final ProviderErrorHelper.FallbackMessages FALLBACK_MESSAGES =
+      new ProviderErrorHelper.FallbackMessages(
+          MSG_AUTH, MSG_BILLING, null, MSG_INVALID_REQUEST, MSG_TRANSIENT, MSG_INVALID_RESPONSE);
+
   private GeminiErrorMapper() {}
 
   /**
@@ -45,63 +48,26 @@ final class GeminiErrorMapper {
    * @return 映射后的 ProviderException；仅 CANCELLED（调用线程被中断）返回 null
    */
   static ProviderException mapTransportException(TransportException exception) {
-    if (exception == null) {
-      return new ProviderException(ProviderErrorKind.TRANSIENT, MSG_TRANSIENT);
-    }
-    if (ProviderErrorHelper.isSilentTransportKind(exception.kind())) {
-      return null;
-    }
-    if (exception.kind() == TransportErrorKind.TIMEOUT) {
-      return new ProviderException(ProviderErrorKind.TRANSIENT, "Gemini request timed out");
-    }
-    if (exception.kind() == TransportErrorKind.IO) {
-      return new ProviderException(ProviderErrorKind.TRANSIENT, "Gemini I/O error");
-    }
-    if (exception.kind() == TransportErrorKind.INVALID_RESPONSE) {
-      return new ProviderException(ProviderErrorKind.INVALID_RESPONSE, MSG_INVALID_RESPONSE);
-    }
-    if (exception.kind() == TransportErrorKind.HTTP_STATUS) {
-      int status = exception.statusCode();
-      String errorStatus = extractErrorStatus(exception.errorBodyBytes());
-      ProviderErrorKind kind = classify(status, errorStatus);
-      String fallback = fallbackForKind(kind);
-      String message = ProviderErrorHelper.formatHttpErrorMessage(exception, fallback);
-      return new ProviderException(kind, message, ProviderErrorHelper.httpErrorStatus(status));
-    }
-    return new ProviderException(ProviderErrorKind.TRANSIENT, MSG_TRANSIENT);
+    return ProviderErrorHelper.mapTransportException(
+        exception, "Gemini", GeminiErrorMapper::classifyHttp, FALLBACK_MESSAGES);
   }
 
   /** 将 SSE 接收到的 error 事件 envelope 进行映射。 */
   static ProviderException mapSseErrorEnvelope(JsonNode errorEventNode) {
-    if (errorEventNode == null) {
-      return new ProviderException(ProviderErrorKind.INVALID_RESPONSE, MSG_INVALID_RESPONSE);
-    }
-    if (!errorEventNode.isObject()) {
-      return new ProviderException(ProviderErrorKind.INVALID_RESPONSE, errorEventNode.toString());
-    }
-    String errorStatus = null;
-    int statusCode = 0;
-    JsonNode errorNode = errorEventNode.get("error");
-    if (errorNode != null && errorNode.isObject()) {
-      if (errorNode.has("status") && errorNode.get("status").isString()) {
-        errorStatus = errorNode.get("status").asString("");
-      }
-      if (errorNode.has("code") && errorNode.get("code").isIntegralNumber()) {
-        statusCode = errorNode.get("code").asInt(0);
-      }
-    }
-    ProviderErrorKind kind = classify(statusCode, errorStatus);
-    return new ProviderException(
-        kind, errorEventNode.toString(), ProviderErrorHelper.httpErrorStatus(statusCode));
+    return ProviderErrorHelper.mapSseErrorEnvelope(
+        errorEventNode,
+        node -> classify(extractStatusCode(node), extractErrorStatus(node)),
+        GeminiErrorMapper::extractStatusCode,
+        MSG_INVALID_RESPONSE);
   }
 
   static ProviderException fromHttp(int statusCode, String errorJson) {
     String errorStatus =
         extractErrorStatus(errorJson != null ? errorJson.getBytes(StandardCharsets.UTF_8) : null);
     ProviderErrorKind kind = classify(statusCode, errorStatus);
-    String fallback = fallbackForKind(kind);
     String message =
-        ProviderErrorHelper.formatHttpErrorMessage(statusCode, errorJson, false, fallback);
+        ProviderErrorHelper.formatHttpErrorMessage(
+            statusCode, errorJson, false, FALLBACK_MESSAGES.fallbackForKind(kind));
     return new ProviderException(kind, message, ProviderErrorHelper.httpErrorStatus(statusCode));
   }
 
@@ -119,6 +85,12 @@ final class GeminiErrorMapper {
       return new ProviderException(ProviderErrorKind.CANCELLED, "Gemini request cancelled");
     }
     return new ProviderException(ProviderErrorKind.TRANSIENT, MSG_TRANSIENT);
+  }
+
+  private static ProviderErrorKind classifyHttp(TransportException exception) {
+    int status = exception.statusCode();
+    String errorStatus = extractErrorStatus(exception.errorBodyBytes());
+    return classify(status, errorStatus);
   }
 
   private static ProviderErrorKind classify(int statusCode, String errorStatus) {
@@ -143,21 +115,32 @@ final class GeminiErrorMapper {
     }
     if (statusUpper.contains("INVALID_ARGUMENT")
         || statusUpper.contains("NOT_FOUND")
-        || statusUpper.contains("FAILED_PRECONDITION")
-        || (statusCode >= 400 && statusCode < 500)) {
+        || statusUpper.contains("FAILED_PRECONDITION")) {
       return ProviderErrorKind.INVALID_REQUEST;
     }
-    return ProviderErrorKind.INVALID_RESPONSE;
+    return ProviderErrorHelper.classifyHttpStatus(statusCode);
   }
 
-  private static String fallbackForKind(ProviderErrorKind kind) {
-    return switch (kind) {
-      case AUTHENTICATION -> MSG_AUTH;
-      case BILLING -> MSG_BILLING;
-      case TRANSIENT -> MSG_TRANSIENT;
-      case INVALID_REQUEST -> MSG_INVALID_REQUEST;
-      case OVERFLOW, INVALID_RESPONSE, CANCELLED, NO_AVAILABLE_MODEL -> MSG_INVALID_RESPONSE;
-    };
+  private static int extractStatusCode(JsonNode errorEventNode) {
+    if (errorEventNode != null && errorEventNode.has("error")) {
+      JsonNode errorNode = errorEventNode.get("error");
+      if (errorNode.isObject()
+          && errorNode.has("code")
+          && errorNode.get("code").isIntegralNumber()) {
+        return errorNode.get("code").asInt(0);
+      }
+    }
+    return 0;
+  }
+
+  private static String extractErrorStatus(JsonNode errorEventNode) {
+    if (errorEventNode != null && errorEventNode.has("error")) {
+      JsonNode errorNode = errorEventNode.get("error");
+      if (errorNode.isObject() && errorNode.has("status") && errorNode.get("status").isString()) {
+        return errorNode.get("status").asString("");
+      }
+    }
+    return null;
   }
 
   private static String extractErrorStatus(byte[] bodyBytes) {
@@ -166,15 +149,10 @@ final class GeminiErrorMapper {
     }
     try {
       JsonNode node = OBJECT_MAPPER.readTree(bodyBytes);
-      if (node != null && node.has("error") && node.get("error").isObject()) {
-        JsonNode errNode = node.get("error");
-        if (errNode.has("status") && errNode.get("status").isString()) {
-          return errNode.get("status").asString("");
-        }
-      }
+      return extractErrorStatus(node);
     } catch (Exception ignored) {
       // 忽略解析失败，进入 fallback 状态码分类
+      return null;
     }
-    return null;
   }
 }
