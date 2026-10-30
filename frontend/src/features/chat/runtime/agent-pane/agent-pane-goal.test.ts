@@ -4,7 +4,7 @@ import { buildGoalBatchPlan } from '@/features/chat/command-batch-plan'
 import {
   savePendingAcceptance,
   loadPendingAcceptance,
-} from '@/features/chat/runtime/agent-pane/pane-target'
+} from '@/features/chat/runtime/pending-request-store'
 import {
   THREAD_COMMANDS,
   threadCommandsForTarget,

@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import type { LspServerConfig } from '../contracts.js'
+import { isWindows } from '../native/host.js'
 import { LspError } from './lsp-error.js'
 
 export interface ResolvedServerConfig {
@@ -27,7 +28,7 @@ export interface ExecutableResolverPlatform {
 
 export class ExecutableResolver {
   static resolve(command: string, platform: ExecutableResolverPlatform = {}): string | undefined {
-    const isWin = platform.windows ?? (process.platform === 'win32')
+    const isWin = platform.windows ?? isWindows()
     const pathVar = platform.pathVariable !== undefined ? platform.pathVariable : process.env['PATH']
     const pathext = platform.pathext !== undefined ? platform.pathext : process.env['PATHEXT']
     const home = platform.home !== undefined ? platform.home : os.homedir()

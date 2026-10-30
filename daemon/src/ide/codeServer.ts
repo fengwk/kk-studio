@@ -7,6 +7,7 @@ import type { AddressInfo } from 'node:net'
 import type { Readable } from 'node:stream'
 import type { DaemonConfig, ManagedProcess, ProcessSupervisor } from '../contracts.js'
 import { withLoopbackResponse } from '../network.js'
+import { bundledNodeExecutableName, isPosixHost } from '../native/host.js'
 import { ensurePrivateDirectory, writePrivateFile } from '../native/index.js'
 import { IdeError, safeMessage } from './errors.js'
 
@@ -122,7 +123,7 @@ interface Launch {
 /** Resolves the fixed, bundled Node CLI of the frozen distribution. */
 export function resolveCodeServerLaunch(distributionDir: string): Launch {
   const root = join(distributionDir, 'runtime', 'code-server')
-  const nodeName = process.platform === 'win32' ? 'node.exe' : 'node'
+  const nodeName = bundledNodeExecutableName()
   const executable = join(root, 'lib', nodeName)
   const entry = join(root, 'out', 'node', 'entry.js')
   if (!existsSync(executable) || !existsSync(entry)) {
@@ -452,7 +453,7 @@ export function createCodeServerManager(
 
     // Linux sun_path is bounded in bytes. Persistent data paths and TMPDIR are not.
     // The private short directory also protects the unauthenticated session IPC endpoint.
-    if (process.platform !== 'win32' && ipcDirectory === undefined) {
+    if (isPosixHost() && ipcDirectory === undefined) {
       ipcDirectory = await ensurePrivateDirectory(join('/tmp', `kk-studio-ide-${randomUUID()}`))
     }
     const ipcArgs = ipcDirectory === undefined ? [] : ['--session-socket', join(ipcDirectory, 'session.sock')]

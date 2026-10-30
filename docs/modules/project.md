@@ -10,7 +10,8 @@ Project 是业务状态的事实源；Canvas 组织资源，不决定 Issue 的�
 PostgreSQL 持久化、Issue 调度与 Agent 业务工具，经
 [`ProjectAutoConfiguration`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/ProjectAutoConfiguration.java)
 装配进宿主应用。它直接使用 [Platform](platform.md) 的公开服务（运行时、Agent 任务、全局 Blob、Agent 目录与
-Session 深删除），并实现平台定义的 `IssueAgentOwnership`；平台从不依赖 Project。HTTP DTO 映射与 Issue
+Session 深删除），并实现平台定义的 `IssueAgentOwnership`；平台从不依赖 Project。领域与 share DTO 的映射在
+[`ProjectDtoMapper`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto/ProjectDtoMapper.java)，由本模块扫描为唯一组件，并注入宿主的 Jackson 3 `ObjectMapper` 与唯一的 [`ProjectWorkflowJsonCodec`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/domain/ProjectWorkflowJsonCodec.java)。Issue
 Reconcile 的执行器、生命周期由 [Web](web.md) 组装。模块依赖方向由仓库检查
 [`check.mjs`](../../scripts/dev/verify/repository/check.mjs) 校验。
 
@@ -26,6 +27,7 @@ Reconcile 的执行器、生命周期由 [Web](web.md) 组装。模块依赖方�
 | [platform](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/platform) | 对运行时与全局 Blob 的窄适配：Issue/Run 执行所需的 Thread 事实与命令控制、证据 Blob |
 | [tool](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/tool) | Project Harness Contributor：`issue_transition` 等业务工具与 Run 上下文 projector |
 | [turn](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/turn) | 冻结在 branch 上的 `ProjectRunScope` 及其编解码 |
+| [dto](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/dto) | 领域模型与 share wire DTO 的双向映射 |
 | [error](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/error) | 模块自有错误模型与稳定的 Web 映射 |
 
 ## 平台能力与 owner 归属
@@ -124,17 +126,19 @@ Issue 与 Project 行用 `version` CAS 删除并检查受影响行数。
 [`reconcile`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/reconcile/package-info.java)
 承载 Issue 的部署级配置与确定性推进：`IssueReconcileDispatcher` 只做 `durable_work` 中 `ISSUE` 行的
 claim、bounded handoff 与 poll 生命周期，合并 wake 的单 drain、容量计数、stop 收尾与 executor
-拒绝/失败分型复用 [Common](common.md) 的
-[`BoundedWorkDispatcher`](../../common/src/main/java/fun/fengwk/kkstudio/common/concurrent/BoundedWorkDispatcher.java)，
+拒绝/失败分型复用 [Durable Work](work.md) 的
+[`BoundedWorkDispatcher`](../../work/src/main/java/fun/fengwk/kkstudio/work/BoundedWorkDispatcher.java)，
 [`IssueReconciler`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/reconcile/IssueReconciler.java)
 在固定锁序下一次推进一个有界动作。调度只依赖数据库中的 work 行与 lease token，通知与 poll
 提供发现入口；租约参数见 [Platform](platform.md) 的配置表。
 
 Work 的请求、claim、续租、完成与重排由共享的
-[`DurableWorkQueue`](../../work/src/main/java/fun/fengwk/kkstudio/work/DurableWorkQueue.java)
+[`DurableWorkStore`](../../work/src/main/java/fun/fengwk/kkstudio/work/DurableWorkStore.java)
 完成，Project 只持有 target type 为 `ISSUE` 的实例 `issueWorkQueue`：时间一律取数据库
 `statement_timestamp()` 并截断到毫秒，调用方传相对 `Duration`，Dispatcher 不持有 Clock；请求合并较早 due
 并递增 wake_version，完成与重排以 lease token 围栏，处理期间到达的新 wake 不会被吞掉。
+工作者拒绝、reconciler 失败与 stop 后未 handoff 的 claim，都由 dispatcher 在短事务中先
+`lockClaimed` 确认仍持有有效租约，再按对应延迟 `reschedule`；失权则不归还。
 Harness 的调度时间域见 [Harness Infra](harness-infra.md#work-的-claim--lease--wake)。
 
 ## 错误映射

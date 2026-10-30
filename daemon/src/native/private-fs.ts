@@ -1,5 +1,7 @@
 import { constants, closeSync, fsyncSync, lstatSync, mkdirSync, openSync, renameSync, rmSync, writeSync, chmodSync, type Stats } from 'node:fs'
 import { randomUUID } from 'node:crypto'
+import { isWindows } from './host.js'
+import { writeAllSync } from './write-all.js'
 
 /**
  * 属主独占的私有文件系统原语：目录 0700、文件 0600，且创建后必须读回验证。
@@ -22,7 +24,7 @@ const FILE_MODE = 0o600
 /** 独占创建或确认一个只有属主可访问的私有目录，并返回该路径。 */
 export async function ensurePrivateDirectory(path: string): Promise<string> {
   rejectSymlink(path)
-  if (process.platform === 'win32') {
+  if (isWindows()) {
     const win = await import('./win32.js')
     return win.ensurePrivateDirectory(path)
   }
@@ -47,7 +49,7 @@ export async function ensurePrivateDirectory(path: string): Promise<string> {
 /** 以 0600 原子替换写入一个敏感文件，并在写入后读回验证。 */
 export async function writePrivateFile(path: string, data: string | Uint8Array): Promise<void> {
   rejectSymlink(path)
-  if (process.platform === 'win32') {
+  if (isWindows()) {
     const win = await import('./win32.js')
     await win.writePrivateFile(path, data)
     return
@@ -65,7 +67,7 @@ export async function writePrivateFile(path: string, data: string | Uint8Array):
   const flags = constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW
   const descriptor = openSync(temporary, flags, FILE_MODE)
   try {
-    writeAll(descriptor, bytes)
+    writeAllSync({ writeSync }, descriptor, bytes, 'the private file could not be written completely')
     fsyncSync(descriptor)
   } catch (error) {
     closeSync(descriptor)
@@ -80,7 +82,7 @@ export async function writePrivateFile(path: string, data: string | Uint8Array):
 
 /** 校验一个敏感文件的权限与属主；不是 0600 的普通文件就显式失败。 */
 export async function verifyPrivateFile(path: string): Promise<void> {
-  if (process.platform === 'win32') {
+  if (isWindows()) {
     const win = await import('./win32.js')
     await win.verifyPrivateFile(path)
     return
@@ -90,18 +92,6 @@ export async function verifyPrivateFile(path: string): Promise<void> {
     throw new Error(`the private file path is not a real file: ${path}`)
   }
   assertOwnerAndMode(path, stats.mode, FILE_MODE, stats.uid, 'file')
-}
-
-/** 写满整个缓冲区：`writeSync` 允许短写，循环补齐前绝不认为已经写完。 */
-function writeAll(descriptor: number, bytes: Buffer): void {
-  let offset = 0
-  while (offset < bytes.length) {
-    const written = writeSync(descriptor, bytes, offset, bytes.length - offset)
-    if (written <= 0) {
-      throw new Error('the private file could not be written completely')
-    }
-    offset += written
-  }
 }
 
 function assertOwnerAndMode(path: string, mode: number, expectedMode: number, uid: number, kind: string): void {

@@ -13,27 +13,10 @@ import { useI18n } from '@/shared/i18n'
 import '@/features/chat/runtime/child-thread-view.css'
 import type { EnvironmentCardDTO } from '@/shared/api/generated/contracts'
 
-/**
- * 已绑定 Thread 的视图外壳：只消费投影与视图状态，不挂载草稿、上传或人工执行
- * Hook，因此不存在任何写入口。调用方可以提供已持有的投影（父面板已订阅同一
- * Thread 时不重复查询与订阅），以及查看层的返回入口 `navigation`。
- *
- * workspace 由 onPresentation 接管单顶栏；standalone 在滚动区之外保留唯一紧凑读头。
- * 两者共用原查看状态和 scoped 动作，底部写控制区仍然只属于根面板。
- */
-export function BoundThreadView({
-  threadId,
-  projection: injectedProjection,
-  environments,
-  navigation,
-  readOnly = false,
-  selected = true,
-  active = true,
-  onPresentation,
-  onParent,
-}: {
-  threadId: string
-  projection?: ThreadProjection
+export interface ThreadViewProps {
+  threadId?: string
+  /** 纯展示组件消费必填的投影，自身不再拥有或自建订阅 */
+  projection: ThreadProjection
   environments: EnvironmentCardDTO[]
   /** 查看层/独立地址的返回入口（顶部标题区）。 */
   navigation?: ReactNode
@@ -43,10 +26,25 @@ export function BoundThreadView({
   active?: boolean
   onPresentation?: (report: ThreadPresentation) => void
   onParent?: (parentThreadId: string) => void
-}) {
+}
+
+/**
+ * 纯只读展示视图：强约束要求必须传入 projection，只消费投影与视图状态，
+ * 不挂载草稿、上传或人工执行 Hook，内部绝不调用 useThreadProjection。
+ */
+export function ThreadView({
+  threadId: explicitThreadId,
+  projection,
+  environments,
+  navigation,
+  readOnly = false,
+  selected = true,
+  active = true,
+  onPresentation,
+  onParent,
+}: ThreadViewProps) {
   const { t } = useI18n()
-  const ownProjection = useThreadProjection(injectedProjection ? '' : threadId)
-  const projection = injectedProjection ?? ownProjection
+  const threadId = explicitThreadId ?? projection.threadId
   // 只读视图自持视图状态（Conversation/Debug 与滚动恢复），不进入根控制面。
   const views = useBoundThreadPanelViews(threadId, projection, {
     viewKey: `thread:${threadId}`,
@@ -55,7 +53,12 @@ export function BoundThreadView({
     onRetryHistory: () => { void projection.snapshotQuery.refetch() },
   })
   const presentation = useThreadPresentation({
-    views, projection, threadId, selected, active, onReport: onPresentation,
+    views,
+    projection,
+    threadId,
+    selected,
+    active,
+    onReport: onPresentation,
     onParent,
   })
   useLayoutEffect(() => {
@@ -73,34 +76,65 @@ export function BoundThreadView({
         presentation.act(presentation.viewKey, 'close-debug')
       }
     }}>
-    {onPresentation == null ? <header className="agent-pane-thread-heading">
-      {views.mode === 'debug' ? <Button variant="ghost" onClick={() => presentation.act(presentation.viewKey, 'close-debug')}>
-        {t('ai.runtime.debug.close')}
-      </Button> : presentation.parentThreadId ? <ThreadPresentationActions view={presentation} /> : navigation}
-      {views.mode !== 'debug' ? <>
-        {presentation.name ? <h2 className="agent-pane-thread-title" title={presentation.name}>{presentation.name}</h2> : null}
-        {readOnly ? <span className="thread-readonly-badge">{t('ai.runtime.childThread.readOnly')}</span> : null}
-      </> : null}
-    </header> : null}
-    <ThreadPane
-      projection={projection}
-      environments={environments}
-      activity={{ working: projection.working }}
-      views={{
-        mainView: views.mainView,
-        initialConversationScrollTop: views.initialConversationScrollTop,
-      }}
-    />
+      {onPresentation == null ? <header className="agent-pane-thread-heading">
+        {views.mode === 'debug' ? <Button variant="ghost" onClick={() => presentation.act(presentation.viewKey, 'close-debug')}>
+          {t('ai.runtime.debug.close')}
+        </Button> : presentation.parentThreadId ? <ThreadPresentationActions view={presentation} /> : navigation}
+        {views.mode !== 'debug' ? <>
+          {presentation.name ? <h2 className="agent-pane-thread-title" title={presentation.name}>{presentation.name}</h2> : null}
+          {readOnly ? <span className="thread-readonly-badge">{t('ai.runtime.childThread.readOnly')}</span> : null}
+        </> : null}
+      </header> : null}
+      <ThreadPane
+        projection={projection}
+        environments={environments}
+        activity={{ working: projection.working }}
+        views={{
+          mainView: views.mainView,
+          initialConversationScrollTop: views.initialConversationScrollTop,
+        }}
+      />
     </div>
   )
 }
 
-/** 只读子代理视图：投影 + 只读标识 + 顶部返回入口，没有任何写入口。 */
-export function ChildThreadView(props: {
+export interface ConnectedThreadViewProps {
   threadId: string
-  projection?: ThreadProjection
   environments: EnvironmentCardDTO[]
   navigation?: ReactNode
-}) {
-  return <BoundThreadView {...props} readOnly />
+  readOnly?: boolean
+  selected?: boolean
+  active?: boolean
+  onPresentation?: (report: ThreadPresentation) => void
+  onParent?: (parentThreadId: string) => void
+}
+
+/**
+ * 独立/子代理视图连接入口：只在自己的组件入口获取一次投影，向下传递给 ThreadView，
+ * 避免外层父组件重复订阅。默认只读。
+ */
+export function ConnectedThreadView({
+  threadId,
+  environments,
+  navigation,
+  readOnly = true,
+  selected = true,
+  active = true,
+  onPresentation,
+  onParent,
+}: ConnectedThreadViewProps) {
+  const projection = useThreadProjection(threadId)
+  return (
+    <ThreadView
+      threadId={threadId}
+      projection={projection}
+      environments={environments}
+      navigation={navigation}
+      readOnly={readOnly}
+      selected={selected}
+      active={active}
+      onPresentation={onPresentation}
+      onParent={onParent}
+    />
+  )
 }

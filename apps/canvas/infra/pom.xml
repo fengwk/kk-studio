@@ -7,7 +7,7 @@
     <parent>
         <groupId>fun.fengwk.kk-studio</groupId>
         <artifactId>kk-studio-canvas</artifactId>
-        <version>5.0.1</version>
+        <version>6.0.0</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
 
@@ -21,6 +21,10 @@
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
             <artifactId>kk-studio-platform-runtime</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>fun.fengwk.kk-studio</groupId>
+            <artifactId>kk-studio-share</artifactId>
         </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>

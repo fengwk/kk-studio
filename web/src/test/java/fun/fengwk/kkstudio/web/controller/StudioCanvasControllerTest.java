@@ -46,6 +46,7 @@ import fun.fengwk.kkstudio.canvas.CanvasResourceNode;
 import fun.fengwk.kkstudio.canvas.CanvasSnapshot;
 import fun.fengwk.kkstudio.canvas.CanvasTransform;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson;
+import fun.fengwk.kkstudio.canvas.infra.dto.CanvasDtoMapper;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.share.canvas.ApplyCanvasCommandsRequestDTO;
@@ -55,7 +56,6 @@ import fun.fengwk.kkstudio.share.canvas.CanvasResourceInputDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasTransformDTO;
 import fun.fengwk.kkstudio.share.canvas.CreateCanvasRequestDTO;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
-import fun.fengwk.kkstudio.web.mapper.WebDtoMapper;
 
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -101,7 +101,7 @@ class StudioCanvasControllerTest {
     mockMvc =
         standaloneSetup(
                 new StudioCanvasController(
-                    queryService, commandService, new WebDtoMapper(blobManager)))
+                    queryService, commandService, new CanvasDtoMapper(blobManager)))
             .setMessageConverters(new JacksonJsonHttpMessageConverter(objectMapper))
             .build();
   }

@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.work;
 
+import fun.fengwk.kkstudio.common.work.WorkState;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 
 import java.time.Instant;
@@ -22,7 +23,7 @@ public record ClaimedWork(
     if (claimedWakeVersion <= 0) {
       throw new IllegalArgumentException("claimedWakeVersion must be positive");
     }
-    leaseToken = WorkValues.requireCanonicalToken(leaseToken);
+    leaseToken = WorkState.requireLeaseToken(leaseToken);
     leaseUntil = Objects.requireNonNull(leaseUntil, "leaseUntil");
     if (requiredEnvironmentId != null && target.type() != WorkTargetType.TOOL) {
       throw new IllegalArgumentException(

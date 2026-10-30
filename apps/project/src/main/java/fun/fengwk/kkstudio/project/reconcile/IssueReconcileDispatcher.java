@@ -1,11 +1,14 @@
 package fun.fengwk.kkstudio.project.reconcile;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
-import fun.fengwk.kkstudio.common.concurrent.BoundedWorkDispatcher;
-import fun.fengwk.kkstudio.work.DurableWorkQueue;
+import fun.fengwk.kkstudio.work.BoundedWorkDispatcher;
+import fun.fengwk.kkstudio.work.DurableWorkStore;
 import fun.fengwk.kkstudio.work.WorkClaim;
 
+import java.time.Duration;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.Executor;
@@ -30,37 +33,43 @@ public final class IssueReconcileDispatcher implements AutoCloseable {
 
   private static final String NAME = "issue reconcile dispatcher";
 
-  private final DurableWorkQueue workQueue;
+  private final DurableWorkStore workQueue;
   private final Function<WorkClaim, IssueReconcileOutcome> reconciler;
   private final IssueReconcileProperties properties;
   private final BoundedWorkDispatcher<WorkClaim> dispatcher;
+  private final TransactionTemplate transactions;
 
   public IssueReconcileDispatcher(
-      DurableWorkQueue workQueue,
+      DurableWorkStore workQueue,
       IssueReconciler reconciler,
       IssueReconcileProperties properties,
       Executor drainExecutor,
       Executor workerExecutor,
-      ScheduledExecutorService pollScheduler) {
+      ScheduledExecutorService pollScheduler,
+      PlatformTransactionManager transactionManager) {
     this(
         workQueue,
         Objects.requireNonNull(reconciler, "reconciler")::reconcile,
         properties,
         drainExecutor,
         workerExecutor,
-        pollScheduler);
+        pollScheduler,
+        transactionManager);
   }
 
   IssueReconcileDispatcher(
-      DurableWorkQueue workQueue,
+      DurableWorkStore workQueue,
       Function<WorkClaim, IssueReconcileOutcome> reconciler,
       IssueReconcileProperties properties,
       Executor drainExecutor,
       Executor workerExecutor,
-      ScheduledExecutorService pollScheduler) {
+      ScheduledExecutorService pollScheduler,
+      PlatformTransactionManager transactionManager) {
     this.workQueue = Objects.requireNonNull(workQueue, "workQueue");
     this.reconciler = Objects.requireNonNull(reconciler, "reconciler");
     this.properties = Objects.requireNonNull(properties, "properties");
+    this.transactions =
+        new TransactionTemplate(Objects.requireNonNull(transactionManager, "transactionManager"));
     this.dispatcher =
         new BoundedWorkDispatcher<>(
             NAME,
@@ -121,7 +130,7 @@ public final class IssueReconcileDispatcher implements AutoCloseable {
   /** 归还 claim：延后 rejectionDelay 并交还 lease；归还失败仅留 lease 自愈。 */
   private void returnClaim(WorkClaim claim) {
     try {
-      workQueue.reschedule(claim, properties.getRejectionDelay());
+      rescheduleOwned(claim, properties.getRejectionDelay());
     } catch (RuntimeException error) {
       log.warn(
           "Failed to return claim for issueId={}; failure={}",
@@ -133,12 +142,21 @@ public final class IssueReconcileDispatcher implements AutoCloseable {
   /** reconciler 失败重试：延后 retryDelay 后重检；失败则留 lease 过期。 */
   private void tryRescheduleOnFailure(WorkClaim claim) {
     try {
-      workQueue.reschedule(claim, properties.getRetryDelay());
+      rescheduleOwned(claim, properties.getRetryDelay());
     } catch (RuntimeException error) {
       log.warn(
           "Failed to reschedule work after reconciler failure for issueId={}; failure={}",
           claim.targetId(),
           error.getClass().getName());
     }
+  }
+
+  private void rescheduleOwned(WorkClaim claim, Duration delay) {
+    transactions.executeWithoutResult(
+        status -> {
+          if (workQueue.lockClaimed(claim).isPresent()) {
+            workQueue.reschedule(claim, delay);
+          }
+        });
   }
 }

@@ -53,7 +53,7 @@ import fun.fengwk.kkstudio.project.repo.IssueStageBudgetRepository;
 import fun.fengwk.kkstudio.project.repo.ProjectRepository;
 import fun.fengwk.kkstudio.project.turn.ProjectRunScope;
 import fun.fengwk.kkstudio.project.turn.ProjectRunScopeJsonCodec;
-import fun.fengwk.kkstudio.work.DurableWorkQueue;
+import fun.fengwk.kkstudio.work.DurableWorkStore;
 
 import java.time.Instant;
 import java.util.List;
@@ -89,7 +89,7 @@ class IssueRunServiceTest {
       mock(IssueAgentThreadRepository.class);
   private final IssueActivityRepository issueActivityRepository =
       mock(IssueActivityRepository.class);
-  private final DurableWorkQueue issueWorkQueue = mock(DurableWorkQueue.class);
+  private final DurableWorkStore issueWorkQueue = mock(DurableWorkStore.class);
   private final ProjectWorkflowJsonCodec workflowCodec = new ProjectWorkflowJsonCodec();
   private final AgentBranchSettingsMaterializer agentBranchSettings =
       mock(AgentBranchSettingsMaterializer.class);

@@ -3362,22 +3362,28 @@ class DatabaseTurnResolverTest {
               ? providedToolCatalogSource
               : TestRuntimeToolCatalogSource.of(catalog);
 
-      resolver =
-          new DatabaseTurnResolver(
+      DatabaseAgentTurnContextResolver contextResolver =
+          new DatabaseAgentTurnContextResolver(
               agents,
-              models,
-              providers,
               agentConfigCodec,
-              modelConfigParser,
-              groupConfigCodec,
-              new ProviderFactories(factories),
               toolCatalogSource,
               environmentRegistry,
               environmentRepository,
               skillPackageRepository,
               skillPromptPathResolver,
-              () -> new CompactionConfig(20_000),
               new AgentPromptComposer(() -> subagentConfig),
+              clock);
+
+      resolver =
+          new DatabaseTurnResolver(
+              agents,
+              models,
+              providers,
+              modelConfigParser,
+              groupConfigCodec,
+              new ProviderFactories(factories),
+              () -> new CompactionConfig(20_000),
+              contextResolver,
               clock);
     }
 

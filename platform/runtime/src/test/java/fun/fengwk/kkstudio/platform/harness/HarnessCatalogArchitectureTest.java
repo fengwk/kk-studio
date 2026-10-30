@@ -23,10 +23,10 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
- * 架构守卫：验证 Platform 四大工具消费方（{@code DatabaseTurnResolver}、{@code ToolExecutionGateway}、 {@code
- * ToolCatalogQueryService}、{@code AgentDefinitionConfigValidator}）均使用 {@code RuntimeToolCatalog}
- * 进行工具查找与列出；仅在 Resolver/Gateway 中允许保留 {@code HarnessCatalog} 访问非工具元数据（context projectors 与 custom
- * entry types），并严禁通过 {@code HarnessCatalog} 进行工具查找。
+ * 架构守卫：验证 Platform 四大工具消费方（{@code DatabaseAgentTurnContextResolver}、{@code ToolExecutionGateway}、
+ * {@code ToolCatalogQueryService}、{@code AgentDefinitionConfigValidator}）均使用 {@code
+ * RuntimeToolCatalog} 进行工具查找与列出；仅在目录解析器/Gateway 中允许保留 {@code HarnessCatalog} 访问非工具元数据（context
+ * projectors 与 custom entry types），并严禁通过 {@code HarnessCatalog} 进行工具查找。
  */
 class HarnessCatalogArchitectureTest {
 
@@ -112,7 +112,8 @@ class HarnessCatalogArchitectureTest {
 
     Path resolverPath =
         main.resolve(
-            "fun/fengwk/kkstudio/platform/harness/thread/command/DatabaseTurnResolver.java");
+            "fun/fengwk/kkstudio/platform/harness/thread/command/"
+                + "DatabaseAgentTurnContextResolver.java");
     Path gatewayPath =
         main.resolve("fun/fengwk/kkstudio/platform/harness/tool/gateway/ToolExecutionGateway.java");
     Path validatorPath =
@@ -149,7 +150,7 @@ class HarnessCatalogArchitectureTest {
           source.contains("HarnessCatalog"), consumer + " must not reference HarnessCatalog");
     }
 
-    // DatabaseTurnResolver 与 ToolExecutionGateway 仅为非工具元数据保留 HarnessCatalog，严禁工具查找
+    // DatabaseAgentTurnContextResolver 与 ToolExecutionGateway 仅为非工具元数据保留 HarnessCatalog，严禁工具查找
     List<Path> metadataConsumers = List.of(resolverPath, gatewayPath);
     for (Path consumer : metadataConsumers) {
       String source = Files.readString(consumer, StandardCharsets.UTF_8);
@@ -174,7 +175,7 @@ class HarnessCatalogArchitectureTest {
     String resolverSource = Files.readString(resolverPath, StandardCharsets.UTF_8);
     assertTrue(
         resolverSource.matches("(?s).*harnessCatalog\\s*\\.contextProjectors\\(\\).*"),
-        "DatabaseTurnResolver must use harnessCatalog.contextProjectors() for context projections");
+        "DatabaseAgentTurnContextResolver must use harnessCatalog.contextProjectors() for context projections");
 
     String gatewaySource = Files.readString(gatewayPath, StandardCharsets.UTF_8);
     assertTrue(
@@ -190,7 +191,8 @@ class HarnessCatalogArchitectureTest {
     Set<Path> allowedImporters =
         Set.of(
             main.resolve(
-                    "fun/fengwk/kkstudio/platform/harness/thread/command/DatabaseTurnResolver.java")
+                    "fun/fengwk/kkstudio/platform/harness/thread/command/"
+                        + "DatabaseAgentTurnContextResolver.java")
                 .normalize(),
             main.resolve(
                     "fun/fengwk/kkstudio/platform/catalog/tool/PluginRuntimeToolCatalogSource.java")

@@ -10,10 +10,11 @@ import org.springframework.web.server.ResponseStatusException;
 import fun.fengwk.kkstudio.canvas.CanvasQueryService;
 import fun.fengwk.kkstudio.canvas.CanvasResource;
 import fun.fengwk.kkstudio.canvas.CanvasSnapshot;
+import fun.fengwk.kkstudio.canvas.infra.dto.CanvasDtoMapper;
+import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.share.canvas.CanvasPresignedUrlDTO;
 import fun.fengwk.kkstudio.web.api.ApiResponse;
-import fun.fengwk.kkstudio.web.mapper.WebDtoMapper;
 
 import java.util.Objects;
 import java.util.Optional;
@@ -54,15 +55,15 @@ public class StudioCanvasResourceController {
   private ApiResponse<CanvasPresignedUrlDTO> sign(
       String canvasIdText, String resourceIdText, boolean original) {
     try {
-      UUID canvasId = WebDtoMapper.parseUuid(canvasIdText, "canvasId");
-      UUID resourceId = WebDtoMapper.parseUuid(resourceIdText, "resourceId");
+      UUID canvasId = Uuids.parseCanonical(canvasIdText, "canvasId");
+      UUID resourceId = Uuids.parseCanonical(resourceIdText, "resourceId");
       CanvasResource resource = findResource(canvasId, resourceId);
       if (resource.isText()) {
         throw new ResponseStatusException(
             HttpStatus.BAD_REQUEST, "TEXT resource has no blob content");
       }
       return ApiResponse.ok(
-          WebDtoMapper.toPresignedUrlDto(
+          CanvasDtoMapper.toPresignedUrlDto(
               original
                   ? blobManager.presignOriginalUrl(resource.blobId())
                   : blobManager.presignPreviewUrl(resource.blobId())));

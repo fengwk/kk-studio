@@ -2,6 +2,7 @@ import { lstat, realpath, stat } from 'node:fs/promises'
 import { dirname, join, posix, relative, win32 } from 'node:path'
 import type { CapabilityResult } from '../contracts.js'
 import { errorResult } from '../contracts.js'
+import { isWindows } from '../native/host.js'
 
 /**
  * 文件/搜索/进程能力共享的失败分类与参数校验。
@@ -230,7 +231,7 @@ function usesWindowsNormalize(path: string): boolean {
   if (/^[A-Za-z]:[\\/]/.test(path) || path.startsWith('\\')) {
     return true
   }
-  if (process.platform === 'win32' && path.startsWith('//')) {
+  if (isWindows() && path.startsWith('//')) {
     return true
   }
   return path.includes('\\') && !path.startsWith('/')

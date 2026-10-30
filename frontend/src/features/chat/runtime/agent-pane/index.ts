@@ -1,7 +1,4 @@
 export {
-  clearBoundPendingMessage,
-  clearPendingAcceptance,
-  isBoundPendingMessageValue,
   isBoundTarget,
   isCommandContent,
   isDraftHistoryTarget,
@@ -10,21 +7,27 @@ export {
   isNewThreadTarget,
   isNewSessionTarget,
   isPaneTarget,
-  inspectPendingAcceptanceSlot,
-  loadBoundPendingMessage,
-  loadPendingAcceptance,
   normalizePaneTarget,
   ownerIdentity,
   samePaneTarget,
+  targetIdentity,
+  type PaneTarget,
+  type PaneTargetKind,
+} from '@/features/chat/runtime/agent-pane/pane-target'
+
+export {
+  clearBoundPendingMessage,
+  clearPendingAcceptance,
+  inspectPendingAcceptanceSlot,
+  isBoundPendingMessageValue,
+  loadBoundPendingMessage,
+  loadPendingAcceptance,
   sameBatchRequestIdentity,
   samePendingAcceptanceIdentity,
   saveBoundPendingMessage,
   savePendingAcceptance,
-  targetIdentity,
   boundPendingStorageKey,
   type BoundPendingMessage,
-  type PaneTarget,
-  type PaneTargetKind,
   type PendingAcceptance,
   type PendingAcceptanceSlot,
-} from '@/features/chat/runtime/agent-pane/pane-target'
+} from '@/features/chat/runtime/pending-request-store'

@@ -22,7 +22,7 @@ import fun.fengwk.kkstudio.project.reconcile.IssueReconcileDispatcher;
 import fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationHandler;
 import fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationLoop;
 import fun.fengwk.kkstudio.web.project.ProjectInvalidationHub;
-import fun.fengwk.kkstudio.work.DurableWorkQueue;
+import fun.fengwk.kkstudio.work.DurableWorkStore;
 
 import javax.sql.DataSource;
 
@@ -90,7 +90,7 @@ public class ApplicationEventConfiguration {
             // LOCKED
             // 并发抢占。重连后无法得知漏掉了哪些类型，全部唤醒一次。
             new PostgresqlNotificationHandler(
-                DurableWorkQueue.CHANNEL,
+                DurableWorkStore.CHANNEL,
                 targetType ->
                     durableWorkDispatcher(
                             targetType,

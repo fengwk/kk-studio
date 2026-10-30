@@ -194,11 +194,14 @@ PaneTarget 有四种状态：`NEW_SESSION_DRAFT`（尚无 Session/Thread）、
 回合间的 SETTINGS 成为最新 head 时立即展示变化；后续相同快照不重复展示。
 无效快照明确提示并中断差值基准，Debug 仍保留一条已识别的 SETTINGS 事件及完整原始数据。
 
-命令批在发送前冻结 idempotency keys、payload 与顺序；只有设置 / Goal 批次冻结 cursor。连同本地草稿写入 pending storage；
-写入失败中止发送。容器创建用带 owner/target 的 `kk-studio.agent-pane-acceptance` 记录，
-既有 Thread 的发送用只按 threadId 隔离的 `kk-studio.agent-thread-pending` 记录，互不伪造 owner。
-不确定网络结果保留 exact replay，锁定请求身份并提供相同请求重试或显式放弃。
-恢复时按 request identity 保护多 Pane 并发；放弃只清理本地记录，服务端可能已接受。
+`AgentPane` 持有根投影，各子代理查看层由 `ConnectedThreadView` 读取自己的投影。
+`ThreadView` 与命令控制 Hook 只消费必填投影；命令批直接从该投影构建。
+
+命令批在发送前冻结幂等键、payload 与顺序；设置 / Goal 批次还冻结 cursor。
+`pending-request-store` 保存这些未决请求：容器创建按 owner/pane 隔离，既有 Thread 按 threadId 隔离，
+与 IndexedDB 离线草稿分开保存。写入失败中止发送；未知结果保留相同请求供精确重试或显式放弃。
+恢复与清理核对 request identity，避免常规路径覆盖其他 Pane 的记录；先读后写并非跨标签页原子操作。
+放弃只清理本地记录，不撤销服务端可能已经接受的请求。
 单条纯 USER_MESSAGE 不依赖 cursor，过期 cursor 不会被客户端重算或重试；设置 / Goal 批次仍以精确 cursor 提交，明确 409 保留草稿并交给既有控制面处理。
 
 Stop 复用 stopRequestId 处理未知结果，覆盖当前 Thread 与完整后代。
@@ -341,7 +344,7 @@ Environment 管理面展示宿主事实与有界运维事件窗口，并提供�
 ### tab 全局 IDE 面板
 
 IDE 是 tab 全局面板，不在工作区内嵌视图：[`IdePanelProvider`](../../frontend/src/features/environment/ide/IdePanelProvider.tsx)
-由应用外壳装配，一个 Environment 在同一 tab 内最多一个视图。面板收起只隐藏，关闭视图才释放资源；
+由应用外壳装配，负责 Context 提供、顶层状态组装与浮层渲染；内部职责明确拆分为纯 Claim 状态机（[`ide-claim-reducer`](../../frontend/src/features/environment/ide/ide-claim-reducer.ts)）、单点存储适配（[`ide-tab-state`](../../frontend/src/features/environment/ide/ide-tab-state.ts)）与连接身份对账（[`use-ide-claim-reconciliation`](../../frontend/src/features/environment/ide/use-ide-claim-reconciliation.ts)）。一个 Environment 在同一 tab 内最多一个视图。面板收起只隐藏，关闭视图才释放资源；
 切换环境只改变可见性，已打开的 iframe 保持挂载。入口只表达“打开这个环境的工作台”：
 Chat 入口经 [`ide-panel-context`](../../frontend/src/features/environment/ide/ide-panel-context.ts)
 请求面板聚焦已有视图，不预创建 iframe，也不在入口处声明目录。

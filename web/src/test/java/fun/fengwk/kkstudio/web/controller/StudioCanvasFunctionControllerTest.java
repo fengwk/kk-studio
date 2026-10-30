@@ -40,9 +40,9 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionOutputSpec;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson;
 import fun.fengwk.kkstudio.canvas.function.CanvasResourceKind;
+import fun.fengwk.kkstudio.canvas.infra.dto.CanvasDtoMapper;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
-import fun.fengwk.kkstudio.web.mapper.WebDtoMapper;
 
 import java.time.Instant;
 import java.util.List;
@@ -83,7 +83,7 @@ class StudioCanvasFunctionControllerTest {
                 new StudioCanvasFunctionController(
                     catalogSource,
                     runtimeService,
-                    new WebDtoMapper(mock(StorageBlobManager.class))))
+                    new CanvasDtoMapper(mock(StorageBlobManager.class))))
             .setControllerAdvice(new ApiResponseStatusAdvice())
             .setMessageConverters(strictJsonConverter())
             .build();

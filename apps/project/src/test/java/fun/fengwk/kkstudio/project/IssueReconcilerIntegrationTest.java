@@ -54,7 +54,7 @@ import fun.fengwk.kkstudio.project.reconcile.IssueReconciler;
 import fun.fengwk.kkstudio.project.tool.IssueTransitionService;
 import fun.fengwk.kkstudio.project.turn.ProjectRunScope;
 import fun.fengwk.kkstudio.work.DurableWork;
-import fun.fengwk.kkstudio.work.DurableWorkQueue;
+import fun.fengwk.kkstudio.work.DurableWorkStore;
 import fun.fengwk.kkstudio.work.WorkClaim;
 
 import java.time.Duration;
@@ -76,7 +76,7 @@ import java.util.concurrent.ConcurrentHashMap;
 class IssueReconcilerIntegrationTest extends ProjectTestSupport {
 
   @Autowired private IssueReconciler reconciler;
-  @Autowired private DurableWorkQueue issueWorkQueue;
+  @Autowired private DurableWorkStore issueWorkQueue;
   @Autowired private IssueTransitionService issueTransitionService;
   @Autowired private HarnessRuntime harnessRuntime;
 
@@ -262,7 +262,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
         NullPointerException.class,
         () -> reconciler.reconcile(new WorkClaim(null, 1L, "token", Instant.now())));
     assertThrows(
-        NullPointerException.class,
+        IllegalArgumentException.class,
         () -> reconciler.reconcile(new WorkClaim(UUID.randomUUID(), 1L, null, Instant.now())));
     assertThrows(
         NullPointerException.class,

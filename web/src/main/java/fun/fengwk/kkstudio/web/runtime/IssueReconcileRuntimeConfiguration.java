@@ -7,12 +7,13 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.SmartLifecycle;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.project.reconcile.IssueReconcileDispatcher;
 import fun.fengwk.kkstudio.project.reconcile.IssueReconcileProperties;
 import fun.fengwk.kkstudio.project.reconcile.IssueReconciler;
-import fun.fengwk.kkstudio.work.DurableWorkQueue;
+import fun.fengwk.kkstudio.work.DurableWorkStore;
 
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
@@ -68,14 +69,21 @@ public class IssueReconcileRuntimeConfiguration {
 
   @Bean
   public IssueReconcileDispatcher issueReconcileDispatcher(
-      DurableWorkQueue issueWorkQueue,
+      DurableWorkStore issueWorkQueue,
       IssueReconciler reconciler,
       IssueReconcileProperties properties,
       @Qualifier("issueReconcileDispatcherDrainExecutor") Executor drainExecutor,
       @Qualifier("issueReconcileDispatcherWorkerExecutor") Executor workerExecutor,
-      @Qualifier("issueReconcileDispatcherPollScheduler") ScheduledExecutorService pollScheduler) {
+      @Qualifier("issueReconcileDispatcherPollScheduler") ScheduledExecutorService pollScheduler,
+      PlatformTransactionManager transactionManager) {
     return new IssueReconcileDispatcher(
-        issueWorkQueue, reconciler, properties, drainExecutor, workerExecutor, pollScheduler);
+        issueWorkQueue,
+        reconciler,
+        properties,
+        drainExecutor,
+        workerExecutor,
+        pollScheduler,
+        transactionManager);
   }
 
   @Bean

@@ -24,7 +24,7 @@ import fun.fengwk.kkstudio.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.project.repo.IssueRunRepository;
 import fun.fengwk.kkstudio.project.repo.IssueStageBudgetRepository;
 import fun.fengwk.kkstudio.project.repo.ProjectRepository;
-import fun.fengwk.kkstudio.work.DurableWorkQueue;
+import fun.fengwk.kkstudio.work.DurableWorkStore;
 
 import java.time.Instant;
 import java.util.List;
@@ -87,7 +87,7 @@ public class ProjectService {
   private final IssueRunRepository issueRunRepository;
   private final IssueEvidenceService issueEvidenceService;
   private final IssueActivityRepository issueActivityRepository;
-  private final DurableWorkQueue issueWorkQueue;
+  private final DurableWorkStore issueWorkQueue;
   private final IssueStageBudgetRepository issueStageBudgetRepository;
   private final IssueAgentThreadRepository issueAgentThreadRepository;
   private final SessionDeletionOrchestrator sessionDeletion;

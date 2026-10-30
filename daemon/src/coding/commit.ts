@@ -2,6 +2,7 @@ import { constants } from 'node:fs'
 import { chmod, lstat, mkdir, open, rename, rm, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { isWindows } from '../native/host.js'
 import { ToolRunFailureError } from './support.js'
 
 /**
@@ -81,7 +82,7 @@ async function existingPermissions(target: string): Promise<number | null> {
   if (!info.isFile()) {
     throw new ToolRunFailureError(`target is not a regular file: ${target}`, 'INVALID_ARGUMENT')
   }
-  if (process.platform === 'win32') {
+  if (isWindows()) {
     return null
   }
   return info.mode & 0o7777

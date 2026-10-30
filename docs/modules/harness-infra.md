@@ -51,13 +51,15 @@ Tool siblings 按 assistantEntryId/callIndex、Work 按 type/UUID 排序。
 
 `loadEntryPath` 用单条 `WITH RECURSIVE` CTE 自 head 回溯到 ROOT，一次往返读出整条不可变路径并按 `depth desc` 输出；只追加写入、同 Session 复合外键与「非 ROOT 必有父、不得指向自身」约束保证父链终止于唯一 ROOT，SQL 不另做环路检测。句柄内维护事务局部 `Map<UUID, EntryPath>` 正向缓存：冷读一次 CTE 后回填；同事务内连续 `insertEntry` 直接从已缓存父路径派生新节点并更新缓存，后续读取子节点 0 次 CTE；缓存只在本事务可见，`close()` 清空；`deleteEntries` / `deleteSession` 按 session 整体驱逐，避免读到失效数据。`findRootEntry` 优先复用缓存中的 ROOT，未命中时借 `uk_harness_entry_single_root` 点查并把单节点路径写回缓存。[`PostgresqlHarnessRows`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlHarnessRows.java) 负责行映射与毫秒精度校验。
 
+`loadSlice` 读取 head 相对游标的增量。游标是当前祖先时 `baseEntryId` 等于游标且结果不含游标，游标即 head 时列表为空；游标不是祖先、属于另一 Session 或未知时返回完整链且 `baseEntryId` 为 null。head 缺失与 `loadEntryPath` 一样拒绝。本事务已有该 head 的完整路径时直接截取。冷缓存只执行一条 `WITH RECURSIVE entry_slice`：从 head 向上，遇到游标或 ROOT 即停，不先读完整路径，也不把部分结果写入完整路径缓存。
+
 `loadContributorCustomEntriesOnPath` 在完整路径缓存精确命中时直接在内存过滤 CUSTOM Entry；未命中时走一条窄递归 CTE，只返回 head（区分 head 不存在）与匹配该 `contributorId` 的 CUSTOM 节点，结果不回填完整路径缓存。
 
 深删除按阶梯取锁：`deleteThreads` 将 UUID 排序，但重复 ID 直接抛 `IllegalArgumentException`，不静默去重。目标 Thread 必须全部已加锁且属于已锁执行树；仍被 join 引用、或删除父 Thread 却遗漏其存活子 Thread 时同样拒绝。随后依次锁 Command、Model、Tool、Work，删除顺序为 Work、Command、Tool、Model、执行退出事实（包括 `ABANDONED` 行），最后整批删除 Thread。删除执行事实不是执行退出。`deleteEntries` 叶子优先逐层删除直到只剩 ROOT，Session 由独立的 `deleteSession` 删除。
 
 ## Work 的 claim / lease / wake
 
-`durable_work` 以 `(target_type, target_id)` 为主键，列含 `available_at`、`wake_version`、`lease_token`、`lease_until` 与 `required_environment_id`。同一张表还承载 Project 的 `ISSUE` 与 Canvas 的 `CANVAS_RUN` 行，它们由 [`DurableWorkQueue`](../../work/src/main/java/fun/fengwk/kkstudio/work/DurableWorkQueue.java) 读写；Harness 的每条语句都按 `target_type` 过滤。行变为可领取时在同一事务内向共享通道 `durable_work` 发送 payload 为 target type 的提示，组合根按类型只唤醒对应的 dispatcher。
+`durable_work` 以 `(target_type, target_id)` 为主键，列含 `available_at`、`wake_version`、`lease_token`、`lease_until` 与 `required_environment_id`。同一张表还承载 Project 的 `ISSUE` 与 Canvas 的 `CANVAS_RUN` 行。三类 target 都由 [`DurableWorkStore`](../../work/src/main/java/fun/fengwk/kkstudio/work/DurableWorkStore.java) 读写：它是这张表的唯一 SQL 实现，Harness 只把自己的事务钩子注入该 Store，每条语句仍按 `target_type` 过滤。行变为可领取时在同一事务内向共享通道 `durable_work` 发送 payload 为 target type 的提示，组合根按类型只唤醒对应的 dispatcher。
 
 `requestWork` 必须在持有所属 Thread 锁的事务内调用，upsert 语义是纯函数式推进；一次 request 只表达「立即唤醒」，due 由数据库权威时间写入，调用方传入的 `now` 只做毫秒精度校验：
 
@@ -90,7 +92,7 @@ wake merge -> round-robin claim THREAD/MODEL/TOOL（携带 nodeInstanceId）
 
 调度器持有实例级 `nodeInstanceId` 并把它传进每次 `claimNextWork`，这正是环境路由围栏判定的输入。`wakeRequested` 与 `drainRunning` 两个原子标志以 CAS 合并唤醒，保证同一时刻只有一个 drain 在跑，并在收尾时再检一次新唤醒；THREAD / MODEL / TOOL 之间用实例级 round-robin 游标轮转，避免类型饥饿；`start()` 注册 fixed-delay poll 并立即触发首次唤醒，运行期间重复调用是 no-op，`stop()` 后再调用则抛 `IllegalStateException`。外部注入的 drain / worker / poll 执行器由调用方管理，`stop()` 只取消 poll future 并立即返回，已进入数据库的 claim 可能提交但会在 handoff 前归还。
 
-合并 wake 的单 drain、bounded handoff、容量计数、executor 拒绝归还、接收前拒绝与接收后失败的区分、stop 收尾与 fail-fast executor 校验收敛在 [`harness/common`](../../common/) 的 [`BoundedWorkDispatcher`](../../common/src/main/java/fun/fengwk/kkstudio/common/concurrent/BoundedWorkDispatcher.java)；Harness 只保留 round-robin 类型 claim、按类型路由的 Processor handoff 与 ownership-fenced 归还，因此同一份调度骨架被 Harness / Issue / Canvas 三个域复用，而各自的 claim、fencing 与失败策略仍在域内。
+合并 wake 的单 drain、bounded handoff、容量计数、executor 拒绝归还、接收前拒绝与接收后失败的区分、stop 收尾与 fail-fast executor 校验收敛在 [`work`](../../work/) 的 [`BoundedWorkDispatcher`](../../work/src/main/java/fun/fengwk/kkstudio/work/BoundedWorkDispatcher.java)；Harness 只保留 round-robin 类型 claim、按类型路由的 Processor handoff 与 ownership-fenced 归还，因此同一份调度骨架被 Harness / Issue / Canvas 三个域复用，而各自的 claim、fencing 与失败策略仍在域内。
 
 worker 线程池必须是 fail-fast 拒绝策略（`AbortPolicy` 一类），构造时显式检查，拒绝 `CallerRunsPolicy` / `DiscardPolicy` / `DiscardOldestPolicy`。容量打满抛拒绝异常时，Dispatcher 先 `lockClaimedWork` 确认本节点仍持有有效租约，再按 `executorRejectionDelay` 延迟 `rescheduleWork` 归还租约并终止当前 drain，避免在过载下陷入 claim-拒绝的紧密循环。Processor 抛 `RuntimeException` 时只记日志、保留数据库租约，等租约自然过期后由后续调度重新认领并按持久化状态恢复。
 

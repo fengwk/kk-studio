@@ -5,9 +5,9 @@ Canvas 是建立在平台之上的图形编辑应用：用户在画布上摆放�
 | 模块 | 职责 | 依赖 |
 | --- | --- | --- |
 | [`apps/canvas/core`](../../apps/canvas/core/) | 不可变 graph、typed command、纯领域命令规划、冲突语义与全部端口 | [Common](common.md)、[Platform Plugin API](platform-plugin-api.md#canvas-function-spi)（Function SPI 与 `CanvasJson`）、Jackson core |
-| [`apps/canvas/infra`](../../apps/canvas/infra/) | PostgreSQL 持久化、Snapshot 一致性读、Function Run 运行时，以及对平台 Storage 与插件目录的适配 | Core、[Platform](platform.md)、[Durable Work](work.md)、Spring JDBC |
+| [`apps/canvas/infra`](../../apps/canvas/infra/) | PostgreSQL 持久化、Snapshot 一致性读、Function Run 运行时、领域与 share DTO 映射，以及对平台 Storage 与插件目录的适配 | Core、[Share](share.md)、[Platform](platform.md)、[Durable Work](work.md)、Spring JDBC |
 
-平台从不依赖 Canvas：Canvas 经平台的公开服务使用全局 Blob 与插件快照，[Web](web.md) 完成 HTTP/DTO 映射与组装。自动配置入口是 [`CanvasInfraAutoConfiguration`](../../apps/canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/CanvasInfraAutoConfiguration.java)。Canvas 与 Project 的关系、跨域数据约束见 [Canvas / Project](../canvas-project.md)。
+平台从不依赖 Canvas：Canvas 经平台的公开服务使用全局 Blob 与插件快照。领域与 share DTO 的映射在 [`CanvasDtoMapper`](../../apps/canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/dto/CanvasDtoMapper.java)，由 [`CanvasPlatformAutoConfiguration`](../../apps/canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/platform/CanvasPlatformAutoConfiguration.java) 使用平台 Storage 显式装配；独立 Canvas 运行时不加载它，[Web](web.md) 只组装 HTTP。Canvas 与 Project 的关系、跨域数据约束见 [Canvas / Project](../canvas-project.md)。
 
 ## Graph 聚合
 
@@ -91,7 +91,7 @@ Function 的能力契约（adapter、目录、冻结运行计划、执行上下�
 
 [`CanvasFunctionWorkStore.claimNext`](../../apps/canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/CanvasFunctionWorkStore.java) 从 `durable_work` 以 `SKIP LOCKED` 领取一条到期 Work，再在单次启动的短事务中按 Run → Work 顺序锁行，确认同一 lease token 在数据库时间下仍有效，才把 Run 推进为 `RUNNING` 并递增 attempt；失权立即返回无任务，终态、`UNKNOWN` 或已删除的 Run 则清理 Work 后继续扫描。执行中的持有者写入都在 SQL 里要求同一 `request_id`、`status='RUNNING'`，且同一 lease token 在数据库时钟下仍持有租约；token 过期或被接管时写入影响 0 行，旧 worker 的回调只能变成 no-op 或静默退出。
 
-[`CanvasFunctionDispatcher`](../../apps/canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/function/CanvasFunctionDispatcher.java) 由周期 poll 驱动，`durable_work` 通道上的 `CANVAS_RUN` 提示只降低延迟，正确性来自 poll 与租约；调度骨架复用 Common 的 [`BoundedWorkDispatcher`](../../common/src/main/java/fun/fengwk/kkstudio/common/concurrent/BoundedWorkDispatcher.java)，没有第二层内存队列，本地容量满时把 Run 还回并推迟。
+[`CanvasFunctionDispatcher`](../../apps/canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/function/CanvasFunctionDispatcher.java) 由周期 poll 驱动，`durable_work` 通道上的 `CANVAS_RUN` 提示只降低延迟，正确性来自 poll 与租约；调度骨架复用 [Durable Work](work.md) 的 [`BoundedWorkDispatcher`](../../work/src/main/java/fun/fengwk/kkstudio/work/BoundedWorkDispatcher.java)，没有第二层内存队列，本地容量满时把 Run 还回并推迟。
 
 [`CanvasFunctionWorker.run`](../../apps/canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/function/CanvasFunctionWorker.java) 执行两阶段协议：
 

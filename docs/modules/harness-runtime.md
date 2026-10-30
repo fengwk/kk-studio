@@ -57,7 +57,7 @@ tree 锁只用于结构或跨 Thread 的写操作（spawn、Stop、删除、fork
 
 执行父子关系不进历史，而是 Thread 行上不可变的 `parentThreadId`，因此 Entry Tree 始终是对话历史而不是运行树。Environment 以全局唯一、不可变的 name 进入 settings，每回合再解析为内部路由身份；目录只出现在每次工具调用自己的 arguments 里，历史中没有目录状态。
 
-[`EntryPath`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/history/EntryPath.java) 是从 `ROOT` 到 head 的不可变连续路径（同 Session、父链相接、ID 不重复、首节点是唯一的 `ROOT`）。[`TurnPathValidator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/history/TurnPathValidator.java) 在其上校验回合文法：
+[`EntryPath`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/history/EntryPath.java) 是从 `ROOT` 到 head 的不可变连续路径（同 Session、父链相接、ID 不重复、首节点是唯一的 `ROOT`）。[`EntrySlice`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/history/EntrySlice.java) 是同一条链的读取视图：`baseEntryId` 为空时就是这条完整路径；非空时只含该祖先之后、不含游标本身的连续子链，空列表表示游标就是 head。增量不满足 `EntryPath` 的 ROOT 约束，不能当作完整路径使用。[`TurnPathValidator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/history/TurnPathValidator.java) 在其上校验回合文法：
 
 - `CUSTOM`、`SETTINGS`、`FORK` 是透明节点，不打开也不关闭回合，后两者只能位于回合之间；其余节点必须落在唯一 open 的 `TURN_START` 内，前一回合未关闭时不得再开。
 - 每回合至多一个 Assistant 结果（ASSISTANT 消息、`ASSISTANT_ERROR`、`ASSISTANT_ABORTED` 或 `COMPACTION`）；TOOL 消息紧随带 `ToolCall` 的 ASSISTANT 消息，`callIndex` 从 0 起严格连续，调用 ID、工具名与所属 Assistant 精确匹配。
@@ -304,7 +304,7 @@ Goal 正文由用户经 typed `GOAL` 命令写入 branch settings，Agent 只能
 | `runtime.driver` | 内部 Agent Driver 契约与中立投影：Turn 解析/提交、锁定状态、活动投影与 Stop 结果；不读取具体 Driver 私有状态 |
 | `runtime.entry` | 分支配置与回合生命周期值：`BranchSettings`、`GoalSetting`、启动原因与结局 |
 | `runtime.execution` | 具体执行代次的窄退出账本：身份登记、单向真实 ACK、显式放弃、journal write-ahead 重放与确认后的 Join 结算推进；不复制 Invocation 状态机 |
-| `runtime.history` | Entry、`EntryPath`、回合文法校验与历史 JSON 编解码 |
+| `runtime.history` | Entry、`EntryPath`、`EntrySlice`、回合文法校验与历史 JSON 编解码 |
 | `runtime.input` | `ask_user` 问卷与答案的纯值校验和规范化 |
 | `runtime.interaction` | 等待输入/审批的只读投影与稳定分页，不持有产品归属 |
 | `runtime.invocation.codec` | Tool 持久化列的严格确定性 JSON 编解码；Builtin 的 `ModelRequestSpec` codec 在 driver 模块 |
