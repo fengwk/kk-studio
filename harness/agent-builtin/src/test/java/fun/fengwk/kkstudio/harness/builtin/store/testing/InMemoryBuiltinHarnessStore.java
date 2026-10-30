@@ -26,6 +26,12 @@ import java.util.UUID;
  *
  * <p>Model 行与属性存放在 runtime 核心事务快照的 driver row 区域，因此与核心 Store 共享同一 copy-on-write 快照、rollback、driver
  * 级锁与按 Thread 深删除语义。它不是生产实现，也不是生产 SPI。
+ *
+ * <p>Builtin-specific model 校验由本类事务实现：新 ModelInvocation 只能 READY / attempt=0 插入，保持 {@code (thread,
+ * turnStartEntryId)} 唯一、requestHeadEntryId 等于 Thread 当前 head、turnStartEntryId 位于 requestHead 的
+ * EntryPath 且 owner 匹配；resultEntryId 必须是同一 turn 的 ASSISTANT / ASSISTANT_ERROR / ASSISTANT_ABORTED
+ * descendant 且全局唯一；update 走 ModelInvocation transition validation，delete 拒绝仍有 tool invocation
+ * children 的模型行。核心 Store 不实现这些约束，只提供 driver row 快照与 owner 关联。
  */
 public final class InMemoryBuiltinHarnessStore extends InMemoryHarnessStore
     implements BuiltinStore {
