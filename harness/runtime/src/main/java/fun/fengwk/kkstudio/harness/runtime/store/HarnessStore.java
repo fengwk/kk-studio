@@ -1,28 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.store;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.runtime.StoppedThreadReceipt;
-import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState;
-import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
-import fun.fengwk.kkstudio.harness.runtime.history.Entry;
-import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
-import fun.fengwk.kkstudio.harness.runtime.session.Session;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
-import fun.fengwk.kkstudio.harness.runtime.work.Work;
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
-import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
-
-import java.time.Duration;
 import java.time.Instant;
-import java.util.Collection;
-import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Function;
 
@@ -30,28 +8,27 @@ import java.util.function.Function;
  * 单一持久化存储根：Harness 持久化原语的唯一入口。
  *
  * <p>本接口不是 Repository / Specification / generic save / UnitOfWork 框架：不提供任何业务 use-case 方法（例如
- * applyTerminalModel、applyToolBatch、startTurn、stop、approve、decideNextAction、harvest、
- * enqueue），更新只允许修改 Thread / Command / Invocation / Work 的 current state；Session 与 Entry 是
- * append-only 不可变记录。
+ * applyTerminalModel、applyToolBatch、startTurn、stop、approve、decideNextAction、harvest、enqueue），更新只允许修改
+ * Thread / Command / Invocation / Work 的 current state；Session 与 Entry 是 append-only 不可变记录。
  *
  * <p>事务语义（所有实现必须遵守）：回调正常返回即提交（除非实现选择加入调用方已有的外层事务，此时提交/回滚由外层事务决定），抛出 {@link RuntimeException} 或
  * {@link Error} 时完整回滚并原样重抛；回调返回 null 合法（void 场景）。事务句柄只能由执行回调的同一线程在回调内使用； 跨线程使用或回调结束后的任何句柄调用都必须被实现以
  * {@link IllegalStateException} 拒绝。实现必须拒绝重入（回调内再次调用同一 Store 的 {@link
  * #transaction}）。并发由实现决定：生产实现允许并发事务，测试参考实现使用全局 monitor 串行化。
  *
- * <p>多实体锁顺序（所有多行事务必须遵守，用于收敛已知锁逆序与数据库死锁路径）：携带 frozen task 策略的 Join 准入先获取全局 Join 准入锁（{@link
- * Transaction#lockJoinAdmission}），再获取执行树锁（{@link Transaction#lockTree}）；若涉及 Session 锁，先锁
- * Session（{@link #lockSessionForKeyShare} 或 {@link #lockSessionForUpdate}），再按 {@link UuidOrder} 升序锁
- * Thread，再锁其 Commands，再锁其 ModelInvocation，再按 callIndex 升序锁同 Assistant Entry 的 ToolInvocation
- * siblings，最后锁 Work；同一事务锁多行 Work 时，同层 Work 必须按 (type, id) 升序（例如先 THREAD Work 再 MODEL
+ * <p>多实体锁顺序（所有多行事务必须遵守，用于收敛已知锁逆序与数据库死锁路径）：携带 frozen task 策略的 Join 准入先获取全局 Join 准入锁 （{@link
+ * Transaction#joins()} 的 {@code lockAdmission}），再获取执行树锁（{@link Transaction#threads()} 的 {@code
+ * lockTree}）；若涉及 Session 锁，先锁 Session（{@code lockForKeyShare} 或 {@code lockForUpdate}），再按 {@link
+ * UuidOrder} 升序锁 Thread，再锁其 Commands，再锁其 Driver 私有行，再按 callIndex 升序锁同 Assistant Entry 的
+ * ToolInvocation siblings，最后锁 Work；同一事务锁多行 Work 时，同层 Work 必须按 (type, id) 升序（例如先 THREAD Work 再 MODEL
  * Work）。创建、请求或强制删除 Work 的业务事务必须先锁 owning Thread；dispatcher claim、heartbeat/lease 等单 Work
  * 调度事务是唯一例外，它们不得创建新的业务 wake。实现必须在实际获取新锁前以 {@link IllegalStateException} 拒绝已知逆序；重复访问本事务已持有的锁合法。
  *
- * <p>读取约定：所有 find/lock 返回 {@link Optional}；所有 list 返回不可变列表；list 入参被防御性拷贝且拒绝 null 元素。唯一键 / 引用完整性违反抛
- * {@link IllegalArgumentException}；未锁定即更新抛 {@link IllegalStateException}。
+ * <p>读取约定：所有 find/lock 返回 {@link java.util.Optional}；所有 list 返回不可变列表；list 入参被防御性拷贝且拒绝 null 元素。唯一键 /
+ * 引用完整性违反抛 {@link IllegalArgumentException}；未锁定即更新抛 {@link IllegalStateException}。
  *
  * <p>时间：唯一权威时间是 {@link Transaction#now()}——生产实现取数据库时钟，同一事务内保持不变。所有持久化时间戳都取自它，
- * 时间只记录事实发生的时刻，不承担排序或单调性约束（顺序由父链、序号与版本表达）。映射到 SQL timestamp 列的时间统一使用毫秒精度； 任何非 null 值若包含亚毫秒部分，实现必须以
+ * 时间只记录事实发生的时刻，不承担排序或单调性约束 （顺序由父链、序号与版本表达）。映射到 SQL timestamp 列的时间统一使用毫秒精度；任何非 null 值若包含亚毫秒部分，实现必须以
  * {@link IllegalArgumentException} 拒绝，禁止静默截断或四舍五入。
  */
 public interface HarnessStore {
@@ -62,19 +39,20 @@ public interface HarnessStore {
    * <p>回调内只能通过句柄执行 typed primitives；回调正常返回即提交，抛出 {@link RuntimeException} 或 {@link Error}
    * 即回滚并重抛。句柄在回调返回后失效。
    *
-   * <p>实现可以加入调用方已有的外层事务（例如 Spring {@code PROPAGATION_REQUIRED}）：此时回调正常返回只表示当前事务边界内
-   * 的写入已准备好，实际提交/回滚由外层事务决定；未加入外层事务的调用则保持回调返回即提交的语义。回调抛异常在两种模式下都会使当前事务 边界失效（标记 rollback-only
-   * 或直接回滚），外层事务随后提交时会被拒绝。实现不得改用 {@code REQUIRES_NEW}：owner 锁与 harness durable 更新必须留在同一物理事务里。
+   * <p>实现可以加入调用方已有的外层事务（例如 Spring {@code
+   * PROPAGATION_REQUIRED}）：此时回调正常返回只表示当前事务边界内的写入已准备好，实际提交/回滚由外层事务决定；
+   * 未加入外层事务的调用则保持回调返回即提交的语义。回调抛异常在两种模式下都会使当前事务边界失效（标记 rollback-only 或直接回滚），外层事务随后提交时会被拒绝。实现不得改用
+   * {@code REQUIRES_NEW}：owner 锁与 harness durable 更新必须留在同一物理事务里。
    */
   <T> T transaction(Function<Transaction, T> callback);
 
   /**
    * 把进程内副作用登记到当前 {@link #transaction} 的物理提交之后。
    *
-   * <p>只能由正在执行的 store callback 调用。无外层事务时，副作用在该 callback 成功提交后、{@link #transaction} 返回前执行；
-   * 实现加入了外层事务时，副作用只在该物理事务真正 {@code afterCommit} 时执行，rollback 不执行。callback 抛异常时不得执行已登记的动作。
+   * <p>只能由正在执行的 store callback 调用。无外层事务时，副作用在该 callback 成功提交后、{@link #transaction}
+   * 返回前执行；实现加入了外层事务时， 副作用只在该物理事务真正 {@code afterCommit} 时执行，rollback 不执行。callback 抛异常时不得执行已登记的动作。
    *
-   * <p>动作执行时 store 事务边界已释放且提交已可见：动作可以开启新的 store 事务读取已提交状态；但动作不属于任何事务，其失败不得影响 已提交结果，也不得被 {@link
+   * <p>动作执行时 store 事务边界已释放且提交已可见：动作可以开启新的 store 事务读取已提交状态；但动作不属于任何事务，其失败不得影响已提交结果，也不得被 {@link
    * #transaction} 重试或回滚。
    */
   void afterCommit(Runnable action);
@@ -86,7 +64,7 @@ public interface HarnessStore {
    */
   void assertNoAmbientTransaction();
 
-  /** 一次事务内的 typed persistence 句柄。 */
+  /** 一次事务内的 typed persistence 句柄：只有事务时钟、id 分配与九个聚合视图。 */
   interface Transaction {
 
     /** 本事务的权威时间（毫秒精度）：首次调用时取数据库时钟，之后在本事务内返回同一值。 */
@@ -95,491 +73,31 @@ public interface HarnessStore {
     /** 分配下一个 durable UUID id：只保证全局唯一；事务失败可能已消耗 ID，不要求 rollback 复用。 */
     UUID nextId();
 
-    /** 插入新 Session；id 冲突抛 {@link IllegalArgumentException}。 */
-    void insertSession(Session session);
+    /** Session 聚合视图。 */
+    SessionStore sessions();
 
-    /** 按 id 读取 Session；不存在返回 {@link Optional#empty()}。 */
-    Optional<Session> findSession(UUID id);
+    /** Entry 聚合视图。 */
+    EntryStore entries();
 
-    /**
-     * 更新 Session 的显示名称。要求行存在且已在本事务锁定（{@link #lockSessionForKeyShare} 或 {@link
-     * #lockSessionForUpdate}），并通过共享 transition validation（{@link Session#validateTransition}）： id /
-     * createdAt 不得改变。未锁定抛 {@link IllegalStateException}，行不存在、身份改变或非法 name 抛 {@link
-     * IllegalArgumentException}。
-     */
-    void updateSession(Session session);
+    /** Thread 聚合视图。 */
+    ThreadStore threads();
 
-    /**
-     * 锁定 Session 行并返回（FOR KEY SHARE：只防删除/改键，不串行化同 Session 的 sibling Thread）； 不存在返回 {@link
-     * Optional#empty()} 且不产生锁。要求 Session -&gt; Thread 锁序：必须先锁 Session 再锁 Thread。
-     */
-    Optional<Session> lockSessionForKeyShare(UUID id);
+    /** Thread Command 聚合视图。 */
+    CommandStore commands();
 
-    /**
-     * 锁定 Session 行并返回（FOR UPDATE：串行化该 Session 的删除 / 归属独占类写操作）；不存在返回 {@link Optional#empty()}
-     * 且不产生锁。要求 Session -&gt; Thread 锁序。仅用于删除 / 归属独占操作，<b>不得</b>用于命令接受与 sibling Thread
-     * 的正常执行路径——NEW_SESSION / NEW_THREAD 初始创建与 THREAD 写入一律使用 {@link #lockSessionForKeyShare}，避免同
-     * Session 的 sibling 被 Session 级锁串行化。
-     */
-    Optional<Session> lockSessionForUpdate(UUID id);
+    /** ToolInvocation 聚合视图。 */
+    ToolStore tools();
 
-    /**
-     * 追加一个不可变 Entry。约束：session 必须存在；每个 Session 至多一个 ROOT 且 ROOT 必须先于其他 Entry；写入前用 ROOT 单元素链或 {@code
-     * parent path + new entry} 构造完整 {@link EntryPath} 校验（parent 连续、同 Session 与 turn / tool-prefix
-     * 结构），非法序列不能进入 store。违反抛 {@link IllegalArgumentException}。
-     */
-    void insertEntry(Entry entry);
+    /** Work 调度原语视图。 */
+    WorkStore work();
 
-    /** 按 id 读取 Entry；不存在返回 {@link Optional#empty()}。 */
-    Optional<Entry> findEntry(UUID id);
+    /** Thread Join 聚合视图。 */
+    JoinStore joins();
 
-    /**
-     * 按 sessionId 读取该 Session 唯一的 ROOT Entry。Session 不存在或尚无 ROOT 时返回 {@link Optional#empty()}。
-     *
-     * @param sessionId Session ID，不能为 null
-     * @return 唯一的 ROOT Entry
-     */
-    Optional<Entry> findRootEntry(UUID sessionId);
+    /** Stop 回执聚合视图。 */
+    StopReceiptStore stops();
 
-    /**
-     * 从 head Entry 向上回溯到 ROOT，返回 root-to-head 的不可变 {@link EntryPath}（构造时校验同 Session、 parent 连续与
-     * turn 结构）。head 不存在抛 {@link IllegalArgumentException}。
-     */
-    EntryPath loadEntryPath(UUID headEntryId);
-
-    /**
-     * 读取指定 head Entry 的 root-to-head 祖先链上、payload 为 {@link CustomEntryPayload} 且 contributorId
-     * 精确匹配的 Entry 列表。
-     *
-     * <p>保持 root-to-head 顺序；不含 sibling 和其他 contributor；返回不可变列表。head 不存在或祖先链 cycle / 未到 ROOT fail
-     * closed（抛出 {@link IllegalArgumentException}）；参数为 null 拒绝。
-     *
-     * @param headEntryId 祖先链起点 head Entry ID，不能为 null
-     * @param contributorId 精确匹配的 Contributor ID，不能为 null
-     * @return 匹配的不可变 Entry 列表（保持 root-to-head 顺序）
-     */
-    List<Entry> loadContributorCustomEntriesOnPath(UUID headEntryId, String contributorId);
-
-    /**
-     * 读取指定 head Entry 所在 branch 的生效 {@link BranchSettings}：以 ROOT settings 为基础，被路径上最近的非 COMPACTION
-     * TURN_START settings 覆盖，与 {@link EntryPath#baseSettings()} 语义完全一致。
-     *
-     * <p>这是为只读 Contributor branch view 提供的窄读取：只返回 settings 快照，不物化完整 EntryPath，也不返回任何 message / tool
-     * / compaction 内容；sibling 分支的 settings 绝不可见。head 不存在或祖先链 cycle / 未到 ROOT fail closed（抛出 {@link
-     * IllegalArgumentException}）；参数为 null 拒绝。
-     *
-     * @param headEntryId 祖先链起点 head Entry ID，不能为 null
-     * @return 该 branch 的生效 settings 快照
-     */
-    BranchSettings loadBranchSettings(UUID headEntryId);
-
-    /**
-     * 读取指定 Session 的全部不可变 Entry，包含非当前 head 路径上的历史分支。按 {@code createdAt} 升序，相同时按 PostgreSQL 兼容的无符号
-     * UUID 序（{@link UuidOrder}）。Session 不存在抛 {@link IllegalArgumentException}；返回不可变列表。
-     */
-    List<Entry> loadEntriesBySessionId(UUID sessionId);
-
-    /**
-     * 插入新 Thread；head Entry 必须存在且属于 {@code thread.sessionId} 的 Session（Session 到 head 的同一 Session
-     * 索引强制），id 冲突抛 {@link IllegalArgumentException}。同一 Session 内执行根（{@code parentThreadId} 为
-     * null）名称重复抛 {@link fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException}
-     * （{@code THREAD_NAME_CONFLICT}）；子代理与跨 Session 同名不受限。插入后本事务内可更新。
-     */
-    void insertThread(ThreadState thread);
-
-    /** 按 id 读取 Thread；不存在返回 {@link Optional#empty()}。 */
-    Optional<ThreadState> findThread(UUID id);
-
-    /** 锁定 Thread 行并返回（FOR UPDATE）；不存在返回 {@link Optional#empty()} 且不产生锁。 */
-    Optional<ThreadState> lockThread(UUID id);
-
-    /**
-     * 读取指定 Session 的全部 Thread（当前 projection），按 {@code (created_at, id)} 确定性序返回不可变列表。Session 不存在抛
-     * {@link IllegalArgumentException}。
-     */
-    List<ThreadState> listThreadsBySession(UUID sessionId);
-
-    /**
-     * 读取指定 parentThreadId 的全部直接子 Thread，按 UUID 升序返回不可变列表；不产生锁。
-     *
-     * @param parentThreadId 父 Thread ID，不能为 null
-     * @return 子 Thread 列表，按 UUID 升序排列
-     */
-    List<ThreadState> listChildren(UUID parentThreadId);
-
-    /**
-     * 更新 Thread current state。要求行存在且已在本事务锁定（{@link #lockThread} 或同事务 {@link #insertThread}），并通过共享
-     * transition validation（{@link ThreadState#validateTransition}）：id / sessionId /
-     * creationRequestHash / createdAt 不得改变，headEntryId 必须指向已存在 Entry 且属于 Thread 的
-     * Session，nextCommandSequence / version / updatedAt 不得回退，任何对外字段变化必须 version 精确 +1。未锁定抛 {@link
-     * IllegalStateException}，行不存在、身份改变、非法 transition 或 head 不存在/跨 Session 抛 {@link
-     * IllegalArgumentException}；执行根名称与其他执行根重复抛 {@link
-     * fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException}（{@code
-     * THREAD_NAME_CONFLICT}）。
-     */
-    void updateThread(ThreadState thread);
-
-    /** 由不可变 parent 链派生 head-to-root 祖先（包含自身）。不存在返回空列表。 */
-    List<UUID> findAncestorChain(UUID threadId);
-
-    /** 读取执行根为 {@code rootThreadId} 的全部 Thread（含根自身），不产生锁，顺序不保证。 */
-    List<ThreadState> listThreadsByRoot(UUID rootThreadId);
-
-    /**
-     * 在 Join 准入锁之后、任何 Session/Thread/Work 锁之前获取执行树事务级锁；root 取自 Thread 不可变的 {@code rootThreadId}。
-     */
-    void lockTree(UUID rootThreadId);
-
-    /**
-     * 在任何 tree / Session / Thread / Invocation / Work 锁之前获取全局 Join 准入事务级锁：串行化所有携带 frozen task 策略的
-     * subagent 准入，使「全局活跃 subagent 数」上限的判定与创建无竞态。
-     *
-     * <p>必须在事务内首次加锁前调用，即使本次请求的额度为 unlimited 也必须获取（否则并发的有限额度请求会与之竞态）；同一事务内重复调用幂等。已持有任何 tree
-     * 或业务行锁后再调用抛 {@link IllegalStateException}。该锁只是准入串行化原语，不承载任何持久字段，且与 tree 锁使用相互隔离的 key 空间。root
-     * one-shot（无父）准入不需要它。
-     */
-    void lockJoinAdmission();
-
-    /** Join 是源 command 的 FK 约束引用，必须与源 command 在同一事务内创建。 */
-    void insertJoin(ThreadJoin join);
-
-    Optional<ThreadJoin> findJoin(UUID invocationId);
-
-    /** 子 Thread 上尚未冻结 terminal 结果且未被后续续接 supersede 的 Join。 */
-    List<ThreadJoin> loadIncompleteJoins(UUID childThreadId);
-
-    /**
-     * 统计指定父 Thread 下尚未冻结结果、未被 supersede 的 NOTIFY_PARENT 直接子 Join（{@code terminalEntryId ==
-     * null}）数量；不产生锁。用于子任务并发配额判定。
-     *
-     * @param parentThreadId 父 Thread ID，不能为 null
-     * @return 未完成的直接子 Join 数量
-     */
-    int countIncompleteChildJoins(UUID parentThreadId);
-
-    /**
-     * 判断指定父 Thread 是否存在尚未冻结结果、未被 supersede 的直接 SETTLE_OWNER_TURN 子 Join；不产生锁。用于把 owner 压缩结算义务与
-     * NOTIFY_PARENT 子任务配额区分开。
-     *
-     * @param parentThreadId 父 Thread ID，不能为 null
-     * @return 是否存在未完成的 owner 结算义务
-     */
-    boolean hasIncompleteOwnerChildJoin(UUID parentThreadId);
-
-    /**
-     * 全局统计尚未冻结结果、未被 supersede 且拥有非空 parentThreadId 的 TASK Join 数量；跨所有 root 聚合，root
-     * ticket（parentThreadId 为空）与 COMPACTION join 不计入。 不产生锁。用于 subagent 任务的全局并发上限判定。
-     *
-     * @return 全局未完成的执行子 Join 数量
-     */
-    int countIncompleteSubagentJoins();
-
-    /** 只允许首次冻结结果、单调推进提醒、首次写入交付引用，以及首次写入 supersede 接管身份。 */
-    void updateJoin(ThreadJoin join);
-
-    /**
-     * 持久保存一次 Stop 产生的完整回执集合（请求目标与全部后代各一条）。要求每条回执的 Thread 已在本事务锁定；回执身份 {@code (threadId,
-     * stopRequestId)} 不可重用，重复插入抛 {@link IllegalArgumentException}。{@code rootThreadId} 是本次 Stop
-     * 的请求目标 Thread，{@code rootStopRequestId} 是本次 Stop 的根请求 ID，二者共同标识一次 Stop 的完整范围，用于
-     * 精确重放旧范围而不以当前树重算，也避免不同树的派生身份互相串回执。
-     */
-    void insertStopReceipts(
-        UUID rootThreadId, UUID rootStopRequestId, List<StoppedThreadReceipt> receipts);
-
-    /** 按 {@code (threadId, stopRequestId)} 读取单条 Stop 回执；不存在返回 {@link Optional#empty()}。 */
-    Optional<StoppedThreadReceipt> findStopReceipt(UUID threadId, UUID stopRequestId);
-
-    /** 读取该 Thread 自己的全部 Stop 回执，按创建顺序返回；不产生锁。返回不可变列表。 */
-    List<StoppedThreadReceipt> loadStopReceiptsByThread(UUID threadId);
-
-    /**
-     * 读取以 {@code (rootThreadId, rootStopRequestId)} 根对标识的一次 Stop 产生的完整回执集合，按 Thread UUID 升序返回；
-     * 根对不匹配或不存在时返回空列表。不产生锁。返回不可变列表。
-     */
-    List<StoppedThreadReceipt> loadStopReceiptsByRootRequest(
-        UUID rootThreadId, UUID rootStopRequestId);
-
-    /**
-     * GC 删除指定子 Thread 的全部 Join 记录并返回删除行数。要求该子 Thread 已在本事务锁定（未锁定抛 {@link IllegalStateException}）；
-     * 若该子 Thread 下存在任何尚未结算的 Join，必须抛出 {@link IllegalArgumentException} 拒绝删除并回滚。已结算可删的 Join
-     * 包括：已被后续续接 supersede 的 Join、已冻结结果的根 completion ticket、已冻结结果的 COMPACTION Join，以及已成功交付给父 Thread
-     * 的 TASK Join；仍缺结果或结果尚未交付给存活父 Thread 的 Join 一律拒绝。
-     */
-    int deleteJoinsByChild(UUID childThreadId);
-
-    /**
-     * 整体删除一批 Thread 涉及的 Join 记录并返回删除行数（Chat 深删除专用）。要求每个 Thread 已在本事务锁定且位于已加锁的执行树内。
-     *
-     * <p>当 Join 的 child 与（非空）parent 都位于本删除集合内时，两端将在同一事务内被物理删除，任何存活 Thread 都不会再引用该 Join，因此未匹配或未交付的
-     * pending Join 也可一并删除；只有 child 在集合内而 parent 存活时，仍按 {@link #deleteJoinsByChild} 的单边规则拒绝尚未结算的
-     * Join。违反抛 {@link IllegalArgumentException}。
-     */
-    int deleteJoinsForThreads(List<UUID> threadIds);
-
-    /** 按 (threadId, idempotencyKey) 幂等查找 Command；不存在返回 {@link Optional#empty()}。 */
-    Optional<ThreadCommand> findCommandByIdempotencyKey(UUID threadId, UUID idempotencyKey);
-
-    /** 按 (threadId, sequence) 直接定位单条 Command；不存在返回 {@link Optional#empty()}。不产生业务行锁。 */
-    Optional<ThreadCommand> findCommand(UUID threadId, long sequence);
-
-    /**
-     * 读取该 Thread 全部 QUEUED Command，按 sequence 升序。要求该 Thread 已在本事务锁定（{@link #lockThread} 或同事务 {@link
-     * #insertThread}，未锁定抛 {@link IllegalStateException}）；返回行视为已在本事务锁定（可直接 {@link
-     * #updateCommands}）。返回不可变列表。
-     */
-    List<ThreadCommand> loadQueuedCommands(UUID threadId);
-
-    /**
-     * 判断该 Thread 是否存在 sequence 大于 {@code afterSequence} 的 APPLIED NOTIFICATION Command；不产生锁，只按
-     * {@code (thread_id, sequence)} 区间判定、不读取 payload。用于识别已物化但尚未越过输入水位的系统通知。
-     */
-    boolean hasAppliedNotificationAfter(UUID threadId, long afterSequence);
-
-    /**
-     * 读取该 Thread 上以指定 {@code stopRequestId} 取消的全部 Command（CANCELLED，含历史），按 sequence 升序；不产生锁。索引用
-     * {@code idx_harness_thread_command_stop_request}；返回不可变列表。
-     */
-    List<ThreadCommand> loadCancelledCommandsByRequest(UUID threadId, UUID stopRequestId);
-
-    /**
-     * 批量插入新 Command；每条 command 的 thread 必须存在且已在本事务锁定（锁序 Thread -&gt; commands），初始状态必须为 QUEUED（无任何
-     * terminal marker），并逐条校验 {@code (thread, sequence)}、{@code (thread, idempotencyKey)} 唯一性后按
-     * {@code (threadId, sequence)} 稳定顺序写入。违反抛 {@link IllegalArgumentException}；入参 list 被防御性拷贝且拒绝
-     * null 元素。插入后本事务内可更新。
-     */
-    void insertCommands(List<ThreadCommand> commands);
-
-    /**
-     * 批量更新 Command 的生命周期。threadId / payload / idempotencyKey / requestHash / sequence / createdAt
-     * 必须与 已存储行一致；QUEUED 行只能推进为 APPLIED（设置 appliedEntryId）或 CANCELLED（设置 stopRequestId 与 cancelledAt
-     * 成对），terminal 行只接受 exact-idempotent 重放（相同 marker），禁止 terminal-&gt;QUEUED、
-     * APPLIED&lt;-&gt;CANCELLED 或 terminal marker 改变；appliedEntryId 必须指向存在的 Entry、属于 Command Thread
-     * 的 Session，且被引用 Entry 的 ownerThreadId（若为 TURN_START）等于 command 的 threadId。要求每行已在本事务锁定 （{@link
-     * #loadQueuedCommands} 或 {@link #insertCommands}），且每条 command 的 thread 已在本事务锁定（锁序 Thread -&gt;
-     * commands）。未锁定抛 {@link IllegalStateException}，身份 / 生命周期 / applied 引用违反或行不存在抛 {@link
-     * IllegalArgumentException}。
-     */
-    void updateCommands(List<ThreadCommand> commands);
-
-    /** 按 id 读取 ToolInvocation；不存在返回 {@link Optional#empty()}。 */
-    Optional<ToolInvocation> findToolInvocation(UUID id);
-
-    /** 锁定 ToolInvocation 行并返回；不存在返回 {@link Optional#empty()} 且不产生锁。 */
-    Optional<ToolInvocation> lockToolInvocation(UUID id);
-
-    /** 读取指定 Assistant Entry 的全部 ToolInvocation，按 callIndex 升序；不产生锁。返回不可变列表。 */
-    List<ToolInvocation> loadToolInvocationsByAssistantEntryId(UUID assistantEntryId);
-
-    /** 读取指定 Assistant Entry 的全部 ToolInvocation，按 callIndex 升序并统一锁定；返回不可变列表。 */
-    List<ToolInvocation> lockToolInvocationsByAssistantEntryId(UUID assistantEntryId);
-
-    /**
-     * 按 {@code (created_at, id)} 升序读取两种等待状态（{@code WAITING_INPUT} / {@code WAITING_APPROVAL}）的
-     * ToolInvocation 及其 owning Thread / Session 坐标，用于待处理列表的稳定 keyset 分页。
-     *
-     * <p>{@code afterCreatedAt} / {@code afterId} 是游标下界，返回严格大于该组合的行（首屏使用 {@link
-     * java.time.Instant#EPOCH} 与全零 UUID）；{@code limit} 必须为正，实现按 {@code limit}
-     * 截断。不使用状态拆分的两次查询，也不产生锁；返回不可变列表。
-     */
-    List<PendingToolInvocationRow> listPendingToolInvocations(
-        Instant afterCreatedAt, UUID afterId, int limit);
-
-    /**
-     * 按 {@code (representativeCreatedAt, representativeInvocationId)} 升序读取「等待环境」分组：一组调用已 READY、其
-     * TOOL Work 已到期且无有效执行 lease、冻结了非空 {@code required_environment_id}，且该环境没有有效 READY 连接租约。
-     *
-     * <p>分组键是 {@code (真实执行根, 所需环境)}：根取自 Thread 不可变的 rootThreadId，代表取组内最早的 {@code (createdAt,
-     * id)}，{@code waitingCount} 是组内调用数。时间条件按本事务的 {@link #now()} 判定。{@code
-     * afterRepresentativeCreatedAt} / {@code afterRepresentativeInvocationId} 是分组代表的游标下界（严格大于），首屏使用
-     * {@link Instant#EPOCH} 与全零 UUID；{@code limit} 必须为正，实现按 {@code limit} 截断。本查询只读、不产生锁，不新增任何持久等待
-     * 状态；返回不可变列表。
-     */
-    List<PendingEnvironmentWaitRow> listPendingEnvironmentWaits(
-        Instant afterRepresentativeCreatedAt, UUID afterRepresentativeInvocationId, int limit);
-
-    /**
-     * 按工具调用读取「环境等待」只读快照（工具行投影）：每个调用给出其 TOOL Work 冻结的 {@code requiredEnvironmentId}（server-side 工具为
-     * null），以及它此刻是否在等待该环境上线（{@code READY} 调用 + Work 已到期 + 无有效执行 lease + 环境无有效 READY 连接租约）。
-     *
-     * <p>它与 {@link #listPendingEnvironmentWaits} 判定同一事实、同一权威时间域，只是不做 <em>根+环境</em>
-     * 聚合，因此工具行不需要从分组反推具体 调用。{@code invocationIds} 为空返回空列表；不存在的 id 不产出行；不产生锁；返回不可变列表。 名称沿 Work
-     * 冻结身份读取环境目录；时效边界只取该 READY 环境调用未来的有效 READY 连接租约、Work availableAt 和 leaseUntil 的最小值；非
-     * READY、server-side 或无未来边界为 null，不使用全局截止点。
-     */
-    List<EnvironmentToolWaitRow> listEnvironmentToolWaits(Collection<UUID> invocationIds);
-
-    /**
-     * 返回待处理读模型仅因时间推移（没有任何数据库写事件、因此不会有通知）最早可能改变的权威时刻。
-     *
-     * <p>候选只有两类：当前被有效环境连接租约抑制、即将到期的候选环境（取最早 {@code lease_until}），以及尚未到期、即将变为 due 的候选 TOOL Work（取最早
-     * {@code available_at}）。读取方据此安排一次回读，不需要轮询，也不新增通知来源。没有任何此类时刻时返回 {@link Optional#empty()}。时间语义与
-     * {@link #listPendingEnvironmentWaits} 完全一致。
-     */
-    Optional<Instant> findNextEnvironmentWaitChange();
-
-    /**
-     * 在指定 Session 的不可变 Entry 历史中，按原 ToolInvocation ID 查找已物化的 ToolResult MESSAGE Entry。
-     *
-     * <p>Terminal ToolInvocation 行在结果物化后被物理删除，此时只能靠 Entry 的 runtime 元数据（{@code
-     * toolResultMetadata.invocationId}）反查。命中至多一条；缺失返回 {@link Optional#empty()}；工具结果被合成替换（synthetic）
-     * 时不携带 invocation ID，因此不会被本查询命中。返回不可变 Entry。
-     */
-    Optional<Entry> findToolResultEntryByInvocationId(UUID sessionId, UUID invocationId);
-
-    /**
-     * 批量插入新 ToolInvocation（初始状态为 READY，或用于 sibling 静态拒绝的 unattached FAILED；均为
-     * attempt=0、approval=null、effects 为空）；逐条校验 id、{@code (assistantEntryId, callIndex)}
-     * 唯一性，并要求：threadId 存在且已锁定；turnStartEntryId 属于该 Thread/Session、ownerThreadId 匹配，且是
-     * assistantEntryId 所在分支的 open turn；assistantEntryId 指向同一 Session 的 Assistant MESSAGE Entry 且
-     * call 与其中按 callIndex 提取的 ToolCall（id / toolName / argumentsJson）精确一致；除 terminal FAILED 外
-     * binding 必须存在（unknown 无 binding 只能形成 terminal 失败槽）。完整预校验后按 {@code (assistantEntryId,
-     * callIndex)} 稳定顺序写入；违反抛 {@link IllegalArgumentException}；入参 list 被防御性拷贝且拒绝 null 元素。插入后本事务内可更新。
-     */
-    void insertToolInvocations(List<ToolInvocation> invocations);
-
-    /**
-     * 批量更新 ToolInvocation current state。要求每行存在且已在本事务锁定，并通过共享 transition validation（{@link
-     * ToolInvocation#validateTransition}）：id / threadId / turnStartEntryId / assistantEntryId /
-     * callIndex / call / binding / createdAt 不得改变，attempt 只在确认 start 时 +1，approval 一旦决定不可变，terminal
-     * facts（result/effects/error）不可变。未锁定抛 {@link IllegalStateException}，身份改变、非法 transition 或行不存在抛
-     * {@link IllegalArgumentException}。
-     */
-    void updateToolInvocations(List<ToolInvocation> invocations);
-
-    /** 按 target 读取 Work；不存在返回 {@link Optional#empty()}。 */
-    Optional<Work> findWork(WorkTarget target);
-
-    /** 锁定 Work 行并返回；不存在返回 {@link Optional#empty()} 且不产生锁。 */
-    Optional<Work> lockWork(WorkTarget target);
-
-    /**
-     * 锁定 Work 行并校验 claim ownership：仅当行存在、leaseToken 匹配且 {@code leaseUntil} 严格晚于实现的权威时间时返回当前
-     * Work。时间按本事务的 {@link #now()} 判定。行缺失、token 不匹配或 lease 已过期均返回 {@link Optional#empty()}（lost /
-     * stale ownership 是正常竞态，不以异常表达）。持有 claim 期间 wakeVersion 增长（新 wake 到达）不导致 ownership 丢失，返回的 Work
-     * 可能带更新后的 wakeVersion。未锁定行不产生锁。
-     */
-    Optional<Work> lockClaimedWork(ClaimedWork claim);
-
-    /**
-     * 控制面强制锁定并删除 Work 行：行存在时删除并返回 true，不存在返回 false；无需 claim token（Stop 用它 fence 旧 callback）。Work
-     * 行存在时要求 owning Thread 已在本事务锁定；删除后旧 claim 的 renew / complete / reschedule 视为 lost ownership。
-     */
-    boolean deleteWork(WorkTarget target);
-
-    /**
-     * 请求一次 wake（upsert 调度原语）：target 必须存在；新 target 写入 wakeVersion=1，已有行递增 wakeVersion，并把 availableAt
-     * 设为实现的权威时间「此刻」——本原语只表达一次立即可处理的唤醒，绝不把调用方的 JVM 绝对时刻写成持久化 due。「此刻」即本事务的 {@link #now()}。已有行保留当前
-     * lease。要求 owning Thread 已在本事务锁定； target 不存在抛 {@link IllegalArgumentException}。
-     */
-    void requestWork(WorkTarget target);
-
-    /**
-     * 请求一次带环境亲和性的 wake（TOOL 专用）：调度语义与 {@link #requestWork(WorkTarget)} 完全相同，并在新 target 上 冻结
-     * requiredEnvironmentId。non-null 仅允许 TOOL 类型；要求 owning Thread 已在本事务锁定；target 不存在或亲和性冲突抛 {@link
-     * IllegalArgumentException}。
-     */
-    void requestWork(WorkTarget target, EnvironmentId requiredEnvironmentId);
-
-    /**
-     * 领取 targetType 中下一个 due 的 Work（无 node 亲和性）。due / 旧 lease 是否过期、以及新 deadline，都由实现的权威时钟决定： 均按本事务的
-     * {@link #now()}；新 deadline 为权威时间加上 {@code leaseDuration}。返回的 {@link Work} 携带该权威 deadline。
-     */
-    Optional<ClaimedWork> claimNextWork(
-        WorkTargetType targetType, String leaseToken, Duration leaseDuration);
-
-    /**
-     * 领取 targetType 中下一个 due 的 Work。候选为权威时间下已 due（{@code availableAt} 不晚于权威时间）且 lease 为空或已过期，
-     * 并满足环境亲和性（requiredEnvironmentId 为空或当前 nodeInstanceId 持有有效 READY 连接租约）的行，按 (availableAt,
-     * targetId) 升序确定性选取第一条。新 {@code leaseUntil} 由权威时间加上正的整毫秒 {@code leaseDuration} 计算，而不是写入调用方 的绝对
-     * Instant；返回值使用该真实 deadline。权威时间是本事务的 {@link #now()}。该 dispatcher primitive 必须是本事务首个 Work
-     * 锁操作；无候选返回 {@link Optional#empty()}。
-     */
-    Optional<ClaimedWork> claimNextWork(
-        WorkTargetType targetType, String leaseToken, Duration leaseDuration, UUID nodeInstanceId);
-
-    /**
-     * 延长 claim 的 lease，使其至少覆盖权威时间加上 {@code leaseDuration}。权威时间是本事务的 {@link #now()}。
-     *
-     * <p>内部先锁定 Work 行：行不存在抛 {@link IllegalStateException}（lost ownership），token 不匹配或该时间域下租约已过期抛
-     * {@link IllegalArgumentException}。若当前 lease 已不早于目标时点则保持不变并返回 {@code false}；否则延展到目标时点并返回 {@code
-     * true}。
-     */
-    boolean renewWork(ClaimedWork claim, Duration leaseDuration);
-
-    /**
-     * 完成 claim：内部先锁定 Work 行；Work 行不存在时抛 {@link IllegalStateException}（lost ownership：没有可验证 的
-     * lease，不能幂等吞掉终态），否则按权威时间校验 lease 仍然有效，再按 {@link Work#complete} 校验 token /
-     * claimedWakeVersion：返回 {@link Optional#empty()} 表示删除匹配当前 wake 的行，返回保留的 {@link Work} 表示处理期间出现新
-     * wake，仅清除 lease。权威时间是本事务的 {@link #now()}。token / version 违反抛 {@link IllegalArgumentException}。
-     */
-    Optional<Work> completeWork(ClaimedWork claim);
-
-    /**
-     * 重排 claim 的 Work：内部先锁定 Work 行（行不存在抛 {@link IllegalStateException}），再按权威时间校验 lease 仍然有效，然后按
-     * {@link Work#reschedule} 校验 token / claimedWakeVersion，把 availableAt 设为实现的权威时间加上 {@code delay}
-     * 并清除 lease。 {@code delay} 必须是非负整毫秒 {@link Duration}（零表示立即可用）；权威时间是本事务的 {@link #now()}。违反抛
-     * {@link IllegalArgumentException}。
-     */
-    void rescheduleWork(ClaimedWork claim, Duration delay);
-
-    // ---------- 应用侧深删除原语（Chat 深删除专用） ----------
-
-    /**
-     * 批量删除 Thread 及其全部 Command / ModelInvocation / ToolInvocation / Work / Join / Stop 回执。要求所有
-     * Thread 已按 UUID 升序在本事务 锁定；实现必须跨全部 Thread 按 Command -&gt; Model -&gt; Tool -&gt; Work
-     * 的规范顺序锁定子事实，再按 FK 顺序删除，避免多 Thread 深删发生锁 rank 回退，也避免与运行时 callback 的 Model/Tool -&gt; Work
-     * 锁序形成死锁。Entry 仍由 Session 级删除原语处理。
-     */
-    int deleteThreads(List<UUID> threadIds);
-
-    /**
-     * 删除该 Session 的全部 Entry 行并返回删除行数：以叶子优先循环逐批删除（同一语句只删除父不在批内的行），保证自引用 parent FK 顺序；ROOT
-     * 最后被删除。Thread / Invocation 对 Entry 的引用必须先被删除。
-     */
-    int deleteEntries(UUID sessionId);
-
-    /**
-     * 删除 Session 行并返回是否删除。其全部 Entry 行必须先被删除；Session blob 引用由应用层 {@code SessionBlobRefManager}
-     * 负责，本原语绝不触碰。
-     */
-    boolean deleteSession(UUID sessionId);
-
-    // ---------- 运行期 TURN_END / Stop 删除原语 ----------
-
-    /**
-     * 批量删除已锁定的 ToolInvocation 行并返回删除行数（batch apply / Stop 的 child 清理）。要求每行已在本事务锁定（{@link
-     * #lockToolInvocationsByAssistantEntryId} 或 {@link #lockToolInvocation}），未锁定抛 {@link
-     * IllegalStateException}；任一 id 对应行不存在抛 {@link IllegalArgumentException} 且不删除任何行（完整事务回滚，
-     * 绝不部分删除）；入参出现重复 id 抛 {@link IllegalArgumentException}（调用方错误必须显式暴露，禁止静默去重）；入参 list 被防御性拷贝且拒绝
-     * null 元素。调用方必须保证调用顺序 children 先于 parent，残留引用使事务回滚。
-     */
-    int deleteToolInvocationsByIds(List<UUID> toolInvocationIds);
-
-    /**
-     * 在已锁定的 Thread 内登记一次具体执行代次。身份不可更换：相同 executionId 必须携带完全相同的身份并返回已有事实；同一 executionId 的不同身份抛
-     * {@link IllegalArgumentException}。不获取新的行锁，因此可安全发生在 Thread 锁之后。
-     */
-    ExecutionExitFact registerExecution(ExecutionExitFact fact);
-
-    /**
-     * 把已登记代次单向推进到真实退出证据。写入前必须匹配 thread、invocation、attempt、owner lease、kind 与 parent；任一不匹配抛 {@link
-     * IllegalArgumentException} 且不修改行。重复的相同证据幂等并返回原事实；已确认真实证据后的不同证据抛 {@link
-     * IllegalArgumentException}。ABANDONED 可升级为真实证据并保留放弃时刻。不存在返回 {@link Optional#empty()}。不要求 Work
-     * 仍存在，也不获取新的行锁。
-     */
-    Optional<ExecutionExitFact> confirmExecution(
-        ExecutionExitFact expected, ExecutionExitState state, Instant confirmedAt);
-
-    /**
-     * 用用户显式放弃解除收敛阻塞；它不是物理退出。写入前必须匹配完整身份；UNCONFIRMED 才推进到 ABANDONED，重复放弃幂等返回原事实， 已真实确认后的放弃抛 {@link
-     * IllegalArgumentException}。不存在返回 {@link Optional#empty()}。不获取新的行锁。
-     */
-    Optional<ExecutionExitFact> abandonExecution(ExecutionExitFact expected, Instant abandonedAt);
-
-    /** 读取一个 Thread 上尚未确认退出（仅 UNCONFIRMED）的执行代次；不依赖 open turn，也不产生锁。 */
-    List<ExecutionExitFact> loadUnconfirmedExecutions(UUID threadId);
-
-    /** 按 executionId 读取执行代次；不存在返回 {@link Optional#empty()}。 */
-    Optional<ExecutionExitFact> findExecution(UUID executionId);
+    /** 执行退出账本聚合视图。 */
+    ExecutionExitStore exits();
   }
 }

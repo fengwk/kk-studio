@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.infra.store;
 
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreCallProbe.wrap;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -12,9 +13,6 @@ import fun.fengwk.kkstudio.harness.runtime.ThreadLifecycleCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
 
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
-import java.lang.reflect.Proxy;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -70,9 +68,9 @@ class PostgresqlHarnessConcurrencyIntegrationTest {
     assertNull(locked, "concurrently deleted thread must yield null, not a drift failure");
     assertEquals(
         List.of(
-            "findThread:" + baseline.threadId(),
-            "lockTree:" + baseline.threadId(),
-            "findThread:" + baseline.threadId()),
+            "threads.find:" + baseline.threadId(),
+            "threads.lockTree:" + baseline.threadId(),
+            "threads.find:" + baseline.threadId()),
         pausing.operations(),
         "coordinator must re-read the target after the tree lock and return before any row lock");
   }
@@ -81,12 +79,12 @@ class PostgresqlHarnessConcurrencyIntegrationTest {
   private void deleteSessionAndThread(Baseline baseline) {
     store.transaction(
         tx -> {
-          tx.lockTree(baseline.threadId());
-          tx.lockSessionForUpdate(baseline.sessionId()).orElseThrow();
-          tx.lockThread(baseline.threadId()).orElseThrow();
-          tx.deleteThreads(List.of(baseline.threadId()));
-          tx.deleteEntries(baseline.sessionId());
-          tx.deleteSession(baseline.sessionId());
+          tx.threads().lockTree(baseline.threadId());
+          tx.sessions().lockForUpdate(baseline.sessionId()).orElseThrow();
+          tx.threads().lock(baseline.threadId()).orElseThrow();
+          tx.threads().delete(List.of(baseline.threadId()));
+          tx.entries().delete(baseline.sessionId());
+          tx.sessions().delete(baseline.sessionId());
           return null;
         });
   }
@@ -134,34 +132,25 @@ class PostgresqlHarnessConcurrencyIntegrationTest {
       return delegate.transaction(
           tx ->
               callback.apply(
-                  (Transaction)
-                      Proxy.newProxyInstance(
-                          Transaction.class.getClassLoader(),
-                          new Class<?>[] {Transaction.class},
-                          (proxy, method, args) -> {
-                            String name = method.getName();
-                            // 记录全部 lock* 与 Thread 读取：任何业务行锁都会出现在完整操作序列里。
-                            if (name.startsWith("lock") || name.equals("findThread")) {
-                              operations.add(name + ":" + args[0]);
-                            }
-                            if (name.equals("findThread") && pausedThreadId.equals(args[0])) {
-                              Object thread = invoke(tx, method, args);
-                              if (paused.compareAndSet(false, true)) {
-                                firstReadDone.countDown();
-                                await(deletionCommitted);
-                              }
-                              return thread;
-                            }
-                            return invoke(tx, method, args);
-                          })));
-    }
-
-    private static Object invoke(Transaction tx, Method method, Object[] args) throws Throwable {
-      try {
-        return method.invoke(tx, args);
-      } catch (InvocationTargetException error) {
-        throw error.getCause();
-      }
+                  wrap(
+                      tx,
+                      (call, next) -> {
+                        String name = call.operation();
+                        // 记录全部 lock* 与 Thread 读取：任何业务行锁都会出现在完整操作序列里。
+                        if (name.contains(".lock") || name.equals("threads.find")) {
+                          operations.add(name + ":" + call.argument(0));
+                        }
+                        if (name.equals("threads.find")
+                            && pausedThreadId.equals(call.argument(0))) {
+                          Object thread = next.invoke();
+                          if (paused.compareAndSet(false, true)) {
+                            firstReadDone.countDown();
+                            await(deletionCommitted);
+                          }
+                          return thread;
+                        }
+                        return next.invoke();
+                      })));
     }
 
     private static void await(CountDownLatch latch) {

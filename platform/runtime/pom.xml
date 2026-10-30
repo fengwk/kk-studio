@@ -209,6 +209,7 @@
                                 <rule>
                                     <element>CLASS</element>
                                     <includes>
+                                        <include>fun.fengwk.kkstudio.platform.environment.cluster.RealtimeSubscriptionService</include>
                                         <include>fun.fengwk.kkstudio.platform.environment.gateway.EnvironmentDaemonGateway</include>
                                         <include>fun.fengwk.kkstudio.platform.harness.read.TextReadWindow</include>
                                         <include>fun.fengwk.kkstudio.platform.settings.HttpProxySelector*</include>

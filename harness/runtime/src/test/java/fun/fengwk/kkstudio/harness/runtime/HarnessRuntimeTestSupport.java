@@ -213,9 +213,9 @@ public final class HarnessRuntimeTestSupport {
           UUID sessionId = tx.nextId();
           UUID rootEntryId = tx.nextId();
           UUID threadId = tx.nextId();
-          tx.insertSession(session(sessionId));
-          tx.insertEntry(rootEntry(rootEntryId, sessionId));
-          tx.insertThread(thread(threadId, sessionId, rootEntryId));
+          tx.sessions().insert(session(sessionId));
+          tx.entries().insert(rootEntry(rootEntryId, sessionId));
+          tx.threads().insert(thread(threadId, sessionId, rootEntryId));
           return new Baseline(sessionId, rootEntryId, threadId);
         });
   }
@@ -228,10 +228,11 @@ public final class HarnessRuntimeTestSupport {
           UUID rootEntryId = tx.nextId();
           UUID turnStartEntryId = tx.nextId();
           UUID threadId = tx.nextId();
-          tx.insertSession(session(sessionId));
-          tx.insertEntry(rootEntry(rootEntryId, sessionId));
-          tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1, threadId));
-          tx.insertThread(thread(threadId, sessionId, turnStartEntryId));
+          tx.sessions().insert(session(sessionId));
+          tx.entries().insert(rootEntry(rootEntryId, sessionId));
+          tx.entries()
+              .insert(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1, threadId));
+          tx.threads().insert(thread(threadId, sessionId, turnStartEntryId));
           return new TurnBaseline(sessionId, rootEntryId, turnStartEntryId, threadId);
         });
   }
@@ -297,23 +298,26 @@ public final class HarnessRuntimeTestSupport {
           UUID rootEntryId = tx.nextId();
           UUID turnStartEntryId = tx.nextId();
           UUID threadId = tx.nextId();
-          tx.insertSession(session(sessionId));
-          tx.insertEntry(rootEntry(rootEntryId, sessionId));
-          tx.insertEntry(
-              turnStartEntry(
-                  turnStartEntryId,
-                  sessionId,
-                  rootEntryId,
-                  T1,
-                  threadId,
-                  capabilities(hostBinding())));
+          tx.sessions().insert(session(sessionId));
+          tx.entries().insert(rootEntry(rootEntryId, sessionId));
+          tx.entries()
+              .insert(
+                  turnStartEntry(
+                      turnStartEntryId,
+                      sessionId,
+                      rootEntryId,
+                      T1,
+                      threadId,
+                      capabilities(hostBinding())));
           ThreadState thread = thread(threadId, sessionId, turnStartEntryId);
-          tx.insertThread(thread);
+          tx.threads().insert(thread);
           UUID userEntryId = tx.nextId();
-          tx.insertEntry(userMessageEntry(userEntryId, sessionId, turnStartEntryId, T1));
+          tx.entries().insert(userMessageEntry(userEntryId, sessionId, turnStartEntryId, T1));
           UUID assistantEntryId = tx.nextId();
-          tx.insertEntry(
-              new Entry(assistantEntryId, sessionId, userEntryId, assistantPayload(callIds), T1));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      assistantEntryId, sessionId, userEntryId, assistantPayload(callIds), T1));
           List<UUID> toolIds = new ArrayList<>(toolCount);
           List<ToolInvocation> invocations = new ArrayList<>(toolCount);
           for (int i = 0; i < toolCount; i++) {
@@ -323,8 +327,8 @@ public final class HarnessRuntimeTestSupport {
                 toolInvocation(
                     toolId, threadId, turnStartEntryId, assistantEntryId, i, callIds[i], T1));
           }
-          tx.insertToolInvocations(invocations);
-          tx.updateThread(thread.advanceHead(assistantEntryId, T2));
+          tx.tools().insert(invocations);
+          tx.threads().update(thread.advanceHead(assistantEntryId, T2));
           return new ModelFreeMultiToolBaseline(
               sessionId,
               rootEntryId,
@@ -339,9 +343,9 @@ public final class HarnessRuntimeTestSupport {
   static ToolInvocation setWaitingInput(InMemoryHarnessStore store, UUID toolId) {
     return store.transaction(
         tx -> {
-          ToolInvocation tool = tx.lockToolInvocation(toolId).orElseThrow();
+          ToolInvocation tool = tx.tools().lock(toolId).orElseThrow();
           ToolInvocation waiting = tool.requestInput(T3);
-          tx.updateToolInvocations(List.of(waiting));
+          tx.tools().update(List.of(waiting));
           return waiting;
         });
   }
@@ -355,9 +359,9 @@ public final class HarnessRuntimeTestSupport {
   static ToolInvocation setWaitingApproval(InMemoryHarnessStore store, UUID toolId) {
     return store.transaction(
         tx -> {
-          ToolInvocation tool = tx.lockToolInvocation(toolId).orElseThrow();
+          ToolInvocation tool = tx.tools().lock(toolId).orElseThrow();
           ToolInvocation waiting = tool.requestApproval("tool approval requested", T3);
-          tx.updateToolInvocations(List.of(waiting));
+          tx.tools().update(List.of(waiting));
           return waiting;
         });
   }
@@ -371,9 +375,9 @@ public final class HarnessRuntimeTestSupport {
   static ToolInvocation cancelTool(InMemoryHarnessStore store, UUID toolId) {
     return store.transaction(
         tx -> {
-          ToolInvocation tool = tx.lockToolInvocation(toolId).orElseThrow();
+          ToolInvocation tool = tx.tools().lock(toolId).orElseThrow();
           ToolInvocation cancelled = tool.cancel(toolError(), T3);
-          tx.updateToolInvocations(List.of(cancelled));
+          tx.tools().update(List.of(cancelled));
           return cancelled;
         });
   }
@@ -382,13 +386,13 @@ public final class HarnessRuntimeTestSupport {
   static ToolInvocation unknownTool(InMemoryHarnessStore store, UUID toolId) {
     return store.transaction(
         tx -> {
-          ToolInvocation tool = tx.lockToolInvocation(toolId).orElseThrow();
+          ToolInvocation tool = tx.tools().lock(toolId).orElseThrow();
           ToolInvocation preflighted = tool.markApprovalNotRequired(T3);
-          tx.updateToolInvocations(List.of(preflighted));
+          tx.tools().update(List.of(preflighted));
           ToolInvocation running = preflighted.markRunning(T3);
-          tx.updateToolInvocations(List.of(running));
+          tx.tools().update(List.of(running));
           ToolInvocation unknown = running.unknown(toolError(), T3);
-          tx.updateToolInvocations(List.of(unknown));
+          tx.tools().update(List.of(unknown));
           return unknown;
         });
   }
@@ -397,9 +401,9 @@ public final class HarnessRuntimeTestSupport {
   static ToolInvocation approveTool(InMemoryHarnessStore store, UUID toolId) {
     return store.transaction(
         tx -> {
-          ToolInvocation tool = tx.lockToolInvocation(toolId).orElseThrow();
+          ToolInvocation tool = tx.tools().lock(toolId).orElseThrow();
           ToolInvocation updated = tool.markApprovalNotRequired(T3);
-          tx.updateToolInvocations(List.of(updated));
+          tx.tools().update(List.of(updated));
           return updated;
         });
   }
@@ -408,9 +412,9 @@ public final class HarnessRuntimeTestSupport {
   static ToolInvocation markRunningTool(InMemoryHarnessStore store, UUID toolId) {
     return store.transaction(
         tx -> {
-          ToolInvocation tool = tx.lockToolInvocation(toolId).orElseThrow();
+          ToolInvocation tool = tx.tools().lock(toolId).orElseThrow();
           ToolInvocation updated = tool.markRunning(T3);
-          tx.updateToolInvocations(List.of(updated));
+          tx.tools().update(List.of(updated));
           return updated;
         });
   }
@@ -419,9 +423,9 @@ public final class HarnessRuntimeTestSupport {
   static ToolInvocation retryReadyTool(InMemoryHarnessStore store, UUID toolId) {
     return store.transaction(
         tx -> {
-          ToolInvocation tool = tx.lockToolInvocation(toolId).orElseThrow();
+          ToolInvocation tool = tx.tools().lock(toolId).orElseThrow();
           ToolInvocation updated = tool.retryReady(T3);
-          tx.updateToolInvocations(List.of(updated));
+          tx.tools().update(List.of(updated));
           return updated;
         });
   }
@@ -436,14 +440,14 @@ public final class HarnessRuntimeTestSupport {
       InMemoryHarnessStore store, UUID toolId, ToolEffectBatch effects) {
     return store.transaction(
         tx -> {
-          ToolInvocation tool = tx.lockToolInvocation(toolId).orElseThrow();
+          ToolInvocation tool = tx.tools().lock(toolId).orElseThrow();
           ToolInvocation updated =
               tool.succeed(
                   new ToolResult(
                       tool.call().id(), List.of(new TextResultContent("real result")), false, "{}"),
                   effects,
                   T3);
-          tx.updateToolInvocations(List.of(updated));
+          tx.tools().update(List.of(updated));
           return updated;
         });
   }
@@ -452,9 +456,9 @@ public final class HarnessRuntimeTestSupport {
   static ToolInvocation markApprovalNotRequired(InMemoryHarnessStore store, ToolBaseline baseline) {
     return store.transaction(
         tx -> {
-          ToolInvocation tool = tx.lockToolInvocation(baseline.toolId()).orElseThrow();
+          ToolInvocation tool = tx.tools().lock(baseline.toolId()).orElseThrow();
           ToolInvocation updated = tool.markApprovalNotRequired(T3);
-          tx.updateToolInvocations(List.of(updated));
+          tx.tools().update(List.of(updated));
           return updated;
         });
   }
@@ -468,22 +472,24 @@ public final class HarnessRuntimeTestSupport {
           UUID rootEntryId = tx.nextId();
           UUID turnStartEntryId = tx.nextId();
           UUID threadId = tx.nextId();
-          tx.insertSession(session(sessionId));
-          tx.insertEntry(rootEntry(rootEntryId, sessionId));
-          tx.insertEntry(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1, threadId));
+          tx.sessions().insert(session(sessionId));
+          tx.entries().insert(rootEntry(rootEntryId, sessionId));
+          tx.entries()
+              .insert(turnStartEntry(turnStartEntryId, sessionId, rootEntryId, T1, threadId));
           ThreadState thread =
               thread(threadId, sessionId, headAtTurnEnd ? turnStartEntryId : rootEntryId);
-          tx.insertThread(thread);
+          tx.threads().insert(thread);
           UUID userEntryId = tx.nextId();
-          tx.insertEntry(userMessageEntry(userEntryId, sessionId, turnStartEntryId, T1));
+          tx.entries().insert(userMessageEntry(userEntryId, sessionId, turnStartEntryId, T1));
           UUID assistantEntryId = tx.nextId();
-          tx.insertEntry(assistantEntry(assistantEntryId, sessionId, userEntryId, T1));
+          tx.entries().insert(assistantEntry(assistantEntryId, sessionId, userEntryId, T1));
           UUID turnEndEntryId = tx.nextId();
-          tx.insertEntry(
-              turnEndEntry(
-                  turnEndEntryId, sessionId, assistantEntryId, T1, turnStartEntryId, true));
+          tx.entries()
+              .insert(
+                  turnEndEntry(
+                      turnEndEntryId, sessionId, assistantEntryId, T1, turnStartEntryId, true));
           if (headAtTurnEnd) {
-            tx.updateThread(thread.advanceHead(turnEndEntryId, T1));
+            tx.threads().update(thread.advanceHead(turnEndEntryId, T1));
           }
           return new ContinuationBaseline(sessionId, rootEntryId, turnEndEntryId, threadId);
         });
@@ -495,8 +501,8 @@ public final class HarnessRuntimeTestSupport {
         tx -> {
           UUID sessionId = tx.nextId();
           UUID rootEntryId = tx.nextId();
-          tx.insertSession(session(sessionId));
-          tx.insertEntry(rootEntry(rootEntryId, sessionId));
+          tx.sessions().insert(session(sessionId));
+          tx.entries().insert(rootEntry(rootEntryId, sessionId));
           return rootEntryId;
         });
   }
@@ -506,8 +512,8 @@ public final class HarnessRuntimeTestSupport {
     return store.transaction(
         tx -> {
           UUID id = tx.nextId();
-          UUID sessionId = tx.loadEntryPath(headEntryId).root().sessionId();
-          tx.insertThread(thread(id, sessionId, headEntryId, "sibling", false));
+          UUID sessionId = tx.entries().loadPath(headEntryId).root().sessionId();
+          tx.threads().insert(thread(id, sessionId, headEntryId, "sibling", false));
           return id;
         });
   }
@@ -517,8 +523,8 @@ public final class HarnessRuntimeTestSupport {
     return store.transaction(
         tx -> {
           UUID id = tx.nextId();
-          UUID sessionId = tx.loadEntryPath(headEntryId).root().sessionId();
-          tx.insertThread(thread(id, sessionId, headEntryId, true));
+          UUID sessionId = tx.entries().loadPath(headEntryId).root().sessionId();
+          tx.threads().insert(thread(id, sessionId, headEntryId, true));
           return id;
         });
   }
@@ -535,26 +541,27 @@ public final class HarnessRuntimeTestSupport {
           UUID sessionId = tx.nextId();
           UUID rootEntryId = tx.nextId();
           UUID threadId = tx.nextId();
-          tx.insertSession(session(sessionId));
-          tx.insertEntry(rootEntry(rootEntryId, sessionId));
-          tx.insertThread(
-              new ThreadState(
-                  threadId,
-                  sessionId,
-                  null,
-                  rootEntryId,
-                  CREATION_REQUEST_HASH,
-                  "parent",
-                  threadId,
-                  false,
-                  SpawnTrigger.USER,
-                  ThreadConstraints.NONE,
-                  ThreadExecutionControl.RUNNABLE,
-                  0L,
-                  1,
-                  0,
-                  T0,
-                  T0));
+          tx.sessions().insert(session(sessionId));
+          tx.entries().insert(rootEntry(rootEntryId, sessionId));
+          tx.threads()
+              .insert(
+                  new ThreadState(
+                      threadId,
+                      sessionId,
+                      null,
+                      rootEntryId,
+                      CREATION_REQUEST_HASH,
+                      "parent",
+                      threadId,
+                      false,
+                      SpawnTrigger.USER,
+                      ThreadConstraints.NONE,
+                      ThreadExecutionControl.RUNNABLE,
+                      0L,
+                      1,
+                      0,
+                      T0,
+                      T0));
           return threadId;
         });
   }
@@ -564,7 +571,7 @@ public final class HarnessRuntimeTestSupport {
     return store.transaction(
         tx -> {
           UUID id = tx.nextId();
-          tx.insertEntry(turnStartEntry(id, sessionId, parentEntryId, T1, OWNER_THREAD_ID));
+          tx.entries().insert(turnStartEntry(id, sessionId, parentEntryId, T1, OWNER_THREAD_ID));
           return id;
         });
   }
@@ -613,19 +620,20 @@ public final class HarnessRuntimeTestSupport {
       UUID idempotencyKey) {
     store.transaction(
         tx -> {
-          tx.lockThread(threadId);
-          tx.insertCommands(
-              List.of(
-                  new ThreadCommand(
-                      threadId,
-                      sequence,
-                      payload,
-                      idempotencyKey,
-                      ThreadCommandPayloadJsonCodec.requestHash(payload),
-                      null,
-                      null,
-                      null,
-                      T1)));
+          tx.threads().lock(threadId);
+          tx.commands()
+              .insert(
+                  List.of(
+                      new ThreadCommand(
+                          threadId,
+                          sequence,
+                          payload,
+                          idempotencyKey,
+                          ThreadCommandPayloadJsonCodec.requestHash(payload),
+                          null,
+                          null,
+                          null,
+                          T1)));
           return null;
         });
   }
@@ -634,8 +642,8 @@ public final class HarnessRuntimeTestSupport {
   static void seedThreadWork(InMemoryHarnessStore store, UUID threadId) {
     store.transaction(
         tx -> {
-          tx.lockThread(threadId).orElseThrow();
-          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId));
+          tx.threads().lock(threadId).orElseThrow();
+          tx.work().request(new WorkTarget(WorkTargetType.THREAD, threadId));
           return null;
         });
   }
@@ -644,9 +652,9 @@ public final class HarnessRuntimeTestSupport {
   static void seedToolWork(InMemoryHarnessStore store, UUID toolId) {
     store.transaction(
         tx -> {
-          ToolInvocation tool = tx.findToolInvocation(toolId).orElseThrow();
-          tx.lockThread(tool.threadId()).orElseThrow();
-          tx.requestWork(new WorkTarget(WorkTargetType.TOOL, toolId));
+          ToolInvocation tool = tx.tools().find(toolId).orElseThrow();
+          tx.threads().lock(tool.threadId()).orElseThrow();
+          tx.work().request(new WorkTarget(WorkTargetType.TOOL, toolId));
           return null;
         });
   }
@@ -656,7 +664,7 @@ public final class HarnessRuntimeTestSupport {
     seedThreadWork(store, threadId);
     store.transaction(
         tx -> {
-          tx.claimNextWork(WorkTargetType.THREAD, "lease-1", Duration.between(T0, T3));
+          tx.work().claimNext(WorkTargetType.THREAD, "lease-1", Duration.between(T0, T3));
           return null;
         });
   }

@@ -49,10 +49,10 @@ class InMemoryHarnessStoreTransactionTest {
     UUID sessionId = TestIds.id(1);
     store.transaction(
         tx -> {
-          tx.insertSession(session(sessionId));
+          tx.sessions().insert(session(sessionId));
           return null;
         });
-    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(sessionId).isPresent()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.sessions().find(sessionId).isPresent()));
   }
 
   @Test
@@ -70,11 +70,11 @@ class InMemoryHarnessStoreTransactionTest {
             () ->
                 store.transaction(
                     tx -> {
-                      tx.insertSession(session(sessionId));
+                      tx.sessions().insert(session(sessionId));
                       throw failure;
                     }));
     assertSame(failure, thrown);
-    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(sessionId).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.sessions().find(sessionId).isEmpty()));
   }
 
   @Test
@@ -87,11 +87,11 @@ class InMemoryHarnessStoreTransactionTest {
             () ->
                 store.transaction(
                     tx -> {
-                      tx.insertSession(session(sessionId));
+                      tx.sessions().insert(session(sessionId));
                       throw failure;
                     }));
     assertSame(failure, thrown);
-    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(sessionId).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.sessions().find(sessionId).isEmpty()));
   }
 
   @Test
@@ -108,16 +108,17 @@ class InMemoryHarnessStoreTransactionTest {
             () ->
                 store.transaction(
                     tx -> {
-                      ThreadState thread = tx.lockThread(baseline.threadId()).orElseThrow();
-                      tx.insertEntry(
-                          new Entry(
-                              inputEntryId,
-                              baseline.sessionId(),
-                              baseline.turnStartEntryId(),
-                              userMessagePayload(),
-                              T2));
-                      tx.updateThread(thread.advanceHead(inputEntryId, T2));
-                      builtin(tx)
+                      ThreadState thread = tx.threads().lock(baseline.threadId()).orElseThrow();
+                      tx.entries()
+                          .insert(
+                              new Entry(
+                                  inputEntryId,
+                                  baseline.sessionId(),
+                                  baseline.turnStartEntryId(),
+                                  userMessagePayload(),
+                                  T2));
+                      tx.threads().update(thread.advanceHead(inputEntryId, T2));
+                      builtin(store, tx)
                           .insertModelInvocation(
                               modelInvocation(
                                   modelId,
@@ -127,24 +128,28 @@ class InMemoryHarnessStoreTransactionTest {
                                   ModelInvocationStatus.READY,
                                   null,
                                   T2));
-                      tx.requestWork(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()));
-                      tx.requestWork(new WorkTarget(WorkTargetType.MODEL, modelId));
+                      tx.work().request(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()));
+                      tx.work().request(new WorkTarget(WorkTargetType.MODEL, modelId));
                       throw failure;
                     }));
     assertSame(failure, thrown);
-    assertTrue(store.<Boolean>transaction(tx -> tx.findEntry(inputEntryId).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.entries().find(inputEntryId).isEmpty()));
     assertTrue(
-        store.<Boolean>transaction(tx -> builtin(tx).findModelInvocation(modelId).isEmpty()));
+        store.<Boolean>transaction(
+            tx -> builtin(store, tx).findModelInvocation(modelId).isEmpty()));
     assertTrue(
         store.<Boolean>transaction(
             tx ->
-                tx.findWork(new WorkTarget(WorkTargetType.THREAD, baseline.threadId())).isEmpty()));
+                tx.work()
+                    .find(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()))
+                    .isEmpty()));
     assertTrue(
         store.<Boolean>transaction(
-            tx -> tx.findWork(new WorkTarget(WorkTargetType.MODEL, modelId)).isEmpty()));
+            tx -> tx.work().find(new WorkTarget(WorkTargetType.MODEL, modelId)).isEmpty()));
     assertEquals(
         baseline.turnStartEntryId(),
-        store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow().headEntryId()));
+        store.transaction(
+            tx -> tx.threads().find(baseline.threadId()).orElseThrow().headEntryId()));
   }
 
   @Test
@@ -181,10 +186,10 @@ class InMemoryHarnessStoreTransactionTest {
     HarnessStore.Transaction escaped = store.transaction(tx -> tx);
     UUID sessionId = TestIds.id(1);
     assertThrows(IllegalStateException.class, escaped::nextId);
-    assertThrows(IllegalStateException.class, () -> escaped.insertSession(session(sessionId)));
-    assertThrows(IllegalStateException.class, () -> escaped.findSession(sessionId));
-    assertThrows(IllegalStateException.class, () -> escaped.loadEntryPath(sessionId));
-    assertThrows(IllegalStateException.class, () -> escaped.loadEntriesBySessionId(sessionId));
+    assertThrows(IllegalStateException.class, () -> escaped.sessions().insert(session(sessionId)));
+    assertThrows(IllegalStateException.class, () -> escaped.sessions().find(sessionId));
+    assertThrows(IllegalStateException.class, () -> escaped.entries().loadPath(sessionId));
+    assertThrows(IllegalStateException.class, () -> escaped.entries().loadBySession(sessionId));
   }
 
   @Test
@@ -200,7 +205,7 @@ class InMemoryHarnessStoreTransactionTest {
                 }));
     assertThrows(IllegalStateException.class, escaped[0]::nextId);
     UUID sessionId = TestIds.id(1);
-    assertThrows(IllegalStateException.class, () -> escaped[0].findSession(sessionId));
+    assertThrows(IllegalStateException.class, () -> escaped[0].sessions().find(sessionId));
   }
 
   @Test
@@ -213,7 +218,7 @@ class InMemoryHarnessStoreTransactionTest {
                         () ->
                             assertThrows(
                                 IllegalStateException.class,
-                                () -> tx.insertSession(session(TestIds.id(1)))),
+                                () -> tx.sessions().insert(session(TestIds.id(1)))),
                         executor)
                     .join();
             assertEquals(
@@ -221,7 +226,7 @@ class InMemoryHarnessStoreTransactionTest {
             return null;
           });
     }
-    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(TestIds.id(1)).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.sessions().find(TestIds.id(1)).isEmpty()));
   }
 
   @Test
@@ -232,12 +237,12 @@ class InMemoryHarnessStoreTransactionTest {
             () ->
                 store.transaction(
                     tx -> {
-                      tx.insertSession(session(TestIds.id(1)));
+                      tx.sessions().insert(session(TestIds.id(1)));
                       store.transaction(inner -> null);
                       return null;
                     }));
     assertEquals("nested transactions are not supported", thrown.getMessage());
-    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(TestIds.id(1)).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.sessions().find(TestIds.id(1)).isEmpty()));
   }
 
   @Test

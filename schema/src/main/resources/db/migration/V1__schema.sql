@@ -1032,6 +1032,28 @@ create unique index uk_harness_thread_root_name
 
 comment on index uk_harness_thread_root_name is '同一 Session 内执行根名称唯一（partial unique：仅约束 parent_thread_id is null 的根行）';
 
+-- 跨节点 realtime 订阅：只有某 Thread 在其它节点仍有未过期订阅且该节点 cluster_node 租约有效时，
+-- 本节点才为该 Thread 发布 NOTIFY。节点 ID 不设 FK，节点有效性统一以 cluster_node 租约为准；
+-- Thread 删除时级联清理订阅，避免遗留指向已删除 Thread 的租约行。
+create table realtime_subscription (
+    thread_id        uuid           not null,
+    node_instance_id uuid           not null,
+    lease_until      timestamptz(3) not null,
+    constraint pk_realtime_subscription primary key (thread_id, node_instance_id),
+    constraint fk_realtime_subscription_thread foreign key (thread_id)
+        references harness_thread (id) on delete cascade
+);
+
+comment on table realtime_subscription is '跨节点 realtime 订阅租约：按 (Thread, 节点实例) 唯一，随节点心跳续租，Thread 删除时级联清理';
+comment on column realtime_subscription.thread_id is '被订阅的 Thread UUID（复合 PK 前缀，FK cascade）';
+comment on column realtime_subscription.node_instance_id is '订阅方节点实例 UUID；不设 FK，读取时连接 cluster_node 校验租约';
+comment on column realtime_subscription.lease_until is '订阅租约到期时间（毫秒精度），由节点心跳按 45 秒节奏续租';
+
+create index idx_realtime_subscription_node
+    on realtime_subscription (node_instance_id);
+
+comment on index idx_realtime_subscription_node is '节点退出时按 node_instance_id 清理本节点全部订阅';
+
 create table harness_thread_command (
     thread_id uuid not null,
     sequence bigint not null check (sequence > 0),

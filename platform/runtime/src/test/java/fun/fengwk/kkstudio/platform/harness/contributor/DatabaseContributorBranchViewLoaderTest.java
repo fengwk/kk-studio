@@ -21,6 +21,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.GoalSetting;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
+import fun.fengwk.kkstudio.harness.runtime.store.EntryStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 
 import java.time.Instant;
@@ -37,13 +38,14 @@ class DatabaseContributorBranchViewLoaderTest {
   void loadsScopedContributorStateAndExposesBranchGoalWithoutFullEntryPath() {
     HarnessStore store = mock(HarnessStore.class);
     HarnessStore.Transaction transaction = mock(HarnessStore.Transaction.class);
+    EntryStore entries = mock(EntryStore.class);
+    when(transaction.entries()).thenReturn(entries);
     UUID entryId = new UUID(0L, 11L);
     UUID goalId = new UUID(0L, 42L);
     Entry customEntry = customEntry(entryId, "goal", "goal.progress", "{\"state\":\"ok\"}");
-    when(transaction.loadContributorCustomEntriesOnPath(entryId, "goal"))
-        .thenReturn(List.of(customEntry));
-    when(transaction.loadContributorCustomEntriesOnPath(entryId, "other")).thenReturn(List.of());
-    when(transaction.loadBranchSettings(entryId)).thenReturn(settings(goalId, "ship it"));
+    when(entries.loadContributorCustom(entryId, "goal")).thenReturn(List.of(customEntry));
+    when(entries.loadContributorCustom(entryId, "other")).thenReturn(List.of());
+    when(entries.loadBranchSettings(entryId)).thenReturn(settings(goalId, "ship it"));
     when(store.transaction(any()))
         .thenAnswer(
             invocation -> {
@@ -68,11 +70,11 @@ class DatabaseContributorBranchViewLoaderTest {
     BranchView otherView = loader.load(entryId, new ContributorId("other"));
     assertTrue(otherView.customEntries("goal.progress").isEmpty());
 
-    verify(transaction).loadContributorCustomEntriesOnPath(entryId, "goal");
-    verify(transaction).loadContributorCustomEntriesOnPath(entryId, "other");
-    verify(transaction, times(2)).loadBranchSettings(entryId);
+    verify(entries).loadContributorCustom(entryId, "goal");
+    verify(entries).loadContributorCustom(entryId, "other");
+    verify(entries, times(2)).loadBranchSettings(entryId);
     // 窄读取守卫：工具执行路径绝不加载完整 EntryPath。
-    verify(transaction, never()).loadEntryPath(any());
+    verify(entries, never()).loadPath(any());
     assertThrows(NullPointerException.class, () -> loader.load(null, "goal"));
     assertThrows(NullPointerException.class, () -> loader.load(entryId, (String) null));
     assertThrows(NullPointerException.class, () -> new DatabaseContributorBranchViewLoader(null));
@@ -83,9 +85,11 @@ class DatabaseContributorBranchViewLoaderTest {
   void reportsEmptyGoalWhenBranchSettingsHaveNoGoal() {
     HarnessStore store = mock(HarnessStore.class);
     HarnessStore.Transaction transaction = mock(HarnessStore.Transaction.class);
+    EntryStore entries = mock(EntryStore.class);
+    when(transaction.entries()).thenReturn(entries);
     UUID entryId = new UUID(0L, 11L);
-    when(transaction.loadContributorCustomEntriesOnPath(entryId, "goal")).thenReturn(List.of());
-    when(transaction.loadBranchSettings(entryId)).thenReturn(settings(null, null));
+    when(entries.loadContributorCustom(entryId, "goal")).thenReturn(List.of());
+    when(entries.loadBranchSettings(entryId)).thenReturn(settings(null, null));
     when(store.transaction(any()))
         .thenAnswer(
             invocation -> {

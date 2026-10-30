@@ -78,10 +78,12 @@ class ThreadInputDemandTest {
       ThreadCommand command) {
     store.transaction(
         tx -> {
-          tx.lockThread(baseline.threadId());
-          tx.insertCommands(
-              List.of(
-                  command(baseline.threadId(), command.sequence(), command.payload(), null, null)));
+          tx.threads().lock(baseline.threadId());
+          tx.commands()
+              .insert(
+                  List.of(
+                      command(
+                          baseline.threadId(), command.sequence(), command.payload(), null, null)));
           return null;
         });
   }
@@ -89,8 +91,8 @@ class ThreadInputDemandTest {
   private static boolean hasInputDemand(InMemoryHarnessStore store, UUID threadId) {
     return store.<Boolean>transaction(
         tx -> {
-          tx.lockThread(threadId);
-          return ThreadInputDemand.hasInputDemand(tx, tx.findThread(threadId).orElseThrow());
+          tx.threads().lock(threadId);
+          return ThreadInputDemand.hasInputDemand(tx, tx.threads().find(threadId).orElseThrow());
         });
   }
 

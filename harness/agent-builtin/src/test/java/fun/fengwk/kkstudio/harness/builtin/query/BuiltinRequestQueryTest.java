@@ -73,34 +73,44 @@ class BuiltinRequestQueryTest {
           UUID threadId = tx.nextId();
           BranchSettings settings =
               new BranchSettings("agent", new ModelSelection("model", "v1"), null);
-          tx.insertSession(new Session(sessionId, "session", NOW));
-          tx.insertEntry(new Entry(rootEntryId, sessionId, null, new RootPayload(settings), NOW));
-          tx.insertEntry(
-              new Entry(
-                  turnStartEntryId,
-                  sessionId,
-                  rootEntryId,
-                  new TurnStartPayload(
-                      TurnStartReason.INPUT, settings, threadId, 100_000, 16_384, null, null, null),
-                  NOW));
-          tx.insertThread(
-              new ThreadState(
-                  threadId,
-                  sessionId,
-                  null,
-                  turnStartEntryId,
-                  CREATION_REQUEST_HASH,
-                  "main",
-                  threadId,
-                  false,
-                  SpawnTrigger.USER,
-                  ThreadConstraints.NONE,
-                  ThreadExecutionControl.RUNNABLE,
-                  0L,
-                  1L,
-                  0L,
-                  NOW,
-                  NOW));
+          tx.sessions().insert(new Session(sessionId, "session", NOW));
+          tx.entries()
+              .insert(new Entry(rootEntryId, sessionId, null, new RootPayload(settings), NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStartEntryId,
+                      sessionId,
+                      rootEntryId,
+                      new TurnStartPayload(
+                          TurnStartReason.INPUT,
+                          settings,
+                          threadId,
+                          100_000,
+                          16_384,
+                          null,
+                          null,
+                          null),
+                      NOW));
+          tx.threads()
+              .insert(
+                  new ThreadState(
+                      threadId,
+                      sessionId,
+                      null,
+                      turnStartEntryId,
+                      CREATION_REQUEST_HASH,
+                      "main",
+                      threadId,
+                      false,
+                      SpawnTrigger.USER,
+                      ThreadConstraints.NONE,
+                      ThreadExecutionControl.RUNNABLE,
+                      0L,
+                      1L,
+                      0L,
+                      NOW,
+                      NOW));
           UUID modelId = null;
           if (withModel) {
             modelId = tx.nextId();

@@ -191,7 +191,7 @@ public class HarnessCommandAcceptanceOrchestrator {
   /** 由来源执行根 Thread 解析其 Session；Thread 不可解析说明来源已不一致，失败而不是回退。 */
   private UUID sourceSessionId(UUID sourceThreadId) {
     return requireStore()
-        .transaction(tx -> tx.findThread(sourceThreadId).map(ThreadState::sessionId))
+        .transaction(tx -> tx.threads().find(sourceThreadId).map(ThreadState::sessionId))
         .orElseThrow(() -> new IllegalArgumentException("fork source thread does not exist"));
   }
 
@@ -208,7 +208,7 @@ public class HarnessCommandAcceptanceOrchestrator {
 
   /** Session 已存在时，NEW_SESSION 只能作为同 owner 的精确 replay，内部无归属 Session 也不得被产品 owner 接管。 */
   private boolean sessionExists(UUID sessionId) {
-    return requireStore().transaction(tx -> tx.findSession(sessionId).isPresent());
+    return requireStore().transaction(tx -> tx.sessions().find(sessionId).isPresent());
   }
 
   /** Chat owner 行以 KEY SHARE 锁定：阻止 Chat 删除但允许同 Chat 的并发接受；缺失即归属目标不存在。 */
@@ -243,7 +243,7 @@ public class HarnessCommandAcceptanceOrchestrator {
   /** 由稳定绑定解析其 Thread 的 Session；Thread 不可解析说明归属事实已不一致，失败而不是回退。 */
   private UUID boundSessionId(UUID threadId) {
     return requireStore()
-        .transaction(tx -> tx.findThread(threadId).map(ThreadState::sessionId))
+        .transaction(tx -> tx.threads().find(threadId).map(ThreadState::sessionId))
         .orElseThrow(() -> new IllegalArgumentException("Issue agent thread does not exist"));
   }
 
@@ -273,7 +273,7 @@ public class HarnessCommandAcceptanceOrchestrator {
    * session_blob_ref} 持有，源 Session 删除后新历史仍须可用。已存在的 ref 由幂等 retain 自然去重。
    */
   private void retainCopiedResources(HarnessStore.Transaction tx, UUID sessionId) {
-    for (Entry entry : tx.loadEntriesBySessionId(sessionId)) {
+    for (Entry entry : tx.entries().loadBySession(sessionId)) {
       for (ResourceMessageContent resource : referencedResources(entry.payload())) {
         refManager.retainRef(sessionId, resource.blobId());
       }

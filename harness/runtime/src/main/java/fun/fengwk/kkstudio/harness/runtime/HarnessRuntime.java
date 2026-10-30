@@ -163,7 +163,7 @@ public final class HarnessRuntime {
   /** 按 invocationId 读取固定 join receipt（未匹配时 receipt 字段为空）。 */
   public Optional<ThreadJoin> findJoin(UUID invocationId) {
     Objects.requireNonNull(invocationId, "invocationId");
-    return store.transaction(tx -> tx.findJoin(invocationId));
+    return store.transaction(tx -> tx.joins().find(invocationId));
   }
 
   /**
@@ -185,14 +185,15 @@ public final class HarnessRuntime {
     Objects.requireNonNull(invocationId, "invocationId");
     return store.transaction(
         tx ->
-            tx.findJoin(invocationId)
+            tx.joins()
+                .find(invocationId)
                 .flatMap(join -> ThreadJoinProjector.INSTANCE.project(tx, join)));
   }
 
   /** Thread 的不可变执行根；Thread 不存在时为空。 */
   public Optional<UUID> findRootThreadId(UUID threadId) {
     Objects.requireNonNull(threadId, "threadId");
-    return store.transaction(tx -> tx.findThread(threadId).map(ThreadState::rootThreadId));
+    return store.transaction(tx -> tx.threads().find(threadId).map(ThreadState::rootThreadId));
   }
 
   /**
@@ -212,20 +213,20 @@ public final class HarnessRuntime {
                           new HarnessRuntimeNotFoundException(
                               "thread " + threadId + " does not exist"));
           List<UUID> lockOrder =
-              tx.listThreadsByRoot(target.rootThreadId()).stream()
+              tx.threads().listByRoot(target.rootThreadId()).stream()
                   .map(ThreadState::id)
                   .sorted(UuidOrder.COMPARATOR)
                   .toList();
           List<ThreadState> locked = new ArrayList<>(lockOrder.size());
           for (UUID id : lockOrder) {
-            locked.add(tx.lockThread(id).orElseThrow());
+            locked.add(tx.threads().lock(id).orElseThrow());
           }
           ThreadContextProbe probe = new ThreadContextProbe(driver);
           List<ThreadSnapshot> snapshots = new ArrayList<>(locked.size());
           for (ThreadState thread : locked) {
-            List<ThreadCommand> queued = tx.loadQueuedCommands(thread.id());
-            EntryPath path = tx.loadEntryPath(thread.headEntryId());
-            int incompleteChildJoins = tx.countIncompleteChildJoins(thread.id());
+            List<ThreadCommand> queued = tx.commands().loadQueued(thread.id());
+            EntryPath path = tx.entries().loadPath(thread.headEntryId());
+            int incompleteChildJoins = tx.joins().countIncompleteChildren(thread.id());
             boolean unconsumedAppliedNotifications =
                 ThreadInputDemand.hasUnconsumedNotification(tx, thread);
             // 树锁串行化同树 Invocation 写入；只读探测不在多个节点间回退 Model/Tool 锁阶梯。
@@ -235,11 +236,11 @@ public final class HarnessRuntime {
                     path,
                     queued,
                     probe.probe(tx, thread, path),
-                    tx.loadStopReceiptsByThread(thread.id()),
+                    tx.stops().loadByThread(thread.id()),
                     incompleteChildJoins,
                     unconsumedAppliedNotifications,
-                    tx.loadUnconfirmedExecutions(thread.id()),
-                    tx.hasIncompleteOwnerChildJoin(thread.id())));
+                    tx.exits().loadUnconfirmed(thread.id()),
+                    tx.joins().hasIncompleteOwnerChild(thread.id())));
           }
           snapshots.sort(
               Comparator.comparing((ThreadSnapshot snapshot) -> snapshot.thread().createdAt())
@@ -257,7 +258,8 @@ public final class HarnessRuntime {
     Objects.requireNonNull(sessionId, "sessionId");
     return store.transaction(
         tx ->
-            tx.findSession(sessionId)
+            tx.sessions()
+                .find(sessionId)
                 .orElseThrow(
                     () ->
                         new HarnessRuntimeNotFoundException(
@@ -270,10 +272,10 @@ public final class HarnessRuntime {
     Objects.requireNonNull(idempotencyKey, "idempotencyKey");
     return store.transaction(
         tx -> {
-          if (tx.findThread(threadId).isEmpty()) {
+          if (tx.threads().find(threadId).isEmpty()) {
             throw new HarnessRuntimeNotFoundException("thread " + threadId + " does not exist");
           }
-          return tx.findCommandByIdempotencyKey(threadId, idempotencyKey);
+          return tx.commands().findByIdempotencyKey(threadId, idempotencyKey);
         });
   }
 
@@ -287,7 +289,8 @@ public final class HarnessRuntime {
     return store.transaction(
         tx -> {
           Session session =
-              tx.lockSessionForUpdate(command.sessionId())
+              tx.sessions()
+                  .lockForUpdate(command.sessionId())
                   .orElseThrow(
                       () ->
                           new HarnessRuntimeNotFoundException(
@@ -296,7 +299,7 @@ public final class HarnessRuntime {
             return session;
           }
           Session updated = session.rename(command.name());
-          tx.updateSession(updated);
+          tx.sessions().update(updated);
           return updated;
         });
   }
@@ -314,7 +317,8 @@ public final class HarnessRuntime {
     return store.transaction(
         tx -> {
           ThreadState thread =
-              tx.lockThread(command.threadId())
+              tx.threads()
+                  .lock(command.threadId())
                   .orElseThrow(
                       () ->
                           new HarnessRuntimeNotFoundException(
@@ -323,7 +327,7 @@ public final class HarnessRuntime {
             return thread;
           }
           ThreadState updated = thread.renameThread(command.name(), tx.now());
-          tx.updateThread(updated);
+          tx.threads().update(updated);
           return updated;
         });
   }
@@ -341,7 +345,8 @@ public final class HarnessRuntime {
     return store.transaction(
         tx -> {
           ThreadState thread =
-              tx.lockThread(command.threadId())
+              tx.threads()
+                  .lock(command.threadId())
                   .orElseThrow(
                       () ->
                           new HarnessRuntimeNotFoundException(
@@ -356,7 +361,7 @@ public final class HarnessRuntime {
             return thread;
           }
           ThreadState updated = thread.setRootYolo(command.enabled(), tx.now());
-          tx.updateThread(updated);
+          tx.threads().update(updated);
           return updated;
         });
   }
@@ -419,11 +424,11 @@ public final class HarnessRuntime {
     store.transaction(
         tx -> {
           ExecutionExitLedger.lockAncestorChain(tx, threadId);
-          ThreadState thread = tx.lockThread(threadId).orElse(null);
+          ThreadState thread = tx.threads().lock(threadId).orElse(null);
           if (thread == null) {
             throw new HarnessRuntimeNotFoundException("thread " + threadId + " does not exist");
           }
-          ExecutionExitFact stored = tx.findExecution(executionId).orElse(null);
+          ExecutionExitFact stored = tx.exits().find(executionId).orElse(null);
           if (stored == null) {
             throw new HarnessRuntimeNotFoundException(
                 "execution " + executionId + " does not exist");
@@ -495,7 +500,7 @@ public final class HarnessRuntime {
     return store.transaction(
         tx -> {
           List<PendingToolInvocationRow> rows =
-              tx.listPendingToolInvocations(afterCreatedAt, afterId, probeSize);
+              tx.tools().listPending(afterCreatedAt, afterId, probeSize);
           boolean hasMore = rows.size() > limit;
           List<PendingInteraction> interactions = new ArrayList<>(Math.min(rows.size(), limit));
           for (PendingToolInvocationRow row : rows) {
@@ -543,8 +548,9 @@ public final class HarnessRuntime {
     return store.transaction(
         tx -> {
           List<PendingEnvironmentWaitRow> rows =
-              tx.listPendingEnvironmentWaits(
-                  afterRepresentativeCreatedAt, afterRepresentativeInvocationId, probeSize);
+              tx.tools()
+                  .listPendingEnvironmentWaits(
+                      afterRepresentativeCreatedAt, afterRepresentativeInvocationId, probeSize);
           boolean hasMore = rows.size() > limit;
           List<PendingEnvironmentWait> waits = new ArrayList<>(Math.min(rows.size(), limit));
           for (PendingEnvironmentWaitRow row : rows) {
@@ -579,7 +585,7 @@ public final class HarnessRuntime {
     List<UUID> ids = List.copyOf(invocationIds);
     return store.transaction(
         tx -> {
-          List<EnvironmentToolWaitRow> rows = tx.listEnvironmentToolWaits(ids);
+          List<EnvironmentToolWaitRow> rows = tx.tools().listEnvironmentWaits(ids);
           List<EnvironmentToolWait> waits = new ArrayList<>(rows.size());
           for (EnvironmentToolWaitRow row : rows) {
             waits.add(
@@ -600,7 +606,7 @@ public final class HarnessRuntime {
    * <p>浏览器据此安排一次回读，因此租约自然到期不需要周期轮询或新的通知来源。
    */
   public Optional<Instant> findNextEnvironmentWaitChange() {
-    return store.transaction(tx -> tx.findNextEnvironmentWaitChange());
+    return store.transaction(tx -> tx.tools().findNextEnvironmentWaitChange());
   }
 
   /**
@@ -616,11 +622,11 @@ public final class HarnessRuntime {
     Objects.requireNonNull(command, "command");
     return store.transaction(
         tx -> {
-          ThreadState thread = tx.lockThread(command.threadId()).orElse(null);
+          ThreadState thread = tx.threads().lock(command.threadId()).orElse(null);
           if (thread == null) {
             throw approvalNotApplicable("thread " + command.threadId() + " does not exist");
           }
-          ToolInvocation probe = tx.findToolInvocation(command.toolInvocationId()).orElse(null);
+          ToolInvocation probe = tx.tools().find(command.toolInvocationId()).orElse(null);
           if (probe == null) {
             throw approvalNotApplicable(
                 "tool invocation " + command.toolInvocationId() + " does not exist");
@@ -660,7 +666,8 @@ public final class HarnessRuntime {
     return store.transaction(
         tx -> {
           ThreadState thread =
-              tx.lockThread(threadId)
+              tx.threads()
+                  .lock(threadId)
                   .orElseThrow(
                       () ->
                           new HarnessRuntimeNotFoundException(
@@ -671,19 +678,19 @@ public final class HarnessRuntime {
 
   /** 已锁定 Thread 的当前适用快照；调用方必须已持有该 Thread 行锁（整树查询另持有树锁）。 */
   private ThreadSnapshot snapshotLockedThread(HarnessStore.Transaction tx, ThreadState thread) {
-    List<ThreadCommand> queued = tx.loadQueuedCommands(thread.id());
+    List<ThreadCommand> queued = tx.commands().loadQueued(thread.id());
     LockedThreadContext locked = ThreadContextLock.load(tx, thread, driver);
-    int incompleteChildJoins = tx.countIncompleteChildJoins(thread.id());
+    int incompleteChildJoins = tx.joins().countIncompleteChildren(thread.id());
     boolean unconsumedAppliedNotifications =
         ThreadInputDemand.hasUnconsumedNotification(tx, thread);
-    List<ExecutionExitFact> unconfirmedExecutions = tx.loadUnconfirmedExecutions(thread.id());
-    boolean hasIncompleteOwnerChildJoin = tx.hasIncompleteOwnerChildJoin(thread.id());
+    List<ExecutionExitFact> unconfirmedExecutions = tx.exits().loadUnconfirmed(thread.id());
+    boolean hasIncompleteOwnerChildJoin = tx.joins().hasIncompleteOwnerChild(thread.id());
     return snapshot(
         thread,
         locked.path(),
         queued,
         locked.context(),
-        tx.loadStopReceiptsByThread(thread.id()),
+        tx.stops().loadByThread(thread.id()),
         incompleteChildJoins,
         unconsumedAppliedNotifications,
         unconfirmedExecutions,
@@ -808,10 +815,10 @@ public final class HarnessRuntime {
     Objects.requireNonNull(sessionId, "sessionId");
     return store.transaction(
         tx -> {
-          if (tx.findSession(sessionId).isEmpty()) {
+          if (tx.sessions().find(sessionId).isEmpty()) {
             throw new HarnessRuntimeNotFoundException("session " + sessionId + " does not exist");
           }
-          return tx.loadEntriesBySessionId(sessionId);
+          return tx.entries().loadBySession(sessionId);
         });
   }
 
@@ -820,10 +827,10 @@ public final class HarnessRuntime {
     Objects.requireNonNull(sessionId, "sessionId");
     return store.transaction(
         tx -> {
-          if (tx.findSession(sessionId).isEmpty()) {
+          if (tx.sessions().find(sessionId).isEmpty()) {
             throw new HarnessRuntimeNotFoundException("session " + sessionId + " does not exist");
           }
-          return tx.listThreadsBySession(sessionId);
+          return tx.threads().listBySession(sessionId);
         });
   }
 
@@ -834,7 +841,8 @@ public final class HarnessRuntime {
   private ToolInvocation replayDecidedApproval(
       HarnessStore.Transaction tx, ToolInvocation probe, ToolApprovalCommand command) {
     ToolInvocation tool =
-        tx.lockToolInvocation(probe.id())
+        tx.tools()
+            .lock(probe.id())
             .orElseThrow(
                 () ->
                     new IllegalStateException(
@@ -910,13 +918,13 @@ public final class HarnessRuntime {
             command.reason(),
             mutationNow,
             mutationNow);
-    tx.updateToolInvocations(List.of(updated));
-    tx.updateThread(thread.touchVersion(mutationNow));
+    tx.tools().update(List.of(updated));
+    tx.threads().update(thread.touchVersion(mutationNow));
     if (command.decision() == ToolApprovalDecision.ALLOWED) {
       EnvironmentId environmentId = tool.binding() == null ? null : tool.binding().environmentId();
-      tx.requestWork(new WorkTarget(WorkTargetType.TOOL, tool.id()), environmentId);
+      tx.work().request(new WorkTarget(WorkTargetType.TOOL, tool.id()), environmentId);
     } else {
-      tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()));
+      tx.work().request(new WorkTarget(WorkTargetType.THREAD, thread.id()));
     }
     return updated;
   }

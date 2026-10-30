@@ -114,7 +114,7 @@ NOTIFY REFERENCE = oversize 事件从 origin 有界回拉
 NOTIFY RESYNC    = 提示重读快照
 ```
 
-[`RealtimeBus`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/realtime/RealtimeBus.java) 是 Runtime 与 Web 共同使用的本地优先总线，同时实现 sink 与 source。`append` 先同步投递本机订阅，再按集群节点存在快照决定是否跨 PostgreSQL 发布；`appendAll` 同理先完成整批本地投递，再最多一次远端批量。本地回调若关闭 bus，返回后立即停止，不再查询 presence 或发布远端；单节点部署不产生任何实时 NOTIFY。每条远端 envelope 都携带 `originNodeId`，接收方丢弃自身 origin，因此发布节点不会因 LISTEN 回送而重复投递；远端事件只分发给本地订阅，绝不再次发布。收到 `REFERENCE` 时，bus 只从可信 `cluster_node` 租约解析 origin 并回拉 canonical event，校验 Thread 后本地投递一次；回拉期间 bus 关闭则不再投递。回拉是阻塞 HTTP，在 bus 自有的虚拟线程 executor 上执行，不占用唯一的 realtime LISTEN 线程：该 Thread 开一条有序通道，回拉完成前到达的同 Thread 通知按到达顺序排在其后，其它 Thread 照常即时投递；通道积压达到 `256` 条时丢弃积压、以一条 `LANE_OVERFLOW` RESYNC 代替，关闭 bus 会中断进行中的回拉并释放 executor。失败 warning 只记录 origin/Thread/payload id 与异常类别，不输出 HTTP body 或原 JSON，并对目标 Thread 触发 RESYNC。本地投递完成后，节点存在查询或远端发布失败直接向上抛出，不使用静默单机兜底。
+[`RealtimeBus`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/realtime/RealtimeBus.java) 是 Runtime 与 Web 共同使用的本地优先总线，同时实现 sink 与 source。`append` 先同步投递本机订阅，再按事件自身的 Thread 判定其它节点是否存在有效订阅，只有存在时才跨 PostgreSQL 发布；`appendAll` 同理先完成整批本地投递，再按 Thread 过滤并最多一次远端批量，过滤不改变各 Thread 内的相对顺序，也不把无订阅 Thread 混入批次。本地回调若关闭 bus，返回后立即停止，不再查询订阅或发布远端；单节点部署或没有远端订阅不产生任何实时 NOTIFY。每条远端 envelope 都携带 `originNodeId`，接收方丢弃自身 origin，因此发布节点不会因 LISTEN 回送而重复投递；远端事件只分发给本地订阅，绝不再次发布。收到 `REFERENCE` 时，bus 只从可信 `cluster_node` 租约解析 origin 并回拉 canonical event，校验 Thread 后本地投递一次；回拉期间 bus 关闭则不再投递。回拉是阻塞 HTTP，在 bus 自有的虚拟线程 executor 上执行，不占用唯一的 realtime LISTEN 线程：该 Thread 开一条有序通道，回拉完成前到达的同 Thread 通知按到达顺序排在其后，其它 Thread 照常即时投递；通道积压达到 `256` 条时丢弃积压、以一条 `LANE_OVERFLOW` RESYNC 代替，关闭 bus 会中断进行中的回拉并释放 executor。失败 warning 只记录 origin/Thread/payload id 与异常类别，不输出 HTTP body 或原 JSON，并对目标 Thread 触发 RESYNC。本地投递完成后，远端订阅查询或远端发布失败直接向上抛出，不使用静默单机兜底。
 
 [`PostgresqlRealtimeEventSink`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlRealtimeEventSink.java) 向 `harness_realtime` 通道投递实时事件：单条 `append` 用参数化 `pg_notify` 发送带本节点 origin 的 canonical envelope；UTF-8 载荷超过 `7900` 字节时，先把事件自身的完整 canonical JSON 写入 owner 的 [`RealtimePayloadBuffer`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/realtime/RealtimePayloadBuffer.java)，再发送只含 `originNodeId` / `threadId` / `payloadId` 的紧凑 `REFERENCE`。buffer 只驻留内存，单事件上限 `2MiB`、总字节 `64MiB`、最多 `256` 条、TTL `30s`，容量压力按写入顺序驱逐最旧条目；单事件超限或 buffer 已关闭时明确 RESYNC，原因记为 `PAYLOAD_UNAVAILABLE`，绝不截断内容或拆成大量 NOTIFY 帧。批量 `appendAll` 把已提交批次压缩为「每分块一次往返」，分块同时受 `256` 个事件与 `256KiB` 编码载荷双重上界约束，用 `select pg_notify(?, payload) from unnest(?::text[]) with ordinality ... order by ord` 按输入顺序发出，因此投递顺序与逐条 `append` 完全一致、SQL 往返数等于分块数而不是事件数；每个事件仍各自独立处理。JDBC `Array` 在成功与异常路径都必须释放，数据库异常直接向上传播，由 Runtime 既有的实时事件边界隔离。
 
@@ -124,7 +124,7 @@ PostgreSQL `jsonb` 会按自身规则规范化极端量级的数字文本（例�
 
 [`PostgresqlRealtimeEventSource`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlRealtimeEventSource.java) 实现 [`RealtimeEventSource`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/realtime/RealtimeEventSource.java)：它只负责本地订阅分发与关闭围栏，合法 EVENT 按所属 Thread 精确分发，畸变、未知消息与重连触发全部订阅方重读快照。并发由全局生命周期锁、Source 级完成围栏与 Subscriber 级独立围栏三层保证，关闭后不再产生任何回调，用户业务回调始终在全局锁之外执行。
 
-`harness_realtime` 的 `LISTEN` 由独立于 durable-work / 失效提示的专用连接承载：实时高频小帧不会阻塞控制通知，实时连接失联重连时也只对实时订阅触发 `onResync`。节点存在判定来自 `cluster_node` 的未过期租约快照，并以一秒级缓存复用，避免每个增量事件都执行 SQL；查询失败向上传播，不退化为“单节点”。
+`harness_realtime` 的 `LISTEN` 由独立于 durable-work / 失效提示的专用连接承载：实时高频小帧不会阻塞控制通知，实时连接失联重连时也只对实时订阅触发 `onResync`。跨节点发布判定来自 `realtime_subscription` 与 `cluster_node` 的现在时快照：同一 Thread 必须存在不是本节点、订阅租约未过期、且节点租约也未过期的订阅行；结果按 Thread 缓存一秒并容量有界，避免每个增量事件都执行 SQL。查询失败向上传播，不退化为“没有远端订阅”。流式追帧的远端请求仍按“其它活跃节点”判定，因为执行 owner 可以没有浏览器订阅；普通 realtime 才使用订阅过滤。
 
 通知的丢失、乱序或重复都不会改变最终状态：固定周期 poll、重连后的重读与租约过期重认领共同构成收敛路径。
 
@@ -134,7 +134,7 @@ PostgreSQL `jsonb` 会按自身规则规范化极端量级的数字文本（例�
 | --- | --- | --- |
 | `infra.dispatch` | `HarnessWorkDispatcher` 与 `HarnessWorkDispatcherConfig`：Work 调度循环、类型轮转、有界 handoff、wake 合并与 stop | claim-only 短事务；不读业务状态、不解释 Processor 结果 |
 | `infra.postgresql` | `PostgresqlHarnessStore`、`PostgresqlHarnessTransaction`、`PostgresqlHarnessRows`、`PostgresqlRealtimeEventSink` / `PostgresqlRealtimeEventSource` / `PostgresqlRealtimeChannel` / `RealtimeNotificationCodec` | 九表 durable 协议、树锁与锁序防御、poisoning、事务内 EntryPath 缓存、claim / lease / wake 与环境路由围栏、NOTIFY 编解码 |
-| `infra.realtime` | `RealtimeEventSource` 订阅端口与 `RealtimeBus` 本地优先总线 | 先本地投递，再按节点快照跨 PG 发布；origin 去回环；durable snapshot 是唯一恢复事实源 |
+| `infra.realtime` | `RealtimeEventSource` 订阅端口与 `RealtimeBus` 本地优先总线 | 先本地投递，再按 Thread 的远端订阅跨 PG 发布；origin 去回环；durable snapshot 是唯一恢复事实源 |
 
 ## 源码与测试
 

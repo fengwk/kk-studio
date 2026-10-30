@@ -237,12 +237,12 @@ public final class ExecutionExitConfirmer {
       ExecutionExitFact expected,
       ExecutionExitState state,
       Instant confirmedAt) {
-    ThreadState thread = tx.lockThread(expected.threadId()).orElse(null);
+    ThreadState thread = tx.threads().lock(expected.threadId()).orElse(null);
     if (thread == null) {
       return Attempt.THREAD_MISSING;
     }
     if (thread.executionControl() != ThreadExecutionControl.RUNNABLE
-        || !tx.loadIncompleteJoins(expected.threadId()).isEmpty()) {
+        || !tx.joins().loadIncomplete(expected.threadId()).isEmpty()) {
       return Attempt.RETRY_SLOW;
     }
     return confirmLocked(tx, expected, state, confirmedAt, true);
@@ -254,7 +254,7 @@ public final class ExecutionExitConfirmer {
       ExecutionExitState state,
       Instant confirmedAt) {
     ExecutionExitLedger.lockAncestorChain(tx, expected.threadId());
-    if (tx.lockThread(expected.threadId()).isEmpty()) {
+    if (tx.threads().lock(expected.threadId()).isEmpty()) {
       return Attempt.THREAD_MISSING;
     }
     return confirmLocked(tx, expected, state, confirmedAt, false);
@@ -266,7 +266,7 @@ public final class ExecutionExitConfirmer {
       ExecutionExitState state,
       Instant confirmedAt,
       boolean fastPath) {
-    ExecutionExitFact current = tx.findExecution(expected.executionId()).orElse(null);
+    ExecutionExitFact current = tx.exits().find(expected.executionId()).orElse(null);
     if (current == null) {
       return Attempt.FACT_MISSING;
     }

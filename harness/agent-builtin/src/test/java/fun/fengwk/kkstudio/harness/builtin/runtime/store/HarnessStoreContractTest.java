@@ -8,9 +8,17 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.builtin.store.BuiltinStore;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.store.CommandStore;
+import fun.fengwk.kkstudio.harness.runtime.store.EntryStore;
+import fun.fengwk.kkstudio.harness.runtime.store.ExecutionExitStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.JoinStore;
+import fun.fengwk.kkstudio.harness.runtime.store.SessionStore;
+import fun.fengwk.kkstudio.harness.runtime.store.StopReceiptStore;
+import fun.fengwk.kkstudio.harness.runtime.store.ThreadStore;
+import fun.fengwk.kkstudio.harness.runtime.store.ToolStore;
+import fun.fengwk.kkstudio.harness.runtime.store.WorkStore;
 
 import java.lang.reflect.Method;
 import java.time.Instant;
@@ -48,79 +56,17 @@ class HarnessStoreContractTest {
   private static final Set<String> ALLOWED_PRIMITIVES =
       Set.copyOf(
           List.of(
-              "nextId",
-              "insertSession",
-              "findSession",
-              "updateSession",
-              "insertEntry",
-              "findEntry",
-              "findRootEntry",
-              "loadEntryPath",
-              "loadContributorCustomEntriesOnPath",
-              "loadBranchSettings",
-              "loadEntriesBySessionId",
-              "insertThread",
-              "findThread",
-              "lockThread",
-              "updateThread",
-              "listThreadsBySession",
-              "findAncestorChain",
-              "lockTree",
-              "lockJoinAdmission",
-              "listChildren",
-              "countIncompleteChildJoins",
-              "hasIncompleteOwnerChildJoin",
-              "countIncompleteSubagentJoins",
-              "insertJoin",
-              "findJoin",
-              "loadIncompleteJoins",
-              "updateJoin",
-              "insertStopReceipts",
-              "findStopReceipt",
-              "loadStopReceiptsByThread",
-              "loadStopReceiptsByRootRequest",
-              "deleteJoinsByChild",
-              "deleteJoinsForThreads",
-              "lockSessionForKeyShare",
-              "lockSessionForUpdate",
-              "findCommandByIdempotencyKey",
-              "findCommand",
-              "hasAppliedNotificationAfter",
-              "loadCancelledCommandsByRequest",
-              "loadQueuedCommands",
-              "insertCommands",
-              "updateCommands",
-              "findToolInvocation",
-              "lockToolInvocation",
-              "loadToolInvocationsByAssistantEntryId",
-              "lockToolInvocationsByAssistantEntryId",
-              "listPendingToolInvocations",
-              "listPendingEnvironmentWaits",
-              "findNextEnvironmentWaitChange",
-              "listEnvironmentToolWaits",
-              "findToolResultEntryByInvocationId",
-              "insertToolInvocations",
-              "updateToolInvocations",
-              "findWork",
-              "lockWork",
-              "lockClaimedWork",
-              "deleteWork",
-              "requestWork",
-              "claimNextWork",
-              "renewWork",
-              "completeWork",
-              "rescheduleWork",
-              "deleteToolInvocationsByIds",
-              "deleteThreads",
-              "deleteEntries",
-              "deleteSession",
-              "registerExecution",
-              "confirmExecution",
-              "abandonExecution",
-              "loadUnconfirmedExecutions",
-              "findExecution",
               "now",
-              "listThreadsByRoot"));
+              "nextId",
+              "sessions",
+              "entries",
+              "threads",
+              "commands",
+              "tools",
+              "work",
+              "joins",
+              "stops",
+              "exits"));
 
   @Test
   void storeRootExposesOnlyTheTransactionEntryPoint() {
@@ -171,16 +117,22 @@ class HarnessStoreContractTest {
         "builtin-only primitives must not appear in the runtime store contract");
   }
 
-  /** 测试意图：读取原语只能返回 Optional / 不可变 List / EntryPath / BranchSettings 这四类只读投影。 */
+  /** 测试意图：读取原语只能返回 Optional / 不可变 List / EntryPath / BranchSettings / 窄聚合视图。 */
   @Test
   void allReadsReturnOptionalOrImmutableListOrEntryPathOrBranchSettings() {
+    Set<Class<?>> aggregateViews =
+        Set.of(
+            SessionStore.class,
+            EntryStore.class,
+            ThreadStore.class,
+            CommandStore.class,
+            ToolStore.class,
+            WorkStore.class,
+            JoinStore.class,
+            StopReceiptStore.class,
+            ExecutionExitStore.class);
     for (Method method : HarnessStore.Transaction.class.getDeclaredMethods()) {
       if (method.isSynthetic()) {
-        continue;
-      }
-      // 登记是写入原语，返回冻结后的身份；不把它当作额外的读取投影。
-      if (method.getName().equals("registerExecution")) {
-        assertEquals(ExecutionExitFact.class, method.getReturnType());
         continue;
       }
       Class<?> returnType = method.getReturnType();
@@ -188,7 +140,6 @@ class HarnessStoreContractTest {
           || returnType == long.class
           || returnType == int.class
           || returnType == boolean.class
-          || returnType == int.class
           || returnType == UUID.class
           || returnType == Instant.class) {
         continue;
@@ -197,7 +148,8 @@ class HarnessStoreContractTest {
           Optional.class.isAssignableFrom(returnType)
               || List.class.isAssignableFrom(returnType)
               || EntryPath.class.isAssignableFrom(returnType)
-              || BranchSettings.class.isAssignableFrom(returnType),
+              || BranchSettings.class.isAssignableFrom(returnType)
+              || aggregateViews.contains(returnType),
           "unexpected read return type " + returnType + " on " + method.getName());
     }
   }

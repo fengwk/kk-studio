@@ -64,7 +64,7 @@ class HarnessRuntimeAbandonExitTest {
     assertEquals(HarnessRuntimeConflictException.Reason.STALE_VERSION, stale.reason());
     assertEquals(
         ExecutionExitState.UNCONFIRMED,
-        store.transaction(tx -> tx.findExecution(runningFact.executionId()).orElseThrow().state()));
+        store.transaction(tx -> tx.exits().find(runningFact.executionId()).orElseThrow().state()));
   }
 
   @Test
@@ -86,7 +86,7 @@ class HarnessRuntimeAbandonExitTest {
     assertEquals(stoppedVersion + 1, abandoned.thread().version());
     assertTrue(abandoned.unconfirmedExecutions().isEmpty());
     ExecutionExitFact abandonedFact =
-        store.transaction(tx -> tx.findExecution(fact.executionId()).orElseThrow());
+        store.transaction(tx -> tx.exits().find(fact.executionId()).orElseThrow());
     assertEquals(ExecutionExitState.ABANDONED, abandonedFact.state());
     assertEquals(T0, abandonedFact.abandonedAt());
     assertNull(abandonedFact.confirmedAt());
@@ -99,8 +99,9 @@ class HarnessRuntimeAbandonExitTest {
     ExecutionExitFact confirmed =
         store.transaction(
             tx -> {
-              tx.lockThread(baseline.threadId());
-              return tx.confirmExecution(fact, ExecutionExitState.STUDIO_EXITED, confirmedAt)
+              tx.threads().lock(baseline.threadId());
+              return tx.exits()
+                  .confirm(fact, ExecutionExitState.STUDIO_EXITED, confirmedAt)
                   .orElseThrow();
             });
     assertEquals(ExecutionExitState.STUDIO_EXITED, confirmed.state());
@@ -148,8 +149,8 @@ class HarnessRuntimeAbandonExitTest {
             null);
     store.transaction(
         tx -> {
-          tx.lockThread(threadId);
-          return tx.registerExecution(fact);
+          tx.threads().lock(threadId);
+          return tx.exits().register(fact);
         });
     return fact;
   }
