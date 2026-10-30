@@ -447,24 +447,12 @@ test('locks tool versions, policy thresholds, and secret indirection', () => {
     assert.doesNotMatch(canvasInfraPom, /spring-boot-starter-aop/)
     assert.doesNotMatch(platformPom, /spring-boot-starter-aop/)
     assert.doesNotMatch(webPom, /spring-boot-starter-aop/)
-    assert.match(
-        pom,
-        /<exclusion>[\s\S]*?<artifactId>spring-boot-starter-aop<\/artifactId>[\s\S]*?<\/exclusion>/,
-    )
-    assert.match(canvasInfraPom, /<artifactId>spring-boot-starter-aspectj<\/artifactId>/)
-    const canvasAspectjBlock = canvasInfraPom.match(
-        /<dependency>[\s\S]*?<artifactId>spring-boot-starter-aspectj<\/artifactId>[\s\S]*?<\/dependency>/,
-    )?.[0]
-    assert.ok(canvasAspectjBlock)
-    assert.doesNotMatch(canvasAspectjBlock, /<scope>test<\/scope>/)
-    assert.doesNotMatch(canvasAspectjBlock, /<scope>/)
-    assert.match(platformPom, /<artifactId>spring-boot-starter-aspectj<\/artifactId>/)
-    assert.match(pom, /<convention4j\.version>1\.2\.2<\/convention4j\.version>/)
-    assert.match(pom, /<artifactId>convention4j-spring-boot-starter<\/artifactId>/)
-    assert.match(pom, /<artifactId>convention4j-spring-boot-starter-web<\/artifactId>/)
-    assert.match(pom, /<artifactId>convention4j-spring-boot-starter-test<\/artifactId>/)
-    // 无消费者的托管依赖是死依赖：根 POM 不得继续为其固定版本。
-    assert.doesNotMatch(pom, /<artifactId>convention4j-comfyui<\/artifactId>/)
+    assert.doesNotMatch(canvasInfraPom, /spring-boot-starter-aspectj/)
+    assert.doesNotMatch(platformPom, /spring-boot-starter-aspectj/)
+    assert.doesNotMatch(pom, /convention4j/)
+    assert.doesNotMatch(canvasInfraPom, /convention4j/)
+    assert.doesNotMatch(platformPom, /convention4j/)
+    assert.doesNotMatch(webPom, /convention4j/)
     for (const source of [pom, canvasInfraPom, platformPom, webPom]) {
         assert.doesNotMatch(source, /mybatis|org\.apache\.ibatis/)
     }

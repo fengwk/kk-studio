@@ -44,12 +44,7 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
-/**
- * 用真实 Boot MVC 容器验证官方 tracing 装配：W3C 继承、MDC、无外部导出、server span 与唯一收尾日志。
- *
- * <p>测试显式清空 {@code SpringApplication} 的 initializers，避免 convention {@code TracerInitializer}
- * 在测试中生效； 这不改变生产启动路径，只证明新配置可以独立工作。
- */
+/** 用真实 Boot MVC 容器验证官方 tracing 装配：W3C 继承、MDC、无外部导出、server span 与唯一收尾日志。 */
 class TracingWiringIntegrationTest {
 
   private static final String TRACE_ID = "4bf92f3577b34da6a3ce929d0e0e4736";
@@ -63,8 +58,6 @@ class TracingWiringIntegrationTest {
   @BeforeAll
   static void startApplication() {
     SpringApplication application = new SpringApplication(ProbeApplication.class);
-    // 显式隔离 convention 的 SpringApplicationInitializer；生产启动保持原路径，待数据切片合并后删除旧 starter。
-    application.setInitializers(List.of());
     context =
         application.run(
             "--server.port=0",

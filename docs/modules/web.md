@@ -166,8 +166,7 @@ Evidence 接收 READY uploadId，在事务内转移引用并返回规范资源�
 [`StrictJacksonConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/StrictJacksonConfiguration.java)
 定制 Boot4 装配的唯一 Jackson 3 `JsonMapper`（它与其父类型 `ObjectMapper` 是同一 bean）：
 启用重复键检测、Long 字符串序列化和 DTO 声明顺序，默认省略 null。
-只提供 Jackson 2 mapper 的 convention4j JSON 自动装配在组合根被排除
-（[`WebApplication`](../../web/src/main/java/fun/fengwk/kkstudio/web/WebApplication.java) 与其测试入口一致），
+全仓仅装配官方 Jackson 3 mapper，classpath 无 Jackson 2 databind；
 自有代码只解析到该 Jackson 3 mapper；Share DTO 的严格字段规则直接由 Jackson 3 注解声明
 （例如 `protocolOptionsJson` 与网络文本字段只接受 JSON 字符串 token）。
 required-nullable 字段由 DTO 显式 ALWAYS。未知字段由 DTO 的 JsonAnySetter 控制，

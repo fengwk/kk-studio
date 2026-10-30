@@ -22,10 +22,7 @@ Chat、Environment、Settings 与 Catalog 的实体仓库直接以 `JdbcClient` 
 `JdbcClient` 共用它。普通 SQL 使用 `JdbcClient` 命名参数与显式 `RowMapper`；异常翻译固定唯一数据库产品
 `PostgreSQL`，保留 Spring 的 SQLState 分类，不在故障期间取连接读取元数据。
 
-模块依赖保留 `spring-boot-starter-aspectj`：convention4j 的 tracer 仍提供 AspectJ `@Aspect`
-（`ConventionSpanAspect`、`ReactorConventionSpanAspect`，方法签名引用 `org.aspectj.lang.ProceedingJoinPoint`），
-而根 [`pom.xml`](../../pom.xml) 排除了它传递的 Boot 3 `spring-boot-starter-aop`；
-Boot 4 的 aspectj starter 补回 `spring-aop` 与 `aspectjweaver`，否则这些第三方 Aspect 无法织入。
+链路追踪采用 Spring Boot 4 官方 Micrometer Tracing（OpenTelemetry 桥接与 W3C 上下文传播），不再依赖第三方 AspectJ starter 或旧框架切面。
 
 ## 按用例定位源码
 
