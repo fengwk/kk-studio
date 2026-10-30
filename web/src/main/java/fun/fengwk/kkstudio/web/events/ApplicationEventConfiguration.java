@@ -12,12 +12,12 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessThreadChangeSource;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEventJsonCodec;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestrator;
 import fun.fengwk.kkstudio.platform.harness.realtime.HarnessStreamCatchupService;
-import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRefreshTrigger;
-import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRepository;
+import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogRefreshTrigger;
+import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsChangeHandler;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
-import fun.fengwk.kkstudio.project.controller.IssueControllerDispatcher;
+import fun.fengwk.kkstudio.project.reconcile.IssueReconcileDispatcher;
 import fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationHandler;
 import fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationLoop;
 import fun.fengwk.kkstudio.web.project.ProjectInvalidationHub;
@@ -69,7 +69,7 @@ public class ApplicationEventConfiguration {
   public PostgresqlNotificationLoop postgresqlNotificationLoop(
       DataSource dataSource,
       HarnessWorkDispatcher dispatcher,
-      IssueControllerDispatcher issueControllerDispatcher,
+      IssueReconcileDispatcher issueReconcileDispatcher,
       CanvasFunctionDispatcher canvasFunctionDispatcher,
       ThreadVersionHub threadVersionHub,
       CanvasVersionHub canvasVersionHub,
@@ -94,12 +94,12 @@ public class ApplicationEventConfiguration {
                     durableWorkDispatcher(
                             targetType,
                             dispatcher,
-                            issueControllerDispatcher,
+                            issueReconcileDispatcher,
                             canvasFunctionDispatcher)
                         .run(),
                 () -> {
                   dispatcher.wake();
-                  issueControllerDispatcher.wake();
+                  issueReconcileDispatcher.wake();
                   canvasFunctionDispatcher.wake();
                 }),
             // 2. 会话版本失效：Thread 版本号推进，通知 WebSocket 向前端广播版本事件以触发快照对账
@@ -235,10 +235,10 @@ public class ApplicationEventConfiguration {
   private static Runnable durableWorkDispatcher(
       String targetType,
       HarnessWorkDispatcher harnessDispatcher,
-      IssueControllerDispatcher issueControllerDispatcher,
+      IssueReconcileDispatcher issueReconcileDispatcher,
       CanvasFunctionDispatcher canvasFunctionDispatcher) {
     return switch (targetType) {
-      case IssueControllerDispatcher.TARGET_TYPE -> issueControllerDispatcher::wake;
+      case IssueReconcileDispatcher.TARGET_TYPE -> issueReconcileDispatcher::wake;
       case CanvasFunctionDispatcher.TARGET_TYPE -> canvasFunctionDispatcher::wake;
       default -> harnessDispatcher::wake;
     };

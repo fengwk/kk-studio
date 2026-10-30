@@ -17,7 +17,11 @@ final class ModelPricingResolver {
   private ModelPricingResolver() {}
 
   static ResolvedRates resolve(
-      ModelPricing pricing, ModelUsage usage, Instant requestedAt, String serviceTier) {
+      ModelPricing pricing,
+      ModelUsage usage,
+      Instant requestedAt,
+      String serviceTier,
+      RequestBodyPricingSnapshot requestBodyPricing) {
     Objects.requireNonNull(pricing, "pricing");
     Objects.requireNonNull(usage, "usage");
 
@@ -31,7 +35,8 @@ final class ModelPricingResolver {
     BigDecimal reasoning = base.reasoning();
 
     for (ModelPricing.Override override : pricing.overrides()) {
-      Boolean matches = matches(override.when(), usage, requestedAt, serviceTier);
+      Boolean matches =
+          matches(override.when(), usage, requestedAt, serviceTier, requestBodyPricing);
       if (matches == null) {
         return null;
       }
@@ -61,7 +66,8 @@ final class ModelPricingResolver {
     }
 
     for (ModelPricing.Multiplier multiplier : pricing.multipliers()) {
-      Boolean matches = matches(multiplier.when(), usage, requestedAt, serviceTier);
+      Boolean matches =
+          matches(multiplier.when(), usage, requestedAt, serviceTier, requestBodyPricing);
       if (matches == null) {
         return null;
       }
@@ -95,18 +101,23 @@ final class ModelPricingResolver {
   }
 
   private static Boolean matches(
-      ModelPricingCondition condition, ModelUsage usage, Instant requestedAt, String serviceTier) {
-    Boolean all = matchesAll(condition.all(), usage, requestedAt, serviceTier);
+      ModelPricingCondition condition,
+      ModelUsage usage,
+      Instant requestedAt,
+      String serviceTier,
+      RequestBodyPricingSnapshot requestBodyPricing) {
+    Boolean all = matchesAll(condition.all(), usage, requestedAt, serviceTier, requestBodyPricing);
     if (Boolean.FALSE.equals(all)) {
       return false;
     }
-    Boolean any = matchesAny(condition.any(), usage, requestedAt, serviceTier);
+    Boolean any = matchesAny(condition.any(), usage, requestedAt, serviceTier, requestBodyPricing);
     if (Boolean.FALSE.equals(any)) {
       return false;
     }
     Boolean not = true;
     if (condition.not() != null) {
-      Boolean nested = matches(condition.not(), usage, requestedAt, serviceTier);
+      Boolean nested =
+          matches(condition.not(), usage, requestedAt, serviceTier, requestBodyPricing);
       if (nested == null) {
         return null;
       }
@@ -116,21 +127,23 @@ final class ModelPricingResolver {
     Boolean tier = matchesServiceTier(condition.serviceTier(), serviceTier);
     Boolean date = matchesDate(condition.date(), requestedAt);
     Boolean time = matchesTime(condition.time(), requestedAt);
-    return and(all, any, not, context, tier, date, time);
+    Boolean requestBody = matchesRequestBody(condition.requestBody(), requestBodyPricing);
+    return and(all, any, not, context, tier, date, time, requestBody);
   }
 
   private static Boolean matchesAll(
       List<ModelPricingCondition> conditions,
       ModelUsage usage,
       Instant requestedAt,
-      String serviceTier) {
+      String serviceTier,
+      RequestBodyPricingSnapshot requestBodyPricing) {
     if (conditions == null) {
       return true;
     }
     // 标准布尔空合取：显式 all:[] 与未声明均恒真。
     Boolean result = true;
     for (ModelPricingCondition condition : conditions) {
-      Boolean nested = matches(condition, usage, requestedAt, serviceTier);
+      Boolean nested = matches(condition, usage, requestedAt, serviceTier, requestBodyPricing);
       if (Boolean.FALSE.equals(nested)) {
         return false;
       }
@@ -145,7 +158,8 @@ final class ModelPricingResolver {
       List<ModelPricingCondition> conditions,
       ModelUsage usage,
       Instant requestedAt,
-      String serviceTier) {
+      String serviceTier,
+      RequestBodyPricingSnapshot requestBodyPricing) {
     if (conditions == null) {
       // 未声明 any 时不施加额外约束。
       return true;
@@ -156,7 +170,7 @@ final class ModelPricingResolver {
     }
     Boolean result = false;
     for (ModelPricingCondition condition : conditions) {
-      Boolean nested = matches(condition, usage, requestedAt, serviceTier);
+      Boolean nested = matches(condition, usage, requestedAt, serviceTier, requestBodyPricing);
       if (Boolean.TRUE.equals(nested)) {
         return true;
       }
@@ -197,6 +211,17 @@ final class ModelPricingResolver {
       return null;
     }
     return tiers.contains(actualServiceTier);
+  }
+
+  private static Boolean matchesRequestBody(
+      ModelPricingCondition.RequestBody condition, RequestBodyPricingSnapshot snapshot) {
+    if (condition == null) {
+      return true;
+    }
+    if (snapshot == null) {
+      return null;
+    }
+    return snapshot.matches().get(ModelRequestBodyPricing.fingerprint(condition));
   }
 
   private static Boolean matchesDate(ModelPricingCondition.DateRange date, Instant requestedAt) {

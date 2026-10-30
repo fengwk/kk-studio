@@ -25,6 +25,9 @@ import org.springframework.web.context.WebApplicationContext;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestMaterializer;
+import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
+import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcherConfig;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
@@ -35,9 +38,6 @@ import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestMaterializer;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
-import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.TurnPlanPreview;
@@ -55,7 +55,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayl
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
-import fun.fengwk.kkstudio.platform.chat.service.ChatService;
+import fun.fengwk.kkstudio.platform.chat.ChatService;
 import fun.fengwk.kkstudio.platform.error.CatalogVersions;
 import fun.fengwk.kkstudio.platform.harness.model.DatabaseProviderResolutionService;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewService;
@@ -667,11 +667,23 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
         "fixture turn did not reach quiescence");
   }
 
+  /**
+   * 真实静止：没有待处理 Work/Command，也没有 local execution 的退出确认尚未落账。
+   *
+   * <p>Model/Tool 的终态 Work 会先删除，退出确认随后在另一个事务里推进 Thread version；只看 durable_work
+   * 会把「确认前」误当静止，使测试指纹与随后迟到的 updated_at/version 变化竞争。
+   */
   private boolean quiescent(UUID threadId) {
     return count("durable_work") == 0
         && jdbc.queryForObject(
                 "select count(*) from harness_thread_command where thread_id = ?"
                     + " and applied_entry_id is null and cancelled_at is null",
+                Integer.class,
+                threadId)
+            == 0
+        && jdbc.queryForObject(
+                "select count(*) from harness_execution_exit where thread_id = ?"
+                    + " and state = 'UNCONFIRMED'",
                 Integer.class,
                 threadId)
             == 0;

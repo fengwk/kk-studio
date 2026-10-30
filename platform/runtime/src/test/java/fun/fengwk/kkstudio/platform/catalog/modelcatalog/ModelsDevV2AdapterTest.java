@@ -13,15 +13,20 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.harness.model.ModelCost;
+import fun.fengwk.kkstudio.harness.model.ModelPricing;
+import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelInputModality;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingConditionDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingMultiplierDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingOverrideDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelRatePatchDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.ModelDefaultCandidateDTO;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
@@ -88,7 +93,6 @@ class ModelsDevV2AdapterTest {
 
   @Test
   void rejectsUnsupportedConditionsUnitsAndDuplicateTtls() {
-    assertRejected(real.get("opencode/region-only"));
     assertRejected(real.get("opencode/unsupported-override"));
     assertRejected(real.get("opencode/duplicate-ttl"));
     assertRejected(real.get("opencode/character-priced"));
@@ -96,6 +100,140 @@ class ModelsDevV2AdapterTest {
     assertRejected(validation.get("validation/unknown-condition-nested"));
     assertRejected(validation.get("validation/unknown-override-field"));
     assertRejected(validation.get("validation/unknown-factor-field"));
+  }
+
+  @Test
+  void supportsRegionMultiplierByIgnoringAndWarning() {
+    ModelDefaultCandidateDTO candidate = real.get("opencode/region-only");
+    assertNotNull(candidate);
+    assertTrue(candidate.isPricingSupported());
+    assertNotNull(candidate.getPricing());
+    assertDecimal("1", candidate.getPricing().getBase().getInput());
+    assertDecimal("2", candidate.getPricing().getBase().getOutput());
+    assertTrue(candidate.getPricing().getMultipliers().isEmpty());
+    assertTrue(hasIssue(candidate, "ignored region multiplier"));
+  }
+
+  /** 公开定价结构取自 https://models.dev/api/v2.json；忽略 region 后仍按 TTL 与 fast 倍率计价。 */
+  @Test
+  void parsesClaudeOpusAndCalculatesCostWithoutRegionMultiplier() {
+    Map<String, ModelDefaultCandidateDTO> candidates =
+        index(adapter.adapt(resource("models-dev-v2-claude-opus-5-5.json")));
+    ModelDefaultCandidateDTO opus = candidates.get("anthropic/claude-opus-5-5");
+    assertNotNull(opus);
+    assertTrue(opus.isPricingSupported());
+    assertTrue(hasIssue(opus, "ignored region multiplier"));
+    assertTrue(hasIssue(opus, "non-token cost is not included: web_search"));
+
+    AgentModelPricingDTO pricingDto = opus.getPricing();
+    assertNotNull(pricingDto);
+    assertDecimal("4", pricingDto.getBase().getInput());
+    assertDecimal("20", pricingDto.getBase().getOutput());
+    assertDecimal("0.2", pricingDto.getBase().getCacheRead());
+    assertDecimal("0", pricingDto.getBase().getCacheWrite());
+    assertEquals(2, pricingDto.getBase().getCacheWriteByTtl().size());
+    assertDecimal("5", pricingDto.getBase().getCacheWriteByTtl().get("300"));
+    assertDecimal("8", pricingDto.getBase().getCacheWriteByTtl().get("3600"));
+
+    // fast 倍率保留，region us 倍率整条忽略并不进入 multipliers
+    assertEquals(1, pricingDto.getMultipliers().size());
+    AgentModelPricingMultiplierDTO fastMultiplier = pricingDto.getMultipliers().get(0);
+    assertEquals(List.of("fast"), fastMultiplier.getWhen().getServiceTier());
+    assertDecimal("2", fastMultiplier.getFactors().getInput());
+    assertDecimal("2", fastMultiplier.getFactors().getOutput());
+    assertDecimal("2", fastMultiplier.getFactors().getCacheRead());
+    assertDecimal("2", fastMultiplier.getFactors().getCacheWrite());
+    assertDecimal("2", fastMultiplier.getFactors().getReasoning());
+
+    // 经唯一 parser 解析为 ModelPricing
+    ModelPricing modelPricing = AgentModelRuntimeConfigParser.parsePricing(pricingDto);
+    assertNotNull(modelPricing);
+    assertEquals(1, modelPricing.multipliers().size());
+
+    // 用量：1M input, 500k output, 2M cache read, 3M cache write (1M at 300s, 2M at 3600s)
+    ModelUsage usage =
+        new ModelUsage(
+            1_000_000L,
+            500_000L,
+            2_000_000L,
+            3_000_000L,
+            Map.of(300L, 1_000_000L, 3600L, 2_000_000L),
+            null,
+            null);
+
+    Instant requestedAt = Instant.parse("2026-10-23T00:00:00Z");
+    // 缺少 tier 事实时不能猜测是否命中 fast；忽略 region 不改变其他事实的要求。
+    assertNull(ModelCost.calculate(modelPricing, usage, requestedAt, null));
+
+    // standard 按 base 及 TTL 计价，无 region 1.1 倍率。
+    ModelCost costStandard = ModelCost.calculate(modelPricing, usage, requestedAt, "standard");
+    assertNotNull(costStandard);
+    assertDecimal("4", costStandard.input());
+    assertDecimal("10", costStandard.output());
+    assertDecimal("0.4", costStandard.cacheRead());
+    assertDecimal("21", costStandard.cacheWrite());
+    assertDecimal("0", costStandard.reasoning());
+    assertDecimal("35.4", costStandard.total());
+
+    // fast 仍对所有文本与 TTL 缓存费率生效（x2），不再额外乘 region 1.1。
+    ModelCost costFast = ModelCost.calculate(modelPricing, usage, requestedAt, "fast");
+    assertNotNull(costFast);
+    assertDecimal("8", costFast.input());
+    assertDecimal("20", costFast.output());
+    assertDecimal("0.8", costFast.cacheRead());
+    assertDecimal("42", costFast.cacheWrite());
+    assertDecimal("0", costFast.reasoning());
+    assertDecimal("70.8", costFast.total());
+  }
+
+  /** 组合条件不能通过仅删 region 节点变成无条件加价；必须丢弃整条 multiplier。 */
+  @Test
+  void skipsMultiplierWhenRegionIsNestedOrMixed() {
+    Map<String, ModelDefaultCandidateDTO> candidates =
+        index(adapter.adapt(resource("models-dev-v2-region.json")));
+
+    for (String key :
+        List.of(
+            "provider/nested-not",
+            "provider/mixed-all",
+            "provider/mixed-any",
+            "provider/mixed-top-level")) {
+      ModelDefaultCandidateDTO candidate = candidates.get(key);
+      assertNotNull(candidate, key);
+      assertTrue(candidate.isPricingSupported(), key + " must be pricing supported");
+      assertTrue(
+          candidate.getPricing().getMultipliers().isEmpty(), key + " multiplier must be skipped");
+      assertDecimal("1", candidate.getPricing().getBase().getInput());
+      assertDecimal("2", candidate.getPricing().getBase().getOutput());
+      assertTrue(
+          hasIssue(candidate, "ignored region multiplier"),
+          key + " must warn ignored region multiplier");
+    }
+  }
+
+  /** 地区倍率忽略策略不能遮蔽其他未知条件、非法结构或运行时会拒绝的定义。 */
+  @Test
+  void rejectsRegionWithUnknownConditionOrInvalidFactor() {
+    Map<String, ModelDefaultCandidateDTO> candidates =
+        index(adapter.adapt(resource("models-dev-v2-region.json")));
+    assertRejected(candidates.get("provider/region-unknown-condition"));
+    assertRejected(candidates.get("provider/region-unknown-clause"));
+    assertRejected(candidates.get("provider/region-not-unknown"));
+    assertRejected(candidates.get("provider/region-negative-factor"));
+    assertRejected(candidates.get("provider/region-unknown-factor-field"));
+    assertRejected(candidates.get("provider/region-invalid-factor-string"));
+    assertRejected(candidates.get("provider/region-context-conflict"));
+    assertRejected(candidates.get("provider/region-factor-scale-overflow"));
+  }
+
+  /** 例外仅限 multiplier，不悄悄忽略会覆盖基础价的地区 override。 */
+  @Test
+  void rejectsRegionConditionInOverrides() {
+    Map<String, ModelDefaultCandidateDTO> candidates =
+        index(adapter.adapt(resource("models-dev-v2-region.json")));
+    assertRejected(candidates.get("provider/region-input-override"));
+    assertRejected(candidates.get("provider/region-output-override"));
+    assertRejected(candidates.get("provider/region-nested-override"));
   }
 
   @Test
@@ -209,13 +347,15 @@ class ModelsDevV2AdapterTest {
         """
         {"p":{"models":{
           "too-deep":{"cost":{"text":{"input":{"price":1,"overrides":[{"when":%s,"price":2}]},"output":{"price":2}}}},
-          "too-many":{"cost":{"text":{"input":{"price":1,"overrides":[{"when":{"all":[%s]},"price":2}]},"output":{"price":2}}}}
+          "too-many":{"cost":{"text":{"input":{"price":1,"overrides":[{"when":{"all":[%s]},"price":2}]},"output":{"price":2}}}},
+          "region-too-many":{"cost":{"multipliers":[{"when":{"region":{"equals":"us"},"all":[%s]},"factor":1.1}]}}
         }}}
         """
-            .formatted(tooDeep, manyNodes);
+            .formatted(tooDeep, manyNodes, manyNodes);
     Map<String, ModelDefaultCandidateDTO> candidates = index(adapter.adapt(json));
     assertRejected(candidates.get("p/too-deep"));
     assertRejected(candidates.get("p/too-many"));
+    assertRejected(candidates.get("p/region-too-many"));
   }
 
   @Test

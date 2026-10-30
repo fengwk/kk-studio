@@ -3,8 +3,8 @@ package fun.fengwk.kkstudio.web.runtime;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRepository;
-import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRow;
+import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRepository;
+import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRow;
 
 import java.util.Arrays;
 

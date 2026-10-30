@@ -82,6 +82,25 @@ describe('applyCatalogCandidate', () => {
     expect(supported.pricing).not.toBe(before.pricing)
   })
 
+  it('applies pricing from candidates with support warnings when pricing is supported', () => {
+    const before = draft()
+    const warned = applyCatalogCandidate(before, candidate({
+      pricingSupported: true,
+      supportIssues: [
+        'ignored region multiplier',
+        'non-token cost is not included: web_search',
+      ],
+      pricing: {
+        base: { input: '1.25', output: '2.5', cacheRead: '0.1', cacheWrite: '0.2', cacheWriteByTtl: {}, reasoning: null },
+        overrides: [],
+        multipliers: [],
+      },
+    }))
+    expect(warned.pricing.base.input).toBe('1.25')
+    expect(warned.pricing.base.output).toBe('2.5')
+    expect(warned.pricing).not.toBe(before.pricing)
+  })
+
   it('keeps the existing variants without a complete, mappable default variant', () => {
     const before = draft()
     const noDefault = applyCatalogCandidate(before, candidate({

@@ -19,6 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.BlockingStore;
 import fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.ControlledExecutor;
@@ -482,10 +483,10 @@ class HarnessWorkDispatcherDrainTest {
     UUID otherNodeId = UUID.randomUUID();
     EnvironmentId env = EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
 
-    InMemoryHarnessStore store =
-        new InMemoryHarnessStore(
-            (nodeInstanceId, environmentId2, now) ->
-                allowedNodeId.equals(nodeInstanceId) && env.equals(environmentId2));
+    InMemoryHarnessStore store = new InMemoryBuiltinHarnessStore();
+    store.setRouteReadyPredicate(
+        (nodeInstanceId, environmentId2, now) ->
+            allowedNodeId.equals(nodeInstanceId) && env.equals(environmentId2));
 
     ToolSeed toolSeed = seedTool(store);
 

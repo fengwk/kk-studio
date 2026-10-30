@@ -7,6 +7,12 @@ import type {
   AgentModelRatePatchDTO,
   AgentModelRateSetDTO,
 } from '@/shared/api/generated/contracts'
+import {
+  normalizePricingScalar,
+  pricingScalarText,
+  wirePricingScalar,
+  type PricingScalar,
+} from '@/features/catalog/pricing-condition-scalar'
 import type { ModelPricingDraft } from '@/features/catalog/ai-console-types'
 
 const DECIMAL_PATTERN = /^(?:0|[1-9]\d*)(?:\.\d+)?$/
@@ -64,6 +70,14 @@ export function cloneCondition(condition: AgentModelPricingConditionDTO): AgentM
           time: {
             ...condition.time,
             ...(condition.time.weekdays ? { weekdays: [...condition.time.weekdays] } : {}),
+          },
+        }
+      : {}),
+    ...(condition.requestBody
+      ? {
+          requestBody: {
+            path: condition.requestBody.path,
+            equals: condition.requestBody.equals,
           },
         }
       : {}),
@@ -298,6 +312,25 @@ export function normalizeCondition(
     }
   }
 
+  if (condition.requestBody) {
+    const requestBody = condition.requestBody
+    if (typeof requestBody.path !== 'string') {
+      throw new Error(`${field}.requestBody.path is required`)
+    }
+    const path = normalizeJsonPointer(requestBody.path, `${field}.requestBody.path`)
+    if (!('equals' in requestBody)) {
+      throw new Error(`${field}.requestBody.equals is required; use null for JSON null`)
+    }
+    const scalar = normalizePricingScalar(
+      requestBody.equals,
+      `${field}.requestBody.equals`,
+    )
+    result.requestBody = {
+      path,
+      equals: wirePricingScalar(scalar, `${field}.requestBody.equals`) as unknown,
+    }
+  }
+
   for (const key of ['all', 'any'] as const) {
     const children = condition[key]
     if (children) {
@@ -313,6 +346,26 @@ export function normalizeCondition(
     result.not = normalizeCondition(condition.not, depth + 1, `${field}.not`)
   }
   return result
+}
+
+/** RFC 6901 pointer：非空、以 / 开头、只含 ~0/~1，最多 16 段且不超过 512 UTF-8 字节。 */
+function normalizeJsonPointer(value: string, field: string): string {
+  if (!value.startsWith('/')) {
+    throw new Error(`${field} must be a non-empty JSON Pointer starting with /`)
+  }
+  for (let index = 0; index < value.length; index++) {
+    if (value[index] === '~' && value[index + 1] !== '0' && value[index + 1] !== '1') {
+      throw new Error(`${field} only allows ~0 and ~1 escapes`)
+    }
+  }
+  const segments = value.split('/').length - 1
+  if (segments < 1 || segments > 16) {
+    throw new Error(`${field} must contain between 1 and 16 segments`)
+  }
+  if (new TextEncoder().encode(value).length > 512) {
+    throw new Error(`${field} must not exceed 512 UTF-8 bytes`)
+  }
+  return value
 }
 
 function normalizeDate(value: string | null | undefined, field: string): string | undefined {
@@ -355,6 +408,12 @@ export function describeCondition(condition: AgentModelPricingConditionDTO): str
   }
   if (condition.date?.gte) parts.push(`date ≥ ${condition.date.gte}`)
   if (condition.date?.lt) parts.push(`date < ${condition.date.lt}`)
+  if (condition.requestBody) {
+    const equals = condition.requestBody.equals
+    parts.push(
+      `requestBody ${condition.requestBody.path} = ${equals === null ? 'null' : pricingScalarText(equals as PricingScalar)}`,
+    )
+  }
   if (condition.time) {
     const weekdays = condition.time.weekdays?.join(',')
     parts.push(

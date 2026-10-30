@@ -25,9 +25,10 @@ import java.util.function.BooleanSupplier;
  *   <li>close 守卫：close 期间及关闭后的迟到准入不创建 slot、不执行 verifier，旧 ticket 拒绝 attach。
  * </ul>
  */
-final class ClaimAdmissionGuard<E extends ClaimAdmissionGuard.GuardedExecution> {
+public final class ClaimAdmissionGuard<E extends ClaimAdmissionGuard.GuardedExecution> {
 
-  interface GuardedExecution {
+  /** 进程内 execution 的最小契约：绑定 claim，并可被本地放弃。 */
+  public interface GuardedExecution {
     ClaimedWork claim();
 
     void abandon();
@@ -43,7 +44,8 @@ final class ClaimAdmissionGuard<E extends ClaimAdmissionGuard.GuardedExecution> 
     }
   }
 
-  static final class Ticket<E extends GuardedExecution> implements AutoCloseable {
+  /** 一次准入的票据：登记 execution、查询是否被替代，关闭时释放未 attach 的 slot。 */
+  public static final class Ticket<E extends GuardedExecution> implements AutoCloseable {
     private final ClaimAdmissionGuard<E> guard;
     private final UUID invocationId;
 
@@ -58,11 +60,11 @@ final class ClaimAdmissionGuard<E extends ClaimAdmissionGuard.GuardedExecution> 
       this.entry = entry;
     }
 
-    boolean isSuperseded() {
+    public boolean isSuperseded() {
       return entry == null || entry.superseded;
     }
 
-    boolean attach(E execution) {
+    public boolean attach(E execution) {
       return entry != null && guard.attach(this, entry, execution);
     }
 
@@ -77,6 +79,8 @@ final class ClaimAdmissionGuard<E extends ClaimAdmissionGuard.GuardedExecution> 
 
   private final ConcurrentHashMap<UUID, Entry<E>> entries = new ConcurrentHashMap<>();
   private volatile boolean closed;
+
+  ClaimAdmissionGuard() {}
 
   Ticket<E> tryAdmit(ClaimedWork claim, BooleanSupplier claimVerifier) {
     Objects.requireNonNull(claim, "claim");

@@ -11,7 +11,7 @@ PostgreSQL 持久化、Issue 调度与 Agent 业务工具，经
 [`ProjectAutoConfiguration`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/ProjectAutoConfiguration.java)
 装配进宿主应用。它直接使用 [Platform](platform.md) 的公开服务（运行时、Agent 任务、全局 Blob、Agent 目录与
 Session 深删除），并实现平台定义的 `IssueAgentOwnership`；平台从不依赖 Project。HTTP DTO 映射与 Issue
-Controller 的执行器、生命周期由 [Web](web.md) 组装。模块依赖方向由仓库检查
+Reconcile 的执行器、生命周期由 [Web](web.md) 组装。模块依赖方向由仓库检查
 [`check.mjs`](../../scripts/dev/verify/repository/check.mjs) 校验。
 
 ## 模块结构
@@ -20,9 +20,9 @@ Controller 的执行器、生命周期由 [Web](web.md) 组装。模块依赖方
 | --- | --- |
 | [domain](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/domain) | workflow 配置、阶段流转与阶段预算授权规则 |
 | [model](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/model) | Project、Issue、Run、Activity、Evidence、Work、Agent Thread 绑定、阶段预算行与暂停原因等值 |
-| [repo](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/repo) | 仓库契约与 PostgreSQL 实现（`repo/impl` 下的 JdbcStore 提供命名参数 SQL 与显式 RowMapper，model 提供 DO） |
-| [service](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service) | 用例级事务边界：Project/Issue/Run/Evidence 与 Work 邮箱 |
-| [controller](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/controller) | Issue 调度的部署级配置与确定性推进 |
+| [repo](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/repo) | 按实体拆分的具体 `JdbcClient` Repository（直接承载 SQL、参数绑定与 RowMapper）及项目变更通知 |
+| [service](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service) | 用例级事务边界：Project、Issue 编辑/生命周期/阶段预算、Run、Evidence 与 Work 邮箱；`IssueMutationSupport` 共用 owner 锁与幂等回执 |
+| [reconcile](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/reconcile) | Issue 调度的部署级配置与确定性推进 |
 | [platform](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/platform) | 对运行时与全局 Blob 的窄适配：Issue/Run 执行所需的 Thread 事实与命令控制、证据 Blob |
 | [tool](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/tool) | Project Harness Contributor：`issue_transition` 等业务工具与 Run 上下文 projector |
 | [turn](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/turn) | 冻结在 branch 上的 `ProjectRunScope` 及其编解码 |
@@ -37,7 +37,7 @@ Project 只经两个窄适配接触运行时与存储，平台异常在此收敛
 
 Agent 分支设置直接由平台的 `AgentBranchSettingsMaterializer` 按当前 Agent/Model 目录物化；`Issue + Agent` 名下 Session 的深删除直接调用平台的 `SessionDeletionOrchestrator`。
 
-`Issue + Agent` 是平台编排认识的产品 owner 之一。[`ProjectIssueAgentOwnership`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/impl/ProjectIssueAgentOwnership.java) 实现平台定义的 `IssueAgentOwnership`：命令接受与人工交互按 `Project KEY SHARE -> Issue UPDATE` 锁定产品层级（Project/Issue 缺失、归档或层级不一致时拒绝），深删除用排他锁，并读写 `(issueId, agentName) -> threadId` 稳定绑定。锁序因此由 Project 自己维护，平台编排只按固定顺序调用它。
+`Issue + Agent` 是平台编排认识的产品 owner 之一。[`ProjectIssueAgentOwnership`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/ProjectIssueAgentOwnership.java) 实现平台定义的 `IssueAgentOwnership`：命令接受与人工交互按 `Project KEY SHARE -> Issue UPDATE` 锁定产品层级（Project/Issue 缺失、归档或层级不一致时拒绝），深删除用排他锁，并读写 `(issueId, agentName) -> threadId` 稳定绑定。锁序因此由 Project 自己维护，平台编排只按固定顺序调用它。
 
 预算、等待、停止和证据发布政策由 Project 决定，停止区间以本次回执的权威 head 为界。
 
@@ -89,12 +89,16 @@ root Join 冻结的 `terminalEntryId` / `finalAnswerEntryId`（`COMPLETED` / `ER
 
 ## 用例事务与持久化
 
-[`ProjectServiceImpl`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/impl/ProjectServiceImpl.java)、
-[`IssueServiceImpl`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/impl/IssueServiceImpl.java)、
-[`IssueRunServiceImpl`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/impl/IssueRunServiceImpl.java)
-与 [`IssueEvidenceServiceImpl`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/impl/IssueEvidenceServiceImpl.java)
-是写用例的事务边界，`IssueReconciler.reconcile` 在 controller 内以单事务推进一个有界动作；
-`repo/impl` 的 PostgreSQL 实现只做单表读写与 CAS 行数判定。
+[`ProjectService`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/ProjectService.java)、
+[`IssueEditingService`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/IssueEditingService.java)、
+[`IssueLifecycleService`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/IssueLifecycleService.java)、
+[`IssueStageBudgetService`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/IssueStageBudgetService.java)、
+[`IssueRunService`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/IssueRunService.java)
+与 [`IssueEvidenceService`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/IssueEvidenceService.java)
+是写用例的事务边界，`IssueReconciler.reconcile` 在 `reconcile` 包内以单事务推进一个有界动作；
+[`IssueMutationSupport`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/IssueMutationSupport.java)
+只集中 Issue 写路径共用的 `Project KEY SHARE -> Issue UPDATE` 锁序、幂等 receipt、版本/归档门禁与活动落库，
+不承载具体动作或状态/额度规则；Repository 只做单表读写与 CAS 行数判定。
 写入或删除 Project、Issue、Run、Activity、阶段预算、公开证据与 Agent Thread 绑定时，仓库在同一事务内
 用 `pg_notify('project_issue_changed', projectId)` 发送快照失效提示；PostgreSQL 提交后投递、回滚不投递，
 同一事务内相同 payload 合并。删除 Issue 前读取其 Project id；通知不依赖 HTTP 入口，调度与 worker
@@ -104,7 +108,7 @@ COMMENT/INSTRUCTION 必须非空白且不超过 1 MiB，RUN、SPEC_CHANGE、STAT
 Stage 预算与 Evidence 分别落在 `project_issue_stage_budget`、`project_issue_evidence`；
 Work 邮箱是共享 `durable_work` 表中 target type 为 `ISSUE` 的行。
 
-[`IssueEvidenceServiceImpl`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/impl/IssueEvidenceServiceImpl.java)
+[`IssueEvidenceService`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/IssueEvidenceService.java)
 管 Issue **自有的**公开证据：`project_issue_evidence` 一行是 Issue 持有的一个已发布 Blob 引用，
 与 Session 引用各自独立计数，不由 Session 生命周期决定。人工附件经 `lockReadyUpload -> retain ->
 deleteUpload` 在调用方事务内完成引用转移，展示名取自上传行而不是客户端；证据行已存在时不重复
@@ -117,12 +121,12 @@ Issue 与 Project 行用 `version` CAS 删除并检查受影响行数。
 
 ## REST 调度
 
-[`controller`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/controller/package-info.java)
-承载 Issue 的部署级配置与确定性推进：`IssueControllerDispatcher` 只做 `durable_work` 中 `ISSUE` 行的
+[`reconcile`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/reconcile/package-info.java)
+承载 Issue 的部署级配置与确定性推进：`IssueReconcileDispatcher` 只做 `durable_work` 中 `ISSUE` 行的
 claim、bounded handoff 与 poll 生命周期，合并 wake 的单 drain、容量计数、stop 收尾与 executor
 拒绝/失败分型复用 [Common](common.md) 的
 [`BoundedWorkDispatcher`](../../common/src/main/java/fun/fengwk/kkstudio/common/concurrent/BoundedWorkDispatcher.java)，
-[`IssueReconciler`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/controller/IssueReconciler.java)
+[`IssueReconciler`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/reconcile/IssueReconciler.java)
 在固定锁序下一次推进一个有界动作。调度只依赖数据库中的 work 行与 lease token，通知与 poll
 提供发现入口；租约参数见 [Platform](platform.md) 的配置表。
 

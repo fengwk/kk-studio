@@ -5,6 +5,7 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.DatabindException;
 import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.ObjectReader;
 import tools.jackson.databind.cfg.CoercionAction;
@@ -27,6 +28,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingDateConditionDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingFactorsDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingMultiplierDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingOverrideDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingRequestBodyConditionDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingTimeConditionDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelRatePatchDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelRateSetDTO;
@@ -168,7 +170,13 @@ public final class AgentModelRuntimeConfigParser {
     if (config == null) {
       throw invalid("config is required");
     }
-    AgentModelLimitDTO limit = config.getLimit();
+    validateLimit(config.getLimit());
+    AgentModelAbilitiesDTO abilities = validateAbilities(config.getAbilities());
+    validateVariants(config, abilities);
+    validatePricingDefinition(config);
+  }
+
+  private static void validateLimit(AgentModelLimitDTO limit) {
     if (limit == null) {
       throw invalid("config.limit is required");
     }
@@ -181,8 +189,9 @@ public final class AgentModelRuntimeConfigParser {
     if (limit.getOutput() > limit.getContext()) {
       throw invalid("config.limit.output must not exceed limit.context");
     }
+  }
 
-    AgentModelAbilitiesDTO abilities = config.getAbilities();
+  private static AgentModelAbilitiesDTO validateAbilities(AgentModelAbilitiesDTO abilities) {
     if (abilities == null) {
       throw invalid("config.abilities is required");
     }
@@ -206,7 +215,11 @@ public final class AgentModelRuntimeConfigParser {
         throw invalid("config.abilities.inputModalities contains duplicate value: " + modality);
       }
     }
+    return abilities;
+  }
 
+  private static void validateVariants(
+      AgentModelConfigDTO config, AgentModelAbilitiesDTO abilities) {
     List<AgentModelVariantDTO> variants = config.getVariants();
     if (variants == null || variants.isEmpty()) {
       throw invalid("config.variants must not be empty");
@@ -249,7 +262,10 @@ public final class AgentModelRuntimeConfigParser {
     if (!ids.contains(defaultVariant)) {
       throw invalid("config.defaultVariant must match a variants[].id");
     }
+  }
 
+  /** pricing 缺省归一为完整零定义；归一后与目录候选共用同一套校验。 */
+  private static void validatePricingDefinition(AgentModelConfigDTO config) {
     AgentModelPricingDTO pricing = config.getPricing();
     if (pricing == null) {
       pricing = new AgentModelPricingDTO();
@@ -469,11 +485,45 @@ public final class AgentModelRuntimeConfigParser {
                   bounds.start(), bounds.end(), timezone, weekdays),
           timePath);
     }
+    AgentModelPricingRequestBodyConditionDTO requestBody = condition.getRequestBody();
+    if (requestBody != null) {
+      validateRequestBody(requestBody, path + ".requestBody");
+    }
     validateConditionList(condition.getAll(), path + ".all", depth);
     validateConditionList(condition.getAny(), path + ".any", depth);
     if (condition.getNot() != null) {
       validateCondition(condition.getNot(), path + ".not", depth + 1);
     }
+  }
+
+  private static void validateRequestBody(
+      AgentModelPricingRequestBodyConditionDTO requestBody, String path) {
+    if (requestBody.getPath() == null) {
+      throw invalid(path + ".path must be a JSON Pointer string");
+    }
+    if (requestBody.getEquals() == null) {
+      throw invalid(path + ".equals is required; write null explicitly to match JSON null");
+    }
+    // 构造 requestBody 即完成 path/equals 的全部边界校验。
+    toRequestBody(requestBody.getPath(), requestBody.getEquals(), path);
+  }
+
+  private static ModelPricingCondition.RequestBody toRequestBody(
+      String pathValue, JsonNode equals, String path) {
+    if (equals.isString()) {
+      return ModelPricingCondition.RequestBody.stringValue(pathValue, equals.stringValue());
+    }
+    if (equals.isNumber()) {
+      // 保留指数文本交给 RequestBody 先检查 precision/scale，避免展开巨大指数后才失败。
+      return ModelPricingCondition.RequestBody.numberValue(pathValue, equals.toString());
+    }
+    if (equals.isBoolean()) {
+      return ModelPricingCondition.RequestBody.booleanValue(pathValue, equals.booleanValue());
+    }
+    if (equals.isNull()) {
+      return ModelPricingCondition.RequestBody.nullValue(pathValue);
+    }
+    throw invalid(path + ".equals must be a JSON string, number, boolean or null");
   }
 
   private static void validateConditionList(
@@ -574,7 +624,7 @@ public final class AgentModelRuntimeConfigParser {
     }
   }
 
-  private void validateReasoningEffort(String reasoningEffort, String path) {
+  private static void validateReasoningEffort(String reasoningEffort, String path) {
     if (reasoningEffort == null) {
       return;
     }
@@ -756,11 +806,21 @@ public final class AgentModelRuntimeConfigParser {
               ZoneId.of(timeDto.getTimezone()),
               timeDto.getWeekdays());
     }
+    ModelPricingCondition.RequestBody requestBody = null;
+    AgentModelPricingRequestBodyConditionDTO requestBodyDto = condition.getRequestBody();
+    if (requestBodyDto != null) {
+      requestBody =
+          toRequestBody(
+              requestBodyDto.getPath(),
+              requestBodyDto.getEquals(),
+              "config.pricing.condition.requestBody");
+    }
     return new ModelPricingCondition(
         context,
         condition.getServiceTier(),
         date,
         time,
+        requestBody,
         toConditions(condition.getAll()),
         toConditions(condition.getAny()),
         condition.getNot() == null ? null : toCondition(condition.getNot()));

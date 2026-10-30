@@ -51,7 +51,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("接受 Run", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
 
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
 
@@ -135,7 +135,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
             + "{\"state\":\"DONE\",\"name\":\"完成\"}"
             + "]}");
     Issue issue = createIssue(project.getId());
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
 
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
 
@@ -148,7 +148,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("接受重放", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     String acceptKey = key("accept");
     IssueRun accepted = issueRunService.acceptRun(issue.getId(), acceptKey);
     long nextRunOrdinalAfterAccept =
@@ -197,19 +197,20 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("重放先于校验", agent, agent, 1);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     String acceptKey = key("accept");
     IssueRun accepted = issueRunService.acceptRun(issue.getId(), acceptKey);
     UUID endEntryId = appendHistoryEntry(accepted.getThreadId());
     issueRunService.completeRun(
         accepted.getId(), accepted.getVersion(), key("complete"), endEntryId, endEntryId, "REVIEW");
-    assertEquals(0L, issueService.getStageBudget(issue.getId(), "DESIGN").remainingRuns());
+    assertEquals(
+        0L, issueStageBudgetService.getStageBudget(issue.getId(), "DESIGN").remainingRuns());
 
     IssueRun replayed = issueRunService.acceptRun(issue.getId(), acceptKey);
 
     assertEquals(accepted.getId(), replayed.getId());
     assertEquals(IssueRunStatus.COMPLETED, replayed.getStatus());
-    assertEquals("REVIEW", issueService.getIssue(issue.getId()).getState());
+    assertEquals("REVIEW", issueEditingService.getIssue(issue.getId()).getState());
     assertEquals(
         1L, count("select count(*) from project_issue_run where issue_id = ?", issue.getId()));
     assertEquals(1L, count("select count(*) from harness_session"));
@@ -221,11 +222,11 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("重放与门禁", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     String acceptKey = key("accept");
     IssueRun accepted = issueRunService.acceptRun(issue.getId(), acceptKey);
-    Issue inDesign = issueService.getIssue(issue.getId());
-    issueService.pauseIssue(
+    Issue inDesign = issueEditingService.getIssue(issue.getId());
+    issueLifecycleService.pauseIssue(
         inDesign.getId(), inDesign.getVersion(), key("pause"), PauseReason.USER, "人工暂停");
 
     assertEquals(accepted.getId(), issueRunService.acceptRun(issue.getId(), acceptKey).getId());
@@ -242,7 +243,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("唯一活动 Run", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun active = issueRunService.acceptRun(issue.getId(), key("accept"));
 
     ProjectValidationException rejected =
@@ -269,7 +270,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("指纹冲突", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     String acceptKey = key("accept");
     long sequence = nextActivitySequence(issue.getId());
     jdbc.update(
@@ -307,7 +308,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("回滚", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     jdbc.update(
         "insert into project_issue_activity (issue_id, sequence, kind, actor_type, run_id, body,"
             + " data, idempotency_key, request_hash)"
@@ -358,7 +359,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("收尾重放", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     UUID endEntryId = appendHistoryEntry(run.getThreadId());
     String completeKey = key("complete");
@@ -366,7 +367,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
         issueRunService.completeRun(
             run.getId(), run.getVersion(), completeKey, endEntryId, endEntryId, "REVIEW");
     assertEquals(IssueRunStatus.COMPLETED, completed.getStatus());
-    Issue afterComplete = issueService.getIssue(issue.getId());
+    Issue afterComplete = issueEditingService.getIssue(issue.getId());
 
     IssueRun replayed =
         issueRunService.completeRun(
@@ -376,7 +377,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     assertEquals(endEntryId, replayed.getEndEntryId());
     assertEquals(endEntryId, replayed.getFinalAnswerEntryId());
     assertEquals("REVIEW", replayed.getNextState());
-    Issue afterReplay = issueService.getIssue(issue.getId());
+    Issue afterReplay = issueEditingService.getIssue(issue.getId());
     assertEquals("REVIEW", afterReplay.getState());
     assertEquals(afterComplete.getVersion(), afterReplay.getVersion());
     assertEquals(
@@ -397,9 +398,9 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("无交接完成", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
-    Issue before = issueService.getIssue(issue.getId());
+    Issue before = issueEditingService.getIssue(issue.getId());
     UUID endEntryId = appendHistoryEntry(run.getThreadId());
     String completeKey = key("complete");
 
@@ -409,7 +410,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
 
     assertEquals(IssueRunStatus.COMPLETED, completed.getStatus());
     assertNull(completed.getNextState());
-    Issue after = issueService.getIssue(issue.getId());
+    Issue after = issueEditingService.getIssue(issue.getId());
     assertEquals("DESIGN", after.getState());
     assertEquals(before.getNextActivitySequence() + 1, after.getNextActivitySequence());
     assertEquals(
@@ -425,7 +426,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
             run.getId(), completed.getVersion(), completeKey, endEntryId, null, null);
 
     assertEquals(completed.getId(), replayed.getId());
-    Issue afterReplay = issueService.getIssue(issue.getId());
+    Issue afterReplay = issueEditingService.getIssue(issue.getId());
     assertEquals(after.getVersion(), afterReplay.getVersion());
     assertEquals(after.getNextActivitySequence(), afterReplay.getNextActivitySequence());
     assertEquals(
@@ -445,7 +446,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("并发接受", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     String acceptKey = key("accept");
     List<IssueRun> accepted = race(() -> issueRunService.acceptRun(issue.getId(), acceptKey));
     IssueRun first = accepted.get(0);
@@ -478,7 +479,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("并发收尾重放", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     UUID endEntryId = appendHistoryEntry(run.getThreadId());
     String completeKey = key("complete");
@@ -544,7 +545,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("完成冲突", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     UUID firstEnd = appendHistoryEntry(run.getThreadId());
     UUID secondEnd = appendHistoryEntry(run.getThreadId());
@@ -573,7 +574,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("收尾版本", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     UUID end = appendHistoryEntry(run.getThreadId());
     long stale = run.getVersion();
@@ -603,7 +604,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("区间校验", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     UUID detachedEntryId = insertDetachedEntry(run.getThreadId());
 
@@ -627,7 +628,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     IssueRun unchanged = issueRunService.getRun(run.getId());
     assertEquals(IssueRunStatus.RUNNING, unchanged.getStatus());
     assertNull(unchanged.getEndEntryId());
-    assertEquals("DESIGN", issueService.getIssue(issue.getId()).getState());
+    assertEquals("DESIGN", issueEditingService.getIssue(issue.getId()).getState());
     assertEquals(activityCountBeforeRejection, activityCount(run.getIssueId()));
   }
 
@@ -637,7 +638,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("报告区间", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     UUID endEntryId = appendHistoryEntry(run.getThreadId());
 
@@ -660,7 +661,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("失败收尾", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun failedRun = issueRunService.acceptRun(issue.getId(), key("accept"));
 
     IssueRun failed =
@@ -674,10 +675,10 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     assertEquals(IssueRunStatus.FAILED, failed.getStatus());
     assertEquals("provider exploded", failed.getError());
     assertNotNull(failed.getEndedAt());
-    assertEquals("ERROR", issueService.getIssue(issue.getId()).getPauseReason());
+    assertEquals("ERROR", issueEditingService.getIssue(issue.getId()).getPauseReason());
 
-    Issue afterFail = issueService.getIssue(issue.getId());
-    issueService.resumeIssue(afterFail.getId(), afterFail.getVersion(), key("resume"));
+    Issue afterFail = issueEditingService.getIssue(issue.getId());
+    issueLifecycleService.resumeIssue(afterFail.getId(), afterFail.getVersion(), key("resume"));
     IssueRun unknownRun = issueRunService.acceptRun(issue.getId(), key("accept"));
     UUID unknownEnd = appendHistoryEntry(unknownRun.getThreadId());
     IssueRun unknown =
@@ -690,7 +691,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
 
     assertEquals(IssueRunStatus.UNKNOWN, unknown.getStatus());
     assertEquals("side effect lost", unknown.getError());
-    assertEquals("UNKNOWN", issueService.getIssue(issue.getId()).getPauseReason());
+    assertEquals("UNKNOWN", issueEditingService.getIssue(issue.getId()).getPauseReason());
   }
 
   /** 人工停止收尾为 CANCELLED 并保留 USER 暂停门禁，避免轮询立即启动新 Run。 */
@@ -699,7 +700,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("停止", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     UUID endEntryId = appendHistoryEntry(run.getThreadId());
 
@@ -709,7 +710,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     assertEquals(IssueRunStatus.CANCELLED, cancelled.getStatus());
     assertEquals(endEntryId, cancelled.getEndEntryId());
     assertNull(cancelled.getError());
-    assertEquals("USER", issueService.getIssue(issue.getId()).getPauseReason());
+    assertEquals("USER", issueEditingService.getIssue(issue.getId()).getPauseReason());
     assertThrows(
         ProjectValidationException.class,
         () -> issueRunService.acceptRun(issue.getId(), key("accept")));
@@ -721,7 +722,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("等待恢复", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
 
     IssueRun waiting = issueRunService.waitRun(run.getId(), run.getVersion());
@@ -748,11 +749,11 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("门禁恢复", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
     IssueRun waiting = issueRunService.waitRun(run.getId(), run.getVersion());
-    Issue waitingIssue = issueService.getIssue(issue.getId());
-    issueService.pauseIssue(
+    Issue waitingIssue = issueEditingService.getIssue(issue.getId());
+    issueLifecycleService.pauseIssue(
         waitingIssue.getId(),
         waitingIssue.getVersion(),
         key("pause"),
@@ -766,7 +767,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     IssueRun unchanged = issueRunService.getRun(waiting.getId());
     assertEquals(IssueRunStatus.WAITING, unchanged.getStatus());
     assertNull(unchanged.getActiveSince());
-    assertEquals("UNKNOWN", issueService.getIssue(issue.getId()).getPauseReason());
+    assertEquals("UNKNOWN", issueEditingService.getIssue(issue.getId()).getPauseReason());
     assertEquals(1L, budgetUsed(issue.getId()));
   }
 

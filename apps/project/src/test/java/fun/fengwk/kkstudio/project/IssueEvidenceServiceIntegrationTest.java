@@ -4,9 +4,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.mock;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
@@ -14,8 +16,21 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import fun.fengwk.kkstudio.platform.settings.SystemSettings;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
+import fun.fengwk.kkstudio.platform.storage.S3PresignService;
+import fun.fengwk.kkstudio.platform.storage.S3StorageService;
+import fun.fengwk.kkstudio.platform.storage.StorageMaintenanceWakeup;
+import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
+import fun.fengwk.kkstudio.platform.storage.configuration.StorageMaintenanceProperties;
 import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
+import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
+import fun.fengwk.kkstudio.platform.storage.persistence.StorageUploadRepository;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
+import fun.fengwk.kkstudio.platform.storage.service.StorageBlobPreviewService;
+import fun.fengwk.kkstudio.platform.storage.service.StorageMediaProbe;
+import fun.fengwk.kkstudio.platform.storage.service.StorageObjectCleanupService;
+import fun.fengwk.kkstudio.platform.storage.service.StorageUploadOperationLock;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService.ReadyUpload;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService.StagedUpload;
@@ -33,6 +48,7 @@ import fun.fengwk.kkstudio.share.storage.StorageUploadReserveRequestDTO;
 
 import java.io.InputStream;
 import java.sql.Timestamp;
+import java.time.Clock;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -255,7 +271,7 @@ class IssueEvidenceServiceIntegrationTest extends ProjectTestSupport {
     Issue issue1 = createIssue(projectId);
     Issue issue2 = createIssue(projectId);
 
-    issueService.transition(issue1.getId(), issue1.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue1.getId(), issue1.getVersion(), key("t"), "DESIGN");
     IssueRun runOfIssue1 = issueRunService.acceptRun(issue1.getId(), key("accept"));
 
     UUID blobId = UUID.randomUUID();
@@ -278,7 +294,7 @@ class IssueEvidenceServiceIntegrationTest extends ProjectTestSupport {
     UUID projectId = createProjectWithStages("测试工作流", agent, agent, 3);
     Issue issue = createIssue(projectId);
 
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
 
     UUID blobId = UUID.randomUUID();
@@ -484,10 +500,26 @@ class IssueEvidenceServiceIntegrationTest extends ProjectTestSupport {
     }
   }
 
-  public static class FakeStorageBlobManager implements StorageBlobManager {
+  @SuppressWarnings("unchecked")
+  private static ObjectProvider<StorageMaintenanceWakeup> wakeups() {
+    return mock(ObjectProvider.class);
+  }
+
+  public static class FakeStorageBlobManager extends StorageBlobManager {
 
     private final List<UUID> retained = new CopyOnWriteArrayList<>();
     private final List<UUID> released = new CopyOnWriteArrayList<>();
+
+    public FakeStorageBlobManager() {
+      // 受测方法全部覆写；超类依赖用替身满足非空构造契约。
+      super(
+          mock(StorageBlobRepository.class),
+          mock(S3StorageService.class),
+          mock(S3PresignService.class),
+          wakeups(),
+          mock(StorageObjectCleanupService.class),
+          mock(PlatformTransactionManager.class));
+    }
 
     @Override
     public StorageBlob retain(UUID blobId) {
@@ -539,11 +571,31 @@ class IssueEvidenceServiceIntegrationTest extends ProjectTestSupport {
     }
   }
 
-  public static class FakeStorageUploadService implements StorageUploadService {
+  public static class FakeStorageUploadService extends StorageUploadService {
 
     private final Map<UUID, ReadyUpload> readyMap = new ConcurrentHashMap<>();
     private final List<UUID> deleted = new CopyOnWriteArrayList<>();
     private final List<UUID> locked = new CopyOnWriteArrayList<>();
+
+    public FakeStorageUploadService() {
+      // 受测方法全部覆写；超类依赖用替身满足非空构造契约。
+      super(
+          mock(StorageUploadRepository.class),
+          mock(StorageBlobRepository.class),
+          mock(StorageBlobManager.class),
+          mock(S3StorageService.class),
+          mock(S3PresignService.class),
+          mock(StorageMediaProbe.class),
+          mock(StorageBlobPreviewService.class),
+          mock(StorageObjectCleanupService.class),
+          mock(StorageUploadOperationLock.class),
+          wakeups(),
+          new S3StorageProperties(),
+          new SystemSettingsSnapshot(SystemSettings.DEFAULT),
+          new StorageMaintenanceProperties(),
+          Clock.systemUTC(),
+          mock(PlatformTransactionManager.class));
+    }
 
     public void putReady(UUID uploadId, UUID blobId, String filename) {
       readyMap.put(uploadId, new ReadyUpload(blobId, filename));

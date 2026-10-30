@@ -7,20 +7,20 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.PlatformTransactionManager;
 
-import fun.fengwk.kkstudio.project.controller.IssueControllerDispatcher;
-import fun.fengwk.kkstudio.project.controller.IssueControllerProperties;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
+import fun.fengwk.kkstudio.project.reconcile.IssueReconcileDispatcher;
+import fun.fengwk.kkstudio.project.reconcile.IssueReconcileProperties;
 import fun.fengwk.kkstudio.work.DurableWorkQueue;
 
 /**
  * Project 模块的自动装配入口：把 Project 领域 Bean、领域编解码器与 Spring JDBC 持久化组件注册到宿主应用。
  *
  * <p>Project 是建立在平台之上的应用：经平台的公开服务使用运行时、全局 Blob 与 Agent 目录（窄适配见 {@code
- * fun.fengwk.kkstudio.project.platform}），并实现平台定义的 {@code IssueAgentOwnership}。Issue Controller
+ * fun.fengwk.kkstudio.project.platform}），并实现平台定义的 {@code IssueAgentOwnership}。Issue Reconcile
  * 的执行器与生命周期由 web 组合根装配。
  */
 @ComponentScan(basePackageClasses = ProjectAutoConfiguration.class)
-@EnableConfigurationProperties(IssueControllerProperties.class)
+@EnableConfigurationProperties(IssueReconcileProperties.class)
 @Configuration
 public class ProjectAutoConfiguration {
 
@@ -35,6 +35,6 @@ public class ProjectAutoConfiguration {
   public DurableWorkQueue issueWorkQueue(
       JdbcClient jdbcClient, PlatformTransactionManager transactionManager) {
     return new DurableWorkQueue(
-        jdbcClient, transactionManager, IssueControllerDispatcher.TARGET_TYPE);
+        jdbcClient, transactionManager, IssueReconcileDispatcher.TARGET_TYPE);
   }
 }

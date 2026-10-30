@@ -75,7 +75,7 @@ public class S3StorageServiceTest {
   @Test
   void serverUploadUsesExplicitSha256Header() {
     AtomicReference<PutObjectRequest> captured = new AtomicReference<>();
-    S3StorageServiceImpl service =
+    S3StorageService service =
         newObservingStorageService(
             (proxy, method, args) -> {
               if (args != null && args.length > 0 && args[0] instanceof PutObjectRequest request) {
@@ -97,7 +97,7 @@ public class S3StorageServiceTest {
   @Test
   void rejectsInvalidExplicitSha256BeforePut() {
     AtomicInteger puts = new AtomicInteger();
-    S3StorageServiceImpl service =
+    S3StorageService service =
         newObservingStorageService(
             (proxy, method, args) -> {
               if ("putObject".equals(method.getName())) {
@@ -294,7 +294,7 @@ public class S3StorageServiceTest {
     AtomicReference<HeadObjectRequest> captured = new AtomicReference<>();
     S3StorageProperties properties = newS3Properties();
     S3StorageService service =
-        new S3StorageServiceImpl(
+        new S3StorageService(
             properties,
             newNoopS3Client(
                 methodName -> {
@@ -330,7 +330,7 @@ public class S3StorageServiceTest {
     AtomicReference<CopyObjectRequest> captured = new AtomicReference<>();
     S3StorageProperties properties = newS3Properties();
     S3StorageService service =
-        new S3StorageServiceImpl(
+        new S3StorageService(
             properties,
             newNoopS3Client(
                 methodName ->
@@ -353,7 +353,7 @@ public class S3StorageServiceTest {
     AtomicInteger deletedCalls = new AtomicInteger();
     S3StorageProperties properties = newS3Properties();
     S3StorageService service =
-        new S3StorageServiceImpl(
+        new S3StorageService(
             properties,
             newNoopS3Client(
                 methodName -> null,
@@ -374,7 +374,7 @@ public class S3StorageServiceTest {
   public void testDeleteObjectIfExistsRethrowsNon404Errors() {
     S3StorageProperties properties = newS3Properties();
     S3StorageService service =
-        new S3StorageServiceImpl(
+        new S3StorageService(
             properties,
             newNoopS3Client(
                 methodName -> null,
@@ -404,7 +404,7 @@ public class S3StorageServiceTest {
   @Test
   public void testReadObjectAppliesRemainingBudgetAsApiCallTimeout() throws IOException {
     AtomicReference<GetObjectRequest> captured = new AtomicReference<>();
-    S3StorageServiceImpl storageService =
+    S3StorageService storageService =
         newObservingStorageService(
             (proxy, method, args) -> {
               if (args != null && args.length > 0 && args[0] instanceof GetObjectRequest request) {
@@ -428,7 +428,7 @@ public class S3StorageServiceTest {
   @Test
   public void testReadObjectRejectsExpiredDeadlineWithoutRequest() {
     AtomicBoolean getObjectCalled = new AtomicBoolean();
-    S3StorageServiceImpl storageService =
+    S3StorageService storageService =
         newObservingStorageService(
             (proxy, method, args) -> {
               if ("getObject".equals(method.getName())) {
@@ -447,8 +447,8 @@ public class S3StorageServiceTest {
   /** 测试意图：SDK 握手超时按 SDK 异常原样抛出，由读取边界翻译为受管资源读取超时。 */
   @Test
   public void testReadObjectPropagatesSdkHandshakeTimeout() {
-    S3StorageServiceImpl storageService =
-        new S3StorageServiceImpl(
+    S3StorageService storageService =
+        new S3StorageService(
             newS3Properties(),
             newNoopS3Client(
                 methodName -> {
@@ -467,8 +467,8 @@ public class S3StorageServiceTest {
   /** 测试意图：GET 响应缺少非负 contentLength 时必须中止响应流并以非法响应失败，而不是返回未知长度的对象。 */
   @Test
   public void testReadObjectRejectsMissingContentLength() {
-    S3StorageServiceImpl storageService =
-        new S3StorageServiceImpl(
+    S3StorageService storageService =
+        new S3StorageService(
             newS3Properties(),
             newNoopS3Client(
                 methodName -> {
@@ -483,13 +483,12 @@ public class S3StorageServiceTest {
     assertThrows(IllegalArgumentException.class, () -> storageService.readObject("dir/demo.txt"));
   }
 
-  private S3StorageServiceImpl newObservingStorageService(RequestObserver observer) {
-    return new S3StorageServiceImpl(
-        newS3Properties(), newNoopS3Client(methodName -> null, observer));
+  private S3StorageService newObservingStorageService(RequestObserver observer) {
+    return new S3StorageService(newS3Properties(), newNoopS3Client(methodName -> null, observer));
   }
 
   private TestContext newTestContext(Function<String, Object> override) {
-    return new TestContext(new S3StorageServiceImpl(newS3Properties(), newNoopS3Client(override)));
+    return new TestContext(new S3StorageService(newS3Properties(), newNoopS3Client(override)));
   }
 
   private S3Client newNoopS3Client(Function<String, Object> override) {

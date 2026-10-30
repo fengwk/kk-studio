@@ -8,13 +8,24 @@ Environment、Settings 和 Harness 产品用例。它负责跨资源事务、实
 构建期 Plugin 的纯 SPI、凭据与资源端口契约独立在 [Platform Plugin API](platform-plugin-api.md)。
 
 [`PlatformAutoConfiguration`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/PlatformAutoConfiguration.java)
-扫描 service、repository 和 JdbcStore。生产组合根是 [Web](web.md)。
+扫描领域服务、仓库与设施配置。生产组合根是 [Web](web.md)。
 PostgreSQL 保存业务事实，内存 registry、执行句柄和通知承担可重建的运行状态。
+
+Chat、Environment、Settings 与 Catalog 的实体仓库直接以 `JdbcClient` 承担 SQL、行映射与 CAS，
+业务服务使用具体类，不再经过单实现接口和 JdbcStore/DO 转发层。
+
+[`EnvironmentConfiguration`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/environment/EnvironmentConfiguration.java)
+由上述组件扫描装配，提供默认 UTC 时钟和节点身份；它不是独立的 Boot 自动配置入口。
 
 [`PostgresqlPersistenceConfiguration`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/persistence/PostgresqlPersistenceConfiguration.java)
 提供 PostgreSQL 异常翻译器，Boot 自动配置的 `JdbcTemplate`、`NamedParameterJdbcTemplate` 和
 `JdbcClient` 共用它。普通 SQL 使用 `JdbcClient` 命名参数与显式 `RowMapper`；异常翻译固定唯一数据库产品
 `PostgreSQL`，保留 Spring 的 SQLState 分类，不在故障期间取连接读取元数据。
+
+模块依赖保留 `spring-boot-starter-aspectj`：convention4j 的 tracer 仍提供 AspectJ `@Aspect`
+（`ConventionSpanAspect`、`ReactorConventionSpanAspect`，方法签名引用 `org.aspectj.lang.ProceedingJoinPoint`），
+而根 [`pom.xml`](../../pom.xml) 排除了它传递的 Boot 3 `spring-boot-starter-aop`；
+Boot 4 的 aspectj starter 补回 `spring-aop` 与 `aspectjweaver`，否则这些第三方 Aspect 无法织入。
 
 ## 按用例定位源码
 
@@ -34,9 +45,9 @@ PostgreSQL 保存业务事实，内存 registry、执行句柄和通知承担可
 | [interaction](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/interaction) | 人工输入/审批与只读环境等待的统一投影、人工提交 |
 | [storage](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/storage) | 上传、Blob owner 引用、S3、媒体探针与预览、耐久对象清理 |
 | [environment](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/environment) | Card、注册令牌、路由租约、宿主信息和 Skill 同步 |
-| [plugin](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/plugin) | PluginProperties、安全管理面、凭据存储/刷新与资源传输实现；纯 SPI 契约见 [Platform Plugin API](platform-plugin-api.md) |
+| [pluginhost](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/pluginhost) | 插件宿主：PluginProperties、安全管理面、凭据存储/刷新与资源传输实现；纯 SPI 契约在 [Platform Plugin API](platform-plugin-api.md)，与宿主包名隔离 |
 | [settings](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/settings) | 全局设置、严格 codec、编辑 schema、版本快照与运行时现读的全局代理装配 |
-| [configsync](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/configsync) | 八类配置的 YAML 读写、依赖闭包与原子导入 |
+| [configsync](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/configsync) | 具体的 `ConfigSyncService` 编排八类配置的 YAML 读写、依赖闭包与原子导入 |
 
 ## 待处理交互
 
@@ -102,6 +113,13 @@ MODEL 配置保存 limit、abilities、variants、pricing 和 default variant。
 条件对象同层字段为 AND，支持 `all` / `any` / `not`、context token 边界、service tier、UTC 日期
 与时区时间段。覆盖规则只写入非 null 字段，显式 `reasoning: null` 恢复继承；倍率规则逐字段
 缩放，未列出的字段不变。
+
+models.dev v2 目录导入只填入 token 价格；`web_search` 等非 token 附加费用不计入并显示提示。
+由于不感知上游请求地区，含 `region` 条件的倍率规则（包括嵌套组合）整条忽略，保留基础价、
+TTL 缓存价和其他有效倍率，并提示统计费用可能低于实际账单。其他未知定价字段或条件、
+非法价格与倍率仍拒绝整份候选价格；`region` 覆盖规则也不支持。价格不支持的候选仍可填入
+其他模型信息，但保留已有价格，不用零价覆盖。
+
 Agent 配置保存工具名、`SkillRef(packageName, name)`、subagents 与 `inheritParentEnvironment`
 （默认 true）；工具候选和 Skill 引用在写入时校验。
 
@@ -235,6 +253,8 @@ Storage 不 import Harness，存储设施与执行资源边界各自装配。
 `storage_blob` 按 ACTIVE 内容的 `(sha256, size_bytes)` 去重；
 upload、Session、Canvas 和 Issue Evidence 通过各自 owner 边持有引用。
 retain/release 加入调用方事务；引用减至零时切为 DELETING，后台清理 preview、original 和行。
+`storage/persistence` 的实体仓库直接持有 `JdbcClient`，SQL、行映射与条件 CAS 全部内联；
+`storage/service` 是具体的生命周期服务，不存在单实现接口或 `service/impl` 层。
 
 上传使用 reserve → 浏览器 PUT → complete。complete 在专用会话级 upload advisory lock
 内做事务外 checksum HEAD、媒体 probe 与 copy，再短事务绑定 Blob。
@@ -288,13 +308,13 @@ Platform 适配注册、租约和资源票据；会话代际、在途调用和�
 不经 jsonb 数值展开，精度、scale 与指数表示保持可恢复。秘密不进入普通配置。
 启动时为新安装的 Plugin 写入 Schema 默认值（revision 1），已有行保持不变；已卸载 Plugin 的残留行被忽略。
 
-[`PluginConfigurationService`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/plugin/service/PluginConfigurationService.java)
+[`PluginConfigurationService`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/pluginhost/service/PluginConfigurationService.java)
 是普通配置与凭据的唯一写入口。保存以 expectedRevision 做 CAS：先按 Schema 归一普通值，
 用候选配置与候选凭据 configure 一次目标插件（被拒绝即 400，不写入），再在同一事务内核验声明依赖的 Agent、
 更新配置、写入或删除凭据行并发出 `plugin_changed` 提示。提交后唤醒本节点目录刷新，
 凭据被改写时额外唤醒凭据刷新调度器；回滚不触发任何唤醒。
 
-[`PluginCatalogRuntime`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/plugin/catalog/PluginCatalogRuntime.java)
+[`PluginCatalogRuntime`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/pluginhost/catalog/PluginCatalogRuntime.java)
 持有本节点当前快照。刷新回读全部配置，修订有变化时构建新快照并原子替换；构建失败保留旧快照，
 并暴露固定的 `applicationError`。快照按引用计数退役：被替换的快照在最后一个租用释放后才关闭，
 因此在途调用继续使用自己租到的实例完成。Web 合并通知、重连提示与每 5 秒的回读。
@@ -439,7 +459,7 @@ null 表示强制直连；`noProxyHosts` 为逗号分隔绕过规则，默认 `l
 | `kk-studio.cluster` | 节点注册与节点间内部认证 |
 | `kk-studio.harness.environment-gateway` | Daemon 帧、出站队列和发送预算，由 Web 拥有 |
 
-应用模块各自拥有部署参数：`kk-studio.project.controller` 属于 [Project](project.md)，`kk-studio.canvas.function.runtime`
+应用模块各自拥有部署参数：`kk-studio.project.reconcile` 属于 [Project](project.md)，`kk-studio.canvas.function.runtime`
 属于 [Canvas](canvas.md#部署参数)，`kk-studio.harness.ide-gateway` 属于 Web 的同源 IDE 网关。
 
 默认值和完整字段以对应配置类及

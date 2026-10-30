@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.plugin.opencli;
 
+import static fun.fengwk.kkstudio.platform.plugin.support.CanvasArguments.extractText;
+
 import lombok.extern.slf4j.Slf4j;
 
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
@@ -11,7 +13,6 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionUnknownException;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonObject;
-import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonText;
 import fun.fengwk.kkstudio.canvas.function.CanvasResourceKind;
 import fun.fengwk.kkstudio.plugin.opencli.OpenCliHubClient.Execution;
 import fun.fengwk.kkstudio.plugin.opencli.OpenCliHubClient.ExecutionResource;
@@ -261,24 +262,5 @@ public class GptImage2CanvasFunctionAdapter implements CanvasFunctionAdapter {
         throw new IllegalArgumentException("checkpoint uploads do not match frozen manifest");
       }
     }
-  }
-
-  private static String extractText(JsonObject args, String field) {
-    CanvasJson json = args.values().get(field);
-    if (json instanceof JsonText text) {
-      return text.value();
-    }
-    throw new IllegalArgumentException(field + " must be a string");
-  }
-
-  private static String extractText(JsonObject args, String field, String defaultValue) {
-    CanvasJson json = args.values().get(field);
-    if (json instanceof JsonText text) {
-      return text.value();
-    }
-    if (json == null) {
-      return defaultValue;
-    }
-    throw new IllegalArgumentException(field + " must be a string");
   }
 }

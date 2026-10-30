@@ -1,0 +1,337 @@
+package fun.fengwk.kkstudio.harness.builtin.model;
+
+import static fun.fengwk.kkstudio.harness.builtin.invocation.codec.InvocationCodecTestFixtures.environmentModelRequest;
+import static fun.fengwk.kkstudio.harness.builtin.invocation.codec.InvocationCodecTestFixtures.hostModelRequest;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import org.junit.jupiter.api.Test;
+import tools.jackson.databind.node.ObjectNode;
+
+import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
+import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.ProviderProtocolOptions;
+import fun.fengwk.kkstudio.harness.model.codec.ModelDescriptorJsonCodec;
+import fun.fengwk.kkstudio.harness.model.provider.codec.ProviderRequestJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolBindingJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
+
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+
+/** 紧凑 ModelRequestSpec 的严格 wire 与 round-trip 契约。 */
+class ModelRequestSpecJsonCodecTest {
+
+  private final ModelRequestSpecJsonCodec codec = new ModelRequestSpecJsonCodec();
+  private final ModelDescriptorJsonCodec modelCodec = new ModelDescriptorJsonCodec();
+  private final ProviderRequestJsonCodec providerCodec = new ProviderRequestJsonCodec();
+  private final ToolBindingJsonCodec bindingCodec = new ToolBindingJsonCodec();
+
+  @Test
+  void roundTripsEnvironmentRequestWithCanonicalJson() {
+    ModelRequestSpec requestSpec = environmentModelRequest();
+    String expected =
+        "{\"providerType\":\"OPENAI\",\"providerConnectionGenerationId\":\""
+            + requestSpec.providerConnectionGenerationId()
+            + "\",\"model\":"
+            + modelCodec.encodeDescriptor(requestSpec.model())
+            + ",\"variant\":"
+            + modelCodec.encodeVariant(requestSpec.variant())
+            + ",\"outputTokens\":"
+            + requestSpec.outputTokens()
+            + ",\"systemInstruction\":\""
+            + requestSpec.systemInstruction()
+            + "\",\"toolBindings\":["
+            + bindingCodec.encode(requestSpec.toolBindings().getFirst())
+            + "],\"subagentBindings\":[],\"cacheControl\":"
+            + providerCodec.encodeCacheControlNode(requestSpec.cacheControl())
+            + "}";
+
+    assertEquals(expected, codec.encode(requestSpec));
+    assertEquals(requestSpec, codec.decode(expected));
+    assertEquals(requestSpec, codec.decodeNode(codec.encodeNode(requestSpec)));
+    assertThrows(
+        UnsupportedOperationException.class,
+        () -> codec.decode(expected).toolBindings().add(requestSpec.toolBindings().getFirst()));
+  }
+
+  // 测试意图: 组版本与每个成员的 Provider/generation/descriptor/variant 必须完整冻结并严格 round-trip，
+  // 成员切换只派生顶层执行身份，组快照本身不变。
+  @Test
+  void roundTripsFrozenGroupExecutionAndSelectsMemberWithoutMutatingGroup() {
+    ModelRequestSpec single = hostModelRequest();
+    ModelGroupMemberExecution first =
+        new ModelGroupMemberExecution(
+            single.providerType(),
+            single.providerConnectionGenerationId(),
+            single.model(),
+            single.variant());
+    ModelGroupMemberExecution second =
+        new ModelGroupMemberExecution(
+            single.providerType(),
+            single.providerConnectionGenerationId(),
+            new ModelDescriptor(
+                single.model().providerName(),
+                "second-model",
+                "second-model-id",
+                single.model().inputModalities(),
+                single.model().tools(),
+                single.model().reasoning()),
+            new ModelVariant("v2"));
+    ModelGroupExecution group =
+        new ModelGroupExecution("fallback-group", 9L, List.of(first, second), Set.of(429, 503), 45);
+    ModelRequestSpec spec =
+        new ModelRequestSpec(
+            first.providerType(),
+            first.providerConnectionGenerationId(),
+            first.model(),
+            first.variant(),
+            single.outputTokens(),
+            single.systemInstruction(),
+            single.toolBindings(),
+            single.subagentBindings(),
+            single.cacheControl(),
+            group);
+
+    String encoded = codec.encode(spec);
+    ModelRequestSpec decoded = codec.decode(encoded);
+    assertEquals(spec, decoded);
+    assertEquals("second-model", decoded.forMember(1).model().modelName());
+    assertEquals("v2", decoded.forMember(1).variant().id());
+    assertEquals(group.groupName(), decoded.groupExecution().groupName());
+    assertEquals(group.groupVersion(), decoded.groupExecution().groupVersion());
+    assertEquals(group.members(), decoded.groupExecution().members());
+    assertEquals(
+        group.fallbackStatusCodes().stream().sorted().toList(),
+        decoded.groupExecution().fallbackStatusCodes().stream().sorted().toList());
+    assertEquals(group.cooldownSeconds(), decoded.groupExecution().cooldownSeconds());
+    assertSame(decoded.groupExecution(), decoded.forMember(1).groupExecution());
+  }
+
+  @Test
+  void roundTripsFrozenSubagentBindings() {
+    ModelRequestSpec base = hostModelRequest();
+    ModelRequestSpec requestSpec =
+        new ModelRequestSpec(
+            base.providerType(),
+            base.providerConnectionGenerationId(),
+            base.model(),
+            base.variant(),
+            base.outputTokens(),
+            "Test system instruction.",
+            base.toolBindings(),
+            List.of(new SubagentBinding("reviewer", "Review changes")),
+            base.cacheControl());
+
+    String encoded = codec.encode(requestSpec);
+    assertTrue(
+        encoded.contains(
+            "\"subagentBindings\":[{\"name\":\"reviewer\","
+                + "\"description\":\"Review changes\"}]"));
+    assertEquals(requestSpec, codec.decode(encoded));
+  }
+
+  // 测试意图: agent_definition.description 放开为 text 后，subagent 描述不能再被 512 字符上限拒绝，
+  // 且长描述必须无损地穿过冻结 spec 的编解码边界。
+  @Test
+  void roundTripsSubagentDescriptionBeyondLegacyLengthLimit() {
+    ModelRequestSpec base = hostModelRequest();
+    String longDescription = "d".repeat(4096);
+    ModelRequestSpec requestSpec =
+        new ModelRequestSpec(
+            base.providerType(),
+            base.providerConnectionGenerationId(),
+            base.model(),
+            base.variant(),
+            base.outputTokens(),
+            "Test system instruction.",
+            base.toolBindings(),
+            List.of(new SubagentBinding("reviewer", longDescription)),
+            base.cacheControl());
+
+    ModelRequestSpec decoded = codec.decode(codec.encode(requestSpec));
+    assertEquals(longDescription, decoded.subagentBindings().getFirst().description());
+  }
+
+  @Test
+  void encodedSpecContainsExactlyTheFrozenInvocationFields() {
+    ObjectNode encoded = codec.encodeNode(environmentModelRequest());
+    Set<String> fieldNames = new HashSet<>();
+    encoded.propertyNames().forEach(fieldNames::add);
+    assertEquals(
+        Set.of(
+            "providerType",
+            "providerConnectionGenerationId",
+            "model",
+            "variant",
+            "outputTokens",
+            "systemInstruction",
+            "toolBindings",
+            "subagentBindings",
+            "cacheControl"),
+        fieldNames);
+  }
+
+  /**
+   * 测试意图：systemInstruction 是唯一的冻结系统指令，必须在 encode/decode 之间逐字保留；解码器若忽略该字段（回退为固定占位文本）， 重放的 invocation
+   * 就会悄悄换成另一条系统指令。这里显式断言往返保真，而不只断言相等性经由同一 spec 构造。
+   */
+  @Test
+  void roundTripPreservesTheExactSystemInstruction() {
+    ModelRequestSpec base = hostModelRequest();
+    String instruction = "You are a careful reviewer.\n\n<rules>\n- be terse\n</rules>";
+    ModelRequestSpec requestSpec =
+        new ModelRequestSpec(
+            base.providerType(),
+            base.providerConnectionGenerationId(),
+            base.model(),
+            base.variant(),
+            base.outputTokens(),
+            instruction,
+            base.toolBindings(),
+            base.subagentBindings(),
+            base.cacheControl());
+
+    String encoded = codec.encode(requestSpec);
+    assertTrue(encoded.contains("\"systemInstruction\":\"You are a careful reviewer."), encoded);
+
+    ModelRequestSpec decoded = codec.decode(encoded);
+    assertEquals(instruction, decoded.systemInstruction());
+    assertEquals(instruction, codec.decodeNode(codec.encodeNode(requestSpec)).systemInstruction());
+    assertEquals(requestSpec, decoded);
+  }
+
+  /** 解码器必须拒绝缺失或非法的 systemInstruction，而不是回退到任何默认文本。 */
+  @Test
+  void rejectsMissingOrBlankSystemInstruction() {
+    ObjectNode missing = encodedNode();
+    missing.remove("systemInstruction");
+    assertInvalid(missing);
+
+    ObjectNode blank = encodedNode();
+    blank.put("systemInstruction", " ");
+    assertInvalid(blank);
+
+    ObjectNode wrongType = encodedNode();
+    wrongType.putObject("systemInstruction");
+    assertInvalid(wrongType);
+  }
+
+  @Test
+  void rejectsUnknownMissingAndWrongTypeFacts() {
+    ObjectNode extra = encodedNode();
+    extra.put("extra", true);
+    assertInvalid(extra);
+
+    // 未知字段包含旧的 skillBindings 必须被拒绝
+    ObjectNode legacySkills = encodedNode();
+    legacySkills.putArray("skillBindings");
+    assertInvalid(legacySkills);
+
+    ObjectNode missing = encodedNode();
+    missing.remove("toolBindings");
+    assertInvalid(missing);
+
+    ObjectNode providerType = encodedNode();
+    providerType.put("providerType", "UNKNOWN");
+    assertInvalid(providerType);
+
+    ObjectNode providerConnectionGenerationId = encodedNode();
+    providerConnectionGenerationId.put("providerConnectionGenerationId", "not-a-uuid");
+    assertInvalid(providerConnectionGenerationId);
+
+    ObjectNode toolsType = encodedNode();
+    toolsType.putObject("toolBindings");
+    assertInvalid(toolsType);
+
+    // toolBindings 内部包含旧字段 environmentRequired 必须被拒绝
+    ObjectNode legacyTool = encodedNode();
+    ObjectNode firstTool = (ObjectNode) legacyTool.path("toolBindings").get(0);
+    firstTool.put("environmentRequired", true);
+    assertInvalid(legacyTool);
+
+    // toolBindings 内部缺失 environmentSupport 或使用未知枚举值必须被拒绝
+    ObjectNode missingSupport = encodedNode();
+    ((ObjectNode) missingSupport.path("toolBindings").get(0)).remove("environmentSupport");
+    assertInvalid(missingSupport);
+
+    ObjectNode invalidSupport = encodedNode();
+    ((ObjectNode) invalidSupport.path("toolBindings").get(0))
+        .put("environmentSupport", "UNKNOWN_SUPPORT");
+    assertInvalid(invalidSupport);
+
+    // Subagent binding 的 name 与 description 全部必填，缺失时必须严格拒绝。
+    ModelRequestSpec base = hostModelRequest();
+    ModelRequestSpec specWithSubagent =
+        new ModelRequestSpec(
+            base.providerType(),
+            base.providerConnectionGenerationId(),
+            base.model(),
+            base.variant(),
+            base.outputTokens(),
+            base.systemInstruction(),
+            base.toolBindings(),
+            List.of(new SubagentBinding("reviewer", "review")),
+            base.cacheControl());
+    for (String field : List.of("name", "description")) {
+      ObjectNode missingSubagentField = codec.encodeNode(specWithSubagent);
+      ObjectNode subagent = (ObjectNode) missingSubagentField.path("subagentBindings").get(0);
+      subagent.remove(field);
+      assertInvalid(missingSubagentField);
+    }
+  }
+
+  @Test
+  void rejectsNullEncodeAndMalformedDocuments() {
+    String json = codec.encode(environmentModelRequest());
+    assertThrows(NullPointerException.class, () -> codec.encode(null));
+    assertThrows(NullPointerException.class, () -> codec.decode(null));
+    assertThrows(IllegalArgumentException.class, () -> codec.decode("[]"));
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(json + " {}"));
+  }
+
+  private ObjectNode encodedNode() {
+    return codec.encodeNode(environmentModelRequest());
+  }
+
+  private void assertInvalid(ObjectNode node) {
+    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(node));
+  }
+
+  /**
+   * 测试意图：variant.protocolOptions 是厂商原生自由 JSON，必须按 BigDecimal 穿过冻结 spec 的编解码边界；1e309/1e-324
+   * 与高精度小数不得在 double 中退化为 Infinity / 0，也不得被改写成字符串。
+   */
+  @Test
+  void roundTripsVariantProtocolOptionsWithoutFloatLoss() {
+    ModelRequestSpec base = hostModelRequest();
+    String rawOptions = "{\"big\":1e309,\"tiny\":1e-324,\"exact\":0.1234567890123456789012345678}";
+    ModelRequestSpec requestSpec =
+        new ModelRequestSpec(
+            base.providerType(),
+            base.providerConnectionGenerationId(),
+            base.model(),
+            new ModelVariant("v1", "high", new ProviderProtocolOptions(rawOptions)),
+            base.outputTokens(),
+            base.systemInstruction(),
+            base.toolBindings(),
+            base.subagentBindings(),
+            base.cacheControl());
+
+    String encoded = codec.encode(requestSpec);
+
+    assertTrue(encoded.contains("\"big\":1E+309"), encoded);
+    assertTrue(encoded.contains("\"tiny\":1E-324"), encoded);
+    assertFalse(encoded.contains("Infinity"), encoded);
+
+    ModelRequestSpec decoded = codec.decode(encoded);
+    assertEquals(requestSpec, decoded);
+    assertEquals(
+        "{\"big\":1E+309,\"tiny\":1E-324,\"exact\":0.1234567890123456789012345678}",
+        decoded.variant().protocolOptions().canonicalJson());
+  }
+}

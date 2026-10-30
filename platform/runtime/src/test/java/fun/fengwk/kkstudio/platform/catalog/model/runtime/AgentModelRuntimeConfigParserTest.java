@@ -19,6 +19,7 @@ import tools.jackson.databind.module.SimpleModule;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelPricing;
+import fun.fengwk.kkstudio.harness.model.ModelPricingCondition;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.ProviderProtocolOptions;
@@ -666,6 +667,86 @@ class AgentModelRuntimeConfigParserTest {
     assertTrue(pricing.getOverrides().isEmpty());
     assertNotNull(pricing.getMultipliers());
     assertTrue(pricing.getMultipliers().isEmpty());
+  }
+
+  /** requestBody 的 typed scalar 与精确数字必须跨 decode/encode 保留，显式 null 与缺字段严格区分。 */
+  @Test
+  void parsesRequestBodyTypedScalarsAndPreservesExactNumbers() {
+    String json =
+        configWithPricing(
+            "{\"base\":{\"input\":\"1\"},\"overrides\":["
+                + "{\"id\":\"string\",\"when\":{\"requestBody\":{\"path\":\"/speed\",\"equals\":\"fast\"}},"
+                + "\"rates\":{\"input\":\"2\"}},"
+                + "{\"id\":\"number\",\"when\":{\"requestBody\":{\"path\":\"/n\",\"equals\":2.000}},"
+                + "\"rates\":{\"input\":\"3\"}},"
+                + "{\"id\":\"boolean\",\"when\":{\"requestBody\":{\"path\":\"/a~1b/~0mode\",\"equals\":true}},"
+                + "\"rates\":{\"input\":\"4\"}},"
+                + "{\"id\":\"null\",\"when\":{\"requestBody\":{\"path\":\"/x\",\"equals\":null}},"
+                + "\"rates\":{\"input\":\"5\"}}]}");
+    var condition = parser.parse(json).pricing().overrides().get(1).when().requestBody();
+    assertEquals("/n", condition.path());
+    assertEquals(ModelPricingCondition.ScalarType.NUMBER, condition.type());
+    assertEquals("2", condition.canonicalValue());
+    assertEquals(
+        ModelPricingCondition.ScalarType.NULL,
+        parser.parse(json).pricing().overrides().get(3).when().requestBody().type());
+    String encoded = parser.encode(parser.decode(json));
+    assertTrue(encoded.contains("\"equals\":2.000"), encoded);
+    assertTrue(encoded.contains("\"equals\":null"), encoded);
+    // 非法数字不能进入 runtime，尤其不能先被 double 舍入。
+    assertEquals(
+        "9007199254740993",
+        parser
+            .parse(
+                configWithPricing(
+                    "{\"base\":{\"input\":\"1\"},\"overrides\":[{\"id\":\"n\",\"when\":"
+                        + "{\"requestBody\":{\"path\":\"/n\",\"equals\":9007199254740993}},"
+                        + "\"rates\":{\"input\":\"2\"}}]}"))
+            .pricing()
+            .overrides()
+            .get(0)
+            .when()
+            .requestBody()
+            .canonicalValue());
+  }
+
+  /** requestBody 对象本身、path 与 equals 形状和边界都在唯一 parser 入口校验。 */
+  @Test
+  void rejectsInvalidRequestBodyConditions() {
+    String base =
+        "{\"base\":{\"input\":\"1\"},\"overrides\":[{\"id\":\"r\",\"when\":{\"requestBody\":%s},\"rates\":{\"input\":\"2\"}}]}";
+    for (String invalid :
+        List.of(
+            "{\"path\":\"/speed\"}",
+            "{\"equals\":\"fast\"}",
+            "{\"path\":\"/speed\",\"equals\":[]}",
+            "{\"path\":\"/speed\",\"equals\":{}}",
+            "{\"path\":\"speed\",\"equals\":\"fast\"}",
+            "{\"path\":\"/a~2b\",\"equals\":\"fast\"}",
+            "{\"path\":\"/\",\"equals\":\"fast\",\"unknown\":true}",
+            "{\"path\":\"/\" + \"a\".repeat(1025) + \"\",\"equals\":\"x\"}")) {
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> parser.parse(configWithPricing(String.format(base, invalid))),
+          invalid);
+    }
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            parser.parse(
+                configWithPricing(
+                    "{\"base\":{\"input\":\"1\"},\"overrides\":[{\"id\":\"r\",\"when\":"
+                        + "{\"requestBody\":{\"path\":\"/n\",\"equals\":1e19}},"
+                        + "\"rates\":{\"input\":\"2\"}}]}")));
+    // 巨大指数必须在 precision/scale 校验阶段失败，不能先展开成百万位十进制文本。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            parser.parse(
+                configWithPricing(
+                    "{\"base\":{\"input\":\"1\"},\"overrides\":[{\"id\":\"r\",\"when\":"
+                        + "{\"requestBody\":{\"path\":\"/n\",\"equals\":1e1000000}},"
+                        + "\"rates\":{\"input\":\"2\"}}]}")));
   }
 
   private String configWithPricing(String pricingJson) {

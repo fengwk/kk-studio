@@ -18,14 +18,15 @@
 #
 # 跨平台正确性：脚本用 `npm ci --omit=dev --ignore-scripts --os=<npmOs> --cpu=<npmCpu>` 为目标
 # 平台安装依赖，因此只会装入锁定清单里对应平台的 optional 预编译产物（例如 koffi 的
-# `@koromix/koffi-<os>-<arch>`），而不是把 Linux 上装出的 node_modules 原样打包成“假跨平台”。
-# 缺失对应预编译产物即失败，不静默降级。暂存前再删除其它平台的 `@koromix/koffi-*`，避免宿主上
-# 已有的可选包被复制进归档。
+# `@koromix/koffi-<os>-<arch>` 与 ripgrep 的 `@vscode/ripgrep-<os>-<arch>`），而不是把 Linux
+# 上装出的 node_modules 原样打包成“假跨平台”。缺失对应预编译产物即失败，不静默降级。暂存前
+# 再删除其它平台的预编译包，避免宿主上已有的可选包被复制进归档。
 #
 # 必须 `--ignore-scripts`：koffi 等原生包的 install script 是“宿主自检 + 源码编译回退”，在 x64
 # 宿主上为 arm64 目标安装时会加载异架构预编译模块失败，再尝试源码构建而失败。发行契约只打包
-# 锁定清单里的预编译成品（koffi 运行时直接 require `@koromix/koffi-<os>-<arch>`，不依赖脚本
-# 产物），所以目标平台的生命周期脚本一律不在构建宿主上执行。
+# 锁定清单里的预编译成品（koffi 运行时直接 require `@koromix/koffi-<os>-<arch>`，ripgrep 运行时
+# 直接 require `@vscode/ripgrep-<os>-<arch>/bin/rg`），不依赖脚本产物；ripgrep 1.18.0 也没有
+# postinstall。因此目标平台的生命周期脚本一律不在构建宿主上执行。
 #
 # code-server 只来自 `runtime-manifest.json` 里冻结的 fengwk/code-server GitHub Release；
 # 清单里的版本、URL 与 SHA256 在构建期原样使用。本脚本不查询 latest、不回退官方
@@ -102,8 +103,8 @@ Requires a compiled daemon (`npm --prefix daemon ci && npm --prefix daemon run b
 checkout, curl, tar, a SHA256 tool, npm and Node on PATH (or NPM_BIN / NODE_BIN). Production
 dependencies are reinstalled for the target platform via
 `npm ci --ignore-scripts --os/--cpu`, so each archive carries only the target's prebuilt
-native modules and never runs a target lifecycle script on the build host. The tag must equal
-v<daemon/package.json version>.
+koffi and ripgrep packages and never runs a target lifecycle script on the build host. The tag
+must equal v<daemon/package.json version>.
 
 Assets are always staged under daemon/release/<os>-<arch>. Each run first removes and
 rebuilds that directory, deleting any other files in it.
@@ -159,6 +160,27 @@ koffi_optional_name() {
   echo "@koromix/koffi-${npm_os}-${npm_cpu}"
 }
 
+# ripgrep 的 optional 预编译包名（@vscode/ripgrep-<os>-<arch>）；@vscode/ripgrep 按
+# process.platform/process.arch 解析同一个包名。
+ripgrep_optional_name() {
+  local npm_os=$1 npm_cpu=$2
+  echo "@vscode/ripgrep-${npm_os}-${npm_cpu}"
+}
+
+ripgrep_binary_name() {
+  if [ "$1" = win32 ]; then echo rg.exe; else echo rg; fi
+}
+
+# 只保留目标平台的预编译包；宿主上残留的其它平台包不得进入归档。
+prune_optional_prebuilts() {
+  local pattern=$1 expected=$2 directory name
+  for directory in "$pattern"*; do
+    [ -e "$directory" ] || continue
+    name=${directory##*/}
+    if [ "$name" != "$expected" ]; then rm -rf -- "$directory"; fi
+  done
+}
+
 manifest_field() {
   local key=$1 field=$2
   "$NODE_BIN" -e '
@@ -178,26 +200,26 @@ daemon_version() {
 }
 
 install_platform_dependencies() {
-  local prefix=$1 npm_os=$2 npm_cpu=$3 koffi_optional directory name
+  local prefix=$1 npm_os=$2 npm_cpu=$3 koffi_optional ripgrep_optional rg_binary
   mkdir -p "$prefix"
   cp -- "$DAEMON_DIR/package.json" "$DAEMON_DIR/package-lock.json" "$prefix/"
   # 目标平台的生产依赖装进临时前缀，不改写 daemon/node_modules；且只取锁定清单里的预编译
   # 成品：安装阶段不得执行目标平台的生命周期脚本。koffi 的 install script 会在宿主上加载
   # 目标预编译模块并在失败时回退源码编译（异架构打包必然走到这一步），而它的运行时直接
-  # require `@koromix/koffi-<os>-<arch>`，不需要任何脚本产物。
+  # require `@koromix/koffi-<os>-<arch>`，不需要任何脚本产物。ripgrep 1.18.0 没有 postinstall，
+  # 运行时直接解析 `@vscode/ripgrep-<os>-<arch>/bin/rg`。
   "$NPM_BIN" --prefix "$prefix" ci --omit=dev --ignore-scripts --no-audit --no-fund \
     --os="$npm_os" --cpu="$npm_cpu" ||
     die "cannot install production dependencies for $npm_os-$npm_cpu"
   koffi_optional=$(koffi_optional_name "$npm_os" "$npm_cpu")
-  if [ -d "$prefix/node_modules/@koromix" ]; then
-    for directory in "$prefix/node_modules/@koromix"/koffi-*; do
-      [ -e "$directory" ] || continue
-      name=${directory##*/}
-      if [ "$name" != "${koffi_optional##*/}" ]; then rm -rf -- "$directory"; fi
-    done
-  fi
+  ripgrep_optional=$(ripgrep_optional_name "$npm_os" "$npm_cpu")
+  rg_binary=$(ripgrep_binary_name "$npm_os")
+  prune_optional_prebuilts "$prefix/node_modules/@koromix/koffi-" "${koffi_optional##*/}"
+  prune_optional_prebuilts "$prefix/node_modules/@vscode/ripgrep-" "${ripgrep_optional##*/}"
   [ -d "$prefix/node_modules/$koffi_optional" ] ||
     die "target platform prebuilt is missing: $koffi_optional (refusing a fake cross-platform archive)"
+  [ -f "$prefix/node_modules/$ripgrep_optional/bin/$rg_binary" ] ||
+    die "target platform prebuilt is missing: $ripgrep_optional/bin/$rg_binary (refusing a fake cross-platform archive)"
 }
 
 main() {

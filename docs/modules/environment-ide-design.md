@@ -374,7 +374,7 @@ Daemon 在同一准入门闩下检查并进入更新：没有未收敛普通执�
 | 落点 | 职责 |
 | --- | --- |
 | [Schema baseline](../../schema/src/main/resources/db/migration/V1__schema.sql) | 安装 code 合并进 `environment`，连接表只保留三种投影 |
-| [Environment service](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/environment/service/EnvironmentServiceImpl.java) | 一次性授权事务、token 修改统一失效 |
+| [Environment service](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/environment/EnvironmentService.java) | 一次性授权事务、token 修改统一失效 |
 | [Environment registry](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/environment/registry/EnvironmentRegistry.java) | 保留租约与三种投影，不存 IDE/更新任务 |
 | [Environment server](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/server/EnvironmentDaemonServer.java) | 控制状态契约、更新准入、代际绑定；IDE 载荷仍由应用定义 |
 | [IDE application](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/) | mux codec/流状态、视图管理命令、租约协调与跨节点服务 |

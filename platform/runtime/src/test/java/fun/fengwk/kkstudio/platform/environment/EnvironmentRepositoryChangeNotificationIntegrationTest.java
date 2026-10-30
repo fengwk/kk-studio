@@ -20,12 +20,6 @@ import org.springframework.transaction.support.TransactionTemplate;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.server.LeaseBindResult;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
-import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
-import fun.fengwk.kkstudio.platform.environment.repo.impl.PostgresqlEnvironmentChangeNotifier;
-import fun.fengwk.kkstudio.platform.environment.repo.impl.PostgresqlEnvironmentRepository;
-import fun.fengwk.kkstudio.platform.environment.repo.impl.store.EnvironmentJdbcStore;
-import fun.fengwk.kkstudio.platform.environment.service.EnvironmentService;
-import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCardDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCreateDTO;
 
@@ -45,8 +39,7 @@ class EnvironmentRepositoryChangeNotificationIntegrationTest
   @Autowired private EnvironmentService environmentService;
   @Autowired private EnvironmentRepository environmentRepository;
   @Autowired private EnvironmentRegistry environmentRegistry;
-  @Autowired private EnvironmentJdbcStore environmentJdbcStore;
-  @Autowired private PostgresqlEnvironmentChangeNotifier notifier;
+  @Autowired private EnvironmentChangeNotifier notifier;
 
   /** 测试意图：Card 行写入只在事务提交后投递一次；未提交与回滚都不投递，CAS 更新与删除同样投递。 */
   @Test
@@ -121,14 +114,12 @@ class EnvironmentRepositoryChangeNotificationIntegrationTest
   void notificationFailureRollsBackTheRepositoryWrite() throws Exception {
     UUID seededId = seedEnvironment("notify-failure-seeded", "notify-failure-token", 7);
     try (EnvironmentChannelListener listener = listen()) {
-      PostgresqlEnvironmentChangeNotifier failingNotifier =
-          mock(PostgresqlEnvironmentChangeNotifier.class);
+      EnvironmentChangeNotifier failingNotifier = mock(EnvironmentChangeNotifier.class);
       doThrow(new DataAccessResourceFailureException("environment notification unavailable"))
           .when(failingNotifier)
           .environmentChanged(any());
-      PostgresqlEnvironmentRepository failingRepository =
-          new PostgresqlEnvironmentRepository(
-              environmentJdbcStore, failingNotifier, JdbcClient.create(jdbcTemplate));
+      EnvironmentRepository failingRepository =
+          new EnvironmentRepository(JdbcClient.create(jdbcTemplate), failingNotifier);
       TransactionTemplate transaction = new TransactionTemplate(transactionManager);
 
       Environment created = new Environment();

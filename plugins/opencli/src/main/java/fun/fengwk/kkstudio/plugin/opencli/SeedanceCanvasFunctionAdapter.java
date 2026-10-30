@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.plugin.opencli;
 
+import static fun.fengwk.kkstudio.platform.plugin.support.CanvasArguments.extractText;
+
 import lombok.extern.slf4j.Slf4j;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
@@ -17,7 +19,6 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionUnknownException;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonNumber;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonObject;
-import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonText;
 import fun.fengwk.kkstudio.canvas.function.CanvasResourceKind;
 import fun.fengwk.kkstudio.plugin.opencli.OpenCliHubClient.Execution;
 import fun.fengwk.kkstudio.plugin.opencli.OpenCliHubClient.ExecutionResource;
@@ -547,25 +548,6 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
   private static CanvasFunctionDefinition definition(String key, String label) {
     return CanvasFunctionDefinition.of(
         key, label, ARGS_SCHEMA, CanvasResourceKind.VIDEO, REFERENCE_POLICY);
-  }
-
-  private static String extractText(JsonObject args, String field) {
-    CanvasJson json = args.values().get(field);
-    if (json instanceof JsonText text) {
-      return text.value();
-    }
-    throw new IllegalArgumentException(field + " must be a string");
-  }
-
-  private static String extractText(JsonObject args, String field, String defaultValue) {
-    CanvasJson json = args.values().get(field);
-    if (json instanceof JsonText text) {
-      return text.value();
-    }
-    if (json == null) {
-      return defaultValue;
-    }
-    throw new IllegalArgumentException(field + " must be a string");
   }
 
   private static int extractInt(JsonObject args, String field, int defaultValue) {

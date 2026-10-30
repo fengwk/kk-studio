@@ -25,8 +25,8 @@ import java.util.UUID;
  * Session Entry 的读取时费用投影：只用 durable 记录的真实用量与「当前」catalog 价格现算，绝不写回任何历史。
  *
  * <p>费用边界：Assistant / COMPACTION 的 metadata 冻结真实执行 ModelSelection、请求时间与 Provider 报告的
- * serviceTier；本服务只按这些事实与当前 catalog 价格现算，绝不沿 branch settings 或组配置兜底。同一次投影内每个模型至多查一次
- * catalog；模型已删除、或改名/删除后同名被模型组复用时缺席，数据损坏时抛出。
+ * serviceTier，以及成功 attempt 的 request-body 条件指纹快照；本服务只按这些事实与当前 catalog 价格现算，绝不沿 branch settings
+ * 或组配置兜底，也绝不根据今天的条件或 prompt 反推旧请求是否命中。同一次投影内每个模型至多查一次 catalog；模型已删除、 或改名/删除后同名被模型组复用时缺席，数据损坏时抛出。
  */
 @Component
 public class UsageCostProjectionService {
@@ -64,7 +64,11 @@ public class UsageCostProjectionService {
       }
       ModelCost cost =
           ModelCost.calculate(
-              pricing, metadata.usage(), metadata.requestedAt(), metadata.responseServiceTier());
+              pricing,
+              metadata.usage(),
+              metadata.requestedAt(),
+              metadata.responseServiceTier(),
+              metadata.requestBodyPricing());
       if (cost != null) {
         costs.put(entry.id(), usageCost(cost));
       }

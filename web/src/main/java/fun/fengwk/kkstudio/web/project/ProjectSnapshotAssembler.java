@@ -10,8 +10,8 @@ import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueAgentThread;
 import fun.fengwk.kkstudio.project.model.IssueRun;
 import fun.fengwk.kkstudio.project.model.Project;
+import fun.fengwk.kkstudio.project.service.IssueEditingService;
 import fun.fengwk.kkstudio.project.service.IssueRunService;
-import fun.fengwk.kkstudio.project.service.IssueService;
 import fun.fengwk.kkstudio.project.service.ProjectService;
 import fun.fengwk.kkstudio.share.project.ProjectIssueSnapshotDTO;
 import fun.fengwk.kkstudio.share.project.ProjectSnapshotDTO;
@@ -39,17 +39,17 @@ import java.util.UUID;
 public class ProjectSnapshotAssembler {
 
   private final ProjectService projectService;
-  private final IssueService issueService;
+  private final IssueEditingService issueEditingService;
   private final IssueRunService issueRunService;
   private final ProjectDtoMapper mapper;
 
   public ProjectSnapshotAssembler(
       ProjectService projectService,
-      IssueService issueService,
+      IssueEditingService issueEditingService,
       IssueRunService issueRunService,
       ProjectDtoMapper mapper) {
     this.projectService = Objects.requireNonNull(projectService, "projectService");
-    this.issueService = Objects.requireNonNull(issueService, "issueService");
+    this.issueEditingService = Objects.requireNonNull(issueEditingService, "issueEditingService");
     this.issueRunService = Objects.requireNonNull(issueRunService, "issueRunService");
     this.mapper = Objects.requireNonNull(mapper, "mapper");
   }
@@ -66,11 +66,11 @@ public class ProjectSnapshotAssembler {
       throw new IllegalStateException("Foreign project returned for snapshot");
     }
 
-    List<Issue> issues = issueService.listIssues(projectId, false);
+    List<Issue> issues = issueEditingService.listIssues(projectId, false);
     Set<String> referencedStateCodes = new TreeSet<>();
     collectReferencedStates(projectId, issues, referencedStateCodes);
     collectReferencedStates(
-        projectId, issueService.listIssues(projectId, true), referencedStateCodes);
+        projectId, issueEditingService.listIssues(projectId, true), referencedStateCodes);
     List<ProjectIssueSnapshotDTO> issueSnapshots = new ArrayList<>(issues.size());
     for (Issue issue : issues) {
       List<IssueRun> runs = issueRunService.listRuns(issue.getId());
@@ -94,7 +94,7 @@ public class ProjectSnapshotAssembler {
 
       String agentName = null;
       if (currentOrLatest != null && currentOrLatest.getThreadId() != null) {
-        List<IssueAgentThread> threads = issueService.listAgentThreads(issue.getId());
+        List<IssueAgentThread> threads = issueEditingService.listAgentThreads(issue.getId());
         for (IssueAgentThread thread : threads) {
           if (currentOrLatest.getThreadId().equals(thread.threadId())) {
             agentName = thread.agentName();

@@ -3,7 +3,7 @@
  * 的生产适配器。
  *
  * <p>{@link fun.fengwk.kkstudio.platform.harness.model.PlatformModelGateway} 是 {@link
- * fun.fengwk.kkstudio.harness.runtime.port.ModelGateway} 的生产适配器：它通过 {@link
+ * fun.fengwk.kkstudio.harness.builtin.port.ModelGateway} 的生产适配器：它通过 {@link
  * fun.fengwk.kkstudio.platform.harness.model.ProviderResolutionService} 解析冻结 {@link
  * fun.fengwk.kkstudio.harness.model.provider.ProviderType} 与内存 {@link
  * fun.fengwk.kkstudio.harness.model.provider.ProviderRequest}，按配置的 timeout 策略打开一个 {@link
