@@ -47,7 +47,7 @@ import fun.fengwk.kkstudio.project.repo.IssueStageBudgetRepository;
 import fun.fengwk.kkstudio.project.repo.ProjectRepository;
 import fun.fengwk.kkstudio.project.service.IssueEvidenceService;
 import fun.fengwk.kkstudio.project.service.IssueRunService;
-import fun.fengwk.kkstudio.work.DurableWorkQueue;
+import fun.fengwk.kkstudio.work.DurableWorkStore;
 import fun.fengwk.kkstudio.work.WorkClaim;
 
 import java.nio.charset.StandardCharsets;
@@ -103,7 +103,7 @@ public class IssueReconciler {
   private final IssueRunService issueRunService;
   private final IssueEvidenceService issueEvidenceService;
   private final EvidenceBlobs evidenceBlobPort;
-  private final DurableWorkQueue issueWorkQueue;
+  private final DurableWorkStore issueWorkQueue;
   private final ObjectProvider<IssueThreadExecution> threadExecutions;
   private final ProjectWorkflowJsonCodec workflowCodec;
   private final IssueReconcileProperties properties;
@@ -120,7 +120,7 @@ public class IssueReconciler {
       IssueRunService issueRunService,
       IssueEvidenceService issueEvidenceService,
       EvidenceBlobs evidenceBlobPort,
-      DurableWorkQueue issueWorkQueue,
+      DurableWorkStore issueWorkQueue,
       ObjectProvider<IssueThreadExecution> threadExecutions,
       ProjectWorkflowJsonCodec workflowCodec,
       IssueReconcileProperties properties) {
@@ -151,7 +151,7 @@ public class IssueReconciler {
       IssueRunService issueRunService,
       IssueEvidenceService issueEvidenceService,
       EvidenceBlobs evidenceBlobPort,
-      DurableWorkQueue issueWorkQueue,
+      DurableWorkStore issueWorkQueue,
       ObjectProvider<IssueThreadExecution> threadExecutions,
       ProjectWorkflowJsonCodec workflowCodec,
       IssueReconcileProperties properties,
@@ -427,8 +427,7 @@ public class IssueReconciler {
    */
   private IssueReconcileOutcome finish(
       WorkClaim claim, boolean keepPolling, Duration delay, IssueReconcileOutcome outcome) {
-    boolean applied =
-        keepPolling ? issueWorkQueue.reschedule(claim, delay) : issueWorkQueue.complete(claim);
+    boolean applied = finishClaim(claim, keepPolling, delay);
     if (!applied) {
       log.debug(
           "Issue work claim was already superseded; issueId={}, leaseToken={}",
@@ -436,6 +435,18 @@ public class IssueReconciler {
           claim.leaseToken());
     }
     return outcome;
+  }
+
+  /** 成功重排或删除当前 wake 为 true；保留更新 wake 或已经失权为 false。 */
+  private boolean finishClaim(WorkClaim claim, boolean keepPolling, Duration delay) {
+    if (issueWorkQueue.lockClaimed(claim).isEmpty()) {
+      return false;
+    }
+    if (keepPolling) {
+      issueWorkQueue.reschedule(claim, delay);
+      return true;
+    }
+    return issueWorkQueue.complete(claim).isEmpty();
   }
 
   private void validateClaim(WorkClaim claim) {
@@ -463,9 +474,10 @@ public class IssueReconciler {
 
   /** 领取即续租：由数据库保证至少剩余一个完整租期且不缩短当前 lease，并持有 work 行锁到 finish。 */
   private void heartbeat(WorkClaim claim) {
-    if (!issueWorkQueue.renew(claim, properties.getLeaseDuration())) {
+    if (issueWorkQueue.lockClaimed(claim).isEmpty()) {
       throw new IllegalStateException("issue work lease is no longer held: " + claim.targetId());
     }
+    issueWorkQueue.renew(claim, properties.getLeaseDuration());
   }
 
   /** 判断本次 Run 的活动执行时长是否已耗尽。 */

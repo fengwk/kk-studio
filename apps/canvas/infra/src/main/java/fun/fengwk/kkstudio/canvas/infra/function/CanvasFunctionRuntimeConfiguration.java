@@ -9,7 +9,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasFunctionWorkStore;
-import fun.fengwk.kkstudio.work.DurableWorkQueue;
+import fun.fengwk.kkstudio.work.DurableWorkStore;
 
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
@@ -78,9 +78,9 @@ public class CanvasFunctionRuntimeConfiguration {
 
   /** Function Run 的调度邮箱：{@code durable_work} 中 target type 为 CANVAS_RUN 的行。 */
   @Bean
-  public DurableWorkQueue canvasRunWorkQueue(
+  public DurableWorkStore canvasRunWorkQueue(
       JdbcClient jdbcClient, PlatformTransactionManager transactionManager) {
-    return new DurableWorkQueue(
-        jdbcClient, transactionManager, CanvasFunctionDispatcher.TARGET_TYPE);
+    return new DurableWorkStore(
+        CanvasFunctionDispatcher.TARGET_TYPE, jdbcClient, transactionManager);
   }
 }

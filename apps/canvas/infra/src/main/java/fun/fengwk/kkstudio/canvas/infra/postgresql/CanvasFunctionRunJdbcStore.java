@@ -302,17 +302,19 @@ public class CanvasFunctionRunJdbcStore {
         .update();
   }
 
-  /** 删除 Canvas 时先删除其全部 Run 的调度行。 */
-  public int deleteWorkByCanvas(UUID canvasId) {
+  /** 同一 Canvas 下全部 Run 的节点 id；调用方用它删除对应调度行，本类不写 {@code durable_work}。 */
+  public List<UUID> listNodeIdsByCanvas(UUID canvasId) {
     return jdbc.sql(
             """
-            delete from durable_work w
-            using canvas_function_run r, canvas_node n
-            where w.target_type = 'CANVAS_RUN' and w.target_id = r.node_id
-              and r.node_id = n.id and n.canvas_id = :canvasId
+            select r.node_id
+            from canvas_function_run r
+            join canvas_node n on n.id = r.node_id
+            where n.canvas_id = :canvasId
+            order by r.node_id
             """)
         .param("canvasId", canvasId)
-        .update();
+        .query((resultSet, rowNumber) -> resultSet.getObject("node_id", UUID.class))
+        .list();
   }
 
   public int deleteByNodeId(UUID nodeId) {

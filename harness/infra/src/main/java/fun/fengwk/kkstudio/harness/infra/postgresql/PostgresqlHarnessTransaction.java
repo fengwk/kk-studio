@@ -8,6 +8,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 
 import fun.fengwk.kkstudio.harness.builtin.store.BuiltinStore;
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
@@ -27,10 +28,9 @@ import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.store.WorkStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
-import fun.fengwk.kkstudio.work.DurableWorkQueue;
+import fun.fengwk.kkstudio.work.DurableWorkStore;
 
 import java.time.Instant;
 import java.util.Comparator;
@@ -221,7 +221,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   void notifyWorkAvailable(WorkTargetType type) {
-    notifyChannel(DurableWorkQueue.CHANNEL, type.name());
+    notifyChannel(DurableWorkStore.CHANNEL, type.name());
   }
 
   /** Thread version 失效：payload 为 {@code {threadId}:{version}}，与既有协议一致。 */
@@ -296,9 +296,9 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
    * 环境等待待处理失效：仅对冻结了 {@code required_environment_id} 的 TOOL Work 发布，payload 沿用 interaction channel
    * 的真实执行根协议。使用 Work 行冻结的环境事实，而非当前 composer/settings；只提示待处理查询刷新，不创建审批事实。
    */
-  void notifyEnvironmentWorkChanged(Work work) {
-    if (work.requiredEnvironmentId() != null) {
-      notifyToolInteraction(executionRootOfToolInvocation(work.target().id()));
+  void notifyEnvironmentWorkChanged(WorkTarget target, EnvironmentId requiredEnvironmentId) {
+    if (requiredEnvironmentId != null) {
+      notifyToolInteraction(executionRootOfToolInvocation(target.id()));
     }
   }
 

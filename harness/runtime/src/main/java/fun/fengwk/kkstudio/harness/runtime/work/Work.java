@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.work;
 
+import fun.fengwk.kkstudio.common.work.WorkState;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 
 import java.time.Instant;
@@ -9,15 +10,12 @@ import java.util.Optional;
 /**
  * 一次 Work mailbox target 的持久化当前调度状态。
  *
- * <p>每次 request 时 {@code wakeVersion} 递增，从而阻止旧的 Processor 完成删除一个更新的 wake； {@code leaseToken} /
- * {@code leaseUntil} 形成所有权围栏拦截过期的 worker，且两者总是同时存在或同时缺失。所有转换都是纯函数：返回下一个状态，或返回 {@link
- * Optional#empty()} 表示删除，绝不会修改接收者。
+ * <p>调度跃迁的唯一实现是 {@link WorkState}；本类型只保留 Harness 的 typed target 与 {@link EnvironmentId}
+ * 边界，并在两者之间做无损映射。环境亲和性冻结该 Work 必须路由的环境 id；仅允许 targetType 为 {@link WorkTargetType#TOOL}
+ * 时非空；THREAD/MODEL 必须为空，server-side TOOL 可为空。
  *
- * <p>环境亲和性（Environment affinity）：{@code requiredEnvironmentId} 冻结该 Work 必须路由的环境 id；仅允许 targetType 为
- * {@link WorkTargetType#TOOL} 时非空；THREAD/MODEL 必须为空，server-side TOOL 可为空。它在首次创建时冻结，并在后续 {@link
- * #request}、{@link #claim}、{@link #renew}、{@link #complete} 与 {@link #reschedule} 纯函数状态跃迁中完整保留； 后续
- * request 若传入冲突环境需求将被拒绝。Runtime 仅携带该路由要求，PostgreSQL/Dispatcher claim 由 Infra 层按当前节点匹配 READY 且 lease
- * 未过期的 Environment route 实施所有权围栏（契约由 {@code WorkTest} 与 Store contract 守卫）。
+ * <p>每次 request 时 {@code wakeVersion} 递增，从而阻止旧的 Processor 完成删除一个更新的 wake； {@code leaseToken} /
+ * {@code leaseUntil} 形成所有权围栏拦截过期的 worker，且两者总是同时存在或同时缺失。
  */
 public record Work(
     WorkTarget target,
@@ -29,21 +27,17 @@ public record Work(
 
   public Work {
     target = Objects.requireNonNull(target, "target");
-    availableAt = Objects.requireNonNull(availableAt, "availableAt");
-    if (wakeVersion <= 0) {
-      throw new IllegalArgumentException("wakeVersion must be positive");
-    }
-    if (leaseToken != null) {
-      leaseToken = WorkValues.requireCanonicalToken(leaseToken);
-    }
-    if ((leaseToken == null) != (leaseUntil == null)) {
-      throw new IllegalArgumentException(
-          "leaseToken and leaseUntil must both be present or both be absent");
-    }
     if (requiredEnvironmentId != null && target.type() != WorkTargetType.TOOL) {
       throw new IllegalArgumentException(
           "requiredEnvironmentId must be null for target type " + target.type());
     }
+    // 复用公共状态机的字段不变量，避免 Harness 维护第二份 wake/lease 校验。
+    new WorkState(
+        availableAt,
+        wakeVersion,
+        leaseToken,
+        leaseUntil,
+        requiredEnvironmentId == null ? null : requiredEnvironmentId.value());
   }
 
   /** 5 参数便捷构造：无环境亲和性（THREAD/MODEL 或 server-side TOOL）。 */
@@ -56,6 +50,20 @@ public record Work(
     this(target, availableAt, wakeVersion, leaseToken, leaseUntil, null);
   }
 
+  /** 把公共调度状态映射为 Harness typed Work；target 与环境由调用方提供。 */
+  public static Work from(WorkTarget target, WorkState state) {
+    Objects.requireNonNull(state, "state");
+    return new Work(
+        target,
+        state.availableAt(),
+        state.wakeVersion(),
+        state.leaseToken(),
+        state.leaseUntil(),
+        state.requiredEnvironmentId() == null
+            ? null
+            : EnvironmentId.of(state.requiredEnvironmentId()));
+  }
+
   /** 创建 target 的首次 wake：wakeVersion 为 1，无 lease，无环境亲和性；{@code now} 是该实现权威时间域中的立即可用时刻。 */
   public static Work initial(WorkTarget target, Instant now) {
     return initial(target, now, null);
@@ -64,8 +72,10 @@ public record Work(
   /** 创建 target 的首次 wake：wakeVersion 为 1，无 lease，冻结环境亲和性；{@code now} 是该实现权威时间域中的立即可用时刻。 */
   public static Work initial(WorkTarget target, Instant now, EnvironmentId requiredEnvironmentId) {
     Objects.requireNonNull(target, "target");
-    Objects.requireNonNull(now, "now");
-    return new Work(target, now, 1L, null, null, requiredEnvironmentId);
+    return from(
+        target,
+        WorkState.initial(
+            now, requiredEnvironmentId == null ? null : requiredEnvironmentId.value()));
   }
 
   /**
@@ -81,19 +91,11 @@ public record Work(
    * lease。若传入非空环境需求，必须与已冻结的亲和性一致，否则抛出 {@link IllegalArgumentException}。
    */
   public Work request(Instant now, EnvironmentId newRequiredEnvironmentId) {
-    Objects.requireNonNull(now, "now");
-    if (newRequiredEnvironmentId != null
-        && !Objects.equals(requiredEnvironmentId, newRequiredEnvironmentId)) {
-      throw new IllegalArgumentException(
-          "conflicting requiredEnvironmentId: existing "
-              + requiredEnvironmentId
-              + " vs requested "
-              + newRequiredEnvironmentId);
-    }
-    long nextWakeVersion = Math.addExact(wakeVersion, 1L);
-    Instant nextAvailableAt = availableAt.isAfter(now) ? now : availableAt;
-    return new Work(
-        target, nextAvailableAt, nextWakeVersion, leaseToken, leaseUntil, requiredEnvironmentId);
+    return from(
+        target,
+        state()
+            .request(
+                now, newRequiredEnvironmentId == null ? null : newRequiredEnvironmentId.value()));
   }
 
   /**
@@ -101,19 +103,7 @@ public record Work(
    * {@code now} 时已过期）时允许；{@code until} 必须严格晚于 {@code now}。保留环境亲和性。
    */
   public Work claim(Instant now, String token, Instant until) {
-    Objects.requireNonNull(now, "now");
-    Objects.requireNonNull(until, "until");
-    String canonicalToken = WorkValues.requireCanonicalToken(token);
-    if (availableAt.isAfter(now)) {
-      throw new IllegalArgumentException("work is not available yet");
-    }
-    if (hasActiveLeaseAt(now)) {
-      throw new IllegalArgumentException("work has an active lease");
-    }
-    if (!until.isAfter(now)) {
-      throw new IllegalArgumentException("lease until must be after now");
-    }
-    return new Work(target, availableAt, wakeVersion, canonicalToken, until, requiredEnvironmentId);
+    return from(target, state().claim(now, token, until));
   }
 
   /**
@@ -121,15 +111,7 @@ public record Work(
    * now} 或之前已过期）会被拒绝。保留环境亲和性。
    */
   public Work renew(String token, Instant now, Instant until) {
-    Objects.requireNonNull(token, "token");
-    Objects.requireNonNull(now, "now");
-    Objects.requireNonNull(until, "until");
-    requireTokenMatch(token);
-    requireActiveLeaseAt(now);
-    if (!until.isAfter(leaseUntil)) {
-      throw new IllegalArgumentException("renew must strictly extend the current lease");
-    }
-    return new Work(target, availableAt, wakeVersion, leaseToken, until, requiredEnvironmentId);
+    return from(target, state().renew(token, now, until));
   }
 
   /**
@@ -137,21 +119,7 @@ public record Work(
    * Optional#empty()}）；过期 claim 仅清除 lease，保留行以便更新的 wake 仍可见；未来的 claim 视为非法。保留环境亲和性。
    */
   public Optional<Work> complete(String token, long claimedWakeVersion, Instant now) {
-    Objects.requireNonNull(token, "token");
-    Objects.requireNonNull(now, "now");
-    requireTokenMatch(token);
-    if (claimedWakeVersion <= 0) {
-      throw new IllegalArgumentException("claimedWakeVersion must be positive");
-    }
-    requireActiveLeaseAt(now);
-    if (claimedWakeVersion > wakeVersion) {
-      throw new IllegalArgumentException("claimed wakeVersion must not exceed current");
-    }
-    if (claimedWakeVersion == wakeVersion) {
-      return Optional.empty();
-    }
-    return Optional.of(
-        new Work(target, availableAt, wakeVersion, null, null, requiredEnvironmentId));
+    return state().complete(token, claimedWakeVersion, now).map(next -> from(target, next));
   }
 
   /**
@@ -160,39 +128,24 @@ public record Work(
    * 始终被清除，保留环境亲和性。
    */
   public Work reschedule(String token, long claimedWakeVersion, Instant now, Instant availableAt) {
-    Objects.requireNonNull(token, "token");
-    Objects.requireNonNull(now, "now");
-    Objects.requireNonNull(availableAt, "availableAt");
-    requireTokenMatch(token);
-    if (claimedWakeVersion <= 0) {
-      throw new IllegalArgumentException("claimedWakeVersion must be positive");
-    }
-    requireActiveLeaseAt(now);
-    if (claimedWakeVersion > wakeVersion) {
-      throw new IllegalArgumentException("claimed wakeVersion must not exceed current");
-    }
-    Instant nextAvailableAt;
-    if (claimedWakeVersion == wakeVersion) {
-      nextAvailableAt = availableAt;
-    } else {
-      nextAvailableAt = this.availableAt.isAfter(availableAt) ? availableAt : this.availableAt;
-    }
-    return new Work(target, nextAvailableAt, wakeVersion, null, null, requiredEnvironmentId);
+    return from(target, state().reschedule(token, claimedWakeVersion, now, availableAt));
   }
 
-  private boolean hasActiveLeaseAt(Instant now) {
-    return leaseUntil != null && leaseUntil.isAfter(now);
+  /** 当前 lease 在 {@code now} 是否仍由 {@code token} 持有。 */
+  public boolean isOwnedBy(String token, Instant now) {
+    return leaseToken != null
+        && leaseToken.equals(token)
+        && leaseUntil != null
+        && leaseUntil.isAfter(now);
   }
 
-  private void requireActiveLeaseAt(Instant now) {
-    if (!leaseUntil.isAfter(now)) {
-      throw new IllegalArgumentException("lease is stale at now");
-    }
-  }
-
-  private void requireTokenMatch(String token) {
-    if (leaseToken == null || !leaseToken.equals(token)) {
-      throw new IllegalArgumentException("lease token mismatch");
-    }
+  /** 映射到公共状态机；Harness 不再维护第二套跃迁实现。 */
+  public WorkState state() {
+    return new WorkState(
+        availableAt,
+        wakeVersion,
+        leaseToken,
+        leaseUntil,
+        requiredEnvironmentId == null ? null : requiredEnvironmentId.value());
   }
 }

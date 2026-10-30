@@ -11,6 +11,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeast;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -20,8 +21,10 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.transaction.PlatformTransactionManager;
 
-import fun.fengwk.kkstudio.work.DurableWorkQueue;
+import fun.fengwk.kkstudio.work.DurableWork;
+import fun.fengwk.kkstudio.work.DurableWorkStore;
 import fun.fengwk.kkstudio.work.WorkClaim;
 
 import java.time.Clock;
@@ -63,7 +66,7 @@ class IssueReconcileDispatcherTest {
     for (var field : IssueReconcileDispatcher.class.getDeclaredFields()) {
       assertFalse(Clock.class.isAssignableFrom(field.getType()));
     }
-    for (var method : DurableWorkQueue.class.getMethods()) {
+    for (var method : DurableWorkStore.class.getMethods()) {
       for (Class<?> parameter : method.getParameterTypes()) {
         assertFalse(Clock.class.isAssignableFrom(parameter));
         assertFalse(Instant.class.isAssignableFrom(parameter));
@@ -74,7 +77,7 @@ class IssueReconcileDispatcherTest {
   /** 测试意图：start() 注册固定间隔周期轮询并触发首次 drain，正确领取 claim 并投递给 reconciler。 */
   @Test
   void startSchedulesPeriodicPollAndDrainsFirstClaim() {
-    DurableWorkQueue workStore = mock(DurableWorkQueue.class);
+    DurableWorkStore workStore = mock(DurableWorkStore.class);
     @SuppressWarnings("unchecked")
     Function<WorkClaim, IssueReconcileOutcome> reconciler = mock(Function.class);
     ScheduledExecutorService pollScheduler = mock(ScheduledExecutorService.class);
@@ -89,7 +92,13 @@ class IssueReconcileDispatcherTest {
 
     IssueReconcileDispatcher dispatcher =
         new IssueReconcileDispatcher(
-            workStore, reconciler, properties, Runnable::run, Runnable::run, pollScheduler);
+            workStore,
+            reconciler,
+            properties,
+            Runnable::run,
+            Runnable::run,
+            pollScheduler,
+            mock(PlatformTransactionManager.class));
 
     UUID issueId = UUID.randomUUID();
     WorkClaim work = new WorkClaim(issueId, 3L, "lease", Instant.parse("2026-09-27T11:00:00Z"));
@@ -108,7 +117,7 @@ class IssueReconcileDispatcherTest {
     verify(reconciler).apply(claimCaptor.capture());
     WorkClaim passedClaim = claimCaptor.getValue();
     assertEquals(issueId, passedClaim.targetId());
-    assertEquals(3L, passedClaim.wakeVersion());
+    assertEquals(3L, passedClaim.claimedWakeVersion());
     assertEquals(work.leaseUntil(), passedClaim.leaseUntil());
     assertNotNull(passedClaim.leaseToken());
 
@@ -121,7 +130,7 @@ class IssueReconcileDispatcherTest {
   /** 测试意图：wake() 在 start 前和 stop 后均为 no-op；start() 幂等；已 stop 再次 start 抛出异常。 */
   @Test
   void wakeBeforeStartAndAfterStopIsNoOpAndStartAfterStopThrows() {
-    DurableWorkQueue workStore = mock(DurableWorkQueue.class);
+    DurableWorkStore workStore = mock(DurableWorkStore.class);
     @SuppressWarnings("unchecked")
     Function<WorkClaim, IssueReconcileOutcome> reconciler = mock(Function.class);
     ScheduledExecutorService pollScheduler = mock(ScheduledExecutorService.class);
@@ -133,7 +142,13 @@ class IssueReconcileDispatcherTest {
     IssueReconcileProperties properties = new IssueReconcileProperties();
     IssueReconcileDispatcher dispatcher =
         new IssueReconcileDispatcher(
-            workStore, reconciler, properties, Runnable::run, Runnable::run, pollScheduler);
+            workStore,
+            reconciler,
+            properties,
+            Runnable::run,
+            Runnable::run,
+            pollScheduler,
+            mock(PlatformTransactionManager.class));
 
     // start 前 wake 是 no-op
     dispatcher.wake();
@@ -169,7 +184,7 @@ class IssueReconcileDispatcherTest {
   /** 测试意图：多个 wake() 请求在 drain 执行期间到达时被合并为单次后续 iteration，不启动并发 drain 也不会丢失唤醒。 */
   @Test
   void wakeMergingRunsExactlyOneExtraDrainAfterCurrentDrainFinishes() {
-    DurableWorkQueue workStore = mock(DurableWorkQueue.class);
+    DurableWorkStore workStore = mock(DurableWorkStore.class);
     @SuppressWarnings("unchecked")
     Function<WorkClaim, IssueReconcileOutcome> reconciler = mock(Function.class);
     ScheduledExecutorService pollScheduler = mock(ScheduledExecutorService.class);
@@ -186,7 +201,13 @@ class IssueReconcileDispatcherTest {
 
     IssueReconcileDispatcher dispatcher =
         new IssueReconcileDispatcher(
-            workStore, reconciler, properties, drainExecutor, Runnable::run, pollScheduler);
+            workStore,
+            reconciler,
+            properties,
+            drainExecutor,
+            Runnable::run,
+            pollScheduler,
+            mock(PlatformTransactionManager.class));
 
     when(workStore.claimNext(anyString(), any(Duration.class)))
         .thenAnswer(
@@ -218,7 +239,7 @@ class IssueReconcileDispatcherTest {
   /** 测试意图：工作者执行器拒绝任务时，dispatcher 用 rejectionDelay 归还租约并立即终止当前 drain，避免热循环。 */
   @Test
   void workerExecutorRejectionReturnsClaimAndStopsDrain() {
-    DurableWorkQueue workStore = mock(DurableWorkQueue.class);
+    DurableWorkStore workStore = mock(DurableWorkStore.class);
     @SuppressWarnings("unchecked")
     Function<WorkClaim, IssueReconcileOutcome> reconciler = mock(Function.class);
     ScheduledExecutorService pollScheduler = mock(ScheduledExecutorService.class);
@@ -241,11 +262,13 @@ class IssueReconcileDispatcherTest {
             properties,
             Runnable::run,
             rejectingWorkerExecutor,
-            pollScheduler);
+            pollScheduler,
+            mock(PlatformTransactionManager.class));
 
     UUID issueId = UUID.randomUUID();
     WorkClaim work = new WorkClaim(issueId, 1L, "lease", LEASE_UNTIL);
     when(workStore.claimNext(anyString(), any(Duration.class))).thenReturn(Optional.of(work));
+    when(workStore.lockClaimed(any())).thenReturn(Optional.of(mock(DurableWork.class)));
 
     dispatcher.start();
 
@@ -258,7 +281,7 @@ class IssueReconcileDispatcherTest {
   /** 测试意图：reconciler 抛出异常时以 retryDelay 重新调度，且 reschedule 自身的异常不会向外传播。 */
   @Test
   void reconcilerThrowingReschedulesWorkWithRetryDelayAndSwallowsRescheduleError() {
-    DurableWorkQueue workStore = mock(DurableWorkQueue.class);
+    DurableWorkStore workStore = mock(DurableWorkStore.class);
     Function<WorkClaim, IssueReconcileOutcome> throwingReconciler =
         claim -> {
           throw new RuntimeException("transient reconciler failure");
@@ -273,14 +296,22 @@ class IssueReconcileDispatcherTest {
 
     IssueReconcileDispatcher dispatcher =
         new IssueReconcileDispatcher(
-            workStore, throwingReconciler, properties, Runnable::run, Runnable::run, pollScheduler);
+            workStore,
+            throwingReconciler,
+            properties,
+            Runnable::run,
+            Runnable::run,
+            pollScheduler,
+            mock(PlatformTransactionManager.class));
 
     UUID issueId = UUID.randomUUID();
     WorkClaim work = new WorkClaim(issueId, 1L, "lease", LEASE_UNTIL);
     when(workStore.claimNext(anyString(), any(Duration.class)))
         .thenReturn(Optional.of(work), Optional.empty());
-    when(workStore.reschedule(any(WorkClaim.class), any(Duration.class)))
-        .thenThrow(new RuntimeException("store connection down"));
+    when(workStore.lockClaimed(any())).thenReturn(Optional.of(mock(DurableWork.class)));
+    doThrow(new RuntimeException("store connection down"))
+        .when(workStore)
+        .reschedule(any(WorkClaim.class), any(Duration.class));
 
     assertDoesNotThrow(dispatcher::start);
 
@@ -290,7 +321,7 @@ class IssueReconcileDispatcherTest {
   /** 测试意图：严格控制并发投递不超过 maxDispatchTasks，且 dispatchCapacity() 实时准确反映在途任务量。 */
   @Test
   void capacityEnforcesMaxDispatchTasksAndReflectsInFlightDispatches() throws InterruptedException {
-    DurableWorkQueue workStore = mock(DurableWorkQueue.class);
+    DurableWorkStore workStore = mock(DurableWorkStore.class);
     ScheduledExecutorService pollScheduler = mock(ScheduledExecutorService.class);
     when(pollScheduler.scheduleWithFixedDelay(
             any(Runnable.class), anyLong(), anyLong(), any(TimeUnit.class)))
@@ -323,7 +354,8 @@ class IssueReconcileDispatcherTest {
             properties,
             drainExecutor,
             workerExecutor,
-            pollScheduler);
+            pollScheduler,
+            mock(PlatformTransactionManager.class));
 
     when(workStore.claimNext(anyString(), any(Duration.class)))
         .thenAnswer(inv -> Optional.of(new WorkClaim(UUID.randomUUID(), 1L, "lease", LEASE_UNTIL)));
@@ -345,7 +377,7 @@ class IssueReconcileDispatcherTest {
   /** 测试意图：stop() 后阻止新 claim，中途已领取但未 handoff 的工作被立即归还。 */
   @Test
   void stopReturnsUnHandedOffClaimAndPreventsNewClaims() {
-    DurableWorkQueue workStore = mock(DurableWorkQueue.class);
+    DurableWorkStore workStore = mock(DurableWorkStore.class);
     @SuppressWarnings("unchecked")
     Function<WorkClaim, IssueReconcileOutcome> reconciler = mock(Function.class);
     ScheduledExecutorService pollScheduler = mock(ScheduledExecutorService.class);
@@ -358,7 +390,13 @@ class IssueReconcileDispatcherTest {
 
     IssueReconcileDispatcher dispatcher =
         new IssueReconcileDispatcher(
-            workStore, reconciler, properties, Runnable::run, Runnable::run, pollScheduler);
+            workStore,
+            reconciler,
+            properties,
+            Runnable::run,
+            Runnable::run,
+            pollScheduler,
+            mock(PlatformTransactionManager.class));
 
     UUID issueId = UUID.randomUUID();
     WorkClaim work = new WorkClaim(issueId, 1L, "lease", LEASE_UNTIL);
@@ -369,6 +407,7 @@ class IssueReconcileDispatcherTest {
               dispatcher.stop();
               return Optional.of(work);
             });
+    when(workStore.lockClaimed(any())).thenReturn(Optional.of(mock(DurableWork.class)));
 
     dispatcher.start();
 
@@ -380,7 +419,7 @@ class IssueReconcileDispatcherTest {
   /** 测试意图：构造函数严格拒绝使用 DiscardPolicy、DiscardOldestPolicy 与 CallerRunsPolicy 的 ThreadPoolExecutor。 */
   @Test
   void constructionRejectsInvalidThreadPoolExecutorRejectionPolicies() {
-    DurableWorkQueue workStore = mock(DurableWorkQueue.class);
+    DurableWorkStore workStore = mock(DurableWorkStore.class);
     @SuppressWarnings("unchecked")
     Function<WorkClaim, IssueReconcileOutcome> reconciler = mock(Function.class);
     IssueReconcileProperties properties = new IssueReconcileProperties();
@@ -398,7 +437,13 @@ class IssueReconcileDispatcherTest {
         IllegalArgumentException.class,
         () ->
             new IssueReconcileDispatcher(
-                workStore, reconciler, properties, discardDrain, Runnable::run, pollScheduler));
+                workStore,
+                reconciler,
+                properties,
+                discardDrain,
+                Runnable::run,
+                pollScheduler,
+                mock(PlatformTransactionManager.class)));
 
     ThreadPoolExecutor callerRunsWorker =
         new ThreadPoolExecutor(
@@ -412,7 +457,13 @@ class IssueReconcileDispatcherTest {
         IllegalArgumentException.class,
         () ->
             new IssueReconcileDispatcher(
-                workStore, reconciler, properties, Runnable::run, callerRunsWorker, pollScheduler));
+                workStore,
+                reconciler,
+                properties,
+                Runnable::run,
+                callerRunsWorker,
+                pollScheduler,
+                mock(PlatformTransactionManager.class)));
 
     ThreadPoolExecutor discardOldestWorker =
         new ThreadPoolExecutor(
@@ -431,7 +482,8 @@ class IssueReconcileDispatcherTest {
                 properties,
                 Runnable::run,
                 discardOldestWorker,
-                pollScheduler));
+                pollScheduler,
+                mock(PlatformTransactionManager.class)));
 
     discardDrain.shutdown();
     callerRunsWorker.shutdown();
@@ -441,7 +493,7 @@ class IssueReconcileDispatcherTest {
   /** 测试意图：drain 执行器拒绝提交任务时安全捕获并重置运行标志，returnClaim 失败不中断。 */
   @Test
   void drainExecutorRejectionHandledGracefully() {
-    DurableWorkQueue workStore = mock(DurableWorkQueue.class);
+    DurableWorkStore workStore = mock(DurableWorkStore.class);
     @SuppressWarnings("unchecked")
     Function<WorkClaim, IssueReconcileOutcome> reconciler = mock(Function.class);
     ScheduledExecutorService pollScheduler = mock(ScheduledExecutorService.class);
@@ -457,7 +509,13 @@ class IssueReconcileDispatcherTest {
 
     IssueReconcileDispatcher dispatcher =
         new IssueReconcileDispatcher(
-            workStore, reconciler, properties, rejectingDrain, Runnable::run, pollScheduler);
+            workStore,
+            reconciler,
+            properties,
+            rejectingDrain,
+            Runnable::run,
+            pollScheduler,
+            mock(PlatformTransactionManager.class));
 
     assertDoesNotThrow(dispatcher::start);
     assertDoesNotThrow(dispatcher::wake);
@@ -466,7 +524,7 @@ class IssueReconcileDispatcherTest {
   /** 测试意图：worker 执行器抛出 Error 时正确清理容量并归还 claim。 */
   @Test
   void workerExecutorErrorReturnsClaim() {
-    DurableWorkQueue workStore = mock(DurableWorkQueue.class);
+    DurableWorkStore workStore = mock(DurableWorkStore.class);
     @SuppressWarnings("unchecked")
     Function<WorkClaim, IssueReconcileOutcome> reconciler = mock(Function.class);
     ScheduledExecutorService pollScheduler = mock(ScheduledExecutorService.class);
@@ -482,11 +540,18 @@ class IssueReconcileDispatcherTest {
 
     IssueReconcileDispatcher dispatcher =
         new IssueReconcileDispatcher(
-            workStore, reconciler, properties, Runnable::run, errorWorker, pollScheduler);
+            workStore,
+            reconciler,
+            properties,
+            Runnable::run,
+            errorWorker,
+            pollScheduler,
+            mock(PlatformTransactionManager.class));
 
     UUID issueId = UUID.randomUUID();
     WorkClaim work = new WorkClaim(issueId, 1L, "lease", LEASE_UNTIL);
     when(workStore.claimNext(anyString(), any(Duration.class))).thenReturn(Optional.of(work));
+    when(workStore.lockClaimed(any())).thenReturn(Optional.of(mock(DurableWork.class)));
 
     assertThrows(AssertionError.class, dispatcher::start);
     assertEquals(0, dispatcher.dispatchCapacity());
@@ -496,14 +561,20 @@ class IssueReconcileDispatcherTest {
   /** 测试意图：生产构造函数正确委托并完成初始化。 */
   @Test
   void publicConstructorInitializesCorrectly() {
-    DurableWorkQueue workStore = mock(DurableWorkQueue.class);
+    DurableWorkStore workStore = mock(DurableWorkStore.class);
     IssueReconciler reconciler = mock(IssueReconciler.class);
     IssueReconcileProperties properties = new IssueReconcileProperties();
     ScheduledExecutorService pollScheduler = mock(ScheduledExecutorService.class);
 
     IssueReconcileDispatcher dispatcher =
         new IssueReconcileDispatcher(
-            workStore, reconciler, properties, Runnable::run, Runnable::run, pollScheduler);
+            workStore,
+            reconciler,
+            properties,
+            Runnable::run,
+            Runnable::run,
+            pollScheduler,
+            mock(PlatformTransactionManager.class));
     assertNotNull(dispatcher);
     assertEquals(0, dispatcher.dispatchCapacity());
   }

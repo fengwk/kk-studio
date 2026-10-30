@@ -22,7 +22,7 @@ import fun.fengwk.kkstudio.project.repo.IssueActivityRepository;
 import fun.fengwk.kkstudio.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.project.repo.ProjectRepository;
 import fun.fengwk.kkstudio.project.service.IssueActivityIdempotency.Identity;
-import fun.fengwk.kkstudio.work.DurableWorkQueue;
+import fun.fengwk.kkstudio.work.DurableWorkStore;
 
 import java.time.Duration;
 import java.util.Objects;
@@ -41,7 +41,7 @@ final class IssueMutationSupport {
   private final ProjectRepository projectRepository;
   private final IssueRepository issueRepository;
   private final IssueActivityRepository issueActivityRepository;
-  private final DurableWorkQueue issueWorkQueue;
+  private final DurableWorkStore issueWorkQueue;
   private final ProjectWorkflowJsonCodec workflowCodec;
   private final ObjectMapper objectMapper;
 
