@@ -7,6 +7,7 @@ import type { DaemonConfig } from '../src/contracts.js'
 import { CAPABILITY_CATALOG_VERSION, decodeEnvelope, encodeInvoke, type Envelope } from '../src/protocol.js'
 import { Runtime } from '../src/runtime.js'
 import { createSearchCapabilities, searchCapabilities } from '../src/coding/search.js'
+import { toPosix } from '../src/coding/support.js'
 import type { CapabilityExecutor } from '../src/contracts.js'
 import { FakeTransport, fakeProcessSupervisor, serverMessage, testConfig, tick, waitFor } from './helpers.js'
 import { installFakeRipgrep, waitForFakePid } from './coding/fake-ripgrep.js'
@@ -124,7 +125,9 @@ describe('Runtime + Search 真实能力整合生命周期', () => {
         }
         expect(body.result.error).toBe(false)
         const text = body.result.contents.map((content) => content.text ?? '').join('\n')
-        expect(text).toContain(capabilityId === 'fs.find' ? `${dir}/a.ts` : 'export const needle = 42')
+        expect(text).toContain(
+          capabilityId === 'fs.find' ? toPosix(join(dir, 'a.ts')) : 'export const needle = 42',
+        )
 
         const types = sent(setup.transport)
           .filter((envelope) => envelope.invocationId === invocationId)

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -562,22 +562,35 @@ describe('rg 进程生命周期与失败语义', () => {
     const fake = await installFakeRipgrep(dir, { target: file, hang: true })
     const capabilities = createSearchCapabilities(fake.command)
     const controller = new AbortController()
-    const resultPromise = callCapability(
-      capabilities['fs.grep']!,
-      'fs.grep',
-      { pattern: 'match', path: file },
-      makeContext(dir, { signal: controller.signal }),
-    )
-    const pid = await waitForFakePid(fake.pidFile)
-    controller.abort('TIMED_OUT')
-    const result = await resultPromise
-    expect(result.details).toMatchObject({
-      code: 'TIMEOUT',
-      search: { outcome: 'TIMED_OUT', incomplete: true },
+    const parse = JSON.parse
+    // PID 只证明子进程启动。观察真实解析器消费首条匹配，待当前 stdout 回调收集完该条结果后才取消。
+    const parsed = vi.spyOn(JSON, 'parse').mockImplementation((text, reviver) => {
+      const value = parse(text, reviver)
+      if (value?.type === 'match' && value.data?.path?.text === file) {
+        queueMicrotask(() => controller.abort('TIMED_OUT'))
+      }
+      return value
     })
-    expect(textOf(result)).toContain(`${displayed(file)}:1:match line`)
-    expect(textOf(result)).toContain('[Search timed out; results are incomplete.]')
-    expectProcessGone(pid)
+    try {
+      const resultPromise = callCapability(
+        capabilities['fs.grep']!,
+        'fs.grep',
+        { pattern: 'match', path: file },
+        makeContext(dir, { signal: controller.signal }),
+      )
+      const pid = await waitForFakePid(fake.pidFile)
+      const result = await resultPromise
+      expect(result.details).toMatchObject({
+        code: 'TIMEOUT',
+        search: { outcome: 'TIMED_OUT', incomplete: true },
+      })
+      expect(textOf(result)).toContain(`${displayed(file)}:1:match line`)
+      expect(textOf(result)).toContain('[Search timed out; results are incomplete.]')
+      expectProcessGone(pid)
+    } finally {
+      parsed.mockRestore()
+      controller.abort('CANCELLED')
+    }
   })
 
   it('达到结果上限时主动终止 rg 并回收进程', async () => {
