@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.web.advice;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import fun.fengwk.convention4j.api.result.Result;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -21,6 +20,7 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewUnavailableException;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewUnavailableException.Reason;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessRequestFormatException;
+import fun.fengwk.kkstudio.web.api.ApiResponse;
 import fun.fengwk.kkstudio.web.controller.StudioAgentTaskController;
 import fun.fengwk.kkstudio.web.controller.StudioCanvasController;
 import fun.fengwk.kkstudio.web.controller.StudioCanvasFunctionController;
@@ -94,10 +94,10 @@ class StudioResponseStatusErrorAdviceTest {
     ResponseStatusException error =
         new ResponseStatusException(HttpStatus.NOT_FOUND, "unknown canvas: 42");
 
-    ResponseEntity<Result<Void>> response = advice.handle(error, new MockHttpServletRequest());
+    ResponseEntity<ApiResponse<Void>> response = advice.handle(error, new MockHttpServletRequest());
 
     assertEquals(404, response.getStatusCode().value());
-    Result<Void> body = response.getBody();
+    ApiResponse<Void> body = response.getBody();
     assertEquals("NOT_FOUND", body.getCode());
     assertEquals("未找到请求的资源。", body.getMessage());
     assertEquals(
@@ -114,10 +114,10 @@ class StudioResponseStatusErrorAdviceTest {
     ResponseStatusException error =
         new ResponseStatusException(HttpStatusCode.valueOf(599), "upstream detail");
 
-    ResponseEntity<Result<Void>> response = advice.handle(error, null);
+    ResponseEntity<ApiResponse<Void>> response = advice.handle(error, null);
 
     assertEquals(599, response.getStatusCode().value());
-    Result<Void> body = response.getBody();
+    ApiResponse<Void> body = response.getBody();
     assertEquals("599", body.getCode());
     assertEquals("HTTP error (status 599).", body.getMessage());
     assertEquals(
@@ -133,7 +133,7 @@ class StudioResponseStatusErrorAdviceTest {
     ResponseStatusException error =
         new ResponseStatusException(HttpStatus.CONFLICT, conflict.getMessage(), conflict);
 
-    ResponseEntity<Result<Void>> response = advice.handle(error, new MockHttpServletRequest());
+    ResponseEntity<ApiResponse<Void>> response = advice.handle(error, new MockHttpServletRequest());
 
     assertEquals(409, response.getStatusCode().value());
     assertEquals(
@@ -212,10 +212,10 @@ class StudioResponseStatusErrorAdviceTest {
                 new HarnessRequestFormatException("unknown HTTP command field: environment")),
             new MockHttpInputMessage(new byte[0]));
 
-    ResponseEntity<Result<Void>> response = advice.handle(error, new MockHttpServletRequest());
+    ResponseEntity<ApiResponse<Void>> response = advice.handle(error, new MockHttpServletRequest());
 
     assertEquals(400, response.getStatusCode().value());
-    Result<Void> body = response.getBody();
+    ApiResponse<Void> body = response.getBody();
     assertEquals("BAD_REQUEST", body.getCode());
     assertEquals("The request is invalid.", body.getMessage());
     assertEquals(
@@ -235,7 +235,7 @@ class StudioResponseStatusErrorAdviceTest {
             new IllegalArgumentException("sensitive internal detail"),
             new MockHttpInputMessage(new byte[0]));
 
-    ResponseEntity<Result<Void>> response = advice.handle(error, new MockHttpServletRequest());
+    ResponseEntity<ApiResponse<Void>> response = advice.handle(error, new MockHttpServletRequest());
 
     assertEquals(400, response.getStatusCode().value());
     assertEquals("Failed to read request", response.getBody().getErrors().get("detail"));
@@ -250,10 +250,10 @@ class StudioResponseStatusErrorAdviceTest {
             new RuntimeException("malformed token"),
             new MockHttpInputMessage(new byte[0]));
 
-    ResponseEntity<Result<Void>> response = advice.handle(error, new MockHttpServletRequest());
+    ResponseEntity<ApiResponse<Void>> response = advice.handle(error, new MockHttpServletRequest());
 
     assertEquals(400, response.getStatusCode().value());
-    Result<Void> body = response.getBody();
+    ApiResponse<Void> body = response.getBody();
     assertEquals("BAD_REQUEST", body.getCode());
     assertEquals("The request is invalid.", body.getMessage());
     assertEquals(
@@ -273,7 +273,7 @@ class StudioResponseStatusErrorAdviceTest {
             new HarnessRequestFormatException("   "),
             new MockHttpInputMessage(new byte[0]));
 
-    ResponseEntity<Result<Void>> response = advice.handle(error, new MockHttpServletRequest());
+    ResponseEntity<ApiResponse<Void>> response = advice.handle(error, new MockHttpServletRequest());
 
     assertEquals(400, response.getStatusCode().value());
     assertEquals("Failed to read request", response.getBody().getErrors().get("detail"));

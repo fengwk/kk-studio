@@ -1,9 +1,5 @@
 package fun.fengwk.kkstudio.web.controller;
 
-import fun.fengwk.convention4j.api.page.Page;
-import fun.fengwk.convention4j.api.page.PageQuery;
-import fun.fengwk.convention4j.api.result.Result;
-import fun.fengwk.convention4j.common.result.Results;
 import lombok.AllArgsConstructor;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -15,10 +11,12 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import fun.fengwk.kkstudio.common.page.Page;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
+import fun.fengwk.kkstudio.web.api.ApiResponse;
 
 /** Agent definition 全局 CRUD API。 */
 @AllArgsConstructor
@@ -29,27 +27,29 @@ public class StudioAgentDefinitionController {
   private final AgentDefinitionService agentDefinitionService;
 
   @GetMapping
-  public Result<Page<AgentDefinitionDTO>> pageAgents(
+  public ApiResponse<Page<AgentDefinitionDTO>> pageAgents(
       @RequestParam(value = "pageNumber", defaultValue = "1") int pageNumber,
       @RequestParam(value = "pageSize", defaultValue = "50") int pageSize) {
-    return Results.ok(agentDefinitionService.pageAgents(new PageQuery(pageNumber, pageSize)));
+    return ApiResponse.ok(
+        agentDefinitionService.pageAgents(PageQueries.create(pageNumber, pageSize)));
   }
 
   @PostMapping
-  public Result<AgentDefinitionDTO> createAgent(@RequestBody AgentDefinitionCreateDTO createDTO) {
-    return Results.created(agentDefinitionService.createAgent(createDTO));
+  public ApiResponse<AgentDefinitionDTO> createAgent(
+      @RequestBody AgentDefinitionCreateDTO createDTO) {
+    return ApiResponse.created(agentDefinitionService.createAgent(createDTO));
   }
 
   @PutMapping("/{name}")
-  public Result<AgentDefinitionDTO> updateAgent(
+  public ApiResponse<AgentDefinitionDTO> updateAgent(
       @PathVariable("name") String name, @RequestBody AgentDefinitionUpdateDTO updateDTO) {
-    return Results.ok(agentDefinitionService.updateAgent(name, updateDTO));
+    return ApiResponse.ok(agentDefinitionService.updateAgent(name, updateDTO));
   }
 
   @DeleteMapping("/{name}")
-  public Result<Void> deleteAgent(
+  public ApiResponse<Void> deleteAgent(
       @PathVariable("name") String name, @RequestParam("expectedVersion") String expectedVersion) {
     agentDefinitionService.deleteAgent(name, expectedVersion);
-    return Results.noContent();
+    return ApiResponse.noContent();
   }
 }

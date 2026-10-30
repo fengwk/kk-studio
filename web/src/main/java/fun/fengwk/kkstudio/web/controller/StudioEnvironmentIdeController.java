@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.web.controller;
 
-import fun.fengwk.convention4j.api.result.Result;
-import fun.fengwk.convention4j.common.result.Results;
 import lombok.AllArgsConstructor;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -19,6 +17,7 @@ import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeCloseViewDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeOpenViewDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
+import fun.fengwk.kkstudio.web.api.ApiResponse;
 
 /**
  * Environment IDE 视图控制 API：把 Studio pane 的 view 生命周期翻译为对 Daemon 的 IDE 命令。
@@ -34,36 +33,37 @@ public class StudioEnvironmentIdeController {
   private final EnvironmentIdeService environmentIdeService;
 
   @PostMapping
-  public Result<EnvironmentIdeViewDTO> openView(
+  public ApiResponse<EnvironmentIdeViewDTO> openView(
       @PathVariable String environmentId, @RequestBody EnvironmentIdeOpenViewDTO request) {
-    return Results.ok(environmentIdeService.openView(parseEnvironmentId(environmentId), request));
+    return ApiResponse.ok(
+        environmentIdeService.openView(parseEnvironmentId(environmentId), request));
   }
 
   @PutMapping("/{viewId}/directory")
-  public Result<EnvironmentIdeViewDTO> changeDirectory(
+  public ApiResponse<EnvironmentIdeViewDTO> changeDirectory(
       @PathVariable String environmentId,
       @PathVariable String viewId,
       @RequestBody EnvironmentIdeChangeDirectoryDTO request) {
-    return Results.ok(
+    return ApiResponse.ok(
         environmentIdeService.changeDirectory(parseEnvironmentId(environmentId), viewId, request));
   }
 
   @PostMapping("/{viewId}/terminal")
-  public Result<Void> focusTerminal(
+  public ApiResponse<Void> focusTerminal(
       @PathVariable String environmentId,
       @PathVariable String viewId,
       @RequestBody EnvironmentIdeViewBindingDTO request) {
     environmentIdeService.focusTerminal(parseEnvironmentId(environmentId), viewId, request);
-    return Results.noContent();
+    return ApiResponse.noContent();
   }
 
   @DeleteMapping("/{viewId}")
-  public Result<Void> closeView(
+  public ApiResponse<Void> closeView(
       @PathVariable String environmentId,
       @PathVariable String viewId,
       @RequestBody EnvironmentIdeCloseViewDTO request) {
     environmentIdeService.closeView(parseEnvironmentId(environmentId), viewId, request);
-    return Results.noContent();
+    return ApiResponse.noContent();
   }
 
   private static EnvironmentId parseEnvironmentId(String text) {

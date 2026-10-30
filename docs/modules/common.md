@@ -12,6 +12,7 @@
 | `fun.fengwk.kkstudio.common.json` | 严格 JSON 门禁、共享有界输出流与有界 UTF-8 JSON 编码器 | 校验语法与体积，超限中止编码；业务结构由调用方定义 |
 | `fun.fengwk.kkstudio.common.hash` | SHA-256 摘要与 64 位小写十六进制编码的唯一入口 | 只依赖 JDK；被哈希的字节与领域分隔由调用方决定 |
 | `fun.fengwk.kkstudio.common.io` | send 前冻结预算的响应体 deadline 包装：到期主动关闭底层流并把超时统一为超时失败 | 纯 JDK 流包装，不构造 HTTP 客户端、不持有凭据；协议与凭据分类由调用方适配 |
+| `fun.fengwk.kkstudio.common.page` | 共享分页值对象与安全 offset 计算 | 只保存分页元数据、当前结果集与逐项映射；不包含查询执行、排序或与存储相关的计算 |
 | `fun.fengwk.kkstudio.common.resource` | 不可变规范 Resource URI 引用与逐 scheme 校验 | 受支持的 scheme 与字节上限在此固定；下载、传输与存储由外部能力承接 |
 | `fun.fengwk.kkstudio.common.result` | sealed 结果内容单元 Text / Json / Binary / Resource 与文本工件元数据 | 纯不可变值模型；执行生命周期、权限与持久化调度由运行时承接 |
 | `fun.fengwk.kkstudio.common.schema` | 输入参数 schema 结构、严格校验器、容错归一化器与确定性 JSON 编解码器 | 属性字典序的确定性编解码；执行路由与 Provider 转换由上层处理 |

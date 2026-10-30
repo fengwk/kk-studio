@@ -1,11 +1,8 @@
 package fun.fengwk.kkstudio.web.advice;
 
-import fun.fengwk.convention4j.api.code.HttpStatus;
-import fun.fengwk.convention4j.api.code.ImmutableResolvedConventionErrorCode;
-import fun.fengwk.convention4j.api.result.Result;
-import fun.fengwk.convention4j.common.result.Results;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -21,6 +18,7 @@ import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiUpstreamException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.web.api.ApiResponse;
 import fun.fengwk.kkstudio.web.controller.StudioAgentDefinitionController;
 import fun.fengwk.kkstudio.web.controller.StudioAgentModelController;
 import fun.fengwk.kkstudio.web.controller.StudioAgentProviderController;
@@ -38,7 +36,7 @@ import java.util.Map;
 /**
  * AI Catalog、Chat、MCP 与 Environment domain 错误模型的 Web 层统一翻译器。
  *
- * <p>每个 handler 都返回项目 {@link Result} 信封，其中包含由类型化错误的 {@link
+ * <p>每个 handler 都返回项目 {@link ApiResponse} 信封，其中包含由类型化错误的 {@link
  * fun.fengwk.kkstudio.platform.error.DomainErrorCode} 派生的稳定机器可读 {@code code}。HTTP 状态遵循以下语义：
  *
  * <ul>
@@ -76,49 +74,49 @@ public class StudioDomainErrorAdvice {
   }
 
   @ExceptionHandler(AiValidationException.class)
-  public ResponseEntity<Result<Void>> handleValidation(AiValidationException error) {
+  public ResponseEntity<ApiResponse<Void>> handleValidation(AiValidationException error) {
     return build(HttpStatus.BAD_REQUEST, error);
   }
 
   @ExceptionHandler(AiResourceNotFoundException.class)
-  public ResponseEntity<Result<Void>> handleNotFound(AiResourceNotFoundException error) {
+  public ResponseEntity<ApiResponse<Void>> handleNotFound(AiResourceNotFoundException error) {
     return build(HttpStatus.NOT_FOUND, error);
   }
 
   @ExceptionHandler(AiVersionConflictException.class)
-  public ResponseEntity<Result<Void>> handleVersionConflict(AiVersionConflictException error) {
+  public ResponseEntity<ApiResponse<Void>> handleVersionConflict(AiVersionConflictException error) {
     return build(HttpStatus.CONFLICT, error);
   }
 
   @ExceptionHandler(AiDuplicateException.class)
-  public ResponseEntity<Result<Void>> handleDuplicate(AiDuplicateException error) {
+  public ResponseEntity<ApiResponse<Void>> handleDuplicate(AiDuplicateException error) {
     return build(HttpStatus.CONFLICT, error);
   }
 
   @ExceptionHandler(AiInUseException.class)
-  public ResponseEntity<Result<Void>> handleInUse(AiInUseException error) {
+  public ResponseEntity<ApiResponse<Void>> handleInUse(AiInUseException error) {
     return build(HttpStatus.CONFLICT, error);
   }
 
   @ExceptionHandler(AiEnvironmentIdeUnavailableException.class)
-  public ResponseEntity<Result<Void>> handleIdeUnavailable(
+  public ResponseEntity<ApiResponse<Void>> handleIdeUnavailable(
       AiEnvironmentIdeUnavailableException error) {
     return build(HttpStatus.CONFLICT, error);
   }
 
   @ExceptionHandler(AiEnvironmentUnavailableException.class)
-  public ResponseEntity<Result<Void>> handleEnvironmentUnavailable(
+  public ResponseEntity<ApiResponse<Void>> handleEnvironmentUnavailable(
       AiEnvironmentUnavailableException error) {
     return build(HttpStatus.CONFLICT, error);
   }
 
   @ExceptionHandler(AiUpstreamException.class)
-  public ResponseEntity<Result<Void>> handleUpstream(AiUpstreamException error) {
+  public ResponseEntity<ApiResponse<Void>> handleUpstream(AiUpstreamException error) {
     return build(HttpStatus.BAD_GATEWAY, error);
   }
 
   @ExceptionHandler(MissingServletRequestParameterException.class)
-  public ResponseEntity<Result<Void>> handleMissingParam(
+  public ResponseEntity<ApiResponse<Void>> handleMissingParam(
       MissingServletRequestParameterException error) {
     AiValidationException wrapped =
         new AiValidationException(
@@ -130,7 +128,7 @@ public class StudioDomainErrorAdvice {
   }
 
   @ExceptionHandler(MethodArgumentTypeMismatchException.class)
-  public ResponseEntity<Result<Void>> handleTypeMismatch(
+  public ResponseEntity<ApiResponse<Void>> handleTypeMismatch(
       MethodArgumentTypeMismatchException error) {
     AiValidationException wrapped =
         new AiValidationException(
@@ -139,14 +137,14 @@ public class StudioDomainErrorAdvice {
         HttpStatus.BAD_REQUEST, wrapped, messageService.validationTypeMismatch(error.getName()));
   }
 
-  private ResponseEntity<Result<Void>> build(HttpStatus status, AiDomainException error) {
+  private ResponseEntity<ApiResponse<Void>> build(HttpStatus status, AiDomainException error) {
     return build(
         status,
         error,
         messageService.domainMessage(error.code(), Map.of("resource", error.resource())));
   }
 
-  private ResponseEntity<Result<Void>> build(
+  private ResponseEntity<ApiResponse<Void>> build(
       HttpStatus status, AiDomainException error, String message) {
     Map<String, Object> errorContext = new LinkedHashMap<>();
     errorContext.put("resource", error.resource());
@@ -155,9 +153,7 @@ public class StudioDomainErrorAdvice {
       errorContext.put("actualVersion", versionConflict.actualVersion());
     }
     errorContext.put("detail", error.getMessage());
-    ImmutableResolvedConventionErrorCode code =
-        new ImmutableResolvedConventionErrorCode(
-            status.getStatus(), error.code().code(), message, errorContext);
-    return ResponseEntity.status(status.getStatus()).body(Results.error(code));
+    return ResponseEntity.status(status)
+        .body(ApiResponse.error(status, error.code().code(), message, errorContext));
   }
 }

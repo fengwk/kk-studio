@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.web.controller;
 
-import fun.fengwk.convention4j.api.result.Result;
-import fun.fengwk.convention4j.common.result.Results;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -18,6 +16,7 @@ import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrches
 import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessAcceptedCommandsDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessCommandBatchDTO;
+import fun.fengwk.kkstudio.web.api.ApiResponse;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapper;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapper;
 
@@ -48,8 +47,9 @@ public class StudioHarnessCommandBatchController {
 
   /** 接受一个 owner-aware 用户命令批；202 仅表示 durable acceptance 已提交。 */
   @PostMapping
-  public Result<HarnessAcceptedCommandsDTO> accept(@RequestBody HarnessCommandBatchDTO request) {
-    return Results.accepted(
+  public ApiResponse<HarnessAcceptedCommandsDTO> accept(
+      @RequestBody HarnessCommandBatchDTO request) {
+    return ApiResponse.accepted(
         StudioHarnessThreadController.withRuntimeTranslation(
             () -> {
               OwnerRef owner = HarnessRuntimeRequestMapper.toOwner(request.getOwner());

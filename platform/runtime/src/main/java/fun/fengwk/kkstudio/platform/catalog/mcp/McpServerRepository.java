@@ -1,8 +1,5 @@
 package fun.fengwk.kkstudio.platform.catalog.mcp;
 
-import fun.fengwk.convention4j.api.page.Page;
-import fun.fengwk.convention4j.api.page.PageQuery;
-import fun.fengwk.convention4j.common.page.Pages;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -10,6 +7,8 @@ import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.common.page.Page;
+import fun.fengwk.kkstudio.common.page.PageQuery;
 import fun.fengwk.kkstudio.platform.persistence.PostgresJdbcTypes;
 
 import java.time.OffsetDateTime;
@@ -72,12 +71,12 @@ public class McpServerRepository {
                 "select "
                     + SERVER_COLUMNS
                     + " from mcp_server order by name asc limit :limit offset :offset")
-            .param("limit", Pages.queryLimit(pageQuery))
-            .param("offset", Pages.queryOffset(pageQuery))
+            .param("limit", pageQuery.getPageSize())
+            .param("offset", pageQuery.getOffset())
             .query(SERVER_ROW_MAPPER)
             .list();
     long total = jdbcClient.sql("select count(*) from mcp_server").query(Long.class).single();
-    return Pages.page(pageQuery, results, total);
+    return new Page<>(pageQuery.getPageNumber(), pageQuery.getPageSize(), results, total);
   }
 
   /** 返回全部 server 行（按 name 排序）。 */
