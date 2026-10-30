@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
-import { createMemoryRouter, RouterProvider } from 'react-router'
+import { BrowserRouter, createMemoryRouter, RouterProvider } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '@/app/App'
 import { AppProviders } from '@/app/providers'
@@ -59,12 +59,8 @@ describe('App routes', () => {
   })
 
   it('redirects root to Chat console', async () => {
-    const router = createMemoryRouter(
-      [{ path: '*', element: <AppProviders><App /></AppProviders> }],
-      { initialEntries: ['/'] },
-    )
-    render(<RouterProvider router={router} />)
-    await waitFor(() => expect(router.state.location.pathname).toBe('/chats'))
+    render(<BrowserRouter><AppProviders><App /></AppProviders></BrowserRouter>)
+    await waitFor(() => expect(window.location.pathname).toBe('/chats'))
     // 路由重定向必须完成异步资源加载并渲染 Chat 控制台。
     expect(await screen.findByRole('button', { name: '新建 Chat' }, { timeout: 3000 })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'KK Studio' })).toHaveAttribute('href', '/chats')
