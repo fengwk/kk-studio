@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.harness.builtin.history.BuiltinHistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
@@ -56,7 +57,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
@@ -97,7 +97,7 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 
 /**
- * ToolProcessor 测试共享基座：InMemoryHarnessStore + fake ToolGateway / sink + 可变时钟 + 种子与断言 helper。
+ * ToolProcessor 测试共享基座：InMemoryBuiltinHarnessStore + fake ToolGateway / sink + 可变时钟 + 种子与断言 helper。
  *
  * <p>每个 Fixture 原子种子一条最小合法链：Session + ROOT + TURN_START + USER + ASSISTANT(call-1) + terminal
  * ModelInvocation（resultEntryId 指向 ASSISTANT）+ READY ToolInvocation + THREAD/TOOL Work。测试通过 {@link
@@ -225,7 +225,7 @@ public final class ToolProcessorTestSupport {
 
   static final class Fixture {
     final MutableClock clock = new MutableClock(NOW);
-    final InMemoryHarnessStore store = new InMemoryHarnessStore();
+    final InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
 
     {
       store.setClock(clock);
@@ -351,7 +351,7 @@ public final class ToolProcessorTestSupport {
   }
 
   record MisrootedFixture(
-      InMemoryHarnessStore store,
+      InMemoryBuiltinHarnessStore store,
       FakeToolGateway gateway,
       Baseline realRoot,
       Baseline unrelatedRoot,
@@ -364,17 +364,18 @@ public final class ToolProcessorTestSupport {
     return new Fixture(NO_RETRY, false, newScheduler(), askUserScenario(argumentsJson));
   }
 
-  static Baseline seedToolBaseline(InMemoryHarnessStore store, Instant now) {
+  static Baseline seedToolBaseline(InMemoryBuiltinHarnessStore store, Instant now) {
     return seedToolBaseline(store, now, false);
   }
 
-  static Baseline seedToolBaseline(InMemoryHarnessStore store, Instant now, boolean yoloEnabled) {
+  static Baseline seedToolBaseline(
+      InMemoryBuiltinHarnessStore store, Instant now, boolean yoloEnabled) {
     return seedToolBaseline(store, now, yoloEnabled, bashScenario(ToolSideEffect.READ_ONLY));
   }
 
   /** 按给定场景种子 assistant/thread：assistant Entry 与该场景的 frozen request + response 严格一致。 */
   static Baseline seedToolBaseline(
-      InMemoryHarnessStore store, Instant now, boolean yoloEnabled, Scenario scenario) {
+      InMemoryBuiltinHarnessStore store, Instant now, boolean yoloEnabled, Scenario scenario) {
     return store.transaction(
         tx -> {
           UUID sessionId = tx.nextId();
@@ -459,7 +460,7 @@ public final class ToolProcessorTestSupport {
    * @param request 叶子的 Tool 请求；null 表示该节点没有 Tool
    */
   static SeededChild seedChildNode(
-      InMemoryHarnessStore store,
+      InMemoryBuiltinHarnessStore store,
       Baseline parent,
       Instant now,
       boolean yoloEnabled,
@@ -575,7 +576,7 @@ public final class ToolProcessorTestSupport {
    * sibling 与 Work 在同一事务写入，并且没有 ModelInvocation。
    */
   static SeededChild seedChildChain(
-      InMemoryHarnessStore store,
+      InMemoryBuiltinHarnessStore store,
       Instant now,
       boolean rootYoloEnabled,
       int followDepth,
@@ -593,7 +594,10 @@ public final class ToolProcessorTestSupport {
    * + READY ToolInvocation + THREAD / TOOL Work。
    */
   static Seeded seedTool(
-      InMemoryHarnessStore store, Baseline baseline, ToolInvocationRequest request, Instant now) {
+      InMemoryBuiltinHarnessStore store,
+      Baseline baseline,
+      ToolInvocationRequest request,
+      Instant now) {
     return seedTool(store, baseline, request, now, null);
   }
 
@@ -602,7 +606,7 @@ public final class ToolProcessorTestSupport {
    * bash）。
    */
   static Seeded seedTool(
-      InMemoryHarnessStore store,
+      InMemoryBuiltinHarnessStore store,
       Baseline baseline,
       ToolInvocationRequest request,
       Instant now,
@@ -666,17 +670,17 @@ public final class ToolProcessorTestSupport {
         });
   }
 
-  static ClaimedWork claim(InMemoryHarnessStore store, UUID toolInvocationId, Instant now) {
+  static ClaimedWork claim(InMemoryBuiltinHarnessStore store, UUID toolInvocationId, Instant now) {
     return claim(store, toolInvocationId, now, "token-" + toolInvocationId);
   }
 
   static ClaimedWork claim(
-      InMemoryHarnessStore store, UUID toolInvocationId, Instant now, String token) {
+      InMemoryBuiltinHarnessStore store, UUID toolInvocationId, Instant now, String token) {
     return claim(store, toolInvocationId, now, token, Duration.ofSeconds(60));
   }
 
   static ClaimedWork claim(
-      InMemoryHarnessStore store,
+      InMemoryBuiltinHarnessStore store,
       UUID toolInvocationId,
       Instant now,
       String token,
@@ -687,7 +691,7 @@ public final class ToolProcessorTestSupport {
   }
 
   static void transition(
-      InMemoryHarnessStore store,
+      InMemoryBuiltinHarnessStore store,
       UUID toolInvocationId,
       Function<ToolInvocation, ToolInvocation> transition) {
     store.transaction(
@@ -702,35 +706,35 @@ public final class ToolProcessorTestSupport {
    * READY(null approval) -&gt; READY(not-required approval) 前置：approval 引入必须经过 READY -&gt; READY
    * 步骤。
    */
-  static void toApproved(InMemoryHarnessStore store, UUID toolInvocationId, Instant now) {
+  static void toApproved(InMemoryBuiltinHarnessStore store, UUID toolInvocationId, Instant now) {
     transition(store, toolInvocationId, tool -> tool.markApprovalNotRequired(now));
   }
 
   /** READY(null approval) -&gt; RUNNING(attempt 1) 前置：not-required -&gt; markRunning。 */
-  static void toRunning(InMemoryHarnessStore store, UUID toolInvocationId, Instant now) {
+  static void toRunning(InMemoryBuiltinHarnessStore store, UUID toolInvocationId, Instant now) {
     toApproved(store, toolInvocationId, now);
     transition(store, toolInvocationId, tool -> tool.markRunning(now));
   }
 
-  static ToolInvocation tool(InMemoryHarnessStore store, UUID toolInvocationId) {
+  static ToolInvocation tool(InMemoryBuiltinHarnessStore store, UUID toolInvocationId) {
     return store.transaction(tx -> tx.findToolInvocation(toolInvocationId)).orElseThrow();
   }
 
-  static ModelInvocation model(InMemoryHarnessStore store, UUID modelInvocationId) {
+  static ModelInvocation model(InMemoryBuiltinHarnessStore store, UUID modelInvocationId) {
     return store
         .transaction(tx -> builtin(tx).findModelInvocation(modelInvocationId))
         .orElseThrow();
   }
 
-  static ThreadState thread(InMemoryHarnessStore store, UUID threadId) {
+  static ThreadState thread(InMemoryBuiltinHarnessStore store, UUID threadId) {
     return store.transaction(tx -> tx.findThread(threadId)).orElseThrow();
   }
 
-  static Work work(InMemoryHarnessStore store, WorkTarget target) {
+  static Work work(InMemoryBuiltinHarnessStore store, WorkTarget target) {
     return store.transaction(tx -> tx.findWork(target)).orElse(null);
   }
 
-  static Work toolWork(InMemoryHarnessStore store, UUID toolInvocationId) {
+  static Work toolWork(InMemoryBuiltinHarnessStore store, UUID toolInvocationId) {
     return work(store, new WorkTarget(WorkTargetType.TOOL, toolInvocationId));
   }
 
@@ -763,7 +767,7 @@ public final class ToolProcessorTestSupport {
         });
   }
 
-  static Work threadWork(InMemoryHarnessStore store, UUID threadId) {
+  static Work threadWork(InMemoryBuiltinHarnessStore store, UUID threadId) {
     return work(store, new WorkTarget(WorkTargetType.THREAD, threadId));
   }
 
@@ -1085,14 +1089,14 @@ public final class ToolProcessorTestSupport {
 
   /**
    * 记录每个事务内的锁与写调用序列；用于断言 Processor 只按 own Thread -> Invocation -> Work 加锁， 不出现
-   * tree/ancestor/Session 锁。委托真实 InMemoryHarnessStore，保持事务语义。
+   * tree/ancestor/Session 锁。委托真实 InMemoryBuiltinHarnessStore，保持事务语义。
    */
   static final class RecordingLockStore implements HarnessStore {
 
-    private final InMemoryHarnessStore delegate;
+    private final InMemoryBuiltinHarnessStore delegate;
     private final List<List<String>> transactions = new CopyOnWriteArrayList<>();
 
-    RecordingLockStore(InMemoryHarnessStore delegate) {
+    RecordingLockStore(InMemoryBuiltinHarnessStore delegate) {
       this.delegate = delegate;
     }
 

@@ -30,6 +30,7 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.node.JsonNodeFactory;
 
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestMaterializer;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
@@ -59,7 +60,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
@@ -87,12 +87,12 @@ import java.util.UUID;
  */
 class HarnessRuntimeForkTest {
 
-  private InMemoryHarnessStore store;
+  private InMemoryBuiltinHarnessStore store;
   private HarnessRuntime runtime;
 
   @BeforeEach
   void setUp() {
-    store = new InMemoryHarnessStore();
+    store = new InMemoryBuiltinHarnessStore();
     runtime = HarnessRuntimeTestSupport.runtime(store, Clock.fixed(T0, ZoneOffset.UTC));
   }
 
@@ -722,7 +722,7 @@ class HarnessRuntimeForkTest {
    *
    * @param keepOpenTail 为 true 时末尾追加未闭合 INPUT turn（用于验证半轮切点被拒绝）
    */
-  private static HistorySeed seedHistory(InMemoryHarnessStore store, boolean keepOpenTail) {
+  private static HistorySeed seedHistory(InMemoryBuiltinHarnessStore store, boolean keepOpenTail) {
     return store.transaction(
         tx -> {
           UUID sessionId = tx.nextId();
@@ -760,7 +760,7 @@ class HarnessRuntimeForkTest {
   }
 
   /** ROOT -&gt; [T1] -&gt; [T2 u2] -&gt; COMPACTION(cut=u2) -&gt; [T3]；head = END3，保留尾部从 T2 开始。 */
-  private static CompactionSeed seedCompactedHistory(InMemoryHarnessStore store) {
+  private static CompactionSeed seedCompactedHistory(InMemoryBuiltinHarnessStore store) {
     return store.transaction(
         tx -> {
           UUID sessionId = tx.nextId();
@@ -817,7 +817,7 @@ class HarnessRuntimeForkTest {
   }
 
   /** HISTORY 压缩后紧接 TURN_PREFIX 压缩（引用 HISTORY 结果）；head = END3，保留尾部从 T2 开始。 */
-  private static CompactionSeed seedSplitCompactionHistory(InMemoryHarnessStore store) {
+  private static CompactionSeed seedSplitCompactionHistory(InMemoryBuiltinHarnessStore store) {
     return store.transaction(
         tx -> {
           UUID sessionId = tx.nextId();

@@ -17,13 +17,13 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.store.BuiltinStore;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException.Reason;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 
@@ -38,13 +38,13 @@ import java.util.function.Function;
 /** decideToolApproval 加锁：规范加锁顺序、锁定的行基准与锁漂移不变量。 */
 class HarnessRuntimeApprovalLockingTest {
 
-  private InMemoryHarnessStore store;
+  private InMemoryBuiltinHarnessStore store;
   private TestClock clock;
   private HarnessRuntime runtime;
 
   @BeforeEach
   void setUp() {
-    store = new InMemoryHarnessStore();
+    store = new InMemoryBuiltinHarnessStore();
     clock = new TestClock(T5);
     runtime = HarnessRuntimeTestSupport.runtime(store, clock);
   }
@@ -381,14 +381,14 @@ class HarnessRuntimeApprovalLockingTest {
    * findToolInvocation 行或返回 empty 的锁），从而证明控制面锁定当前行而不是信任未加锁探针。
    */
   private static HarnessStore recordingProbeStore(
-      InMemoryHarnessStore delegate,
+      InMemoryBuiltinHarnessStore delegate,
       List<String> lockCalls,
       Map<String, Function<Object[], Object>> overrides) {
     return recordingProbeStore(delegate, lockCalls, overrides, () -> {});
   }
 
   private static HarnessStore recordingProbeStore(
-      InMemoryHarnessStore delegate,
+      InMemoryBuiltinHarnessStore delegate,
       List<String> lockCalls,
       Map<String, Function<Object[], Object>> overrides,
       Runnable onThreadLock) {

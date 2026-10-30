@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.builtin.store.BuiltinStore;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
@@ -64,7 +65,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
@@ -106,7 +106,7 @@ import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 
 /**
- * ThreadProcessor 测试共享基座：InMemoryHarnessStore + fake TurnResolver + 可变时钟 + 种子与断言 helper。
+ * ThreadProcessor 测试共享基座：InMemoryBuiltinHarnessStore + fake TurnResolver + 可变时钟 + 种子与断言 helper。
  *
  * <p>每条链按 store 约束原子种子：Session + ROOT +（TURN_START + USER/ASSISTANT/TURN_END）+
  * Thread；ModelInvocation 只能以 READY/attempt=0 插入且 requestHead 必须等于 Thread 当前 head，terminal 状态通过共享
@@ -209,7 +209,7 @@ public final class ThreadProcessorTestSupport {
       UUID threadId) {}
 
   /** Session + ROOT + Thread（head 指向 ROOT）。 */
-  static Baseline seedBaseline(InMemoryHarnessStore store) {
+  static Baseline seedBaseline(InMemoryBuiltinHarnessStore store) {
     return store.transaction(
         tx -> {
           UUID sessionId = tx.nextId();
@@ -224,12 +224,12 @@ public final class ThreadProcessorTestSupport {
   }
 
   /** Session + ROOT + TURN_START(INPUT) + USER；Thread head 指向 USER。 */
-  public static OpenTurnBaseline seedOpenInputTurn(InMemoryHarnessStore store) {
+  public static OpenTurnBaseline seedOpenInputTurn(InMemoryBuiltinHarnessStore store) {
     return seedOpenInputTurn(store, List.of());
   }
 
   static OpenTurnBaseline seedOpenInputTurn(
-      InMemoryHarnessStore store, List<ToolBinding> toolBindings) {
+      InMemoryBuiltinHarnessStore store, List<ToolBinding> toolBindings) {
     return store.transaction(
         tx -> {
           UUID sessionId = tx.nextId();
@@ -257,7 +257,8 @@ public final class ThreadProcessorTestSupport {
   }
 
   /** Session + ROOT + 完整关闭 Turn（ASSISTANT 无 tool call + TURN_END COMPLETED）。 */
-  static ClosedTurnBaseline seedClosedTurn(InMemoryHarnessStore store, boolean continueModel) {
+  static ClosedTurnBaseline seedClosedTurn(
+      InMemoryBuiltinHarnessStore store, boolean continueModel) {
     return store.transaction(
         tx -> {
           UUID sessionId = tx.nextId();
@@ -304,7 +305,7 @@ public final class ThreadProcessorTestSupport {
    * {@code presentResults} 个已有 ToolResult 之后的位置（0 = assistant，&gt;0 = 最后一个真实结果）。
    */
   static HistoricalBaseline seedHistoricalOpenTurn(
-      InMemoryHarnessStore store, int toolCalls, int presentResults) {
+      InMemoryBuiltinHarnessStore store, int toolCalls, int presentResults) {
     if (presentResults < 0 || presentResults > toolCalls) {
       throw new IllegalArgumentException("presentResults must be within toolCalls");
     }
@@ -358,7 +359,7 @@ public final class ThreadProcessorTestSupport {
 
   /** 在已有 Session 上新建第二个 Thread，head 指向共享的历史 assistant Entry。 */
   static HistoricalBaseline seedSecondThreadAtHistoricalAssistant(
-      InMemoryHarnessStore store, UUID sessionId, UUID assistantEntryId) {
+      InMemoryBuiltinHarnessStore store, UUID sessionId, UUID assistantEntryId) {
     return store.transaction(
         tx -> {
           UUID threadId = tx.nextId();
@@ -375,7 +376,8 @@ public final class ThreadProcessorTestSupport {
   }
 
   /** 插入一条 QUEUED Command（sequence 取自 Thread.nextCommandSequence）并推进 Thread 序列。 */
-  static UUID seedCommand(InMemoryHarnessStore store, UUID threadId, ThreadCommandPayload payload) {
+  static UUID seedCommand(
+      InMemoryBuiltinHarnessStore store, UUID threadId, ThreadCommandPayload payload) {
     return store.transaction(
         tx -> {
           ThreadState thread = tx.lockThread(threadId).orElseThrow();
@@ -399,7 +401,7 @@ public final class ThreadProcessorTestSupport {
   }
 
   /** 在一条已存在 Thread 上请求 THREAD Work（模拟 enqueue 侧）。 */
-  static void requestThreadWork(InMemoryHarnessStore store, UUID threadId) {
+  static void requestThreadWork(InMemoryBuiltinHarnessStore store, UUID threadId) {
     store.transaction(
         tx -> {
           tx.lockThread(threadId);
@@ -416,7 +418,7 @@ public final class ThreadProcessorTestSupport {
       List<UUID> toolInvocationIds) {}
 
   static ToolChain seedToolChain(
-      InMemoryHarnessStore store,
+      InMemoryBuiltinHarnessStore store,
       List<String> callIds,
       ModelInvocationStatus modelStatus,
       List<ToolInvocationStatus> toolStatuses) {
@@ -466,7 +468,7 @@ public final class ThreadProcessorTestSupport {
 
   /** 在 open Turn 的 head 后插入 ASSISTANT(calls) Entry 并推进 Thread head（seedToolChain 的构成片段）。 */
   static UUID insertAssistantWithCalls(
-      InMemoryHarnessStore store, OpenTurnBaseline turn, List<String> callIds) {
+      InMemoryBuiltinHarnessStore store, OpenTurnBaseline turn, List<String> callIds) {
     return store.transaction(
         tx -> {
           tx.lockThread(turn.threadId());
@@ -482,7 +484,7 @@ public final class ThreadProcessorTestSupport {
    * 在 open Turn 的 head 后插入指定 payload 的 ASSISTANT Entry 并推进 Thread head（live attached fixture 专用）。
    */
   static UUID insertAssistantPayload(
-      InMemoryHarnessStore store, OpenTurnBaseline turn, EntryPayload payload) {
+      InMemoryBuiltinHarnessStore store, OpenTurnBaseline turn, EntryPayload payload) {
     return store.transaction(
         tx -> {
           tx.lockThread(turn.threadId());
@@ -501,7 +503,7 @@ public final class ThreadProcessorTestSupport {
 
   /** 原子种子合法 SUCCEEDED tool-phase model + mapper 派生 assistant（strict attach 校验要求全等），返回二者 id。 */
   static SeededToolPhase seedSucceededToolPhase(
-      InMemoryHarnessStore store, OpenTurnBaseline turn, List<String> callIds) {
+      InMemoryBuiltinHarnessStore store, OpenTurnBaseline turn, List<String> callIds) {
     ModelRequestSpec requestSpec = tooledRequest(List.of("bash"));
     ProviderResponse response = successResponse(callIds, "bash");
     UUID modelId =
@@ -531,7 +533,7 @@ public final class ThreadProcessorTestSupport {
    * resultEntryId 仍 null）。
    */
   static UUID seedModelInvocation(
-      InMemoryHarnessStore store,
+      InMemoryBuiltinHarnessStore store,
       UUID threadId,
       UUID turnStartEntryId,
       UUID basisEntryId,
@@ -552,7 +554,7 @@ public final class ThreadProcessorTestSupport {
   }
 
   static UUID seedModelInvocation(
-      InMemoryHarnessStore store,
+      InMemoryBuiltinHarnessStore store,
       UUID threadId,
       UUID turnStartEntryId,
       UUID basisEntryId,
@@ -607,7 +609,7 @@ public final class ThreadProcessorTestSupport {
 
   /** 插入 READY ToolInvocation 并把状态推进到 {@code status}。 */
   static UUID seedToolInvocation(
-      InMemoryHarnessStore store,
+      InMemoryBuiltinHarnessStore store,
       UUID threadId,
       UUID turnStartEntryId,
       UUID assistantEntryId,
@@ -662,17 +664,17 @@ public final class ThreadProcessorTestSupport {
     return toolId;
   }
 
-  public static ClaimedWork claimThreadWork(InMemoryHarnessStore store, UUID threadId) {
+  public static ClaimedWork claimThreadWork(InMemoryBuiltinHarnessStore store, UUID threadId) {
     return claimThreadWork(store, threadId, NOW);
   }
 
   public static ClaimedWork claimThreadWork(
-      InMemoryHarnessStore store, UUID threadId, Instant now) {
+      InMemoryBuiltinHarnessStore store, UUID threadId, Instant now) {
     return claimThreadWork(store, threadId, now, Duration.ofSeconds(60));
   }
 
   public static ClaimedWork claimThreadWork(
-      InMemoryHarnessStore store, UUID threadId, Instant now, Duration leaseDuration) {
+      InMemoryBuiltinHarnessStore store, UUID threadId, Instant now, Duration leaseDuration) {
     return store
         .transaction(
             tx -> tx.claimNextWork(WorkTargetType.THREAD, "token-" + threadId, leaseDuration))
@@ -684,7 +686,9 @@ public final class ThreadProcessorTestSupport {
   // -----------------------------------------------------------------------------------------------
 
   static void transitionModel(
-      InMemoryHarnessStore store, UUID modelId, Function<ModelInvocation, ModelInvocation> f) {
+      InMemoryBuiltinHarnessStore store,
+      UUID modelId,
+      Function<ModelInvocation, ModelInvocation> f) {
     store.transaction(
         tx -> {
           ModelInvocation model = builtin(tx).lockModelInvocation(modelId).orElseThrow();
@@ -694,7 +698,7 @@ public final class ThreadProcessorTestSupport {
   }
 
   static void transitionTool(
-      InMemoryHarnessStore store, UUID toolId, Function<ToolInvocation, ToolInvocation> f) {
+      InMemoryBuiltinHarnessStore store, UUID toolId, Function<ToolInvocation, ToolInvocation> f) {
     store.transaction(
         tx -> {
           ToolInvocation tool = tx.lockToolInvocation(toolId).orElseThrow();
@@ -704,7 +708,8 @@ public final class ThreadProcessorTestSupport {
   }
 
   /** 仅推进 Thread 的 durable 时间/version，保持 head 与 policy 不变。 */
-  static void touchThreadTimestamp(InMemoryHarnessStore store, UUID threadId, Instant updatedAt) {
+  static void touchThreadTimestamp(
+      InMemoryBuiltinHarnessStore store, UUID threadId, Instant updatedAt) {
     store.transaction(
         tx -> {
           ThreadState thread = tx.lockThread(threadId).orElseThrow();
@@ -714,7 +719,8 @@ public final class ThreadProcessorTestSupport {
   }
 
   /** 通过 Store validator 合法推进 ModelInvocation.updatedAt，保持 invocation 事实不变。 */
-  static void touchModelTimestamp(InMemoryHarnessStore store, UUID modelId, Instant updatedAt) {
+  static void touchModelTimestamp(
+      InMemoryBuiltinHarnessStore store, UUID modelId, Instant updatedAt) {
     transitionModel(
         store,
         modelId,
@@ -740,7 +746,8 @@ public final class ThreadProcessorTestSupport {
   }
 
   /** 通过 Store validator 合法推进 ToolInvocation.updatedAt，保持 invocation 事实不变。 */
-  static void touchToolTimestamp(InMemoryHarnessStore store, UUID toolId, Instant updatedAt) {
+  static void touchToolTimestamp(
+      InMemoryBuiltinHarnessStore store, UUID toolId, Instant updatedAt) {
     transitionTool(
         store,
         toolId,
@@ -764,50 +771,52 @@ public final class ThreadProcessorTestSupport {
   }
 
   /** 把 READY ToolInvocation 逐级推进到 SUCCEEDED 并挂载自定义结果（用于 mapper 回滚类测试）。 */
-  static void succeedToolWith(InMemoryHarnessStore store, UUID toolId, ToolResult result) {
+  static void succeedToolWith(InMemoryBuiltinHarnessStore store, UUID toolId, ToolResult result) {
     succeedToolWith(store, toolId, result, ToolEffectBatch.EMPTY);
   }
 
   /** 把 READY ToolInvocation 逐级推进到 SUCCEEDED，并原子附带自定义结果与 effects。 */
   static void succeedToolWith(
-      InMemoryHarnessStore store, UUID toolId, ToolResult result, ToolEffectBatch effects) {
+      InMemoryBuiltinHarnessStore store, UUID toolId, ToolResult result, ToolEffectBatch effects) {
     transitionTool(store, toolId, t -> t.markApprovalNotRequired(NOW));
     transitionTool(store, toolId, t -> t.markRunning(NOW));
     transitionTool(store, toolId, t -> t.succeed(result, effects, NOW));
   }
 
-  static ThreadState thread(InMemoryHarnessStore store, UUID threadId) {
+  static ThreadState thread(InMemoryBuiltinHarnessStore store, UUID threadId) {
     return store.transaction(tx -> tx.findThread(threadId)).orElseThrow();
   }
 
-  public static EntryPath path(InMemoryHarnessStore store, UUID threadId) {
+  public static EntryPath path(InMemoryBuiltinHarnessStore store, UUID threadId) {
     return store.transaction(
         tx -> tx.loadEntryPath(tx.findThread(threadId).orElseThrow().headEntryId()));
   }
 
-  static Entry entry(InMemoryHarnessStore store, UUID entryId) {
+  static Entry entry(InMemoryBuiltinHarnessStore store, UUID entryId) {
     return store.transaction(tx -> tx.findEntry(entryId)).orElseThrow();
   }
 
-  public static ModelInvocation model(InMemoryHarnessStore store, UUID modelId) {
+  public static ModelInvocation model(InMemoryBuiltinHarnessStore store, UUID modelId) {
     return store.transaction(tx -> builtin(tx).findModelInvocation(modelId)).orElseThrow();
   }
 
-  static ToolInvocation tool(InMemoryHarnessStore store, UUID toolId) {
+  static ToolInvocation tool(InMemoryBuiltinHarnessStore store, UUID toolId) {
     return store.transaction(tx -> tx.findToolInvocation(toolId)).orElseThrow();
   }
 
-  static List<ToolInvocation> toolsByAssistant(InMemoryHarnessStore store, UUID assistantEntryId) {
+  static List<ToolInvocation> toolsByAssistant(
+      InMemoryBuiltinHarnessStore store, UUID assistantEntryId) {
     return store.transaction(tx -> tx.loadToolInvocationsByAssistantEntryId(assistantEntryId));
   }
 
-  static ThreadCommand command(InMemoryHarnessStore store, UUID threadId, UUID idempotencyKey) {
+  static ThreadCommand command(
+      InMemoryBuiltinHarnessStore store, UUID threadId, UUID idempotencyKey) {
     return store
         .transaction(tx -> tx.findCommandByIdempotencyKey(threadId, idempotencyKey))
         .orElseThrow();
   }
 
-  static Work work(InMemoryHarnessStore store, WorkTarget target) {
+  static Work work(InMemoryBuiltinHarnessStore store, WorkTarget target) {
     return store.transaction(tx -> tx.findWork(target)).orElse(null);
   }
 
@@ -966,12 +975,12 @@ public final class ThreadProcessorTestSupport {
    * usage}（planner 依赖它）；不 seed/保留任何 ModelInvocation（closed turn 不保留 invocation）。
    */
   static ClosedTurnBaseline seedCompactionReadyClosedTurn(
-      InMemoryHarnessStore store, ModelUsage usage) {
+      InMemoryBuiltinHarnessStore store, ModelUsage usage) {
     return seedCompactionReadyClosedTurn(store, usage, false);
   }
 
   static ClosedTurnBaseline seedCompactionReadyClosedTurn(
-      InMemoryHarnessStore store, ModelUsage usage, boolean continueModel) {
+      InMemoryBuiltinHarnessStore store, ModelUsage usage, boolean continueModel) {
     // 形状：turn1（有足够可移除历史，确保成功摘要有真实 gain）+ turn2（长 USER + 短 ASSISTANT）。
     // planner 从尾部累计：turn2 的 ASSISTANT 远小于 keepRecentTokens，长 USER 处越过 -> cut 落在 turn2 USER（非切分
     // FULL）。
@@ -1281,7 +1290,7 @@ public final class ThreadProcessorTestSupport {
   /** 每次测试一个 Fixture：InMemory store + fake resolver + 可变时钟 + ThreadProcessor + HarnessRuntime。 */
   public static final class Fixture {
     public final MutableClock clock = new MutableClock(NOW);
-    public final InMemoryHarnessStore store = new InMemoryHarnessStore();
+    public final InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
 
     {
       store.setClock(clock);
@@ -1327,7 +1336,7 @@ public final class ThreadProcessorTestSupport {
    * 包装 InMemory store 的 test fake：第 {@code loseAtFenceCall} 次 {@code lockClaimedWork} 调用开始返回 empty
    * （模拟 claim 在最终 fence 处丢失）。用于证明 final fence 丢失时整事务回滚、零 durable mutation。
    */
-  static HarnessStore claimLosingStore(InMemoryHarnessStore real, int loseAtFenceCall) {
+  static HarnessStore claimLosingStore(InMemoryBuiltinHarnessStore real, int loseAtFenceCall) {
     AtomicInteger fenceCalls = new AtomicInteger();
     InvocationHandler storeHandler =
         (storeProxy, method, args) -> {

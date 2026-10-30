@@ -33,6 +33,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.interaction.EnvironmentToolWait;
@@ -40,7 +41,6 @@ import fun.fengwk.kkstudio.harness.runtime.interaction.PendingInteraction;
 import fun.fengwk.kkstudio.harness.runtime.interaction.PendingInteractionPage;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.store.EnvironmentToolWaitRow;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
@@ -59,13 +59,13 @@ import java.util.UUID;
  */
 class HarnessRuntimePendingInteractionTest {
 
-  private InMemoryHarnessStore store;
+  private InMemoryBuiltinHarnessStore store;
   private TestClock clock;
   private HarnessRuntime runtime;
 
   @BeforeEach
   void setUp() {
-    store = new InMemoryHarnessStore();
+    store = new InMemoryBuiltinHarnessStore();
     clock = new TestClock(T5);
     runtime = HarnessRuntimeTestSupport.runtime(store, clock);
   }
@@ -120,7 +120,8 @@ class HarnessRuntimePendingInteractionTest {
   }
 
   /** 在指定时间戳创建带有 READY ToolInvocation 的 TOOL baseline。 */
-  private static ToolBaseline seedToolBaselineAt(InMemoryHarnessStore store, Instant createdAt) {
+  private static ToolBaseline seedToolBaselineAt(
+      InMemoryBuiltinHarnessStore store, Instant createdAt) {
     return store.transaction(
         tx -> {
           UUID sessionId = tx.nextId();

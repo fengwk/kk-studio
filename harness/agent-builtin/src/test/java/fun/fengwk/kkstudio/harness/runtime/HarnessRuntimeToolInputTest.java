@@ -38,6 +38,7 @@ import tools.jackson.databind.JsonNode;
 import fun.fengwk.kkstudio.common.json.JsonValues;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException.Reason;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
@@ -50,7 +51,6 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.interaction.PendingInteraction;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
@@ -86,13 +86,13 @@ class HarnessRuntimeToolInputTest {
   /** 符合绑定 schema（数组无下限）但违反问卷契约（至少一问）的 {@code ask_user} 参数：不可解码为冻结问卷。 */
   private static final String QUESTIONNAIRE_WITHOUT_QUESTIONS = "{\"questions\":[]}";
 
-  private InMemoryHarnessStore store;
+  private InMemoryBuiltinHarnessStore store;
   private TestClock clock;
   private HarnessRuntime runtime;
 
   @BeforeEach
   void setUp() {
-    store = new InMemoryHarnessStore();
+    store = new InMemoryBuiltinHarnessStore();
     clock = new TestClock(T5);
     runtime = HarnessRuntimeTestSupport.runtime(store, clock);
   }

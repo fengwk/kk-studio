@@ -15,7 +15,7 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 
 import java.time.Clock;
 import java.util.List;
@@ -160,7 +160,8 @@ class ExecutionExitConfirmationRetryTest {
   }
 
   private static ExecutionExitConfirmer confirmer(ExecutionExitJournal journal) {
-    return new ExecutionExitConfirmer(new InMemoryHarnessStore(), journal, Clock.systemUTC());
+    return new ExecutionExitConfirmer(
+        new InMemoryBuiltinHarnessStore(), journal, Clock.systemUTC());
   }
 
   private static void dispatchUntil(

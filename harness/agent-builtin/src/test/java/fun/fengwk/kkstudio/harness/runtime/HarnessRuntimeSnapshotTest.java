@@ -19,10 +19,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.builtin.store.BuiltinStore;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.driver.GenerationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadLiveState;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
@@ -44,12 +44,12 @@ import java.util.function.Function;
 /** getThreadSnapshot：每个分类器上下文中事务内一致的投影。 */
 class HarnessRuntimeSnapshotTest {
 
-  private InMemoryHarnessStore store;
+  private InMemoryBuiltinHarnessStore store;
   private HarnessRuntime runtime;
 
   @BeforeEach
   void setUp() {
-    store = new InMemoryHarnessStore();
+    store = new InMemoryBuiltinHarnessStore();
     runtime = HarnessRuntimeTestSupport.runtime(store, Clock.fixed(T5, ZoneOffset.UTC));
   }
 
@@ -240,7 +240,7 @@ class HarnessRuntimeSnapshotTest {
    */
   @Test
   void sharedContextHelperRaisesIseWhenFoundModelCannotBeLocked() {
-    InMemoryHarnessStore delegate = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore delegate = new InMemoryBuiltinHarnessStore();
     HarnessRuntimeTestSupport.ModelBaseline baseline = seedRunningModel(delegate);
     HarnessRuntime sabotagedRuntime =
         HarnessRuntimeTestSupport.runtime(
@@ -253,7 +253,7 @@ class HarnessRuntimeSnapshotTest {
   }
 
   /** 仅测试用的委托 store：其事务拒绝锁定任何 Model 行。 */
-  private static HarnessStore sabotagedStoreLockingNoModel(InMemoryHarnessStore delegate) {
+  private static HarnessStore sabotagedStoreLockingNoModel(InMemoryBuiltinHarnessStore delegate) {
     return (HarnessStore)
         Proxy.newProxyInstance(
             HarnessStore.class.getClassLoader(),

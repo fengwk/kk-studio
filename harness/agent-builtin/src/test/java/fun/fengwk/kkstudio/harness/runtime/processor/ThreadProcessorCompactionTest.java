@@ -39,6 +39,7 @@ import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
@@ -89,7 +90,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
@@ -1400,7 +1400,8 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
    * FAILED TURN_END 挂在 turn1 后）。历史事实仅由 immutable Entry 构成（TURN_START owner/contextWindow + 错误
    * payload），不 seed/保留 ModelInvocation（closed turn 不保留 invocation；OVERFLOW 触发按 Entry 错误事实判定）。
    */
-  private static ClosedTurnBaseline seedOverflowFailedClosedTurn(InMemoryHarnessStore store) {
+  private static ClosedTurnBaseline seedOverflowFailedClosedTurn(
+      InMemoryBuiltinHarnessStore store) {
     return store.transaction(
         tx -> {
           UUID sessionId = tx.nextId();
@@ -1508,7 +1509,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
   }
 
   /** 被停止的 COMPACTION turn 种子：TURN_START(COMPACTION) -> ABORTED -> TURN_END(STOPPED)。 */
-  private static ClosedTurnBaseline seedStoppedCompactionTurn(InMemoryHarnessStore store) {
+  private static ClosedTurnBaseline seedStoppedCompactionTurn(InMemoryBuiltinHarnessStore store) {
     return store.transaction(
         tx -> {
           UUID sessionId = tx.nextId();
@@ -1566,7 +1567,8 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
    * barrier）：处理本 thread 时不得压缩该 turn。共享历史仅由 immutable Entry 构成（ {@link
    * TurnStartPayload#ownerThreadId()} + 两个 Thread 指向同一 closed head），不依赖任何 ModelInvocation。
    */
-  private static ClosedTurnBaseline seedClosedTurnOwnedByOtherThread(InMemoryHarnessStore store) {
+  private static ClosedTurnBaseline seedClosedTurnOwnedByOtherThread(
+      InMemoryBuiltinHarnessStore store) {
     return store.transaction(
         tx -> {
           UUID sessionId = tx.nextId();
@@ -2004,7 +2006,8 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
   }
 
   /** 读取指定 Thread 当前 open Turn 的 model invocation（未经模型执行，仅本地 durable 事实）。 */
-  private static ModelInvocation childOpenModel(InMemoryHarnessStore store, UUID childThreadId) {
+  private static ModelInvocation childOpenModel(
+      InMemoryBuiltinHarnessStore store, UUID childThreadId) {
     return store.transaction(
         tx -> {
           ThreadState child = tx.findThread(childThreadId).orElseThrow();
@@ -2014,14 +2017,15 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
   }
 
   /** 读取指定 TURN_START Entry 冻结的 maxOutputTokens。 */
-  private static int turnStartMaxOutputTokens(InMemoryHarnessStore store, UUID turnStartEntryId) {
+  private static int turnStartMaxOutputTokens(
+      InMemoryBuiltinHarnessStore store, UUID turnStartEntryId) {
     return store.transaction(
         tx ->
             ((TurnStartPayload) tx.findEntry(turnStartEntryId).orElseThrow().payload())
                 .maxOutputTokens());
   }
 
-  private static long compactionFailureCount(InMemoryHarnessStore store, UUID threadId) {
+  private static long compactionFailureCount(InMemoryBuiltinHarnessStore store, UUID threadId) {
     return store.transaction(
         tx ->
             tx.loadEntryPath(tx.findThread(threadId).orElseThrow().headEntryId()).entries().stream()
@@ -2032,12 +2036,12 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                 .count());
   }
 
-  private static boolean forbidsAutoCompaction(InMemoryHarnessStore store, UUID threadId) {
+  private static boolean forbidsAutoCompaction(InMemoryBuiltinHarnessStore store, UUID threadId) {
     return store.transaction(
         tx -> !tx.findThread(threadId).orElseThrow().constraints().allowAutoCompaction());
   }
 
-  private static void setStopped(InMemoryHarnessStore store, UUID threadId) {
+  private static void setStopped(InMemoryBuiltinHarnessStore store, UUID threadId) {
     store.transaction(
         tx -> {
           ThreadState thread = tx.lockThread(threadId).orElseThrow();
@@ -2048,11 +2052,12 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
   }
 
   private static ThreadExecutionControl executionControl(
-      InMemoryHarnessStore store, UUID threadId) {
+      InMemoryBuiltinHarnessStore store, UUID threadId) {
     return store.transaction(tx -> tx.findThread(threadId).orElseThrow().executionControl());
   }
 
-  private static boolean isQueued(InMemoryHarnessStore store, UUID threadId, UUID commandId) {
+  private static boolean isQueued(
+      InMemoryBuiltinHarnessStore store, UUID threadId, UUID commandId) {
     return store.transaction(
         tx -> {
           tx.lockThread(threadId);
@@ -2061,7 +2066,8 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
         });
   }
 
-  private static String childFirstCommandText(InMemoryHarnessStore store, UUID childThreadId) {
+  private static String childFirstCommandText(
+      InMemoryBuiltinHarnessStore store, UUID childThreadId) {
     return store.transaction(
         tx -> {
           tx.lockThread(childThreadId);
@@ -2075,12 +2081,12 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
   }
 
   /** 手工创建带未结算 task Join 的直接子线程（独立 Session）；有效约束与 spawn 一样由父约束合并而来。 */
-  private static UUID seedJoinChildThread(InMemoryHarnessStore store, UUID parentThreadId) {
+  private static UUID seedJoinChildThread(InMemoryBuiltinHarnessStore store, UUID parentThreadId) {
     return seedJoinChildThread(store, parentThreadId, ThreadConstraints.NONE);
   }
 
   private static UUID seedJoinChildThread(
-      InMemoryHarnessStore store, UUID parentThreadId, ThreadConstraints constraints) {
+      InMemoryBuiltinHarnessStore store, UUID parentThreadId, ThreadConstraints constraints) {
     return store.transaction(
         tx -> {
           tx.lockThread(parentThreadId);

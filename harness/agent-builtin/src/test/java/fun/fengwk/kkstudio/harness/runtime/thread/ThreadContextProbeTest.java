@@ -6,12 +6,12 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinAgentDriver;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -29,7 +29,7 @@ class ThreadContextProbeTest {
   @Test
   void probeWithoutExplicitPathLoadsTheLockedThreadHead() {
     // 两参数入口必须从同一 transaction 加载 head path，再交给共享分类器。
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
     ThreadState thread =
         new ThreadState(
             THREAD_ID,

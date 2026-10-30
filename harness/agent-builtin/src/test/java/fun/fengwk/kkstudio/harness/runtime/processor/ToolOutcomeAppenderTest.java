@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
@@ -26,7 +27,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
 import java.util.List;
@@ -44,7 +44,7 @@ class ToolOutcomeAppenderTest {
             ToolInvocationStatus.FAILED,
             ToolInvocationStatus.CANCELLED,
             ToolInvocationStatus.UNKNOWN)) {
-      InMemoryHarnessStore store = new InMemoryHarnessStore();
+      InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
       var chain =
           seedToolChain(store, List.of("call-1"), ModelInvocationStatus.SUCCEEDED, List.of(status));
       ToolInvocation invocation = tool(store, chain.toolInvocationIds().getFirst());
@@ -63,7 +63,7 @@ class ToolOutcomeAppenderTest {
 
   @Test
   void succeededStatusPersistsStableSessionResource() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
     var chain =
         seedToolChain(
             store,
@@ -112,7 +112,7 @@ class ToolOutcomeAppenderTest {
   /** append 只接受 terminal Tool：READY 行被拒绝（不进入任何 Entry 追加）。 */
   @Test
   void rejectsNonTerminalToolAppend() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
     var chain =
         seedToolChain(
             store,
@@ -134,7 +134,7 @@ class ToolOutcomeAppenderTest {
   /** SUCCEEDED 的 CUSTOM effects 按冻结顺序位于 ToolResult 之前；head 仍是 ToolResult Entry。 */
   @Test
   void appendsCustomEffectsBeforeToolResultInOrder() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
     var chain =
         seedToolChain(
             store,
@@ -174,7 +174,7 @@ class ToolOutcomeAppenderTest {
   /** 空结果稳定落为空 TextMessageContent，head ToolResult 仍被持久化。 */
   @Test
   void emptyResultFallsBackToEmptyText() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
     var chain =
         seedToolChain(
             store,

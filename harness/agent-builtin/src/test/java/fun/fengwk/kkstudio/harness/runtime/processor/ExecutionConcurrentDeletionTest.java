@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.harness.builtin.processor.ModelExecution;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessorConfig;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelStreamConfig;
 import fun.fengwk.kkstudio.harness.builtin.store.BuiltinStore;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
@@ -24,7 +25,6 @@ import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
@@ -244,7 +244,7 @@ class ExecutionConcurrentDeletionTest {
   }
 
   private record ToolExecutionFixture(
-      InMemoryHarnessStore rawStore,
+      InMemoryBuiltinHarnessStore rawStore,
       ToolProcessorTestSupport.RecordingSink sink,
       UUID toolInvocationId,
       UUID threadId,
@@ -269,7 +269,7 @@ class ExecutionConcurrentDeletionTest {
 
   /** 一条 READY 的 Model 链 + 进程内 execution；{@code activated} 决定是否先持久化到 RUNNING。 */
   private ModelExecutionFixture modelExecutionFixture(boolean activated) {
-    InMemoryHarnessStore rawStore = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore rawStore = new InMemoryBuiltinHarnessStore();
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
     schedulersToClose.add(scheduler);
     ThreadProcessorTestSupport.OpenTurnBaseline turn =
@@ -323,7 +323,7 @@ class ExecutionConcurrentDeletionTest {
 
   private final class ModelExecutionFixture {
 
-    final InMemoryHarnessStore rawStore;
+    final InMemoryBuiltinHarnessStore rawStore;
     final UUID threadId;
     final UUID invocationId;
     final AtomicInteger releases = new AtomicInteger();
@@ -332,7 +332,7 @@ class ExecutionConcurrentDeletionTest {
     final ModelExecution execution;
 
     ModelExecutionFixture(
-        InMemoryHarnessStore rawStore,
+        InMemoryBuiltinHarnessStore rawStore,
         DeletionBeforeThreadLockStore store,
         UUID threadId,
         UUID invocationId,
@@ -378,22 +378,24 @@ class ExecutionConcurrentDeletionTest {
     }
   }
 
-  private static long threadVersion(InMemoryHarnessStore store, UUID threadId) {
+  private static long threadVersion(InMemoryBuiltinHarnessStore store, UUID threadId) {
     return ToolProcessorTestSupport.thread(store, threadId).version();
   }
 
-  private static ExecutionExitState executionState(InMemoryHarnessStore store, UUID executionId) {
+  private static ExecutionExitState executionState(
+      InMemoryBuiltinHarnessStore store, UUID executionId) {
     return store.transaction(tx -> tx.findExecution(executionId).orElseThrow().state());
   }
 
-  private static ModelInvocationStatus modelStatus(InMemoryHarnessStore store, UUID invocationId) {
+  private static ModelInvocationStatus modelStatus(
+      InMemoryBuiltinHarnessStore store, UUID invocationId) {
     return store
         .transaction(tx -> builtin(tx).findModelInvocation(invocationId))
         .orElseThrow()
         .status();
   }
 
-  private static Object modelResult(InMemoryHarnessStore store, UUID invocationId) {
+  private static Object modelResult(InMemoryBuiltinHarnessStore store, UUID invocationId) {
     return store
         .transaction(tx -> builtin(tx).findModelInvocation(invocationId))
         .orElseThrow()
@@ -418,13 +420,13 @@ class ExecutionConcurrentDeletionTest {
    */
   private static final class DeletionBeforeThreadLockStore implements HarnessStore, BuiltinStore {
 
-    private final InMemoryHarnessStore delegate;
+    private final InMemoryBuiltinHarnessStore delegate;
     private final UUID deletedThreadId;
     private final AtomicInteger failedTransactions = new AtomicInteger();
     private boolean armed;
     private boolean deleted;
 
-    DeletionBeforeThreadLockStore(InMemoryHarnessStore delegate, UUID deletedThreadId) {
+    DeletionBeforeThreadLockStore(InMemoryBuiltinHarnessStore delegate, UUID deletedThreadId) {
       this.delegate = delegate;
       this.deletedThreadId = deletedThreadId;
     }

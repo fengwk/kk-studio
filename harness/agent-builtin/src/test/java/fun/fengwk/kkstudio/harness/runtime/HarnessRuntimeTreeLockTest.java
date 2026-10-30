@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.builtin.store.BuiltinStore;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.Baseline;
@@ -41,7 +42,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
@@ -69,13 +69,13 @@ import java.util.function.Function;
  */
 class HarnessRuntimeTreeLockTest {
 
-  private InMemoryHarnessStore store;
+  private InMemoryBuiltinHarnessStore store;
   private TestClock clock;
   private HarnessRuntime runtime;
 
   @BeforeEach
   void setUp() {
-    store = new InMemoryHarnessStore();
+    store = new InMemoryBuiltinHarnessStore();
     clock = new TestClock(T0);
     runtime = HarnessRuntimeTestSupport.runtime(store, clock);
   }
@@ -430,7 +430,7 @@ class HarnessRuntimeTreeLockTest {
   }
 
   private static UUID createChildThread(
-      InMemoryHarnessStore store,
+      InMemoryBuiltinHarnessStore store,
       UUID parentThreadId,
       UUID sessionId,
       UUID headEntryId,
@@ -464,7 +464,7 @@ class HarnessRuntimeTreeLockTest {
   }
 
   private static HarnessStore recordingStore(
-      InMemoryHarnessStore delegate, List<String> lockCalls) {
+      InMemoryBuiltinHarnessStore delegate, List<String> lockCalls) {
     return (HarnessStore)
         Proxy.newProxyInstance(
             HarnessStore.class.getClassLoader(),
@@ -544,7 +544,7 @@ class HarnessRuntimeTreeLockTest {
   }
 
   private static HarnessStore sabotagingStore(
-      InMemoryHarnessStore delegate, Map<String, Function<Object[], Object>> overrides) {
+      InMemoryBuiltinHarnessStore delegate, Map<String, Function<Object[], Object>> overrides) {
     return (HarnessStore)
         Proxy.newProxyInstance(
             HarnessStore.class.getClassLoader(),
@@ -577,7 +577,7 @@ class HarnessRuntimeTreeLockTest {
   }
 
   private static Fixture manualCompactionFixture() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
     Clock clock = Clock.fixed(T0, ZoneOffset.UTC);
     TurnResolver resolver =
         (threadId, candidatePath, preparation) -> {
@@ -601,14 +601,14 @@ class HarnessRuntimeTreeLockTest {
   }
 
   private record Fixture(
-      InMemoryHarnessStore store,
+      InMemoryBuiltinHarnessStore store,
       Clock clock,
       TurnResolver resolver,
       CompactionConfigProvider compactionConfigProvider) {}
 
   private record ClosedTurnBaseline(UUID sessionId, UUID threadId, UUID turnEndId) {}
 
-  private static ClosedTurnBaseline seedCompactionEligibleTurn(InMemoryHarnessStore store) {
+  private static ClosedTurnBaseline seedCompactionEligibleTurn(InMemoryBuiltinHarnessStore store) {
     Instant now = T0;
     return store.transaction(
         tx -> {

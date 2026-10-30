@@ -1,9 +1,5 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
-import fun.fengwk.kkstudio.harness.builtin.history.ModelAttemptMaterialization;
-import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
-import fun.fengwk.kkstudio.harness.builtin.store.BuiltinStore;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.StoppedThreadReceipt;
@@ -97,7 +93,7 @@ import java.util.function.Function;
  * 升序，Work 同层按 (type, id) 升序；requestWork 与存在行的 deleteWork 要求 owning Thread 已锁定。返回对象与 list 均为
  * immutable records / copies。
  */
-public final class InMemoryHarnessStore implements HarnessStore, BuiltinStore {
+public class InMemoryHarnessStore implements HarnessStore {
 
   private static final Comparator<ThreadCommand> COMMAND_LOCK_ORDER =
       Comparator.comparing(ThreadCommand::threadId, UuidOrder.COMPARATOR)
@@ -144,11 +140,11 @@ public final class InMemoryHarnessStore implements HarnessStore, BuiltinStore {
   }
 
   /** 仅用于测试的构造函数，用于播种全局 id 序列；下一个分配的 id 为 {@code initialNextId + 1}。 */
-  InMemoryHarnessStore(long initialNextId) {
+  public InMemoryHarnessStore(long initialNextId) {
     this(initialNextId, null);
   }
 
-  InMemoryHarnessStore(long initialNextId, RouteReadyPredicate routeReadyPredicate) {
+  public InMemoryHarnessStore(long initialNextId, RouteReadyPredicate routeReadyPredicate) {
     if (initialNextId < 0) {
       throw new IllegalArgumentException("initialNextId must not be negative");
     }
@@ -270,7 +266,7 @@ public final class InMemoryHarnessStore implements HarnessStore, BuiltinStore {
       inTransaction = true;
       transactionCount++;
       try {
-        InMemoryTransaction tx = new InMemoryTransaction(State.copyOf(committed));
+        InMemoryTransaction tx = createTransaction(State.copyOf(committed));
         try {
           result = callback.apply(tx);
           tx.close();
@@ -306,44 +302,41 @@ public final class InMemoryHarnessStore implements HarnessStore, BuiltinStore {
   public void assertNoAmbientTransaction() {}
 
   /** 已提交的 working state；每个 transaction 都基于 shallow copy 工作。 */
-  private static final class State {
+  protected static final class State {
     final Map<UUID, Session> sessions = new HashMap<>();
     final Map<UUID, Entry> entries = new HashMap<>();
     final Map<UUID, ThreadState> threads = new HashMap<>();
     final Map<CommandKey, ThreadCommand> commands = new HashMap<>();
-    final Map<UUID, ModelInvocation> modelInvocations = new HashMap<>();
+    final Map<UUID, Object> driverRows = new HashMap<>();
+    final Map<UUID, UUID> driverRowOwners = new HashMap<>();
+    final Map<String, Object> driverAttributes = new HashMap<>();
     final Map<UUID, ToolInvocation> toolInvocations = new HashMap<>();
     final Map<UUID, ThreadJoin> joins = new HashMap<>();
     final Map<StopReceiptKey, StoredStopReceipt> stopReceipts = new HashMap<>();
     final Map<StopRootKey, List<StopReceiptKey>> stopReceiptsByRoot = new HashMap<>();
     final Map<WorkTarget, Work> works = new HashMap<>();
     final Map<UUID, ExecutionExitFact> executions = new HashMap<>();
-    final Map<GroupCooldownKey, GroupCooldown> groupCooldowns = new HashMap<>();
     long nextId;
 
-    static State copyOf(State source) {
+    protected static State copyOf(State source) {
       State copy = new State();
       copy.sessions.putAll(source.sessions);
       copy.entries.putAll(source.entries);
       copy.threads.putAll(source.threads);
       copy.commands.putAll(source.commands);
-      copy.modelInvocations.putAll(source.modelInvocations);
+      copy.driverRows.putAll(source.driverRows);
+      copy.driverRowOwners.putAll(source.driverRowOwners);
+      copy.driverAttributes.putAll(source.driverAttributes);
       copy.toolInvocations.putAll(source.toolInvocations);
       copy.joins.putAll(source.joins);
       copy.stopReceipts.putAll(source.stopReceipts);
       copy.stopReceiptsByRoot.putAll(source.stopReceiptsByRoot);
       copy.works.putAll(source.works);
       copy.executions.putAll(source.executions);
-      copy.groupCooldowns.putAll(source.groupCooldowns);
       copy.nextId = source.nextId;
       return copy;
     }
   }
-
-  private record GroupCooldownKey(
-      String groupName, long groupVersion, String memberModelName, String memberVariant) {}
-
-  private record GroupCooldown(Instant cooldownUntil) {}
 
   /** Stop 回执身份 {@code (threadId, stopRequestId)}。 */
   private record StopReceiptKey(UUID threadId, UUID stopRequestId) {}
@@ -430,18 +423,9 @@ public final class InMemoryHarnessStore implements HarnessStore, BuiltinStore {
     }
   }
 
-  @Override
-  public BuiltinStore.Transaction in(HarnessStore.Transaction tx) {
-    Objects.requireNonNull(tx, "tx");
-    // Test wrappers may decorate the native transaction while delegating every operation to it.
-    if (tx instanceof BuiltinStore.Transaction transaction) {
-      return transaction;
-    }
-    if (!(tx instanceof InMemoryHarnessStore.InMemoryTransaction transaction)) {
-      throw new IllegalArgumentException(
-          "builtin store view requires a transaction created by this InMemoryHarnessStore");
-    }
-    return transaction;
+  /** 创建当前事务句柄的工厂；测试子类可返回扩展事务，与核心 Store 共用同一快照与锁语义。 */
+  protected InMemoryTransaction createTransaction(State state) {
+    return new InMemoryTransaction(state);
   }
 
   private record CommandKey(UUID threadId, long sequence) {}
@@ -452,7 +436,7 @@ public final class InMemoryHarnessStore implements HarnessStore, BuiltinStore {
 
   private record ToolCallIndexKey(UUID assistantEntryId, int callIndex) {}
 
-  private final class InMemoryTransaction implements BuiltinStore.Transaction {
+  protected class InMemoryTransaction implements HarnessStore.Transaction {
 
     private final State state;
     private final Set<LockKey> locked = new HashSet<>();
@@ -466,8 +450,13 @@ public final class InMemoryHarnessStore implements HarnessStore, BuiltinStore {
     private boolean closed;
     private Instant now;
 
-    InMemoryTransaction(State state) {
+    protected InMemoryTransaction(State state) {
       this.state = state;
+    }
+
+    /** 事务所属 Store；扩展事务只能在同一个 Store 内被投影。 */
+    protected final InMemoryHarnessStore ownerStore() {
+      return InMemoryHarnessStore.this;
     }
 
     @Override
@@ -479,11 +468,11 @@ public final class InMemoryHarnessStore implements HarnessStore, BuiltinStore {
       return now;
     }
 
-    void close() {
+    protected void close() {
       closed = true;
     }
 
-    private void checkOpen() {
+    protected void checkOpen() {
       if (Thread.currentThread() != owner) {
         throw new IllegalStateException("transaction handle may only be used by its owner thread");
       }
@@ -1634,212 +1623,76 @@ public final class InMemoryHarnessStore implements HarnessStore, BuiltinStore {
       }
     }
 
-    @Override
-    public Optional<ModelInvocation> findModelInvocation(UUID id) {
+    protected Optional<Object> findDriverRow(UUID id) {
       checkOpen();
-      return Optional.ofNullable(state.modelInvocations.get(id));
+      return Optional.ofNullable(state.driverRows.get(id));
     }
 
-    @Override
-    public Optional<ModelInvocation> lockModelInvocation(UUID id) {
+    protected Optional<Object> lockDriverRow(UUID id) {
       checkOpen();
       LockKey lockKey = LockKey.model(id);
       requireCanLock(lockKey);
-      ModelInvocation invocation = state.modelInvocations.get(id);
-      if (invocation != null) {
+      Object row = state.driverRows.get(id);
+      if (row != null) {
         lock(lockKey);
       }
-      return Optional.ofNullable(invocation);
+      return Optional.ofNullable(row);
     }
 
-    @Override
-    public Optional<ModelInvocation> findModelInvocationByTurn(
-        UUID threadId, UUID turnStartEntryId) {
+    protected void insertDriverRow(UUID id, UUID ownerThreadId, Object value) {
       checkOpen();
-      for (ModelInvocation invocation : state.modelInvocations.values()) {
-        if (invocation.threadId().equals(threadId)
-            && invocation.turnStartEntryId().equals(turnStartEntryId)) {
-          return Optional.of(invocation);
-        }
+      Objects.requireNonNull(id, "id");
+      Objects.requireNonNull(ownerThreadId, "ownerThreadId");
+      Objects.requireNonNull(value, "value");
+      requireAbsent(state.driverRows, id, "driver row");
+      if (!state.threads.containsKey(ownerThreadId)) {
+        throw new IllegalArgumentException("thread " + ownerThreadId + " does not exist");
       }
-      return Optional.empty();
-    }
-
-    @Override
-    public void insertModelInvocation(ModelInvocation invocation) {
-      checkOpen();
-      Objects.requireNonNull(invocation, "invocation");
-      requireMillisecondPrecision(invocation.createdAt());
-      requireMillisecondPrecision(invocation.updatedAt());
-      requireAbsent(state.modelInvocations, invocation.id(), "model invocation");
-      requireUniqueModelTurn(invocation);
-      if (!state.threads.containsKey(invocation.threadId())) {
-        throw new IllegalArgumentException("thread " + invocation.threadId() + " does not exist");
-      }
-      // requestHead CAS 只有在 Thread 已在本事务锁定时才原子成立。
-      requireLocked(LockKey.thread(invocation.threadId()));
-      Entry turnStart = requireExistingEntry(invocation.turnStartEntryId());
-      if (turnStart.payload().type() != EntryType.TURN_START) {
-        throw new IllegalArgumentException("turnStartEntryId must reference a TURN_START entry");
-      }
-      TurnStartPayload turnStartPayload = (TurnStartPayload) turnStart.payload();
-      if (!turnStartPayload.ownerThreadId().equals(invocation.threadId())) {
-        throw new IllegalArgumentException(
-            "turn start ownerThreadId must equal the model invocation threadId");
-      }
-      Integer contextWindow = turnStartPayload.contextWindow();
-      if (contextWindow == null || contextWindow <= 0) {
-        throw new IllegalArgumentException(
-            "model invocations require a positive turn start contextWindow");
-      }
-      Integer maxOutputTokens = turnStartPayload.maxOutputTokens();
-      if (maxOutputTokens == null || maxOutputTokens <= 0) {
-        throw new IllegalArgumentException(
-            "model invocations require positive turn start maxOutputTokens");
-      }
-      // 新 durable invocation 初始状态不变量：READY / attempt=0 / 无 terminal facts（record 配合保证后者）。
-      if (invocation.status() != ModelInvocationStatus.READY || invocation.attempt() != 0) {
-        throw new IllegalArgumentException("new model invocations must be READY with attempt 0");
-      }
-      // 创建时精确 requestHead CAS：requestHead 必须等于 Thread 当前 head。
-      ThreadState thread = state.threads.get(invocation.threadId());
-      if (!thread.headEntryId().equals(invocation.requestHeadEntryId())) {
-        throw new IllegalArgumentException(
-            "requestHeadEntryId must equal the current thread head entry");
-      }
-      requireValidModelBranch(invocation);
-      requireValidModelResultEntry(invocation);
-      LockKey lockKey = LockKey.model(invocation.id());
+      requireLocked(LockKey.thread(ownerThreadId));
+      LockKey lockKey = LockKey.model(id);
       requireCanLock(lockKey);
-      state.modelInvocations.put(invocation.id(), invocation);
+      state.driverRows.put(id, value);
+      state.driverRowOwners.put(id, ownerThreadId);
       lock(lockKey);
     }
 
-    /**
-     * turnStartEntryId 必须位于 requestHeadEntryId 的 EntryPath 上，且该 path 的 session 必须与 Thread session
-     * 一致。仅 insert 使用：创建时的 requestHead CAS 依赖 Thread 当前 head，relocation 后不应重复校验。
-     */
-    private void requireValidModelBranch(ModelInvocation invocation) {
-      EntryPath requestHeadPath = loadEntryPath(invocation.requestHeadEntryId());
-      boolean turnStartOnBasisPath =
-          requestHeadPath.entries().stream()
-              .anyMatch(entry -> entry.id().equals(invocation.turnStartEntryId()));
-      if (!turnStartOnBasisPath) {
-        throw new IllegalArgumentException(
-            "turnStartEntryId must be on the requestHeadEntryId entry path");
-      }
-      ThreadState thread = state.threads.get(invocation.threadId());
-      if (!thread.sessionId().equals(requestHeadPath.head().sessionId())) {
-        throw new IllegalArgumentException(
-            "thread session must match the requestHead path session");
-      }
-    }
-
-    private void requireUniqueModelTurn(ModelInvocation invocation) {
-      for (ModelInvocation existing : state.modelInvocations.values()) {
-        if (existing.threadId().equals(invocation.threadId())
-            && existing.turnStartEntryId().equals(invocation.turnStartEntryId())) {
-          throw new IllegalArgumentException(
-              "model invocation already exists for thread "
-                  + invocation.threadId()
-                  + " turn "
-                  + invocation.turnStartEntryId());
-        }
-      }
-    }
-
-    private void requireValidModelResultEntry(ModelInvocation invocation) {
-      UUID resultEntryId = invocation.resultEntryId();
-      if (resultEntryId == null) {
-        return;
-      }
-      Entry result = requireExistingEntry(resultEntryId);
-      if (!isModelResultEntry(result)) {
-        throw new IllegalArgumentException(
-            "model resultEntryId must reference an assistant, assistant-error or"
-                + " assistant-aborted entry");
-      }
-      if (resultEntryId.equals(invocation.requestHeadEntryId())) {
-        throw new IllegalArgumentException(
-            "model result entry must be a strict descendant of the requestHead head entry");
-      }
-      // result path 必须同时包含 requestHead 与 turnStart（同 branch descendant），不依赖 Thread 当前 head。
-      EntryPath resultPath = loadEntryPath(resultEntryId);
-      boolean onBasisPath =
-          resultPath.entries().stream()
-              .anyMatch(entry -> entry.id().equals(invocation.requestHeadEntryId()));
-      boolean sameTurnStart =
-          resultPath.entries().stream()
-              .anyMatch(entry -> entry.id().equals(invocation.turnStartEntryId()));
-      if (!onBasisPath || !sameTurnStart) {
-        throw new IllegalArgumentException(
-            "model result entry must be on the requestHead path and in the same turn");
-      }
-      for (ModelInvocation other : state.modelInvocations.values()) {
-        if (!other.id().equals(invocation.id())
-            && Objects.equals(other.resultEntryId(), resultEntryId)) {
-          throw new IllegalArgumentException(
-              "model resultEntryId " + resultEntryId + " is already used");
-        }
-      }
-    }
-
-    private static boolean isModelResultEntry(Entry entry) {
-      return switch (entry.payload().type()) {
-        case ASSISTANT_ERROR, ASSISTANT_ABORTED -> true;
-        case MESSAGE -> entry.payload() instanceof MessagePayload message
-            && message.message().role() == AgentMessageRole.ASSISTANT;
-        default -> false;
-      };
-    }
-
-    @Override
-    public void updateModelInvocation(ModelInvocation invocation) {
+    protected void updateDriverRow(UUID id, Object value) {
       checkOpen();
-      Objects.requireNonNull(invocation, "invocation");
-      requireMillisecondPrecision(invocation.createdAt());
-      requireMillisecondPrecision(invocation.updatedAt());
-      requireLocked(LockKey.model(invocation.id()));
-      ModelInvocation stored = state.modelInvocations.get(invocation.id());
-      if (stored == null) {
-        throw new IllegalArgumentException(
-            "model invocation " + invocation.id() + " does not exist");
+      Objects.requireNonNull(id, "id");
+      Objects.requireNonNull(value, "value");
+      requireLocked(LockKey.model(id));
+      if (!state.driverRows.containsKey(id)) {
+        throw new IllegalArgumentException("driver row " + id + " does not exist");
       }
-      ModelInvocation.validateTransition(stored, invocation);
-      // update 不重复依赖 Thread 当前 head / session（relocation 后 terminal exact replay 仍合法）；
-      // 仅当 resultEntry 出现时校验类型、path 与唯一性。
-      requireValidModelResultEntry(invocation);
-      if (stored.resultEntryId() == null && invocation.resultEntryId() != null) {
-        ModelAttemptMaterialization.validate(
-            stored, invocation, loadEntryPath(invocation.resultEntryId()));
-      }
-      state.modelInvocations.put(invocation.id(), invocation);
+      state.driverRows.put(id, value);
     }
 
-    @Override
-    public boolean isGroupMemberCooling(
-        String groupName, long groupVersion, String memberModelName, String memberVariant) {
-      Instant now = now();
-      GroupCooldown cooldown =
-          state.groupCooldowns.get(
-              new GroupCooldownKey(groupName, groupVersion, memberModelName, memberVariant));
-      return cooldown != null && cooldown.cooldownUntil().isAfter(now);
-    }
-
-    @Override
-    public void freezeGroupMember(
-        String groupName,
-        long groupVersion,
-        String memberModelName,
-        String memberVariant,
-        Instant cooldownUntil) {
+    protected boolean deleteDriverRow(UUID id) {
       checkOpen();
-      GroupCooldownKey key =
-          new GroupCooldownKey(groupName, groupVersion, memberModelName, memberVariant);
-      GroupCooldown existing = state.groupCooldowns.get(key);
-      if (existing == null || existing.cooldownUntil().isBefore(cooldownUntil)) {
-        state.groupCooldowns.put(key, new GroupCooldown(cooldownUntil));
+      Objects.requireNonNull(id, "id");
+      if (!state.driverRows.containsKey(id)) {
+        throw new IllegalArgumentException("driver row " + id + " does not exist");
       }
+      requireLocked(LockKey.model(id));
+      state.driverRowOwners.remove(id);
+      return state.driverRows.remove(id) != null;
+    }
+
+    protected Map<UUID, Object> driverRows() {
+      checkOpen();
+      return Map.copyOf(state.driverRows);
+    }
+
+    protected Optional<Object> driverAttribute(String key) {
+      checkOpen();
+      return Optional.ofNullable(state.driverAttributes.get(key));
+    }
+
+    protected void putDriverAttribute(String key, Object value) {
+      checkOpen();
+      Objects.requireNonNull(key, "key");
+      Objects.requireNonNull(value, "value");
+      state.driverAttributes.put(key, value);
     }
 
     public Optional<ToolInvocation> findToolInvocation(UUID id) {
@@ -2334,15 +2187,13 @@ public final class InMemoryHarnessStore implements HarnessStore, BuiltinStore {
         lock(LockKey.command(command.threadId(), command.sequence()));
       }
 
-      List<ModelInvocation> models =
-          state.modelInvocations.values().stream()
-              .filter(model -> threadIdSet.contains(model.threadId()))
-              .sorted(Comparator.comparing(ModelInvocation::id, UuidOrder.COMPARATOR))
+      List<UUID> driverRowIds =
+          state.driverRows.keySet().stream()
+              .filter(id -> threadIdSet.contains(state.driverRowOwners.get(id)))
+              .sorted(UuidOrder.COMPARATOR)
               .toList();
-      Set<UUID> modelIds = new HashSet<>();
-      for (ModelInvocation model : models) {
-        modelIds.add(model.id());
-        lock(LockKey.model(model.id()));
+      for (UUID driverRowId : driverRowIds) {
+        lock(LockKey.model(driverRowId));
       }
 
       List<ToolInvocation> tools =
@@ -2362,7 +2213,7 @@ public final class InMemoryHarnessStore implements HarnessStore, BuiltinStore {
                   target ->
                       (target.type() == WorkTargetType.THREAD && threadIdSet.contains(target.id()))
                           || (target.type() == WorkTargetType.MODEL
-                              && modelIds.contains(target.id()))
+                              && driverRowIds.contains(target.id()))
                           || (target.type() == WorkTargetType.TOOL
                               && toolIds.contains(target.id())))
               .sorted(WORK_LOCK_ORDER)
@@ -2380,8 +2231,9 @@ public final class InMemoryHarnessStore implements HarnessStore, BuiltinStore {
       for (ToolInvocation tool : tools) {
         state.toolInvocations.remove(tool.id());
       }
-      for (ModelInvocation model : models) {
-        state.modelInvocations.remove(model.id());
+      for (UUID driverRowId : driverRowIds) {
+        state.driverRows.remove(driverRowId);
+        state.driverRowOwners.remove(driverRowId);
       }
       for (UUID threadId : copied) {
         state.threads.remove(threadId);
@@ -2545,26 +2397,6 @@ public final class InMemoryHarnessStore implements HarnessStore, BuiltinStore {
     }
 
     @Override
-    public boolean deleteModelInvocation(UUID modelInvocationId) {
-      checkOpen();
-      Objects.requireNonNull(modelInvocationId, "modelInvocationId");
-      if (!state.modelInvocations.containsKey(modelInvocationId)) {
-        throw new IllegalArgumentException(
-            "model invocation " + modelInvocationId + " does not exist");
-      }
-      requireLocked(LockKey.model(modelInvocationId));
-      ModelInvocation model = state.modelInvocations.get(modelInvocationId);
-      for (ToolInvocation tool : state.toolInvocations.values()) {
-        if (tool.threadId().equals(model.threadId())
-            && tool.turnStartEntryId().equals(model.turnStartEntryId())) {
-          throw new IllegalArgumentException(
-              "model invocation " + modelInvocationId + " has tool invocation children");
-        }
-      }
-      return state.modelInvocations.remove(modelInvocationId) != null;
-    }
-
-    @Override
     public void requestWork(WorkTarget target) {
       requestWork(target, null);
     }
@@ -2599,11 +2431,11 @@ public final class InMemoryHarnessStore implements HarnessStore, BuiltinStore {
               yield target.id();
             }
             case MODEL -> {
-              ModelInvocation model = state.modelInvocations.get(target.id());
-              if (model == null) {
+              UUID ownerThreadId = state.driverRowOwners.get(target.id());
+              if (!state.driverRows.containsKey(target.id()) || ownerThreadId == null) {
                 throw new IllegalArgumentException("work target does not exist: " + target);
               }
-              yield model.threadId();
+              yield ownerThreadId;
             }
             case TOOL -> {
               ToolInvocation tool = state.toolInvocations.get(target.id());
@@ -2620,7 +2452,7 @@ public final class InMemoryHarnessStore implements HarnessStore, BuiltinStore {
       boolean exists =
           switch (target.type()) {
             case THREAD -> state.threads.containsKey(target.id());
-            case MODEL -> state.modelInvocations.containsKey(target.id());
+            case MODEL -> state.driverRows.containsKey(target.id());
             case TOOL -> state.toolInvocations.containsKey(target.id());
           };
       if (!exists) {

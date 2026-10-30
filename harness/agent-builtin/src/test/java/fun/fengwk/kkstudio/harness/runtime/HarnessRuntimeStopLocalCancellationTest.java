@@ -19,11 +19,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.ToolResultStatus;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -43,7 +43,7 @@ class HarnessRuntimeStopLocalCancellationTest {
 
   @Test
   void modelExecutionIsCancelledOnlyAfterTheDurableCommit() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
     HarnessRuntimeTestSupport.ModelBaseline baseline =
         seedModel(store, ModelInvocationStatus.READY);
     seedThreadWork(store, baseline.threadId());
@@ -76,7 +76,7 @@ class HarnessRuntimeStopLocalCancellationTest {
 
   @Test
   void toolCancellationIncludesOnlyOriginallyNonTerminalSiblings() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
     HarnessRuntimeTestSupport.ModelFreeMultiToolBaseline baseline =
         seedModelFreeToolBaseline(store, 3);
     List<UUID> ids = baseline.toolIds();
@@ -137,7 +137,7 @@ class HarnessRuntimeStopLocalCancellationTest {
 
   @Test
   void cancellationFailuresAreIsolatedFromTheCommittedStopAndFromEachOther() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
     HarnessRuntimeTestSupport.ModelFreeMultiToolBaseline baseline =
         seedModelFreeToolBaseline(store, 2);
     List<UUID> calls = new ArrayList<>();
@@ -175,7 +175,7 @@ class HarnessRuntimeStopLocalCancellationTest {
 
   @Test
   void replayAndIdleStopsDoNotRepeatLocalCancellation() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
     HarnessRuntimeTestSupport.ModelBaseline active = seedModel(store, ModelInvocationStatus.READY);
     List<UUID> calls = new ArrayList<>();
     HarnessRuntime runtime =

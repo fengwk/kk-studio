@@ -15,6 +15,7 @@ import fun.fengwk.kkstudio.harness.builtin.processor.ModelExecution;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessorConfig;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelStreamConfig;
 import fun.fengwk.kkstudio.harness.builtin.store.BuiltinStore;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
@@ -25,7 +26,6 @@ import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -84,7 +84,7 @@ class ExecutionTreeLockRegressionTest {
    */
   @Test
   void modelExecutionTerminalPathTakesNoTreeLock() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
     RecordingStore recordingStore = new RecordingStore(store);
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
     schedulersToClose.add(scheduler);
@@ -182,7 +182,7 @@ class ExecutionTreeLockRegressionTest {
   /** 测试意图：验证 ModelExecution 的 checkpoint 事务不取执行树锁，只按 Model -> Work 顺序锁定自己的行。 */
   @Test
   void modelExecutionCheckpointTakesNoTreeLock() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
     RecordingStore recordingStore = new RecordingStore(store);
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
     schedulersToClose.add(scheduler);
@@ -342,10 +342,10 @@ class ExecutionTreeLockRegressionTest {
   // --- 记录 Store 装饰器 ---
 
   static final class RecordingStore implements HarnessStore, BuiltinStore {
-    private final InMemoryHarnessStore delegate;
+    private final InMemoryBuiltinHarnessStore delegate;
     private final List<List<String>> recordedOperations = new CopyOnWriteArrayList<>();
 
-    RecordingStore(InMemoryHarnessStore delegate) {
+    RecordingStore(InMemoryBuiltinHarnessStore delegate) {
       this.delegate = delegate;
     }
 

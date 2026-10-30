@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.store.EnvironmentToolWaitRow;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
@@ -40,7 +41,7 @@ class InMemoryWorkTest extends HarnessStoreWorkContract {
   @Override
   HarnessStore createStore() {
     readyEnvironments.clear();
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryHarnessStore store = new InMemoryBuiltinHarnessStore();
     store.setClock(Clock.fixed(CLOCK, ZoneOffset.UTC));
     store.setEnvironmentReadyLeasePredicate(
         (environmentId, now) -> readyEnvironments.contains(environmentId.value()));
@@ -55,17 +56,17 @@ class InMemoryWorkTest extends HarnessStoreWorkContract {
   /** 内存时钟固定不前进：过期直接改写内存 lease deadline。 */
   @Override
   protected void expireLease(WorkTarget target) {
-    ((InMemoryHarnessStore) store).forceLeaseUntil(target, Instant.EPOCH);
+    ((InMemoryBuiltinHarnessStore) store).forceLeaseUntil(target, Instant.EPOCH);
   }
 
   @Override
   protected void forceWorkAvailable(WorkTarget target) {
-    ((InMemoryHarnessStore) store).forceAvailableAt(target, Instant.EPOCH);
+    ((InMemoryBuiltinHarnessStore) store).forceAvailableAt(target, Instant.EPOCH);
   }
 
   @Override
   protected void forceWorkAvailableAfter(WorkTarget target, Duration delay) {
-    ((InMemoryHarnessStore) store).forceAvailableAt(target, CLOCK.plus(delay));
+    ((InMemoryBuiltinHarnessStore) store).forceAvailableAt(target, CLOCK.plus(delay));
   }
 
   @Override
@@ -83,7 +84,7 @@ class InMemoryWorkTest extends HarnessStoreWorkContract {
   void toolProjectionUsesFrozenNameAndWorkDeadlineWithBooleanEnvironment() {
     SeededTool seeded = seedTool(store);
     EnvironmentId environment = EnvironmentId.of(UUID.randomUUID());
-    InMemoryHarnessStore memory = (InMemoryHarnessStore) store;
+    InMemoryHarnessStore memory = (InMemoryBuiltinHarnessStore) store;
     memory.setEnvironmentName(environment, "frozen-environment");
     WorkTarget target = new WorkTarget(WorkTargetType.TOOL, seeded.toolId());
     inTransaction(
@@ -140,7 +141,7 @@ class InMemoryWorkTest extends HarnessStoreWorkContract {
    */
   @Test
   void claimAndRenewDeadlinesAreAnchoredToTheTransactionTime() {
-    InMemoryHarnessStore memory = (InMemoryHarnessStore) store;
+    InMemoryHarnessStore memory = (InMemoryBuiltinHarnessStore) store;
     Duration claimLease = Duration.ofMinutes(5);
     Duration renewLease = Duration.ofMinutes(7);
     Baseline baseline = seedThreadBaseline(store);

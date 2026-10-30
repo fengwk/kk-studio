@@ -5,9 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.history.NotificationKind;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NotificationCommandPayload;
@@ -48,7 +48,7 @@ class ThreadInputDemandTest {
   /** queued 用户消息构成输入需求。 */
   @Test
   void hasInputDemandTrueForQueuedUserMessage() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
     HarnessRuntimeTestSupport.Baseline baseline = HarnessRuntimeTestSupport.seedBaseline(store);
     insertCommands(store, baseline, command(1L, userMessage(), null, null));
     assertTrue(hasInputDemand(store, baseline.threadId()));
@@ -57,7 +57,7 @@ class ThreadInputDemandTest {
   /** queued 设置命令不构成输入需求。 */
   @Test
   void hasInputDemandFalseForQueuedSettingOnly() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
     HarnessRuntimeTestSupport.Baseline baseline = HarnessRuntimeTestSupport.seedBaseline(store);
     insertCommands(
         store, baseline, command(1L, new SetAgentCommandPayload("assistant"), null, null));
@@ -67,13 +67,13 @@ class ThreadInputDemandTest {
   /** 无任何命令时没有输入需求。 */
   @Test
   void hasInputDemandFalseWhenNoCommands() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
     HarnessRuntimeTestSupport.Baseline baseline = HarnessRuntimeTestSupport.seedBaseline(store);
     assertFalse(hasInputDemand(store, baseline.threadId()));
   }
 
   private static void insertCommands(
-      InMemoryHarnessStore store,
+      InMemoryBuiltinHarnessStore store,
       HarnessRuntimeTestSupport.Baseline baseline,
       ThreadCommand command) {
     store.transaction(
@@ -86,7 +86,7 @@ class ThreadInputDemandTest {
         });
   }
 
-  private static boolean hasInputDemand(InMemoryHarnessStore store, UUID threadId) {
+  private static boolean hasInputDemand(InMemoryBuiltinHarnessStore store, UUID threadId) {
     return store.<Boolean>transaction(
         tx -> {
           tx.lockThread(threadId);

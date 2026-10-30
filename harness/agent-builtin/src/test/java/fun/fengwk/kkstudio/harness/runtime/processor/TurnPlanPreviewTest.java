@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
@@ -21,7 +22,6 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
@@ -45,7 +45,7 @@ class TurnPlanPreviewTest {
   /** 测试意图：SET_MODEL/SET_AGENT 前缀只更新快照，末尾 USER_MESSAGE 生成唯一模型可见消息，且候选 path 直接从 source head 续接。 */
   @Test
   void inputCandidatePathMergesSettingsSnapshotAndUserMessage() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
     var baseline = seedBaseline(store);
     EntryPath source = path(store, baseline.threadId());
     NewThreadCommand setModel =
@@ -79,7 +79,7 @@ class TurnPlanPreviewTest {
   /** 测试意图：candidate Entry 只是内存对象，绝不写入 Store（source path 上的 Entry/Thread 保持不变）。 */
   @Test
   void inputCandidatePathNeverWritesStore() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
     var baseline = seedBaseline(store);
     EntryPath source = path(store, baseline.threadId());
 
@@ -96,7 +96,7 @@ class TurnPlanPreviewTest {
   /** 测试意图：批次缺少末尾 user-like 输入时与正式规划一致地确定性拒绝，绝不构造半截候选历史。 */
   @Test
   void inputCandidatePathRejectsBatchWithoutUserInput() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
     var baseline = seedBaseline(store);
     EntryPath source = path(store, baseline.threadId());
 
@@ -122,7 +122,7 @@ class TurnPlanPreviewTest {
   /** 测试意图：临时 ThreadCommand 的合法 seq/hash 由共享命令契约保证（预览不放松任何一条），且 seq 起点由调用方给定。 */
   @Test
   void inputCandidatePathRequiresLegalSequenceAndHash() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
     var baseline = seedBaseline(store);
     EntryPath source = path(store, baseline.threadId());
     NewThreadCommand userMessage = command(userMessage("x"));

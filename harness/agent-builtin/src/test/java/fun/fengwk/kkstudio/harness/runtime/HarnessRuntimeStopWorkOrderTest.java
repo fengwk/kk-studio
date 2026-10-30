@@ -12,10 +12,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.builtin.store.BuiltinStore;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -45,7 +45,7 @@ class HarnessRuntimeStopWorkOrderTest {
 
   @Test
   void toolStopPrelocksThenDeletesWorkInCanonicalOrderBeforeConvergence() {
-    InMemoryHarnessStore delegate = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore delegate = new InMemoryBuiltinHarnessStore();
     HarnessRuntimeTestSupport.ModelFreeMultiToolBaseline baseline =
         seedModelFreeToolBaseline(delegate, 3);
     seedThreadWork(delegate, baseline.threadId());
@@ -97,7 +97,7 @@ class HarnessRuntimeStopWorkOrderTest {
 
   @Test
   void failureOnASecondWorkDeleteRollsBackEarlierDeletesAndAllStopMutations() {
-    InMemoryHarnessStore delegate = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore delegate = new InMemoryBuiltinHarnessStore();
     HarnessRuntimeTestSupport.ModelFreeMultiToolBaseline baseline =
         seedModelFreeToolBaseline(delegate, 2);
     seedThreadWork(delegate, baseline.threadId());
@@ -147,7 +147,8 @@ class HarnessRuntimeStopWorkOrderTest {
     return -1;
   }
 
-  private static HarnessStore recordingStore(InMemoryHarnessStore delegate, List<StoreCall> calls) {
+  private static HarnessStore recordingStore(
+      InMemoryBuiltinHarnessStore delegate, List<StoreCall> calls) {
     return (HarnessStore)
         Proxy.newProxyInstance(
             HarnessStore.class.getClassLoader(),
@@ -183,7 +184,7 @@ class HarnessRuntimeStopWorkOrderTest {
             });
   }
 
-  private static HarnessStore storeFailingSecondDelete(InMemoryHarnessStore delegate) {
+  private static HarnessStore storeFailingSecondDelete(InMemoryBuiltinHarnessStore delegate) {
     AtomicInteger deletes = new AtomicInteger();
     return (HarnessStore)
         Proxy.newProxyInstance(
