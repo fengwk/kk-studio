@@ -1,5 +1,6 @@
 import { apiClient, type HttpClient } from '@/shared/api/client'
 import type { PageResult } from '@/shared/api/contracts/base'
+import { parseJsonPreservingPathEqualsNumbers } from '@/shared/lib/lossless-json-number'
 import type {
   AgentDefinitionCreateDTO,
   AgentDefinitionDTO,
@@ -41,16 +42,21 @@ export function createAgentService(client: HttpClient = apiClient) {
       client.get(`/providers/${encodeURIComponent(providerName)}/remote-models`),
 
     listModels: (pageNumber = 1, pageSize = 50): Promise<PageResult<AgentModelDTO>> =>
-      client.get('/models', { params: { pageNumber, pageSize } }),
+      client.get('/models', {
+        params: { pageNumber, pageSize },
+        jsonParser: parseJsonPreservingPathEqualsNumbers,
+      }),
 
     createModel: (data: AgentModelCreateDTO): Promise<AgentModelDTO> =>
-      client.post('/models', data),
+      client.post('/models', data, { jsonParser: parseJsonPreservingPathEqualsNumbers }),
 
     updateModel: (
       modelName: string,
       data: AgentModelUpdateDTO,
     ): Promise<AgentModelDTO> =>
-      client.put(`/models/${encodePathTail(modelName)}`, data),
+      client.put(`/models/${encodePathTail(modelName)}`, data, {
+        jsonParser: parseJsonPreservingPathEqualsNumbers,
+      }),
 
     deleteModel: (
       modelName: string,
@@ -71,10 +77,13 @@ export function createAgentService(client: HttpClient = apiClient) {
           ...(cursor ? { cursor } : {}),
           pageSize,
         },
+        jsonParser: parseJsonPreservingPathEqualsNumbers,
       }),
 
     refreshModelDefaults: (): Promise<ModelCatalogPageDTO> =>
-      client.post('/model-defaults/refresh', {}),
+      client.post('/model-defaults/refresh', {}, {
+        jsonParser: parseJsonPreservingPathEqualsNumbers,
+      }),
 
     listAgents: (pageNumber = 1, pageSize = 50): Promise<PageResult<AgentDefinitionDTO>> =>
       client.get('/agents', { params: { pageNumber, pageSize } }),

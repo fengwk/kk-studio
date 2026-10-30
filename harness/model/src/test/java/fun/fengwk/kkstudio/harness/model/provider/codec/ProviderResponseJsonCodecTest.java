@@ -14,6 +14,7 @@ import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.model.RequestBodyPricingSnapshot;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
@@ -382,5 +383,27 @@ class ProviderResponseJsonCodecTest {
         .put("partialArguments", "{}")
         .put("message", "overflow");
     assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(overflow));
+  }
+
+  /** 可选 request-body 快照只含指纹和布尔值；旧响应缺失字段、非法指纹与非布尔值都严格处理。 */
+  @Test
+  void roundTripsOptionalRequestBodyPricingSnapshot() {
+    String fingerprint = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    ObjectNode node = canonicalNode();
+    node.putObject("requestBodyPricing").put(fingerprint, true);
+    ProviderResponse decoded = codec.decodeNode(node);
+    assertEquals(Map.of(fingerprint, true), decoded.requestBodyPricing().matches());
+    String encoded = codec.encode(decoded);
+    assertTrue(encoded.contains("\"requestBodyPricing\":{\"" + fingerprint + "\":true}"), encoded);
+    assertFrame(codec.decode(encoded).requestBodyPricing());
+
+    assertNull(codec.decodeNode(canonicalNode()).requestBodyPricing());
+    assertRejected(root -> root.putObject("requestBodyPricing").put(fingerprint, "true"));
+    assertRejected(root -> root.putObject("requestBodyPricing").put("not-a-fingerprint", true));
+    assertRejected(root -> root.putArray("requestBodyPricing"));
+  }
+
+  private static void assertFrame(RequestBodyPricingSnapshot snapshot) {
+    assertEquals(1, snapshot.matches().size());
   }
 }

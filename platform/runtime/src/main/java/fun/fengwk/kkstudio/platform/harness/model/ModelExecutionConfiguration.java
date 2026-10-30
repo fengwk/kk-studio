@@ -112,11 +112,13 @@ public class ModelExecutionConfiguration {
   public PlatformModelGateway platformModelGateway(
       ProviderResolutionService providerResolution,
       SystemSettingsSnapshot systemSettingsSnapshot,
-      @Qualifier("modelExecutionAdmission") ConcurrencyAdmission admission) {
+      @Qualifier("modelExecutionAdmission") ConcurrencyAdmission admission,
+      ModelPricingPlanSource pricingPlans) {
     return new PlatformModelGateway(
         providerResolution,
         () -> Duration.ofMillis(systemSettingsSnapshot.get().tool().modelGatewayBusyRetryMillis()),
-        admission);
+        admission,
+        pricingPlans);
   }
 
   @Bean(name = "openaiProviderFactory")

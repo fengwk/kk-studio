@@ -89,6 +89,7 @@ class ProviderRequestBodyPreviewTest {
   private ExecutorService workers;
   private ScheduledExecutorService scheduler;
   private final AtomicReference<byte[]> capturedBody = new AtomicReference<>();
+  private final AtomicReference<byte[]> observedCallbackBody = new AtomicReference<>();
   private CountDownLatch requestLatch;
 
   @BeforeEach
@@ -323,11 +324,31 @@ class ProviderRequestBodyPreviewTest {
       ProviderAdapter adapter, ProviderDescriptor descriptor, ProviderRequest request)
       throws InterruptedException {
     capturedBody.set(null);
+    observedCallbackBody.set(null);
     requestLatch = new CountDownLatch(1);
-    adapter.create(descriptor).stream(request, noopHandler());
+    adapter.create(descriptor).stream(
+        request,
+        new ProviderStreamHandler() {
+          @Override
+          public void onEvent(ProviderStreamEvent event) {}
+
+          @Override
+          public void onRequestBody(byte[] bodyUtf8Bytes) {
+            observedCallbackBody.set(bodyUtf8Bytes);
+          }
+
+          @Override
+          public void onComplete(ProviderCompletion completion) {}
+
+          @Override
+          public void onError(ProviderException error) {}
+        });
     assertTrue(requestLatch.await(10, TimeUnit.SECONDS), "request must reach the local upstream");
     byte[] body = capturedBody.get();
     assertNotNull(body, "upstream must capture the request body");
+    // 定价观察必须在真实发送路径上收到与 transport 实际发送逐字节相同的 body。
+    assertArrayEquals(
+        body, observedCallbackBody.get(), "onRequestBody must observe the actually sent body");
     return body;
   }
 
@@ -439,19 +460,6 @@ class ProviderRequestBodyPreviewTest {
       case OPENAI_CHAT, OPENAI_RESPONSES, ANTHROPIC -> ProviderCacheControl.session(
           PromptCacheRetention.SHORT, "00000000-0000-0000-0000-000000000001");
       case GEMINI -> ProviderCacheControl.none();
-    };
-  }
-
-  private static ProviderStreamHandler noopHandler() {
-    return new ProviderStreamHandler() {
-      @Override
-      public void onEvent(ProviderStreamEvent event) {}
-
-      @Override
-      public void onComplete(ProviderCompletion completion) {}
-
-      @Override
-      public void onError(ProviderException error) {}
     };
   }
 }

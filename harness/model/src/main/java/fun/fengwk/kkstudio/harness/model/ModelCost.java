@@ -47,7 +47,7 @@ public record ModelCost(
 
   /** 无条件便利入口；缺少计价事实时返回 null，不冒充免费请求。 */
   public static ModelCost calculate(ModelPricing pricing, ModelUsage usage) {
-    return calculate(pricing, usage, null, null);
+    return calculate(pricing, usage, null, null, null);
   }
 
   /**
@@ -57,10 +57,25 @@ public record ModelCost(
    */
   public static ModelCost calculate(
       ModelPricing pricing, ModelUsage usage, Instant requestedAt, String serviceTier) {
+    return calculate(pricing, usage, requestedAt, serviceTier, null);
+  }
+
+  /**
+   * 使用实际请求时间、最终 service tier 与 durable request-body 条件快照解析规则并计算费用。
+   *
+   * <p>{@code requestBodyPricing} 为 null 或缺少某个条件指纹时，该 request-body 叶子保持未知。若完成规则判定必须依赖该事实，
+   * 则返回 null，而不是跳过规则后采用基础价格；绝不用当前配置反推旧请求的匹配结果。
+   */
+  public static ModelCost calculate(
+      ModelPricing pricing,
+      ModelUsage usage,
+      Instant requestedAt,
+      String serviceTier,
+      RequestBodyPricingSnapshot requestBodyPricing) {
     Objects.requireNonNull(pricing, "pricing");
     Objects.requireNonNull(usage, "usage");
     ModelPricingResolver.ResolvedRates rates =
-        ModelPricingResolver.resolve(pricing, usage, requestedAt, serviceTier);
+        ModelPricingResolver.resolve(pricing, usage, requestedAt, serviceTier, requestBodyPricing);
     if (rates == null) {
       return null;
     }
