@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.web.controller;
 
-import fun.fengwk.convention4j.api.result.Result;
-import fun.fengwk.convention4j.common.result.Results;
 import lombok.AllArgsConstructor;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -19,6 +17,7 @@ import fun.fengwk.kkstudio.share.ai.skill.SkillPackageCreateDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackageDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackageEditDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackagePublishDTO;
+import fun.fengwk.kkstudio.web.api.ApiResponse;
 
 import java.util.List;
 
@@ -36,42 +35,42 @@ public class StudioSkillCatalogController {
   private final SkillCatalogService skillCatalogService;
 
   @GetMapping("/skill-packages")
-  public Result<List<SkillPackageDTO>> listPackages() {
-    return Results.ok(skillCatalogService.listPackages());
+  public ApiResponse<List<SkillPackageDTO>> listPackages() {
+    return ApiResponse.ok(skillCatalogService.listPackages());
   }
 
   @GetMapping("/skill-packages/{name}")
-  public Result<SkillPackageDTO> getPackage(@PathVariable("name") String name) {
-    return Results.ok(skillCatalogService.getPackage(name));
+  public ApiResponse<SkillPackageDTO> getPackage(@PathVariable("name") String name) {
+    return ApiResponse.ok(skillCatalogService.getPackage(name));
   }
 
   @PostMapping("/skill-packages")
-  public Result<SkillPackageDTO> createPackage(@RequestBody SkillPackageCreateDTO createDTO) {
-    return Results.created(skillCatalogService.createPackage(createDTO));
+  public ApiResponse<SkillPackageDTO> createPackage(@RequestBody SkillPackageCreateDTO createDTO) {
+    return ApiResponse.created(skillCatalogService.createPackage(createDTO));
   }
 
   @PutMapping("/skill-packages/{name}")
-  public Result<SkillPackageDTO> editPackage(
+  public ApiResponse<SkillPackageDTO> editPackage(
       @PathVariable("name") String name, @RequestBody SkillPackageEditDTO editDTO) {
-    return Results.ok(skillCatalogService.editPackage(name, editDTO));
+    return ApiResponse.ok(skillCatalogService.editPackage(name, editDTO));
   }
 
   @DeleteMapping("/skill-packages/{name}")
-  public Result<Void> deletePackage(
+  public ApiResponse<Void> deletePackage(
       @PathVariable("name") String name, @RequestParam("expectedVersion") String expectedVersion) {
     skillCatalogService.deletePackage(name, expectedVersion);
-    return Results.noContent();
+    return ApiResponse.noContent();
   }
 
   @PostMapping("/skill-packages/{name}/check")
-  public Result<SkillPackageDTO> checkPackage(
+  public ApiResponse<SkillPackageDTO> checkPackage(
       @PathVariable("name") String name, @RequestBody SkillPackageCheckDTO checkDTO) {
-    return Results.ok(skillCatalogService.checkPackage(name, checkDTO));
+    return ApiResponse.ok(skillCatalogService.checkPackage(name, checkDTO));
   }
 
   @PostMapping("/skill-packages/{name}/update")
-  public Result<SkillPackageDTO> updatePackage(
+  public ApiResponse<SkillPackageDTO> updatePackage(
       @PathVariable("name") String name, @RequestBody SkillPackagePublishDTO publishDTO) {
-    return Results.ok(skillCatalogService.updatePackage(name, publishDTO));
+    return ApiResponse.ok(skillCatalogService.updatePackage(name, publishDTO));
   }
 }

@@ -1,9 +1,7 @@
 package fun.fengwk.kkstudio.web.i18n;
 
-import fun.fengwk.convention4j.api.code.CommonErrorCodes;
-import fun.fengwk.convention4j.common.i18n.AggregateResourceBundle;
-import fun.fengwk.convention4j.common.i18n.StringManager;
 import org.springframework.context.i18n.LocaleContextHolder;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.platform.error.DomainErrorCode;
@@ -15,12 +13,14 @@ import java.util.Map;
 import java.util.MissingResourceException;
 import java.util.Objects;
 import java.util.ResourceBundle;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Web 边界的消息解析器，用于按请求作用域解析用户可见的错误文案。
  *
- * <p>convention starter 只暴露单一启动 locale 的 manager。本服务有意为每个受支持的请求 locale 各持有一个
- * manager，使请求可以选择自己的语言，而无需改动 platform 错误模型或进程级 convention 配置。
+ * <p>本服务为受支持的请求 locale 各持有一个 JDK {@link ResourceBundle}，使请求可以选择自己的语言，而无需改动 platform 错误模型或进程级
+ * locale。中文资源缺键时回退到英文资源；两种资源都缺键时抛出 {@link MissingResourceException}，不静默返回空文案。
  *
  * <p>{@code errors.resource} 保留稳定内部标识；用户可见 message 经 {@link #resourceDisplayName(String)} 使用本地化名称。
  */
@@ -33,8 +33,9 @@ public class StudioMessageService {
   private static final String DOMAIN_PREFIX = "studio.error.domain.";
   private static final String RESOURCE_PREFIX = "studio.error.domain.resource.";
   private static final String HTTP_PREFIX = "studio.error.http.";
+  private static final Pattern NAMED_PLACEHOLDER = Pattern.compile("\\$\\{([^}]+)}");
 
-  private final Map<Locale, StringManager> stringManagers;
+  private final Map<Locale, ResourceBundle> bundles;
 
   public StudioMessageService() {
     this(defaultClassLoader());
@@ -42,10 +43,10 @@ public class StudioMessageService {
 
   StudioMessageService(ClassLoader classLoader) {
     Objects.requireNonNull(classLoader, "classLoader");
-    this.stringManagers =
+    this.bundles =
         Map.of(
-            EN_US, createStringManager(EN_US, classLoader),
-            ZH_CN, createStringManager(ZH_CN, classLoader));
+            EN_US, createBundle(EN_US, classLoader),
+            ZH_CN, createBundle(ZH_CN, classLoader));
   }
 
   /** 返回请求 locale 对应的规范受支持 locale。 */
@@ -70,12 +71,11 @@ public class StudioMessageService {
   public String message(Locale locale, String key, Map<String, ?> context) {
     Objects.requireNonNull(key, "key");
     Locale normalized = normalize(locale);
-    Map<String, ?> safeContext = context == null ? Collections.emptyMap() : context;
     try {
-      return stringManagers.get(normalized).getString(key, safeContext);
+      return resolve(bundles.get(normalized), key, context);
     } catch (MissingResourceException error) {
       if (!EN_US.equals(normalized)) {
-        return stringManagers.get(EN_US).getString(key, safeContext);
+        return resolve(bundles.get(EN_US), key, context);
       }
       throw error;
     }
@@ -128,23 +128,39 @@ public class StudioMessageService {
   }
 
   public String httpCode(int status) {
-    CommonErrorCodes errorCode = CommonErrorCodes.ofStatus(status);
-    return errorCode == null ? Integer.toString(status) : errorCode.getCode();
+    HttpStatus resolved = HttpStatus.resolve(status);
+    return resolved == null ? Integer.toString(status) : resolved.name();
   }
 
   private String httpMessage(int status, String part) {
-    CommonErrorCodes errorCode = CommonErrorCodes.ofStatus(status);
-    if (errorCode == null) {
-      return message(HTTP_PREFIX + "unknown." + part, Collections.singletonMap("status", status));
+    HttpStatus resolved = HttpStatus.resolve(status);
+    if (resolved == null) {
+      return message(HTTP_PREFIX + "unknown." + part, Map.of("status", status));
     }
-    String key = HTTP_PREFIX + errorCode.getCode().toLowerCase(Locale.ROOT) + "." + part;
+    String key = HTTP_PREFIX + resolved.name().toLowerCase(Locale.ROOT) + "." + part;
     return message(key, Collections.emptyMap());
   }
 
-  private static StringManager createStringManager(Locale locale, ClassLoader classLoader) {
-    ResourceBundle resourceBundle =
-        ResourceBundle.getBundle(BASE_NAME, locale, classLoader, AggregateResourceBundle.CONTROL);
-    return new StringManager(resourceBundle);
+  private static ResourceBundle createBundle(Locale locale, ClassLoader classLoader) {
+    return ResourceBundle.getBundle(BASE_NAME, locale, classLoader);
+  }
+
+  private static String resolve(ResourceBundle bundle, String key, Map<String, ?> context) {
+    return format(bundle.getString(key), context);
+  }
+
+  /** 替换资源中的 {@code ${name}} 占位符；缺失值按空字符串处理。 */
+  private static String format(String template, Map<String, ?> context) {
+    Map<String, ?> values = context == null ? Collections.emptyMap() : context;
+    Matcher matcher = NAMED_PLACEHOLDER.matcher(template);
+    StringBuilder result = new StringBuilder();
+    while (matcher.find()) {
+      Object value = values.get(matcher.group(1));
+      matcher.appendReplacement(
+          result, Matcher.quoteReplacement(value == null ? "" : String.valueOf(value)));
+    }
+    matcher.appendTail(result);
+    return result.toString();
   }
 
   private static boolean isLocale(Locale actual, Locale expected) {

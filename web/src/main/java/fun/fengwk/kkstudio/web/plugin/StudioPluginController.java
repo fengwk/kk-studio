@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.web.plugin;
 
-import fun.fengwk.convention4j.api.result.Result;
-import fun.fengwk.convention4j.common.result.Results;
 import lombok.AllArgsConstructor;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -27,6 +25,7 @@ import fun.fengwk.kkstudio.share.ai.plugin.PluginConnectionCheckDTO;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginConnectionCheckRequestDTO;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginDTO;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginSecretPatchDTO;
+import fun.fengwk.kkstudio.web.api.ApiResponse;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -49,13 +48,13 @@ public class StudioPluginController {
   private final PluginManagementService pluginManagementService;
 
   @GetMapping
-  public Result<List<PluginDTO>> listPlugins() {
-    return Results.ok(pluginManagementService.listPlugins());
+  public ApiResponse<List<PluginDTO>> listPlugins() {
+    return ApiResponse.ok(pluginManagementService.listPlugins());
   }
 
   @GetMapping("/{pluginId}")
-  public Result<PluginDTO> getPlugin(@PathVariable("pluginId") String pluginId) {
-    return Results.ok(pluginManagementService.getPlugin(pluginId));
+  public ApiResponse<PluginDTO> getPlugin(@PathVariable("pluginId") String pluginId) {
+    return ApiResponse.ok(pluginManagementService.getPlugin(pluginId));
   }
 
   /**
@@ -65,7 +64,7 @@ public class StudioPluginController {
    * OK}；两者都强制 {@code Cache-Control: no-store}。
    */
   @PutMapping("/{pluginId}/configuration")
-  public ResponseEntity<Result<PluginDTO>> updateConfiguration(
+  public ResponseEntity<ApiResponse<PluginDTO>> updateConfiguration(
       @PathVariable("pluginId") String pluginId,
       @RequestBody PluginConfigurationUpdateRequestDTO request) {
     long expectedRevision = parseCoordinate(request.getExpectedRevision(), "expectedRevision");
@@ -77,9 +76,9 @@ public class StudioPluginController {
             toSecretPatch(request.getSecretPatch()));
     HttpStatus status =
         pluginDTO.getApplicationError() == null ? HttpStatus.OK : HttpStatus.ACCEPTED;
-    return ResponseEntity.status(status)
-        .header(HttpHeaders.CACHE_CONTROL, NO_STORE)
-        .body(Results.ok(pluginDTO));
+    ApiResponse<PluginDTO> body =
+        status == HttpStatus.ACCEPTED ? ApiResponse.accepted(pluginDTO) : ApiResponse.ok(pluginDTO);
+    return ResponseEntity.status(status).header(HttpHeaders.CACHE_CONTROL, NO_STORE).body(body);
   }
 
   /**
@@ -88,7 +87,7 @@ public class StudioPluginController {
    * <p>响应只含类型化维度与本次已应用坐标，强制 {@code Cache-Control: no-store}；绝不回显远端内容、URL 或凭据。
    */
   @PostMapping("/{pluginId}/connection-check")
-  public ResponseEntity<Result<PluginConnectionCheckDTO>> checkConnection(
+  public ResponseEntity<ApiResponse<PluginConnectionCheckDTO>> checkConnection(
       @PathVariable("pluginId") String pluginId,
       @RequestBody PluginConnectionCheckRequestDTO request) {
     long expectedRevision = parseCoordinate(request.getExpectedRevision(), "expectedRevision");
@@ -96,21 +95,21 @@ public class StudioPluginController {
         pluginManagementService.checkConnection(pluginId, expectedRevision);
     return ResponseEntity.ok()
         .header(HttpHeaders.CACHE_CONTROL, NO_STORE)
-        .body(Results.ok(checkDTO));
+        .body(ApiResponse.ok(checkDTO));
   }
 
   @PostMapping("/{pluginId}/auth/prepare")
-  public ResponseEntity<Result<PluginAuthPrepareDTO>> prepareAuth(
+  public ResponseEntity<ApiResponse<PluginAuthPrepareDTO>> prepareAuth(
       @PathVariable("pluginId") String pluginId, @RequestBody PluginAuthPrepareRequestDTO request) {
     PluginAuthPrepareDTO prepareDTO =
         pluginManagementService.prepareAuth(pluginId, request.getRegion());
     return ResponseEntity.ok()
         .header(HttpHeaders.CACHE_CONTROL, NO_STORE)
-        .body(Results.ok(prepareDTO));
+        .body(ApiResponse.ok(prepareDTO));
   }
 
   @PostMapping("/{pluginId}/auth/complete")
-  public ResponseEntity<Result<PluginDTO>> completeAuth(
+  public ResponseEntity<ApiResponse<PluginDTO>> completeAuth(
       @PathVariable("pluginId") String pluginId,
       @RequestBody PluginAuthCompleteRequestDTO request) {
     PluginDTO pluginDTO =
@@ -118,13 +117,13 @@ public class StudioPluginController {
             pluginId, request.getAuthAttemptId(), request.getCallbackUrl());
     return ResponseEntity.ok()
         .header(HttpHeaders.CACHE_CONTROL, NO_STORE)
-        .body(Results.ok(pluginDTO));
+        .body(ApiResponse.ok(pluginDTO));
   }
 
   @DeleteMapping("/{pluginId}/auth")
-  public Result<Void> disconnect(@PathVariable("pluginId") String pluginId) {
+  public ApiResponse<Void> disconnect(@PathVariable("pluginId") String pluginId) {
     pluginManagementService.disconnect(pluginId);
-    return Results.noContent();
+    return ApiResponse.noContent();
   }
 
   private static long parseCoordinate(String value, String field) {

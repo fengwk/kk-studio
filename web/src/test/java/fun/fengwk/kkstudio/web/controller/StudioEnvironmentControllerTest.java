@@ -18,7 +18,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import fun.fengwk.convention4j.springboot.starter.web.result.ResultResponseBodyAdvice;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
@@ -41,6 +40,7 @@ import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRuntimeDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRuntimeStatusDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentUpdateProgressDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentUpdateStartDTO;
+import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
 import fun.fengwk.kkstudio.web.advice.StudioDomainErrorAdvice;
 import fun.fengwk.kkstudio.web.environment.cluster.EnvironmentRuntimeOwnerClient;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
@@ -76,7 +76,7 @@ class StudioEnvironmentControllerTest {
         MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(
                 new StudioDomainErrorAdvice(new StudioMessageService()),
-                new ResultResponseBodyAdvice())
+                new ApiResponseStatusAdvice())
             .build();
   }
 

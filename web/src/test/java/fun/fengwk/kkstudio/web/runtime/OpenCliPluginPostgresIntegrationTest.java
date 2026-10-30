@@ -11,7 +11,6 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 
 import com.sun.net.httpserver.HttpServer;
-import fun.fengwk.convention4j.springboot.starter.web.result.ResultResponseBodyAdvice;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -67,6 +66,7 @@ import fun.fengwk.kkstudio.share.ai.plugin.PluginConnectionCheckDTO;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginDTO;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
+import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
 import fun.fengwk.kkstudio.web.plugin.StudioPluginController;
 
 import javax.sql.DataSource;
@@ -378,7 +378,7 @@ class OpenCliPluginPostgresIntegrationTest {
               MockMvc mockMvc =
                   MockMvcBuilders.standaloneSetup(new StudioPluginController(management))
                       .setMessageConverters(HTTP_CONVERTER)
-                      .setControllerAdvice(new ResultResponseBodyAdvice())
+                      .setControllerAdvice(new ApiResponseStatusAdvice())
                       .build();
               MockHttpServletResponse response =
                   mockMvc.perform(get("/api/plugins/" + PLUGIN_ID)).andReturn().getResponse();
