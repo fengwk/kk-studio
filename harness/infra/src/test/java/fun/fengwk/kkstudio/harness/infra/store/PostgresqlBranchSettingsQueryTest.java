@@ -1,21 +1,21 @@
 package fun.fengwk.kkstudio.harness.infra.store;
 
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.branchSettings;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.branchSettings;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport;
-import fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.Baseline;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.GoalSetting;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 
 import javax.sql.DataSource;

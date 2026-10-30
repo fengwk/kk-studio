@@ -72,24 +72,24 @@ import java.util.function.Consumer;
 public final class StoreTestSupport {
 
   static final EnvironmentId ENV_ID = EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
-  static final UUID OWNER_THREAD_ID = TestIds.id(10L);
-  static final int CONTEXT_WINDOW = 100_000;
-  static final int MAX_OUTPUT_TOKENS = 16_384;
-  static final Instant T0 = Instant.ofEpochMilli(1000);
-  static final Instant T1 = Instant.ofEpochMilli(2000);
-  static final Instant T2 = Instant.ofEpochMilli(3000);
-  static final Instant T3 = Instant.ofEpochMilli(4000);
-  static final Instant T4 = Instant.ofEpochMilli(5000);
-  static final Instant T5 = Instant.ofEpochMilli(6000);
+  public static final UUID OWNER_THREAD_ID = TestIds.id(10L);
+  public static final int CONTEXT_WINDOW = 100_000;
+  public static final int MAX_OUTPUT_TOKENS = 16_384;
+  public static final Instant T0 = Instant.ofEpochMilli(1000);
+  public static final Instant T1 = Instant.ofEpochMilli(2000);
+  public static final Instant T2 = Instant.ofEpochMilli(3000);
+  public static final Instant T3 = Instant.ofEpochMilli(4000);
+  public static final Instant T4 = Instant.ofEpochMilli(5000);
+  public static final Instant T5 = Instant.ofEpochMilli(6000);
 
   /** 测试种子线程的合法 64 位小写 SHA-256 creation request hash（非 accept 路径的固定身份键）。 */
-  static final String CREATION_REQUEST_HASH =
+  public static final String CREATION_REQUEST_HASH =
       "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
   private StoreTestSupport() {}
 
   /** 运行 void transaction 体，便于测试使用 statement lambda。 */
-  static void inTransaction(HarnessStore store, Consumer<HarnessStore.Transaction> body) {
+  public static void inTransaction(HarnessStore store, Consumer<HarnessStore.Transaction> body) {
     store.transaction(
         tx -> {
           body.accept(tx);
@@ -127,12 +127,13 @@ public final class StoreTestSupport {
   }
 
   /** 最小已提交 baseline：包含 ROOT 的一个 session，以及指向该 ROOT 的一个 thread。 */
-  record Baseline(UUID sessionId, UUID rootEntryId, UUID threadId) {}
+  public record Baseline(UUID sessionId, UUID rootEntryId, UUID threadId) {}
 
   /** 包含一条开放的 TURN_START chain 的 baseline；thread head 指向该 TURN_START。 */
-  record TurnBaseline(UUID sessionId, UUID rootEntryId, UUID turnStartEntryId, UUID threadId) {}
+  public record TurnBaseline(
+      UUID sessionId, UUID rootEntryId, UUID turnStartEntryId, UUID threadId) {}
 
-  static Baseline seedThreadBaseline(HarnessStore store) {
+  public static Baseline seedThreadBaseline(HarnessStore store) {
     return store.transaction(
         tx -> {
           UUID sessionId = tx.nextId();
@@ -145,11 +146,11 @@ public final class StoreTestSupport {
         });
   }
 
-  static TurnBaseline seedTurnBaseline(HarnessStore store) {
+  public static TurnBaseline seedTurnBaseline(HarnessStore store) {
     return seedTurnBaseline(store, List.of());
   }
 
-  static TurnBaseline seedTurnBaseline(HarnessStore store, List<ToolBinding> toolBindings) {
+  public static TurnBaseline seedTurnBaseline(HarnessStore store, List<ToolBinding> toolBindings) {
     return store.transaction(
         tx -> {
           UUID sessionId = tx.nextId();
@@ -171,7 +172,7 @@ public final class StoreTestSupport {
   }
 
   /** 在 {@code parentEntryId} 下插入一个带新 id 的子 Entry，并返回该 id。 */
-  static UUID insertChildEntry(
+  public static UUID insertChildEntry(
       HarnessStore store, UUID sessionId, UUID parentEntryId, EntryPayload payload) {
     return store.transaction(
         tx -> {
@@ -181,11 +182,11 @@ public final class StoreTestSupport {
         });
   }
 
-  static Session session(UUID id) {
+  public static Session session(UUID id) {
     return new Session(id, "session-" + id, T0);
   }
 
-  static Entry rootEntry(UUID id, UUID sessionId) {
+  public static Entry rootEntry(UUID id, UUID sessionId) {
     return new Entry(id, sessionId, null, rootPayload(), T0);
   }
 
@@ -201,7 +202,7 @@ public final class StoreTestSupport {
     return new Entry(id, sessionId, parentId, resolvedTurnStartPayload(ownerThreadId), createdAt);
   }
 
-  static Entry assistantEntry(
+  public static Entry assistantEntry(
       UUID id, UUID sessionId, UUID parentId, Instant createdAt, String... toolCallIds) {
     return new Entry(id, sessionId, parentId, assistantPayload(toolCallIds), createdAt);
   }
@@ -227,15 +228,16 @@ public final class StoreTestSupport {
     return new RootPayload(branchSettings());
   }
 
-  static EntryPayload turnStartPayload() {
+  public static EntryPayload turnStartPayload() {
     return new TurnStartPayload(TurnStartReason.INPUT, branchSettings(), OWNER_THREAD_ID);
   }
 
-  static EntryPayload resolvedTurnStartPayload(UUID ownerThreadId) {
+  public static EntryPayload resolvedTurnStartPayload(UUID ownerThreadId) {
     return resolvedTurnStartPayload(ownerThreadId, List.of());
   }
 
-  static EntryPayload resolvedTurnStartPayload(UUID ownerThreadId, List<ToolBinding> toolBindings) {
+  public static EntryPayload resolvedTurnStartPayload(
+      UUID ownerThreadId, List<ToolBinding> toolBindings) {
     return new TurnStartPayload(
         TurnStartReason.INPUT,
         branchSettings(),
@@ -248,7 +250,7 @@ public final class StoreTestSupport {
   }
 
   /** ASSISTANT MESSAGE payload；{@code toolCallIds} 会按顺序变成 ToolCall 内容。 */
-  static EntryPayload assistantPayload(String... toolCallIds) {
+  public static EntryPayload assistantPayload(String... toolCallIds) {
     List<AgentMessageContent> contents = new ArrayList<>();
     for (String toolCallId : toolCallIds) {
       contents.add(new ToolCallMessageContent(toolCallId, "bash", "bash", "{}"));
@@ -262,7 +264,8 @@ public final class StoreTestSupport {
         null);
   }
 
-  static EntryPayload assistantPayloadWithArguments(String toolCallId, String argumentsJson) {
+  public static EntryPayload assistantPayloadWithArguments(
+      String toolCallId, String argumentsJson) {
     return new MessagePayload(
         new AgentMessage(
             AgentMessageRole.ASSISTANT,
@@ -273,7 +276,7 @@ public final class StoreTestSupport {
         null);
   }
 
-  static ProviderResponse assistantResponse(String... toolCallIds) {
+  public static ProviderResponse assistantResponse(String... toolCallIds) {
     List<ProviderToolCall> calls = new ArrayList<>();
     for (String toolCallId : toolCallIds) {
       calls.add(new ProviderToolCall(toolCallId, "bash", "{}"));
@@ -289,17 +292,17 @@ public final class StoreTestSupport {
         "{}");
   }
 
-  static EntryPayload assistantErrorPayload() {
+  public static EntryPayload assistantErrorPayload() {
     return new AssistantErrorPayload(
         new AssistantError(ProviderErrorKind.INVALID_REQUEST.name(), "model failed"), null);
   }
 
-  static EntryPayload assistantAbortedPayload() {
+  public static EntryPayload assistantAbortedPayload() {
     return new AssistantAbortedPayload(
         new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("partial"))));
   }
 
-  static EntryPayload userMessagePayload() {
+  public static EntryPayload userMessagePayload() {
     return new MessagePayload(
         new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("hello"))),
         null,
@@ -307,14 +310,14 @@ public final class StoreTestSupport {
   }
 
   /** TOOL MESSAGE payload，其 metadata 与给定的 assistant entry / callIndex / call id 匹配。 */
-  static EntryPayload toolResultPayload(
+  public static EntryPayload toolResultPayload(
       UUID toolInvocationId, UUID assistantEntryId, int callIndex, String toolCallId) {
     return toolResultPayload(
         toolInvocationId, assistantEntryId, callIndex, toolCallId, ToolResultStatus.SUCCEEDED);
   }
 
   /** TOOL MESSAGE payload，带显式 terminal status（必须精确映射所关联 invocation 的 status）。 */
-  static EntryPayload toolResultPayload(
+  public static EntryPayload toolResultPayload(
       UUID toolInvocationId,
       UUID assistantEntryId,
       int callIndex,
@@ -324,7 +327,7 @@ public final class StoreTestSupport {
         toolInvocationId, assistantEntryId, callIndex, toolCallId, status, "bash");
   }
 
-  static EntryPayload toolResultPayload(
+  public static EntryPayload toolResultPayload(
       UUID toolInvocationId,
       UUID assistantEntryId,
       int callIndex,
@@ -350,7 +353,7 @@ public final class StoreTestSupport {
   }
 
   /** 用于 history-normalization 的合成 ToolResult entry；禁止关联真实 ToolInvocation。 */
-  static EntryPayload syntheticToolResultPayload(
+  public static EntryPayload syntheticToolResultPayload(
       UUID assistantEntryId, int callIndex, String toolCallId) {
     ToolResultMessageContent content =
         new ToolResultMessageContent(
@@ -378,12 +381,12 @@ public final class StoreTestSupport {
    * 同一 Session 内的额外执行根 Thread（sibling / 多 Thread 场景）：名称由调用方显式给出，必须与同 Session 其他根不同， 否则违反 {@code
    * uk_harness_thread_root_name} 部分唯一索引。
    */
-  static ThreadState siblingRoot(UUID id, UUID sessionId, UUID headEntryId, String name) {
+  public static ThreadState siblingRoot(UUID id, UUID sessionId, UUID headEntryId, String name) {
     return threadState(id, sessionId, headEntryId, name, false, 1, 0, T0, T0);
   }
 
   /** 允许显式指定 next sequence / version 与时间的 ThreadState 构造（契约测试模拟已推进的 Thread）。 */
-  static ThreadState threadState(
+  public static ThreadState threadState(
       UUID id,
       UUID sessionId,
       UUID headEntryId,
@@ -404,7 +407,7 @@ public final class StoreTestSupport {
   }
 
   /** 允许显式指定 YOLO runtime policy、next sequence / version 与时间的 ThreadState 构造。 */
-  static ThreadState threadState(
+  public static ThreadState threadState(
       UUID id,
       UUID sessionId,
       UUID headEntryId,
@@ -426,7 +429,7 @@ public final class StoreTestSupport {
   }
 
   /** 允许显式指定名称、YOLO runtime policy、next sequence / version 与时间的 ThreadState 构造。 */
-  static ThreadState threadState(
+  public static ThreadState threadState(
       UUID id,
       UUID sessionId,
       UUID headEntryId,
@@ -459,7 +462,7 @@ public final class StoreTestSupport {
    * 命令 helper：ThreadCommand 不再携带代理 id，签名仅为 {@code (threadId, sequence, idempotencyKey)}。
    * idempotencyKey 必须为非空 UUID。
    */
-  static ThreadCommand command(UUID threadId, long sequence, UUID idempotencyKey) {
+  public static ThreadCommand command(UUID threadId, long sequence, UUID idempotencyKey) {
     UserMessageCommandPayload payload =
         new UserMessageCommandPayload(
             new AgentMessage(
@@ -519,7 +522,7 @@ public final class StoreTestSupport {
   }
 
   /** 返回仅设置了 consumed marker 的 command；其余身份信息保持不变。 */
-  static ThreadCommand withConsumedTurnStart(ThreadCommand command, UUID turnStartEntryId) {
+  public static ThreadCommand withConsumedTurnStart(ThreadCommand command, UUID turnStartEntryId) {
     return new ThreadCommand(
         command.threadId(),
         command.sequence(),
@@ -550,7 +553,7 @@ public final class StoreTestSupport {
   /**
    * READY（非 terminal）或 CANCELLED（terminal）的 tool invocation；不再持有 resultEntryId（batch apply 后行物理删除）。
    */
-  static ToolInvocation toolInvocation(
+  public static ToolInvocation toolInvocation(
       UUID id,
       UUID threadId,
       UUID turnStartEntryId,
@@ -581,7 +584,7 @@ public final class StoreTestSupport {
   }
 
   /** 复制 invocation，仅替换冻结 binding 的 rendererKey。 */
-  static ToolInvocation withRendererKey(ToolInvocation invocation, String rendererKey) {
+  public static ToolInvocation withRendererKey(ToolInvocation invocation, String rendererKey) {
     ToolDescriptor descriptor = invocation.binding().descriptor();
     AgentToolDefinition definition = invocation.binding().definition();
     ToolBinding binding =
@@ -617,19 +620,19 @@ public final class StoreTestSupport {
         invocation.updatedAt());
   }
 
-  static ModelSelection builtinExecutionModel() {
+  public static ModelSelection builtinExecutionModel() {
     return ModelSelection.model("model", "v1");
   }
 
-  static BranchSettings branchSettings() {
+  public static BranchSettings branchSettings() {
     return new BranchSettings("agent", builtinExecutionModel(), null);
   }
 
-  static ToolCall toolCall(String toolCallId) {
+  public static ToolCall toolCall(String toolCallId) {
     return toolCall(toolCallId, "{}");
   }
 
-  static ToolCall toolCall(String toolCallId, String argumentsJson) {
+  public static ToolCall toolCall(String toolCallId, String argumentsJson) {
     return new ToolCall(toolCallId, "bash", argumentsJson);
   }
 
@@ -643,11 +646,11 @@ public final class StoreTestSupport {
   }
 
   /** {@code ask_user} 的冻结问卷原文（内置 contributor 贡献，provenance 即身份判据）。 */
-  static final String ASK_USER_QUESTIONNAIRE =
+  public static final String ASK_USER_QUESTIONNAIRE =
       "{\"questions\":[{\"question\":\"which plan?\",\"options\":[{\"label\":\"fast\"},{\"label\":\"safe\"}]}]}";
 
   /** 内置 contributor 贡献的 {@code ask_user}：只有该 provenance 才会被运行时视为人工输入等待。 */
-  static ToolBinding askUserBinding() {
+  public static ToolBinding askUserBinding() {
     return new ToolBinding(
         new AgentToolDefinition(
             new ToolDescriptor(
@@ -664,7 +667,7 @@ public final class StoreTestSupport {
         null);
   }
 
-  static ToolBinding hostBinding() {
+  public static ToolBinding hostBinding() {
     return new ToolBinding(
         new AgentToolDefinition(toolDescriptor("bash"), ToolVisibility.SELECTABLE),
         new ContributorBinding("core", "bash", List.of()),

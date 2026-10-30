@@ -1,9 +1,6 @@
-package fun.fengwk.kkstudio.harness.builtin.runtime.processor;
+package fun.fengwk.kkstudio.harness.runtime.processor;
 
-import static fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport.NOW;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport.entry;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport.path;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport.seedBaseline;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedBaseline;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -11,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
@@ -19,16 +15,17 @@ import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.runtime.processor.TurnPlanPreview;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -42,11 +39,12 @@ import java.util.UUID;
 class TurnPlanPreviewTest {
 
   private static final UUID IDEMPOTENCY_KEY = TestIds.id(77_001L);
+  private static final Instant NOW = Instant.parse("2026-07-01T00:00:00Z");
 
   /** 测试意图：SET_MODEL/SET_AGENT 前缀只更新快照，末尾 USER_MESSAGE 生成唯一模型可见消息，且候选 path 直接从 source head 续接。 */
   @Test
   void inputCandidatePathMergesSettingsSnapshotAndUserMessage() {
-    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
     var baseline = seedBaseline(store);
     EntryPath source = path(store, baseline.threadId());
     NewThreadCommand setModel =
@@ -80,7 +78,7 @@ class TurnPlanPreviewTest {
   /** 测试意图：candidate Entry 只是内存对象，绝不写入 Store（source path 上的 Entry/Thread 保持不变）。 */
   @Test
   void inputCandidatePathNeverWritesStore() {
-    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
     var baseline = seedBaseline(store);
     EntryPath source = path(store, baseline.threadId());
 
@@ -97,7 +95,7 @@ class TurnPlanPreviewTest {
   /** 测试意图：批次缺少末尾 user-like 输入时与正式规划一致地确定性拒绝，绝不构造半截候选历史。 */
   @Test
   void inputCandidatePathRejectsBatchWithoutUserInput() {
-    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
     var baseline = seedBaseline(store);
     EntryPath source = path(store, baseline.threadId());
 
@@ -123,7 +121,7 @@ class TurnPlanPreviewTest {
   /** 测试意图：临时 ThreadCommand 的合法 seq/hash 由共享命令契约保证（预览不放松任何一条），且 seq 起点由调用方给定。 */
   @Test
   void inputCandidatePathRequiresLegalSequenceAndHash() {
-    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
     var baseline = seedBaseline(store);
     EntryPath source = path(store, baseline.threadId());
     NewThreadCommand userMessage = command(userMessage("x"));
@@ -136,6 +134,15 @@ class TurnPlanPreviewTest {
         EntryPath.class,
         TurnPlanPreview.inputCandidatePath(
             baseline.threadId(), source, 5L, List.of(userMessage), NOW));
+  }
+
+  private static EntryPath path(InMemoryHarnessStore store, UUID threadId) {
+    return store.transaction(
+        tx -> tx.loadEntryPath(tx.findThread(threadId).orElseThrow().headEntryId()));
+  }
+
+  private static Entry entry(InMemoryHarnessStore store, UUID entryId) {
+    return store.transaction(tx -> tx.findEntry(entryId)).orElseThrow();
   }
 
   private static NewThreadCommand command(SetModelCommandPayload payload) {

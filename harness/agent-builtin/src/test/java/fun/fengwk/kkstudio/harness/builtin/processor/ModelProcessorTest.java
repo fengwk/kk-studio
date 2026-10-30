@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.builtin.processor;
 
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.loadCommandsByThread;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.loadCommandsByThread;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;

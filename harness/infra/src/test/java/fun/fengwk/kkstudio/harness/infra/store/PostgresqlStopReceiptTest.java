@@ -13,7 +13,6 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.cfg.JsonNodeFeature;
 import tools.jackson.databind.json.JsonMapper;
 
-import fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.CancelledThreadInput;
 import fun.fengwk.kkstudio.harness.runtime.StoppedThreadReceipt;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
@@ -28,6 +27,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;

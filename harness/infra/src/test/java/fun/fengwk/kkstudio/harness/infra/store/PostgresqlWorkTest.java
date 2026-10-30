@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.infra.store;
 
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.inTransaction;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.inTransaction;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -12,9 +12,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.HarnessStoreWorkContract;
-import fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.Baseline;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;

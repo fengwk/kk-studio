@@ -1,7 +1,7 @@
-package fun.fengwk.kkstudio.harness.builtin.runtime;
+package fun.fengwk.kkstudio.harness.runtime;
 
-import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.T0;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.seedBaseline;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T0;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedBaseline;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -15,7 +15,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.slf4j.LoggerFactory;
 
-import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitJournal;
@@ -28,6 +27,7 @@ import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.runtime.execution.FileExecutionExitJournal;
 import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 
 import java.io.IOException;
@@ -522,13 +522,13 @@ class ExecutionExitConfirmerGovernanceTest {
   }
 
   private static ExecutionExitFact register(
-      InMemoryBuiltinHarnessStore store, UUID threadId, UUID invocationId) {
+      InMemoryHarnessStore store, UUID threadId, UUID invocationId) {
     ExecutionExitFact fact = expected(threadId, invocationId, T0);
     register(store, fact);
     return fact;
   }
 
-  private static void register(InMemoryBuiltinHarnessStore store, ExecutionExitFact fact) {
+  private static void register(InMemoryHarnessStore store, ExecutionExitFact fact) {
     store.transaction(
         tx -> {
           tx.lockThread(fact.threadId());
@@ -571,13 +571,13 @@ class ExecutionExitConfirmerGovernanceTest {
 
   private static final class Fixture {
 
-    private final InMemoryBuiltinHarnessStore store;
+    private final InMemoryHarnessStore store;
     private final HarnessRuntimeTestSupport.Baseline baseline;
     private final ExecutionExitFact fact;
     private final MutableClock clock;
 
     private Fixture(
-        InMemoryBuiltinHarnessStore store,
+        InMemoryHarnessStore store,
         HarnessRuntimeTestSupport.Baseline baseline,
         ExecutionExitFact fact,
         MutableClock clock) {
@@ -588,7 +588,7 @@ class ExecutionExitConfirmerGovernanceTest {
     }
 
     static Fixture create() {
-      InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
+      InMemoryHarnessStore store = new InMemoryHarnessStore();
       HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
       ExecutionExitFact fact = register(store, baseline.threadId(), TestIds.id(1));
       return new Fixture(store, baseline, fact, new MutableClock(T0));

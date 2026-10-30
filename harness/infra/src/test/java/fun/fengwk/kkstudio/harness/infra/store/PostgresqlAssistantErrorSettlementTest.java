@@ -2,7 +2,8 @@ package fun.fengwk.kkstudio.harness.infra.store;
 
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtinDriver;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.T2;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.modelRequest;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T2;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -14,7 +15,6 @@ import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
-import fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
@@ -29,6 +29,7 @@ import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessResult;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorConfig;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -85,7 +86,7 @@ class PostgresqlAssistantErrorSettlementTest {
             tx -> {
               tx.lockThread(baseline.threadId()).orElseThrow();
               UUID id = tx.nextId();
-              ModelRequestSpec request = StoreTestSupport.modelRequest();
+              ModelRequestSpec request = modelRequest();
               builtin(tx)
                   .insertModelInvocation(
                       new ModelInvocation(

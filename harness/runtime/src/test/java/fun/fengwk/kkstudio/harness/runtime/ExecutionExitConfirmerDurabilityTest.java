@@ -1,7 +1,7 @@
-package fun.fengwk.kkstudio.harness.builtin.runtime;
+package fun.fengwk.kkstudio.harness.runtime;
 
-import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.T0;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.seedBaseline;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T0;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedBaseline;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -9,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitJournal;
@@ -21,6 +20,7 @@ import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.runtime.execution.FileExecutionExitJournal;
 import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 
 import java.lang.reflect.Proxy;
@@ -43,7 +43,7 @@ class ExecutionExitConfirmerDurabilityTest {
   @Test
   void databaseFailureAfterProofWriteKeepsJournalForRestartReplay(@TempDir Path directory)
       throws Exception {
-    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     ExecutionExitFact fact = register(store, baseline.threadId(), TestIds.id(1), T0);
     Clock clock = Clock.fixed(T0, ZoneOffset.UTC);
@@ -76,7 +76,7 @@ class ExecutionExitConfirmerDurabilityTest {
   @Test
   void proofWrittenBeforeAbandonmentReplaysWithoutReplacingEitherTime(@TempDir Path directory)
       throws Exception {
-    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     ExecutionExitFact fact = register(store, baseline.threadId(), TestIds.id(1), T0);
     try (FileExecutionExitJournal journal = new FileExecutionExitJournal(directory)) {
@@ -152,7 +152,7 @@ class ExecutionExitConfirmerDurabilityTest {
 
   @Test
   void missingFactKeepsJournalButMissingThreadDeletesIt(@TempDir Path directory) throws Exception {
-    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     Clock clock = Clock.fixed(T0, ZoneOffset.UTC);
     ExecutionExitConfirmer confirmer;
@@ -185,7 +185,7 @@ class ExecutionExitConfirmerDurabilityTest {
 
   @Test
   void replayContinuesAfterOneRecordFails(@TempDir Path directory) throws Exception {
-    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     ExecutionExitFact missing = expected(baseline.threadId(), TestIds.id(7), T0);
     ExecutionExitFact present = register(store, baseline.threadId(), TestIds.id(8), T0);
@@ -208,7 +208,7 @@ class ExecutionExitConfirmerDurabilityTest {
 
   @Test
   void deleteFailureKeepsProofAndReplayDoesNotAdvanceVersionAgain(@TempDir Path directory) {
-    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     ExecutionExitFact fact = register(store, baseline.threadId(), TestIds.id(9), T0);
 
@@ -233,7 +233,7 @@ class ExecutionExitConfirmerDurabilityTest {
 
   @Test
   void confirmedStateCannotBeReplacedByDifferentRealEvidence(@TempDir Path directory) {
-    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     ExecutionExitFact fact = register(store, baseline.threadId(), TestIds.id(10), T0);
 
@@ -258,7 +258,7 @@ class ExecutionExitConfirmerDurabilityTest {
 
   @Test
   void journalIdentityConflictIsRetainedWithoutTouchingTheDatabase(@TempDir Path directory) {
-    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     ExecutionExitFact recorded = expected(baseline.threadId(), TestIds.id(11), T0);
     ExecutionExitFact conflicting =
@@ -291,7 +291,7 @@ class ExecutionExitConfirmerDurabilityTest {
 
   @Test
   void unconfirmedTargetIsRejectedBeforeWritingProof(@TempDir Path directory) {
-    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     ExecutionExitFact fact = register(store, baseline.threadId(), TestIds.id(13), T0);
 
@@ -308,7 +308,7 @@ class ExecutionExitConfirmerDurabilityTest {
 
   @Test
   void concurrentCallbacksAdvanceVersionExactlyOnce() throws Exception {
-    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     ExecutionExitFact fact = register(store, baseline.threadId(), TestIds.id(4), T0);
     ExecutionExitConfirmer confirmer =
@@ -350,7 +350,7 @@ class ExecutionExitConfirmerDurabilityTest {
   }
 
   private static ExecutionExitFact register(
-      InMemoryBuiltinHarnessStore store, UUID threadId, UUID invocationId, Instant registeredAt) {
+      InMemoryHarnessStore store, UUID threadId, UUID invocationId, Instant registeredAt) {
     ExecutionExitFact fact = expected(threadId, invocationId, registeredAt);
     store.transaction(
         tx -> {
@@ -360,7 +360,7 @@ class ExecutionExitConfirmerDurabilityTest {
     return fact;
   }
 
-  private static long threadVersion(InMemoryBuiltinHarnessStore store, UUID threadId) {
+  private static long threadVersion(InMemoryHarnessStore store, UUID threadId) {
     return store.transaction(tx -> tx.findThread(threadId).orElseThrow().version());
   }
 

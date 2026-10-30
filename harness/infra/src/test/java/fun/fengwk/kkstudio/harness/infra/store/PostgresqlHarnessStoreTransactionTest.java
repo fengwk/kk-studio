@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.infra.store;
 
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.session;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.session;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;

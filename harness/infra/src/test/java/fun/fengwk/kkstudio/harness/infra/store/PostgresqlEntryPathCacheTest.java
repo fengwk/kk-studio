@@ -1,23 +1,23 @@
 package fun.fengwk.kkstudio.harness.infra.store;
 
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.T1;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.T2;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.insertChildEntry;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.resolvedTurnStartPayload;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.rootEntry;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.session;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.userMessagePayload;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T1;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T2;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.insertChildEntry;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.resolvedTurnStartPayload;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.rootEntry;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.session;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.userMessagePayload;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.Baseline;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
 
 import javax.sql.DataSource;
 

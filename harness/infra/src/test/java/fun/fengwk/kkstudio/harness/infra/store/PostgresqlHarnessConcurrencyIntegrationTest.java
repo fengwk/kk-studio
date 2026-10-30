@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.infra.store;
 
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -8,9 +8,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.Baseline;
 import fun.fengwk.kkstudio.harness.runtime.ThreadLifecycleCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;

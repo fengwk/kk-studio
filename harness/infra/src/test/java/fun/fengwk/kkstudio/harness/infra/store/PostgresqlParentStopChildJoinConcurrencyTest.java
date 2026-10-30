@@ -2,12 +2,13 @@ package fun.fengwk.kkstudio.harness.infra.store;
 
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtinDriver;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.CREATION_REQUEST_HASH;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.T1;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.T3;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.resolvedTurnStartPayload;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.rootEntry;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.session;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.succeededRequest;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.CREATION_REQUEST_HASH;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T1;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T3;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.resolvedTurnStartPayload;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.rootEntry;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.session;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -23,7 +24,6 @@ import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
-import fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport;
 import fun.fengwk.kkstudio.harness.builtin.store.BuiltinStore;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
@@ -47,6 +47,7 @@ import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorConfig;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
@@ -201,7 +202,7 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
           tx.updateCommands(List.of(StoreTestSupport.withConsumedTurnStart(childCmd, turnStartId)));
 
           UUID modelId = tx.nextId();
-          ModelRequestSpec request = StoreTestSupport.succeededRequest();
+          ModelRequestSpec request = succeededRequest();
           ProviderResponse response = StoreTestSupport.assistantResponse();
           ModelInvocation model =
               new ModelInvocation(
