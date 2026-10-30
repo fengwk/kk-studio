@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import type { AddressInfo } from 'node:net'
 import { isAbsolute, resolve as resolvePath } from 'node:path'
+import { pathKeysIgnoreCase } from '../native/host.js'
 import { IdeError } from './errors.js'
 
 /**
@@ -79,7 +80,7 @@ const COMMAND_TIMEOUT_MILLIS = 20_000
 
 function pathKey(path: string): string {
   const resolved = resolvePath(path)
-  return process.platform === 'win32' ? resolved.toLowerCase() : resolved
+  return pathKeysIgnoreCase() ? resolved.toLowerCase() : resolved
 }
 
 function isLoopback(address: string | undefined): boolean {

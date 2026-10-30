@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import type { Stats } from 'node:fs'
 import type { ExitReport, LaunchSpec } from './state.js'
 import { joinCommandLine } from './windows-command-line.js'
+import { writeAllSync as writeDescriptor } from './write-all.js'
 
 /**
  * Windows 原生执行范围、内核锁与 owner-only ACL。
@@ -926,7 +927,7 @@ export function commitPrivateFile(
   const noFollow = fs.constants.O_NOFOLLOW ?? 0
   const handle = fs.openSync(temporary, fs.constants.O_WRONLY | noFollow)
   try {
-    writeAllSync(fs, handle, data)
+    writeDescriptor(fs, handle, data, 'the private file could not be written completely')
     fs.fsyncSync(handle)
   } finally {
     fs.closeSync(handle)
@@ -1162,23 +1163,6 @@ function lstatOrNull(fs: typeof import('node:fs'), path: string): Stats | null {
       return null
     }
     throw error
-  }
-}
-
-/** 写满整个缓冲区：`writeSync` 允许短写，循环直到全部写完。 */
-export function writeAllSync(
-  fs: Pick<typeof import('node:fs'), 'writeSync'>,
-  handle: number,
-  data: Buffer,
-): void {
-  let offset = 0
-  while (offset < data.length) {
-    const written = fs.writeSync(handle, data, offset, data.length - offset)
-    if (written <= 0) {
-      // 短写为 0（或异常负值）必须失败：否则会无限循环，且目标可能只落了一半内容。
-      throw new Error('the private file could not be written completely')
-    }
-    offset += written
   }
 }
 
