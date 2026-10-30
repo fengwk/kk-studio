@@ -25,7 +25,6 @@ export {
 } from '@/features/chat/runtime/ThreadPane'
 export { RootThreadControlArea } from '@/features/chat/runtime/RootThreadControlArea'
 export {
-  ChildThreadView,
   ThreadView,
   ConnectedThreadView,
 } from '@/features/chat/runtime/ChildThreadView'

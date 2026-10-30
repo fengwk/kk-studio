@@ -197,17 +197,12 @@ export function AgentPane({
   }, [visiblePresentation])
   const openParent = isRoot === true ? navigation.openThread : undefined
 
-  // 各 thread layer 进入语义明确选择当前可操作环境，不从 toolarguments 猜 cwd；
-  // 准确解析 EnvironmentCard.id/name/ready/HOME，查不到不能用 name 冒充 UUID。
-  // child 活跃时只能是该 child 的 presentation 环境或 null，绝不继承 root 环境；
-  // root 活跃时保持其 root 投影及默认环境配置语义。
-  const activeChildThreadId = navigation.activeThreadId
-  const activeLayerEnvironmentName = activeChildThreadId != null
-    ? visiblePresentation?.environmentName ?? null
-    : projection.thread?.branchSettings?.environmentName ?? defaults?.environmentName ?? null
-
-  const matchedEnvCard = activeLayerEnvironmentName
-    ? environments.find((env) => env.name === activeLayerEnvironmentName) ?? null
+  // IDE 命令只由根控制面提供；子代理查看层没有命令入口，隐藏的根控制面也不接收动作。
+  const environmentName = projection.thread?.branchSettings?.environmentName
+    ?? defaults?.environmentName
+    ?? null
+  const matchedEnvCard = environmentName
+    ? environments.find((env) => env.name === environmentName) ?? null
     : null
 
   const resolvedEnvironment: IdeEnvironmentInfo | null = useMemo(() => {
