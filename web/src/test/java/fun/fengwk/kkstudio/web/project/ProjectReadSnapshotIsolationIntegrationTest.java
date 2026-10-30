@@ -14,7 +14,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.Project;
-import fun.fengwk.kkstudio.project.service.IssueService;
+import fun.fengwk.kkstudio.project.service.IssueEditingService;
+import fun.fengwk.kkstudio.project.service.IssueLifecycleService;
 import fun.fengwk.kkstudio.project.service.ProjectService;
 import fun.fengwk.kkstudio.share.project.IssueDetailDTO;
 import fun.fengwk.kkstudio.share.project.ProjectSnapshotDTO;
@@ -40,7 +41,8 @@ class ProjectReadSnapshotIsolationIntegrationTest extends WebPostgresTestSupport
   @Autowired private PlatformTransactionManager transactionManager;
 
   @MockitoSpyBean private ProjectService projectService;
-  @MockitoSpyBean private IssueService issueService;
+  @MockitoSpyBean private IssueEditingService issueEditingService;
+  @Autowired private IssueLifecycleService issueLifecycleService;
 
   /** 意图：Project Snapshot 读取期间并发提交的 Issue 不得出现在同一次聚合里。 */
   @Test
@@ -54,13 +56,14 @@ class ProjectReadSnapshotIsolationIntegrationTest extends WebPostgresTestSupport
               if (injected.compareAndSet(false, true)) {
                 commitInNewTransaction(
                     () -> {
-                      issueService.createIssue(project.getId(), "Concurrent Issue", "Desc");
+                      issueEditingService.createIssue(project.getId(), "Concurrent Issue", "Desc");
                       Issue archived =
-                          issueService.createIssue(project.getId(), "Archived Issue", "Desc");
+                          issueEditingService.createIssue(
+                              project.getId(), "Archived Issue", "Desc");
                       archived =
-                          issueService.blockIssue(
+                          issueLifecycleService.blockIssue(
                               archived.getId(), archived.getVersion(), "rr-block", "Blocked");
-                      issueService.archiveIssue(archived.getId(), archived.getVersion());
+                      issueLifecycleService.archiveIssue(archived.getId(), archived.getVersion());
                     });
               }
               return resolved;
@@ -86,7 +89,7 @@ class ProjectReadSnapshotIsolationIntegrationTest extends WebPostgresTestSupport
   @Test
   void issueDetailIgnoresFactsCommittedAfterItsReadSnapshot() {
     Project project = projectService.createProject("RR Detail Project", "Desc", false);
-    Issue issue = issueService.createIssue(project.getId(), "RR Detail Issue", "Desc");
+    Issue issue = issueEditingService.createIssue(project.getId(), "RR Detail Issue", "Desc");
     AtomicBoolean injected = new AtomicBoolean();
     doAnswer(
             invocation -> {
@@ -95,7 +98,7 @@ class ProjectReadSnapshotIsolationIntegrationTest extends WebPostgresTestSupport
               if (injected.compareAndSet(false, true)) {
                 commitInNewTransaction(
                     () ->
-                        issueService.appendComment(
+                        issueEditingService.appendComment(
                             issue.getId(),
                             resolved.getVersion(),
                             "rr-concurrent-comment",
@@ -103,7 +106,7 @@ class ProjectReadSnapshotIsolationIntegrationTest extends WebPostgresTestSupport
               }
               return resolved;
             })
-        .when(issueService)
+        .when(issueEditingService)
         .getIssue(any());
 
     IssueDetailDTO snapshotTakenBeforeCommit = issueDetailAssembler.assemble(issue.getId(), 0L, 50);

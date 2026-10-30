@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.project.service.impl;
+package fun.fengwk.kkstudio.project.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -68,7 +68,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * <p>测试意图：断言接受方提交的 Harness 契约形状（命令类型与顺序、Join 身份、冻结快照的业务身份），不依赖真实 Runtime 执行；Run 记录、Join
  * 与上下文冻结的原子性由平台集成测试覆盖。
  */
-class IssueRunServiceImplTest {
+class IssueRunServiceTest {
 
   private static final UUID ISSUE_ID = UUID.fromString("10000000-0000-0000-0000-000000000001");
   private static final UUID PROJECT_ID = UUID.fromString("10000000-0000-0000-0000-000000000002");
@@ -98,8 +98,8 @@ class IssueRunServiceImplTest {
   @SuppressWarnings("unchecked")
   private final ObjectProvider<IssueThreadExecution> executions = mock(ObjectProvider.class);
 
-  private final IssueRunServiceImpl service =
-      new IssueRunServiceImpl(
+  private final IssueRunService service =
+      new IssueRunService(
           projectRepository,
           issueRepository,
           issueRunRepository,

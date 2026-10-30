@@ -51,8 +51,10 @@ import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.Project;
 import fun.fengwk.kkstudio.project.repo.IssueActivityRepository;
+import fun.fengwk.kkstudio.project.service.IssueEditingService;
+import fun.fengwk.kkstudio.project.service.IssueLifecycleService;
 import fun.fengwk.kkstudio.project.service.IssueRunService;
-import fun.fengwk.kkstudio.project.service.IssueService;
+import fun.fengwk.kkstudio.project.service.IssueStageBudgetService;
 import fun.fengwk.kkstudio.project.service.ProjectService;
 import fun.fengwk.kkstudio.project.turn.ProjectRunScope;
 import fun.fengwk.kkstudio.project.turn.ProjectRunScopeJsonCodec;
@@ -98,7 +100,9 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
 
   @Autowired protected JdbcTemplate jdbc;
   @Autowired protected ProjectService projectService;
-  @Autowired protected IssueService issueService;
+  @Autowired protected IssueEditingService issueEditingService;
+  @Autowired protected IssueLifecycleService issueLifecycleService;
+  @Autowired protected IssueStageBudgetService issueStageBudgetService;
   @Autowired protected IssueRunService issueRunService;
 
   /**
@@ -174,7 +178,7 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
   }
 
   protected Issue createIssue(UUID projectId) {
-    return issueService.createIssue(projectId, "Issue " + UUID.randomUUID(), "需求描述");
+    return issueEditingService.createIssue(projectId, "Issue " + UUID.randomUUID(), "需求描述");
   }
 
   /** 当前 Thread head Entry：终态收尾必须冻结一个真实属于本 Session 的 Entry。 */

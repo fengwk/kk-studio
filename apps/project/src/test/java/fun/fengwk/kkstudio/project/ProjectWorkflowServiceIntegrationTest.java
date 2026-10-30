@@ -111,16 +111,16 @@ class ProjectWorkflowServiceIntegrationTest extends ProjectTestSupport {
     projectService.updateWorkflow(
         project.getId(), project.getVersion(), workflowJson(agent, agent, 3));
     Issue live = createIssue(project.getId());
-    issueService.transition(live.getId(), live.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(live.getId(), live.getVersion(), key("t"), "DESIGN");
     Issue blocked =
-        issueService.blockIssue(
-            issueService.getIssue(live.getId()).getId(),
-            issueService.getIssue(live.getId()).getVersion(),
+        issueLifecycleService.blockIssue(
+            issueEditingService.getIssue(live.getId()).getId(),
+            issueEditingService.getIssue(live.getId()).getVersion(),
             key("block"),
             "等待外部");
     Issue archived = createIssue(project.getId());
-    issueService.transition(archived.getId(), archived.getVersion(), key("t"), "DESIGN");
-    Issue inDesign = issueService.getIssue(archived.getId());
+    issueLifecycleService.transition(archived.getId(), archived.getVersion(), key("t"), "DESIGN");
+    Issue inDesign = issueEditingService.getIssue(archived.getId());
     IssueRun archivedRun = issueRunService.acceptRun(inDesign.getId(), key("accept"));
     UUID archivedEnd = appendHistoryEntry(archivedRun.getThreadId());
     issueRunService.completeRun(
@@ -130,8 +130,8 @@ class ProjectWorkflowServiceIntegrationTest extends ProjectTestSupport {
         archivedEnd,
         null,
         "REVIEW");
-    Issue inReview = issueService.getIssue(archived.getId());
-    issueService.archiveIssue(inReview.getId(), inReview.getVersion());
+    Issue inReview = issueEditingService.getIssue(archived.getId());
+    issueLifecycleService.archiveIssue(inReview.getId(), inReview.getVersion());
     Project current = projectService.getProject(project.getId());
     String withoutDesign =
         "{"
@@ -162,8 +162,8 @@ class ProjectWorkflowServiceIntegrationTest extends ProjectTestSupport {
         () -> projectService.updateWorkflow(current.getId(), current.getVersion(), withoutReview));
     assertEquals(
         blocked.getBlockedFromState(),
-        issueService.getIssue(blocked.getId()).getBlockedFromState());
-    assertEquals("REVIEW", issueService.getIssue(archived.getId()).getState());
+        issueEditingService.getIssue(blocked.getId()).getBlockedFromState());
+    assertEquals("REVIEW", issueEditingService.getIssue(archived.getId()).getState());
     assertEquals(
         current.getWorkflowJson(), projectService.getProject(project.getId()).getWorkflowJson());
   }
@@ -176,7 +176,7 @@ class ProjectWorkflowServiceIntegrationTest extends ProjectTestSupport {
     projectService.updateWorkflow(
         project.getId(), project.getVersion(), workflowJson(agent, agent, 3));
     Issue issue = createIssue(project.getId());
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     Project current = projectService.getProject(project.getId());
     String withoutReview =
         "{"
@@ -195,7 +195,7 @@ class ProjectWorkflowServiceIntegrationTest extends ProjectTestSupport {
     assertEquals(
         withoutReview,
         new ProjectWorkflowJsonCodec().encode(codec.decode(updated.getWorkflowJson())));
-    assertEquals("DESIGN", issueService.getIssue(issue.getId()).getState());
+    assertEquals("DESIGN", issueEditingService.getIssue(issue.getId()).getState());
   }
 
   /** 存在活动主 Run 时拒绝影响职责/结构的工作流调整。 */
@@ -206,8 +206,8 @@ class ProjectWorkflowServiceIntegrationTest extends ProjectTestSupport {
     projectService.updateWorkflow(
         project.getId(), project.getVersion(), workflowJson(agent, agent, 3));
     Issue issue = createIssue(project.getId());
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
-    Issue inDesign = issueService.getIssue(issue.getId());
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    Issue inDesign = issueEditingService.getIssue(issue.getId());
     issueRunService.acceptRun(inDesign.getId(), key("accept"));
 
     Project current = projectService.getProject(project.getId());
@@ -228,12 +228,13 @@ class ProjectWorkflowServiceIntegrationTest extends ProjectTestSupport {
     Issue issue = createIssue(project.getId());
     String pauseKey = key("pause");
     Issue paused =
-        issueService.pauseIssue(
+        issueLifecycleService.pauseIssue(
             issue.getId(), issue.getVersion(), pauseKey, PauseReason.USER, "人工暂停");
     long activityCount = activityCount(issue.getId());
 
     // 用第一次请求前的旧版本重试：精确重试先于版本校验，因此必须成功且返回同一事实。
-    Issue replayed = issueService.pauseIssue(issue.getId(), 0L, pauseKey, PauseReason.USER, "人工暂停");
+    Issue replayed =
+        issueLifecycleService.pauseIssue(issue.getId(), 0L, pauseKey, PauseReason.USER, "人工暂停");
 
     assertEquals("USER", replayed.getPauseReason());
     assertEquals("人工暂停", replayed.getPauseDetail());
@@ -251,10 +252,11 @@ class ProjectWorkflowServiceIntegrationTest extends ProjectTestSupport {
     Issue issue = createIssue(project.getId());
     String transitionKey = key("t");
     Issue inDesign =
-        issueService.transition(issue.getId(), issue.getVersion(), transitionKey, "DESIGN");
+        issueLifecycleService.transition(
+            issue.getId(), issue.getVersion(), transitionKey, "DESIGN");
     long activityCount = activityCount(issue.getId());
 
-    Issue replayed = issueService.transition(issue.getId(), 0L, transitionKey, "DESIGN");
+    Issue replayed = issueLifecycleService.transition(issue.getId(), 0L, transitionKey, "DESIGN");
 
     assertEquals("DESIGN", replayed.getState());
     assertEquals(inDesign.getVersion(), replayed.getVersion());
@@ -272,11 +274,16 @@ class ProjectWorkflowServiceIntegrationTest extends ProjectTestSupport {
 
     assertThrows(
         ProjectValidationException.class,
-        () -> issueService.transition(issue.getId(), issue.getVersion(), key("t"), "REVIEW"));
-    Issue inDesign = issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+        () ->
+            issueLifecycleService.transition(
+                issue.getId(), issue.getVersion(), key("t"), "REVIEW"));
+    Issue inDesign =
+        issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     assertThrows(
         ProjectVersionConflictException.class,
-        () -> issueService.transition(issue.getId(), issue.getVersion(), key("t"), "REVIEW"));
+        () ->
+            issueLifecycleService.transition(
+                issue.getId(), issue.getVersion(), key("t"), "REVIEW"));
     assertEquals("DESIGN", inDesign.getState());
   }
 
@@ -290,22 +297,22 @@ class ProjectWorkflowServiceIntegrationTest extends ProjectTestSupport {
     Issue issue = createIssue(project.getId());
     String pauseKey = key("pause");
     Issue paused =
-        issueService.pauseIssue(
+        issueLifecycleService.pauseIssue(
             issue.getId(), issue.getVersion(), pauseKey, PauseReason.USER, "第一次暂停");
     long activityCount = activityCount(issue.getId());
 
-    Issue stillPaused = issueService.getIssue(issue.getId());
+    Issue stillPaused = issueEditingService.getIssue(issue.getId());
     assertThrows(
         ProjectDuplicateException.class,
         () ->
-            issueService.pauseIssue(
+            issueLifecycleService.pauseIssue(
                 stillPaused.getId(),
                 stillPaused.getVersion(),
                 pauseKey,
                 PauseReason.USER,
                 "第二次暂停"));
 
-    Issue after = issueService.getIssue(issue.getId());
+    Issue after = issueEditingService.getIssue(issue.getId());
     assertEquals("第一次暂停", after.getPauseDetail());
     assertEquals(stillPaused.getVersion(), after.getVersion());
     assertEquals(activityCount, activityCount(issue.getId()));
