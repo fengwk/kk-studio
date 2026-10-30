@@ -4,6 +4,10 @@
 
 模块只依赖 [Common](common.md)、[Harness Runtime](harness-runtime.md) 的 Contributor / Tool 契约与 Jackson 3 值模型（见 [`pom.xml`](../../platform/plugin-api/pom.xml)）。插件源码只能 import 本模块、Contributor / Tool 契约与 Common；这条边界与模块依赖方向一起由仓库检查 [`check.mjs`](../../scripts/dev/verify/repository/check.mjs) 校验。
 
+## 公共辅助
+
+`fun.fengwk.kkstudio.platform.plugin.support` 提供插件共享的纯辅助，不引入实例基类。`DeadlineResponseBody` 把发送前冻结的单一截止点延伸到响应体读取，到期关闭底层流，长度不符与底层读取失败使用固定去敏错误。`CanvasArguments` 读取字符串参数，仅在字段缺失时使用默认值，显式 null 或错误类型仍拒绝。
+
 ## 定义与配置实例
 
 [`StudioPlugin`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/StudioPlugin.java) 是安装期定义，由插件 JAR 的 auto-configuration 注册。它声明唯一 [`PluginDescriptor`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginDescriptor.java)（pluginId、展示名、代码版本）、配置 Schema、认证形态，并通过 `configure(config, context)` 构建 [`PluginInstance`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginInstance.java)。

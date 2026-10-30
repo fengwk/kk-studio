@@ -43,6 +43,8 @@
                                     <element>CLASS</element>
                                     <includes>
                                         <include>fun.fengwk.kkstudio.harness.provider.ProviderErrorHelper</include>
+                                        <include>fun.fengwk.kkstudio.harness.provider.ProviderJsonHelper</include>
+                                        <include>fun.fengwk.kkstudio.harness.provider.ProviderMediaValidator</include>
                                         <include>fun.fengwk.kkstudio.harness.provider.RequestBodySizeGuard</include>
                                         <include>fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge</include>
                                         <include>fun.fengwk.kkstudio.harness.provider.ProviderModelDiscovery</include>

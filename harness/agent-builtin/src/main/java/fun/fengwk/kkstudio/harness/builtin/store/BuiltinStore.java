@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin.store;
 
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
+import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 
 import java.time.Instant;

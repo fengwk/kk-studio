@@ -105,6 +105,13 @@ MODEL 配置保存 limit、abilities、variants、pricing 和 default variant。
 条件对象同层字段为 AND，支持 `all` / `any` / `not`、context token 边界、service tier、UTC 日期
 与时区时间段。覆盖规则只写入非 null 字段，显式 `reasoning: null` 恢复继承；倍率规则逐字段
 缩放，未列出的字段不变。
+
+models.dev v2 目录导入只填入 token 价格；`web_search` 等非 token 附加费用不计入并显示提示。
+由于不感知上游请求地区，含 `region` 条件的倍率规则（包括嵌套组合）整条忽略，保留基础价、
+TTL 缓存价和其他有效倍率，并提示统计费用可能低于实际账单。其他未知定价字段或条件、
+非法价格与倍率仍拒绝整份候选价格；`region` 覆盖规则也不支持。价格不支持的候选仍可填入
+其他模型信息，但保留已有价格，不用零价覆盖。
+
 Agent 配置保存工具名、`SkillRef(packageName, name)`、subagents 与 `inheritParentEnvironment`
 （默认 true）；工具候选和 Skill 引用在写入时校验。
 

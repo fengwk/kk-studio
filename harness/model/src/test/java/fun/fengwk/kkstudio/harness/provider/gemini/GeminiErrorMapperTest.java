@@ -132,6 +132,33 @@ class GeminiErrorMapperTest {
     assertEquals("HTTP 503\n" + unavailJson, ex2.getMessage());
   }
 
+  /** 验证 599/600 边界：只有标准 5xx 可重试，范围外状态不得变成 TRANSIENT。 */
+  @Test
+  void preservesNonStandardStatusClassification() {
+    ProviderException http599 = GeminiErrorMapper.fromHttp(599, null);
+    assertEquals(ProviderErrorKind.TRANSIENT, http599.kind());
+    assertEquals("HTTP 599: " + GeminiErrorMapper.MSG_TRANSIENT, http599.getMessage());
+    assertEquals(599, http599.httpStatus());
+
+    ProviderException http600 = GeminiErrorMapper.fromHttp(600, null);
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, http600.kind());
+    assertEquals("HTTP 600: " + GeminiErrorMapper.MSG_INVALID_RESPONSE, http600.getMessage());
+    assertNull(http600.httpStatus());
+
+    ObjectNode env599 = MAPPER.createObjectNode();
+    env599.putObject("error").put("code", 599);
+    ProviderException sse599 = GeminiErrorMapper.mapSseErrorEnvelope(env599);
+    assertEquals(ProviderErrorKind.TRANSIENT, sse599.kind());
+    assertEquals(599, sse599.httpStatus());
+
+    ObjectNode env600 = MAPPER.createObjectNode();
+    env600.putObject("error").put("code", 600);
+    ProviderException sse600 = GeminiErrorMapper.mapSseErrorEnvelope(env600);
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, sse600.kind());
+    assertEquals(env600.toString(), sse600.getMessage());
+    assertNull(sse600.httpStatus());
+  }
+
   /** 验证底层网络与超时异常的规范映射。 */
   @Test
   void mapsTransportExceptions() {

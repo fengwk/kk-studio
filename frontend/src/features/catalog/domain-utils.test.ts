@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
+import { setLocale } from '@/shared/i18n'
 import {
   filterAgents,
   filterModels,
   filterProviders,
+  formatCatalogSupportIssue,
   resourceTitle,
 } from '@/features/catalog/catalog-utils'
 import {
@@ -516,5 +518,23 @@ describe('AI domain utilities', () => {
     })
 
     expect(includesSearch('MiniMax', 'missing')).toBe(false)
+  })
+
+  it('maps known diagnostics to user warnings and keeps unknown issues verbatim', () => {
+    setLocale('zh-CN')
+    expect(formatCatalogSupportIssue('ignored region multiplier'))
+      .toBe('已忽略地区倍率，统计费用可能低于实际账单')
+    expect(formatCatalogSupportIssue('non-token cost is not included: web_search'))
+      .toBe('网页搜索附加费用未计入Token价格')
+    expect(formatCatalogSupportIssue('unsupported condition: tier'))
+      .toBe('unsupported condition: tier')
+
+    setLocale('en-US')
+    expect(formatCatalogSupportIssue('ignored region multiplier'))
+      .toBe('Region multipliers ignored; estimated costs may be lower than your actual bill')
+    expect(formatCatalogSupportIssue('non-token cost is not included: web_search'))
+      .toBe('Web search surcharges are not included in token prices')
+    expect(formatCatalogSupportIssue('unsupported condition: tier'))
+      .toBe('unsupported condition: tier')
   })
 })

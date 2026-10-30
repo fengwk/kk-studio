@@ -10,10 +10,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 /** 在指定工作线程首次 ownership 事务结束后暂停，不持有 Store 或准入锁。 */
-final class ClaimOwnershipTestSupport {
+public final class ClaimOwnershipTestSupport {
   private ClaimOwnershipTestSupport() {}
 
-  static HarnessStore gate(
+  public static HarnessStore gate(
       HarnessStore store,
       AtomicReference<Thread> worker,
       CountDownLatch checked,

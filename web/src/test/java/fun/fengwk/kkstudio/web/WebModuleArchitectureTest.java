@@ -57,6 +57,11 @@ class WebModuleArchitectureTest {
           WEB_SOURCE_ROOT + "runtime/HarnessRuntimeConfiguration.java",
           List.of(
               BUILTIN_PREFIX + "driver.BuiltinAgentDriver",
+              BUILTIN_PREFIX + "port.ModelGateway",
+              BUILTIN_PREFIX + "port.TurnResolver",
+              BUILTIN_PREFIX + "processor.ModelProcessor",
+              BUILTIN_PREFIX + "processor.ModelProcessorConfig",
+              BUILTIN_PREFIX + "processor.ModelStreamConfig",
               BUILTIN_PREFIX + "query.BuiltinRequestQuery"));
 
   private static final List<String> FORBIDDEN_IMPORT_PREFIXES =

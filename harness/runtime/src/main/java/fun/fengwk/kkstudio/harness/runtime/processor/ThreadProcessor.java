@@ -922,14 +922,4 @@ public final class ThreadProcessor {
               return true;
             }));
   }
-
-  /**
-   * 内部回滚信号：final claim fence 或提交 CAS 丢失时抛出，使当前事务完整回滚（零 durable mutation），再由 {@link #process} 捕获并映射为
-   * LOST_OWNERSHIP。除 {@link #process} 外不得被捕获。
-   */
-  private static final class ClaimLostSignal extends RuntimeException {
-    private ClaimLostSignal() {
-      super("claimed work lost at final fence", null, false, false);
-    }
-  }
 }

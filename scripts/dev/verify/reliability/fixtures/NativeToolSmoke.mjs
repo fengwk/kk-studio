@@ -20,7 +20,7 @@ const distDir = process.env.KK_STUDIO_DAEMON_DIST ?? '/opt/kk-studio/daemon'
 const smokeRoot = process.env.KK_STUDIO_SMOKE_ROOT ?? '/workspace'
 
 const load = async (relative) => import(pathToFileURL(join(distDir, relative)).href)
-const { searchCapabilities, resolveSearchWorkerEntry } = await load('coding/search.js')
+const { searchCapabilities } = await load('coding/search.js')
 const { processCapabilities } = await load('coding/process.js')
 const { createProcessSupervisor } = await load('native/index.js')
 
@@ -75,6 +75,7 @@ async function main() {
       },
     },
     async progress() {},
+    confirmExecutionExit() {},
   }
   const invoke = async (capabilityId, args) => {
     const executor = searchCapabilities[capabilityId] ?? processCapabilities[capabilityId]
@@ -108,14 +109,14 @@ async function main() {
       `slash-containing find must remain segment-aware: ${textOf(slashPattern)}`,
     )
 
-    // glob 由发行目录里的 picomatch 编译：`[d]` 是字面字符类，`\d` 是数字类。
+    // glob 由发行目录里的 rg globset 编译：`[d]` 是字符类，`[0-9]` 是数字范围。
     const literalClass = await invoke('fs.find', { pattern: '[d].txt', path: root })
     check(
       textOf(literalClass) === join(root, 'd.txt'),
       `literal glob character-class mismatch: ${textOf(literalClass)}`,
     )
 
-    const digitClass = await invoke('fs.find', { pattern: '[\\d].txt', path: root })
+    const digitClass = await invoke('fs.find', { pattern: '[0-9].txt', path: root })
     check(
       textOf(digitClass) === join(root, '1.txt'),
       `glob digit-class mismatch: ${textOf(digitClass)}`,
@@ -163,11 +164,8 @@ async function main() {
     check(ansi.error === false, `ANSI bash output must succeed: ${textOf(ansi)}`)
     check(textOf(ansi).includes('passed'), 'ANSI bash output must remain readable')
 
-    // 发行目录必须自带编译后的搜索 Worker：缺它搜索会 fail-closed，而不是静默降级。
-    check(resolveSearchWorkerEntry() !== null, 'the packaged search worker entry is missing')
-
     process.stdout.write(
-      `native-node-tool-smoke=PASS assertions=${assertions} rg_fd_required=false\n`,
+      `native-node-tool-smoke=PASS assertions=${assertions} ripgrep=packaged\n`,
     )
   } finally {
     try {

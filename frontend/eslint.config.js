@@ -3,9 +3,53 @@ import globals from 'globals'
 import reactHooks from 'eslint-plugin-react-hooks'
 import reactRefresh from 'eslint-plugin-react-refresh'
 import tseslint from 'typescript-eslint'
+import path from 'node:path'
+
+// Exact entry points currently shared by features; new dependencies require review.
+const featureDependencies = {
+  canvas: ['chat/composer'],
+  projects: ['chat/composer', 'chat/runtime/AgentPane'],
+  settings: ['chat/runtime/thread-notifications', 'extensions/PluginsTab', 'catalog/agent-capability-candidates'],
+  chat: ['catalog', 'environment/ide/ide-panel-context'],
+}
+
+const featureBoundary = {
+  meta: { type: 'problem', schema: [], messages: { forbidden: 'Unregistered cross-feature dependency: {{entry}}.' } },
+  create(context) {
+    const root = path.resolve(import.meta.dirname, 'src/features')
+    const owner = path.relative(root, context.filename).split(path.sep)[0]
+    function check(node) {
+      const source = node.source ?? node.parameter
+      if (typeof source?.value !== 'string') return
+      const specifier = source.value
+      const target = specifier.startsWith('@/features/')
+        ? path.resolve(root, specifier.slice('@/features/'.length))
+        : specifier.startsWith('.') ? path.resolve(path.dirname(context.filename), specifier) : null
+      if (!target) return
+      const entry = path.relative(root, target).split(path.sep).join('/')
+      if (entry.startsWith('../') || entry.split('/')[0] === owner) return
+      if (!(featureDependencies[owner] ?? []).includes(entry)) {
+        context.report({ node: source, messageId: 'forbidden', data: { entry } })
+      }
+    }
+    return {
+      ImportDeclaration: check,
+      ExportNamedDeclaration: check,
+      ExportAllDeclaration: check,
+      ImportExpression: check,
+      TSImportType: check,
+    }
+  },
+}
 
 export default tseslint.config(
   { ignores: ['dist', 'coverage', '.reports'] },
+  {
+    files: ['src/features/**/*.{ts,tsx}'],
+    ignores: ['src/features/**/*.test.{ts,tsx}', 'src/features/**/__tests__/**'],
+    plugins: { architecture: { rules: { 'feature-dependencies': featureBoundary } } },
+    rules: { 'architecture/feature-dependencies': 'error' },
+  },
   {
     files: ['**/*.{ts,tsx}'],
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
