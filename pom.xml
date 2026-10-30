@@ -28,6 +28,7 @@
         <spring-boot.version>4.0.8</spring-boot.version>
         <jackson.version>2.22.3</jackson.version>
         <jackson3.version>3.1.7</jackson3.version>
+        <flyway.version>12.0.3</flyway.version>
         <tomcat.version>11.0.26</tomcat.version>
         <netty.version>4.2.18.Final</netty.version>
         <httpclient5.version>5.6.4</httpclient5.version>
@@ -77,6 +78,17 @@
                 <groupId>org.apache.httpcomponents.core5</groupId>
                 <artifactId>httpcore5-h2</artifactId>
                 <version>${httpcore5.version}</version>
+            </dependency>
+            <!-- Flyway 12 使用 Jackson 3；core 与 database-postgresql 必须同版本。 -->
+            <dependency>
+                <groupId>org.flywaydb</groupId>
+                <artifactId>flyway-core</artifactId>
+                <version>${flyway.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.flywaydb</groupId>
+                <artifactId>flyway-database-postgresql</artifactId>
+                <version>${flyway.version}</version>
             </dependency>
             <dependency>
                 <groupId>io.netty</groupId>
