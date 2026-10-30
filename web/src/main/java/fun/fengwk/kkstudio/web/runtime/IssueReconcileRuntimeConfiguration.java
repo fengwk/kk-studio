@@ -12,7 +12,6 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperties;
-import fun.fengwk.kkstudio.project.reconcile.IssueReconcileOutcome;
 import fun.fengwk.kkstudio.project.reconcile.IssueReconcileProperties;
 import fun.fengwk.kkstudio.project.reconcile.IssueReconciler;
 import fun.fengwk.kkstudio.work.BoundedWorkDispatcher;
@@ -30,7 +29,6 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Function;
 
 /**
  * Issue Reconcile 运行时装配：drain executor、worker executor、poll scheduler、dispatcher 与 SmartLifecycle。
@@ -89,8 +87,7 @@ public class IssueReconcileRuntimeConfiguration {
       @Qualifier("issueReconcileDispatcherPollScheduler") ScheduledExecutorService pollScheduler,
       PlatformTransactionManager transactionManager) {
     DurableWorkStore workQueue = Objects.requireNonNull(issueWorkQueue, "workQueue");
-    Function<WorkClaim, IssueReconcileOutcome> reconcile =
-        Objects.requireNonNull(reconciler, "reconciler")::reconcile;
+    IssueReconciler reconcile = Objects.requireNonNull(reconciler, "reconciler");
     IssueReconcileProperties reconcileProperties = Objects.requireNonNull(properties, "properties");
     TransactionTemplate transactions =
         new TransactionTemplate(Objects.requireNonNull(transactionManager, "transactionManager"));
@@ -121,13 +118,13 @@ public class IssueReconcileRuntimeConfiguration {
   }
 
   private static void runHandoff(
-      Function<WorkClaim, IssueReconcileOutcome> reconciler,
+      IssueReconciler reconciler,
       DurableWorkStore workQueue,
       TransactionTemplate transactions,
       IssueReconcileProperties properties,
       WorkClaim claim) {
     try {
-      reconciler.apply(claim);
+      reconciler.reconcile(claim);
     } catch (RuntimeException error) {
       log.error(
           "Reconciler failed for issueId={}; failure={}",
