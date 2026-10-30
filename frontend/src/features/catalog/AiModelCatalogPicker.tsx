@@ -9,6 +9,7 @@ import { toUserFacingErrorMessage } from '@/shared/lib/user-facing-error'
 import { Button } from '@/shared/ui/controls/Button'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 import { useI18n } from '@/shared/i18n'
+import { formatCatalogSupportIssue } from '@/features/catalog/catalog-utils'
 
 /**
  * 单 Model 的原位目录候选区：只读展示来源，逐行点击预览，每行一键填入。
@@ -238,7 +239,9 @@ function CandidatePreview({ candidate }: { candidate: ModelDefaultCandidateDTO }
       ) : null}
       {candidate.supportIssues.length > 0 ? (
         <ul className="catalog-candidate-issues" role="status">
-          {candidate.supportIssues.map((issue) => <li key={issue}>{issue}</li>)}
+          {candidate.supportIssues.map((issue) => (
+            <li key={issue}>{formatCatalogSupportIssue(issue, t)}</li>
+          ))}
         </ul>
       ) : null}
     </div>
