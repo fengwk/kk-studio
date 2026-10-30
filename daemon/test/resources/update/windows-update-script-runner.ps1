@@ -4,6 +4,7 @@
 # only the three scheduler cmdlets. Get-ScheduledTask returns the installer-owned task shape;
 # Stop/Start append to a log and move the in-memory task state. The production script text still
 # runs on a real Windows PowerShell host, and every ownership check stays in that text.
+[Console]::Error.WriteLine('[kk-update-test] runner-start')
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -70,5 +71,7 @@ function Start-ScheduledTask {
 }
 
 $global:LASTEXITCODE = 1
+[Console]::Error.WriteLine('[kk-update-test] fixture-ready; script-start')
 & $scriptPath -Action $action -OperationDir $operationDir -StagedDir $stagedDir -InstalledDir $installedDir
+[Console]::Error.WriteLine('[kk-update-test] script-returned')
 exit $LASTEXITCODE
