@@ -36,12 +36,13 @@ function withSmoke(body) {
       arch,
       otherArch,
       archive: ({ name, ...options } = {}) => {
-        const { includeRuntime, includeMain, includeKoffi, includeIde, includeEntry, includeNative, ...shimOptions } = options
+        const { includeRuntime, includeMain, includeKoffi, includeRg, includeIde, includeEntry, includeNative, ...shimOptions } = options
         return buildArchive(path.join(root, name ?? ARCHIVE_NAME(arch)), {
           node: shim(shimOptions),
           includeRuntime,
           includeMain,
           includeKoffi,
+          includeRg,
           includeIde,
           includeEntry,
           includeNative,
@@ -117,6 +118,7 @@ describe('smoke-archive.sh', { skip }, () => {
         'missing runtime': { includeRuntime: false },
         'missing entrypoint': { includeMain: false },
         'missing koffi': { includeKoffi: false },
+        'missing ripgrep': { includeRg: false },
         'missing IDE extension': { includeIde: false },
         'missing code-server entry': { includeEntry: false },
       }
