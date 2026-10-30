@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router'
 import '@/styles.css'
-import { ChildThreadView } from '@/features/chat/runtime/ChildThreadView'
+import { ThreadView } from '@/features/chat/runtime/ChildThreadView'
 import { buildThreadTimeline } from '@/features/chat/runtime/thread-timeline'
 import { extractQueuedCustomMessages } from '@/features/chat/runtime/queued-custom-messages'
 import { ApplicationEventProvider } from '@/shared/app-events'
@@ -197,10 +197,11 @@ export function CustomMessageQueueHarness() {
         </button>
       </header>
       <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-        <ChildThreadView
+        <ThreadView
           threadId={HARNESS_CHILD_THREAD_ID}
           projection={projection}
           environments={[]}
+          readOnly
         />
       </div>
     </div>

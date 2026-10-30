@@ -139,31 +139,21 @@ function compareDecimalVersions(a: string, b: string): number {
  * 在调用组件中。
  */
 export function useBoundBranchPanel({
-  threadId,
+  threadId: explicitThreadId,
   initialParts = [],
   projection,
 }: {
-  threadId: string
+  threadId?: string
   initialParts?: ComposerPart[]
-  /** 调用方已持有的只读投影；传入时不重复查询与订阅。 */
-  projection?: ThreadProjection
+  projection: ThreadProjection
 }) {
-  // buildBatch 依赖 controller 的 snapshot thread；稳定回调通过 ref 转发，
-  // 并在提交事件到达前由下方 effect 更新。
-  const buildBatchRef = useRef<((parts: ComposerPart[]) => CommandBatchPlan | null) | null>(null)
-  const buildGoalBatchRef = useRef<((goalText: string | null) => CommandBatchPlan | null) | null>(null)
-  const controller = useAgentThreadController(
-    threadId,
-    initialParts,
-    (parts) => buildBatchRef.current?.(parts) ?? null,
-    (goalText) => buildGoalBatchRef.current?.(goalText) ?? null,
-    projection,
-  )
+  const threadId = explicitThreadId ?? projection.threadId
   const [branchState, setBranchState] = useState<BoundBranchState | null>(null)
   const [yoloError, setYoloError] = useState<string | null>(null)
+  const [yoloConflict, setYoloConflict] = useState<ConflictPresentation | null>(null)
   const [settingsError, setSettingsError] = useState<string | null>(null)
+  const [settingsConflict, setSettingsConflict] = useState<ConflictPresentation | null>(null)
   const [settingsOverlay, setSettingsOverlay] = useState<SettingsOverlayEntry[]>([])
-  const [conflict, setConflict] = useState<ConflictPresentation | null>(null)
   const boundThreadIdRef = useRef<string | null>(null)
   const queryClient = useQueryClient()
   // YOLO 直接控制面的权威 Thread 状态（version + yolo policy）：来自 /yolo 成功
@@ -207,16 +197,17 @@ export function useBoundBranchPanel({
     overlayRef.current = []
     setBranchState(null)
     setYoloError(null)
+    setYoloConflict(null)
     setSettingsOverlay([])
     setSettingsError(null)
-    setConflict(null)
+    setSettingsConflict(null)
   }, [threadId])
 
   // 从持久化 Thread snapshot 初始化或跟随 base；用户 draft 绝不会被静默覆盖。
   // 只接受属于当前 threadId 的快照：重绑后新 snapshot 未到达前不初始化；
   // version 回退的迟到 snapshot 被整体忽略（不改 base、不降权威 version）。
   useEffect(() => {
-    const thread = controller.thread
+    const thread = projection.thread
     if (!thread || thread.threadId !== threadId) {
       return
     }
@@ -229,7 +220,7 @@ export function useBoundBranchPanel({
         return {
           threadId,
           base: snapshotDraft,
-          draft: projectPendingTarget(snapshotDraft, controller.queuedCommands),
+          draft: projectPendingTarget(snapshotDraft, projection.queuedCommands),
         }
       }
       return {
@@ -240,10 +231,10 @@ export function useBoundBranchPanel({
           : { ...current.draft, yoloEnabled: snapshotDraft.yoloEnabled },
       }
     })
-  }, [controller.queuedCommands, controller.thread, threadId])
+  }, [projection.queuedCommands, projection.thread, threadId])
 
   // render-time fail-closed：state 与 snapshot 必须都属于当前 threadId。
-  const boundThread = controller.thread?.threadId === threadId ? controller.thread : null
+  const boundThread = projection.thread?.threadId === threadId ? projection.thread : null
   const boundBranchState = branchState?.threadId === threadId ? branchState : null
 
   // overlay 只在快照尚未达到其水位时有效：达到后服务器排队命令即权威事实。
@@ -270,8 +261,8 @@ export function useBoundBranchPanel({
 
   // 服务器排队命令 + 尚未回读的本地 overlay：连续选择在 snapshot 刷新前也不会重复携带同一 diff。
   const queuedForProjection = useMemo(
-    () => mergeQueuedCommands(controller.queuedCommands, activeOverlay, threadId),
-    [activeOverlay, controller.queuedCommands, threadId],
+    () => mergeQueuedCommands(projection.queuedCommands, activeOverlay, threadId),
+    [activeOverlay, projection.queuedCommands, threadId],
   )
 
   const effectiveBase = useMemo(
@@ -285,7 +276,7 @@ export function useBoundBranchPanel({
     boundThreadRef.current = boundThread
     baseRef.current = boundBranchState?.base ?? null
     draftRef.current = boundBranchState?.draft ?? null
-    queuedCommandsRef.current = controller.queuedCommands
+    queuedCommandsRef.current = projection.queuedCommands
     overlayRef.current = activeOverlay
   })
 
@@ -333,11 +324,13 @@ export function useBoundBranchPanel({
     },
     [boundBranchState, boundThread, effectiveBase],
   )
-  useEffect(() => {
-    // Refs 由 controller 的 submit handler 使用（事件驱动，总在 effect 之后）。
-    buildBatchRef.current = buildBatch
-    buildGoalBatchRef.current = buildGoalBatch
-  })
+
+  const controller = useAgentThreadController(
+    projection,
+    initialParts,
+    buildBatch,
+    buildGoalBatch,
+  )
 
   const dirty =
     boundBranchState != null
@@ -445,7 +438,7 @@ export function useBoundBranchPanel({
       return
     }
     setYoloError(null)
-    setConflict(null)
+    setYoloConflict(null)
     editDraft({ yoloEnabled: enabled })
     yoloPendingRef.current = enabled
     void drainYolo()
@@ -497,7 +490,7 @@ export function useBoundBranchPanel({
         return
       }
       setYoloError(null)
-      setConflict(null)
+      setYoloConflict(null)
       // 权威响应携带策略投影：根只可能是 ENABLE/DISABLE，本地 draft 需要的是生效布尔。
       const acceptedEnabled = accepted.yoloEnabled
       // 捕获成功时刻的排队意图：React 会延迟执行 setBranchState 回调，届时
@@ -537,10 +530,10 @@ export function useBoundBranchPanel({
       )
       const presentation = presentConflict(error)
       if (presentation != null) {
-        setConflict(presentation)
+        setYoloConflict(presentation)
         setYoloError(null)
       } else {
-        setConflict(null)
+        setYoloConflict(null)
         setYoloError(errorMessage(error))
       }
     }
@@ -623,7 +616,7 @@ export function useBoundBranchPanel({
           setSettingsOverlay((current) => [...current, ...entries])
         }
         setSettingsError(null)
-        setConflict(null)
+        setSettingsConflict(null)
         await queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(originThreadId) })
         return
       } catch (error) {
@@ -654,10 +647,10 @@ export function useBoundBranchPanel({
         // 失败：保留用户选择为本地草稿（绝不丢输入），并暴露错误/冲突提示。
         const presentation = presentConflict(error)
         if (presentation != null) {
-          setConflict(presentation)
+          setSettingsConflict(presentation)
           setSettingsError(null)
         } else {
-          setConflict(null)
+          setSettingsConflict(null)
           setSettingsError(errorMessage(error))
         }
         return
@@ -688,10 +681,17 @@ export function useBoundBranchPanel({
     settingsStatus,
     settingsError,
     dismissSettingsError: () => setSettingsError(null),
+    settingsConflict,
+    dismissSettingsConflict: () => setSettingsConflict(null),
     yoloError,
     dismissYoloError: () => setYoloError(null),
-    conflict,
-    dismissConflict: () => setConflict(null),
+    yoloConflict,
+    dismissYoloConflict: () => setYoloConflict(null),
+    conflict: settingsConflict ?? yoloConflict,
+    dismissConflict: () => {
+      setSettingsConflict(null)
+      setYoloConflict(null)
+    },
     selectAgent,
     setYoloEnabled,
     selectModel,

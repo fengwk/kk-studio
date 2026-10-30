@@ -120,7 +120,8 @@ export function useThreadPresentation({
   const report = useMemo<ThreadPresentation>(() => ({
     viewKey: views.viewKey, threadId: thread?.threadId ?? null, mode: views.mode,
     name: thread?.parentThreadId && thread.name === 'main' ? null : thread?.name ?? null,
-    parentThreadId: thread?.parentThreadId ?? null, parentHref, identity, act,
+    parentThreadId: thread?.parentThreadId ?? null, parentHref, identity,
+    act,
   }), [views.viewKey, views.mode, thread?.threadId, thread?.name, thread?.parentThreadId, parentHref, identity, act])
   const callback = useRef(onReport)
   useLayoutEffect(() => { callback.current = onReport })

@@ -5,7 +5,8 @@ import { Button } from '@/shared/ui/controls/Button'
 import { useI18n } from '@/shared/i18n'
 import { shouldDeferToBlockingModal } from '@/shared/ui/blocking-overlay'
 import {
-  BoundThreadView,
+  ConnectedThreadView,
+  ThreadView,
 } from '@/features/chat/runtime/ChildThreadView'
 import { RootAgentPane } from '@/features/chat/runtime/RootAgentPane'
 import { ThreadNavigationContext } from '@/features/chat/runtime/thread-navigation-context'
@@ -196,16 +197,12 @@ export function AgentPane({
   }, [visiblePresentation])
   const openParent = isRoot === true ? navigation.openThread : undefined
 
-  // 各 thread layer 进入语义明确选择当前可操作环境，不从 toolarguments 猜 cwd；
-  // 准确解析 EnvironmentCard.id/name/ready/HOME，查不到不能用 name 冒充 UUID。
-  const activeChildThreadId = navigation.activeThreadId
-  const childProjection = useThreadProjection(activeChildThreadId ?? '')
-  const activeLayerEnvironmentName = activeChildThreadId
-    ? childProjection.thread?.branchSettings?.environmentName ?? null
-    : projection.thread?.branchSettings?.environmentName ?? defaults?.environmentName ?? null
-
-  const matchedEnvCard = activeLayerEnvironmentName
-    ? environments.find((env) => env.name === activeLayerEnvironmentName) ?? null
+  // IDE 命令只由根控制面提供；子代理查看层没有命令入口，隐藏的根控制面也不接收动作。
+  const environmentName = projection.thread?.branchSettings?.environmentName
+    ?? defaults?.environmentName
+    ?? null
+  const matchedEnvCard = environmentName
+    ? environments.find((env) => env.name === environmentName) ?? null
     : null
 
   const resolvedEnvironment: IdeEnvironmentInfo | null = useMemo(() => {
@@ -290,7 +287,7 @@ export function AgentPane({
               onOpenIde={handleOpenIde}
             />
           ) : (
-            <BoundThreadView
+            <ThreadView
               threadId={boundThreadId}
               projection={projection}
               environments={environments}
@@ -309,7 +306,7 @@ export function AgentPane({
             hidden={hidden || index !== topLayerIndex}
             inert={hidden || index !== topLayerIndex}
           >
-            <BoundThreadView
+            <ConnectedThreadView
               threadId={layer.threadId}
               environments={environments}
               readOnly
