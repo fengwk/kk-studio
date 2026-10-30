@@ -3,7 +3,8 @@
  *
  * The fixtures shim curl/npm while retaining real tag/version checks, SHA256 verification, archive
  * parsing and staging. They verify selection arguments and archive layout, not native ABI
- * compatibility; the host-matched CI smoke tests cover runnable platform binaries.
+ * compatibility; the host-matched CI smoke tests cover runnable platform binaries. Both optional
+ * prebuilt families (koffi native bindings and ripgrep) are checked for every target platform.
  */
 
 import assert from 'node:assert/strict'
@@ -86,6 +87,7 @@ describe('prepare-release.sh', () => {
         'package.json',
         'runtime-manifest.json',
         'node_modules/@koromix/koffi-linux-x64/index.js',
+        'node_modules/@vscode/ripgrep-linux-x64/bin/rg',
         'runtime/code-server/lib/node',
         'runtime/code-server/out/node/entry.js',
         'ide-extension/extension.js',
@@ -95,25 +97,28 @@ describe('prepare-release.sh', () => {
         assert.ok(names.includes(expected), expected)
       }
       assert.ok(!names.includes('node_modules/@koromix/koffi-darwin-x64'))
+      assert.ok(!names.some((name) => name.startsWith('node_modules/@vscode/ripgrep-') && !name.startsWith('node_modules/@vscode/ripgrep-linux-x64/')))
     }))
 
   it('selects the target optional prebuilt per platform', () => {
     const expected = [
-      ['linux', 'amd64', 'koffi-linux-x64'],
-      ['linux', 'arm64', 'koffi-linux-arm64'],
-      ['macos', 'amd64', 'koffi-darwin-x64'],
-      ['macos', 'arm64', 'koffi-darwin-arm64'],
-      ['windows', 'amd64', 'koffi-win32-x64'],
+      ['linux', 'amd64', 'koffi-linux-x64', 'ripgrep-linux-x64', 'rg'],
+      ['linux', 'arm64', 'koffi-linux-arm64', 'ripgrep-linux-arm64', 'rg'],
+      ['macos', 'amd64', 'koffi-darwin-x64', 'ripgrep-darwin-x64', 'rg'],
+      ['macos', 'arm64', 'koffi-darwin-arm64', 'ripgrep-darwin-arm64', 'rg'],
+      ['windows', 'amd64', 'koffi-win32-x64', 'ripgrep-win32-x64', 'rg.exe'],
     ]
-    for (const [osName, arch, koffi] of expected) {
+    for (const [osName, arch, koffi, ripgrep, binary] of expected) {
       withFixture((fixture) => {
         const result = fixture.run([RELEASE_TAG, osName, arch])
         assert.equal(result.status, 0, `${osName}-${arch}: ${result.stderr}`)
         const names = tarNames(archiveOf(fixture, osName, arch))
         assert.ok(names.includes(`node_modules/@koromix/${koffi}/index.js`), koffi)
+        assert.ok(names.includes(`node_modules/@vscode/${ripgrep}/bin/${binary}`), ripgrep)
         assert.ok(names.includes('runtime/code-server/out/node/entry.js'))
         assert.ok(names.includes(`runtime/code-server/lib/${osName === 'windows' ? 'node.exe' : 'node'}`))
         assert.ok(!names.some((name) => name.includes('koffi-freebsd')))
+        assert.ok(!names.some((name) => name.includes('ripgrep-freebsd')))
       })
     }
   })
@@ -155,13 +160,15 @@ describe('prepare-release.sh', () => {
       assert.ok(!existsSync(path.join(prefix, 'node_modules')))
     }))
 
-  it('prunes foreign koffi prebuilts', () =>
+  it('prunes foreign optional prebuilts', () =>
     withFixture((fixture) => {
       const result = fixture.run([RELEASE_TAG, 'linux', 'amd64'], { FAKE_NPM_FOREIGN_PREBUILT: '1' })
       assert.equal(result.status, 0, result.stderr)
       const names = tarNames(archiveOf(fixture, 'linux', 'amd64'))
       assert.ok(names.includes('node_modules/@koromix/koffi-linux-x64/index.js'))
       assert.ok(!names.some((name) => name.includes('koffi-freebsd')))
+      assert.ok(names.includes('node_modules/@vscode/ripgrep-linux-x64/bin/rg'))
+      assert.ok(!names.some((name) => name.includes('ripgrep-freebsd')))
     }))
 
   it('refuses to package before the runtime sha is frozen', () =>
@@ -180,6 +187,14 @@ describe('prepare-release.sh', () => {
       const result = fixture.run([RELEASE_TAG, 'linux', 'amd64'], { FAKE_NPM_OMIT_PREBUILT: '1' })
       assert.notEqual(result.status, 0)
       assert.ok(result.stderr.includes('prebuilt'))
+      assert.ok(!existsSync(fixture.releaseDir('linux-amd64')))
+    }))
+
+  it('rejects a missing target ripgrep binary', () =>
+    withFixture((fixture) => {
+      const result = fixture.run([RELEASE_TAG, 'linux', 'amd64'], { FAKE_NPM_OMIT_RG: '1' })
+      assert.notEqual(result.status, 0)
+      assert.ok(result.stderr.includes('@vscode/ripgrep-linux-x64/bin/rg'))
       assert.ok(!existsSync(fixture.releaseDir('linux-amd64')))
     }))
 

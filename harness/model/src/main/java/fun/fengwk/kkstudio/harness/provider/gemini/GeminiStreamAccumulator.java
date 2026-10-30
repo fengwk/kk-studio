@@ -1,12 +1,6 @@
 package fun.fengwk.kkstudio.harness.provider.gemini;
 
-import tools.jackson.core.JacksonException;
-import tools.jackson.core.StreamReadFeature;
-import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.cfg.JsonNodeFeature;
-import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
@@ -23,6 +17,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.provider.ProviderJsonHelper;
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 
 import java.util.ArrayList;
@@ -51,12 +46,6 @@ import java.util.Set;
  */
 final class GeminiStreamAccumulator {
 
-  private static final ObjectMapper OBJECT_MAPPER =
-      JsonMapper.builder()
-          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
-          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
-          .build();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
   private static final Set<String> FILTERED_FINISH_REASONS =
@@ -121,7 +110,7 @@ final class GeminiStreamAccumulator {
       return;
     }
 
-    JsonNode root = parseJson(data);
+    JsonNode root = ProviderJsonHelper.parseSseJson(data, "malformed SSE data JSON");
 
     // 检查是否有顶级错误信封
     if (root.has("error") && root.get("error").isObject()) {
@@ -638,14 +627,6 @@ final class GeminiStreamAccumulator {
         ProviderReplayFormat.GEMINI_CONTENT,
         descriptor.affinity(request.model().modelId()),
         payload);
-  }
-
-  private static JsonNode parseJson(String data) {
-    try {
-      return OBJECT_MAPPER.readTree(data);
-    } catch (JacksonException e) {
-      throw new ProviderException(ProviderErrorKind.INVALID_RESPONSE, "malformed SSE data JSON");
-    }
   }
 
   /** 单个原生 part 的累积状态：rawPart 保真，已知字段由规范化累积结果统一写回。 */

@@ -102,6 +102,14 @@ try {
     if (-not (Test-Path -LiteralPath (Join-Path $root 'node_modules\@koromix\koffi-win32-x64'))) {
         Fail 'the Windows koffi prebuilt is missing'
     }
+    $rg = Join-Path $root 'node_modules\@vscode\ripgrep-win32-x64\bin\rg.exe'
+    if (-not (Test-Path -LiteralPath $rg -PathType Leaf)) {
+        Fail 'the Windows ripgrep binary is missing'
+    }
+    $rgVersion = & $rg --version 2>&1
+    if ($LASTEXITCODE -ne 0 -or ($rgVersion -join "`n") -notmatch '(?m)^ripgrep ') {
+        Fail "packaged ripgrep failed to report its version: $rgVersion"
+    }
     # Native creation verifies owner-only ACLs; subsequent overwrites preserve those ACLs.
     $utf8 = New-Object System.Text.UTF8Encoding($false)
     $probe = Join-Path $root 'native-probe.mjs'

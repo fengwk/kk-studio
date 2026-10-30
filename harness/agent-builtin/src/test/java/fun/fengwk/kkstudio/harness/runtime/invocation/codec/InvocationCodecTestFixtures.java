@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.invocation.codec;
 
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
+import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
@@ -12,7 +13,6 @@ import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccess;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccessMode;
@@ -31,9 +31,9 @@ import java.util.Set;
 import java.util.UUID;
 
 /** 严格 Invocation codec 测试间共享的小型完整测试值。 */
-final class InvocationCodecTestFixtures {
+public final class InvocationCodecTestFixtures {
 
-  static final EnvironmentId ENVIRONMENT_ID =
+  public static final EnvironmentId ENVIRONMENT_ID =
       EnvironmentId.parse("123e4567-e89b-12d3-a456-426614174000");
   static final EnvironmentId OTHER_ENVIRONMENT_ID =
       EnvironmentId.parse("123e4567-e89b-12d3-a456-426614174001");
@@ -100,7 +100,7 @@ final class InvocationCodecTestFixtures {
         ProviderCacheControl.none());
   }
 
-  static ModelRequestSpec environmentModelRequest() {
+  public static ModelRequestSpec environmentModelRequest() {
     ToolBinding binding = binding(EnvironmentSupport.REQUIRED);
     ProviderRequest provider = providerRequest(binding.descriptor());
     return new ModelRequestSpec(
@@ -115,7 +115,7 @@ final class InvocationCodecTestFixtures {
         provider.cacheControl());
   }
 
-  static ModelRequestSpec hostModelRequest() {
+  public static ModelRequestSpec hostModelRequest() {
     ToolBinding binding = binding(EnvironmentSupport.NONE);
     ProviderRequest provider = providerRequest(binding.descriptor());
     return new ModelRequestSpec(

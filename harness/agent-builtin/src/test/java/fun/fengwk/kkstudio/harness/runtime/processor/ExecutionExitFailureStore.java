@@ -15,10 +15,10 @@ import java.util.function.Function;
  * <p>全部读写委托真实内存 store；故障发生在确认事实写入之前。用于验证 processor 的真实 finally 路径捕获并报告持久化失败后仍保留
  * UNCONFIRMED，而不是依赖日志文本。
  */
-final class ExecutionExitFailureStore {
+public final class ExecutionExitFailureStore {
 
   /** 明显 synthetic 的异常详情：任何退出边界日志都不允许回显它。 */
-  static final String SYNTHETIC_SECRET = "synthetic-secret-exit-failure-details";
+  public static final String SYNTHETIC_SECRET = "synthetic-secret-exit-failure-details";
 
   private ExecutionExitFailureStore() {}
 
@@ -26,7 +26,7 @@ final class ExecutionExitFailureStore {
    * 包装真实 store；{@code failConfirm} 为 true 时每次 {@code confirmExecution} 都抛 {@link
    * InjectedPersistenceFailure}。无论是否注入，都会统计确认尝试次数供主线程断言。
    */
-  static HarnessStore wrapping(
+  public static HarnessStore wrapping(
       HarnessStore delegate, AtomicInteger confirmAttempts, boolean failConfirm) {
     return (HarnessStore)
         Proxy.newProxyInstance(
@@ -76,7 +76,7 @@ final class ExecutionExitFailureStore {
   }
 
   /** 明确的确认持久化失败，便于调试时从 warn 之外的事实断言定位注入点。 */
-  static final class InjectedPersistenceFailure extends IllegalStateException {
+  public static final class InjectedPersistenceFailure extends IllegalStateException {
     InjectedPersistenceFailure(String message) {
       super(message);
     }

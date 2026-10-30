@@ -64,7 +64,7 @@ public final class ToolProcessor implements AutoCloseable {
   private final ScheduledExecutorService scheduler;
   private final Executor heartbeatWorker;
   private final ToolResultHistoryMaterializer toolResultHistoryMaterializer;
-  private final ClaimAdmissionGuard<ToolExecution> admissionGuard = new ClaimAdmissionGuard<>();
+  private final ClaimedExecutionSupport<ToolExecution> executions;
 
   public ToolProcessor(
       HarnessStore store,
@@ -86,6 +86,8 @@ public final class ToolProcessor implements AutoCloseable {
     this.heartbeatWorker = Objects.requireNonNull(heartbeatWorker, "heartbeatWorker");
     this.toolResultHistoryMaterializer =
         Objects.requireNonNull(toolResultHistoryMaterializer, "toolResultHistoryMaterializer");
+    this.executions =
+        new ClaimedExecutionSupport<>(store, WorkTargetType.TOOL, config.leaseConfig());
   }
 
   /**
@@ -97,19 +99,7 @@ public final class ToolProcessor implements AutoCloseable {
    * @return 启动为 STARTED，重排为 RESCHEDULED，已收敛为 TERMINATED，失权或重复投递为 LOST_OWNERSHIP
    */
   public ProcessResult process(ClaimedWork claim) {
-    Objects.requireNonNull(claim, "claim");
-    if (admissionGuard.isClosed()) {
-      throw new IllegalStateException("tool processor is closed");
-    }
-    if (claim.target().type() != WorkTargetType.TOOL) {
-      throw new IllegalArgumentException(
-          "ToolProcessor requires a TOOL work claim, got " + claim.target());
-    }
-    if (!claimOwned(claim)) {
-      return ProcessResult.LOST_OWNERSHIP;
-    }
-    ClaimAdmissionGuard.Ticket<ToolExecution> ticket =
-        admissionGuard.tryAdmit(claim, () -> claimOwned(claim));
+    ClaimAdmissionGuard.Ticket<ToolExecution> ticket = executions.admit(claim);
     if (ticket == null) {
       return ProcessResult.LOST_OWNERSHIP;
     }
@@ -141,24 +131,18 @@ public final class ToolProcessor implements AutoCloseable {
    * @return 是否存在并已取消对应本地 execution
    */
   public boolean cancel(UUID invocationId) {
-    Objects.requireNonNull(invocationId, "invocationId");
-    return admissionGuard.cancel(invocationId);
+    return executions.cancel(invocationId);
   }
 
   /** 取消全部本地 execution 并停止各自 heartbeat；不 shutdown 调用方注入的 scheduler；幂等。 */
   @Override
   public void close() {
-    admissionGuard.close();
+    executions.close();
   }
 
   /** 当前 JVM 是否持有任何活跃的本地 Tool execution。 */
   public boolean hasActiveExecution() {
-    return admissionGuard.hasActiveExecution();
-  }
-
-  /** 仅锁 Work 验证所有权，用于前置校验与 guard 内复核。 */
-  private boolean claimOwned(ClaimedWork claim) {
-    return Boolean.TRUE.equals(store.transaction(tx -> !tx.lockClaimedWork(claim).isEmpty()));
+    return executions.hasActiveExecution();
   }
 
   /** 按锁序 Thread -&gt; Tool -&gt; Work 读取并分支当前 durable 状态；不重放、不重复 bump version。 */
@@ -182,7 +166,7 @@ public final class ToolProcessor implements AutoCloseable {
           "tool invocation " + tool.id() + " changed its thread during preparation");
     }
     return switch (tool.status()) {
-      case READY -> prepareReady(tx, claim, thread, tool, now);
+      case READY -> prepareReady(tx, claim, thread, tool);
       case WAITING_APPROVAL, WAITING_INPUT -> waitingForHuman(tx, claim, now);
       case RUNNING -> recoverUnknown(tx, claim, thread, tool, now);
       case SUCCEEDED, FAILED, CANCELLED, UNKNOWN -> cleanupTerminal(tx, claim, thread, tool, now);
@@ -198,11 +182,7 @@ public final class ToolProcessor implements AutoCloseable {
    * preflight：YOLO 不代替用户作答，问卷也不经过工具权限审批。
    */
   private Prepare prepareReady(
-      HarnessStore.Transaction tx,
-      ClaimedWork claim,
-      ThreadState thread,
-      ToolInvocation tool,
-      Instant now) {
+      HarnessStore.Transaction tx, ClaimedWork claim, ThreadState thread, ToolInvocation tool) {
     Optional<Work> claimed = tx.lockClaimedWork(claim);
     if (claimed.isEmpty()) {
       return new Prepare.Lost();
@@ -211,7 +191,7 @@ public final class ToolProcessor implements AutoCloseable {
       return new Prepare.Input(thread.id());
     }
     // admission 前确保 lease 有完整 margin：剩余不足以撑到首次 heartbeat 时立即 renew。
-    ProcessorLeaseSupport.ensureLeaseMargin(tx, claim, config.leaseConfig(), now);
+    executions.ensureLeaseMargin(tx, claim);
     // READY 边界临时构造 transient executable request（不持久化）。
     ToolInvocationRequest request = new ToolInvocationRequest(tool.call(), tool.binding());
     if (tool.approval() == null) {
@@ -364,13 +344,13 @@ public final class ToolProcessor implements AutoCloseable {
         newExecution(claim, preflight.threadId(), preflight.attempt(), preflight.request());
     if (!ticket.attach(execution)) {
       execution.abandon();
-      return admissionGuard.isClosed()
+      return executions.isClosed()
           ? bouncePreflight(claim, preflight)
           : ProcessResult.LOST_OWNERSHIP;
     }
     boolean started = false;
     try {
-      if (admissionGuard.isClosed()
+      if (executions.isClosed()
           || !execution.startHeartbeat()
           || execution.abandoned()
           || ticket.isSuperseded()) {
@@ -452,7 +432,7 @@ public final class ToolProcessor implements AutoCloseable {
         new Prepare.Dispatched(
             threadId, assistantEntryId, attempt, request, ToolApproval.notRequired());
     if (execution != null) {
-      if (admissionGuard.isClosed() || execution.abandoned() || ticket.isSuperseded()) {
+      if (executions.isClosed() || execution.abandoned() || ticket.isSuperseded()) {
         // Allow 意图提交后 close / cancel 获胜：不 admit，保持 READY 并重排。
         return rescheduleResult(claim, dispatched, config.admitFailureDelay());
       }
@@ -596,13 +576,13 @@ public final class ToolProcessor implements AutoCloseable {
         newExecution(claim, dispatched.threadId(), dispatched.attempt(), dispatched.request());
     if (!ticket.attach(execution)) {
       execution.abandon();
-      return admissionGuard.isClosed()
+      return executions.isClosed()
           ? rescheduleResult(claim, dispatched, config.admitFailureDelay())
           : ProcessResult.LOST_OWNERSHIP;
     }
     boolean started = false;
     try {
-      if (admissionGuard.isClosed()
+      if (executions.isClosed()
           || !execution.startHeartbeat()
           || execution.abandoned()
           || ticket.isSuperseded()) {
@@ -692,7 +672,7 @@ public final class ToolProcessor implements AutoCloseable {
         clock,
         scheduler,
         heartbeatWorker,
-        this::release,
+        executions::release,
         exitConfirmer,
         toolResultHistoryMaterializer);
   }
@@ -705,21 +685,10 @@ public final class ToolProcessor implements AutoCloseable {
     return tx.findThread(thread.rootThreadId()).orElseThrow().yoloEnabled();
   }
 
-  private void release(ToolExecution execution) {
-    admissionGuard.releaseExecution(execution);
-  }
-
-  /** 内部回滚信号：最终 Work ownership fence 失败时使当前事务完整回滚。 */
   /** 冻结问卷无法解析时的确定性错误 kind：契约漂移，可重试前提是工具实现修好。 */
   private static final String INVALID_QUESTIONNAIRE_KIND = "INVALID_QUESTIONNAIRE";
 
   private static final HumanInputJsonCodec INPUT_JSON = new HumanInputJsonCodec();
-
-  private static final class ClaimLostSignal extends RuntimeException {
-    private ClaimLostSignal() {
-      super("claimed work lost at final fence", null, false, false);
-    }
-  }
 
   private sealed interface Prepare
       permits Prepare.Lost,

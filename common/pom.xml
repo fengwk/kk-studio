@@ -51,7 +51,6 @@
                                         <include>fun.fengwk.kkstudio.common.json.StrictJson</include>
                                         <include>fun.fengwk.kkstudio.common.json.BoundedJsonWriter</include>
                                         <include>fun.fengwk.kkstudio.common.json.BoundedOutputStream</include>
-                                        <include>fun.fengwk.kkstudio.common.io.DeadlineResponseBody</include>
                                         <include>fun.fengwk.kkstudio.common.concurrent.BoundedWorkDispatcher</include>
                                     </includes>
                                     <limits>
