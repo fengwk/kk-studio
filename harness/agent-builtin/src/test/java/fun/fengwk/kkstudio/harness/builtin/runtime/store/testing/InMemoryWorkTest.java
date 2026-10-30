@@ -40,7 +40,7 @@ class InMemoryWorkTest extends HarnessStoreWorkContract {
   private final Set<UUID> readyEnvironments = new HashSet<>();
 
   @Override
-  HarnessStore createStore() {
+  protected HarnessStore createStore() {
     readyEnvironments.clear();
     InMemoryHarnessStore store = new InMemoryBuiltinHarnessStore();
     store.setClock(Clock.fixed(CLOCK, ZoneOffset.UTC));
