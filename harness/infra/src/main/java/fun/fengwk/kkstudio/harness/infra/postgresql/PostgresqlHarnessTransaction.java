@@ -43,9 +43,10 @@ import java.util.UUID;
 import java.util.function.Supplier;
 
 /**
- * {@link HarnessStore.Transaction} typed primitives 的 PostgreSQL 实现。
+ * PostgreSQL 事务核心：持有同一连接、数据库时钟、生命周期、锁阶梯、EntryPath 缓存与首个数据库故障。
  *
- * <p>本类仅实现底层持久化原语的精确映射，绝不包含 Thread 下一步决策、重试策略、权限判定或 Tool 聚合等用例逻辑。
+ * <p>九个聚合实现通过本核心共享 JDBC 原语与事务状态；Builtin 私有模型由 {@link PostgresqlModelTransaction} 在同一核心上提供窄视图。核心不决定
+ * Thread 下一步动作、重试策略或权限。
  *
  * <p><b>Transaction 线程约束：</b> 事务句柄严格由创建它的单线程独占（{@link #owner}），禁止跨线程传递或并发调用；每次操作前均通过 {@link
  * #checkOpen()} 校验 调用线程身份与活跃状态，已关闭或跨线程调用直接抛出 {@link IllegalStateException}。
@@ -54,51 +55,20 @@ import java.util.function.Supplier;
  * #remember(RuntimeException)} 记录到 {@link #databaseFailure} 字段中，并原样抛出。若外层代码未中断执行，在事务提交前 {@link
  * #rethrowDatabaseFailure()} 将强制重新抛出该首个故障，阻断脏状态提交。
  *
- * <p><b>严格锁序防御（Lock Ranking &amp; Ordering）：</b> 所有跨实体并发加锁严格遵守单向递增的层级排序：
+ * <p><b>锁阶梯：</b> 受控业务行锁遵守以下顺序；树锁与 Join 准入锁先于业务行锁：
  *
  * <pre>{@code
  * SESSION -> THREAD -> COMMAND -> DRIVER -> TOOL -> WORK
  * }</pre>
  *
- * 在会批量获取同阶锁的路径中，按稳定顺序发起数据库加锁：
+ * <p>同阶顺序与树内 Command 回写例外由 {@link PostgresqlHarnessLocks} 守护，聚合 SQL 通过稳定 ORDER BY 获取批量锁；该防御不替代
+ * PostgreSQL 的死锁检测与回滚。
  *
- * <ul>
- *   <li>Thread 必须按 {@link UuidOrder#COMPARATOR} 升序；
- *   <li>Command 按 {@code (threadId, sequence)} 升序；
- *   <li>Tool 必须按 {@code (assistantEntryId, callIndex, id)} 严格递增升序；
- *   <li>Work 必须按 {@code (targetType.ordinal(), targetId)} 严格递增升序。
- * </ul>
+ * <p>{@link PostgresqlEntryStore} 负责缓存命中、递归读取、追加派生与 Session 删除驱逐；窄投影绝不写入完整路径缓存。 本核心在 {@link
+ * #close()} 清空缓存，使所有聚合视图同时失效。
  *
- * 已显式跟踪的层级逆序或同阶逆序会在获取新的受控锁前抛出 {@link IllegalStateException}；SQL 查询本身通过稳定 {@code ORDER BY}
- * 固定批量锁顺序。该机制收敛本适配器内的已知锁逆序路径，但不替代 PostgreSQL 对其它数据库死锁的检测与回滚。
- *
- * <p><b>事务内 EntryPath 局部缓存（Transaction-local Cache）与 Invalidation：</b> 维护事务局部的 {@link
- * #entryPathCache}（{@code Map<UUID, EntryPath>}），在单事务内优化 Entry 路径读取与构建开销：
- *
- * <ul>
- *   <li>首次读取未命中缓存时，执行单次不可变回溯递归 CTE（{@link #LOAD_ENTRY_PATH}）并存入正向缓存；
- *   <li>连续调用 {@link #insertEntry(Entry)} 时，加载或复用 parent path 后在内存中派生新路径并写入缓存，实现子节点后续读取 0 次 CTE；
- *   <li>窄查询（{@link #loadContributorCustomEntriesOnPath}）在 cache miss 时执行独立窄 CTE，绝不将不完整投影写回完整路径缓存；
- *   <li>执行 {@link #deleteEntries} 或 {@link #deleteSession} 时，按 session 整体驱逐相关缓存，避免脏读；
- *   <li>事务 {@link #close()} 时立即清空全部缓存。
- * </ul>
- *
- * <p><b>Environment route 路由围栏与 Work claim：</b> 调度器通过 {@link #claimNextWork} 开启独立 short transaction
- * 选取待处理任务：
- *
- * <ul>
- *   <li>{@code durable_work.required_environment_id} 仅用于 TOOL Work；为空时无亲和性要求；
- *   <li>非空时，只有在 {@code environment_connection} 中存在匹配的 {@code environment_id}、所有者为当前 Dispatcher 的
- *       {@code nodeInstanceId}、连接状态为 {@code READY} 且租约有效的记录时，当前节点才可 claim；
- *   <li>路由不确定或底层查询失败时严格 fail closed；
- *   <li>层次区分：Environment route 路由围栏与 PostgreSQL 底层 {@code FOR UPDATE SKIP LOCKED} 行级跳锁以及应用层 {@code
- *       lease_token} / {@code lease_until} 所有权围栏分属不同层次，互不替代；避免把 {@code SKIP LOCKED} 误称为分布式锁。
- *   <li>{@link #requestWork} 对已冻结的 affinity 实施严格冲突拒绝，已存在的 Work 不允许被修改为冲突的不同非空 affinity。
- * </ul>
- *
- * <p><b>Final Work Fence：</b> Processor 的持久化变更先于 Work 终态变更。{@link #completeWork} 与 {@link
- * #rescheduleWork} 在执行终态更新前先由 {@link #lockWork} 获取 Work 行级排他锁，再由 Work 领域跃迁校验 {@code lease_token} 与
- * {@code claimedWakeVersion}。若租约丢失则抛出异常导致整个事务回滚；若执行期间有新 wake 到达使版本递增，则清除租约保留行，防止并发工作被静默覆盖。
+ * <p>{@link PostgresqlWorkStore} 负责环境路由围栏、claim、lease 与最终 wake-version 围栏； 这些操作与 Processor
+ * 的业务事实共享本核心的事务连接，失败必须整体回滚。
  */
 final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
 
@@ -298,8 +268,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   /**
-   * 沿 {@code harness_tool_invocation -> harness_model_invocation -> harness_thread} 定位来源
-   * Thread，再解析真实执行根。
+   * 沿 {@code harness_tool_invocation.thread_id} 定位来源 Thread，再解析真实执行根。
    *
    * <p>返回 {@code null} 仅表示来源 Thread 已不可解析（合法清理路径上来源行已删除），此时调用方以空 payload 触发 listener 全量 resync；
    * 数据库故障一律向上抛出，绝不吞成空 payload。
