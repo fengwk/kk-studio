@@ -8,4 +8,8 @@ public final class ToolExecutionTestSupport {
   public static boolean isAbandoned(ToolExecution execution) {
     return execution.abandoned();
   }
+
+  public static boolean markRunning(ToolExecution execution) {
+    return execution.markRunning();
+  }
 }

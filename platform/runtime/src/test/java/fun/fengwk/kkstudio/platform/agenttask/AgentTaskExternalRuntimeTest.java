@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.platform.agenttask;
 
-import static fun.fengwk.kkstudio.harness.runtime.store.testing.BuiltinTestTransactions.builtinDriver;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtinDriver;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.loadCommandsByThread;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -12,6 +12,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.SpawnRequest;
@@ -20,7 +21,6 @@ import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
@@ -41,7 +41,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
 /**
- * 基于真实 {@link HarnessRuntime} 和 {@link InMemoryHarnessStore} 的外部任务身份与重放语义测试：
+ * 基于真实 {@link HarnessRuntime} 和 {@link InMemoryBuiltinHarnessStore} 的外部任务身份与重放语义测试：
  * 验证配置变更/删除不触发物化重入、外部字段变化拒绝、并发相同外部请求回放不产生额外 commands。
  */
 class AgentTaskExternalRuntimeTest {
@@ -49,14 +49,14 @@ class AgentTaskExternalRuntimeTest {
   private static final BranchSettings SETTINGS =
       new BranchSettings("test-agent", ModelSelection.model("provider", "model"), null);
 
-  private InMemoryHarnessStore store;
+  private InMemoryBuiltinHarnessStore store;
   private HarnessRuntime runtime;
   private AgentTaskService service;
 
   @BeforeEach
   @SuppressWarnings("unchecked")
   void setUp() {
-    store = new InMemoryHarnessStore();
+    store = new InMemoryBuiltinHarnessStore();
     runtime =
         new HarnessRuntime(
             store, builtinDriver(store, (tid, path, prep) -> null), () -> CompactionConfig.DEFAULT);
