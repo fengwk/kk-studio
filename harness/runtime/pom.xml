@@ -71,6 +71,62 @@
                     </execution>
                 </executions>
             </plugin>
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>check-critical-class-line-coverage</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <rule>
+                                    <element>CLASS</element>
+                                    <includes>
+                                        <include>fun.fengwk.kkstudio.harness.runtime.ManualCompactionControl</include>
+                                        <include>fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot</include>
+                                        <include>fun.fengwk.kkstudio.harness.runtime.compaction.CompactionHistory</include>
+                                        <include>fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextProbe</include>
+                                        <include>fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding</include>
+                                        <include>fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolBindingJsonCodec</include>
+                                        <include>fun.fengwk.kkstudio.harness.runtime.AcceptCommandsControl</include>
+                                        <include>fun.fengwk.kkstudio.harness.runtime.AgentSpawner</include>
+                                        <include>fun.fengwk.kkstudio.harness.runtime.SpawnRequest</include>
+                                        <include>fun.fengwk.kkstudio.harness.runtime.SpawnRequest.Continuation</include>
+                                        <include>fun.fengwk.kkstudio.harness.runtime.SpawnRequest.Budget</include>
+                                        <include>fun.fengwk.kkstudio.harness.runtime.SpawnTickets</include>
+                                        <include>fun.fengwk.kkstudio.harness.runtime.compaction.CompactionChildSpawn</include>
+                                        <include>fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin</include>
+                                        <include>fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints</include>
+                                        <include>fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl</include>
+                                        <include>fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionFacts</include>
+                                        <include>fun.fengwk.kkstudio.harness.runtime.thread.ThreadState</include>
+                                        <include>fun.fengwk.kkstudio.harness.tool.ToolCall</include>
+                                        <include>fun.fengwk.kkstudio.harness.tool.codec.AgentToolDefinitionJsonCodec</include>
+                                        <include>fun.fengwk.kkstudio.harness.tool.codec.ToolDescriptorJsonCodec</include>
+                                        <include>fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec</include>
+                                        <include>fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog</include>
+                                        <include>fun.fengwk.kkstudio.harness.builtin.BuiltinHarnessContributor</include>
+                                        <include>fun.fengwk.kkstudio.harness.builtin.goal.GoalProgressCodec</include>
+                                        <include>fun.fengwk.kkstudio.harness.prompt.PromptTemplate</include>
+                                        <include>fun.fengwk.kkstudio.harness.prompt.PromptTemplateLoader</include>
+                                    </includes>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.90</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
     </build>
 </project>

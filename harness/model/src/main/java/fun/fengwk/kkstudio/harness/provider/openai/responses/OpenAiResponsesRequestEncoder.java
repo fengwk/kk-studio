@@ -61,7 +61,7 @@ import java.util.Set;
  * durable 语义矛盾时才回退语义编码。回退只丢弃 native 事实，绝不因为 payload 存在 opaque item 就拒绝整个请求。payload 的真实形状（顶层字段、已知
  * item 结构、与 durable 文本/思考/工具调用的一致性）始终严格校验，结构损坏一律 {@code INVALID_REQUEST}。
  */
-final class OpenAiResponsesRequestEncoder {
+public final class OpenAiResponsesRequestEncoder {
 
   private static final ObjectMapper OBJECT_MAPPER =
       JsonMapper.builder()
@@ -106,7 +106,7 @@ final class OpenAiResponsesRequestEncoder {
   /** 应用层最终 UTF-8 请求体字节上限守卫；默认使用共享的 192 MiB 应用上限。 */
   private final RequestBodySizeGuard bodySizeGuard;
 
-  OpenAiResponsesRequestEncoder() {
+  public OpenAiResponsesRequestEncoder() {
     this(RequestBodySizeGuard.DEFAULT);
   }
 
@@ -114,7 +114,8 @@ final class OpenAiResponsesRequestEncoder {
     this.bodySizeGuard = Objects.requireNonNull(bodySizeGuard, "bodySizeGuard");
   }
 
-  OpenAiResponsesEncodedRequest encode(ProviderRequest request, ProviderDescriptor descriptor) {
+  public OpenAiResponsesEncodedRequest encode(
+      ProviderRequest request, ProviderDescriptor descriptor) {
     Objects.requireNonNull(request, "request");
     Objects.requireNonNull(descriptor, "descriptor");
 

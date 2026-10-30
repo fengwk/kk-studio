@@ -65,7 +65,7 @@ import java.util.function.Consumer;
  * delete/Stop 串行化，唤醒 THREAD Work 只是 hint，不需要执行树锁。
  */
 @Slf4j
-final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution {
+public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution {
 
   private final HarnessStore store;
   private final ExecutionExitConfirmer exitConfirmer;
@@ -103,7 +103,7 @@ final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution {
   private Thread bodyThread;
   private volatile boolean progressOpen;
 
-  ToolExecution(
+  public ToolExecution(
       HarnessStore store,
       RealtimeEventSink realtimeEventSink,
       ClaimedWork claim,
@@ -144,7 +144,7 @@ final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution {
   }
 
   /** 当前 Tool 代次的远端观察者：发送前登记，正向 ACK 或确定未发送才确认。 */
-  ToolGateway.RemoteExecutionObserver remoteExecutions() {
+  public ToolGateway.RemoteExecutionObserver remoteExecutions() {
     return new RemoteExecution();
   }
 
@@ -235,7 +235,7 @@ final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution {
    * Gateway admission 返回 Admitted 后调用：先持久化 {@code READY -> RUNNING}（失败也必须在同一窗口 close），再启动执行线程。 run
    * 的关闭责任自此转移给执行线程；返回 {@link ProcessResult#STARTED} 表示线程已启动。
    */
-  ProcessResult start(ToolGateway.Run run) {
+  public ProcessResult start(ToolGateway.Run run) {
     boolean committed;
     try {
       committed = markRunning();
