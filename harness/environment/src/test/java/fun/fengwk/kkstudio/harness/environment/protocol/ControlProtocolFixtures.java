@@ -26,6 +26,33 @@ final class ControlProtocolFixtures {
       "{\"answer\":42,\"exponent\":1e-7,"
           + "\"highPrecision\":0.123456789012345678901234567890,\"negativeZero\":-0}";
 
+  static final String[] GOLDEN_NAMES = {
+    "invoke.bin",
+    "completed.bin",
+    "execution-exited.bin",
+    "settings.bin",
+    "ready.bin",
+    "heartbeat.bin",
+    "runtime-status.bin",
+    "started.bin",
+    "progress.bin",
+    "failed.bin",
+    "cancel.bin",
+    "cancelled.bin",
+    "recover.bin",
+    "recover-not-found.bin",
+    "upload-request.bin",
+    "upload-ticket.bin",
+    "upload-commit.bin",
+    "policy.bin",
+    "update.bin",
+    "update-result.bin",
+    "ide-command.bin",
+    "ide-result.bin",
+    "ide-lease.bin",
+    "error.bin"
+  };
+
   private static final String GOLDEN_DIRECTORY =
       Path.of("src", "main", "protocol", "golden").toString();
 
@@ -33,6 +60,14 @@ final class ControlProtocolFixtures {
 
   static byte[] golden(String name) throws IOException {
     return Files.readAllBytes(Path.of(GOLDEN_DIRECTORY, name));
+  }
+
+  static byte[] goldenUnchecked(String name) {
+    try {
+      return golden(name);
+    } catch (IOException error) {
+      throw new IllegalStateException(error);
+    }
   }
 
   static Envelope invokeEnvelope() {

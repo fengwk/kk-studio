@@ -26,6 +26,8 @@ if [ -z "$JDK21" ]; then
 fi
 
 cd "$REPO_ROOT"
+node "$SCRIPT_DIR/capabilities.mjs" --check
+node "$REPO_ROOT/harness/environment/src/main/protocol/ts/generate.mjs" --check
 exec env JAVA_HOME="$JDK21" mvn -q -pl web -am \
   -Dtest=TsContractArtifactTest,DaemonContractArtifactTest \
   -Dsurefire.failIfNoSpecifiedTests=false \

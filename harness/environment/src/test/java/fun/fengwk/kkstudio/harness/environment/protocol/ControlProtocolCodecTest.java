@@ -12,6 +12,381 @@ import java.io.IOException;
 /** v8 三条首批控制消息的 binary golden 与应用层边界测试。 */
 class ControlProtocolCodecTest {
 
+  /** 其余消息的非法枚举、缺失必填和越界都拒绝，合法边界可以编码。 */
+  @Test
+  void validatesRemainingMessages() {
+    Envelope settings =
+        ControlProtocolCodec.decodeBinary(ControlProtocolFixtures.goldenUnchecked("settings.bin"));
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                settings.toBuilder()
+                    .setInvocationId(ControlProtocolFixtures.INVOCATION_ID)
+                    .build()));
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                settings.toBuilder()
+                    .setSettings(
+                        settings.getSettings().toBuilder()
+                            .setResourceBudgets(
+                                settings.getSettings().getResourceBudgets().toBuilder()
+                                    .setMaxResourceBytes(0)))
+                    .build()));
+
+    Envelope ready =
+        ControlProtocolCodec.decodeBinary(ControlProtocolFixtures.goldenUnchecked("ready.bin"));
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                ready.toBuilder()
+                    .setReady(ready.getReady().toBuilder().setCapabilitiesVersion(5))
+                    .build()));
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                ready.toBuilder()
+                    .setReady(
+                        ready.getReady().toBuilder()
+                            .setEnvironment(
+                                ready.getReady().getEnvironment().toBuilder()
+                                    .setOperatingSystem(
+                                        OperatingSystem.OPERATING_SYSTEM_UNSPECIFIED)))
+                    .build()));
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                ready.toBuilder()
+                    .setReady(ready.getReady().toBuilder().setDaemonVersion("other"))
+                    .build()));
+
+    Envelope heartbeat =
+        ControlProtocolCodec.decodeBinary(ControlProtocolFixtures.goldenUnchecked("heartbeat.bin"));
+    ControlProtocolCodec.encodeBinary(
+        heartbeat.toBuilder()
+            .setHeartbeat(heartbeat.getHeartbeat().toBuilder().setIdeLeaseRound(1))
+            .build());
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                heartbeat.toBuilder()
+                    .setHeartbeat(heartbeat.getHeartbeat().toBuilder().setIdeLeaseRound(0))
+                    .build()));
+
+    Envelope started =
+        ControlProtocolCodec.decodeBinary(ControlProtocolFixtures.goldenUnchecked("started.bin"));
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                started.toBuilder()
+                    .setStarted(started.getStarted().toBuilder().setReplayed(false))
+                    .build()));
+
+    Envelope progress =
+        ControlProtocolCodec.decodeBinary(ControlProtocolFixtures.goldenUnchecked("progress.bin"));
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                progress.toBuilder()
+                    .setProgress(
+                        progress.getProgress().toBuilder()
+                            .setResult(
+                                progress.getProgress().getResult().toBuilder()
+                                    .addContents(
+                                        ControlProtocolFixtures.resource(
+                                            "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+                                            "text/plain",
+                                            null,
+                                            0,
+                                            "b".repeat(64),
+                                            null))))
+                    .build()));
+
+    Envelope ticket =
+        ControlProtocolCodec.decodeBinary(
+            ControlProtocolFixtures.goldenUnchecked("upload-ticket.bin"));
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                ticket.toBuilder()
+                    .setResourceUploadTicket(
+                        ticket.getResourceUploadTicket().toBuilder()
+                            .setState(TicketState.TICKET_STATE_UNSPECIFIED))
+                    .build()));
+    Envelope readyTicket =
+        ticket.toBuilder()
+            .setResourceUploadTicket(
+                ResourceUploadTicket.newBuilder()
+                    .setTransferId(ticket.getResourceUploadTicket().getTransferId())
+                    .setState(TicketState.TICKET_READY)
+                    .setUploadId(ticket.getResourceUploadTicket().getUploadId()))
+            .build();
+    ControlProtocolCodec.encodeBinary(readyTicket);
+    Envelope failedTicket =
+        ticket.toBuilder()
+            .setResourceUploadTicket(
+                ResourceUploadTicket.newBuilder()
+                    .setTransferId(ticket.getResourceUploadTicket().getTransferId())
+                    .setState(TicketState.TICKET_FAILED)
+                    .setMessage("nope"))
+            .build();
+    ControlProtocolCodec.encodeBinary(failedTicket);
+
+    Envelope command =
+        ControlProtocolCodec.decodeBinary(
+            ControlProtocolFixtures.goldenUnchecked("ide-command.bin"));
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                command.toBuilder()
+                    .setIdeCommand(
+                        command.getIdeCommand().toBuilder()
+                            .setAction(IdeAction.LIST_VIEWS)
+                            .setDirectory("/x"))
+                    .build()));
+    ControlProtocolCodec.encodeBinary(
+        command.toBuilder()
+            .setIdeCommand(
+                IdeCommand.newBuilder()
+                    .setAction(IdeAction.CHANGE_DIRECTORY)
+                    .setViewId(command.getIdeCommand().getViewId())
+                    .setDocumentId(command.getIdeCommand().getDocumentId())
+                    .setBindingEpoch(1)
+                    .setDirectory("/work"))
+            .build());
+    ControlProtocolCodec.encodeBinary(
+        command.toBuilder()
+            .setIdeCommand(
+                IdeCommand.newBuilder()
+                    .setAction(IdeAction.CLOSE_VIEW)
+                    .setViewId(command.getIdeCommand().getViewId())
+                    .setDocumentId(command.getIdeCommand().getDocumentId())
+                    .setBindingEpoch(1)
+                    .setDiscard(true))
+            .build());
+
+    Envelope result =
+        ControlProtocolCodec.decodeBinary(
+            ControlProtocolFixtures.goldenUnchecked("ide-result.bin"));
+    ControlProtocolCodec.encodeBinary(
+        result.toBuilder()
+            .setIdeResult(IdeResult.newBuilder().setOk(false).setCode("BUSY").setMessage("later"))
+            .build());
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                result.toBuilder()
+                    .setIdeResult(
+                        IdeResult.newBuilder().setOk(false).setCode("busy").setMessage("later"))
+                    .build()));
+    ControlProtocolCodec.encodeBinary(
+        result.toBuilder().setIdeResult(IdeResult.newBuilder().setOk(true)).build());
+
+    UpgradeRequired upgrade =
+        UpgradeRequired.newBuilder()
+            .setTargetProtocolVersion(8)
+            .setArtifactUrl(
+                "https://github.com/fengwk/kk-studio/releases/download/v1.2.3/"
+                    + "kk-studio-daemon-v1.2.3-linux-amd64.tar.gz")
+            .setArtifactSha256("a".repeat(64))
+            .build();
+    ControlProtocolCodec.validateUpgrade(upgrade);
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.validateUpgrade(
+                upgrade.toBuilder().setArtifactUrl("https://example.invalid/a.tar.gz").build()));
+
+    Envelope update =
+        ControlProtocolCodec.decodeBinary(ControlProtocolFixtures.goldenUnchecked("update.bin"));
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                update.toBuilder()
+                    .setUpdate(update.getUpdate().toBuilder().setArtifactSha256("zz"))
+                    .build()));
+    Envelope updateResult =
+        ControlProtocolCodec.decodeBinary(
+            ControlProtocolFixtures.goldenUnchecked("update-result.bin"));
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                updateResult.toBuilder()
+                    .setUpdateResult(
+                        updateResult.getUpdateResult().toBuilder()
+                            .setPhase(UpdatePhase.UPDATE_PHASE_UNSPECIFIED))
+                    .build()));
+    ControlProtocolCodec.encodeBinary(
+        updateResult.toBuilder()
+            .setUpdateResult(updateResult.getUpdateResult().toBuilder().setMessage("prepared"))
+            .build());
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                updateResult.toBuilder()
+                    .setUpdateResult(updateResult.getUpdateResult().toBuilder().setMessage("bad\n"))
+                    .build()));
+
+    IdeCommand open = command.getIdeCommand();
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                command.toBuilder()
+                    .setIdeCommand(open.toBuilder().setAction(IdeAction.IDE_ACTION_UNSPECIFIED))
+                    .build()));
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                command.toBuilder().setIdeCommand(open.toBuilder().setBindingEpoch(1)).build()));
+    ControlProtocolCodec.encodeBinary(
+        command.toBuilder()
+            .setIdeCommand(
+                IdeCommand.newBuilder()
+                    .setAction(IdeAction.FOCUS_TERMINAL)
+                    .setViewId(open.getViewId())
+                    .setDocumentId(open.getDocumentId())
+                    .setBindingEpoch(1))
+            .build());
+    ControlProtocolCodec.encodeBinary(
+        command.toBuilder()
+            .setIdeCommand(
+                IdeCommand.newBuilder()
+                    .setAction(IdeAction.DETACH_VIEW)
+                    .setViewId(open.getViewId())
+                    .setDocumentId(open.getDocumentId())
+                    .setBindingEpoch(1))
+            .build());
+    ControlProtocolCodec.encodeBinary(
+        command.toBuilder()
+            .setIdeCommand(IdeCommand.newBuilder().setAction(IdeAction.LIST_VIEWS))
+            .build());
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                command.toBuilder()
+                    .setIdeCommand(
+                        IdeCommand.newBuilder()
+                            .setAction(IdeAction.CHANGE_DIRECTORY)
+                            .setViewId(open.getViewId())
+                            .setDocumentId(open.getDocumentId())
+                            .setBindingEpoch(1)
+                            .setDiscard(true)
+                            .setDirectory("/work"))
+                    .build()));
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                command.toBuilder()
+                    .setIdeCommand(
+                        IdeCommand.newBuilder()
+                            .setAction(IdeAction.CLOSE_VIEW)
+                            .setViewId(open.getViewId())
+                            .setDocumentId(open.getDocumentId())
+                            .setBindingEpoch(1))
+                    .build()));
+
+    IdeViewSummary view = result.getIdeResult().getViews(0);
+    ControlProtocolCodec.encodeBinary(
+        result.toBuilder()
+            .setIdeResult(
+                IdeResult.newBuilder()
+                    .setOk(true)
+                    .setViewId(view.getViewId())
+                    .setDocumentId(view.getDocumentId())
+                    .setEventNodeId(view.getEventNodeId())
+                    .setConnectionId(view.getConnectionId())
+                    .setClaimId(view.getClaimId())
+                    .setBindingEpoch(view.getBindingEpoch())
+                    .setDirectory(view.getDirectory())
+                    .setWorkspacePath(view.getWorkspacePath()))
+            .build());
+    ControlProtocolCodec.encodeBinary(
+        result.toBuilder()
+            .setIdeResult(
+                IdeResult.newBuilder()
+                    .setOk(true)
+                    .setViewId(view.getViewId())
+                    .setDirectory("/work"))
+            .build());
+    ControlProtocolCodec.encodeBinary(
+        result.toBuilder()
+            .setIdeResult(IdeResult.newBuilder().setOk(true).setViewId(view.getViewId()))
+            .build());
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                result.toBuilder().setIdeResult(IdeResult.newBuilder()).build()));
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                result.toBuilder()
+                    .setIdeResult(
+                        result.getIdeResult().toBuilder()
+                            .addViews(view.toBuilder().setViewId(view.getViewId())))
+                    .build()));
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                result.toBuilder()
+                    .setIdeResult(
+                        IdeResult.newBuilder()
+                            .setOk(false)
+                            .setCode("BUSY")
+                            .setViewId(view.getViewId()))
+                    .build()));
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                result.toBuilder()
+                    .setIdeResult(result.getIdeResult().toBuilder().setMessage("extra"))
+                    .build()));
+
+    Envelope lease =
+        ControlProtocolCodec.decodeBinary(ControlProtocolFixtures.goldenUnchecked("ide-lease.bin"));
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                lease.toBuilder()
+                    .setIdeLease(
+                        lease.getIdeLease().toBuilder()
+                            .addBindings(lease.getIdeLease().getBindings(0)))
+                    .build()));
+
+    Envelope error =
+        ControlProtocolCodec.decodeBinary(ControlProtocolFixtures.goldenUnchecked("error.bin"));
+    ControlProtocolCodec.encodeBinary(
+        error.toBuilder().setError(error.getError().toBuilder().clearCode()).build());
+
+    assertThrows(ControlProtocolException.class, () -> ControlProtocolCodec.validate(null));
+    assertThrows(
+        ControlProtocolException.class, () -> ControlProtocolCodec.decodeBinary(new byte[0]));
+    assertThrows(
+        ControlProtocolException.class, () -> ControlProtocolCodec.decodeBinary(new byte[] {0x0a}));
+  }
+
   /** 三条消息的 Java 构造结果必须与 TS 生成的共享 golden 逐字节一致。 */
   @Test
   void encodesFixtureMessagesToSharedGolden() throws IOException {
@@ -29,7 +404,7 @@ class ControlProtocolCodecTest {
   /** 共享 golden 解码后重新编码必须逐字节相同，裸消息和帧路径都要覆盖。 */
   @Test
   void roundtripsSharedGoldenByteForByte() throws IOException {
-    for (String name : new String[] {"invoke.bin", "completed.bin", "execution-exited.bin"}) {
+    for (String name : ControlProtocolFixtures.GOLDEN_NAMES) {
       byte[] golden = ControlProtocolFixtures.golden(name);
       assertArrayEquals(
           golden, ControlProtocolCodec.encodeBinary(ControlProtocolCodec.decodeBinary(golden)));

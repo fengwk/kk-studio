@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file control.proto.
  */
 export const file_control: GenFile = /*@__PURE__*/
-  fileDesc("Cg1jb250cm9sLnByb3RvEh9ra3N0dWRpby5lbnZpcm9ubWVudC5jb250cm9sLnY4IscDCghFbnZlbG9wZRIdChBwcm90b2NvbF92ZXJzaW9uGAEgASgFSAGIAQESQgoMbWVzc2FnZV90eXBlGAIgASgOMiwua2tzdHVkaW8uZW52aXJvbm1lbnQuY29udHJvbC52OC5NZXNzYWdlVHlwZRIbCg5lbnZpcm9ubWVudF9pZBgDIAEoCUgCiAEBEhoKDWludm9jYXRpb25faWQYBCABKAlIA4gBARI5CgZpbnZva2UYDiABKAsyJy5ra3N0dWRpby5lbnZpcm9ubWVudC5jb250cm9sLnY4Lkludm9rZUgAEj8KCWNvbXBsZXRlZBgRIAEoCzIqLmtrc3R1ZGlvLmVudmlyb25tZW50LmNvbnRyb2wudjguQ29tcGxldGVkSAASTAoQZXhlY3V0aW9uX2V4aXRlZBgXIAEoCzIwLmtrc3R1ZGlvLmVudmlyb25tZW50LmNvbnRyb2wudjguRXhlY3V0aW9uRXhpdGVkSABCCQoHcGF5bG9hZEITChFfcHJvdG9jb2xfdmVyc2lvbkIRCg9fZW52aXJvbm1lbnRfaWRCEAoOX2ludm9jYXRpb25faWRKBAgFEApKBAhkEGVKBAhlEGYiqwIKBkludm9rZRIaCg1jYXBhYmlsaXR5X2lkGAEgASgJSACIAQESHwoSY2FwYWJpbGl0eV92ZXJzaW9uGAIgASgJSAGIAQESGwoOYXJndW1lbnRzX2pzb24YAyABKAlIAogBARIbCg50aW1lb3V0X21pbGxpcxgEIAEoA0gDiAEBEkkKDWV4cGVjdGVkX2ZpbGUYBSABKAsyLS5ra3N0dWRpby5lbnZpcm9ubWVudC5jb250cm9sLnY4LkV4cGVjdGVkRmlsZUgEiAEBQhAKDl9jYXBhYmlsaXR5X2lkQhUKE19jYXBhYmlsaXR5X3ZlcnNpb25CEQoPX2FyZ3VtZW50c19qc29uQhEKD190aW1lb3V0X21pbGxpc0IQCg5fZXhwZWN0ZWRfZmlsZSJKCgxFeHBlY3RlZEZpbGUSEQoEcGF0aBgBIAEoCUgAiAEBEhMKBnNoYTI1NhgCIAEoCUgBiAEBQgcKBV9wYXRoQgkKB19zaGEyNTYiXgoJQ29tcGxldGVkEkYKBnJlc3VsdBgBIAEoCzIxLmtrc3R1ZGlvLmVudmlyb25tZW50LmNvbnRyb2wudjguQ2FwYWJpbGl0eVJlc3VsdEgAiAEBQgkKB19yZXN1bHQiugEKEENhcGFiaWxpdHlSZXN1bHQSFAoHY2FsbF9pZBgBIAEoCUgAiAEBEhIKBWVycm9yGAIgASgISAGIAQESGQoMZGV0YWlsc19qc29uGAMgASgJSAKIAQESOgoIY29udGVudHMYBCADKAsyKC5ra3N0dWRpby5lbnZpcm9ubWVudC5jb250cm9sLnY4LkNvbnRlbnRCCgoIX2NhbGxfaWRCCAoGX2Vycm9yQg8KDV9kZXRhaWxzX2pzb24i0wEKB0NvbnRlbnQSPAoEdGV4dBgBIAEoCzIsLmtrc3R1ZGlvLmVudmlyb25tZW50LmNvbnRyb2wudjguVGV4dENvbnRlbnRIABI8CgRqc29uGAIgASgLMiwua2tzdHVkaW8uZW52aXJvbm1lbnQuY29udHJvbC52OC5Kc29uQ29udGVudEgAEkQKCHJlc291cmNlGAMgASgLMjAua2tzdHVkaW8uZW52aXJvbm1lbnQuY29udHJvbC52OC5SZXNvdXJjZUNvbnRlbnRIAEIGCgRib2R5IikKC1RleHRDb250ZW50EhEKBHRleHQYASABKAlIAIgBAUIHCgVfdGV4dCIpCgtKc29uQ29udGVudBIRCgRqc29uGAEgASgJSACIAQFCBwoFX2pzb24i2QEKD1Jlc291cmNlQ29udGVudBIWCgl1cGxvYWRfaWQYASABKAlIAIgBARIXCgptZWRpYV90eXBlGAIgASgJSAGIAQESEQoEbmFtZRgDIAEoCUgCiAEBEhEKBHNpemUYBCABKANIA4gBARITCgZzaGEyNTYYBSABKAlIBIgBARIUCgdwcmV2aWV3GAYgASgJSAWIAQFCDAoKX3VwbG9hZF9pZEINCgtfbWVkaWFfdHlwZUIHCgVfbmFtZUIHCgVfc2l6ZUIJCgdfc2hhMjU2QgoKCF9wcmV2aWV3IhEKD0V4ZWN1dGlvbkV4aXRlZCpcCgtNZXNzYWdlVHlwZRIcChhNRVNTQUdFX1RZUEVfVU5TUEVDSUZJRUQQABIKCgZJTlZPS0UQBRINCglDT01QTEVURUQQCBIUChBFWEVDVVRJT05fRVhJVEVEEA5CQgowZnVuLmZlbmd3ay5ra3N0dWRpby5oYXJuZXNzLmVudmlyb25tZW50LnByb3RvY29sQgxDb250cm9sUHJvdG9QAWIGcHJvdG8z");
+  fileDesc("Cg1jb250cm9sLnByb3RvEh9ra3N0dWRpby5lbnZpcm9ubWVudC5jb250cm9sLnY4IvEOCghFbnZlbG9wZRIdChBwcm90b2NvbF92ZXJzaW9uGAEgASgFSAGIAQESQgoMbWVzc2FnZV90eXBlGAIgASgOMiwua2tzdHVkaW8uZW52aXJvbm1lbnQuY29udHJvbC52OC5NZXNzYWdlVHlwZRIbCg5lbnZpcm9ubWVudF9pZBgDIAEoCUgCiAEBEhoKDWludm9jYXRpb25faWQYBCABKAlIA4gBARI9CghzZXR0aW5ncxgKIAEoCzIpLmtrc3R1ZGlvLmVudmlyb25tZW50LmNvbnRyb2wudjguU2V0dGluZ3NIABI3CgVyZWFkeRgLIAEoCzImLmtrc3R1ZGlvLmVudmlyb25tZW50LmNvbnRyb2wudjguUmVhZHlIABI/CgloZWFydGJlYXQYDCABKAsyKi5ra3N0dWRpby5lbnZpcm9ubWVudC5jb250cm9sLnY4LkhlYXJ0YmVhdEgAEkgKDnJ1bnRpbWVfc3RhdHVzGA0gASgLMi4ua2tzdHVkaW8uZW52aXJvbm1lbnQuY29udHJvbC52OC5SdW50aW1lU3RhdHVzSAASOQoGaW52b2tlGA4gASgLMicua2tzdHVkaW8uZW52aXJvbm1lbnQuY29udHJvbC52OC5JbnZva2VIABI7CgdzdGFydGVkGA8gASgLMigua2tzdHVkaW8uZW52aXJvbm1lbnQuY29udHJvbC52OC5TdGFydGVkSAASPQoIcHJvZ3Jlc3MYECABKAsyKS5ra3N0dWRpby5lbnZpcm9ubWVudC5jb250cm9sLnY4LlByb2dyZXNzSAASPwoJY29tcGxldGVkGBEgASgLMioua2tzdHVkaW8uZW52aXJvbm1lbnQuY29udHJvbC52OC5Db21wbGV0ZWRIABI5CgZmYWlsZWQYEiABKAsyJy5ra3N0dWRpby5lbnZpcm9ubWVudC5jb250cm9sLnY4LkZhaWxlZEgAEjkKBmNhbmNlbBgTIAEoCzInLmtrc3R1ZGlvLmVudmlyb25tZW50LmNvbnRyb2wudjguQ2FuY2VsSAASPwoJY2FuY2VsbGVkGBQgASgLMioua2tzdHVkaW8uZW52aXJvbm1lbnQuY29udHJvbC52OC5DYW5jZWxsZWRIABI7CgdyZWNvdmVyGBUgASgLMigua2tzdHVkaW8uZW52aXJvbm1lbnQuY29udHJvbC52OC5SZWNvdmVySAASTQoRcmVjb3Zlcl9ub3RfZm91bmQYFiABKAsyMC5ra3N0dWRpby5lbnZpcm9ubWVudC5jb250cm9sLnY4LlJlY292ZXJOb3RGb3VuZEgAEkwKEGV4ZWN1dGlvbl9leGl0ZWQYFyABKAsyMC5ra3N0dWRpby5lbnZpcm9ubWVudC5jb250cm9sLnY4LkV4ZWN1dGlvbkV4aXRlZEgAElkKF3Jlc291cmNlX3VwbG9hZF9yZXF1ZXN0GBggASgLMjYua2tzdHVkaW8uZW52aXJvbm1lbnQuY29udHJvbC52OC5SZXNvdXJjZVVwbG9hZFJlcXVlc3RIABJXChZyZXNvdXJjZV91cGxvYWRfdGlja2V0GBkgASgLMjUua2tzdHVkaW8uZW52aXJvbm1lbnQuY29udHJvbC52OC5SZXNvdXJjZVVwbG9hZFRpY2tldEgAElcKFnJlc291cmNlX3VwbG9hZF9jb21taXQYGiABKAsyNS5ra3N0dWRpby5lbnZpcm9ubWVudC5jb250cm9sLnY4LlJlc291cmNlVXBsb2FkQ29tbWl0SAASXQoZdGVtcG9yYXJ5X3Jlc291cmNlX3BvbGljeRgbIAEoCzI4Lmtrc3R1ZGlvLmVudmlyb25tZW50LmNvbnRyb2wudjguVGVtcG9yYXJ5UmVzb3VyY2VQb2xpY3lIABI5CgZ1cGRhdGUYHCABKAsyJy5ra3N0dWRpby5lbnZpcm9ubWVudC5jb250cm9sLnY4LlVwZGF0ZUgAEkYKDXVwZGF0ZV9yZXN1bHQYHSABKAsyLS5ra3N0dWRpby5lbnZpcm9ubWVudC5jb250cm9sLnY4LlVwZGF0ZVJlc3VsdEgAEkIKC2lkZV9jb21tYW5kGB4gASgLMisua2tzdHVkaW8uZW52aXJvbm1lbnQuY29udHJvbC52OC5JZGVDb21tYW5kSAASQAoKaWRlX3Jlc3VsdBgfIAEoCzIqLmtrc3R1ZGlvLmVudmlyb25tZW50LmNvbnRyb2wudjguSWRlUmVzdWx0SAASPgoJaWRlX2xlYXNlGCAgASgLMikua2tzdHVkaW8uZW52aXJvbm1lbnQuY29udHJvbC52OC5JZGVMZWFzZUgAEjcKBWVycm9yGCEgASgLMiYua2tzdHVkaW8uZW52aXJvbm1lbnQuY29udHJvbC52OC5FcnJvckgAQgkKB3BheWxvYWRCEwoRX3Byb3RvY29sX3ZlcnNpb25CEQoPX2Vudmlyb25tZW50X2lkQhAKDl9pbnZvY2F0aW9uX2lkSgQIZBBlSgQIZRBmIrEBCg9VcGdyYWRlUmVxdWlyZWQSJAoXdGFyZ2V0X3Byb3RvY29sX3ZlcnNpb24YASABKAVIAIgBARIZCgxhcnRpZmFjdF91cmwYAiABKAlIAYgBARIcCg9hcnRpZmFjdF9zaGEyNTYYAyABKAlIAogBAUIaChhfdGFyZ2V0X3Byb3RvY29sX3ZlcnNpb25CDwoNX2FydGlmYWN0X3VybEISChBfYXJ0aWZhY3Rfc2hhMjU2IoIBCghTZXR0aW5ncxJKChByZXNvdXJjZV9idWRnZXRzGAEgASgLMjAua2tzdHVkaW8uZW52aXJvbm1lbnQuY29udHJvbC52OC5SZXNvdXJjZUJ1ZGdldHMSGQoMZGlzcGxheV9uYW1lGAIgASgJSACIAQFCDwoNX2Rpc3BsYXlfbmFtZSKDAgoPUmVzb3VyY2VCdWRnZXRzEh8KEm1heF9yZXNvdXJjZV9ieXRlcxgBIAEoA0gAiAEBEisKHnRlbXBvcmFyeV9yZXNvdXJjZV90dGxfc2Vjb25kcxgCIAEoA0gBiAEBEjgKK3RlbXBvcmFyeV9yZXNvdXJjZV9jbGVhbnVwX2ludGVydmFsX3NlY29uZHMYAyABKANIAogBAUIVChNfbWF4X3Jlc291cmNlX2J5dGVzQiEKH190ZW1wb3JhcnlfcmVzb3VyY2VfdHRsX3NlY29uZHNCLgosX3RlbXBvcmFyeV9yZXNvdXJjZV9jbGVhbnVwX2ludGVydmFsX3NlY29uZHMihAIKBVJlYWR5EiEKFGNhcGFiaWxpdGllc192ZXJzaW9uGAEgASgFSACIAQESGwoOZGFlbW9uX3ZlcnNpb24YAiABKAlIAYgBARJFCgtlbnZpcm9ubWVudBgDIAEoCzIwLmtrc3R1ZGlvLmVudmlyb25tZW50LmNvbnRyb2wudjguRW52aXJvbm1lbnRJbmZvEkgKDnJ1bnRpbWVfc3RhdHVzGAQgASgLMjAua2tzdHVkaW8uZW52aXJvbm1lbnQuY29udHJvbC52OC5SdW50aW1lU25hcHNob3RCFwoVX2NhcGFiaWxpdGllc192ZXJzaW9uQhEKD19kYWVtb25fdmVyc2lvbiLqAgoPRW52aXJvbm1lbnRJbmZvEkoKEG9wZXJhdGluZ19zeXN0ZW0YASABKA4yMC5ra3N0dWRpby5lbnZpcm9ubWVudC5jb250cm9sLnY4Lk9wZXJhdGluZ1N5c3RlbRJDCgxhcmNoaXRlY3R1cmUYAiABKA4yLS5ra3N0dWRpby5lbnZpcm9ubWVudC5jb250cm9sLnY4LkFyY2hpdGVjdHVyZRIWCgl0aW1lX3pvbmUYAyABKAlIAIgBARIWCgl1c2VyX25hbWUYBCABKAlIAYgBARIbCg5ob21lX2RpcmVjdG9yeRgFIAEoCUgCiAEBEhEKBG5vdGUYBiABKAlIA4gBARIbCg50ZW1wX2RpcmVjdG9yeRgHIAEoCUgEiAEBQgwKCl90aW1lX3pvbmVCDAoKX3VzZXJfbmFtZUIRCg9faG9tZV9kaXJlY3RvcnlCBwoFX25vdGVCEQoPX3RlbXBfZGlyZWN0b3J5IocBCglIZWFydGJlYXQSSAoOcnVudGltZV9zdGF0dXMYASABKAsyMC5ra3N0dWRpby5lbnZpcm9ubWVudC5jb250cm9sLnY4LlJ1bnRpbWVTbmFwc2hvdBIcCg9pZGVfbGVhc2Vfcm91bmQYAiABKANIAIgBAUISChBfaWRlX2xlYXNlX3JvdW5kIlkKDVJ1bnRpbWVTdGF0dXMSSAoOcnVudGltZV9zdGF0dXMYASABKAsyMC5ra3N0dWRpby5lbnZpcm9ubWVudC5jb250cm9sLnY4LlJ1bnRpbWVTbmFwc2hvdCJzCg9SdW50aW1lU25hcHNob3QSFQoIcmV2aXNpb24YASABKANIAIgBARI8CgZzdGF0dXMYAiABKAsyLC5ra3N0dWRpby5lbnZpcm9ubWVudC5jb250cm9sLnY4LlJ1bnRpbWVCb2R5QgsKCV9yZXZpc2lvbiJ+CgtSdW50aW1lQm9keRIbCg5kYWVtb25fdmVyc2lvbhgBIAEoCUgAiAEBEj8KBnVwZGF0ZRgCIAEoCzIvLmtrc3R1ZGlvLmVudmlyb25tZW50LmNvbnRyb2wudjguVXBkYXRlUHJvZ3Jlc3NCEQoPX2RhZW1vbl92ZXJzaW9uIp4BCg5VcGRhdGVQcm9ncmVzcxIbCg50YXJnZXRfdmVyc2lvbhgBIAEoCUgAiAEBEh0KEGRvd25sb2FkZWRfYnl0ZXMYAiABKANIAYgBARIYCgt0b3RhbF9ieXRlcxgDIAEoA0gCiAEBQhEKD190YXJnZXRfdmVyc2lvbkITChFfZG93bmxvYWRlZF9ieXRlc0IOCgxfdG90YWxfYnl0ZXMiqwIKBkludm9rZRIaCg1jYXBhYmlsaXR5X2lkGAEgASgJSACIAQESHwoSY2FwYWJpbGl0eV92ZXJzaW9uGAIgASgJSAGIAQESGwoOYXJndW1lbnRzX2pzb24YAyABKAlIAogBARIbCg50aW1lb3V0X21pbGxpcxgEIAEoA0gDiAEBEkkKDWV4cGVjdGVkX2ZpbGUYBSABKAsyLS5ra3N0dWRpby5lbnZpcm9ubWVudC5jb250cm9sLnY4LkV4cGVjdGVkRmlsZUgEiAEBQhAKDl9jYXBhYmlsaXR5X2lkQhUKE19jYXBhYmlsaXR5X3ZlcnNpb25CEQoPX2FyZ3VtZW50c19qc29uQhEKD190aW1lb3V0X21pbGxpc0IQCg5fZXhwZWN0ZWRfZmlsZSJKCgxFeHBlY3RlZEZpbGUSEQoEcGF0aBgBIAEoCUgAiAEBEhMKBnNoYTI1NhgCIAEoCUgBiAEBQgcKBV9wYXRoQgkKB19zaGEyNTYiLQoHU3RhcnRlZBIVCghyZXBsYXllZBgBIAEoCEgAiAEBQgsKCV9yZXBsYXllZCJdCghQcm9ncmVzcxJGCgZyZXN1bHQYASABKAsyMS5ra3N0dWRpby5lbnZpcm9ubWVudC5jb250cm9sLnY4LkNhcGFiaWxpdHlSZXN1bHRIAIgBAUIJCgdfcmVzdWx0Il4KCUNvbXBsZXRlZBJGCgZyZXN1bHQYASABKAsyMS5ra3N0dWRpby5lbnZpcm9ubWVudC5jb250cm9sLnY4LkNhcGFiaWxpdHlSZXN1bHRIAIgBAUIJCgdfcmVzdWx0IroBChBDYXBhYmlsaXR5UmVzdWx0EhQKB2NhbGxfaWQYASABKAlIAIgBARISCgVlcnJvchgCIAEoCEgBiAEBEhkKDGRldGFpbHNfanNvbhgDIAEoCUgCiAEBEjoKCGNvbnRlbnRzGAQgAygLMigua2tzdHVkaW8uZW52aXJvbm1lbnQuY29udHJvbC52OC5Db250ZW50QgoKCF9jYWxsX2lkQggKBl9lcnJvckIPCg1fZGV0YWlsc19qc29uItMBCgdDb250ZW50EjwKBHRleHQYASABKAsyLC5ra3N0dWRpby5lbnZpcm9ubWVudC5jb250cm9sLnY4LlRleHRDb250ZW50SAASPAoEanNvbhgCIAEoCzIsLmtrc3R1ZGlvLmVudmlyb25tZW50LmNvbnRyb2wudjguSnNvbkNvbnRlbnRIABJECghyZXNvdXJjZRgDIAEoCzIwLmtrc3R1ZGlvLmVudmlyb25tZW50LmNvbnRyb2wudjguUmVzb3VyY2VDb250ZW50SABCBgoEYm9keSIpCgtUZXh0Q29udGVudBIRCgR0ZXh0GAEgASgJSACIAQFCBwoFX3RleHQiKQoLSnNvbkNvbnRlbnQSEQoEanNvbhgBIAEoCUgAiAEBQgcKBV9qc29uItkBCg9SZXNvdXJjZUNvbnRlbnQSFgoJdXBsb2FkX2lkGAEgASgJSACIAQESFwoKbWVkaWFfdHlwZRgCIAEoCUgBiAEBEhEKBG5hbWUYAyABKAlIAogBARIRCgRzaXplGAQgASgDSAOIAQESEwoGc2hhMjU2GAUgASgJSASIAQESFAoHcHJldmlldxgGIAEoCUgFiAEBQgwKCl91cGxvYWRfaWRCDQoLX21lZGlhX3R5cGVCBwoFX25hbWVCBwoFX3NpemVCCQoHX3NoYTI1NkIKCghfcHJldmlldyIqCgZGYWlsZWQSFAoHbWVzc2FnZRgBIAEoCUgAiAEBQgoKCF9tZXNzYWdlIggKBkNhbmNlbCIrCglDYW5jZWxsZWQSEwoGcmVhc29uGAEgASgJSACIAQFCCQoHX3JlYXNvbiIJCgdSZWNvdmVyIhEKD1JlY292ZXJOb3RGb3VuZCIRCg9FeGVjdXRpb25FeGl0ZWQiwQEKFVJlc291cmNlVXBsb2FkUmVxdWVzdBIYCgt0cmFuc2Zlcl9pZBgBIAEoCUgAiAEBEhcKCm1lZGlhX3R5cGUYAiABKAlIAYgBARIRCgRuYW1lGAMgASgJSAKIAQESEQoEc2l6ZRgEIAEoA0gDiAEBEhMKBnNoYTI1NhgFIAEoCUgEiAEBQg4KDF90cmFuc2Zlcl9pZEINCgtfbWVkaWFfdHlwZUIHCgVfbmFtZUIHCgVfc2l6ZUIJCgdfc2hhMjU2IosCChRSZXNvdXJjZVVwbG9hZFRpY2tldBIYCgt0cmFuc2Zlcl9pZBgBIAEoCUgAiAEBEjsKBXN0YXRlGAIgASgOMiwua2tzdHVkaW8uZW52aXJvbm1lbnQuY29udHJvbC52OC5UaWNrZXRTdGF0ZRIWCgl1cGxvYWRfaWQYAyABKAlIAYgBARJECg1wcmVzaWduZWRfcHV0GAQgASgLMi0ua2tzdHVkaW8uZW52aXJvbm1lbnQuY29udHJvbC52OC5QcmVzaWduZWRQdXQSFAoHbWVzc2FnZRgFIAEoCUgCiAEBQg4KDF90cmFuc2Zlcl9pZEIMCgpfdXBsb2FkX2lkQgoKCF9tZXNzYWdlIu0BCgxQcmVzaWduZWRQdXQSEwoGbWV0aG9kGAEgASgJSACIAQESEAoDdXJsGAIgASgJSAGIAQESSwoHaGVhZGVycxgDIAMoCzI6Lmtrc3R1ZGlvLmVudmlyb25tZW50LmNvbnRyb2wudjguUHJlc2lnbmVkUHV0LkhlYWRlcnNFbnRyeRIXCgpleHBpcmVzX2F0GAQgASgJSAKIAQEaLgoMSGVhZGVyc0VudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAFCCQoHX21ldGhvZEIGCgRfdXJsQg0KC19leHBpcmVzX2F0ImYKFFJlc291cmNlVXBsb2FkQ29tbWl0EhgKC3RyYW5zZmVyX2lkGAEgASgJSACIAQESFgoJdXBsb2FkX2lkGAIgASgJSAGIAQFCDgoMX3RyYW5zZmVyX2lkQgwKCl91cGxvYWRfaWQi0wEKF1RlbXBvcmFyeVJlc291cmNlUG9saWN5EisKHnRlbXBvcmFyeV9yZXNvdXJjZV90dGxfc2Vjb25kcxgBIAEoA0gAiAEBEjgKK3RlbXBvcmFyeV9yZXNvdXJjZV9jbGVhbnVwX2ludGVydmFsX3NlY29uZHMYAiABKANIAYgBAUIhCh9fdGVtcG9yYXJ5X3Jlc291cmNlX3R0bF9zZWNvbmRzQi4KLF90ZW1wb3JhcnlfcmVzb3VyY2VfY2xlYW51cF9pbnRlcnZhbF9zZWNvbmRzIsIBCgZVcGRhdGUSGQoMb3BlcmF0aW9uX2lkGAEgASgJSACIAQESGwoOdGFyZ2V0X3ZlcnNpb24YAiABKAlIAYgBARIZCgxhcnRpZmFjdF91cmwYAyABKAlIAogBARIcCg9hcnRpZmFjdF9zaGEyNTYYBCABKAlIA4gBAUIPCg1fb3BlcmF0aW9uX2lkQhEKD190YXJnZXRfdmVyc2lvbkIPCg1fYXJ0aWZhY3RfdXJsQhIKEF9hcnRpZmFjdF9zaGEyNTYimQEKDFVwZGF0ZVJlc3VsdBIZCgxvcGVyYXRpb25faWQYASABKAlIAIgBARI7CgVwaGFzZRgCIAEoDjIsLmtrc3R1ZGlvLmVudmlyb25tZW50LmNvbnRyb2wudjguVXBkYXRlUGhhc2USFAoHbWVzc2FnZRgDIAEoCUgBiAEBQg8KDV9vcGVyYXRpb25faWRCCgoIX21lc3NhZ2UixgMKCklkZUNvbW1hbmQSOgoGYWN0aW9uGAEgASgOMioua2tzdHVkaW8uZW52aXJvbm1lbnQuY29udHJvbC52OC5JZGVBY3Rpb24SFAoHdmlld19pZBgCIAEoCUgAiAEBEhgKC2RvY3VtZW50X2lkGAMgASgJSAGIAQESGgoNZXZlbnRfbm9kZV9pZBgEIAEoCUgCiAEBEhoKDWNvbm5lY3Rpb25faWQYBSABKAlIA4gBARIVCghjbGFpbV9pZBgGIAEoCUgEiAEBEhoKDWJpbmRpbmdfZXBvY2gYByABKANIBYgBARI6CgRtb2RlGAggASgOMiwua2tzdHVkaW8uZW52aXJvbm1lbnQuY29udHJvbC52OC5JZGVPcGVuTW9kZRIWCglkaXJlY3RvcnkYCSABKAlIBogBARIUCgdkaXNjYXJkGAogASgISAeIAQFCCgoIX3ZpZXdfaWRCDgoMX2RvY3VtZW50X2lkQhAKDl9ldmVudF9ub2RlX2lkQhAKDl9jb25uZWN0aW9uX2lkQgsKCV9jbGFpbV9pZEIQCg5fYmluZGluZ19lcG9jaEIMCgpfZGlyZWN0b3J5QgoKCF9kaXNjYXJkIvEDCglJZGVSZXN1bHQSDwoCb2sYASABKAhIAIgBARIRCgRjb2RlGAIgASgJSAGIAQESFAoHbWVzc2FnZRgDIAEoCUgCiAEBEhQKB3ZpZXdfaWQYBCABKAlIA4gBARIYCgtkb2N1bWVudF9pZBgFIAEoCUgEiAEBEhoKDWV2ZW50X25vZGVfaWQYBiABKAlIBYgBARIaCg1jb25uZWN0aW9uX2lkGAcgASgJSAaIAQESFQoIY2xhaW1faWQYCCABKAlIB4gBARIaCg1iaW5kaW5nX2Vwb2NoGAkgASgDSAiIAQESFgoJZGlyZWN0b3J5GAogASgJSAmIAQESGwoOd29ya3NwYWNlX3BhdGgYCyABKAlICogBARI+CgV2aWV3cxgMIAMoCzIvLmtrc3R1ZGlvLmVudmlyb25tZW50LmNvbnRyb2wudjguSWRlVmlld1N1bW1hcnlCBQoDX29rQgcKBV9jb2RlQgoKCF9tZXNzYWdlQgoKCF92aWV3X2lkQg4KDF9kb2N1bWVudF9pZEIQCg5fZXZlbnRfbm9kZV9pZEIQCg5fY29ubmVjdGlvbl9pZEILCglfY2xhaW1faWRCEAoOX2JpbmRpbmdfZXBvY2hCDAoKX2RpcmVjdG9yeUIRCg9fd29ya3NwYWNlX3BhdGgingMKDklkZVZpZXdTdW1tYXJ5EhQKB3ZpZXdfaWQYASABKAlIAIgBARIYCgtkb2N1bWVudF9pZBgCIAEoCUgBiAEBEhoKDWV2ZW50X25vZGVfaWQYAyABKAlIAogBARIaCg1jb25uZWN0aW9uX2lkGAQgASgJSAOIAQESFQoIY2xhaW1faWQYBSABKAlIBIgBARIaCg1iaW5kaW5nX2Vwb2NoGAYgASgDSAWIAQESFgoJZGlyZWN0b3J5GAcgASgJSAaIAQESGwoOd29ya3NwYWNlX3BhdGgYCCABKAlIB4gBARI8CgVzdGF0ZRgJIAEoDjItLmtrc3R1ZGlvLmVudmlyb25tZW50LmNvbnRyb2wudjguSWRlVmlld1N0YXRlQgoKCF92aWV3X2lkQg4KDF9kb2N1bWVudF9pZEIQCg5fZXZlbnRfbm9kZV9pZEIQCg5fY29ubmVjdGlvbl9pZEILCglfY2xhaW1faWRCEAoOX2JpbmRpbmdfZXBvY2hCDAoKX2RpcmVjdG9yeUIRCg9fd29ya3NwYWNlX3BhdGgibAoISWRlTGVhc2USEgoFcm91bmQYASABKANIAIgBARJCCghiaW5kaW5ncxgCIAMoCzIwLmtrc3R1ZGlvLmVudmlyb25tZW50LmNvbnRyb2wudjguSWRlTGVhc2VCaW5kaW5nQggKBl9yb3VuZCKLAQoPSWRlTGVhc2VCaW5kaW5nEhQKB3ZpZXdfaWQYASABKAlIAIgBARIYCgtkb2N1bWVudF9pZBgCIAEoCUgBiAEBEhoKDWJpbmRpbmdfZXBvY2gYAyABKANIAogBAUIKCghfdmlld19pZEIOCgxfZG9jdW1lbnRfaWRCEAoOX2JpbmRpbmdfZXBvY2giYwoFRXJyb3ISFAoHbWVzc2FnZRgBIAEoCUgAiAEBEjgKBGNvZGUYAiABKA4yKi5ra3N0dWRpby5lbnZpcm9ubWVudC5jb250cm9sLnY4LkVycm9yQ29kZUIKCghfbWVzc2FnZSrMAwoLTWVzc2FnZVR5cGUSHAoYTUVTU0FHRV9UWVBFX1VOU1BFQ0lGSUVEEAASDAoIU0VUVElOR1MQARIJCgVSRUFEWRACEg0KCUhFQVJUQkVBVBADEhIKDlJVTlRJTUVfU1RBVFVTEAQSCgoGSU5WT0tFEAUSCwoHU1RBUlRFRBAGEgwKCFBST0dSRVNTEAcSDQoJQ09NUExFVEVEEAgSCgoGRkFJTEVEEAkSCgoGQ0FOQ0VMEAoSDQoJQ0FOQ0VMTEVEEAsSCwoHUkVDT1ZFUhAMEhUKEVJFQ09WRVJfTk9UX0ZPVU5EEA0SFAoQRVhFQ1VUSU9OX0VYSVRFRBAOEhsKF1JFU09VUkNFX1VQTE9BRF9SRVFVRVNUEA8SGgoWUkVTT1VSQ0VfVVBMT0FEX1RJQ0tFVBAQEhoKFlJFU09VUkNFX1VQTE9BRF9DT01NSVQQERIdChlURU1QT1JBUllfUkVTT1VSQ0VfUE9MSUNZEBISCgoGVVBEQVRFEBMSEQoNVVBEQVRFX1JFU1VMVBAUEg8KC0lERV9DT01NQU5EEBUSDgoKSURFX1JFU1VMVBAWEg0KCUlERV9MRUFTRRAXEgkKBUVSUk9SEBgqXwoPT3BlcmF0aW5nU3lzdGVtEiAKHE9QRVJBVElOR19TWVNURU1fVU5TUEVDSUZJRUQQABILCgdXSU5ET1dTEAESBwoDV1NMEAISCQoFTElOVVgQAxIJCgVNQUNPUxAEKkIKDEFyY2hpdGVjdHVyZRIcChhBUkNISVRFQ1RVUkVfVU5TUEVDSUZJRUQQABIJCgVBTUQ2NBABEgkKBUFSTTY0EAIqZAoLVGlja2V0U3RhdGUSHAoYVElDS0VUX1NUQVRFX1VOU1BFQ0lGSUVEEAASEgoOVElDS0VUX1BFTkRJTkcQARIQCgxUSUNLRVRfUkVBRFkQAhIRCg1USUNLRVRfRkFJTEVEEAMqaAoLVXBkYXRlUGhhc2USHAoYVVBEQVRFX1BIQVNFX1VOU1BFQ0lGSUVEEAASEwoPVVBEQVRFX0FDQ0VQVEVEEAESEwoPVVBEQVRFX1BSRVBBUkVEEAISEQoNVVBEQVRFX0ZBSUxFRBADKlMKCUVycm9yQ29kZRIaChZFUlJPUl9DT0RFX1VOU1BFQ0lGSUVEEAASDwoLUkVUUllfTEFURVIQARIZChVSRUdJU1RSQVRJT05fUkVKRUNURUQQAiqRAQoJSWRlQWN0aW9uEhoKFklERV9BQ1RJT05fVU5TUEVDSUZJRUQQABINCglPUEVOX1ZJRVcQARIUChBDSEFOR0VfRElSRUNUT1JZEAISEgoORk9DVVNfVEVSTUlOQUwQAxIOCgpDTE9TRV9WSUVXEAQSDwoLREVUQUNIX1ZJRVcQBRIOCgpMSVNUX1ZJRVdTEAYqRAoLSWRlT3Blbk1vZGUSHQoZSURFX09QRU5fTU9ERV9VTlNQRUNJRklFRBAAEgoKBkNSRUFURRABEgoKBlJFU1VNRRACKkUKDElkZVZpZXdTdGF0ZRIeChpJREVfVklFV19TVEFURV9VTlNQRUNJRklFRBAAEggKBE9QRU4QARILCgdDTE9TSU5HEAJCQgowZnVuLmZlbmd3ay5ra3N0dWRpby5oYXJuZXNzLmVudmlyb25tZW50LnByb3RvY29sQgxDb250cm9sUHJvdG9QAWIGcHJvdG8z");
 
 /**
  * @generated from message kkstudio.environment.control.v8.Envelope
@@ -41,10 +41,46 @@ export type Envelope = Message<"kkstudio.environment.control.v8.Envelope"> & {
    */
   payload: {
     /**
+     * @generated from field: kkstudio.environment.control.v8.Settings settings = 10;
+     */
+    value: Settings;
+    case: "settings";
+  } | {
+    /**
+     * @generated from field: kkstudio.environment.control.v8.Ready ready = 11;
+     */
+    value: Ready;
+    case: "ready";
+  } | {
+    /**
+     * @generated from field: kkstudio.environment.control.v8.Heartbeat heartbeat = 12;
+     */
+    value: Heartbeat;
+    case: "heartbeat";
+  } | {
+    /**
+     * @generated from field: kkstudio.environment.control.v8.RuntimeStatus runtime_status = 13;
+     */
+    value: RuntimeStatus;
+    case: "runtimeStatus";
+  } | {
+    /**
      * @generated from field: kkstudio.environment.control.v8.Invoke invoke = 14;
      */
     value: Invoke;
     case: "invoke";
+  } | {
+    /**
+     * @generated from field: kkstudio.environment.control.v8.Started started = 15;
+     */
+    value: Started;
+    case: "started";
+  } | {
+    /**
+     * @generated from field: kkstudio.environment.control.v8.Progress progress = 16;
+     */
+    value: Progress;
+    case: "progress";
   } | {
     /**
      * @generated from field: kkstudio.environment.control.v8.Completed completed = 17;
@@ -53,10 +89,100 @@ export type Envelope = Message<"kkstudio.environment.control.v8.Envelope"> & {
     case: "completed";
   } | {
     /**
+     * @generated from field: kkstudio.environment.control.v8.Failed failed = 18;
+     */
+    value: Failed;
+    case: "failed";
+  } | {
+    /**
+     * @generated from field: kkstudio.environment.control.v8.Cancel cancel = 19;
+     */
+    value: Cancel;
+    case: "cancel";
+  } | {
+    /**
+     * @generated from field: kkstudio.environment.control.v8.Cancelled cancelled = 20;
+     */
+    value: Cancelled;
+    case: "cancelled";
+  } | {
+    /**
+     * @generated from field: kkstudio.environment.control.v8.Recover recover = 21;
+     */
+    value: Recover;
+    case: "recover";
+  } | {
+    /**
+     * @generated from field: kkstudio.environment.control.v8.RecoverNotFound recover_not_found = 22;
+     */
+    value: RecoverNotFound;
+    case: "recoverNotFound";
+  } | {
+    /**
      * @generated from field: kkstudio.environment.control.v8.ExecutionExited execution_exited = 23;
      */
     value: ExecutionExited;
     case: "executionExited";
+  } | {
+    /**
+     * @generated from field: kkstudio.environment.control.v8.ResourceUploadRequest resource_upload_request = 24;
+     */
+    value: ResourceUploadRequest;
+    case: "resourceUploadRequest";
+  } | {
+    /**
+     * @generated from field: kkstudio.environment.control.v8.ResourceUploadTicket resource_upload_ticket = 25;
+     */
+    value: ResourceUploadTicket;
+    case: "resourceUploadTicket";
+  } | {
+    /**
+     * @generated from field: kkstudio.environment.control.v8.ResourceUploadCommit resource_upload_commit = 26;
+     */
+    value: ResourceUploadCommit;
+    case: "resourceUploadCommit";
+  } | {
+    /**
+     * @generated from field: kkstudio.environment.control.v8.TemporaryResourcePolicy temporary_resource_policy = 27;
+     */
+    value: TemporaryResourcePolicy;
+    case: "temporaryResourcePolicy";
+  } | {
+    /**
+     * @generated from field: kkstudio.environment.control.v8.Update update = 28;
+     */
+    value: Update;
+    case: "update";
+  } | {
+    /**
+     * @generated from field: kkstudio.environment.control.v8.UpdateResult update_result = 29;
+     */
+    value: UpdateResult;
+    case: "updateResult";
+  } | {
+    /**
+     * @generated from field: kkstudio.environment.control.v8.IdeCommand ide_command = 30;
+     */
+    value: IdeCommand;
+    case: "ideCommand";
+  } | {
+    /**
+     * @generated from field: kkstudio.environment.control.v8.IdeResult ide_result = 31;
+     */
+    value: IdeResult;
+    case: "ideResult";
+  } | {
+    /**
+     * @generated from field: kkstudio.environment.control.v8.IdeLease ide_lease = 32;
+     */
+    value: IdeLease;
+    case: "ideLease";
+  } | {
+    /**
+     * @generated from field: kkstudio.environment.control.v8.Error error = 33;
+     */
+    value: Error;
+    case: "error";
   } | { case: undefined; value?: undefined };
 };
 
@@ -66,6 +192,273 @@ export type Envelope = Message<"kkstudio.environment.control.v8.Envelope"> & {
  */
 export const EnvelopeSchema: GenMessage<Envelope> = /*@__PURE__*/
   messageDesc(file_control, 0);
+
+/**
+ * HTTP 426 升级拒绝的 protobuf 载荷。content-type 与端点适配由后续切片完成。
+ *
+ * @generated from message kkstudio.environment.control.v8.UpgradeRequired
+ */
+export type UpgradeRequired = Message<"kkstudio.environment.control.v8.UpgradeRequired"> & {
+  /**
+   * @generated from field: optional int32 target_protocol_version = 1;
+   */
+  targetProtocolVersion?: number | undefined;
+
+  /**
+   * @generated from field: optional string artifact_url = 2;
+   */
+  artifactUrl?: string | undefined;
+
+  /**
+   * @generated from field: optional string artifact_sha256 = 3;
+   */
+  artifactSha256?: string | undefined;
+};
+
+/**
+ * Describes the message kkstudio.environment.control.v8.UpgradeRequired.
+ * Use `create(UpgradeRequiredSchema)` to create a new message.
+ */
+export const UpgradeRequiredSchema: GenMessage<UpgradeRequired> = /*@__PURE__*/
+  messageDesc(file_control, 1);
+
+/**
+ * @generated from message kkstudio.environment.control.v8.Settings
+ */
+export type Settings = Message<"kkstudio.environment.control.v8.Settings"> & {
+  /**
+   * @generated from field: kkstudio.environment.control.v8.ResourceBudgets resource_budgets = 1;
+   */
+  resourceBudgets?: ResourceBudgets | undefined;
+
+  /**
+   * @generated from field: optional string display_name = 2;
+   */
+  displayName?: string | undefined;
+};
+
+/**
+ * Describes the message kkstudio.environment.control.v8.Settings.
+ * Use `create(SettingsSchema)` to create a new message.
+ */
+export const SettingsSchema: GenMessage<Settings> = /*@__PURE__*/
+  messageDesc(file_control, 2);
+
+/**
+ * @generated from message kkstudio.environment.control.v8.ResourceBudgets
+ */
+export type ResourceBudgets = Message<"kkstudio.environment.control.v8.ResourceBudgets"> & {
+  /**
+   * @generated from field: optional int64 max_resource_bytes = 1;
+   */
+  maxResourceBytes?: bigint | undefined;
+
+  /**
+   * @generated from field: optional int64 temporary_resource_ttl_seconds = 2;
+   */
+  temporaryResourceTtlSeconds?: bigint | undefined;
+
+  /**
+   * @generated from field: optional int64 temporary_resource_cleanup_interval_seconds = 3;
+   */
+  temporaryResourceCleanupIntervalSeconds?: bigint | undefined;
+};
+
+/**
+ * Describes the message kkstudio.environment.control.v8.ResourceBudgets.
+ * Use `create(ResourceBudgetsSchema)` to create a new message.
+ */
+export const ResourceBudgetsSchema: GenMessage<ResourceBudgets> = /*@__PURE__*/
+  messageDesc(file_control, 3);
+
+/**
+ * @generated from message kkstudio.environment.control.v8.Ready
+ */
+export type Ready = Message<"kkstudio.environment.control.v8.Ready"> & {
+  /**
+   * @generated from field: optional int32 capabilities_version = 1;
+   */
+  capabilitiesVersion?: number | undefined;
+
+  /**
+   * @generated from field: optional string daemon_version = 2;
+   */
+  daemonVersion?: string | undefined;
+
+  /**
+   * @generated from field: kkstudio.environment.control.v8.EnvironmentInfo environment = 3;
+   */
+  environment?: EnvironmentInfo | undefined;
+
+  /**
+   * @generated from field: kkstudio.environment.control.v8.RuntimeSnapshot runtime_status = 4;
+   */
+  runtimeStatus?: RuntimeSnapshot | undefined;
+};
+
+/**
+ * Describes the message kkstudio.environment.control.v8.Ready.
+ * Use `create(ReadySchema)` to create a new message.
+ */
+export const ReadySchema: GenMessage<Ready> = /*@__PURE__*/
+  messageDesc(file_control, 4);
+
+/**
+ * @generated from message kkstudio.environment.control.v8.EnvironmentInfo
+ */
+export type EnvironmentInfo = Message<"kkstudio.environment.control.v8.EnvironmentInfo"> & {
+  /**
+   * @generated from field: kkstudio.environment.control.v8.OperatingSystem operating_system = 1;
+   */
+  operatingSystem: OperatingSystem;
+
+  /**
+   * @generated from field: kkstudio.environment.control.v8.Architecture architecture = 2;
+   */
+  architecture: Architecture;
+
+  /**
+   * @generated from field: optional string time_zone = 3;
+   */
+  timeZone?: string | undefined;
+
+  /**
+   * @generated from field: optional string user_name = 4;
+   */
+  userName?: string | undefined;
+
+  /**
+   * @generated from field: optional string home_directory = 5;
+   */
+  homeDirectory?: string | undefined;
+
+  /**
+   * @generated from field: optional string note = 6;
+   */
+  note?: string | undefined;
+
+  /**
+   * @generated from field: optional string temp_directory = 7;
+   */
+  tempDirectory?: string | undefined;
+};
+
+/**
+ * Describes the message kkstudio.environment.control.v8.EnvironmentInfo.
+ * Use `create(EnvironmentInfoSchema)` to create a new message.
+ */
+export const EnvironmentInfoSchema: GenMessage<EnvironmentInfo> = /*@__PURE__*/
+  messageDesc(file_control, 5);
+
+/**
+ * @generated from message kkstudio.environment.control.v8.Heartbeat
+ */
+export type Heartbeat = Message<"kkstudio.environment.control.v8.Heartbeat"> & {
+  /**
+   * @generated from field: kkstudio.environment.control.v8.RuntimeSnapshot runtime_status = 1;
+   */
+  runtimeStatus?: RuntimeSnapshot | undefined;
+
+  /**
+   * @generated from field: optional int64 ide_lease_round = 2;
+   */
+  ideLeaseRound?: bigint | undefined;
+};
+
+/**
+ * Describes the message kkstudio.environment.control.v8.Heartbeat.
+ * Use `create(HeartbeatSchema)` to create a new message.
+ */
+export const HeartbeatSchema: GenMessage<Heartbeat> = /*@__PURE__*/
+  messageDesc(file_control, 6);
+
+/**
+ * @generated from message kkstudio.environment.control.v8.RuntimeStatus
+ */
+export type RuntimeStatus = Message<"kkstudio.environment.control.v8.RuntimeStatus"> & {
+  /**
+   * @generated from field: kkstudio.environment.control.v8.RuntimeSnapshot runtime_status = 1;
+   */
+  runtimeStatus?: RuntimeSnapshot | undefined;
+};
+
+/**
+ * Describes the message kkstudio.environment.control.v8.RuntimeStatus.
+ * Use `create(RuntimeStatusSchema)` to create a new message.
+ */
+export const RuntimeStatusSchema: GenMessage<RuntimeStatus> = /*@__PURE__*/
+  messageDesc(file_control, 7);
+
+/**
+ * @generated from message kkstudio.environment.control.v8.RuntimeSnapshot
+ */
+export type RuntimeSnapshot = Message<"kkstudio.environment.control.v8.RuntimeSnapshot"> & {
+  /**
+   * @generated from field: optional int64 revision = 1;
+   */
+  revision?: bigint | undefined;
+
+  /**
+   * @generated from field: kkstudio.environment.control.v8.RuntimeBody status = 2;
+   */
+  status?: RuntimeBody | undefined;
+};
+
+/**
+ * Describes the message kkstudio.environment.control.v8.RuntimeSnapshot.
+ * Use `create(RuntimeSnapshotSchema)` to create a new message.
+ */
+export const RuntimeSnapshotSchema: GenMessage<RuntimeSnapshot> = /*@__PURE__*/
+  messageDesc(file_control, 8);
+
+/**
+ * @generated from message kkstudio.environment.control.v8.RuntimeBody
+ */
+export type RuntimeBody = Message<"kkstudio.environment.control.v8.RuntimeBody"> & {
+  /**
+   * @generated from field: optional string daemon_version = 1;
+   */
+  daemonVersion?: string | undefined;
+
+  /**
+   * @generated from field: kkstudio.environment.control.v8.UpdateProgress update = 2;
+   */
+  update?: UpdateProgress | undefined;
+};
+
+/**
+ * Describes the message kkstudio.environment.control.v8.RuntimeBody.
+ * Use `create(RuntimeBodySchema)` to create a new message.
+ */
+export const RuntimeBodySchema: GenMessage<RuntimeBody> = /*@__PURE__*/
+  messageDesc(file_control, 9);
+
+/**
+ * @generated from message kkstudio.environment.control.v8.UpdateProgress
+ */
+export type UpdateProgress = Message<"kkstudio.environment.control.v8.UpdateProgress"> & {
+  /**
+   * @generated from field: optional string target_version = 1;
+   */
+  targetVersion?: string | undefined;
+
+  /**
+   * @generated from field: optional int64 downloaded_bytes = 2;
+   */
+  downloadedBytes?: bigint | undefined;
+
+  /**
+   * @generated from field: optional int64 total_bytes = 3;
+   */
+  totalBytes?: bigint | undefined;
+};
+
+/**
+ * Describes the message kkstudio.environment.control.v8.UpdateProgress.
+ * Use `create(UpdateProgressSchema)` to create a new message.
+ */
+export const UpdateProgressSchema: GenMessage<UpdateProgress> = /*@__PURE__*/
+  messageDesc(file_control, 10);
 
 /**
  * @generated from message kkstudio.environment.control.v8.Invoke
@@ -102,7 +495,7 @@ export type Invoke = Message<"kkstudio.environment.control.v8.Invoke"> & {
  * Use `create(InvokeSchema)` to create a new message.
  */
 export const InvokeSchema: GenMessage<Invoke> = /*@__PURE__*/
-  messageDesc(file_control, 1);
+  messageDesc(file_control, 11);
 
 /**
  * @generated from message kkstudio.environment.control.v8.ExpectedFile
@@ -124,7 +517,41 @@ export type ExpectedFile = Message<"kkstudio.environment.control.v8.ExpectedFile
  * Use `create(ExpectedFileSchema)` to create a new message.
  */
 export const ExpectedFileSchema: GenMessage<ExpectedFile> = /*@__PURE__*/
-  messageDesc(file_control, 2);
+  messageDesc(file_control, 12);
+
+/**
+ * @generated from message kkstudio.environment.control.v8.Started
+ */
+export type Started = Message<"kkstudio.environment.control.v8.Started"> & {
+  /**
+   * @generated from field: optional bool replayed = 1;
+   */
+  replayed?: boolean | undefined;
+};
+
+/**
+ * Describes the message kkstudio.environment.control.v8.Started.
+ * Use `create(StartedSchema)` to create a new message.
+ */
+export const StartedSchema: GenMessage<Started> = /*@__PURE__*/
+  messageDesc(file_control, 13);
+
+/**
+ * @generated from message kkstudio.environment.control.v8.Progress
+ */
+export type Progress = Message<"kkstudio.environment.control.v8.Progress"> & {
+  /**
+   * @generated from field: optional kkstudio.environment.control.v8.CapabilityResult result = 1;
+   */
+  result?: CapabilityResult | undefined;
+};
+
+/**
+ * Describes the message kkstudio.environment.control.v8.Progress.
+ * Use `create(ProgressSchema)` to create a new message.
+ */
+export const ProgressSchema: GenMessage<Progress> = /*@__PURE__*/
+  messageDesc(file_control, 14);
 
 /**
  * @generated from message kkstudio.environment.control.v8.Completed
@@ -141,7 +568,7 @@ export type Completed = Message<"kkstudio.environment.control.v8.Completed"> & {
  * Use `create(CompletedSchema)` to create a new message.
  */
 export const CompletedSchema: GenMessage<Completed> = /*@__PURE__*/
-  messageDesc(file_control, 3);
+  messageDesc(file_control, 15);
 
 /**
  * @generated from message kkstudio.environment.control.v8.CapabilityResult
@@ -173,7 +600,7 @@ export type CapabilityResult = Message<"kkstudio.environment.control.v8.Capabili
  * Use `create(CapabilityResultSchema)` to create a new message.
  */
 export const CapabilityResultSchema: GenMessage<CapabilityResult> = /*@__PURE__*/
-  messageDesc(file_control, 4);
+  messageDesc(file_control, 16);
 
 /**
  * @generated from message kkstudio.environment.control.v8.Content
@@ -208,7 +635,7 @@ export type Content = Message<"kkstudio.environment.control.v8.Content"> & {
  * Use `create(ContentSchema)` to create a new message.
  */
 export const ContentSchema: GenMessage<Content> = /*@__PURE__*/
-  messageDesc(file_control, 5);
+  messageDesc(file_control, 17);
 
 /**
  * @generated from message kkstudio.environment.control.v8.TextContent
@@ -225,7 +652,7 @@ export type TextContent = Message<"kkstudio.environment.control.v8.TextContent">
  * Use `create(TextContentSchema)` to create a new message.
  */
 export const TextContentSchema: GenMessage<TextContent> = /*@__PURE__*/
-  messageDesc(file_control, 6);
+  messageDesc(file_control, 18);
 
 /**
  * @generated from message kkstudio.environment.control.v8.JsonContent
@@ -242,7 +669,7 @@ export type JsonContent = Message<"kkstudio.environment.control.v8.JsonContent">
  * Use `create(JsonContentSchema)` to create a new message.
  */
 export const JsonContentSchema: GenMessage<JsonContent> = /*@__PURE__*/
-  messageDesc(file_control, 7);
+  messageDesc(file_control, 19);
 
 /**
  * @generated from message kkstudio.environment.control.v8.ResourceContent
@@ -284,7 +711,80 @@ export type ResourceContent = Message<"kkstudio.environment.control.v8.ResourceC
  * Use `create(ResourceContentSchema)` to create a new message.
  */
 export const ResourceContentSchema: GenMessage<ResourceContent> = /*@__PURE__*/
-  messageDesc(file_control, 8);
+  messageDesc(file_control, 20);
+
+/**
+ * @generated from message kkstudio.environment.control.v8.Failed
+ */
+export type Failed = Message<"kkstudio.environment.control.v8.Failed"> & {
+  /**
+   * @generated from field: optional string message = 1;
+   */
+  message?: string | undefined;
+};
+
+/**
+ * Describes the message kkstudio.environment.control.v8.Failed.
+ * Use `create(FailedSchema)` to create a new message.
+ */
+export const FailedSchema: GenMessage<Failed> = /*@__PURE__*/
+  messageDesc(file_control, 21);
+
+/**
+ * @generated from message kkstudio.environment.control.v8.Cancel
+ */
+export type Cancel = Message<"kkstudio.environment.control.v8.Cancel"> & {
+};
+
+/**
+ * Describes the message kkstudio.environment.control.v8.Cancel.
+ * Use `create(CancelSchema)` to create a new message.
+ */
+export const CancelSchema: GenMessage<Cancel> = /*@__PURE__*/
+  messageDesc(file_control, 22);
+
+/**
+ * @generated from message kkstudio.environment.control.v8.Cancelled
+ */
+export type Cancelled = Message<"kkstudio.environment.control.v8.Cancelled"> & {
+  /**
+   * @generated from field: optional string reason = 1;
+   */
+  reason?: string | undefined;
+};
+
+/**
+ * Describes the message kkstudio.environment.control.v8.Cancelled.
+ * Use `create(CancelledSchema)` to create a new message.
+ */
+export const CancelledSchema: GenMessage<Cancelled> = /*@__PURE__*/
+  messageDesc(file_control, 23);
+
+/**
+ * @generated from message kkstudio.environment.control.v8.Recover
+ */
+export type Recover = Message<"kkstudio.environment.control.v8.Recover"> & {
+};
+
+/**
+ * Describes the message kkstudio.environment.control.v8.Recover.
+ * Use `create(RecoverSchema)` to create a new message.
+ */
+export const RecoverSchema: GenMessage<Recover> = /*@__PURE__*/
+  messageDesc(file_control, 24);
+
+/**
+ * @generated from message kkstudio.environment.control.v8.RecoverNotFound
+ */
+export type RecoverNotFound = Message<"kkstudio.environment.control.v8.RecoverNotFound"> & {
+};
+
+/**
+ * Describes the message kkstudio.environment.control.v8.RecoverNotFound.
+ * Use `create(RecoverNotFoundSchema)` to create a new message.
+ */
+export const RecoverNotFoundSchema: GenMessage<RecoverNotFound> = /*@__PURE__*/
+  messageDesc(file_control, 25);
 
 /**
  * @generated from message kkstudio.environment.control.v8.ExecutionExited
@@ -297,17 +797,487 @@ export type ExecutionExited = Message<"kkstudio.environment.control.v8.Execution
  * Use `create(ExecutionExitedSchema)` to create a new message.
  */
 export const ExecutionExitedSchema: GenMessage<ExecutionExited> = /*@__PURE__*/
-  messageDesc(file_control, 9);
+  messageDesc(file_control, 26);
+
+/**
+ * @generated from message kkstudio.environment.control.v8.ResourceUploadRequest
+ */
+export type ResourceUploadRequest = Message<"kkstudio.environment.control.v8.ResourceUploadRequest"> & {
+  /**
+   * @generated from field: optional string transfer_id = 1;
+   */
+  transferId?: string | undefined;
+
+  /**
+   * @generated from field: optional string media_type = 2;
+   */
+  mediaType?: string | undefined;
+
+  /**
+   * @generated from field: optional string name = 3;
+   */
+  name?: string | undefined;
+
+  /**
+   * @generated from field: optional int64 size = 4;
+   */
+  size?: bigint | undefined;
+
+  /**
+   * @generated from field: optional string sha256 = 5;
+   */
+  sha256?: string | undefined;
+};
+
+/**
+ * Describes the message kkstudio.environment.control.v8.ResourceUploadRequest.
+ * Use `create(ResourceUploadRequestSchema)` to create a new message.
+ */
+export const ResourceUploadRequestSchema: GenMessage<ResourceUploadRequest> = /*@__PURE__*/
+  messageDesc(file_control, 27);
+
+/**
+ * @generated from message kkstudio.environment.control.v8.ResourceUploadTicket
+ */
+export type ResourceUploadTicket = Message<"kkstudio.environment.control.v8.ResourceUploadTicket"> & {
+  /**
+   * @generated from field: optional string transfer_id = 1;
+   */
+  transferId?: string | undefined;
+
+  /**
+   * @generated from field: kkstudio.environment.control.v8.TicketState state = 2;
+   */
+  state: TicketState;
+
+  /**
+   * @generated from field: optional string upload_id = 3;
+   */
+  uploadId?: string | undefined;
+
+  /**
+   * @generated from field: kkstudio.environment.control.v8.PresignedPut presigned_put = 4;
+   */
+  presignedPut?: PresignedPut | undefined;
+
+  /**
+   * @generated from field: optional string message = 5;
+   */
+  message?: string | undefined;
+};
+
+/**
+ * Describes the message kkstudio.environment.control.v8.ResourceUploadTicket.
+ * Use `create(ResourceUploadTicketSchema)` to create a new message.
+ */
+export const ResourceUploadTicketSchema: GenMessage<ResourceUploadTicket> = /*@__PURE__*/
+  messageDesc(file_control, 28);
+
+/**
+ * @generated from message kkstudio.environment.control.v8.PresignedPut
+ */
+export type PresignedPut = Message<"kkstudio.environment.control.v8.PresignedPut"> & {
+  /**
+   * @generated from field: optional string method = 1;
+   */
+  method?: string | undefined;
+
+  /**
+   * @generated from field: optional string url = 2;
+   */
+  url?: string | undefined;
+
+  /**
+   * @generated from field: map<string, string> headers = 3;
+   */
+  headers: { [key: string]: string };
+
+  /**
+   * @generated from field: optional string expires_at = 4;
+   */
+  expiresAt?: string | undefined;
+};
+
+/**
+ * Describes the message kkstudio.environment.control.v8.PresignedPut.
+ * Use `create(PresignedPutSchema)` to create a new message.
+ */
+export const PresignedPutSchema: GenMessage<PresignedPut> = /*@__PURE__*/
+  messageDesc(file_control, 29);
+
+/**
+ * @generated from message kkstudio.environment.control.v8.ResourceUploadCommit
+ */
+export type ResourceUploadCommit = Message<"kkstudio.environment.control.v8.ResourceUploadCommit"> & {
+  /**
+   * @generated from field: optional string transfer_id = 1;
+   */
+  transferId?: string | undefined;
+
+  /**
+   * @generated from field: optional string upload_id = 2;
+   */
+  uploadId?: string | undefined;
+};
+
+/**
+ * Describes the message kkstudio.environment.control.v8.ResourceUploadCommit.
+ * Use `create(ResourceUploadCommitSchema)` to create a new message.
+ */
+export const ResourceUploadCommitSchema: GenMessage<ResourceUploadCommit> = /*@__PURE__*/
+  messageDesc(file_control, 30);
+
+/**
+ * @generated from message kkstudio.environment.control.v8.TemporaryResourcePolicy
+ */
+export type TemporaryResourcePolicy = Message<"kkstudio.environment.control.v8.TemporaryResourcePolicy"> & {
+  /**
+   * @generated from field: optional int64 temporary_resource_ttl_seconds = 1;
+   */
+  temporaryResourceTtlSeconds?: bigint | undefined;
+
+  /**
+   * @generated from field: optional int64 temporary_resource_cleanup_interval_seconds = 2;
+   */
+  temporaryResourceCleanupIntervalSeconds?: bigint | undefined;
+};
+
+/**
+ * Describes the message kkstudio.environment.control.v8.TemporaryResourcePolicy.
+ * Use `create(TemporaryResourcePolicySchema)` to create a new message.
+ */
+export const TemporaryResourcePolicySchema: GenMessage<TemporaryResourcePolicy> = /*@__PURE__*/
+  messageDesc(file_control, 31);
+
+/**
+ * @generated from message kkstudio.environment.control.v8.Update
+ */
+export type Update = Message<"kkstudio.environment.control.v8.Update"> & {
+  /**
+   * @generated from field: optional string operation_id = 1;
+   */
+  operationId?: string | undefined;
+
+  /**
+   * @generated from field: optional string target_version = 2;
+   */
+  targetVersion?: string | undefined;
+
+  /**
+   * @generated from field: optional string artifact_url = 3;
+   */
+  artifactUrl?: string | undefined;
+
+  /**
+   * @generated from field: optional string artifact_sha256 = 4;
+   */
+  artifactSha256?: string | undefined;
+};
+
+/**
+ * Describes the message kkstudio.environment.control.v8.Update.
+ * Use `create(UpdateSchema)` to create a new message.
+ */
+export const UpdateSchema: GenMessage<Update> = /*@__PURE__*/
+  messageDesc(file_control, 32);
+
+/**
+ * @generated from message kkstudio.environment.control.v8.UpdateResult
+ */
+export type UpdateResult = Message<"kkstudio.environment.control.v8.UpdateResult"> & {
+  /**
+   * @generated from field: optional string operation_id = 1;
+   */
+  operationId?: string | undefined;
+
+  /**
+   * @generated from field: kkstudio.environment.control.v8.UpdatePhase phase = 2;
+   */
+  phase: UpdatePhase;
+
+  /**
+   * @generated from field: optional string message = 3;
+   */
+  message?: string | undefined;
+};
+
+/**
+ * Describes the message kkstudio.environment.control.v8.UpdateResult.
+ * Use `create(UpdateResultSchema)` to create a new message.
+ */
+export const UpdateResultSchema: GenMessage<UpdateResult> = /*@__PURE__*/
+  messageDesc(file_control, 33);
+
+/**
+ * @generated from message kkstudio.environment.control.v8.IdeCommand
+ */
+export type IdeCommand = Message<"kkstudio.environment.control.v8.IdeCommand"> & {
+  /**
+   * @generated from field: kkstudio.environment.control.v8.IdeAction action = 1;
+   */
+  action: IdeAction;
+
+  /**
+   * @generated from field: optional string view_id = 2;
+   */
+  viewId?: string | undefined;
+
+  /**
+   * @generated from field: optional string document_id = 3;
+   */
+  documentId?: string | undefined;
+
+  /**
+   * @generated from field: optional string event_node_id = 4;
+   */
+  eventNodeId?: string | undefined;
+
+  /**
+   * @generated from field: optional string connection_id = 5;
+   */
+  connectionId?: string | undefined;
+
+  /**
+   * @generated from field: optional string claim_id = 6;
+   */
+  claimId?: string | undefined;
+
+  /**
+   * @generated from field: optional int64 binding_epoch = 7;
+   */
+  bindingEpoch?: bigint | undefined;
+
+  /**
+   * @generated from field: kkstudio.environment.control.v8.IdeOpenMode mode = 8;
+   */
+  mode: IdeOpenMode;
+
+  /**
+   * @generated from field: optional string directory = 9;
+   */
+  directory?: string | undefined;
+
+  /**
+   * @generated from field: optional bool discard = 10;
+   */
+  discard?: boolean | undefined;
+};
+
+/**
+ * Describes the message kkstudio.environment.control.v8.IdeCommand.
+ * Use `create(IdeCommandSchema)` to create a new message.
+ */
+export const IdeCommandSchema: GenMessage<IdeCommand> = /*@__PURE__*/
+  messageDesc(file_control, 34);
+
+/**
+ * @generated from message kkstudio.environment.control.v8.IdeResult
+ */
+export type IdeResult = Message<"kkstudio.environment.control.v8.IdeResult"> & {
+  /**
+   * @generated from field: optional bool ok = 1;
+   */
+  ok?: boolean | undefined;
+
+  /**
+   * @generated from field: optional string code = 2;
+   */
+  code?: string | undefined;
+
+  /**
+   * @generated from field: optional string message = 3;
+   */
+  message?: string | undefined;
+
+  /**
+   * @generated from field: optional string view_id = 4;
+   */
+  viewId?: string | undefined;
+
+  /**
+   * @generated from field: optional string document_id = 5;
+   */
+  documentId?: string | undefined;
+
+  /**
+   * @generated from field: optional string event_node_id = 6;
+   */
+  eventNodeId?: string | undefined;
+
+  /**
+   * @generated from field: optional string connection_id = 7;
+   */
+  connectionId?: string | undefined;
+
+  /**
+   * @generated from field: optional string claim_id = 8;
+   */
+  claimId?: string | undefined;
+
+  /**
+   * @generated from field: optional int64 binding_epoch = 9;
+   */
+  bindingEpoch?: bigint | undefined;
+
+  /**
+   * @generated from field: optional string directory = 10;
+   */
+  directory?: string | undefined;
+
+  /**
+   * @generated from field: optional string workspace_path = 11;
+   */
+  workspacePath?: string | undefined;
+
+  /**
+   * @generated from field: repeated kkstudio.environment.control.v8.IdeViewSummary views = 12;
+   */
+  views: IdeViewSummary[];
+};
+
+/**
+ * Describes the message kkstudio.environment.control.v8.IdeResult.
+ * Use `create(IdeResultSchema)` to create a new message.
+ */
+export const IdeResultSchema: GenMessage<IdeResult> = /*@__PURE__*/
+  messageDesc(file_control, 35);
+
+/**
+ * @generated from message kkstudio.environment.control.v8.IdeViewSummary
+ */
+export type IdeViewSummary = Message<"kkstudio.environment.control.v8.IdeViewSummary"> & {
+  /**
+   * @generated from field: optional string view_id = 1;
+   */
+  viewId?: string | undefined;
+
+  /**
+   * @generated from field: optional string document_id = 2;
+   */
+  documentId?: string | undefined;
+
+  /**
+   * @generated from field: optional string event_node_id = 3;
+   */
+  eventNodeId?: string | undefined;
+
+  /**
+   * @generated from field: optional string connection_id = 4;
+   */
+  connectionId?: string | undefined;
+
+  /**
+   * @generated from field: optional string claim_id = 5;
+   */
+  claimId?: string | undefined;
+
+  /**
+   * @generated from field: optional int64 binding_epoch = 6;
+   */
+  bindingEpoch?: bigint | undefined;
+
+  /**
+   * @generated from field: optional string directory = 7;
+   */
+  directory?: string | undefined;
+
+  /**
+   * @generated from field: optional string workspace_path = 8;
+   */
+  workspacePath?: string | undefined;
+
+  /**
+   * @generated from field: kkstudio.environment.control.v8.IdeViewState state = 9;
+   */
+  state: IdeViewState;
+};
+
+/**
+ * Describes the message kkstudio.environment.control.v8.IdeViewSummary.
+ * Use `create(IdeViewSummarySchema)` to create a new message.
+ */
+export const IdeViewSummarySchema: GenMessage<IdeViewSummary> = /*@__PURE__*/
+  messageDesc(file_control, 36);
+
+/**
+ * @generated from message kkstudio.environment.control.v8.IdeLease
+ */
+export type IdeLease = Message<"kkstudio.environment.control.v8.IdeLease"> & {
+  /**
+   * @generated from field: optional int64 round = 1;
+   */
+  round?: bigint | undefined;
+
+  /**
+   * @generated from field: repeated kkstudio.environment.control.v8.IdeLeaseBinding bindings = 2;
+   */
+  bindings: IdeLeaseBinding[];
+};
+
+/**
+ * Describes the message kkstudio.environment.control.v8.IdeLease.
+ * Use `create(IdeLeaseSchema)` to create a new message.
+ */
+export const IdeLeaseSchema: GenMessage<IdeLease> = /*@__PURE__*/
+  messageDesc(file_control, 37);
+
+/**
+ * @generated from message kkstudio.environment.control.v8.IdeLeaseBinding
+ */
+export type IdeLeaseBinding = Message<"kkstudio.environment.control.v8.IdeLeaseBinding"> & {
+  /**
+   * @generated from field: optional string view_id = 1;
+   */
+  viewId?: string | undefined;
+
+  /**
+   * @generated from field: optional string document_id = 2;
+   */
+  documentId?: string | undefined;
+
+  /**
+   * @generated from field: optional int64 binding_epoch = 3;
+   */
+  bindingEpoch?: bigint | undefined;
+};
+
+/**
+ * Describes the message kkstudio.environment.control.v8.IdeLeaseBinding.
+ * Use `create(IdeLeaseBindingSchema)` to create a new message.
+ */
+export const IdeLeaseBindingSchema: GenMessage<IdeLeaseBinding> = /*@__PURE__*/
+  messageDesc(file_control, 38);
+
+/**
+ * @generated from message kkstudio.environment.control.v8.Error
+ */
+export type Error = Message<"kkstudio.environment.control.v8.Error"> & {
+  /**
+   * @generated from field: optional string message = 1;
+   */
+  message?: string | undefined;
+
+  /**
+   * @generated from field: kkstudio.environment.control.v8.ErrorCode code = 2;
+   */
+  code: ErrorCode;
+};
+
+/**
+ * Describes the message kkstudio.environment.control.v8.Error.
+ * Use `create(ErrorSchema)` to create a new message.
+ */
+export const ErrorSchema: GenMessage<Error> = /*@__PURE__*/
+  messageDesc(file_control, 39);
 
 /**
  * Daemon <-> Studio 控制协议 v8 的单一事实源。
  *
- * <p>当前检查点只冻结 INVOKE、COMPLETED 与 EXECUTION_EXITED；其它 v8 消息在各自切片加入，不在此
- * 伪造占位 payload。消息类型和 envelope payload 使用 v8 的最终字段号，后续增加消息不需要重编号。
+ * <p>wire 使用 protobuf binary，每条外层控制消息带 4 字节 big-endian 长度前缀（长度不含前缀，1..16 MiB）。
+ * 任意 JSON 载荷始终以原始 JSON string 承载，不映射为 Struct；解码只校验文本，不重新序列化。
  *
- * <p>wire 使用 protobuf binary，每条外层控制消息带 4 字节 big-endian 长度前缀（长度不含前缀）。
- * 任意 JSON 载荷始终以原始 JSON string 承载，不映射为 Struct；解码只校验文本，不重新序列化，
- * 因此指数、高精度小数和 -0 可以逐字保留。
+ * <p>HELLO/WELCOME/DATA_BIND 已删除：认证与版本在 HTTP 升级完成，WELCOME 的资源预算并入首条 SETTINGS。
+ * AGENT_COMMAND / AGENT_RESULT 只预留字段号，本切片不定义 Claude 载荷。
  *
  * @generated from enum kkstudio.environment.control.v8.MessageType
  */
@@ -318,9 +1288,39 @@ export enum MessageType {
   MESSAGE_TYPE_UNSPECIFIED = 0,
 
   /**
+   * @generated from enum value: SETTINGS = 1;
+   */
+  SETTINGS = 1,
+
+  /**
+   * @generated from enum value: READY = 2;
+   */
+  READY = 2,
+
+  /**
+   * @generated from enum value: HEARTBEAT = 3;
+   */
+  HEARTBEAT = 3,
+
+  /**
+   * @generated from enum value: RUNTIME_STATUS = 4;
+   */
+  RUNTIME_STATUS = 4,
+
+  /**
    * @generated from enum value: INVOKE = 5;
    */
   INVOKE = 5,
+
+  /**
+   * @generated from enum value: STARTED = 6;
+   */
+  STARTED = 6,
+
+  /**
+   * @generated from enum value: PROGRESS = 7;
+   */
+  PROGRESS = 7,
 
   /**
    * @generated from enum value: COMPLETED = 8;
@@ -328,9 +1328,84 @@ export enum MessageType {
   COMPLETED = 8,
 
   /**
+   * @generated from enum value: FAILED = 9;
+   */
+  FAILED = 9,
+
+  /**
+   * @generated from enum value: CANCEL = 10;
+   */
+  CANCEL = 10,
+
+  /**
+   * @generated from enum value: CANCELLED = 11;
+   */
+  CANCELLED = 11,
+
+  /**
+   * @generated from enum value: RECOVER = 12;
+   */
+  RECOVER = 12,
+
+  /**
+   * @generated from enum value: RECOVER_NOT_FOUND = 13;
+   */
+  RECOVER_NOT_FOUND = 13,
+
+  /**
    * @generated from enum value: EXECUTION_EXITED = 14;
    */
   EXECUTION_EXITED = 14,
+
+  /**
+   * @generated from enum value: RESOURCE_UPLOAD_REQUEST = 15;
+   */
+  RESOURCE_UPLOAD_REQUEST = 15,
+
+  /**
+   * @generated from enum value: RESOURCE_UPLOAD_TICKET = 16;
+   */
+  RESOURCE_UPLOAD_TICKET = 16,
+
+  /**
+   * @generated from enum value: RESOURCE_UPLOAD_COMMIT = 17;
+   */
+  RESOURCE_UPLOAD_COMMIT = 17,
+
+  /**
+   * @generated from enum value: TEMPORARY_RESOURCE_POLICY = 18;
+   */
+  TEMPORARY_RESOURCE_POLICY = 18,
+
+  /**
+   * @generated from enum value: UPDATE = 19;
+   */
+  UPDATE = 19,
+
+  /**
+   * @generated from enum value: UPDATE_RESULT = 20;
+   */
+  UPDATE_RESULT = 20,
+
+  /**
+   * @generated from enum value: IDE_COMMAND = 21;
+   */
+  IDE_COMMAND = 21,
+
+  /**
+   * @generated from enum value: IDE_RESULT = 22;
+   */
+  IDE_RESULT = 22,
+
+  /**
+   * @generated from enum value: IDE_LEASE = 23;
+   */
+  IDE_LEASE = 23,
+
+  /**
+   * @generated from enum value: ERROR = 24;
+   */
+  ERROR = 24,
 }
 
 /**
@@ -338,3 +1413,251 @@ export enum MessageType {
  */
 export const MessageTypeSchema: GenEnum<MessageType> = /*@__PURE__*/
   enumDesc(file_control, 0);
+
+/**
+ * @generated from enum kkstudio.environment.control.v8.OperatingSystem
+ */
+export enum OperatingSystem {
+  /**
+   * @generated from enum value: OPERATING_SYSTEM_UNSPECIFIED = 0;
+   */
+  OPERATING_SYSTEM_UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: WINDOWS = 1;
+   */
+  WINDOWS = 1,
+
+  /**
+   * @generated from enum value: WSL = 2;
+   */
+  WSL = 2,
+
+  /**
+   * @generated from enum value: LINUX = 3;
+   */
+  LINUX = 3,
+
+  /**
+   * @generated from enum value: MACOS = 4;
+   */
+  MACOS = 4,
+}
+
+/**
+ * Describes the enum kkstudio.environment.control.v8.OperatingSystem.
+ */
+export const OperatingSystemSchema: GenEnum<OperatingSystem> = /*@__PURE__*/
+  enumDesc(file_control, 1);
+
+/**
+ * @generated from enum kkstudio.environment.control.v8.Architecture
+ */
+export enum Architecture {
+  /**
+   * @generated from enum value: ARCHITECTURE_UNSPECIFIED = 0;
+   */
+  ARCHITECTURE_UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: AMD64 = 1;
+   */
+  AMD64 = 1,
+
+  /**
+   * @generated from enum value: ARM64 = 2;
+   */
+  ARM64 = 2,
+}
+
+/**
+ * Describes the enum kkstudio.environment.control.v8.Architecture.
+ */
+export const ArchitectureSchema: GenEnum<Architecture> = /*@__PURE__*/
+  enumDesc(file_control, 2);
+
+/**
+ * @generated from enum kkstudio.environment.control.v8.TicketState
+ */
+export enum TicketState {
+  /**
+   * @generated from enum value: TICKET_STATE_UNSPECIFIED = 0;
+   */
+  TICKET_STATE_UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: TICKET_PENDING = 1;
+   */
+  TICKET_PENDING = 1,
+
+  /**
+   * @generated from enum value: TICKET_READY = 2;
+   */
+  TICKET_READY = 2,
+
+  /**
+   * @generated from enum value: TICKET_FAILED = 3;
+   */
+  TICKET_FAILED = 3,
+}
+
+/**
+ * Describes the enum kkstudio.environment.control.v8.TicketState.
+ */
+export const TicketStateSchema: GenEnum<TicketState> = /*@__PURE__*/
+  enumDesc(file_control, 3);
+
+/**
+ * @generated from enum kkstudio.environment.control.v8.UpdatePhase
+ */
+export enum UpdatePhase {
+  /**
+   * @generated from enum value: UPDATE_PHASE_UNSPECIFIED = 0;
+   */
+  UPDATE_PHASE_UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: UPDATE_ACCEPTED = 1;
+   */
+  UPDATE_ACCEPTED = 1,
+
+  /**
+   * @generated from enum value: UPDATE_PREPARED = 2;
+   */
+  UPDATE_PREPARED = 2,
+
+  /**
+   * @generated from enum value: UPDATE_FAILED = 3;
+   */
+  UPDATE_FAILED = 3,
+}
+
+/**
+ * Describes the enum kkstudio.environment.control.v8.UpdatePhase.
+ */
+export const UpdatePhaseSchema: GenEnum<UpdatePhase> = /*@__PURE__*/
+  enumDesc(file_control, 4);
+
+/**
+ * @generated from enum kkstudio.environment.control.v8.ErrorCode
+ */
+export enum ErrorCode {
+  /**
+   * @generated from enum value: ERROR_CODE_UNSPECIFIED = 0;
+   */
+  ERROR_CODE_UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: RETRY_LATER = 1;
+   */
+  RETRY_LATER = 1,
+
+  /**
+   * @generated from enum value: REGISTRATION_REJECTED = 2;
+   */
+  REGISTRATION_REJECTED = 2,
+}
+
+/**
+ * Describes the enum kkstudio.environment.control.v8.ErrorCode.
+ */
+export const ErrorCodeSchema: GenEnum<ErrorCode> = /*@__PURE__*/
+  enumDesc(file_control, 5);
+
+/**
+ * @generated from enum kkstudio.environment.control.v8.IdeAction
+ */
+export enum IdeAction {
+  /**
+   * @generated from enum value: IDE_ACTION_UNSPECIFIED = 0;
+   */
+  IDE_ACTION_UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: OPEN_VIEW = 1;
+   */
+  OPEN_VIEW = 1,
+
+  /**
+   * @generated from enum value: CHANGE_DIRECTORY = 2;
+   */
+  CHANGE_DIRECTORY = 2,
+
+  /**
+   * @generated from enum value: FOCUS_TERMINAL = 3;
+   */
+  FOCUS_TERMINAL = 3,
+
+  /**
+   * @generated from enum value: CLOSE_VIEW = 4;
+   */
+  CLOSE_VIEW = 4,
+
+  /**
+   * @generated from enum value: DETACH_VIEW = 5;
+   */
+  DETACH_VIEW = 5,
+
+  /**
+   * @generated from enum value: LIST_VIEWS = 6;
+   */
+  LIST_VIEWS = 6,
+}
+
+/**
+ * Describes the enum kkstudio.environment.control.v8.IdeAction.
+ */
+export const IdeActionSchema: GenEnum<IdeAction> = /*@__PURE__*/
+  enumDesc(file_control, 6);
+
+/**
+ * @generated from enum kkstudio.environment.control.v8.IdeOpenMode
+ */
+export enum IdeOpenMode {
+  /**
+   * @generated from enum value: IDE_OPEN_MODE_UNSPECIFIED = 0;
+   */
+  IDE_OPEN_MODE_UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: CREATE = 1;
+   */
+  CREATE = 1,
+
+  /**
+   * @generated from enum value: RESUME = 2;
+   */
+  RESUME = 2,
+}
+
+/**
+ * Describes the enum kkstudio.environment.control.v8.IdeOpenMode.
+ */
+export const IdeOpenModeSchema: GenEnum<IdeOpenMode> = /*@__PURE__*/
+  enumDesc(file_control, 7);
+
+/**
+ * @generated from enum kkstudio.environment.control.v8.IdeViewState
+ */
+export enum IdeViewState {
+  /**
+   * @generated from enum value: IDE_VIEW_STATE_UNSPECIFIED = 0;
+   */
+  IDE_VIEW_STATE_UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: OPEN = 1;
+   */
+  OPEN = 1,
+
+  /**
+   * @generated from enum value: CLOSING = 2;
+   */
+  CLOSING = 2,
+}
+
+/**
+ * Describes the enum kkstudio.environment.control.v8.IdeViewState.
+ */
+export const IdeViewStateSchema: GenEnum<IdeViewState> = /*@__PURE__*/
+  enumDesc(file_control, 8);

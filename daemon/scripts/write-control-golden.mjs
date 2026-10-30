@@ -3,20 +3,12 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { decodeBinary, encodeBinary } from '../dist/protocol/control/codec.js'
-import {
-  completedEnvelope,
-  executionExitedEnvelope,
-  invokeEnvelope,
-} from '../test/protocol/control-fixtures.mjs'
+import { GOLDEN_FIXTURES } from '../test/protocol/control-fixtures.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const GOLDEN = resolve(HERE, '../../harness/environment/src/main/protocol/golden')
 
-const fixtures = [
-  ['invoke.bin', invokeEnvelope()],
-  ['completed.bin', completedEnvelope()],
-  ['execution-exited.bin', executionExitedEnvelope()],
-]
+const fixtures = GOLDEN_FIXTURES.map(([name, factory]) => [name, factory()])
 
 mkdirSync(GOLDEN, { recursive: true })
 for (const [name, envelope] of fixtures) {
