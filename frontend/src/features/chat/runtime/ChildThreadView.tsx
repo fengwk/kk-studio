@@ -111,13 +111,13 @@ export interface ConnectedThreadViewProps {
 
 /**
  * 独立/子代理视图连接入口：只在自己的组件入口获取一次投影，向下传递给 ThreadView，
- * 避免外层父组件重复订阅。
+ * 避免外层父组件重复订阅。默认只读。
  */
 export function ConnectedThreadView({
   threadId,
   environments,
   navigation,
-  readOnly = false,
+  readOnly = true,
   selected = true,
   active = true,
   onPresentation,
@@ -138,6 +138,3 @@ export function ConnectedThreadView({
     />
   )
 }
-
-/** 连接入口组件：对外保留 ChildThreadView 明确入口 */
-export const ChildThreadView = ConnectedThreadView
