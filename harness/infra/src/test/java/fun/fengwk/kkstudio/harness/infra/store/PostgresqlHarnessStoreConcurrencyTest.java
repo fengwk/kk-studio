@@ -442,7 +442,7 @@ class PostgresqlHarnessStoreConcurrencyTest {
         store,
         tx -> {
           tx.threads().lock(baseline.threadId()).orElseThrow();
-          builtin(tx)
+          builtin(store, tx)
               .insertModelInvocation(
                   modelInvocation(
                       modelId,
@@ -470,7 +470,7 @@ class PostgresqlHarnessStoreConcurrencyTest {
               () ->
                   store.transaction(
                       tx -> {
-                        builtin(tx).lockModelInvocation(modelId).orElseThrow();
+                        builtin(store, tx).lockModelInvocation(modelId).orElseThrow();
                         modelLocked.countDown();
                         await(continueToWork);
                         return tx.work().lockClaimed(claim).isPresent();
@@ -497,7 +497,7 @@ class PostgresqlHarnessStoreConcurrencyTest {
     }
 
     assertTrue(store.transaction(tx -> tx.threads().find(baseline.threadId())).isEmpty());
-    assertTrue(store.transaction(tx -> builtin(tx).findModelInvocation(modelId)).isEmpty());
+    assertTrue(store.transaction(tx -> builtin(store, tx).findModelInvocation(modelId)).isEmpty());
     assertTrue(store.transaction(tx -> tx.work().find(target)).isEmpty());
   }
 
@@ -518,7 +518,7 @@ class PostgresqlHarnessStoreConcurrencyTest {
         store,
         tx -> {
           tx.threads().lock(baseline.threadId()).orElseThrow();
-          builtin(tx)
+          builtin(store, tx)
               .insertModelInvocation(
                   new ModelInvocation(
                       id(1L),
@@ -535,12 +535,12 @@ class PostgresqlHarnessStoreConcurrencyTest {
                       List.of(),
                       T1,
                       T1));
-          ModelInvocation model = builtin(tx).lockModelInvocation(id(1L)).orElseThrow();
-          builtin(tx).updateModelInvocation(model.markRunning(T1));
-          model = builtin(tx).lockModelInvocation(id(1L)).orElseThrow();
-          builtin(tx).updateModelInvocation(model.succeed(response, T1));
-          model = builtin(tx).lockModelInvocation(id(1L)).orElseThrow();
-          builtin(tx).updateModelInvocation(model.attachResultEntry(assistantEntryId, T1));
+          ModelInvocation model = builtin(store, tx).lockModelInvocation(id(1L)).orElseThrow();
+          builtin(store, tx).updateModelInvocation(model.markRunning(T1));
+          model = builtin(store, tx).lockModelInvocation(id(1L)).orElseThrow();
+          builtin(store, tx).updateModelInvocation(model.succeed(response, T1));
+          model = builtin(store, tx).lockModelInvocation(id(1L)).orElseThrow();
+          builtin(store, tx).updateModelInvocation(model.attachResultEntry(assistantEntryId, T1));
         });
     ToolInvocation first =
         toolInvocation(

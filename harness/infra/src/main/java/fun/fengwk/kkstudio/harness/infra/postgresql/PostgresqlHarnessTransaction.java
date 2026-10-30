@@ -57,7 +57,7 @@ import java.util.function.Supplier;
  * <p><b>严格锁序防御（Lock Ranking &amp; Ordering）：</b> 所有跨实体并发加锁严格遵守单向递增的层级排序：
  *
  * <pre>{@code
- * SESSION -> THREAD -> COMMAND -> MODEL -> TOOL -> WORK
+ * SESSION -> THREAD -> COMMAND -> DRIVER -> TOOL -> WORK
  * }</pre>
  *
  * 在会批量获取同阶锁的路径中，按稳定顺序发起数据库加锁：

@@ -134,7 +134,7 @@ public abstract class HarnessStoreInvocationContract {
         store,
         tx -> {
           tx.threads().lock(baseline.threadId());
-          builtin(tx)
+          builtin(store, tx)
               .insertModelInvocation(
                   modelInvocation(
                       TestIds.id(101),
@@ -144,14 +144,17 @@ public abstract class HarnessStoreInvocationContract {
                       ModelInvocationStatus.READY,
                       null,
                       T1));
-          ModelInvocation current = builtin(tx).lockModelInvocation(TestIds.id(101)).orElseThrow();
-          builtin(tx).updateModelInvocation(current.markRunning(T2));
-          current = builtin(tx).lockModelInvocation(TestIds.id(101)).orElseThrow();
-          builtin(tx).updateModelInvocation(current.succeed(response, null, replayState, T2));
+          ModelInvocation current =
+              builtin(store, tx).lockModelInvocation(TestIds.id(101)).orElseThrow();
+          builtin(store, tx).updateModelInvocation(current.markRunning(T2));
+          current = builtin(store, tx).lockModelInvocation(TestIds.id(101)).orElseThrow();
+          builtin(store, tx)
+              .updateModelInvocation(current.succeed(response, null, replayState, T2));
         });
 
     ModelInvocation foundModel =
-        store.transaction(tx -> builtin(tx).findModelInvocation(TestIds.id(101)).orElseThrow());
+        store.transaction(
+            tx -> builtin(store, tx).findModelInvocation(TestIds.id(101)).orElseThrow());
     assertEquals(replayState, foundModel.providerReplayState());
 
     // 2. 插入按照 turn 协议合法的 user entry 与带有 matching replayState 的 assistant entry
@@ -189,12 +192,14 @@ public abstract class HarnessStoreInvocationContract {
     inTransaction(
         store,
         tx -> {
-          ModelInvocation current = builtin(tx).lockModelInvocation(TestIds.id(101)).orElseThrow();
-          builtin(tx).updateModelInvocation(current.attachResultEntry(assistantEntryId, T3));
+          ModelInvocation current =
+              builtin(store, tx).lockModelInvocation(TestIds.id(101)).orElseThrow();
+          builtin(store, tx).updateModelInvocation(current.attachResultEntry(assistantEntryId, T3));
         });
 
     ModelInvocation foundAttached =
-        store.transaction(tx -> builtin(tx).findModelInvocation(TestIds.id(101)).orElseThrow());
+        store.transaction(
+            tx -> builtin(store, tx).findModelInvocation(TestIds.id(101)).orElseThrow());
     assertNull(foundAttached.providerReplayState());
     assertEquals(assistantEntryId, foundAttached.resultEntryId());
   }
@@ -245,7 +250,7 @@ public abstract class HarnessStoreInvocationContract {
                 store,
                 tx -> {
                   tx.threads().lock(baseline.threadId()).orElseThrow();
-                  builtin(tx).insertModelInvocation(nonCanonicalModel);
+                  builtin(store, tx).insertModelInvocation(nonCanonicalModel);
                 }));
 
     UUID assistantEntryId = seedAssistantAndModel();
@@ -286,7 +291,7 @@ public abstract class HarnessStoreInvocationContract {
         store,
         tx -> {
           tx.threads().lock(baseline.threadId());
-          builtin(tx)
+          builtin(store, tx)
               .insertModelInvocation(
                   modelInvocation(
                       TestIds.id(1),
@@ -304,7 +309,7 @@ public abstract class HarnessStoreInvocationContract {
                 store,
                 tx -> {
                   tx.threads().lock(baseline.threadId());
-                  builtin(tx)
+                  builtin(store, tx)
                       .insertModelInvocation(
                           modelInvocation(
                               TestIds.id(2),
@@ -319,14 +324,16 @@ public abstract class HarnessStoreInvocationContract {
         store
             .transaction(
                 tx ->
-                    builtin(tx)
+                    builtin(store, tx)
                         .findModelInvocationByTurn(
                             baseline.threadId(), baseline.turnStartEntryId()))
             .isPresent());
     assertTrue(
         store
             .transaction(
-                tx -> builtin(tx).findModelInvocationByTurn(baseline.threadId(), TestIds.id(42)))
+                tx ->
+                    builtin(store, tx)
+                        .findModelInvocationByTurn(baseline.threadId(), TestIds.id(42)))
             .isEmpty());
   }
 
@@ -337,7 +344,7 @@ public abstract class HarnessStoreInvocationContract {
         store,
         tx -> {
           tx.threads().lock(baseline.threadId());
-          builtin(tx)
+          builtin(store, tx)
               .insertModelInvocation(
                   modelInvocation(
                       TestIds.id(1),
@@ -362,14 +369,16 @@ public abstract class HarnessStoreInvocationContract {
     inTransaction(
         store,
         tx -> {
-          ModelInvocation model = builtin(tx).lockModelInvocation(TestIds.id(1)).orElseThrow();
+          ModelInvocation model =
+              builtin(store, tx).lockModelInvocation(TestIds.id(1)).orElseThrow();
           ModelInvocation running = model.markRunning(T2);
-          builtin(tx).updateModelInvocation(running);
-          builtin(tx).updateModelInvocation(running.retryReady(failure, T3));
+          builtin(store, tx).updateModelInvocation(running);
+          builtin(store, tx).updateModelInvocation(running.retryReady(failure, T3));
         });
 
     ModelInvocation stored =
-        store.transaction(tx -> builtin(tx).findModelInvocation(TestIds.id(1)).orElseThrow());
+        store.transaction(
+            tx -> builtin(store, tx).findModelInvocation(TestIds.id(1)).orElseThrow());
     assertEquals(ModelInvocationStatus.READY, stored.status());
     assertEquals(1, stored.attempt());
     assertEquals(List.of(failure), stored.failedAttempts());
@@ -384,7 +393,7 @@ public abstract class HarnessStoreInvocationContract {
             inTransaction(
                 store,
                 tx ->
-                    builtin(tx)
+                    builtin(store, tx)
                         .insertModelInvocation(
                             modelInvocation(
                                 TestIds.id(1),
@@ -402,7 +411,7 @@ public abstract class HarnessStoreInvocationContract {
                 store,
                 tx -> {
                   tx.threads().lock(baseline.threadId());
-                  builtin(tx)
+                  builtin(store, tx)
                       .insertModelInvocation(
                           modelInvocation(
                               TestIds.id(2),
@@ -421,7 +430,7 @@ public abstract class HarnessStoreInvocationContract {
                 store,
                 tx -> {
                   tx.threads().lock(baseline.threadId());
-                  builtin(tx)
+                  builtin(store, tx)
                       .insertModelInvocation(
                           modelInvocation(
                               TestIds.id(3),
@@ -468,7 +477,7 @@ public abstract class HarnessStoreInvocationContract {
                 store,
                 tx -> {
                   tx.threads().lock(root.threadId());
-                  builtin(tx)
+                  builtin(store, tx)
                       .insertModelInvocation(
                           modelInvocation(
                               TestIds.id(1),
@@ -505,7 +514,7 @@ public abstract class HarnessStoreInvocationContract {
                 store,
                 tx -> {
                   tx.threads().lock(otherRoot.threadId());
-                  builtin(tx)
+                  builtin(store, tx)
                       .insertModelInvocation(
                           modelInvocation(
                               TestIds.id(2),
@@ -529,7 +538,7 @@ public abstract class HarnessStoreInvocationContract {
                 store,
                 tx -> {
                   tx.threads().lock(other.threadId());
-                  builtin(tx)
+                  builtin(store, tx)
                       .insertModelInvocation(
                           modelInvocation(
                               TestIds.id(1),
@@ -545,7 +554,7 @@ public abstract class HarnessStoreInvocationContract {
         store,
         tx -> {
           tx.threads().lock(baseline.threadId());
-          builtin(tx)
+          builtin(store, tx)
               .insertModelInvocation(
                   modelInvocation(
                       TestIds.id(2),
@@ -571,7 +580,7 @@ public abstract class HarnessStoreInvocationContract {
                 store,
                 tx -> {
                   tx.threads().lock(baseline.threadId());
-                  builtin(tx)
+                  builtin(store, tx)
                       .insertModelInvocation(
                           modelInvocation(
                               TestIds.id(1),
@@ -587,7 +596,7 @@ public abstract class HarnessStoreInvocationContract {
         store,
         tx -> {
           tx.threads().lock(baseline.threadId());
-          builtin(tx)
+          builtin(store, tx)
               .insertModelInvocation(
                   modelInvocation(
                       TestIds.id(3),
@@ -644,7 +653,7 @@ public abstract class HarnessStoreInvocationContract {
                   tx -> {
                     UUID id = tx.nextId();
                     tx.threads().lock(baseline.threadId());
-                    builtin(tx)
+                    builtin(store, tx)
                         .insertModelInvocation(
                             modelInvocation(
                                 id,
@@ -654,8 +663,8 @@ public abstract class HarnessStoreInvocationContract {
                                 ModelInvocationStatus.READY,
                                 null,
                                 T1));
-                    builtin(tx).lockModelInvocation(id);
-                    builtin(tx)
+                    builtin(store, tx).lockModelInvocation(id);
+                    builtin(store, tx)
                         .updateModelInvocation(
                             modelInvocation(
                                 id,
@@ -721,7 +730,7 @@ public abstract class HarnessStoreInvocationContract {
                               baseline.sessionId(),
                               baseline.turnStartEntryId(),
                               "sibling-7"));
-                  builtin(tx)
+                  builtin(store, tx)
                       .insertModelInvocation(
                           modelInvocation(
                               TestIds.id(7),
@@ -731,8 +740,8 @@ public abstract class HarnessStoreInvocationContract {
                               ModelInvocationStatus.READY,
                               null,
                               T4));
-                  builtin(tx).lockModelInvocation(TestIds.id(7));
-                  builtin(tx)
+                  builtin(store, tx).lockModelInvocation(TestIds.id(7));
+                  builtin(store, tx)
                       .updateModelInvocation(
                           modelInvocation(
                               TestIds.id(7),
@@ -761,7 +770,7 @@ public abstract class HarnessStoreInvocationContract {
                 tx -> {
                   UUID id = tx.nextId();
                   tx.threads().lock(baseline.threadId());
-                  builtin(tx)
+                  builtin(store, tx)
                       .insertModelInvocation(
                           modelInvocation(
                               id,
@@ -771,8 +780,8 @@ public abstract class HarnessStoreInvocationContract {
                               ModelInvocationStatus.READY,
                               null,
                               T1));
-                  builtin(tx).lockModelInvocation(id);
-                  builtin(tx)
+                  builtin(store, tx).lockModelInvocation(id);
+                  builtin(store, tx)
                       .updateModelInvocation(
                           modelInvocation(
                               id,
@@ -798,7 +807,7 @@ public abstract class HarnessStoreInvocationContract {
                 tx -> {
                   UUID id = tx.nextId();
                   tx.threads().lock(baseline.threadId());
-                  builtin(tx)
+                  builtin(store, tx)
                       .insertModelInvocation(
                           modelInvocation(
                               id,
@@ -808,8 +817,8 @@ public abstract class HarnessStoreInvocationContract {
                               ModelInvocationStatus.READY,
                               null,
                               T1));
-                  builtin(tx).lockModelInvocation(id);
-                  builtin(tx)
+                  builtin(store, tx).lockModelInvocation(id);
+                  builtin(store, tx)
                       .updateModelInvocation(
                           modelInvocation(
                               id,
@@ -856,7 +865,7 @@ public abstract class HarnessStoreInvocationContract {
                 tx -> {
                   UUID id = tx.nextId();
                   tx.threads().lock(baseline.threadId());
-                  builtin(tx)
+                  builtin(store, tx)
                       .insertModelInvocation(
                           modelInvocation(
                               id,
@@ -866,8 +875,8 @@ public abstract class HarnessStoreInvocationContract {
                               ModelInvocationStatus.READY,
                               null,
                               T2));
-                  builtin(tx).lockModelInvocation(id);
-                  builtin(tx)
+                  builtin(store, tx).lockModelInvocation(id);
+                  builtin(store, tx)
                       .updateModelInvocation(
                           modelInvocation(
                               id,
@@ -901,7 +910,7 @@ public abstract class HarnessStoreInvocationContract {
         store,
         tx -> {
           tx.threads().lock(baseline.threadId());
-          builtin(tx)
+          builtin(store, tx)
               .insertModelInvocation(
                   modelInvocation(
                       TestIds.id(1),
@@ -921,10 +930,10 @@ public abstract class HarnessStoreInvocationContract {
                 store,
                 tx -> {
                   ModelInvocation current =
-                      builtin(tx).lockModelInvocation(TestIds.id(1)).orElseThrow();
-                  builtin(tx).updateModelInvocation(current.markRunning(T2));
-                  current = builtin(tx).lockModelInvocation(TestIds.id(1)).orElseThrow();
-                  builtin(tx)
+                      builtin(store, tx).lockModelInvocation(TestIds.id(1)).orElseThrow();
+                  builtin(store, tx).updateModelInvocation(current.markRunning(T2));
+                  current = builtin(store, tx).lockModelInvocation(TestIds.id(1)).orElseThrow();
+                  builtin(store, tx)
                       .updateModelInvocation(
                           current.succeed(successResponse(), T2).attachResultEntry(assistantA, T2));
                 }));
@@ -947,7 +956,7 @@ public abstract class HarnessStoreInvocationContract {
         store,
         tx -> {
           tx.threads().lock(baseline.threadId());
-          builtin(tx)
+          builtin(store, tx)
               .insertModelInvocation(
                   modelInvocation(
                       TestIds.id(1),
@@ -957,13 +966,15 @@ public abstract class HarnessStoreInvocationContract {
                       ModelInvocationStatus.READY,
                       null,
                       T1));
-          ModelInvocation current = builtin(tx).lockModelInvocation(TestIds.id(1)).orElseThrow();
-          builtin(tx).updateModelInvocation(current.markRunning(T2));
-          current = builtin(tx).lockModelInvocation(TestIds.id(1)).orElseThrow();
-          builtin(tx).updateModelInvocation(current.succeed(response, T2));
+          ModelInvocation current =
+              builtin(store, tx).lockModelInvocation(TestIds.id(1)).orElseThrow();
+          builtin(store, tx).updateModelInvocation(current.markRunning(T2));
+          current = builtin(store, tx).lockModelInvocation(TestIds.id(1)).orElseThrow();
+          builtin(store, tx).updateModelInvocation(current.succeed(response, T2));
         });
     ModelInvocation committed =
-        store.transaction(tx -> builtin(tx).findModelInvocation(TestIds.id(1)).orElseThrow());
+        store.transaction(
+            tx -> builtin(store, tx).findModelInvocation(TestIds.id(1)).orElseThrow());
     // 将 thread head 迁移到同一 session 中无关 branch（Session -> head 必须同 Session 的新契约）。
     UUID otherTurnStart =
         insertChildEntry(store, baseline.sessionId(), baseline.rootEntryId(), turnStartPayload());
@@ -985,8 +996,8 @@ public abstract class HarnessStoreInvocationContract {
     inTransaction(
         store,
         tx -> {
-          builtin(tx).lockModelInvocation(TestIds.id(1));
-          builtin(tx).updateModelInvocation(committed);
+          builtin(store, tx).lockModelInvocation(TestIds.id(1));
+          builtin(store, tx).updateModelInvocation(committed);
         });
     // relocation 之后附加 requestHead/turn path 之外的 entry 仍会被拒绝
     assertThrows(
@@ -996,19 +1007,25 @@ public abstract class HarnessStoreInvocationContract {
                 store,
                 tx -> {
                   ModelInvocation locked =
-                      builtin(tx).lockModelInvocation(TestIds.id(1)).orElseThrow();
-                  builtin(tx).updateModelInvocation(locked.attachResultEntry(otherAssistant, T3));
+                      builtin(store, tx).lockModelInvocation(TestIds.id(1)).orElseThrow();
+                  builtin(store, tx)
+                      .updateModelInvocation(locked.attachResultEntry(otherAssistant, T3));
                 }));
     // relocation 之后在原始 turn 上附加 result entry 仍合法
     inTransaction(
         store,
         tx -> {
-          ModelInvocation locked = builtin(tx).lockModelInvocation(TestIds.id(1)).orElseThrow();
-          builtin(tx).updateModelInvocation(locked.attachResultEntry(assistantA, T3));
+          ModelInvocation locked =
+              builtin(store, tx).lockModelInvocation(TestIds.id(1)).orElseThrow();
+          builtin(store, tx).updateModelInvocation(locked.attachResultEntry(assistantA, T3));
         });
     UUID committedResultEntryId =
         store.transaction(
-            tx -> builtin(tx).findModelInvocation(TestIds.id(1)).orElseThrow().resultEntryId());
+            tx ->
+                builtin(store, tx)
+                    .findModelInvocation(TestIds.id(1))
+                    .orElseThrow()
+                    .resultEntryId());
     assertEquals(assistantA, committedResultEntryId);
   }
 
@@ -1021,7 +1038,7 @@ public abstract class HarnessStoreInvocationContract {
         store,
         tx -> {
           tx.threads().lock(baseline.threadId());
-          builtin(tx)
+          builtin(store, tx)
               .insertModelInvocation(
                   modelInvocation(
                       TestIds.id(1),
@@ -1041,15 +1058,17 @@ public abstract class HarnessStoreInvocationContract {
     inTransaction(
         store,
         tx -> {
-          ModelInvocation current = builtin(tx).lockModelInvocation(TestIds.id(1)).orElseThrow();
-          builtin(tx).updateModelInvocation(current.markRunning(T2));
-          current = builtin(tx).lockModelInvocation(TestIds.id(1)).orElseThrow();
-          builtin(tx).updateModelInvocation(current.succeed(response, T2));
-          current = builtin(tx).lockModelInvocation(TestIds.id(1)).orElseThrow();
-          builtin(tx).updateModelInvocation(current.attachResultEntry(assistantEntryId, T2));
+          ModelInvocation current =
+              builtin(store, tx).lockModelInvocation(TestIds.id(1)).orElseThrow();
+          builtin(store, tx).updateModelInvocation(current.markRunning(T2));
+          current = builtin(store, tx).lockModelInvocation(TestIds.id(1)).orElseThrow();
+          builtin(store, tx).updateModelInvocation(current.succeed(response, T2));
+          current = builtin(store, tx).lockModelInvocation(TestIds.id(1)).orElseThrow();
+          builtin(store, tx).updateModelInvocation(current.attachResultEntry(assistantEntryId, T2));
         });
     ModelInvocation committed =
-        store.transaction(tx -> builtin(tx).findModelInvocation(TestIds.id(1)).orElseThrow());
+        store.transaction(
+            tx -> builtin(store, tx).findModelInvocation(TestIds.id(1)).orElseThrow());
     assertEquals(ModelInvocationStatus.SUCCEEDED, committed.status());
     assertEquals(assistantEntryId, committed.resultEntryId());
   }
@@ -1065,7 +1084,7 @@ public abstract class HarnessStoreInvocationContract {
         store,
         tx -> {
           tx.threads().lock(turn1.threadId());
-          builtin(tx)
+          builtin(store, tx)
               .insertModelInvocation(
                   modelInvocation(
                       TestIds.id(10),
@@ -1079,14 +1098,16 @@ public abstract class HarnessStoreInvocationContract {
     inTransaction(
         store,
         tx -> {
-          ModelInvocation current = builtin(tx).lockModelInvocation(TestIds.id(10)).orElseThrow();
-          builtin(tx).updateModelInvocation(current.markRunning(T2));
-          current = builtin(tx).lockModelInvocation(TestIds.id(10)).orElseThrow();
+          ModelInvocation current =
+              builtin(store, tx).lockModelInvocation(TestIds.id(10)).orElseThrow();
+          builtin(store, tx).updateModelInvocation(current.markRunning(T2));
+          current = builtin(store, tx).lockModelInvocation(TestIds.id(10)).orElseThrow();
           StreamCheckpoint finalCheckpoint = new StreamCheckpoint(1, 10L, "hello", "");
-          builtin(tx).updateModelInvocation(current.succeed(response, finalCheckpoint, T3));
+          builtin(store, tx).updateModelInvocation(current.succeed(response, finalCheckpoint, T3));
         });
     ModelInvocation committed10 =
-        store.transaction(tx -> builtin(tx).findModelInvocation(TestIds.id(10)).orElseThrow());
+        store.transaction(
+            tx -> builtin(store, tx).findModelInvocation(TestIds.id(10)).orElseThrow());
     assertEquals(ModelInvocationStatus.SUCCEEDED, committed10.status());
     assertNotNull(committed10.streamCheckpoint());
     assertEquals(10L, committed10.streamCheckpoint().sequence());
@@ -1098,7 +1119,7 @@ public abstract class HarnessStoreInvocationContract {
         store,
         tx -> {
           tx.threads().lock(turn2.threadId());
-          builtin(tx)
+          builtin(store, tx)
               .insertModelInvocation(
                   modelInvocation(
                       TestIds.id(11),
@@ -1112,18 +1133,20 @@ public abstract class HarnessStoreInvocationContract {
     inTransaction(
         store,
         tx -> {
-          ModelInvocation current = builtin(tx).lockModelInvocation(TestIds.id(11)).orElseThrow();
-          builtin(tx).updateModelInvocation(current.markRunning(T2));
-          current = builtin(tx).lockModelInvocation(TestIds.id(11)).orElseThrow();
-          builtin(tx)
+          ModelInvocation current =
+              builtin(store, tx).lockModelInvocation(TestIds.id(11)).orElseThrow();
+          builtin(store, tx).updateModelInvocation(current.markRunning(T2));
+          current = builtin(store, tx).lockModelInvocation(TestIds.id(11)).orElseThrow();
+          builtin(store, tx)
               .updateModelInvocation(
                   current.checkpoint(new StreamCheckpoint(1, 5L, "hel", ""), T2));
-          current = builtin(tx).lockModelInvocation(TestIds.id(11)).orElseThrow();
+          current = builtin(store, tx).lockModelInvocation(TestIds.id(11)).orElseThrow();
           StreamCheckpoint grown = new StreamCheckpoint(1, 12L, "hello world", "");
-          builtin(tx).updateModelInvocation(current.succeed(response, grown, T3));
+          builtin(store, tx).updateModelInvocation(current.succeed(response, grown, T3));
         });
     ModelInvocation committed11 =
-        store.transaction(tx -> builtin(tx).findModelInvocation(TestIds.id(11)).orElseThrow());
+        store.transaction(
+            tx -> builtin(store, tx).findModelInvocation(TestIds.id(11)).orElseThrow());
     assertEquals(ModelInvocationStatus.SUCCEEDED, committed11.status());
     assertEquals(12L, committed11.streamCheckpoint().sequence());
     assertEquals("hello world", committed11.streamCheckpoint().text());
@@ -1134,7 +1157,7 @@ public abstract class HarnessStoreInvocationContract {
         store,
         tx -> {
           tx.threads().lock(turn3.threadId());
-          builtin(tx)
+          builtin(store, tx)
               .insertModelInvocation(
                   modelInvocation(
                       TestIds.id(12),
@@ -1148,14 +1171,16 @@ public abstract class HarnessStoreInvocationContract {
     inTransaction(
         store,
         tx -> {
-          ModelInvocation current = builtin(tx).lockModelInvocation(TestIds.id(12)).orElseThrow();
-          builtin(tx).updateModelInvocation(current.markRunning(T2));
-          current = builtin(tx).lockModelInvocation(TestIds.id(12)).orElseThrow();
+          ModelInvocation current =
+              builtin(store, tx).lockModelInvocation(TestIds.id(12)).orElseThrow();
+          builtin(store, tx).updateModelInvocation(current.markRunning(T2));
+          current = builtin(store, tx).lockModelInvocation(TestIds.id(12)).orElseThrow();
           StreamCheckpoint failureCheckpoint = new StreamCheckpoint(1, 3L, "partial error", "");
-          builtin(tx).updateModelInvocation(current.fail(error, failureCheckpoint, T3));
+          builtin(store, tx).updateModelInvocation(current.fail(error, failureCheckpoint, T3));
         });
     ModelInvocation committed12 =
-        store.transaction(tx -> builtin(tx).findModelInvocation(TestIds.id(12)).orElseThrow());
+        store.transaction(
+            tx -> builtin(store, tx).findModelInvocation(TestIds.id(12)).orElseThrow());
     assertEquals(ModelInvocationStatus.FAILED, committed12.status());
     assertEquals(3L, committed12.streamCheckpoint().sequence());
     assertEquals("partial error", committed12.streamCheckpoint().text());
@@ -1166,7 +1191,7 @@ public abstract class HarnessStoreInvocationContract {
         store,
         tx -> {
           tx.threads().lock(turn4.threadId());
-          builtin(tx)
+          builtin(store, tx)
               .insertModelInvocation(
                   modelInvocation(
                       TestIds.id(13),
@@ -1180,10 +1205,11 @@ public abstract class HarnessStoreInvocationContract {
     inTransaction(
         store,
         tx -> {
-          ModelInvocation current = builtin(tx).lockModelInvocation(TestIds.id(13)).orElseThrow();
-          builtin(tx).updateModelInvocation(current.markRunning(T2));
-          current = builtin(tx).lockModelInvocation(TestIds.id(13)).orElseThrow();
-          builtin(tx)
+          ModelInvocation current =
+              builtin(store, tx).lockModelInvocation(TestIds.id(13)).orElseThrow();
+          builtin(store, tx).updateModelInvocation(current.markRunning(T2));
+          current = builtin(store, tx).lockModelInvocation(TestIds.id(13)).orElseThrow();
+          builtin(store, tx)
               .updateModelInvocation(
                   current.checkpoint(new StreamCheckpoint(1, 10L, "hello world", ""), T2));
         });
@@ -1194,11 +1220,12 @@ public abstract class HarnessStoreInvocationContract {
                 store,
                 tx -> {
                   ModelInvocation current =
-                      builtin(tx).lockModelInvocation(TestIds.id(13)).orElseThrow();
+                      builtin(store, tx).lockModelInvocation(TestIds.id(13)).orElseThrow();
                   // current is RUNNING with sequence 10; terminal update with sequence 5 must be
                   // rejected
                   StreamCheckpoint regression = new StreamCheckpoint(1, 5L, "hello", "");
-                  builtin(tx).updateModelInvocation(current.succeed(response, regression, T3));
+                  builtin(store, tx)
+                      .updateModelInvocation(current.succeed(response, regression, T3));
                 }));
   }
 
@@ -1208,7 +1235,7 @@ public abstract class HarnessStoreInvocationContract {
         store,
         tx -> {
           tx.threads().lock(baseline.threadId());
-          builtin(tx)
+          builtin(store, tx)
               .insertModelInvocation(
                   modelInvocation(
                       TestIds.id(1),
@@ -1220,12 +1247,13 @@ public abstract class HarnessStoreInvocationContract {
                       T1));
         });
     ModelInvocation stored =
-        store.transaction(tx -> builtin(tx).findModelInvocation(TestIds.id(1)).orElseThrow());
+        store.transaction(
+            tx -> builtin(store, tx).findModelInvocation(TestIds.id(1)).orElseThrow());
 
     // 未持有锁
     assertThrows(
         IllegalStateException.class,
-        () -> inTransaction(store, tx -> builtin(tx).updateModelInvocation(stored)));
+        () -> inTransaction(store, tx -> builtin(store, tx).updateModelInvocation(stored)));
     // 修改了 requestHeadEntryId
     assertThrows(
         IllegalArgumentException.class,
@@ -1233,8 +1261,8 @@ public abstract class HarnessStoreInvocationContract {
             inTransaction(
                 store,
                 tx -> {
-                  builtin(tx).lockModelInvocation(TestIds.id(1));
-                  builtin(tx)
+                  builtin(store, tx).lockModelInvocation(TestIds.id(1));
+                  builtin(store, tx)
                       .updateModelInvocation(
                           new ModelInvocation(
                               stored.id(),
@@ -1259,8 +1287,8 @@ public abstract class HarnessStoreInvocationContract {
             inTransaction(
                 store,
                 tx -> {
-                  builtin(tx).lockModelInvocation(TestIds.id(1));
-                  builtin(tx)
+                  builtin(store, tx).lockModelInvocation(TestIds.id(1));
+                  builtin(store, tx)
                       .updateModelInvocation(
                           new ModelInvocation(
                               stored.id(),
@@ -1284,9 +1312,11 @@ public abstract class HarnessStoreInvocationContract {
   void findAndLockModelInvocationReturnEmptyForMissingIds() {
     UUID missingId = TestIds.id(1);
     assertTrue(
-        store.<Boolean>transaction(tx -> builtin(tx).findModelInvocation(missingId).isEmpty()));
+        store.<Boolean>transaction(
+            tx -> builtin(store, tx).findModelInvocation(missingId).isEmpty()));
     assertTrue(
-        store.<Boolean>transaction(tx -> builtin(tx).lockModelInvocation(missingId).isEmpty()));
+        store.<Boolean>transaction(
+            tx -> builtin(store, tx).lockModelInvocation(missingId).isEmpty()));
   }
 
   @Test
@@ -1299,7 +1329,7 @@ public abstract class HarnessStoreInvocationContract {
                 store,
                 tx -> {
                   tx.threads().lock(baseline.threadId());
-                  builtin(tx)
+                  builtin(store, tx)
                       .insertModelInvocation(
                           modelInvocation(
                               TestIds.id(1),
@@ -1317,7 +1347,7 @@ public abstract class HarnessStoreInvocationContract {
                 store,
                 tx -> {
                   tx.threads().lock(baseline.threadId());
-                  builtin(tx)
+                  builtin(store, tx)
                       .insertModelInvocation(
                           new ModelInvocation(
                               TestIds.id(2),
@@ -1601,7 +1631,7 @@ public abstract class HarnessStoreInvocationContract {
         store,
         tx -> {
           tx.threads().lock(baseline.threadId());
-          builtin(tx)
+          builtin(store, tx)
               .insertModelInvocation(
                   modelInvocation(
                       TestIds.id(1),
@@ -1614,16 +1644,17 @@ public abstract class HarnessStoreInvocationContract {
         });
     assertThrows(
         IllegalArgumentException.class,
-        () -> inTransaction(store, tx -> builtin(tx).deleteModelInvocation(TestIds.id(999))));
+        () ->
+            inTransaction(store, tx -> builtin(store, tx).deleteModelInvocation(TestIds.id(999))));
     assertThrows(
         IllegalStateException.class,
-        () -> inTransaction(store, tx -> builtin(tx).deleteModelInvocation(TestIds.id(1))));
+        () -> inTransaction(store, tx -> builtin(store, tx).deleteModelInvocation(TestIds.id(1))));
     boolean deletedAndAbsent =
         store.<Boolean>transaction(
             tx -> {
-              builtin(tx).lockModelInvocation(TestIds.id(1)).orElseThrow();
-              assertTrue(builtin(tx).deleteModelInvocation(TestIds.id(1)));
-              return builtin(tx).findModelInvocation(TestIds.id(1)).isEmpty();
+              builtin(store, tx).lockModelInvocation(TestIds.id(1)).orElseThrow();
+              assertTrue(builtin(store, tx).deleteModelInvocation(TestIds.id(1)));
+              return builtin(store, tx).findModelInvocation(TestIds.id(1)).isEmpty();
             });
     assertTrue(deletedAndAbsent);
   }
@@ -1653,10 +1684,11 @@ public abstract class HarnessStoreInvocationContract {
             inTransaction(
                 store,
                 tx -> {
-                  builtin(tx).lockModelInvocation(TestIds.id(1));
-                  builtin(tx).deleteModelInvocation(TestIds.id(1));
+                  builtin(store, tx).lockModelInvocation(TestIds.id(1));
+                  builtin(store, tx).deleteModelInvocation(TestIds.id(1));
                 }));
-    assertTrue(store.transaction(tx -> builtin(tx).findModelInvocation(TestIds.id(1))).isPresent());
+    assertTrue(
+        store.transaction(tx -> builtin(store, tx).findModelInvocation(TestIds.id(1))).isPresent());
     assertTrue(store.transaction(tx -> tx.tools().find(TestIds.id(10))).isPresent());
   }
 
@@ -1704,7 +1736,7 @@ public abstract class HarnessStoreInvocationContract {
         store,
         tx -> {
           tx.threads().lock(threadId);
-          builtin(tx)
+          builtin(store, tx)
               .insertModelInvocation(
                   new ModelInvocation(
                       id,
@@ -1721,25 +1753,25 @@ public abstract class HarnessStoreInvocationContract {
                       List.of(),
                       createdAt,
                       createdAt));
-          ModelInvocation current = builtin(tx).lockModelInvocation(id).orElseThrow();
+          ModelInvocation current = builtin(store, tx).lockModelInvocation(id).orElseThrow();
           if (status == ModelInvocationStatus.SUCCEEDED) {
-            builtin(tx).updateModelInvocation(current.markRunning(createdAt));
-            current = builtin(tx).lockModelInvocation(id).orElseThrow();
-            builtin(tx).updateModelInvocation(current.succeed(response, createdAt));
+            builtin(store, tx).updateModelInvocation(current.markRunning(createdAt));
+            current = builtin(store, tx).lockModelInvocation(id).orElseThrow();
+            builtin(store, tx).updateModelInvocation(current.succeed(response, createdAt));
           } else if (status == ModelInvocationStatus.FAILED) {
-            builtin(tx)
+            builtin(store, tx)
                 .updateModelInvocation(
                     current.fail(
                         new ModelInvocationError(ProviderErrorKind.INVALID_REQUEST, "model failed"),
                         createdAt));
           } else if (status == ModelInvocationStatus.CANCELLED) {
-            builtin(tx).updateModelInvocation(current.markRunning(createdAt));
-            current = builtin(tx).lockModelInvocation(id).orElseThrow();
-            builtin(tx)
+            builtin(store, tx).updateModelInvocation(current.markRunning(createdAt));
+            current = builtin(store, tx).lockModelInvocation(id).orElseThrow();
+            builtin(store, tx)
                 .updateModelInvocation(
                     current.checkpoint(new StreamCheckpoint(1, 1, "partial", ""), createdAt));
-            current = builtin(tx).lockModelInvocation(id).orElseThrow();
-            builtin(tx)
+            current = builtin(store, tx).lockModelInvocation(id).orElseThrow();
+            builtin(store, tx)
                 .updateModelInvocation(
                     current
                         .cancel(
@@ -1750,8 +1782,9 @@ public abstract class HarnessStoreInvocationContract {
           } else {
             throw new IllegalArgumentException("unsupported terminal model status " + status);
           }
-          current = builtin(tx).lockModelInvocation(id).orElseThrow();
-          builtin(tx).updateModelInvocation(current.attachResultEntry(resultEntryId, createdAt));
+          current = builtin(store, tx).lockModelInvocation(id).orElseThrow();
+          builtin(store, tx)
+              .updateModelInvocation(current.attachResultEntry(resultEntryId, createdAt));
         });
   }
 
@@ -2562,7 +2595,7 @@ public abstract class HarnessStoreInvocationContract {
         tx -> {
           tx.threads().lock(baseline.threadId());
           UUID modelId = tx.nextId();
-          builtin(tx)
+          builtin(store, tx)
               .insertModelInvocation(
                   new ModelInvocation(
                       modelId,
@@ -2724,14 +2757,16 @@ public abstract class HarnessStoreInvocationContract {
                   tx.entries()
                       .insert(
                           new Entry(resultEntryId, baseline.sessionId(), turnStart, result, T2));
-                  ModelInvocation locked = builtin(tx).lockModelInvocation(modelId).orElseThrow();
-                  builtin(tx)
+                  ModelInvocation locked =
+                      builtin(store, tx).lockModelInvocation(modelId).orElseThrow();
+                  builtin(store, tx)
                       .updateModelInvocation(
                           locked.fail(
                               new ModelInvocationError(ProviderErrorKind.INVALID_REQUEST, "boom"),
                               T3));
-                  locked = builtin(tx).lockModelInvocation(modelId).orElseThrow();
-                  builtin(tx).updateModelInvocation(locked.attachResultEntry(resultEntryId, T3));
+                  locked = builtin(store, tx).lockModelInvocation(modelId).orElseThrow();
+                  builtin(store, tx)
+                      .updateModelInvocation(locked.attachResultEntry(resultEntryId, T3));
                   return null;
                 }));
 
@@ -2755,12 +2790,15 @@ public abstract class HarnessStoreInvocationContract {
                                   assistantPayload(),
                                   T2));
                       ModelInvocation current =
-                          builtin(tx).lockModelInvocation(succeededModelId).orElseThrow();
-                      builtin(tx).updateModelInvocation(current.markRunning(T2));
-                      current = builtin(tx).lockModelInvocation(succeededModelId).orElseThrow();
-                      builtin(tx).updateModelInvocation(current.succeed(successResponse(), T3));
-                      current = builtin(tx).lockModelInvocation(succeededModelId).orElseThrow();
-                      builtin(tx)
+                          builtin(store, tx).lockModelInvocation(succeededModelId).orElseThrow();
+                      builtin(store, tx).updateModelInvocation(current.markRunning(T2));
+                      current =
+                          builtin(store, tx).lockModelInvocation(succeededModelId).orElseThrow();
+                      builtin(store, tx)
+                          .updateModelInvocation(current.succeed(successResponse(), T3));
+                      current =
+                          builtin(store, tx).lockModelInvocation(succeededModelId).orElseThrow();
+                      builtin(store, tx)
                           .updateModelInvocation(current.attachResultEntry(assistantEntryId, T3));
                       return null;
                     }));

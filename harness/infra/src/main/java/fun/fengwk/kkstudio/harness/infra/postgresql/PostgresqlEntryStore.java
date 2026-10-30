@@ -20,7 +20,9 @@ import java.util.Set;
 import java.util.UUID;
 
 /** Entry 聚合的 PostgreSQL 实现。 */
-final class PostgresqlEntryStore extends PostgresqlHarnessView implements EntryStore {
+final class PostgresqlEntryStore implements EntryStore {
+
+  private final PostgresqlHarnessTransaction tx;
 
   /**
    * 单次不可变 EntryPath 递归读取 CTE：以指定 head 为起点沿父链回溯到 ROOT，按 {@code depth desc} 输出 ROOT 到 head 的有序 Entry。
@@ -97,18 +99,18 @@ final class PostgresqlEntryStore extends PostgresqlHarnessView implements EntryS
       """;
 
   PostgresqlEntryStore(PostgresqlHarnessTransaction tx) {
-    super(tx);
+    this.tx = tx;
   }
 
   /**
    * 插入新的 Entry 节点并同步更新事务内 EntryPath 局部缓存。
    *
-   * <p>若为非 ROOT Entry，从父节点已缓存的路径直接内存追加派生子节点的 {@link EntryPath} 并写入 {@link
-   * #entryPathCache()}，使同事务内后续子节点构建达到 0 次递归 CTE 开销。
+   * <p>若为非 ROOT Entry，从父节点已缓存的路径直接内存追加派生子节点的 {@link EntryPath} 并写入事务局部 EntryPath 缓存，使同事务内后续子节点构建达到
+   * 0 次递归 CTE 开销。
    */
   @Override
   public void insert(Entry entry) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(entry, "entry");
     if (tx.entries().find(entry.id()).isPresent()) {
       throw new IllegalArgumentException("duplicate entry id " + entry.id());
@@ -133,7 +135,7 @@ final class PostgresqlEntryStore extends PostgresqlHarnessView implements EntryS
       nextPath.add(entry);
       candidatePath = new EntryPath(nextPath);
     }
-    updateJdbc(
+    tx.updateJdbc(
         """
         insert into harness_entry (
             id, session_id, parent_entry_id, entry_type, payload, created_at, provider_replay_state
@@ -146,7 +148,7 @@ final class PostgresqlEntryStore extends PostgresqlHarnessView implements EntryS
         PostgresqlHarnessRows.ENTRY_PAYLOADS.encode(entry.payload()),
         PostgresqlHarnessRows.timestamp(entry.createdAt()),
         encodeEntryProviderReplayState(entry));
-    entryPathCache().put(entry.id(), candidatePath);
+    tx.entryPathCache().put(entry.id(), candidatePath);
   }
 
   private static String encodeEntryProviderReplayState(Entry entry) {
@@ -157,27 +159,27 @@ final class PostgresqlEntryStore extends PostgresqlHarnessView implements EntryS
 
   @Override
   public Optional<Entry> find(UUID id) {
-    checkOpen();
-    return queryOne("select * from harness_entry where id = ?", PostgresqlHarnessRows.ENTRY, id);
+    tx.checkOpen();
+    return tx.queryOne("select * from harness_entry where id = ?", PostgresqlHarnessRows.ENTRY, id);
   }
 
   /**
    * 查找指定 Session 的 ROOT Entry。
    *
-   * <p>优先复用当前事务局部缓存 {@link #entryPathCache()} 中已有的同 Session 路径根节点；未命中时通过 {@code
-   * uk_harness_entry_single_root} 索引点查，并将单节点根路径写回缓存。
+   * <p>优先复用事务局部 EntryPath 缓存中已有的同 Session 路径根节点；未命中时通过 {@code uk_harness_entry_single_root}
+   * 索引点查，并将单节点根路径写回缓存。
    */
   @Override
   public Optional<Entry> findRoot(UUID sessionId) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(sessionId, "sessionId");
-    for (EntryPath path : entryPathCache().values()) {
+    for (EntryPath path : tx.entryPathCache().values()) {
       if (path.root().sessionId().equals(sessionId)) {
         return Optional.of(path.root());
       }
     }
     Optional<Entry> found =
-        queryOne(
+        tx.queryOne(
             """
             select *
             from harness_entry
@@ -185,24 +187,25 @@ final class PostgresqlEntryStore extends PostgresqlHarnessView implements EntryS
             """,
             PostgresqlHarnessRows.ENTRY,
             sessionId);
-    found.ifPresent(root -> entryPathCache().putIfAbsent(root.id(), new EntryPath(List.of(root))));
+    found.ifPresent(
+        root -> tx.entryPathCache().putIfAbsent(root.id(), new EntryPath(List.of(root))));
     return found;
   }
 
   /**
    * 读取指定 head 的完整不可变 EntryPath。
    *
-   * <p>优先从 {@link #entryPathCache()} 读取；未命中时执行单次递归回溯 CTE（{@link #LOAD_ENTRY_PATH}）并存入缓存。
+   * <p>优先从事务局部缓存读取；未命中时执行单次递归回溯 CTE（{@link #LOAD_ENTRY_PATH}）并存入缓存。
    */
   @Override
   public EntryPath loadPath(UUID headEntryId) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(headEntryId, "headEntryId");
-    EntryPath cached = entryPathCache().get(headEntryId);
+    EntryPath cached = tx.entryPathCache().get(headEntryId);
     if (cached != null) {
       return cached;
     }
-    List<Entry> entries = queryList(LOAD_ENTRY_PATH, PostgresqlHarnessRows.ENTRY, headEntryId);
+    List<Entry> entries = tx.queryList(LOAD_ENTRY_PATH, PostgresqlHarnessRows.ENTRY, headEntryId);
     if (entries.isEmpty()) {
       throw new IllegalArgumentException("entry " + headEntryId + " does not exist");
     }
@@ -213,22 +216,22 @@ final class PostgresqlEntryStore extends PostgresqlHarnessView implements EntryS
       }
     }
     EntryPath path = new EntryPath(entries);
-    entryPathCache().put(headEntryId, path);
+    tx.entryPathCache().put(headEntryId, path);
     return path;
   }
 
   /**
    * 加载指定 head 路径上属于特定 Contributor 的自定义 Entry。
    *
-   * <p>若完整路径在 {@link #entryPathCache()} 中已命中，直接在内存中过滤返回；cold cache 则执行窄查询 CTE（{@link
+   * <p>若完整路径已在事务局部缓存中命中，直接在内存中过滤返回；cold cache 则执行窄查询 CTE（{@link
    * #LOAD_CONTRIBUTOR_CUSTOM_ENTRIES_ON_PATH}），部分投影结果绝不写入完整路径缓存。
    */
   @Override
   public List<Entry> loadContributorCustom(UUID headEntryId, String contributorId) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(headEntryId, "headEntryId");
     Objects.requireNonNull(contributorId, "contributorId");
-    EntryPath cached = entryPathCache().get(headEntryId);
+    EntryPath cached = tx.entryPathCache().get(headEntryId);
     if (cached != null) {
       return cached.entries().stream()
           .filter(
@@ -238,7 +241,7 @@ final class PostgresqlEntryStore extends PostgresqlHarnessView implements EntryS
           .toList();
     }
     List<Entry> rows =
-        queryList(
+        tx.queryList(
             LOAD_CONTRIBUTOR_CUSTOM_ENTRIES_ON_PATH,
             PostgresqlHarnessRows.ENTRY,
             headEntryId,
@@ -257,18 +260,18 @@ final class PostgresqlEntryStore extends PostgresqlHarnessView implements EntryS
   /**
    * 读取指定 head 所在 branch 的生效 settings（等价于 {@link EntryPath#baseSettings()}）。
    *
-   * <p>若完整路径在 {@link #entryPathCache()} 中已命中，直接在内存中派生；cold cache 则执行窄查询 CTE（{@link
-   * #LOAD_BRANCH_SETTINGS}），只返回 ROOT 与非 COMPACTION TURN_START 节点，绝不物化完整 EntryPath、也绝不把部分投影写入完整路径缓存。
+   * <p>若完整路径已在事务局部缓存中命中，直接在内存中派生；cold cache 则执行窄查询 CTE（{@link #LOAD_BRANCH_SETTINGS}），只返回 ROOT 与非
+   * COMPACTION TURN_START 节点，绝不物化完整 EntryPath、也绝不把部分投影写入完整路径缓存。
    */
   @Override
   public BranchSettings loadBranchSettings(UUID headEntryId) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(headEntryId, "headEntryId");
-    EntryPath cached = entryPathCache().get(headEntryId);
+    EntryPath cached = tx.entryPathCache().get(headEntryId);
     if (cached != null) {
       return cached.baseSettings();
     }
-    List<Entry> rows = queryList(LOAD_BRANCH_SETTINGS, PostgresqlHarnessRows.ENTRY, headEntryId);
+    List<Entry> rows = tx.queryList(LOAD_BRANCH_SETTINGS, PostgresqlHarnessRows.ENTRY, headEntryId);
     if (rows.isEmpty()) {
       throw new IllegalArgumentException("entry " + headEntryId + " does not exist");
     }
@@ -290,12 +293,12 @@ final class PostgresqlEntryStore extends PostgresqlHarnessView implements EntryS
 
   @Override
   public List<Entry> loadBySession(UUID sessionId) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(sessionId, "sessionId");
     if (tx.sessions().find(sessionId).isEmpty()) {
       throw new IllegalArgumentException("session " + sessionId + " does not exist");
     }
-    return queryList(
+    return tx.queryList(
         """
         select *
         from harness_entry
@@ -308,10 +311,10 @@ final class PostgresqlEntryStore extends PostgresqlHarnessView implements EntryS
 
   @Override
   public Optional<Entry> findToolResultByInvocationId(UUID sessionId, UUID invocationId) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(sessionId, "sessionId");
     Objects.requireNonNull(invocationId, "invocationId");
-    return queryOne(
+    return tx.queryOne(
         """
         select *
         from harness_entry
@@ -327,14 +330,14 @@ final class PostgresqlEntryStore extends PostgresqlHarnessView implements EntryS
   /** 删除指定 Session 下的全部 Entry 节点（叶子优先逐层删除），并同步驱逐事务内缓存。 */
   @Override
   public int delete(UUID sessionId) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(sessionId, "sessionId");
-    entryPathCache().values().removeIf(path -> path.root().sessionId().equals(sessionId));
+    tx.entryPathCache().values().removeIf(path -> path.root().sessionId().equals(sessionId));
     int total = 0;
     while (true) {
       // 叶子优先：同一语句只删除父不在批内的行（parent FK 顺序天然成立），逐层剥到 ROOT。
       int deleted =
-          updateJdbc(
+          tx.updateJdbc(
               """
               delete from harness_entry e
               where e.session_id = ?
@@ -355,7 +358,7 @@ final class PostgresqlEntryStore extends PostgresqlHarnessView implements EntryS
 
   private boolean hasRoot(UUID sessionId) {
     Boolean exists =
-        queryForObject(
+        tx.queryForObject(
             """
             select exists (
                 select 1

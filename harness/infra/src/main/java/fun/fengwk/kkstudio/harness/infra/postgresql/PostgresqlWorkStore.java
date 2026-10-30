@@ -17,7 +17,9 @@ import java.util.Optional;
 import java.util.UUID;
 
 /** Durable Work 聚合的 PostgreSQL 实现。 */
-final class PostgresqlWorkStore extends PostgresqlHarnessView implements WorkStore {
+final class PostgresqlWorkStore implements WorkStore {
+
+  private final PostgresqlHarnessTransaction tx;
 
   /**
    * Work claim-only 短事务候选选取与租约写入 SQL。
@@ -94,14 +96,14 @@ final class PostgresqlWorkStore extends PostgresqlHarnessView implements WorkSto
       """;
 
   PostgresqlWorkStore(PostgresqlHarnessTransaction tx) {
-    super(tx);
+    this.tx = tx;
   }
 
   @Override
   public Optional<Work> find(WorkTarget target) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(target, "target");
-    return queryOne(
+    return tx.queryOne(
         "select * from durable_work where target_type = ? and target_id = ?",
         PostgresqlHarnessRows.WORK,
         target.type().name(),
@@ -115,11 +117,11 @@ final class PostgresqlWorkStore extends PostgresqlHarnessView implements WorkSto
    */
   @Override
   public Optional<Work> lock(WorkTarget target) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(target, "target");
-    requireCanLockWork(target);
+    tx.requireCanLockWork(target);
     Optional<Work> work =
-        queryOne(
+        tx.queryOne(
             """
             select *
             from durable_work
@@ -129,7 +131,7 @@ final class PostgresqlWorkStore extends PostgresqlHarnessView implements WorkSto
             PostgresqlHarnessRows.WORK,
             target.type().name(),
             target.id());
-    work.ifPresent(ignored -> recordWorkLock(target));
+    work.ifPresent(ignored -> tx.recordWorkLock(target));
     return work;
   }
 
@@ -140,11 +142,11 @@ final class PostgresqlWorkStore extends PostgresqlHarnessView implements WorkSto
    */
   @Override
   public Optional<Work> lockClaimed(ClaimedWork claim) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(claim, "claim");
-    requireCanLockWork(claim.target());
+    tx.requireCanLockWork(claim.target());
     Optional<Work> work =
-        queryOne(
+        tx.queryOne(
             """
             select *
             from durable_work
@@ -158,14 +160,14 @@ final class PostgresqlWorkStore extends PostgresqlHarnessView implements WorkSto
             claim.target().type().name(),
             claim.target().id(),
             claim.leaseToken());
-    work.ifPresent(ignored -> recordWorkLock(claim.target()));
+    work.ifPresent(ignored -> tx.recordWorkLock(claim.target()));
     return work;
   }
 
   /** 删除指定 Work。要求必须已持有其属主实体的行级锁。 */
   @Override
   public boolean delete(WorkTarget target) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(target, "target");
     if (tx.work().find(target).isEmpty()) {
       return false;
@@ -176,13 +178,13 @@ final class PostgresqlWorkStore extends PostgresqlHarnessView implements WorkSto
       return false;
     }
     int deleted =
-        updateJdbc(
+        tx.updateJdbc(
             "delete from durable_work where target_type = ? and target_id = ?",
             target.type().name(),
             target.id());
-    requireSingleUpdate(deleted, "work", target.id());
+    tx.requireSingleUpdate(deleted, "work", target.id());
     // Work 行删除使「待领取环境等待」集合变化；属主实体若仍在该事务内即可解析真实执行根。
-    notifyEnvironmentWorkChanged(locked.get());
+    tx.notifyEnvironmentWorkChanged(locked.get());
     return true;
   }
 
@@ -208,16 +210,16 @@ final class PostgresqlWorkStore extends PostgresqlHarnessView implements WorkSto
    */
   @Override
   public void request(WorkTarget target, EnvironmentId requiredEnvironmentId) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(target, "target");
     if (requiredEnvironmentId != null && target.type() != WorkTargetType.TOOL) {
       throw new IllegalArgumentException(
           "requiredEnvironmentId must be null for target type " + target.type());
     }
     requireWorkOwnerLocked(target);
-    requireCanLockWork(target);
+    tx.requireCanLockWork(target);
     Work work =
-        writeOne(
+        tx.writeOne(
                 REQUEST_WORK,
                 PostgresqlHarnessRows.WORK,
                 target.type().name(),
@@ -227,10 +229,10 @@ final class PostgresqlWorkStore extends PostgresqlHarnessView implements WorkSto
                 () ->
                     new IllegalArgumentException(
                         "conflicting requiredEnvironmentId for work target " + target));
-    recordWorkLock(work.target());
-    notifyWorkAvailable(work.target().type());
+    tx.recordWorkLock(work.target());
+    tx.notifyWorkAvailable(work.target().type());
     // 新建/重置冻结了环境亲和性的 TOOL Work：新增或提前了「待领取环境等待」事实，需失效待处理读模型。
-    notifyEnvironmentWorkChanged(work);
+    tx.notifyEnvironmentWorkChanged(work);
   }
 
   @Override
@@ -255,14 +257,14 @@ final class PostgresqlWorkStore extends PostgresqlHarnessView implements WorkSto
    */
   public Optional<ClaimedWork> claimNext(
       WorkTargetType targetType, String leaseToken, Duration leaseDuration, UUID nodeInstanceId) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(targetType, "targetType");
     Objects.requireNonNull(leaseToken, "leaseToken");
     HarnessStoreTime.requireWholeMillisecondDuration(leaseDuration, "leaseDuration");
     requireCanonicalLeaseToken(leaseToken);
-    requireCanClaimWork();
+    tx.requireCanClaimWork();
     Optional<Work> claimed =
-        writeOne(
+        tx.writeOne(
             CLAIM_NEXT_WORK,
             PostgresqlHarnessRows.WORK,
             targetType.name(),
@@ -274,9 +276,9 @@ final class PostgresqlWorkStore extends PostgresqlHarnessView implements WorkSto
     }
     Work work = claimed.get();
     requireTargetExists(work.target());
-    recordWorkLock(work.target());
+    tx.recordWorkLock(work.target());
     // 领取冻结了环境亲和性的 TOOL Work：签发执行租约使「待领取环境等待」条目消失，需失效待处理读模型。
-    notifyEnvironmentWorkChanged(work);
+    tx.notifyEnvironmentWorkChanged(work);
     return Optional.of(
         new ClaimedWork(
             work.target(),
@@ -293,10 +295,10 @@ final class PostgresqlWorkStore extends PostgresqlHarnessView implements WorkSto
    */
   @Override
   public boolean renew(ClaimedWork claim, Duration leaseDuration) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(claim, "claim");
     HarnessStoreTime.requireWholeMillisecondDuration(leaseDuration, "leaseDuration");
-    Instant databaseNow = databaseNow();
+    Instant databaseNow = tx.databaseNow();
     Work work = lockOwnedWorkAtDatabaseTime(claim);
     Instant target = databaseNow.plus(leaseDuration);
     if (!target.isAfter(work.leaseUntil())) {
@@ -315,25 +317,25 @@ final class PostgresqlWorkStore extends PostgresqlHarnessView implements WorkSto
    */
   @Override
   public Optional<Work> complete(ClaimedWork claim) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(claim, "claim");
-    Instant databaseNow = databaseNow();
+    Instant databaseNow = tx.databaseNow();
     Work work = lockOwnedWorkAtDatabaseTime(claim);
     Optional<Work> next =
         work.complete(claim.leaseToken(), claim.claimedWakeVersion(), databaseNow);
     if (next.isEmpty()) {
       int deleted =
-          updateJdbc(
+          tx.updateJdbc(
               "delete from durable_work where target_type = ? and target_id = ?",
               claim.target().type().name(),
               claim.target().id());
-      requireSingleUpdate(deleted, "work", claim.target().id());
+      tx.requireSingleUpdate(deleted, "work", claim.target().id());
     } else {
       updateWork(next.get());
-      notifyWorkAvailable(claim.target().type());
+      tx.notifyWorkAvailable(claim.target().type());
     }
     // Work 终态变更（删除或清租约保留）都会改变「待领取环境等待」集合，需失效待处理读模型。
-    notifyEnvironmentWorkChanged(work);
+    tx.notifyEnvironmentWorkChanged(work);
     return next;
   }
 
@@ -344,18 +346,18 @@ final class PostgresqlWorkStore extends PostgresqlHarnessView implements WorkSto
    */
   @Override
   public void reschedule(ClaimedWork claim, Duration delay) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(claim, "claim");
     HarnessStoreTime.requireNonNegativeWholeMillisecondDuration(delay, "delay");
-    Instant databaseNow = databaseNow();
+    Instant databaseNow = tx.databaseNow();
     Work work = lockOwnedWorkAtDatabaseTime(claim);
     Work next =
         work.reschedule(
             claim.leaseToken(), claim.claimedWakeVersion(), databaseNow, databaseNow.plus(delay));
     updateWork(next);
-    notifyWorkAvailable(claim.target().type());
+    tx.notifyWorkAvailable(claim.target().type());
     // 清租约重排使 Work 可能重新进入「待领取环境等待」，需失效待处理读模型。
-    notifyEnvironmentWorkChanged(work);
+    tx.notifyEnvironmentWorkChanged(work);
   }
 
   private void requireWorkOwnerLocked(WorkTarget target) {
@@ -381,17 +383,17 @@ final class PostgresqlWorkStore extends PostgresqlHarnessView implements WorkSto
             yield tool.threadId();
           }
         };
-    requireLocked(LockKey.thread(threadId));
+    tx.requireLocked(LockKey.thread(threadId));
   }
 
   private void requireTargetExists(WorkTarget target) {
     boolean exists =
         switch (target.type()) {
-          case THREAD -> queryExists(
+          case THREAD -> tx.queryExists(
               "select exists (select 1 from harness_thread where id = ?)", target.id());
-          case MODEL -> queryExists(
+          case MODEL -> tx.queryExists(
               "select exists (select 1 from harness_model_invocation where id = ?)", target.id());
-          case TOOL -> queryExists(
+          case TOOL -> tx.queryExists(
               "select exists (select 1 from harness_tool_invocation where id = ?)", target.id());
         };
     if (!exists) {
@@ -431,7 +433,7 @@ final class PostgresqlWorkStore extends PostgresqlHarnessView implements WorkSto
 
   private void updateWork(Work work) {
     int updated =
-        updateJdbc(
+        tx.updateJdbc(
             """
             update durable_work
             set available_at = ?,
@@ -446,6 +448,6 @@ final class PostgresqlWorkStore extends PostgresqlHarnessView implements WorkSto
             PostgresqlHarnessRows.timestamp(work.leaseUntil()),
             work.target().type().name(),
             work.target().id());
-    requireSingleUpdate(updated, "work", work.target().id());
+    tx.requireSingleUpdate(updated, "work", work.target().id());
   }
 }

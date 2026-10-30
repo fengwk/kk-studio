@@ -536,7 +536,7 @@ class PostgresqlHarnessTransactionNotificationTest {
                       T0,
                       T0));
           tx.threads().lock(threadId).orElseThrow();
-          builtin(tx)
+          builtin(store, tx)
               .insertModelInvocation(
                   new ModelInvocation(
                       modelId,
@@ -553,12 +553,12 @@ class PostgresqlHarnessTransactionNotificationTest {
                       List.of(),
                       T1,
                       T1));
-          ModelInvocation model = builtin(tx).lockModelInvocation(modelId).orElseThrow();
-          builtin(tx).updateModelInvocation(model.markRunning(T1));
-          model = builtin(tx).lockModelInvocation(modelId).orElseThrow();
-          builtin(tx).updateModelInvocation(model.succeed(spec.response(), T1));
-          model = builtin(tx).lockModelInvocation(modelId).orElseThrow();
-          builtin(tx).updateModelInvocation(model.attachResultEntry(assistantEntryId, T1));
+          ModelInvocation model = builtin(store, tx).lockModelInvocation(modelId).orElseThrow();
+          builtin(store, tx).updateModelInvocation(model.markRunning(T1));
+          model = builtin(store, tx).lockModelInvocation(modelId).orElseThrow();
+          builtin(store, tx).updateModelInvocation(model.succeed(spec.response(), T1));
+          model = builtin(store, tx).lockModelInvocation(modelId).orElseThrow();
+          builtin(store, tx).updateModelInvocation(model.attachResultEntry(assistantEntryId, T1));
           tx.tools()
               .insert(
                   List.of(

@@ -15,6 +15,7 @@ import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupp
 import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.userMessageEntry;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.userMessagePayload;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreCallProbe.wrap;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.deriveChildStopRequestId;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.loadCommandsByThread;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -171,10 +172,11 @@ class HarnessRuntimeStopSubtreeTest {
 
     recording.stop(new StopCommand(child, TestIds.id(16), 0L));
 
-    assertTrue(locks.contains("lockTree:" + root.threadId()), "structural Stop keeps tree lock");
-    assertTrue(locks.contains("lockThread:" + child), "Stop locks the stopped subtree");
-    assertTrue(locks.contains("lockThread:" + root.threadId()), "Stop locks joined ancestors");
-    assertFalse(locks.contains("lockThread:" + sibling), "Stop must not lock unrelated siblings");
+    assertTrue(
+        locks.contains("threads.lockTree:" + root.threadId()), "structural Stop keeps tree lock");
+    assertTrue(locks.contains("threads.lock:" + child), "Stop locks the stopped subtree");
+    assertTrue(locks.contains("threads.lock:" + root.threadId()), "Stop locks joined ancestors");
+    assertFalse(locks.contains("threads.lock:" + sibling), "Stop must not lock unrelated siblings");
   }
 
   @Test
@@ -213,20 +215,20 @@ class HarnessRuntimeStopSubtreeTest {
             .sorted(UuidOrder.COMPARATOR)
             .toList());
     List<String> expectedLocks = new ArrayList<>();
-    expectedLocks.add("lockTree:" + root.threadId());
-    expectedLocks.add("lockSessionForKeyShare:" + root.sessionId());
+    expectedLocks.add("threads.lockTree:" + root.threadId());
+    expectedLocks.add("sessions.lockForKeyShare:" + root.sessionId());
     for (UUID threadId :
         List.of(parent, target, descendant).stream().sorted(UuidOrder.COMPARATOR).toList()) {
-      expectedLocks.add("lockThread:" + threadId);
+      expectedLocks.add("threads.lock:" + threadId);
     }
     assertEquals(
         expectedLocks,
         locks.stream()
             .filter(
                 op ->
-                    op.startsWith("lockTree:")
-                        || op.startsWith("lockSessionForKeyShare:")
-                        || op.startsWith("lockThread:"))
+                    op.startsWith("threads.lockTree:")
+                        || op.startsWith("sessions.lockForKeyShare:")
+                        || op.startsWith("threads.lock:"))
             .toList());
 
     ThreadJoin join = store.transaction(tx -> tx.joins().find(joinId).orElseThrow());
@@ -290,14 +292,14 @@ class HarnessRuntimeStopSubtreeTest {
             .map(StoppedThreadReceipt::threadId)
             .sorted(UuidOrder.COMPARATOR)
             .toList());
-    assertTrue(locks.contains("lockTree:" + root.threadId()));
-    assertTrue(locks.contains("lockThread:" + parent));
-    assertTrue(locks.contains("lockThread:" + child));
-    assertTrue(locks.contains("lockThread:" + sibling));
+    assertTrue(locks.contains("threads.lockTree:" + root.threadId()));
+    assertTrue(locks.contains("threads.lock:" + parent));
+    assertTrue(locks.contains("threads.lock:" + child));
+    assertTrue(locks.contains("threads.lock:" + sibling));
     assertTrue(
-        locks.contains("lockThread:" + root.threadId()), "direct parent of target is locked");
+        locks.contains("threads.lock:" + root.threadId()), "direct parent of target is locked");
     assertFalse(
-        locks.contains("lockThread:" + rootSibling), "unrelated sibling must not be locked");
+        locks.contains("threads.lock:" + rootSibling), "unrelated sibling must not be locked");
 
     ThreadJoin join = store.transaction(tx -> tx.joins().find(joinId).orElseThrow());
     assertTrue(join.matched());
@@ -589,10 +591,10 @@ class HarnessRuntimeStopSubtreeTest {
           ModelInvocation model =
               modelInvocationWithRequest(
                   modelId, childId, turnStartEntryId, userEntryId, modelRequest(), T1);
-          builtin(tx).insertModelInvocation(model);
+          builtin(store, tx).insertModelInvocation(model);
           ProviderResponse response = responseWithToolCalls();
-          builtin(tx).updateModelInvocation(model.markRunning(T2));
-          builtin(tx).updateModelInvocation(model.markRunning(T2).succeed(response, T2));
+          builtin(store, tx).updateModelInvocation(model.markRunning(T2));
+          builtin(store, tx).updateModelInvocation(model.markRunning(T2).succeed(response, T2));
 
           tx.joins()
               .insert(
@@ -661,19 +663,17 @@ class HarnessRuntimeStopSubtreeTest {
               return delegate.transaction(
                   tx -> {
                     HarnessStore.Transaction wrapped =
-                        (HarnessStore.Transaction)
-                            Proxy.newProxyInstance(
-                                HarnessStore.Transaction.class.getClassLoader(),
-                                new Class<?>[] {BuiltinStore.Transaction.class},
-                                (transactionProxy, transactionMethod, transactionArgs) -> {
-                                  String name = transactionMethod.getName();
-                                  if (name.equals("lockTree")
-                                      || name.equals("lockSessionForKeyShare")
-                                      || name.equals("lockThread")) {
-                                    lockCalls.add(name + ":" + transactionArgs[0]);
-                                  }
-                                  return transactionMethod.invoke(tx, transactionArgs);
-                                });
+                        wrap(
+                            tx,
+                            (call, next) -> {
+                              String name = call.operation();
+                              if (name.equals("threads.lockTree")
+                                  || name.equals("sessions.lockForKeyShare")
+                                  || name.equals("threads.lock")) {
+                                lockCalls.add(name + ":" + call.argument(0));
+                              }
+                              return next.invoke();
+                            });
                     return callback.apply(wrapped);
                   });
             });

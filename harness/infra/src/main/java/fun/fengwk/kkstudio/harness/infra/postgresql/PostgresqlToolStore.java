@@ -34,7 +34,9 @@ import java.util.Set;
 import java.util.UUID;
 
 /** ToolInvocation 聚合的 PostgreSQL 实现。 */
-final class PostgresqlToolStore extends PostgresqlHarnessView implements ToolStore {
+final class PostgresqlToolStore implements ToolStore {
+
+  private final PostgresqlHarnessTransaction tx;
 
   /**
    * 「等待环境」只读聚合查询：按 {@code (真实执行根, 冻结的所需环境)} 分组，代表取组内最早 {@code (created_at, id)}。
@@ -105,13 +107,13 @@ final class PostgresqlToolStore extends PostgresqlHarnessView implements ToolSto
   private record ToolCallIndexKey(UUID assistantEntryId, int callIndex) {}
 
   PostgresqlToolStore(PostgresqlHarnessTransaction tx) {
-    super(tx);
+    this.tx = tx;
   }
 
   @Override
   public Optional<ToolInvocation> find(UUID id) {
-    checkOpen();
-    return queryOne(
+    tx.checkOpen();
+    return tx.queryOne(
         "select * from harness_tool_invocation where id = ?",
         PostgresqlHarnessRows.TOOL_INVOCATION,
         id);
@@ -119,25 +121,25 @@ final class PostgresqlToolStore extends PostgresqlHarnessView implements ToolSto
 
   @Override
   public Optional<ToolInvocation> lock(UUID id) {
-    checkOpen();
+    tx.checkOpen();
     Optional<ToolInvocation> current = tx.tools().find(id);
     if (current.isEmpty()) {
       return Optional.empty();
     }
-    requireCanLockTools(current.stream().toList());
+    tx.requireCanLockTools(current.stream().toList());
     Optional<ToolInvocation> invocation =
-        queryOne(
+        tx.queryOne(
             "select * from harness_tool_invocation where id = ? for update",
             PostgresqlHarnessRows.TOOL_INVOCATION,
             id);
-    invocation.ifPresent(this::lockTool);
+    invocation.ifPresent(tx::lockTool);
     return invocation;
   }
 
   @Override
   public List<ToolInvocation> loadByAssistantEntry(UUID assistantEntryId) {
-    checkOpen();
-    return queryList(
+    tx.checkOpen();
+    return tx.queryList(
         """
         select *
         from harness_tool_invocation
@@ -150,12 +152,12 @@ final class PostgresqlToolStore extends PostgresqlHarnessView implements ToolSto
 
   @Override
   public List<ToolInvocation> lockByAssistantEntry(UUID assistantEntryId) {
-    checkOpen();
+    tx.checkOpen();
     // Work-stage reentry requires every current sibling to be already locked.
     List<ToolInvocation> current = tx.tools().loadByAssistantEntry(assistantEntryId);
-    requireCanLockTools(current);
+    tx.requireCanLockTools(current);
     List<ToolInvocation> invocations =
-        queryList(
+        tx.queryList(
             """
             select *
             from harness_tool_invocation
@@ -166,7 +168,7 @@ final class PostgresqlToolStore extends PostgresqlHarnessView implements ToolSto
             PostgresqlHarnessRows.TOOL_INVOCATION,
             assistantEntryId);
     for (ToolInvocation invocation : invocations) {
-      lockTool(invocation);
+      tx.lockTool(invocation);
     }
     return invocations;
   }
@@ -174,13 +176,13 @@ final class PostgresqlToolStore extends PostgresqlHarnessView implements ToolSto
   @Override
   public List<PendingToolInvocationRow> listPending(
       Instant afterCreatedAt, UUID afterId, int limit) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(afterCreatedAt, "afterCreatedAt");
     Objects.requireNonNull(afterId, "afterId");
     if (limit <= 0) {
       throw new IllegalArgumentException("limit must be positive");
     }
-    return queryList(
+    return tx.queryList(
         """
         select t.*, t.thread_id as pending_thread_id, th.session_id as pending_session_id
         from harness_tool_invocation t
@@ -199,13 +201,13 @@ final class PostgresqlToolStore extends PostgresqlHarnessView implements ToolSto
   @Override
   public List<PendingEnvironmentWaitRow> listPendingEnvironmentWaits(
       Instant afterRepresentativeCreatedAt, UUID afterRepresentativeInvocationId, int limit) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(afterRepresentativeCreatedAt, "afterRepresentativeCreatedAt");
     Objects.requireNonNull(afterRepresentativeInvocationId, "afterRepresentativeInvocationId");
     if (limit <= 0) {
       throw new IllegalArgumentException("limit must be positive");
     }
-    return queryList(
+    return tx.queryList(
         LIST_PENDING_ENVIRONMENT_WAITS,
         PostgresqlHarnessRows.PENDING_ENVIRONMENT_WAIT,
         PostgresqlHarnessRows.timestamp(afterRepresentativeCreatedAt),
@@ -215,13 +217,13 @@ final class PostgresqlToolStore extends PostgresqlHarnessView implements ToolSto
 
   @Override
   public List<EnvironmentToolWaitRow> listEnvironmentWaits(Collection<UUID> invocationIds) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(invocationIds, "invocationIds");
     List<UUID> ids = List.copyOf(invocationIds);
     if (ids.isEmpty()) {
       return List.of();
     }
-    return queryList(
+    return tx.queryList(
         """
         select i.id as invocation_id,
                w.required_environment_id,
@@ -254,21 +256,21 @@ final class PostgresqlToolStore extends PostgresqlHarnessView implements ToolSto
         left join environment e on e.id = w.required_environment_id
         where i.id in (%s)
         """
-            .formatted(placeholders(ids.size())),
+            .formatted(PostgresqlHarnessTransaction.placeholders(ids.size())),
         PostgresqlHarnessRows.ENVIRONMENT_TOOL_WAIT,
         ids.toArray());
   }
 
   @Override
   public Optional<Instant> findNextEnvironmentWaitChange() {
-    checkOpen();
-    Timestamp nextChangeAt = queryForObject(NEXT_ENVIRONMENT_WAIT_CHANGE, Timestamp.class);
+    tx.checkOpen();
+    Timestamp nextChangeAt = tx.queryForObject(NEXT_ENVIRONMENT_WAIT_CHANGE, Timestamp.class);
     return Optional.ofNullable(nextChangeAt).map(Timestamp::toInstant);
   }
 
   @Override
   public void insert(List<ToolInvocation> invocations) {
-    checkOpen();
+    tx.checkOpen();
     List<ToolInvocation> copied =
         List.copyOf(invocations).stream()
             .sorted(PostgresqlHarnessTransaction.TOOL_LOCK_ORDER)
@@ -302,10 +304,10 @@ final class PostgresqlToolStore extends PostgresqlHarnessView implements ToolSto
       requireUniqueToolCallIndex(invocation);
       requireValidToolReferences(invocation);
     }
-    requireCanLockTools(copied);
+    tx.requireCanLockTools(copied);
     for (ToolInvocation invocation : copied) {
       // 仅等待态需要交互失效；本原语按上方不变量只创建 READY/FAILED，因此插入永不发布交互失效信号。
-      updateJdbc(
+      tx.updateJdbc(
           """
           insert into harness_tool_invocation (
               id, thread_id, turn_start_entry_id, assistant_entry_id, call_index, call, binding, status, attempt,
@@ -331,13 +333,13 @@ final class PostgresqlToolStore extends PostgresqlHarnessView implements ToolSto
           PostgresqlHarnessRows.timestamp(invocation.createdAt()),
           PostgresqlHarnessRows.timestamp(invocation.updatedAt()),
           encodeToolInputReceipt(invocation));
-      lockTool(invocation);
+      tx.lockTool(invocation);
     }
   }
 
   @Override
   public void update(List<ToolInvocation> invocations) {
-    checkOpen();
+    tx.checkOpen();
     List<ToolInvocation> copied =
         List.copyOf(invocations).stream()
             .sorted(PostgresqlHarnessTransaction.TOOL_LOCK_ORDER)
@@ -350,7 +352,7 @@ final class PostgresqlToolStore extends PostgresqlHarnessView implements ToolSto
       if (!ids.add(invocation.id())) {
         throw new IllegalArgumentException("duplicate tool invocation id " + invocation.id());
       }
-      requireLocked(LockKey.tool(invocation.id()));
+      tx.requireLocked(LockKey.tool(invocation.id()));
       ToolInvocation stored =
           tx.tools()
               .find(invocation.id())
@@ -367,7 +369,7 @@ final class PostgresqlToolStore extends PostgresqlHarnessView implements ToolSto
     }
     for (ToolInvocation invocation : copied) {
       int updated =
-          updateJdbc(
+          tx.updateJdbc(
               """
               update harness_tool_invocation
               set status = ?,
@@ -389,16 +391,16 @@ final class PostgresqlToolStore extends PostgresqlHarnessView implements ToolSto
               PostgresqlHarnessRows.timestamp(invocation.updatedAt()),
               encodeToolInputReceipt(invocation),
               invocation.id());
-      requireSingleUpdate(updated, "tool invocation", invocation.id());
+      tx.requireSingleUpdate(updated, "tool invocation", invocation.id());
     }
     for (UUID interactionId : interactionIds) {
-      notifyToolInteraction(tx.executionRootOfToolInvocation(interactionId));
+      tx.notifyToolInteraction(tx.executionRootOfToolInvocation(interactionId));
     }
   }
 
   @Override
   public int deleteByIds(List<UUID> toolInvocationIds) {
-    checkOpen();
+    tx.checkOpen();
     List<UUID> copied =
         List.copyOf(toolInvocationIds).stream().sorted(UuidOrder.COMPARATOR).toList();
     for (int i = 1; i < copied.size(); i++) {
@@ -417,7 +419,7 @@ final class PostgresqlToolStore extends PostgresqlHarnessView implements ToolSto
                   () ->
                       new IllegalArgumentException(
                           "tool invocation " + toolInvocationId + " does not exist"));
-      requireLocked(LockKey.tool(toolInvocationId));
+      tx.requireLocked(LockKey.tool(toolInvocationId));
       if (PostgresqlHarnessTransaction.isWaitingInteraction(stored.status())) {
         interactionRoots.add(tx.executionRootOfToolInvocation(toolInvocationId));
       }
@@ -427,18 +429,18 @@ final class PostgresqlToolStore extends PostgresqlHarnessView implements ToolSto
     }
     for (UUID toolInvocationId : copied) {
       int deleted =
-          updateJdbc("delete from harness_tool_invocation where id = ?", toolInvocationId);
-      requireSingleUpdate(deleted, "tool invocation", toolInvocationId);
+          tx.updateJdbc("delete from harness_tool_invocation where id = ?", toolInvocationId);
+      tx.requireSingleUpdate(deleted, "tool invocation", toolInvocationId);
     }
     for (UUID interactionRoot : interactionRoots) {
-      notifyToolInteraction(interactionRoot);
+      tx.notifyToolInteraction(interactionRoot);
     }
     return copied.size();
   }
 
   private void requireUniqueToolCallIndex(ToolInvocation invocation) {
     Boolean exists =
-        queryForObject(
+        tx.queryForObject(
             """
             select exists (
                 select 1
@@ -469,7 +471,7 @@ final class PostgresqlToolStore extends PostgresqlHarnessView implements ToolSto
     if (invocation.binding() == null && invocation.status() != ToolInvocationStatus.FAILED) {
       throw new IllegalArgumentException("unbound tool invocations must be terminal FAILED slots");
     }
-    Entry turnStart = requireExistingEntry(invocation.turnStartEntryId());
+    Entry turnStart = tx.requireExistingEntry(invocation.turnStartEntryId());
     if (turnStart.payload().type() != EntryType.TURN_START
         || !(turnStart.payload() instanceof TurnStartPayload start)) {
       throw new IllegalArgumentException("turnStartEntryId must reference a TURN_START entry");
@@ -479,7 +481,7 @@ final class PostgresqlToolStore extends PostgresqlHarnessView implements ToolSto
       throw new IllegalArgumentException(
           "turn start must belong to the tool invocation thread and session");
     }
-    Entry assistant = requireExistingEntry(invocation.assistantEntryId());
+    Entry assistant = tx.requireExistingEntry(invocation.assistantEntryId());
     if (!isAssistantEntry(assistant)) {
       throw new IllegalArgumentException(
           "assistantEntryId must reference an assistant MESSAGE entry");

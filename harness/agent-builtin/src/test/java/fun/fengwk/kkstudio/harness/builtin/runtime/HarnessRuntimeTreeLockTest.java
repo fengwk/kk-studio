@@ -6,6 +6,7 @@ import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupp
 import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.seedToolBaseline;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.setWaitingApproval;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreCallProbe.wrap;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -103,7 +104,7 @@ class HarnessRuntimeTreeLockTest {
           return null;
         });
 
-    assertEquals(List.of("lockTree:" + baseline.threadId()), locks);
+    assertEquals(List.of("threads.lockTree:" + baseline.threadId()), locks);
   }
 
   @Test
@@ -128,7 +129,7 @@ class HarnessRuntimeTreeLockTest {
           ThreadTreeLocks.lockForThread(tx, childId);
           return null;
         });
-    assertEquals(List.of("lockTree:" + baseline.threadId()), childLocks);
+    assertEquals(List.of("threads.lockTree:" + baseline.threadId()), childLocks);
 
     List<String> grandChildLocks = new ArrayList<>();
     HarnessStore grandChildRecording = recordingStore(store, grandChildLocks);
@@ -137,7 +138,7 @@ class HarnessRuntimeTreeLockTest {
           ThreadTreeLocks.lockForThread(tx, grandChildId);
           return null;
         });
-    assertEquals(List.of("lockTree:" + baseline.threadId()), grandChildLocks);
+    assertEquals(List.of("threads.lockTree:" + baseline.threadId()), grandChildLocks);
   }
 
   @Test
@@ -151,12 +152,12 @@ class HarnessRuntimeTreeLockTest {
         recording.transaction(tx -> ThreadTreeLocks.lockForThread(tx, nonExistentId));
 
     assertTrue(found.isEmpty());
-    assertEquals(List.of("lockTree:" + nonExistentId), locks);
+    assertEquals(List.of("threads.lockTree:" + nonExistentId), locks);
   }
 
   /** 构造「加树锁后行锁读不到 Thread」的 Store，模拟持树锁的并发深删除在锁等待期间提交。 */
   private HarnessStore threadDeletedWhileAcquiringTreeLockStore() {
-    return sabotagingStore(store, Map.of("lockThread", args -> Optional.empty()));
+    return sabotagingStore(store, Map.of("threads.lock", args -> Optional.empty()));
   }
 
   @Test
@@ -173,9 +174,9 @@ class HarnessRuntimeTreeLockTest {
     assertNotNull(locked);
     assertEquals(
         List.of(
-            "lockTree:" + baseline.threadId(),
-            "lockSessionForKeyShare:" + baseline.sessionId(),
-            "lockThread:" + baseline.threadId()),
+            "threads.lockTree:" + baseline.threadId(),
+            "sessions.lockForKeyShare:" + baseline.sessionId(),
+            "threads.lock:" + baseline.threadId()),
         locks);
   }
 
@@ -214,9 +215,9 @@ class HarnessRuntimeTreeLockTest {
     assertNull(locked);
     assertEquals(
         List.of(
-            "findThread:" + baseline.threadId(),
-            "lockTree:" + baseline.threadId(),
-            "findThread:" + baseline.threadId()),
+            "threads.find:" + baseline.threadId(),
+            "threads.lockTree:" + baseline.threadId(),
+            "threads.find:" + baseline.threadId()),
         operations);
   }
 
@@ -239,7 +240,7 @@ class HarnessRuntimeTreeLockTest {
     ThreadState renamed =
         recordingRuntime.renameThread(new RenameThreadCommand(childId, "new-child-name"));
     assertEquals("new-child-name", renamed.name());
-    assertEquals(List.of("lockThread:" + childId), locks);
+    assertEquals(List.of("threads.lock:" + childId), locks);
   }
 
   @Test
@@ -255,7 +256,7 @@ class HarnessRuntimeTreeLockTest {
     ThreadState updated =
         recordingRuntime.setThreadYolo(new SetThreadYoloCommand(baseline.threadId(), true));
     assertTrue(updated.yoloEnabled());
-    assertEquals(List.of("lockThread:" + baseline.threadId()), locks);
+    assertEquals(List.of("threads.lock:" + baseline.threadId()), locks);
   }
 
   @Test
@@ -280,8 +281,8 @@ class HarnessRuntimeTreeLockTest {
     assertEquals(ToolInvocationStatus.READY, decided.status());
     assertEquals(
         List.of(
-            "lockThread:" + baseline.threadId(),
-            "lockToolInvocationsByAssistantEntryId:" + baseline.assistantEntryId()),
+            "threads.lock:" + baseline.threadId(),
+            "tools.lockByAssistantEntry:" + baseline.assistantEntryId()),
         locks);
   }
 
@@ -303,7 +304,7 @@ class HarnessRuntimeTreeLockTest {
 
     ThreadSnapshot snapshot = recordingRuntime.getThreadSnapshot(childId);
     assertNotNull(snapshot);
-    assertEquals(List.of("lockThread:" + childId), locks);
+    assertEquals(List.of("threads.lock:" + childId), locks);
   }
 
   @Test
@@ -327,9 +328,9 @@ class HarnessRuntimeTreeLockTest {
     assertFalse(availability.available());
     assertEquals(
         List.of(
-            "lockTree:" + baseline.threadId(),
-            "lockSessionForKeyShare:" + baseline.sessionId(),
-            "lockThread:" + childId),
+            "threads.lockTree:" + baseline.threadId(),
+            "sessions.lockForKeyShare:" + baseline.sessionId(),
+            "threads.lock:" + childId),
         locks);
   }
 
@@ -356,7 +357,7 @@ class HarnessRuntimeTreeLockTest {
             .store
             .transaction(
                 tx ->
-                    builtin(tx)
+                    builtin(store, tx)
                         .findModelInvocationByTurn(baseline.threadId(), result.turnStartEntryId()))
             .isEmpty());
     assertNotNull(
@@ -375,9 +376,9 @@ class HarnessRuntimeTreeLockTest {
     // 结构性写入仍需完整锁序，但只在该事务内获取一次。
     assertEquals(
         List.of(
-            "lockTree:" + baseline.threadId(),
-            "lockSessionForKeyShare:" + baseline.sessionId(),
-            "lockThread:" + baseline.threadId()),
+            "threads.lockTree:" + baseline.threadId(),
+            "sessions.lockForKeyShare:" + baseline.sessionId(),
+            "threads.lock:" + baseline.threadId()),
         locks);
   }
 
@@ -390,7 +391,7 @@ class HarnessRuntimeTreeLockTest {
         sabotagingStore(
             fixture.store,
             Map.of(
-                "lockTree",
+                "threads.lockTree",
                 args -> {
                   throw new IllegalStateException("simulated tree lock conflict");
                 }));
@@ -423,7 +424,7 @@ class HarnessRuntimeTreeLockTest {
         sabotagingStore(
             store,
             Map.of(
-                "lockThread",
+                "threads.lock",
                 args -> {
                   throw new IllegalStateException("simulated thread lock conflict");
                 }));
@@ -490,23 +491,21 @@ class HarnessRuntimeTreeLockTest {
                 return delegate.transaction(
                     tx -> {
                       HarnessStore.Transaction wrapped =
-                          (HarnessStore.Transaction)
-                              Proxy.newProxyInstance(
-                                  HarnessStore.Transaction.class.getClassLoader(),
-                                  new Class<?>[] {BuiltinStore.Transaction.class},
-                                  (transactionProxy, transactionMethod, transactionArgs) -> {
-                                    String name = transactionMethod.getName();
-                                    if (name.equals("lockTree")
-                                        || name.equals("lockSessionForKeyShare")
-                                        || name.equals("lockSessionForUpdate")
-                                        || name.equals("lockThread")
-                                        || name.equals("lockModelInvocation")
-                                        || name.equals("lockToolInvocation")
-                                        || name.equals("lockToolInvocationsByAssistantEntryId")) {
-                                      lockCalls.add(name + ":" + transactionArgs[0]);
-                                    }
-                                    return transactionMethod.invoke(tx, transactionArgs);
-                                  });
+                          wrap(
+                              tx,
+                              (call, next) -> {
+                                String name = call.operation();
+                                if (name.equals("threads.lockTree")
+                                    || name.equals("sessions.lockForKeyShare")
+                                    || name.equals("sessions.lockForUpdate")
+                                    || name.equals("threads.lock")
+                                    || name.equals("lockModelInvocation")
+                                    || name.equals("tools.lock")
+                                    || name.equals("tools.lockByAssistantEntry")) {
+                                  lockCalls.add(name + ":" + call.argument(0));
+                                }
+                                return next.invoke();
+                              });
                       return callback.apply(wrapped);
                     });
               }
@@ -531,26 +530,23 @@ class HarnessRuntimeTreeLockTest {
               return store.transaction(
                   tx -> {
                     HarnessStore.Transaction wrapped =
-                        (HarnessStore.Transaction)
-                            Proxy.newProxyInstance(
-                                HarnessStore.Transaction.class.getClassLoader(),
-                                new Class<?>[] {BuiltinStore.Transaction.class},
-                                (transactionProxy, transactionMethod, transactionArgs) -> {
-                                  String name = transactionMethod.getName();
-                                  if (name.startsWith("lock")
-                                      || (name.equals("findThread")
-                                          && threadId.equals(transactionArgs[0]))) {
-                                    operations.add(name + ":" + transactionArgs[0]);
-                                  }
-                                  if (name.equals("findThread")
-                                      && threadId.equals(transactionArgs[0])) {
-                                    if (firstRead.compareAndSet(true, false)) {
-                                      return transactionMethod.invoke(tx, transactionArgs);
-                                    }
-                                    return Optional.empty();
-                                  }
-                                  return transactionMethod.invoke(tx, transactionArgs);
-                                });
+                        wrap(
+                            tx,
+                            (call, next) -> {
+                              String name = call.operation();
+                              Object argument = call.argument(0);
+                              if (name.contains(".lock")
+                                  || (name.equals("threads.find") && threadId.equals(argument))) {
+                                operations.add(name + ":" + argument);
+                              }
+                              if (name.equals("threads.find") && threadId.equals(argument)) {
+                                if (firstRead.compareAndSet(true, false)) {
+                                  return next.invoke();
+                                }
+                                return Optional.empty();
+                              }
+                              return next.invoke();
+                            });
                     return callback.apply(wrapped);
                   });
             });
@@ -570,18 +566,16 @@ class HarnessRuntimeTreeLockTest {
                 return delegate.transaction(
                     tx -> {
                       HarnessStore.Transaction wrapped =
-                          (HarnessStore.Transaction)
-                              Proxy.newProxyInstance(
-                                  HarnessStore.Transaction.class.getClassLoader(),
-                                  new Class<?>[] {BuiltinStore.Transaction.class},
-                                  (transactionProxy, transactionMethod, transactionArgs) -> {
-                                    String name = transactionMethod.getName();
-                                    Function<Object[], Object> override = overrides.get(name);
-                                    if (override != null) {
-                                      return override.apply(transactionArgs);
-                                    }
-                                    return transactionMethod.invoke(tx, transactionArgs);
-                                  });
+                          wrap(
+                              tx,
+                              (call, next) -> {
+                                Function<Object[], Object> override =
+                                    overrides.get(call.operation());
+                                if (override != null) {
+                                  return override.apply(call.arguments());
+                                }
+                                return next.invoke();
+                              });
                       return callback.apply(wrapped);
                     });
               }

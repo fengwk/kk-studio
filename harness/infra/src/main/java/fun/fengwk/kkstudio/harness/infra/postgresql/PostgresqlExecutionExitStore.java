@@ -12,18 +12,19 @@ import java.util.Optional;
 import java.util.UUID;
 
 /** ExecutionExit 聚合的 PostgreSQL 实现。 */
-final class PostgresqlExecutionExitStore extends PostgresqlHarnessView
-    implements ExecutionExitStore {
+final class PostgresqlExecutionExitStore implements ExecutionExitStore {
+
+  private final PostgresqlHarnessTransaction tx;
 
   PostgresqlExecutionExitStore(PostgresqlHarnessTransaction tx) {
-    super(tx);
+    this.tx = tx;
   }
 
   @Override
   public ExecutionExitFact register(ExecutionExitFact fact) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(fact, "fact");
-    requireLocked(LockKey.thread(fact.threadId()));
+    tx.requireLocked(LockKey.thread(fact.threadId()));
     if (tx.threads().find(fact.threadId()).isEmpty()) {
       throw new IllegalArgumentException("thread " + fact.threadId() + " does not exist");
     }
@@ -40,7 +41,7 @@ final class PostgresqlExecutionExitStore extends PostgresqlHarnessView
       }
       fact.requireRemoteParent(parent);
     }
-    updateJdbc(
+    tx.updateJdbc(
         """
         insert into harness_execution_exit (
             execution_id, thread_id, invocation_id, attempt, owner_lease_token, kind,
@@ -64,7 +65,7 @@ final class PostgresqlExecutionExitStore extends PostgresqlHarnessView
   @Override
   public Optional<ExecutionExitFact> confirm(
       ExecutionExitFact expected, ExecutionExitState state, Instant confirmedAt) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(expected, "expected");
     Objects.requireNonNull(state, "state");
     Objects.requireNonNull(confirmedAt, "confirmedAt");
@@ -75,7 +76,7 @@ final class PostgresqlExecutionExitStore extends PostgresqlHarnessView
     if (stored == null) {
       return Optional.empty();
     }
-    requireLocked(LockKey.thread(stored.threadId()));
+    tx.requireLocked(LockKey.thread(stored.threadId()));
     requireSameExecutionIdentity(stored, expected);
     if (stored.state() == state) {
       return Optional.of(stored);
@@ -85,7 +86,7 @@ final class PostgresqlExecutionExitStore extends PostgresqlHarnessView
           "execution " + stored.executionId() + " is already confirmed as " + stored.state());
     }
     ExecutionExitFact confirmed = stored.confirm(state, confirmedAt);
-    updateJdbc(
+    tx.updateJdbc(
         """
         update harness_execution_exit
            set state = ?, confirmed_at = ?
@@ -99,20 +100,20 @@ final class PostgresqlExecutionExitStore extends PostgresqlHarnessView
 
   @Override
   public Optional<ExecutionExitFact> abandon(ExecutionExitFact expected, Instant abandonedAt) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(expected, "expected");
     Objects.requireNonNull(abandonedAt, "abandonedAt");
     ExecutionExitFact stored = tx.exits().find(expected.executionId()).orElse(null);
     if (stored == null) {
       return Optional.empty();
     }
-    requireLocked(LockKey.thread(stored.threadId()));
+    tx.requireLocked(LockKey.thread(stored.threadId()));
     requireSameExecutionIdentity(stored, expected);
     ExecutionExitFact abandoned = stored.abandon(abandonedAt);
     if (abandoned == stored) {
       return Optional.of(stored);
     }
-    updateJdbc(
+    tx.updateJdbc(
         """
         update harness_execution_exit
            set state = 'ABANDONED', abandoned_at = ?
@@ -125,9 +126,9 @@ final class PostgresqlExecutionExitStore extends PostgresqlHarnessView
 
   @Override
   public List<ExecutionExitFact> loadUnconfirmed(UUID threadId) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(threadId, "threadId");
-    return queryList(
+    return tx.queryList(
         """
         select * from harness_execution_exit
          where thread_id = ? and state = 'UNCONFIRMED'
@@ -139,9 +140,9 @@ final class PostgresqlExecutionExitStore extends PostgresqlHarnessView
 
   @Override
   public Optional<ExecutionExitFact> find(UUID executionId) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(executionId, "executionId");
-    return queryOne(
+    return tx.queryOne(
         "select * from harness_execution_exit where execution_id = ?",
         PostgresqlHarnessRows.EXECUTION_EXIT,
         executionId);

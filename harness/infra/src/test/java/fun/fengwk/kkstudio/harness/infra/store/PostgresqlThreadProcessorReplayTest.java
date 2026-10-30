@@ -97,7 +97,7 @@ class PostgresqlThreadProcessorReplayTest {
             tx -> {
               tx.threads().lock(baseline.threadId()).orElseThrow();
               UUID id = tx.nextId();
-              builtin(tx)
+              builtin(store, tx)
                   .insertModelInvocation(
                       new ModelInvocation(
                           id,
@@ -114,10 +114,10 @@ class PostgresqlThreadProcessorReplayTest {
                           List.of(),
                           T2,
                           T2));
-              var model = builtin(tx).lockModelInvocation(id).orElseThrow();
-              builtin(tx).updateModelInvocation(model.markRunning(T2));
-              model = builtin(tx).lockModelInvocation(id).orElseThrow();
-              builtin(tx).updateModelInvocation(model.succeed(response, null, replay, T2));
+              var model = builtin(store, tx).lockModelInvocation(id).orElseThrow();
+              builtin(store, tx).updateModelInvocation(model.markRunning(T2));
+              model = builtin(store, tx).lockModelInvocation(id).orElseThrow();
+              builtin(store, tx).updateModelInvocation(model.succeed(response, null, replay, T2));
               return id;
             });
 
@@ -125,7 +125,7 @@ class PostgresqlThreadProcessorReplayTest {
         store.transaction(
             tx -> {
               var thread = tx.threads().lock(baseline.threadId()).orElseThrow();
-              var model = builtin(tx).lockModelInvocation(modelId).orElseThrow();
+              var model = builtin(store, tx).lockModelInvocation(modelId).orElseThrow();
               UUID id = tx.nextId();
               tx.entries()
                   .insert(
@@ -136,7 +136,7 @@ class PostgresqlThreadProcessorReplayTest {
                           mappedAssistant(request, response),
                           T3,
                           replay));
-              builtin(tx).updateModelInvocation(model.attachResultEntry(id, T3));
+              builtin(store, tx).updateModelInvocation(model.attachResultEntry(id, T3));
               tx.threads().update(thread.advanceHead(id, T3));
               tx.tools()
                   .insert(
@@ -188,7 +188,11 @@ class PostgresqlThreadProcessorReplayTest {
         });
     assertNull(
         store.transaction(
-            tx -> builtin(tx).findModelInvocation(modelId).orElseThrow().providerReplayState()));
+            tx ->
+                builtin(store, tx)
+                    .findModelInvocation(modelId)
+                    .orElseThrow()
+                    .providerReplayState()));
     assertEquals(
         replay,
         store.transaction(
@@ -233,7 +237,8 @@ class PostgresqlThreadProcessorReplayTest {
       TurnEndPayload batchEnd = assertInstanceOf(TurnEndPayload.class, applied.head().payload());
       assertEquals(TurnEndOutcome.COMPLETED, batchEnd.outcome());
       assertTrue(batchEnd.continueModel());
-      assertTrue(store.transaction(tx -> builtin(tx).findModelInvocation(modelId)).isEmpty());
+      assertTrue(
+          store.transaction(tx -> builtin(store, tx).findModelInvocation(modelId)).isEmpty());
       assertTrue(store.transaction(tx -> tx.tools().loadByAssistantEntry(assistantId)).isEmpty());
       assertTrue(store.transaction(tx -> tx.work().find(target)).isPresent());
 
