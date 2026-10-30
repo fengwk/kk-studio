@@ -457,7 +457,7 @@ null 表示强制直连；`noProxyHosts` 为逗号分隔绕过规则，默认 `l
 | `kk-studio.cluster` | 节点注册与节点间内部认证 |
 | `kk-studio.harness.environment-gateway` | Daemon 帧、出站队列和发送预算，由 Web 拥有 |
 
-应用模块各自拥有部署参数：`kk-studio.project.controller` 属于 [Project](project.md)，`kk-studio.canvas.function.runtime`
+应用模块各自拥有部署参数：`kk-studio.project.reconcile` 属于 [Project](project.md)，`kk-studio.canvas.function.runtime`
 属于 [Canvas](canvas.md#部署参数)，`kk-studio.harness.ide-gateway` 属于 Web 的同源 IDE 网关。
 
 默认值和完整字段以对应配置类及

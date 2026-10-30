@@ -1,40 +1,319 @@
 package fun.fengwk.kkstudio.project.service;
 
-import fun.fengwk.kkstudio.project.model.Project;
+import lombok.AllArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
+import fun.fengwk.kkstudio.platform.orchestration.OwnerRef;
+import fun.fengwk.kkstudio.platform.orchestration.SessionDeletionOrchestrator;
+import fun.fengwk.kkstudio.project.domain.ProjectStateCode;
+import fun.fengwk.kkstudio.project.domain.ProjectWorkflow;
+import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
+import fun.fengwk.kkstudio.project.domain.ProjectWorkflowReservedState;
+import fun.fengwk.kkstudio.project.domain.ProjectWorkflowState;
+import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
+import fun.fengwk.kkstudio.project.error.ProjectValidationException;
+import fun.fengwk.kkstudio.project.error.ProjectVersionConflictException;
+import fun.fengwk.kkstudio.project.model.Issue;
+import fun.fengwk.kkstudio.project.model.IssueAgentThread;
+import fun.fengwk.kkstudio.project.model.PauseReason;
+import fun.fengwk.kkstudio.project.model.Project;
+import fun.fengwk.kkstudio.project.repo.IssueActivityRepository;
+import fun.fengwk.kkstudio.project.repo.IssueAgentThreadRepository;
+import fun.fengwk.kkstudio.project.repo.IssueRepository;
+import fun.fengwk.kkstudio.project.repo.IssueRunRepository;
+import fun.fengwk.kkstudio.project.repo.IssueStageBudgetRepository;
+import fun.fengwk.kkstudio.project.repo.ProjectRepository;
+import fun.fengwk.kkstudio.work.DurableWorkQueue;
+
+import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 
 /**
- * Project 配置用例：workflow 整体保存、严格校验与版本 CAS。
+ * Project 配置用例实现：所有写路径先持有 Project 行锁，再以版本 CAS 提交。
  *
- * <p>workflow 是唯一事实源；影响执行的结构、指令或职责绑定调整要求项目无活动主 Run。归档不删除历史与资源。
+ * <p>锁序与设计 §7.1 一致（Project 独占锁下改配置）。工作流替换在同一把锁下检查现存 Issue：当前状态与阻塞来源都必须仍在新 workflow 中，包含保留状态与已归档
+ * Issue；未被引用的编码可以删除。活动主 Run 检查只读取项目自身下级 Issue，绝不跨产品写入。
  */
-public interface ProjectService {
+@Service
+@AllArgsConstructor
+public class ProjectService {
 
-  /** 创建项目：生成 INIT→WORK→DONE 的默认工作流（WORK 为无 Agent 的人工阶段）。 */
-  Project createProject(String title, String description, boolean yoloEnabled);
+  /** 创建项目时提供的默认流程：INIT → WORK（人工阶段）→ DONE。 */
+  private static final ProjectWorkflow DEFAULT_WORKFLOW =
+      new ProjectWorkflow(
+          List.of(
+              new ProjectWorkflowState(
+                  ProjectStateCode.of("INIT"),
+                  "待开始",
+                  null,
+                  null,
+                  null,
+                  null,
+                  true,
+                  List.of(ProjectStateCode.of("WORK"))),
+              new ProjectWorkflowState(
+                  ProjectStateCode.of("WORK"),
+                  "处理中",
+                  null,
+                  null,
+                  null,
+                  null,
+                  true,
+                  List.of(ProjectStateCode.of("DONE"))),
+              new ProjectWorkflowState(
+                  ProjectWorkflowReservedState.BLOCKED.code(),
+                  "业务阻塞",
+                  null,
+                  null,
+                  null,
+                  null,
+                  true,
+                  List.of()),
+              new ProjectWorkflowState(
+                  ProjectWorkflowReservedState.DONE.code(),
+                  "完成",
+                  null,
+                  null,
+                  null,
+                  null,
+                  true,
+                  List.of())));
 
-  Project getProject(UUID projectId);
+  private final ProjectRepository projectRepository;
+  private final IssueRepository issueRepository;
+  private final IssueRunRepository issueRunRepository;
+  private final IssueEvidenceService issueEvidenceService;
+  private final IssueActivityRepository issueActivityRepository;
+  private final DurableWorkQueue issueWorkQueue;
+  private final IssueStageBudgetRepository issueStageBudgetRepository;
+  private final IssueAgentThreadRepository issueAgentThreadRepository;
+  private final SessionDeletionOrchestrator sessionDeletion;
+  private final ProjectWorkflowJsonCodec workflowCodec;
 
-  List<Project> listProjects(boolean archived);
+  @Transactional
+  public Project createProject(String title, String description, boolean yoloEnabled) {
+    String validTitle =
+        ProjectValidationUtils.requireDisplayName(
+            title, "title", ProjectValidationUtils.MAX_TITLE_LENGTH);
+    String validDescription =
+        ProjectValidationUtils.optionalUtf8Text(
+            description == null ? "" : description,
+            "description",
+            ProjectValidationUtils.MAX_DESCRIPTION_BYTES);
+    Project project =
+        Project.builder()
+            .id(UUID.randomUUID())
+            .title(validTitle)
+            .description(validDescription)
+            .workflowJson(workflowCodec.encode(DEFAULT_WORKFLOW))
+            .yoloEnabled(yoloEnabled)
+            .build();
+    if (!projectRepository.create(project)) {
+      throw new IllegalStateException("failed to insert project");
+    }
+    return projectRepository.getById(project.getId());
+  }
 
-  /** 编辑项目资料（标题与描述）；工作流与执行策略各自用专门操作修改。 */
-  Project updateConfiguration(
-      UUID projectId, long expectedVersion, String title, String description);
+  public Project getProject(UUID projectId) {
+    Objects.requireNonNull(projectId, "projectId");
+    Project project = projectRepository.getById(projectId);
+    if (project == null) {
+      throw new ProjectNotFoundException("project");
+    }
+    return project;
+  }
 
-  /** 以版本 CAS 整体替换 workflow 配置：严格解码 / 校验保留值、唯一编码、边、可达性与引用。 */
-  Project updateWorkflow(UUID projectId, long expectedVersion, String workflowJson);
+  public List<Project> listProjects(boolean archived) {
+    return projectRepository.listByArchived(archived);
+  }
 
-  /** 以版本 CAS 更新 YOLO 执行策略；接受与派发按当前策略对齐 Thread 设置。 */
-  Project updateYolo(UUID projectId, long expectedVersion, boolean yoloEnabled);
+  @Transactional
+  public Project updateConfiguration(
+      UUID projectId, long expectedVersion, String title, String description) {
+    Objects.requireNonNull(projectId, "projectId");
+    Project locked = lockProject(projectId);
+    requireEditable(locked);
+    requireVersion(locked, expectedVersion);
+    locked.setTitle(
+        ProjectValidationUtils.requireDisplayName(
+            title, "title", ProjectValidationUtils.MAX_TITLE_LENGTH));
+    locked.setDescription(
+        ProjectValidationUtils.optionalUtf8Text(
+            description == null ? "" : description,
+            "description",
+            ProjectValidationUtils.MAX_DESCRIPTION_BYTES));
+    return applyConfiguration(locked, expectedVersion);
+  }
 
-  /** 归档项目：归档后禁止执行，不删除历史与资源。 */
-  Project archiveProject(UUID projectId, long expectedVersion);
+  @Transactional
+  public Project updateWorkflow(UUID projectId, long expectedVersion, String workflowJson) {
+    Objects.requireNonNull(projectId, "projectId");
+    Project locked = lockProject(projectId);
+    requireEditable(locked);
+    requireVersion(locked, expectedVersion);
+    requireNoActiveRun(projectId);
+    ProjectWorkflow workflow = decodeWorkflow(workflowJson);
+    requireReferencedStatesRetained(projectId, workflow);
+    locked.setWorkflowJson(workflowCodec.encode(workflow));
+    return applyConfiguration(locked, expectedVersion);
+  }
 
-  /** 恢复归档项目：只回到可编辑状态，不自动新建 Run。 */
-  Project unarchiveProject(UUID projectId, long expectedVersion);
+  @Transactional
+  public Project updateYolo(UUID projectId, long expectedVersion, boolean yoloEnabled) {
+    Objects.requireNonNull(projectId, "projectId");
+    Project locked = lockProject(projectId);
+    requireEditable(locked);
+    requireVersion(locked, expectedVersion);
+    locked.setYoloEnabled(yoloEnabled);
+    return applyConfiguration(locked, expectedVersion);
+  }
 
-  /** 深删除项目：严格要求所有 Issue 无活动 Run 且无未核查的 UNKNOWN，按依赖顺序深删除全部 Issue 后删除项目。 */
-  void deleteProject(UUID projectId, long expectedVersion);
+  @Transactional
+  public Project archiveProject(UUID projectId, long expectedVersion) {
+    Objects.requireNonNull(projectId, "projectId");
+    Project locked = lockProject(projectId);
+    requireVersion(locked, expectedVersion);
+    requireNoActiveRun(projectId);
+    if (locked.isArchived()) {
+      // 当前版本已经归档：不重复写行。陈旧版本在版本校验时已被拒绝。
+      return locked;
+    }
+    if (!projectRepository.updateArchivedAt(projectId, Instant.now(), expectedVersion)) {
+      throw conflict(locked, expectedVersion);
+    }
+    return projectRepository.getById(projectId);
+  }
+
+  @Transactional
+  public Project unarchiveProject(UUID projectId, long expectedVersion) {
+    Objects.requireNonNull(projectId, "projectId");
+    Project locked = lockProject(projectId);
+    requireVersion(locked, expectedVersion);
+    if (!locked.isArchived()) {
+      // 当前版本已经可编辑：不重复写行。陈旧版本在版本校验时已被拒绝。
+      return locked;
+    }
+    if (!projectRepository.updateArchivedAt(projectId, null, expectedVersion)) {
+      throw conflict(locked, expectedVersion);
+    }
+    return projectRepository.getById(projectId);
+  }
+
+  @Transactional
+  public void deleteProject(UUID projectId, long expectedVersion) {
+    Objects.requireNonNull(projectId, "projectId");
+    Project locked = lockProject(projectId);
+    requireVersion(locked, expectedVersion);
+    List<Issue> issues = issueRepository.listByProjectId(projectId);
+    for (Issue issue : issues) {
+      if (issueRunRepository.lockActiveByIssueId(issue.getId()) != null) {
+        throw new ProjectValidationException(
+            "project",
+            "Cannot delete a project while an issue has an active run; stop or settle it first");
+      }
+      if (PauseReason.UNKNOWN.name().equals(issue.getPauseReason())) {
+        throw new ProjectValidationException(
+            "project",
+            "Cannot delete a project while an issue has an unresolved UNKNOWN gate; resolve unknown verification first");
+      }
+    }
+    for (Issue issue : issues) {
+      issueEvidenceService.releaseAll(issue.getId());
+      issueActivityRepository.deleteByIssueId(issue.getId());
+      issueWorkQueue.delete(issue.getId());
+      issueRunRepository.deleteByIssueId(issue.getId());
+      issueStageBudgetRepository.deleteByIssueId(issue.getId());
+      List<IssueAgentThread> bindings = issueAgentThreadRepository.listByIssueId(issue.getId());
+      for (IssueAgentThread binding : bindings) {
+        sessionDeletion.deleteSessionsByOwner(
+            new OwnerRef.IssueAgent(issue.getId(), binding.agentName()));
+      }
+      if (!issueRepository.deleteById(issue.getId(), issue.getVersion())) {
+        throw new ProjectVersionConflictException(
+            "issue", Long.toString(issue.getVersion()), Long.toString(issue.getVersion()));
+      }
+    }
+    if (!projectRepository.deleteById(projectId, expectedVersion)) {
+      throw conflict(locked, expectedVersion);
+    }
+  }
+
+  private ProjectWorkflow decodeWorkflow(String workflowJson) {
+    String json =
+        ProjectValidationUtils.requireUtf8Text(
+            workflowJson, "workflow", ProjectValidationUtils.MAX_LARGE_TEXT_BYTES);
+    try {
+      return workflowCodec.decode(json);
+    } catch (IllegalArgumentException error) {
+      throw ProjectValidationUtils.validation("workflow", error);
+    }
+  }
+
+  private Project applyConfiguration(Project locked, long expectedVersion) {
+    if (!projectRepository.updateConfiguration(locked, expectedVersion)) {
+      throw conflict(locked, expectedVersion);
+    }
+    return projectRepository.getById(locked.getId());
+  }
+
+  private Project lockProject(UUID projectId) {
+    Project locked = projectRepository.lockById(projectId);
+    if (locked == null) {
+      throw new ProjectNotFoundException("project");
+    }
+    return locked;
+  }
+
+  private void requireVersion(Project locked, long expectedVersion) {
+    if (locked.getVersion() != expectedVersion) {
+      throw conflict(locked, expectedVersion);
+    }
+  }
+
+  /** 归档项目禁止任何配置修改；先恢复归档再编辑，避免归档状态下的隐式改动。 */
+  private static void requireEditable(Project locked) {
+    if (locked.isArchived()) {
+      throw new ProjectValidationException("project", "Cannot modify an archived project");
+    }
+  }
+
+  /**
+   * 现存 Issue 的当前状态与阻塞来源都必须继续出现在新 workflow 中。
+   *
+   * <p>检查发生在 Project 排他锁内，因此并发 Issue 写不能在检查后插入新的悬空引用。归档 Issue 同样计入；没有引用的工作阶段可以删除。
+   */
+  private void requireReferencedStatesRetained(UUID projectId, ProjectWorkflow workflow) {
+    for (Issue issue : issueRepository.listByProjectId(projectId)) {
+      requireDeclaredState(workflow, issue.getState(), "state");
+      if (issue.getBlockedFromState() != null) {
+        requireDeclaredState(workflow, issue.getBlockedFromState(), "blockedFromState");
+      }
+    }
+  }
+
+  private static void requireDeclaredState(
+      ProjectWorkflow workflow, String code, String reference) {
+    if (workflow.find(ProjectStateCode.of(code)).isEmpty()) {
+      throw new ProjectValidationException(
+          "workflow", "Cannot remove " + reference + " " + code + " while an issue still uses it");
+    }
+  }
+
+  private void requireNoActiveRun(UUID projectId) {
+    for (Issue issue : issueRepository.listByProjectId(projectId)) {
+      if (issueRunRepository.lockActiveByIssueId(issue.getId()) == null) {
+        continue;
+      }
+      throw new ProjectValidationException(
+          "project", "Cannot change project configuration while an issue has an active run");
+    }
+  }
+
+  private static ProjectVersionConflictException conflict(Project locked, long expectedVersion) {
+    return new ProjectVersionConflictException(
+        "project", Long.toString(expectedVersion), Long.toString(locked.getVersion()));
+  }
 }

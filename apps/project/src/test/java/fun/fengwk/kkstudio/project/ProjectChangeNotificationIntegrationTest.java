@@ -11,7 +11,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import fun.fengwk.kkstudio.project.repo.impl.PostgresqlProjectChangeNotifier;
+import fun.fengwk.kkstudio.project.repo.ProjectChangeNotifier;
 
 import javax.sql.DataSource;
 
@@ -24,7 +24,7 @@ class ProjectChangeNotificationIntegrationTest extends ProjectTestSupport {
 
   @Autowired private DataSource dataSource;
   @Autowired private PlatformTransactionManager transactionManager;
-  @Autowired private PostgresqlProjectChangeNotifier notifier;
+  @Autowired private ProjectChangeNotifier notifier;
 
   /** Issue 及其活动写入可合并为一次提交后的定向提示；未提交和回滚均不可见。 */
   @Test
@@ -42,7 +42,7 @@ class ProjectChangeNotificationIntegrationTest extends ProjectTestSupport {
       TransactionTemplate tx = new TransactionTemplate(transactionManager);
       tx.executeWithoutResult(
           status -> {
-            issueService.appendComment(
+            issueEditingService.appendComment(
                 issue.getId(), issue.getVersion(), "notify-commit", "comment");
             try {
               assertNoNotification(pg);
@@ -55,17 +55,18 @@ class ProjectChangeNotificationIntegrationTest extends ProjectTestSupport {
 
       tx.executeWithoutResult(
           status -> {
-            issueService.appendComment(
+            issueEditingService.appendComment(
                 issue.getId(),
-                issueService.getIssue(issue.getId()).getVersion(),
+                issueEditingService.getIssue(issue.getId()).getVersion(),
                 "notify-rollback",
                 "comment");
             status.setRollbackOnly();
           });
       assertNoNotification(pg);
-      assertEquals(1, issueService.listActivities(issue.getId(), 0, 50).size());
+      assertEquals(1, issueEditingService.listActivities(issue.getId(), 0, 50).size());
 
-      issueService.deleteIssue(issue.getId(), issueService.getIssue(issue.getId()).getVersion());
+      issueLifecycleService.deleteIssue(
+          issue.getId(), issueEditingService.getIssue(issue.getId()).getVersion());
       assertNotification(pg, projectId);
     }
   }

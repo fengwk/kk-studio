@@ -21,8 +21,8 @@ import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueAgentThread;
 import fun.fengwk.kkstudio.project.model.IssueRun;
 import fun.fengwk.kkstudio.project.model.Project;
+import fun.fengwk.kkstudio.project.service.IssueEditingService;
 import fun.fengwk.kkstudio.project.service.IssueRunService;
-import fun.fengwk.kkstudio.project.service.IssueService;
 import fun.fengwk.kkstudio.project.service.ProjectService;
 import fun.fengwk.kkstudio.share.project.ProjectSnapshotDTO;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
@@ -40,7 +40,7 @@ import java.util.stream.Collectors;
 class ProjectSnapshotAssemblerTest {
 
   private ProjectService projectService;
-  private IssueService issueService;
+  private IssueEditingService issueEditingService;
   private IssueRunService issueRunService;
   private ProjectDtoMapper mapper;
   private ProjectSnapshotAssembler assembler;
@@ -51,11 +51,12 @@ class ProjectSnapshotAssemblerTest {
   @BeforeEach
   void setUp() {
     projectService = mock(ProjectService.class);
-    issueService = mock(IssueService.class);
+    issueEditingService = mock(IssueEditingService.class);
     issueRunService = mock(IssueRunService.class);
     mapper =
         new ProjectDtoMapper(new ProjectWorkflowJsonCodec(), StrictHttpJsonMapperTestSupport.get());
-    assembler = new ProjectSnapshotAssembler(projectService, issueService, issueRunService, mapper);
+    assembler =
+        new ProjectSnapshotAssembler(projectService, issueEditingService, issueRunService, mapper);
   }
 
   @Test
@@ -98,7 +99,7 @@ class ProjectSnapshotAssemblerTest {
             .createdAt(now)
             .updatedAt(now)
             .build();
-    when(issueService.listIssues(projectId, false)).thenReturn(List.of(issue1, issue2));
+    when(issueEditingService.listIssues(projectId, false)).thenReturn(List.of(issue1, issue2));
 
     IssueRun run =
         IssueRun.builder()
@@ -113,7 +114,7 @@ class ProjectSnapshotAssemblerTest {
             .build();
     when(issueRunService.listRuns(issue1Id)).thenReturn(List.of());
     when(issueRunService.listRuns(issue2Id)).thenReturn(List.of(run));
-    when(issueService.listAgentThreads(issue2Id))
+    when(issueEditingService.listAgentThreads(issue2Id))
         .thenReturn(List.of(new IssueAgentThread(issue2Id, "coder", threadId)));
 
     ProjectSnapshotDTO snapshot = assembler.assemble(projectId);
@@ -147,8 +148,8 @@ class ProjectSnapshotAssemblerTest {
     Issue archived = referenceIssue(projectId, "BLOCKED", "REVIEW", true);
     Issue archivedDone = referenceIssue(projectId, "DONE", null, true);
     Issue archivedDuplicate = referenceIssue(projectId, "BLOCKED", "WORK", true);
-    when(issueService.listIssues(projectId, false)).thenReturn(List.of(active, activeInit));
-    when(issueService.listIssues(projectId, true))
+    when(issueEditingService.listIssues(projectId, false)).thenReturn(List.of(active, activeInit));
+    when(issueEditingService.listIssues(projectId, true))
         .thenReturn(List.of(archivedDone, archivedDuplicate, archived));
     when(issueRunService.listRuns(active.getId())).thenReturn(List.of());
     when(issueRunService.listRuns(activeInit.getId())).thenReturn(List.of());
@@ -170,17 +171,17 @@ class ProjectSnapshotAssemblerTest {
     verify(issueRunService).listRuns(active.getId());
     verify(issueRunService).listRuns(activeInit.getId());
     verifyNoMoreInteractions(issueRunService);
-    verify(issueService).listIssues(projectId, false);
-    verify(issueService).listIssues(projectId, true);
-    verifyNoMoreInteractions(issueService);
+    verify(issueEditingService).listIssues(projectId, false);
+    verify(issueEditingService).listIssues(projectId, true);
+    verifyNoMoreInteractions(issueEditingService);
   }
 
   @Test
   void testEmptyProjectProvidesEmptyReferenceArray() {
     // 没有 Issue 时仍提供真实非 null 数组，而非缺失字段的兼容默认值。
     when(projectService.getProject(projectId)).thenReturn(Project.builder().id(projectId).build());
-    when(issueService.listIssues(projectId, false)).thenReturn(List.of());
-    when(issueService.listIssues(projectId, true)).thenReturn(List.of());
+    when(issueEditingService.listIssues(projectId, false)).thenReturn(List.of());
+    when(issueEditingService.listIssues(projectId, true)).thenReturn(List.of());
 
     ProjectSnapshotDTO snapshot = assembler.assemble(projectId);
 
@@ -196,9 +197,9 @@ class ProjectSnapshotAssemblerTest {
   void testFailClosedOnForeignArchivedIssue() {
     // 归档查询也必须验证项目归属，且失败时不得读取任何 Run。
     when(projectService.getProject(projectId)).thenReturn(Project.builder().id(projectId).build());
-    when(issueService.listIssues(projectId, false))
+    when(issueEditingService.listIssues(projectId, false))
         .thenReturn(List.of(referenceIssue(projectId, "INIT", null, false)));
-    when(issueService.listIssues(projectId, true))
+    when(issueEditingService.listIssues(projectId, true))
         .thenReturn(List.of(referenceIssue(UUID.randomUUID(), "BLOCKED", "WORK", true)));
 
     IllegalStateException ex =
@@ -256,7 +257,7 @@ class ProjectSnapshotAssemblerTest {
             .createdAt(now)
             .updatedAt(now)
             .build();
-    when(issueService.listIssues(projectId, false)).thenReturn(List.of(foreignIssue));
+    when(issueEditingService.listIssues(projectId, false)).thenReturn(List.of(foreignIssue));
 
     IllegalStateException ex =
         assertThrows(IllegalStateException.class, () -> assembler.assemble(projectId));
@@ -288,7 +289,7 @@ class ProjectSnapshotAssemblerTest {
             .createdAt(now)
             .updatedAt(now)
             .build();
-    when(issueService.listIssues(projectId, false)).thenReturn(List.of(issue));
+    when(issueEditingService.listIssues(projectId, false)).thenReturn(List.of(issue));
 
     IssueRun foreignRun =
         IssueRun.builder()

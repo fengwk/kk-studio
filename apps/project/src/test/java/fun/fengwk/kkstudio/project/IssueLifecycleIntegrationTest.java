@@ -20,8 +20,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionFacts;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
-import fun.fengwk.kkstudio.project.controller.IssueReconcileOutcome;
-import fun.fengwk.kkstudio.project.controller.IssueReconciler;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.error.ProjectValidationException;
 import fun.fengwk.kkstudio.project.error.ProjectVersionConflictException;
@@ -31,6 +29,8 @@ import fun.fengwk.kkstudio.project.model.IssueActivityKind;
 import fun.fengwk.kkstudio.project.model.IssueRun;
 import fun.fengwk.kkstudio.project.model.PauseReason;
 import fun.fengwk.kkstudio.project.model.Project;
+import fun.fengwk.kkstudio.project.reconcile.IssueReconcileOutcome;
+import fun.fengwk.kkstudio.project.reconcile.IssueReconciler;
 import fun.fengwk.kkstudio.project.service.IssueEvidenceService;
 import fun.fengwk.kkstudio.work.DurableWorkQueue;
 import fun.fengwk.kkstudio.work.WorkClaim;
@@ -71,16 +71,16 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("StopIdleProj", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
-    Issue inDesign = issueService.getIssue(issue.getId());
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    Issue inDesign = issueEditingService.getIssue(issue.getId());
 
     Issue stopped =
-        issueService.stopIssue(
+        issueLifecycleService.stopIssue(
             inDesign.getId(), inDesign.getVersion(), key("stop"), "Human requested stop");
     assertEquals(PauseReason.USER.name(), stopped.getPauseReason());
     assertEquals("Human requested stop", stopped.getPauseDetail());
 
-    List<IssueActivity> activities = issueService.listActivities(issue.getId(), 0, 10);
+    List<IssueActivity> activities = issueEditingService.listActivities(issue.getId(), 0, 10);
     boolean hasStopActivity =
         activities.stream()
             .anyMatch(
@@ -103,14 +103,14 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("StopActiveProj", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
-    Issue inDesign = issueService.getIssue(issue.getId());
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    Issue inDesign = issueEditingService.getIssue(issue.getId());
     IssueRun activeRun = issueRunService.acceptRun(inDesign.getId(), key("accept"));
     assertEquals(IssueRunStatus.RUNNING, activeRun.getStatus());
 
-    Issue fresh = issueService.getIssue(issue.getId());
+    Issue fresh = issueEditingService.getIssue(issue.getId());
     Issue stopped =
-        issueService.stopIssue(
+        issueLifecycleService.stopIssue(
             fresh.getId(), fresh.getVersion(), key("stop"), "Stop the current run");
     assertEquals(PauseReason.USER.name(), stopped.getPauseReason());
 
@@ -133,8 +133,8 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("StopUnknownProj", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
-    Issue inDesign = issueService.getIssue(issue.getId());
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    Issue inDesign = issueEditingService.getIssue(issue.getId());
     IssueRun activeRun = issueRunService.acceptRun(inDesign.getId(), key("accept"));
 
     // 受控 Harness 假件在投影边界模拟「仍在途」执行事实：RUNNING 工具 → hasWork；真实分类契约由 Runtime 测试覆盖。
@@ -157,9 +157,9 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
         .thenReturn(new ThreadExecutionFacts(true, false, false));
     when(runtime.getThreadSnapshot(activeRun.getThreadId())).thenReturn(inFlightSnapshot);
 
-    Issue fresh = issueService.getIssue(issue.getId());
+    Issue fresh = issueEditingService.getIssue(issue.getId());
     Issue stopped =
-        issueService.stopIssue(
+        issueLifecycleService.stopIssue(
             fresh.getId(), fresh.getVersion(), key("stop"), "Network timeout while executing tool");
     assertEquals(PauseReason.UNKNOWN.name(), stopped.getPauseReason());
     assertTrue(stopped.getPauseDetail().contains("Network timeout"));
@@ -175,8 +175,8 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("UnknownGatingProj", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
-    Issue inDesign = issueService.getIssue(issue.getId());
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    Issue inDesign = issueEditingService.getIssue(issue.getId());
     IssueRun activeRun = issueRunService.acceptRun(inDesign.getId(), key("accept"));
 
     issueRunService.markUnknown(
@@ -185,35 +185,39 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
         key("unknown"),
         headEntry(activeRun.getThreadId()),
         "Undetermined state");
-    Issue unknownIssue = issueService.getIssue(issue.getId());
+    Issue unknownIssue = issueEditingService.getIssue(issue.getId());
     assertEquals(PauseReason.UNKNOWN.name(), unknownIssue.getPauseReason());
 
     // 1. resumeIssue 拒绝
     assertThrows(
         ProjectValidationException.class,
-        () -> issueService.resumeIssue(unknownIssue.getId(), unknownIssue.getVersion(), key("r")));
+        () ->
+            issueLifecycleService.resumeIssue(
+                unknownIssue.getId(), unknownIssue.getVersion(), key("r")));
 
     // 2. transition 拒绝
     assertThrows(
         ProjectValidationException.class,
         () ->
-            issueService.transition(
+            issueLifecycleService.transition(
                 unknownIssue.getId(), unknownIssue.getVersion(), key("t"), "REVIEW"));
 
     // 3. reopen 拒绝
     assertThrows(
         ProjectValidationException.class,
-        () -> issueService.reopen(unknownIssue.getId(), unknownIssue.getVersion(), key("ro")));
+        () ->
+            issueLifecycleService.reopen(
+                unknownIssue.getId(), unknownIssue.getVersion(), key("ro")));
 
     // 4. archive 拒绝
     assertThrows(
         ProjectValidationException.class,
-        () -> issueService.archiveIssue(unknownIssue.getId(), unknownIssue.getVersion()));
+        () -> issueLifecycleService.archiveIssue(unknownIssue.getId(), unknownIssue.getVersion()));
 
     // 5. deleteIssue 拒绝
     assertThrows(
         ProjectValidationException.class,
-        () -> issueService.deleteIssue(unknownIssue.getId(), unknownIssue.getVersion()));
+        () -> issueLifecycleService.deleteIssue(unknownIssue.getId(), unknownIssue.getVersion()));
 
     // 6. deleteProject 拒绝
     Project project = projectService.getProject(projectId);
@@ -236,8 +240,8 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("ResolveUnknownProj", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
-    Issue inDesign = issueService.getIssue(issue.getId());
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    Issue inDesign = issueEditingService.getIssue(issue.getId());
     IssueRun activeRun = issueRunService.acceptRun(inDesign.getId(), key("accept"));
     issueRunService.markUnknown(
         activeRun.getId(),
@@ -245,18 +249,18 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
         key("unk"),
         headEntry(activeRun.getThreadId()),
         "Side effects unclear");
-    Issue unknownIssue = issueService.getIssue(issue.getId());
+    Issue unknownIssue = issueEditingService.getIssue(issue.getId());
 
     // 空白说明拒绝
     assertThrows(
         ProjectValidationException.class,
         () ->
-            issueService.resolveUnknown(
+            issueLifecycleService.resolveUnknown(
                 unknownIssue.getId(), unknownIssue.getVersion(), key("res"), "   "));
 
     // 提交有效人工核查说明
     Issue resolved =
-        issueService.resolveUnknown(
+        issueLifecycleService.resolveUnknown(
             unknownIssue.getId(),
             unknownIssue.getVersion(),
             key("res"),
@@ -266,7 +270,7 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
         "Checked third-party provider logs: no side effect occurred.", resolved.getPauseDetail());
 
     // 校验活动留痕
-    List<IssueActivity> activities = issueService.listActivities(issue.getId(), 0, 10);
+    List<IssueActivity> activities = issueEditingService.listActivities(issue.getId(), 0, 10);
     IssueActivity resolveActivity =
         activities.stream()
             .filter(
@@ -284,7 +288,7 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
 
     // 现在可以显式 resumeIssue 解除 USER 门禁
     Issue resumed =
-        issueService.resumeIssue(resolved.getId(), resolved.getVersion(), key("resume"));
+        issueLifecycleService.resumeIssue(resolved.getId(), resolved.getVersion(), key("resume"));
     assertNull(resumed.getPauseReason());
     assertNull(resumed.getPauseDetail());
   }
@@ -298,15 +302,15 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
     Issue issue = createIssue(projectId);
 
     // 1. 在 DESIGN 阶段接受并完成一次 Run
-    issueService.transition(issue.getId(), issue.getVersion(), key("t1"), "DESIGN");
-    Issue inDesign = issueService.getIssue(issue.getId());
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t1"), "DESIGN");
+    Issue inDesign = issueEditingService.getIssue(issue.getId());
     IssueRun run1 = issueRunService.acceptRun(inDesign.getId(), key("run1"));
     UUID endEntry1 = appendHistoryEntry(run1.getThreadId());
     issueRunService.completeRun(
         run1.getId(), run1.getVersion(), key("comp1"), endEntry1, null, "REVIEW");
 
     // 2. 在 REVIEW 阶段接受并完成一次 Run
-    Issue inReview = issueService.getIssue(issue.getId());
+    Issue inReview = issueEditingService.getIssue(issue.getId());
     IssueRun run2 = issueRunService.acceptRun(inReview.getId(), key("run2"));
     UUID endEntry2 = appendHistoryEntry(run2.getThreadId());
     issueRunService.completeRun(
@@ -337,8 +341,8 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
         count("select count(*) from project_issue_agent_thread where issue_id = ?", issue.getId()));
 
     // 4. 深删除 Issue
-    Issue currentIssue = issueService.getIssue(issue.getId());
-    issueService.deleteIssue(currentIssue.getId(), currentIssue.getVersion());
+    Issue currentIssue = issueEditingService.getIssue(issue.getId());
+    issueLifecycleService.deleteIssue(currentIssue.getId(), currentIssue.getVersion());
 
     // 验证所有关联表数据完全清理，无孤儿数据
     assertEquals(
@@ -372,13 +376,13 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
 
     // Issue 1: 完成
     Issue issue1 = createIssue(projectId);
-    issueService.transition(issue1.getId(), issue1.getVersion(), key("t1"), "DESIGN");
-    Issue inDesign1 = issueService.getIssue(issue1.getId());
+    issueLifecycleService.transition(issue1.getId(), issue1.getVersion(), key("t1"), "DESIGN");
+    Issue inDesign1 = issueEditingService.getIssue(issue1.getId());
     IssueRun run1 = issueRunService.acceptRun(inDesign1.getId(), key("run1"));
     UUID endEntry1 = appendHistoryEntry(run1.getThreadId());
     issueRunService.completeRun(
         run1.getId(), run1.getVersion(), key("comp1"), endEntry1, null, "REVIEW");
-    Issue inReview1 = issueService.getIssue(issue1.getId());
+    Issue inReview1 = issueEditingService.getIssue(issue1.getId());
     IssueRun run1r = issueRunService.acceptRun(inReview1.getId(), key("run1r"));
     UUID endEntry1r = appendHistoryEntry(run1r.getThreadId());
     issueRunService.completeRun(
@@ -386,8 +390,8 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
 
     // Issue 2: 拥有活动 Run
     Issue issue2 = createIssue(projectId);
-    issueService.transition(issue2.getId(), issue2.getVersion(), key("t2"), "DESIGN");
-    Issue inDesign2 = issueService.getIssue(issue2.getId());
+    issueLifecycleService.transition(issue2.getId(), issue2.getVersion(), key("t2"), "DESIGN");
+    Issue inDesign2 = issueEditingService.getIssue(issue2.getId());
     IssueRun run2 = issueRunService.acceptRun(inDesign2.getId(), key("run2"));
 
     // 1. 项目删除被拒绝（Issue 2 有活动 Run）
@@ -411,8 +415,8 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
         () -> projectService.deleteProject(projectId, projectAfterUnknown.getVersion()));
 
     // 3. 人工核查 Issue 2 并 resolveUnknown -> 转换为 USER 暂停门禁
-    Issue unkIssue2 = issueService.getIssue(issue2.getId());
-    issueService.resolveUnknown(
+    Issue unkIssue2 = issueEditingService.getIssue(issue2.getId());
+    issueLifecycleService.resolveUnknown(
         unkIssue2.getId(), unkIssue2.getVersion(), key("res2"), "Residuals cleaned up");
 
     // 4. 现在项目深删除应当成功执行
@@ -430,29 +434,31 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("ReplayProj", agent, agent, 3);
     Issue issue = createIssue(projectId);
-    issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
-    Issue inDesign = issueService.getIssue(issue.getId());
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    Issue inDesign = issueEditingService.getIssue(issue.getId());
     String stopKey = key("stop");
 
     Issue stopped1 =
-        issueService.stopIssue(inDesign.getId(), inDesign.getVersion(), stopKey, "Detail 1");
+        issueLifecycleService.stopIssue(
+            inDesign.getId(), inDesign.getVersion(), stopKey, "Detail 1");
     // 重复调用同键同指纹：精确回放
     Issue stopped2 =
-        issueService.stopIssue(inDesign.getId(), inDesign.getVersion(), stopKey, "Detail 1");
+        issueLifecycleService.stopIssue(
+            inDesign.getId(), inDesign.getVersion(), stopKey, "Detail 1");
     assertEquals(stopped1.getId(), stopped2.getId());
 
     // 异指纹冲突
     assertThrows(
         Exception.class,
         () ->
-            issueService.stopIssue(
+            issueLifecycleService.stopIssue(
                 inDesign.getId(), inDesign.getVersion(), stopKey, "Different Detail"));
 
     // 恢复暂停后接受 Run 并转为 UNKNOWN 状态
-    issueService.resumeIssue(inDesign.getId(), stopped1.getVersion(), key("res1"));
-    Issue resumed = issueService.getIssue(issue.getId());
+    issueLifecycleService.resumeIssue(inDesign.getId(), stopped1.getVersion(), key("res1"));
+    Issue resumed = issueEditingService.getIssue(issue.getId());
     issueRunService.acceptRun(resumed.getId(), key("accept"));
-    Issue fresh = issueService.getIssue(issue.getId());
+    Issue fresh = issueEditingService.getIssue(issue.getId());
     IssueRun activeRun = issueRunService.getActiveRun(issue.getId());
     issueRunService.markUnknown(
         activeRun.getId(),
@@ -460,21 +466,21 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
         key("u"),
         headEntry(activeRun.getThreadId()),
         "fail");
-    Issue unknownIssue = issueService.getIssue(issue.getId());
+    Issue unknownIssue = issueEditingService.getIssue(issue.getId());
 
     String resolveKey = key("res");
     Issue resolved1 =
-        issueService.resolveUnknown(
+        issueLifecycleService.resolveUnknown(
             unknownIssue.getId(), unknownIssue.getVersion(), resolveKey, "Proof 1");
     Issue resolved2 =
-        issueService.resolveUnknown(
+        issueLifecycleService.resolveUnknown(
             unknownIssue.getId(), unknownIssue.getVersion(), resolveKey, "Proof 1");
     assertEquals(resolved1.getId(), resolved2.getId());
 
     assertThrows(
         Exception.class,
         () ->
-            issueService.resolveUnknown(
+            issueLifecycleService.resolveUnknown(
                 unknownIssue.getId(), unknownIssue.getVersion(), resolveKey, "Different Proof"));
   }
 
@@ -487,35 +493,35 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
 
     // updateIssue
     Issue updated =
-        issueService.updateIssue(issue.getId(), issue.getVersion(), "New Title", "New Desc");
+        issueEditingService.updateIssue(issue.getId(), issue.getVersion(), "New Title", "New Desc");
     assertEquals("New Title", updated.getTitle());
     assertEquals("New Desc", updated.getDescription());
 
     // listIssues
-    List<Issue> activeIssues = issueService.listIssues(projectId, false);
+    List<Issue> activeIssues = issueEditingService.listIssues(projectId, false);
     assertEquals(1, activeIssues.size());
 
     // authorizeStageBudget
-    issueService.transition(issue.getId(), updated.getVersion(), key("t"), "DESIGN");
-    Issue inDesign = issueService.getIssue(issue.getId());
+    issueLifecycleService.transition(issue.getId(), updated.getVersion(), key("t"), "DESIGN");
+    Issue inDesign = issueEditingService.getIssue(issue.getId());
     IssueRun run = issueRunService.acceptRun(inDesign.getId(), key("acc"));
 
     // listAgentThreads
-    var threads = issueService.listAgentThreads(issue.getId());
+    var threads = issueEditingService.listAgentThreads(issue.getId());
     assertEquals(1, threads.size());
     assertEquals(agent, threads.getFirst().agentName());
 
     // getStageBudget
-    var budget = issueService.getStageBudget(issue.getId(), "DESIGN");
+    var budget = issueStageBudgetService.getStageBudget(issue.getId(), "DESIGN");
     assertEquals(5, budget.maxRuns());
     assertEquals(1L, budget.usedRuns());
 
     // resetStageBudget (requires no active run)
     UUID end = appendHistoryEntry(run.getThreadId());
     issueRunService.completeRun(run.getId(), run.getVersion(), key("comp"), end, null, null);
-    Issue fresh = issueService.getIssue(issue.getId());
+    Issue fresh = issueEditingService.getIssue(issue.getId());
     var resetBudget =
-        issueService.resetStageBudget(
+        issueStageBudgetService.resetStageBudget(
             fresh.getId(), fresh.getVersion(), key("reset"), "DESIGN", 10);
     assertEquals(10, resetBudget.maxRuns());
   }
@@ -527,31 +533,36 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
     UUID projectId = createProjectWithStages("ArchiveProj", agent, agent, 3);
     Issue issue = createIssue(projectId);
 
-    Issue archived = issueService.archiveIssue(issue.getId(), issue.getVersion());
+    Issue archived = issueLifecycleService.archiveIssue(issue.getId(), issue.getVersion());
     assertTrue(archived.isArchived());
 
     // 幂等重复归档返回原 Issue
-    Issue archived2 = issueService.archiveIssue(archived.getId(), archived.getVersion());
+    Issue archived2 = issueLifecycleService.archiveIssue(archived.getId(), archived.getVersion());
     assertEquals(archived.getId(), archived2.getId());
 
     // 在已归档 Issue 上尝试修改需求、评论、流转等操作均被拒绝
     assertThrows(
         ProjectValidationException.class,
-        () -> issueService.updateIssue(archived.getId(), archived.getVersion(), "T", "D"));
+        () -> issueEditingService.updateIssue(archived.getId(), archived.getVersion(), "T", "D"));
     assertThrows(
         ProjectValidationException.class,
         () ->
-            issueService.appendComment(archived.getId(), archived.getVersion(), key("c"), "body"));
+            issueEditingService.appendComment(
+                archived.getId(), archived.getVersion(), key("c"), "body"));
     assertThrows(
         ProjectValidationException.class,
-        () -> issueService.transition(archived.getId(), archived.getVersion(), key("t"), "DESIGN"));
+        () ->
+            issueLifecycleService.transition(
+                archived.getId(), archived.getVersion(), key("t"), "DESIGN"));
 
     // 解归档回到可编辑状态
-    Issue unarchived = issueService.unarchiveIssue(archived.getId(), archived.getVersion());
+    Issue unarchived =
+        issueLifecycleService.unarchiveIssue(archived.getId(), archived.getVersion());
     assertFalse(unarchived.isArchived());
 
     // 幂等重复解归档返回原 Issue
-    Issue unarchived2 = issueService.unarchiveIssue(unarchived.getId(), unarchived.getVersion());
+    Issue unarchived2 =
+        issueLifecycleService.unarchiveIssue(unarchived.getId(), unarchived.getVersion());
     assertEquals(unarchived.getId(), unarchived2.getId());
   }
 
@@ -564,57 +575,63 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
 
     // appendComment
     Issue withComment =
-        issueService.appendComment(issue.getId(), issue.getVersion(), key("c1"), "Comment text");
-    var activities = issueService.listActivities(issue.getId(), 0, 10);
+        issueEditingService.appendComment(
+            issue.getId(), issue.getVersion(), key("c1"), "Comment text");
+    var activities = issueEditingService.listActivities(issue.getId(), 0, 10);
     assertTrue(activities.stream().anyMatch(a -> "Comment text".equals(a.getBody())));
 
     // 非活动 Run 时投递指示拒绝
     assertThrows(
         ProjectValidationException.class,
         () ->
-            issueService.appendInstruction(
+            issueEditingService.appendInstruction(
                 withComment.getId(), withComment.getVersion(), key("ins"), "Instruction text"));
 
     // 流转到 DESIGN 阶段
-    Issue fresh = issueService.getIssue(issue.getId());
+    Issue fresh = issueEditingService.getIssue(issue.getId());
     Issue inDesign =
-        issueService.transition(fresh.getId(), fresh.getVersion(), key("t1"), "DESIGN");
+        issueLifecycleService.transition(fresh.getId(), fresh.getVersion(), key("t1"), "DESIGN");
 
     // 非 BLOCKED 状态调用 recover 拒绝
     assertThrows(
         ProjectValidationException.class,
-        () -> issueService.recoverIssue(inDesign.getId(), inDesign.getVersion(), key("rec_err")));
+        () ->
+            issueLifecycleService.recoverIssue(
+                inDesign.getId(), inDesign.getVersion(), key("rec_err")));
 
     // 业务阻塞
     Issue blocked =
-        issueService.blockIssue(
+        issueLifecycleService.blockIssue(
             inDesign.getId(), inDesign.getVersion(), key("b1"), "Waiting on vendor API");
     assertTrue(blocked.isBlocked());
     assertEquals("DESIGN", blocked.getBlockedFromState());
     assertEquals("Waiting on vendor API", blocked.getBlockReason());
 
     // 恢复阻塞
-    Issue recovered = issueService.recoverIssue(blocked.getId(), blocked.getVersion(), key("rec1"));
+    Issue recovered =
+        issueLifecycleService.recoverIssue(blocked.getId(), blocked.getVersion(), key("rec1"));
     assertFalse(recovered.isBlocked());
     assertEquals("DESIGN", recovered.getState());
 
     // 启动 Run 并在有活动 Run 时投递指示
     IssueRun run = issueRunService.acceptRun(recovered.getId(), key("acc"));
-    fresh = issueService.getIssue(issue.getId());
-    issueService.appendInstruction(fresh.getId(), fresh.getVersion(), key("ins1"), "Do something");
+    fresh = issueEditingService.getIssue(issue.getId());
+    issueEditingService.appendInstruction(
+        fresh.getId(), fresh.getVersion(), key("ins1"), "Do something");
 
     // 完成并交接到 DONE
     UUID end = appendHistoryEntry(run.getThreadId());
     issueRunService.completeRun(run.getId(), run.getVersion(), key("comp"), end, null, "REVIEW");
-    Issue inReview = issueService.getIssue(issue.getId());
+    Issue inReview = issueEditingService.getIssue(issue.getId());
     IssueRun run2 = issueRunService.acceptRun(inReview.getId(), key("acc2"));
     UUID end2 = appendHistoryEntry(run2.getThreadId());
     issueRunService.completeRun(run2.getId(), run2.getVersion(), key("comp2"), end2, null, "DONE");
 
     // DONE 重开到 INIT
-    Issue doneIssue = issueService.getIssue(issue.getId());
+    Issue doneIssue = issueEditingService.getIssue(issue.getId());
     assertEquals("DONE", doneIssue.getState());
-    Issue reopened = issueService.reopen(doneIssue.getId(), doneIssue.getVersion(), key("ro1"));
+    Issue reopened =
+        issueLifecycleService.reopen(doneIssue.getId(), doneIssue.getVersion(), key("ro1"));
     assertEquals("INIT", reopened.getState());
 
     // publishBlob with agent and runId + listEvidence
@@ -634,7 +651,8 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
     Issue issue = createIssue(projectId);
 
     assertThrows(
-        ProjectVersionConflictException.class, () -> issueService.deleteIssue(issue.getId(), 999L));
+        ProjectVersionConflictException.class,
+        () -> issueLifecycleService.deleteIssue(issue.getId(), 999L));
 
     Project project = projectService.getProject(projectId);
     assertThrows(

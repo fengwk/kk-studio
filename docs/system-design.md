@@ -261,7 +261,7 @@ Canvas 编辑接受 typed commands、语义组前置条件与 idempotency key，
 Project 的 `(Issue, Agent)` 绑定稳定 Thread，`(Issue, state)` 持有阶段预算。Run 接受
 原子完成额度检查、Thread 选择或创建、历史起点冻结、`ProjectRunScope`（含显式
 Agent/Model/Environment 与业务工具）提交、Run/Activity 写入、Harness 命令与 Work 登记。
-Issue Controller 每次认领后重读当前事实，只认本次 root Join 冻结的 `terminalEntryId` /
+Issue Reconciler 每次认领后重读当前事实，只认本次 root Join 冻结的 `terminalEntryId` /
 `finalAnswerEntryId`（`COMPLETED` / `ERROR` / `CANCELLED`）收尾，不等永久子树 idle；
 交接提交时复验 Run 身份、版本、合法边与门禁，并在同一业务锁内写入 `active=false` 快照。
 Canvas 与 Project 的使用、数据关系和 UNKNOWN 核实路径见 [Canvas、Project 与交互](canvas-project.md)。
