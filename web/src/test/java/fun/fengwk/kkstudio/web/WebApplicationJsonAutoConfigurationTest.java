@@ -25,45 +25,8 @@ class WebApplicationJsonAutoConfigurationTest {
   private static final String BOOT_JACKSON_AUTO_CONFIGURATION =
       JacksonAutoConfiguration.class.getName();
 
-  private static final List<String> RETIRED_FRAMEWORK_AUTO_CONFIGURATIONS =
-      List.of(
-          String.join(
-              ".",
-              "fun",
-              "fengwk",
-              "convention4j",
-              "springboot",
-              "starter",
-              "json",
-              "JacksonAutoConfiguration"),
-          String.join(
-              ".",
-              "fun",
-              "fengwk",
-              "convention4j",
-              "springboot",
-              "starter",
-              "result",
-              "ResultAutoConfiguration"),
-          String.join(
-              ".",
-              "fun",
-              "fengwk",
-              "convention4j",
-              "springboot",
-              "starter",
-              "web",
-              "result",
-              "WebExceptionResultHandlerAutoConfiguration"),
-          String.join(
-              ".",
-              "fun",
-              "fengwk",
-              "convention4j",
-              "springboot",
-              "starter",
-              "i18n",
-              "I18nAutoConfiguration"));
+  private static final String RETIRED_FRAMEWORK_PREFIX =
+      String.join(".", "fun", "fengwk", "convention4j") + ".";
 
   @Test
   void productionRootHasNoLegacyExcludes() {
@@ -79,11 +42,9 @@ class WebApplicationJsonAutoConfigurationTest {
     assertTrue(
         effective.contains(BOOT_JACKSON_AUTO_CONFIGURATION),
         "Boot Jackson auto-configuration must be imported");
-    for (String legacy : RETIRED_FRAMEWORK_AUTO_CONFIGURATIONS) {
-      assertFalse(
-          effective.contains(legacy),
-          "retired framework auto-configuration must not be imported: " + legacy);
-    }
+    assertFalse(
+        effective.stream().anyMatch(name -> name.startsWith(RETIRED_FRAMEWORK_PREFIX)),
+        "retired framework auto-configurations must not be imported");
   }
 
   /** 用真实导入选择器计算给定组合根的生效自动装配清单。 */

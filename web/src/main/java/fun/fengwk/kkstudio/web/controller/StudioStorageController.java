@@ -21,8 +21,8 @@ import java.util.UUID;
 /**
  * 全局 Blob 存储 HTTP 边界。
  *
- * <p>统一返回 convention {@link Result}：reserve/complete/delete 管理上传契约，blob 端点签发原始/预览 GET 预签名 URL。
- * 所有响应不暴露 bucket 与对象物理 key。
+ * <p>统一返回 {@link ApiResponse}：reserve/complete/delete 管理上传契约，blob 端点签发原始/预览 GET 预签名 URL。 所有响应不暴露
+ * bucket 与对象物理 key。
  *
  * @author fengwk
  */

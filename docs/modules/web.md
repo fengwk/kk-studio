@@ -163,6 +163,11 @@ Evidence 接收 READY uploadId，在事务内转移引用并返回规范资源�
 
 ## JSON、错误与信任边界
 
+JSON API 显式返回 [`ApiResponse`](../../web/src/main/java/fun/fengwk/kkstudio/web/api/ApiResponse.java)
+信封，包含 `status/code/message` 与可选的 `data/errors`；`success` 由 HTTP 状态派生。
+直接返回的信封由 advice 同步 HTTP 状态；`ResponseEntity` 由控制器显式设置状态。
+下载、HTML 与字节流保留原始响应，不参与信封包装。
+
 [`StrictJacksonConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/StrictJacksonConfiguration.java)
 定制 Boot4 装配的唯一 Jackson 3 `JsonMapper`（它与其父类型 `ObjectMapper` 是同一 bean）：
 启用重复键检测、Long 字符串序列化和 DTO 声明顺序，默认省略 null。
