@@ -7,7 +7,6 @@
 import {
   canonicalJsonNumber,
   isRawJsonNumber,
-  parseJsonPreservingPathEqualsNumbers,
   rawJsonNumberText,
   supportsLosslessJsonNumbers,
   wireJsonNumber,
@@ -67,9 +66,4 @@ export function pricingScalarText(value: PricingScalar): string {
   if (typeof value === 'string') return JSON.stringify(value)
   if (typeof value === 'boolean') return String(value)
   return rawJsonNumberText(value)
-}
-
-/** 读取模型/定价响应时保留 requestBody.equals 的 number 原文。 */
-export function parseJsonPreservingPricingScalars(text: string): unknown {
-  return parseJsonPreservingPathEqualsNumbers(text)
 }

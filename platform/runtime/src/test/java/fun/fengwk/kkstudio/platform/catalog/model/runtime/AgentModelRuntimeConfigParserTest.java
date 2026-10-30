@@ -738,6 +738,15 @@ class AgentModelRuntimeConfigParserTest {
                     "{\"base\":{\"input\":\"1\"},\"overrides\":[{\"id\":\"r\",\"when\":"
                         + "{\"requestBody\":{\"path\":\"/n\",\"equals\":1e19}},"
                         + "\"rates\":{\"input\":\"2\"}}]}")));
+    // 巨大指数必须在 precision/scale 校验阶段失败，不能先展开成百万位十进制文本。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            parser.parse(
+                configWithPricing(
+                    "{\"base\":{\"input\":\"1\"},\"overrides\":[{\"id\":\"r\",\"when\":"
+                        + "{\"requestBody\":{\"path\":\"/n\",\"equals\":1e1000000}},"
+                        + "\"rates\":{\"input\":\"2\"}}]}")));
   }
 
   private String configWithPricing(String pricingJson) {

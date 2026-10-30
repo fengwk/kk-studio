@@ -126,104 +126,41 @@ export function wireJsonNumber(value: ExactJsonNumber, field: string): unknown {
 }
 
 /**
- * 序列化请求体时把 raw number 写成 JSON number，而不是 `{"rawJSON":"..."}`。
+ * 读取 JSON 响应时只把 requestBody 定价条件对象中的数字 equals 原文保留为 {@link RawJsonNumber}。
  *
- * <p>Axios 的 config merge 会把 rawJSON 原生对象克隆成普通对象，因此不能依赖下游 JSON.stringify 识别原生标记；
- * 这里按 JSON 语义自行输出，既保留精确原文，也避免 Number() 往返。
+ * <p>reviver 在数字阶段只暂存 `context.source`，不改变数值；当 key 为 `requestBody` 且对象确实带文本 path 与数字 equals 时，
+ * 才把 equals 替换成内部 sentinel。其它 `{path, equals}`、普通 `{rawJson}` / `{rawJSON}` 对象以及普通 JSON 完全不变。
+ * 缺少 source access 时只对数字 requestBody 条件显式失败，绝不 Number() 舍入。
  */
-export function stringifyJsonPreservingNumbers(value: unknown): string {
-  const stack = new Set<object>()
-  const write = (current: unknown): string => {
-    if (current === null) {
-      return 'null'
-    }
-    switch (typeof current) {
-      case 'string':
-        return JSON.stringify(current)
-      case 'number':
-        return Number.isFinite(current) ? String(current) : 'null'
-      case 'boolean':
-        return current ? 'true' : 'false'
-      case 'bigint':
-        throw new TypeError('Do not know how to serialize a BigInt')
-      case 'undefined':
-      case 'function':
-      case 'symbol':
-        return 'null'
-      case 'object':
-        break
-      default:
-        return 'null'
-    }
-    if (isRawJsonNumber(current)) {
-      return canonicalJsonNumber(rawJsonNumberText(current))
-    }
-    if (stack.has(current)) {
-      throw new TypeError('Converting circular structure to JSON')
-    }
-    stack.add(current)
-    try {
-      if (Array.isArray(current)) {
-        return `[${current.map((item) => write(item)).join(',')}]`
-      }
-      const object = current as Record<string, unknown>
-      const toJSON = object.toJSON
-      if (typeof toJSON === 'function') {
-        return write(toJSON.call(current))
-      }
-      const entries: string[] = []
-      for (const key of Object.keys(object)) {
-        const item = object[key]
-        if (item === undefined || typeof item === 'function' || typeof item === 'symbol') {
-          continue
-        }
-        entries.push(`${JSON.stringify(key)}:${write(item)}`)
-      }
-      return `{${entries.join(',')}}`
-    } finally {
-      stack.delete(current)
-    }
-  }
-  return write(value)
-}
-
-/**
- * 读取 JSON 时把指定字段的 number 原文保留为 {@link RawJsonNumber}。
- *
- * <p>只有 `JSON.parse` reviver 提供 `context.source` 的运行时才能恢复原文；否则命中数字字段时直接失败，不允许先舍入再继续。
- */
-export function parseJsonPreservingNumbers(
-  text: string,
-  shouldPreserve: (parent: Record<string, unknown>, key: string) => boolean,
-): unknown {
+export function parseJsonPreservingPathEqualsNumbers(text: string): unknown {
   type Reviver = (
     this: Record<string, unknown> | undefined,
     key: string,
     value: unknown,
     context?: { source?: string },
   ) => unknown
+  const sources = new WeakMap<object, string>()
   const reviver: Reviver = function (key, value, context) {
-    if (typeof value === 'number' && this && shouldPreserve(this, key)) {
-      if (typeof context?.source !== 'string') {
-        throw new Error(
-          'JSON.parse source text access is required to preserve exact JSON numbers',
-        )
+    if (typeof value === 'number' && this && key === 'equals' && typeof this.path === 'string') {
+      if (typeof context?.source === 'string') {
+        sources.set(this, context.source)
       }
-      return { rawJson: context.source }
+      return value
+    }
+    if (key === 'requestBody' && this
+      && typeof value === 'object' && value !== null && !Array.isArray(value)) {
+      const condition = value as Record<string, unknown>
+      if (typeof condition.path === 'string' && typeof condition.equals === 'number') {
+        const source = sources.get(condition)
+        if (source === undefined) {
+          throw new Error(
+            'JSON.parse source text access is required to preserve exact JSON numbers',
+          )
+        }
+        condition.equals = { rawJson: source }
+      }
     }
     return value
   }
   return (JSON.parse as unknown as (input: string, parseReviver: Reviver) => unknown)(text, reviver)
-}
-
-/** request-body 定价条件的 wire 约定：对象同时含文本 `path` 与 `equals`。 */
-export function preservesPathEqualsNumber(
-  parent: Record<string, unknown>,
-  key: string,
-): boolean {
-  return key === 'equals' && typeof parent.path === 'string'
-}
-
-export function parseJsonPreservingPathEqualsNumbers(text: string): unknown {
-  return parseJsonPreservingNumbers(text, preservesPathEqualsNumber)
 }
