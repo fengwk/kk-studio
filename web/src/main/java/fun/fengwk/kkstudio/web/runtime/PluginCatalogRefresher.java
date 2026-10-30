@@ -3,8 +3,8 @@ package fun.fengwk.kkstudio.web.runtime;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.SmartLifecycle;
 
-import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRefreshTrigger;
-import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRuntime;
+import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogRefreshTrigger;
+import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogRuntime;
 
 import java.time.Duration;
 import java.util.Objects;

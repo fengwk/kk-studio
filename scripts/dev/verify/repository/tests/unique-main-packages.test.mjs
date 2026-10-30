@@ -51,22 +51,3 @@ test('test sources do not participate in main package ownership', () => {
   }), [])
 })
 
-test('P1 exceptions are limited to the named packages and their two owners', () => {
-  const files = Object.fromEntries(['', '.credential', '.resource'].map((suffix, index) => [
-    `src/main/java/P${index}.java`,
-    `package fun.fengwk.kkstudio.platform.plugin${suffix};\nclass P${index} {}`,
-  ]))
-  assert.deepEqual(diagnostics({
-    'platform/plugin-api': files,
-    'platform/runtime': files,
-  }), [])
-  assert.equal(diagnostics({
-    'platform/plugin-api': files,
-    'platform/runtime': files,
-    third: files,
-  }).length, 3)
-  assert.equal(diagnostics({
-    first: { 'src/main/java/A.java': 'package fun.fengwk.kkstudio.platform.plugin.other;' },
-    second: { 'src/main/java/B.java': 'package fun.fengwk.kkstudio.platform.plugin.other;' },
-  }).length, 1)
-})

@@ -19,6 +19,11 @@ PostgreSQL 保存业务事实，内存 registry、执行句柄和通知承担可
 `JdbcClient` 共用它。普通 SQL 使用 `JdbcClient` 命名参数与显式 `RowMapper`；异常翻译固定唯一数据库产品
 `PostgreSQL`，保留 Spring 的 SQLState 分类，不在故障期间取连接读取元数据。
 
+模块依赖保留 `spring-boot-starter-aspectj`：convention4j 的 tracer 仍提供 AspectJ `@Aspect`
+（`ConventionSpanAspect`、`ReactorConventionSpanAspect`，方法签名引用 `org.aspectj.lang.ProceedingJoinPoint`），
+而根 [`pom.xml`](../../pom.xml) 排除了它传递的 Boot 3 `spring-boot-starter-aop`；
+Boot 4 的 aspectj starter 补回 `spring-aop` 与 `aspectjweaver`，否则这些第三方 Aspect 无法织入。
+
 ## 按用例定位源码
 
 | 目录 | 入口与职责 |
@@ -37,7 +42,7 @@ PostgreSQL 保存业务事实，内存 registry、执行句柄和通知承担可
 | [interaction](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/interaction) | 人工输入/审批与只读环境等待的统一投影、人工提交 |
 | [storage](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/storage) | 上传、Blob owner 引用、S3、媒体探针与预览、耐久对象清理 |
 | [environment](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/environment) | Card、注册令牌、路由租约、宿主信息和 Skill 同步 |
-| [plugin](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/plugin) | PluginProperties、安全管理面、凭据存储/刷新与资源传输实现；纯 SPI 契约见 [Platform Plugin API](platform-plugin-api.md) |
+| [pluginhost](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/pluginhost) | 插件宿主：PluginProperties、安全管理面、凭据存储/刷新与资源传输实现；纯 SPI 契约在 [Platform Plugin API](platform-plugin-api.md)，与宿主包名隔离 |
 | [settings](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/settings) | 全局设置、严格 codec、编辑 schema、版本快照与运行时现读的全局代理装配 |
 | [configsync](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/configsync) | 具体的 `ConfigSyncService` 编排八类配置的 YAML 读写、依赖闭包与原子导入 |
 
@@ -298,13 +303,13 @@ Platform 适配注册、租约和资源票据；会话代际、在途调用和�
 不经 jsonb 数值展开，精度、scale 与指数表示保持可恢复。秘密不进入普通配置。
 启动时为新安装的 Plugin 写入 Schema 默认值（revision 1），已有行保持不变；已卸载 Plugin 的残留行被忽略。
 
-[`PluginConfigurationService`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/plugin/service/PluginConfigurationService.java)
+[`PluginConfigurationService`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/pluginhost/service/PluginConfigurationService.java)
 是普通配置与凭据的唯一写入口。保存以 expectedRevision 做 CAS：先按 Schema 归一普通值，
 用候选配置与候选凭据 configure 一次目标插件（被拒绝即 400，不写入），再在同一事务内核验声明依赖的 Agent、
 更新配置、写入或删除凭据行并发出 `plugin_changed` 提示。提交后唤醒本节点目录刷新，
 凭据被改写时额外唤醒凭据刷新调度器；回滚不触发任何唤醒。
 
-[`PluginCatalogRuntime`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/plugin/catalog/PluginCatalogRuntime.java)
+[`PluginCatalogRuntime`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/pluginhost/catalog/PluginCatalogRuntime.java)
 持有本节点当前快照。刷新回读全部配置，修订有变化时构建新快照并原子替换；构建失败保留旧快照，
 并暴露固定的 `applicationError`。快照按引用计数退役：被替换的快照在最后一个租用释放后才关闭，
 因此在途调用继续使用自己租到的实例完成。Web 合并通知、重连提示与每 5 秒的回读。

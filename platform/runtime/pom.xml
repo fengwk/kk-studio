@@ -222,9 +222,9 @@
                                         <include>fun.fengwk.kkstudio.platform.catalog.mcp.McpServerService</include>
                                         <include>fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog</include>
                                         <include>fun.fengwk.kkstudio.platform.catalog.mcp.runtime.RemoteMcpExecutableTool</include>
-                                        <include>fun.fengwk.kkstudio.platform.plugin.resource.PublicAddressPolicy</include>
-                                        <include>fun.fengwk.kkstudio.platform.plugin.resource.PublicAddressDnsResolver</include>
-                                        <include>fun.fengwk.kkstudio.platform.plugin.resource.HttpRemoteMediaTransport</include>
+                                        <include>fun.fengwk.kkstudio.platform.pluginhost.resource.PublicAddressPolicy</include>
+                                        <include>fun.fengwk.kkstudio.platform.pluginhost.resource.PublicAddressDnsResolver</include>
+                                        <include>fun.fengwk.kkstudio.platform.pluginhost.resource.HttpRemoteMediaTransport</include>
                                         <include>fun.fengwk.kkstudio.platform.persistence.PostgresqlPersistenceConfiguration</include>
                                     </includes>
                                     <limits>
@@ -263,17 +263,17 @@
                                 <rule>
                                     <element>CLASS</element>
                                     <includes>
-                                        <include>fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogSnapshot*</include>
-                                        <include>fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRuntime*</include>
-                                        <include>fun.fengwk.kkstudio.platform.plugin.persistence.*</include>
-                                        <include>fun.fengwk.kkstudio.platform.plugin.credential.DatabasePluginCredentialStore</include>
-                                        <include>fun.fengwk.kkstudio.platform.plugin.credential.FixedPluginCredentialAccess</include>
-                                        <include>fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialRefreshService</include>
-                                        <include>fun.fengwk.kkstudio.platform.plugin.credential.ScopedPluginCredentialAccess</include>
-                                        <include>fun.fengwk.kkstudio.platform.plugin.service.PluginConfigurationService*</include>
-                                        <include>fun.fengwk.kkstudio.platform.plugin.service.PluginManagementService*</include>
-                                        <include>fun.fengwk.kkstudio.platform.plugin.service.PluginContextFactory</include>
-                                        <include>fun.fengwk.kkstudio.platform.plugin.service.PluginSecretPatch</include>
+                                        <include>fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogSnapshot*</include>
+                                        <include>fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogRuntime*</include>
+                                        <include>fun.fengwk.kkstudio.platform.pluginhost.persistence.*</include>
+                                        <include>fun.fengwk.kkstudio.platform.pluginhost.credential.DatabasePluginCredentialStore</include>
+                                        <include>fun.fengwk.kkstudio.platform.pluginhost.credential.FixedPluginCredentialAccess</include>
+                                        <include>fun.fengwk.kkstudio.platform.pluginhost.credential.PluginCredentialRefreshService</include>
+                                        <include>fun.fengwk.kkstudio.platform.pluginhost.credential.ScopedPluginCredentialAccess</include>
+                                        <include>fun.fengwk.kkstudio.platform.pluginhost.service.PluginConfigurationService*</include>
+                                        <include>fun.fengwk.kkstudio.platform.pluginhost.service.PluginManagementService*</include>
+                                        <include>fun.fengwk.kkstudio.platform.pluginhost.service.PluginContextFactory</include>
+                                        <include>fun.fengwk.kkstudio.platform.pluginhost.service.PluginSecretPatch</include>
                                     </includes>
                                     <limits>
                                         <limit>
