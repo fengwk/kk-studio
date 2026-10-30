@@ -7,6 +7,7 @@ import { pipeline } from 'node:stream/promises'
 import { setTimeout as sleep } from 'node:timers/promises'
 import type { DaemonConfig, ManagedProcess, ProcessSpec, ProcessSupervisor } from './contracts.js'
 import { extractArchive as extractArchiveSafely, MAX_ARCHIVE_BYTES, MAX_CHECKSUM_BYTES, MAX_MANIFEST_BYTES } from './archive.js'
+import { hostPlatform } from './native/host.js'
 import { getOutboundNetwork } from './network.js'
 import {
   acquireFileLock,
@@ -1106,7 +1107,7 @@ function declaredContentLength(headers: { 'content-length'?: string | string[] }
 
 /** 生产依赖：官方 HTTPS 下载、受控归档解包、原生 supervisor 与 UUID。 */
 export function productionDependencies(processes: ProcessSupervisor): UpdateDependencies {
-  const platform = releasePlatformFor(process.platform, process.arch)
+  const platform = releasePlatformFor(hostPlatform(), process.arch)
   return {
     releaseOs: platform.os,
     releaseArch: platform.arch,

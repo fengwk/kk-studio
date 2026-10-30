@@ -3,6 +3,7 @@ import { errors as undiciErrors } from 'undici'
 import type { HttpClient, GitHttpRequest, GitHttpResponse } from 'isomorphic-git'
 
 import { getOutboundNetwork, type OutboundNetwork, type OutboundRequestInit, type OutboundResponse } from '../network.js'
+import { isAbortError } from '../native/abort.js'
 
 export const DEFAULT_CONNECT_MILLIS = 60_000
 export const DEFAULT_READ_MILLIS = 180_000
@@ -223,15 +224,7 @@ function flattenHeaders(headers: Record<string, string | string[] | undefined>):
   return flat
 }
 
-export function isAbortError(error: unknown): boolean {
-  if (!error) return false
-  if (typeof error === 'object') {
-    const err = error as { name?: string; message?: string }
-    if (err.name === 'AbortError') return true
-    if (err.message === 'Operation cancelled' || err.message?.includes('The operation was aborted')) return true
-  }
-  return false
-}
+export { isAbortError }
 
 export function classifyGitError(error: unknown): string {
   if (isAbortError(error)) {

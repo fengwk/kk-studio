@@ -3,6 +3,7 @@ import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import type { DaemonConfig, LspServerConfig } from './contracts.js'
+import { isWindows } from './native/host.js'
 import { MAX_NOTE_CHARS, ProtocolError, parseStrictJson } from './protocol.js'
 
 /**
@@ -345,7 +346,7 @@ function validateTokenFile(tokenPath: string): string {
   if (stats.isSymbolicLink() || !stats.isFile()) {
     throw invalid('daemon.token', 'must be a regular file, not a link or directory')
   }
-  if (process.platform !== 'win32') {
+  if (!isWindows()) {
     const mode = stats.mode & 0o777
     if ((mode & 0o077) !== 0) {
       throw invalid('daemon.token', 'must not grant group/other permissions')
@@ -380,7 +381,7 @@ export function resolveExecutable(command: string): string | null {
   }
   const pathValue = process.env.PATH ?? ''
   const extensions =
-    process.platform === 'win32' ? (process.env.PATHEXT ?? '.EXE;.CMD;.BAT').split(';').filter((x) => x !== '') : ['']
+    executableExtensions()
   for (const directory of pathValue.split(delimiter)) {
     if (directory === '') {
       continue
@@ -393,6 +394,14 @@ export function resolveExecutable(command: string): string | null {
     }
   }
   return null
+}
+
+/** Windows PATH 查找追加 PATHEXT；其它宿主只探测命令名本身。 */
+function executableExtensions(): string[] {
+  if (!isWindows()) {
+    return ['']
+  }
+  return (process.env.PATHEXT ?? '.EXE;.CMD;.BAT').split(';').filter((extension) => extension !== '')
 }
 
 function isExecutableFile(path: string): boolean {

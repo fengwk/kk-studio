@@ -14,6 +14,7 @@ import { LspDiscovery, type LspSupport } from './lsp-discovery.js'
 import { LspError, LspTimeoutError } from './lsp-error.js'
 import type { LspPoolOptions } from './lsp-pool.js'
 import { LspService } from './lsp-service.js'
+import { isAbortError } from '../native/abort.js'
 
 export { LspDiscovery, type LspSupport } from './lsp-discovery.js'
 export { LspError, LspTimeoutError } from './lsp-error.js'
@@ -24,13 +25,6 @@ export { LspClientPool } from './lsp-pool.js'
 export interface LspCapabilityGroup extends CapabilityGroup {
   support(file: string): LspSupport
   fileChanged(file: string): void
-}
-
-function isAbortError(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    (error.name === 'AbortError' || error.message === 'Operation cancelled')
-  )
 }
 
 function isTimeout(error: unknown, signal?: AbortSignal): boolean {
