@@ -77,10 +77,13 @@ class ExecutionExitConfirmationRetryTest {
   }
 
   @Test
-  void oneDatabaseFailureRecoversOnTheNextCycle() throws Exception {
+  void oneJournalFailureRecoversAfterBackoff() {
     ObservingJournal journal = new ObservingJournal();
     journal.failOnce = true;
-    ExecutionExitConfirmer confirmer = confirmer(journal);
+    Clock clock = mock(Clock.class);
+    when(clock.millis()).thenReturn(0L);
+    ExecutionExitConfirmer confirmer =
+        new ExecutionExitConfirmer(new InMemoryHarnessStore(), journal, clock);
     AtomicReference<Runnable> dispatch = new AtomicReference<>();
     ScheduledExecutorService timer = mock(ScheduledExecutorService.class);
     ScheduledFuture<?> future = mock(ScheduledFuture.class);
@@ -92,15 +95,28 @@ class ExecutionExitConfirmationRetryTest {
         .when(timer)
         .scheduleWithFixedDelay(
             any(Runnable.class), eq(1000L), eq(1000L), eq(TimeUnit.MILLISECONDS));
-    ExecutorService worker = Executors.newSingleThreadExecutor();
+    ExecutorService worker = mock(ExecutorService.class);
+    doAnswer(
+            invocation -> {
+              invocation.<Runnable>getArgument(0).run();
+              return null;
+            })
+        .when(worker)
+        .execute(any(Runnable.class));
 
     try (ExecutionExitConfirmationRetry retry =
         new ExecutionExitConfirmationRetry(confirmer, timer, worker)) {
       retry.start();
       dispatch.get().run();
-      assertTrue(journal.awaitLoads(1));
-      assertTrue(journal.completed.await(1, TimeUnit.SECONDS));
-      dispatchUntil(dispatch, journal, 2);
+      assertEquals(1, journal.loads.get());
+
+      // 显式跨越 1 秒退避边界，不让真实等待与测试 deadline 竞速。
+      when(clock.millis()).thenReturn(999L);
+      dispatch.get().run();
+      assertEquals(1, journal.loads.get());
+      when(clock.millis()).thenReturn(1000L);
+      dispatch.get().run();
+      assertEquals(2, journal.loads.get());
     }
   }
 
@@ -163,17 +179,6 @@ class ExecutionExitConfirmationRetryTest {
     return new ExecutionExitConfirmer(new InMemoryHarnessStore(), journal, Clock.systemUTC());
   }
 
-  private static void dispatchUntil(
-      AtomicReference<Runnable> dispatch, ObservingJournal journal, int expected)
-      throws InterruptedException {
-    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
-    while (journal.loads.get() < expected && System.nanoTime() < deadline) {
-      dispatch.get().run();
-      Thread.sleep(10);
-    }
-    assertTrue(journal.loads.get() >= expected);
-  }
-
   private static final class ObservingJournal implements ExecutionExitJournal {
 
     private final AtomicInteger loads = new AtomicInteger();
@@ -182,7 +187,6 @@ class ExecutionExitConfirmationRetryTest {
     private final AtomicReference<String> threadName = new AtomicReference<>();
     private final CountDownLatch entered = new CountDownLatch(1);
     private final CountDownLatch release = new CountDownLatch(1);
-    private final CountDownLatch completed = new CountDownLatch(1);
     private volatile boolean block;
     private volatile boolean failOnce;
 
@@ -218,21 +222,12 @@ class ExecutionExitConfirmationRetryTest {
         return new ExecutionExitJournalSnapshot(List.of(), List.of());
       } finally {
         active.decrementAndGet();
-        completed.countDown();
       }
     }
 
     private void unblock() {
       block = false;
       release.countDown();
-    }
-
-    private boolean awaitLoads(int expected) throws InterruptedException {
-      long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(2500);
-      while (loads.get() < expected && System.nanoTime() < deadline) {
-        Thread.sleep(25);
-      }
-      return loads.get() >= expected;
     }
 
     @Override
