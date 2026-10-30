@@ -1,9 +1,14 @@
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
+import {
+  indexMainSources,
+  isQualifiedNamePattern,
+  matchesAny,
+} from './support/jacoco-source-index.mjs'
 
 /**
  * JaCoCo check 命名规约守护。
@@ -109,197 +114,6 @@ function parseJacocoRules(xml) {
     }
   }
   return rules
-}
-
-/** 复刻 `org.jacoco.core.runtime.WildcardMatcher`：`:` 分隔候选，`*` 任意字符，`?` 单字符，其余字面量，整体匹配。 */
-function jacocoPatternToRegExp(pattern) {
-  const alternatives = pattern.split(':').map((part) => {
-    let regex = ''
-    for (const char of part) {
-      if (char === '*') {
-        regex += '.*'
-      } else if (char === '?') {
-        regex += '.'
-      } else {
-        regex += char.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')
-      }
-    }
-    return `(${regex})`
-  })
-  return new RegExp(`^${alternatives.join('|')}$`, 'u')
-}
-
-const JAVA_TYPE_KEYWORDS = new Set(['class', 'interface', 'enum', 'record'])
-
-/**
- * 剥离 Java 注释与字符串/字符/文本块字面量（用空格占位以免粘连相邻 token），保留其余结构字符，
- * 使嵌套类型的花括号配对扫描不受其中内容干扰。
- */
-function stripJavaCommentsAndLiterals(source) {
-  let stripped = ''
-  let index = 0
-  while (index < source.length) {
-    const char = source[index]
-    const next = source[index + 1]
-    if (char === '/' && next === '/') {
-      while (index < source.length && source[index] !== '\n') {
-        index += 1
-      }
-      stripped += ' '
-      continue
-    }
-    if (char === '/' && next === '*') {
-      index += 2
-      while (index < source.length && !(source[index] === '*' && source[index + 1] === '/')) {
-        index += 1
-      }
-      index += 2
-      stripped += ' '
-      continue
-    }
-    if (char === '"' && next === '"' && source[index + 2] === '"') {
-      index += 3
-      while (
-        index < source.length &&
-        !(source[index] === '"' && source[index + 1] === '"' && source[index + 2] === '"')
-      ) {
-        index += source[index] === '\\' ? 2 : 1
-      }
-      index += 3
-      stripped += ' '
-      continue
-    }
-    if (char === '"' || char === "'") {
-      index += 1
-      while (index < source.length && source[index] !== char) {
-        index += source[index] === '\\' ? 2 : 1
-      }
-      index += 1
-      stripped += ' '
-      continue
-    }
-    stripped += char
-    index += 1
-  }
-  return stripped
-}
-
-/**
- * 提取顶层类型内声明的嵌套类型限定名（相对顶层，例如 `Nested`、`Nested.Deeper`），与 JaCoCo
- * 把 `$` 归一为 `.` 后的 CLASS 名称一致，因此点号嵌套模式才能命中真实元素。只统计类型成员体中
- * 的声明：方法体内的局部类在 JaCoCo 中是 `Outer$1Local`，不属于这个命名空间。
- */
-function nestedTypeNames(source) {
-  const code = stripJavaCommentsAndLiterals(source)
-  const names = new Set()
-  // 每层花括号一项：类型体为类型名，其他块（方法体、初始化块、匿名类体等）为 null。
-  const stack = []
-  let pendingType = null
-  let previousSignificant = ''
-  let index = 0
-  while (index < code.length) {
-    const char = code[index]
-    if (char === '{') {
-      stack.push(pendingType)
-      pendingType = null
-      previousSignificant = char
-      index += 1
-      continue
-    }
-    if (char === '}') {
-      stack.pop()
-      previousSignificant = char
-      index += 1
-      continue
-    }
-    if (/[A-Za-z_$]/u.test(char)) {
-      let end = index
-      while (end < code.length && /[A-Za-z0-9_$]/u.test(code[end])) {
-        end += 1
-      }
-      const word = code.slice(index, end)
-      // `.class` 字面量不引入类型声明。
-      if (JAVA_TYPE_KEYWORDS.has(word) && previousSignificant !== '.') {
-        let nameStart = end
-        while (nameStart < code.length && /\s/u.test(code[nameStart])) {
-          nameStart += 1
-        }
-        let nameEnd = nameStart
-        while (nameEnd < code.length && /[A-Za-z0-9_$]/u.test(code[nameEnd])) {
-          nameEnd += 1
-        }
-        const typeName = code.slice(nameStart, nameEnd)
-        if (typeName) {
-          // stack[0] 是文件顶层类型，只有它之内的声明才是嵌套类型。
-          const enclosing = stack.slice(1)
-          if (stack.length > 0 && enclosing.every((entry) => entry !== null)) {
-            names.add(enclosing.length > 0 ? `${enclosing.join('.')}.${typeName}` : typeName)
-          }
-          pendingType = typeName
-        }
-      }
-      previousSignificant = code[end - 1]
-      index = end
-      continue
-    }
-    if (!/\s/u.test(char)) {
-      previousSignificant = char
-    }
-    index += 1
-  }
-  return names
-}
-
-/** 主源码类/包索引（不含 package-info / module-info：它们不是 capability 目标类）。 */
-function indexMainSources(moduleDirectory) {
-  const sourceRoot = path.join(moduleDirectory, 'src/main/java')
-  const classes = new Set()
-  const packages = new Set()
-  const walk = (directory) => {
-    for (const entry of readdirSync(directory, { withFileTypes: true })) {
-      const absolutePath = path.join(directory, entry.name)
-      if (entry.isDirectory()) {
-        walk(absolutePath)
-        continue
-      }
-      if (!entry.name.endsWith('.java') || /^(?:package|module)-info\.java$/u.test(entry.name)) {
-        continue
-      }
-      const qualifiedName = path
-        .relative(sourceRoot, absolutePath)
-        .slice(0, -'.java'.length)
-        .split(path.sep)
-        .join('.')
-      classes.add(qualifiedName)
-      packages.add(qualifiedName.split('.').slice(0, -1).join('.'))
-      // 嵌套类型没有独立源文件，必须按 `Outer.Nested` 限定名补入类命名空间。
-      for (const nested of nestedTypeNames(readFileSync(absolutePath, 'utf8'))) {
-        classes.add(`${qualifiedName}.${nested}`)
-      }
-    }
-  }
-  if (existsSync(sourceRoot)) {
-    walk(sourceRoot)
-  }
-  return { classes, packages }
-}
-
-/** 合法限定名模式：不许 `/`（不会命中）、不许 `$`（限定名规约要求嵌套类用 `.`）、不许 `:`；每段为非空标识符/通配符。 */
-function isQualifiedNamePattern(pattern) {
-  if (pattern.length === 0 || /[/$:]/u.test(pattern)) {
-    return false
-  }
-  return pattern.split('.').every((segment) => /^[A-Za-z0-9_*?]+$/u.test(segment))
-}
-
-function matchesAny(pattern, names) {
-  const matcher = jacocoPatternToRegExp(pattern)
-  for (const name of names) {
-    if (matcher.test(name)) {
-      return true
-    }
-  }
-  return false
 }
 
 /** 各 element 的匹配命名空间：CLASS/PACKAGE 用主源码限定名，BUNDLE 用 bundle 显示名，其他 element 不校验。 */
@@ -418,11 +232,15 @@ test('every repository CLASS/PACKAGE/BUNDLE JaCoCo rule matches the element name
   assert.ok(stats.classOrPackageRuleCount >= 10, `expected >= 10 rules, got ${stats.classOrPackageRuleCount}`)
   assert.ok(stats.includePatternCount >= 50, `expected >= 50 include patterns, got ${stats.includePatternCount}`)
 
-  // 双 bundle 的关键类覆盖由 agent-builtin 的官方 JaCoCo Ant report/check 承担，不能再保留无效的 Maven 本地 check。
+  // 关键类覆盖由各模块自己的 native jacoco:check 承担，不得回退到跨模块 Ant report。
   const runtimePom = readFileSync(path.join(REPOSITORY_ROOT, 'harness/runtime/pom.xml'), 'utf8')
   const builtinPom = readFileSync(path.join(REPOSITORY_ROOT, 'harness/agent-builtin/pom.xml'), 'utf8')
-  assert.deepEqual(parseJacocoRules(runtimePom), [], 'runtime must not retain a local JaCoCo check')
-  assert.deepEqual(parseJacocoRules(builtinPom), [], 'builtin coverage must use the official Ant report')
+  assert.ok(parseJacocoRules(runtimePom).length > 0, 'runtime must own its native JaCoCo check')
+  assert.ok(parseJacocoRules(builtinPom).length > 0, 'builtin must own its native JaCoCo check')
+  assert.doesNotMatch(runtimePom, /maven-antrun-plugin/u)
+  assert.doesNotMatch(builtinPom, /maven-antrun-plugin/u)
+  assert.doesNotMatch(runtimePom, /org\.jacoco\.ant/u)
+  assert.doesNotMatch(builtinPom, /org\.jacoco\.ant/u)
 })
 
 test('dotted and wildcard CLASS patterns matching main sources are accepted', () => {

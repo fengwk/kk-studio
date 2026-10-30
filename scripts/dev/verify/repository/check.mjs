@@ -717,14 +717,18 @@ function productionPackages(modulePath) {
   })
 }
 
-function checkUniqueMainPackages() {
+/**
+ * 同名包按源集分别归属：生产包和测试包各自在 Maven 模块之间唯一。
+ * 同一模块的 main 与 test 可以同名，因为它们位于不同 classpath，不构成运行时冲突。
+ */
+function packageOwners(sourceSet) {
   const owners = new Map()
   function visitModule(modulePath) {
     const pomPath = path.join(modulePath, 'pom.xml')
     if (!existsSync(path.join(repositoryRoot, pomPath))) {
       return
     }
-    const sourceRoot = path.join(repositoryRoot, modulePath, 'src/main/java')
+    const sourceRoot = path.join(repositoryRoot, modulePath, 'src', sourceSet, 'java')
     for (const file of walkFiles(sourceRoot).filter((file) => file.endsWith('.java'))) {
       const match = readFileSync(file, 'utf8').match(/^\s*package\s+([\w.]+)\s*;/mu)
       if (!match) {
@@ -741,11 +745,19 @@ function checkUniqueMainPackages() {
     }
   }
   visitModule('')
-  for (const [name, modules] of owners) {
-    if (modules.size < 2) {
-      continue
+  return owners
+}
+
+function checkUniquePackages() {
+  for (const sourceSet of ['main', 'test']) {
+    for (const [name, modules] of packageOwners(sourceSet)) {
+      if (modules.size < 2) {
+        continue
+      }
+      addError(
+        `Java ${sourceSet} package shared across Maven modules: ${name} (${[...modules].sort().join(', ')})`,
+      )
     }
-    addError(`Java main package shared across Maven modules: ${name} (${[...modules].sort().join(', ')})`)
   }
 }
 
@@ -859,7 +871,7 @@ checkLinks()
 checkInlineSourcePaths()
 checkForbiddenReferencesAndTerms()
 checkModuleBoundaries()
-checkUniqueMainPackages()
+checkUniquePackages()
 checkNoHarnessModuleDocs()
 checkPackageInfo()
 checkPackageArchitectureDocs()
