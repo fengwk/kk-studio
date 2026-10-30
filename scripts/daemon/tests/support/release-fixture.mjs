@@ -8,8 +8,8 @@
  *
  * - `curl` maps the official URLs onto local fixture files.
  * - `npm` honours `--os` / `--cpu` by materialising only the matching `@koromix/koffi-<os>-<cpu>`
- *   optional prebuilt, and refuses any install that would run target lifecycle scripts without
- *   `--ignore-scripts`.
+ *   and `@vscode/ripgrep-<os>-<cpu>` optional prebuilts, and refuses any install that would run
+ *   target lifecycle scripts without `--ignore-scripts`.
  * - the daemon entrypoint and the frozen `lib/node` are real executables with a controlled
  *   `--version` / `--check-config` contract.
  * - the managed update script is imported from the shipped TypeScript module, so the tests never
@@ -229,6 +229,19 @@ if (process.env.FAKE_NPM_FOREIGN_PREBUILT === '1') {
   const foreign = path.join(prefix, 'node_modules', '@koromix', 'koffi-freebsd-x64')
   fs.mkdirSync(foreign, { recursive: true })
   fs.writeFileSync(path.join(foreign, 'index.js'), 'module.exports = {}\\n')
+}
+if (process.env.FAKE_NPM_OMIT_RG !== '1') {
+  // @vscode/ripgrep resolves @vscode/ripgrep-<platform>-<arch>/bin/rg from the installed package.
+  const rgRoot = path.join(prefix, 'node_modules', '@vscode', 'ripgrep-' + targetOs + '-' + targetCpu)
+  const rgName = targetOs === 'win32' ? 'rg.exe' : 'rg'
+  fs.mkdirSync(path.join(rgRoot, 'bin'), { recursive: true })
+  fs.writeFileSync(path.join(rgRoot, 'bin', rgName), '#!/bin/sh\\nexit 0\\n')
+  fs.chmodSync(path.join(rgRoot, 'bin', rgName), 0o755)
+  if (process.env.FAKE_NPM_FOREIGN_PREBUILT === '1') {
+    const foreignRg = path.join(prefix, 'node_modules', '@vscode', 'ripgrep-freebsd-x64')
+    fs.mkdirSync(path.join(foreignRg, 'bin'), { recursive: true })
+    fs.writeFileSync(path.join(foreignRg, 'bin', 'rg'), '#!/bin/sh\\nexit 0\\n')
+  }
 }
 `
 }

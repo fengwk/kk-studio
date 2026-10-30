@@ -11,6 +11,7 @@
 #     原生模块能被这份 Node 加载；
 #   * 目标平台 `@koromix/koffi-<linux|darwin>-*` 原生预编译模块确实可加载：私有数据目录
 #     0700、`daemon.lock` 0600 与内核锁独占；
+#   * 目标平台 `@vscode/ripgrep-<linux|darwin>-*` 的 rg 可执行文件存在且能报告版本。
 #   * 真实入口 `main.js --config` 能启动、持锁并被第二个实例按锁冲突拒绝，且在失败、
 #     超时或 SIGINT/SIGTERM 时被终止并等待真实退出后再删除临时目录。
 #
@@ -34,7 +35,8 @@ Acceptance smoke for one staged Node Daemon release archive on Linux or macOS. E
 the archive and runs it with its own frozen runtime under a PATH that contains no user
 Node or Java: --version / --help / --check-config (including rejecting a wrapped "daemon"
 object the real schema forbids), the frozen code-server entry and its native modules, the
-target-platform koffi prebuilt (private directory + kernel lock), and a real main.js
+target-platform koffi prebuilt and ripgrep binary (private directory + kernel lock + rg --version),
+and a real main.js
 --config launch that is terminated and reaped on every exit path. Only a linux or macos
 archive for this host can run; Windows and cross-platform archives fail instead of being
 skipped. Nothing is downloaded, uploaded or registered.
@@ -155,6 +157,19 @@ esac
 [ -e "$extract/node_modules/$koffi" ] ||
   fail "archive is missing the target-platform koffi prebuilt: node_modules/$koffi"
 
+case "$archive_os-$archive_arch" in
+  linux-amd64) ripgrep=@vscode/ripgrep-linux-x64 ;;
+  linux-arm64) ripgrep=@vscode/ripgrep-linux-arm64 ;;
+  macos-amd64) ripgrep=@vscode/ripgrep-darwin-x64 ;;
+  macos-arm64) ripgrep=@vscode/ripgrep-darwin-arm64 ;;
+  *) fail "no ripgrep prebuilt mapping for $archive_os-$archive_arch" ;;
+esac
+rg_bin="$extract/node_modules/$ripgrep/bin/rg"
+[ -f "$rg_bin" ] ||
+  fail "archive is missing the target-platform ripgrep binary: node_modules/$ripgrep/bin/rg"
+[ -x "$rg_bin" ] ||
+  fail "target-platform ripgrep binary is not executable: node_modules/$ripgrep/bin/rg"
+
 # 冻结 code-server 4.141.0 自带 Node 24；发行 `engines` 也要求 24.x，两者必须一致。
 frozen_node_version=$("$node_bin" --version 2>&1) || fail "frozen runtime cannot report its version"
 case "$frozen_node_version" in
@@ -193,6 +208,14 @@ run_isolated() {
 if run_isolated sh -c 'command -v node >/dev/null 2>&1 || command -v java >/dev/null 2>&1'; then
   fail "the controlled PATH must not contain a user Node or Java"
 fi
+
+# rg 是发行包内的目标平台二进制；在受控 PATH 下执行，证明它不是宿主工具链回退。
+rg_version=$(run_isolated "$rg_bin" --version 2>&1) ||
+  fail "packaged ripgrep cannot run under the controlled PATH: $rg_version"
+case "$rg_version" in
+  'ripgrep '*) ;;
+  *) fail "packaged ripgrep reported an unexpected version: $rg_version" ;;
+esac
 
 # 1) 信息命令只用冻结运行时即可回答，不读取配置、不建目录。
 actual_version=$(run_isolated "$node_bin" "$main_js" --version 2>&1) ||
