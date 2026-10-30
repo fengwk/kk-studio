@@ -206,6 +206,8 @@
                                         <include>fun.fengwk.kkstudio.platform.harness.read.TextReadWindow</include>
                                         <include>fun.fengwk.kkstudio.platform.settings.HttpProxySelector*</include>
                                         <include>fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver</include>
+                                        <include>fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseAgentTurnContextResolver</include>
+                                        <include>fun.fengwk.kkstudio.platform.harness.thread.command.AgentTurnContext</include>
                                         <include>fun.fengwk.kkstudio.platform.harness.model.ProviderResourceMaterializer*</include>
                                         <include>fun.fengwk.kkstudio.platform.harness.model.ProviderInlineBlobReader*</include>
                                         <include>fun.fengwk.kkstudio.platform.harness.tool.gateway.ToolExecutionGateway</include>
