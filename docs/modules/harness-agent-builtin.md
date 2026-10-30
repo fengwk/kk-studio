@@ -102,12 +102,9 @@ groupExecution?
 
 ## 源码与测试
 
-- Driver、私有状态与 debug 查询：[`BuiltinAgentDriver.java`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/driver/BuiltinAgentDriver.java)、[`BuiltinStore.java`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/store/BuiltinStore.java)、[`BuiltinRequestQueryTest.java`](../../harness/agent-builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/query/BuiltinRequestQueryTest.java)。
-- 模型状态、请求物化与模型组：[`ModelInvocationTransitionTest.java`](../../harness/agent-builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/model/ModelInvocationTransitionTest.java)、[`ModelInvocationGroupTest.java`](../../harness/agent-builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/model/ModelInvocationGroupTest.java)、[`ModelRequestMaterializerTest.java`](../../harness/agent-builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/model/ModelRequestMaterializerTest.java)、[`ModelGroupFailureDeciderTest.java`](../../harness/agent-builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/processor/ModelGroupFailureDeciderTest.java)。
-- MODEL Work、流式与响应物化：[`ModelProcessorTest.java`](../../harness/agent-builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/processor/ModelProcessorTest.java)、[`ModelExecutionStreamFlushTest.java`](../../harness/agent-builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/processor/ModelExecutionStreamFlushTest.java)、[`ModelResponsePlannerTest.java`](../../harness/agent-builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/processor/ModelResponsePlannerTest.java)、[`ModelResponseValidatorTest.java`](../../harness/agent-builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/processor/ModelResponseValidatorTest.java)、[`ToolHistoryActionsTest.java`](../../harness/agent-builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/processor/ToolHistoryActionsTest.java)、[`ModelAttemptMaterializationTest.java`](../../harness/agent-builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/history/ModelAttemptMaterializationTest.java)。
-- 自动压缩：[`CompactionPlannerTest.java`](../../harness/agent-builtin/src/test/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionPlannerTest.java)。
-- Runtime 业务测试集中在 [`harness/agent-builtin` 测试目录](../../harness/agent-builtin/src/test/java/)；`harness/runtime` 自身验证模块边界与公共执行骨架。
-- 模块 `verify` 的 `check-critical-class-line-coverage` 使用官方 JaCoCo Ant report/check，同时分析 `harness/runtime/target/classes` 与本模块 `target/classes`，读取本模块 integration `jacoco.exec`，并把 XML/CSV/HTML 写入 `target/jacoco-report/`。32 个关键类逐类要求 `LINE` 覆盖率不低于 90%；任何缺失类、额外 include 或降低阈值都使门禁失败。
+- 本模块测试只验证 Builtin 自身：Driver、私有状态、模型状态与请求物化、流式与重试、模型组、自动压缩和响应物化。测试入口都在 [`harness/agent-builtin/src/test`](../../harness/agent-builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/) 下。
+- 测试通过 runtime test-jar 复用中立 kernel fixture（`InMemoryHarnessStore`、Store 契约基类、`FakeAgentDriver`）；本模块的 test-jar 仍导出 Builtin 私有模型契约/fixture，供 `infra` 等消费者使用，但 Runtime 内核测试和共享 fixture 不回流到本模块。
+- 模块 `verify` 的 native `jacoco:check` 只校验本模块的 5 个关键类，逐类 `LINE` 覆盖率不低于 90%。Runtime 的 27 个关键类由 runtime 自己的 check 负责，不存在跨模块 Ant report。
 
 ---
 
