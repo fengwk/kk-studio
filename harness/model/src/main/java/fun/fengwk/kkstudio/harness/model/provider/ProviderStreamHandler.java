@@ -17,6 +17,16 @@ public interface ProviderStreamHandler {
   }
 
   /**
+   * 接收本次调用实际发送的最终 UTF-8 JSON 请求体。回调发生在 Provider 现有 encoder 成功之后、transport 真正发送之前，同一 attempt
+   * 至多一次；默认安全忽略。
+   *
+   * <p>字节只在调用栈内临时存在，接收方不得持久化或记录正文。未实现该观察的 adapter 不会触发回调，调用方的 request-body 定价事实必须保持未知，不能根据其它信息虚构。
+   */
+  default void onRequestBody(byte[] bodyUtf8Bytes) {
+    // 安全默认：不需要观察最终请求体的实现者无需改动。
+  }
+
+  /**
    * 接收完整终止响应与可选的 native replay 状态。
    *
    * <p>唯一的成功终态入口：完成事实整体交付，调用方无需也不应再从 response 重建 replay 状态。

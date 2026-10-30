@@ -204,4 +204,60 @@ describe('ai-model-pricing-codec', () => {
       time: { start: '09:00', end: '18:00', timezone: 'UTC', weekdays: [1, 2] },
     })).toBe('context > 1000 · context ≤ 2000 · tier ∈ priority · time 09:00-18:00 UTC [1,2]')
   })
+
+
+  it('round-trips request-body path and typed values without losing scalar type or exact numbers', () => {
+    const draft = emptyPricingDraft()
+    draft.overrides.push({
+      id: 'request-body',
+      when: {
+        requestBody: { path: '/options/0/n', equals: { rawJson: '9007199254740993' } },
+      },
+      rates: { input: '2' },
+    })
+    const normalized = normalizePricing(draft)
+    expect(normalized.overrides[0].when.requestBody).toEqual({
+      path: '/options/0/n',
+      equals: { rawJSON: '9007199254740993' },
+    })
+    expect(JSON.stringify(normalized)).toContain('"equals":9007199254740993')
+    expect(clonePricing(normalized).overrides[0].when.requestBody).toEqual(
+      normalized.overrides[0].when.requestBody,
+    )
+
+    for (const equals of ['fast', true, null]) {
+      expect(
+        normalizeCondition({
+          requestBody: { path: '/speed', equals },
+        }).requestBody,
+      ).toEqual({ path: '/speed', equals })
+    }
+    expect(normalizeCondition({ requestBody: { path: '/n', equals: '2.000' } }).requestBody)
+      .toEqual({ path: '/n', equals: '2.000' })
+    expect(normalizeCondition({ requestBody: { path: '/n', equals: { rawJson: '2.000' } } }).requestBody)
+      .toEqual({ path: '/n', equals: { rawJSON: '2' } })
+    expect(JSON.stringify(normalizeCondition({
+      requestBody: { path: '/n', equals: { rawJson: '2.000' } },
+    }))).toContain('"equals":2')
+  })
+
+  it('rejects missing equals, invalid pointers, non-scalars and number precision loss', () => {
+    expect(() => normalizeCondition({ requestBody: { path: '/n' } }))
+      .toThrow(/equals is required/)
+    expect(() => normalizeCondition({ requestBody: { path: 'n', equals: 1 } }))
+      .toThrow(/JSON Pointer/)
+    expect(() => normalizeCondition({ requestBody: { path: '/a~2b', equals: 1 } }))
+      .toThrow(/~0 and ~1/)
+    expect(() => normalizeCondition({ requestBody: { path: '/' + 'a'.repeat(513), equals: 1 } }))
+      .toThrow(/512 UTF-8 bytes/)
+    expect(() => normalizeCondition({ requestBody: { path: '/n', equals: {} } }))
+      .toThrow(/string, number, boolean or null/)
+    expect(() => normalizeCondition({ requestBody: { path: '/n', equals: { rawJson: '1e19' } } }))
+      .toThrow(/scale/)
+    expect(() => normalizeCondition({ requestBody: { path: '/n', equals: { rawJson: '1'.repeat(65) } } }))
+      .toThrow(/precision/)
+    expect(describeCondition({
+      requestBody: { path: '/n', equals: { rawJson: '2.5' } },
+    })).toBe('requestBody /n = 2.5')
+  })
 })

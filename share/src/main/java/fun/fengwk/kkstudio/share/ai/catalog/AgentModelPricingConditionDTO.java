@@ -17,6 +17,8 @@ public class AgentModelPricingConditionDTO {
 
   private @Nullable AgentModelPricingTimeConditionDTO time;
 
+  private @Nullable AgentModelPricingRequestBodyConditionDTO requestBody;
+
   private @Nullable List<AgentModelPricingConditionDTO> all;
 
   private @Nullable List<AgentModelPricingConditionDTO> any;

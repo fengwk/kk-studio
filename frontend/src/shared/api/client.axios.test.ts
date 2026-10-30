@@ -3,6 +3,7 @@ import type { AxiosAdapter } from 'axios'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { HttpClient } from '@/shared/api/client'
 import { setLocale } from '@/shared/i18n'
+import { wireJsonNumber } from '@/shared/lib/lossless-json-number'
 
 const adapter = vi.fn<AxiosAdapter>()
 let apiClient: HttpClient
@@ -70,6 +71,35 @@ describe('apiClient with real axios', () => {
     const [config] = adapter.mock.calls[0]
     expect(config.data).toBe('{"name":"example"}')
     expect(config.headers.get('Content-Type')).toBe('application/json')
+  })
+
+  it('preserves exact request-body numbers from GET parsing through PUT serialization', async () => {
+    adapter.mockImplementation(async (config) => ({
+      config,
+      status: 200,
+      statusText: 'OK',
+      headers: new AxiosHeaders(),
+      // 直接构造 JSON 原文：先经 JSON.stringify(number) 就已经丢精度，不能再验证读取链路。
+      data: '{"status":200,"data":{"config":{"pricing":{"overrides":['
+        + '{"when":{"requestBody":{"path":"/n","equals":9007199254740993}}}'
+        + ']}}}}',
+    }))
+
+    const response = await apiClient.get<{
+      config: { pricing: { overrides: Array<{ when: { requestBody: { equals: unknown } } }> } }
+    }>('/models/example')
+    const exact = response.config.pricing.overrides[0].when.requestBody.equals
+    expect(exact).toEqual({ rawJson: '9007199254740993' })
+
+    const raw = wireJsonNumber(exact as { rawJson: string }, 'equals')
+    expect(JSON.stringify({ equals: raw })).toBe('{"equals":9007199254740993}')
+    await apiClient.put('/models/example', {
+      expectedVersion: '1',
+      equals: raw,
+    })
+    expect(adapter.mock.calls[1][0].data).toBe(
+      '{"expectedVersion":"1","equals":9007199254740993}',
+    )
   })
 
   it('transforms HTTP error bodies before normalizing backend error context', async () => {

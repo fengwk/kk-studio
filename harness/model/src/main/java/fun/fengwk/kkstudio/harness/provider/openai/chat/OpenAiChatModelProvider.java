@@ -78,6 +78,8 @@ final class OpenAiChatModelProvider implements ModelProvider {
       bridge.emitError(exception);
       return;
     }
+    // 定价观察只读取本次真正发送的编码 body；回调不得改变发送内容或二次编码。
+    handler.onRequestBody(encoded.bodyUtf8Bytes());
 
     HttpRequest httpRequest;
     try {

@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.model.RequestBodyPricingSnapshot;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
@@ -208,6 +209,39 @@ class HistoryEntryPayloadJsonCodecTest {
         (MessagePayload) CODEC.decode(EntryType.MESSAGE, CODEC.encode(payload));
 
     assertEquals(metadata, decoded.assistantMetadata());
+  }
+
+  /** 测试意图：request-body 定价快照只持久指纹与布尔值，旧记录缺失字段保持未知而不是反推匹配。 */
+  @Test
+  void roundTripsRequestBodyPricingSnapshotAndAcceptsLegacyAbsence() {
+    String fingerprint = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    AssistantMessageMetadata metadata =
+        new AssistantMessageMetadata(
+            GenerationStopReason.COMPLETE,
+            new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L),
+            null,
+            ModelSelection.model("actual-model", "high"),
+            Instant.parse("2026-01-01T00:00:05Z"),
+            "priority",
+            new RequestBodyPricingSnapshot(Map.of(fingerprint, true)));
+    MessagePayload payload = new MessagePayload(assistant("answer"), metadata, null);
+    MessagePayload decoded =
+        (MessagePayload) CODEC.decode(EntryType.MESSAGE, CODEC.encode(payload));
+    assertEquals(metadata, decoded.assistantMetadata());
+    String encoded = CODEC.encode(payload);
+    assertTrue(encoded.contains("\"requestBodyPricing\":{\"" + fingerprint + "\":true}"), encoded);
+    assertFalse(encoded.contains("/speed"), encoded);
+
+    String invalid =
+        "{\"message\":{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"text\",\"text\":\"answer\"}]},"
+            + "\"assistantMetadata\":{\"stopReason\":\"COMPLETE\",\"usage\":{\"inputTokens\":1,"
+            + "\"outputTokens\":1,\"cacheReadTokens\":0,\"cacheWriteTokens\":0,"
+            + "\"cacheWriteByTtl\":{},\"reasoningTokens\":0,\"providerTotalTokens\":2},"
+            + "\"requestBodyPricing\":{\""
+            + fingerprint
+            + "\":\"true\"}},"
+            + "\"toolResultMetadata\":null}";
+    assertThrows(IllegalArgumentException.class, () -> CODEC.decode(EntryType.MESSAGE, invalid));
   }
 
   /** 测试意图：人工输入回执随结果迁入 Entry 元数据后必须可无损往返，并作为 runtime 元数据显式编码（不写进业务 details）。 */

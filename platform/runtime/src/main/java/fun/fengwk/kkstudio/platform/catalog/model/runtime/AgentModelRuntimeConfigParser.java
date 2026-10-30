@@ -5,10 +5,12 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.DatabindException;
 import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.ObjectReader;
 import tools.jackson.databind.cfg.CoercionAction;
 import tools.jackson.databind.cfg.CoercionInputShape;
+import tools.jackson.databind.cfg.JsonNodeFeature;
 import tools.jackson.databind.type.LogicalType;
 
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
@@ -27,6 +29,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingDateConditionDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingFactorsDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingMultiplierDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingOverrideDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingRequestBodyConditionDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingTimeConditionDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelRatePatchDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelRateSetDTO;
@@ -74,6 +77,8 @@ public final class AgentModelRuntimeConfigParser {
             .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
             .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+            // equals 的 JSON number 必须保留十进制原文精度，不能先变 double。
+            .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
             .withCoercionConfig(
                 LogicalType.Integer,
                 config ->
@@ -469,11 +474,45 @@ public final class AgentModelRuntimeConfigParser {
                   bounds.start(), bounds.end(), timezone, weekdays),
           timePath);
     }
+    AgentModelPricingRequestBodyConditionDTO requestBody = condition.getRequestBody();
+    if (requestBody != null) {
+      validateRequestBody(requestBody, path + ".requestBody");
+    }
     validateConditionList(condition.getAll(), path + ".all", depth);
     validateConditionList(condition.getAny(), path + ".any", depth);
     if (condition.getNot() != null) {
       validateCondition(condition.getNot(), path + ".not", depth + 1);
     }
+  }
+
+  private static void validateRequestBody(
+      AgentModelPricingRequestBodyConditionDTO requestBody, String path) {
+    if (requestBody.getPath() == null) {
+      throw invalid(path + ".path must be a JSON Pointer string");
+    }
+    if (requestBody.getEquals() == null) {
+      throw invalid(path + ".equals is required; write null explicitly to match JSON null");
+    }
+    // 构造 requestBody 即完成 path/equals 的全部边界校验。
+    toRequestBody(requestBody.getPath(), requestBody.getEquals(), path);
+  }
+
+  private static ModelPricingCondition.RequestBody toRequestBody(
+      String pathValue, JsonNode equals, String path) {
+    if (equals.isString()) {
+      return ModelPricingCondition.RequestBody.stringValue(pathValue, equals.stringValue());
+    }
+    if (equals.isNumber()) {
+      return ModelPricingCondition.RequestBody.numberValue(
+          pathValue, equals.decimalValue().toPlainString());
+    }
+    if (equals.isBoolean()) {
+      return ModelPricingCondition.RequestBody.booleanValue(pathValue, equals.booleanValue());
+    }
+    if (equals.isNull()) {
+      return ModelPricingCondition.RequestBody.nullValue(pathValue);
+    }
+    throw invalid(path + ".equals must be a JSON string, number, boolean or null");
   }
 
   private static void validateConditionList(
@@ -756,11 +795,21 @@ public final class AgentModelRuntimeConfigParser {
               ZoneId.of(timeDto.getTimezone()),
               timeDto.getWeekdays());
     }
+    ModelPricingCondition.RequestBody requestBody = null;
+    AgentModelPricingRequestBodyConditionDTO requestBodyDto = condition.getRequestBody();
+    if (requestBodyDto != null) {
+      requestBody =
+          toRequestBody(
+              requestBodyDto.getPath(),
+              requestBodyDto.getEquals(),
+              "config.pricing.condition.requestBody");
+    }
     return new ModelPricingCondition(
         context,
         condition.getServiceTier(),
         date,
         time,
+        requestBody,
         toConditions(condition.getAll()),
         toConditions(condition.getAny()),
         condition.getNot() == null ? null : toCondition(condition.getNot()));
