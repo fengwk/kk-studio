@@ -14,6 +14,7 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
+import fun.fengwk.kkstudio.project.dto.ProjectDtoMapper;
 import fun.fengwk.kkstudio.web.StrictJacksonConfiguration;
 
 import java.lang.reflect.Field;
@@ -63,17 +64,25 @@ class ProjectDtoMapperWiringTest {
     runner.run(
         context -> {
           assertNull(context.getStartupFailure(), "bean wiring must start");
+          Class<?> jackson2Mapper = jackson2MapperClass();
           assertEquals(
               0,
-              context.getBeanNamesForType(jackson2MapperClass()).length,
+              jackson2Mapper == null ? 0 : context.getBeanNamesForType(jackson2Mapper).length,
               "own code must never resolve a Jackson 2 mapper bean");
         });
   }
 
-  /** Jackson 2 mapper 类名按段拼出：既避免导入 Jackson 2 core，也避免在代码体内写字面全限定名。 */
-  static Class<?> jackson2MapperClass() throws ClassNotFoundException {
-    return Class.forName(
-        String.join(".", "com", "fasterxml", "jackson", "databind", "ObjectMapper"));
+  /**
+   * Jackson 2 mapper 类名按段拼出：既避免导入 Jackson 2 core，也避免在代码体内写字面全限定名。当前 web 测试 classpath 已无 Jackson 2
+   * databind，缺失本身就是期望结果。
+   */
+  static Class<?> jackson2MapperClass() {
+    try {
+      return Class.forName(
+          String.join(".", "com", "fasterxml", "jackson", "databind", "ObjectMapper"));
+    } catch (ClassNotFoundException absent) {
+      return null;
+    }
   }
 
   /** 读取私有依赖字段：装配断言的唯一可观测点，DTO 映射行为无法区分 mapper 实例身份。 */

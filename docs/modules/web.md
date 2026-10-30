@@ -3,7 +3,7 @@
 [`WebApplication`](../../web/src/main/java/fun/fengwk/kkstudio/web/WebApplication.java)
 是生产 Spring Boot 组合根：装配 Platform、Project、Canvas/Harness infra、Runtime、
 Contributor 和构建期 Plugin，提供 REST、静态 SPA、浏览器事件与 Daemon WebSocket。
-Controller 解析 DTO、调用用例、映射结果；领域行为与事务由相应模块持有。
+Controller 解析请求、调用用例并返回结果。Harness 领域类型仍由 Web 映射；Canvas 与 Project 的 DTO 映射分别由各自模块持有。领域行为与事务由相应模块持有。
 
 ## 组合与生命周期
 
