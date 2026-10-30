@@ -8,8 +8,11 @@ Environment、Settings 和 Harness 产品用例。它负责跨资源事务、实
 构建期 Plugin 的纯 SPI、凭据与资源端口契约独立在 [Platform Plugin API](platform-plugin-api.md)。
 
 [`PlatformAutoConfiguration`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/PlatformAutoConfiguration.java)
-扫描 service、repository 和 JdbcStore。生产组合根是 [Web](web.md)。
+扫描领域服务、仓库与设施配置。生产组合根是 [Web](web.md)。
 PostgreSQL 保存业务事实，内存 registry、执行句柄和通知承担可重建的运行状态。
+
+Chat、Environment、Settings 与 Catalog 的实体仓库直接以 `JdbcClient` 承担 SQL、行映射与 CAS，
+业务服务使用具体类，不再经过单实现接口和 JdbcStore/DO 转发层。
 
 [`EnvironmentConfiguration`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/environment/EnvironmentConfiguration.java)
 由上述组件扫描装配，提供默认 UTC 时钟和节点身份；它不是独立的 Boot 自动配置入口。
