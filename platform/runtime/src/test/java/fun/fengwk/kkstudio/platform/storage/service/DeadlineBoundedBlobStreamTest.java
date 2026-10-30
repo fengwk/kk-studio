@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.storage.service.impl;
+package fun.fengwk.kkstudio.platform.storage.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;

@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.storage.service.impl;
+package fun.fengwk.kkstudio.platform.storage.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -17,7 +17,6 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import fun.fengwk.kkstudio.platform.storage.S3StorageService;
 import fun.fengwk.kkstudio.platform.storage.configuration.StorageMaintenanceProperties;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageObjectCleanupRepository;
-import fun.fengwk.kkstudio.platform.storage.service.StorageObjectCleanupService;
 
 import java.time.Duration;
 import java.util.List;
@@ -28,7 +27,7 @@ import java.util.List;
  * <p>测试意图：认领/重试参数必须是配置时长换算出的毫秒值（数据库用它加 {@code statement_timestamp()}），因此节点时钟偏移无法把记录推到过去；
  * 同时校验事务契约（enqueue 必须有活动事务、sweep 必须在事务外）与不安全配置的拒绝路径。
  */
-class PostgresqlStorageObjectCleanupServiceTest {
+class StorageObjectCleanupServiceTest {
 
   private static final long INTERVAL_MILLIS = 7_200_000L;
   private static final long RETRY_MILLIS = 45_000L;
@@ -47,8 +46,8 @@ class PostgresqlStorageObjectCleanupServiceTest {
     when(repository.claimDue(StorageObjectCleanupService.MAX_CLEANUP_BATCH, INTERVAL_MILLIS))
         .thenReturn(List.of("a", "b"));
     S3StorageService s3 = mock(S3StorageService.class);
-    PostgresqlStorageObjectCleanupService service =
-        new PostgresqlStorageObjectCleanupService(
+    StorageObjectCleanupService service =
+        new StorageObjectCleanupService(
             repository, s3, properties(Duration.ofHours(2), Duration.ofSeconds(45)));
 
     assertEquals(2, service.sweepOnce());
@@ -66,8 +65,8 @@ class PostgresqlStorageObjectCleanupServiceTest {
         .thenReturn(List.of("a"));
     S3StorageService s3 = mock(S3StorageService.class);
     doThrow(new IllegalStateException("S3 unavailable")).when(s3).deleteObjectIfExists("a");
-    PostgresqlStorageObjectCleanupService service =
-        new PostgresqlStorageObjectCleanupService(
+    StorageObjectCleanupService service =
+        new StorageObjectCleanupService(
             repository, s3, properties(Duration.ofHours(2), Duration.ofSeconds(45)));
 
     assertEquals(1, service.sweepOnce());
@@ -84,8 +83,8 @@ class PostgresqlStorageObjectCleanupServiceTest {
         .thenThrow(new IllegalStateException("database unavailable"));
     S3StorageService s3 = mock(S3StorageService.class);
     doThrow(new IllegalStateException("S3 unavailable")).when(s3).deleteObjectIfExists("a");
-    PostgresqlStorageObjectCleanupService service =
-        new PostgresqlStorageObjectCleanupService(
+    StorageObjectCleanupService service =
+        new StorageObjectCleanupService(
             repository, s3, properties(Duration.ofHours(2), Duration.ofSeconds(45)));
 
     // 认领已经把 next_attempt_at 推后，重试更新失败也不能让异常逃出去打断本轮清扫。
@@ -97,9 +96,8 @@ class PostgresqlStorageObjectCleanupServiceTest {
   @Test
   void enqueueRequiresAnActiveTransaction() {
     StorageObjectCleanupRepository repository = mock(StorageObjectCleanupRepository.class);
-    PostgresqlStorageObjectCleanupService service =
-        new PostgresqlStorageObjectCleanupService(
-            repository, mock(S3StorageService.class), properties());
+    StorageObjectCleanupService service =
+        new StorageObjectCleanupService(repository, mock(S3StorageService.class), properties());
 
     assertThrows(
         IllegalStateException.class,
@@ -115,8 +113,8 @@ class PostgresqlStorageObjectCleanupServiceTest {
 
   @Test
   void sweepRefusesToRunInsideADatabaseTransaction() {
-    PostgresqlStorageObjectCleanupService service =
-        new PostgresqlStorageObjectCleanupService(
+    StorageObjectCleanupService service =
+        new StorageObjectCleanupService(
             mock(StorageObjectCleanupRepository.class), mock(S3StorageService.class), properties());
 
     TransactionSynchronizationManager.initSynchronization();
@@ -136,28 +134,27 @@ class PostgresqlStorageObjectCleanupServiceTest {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            new PostgresqlStorageObjectCleanupService(
+            new StorageObjectCleanupService(
                 repository, s3, properties(Duration.ZERO, Duration.ofSeconds(45))));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            new PostgresqlStorageObjectCleanupService(
+            new StorageObjectCleanupService(
                 repository, s3, properties(Duration.ofNanos(1), Duration.ofSeconds(45))));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            new PostgresqlStorageObjectCleanupService(
+            new StorageObjectCleanupService(
                 repository,
                 s3,
                 properties(Duration.ofSeconds(Long.MAX_VALUE), Duration.ofSeconds(45))));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            new PostgresqlStorageObjectCleanupService(
+            new StorageObjectCleanupService(
                 repository, s3, properties(Duration.ofHours(2), Duration.ZERO)));
     assertThrows(
-        NullPointerException.class,
-        () -> new PostgresqlStorageObjectCleanupService(repository, s3, null));
+        NullPointerException.class, () -> new StorageObjectCleanupService(repository, s3, null));
   }
 
   private static StorageMaintenanceProperties properties() {

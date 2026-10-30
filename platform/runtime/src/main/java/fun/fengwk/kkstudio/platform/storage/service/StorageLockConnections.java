@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.storage.service.impl;
+package fun.fengwk.kkstudio.platform.storage.service;
 
 import java.sql.Connection;
 import java.sql.SQLException;

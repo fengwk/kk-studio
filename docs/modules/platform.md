@@ -236,6 +236,8 @@ Storage 不 import Harness，存储设施与执行资源边界各自装配。
 `storage_blob` 按 ACTIVE 内容的 `(sha256, size_bytes)` 去重；
 upload、Session、Canvas 和 Issue Evidence 通过各自 owner 边持有引用。
 retain/release 加入调用方事务；引用减至零时切为 DELETING，后台清理 preview、original 和行。
+`storage/persistence` 的实体仓库直接持有 `JdbcClient`，SQL、行映射与条件 CAS 全部内联；
+`storage/service` 是具体的生命周期服务，不存在单实现接口或 `service/impl` 层。
 
 上传使用 reserve → 浏览器 PUT → complete。complete 在专用会话级 upload advisory lock
 内做事务外 checksum HEAD、媒体 probe 与 copy，再短事务绑定 Blob。

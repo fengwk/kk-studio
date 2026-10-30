@@ -20,7 +20,6 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageObjectCleanupService;
-import fun.fengwk.kkstudio.platform.storage.service.impl.PostgresqlStorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
 
@@ -28,7 +27,7 @@ import java.util.List;
 import java.util.UUID;
 
 /** release 到零后的提交回调只做快速本地 wake，回滚不 wake，且绝不执行 S3。 */
-class PostgresqlStorageBlobManagerTest {
+class StorageBlobManagerTest {
 
   @AfterEach
   void clearSynchronization() {
@@ -45,7 +44,7 @@ class PostgresqlStorageBlobManagerTest {
     S3PresignService presign = mock(S3PresignService.class);
     StorageMaintenanceWakeup wakeup = mock(StorageMaintenanceWakeup.class);
     ObjectProvider<StorageMaintenanceWakeup> provider = provider(wakeup);
-    PostgresqlStorageBlobManager manager = newManager(repository, s3, presign, provider);
+    StorageBlobManager manager = newManager(repository, s3, presign, provider);
     TransactionSynchronizationManager.initSynchronization();
 
     long started = System.nanoTime();
@@ -67,7 +66,7 @@ class PostgresqlStorageBlobManagerTest {
   void rolledBackReleaseDoesNotWake() {
     UUID blobId = UUID.randomUUID();
     StorageMaintenanceWakeup wakeup = mock(StorageMaintenanceWakeup.class);
-    PostgresqlStorageBlobManager manager =
+    StorageBlobManager manager =
         newManager(
             deletingRepository(blobId),
             mock(S3StorageService.class),
@@ -95,8 +94,8 @@ class PostgresqlStorageBlobManagerTest {
     when(repository.deleteDeleting(blobId)).thenReturn(true);
     S3StorageService s3 = mock(S3StorageService.class);
     StorageObjectCleanupService cleanups = mock(StorageObjectCleanupService.class);
-    PostgresqlStorageBlobManager manager =
-        new PostgresqlStorageBlobManager(
+    StorageBlobManager manager =
+        new StorageBlobManager(
             repository,
             s3,
             mock(S3PresignService.class),
@@ -128,8 +127,8 @@ class PostgresqlStorageBlobManagerTest {
     when(repository.getById(blobId)).thenReturn(active);
     S3StorageService s3 = mock(S3StorageService.class);
     StorageObjectCleanupService cleanups = mock(StorageObjectCleanupService.class);
-    PostgresqlStorageBlobManager manager =
-        new PostgresqlStorageBlobManager(
+    StorageBlobManager manager =
+        new StorageBlobManager(
             repository,
             s3,
             mock(S3PresignService.class),
@@ -152,12 +151,12 @@ class PostgresqlStorageBlobManagerTest {
     return blob;
   }
 
-  private static PostgresqlStorageBlobManager newManager(
+  private static StorageBlobManager newManager(
       StorageBlobRepository repository,
       S3StorageService s3,
       S3PresignService presign,
       ObjectProvider<StorageMaintenanceWakeup> provider) {
-    return new PostgresqlStorageBlobManager(
+    return new StorageBlobManager(
         repository,
         s3,
         presign,

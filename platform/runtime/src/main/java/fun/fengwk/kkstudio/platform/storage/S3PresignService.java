@@ -1,35 +1,168 @@
 package fun.fengwk.kkstudio.platform.storage;
 
+import org.springframework.util.Assert;
+import org.springframework.util.MimeTypeUtils;
+import org.springframework.util.StringUtils;
+import software.amazon.awssdk.awscore.presigner.PresignedRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.s3.presigner.S3Presigner;
+import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
+import software.amazon.awssdk.services.s3.presigner.model.PresignedGetObjectRequest;
+import software.amazon.awssdk.services.s3.presigner.model.PresignedPutObjectRequest;
+import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
+
+import fun.fengwk.kkstudio.platform.settings.SystemSettings;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
+import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
+
+import java.time.Duration;
+import java.util.Base64;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+
 /**
  * S3 预签名服务：仅为上传或下载生成内部预签名 URL，不读写对象字节。
  *
- * <p>bucket 始终来自服务端配置；有效期为空时取默认；显式值必须为正且不超过服务端上限。
+ * <p>bucket 始终来自服务端配置；有效期为空时取默认；显式值必须为正且不超过服务端上限。签名由 AWS SDK v2 的 {@link S3Presigner} 在本地完成，不与 S3
+ * 产生任何 IO。bucket 来自 {@link S3StorageProperties}（部署连接），expiry 默认值/上限每次签名都从 {@link
+ * SystemSettingsSnapshot} 现读 {@link SystemSettings.StorageMedia}：修改配置只影响之后新签发的 URL，已签发 URL 不追溯。
+ *
+ * <p>响应 headers 只返回调用方发起请求时必须显式设置的已签名头（例如 PUT 场景下的 {@code Content-Type}）， 浏览器根据 URL 自动发送且脚本禁止设置的
+ * {@code Host} 不会出现在响应中。
  *
  * @author fengwk
  */
-public interface S3PresignService {
+public class S3PresignService {
 
-  /**
-   * 为携带客户端 SHA-256 校验和的 create-only PUT 生成预签名响应（浏览器直传）。
-   *
-   * <p>签名同时包含 {@code If-None-Match: *}（目标 key 已存在时拒绝 PUT）与 {@code x-amz-checksum-sha256}（浏览器必须原样回传
-   * base64 编码的原始 SHA-256 摘要）， 对象存储据此在写入时校验内容并持久化校验和，服务端随后可通过 checksum mode HEAD 复核。
-   *
-   * @param key 对象键（不要求规范化，服务端会统一校验）
-   * @param contentType 可选 content type；空白视为未提供，非空时校验并规范化后参与签名
-   * @param checksumSha256Base64 必填：base64 编码的原始 SHA-256 摘要（解码后必须恰好 32 字节）
-   * @param expiresInSeconds 可选过期秒数；{@code null} 使用服务端默认，显式值必须在允许范围内
-   * @return 包含 URL、调用方必须显式设置的 headers 与过期时间的内部预签名对象
-   */
-  S3PresignedUrl presignChecksummedCreateOnlyUpload(
-      String key, String contentType, String checksumSha256Base64, Long expiresInSeconds);
+  /** {@code contentType} 字段的最大长度，防止异常输入撑爆签名头。 */
+  static final int MAX_CONTENT_TYPE_LENGTH = 255;
 
-  /**
-   * 为 GET 下载生成预签名响应。
-   *
-   * @param key 对象键
-   * @param expiresInSeconds 可选过期秒数；{@code null} 使用服务端默认，显式值必须在允许范围内
-   * @return 包含 URL、调用方必须显式设置的 headers 与过期时间的内部预签名对象
-   */
-  S3PresignedUrl presignDownload(String key, Long expiresInSeconds);
+  private final S3StorageProperties properties;
+  private final S3Presigner s3Presigner;
+  private final SystemSettingsSnapshot settingsSnapshot;
+
+  public S3PresignService(
+      S3StorageProperties properties,
+      S3Presigner s3Presigner,
+      SystemSettingsSnapshot settingsSnapshot) {
+    this.properties = Objects.requireNonNull(properties, "properties must not be null");
+    this.s3Presigner = Objects.requireNonNull(s3Presigner, "s3Presigner must not be null");
+    this.settingsSnapshot =
+        Objects.requireNonNull(settingsSnapshot, "settingsSnapshot must not be null");
+  }
+
+  public S3PresignedUrl presignChecksummedCreateOnlyUpload(
+      String key, String contentType, String checksumSha256Base64, Long expiresInSeconds) {
+    validateChecksumSha256Base64(checksumSha256Base64);
+    PutObjectRequest putRequest =
+        newPutObjectRequest(key, contentType)
+            .ifNoneMatch("*")
+            .checksumSHA256(checksumSha256Base64)
+            .build();
+    Duration duration = resolveExpires(expiresInSeconds);
+    PutObjectPresignRequest presignRequest =
+        PutObjectPresignRequest.builder()
+            .signatureDuration(duration)
+            .putObjectRequest(putRequest)
+            .build();
+    PresignedPutObjectRequest presigned = s3Presigner.presignPutObject(presignRequest);
+    return toPresignedUrl(presigned, "PUT");
+  }
+
+  public S3PresignedUrl presignDownload(String key, Long expiresInSeconds) {
+    String normalizedKey = S3ObjectKeyNormalizer.normalize(key);
+    Duration duration = resolveExpires(expiresInSeconds);
+    GetObjectRequest getRequest =
+        GetObjectRequest.builder().bucket(properties.getBucket()).key(normalizedKey).build();
+    GetObjectPresignRequest presignRequest =
+        GetObjectPresignRequest.builder()
+            .signatureDuration(duration)
+            .getObjectRequest(getRequest)
+            .build();
+    PresignedGetObjectRequest presigned = s3Presigner.presignGetObject(presignRequest);
+    return toPresignedUrl(presigned, "GET");
+  }
+
+  private PutObjectRequest.Builder newPutObjectRequest(String key, String contentType) {
+    String normalizedKey = S3ObjectKeyNormalizer.normalize(key);
+    String normalizedContentType = normalizeContentType(contentType);
+    PutObjectRequest.Builder putBuilder =
+        PutObjectRequest.builder().bucket(properties.getBucket()).key(normalizedKey);
+    if (normalizedContentType != null) {
+      putBuilder.contentType(normalizedContentType);
+    }
+    return putBuilder;
+  }
+
+  private String normalizeContentType(String contentType) {
+    if (!StringUtils.hasText(contentType)) {
+      return null;
+    }
+    for (int i = 0; i < contentType.length(); i++) {
+      Assert.isTrue(
+          !Character.isISOControl(contentType.charAt(i)),
+          "contentType must not contain control characters");
+    }
+    String normalized = contentType.trim();
+    Assert.isTrue(
+        normalized.length() <= MAX_CONTENT_TYPE_LENGTH,
+        "contentType must not exceed " + MAX_CONTENT_TYPE_LENGTH + " characters");
+    try {
+      return MimeTypeUtils.parseMimeType(normalized).toString();
+    } catch (IllegalArgumentException e) {
+      throw new IllegalArgumentException("contentType must be a valid media type", e);
+    }
+  }
+
+  private void validateChecksumSha256Base64(String checksumSha256Base64) {
+    Assert.hasText(checksumSha256Base64, "checksumSha256Base64 must not be blank");
+    byte[] decoded;
+    try {
+      decoded = Base64.getDecoder().decode(checksumSha256Base64);
+    } catch (IllegalArgumentException e) {
+      throw new IllegalArgumentException("checksumSha256Base64 must be valid base64", e);
+    }
+    Assert.isTrue(
+        decoded.length == 32,
+        "checksumSha256Base64 must decode to a 32-byte SHA-256 digest, got " + decoded.length);
+  }
+
+  private Duration resolveExpires(Long expiresInSeconds) {
+    SystemSettings.StorageMedia storageMedia = settingsSnapshot.get().storageMedia();
+    long defaultExpires = storageMedia.s3PresignDefaultExpiresSeconds();
+    long maxExpires = storageMedia.s3PresignMaxExpiresSeconds();
+    long requested = expiresInSeconds == null ? defaultExpires : expiresInSeconds;
+    Assert.isTrue(requested > 0L, "expiresInSeconds must be positive");
+    Assert.isTrue(requested <= maxExpires, "expiresInSeconds must not exceed " + maxExpires);
+    return Duration.ofSeconds(requested);
+  }
+
+  private S3PresignedUrl toPresignedUrl(PresignedRequest presigned, String method) {
+    Map<String, List<String>> signedHeaders = presigned.signedHeaders();
+    // 对不暴露独立 signedHeaders map 的 SDK 实现，回退到已签名的 HTTP 请求头。
+    if (signedHeaders == null || signedHeaders.isEmpty()) {
+      signedHeaders = presigned.httpRequest().headers();
+    }
+    Map<String, String> flatHeaders = new LinkedHashMap<>();
+    if (signedHeaders != null) {
+      for (Map.Entry<String, List<String>> e : signedHeaders.entrySet()) {
+        if ("host".equalsIgnoreCase(e.getKey())) {
+          continue;
+        }
+        List<String> values = e.getValue();
+        if (values != null && !values.isEmpty()) {
+          flatHeaders.put(e.getKey(), values.get(0));
+        }
+      }
+    }
+    return S3PresignedUrl.builder()
+        .method(method)
+        .url(presigned.url().toString())
+        .headers(flatHeaders)
+        .expiresAt(presigned.expiration().toString())
+        .build();
+  }
 }
