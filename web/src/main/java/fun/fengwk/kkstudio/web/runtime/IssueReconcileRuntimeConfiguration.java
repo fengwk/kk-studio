@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.web.runtime;
 
+import io.micrometer.context.ContextExecutorService;
+import io.micrometer.context.ContextSnapshotFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.SmartLifecycle;
@@ -43,17 +45,19 @@ public class IssueReconcileRuntimeConfiguration {
   /** bounded worker executor：固定并发 + 有界队列 + AbortPolicy（fail-fast，绝不静默丢弃 handoff task）。 */
   @Bean(name = "issueReconcileDispatcherWorkerExecutor", destroyMethod = "shutdown")
   public ExecutorService issueReconcileDispatcherWorkerExecutor(
-      IssueReconcileProperties properties) {
+      IssueReconcileProperties properties, ContextSnapshotFactory contextSnapshotFactory) {
     int concurrency = properties.getWorker().getConcurrency();
     int queueCapacity = properties.getWorker().getQueueCapacity();
-    return new ThreadPoolExecutor(
-        concurrency,
-        concurrency,
-        60L,
-        TimeUnit.SECONDS,
-        new LinkedBlockingQueue<>(queueCapacity),
-        Thread.ofPlatform().name("issue-dispatch-worker-", 0L).daemon(true).factory(),
-        new ThreadPoolExecutor.AbortPolicy());
+    return ContextExecutorService.wrap(
+        new ThreadPoolExecutor(
+            concurrency,
+            concurrency,
+            60L,
+            TimeUnit.SECONDS,
+            new LinkedBlockingQueue<>(queueCapacity),
+            Thread.ofPlatform().name("issue-dispatch-worker-", 0L).daemon(true).factory(),
+            new ThreadPoolExecutor.AbortPolicy()),
+        contextSnapshotFactory);
   }
 
   @Bean(name = "issueReconcileDispatcherPollScheduler", destroyMethod = "shutdown")

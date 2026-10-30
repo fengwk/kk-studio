@@ -3,6 +3,9 @@ spring:
   autoconfigure:
     exclude:
       - fun.fengwk.convention4j.springboot.starter.web.error.WebErrorAutoConfiguration
+      # 请求追踪由官方 ServerHttpObservationFilter 承担；旧 interceptor/aspect 不再激活。
+      - fun.fengwk.convention4j.springboot.starter.web.tracer.TracerWebAutoConfiguration
+      - fun.fengwk.convention4j.springboot.starter.tracer.ConventionSpanAspectAutoConfiguration
 
   application:
     # 应用名称
@@ -52,6 +55,19 @@ management:
     web:
       exposure:
         include: "health,prometheus,offline,online"
+  tracing:
+    # 本地链路追踪只创建 span 与 MDC，不上报外部 collector。
+    sampling:
+      probability: 1.0
+    propagation:
+      type: W3C
+    baggage:
+      # 本切片不传播/关联 baggage，避免任意 baggage key 进入 MDC。
+      enabled: false
+    export:
+      otlp:
+        # 显式关闭 OTLP exporter 条件；桥接与传播保持启用。classpath 也不声明 OTLP exporter。
+        enabled: false
 
 # 日志配置
 logging:
