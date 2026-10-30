@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.postgresql.PGConnection;
 import org.postgresql.PGNotification;
 
-import fun.fengwk.kkstudio.work.DurableWorkQueue;
+import fun.fengwk.kkstudio.work.DurableWorkStore;
 
 import javax.sql.DataSource;
 
@@ -35,7 +35,7 @@ import java.util.logging.Logger;
 
 class PostgresqlNotificationLoopTest {
 
-  private static final String WORK_CHANNEL = DurableWorkQueue.CHANNEL;
+  private static final String WORK_CHANNEL = DurableWorkStore.CHANNEL;
   private static final String PROJECT_CHANNEL = "project_issue_changed";
   private static final String THREAD_CHANNEL = "harness_thread_version";
   private static final String CANVAS_CHANNEL = "canvas_revision";

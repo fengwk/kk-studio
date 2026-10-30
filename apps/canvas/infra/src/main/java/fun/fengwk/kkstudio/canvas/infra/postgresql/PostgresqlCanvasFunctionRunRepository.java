@@ -7,9 +7,8 @@ import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunRepository;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStateCodecPort;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus;
-import fun.fengwk.kkstudio.work.DurableWorkQueue;
+import fun.fengwk.kkstudio.work.DurableWorkStore;
 
-import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -29,12 +28,12 @@ public class PostgresqlCanvasFunctionRunRepository implements CanvasFunctionRunR
 
   private final CanvasFunctionRunJdbcStore runStore;
   private final CanvasFunctionRunStateCodecPort stateCodec;
-  private final DurableWorkQueue canvasRunWorkQueue;
+  private final DurableWorkStore canvasRunWorkQueue;
 
   public PostgresqlCanvasFunctionRunRepository(
       CanvasFunctionRunJdbcStore runStore,
       CanvasFunctionRunStateCodecPort stateCodec,
-      DurableWorkQueue canvasRunWorkQueue) {
+      DurableWorkStore canvasRunWorkQueue) {
     this.runStore = Objects.requireNonNull(runStore, "runStore");
     this.stateCodec = Objects.requireNonNull(stateCodec, "stateCodec");
     this.canvasRunWorkQueue = Objects.requireNonNull(canvasRunWorkQueue, "canvasRunWorkQueue");
@@ -76,7 +75,7 @@ public class PostgresqlCanvasFunctionRunRepository implements CanvasFunctionRunR
     if (runStore.insert(toData(run)) != 1) {
       throw new IllegalStateException("insert canvas function run failed: " + run.nodeId());
     }
-    canvasRunWorkQueue.request(run.nodeId(), Duration.ZERO);
+    canvasRunWorkQueue.request(run.nodeId());
   }
 
   @Override
@@ -86,7 +85,7 @@ public class PostgresqlCanvasFunctionRunRepository implements CanvasFunctionRunR
     if (runStore.replaceTerminalWithReady(toData(run)) != 1) {
       return false;
     }
-    canvasRunWorkQueue.request(run.nodeId(), Duration.ZERO);
+    canvasRunWorkQueue.request(run.nodeId());
     return true;
   }
 
@@ -136,7 +135,7 @@ public class PostgresqlCanvasFunctionRunRepository implements CanvasFunctionRunR
         != 1) {
       return false;
     }
-    canvasRunWorkQueue.request(run.nodeId(), Duration.ZERO);
+    canvasRunWorkQueue.request(run.nodeId());
     return true;
   }
 
@@ -170,7 +169,7 @@ public class PostgresqlCanvasFunctionRunRepository implements CanvasFunctionRunR
   @Override
   @Transactional
   public boolean deleteByCanvasId(UUID canvasId) {
-    runStore.deleteWorkByCanvas(canvasId);
+    canvasRunWorkQueue.deleteAll(runStore.listNodeIdsByCanvas(canvasId));
     return runStore.deleteByCanvas(canvasId) >= 0;
   }
 

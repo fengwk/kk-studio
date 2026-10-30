@@ -61,7 +61,7 @@ import fun.fengwk.kkstudio.project.repo.ProjectRepository;
 import fun.fengwk.kkstudio.project.service.IssueActivityIdempotency.Identity;
 import fun.fengwk.kkstudio.project.turn.ProjectRunScope;
 import fun.fengwk.kkstudio.project.turn.ProjectRunScopeJsonCodec;
-import fun.fengwk.kkstudio.work.DurableWorkQueue;
+import fun.fengwk.kkstudio.work.DurableWorkStore;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -103,7 +103,7 @@ public class IssueRunService {
   private final IssueStageBudgetRepository stageBudgetRepository;
   private final IssueAgentThreadRepository issueAgentThreadRepository;
   private final IssueActivityRepository issueActivityRepository;
-  private final DurableWorkQueue issueWorkQueue;
+  private final DurableWorkStore issueWorkQueue;
   private final ProjectWorkflowJsonCodec workflowCodec;
   private final AgentBranchSettingsMaterializer agentBranchSettings;
   private final ObjectProvider<IssueThreadExecution> threadExecutions;
