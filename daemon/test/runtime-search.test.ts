@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -6,14 +6,10 @@ import { join } from 'node:path'
 import type { DaemonConfig } from '../src/contracts.js'
 import { CAPABILITY_CATALOG_VERSION, decodeEnvelope, encodeInvoke, type Envelope } from '../src/protocol.js'
 import { Runtime } from '../src/runtime.js'
-import { searchCapabilities } from '../src/coding/search.js'
-import { FakeWorker } from './coding/fake-search-worker.js'
+import { createSearchCapabilities, searchCapabilities } from '../src/coding/search.js'
+import type { CapabilityExecutor } from '../src/contracts.js'
 import { FakeTransport, fakeProcessSupervisor, serverMessage, testConfig, tick, waitFor } from './helpers.js'
-
-vi.mock('node:worker_threads', async () => {
-  const { FakeWorker } = await import('./coding/fake-search-worker.js')
-  return { Worker: FakeWorker }
-})
+import { installFakeRipgrep, waitForFakePid } from './coding/fake-ripgrep.js'
 
 const ENV = '11111111-2222-4333-8444-555555555555'
 
@@ -45,13 +41,15 @@ interface Setup {
   config: DaemonConfig
 }
 
-function buildSearchRuntime(): Setup {
+function buildSearchRuntime(
+  capabilities: Record<string, CapabilityExecutor> = searchCapabilities,
+): Setup {
   const transport = new FakeTransport()
   const config = testConfig()
   const runtime = new Runtime({
     config,
     transport,
-    capabilities: searchCapabilities,
+    capabilities,
     processes: fakeProcessSupervisor,
     environment,
     heartbeatIntervalMillis: 10_000,
@@ -72,17 +70,7 @@ async function handshake(setup: Setup): Promise<void> {
 describe('Runtime + Search 真实能力整合生命周期', () => {
   const tempDirs: string[] = []
 
-  beforeEach(() => {
-    FakeWorker.onCreated = null
-    FakeWorker.instances.length = 0
-  })
-
   afterEach(async () => {
-    FakeWorker.onCreated = null
-    for (const worker of FakeWorker.instances) {
-      worker.release()
-    }
-    FakeWorker.instances.length = 0
     await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
   })
 
@@ -94,129 +82,17 @@ describe('Runtime + Search 真实能力整合生命周期', () => {
   }
 
   it.each(['fs.find', 'fs.grep'] as const)(
-    '推进 fake timer 超时：%s 协作写入 stopBuffer(TIMED_OUT)，exit 门禁前维持 RUNNING，退出后仅一次 COMPLETED(error=true) 终态',
+    '%s 正常完成后只发送一次 COMPLETED 与 EXECUTION_EXITED',
     async (capabilityId) => {
       const dir = await createTestDir()
-      const workerCreated = Promise.withResolvers<FakeWorker>()
-      FakeWorker.onCreated = (w) => workerCreated.resolve(w)
-
       const setup = buildSearchRuntime()
-      const invocationId = `inv-search-timeout-${capabilityId.replace('.', '-')}`
-
+      const invocationId = `inv-search-${capabilityId.replace('.', '-')}`
       try {
         await handshake(setup)
-        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
-
         const args =
           capabilityId === 'fs.find'
             ? { pattern: '*.ts', path: dir }
             : { pattern: 'needle', path: dir }
-
-        const payload = JSON.parse(
-          encodeInvoke({
-            capabilityId,
-            capabilityVersion: CAPABILITY_CATALOG_VERSION,
-            arguments: args,
-            timeoutMillis: 50,
-          }),
-        ) as Record<string, unknown>
-
-        setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId, payload }))
-
-        // 等待 worker 实例创建并收到 search job
-        const worker = await workerCreated.promise
-        const job = worker.posted[0] as { stopBuffer: SharedArrayBuffer }
-        expect(job.stopBuffer).toBeDefined()
-        expect(Atomics.load(new Int32Array(job.stopBuffer), 0)).toBe(0)
-
-        // 推进 fake clock 到期，触发 Runtime 唯一的 invoke deadline timer
-        await vi.advanceTimersByTimeAsync(50)
-
-        // 验证 search capability 监听到 abort 后协作更新了 stopBuffer 为 1 (STOP_TIMED_OUT)
-        expect(Atomics.load(new Int32Array(job.stopBuffer), 0)).toBe(1)
-
-        // 模拟 worker 响应协作停止，回传 partial 结果带 stopReason='TIMED_OUT'
-        worker.emit('message', {
-          ok: true,
-          kind: capabilityId === 'fs.find' ? 'find' : 'grep',
-          matches: capabilityId === 'fs.find' ? [`${dir}/a.ts`] : undefined,
-          lines: capabilityId === 'fs.grep' ? [`${dir}/a.ts:1:export const needle = 42`] : undefined,
-          limitReached: false,
-          skipped: [],
-          stopReason: 'TIMED_OUT',
-        })
-
-        // 在 exit 门禁放行前：journal 维持 RUNNING 且绝不发送 terminal 报文
-        expect(setup.runtime.getJournal().find(invocationId)?.state).toBe('RUNNING')
-        expect(
-          sent(setup.transport).some(
-            (env) => env.invocationId === invocationId && ['COMPLETED', 'FAILED', 'CANCELLED'].includes(env.messageType),
-          ),
-        ).toBe(false)
-
-        // worker 进程自然退出
-        worker.emit('exit', 0)
-
-        vi.useRealTimers()
-
-        // 验证终态到达：按契约，CapabilityResult 无论 error 与否统一由 COMPLETED 报文承载
-        await waitFor(() =>
-          sent(setup.transport).some((env) => env.invocationId === invocationId && env.messageType === 'COMPLETED'),
-        )
-
-        const completedEnvelopes = sent(setup.transport).filter(
-          (env) => env.invocationId === invocationId && env.messageType === 'COMPLETED',
-        )
-        expect(completedEnvelopes).toHaveLength(1)
-        expect(
-          sent(setup.transport).some(
-            (env) => env.invocationId === invocationId && ['FAILED', 'CANCELLED'].includes(env.messageType),
-          ),
-        ).toBe(false)
-
-        const completed = completedEnvelopes[0]!
-        const body = completed.payload as {
-          result: {
-            error: boolean
-            details: { search?: { outcome?: string; incomplete?: boolean } }
-            contents: Array<{ type: string; text?: string }>
-          }
-        }
-        const resultPayload = body.result
-        expect(resultPayload.error).toBe(true)
-        expect(resultPayload.details.search?.outcome).toBe('TIMED_OUT')
-        expect(resultPayload.details.search?.incomplete).toBe(true)
-
-        const text = resultPayload.contents.map((c) => c.text ?? '').join('\n')
-        expect(text).toContain(capabilityId === 'fs.find' ? `${dir}/a.ts` : 'export const needle = 42')
-        expect(text).toContain('[Search timed out; results are incomplete.]')
-
-        expect(setup.runtime.getJournal().find(invocationId)?.state).toBe('COMPLETED')
-      } finally {
-        vi.useRealTimers()
-        setup.runtime.close()
-      }
-    },
-  )
-
-  it.each(['fs.find', 'fs.grep'] as const)(
-    '收到 CANCEL 报文：%s 协作写入 stopBuffer(CANCELLED)，exit 门禁前维持 RUNNING，退出后仅一次 COMPLETED(error=true) 终态',
-    async (capabilityId) => {
-      const dir = await createTestDir()
-      const workerCreated = Promise.withResolvers<FakeWorker>()
-      FakeWorker.onCreated = (w) => workerCreated.resolve(w)
-
-      const setup = buildSearchRuntime()
-      const invocationId = `inv-search-cancel-${capabilityId.replace('.', '-')}`
-
-      try {
-        await handshake(setup)
-
-        const args =
-          capabilityId === 'fs.find'
-            ? { pattern: '*.ts', path: dir }
-            : { pattern: 'needle', path: dir }
-
         const payload = JSON.parse(
           encodeInvoke({
             capabilityId,
@@ -227,71 +103,106 @@ describe('Runtime + Search 真实能力整合生命周期', () => {
         ) as Record<string, unknown>
 
         setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId, payload }))
+        await waitFor(() =>
+          sent(setup.transport).some(
+            (envelope) => envelope.invocationId === invocationId && envelope.messageType === 'COMPLETED',
+          ),
+        )
+        await waitFor(() =>
+          sent(setup.transport).some(
+            (envelope) =>
+              envelope.invocationId === invocationId && envelope.messageType === 'EXECUTION_EXITED',
+          ),
+        )
 
-        const worker = await workerCreated.promise
-        const job = worker.posted[0] as { stopBuffer: SharedArrayBuffer }
-        expect(job.stopBuffer).toBeDefined()
-        expect(Atomics.load(new Int32Array(job.stopBuffer), 0)).toBe(0)
+        const completed = sent(setup.transport).filter(
+          (envelope) => envelope.invocationId === invocationId && envelope.messageType === 'COMPLETED',
+        )
+        expect(completed).toHaveLength(1)
+        const body = completed[0]!.payload as {
+          result: { error: boolean; contents: Array<{ type: string; text?: string }> }
+        }
+        expect(body.result.error).toBe(false)
+        const text = body.result.contents.map((content) => content.text ?? '').join('\n')
+        expect(text).toContain(capabilityId === 'fs.find' ? `${dir}/a.ts` : 'export const needle = 42')
 
-        // 发送 CANCEL 报文
+        const types = sent(setup.transport)
+          .filter((envelope) => envelope.invocationId === invocationId)
+          .map((envelope) => envelope.messageType)
+        expect(types.indexOf('COMPLETED')).toBeLessThan(types.indexOf('EXECUTION_EXITED'))
+        expect(types.filter((messageType) => messageType === 'EXECUTION_EXITED')).toHaveLength(1)
+        expect(setup.runtime.getJournal().find(invocationId)?.state).toBe('COMPLETED')
+      } finally {
+        setup.runtime.close()
+      }
+    },
+  )
+
+  it.each(['fs.find', 'fs.grep'] as const)(
+    '收到 CANCEL 报文：%s 终止 rg，保留 partial 并只发送一次 COMPLETED(error=true)',
+    async (capabilityId) => {
+      const dir = await createTestDir()
+      const file = join(dir, 'a.ts')
+      const fake = await installFakeRipgrep(dir, {
+        target: file,
+        matches: 1,
+        hang: true,
+        rawStdout: '',
+      })
+      const setup = buildSearchRuntime(createSearchCapabilities(fake.command))
+      const invocationId = `inv-search-cancel-${capabilityId.replace('.', '-')}`
+      try {
+        await handshake(setup)
+        const args =
+          capabilityId === 'fs.find'
+            ? { pattern: '*.ts', path: dir }
+            : { pattern: 'needle', path: dir }
+        const payload = JSON.parse(
+          encodeInvoke({
+            capabilityId,
+            capabilityVersion: CAPABILITY_CATALOG_VERSION,
+            arguments: args,
+            timeoutMillis: 10_000,
+          }),
+        ) as Record<string, unknown>
+
+        setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId, payload }))
+        const pid = await waitForFakePid(fake.pidFile)
+        // fs.find 先枚举允许路径；假 rg 的 --files 会立即成功返回，随后 grep/pattern 阶段挂起。
         setup.transport.receive(serverMessage('CANCEL', { environmentId: ENV, invocationId }))
 
-        // 验证 stopBuffer 被协作更新为 2 (STOP_CANCELLED)
-        await waitFor(() => Atomics.load(new Int32Array(job.stopBuffer), 0) === 2)
-
-        // 模拟 worker 协作停止并回传带 CANCELLED 的 partial
-        worker.emit('message', {
-          ok: true,
-          kind: capabilityId === 'fs.find' ? 'find' : 'grep',
-          matches: capabilityId === 'fs.find' ? [`${dir}/a.ts`] : undefined,
-          lines: capabilityId === 'fs.grep' ? [`${dir}/a.ts:1:export const needle = 42`] : undefined,
-          limitReached: false,
-          skipped: [],
-          stopReason: 'CANCELLED',
-        })
-
-        // 在 exit 门禁前：journal 维持 RUNNING 且无 terminal 报文
-        expect(setup.runtime.getJournal().find(invocationId)?.state).toBe('RUNNING')
-        expect(
-          sent(setup.transport).some(
-            (env) => env.invocationId === invocationId && ['COMPLETED', 'FAILED', 'CANCELLED'].includes(env.messageType),
-          ),
-        ).toBe(false)
-
-        worker.emit('exit', 0)
-
         await waitFor(() =>
-          sent(setup.transport).some((env) => env.invocationId === invocationId && env.messageType === 'COMPLETED'),
+          sent(setup.transport).some(
+            (envelope) => envelope.invocationId === invocationId && envelope.messageType === 'COMPLETED',
+          ),
         )
 
-        const completedEnvelopes = sent(setup.transport).filter(
-          (env) => env.invocationId === invocationId && env.messageType === 'COMPLETED',
+        const completed = sent(setup.transport).filter(
+          (envelope) => envelope.invocationId === invocationId && envelope.messageType === 'COMPLETED',
         )
-        expect(completedEnvelopes).toHaveLength(1)
+        expect(completed).toHaveLength(1)
         expect(
           sent(setup.transport).some(
-            (env) => env.invocationId === invocationId && ['FAILED', 'CANCELLED'].includes(env.messageType),
+            (envelope) =>
+              envelope.invocationId === invocationId &&
+              ['FAILED', 'CANCELLED'].includes(envelope.messageType),
           ),
         ).toBe(false)
 
-        const completed = completedEnvelopes[0]!
-        const body = completed.payload as {
+        const body = completed[0]!.payload as {
           result: {
             error: boolean
             details: { search?: { outcome?: string; incomplete?: boolean } }
             contents: Array<{ type: string; text?: string }>
           }
         }
-        const resultPayload = body.result
-        expect(resultPayload.error).toBe(true)
-        expect(resultPayload.details.search?.outcome).toBe('CANCELLED')
-        expect(resultPayload.details.search?.incomplete).toBe(true)
-
-        const text = resultPayload.contents.map((c) => c.text ?? '').join('\n')
-        expect(text).toContain(capabilityId === 'fs.find' ? `${dir}/a.ts` : 'export const needle = 42')
-        expect(text).toContain('[Search cancelled; results are incomplete.]')
-
+        expect(body.result.error).toBe(true)
+        expect(body.result.details.search).toMatchObject({ outcome: 'CANCELLED', incomplete: true })
+        expect(body.result.contents.map((content) => content.text ?? '').join('\n')).toContain(
+          '[Search cancelled; results are incomplete.]',
+        )
         expect(setup.runtime.getJournal().find(invocationId)?.state).toBe('COMPLETED')
+        expect(() => process.kill(pid, 0)).toThrow()
       } finally {
         setup.runtime.close()
       }
