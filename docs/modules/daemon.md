@@ -2,7 +2,7 @@
 
 Environment Daemon 是目标宿主上的独立 Node.js 进程，把 Platform 的原子能力调用落到文件系统、进程与本地工具链。网络连接只是消息管道：同一 Daemon 进程断线重连，不会重启已受理的执行。安装与三平台管理见 [Environment Daemon 安装与运行](../operations/environment-daemon.md)；共享契约与服务端会话见 [Harness Environment](harness-environment.md)。
 
-模块运行在 Node.js 24 运行时之上，依赖 `ajv`、`diff`、`ignore`、`isomorphic-git`、`koffi`、`picomatch`、`re2-wasm`、`tar`、`vscode-jsonrpc`、`ws` 等生产依赖。官方发行归档内置冻结的 code-server 运行时（Node 24.x 与 code-server），不依赖宿主全局安装 Node 或 JDK 运行时；外部语言服务器与 Bash 由宿主提供。
+模块运行在 Node.js 24 运行时之上，依赖 `@vscode/ripgrep`、`ajv`、`diff`、`isomorphic-git`、`koffi`、`tar`、`vscode-jsonrpc`、`ws` 等生产依赖。官方发行归档内置冻结的 code-server 运行时（Node 24.x 与 code-server）及对应平台的 ripgrep，不依赖宿主全局安装 Node、JDK 或 ripgrep；外部语言服务器与 Bash 由宿主提供。
 
 ## 启动与本地状态
 
@@ -46,7 +46,7 @@ POSIX 目录权限为 0700、敏感文件为 0600。`tmp/workspaces` 由受控�
 - INVOKE 经过严格 JSON 解码后，以 [`Journal`](../../daemon/src/journal.ts) 的 `start(invocationId)` 原子去重。已有条目直接重放：RUNNING 状态重放 `STARTED(replayed=true)`，已完成条目重放冻结终态，副作用不再重复执行。退出确认单独保存在同一条目里，重复 INVOKE 或 CANCEL 时随条目重放 `EXECUTION_EXITED`；不能从终态报文推断。有界 journal 淘汰条目后不再重放该确认。
 - 同实例重连后，Server 对在途调用发送 `RECOVER`：Runtime 只重放 journal，运行中的条目回放 `STARTED(replayed=true)` 并继续执行，已终结条目重放冻结终态与退出确认，未知条目保持静默；只有 `CANCEL` 会请求停止。
 - 超时与取消：Runtime 维护唯一的 invoke timer，超时或取消时通过同一 `context.signal` 请求停止（`TIMED_OUT` / `CANCELLED`），不提前抢占终态；由 process、search 等执行器在 cleanup 后交付真实结果，已完成的文件修改提交成功决不能被 late abort 覆盖。系统不对 OS 阻塞做严格硬中止或承诺 60 秒内一定回包。部分结果编码失败时封存 `FAILED`，并通过同一 signal 请求中断；失败结果不代替执行范围退出。
-- 退出确认：能力只在确知自己管理的范围已经结束时调用 `confirmExecutionExit()`。文件读写编辑在调用返回前没有留下 worker。`skill.sync` 只在进入安装前就能确定未开始，或安装调用成功返回时确认；安装进入后抛错（包括中断或收尾失败）保持退出未确认。`fs.find` / `fs.grep` 要等到本次 worker 退出，并且输出 spool 关闭成功；校验失败且 worker 尚未创建时确认为未开始。`process.exec` 要等到受管进程 `terminate` 成功且本地捕获关闭成功；`start` 抛错不证明范围已清理，不能确认。LSP 在服务端成功结果或服务端 RPC 错误到达时直接确认；进程退出报告只代表可用性变化，不是范围收尾，已发出请求要等到同一客户端 `stop` 成功、真实子进程与 stdio 收尾后才确认；`stop` 失败或仍在等待时不确认，也不重试。本地写失败、连接 dispose、取消、超时和传输失败都不是请求结束。参数、租约或发送前失败才确认为未开始。Runtime 持有同一次调用对象：executor 及其拥有的上传和终态收尾完成，并且正向证据已经留下，才发送一次空 payload 的 `EXECUTION_EXITED`。证据晚于终态到达仍然发送；收尾抛错不发送。确定未启动 executor 的拒绝直接确认；已经启动但没有正向证据时不补发。取消、超时和普通 error 本身都不是退出证据。重连后 Platform 对同一未确认退出事实重发 `CANCEL` 以拉取 journal 事实或停止仍运行的执行范围；未知 `CANCEL` 不产生确认。
+- 退出确认：能力只在确知自己管理的范围已经结束时调用 `confirmExecutionExit()`。文件读写编辑在调用返回前没有留下 worker。`skill.sync` 只在进入安装前就能确定未开始，或安装调用成功返回时确认；安装进入后抛错（包括中断或收尾失败）保持退出未确认。`fs.find` / `fs.grep` 要等到本次所有 rg 子进程退出、stdio 关闭，并且输出 spool 关闭成功；校验失败且 rg 尚未启动时确认为未开始。`process.exec` 要等到受管进程 `terminate` 成功且本地捕获关闭成功；`start` 抛错不证明范围已清理，不能确认。LSP 在服务端成功结果或服务端 RPC 错误到达时直接确认；进程退出报告只代表可用性变化，不是范围收尾，已发出请求要等到同一客户端 `stop` 成功、真实子进程与 stdio 收尾后才确认；`stop` 失败或仍在等待时不确认，也不重试。本地写失败、连接 dispose、取消、超时和传输失败都不是请求结束。参数、租约或发送前失败才确认为未开始。Runtime 持有同一次调用对象：executor 及其拥有的上传和终态收尾完成，并且正向证据已经留下，才发送一次空 payload 的 `EXECUTION_EXITED`。证据晚于终态到达仍然发送；收尾抛错不发送。确定未启动 executor 的拒绝直接确认；已经启动但没有正向证据时不补发。取消、超时和普通 error 本身都不是退出证据。重连后 Platform 对同一未确认退出事实重发 `CANCEL` 以拉取 journal 事实或停止仍运行的执行范围；未知 `CANCEL` 不产生确认。
 - 关停顺序：逆序释放连接与在途调用、能力资源、受控临时存储与目录锁。关停中发生的异常通过 `AggregateError` 聚合抛出，不静默吞掉清理错误。
 
 ## 本地存储与文本输出
@@ -81,7 +81,9 @@ POSIX 目录权限为 0700、敏感文件为 0600。`tmp/workspaces` 由受控�
 - `fs.edit.preview` 使用 `diff@9.0.0` 的 `diffArrays` 计算所有变更行、4 行上下文与 EOF 缺换行标记，不设独立的计算超时或 `maxEditLength`；在文件锁内读取原文件原始字节，计算 canonical 绝对路径、原始字节 SHA-256 与带行号的 diff，返回 `{path, diff, sha256}`；完整 review 连同结果序列化后超过 1 MiB 时，在预览或提交前拒绝，不截断变更。
 - `fs.edit` 在文件锁内执行时，若 INVOKE 携带内部元数据 `expectedFile`（`{path, sha256}`），核对其与当前磁盘文件的绝对路径和 SHA-256；若文件在审查后已被变动，直接拒绝写入，防止授权陈旧变更；执行成功后在结果 `details.editReview` 携带 `{path, diff, sha256}`，作为唯一权威 canonical 持久化 diff，供自动放行/YOLO 模式展示真实变更。
 
-检索（[`search.ts`](../../daemon/src/coding/search.ts)）在进程内直接完成遍历与匹配，默认超时 15 秒（可由 `timeout_seconds` 覆盖），worker 共享原子 flag 在目录、行与 8KiB 块等检查点协作检查中断，超时保留 partial 匹配并标记 `search.incomplete`；非响应 stop 给予 5 秒清理宽限才 await terminate（非额外更短执行预算），清理失败明确暴露；支持分层 `.gitignore` 与 `.git/info/exclude`，不依赖外部 ripgrep/fd 二进制。
+检索（[`search.ts`](../../daemon/src/coding/search.ts)）调用 `@vscode/ripgrep` 随包提供的 rg：`fs.find` 解析 NUL 分隔的 `rg --files` 输出，`fs.grep` 解析 `rg --json` 输出。默认超时 15 秒（可由 `timeout_seconds` 覆盖）；超时、取消或达到结果上限时终止 rg，等待进程和 stdio 关闭后返回。超时与取消保留已收到的 partial 匹配并标记 `search.incomplete`；达到结果上限时给出明确提示。正则或 glob 错误作为输入拒绝，无法读取的路径作为 skipped 报告，其他进程错误作为运行失败，均不伪报“无匹配”。
+
+检索包含隐藏文件，不跟随目录中的符号链接，排除 `.git`；支持分层 `.gitignore` 和 `.git/info/exclude`（含 linked worktree 的共享 exclude），不读取 `.ignore`、全局 Git ignore 或宿主的 ripgrep 配置。glob 相对检索根解释，不能重新包含被忽略的文件；显式指定被忽略的目录时仍检索该目录。目录检索静默跳过前 8 KiB 探针判定的二进制文件，直接指定二进制文件则报错；UTF-16 BOM 文本仍可检索。正则使用 ripgrep 的 Rust regex 引擎，`\w` 等简写字符类默认按 ASCII 匹配，不启用 PCRE2。
 
 ### 受管 IDE 与复用数据连接
 

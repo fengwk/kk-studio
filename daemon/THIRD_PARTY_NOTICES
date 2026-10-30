@@ -10,9 +10,8 @@ inside the archive. Direct runtime dependencies:
 
 | Component | License |
 | --- | --- |
-| `ajv`, `ignore`, `isomorphic-git`, `jsonc-parser`, `koffi`, `picomatch`, `undici`, `vscode-jsonrpc`, `ws` | MIT License |
+| `@vscode/ripgrep` and its platform-specific binary packages, `ajv`, `isomorphic-git`, `jsonc-parser`, `koffi`, `undici`, `vscode-jsonrpc`, `ws` | MIT License |
 | `diff` | BSD 3-Clause License |
-| `re2-wasm` | Apache License 2.0 |
 | `tar` | Blue Oak Model License 1.0.0 |
 | `code-server` (fengwk/code-server, managed fork of coder/code-server) | MIT License |
 | Node.js (bundled inside the code-server standalone runtime) | MIT License |
@@ -22,6 +21,8 @@ Apache License 2.0 components are covered by the accompanying `LICENSE`.
 Source repositories:
 
 - npm packages: `https://www.npmjs.com/package/<name>`
+- vscode-ripgrep: `https://github.com/microsoft/vscode-ripgrep`
+- ripgrep: `https://github.com/BurntSushi/ripgrep`
 - managed code-server: `https://github.com/fengwk/code-server`
 - upstream code-server: `https://github.com/coder/code-server`
 - Node.js: `https://github.com/nodejs/node`
