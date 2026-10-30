@@ -140,6 +140,11 @@ public final class HarnessRuntimeTestSupport {
     }
   }
 
+  /** 测试专用：转调 StopControl 的确定性子树 stopRequestId 推导，不扩大生产 API。 */
+  public static UUID deriveChildStopRequestId(UUID parentStopRequestId, UUID childThreadId) {
+    return StopControl.deriveChildStopRequestId(parentStopRequestId, childThreadId);
+  }
+
   /** 固定 UTC 的测试时钟，可推进 instant 用于 replay/竞态测试。 */
   static final class TestClock extends Clock {
     private Instant instant;

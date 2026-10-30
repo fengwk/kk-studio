@@ -15,6 +15,7 @@ import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupp
 import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.userMessageEntry;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.userMessagePayload;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.deriveChildStopRequestId;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.loadCommandsByThread;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -685,20 +686,5 @@ class HarnessRuntimeStopSubtreeTest {
                   null));
           return null;
         });
-  }
-
-  /** 读取 runtime 包内确定性子树 stopRequestId 推导，避免为测试扩大生产可见性。 */
-  private static UUID deriveChildStopRequestId(UUID rootRequestId, UUID childThreadId) {
-    try {
-      Class<?> stopControl =
-          Class.forName(
-              String.join(".", "fun", "fengwk", "kkstudio", "harness", "runtime", "StopControl"));
-      var method =
-          stopControl.getDeclaredMethod("deriveChildStopRequestId", UUID.class, UUID.class);
-      method.setAccessible(true);
-      return (UUID) method.invoke(null, rootRequestId, childThreadId);
-    } catch (ReflectiveOperationException failure) {
-      throw new AssertionError("cannot derive child stop request id", failure);
-    }
   }
 }

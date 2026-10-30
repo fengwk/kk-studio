@@ -68,30 +68,29 @@ import java.util.function.Function;
  * 时丢弃快照（完整 rollback，包括 nextId）。事务句柄在 回调结束后关闭，任何后续调用抛 {@link IllegalStateException}；同一 Store
  * 的重入事务被拒绝。
  *
- * <p>模拟必要 schema 约束：Session / Entry / Thread / Invocation id 唯一；Entry 写入前用完整 {@link EntryPath} 校验（每
- * Session 一个 ROOT 且 ROOT 先于其他 Entry、parent 连续且同 Session、createdAt 顺序与 turn / tool-prefix 结构）；Thread
- * head Entry 存在（insert 与 update）；Command 只能以 QUEUED 插入，所属 thread 存在且 保持 {@code (thread, sequence)}
- * 与 {@code (thread, idempotencyKey)} 唯一，生命周期只能 QUEUED-&gt;APPLIED / CANCELLED 或 terminal
+ * <p>模拟核心 schema 约束：Session / Entry / Thread / ToolInvocation id 唯一；Entry 写入前用完整 {@link EntryPath}
+ * 校验（每 Session 一个 ROOT 且 ROOT 先于其他 Entry、parent 连续且同 Session、createdAt 顺序与 turn / tool-prefix
+ * 结构）；Thread head Entry 存在（insert 与 update）；Command 只能以 QUEUED 插入，所属 thread 存在且保持 {@code (thread,
+ * sequence)} 与 {@code (thread, idempotencyKey)} 唯一，生命周期只能 QUEUED-&gt;APPLIED / CANCELLED 或 terminal
  * exact-idempotent，appliedEntryId 必须指向与 thread 当前 head 同 session 的 TURN_START Entry；新
- * ModelInvocation 只能以 READY / attempt=0 插入并保持 {@code (thread, turnStartEntryId)}
- * 唯一，requestHeadEntryId 必须等于 thread 当前 head（创建时 requestHead CAS），turnStartEntryId 必须位于 requestHead
- * 的 EntryPath 上，resultEntryId 全局唯一、限定为 Assistant / AssistantError / AssistantAborted Entry 且其 path
- * 同时包含 requestHead 与 turnStart（同 branch descendant）；新 ToolInvocation 只能以 READY（或用于 sibling 静态拒绝的
- * unattached FAILED）、attempt=0、approval=null 插入并保持 {@code (assistantEntryId, callIndex)} 唯一，其
- * modelInvocation 的 resultEntryId 必须等于 assistantEntryId，durable {@code call} 与 Assistant 中按
- * callIndex 提取的 ToolCall 精确一致 （binding 为 null 时 renderer 固定回退）；Tool 行不持有结果引用 —— Outcome 已追加为
- * ToolResult MESSAGE Entry 后行 被 batch apply 物理删除；Work target 必须存在且保持 {@code (targetType, targetId)}
- * 主键。
+ * ToolInvocation 只能以 READY（或用于 sibling 静态拒绝的 unattached FAILED）、attempt=0、approval=null 插入并保持
+ * {@code (assistantEntryId, callIndex)} 唯一，durable {@code call} 与 Assistant 中按 callIndex 提取的
+ * ToolCall 精确一致 （binding 为 null 时 renderer 固定回退）；Tool 行不持有结果引用 —— Outcome 已追加为 ToolResult MESSAGE
+ * Entry 后行 被 batch apply 物理删除；Work target 必须存在且保持 {@code (targetType, targetId)} 主键。
  *
- * <p>per-transaction lock tracking：updateThread / updateCommands / updateModelInvocation /
- * updateToolInvocations 要求对应行已在本事务锁定，且 Thread / Model / Tool 更新必须通过 aggregate 共享 transition
- * validation （非法状态机跳跃与 terminal 回退/改写被拒绝）；lock* 方法、loadQueuedCommands 与
- * lockToolInvocationsByAssistantEntryId 产生锁；insert* 之后本事务内可直接更新，insertModelInvocation 额外要求 Thread
- * 已在本事务锁定（requestHead CAS 原子），loadQueuedCommands / insertCommands / updateCommands 也要求相关 Thread
- * 已在本事务锁定（锁序 Thread -&gt; commands）；Work 的 renew / complete / reschedule 方法内部先锁定目标行，
- * lockClaimedWork 在 ownership 校验通过后锁行；Thread 同层按 {@link UuidOrder} 升序，Tool siblings 按 callIndex
- * 升序，Work 同层按 (type, id) 升序；requestWork 与存在行的 deleteWork 要求 owning Thread 已锁定。返回对象与 list 均为
- * immutable records / copies。
+ * <p>通用 driver 快照：扩展 Store 可通过 protected driver row / attribute API 在核心事务快照中挂载不透明行。driver row
+ * 写入要求所属 Thread 已在本事务锁定，并登记 row -&gt; owner Thread；子类行随 owner Thread 的深删除一并移除。核心只保证 copy-on-write /
+ * rollback / owner 关联 / 行锁阶梯，不解释行内容，也不校验具体 driver 协议或状态机。
+ *
+ * <p>per-transaction lock tracking：updateThread / updateCommands / updateToolInvocations
+ * 要求对应行已在本事务锁定，且 Thread / Tool 更新必须通过 aggregate 共享 transition validation（非法状态机跳跃与 terminal
+ * 回退/改写被拒绝）；lock* 方法、loadQueuedCommands 与 lockToolInvocationsByAssistantEntryId 产生锁；insert*
+ * 之后本事务内可直接更新。 loadQueuedCommands / insertCommands / updateCommands 也要求相关 Thread 已在本事务锁定（锁序 Thread
+ * -&gt; commands）。锁阶梯为 SESSION -&gt; THREAD -&gt; COMMAND -&gt; MODEL -&gt; TOOL -&gt; WORK；Thread
+ * 同层按 {@link UuidOrder} 升序，Tool siblings 按 callIndex 升序，Work 同层按 (type, id) 升序。insertDriverRow 要求
+ * owner Thread 已锁定并获取 driver row 锁；updateDriverRow / deleteDriverRow 要求该行已锁定。Work 的 renew /
+ * complete / reschedule 方法内部先锁定目标行，lockClaimedWork 在 ownership 校验通过后锁行；requestWork 与存在行的 deleteWork
+ * 要求 owning Thread 已锁定。返回对象与 list 均为 immutable records / copies。
  */
 public class InMemoryHarnessStore implements HarnessStore {
 
