@@ -15,7 +15,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import fun.fengwk.convention4j.springboot.starter.web.result.ResultResponseBodyAdvice;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -31,6 +30,7 @@ import fun.fengwk.kkstudio.platform.settings.SystemSettingsService;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderDTO;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
+import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
 
 import java.util.List;
 
@@ -60,7 +60,7 @@ class StudioHttpRetryStatusCodesContractTest {
                 new StudioSystemSettingsController(
                     settingsService, mock(SystemSettingsSchemaProvider.class)))
             .setMessageConverters(new JacksonJsonHttpMessageConverter(strictHttpMapper()))
-            .setControllerAdvice(new ResultResponseBodyAdvice())
+            .setControllerAdvice(new ApiResponseStatusAdvice())
             .build();
   }
 

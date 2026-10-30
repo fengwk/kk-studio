@@ -10,7 +10,6 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
-import fun.fengwk.convention4j.springboot.starter.web.result.ResultResponseBodyAdvice;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.io.ClassPathResource;
@@ -44,6 +43,7 @@ import fun.fengwk.kkstudio.share.ai.plugin.PluginConnectionCheckDTO;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginDTO;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginSecretProjectionDTO;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
+import fun.fengwk.kkstudio.web.advice.ApiResponseStatusAdvice;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 
 import java.io.IOException;
@@ -128,7 +128,7 @@ class PluginHttpWireContractTest {
         MockMvcBuilders.standaloneSetup(controller)
             // 只注册生产 mapper 的 converter：MVC 没有机会回退到构件自建或 Jackson 2 的副本。
             .setMessageConverters(HTTP_CONVERTER)
-            .setControllerAdvice(new ResultResponseBodyAdvice(), errorAdvice)
+            .setControllerAdvice(new ApiResponseStatusAdvice(), errorAdvice)
             .build();
   }
 

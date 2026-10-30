@@ -1,11 +1,8 @@
 package fun.fengwk.kkstudio.web.project;
 
-import fun.fengwk.convention4j.api.code.HttpStatus;
-import fun.fengwk.convention4j.api.code.ImmutableResolvedConventionErrorCode;
-import fun.fengwk.convention4j.api.result.Result;
-import fun.fengwk.convention4j.common.result.Results;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.BindException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -18,6 +15,7 @@ import fun.fengwk.kkstudio.project.error.ProjectDuplicateException;
 import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
 import fun.fengwk.kkstudio.project.error.ProjectValidationException;
 import fun.fengwk.kkstudio.project.error.ProjectVersionConflictException;
+import fun.fengwk.kkstudio.web.api.ApiResponse;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 
 import java.util.LinkedHashMap;
@@ -40,7 +38,8 @@ public class StudioProjectErrorAdvice {
   }
 
   @ExceptionHandler(ProjectVersionConflictException.class)
-  public ResponseEntity<Result<Void>> handleVersionConflict(ProjectVersionConflictException error) {
+  public ResponseEntity<ApiResponse<Void>> handleVersionConflict(
+      ProjectVersionConflictException error) {
     Map<String, Object> ctx = new LinkedHashMap<>();
     ctx.put("resource", error.resource());
     ctx.put("expectedVersion", error.expectedVersion());
@@ -55,7 +54,7 @@ public class StudioProjectErrorAdvice {
   }
 
   @ExceptionHandler(ProjectDuplicateException.class)
-  public ResponseEntity<Result<Void>> handleDuplicate(ProjectDuplicateException error) {
+  public ResponseEntity<ApiResponse<Void>> handleDuplicate(ProjectDuplicateException error) {
     Map<String, Object> ctx = new LinkedHashMap<>();
     ctx.put("resource", error.resource());
     ctx.put("detail", error.getMessage());
@@ -63,7 +62,8 @@ public class StudioProjectErrorAdvice {
   }
 
   @ExceptionHandler(HarnessRuntimeConflictException.class)
-  public ResponseEntity<Result<Void>> handleHarnessConflict(HarnessRuntimeConflictException error) {
+  public ResponseEntity<ApiResponse<Void>> handleHarnessConflict(
+      HarnessRuntimeConflictException error) {
     Map<String, Object> ctx = new LinkedHashMap<>();
     ctx.put("detail", "Issue runtime conflict occurred");
     return build(
@@ -74,7 +74,7 @@ public class StudioProjectErrorAdvice {
   }
 
   @ExceptionHandler(ProjectNotFoundException.class)
-  public ResponseEntity<Result<Void>> handleResourceNotFound(ProjectNotFoundException error) {
+  public ResponseEntity<ApiResponse<Void>> handleResourceNotFound(ProjectNotFoundException error) {
     Map<String, Object> ctx = new LinkedHashMap<>();
     ctx.put("resource", error.resource());
     return build(
@@ -87,7 +87,8 @@ public class StudioProjectErrorAdvice {
   }
 
   @ExceptionHandler(HarnessRuntimeNotFoundException.class)
-  public ResponseEntity<Result<Void>> handleHarnessNotFound(HarnessRuntimeNotFoundException error) {
+  public ResponseEntity<ApiResponse<Void>> handleHarnessNotFound(
+      HarnessRuntimeNotFoundException error) {
     Map<String, Object> ctx = new LinkedHashMap<>();
     ctx.put("detail", "Issue runtime resource not found");
     return build(
@@ -98,18 +99,18 @@ public class StudioProjectErrorAdvice {
   }
 
   @ExceptionHandler({ProjectValidationException.class, IllegalArgumentException.class})
-  public ResponseEntity<Result<Void>> handleValidation(RuntimeException error) {
+  public ResponseEntity<ApiResponse<Void>> handleValidation(RuntimeException error) {
     Map<String, Object> ctx = new LinkedHashMap<>();
     ctx.put("detail", error.getMessage());
     return build(
         HttpStatus.BAD_REQUEST,
         "PROJECT_VALIDATION_ERROR",
-        messageService.httpMessage(HttpStatus.BAD_REQUEST.getStatus()),
+        messageService.httpMessage(HttpStatus.BAD_REQUEST.value()),
         ctx);
   }
 
   @ExceptionHandler(IllegalStateException.class)
-  public ResponseEntity<Result<Void>> handleIllegalState(IllegalStateException error) {
+  public ResponseEntity<ApiResponse<Void>> handleIllegalState(IllegalStateException error) {
     Map<String, Object> ctx = new LinkedHashMap<>();
     ctx.put("detail", "Project operation failed");
     return build(
@@ -120,20 +121,19 @@ public class StudioProjectErrorAdvice {
   }
 
   @ExceptionHandler({MethodArgumentNotValidException.class, BindException.class})
-  public ResponseEntity<Result<Void>> handleBinding(Exception error) {
+  public ResponseEntity<ApiResponse<Void>> handleBinding(Exception error) {
     Map<String, Object> ctx = new LinkedHashMap<>();
     ctx.put("detail", "Request validation failed");
     return build(
         HttpStatus.BAD_REQUEST,
         "PROJECT_VALIDATION_ERROR",
-        messageService.httpMessage(HttpStatus.BAD_REQUEST.getStatus()),
+        messageService.httpMessage(HttpStatus.BAD_REQUEST.value()),
         ctx);
   }
 
-  private ResponseEntity<Result<Void>> build(
+  private ResponseEntity<ApiResponse<Void>> build(
       HttpStatus status, String code, String message, Map<String, Object> errorContext) {
-    ImmutableResolvedConventionErrorCode errorCode =
-        new ImmutableResolvedConventionErrorCode(status.getStatus(), code, message, errorContext);
-    return ResponseEntity.status(status.getStatus()).body(Results.error(errorCode));
+    return ResponseEntity.status(status)
+        .body(ApiResponse.error(status, code, message, errorContext));
   }
 }

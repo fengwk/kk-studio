@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.web.controller;
 
-import fun.fengwk.convention4j.api.result.Result;
-import fun.fengwk.convention4j.common.result.Results;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -24,6 +22,7 @@ import fun.fengwk.kkstudio.platform.agenttask.AgentTaskStatus;
 import fun.fengwk.kkstudio.platform.harness.task.AgentBranchSettingsMaterializer;
 import fun.fengwk.kkstudio.share.ai.runtime.AgentTaskDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.AgentTaskSubmitDTO;
+import fun.fengwk.kkstudio.web.api.ApiResponse;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapper;
 
 import java.nio.charset.StandardCharsets;
@@ -55,8 +54,8 @@ public class StudioAgentTaskController {
    * 都由它确定性派生，因此同一请求重放会精确命中原任务并返回其当前状态，同一 ticketId 换了内容则被运行时拒绝。
    */
   @PostMapping
-  public Result<AgentTaskDTO> submit(@RequestBody AgentTaskSubmitDTO request) {
-    return Results.accepted(
+  public ApiResponse<AgentTaskDTO> submit(@RequestBody AgentTaskSubmitDTO request) {
+    return ApiResponse.accepted(
         StudioHarnessThreadController.withRuntimeTranslation(
             () -> {
               UUID ticketId = parse(request.getTicketId());
@@ -97,15 +96,15 @@ public class StudioAgentTaskController {
 
   /** 读取任务当前状态；结束后同时带冻结结果。 */
   @GetMapping("/{ticketId}")
-  public Result<AgentTaskDTO> get(@PathVariable String ticketId) {
-    return Results.ok(
+  public ApiResponse<AgentTaskDTO> get(@PathVariable String ticketId) {
+    return ApiResponse.ok(
         StudioHarnessThreadController.withRuntimeTranslation(() -> status(parse(ticketId))));
   }
 
   /** 停止任务（含其子树）并返回停止后的状态；已结束的任务按原样返回。 */
   @PostMapping("/{ticketId}/stop")
-  public Result<AgentTaskDTO> stop(@PathVariable String ticketId) {
-    return Results.ok(
+  public ApiResponse<AgentTaskDTO> stop(@PathVariable String ticketId) {
+    return ApiResponse.ok(
         StudioHarnessThreadController.withRuntimeTranslation(
             () -> {
               UUID id = parse(ticketId);

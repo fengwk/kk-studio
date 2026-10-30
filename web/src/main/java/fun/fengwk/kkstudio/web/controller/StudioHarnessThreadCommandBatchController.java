@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.web.controller;
 
-import fun.fengwk.convention4j.api.result.Result;
-import fun.fengwk.convention4j.common.result.Results;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -16,6 +14,7 @@ import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessAcceptedCommandsDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCommandBatchDTO;
+import fun.fengwk.kkstudio.web.api.ApiResponse;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapper;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapper;
 
@@ -43,9 +42,9 @@ public class StudioHarnessThreadCommandBatchController {
 
   /** 接受一个既有 Thread 的用户命令批；202 仅表示 durable acceptance 已提交。 */
   @PostMapping("/{threadId}/command-batches")
-  public Result<HarnessAcceptedCommandsDTO> accept(
+  public ApiResponse<HarnessAcceptedCommandsDTO> accept(
       @PathVariable String threadId, @RequestBody HarnessThreadCommandBatchDTO request) {
-    return Results.accepted(
+    return ApiResponse.accepted(
         StudioHarnessThreadController.withRuntimeTranslation(
             () -> {
               AcceptCommandsCommand command =

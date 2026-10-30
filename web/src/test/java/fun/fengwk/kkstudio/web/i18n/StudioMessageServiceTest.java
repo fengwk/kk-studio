@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.web.i18n;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -13,6 +14,7 @@ import fun.fengwk.kkstudio.platform.error.DomainErrorCode;
 
 import java.util.Locale;
 import java.util.Map;
+import java.util.MissingResourceException;
 
 class StudioMessageServiceTest {
 
@@ -43,6 +45,8 @@ class StudioMessageServiceTest {
             DomainErrorCode.VERSION_CONFLICT, Map.of("resource", "agent_model")));
     assertEquals("The request is invalid.", messageService.httpMessage(400));
     assertEquals("Bad Request", messageService.httpTitle(400));
+    assertEquals("The server encountered an unexpected error.", messageService.httpMessage(500));
+    assertEquals("Internal Server Error", messageService.httpTitle(500));
 
     LocaleContextHolder.setLocale(Locale.SIMPLIFIED_CHINESE);
     assertEquals(
@@ -53,6 +57,8 @@ class StudioMessageServiceTest {
     assertEquals("limit 参数的值无效。", messageService.validationTypeMismatch("limit"));
     assertEquals("请求无效。", messageService.httpMessage(400));
     assertEquals("请求错误", messageService.httpTitle(400));
+    assertEquals("服务器发生意外错误。", messageService.httpMessage(500));
+    assertEquals("服务器错误", messageService.httpTitle(500));
   }
 
   @Test
@@ -62,6 +68,19 @@ class StudioMessageServiceTest {
 
     LocaleContextHolder.setLocale(Locale.FRANCE);
     assertEquals("The requested resource was not found.", messageService.httpMessage(404));
+  }
+
+  @Test
+  void missingKeyFailsInsteadOfReturningRawKeyOrBlankText() {
+    LocaleContextHolder.setLocale(Locale.US);
+    assertThrows(
+        MissingResourceException.class,
+        () -> messageService.message("studio.error.missing.key", Map.of()));
+
+    LocaleContextHolder.setLocale(Locale.SIMPLIFIED_CHINESE);
+    assertThrows(
+        MissingResourceException.class,
+        () -> messageService.message("studio.error.missing.key", Map.of()));
   }
 
   @Test

@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.web.controller;
 
-import fun.fengwk.convention4j.api.result.Result;
-import fun.fengwk.convention4j.common.result.Results;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -15,6 +13,7 @@ import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewService;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewUnavailableException;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessProviderRequestPreviewDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCommandBatchDTO;
+import fun.fengwk.kkstudio.web.api.ApiResponse;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapper;
 
 import java.util.Objects;
@@ -41,10 +40,10 @@ public class StudioHarnessProviderRequestPreviewController {
 
   /** 现算一次草稿的最终 Provider 请求体；响应 200 只表示该快照下请求可以被精确预览。 */
   @PostMapping("/{threadId}/provider-request-preview")
-  public Result<HarnessProviderRequestPreviewDTO> preview(
+  public ApiResponse<HarnessProviderRequestPreviewDTO> preview(
       @PathVariable String threadId, @RequestBody HarnessThreadCommandBatchDTO request) {
     try {
-      return Results.ok(
+      return ApiResponse.ok(
           StudioHarnessThreadController.withRuntimeTranslation(
               () -> {
                 UUID id = HarnessRuntimeRequestMapper.parseUuid(threadId, "threadId");

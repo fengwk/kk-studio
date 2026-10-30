@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import fun.fengwk.convention4j.springboot.starter.i18n.I18nAutoConfiguration;
 import fun.fengwk.convention4j.springboot.starter.json.JacksonAutoConfiguration;
 import fun.fengwk.convention4j.springboot.starter.result.ResultAutoConfiguration;
+import fun.fengwk.convention4j.springboot.starter.web.result.WebExceptionResultHandlerAutoConfiguration;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.support.DefaultListableBeanFactory;
 import org.springframework.boot.autoconfigure.AutoConfigurationImportSelector;
@@ -20,22 +21,30 @@ import java.util.Arrays;
 import java.util.List;
 
 /**
- * 生产组合根 {@link WebApplication} 的 Jackson 自动装配排除验收。
+ * 生产组合根 {@link WebApplication} 的 Web 自动装配排除验收。
  *
  * <p>convention4j 的 {@link JacksonAutoConfiguration} 只提供一个 Jackson 2 {@code ObjectMapper}
- * bean，且已无自有消费者。 WebApplication 显式排除它，让 HTTP wire 只由 Boot4 装配的 Jackson 3 mapper 承担。
+ * bean，且已无自有消费者；Result 自动包装与异常 Result 处理也由本仓显式响应信封替代。 WebApplication 显式排除它们，HTTP wire 只由 Boot4 装配的
+ * Jackson 3 mapper 与自有 {@code ApiResponse} advice 承担。
  *
- * <p>用 Spring Boot 真实 {@link AutoConfigurationImportSelector} 读取生效清单：未声明排除时该配置是真实候选，声明排除后不再被
- * 导入，同时其余 convention4j Result / i18n 能力保留。
+ * <p>用 Spring Boot 真实 {@link AutoConfigurationImportSelector} 读取生效清单：未声明排除时这些配置是真实候选，声明排除后不再被
+ * 导入，同时其余 convention4j i18n 能力保留。
  */
 class WebApplicationJsonAutoConfigurationExclusionTest {
 
   @Test
-  void productionRootExcludesTheJackson2JsonAutoConfiguration() {
+  void productionRootExcludesConventionWebResponseAutoConfigurations() {
+    List<Class<?>> excluded =
+        Arrays.asList(WebApplication.class.getAnnotation(SpringBootApplication.class).exclude());
     assertTrue(
-        Arrays.asList(WebApplication.class.getAnnotation(SpringBootApplication.class).exclude())
-            .contains(JacksonAutoConfiguration.class),
+        excluded.contains(JacksonAutoConfiguration.class),
         "WebApplication must exclude the convention4j Jackson 2 JSON auto-configuration");
+    assertTrue(
+        excluded.contains(ResultAutoConfiguration.class),
+        "WebApplication must exclude the convention4j Result auto-configuration");
+    assertTrue(
+        excluded.contains(WebExceptionResultHandlerAutoConfiguration.class),
+        "WebApplication must exclude convention4j Result exception handlers");
   }
 
   @Test
@@ -45,14 +54,25 @@ class WebApplicationJsonAutoConfigurationExclusionTest {
         effectiveImports(UndecoratedAutoConfiguration.class)
             .contains(JacksonAutoConfiguration.class.getName()),
         "convention4j Jackson 2 auto-configuration must be a real classpath candidate");
+    assertTrue(
+        effectiveImports(UndecoratedAutoConfiguration.class)
+            .contains(ResultAutoConfiguration.class.getName()),
+        "convention4j Result auto-configuration must be a real classpath candidate");
+    assertTrue(
+        effectiveImports(UndecoratedAutoConfiguration.class)
+            .contains(WebExceptionResultHandlerAutoConfiguration.class.getName()),
+        "convention4j web Result handler auto-configuration must be a real classpath candidate");
 
     List<String> effective = effectiveImports(WebApplication.class);
     assertFalse(
         effective.contains(JacksonAutoConfiguration.class.getName()),
         "excluded Jackson 2 auto-configuration must not be imported");
-    assertTrue(
+    assertFalse(
         effective.contains(ResultAutoConfiguration.class.getName()),
-        "convention4j Result capability must be retained");
+        "excluded Result auto-configuration must not be imported");
+    assertFalse(
+        effective.contains(WebExceptionResultHandlerAutoConfiguration.class.getName()),
+        "excluded web Result handler auto-configuration must not be imported");
     assertTrue(
         effective.contains(I18nAutoConfiguration.class.getName()),
         "convention4j i18n capability must be retained");

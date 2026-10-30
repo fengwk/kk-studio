@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
-import fun.fengwk.convention4j.api.result.Result;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.i18n.LocaleContextHolder;
@@ -20,6 +19,7 @@ import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiUpstreamException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.web.api.ApiResponse;
 import fun.fengwk.kkstudio.web.controller.StudioAgentDefinitionController;
 import fun.fengwk.kkstudio.web.controller.StudioAgentModelController;
 import fun.fengwk.kkstudio.web.controller.StudioAgentProviderController;
@@ -67,11 +67,11 @@ class StudioDomainErrorAdviceTest {
     StudioDomainErrorAdvice advice = new StudioDomainErrorAdvice(new StudioMessageService());
 
     LocaleContextHolder.setLocale(Locale.US);
-    ResponseEntity<Result<Void>> validation =
+    ResponseEntity<ApiResponse<Void>> validation =
         advice.handleValidation(new AiValidationException("agent_provider", "invalid provider"));
     assertEquals(400, validation.getStatusCode().value());
     assertNotNull(validation.getBody());
-    Result<Void> validationBody = validation.getBody();
+    ApiResponse<Void> validationBody = validation.getBody();
     assertEquals("validation", validationBody.getCode());
     assertEquals("Invalid agent provider request.", validationBody.getMessage());
     assertEquals(
@@ -79,11 +79,11 @@ class StudioDomainErrorAdviceTest {
         validationBody.getErrors());
 
     LocaleContextHolder.setLocale(Locale.SIMPLIFIED_CHINESE);
-    ResponseEntity<Result<Void>> conflict =
+    ResponseEntity<ApiResponse<Void>> conflict =
         advice.handleVersionConflict(new AiVersionConflictException("agent_model", "3", "4"));
     assertEquals(409, conflict.getStatusCode().value());
     assertNotNull(conflict.getBody());
-    Result<Void> conflictBody = conflict.getBody();
+    ApiResponse<Void> conflictBody = conflict.getBody();
     assertEquals("version_conflict", conflictBody.getCode());
     assertEquals("Agent Model 已被其他请求修改。", conflictBody.getMessage());
     assertEquals(
@@ -104,13 +104,13 @@ class StudioDomainErrorAdviceTest {
     StudioDomainErrorAdvice advice = new StudioDomainErrorAdvice(new StudioMessageService());
     LocaleContextHolder.setLocale(Locale.SIMPLIFIED_CHINESE);
 
-    ResponseEntity<Result<Void>> response =
+    ResponseEntity<ApiResponse<Void>> response =
         advice.handleTypeMismatch(
             new MethodArgumentTypeMismatchException("invalid", Integer.class, "limit", null, null));
 
     assertEquals(400, response.getStatusCode().value());
     assertNotNull(response.getBody());
-    Result<Void> body = response.getBody();
+    ApiResponse<Void> body = response.getBody();
     assertEquals("validation", body.getCode());
     assertEquals("limit 参数的值无效。", body.getMessage());
     assertEquals(
@@ -170,7 +170,7 @@ class StudioDomainErrorAdviceTest {
   }
 
   private static void assertError(
-      ResponseEntity<Result<Void>> response,
+      ResponseEntity<ApiResponse<Void>> response,
       int status,
       String code,
       String message,
@@ -178,7 +178,7 @@ class StudioDomainErrorAdviceTest {
       String detail) {
     assertEquals(status, response.getStatusCode().value());
     assertNotNull(response.getBody());
-    Result<Void> body = response.getBody();
+    ApiResponse<Void> body = response.getBody();
     assertEquals(code, body.getCode());
     assertEquals(message, body.getMessage());
     assertEquals(Map.of("resource", resource, "detail", detail), body.getErrors());
