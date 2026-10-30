@@ -64,6 +64,25 @@ class McpClientFactoryTest {
     assertNoInitializerThreadsLeft();
   }
 
+  /** 非法 URL 或 header 属于本地配置错误：不得发起网络 I/O，也不回显配置内容。 */
+  @Test
+  void mapsInvalidRemoteConfigToOpaqueInitializationFailure() {
+    assertThatThrownBy(
+            () ->
+                McpClientFactory.createRemote(
+                    new RemoteMcpConfig("http://[", Map.of()), McpDeadline.of(seconds(1))))
+        .isInstanceOf(McpException.class)
+        .hasMessage(INIT_FAILED);
+    assertThatThrownBy(
+            () ->
+                McpClientFactory.createRemote(
+                    new RemoteMcpConfig("http://127.0.0.1:1/mcp", Map.of("Bad Header", "value")),
+                    McpDeadline.of(seconds(1))))
+        .isInstanceOf(McpException.class)
+        .hasMessage(INIT_FAILED);
+    assertNoInitializerThreadsLeft();
+  }
+
   /** 服务端拒绝握手时必须映射为初始化失败（而非超时），并回收初始化线程。 */
   @Test
   @Timeout(30)

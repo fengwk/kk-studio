@@ -3,169 +3,250 @@ package fun.fengwk.kkstudio.platform.catalog.mcp.client;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.fasterxml.jackson.core.JsonGenerator;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.JsonSerializer;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializerProvider;
-import com.fasterxml.jackson.databind.annotation.JsonSerialize;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import dev.langchain4j.service.tool.ToolExecutionResult;
+import io.modelcontextprotocol.spec.McpSchema;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.common.json.BoundedOutputStream;
 import fun.fengwk.kkstudio.common.result.BinaryResultContent;
 import fun.fengwk.kkstudio.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.common.result.ResultContent;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
 
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
-/** MCP 结果提取器测试：验证多模态内容无损提取与非文本结构保留。 */
+/** MCP 结果提取器测试：验证多模态内容无损提取、content 优先与结构化回退、错误映射和预算边界。 */
 class McpResultExtractorTest {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
   private final McpResultExtractor extractor = new McpResultExtractor();
 
   /** 验证纯文本内容正确映射为 TextResultContent。 */
   @Test
-  void extractsTextContent() throws Exception {
-    JsonNode node = MAPPER.readTree("[{\"type\":\"text\",\"text\":\"hello world\"}]");
-    ToolExecutionResult result = extractor.extract(node, false);
-    assertThat(result.isError()).isFalse();
+  void extractsTextContent() {
+    McpSchema.CallToolResult result =
+        McpSchema.CallToolResult.builder().addTextContent("hello world").build();
 
-    @SuppressWarnings("unchecked")
-    List<ResultContent> contents = (List<ResultContent>) result.result();
-    assertThat(contents).hasSize(1);
-    assertThat(contents.getFirst()).isInstanceOf(TextResultContent.class);
-    assertThat(((TextResultContent) contents.getFirst()).text()).isEqualTo("hello world");
+    McpToolCallResult mapped = extractor.extract(result);
+
+    assertThat(mapped.error()).isFalse();
+    assertThat(mapped.contents()).containsExactly(new TextResultContent("hello world"));
   }
 
   /** 验证图像 Base64 正确映射为 BinaryResultContent。 */
   @Test
-  void extractsImageContent() throws Exception {
-    JsonNode node =
-        MAPPER.readTree("[{\"type\":\"image\",\"data\":\"AQID\",\"mimeType\":\"image/png\"}]");
-    ToolExecutionResult result = extractor.extract(node, false);
+  void extractsImageContent() {
+    McpSchema.CallToolResult result =
+        McpSchema.CallToolResult.builder()
+            .addContent(McpSchema.ImageContent.builder("AQID", "image/png").build())
+            .build();
 
-    @SuppressWarnings("unchecked")
-    List<ResultContent> contents = (List<ResultContent>) result.result();
-    assertThat(contents).hasSize(1);
-    assertThat(contents.getFirst()).isInstanceOf(BinaryResultContent.class);
-    BinaryResultContent binary = (BinaryResultContent) contents.getFirst();
+    McpToolCallResult mapped = extractor.extract(result);
+
+    assertThat(mapped.contents()).hasSize(1);
+    BinaryResultContent binary = (BinaryResultContent) mapped.contents().getFirst();
     assertThat(binary.mediaType()).isEqualTo("image/png");
     assertThat(binary.content()).containsExactly(1, 2, 3);
   }
 
   /** 验证缺省 mimeType 时使用默认二进制媒体类型。 */
   @Test
-  void extractsImageWithBlankMimeTypeUsesDefault() throws Exception {
-    JsonNode node =
-        MAPPER.readTree("[{\"type\":\"image\",\"data\":\"AQID\",\"mimeType\":\"   \"}]");
-    ToolExecutionResult result = extractor.extract(node, false);
+  void extractsImageWithBlankMimeTypeUsesDefault() {
+    McpSchema.CallToolResult result =
+        McpSchema.CallToolResult.builder()
+            .addContent(McpSchema.ImageContent.builder("AQID", "   ").build())
+            .build();
 
-    @SuppressWarnings("unchecked")
-    List<ResultContent> contents = (List<ResultContent>) result.result();
-    assertThat(contents).hasSize(1);
-    BinaryResultContent binary = (BinaryResultContent) contents.getFirst();
-    assertThat(binary.mediaType()).isEqualTo("application/octet-stream");
+    McpToolCallResult mapped = extractor.extract(result);
+
+    assertThat(((BinaryResultContent) mapped.contents().getFirst()).mediaType())
+        .isEqualTo("application/octet-stream");
   }
 
-  /** 验证非法 Base64 图像作为稳定 JSON 保留结构。 */
+  /** 验证音频内容同样映射为二进制，并使用音频默认媒体类型。 */
   @Test
-  void extractsInvalidBase64AsJson() throws Exception {
-    JsonNode node =
-        MAPPER.readTree(
-            "[{\"type\":\"image\",\"data\":\"not_base_64!!!\",\"mimeType\":\"image/png\"}]");
-    ToolExecutionResult result = extractor.extract(node, false);
+  void extractsAudioContent() {
+    McpSchema.CallToolResult result =
+        McpSchema.CallToolResult.builder()
+            .addContent(McpSchema.AudioContent.builder("AQID", "  ").build())
+            .build();
 
-    @SuppressWarnings("unchecked")
-    List<ResultContent> contents = (List<ResultContent>) result.result();
-    assertThat(contents).hasSize(1);
-    assertThat(contents.getFirst()).isInstanceOf(JsonResultContent.class);
+    McpToolCallResult mapped = extractor.extract(result);
+
+    assertThat(((BinaryResultContent) mapped.contents().getFirst()).mediaType())
+        .isEqualTo("audio/wav");
   }
 
-  /** 验证 resource 与复合内容完整保留无损结构。 */
+  /** 验证非法 Base64 图像作为稳定 JSON 保留结构，并保留 type 判别字段。 */
   @Test
-  void extractsResourceAndMixedContents() throws Exception {
-    String json =
-        "["
-            + "{\"type\":\"text\",\"text\":\"info\"},"
-            + "{\"type\":\"resource\",\"resource\":{\"uri\":\"file:///test.txt\",\"text\":\"data\"}},"
-            + "{\"type\":\"custom_type\",\"foo\":123}"
-            + "]";
-    JsonNode node = MAPPER.readTree(json);
-    ToolExecutionResult result = extractor.extract(node, true);
-    assertThat(result.isError()).isTrue();
+  void extractsInvalidBase64AsJson() {
+    McpSchema.CallToolResult result =
+        McpSchema.CallToolResult.builder()
+            .addContent(McpSchema.ImageContent.builder("not_base_64!!!", "image/png").build())
+            .build();
 
-    @SuppressWarnings("unchecked")
-    List<ResultContent> contents = (List<ResultContent>) result.result();
-    assertThat(contents).hasSize(3);
-    assertThat(contents.get(0)).isInstanceOf(TextResultContent.class);
-    assertThat(contents.get(1)).isInstanceOf(JsonResultContent.class);
-    assertThat(contents.get(2)).isInstanceOf(JsonResultContent.class);
+    McpToolCallResult mapped = extractor.extract(result);
+
+    assertThat(mapped.contents()).hasSize(1);
+    assertThat(mapped.contents().getFirst()).isInstanceOf(JsonResultContent.class);
+    String json = ((JsonResultContent) mapped.contents().getFirst()).json();
+    assertThat(json).contains("\"type\":\"image\"").contains("\"mimeType\":\"image/png\"");
   }
 
-  /** 验证单节点非数组以及纯文本节点输入。 */
+  /** 验证 resource 与混合内容完整保留无损结构。 */
   @Test
-  void extractsSingleObjectOrTextNode() throws Exception {
-    JsonNode objectNode = MAPPER.readTree("{\"type\":\"text\",\"text\":\"single\"}");
-    ToolExecutionResult objectResult = extractor.extract(objectNode, false);
-    @SuppressWarnings("unchecked")
-    List<ResultContent> objectContents = (List<ResultContent>) objectResult.result();
-    assertThat(objectContents).hasSize(1);
-    assertThat(objectContents.getFirst()).isInstanceOf(TextResultContent.class);
+  void extractsResourceAndMixedContents() {
+    McpSchema.ResourceContents resource =
+        McpSchema.TextResourceContents.builder("file:///test.txt", "data").build();
+    McpSchema.CallToolResult result =
+        McpSchema.CallToolResult.builder()
+            .addTextContent("info")
+            .addContent(McpSchema.EmbeddedResource.builder(resource).build())
+            .addContent(
+                McpSchema.ResourceLink.builder()
+                    .name("link")
+                    .uri("file:///link.txt")
+                    .mimeType("text/plain")
+                    .build())
+            .build();
 
-    JsonNode textNode = MAPPER.readTree("\"plain string\"");
-    ToolExecutionResult textResult = extractor.extract(textNode, false);
-    @SuppressWarnings("unchecked")
-    List<ResultContent> textContents = (List<ResultContent>) textResult.result();
-    assertThat(textContents).hasSize(1);
-    assertThat(((TextResultContent) textContents.getFirst()).text()).isEqualTo("plain string");
+    McpToolCallResult mapped = extractor.extract(result);
+
+    assertThat(mapped.error()).isFalse();
+    assertThat(mapped.contents()).hasSize(3);
+    assertThat(mapped.contents().get(0)).isEqualTo(new TextResultContent("info"));
+    assertThat(mapped.contents().get(1)).isInstanceOf(JsonResultContent.class);
+    assertThat(((JsonResultContent) mapped.contents().get(1)).json())
+        .contains("\"type\":\"resource\"")
+        .contains("\"uri\":\"file:///test.txt\"")
+        .contains("\"text\":\"data\"");
+    assertThat(mapped.contents().get(2)).isInstanceOf(JsonResultContent.class);
+    assertThat(((JsonResultContent) mapped.contents().get(2)).json())
+        .contains("\"type\":\"resource_link\"")
+        .contains("\"uri\":\"file:///link.txt\"")
+        .contains("\"name\":\"link\"");
   }
 
-  /** 结构化 JSON 超过单条 1 MiB 时必须 fail closed：不能物化成同尺寸无界文本，也不能吞掉超限继续返回内容。 */
+  /** 普通 content 优先以保持既有映射；_meta 只保留业务详情。 */
   @Test
-  void rejectsStructuredJsonAboveSingleItemLimit() {
-    String largeValue = "x".repeat(JsonResultContent.MAX_JSON_UTF8_BYTES + 100);
-    JsonNode node = MAPPER.createObjectNode().put("type", "huge").put("data", largeValue);
+  void prefersContentAndFiltersProtocolMeta() {
+    Map<String, Object> structured = new LinkedHashMap<>();
+    structured.put("answer", 42);
+    Map<String, Object> meta = new LinkedHashMap<>();
+    meta.put("traceId", "t-1");
+    meta.put("io.modelcontextprotocol/serverInfo", Map.of("name", "fake"));
+    meta.put("com.mcp/tool", "reserved");
+    McpSchema.CallToolResult result =
+        McpSchema.CallToolResult.builder()
+            .addTextContent("hello")
+            .structuredContent(structured)
+            .meta(meta)
+            .build();
 
-    assertThatThrownBy(() -> extractor.extract(node, false))
-        .isInstanceOf(McpException.class)
-        .hasMessageContaining(String.valueOf(JsonResultContent.MAX_JSON_UTF8_BYTES));
+    McpToolCallResult mapped = extractor.extract(result);
+
+    assertThat(mapped.error()).isFalse();
+    assertThat(mapped.contents()).containsExactly(new TextResultContent("hello"));
+    assertThat(mapped.detailsJson()).isEqualTo("{\"traceId\":\"t-1\"}");
   }
 
-  /** 恰好不超过单条 JSON 上限的结构仍保留为 JsonResultContent，并计入累计预算。 */
+  /** content 为空时才使用结构化结果，并把它写成可读 JSON 文本。 */
   @Test
-  void retainsStructuredJsonAtSingleItemLimit() {
-    int overhead = "{\"type\":\"huge\",\"data\":\"\"}".getBytes(StandardCharsets.UTF_8).length;
-    String largeValue = "x".repeat(JsonResultContent.MAX_JSON_UTF8_BYTES - overhead);
-    JsonNode node = MAPPER.createObjectNode().put("type", "huge").put("data", largeValue);
+  void mapsStructuredContentWhenContentIsEmpty() {
+    McpSchema.CallToolResult result =
+        McpSchema.CallToolResult.builder().structuredContent(Map.of("answer", 42)).build();
 
-    ToolExecutionResult result = extractor.extract(node, false);
+    McpToolCallResult mapped = extractor.extract(result);
 
-    @SuppressWarnings("unchecked")
-    List<ResultContent> contents = (List<ResultContent>) result.result();
-    assertThat(contents).singleElement().isInstanceOf(JsonResultContent.class);
-    assertThat(((JsonResultContent) contents.getFirst()).json().getBytes(StandardCharsets.UTF_8))
-        .hasSize(JsonResultContent.MAX_JSON_UTF8_BYTES);
+    assertThat(mapped.error()).isFalse();
+    assertThat(mapped.contents()).containsExactly(new TextResultContent("{\"answer\":42}"));
   }
 
-  /** 多条各自合法的文本合计超过 64 MiB 时拒绝，不能靠拆条绕过累计预算。 */
+  /** 错误结果映射为可读错误文本；结构化错误同样保留其 JSON 文本。 */
+  @Test
+  void mapsErrorResultsToReadableText() {
+    McpToolCallResult textError =
+        extractor.extract(
+            McpSchema.CallToolResult.builder()
+                .addTextContent("first")
+                .addTextContent("second")
+                .isError(true)
+                .build());
+    assertThat(textError.error()).isTrue();
+    assertThat(textError.contents()).containsExactly(new TextResultContent("first\nsecond"));
+
+    McpToolCallResult structuredError =
+        extractor.extract(
+            McpSchema.CallToolResult.builder()
+                .structuredContent(Map.of("reason", "boom"))
+                .isError(true)
+                .build());
+    assertThat(structuredError.contents())
+        .containsExactly(new TextResultContent("{\"reason\":\"boom\"}"));
+
+    McpToolCallResult mixedError =
+        extractor.extract(
+            McpSchema.CallToolResult.builder()
+                .addTextContent("first")
+                .structuredContent(Map.of("reason", "boom"))
+                .isError(true)
+                .build());
+    assertThat(mixedError.contents()).containsExactly(new TextResultContent("first"));
+  }
+
+  /** 既无文本也无结构化内容的错误结果给出固定兜底文案。 */
+  @Test
+  void mapsEmptyErrorResultToCanonicalFallback() {
+    McpToolCallResult mapped =
+        extractor.extract(McpSchema.CallToolResult.builder().isError(true).build());
+
+    assertThat(mapped.contents())
+        .containsExactly(new TextResultContent("MCP tool returned an error result"));
+  }
+
+  /** 空 content 返回默认空文本单元。 */
+  @Test
+  void extractsEmptyContent() {
+    McpToolCallResult mapped = extractor.extract(McpSchema.CallToolResult.builder().build());
+
+    assertThat(mapped.contents()).containsExactly(new TextResultContent(""));
+  }
+
+  /** null 内容项必须安全降级，绝不抛出二次异常。 */
+  @Test
+  void handlesNullContentItemSafely() {
+    McpSchema.CallToolResult result =
+        new McpSchema.CallToolResult(
+            Arrays.asList(null, McpSchema.TextContent.builder("ok").build()), false, null, null);
+
+    McpToolCallResult mapped = extractor.extract(result);
+
+    assertThat(mapped.contents())
+        .containsExactly(new TextResultContent(""), new TextResultContent("ok"));
+  }
+
+  /** 累计文本超过 64 MiB 时拒绝，不能靠拆条绕过累计预算。 */
   @Test
   void rejectsAggregateTextAboveContentBudget() {
-    int chunk = 1024 * 1024;
-    ArrayNode array = MAPPER.createArrayNode();
-    int count = McpResultExtractor.MAX_CONTENT_BUDGET_BYTES / chunk + 1;
-    for (int index = 0; index < count; index++) {
-      array.addObject().put("type", "text").put("text", "x".repeat(chunk));
-    }
+    String text = "x".repeat(McpResultExtractor.MAX_CONTENT_BUDGET_BYTES + 1);
 
-    assertThatThrownBy(() -> extractor.extract(array, false))
+    assertThatThrownBy(
+            () ->
+                extractor.extract(McpSchema.CallToolResult.builder().addTextContent(text).build()))
+        .isInstanceOf(McpException.class)
+        .hasMessageContaining(String.valueOf(McpResultExtractor.MAX_CONTENT_BUDGET_BYTES));
+  }
+
+  /** 错误结果的可读文本同样受累计预算约束，不能绕过成功结果的 64 MiB 上限。 */
+  @Test
+  void rejectsAggregateErrorTextAboveContentBudget() {
+    String text = "x".repeat(McpResultExtractor.MAX_CONTENT_BUDGET_BYTES + 1);
+
+    assertThatThrownBy(
+            () ->
+                extractor.extract(
+                    McpSchema.CallToolResult.builder().addTextContent(text).isError(true).build()))
         .isInstanceOf(McpException.class)
         .hasMessageContaining(String.valueOf(McpResultExtractor.MAX_CONTENT_BUDGET_BYTES));
   }
@@ -175,83 +256,43 @@ class McpResultExtractorTest {
   void rejectsBase64ImageBeforeDecodingWhenEncodedLengthExceedsBudget() {
     int encodedChars =
         Math.toIntExact(((long) McpResultExtractor.MAX_CONTENT_BUDGET_BYTES / 3 + 1) * 4);
-    ObjectNode image = MAPPER.createObjectNode();
-    image.put("type", "image");
-    image.put("data", "A".repeat(encodedChars));
-    image.put("mimeType", "image/png");
+    McpSchema.CallToolResult result =
+        McpSchema.CallToolResult.builder()
+            .addContent(
+                McpSchema.ImageContent.builder("A".repeat(encodedChars), "image/png").build())
+            .build();
 
-    assertThatThrownBy(() -> extractor.extract(image, false))
+    assertThatThrownBy(() -> extractor.extract(result))
         .isInstanceOf(McpException.class)
         .hasMessageContaining(String.valueOf(McpResultExtractor.MAX_CONTENT_BUDGET_BYTES));
   }
 
   /** 非法 Base64 预先扣除的 decoded 上界必须退回，后续合法内容不被误判超预算。 */
   @Test
-  void refundsBudgetAfterInvalidBase64Image() throws Exception {
-    JsonNode node =
-        MAPPER.readTree(
-            "[{\"type\":\"image\",\"data\":\"not_base_64!!!\",\"mimeType\":\"image/png\"},"
-                + "{\"type\":\"text\",\"text\":\"after\"}]");
+  void refundsBudgetAfterInvalidBase64Image() {
+    McpSchema.CallToolResult result =
+        McpSchema.CallToolResult.builder()
+            .addContent(McpSchema.ImageContent.builder("not_base_64!!!", "image/png").build())
+            .addTextContent("after")
+            .build();
 
-    @SuppressWarnings("unchecked")
-    List<ResultContent> contents = (List<ResultContent>) extractor.extract(node, false).result();
+    List<ResultContent> contents = extractor.extract(result).contents();
 
     assertThat(contents).hasSize(2);
     assertThat(contents.get(0)).isInstanceOf(JsonResultContent.class);
     assertThat(((TextResultContent) contents.get(1)).text()).isEqualTo("after");
   }
 
-  /** 文本单元之间的换行合并必须只在存在多个文本时插入分隔符。 */
-  @Test
-  void joinsOnlyMultipleTextParts() throws Exception {
-    JsonNode single = MAPPER.readTree("[{\"type\":\"text\",\"text\":\"only\"}]");
-    assertThat(extractor.extract(single, false).resultText()).isEqualTo("only");
-
-    JsonNode multiple =
-        MAPPER.readTree(
-            "[{\"type\":\"text\",\"text\":\"first\"},{\"type\":\"text\",\"text\":\"second\"}]");
-    assertThat(extractor.extract(multiple, false).resultText()).isEqualTo("first\nsecond");
-  }
-
-  /** null 与裸值单元必须安全降级，绝不抛出二次异常。 */
-  @Test
-  void handlesNullAndScalarItemsSafely() throws Exception {
-    JsonNode withNull = MAPPER.readTree("[null,{\"type\":\"text\",\"text\":\"ok\"}]");
-    @SuppressWarnings("unchecked")
-    List<ResultContent> contents =
-        (List<ResultContent>) extractor.extract(withNull, false).result();
-    assertThat(contents).hasSize(2);
-    assertThat(((TextResultContent) contents.getFirst()).text()).isEmpty();
-
-    JsonNode scalar = MAPPER.readTree("42");
-    @SuppressWarnings("unchecked")
-    List<ResultContent> scalarContents =
-        (List<ResultContent>) extractor.extract(scalar, false).result();
-    assertThat(scalarContents).hasSize(1);
-    assertThat(scalarContents.getFirst()).isInstanceOf(JsonResultContent.class);
-  }
-
-  /** 验证空 content 返回默认空文本单元。 */
-  @Test
-  void extractsEmptyContent() throws Exception {
-    JsonNode node = MAPPER.readTree("[]");
-    ToolExecutionResult result = extractor.extract(node, false);
-
-    @SuppressWarnings("unchecked")
-    List<ResultContent> contents = (List<ResultContent>) result.result();
-    assertThat(contents).hasSize(1);
-    assertThat(contents.getFirst()).isInstanceOf(TextResultContent.class);
-    assertThat(((TextResultContent) contents.getFirst()).text()).isEmpty();
-  }
-
   /**
-   * 结构化内容经 SDK 的 Jackson 2 节点边界写出：多字节 UTF-8 按实际输出字节精确判定边界，超限一字节即拒绝。
+   * 结构化内容经有界输出流写出：多字节 UTF-8 按实际输出字节精确判定边界，超限一字节即拒绝。
    *
    * <p>同时锁定默认 profile 不对 BMP 非 ASCII（中文）转义，因此这里必须是有界写出的原文。
    */
   @Test
   void writeBoundedJsonCountsMultibyteUtf8AtExactBoundary() {
-    ObjectNode node = MAPPER.createObjectNode().put("type", "huge").put("data", "你好世界");
+    Map<String, Object> node = new LinkedHashMap<>();
+    node.put("type", "huge");
+    node.put("data", "你好世界");
     String written = McpResultExtractor.writeBoundedJson(node, Integer.MAX_VALUE);
     assertThat(written).contains("你好世界").doesNotContain("\\u");
     int exactBytes = written.getBytes(StandardCharsets.UTF_8).length;
@@ -260,10 +301,10 @@ class McpResultExtractorTest {
     assertThat(McpResultExtractor.writeBoundedJson(node, exactBytes - 1)).isNull();
   }
 
-  /** emoji（代理对）同样按 Jackson 2 输出流实际字节判定边界，临界点保留、少一字节即超限。 */
+  /** emoji（代理对）同样按实际输出字节判定边界，临界点保留、少一字节即超限。 */
   @Test
   void writeBoundedJsonCountsEmojiAtExactBoundary() {
-    ObjectNode node = MAPPER.createObjectNode().put("emoji", "😀🚀");
+    Map<String, Object> node = Map.of("emoji", "😀🚀");
     String written = McpResultExtractor.writeBoundedJson(node, Integer.MAX_VALUE);
     int exactBytes = written.getBytes(StandardCharsets.UTF_8).length;
 
@@ -274,95 +315,20 @@ class McpResultExtractorTest {
   /** 远超上限的节点在写出期提前中止并返回 null，不物化完整输出。 */
   @Test
   void writeBoundedJsonAbortsEarlyOnOversizedNode() {
-    ObjectNode node = MAPPER.createObjectNode().put("big", "x".repeat(10 * 1024 * 1024));
+    Map<String, Object> node = Map.of("big", "x".repeat(10 * 1024 * 1024));
 
     assertThat(McpResultExtractor.writeBoundedJson(node, 1024)).isNull();
-  }
-
-  /** 恰好不超过单条 JSON 上限的多字节结构仍被保留，并按实际 UTF-8 字节数计入 1 MiB 上限。 */
-  @Test
-  void retainsMultibyteStructuredJsonAtSingleItemLimit() {
-    int overhead = "{\"type\":\"huge\",\"data\":\"\"}".getBytes(StandardCharsets.UTF_8).length;
-    int remaining = JsonResultContent.MAX_JSON_UTF8_BYTES - overhead;
-    String value = "你".repeat(remaining / 3) + "x".repeat(remaining % 3);
-    JsonNode node = MAPPER.createObjectNode().put("type", "huge").put("data", value);
-
-    ToolExecutionResult result = extractor.extract(node, false);
-
-    @SuppressWarnings("unchecked")
-    List<ResultContent> contents = (List<ResultContent>) result.result();
-    assertThat(contents).singleElement().isInstanceOf(JsonResultContent.class);
-    assertThat(((JsonResultContent) contents.getFirst()).json().getBytes(StandardCharsets.UTF_8))
-        .hasSize(JsonResultContent.MAX_JSON_UTF8_BYTES);
   }
 
   /** 非超限的序列化失败必须收敛为固定不透明 McpException，绝不回显内容或保留底层 cause。 */
   @Test
   void writeBoundedJsonMakesGenericSerializationFailureOpaque() {
-    pendingSerializerFailure = new IOException("generic-secret");
-    try {
-      assertThatThrownBy(() -> McpResultExtractor.writeBoundedJson(failingValueNode(), 1024))
-          .isInstanceOf(McpException.class)
-          .hasMessage("MCP content cannot be encoded as bounded JSON")
-          .hasNoCause()
-          .satisfies(error -> assertThat(error.getMessage()).doesNotContain("generic-secret"));
-    } finally {
-      pendingSerializerFailure = null;
-    }
-  }
+    Map<String, Object> cyclic = new LinkedHashMap<>();
+    cyclic.put("self", cyclic);
 
-  /**
-   * 超限识别沿 cause 链只看有界输出流自身的 {@link BoundedOutputStream.LimitExceededException}：被序列化层包装的超限也必须判为超限。
-   */
-  @Test
-  void writeBoundedJsonRecognizesWrappedLimitExceeded() throws IOException {
-    pendingSerializerFailure = new IOException("wrapper", capturedLimitExceeded());
-    try {
-      assertThat(McpResultExtractor.writeBoundedJson(failingValueNode(), 1024)).isNull();
-    } finally {
-      pendingSerializerFailure = null;
-    }
-  }
-
-  /** 序列化器在写出期直接抛出超限中止时同样返回 null，而不是被当成普通编码失败。 */
-  @Test
-  void writeBoundedJsonRecognizesDirectLimitExceeded() throws IOException {
-    pendingSerializerFailure = capturedLimitExceeded();
-    try {
-      assertThat(McpResultExtractor.writeBoundedJson(failingValueNode(), 1024)).isNull();
-    } finally {
-      pendingSerializerFailure = null;
-    }
-  }
-
-  /** 让序列化器抛出预设失败的 POJO，用于验证超限与通用失败的区分。 */
-  @JsonSerialize(using = FailingSerializer.class)
-  private static final class FailingValue {}
-
-  private static final class FailingSerializer extends JsonSerializer<FailingValue> {
-    @Override
-    public void serialize(FailingValue value, JsonGenerator generator, SerializerProvider provider)
-        throws IOException {
-      throw pendingSerializerFailure;
-    }
-  }
-
-  /** 预设的序列化失败；测试之间串行执行，用静态哨兵模拟写出期异常。 */
-  private static volatile IOException pendingSerializerFailure;
-
-  private static JsonNode failingValueNode() {
-    return JsonNodeFactory.instance.pojoNode(new FailingValue());
-  }
-
-  /** 使用真实有界输出流产生一个超限中止异常，供超限识别断言使用。 */
-  private static BoundedOutputStream.LimitExceededException capturedLimitExceeded()
-      throws IOException {
-    BoundedOutputStream out = new BoundedOutputStream(1);
-    try {
-      out.write(new byte[] {1, 2});
-    } catch (BoundedOutputStream.LimitExceededException error) {
-      return error;
-    }
-    throw new AssertionError("expected BoundedOutputStream to abort over limit");
+    assertThatThrownBy(() -> McpResultExtractor.writeBoundedJson(cyclic, 1024))
+        .isInstanceOf(McpException.class)
+        .hasMessage("MCP content cannot be encoded as bounded JSON")
+        .hasNoCause();
   }
 }

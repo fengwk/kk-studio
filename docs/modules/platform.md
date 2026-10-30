@@ -150,23 +150,25 @@ URL 与 headers 仅在显式配置查询中以 `no-store` 返回，变量占位�
 
 ### MCP client
 
-[`catalog/mcp/client`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/mcp/client/) 把 LangChain4j 的 Streamable HTTP client
+[`catalog/mcp/client`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/mcp/client/) 用官方 MCP Java SDK 的同步 Streamable HTTP client
 适配为平台自有的配置、工具定义与结果，供发现与执行共用，公共签名不出现 SDK 类型。
 [`McpClientFactory`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/mcp/client/McpClientFactory.java) 是唯一构造入口：
-固定 client protocol version，关闭 SDK 的工具列表缓存、变更订阅与健康检查，每个 client 都不复用远端状态；
+固定 client protocol version，使用 JDK HttpClient 的 Streamable HTTP 传输，不启用调用结果 schema 缓存，不同 client 不共享远端会话；
 初始化在独立线程完成，超时、构建失败或交接竞态都不会留下半开的连接。
 
-预算只有一个：[`McpDeadline`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/mcp/client/McpDeadline.java)
+时间预算只有一个：[`McpDeadline`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/mcp/client/McpDeadline.java)
 保存绝对截止时刻，同一实例依次交给 factory 与 `listTools` / `callTool`，初始化花掉的时间从后续阶段扣除，没有无预算的形式。
 [`McpCancellationToken`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/mcp/client/McpCancellationToken.java)
-只结束本次本地等待（取消该调用的 worker 并中断其线程），绝不关闭共享 client。每个 client 至多 64 个真实 worker，
+只结束本次调用的本地等待（取消该调用的 worker 并中断其线程），绝不关闭共享 client。每个 client 至多 64 个真实 worker，
 交接不排队，池满或已关闭时立即抛 `McpException`，不挂起调用方。
+调用级取消不表示远端工具已经停止；SDK 在途请求可继续等待服务端响应或请求超时，不以销毁共享 client 取消其他调用。
 
 失败分两类：工具自身以错误结束映射为可读的 `McpToolCallResult.errorText`；只有连接或协议失败才抛
 `McpException`、`McpTimeoutException` 或 `McpCancelledException`，上层据此决定保留还是重建 client。
 [`McpResultExtractor`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/mcp/client/McpResultExtractor.java)
-把 MCP content 映射为 Common 的内容单元，是唯一的 Jackson 2 边界（SDK 签名固定），文本、图片与扩展内容都按单条与单次响应预算有界写出；
-入参要求严格 JSON object，重复键或尾随内容在本地拒绝，不交给服务端偶然实现。
+把官方 SDK 的 MCP content 映射为 Common 的内容单元，统一使用 Jackson 3；普通 content 优先，仅在 content 为空时把结构化结果写成可读 JSON，`_meta` 中的业务详情单独保留，
+文本与二进制内容共享单次响应 64 MiB 累计预算，结构化内容另受单条 JSON 上限约束。传输报文预算容纳内容最坏六倍 JSON 转义和单条 JSON 大小的信封余量，JSON 字符串读取上限与报文预算对齐，不用 SDK 的默认限制缩小内容预算。
+入参要求严格 JSON object，重复键或尾随内容在本地拒绝，不交给服务端偶然实现；远端工具的 `inputSchema` 也必须是 JSON object，非法形状使发现失败，不归一化为无参数工具。
 [`RemoteMcpConfig`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/mcp/client/RemoteMcpConfig.java)
 的 `toString` 只输出 URL 长度与 header 数量，因为 URL 可能内嵌凭证。
 
