@@ -170,7 +170,13 @@ public final class AgentModelRuntimeConfigParser {
     if (config == null) {
       throw invalid("config is required");
     }
-    AgentModelLimitDTO limit = config.getLimit();
+    validateLimit(config.getLimit());
+    AgentModelAbilitiesDTO abilities = validateAbilities(config.getAbilities());
+    validateVariants(config, abilities);
+    validatePricingDefinition(config);
+  }
+
+  private static void validateLimit(AgentModelLimitDTO limit) {
     if (limit == null) {
       throw invalid("config.limit is required");
     }
@@ -183,8 +189,9 @@ public final class AgentModelRuntimeConfigParser {
     if (limit.getOutput() > limit.getContext()) {
       throw invalid("config.limit.output must not exceed limit.context");
     }
+  }
 
-    AgentModelAbilitiesDTO abilities = config.getAbilities();
+  private static AgentModelAbilitiesDTO validateAbilities(AgentModelAbilitiesDTO abilities) {
     if (abilities == null) {
       throw invalid("config.abilities is required");
     }
@@ -208,7 +215,11 @@ public final class AgentModelRuntimeConfigParser {
         throw invalid("config.abilities.inputModalities contains duplicate value: " + modality);
       }
     }
+    return abilities;
+  }
 
+  private static void validateVariants(
+      AgentModelConfigDTO config, AgentModelAbilitiesDTO abilities) {
     List<AgentModelVariantDTO> variants = config.getVariants();
     if (variants == null || variants.isEmpty()) {
       throw invalid("config.variants must not be empty");
@@ -251,7 +262,10 @@ public final class AgentModelRuntimeConfigParser {
     if (!ids.contains(defaultVariant)) {
       throw invalid("config.defaultVariant must match a variants[].id");
     }
+  }
 
+  /** pricing 缺省归一为完整零定义；归一后与目录候选共用同一套校验。 */
+  private static void validatePricingDefinition(AgentModelConfigDTO config) {
     AgentModelPricingDTO pricing = config.getPricing();
     if (pricing == null) {
       pricing = new AgentModelPricingDTO();
@@ -610,7 +624,7 @@ public final class AgentModelRuntimeConfigParser {
     }
   }
 
-  private void validateReasoningEffort(String reasoningEffort, String path) {
+  private static void validateReasoningEffort(String reasoningEffort, String path) {
     if (reasoningEffort == null) {
       return;
     }
