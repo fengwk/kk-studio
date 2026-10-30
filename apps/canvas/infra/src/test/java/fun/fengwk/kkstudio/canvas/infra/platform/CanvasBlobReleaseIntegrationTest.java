@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -16,6 +17,7 @@ import fun.fengwk.kkstudio.canvas.CanvasCommandService;
 import fun.fengwk.kkstudio.canvas.CanvasDocument;
 import fun.fengwk.kkstudio.canvas.CanvasResourceInput;
 import fun.fengwk.kkstudio.canvas.CanvasTransform;
+import fun.fengwk.kkstudio.canvas.infra.dto.CanvasDtoMapper;
 import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionDispatcher;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.platform.storage.StorageMaintenance;
@@ -39,8 +41,15 @@ class CanvasBlobReleaseIntegrationTest extends PostgresSpringTestSupport {
 
   @Autowired private CanvasCommandService commandService;
   @Autowired private JdbcTemplate jdbc;
+  @Autowired private ApplicationContext context;
   @MockitoBean private StorageMaintenance storageBlobSweeper;
   @MockitoBean private CanvasFunctionDispatcher canvasFunctionDispatcher;
+
+  /** 平台适配根显式注册唯一 mapper，Web 无需自行扫描或装配它。 */
+  @Test
+  void platformRegistersSingleCanvasDtoMapper() {
+    assertEquals(1, context.getBeansOfType(CanvasDtoMapper.class).size());
+  }
 
   /** 删除节点：节点 Resource 行与它持有的 Blob 引用同事务释放，引用归零后 Blob 转为 DELETING。 */
   @Test

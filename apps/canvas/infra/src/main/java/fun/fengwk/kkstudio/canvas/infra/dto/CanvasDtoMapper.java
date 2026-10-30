@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.canvas.infra.dto;
 
-import org.springframework.stereotype.Component;
-
 import fun.fengwk.kkstudio.canvas.CanvasCommand;
 import fun.fengwk.kkstudio.canvas.CanvasConflict;
 import fun.fengwk.kkstudio.canvas.CanvasDocument;
@@ -65,10 +63,9 @@ import java.util.UUID;
  * <p>Function args 在 wire 是任意 JSON object，在领域是严格 {@link CanvasJson.JsonObject}：映射双向递归转换，并在入口触发 Core
  * 的深度与长度校验，保证 HTTP 输入不会绕过持久化形式的不变量。
  */
-@Component
 public class CanvasDtoMapper {
 
-  /** canonical 非负十进制 long：无前导零、无符号、无空白。 */
+  /** 媒体 Blob 的权威事实由平台 Storage 提供。 */
   private final StorageBlobManager blobManager;
 
   public CanvasDtoMapper(StorageBlobManager blobManager) {
