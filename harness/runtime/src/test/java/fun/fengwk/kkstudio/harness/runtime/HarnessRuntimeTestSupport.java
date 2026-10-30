@@ -98,7 +98,7 @@ public final class HarnessRuntimeTestSupport {
   static final Instant T6 = Instant.ofEpochMilli(7_000);
 
   /** 测试种子用的合法 64 位小写 SHA-256 creation request hash（非 NEW_SESSION/ENTRY 路径的任意固定值）。 */
-  static final String CREATION_REQUEST_HASH =
+  public static final String CREATION_REQUEST_HASH =
       "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
   static final EnvironmentId ENV = EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
@@ -168,7 +168,7 @@ public final class HarnessRuntimeTestSupport {
     }
   }
 
-  record Baseline(UUID sessionId, UUID rootEntryId, UUID threadId) {}
+  public record Baseline(UUID sessionId, UUID rootEntryId, UUID threadId) {}
 
   record TurnBaseline(UUID sessionId, UUID rootEntryId, UUID turnStartEntryId, UUID threadId) {}
 
@@ -202,7 +202,7 @@ public final class HarnessRuntimeTestSupport {
       UUID sessionId, UUID rootEntryId, UUID turnEndEntryId, UUID threadId) {}
 
   /** Session + ROOT + Thread(head 指向 ROOT)；静默的 IDLE_OR_HISTORICAL baseline。 */
-  static Baseline seedBaseline(InMemoryHarnessStore store) {
+  public static Baseline seedBaseline(InMemoryHarnessStore store) {
     return store.transaction(
         tx -> {
           UUID sessionId = tx.nextId();

@@ -2,8 +2,10 @@ package fun.fengwk.kkstudio.harness.infra.store;
 
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtinDriver;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.T2;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.T3;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.mappedAssistant;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.succeededRequest;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T2;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T3;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -17,7 +19,6 @@ import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
-import fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
@@ -42,6 +43,7 @@ import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -83,10 +85,9 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
   @Test
   void expiredToolRecoveryFeedsHonestResultAndContinuesModelLoop() {
     StoreTestSupport.TurnBaseline turn =
-        StoreTestSupport.seedTurnBaseline(
-            store, StoreTestSupport.succeededRequest().toolBindings());
+        StoreTestSupport.seedTurnBaseline(store, succeededRequest().toolBindings());
     UUID userId = seedUserEntry(turn);
-    ModelRequestSpec request = StoreTestSupport.succeededRequest();
+    ModelRequestSpec request = succeededRequest();
     ProviderResponse response = StoreTestSupport.assistantResponse("call-0");
     UUID modelId = seedRunningModelWithToolCall(turn, userId, request, response);
     UUID assistantId =
@@ -188,7 +189,7 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
   private ThreadProcessor newThreadProcessor() {
     TurnResolver resolver =
         (threadId, path, preparation) ->
-            new TurnResolver.Resolved(StoreTestSupport.succeededRequest(), 100_000, 16_384);
+            new TurnResolver.Resolved(succeededRequest(), 100_000, 16_384);
     return new ThreadProcessor(
         store,
         builtinDriver(store, resolver),
@@ -257,7 +258,7 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
                   assistantId,
                   turn.sessionId(),
                   requestHeadEntryId,
-                  StoreTestSupport.mappedAssistant(request, response, T3),
+                  mappedAssistant(request, response, T3),
                   T3));
           builtin(tx)
               .updateModelInvocation(

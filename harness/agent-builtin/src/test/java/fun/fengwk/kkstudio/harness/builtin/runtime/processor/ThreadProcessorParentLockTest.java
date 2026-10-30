@@ -8,7 +8,7 @@ import static fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProces
 import static fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport.claimThreadWork;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport.thread;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport.work;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.loadCommandsByThread;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.loadCommandsByThread;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;

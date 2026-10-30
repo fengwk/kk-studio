@@ -1,11 +1,11 @@
 package fun.fengwk.kkstudio.harness.builtin.runtime.store.testing;
 
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.T2;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.modelInvocation;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.seedTurnBaseline;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.session;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.userMessagePayload;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T2;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedTurnBaseline;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.session;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.userMessagePayload;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -20,6 +20,7 @@ import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessS
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.TurnBaseline;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -97,7 +98,7 @@ class InMemoryHarnessStoreTransactionTest {
   void rollsBackInputDriverModelAndWorkInTheSameTransaction() {
     // 测试意图：同事务写入输入历史、Builtin 私有 ModelInvocation 与两类 Work 后失败，三者必须一起不可见；
     // 使用真实 InMemoryHarnessStore 的 copy-on-write 事务，而不是 no-op fake。
-    StoreTestSupport.TurnBaseline baseline = seedTurnBaseline(store);
+    TurnBaseline baseline = seedTurnBaseline(store);
     IllegalArgumentException failure = new IllegalArgumentException("same transaction failure");
     UUID inputEntryId = TestIds.id(100);
     UUID modelId = TestIds.id(200);

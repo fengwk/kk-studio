@@ -1,36 +1,42 @@
 package fun.fengwk.kkstudio.harness.builtin.runtime.store.testing;
 
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.ASK_USER_QUESTIONNAIRE;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.T0;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.T1;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.T2;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.T3;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.T4;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.askUserBinding;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.askUserRequest;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.askUserResponse;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.assistantAbortedPayload;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.assistantErrorPayload;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.assistantPayload;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.assistantResponse;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.hostBinding;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.inTransaction;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.insertChildEntry;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.mappedAssistant;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.modelInvocation;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.modelRequest;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.resolvedTurnStartPayload;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.seedTurnBaseline;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.succeededRequest;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.syntheticToolResultPayload;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.toolCall;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.toolInvocation;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.toolResultPayload;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.turnStartPayload;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.userMessagePayload;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.withRendererKey;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.ASK_USER_QUESTIONNAIRE;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.CONTEXT_WINDOW;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.MAX_OUTPUT_TOKENS;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T0;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T1;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T2;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T3;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T4;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.askUserBinding;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.assistantAbortedPayload;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.assistantErrorPayload;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.assistantPayload;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.assistantResponse;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.branchSettings;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.builtinExecutionModel;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.hostBinding;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.inTransaction;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.insertChildEntry;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.resolvedTurnStartPayload;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedTurnBaseline;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.siblingRoot;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.syntheticToolResultPayload;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.threadState;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.toolCall;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.toolInvocation;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.toolResultPayload;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.turnStartPayload;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.userMessagePayload;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.withRendererKey;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -48,8 +54,6 @@ import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.model.StreamCheckpoint;
-import fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.Baseline;
-import fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.TurnBaseline;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
@@ -80,6 +84,8 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.PendingToolInvocationRow;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.TurnBaseline;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -443,10 +449,10 @@ public abstract class HarnessStoreInvocationContract {
                       root.rootEntryId(),
                       new TurnStartPayload(
                           TurnStartReason.INPUT,
-                          StoreTestSupport.branchSettings(),
+                          branchSettings(),
                           foreignOwner,
-                          StoreTestSupport.CONTEXT_WINDOW,
-                          StoreTestSupport.MAX_OUTPUT_TOKENS,
+                          CONTEXT_WINDOW,
+                          MAX_OUTPUT_TOKENS,
                           null,
                           null),
                       T1));
@@ -484,9 +490,7 @@ public abstract class HarnessStoreInvocationContract {
                       otherRoot.sessionId(),
                       otherRoot.rootEntryId(),
                       new TurnStartPayload(
-                          TurnStartReason.INPUT,
-                          StoreTestSupport.branchSettings(),
-                          otherRoot.threadId()),
+                          TurnStartReason.INPUT, branchSettings(), otherRoot.threadId()),
                       T1));
               ThreadState locked = tx.lockThread(otherRoot.threadId()).orElseThrow();
               tx.updateThread(locked.advanceHead(id, T1));
@@ -675,10 +679,7 @@ public abstract class HarnessStoreInvocationContract {
         T1);
     inTransaction(
         store,
-        tx ->
-            tx.insertThread(
-                StoreTestSupport.siblingRoot(
-                    thread5, baseline.sessionId(), turnStartB, "sibling-5")));
+        tx -> tx.insertThread(siblingRoot(thread5, baseline.sessionId(), turnStartB, "sibling-5")));
     insertTerminalModel(
         TestIds.id(5),
         thread5,
@@ -689,10 +690,7 @@ public abstract class HarnessStoreInvocationContract {
         T2);
     inTransaction(
         store,
-        tx ->
-            tx.insertThread(
-                StoreTestSupport.siblingRoot(
-                    thread6, baseline.sessionId(), turnStartC, "sibling-6")));
+        tx -> tx.insertThread(siblingRoot(thread6, baseline.sessionId(), turnStartC, "sibling-6")));
     insertTerminalModel(
         TestIds.id(6),
         thread6,
@@ -711,7 +709,7 @@ public abstract class HarnessStoreInvocationContract {
                 tx -> {
                   UUID thread7 = tx.nextId();
                   tx.insertThread(
-                      StoreTestSupport.siblingRoot(
+                      siblingRoot(
                           thread7, baseline.sessionId(), baseline.turnStartEntryId(), "sibling-7"));
                   builtin(tx)
                       .insertModelInvocation(
@@ -834,8 +832,7 @@ public abstract class HarnessStoreInvocationContract {
         tx -> {
           tx.lockThread(baseline.threadId());
           tx.updateThread(
-              StoreTestSupport.threadState(
-                  baseline.threadId(), baseline.sessionId(), toolResultA, 1, 1, T0, T2));
+              threadState(baseline.threadId(), baseline.sessionId(), toolResultA, 1, 1, T0, T2));
         });
     // assistantA 与 requestHead 处于同一 turn，但位于 requestHead 的祖先一侧：sibling branch 仍会被拒绝，
     // 即便它本身是合法的 assistant result entry
@@ -885,8 +882,7 @@ public abstract class HarnessStoreInvocationContract {
         tx -> {
           tx.lockThread(baseline.threadId());
           tx.updateThread(
-              StoreTestSupport.threadState(
-                  baseline.threadId(), baseline.sessionId(), assistantA, 1, 1, T0, T2));
+              threadState(baseline.threadId(), baseline.sessionId(), assistantA, 1, 1, T0, T2));
         });
     inTransaction(
         store,
@@ -968,8 +964,7 @@ public abstract class HarnessStoreInvocationContract {
         tx -> {
           tx.lockThread(baseline.threadId());
           tx.updateThread(
-              StoreTestSupport.threadState(
-                  baseline.threadId(), baseline.sessionId(), otherAssistant, 1, 1, T0, T2));
+              threadState(baseline.threadId(), baseline.sessionId(), otherAssistant, 1, 1, T0, T2));
         });
     // relocation 之后 terminal exact replay 仍合法，不依赖当前 head
     inTransaction(
@@ -1050,7 +1045,7 @@ public abstract class HarnessStoreInvocationContract {
     ModelInvocationError error = new ModelInvocationError(ProviderErrorKind.TRANSIENT, "boom");
 
     // Case 1: RUNNING (null checkpoint) -> SUCCEEDED (new checkpoint) in a single update
-    StoreTestSupport.TurnBaseline turn1 = seedTurnBaseline(store);
+    TurnBaseline turn1 = seedTurnBaseline(store);
     inTransaction(
         store,
         tx -> {
@@ -1083,7 +1078,7 @@ public abstract class HarnessStoreInvocationContract {
     assertEquals("hello", committed10.streamCheckpoint().text());
 
     // Case 2: RUNNING (checkpoint 1) -> SUCCEEDED (grown checkpoint 2) in a single update
-    StoreTestSupport.TurnBaseline turn2 = seedTurnBaseline(store);
+    TurnBaseline turn2 = seedTurnBaseline(store);
     inTransaction(
         store,
         tx -> {
@@ -1119,7 +1114,7 @@ public abstract class HarnessStoreInvocationContract {
     assertEquals("hello world", committed11.streamCheckpoint().text());
 
     // Case 3: RUNNING (checkpoint 1) -> FAILED (grown checkpoint 2) in a single update
-    StoreTestSupport.TurnBaseline turn3 = seedTurnBaseline(store);
+    TurnBaseline turn3 = seedTurnBaseline(store);
     inTransaction(
         store,
         tx -> {
@@ -1151,7 +1146,7 @@ public abstract class HarnessStoreInvocationContract {
     assertEquals("partial error", committed12.streamCheckpoint().text());
 
     // Case 4: Sequence regression from RUNNING to terminal update is rejected by store
-    StoreTestSupport.TurnBaseline turn4 = seedTurnBaseline(store);
+    TurnBaseline turn4 = seedTurnBaseline(store);
     inTransaction(
         store,
         tx -> {
@@ -2508,9 +2503,9 @@ public abstract class HarnessStoreInvocationContract {
                   endEntryId,
                   new TurnStartPayload(
                       TurnStartReason.COMPACTION,
-                      StoreTestSupport.branchSettings(),
+                      branchSettings(),
                       baseline.threadId(),
-                      StoreTestSupport.CONTEXT_WINDOW,
+                      CONTEXT_WINDOW,
                       16_384,
                       compaction,
                       null),
@@ -2581,7 +2576,7 @@ public abstract class HarnessStoreInvocationContract {
               new CompactionStart(
                   CompactionPhase.FULL,
                   CompactionTrigger.THRESHOLD,
-                  StoreTestSupport.builtinExecutionModel(),
+                  builtinExecutionModel(),
                   4096L,
                   cutEntryId,
                   null,
@@ -2595,9 +2590,9 @@ public abstract class HarnessStoreInvocationContract {
                   endEntryId,
                   new TurnStartPayload(
                       TurnStartReason.COMPACTION,
-                      StoreTestSupport.branchSettings(),
+                      branchSettings(),
                       baseline.threadId(),
-                      StoreTestSupport.CONTEXT_WINDOW,
+                      CONTEXT_WINDOW,
                       16_384,
                       compaction,
                       null),

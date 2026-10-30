@@ -2,8 +2,10 @@ package fun.fengwk.kkstudio.harness.infra.store;
 
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtinDriver;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.T2;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.T3;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.mappedAssistant;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.succeededRequest;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T2;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T3;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -17,7 +19,6 @@ import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
-import fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
@@ -36,6 +37,7 @@ import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessResult;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorConfig;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
@@ -56,8 +58,7 @@ class PostgresqlThreadProcessorReplayTest {
   void toolSiblingBatchWithTransferredReplayStateAdvancesAndWakesContinuation() {
     HarnessStore store = PostgresqlHarnessStoreFixture.resetAndCreate();
     StoreTestSupport.TurnBaseline baseline =
-        StoreTestSupport.seedTurnBaseline(
-            store, StoreTestSupport.succeededRequest().toolBindings());
+        StoreTestSupport.seedTurnBaseline(store, succeededRequest().toolBindings());
     Instant now = Instant.now().minusSeconds(1).truncatedTo(ChronoUnit.MILLIS);
     WorkTarget target = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
     UUID userId =
@@ -76,7 +77,7 @@ class PostgresqlThreadProcessorReplayTest {
               return id;
             });
 
-    ModelRequestSpec request = StoreTestSupport.succeededRequest();
+    ModelRequestSpec request = succeededRequest();
     ProviderResponse response = StoreTestSupport.assistantResponse("call-0", "call-1");
     ProviderReplayState replay =
         new ProviderReplayState(
@@ -130,7 +131,7 @@ class PostgresqlThreadProcessorReplayTest {
                       id,
                       baseline.sessionId(),
                       userId,
-                      StoreTestSupport.mappedAssistant(request, response),
+                      mappedAssistant(request, response),
                       T3,
                       replay));
               builtin(tx).updateModelInvocation(model.attachResultEntry(id, T3));

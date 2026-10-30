@@ -1,14 +1,17 @@
 package fun.fengwk.kkstudio.harness.builtin.runtime.store.testing;
 
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.T1;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.inTransaction;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.mappedAssistant;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.modelInvocation;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.seedTurnBaseline;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.succeededRequest;
-import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.toolInvocation;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T1;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.assistantResponse;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.inTransaction;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedTurnBaseline;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.siblingRoot;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.toolInvocation;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.userMessagePayload;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -22,8 +25,6 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
-import fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.Baseline;
-import fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.TurnBaseline;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
@@ -32,6 +33,8 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.store.EnvironmentToolWaitRow;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.PendingEnvironmentWaitRow;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.TurnBaseline;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
@@ -135,7 +138,7 @@ public abstract class HarnessStoreWorkContract {
   protected SeededTool seedTool(HarnessStore store) {
     TurnBaseline baseline = seedTurnBaseline(store);
     ModelRequestSpec requestSpec = succeededRequest();
-    ProviderResponse response = StoreTestSupport.assistantResponse("call-1");
+    ProviderResponse response = assistantResponse("call-1");
     return store.transaction(
         tx -> {
           UUID modelId = tx.nextId();
@@ -147,7 +150,7 @@ public abstract class HarnessStoreWorkContract {
                   userEntryId,
                   baseline.sessionId(),
                   baseline.turnStartEntryId(),
-                  StoreTestSupport.userMessagePayload(),
+                  userMessagePayload(),
                   T1));
           tx.insertEntry(
               new Entry(
@@ -302,8 +305,7 @@ public abstract class HarnessStoreWorkContract {
             tx -> {
               UUID id = tx.nextId();
               tx.insertThread(
-                  StoreTestSupport.siblingRoot(
-                      id, baseline.sessionId(), baseline.rootEntryId(), "sibling"));
+                  siblingRoot(id, baseline.sessionId(), baseline.rootEntryId(), "sibling"));
               return id;
             });
     store.transaction(
@@ -467,8 +469,7 @@ public abstract class HarnessStoreWorkContract {
             tx -> {
               UUID id = tx.nextId();
               tx.insertThread(
-                  StoreTestSupport.siblingRoot(
-                      id, baseline.sessionId(), baseline.rootEntryId(), "sibling-2"));
+                  siblingRoot(id, baseline.sessionId(), baseline.rootEntryId(), "sibling-2"));
               return id;
             });
     UUID thread3 =
@@ -476,8 +477,7 @@ public abstract class HarnessStoreWorkContract {
             tx -> {
               UUID id = tx.nextId();
               tx.insertThread(
-                  StoreTestSupport.siblingRoot(
-                      id, baseline.sessionId(), baseline.rootEntryId(), "sibling-3"));
+                  siblingRoot(id, baseline.sessionId(), baseline.rootEntryId(), "sibling-3"));
               return id;
             });
     inTransaction(
@@ -926,7 +926,7 @@ public abstract class HarnessStoreWorkContract {
     for (int index = 0; index < count; index++) {
       callIds[index] = "call-" + (index + 1);
     }
-    ProviderResponse response = StoreTestSupport.assistantResponse(callIds);
+    ProviderResponse response = assistantResponse(callIds);
     return store.transaction(
         tx -> {
           UUID modelId = tx.nextId();
@@ -937,7 +937,7 @@ public abstract class HarnessStoreWorkContract {
                   userEntryId,
                   baseline.sessionId(),
                   baseline.turnStartEntryId(),
-                  StoreTestSupport.userMessagePayload(),
+                  userMessagePayload(),
                   T1));
           tx.insertEntry(
               new Entry(
