@@ -36,6 +36,9 @@ export function normalizePricingScalar(value: unknown, field: string): PricingSc
     case 'null':
       return null
     case 'string':
+      if (new TextEncoder().encode(value as string).length > 1024) {
+        throw new Error(`${field} string must not exceed 1024 UTF-8 bytes`)
+      }
       return value as string
     case 'boolean':
       return value as boolean
