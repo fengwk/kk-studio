@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.environment.tunnel.testing;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.harness.environment.tunnel.EnvironmentTunnel;
 import fun.fengwk.kkstudio.harness.environment.tunnel.TunnelExchange;
@@ -135,10 +135,6 @@ public final class FakeEnvironmentTunnel implements EnvironmentTunnel {
       throw new IllegalArgumentException("raw target must be ide/<canonical UUID>");
     }
     String rawId = target.substring(prefix.length());
-    try {
-      EnvironmentId.parse(rawId);
-    } catch (RuntimeException error) {
-      throw new IllegalArgumentException("raw target must be ide/<canonical UUID>", error);
-    }
+    Uuids.parseCanonical(rawId, "viewId");
   }
 }

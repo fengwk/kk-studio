@@ -23,7 +23,7 @@ public final class FakeTunnelStream implements TunnelStream {
   private final Object lock = new Object();
   private final Direction outbound = new Direction();
   private final Direction inbound = new Direction();
-  private boolean closed;
+  private Throwable terminalFailure;
 
   FakeTunnelStream() {}
 
@@ -63,24 +63,16 @@ public final class FakeTunnelStream implements TunnelStream {
   private void terminate(Throwable failure) {
     List<CompletableFuture<?>> pending = new ArrayList<>();
     synchronized (lock) {
-      if (closed) {
+      if (terminalFailure != null) {
         return;
       }
-      closed = true;
+      terminalFailure = failure;
       outbound.takePending(pending);
       inbound.takePending(pending);
     }
-    Throwable published = failure instanceof CancellationException ? failure : copyFailure(failure);
     for (CompletableFuture<?> future : pending) {
-      future.completeExceptionally(published);
+      future.completeExceptionally(failure);
     }
-  }
-
-  private static Throwable copyFailure(Throwable failure) {
-    if (failure instanceof IOException ioFailure) {
-      return new IOException(ioFailure.getMessage(), ioFailure);
-    }
-    return failure;
   }
 
   /** 测试中模拟 Daemon 或浏览器对端的反向端口。 */
@@ -118,6 +110,9 @@ public final class FakeTunnelStream implements TunnelStream {
       CompletableFuture<Void> finishedWrite = null;
       CompletableFuture<Void> finishedEnd = null;
       synchronized (monitor) {
+        if (terminalFailure != null) {
+          return CompletableFuture.failedFuture(terminalFailure);
+        }
         if (pendingRead != null) {
           throw new IllegalStateException("a read is already pending in this direction");
         }
@@ -191,7 +186,7 @@ public final class FakeTunnelStream implements TunnelStream {
         if (ending != null) {
           return ending;
         }
-        if (closed) {
+        if (terminalFailure != null) {
           throw new IllegalStateException("tunnel stream is closed");
         }
         completion = new CompletableFuture<>();
@@ -248,7 +243,7 @@ public final class FakeTunnelStream implements TunnelStream {
     }
 
     private void ensureWritable() {
-      if (closed) {
+      if (terminalFailure != null) {
         throw new IllegalStateException("tunnel stream is closed");
       }
       if (ended || ending != null) {

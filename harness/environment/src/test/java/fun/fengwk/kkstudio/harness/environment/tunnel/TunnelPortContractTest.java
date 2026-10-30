@@ -134,6 +134,7 @@ class TunnelPortContractTest {
     cancelled.close();
     assertThrows(CancellationException.class, () -> join(pendingRead));
     assertThrows(CancellationException.class, () -> join(pendingWrite));
+    assertThrows(CancellationException.class, () -> join(cancelled.read()));
 
     tunnels.remove(ENVIRONMENT);
     FakeEnvironmentTunnel disconnectedSession = register(tunnels, "daemon-a");
@@ -143,6 +144,7 @@ class TunnelPortContractTest {
     disconnectedSession.disconnect();
     disconnectedSession.disconnect();
     assertThrows(IOException.class, () -> join(blocked));
+    assertThrows(IOException.class, () -> join(disconnected.read()));
     assertTrue(tunnels.local(ENVIRONMENT).isEmpty());
     assertThrows(IllegalStateException.class, () -> disconnectedSession.openRaw(rawTarget()));
   }
