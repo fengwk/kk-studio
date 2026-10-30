@@ -667,11 +667,23 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
         "fixture turn did not reach quiescence");
   }
 
+  /**
+   * 真实静止：没有待处理 Work/Command，也没有 local execution 的退出确认尚未落账。
+   *
+   * <p>Model/Tool 的终态 Work 会先删除、随后退出确认才在同一事务里推进 Thread version；只看 durable_work
+   * 会把「确认前」误当静止，使测试指纹与随后迟到的 updated_at/version 变化竞争。
+   */
   private boolean quiescent(UUID threadId) {
     return count("durable_work") == 0
         && jdbc.queryForObject(
                 "select count(*) from harness_thread_command where thread_id = ?"
                     + " and applied_entry_id is null and cancelled_at is null",
+                Integer.class,
+                threadId)
+            == 0
+        && jdbc.queryForObject(
+                "select count(*) from harness_execution_exit where thread_id = ?"
+                    + " and state = 'UNCONFIRMED'",
                 Integer.class,
                 threadId)
             == 0;
