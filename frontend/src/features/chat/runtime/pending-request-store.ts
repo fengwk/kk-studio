@@ -45,16 +45,6 @@ export interface BoundPendingMessage {
   unknownOutcome: boolean
 }
 
-/**
- * 统一待决请求的可区分变体（discriminated variant）：
- * - acceptance: 未绑定目标的新建/分叉请求，由 (owner, paneId) 槽位寻址；
- * - bound_message: 既有 Thread 上的消息或目标请求，由 threadId 槽位寻址。
- * 两者代表不同的精确重放事实，禁止跨槽位混淆或重复拥有。
- */
-export type PendingRequest =
-  | ({ variant: 'acceptance' } & PendingAcceptance)
-  | ({ variant: 'bound_message' } & BoundPendingMessage)
-
 export type PendingAcceptanceSlot =
   | { status: 'empty' }
   | { status: 'occupied'; pending: PendingAcceptance }
@@ -207,7 +197,7 @@ export function savePendingAcceptance(
   owner: AgentRuntimeOwnerDTO,
   paneId: string,
   pending: PendingAcceptance,
-  storage: Pick<Storage, 'getItem' | 'setItem'> = globalThis.localStorage,
+  storage?: Pick<Storage, 'getItem' | 'setItem'>,
 ): boolean {
   const resolved = resolveStorage(storage)
   if (
@@ -239,7 +229,7 @@ export function clearPendingAcceptance(
   owner: AgentRuntimeOwnerDTO,
   paneId: string,
   expected: PendingAcceptance,
-  storage: Pick<Storage, 'getItem' | 'removeItem'> = globalThis.localStorage,
+  storage?: Pick<Storage, 'getItem' | 'removeItem'>,
 ): boolean {
   const resolved = resolveStorage(storage)
   if (resolved == null) {
@@ -325,16 +315,15 @@ export function saveBoundPendingMessage(
   const key = boundPendingStorageKey(threadId)
   const existingRaw = resolved.getItem(key)
   if (existingRaw) {
+    let existing: unknown = null
     try {
-      const existing = JSON.parse(existingRaw)
-      if (isBoundPendingMessageValue(existing)) {
-        if (!sameBatchRequestIdentity(existing.request, pending.request)) {
-          throw new Error('Conflict: another pending message exists for this thread')
-        }
-      }
-    } catch (err) {
-      if (err instanceof Error && err.message.startsWith('Conflict:')) {
-        throw err
+      existing = JSON.parse(existingRaw)
+    } catch {
+      // 坏数据忽略，允许覆盖
+    }
+    if (isBoundPendingMessageValue(existing)) {
+      if (!sameBatchRequestIdentity(existing.request, pending.request)) {
+        throw new Error('Conflict: another pending message exists for this thread')
       }
     }
   }

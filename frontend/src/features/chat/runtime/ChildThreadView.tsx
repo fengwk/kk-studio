@@ -139,8 +139,5 @@ export function ConnectedThreadView({
   )
 }
 
-/** 兼容别名：BoundThreadView 即展示组件 ThreadView */
-export const BoundThreadView = ThreadView
-
-/** 兼容别名：ChildThreadView 即连接组件 ConnectedThreadView */
+/** 连接入口组件：对外保留 ChildThreadView 明确入口 */
 export const ChildThreadView = ConnectedThreadView

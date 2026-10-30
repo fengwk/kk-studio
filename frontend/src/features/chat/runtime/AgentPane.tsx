@@ -5,8 +5,8 @@ import { Button } from '@/shared/ui/controls/Button'
 import { useI18n } from '@/shared/i18n'
 import { shouldDeferToBlockingModal } from '@/shared/ui/blocking-overlay'
 import {
-  BoundThreadView,
   ConnectedThreadView,
+  ThreadView,
 } from '@/features/chat/runtime/ChildThreadView'
 import { RootAgentPane } from '@/features/chat/runtime/RootAgentPane'
 import { ThreadNavigationContext } from '@/features/chat/runtime/thread-navigation-context'
@@ -199,10 +199,12 @@ export function AgentPane({
 
   // 各 thread layer 进入语义明确选择当前可操作环境，不从 toolarguments 猜 cwd；
   // 准确解析 EnvironmentCard.id/name/ready/HOME，查不到不能用 name 冒充 UUID。
-  const activeLayerEnvironmentName = visiblePresentation?.environmentName
-    ?? projection.thread?.branchSettings?.environmentName
-    ?? defaults?.environmentName
-    ?? null
+  // child 活跃时只能是该 child 的 presentation 环境或 null，绝不继承 root 环境；
+  // root 活跃时保持其 root 投影及默认环境配置语义。
+  const activeChildThreadId = navigation.activeThreadId
+  const activeLayerEnvironmentName = activeChildThreadId != null
+    ? visiblePresentation?.environmentName ?? null
+    : projection.thread?.branchSettings?.environmentName ?? defaults?.environmentName ?? null
 
   const matchedEnvCard = activeLayerEnvironmentName
     ? environments.find((env) => env.name === activeLayerEnvironmentName) ?? null
@@ -290,7 +292,7 @@ export function AgentPane({
               onOpenIde={handleOpenIde}
             />
           ) : (
-            <BoundThreadView
+            <ThreadView
               threadId={boundThreadId}
               projection={projection}
               environments={environments}
