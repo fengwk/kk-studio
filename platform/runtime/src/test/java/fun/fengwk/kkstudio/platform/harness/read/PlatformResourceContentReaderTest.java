@@ -13,6 +13,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.ThreadStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.storage.ReadDeadline;
 import fun.fengwk.kkstudio.platform.storage.error.StorageReadInterruptedException;
@@ -35,6 +36,7 @@ class PlatformResourceContentReaderTest {
 
   private HarnessStore store;
   private HarnessStore.Transaction transaction;
+  private ThreadStore threadStore;
   private SessionBlobRefManager refs;
   private StorageBlobManager blobManager;
   private StorageBlobContentService blobs;
@@ -44,6 +46,8 @@ class PlatformResourceContentReaderTest {
   void setUp() {
     store = mock(HarnessStore.class);
     transaction = mock(HarnessStore.Transaction.class);
+    threadStore = mock(ThreadStore.class);
+    when(transaction.threads()).thenReturn(threadStore);
     refs = mock(SessionBlobRefManager.class);
     blobManager = mock(StorageBlobManager.class);
     blobs = mock(StorageBlobContentService.class);
@@ -62,7 +66,7 @@ class PlatformResourceContentReaderTest {
     UUID id = UUID.randomUUID();
     assertThrows(PlatformReadException.class, () -> read(null, id));
     assertThrows(PlatformReadException.class, () -> read(id, null));
-    when(transaction.threads().find(id)).thenReturn(Optional.empty());
+    when(threadStore.find(id)).thenReturn(Optional.empty());
     assertTrue(
         assertThrows(PlatformReadException.class, () -> read(id, id))
             .getMessage()
@@ -233,7 +237,7 @@ class PlatformResourceContentReaderTest {
   private void authorize(UUID threadId, UUID sessionId, UUID blobId, boolean allowed) {
     ThreadState thread = mock(ThreadState.class);
     when(thread.sessionId()).thenReturn(sessionId);
-    when(transaction.threads().find(threadId)).thenReturn(Optional.of(thread));
+    when(threadStore.find(threadId)).thenReturn(Optional.of(thread));
     when(refs.contains(sessionId, blobId)).thenReturn(allowed);
   }
 

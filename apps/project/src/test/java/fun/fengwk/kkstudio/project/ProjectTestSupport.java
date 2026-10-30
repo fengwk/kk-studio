@@ -36,7 +36,11 @@ import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinOutcome;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinReceipt;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
+import fun.fengwk.kkstudio.harness.runtime.store.EntryStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.JoinStore;
+import fun.fengwk.kkstudio.harness.runtime.store.SessionStore;
+import fun.fengwk.kkstudio.harness.runtime.store.ThreadStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionFacts;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
@@ -360,7 +364,15 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
     public HarnessStore harnessStore(JdbcTemplate jdbc) {
       HarnessStore store = mock(HarnessStore.class);
       HarnessStore.Transaction transaction = mock(HarnessStore.Transaction.class);
-      when(transaction.sessions().find(any(UUID.class)))
+      SessionStore sessionStore = mock(SessionStore.class);
+      EntryStore entryStore = mock(EntryStore.class);
+      ThreadStore threadStore = mock(ThreadStore.class);
+      JoinStore joinStore = mock(JoinStore.class);
+      when(transaction.sessions()).thenReturn(sessionStore);
+      when(transaction.entries()).thenReturn(entryStore);
+      when(transaction.threads()).thenReturn(threadStore);
+      when(transaction.joins()).thenReturn(joinStore);
+      when(sessionStore.find(any(UUID.class)))
           .thenAnswer(
               invocation -> {
                 UUID sessionId = invocation.getArgument(0);
@@ -369,7 +381,7 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
                     ? Optional.of(mock(Session.class))
                     : Optional.empty();
               });
-      when(transaction.sessions().lockForUpdate(any(UUID.class)))
+      when(sessionStore.lockForUpdate(any(UUID.class)))
           .thenAnswer(
               invocation -> {
                 UUID sessionId = invocation.getArgument(0);
@@ -378,7 +390,7 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
                     ? Optional.of(mock(Session.class))
                     : Optional.empty();
               });
-      when(transaction.threads().find(any(UUID.class)))
+      when(threadStore.find(any(UUID.class)))
           .thenAnswer(
               invocation -> {
                 UUID threadId = invocation.getArgument(0);
@@ -390,7 +402,7 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
                 }
                 return Optional.of(threadState(threadId, (UUID) row.get("session_id")));
               });
-      when(transaction.threads().listBySession(any(UUID.class)))
+      when(threadStore.listBySession(any(UUID.class)))
           .thenAnswer(
               invocation -> {
                 UUID sessionId = invocation.getArgument(0);
@@ -399,7 +411,7 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
                         "select id from harness_thread where session_id = ?", sessionId);
                 return rows.stream().map(r -> threadState((UUID) r.get("id"), sessionId)).toList();
               });
-      when(transaction.threads().lock(any(UUID.class)))
+      when(threadStore.lock(any(UUID.class)))
           .thenAnswer(
               invocation -> {
                 UUID threadId = invocation.getArgument(0);
@@ -411,7 +423,7 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
                 }
                 return Optional.of(threadState(threadId, (UUID) row.get("session_id")));
               });
-      when(transaction.joins().deleteForThreads(any()))
+      when(joinStore.deleteForThreads(any()))
           .thenAnswer(
               invocation -> {
                 List<UUID> threadIds = invocation.getArgument(0);
@@ -423,7 +435,7 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
                 }
                 return deleted;
               });
-      when(transaction.threads().delete(any()))
+      when(threadStore.delete(any()))
           .thenAnswer(
               invocation -> {
                 List<UUID> threadIds = invocation.getArgument(0);
@@ -434,7 +446,7 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
                 }
                 return deleted;
               });
-      when(transaction.entries().delete(any(UUID.class)))
+      when(entryStore.delete(any(UUID.class)))
           .thenAnswer(
               invocation -> {
                 UUID sessionId = invocation.getArgument(0);
@@ -443,7 +455,7 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
                     sessionId);
                 return jdbc.update("delete from harness_entry where session_id = ?", sessionId);
               });
-      when(transaction.sessions().delete(any(UUID.class)))
+      when(sessionStore.delete(any(UUID.class)))
           .thenAnswer(
               invocation -> {
                 UUID sessionId = invocation.getArgument(0);
