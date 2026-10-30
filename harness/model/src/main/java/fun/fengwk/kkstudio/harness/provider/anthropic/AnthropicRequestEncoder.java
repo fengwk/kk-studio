@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.harness.provider.anthropic;
 
 import tools.jackson.core.JacksonException;
-import tools.jackson.core.JsonParser;
 import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
@@ -33,11 +32,12 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolResultBlock;
+import fun.fengwk.kkstudio.harness.provider.ProviderJsonHelper;
+import fun.fengwk.kkstudio.harness.provider.ProviderMediaValidator;
 import fun.fengwk.kkstudio.harness.provider.ProviderProtocolOptionsJson;
 
 import java.net.URI;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
@@ -79,10 +79,6 @@ final class AnthropicRequestEncoder {
       OBJECT_MAPPER.reader().with(JsonNodeFeature.STRIP_TRAILING_BIGDECIMAL_ZEROES);
 
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
-
-  private static final Set<String> ALLOWED_IMAGE_TYPES =
-      Set.of("image/jpeg", "image/png", "image/gif", "image/webp");
-  private static final Set<String> ALLOWED_DOCUMENT_TYPES = Set.of("application/pdf");
 
   /**
    * 运行时独占的顶层请求事实：{@code cache_control} 表示 prompt cache 的运行时所有权（标记由本编码器写入
@@ -426,14 +422,15 @@ final class AnthropicRequestEncoder {
   }
 
   private static ObjectNode encodeImageBlock(ProviderImageBlock block) {
-    if (!ALLOWED_IMAGE_TYPES.contains(block.mediaType())) {
+    if (!ProviderMediaValidator.isAllowedMediaType(
+        block.mediaType(), ProviderMediaValidator.IMAGE_MEDIA_TYPES)) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST, "unsupported image media type");
     }
     ObjectNode node = NODES.objectNode();
     node.put("type", "image");
     ObjectNode sourceNode = node.putObject("source");
-    String base64Data = extractBase64Data(block.source(), block.mediaType());
+    String base64Data = ProviderMediaValidator.extractBase64Data(block.source(), block.mediaType());
     if (base64Data != null) {
       sourceNode.put("type", "base64");
       sourceNode.put("media_type", block.mediaType());
@@ -450,11 +447,12 @@ final class AnthropicRequestEncoder {
   }
 
   private static ObjectNode encodeDocumentBlock(ProviderDocumentBlock block) {
-    if (!ALLOWED_DOCUMENT_TYPES.contains(block.mediaType())) {
+    if (!ProviderMediaValidator.isAllowedMediaType(
+        block.mediaType(), ProviderMediaValidator.DOCUMENT_MEDIA_TYPES)) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST, "unsupported document media type");
     }
-    String base64Data = extractBase64Data(block.source(), block.mediaType());
+    String base64Data = ProviderMediaValidator.extractBase64Data(block.source(), block.mediaType());
     if (base64Data == null) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST,
@@ -678,7 +676,8 @@ final class AnthropicRequestEncoder {
         durableThinking.append(pb.thinking());
       } else if (block instanceof ProviderToolCallBlock cb) {
         ProviderToolCall call = cb.toolCall();
-        parseJsonObject(call.argumentsJson(), "durable tool call arguments must be a JSON object");
+        ProviderJsonHelper.parseStrictJsonObject(
+            call.argumentsJson(), "durable tool call arguments must be a JSON object");
         durableCalls.add(call);
       } else {
         throw new ProviderException(
@@ -709,8 +708,10 @@ final class AnthropicRequestEncoder {
             "replay payload tool call id/name does not match durable content");
       }
       // 合法性边界不变：两侧参数仍按 wire 同款严格对象校验。
-      parseJsonObject(pCall.argumentsJson(), "replay tool call input must be a JSON object");
-      parseJsonObject(dCall.argumentsJson(), "durable tool call arguments must be a JSON object");
+      ProviderJsonHelper.parseStrictJsonObject(
+          pCall.argumentsJson(), "replay tool call input must be a JSON object");
+      ProviderJsonHelper.parseStrictJsonObject(
+          dCall.argumentsJson(), "durable tool call arguments must be a JSON object");
       // 语义一致性按数值 scale 无关比对（1.0 与 1.00 同值）；比较专用 reader 只读取比较树，
       // wire 仍使用 replay 原生 input，输出形态不被改写。
       if (!COMPARISON_READER
@@ -770,27 +771,13 @@ final class AnthropicRequestEncoder {
       node.put("id", call.id());
       node.put("name", call.name());
       JsonNode inputNode =
-          parseJsonObject(call.argumentsJson(), "tool_use input must be a JSON object");
+          ProviderJsonHelper.parseStrictJsonObject(
+              call.argumentsJson(), "tool_use input must be a JSON object");
       node.set("input", inputNode);
       return node;
     }
     throw new ProviderException(
         ProviderErrorKind.INVALID_REQUEST, "unsupported assistant block type");
-  }
-
-  private static JsonNode parseJsonObject(String json, String errorMessage) {
-    if (json == null || json.isBlank()) {
-      throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, errorMessage);
-    }
-    try (JsonParser parser = OBJECT_MAPPER.createParser(json)) {
-      JsonNode node = OBJECT_MAPPER.readTree(parser);
-      if (node == null || !node.isObject() || parser.nextToken() != null) {
-        throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, errorMessage);
-      }
-      return node;
-    } catch (Exception e) {
-      throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, errorMessage);
-    }
   }
 
   /**
@@ -877,27 +864,6 @@ final class AnthropicRequestEncoder {
     } catch (IllegalArgumentException exception) {
       return false;
     }
-  }
-
-  private static String extractBase64Data(String source, String expectedMediaType) {
-    if (source == null || source.isBlank()) {
-      return null;
-    }
-    String prefix = "data:" + expectedMediaType + ";base64,";
-    if (source.startsWith(prefix)) {
-      String data = source.substring(prefix.length());
-      if (!data.isBlank()) {
-        try {
-          byte[] decoded = Base64.getDecoder().decode(data);
-          if (decoded.length > 0) {
-            return data;
-          }
-        } catch (IllegalArgumentException ignored) {
-          return null;
-        }
-      }
-    }
-    return null;
   }
 
   /** 编码完成的 assistant wire 消息；{@code resetsHistory} 表示该消息的 replay 代表已摘要历史，必须省略此前的 wire messages。 */
