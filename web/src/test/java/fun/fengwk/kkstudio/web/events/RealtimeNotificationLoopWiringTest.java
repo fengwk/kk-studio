@@ -56,7 +56,7 @@ class RealtimeNotificationLoopWiringTest {
             event -> {
               throw new AssertionError("remote event must not be re-published");
             },
-            () -> false,
+            thread -> false,
             (origin, thread, payloadId) -> {
               throw new AssertionError("small event must not fetch an oversize payload");
             },
@@ -122,7 +122,7 @@ class RealtimeNotificationLoopWiringTest {
             event -> {
               throw new AssertionError("remote event must not be re-published");
             },
-            () -> false,
+            thread -> false,
             (origin, thread, payloadId) -> {
               throw new AssertionError("catchup notifications must not fetch an oversize payload");
             },

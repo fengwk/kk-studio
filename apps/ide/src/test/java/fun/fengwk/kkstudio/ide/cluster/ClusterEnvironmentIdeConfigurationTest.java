@@ -22,9 +22,12 @@ import fun.fengwk.kkstudio.ide.IdeBrowserUseGateway;
 import fun.fengwk.kkstudio.ide.IdeCommandTransport;
 import fun.fengwk.kkstudio.ide.InMemoryIdeBootstrapTicketService;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthentication;
+import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeLifecycle;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodePresence;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterPresenceConfiguration;
+import fun.fengwk.kkstudio.platform.environment.cluster.ClusterProperties;
+import fun.fengwk.kkstudio.platform.environment.cluster.RealtimeSubscriptionService;
 
 import javax.sql.DataSource;
 
@@ -49,13 +52,17 @@ class ClusterEnvironmentIdeConfigurationTest {
             context.registerBean(Clock.class, () -> Clock.systemUTC());
             context.registerBean("nodeInstanceId", UUID.class, () -> UUID.randomUUID());
             context.registerBean(ObjectMapper.class, () -> JsonMapper.builder().build());
-            context.register(ClusterEnvironmentIdeConfiguration.class);
+            context.register(
+                ClusterEnvironmentIdeConfiguration.class, ClusterPresenceConfiguration.class);
             context.refresh();
 
             assertNotNull(context.getBean(ClusterNodeRegistry.class));
             assertNotNull(context.getBean(ClusterInternalAuthentication.class));
             assertNotNull(context.getBean("clusterInternalHttpClient", HttpClient.class));
             assertNotNull(context.getBean(IdeClusterClient.class));
+            assertNotNull(context.getBean(ClusterProperties.class));
+            assertNotNull(context.getBean(ClusterNodePresence.class));
+            assertNotNull(context.getBean(RealtimeSubscriptionService.class));
             assertTrue(context.getBeansOfType(EnvironmentIdeService.class).isEmpty());
           }
         });
@@ -92,6 +99,8 @@ class ClusterEnvironmentIdeConfigurationTest {
             assertNotNull(context.getBean(ClusterInternalAuthentication.class));
             assertNotNull(context.getBean(IdeClusterClient.class));
             assertNotNull(context.getBean(ClusterNodePresence.class));
+            assertNotNull(context.getBean(RealtimeSubscriptionService.class));
+            assertNotNull(context.getBean(ClusterNodeLifecycle.class));
             assertEquals(1, context.getBeansOfType(IdeClusterClient.class).size());
           }
         });

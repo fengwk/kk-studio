@@ -1,7 +1,10 @@
 package fun.fengwk.kkstudio.web.events;
 
+import lombok.extern.slf4j.Slf4j;
+
 import fun.fengwk.kkstudio.harness.infra.realtime.RealtimeEventSource;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
+import fun.fengwk.kkstudio.platform.environment.cluster.RealtimeSubscriptionService;
 import fun.fengwk.kkstudio.web.project.ProjectInvalidationHub;
 
 import java.util.ArrayDeque;
@@ -30,6 +33,7 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p>订阅激活前（传输层尚未发出 ack 帧）到达的事件缓冲在订阅内，{@link Subscription#activate()} 后按到达顺序 投递，保证事件帧不先于 ack 帧。
  */
+@Slf4j
 final class ApplicationEventHub implements AutoCloseable {
 
   enum ResourceKind {
@@ -115,6 +119,7 @@ final class ApplicationEventHub implements AutoCloseable {
 
   private final ThreadVersionEventSource threadVersionSource;
   private final RealtimeEventSource realtimeSource;
+  private final RealtimeSubscriptionService realtimeSubscriptions;
   private final CanvasVersionEventSource canvasVersionSource;
   private final ProjectInvalidationHub projectInvalidationHub;
   private final InvalidationEventSource executionTreeChangeSource;
@@ -139,6 +144,7 @@ final class ApplicationEventHub implements AutoCloseable {
   ApplicationEventHub(
       ThreadVersionEventSource threadVersionSource,
       RealtimeEventSource realtimeSource,
+      RealtimeSubscriptionService realtimeSubscriptions,
       CanvasVersionEventSource canvasVersionSource,
       ProjectInvalidationHub projectInvalidationHub,
       InvalidationEventSource executionTreeChangeSource,
@@ -147,6 +153,8 @@ final class ApplicationEventHub implements AutoCloseable {
       int maxBufferedSignals) {
     this.threadVersionSource = Objects.requireNonNull(threadVersionSource, "threadVersionSource");
     this.realtimeSource = Objects.requireNonNull(realtimeSource, "realtimeSource");
+    this.realtimeSubscriptions =
+        Objects.requireNonNull(realtimeSubscriptions, "realtimeSubscriptions");
     this.canvasVersionSource = Objects.requireNonNull(canvasVersionSource, "canvasVersionSource");
     this.projectInvalidationHub =
         Objects.requireNonNull(projectInvalidationHub, "projectInvalidationHub");
@@ -235,6 +243,7 @@ final class ApplicationEventHub implements AutoCloseable {
           state.retired = true;
           resources.remove(state.key, state);
           closeUpstreams(state);
+          unregisterRealtimeSubscription(state);
           for (LocalSubscription subscription : state.subscribers) {
             subscription.markClosed();
           }
@@ -255,6 +264,7 @@ final class ApplicationEventHub implements AutoCloseable {
                 state.key.id(),
                 event -> fanout(state, new Signal.Realtime(event)),
                 () -> fanout(state, new Signal.Resync()));
+        registerRealtimeSubscription(state);
         state.cursor = version.cursor();
       }
       case CANVAS -> {
@@ -367,7 +377,47 @@ final class ApplicationEventHub implements AutoCloseable {
         // 先移除 map entry 再关闭上游：并发 subscribe 只能取得全新状态，不会复用正在退役的旧状态。
         resources.remove(subscription.resource, state);
         closeUpstreams(state);
+        unregisterRealtimeSubscription(state);
       }
+    }
+  }
+
+  /** 首个 Thread 订阅建立时登记跨节点订阅。登记失败只影响跨节点投递：记录安全错误并向该 Thread 缓冲一次 resync，本机上游保持建立。 */
+  private void registerRealtimeSubscription(ResourceState state) {
+    UUID threadId = state.key.id();
+    try {
+      realtimeSubscriptions.register(threadId, () -> resyncThread(threadId));
+    } catch (RuntimeException error) {
+      log.warn(
+          "cannot register realtime subscription; local delivery continues threadId={}"
+              + " errorType={}",
+          threadId,
+          error.getClass().getSimpleName());
+      fanout(state, new Signal.Resync());
+    }
+  }
+
+  /** 末个 Thread 订阅释放或 Hub close 时注销登记；注销失败只影响远端租约清理，不阻断本地释放。 */
+  private void unregisterRealtimeSubscription(ResourceState state) {
+    if (state.key.kind() != ResourceKind.THREAD) {
+      return;
+    }
+    try {
+      realtimeSubscriptions.unregister(state.key.id());
+    } catch (RuntimeException error) {
+      log.warn(
+          "cannot release realtime subscription; relying on lease expiry threadId={}"
+              + " errorType={}",
+          state.key.id(),
+          error.getClass().getSimpleName());
+    }
+  }
+
+  /** 服务续租失败/恢复时的锁外回调：只向当前仍存活的 Thread 状态投递 resync。 */
+  private void resyncThread(UUID threadId) {
+    ResourceState state = resources.get(new ResourceKey(ResourceKind.THREAD, threadId));
+    if (state != null) {
+      fanout(state, new Signal.Resync());
     }
   }
 
