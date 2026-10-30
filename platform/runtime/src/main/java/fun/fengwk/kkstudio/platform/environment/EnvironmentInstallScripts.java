@@ -1,0 +1,131 @@
+package fun.fengwk.kkstudio.platform.environment;
+
+import com.fasterxml.jackson.annotation.JsonInclude;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+
+import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.share.ai.environment.DaemonConfiguration;
+import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallConfigDTO;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
+import java.util.Set;
+
+/** 把已保存的安装设置渲染成可下载执行的安装或卸载脚本。 */
+public final class EnvironmentInstallScripts {
+  static final String INSTALLER_BASE =
+      "https://raw.githubusercontent.com/fengwk/kk-studio/main/scripts/daemon";
+
+  private static final ObjectMapper JSON =
+      JsonMapper.builder()
+          .changeDefaultPropertyInclusion(
+              inclusion -> inclusion.withValueInclusion(JsonInclude.Include.ALWAYS))
+          .build();
+  private static final String UNIX = load("environment-install-unix.sh");
+  private static final String WINDOWS = load("environment-install-windows.ps1");
+
+  private EnvironmentInstallScripts() {}
+
+  public static String install(EnvironmentInstallConfigDTO config, String registrationToken) {
+    EnvironmentInstallConfigDTO normalized = EnvironmentInstallConfigs.validate(config);
+    text(registrationToken, "registrationToken");
+    boolean windows = "windows".equals(normalized.getOperatingSystem());
+    return render(windows, "install", daemonJson(normalized.getDaemon()), registrationToken);
+  }
+
+  public static String uninstall(String operatingSystem) {
+    if (!Set.of("linux", "macos", "windows").contains(operatingSystem)) {
+      throw new AiValidationException(
+          "operatingSystem", "operatingSystem must be linux, macos or windows");
+    }
+    return render("windows".equals(operatingSystem), "uninstall", "", "");
+  }
+
+  private static String render(boolean windows, String action, String daemonJson, String token) {
+    String template = windows ? WINDOWS : UNIX;
+    String parameters = "";
+    if (!daemonJson.isEmpty()) {
+      parameters =
+          windows
+              ? " -ConfigFile $config -TokenFile $token"
+              : " --config-file \"$stage/daemon.json\" --token-file \"$stage/daemon.token\"";
+    }
+    String staging =
+        daemonJson.isEmpty()
+            ? ""
+            : (windows ? windowsStaging(daemonJson, token) : unixStaging(daemonJson, token));
+    String installer =
+        windows ? ps(INSTALLER_BASE + "/install.ps1") : sh(INSTALLER_BASE + "/install.sh");
+    return template.formatted(staging, installer, action, parameters);
+  }
+
+  private static String unixStaging(String daemonJson, String token) {
+    return """
+        builtin printf '%%s' %s > "$stage/daemon.json"
+        builtin printf '%%s' %s > "$stage/daemon.token"
+        chmod 600 "$stage/daemon.json" "$stage/daemon.token"
+        """
+        .formatted(sh(daemonJson), sh(token));
+  }
+
+  private static String windowsStaging(String daemonJson, String token) {
+    return """
+          $config = Join-Path $stage 'daemon.json'
+          $token = Join-Path $stage 'daemon.token'
+          foreach ($path in @($config, $token)) {
+            $stream = [IO.File]::Open($path, [IO.FileMode]::CreateNew)
+            $stream.Dispose()
+            Set-KkPrivateAcl -Path $path
+          }
+          $utf8 = New-Object Text.UTF8Encoding($false)
+          [IO.File]::WriteAllText($config, %s, $utf8)
+          [IO.File]::WriteAllText($token, %s, $utf8)
+        """
+        .formatted(ps(daemonJson), ps(token));
+  }
+
+  private static String daemonJson(DaemonConfiguration daemon) {
+    try {
+      return JSON.writeValueAsString(daemon);
+    } catch (JacksonException error) {
+      throw new IllegalStateException("cannot serialize daemon configuration", error);
+    }
+  }
+
+  /** POSIX 单引号：内部单引号结束当前字面量、插入转义单引号后再继续。 */
+  static String sh(String value) {
+    return "'" + value.replace("'", "'\\''") + "'";
+  }
+
+  /** PowerShell 单引号字符串：内部单引号写成两个单引号。 */
+  static String ps(String value) {
+    return "'" + value.replace("'", "''") + "'";
+  }
+
+  private static void text(String value, String field) {
+    if (value == null
+        || value.isBlank()
+        || value.codePoints().anyMatch(Character::isISOControl)
+        || value.indexOf('\u2028') >= 0
+        || value.indexOf('\u2029') >= 0) {
+      throw new AiValidationException(field, field + " must be text without control characters");
+    }
+  }
+
+  private static String load(String name) {
+    try (InputStream input =
+        EnvironmentInstallScripts.class.getResourceAsStream(
+            "/fun/fengwk/kkstudio/platform/environment/service/" + name)) {
+      if (input == null) {
+        throw new IllegalStateException("missing install command template " + name);
+      }
+      return new String(input.readAllBytes(), StandardCharsets.UTF_8).strip() + "\n";
+    } catch (IOException error) {
+      throw new UncheckedIOException(error);
+    }
+  }
+}

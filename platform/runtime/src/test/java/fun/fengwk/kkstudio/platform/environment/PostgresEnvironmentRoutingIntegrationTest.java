@@ -5,12 +5,15 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.NoSuchBeanDefinitionException;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
@@ -37,10 +40,7 @@ import fun.fengwk.kkstudio.harness.environment.server.EnvironmentSessionListener
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
-import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
-import fun.fengwk.kkstudio.platform.environment.repo.impl.PostgresqlEnvironmentChangeNotifier;
 import fun.fengwk.kkstudio.platform.environment.server.EnvironmentServerConfiguration;
-import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
@@ -124,9 +124,9 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
         new SingleConnectionDataSource(
             POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword(), true);
     this.jdbcTemplate = new JdbcTemplate(ds);
+    JdbcClient jdbcClient = JdbcClient.create(ds);
     DataSourceTransactionManager transactionManager = new DataSourceTransactionManager(ds);
-    PostgresqlEnvironmentChangeNotifier notifier =
-        new PostgresqlEnvironmentChangeNotifier(jdbcTemplate);
+    EnvironmentChangeNotifier notifier = new EnvironmentChangeNotifier(jdbcClient);
 
     // 播种稳定 environment 卡片
     jdbcTemplate.update(
@@ -134,109 +134,22 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
         DEV.value(),
         REGISTRATION_TOKEN);
 
-    this.environmentRepository =
-        new EnvironmentRepository() {
-          @Override
-          public List<Environment> listNewestFirst() {
-            throw new UnsupportedOperationException();
-          }
-
-          @Override
-          public List<Environment> listAll() {
-            throw new UnsupportedOperationException();
-          }
-
-          @Override
-          public Environment getById(UUID id) {
-            List<Environment> list =
-                jdbcTemplate.query(
-                    "select id, name, registration_token_hash, version, created_at as create_time, updated_at as update_time from environment where id = ?",
-                    (rs, rowNum) -> {
-                      Environment e = new Environment();
-                      e.setId((UUID) rs.getObject("id"));
-                      e.setName(rs.getString("name"));
-                      e.setRegistrationTokenHash(rs.getString("registration_token_hash"));
-                      e.setVersion(rs.getLong("version"));
-                      return e;
-                    },
-                    id);
-            return list.isEmpty() ? null : list.get(0);
-          }
-
-          @Override
-          public Environment getByName(String name) {
-            throw new UnsupportedOperationException();
-          }
-
-          @Override
-          public Environment getByRegistrationTokenHash(String tokenHash) {
-            List<Environment> list =
-                jdbcTemplate.query(
-                    "select id, name, registration_token_hash, version, created_at as create_time, updated_at as update_time from environment where registration_token_hash = ?",
-                    (rs, rowNum) -> {
-                      Environment e = new Environment();
-                      e.setId((UUID) rs.getObject("id"));
-                      e.setName(rs.getString("name"));
-                      e.setRegistrationTokenHash(rs.getString("registration_token_hash"));
-                      e.setVersion(rs.getLong("version"));
-                      return e;
-                    },
-                    tokenHash);
-            return list.isEmpty() ? null : list.get(0);
-          }
-
-          @Override
-          public Environment lockById(UUID id) {
-            return getById(id);
-          }
-
-          @Override
-          public Environment lockForKeyShare(UUID id) {
-            return getById(id);
-          }
-
-          @Override
-          public boolean existsByName(String name) {
-            return false;
-          }
-
-          @Override
-          public boolean create(Environment environment) {
-            return false;
-          }
-
-          @Override
-          public boolean updateById(Environment environment, long expectedVersion) {
-            return false;
-          }
-
-          @Override
-          public boolean deleteById(UUID id, long expectedVersion) {
-            return false;
-          }
-
-          @Override
-          public boolean saveInstallCode(
-              UUID id, long expectedVersion, String codeHash, Instant expiresAt) {
-            throw new UnsupportedOperationException();
-          }
-
-          @Override
-          public boolean redeemInstallCode(
-              UUID id, long expectedVersion, String codeHash, String registrationTokenHash) {
-            throw new UnsupportedOperationException();
-          }
-        };
+    this.environmentRepository = mock(EnvironmentRepository.class);
+    Environment registered = new Environment();
+    registered.setId(DEV.value());
+    registered.setName("dev-env");
+    registered.setRegistrationTokenHash(RegistrationTokens.hash(REGISTRATION_TOKEN));
+    when(environmentRepository.getByRegistrationTokenHash(
+            RegistrationTokens.hash(REGISTRATION_TOKEN)))
+        .thenReturn(registered);
 
     this.node1 = UUID.randomUUID();
     this.node2 = UUID.randomUUID();
 
     this.registryNode1 =
-        new EnvironmentRegistry(
-            jdbcTemplate, node1, Clock.systemUTC(), transactionManager, notifier);
+        new EnvironmentRegistry(jdbcClient, node1, Clock.systemUTC(), transactionManager, notifier);
     this.registryNode2 =
-        new EnvironmentRegistry(
-            jdbcTemplate, node2, Clock.systemUTC(), transactionManager, notifier);
+        new EnvironmentRegistry(jdbcClient, node2, Clock.systemUTC(), transactionManager, notifier);
 
     SystemSettingsSnapshot snapshot = new SystemSettingsSnapshot(SystemSettings.DEFAULT);
     EnvironmentSessionListener sessionListener = env -> {};

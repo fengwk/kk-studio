@@ -7,8 +7,8 @@ import org.springframework.transaction.annotation.Transactional;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.platform.chat.repo.ChatRepository;
-import fun.fengwk.kkstudio.platform.chat.repo.ChatSessionRepository;
+import fun.fengwk.kkstudio.platform.chat.ChatRepository;
+import fun.fengwk.kkstudio.platform.chat.ChatSessionRepository;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 
 import java.util.ArrayList;

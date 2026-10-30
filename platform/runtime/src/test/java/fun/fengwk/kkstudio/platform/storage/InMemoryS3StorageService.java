@@ -1,11 +1,16 @@
 package fun.fengwk.kkstudio.platform.storage;
 
+import static org.mockito.Mockito.mock;
+
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import software.amazon.awssdk.core.ResponseInputStream;
 import software.amazon.awssdk.http.AbortableInputStream;
+import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.PutObjectResponse;
+
+import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -26,7 +31,12 @@ import java.util.function.Consumer;
  *
  * @author fengwk
  */
-public class InMemoryS3StorageService implements S3StorageService {
+public class InMemoryS3StorageService extends S3StorageService {
+
+  public InMemoryS3StorageService() {
+    // 所有受测方法都被本假件覆盖；超类只要求有效的部署连接与客户端引用。
+    super(new S3StorageProperties(), mock(S3Client.class));
+  }
 
   private final Map<String, byte[]> objects = new ConcurrentHashMap<>();
   private final Map<String, String> contentTypes = new ConcurrentHashMap<>();

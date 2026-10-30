@@ -25,8 +25,8 @@ import fun.fengwk.kkstudio.platform.harness.read.PlatformReadException;
 import fun.fengwk.kkstudio.platform.harness.read.ReadTextWindow;
 import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
 import fun.fengwk.kkstudio.platform.storage.error.StorageReadTimeoutException;
+import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
-import fun.fengwk.kkstudio.platform.storage.service.impl.StorageBlobContentServiceImpl;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 
 import java.io.IOException;
@@ -100,7 +100,7 @@ class S3StorageDeadlineIntegrationTest {
             exchange.close();
           }
         });
-    S3StorageServiceImpl storageService = newStorageService();
+    S3StorageService storageService = newStorageService();
 
     // SDK 层：apiCallTimeout 覆盖响应头握手，阻塞的手握会被 SDK 中止（异常类型由 SDK 决定）。
     long startedAt = System.nanoTime();
@@ -159,11 +159,11 @@ class S3StorageDeadlineIntegrationTest {
             releaseHandler.countDown();
           }
         });
-    S3StorageServiceImpl storageService = newStorageService();
+    S3StorageService storageService = newStorageService();
 
     UUID blobId = UUID.randomUUID();
     StorageBlobManager blobManager = mock(StorageBlobManager.class);
-    StorageBlobContentServiceImpl contentService =
+    StorageBlobContentService contentService =
         newContentService(storageService, blobId, blobManager);
 
     long startedAt = System.nanoTime();
@@ -211,10 +211,10 @@ class S3StorageDeadlineIntegrationTest {
             exchange.close();
           }
         });
-    S3StorageServiceImpl storageService = newStorageService();
+    S3StorageService storageService = newStorageService();
     UUID blobId = UUID.randomUUID();
     StorageBlobManager blobManager = mock(StorageBlobManager.class);
-    StorageBlobContentServiceImpl contentService =
+    StorageBlobContentService contentService =
         newContentService(storageService, blobId, blobManager);
 
     PlatformReadException failure =
@@ -228,19 +228,19 @@ class S3StorageDeadlineIntegrationTest {
     verify(blobManager).release(blobId);
   }
 
-  private static StorageBlobContentServiceImpl newContentService(
-      S3StorageServiceImpl storageService, UUID blobId, StorageBlobManager blobManager) {
+  private static StorageBlobContentService newContentService(
+      S3StorageService storageService, UUID blobId, StorageBlobManager blobManager) {
     StorageBlob blob = new StorageBlob();
     blob.setId(blobId);
     when(blobManager.retain(blobId)).thenReturn(blob);
     when(blobManager.release(blobId)).thenReturn(true);
     PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
     when(transactionManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
-    return new StorageBlobContentServiceImpl(blobManager, storageService, transactionManager);
+    return new StorageBlobContentService(blobManager, storageService, transactionManager);
   }
 
   /** 走受管资源文本读取的完整边界：读取预算在入口冻结，超时由读取边界翻译。 */
-  private static void readResourceText(StorageBlobContentServiceImpl contentService, UUID blobId) {
+  private static void readResourceText(StorageBlobContentService contentService, UUID blobId) {
     ReadDeadline deadline = ReadDeadline.after(Duration.ofSeconds(1L));
     contentService.withBlobStream(
         blobId,
@@ -286,7 +286,7 @@ class S3StorageDeadlineIntegrationTest {
     server.start();
   }
 
-  private S3StorageServiceImpl newStorageService() {
+  private S3StorageService newStorageService() {
     String endpoint = "http://127.0.0.1:" + server.getAddress().getPort();
     S3StorageProperties properties = new S3StorageProperties();
     properties.setEndpoint(endpoint);
@@ -304,6 +304,6 @@ class S3StorageDeadlineIntegrationTest {
             .serviceConfiguration(S3Configuration.builder().pathStyleAccessEnabled(true).build())
             .httpClientBuilder(ApacheHttpClient.builder().socketTimeout(Duration.ofSeconds(5L)))
             .build();
-    return new S3StorageServiceImpl(properties, s3Client);
+    return new S3StorageService(properties, s3Client);
   }
 }

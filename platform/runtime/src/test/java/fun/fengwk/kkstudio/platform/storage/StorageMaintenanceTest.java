@@ -10,10 +10,21 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.transaction.PlatformTransactionManager;
 
+import fun.fengwk.kkstudio.platform.settings.SystemSettings;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
+import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
 import fun.fengwk.kkstudio.platform.storage.configuration.StorageMaintenanceProperties;
+import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
+import fun.fengwk.kkstudio.platform.storage.persistence.StorageObjectCleanupRepository;
+import fun.fengwk.kkstudio.platform.storage.persistence.StorageUploadRepository;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
+import fun.fengwk.kkstudio.platform.storage.service.StorageBlobPreviewService;
+import fun.fengwk.kkstudio.platform.storage.service.StorageMediaProbe;
 import fun.fengwk.kkstudio.platform.storage.service.StorageObjectCleanupService;
+import fun.fengwk.kkstudio.platform.storage.service.StorageUploadOperationLock;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.share.storage.StoragePresignedUrlDTO;
@@ -22,6 +33,7 @@ import fun.fengwk.kkstudio.share.storage.StorageUploadReserveRequestDTO;
 
 import java.io.InputStream;
 import java.lang.reflect.Field;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.List;
@@ -350,12 +362,34 @@ class StorageMaintenanceTest {
     field.set(maintenance, executor);
   }
 
-  private static class CountingUploadService implements StorageUploadService {
+  @SuppressWarnings("unchecked")
+  private static ObjectProvider<StorageMaintenanceWakeup> wakeups() {
+    return mock(ObjectProvider.class);
+  }
+
+  private static class CountingUploadService extends StorageUploadService {
 
     protected final AtomicInteger calls = new AtomicInteger();
     private final CountDownLatch latch;
 
     private CountingUploadService(int expectedCalls) {
+      // 仅覆盖 expireOnce；其余方法不会被本测试触达，超类依赖用替身满足非空构造契约。
+      super(
+          mock(StorageUploadRepository.class),
+          mock(StorageBlobRepository.class),
+          mock(StorageBlobManager.class),
+          mock(S3StorageService.class),
+          mock(S3PresignService.class),
+          mock(StorageMediaProbe.class),
+          mock(StorageBlobPreviewService.class),
+          mock(StorageObjectCleanupService.class),
+          mock(StorageUploadOperationLock.class),
+          wakeups(),
+          new S3StorageProperties(),
+          new SystemSettingsSnapshot(SystemSettings.DEFAULT),
+          new StorageMaintenanceProperties(),
+          Clock.systemUTC(),
+          mock(PlatformTransactionManager.class));
       this.latch = new CountDownLatch(expectedCalls);
     }
 
@@ -428,11 +462,19 @@ class StorageMaintenanceTest {
     }
   }
 
-  private static final class CountingBlobManager implements StorageBlobManager {
+  private static final class CountingBlobManager extends StorageBlobManager {
 
     private final CountDownLatch latch;
 
     private CountingBlobManager(int expectedCalls) {
+      // 仅覆盖 sweepDeleting；超类依赖用替身满足非空构造契约。
+      super(
+          mock(StorageBlobRepository.class),
+          mock(S3StorageService.class),
+          mock(S3PresignService.class),
+          wakeups(),
+          mock(StorageObjectCleanupService.class),
+          mock(PlatformTransactionManager.class));
       this.latch = new CountDownLatch(expectedCalls);
     }
 
@@ -472,11 +514,16 @@ class StorageMaintenanceTest {
     }
   }
 
-  private static final class CountingObjectCleanupService implements StorageObjectCleanupService {
+  private static final class CountingObjectCleanupService extends StorageObjectCleanupService {
 
     private final CountDownLatch latch;
 
     private CountingObjectCleanupService(int expectedCalls) {
+      // 仅覆盖 sweepOnce；超类依赖用替身满足非空构造契约。
+      super(
+          mock(StorageObjectCleanupRepository.class),
+          mock(S3StorageService.class),
+          new StorageMaintenanceProperties());
       this.latch = new CountDownLatch(expectedCalls);
     }
 

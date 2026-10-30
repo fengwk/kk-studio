@@ -2,8 +2,8 @@ package fun.fengwk.kkstudio.platform.environment.registry;
 
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.dao.DataAccessException;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -13,8 +13,8 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilitiesCodec;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonLeaseStore;
 import fun.fengwk.kkstudio.harness.environment.server.LeaseBindResult;
+import fun.fengwk.kkstudio.platform.environment.EnvironmentChangeNotifier;
 import fun.fengwk.kkstudio.platform.environment.RegistrationTokens;
-import fun.fengwk.kkstudio.platform.environment.repo.impl.PostgresqlEnvironmentChangeNotifier;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -51,9 +51,9 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
   private static final String TRY_ACQUIRE_SQL =
       """
       with locked_env as (
-          select id, (registration_token_hash = ?) as token_valid
+          select id, (registration_token_hash = :tokenHash) as token_valid
           from environment
-          where id = ?
+          where id = :environmentId
           for update
       ),
       tried_upsert as (
@@ -62,8 +62,8 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
               status, runtime_info, recent_events, last_seen_at, lease_until
           )
           select
-              id, ?, ?,
-              'CONNECTING', null, jsonb_build_array(?::jsonb), statement_timestamp(), statement_timestamp() + (? * interval '1 millisecond')
+              id, :ownerNodeId, :leaseToken,
+              'CONNECTING', null, jsonb_build_array(:connectingEvent::jsonb), statement_timestamp(), statement_timestamp() + (:leaseMillis * interval '1 millisecond')
           from locked_env
           where token_valid = true
           on conflict (environment_id) do update
@@ -71,12 +71,12 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
               lease_token = excluded.lease_token,
               status = 'CONNECTING',
               recent_events = case
-                  when jsonb_array_length(environment_connection.recent_events) >= ?
+                  when jsonb_array_length(environment_connection.recent_events) >= :maxRecentEvents
                       then (environment_connection.recent_events - 0) || excluded.recent_events
                       else environment_connection.recent_events || excluded.recent_events
                   end,
               last_seen_at = statement_timestamp(),
-              lease_until = statement_timestamp() + (? * interval '1 millisecond')
+              lease_until = statement_timestamp() + (:leaseMillis * interval '1 millisecond')
           where environment_connection.lease_until <= statement_timestamp()
              or (environment_connection.status = 'CONNECTING' and environment_connection.owner_node_id = excluded.owner_node_id)
           returning environment_connection.lease_token, true as acquired
@@ -104,18 +104,18 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
       """
       update environment_connection
       set status = 'READY',
-          runtime_info = ?::jsonb,
+          runtime_info = :runtimeInfo::jsonb,
           skill_state = '[]'::jsonb,
           recent_events = case
-              when jsonb_array_length(recent_events) >= ?
-                  then (recent_events - 0) || ?::jsonb
-                  else recent_events || ?::jsonb
+              when jsonb_array_length(recent_events) >= :maxRecentEvents
+                  then (recent_events - 0) || :readyEvent::jsonb
+                  else recent_events || :readyEvent::jsonb
               end,
           last_seen_at = statement_timestamp(),
-          lease_until = statement_timestamp() + (? * interval '1 millisecond')
-      where environment_id = ?
-        and owner_node_id = ?
-        and lease_token = ?
+          lease_until = statement_timestamp() + (:leaseMillis * interval '1 millisecond')
+      where environment_id = :environmentId
+        and owner_node_id = :ownerNodeId
+        and lease_token = :leaseToken
         and lease_until > statement_timestamp()
       """;
 
@@ -123,10 +123,10 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
       """
       update environment_connection
       set last_seen_at = statement_timestamp(),
-          lease_until = statement_timestamp() + (? * interval '1 millisecond')
-      where environment_id = ?
-        and owner_node_id = ?
-        and lease_token = ?
+          lease_until = statement_timestamp() + (:leaseMillis * interval '1 millisecond')
+      where environment_id = :environmentId
+        and owner_node_id = :ownerNodeId
+        and lease_token = :leaseToken
         and lease_until > statement_timestamp()
       """;
 
@@ -135,15 +135,15 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
       update environment_connection
       set status = 'CONNECTING',
           recent_events = case
-              when jsonb_array_length(recent_events) >= ?
-                  then (recent_events - 0) || ?::jsonb
-                  else recent_events || ?::jsonb
+              when jsonb_array_length(recent_events) >= :maxRecentEvents
+                  then (recent_events - 0) || :disconnectedEvent::jsonb
+                  else recent_events || :disconnectedEvent::jsonb
               end,
           last_seen_at = statement_timestamp(),
-          lease_until = statement_timestamp() + (? * interval '1 millisecond')
-      where environment_id = ?
-        and owner_node_id = ?
-        and lease_token = ?
+          lease_until = statement_timestamp() + (:leaseMillis * interval '1 millisecond')
+      where environment_id = :environmentId
+        and owner_node_id = :ownerNodeId
+        and lease_token = :leaseToken
         and lease_until > statement_timestamp()
       """;
 
@@ -152,14 +152,14 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
       select environment_id, owner_node_id, lease_token,
              status, runtime_info, skill_state, recent_events, last_seen_at, lease_until
       from environment_connection
-      where environment_id = ?
+      where environment_id = :environmentId
       """;
 
   private static final String HAS_ACTIVE_LEASE_SQL =
       """
       select exists (
           select 1 from environment_connection
-          where environment_id = ?
+          where environment_id = :environmentId
             and lease_until > statement_timestamp()
       )
       """;
@@ -168,9 +168,9 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
       """
       select exists (
           select 1 from environment_connection
-          where environment_id = ?
-            and owner_node_id = ?
-            and lease_token = ?
+          where environment_id = :environmentId
+            and owner_node_id = :ownerNodeId
+            and lease_token = :leaseToken
             and status = 'READY'
             and lease_until > statement_timestamp()
       )
@@ -180,7 +180,7 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
       """
       select exists (
           select 1 from environment_connection
-          where environment_id = ?
+          where environment_id = :environmentId
             and status = 'READY'
             and lease_until > statement_timestamp()
       )
@@ -190,9 +190,9 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
       """
       select exists (
           select 1 from environment_connection
-          where environment_id = ?
-            and owner_node_id = ?
-            and lease_token = ?
+          where environment_id = :environmentId
+            and owner_node_id = :ownerNodeId
+            and lease_token = :leaseToken
             and lease_until > statement_timestamp()
       )
       """;
@@ -211,7 +211,7 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
       select environment_id, owner_node_id, lease_token,
              status, runtime_info, skill_state, recent_events, last_seen_at, lease_until
       from environment_connection
-      where owner_node_id = ?
+      where owner_node_id = :ownerNodeId
         and status = 'READY'
         and lease_until > statement_timestamp()
       order by environment_id asc
@@ -222,13 +222,13 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
       """
       update environment_connection
       set recent_events = case
-              when jsonb_array_length(recent_events) >= ?
-                  then (recent_events - 0) || ?::jsonb
-                  else recent_events || ?::jsonb
+              when jsonb_array_length(recent_events) >= :maxRecentEvents
+                  then (recent_events - 0) || :event::jsonb
+                  else recent_events || :event::jsonb
               end
-      where environment_id = ?
-        and owner_node_id = ?
-        and lease_token = ?
+      where environment_id = :environmentId
+        and owner_node_id = :ownerNodeId
+        and lease_token = :leaseToken
         and status = 'READY'
         and lease_until > statement_timestamp()
       """;
@@ -237,34 +237,34 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
   private static final String REPLACE_SKILL_STATE_SQL =
       """
       update environment_connection
-      set skill_state = ?::jsonb,
+      set skill_state = :skillState::jsonb,
           recent_events = case
-              when jsonb_array_length(recent_events) >= ?
-                  then (recent_events - 0) || ?::jsonb
-                  else recent_events || ?::jsonb
+              when jsonb_array_length(recent_events) >= :maxRecentEvents
+                  then (recent_events - 0) || :event::jsonb
+                  else recent_events || :event::jsonb
               end
-      where environment_id = ?
-        and owner_node_id = ?
-        and lease_token = ?
+      where environment_id = :environmentId
+        and owner_node_id = :ownerNodeId
+        and lease_token = :leaseToken
         and status = 'READY'
         and lease_until > statement_timestamp()
       """;
 
-  private final JdbcTemplate jdbcTemplate;
+  private final JdbcClient jdbcClient;
   private final UUID ownerNodeId;
   private final Clock clock;
   private final TransactionTemplate transactionTemplate;
-  private final PostgresqlEnvironmentChangeNotifier notifier;
+  private final EnvironmentChangeNotifier notifier;
   private final DaemonCapabilitiesCodec capabilitiesCodec = new DaemonCapabilitiesCodec();
   private final EnvironmentStateCodec stateCodec = new EnvironmentStateCodec();
 
   public EnvironmentRegistry(
-      JdbcTemplate jdbcTemplate,
+      JdbcClient jdbcClient,
       @Qualifier("nodeInstanceId") UUID ownerNodeId,
       Clock clock,
       PlatformTransactionManager transactionManager,
-      PostgresqlEnvironmentChangeNotifier notifier) {
-    this.jdbcTemplate = Objects.requireNonNull(jdbcTemplate, "jdbcTemplate");
+      EnvironmentChangeNotifier notifier) {
+    this.jdbcClient = Objects.requireNonNull(jdbcClient, "jdbcClient");
     this.ownerNodeId = Objects.requireNonNull(ownerNodeId, "ownerNodeId");
     this.clock = Objects.requireNonNull(clock, "clock");
     this.transactionTemplate =
@@ -324,21 +324,22 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
         transactionTemplate.execute(
             status -> {
               List<AcquireRow> rows =
-                  jdbcTemplate.query(
-                      TRY_ACQUIRE_SQL,
-                      (rs, rowNum) ->
-                          new AcquireRow(
-                              (UUID) rs.getObject("lease_token"),
-                              rs.getBoolean("acquired"),
-                              rs.getString("result_type")),
-                      RegistrationTokens.hash(registrationToken),
-                      environmentId.value(),
-                      ownerNodeId,
-                      newLeaseToken,
-                      connectingEvent,
-                      millis,
-                      EnvironmentConnection.MAX_RECENT_EVENTS,
-                      millis);
+                  jdbcClient
+                      .sql(TRY_ACQUIRE_SQL)
+                      .param("tokenHash", RegistrationTokens.hash(registrationToken))
+                      .param("environmentId", environmentId.value())
+                      .param("ownerNodeId", ownerNodeId)
+                      .param("leaseToken", newLeaseToken)
+                      .param("connectingEvent", connectingEvent)
+                      .param("leaseMillis", millis)
+                      .param("maxRecentEvents", EnvironmentConnection.MAX_RECENT_EVENTS)
+                      .query(
+                          (rs, rowNum) ->
+                              new AcquireRow(
+                                  (UUID) rs.getObject("lease_token"),
+                                  rs.getBoolean("acquired"),
+                                  rs.getString("result_type")))
+                      .list();
               if (rows.isEmpty()) {
                 return Optional.<AcquireRow>empty();
               }
@@ -390,16 +391,16 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
     return fencedWrite(
         environmentId,
         () ->
-            jdbcTemplate.update(
-                MARK_READY_SQL,
-                runtimeInfoJson,
-                EnvironmentConnection.MAX_RECENT_EVENTS,
-                readyEvent,
-                readyEvent,
-                leaseDuration.toMillis(),
-                environmentId.value(),
-                ownerNodeId,
-                leaseToken));
+            jdbcClient
+                .sql(MARK_READY_SQL)
+                .param("runtimeInfo", runtimeInfoJson)
+                .param("maxRecentEvents", EnvironmentConnection.MAX_RECENT_EVENTS)
+                .param("readyEvent", readyEvent)
+                .param("leaseMillis", leaseDuration.toMillis())
+                .param("environmentId", environmentId.value())
+                .param("ownerNodeId", ownerNodeId)
+                .param("leaseToken", leaseToken)
+                .update());
   }
 
   /**
@@ -415,12 +416,13 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
     return fencedWrite(
         environmentId,
         () ->
-            jdbcTemplate.update(
-                HEARTBEAT_SQL,
-                leaseDuration.toMillis(),
-                environmentId.value(),
-                ownerNodeId,
-                leaseToken));
+            jdbcClient
+                .sql(HEARTBEAT_SQL)
+                .param("leaseMillis", leaseDuration.toMillis())
+                .param("environmentId", environmentId.value())
+                .param("ownerNodeId", ownerNodeId)
+                .param("leaseToken", leaseToken)
+                .update());
   }
 
   /**
@@ -445,15 +447,15 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
       return fencedWrite(
           environmentId,
           () ->
-              jdbcTemplate.update(
-                  DISCONNECT_SQL,
-                  EnvironmentConnection.MAX_RECENT_EVENTS,
-                  disconnectedEvent,
-                  disconnectedEvent,
-                  graceDuration.toMillis(),
-                  environmentId.value(),
-                  ownerNodeId,
-                  leaseToken));
+              jdbcClient
+                  .sql(DISCONNECT_SQL)
+                  .param("maxRecentEvents", EnvironmentConnection.MAX_RECENT_EVENTS)
+                  .param("disconnectedEvent", disconnectedEvent)
+                  .param("leaseMillis", graceDuration.toMillis())
+                  .param("environmentId", environmentId.value())
+                  .param("ownerNodeId", ownerNodeId)
+                  .param("leaseToken", leaseToken)
+                  .update());
     } catch (DataAccessException ignored) {
       // 捕获在事务边界之外：失败时围栏写已随短事务回滚，绝不留下「租约已提交、通知失败」的中间态。
       return false;
@@ -466,13 +468,17 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
       return Optional.empty();
     }
     List<EnvironmentConnection> results =
-        jdbcTemplate.query(FIND_SQL, new EnvironmentConnectionRowMapper(), environmentId.value());
+        jdbcClient
+            .sql(FIND_SQL)
+            .param("environmentId", environmentId.value())
+            .query(new EnvironmentConnectionRowMapper())
+            .list();
     return results.isEmpty() ? Optional.empty() : Optional.of(results.get(0));
   }
 
   /** 查询当前数据库中所有活跃环境的路由快照列表。 */
   public List<EnvironmentConnection> list() {
-    return jdbcTemplate.query(LIST_SQL, new EnvironmentConnectionRowMapper());
+    return jdbcClient.sql(LIST_SQL).query(new EnvironmentConnectionRowMapper()).list();
   }
 
   /**
@@ -481,8 +487,11 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
    * <p>这是 Skill 增量同步与通知重连对账的目标集合：行级 owner 与租约活跃性都由数据库现在时判定，绝不依据进程内缓存。
    */
   public List<EnvironmentConnection> listReadyOwnedByNode() {
-    return jdbcTemplate.query(
-        LIST_READY_OWNED_SQL, new EnvironmentConnectionRowMapper(), ownerNodeId);
+    return jdbcClient
+        .sql(LIST_READY_OWNED_SQL)
+        .param("ownerNodeId", ownerNodeId)
+        .query(new EnvironmentConnectionRowMapper())
+        .list();
   }
 
   /**
@@ -499,14 +508,14 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
     return fencedWrite(
         environmentId,
         () ->
-            jdbcTemplate.update(
-                APPEND_EVENT_SQL,
-                EnvironmentConnection.MAX_RECENT_EVENTS,
-                eventJson,
-                eventJson,
-                environmentId.value(),
-                ownerNodeId,
-                leaseToken));
+            jdbcClient
+                .sql(APPEND_EVENT_SQL)
+                .param("maxRecentEvents", EnvironmentConnection.MAX_RECENT_EVENTS)
+                .param("event", eventJson)
+                .param("environmentId", environmentId.value())
+                .param("ownerNodeId", ownerNodeId)
+                .param("leaseToken", leaseToken)
+                .update());
   }
 
   /**
@@ -528,15 +537,15 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
     return fencedWrite(
         environmentId,
         () ->
-            jdbcTemplate.update(
-                REPLACE_SKILL_STATE_SQL,
-                skillStateJson,
-                EnvironmentConnection.MAX_RECENT_EVENTS,
-                eventJson,
-                eventJson,
-                environmentId.value(),
-                ownerNodeId,
-                leaseToken));
+            jdbcClient
+                .sql(REPLACE_SKILL_STATE_SQL)
+                .param("skillState", skillStateJson)
+                .param("maxRecentEvents", EnvironmentConnection.MAX_RECENT_EVENTS)
+                .param("event", eventJson)
+                .param("environmentId", environmentId.value())
+                .param("ownerNodeId", ownerNodeId)
+                .param("leaseToken", leaseToken)
+                .update());
   }
 
   /** 数据库现在时判定指定环境是否有任意活跃租约（用于 delete 在锁行下的安全准入）。 */
@@ -545,7 +554,11 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
       return false;
     }
     Boolean exists =
-        jdbcTemplate.queryForObject(HAS_ACTIVE_LEASE_SQL, Boolean.class, environmentId.value());
+        jdbcClient
+            .sql(HAS_ACTIVE_LEASE_SQL)
+            .param("environmentId", environmentId.value())
+            .query(Boolean.class)
+            .single();
     return Boolean.TRUE.equals(exists);
   }
 
@@ -564,7 +577,11 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
       return false;
     }
     Boolean exists =
-        jdbcTemplate.queryForObject(HAS_READY_LEASE_SQL, Boolean.class, environmentId.value());
+        jdbcClient
+            .sql(HAS_READY_LEASE_SQL)
+            .param("environmentId", environmentId.value())
+            .query(Boolean.class)
+            .single();
     return Boolean.TRUE.equals(exists);
   }
 
@@ -575,8 +592,13 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
       return false;
     }
     Boolean exists =
-        jdbcTemplate.queryForObject(
-            HOLDS_READY_LEASE_SQL, Boolean.class, environmentId.value(), ownerNodeId, leaseToken);
+        jdbcClient
+            .sql(HOLDS_READY_LEASE_SQL)
+            .param("environmentId", environmentId.value())
+            .param("ownerNodeId", ownerNodeId)
+            .param("leaseToken", leaseToken)
+            .query(Boolean.class)
+            .single();
     return Boolean.TRUE.equals(exists);
   }
 
@@ -587,12 +609,13 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
       return false;
     }
     Boolean exists =
-        jdbcTemplate.queryForObject(
-            HAS_ACTIVE_LEASE_TOKEN_SQL,
-            Boolean.class,
-            environmentId.value(),
-            ownerNodeId,
-            leaseToken);
+        jdbcClient
+            .sql(HAS_ACTIVE_LEASE_TOKEN_SQL)
+            .param("environmentId", environmentId.value())
+            .param("ownerNodeId", ownerNodeId)
+            .param("leaseToken", leaseToken)
+            .query(Boolean.class)
+            .single();
     return Boolean.TRUE.equals(exists);
   }
 
