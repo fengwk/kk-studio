@@ -16,6 +16,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
@@ -37,7 +38,7 @@ class InMemoryHarnessStoreTransactionTest {
 
   @BeforeEach
   void setUp() {
-    store = new InMemoryHarnessStore();
+    store = new InMemoryBuiltinHarnessStore();
   }
 
   @Test
@@ -166,7 +167,7 @@ class InMemoryHarnessStoreTransactionTest {
 
   @Test
   void nextIdOverflowAbortsTheTransactionAndKeepsTheCounter() {
-    InMemoryHarnessStore seeded = new InMemoryHarnessStore(Long.MAX_VALUE - 1);
+    InMemoryHarnessStore seeded = new InMemoryBuiltinHarnessStore(Long.MAX_VALUE - 1);
     assertEquals(TestIds.id(Long.MAX_VALUE), seeded.transaction(HarnessStore.Transaction::nextId));
     assertThrows(
         ArithmeticException.class, () -> seeded.transaction(HarnessStore.Transaction::nextId));

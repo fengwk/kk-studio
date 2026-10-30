@@ -36,6 +36,7 @@ import fun.fengwk.kkstudio.common.schema.StringSchema;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
@@ -63,7 +64,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
@@ -913,7 +913,7 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
 
   @Test
   void lostClaimAtModelApplyFenceRollsBackAllMutations() {
-    InMemoryHarnessStore real = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore real = new InMemoryBuiltinHarnessStore();
     Fixture fixture = fixture(claimLosingStore(real, 2));
     var baseline = seedOpenInputTurn(real, tooledRequest(List.of("bash")).toolBindings());
     UUID modelId =

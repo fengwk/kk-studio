@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
@@ -32,7 +33,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.JsonMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
@@ -73,14 +73,14 @@ class ThreadJoinProjectorTest {
   private static final Instant T1 = Instant.parse("2026-01-01T00:00:01Z");
   private static final Instant T2 = Instant.parse("2026-01-01T00:00:02Z");
 
-  private InMemoryHarnessStore store;
+  private InMemoryBuiltinHarnessStore store;
   private UUID sessionId;
   private UUID childThreadId;
   private UUID rootEntryId;
 
   @BeforeEach
   void setUp() {
-    store = new InMemoryHarnessStore();
+    store = new InMemoryBuiltinHarnessStore();
     sessionId = id(1);
     childThreadId = id(2);
     rootEntryId = id(3);

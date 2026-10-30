@@ -6,13 +6,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
@@ -535,7 +535,7 @@ class WorkHeartbeatTest {
 
   /** 最小可控 fixture：一个 THREAD work claim（heartbeat 与 target 类型无关）。 */
   private static final class Fixture {
-    final InMemoryHarnessStore store = new InMemoryHarnessStore();
+    final InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
     final FakeScheduler scheduler = new FakeScheduler();
     final WorkHeartbeat heartbeat;
     final ClaimedWork claimed;

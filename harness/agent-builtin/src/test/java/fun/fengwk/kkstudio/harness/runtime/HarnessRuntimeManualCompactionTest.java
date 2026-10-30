@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
@@ -37,7 +38,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.SessionFirstThreadLockStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
@@ -130,7 +130,7 @@ class HarnessRuntimeManualCompactionTest {
   @Test
   void compactThreadLocksSessionBeforeThread() {
     // availability 与单事务 compact 均经过守卫，防止 Entry 外键锁与 Session 深删除形成 Thread -> Session 逆序。
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
     Fixture fixture = fixture(store, SessionFirstThreadLockStore.wrap(store));
     ClosedTurnBaseline baseline = seedCompactionReadyClosedTurn(store);
     fixture.resolver.autoConsistent = true;
@@ -379,11 +379,11 @@ class HarnessRuntimeManualCompactionTest {
   }
 
   private static Fixture fixture() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
     return fixture(store, store);
   }
 
-  private static Fixture fixture(InMemoryHarnessStore store, HarnessStore runtimeStore) {
+  private static Fixture fixture(InMemoryBuiltinHarnessStore store, HarnessStore runtimeStore) {
     FakeTurnResolver resolver = new FakeTurnResolver();
     HarnessRuntime runtime =
         new HarnessRuntime(
@@ -398,7 +398,7 @@ class HarnessRuntimeManualCompactionTest {
   }
 
   private static UUID seedCommand(
-      InMemoryHarnessStore store, UUID threadId, ThreadCommandPayload payload) {
+      InMemoryBuiltinHarnessStore store, UUID threadId, ThreadCommandPayload payload) {
     return store.transaction(
         tx -> {
           ThreadState thread = tx.lockThread(threadId).orElseThrow();
@@ -420,16 +420,17 @@ class HarnessRuntimeManualCompactionTest {
         });
   }
 
-  private static ClosedTurnBaseline seedCompactionReadyClosedTurn(InMemoryHarnessStore store) {
+  private static ClosedTurnBaseline seedCompactionReadyClosedTurn(
+      InMemoryBuiltinHarnessStore store) {
     return seedClosedTurn(store, 50_000, 90_000);
   }
 
-  private static ClosedTurnBaseline seedSmallClosedTurn(InMemoryHarnessStore store) {
+  private static ClosedTurnBaseline seedSmallClosedTurn(InMemoryBuiltinHarnessStore store) {
     return seedClosedTurn(store, 10, 10);
   }
 
   private static ClosedTurnBaseline seedClosedTurn(
-      InMemoryHarnessStore store, int historicalChars, int currentChars) {
+      InMemoryBuiltinHarnessStore store, int historicalChars, int currentChars) {
     return store.transaction(
         tx -> {
           UUID sessionId = tx.nextId();
@@ -551,7 +552,7 @@ class HarnessRuntimeManualCompactionTest {
     return new AssistantMessageMetadata(GenerationStopReason.COMPLETE, USAGE);
   }
 
-  private static EntryPath path(InMemoryHarnessStore store, UUID threadId) {
+  private static EntryPath path(InMemoryBuiltinHarnessStore store, UUID threadId) {
     ThreadState thread = thread(store, threadId);
     return store.transaction(tx -> tx.loadEntryPath(thread.headEntryId()));
   }
@@ -615,7 +616,7 @@ class HarnessRuntimeManualCompactionTest {
 
   /** 手工创建带 source command 与 Join 的 child Thread，用于按创建约束事实验证手动入口 guard。 */
   private static UUID seedChildThread(
-      InMemoryHarnessStore store,
+      InMemoryBuiltinHarnessStore store,
       UUID parentThreadId,
       SpawnTrigger trigger,
       ThreadConstraints constraints,
@@ -692,16 +693,16 @@ class HarnessRuntimeManualCompactionTest {
         });
   }
 
-  private static ThreadState thread(InMemoryHarnessStore store, UUID threadId) {
+  private static ThreadState thread(InMemoryBuiltinHarnessStore store, UUID threadId) {
     return store.transaction(tx -> tx.findThread(threadId).orElseThrow());
   }
 
-  private static Work work(InMemoryHarnessStore store, WorkTarget target) {
+  private static Work work(InMemoryBuiltinHarnessStore store, WorkTarget target) {
     return store.transaction(tx -> tx.findWork(target).orElse(null));
   }
 
   private record Fixture(
-      InMemoryHarnessStore store, FakeTurnResolver resolver, HarnessRuntime runtime) {}
+      InMemoryBuiltinHarnessStore store, FakeTurnResolver resolver, HarnessRuntime runtime) {}
 
   private record ClosedTurnBaseline(UUID threadId, UUID turnEndEntryId) {}
 

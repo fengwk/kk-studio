@@ -28,8 +28,8 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
@@ -156,7 +156,7 @@ class ThreadProcessorClaimTest extends ThreadProcessorTestBase {
    */
   @Test
   void resolvedTurnWithLostFinalFenceRollsBackWholeTransaction() {
-    InMemoryHarnessStore real = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore real = new InMemoryBuiltinHarnessStore();
     Fixture fixture = fixture(claimLosingStore(real, 2));
     var baseline = seedBaseline(real);
     UUID userCommand =
@@ -176,7 +176,7 @@ class ThreadProcessorClaimTest extends ThreadProcessorTestBase {
 
   @Test
   void nonterminalModelBlockerWithLostClaimIsLostNoOp() {
-    InMemoryHarnessStore real = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore real = new InMemoryBuiltinHarnessStore();
     Fixture fixture = fixture(claimLosingStore(real, 2));
     var baseline = seedOpenInputTurn(real);
     seedModelInvocation(
@@ -201,7 +201,7 @@ class ThreadProcessorClaimTest extends ThreadProcessorTestBase {
 
   @Test
   void nonterminalToolSiblingsWithLostClaimIsLostNoOp() {
-    InMemoryHarnessStore real = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore real = new InMemoryBuiltinHarnessStore();
     Fixture fixture = fixture(claimLosingStore(real, 2));
     var chain =
         seedToolChain(
@@ -221,7 +221,7 @@ class ThreadProcessorClaimTest extends ThreadProcessorTestBase {
 
   @Test
   void quiescentClaimLostAtFinalFenceIsLostNoOp() {
-    InMemoryHarnessStore real = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore real = new InMemoryBuiltinHarnessStore();
     Fixture fixture = fixture(claimLosingStore(real, 2));
     var baseline = seedBaseline(real);
     requestThreadWork(real, baseline.threadId());

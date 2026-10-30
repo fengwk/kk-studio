@@ -32,6 +32,7 @@ import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.model.StreamCheckpoint;
 import fun.fengwk.kkstudio.harness.builtin.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.builtin.store.BuiltinStore;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
@@ -103,7 +104,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
@@ -156,7 +156,7 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 
 /**
- * ModelProcessor 端到端行为测试：InMemoryHarnessStore + fake ModelGateway / Realtime sink。
+ * ModelProcessor 端到端行为测试：InMemoryBuiltinHarnessStore + fake ModelGateway / Realtime sink。
  *
  * <p>覆盖 READY 准入（Admitted / Busy / 抛异常 / Rejected）、RUNNING 先于运行持久化的陈旧启动围栏、stale lease 恢复、stream
  * checkpoint 前缀与 tool fragment 排除、success terminal + THREAD wake、transient retry 与 retry
@@ -666,7 +666,7 @@ class ModelProcessorTest {
   @Test
   void incompatibleOpaqueReplayProjectsSemanticFallbackThenStarts() {
     ReplayHistory history = seedReplayHistory();
-    InMemoryHarnessStore store = history.store();
+    InMemoryBuiltinHarnessStore store = history.store();
     UserBasis basis = history.basis();
     UUID invocationId = history.invocationId();
     FakeGateway gateway = new FakeGateway();
@@ -705,7 +705,7 @@ class ModelProcessorTest {
   @Test
   void ownershipLossDuringMaterializationDoesNotWriteOrDispatch() {
     ReplayHistory history = seedReplayHistory();
-    InMemoryHarnessStore store = history.store();
+    InMemoryBuiltinHarnessStore store = history.store();
     WorkTarget target = new WorkTarget(WorkTargetType.MODEL, history.invocationId());
     FakeGateway gateway = new FakeGateway();
     HarnessStore hooked =
@@ -3432,7 +3432,7 @@ class ModelProcessorTest {
   /** heartbeat 一旦 stop 就不能重启（scheduler 拒绝路径之外的防御）。 */
   @Test
   void heartbeatCannotRestartAfterStop() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
     Baseline baseline = seedBaseline(store, NOW);
     UUID invocationId = seedInvocation(store, baseline, requestSpec(), NOW);
     ClaimedWork claimed = claim(store, invocationId);
@@ -3572,7 +3572,7 @@ class ModelProcessorTest {
   /** heartbeat 只 renew 当前 Work lease；lease 丢失后立即关 gate / cancel handle，不反写 durable。 */
   @Test
   void heartbeatRenewsLeaseAndStopsWhenOwnershipIsLost() throws Exception {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
     Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
     Baseline baseline = seedBaseline(store, now);
     UUID invocationId = seedInvocation(store, baseline, requestSpec(), now);
@@ -3866,10 +3866,10 @@ class ModelProcessorTest {
 
   /** 记录模型事务锁序，同时保留同一事务上的 Builtin 操作拦截。 */
   private static final class RecordingLockStore implements HarnessStore, BuiltinStore {
-    private final InMemoryHarnessStore delegate;
+    private final InMemoryBuiltinHarnessStore delegate;
     private final List<List<String>> transactions = new CopyOnWriteArrayList<>();
 
-    private RecordingLockStore(InMemoryHarnessStore delegate) {
+    private RecordingLockStore(InMemoryBuiltinHarnessStore delegate) {
       this.delegate = delegate;
     }
 
@@ -4111,7 +4111,7 @@ class ModelProcessorTest {
 
   private final class Fixture {
     final MutableClock clock = new MutableClock(NOW);
-    final InMemoryHarnessStore store = new InMemoryHarnessStore();
+    final InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
 
     {
       store.setClock(clock);
@@ -4230,11 +4230,12 @@ class ModelProcessorTest {
   private record UserBasis(
       UUID sessionId, UUID rootEntryId, UUID turnStartEntryId, UUID userEntryId, UUID threadId) {}
 
-  private record ReplayHistory(InMemoryHarnessStore store, UserBasis basis, UUID invocationId) {}
+  private record ReplayHistory(
+      InMemoryBuiltinHarnessStore store, UserBasis basis, UUID invocationId) {}
 
   /** 使用真实 Entry 与 Work 初始化含工具调用及 opaque replay 的待投影历史。 */
   private static ReplayHistory seedReplayHistory() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
     UserBasis basis = seedUserBasis(store);
     UUID invocationId =
         store.transaction(
@@ -4368,7 +4369,10 @@ class ModelProcessorTest {
 
   /** 以 USER 为 requestHead 插入 READY ModelInvocation + THREAD / MODEL Work（materialization 全链测试用）。 */
   private static UUID seedUserBasisInvocation(
-      InMemoryHarnessStore store, UserBasis baseline, ModelRequestSpec requestSpec, Instant now) {
+      InMemoryBuiltinHarnessStore store,
+      UserBasis baseline,
+      ModelRequestSpec requestSpec,
+      Instant now) {
     return store.transaction(
         tx -> {
           tx.lockThread(baseline.threadId());
@@ -4398,7 +4402,7 @@ class ModelProcessorTest {
 
   /** 真正由父 Turn owner 结算的摘要任务：直接票据 delivery=SETTLE_OWNER_TURN，而不是靠执行约束推断。 */
   private static void seedOwnerSettledTicket(
-      InMemoryHarnessStore store, UUID sessionId, UUID rootEntryId, UUID threadId) {
+      InMemoryBuiltinHarnessStore store, UUID sessionId, UUID rootEntryId, UUID threadId) {
     store.transaction(
         tx -> {
           tx.lockThread(threadId).orElseThrow();

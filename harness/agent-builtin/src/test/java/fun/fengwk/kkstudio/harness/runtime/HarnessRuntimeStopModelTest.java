@@ -25,6 +25,7 @@ import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinAgentDriver;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.model.StreamCheckpoint;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
@@ -41,7 +42,6 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
@@ -63,12 +63,12 @@ import java.util.UUID;
  */
 class HarnessRuntimeStopModelTest {
 
-  private InMemoryHarnessStore store;
+  private InMemoryBuiltinHarnessStore store;
   private HarnessRuntime runtime;
 
   @BeforeEach
   void setUp() {
-    store = new InMemoryHarnessStore();
+    store = new InMemoryBuiltinHarnessStore();
     runtime = HarnessRuntimeTestSupport.runtime(store, Clock.fixed(T5, ZoneOffset.UTC));
   }
 

@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
@@ -27,7 +28,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
@@ -70,7 +70,7 @@ class ManualCompactionLifecycleRegressionTest {
    */
   @Test
   void twoLevelDescendantManualCompactionAdvancesChildWithoutMutatingRoot() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
     FakeTurnResolver resolver = new FakeTurnResolver();
     HarnessRuntime runtime =
         new HarnessRuntime(
@@ -113,7 +113,7 @@ class ManualCompactionLifecycleRegressionTest {
    */
   @Test
   void threeLevelDescendantManualCompactionDoesNotMutateAncestors() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
     FakeTurnResolver resolver = new FakeTurnResolver();
     HarnessRuntime runtime =
         new HarnessRuntime(
@@ -160,7 +160,7 @@ class ManualCompactionLifecycleRegressionTest {
   private record ThreeLevelBaseline(
       UUID rootThreadId, UUID middleThreadId, UUID leafThreadId, UUID leafHeadEntryId) {}
 
-  private static TwoLevelBaseline seedTwoLevelTree(InMemoryHarnessStore store) {
+  private static TwoLevelBaseline seedTwoLevelTree(InMemoryBuiltinHarnessStore store) {
     return store.transaction(
         tx -> {
           UUID sessionId = tx.nextId();
@@ -224,7 +224,7 @@ class ManualCompactionLifecycleRegressionTest {
         });
   }
 
-  private static ThreeLevelBaseline seedThreeLevelTree(InMemoryHarnessStore store) {
+  private static ThreeLevelBaseline seedThreeLevelTree(InMemoryBuiltinHarnessStore store) {
     return store.transaction(
         tx -> {
           UUID sessionId = tx.nextId();
@@ -400,11 +400,11 @@ class ManualCompactionLifecycleRegressionTest {
     return new AssistantMessageMetadata(GenerationStopReason.COMPLETE, USAGE);
   }
 
-  private static ThreadState thread(InMemoryHarnessStore store, UUID threadId) {
+  private static ThreadState thread(InMemoryBuiltinHarnessStore store, UUID threadId) {
     return store.transaction(tx -> tx.findThread(threadId).orElseThrow());
   }
 
-  private static Work work(InMemoryHarnessStore store, WorkTarget target) {
+  private static Work work(InMemoryBuiltinHarnessStore store, WorkTarget target) {
     return store.transaction(tx -> tx.findWork(target).orElse(null));
   }
 

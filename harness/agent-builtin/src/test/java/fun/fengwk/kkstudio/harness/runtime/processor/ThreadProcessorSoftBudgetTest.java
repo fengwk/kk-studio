@@ -21,6 +21,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
@@ -52,7 +53,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
@@ -943,7 +943,7 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
   }
 
   private void transitionModelToToolCall(
-      InMemoryHarnessStore store, ModelInvocation model, String callId) {
+      InMemoryBuiltinHarnessStore store, ModelInvocation model, String callId) {
     ProviderResponse response = successResponse(List.of(callId), "bash");
     store.transaction(
         tx -> {
@@ -957,7 +957,7 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
   }
 
   private void transitionModelToSucceeded(
-      InMemoryHarnessStore store, ModelInvocation model, String text) {
+      InMemoryBuiltinHarnessStore store, ModelInvocation model, String text) {
     ProviderResponse response = successResponse(text, List.of(), GenerationStopReason.COMPLETE);
     store.transaction(
         tx -> {
@@ -971,7 +971,7 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
   }
 
   private void transitionModelToContinue(
-      InMemoryHarnessStore store, ModelInvocation model, String text) {
+      InMemoryBuiltinHarnessStore store, ModelInvocation model, String text) {
     ProviderResponse response = successResponse(text, List.of(), GenerationStopReason.CONTINUE);
     store.transaction(
         tx -> {
@@ -984,7 +984,7 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
         });
   }
 
-  private void succeedToolsByAssistant(InMemoryHarnessStore store, UUID threadId) {
+  private void succeedToolsByAssistant(InMemoryBuiltinHarnessStore store, UUID threadId) {
     List<ToolInvocation> tools =
         store.transaction(
             tx -> {

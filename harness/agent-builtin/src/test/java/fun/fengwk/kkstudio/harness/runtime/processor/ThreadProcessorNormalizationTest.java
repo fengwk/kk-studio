@@ -36,6 +36,7 @@ import fun.fengwk.kkstudio.harness.builtin.history.BuiltinHistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
@@ -55,7 +56,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
@@ -392,7 +392,7 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
    * @return 被处理 Thread 的历史基线（{@code threadId} 指向共享 head 的旁支 Thread）
    */
   private static HistoricalBaseline seedHistoricalOpenTurnOwnedByOtherThread(
-      InMemoryHarnessStore store, int toolCalls) {
+      InMemoryBuiltinHarnessStore store, int toolCalls) {
     return store.transaction(
         tx -> {
           UUID sessionId = tx.nextId();

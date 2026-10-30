@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
@@ -42,7 +43,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
@@ -71,12 +71,12 @@ class BuiltinAgentDriverContractTest {
   /** 本测试不解析 turn：resolver 永不参与锁定路径。 */
   private static final TurnResolver UNUSED_RESOLVER = (threadId, path, preparation) -> null;
 
-  private InMemoryHarnessStore store;
+  private InMemoryBuiltinHarnessStore store;
   private BuiltinAgentDriver driver;
 
   @BeforeEach
   void setUp() {
-    store = new InMemoryHarnessStore();
+    store = new InMemoryBuiltinHarnessStore();
     driver = builtinDriver(store, UNUSED_RESOLVER);
   }
 

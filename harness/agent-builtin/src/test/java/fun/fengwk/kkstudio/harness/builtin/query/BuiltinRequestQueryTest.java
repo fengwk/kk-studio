@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
@@ -20,7 +21,6 @@ import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
@@ -40,7 +40,7 @@ class BuiltinRequestQueryTest {
 
   @Test
   void returnsOnlyTheCurrentThreadOpenTurnRequest() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
     Seed owner = seed(store, true);
     Seed other = seed(store, false);
     BuiltinRequestQuery query = new BuiltinRequestQuery(store, store);
@@ -56,7 +56,7 @@ class BuiltinRequestQueryTest {
 
   @Test
   void returnsEmptyWithoutThreadOpenTurnOrInvocation() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
     Seed noModel = seed(store, false);
     BuiltinRequestQuery query = new BuiltinRequestQuery(store, store);
 
@@ -64,7 +64,7 @@ class BuiltinRequestQueryTest {
     assertTrue(query.findCurrent(noModel.threadId()).isEmpty());
   }
 
-  private static Seed seed(InMemoryHarnessStore store, boolean withModel) {
+  private static Seed seed(InMemoryBuiltinHarnessStore store, boolean withModel) {
     return store.transaction(
         tx -> {
           UUID sessionId = tx.nextId();

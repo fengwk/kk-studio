@@ -13,12 +13,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.driver.AgentDriver;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
@@ -55,12 +55,12 @@ class StopRecordsTest {
           Instant.ofEpochMilli(1),
           Instant.ofEpochMilli(1));
 
-  private InMemoryHarnessStore store;
+  private InMemoryBuiltinHarnessStore store;
   private HarnessRuntime runtime;
 
   @BeforeEach
   void setUp() {
-    store = new InMemoryHarnessStore();
+    store = new InMemoryBuiltinHarnessStore();
     runtime =
         HarnessRuntimeTestSupport.runtime(
             store, Clock.fixed(Instant.ofEpochMilli(3_000), ZoneOffset.UTC));

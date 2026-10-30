@@ -30,9 +30,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.SettingsPayload;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionFacts;
@@ -47,18 +47,18 @@ import java.util.UUID;
 /**
  * {@link ThreadSnapshot#executionFacts()} 的统一执行事实投影测试。
  *
- * <p>全部用例都经真实 {@link InMemoryHarnessStore} 种子与 {@link HarnessRuntime#getThreadSnapshot} 读取，命中真实
- * {@code ThreadContextClassifier} 分支：排队命令、Model 活动/终态、工具 READY/RUNNING/等待/UNKNOWN 及混合、 owner 归属
- * continuation、尾部控制 Entry 与 STOPPED 仍在途。断言直接给出三个正交事实，覆盖全部状态矩阵。
+ * <p>全部用例都经真实 {@link InMemoryBuiltinHarnessStore} 种子与 {@link HarnessRuntime#getThreadSnapshot}
+ * 读取，命中真实 {@code ThreadContextClassifier} 分支：排队命令、Model 活动/终态、工具 READY/RUNNING/等待/UNKNOWN 及混合、
+ * owner 归属 continuation、尾部控制 Entry 与 STOPPED 仍在途。断言直接给出三个正交事实，覆盖全部状态矩阵。
  */
 class ThreadExecutionFactsTest {
 
-  private InMemoryHarnessStore store;
+  private InMemoryBuiltinHarnessStore store;
   private HarnessRuntime runtime;
 
   @BeforeEach
   void setUp() {
-    store = new InMemoryHarnessStore();
+    store = new InMemoryBuiltinHarnessStore();
     runtime = runtime(store, Clock.fixed(T5, ZoneOffset.UTC));
   }
 

@@ -20,6 +20,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.ToolOutcomeView;
@@ -34,7 +35,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
@@ -50,7 +50,7 @@ class ToolOutcomeQueryTest {
 
   @Test
   void terminalInvocationAndMaterializedEntryProjectTheSameOutcome() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
     var chain =
         seedToolChain(
             store,
@@ -103,7 +103,7 @@ class ToolOutcomeQueryTest {
   @Test
   void succeededBusinessErrorIsReadableBeforeAndAfterMaterialization() {
     // 正常执行可返回业务错误，物化不能将它误判为损坏的历史身份。
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
     var chain =
         seedToolChain(
             store,
@@ -158,7 +158,7 @@ class ToolOutcomeQueryTest {
   @Test
   void nonSucceededHistoryWithFalseErrorFlagIsRejected() {
     // 降低成功分支的限制不能放过非成功终态中损坏的错误标志。
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
     var chain =
         seedToolChain(
             store,
@@ -224,7 +224,7 @@ class ToolOutcomeQueryTest {
 
   @Test
   void nonTerminalInvocationIsNotAnOutcome() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
     var chain =
         seedToolChain(
             store,
@@ -240,7 +240,7 @@ class ToolOutcomeQueryTest {
 
   @Test
   void invocationAndMaterializedEntryAreInvisibleToAnotherThread() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
     var chain =
         seedToolChain(
             store,
@@ -278,7 +278,7 @@ class ToolOutcomeQueryTest {
 
   @Test
   void sharedParentHistoryDoesNotLeakChildOutcomeToParentOrSiblingFork() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
     ClosedTurnBaseline parent = seedClosedTurn(store, false);
     ChildOutcome first = seedChildToolOutcome(store, parent, "child-1", "call-1");
     ChildOutcome second = seedChildToolOutcome(store, parent, "child-2", "call-2");
@@ -303,7 +303,7 @@ class ToolOutcomeQueryTest {
   }
 
   private static ChildOutcome seedChildToolOutcome(
-      InMemoryHarnessStore store, ClosedTurnBaseline parent, String name, String callId) {
+      InMemoryBuiltinHarnessStore store, ClosedTurnBaseline parent, String name, String callId) {
     return store.transaction(
         tx -> {
           UUID childThreadId = tx.nextId();
@@ -378,7 +378,8 @@ class ToolOutcomeQueryTest {
         null);
   }
 
-  private static void advanceHead(InMemoryHarnessStore store, UUID threadId, UUID resultEntryId) {
+  private static void advanceHead(
+      InMemoryBuiltinHarnessStore store, UUID threadId, UUID resultEntryId) {
     store.transaction(
         tx -> {
           ThreadState thread = tx.lockThread(threadId).orElseThrow();
@@ -390,7 +391,7 @@ class ToolOutcomeQueryTest {
   private record ChildOutcome(
       UUID threadId, UUID invocationId, UUID assistantEntryId, UUID resultEntryId) {}
 
-  private static HarnessRuntime runtime(InMemoryHarnessStore store) {
+  private static HarnessRuntime runtime(InMemoryBuiltinHarnessStore store) {
     return new HarnessRuntime(
         store,
         HarnessRuntimeTestSupport.driver(store, (threadId, path, preparation) -> null),

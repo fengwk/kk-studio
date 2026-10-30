@@ -17,6 +17,7 @@ import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.builtin.store.BuiltinStore;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
@@ -57,7 +58,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.SystemReminder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
@@ -95,7 +95,7 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 
 /**
- * HarnessRuntime 控制面测试用的包内 fixture 构建器：基于 {@link InMemoryHarnessStore} 提供原子的
+ * HarnessRuntime 控制面测试用的包内 fixture 构建器：基于 {@link InMemoryBuiltinHarnessStore} 提供原子的
  * Session/Entry/Thread/Invocation/Work 种子，以及小型 value 构建器。
  */
 public final class HarnessRuntimeTestSupport {
@@ -161,7 +161,7 @@ public final class HarnessRuntimeTestSupport {
 
   /** 测试时钟驱动内存 store 的事务时间（生产实现取数据库时钟）。 */
   static void useClock(HarnessStore store, Clock clock) {
-    if (store instanceof InMemoryHarnessStore memory) {
+    if (store instanceof InMemoryBuiltinHarnessStore memory) {
       memory.setClock(clock);
     }
   }
@@ -231,7 +231,7 @@ public final class HarnessRuntimeTestSupport {
       UUID sessionId, UUID rootEntryId, UUID turnEndEntryId, UUID threadId) {}
 
   /** Session + ROOT + Thread(head 指向 ROOT)；静默的 IDLE_OR_HISTORICAL baseline。 */
-  static Baseline seedBaseline(InMemoryHarnessStore store) {
+  static Baseline seedBaseline(InMemoryBuiltinHarnessStore store) {
     return store.transaction(
         tx -> {
           UUID sessionId = tx.nextId();
@@ -245,7 +245,7 @@ public final class HarnessRuntimeTestSupport {
   }
 
   /** Session + ROOT + 打开的 TURN_START(INPUT) + Thread(head 指向 TURN_START)。 */
-  static TurnBaseline seedOpenTurn(InMemoryHarnessStore store) {
+  static TurnBaseline seedOpenTurn(InMemoryBuiltinHarnessStore store) {
     return store.transaction(
         tx -> {
           UUID sessionId = tx.nextId();
@@ -261,7 +261,7 @@ public final class HarnessRuntimeTestSupport {
   }
 
   /** MODEL_ACTIVE baseline：打开的 turn，在 TURN_START requestHead 上挂一个 RUNNING 的 Model。 */
-  static ModelBaseline seedRunningModel(InMemoryHarnessStore store) {
+  static ModelBaseline seedRunningModel(InMemoryBuiltinHarnessStore store) {
     return store.transaction(
         tx -> {
           UUID sessionId = tx.nextId();
@@ -285,7 +285,7 @@ public final class HarnessRuntimeTestSupport {
    * MODEL_ACTIVE baseline，按指定的活动状态（READY / RUNNING）： ROOT -&gt; TURN_START(INPUT) -&gt; USER，thread
    * head 指向 USER entry，model requestHead = USER entry。
    */
-  static ModelBaseline seedModel(InMemoryHarnessStore store, ModelInvocationStatus status) {
+  static ModelBaseline seedModel(InMemoryBuiltinHarnessStore store, ModelInvocationStatus status) {
     return store.transaction(
         tx -> {
           UUID sessionId = tx.nextId();
@@ -314,7 +314,7 @@ public final class HarnessRuntimeTestSupport {
    * CONTINUATION turn 上的 MODEL_ACTIVE：裸的 TURN_START(CONTINUATION) head（真实 plan 形态 没有 input
    * entry），并在该 TURN_START requestHead 上挂一个 RUNNING 的 Model。
    */
-  static ModelBaseline seedRunningContinuationModel(InMemoryHarnessStore store) {
+  static ModelBaseline seedRunningContinuationModel(InMemoryBuiltinHarnessStore store) {
     return store.transaction(
         tx -> {
           UUID sessionId = tx.nextId();
@@ -349,7 +349,7 @@ public final class HarnessRuntimeTestSupport {
   }
 
   /** MODEL_TERMINAL_PENDING baseline：打开的 turn，挂一个尚未 apply 的 terminal Model。 */
-  static ModelBaseline seedTerminalModel(InMemoryHarnessStore store) {
+  static ModelBaseline seedTerminalModel(InMemoryBuiltinHarnessStore store) {
     return store.transaction(
         tx -> {
           UUID sessionId = tx.nextId();
@@ -373,7 +373,7 @@ public final class HarnessRuntimeTestSupport {
    * 完整 TOOL baseline：ROOT -&gt; TURN_START(INPUT) -&gt; USER -&gt; ASSISTANT(call-1)， 在 assistant
    * 上挂一个 SUCCEEDED 的 Model 与一个 READY 的 ToolInvocation， thread head 指向 assistant entry。
    */
-  static ToolBaseline seedToolBaseline(InMemoryHarnessStore store) {
+  static ToolBaseline seedToolBaseline(InMemoryBuiltinHarnessStore store) {
     MultiToolBaseline multi = seedToolBaseline(store, 1);
     return new ToolBaseline(
         multi.sessionId(),
@@ -389,7 +389,7 @@ public final class HarnessRuntimeTestSupport {
    * 多 sibling 的 TOOL baseline：assistant 上携带 {@code toolCount} 个 tool call（"call-0" …）， 每个 call 对应一个
    * READY invocation，因此 Stop 可以在一条路径上收敛完整的 sibling 状态矩阵。
    */
-  static MultiToolBaseline seedToolBaseline(InMemoryHarnessStore store, int toolCount) {
+  static MultiToolBaseline seedToolBaseline(InMemoryBuiltinHarnessStore store, int toolCount) {
     if (toolCount <= 0) {
       throw new IllegalArgumentException("toolCount must be positive");
     }
@@ -470,7 +470,7 @@ public final class HarnessRuntimeTestSupport {
    * <p>用于验证合法 Assistant 工具批次在没有任何 ModelInvocation 时仍可审批、执行与 Stop；Tool 的路径归属完全由
    * Thread/TurnStart/Assistant 决定。
    */
-  static ToolBaseline seedModelFreeToolBaseline(InMemoryHarnessStore store) {
+  static ToolBaseline seedModelFreeToolBaseline(InMemoryBuiltinHarnessStore store) {
     ModelFreeMultiToolBaseline multi = seedModelFreeToolBaseline(store, 1);
     return new ToolBaseline(
         multi.sessionId(),
@@ -484,7 +484,7 @@ public final class HarnessRuntimeTestSupport {
 
   /** 无 Model 父行的完整多工具批次，调用顺序与 sibling 序号一致。 */
   static ModelFreeMultiToolBaseline seedModelFreeToolBaseline(
-      InMemoryHarnessStore store, int toolCount) {
+      InMemoryBuiltinHarnessStore store, int toolCount) {
     if (toolCount <= 0) {
       throw new IllegalArgumentException("toolCount must be positive");
     }
@@ -547,7 +547,7 @@ public final class HarnessRuntimeTestSupport {
           + "]}";
 
   /** {@code ask_user} TOOL baseline：默认根 Thread、IDLE 状态与标准冻结问卷。 */
-  static ToolBaseline seedAskUserBaseline(InMemoryHarnessStore store) {
+  static ToolBaseline seedAskUserBaseline(InMemoryBuiltinHarnessStore store) {
     return seedAskUserBaseline(
         store, null, ThreadExecutionControl.RUNNABLE, ASK_USER_QUESTIONNAIRE);
   }
@@ -560,7 +560,7 @@ public final class HarnessRuntimeTestSupport {
    * 参数导致冻结问卷损坏时的 fail-closed 断言。
    */
   static ToolBaseline seedAskUserBaseline(
-      InMemoryHarnessStore store,
+      InMemoryBuiltinHarnessStore store,
       UUID parentThreadId,
       ThreadExecutionControl status,
       String argumentsJson) {
@@ -648,7 +648,7 @@ public final class HarnessRuntimeTestSupport {
 
   /** 将 {@code ask_user} 调用冻结为 WAITING_INPUT（ToolProcessor 接受等待后的 durable 形状）。 */
   static ToolInvocation parkForInput(
-      InMemoryHarnessStore store, ToolBaseline baseline, Instant now) {
+      InMemoryBuiltinHarnessStore store, ToolBaseline baseline, Instant now) {
     return store.transaction(
         tx -> {
           ThreadState thread = tx.lockThread(baseline.threadId()).orElseThrow();
@@ -721,12 +721,13 @@ public final class HarnessRuntimeTestSupport {
   }
 
   /** 将 TOOL baseline 上的 ToolInvocation 推进到 WAITING_APPROVAL（TOOL_ACTIVE 上下文）。 */
-  static ToolInvocation setWaitingApproval(InMemoryHarnessStore store, ToolBaseline baseline) {
+  static ToolInvocation setWaitingApproval(
+      InMemoryBuiltinHarnessStore store, ToolBaseline baseline) {
     return setWaitingApproval(store, baseline.toolId());
   }
 
   /** 将指定 id 的 ToolInvocation 推进到 WAITING_APPROVAL（多 sibling 的 TOOL_ACTIVE 上下文）。 */
-  static ToolInvocation setWaitingApproval(InMemoryHarnessStore store, UUID toolId) {
+  static ToolInvocation setWaitingApproval(InMemoryBuiltinHarnessStore store, UUID toolId) {
     return store.transaction(
         tx -> {
           ToolInvocation tool = tx.lockToolInvocation(toolId).orElseThrow();
@@ -737,12 +738,12 @@ public final class HarnessRuntimeTestSupport {
   }
 
   /** 将 ToolInvocation 标记为 terminal 但未应用结果（TOOL_TERMINAL_PENDING）。 */
-  static ToolInvocation cancelTool(InMemoryHarnessStore store, ToolBaseline baseline) {
+  static ToolInvocation cancelTool(InMemoryBuiltinHarnessStore store, ToolBaseline baseline) {
     return cancelTool(store, baseline.toolId());
   }
 
   /** 将指定 id 的 ToolInvocation 标记为 terminal CANCELLED 但未应用结果。 */
-  static ToolInvocation cancelTool(InMemoryHarnessStore store, UUID toolId) {
+  static ToolInvocation cancelTool(InMemoryBuiltinHarnessStore store, UUID toolId) {
     return store.transaction(
         tx -> {
           ToolInvocation tool = tx.lockToolInvocation(toolId).orElseThrow();
@@ -753,7 +754,7 @@ public final class HarnessRuntimeTestSupport {
   }
 
   /** 将指定 id 的 ToolInvocation 从 READY 经 RUNNING 推进到 terminal UNKNOWN（outcome 尚未物化）。 */
-  static ToolInvocation unknownTool(InMemoryHarnessStore store, UUID toolId) {
+  static ToolInvocation unknownTool(InMemoryBuiltinHarnessStore store, UUID toolId) {
     return store.transaction(
         tx -> {
           ToolInvocation tool = tx.lockToolInvocation(toolId).orElseThrow();
@@ -768,7 +769,7 @@ public final class HarnessRuntimeTestSupport {
   }
 
   /** 将指定 tool 保持 READY 并完成 approval preflight（not-required approval，attempt 保持为 0）。 */
-  static ToolInvocation approveTool(InMemoryHarnessStore store, UUID toolId) {
+  static ToolInvocation approveTool(InMemoryBuiltinHarnessStore store, UUID toolId) {
     return store.transaction(
         tx -> {
           ToolInvocation tool = tx.lockToolInvocation(toolId).orElseThrow();
@@ -779,7 +780,7 @@ public final class HarnessRuntimeTestSupport {
   }
 
   /** 将已完成 approval preflight 的 tool 从 READY 推进到 RUNNING（attempt 推进到 1）。 */
-  static ToolInvocation markRunningTool(InMemoryHarnessStore store, UUID toolId) {
+  static ToolInvocation markRunningTool(InMemoryBuiltinHarnessStore store, UUID toolId) {
     return store.transaction(
         tx -> {
           ToolInvocation tool = tx.lockToolInvocation(toolId).orElseThrow();
@@ -790,7 +791,7 @@ public final class HarnessRuntimeTestSupport {
   }
 
   /** 在一次可重试尝试后将 RUNNING 转回 READY；已确认的 attempt 保持为正值。 */
-  static ToolInvocation retryReadyTool(InMemoryHarnessStore store, UUID toolId) {
+  static ToolInvocation retryReadyTool(InMemoryBuiltinHarnessStore store, UUID toolId) {
     return store.transaction(
         tx -> {
           ToolInvocation tool = tx.lockToolInvocation(toolId).orElseThrow();
@@ -801,13 +802,13 @@ public final class HarnessRuntimeTestSupport {
   }
 
   /** 将指定 tool 从 RUNNING 推进到 SUCCEEDED 并携带真实 result，但 result 尚未挂载。 */
-  static ToolInvocation succeedTool(InMemoryHarnessStore store, UUID toolId) {
+  static ToolInvocation succeedTool(InMemoryBuiltinHarnessStore store, UUID toolId) {
     return succeedTool(store, toolId, ToolEffectBatch.EMPTY);
   }
 
   /** 将指定 tool 从 RUNNING 推进到 SUCCEEDED，并原子携带真实 result 与 branch effects。 */
   static ToolInvocation succeedTool(
-      InMemoryHarnessStore store, UUID toolId, ToolEffectBatch effects) {
+      InMemoryBuiltinHarnessStore store, UUID toolId, ToolEffectBatch effects) {
     return store.transaction(
         tx -> {
           ToolInvocation tool = tx.lockToolInvocation(toolId).orElseThrow();
@@ -823,7 +824,8 @@ public final class HarnessRuntimeTestSupport {
   }
 
   /** 将 tool approval 标记为不需要（READY 配已决定的 neutral approval）。 */
-  static ToolInvocation markApprovalNotRequired(InMemoryHarnessStore store, ToolBaseline baseline) {
+  static ToolInvocation markApprovalNotRequired(
+      InMemoryBuiltinHarnessStore store, ToolBaseline baseline) {
     return store.transaction(
         tx -> {
           ToolInvocation tool = tx.lockToolInvocation(baseline.toolId()).orElseThrow();
@@ -835,7 +837,7 @@ public final class HarnessRuntimeTestSupport {
 
   /** ROOT -&gt; TURN_START(INPUT) -&gt; USER -&gt; ASSISTANT -&gt; TURN_END(continueModel=true)。 */
   static ContinuationBaseline seedContinuationChain(
-      InMemoryHarnessStore store, boolean headAtTurnEnd) {
+      InMemoryBuiltinHarnessStore store, boolean headAtTurnEnd) {
     return store.transaction(
         tx -> {
           UUID sessionId = tx.nextId();
@@ -864,7 +866,7 @@ public final class HarnessRuntimeTestSupport {
   }
 
   /** 另一个 Session，自带 ROOT（跨 Session 所有权校验 fixture）。 */
-  static UUID seedForeignRoot(InMemoryHarnessStore store) {
+  static UUID seedForeignRoot(InMemoryBuiltinHarnessStore store) {
     return store.transaction(
         tx -> {
           UUID sessionId = tx.nextId();
@@ -876,7 +878,7 @@ public final class HarnessRuntimeTestSupport {
   }
 
   /** 在同一 Session 内增加一条 Thread，指向现有 head Entry；名称须与 Session 内其他根不同。 */
-  static UUID seedThreadAt(InMemoryHarnessStore store, UUID headEntryId) {
+  static UUID seedThreadAt(InMemoryBuiltinHarnessStore store, UUID headEntryId) {
     return store.transaction(
         tx -> {
           UUID id = tx.nextId();
@@ -887,7 +889,7 @@ public final class HarnessRuntimeTestSupport {
   }
 
   /** 在同一 Session 内增加一条启用 YOLO 的 Thread，指向现有 head Entry。 */
-  static UUID seedYoloThreadAt(InMemoryHarnessStore store, UUID headEntryId) {
+  static UUID seedYoloThreadAt(InMemoryBuiltinHarnessStore store, UUID headEntryId) {
     return store.transaction(
         tx -> {
           UUID id = tx.nextId();
@@ -903,7 +905,7 @@ public final class HarnessRuntimeTestSupport {
    *
    * <p>用于断言人工输入的接受只推进目标 Thread，祖先链的递归投影与 Work 不被改写。
    */
-  static UUID seedWaitingChildrenParent(InMemoryHarnessStore store) {
+  static UUID seedWaitingChildrenParent(InMemoryBuiltinHarnessStore store) {
     return store.transaction(
         tx -> {
           UUID sessionId = tx.nextId();
@@ -934,7 +936,8 @@ public final class HarnessRuntimeTestSupport {
   }
 
   /** 在 {@code parentEntryId} 下插入一个 TURN_START 子节点，并返回其 id。 */
-  static UUID seedChildTurnStart(InMemoryHarnessStore store, UUID sessionId, UUID parentEntryId) {
+  static UUID seedChildTurnStart(
+      InMemoryBuiltinHarnessStore store, UUID sessionId, UUID parentEntryId) {
     return store.transaction(
         tx -> {
           UUID id = tx.nextId();
@@ -948,7 +951,7 @@ public final class HarnessRuntimeTestSupport {
    * updatedAt 倒退。
    */
   static HarnessStore storeAdvancingClockOnThreadLock(
-      InMemoryHarnessStore delegate, TestClock clock, Instant advanceTo) {
+      InMemoryBuiltinHarnessStore delegate, TestClock clock, Instant advanceTo) {
     return (HarnessStore)
         Proxy.newProxyInstance(
             HarnessStore.class.getClassLoader(),
@@ -980,7 +983,7 @@ public final class HarnessRuntimeTestSupport {
 
   /** 在 thread 上插入一条 QUEUED command（必须是尚无 command 的全新 thread）。 */
   static void seedQueuedCommand(
-      InMemoryHarnessStore store,
+      InMemoryBuiltinHarnessStore store,
       UUID threadId,
       long sequence,
       ThreadCommandPayload payload,
@@ -1005,7 +1008,7 @@ public final class HarnessRuntimeTestSupport {
   }
 
   /** 请求一条无 lease 的 THREAD Work 行（Resolver 邮箱的推测式围栏）。 */
-  static void seedThreadWork(InMemoryHarnessStore store, UUID threadId) {
+  static void seedThreadWork(InMemoryBuiltinHarnessStore store, UUID threadId) {
     store.transaction(
         tx -> {
           tx.lockThread(threadId).orElseThrow();
@@ -1015,7 +1018,7 @@ public final class HarnessRuntimeTestSupport {
   }
 
   /** 请求一条无 lease 的 MODEL Work 行（在 Model 活跃期间被围栏）。 */
-  static void seedModelWork(InMemoryHarnessStore store, UUID modelId) {
+  static void seedModelWork(InMemoryBuiltinHarnessStore store, UUID modelId) {
     store.transaction(
         tx -> {
           ModelInvocation model = builtin(tx).findModelInvocation(modelId).orElseThrow();
@@ -1026,7 +1029,7 @@ public final class HarnessRuntimeTestSupport {
   }
 
   /** 为指定 invocation 请求一条无 lease 的 TOOL Work 行。 */
-  static void seedToolWork(InMemoryHarnessStore store, UUID toolId) {
+  static void seedToolWork(InMemoryBuiltinHarnessStore store, UUID toolId) {
     store.transaction(
         tx -> {
           ToolInvocation tool = tx.findToolInvocation(toolId).orElseThrow();
@@ -1037,7 +1040,7 @@ public final class HarnessRuntimeTestSupport {
   }
 
   /** Claim THREAD Work 行，使其带有 active lease 而存在。 */
-  static void seedClaimedThreadWork(InMemoryHarnessStore store, UUID threadId) {
+  static void seedClaimedThreadWork(InMemoryBuiltinHarnessStore store, UUID threadId) {
     seedThreadWork(store, threadId);
     store.transaction(
         tx -> {
@@ -1428,7 +1431,8 @@ public final class HarnessRuntimeTestSupport {
   }
 
   /** 在 in-memory store 上运行 void 事务体的辅助方法。 */
-  static void inTransaction(InMemoryHarnessStore store, Consumer<HarnessStore.Transaction> body) {
+  static void inTransaction(
+      InMemoryBuiltinHarnessStore store, Consumer<HarnessStore.Transaction> body) {
     store.transaction(
         tx -> {
           body.accept(tx);

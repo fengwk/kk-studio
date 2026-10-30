@@ -17,7 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
@@ -31,7 +31,7 @@ class HarnessRuntimeStopCallbackFenceTest {
 
   @Test
   void modelClaimCannotCommitAfterStop() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
     HarnessRuntimeTestSupport.ModelBaseline baseline =
         seedModel(store, ModelInvocationStatus.RUNNING);
     seedThreadWork(store, baseline.threadId());
@@ -53,7 +53,7 @@ class HarnessRuntimeStopCallbackFenceTest {
 
   @Test
   void toolClaimCannotCommitAfterStop() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
     HarnessRuntimeTestSupport.ToolBaseline baseline = seedModelFreeToolBaseline(store);
     approveTool(store, baseline.toolId());
     markRunningTool(store, baseline.toolId());

@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.GoalSetting;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
@@ -23,7 +24,6 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
@@ -50,7 +50,7 @@ class TurnPlanBuilderGoalTest {
   /** 测试意图：一条 GOAL 命令必须同时产生 settings.goal 快照与含用户原文及当次行动要求的冻结 USER 消息，且两者属于同一个 TURN_START（原子生效）。 */
   @Test
   void goalInputWritesSettingsSnapshotAndFrozenUserMessageInOneTurn() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
     var baseline = seedBaseline(store);
     UUID key = seedCommand(store, baseline.threadId(), new GoalCommandPayload("finish migration"));
     ThreadCommand goal = command(store, baseline.threadId(), key);
@@ -88,7 +88,7 @@ class TurnPlanBuilderGoalTest {
    */
   @Test
   void repeatedGoalSetGetsFreshIdAndClearDropsGoalAtomically() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
     var baseline = seedBaseline(store);
     EntryPath base = path(store, baseline.threadId());
     UUID key = seedCommand(store, baseline.threadId(), new GoalCommandPayload("same text"));
@@ -163,7 +163,7 @@ class TurnPlanBuilderGoalTest {
   /** 测试意图：CONTINUATION 只消费 SET_*，排队的 GOAL 必须保持 queued（不得提前消费、不得改 settings、不得产生消息），只留下一次显式 wake。 */
   @Test
   void continuationLeavesQueuedGoalUntouched() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
     var baseline = seedBaseline(store);
     UUID key = seedCommand(store, baseline.threadId(), new GoalCommandPayload("later"));
     ThreadCommand goal = command(store, baseline.threadId(), key);

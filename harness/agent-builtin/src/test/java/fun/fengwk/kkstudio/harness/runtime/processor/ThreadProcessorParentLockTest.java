@@ -17,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
@@ -24,7 +25,6 @@ import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
@@ -148,7 +148,7 @@ class ThreadProcessorParentLockTest extends ThreadProcessorTestBase {
     assertEquals(parentHead, parentAfter.headEntryId());
   }
 
-  private static UUID seedRootSession(InMemoryHarnessStore store, UUID sessionId) {
+  private static UUID seedRootSession(InMemoryBuiltinHarnessStore store, UUID sessionId) {
     return store.transaction(
         tx -> {
           tx.insertSession(new Session(sessionId, "session-" + sessionId, NOW));
@@ -160,7 +160,7 @@ class ThreadProcessorParentLockTest extends ThreadProcessorTestBase {
   }
 
   private static void insertThread(
-      InMemoryHarnessStore store,
+      InMemoryBuiltinHarnessStore store,
       UUID threadId,
       UUID sessionId,
       UUID parentThreadId,
@@ -192,7 +192,11 @@ class ThreadProcessorParentLockTest extends ThreadProcessorTestBase {
   }
 
   private static void insertJoin(
-      InMemoryHarnessStore store, UUID joinId, UUID parentId, UUID childId, long sourceSequence) {
+      InMemoryBuiltinHarnessStore store,
+      UUID joinId,
+      UUID parentId,
+      UUID childId,
+      long sourceSequence) {
     store.transaction(
         tx -> {
           tx.lockThread(childId);

@@ -21,6 +21,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.store.BuiltinStore;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantErrorPayload;
@@ -37,7 +38,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
@@ -64,12 +64,12 @@ import java.util.function.Function;
  */
 class HarnessRuntimeStopIdleTest {
 
-  private InMemoryHarnessStore store;
+  private InMemoryBuiltinHarnessStore store;
   private HarnessRuntime runtime;
 
   @BeforeEach
   void setUp() {
-    store = new InMemoryHarnessStore();
+    store = new InMemoryBuiltinHarnessStore();
     runtime = runtime(store, Clock.fixed(T3, ZoneOffset.UTC));
   }
 
@@ -545,7 +545,7 @@ class HarnessRuntimeStopIdleTest {
   }
 
   /** 仅测试用的委托 store：其事务使每次 deleteWork 调用都失败。 */
-  private static HarnessStore storeFailingDeleteWork(InMemoryHarnessStore delegate) {
+  private static HarnessStore storeFailingDeleteWork(InMemoryBuiltinHarnessStore delegate) {
     return (HarnessStore)
         Proxy.newProxyInstance(
             HarnessStore.class.getClassLoader(),

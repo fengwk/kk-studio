@@ -31,6 +31,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
@@ -52,7 +53,6 @@ import fun.fengwk.kkstudio.harness.runtime.port.TurnResolveTransientException;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
@@ -77,7 +77,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
   void entryMutationsLockSessionBeforeThread() {
     // 单事务路径经过 Session-first 守卫：先锁 Thread 会确定性失败，而不是等待偶发数据库死锁。
     Fixture fixture = fixture();
-    InMemoryHarnessStore store = fixture.store;
+    InMemoryBuiltinHarnessStore store = fixture.store;
     HarnessStore wrapped = wrap(store);
     ThreadProcessor processor =
         new ThreadProcessor(

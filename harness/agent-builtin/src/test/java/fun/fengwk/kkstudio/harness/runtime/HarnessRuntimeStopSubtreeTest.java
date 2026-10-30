@@ -28,6 +28,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.store.BuiltinStore;
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
@@ -41,7 +42,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
@@ -73,12 +73,12 @@ import java.util.function.Function;
  */
 class HarnessRuntimeStopSubtreeTest {
 
-  private InMemoryHarnessStore store;
+  private InMemoryBuiltinHarnessStore store;
   private HarnessRuntime runtime;
 
   @BeforeEach
   void setUp() {
-    store = new InMemoryHarnessStore();
+    store = new InMemoryBuiltinHarnessStore();
     runtime = runtime(store, Clock.fixed(Instant.ofEpochMilli(5_000), ZoneOffset.UTC));
   }
 
@@ -625,7 +625,7 @@ class HarnessRuntimeStopSubtreeTest {
   }
 
   private static HarnessStore recordingStore(
-      InMemoryHarnessStore delegate, List<String> lockCalls) {
+      InMemoryBuiltinHarnessStore delegate, List<String> lockCalls) {
     return (HarnessStore)
         Proxy.newProxyInstance(
             HarnessStore.class.getClassLoader(),

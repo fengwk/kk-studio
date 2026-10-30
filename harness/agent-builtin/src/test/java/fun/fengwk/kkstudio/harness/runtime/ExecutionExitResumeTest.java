@@ -12,10 +12,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitKind;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitState;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
@@ -32,7 +32,7 @@ class ExecutionExitResumeTest {
 
   @Test
   void stoppedThreadRejectsResumeUntilItsExecutionIsConfirmed() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
     HarnessRuntime runtime =
         HarnessRuntimeTestSupport.runtime(store, Clock.fixed(T0, ZoneOffset.UTC));
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
@@ -82,7 +82,7 @@ class ExecutionExitResumeTest {
   @Test
   void stoppedThreadRejectsTrustedCustomAndGoalWhileItsExecutionIsUnconfirmed() {
     // 测试意图：CUSTOM 与 GOAL 都是可信 user-like 输入，STOPPED + unconfirmed 时同样拒绝恢复且零写入。
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
     HarnessRuntime runtime =
         HarnessRuntimeTestSupport.runtime(store, Clock.fixed(T0, ZoneOffset.UTC));
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
@@ -123,7 +123,7 @@ class ExecutionExitResumeTest {
 
   private static void assertReplayKeepsStopped(
       NewThreadCommand original, UUID unconfirmedExecutionId) {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryBuiltinHarnessStore store = new InMemoryBuiltinHarnessStore();
     HarnessRuntime runtime =
         HarnessRuntimeTestSupport.runtime(store, Clock.fixed(T0, ZoneOffset.UTC));
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
@@ -158,7 +158,7 @@ class ExecutionExitResumeTest {
   }
 
   private static void registerUnconfirmed(
-      InMemoryHarnessStore store, UUID threadId, UUID executionId) {
+      InMemoryBuiltinHarnessStore store, UUID threadId, UUID executionId) {
     store.transaction(
         tx -> {
           tx.lockThread(threadId);

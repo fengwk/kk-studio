@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 
@@ -23,7 +24,7 @@ class InMemoryHarnessStoreAfterCommitTest {
   /** 测试意图：动作在提交状态已可见之后、且 transaction 返回之前执行恰一次。 */
   @Test
   void afterCommitRunsExactlyOnceAfterTheCommittedStateIsVisible() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryHarnessStore store = new InMemoryBuiltinHarnessStore();
     Baseline baseline = seedThreadBaseline(store);
     long before =
         store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow().version());
@@ -55,7 +56,7 @@ class InMemoryHarnessStoreAfterCommitTest {
   /** 测试意图：callback 抛异常（rollback）时登记的动作被丢弃，且不会被后续提交的事务误执行。 */
   @Test
   void afterCommitIsDiscardedOnRollbackAndNeverRunsLater() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryHarnessStore store = new InMemoryBuiltinHarnessStore();
     List<String> events = new ArrayList<>();
 
     assertThrows(
@@ -80,7 +81,7 @@ class InMemoryHarnessStoreAfterCommitTest {
   /** 测试意图：事务外注册是编程错误，必须立即拒绝，而不是静默延迟到未来某个事务。 */
   @Test
   void afterCommitOutsideATransactionIsRejected() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryHarnessStore store = new InMemoryBuiltinHarnessStore();
     assertThrows(IllegalStateException.class, () -> store.afterCommit(() -> {}));
     assertThrows(NullPointerException.class, () -> store.afterCommit(null));
   }
@@ -88,6 +89,6 @@ class InMemoryHarnessStoreAfterCommitTest {
   /** 内存实现没有环境事务：手动压缩的事务外守卫始终放行。 */
   @Test
   void assertNoAmbientTransactionIsANoOpForTheInMemoryStore() {
-    new InMemoryHarnessStore().assertNoAmbientTransaction();
+    new InMemoryBuiltinHarnessStore().assertNoAmbientTransaction();
   }
 }
