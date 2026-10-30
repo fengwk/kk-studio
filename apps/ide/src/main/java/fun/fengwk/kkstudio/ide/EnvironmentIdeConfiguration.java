@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.ide;
 
+import io.micrometer.context.ContextExecutorService;
+import io.micrometer.context.ContextSnapshotFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -51,8 +53,9 @@ public class EnvironmentIdeConfiguration {
 
   @Bean(destroyMethod = "shutdownNow")
   @ConditionalOnMissingBean(name = "ideLeaseExecutor")
-  public ExecutorService ideLeaseExecutor() {
-    return Executors.newVirtualThreadPerTaskExecutor();
+  public ExecutorService ideLeaseExecutor(ContextSnapshotFactory contextSnapshotFactory) {
+    return ContextExecutorService.wrap(
+        Executors.newVirtualThreadPerTaskExecutor(), contextSnapshotFactory);
   }
 
   @Bean

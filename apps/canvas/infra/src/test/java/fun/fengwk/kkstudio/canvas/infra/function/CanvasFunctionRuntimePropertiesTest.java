@@ -3,7 +3,9 @@ package fun.fengwk.kkstudio.canvas.infra.function;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import io.micrometer.context.ContextSnapshotFactory;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.SynchronousQueue;
@@ -29,9 +31,12 @@ class CanvasFunctionRuntimePropertiesTest {
   void workerExecutorHasNoInMemoryQueue() {
     CanvasFunctionRuntimeProperties properties = new CanvasFunctionRuntimeProperties();
     ExecutorService executor =
-        new CanvasFunctionRuntimeConfiguration().canvasFunctionWorkerExecutor(properties);
+        new CanvasFunctionRuntimeConfiguration()
+            .canvasFunctionWorkerExecutor(
+                properties, ContextSnapshotFactory.builder().clearMissing(true).build());
     try {
-      ThreadPoolExecutor pool = (ThreadPoolExecutor) executor;
+      ThreadPoolExecutor pool =
+          (ThreadPoolExecutor) ReflectionTestUtils.getField(executor, "executorService");
       assertEquals(2, pool.getCorePoolSize());
       assertEquals(2, pool.getMaximumPoolSize());
       assertEquals(SynchronousQueue.class, pool.getQueue().getClass());

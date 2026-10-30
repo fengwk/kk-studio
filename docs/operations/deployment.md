@@ -31,12 +31,7 @@ local/test/reliability/distributed 共用的 MinIO 镜像、平台限制与 mc �
 env JAVA_HOME="$JAVA_HOME_21" \
   mvn -B -ntp -Pdistribution -pl web -am clean package
 test -f web/target/kk-studio-web-5.0.1.jar
-sh scripts/dev/lib/extract-convention4j-agent.sh "$JAVA_HOME_21/bin/jar" \
-  web/target/kk-studio-web-5.0.1.jar \
-  web/target/convention4j-agent/convention4j-agent.jar
-"$JAVA_HOME_21/bin/java" \
-  -javaagent:web/target/convention4j-agent/convention4j-agent.jar \
-  -jar web/target/kk-studio-web-5.0.1.jar
+"$JAVA_HOME_21/bin/java" -jar web/target/kk-studio-web-5.0.1.jar
 ```
 
 `distribution` profile 在 `prepare-package` 阶段由 [web/pom.xml](../../web/pom.xml) 的
@@ -45,9 +40,8 @@ sh scripts/dev/lib/extract-convention4j-agent.sh "$JAVA_HOME_21/bin/jar" \
 `spring-boot-maven-plugin` 写入 `BOOT-INF/classes/static`。普通 `mvn test` / `mvn package`
 不激活该 profile。
 
-`clean package` 会重建 reactor 的构建产物；提取脚本写入指定输出目录、更新稳定别名，
-并删除同目录中其他版本的 `convention4j-agent-*.jar`，不要将输出目录指向需要保留多个版本的安装目录。
-运行 JAR 会连接配置的数据面并按 profile 初始化，先确认数据库、S3、Flyway owner 与 worker 的归属。
+`clean package` 会重建 reactor 的构建产物。运行 JAR 会连接配置的数据面并按 profile 初始化，
+先确认数据库、S3、Flyway owner 与 worker 的归属。
 
 可选 Plugin 是构建期依赖，不从运行目录动态发现。把对应 artifact 以 runtime scope 加入
 [`web/pom.xml`](../../web/pom.xml) 后，上面的 `-pl web -am` 会构建并把它写入 Fat JAR；
@@ -79,14 +73,15 @@ App 镜像由 [deploy/local/Dockerfile](../../deploy/local/Dockerfile) 构建，
 | builder | `maven:3.9.11-eclipse-temurin-21`，BuildKit Maven/npm cache，`mvn -U -Pdistribution -pl web -am -DskipTests -B -ntp clean package` |
 | runtime | `eclipse-temurin:21.0.8_9-jre-jammy`，安装 `ffmpeg`/`ffprobe`，清理 apt lists |
 | user | `kkstudio:kkstudio`，uid/gid `10001`，`USER kkstudio` |
-| process | `java -javaagent:/app/convention4j-agent/convention4j-agent.jar -jar /app/app.jar`，`JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=75.0` |
+| process | `java -jar /app/app.jar`，`JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=75.0` |
 | health | `curl -fsS http://127.0.0.1:8080/actuator/health`，15s interval、5s timeout、60s start period、6 retries |
 
 builder 接受 `KK_STUDIO_BUILD_HTTP_PROXY`、`KK_STUDIO_BUILD_HTTPS_PROXY`、
 `KK_STUDIO_BUILD_NO_PROXY` 和 `KK_STUDIO_MAVEN_BUILD_OPTS`；这些值只用于 build，不复制进
-runtime image。构建时从 Fat JAR 提取同版本 `convention4j-agent`，保留 manifest
-`Boot-Class-Path` 要求的版本化文件名并通过稳定别名启动 JVM；它负责线程池中的 TTL/MDC
-上下文透传，不替代跨服务的 Trace 传播。runtime image 不含 Maven、Node 和源码。
+runtime image。应用使用 Spring Boot 管理的 Micrometer Tracing 与 OpenTelemetry bridge，
+由官方 Observation 生命周期生成 span，并在指定的业务线程池和虚拟线程边界使用
+`ContextExecutorService` 透传上下文；不依赖 javaagent，也不替代跨服务的 W3C `traceparent`
+传播。runtime image 不含 Maven、Node 和源码。
 
 Compose 栈中的 App 依赖 PostgreSQL 与 MinIO `healthy`，并等待一次性的 `minio-init` 成功退出
 （`service_completed_successfully`）后才启动；启动期严格验证 S3 连接属性并探测 bucket 可访问性。
