@@ -24,7 +24,10 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnCapabilities;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnMediaCapabilities;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.runtime.store.EntryStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.ThreadStore;
+import fun.fengwk.kkstudio.harness.runtime.store.ToolStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderResourceMaterializer;
@@ -54,6 +57,9 @@ class PlatformResourceContentReaderMediaTest {
 
   private HarnessStore store;
   private HarnessStore.Transaction transaction;
+  private ThreadStore threadStore;
+  private ToolStore toolStore;
+  private EntryStore entryStore;
   private SessionBlobRefManager refs;
   private StorageBlobManager blobManager;
   private StorageBlobContentService blobs;
@@ -69,6 +75,12 @@ class PlatformResourceContentReaderMediaTest {
   void setUp() {
     store = mock(HarnessStore.class);
     transaction = mock(HarnessStore.Transaction.class);
+    threadStore = mock(ThreadStore.class);
+    toolStore = mock(ToolStore.class);
+    entryStore = mock(EntryStore.class);
+    when(transaction.threads()).thenReturn(threadStore);
+    when(transaction.tools()).thenReturn(toolStore);
+    when(transaction.entries()).thenReturn(entryStore);
     refs = mock(SessionBlobRefManager.class);
     blobManager = mock(StorageBlobManager.class);
     blobs = mock(StorageBlobContentService.class);
@@ -88,14 +100,14 @@ class PlatformResourceContentReaderMediaTest {
 
     ThreadState thread = mock(ThreadState.class);
     when(thread.sessionId()).thenReturn(sessionId);
-    when(transaction.findThread(threadId)).thenReturn(Optional.of(thread));
+    when(threadStore.find(threadId)).thenReturn(Optional.of(thread));
     when(refs.contains(sessionId, blobId)).thenReturn(true);
 
     ToolInvocation invocation = mock(ToolInvocation.class);
     when(invocation.call()).thenReturn(new ToolCall(CALL_ID, "read", "{}"));
     when(invocation.threadId()).thenReturn(threadId);
     when(invocation.turnStartEntryId()).thenReturn(turnStartEntryId);
-    when(transaction.findToolInvocation(invocationId)).thenReturn(Optional.of(invocation));
+    when(toolStore.find(invocationId)).thenReturn(Optional.of(invocation));
   }
 
   /** 支持的模型与协议下，媒体读取返回指向同一已授权 Blob 的 durable 引用，且不读取任何字节。 */
@@ -388,6 +400,6 @@ class PlatformResourceContentReaderMediaTest {
     when(entry.payload()).thenReturn(start);
     EntryPath path = mock(EntryPath.class);
     when(path.head()).thenReturn(entry);
-    when(transaction.loadEntryPath(turnStartEntryId)).thenReturn(path);
+    when(entryStore.loadPath(turnStartEntryId)).thenReturn(path);
   }
 }

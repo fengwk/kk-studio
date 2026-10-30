@@ -57,7 +57,7 @@ public final class SessionFirstThreadLockStore {
               }
               if (method.getName().equals("lockThread")) {
                 UUID threadId = (UUID) arguments[0];
-                ThreadState thread = transaction.findThread(threadId).orElse(null);
+                ThreadState thread = transaction.threads().find(threadId).orElse(null);
                 if (thread != null && !lockedSessions.contains(thread.sessionId())) {
                   throw new AssertionError(
                       "thread " + threadId + " was locked before session " + thread.sessionId());

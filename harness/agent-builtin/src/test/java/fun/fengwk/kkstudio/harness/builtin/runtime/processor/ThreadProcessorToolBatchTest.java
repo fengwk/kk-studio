@@ -139,7 +139,8 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
     assertNull(
         fixture
             .store
-            .transaction(tx -> builtin(tx).findModelInvocation(chain.modelInvocationId()))
+            .transaction(
+                tx -> builtin(fixture.store, tx).findModelInvocation(chain.modelInvocationId()))
             .orElse(null));
 
     // claim2：下一 claim 才创建 continuation Model 并请求 MODEL Work（consumed 本 claim，THREAD 行被清除）。
@@ -156,7 +157,7 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
         inTx(
                 fixture,
                 tx ->
-                    builtin(tx)
+                    builtin(fixture.store, tx)
                         .findModelInvocationByTurn(chain.turn().threadId(), entries.get(7).id()))
             .orElseThrow();
     assertNotNull(
@@ -185,8 +186,8 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
     ToolInvocation ready = tool(fixture.store, chain.toolInvocationIds().getFirst());
     fixture.store.transaction(
         tx -> {
-          tx.lockToolInvocation(ready.id());
-          tx.updateToolInvocations(List.of(ready.requestApproval("needs approval", NOW)));
+          tx.tools().lock(ready.id());
+          tx.tools().update(List.of(ready.requestApproval("needs approval", NOW)));
           return null;
         });
     requestThreadWork(fixture.store, chain.turn().threadId());
@@ -199,11 +200,17 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
     ToolInvocation approved = tool(fixture.store, ready.id());
     fixture.store.transaction(
         tx -> {
-          tx.lockToolInvocation(approved.id());
-          tx.updateToolInvocations(
-              List.of(
-                  approved.decideApproval(
-                      ToolApprovalDecision.ALLOWED, UUID.randomUUID(), "tester", null, NOW, NOW)));
+          tx.tools().lock(approved.id());
+          tx.tools()
+              .update(
+                  List.of(
+                      approved.decideApproval(
+                          ToolApprovalDecision.ALLOWED,
+                          UUID.randomUUID(),
+                          "tester",
+                          null,
+                          NOW,
+                          NOW)));
           return null;
         });
     transitionTool(fixture.store, ready.id(), tool -> tool.markRunning(NOW));
@@ -259,20 +266,22 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
     UUID assistantId =
         fixture.store.transaction(
             tx -> {
-              var thread = tx.lockThread(turn.threadId()).orElseThrow();
+              var thread = tx.threads().lock(turn.threadId()).orElseThrow();
               UUID id = tx.nextId();
               ModelSelection selection =
                   ModelSelection.model(requestSpec.model().modelName(), requestSpec.variant().id());
-              tx.insertEntry(
-                  new Entry(
-                      id,
-                      turn.sessionId(),
-                      turn.userEntryId(),
-                      new BuiltinHistoryPayloadMapper()
-                          .assistantPayload(response, requestSpec.toolBindings(), selection, NOW),
-                      NOW,
-                      replayState));
-              tx.updateThread(thread.advanceHead(id, NOW));
+              tx.entries()
+                  .insert(
+                      new Entry(
+                          id,
+                          turn.sessionId(),
+                          turn.userEntryId(),
+                          new BuiltinHistoryPayloadMapper()
+                              .assistantPayload(
+                                  response, requestSpec.toolBindings(), selection, NOW),
+                          NOW,
+                          replayState));
+              tx.threads().update(thread.advanceHead(id, NOW));
               return id;
             });
     transitionModel(fixture.store, modelId, model -> model.attachResultEntry(assistantId, NOW));
@@ -305,7 +314,10 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
     assertInstanceOf(TurnEndPayload.class, entries.get(6).payload());
     assertTrue(toolsByAssistant(fixture.store, assistantId).isEmpty());
     assertNull(
-        fixture.store.transaction(tx -> builtin(tx).findModelInvocation(modelId)).orElse(null));
+        fixture
+            .store
+            .transaction(tx -> builtin(fixture.store, tx).findModelInvocation(modelId))
+            .orElse(null));
   }
 
   @Test
@@ -353,7 +365,8 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
     assertNull(
         fixture
             .store
-            .transaction(tx -> builtin(tx).findModelInvocation(chain.modelInvocationId()))
+            .transaction(
+                tx -> builtin(fixture.store, tx).findModelInvocation(chain.modelInvocationId()))
             .orElse(null));
     assertNotNull(
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, chain.turn().threadId())));
@@ -401,7 +414,8 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
     assertNull(
         fixture
             .store
-            .transaction(tx -> builtin(tx).findModelInvocation(chain.modelInvocationId()))
+            .transaction(
+                tx -> builtin(fixture.store, tx).findModelInvocation(chain.modelInvocationId()))
             .orElse(null));
 
     // claim2：continuation 使 branch 到达 10 条（TURN_START 追加在 TURN_END 后）。
@@ -477,12 +491,13 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
 
     // 临时行真实物理删除后，Entry 仍能独立核查原冻结 binding。
     for (ToolInvocation original : originals) {
-      assertTrue(fixture.store.transaction(tx -> tx.findToolInvocation(original.id())).isEmpty());
+      assertTrue(fixture.store.transaction(tx -> tx.tools().find(original.id())).isEmpty());
     }
     assertTrue(
         fixture
             .store
-            .transaction(tx -> builtin(tx).findModelInvocation(chain.modelInvocationId()))
+            .transaction(
+                tx -> builtin(fixture.store, tx).findModelInvocation(chain.modelInvocationId()))
             .isEmpty());
 
     // claim2：下一 claim 才做 continuation。
@@ -510,7 +525,8 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
     assertNotNull(
         toolFixture
             .store
-            .transaction(tx -> builtin(tx).findModelInvocation(chain.modelInvocationId()))
+            .transaction(
+                tx -> builtin(toolFixture.store, tx).findModelInvocation(chain.modelInvocationId()))
             .orElse(null));
     assertEquals(4, path(toolFixture.store, chain.turn().threadId()).entries().size());
   }

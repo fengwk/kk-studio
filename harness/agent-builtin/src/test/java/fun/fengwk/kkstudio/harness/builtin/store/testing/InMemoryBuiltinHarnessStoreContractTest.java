@@ -90,8 +90,10 @@ class InMemoryBuiltinHarnessStoreContractTest {
             () ->
                 store.transaction(
                     tx -> {
-                      builtin(tx).freezeGroupMember(groupName, groupVersion, "model-a", "v1", T4);
-                      builtin(tx).freezeGroupMember(groupName, groupVersion, "model-b", "v1", T5);
+                      builtin(store, tx)
+                          .freezeGroupMember(groupName, groupVersion, "model-a", "v1", T4);
+                      builtin(store, tx)
+                          .freezeGroupMember(groupName, groupVersion, "model-b", "v1", T5);
                       throw failure;
                     })));
 
@@ -120,7 +122,7 @@ class InMemoryBuiltinHarnessStoreContractTest {
             () ->
                 store.transaction(
                     tx -> {
-                      builtin(tx).insertModelInvocation(invocation);
+                      builtin(store, tx).insertModelInvocation(invocation);
                       return null;
                     }));
 
@@ -147,11 +149,11 @@ class InMemoryBuiltinHarnessStoreContractTest {
             () ->
                 store.transaction(
                     tx -> {
-                      builtin(tx).updateModelInvocation(invocation);
+                      builtin(store, tx).updateModelInvocation(invocation);
                       return null;
                     }));
 
-    assertEquals(notLocked("MODEL", "model:" + missingModelId), failure.getMessage());
+    assertEquals(notLocked("DRIVER", "driver:" + missingModelId), failure.getMessage());
   }
 
   @Test
@@ -166,8 +168,8 @@ class InMemoryBuiltinHarnessStoreContractTest {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(baseline.threadId());
-          builtin(tx)
+          tx.threads().lock(baseline.threadId());
+          builtin(store, tx)
               .insertModelInvocation(
                   modelInvocation(
                       modelId,
@@ -181,24 +183,25 @@ class InMemoryBuiltinHarnessStoreContractTest {
     inTransaction(
         store,
         tx ->
-            tx.insertToolInvocations(
-                List.of(
-                    toolInvocation(
-                        TestIds.id(10),
-                        baseline.threadId(),
-                        baseline.turnStartEntryId(),
-                        assistantEntryId,
-                        0,
-                        "call-1",
-                        ToolInvocationStatus.READY,
-                        T2))));
+            tx.tools()
+                .insert(
+                    List.of(
+                        toolInvocation(
+                            TestIds.id(10),
+                            baseline.threadId(),
+                            baseline.turnStartEntryId(),
+                            assistantEntryId,
+                            0,
+                            "call-1",
+                            ToolInvocationStatus.READY,
+                            T2))));
 
     IllegalStateException failure =
         assertThrows(
             IllegalStateException.class,
-            () -> store.transaction(tx -> builtin(tx).deleteModelInvocation(modelId)));
+            () -> store.transaction(tx -> builtin(store, tx).deleteModelInvocation(modelId)));
 
-    assertEquals(notLocked("MODEL", "model:" + modelId), failure.getMessage());
+    assertEquals(notLocked("DRIVER", "driver:" + modelId), failure.getMessage());
   }
 
   @Test
@@ -217,12 +220,12 @@ class InMemoryBuiltinHarnessStoreContractTest {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(baseline.threadId());
-          builtin(tx).insertModelInvocation(invocation);
+          tx.threads().lock(baseline.threadId());
+          builtin(store, tx).insertModelInvocation(invocation);
           IllegalArgumentException failure =
               assertThrows(
                   IllegalArgumentException.class,
-                  () -> builtin(tx).insertModelInvocation(invocation));
+                  () -> builtin(store, tx).insertModelInvocation(invocation));
           assertEquals("duplicate model invocation id " + invocation.id(), failure.getMessage());
         });
   }
@@ -262,7 +265,7 @@ class InMemoryBuiltinHarnessStoreContractTest {
             () ->
                 store.transaction(
                     tx -> {
-                      builtin(tx).insertModelInvocation(nonCanonical);
+                      builtin(store, tx).insertModelInvocation(nonCanonical);
                       return null;
                     }));
 
@@ -278,7 +281,7 @@ class InMemoryBuiltinHarnessStoreContractTest {
     inTransaction(
         store,
         tx ->
-            builtin(tx)
+            builtin(store, tx)
                 .freezeGroupMember(
                     groupName, groupVersion, memberModelName, memberVariant, cooldownUntil));
   }
@@ -287,7 +290,7 @@ class InMemoryBuiltinHarnessStoreContractTest {
       String groupName, long groupVersion, String memberModelName, String memberVariant) {
     return store.transaction(
         tx ->
-            builtin(tx)
+            builtin(store, tx)
                 .isGroupMemberCooling(groupName, groupVersion, memberModelName, memberVariant));
   }
 

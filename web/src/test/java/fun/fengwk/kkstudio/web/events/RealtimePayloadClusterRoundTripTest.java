@@ -138,7 +138,7 @@ class RealtimePayloadClusterRoundTripTest {
             ignored -> {
               throw new AssertionError("fetched payload must not be re-published");
             },
-            () -> false,
+            thread -> false,
             payloadClient(),
             payloadBuffer,
             resolver);
@@ -168,7 +168,7 @@ class RealtimePayloadClusterRoundTripTest {
             ignored -> {
               throw new AssertionError("must not echo");
             },
-            () -> false,
+            thread -> false,
             payloadClient(),
             payloadBuffer,
             resolver);
@@ -198,7 +198,7 @@ class RealtimePayloadClusterRoundTripTest {
             ignored -> {
               throw new AssertionError("must not echo");
             },
-            () -> false,
+            thread -> false,
             payloadClient(),
             payloadBuffer,
             resolver);

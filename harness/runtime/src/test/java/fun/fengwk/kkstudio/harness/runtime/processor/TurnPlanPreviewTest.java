@@ -138,11 +138,11 @@ class TurnPlanPreviewTest {
 
   private static EntryPath path(InMemoryHarnessStore store, UUID threadId) {
     return store.transaction(
-        tx -> tx.loadEntryPath(tx.findThread(threadId).orElseThrow().headEntryId()));
+        tx -> tx.entries().loadPath(tx.threads().find(threadId).orElseThrow().headEntryId()));
   }
 
   private static Entry entry(InMemoryHarnessStore store, UUID entryId) {
-    return store.transaction(tx -> tx.findEntry(entryId)).orElseThrow();
+    return store.transaction(tx -> tx.entries().find(entryId)).orElseThrow();
   }
 
   private static NewThreadCommand command(SetModelCommandPayload payload) {

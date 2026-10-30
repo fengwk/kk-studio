@@ -55,8 +55,7 @@ class PostgresqlContributorCustomPathTest {
 
     // 独立冷缓存事务执行窄查询：不应触发全路径 CTE（with recursive entry_path）
     List<Entry> entries =
-        store.transaction(
-            tx -> tx.loadContributorCustomEntriesOnPath(customId, "test.contributor"));
+        store.transaction(tx -> tx.entries().loadContributorCustom(customId, "test.contributor"));
     assertEquals(1, entries.size());
     assertEquals(customId, entries.get(0).id());
     assertEquals(0, cteCounter.get(), "冷缓存窄查询不执行 with recursive entry_path 全路径 CTE");
@@ -78,12 +77,12 @@ class PostgresqlContributorCustomPathTest {
     store.transaction(
         tx -> {
           // 先显式加载完整 path，触发 1 次全路径 CTE 写入缓存
-          tx.loadEntryPath(customId);
+          tx.entries().loadPath(customId);
           assertEquals(1, cteCounter.get(), "loadEntryPath 执行 1 次全路径 CTE");
 
           // 随后执行窄查询，直接从 entryPathCache 过滤，不产生额外的全路径 CTE
           List<Entry> cachedEntries =
-              tx.loadContributorCustomEntriesOnPath(customId, "test.contributor");
+              tx.entries().loadContributorCustom(customId, "test.contributor");
           assertEquals(1, cachedEntries.size());
           assertEquals(customId, cachedEntries.get(0).id());
           assertEquals(1, cteCounter.get(), "缓存命中时不产生额外的全路径 CTE");

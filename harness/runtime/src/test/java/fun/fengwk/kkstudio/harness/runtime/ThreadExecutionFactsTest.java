@@ -73,7 +73,8 @@ class ThreadExecutionFactsTest {
   void queuedCommandsAloneConstituteWork() {
     // 测试意图：只要存在尚未发动的排队命令即构成工作，与本地上下文无关。
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
-    ThreadState before = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
+    ThreadState before =
+        store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow());
     runtime.acceptCommands(
         new AcceptCommandsCommand(
             new AcceptCommandsTarget.Thread(baseline.threadId()),
@@ -238,13 +239,15 @@ class ThreadExecutionFactsTest {
           UUID assistantId = tx.nextId();
           UUID turnEndId = tx.nextId();
           UUID threadId = tx.nextId();
-          tx.insertSession(session(sessionId));
-          tx.insertEntry(rootEntry(rootId, sessionId));
-          tx.insertEntry(turnStartEntry(turnStartId, sessionId, rootId, T3, foreignOwnerThreadId));
-          tx.insertEntry(userMessageEntry(userId, sessionId, turnStartId, T3));
-          tx.insertEntry(assistantEntry(assistantId, sessionId, userId, T3));
-          tx.insertEntry(turnEndEntry(turnEndId, sessionId, assistantId, T3, turnStartId, true));
-          tx.insertThread(thread(threadId, sessionId, turnEndId));
+          tx.sessions().insert(session(sessionId));
+          tx.entries().insert(rootEntry(rootId, sessionId));
+          tx.entries()
+              .insert(turnStartEntry(turnStartId, sessionId, rootId, T3, foreignOwnerThreadId));
+          tx.entries().insert(userMessageEntry(userId, sessionId, turnStartId, T3));
+          tx.entries().insert(assistantEntry(assistantId, sessionId, userId, T3));
+          tx.entries()
+              .insert(turnEndEntry(turnEndId, sessionId, assistantId, T3, turnStartId, true));
+          tx.threads().insert(thread(threadId, sessionId, turnEndId));
           return threadId;
         });
   }
@@ -261,17 +264,18 @@ class ThreadExecutionFactsTest {
           UUID turnEndId = tx.nextId();
           UUID settingsId = tx.nextId();
           UUID threadId = tx.nextId();
-          tx.insertSession(session(sessionId));
-          tx.insertEntry(rootEntry(rootId, sessionId));
-          tx.insertEntry(turnStartEntry(turnStartId, sessionId, rootId, T3, threadId));
-          tx.insertEntry(userMessageEntry(userId, sessionId, turnStartId, T3));
-          tx.insertEntry(assistantEntry(assistantId, sessionId, userId, T3));
-          tx.insertEntry(turnEndEntry(turnEndId, sessionId, assistantId, T3, turnStartId, true));
+          tx.sessions().insert(session(sessionId));
+          tx.entries().insert(rootEntry(rootId, sessionId));
+          tx.entries().insert(turnStartEntry(turnStartId, sessionId, rootId, T3, threadId));
+          tx.entries().insert(userMessageEntry(userId, sessionId, turnStartId, T3));
+          tx.entries().insert(assistantEntry(assistantId, sessionId, userId, T3));
+          tx.entries()
+              .insert(turnEndEntry(turnEndId, sessionId, assistantId, T3, turnStartId, true));
           Entry settingsEntry =
               new Entry(
                   settingsId, sessionId, turnEndId, new SettingsPayload(settings(), threadId), T3);
-          tx.insertEntry(settingsEntry);
-          tx.insertThread(thread(threadId, sessionId, settingsId));
+          tx.entries().insert(settingsEntry);
+          tx.threads().insert(thread(threadId, sessionId, settingsId));
           return threadId;
         });
   }
@@ -280,8 +284,8 @@ class ThreadExecutionFactsTest {
   private void markControl(UUID threadId, ThreadExecutionControl control) {
     store.transaction(
         tx -> {
-          ThreadState thread = tx.lockThread(threadId).orElseThrow();
-          tx.updateThread(thread.changeExecutionControl(control, T5));
+          ThreadState thread = tx.threads().lock(threadId).orElseThrow();
+          tx.threads().update(thread.changeExecutionControl(control, T5));
           return null;
         });
   }

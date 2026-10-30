@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.web.controller;
 
-import fun.fengwk.convention4j.api.result.Result;
-import fun.fengwk.convention4j.common.result.Results;
 import lombok.AllArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -14,6 +12,7 @@ import fun.fengwk.kkstudio.platform.settings.SystemSettingsService;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSchemaDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsUpdateDTO;
+import fun.fengwk.kkstudio.web.api.ApiResponse;
 
 /** 全局 system settings 聚合的 GET / PUT HTTP 边界。 */
 @AllArgsConstructor
@@ -25,17 +24,17 @@ public class StudioSystemSettingsController {
   private final SystemSettingsSchemaProvider systemSettingsSchemaProvider;
 
   @GetMapping
-  public Result<SystemSettingsDTO> get() {
-    return Results.ok(systemSettingsService.get());
+  public ApiResponse<SystemSettingsDTO> get() {
+    return ApiResponse.ok(systemSettingsService.get());
   }
 
   @GetMapping("/schema")
-  public Result<SystemSettingsSchemaDTO> schema() {
-    return Results.ok(systemSettingsSchemaProvider.get());
+  public ApiResponse<SystemSettingsSchemaDTO> schema() {
+    return ApiResponse.ok(systemSettingsSchemaProvider.get());
   }
 
   @PutMapping
-  public Result<SystemSettingsDTO> update(@RequestBody SystemSettingsUpdateDTO updateDTO) {
-    return Results.ok(systemSettingsService.update(updateDTO));
+  public ApiResponse<SystemSettingsDTO> update(@RequestBody SystemSettingsUpdateDTO updateDTO) {
+    return ApiResponse.ok(systemSettingsService.update(updateDTO));
   }
 }

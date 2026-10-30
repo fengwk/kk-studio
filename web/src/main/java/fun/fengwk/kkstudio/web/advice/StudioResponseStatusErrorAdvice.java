@@ -1,12 +1,10 @@
 package fun.fengwk.kkstudio.web.advice;
 
-import fun.fengwk.convention4j.api.code.ImmutableResolvedConventionErrorCode;
-import fun.fengwk.convention4j.api.result.Result;
-import fun.fengwk.convention4j.common.result.Results;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -16,6 +14,7 @@ import org.springframework.web.server.ResponseStatusException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewUnavailableException;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessRequestFormatException;
+import fun.fengwk.kkstudio.web.api.ApiResponse;
 import fun.fengwk.kkstudio.web.controller.StudioAgentTaskController;
 import fun.fengwk.kkstudio.web.controller.StudioCanvasController;
 import fun.fengwk.kkstudio.web.controller.StudioCanvasFunctionController;
@@ -67,7 +66,7 @@ public class StudioResponseStatusErrorAdvice {
   }
 
   @ExceptionHandler(ResponseStatusException.class)
-  public ResponseEntity<Result<Void>> handle(
+  public ResponseEntity<ApiResponse<Void>> handle(
       ResponseStatusException error, HttpServletRequest request) {
     int status = error.getStatusCode().value();
     String reason = null;
@@ -80,7 +79,7 @@ public class StudioResponseStatusErrorAdvice {
   }
 
   @ExceptionHandler(HttpMessageNotReadableException.class)
-  public ResponseEntity<Result<Void>> handle(
+  public ResponseEntity<ApiResponse<Void>> handle(
       HttpMessageNotReadableException error, HttpServletRequest request) {
     int status = HttpStatus.BAD_REQUEST.value();
     return buildResponse(status, extractHarnessFormatDetail(error), null);
@@ -98,7 +97,8 @@ public class StudioResponseStatusErrorAdvice {
     return DEFAULT_READABLE_ERROR_DETAIL;
   }
 
-  private ResponseEntity<Result<Void>> buildResponse(int status, String detail, String reason) {
+  private ResponseEntity<ApiResponse<Void>> buildResponse(
+      int status, String detail, String reason) {
     Map<String, Object> errorContext = new LinkedHashMap<>();
     errorContext.put("type", "about:blank");
     errorContext.put("title", messageService.httpTitle(status));
@@ -106,12 +106,12 @@ public class StudioResponseStatusErrorAdvice {
     if (reason != null) {
       errorContext.put("reason", reason);
     }
-    ImmutableResolvedConventionErrorCode errorCode =
-        new ImmutableResolvedConventionErrorCode(
-            status,
-            messageService.httpCode(status),
-            messageService.httpMessage(status),
-            errorContext);
-    return ResponseEntity.status(status).body(Results.error(errorCode));
+    return ResponseEntity.status(status)
+        .body(
+            ApiResponse.error(
+                HttpStatusCode.valueOf(status),
+                messageService.httpCode(status),
+                messageService.httpMessage(status),
+                errorContext));
   }
 }

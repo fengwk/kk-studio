@@ -27,7 +27,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.BooleanSupplier;
+import java.util.function.Predicate;
 
 /** RealtimeBus：本地优先、跨节点发布、origin 去回环与关闭边界。 */
 class RealtimeBusTest {
@@ -39,16 +39,16 @@ class RealtimeBusTest {
   private final RealtimeNotificationCodec codec = new RealtimeNotificationCodec();
   private final RealtimePayloadBuffer payloadBuffer = new RealtimePayloadBuffer();
 
-  /** 单节点：本地立即投递，节点存在判定为 false 时不产生任何远端发布。 */
+  /** 单节点或该 Thread 无远端订阅：本地立即投递，不产生任何远端发布；判定按该事件的 Thread 进行。 */
   @Test
-  void singleNodeDeliversLocallyWithoutRemotePublish() {
+  void noRemoteThreadSubscriptionDeliversLocallyWithoutRemotePublish() {
     RecordingSink remote = new RecordingSink();
-    AtomicInteger presenceChecks = new AtomicInteger();
+    List<UUID> checkedThreads = new ArrayList<>();
     try (RealtimeBus bus =
         bus(
             remote,
-            () -> {
-              presenceChecks.incrementAndGet();
+            threadId -> {
+              checkedThreads.add(threadId);
               return false;
             })) {
       List<RealtimeEvent> received = new ArrayList<>();
@@ -59,7 +59,7 @@ class RealtimeBusTest {
 
       assertEquals(List.of(event), received);
       assertEquals(0, remote.appends);
-      assertEquals(1, presenceChecks.get());
+      assertEquals(List.of(event.threadId()), checkedThreads);
     }
   }
 
@@ -67,7 +67,7 @@ class RealtimeBusTest {
   @Test
   void multiNodeDeliversLocallyThenPublishesOnce() {
     RecordingSink remote = new RecordingSink();
-    try (RealtimeBus bus = bus(remote, () -> true)) {
+    try (RealtimeBus bus = bus(remote, thread -> true)) {
       List<RealtimeEvent> received = new ArrayList<>();
       bus.subscribe(id(1L), received::add, () -> {});
 
@@ -80,16 +80,36 @@ class RealtimeBusTest {
     }
   }
 
-  /** 本地回调关闭 bus 后，append 不得继续查询 presence 或发布远端。 */
+  /** 远端发布按事件自身的 Thread 过滤：另一个 Thread 有订阅不会让本 Thread 的事件外发。 */
+  @Test
+  void remotePublishIsGuardedByTheEventThreadSubscription() {
+    RecordingSink remote = new RecordingSink();
+    try (RealtimeBus bus = bus(remote, id(2L)::equals)) {
+      List<RealtimeEvent> received = new ArrayList<>();
+      bus.subscribe(id(1L), received::add, () -> {});
+      bus.subscribe(id(2L), received::add, () -> {});
+
+      RealtimeEvent localOnly = modelDelta(id(1L), "local-only");
+      RealtimeEvent remoteWanted = modelDelta(id(2L), "remote-wanted");
+      bus.append(localOnly);
+      bus.append(remoteWanted);
+
+      assertEquals(List.of(localOnly, remoteWanted), received);
+      assertEquals(1, remote.appends);
+      assertEquals(List.of(remoteWanted), remote.events);
+    }
+  }
+
+  /** 本地回调关闭 bus 后，append 不得继续查询远端订阅或发布远端。 */
   @Test
   void callbackClosingBusPreventsRemotePublishOnAppend() {
     RecordingSink remote = new RecordingSink();
-    AtomicInteger presenceChecks = new AtomicInteger();
+    AtomicInteger subscriptionChecks = new AtomicInteger();
     RealtimeBus bus =
         bus(
             remote,
-            () -> {
-              presenceChecks.incrementAndGet();
+            threadId -> {
+              subscriptionChecks.incrementAndGet();
               return true;
             });
     bus.subscribe(id(1L), ignored -> bus.close(), () -> {});
@@ -97,19 +117,19 @@ class RealtimeBusTest {
     bus.append(modelDelta("closing"));
 
     assertEquals(0, remote.appends);
-    assertEquals(0, presenceChecks.get());
+    assertEquals(0, subscriptionChecks.get());
   }
 
   /** 批量中间某个本地回调关闭 bus 后，appendAll 不得继续发布整批远端事件。 */
   @Test
   void callbackClosingBusPreventsRemotePublishOnAppendAll() {
     RecordingSink remote = new RecordingSink();
-    AtomicInteger presenceChecks = new AtomicInteger();
+    AtomicInteger subscriptionChecks = new AtomicInteger();
     RealtimeBus bus =
         bus(
             remote,
-            () -> {
-              presenceChecks.incrementAndGet();
+            threadId -> {
+              subscriptionChecks.incrementAndGet();
               return true;
             });
     bus.subscribe(id(1L), ignored -> bus.close(), () -> {});
@@ -117,7 +137,7 @@ class RealtimeBusTest {
     bus.appendAll(List.of(modelDelta("one"), modelDelta("two")));
 
     assertEquals(0, remote.batches);
-    assertEquals(0, presenceChecks.get());
+    assertEquals(0, subscriptionChecks.get());
   }
 
   /** REFERENCE 回拉期间 bus 被关闭时不得再投递或触发 resync。 */
@@ -135,7 +155,7 @@ class RealtimeBusTest {
             event1 -> {
               throw new AssertionError("must not echo");
             },
-            () -> false,
+            thread -> false,
             (origin, thread, id) -> {
               busRef.get().close();
               return canonical;
@@ -161,7 +181,7 @@ class RealtimeBusTest {
         event -> {
           throw failure;
         };
-    try (RealtimeBus bus = bus(remote, () -> true)) {
+    try (RealtimeBus bus = bus(remote, thread -> true)) {
       List<RealtimeEvent> received = new ArrayList<>();
       bus.subscribe(id(1L), received::add, () -> {});
 
@@ -172,14 +192,14 @@ class RealtimeBusTest {
     }
   }
 
-  /** 节点存在查询失败同样在本地投递后可见，不静默退化为单节点。 */
+  /** 远端订阅查询失败同样在本地投递后可见，不静默退化为没有订阅。 */
   @Test
-  void presenceFailureStillDeliversLocallyAndPropagates() {
+  void subscriptionQueryFailureStillDeliversLocallyAndPropagates() {
     IllegalStateException failure = new IllegalStateException("cluster query unavailable");
     try (RealtimeBus bus =
         bus(
             new RecordingSink(),
-            () -> {
+            threadId -> {
               throw failure;
             })) {
       List<RealtimeEvent> received = new ArrayList<>();
@@ -196,7 +216,7 @@ class RealtimeBusTest {
   @Test
   void ownOriginNotificationIsIgnored() {
     RecordingSink remote = new RecordingSink();
-    try (RealtimeBus bus = bus(remote, () -> false)) {
+    try (RealtimeBus bus = bus(remote, thread -> false)) {
       List<RealtimeEvent> received = new ArrayList<>();
       AtomicInteger resyncs = new AtomicInteger();
       bus.subscribe(id(1L), received::add, resyncs::incrementAndGet);
@@ -213,7 +233,7 @@ class RealtimeBusTest {
   @Test
   void remoteNotificationIsDeliveredOnceWithoutEcho() {
     RecordingSink remote = new RecordingSink();
-    try (RealtimeBus bus = bus(remote, () -> true)) {
+    try (RealtimeBus bus = bus(remote, thread -> true)) {
       List<RealtimeEvent> received = new ArrayList<>();
       bus.subscribe(id(1L), received::add, () -> {});
       RealtimeEvent event = modelDelta("remote");
@@ -228,7 +248,7 @@ class RealtimeBusTest {
   /** 远端 RESYNC 同样按 origin 过滤，只触发目标 Thread 的本地恢复。 */
   @Test
   void remoteResyncIsDeliveredByOrigin() {
-    try (RealtimeBus bus = bus(new RecordingSink(), () -> false)) {
+    try (RealtimeBus bus = bus(new RecordingSink(), thread -> false)) {
       AtomicInteger first = new AtomicInteger();
       AtomicInteger second = new AtomicInteger();
       bus.subscribe(id(1L), ignored -> {}, first::incrementAndGet);
@@ -246,7 +266,7 @@ class RealtimeBusTest {
   @Test
   void appendAllDeliversAllLocallyThenPublishesOneBatch() {
     RecordingSink remote = new RecordingSink();
-    try (RealtimeBus bus = bus(remote, () -> true)) {
+    try (RealtimeBus bus = bus(remote, thread -> true)) {
       List<RealtimeEvent> received = new ArrayList<>();
       bus.subscribe(id(1L), received::add, () -> {});
       List<RealtimeEvent> events = List.of(modelDelta("one"), modelDelta("two"));
@@ -256,6 +276,54 @@ class RealtimeBusTest {
       assertEquals(events, received);
       assertEquals(1, remote.batches);
       assertEquals(events, remote.events);
+    }
+  }
+
+  /** 批量按 Thread 过滤远端批次：无订阅的事件不混入，保留其它 Thread 的相对顺序，并按 Thread 复用一次判定。 */
+  @Test
+  void appendAllFiltersUnsubscribedThreadsWhileKeepingRelativeOrder() {
+    RecordingSink remote = new RecordingSink();
+    List<UUID> checkedThreads = new ArrayList<>();
+    try (RealtimeBus bus =
+        bus(
+            remote,
+            threadId -> {
+              checkedThreads.add(threadId);
+              return id(1L).equals(threadId) || id(3L).equals(threadId);
+            })) {
+      List<RealtimeEvent> received = new ArrayList<>();
+      bus.subscribe(id(1L), received::add, () -> {});
+      bus.subscribe(id(2L), received::add, () -> {});
+      bus.subscribe(id(3L), received::add, () -> {});
+      RealtimeEvent first = modelDelta(id(1L), "first");
+      RealtimeEvent skipped = modelDelta(id(2L), "skipped");
+      RealtimeEvent second = modelDelta(id(1L), "second");
+      RealtimeEvent third = modelDelta(id(3L), "third");
+      List<RealtimeEvent> events = List.of(first, skipped, second, third);
+
+      bus.appendAll(events);
+
+      assertEquals(events, received);
+      assertEquals(List.of(first, second, third), remote.events);
+      assertEquals(1, remote.batches);
+      assertEquals(List.of(id(1L), id(2L), id(3L)), checkedThreads);
+    }
+  }
+
+  /** 整批都没有远端订阅时不发起远端批量往返。 */
+  @Test
+  void appendAllWithoutRemoteSubscriptionsSkipsRemoteBatch() {
+    RecordingSink remote = new RecordingSink();
+    try (RealtimeBus bus = bus(remote, thread -> false)) {
+      List<RealtimeEvent> received = new ArrayList<>();
+      bus.subscribe(id(1L), received::add, () -> {});
+      List<RealtimeEvent> events = List.of(modelDelta("one"), modelDelta("two"));
+
+      bus.appendAll(events);
+
+      assertEquals(events, received);
+      assertEquals(0, remote.batches);
+      assertEquals(List.of(), remote.events);
     }
   }
 
@@ -273,7 +341,7 @@ class RealtimeBusTest {
             codec,
             new PostgresqlRealtimeEventSource(codec),
             remote,
-            () -> true,
+            thread -> true,
             (origin, thread, id) -> {
               assertEquals(REMOTE, origin);
               assertEquals(event.threadId(), thread);
@@ -300,7 +368,7 @@ class RealtimeBusTest {
     String canonical = codec.encodeEventPayload(otherThread);
     UUID payloadId = payloadBuffer.put(otherThread.threadId(), canonical).orElseThrow();
     try (RealtimeBus bus =
-        bus(new RecordingSink(), () -> false, (origin, thread, id) -> canonical)) {
+        bus(new RecordingSink(), thread -> false, (origin, thread, id) -> canonical)) {
       List<RealtimeEvent> received = new ArrayList<>();
       AtomicInteger targetResyncs = new AtomicInteger();
       AtomicInteger otherResyncs = new AtomicInteger();
@@ -321,7 +389,7 @@ class RealtimeBusTest {
     try (RealtimeBus bus =
         bus(
             new RecordingSink(),
-            () -> false,
+            thread -> false,
             (origin, thread, id) -> {
               throw new RealtimePayloadUnavailableException("expired");
             })) {
@@ -343,7 +411,7 @@ class RealtimeBusTest {
     try (RealtimeBus bus =
         bus(
             new RecordingSink(),
-            () -> false,
+            thread -> false,
             (origin, thread, id) -> {
               fetches.incrementAndGet();
               throw new AssertionError("own origin must not be fetched");
@@ -364,7 +432,7 @@ class RealtimeBusTest {
     RealtimeEvent event = modelDelta("buffered");
     UUID payloadId =
         payloadBuffer.put(event.threadId(), codec.encodeEventPayload(event)).orElseThrow();
-    RealtimeBus bus = bus(new RecordingSink(), () -> false);
+    RealtimeBus bus = bus(new RecordingSink(), thread -> false);
 
     bus.close();
 
@@ -374,7 +442,7 @@ class RealtimeBusTest {
   /** 畸变 notification 无法安全定位 Thread，触发全部本地订阅恢复。 */
   @Test
   void malformedNotificationResyncsAllLocalSubscribers() {
-    try (RealtimeBus bus = bus(new RecordingSink(), () -> false)) {
+    try (RealtimeBus bus = bus(new RecordingSink(), thread -> false)) {
       AtomicInteger first = new AtomicInteger();
       AtomicInteger second = new AtomicInteger();
       bus.subscribe(id(1L), ignored -> {}, first::incrementAndGet);
@@ -391,7 +459,7 @@ class RealtimeBusTest {
   @Test
   void closeStopsCallbacksAndPublishing() {
     RecordingSink remote = new RecordingSink();
-    RealtimeBus bus = bus(remote, () -> true);
+    RealtimeBus bus = bus(remote, thread -> true);
     AtomicInteger events = new AtomicInteger();
     AtomicInteger resyncs = new AtomicInteger();
     bus.subscribe(id(1L), ignored -> events.incrementAndGet(), resyncs::incrementAndGet);
@@ -424,7 +492,7 @@ class RealtimeBusTest {
             codec,
             new PostgresqlRealtimeEventSource(codec),
             new RecordingSink(),
-            () -> false,
+            thread -> false,
             (origin, thread, id) -> {
               fetchStarted.countDown();
               await(releaseFetch);
@@ -466,7 +534,7 @@ class RealtimeBusTest {
             codec,
             new PostgresqlRealtimeEventSource(codec),
             new RecordingSink(),
-            () -> false,
+            thread -> false,
             (origin, thread, id) -> {
               fetchStarted.countDown();
               await(releaseFetch);
@@ -509,7 +577,7 @@ class RealtimeBusTest {
             codec,
             new PostgresqlRealtimeEventSource(codec),
             new RecordingSink(),
-            () -> false,
+            thread -> false,
             (origin, thread, id) -> {
               fetchStarted.countDown();
               try {
@@ -588,10 +656,10 @@ class RealtimeBusTest {
     }
   }
 
-  private RealtimeBus bus(RealtimeEventSink remote, BooleanSupplier otherActiveNodes) {
+  private RealtimeBus bus(RealtimeEventSink remote, Predicate<UUID> remoteThreadSubscription) {
     return bus(
         remote,
-        otherActiveNodes,
+        remoteThreadSubscription,
         (origin, thread, payloadId) -> {
           throw new RealtimePayloadUnavailableException("unavailable");
         });
@@ -599,14 +667,14 @@ class RealtimeBusTest {
 
   private RealtimeBus bus(
       RealtimeEventSink remote,
-      BooleanSupplier otherActiveNodes,
+      Predicate<UUID> remoteThreadSubscription,
       RealtimePayloadFetcher payloadFetcher) {
     return new RealtimeBus(
         LOCAL,
         codec,
         new PostgresqlRealtimeEventSource(codec),
         remote,
-        otherActiveNodes,
+        remoteThreadSubscription,
         payloadFetcher,
         payloadBuffer,
         new InlineExecutorService());

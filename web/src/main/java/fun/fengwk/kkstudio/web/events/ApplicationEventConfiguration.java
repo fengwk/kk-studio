@@ -10,6 +10,7 @@ import fun.fengwk.kkstudio.harness.infra.realtime.RealtimeBus;
 import fun.fengwk.kkstudio.harness.infra.realtime.RealtimeEventSource;
 import fun.fengwk.kkstudio.harness.runtime.HarnessThreadChangeSource;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEventJsonCodec;
+import fun.fengwk.kkstudio.platform.environment.cluster.RealtimeSubscriptionService;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestrator;
 import fun.fengwk.kkstudio.platform.harness.realtime.HarnessStreamCatchupService;
 import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogRefreshTrigger;
@@ -208,6 +209,7 @@ public class ApplicationEventConfiguration {
   public ApplicationEventHub applicationEventHub(
       ThreadVersionEventSource threadVersionSource,
       RealtimeEventSource realtimeSource,
+      RealtimeSubscriptionService realtimeSubscriptions,
       CanvasVersionEventSource canvasVersionSource,
       ProjectInvalidationHub projectInvalidationHub,
       ExecutionTreeChangeHub executionTreeChangeHub,
@@ -217,6 +219,7 @@ public class ApplicationEventConfiguration {
     return new ApplicationEventHub(
         threadVersionSource,
         realtimeSource,
+        realtimeSubscriptions,
         canvasVersionSource,
         projectInvalidationHub,
         executionTreeChangeHub,

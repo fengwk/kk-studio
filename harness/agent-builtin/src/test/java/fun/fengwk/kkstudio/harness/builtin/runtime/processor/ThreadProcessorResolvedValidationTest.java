@@ -124,7 +124,7 @@ class ThreadProcessorResolvedValidationTest extends ThreadProcessorTestBase {
         inTx(
                 fixture,
                 tx ->
-                    builtin(tx)
+                    builtin(fixture.store, tx)
                         .findModelInvocationByTurn(baseline.threadId(), path.entries().get(1).id()))
             .isEmpty());
     // 无 deferred demand：不保留 THREAD Work（确定性失败不自我重排）。

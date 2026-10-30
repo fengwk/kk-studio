@@ -106,14 +106,17 @@ class McpToolDiscoveryTest {
   }
 
   @Test
-  void normalizesUnsupportedSchemaShapesIntoCanonicalObject() {
-    // 意图：远端自由 JSON Schema 一律收敛为合法 canonical object，绝不把裸 schema 透传给 Platform 校验门禁
+  void rejectsNonObjectInputSchemaAtTheProtocolBoundary() {
+    // MCP inputSchema 必须是 object；非法协议数据不能被伪装成无参数工具。
     fakeServer.addTool("array_schema", "desc", "[\"a\",\"b\"]");
-    List<McpTool> arrayTools = realDiscovery().discover(server(5000L));
-    assertEquals(1, arrayTools.size());
-    assertTrue(arrayTools.get(0).inputSchemaJson().startsWith("{"));
+    AiValidationException error =
+        assertThrows(AiValidationException.class, () -> realDiscovery().discover(server(5000L)));
+    assertEquals("MCP server discovery failed.", error.getMessage());
+  }
 
-    fakeServer.clearTools();
+  @Test
+  void normalizesUnsupportedObjectSchemaShapesIntoCanonicalObject() {
+    // 合法 JSON Schema 的组合结构仍转换为 Platform 可校验的 canonical object。
     fakeServer.addTool(
         "complex_schema",
         "desc",

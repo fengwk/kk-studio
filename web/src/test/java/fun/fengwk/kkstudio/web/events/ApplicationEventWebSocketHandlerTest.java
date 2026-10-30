@@ -34,6 +34,7 @@ import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEventJsonCodec;
 import fun.fengwk.kkstudio.ide.browser.ConnectionIdentity;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUse;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseRegistry;
+import fun.fengwk.kkstudio.platform.environment.cluster.RealtimeSubscriptionService;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKey;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKind;
 import fun.fengwk.kkstudio.web.project.ProjectInvalidationHub;
@@ -74,6 +75,7 @@ class ApplicationEventWebSocketHandlerTest {
 
   private ThreadVersionEventSource threadVersionSource;
   private RealtimeEventSource realtimeSource;
+  private RealtimeSubscriptionService realtimeSubscriptions;
   private CanvasVersionEventSource canvasVersionSource;
   private ProjectInvalidationHub projectInvalidationHub;
   private ApplicationEventHub hub;
@@ -88,6 +90,7 @@ class ApplicationEventWebSocketHandlerTest {
   void setUp() throws Exception {
     threadVersionSource = mock(ThreadVersionEventSource.class);
     realtimeSource = mock(RealtimeEventSource.class);
+    realtimeSubscriptions = mock(RealtimeSubscriptionService.class);
     canvasVersionSource = mock(CanvasVersionEventSource.class);
     projectInvalidationHub = mock(ProjectInvalidationHub.class);
     when(threadVersionSource.subscribe(any(), any()))
@@ -100,6 +103,7 @@ class ApplicationEventWebSocketHandlerTest {
         new ApplicationEventHub(
             threadVersionSource,
             realtimeSource,
+            realtimeSubscriptions,
             canvasVersionSource,
             projectInvalidationHub,
             new ExecutionTreeChangeHub(),

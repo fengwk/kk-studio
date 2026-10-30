@@ -68,26 +68,27 @@ class PostgresqlAssistantErrorSettlementTest {
     UUID userEntryId =
         store.transaction(
             tx -> {
-              var thread = tx.lockThread(baseline.threadId()).orElseThrow();
+              var thread = tx.threads().lock(baseline.threadId()).orElseThrow();
               UUID id = tx.nextId();
-              tx.insertEntry(
-                  new Entry(
-                      id,
-                      baseline.sessionId(),
-                      baseline.turnStartEntryId(),
-                      StoreTestSupport.userMessagePayload(),
-                      T2));
-              tx.updateThread(thread.advanceHead(id, T2));
+              tx.entries()
+                  .insert(
+                      new Entry(
+                          id,
+                          baseline.sessionId(),
+                          baseline.turnStartEntryId(),
+                          StoreTestSupport.userMessagePayload(),
+                          T2));
+              tx.threads().update(thread.advanceHead(id, T2));
               return id;
             });
 
     UUID modelId =
         store.transaction(
             tx -> {
-              tx.lockThread(baseline.threadId()).orElseThrow();
+              tx.threads().lock(baseline.threadId()).orElseThrow();
               UUID id = tx.nextId();
               ModelRequestSpec request = modelRequest();
-              builtin(tx)
+              builtin(store, tx)
                   .insertModelInvocation(
                       new ModelInvocation(
                           id,
@@ -105,11 +106,11 @@ class PostgresqlAssistantErrorSettlementTest {
                           T2,
                           T2));
               // 与生产一致：dispatch 已开始、上游返回 HTTP 404，invocation 终结为 FAILED(INVALID_REQUEST)。
-              var model = builtin(tx).lockModelInvocation(id).orElseThrow();
-              builtin(tx).updateModelInvocation(model.markRunning(T2));
-              model = builtin(tx).lockModelInvocation(id).orElseThrow();
-              builtin(tx).updateModelInvocation(model.fail(error, T2));
-              tx.requestWork(target);
+              var model = builtin(store, tx).lockModelInvocation(id).orElseThrow();
+              builtin(store, tx).updateModelInvocation(model.markRunning(T2));
+              model = builtin(store, tx).lockModelInvocation(id).orElseThrow();
+              builtin(store, tx).updateModelInvocation(model.fail(error, T2));
+              tx.work().request(target);
               return id;
             });
 
@@ -131,14 +132,15 @@ class PostgresqlAssistantErrorSettlementTest {
           store
               .transaction(
                   tx ->
-                      tx.claimNextWork(
-                          WorkTargetType.THREAD, "settle-claim", Duration.ofSeconds(30)))
+                      tx.work()
+                          .claimNext(WorkTargetType.THREAD, "settle-claim", Duration.ofSeconds(30)))
               .orElseThrow();
       assertEquals(ThreadProcessResult.COMPLETED, processor.process(claimed));
 
       assertFalse(resolved.get());
-      assertTrue(store.transaction(tx -> builtin(tx).findModelInvocation(modelId)).isEmpty());
-      assertTrue(store.transaction(tx -> tx.findWork(target)).isEmpty());
+      assertTrue(
+          store.transaction(tx -> builtin(store, tx).findModelInvocation(modelId)).isEmpty());
+      assertTrue(store.transaction(tx -> tx.work().find(target)).isEmpty());
       EntryPath path = loadPath(store, baseline.threadId());
       TurnEndPayload end = assertInstanceOf(TurnEndPayload.class, path.head().payload());
       assertEquals(TurnEndOutcome.FAILED, end.outcome());
@@ -162,22 +164,22 @@ class PostgresqlAssistantErrorSettlementTest {
       // 重新请求同一 THREAD Work 再 claim：终态已收敛，重复处理不得产生重复条目。
       store.transaction(
           tx -> {
-            tx.lockThread(baseline.threadId()).orElseThrow();
-            tx.requestWork(target);
+            tx.threads().lock(baseline.threadId()).orElseThrow();
+            tx.work().request(target);
             return null;
           });
       ClaimedWork replayed =
           store
               .transaction(
                   tx ->
-                      tx.claimNextWork(
-                          WorkTargetType.THREAD, "replay-claim", Duration.ofSeconds(30)))
+                      tx.work()
+                          .claimNext(WorkTargetType.THREAD, "replay-claim", Duration.ofSeconds(30)))
               .orElseThrow();
       assertEquals(ThreadProcessResult.COMPLETED, processor.process(replayed));
       EntryPath replayedPath = loadPath(store, baseline.threadId());
       assertEquals(path.entries().size(), replayedPath.entries().size());
       assertEquals(path.head().id(), replayedPath.head().id());
-      assertTrue(store.transaction(tx -> tx.findWork(target)).isEmpty());
+      assertTrue(store.transaction(tx -> tx.work().find(target)).isEmpty());
       assertEquals(
           ThreadRuntimeStatus.IDLE,
           snapshotRuntime.getThreadSnapshot(baseline.threadId()).runtimeStatus());
@@ -188,6 +190,6 @@ class PostgresqlAssistantErrorSettlementTest {
 
   private static EntryPath loadPath(HarnessStore store, UUID threadId) {
     return store.transaction(
-        tx -> tx.loadEntryPath(tx.findThread(threadId).orElseThrow().headEntryId()));
+        tx -> tx.entries().loadPath(tx.threads().find(threadId).orElseThrow().headEntryId()));
   }
 }

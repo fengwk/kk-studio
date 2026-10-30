@@ -85,7 +85,7 @@ class HarnessRuntimeThreadSemanticsScenarioTest {
     assertEquals(siblingVersion, version(sibling));
     assertEquals(
         root.rootEntryId(),
-        store.transaction(tx -> tx.findJoin(joinId).orElseThrow()).terminalEntryId());
+        store.transaction(tx -> tx.joins().find(joinId).orElseThrow()).terminalEntryId());
   }
 
   /** J2：已冻结 Join 结果不因之后的新子线程/fork 改写，也不重复通知。 */
@@ -100,7 +100,7 @@ class HarnessRuntimeThreadSemanticsScenarioTest {
 
     StopResult stop = runtime.stop(new StopCommand(child, TestIds.id(12), 0L));
     assertStopped(stop);
-    ThreadJoin frozen = store.transaction(tx -> tx.findJoin(joinId).orElseThrow());
+    ThreadJoin frozen = store.transaction(tx -> tx.joins().find(joinId).orElseThrow());
     assertNotNull(frozen.terminalEntryId());
     UUID frozenTerminal = frozen.terminalEntryId();
     Integer deliveriesBefore =
@@ -114,7 +114,7 @@ class HarnessRuntimeThreadSemanticsScenarioTest {
     assertReplayed(replay);
     assertEquals(
         frozenTerminal,
-        store.transaction(tx -> tx.findJoin(joinId).orElseThrow()).terminalEntryId());
+        store.transaction(tx -> tx.joins().find(joinId).orElseThrow()).terminalEntryId());
     assertEquals(
         deliveriesBefore,
         store.transaction(tx -> loadCommandsByThread(tx, root.threadId())).size());
@@ -132,7 +132,7 @@ class HarnessRuntimeThreadSemanticsScenarioTest {
 
     runtime.stop(new StopCommand(root.threadId(), TestIds.id(13), 0L));
 
-    ThreadJoin join = store.transaction(tx -> tx.findJoin(joinId).orElseThrow());
+    ThreadJoin join = store.transaction(tx -> tx.joins().find(joinId).orElseThrow());
     assertTrue(join.matched());
     assertNotNull(join.deliveryCommandSequence());
     assertEquals(1, notificationCount(root.threadId()));
@@ -144,8 +144,8 @@ class HarnessRuntimeThreadSemanticsScenarioTest {
     boolean noQueuedCommands =
         store.transaction(
             tx -> {
-              tx.lockThread(root.threadId());
-              return tx.loadQueuedCommands(root.threadId()).isEmpty();
+              tx.threads().lock(root.threadId());
+              return tx.commands().loadQueued(root.threadId()).isEmpty();
             });
     assertTrue(noQueuedCommands);
   }
@@ -188,20 +188,21 @@ class HarnessRuntimeThreadSemanticsScenarioTest {
         tx -> {
           for (UUID threadId :
               List.of(parentId, childId).stream().sorted(UuidOrder.COMPARATOR).toList()) {
-            tx.lockThread(threadId);
+            tx.threads().lock(threadId);
           }
-          tx.insertCommands(
-              List.of(
-                  new ThreadCommand(
-                      parentId,
-                      1L,
-                      userMessagePayload("parent-notification"),
-                      TestIds.id(31),
-                      CREATION_REQUEST_HASH,
-                      null,
-                      null,
-                      null,
-                      T0)));
+          tx.commands()
+              .insert(
+                  List.of(
+                      new ThreadCommand(
+                          parentId,
+                          1L,
+                          userMessagePayload("parent-notification"),
+                          TestIds.id(31),
+                          CREATION_REQUEST_HASH,
+                          null,
+                          null,
+                          null,
+                          T0)));
           ThreadJoin join =
               new ThreadJoin(
                   joinId,
@@ -220,8 +221,8 @@ class HarnessRuntimeThreadSemanticsScenarioTest {
                   JoinDelivery.NOTIFY_PARENT,
                   null);
           // terminalEntryId 指向已存在的 Entry；仅验证冻结结果不被 Stop 改写。
-          tx.insertJoin(join);
-          tx.updateJoin(join.match(terminalEntryId, null, T0).delivered(1L, T0));
+          tx.joins().insert(join);
+          tx.joins().update(join.match(terminalEntryId, null, T0).delivered(1L, T0));
           return null;
         });
   }
@@ -229,24 +230,25 @@ class HarnessRuntimeThreadSemanticsScenarioTest {
   private void insertJoin(UUID joinId, UUID parentId, UUID childId, long sourceSequence) {
     store.transaction(
         tx -> {
-          tx.lockThread(childId);
-          tx.insertJoin(
-              new ThreadJoin(
-                  joinId,
-                  CREATION_REQUEST_HASH,
-                  parentId,
-                  childId,
-                  sourceSequence,
-                  "agent",
-                  10,
-                  0L,
-                  null,
-                  null,
-                  null,
-                  T0,
-                  T0,
-                  JoinDelivery.NOTIFY_PARENT,
-                  null));
+          tx.threads().lock(childId);
+          tx.joins()
+              .insert(
+                  new ThreadJoin(
+                      joinId,
+                      CREATION_REQUEST_HASH,
+                      parentId,
+                      childId,
+                      sourceSequence,
+                      "agent",
+                      10,
+                      0L,
+                      null,
+                      null,
+                      null,
+                      T0,
+                      T0,
+                      JoinDelivery.NOTIFY_PARENT,
+                      null));
           return null;
         });
   }
@@ -256,24 +258,25 @@ class HarnessRuntimeThreadSemanticsScenarioTest {
     UUID childId = UUID.randomUUID();
     store.transaction(
         tx -> {
-          tx.insertThread(
-              new ThreadState(
-                  childId,
-                  sessionId,
-                  parentThreadId,
-                  headEntryId,
-                  CREATION_REQUEST_HASH,
-                  "child-branch",
-                  rootThreadId,
-                  false,
-                  SpawnTrigger.MODEL_TOOL,
-                  ThreadConstraints.NONE,
-                  ThreadExecutionControl.RUNNABLE,
-                  0L,
-                  1L,
-                  0L,
-                  T0,
-                  T0));
+          tx.threads()
+              .insert(
+                  new ThreadState(
+                      childId,
+                      sessionId,
+                      parentThreadId,
+                      headEntryId,
+                      CREATION_REQUEST_HASH,
+                      "child-branch",
+                      rootThreadId,
+                      false,
+                      SpawnTrigger.MODEL_TOOL,
+                      ThreadConstraints.NONE,
+                      ThreadExecutionControl.RUNNABLE,
+                      0L,
+                      1L,
+                      0L,
+                      T0,
+                      T0));
           return null;
         });
     return childId;
@@ -284,7 +287,7 @@ class HarnessRuntimeThreadSemanticsScenarioTest {
   }
 
   private ThreadState thread(UUID threadId) {
-    return store.transaction(tx -> tx.findThread(threadId).orElseThrow());
+    return store.transaction(tx -> tx.threads().find(threadId).orElseThrow());
   }
 
   private long version(UUID threadId) {
@@ -294,8 +297,8 @@ class HarnessRuntimeThreadSemanticsScenarioTest {
   private int notificationCount(UUID threadId) {
     return store.transaction(
         tx -> {
-          ThreadState state = tx.findThread(threadId).orElseThrow();
-          EntryPath path = tx.loadEntryPath(state.headEntryId());
+          ThreadState state = tx.threads().find(threadId).orElseThrow();
+          EntryPath path = tx.entries().loadPath(state.headEntryId());
           int count = 0;
           for (Entry entry : path.entries()) {
             if (entry.payload() instanceof NotificationPayload) {

@@ -61,12 +61,12 @@ public final class ClaimedExecutionSupport<E extends ClaimAdmissionGuard.Guarded
 
   /** 仅锁 Work 验证所有权；供准入与派发前复核复用。 */
   private boolean claimOwned(ClaimedWork claim) {
-    return Boolean.TRUE.equals(store.transaction(tx -> !tx.lockClaimedWork(claim).isEmpty()));
+    return Boolean.TRUE.equals(store.transaction(tx -> !tx.work().lockClaimed(claim).isEmpty()));
   }
 
   /** 在调用方已锁定 Work 行时确保现有租约至少覆盖权威时间 + leaseDuration。 */
   public void ensureLeaseMargin(HarnessStore.Transaction tx, ClaimedWork claim) {
-    tx.renewWork(claim, leaseConfig.leaseDuration());
+    tx.work().renew(claim, leaseConfig.leaseDuration());
   }
 
   /** 定位仍登记为 active 的本地 execution；已 superseded 或不存在时返回 {@code null}。 */

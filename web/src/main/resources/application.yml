@@ -1,9 +1,5 @@
 spring:
 
-  autoconfigure:
-    exclude:
-      - fun.fengwk.convention4j.springboot.starter.web.error.WebErrorAutoConfiguration
-
   application:
     # 应用名称
     name: kk-studio
@@ -52,24 +48,24 @@ management:
     web:
       exposure:
         include: "health,prometheus,offline,online"
+  tracing:
+    # 本地链路追踪只创建 span 与 MDC，不上报外部 collector。
+    sampling:
+      probability: 1.0
+    propagation:
+      type: W3C
+    baggage:
+      # 本切片不传播/关联 baggage，避免任意 baggage key 进入 MDC。
+      enabled: false
+    export:
+      otlp:
+        # 显式关闭 OTLP exporter 条件；桥接与传播保持启用。classpath 也不声明 OTLP exporter。
+        enabled: false
 
 # 日志配置
 logging:
   level:
     root: info
-
-# 规约配置
-convention:
-  i18n:
-    # i18n properties文件名称
-    base-name: string
-    # 使用语言
-    locale: en_US
-
-  code:
-    i18n:
-      # 错误码i18n语言，与i18n.locale保持一致
-      locale: ${convention.i18n.locale}
 
 kk-studio:
   catalog:

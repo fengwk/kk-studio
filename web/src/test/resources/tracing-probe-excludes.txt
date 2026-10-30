@@ -1,0 +1,16 @@
+fun.fengwk.kkstudio.platform.PlatformAutoConfiguration
+org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration
+org.springframework.boot.jdbc.autoconfigure.DataSourceTransactionManagerAutoConfiguration
+org.springframework.boot.jdbc.autoconfigure.JdbcClientAutoConfiguration
+org.springframework.boot.jdbc.autoconfigure.JdbcTemplateAutoConfiguration
+org.springframework.boot.flyway.autoconfigure.FlywayAutoConfiguration
+org.springframework.boot.transaction.autoconfigure.TransactionAutoConfiguration
+org.springframework.boot.transaction.autoconfigure.TransactionManagerCustomizationAutoConfiguration
+fun.fengwk.kkstudio.project.ProjectAutoConfiguration
+fun.fengwk.kkstudio.ide.IdeAutoConfiguration
+fun.fengwk.kkstudio.canvas.infra.CanvasInfraAutoConfiguration
+fun.fengwk.kkstudio.canvas.infra.platform.CanvasPlatformAutoConfiguration
+fun.fengwk.kkstudio.plugin.comfyui.ComfyuiAutoConfiguration
+fun.fengwk.kkstudio.plugin.opencli.OpenCliAutoConfiguration
+fun.fengwk.kkstudio.plugin.media.MediaAutoConfiguration
+fun.fengwk.kkstudio.plugin.minimaxmavis.MiniMaxMavisAutoConfiguration

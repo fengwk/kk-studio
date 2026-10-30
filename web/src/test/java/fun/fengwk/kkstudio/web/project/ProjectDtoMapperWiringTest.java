@@ -23,8 +23,8 @@ import java.lang.reflect.Field;
  * JsonMapper}（Boot4 {@link JacksonAutoConfiguration} + {@link StrictJacksonConfiguration}
  * 定制，JsonMapper 与其父类型 ObjectMapper 是同一个 bean）与自动装配的 workflow codec，而不是构件内部自建的副本。
  *
- * <p>生产组合根对 convention4j Jackson 2 JSON 自动装配的排除由 {@code
- * fun.fengwk.kkstudio.web.WebApplicationJsonAutoConfigurationExclusionTest} 用真实导入选择器核验。
+ * <p>生产组合根的 Jackson 3 自动装配由 {@code fun.fengwk.kkstudio.web.WebApplicationJsonAutoConfigurationTest}
+ * 用真实导入选择器核验。
  */
 class ProjectDtoMapperWiringTest {
 

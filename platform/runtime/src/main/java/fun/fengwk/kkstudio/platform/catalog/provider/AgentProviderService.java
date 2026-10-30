@@ -1,11 +1,11 @@
 package fun.fengwk.kkstudio.platform.catalog.provider;
 
-import fun.fengwk.convention4j.api.page.Page;
-import fun.fengwk.convention4j.api.page.PageQuery;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import fun.fengwk.kkstudio.common.page.Page;
+import fun.fengwk.kkstudio.common.page.PageQuery;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.provider.ProviderModelDiscovery;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;

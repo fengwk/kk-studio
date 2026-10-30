@@ -127,9 +127,8 @@ gh workflow run docker-publish.yml --ref dev -f validate_only=true
 V1 与当前基线不同的已有数据库必须在 Flyway 校验阶段拒绝，且表数据、迁移历史与结构均保持不变；
 退役的 `database-upgrade` 命令必须在启动 Spring 或访问数据库前拒绝。Java 门禁以
 `mvn -B -ntp -Pdistribution verify` 启动完整仓库测试与覆盖率，并在同次 reactor 中只打包一次带内嵌
-React 产物的发行 Fat JAR；其后的必需步骤复用同一 JAR 验证启动/旧库拒绝、Node decoder 与
-matching convention4j agent。通过后上传仅含 `app.jar`、稳定命名与版本化 agent 文件
-（两者字节一致）及版本/提交/SHA256 清单的 `kk-studio-app-<commit-sha>` artifact。
+React 产物的发行 Fat JAR；其后的必需步骤复用同一 JAR 验证启动/旧库拒绝与 Node decoder。
+通过后上传仅含 `app.jar` 及版本/提交/SHA256 清单的 `kk-studio-app-<commit-sha>` artifact。
 `main` publish 只下载同 run、同 SHA 的该 artifact，
 校验版本、提交与文件摘要后选择 `deploy/local/Dockerfile` 的 `verified-artifact` 阶段构建镜像，
 不重新构建源码，也不使用普通 verify 产生的无前端 JAR；`dev` 仍从源码 context 使用默认 `source` 阶段。
@@ -271,7 +270,7 @@ env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -Pdistribution -pl web -am clean packa
 
 `distribution` profile 在 `prepare-package` 安装 Node 与 npm、对 [`frontend/`](../../frontend/) 执行
 `npm ci` 与 `npm run build`，并把产物打进 `BOOT-INF/classes/static`；普通 `mvn test` /
-`mvn package` 不激活它。提取并加载 convention4j agent 的启动命令见
+`mvn package` 不激活它。启动命令见
 [构建可运行产物](deployment.md#构建可运行产物)。
 
 ## Frontend 检查

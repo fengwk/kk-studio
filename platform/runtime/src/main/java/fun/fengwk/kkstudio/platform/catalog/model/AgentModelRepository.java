@@ -1,12 +1,11 @@
 package fun.fengwk.kkstudio.platform.catalog.model;
 
-import fun.fengwk.convention4j.api.page.Page;
-import fun.fengwk.convention4j.api.page.PageQuery;
-import fun.fengwk.convention4j.common.page.Pages;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
+import fun.fengwk.kkstudio.common.page.Page;
+import fun.fengwk.kkstudio.common.page.PageQuery;
 import fun.fengwk.kkstudio.platform.persistence.PostgresJdbcTypes;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 
@@ -95,12 +94,12 @@ public class AgentModelRepository {
                 "select "
                     + COLUMNS
                     + " from agent_model order by name asc limit :limit offset :offset")
-            .param("limit", Pages.queryLimit(pageQuery))
-            .param("offset", Pages.queryOffset(pageQuery))
+            .param("limit", pageQuery.getPageSize())
+            .param("offset", pageQuery.getOffset())
             .query(ROW_MAPPER)
             .list();
     long total = jdbcClient.sql("select count(*) from agent_model").query(Long.class).single();
-    return Pages.page(pageQuery, results, total);
+    return new Page<>(pageQuery.getPageNumber(), pageQuery.getPageSize(), results, total);
   }
 
   /** 按 {@code name asc} 列出全部 model，用于一次性导出快照。 */

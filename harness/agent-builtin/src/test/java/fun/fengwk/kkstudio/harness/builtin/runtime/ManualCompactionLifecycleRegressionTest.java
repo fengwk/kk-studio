@@ -171,57 +171,60 @@ class ManualCompactionLifecycleRegressionTest {
           UUID rootThreadId = tx.nextId();
           UUID childThreadId = tx.nextId();
 
-          tx.insertSession(new Session(sessionId, "session-" + sessionId, NOW));
-          tx.insertEntry(
-              new Entry(
-                  rootEntryId,
-                  sessionId,
-                  null,
-                  new RootPayload(HarnessRuntimeTestSupport.settings()),
-                  NOW));
+          tx.sessions().insert(new Session(sessionId, "session-" + sessionId, NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      rootEntryId,
+                      sessionId,
+                      null,
+                      new RootPayload(HarnessRuntimeTestSupport.settings()),
+                      NOW));
 
           // 插入 Root 线程（IDLE，无父级）
-          tx.insertThread(
-              new ThreadState(
-                  rootThreadId,
-                  sessionId,
-                  null,
-                  rootEntryId,
-                  HarnessRuntimeTestSupport.CREATION_REQUEST_HASH,
-                  "root",
-                  rootThreadId,
-                  false,
-                  SpawnTrigger.USER,
-                  ThreadConstraints.NONE,
-                  ThreadExecutionControl.RUNNABLE,
-                  0L,
-                  1,
-                  0,
-                  NOW,
-                  NOW));
+          tx.threads()
+              .insert(
+                  new ThreadState(
+                      rootThreadId,
+                      sessionId,
+                      null,
+                      rootEntryId,
+                      HarnessRuntimeTestSupport.CREATION_REQUEST_HASH,
+                      "root",
+                      rootThreadId,
+                      false,
+                      SpawnTrigger.USER,
+                      ThreadConstraints.NONE,
+                      ThreadExecutionControl.RUNNABLE,
+                      0L,
+                      1,
+                      0,
+                      NOW,
+                      NOW));
 
           // 为 Child 线程种子满足压缩条件的两个已完成 Turn（历史 token 足够）
           UUID headEntryId = seedCompactionHistory(tx, sessionId, rootEntryId, childThreadId);
 
           // 插入 Child 线程（IDLE，parent 指向 rootThreadId）
-          tx.insertThread(
-              new ThreadState(
-                  childThreadId,
-                  sessionId,
-                  rootThreadId,
-                  headEntryId,
-                  HarnessRuntimeTestSupport.CREATION_REQUEST_HASH,
-                  "child",
-                  rootThreadId,
-                  false,
-                  SpawnTrigger.MODEL_TOOL,
-                  ThreadConstraints.NONE,
-                  ThreadExecutionControl.RUNNABLE,
-                  0L,
-                  1,
-                  0,
-                  NOW,
-                  NOW));
+          tx.threads()
+              .insert(
+                  new ThreadState(
+                      childThreadId,
+                      sessionId,
+                      rootThreadId,
+                      headEntryId,
+                      HarnessRuntimeTestSupport.CREATION_REQUEST_HASH,
+                      "child",
+                      rootThreadId,
+                      false,
+                      SpawnTrigger.MODEL_TOOL,
+                      ThreadConstraints.NONE,
+                      ThreadExecutionControl.RUNNABLE,
+                      0L,
+                      1,
+                      0,
+                      NOW,
+                      NOW));
 
           return new TwoLevelBaseline(rootThreadId, childThreadId, headEntryId);
         });
@@ -236,73 +239,77 @@ class ManualCompactionLifecycleRegressionTest {
           UUID middleThreadId = tx.nextId();
           UUID leafThreadId = tx.nextId();
 
-          tx.insertSession(new Session(sessionId, "session-" + sessionId, NOW));
-          tx.insertEntry(
-              new Entry(
-                  rootEntryId,
-                  sessionId,
-                  null,
-                  new RootPayload(HarnessRuntimeTestSupport.settings()),
-                  NOW));
+          tx.sessions().insert(new Session(sessionId, "session-" + sessionId, NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      rootEntryId,
+                      sessionId,
+                      null,
+                      new RootPayload(HarnessRuntimeTestSupport.settings()),
+                      NOW));
 
-          tx.insertThread(
-              new ThreadState(
-                  rootThreadId,
-                  sessionId,
-                  null,
-                  rootEntryId,
-                  HarnessRuntimeTestSupport.CREATION_REQUEST_HASH,
-                  "root",
-                  rootThreadId,
-                  false,
-                  SpawnTrigger.USER,
-                  ThreadConstraints.NONE,
-                  ThreadExecutionControl.RUNNABLE,
-                  0L,
-                  1,
-                  0,
-                  NOW,
-                  NOW));
+          tx.threads()
+              .insert(
+                  new ThreadState(
+                      rootThreadId,
+                      sessionId,
+                      null,
+                      rootEntryId,
+                      HarnessRuntimeTestSupport.CREATION_REQUEST_HASH,
+                      "root",
+                      rootThreadId,
+                      false,
+                      SpawnTrigger.USER,
+                      ThreadConstraints.NONE,
+                      ThreadExecutionControl.RUNNABLE,
+                      0L,
+                      1,
+                      0,
+                      NOW,
+                      NOW));
 
-          tx.insertThread(
-              new ThreadState(
-                  middleThreadId,
-                  sessionId,
-                  rootThreadId,
-                  rootEntryId,
-                  HarnessRuntimeTestSupport.CREATION_REQUEST_HASH,
-                  "middle",
-                  rootThreadId,
-                  false,
-                  SpawnTrigger.MODEL_TOOL,
-                  ThreadConstraints.NONE,
-                  ThreadExecutionControl.RUNNABLE,
-                  0L,
-                  1,
-                  0,
-                  NOW,
-                  NOW));
+          tx.threads()
+              .insert(
+                  new ThreadState(
+                      middleThreadId,
+                      sessionId,
+                      rootThreadId,
+                      rootEntryId,
+                      HarnessRuntimeTestSupport.CREATION_REQUEST_HASH,
+                      "middle",
+                      rootThreadId,
+                      false,
+                      SpawnTrigger.MODEL_TOOL,
+                      ThreadConstraints.NONE,
+                      ThreadExecutionControl.RUNNABLE,
+                      0L,
+                      1,
+                      0,
+                      NOW,
+                      NOW));
 
           UUID leafHeadEntryId = seedCompactionHistory(tx, sessionId, rootEntryId, leafThreadId);
 
-          tx.insertThread(
-              new ThreadState(
-                  leafThreadId,
-                  sessionId,
-                  middleThreadId,
-                  leafHeadEntryId,
-                  HarnessRuntimeTestSupport.CREATION_REQUEST_HASH,
-                  "leaf",
-                  rootThreadId,
-                  false,
-                  SpawnTrigger.MODEL_TOOL,
-                  ThreadConstraints.NONE,
-                  ThreadExecutionControl.RUNNABLE,
-                  0L,
-                  1,
-                  0,
-                  NOW,
-                  NOW));
+          tx.threads()
+              .insert(
+                  new ThreadState(
+                      leafThreadId,
+                      sessionId,
+                      middleThreadId,
+                      leafHeadEntryId,
+                      HarnessRuntimeTestSupport.CREATION_REQUEST_HASH,
+                      "leaf",
+                      rootThreadId,
+                      false,
+                      SpawnTrigger.MODEL_TOOL,
+                      ThreadConstraints.NONE,
+                      ThreadExecutionControl.RUNNABLE,
+                      0L,
+                      1,
+                      0,
+                      NOW,
+                      NOW));
 
           return new ThreeLevelBaseline(
               rootThreadId, middleThreadId, leafThreadId, leafHeadEntryId);
@@ -320,39 +327,43 @@ class ManualCompactionLifecycleRegressionTest {
     UUID secondAssistantId = tx.nextId();
     UUID secondEndId = tx.nextId();
 
-    tx.insertEntry(turnStart(firstStartId, sessionId, initialParentId, threadId));
-    tx.insertEntry(
-        message(
-            firstUserId,
-            sessionId,
-            firstStartId,
-            userMessage("historical user " + "h".repeat(50_000)),
-            null));
-    tx.insertEntry(
-        message(
-            firstAssistantId,
-            sessionId,
-            firstUserId,
-            assistantMessage("historical assistant " + "a".repeat(50_000)),
-            metadata()));
-    tx.insertEntry(turnEnd(firstEndId, sessionId, firstAssistantId, firstStartId));
+    tx.entries().insert(turnStart(firstStartId, sessionId, initialParentId, threadId));
+    tx.entries()
+        .insert(
+            message(
+                firstUserId,
+                sessionId,
+                firstStartId,
+                userMessage("historical user " + "h".repeat(50_000)),
+                null));
+    tx.entries()
+        .insert(
+            message(
+                firstAssistantId,
+                sessionId,
+                firstUserId,
+                assistantMessage("historical assistant " + "a".repeat(50_000)),
+                metadata()));
+    tx.entries().insert(turnEnd(firstEndId, sessionId, firstAssistantId, firstStartId));
 
-    tx.insertEntry(turnStart(secondStartId, sessionId, firstEndId, threadId));
-    tx.insertEntry(
-        message(
-            secondUserId,
-            sessionId,
-            secondStartId,
-            userMessage("user asks a very long question" + "x".repeat(90_000)),
-            null));
-    tx.insertEntry(
-        message(
-            secondAssistantId,
-            sessionId,
-            secondUserId,
-            assistantMessage("assistant reply"),
-            metadata()));
-    tx.insertEntry(turnEnd(secondEndId, sessionId, secondAssistantId, secondStartId));
+    tx.entries().insert(turnStart(secondStartId, sessionId, firstEndId, threadId));
+    tx.entries()
+        .insert(
+            message(
+                secondUserId,
+                sessionId,
+                secondStartId,
+                userMessage("user asks a very long question" + "x".repeat(90_000)),
+                null));
+    tx.entries()
+        .insert(
+            message(
+                secondAssistantId,
+                sessionId,
+                secondUserId,
+                assistantMessage("assistant reply"),
+                metadata()));
+    tx.entries().insert(turnEnd(secondEndId, sessionId, secondAssistantId, secondStartId));
 
     return secondEndId;
   }
@@ -404,11 +415,11 @@ class ManualCompactionLifecycleRegressionTest {
   }
 
   private static ThreadState thread(InMemoryBuiltinHarnessStore store, UUID threadId) {
-    return store.transaction(tx -> tx.findThread(threadId).orElseThrow());
+    return store.transaction(tx -> tx.threads().find(threadId).orElseThrow());
   }
 
   private static Work work(InMemoryBuiltinHarnessStore store, WorkTarget target) {
-    return store.transaction(tx -> tx.findWork(target).orElse(null));
+    return store.transaction(tx -> tx.work().find(target).orElse(null));
   }
 
   private static final class FakeTurnResolver implements TurnResolver {

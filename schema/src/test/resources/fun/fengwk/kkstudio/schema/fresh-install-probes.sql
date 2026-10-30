@@ -210,6 +210,7 @@ insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload,
     (pg_temp.uid(202), pg_temp.uid(102), null, 'ROOT', '{}', now()),
     (pg_temp.uid(203), pg_temp.uid(104), null, 'ROOT', '{}', now()),
     (pg_temp.uid(207), pg_temp.uid(106), null, 'ROOT', '{}', now()),
+    (pg_temp.uid(208), pg_temp.uid(103), null, 'ROOT', '{}', now()),
     (pg_temp.uid(205), pg_temp.uid(100), pg_temp.uid(200), 'MESSAGE',
         '{"message":{"role":"ASSISTANT"}}', now()),
     (pg_temp.uid(206), pg_temp.uid(100), pg_temp.uid(205), 'TURN_END', '{}', now());
@@ -226,7 +227,43 @@ insert into harness_thread (id, session_id, head_entry_id, creation_request_hash
     (pg_temp.uid(302), pg_temp.uid(102), pg_temp.uid(202), repeat('c', 64), 'second', pg_temp.uid(302), true, 'USER', '{"maxOutputTokens":null,"promptCacheDisabled":false,"allowAutoCompaction":true}', 'RUNNABLE', 0, 1, 0, now(), now()),
     (pg_temp.uid(303), pg_temp.uid(106), pg_temp.uid(207), repeat('d', 64), 'second-reviewer', pg_temp.uid(303), true, 'USER', '{"maxOutputTokens":null,"promptCacheDisabled":false,"allowAutoCompaction":true}', 'STOPPED', 0, 1, 0, now(), now()),
     (pg_temp.uid(304), pg_temp.uid(101), pg_temp.uid(201), repeat('e', 64), 'takeover', pg_temp.uid(304), true, 'USER', '{"maxOutputTokens":null,"promptCacheDisabled":false,"allowAutoCompaction":true}', 'STOPPED', 0, 1, 0, now(), now()),
-    (pg_temp.uid(305), pg_temp.uid(104), pg_temp.uid(203), repeat('f', 64), 'third', pg_temp.uid(305), true, 'USER', '{"maxOutputTokens":null,"promptCacheDisabled":false,"allowAutoCompaction":true}', 'RUNNABLE', 0, 1, 0, now(), now());
+    (pg_temp.uid(305), pg_temp.uid(104), pg_temp.uid(203), repeat('f', 64), 'third', pg_temp.uid(305), true, 'USER', '{"maxOutputTokens":null,"promptCacheDisabled":false,"allowAutoCompaction":true}', 'RUNNABLE', 0, 1, 0, now(), now()),
+    (pg_temp.uid(306), pg_temp.uid(103), pg_temp.uid(208), repeat('1', 64), 'unbound', pg_temp.uid(306), true, 'USER', '{"maxOutputTokens":null,"promptCacheDisabled":false,"allowAutoCompaction":true}', 'RUNNABLE', 0, 1, 0, now(), now());
+
+-- 跨节点 realtime 订阅：复合主键、无节点 FK、Thread FK 级联。
+insert into realtime_subscription (thread_id, node_instance_id, lease_until)
+    values (pg_temp.uid(300), pg_temp.uid(9201), now() + interval '1 minute');
+select pg_temp.assert_true('realtime subscription accepts an unregistered node without a node FK',
+    (select lease_until > now() from realtime_subscription
+        where thread_id = pg_temp.uid(300) and node_instance_id = pg_temp.uid(9201)));
+select pg_temp.assert_true('realtime subscription primary key is thread and node',
+    (select count(*) = 2 from pg_constraint con
+        join pg_attribute att on att.attrelid = con.conrelid and att.attnum = any(con.conkey)
+        where con.conrelid = 'realtime_subscription'::regclass and con.contype = 'p'
+            and att.attname in ('thread_id', 'node_instance_id')));
+select pg_temp.assert_true('realtime subscription node index is exactly (node_instance_id)',
+    (select indnatts = 1 from pg_index
+        where indexrelid = to_regclass('public.idx_realtime_subscription_node'))
+    and (select array_agg(att.attname::text order by idx_key.ordinality)
+            = array['node_instance_id']
+        from pg_index idx
+        join lateral unnest(idx.indkey) with ordinality as idx_key(attnum, ordinality) on true
+        join pg_attribute att
+            on att.attrelid = idx.indrelid and att.attnum = idx_key.attnum
+        where idx.indexrelid = to_regclass('public.idx_realtime_subscription_node')));
+select pg_temp.rejects('realtime subscription is unique per thread and node',
+    $$insert into realtime_subscription (thread_id, node_instance_id, lease_until)
+        values (pg_temp.uid(300), pg_temp.uid(9201), now() + interval '1 minute')$$,
+    '23505', 'pk_realtime_subscription');
+select pg_temp.rejects('realtime subscription requires an existing thread',
+    $$insert into realtime_subscription (thread_id, node_instance_id, lease_until)
+        values (pg_temp.uid(9999), pg_temp.uid(9201), now() + interval '1 minute')$$,
+    '23503', 'fk_realtime_subscription_thread');
+insert into realtime_subscription (thread_id, node_instance_id, lease_until)
+    values (pg_temp.uid(306), pg_temp.uid(9200), now() + interval '1 minute');
+delete from harness_thread where id = pg_temp.uid(306);
+select pg_temp.assert_true('deleting a thread cascades its realtime subscriptions',
+    not exists(select 1 from realtime_subscription where thread_id = pg_temp.uid(306)));
 
 insert into project_issue_agent_thread (issue_id, agent_name, thread_id) values
     (pg_temp.uid(10), 'designer', pg_temp.uid(300)),

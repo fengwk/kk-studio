@@ -51,7 +51,7 @@ class HarnessRuntimeStopConcurrencyTest {
 
     assertStopped(stopped);
     // stopTools 在同一事务删除 tool 行；后续 decision replay 因找不到 durable row 而业务冲突拒绝。
-    assertTrue(store.transaction(tx -> tx.findToolInvocation(baseline.toolId())).isEmpty());
+    assertTrue(store.transaction(tx -> tx.tools().find(baseline.toolId())).isEmpty());
     HarnessRuntimeConflictException replayError =
         assertThrows(
             HarnessRuntimeConflictException.class, () -> runtime.decideToolApproval(approval));
@@ -73,7 +73,7 @@ class HarnessRuntimeStopConcurrencyTest {
 
     assertEquals(Reason.APPROVAL_NOT_APPLICABLE, error.reason());
     // Stop 已删除 tool 行；decision 不再能 undecided WAITING_APPROVAL → READY 转换。
-    assertTrue(store.transaction(tx -> tx.findToolInvocation(baseline.toolId())).isEmpty());
+    assertTrue(store.transaction(tx -> tx.tools().find(baseline.toolId())).isEmpty());
   }
 
   @Test
@@ -99,12 +99,12 @@ class HarnessRuntimeStopConcurrencyTest {
       if (stopAttempt.error() == null) {
         // Stop 胜出：tool 行在同一事务被 stopTools 物理删除，approval 因 TOOL_ACTIVE 不再属于当前
         // 上下文而被业务冲突拒绝。
-        assertTrue(store.transaction(tx -> tx.findToolInvocation(baseline.toolId())).isEmpty());
+        assertTrue(store.transaction(tx -> tx.tools().find(baseline.toolId())).isEmpty());
         assertConflict(approvalAttempt, Reason.APPROVAL_NOT_APPLICABLE);
       } else {
         assertConflict(stopAttempt, Reason.STALE_VERSION);
         ToolInvocation tool =
-            store.transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow());
+            store.transaction(tx -> tx.tools().find(baseline.toolId()).orElseThrow());
         assertEquals(ToolInvocationStatus.READY, tool.status());
         assertEquals(ToolApprovalDecision.ALLOWED, tool.approval().decision());
       }
@@ -149,7 +149,7 @@ class HarnessRuntimeStopConcurrencyTest {
       Attempt two = second.get();
       assertEquals(2, successCount(one, two));
       ThreadState thread =
-          store.transaction(tx -> tx.lockThread(baseline.threadId()).orElseThrow());
+          store.transaction(tx -> tx.threads().lock(baseline.threadId()).orElseThrow());
       assertEquals(3L, thread.nextCommandSequence());
       assertEquals(2L, thread.version());
     } finally {
@@ -201,7 +201,7 @@ class HarnessRuntimeStopConcurrencyTest {
       Attempt loser = one.error() == null ? two : one;
       assertConflict(loser, Reason.STALE_COMMAND_CURSOR);
       ThreadState thread =
-          store.transaction(tx -> tx.lockThread(baseline.threadId()).orElseThrow());
+          store.transaction(tx -> tx.threads().lock(baseline.threadId()).orElseThrow());
       assertEquals(3L, thread.nextCommandSequence());
       assertEquals(1L, thread.version());
     } finally {

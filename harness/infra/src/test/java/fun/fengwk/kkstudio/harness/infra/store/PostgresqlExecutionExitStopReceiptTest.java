@@ -97,7 +97,7 @@ class PostgresqlExecutionExitStopReceiptTest {
     List<UUID> ordered =
         store.transaction(
             tx ->
-                tx.loadStopReceiptsByThread(tree.targetThreadId()).stream()
+                tx.stops().loadByThread(tree.targetThreadId()).stream()
                     .map(StoppedThreadReceipt::stopRequestId)
                     .toList());
     assertEquals(List.of(SECOND_STOP_REQUEST_ID, FIRST_STOP_REQUEST_ID), ordered);
@@ -107,7 +107,9 @@ class PostgresqlExecutionExitStopReceiptTest {
     EntryPath path =
         store.transaction(
             tx ->
-                tx.loadEntryPath(tx.findThread(tree.targetThreadId()).orElseThrow().headEntryId()));
+                tx.entries()
+                    .loadPath(
+                        tx.threads().find(tree.targetThreadId()).orElseThrow().headEntryId()));
     Entry terminal = path.headIgnoringTrailingControlEntries();
     assertTrue(
         terminal.payload() instanceof TurnEndPayload end
@@ -152,7 +154,7 @@ class PostgresqlExecutionExitStopReceiptTest {
         "delete from harness_thread_stop_receipt where thread_id = ?", tree.targetThreadId());
     assertTrue(
         store
-            .transaction(tx -> tx.findStopReceipt(tree.targetThreadId(), FIRST_STOP_REQUEST_ID))
+            .transaction(tx -> tx.stops().findReceipt(tree.targetThreadId(), FIRST_STOP_REQUEST_ID))
             .isEmpty(),
         "the forced-missing receipt must be absent before confirmation");
 
@@ -177,39 +179,43 @@ class PostgresqlExecutionExitStopReceiptTest {
           UUID rootEntryId = tx.nextId();
           UUID parentThreadId = tx.nextId();
           UUID targetThreadId = tx.nextId();
-          tx.insertSession(StoreTestSupport.session(sessionId));
-          tx.insertEntry(StoreTestSupport.rootEntry(rootEntryId, sessionId));
-          tx.insertThread(
-              thread(parentThreadId, sessionId, null, parentThreadId, rootEntryId, "parent", 1));
-          tx.insertThread(
-              thread(
-                  targetThreadId,
-                  sessionId,
-                  parentThreadId,
-                  parentThreadId,
-                  rootEntryId,
-                  "target",
-                  2));
+          tx.sessions().insert(StoreTestSupport.session(sessionId));
+          tx.entries().insert(StoreTestSupport.rootEntry(rootEntryId, sessionId));
+          tx.threads()
+              .insert(
+                  thread(
+                      parentThreadId, sessionId, null, parentThreadId, rootEntryId, "parent", 1));
+          tx.threads()
+              .insert(
+                  thread(
+                      targetThreadId,
+                      sessionId,
+                      parentThreadId,
+                      parentThreadId,
+                      rootEntryId,
+                      "target",
+                      2));
           ThreadCommand source = StoreTestSupport.command(targetThreadId, 1L, tx.nextId());
-          tx.insertCommands(List.of(source));
+          tx.commands().insert(List.of(source));
           UUID joinId = tx.nextId();
-          tx.insertJoin(
-              new ThreadJoin(
-                  joinId,
-                  CREATION_REQUEST_HASH,
-                  parentThreadId,
-                  targetThreadId,
-                  1L,
-                  "agent",
-                  10,
-                  0L,
-                  null,
-                  null,
-                  null,
-                  T0,
-                  T0,
-                  JoinDelivery.NOTIFY_PARENT,
-                  null));
+          tx.joins()
+              .insert(
+                  new ThreadJoin(
+                      joinId,
+                      CREATION_REQUEST_HASH,
+                      parentThreadId,
+                      targetThreadId,
+                      1L,
+                      "agent",
+                      10,
+                      0L,
+                      null,
+                      null,
+                      null,
+                      T0,
+                      T0,
+                      JoinDelivery.NOTIFY_PARENT,
+                      null));
           UUID executionId = tx.nextId();
           ExecutionExitLedger.register(
               tx,
@@ -263,17 +269,18 @@ class PostgresqlExecutionExitStopReceiptTest {
   private void appendTrailingSettings(Tree tree) {
     store.transaction(
         tx -> {
-          ThreadState target = tx.lockThread(tree.targetThreadId()).orElseThrow();
+          ThreadState target = tx.threads().lock(tree.targetThreadId()).orElseThrow();
           UUID settingsId = tx.nextId();
           Instant now = tx.now();
-          tx.insertEntry(
-              new Entry(
-                  settingsId,
-                  tree.sessionId(),
-                  target.headEntryId(),
-                  new SettingsPayload(StoreTestSupport.branchSettings(), tree.targetThreadId()),
-                  now));
-          tx.updateThread(target.advanceHead(settingsId, now));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      settingsId,
+                      tree.sessionId(),
+                      target.headEntryId(),
+                      new SettingsPayload(StoreTestSupport.branchSettings(), tree.targetThreadId()),
+                      now));
+          tx.threads().update(target.advanceHead(settingsId, now));
           return null;
         });
   }
@@ -282,7 +289,7 @@ class PostgresqlExecutionExitStopReceiptTest {
     return store.transaction(
         tx -> {
           ExecutionExitLedger.lockAncestorChain(tx, threadId);
-          tx.lockThread(threadId).orElseThrow();
+          tx.threads().lock(threadId).orElseThrow();
           ExecutionExitLedger.Confirmation confirmation =
               ExecutionExitLedger.confirm(tx, expected, ExecutionExitState.NOT_STARTED, tx.now())
                   .orElseThrow();
@@ -292,19 +299,19 @@ class PostgresqlExecutionExitStopReceiptTest {
   }
 
   private StoppedThreadReceipt findReceipt(UUID threadId, UUID stopRequestId) {
-    return store.transaction(tx -> tx.findStopReceipt(threadId, stopRequestId)).orElseThrow();
+    return store.transaction(tx -> tx.stops().findReceipt(threadId, stopRequestId)).orElseThrow();
   }
 
   private ThreadState findThread(UUID threadId) {
-    return store.transaction(tx -> tx.findThread(threadId)).orElseThrow();
+    return store.transaction(tx -> tx.threads().find(threadId)).orElseThrow();
   }
 
   private ExecutionExitFact findExecution(UUID executionId) {
-    return store.transaction(tx -> tx.findExecution(executionId)).orElseThrow();
+    return store.transaction(tx -> tx.exits().find(executionId)).orElseThrow();
   }
 
   private ThreadJoin findJoin(UUID joinId) {
-    return store.transaction(tx -> tx.findJoin(joinId)).orElseThrow();
+    return store.transaction(tx -> tx.joins().find(joinId)).orElseThrow();
   }
 
   private long notificationCount(UUID parentThreadId) {
@@ -315,7 +322,7 @@ class PostgresqlExecutionExitStopReceiptTest {
 
   private boolean hasThreadWork(UUID threadId) {
     return store
-        .transaction(tx -> tx.findWork(new WorkTarget(WorkTargetType.THREAD, threadId)))
+        .transaction(tx -> tx.work().find(new WorkTarget(WorkTargetType.THREAD, threadId)))
         .isPresent();
   }
 }

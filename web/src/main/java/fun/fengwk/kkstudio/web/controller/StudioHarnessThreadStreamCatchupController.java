@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.web.controller;
 
-import fun.fengwk.convention4j.api.result.Result;
-import fun.fengwk.convention4j.common.result.Results;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -10,6 +8,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import fun.fengwk.kkstudio.platform.harness.realtime.HarnessStreamCatchupService;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadStreamCatchupDTO;
+import fun.fengwk.kkstudio.web.api.ApiResponse;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapper;
 
 import java.util.Objects;
@@ -31,9 +30,9 @@ public class StudioHarnessThreadStreamCatchupController {
   }
 
   @PostMapping("/{threadId}/stream-catchup")
-  public Result<Void> catchUp(
+  public ApiResponse<Void> catchUp(
       @PathVariable String threadId, @RequestBody HarnessThreadStreamCatchupDTO request) {
-    return Results.accepted(
+    return ApiResponse.accepted(
         StudioHarnessThreadController.withRuntimeTranslation(
             () -> {
               if (request == null) {

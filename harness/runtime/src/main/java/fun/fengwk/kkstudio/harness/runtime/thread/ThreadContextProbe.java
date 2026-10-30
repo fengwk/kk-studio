@@ -34,7 +34,7 @@ public final class ThreadContextProbe {
     List<ToolInvocation> siblings = List.of();
     if (path.openTurnStart().isPresent() && assistantHead(path)) {
       siblings =
-          tx.loadToolInvocationsByAssistantEntryId(path.head().id()).stream()
+          tx.tools().loadByAssistantEntry(path.head().id()).stream()
               .filter(
                   sibling ->
                       sibling.threadId().equals(thread.id())
@@ -50,7 +50,7 @@ public final class ThreadContextProbe {
   public ThreadContext probe(HarnessStore.Transaction tx, ThreadState thread) {
     Objects.requireNonNull(tx, "tx");
     Objects.requireNonNull(thread, "thread");
-    return probe(tx, thread, tx.loadEntryPath(thread.headEntryId()));
+    return probe(tx, thread, tx.entries().loadPath(thread.headEntryId()));
   }
 
   private static boolean assistantHead(EntryPath path) {

@@ -163,11 +163,15 @@ Evidence 接收 READY uploadId，在事务内转移引用并返回规范资源�
 
 ## JSON、错误与信任边界
 
+JSON API 显式返回 [`ApiResponse`](../../web/src/main/java/fun/fengwk/kkstudio/web/api/ApiResponse.java)
+信封，包含 `status/code/message` 与可选的 `data/errors`；`success` 由 HTTP 状态派生。
+直接返回的信封由 advice 同步 HTTP 状态；`ResponseEntity` 由控制器显式设置状态。
+下载、HTML 与字节流保留原始响应，不参与信封包装。
+
 [`StrictJacksonConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/StrictJacksonConfiguration.java)
 定制 Boot4 装配的唯一 Jackson 3 `JsonMapper`（它与其父类型 `ObjectMapper` 是同一 bean）：
 启用重复键检测、Long 字符串序列化和 DTO 声明顺序，默认省略 null。
-只提供 Jackson 2 mapper 的 convention4j JSON 自动装配在组合根被排除
-（[`WebApplication`](../../web/src/main/java/fun/fengwk/kkstudio/web/WebApplication.java) 与其测试入口一致），
+全仓仅装配官方 Jackson 3 mapper，classpath 无 Jackson 2 databind；
 自有代码只解析到该 Jackson 3 mapper；Share DTO 的严格字段规则直接由 Jackson 3 注解声明
 （例如 `protocolOptionsJson` 与网络文本字段只接受 JSON 字符串 token）。
 required-nullable 字段由 DTO 显式 ALWAYS。未知字段由 DTO 的 JsonAnySetter 控制，
@@ -209,6 +213,15 @@ Thread `version` 与 Canvas `revision` 携 durable cursor，Thread `realtime` �
 `projects` / `tree` / `interactions` / `environments` 只发失效提示，由客户端回读权威事实。
 订阅先注册上游再读 cursor，sender 先排 subscribed ack 后 activate，
 过滤陈旧版本；缓冲溢出折叠为 resync。
+
+Thread 的首个本地订阅同时向平台订阅服务登记 `(threadId, nodeInstanceId)` 租约，末个订阅释放或 Hub close
+时注销；登记失败只影响跨节点投递，本机 realtime 上游照常建立，并向该 Thread 缓冲一次 resync。租约随节点
+15 秒心跳续租、45 秒过期，每个 Thread 独立续租，单个 Thread 的外键失败不会阻断其它 Thread。首次续租失败
+与恢复都会对对应 Thread 触发 resync；每次成功续租记录单调时钟，心跳提前返回或长停顿使相邻成功续租间隔达到
+租约时长时也触发 resync。租约是否有效只由数据库现在时判定，单调时钟仅用于识别本机续租间断。节点退出先封闭
+订阅服务生命周期边界，再删除本节点全部订阅，迟到的登记或续租不得复活租约。
+只有其它节点存在该 Thread 的有效订阅（订阅租约与 `cluster_node` 租约均未过期）时，普通 realtime 才跨节点
+发布；流式追帧请求仍按“其它活跃节点”广播。
 Environment 的连接状态不做推送：Card 的 `status` / `statusExpiresAt` 在读取时由
 `min(leaseUntil, lastSeen + heartbeatTimeout)` 派生，浏览器只按 `environments` 失效提示回读。
 非法帧、过载和关闭按稳定错误与 WebSocket close code 收尾。

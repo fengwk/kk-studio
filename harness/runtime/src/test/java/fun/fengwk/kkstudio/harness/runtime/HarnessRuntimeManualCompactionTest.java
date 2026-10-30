@@ -262,7 +262,7 @@ class HarnessRuntimeManualCompactionTest {
     assertEquals(
         1,
         fixture.store.<Integer>transaction(
-            tx -> tx.listThreadsBySession(after.root().sessionId()).size()),
+            tx -> tx.threads().listBySession(after.root().sessionId()).size()),
         "rejected manual compaction must not create a COMPACTION child thread");
   }
 
@@ -285,7 +285,7 @@ class HarnessRuntimeManualCompactionTest {
     assertEquals(
         1,
         fixture.store.<Integer>transaction(
-            tx -> tx.listThreadsBySession(path.root().sessionId()).size()),
+            tx -> tx.threads().listBySession(path.root().sessionId()).size()),
         "rejected manual compaction must not create a COMPACTION child thread");
   }
 
@@ -338,7 +338,7 @@ class HarnessRuntimeManualCompactionTest {
     assertEquals(
         1,
         fixture.store.<Integer>transaction(
-            tx -> tx.listThreadsBySession(after.root().sessionId()).size()));
+            tx -> tx.threads().listBySession(after.root().sessionId()).size()));
     List<ThreadCommand> commands =
         fixture.store.<List<ThreadCommand>>transaction(
             tx -> loadCommandsByThread(tx, baseline.threadId()));
@@ -400,21 +400,22 @@ class HarnessRuntimeManualCompactionTest {
       InMemoryHarnessStore store, UUID threadId, ThreadCommandPayload payload) {
     return store.transaction(
         tx -> {
-          ThreadState thread = tx.lockThread(threadId).orElseThrow();
+          ThreadState thread = tx.threads().lock(threadId).orElseThrow();
           UUID idempotencyKey = tx.nextId();
-          tx.insertCommands(
-              List.of(
-                  new ThreadCommand(
-                      threadId,
-                      thread.nextCommandSequence(),
-                      payload,
-                      idempotencyKey,
-                      ThreadCommandPayloadJsonCodec.requestHash(payload),
-                      null,
-                      null,
-                      null,
-                      NOW)));
-          tx.updateThread(thread.reserveCommandSequences(1, NOW));
+          tx.commands()
+              .insert(
+                  List.of(
+                      new ThreadCommand(
+                          threadId,
+                          thread.nextCommandSequence(),
+                          payload,
+                          idempotencyKey,
+                          ThreadCommandPayloadJsonCodec.requestHash(payload),
+                          null,
+                          null,
+                          null,
+                          NOW)));
+          tx.threads().update(thread.reserveCommandSequences(1, NOW));
           return idempotencyKey;
         });
   }
@@ -442,64 +443,70 @@ class HarnessRuntimeManualCompactionTest {
           UUID secondAssistantId = tx.nextId();
           UUID secondEndId = tx.nextId();
           UUID threadId = tx.nextId();
-          tx.insertSession(new Session(sessionId, "session-" + sessionId, NOW));
-          tx.insertEntry(
-              new Entry(
-                  rootId,
-                  sessionId,
-                  null,
-                  new RootPayload(HarnessRuntimeTestSupport.settings()),
-                  NOW));
-          tx.insertEntry(turnStart(firstStartId, sessionId, rootId, threadId));
-          tx.insertEntry(
-              message(
-                  firstUserId,
-                  sessionId,
-                  firstStartId,
-                  userMessage("historical user " + "h".repeat(historicalChars)),
-                  null));
-          tx.insertEntry(
-              message(
-                  firstAssistantId,
-                  sessionId,
-                  firstUserId,
-                  assistantMessage("historical assistant " + "a".repeat(historicalChars)),
-                  metadata()));
-          tx.insertEntry(turnEnd(firstEndId, sessionId, firstAssistantId, firstStartId));
-          tx.insertEntry(turnStart(secondStartId, sessionId, firstEndId, threadId));
-          tx.insertEntry(
-              message(
-                  secondUserId,
-                  sessionId,
-                  secondStartId,
-                  userMessage("user asks a very long question" + "x".repeat(currentChars)),
-                  null));
-          tx.insertEntry(
-              message(
-                  secondAssistantId,
-                  sessionId,
-                  secondUserId,
-                  assistantMessage("assistant reply"),
-                  metadata()));
-          tx.insertEntry(turnEnd(secondEndId, sessionId, secondAssistantId, secondStartId));
-          tx.insertThread(
-              new ThreadState(
-                  threadId,
-                  sessionId,
-                  null,
-                  secondEndId,
-                  HarnessRuntimeTestSupport.CREATION_REQUEST_HASH,
-                  "main",
-                  threadId,
-                  false,
-                  SpawnTrigger.USER,
-                  ThreadConstraints.NONE,
-                  ThreadExecutionControl.RUNNABLE,
-                  0L,
-                  1,
-                  0,
-                  NOW,
-                  NOW));
+          tx.sessions().insert(new Session(sessionId, "session-" + sessionId, NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      rootId,
+                      sessionId,
+                      null,
+                      new RootPayload(HarnessRuntimeTestSupport.settings()),
+                      NOW));
+          tx.entries().insert(turnStart(firstStartId, sessionId, rootId, threadId));
+          tx.entries()
+              .insert(
+                  message(
+                      firstUserId,
+                      sessionId,
+                      firstStartId,
+                      userMessage("historical user " + "h".repeat(historicalChars)),
+                      null));
+          tx.entries()
+              .insert(
+                  message(
+                      firstAssistantId,
+                      sessionId,
+                      firstUserId,
+                      assistantMessage("historical assistant " + "a".repeat(historicalChars)),
+                      metadata()));
+          tx.entries().insert(turnEnd(firstEndId, sessionId, firstAssistantId, firstStartId));
+          tx.entries().insert(turnStart(secondStartId, sessionId, firstEndId, threadId));
+          tx.entries()
+              .insert(
+                  message(
+                      secondUserId,
+                      sessionId,
+                      secondStartId,
+                      userMessage("user asks a very long question" + "x".repeat(currentChars)),
+                      null));
+          tx.entries()
+              .insert(
+                  message(
+                      secondAssistantId,
+                      sessionId,
+                      secondUserId,
+                      assistantMessage("assistant reply"),
+                      metadata()));
+          tx.entries().insert(turnEnd(secondEndId, sessionId, secondAssistantId, secondStartId));
+          tx.threads()
+              .insert(
+                  new ThreadState(
+                      threadId,
+                      sessionId,
+                      null,
+                      secondEndId,
+                      HarnessRuntimeTestSupport.CREATION_REQUEST_HASH,
+                      "main",
+                      threadId,
+                      false,
+                      SpawnTrigger.USER,
+                      ThreadConstraints.NONE,
+                      ThreadExecutionControl.RUNNABLE,
+                      0L,
+                      1,
+                      0,
+                      NOW,
+                      NOW));
           return new ClosedTurnBaseline(threadId, secondEndId);
         });
   }
@@ -552,7 +559,7 @@ class HarnessRuntimeManualCompactionTest {
 
   private static EntryPath path(InMemoryHarnessStore store, UUID threadId) {
     ThreadState thread = thread(store, threadId);
-    return store.transaction(tx -> tx.loadEntryPath(thread.headEntryId()));
+    return store.transaction(tx -> tx.entries().loadPath(thread.headEntryId()));
   }
 
   /**
@@ -582,7 +589,7 @@ class HarnessRuntimeManualCompactionTest {
             JoinDelivery.NOTIFY_PARENT,
             true);
     assertTrue(
-        fixture.store.<Boolean>transaction(tx -> tx.loadIncompleteJoins(descendant).isEmpty()));
+        fixture.store.<Boolean>transaction(tx -> tx.joins().loadIncomplete(descendant).isEmpty()));
 
     ManualCompactionAvailability descendantAvailability =
         fixture.runtime.manualCompactionAvailability(descendant);
@@ -622,46 +629,49 @@ class HarnessRuntimeManualCompactionTest {
       boolean matchedJoin) {
     return store.transaction(
         tx -> {
-          tx.lockThread(parentThreadId);
+          tx.threads().lock(parentThreadId);
           UUID sessionId = tx.nextId();
           UUID rootEntryId = tx.nextId();
           UUID threadId = tx.nextId();
           UUID commandId = tx.nextId();
-          tx.insertSession(new Session(sessionId, "child-" + sessionId, NOW));
-          tx.insertEntry(
-              new Entry(
-                  rootEntryId,
-                  sessionId,
-                  null,
-                  new RootPayload(HarnessRuntimeTestSupport.settings()),
-                  NOW));
-          List<UUID> ancestors = tx.findAncestorChain(parentThreadId);
+          tx.sessions().insert(new Session(sessionId, "child-" + sessionId, NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      rootEntryId,
+                      sessionId,
+                      null,
+                      new RootPayload(HarnessRuntimeTestSupport.settings()),
+                      NOW));
+          List<UUID> ancestors = tx.threads().findAncestorChain(parentThreadId);
           UUID rootThreadId = ancestors.isEmpty() ? parentThreadId : ancestors.getLast();
-          tx.insertThread(
-              new ThreadState(
-                  threadId,
-                  sessionId,
-                  parentThreadId,
-                  rootEntryId,
-                  HarnessRuntimeTestSupport.CREATION_REQUEST_HASH,
-                  "child-" + delivery.name().toLowerCase(),
-                  rootThreadId,
-                  false,
-                  trigger,
-                  constraints,
-                  ThreadExecutionControl.RUNNABLE,
-                  0L,
-                  2L,
-                  0L,
-                  NOW,
-                  NOW));
+          tx.threads()
+              .insert(
+                  new ThreadState(
+                      threadId,
+                      sessionId,
+                      parentThreadId,
+                      rootEntryId,
+                      HarnessRuntimeTestSupport.CREATION_REQUEST_HASH,
+                      "child-" + delivery.name().toLowerCase(),
+                      rootThreadId,
+                      false,
+                      trigger,
+                      constraints,
+                      ThreadExecutionControl.RUNNABLE,
+                      0L,
+                      2L,
+                      0L,
+                      NOW,
+                      NOW));
           CustomMessageCommandPayload payload =
               new CustomMessageCommandPayload(AgentMessage.user("child instruction"));
           String requestHash = ThreadCommandPayloadJsonCodec.requestHash(payload);
-          tx.insertCommands(
-              List.of(
-                  new ThreadCommand(
-                      threadId, 1L, payload, commandId, requestHash, null, null, null, NOW)));
+          tx.commands()
+              .insert(
+                  List.of(
+                      new ThreadCommand(
+                          threadId, 1L, payload, commandId, requestHash, null, null, null, NOW)));
           ThreadJoin join =
               new ThreadJoin(
                   commandId,
@@ -679,24 +689,24 @@ class HarnessRuntimeManualCompactionTest {
                   NOW,
                   delivery,
                   null);
-          tx.insertJoin(join);
+          tx.joins().insert(join);
           if (matchedJoin) {
             ThreadJoin matched = join.match(rootEntryId, null, NOW);
             if (delivery == JoinDelivery.NOTIFY_PARENT) {
               matched = matched.delivered(1L, NOW);
             }
-            tx.updateJoin(matched);
+            tx.joins().update(matched);
           }
           return threadId;
         });
   }
 
   private static ThreadState thread(InMemoryHarnessStore store, UUID threadId) {
-    return store.transaction(tx -> tx.findThread(threadId).orElseThrow());
+    return store.transaction(tx -> tx.threads().find(threadId).orElseThrow());
   }
 
   private static Work work(InMemoryHarnessStore store, WorkTarget target) {
-    return store.transaction(tx -> tx.findWork(target).orElse(null));
+    return store.transaction(tx -> tx.work().find(target).orElse(null));
   }
 
   private record Fixture(

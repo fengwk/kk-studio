@@ -71,7 +71,7 @@ class HarnessNamesTest {
             newSession(sessionId, threadId, List.of(userMessage(messy))),
             AcceptancePreflight.IDENTITY);
     assertEquals("第一条 消息 继续 说", accepted.session().name());
-    Session stored = store.transaction(tx -> tx.findSession(sessionId).orElseThrow());
+    Session stored = store.transaction(tx -> tx.sessions().find(sessionId).orElseThrow());
     assertEquals("第一条 消息 继续 说", stored.name());
   }
 
@@ -105,7 +105,7 @@ class HarnessNamesTest {
     runtime.acceptCommands(
         newSession(sessionId, TestIds.id(104), List.of(userMessage("a" + emoji + "尾"))),
         AcceptancePreflight.IDENTITY);
-    Session stored = store.transaction(tx -> tx.findSession(sessionId).orElseThrow());
+    Session stored = store.transaction(tx -> tx.sessions().find(sessionId).orElseThrow());
     assertEquals(40, stored.name().codePointCount(0, stored.name().length()));
     assertTrue(stored.name().startsWith("a"));
     assertFalse(stored.name().endsWith("…"));
@@ -119,7 +119,7 @@ class HarnessNamesTest {
     runtime.acceptCommands(
         newSession(sessionId, TestIds.id(106), List.of(userMessage(overLong))),
         AcceptancePreflight.IDENTITY);
-    Session stored = store.transaction(tx -> tx.findSession(sessionId).orElseThrow());
+    Session stored = store.transaction(tx -> tx.sessions().find(sessionId).orElseThrow());
     assertEquals(40, stored.name().codePointCount(0, stored.name().length()));
     assertTrue(stored.name().startsWith("长文 长文"));
     assertFalse(stored.name().endsWith("…"));
@@ -138,7 +138,7 @@ class HarnessNamesTest {
                 new NewThreadCommand(new SetAgentCommandPayload("assistant"), UUID.randomUUID()),
                 userMessage("trailing user text"))),
         AcceptancePreflight.IDENTITY);
-    Session stored = store.transaction(tx -> tx.findSession(sessionId).orElseThrow());
+    Session stored = store.transaction(tx -> tx.sessions().find(sessionId).orElseThrow());
     assertEquals("trailing user text", stored.name());
   }
 
@@ -150,7 +150,7 @@ class HarnessNamesTest {
     runtime.acceptCommands(
         newSession(sessionId, threadId, List.of(customUserMessage("custom user text"))),
         AcceptancePreflight.IDENTITY);
-    Session stored = store.transaction(tx -> tx.findSession(sessionId).orElseThrow());
+    Session stored = store.transaction(tx -> tx.sessions().find(sessionId).orElseThrow());
     assertEquals("custom user text", stored.name());
   }
 
@@ -179,7 +179,7 @@ class HarnessNamesTest {
             newSession(sessionId, threadId, List.of(userMessage("hello"))),
             AcceptancePreflight.IDENTITY);
     assertEquals("main", accepted.thread().name());
-    ThreadState stored = store.transaction(tx -> tx.findThread(threadId).orElseThrow());
+    ThreadState stored = store.transaction(tx -> tx.threads().find(threadId).orElseThrow());
     assertEquals("main", stored.name());
   }
 
@@ -195,10 +195,11 @@ class HarnessNamesTest {
             List.of(userMessage("branch hello")));
     AcceptedCommands accepted = runtime.acceptCommands(command, AcceptancePreflight.IDENTITY);
     assertEquals("发布 分支", accepted.thread().name());
-    ThreadState stored = store.transaction(tx -> tx.findThread(branchThreadId).orElseThrow());
+    ThreadState stored = store.transaction(tx -> tx.threads().find(branchThreadId).orElseThrow());
     assertEquals("发布 分支", stored.name());
     // 分支创建不改既有 Session 名称（seedBaseline 直接以 session-<uuid> 落库）。
-    Session session = store.transaction(tx -> tx.findSession(baseline.sessionId()).orElseThrow());
+    Session session =
+        store.transaction(tx -> tx.sessions().find(baseline.sessionId()).orElseThrow());
     assertEquals("session-" + baseline.sessionId(), session.name());
   }
 
@@ -241,7 +242,8 @@ class HarnessNamesTest {
     assertEquals(HarnessRuntimeConflictException.Reason.THREAD_ID_REUSED, error.reason());
 
     // seedBaseline 的根 Thread + 新建分支 = 2，且分支只有初始一条 Command / 一份 Work。
-    assertEquals(2, store.transaction(tx -> tx.listThreadsBySession(baseline.sessionId())).size());
+    assertEquals(
+        2, store.transaction(tx -> tx.threads().listBySession(baseline.sessionId())).size());
     assertEquals(1, store.transaction(tx -> loadCommandsByThread(tx, branchThreadId)).size());
   }
 
@@ -258,7 +260,7 @@ class HarnessNamesTest {
     ThreadState renamedThread = runtime.renameThread(new RenameThreadCommand(threadId, "主线"));
 
     String hashBefore =
-        store.transaction(tx -> tx.findThread(threadId).orElseThrow()).creationRequestHash();
+        store.transaction(tx -> tx.threads().find(threadId).orElseThrow()).creationRequestHash();
     AcceptedCommands replayed =
         runtime.acceptCommands(
             newSession(sessionId, threadId, List.of(first)), AcceptancePreflight.IDENTITY);
