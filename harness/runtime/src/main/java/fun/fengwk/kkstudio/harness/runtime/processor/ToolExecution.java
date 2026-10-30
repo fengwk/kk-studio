@@ -687,11 +687,4 @@ final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution {
     /** 收敛为结果不确定的终态。 */
     UNKNOWN
   }
-
-  /** 内部回滚信号：终态事务失去 Work ownership 时使当前事务完整回滚。 */
-  private static final class ClaimLostSignal extends RuntimeException {
-    private ClaimLostSignal() {
-      super("claimed work lost at final fence", null, false, false);
-    }
-  }
 }

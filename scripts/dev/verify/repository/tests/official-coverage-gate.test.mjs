@@ -58,11 +58,11 @@ const CRITICAL_CLASSES = [
   'fun.fengwk.kkstudio.harness.builtin.goal.GoalProgressCodec',
   'fun.fengwk.kkstudio.harness.prompt.PromptTemplate',
   'fun.fengwk.kkstudio.harness.prompt.PromptTemplateLoader',
-  'fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation',
-  'fun.fengwk.kkstudio.harness.runtime.processor.ModelExecution',
+  'fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation',
+  'fun.fengwk.kkstudio.harness.builtin.processor.ModelExecution',
   'fun.fengwk.kkstudio.harness.builtin.compaction.AutomaticCompactionPlanner',
-  'fun.fengwk.kkstudio.harness.runtime.thread.ResolvedRequestValidator',
-  'fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec',
+  'fun.fengwk.kkstudio.harness.builtin.request.ResolvedRequestValidator',
+  'fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec',
 ]
 
 function stripComments(xml) {

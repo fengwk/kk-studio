@@ -507,7 +507,7 @@ const CORE_STATE_ENUMS = [
     constants: ['RUNNING', 'WAITING', 'IDLE'],
   },
   {
-    path: 'harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelInvocationStatus.java',
+    path: 'harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/model/ModelInvocationStatus.java',
     enumName: 'ModelInvocationStatus',
     constants: ['READY', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN'],
   },
@@ -615,12 +615,12 @@ const CORE_STATE_ENUMS = [
     ],
   },
   {
-    path: 'harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ModelExecution.java',
+    path: 'harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/processor/ModelExecution.java',
     enumName: 'Applied',
     constants: ['RETRY', 'TERMINAL', 'LOST'],
   },
   {
-    path: 'harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ModelExecution.java',
+    path: 'harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/processor/ModelExecution.java',
     enumName: 'TerminalKind',
     constants: ['FAILED', 'CANCELLED', 'UNKNOWN'],
   },

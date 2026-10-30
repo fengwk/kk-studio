@@ -18,8 +18,6 @@
  * Commands）再锁 Model/Tool，分类结果不会漂移。
  *
  * <p>{@code fun.fengwk.kkstudio.harness.runtime.thread.command} 包承载 Command mailbox 的持久化
- * payload、batch 与 harvest reducer；{@link
- * fun.fengwk.kkstudio.harness.runtime.thread.ProviderMessageProjector} 把语义 Context 投影为与 Provider
- * SDK 无关的 ProviderMessage。
+ * payload、batch 与 harvest reducer。面向具体执行后端的请求投影与校验属于 Driver，而非 Thread 域。
  */
 package fun.fengwk.kkstudio.harness.runtime.thread;

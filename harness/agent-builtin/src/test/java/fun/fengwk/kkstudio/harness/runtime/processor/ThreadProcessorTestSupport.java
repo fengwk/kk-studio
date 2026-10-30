@@ -6,6 +6,11 @@ import static org.junit.jupiter.api.Assertions.fail;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinAgentDriver;
+import fun.fengwk.kkstudio.harness.builtin.history.BuiltinHistoryPayloadMapper;
+import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
+import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
+import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.builtin.store.BuiltinStore;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
@@ -33,7 +38,6 @@ import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
-import fun.fengwk.kkstudio.harness.runtime.history.BuiltinHistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
@@ -44,9 +48,6 @@ import fun.fengwk.kkstudio.harness.runtime.history.ToolResultStatus;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnCapabilities;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccess;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
@@ -54,7 +55,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -113,12 +113,12 @@ import java.util.function.Function;
  * transition 逐级推进； ToolInvocation 只能以 READY/attempt=0/approval=null 插入，call/binding 由基座固定绑定 bash
  * tool。
  */
-final class ThreadProcessorTestSupport {
+public final class ThreadProcessorTestSupport {
 
-  static final Instant NOW = Instant.parse("2026-07-01T00:00:00Z");
+  public static final Instant NOW = Instant.parse("2026-07-01T00:00:00Z");
   static final UUID OWNER_THREAD_ID = new UUID(0L, 1L);
   static final EnvironmentId ENV_ID = EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
-  static final ProcessorLeaseConfig LEASE_CONFIG =
+  public static final ProcessorLeaseConfig LEASE_CONFIG =
       new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5));
   static final Duration RESOLVE_FAILURE_DELAY = Duration.ofSeconds(7);
 
@@ -132,24 +132,25 @@ final class ThreadProcessorTestSupport {
   static final CompactionConfig COMPACTION_CONFIG = new CompactionConfig(20_000);
 
   /** 测试种子线程的合法 64 位小写 SHA-256 creation request hash（非 accept 路径的固定身份键）。 */
-  static final String CREATION_REQUEST_HASH =
+  public static final String CREATION_REQUEST_HASH =
       "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
   private ThreadProcessorTestSupport() {}
 
   /** 构造有合法 creationRequestHash 的 ThreadState：name 固定 root 名、version 0 / nextCommandSequence 1。 */
-  static ThreadState threadState(UUID threadId, UUID sessionId, UUID headEntryId, Instant now) {
+  public static ThreadState threadState(
+      UUID threadId, UUID sessionId, UUID headEntryId, Instant now) {
     return threadState(threadId, sessionId, headEntryId, "main", now, ThreadConstraints.NONE);
   }
 
   /** 带冻结创建约束的 root ThreadState（如压缩子的不可自动压缩约束）。 */
-  static ThreadState threadState(
+  public static ThreadState threadState(
       UUID threadId, UUID sessionId, UUID headEntryId, Instant now, ThreadConstraints constraints) {
     return threadState(threadId, sessionId, headEntryId, "main", now, constraints);
   }
 
   /** 指定名称的 root ThreadState：同一 Session 内的额外根必须使用不同名称。 */
-  static ThreadState threadState(
+  public static ThreadState threadState(
       UUID threadId, UUID sessionId, UUID headEntryId, String name, Instant now) {
     return threadState(threadId, sessionId, headEntryId, name, now, ThreadConstraints.NONE);
   }
@@ -186,7 +187,7 @@ final class ThreadProcessorTestSupport {
 
   record Baseline(UUID sessionId, UUID rootEntryId, UUID threadId) {}
 
-  record OpenTurnBaseline(
+  public record OpenTurnBaseline(
       UUID sessionId, UUID rootEntryId, UUID turnStartEntryId, UUID userEntryId, UUID threadId) {}
 
   record ClosedTurnBaseline(
@@ -223,7 +224,7 @@ final class ThreadProcessorTestSupport {
   }
 
   /** Session + ROOT + TURN_START(INPUT) + USER；Thread head 指向 USER。 */
-  static OpenTurnBaseline seedOpenInputTurn(InMemoryHarnessStore store) {
+  public static OpenTurnBaseline seedOpenInputTurn(InMemoryHarnessStore store) {
     return seedOpenInputTurn(store, List.of());
   }
 
@@ -661,15 +662,16 @@ final class ThreadProcessorTestSupport {
     return toolId;
   }
 
-  static ClaimedWork claimThreadWork(InMemoryHarnessStore store, UUID threadId) {
+  public static ClaimedWork claimThreadWork(InMemoryHarnessStore store, UUID threadId) {
     return claimThreadWork(store, threadId, NOW);
   }
 
-  static ClaimedWork claimThreadWork(InMemoryHarnessStore store, UUID threadId, Instant now) {
+  public static ClaimedWork claimThreadWork(
+      InMemoryHarnessStore store, UUID threadId, Instant now) {
     return claimThreadWork(store, threadId, now, Duration.ofSeconds(60));
   }
 
-  static ClaimedWork claimThreadWork(
+  public static ClaimedWork claimThreadWork(
       InMemoryHarnessStore store, UUID threadId, Instant now, Duration leaseDuration) {
     return store
         .transaction(
@@ -778,7 +780,7 @@ final class ThreadProcessorTestSupport {
     return store.transaction(tx -> tx.findThread(threadId)).orElseThrow();
   }
 
-  static EntryPath path(InMemoryHarnessStore store, UUID threadId) {
+  public static EntryPath path(InMemoryHarnessStore store, UUID threadId) {
     return store.transaction(
         tx -> tx.loadEntryPath(tx.findThread(threadId).orElseThrow().headEntryId()));
   }
@@ -787,7 +789,7 @@ final class ThreadProcessorTestSupport {
     return store.transaction(tx -> tx.findEntry(entryId)).orElseThrow();
   }
 
-  static ModelInvocation model(InMemoryHarnessStore store, UUID modelId) {
+  public static ModelInvocation model(InMemoryHarnessStore store, UUID modelId) {
     return store.transaction(tx -> builtin(tx).findModelInvocation(modelId)).orElseThrow();
   }
 
@@ -905,7 +907,7 @@ final class ThreadProcessorTestSupport {
     return requestWithBindings(bindings);
   }
 
-  static ModelRequestSpec plainRequest() {
+  public static ModelRequestSpec plainRequest() {
     return tooledRequest(List.of());
   }
 
@@ -1277,20 +1279,20 @@ final class ThreadProcessorTestSupport {
   }
 
   /** 每次测试一个 Fixture：InMemory store + fake resolver + 可变时钟 + ThreadProcessor + HarnessRuntime。 */
-  static final class Fixture {
-    final MutableClock clock = new MutableClock(NOW);
-    final InMemoryHarnessStore store = new InMemoryHarnessStore();
+  public static final class Fixture {
+    public final MutableClock clock = new MutableClock(NOW);
+    public final InMemoryHarnessStore store = new InMemoryHarnessStore();
 
     {
       store.setClock(clock);
     }
 
-    final FakeTurnResolver resolver = new FakeTurnResolver();
-    final ThreadProcessor processor;
-    final HarnessRuntime runtime;
-    ClaimedWork claim;
+    public final FakeTurnResolver resolver = new FakeTurnResolver();
+    public final ThreadProcessor processor;
+    public final HarnessRuntime runtime;
+    public ClaimedWork claim;
 
-    Fixture() {
+    public Fixture() {
       this((HarnessStore) null);
     }
 
@@ -1316,7 +1318,7 @@ final class ThreadProcessorTestSupport {
     }
 
     /** claim 并处理一次指定 Thread 的 THREAD claim（single-action），返回处理结果。 */
-    ThreadProcessResult nextClaim(UUID threadId) {
+    public ThreadProcessResult nextClaim(UUID threadId) {
       return processor.process(claimThreadWork(store, threadId, clock.instant()));
     }
   }
