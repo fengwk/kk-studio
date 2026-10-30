@@ -11,6 +11,7 @@ import fun.fengwk.kkstudio.canvas.CanvasFunctionRunRepository;
 import fun.fengwk.kkstudio.canvas.CanvasResourceMaterializer;
 import fun.fengwk.kkstudio.canvas.CanvasResourceRepository;
 import fun.fengwk.kkstudio.canvas.CanvasStore;
+import fun.fengwk.kkstudio.canvas.infra.dto.CanvasDtoMapper;
 import fun.fengwk.kkstudio.platform.storage.S3StorageService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
@@ -23,6 +24,12 @@ import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
  */
 @AutoConfiguration
 public class CanvasPlatformAutoConfiguration {
+
+  /** DTO 媒体事实依赖平台 Storage，不随独立 Canvas 运行时装配。 */
+  @Bean
+  public CanvasDtoMapper canvasDtoMapper(StorageBlobManager blobManager) {
+    return new CanvasDtoMapper(blobManager);
+  }
 
   @Bean
   public CanvasFunctionBlobAccess canvasFunctionBlobAccess(

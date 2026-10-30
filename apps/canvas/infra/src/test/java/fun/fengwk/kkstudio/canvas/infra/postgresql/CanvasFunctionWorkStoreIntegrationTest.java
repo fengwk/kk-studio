@@ -19,6 +19,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.postgresql.PGNotification;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationContext;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.util.AopTestUtils;
 
@@ -38,6 +39,7 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionSubmitState;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson;
 import fun.fengwk.kkstudio.canvas.function.CanvasResourceKind;
+import fun.fengwk.kkstudio.canvas.infra.dto.CanvasDtoMapper;
 import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionRunTransactions;
 import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionRuntimeProperties;
 import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionWorker;
@@ -75,6 +77,13 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
   @Autowired private CanvasFunctionWorkStore workStore;
   @Autowired private CanvasFunctionRunJdbcStore runJdbcStore;
   @Autowired private CanvasFunctionRunStateCodecPort stateCodec;
+  @Autowired private ApplicationContext context;
+
+  /** 独立运行时不装配依赖平台 Storage 的 HTTP DTO mapper。 */
+  @Test
+  void runtimeDoesNotLoadPlatformDtoMapper() {
+    assertTrue(context.getBeansOfType(CanvasDtoMapper.class).isEmpty());
+  }
 
   /** 清理不可运行 Work 后必须在同一次调用继续领取有效 Run。 */
   @ParameterizedTest

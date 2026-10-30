@@ -7,7 +7,7 @@ Canvas 是建立在平台之上的图形编辑应用：用户在画布上摆放�
 | [`apps/canvas/core`](../../apps/canvas/core/) | 不可变 graph、typed command、纯领域命令规划、冲突语义与全部端口 | [Common](common.md)、[Platform Plugin API](platform-plugin-api.md#canvas-function-spi)（Function SPI 与 `CanvasJson`）、Jackson core |
 | [`apps/canvas/infra`](../../apps/canvas/infra/) | PostgreSQL 持久化、Snapshot 一致性读、Function Run 运行时、领域与 share DTO 映射，以及对平台 Storage 与插件目录的适配 | Core、[Share](share.md)、[Platform](platform.md)、[Durable Work](work.md)、Spring JDBC |
 
-平台从不依赖 Canvas：Canvas 经平台的公开服务使用全局 Blob 与插件快照。领域与 share DTO 的映射在 [`CanvasDtoMapper`](../../apps/canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/dto/CanvasDtoMapper.java)，由 [`CanvasInfraAutoConfiguration`](../../apps/canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/CanvasInfraAutoConfiguration.java) 扫描为唯一组件；[Web](web.md) 只组装 HTTP。Canvas 与 Project 的关系、跨域数据约束见 [Canvas / Project](../canvas-project.md)。
+平台从不依赖 Canvas：Canvas 经平台的公开服务使用全局 Blob 与插件快照。领域与 share DTO 的映射在 [`CanvasDtoMapper`](../../apps/canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/dto/CanvasDtoMapper.java)，由 [`CanvasPlatformAutoConfiguration`](../../apps/canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/platform/CanvasPlatformAutoConfiguration.java) 使用平台 Storage 显式装配；独立 Canvas 运行时不加载它，[Web](web.md) 只组装 HTTP。Canvas 与 Project 的关系、跨域数据约束见 [Canvas / Project](../canvas-project.md)。
 
 ## Graph 聚合
 
