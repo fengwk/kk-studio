@@ -71,6 +71,15 @@ class PostgresqlEntrySliceQueryTest {
     assertEquals(0, fullPathCounter.get(), "命中游标不得先执行完整 entry_path CTE");
     assertTrue(slicePlan.get().contains(chain.turnStartId().toString()), "命中游标的递归过滤必须带上该游标");
     assertTrue(slicePlan.get().contains("<>"), "递归必须在游标处停止");
+    assertTrue(
+        slicePlan
+            .get()
+            .lines()
+            .anyMatch(
+                line ->
+                    line.contains("Recursive Union")
+                        && line.matches(".*\\(actual [^)]*rows=3 loops=1\\).*")),
+        () -> "递归只能读取 head、user 和游标三个节点，不能读到 ROOT：\n" + slicePlan.get());
   }
 
   /** 测试意图：同事务已有完整路径时直接截取，不再查询；随后冷事务的部分结果不能冒充完整路径缓存。 */
@@ -91,12 +100,16 @@ class PostgresqlEntrySliceQueryTest {
         });
 
     fullPathCounter.set(0);
-    store.transaction(tx -> tx.entries().loadSlice(chain.headId(), chain.turnStartId()));
-    assertEquals(0, fullPathCounter.get(), "冷增量读取不得回填完整路径");
-
-    fullPathCounter.set(0);
-    store.transaction(tx -> tx.entries().loadPath(chain.headId()));
-    assertEquals(1, fullPathCounter.get(), "此前的部分结果不得让下一事务跳过完整路径读取");
+    store.transaction(
+        tx -> {
+          EntrySlice sliced = tx.entries().loadSlice(chain.headId(), chain.turnStartId());
+          assertEquals(chain.turnStartId(), sliced.baseEntryId());
+          assertEquals(List.of(chain.userId(), chain.headId()), ids(sliced));
+          assertEquals(0, fullPathCounter.get(), "冷增量读取不得先读取完整路径");
+          assertEquals(chain.rootId(), tx.entries().loadPath(chain.headId()).root().id());
+          assertEquals(1, fullPathCounter.get(), "同一事务的部分结果不得进入完整路径缓存");
+          return null;
+        });
   }
 
   /** 测试意图：非祖先仍返回完整链，但使用增量 CTE 而不是先执行完整 entry_path。 */

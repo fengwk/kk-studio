@@ -87,10 +87,7 @@ final class PostgresqlEntrySliceProbe {
       try (ResultSet rows = explain.executeQuery()) {
         StringBuilder text = new StringBuilder();
         while (rows.next()) {
-          String line = rows.getString(1);
-          if (line.contains("Filter:")) {
-            text.append(line.strip()).append('\n');
-          }
+          text.append(rows.getString(1).strip()).append('\n');
         }
         return text.toString();
       }
