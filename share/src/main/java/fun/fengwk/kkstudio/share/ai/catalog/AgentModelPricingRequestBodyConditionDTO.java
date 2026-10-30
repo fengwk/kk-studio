@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.share.ai.catalog;
 import lombok.Data;
 import org.jspecify.annotations.Nullable;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.annotation.JsonDeserialize;
 
 /**
  * request-body 定价条件：对最终编码 Provider JSON 请求体执行 RFC 6901 JSON Pointer 与 typed scalar 相等判定。
@@ -17,5 +18,6 @@ public class AgentModelPricingRequestBodyConditionDTO {
   private @Nullable String path;
 
   /** JSON string、number、boolean 或 null；字段缺失与显式 null 语义不同。 */
+  @JsonDeserialize(using = RequestBodyEqualsJsonDeserializer.class)
   private @Nullable JsonNode equals;
 }
