@@ -55,7 +55,7 @@ TARGET_FQCNS=(
   fun.fengwk.kkstudio.web.events.ApplicationEventHubTest
   fun.fengwk.kkstudio.web.events.ApplicationEventWebSocketHandlerTest
   fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasFunctionWorkStoreIntegrationTest
-  fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionDispatcherTest
+  fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionRuntimeConfigurationTest
   fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionExecutionContextImplTest
   fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionWorkerHeartbeatTest
   fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcherHandoffTest
