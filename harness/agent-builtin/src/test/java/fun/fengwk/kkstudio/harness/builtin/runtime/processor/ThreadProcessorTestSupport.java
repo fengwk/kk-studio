@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.builtin.runtime.processor;
 
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreCallProbe.wrap;
 import static org.junit.jupiter.api.Assertions.fail;
 
 import fun.fengwk.kkstudio.common.result.TextResultContent;
@@ -219,10 +220,11 @@ public final class ThreadProcessorTestSupport {
           UUID sessionId = tx.nextId();
           UUID rootEntryId = tx.nextId();
           UUID threadId = tx.nextId();
-          tx.insertSession(new Session(sessionId, "session-" + sessionId, NOW));
-          tx.insertEntry(
-              new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
-          tx.insertThread(threadState(threadId, sessionId, rootEntryId, NOW));
+          tx.sessions().insert(new Session(sessionId, "session-" + sessionId, NOW));
+          tx.entries()
+              .insert(
+                  new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
+          tx.threads().insert(threadState(threadId, sessionId, rootEntryId, NOW));
           return new Baseline(sessionId, rootEntryId, threadId);
         });
   }
@@ -241,20 +243,23 @@ public final class ThreadProcessorTestSupport {
           UUID turnStartEntryId = tx.nextId();
           UUID userEntryId = tx.nextId();
           UUID threadId = tx.nextId();
-          tx.insertSession(new Session(sessionId, "session-" + sessionId, NOW));
-          tx.insertEntry(
-              new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
-          tx.insertEntry(
-              new Entry(
-                  turnStartEntryId,
-                  sessionId,
-                  rootEntryId,
-                  resolvedInputTurnStart(threadId, toolBindings),
-                  NOW));
-          tx.insertEntry(
-              new Entry(
-                  userEntryId, sessionId, turnStartEntryId, userMessagePayload("hello"), NOW));
-          tx.insertThread(threadState(threadId, sessionId, userEntryId, NOW));
+          tx.sessions().insert(new Session(sessionId, "session-" + sessionId, NOW));
+          tx.entries()
+              .insert(
+                  new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStartEntryId,
+                      sessionId,
+                      rootEntryId,
+                      resolvedInputTurnStart(threadId, toolBindings),
+                      NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      userEntryId, sessionId, turnStartEntryId, userMessagePayload("hello"), NOW));
+          tx.threads().insert(threadState(threadId, sessionId, userEntryId, NOW));
           return new OpenTurnBaseline(
               sessionId, rootEntryId, turnStartEntryId, userEntryId, threadId);
         });
@@ -272,27 +277,36 @@ public final class ThreadProcessorTestSupport {
           UUID assistantEntryId = tx.nextId();
           UUID turnEndEntryId = tx.nextId();
           UUID threadId = tx.nextId();
-          tx.insertSession(new Session(sessionId, "session-" + sessionId, NOW));
-          tx.insertEntry(
-              new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
-          tx.insertEntry(
-              new Entry(
-                  turnStartEntryId, sessionId, rootEntryId, resolvedInputTurnStart(threadId), NOW));
-          tx.insertEntry(
-              new Entry(
-                  userEntryId, sessionId, turnStartEntryId, userMessagePayload("hello"), NOW));
-          tx.insertEntry(
-              new Entry(
-                  assistantEntryId, sessionId, userEntryId, assistantPayload(List.of()), NOW));
-          tx.insertEntry(
-              new Entry(
-                  turnEndEntryId,
-                  sessionId,
-                  assistantEntryId,
-                  new TurnEndPayload(
-                      turnStartEntryId, TurnEndOutcome.COMPLETED, continueModel, null, null),
-                  NOW));
-          tx.insertThread(threadState(threadId, sessionId, turnEndEntryId, NOW));
+          tx.sessions().insert(new Session(sessionId, "session-" + sessionId, NOW));
+          tx.entries()
+              .insert(
+                  new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStartEntryId,
+                      sessionId,
+                      rootEntryId,
+                      resolvedInputTurnStart(threadId),
+                      NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      userEntryId, sessionId, turnStartEntryId, userMessagePayload("hello"), NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      assistantEntryId, sessionId, userEntryId, assistantPayload(List.of()), NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnEndEntryId,
+                      sessionId,
+                      assistantEntryId,
+                      new TurnEndPayload(
+                          turnStartEntryId, TurnEndOutcome.COMPLETED, continueModel, null, null),
+                      NOW));
+          tx.threads().insert(threadState(threadId, sessionId, turnEndEntryId, NOW));
           return new ClosedTurnBaseline(
               sessionId,
               rootEntryId,
@@ -321,35 +335,45 @@ public final class ThreadProcessorTestSupport {
           UUID userEntryId = tx.nextId();
           UUID assistantEntryId = tx.nextId();
           UUID threadId = tx.nextId();
-          tx.insertSession(new Session(sessionId, "session-" + sessionId, NOW));
-          tx.insertEntry(
-              new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
-          tx.insertEntry(
-              new Entry(
-                  turnStartEntryId, sessionId, rootEntryId, resolvedInputTurnStart(threadId), NOW));
-          tx.insertEntry(
-              new Entry(
-                  userEntryId, sessionId, turnStartEntryId, userMessagePayload("hello"), NOW));
+          tx.sessions().insert(new Session(sessionId, "session-" + sessionId, NOW));
+          tx.entries()
+              .insert(
+                  new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStartEntryId,
+                      sessionId,
+                      rootEntryId,
+                      resolvedInputTurnStart(threadId),
+                      NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      userEntryId, sessionId, turnStartEntryId, userMessagePayload("hello"), NOW));
           List<String> callIds = new ArrayList<>();
           for (int i = 0; i < toolCalls; i++) {
             callIds.add("call-" + i);
           }
-          tx.insertEntry(
-              new Entry(assistantEntryId, sessionId, userEntryId, assistantPayload(callIds), NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      assistantEntryId, sessionId, userEntryId, assistantPayload(callIds), NOW));
           UUID headEntryId = assistantEntryId;
           for (int callIndex = 0; callIndex < presentResults; callIndex++) {
             UUID resultId = tx.nextId();
-            tx.insertEntry(
-                new Entry(
-                    resultId,
-                    sessionId,
-                    headEntryId,
-                    realToolResultPayload(
-                        tx.nextId(), assistantEntryId, callIndex, "call-" + callIndex),
-                    NOW));
+            tx.entries()
+                .insert(
+                    new Entry(
+                        resultId,
+                        sessionId,
+                        headEntryId,
+                        realToolResultPayload(
+                            tx.nextId(), assistantEntryId, callIndex, "call-" + callIndex),
+                        NOW));
             headEntryId = resultId;
           }
-          tx.insertThread(threadState(threadId, sessionId, headEntryId, NOW));
+          tx.threads().insert(threadState(threadId, sessionId, headEntryId, NOW));
           return new HistoricalBaseline(
               sessionId,
               rootEntryId,
@@ -367,7 +391,7 @@ public final class ThreadProcessorTestSupport {
     return store.transaction(
         tx -> {
           UUID threadId = tx.nextId();
-          tx.insertThread(threadState(threadId, sessionId, assistantEntryId, "second", NOW));
+          tx.threads().insert(threadState(threadId, sessionId, assistantEntryId, "second", NOW));
           return new HistoricalBaseline(
               sessionId,
               TestIds.id(1_000_000L),
@@ -384,22 +408,23 @@ public final class ThreadProcessorTestSupport {
       InMemoryBuiltinHarnessStore store, UUID threadId, ThreadCommandPayload payload) {
     return store.transaction(
         tx -> {
-          ThreadState thread = tx.lockThread(threadId).orElseThrow();
+          ThreadState thread = tx.threads().lock(threadId).orElseThrow();
           UUID idempotencyKey = tx.nextId();
           long sequence = thread.nextCommandSequence();
-          tx.insertCommands(
-              List.of(
-                  new ThreadCommand(
-                      threadId,
-                      sequence,
-                      payload,
-                      idempotencyKey,
-                      ThreadCommandPayloadJsonCodec.requestHash(payload),
-                      null,
-                      null,
-                      null,
-                      NOW)));
-          tx.updateThread(thread.reserveCommandSequences(1, NOW));
+          tx.commands()
+              .insert(
+                  List.of(
+                      new ThreadCommand(
+                          threadId,
+                          sequence,
+                          payload,
+                          idempotencyKey,
+                          ThreadCommandPayloadJsonCodec.requestHash(payload),
+                          null,
+                          null,
+                          null,
+                          NOW)));
+          tx.threads().update(thread.reserveCommandSequences(1, NOW));
           return idempotencyKey;
         });
   }
@@ -408,8 +433,8 @@ public final class ThreadProcessorTestSupport {
   static void requestThreadWork(InMemoryBuiltinHarnessStore store, UUID threadId) {
     store.transaction(
         tx -> {
-          tx.lockThread(threadId);
-          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId));
+          tx.threads().lock(threadId);
+          tx.work().request(new WorkTarget(WorkTargetType.THREAD, threadId));
           return null;
         });
   }
@@ -475,11 +500,14 @@ public final class ThreadProcessorTestSupport {
       InMemoryBuiltinHarnessStore store, OpenTurnBaseline turn, List<String> callIds) {
     return store.transaction(
         tx -> {
-          tx.lockThread(turn.threadId());
+          tx.threads().lock(turn.threadId());
           UUID id = tx.nextId();
-          tx.insertEntry(
-              new Entry(id, turn.sessionId(), turn.userEntryId(), assistantPayload(callIds), NOW));
-          tx.updateThread(tx.findThread(turn.threadId()).orElseThrow().advanceHead(id, NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      id, turn.sessionId(), turn.userEntryId(), assistantPayload(callIds), NOW));
+          tx.threads()
+              .update(tx.threads().find(turn.threadId()).orElseThrow().advanceHead(id, NOW));
           return id;
         });
   }
@@ -491,10 +519,11 @@ public final class ThreadProcessorTestSupport {
       InMemoryBuiltinHarnessStore store, OpenTurnBaseline turn, EntryPayload payload) {
     return store.transaction(
         tx -> {
-          tx.lockThread(turn.threadId());
+          tx.threads().lock(turn.threadId());
           UUID id = tx.nextId();
-          tx.insertEntry(new Entry(id, turn.sessionId(), turn.userEntryId(), payload, NOW));
-          tx.updateThread(tx.findThread(turn.threadId()).orElseThrow().advanceHead(id, NOW));
+          tx.entries().insert(new Entry(id, turn.sessionId(), turn.userEntryId(), payload, NOW));
+          tx.threads()
+              .update(tx.threads().find(turn.threadId()).orElseThrow().advanceHead(id, NOW));
           return id;
         });
   }
@@ -573,9 +602,9 @@ public final class ThreadProcessorTestSupport {
     UUID modelId =
         store.transaction(
             tx -> {
-              tx.lockThread(threadId);
+              tx.threads().lock(threadId);
               UUID id = tx.nextId();
-              builtin(tx)
+              builtin(store, tx)
                   .insertModelInvocation(
                       new ModelInvocation(
                           id,
@@ -625,23 +654,24 @@ public final class ThreadProcessorTestSupport {
             tx -> {
               UUID id = tx.nextId();
               ToolInvocationRequest request = toolRequest(callId);
-              tx.insertToolInvocations(
-                  List.of(
-                      new ToolInvocation(
-                          id,
-                          threadId,
-                          turnStartEntryId,
-                          assistantEntryId,
-                          callIndex,
-                          request.call(),
-                          request.binding(),
-                          ToolInvocationStatus.READY,
-                          0,
-                          null,
-                          null,
-                          null,
-                          NOW,
-                          NOW)));
+              tx.tools()
+                  .insert(
+                      List.of(
+                          new ToolInvocation(
+                              id,
+                              threadId,
+                              turnStartEntryId,
+                              assistantEntryId,
+                              callIndex,
+                              request.call(),
+                              request.binding(),
+                              ToolInvocationStatus.READY,
+                              0,
+                              null,
+                              null,
+                              null,
+                              NOW,
+                              NOW)));
               return id;
             });
     switch (status) {
@@ -681,7 +711,7 @@ public final class ThreadProcessorTestSupport {
       InMemoryBuiltinHarnessStore store, UUID threadId, Instant now, Duration leaseDuration) {
     return store
         .transaction(
-            tx -> tx.claimNextWork(WorkTargetType.THREAD, "token-" + threadId, leaseDuration))
+            tx -> tx.work().claimNext(WorkTargetType.THREAD, "token-" + threadId, leaseDuration))
         .orElseThrow();
   }
 
@@ -695,8 +725,8 @@ public final class ThreadProcessorTestSupport {
       Function<ModelInvocation, ModelInvocation> f) {
     store.transaction(
         tx -> {
-          ModelInvocation model = builtin(tx).lockModelInvocation(modelId).orElseThrow();
-          builtin(tx).updateModelInvocation(f.apply(model));
+          ModelInvocation model = builtin(store, tx).lockModelInvocation(modelId).orElseThrow();
+          builtin(store, tx).updateModelInvocation(f.apply(model));
           return null;
         });
   }
@@ -705,8 +735,8 @@ public final class ThreadProcessorTestSupport {
       InMemoryBuiltinHarnessStore store, UUID toolId, Function<ToolInvocation, ToolInvocation> f) {
     store.transaction(
         tx -> {
-          ToolInvocation tool = tx.lockToolInvocation(toolId).orElseThrow();
-          tx.updateToolInvocations(List.of(f.apply(tool)));
+          ToolInvocation tool = tx.tools().lock(toolId).orElseThrow();
+          tx.tools().update(List.of(f.apply(tool)));
           return null;
         });
   }
@@ -716,8 +746,8 @@ public final class ThreadProcessorTestSupport {
       InMemoryBuiltinHarnessStore store, UUID threadId, Instant updatedAt) {
     store.transaction(
         tx -> {
-          ThreadState thread = tx.lockThread(threadId).orElseThrow();
-          tx.updateThread(thread.touchVersion(updatedAt));
+          ThreadState thread = tx.threads().lock(threadId).orElseThrow();
+          tx.threads().update(thread.touchVersion(updatedAt));
           return null;
         });
   }
@@ -788,40 +818,40 @@ public final class ThreadProcessorTestSupport {
   }
 
   static ThreadState thread(InMemoryBuiltinHarnessStore store, UUID threadId) {
-    return store.transaction(tx -> tx.findThread(threadId)).orElseThrow();
+    return store.transaction(tx -> tx.threads().find(threadId)).orElseThrow();
   }
 
   public static EntryPath path(InMemoryBuiltinHarnessStore store, UUID threadId) {
     return store.transaction(
-        tx -> tx.loadEntryPath(tx.findThread(threadId).orElseThrow().headEntryId()));
+        tx -> tx.entries().loadPath(tx.threads().find(threadId).orElseThrow().headEntryId()));
   }
 
   static Entry entry(InMemoryBuiltinHarnessStore store, UUID entryId) {
-    return store.transaction(tx -> tx.findEntry(entryId)).orElseThrow();
+    return store.transaction(tx -> tx.entries().find(entryId)).orElseThrow();
   }
 
   public static ModelInvocation model(InMemoryBuiltinHarnessStore store, UUID modelId) {
-    return store.transaction(tx -> builtin(tx).findModelInvocation(modelId)).orElseThrow();
+    return store.transaction(tx -> builtin(store, tx).findModelInvocation(modelId)).orElseThrow();
   }
 
   static ToolInvocation tool(InMemoryBuiltinHarnessStore store, UUID toolId) {
-    return store.transaction(tx -> tx.findToolInvocation(toolId)).orElseThrow();
+    return store.transaction(tx -> tx.tools().find(toolId)).orElseThrow();
   }
 
   static List<ToolInvocation> toolsByAssistant(
       InMemoryBuiltinHarnessStore store, UUID assistantEntryId) {
-    return store.transaction(tx -> tx.loadToolInvocationsByAssistantEntryId(assistantEntryId));
+    return store.transaction(tx -> tx.tools().loadByAssistantEntry(assistantEntryId));
   }
 
   static ThreadCommand command(
       InMemoryBuiltinHarnessStore store, UUID threadId, UUID idempotencyKey) {
     return store
-        .transaction(tx -> tx.findCommandByIdempotencyKey(threadId, idempotencyKey))
+        .transaction(tx -> tx.commands().findByIdempotencyKey(threadId, idempotencyKey))
         .orElseThrow();
   }
 
   static Work work(InMemoryBuiltinHarnessStore store, WorkTarget target) {
-    return store.transaction(tx -> tx.findWork(target)).orElse(null);
+    return store.transaction(tx -> tx.work().find(target)).orElse(null);
   }
 
   // -----------------------------------------------------------------------------------------------
@@ -1002,77 +1032,91 @@ public final class ThreadProcessorTestSupport {
           UUID secondAssistantEntryId = tx.nextId(); // turn2 ASSISTANT（携带 usage）
           UUID secondTurnEndId = tx.nextId(); // turn2 TURN_END
           UUID threadId = tx.nextId();
-          tx.insertSession(new Session(sessionId, "session-" + sessionId, NOW));
-          tx.insertEntry(
-              new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
+          tx.sessions().insert(new Session(sessionId, "session-" + sessionId, NOW));
+          tx.entries()
+              .insert(
+                  new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
           // turn1：可摘要历史显著大于测试摘要 wrapper，避免成功路径被 no-gain 保护拦截。
-          tx.insertEntry(
-              new Entry(
-                  turnStartEntryId, sessionId, rootEntryId, resolvedInputTurnStart(threadId), NOW));
-          tx.insertEntry(
-              new Entry(
-                  userEntryId,
-                  sessionId,
-                  turnStartEntryId,
-                  userMessagePayload("historical user " + "h".repeat(50_000)),
-                  NOW));
-          tx.insertEntry(
-              new Entry(
-                  assistantEntryId,
-                  sessionId,
-                  userEntryId,
-                  new MessagePayload(
-                      new AgentMessage(
-                          AgentMessageRole.ASSISTANT,
-                          List.of(
-                              new TextMessageContent(
-                                  "historical assistant " + "a".repeat(50_000)))),
-                      new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage()),
-                      null),
-                  NOW));
-          tx.insertEntry(
-              new Entry(
-                  turnEndEntryId,
-                  sessionId,
-                  assistantEntryId,
-                  new TurnEndPayload(turnStartEntryId, TurnEndOutcome.COMPLETED, false, null, null),
-                  NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStartEntryId,
+                      sessionId,
+                      rootEntryId,
+                      resolvedInputTurnStart(threadId),
+                      NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      userEntryId,
+                      sessionId,
+                      turnStartEntryId,
+                      userMessagePayload("historical user " + "h".repeat(50_000)),
+                      NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      assistantEntryId,
+                      sessionId,
+                      userEntryId,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.ASSISTANT,
+                              List.of(
+                                  new TextMessageContent(
+                                      "historical assistant " + "a".repeat(50_000)))),
+                          new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage()),
+                          null),
+                      NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnEndEntryId,
+                      sessionId,
+                      assistantEntryId,
+                      new TurnEndPayload(
+                          turnStartEntryId, TurnEndOutcome.COMPLETED, false, null, null),
+                      NOW));
           // turn2：长 USER + 短 ASSISTANT（usage 挂这里，作为阈值触发事实）。
-          tx.insertEntry(
-              new Entry(
-                  secondTurnStartId,
-                  sessionId,
-                  turnEndEntryId,
-                  resolvedInputTurnStart(threadId),
-                  NOW));
-          tx.insertEntry(
-              new Entry(
-                  secondUserEntryId,
-                  sessionId,
-                  secondTurnStartId,
-                  new MessagePayload(
-                      new AgentMessage(
-                          AgentMessageRole.USER,
-                          List.of(new TextMessageContent(compactionUserText()))),
-                      null,
-                      null),
-                  NOW));
-          tx.insertEntry(
-              new Entry(
-                  secondAssistantEntryId,
-                  sessionId,
-                  secondUserEntryId,
-                  new BuiltinHistoryPayloadMapper().assistantPayload(response, List.of()),
-                  NOW));
-          tx.insertEntry(
-              new Entry(
-                  secondTurnEndId,
-                  sessionId,
-                  secondAssistantEntryId,
-                  new TurnEndPayload(
-                      secondTurnStartId, TurnEndOutcome.COMPLETED, continueModel, null, null),
-                  NOW));
-          tx.insertThread(threadState(threadId, sessionId, secondTurnEndId, NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      secondTurnStartId,
+                      sessionId,
+                      turnEndEntryId,
+                      resolvedInputTurnStart(threadId),
+                      NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      secondUserEntryId,
+                      sessionId,
+                      secondTurnStartId,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.USER,
+                              List.of(new TextMessageContent(compactionUserText()))),
+                          null,
+                          null),
+                      NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      secondAssistantEntryId,
+                      sessionId,
+                      secondUserEntryId,
+                      new BuiltinHistoryPayloadMapper().assistantPayload(response, List.of()),
+                      NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      secondTurnEndId,
+                      sessionId,
+                      secondAssistantEntryId,
+                      new TurnEndPayload(
+                          secondTurnStartId, TurnEndOutcome.COMPLETED, continueModel, null, null),
+                      NOW));
+          tx.threads().insert(threadState(threadId, sessionId, secondTurnEndId, NOW));
           return new ClosedTurnBaseline(
               sessionId,
               rootEntryId,
@@ -1351,17 +1395,15 @@ public final class ThreadProcessorTestSupport {
             return real.transaction(
                 tx -> {
                   HarnessStore.Transaction wrapped =
-                      (HarnessStore.Transaction)
-                          Proxy.newProxyInstance(
-                              HarnessStore.Transaction.class.getClassLoader(),
-                              new Class<?>[] {BuiltinStore.Transaction.class},
-                              (txProxy, txMethod, txArgs) -> {
-                                if (txMethod.getName().equals("lockClaimedWork")
-                                    && fenceCalls.incrementAndGet() >= loseAtFenceCall) {
-                                  return Optional.empty();
-                                }
-                                return txMethod.invoke(tx, txArgs);
-                              });
+                      wrap(
+                          tx,
+                          (call, next) -> {
+                            if (call.operation().equals("work.lockClaimed")
+                                && fenceCalls.incrementAndGet() >= loseAtFenceCall) {
+                              return Optional.empty();
+                            }
+                            return next.invoke();
+                          });
                   return callback.apply(wrapped);
                 });
           }

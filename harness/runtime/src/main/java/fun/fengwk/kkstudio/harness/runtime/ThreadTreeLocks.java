@@ -28,8 +28,8 @@ public final class ThreadTreeLocks {
   public static Optional<ThreadState> lockForThread(HarnessStore.Transaction tx, UUID threadId) {
     Objects.requireNonNull(tx, "tx");
     Objects.requireNonNull(threadId, "threadId");
-    Optional<ThreadState> thread = tx.findThread(threadId);
-    tx.lockTree(thread.map(ThreadState::rootThreadId).orElse(threadId));
+    Optional<ThreadState> thread = tx.threads().find(threadId);
+    tx.threads().lockTree(thread.map(ThreadState::rootThreadId).orElse(threadId));
     return thread;
   }
 }

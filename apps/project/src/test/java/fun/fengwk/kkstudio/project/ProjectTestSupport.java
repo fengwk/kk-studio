@@ -360,7 +360,7 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
     public HarnessStore harnessStore(JdbcTemplate jdbc) {
       HarnessStore store = mock(HarnessStore.class);
       HarnessStore.Transaction transaction = mock(HarnessStore.Transaction.class);
-      when(transaction.findSession(any(UUID.class)))
+      when(transaction.sessions().find(any(UUID.class)))
           .thenAnswer(
               invocation -> {
                 UUID sessionId = invocation.getArgument(0);
@@ -369,7 +369,7 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
                     ? Optional.of(mock(Session.class))
                     : Optional.empty();
               });
-      when(transaction.lockSessionForUpdate(any(UUID.class)))
+      when(transaction.sessions().lockForUpdate(any(UUID.class)))
           .thenAnswer(
               invocation -> {
                 UUID sessionId = invocation.getArgument(0);
@@ -378,7 +378,7 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
                     ? Optional.of(mock(Session.class))
                     : Optional.empty();
               });
-      when(transaction.findThread(any(UUID.class)))
+      when(transaction.threads().find(any(UUID.class)))
           .thenAnswer(
               invocation -> {
                 UUID threadId = invocation.getArgument(0);
@@ -390,7 +390,7 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
                 }
                 return Optional.of(threadState(threadId, (UUID) row.get("session_id")));
               });
-      when(transaction.listThreadsBySession(any(UUID.class)))
+      when(transaction.threads().listBySession(any(UUID.class)))
           .thenAnswer(
               invocation -> {
                 UUID sessionId = invocation.getArgument(0);
@@ -399,7 +399,7 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
                         "select id from harness_thread where session_id = ?", sessionId);
                 return rows.stream().map(r -> threadState((UUID) r.get("id"), sessionId)).toList();
               });
-      when(transaction.lockThread(any(UUID.class)))
+      when(transaction.threads().lock(any(UUID.class)))
           .thenAnswer(
               invocation -> {
                 UUID threadId = invocation.getArgument(0);
@@ -411,7 +411,7 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
                 }
                 return Optional.of(threadState(threadId, (UUID) row.get("session_id")));
               });
-      when(transaction.deleteJoinsForThreads(any()))
+      when(transaction.joins().deleteForThreads(any()))
           .thenAnswer(
               invocation -> {
                 List<UUID> threadIds = invocation.getArgument(0);
@@ -423,7 +423,7 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
                 }
                 return deleted;
               });
-      when(transaction.deleteThreads(any()))
+      when(transaction.threads().delete(any()))
           .thenAnswer(
               invocation -> {
                 List<UUID> threadIds = invocation.getArgument(0);
@@ -434,7 +434,7 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
                 }
                 return deleted;
               });
-      when(transaction.deleteEntries(any(UUID.class)))
+      when(transaction.entries().delete(any(UUID.class)))
           .thenAnswer(
               invocation -> {
                 UUID sessionId = invocation.getArgument(0);
@@ -443,7 +443,7 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
                     sessionId);
                 return jdbc.update("delete from harness_entry where session_id = ?", sessionId);
               });
-      when(transaction.deleteSession(any(UUID.class)))
+      when(transaction.sessions().delete(any(UUID.class)))
           .thenAnswer(
               invocation -> {
                 UUID sessionId = invocation.getArgument(0);

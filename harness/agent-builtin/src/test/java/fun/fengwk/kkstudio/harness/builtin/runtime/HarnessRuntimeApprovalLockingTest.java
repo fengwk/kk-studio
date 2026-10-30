@@ -7,6 +7,7 @@ import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupp
 import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.setWaitingApproval;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.toolError;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreCallProbe.wrap;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -69,12 +70,12 @@ class HarnessRuntimeApprovalLockingTest {
     // ToolProcessor 风格的后续推进：READY -> RUNNING（decided approval 保持不变）。
     store.transaction(
         tx -> {
-          ToolInvocation tool = tx.lockToolInvocation(baseline.toolId()).orElseThrow();
-          tx.updateToolInvocations(List.of(tool.markRunning(T6)));
+          ToolInvocation tool = tx.tools().lock(baseline.toolId()).orElseThrow();
+          tx.tools().update(List.of(tool.markRunning(T6)));
           return null;
         });
     ToolInvocation current =
-        store.transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow());
+        store.transaction(tx -> tx.tools().find(baseline.toolId()).orElseThrow());
     ToolInvocation staleProbe =
         new ToolInvocation(
             current.id(),
@@ -99,7 +100,7 @@ class HarnessRuntimeApprovalLockingTest {
             clock);
     ToolInvocation replay =
         lockedRuntime.decideToolApproval(allow(baseline.threadId(), baseline.toolId()));
-    assertEquals(List.of("lockToolInvocation:" + baseline.toolId()), locks);
+    assertEquals(List.of("tools.lock:" + baseline.toolId()), locks);
     // 返回锁定后的当前行，而不是未加锁读取的过期探针。
     assertEquals(ToolInvocationStatus.RUNNING, replay.status());
     assertEquals(T6, replay.updatedAt());
@@ -115,7 +116,7 @@ class HarnessRuntimeApprovalLockingTest {
     HarnessRuntimeTestSupport.ToolBaseline baseline = seedToolBaseline(store);
     setWaitingApproval(store, baseline);
     ToolInvocation current =
-        store.transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow());
+        store.transaction(tx -> tx.tools().find(baseline.toolId()).orElseThrow());
     ToolInvocation cancelledProbe =
         new ToolInvocation(
             current.id(),
@@ -142,11 +143,10 @@ class HarnessRuntimeApprovalLockingTest {
         lockedRuntime.decideToolApproval(allow(baseline.threadId(), baseline.toolId()));
     assertEquals(ToolInvocationStatus.READY, decided.status());
     // siblings 统一锁定（callIndex 序），绝不对目标单独加锁。
-    assertTrue(
-        locks.contains("lockToolInvocationsByAssistantEntryId:" + baseline.assistantEntryId()));
-    assertFalse(locks.contains("lockToolInvocation:" + baseline.toolId()));
+    assertTrue(locks.contains("tools.lockByAssistantEntry:" + baseline.assistantEntryId()));
+    assertFalse(locks.contains("tools.lock:" + baseline.toolId()));
     ToolInvocation stored =
-        store.transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow());
+        store.transaction(tx -> tx.tools().find(baseline.toolId()).orElseThrow());
     assertEquals(decided, stored);
   }
 
@@ -159,7 +159,7 @@ class HarnessRuntimeApprovalLockingTest {
     HarnessRuntimeTestSupport.ToolBaseline baseline = seedToolBaseline(store);
     setWaitingApproval(store, baseline);
     ToolInvocation current =
-        store.transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow());
+        store.transaction(tx -> tx.tools().find(baseline.toolId()).orElseThrow());
     ToolInvocation readySibling =
         new ToolInvocation(
             current.id(),
@@ -191,9 +191,7 @@ class HarnessRuntimeApprovalLockingTest {
                         recordingProbeStore(
                             store,
                             new ArrayList<>(),
-                            Map.of(
-                                "lockToolInvocationsByAssistantEntryId",
-                                args -> List.of(readySibling))),
+                            Map.of("tools.lockByAssistantEntry", args -> List.of(readySibling))),
                         clock)
                     .decideToolApproval(allow(baseline.threadId(), baseline.toolId())));
     assertEquals(Reason.APPROVAL_NOT_APPLICABLE, error.reason());
@@ -208,7 +206,7 @@ class HarnessRuntimeApprovalLockingTest {
     HarnessRuntimeTestSupport.ToolBaseline baseline = seedToolBaseline(store);
     setWaitingApproval(store, baseline);
     ToolInvocation current =
-        store.transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow());
+        store.transaction(tx -> tx.tools().find(baseline.toolId()).orElseThrow());
     // 伪造当前 assistant 的 siblings 为另一把工具（满足分类器序/归属不变量）：目标工具不在其中。
     ToolInvocation otherSibling =
         new ToolInvocation(
@@ -234,9 +232,7 @@ class HarnessRuntimeApprovalLockingTest {
                         recordingProbeStore(
                             store,
                             new ArrayList<>(),
-                            Map.of(
-                                "lockToolInvocationsByAssistantEntryId",
-                                args -> List.of(otherSibling))),
+                            Map.of("tools.lockByAssistantEntry", args -> List.of(otherSibling))),
                         clock)
                     .decideToolApproval(allow(baseline.threadId(), baseline.toolId())));
     assertEquals(Reason.APPROVAL_NOT_APPLICABLE, error.reason());
@@ -249,7 +245,7 @@ class HarnessRuntimeApprovalLockingTest {
     setWaitingApproval(store, baseline);
     runtime.decideToolApproval(allow(baseline.threadId(), baseline.toolId()));
     ToolInvocation current =
-        store.transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow());
+        store.transaction(tx -> tx.tools().find(baseline.toolId()).orElseThrow());
 
     IllegalStateException vanishedTool =
         assertThrows(
@@ -259,7 +255,7 @@ class HarnessRuntimeApprovalLockingTest {
                         recordingProbeStore(
                             store,
                             new ArrayList<>(),
-                            Map.of("lockToolInvocation", args -> Optional.empty())),
+                            Map.of("tools.lock", args -> Optional.empty())),
                         clock)
                     .decideToolApproval(allow(baseline.threadId(), baseline.toolId())));
     assertTrue(vanishedTool.getMessage().contains("could not be locked"));
@@ -288,7 +284,7 @@ class HarnessRuntimeApprovalLockingTest {
                         recordingProbeStore(
                             store,
                             new ArrayList<>(),
-                            Map.of("lockToolInvocation", args -> Optional.of(detachedTool))),
+                            Map.of("tools.lock", args -> Optional.of(detachedTool))),
                         clock)
                     .decideToolApproval(allow(baseline.threadId(), baseline.toolId())));
     assertTrue(detached.getMessage().contains("changed its ownership"));
@@ -317,7 +313,7 @@ class HarnessRuntimeApprovalLockingTest {
                         recordingProbeStore(
                             store,
                             new ArrayList<>(),
-                            Map.of("lockToolInvocation", args -> Optional.of(lostApproval))),
+                            Map.of("tools.lock", args -> Optional.of(lostApproval))),
                         clock)
                     .decideToolApproval(allow(baseline.threadId(), baseline.toolId())));
     assertTrue(approvalDrift.getMessage().contains("lost its required decided approval"));
@@ -330,7 +326,8 @@ class HarnessRuntimeApprovalLockingTest {
     setWaitingApproval(store, baseline);
     runtime.decideToolApproval(allow(baseline.threadId(), baseline.toolId()));
     ModelInvocation model =
-        store.transaction(tx -> builtin(tx).findModelInvocation(baseline.modelId()).orElseThrow());
+        store.transaction(
+            tx -> builtin(store, tx).findModelInvocation(baseline.modelId()).orElseThrow());
     ModelInvocation foreignModel =
         new ModelInvocation(
             model.id(),
@@ -374,7 +371,8 @@ class HarnessRuntimeApprovalLockingTest {
         lockedRuntime.decideToolApproval(allow(baseline.threadId(), baseline.toolId()));
     assertEquals(T6, decided.approval().decidedAt());
     assertEquals(T6, decided.updatedAt());
-    ThreadState thread = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
+    ThreadState thread =
+        store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow());
     assertEquals(T6, thread.updatedAt());
   }
 
@@ -407,26 +405,24 @@ class HarnessRuntimeApprovalLockingTest {
                 return delegate.transaction(
                     tx -> {
                       HarnessStore.Transaction wrapped =
-                          (HarnessStore.Transaction)
-                              Proxy.newProxyInstance(
-                                  HarnessStore.Transaction.class.getClassLoader(),
-                                  new Class<?>[] {BuiltinStore.Transaction.class},
-                                  (transactionProxy, transactionMethod, transactionArgs) -> {
-                                    String name = transactionMethod.getName();
-                                    if (name.equals("lockThread")) {
-                                      onThreadLock.run();
-                                    }
-                                    if (name.equals("lockModelInvocation")
-                                        || name.equals("lockToolInvocation")
-                                        || name.equals("lockToolInvocationsByAssistantEntryId")) {
-                                      lockCalls.add(name + ":" + transactionArgs[0]);
-                                    }
-                                    Function<Object[], Object> override = overrides.get(name);
-                                    if (override != null) {
-                                      return override.apply(transactionArgs);
-                                    }
-                                    return transactionMethod.invoke(tx, transactionArgs);
-                                  });
+                          wrap(
+                              tx,
+                              (call, next) -> {
+                                String name = call.operation();
+                                if (name.equals("threads.lock")) {
+                                  onThreadLock.run();
+                                }
+                                if (name.equals("lockModelInvocation")
+                                    || name.equals("tools.lock")
+                                    || name.equals("tools.lockByAssistantEntry")) {
+                                  lockCalls.add(name + ":" + call.argument(0));
+                                }
+                                Function<Object[], Object> override = overrides.get(name);
+                                if (override != null) {
+                                  return override.apply(call.arguments());
+                                }
+                                return next.invoke();
+                              });
                       return callback.apply(wrapped);
                     });
               }

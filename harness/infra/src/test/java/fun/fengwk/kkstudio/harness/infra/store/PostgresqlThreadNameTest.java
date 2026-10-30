@@ -63,19 +63,20 @@ class PostgresqlThreadNameTest {
             HarnessRuntimeConflictException.class,
             () -> runtime.acceptCommands(conflictRequest, AcceptancePreflight.IDENTITY));
     assertEquals(HarnessRuntimeConflictException.Reason.THREAD_NAME_CONFLICT, conflict.reason());
-    assertTrue(store.transaction(tx -> tx.findThread(rejectedId)).isEmpty());
+    assertTrue(store.transaction(tx -> tx.threads().find(rejectedId)).isEmpty());
     assertTrue(store.transaction(tx -> loadCommandsByThread(tx, rejectedId)).isEmpty());
     assertTrue(
         store
-            .transaction(tx -> tx.findWork(new WorkTarget(WorkTargetType.THREAD, rejectedId)))
+            .transaction(tx -> tx.work().find(new WorkTarget(WorkTargetType.THREAD, rejectedId)))
             .isEmpty());
-    assertEquals(2, store.transaction(tx -> tx.listThreadsBySession(baseline.sessionId())).size());
+    assertEquals(
+        2, store.transaction(tx -> tx.threads().listBySession(baseline.sessionId())).size());
     var renameConflict =
         assertThrows(
             HarnessRuntimeConflictException.class,
             () -> runtime.renameThread(new RenameThreadCommand(createdId, "main")));
     assertEquals(
         HarnessRuntimeConflictException.Reason.THREAD_NAME_CONFLICT, renameConflict.reason());
-    assertEquals(renamed, store.transaction(tx -> tx.findThread(createdId).orElseThrow()));
+    assertEquals(renamed, store.transaction(tx -> tx.threads().find(createdId).orElseThrow()));
   }
 }

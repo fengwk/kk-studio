@@ -80,7 +80,10 @@ class ThreadProcessorClaimTest extends ThreadProcessorTestBase {
     assertEquals(ThreadProcessResult.LOST_OWNERSHIP, fixture.processor.process(claim));
     // SUCCEEDED-no-calls 关闭 turn 后 Model 行被物理删除。
     assertNull(
-        fixture.store.transaction(tx -> builtin(tx).findModelInvocation(modelId)).orElse(null));
+        fixture
+            .store
+            .transaction(tx -> builtin(fixture.store, tx).findModelInvocation(modelId))
+            .orElse(null));
   }
 
   @Test

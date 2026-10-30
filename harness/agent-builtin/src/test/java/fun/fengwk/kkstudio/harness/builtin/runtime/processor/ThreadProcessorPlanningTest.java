@@ -467,7 +467,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
         inTx(
                 fixture,
                 tx ->
-                    builtin(tx)
+                    builtin(fixture.store, tx)
                         .findModelInvocationByTurn(baseline.threadId(), path.entries().get(2).id()))
             .orElseThrow();
     assertEquals(path.entries().get(3).id(), invocation.requestHeadEntryId());
@@ -512,7 +512,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
         inTx(
                 fixture,
                 tx ->
-                    builtin(tx)
+                    builtin(fixture.store, tx)
                         .findModelInvocationByTurn(baseline.threadId(), path.entries().get(1).id()))
             .isEmpty());
     // 无 deferred message、闭合也未触发 compaction（ROOT 无历史）-> 不保留 THREAD Work。
@@ -673,7 +673,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
     ModelInvocation planned =
         fixture.store.transaction(
             tx ->
-                builtin(tx)
+                builtin(fixture.store, tx)
                     .findModelInvocationByTurn(
                         baseline.threadId(), afterPlan.openTurnStart().orElseThrow().id())
                     .orElseThrow());
@@ -702,19 +702,21 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
         fixture.store.transaction(
             tx -> {
               UUID entryId = tx.nextId();
-              tx.insertEntry(
-                  new Entry(
-                      entryId,
-                      baseline.sessionId(),
-                      baseline.turnEndEntryId(),
-                      new NotificationPayload(
-                          UUID.randomUUID(),
-                          NotificationKind.SUBAGENT_RESULT,
-                          UUID.randomUUID(),
-                          userMessage("inherited")),
-                      NOW));
+              tx.entries()
+                  .insert(
+                      new Entry(
+                          entryId,
+                          baseline.sessionId(),
+                          baseline.turnEndEntryId(),
+                          new NotificationPayload(
+                              UUID.randomUUID(),
+                              NotificationKind.SUBAGENT_RESULT,
+                              UUID.randomUUID(),
+                              userMessage("inherited")),
+                          NOW));
               UUID forkedId = tx.nextId();
-              tx.insertThread(threadState(forkedId, baseline.sessionId(), entryId, "forked", NOW));
+              tx.threads()
+                  .insert(threadState(forkedId, baseline.sessionId(), entryId, "forked", NOW));
               return entryId;
             });
 
@@ -722,12 +724,12 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
         fixture.store.transaction(
             tx -> {
               ThreadState state =
-                  tx.listThreadsBySession(baseline.sessionId()).stream()
+                  tx.threads().listBySession(baseline.sessionId()).stream()
                       .filter(candidate -> candidate.headEntryId().equals(notificationEntryId))
                       .findFirst()
                       .orElseThrow();
-              tx.lockThread(state.id());
-              tx.requestWork(new WorkTarget(WorkTargetType.THREAD, state.id()));
+              tx.threads().lock(state.id());
+              tx.work().request(new WorkTarget(WorkTargetType.THREAD, state.id()));
               return state.id();
             });
 
@@ -740,7 +742,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
     assertTrue(
         fixture.store.<Boolean>transaction(
             tx ->
-                builtin(tx)
+                builtin(fixture.store, tx)
                     .findModelInvocationByTurn(forkedThreadId, notificationEntryId)
                     .isEmpty()));
   }

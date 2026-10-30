@@ -106,12 +106,13 @@ public final class StoreTestSupport {
       HarnessStore.Transaction tx, UUID threadId) {
     Objects.requireNonNull(tx, "tx");
     Objects.requireNonNull(threadId, "threadId");
-    return tx.findThread(threadId)
+    return tx.threads()
+        .find(threadId)
         .map(
             thread -> {
               List<ThreadCommand> commands = new ArrayList<>();
               for (long sequence = 1; sequence < thread.nextCommandSequence(); sequence++) {
-                tx.findCommand(threadId, sequence).ifPresent(commands::add);
+                tx.commands().find(threadId, sequence).ifPresent(commands::add);
               }
               return List.copyOf(commands);
             })
@@ -139,9 +140,9 @@ public final class StoreTestSupport {
           UUID sessionId = tx.nextId();
           UUID rootEntryId = tx.nextId();
           UUID threadId = tx.nextId();
-          tx.insertSession(session(sessionId));
-          tx.insertEntry(rootEntry(rootEntryId, sessionId));
-          tx.insertThread(thread(threadId, sessionId, rootEntryId));
+          tx.sessions().insert(session(sessionId));
+          tx.entries().insert(rootEntry(rootEntryId, sessionId));
+          tx.threads().insert(thread(threadId, sessionId, rootEntryId));
           return new Baseline(sessionId, rootEntryId, threadId);
         });
   }
@@ -157,16 +158,17 @@ public final class StoreTestSupport {
           UUID rootEntryId = tx.nextId();
           UUID turnStartEntryId = tx.nextId();
           UUID threadId = tx.nextId();
-          tx.insertSession(session(sessionId));
-          tx.insertEntry(rootEntry(rootEntryId, sessionId));
-          tx.insertEntry(
-              new Entry(
-                  turnStartEntryId,
-                  sessionId,
-                  rootEntryId,
-                  resolvedTurnStartPayload(threadId, toolBindings),
-                  T1));
-          tx.insertThread(thread(threadId, sessionId, turnStartEntryId));
+          tx.sessions().insert(session(sessionId));
+          tx.entries().insert(rootEntry(rootEntryId, sessionId));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStartEntryId,
+                      sessionId,
+                      rootEntryId,
+                      resolvedTurnStartPayload(threadId, toolBindings),
+                      T1));
+          tx.threads().insert(thread(threadId, sessionId, turnStartEntryId));
           return new TurnBaseline(sessionId, rootEntryId, turnStartEntryId, threadId);
         });
   }
@@ -177,7 +179,7 @@ public final class StoreTestSupport {
     return store.transaction(
         tx -> {
           UUID id = tx.nextId();
-          tx.insertEntry(new Entry(id, sessionId, parentEntryId, payload, T1));
+          tx.entries().insert(new Entry(id, sessionId, parentEntryId, payload, T1));
           return id;
         });
   }

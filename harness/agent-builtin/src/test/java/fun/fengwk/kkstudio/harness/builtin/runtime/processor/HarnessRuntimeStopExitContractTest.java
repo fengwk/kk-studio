@@ -112,8 +112,7 @@ class HarnessRuntimeStopExitContractTest {
         assertEquals(ProcessResult.STARTED, fixture.processor.process(claim));
         executionSeen[0] =
             fixture.store.transaction(
-                tx ->
-                    tx.loadUnconfirmedExecutions(fixture.baseline.threadId()).get(0).executionId());
+                tx -> tx.exits().loadUnconfirmed(fixture.baseline.threadId()).get(0).executionId());
         assertTrue(run.awaitExecuting(), "tool body must be entered before stop");
         assertEquals(0, run.closes.get(), "body has not finished");
         ThreadSnapshot before = runtime.getThreadSnapshot(fixture.baseline.threadId());
@@ -132,7 +131,7 @@ class HarnessRuntimeStopExitContractTest {
             "stop must be observed while the real tool body is still inside the parent gate");
         assertEquals(0, run.closes.get(), "close follows body exit");
         ThreadSnapshot child = runtime.getThreadSnapshot(fixture.baseline.threadId());
-        ThreadJoin join = fixture.store.transaction(tx -> tx.findJoin(joinId).orElseThrow());
+        ThreadJoin join = fixture.store.transaction(tx -> tx.joins().find(joinId).orElseThrow());
         assertEquals(ThreadExecutionControl.STOPPED, child.thread().executionControl());
         boolean notified = parentNotified(fixture, parentId);
         assertAll(
@@ -154,9 +153,9 @@ class HarnessRuntimeStopExitContractTest {
         fixture.store.transaction(
             tx -> {
               assertTrue(
-                  tx.loadUnconfirmedExecutions(fixture.baseline.threadId()).isEmpty(),
+                  tx.exits().loadUnconfirmed(fixture.baseline.threadId()).isEmpty(),
                   "the entered generation is confirmed after close");
-              return tx.findExecution(executionSeen[0]).orElseThrow();
+              return tx.exits().find(executionSeen[0]).orElseThrow();
             });
     assertEquals(ExecutionExitState.STUDIO_EXITED, confirmed.state());
     assertEquals(ExecutionExitKind.TOOL, confirmed.kind());
@@ -195,7 +194,7 @@ class HarnessRuntimeStopExitContractTest {
         assertTrue(run.executionThread.join(Duration.ofSeconds(5)), "the real finally must finish");
         assertEquals(Boolean.TRUE, started.get(), "remote registration must succeed");
         ExecutionExitFact remote =
-            fixture.store.transaction(tx -> tx.findExecution(remoteId).orElseThrow());
+            fixture.store.transaction(tx -> tx.exits().find(remoteId).orElseThrow());
         assertEquals(ExecutionExitKind.REMOTE, remote.kind());
         assertEquals(ExecutionExitState.REMOTE_ACKNOWLEDGED, remote.state());
         IllegalArgumentException mismatch =
@@ -204,28 +203,29 @@ class HarnessRuntimeStopExitContractTest {
                 () ->
                     fixture.store.transaction(
                         tx -> {
-                          tx.lockThread(remote.threadId());
-                          return tx.confirmExecution(
-                              new ExecutionExitFact(
-                                  remote.executionId(),
-                                  remote.threadId(),
-                                  remote.invocationId(),
-                                  remote.attempt(),
-                                  "other-lease",
-                                  remote.kind(),
-                                  remote.parentExecutionId(),
-                                  ExecutionExitState.UNCONFIRMED,
-                                  remote.registeredAt(),
-                                  null,
-                                  null),
-                              ExecutionExitState.NOT_STARTED,
-                              NOW);
+                          tx.threads().lock(remote.threadId());
+                          return tx.exits()
+                              .confirm(
+                                  new ExecutionExitFact(
+                                      remote.executionId(),
+                                      remote.threadId(),
+                                      remote.invocationId(),
+                                      remote.attempt(),
+                                      "other-lease",
+                                      remote.kind(),
+                                      remote.parentExecutionId(),
+                                      ExecutionExitState.UNCONFIRMED,
+                                      remote.registeredAt(),
+                                      null,
+                                      null),
+                                  ExecutionExitState.NOT_STARTED,
+                                  NOW);
                         }));
         assertEquals(
             "execution " + remoteId + " identity cannot be replaced", mismatch.getMessage());
         assertEquals(
             ExecutionExitState.REMOTE_ACKNOWLEDGED,
-            fixture.store.transaction(tx -> tx.findExecution(remoteId).orElseThrow().state()));
+            fixture.store.transaction(tx -> tx.exits().find(remoteId).orElseThrow().state()));
       }
     }
   }
@@ -291,13 +291,13 @@ class HarnessRuntimeStopExitContractTest {
         assertTrue(registered.await(5, TimeUnit.SECONDS), "both remote executions must register");
         assertEquals(List.of(true, true), starts.get());
         int unconfirmedBeforeStop =
-            fixture.store.transaction(tx -> tx.loadUnconfirmedExecutions(leafId).size());
+            fixture.store.transaction(tx -> tx.exits().loadUnconfirmed(leafId).size());
         assertEquals(
             3, unconfirmedBeforeStop, "the local generation and both remotes are unconfirmed");
         localExecutionId =
             fixture.store.transaction(
                 tx ->
-                    tx.loadUnconfirmedExecutions(leafId).stream()
+                    tx.exits().loadUnconfirmed(leafId).stream()
                         .filter(fact -> fact.kind() == ExecutionExitKind.TOOL)
                         .map(ExecutionExitFact::executionId)
                         .findFirst()
@@ -403,10 +403,7 @@ class HarnessRuntimeStopExitContractTest {
                     ExecutionExitState.NOT_STARTED, executionState(fixture, notStartedRemote)),
             () ->
                 assertTrue(
-                    fixture
-                        .store
-                        .transaction(tx -> tx.loadUnconfirmedExecutions(leafId))
-                        .isEmpty()),
+                    fixture.store.transaction(tx -> tx.exits().loadUnconfirmed(leafId)).isEmpty()),
             () -> assertEquals(versionAfterFirstAck + 1, version(fixture.store, leafId)),
             () -> assertEquals(ThreadRuntimeStatus.IDLE, settled.runtimeStatus()),
             () -> assertEquals(ThreadExecutionControl.STOPPED, settled.thread().executionControl()),
@@ -420,7 +417,7 @@ class HarnessRuntimeStopExitContractTest {
         UUID afterStopRemote = UUID.randomUUID();
         assertFalse(
             observer.get().tryStart(afterStopRemote), "Stop already won; no remote may start");
-        assertTrue(fixture.store.transaction(tx -> tx.findExecution(afterStopRemote)).isEmpty());
+        assertTrue(fixture.store.transaction(tx -> tx.exits().find(afterStopRemote)).isEmpty());
       }
     }
   }
@@ -475,7 +472,7 @@ class HarnessRuntimeStopExitContractTest {
         ExecutionExitFact local =
             fixture.store.transaction(
                 tx ->
-                    tx.loadUnconfirmedExecutions(leafId).stream()
+                    tx.exits().loadUnconfirmed(leafId).stream()
                         .filter(fact -> fact.kind() == ExecutionExitKind.TOOL)
                         .findFirst()
                         .orElseThrow());
@@ -509,9 +506,9 @@ class HarnessRuntimeStopExitContractTest {
                 null);
         fixture.store.transaction(
             tx -> {
-              tx.lockThread(leafId);
-              tx.registerExecution(foreignParent);
-              tx.registerExecution(foreignRemote);
+              tx.threads().lock(leafId);
+              tx.exits().register(foreignParent);
+              tx.exits().register(foreignRemote);
               return null;
             });
 
@@ -533,7 +530,7 @@ class HarnessRuntimeStopExitContractTest {
             "remote execution " + foreignRemote.executionId() + " was not registered before start",
             foreign.getMessage());
         assertAll(
-            () -> assertTrue(fixture.store.transaction(tx -> tx.findExecution(unknown)).isEmpty()),
+            () -> assertTrue(fixture.store.transaction(tx -> tx.exits().find(unknown)).isEmpty()),
             () ->
                 assertEquals(
                     ExecutionExitState.UNCONFIRMED, executionState(fixture, legalRemoteId)),
@@ -573,9 +570,10 @@ class HarnessRuntimeStopExitContractTest {
   private static UUID insertSourceAndJoin(Fixture fixture, UUID joinId) {
     return fixture.store.transaction(
         tx -> {
-          ThreadState child = tx.lockThread(fixture.baseline.threadId()).orElseThrow();
+          ThreadState child = tx.threads().lock(fixture.baseline.threadId()).orElseThrow();
           MessagePayload input =
-              (MessagePayload) tx.findEntry(fixture.baseline.userEntryId()).orElseThrow().payload();
+              (MessagePayload)
+                  tx.entries().find(fixture.baseline.userEntryId()).orElseThrow().payload();
           ThreadCommand source =
               new ThreadCommand(
                   child.id(),
@@ -587,30 +585,32 @@ class HarnessRuntimeStopExitContractTest {
                   null,
                   null,
                   NOW);
-          tx.updateThread(child.reserveCommandSequences(1, NOW));
-          tx.insertCommands(List.of(source));
-          tx.updateCommands(List.of(source.markApplied(fixture.baseline.turnStartEntryId())));
-          child = tx.lockThread(child.id()).orElseThrow();
-          tx.updateThread(
-              child.advanceHeadAndInputThroughSequence(
-                  fixture.baseline.assistantEntryId(), 1L, NOW));
-          tx.insertJoin(
-              new ThreadJoin(
-                  joinId,
-                  CREATION_REQUEST_HASH,
-                  child.parentThreadId(),
-                  fixture.baseline.threadId(),
-                  1L,
-                  "agent",
-                  10,
-                  0L,
-                  null,
-                  null,
-                  null,
-                  NOW,
-                  NOW,
-                  JoinDelivery.NOTIFY_PARENT,
-                  null));
+          tx.threads().update(child.reserveCommandSequences(1, NOW));
+          tx.commands().insert(List.of(source));
+          tx.commands().update(List.of(source.markApplied(fixture.baseline.turnStartEntryId())));
+          child = tx.threads().lock(child.id()).orElseThrow();
+          tx.threads()
+              .update(
+                  child.advanceHeadAndInputThroughSequence(
+                      fixture.baseline.assistantEntryId(), 1L, NOW));
+          tx.joins()
+              .insert(
+                  new ThreadJoin(
+                      joinId,
+                      CREATION_REQUEST_HASH,
+                      child.parentThreadId(),
+                      fixture.baseline.threadId(),
+                      1L,
+                      "agent",
+                      10,
+                      0L,
+                      null,
+                      null,
+                      null,
+                      NOW,
+                      NOW,
+                      JoinDelivery.NOTIFY_PARENT,
+                      null));
           return child.parentThreadId();
         });
   }
@@ -629,8 +629,8 @@ class HarnessRuntimeStopExitContractTest {
               count++;
             }
           }
-          ThreadState parent = tx.findThread(parentId).orElseThrow();
-          EntryPath path = tx.loadEntryPath(parent.headEntryId());
+          ThreadState parent = tx.threads().find(parentId).orElseThrow();
+          EntryPath path = tx.entries().loadPath(parent.headEntryId());
           for (Entry entry : path.entries()) {
             if (entry.payload() instanceof NotificationPayload) {
               count++;
@@ -641,7 +641,7 @@ class HarnessRuntimeStopExitContractTest {
   }
 
   private static ExecutionExitFact execution(Fixture fixture, UUID executionId) {
-    return fixture.store.transaction(tx -> tx.findExecution(executionId).orElseThrow());
+    return fixture.store.transaction(tx -> tx.exits().find(executionId).orElseThrow());
   }
 
   private static ExecutionExitState executionState(Fixture fixture, UUID executionId) {
@@ -649,14 +649,15 @@ class HarnessRuntimeStopExitContractTest {
   }
 
   private static long version(HarnessStore store, UUID threadId) {
-    return store.transaction(tx -> tx.findThread(threadId).orElseThrow().version());
+    return store.transaction(tx -> tx.threads().find(threadId).orElseThrow().version());
   }
 
   /** 当前 THREAD Work 的唤醒代次；不存在时用 -1 表示，便于确认重复 ACK 不产生 wake。 */
   private static long threadWakeVersion(HarnessStore store, UUID threadId) {
     return store.transaction(
         tx ->
-            tx.findWork(new WorkTarget(WorkTargetType.THREAD, threadId))
+            tx.work()
+                .find(new WorkTarget(WorkTargetType.THREAD, threadId))
                 .map(Work::wakeVersion)
                 .orElse(-1L));
   }

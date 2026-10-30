@@ -342,20 +342,21 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
             fixture,
             tx -> {
               UUID id = tx.nextId();
-              tx.insertEntry(
-                  new Entry(
-                      id,
-                      chain.turn().sessionId(),
-                      assistantId,
-                      realToolResultPayload(tx.nextId(), assistantId, 0, "call-1"),
-                      NOW));
+              tx.entries()
+                  .insert(
+                      new Entry(
+                          id,
+                          chain.turn().sessionId(),
+                          assistantId,
+                          realToolResultPayload(tx.nextId(), assistantId, 0, "call-1"),
+                          NOW));
               return id;
             });
     inTx(
         fixture,
         tx -> {
-          ThreadState current = tx.lockThread(threadId).orElseThrow();
-          tx.updateThread(current.advanceHead(tool0EntryId, NOW));
+          ThreadState current = tx.threads().lock(threadId).orElseThrow();
+          tx.threads().update(current.advanceHead(tool0EntryId, NOW));
           return null;
         });
     seedCommand(fixture.store, threadId, new UserMessageCommandPayload(userMessage("hi")));
@@ -403,28 +404,34 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
           UUID assistantEntryId = tx.nextId();
           UUID ownerThreadId = tx.nextId(); // 拥有 open Turn 的第三方 Thread
           UUID threadId = tx.nextId(); // 被处理的 Thread（共享同一历史 head）
-          tx.insertSession(new Session(sessionId, "session-" + sessionId, NOW));
-          tx.insertEntry(
-              new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
-          tx.insertEntry(
-              new Entry(
-                  turnStartEntryId,
-                  sessionId,
-                  rootEntryId,
-                  resolvedInputTurnStart(ownerThreadId),
-                  NOW));
-          tx.insertEntry(
-              new Entry(
-                  userEntryId, sessionId, turnStartEntryId, userMessagePayload("hello"), NOW));
+          tx.sessions().insert(new Session(sessionId, "session-" + sessionId, NOW));
+          tx.entries()
+              .insert(
+                  new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStartEntryId,
+                      sessionId,
+                      rootEntryId,
+                      resolvedInputTurnStart(ownerThreadId),
+                      NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      userEntryId, sessionId, turnStartEntryId, userMessagePayload("hello"), NOW));
           List<String> callIds = new ArrayList<>();
           for (int i = 0; i < toolCalls; i++) {
             callIds.add("call-" + i);
           }
-          tx.insertEntry(
-              new Entry(assistantEntryId, sessionId, userEntryId, assistantPayload(callIds), NOW));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      assistantEntryId, sessionId, userEntryId, assistantPayload(callIds), NOW));
           // Owner 停在 USER，避免自身的 assistant head 缺少 siblings；旁支读取历史 assistant。
-          tx.insertThread(threadState(ownerThreadId, sessionId, userEntryId, "owner-thread", NOW));
-          tx.insertThread(threadState(threadId, sessionId, assistantEntryId, NOW));
+          tx.threads()
+              .insert(threadState(ownerThreadId, sessionId, userEntryId, "owner-thread", NOW));
+          tx.threads().insert(threadState(threadId, sessionId, assistantEntryId, NOW));
           return new HistoricalBaseline(
               sessionId,
               rootEntryId,

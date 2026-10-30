@@ -86,26 +86,27 @@ class PostgresqlAcceptCommandsRootQueryTest {
 
     store.transaction(
         tx -> {
-          tx.lockThread(baseline.threadId());
-          ThreadState current = tx.findThread(baseline.threadId()).orElseThrow();
-          tx.updateThread(
-              new ThreadState(
-                  current.id(),
-                  current.sessionId(),
-                  current.parentThreadId(),
-                  turnEndId,
-                  current.creationRequestHash(),
-                  current.name(),
-                  current.rootThreadId(),
-                  current.yoloEnabled(),
-                  current.spawnTrigger(),
-                  current.constraints(),
-                  current.executionControl(),
-                  current.inputThroughSequence(),
-                  current.nextCommandSequence(),
-                  current.version() + 1,
-                  current.createdAt(),
-                  T2));
+          tx.threads().lock(baseline.threadId());
+          ThreadState current = tx.threads().find(baseline.threadId()).orElseThrow();
+          tx.threads()
+              .update(
+                  new ThreadState(
+                      current.id(),
+                      current.sessionId(),
+                      current.parentThreadId(),
+                      turnEndId,
+                      current.creationRequestHash(),
+                      current.name(),
+                      current.rootThreadId(),
+                      current.yoloEnabled(),
+                      current.spawnTrigger(),
+                      current.constraints(),
+                      current.executionControl(),
+                      current.inputThroughSequence(),
+                      current.nextCommandSequence(),
+                      current.version() + 1,
+                      current.createdAt(),
+                      T2));
           return null;
         });
 

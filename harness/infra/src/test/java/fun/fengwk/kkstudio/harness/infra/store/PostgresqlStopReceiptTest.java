@@ -92,26 +92,28 @@ class PostgresqlStopReceiptTest {
           UUID rootThreadId = tx.nextId();
           UUID childThreadId = tx.nextId();
           UUID grandChildThreadId = tx.nextId();
-          tx.insertSession(StoreTestSupport.session(sessionId));
-          tx.insertEntry(StoreTestSupport.rootEntry(rootEntryId, sessionId));
-          tx.insertThread(
-              thread(rootThreadId, sessionId, null, null, rootEntryId, label + "-root"));
-          tx.insertThread(
-              thread(
-                  childThreadId,
-                  sessionId,
-                  rootThreadId,
-                  rootThreadId,
-                  rootEntryId,
-                  label + "-child"));
-          tx.insertThread(
-              thread(
-                  grandChildThreadId,
-                  sessionId,
-                  childThreadId,
-                  rootThreadId,
-                  rootEntryId,
-                  label + "-grand"));
+          tx.sessions().insert(StoreTestSupport.session(sessionId));
+          tx.entries().insert(StoreTestSupport.rootEntry(rootEntryId, sessionId));
+          tx.threads()
+              .insert(thread(rootThreadId, sessionId, null, null, rootEntryId, label + "-root"));
+          tx.threads()
+              .insert(
+                  thread(
+                      childThreadId,
+                      sessionId,
+                      rootThreadId,
+                      rootThreadId,
+                      rootEntryId,
+                      label + "-child"));
+          tx.threads()
+              .insert(
+                  thread(
+                      grandChildThreadId,
+                      sessionId,
+                      childThreadId,
+                      rootThreadId,
+                      rootEntryId,
+                      label + "-grand"));
           return new Tree(sessionId, rootEntryId, rootThreadId, childThreadId, grandChildThreadId);
         });
   }
@@ -154,12 +156,12 @@ class PostgresqlStopReceiptTest {
     StoreTestSupport.inTransaction(
         store,
         tx -> {
-          List<UUID> chain = tx.findAncestorChain(rootThreadId);
-          tx.lockTree(chain.isEmpty() ? rootThreadId : chain.get(chain.size() - 1));
+          List<UUID> chain = tx.threads().findAncestorChain(rootThreadId);
+          tx.threads().lockTree(chain.isEmpty() ? rootThreadId : chain.get(chain.size() - 1));
           for (UUID threadId : threadIds) {
-            tx.lockThread(threadId).orElseThrow();
+            tx.threads().lock(threadId).orElseThrow();
           }
-          tx.insertStopReceipts(rootThreadId, rootStopRequestId, receipts);
+          tx.stops().insertReceipts(rootThreadId, rootStopRequestId, receipts);
         });
   }
 
@@ -197,7 +199,7 @@ class PostgresqlStopReceiptTest {
     // 单条回执读取精确往返（含 cancelledInputs 的 payload 类型与内容）。
     StoppedThreadReceipt loadedChild =
         store
-            .transaction(tx -> tx.findStopReceipt(tree.childThreadId(), childStopRequestId))
+            .transaction(tx -> tx.stops().findReceipt(tree.childThreadId(), childStopRequestId))
             .orElseThrow();
     assertEquals(childReceipt, loadedChild);
     CancelledThreadInput loadedUserMessage = loadedChild.cancelledInputs().get(0);
@@ -209,7 +211,7 @@ class PostgresqlStopReceiptTest {
     // 按 Thread 读取只返回该 Thread 自己的回执。
     assertEquals(
         List.of(childReceipt),
-        store.transaction(tx -> tx.loadStopReceiptsByThread(tree.childThreadId())));
+        store.transaction(tx -> tx.stops().loadByThread(tree.childThreadId())));
 
     // 按根对读取整集合，按 Thread UUID 升序。
     List<StoppedThreadReceipt> expected =
@@ -218,7 +220,7 @@ class PostgresqlStopReceiptTest {
     assertEquals(
         expected,
         store.transaction(
-            tx -> tx.loadStopReceiptsByRootRequest(tree.rootThreadId(), rootStopRequestId)));
+            tx -> tx.stops().loadByRootRequest(tree.rootThreadId(), rootStopRequestId)));
   }
 
   @Test
@@ -247,10 +249,10 @@ class PostgresqlStopReceiptTest {
 
     List<StoppedThreadReceipt> firstSet =
         store.transaction(
-            tx -> tx.loadStopReceiptsByRootRequest(first.rootThreadId(), sharedRootStopRequestId));
+            tx -> tx.stops().loadByRootRequest(first.rootThreadId(), sharedRootStopRequestId));
     List<StoppedThreadReceipt> secondSet =
         store.transaction(
-            tx -> tx.loadStopReceiptsByRootRequest(second.rootThreadId(), sharedRootStopRequestId));
+            tx -> tx.stops().loadByRootRequest(second.rootThreadId(), sharedRootStopRequestId));
     assertEquals(2, firstSet.size());
     assertEquals(2, secondSet.size());
     assertTrue(
@@ -269,23 +271,25 @@ class PostgresqlStopReceiptTest {
     assertEquals(
         firstChild,
         store
-            .transaction(tx -> tx.findStopReceipt(first.childThreadId(), sharedChildStopRequestId))
+            .transaction(
+                tx -> tx.stops().findReceipt(first.childThreadId(), sharedChildStopRequestId))
             .orElseThrow());
     assertEquals(
         secondChild,
         store
-            .transaction(tx -> tx.findStopReceipt(second.childThreadId(), sharedChildStopRequestId))
+            .transaction(
+                tx -> tx.stops().findReceipt(second.childThreadId(), sharedChildStopRequestId))
             .orElseThrow());
 
     // 根对不匹配返回空集合，不泄漏他树回执。
     assertEquals(
         List.of(),
         store.transaction(
-            tx -> tx.loadStopReceiptsByRootRequest(first.rootThreadId(), UUID.randomUUID())));
+            tx -> tx.stops().loadByRootRequest(first.rootThreadId(), UUID.randomUUID())));
     assertEquals(
         List.of(),
         store.transaction(
-            tx -> tx.loadStopReceiptsByRootRequest(UUID.randomUUID(), sharedRootStopRequestId)));
+            tx -> tx.stops().loadByRootRequest(UUID.randomUUID(), sharedRootStopRequestId)));
   }
 
   @Test
@@ -407,23 +411,23 @@ class PostgresqlStopReceiptTest {
     StoreTestSupport.inTransaction(
         store,
         tx -> {
-          tx.lockTree(tree.rootThreadId());
-          tx.lockThread(tree.childThreadId()).orElseThrow();
-          tx.lockThread(tree.grandChildThreadId()).orElseThrow();
-          tx.deleteThreads(List.of(tree.childThreadId(), tree.grandChildThreadId()));
+          tx.threads().lockTree(tree.rootThreadId());
+          tx.threads().lock(tree.childThreadId()).orElseThrow();
+          tx.threads().lock(tree.grandChildThreadId()).orElseThrow();
+          tx.threads().delete(List.of(tree.childThreadId(), tree.grandChildThreadId()));
         });
     assertEquals(
         List.of(rootReceipt),
         store.transaction(
-            tx -> tx.loadStopReceiptsByRootRequest(tree.rootThreadId(), rootStopRequestId)));
+            tx -> tx.stops().loadByRootRequest(tree.rootThreadId(), rootStopRequestId)));
 
     // 删除根 Thread（连同其回执）不再违反 root_thread_id 外键。
     StoreTestSupport.inTransaction(
         store,
         tx -> {
-          tx.lockTree(tree.rootThreadId());
-          tx.lockThread(tree.rootThreadId()).orElseThrow();
-          tx.deleteThreads(List.of(tree.rootThreadId()));
+          tx.threads().lockTree(tree.rootThreadId());
+          tx.threads().lock(tree.rootThreadId()).orElseThrow();
+          tx.threads().delete(List.of(tree.rootThreadId()));
         });
     Integer remaining =
         jdbcTemplate.queryForObject(
@@ -441,14 +445,15 @@ class PostgresqlStopReceiptTest {
         store.transaction(
             tx -> {
               UUID id = tx.nextId();
-              tx.insertThread(
-                  thread(
-                      id,
-                      tree.sessionId(),
-                      tree.rootThreadId(),
-                      tree.rootThreadId(),
-                      tree.rootEntryId(),
-                      "middle-sibling"));
+              tx.threads()
+                  .insert(
+                      thread(
+                          id,
+                          tree.sessionId(),
+                          tree.rootThreadId(),
+                          tree.rootThreadId(),
+                          tree.rootEntryId(),
+                          "middle-sibling"));
               return id;
             });
     UUID subtreeStopRequestId = UUID.randomUUID();
@@ -464,20 +469,20 @@ class PostgresqlStopReceiptTest {
         2,
         store
             .transaction(
-                tx -> tx.loadStopReceiptsByRootRequest(tree.childThreadId(), subtreeStopRequestId))
+                tx -> tx.stops().loadByRootRequest(tree.childThreadId(), subtreeStopRequestId))
             .size());
     assertTrue(
         store
             .transaction(
-                tx -> tx.loadStopReceiptsByRootRequest(tree.childThreadId(), subtreeStopRequestId))
+                tx -> tx.stops().loadByRootRequest(tree.childThreadId(), subtreeStopRequestId))
             .stream()
             .noneMatch(receipt -> receipt.threadId().equals(tree.rootThreadId())));
     // 祖先 root 与兄弟都不产生该根对的回执。
     assertEquals(
         List.of(),
         store.transaction(
-            tx -> tx.loadStopReceiptsByRootRequest(tree.rootThreadId(), subtreeStopRequestId)));
-    assertEquals(List.of(), store.transaction(tx -> tx.loadStopReceiptsByThread(siblingThreadId)));
+            tx -> tx.stops().loadByRootRequest(tree.rootThreadId(), subtreeStopRequestId)));
+    assertEquals(List.of(), store.transaction(tx -> tx.stops().loadByThread(siblingThreadId)));
 
     // 集合混入祖先回执：祖先不是 rootThreadId 的后代，拒绝。
     UUID ancestorMixRootRequestId = UUID.randomUUID();
@@ -610,60 +615,65 @@ class PostgresqlStopReceiptTest {
     return store.transaction(
         tx -> {
           UUID turnStartId = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  turnStartId,
-                  sessionId,
-                  parentEntryId,
-                  new TurnStartPayload(
-                      stopped ? TurnStartReason.STOP : TurnStartReason.INPUT,
-                      StoreTestSupport.branchSettings(),
-                      ownerThreadId),
-                  StoreTestSupport.T1));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStartId,
+                      sessionId,
+                      parentEntryId,
+                      new TurnStartPayload(
+                          stopped ? TurnStartReason.STOP : TurnStartReason.INPUT,
+                          StoreTestSupport.branchSettings(),
+                          ownerThreadId),
+                      StoreTestSupport.T1));
           UUID parentId = turnStartId;
           if (stopped) {
             UUID barrierId = tx.nextId();
-            tx.insertEntry(
-                new Entry(
-                    barrierId,
-                    sessionId,
-                    parentId,
-                    new AssistantErrorPayload(
-                        new AssistantError(AssistantError.CANCELLED_CODE, "Cancelled by user."),
-                        null),
-                    StoreTestSupport.T1));
+            tx.entries()
+                .insert(
+                    new Entry(
+                        barrierId,
+                        sessionId,
+                        parentId,
+                        new AssistantErrorPayload(
+                            new AssistantError(AssistantError.CANCELLED_CODE, "Cancelled by user."),
+                            null),
+                        StoreTestSupport.T1));
             parentId = barrierId;
           } else {
             UUID userId = tx.nextId();
-            tx.insertEntry(
-                new Entry(
-                    userId,
-                    sessionId,
-                    parentId,
-                    StoreTestSupport.userMessagePayload(),
-                    StoreTestSupport.T1));
+            tx.entries()
+                .insert(
+                    new Entry(
+                        userId,
+                        sessionId,
+                        parentId,
+                        StoreTestSupport.userMessagePayload(),
+                        StoreTestSupport.T1));
             UUID assistantId = tx.nextId();
-            tx.insertEntry(
-                StoreTestSupport.assistantEntry(
-                    assistantId, sessionId, userId, StoreTestSupport.T1));
+            tx.entries()
+                .insert(
+                    StoreTestSupport.assistantEntry(
+                        assistantId, sessionId, userId, StoreTestSupport.T1));
             parentId = assistantId;
           }
           UUID turnEndId = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  turnEndId,
-                  sessionId,
-                  parentId,
-                  stopped
-                      ? new TurnEndPayload(
-                          turnStartId,
-                          TurnEndOutcome.STOPPED,
-                          false,
-                          TurnEndReason.USER_STOP,
-                          UUID.randomUUID())
-                      : new TurnEndPayload(
-                          turnStartId, TurnEndOutcome.COMPLETED, false, null, null),
-                  StoreTestSupport.T1));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnEndId,
+                      sessionId,
+                      parentId,
+                      stopped
+                          ? new TurnEndPayload(
+                              turnStartId,
+                              TurnEndOutcome.STOPPED,
+                              false,
+                              TurnEndReason.USER_STOP,
+                              UUID.randomUUID())
+                          : new TurnEndPayload(
+                              turnStartId, TurnEndOutcome.COMPLETED, false, null, null),
+                      StoreTestSupport.T1));
           return turnEndId;
         });
   }
@@ -694,7 +704,7 @@ class PostgresqlStopReceiptTest {
 
     StoppedThreadReceipt loaded =
         store
-            .transaction(tx -> tx.findStopReceipt(tree.rootThreadId(), rootStopRequestId))
+            .transaction(tx -> tx.stops().findReceipt(tree.rootThreadId(), rootStopRequestId))
             .orElseThrow();
     assertEquals(1, loaded.cancelledInputs().size());
     CancelledThreadInput loadedInput = loaded.cancelledInputs().getFirst();

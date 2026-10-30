@@ -45,10 +45,10 @@ class PostgresqlHarnessStoreTransactionTest {
   void commitsChangesAndMakesThemVisibleToLaterTransactions() {
     store.transaction(
         tx -> {
-          tx.insertSession(session(id(1L)));
+          tx.sessions().insert(session(id(1L)));
           return null;
         });
-    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(id(1L)).isPresent()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.sessions().find(id(1L)).isPresent()));
   }
 
   @Test
@@ -65,11 +65,11 @@ class PostgresqlHarnessStoreTransactionTest {
             () ->
                 store.transaction(
                     tx -> {
-                      tx.insertSession(session(id(1L)));
+                      tx.sessions().insert(session(id(1L)));
                       throw failure;
                     }));
     assertSame(failure, thrown);
-    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(id(1L)).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.sessions().find(id(1L)).isEmpty()));
   }
 
   @Test
@@ -81,11 +81,11 @@ class PostgresqlHarnessStoreTransactionTest {
             () ->
                 store.transaction(
                     tx -> {
-                      tx.insertSession(session(id(1L)));
+                      tx.sessions().insert(session(id(1L)));
                       throw failure;
                     }));
     assertSame(failure, thrown);
-    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(id(1L)).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.sessions().find(id(1L)).isEmpty()));
   }
 
   @Test
@@ -98,11 +98,11 @@ class PostgresqlHarnessStoreTransactionTest {
             () ->
                 store.transaction(
                     tx -> {
-                      tx.insertSession(session(id(1L)));
+                      tx.sessions().insert(session(id(1L)));
                       throw failure;
                     }));
     assertSame(failure, thrown);
-    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(id(1L)).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.sessions().find(id(1L)).isEmpty()));
   }
 
   @Test
@@ -135,10 +135,10 @@ class PostgresqlHarnessStoreTransactionTest {
   void transactionHandleIsRejectedAfterCommit() {
     HarnessStore.Transaction escaped = store.transaction(tx -> tx);
     assertThrows(IllegalStateException.class, escaped::nextId);
-    assertThrows(IllegalStateException.class, () -> escaped.insertSession(session(id(1L))));
-    assertThrows(IllegalStateException.class, () -> escaped.findSession(id(1L)));
-    assertThrows(IllegalStateException.class, () -> escaped.loadEntryPath(id(1L)));
-    assertThrows(IllegalStateException.class, () -> escaped.loadEntriesBySessionId(id(1L)));
+    assertThrows(IllegalStateException.class, () -> escaped.sessions().insert(session(id(1L))));
+    assertThrows(IllegalStateException.class, () -> escaped.sessions().find(id(1L)));
+    assertThrows(IllegalStateException.class, () -> escaped.entries().loadPath(id(1L)));
+    assertThrows(IllegalStateException.class, () -> escaped.entries().loadBySession(id(1L)));
   }
 
   @Test
@@ -153,7 +153,7 @@ class PostgresqlHarnessStoreTransactionTest {
                   throw new IllegalStateException("boom");
                 }));
     assertThrows(IllegalStateException.class, escaped[0]::nextId);
-    assertThrows(IllegalStateException.class, () -> escaped[0].findSession(id(1L)));
+    assertThrows(IllegalStateException.class, () -> escaped[0].sessions().find(id(1L)));
   }
 
   @Test
@@ -166,7 +166,7 @@ class PostgresqlHarnessStoreTransactionTest {
                         () ->
                             assertThrows(
                                 IllegalStateException.class,
-                                () -> tx.insertSession(session(id(1L)))),
+                                () -> tx.sessions().insert(session(id(1L)))),
                         executor)
                     .join();
             assertEquals(
@@ -174,7 +174,7 @@ class PostgresqlHarnessStoreTransactionTest {
             return null;
           });
     }
-    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(id(1L)).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.sessions().find(id(1L)).isEmpty()));
   }
 
   @Test
@@ -185,12 +185,12 @@ class PostgresqlHarnessStoreTransactionTest {
             () ->
                 store.transaction(
                     tx -> {
-                      tx.insertSession(session(id(1L)));
+                      tx.sessions().insert(session(id(1L)));
                       store.transaction(inner -> null);
                       return null;
                     }));
     assertEquals("nested transactions are not supported", thrown.getMessage());
-    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(id(1L)).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.sessions().find(id(1L)).isEmpty()));
   }
 
   @Test
@@ -206,12 +206,12 @@ class PostgresqlHarnessStoreTransactionTest {
             () ->
                 store.transaction(
                     tx -> {
-                      tx.insertSession(session(id(1L)));
-                      tx.insertSession(session(id(1L)));
+                      tx.sessions().insert(session(id(1L)));
+                      tx.sessions().insert(session(id(1L)));
                       return null;
                     }));
     assertTrue(thrown.getMessage().contains("integrity constraint"));
-    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(id(1L)).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.sessions().find(id(1L)).isEmpty()));
   }
 
   @Test
@@ -222,16 +222,16 @@ class PostgresqlHarnessStoreTransactionTest {
             () ->
                 store.transaction(
                     tx -> {
-                      tx.insertSession(session(id(1L)));
+                      tx.sessions().insert(session(id(1L)));
                       try {
-                        tx.insertSession(session(id(1L)));
+                        tx.sessions().insert(session(id(1L)));
                       } catch (IllegalArgumentException ignored) {
                         // PostgreSQL 已中止该事务：正常返回不再合法。
                       }
                       return "must not commit";
                     }));
     assertTrue(thrown.getMessage().contains("integrity constraint"));
-    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(id(1L)).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.sessions().find(id(1L)).isEmpty()));
   }
 
   @Test
@@ -246,9 +246,9 @@ class PostgresqlHarnessStoreTransactionTest {
             () ->
                 store.transaction(
                     tx -> {
-                      tx.insertSession(session(id(1L)));
+                      tx.sessions().insert(session(id(1L)));
                       try {
-                        tx.findEntry(id(1L));
+                        tx.entries().find(id(1L));
                       } catch (DataAccessException failure) {
                         caught.set(failure);
                       }
@@ -256,7 +256,7 @@ class PostgresqlHarnessStoreTransactionTest {
                     }));
 
     assertSame(caught.get(), thrown);
-    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(id(1L)).isEmpty()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.sessions().find(id(1L)).isEmpty()));
   }
 
   @Test
@@ -270,19 +270,19 @@ class PostgresqlHarnessStoreTransactionTest {
                 status -> {
                   store.transaction(
                       tx -> {
-                        tx.insertSession(session(id(1L)));
+                        tx.sessions().insert(session(id(1L)));
                         return null;
                       });
                   store.transaction(
                       tx -> {
-                        tx.insertSession(session(id(2L)));
+                        tx.sessions().insert(session(id(2L)));
                         return null;
                       });
                   throw new IllegalStateException("rollback outer");
                 }));
 
-    assertFalse(store.<Boolean>transaction(tx -> tx.findSession(id(1L)).isPresent()));
-    assertFalse(store.<Boolean>transaction(tx -> tx.findSession(id(2L)).isPresent()));
+    assertFalse(store.<Boolean>transaction(tx -> tx.sessions().find(id(1L)).isPresent()));
+    assertFalse(store.<Boolean>transaction(tx -> tx.sessions().find(id(2L)).isPresent()));
   }
 
   /** 测试意图：无外层事务时，afterCommit 在本 store transaction 提交成功后、返回前执行恰一次，且提交状态在动作内已可见。 */
@@ -292,12 +292,12 @@ class PostgresqlHarnessStoreTransactionTest {
 
     store.transaction(
         tx -> {
-          tx.insertSession(session(id(1L)));
+          tx.sessions().insert(session(id(1L)));
           store.afterCommit(
               () -> {
                 // 动作执行时本事务已提交：新事务必须能看到刚插入的 Session。
                 assertTrue(
-                    store.<Boolean>transaction(inner -> inner.findSession(id(1L)).isPresent()));
+                    store.<Boolean>transaction(inner -> inner.sessions().find(id(1L)).isPresent()));
                 events.add("after-commit");
               });
           events.add("callback");
@@ -320,7 +320,7 @@ class PostgresqlHarnessStoreTransactionTest {
         status -> {
           store.transaction(
               tx -> {
-                tx.insertSession(session(id(1L)));
+                tx.sessions().insert(session(id(1L)));
                 store.afterCommit(executions::incrementAndGet);
                 store.afterCommit(executions::incrementAndGet);
                 return null;
@@ -345,7 +345,7 @@ class PostgresqlHarnessStoreTransactionTest {
                 status -> {
                   store.transaction(
                       tx -> {
-                        tx.insertSession(session(id(1L)));
+                        tx.sessions().insert(session(id(1L)));
                         store.afterCommit(executions::incrementAndGet);
                         return null;
                       });
@@ -353,7 +353,7 @@ class PostgresqlHarnessStoreTransactionTest {
                 }));
 
     assertEquals(0, executions.get(), "rolled back outer transaction must not run afterCommit");
-    assertFalse(store.<Boolean>transaction(tx -> tx.findSession(id(1L)).isPresent()));
+    assertFalse(store.<Boolean>transaction(tx -> tx.sessions().find(id(1L)).isPresent()));
   }
 
   /** 手动压缩等事务外入口的守卫：无环境事务时放行，真实 Spring 事务内必须在工作开始前拒绝。 */
@@ -386,7 +386,7 @@ class PostgresqlHarnessStoreTransactionTest {
               () ->
                   store.transaction(
                       tx -> {
-                        tx.insertSession(session(id(1L)));
+                        tx.sessions().insert(session(id(1L)));
                         bothInside.countDown();
                         await(release);
                         return null;
@@ -396,7 +396,7 @@ class PostgresqlHarnessStoreTransactionTest {
               () ->
                   store.transaction(
                       tx -> {
-                        tx.insertSession(session(id(2L)));
+                        tx.sessions().insert(session(id(2L)));
                         bothInside.countDown();
                         await(release);
                         return null;
@@ -406,8 +406,8 @@ class PostgresqlHarnessStoreTransactionTest {
       first.get(10, TimeUnit.SECONDS);
       second.get(10, TimeUnit.SECONDS);
     }
-    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(id(1L)).isPresent()));
-    assertTrue(store.<Boolean>transaction(tx -> tx.findSession(id(2L)).isPresent()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.sessions().find(id(1L)).isPresent()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.sessions().find(id(2L)).isPresent()));
   }
 
   @Test

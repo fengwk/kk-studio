@@ -99,7 +99,7 @@ public final class ModelOutcomeAppender {
                 : payloadMapper.assistantErrorPayload(model.error(), modelAttemptSnapshot(model)),
             mutationNow,
             succeeded ? model.providerReplayState() : null);
-    tx.insertEntry(resultEntry);
+    tx.entries().insert(resultEntry);
     UUID resultEntryId = resultEntry.id();
     if (!succeeded) {
       UUID turnEndId =
@@ -255,7 +255,7 @@ public final class ModelOutcomeAppender {
             null,
             mutationNow);
     // children 先于 parent 删除（FK 顺序）。
-    tx.deleteToolInvocationsByIds(siblings.stream().map(ToolInvocation::id).toList());
+    tx.tools().deleteByIds(siblings.stream().map(ToolInvocation::id).toList());
     if (model != null) {
       tx.deleteModelInvocation(model.id());
     }
@@ -302,7 +302,7 @@ public final class ModelOutcomeAppender {
               mutationNow,
               mutationNow));
     }
-    tx.insertToolInvocations(materialized);
+    tx.tools().insert(materialized);
     return materialized;
   }
 
@@ -316,13 +316,14 @@ public final class ModelOutcomeAppender {
       TurnEndReason reason,
       Instant now) {
     UUID turnEndId = tx.nextId();
-    tx.insertEntry(
-        new Entry(
-            turnEndId,
-            sessionId,
-            parentId,
-            new TurnEndPayload(turnStartEntryId, outcome, continueModel, reason, null),
-            now));
+    tx.entries()
+        .insert(
+            new Entry(
+                turnEndId,
+                sessionId,
+                parentId,
+                new TurnEndPayload(turnStartEntryId, outcome, continueModel, reason, null),
+                now));
     return turnEndId;
   }
 

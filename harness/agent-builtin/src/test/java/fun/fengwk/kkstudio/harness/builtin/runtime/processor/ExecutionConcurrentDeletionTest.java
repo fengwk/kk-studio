@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.builtin.runtime.processor;
 
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreCallProbe.wrap;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -32,9 +33,6 @@ import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
-import java.lang.reflect.Proxy;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.ZoneOffset;
@@ -110,7 +108,7 @@ class ExecutionConcurrentDeletionTest {
           List.of(ExecutionExitState.UNCONFIRMED),
           fixture.rawStore.transaction(
               tx ->
-                  tx.loadUnconfirmedExecutions(fixture.threadId).stream()
+                  tx.exits().loadUnconfirmed(fixture.threadId).stream()
                       .map(fact -> fact.state())
                       .toList()),
           "a missing Thread must not manufacture an exit confirmation");
@@ -181,7 +179,7 @@ class ExecutionConcurrentDeletionTest {
         List.of(ExecutionExitState.UNCONFIRMED),
         fixture.rawStore.transaction(
             tx ->
-                tx.loadUnconfirmedExecutions(fixture.threadId).stream()
+                tx.exits().loadUnconfirmed(fixture.threadId).stream()
                     .map(fact -> fact.state())
                     .toList()));
   }
@@ -281,9 +279,9 @@ class ExecutionConcurrentDeletionTest {
     UUID invocationId =
         rawStore.transaction(
             tx -> {
-              tx.lockThread(threadId);
+              tx.threads().lock(threadId);
               UUID id = tx.nextId();
-              builtin(tx)
+              builtin(rawStore, tx)
                   .insertModelInvocation(
                       new ModelInvocation(
                           id,
@@ -300,15 +298,16 @@ class ExecutionConcurrentDeletionTest {
                           List.of(),
                           ThreadProcessorTestSupport.NOW,
                           ThreadProcessorTestSupport.NOW));
-              tx.requestWork(new WorkTarget(WorkTargetType.MODEL, id));
+              tx.work().request(new WorkTarget(WorkTargetType.MODEL, id));
               return id;
             });
     ClaimedWork claim =
         rawStore
             .transaction(
                 tx ->
-                    tx.claimNextWork(
-                        WorkTargetType.MODEL, "token-" + invocationId, Duration.ofSeconds(60)))
+                    tx.work()
+                        .claimNext(
+                            WorkTargetType.MODEL, "token-" + invocationId, Duration.ofSeconds(60)))
             .orElseThrow();
     ModelExecutionFixture fixture =
         new ModelExecutionFixture(
@@ -387,20 +386,20 @@ class ExecutionConcurrentDeletionTest {
 
   private static ExecutionExitState executionState(
       InMemoryBuiltinHarnessStore store, UUID executionId) {
-    return store.transaction(tx -> tx.findExecution(executionId).orElseThrow().state());
+    return store.transaction(tx -> tx.exits().find(executionId).orElseThrow().state());
   }
 
   private static ModelInvocationStatus modelStatus(
       InMemoryBuiltinHarnessStore store, UUID invocationId) {
     return store
-        .transaction(tx -> builtin(tx).findModelInvocation(invocationId))
+        .transaction(tx -> builtin(store, tx).findModelInvocation(invocationId))
         .orElseThrow()
         .status();
   }
 
   private static Object modelResult(InMemoryBuiltinHarnessStore store, UUID invocationId) {
     return store
-        .transaction(tx -> builtin(tx).findModelInvocation(invocationId))
+        .transaction(tx -> builtin(store, tx).findModelInvocation(invocationId))
         .orElseThrow()
         .result();
   }
@@ -466,44 +465,33 @@ class ExecutionConcurrentDeletionTest {
           tx -> {
             try {
               return callback.apply(
-                  (HarnessStore.Transaction)
-                      Proxy.newProxyInstance(
-                          HarnessStore.Transaction.class.getClassLoader(),
-                          new Class<?>[] {BuiltinStore.Transaction.class},
-                          (proxy, method, args) -> {
-                            String name = method.getName();
-                            if (armed
-                                && name.equals("lockThread")
-                                && args != null
-                                && deletedThreadId.equals(args[0])) {
-                              armed = false;
-                              deleted = true;
-                              return Optional.empty();
-                            }
-                            if (deleted && args != null && deletedThreadId.equals(args[0])) {
-                              if (name.equals("findAncestorChain")) {
-                                return List.of();
-                              }
-                              if (name.equals("findThread") || name.equals("lockThread")) {
-                                return Optional.empty();
-                              }
-                            }
-                            return invoke(tx, method, args);
-                          }));
+                  wrap(
+                      tx,
+                      (call, next) -> {
+                        String name = call.operation();
+                        Object argument = call.argument(0);
+                        if (armed
+                            && name.equals("threads.lock")
+                            && deletedThreadId.equals(argument)) {
+                          armed = false;
+                          deleted = true;
+                          return Optional.empty();
+                        }
+                        if (deleted && deletedThreadId.equals(argument)) {
+                          if (name.equals("threads.findAncestorChain")) {
+                            return List.of();
+                          }
+                          if (name.equals("threads.find") || name.equals("threads.lock")) {
+                            return Optional.empty();
+                          }
+                        }
+                        return next.invoke();
+                      }));
             } catch (RuntimeException | Error error) {
               failedTransactions.incrementAndGet();
               throw error;
             }
           });
-    }
-
-    private static Object invoke(HarnessStore.Transaction tx, Method method, Object[] args)
-        throws Throwable {
-      try {
-        return method.invoke(tx, args);
-      } catch (InvocationTargetException error) {
-        throw error.getCause();
-      }
     }
   }
 }

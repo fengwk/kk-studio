@@ -69,22 +69,27 @@ class HarnessRuntimeApprovalTest {
     assertEquals(0, decided.attempt());
 
     ToolInvocation stored =
-        store.transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow());
+        store.transaction(tx -> tx.tools().find(baseline.toolId()).orElseThrow());
     assertEquals(decided, stored);
 
-    ThreadState thread = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
+    ThreadState thread =
+        store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow());
     // fixture 已推进一次 head（version 1），决定再 +1。
     assertEquals(2L, thread.version());
 
     Work toolWork =
         store.transaction(
             tx ->
-                tx.findWork(new WorkTarget(WorkTargetType.TOOL, baseline.toolId())).orElseThrow());
+                tx.work()
+                    .find(new WorkTarget(WorkTargetType.TOOL, baseline.toolId()))
+                    .orElseThrow());
     assertEquals(1L, toolWork.wakeVersion());
     assertTrue(
         store.<Boolean>transaction(
             tx ->
-                tx.findWork(new WorkTarget(WorkTargetType.THREAD, baseline.threadId())).isEmpty()));
+                tx.work()
+                    .find(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()))
+                    .isEmpty()));
   }
 
   @Test
@@ -105,17 +110,20 @@ class HarnessRuntimeApprovalTest {
     assertEquals(ToolInvocationStatus.FAILED, decided.status());
     assertEquals(ToolApprovalDecision.DENIED, decided.approval().decision());
     assertEquals("DENIED", decided.error().kind());
-    ThreadState thread = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
+    ThreadState thread =
+        store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow());
     assertEquals(2L, thread.version());
     Work threadWork =
         store.transaction(
             tx ->
-                tx.findWork(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()))
+                tx.work()
+                    .find(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()))
                     .orElseThrow());
     assertEquals(1L, threadWork.wakeVersion());
     assertTrue(
         store.<Boolean>transaction(
-            tx -> tx.findWork(new WorkTarget(WorkTargetType.TOOL, baseline.toolId())).isEmpty()));
+            tx ->
+                tx.work().find(new WorkTarget(WorkTargetType.TOOL, baseline.toolId())).isEmpty()));
   }
 
   @Test
@@ -131,13 +139,16 @@ class HarnessRuntimeApprovalTest {
 
     assertEquals(first, replay);
     assertEquals(T5, replay.approval().decidedAt());
-    ThreadState thread = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
+    ThreadState thread =
+        store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow());
     // 一次真实决定（fixture head advance + decision）= 2；replay 不再 bump。
     assertEquals(2L, thread.version());
     Work toolWork =
         store.transaction(
             tx ->
-                tx.findWork(new WorkTarget(WorkTargetType.TOOL, baseline.toolId())).orElseThrow());
+                tx.work()
+                    .find(new WorkTarget(WorkTargetType.TOOL, baseline.toolId()))
+                    .orElseThrow());
     assertEquals(1L, toolWork.wakeVersion());
   }
 
@@ -151,8 +162,8 @@ class HarnessRuntimeApprovalTest {
     // 模拟 approval 之后才提交的 Stop：tool READY -> CANCELLED（decided approval 保持不变）。
     store.transaction(
         tx -> {
-          ToolInvocation tool = tx.lockToolInvocation(baseline.toolId()).orElseThrow();
-          tx.updateToolInvocations(List.of(tool.cancel(toolError(), T6)));
+          ToolInvocation tool = tx.tools().lock(baseline.toolId()).orElseThrow();
+          tx.tools().update(List.of(tool.cancel(toolError(), T6)));
           return null;
         });
     ToolInvocation replay =
@@ -160,7 +171,8 @@ class HarnessRuntimeApprovalTest {
     assertEquals(ToolInvocationStatus.CANCELLED, replay.status());
     assertEquals(first.approval(), replay.approval());
     assertEquals(T5, replay.approval().decidedAt());
-    ThreadState thread = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
+    ThreadState thread =
+        store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow());
     assertEquals(2L, thread.version());
   }
 
@@ -259,8 +271,8 @@ class HarnessRuntimeApprovalTest {
     // head 移回 ROOT 后 WAITING_APPROVAL 不再属于当前 TOOL_ACTIVE 上下文。
     store.transaction(
         tx -> {
-          ThreadState thread = tx.lockThread(baseline.threadId()).orElseThrow();
-          tx.updateThread(thread.advanceHead(baseline.rootEntryId(), T6));
+          ThreadState thread = tx.threads().lock(baseline.threadId()).orElseThrow();
+          tx.threads().update(thread.advanceHead(baseline.rootEntryId(), T6));
           return null;
         });
     HarnessRuntimeConflictException error =
@@ -277,8 +289,8 @@ class HarnessRuntimeApprovalTest {
     // Stop 风格的 WAITING_APPROVAL -> CANCELLED 保留 exact undecided approval（后续 Stop slice 的真实形状）。
     store.transaction(
         tx -> {
-          ToolInvocation tool = tx.lockToolInvocation(baseline.toolId()).orElseThrow();
-          tx.updateToolInvocations(List.of(tool.cancel(toolError(), T6)));
+          ToolInvocation tool = tx.tools().lock(baseline.toolId()).orElseThrow();
+          tx.tools().update(List.of(tool.cancel(toolError(), T6)));
           return null;
         });
     HarnessRuntimeConflictException error =
@@ -288,7 +300,7 @@ class HarnessRuntimeApprovalTest {
     assertEquals(Reason.APPROVAL_NOT_APPLICABLE, error.reason());
     // 工具保持 CANCELLED + 未决定 approval，没有任何 mutation。
     ToolInvocation stored =
-        store.transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow());
+        store.transaction(tx -> tx.tools().find(baseline.toolId()).orElseThrow());
     assertEquals(ToolInvocationStatus.CANCELLED, stored.status());
     assertTrue(stored.approval().isUndecided());
   }
@@ -338,13 +350,16 @@ class HarnessRuntimeApprovalTest {
     } finally {
       pool.shutdownNow();
     }
-    ThreadState thread = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
+    ThreadState thread =
+        store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow());
     // 两次调用只有一次真实决定：version 恰好 +1（fixture head advance 1 + 一次决定 1）。
     assertEquals(2L, thread.version());
     Work toolWork =
         store.transaction(
             tx ->
-                tx.findWork(new WorkTarget(WorkTargetType.TOOL, baseline.toolId())).orElseThrow());
+                tx.work()
+                    .find(new WorkTarget(WorkTargetType.TOOL, baseline.toolId()))
+                    .orElseThrow());
     assertEquals(1L, toolWork.wakeVersion());
   }
 

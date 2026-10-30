@@ -115,10 +115,10 @@ class HarnessWorkDispatcherLifecycleTest {
     // 手动 tick 触发 poll -> wake -> drain -> claim。
     store.transaction(
         tx -> {
-          tx.lockThread(seed.threadId());
+          tx.threads().lock(seed.threadId());
           WorkTarget target = new WorkTarget(WorkTargetType.THREAD, seed.threadId());
-          tx.deleteWork(target);
-          tx.requestWork(target);
+          tx.work().delete(target);
+          tx.work().request(target);
           return null;
         });
     scheduler.runPoll(0);
@@ -215,19 +215,20 @@ class HarnessWorkDispatcherLifecycleTest {
     WorkTarget target = new WorkTarget(WorkTargetType.THREAD, seed.threadId());
     store.transaction(
         tx -> {
-          tx.lockThread(seed.threadId());
-          tx.deleteWork(target);
-          tx.requestWork(target);
+          tx.threads().lock(seed.threadId());
+          tx.work().delete(target);
+          tx.work().request(target);
           return null;
         });
     ClaimedWork claim =
         store
             .transaction(
-                tx -> tx.claimNextWork(WorkTargetType.THREAD, "seed-lease", Duration.ofMillis(10)))
+                tx ->
+                    tx.work().claimNext(WorkTargetType.THREAD, "seed-lease", Duration.ofMillis(10)))
             .orElseThrow();
     store.transaction(
         tx -> {
-          tx.rescheduleWork(claim, Duration.ofMillis(150));
+          tx.work().reschedule(claim, Duration.ofMillis(150));
           return null;
         });
     dispatcher.start();

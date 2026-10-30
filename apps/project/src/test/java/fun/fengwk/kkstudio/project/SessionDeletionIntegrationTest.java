@@ -239,7 +239,7 @@ class SessionDeletionIntegrationTest extends OwnerTestSupport {
     return store.transaction(
         tx -> {
           UUID sessionId = tx.nextId();
-          tx.insertSession(new Session(sessionId, name, T0));
+          tx.sessions().insert(new Session(sessionId, name, T0));
           return sessionId;
         });
   }
@@ -254,7 +254,8 @@ class SessionDeletionIntegrationTest extends OwnerTestSupport {
     return store.transaction(
         tx -> {
           UUID rootEntryId = tx.nextId();
-          tx.insertEntry(new Entry(rootEntryId, sessionId, null, new RootPayload(SETTINGS), T0));
+          tx.entries()
+              .insert(new Entry(rootEntryId, sessionId, null, new RootPayload(SETTINGS), T0));
           return rootEntryId;
         });
   }
@@ -269,24 +270,25 @@ class SessionDeletionIntegrationTest extends OwnerTestSupport {
         tx -> {
           UUID threadId = tx.nextId();
           // 根线程使用独立开关；子线程恒 FOLLOW 传入的执行根（fixture 的 parent 即执行根）。
-          tx.insertThread(
-              new ThreadState(
-                  threadId,
-                  sessionId,
-                  parentThreadId,
-                  headEntryId,
-                  HASH,
-                  "thread-" + threadId,
-                  parentThreadId == null ? threadId : parentThreadId,
-                  false,
-                  SpawnTrigger.MODEL_TOOL,
-                  ThreadConstraints.NONE,
-                  status,
-                  0L,
-                  1L,
-                  0L,
-                  T0,
-                  T0));
+          tx.threads()
+              .insert(
+                  new ThreadState(
+                      threadId,
+                      sessionId,
+                      parentThreadId,
+                      headEntryId,
+                      HASH,
+                      "thread-" + threadId,
+                      parentThreadId == null ? threadId : parentThreadId,
+                      false,
+                      SpawnTrigger.MODEL_TOOL,
+                      ThreadConstraints.NONE,
+                      status,
+                      0L,
+                      1L,
+                      0L,
+                      T0,
+                      T0));
           return threadId;
         });
   }
@@ -295,7 +297,7 @@ class SessionDeletionIntegrationTest extends OwnerTestSupport {
   private UUID headEntryOf(UUID sessionId) {
     return store.transaction(
         tx ->
-            tx.listThreadsBySession(sessionId).stream()
+            tx.threads().listBySession(sessionId).stream()
                 .map(ThreadState::headEntryId)
                 .findFirst()
                 .orElseThrow());
@@ -321,10 +323,10 @@ class SessionDeletionIntegrationTest extends OwnerTestSupport {
               terminalEntryId != null
                   ? Stream.of(childThreadId, parentThreadId).sorted(UuidOrder.COMPARATOR).toList()
                   : List.of(childThreadId);
-          threadsToLock.forEach(tx::lockThread);
-          tx.insertCommands(List.of(command(childThreadId, sequence)));
+          threadsToLock.forEach(id -> tx.threads().lock(id));
+          tx.commands().insert(List.of(command(childThreadId, sequence)));
           if (terminalEntryId != null) {
-            tx.insertCommands(List.of(command(parentThreadId, 1L)));
+            tx.commands().insert(List.of(command(parentThreadId, 1L)));
           }
           ThreadJoin join =
               new ThreadJoin(
@@ -343,9 +345,10 @@ class SessionDeletionIntegrationTest extends OwnerTestSupport {
                   T0,
                   JoinDelivery.NOTIFY_PARENT,
                   null);
-          tx.insertJoin(join);
+          tx.joins().insert(join);
           if (terminalEntryId != null) {
-            tx.updateJoin(join.match(terminalEntryId, finalAnswerEntryId, T1).delivered(1L, T1));
+            tx.joins()
+                .update(join.match(terminalEntryId, finalAnswerEntryId, T1).delivered(1L, T1));
           }
           return null;
         });

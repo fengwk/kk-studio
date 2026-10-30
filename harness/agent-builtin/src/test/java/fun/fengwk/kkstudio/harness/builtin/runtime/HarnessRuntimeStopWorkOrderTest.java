@@ -5,6 +5,7 @@ import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupp
 import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.seedModelFreeToolBaseline;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.seedThreadWork;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.seedToolWork;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreCallProbe.wrap;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -38,12 +39,12 @@ class HarnessRuntimeStopWorkOrderTest {
 
   private static final Set<String> DURABLE_MUTATIONS =
       Set.of(
-          "updateCommands",
-          "insertEntry",
+          "commands.update",
+          "entries.insert",
           "updateModelInvocation",
-          "updateToolInvocations",
-          "updateThread",
-          "deleteWork");
+          "tools.update",
+          "threads.update",
+          "work.delete");
 
   @Test
   void toolStopPrelocksThenDeletesWorkInCanonicalOrderBeforeConvergence() {
@@ -69,31 +70,31 @@ class HarnessRuntimeStopWorkOrderTest {
     assertEquals(
         expected,
         calls.stream()
-            .filter(call -> call.method().equals("lockWork"))
+            .filter(call -> call.method().equals("work.lock"))
             .map(StoreCall::target)
             .toList());
     assertEquals(
         expected,
         calls.stream()
-            .filter(call -> call.method().equals("deleteWork"))
+            .filter(call -> call.method().equals("work.delete"))
             .map(StoreCall::target)
             .toList());
 
-    int firstDelete = firstIndex(calls, "deleteWork");
-    int lastDelete = lastIndex(calls, "deleteWork");
-    int lastWorkLock = lastIndex(calls, "lockWork");
+    int firstDelete = firstIndex(calls, "work.delete");
+    int lastDelete = lastIndex(calls, "work.delete");
+    int lastWorkLock = lastIndex(calls, "work.lock");
     assertTrue(lastWorkLock >= 0);
     assertTrue(firstDelete > lastWorkLock);
     // Work 净化必须紧邻锁获取且连续完成：deleteWork 的 owner 校验反查 Model/Tool 行，因此必须在收敛
     // （append Entry / advance Thread / 删除 Invocation）前执行。
     for (int i = firstDelete; i <= lastDelete; i++) {
-      assertEquals("deleteWork", calls.get(i).method());
+      assertEquals("work.delete", calls.get(i).method());
     }
     // deleteWork 之后不再出现任何 lockWork / deleteWork：进入收敛段（insertEntry / updateThread / delete 原语）。
     for (int i = lastDelete + 1; i < calls.size(); i++) {
       String method = calls.get(i).method();
       assertTrue(
-          !method.equals("lockWork") && !method.equals("deleteWork"), "unexpected " + method);
+          !method.equals("work.lock") && !method.equals("work.delete"), "unexpected " + method);
     }
   }
 
@@ -114,11 +115,11 @@ class HarnessRuntimeStopWorkOrderTest {
         () -> runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 1)));
 
     ThreadState thread =
-        delegate.transaction(tx -> tx.lockThread(baseline.threadId()).orElseThrow());
+        delegate.transaction(tx -> tx.threads().lock(baseline.threadId()).orElseThrow());
     assertEquals(1L, thread.version());
     assertEquals(baseline.assistantEntryId(), thread.headEntryId());
     for (UUID id : baseline.toolIds()) {
-      ToolInvocation stored = delegate.transaction(tx -> tx.findToolInvocation(id).orElseThrow());
+      ToolInvocation stored = delegate.transaction(tx -> tx.tools().find(id).orElseThrow());
       assertEquals(ToolInvocationStatus.READY, stored.status());
     }
     List<WorkTarget> expected =
@@ -127,7 +128,7 @@ class HarnessRuntimeStopWorkOrderTest {
             new WorkTarget(WorkTargetType.TOOL, baseline.toolIds().get(0)),
             new WorkTarget(WorkTargetType.TOOL, baseline.toolIds().get(1)));
     for (WorkTarget target : expected) {
-      assertTrue(delegate.transaction(tx -> tx.findWork(target)).isPresent());
+      assertTrue(delegate.transaction(tx -> tx.work().find(target)).isPresent());
     }
   }
 
@@ -163,22 +164,19 @@ class HarnessRuntimeStopWorkOrderTest {
                 return delegate.transaction(
                     tx -> {
                       HarnessStore.Transaction wrapped =
-                          (HarnessStore.Transaction)
-                              Proxy.newProxyInstance(
-                                  HarnessStore.Transaction.class.getClassLoader(),
-                                  new Class<?>[] {BuiltinStore.Transaction.class},
-                                  (transactionProxy, transactionMethod, transactionArgs) -> {
-                                    String name = transactionMethod.getName();
-                                    if (name.equals("lockWork")
-                                        || DURABLE_MUTATIONS.contains(name)) {
-                                      WorkTarget target =
-                                          (name.equals("lockWork") || name.equals("deleteWork"))
-                                              ? (WorkTarget) transactionArgs[0]
-                                              : null;
-                                      calls.add(new StoreCall(name, target));
-                                    }
-                                    return transactionMethod.invoke(tx, transactionArgs);
-                                  });
+                          wrap(
+                              tx,
+                              (call, next) -> {
+                                String name = call.operation();
+                                if (name.equals("work.lock") || DURABLE_MUTATIONS.contains(name)) {
+                                  WorkTarget target =
+                                      (name.equals("work.lock") || name.equals("work.delete"))
+                                          ? (WorkTarget) call.argument(0)
+                                          : null;
+                                  calls.add(new StoreCall(name, target));
+                                }
+                                return next.invoke();
+                              });
                       return callback.apply(wrapped);
                     });
               }
@@ -200,17 +198,15 @@ class HarnessRuntimeStopWorkOrderTest {
                 return delegate.transaction(
                     tx -> {
                       HarnessStore.Transaction wrapped =
-                          (HarnessStore.Transaction)
-                              Proxy.newProxyInstance(
-                                  HarnessStore.Transaction.class.getClassLoader(),
-                                  new Class<?>[] {BuiltinStore.Transaction.class},
-                                  (transactionProxy, transactionMethod, transactionArgs) -> {
-                                    if (transactionMethod.getName().equals("deleteWork")
-                                        && deletes.incrementAndGet() == 2) {
-                                      throw new IllegalStateException("second delete failed");
-                                    }
-                                    return transactionMethod.invoke(tx, transactionArgs);
-                                  });
+                          wrap(
+                              tx,
+                              (call, next) -> {
+                                if (call.operation().equals("work.delete")
+                                    && deletes.incrementAndGet() == 2) {
+                                  throw new IllegalStateException("second delete failed");
+                                }
+                                return next.invoke();
+                              });
                       return callback.apply(wrapped);
                     });
               }

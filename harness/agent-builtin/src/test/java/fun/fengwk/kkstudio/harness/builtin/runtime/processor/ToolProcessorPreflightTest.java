@@ -285,17 +285,17 @@ class ToolProcessorPreflightTest {
           ops.stream()
               .anyMatch(
                   op ->
-                      op.startsWith("lockTree")
-                          || op.startsWith("findAncestorChain")
-                          || op.startsWith("lockSession")),
+                      op.startsWith("threads.lockTree")
+                          || op.startsWith("threads.findAncestorChain")
+                          || op.startsWith("sessions.lock")),
           "processor must not take tree/session/ancestor locks: " + ops);
-      assertEquals("lockThread:" + fixture.baseline.threadId(), ops.get(0));
+      assertEquals("threads.lock:" + fixture.baseline.threadId(), ops.get(0));
       assertTrue(
           ops.stream()
-              .filter(op -> op.startsWith("lockThread:"))
-              .allMatch(op -> op.equals("lockThread:" + fixture.baseline.threadId())));
-      int tool = indexOfPrefix(ops, "lockToolInvocation:");
-      int work = indexOfPrefix(ops, "lockClaimedWork");
+              .filter(op -> op.startsWith("threads.lock:"))
+              .allMatch(op -> op.equals("threads.lock:" + fixture.baseline.threadId())));
+      int tool = indexOfPrefix(ops, "tools.lock:");
+      int work = indexOfPrefix(ops, "work.lockClaimed");
       assertTrue(tool > 0, "own Thread must precede Tool: " + ops);
       assertTrue(work > tool, "Tool must precede Work: " + ops);
       if (indexOfPrefix(ops, "lockModelInvocation:") >= 0) {
@@ -309,8 +309,8 @@ class ToolProcessorPreflightTest {
             .flatMap(List::stream)
             .anyMatch(
                 op ->
-                    op.equals("lockThread:" + child.rootThreadId())
-                        || op.equals("lockThread:" + child.parentThreadId())),
+                    op.equals("threads.lock:" + child.rootThreadId())
+                        || op.equals("threads.lock:" + child.parentThreadId())),
         "child processor must not lock its execution root or parent");
   }
 
@@ -1270,7 +1270,8 @@ class ToolProcessorPreflightTest {
       boolean reclaimable =
           fixture.store.transaction(
               tx ->
-                  tx.claimNextWork(WorkTargetType.TOOL, "token-new", Duration.ofSeconds(30))
+                  tx.work()
+                      .claimNext(WorkTargetType.TOOL, "token-new", Duration.ofSeconds(30))
                       .isPresent());
       assertTrue(
           reclaimable, "abandoned execution must allow Work to be reclaimed after lease expiry");
