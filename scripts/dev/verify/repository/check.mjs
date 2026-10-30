@@ -443,7 +443,7 @@ const moduleDependencies = {
   common: [],
   schema: [],
   share: [],
-  work: [],
+  work: ['common'],
   'harness/environment': ['common'],
   'harness/model': [],
   'harness/runtime': ['common', 'harness-environment', 'harness-model'],
