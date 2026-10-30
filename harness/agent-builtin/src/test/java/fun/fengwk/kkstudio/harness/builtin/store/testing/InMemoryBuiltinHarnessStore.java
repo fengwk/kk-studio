@@ -30,7 +30,9 @@ import java.util.UUID;
 public final class InMemoryBuiltinHarnessStore extends InMemoryHarnessStore
     implements BuiltinStore {
 
-  private static final String GROUP_COOLDOWN_PREFIX = "builtin.group.cooldown:";
+  /** group 成员冷却身份；typed key 避免字段拼接导致不同成员身份碰撞。 */
+  private record GroupCooldownKey(
+      String groupName, long groupVersion, String memberModelName, String memberVariant) {}
 
   public InMemoryBuiltinHarnessStore() {
     super();
@@ -95,8 +97,7 @@ public final class InMemoryBuiltinHarnessStore extends InMemoryHarnessStore
       requireMillisecondPrecision(invocation.createdAt());
       requireMillisecondPrecision(invocation.updatedAt());
       if (findDriverRow(invocation.id()).isPresent()) {
-        throw new IllegalArgumentException(
-            "model invocation " + invocation.id() + " already exists");
+        throw new IllegalArgumentException("duplicate model invocation id " + invocation.id());
       }
       requireUniqueModelTurn(invocation);
       ThreadState thread =
@@ -105,6 +106,7 @@ public final class InMemoryBuiltinHarnessStore extends InMemoryHarnessStore
                   () ->
                       new IllegalArgumentException(
                           "thread " + invocation.threadId() + " does not exist"));
+      requireThreadLocked(invocation.threadId());
       Entry turnStart =
           findEntry(invocation.turnStartEntryId())
               .orElseThrow(
@@ -223,6 +225,7 @@ public final class InMemoryBuiltinHarnessStore extends InMemoryHarnessStore
       Objects.requireNonNull(invocation, "invocation");
       requireMillisecondPrecision(invocation.createdAt());
       requireMillisecondPrecision(invocation.updatedAt());
+      requireDriverRowLocked(invocation.id());
       ModelInvocation stored =
           findDriverRow(invocation.id())
               .map(ModelInvocation.class::cast)
@@ -243,7 +246,8 @@ public final class InMemoryBuiltinHarnessStore extends InMemoryHarnessStore
     public boolean isGroupMemberCooling(
         String groupName, long groupVersion, String memberModelName, String memberVariant) {
       Instant now = now();
-      return driverAttribute(groupKey(groupName, groupVersion, memberModelName, memberVariant))
+      return driverAttribute(
+              new GroupCooldownKey(groupName, groupVersion, memberModelName, memberVariant))
           .map(Instant.class::cast)
           .map(until -> until.isAfter(now))
           .orElse(false);
@@ -256,7 +260,8 @@ public final class InMemoryBuiltinHarnessStore extends InMemoryHarnessStore
         String memberModelName,
         String memberVariant,
         Instant cooldownUntil) {
-      String key = groupKey(groupName, groupVersion, memberModelName, memberVariant);
+      GroupCooldownKey key =
+          new GroupCooldownKey(groupName, groupVersion, memberModelName, memberVariant);
       Instant existing = driverAttribute(key).map(Instant.class::cast).orElse(null);
       if (existing == null || existing.isBefore(cooldownUntil)) {
         putDriverAttribute(key, cooldownUntil);
@@ -272,6 +277,7 @@ public final class InMemoryBuiltinHarnessStore extends InMemoryHarnessStore
                   () ->
                       new IllegalArgumentException(
                           "model invocation " + modelInvocationId + " does not exist"));
+      requireDriverRowLocked(modelInvocationId);
       ThreadState thread =
           findThread(model.threadId())
               .orElseThrow(() -> new IllegalArgumentException("thread does not exist"));
@@ -285,24 +291,6 @@ public final class InMemoryBuiltinHarnessStore extends InMemoryHarnessStore
         }
       }
       return deleteDriverRow(modelInvocationId);
-    }
-
-    private static String groupKey(
-        String groupName, long groupVersion, String memberModelName, String memberVariant) {
-      return GROUP_COOLDOWN_PREFIX
-          + groupName
-          + ':'
-          + groupVersion
-          + ':'
-          + memberModelName
-          + ':'
-          + memberVariant;
-    }
-
-    private static void requireMillisecondPrecision(Instant instant) {
-      if (instant.getNano() % 1_000_000 != 0) {
-        throw new IllegalArgumentException("timestamps must have millisecond precision");
-      }
     }
   }
 
