@@ -12,6 +12,7 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.JsonNodeFactory;
 
+import fun.fengwk.kkstudio.harness.builtin.request.ProviderMessageProjector;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
@@ -40,7 +41,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.thread.ProviderMessageProjector;
 
 import java.net.http.HttpClient;
 import java.time.Duration;

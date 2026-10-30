@@ -13,11 +13,11 @@ import java.util.UUID;
 
 /**
  * 一次 turn 的不可变内存计划：在同一 store transaction 内锁 Thread、读取 queued Command 快照与 cutoff、校验 claim
- * 后构造，随即在同一事务内交给 {@link fun.fengwk.kkstudio.harness.runtime.port.TurnResolver} 并提交。它不写任何 durable
+ * 后构造，随即在同一事务内交给 {@link fun.fengwk.kkstudio.harness.runtime.driver.AgentDriver} 并提交。它不写任何 durable
  * 状态，也不存在事务外解析或第二次 CAS。
  *
  * <p>{@code candidatePath} 是 source path + candidate Entries 的完整合法 root-to-head 链（candidate Entry
- * 已分配稳定 ID 但尚未持久化），交给 {@link fun.fengwk.kkstudio.harness.runtime.port.TurnResolver} 使用；解析完成后
+ * 已分配稳定 ID 但尚未持久化），交给 {@link fun.fengwk.kkstudio.harness.runtime.driver.AgentDriver} 使用；解析完成后
  * 直接在当前事务内原子提交。Thread YOLO 取自同一事务已锁定的当前值，不进入 plan。{@code preparation} 非空当且仅当 {@code reason ==
  * COMPACTION}。
  *

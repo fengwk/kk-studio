@@ -36,6 +36,8 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
 
 import fun.fengwk.kkstudio.common.json.JsonValues;
+import fun.fengwk.kkstudio.harness.builtin.model.ModelInvocation;
+import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException.Reason;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
@@ -46,8 +48,6 @@ import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.interaction.PendingInteraction;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;

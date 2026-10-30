@@ -666,6 +666,7 @@ const packageDocumentedModules = {
   'harness/environment': 'docs/modules/harness-environment.md',
   'harness/model': 'docs/modules/harness-model.md',
   'harness/runtime': 'docs/modules/harness-runtime.md',
+  'harness/agent-builtin': 'docs/modules/harness-agent-builtin.md',
   'harness/infra': 'docs/modules/harness-infra.md',
 }
 
@@ -714,6 +715,53 @@ function productionPackages(modulePath) {
       },
     ]
   })
+}
+
+// 由 P1 移除：仅允许 plugin-api 与 platform/runtime 暂时共享这三个包。
+const temporaryP1SharedMainPackages = new Set([
+  'fun.fengwk.kkstudio.platform.plugin',
+  'fun.fengwk.kkstudio.platform.plugin.credential',
+  'fun.fengwk.kkstudio.platform.plugin.resource',
+])
+
+function checkUniqueMainPackages() {
+  const owners = new Map()
+  function visitModule(modulePath) {
+    const pomPath = path.join(modulePath, 'pom.xml')
+    if (!existsSync(path.join(repositoryRoot, pomPath))) {
+      return
+    }
+    const sourceRoot = path.join(repositoryRoot, modulePath, 'src/main/java')
+    for (const file of walkFiles(sourceRoot).filter((file) => file.endsWith('.java'))) {
+      const match = readFileSync(file, 'utf8').match(/^\s*package\s+([\w.]+)\s*;/mu)
+      if (!match) {
+        continue
+      }
+      const name = match[1]
+      if (!owners.has(name)) {
+        owners.set(name, new Set())
+      }
+      owners.get(name).add(modulePath || '.')
+    }
+    for (const match of read(pomPath).matchAll(/<module>\s*([^<]+?)\s*<\/module>/gu)) {
+      visitModule(path.join(modulePath, match[1]))
+    }
+  }
+  visitModule('')
+  for (const [name, modules] of owners) {
+    if (modules.size < 2) {
+      continue
+    }
+    if (
+      temporaryP1SharedMainPackages.has(name) &&
+      modules.size === 2 &&
+      modules.has('platform/plugin-api') &&
+      modules.has('platform/runtime')
+    ) {
+      continue
+    }
+    addError(`Java main package shared across Maven modules: ${name} (${[...modules].sort().join(', ')})`)
+  }
 }
 
 function checkPackageInfo() {
@@ -826,6 +874,7 @@ checkLinks()
 checkInlineSourcePaths()
 checkForbiddenReferencesAndTerms()
 checkModuleBoundaries()
+checkUniqueMainPackages()
 checkNoHarnessModuleDocs()
 checkPackageInfo()
 checkPackageArchitectureDocs()
