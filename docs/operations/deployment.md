@@ -507,6 +507,11 @@ Logback 配置与运行环境共同决定。排查时先看 `docker logs vps-kk-
 共享 PostgreSQL 与 S3/MinIO 已在各自容器持久化；App 的媒体转码与上传暂存目录仍是可清理的临时空间，
 不应挂成跨容器重启保留的数据卷。
 
+当同一数据库运行多个 App 时，每个节点必须配置其它节点可达的 `kk-studio.cluster.internal-url` 和相同的
+`kk-studio.cluster.secret`。节点用既有 15 秒心跳续租 `cluster_node` 与 `realtime_subscription`，租约 45 秒过期；
+只有某个 Thread 在其它节点存在有效订阅时，该 Thread 的普通 realtime 才写 NOTIFY。正常退出删除本节点订阅，
+异常退出由租约到期收敛；未配置内部 origin/secret 的节点保持单节点模式，不登记订阅，也不发布 realtime NOTIFY。
+
 ### 本机 preview 与 NAS 数据面
 
 前端与同步 API 的日常开发在笔记本上进行：[scripts/dev/shared-preview.sh](../../scripts/dev/shared-preview.sh)
