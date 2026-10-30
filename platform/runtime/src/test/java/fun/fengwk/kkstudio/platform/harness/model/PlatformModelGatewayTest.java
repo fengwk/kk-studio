@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.harness.model.ModelPricingCondition;
 import fun.fengwk.kkstudio.harness.model.ModelRequestBodyPricing;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.RequestBodyPricingSnapshot;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
@@ -333,14 +334,19 @@ class PlatformModelGatewayTest {
     assertNull(second.completion().response().requestBodyPricing());
   }
 
-  /** 未实现观察回调的 adapter 不产生定价事实；伪造的 completion 快照不会被 gateway 保留。 */
+  /** 未实现观察回调的 adapter 不产生定价事实；伪造的 completion 快照会被 gateway 清除。 */
   @Test
   void missingObservationStaysUnknown() {
+    ModelPricingCondition.RequestBody condition =
+        ModelPricingCondition.RequestBody.stringValue("/speed", "fast");
+    String fingerprint = ModelRequestBodyPricing.fingerprint(condition);
+    ProviderResponse forged =
+        response()
+            .withRequestBodyPricing(new RequestBodyPricingSnapshot(Map.of(fingerprint, true)));
     PlatformModelGateway gateway =
         new PlatformModelGateway(
             new Resolution(
-                scripted(
-                    (request, handler) -> handler.onComplete(new ProviderCompletion(response())))),
+                scripted((request, handler) -> handler.onComplete(new ProviderCompletion(forged)))),
             () -> BUSY_DELAY,
             new ConcurrencyAdmission(1),
             modelName ->
@@ -351,14 +357,7 @@ class PlatformModelGatewayTest {
                             new ModelPricing.Override(
                                 "fast",
                                 new ModelPricingCondition(
-                                    null,
-                                    null,
-                                    null,
-                                    null,
-                                    ModelPricingCondition.RequestBody.stringValue("/speed", "fast"),
-                                    null,
-                                    null,
-                                    null),
+                                    null, null, null, null, condition, null, null, null),
                                 new ModelPricing.RatePatch(
                                     BigDecimal.ONE, null, null, null, null, null, false))),
                         List.of())));

@@ -11,13 +11,11 @@ import tools.jackson.databind.cfg.JsonNodeFeature;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.model.ModelPricingCondition.RequestBody;
-import fun.fengwk.kkstudio.harness.model.ModelPricingCondition.ScalarType;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -202,14 +200,5 @@ public final class ModelRequestBodyPricing {
     } catch (NumberFormatException error) {
       return -1;
     }
-  }
-
-  /** 供 UI/文档使用的类型名集合，顺序稳定。 */
-  public static List<String> scalarTypeNames() {
-    List<String> names = new ArrayList<>(ScalarType.values().length);
-    for (ScalarType type : ScalarType.values()) {
-      names.add(type.wireName());
-    }
-    return List.copyOf(names);
   }
 }

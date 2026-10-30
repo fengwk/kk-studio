@@ -198,12 +198,13 @@ public final class PlatformModelGateway implements ModelGateway {
         return;
       }
       ProviderResponse response = completion.response();
-      ProviderCompletion observed =
-          requestBodyPricing == null
-              ? completion
-              : new ProviderCompletion(
-                  response.withRequestBodyPricing(requestBodyPricing), completion.replayState());
-      outcome = new Succeeded(observed);
+      ProviderResponse observedResponse = response.withRequestBodyPricing(requestBodyPricing);
+      // 观察回调是唯一权威：adapter 自行注入的快照即使在缺失观察时也必须被清除；相同响应保留 completion 身份。
+      outcome =
+          new Succeeded(
+              observedResponse == response
+                  ? completion
+                  : new ProviderCompletion(observedResponse, completion.replayState()));
     }
 
     @Override
