@@ -157,11 +157,12 @@ public abstract class HarnessRuntimeThreadTreeContract {
     assertThrows(
         HarnessRuntimeNotFoundException.class, () -> runtime.getThreadTree(TestIds.id(999)));
     TreeFixture tree = seedCrossSessionTree(store);
-    long version = store.transaction(tx -> tx.findThread(tree.rootId()).orElseThrow().version());
+    long version =
+        store.transaction(tx -> tx.threads().find(tree.rootId()).orElseThrow().version());
 
     runtime.getThreadTree(tree.childId());
 
-    long after = store.transaction(tx -> tx.findThread(tree.rootId()).orElseThrow().version());
+    long after = store.transaction(tx -> tx.threads().find(tree.rootId()).orElseThrow().version());
     assertEquals(version, after);
   }
 
@@ -308,42 +309,45 @@ public abstract class HarnessRuntimeThreadTreeContract {
         store.transaction(
             tx -> {
               UUID rootEntry = insertRoot(tx, rootSession);
-              tx.insertThread(
-                  thread(
-                      rootId,
-                      rootSession,
-                      null,
-                      rootEntry,
-                      "root",
-                      T0,
-                      ThreadExecutionControl.RUNNABLE,
-                      null));
-              tx.insertThread(
-                  thread(
-                      unrelatedId,
-                      rootSession,
-                      null,
-                      rootEntry,
-                      "other",
-                      T0,
-                      ThreadExecutionControl.RUNNABLE,
-                      null));
+              tx.threads()
+                  .insert(
+                      thread(
+                          rootId,
+                          rootSession,
+                          null,
+                          rootEntry,
+                          "root",
+                          T0,
+                          ThreadExecutionControl.RUNNABLE,
+                          null));
+              tx.threads()
+                  .insert(
+                      thread(
+                          unrelatedId,
+                          rootSession,
+                          null,
+                          rootEntry,
+                          "other",
+                          T0,
+                          ThreadExecutionControl.RUNNABLE,
+                          null));
               return rootEntry;
             });
     UUID earlyEndId =
         store.transaction(
             tx -> {
               UUID end = insertFailedTurn(tx, rootSession, rootEntryId, earlySiblingId);
-              tx.insertThread(
-                  thread(
-                      earlySiblingId,
-                      rootSession,
-                      rootId,
-                      end,
-                      "early",
-                      T2,
-                      ThreadExecutionControl.RUNNABLE,
-                      rootId));
+              tx.threads()
+                  .insert(
+                      thread(
+                          earlySiblingId,
+                          rootSession,
+                          rootId,
+                          end,
+                          "early",
+                          T2,
+                          ThreadExecutionControl.RUNNABLE,
+                          rootId));
               return end;
             });
     // 每次种子事务只写一个后代，避免 Thread/Model/Tool 锁序跨节点倒退。
@@ -354,11 +358,11 @@ public abstract class HarnessRuntimeThreadTreeContract {
   }
 
   private static UUID insertRoot(HarnessStore.Transaction tx, UUID sessionId) {
-    if (tx.findSession(sessionId).isEmpty()) {
-      tx.insertSession(session(sessionId));
+    if (tx.sessions().find(sessionId).isEmpty()) {
+      tx.sessions().insert(session(sessionId));
     }
     UUID rootId = tx.nextId();
-    tx.insertEntry(rootEntry(rootId, sessionId));
+    tx.entries().insert(rootEntry(rootId, sessionId));
     return rootId;
   }
 
@@ -368,18 +372,20 @@ public abstract class HarnessRuntimeThreadTreeContract {
     UUID userId = tx.nextId();
     UUID errorId = tx.nextId();
     UUID endId = tx.nextId();
-    tx.insertEntry(
-        turn(startId, sessionId, rootEntryId, T1, TurnStartReason.INPUT, settings(), ownerId));
-    tx.insertEntry(user(userId, sessionId, startId, T1));
-    tx.insertEntry(error(errorId, sessionId, userId, T2));
-    tx.insertEntry(
-        new Entry(
-            endId,
-            sessionId,
-            errorId,
-            new TurnEndPayload(
-                startId, TurnEndOutcome.FAILED, false, TurnEndReason.TURN_FAILED, null),
-            T2));
+    tx.entries()
+        .insert(
+            turn(startId, sessionId, rootEntryId, T1, TurnStartReason.INPUT, settings(), ownerId));
+    tx.entries().insert(user(userId, sessionId, startId, T1));
+    tx.entries().insert(error(errorId, sessionId, userId, T2));
+    tx.entries()
+        .insert(
+            new Entry(
+                endId,
+                sessionId,
+                errorId,
+                new TurnEndPayload(
+                    startId, TurnEndOutcome.FAILED, false, TurnEndReason.TURN_FAILED, null),
+                T2));
     return endId;
   }
 
@@ -391,17 +397,18 @@ public abstract class HarnessRuntimeThreadTreeContract {
       UUID rootThreadId) {
     UUID rootId = insertRoot(tx, sessionId);
     UUID startId = tx.nextId();
-    tx.insertEntry(turnStartEntry(startId, sessionId, rootId, T1, threadId));
-    tx.insertThread(
-        thread(
-            threadId,
-            sessionId,
-            parentId,
-            startId,
-            "child",
-            T1,
-            ThreadExecutionControl.RUNNABLE,
-            rootThreadId));
+    tx.entries().insert(turnStartEntry(startId, sessionId, rootId, T1, threadId));
+    tx.threads()
+        .insert(
+            thread(
+                threadId,
+                sessionId,
+                parentId,
+                startId,
+                "child",
+                T1,
+                ThreadExecutionControl.RUNNABLE,
+                rootThreadId));
     UUID modelId = tx.nextId();
     ModelInvocation model = modelInvocation(modelId, threadId, startId, startId, T1);
     builtin(tx).insertModelInvocation(model);
@@ -419,11 +426,12 @@ public abstract class HarnessRuntimeThreadTreeContract {
     UUID startId = tx.nextId();
     UUID userId = tx.nextId();
     UUID assistantId = tx.nextId();
-    tx.insertEntry(turnStartEntry(startId, sessionId, rootId, T1, threadId));
-    tx.insertEntry(userMessageEntry(userId, sessionId, startId, T1));
+    tx.entries().insert(turnStartEntry(startId, sessionId, rootId, T1, threadId));
+    tx.entries().insert(userMessageEntry(userId, sessionId, startId, T1));
     ModelRequestSpec request = tooledModelRequest(List.of("bash"));
     ProviderResponse response = responseWithToolCalls("call-1");
-    tx.insertEntry(mappedAssistantEntry(assistantId, sessionId, userId, T1, request, response));
+    tx.entries()
+        .insert(mappedAssistantEntry(assistantId, sessionId, userId, T1, request, response));
     ThreadState thread =
         thread(
             threadId,
@@ -434,7 +442,7 @@ public abstract class HarnessRuntimeThreadTreeContract {
             T1,
             ThreadExecutionControl.RUNNABLE,
             rootThreadId);
-    tx.insertThread(thread);
+    tx.threads().insert(thread);
     UUID modelId = tx.nextId();
     ModelInvocation model =
         modelInvocationWithRequest(modelId, threadId, startId, startId, request, T1);
@@ -445,9 +453,9 @@ public abstract class HarnessRuntimeThreadTreeContract {
     builtin(tx).updateModelInvocation(succeeded.attachResultEntry(assistantId, T2));
     UUID toolId = tx.nextId();
     ToolInvocation ready = toolInvocation(toolId, threadId, startId, assistantId, 0, "call-1", T1);
-    tx.insertToolInvocations(List.of(ready));
-    tx.updateToolInvocations(List.of(ready.requestApproval("need approval", T2)));
-    tx.updateThread(thread.advanceHead(assistantId, T2));
+    tx.tools().insert(List.of(ready));
+    tx.tools().update(List.of(ready.requestApproval("need approval", T2)));
+    tx.threads().update(thread.advanceHead(assistantId, T2));
     return assistantId;
   }
 
@@ -477,113 +485,138 @@ public abstract class HarnessRuntimeThreadTreeContract {
     UUID resumeEnd = TestIds.id(21);
     store.transaction(
         tx -> {
-          tx.insertSession(session(sessionId));
-          tx.insertEntry(rootEntry(rootId, sessionId));
-          tx.insertEntry(
-              turn(inputStart, sessionId, rootId, T1, TurnStartReason.INPUT, settings(), threadId));
-          tx.insertEntry(user(userId, sessionId, inputStart, T1));
-          tx.insertEntry(assistantEntry(assistantId, sessionId, userId, T1, "call-1", "call-2"));
-          tx.insertEntry(toolResult(firstResult, sessionId, assistantId, assistantId, 0, "call-1"));
-          tx.insertEntry(
-              toolResult(secondResult, sessionId, firstResult, assistantId, 1, "call-2"));
-          tx.insertEntry(
-              new Entry(
-                  inputEnd,
-                  sessionId,
-                  secondResult,
-                  new TurnEndPayload(inputStart, TurnEndOutcome.COMPLETED, false, null, null),
-                  T1));
-          tx.insertEntry(
-              turn(
-                  abandonedStart,
-                  sessionId,
-                  inputEnd,
-                  T1,
-                  TurnStartReason.INPUT,
-                  settings(),
-                  threadId));
-          tx.insertEntry(
-              turn(
-                  continuationStart,
-                  sessionId,
-                  inputEnd,
-                  T1,
-                  TurnStartReason.CONTINUATION,
-                  settings(),
-                  threadId));
-          tx.insertEntry(assistantEntry(continuationAssistant, sessionId, continuationStart, T2));
-          tx.insertEntry(
-              new Entry(
-                  continuationEnd,
-                  sessionId,
-                  continuationAssistant,
-                  new TurnEndPayload(
-                      continuationStart, TurnEndOutcome.COMPLETED, false, null, null),
-                  T2));
-          tx.insertEntry(
-              compactionTurn(compactionStart, sessionId, continuationEnd, T2, threadId, userId));
-          tx.insertEntry(
-              new Entry(
-                  compactionBody,
-                  sessionId,
-                  compactionStart,
-                  new CompactionPayload("summary", null),
-                  T2));
-          tx.insertEntry(
-              new Entry(
-                  compactionEnd,
-                  sessionId,
-                  compactionBody,
-                  new TurnEndPayload(compactionStart, TurnEndOutcome.COMPLETED, false, null, null),
-                  T2));
-          tx.insertEntry(
-              turn(
-                  stopStart,
-                  sessionId,
-                  compactionEnd,
-                  T2,
-                  TurnStartReason.STOP,
-                  settings(),
-                  threadId));
-          tx.insertEntry(
-              new Entry(
-                  stopError,
-                  sessionId,
-                  stopStart,
-                  new AssistantErrorPayload(
-                      new AssistantError(AssistantError.CANCELLED_CODE, "cancelled"), null),
-                  T2));
-          tx.insertEntry(
-              new Entry(
-                  stopEnd,
-                  sessionId,
-                  stopError,
-                  new TurnEndPayload(
+          tx.sessions().insert(session(sessionId));
+          tx.entries().insert(rootEntry(rootId, sessionId));
+          tx.entries()
+              .insert(
+                  turn(
+                      inputStart,
+                      sessionId,
+                      rootId,
+                      T1,
+                      TurnStartReason.INPUT,
+                      settings(),
+                      threadId));
+          tx.entries().insert(user(userId, sessionId, inputStart, T1));
+          tx.entries()
+              .insert(assistantEntry(assistantId, sessionId, userId, T1, "call-1", "call-2"));
+          tx.entries()
+              .insert(toolResult(firstResult, sessionId, assistantId, assistantId, 0, "call-1"));
+          tx.entries()
+              .insert(toolResult(secondResult, sessionId, firstResult, assistantId, 1, "call-2"));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      inputEnd,
+                      sessionId,
+                      secondResult,
+                      new TurnEndPayload(inputStart, TurnEndOutcome.COMPLETED, false, null, null),
+                      T1));
+          tx.entries()
+              .insert(
+                  turn(
+                      abandonedStart,
+                      sessionId,
+                      inputEnd,
+                      T1,
+                      TurnStartReason.INPUT,
+                      settings(),
+                      threadId));
+          tx.entries()
+              .insert(
+                  turn(
+                      continuationStart,
+                      sessionId,
+                      inputEnd,
+                      T1,
+                      TurnStartReason.CONTINUATION,
+                      settings(),
+                      threadId));
+          tx.entries()
+              .insert(assistantEntry(continuationAssistant, sessionId, continuationStart, T2));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      continuationEnd,
+                      sessionId,
+                      continuationAssistant,
+                      new TurnEndPayload(
+                          continuationStart, TurnEndOutcome.COMPLETED, false, null, null),
+                      T2));
+          tx.entries()
+              .insert(
+                  compactionTurn(
+                      compactionStart, sessionId, continuationEnd, T2, threadId, userId));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      compactionBody,
+                      sessionId,
+                      compactionStart,
+                      new CompactionPayload("summary", null),
+                      T2));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      compactionEnd,
+                      sessionId,
+                      compactionBody,
+                      new TurnEndPayload(
+                          compactionStart, TurnEndOutcome.COMPLETED, false, null, null),
+                      T2));
+          tx.entries()
+              .insert(
+                  turn(
                       stopStart,
-                      TurnEndOutcome.STOPPED,
-                      false,
-                      TurnEndReason.USER_STOP,
-                      TestIds.id(20)),
-                  T2));
-          tx.insertEntry(
-              turn(
-                  resumeStart,
-                  sessionId,
-                  stopEnd,
-                  T2,
-                  TurnStartReason.INPUT,
-                  settings(),
-                  threadId));
-          tx.insertEntry(user(resumeUser, sessionId, resumeStart, T2));
-          tx.insertEntry(assistantEntry(resumeAssistant, sessionId, resumeUser, T2));
-          tx.insertEntry(
-              new Entry(
-                  resumeEnd,
-                  sessionId,
-                  resumeAssistant,
-                  new TurnEndPayload(resumeStart, TurnEndOutcome.COMPLETED, false, null, null),
-                  T3));
-          tx.insertThread(idle(threadId, sessionId, null, resumeEnd, "counted", T0));
+                      sessionId,
+                      compactionEnd,
+                      T2,
+                      TurnStartReason.STOP,
+                      settings(),
+                      threadId));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      stopError,
+                      sessionId,
+                      stopStart,
+                      new AssistantErrorPayload(
+                          new AssistantError(AssistantError.CANCELLED_CODE, "cancelled"), null),
+                      T2));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      stopEnd,
+                      sessionId,
+                      stopError,
+                      new TurnEndPayload(
+                          stopStart,
+                          TurnEndOutcome.STOPPED,
+                          false,
+                          TurnEndReason.USER_STOP,
+                          TestIds.id(20)),
+                      T2));
+          tx.entries()
+              .insert(
+                  turn(
+                      resumeStart,
+                      sessionId,
+                      stopEnd,
+                      T2,
+                      TurnStartReason.INPUT,
+                      settings(),
+                      threadId));
+          tx.entries().insert(user(resumeUser, sessionId, resumeStart, T2));
+          tx.entries().insert(assistantEntry(resumeAssistant, sessionId, resumeUser, T2));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      resumeEnd,
+                      sessionId,
+                      resumeAssistant,
+                      new TurnEndPayload(resumeStart, TurnEndOutcome.COMPLETED, false, null, null),
+                      T3));
+          tx.threads().insert(idle(threadId, sessionId, null, resumeEnd, "counted", T0));
           return null;
         });
     return threadId;

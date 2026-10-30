@@ -64,16 +64,17 @@ class PostgresqlThreadProcessorReplayTest {
     UUID userId =
         store.transaction(
             tx -> {
-              var thread = tx.lockThread(baseline.threadId()).orElseThrow();
+              var thread = tx.threads().lock(baseline.threadId()).orElseThrow();
               UUID id = tx.nextId();
-              tx.insertEntry(
-                  new Entry(
-                      id,
-                      baseline.sessionId(),
-                      baseline.turnStartEntryId(),
-                      StoreTestSupport.userMessagePayload(),
-                      T2));
-              tx.updateThread(thread.advanceHead(id, T2));
+              tx.entries()
+                  .insert(
+                      new Entry(
+                          id,
+                          baseline.sessionId(),
+                          baseline.turnStartEntryId(),
+                          StoreTestSupport.userMessagePayload(),
+                          T2));
+              tx.threads().update(thread.advanceHead(id, T2));
               return id;
             });
 
@@ -94,7 +95,7 @@ class PostgresqlThreadProcessorReplayTest {
     UUID modelId =
         store.transaction(
             tx -> {
-              tx.lockThread(baseline.threadId()).orElseThrow();
+              tx.threads().lock(baseline.threadId()).orElseThrow();
               UUID id = tx.nextId();
               builtin(tx)
                   .insertModelInvocation(
@@ -123,60 +124,66 @@ class PostgresqlThreadProcessorReplayTest {
     UUID assistantId =
         store.transaction(
             tx -> {
-              var thread = tx.lockThread(baseline.threadId()).orElseThrow();
+              var thread = tx.threads().lock(baseline.threadId()).orElseThrow();
               var model = builtin(tx).lockModelInvocation(modelId).orElseThrow();
               UUID id = tx.nextId();
-              tx.insertEntry(
-                  new Entry(
-                      id,
-                      baseline.sessionId(),
-                      userId,
-                      mappedAssistant(request, response),
-                      T3,
-                      replay));
+              tx.entries()
+                  .insert(
+                      new Entry(
+                          id,
+                          baseline.sessionId(),
+                          userId,
+                          mappedAssistant(request, response),
+                          T3,
+                          replay));
               builtin(tx).updateModelInvocation(model.attachResultEntry(id, T3));
-              tx.updateThread(thread.advanceHead(id, T3));
-              tx.insertToolInvocations(
-                  List.of(
-                      StoreTestSupport.toolInvocation(
-                          tx.nextId(),
-                          baseline.threadId(),
-                          baseline.turnStartEntryId(),
-                          id,
-                          0,
-                          "call-0",
-                          ToolInvocationStatus.READY,
-                          T3),
-                      StoreTestSupport.toolInvocation(
-                          tx.nextId(),
-                          baseline.threadId(),
-                          baseline.turnStartEntryId(),
-                          id,
-                          1,
-                          "call-1",
-                          ToolInvocationStatus.READY,
-                          T3)));
+              tx.threads().update(thread.advanceHead(id, T3));
+              tx.tools()
+                  .insert(
+                      List.of(
+                          StoreTestSupport.toolInvocation(
+                              tx.nextId(),
+                              baseline.threadId(),
+                              baseline.turnStartEntryId(),
+                              id,
+                              0,
+                              "call-0",
+                              ToolInvocationStatus.READY,
+                              T3),
+                          StoreTestSupport.toolInvocation(
+                              tx.nextId(),
+                              baseline.threadId(),
+                              baseline.turnStartEntryId(),
+                              id,
+                              1,
+                              "call-1",
+                              ToolInvocationStatus.READY,
+                              T3)));
               return id;
             });
 
     // 模拟两个远端工具已持久化 SUCCEEDED：一个线程 claim 必须原子物化全部结果并重新唤醒 continuation。
     store.transaction(
         tx -> {
-          tx.lockThread(baseline.threadId()).orElseThrow();
-          List<ToolInvocation> siblings = tx.lockToolInvocationsByAssistantEntryId(assistantId);
+          tx.threads().lock(baseline.threadId()).orElseThrow();
+          List<ToolInvocation> siblings = tx.tools().lockByAssistantEntry(assistantId);
           for (ToolInvocation sibling : siblings) {
             var ready = sibling.markApprovalNotRequired(T3);
-            tx.updateToolInvocations(List.of(ready));
+            tx.tools().update(List.of(ready));
             var running = ready.markRunning(T3);
-            tx.updateToolInvocations(List.of(running));
-            tx.updateToolInvocations(
-                List.of(
-                    running.succeed(
-                        new ToolResult(
-                            sibling.call().id(), List.of(new TextResultContent("ok")), false, "{}"),
-                        T3)));
+            tx.tools().update(List.of(running));
+            tx.tools()
+                .update(
+                    List.of(
+                        running.succeed(
+                            new ToolResult(
+                                sibling.call().id(),
+                                List.of(new TextResultContent("ok")),
+                                false,
+                                "{}"),
+                            T3)));
           }
-          tx.requestWork(target);
+          tx.work().request(target);
           return null;
         });
     assertNull(
@@ -184,7 +191,8 @@ class PostgresqlThreadProcessorReplayTest {
             tx -> builtin(tx).findModelInvocation(modelId).orElseThrow().providerReplayState()));
     assertEquals(
         replay,
-        store.transaction(tx -> tx.findEntry(assistantId).orElseThrow().providerReplayState()));
+        store.transaction(
+            tx -> tx.entries().find(assistantId).orElseThrow().providerReplayState()));
 
     TurnResolver resolver =
         (threadId, path, preparation) ->
@@ -201,14 +209,16 @@ class PostgresqlThreadProcessorReplayTest {
           store
               .transaction(
                   tx ->
-                      tx.claimNextWork(
-                          WorkTargetType.THREAD, "first-claim", Duration.ofSeconds(30)))
+                      tx.work()
+                          .claimNext(WorkTargetType.THREAD, "first-claim", Duration.ofSeconds(30)))
               .orElseThrow();
       assertEquals(ThreadProcessResult.COMPLETED, processor.process(first));
       var applied =
           store.transaction(
               tx ->
-                  tx.loadEntryPath(tx.findThread(baseline.threadId()).orElseThrow().headEntryId()));
+                  tx.entries()
+                      .loadPath(
+                          tx.threads().find(baseline.threadId()).orElseThrow().headEntryId()));
       List<ToolResultMetadata> results =
           applied.entries().stream()
               .filter(
@@ -224,27 +234,29 @@ class PostgresqlThreadProcessorReplayTest {
       assertEquals(TurnEndOutcome.COMPLETED, batchEnd.outcome());
       assertTrue(batchEnd.continueModel());
       assertTrue(store.transaction(tx -> builtin(tx).findModelInvocation(modelId)).isEmpty());
-      assertTrue(
-          store.transaction(tx -> tx.loadToolInvocationsByAssistantEntryId(assistantId)).isEmpty());
-      assertTrue(store.transaction(tx -> tx.findWork(target)).isPresent());
+      assertTrue(store.transaction(tx -> tx.tools().loadByAssistantEntry(assistantId)).isEmpty());
+      assertTrue(store.transaction(tx -> tx.work().find(target)).isPresent());
 
       ClaimedWork second =
           store
               .transaction(
                   tx ->
-                      tx.claimNextWork(
-                          WorkTargetType.THREAD, "continuation-claim", Duration.ofSeconds(30)))
+                      tx.work()
+                          .claimNext(
+                              WorkTargetType.THREAD, "continuation-claim", Duration.ofSeconds(30)))
               .orElseThrow();
       assertEquals(ThreadProcessResult.COMPLETED, processor.process(second));
       var continued =
           store.transaction(
               tx ->
-                  tx.loadEntryPath(tx.findThread(baseline.threadId()).orElseThrow().headEntryId()));
+                  tx.entries()
+                      .loadPath(
+                          tx.threads().find(baseline.threadId()).orElseThrow().headEntryId()));
       assertTrue(continued.entries().size() > applied.entries().size());
       TurnEndPayload continuationEnd =
           assertInstanceOf(TurnEndPayload.class, continued.head().payload());
       assertEquals(TurnEndOutcome.FAILED, continuationEnd.outcome());
-      assertTrue(store.transaction(tx -> tx.findWork(target)).isEmpty());
+      assertTrue(store.transaction(tx -> tx.work().find(target)).isEmpty());
     } finally {
       scheduler.shutdownNow();
     }

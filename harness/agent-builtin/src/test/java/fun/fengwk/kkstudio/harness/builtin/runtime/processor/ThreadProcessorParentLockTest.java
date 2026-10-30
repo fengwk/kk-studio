@@ -127,7 +127,7 @@ class ThreadProcessorParentLockTest extends ThreadProcessorTestBase {
                         || op.startsWith("lockThread:"))
             .toList());
 
-    ThreadJoin join = fixture.store.transaction(tx -> tx.findJoin(joinId).orElseThrow());
+    ThreadJoin join = fixture.store.transaction(tx -> tx.joins().find(joinId).orElseThrow());
     assertTrue(join.matched());
     assertNotNull(join.deliveryCommandSequence());
     assertEquals(
@@ -154,10 +154,11 @@ class ThreadProcessorParentLockTest extends ThreadProcessorTestBase {
   private static UUID seedRootSession(InMemoryBuiltinHarnessStore store, UUID sessionId) {
     return store.transaction(
         tx -> {
-          tx.insertSession(new Session(sessionId, "session-" + sessionId, NOW));
+          tx.sessions().insert(new Session(sessionId, "session-" + sessionId, NOW));
           UUID rootEntryId = tx.nextId();
-          tx.insertEntry(
-              new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
+          tx.entries()
+              .insert(
+                  new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
           return rootEntryId;
         });
   }
@@ -172,24 +173,25 @@ class ThreadProcessorParentLockTest extends ThreadProcessorTestBase {
       SpawnTrigger spawnTrigger) {
     store.transaction(
         tx -> {
-          tx.insertThread(
-              new ThreadState(
-                  threadId,
-                  sessionId,
-                  parentThreadId,
-                  headEntryId,
-                  CREATION_REQUEST_HASH,
-                  "thread-" + threadId,
-                  rootThreadId,
-                  false,
-                  spawnTrigger,
-                  ThreadConstraints.NONE,
-                  ThreadExecutionControl.RUNNABLE,
-                  0L,
-                  1L,
-                  0L,
-                  NOW,
-                  NOW));
+          tx.threads()
+              .insert(
+                  new ThreadState(
+                      threadId,
+                      sessionId,
+                      parentThreadId,
+                      headEntryId,
+                      CREATION_REQUEST_HASH,
+                      "thread-" + threadId,
+                      rootThreadId,
+                      false,
+                      spawnTrigger,
+                      ThreadConstraints.NONE,
+                      ThreadExecutionControl.RUNNABLE,
+                      0L,
+                      1L,
+                      0L,
+                      NOW,
+                      NOW));
           return null;
         });
   }
@@ -202,24 +204,25 @@ class ThreadProcessorParentLockTest extends ThreadProcessorTestBase {
       long sourceSequence) {
     store.transaction(
         tx -> {
-          tx.lockThread(childId);
-          tx.insertJoin(
-              new ThreadJoin(
-                  joinId,
-                  CREATION_REQUEST_HASH,
-                  parentId,
-                  childId,
-                  sourceSequence,
-                  "agent",
-                  10,
-                  0L,
-                  null,
-                  null,
-                  null,
-                  NOW,
-                  NOW,
-                  JoinDelivery.NOTIFY_PARENT,
-                  null));
+          tx.threads().lock(childId);
+          tx.joins()
+              .insert(
+                  new ThreadJoin(
+                      joinId,
+                      CREATION_REQUEST_HASH,
+                      parentId,
+                      childId,
+                      sourceSequence,
+                      "agent",
+                      10,
+                      0L,
+                      null,
+                      null,
+                      null,
+                      NOW,
+                      NOW,
+                      JoinDelivery.NOTIFY_PARENT,
+                      null));
           return null;
         });
   }

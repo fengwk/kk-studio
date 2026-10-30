@@ -433,8 +433,8 @@ class ModelExecutionStreamFlushTest {
         .delegate()
         .transaction(
             tx -> {
-              tx.lockThread(fixture.baseline.threadId()).orElseThrow();
-              tx.deleteWork(new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
+              tx.threads().lock(fixture.baseline.threadId()).orElseThrow();
+              tx.work().delete(new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
               return null;
             });
 
@@ -571,8 +571,8 @@ class ModelExecutionStreamFlushTest {
         .delegate()
         .transaction(
             tx -> {
-              tx.lockThread(fixture.baseline.threadId()).orElseThrow();
-              tx.deleteWork(new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
+              tx.threads().lock(fixture.baseline.threadId()).orElseThrow();
+              tx.work().delete(new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
               return null;
             });
     fixture.store.resetUpdateCount();
@@ -635,7 +635,7 @@ class ModelExecutionStreamFlushTest {
         .delegate()
         .transaction(
             tx -> {
-              tx.lockThread(fixture.baseline.threadId()).orElseThrow();
+              tx.threads().lock(fixture.baseline.threadId()).orElseThrow();
               ModelInvocation model =
                   builtin(tx).lockModelInvocation(fixture.invocationId).orElseThrow();
               ModelInvocationError error =
@@ -699,7 +699,7 @@ class ModelExecutionStreamFlushTest {
             .store
             .delegate()
             .transaction(
-                tx -> tx.findWork(new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)))
+                tx -> tx.work().find(new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)))
             .orElseThrow();
     assertNotNull(work.leaseToken(), "work must remain claimed");
     assertEquals(
@@ -1508,38 +1508,43 @@ class ModelExecutionStreamFlushTest {
           UUID sessionId = tx.nextId();
           UUID rootEntryId = tx.nextId();
           UUID threadId = tx.nextId();
-          tx.insertSession(new Session(sessionId, "session-" + sessionId, now));
-          tx.insertEntry(
-              new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), now));
+          tx.sessions().insert(new Session(sessionId, "session-" + sessionId, now));
+          tx.entries()
+              .insert(
+                  new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), now));
           UUID turnStartEntryId = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  turnStartEntryId,
-                  sessionId,
-                  rootEntryId,
-                  new TurnStartPayload(
-                      TurnStartReason.INPUT,
-                      branchSettings(),
-                      threadId,
-                      100_000,
-                      16_384,
-                      null,
-                      null),
-                  now.plusMillis(1)));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStartEntryId,
+                      sessionId,
+                      rootEntryId,
+                      new TurnStartPayload(
+                          TurnStartReason.INPUT,
+                          branchSettings(),
+                          threadId,
+                          100_000,
+                          16_384,
+                          null,
+                          null),
+                      now.plusMillis(1)));
           UUID userId = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  userId,
-                  sessionId,
-                  turnStartEntryId,
-                  new MessagePayload(
-                      new AgentMessage(
-                          AgentMessageRole.USER, List.of(new TextMessageContent("hi"))),
-                      null,
-                      null),
-                  now.plusMillis(2)));
-          tx.insertThread(
-              ThreadProcessorTestSupport.threadState(threadId, sessionId, turnStartEntryId, now));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      userId,
+                      sessionId,
+                      turnStartEntryId,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.USER, List.of(new TextMessageContent("hi"))),
+                          null,
+                          null),
+                      now.plusMillis(2)));
+          tx.threads()
+              .insert(
+                  ThreadProcessorTestSupport.threadState(
+                      threadId, sessionId, turnStartEntryId, now));
           return new Baseline(sessionId, rootEntryId, turnStartEntryId, threadId);
         });
   }
@@ -1548,7 +1553,7 @@ class ModelExecutionStreamFlushTest {
       HarnessStore store, Baseline baseline, ModelRequestSpec requestSpec, Instant now) {
     return store.transaction(
         tx -> {
-          tx.lockThread(baseline.threadId());
+          tx.threads().lock(baseline.threadId());
           UUID id = tx.nextId();
           builtin(tx)
               .insertModelInvocation(
@@ -1567,8 +1572,8 @@ class ModelExecutionStreamFlushTest {
                       List.of(),
                       now,
                       now));
-          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()));
-          tx.requestWork(new WorkTarget(WorkTargetType.MODEL, id));
+          tx.work().request(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()));
+          tx.work().request(new WorkTarget(WorkTargetType.MODEL, id));
           return id;
         });
   }
@@ -1577,8 +1582,9 @@ class ModelExecutionStreamFlushTest {
     return store
         .transaction(
             tx ->
-                tx.claimNextWork(
-                    WorkTargetType.MODEL, "token-" + invocationId, Duration.ofSeconds(60)))
+                tx.work()
+                    .claimNext(
+                        WorkTargetType.MODEL, "token-" + invocationId, Duration.ofSeconds(60)))
         .orElseThrow();
   }
 

@@ -58,7 +58,8 @@ class HarnessRuntimeSetYoloTest {
     assertEquals(0L, result.version());
     assertEquals(T0, result.updatedAt());
     assertEquals(T0, result.createdAt());
-    ThreadState stored = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
+    ThreadState stored =
+        store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow());
     assertEquals(0L, stored.version());
     assertEquals(T0, stored.updatedAt());
     assertNoCommandsEntriesOrWork(baseline.threadId());
@@ -70,8 +71,8 @@ class HarnessRuntimeSetYoloTest {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     store.transaction(
         tx -> {
-          ThreadState locked = tx.lockThread(baseline.threadId()).orElseThrow();
-          tx.updateThread(locked.touchVersion(T1));
+          ThreadState locked = tx.threads().lock(baseline.threadId()).orElseThrow();
+          tx.threads().update(locked.touchVersion(T1));
           return null;
         });
     clock.advance(T3);
@@ -106,7 +107,8 @@ class HarnessRuntimeSetYoloTest {
     assertEquals(T3, disabled.updatedAt());
     assertEquals(T0, disabled.createdAt());
 
-    ThreadState stored = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
+    ThreadState stored =
+        store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow());
     assertFalse(stored.yoloEnabled());
     assertEquals(2L, stored.version());
     assertNoCommandsEntriesOrWork(baseline.threadId());
@@ -123,7 +125,7 @@ class HarnessRuntimeSetYoloTest {
         IllegalArgumentException.class,
         () -> runtime.setThreadYolo(new SetThreadYoloCommand(childThreadId, true)));
 
-    ThreadState child = store.transaction(tx -> tx.findThread(childThreadId).orElseThrow());
+    ThreadState child = store.transaction(tx -> tx.threads().find(childThreadId).orElseThrow());
     assertEquals(baseline.threadId(), child.rootThreadId());
     assertEquals(0L, child.version());
     assertEquals(T0, child.updatedAt());
@@ -141,13 +143,13 @@ class HarnessRuntimeSetYoloTest {
 
     assertTrue(enabled.yoloEnabled());
     assertEquals(1L, enabled.version());
-    ThreadState child = store.transaction(tx -> tx.findThread(childThreadId).orElseThrow());
+    ThreadState child = store.transaction(tx -> tx.threads().find(childThreadId).orElseThrow());
     assertEquals(baseline.threadId(), child.rootThreadId());
     assertEquals(0L, child.version());
     assertEquals(T0, child.updatedAt());
     assertTrue(
         store.<Boolean>transaction(
-            tx -> tx.findWork(new WorkTarget(WorkTargetType.THREAD, childThreadId)).isEmpty()));
+            tx -> tx.work().find(new WorkTarget(WorkTargetType.THREAD, childThreadId)).isEmpty()));
   }
 
   /** 根开关不追认既有 WAITING_APPROVAL：审批请求保持未决，只 bump 根自身 version。 */
@@ -157,15 +159,14 @@ class HarnessRuntimeSetYoloTest {
     setWaitingApproval(store, baseline);
     clock.advance(T1);
     long versionBefore =
-        store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow()).version();
+        store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow()).version();
 
     ThreadState enabled =
         runtime.setThreadYolo(new SetThreadYoloCommand(baseline.threadId(), true));
 
     assertTrue(enabled.yoloEnabled());
     assertEquals(versionBefore + 1, enabled.version());
-    ToolInvocation tool =
-        store.transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow());
+    ToolInvocation tool = store.transaction(tx -> tx.tools().find(baseline.toolId()).orElseThrow());
     assertEquals(ToolInvocationStatus.WAITING_APPROVAL, tool.status());
     assertTrue(tool.approval().required());
     assertTrue(tool.approval().isUndecided());
@@ -175,40 +176,41 @@ class HarnessRuntimeSetYoloTest {
     return store.transaction(
         tx -> {
           UUID childThreadId = tx.nextId();
-          tx.insertThread(
-              new ThreadState(
-                  childThreadId,
-                  baseline.sessionId(),
-                  baseline.threadId(),
-                  baseline.rootEntryId(),
-                  CREATION_REQUEST_HASH,
-                  "child",
-                  baseline.threadId(),
-                  false,
-                  SpawnTrigger.MODEL_TOOL,
-                  ThreadConstraints.NONE,
-                  ThreadExecutionControl.RUNNABLE,
-                  0L,
-                  1L,
-                  0L,
-                  T0,
-                  T0));
+          tx.threads()
+              .insert(
+                  new ThreadState(
+                      childThreadId,
+                      baseline.sessionId(),
+                      baseline.threadId(),
+                      baseline.rootEntryId(),
+                      CREATION_REQUEST_HASH,
+                      "child",
+                      baseline.threadId(),
+                      false,
+                      SpawnTrigger.MODEL_TOOL,
+                      ThreadConstraints.NONE,
+                      ThreadExecutionControl.RUNNABLE,
+                      0L,
+                      1L,
+                      0L,
+                      T0,
+                      T0));
           return childThreadId;
         });
   }
 
   private void assertNoCommandsEntriesOrWork(UUID threadId) {
-    ThreadState thread = store.transaction(tx -> tx.lockThread(threadId).orElseThrow());
+    ThreadState thread = store.transaction(tx -> tx.threads().lock(threadId).orElseThrow());
     assertEquals(1, runtime.getSessionEntries(thread.sessionId()).size());
     boolean noWork =
         store.transaction(
-            tx -> tx.findWork(new WorkTarget(WorkTargetType.THREAD, threadId)).isEmpty());
+            tx -> tx.work().find(new WorkTarget(WorkTargetType.THREAD, threadId)).isEmpty());
     assertTrue(noWork);
     boolean noCommands =
         store.transaction(
             tx -> {
-              tx.lockThread(threadId);
-              return tx.loadQueuedCommands(threadId).isEmpty();
+              tx.threads().lock(threadId);
+              return tx.commands().loadQueued(threadId).isEmpty();
             });
     assertTrue(noCommands);
   }

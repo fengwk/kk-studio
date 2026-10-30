@@ -218,7 +218,8 @@ class ModelProcessorTest {
             .store
             .<Optional<ClaimedWork>>transaction(
                 tx ->
-                    tx.claimNextWork(WorkTargetType.THREAD, "thread-token", Duration.ofSeconds(60)))
+                    tx.work()
+                        .claimNext(WorkTargetType.THREAD, "thread-token", Duration.ofSeconds(60)))
             .orElseThrow();
     assertThrows(IllegalArgumentException.class, () -> fixture.processor.process(threadClaim));
   }
@@ -266,8 +267,8 @@ class ModelProcessorTest {
     deleteModelWork(fixture);
     fixture.store.transaction(
         tx -> {
-          tx.lockThread(fixture.baseline.threadId()).orElseThrow();
-          tx.deleteWork(new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()));
+          tx.threads().lock(fixture.baseline.threadId()).orElseThrow();
+          tx.work().delete(new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()));
           return null;
         });
     UUID parentId = UUID.randomUUID();
@@ -309,7 +310,7 @@ class ModelProcessorTest {
       assertTrue(closeEntered.await(5, TimeUnit.SECONDS), "terminal committed and close is held");
       UUID executionId =
           fixture.store.transaction(
-              tx -> tx.loadUnconfirmedExecutions(basis.threadId()).get(0).executionId());
+              tx -> tx.exits().loadUnconfirmed(basis.threadId()).get(0).executionId());
 
       ThreadProcessor threadProcessor =
           new ThreadProcessor(
@@ -321,11 +322,13 @@ class ModelProcessorTest {
           ThreadProcessResult.COMPLETED,
           threadProcessor.process(
               ThreadProcessorTestSupport.claimThreadWork(fixture.store, basis.threadId(), NOW)));
-      ThreadJoin pending = fixture.store.transaction(tx -> tx.findJoin(joinId).orElseThrow());
+      ThreadJoin pending = fixture.store.transaction(tx -> tx.joins().find(joinId).orElseThrow());
       assertFalse(pending.matched(), "join must wait for studio exit confirmation");
       EntryPath materializedPath =
           fixture.store.transaction(
-              tx -> tx.loadEntryPath(tx.findThread(basis.threadId()).orElseThrow().headEntryId()));
+              tx ->
+                  tx.entries()
+                      .loadPath(tx.threads().find(basis.threadId()).orElseThrow().headEntryId()));
       boolean completed = stopReason == GenerationStopReason.COMPLETE;
       TurnEndOutcome expectedOutcome = completed ? TurnEndOutcome.COMPLETED : TurnEndOutcome.FAILED;
       assertTrue(
@@ -345,16 +348,16 @@ class ModelProcessorTest {
 
       assertEquals(
           ExecutionExitState.STUDIO_EXITED,
-          fixture.store.transaction(tx -> tx.findExecution(executionId).orElseThrow().state()),
+          fixture.store.transaction(tx -> tx.exits().find(executionId).orElseThrow().state()),
           "real finally confirmation commits before checking Join");
-      ThreadJoin settled = fixture.store.transaction(tx -> tx.findJoin(joinId).orElseThrow());
+      ThreadJoin settled = fixture.store.transaction(tx -> tx.joins().find(joinId).orElseThrow());
       assertTrue(settled.matched());
       assertEquals(materializedPath.head().id(), settled.terminalEntryId());
       if (completed) {
         assertNotNull(settled.finalAnswerEntryId());
         Entry answer =
             fixture.store.transaction(
-                tx -> tx.findEntry(settled.finalAnswerEntryId()).orElseThrow());
+                tx -> tx.entries().find(settled.finalAnswerEntryId()).orElseThrow());
         assertTrue(
             answer.payload() instanceof MessagePayload message
                 && message.message().role() == AgentMessageRole.ASSISTANT);
@@ -364,7 +367,7 @@ class ModelProcessorTest {
       assertEquals(versionBeforeExit + 1, thread(fixture.store, basis.threadId()).version());
       assertEquals(
           ExecutionExitState.STUDIO_EXITED,
-          fixture.store.transaction(tx -> tx.findExecution(executionId).orElseThrow().state()));
+          fixture.store.transaction(tx -> tx.exits().find(executionId).orElseThrow().state()));
       assertEquals(1, closes.get());
       assertEquals(1, notificationCount(fixture.store, parentId));
     } finally {
@@ -458,7 +461,7 @@ class ModelProcessorTest {
       assertTrue(closeEntered.await(5, TimeUnit.SECONDS), "terminal committed and close is held");
       executionId =
           fixture.store.transaction(
-              tx -> tx.loadUnconfirmedExecutions(basis.threadId()).get(0).executionId());
+              tx -> tx.exits().loadUnconfirmed(basis.threadId()).get(0).executionId());
       assertEquals(0, confirmAttempts.get(), "Stop must not attempt exit confirmation");
       ThreadSnapshot before = runtime.getThreadSnapshot(basis.threadId());
       assertEquals(ThreadRuntimeStatus.RUNNING, before.runtimeStatus());
@@ -474,7 +477,7 @@ class ModelProcessorTest {
       UUID heldExecutionId = executionId;
       assertEquals(
           ExecutionExitState.UNCONFIRMED,
-          fixture.store.transaction(tx -> tx.findExecution(heldExecutionId).orElseThrow().state()));
+          fixture.store.transaction(tx -> tx.exits().find(heldExecutionId).orElseThrow().state()));
       assertEquals(
           ThreadRuntimeStatus.RUNNING, runtime.getThreadSnapshot(basis.threadId()).runtimeStatus());
       assertFalse(runtime.findJoin(joinId).orElseThrow().matched());
@@ -489,7 +492,7 @@ class ModelProcessorTest {
       ThreadSnapshot after = runtime.getThreadSnapshot(basis.threadId());
       ThreadJoin join = runtime.findJoin(joinId).orElseThrow();
       ExecutionExitState state =
-          fixture.store.transaction(tx -> tx.findExecution(heldExecutionId).orElseThrow().state());
+          fixture.store.transaction(tx -> tx.exits().find(heldExecutionId).orElseThrow().state());
       if (failConfirm) {
         assertAll(
             () ->
@@ -557,9 +560,9 @@ class ModelProcessorTest {
       HarnessStore store, UUID childId, UUID parentId, UUID joinId) {
     store.transaction(
         tx -> {
-          ThreadState child = tx.lockThread(childId).orElseThrow();
+          ThreadState child = tx.threads().lock(childId).orElseThrow();
           UUID turnStartEntryId =
-              tx.loadEntryPath(child.headEntryId()).openTurnStart().orElseThrow().id();
+              tx.entries().loadPath(child.headEntryId()).openTurnStart().orElseThrow().id();
           ThreadCommand source =
               new ThreadCommand(
                   child.id(),
@@ -571,28 +574,29 @@ class ModelProcessorTest {
                   null,
                   null,
                   NOW);
-          tx.updateThread(child.reserveCommandSequences(1, NOW));
-          tx.insertCommands(List.of(source));
-          tx.updateCommands(List.of(source.markApplied(turnStartEntryId)));
-          child = tx.lockThread(child.id()).orElseThrow();
-          tx.updateThread(child.advanceInputThroughSequence(1L, NOW));
-          tx.insertJoin(
-              new ThreadJoin(
-                  joinId,
-                  ThreadProcessorTestSupport.CREATION_REQUEST_HASH,
-                  parentId,
-                  child.id(),
-                  1L,
-                  "agent",
-                  10,
-                  0L,
-                  null,
-                  null,
-                  null,
-                  NOW,
-                  NOW,
-                  JoinDelivery.NOTIFY_PARENT,
-                  null));
+          tx.threads().update(child.reserveCommandSequences(1, NOW));
+          tx.commands().insert(List.of(source));
+          tx.commands().update(List.of(source.markApplied(turnStartEntryId)));
+          child = tx.threads().lock(child.id()).orElseThrow();
+          tx.threads().update(child.advanceInputThroughSequence(1L, NOW));
+          tx.joins()
+              .insert(
+                  new ThreadJoin(
+                      joinId,
+                      ThreadProcessorTestSupport.CREATION_REQUEST_HASH,
+                      parentId,
+                      child.id(),
+                      1L,
+                      "agent",
+                      10,
+                      0L,
+                      null,
+                      null,
+                      null,
+                      NOW,
+                      NOW,
+                      JoinDelivery.NOTIFY_PARENT,
+                      null));
           return null;
         });
   }
@@ -714,8 +718,8 @@ class ModelProcessorTest {
             () ->
                 store.transaction(
                     tx -> {
-                      tx.lockThread(history.basis().threadId()).orElseThrow();
-                      tx.deleteWork(target);
+                      tx.threads().lock(history.basis().threadId()).orElseThrow();
+                      tx.work().delete(target);
                       return null;
                     }));
     ModelProcessor processor = projectionProcessor(hooked, gateway);
@@ -937,20 +941,22 @@ class ModelProcessorTest {
             tx -> {
               UUID userId = tx.nextId();
               UUID id = tx.nextId();
-              tx.insertEntry(
-                  new Entry(
-                      userId,
-                      fixture.baseline.sessionId(),
-                      fixture.baseline.turnStartEntryId(),
-                      userMessagePayload(),
-                      NOW.plusMillis(2)));
-              tx.insertEntry(
-                  new Entry(
-                      id,
-                      fixture.baseline.sessionId(),
-                      userId,
-                      assistantPayload(),
-                      NOW.plusMillis(3)));
+              tx.entries()
+                  .insert(
+                      new Entry(
+                          userId,
+                          fixture.baseline.sessionId(),
+                          fixture.baseline.turnStartEntryId(),
+                          userMessagePayload(),
+                          NOW.plusMillis(2)));
+              tx.entries()
+                  .insert(
+                      new Entry(
+                          id,
+                          fixture.baseline.sessionId(),
+                          userId,
+                          assistantPayload(),
+                          NOW.plusMillis(3)));
               return id;
             });
     transition(
@@ -1162,8 +1168,9 @@ class ModelProcessorTest {
         fixture.store.transaction(
             tx ->
                 tx
-                    .loadEntryPath(
-                        tx.findThread(fixture.baseline.threadId()).orElseThrow().headEntryId())
+                    .entries()
+                    .loadPath(
+                        tx.threads().find(fixture.baseline.threadId()).orElseThrow().headEntryId())
                     .entries()
                     .stream()
                     .anyMatch(
@@ -1391,8 +1398,9 @@ class ModelProcessorTest {
         fixture.store.transaction(
             tx ->
                 tx
-                    .loadEntryPath(
-                        tx.findThread(fixture.baseline.threadId()).orElseThrow().headEntryId())
+                    .entries()
+                    .loadPath(
+                        tx.threads().find(fixture.baseline.threadId()).orElseThrow().headEntryId())
                     .entries()
                     .stream()
                     .anyMatch(entry -> entry.payload() instanceof MessagePayload));
@@ -1697,9 +1705,9 @@ class ModelProcessorTest {
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
     fixture.store.transaction(
         tx -> {
-          ThreadState thread = tx.lockThread(fixture.baseline.threadId()).orElseThrow();
+          ThreadState thread = tx.threads().lock(fixture.baseline.threadId()).orElseThrow();
           assertTrue(
-              tx.deleteWork(new WorkTarget(WorkTargetType.THREAD, thread.id())),
+              tx.work().delete(new WorkTarget(WorkTargetType.THREAD, thread.id())),
               "the thread work must be consumable before model terminal persistence");
           return null;
         });
@@ -2718,7 +2726,8 @@ class ModelProcessorTest {
         fixture
             .store
             .transaction(
-                tx -> tx.claimNextWork(WorkTargetType.MODEL, "near-expiry", Duration.ofSeconds(1)))
+                tx ->
+                    tx.work().claimNext(WorkTargetType.MODEL, "near-expiry", Duration.ofSeconds(1)))
             .orElseThrow();
     fixture.gateway.queueControlled();
 
@@ -3033,7 +3042,7 @@ class ModelProcessorTest {
             ignored -> {
               registered.set(
                   fixture.store.transaction(
-                      tx -> tx.loadUnconfirmedExecutions(fixture.baseline.threadId()).getFirst()));
+                      tx -> tx.exits().loadUnconfirmed(fixture.baseline.threadId()).getFirst()));
               throw new RejectedExecutionException("rejected");
             },
             TestExecutionExitConfirmer.create(fixture.store, fixture.clock));
@@ -3047,11 +3056,11 @@ class ModelProcessorTest {
       assertTrue(
           Boolean.TRUE.equals(
               fixture.store.transaction(
-                  tx -> tx.loadUnconfirmedExecutions(fixture.baseline.threadId()).isEmpty())));
+                  tx -> tx.exits().loadUnconfirmed(fixture.baseline.threadId()).isEmpty())));
       assertEquals(
           ExecutionExitState.NOT_STARTED,
           fixture.store.transaction(
-              tx -> tx.findExecution(registered.get().executionId()).orElseThrow().state()),
+              tx -> tx.exits().find(registered.get().executionId()).orElseThrow().state()),
           "the same registered fact must remain as NOT_STARTED, not disappear or claim body exit");
       assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).version());
       assertNotNull(
@@ -3105,8 +3114,7 @@ class ModelProcessorTest {
       assertEquals(0, runs.get());
       assertFalse(processor.hasActiveExecution());
       List<ExecutionExitFact> unconfirmed =
-          fixture.store.transaction(
-              tx -> tx.loadUnconfirmedExecutions(fixture.baseline.threadId()));
+          fixture.store.transaction(tx -> tx.exits().loadUnconfirmed(fixture.baseline.threadId()));
       assertEquals(1, unconfirmed.size());
       assertEquals(ExecutionExitState.UNCONFIRMED, unconfirmed.getFirst().state());
       assertEquals(1, thread(fixture.store, fixture.baseline.threadId()).version());
@@ -3165,7 +3173,7 @@ class ModelProcessorTest {
       assertNotNull(queued.get());
       ExecutionExitFact registered =
           fixture.store.transaction(
-              tx -> tx.loadUnconfirmedExecutions(fixture.baseline.threadId()).getFirst());
+              tx -> tx.exits().loadUnconfirmed(fixture.baseline.threadId()).getFirst());
       assertTrue(processor.cancel(fixture.invocationId));
       assertFalse(processor.hasActiveExecution());
 
@@ -3174,13 +3182,12 @@ class ModelProcessorTest {
       assertEquals(0, runs.get(), "cancelled execution must not enter the gateway body");
       assertEquals(1, closes.get(), "processor finally owns the only close");
       List<ExecutionExitFact> unconfirmed =
-          fixture.store.transaction(
-              tx -> tx.loadUnconfirmedExecutions(fixture.baseline.threadId()));
+          fixture.store.transaction(tx -> tx.exits().loadUnconfirmed(fixture.baseline.threadId()));
       assertTrue(unconfirmed.isEmpty(), "close success confirms the generation NOT_STARTED");
       assertEquals(
           ExecutionExitState.NOT_STARTED,
           fixture.store.transaction(
-              tx -> tx.findExecution(registered.executionId()).orElseThrow().state()),
+              tx -> tx.exits().find(registered.executionId()).orElseThrow().state()),
           "a queued execution that never entered body cannot claim STUDIO_EXITED");
       assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).version());
       assertEquals(
@@ -3398,7 +3405,7 @@ class ModelProcessorTest {
         fixture
             .store
             .transaction(
-                tx -> tx.claimNextWork(WorkTargetType.MODEL, "partial", Duration.ofSeconds(15)))
+                tx -> tx.work().claimNext(WorkTargetType.MODEL, "partial", Duration.ofSeconds(15)))
             .orElseThrow();
     fixture.gateway.queueControlled();
 
@@ -3418,7 +3425,7 @@ class ModelProcessorTest {
         fixture
             .store
             .transaction(
-                tx -> tx.claimNextWork(WorkTargetType.MODEL, "exact", Duration.ofSeconds(30)))
+                tx -> tx.work().claimNext(WorkTargetType.MODEL, "exact", Duration.ofSeconds(30)))
             .orElseThrow();
     fixture.gateway.queueControlled();
 
@@ -3598,8 +3605,9 @@ class ModelProcessorTest {
         store
             .transaction(
                 tx ->
-                    tx.claimNextWork(
-                        WorkTargetType.MODEL, "token-" + invocationId, Duration.ofMillis(400)))
+                    tx.work()
+                        .claimNext(
+                            WorkTargetType.MODEL, "token-" + invocationId, Duration.ofMillis(400)))
             .orElseThrow();
 
     assertEquals(ProcessResult.STARTED, processor.process(claimed));
@@ -3612,8 +3620,8 @@ class ModelProcessorTest {
         Duration.ofSeconds(2));
     store.transaction(
         tx -> {
-          tx.lockThread(baseline.threadId()).orElseThrow();
-          tx.deleteWork(new WorkTarget(WorkTargetType.MODEL, invocationId));
+          tx.threads().lock(baseline.threadId()).orElseThrow();
+          tx.work().delete(new WorkTarget(WorkTargetType.MODEL, invocationId));
           return null;
         });
     awaitTrue(run.interrupted::get, Duration.ofSeconds(2));
@@ -4027,8 +4035,8 @@ class ModelProcessorTest {
   private void deleteModelWork(Fixture fixture, UUID invocationId) {
     fixture.store.transaction(
         tx -> {
-          tx.lockThread(fixture.baseline.threadId()).orElseThrow();
-          tx.deleteWork(new WorkTarget(WorkTargetType.MODEL, invocationId));
+          tx.threads().lock(fixture.baseline.threadId()).orElseThrow();
+          tx.work().delete(new WorkTarget(WorkTargetType.MODEL, invocationId));
           return null;
         });
   }
@@ -4040,10 +4048,10 @@ class ModelProcessorTest {
   private void replaceModelWork(Fixture fixture, UUID invocationId) {
     fixture.store.transaction(
         tx -> {
-          tx.lockThread(fixture.baseline.threadId()).orElseThrow();
+          tx.threads().lock(fixture.baseline.threadId()).orElseThrow();
           WorkTarget target = new WorkTarget(WorkTargetType.MODEL, invocationId);
-          tx.deleteWork(target);
-          tx.requestWork(target);
+          tx.work().delete(target);
+          tx.work().request(target);
           return null;
         });
   }
@@ -4051,8 +4059,8 @@ class ModelProcessorTest {
   private void requestModelWork(Fixture fixture) {
     fixture.store.transaction(
         tx -> {
-          tx.lockThread(fixture.baseline.threadId()).orElseThrow();
-          tx.requestWork(new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
+          tx.threads().lock(fixture.baseline.threadId()).orElseThrow();
+          tx.work().request(new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
           return null;
         });
   }
@@ -4241,21 +4249,26 @@ class ModelProcessorTest {
         store.transaction(
             tx -> {
               UUID assistantId = tx.nextId();
-              tx.insertEntry(
-                  new Entry(
-                      assistantId,
-                      basis.sessionId(),
-                      basis.userEntryId(),
-                      new BuiltinHistoryPayloadMapper()
-                          .assistantPayload(
-                              toolResponse(
-                                  "answer",
-                                  new ProviderToolCall("call-1", "bash", "{\"secret\":1}")),
-                              requestWithTool().toolBindings()),
-                      NOW.plusMillis(3),
-                      sampleReplayState()));
-              tx.updateThread(
-                  tx.lockThread(basis.threadId()).orElseThrow().advanceHead(assistantId, NOW));
+              tx.entries()
+                  .insert(
+                      new Entry(
+                          assistantId,
+                          basis.sessionId(),
+                          basis.userEntryId(),
+                          new BuiltinHistoryPayloadMapper()
+                              .assistantPayload(
+                                  toolResponse(
+                                      "answer",
+                                      new ProviderToolCall("call-1", "bash", "{\"secret\":1}")),
+                                  requestWithTool().toolBindings()),
+                          NOW.plusMillis(3),
+                          sampleReplayState()));
+              tx.threads()
+                  .update(
+                      tx.threads()
+                          .lock(basis.threadId())
+                          .orElseThrow()
+                          .advanceHead(assistantId, NOW));
               UUID id = tx.nextId();
               builtin(tx)
                   .insertModelInvocation(
@@ -4274,8 +4287,8 @@ class ModelProcessorTest {
                           List.of(),
                           NOW,
                           NOW));
-              tx.requestWork(new WorkTarget(WorkTargetType.THREAD, basis.threadId()));
-              tx.requestWork(new WorkTarget(WorkTargetType.MODEL, id));
+              tx.work().request(new WorkTarget(WorkTargetType.THREAD, basis.threadId()));
+              tx.work().request(new WorkTarget(WorkTargetType.MODEL, id));
               return id;
             });
     return new ReplayHistory(store, basis, invocationId);
@@ -4312,57 +4325,63 @@ class ModelProcessorTest {
           UUID turnStartEntryId = tx.nextId();
           UUID userEntryId = tx.nextId();
           UUID threadId = tx.nextId();
-          tx.insertSession(new Session(sessionId, "session-" + sessionId, NOW));
-          tx.insertEntry(
-              new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
+          tx.sessions().insert(new Session(sessionId, "session-" + sessionId, NOW));
+          tx.entries()
+              .insert(
+                  new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
           if (parentThreadId != null) {
             // 先锁树再写父/子 Thread，子 Thread 才能作为 joinedChild 沿用父树锁。
-            tx.lockTree(parentThreadId);
-            tx.insertThread(
-                ThreadProcessorTestSupport.threadState(
-                    parentThreadId, sessionId, rootEntryId, "parent-" + parentThreadId, NOW));
+            tx.threads().lockTree(parentThreadId);
+            tx.threads()
+                .insert(
+                    ThreadProcessorTestSupport.threadState(
+                        parentThreadId, sessionId, rootEntryId, "parent-" + parentThreadId, NOW));
           }
-          tx.insertEntry(
-              new Entry(
-                  turnStartEntryId,
-                  sessionId,
-                  rootEntryId,
-                  new TurnStartPayload(
-                      TurnStartReason.INPUT,
-                      branchSettings(),
-                      threadId,
-                      100_000,
-                      16_384,
-                      null,
-                      null),
-                  NOW.plusMillis(1)));
-          tx.insertEntry(
-              new Entry(
-                  userEntryId,
-                  sessionId,
-                  turnStartEntryId,
-                  userMessagePayload(),
-                  NOW.plusMillis(2)));
-          tx.insertThread(
-              parentThreadId == null
-                  ? ThreadProcessorTestSupport.threadState(threadId, sessionId, userEntryId, NOW)
-                  : new ThreadState(
-                      threadId,
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStartEntryId,
                       sessionId,
-                      parentThreadId,
+                      rootEntryId,
+                      new TurnStartPayload(
+                          TurnStartReason.INPUT,
+                          branchSettings(),
+                          threadId,
+                          100_000,
+                          16_384,
+                          null,
+                          null),
+                      NOW.plusMillis(1)));
+          tx.entries()
+              .insert(
+                  new Entry(
                       userEntryId,
-                      ThreadProcessorTestSupport.CREATION_REQUEST_HASH,
-                      "child-" + threadId,
-                      parentThreadId,
-                      false,
-                      SpawnTrigger.MODEL_TOOL,
-                      ThreadConstraints.NONE,
-                      ThreadExecutionControl.RUNNABLE,
-                      0L,
-                      1L,
-                      0L,
-                      NOW,
-                      NOW));
+                      sessionId,
+                      turnStartEntryId,
+                      userMessagePayload(),
+                      NOW.plusMillis(2)));
+          tx.threads()
+              .insert(
+                  parentThreadId == null
+                      ? ThreadProcessorTestSupport.threadState(
+                          threadId, sessionId, userEntryId, NOW)
+                      : new ThreadState(
+                          threadId,
+                          sessionId,
+                          parentThreadId,
+                          userEntryId,
+                          ThreadProcessorTestSupport.CREATION_REQUEST_HASH,
+                          "child-" + threadId,
+                          parentThreadId,
+                          false,
+                          SpawnTrigger.MODEL_TOOL,
+                          ThreadConstraints.NONE,
+                          ThreadExecutionControl.RUNNABLE,
+                          0L,
+                          1L,
+                          0L,
+                          NOW,
+                          NOW));
           return new UserBasis(sessionId, rootEntryId, turnStartEntryId, userEntryId, threadId);
         });
   }
@@ -4375,7 +4394,7 @@ class ModelProcessorTest {
       Instant now) {
     return store.transaction(
         tx -> {
-          tx.lockThread(baseline.threadId());
+          tx.threads().lock(baseline.threadId());
           UUID id = tx.nextId();
           builtin(tx)
               .insertModelInvocation(
@@ -4394,8 +4413,8 @@ class ModelProcessorTest {
                       List.of(),
                       now,
                       now));
-          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()));
-          tx.requestWork(new WorkTarget(WorkTargetType.MODEL, id));
+          tx.work().request(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()));
+          tx.work().request(new WorkTarget(WorkTargetType.MODEL, id));
           return id;
         });
   }
@@ -4405,56 +4424,59 @@ class ModelProcessorTest {
       InMemoryBuiltinHarnessStore store, UUID sessionId, UUID rootEntryId, UUID threadId) {
     store.transaction(
         tx -> {
-          tx.lockThread(threadId).orElseThrow();
+          tx.threads().lock(threadId).orElseThrow();
           String hash = "a".repeat(64);
           UUID parentThreadId = tx.nextId();
-          tx.insertThread(
-              new ThreadState(
-                  parentThreadId,
-                  sessionId,
-                  null,
-                  rootEntryId,
-                  hash,
-                  "compaction-owner",
-                  parentThreadId,
-                  false,
-                  SpawnTrigger.USER,
-                  ThreadConstraints.NONE,
-                  ThreadExecutionControl.RUNNABLE,
-                  0L,
-                  1L,
-                  0L,
-                  NOW,
-                  NOW));
-          tx.insertCommands(
-              List.of(
-                  new ThreadCommand(
-                      threadId,
-                      1,
-                      new CustomMessageCommandPayload(AgentMessage.user("summarize")),
+          tx.threads()
+              .insert(
+                  new ThreadState(
+                      parentThreadId,
+                      sessionId,
+                      null,
+                      rootEntryId,
+                      hash,
+                      "compaction-owner",
+                      parentThreadId,
+                      false,
+                      SpawnTrigger.USER,
+                      ThreadConstraints.NONE,
+                      ThreadExecutionControl.RUNNABLE,
+                      0L,
+                      1L,
+                      0L,
+                      NOW,
+                      NOW));
+          tx.commands()
+              .insert(
+                  List.of(
+                      new ThreadCommand(
+                          threadId,
+                          1,
+                          new CustomMessageCommandPayload(AgentMessage.user("summarize")),
+                          UUID.randomUUID(),
+                          hash,
+                          null,
+                          null,
+                          null,
+                          NOW)));
+          tx.joins()
+              .insert(
+                  new ThreadJoin(
                       UUID.randomUUID(),
                       hash,
+                      parentThreadId,
+                      threadId,
+                      1,
+                      "Compaction",
+                      null,
+                      0,
                       null,
                       null,
                       null,
-                      NOW)));
-          tx.insertJoin(
-              new ThreadJoin(
-                  UUID.randomUUID(),
-                  hash,
-                  parentThreadId,
-                  threadId,
-                  1,
-                  "Compaction",
-                  null,
-                  0,
-                  null,
-                  null,
-                  null,
-                  NOW,
-                  NOW,
-                  JoinDelivery.SETTLE_OWNER_TURN,
-                  null));
+                      NOW,
+                      NOW,
+                      JoinDelivery.SETTLE_OWNER_TURN,
+                      null));
           return null;
         });
   }
@@ -4470,27 +4492,30 @@ class ModelProcessorTest {
           UUID sessionId = tx.nextId();
           UUID rootEntryId = tx.nextId();
           UUID threadId = tx.nextId();
-          tx.insertSession(new Session(sessionId, "session-" + sessionId, now));
-          tx.insertEntry(
-              new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), now));
+          tx.sessions().insert(new Session(sessionId, "session-" + sessionId, now));
+          tx.entries()
+              .insert(
+                  new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), now));
           UUID turnStartEntryId = tx.nextId();
-          tx.insertEntry(
-              new Entry(
-                  turnStartEntryId,
-                  sessionId,
-                  rootEntryId,
-                  new TurnStartPayload(
-                      TurnStartReason.INPUT,
-                      branchSettings(),
-                      threadId,
-                      100_000,
-                      16_384,
-                      null,
-                      null),
-                  now.plusMillis(1)));
-          tx.insertThread(
-              ThreadProcessorTestSupport.threadState(
-                  threadId, sessionId, turnStartEntryId, now, constraints));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStartEntryId,
+                      sessionId,
+                      rootEntryId,
+                      new TurnStartPayload(
+                          TurnStartReason.INPUT,
+                          branchSettings(),
+                          threadId,
+                          100_000,
+                          16_384,
+                          null,
+                          null),
+                      now.plusMillis(1)));
+          tx.threads()
+              .insert(
+                  ThreadProcessorTestSupport.threadState(
+                      threadId, sessionId, turnStartEntryId, now, constraints));
           return new Baseline(sessionId, rootEntryId, turnStartEntryId, threadId);
         });
   }
@@ -4507,7 +4532,7 @@ class ModelProcessorTest {
       HarnessStore store, Baseline baseline, ModelRequestSpec requestSpec, Instant now) {
     return store.transaction(
         tx -> {
-          tx.lockThread(baseline.threadId());
+          tx.threads().lock(baseline.threadId());
           UUID id = tx.nextId();
           ModelGroupExecution group = requestSpec.groupExecution();
           builtin(tx)
@@ -4531,8 +4556,8 @@ class ModelProcessorTest {
                       group == null
                           ? null
                           : new ModelGroupProgress(group.groupName(), group.groupVersion(), 0, 0)));
-          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()));
-          tx.requestWork(new WorkTarget(WorkTargetType.MODEL, id));
+          tx.work().request(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()));
+          tx.work().request(new WorkTarget(WorkTargetType.MODEL, id));
           return id;
         });
   }
@@ -4543,7 +4568,7 @@ class ModelProcessorTest {
 
   private static ClaimedWork claim(HarnessStore store, UUID invocationId, String token) {
     return store
-        .transaction(tx -> tx.claimNextWork(WorkTargetType.MODEL, token, Duration.ofSeconds(60)))
+        .transaction(tx -> tx.work().claimNext(WorkTargetType.MODEL, token, Duration.ofSeconds(60)))
         .orElseThrow();
   }
 
@@ -4566,16 +4591,16 @@ class ModelProcessorTest {
   private static ProviderRequest materialized(Fixture fixture) {
     ModelInvocation invocation = model(fixture.store, fixture.invocationId);
     EntryPath path =
-        fixture.store.transaction(tx -> tx.loadEntryPath(invocation.requestHeadEntryId()));
+        fixture.store.transaction(tx -> tx.entries().loadPath(invocation.requestHeadEntryId()));
     return new ModelRequestMaterializer().materialize(path, fixture.requestSpec);
   }
 
   private static ThreadState thread(HarnessStore store, UUID threadId) {
-    return store.transaction(tx -> tx.findThread(threadId)).orElseThrow();
+    return store.transaction(tx -> tx.threads().find(threadId)).orElseThrow();
   }
 
   private static Work work(HarnessStore store, WorkTarget target) {
-    return store.transaction(tx -> tx.findWork(target)).orElse(null);
+    return store.transaction(tx -> tx.work().find(target)).orElse(null);
   }
 
   private static List<ProviderStreamEvent> deltas(RecordingSink sink) {
@@ -4624,7 +4649,7 @@ class ModelProcessorTest {
     }
     boolean noUnconfirmed =
         fixture.store.transaction(
-            tx -> tx.loadUnconfirmedExecutions(fixture.baseline.threadId()).isEmpty());
+            tx -> tx.exits().loadUnconfirmed(fixture.baseline.threadId()).isEmpty());
     assertTrue(noUnconfirmed, "confirmed exit must leave no unconfirmed execution fact");
   }
 

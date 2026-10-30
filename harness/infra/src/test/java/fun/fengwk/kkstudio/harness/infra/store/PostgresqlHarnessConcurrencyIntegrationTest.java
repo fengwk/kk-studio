@@ -81,12 +81,12 @@ class PostgresqlHarnessConcurrencyIntegrationTest {
   private void deleteSessionAndThread(Baseline baseline) {
     store.transaction(
         tx -> {
-          tx.lockTree(baseline.threadId());
-          tx.lockSessionForUpdate(baseline.sessionId()).orElseThrow();
-          tx.lockThread(baseline.threadId()).orElseThrow();
-          tx.deleteThreads(List.of(baseline.threadId()));
-          tx.deleteEntries(baseline.sessionId());
-          tx.deleteSession(baseline.sessionId());
+          tx.threads().lockTree(baseline.threadId());
+          tx.sessions().lockForUpdate(baseline.sessionId()).orElseThrow();
+          tx.threads().lock(baseline.threadId()).orElseThrow();
+          tx.threads().delete(List.of(baseline.threadId()));
+          tx.entries().delete(baseline.sessionId());
+          tx.sessions().delete(baseline.sessionId());
           return null;
         });
   }

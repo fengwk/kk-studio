@@ -269,7 +269,7 @@ class ToolProcessorExecutionTest {
       assertTrue(
           Boolean.TRUE.equals(
               fixture.store.transaction(
-                  tx -> tx.loadUnconfirmedExecutions(fixture.baseline.threadId()).isEmpty())));
+                  tx -> tx.exits().loadUnconfirmed(fixture.baseline.threadId()).isEmpty())));
     }
   }
 
@@ -302,7 +302,7 @@ class ToolProcessorExecutionTest {
     assertTrue(
         Boolean.TRUE.equals(
             fixture.store.transaction(
-                tx -> tx.loadUnconfirmedExecutions(fixture.baseline.threadId()).isEmpty())));
+                tx -> tx.exits().loadUnconfirmed(fixture.baseline.threadId()).isEmpty())));
   }
 
   /** claim lease 剩余不足：admission 之前 renew 出完整 margin。 */
@@ -558,10 +558,11 @@ class ToolProcessorExecutionTest {
         progress -> {
           fixture.store.transaction(
               tx -> {
-                tx.lockThread(fixture.baseline.threadId()).orElseThrow();
+                tx.threads().lock(fixture.baseline.threadId()).orElseThrow();
                 assertTrue(
-                    tx.deleteWork(
-                        new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId())));
+                    tx.work()
+                        .delete(
+                            new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId())));
                 return null;
               });
           return ToolProcessorTestSupport.succeeded("call-1");
@@ -736,8 +737,7 @@ class ToolProcessorExecutionTest {
       assertEquals(1, closes.get());
       assertNull(ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId));
       List<ExecutionExitFact> unconfirmed =
-          fixture.store.transaction(
-              tx -> tx.loadUnconfirmedExecutions(fixture.baseline.threadId()));
+          fixture.store.transaction(tx -> tx.exits().loadUnconfirmed(fixture.baseline.threadId()));
       assertEquals(1, unconfirmed.size());
       assertEquals(ExecutionExitState.UNCONFIRMED, unconfirmed.getFirst().state());
       exitLogs.assertSingleSafeFailure(

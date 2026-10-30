@@ -42,7 +42,7 @@ public final class ToolOutcomeAppender {
     if (invocation.status() == ToolInvocationStatus.SUCCEEDED) {
       for (CustomEntryPayload effect : invocation.effects().customEntries()) {
         UUID effectEntryId = tx.nextId();
-        tx.insertEntry(new Entry(effectEntryId, sessionId, parent, effect, now));
+        tx.entries().insert(new Entry(effectEntryId, sessionId, parent, effect, now));
         parent = effectEntryId;
       }
     } else if (!invocation.effects().isEmpty()) {
@@ -50,7 +50,7 @@ public final class ToolOutcomeAppender {
     }
     MessagePayload payload = PAYLOAD_MAPPER.toolResultPayload(invocation);
     UUID headEntryId = tx.nextId();
-    tx.insertEntry(new Entry(headEntryId, sessionId, parent, payload, now));
+    tx.entries().insert(new Entry(headEntryId, sessionId, parent, payload, now));
     return new Applied(headEntryId);
   }
 

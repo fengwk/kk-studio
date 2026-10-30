@@ -303,12 +303,12 @@ public final class ModelExecution
               inTransaction(
                   tx -> {
                     Instant now = tx.now();
-                    ThreadState thread = tx.lockThread(threadId).orElse(null);
+                    ThreadState thread = tx.threads().lock(threadId).orElse(null);
                     if (thread == null) {
                       return false;
                     }
                     ModelInvocation model = tx.lockModelInvocation(invocationId).orElse(null);
-                    if (model == null || tx.lockClaimedWork(claim).isEmpty()) {
+                    if (model == null || tx.work().lockClaimed(claim).isEmpty()) {
                       return false;
                     }
                     if (model.status() != ModelInvocationStatus.READY
@@ -316,7 +316,7 @@ public final class ModelExecution
                       return false;
                     }
                     tx.updateModelInvocation(model.markRunning(now));
-                    tx.updateThread(thread.touchVersion(now));
+                    tx.threads().update(thread.touchVersion(now));
                     registered =
                         ExecutionExitLedger.register(
                             tx,
@@ -662,7 +662,7 @@ public final class ModelExecution
               tx -> {
                 Instant now = tx.now();
                 ModelInvocation model = tx.lockModelInvocation(invocationId).orElse(null);
-                if (model == null || tx.lockClaimedWork(claim).isEmpty()) {
+                if (model == null || tx.work().lockClaimed(claim).isEmpty()) {
                   return false;
                 }
                 if (model.status() != ModelInvocationStatus.RUNNING || model.attempt() != attempt) {
@@ -879,12 +879,12 @@ public final class ModelExecution
         inTransaction(
             tx -> {
               Instant now = tx.now();
-              ThreadState thread = tx.lockThread(threadId).orElse(null);
+              ThreadState thread = tx.threads().lock(threadId).orElse(null);
               if (thread == null) {
                 return false;
               }
               ModelInvocation model = tx.lockModelInvocation(invocationId).orElse(null);
-              if (model == null || tx.lockClaimedWork(claim).isEmpty()) {
+              if (model == null || tx.work().lockClaimed(claim).isEmpty()) {
                 return false;
               }
               if (model.status() != ModelInvocationStatus.RUNNING || model.attempt() != attempt) {
@@ -892,8 +892,8 @@ public final class ModelExecution
               }
               tx.updateModelInvocation(
                   model.retryReady(attemptFailure(model, error, now, now.plus(delay)), now));
-              tx.updateThread(thread.touchVersion(now));
-              tx.rescheduleWork(claim, delay);
+              tx.threads().update(thread.touchVersion(now));
+              tx.work().reschedule(claim, delay);
               return true;
             }));
   }
@@ -907,7 +907,7 @@ public final class ModelExecution
           inTransaction(
               tx -> {
                 Instant now = tx.now();
-                ThreadState thread = tx.lockThread(threadId).orElse(null);
+                ThreadState thread = tx.threads().lock(threadId).orElse(null);
                 if (thread == null) {
                   return false;
                 }
@@ -918,14 +918,14 @@ public final class ModelExecution
                 if (model.status() != ModelInvocationStatus.RUNNING || model.attempt() != attempt) {
                   return false;
                 }
-                tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId));
-                if (tx.lockClaimedWork(claim).isEmpty()) {
+                tx.work().request(new WorkTarget(WorkTargetType.THREAD, threadId));
+                if (tx.work().lockClaimed(claim).isEmpty()) {
                   throw new ClaimLostSignal();
                 }
                 tx.updateModelInvocation(
                     model.succeed(response, finalCheckpoint, replayState, now));
-                tx.updateThread(thread.touchVersion(now));
-                tx.completeWork(claim);
+                tx.threads().update(thread.touchVersion(now));
+                tx.work().complete(claim);
                 return true;
               }));
     } catch (ClaimLostSignal ignored) {
@@ -939,7 +939,7 @@ public final class ModelExecution
           inTransaction(
               tx -> {
                 Instant now = tx.now();
-                ThreadState thread = tx.lockThread(threadId).orElse(null);
+                ThreadState thread = tx.threads().lock(threadId).orElse(null);
                 if (thread == null) {
                   return false;
                 }
@@ -950,8 +950,8 @@ public final class ModelExecution
                 if (model.status() != ModelInvocationStatus.RUNNING || model.attempt() != attempt) {
                   return false;
                 }
-                tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId));
-                if (tx.lockClaimedWork(claim).isEmpty()) {
+                tx.work().request(new WorkTarget(WorkTargetType.THREAD, threadId));
+                if (tx.work().lockClaimed(claim).isEmpty()) {
                   throw new ClaimLostSignal();
                 }
                 String text = accumulator.text();
@@ -967,8 +967,8 @@ public final class ModelExecution
                       case UNKNOWN -> model.unknown(error, finalCheckpoint, now);
                     };
                 tx.updateModelInvocation(next);
-                tx.updateThread(thread.touchVersion(now));
-                tx.completeWork(claim);
+                tx.threads().update(thread.touchVersion(now));
+                tx.work().complete(claim);
                 return true;
               }));
     } catch (ClaimLostSignal ignored) {
@@ -987,7 +987,7 @@ public final class ModelExecution
       return inTransaction(
           tx -> {
             Instant now = tx.now();
-            ThreadState thread = tx.lockThread(threadId).orElse(null);
+            ThreadState thread = tx.threads().lock(threadId).orElse(null);
             if (thread == null) {
               return Applied.LOST;
             }
@@ -1020,7 +1020,7 @@ public final class ModelExecution
               return null;
             }
             if (action == ModelGroupFailureDecider.Action.RETRY_CURRENT) {
-              if (tx.lockClaimedWork(claim).isEmpty()) {
+              if (tx.work().lockClaimed(claim).isEmpty()) {
                 return Applied.LOST;
               }
               Duration delay = retryDecision.delay();
@@ -1028,16 +1028,16 @@ public final class ModelExecution
                   model
                       .retryReady(attemptFailure(model, error, now, now.plus(delay)), now)
                       .withGroupProgress(progress.retryCurrent(), now));
-              tx.updateThread(thread.touchVersion(now));
-              tx.rescheduleWork(claim, delay);
+              tx.threads().update(thread.touchVersion(now));
+              tx.work().reschedule(claim, delay);
               return Applied.RETRY;
             }
             boolean exhausted = progress.memberIndex() + 1 >= group.members().size();
             if (exhausted) {
               // 终态先请求 THREAD Work，再锁 MODEL Work，维持 THREAD -> MODEL 的全局 Work 锁序。
-              tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId));
+              tx.work().request(new WorkTarget(WorkTargetType.THREAD, threadId));
             }
-            if (tx.lockClaimedWork(claim).isEmpty()) {
+            if (tx.work().lockClaimed(claim).isEmpty()) {
               // 已写 THREAD wake 后丢失 MODEL claim：抛错回滚，避免提交无主唤醒。
               throw new ClaimLostSignal();
             }
@@ -1053,14 +1053,14 @@ public final class ModelExecution
             ModelAttemptFailure failure = attemptFailure(model, error, now, now);
             if (exhausted) {
               tx.updateModelInvocation(model.failAfterAttempt(error, failure, now));
-              tx.updateThread(thread.touchVersion(now));
-              tx.completeWork(claim);
+              tx.threads().update(thread.touchVersion(now));
+              tx.work().complete(claim);
               return Applied.TERMINAL;
             }
             tx.updateModelInvocation(model.advanceGroupReady(failure, progress.nextMember(), now));
-            tx.updateThread(thread.touchVersion(now));
+            tx.threads().update(thread.touchVersion(now));
             // 降级到下一成员不等待：立即重新调度同一逻辑 invocation，游标已在同事务推进。
-            tx.rescheduleWork(claim, Duration.ZERO);
+            tx.work().reschedule(claim, Duration.ZERO);
             return Applied.RETRY;
           });
     } catch (ClaimLostSignal ignored) {

@@ -62,7 +62,7 @@ final class ManualCompactionControl {
     return store.transaction(
         tx -> {
           ThreadState thread = lockThreadWithSession(tx, threadId);
-          EntryPath path = tx.loadEntryPath(thread.headEntryId());
+          EntryPath path = tx.entries().loadPath(thread.headEntryId());
           return manualDecision(tx, thread, path).availability();
         });
   }
@@ -89,12 +89,12 @@ final class ManualCompactionControl {
     if (thread.version() != command.expectedVersion()) {
       throw staleManualVersion(command, thread);
     }
-    EntryPath path = tx.loadEntryPath(thread.headEntryId());
+    EntryPath path = tx.entries().loadPath(thread.headEntryId());
     ManualDecision decision = manualDecision(tx, thread, path);
     if (!decision.availability().available()) {
       throw manualUnavailable(thread, decision.availability().disabledReason());
     }
-    List<ThreadCommand> queued = tx.loadQueuedCommands(thread.id());
+    List<ThreadCommand> queued = tx.commands().loadQueued(thread.id());
     Instant now = tx.now();
     UUID turnStartEntryId = tx.nextId();
     Entry candidateEntry =
@@ -136,7 +136,7 @@ final class ManualCompactionControl {
     ThreadContext context = threadContextProbe.probe(tx, thread, path);
     if (!(context instanceof ThreadContext.IdleOrHistorical)
         || path.openTurnStart().isPresent()
-        || !tx.loadIncompleteJoins(thread.id()).isEmpty()
+        || !tx.joins().loadIncomplete(thread.id()).isEmpty()
         // 手动入口使用与自动压缩相同的约束 guard：创建约束不允许压缩的 Thread（压缩子自身及其后代）一律不可手动压缩，
         // 不依赖上层调用方（Web root guard）拦截，runtime primitive 自身绝不递归创建压缩子。
         || !thread.constraints().allowAutoCompaction()
@@ -203,51 +203,55 @@ final class ManualCompactionControl {
               compactionResolved.maxOutputTokens(),
               frozenStart,
               null);
-      tx.insertEntry(
-          new Entry(
-              plan.turnStartEntryId(),
-              plan.sessionId(),
-              plan.sourceHeadEntryId(),
-              resolvedPayload,
-              now));
+      tx.entries()
+          .insert(
+              new Entry(
+                  plan.turnStartEntryId(),
+                  plan.sessionId(),
+                  plan.sourceHeadEntryId(),
+                  resolvedPayload,
+                  now));
       ThreadState advanced = thread.advanceHead(plan.turnStartEntryId(), now);
-      tx.updateThread(advanced);
+      tx.threads().update(advanced);
       return new CompactThreadResult(
           advanced, plan.turnStartEntryId(), frozenStart.childThreadId());
     }
     TurnResolution.Rejected rejected = (TurnResolution.Rejected) result;
-    tx.insertEntry(
-        new Entry(
-            plan.turnStartEntryId(),
-            plan.sessionId(),
-            plan.sourceHeadEntryId(),
-            plan.candidateTurnStartEntry().payload(),
-            now));
-    UUID errorEntryId = tx.nextId();
-    tx.insertEntry(
-        new Entry(
-            errorEntryId,
-            plan.sessionId(),
-            plan.turnStartEntryId(),
-            new AssistantErrorPayload(rejected.error(), null),
-            now));
-    UUID turnEndId = tx.nextId();
-    tx.insertEntry(
-        new Entry(
-            turnEndId,
-            plan.sessionId(),
-            errorEntryId,
-            new TurnEndPayload(
+    tx.entries()
+        .insert(
+            new Entry(
                 plan.turnStartEntryId(),
-                TurnEndOutcome.FAILED,
-                false,
-                TurnEndReason.TURN_FAILED,
-                null),
-            now));
+                plan.sessionId(),
+                plan.sourceHeadEntryId(),
+                plan.candidateTurnStartEntry().payload(),
+                now));
+    UUID errorEntryId = tx.nextId();
+    tx.entries()
+        .insert(
+            new Entry(
+                errorEntryId,
+                plan.sessionId(),
+                plan.turnStartEntryId(),
+                new AssistantErrorPayload(rejected.error(), null),
+                now));
+    UUID turnEndId = tx.nextId();
+    tx.entries()
+        .insert(
+            new Entry(
+                turnEndId,
+                plan.sessionId(),
+                errorEntryId,
+                new TurnEndPayload(
+                    plan.turnStartEntryId(),
+                    TurnEndOutcome.FAILED,
+                    false,
+                    TurnEndReason.TURN_FAILED,
+                    null),
+                now));
     ThreadState advanced = thread.advanceHead(turnEndId, now);
-    tx.updateThread(advanced);
+    tx.threads().update(advanced);
     if (plan.hasDeferredUserMessages()) {
-      tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()));
+      tx.work().request(new WorkTarget(WorkTargetType.THREAD, thread.id()));
     }
     return new CompactThreadResult(advanced, plan.turnStartEntryId(), null);
   }
@@ -256,13 +260,14 @@ final class ManualCompactionControl {
   private static ThreadState lockThreadWithSession(HarnessStore.Transaction tx, UUID threadId) {
     ThreadTreeLocks.lockForThread(tx, threadId);
     ThreadState thread =
-        tx.findThread(threadId)
+        tx.threads()
+            .find(threadId)
             .orElseThrow(
                 () ->
                     new HarnessRuntimeNotFoundException("thread " + threadId + " does not exist"));
     // 树锁内 Thread 不会被删除，其 Session 由外键保证存在。
-    tx.lockSessionForKeyShare(thread.sessionId()).orElseThrow();
-    return tx.lockThread(threadId).orElseThrow();
+    tx.sessions().lockForKeyShare(thread.sessionId()).orElseThrow();
+    return tx.threads().lock(threadId).orElseThrow();
   }
 
   /** queued 快照中是否存在消息或系统通知（两者都能触发下一轮 INPUT）；SET_* 不构成用户需求。 */

@@ -72,7 +72,7 @@ class ToolExecutionRemoteExitTest {
                 ExecutionExitFact local =
                     support.store.transaction(
                         tx ->
-                            tx.loadUnconfirmedExecutions(support.baseline.threadId()).stream()
+                            tx.exits().loadUnconfirmed(support.baseline.threadId()).stream()
                                 .filter(fact -> fact.kind() == ExecutionExitKind.TOOL)
                                 .findFirst()
                                 .orElseThrow());
@@ -214,7 +214,7 @@ class ToolExecutionRemoteExitTest {
   }
 
   private static ExecutionExitFact executionFact(HarnessStore store, UUID executionId) {
-    return store.transaction(tx -> tx.findExecution(executionId).orElseThrow());
+    return store.transaction(tx -> tx.exits().find(executionId).orElseThrow());
   }
 
   private static HarnessStore failNextTransaction(

@@ -114,11 +114,11 @@ class HarnessRuntimeStopWorkOrderTest {
         () -> runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 1)));
 
     ThreadState thread =
-        delegate.transaction(tx -> tx.lockThread(baseline.threadId()).orElseThrow());
+        delegate.transaction(tx -> tx.threads().lock(baseline.threadId()).orElseThrow());
     assertEquals(1L, thread.version());
     assertEquals(baseline.assistantEntryId(), thread.headEntryId());
     for (UUID id : baseline.toolIds()) {
-      ToolInvocation stored = delegate.transaction(tx -> tx.findToolInvocation(id).orElseThrow());
+      ToolInvocation stored = delegate.transaction(tx -> tx.tools().find(id).orElseThrow());
       assertEquals(ToolInvocationStatus.READY, stored.status());
     }
     List<WorkTarget> expected =
@@ -127,7 +127,7 @@ class HarnessRuntimeStopWorkOrderTest {
             new WorkTarget(WorkTargetType.TOOL, baseline.toolIds().get(0)),
             new WorkTarget(WorkTargetType.TOOL, baseline.toolIds().get(1)));
     for (WorkTarget target : expected) {
-      assertTrue(delegate.transaction(tx -> tx.findWork(target)).isPresent());
+      assertTrue(delegate.transaction(tx -> tx.work().find(target)).isPresent());
     }
   }
 

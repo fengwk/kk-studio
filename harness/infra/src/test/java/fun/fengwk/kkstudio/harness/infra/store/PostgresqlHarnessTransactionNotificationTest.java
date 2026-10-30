@@ -113,12 +113,13 @@ class PostgresqlHarnessTransactionNotificationTest {
           () ->
               store.transaction(
                   tx -> {
-                    tx.insertThread(
-                        plainThread(
-                            tx.nextId(),
-                            root.sessionId(),
-                            rootChain.threadId(),
-                            root.rootEntryId()));
+                    tx.threads()
+                        .insert(
+                            plainThread(
+                                tx.nextId(),
+                                root.sessionId(),
+                                rootChain.threadId(),
+                                root.rootEntryId()));
                     throw new IllegalStateException("rollback");
                   }));
       listener.assertSilent();
@@ -128,8 +129,10 @@ class PostgresqlHarnessTransactionNotificationTest {
           store.transaction(
               tx -> {
                 UUID id = tx.nextId();
-                tx.insertThread(
-                    plainThread(id, root.sessionId(), rootChain.threadId(), root.rootEntryId()));
+                tx.threads()
+                    .insert(
+                        plainThread(
+                            id, root.sessionId(), rootChain.threadId(), root.rootEntryId()));
                 return id;
               });
       listener.expectExactly(
@@ -139,9 +142,9 @@ class PostgresqlHarnessTransactionNotificationTest {
       inTransaction(
           store,
           tx -> {
-            tx.lockThread(rootChain.threadId()).orElseThrow();
-            ThreadState stored = tx.findThread(rootChain.threadId()).orElseThrow();
-            tx.updateThread(stored);
+            tx.threads().lock(rootChain.threadId()).orElseThrow();
+            ThreadState stored = tx.threads().find(rootChain.threadId()).orElseThrow();
+            tx.threads().update(stored);
           });
       listener.assertSilent();
 
@@ -149,9 +152,9 @@ class PostgresqlHarnessTransactionNotificationTest {
       inTransaction(
           store,
           tx -> {
-            tx.lockThread(grandChildChain.threadId()).orElseThrow();
-            ThreadState stored = tx.findThread(grandChildChain.threadId()).orElseThrow();
-            tx.updateThread(stored.reserveCommandSequences(1, T4));
+            tx.threads().lock(grandChildChain.threadId()).orElseThrow();
+            ThreadState stored = tx.threads().find(grandChildChain.threadId()).orElseThrow();
+            tx.threads().update(stored.reserveCommandSequences(1, T4));
           });
       listener.expectExactly(
           versionNotification(grandChildChain.threadId(), 2L),
@@ -198,8 +201,8 @@ class PostgresqlHarnessTransactionNotificationTest {
       inTransaction(
           store,
           tx -> {
-            tx.lockToolInvocation(deletionChain.toolId()).orElseThrow();
-            assertEquals(1, tx.deleteToolInvocationsByIds(List.of(deletionChain.toolId())));
+            tx.tools().lock(deletionChain.toolId()).orElseThrow();
+            assertEquals(1, tx.tools().deleteByIds(List.of(deletionChain.toolId())));
           });
       listener.expectExactly(interactionNotification(interactionRoot));
     }
@@ -256,10 +259,11 @@ class PostgresqlHarnessTransactionNotificationTest {
       int deletedChildren =
           store.transaction(
               tx -> {
-                tx.lockTree(rootChain.threadId());
-                tx.lockThread(childChain.threadId()).orElseThrow();
-                tx.lockThread(grandChildChain.threadId()).orElseThrow();
-                return tx.deleteThreads(List.of(childChain.threadId(), grandChildChain.threadId()));
+                tx.threads().lockTree(rootChain.threadId());
+                tx.threads().lock(childChain.threadId()).orElseThrow();
+                tx.threads().lock(grandChildChain.threadId()).orElseThrow();
+                return tx.threads()
+                    .delete(List.of(childChain.threadId(), grandChildChain.threadId()));
               });
       assertEquals(2, deletedChildren);
       listener.expectExactly(treeNotification(rootChain.threadId()));
@@ -268,9 +272,9 @@ class PostgresqlHarnessTransactionNotificationTest {
       int deletedRoot =
           store.transaction(
               tx -> {
-                tx.lockTree(rootChain.threadId());
-                tx.lockThread(rootChain.threadId()).orElseThrow();
-                return tx.deleteThreads(List.of(rootChain.threadId()));
+                tx.threads().lockTree(rootChain.threadId());
+                tx.threads().lock(rootChain.threadId()).orElseThrow();
+                return tx.threads().delete(List.of(rootChain.threadId()));
               });
       assertEquals(1, deletedRoot);
       listener.expectExactly(treeNotification(rootChain.threadId()));
@@ -293,9 +297,13 @@ class PostgresqlHarnessTransactionNotificationTest {
                   store.transaction(
                       tx -> {
                         UUID id = tx.nextId();
-                        tx.insertThread(
-                            plainThread(
-                                id, root.sessionId(), rootChain.threadId(), root.rootEntryId()));
+                        tx.threads()
+                            .insert(
+                                plainThread(
+                                    id,
+                                    root.sessionId(),
+                                    rootChain.threadId(),
+                                    root.rootEntryId()));
                         written.countDown();
                         await(release);
                         return id;
@@ -338,26 +346,26 @@ class PostgresqlHarnessTransactionNotificationTest {
           store
               .transaction(
                   tx ->
-                      tx.claimNextWork(
-                          WorkTargetType.TOOL, "lease-1", Duration.ofSeconds(60), node))
+                      tx.work()
+                          .claimNext(WorkTargetType.TOOL, "lease-1", Duration.ofSeconds(60), node))
               .orElseThrow();
       listener.expectExactly(interactionNotification(chain.threadId()));
 
       // cleanup/reset：重排清租约使 Work 可能重新进入待领取。
-      inTransaction(store, tx -> tx.rescheduleWork(claim, Duration.ZERO));
+      inTransaction(store, tx -> tx.work().reschedule(claim, Duration.ZERO));
       listener.expectExactly(interactionNotification(chain.threadId()));
 
       ClaimedWork reclaimed =
           store
               .transaction(
                   tx ->
-                      tx.claimNextWork(
-                          WorkTargetType.TOOL, "lease-2", Duration.ofSeconds(60), node))
+                      tx.work()
+                          .claimNext(WorkTargetType.TOOL, "lease-2", Duration.ofSeconds(60), node))
               .orElseThrow();
       listener.expectExactly(interactionNotification(chain.threadId()));
 
       // cleanup：终态删除。
-      store.transaction(tx -> tx.completeWork(reclaimed));
+      store.transaction(tx -> tx.work().complete(reclaimed));
       listener.expectExactly(interactionNotification(chain.threadId()));
 
       requestEnvironmentWork(store, chain.threadId(), target, ENVIRONMENT);
@@ -366,8 +374,8 @@ class PostgresqlHarnessTransactionNotificationTest {
       inTransaction(
           store,
           tx -> {
-            tx.lockThread(chain.threadId()).orElseThrow();
-            assertTrue(tx.deleteWork(target));
+            tx.threads().lock(chain.threadId()).orElseThrow();
+            assertTrue(tx.work().delete(target));
           });
       listener.expectExactly(interactionNotification(chain.threadId()));
     }
@@ -384,8 +392,8 @@ class PostgresqlHarnessTransactionNotificationTest {
       inTransaction(
           store,
           tx -> {
-            tx.lockThread(chain.threadId()).orElseThrow();
-            tx.requestWork(target);
+            tx.threads().lock(chain.threadId()).orElseThrow();
+            tx.work().request(target);
           });
       listener.assertSilent();
 
@@ -393,11 +401,11 @@ class PostgresqlHarnessTransactionNotificationTest {
       ClaimedWork claim =
           store
               .transaction(
-                  tx -> tx.claimNextWork(WorkTargetType.TOOL, "lease-1", Duration.ofSeconds(60)))
+                  tx -> tx.work().claimNext(WorkTargetType.TOOL, "lease-1", Duration.ofSeconds(60)))
               .orElseThrow();
       listener.assertSilent();
 
-      store.transaction(tx -> tx.completeWork(claim));
+      store.transaction(tx -> tx.work().complete(claim));
       listener.assertSilent();
     }
   }
@@ -424,8 +432,8 @@ class PostgresqlHarnessTransactionNotificationTest {
           store
               .transaction(
                   tx ->
-                      tx.claimNextWork(
-                          WorkTargetType.TOOL, "lease-1", Duration.ofSeconds(60), node))
+                      tx.work()
+                          .claimNext(WorkTargetType.TOOL, "lease-1", Duration.ofSeconds(60), node))
               .orElseThrow();
       listener.expectExactly(interactionNotification(chain.threadId()));
 
@@ -433,13 +441,13 @@ class PostgresqlHarnessTransactionNotificationTest {
       inTransaction(
           store,
           tx -> {
-            tx.lockToolInvocation(chain.toolId()).orElseThrow();
-            assertEquals(1, tx.deleteToolInvocationsByIds(List.of(chain.toolId())));
+            tx.tools().lock(chain.toolId()).orElseThrow();
+            assertEquals(1, tx.tools().deleteByIds(List.of(chain.toolId())));
           });
       listener.assertSilent();
 
       // 来源 Thread 已不可解析：Work 终态失效退化为空 payload 全量 resync。
-      store.transaction(tx -> tx.completeWork(claim));
+      store.transaction(tx -> tx.work().complete(claim));
       listener.expectExactly(interactionResyncNotification());
     }
   }
@@ -464,8 +472,8 @@ class PostgresqlHarnessTransactionNotificationTest {
         tx -> {
           UUID sessionId = tx.nextId();
           UUID rootEntryId = tx.nextId();
-          tx.insertSession(session(sessionId));
-          tx.insertEntry(rootEntry(rootEntryId, sessionId));
+          tx.sessions().insert(session(sessionId));
+          tx.entries().insert(rootEntry(rootEntryId, sessionId));
           return new SessionRoot(sessionId, rootEntryId);
         });
   }
@@ -488,42 +496,46 @@ class PostgresqlHarnessTransactionNotificationTest {
           UUID threadId = tx.nextId();
           UUID toolId = tx.nextId();
           if (parentThreadId != null) {
-            tx.lockThread(parentThreadId).orElseThrow();
+            tx.threads().lock(parentThreadId).orElseThrow();
           }
-          tx.insertEntry(
-              new Entry(
-                  turnStartId,
-                  sessionId,
-                  root.rootEntryId(),
-                  resolvedTurnStartPayload(threadId),
-                  T1));
-          tx.insertEntry(new Entry(userEntryId, sessionId, turnStartId, userMessagePayload(), T1));
-          tx.insertEntry(
-              new Entry(
-                  assistantEntryId,
-                  sessionId,
-                  userEntryId,
-                  mappedAssistant(spec.request(), spec.response(), T1),
-                  T1));
-          tx.insertThread(
-              new ThreadState(
-                  threadId,
-                  sessionId,
-                  parentThreadId,
-                  turnStartId,
-                  CREATION_REQUEST_HASH,
-                  "main",
-                  parentThreadId == null ? threadId : rootThreadId,
-                  false,
-                  SpawnTrigger.MODEL_TOOL,
-                  ThreadConstraints.NONE,
-                  ThreadExecutionControl.RUNNABLE,
-                  0L,
-                  1L,
-                  1L,
-                  T0,
-                  T0));
-          tx.lockThread(threadId).orElseThrow();
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStartId,
+                      sessionId,
+                      root.rootEntryId(),
+                      resolvedTurnStartPayload(threadId),
+                      T1));
+          tx.entries()
+              .insert(new Entry(userEntryId, sessionId, turnStartId, userMessagePayload(), T1));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      assistantEntryId,
+                      sessionId,
+                      userEntryId,
+                      mappedAssistant(spec.request(), spec.response(), T1),
+                      T1));
+          tx.threads()
+              .insert(
+                  new ThreadState(
+                      threadId,
+                      sessionId,
+                      parentThreadId,
+                      turnStartId,
+                      CREATION_REQUEST_HASH,
+                      "main",
+                      parentThreadId == null ? threadId : rootThreadId,
+                      false,
+                      SpawnTrigger.MODEL_TOOL,
+                      ThreadConstraints.NONE,
+                      ThreadExecutionControl.RUNNABLE,
+                      0L,
+                      1L,
+                      1L,
+                      T0,
+                      T0));
+          tx.threads().lock(threadId).orElseThrow();
           builtin(tx)
               .insertModelInvocation(
                   new ModelInvocation(
@@ -547,24 +559,25 @@ class PostgresqlHarnessTransactionNotificationTest {
           builtin(tx).updateModelInvocation(model.succeed(spec.response(), T1));
           model = builtin(tx).lockModelInvocation(modelId).orElseThrow();
           builtin(tx).updateModelInvocation(model.attachResultEntry(assistantEntryId, T1));
-          tx.insertToolInvocations(
-              List.of(
-                  new ToolInvocation(
-                      toolId,
-                      threadId,
-                      turnStartId,
-                      assistantEntryId,
-                      0,
-                      spec.call(),
-                      spec.binding(),
-                      ToolInvocationStatus.READY,
-                      0,
-                      null,
-                      null,
-                      ToolEffectBatch.EMPTY,
-                      null,
-                      T1,
-                      T1)));
+          tx.tools()
+              .insert(
+                  List.of(
+                      new ToolInvocation(
+                          toolId,
+                          threadId,
+                          turnStartId,
+                          assistantEntryId,
+                          0,
+                          spec.call(),
+                          spec.binding(),
+                          ToolInvocationStatus.READY,
+                          0,
+                          null,
+                          null,
+                          ToolEffectBatch.EMPTY,
+                          null,
+                          T1,
+                          T1)));
           return new ToolChain(turnStartId, threadId, toolId);
         });
   }
@@ -607,9 +620,9 @@ class PostgresqlHarnessTransactionNotificationTest {
       HarnessStore store, UUID toolId, UnaryOperator<ToolInvocation> transition) {
     return store.transaction(
         tx -> {
-          ToolInvocation current = tx.lockToolInvocation(toolId).orElseThrow();
+          ToolInvocation current = tx.tools().lock(toolId).orElseThrow();
           ToolInvocation next = transition.apply(current);
-          tx.updateToolInvocations(List.of(next));
+          tx.tools().update(List.of(next));
           return next;
         });
   }
@@ -619,8 +632,8 @@ class PostgresqlHarnessTransactionNotificationTest {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(threadId).orElseThrow();
-          tx.requestWork(target, environment);
+          tx.threads().lock(threadId).orElseThrow();
+          tx.work().request(target, environment);
         });
   }
 

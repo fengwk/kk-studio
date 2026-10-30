@@ -124,8 +124,9 @@ class HarnessRuntimeForkTest {
     assertEquals(newSessionId, accepted.thread().sessionId());
     assertNull(accepted.thread().parentThreadId());
 
-    EntryPath sourcePath = store.transaction(tx -> tx.loadEntryPath(source.lastEntryId()));
-    EntryPath path = store.transaction(tx -> tx.loadEntryPath(accepted.thread().headEntryId()));
+    EntryPath sourcePath = store.transaction(tx -> tx.entries().loadPath(source.lastEntryId()));
+    EntryPath path =
+        store.transaction(tx -> tx.entries().loadPath(accepted.thread().headEntryId()));
     List<Entry> entries = path.entries();
     // ROOT + 完整来源历史（不含来源 ROOT）+ FORK。
     assertEquals(sourcePath.entries().size() + 1, entries.size());
@@ -277,23 +278,23 @@ class HarnessRuntimeForkTest {
           UUID a2 = tx.nextId();
           UUID te2 = tx.nextId();
           UUID modelId = tx.nextId();
-          tx.insertSession(session(sessionId));
-          tx.insertEntry(rootEntry(root, sessionId));
-          tx.insertEntry(turnStartEntry(ts1, sessionId, root, T1, threadId));
-          tx.insertEntry(userEntry(u1, sessionId, ts1, T1, "u1"));
-          tx.insertEntry(assistantEntry(a1, sessionId, u1, T1, "call-1"));
-          tx.insertEntry(toolResultEntry(tr1, sessionId, a1, a1, 0, "call-1", T1));
-          tx.insertEntry(turnEndEntry(te1, sessionId, tr1, T1, ts1, false));
-          tx.insertEntry(turnStartEntry(ts2, sessionId, te1, T2, threadId));
-          tx.insertEntry(userEntry(u2, sessionId, ts2, T2, "u2"));
-          tx.insertEntry(assistantEntry(a2, sessionId, u2, T2));
-          tx.insertEntry(turnEndEntry(te2, sessionId, a2, T2, ts2, false));
+          tx.sessions().insert(session(sessionId));
+          tx.entries().insert(rootEntry(root, sessionId));
+          tx.entries().insert(turnStartEntry(ts1, sessionId, root, T1, threadId));
+          tx.entries().insert(userEntry(u1, sessionId, ts1, T1, "u1"));
+          tx.entries().insert(assistantEntry(a1, sessionId, u1, T1, "call-1"));
+          tx.entries().insert(toolResultEntry(tr1, sessionId, a1, a1, 0, "call-1", T1));
+          tx.entries().insert(turnEndEntry(te1, sessionId, tr1, T1, ts1, false));
+          tx.entries().insert(turnStartEntry(ts2, sessionId, te1, T2, threadId));
+          tx.entries().insert(userEntry(u2, sessionId, ts2, T2, "u2"));
+          tx.entries().insert(assistantEntry(a2, sessionId, u2, T2));
+          tx.entries().insert(turnEndEntry(te2, sessionId, a2, T2, ts2, false));
           ThreadState initialThread = thread(threadId, sessionId, u1);
-          tx.insertThread(initialThread);
+          tx.threads().insert(initialThread);
           ModelInvocation model = modelInvocation(modelId, threadId, ts1, u1, T1);
           builtin(tx).insertModelInvocation(model);
           builtin(tx).updateModelInvocation(model.cancel(modelError(), T2));
-          tx.updateThread(initialThread.advanceHead(te2, T2));
+          tx.threads().update(initialThread.advanceHead(te2, T2));
           return new HistorySeed(sessionId, threadId, root, ts1, a1, te1, te2);
         });
   }

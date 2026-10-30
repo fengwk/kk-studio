@@ -58,27 +58,31 @@ class PostgresqlBranchSettingsQueryTest {
         store.transaction(
             tx -> {
               UUID id = tx.nextId();
-              tx.insertEntry(
-                  new Entry(
-                      id,
-                      baseline.sessionId(),
-                      baseline.rootEntryId(),
-                      new TurnStartPayload(
-                          TurnStartReason.INPUT, goalSettings, StoreTestSupport.OWNER_THREAD_ID),
-                      StoreTestSupport.T1));
+              tx.entries()
+                  .insert(
+                      new Entry(
+                          id,
+                          baseline.sessionId(),
+                          baseline.rootEntryId(),
+                          new TurnStartPayload(
+                              TurnStartReason.INPUT,
+                              goalSettings,
+                              StoreTestSupport.OWNER_THREAD_ID),
+                          StoreTestSupport.T1));
               return id;
             });
 
     cteCounter.set(0);
 
-    BranchSettings settings = store.transaction(tx -> tx.loadBranchSettings(turnStartId));
+    BranchSettings settings = store.transaction(tx -> tx.entries().loadBranchSettings(turnStartId));
     assertEquals(goalSettings, settings);
     assertEquals(0, cteCounter.get(), "冷缓存窄查询不执行 with recursive entry_path 全路径 CTE");
 
     // ROOT 本身也是一个合法 head：同样只走窄查询。
     cteCounter.set(0);
     assertEquals(
-        branchSettings(), store.transaction(tx -> tx.loadBranchSettings(baseline.rootEntryId())));
+        branchSettings(),
+        store.transaction(tx -> tx.entries().loadBranchSettings(baseline.rootEntryId())));
     assertEquals(0, cteCounter.get(), "ROOT head 的窄查询同样不执行全路径 CTE");
   }
 }

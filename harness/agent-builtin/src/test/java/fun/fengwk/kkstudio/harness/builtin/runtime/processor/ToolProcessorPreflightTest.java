@@ -1270,7 +1270,8 @@ class ToolProcessorPreflightTest {
       boolean reclaimable =
           fixture.store.transaction(
               tx ->
-                  tx.claimNextWork(WorkTargetType.TOOL, "token-new", Duration.ofSeconds(30))
+                  tx.work()
+                      .claimNext(WorkTargetType.TOOL, "token-new", Duration.ofSeconds(30))
                       .isPresent());
       assertTrue(
           reclaimable, "abandoned execution must allow Work to be reclaimed after lease expiry");

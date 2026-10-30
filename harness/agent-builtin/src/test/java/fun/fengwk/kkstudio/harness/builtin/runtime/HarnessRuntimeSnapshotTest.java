@@ -127,8 +127,8 @@ class HarnessRuntimeSnapshotTest {
     // head 移到 ROOT 后模型/工具仍存在但不 applicable：快照按分类器投影为空。
     store.transaction(
         tx -> {
-          ThreadState thread = tx.lockThread(baseline.threadId()).orElseThrow();
-          tx.updateThread(thread.advanceHead(baseline.rootEntryId(), T5));
+          ThreadState thread = tx.threads().lock(baseline.threadId()).orElseThrow();
+          tx.threads().update(thread.advanceHead(baseline.rootEntryId(), T5));
           return null;
         });
     ThreadSnapshot snapshot = runtime.getThreadSnapshot(baseline.threadId());
@@ -200,7 +200,8 @@ class HarnessRuntimeSnapshotTest {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     runtime.getThreadSnapshot(baseline.threadId());
     runtime.getThreadSnapshot(baseline.threadId());
-    ThreadState thread = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
+    ThreadState thread =
+        store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow());
     assertEquals(0L, thread.version());
   }
 

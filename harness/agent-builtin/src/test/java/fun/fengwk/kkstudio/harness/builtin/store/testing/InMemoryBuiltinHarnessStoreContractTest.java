@@ -166,7 +166,7 @@ class InMemoryBuiltinHarnessStoreContractTest {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(baseline.threadId());
+          tx.threads().lock(baseline.threadId());
           builtin(tx)
               .insertModelInvocation(
                   modelInvocation(
@@ -181,17 +181,18 @@ class InMemoryBuiltinHarnessStoreContractTest {
     inTransaction(
         store,
         tx ->
-            tx.insertToolInvocations(
-                List.of(
-                    toolInvocation(
-                        TestIds.id(10),
-                        baseline.threadId(),
-                        baseline.turnStartEntryId(),
-                        assistantEntryId,
-                        0,
-                        "call-1",
-                        ToolInvocationStatus.READY,
-                        T2))));
+            tx.tools()
+                .insert(
+                    List.of(
+                        toolInvocation(
+                            TestIds.id(10),
+                            baseline.threadId(),
+                            baseline.turnStartEntryId(),
+                            assistantEntryId,
+                            0,
+                            "call-1",
+                            ToolInvocationStatus.READY,
+                            T2))));
 
     IllegalStateException failure =
         assertThrows(
@@ -217,7 +218,7 @@ class InMemoryBuiltinHarnessStoreContractTest {
     inTransaction(
         store,
         tx -> {
-          tx.lockThread(baseline.threadId());
+          tx.threads().lock(baseline.threadId());
           builtin(tx).insertModelInvocation(invocation);
           IllegalArgumentException failure =
               assertThrows(

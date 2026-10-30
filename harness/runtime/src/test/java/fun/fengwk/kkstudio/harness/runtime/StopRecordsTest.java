@@ -127,7 +127,7 @@ class StopRecordsTest {
     UUID stopRequestId = id(8L);
     StopResult result = runtime.stop(new StopCommand(baseline.threadId(), stopRequestId, 0));
     assertStopped(result);
-    EntryPath path = store.transaction(tx -> tx.loadEntryPath(result.thread().headEntryId()));
+    EntryPath path = store.transaction(tx -> tx.entries().loadPath(result.thread().headEntryId()));
     TurnEndPayload end = (TurnEndPayload) path.head().payload();
     assertEquals(stopRequestId, end.closeRequestId());
   }

@@ -101,17 +101,20 @@ class HarnessRuntimeStopModelTest {
 
     ThreadCommand command =
         store.transaction(
-            tx -> tx.findCommandByIdempotencyKey(baseline.threadId(), TestIds.id(1)).orElseThrow());
+            tx ->
+                tx.commands()
+                    .findByIdempotencyKey(baseline.threadId(), TestIds.id(1))
+                    .orElseThrow());
     assertEquals(ThreadCommandState.CANCELLED, command.state());
     assertFalse(
         store
             .transaction(
-                tx -> tx.findWork(new WorkTarget(WorkTargetType.THREAD, baseline.threadId())))
+                tx -> tx.work().find(new WorkTarget(WorkTargetType.THREAD, baseline.threadId())))
             .isPresent());
     assertFalse(
         store
             .transaction(
-                tx -> tx.findWork(new WorkTarget(WorkTargetType.MODEL, baseline.modelId())))
+                tx -> tx.work().find(new WorkTarget(WorkTargetType.MODEL, baseline.modelId())))
             .isPresent());
   }
 
@@ -155,14 +158,16 @@ class HarnessRuntimeStopModelTest {
                 });
     HarnessRuntime missingBarrier =
         new HarnessRuntime(store, driver, () -> CompactionConfig.DEFAULT);
-    ThreadState before = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
+    ThreadState before =
+        store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow());
 
     IllegalStateException error =
         assertThrows(
             IllegalStateException.class,
             () -> missingBarrier.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0)));
     assertTrue(error.getMessage().contains("must provide a stop barrier"));
-    assertEquals(before, store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow()));
+    assertEquals(
+        before, store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow()));
     assertTrue(
         store.transaction(tx -> builtin(tx).findModelInvocation(baseline.modelId())).isPresent());
   }
@@ -250,7 +255,7 @@ class HarnessRuntimeStopModelTest {
     assertFalse(
         store
             .transaction(
-                tx -> tx.findWork(new WorkTarget(WorkTargetType.MODEL, baseline.modelId())))
+                tx -> tx.work().find(new WorkTarget(WorkTargetType.MODEL, baseline.modelId())))
             .isPresent());
   }
 
@@ -330,8 +335,8 @@ class HarnessRuntimeStopModelTest {
   }
 
   private EntryPath pathOf(UUID threadId) {
-    ThreadState thread = store.transaction(tx -> tx.lockThread(threadId).orElseThrow());
-    return store.transaction(tx -> tx.loadEntryPath(thread.headEntryId()));
+    ThreadState thread = store.transaction(tx -> tx.threads().lock(threadId).orElseThrow());
+    return store.transaction(tx -> tx.entries().loadPath(thread.headEntryId()));
   }
 
   private static void assertStoppedEnd(

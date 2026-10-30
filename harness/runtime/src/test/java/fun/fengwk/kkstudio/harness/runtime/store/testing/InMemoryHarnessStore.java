@@ -25,12 +25,21 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.store.CommandStore;
+import fun.fengwk.kkstudio.harness.runtime.store.EntryStore;
 import fun.fengwk.kkstudio.harness.runtime.store.EnvironmentToolWaitRow;
+import fun.fengwk.kkstudio.harness.runtime.store.ExecutionExitStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
+import fun.fengwk.kkstudio.harness.runtime.store.JoinStore;
 import fun.fengwk.kkstudio.harness.runtime.store.PendingEnvironmentWaitRow;
 import fun.fengwk.kkstudio.harness.runtime.store.PendingToolInvocationRow;
+import fun.fengwk.kkstudio.harness.runtime.store.SessionStore;
+import fun.fengwk.kkstudio.harness.runtime.store.StopReceiptStore;
+import fun.fengwk.kkstudio.harness.runtime.store.ThreadStore;
+import fun.fengwk.kkstudio.harness.runtime.store.ToolStore;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
+import fun.fengwk.kkstudio.harness.runtime.store.WorkStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NotificationCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
@@ -449,17 +458,71 @@ public class InMemoryHarnessStore implements HarnessStore {
     private boolean closed;
     private Instant now;
 
+    private final SessionStore sessions = new Sessions();
+    private final EntryStore entries = new Entries();
+    private final ThreadStore threads = new Threads();
+    private final CommandStore commands = new Commands();
+    private final ToolStore tools = new Tools();
+    private final WorkStore work = new WorkView();
+    private final JoinStore joins = new Joins();
+    private final StopReceiptStore stops = new Stops();
+    private final ExecutionExitStore exits = new Exits();
+
     protected InMemoryTransaction(State state) {
       this.state = state;
     }
 
-    @Override
     public Instant now() {
       checkOpen();
       if (now == null) {
         now = clock.instant();
       }
       return now;
+    }
+
+    public SessionStore sessions() {
+      checkOpen();
+      return sessions;
+    }
+
+    public EntryStore entries() {
+      checkOpen();
+      return entries;
+    }
+
+    public ThreadStore threads() {
+      checkOpen();
+      return threads;
+    }
+
+    public CommandStore commands() {
+      checkOpen();
+      return commands;
+    }
+
+    public ToolStore tools() {
+      checkOpen();
+      return tools;
+    }
+
+    public WorkStore work() {
+      checkOpen();
+      return work;
+    }
+
+    public JoinStore joins() {
+      checkOpen();
+      return joins;
+    }
+
+    public StopReceiptStore stops() {
+      checkOpen();
+      return stops;
+    }
+
+    public ExecutionExitStore exits() {
+      checkOpen();
+      return exits;
     }
 
     protected void close() {
@@ -639,14 +702,12 @@ public class InMemoryHarnessStore implements HarnessStore {
       return entry;
     }
 
-    @Override
     public UUID nextId() {
       checkOpen();
       state.nextId = Math.addExact(state.nextId, 1L);
       return new UUID(0L, state.nextId);
     }
 
-    @Override
     public void insertSession(Session session) {
       checkOpen();
       Objects.requireNonNull(session, "session");
@@ -655,7 +716,6 @@ public class InMemoryHarnessStore implements HarnessStore {
       state.sessions.put(session.id(), session);
     }
 
-    @Override
     public void updateSession(Session session) {
       checkOpen();
       Objects.requireNonNull(session, "session");
@@ -669,13 +729,11 @@ public class InMemoryHarnessStore implements HarnessStore {
       state.sessions.put(session.id(), session);
     }
 
-    @Override
     public Optional<Session> findSession(UUID id) {
       checkOpen();
       return Optional.ofNullable(state.sessions.get(id));
     }
 
-    @Override
     public Optional<Session> lockSessionForKeyShare(UUID id) {
       checkOpen();
       // 已持有的行锁重复获取不改变加锁顺序，因此不再做 rank 回退检查（幂等重锁）。
@@ -689,13 +747,11 @@ public class InMemoryHarnessStore implements HarnessStore {
       return Optional.ofNullable(session);
     }
 
-    @Override
     public Optional<Session> lockSessionForUpdate(UUID id) {
       // 单 monitor 参考实现没有真正的并发，但为与生产实现一致的锁序记账，FOR UPDATE 与 KEY SHARE 走同一路径。
       return lockSessionForKeyShare(id);
     }
 
-    @Override
     public void insertEntry(Entry entry) {
       checkOpen();
       Objects.requireNonNull(entry, "entry");
@@ -729,13 +785,11 @@ public class InMemoryHarnessStore implements HarnessStore {
       return findRootEntry(sessionId).isPresent();
     }
 
-    @Override
     public Optional<Entry> findEntry(UUID id) {
       checkOpen();
       return Optional.ofNullable(state.entries.get(id));
     }
 
-    @Override
     public Optional<Entry> findRootEntry(UUID sessionId) {
       checkOpen();
       Objects.requireNonNull(sessionId, "sessionId");
@@ -747,7 +801,6 @@ public class InMemoryHarnessStore implements HarnessStore {
       return Optional.empty();
     }
 
-    @Override
     public EntryPath loadEntryPath(UUID headEntryId) {
       checkOpen();
       List<Entry> path = new ArrayList<>();
@@ -761,7 +814,6 @@ public class InMemoryHarnessStore implements HarnessStore {
       return new EntryPath(path);
     }
 
-    @Override
     public List<Entry> loadContributorCustomEntriesOnPath(UUID headEntryId, String contributorId) {
       checkOpen();
       Objects.requireNonNull(headEntryId, "headEntryId");
@@ -774,7 +826,6 @@ public class InMemoryHarnessStore implements HarnessStore {
           .toList();
     }
 
-    @Override
     public BranchSettings loadBranchSettings(UUID headEntryId) {
       checkOpen();
       Objects.requireNonNull(headEntryId, "headEntryId");
@@ -782,7 +833,6 @@ public class InMemoryHarnessStore implements HarnessStore {
       return loadEntryPath(headEntryId).baseSettings();
     }
 
-    @Override
     public List<Entry> loadEntriesBySessionId(UUID sessionId) {
       checkOpen();
       Objects.requireNonNull(sessionId, "sessionId");
@@ -800,7 +850,6 @@ public class InMemoryHarnessStore implements HarnessStore {
       return List.copyOf(entries);
     }
 
-    @Override
     public void insertThread(ThreadState thread) {
       checkOpen();
       Objects.requireNonNull(thread, "thread");
@@ -848,13 +897,11 @@ public class InMemoryHarnessStore implements HarnessStore {
       }
     }
 
-    @Override
     public Optional<ThreadState> findThread(UUID id) {
       checkOpen();
       return Optional.ofNullable(state.threads.get(id));
     }
 
-    @Override
     public Optional<ThreadState> lockThread(UUID id) {
       checkOpen();
       requireCanLockThread(id);
@@ -865,7 +912,6 @@ public class InMemoryHarnessStore implements HarnessStore {
       return Optional.ofNullable(thread);
     }
 
-    @Override
     public List<ThreadState> listThreadsBySession(UUID sessionId) {
       checkOpen();
       Objects.requireNonNull(sessionId, "sessionId");
@@ -880,7 +926,6 @@ public class InMemoryHarnessStore implements HarnessStore {
           .toList();
     }
 
-    @Override
     public List<ThreadState> listChildren(UUID parentThreadId) {
       checkOpen();
       Objects.requireNonNull(parentThreadId, "parentThreadId");
@@ -890,7 +935,6 @@ public class InMemoryHarnessStore implements HarnessStore {
           .toList();
     }
 
-    @Override
     public void updateThread(ThreadState thread) {
       checkOpen();
       Objects.requireNonNull(thread, "thread");
@@ -934,7 +978,6 @@ public class InMemoryHarnessStore implements HarnessStore {
       }
     }
 
-    @Override
     public List<UUID> findAncestorChain(UUID threadId) {
       checkOpen();
       Objects.requireNonNull(threadId, "threadId");
@@ -949,7 +992,6 @@ public class InMemoryHarnessStore implements HarnessStore {
       return List.copyOf(chain);
     }
 
-    @Override
     public List<ThreadState> listThreadsByRoot(UUID rootThreadId) {
       checkOpen();
       Objects.requireNonNull(rootThreadId, "rootThreadId");
@@ -958,7 +1000,6 @@ public class InMemoryHarnessStore implements HarnessStore {
           .toList();
     }
 
-    @Override
     public void lockTree(UUID rootThreadId) {
       checkOpen();
       Objects.requireNonNull(rootThreadId, "rootThreadId");
@@ -977,7 +1018,6 @@ public class InMemoryHarnessStore implements HarnessStore {
       lockedTrees.add(rootThreadId);
     }
 
-    @Override
     public void insertJoin(ThreadJoin join) {
       checkOpen();
       Objects.requireNonNull(join, "join");
@@ -1008,14 +1048,12 @@ public class InMemoryHarnessStore implements HarnessStore {
       state.joins.put(join.invocationId(), join);
     }
 
-    @Override
     public Optional<ThreadJoin> findJoin(UUID invocationId) {
       checkOpen();
       Objects.requireNonNull(invocationId, "invocationId");
       return Optional.ofNullable(state.joins.get(invocationId));
     }
 
-    @Override
     public List<ThreadJoin> loadIncompleteJoins(UUID childThreadId) {
       checkOpen();
       Objects.requireNonNull(childThreadId, "childThreadId");
@@ -1031,7 +1069,6 @@ public class InMemoryHarnessStore implements HarnessStore {
           .toList();
     }
 
-    @Override
     public int countIncompleteChildJoins(UUID parentThreadId) {
       checkOpen();
       Objects.requireNonNull(parentThreadId, "parentThreadId");
@@ -1046,7 +1083,6 @@ public class InMemoryHarnessStore implements HarnessStore {
               .count();
     }
 
-    @Override
     public boolean hasIncompleteOwnerChildJoin(UUID parentThreadId) {
       checkOpen();
       Objects.requireNonNull(parentThreadId, "parentThreadId");
@@ -1059,7 +1095,6 @@ public class InMemoryHarnessStore implements HarnessStore {
                       && join.delivery() == JoinDelivery.SETTLE_OWNER_TURN);
     }
 
-    @Override
     public void lockJoinAdmission() {
       checkOpen();
       if (joinAdmissionLocked) {
@@ -1073,7 +1108,6 @@ public class InMemoryHarnessStore implements HarnessStore {
       joinAdmissionLocked = true;
     }
 
-    @Override
     public int countIncompleteSubagentJoins() {
       checkOpen();
       return (int)
@@ -1087,7 +1121,6 @@ public class InMemoryHarnessStore implements HarnessStore {
               .count();
     }
 
-    @Override
     public void insertStopReceipts(
         UUID rootThreadId, UUID rootStopRequestId, List<StoppedThreadReceipt> receipts) {
       checkOpen();
@@ -1161,7 +1194,6 @@ public class InMemoryHarnessStore implements HarnessStore {
       }
     }
 
-    @Override
     public Optional<StoppedThreadReceipt> findStopReceipt(UUID threadId, UUID stopRequestId) {
       checkOpen();
       Objects.requireNonNull(threadId, "threadId");
@@ -1171,7 +1203,6 @@ public class InMemoryHarnessStore implements HarnessStore {
           .map(StoredStopReceipt::receipt);
     }
 
-    @Override
     public List<StoppedThreadReceipt> loadStopReceiptsByThread(UUID threadId) {
       checkOpen();
       Objects.requireNonNull(threadId, "threadId");
@@ -1181,7 +1212,6 @@ public class InMemoryHarnessStore implements HarnessStore {
           .toList();
     }
 
-    @Override
     public List<StoppedThreadReceipt> loadStopReceiptsByRootRequest(
         UUID rootThreadId, UUID rootStopRequestId) {
       checkOpen();
@@ -1199,7 +1229,6 @@ public class InMemoryHarnessStore implements HarnessStore {
           .toList();
     }
 
-    @Override
     public void updateJoin(ThreadJoin join) {
       checkOpen();
       Objects.requireNonNull(join, "join");
@@ -1309,7 +1338,6 @@ public class InMemoryHarnessStore implements HarnessStore {
       return -1;
     }
 
-    @Override
     public int deleteJoinsByChild(UUID childThreadId) {
       checkOpen();
       Objects.requireNonNull(childThreadId, "childThreadId");
@@ -1346,7 +1374,6 @@ public class InMemoryHarnessStore implements HarnessStore {
       return count;
     }
 
-    @Override
     public Optional<ThreadCommand> findCommandByIdempotencyKey(UUID threadId, UUID idempotencyKey) {
       checkOpen();
       Objects.requireNonNull(idempotencyKey, "idempotencyKey");
@@ -1359,7 +1386,6 @@ public class InMemoryHarnessStore implements HarnessStore {
       return Optional.empty();
     }
 
-    @Override
     public Optional<ThreadCommand> findCommand(UUID threadId, long sequence) {
       checkOpen();
       Objects.requireNonNull(threadId, "threadId");
@@ -1371,7 +1397,6 @@ public class InMemoryHarnessStore implements HarnessStore {
       return Optional.empty();
     }
 
-    @Override
     public int deleteJoinsForThreads(List<UUID> threadIds) {
       checkOpen();
       List<UUID> copied = List.copyOf(threadIds);
@@ -1405,7 +1430,6 @@ public class InMemoryHarnessStore implements HarnessStore {
       return count;
     }
 
-    @Override
     public List<ThreadCommand> loadQueuedCommands(UUID threadId) {
       checkOpen();
       // 锁序 Thread -> commands：先锁 Thread 才能读它的 mailbox。
@@ -1425,7 +1449,6 @@ public class InMemoryHarnessStore implements HarnessStore {
       return queued;
     }
 
-    @Override
     public boolean hasAppliedNotificationAfter(UUID threadId, long afterSequence) {
       checkOpen();
       Objects.requireNonNull(threadId, "threadId");
@@ -1438,7 +1461,6 @@ public class InMemoryHarnessStore implements HarnessStore {
                       && command.type().isNotification());
     }
 
-    @Override
     public List<ThreadCommand> loadCancelledCommandsByRequest(UUID threadId, UUID stopRequestId) {
       checkOpen();
       Objects.requireNonNull(threadId, "threadId");
@@ -1452,7 +1474,6 @@ public class InMemoryHarnessStore implements HarnessStore {
           .toList();
     }
 
-    @Override
     public void insertCommands(List<ThreadCommand> commands) {
       checkOpen();
       List<ThreadCommand> copied =
@@ -1515,7 +1536,6 @@ public class InMemoryHarnessStore implements HarnessStore {
       }
     }
 
-    @Override
     public void updateCommands(List<ThreadCommand> commands) {
       checkOpen();
       List<ThreadCommand> copied =
@@ -1706,7 +1726,6 @@ public class InMemoryHarnessStore implements HarnessStore {
       return Optional.ofNullable(state.toolInvocations.get(id));
     }
 
-    @Override
     public Optional<ToolInvocation> lockToolInvocation(UUID id) {
       checkOpen();
       ToolInvocation invocation = state.toolInvocations.get(id);
@@ -1716,7 +1735,6 @@ public class InMemoryHarnessStore implements HarnessStore {
       return Optional.ofNullable(invocation);
     }
 
-    @Override
     public List<ToolInvocation> loadToolInvocationsByAssistantEntryId(UUID assistantEntryId) {
       checkOpen();
       return state.toolInvocations.values().stream()
@@ -1725,7 +1743,6 @@ public class InMemoryHarnessStore implements HarnessStore {
           .toList();
     }
 
-    @Override
     public List<ToolInvocation> lockToolInvocationsByAssistantEntryId(UUID assistantEntryId) {
       checkOpen();
       requireCanLockRank(LockRank.TOOL);
@@ -1737,7 +1754,6 @@ public class InMemoryHarnessStore implements HarnessStore {
       return invocations;
     }
 
-    @Override
     public List<PendingToolInvocationRow> listPendingToolInvocations(
         Instant afterCreatedAt, UUID afterId, int limit) {
       checkOpen();
@@ -1776,7 +1792,6 @@ public class InMemoryHarnessStore implements HarnessStore {
       return UuidOrder.COMPARATOR.compare(invocation.id(), afterId) > 0;
     }
 
-    @Override
     public List<PendingEnvironmentWaitRow> listPendingEnvironmentWaits(
         Instant afterRepresentativeCreatedAt, UUID afterRepresentativeInvocationId, int limit) {
       checkOpen();
@@ -1833,7 +1848,6 @@ public class InMemoryHarnessStore implements HarnessStore {
       return List.copyOf(rows.size() > limit ? rows.subList(0, limit) : rows);
     }
 
-    @Override
     public List<EnvironmentToolWaitRow> listEnvironmentToolWaits(Collection<UUID> invocationIds) {
       checkOpen();
       Instant now = now();
@@ -1867,7 +1881,6 @@ public class InMemoryHarnessStore implements HarnessStore {
       return List.copyOf(rows);
     }
 
-    @Override
     public Optional<Instant> findNextEnvironmentWaitChange() {
       checkOpen();
       Instant now = now();
@@ -1915,7 +1928,6 @@ public class InMemoryHarnessStore implements HarnessStore {
       return current == null || candidate.isBefore(current) ? candidate : current;
     }
 
-    @Override
     public Optional<Entry> findToolResultEntryByInvocationId(UUID sessionId, UUID invocationId) {
       checkOpen();
       Objects.requireNonNull(sessionId, "sessionId");
@@ -1937,7 +1949,6 @@ public class InMemoryHarnessStore implements HarnessStore {
       return Optional.ofNullable(found);
     }
 
-    @Override
     public void insertToolInvocations(List<ToolInvocation> invocations) {
       checkOpen();
       List<ToolInvocation> copied =
@@ -2065,7 +2076,6 @@ public class InMemoryHarnessStore implements HarnessStore {
           && message.message().role() == AgentMessageRole.ASSISTANT;
     }
 
-    @Override
     public void updateToolInvocations(List<ToolInvocation> invocations) {
       checkOpen();
       List<ToolInvocation> copied =
@@ -2090,14 +2100,12 @@ public class InMemoryHarnessStore implements HarnessStore {
       }
     }
 
-    @Override
     public Optional<Work> findWork(WorkTarget target) {
       checkOpen();
       Objects.requireNonNull(target, "target");
       return Optional.ofNullable(state.works.get(target));
     }
 
-    @Override
     public Optional<Work> lockWork(WorkTarget target) {
       checkOpen();
       Objects.requireNonNull(target, "target");
@@ -2109,7 +2117,6 @@ public class InMemoryHarnessStore implements HarnessStore {
       return Optional.ofNullable(work);
     }
 
-    @Override
     public Optional<Work> lockClaimedWork(ClaimedWork claim) {
       checkOpen();
       Instant now = now();
@@ -2127,7 +2134,6 @@ public class InMemoryHarnessStore implements HarnessStore {
       return Optional.of(work);
     }
 
-    @Override
     public boolean deleteWork(WorkTarget target) {
       checkOpen();
       Objects.requireNonNull(target, "target");
@@ -2143,7 +2149,6 @@ public class InMemoryHarnessStore implements HarnessStore {
 
     // ---------- 应用侧深删除原语（与 PostgresqlHarnessTransaction 语义一致） ----------
 
-    @Override
     public int deleteThreads(List<UUID> threadIds) {
       checkOpen();
       Objects.requireNonNull(threadIds, "threadIds");
@@ -2248,7 +2253,6 @@ public class InMemoryHarnessStore implements HarnessStore {
       return copied.size();
     }
 
-    @Override
     public ExecutionExitFact registerExecution(ExecutionExitFact fact) {
       checkOpen();
       Objects.requireNonNull(fact, "fact");
@@ -2273,7 +2277,6 @@ public class InMemoryHarnessStore implements HarnessStore {
       return fact;
     }
 
-    @Override
     public Optional<ExecutionExitFact> confirmExecution(
         ExecutionExitFact expected, ExecutionExitState state, Instant confirmedAt) {
       checkOpen();
@@ -2294,7 +2297,6 @@ public class InMemoryHarnessStore implements HarnessStore {
       return Optional.of(confirmed);
     }
 
-    @Override
     public Optional<ExecutionExitFact> abandonExecution(
         ExecutionExitFact expected, Instant abandonedAt) {
       checkOpen();
@@ -2311,7 +2313,6 @@ public class InMemoryHarnessStore implements HarnessStore {
       return Optional.of(abandoned);
     }
 
-    @Override
     public List<ExecutionExitFact> loadUnconfirmedExecutions(UUID threadId) {
       checkOpen();
       Objects.requireNonNull(threadId, "threadId");
@@ -2326,7 +2327,6 @@ public class InMemoryHarnessStore implements HarnessStore {
           .toList();
     }
 
-    @Override
     public Optional<ExecutionExitFact> findExecution(UUID executionId) {
       checkOpen();
       Objects.requireNonNull(executionId, "executionId");
@@ -2340,7 +2340,6 @@ public class InMemoryHarnessStore implements HarnessStore {
       }
     }
 
-    @Override
     public int deleteEntries(UUID sessionId) {
       checkOpen();
       Objects.requireNonNull(sessionId, "sessionId");
@@ -2369,14 +2368,12 @@ public class InMemoryHarnessStore implements HarnessStore {
       }
     }
 
-    @Override
     public boolean deleteSession(UUID sessionId) {
       checkOpen();
       Objects.requireNonNull(sessionId, "sessionId");
       return state.sessions.remove(sessionId) != null;
     }
 
-    @Override
     public int deleteToolInvocationsByIds(List<UUID> toolInvocationIds) {
       checkOpen();
       List<UUID> copied =
@@ -2402,12 +2399,10 @@ public class InMemoryHarnessStore implements HarnessStore {
       return copied.size();
     }
 
-    @Override
     public void requestWork(WorkTarget target) {
       requestWork(target, null);
     }
 
-    @Override
     public void requestWork(WorkTarget target, EnvironmentId requiredEnvironmentId) {
       checkOpen();
       Instant now = now();
@@ -2466,13 +2461,11 @@ public class InMemoryHarnessStore implements HarnessStore {
       }
     }
 
-    @Override
     public Optional<ClaimedWork> claimNextWork(
         WorkTargetType targetType, String leaseToken, Duration leaseDuration) {
       return claimNextWork(targetType, leaseToken, leaseDuration, null);
     }
 
-    @Override
     public Optional<ClaimedWork> claimNextWork(
         WorkTargetType targetType, String leaseToken, Duration leaseDuration, UUID nodeInstanceId) {
       checkOpen();
@@ -2521,7 +2514,6 @@ public class InMemoryHarnessStore implements HarnessStore {
           && routeReadyPredicate.isRouteReady(nodeInstanceId, environmentId, now);
     }
 
-    @Override
     public boolean renewWork(ClaimedWork claim, Duration leaseDuration) {
       checkOpen();
       Instant now = now();
@@ -2538,7 +2530,6 @@ public class InMemoryHarnessStore implements HarnessStore {
       return true;
     }
 
-    @Override
     public Optional<Work> completeWork(ClaimedWork claim) {
       checkOpen();
       Instant now = now();
@@ -2560,7 +2551,6 @@ public class InMemoryHarnessStore implements HarnessStore {
       return next;
     }
 
-    @Override
     public void rescheduleWork(ClaimedWork claim, Duration delay) {
       checkOpen();
       Instant now = now();
@@ -2570,6 +2560,412 @@ public class InMemoryHarnessStore implements HarnessStore {
       Work next =
           work.reschedule(claim.leaseToken(), claim.claimedWakeVersion(), now, now.plus(delay));
       state.works.put(next.target(), next);
+    }
+
+    private final class Sessions implements SessionStore {
+
+      @Override
+      public void insert(Session session) {
+        InMemoryTransaction.this.insertSession(session);
+      }
+
+      @Override
+      public Optional<Session> find(UUID id) {
+        return InMemoryTransaction.this.findSession(id);
+      }
+
+      @Override
+      public void update(Session session) {
+        InMemoryTransaction.this.updateSession(session);
+      }
+
+      @Override
+      public Optional<Session> lockForKeyShare(UUID id) {
+        return InMemoryTransaction.this.lockSessionForKeyShare(id);
+      }
+
+      @Override
+      public Optional<Session> lockForUpdate(UUID id) {
+        return InMemoryTransaction.this.lockSessionForUpdate(id);
+      }
+
+      @Override
+      public boolean delete(UUID sessionId) {
+        return InMemoryTransaction.this.deleteSession(sessionId);
+      }
+    }
+
+    private final class Entries implements EntryStore {
+
+      @Override
+      public void insert(Entry entry) {
+        InMemoryTransaction.this.insertEntry(entry);
+      }
+
+      @Override
+      public Optional<Entry> find(UUID id) {
+        return InMemoryTransaction.this.findEntry(id);
+      }
+
+      @Override
+      public Optional<Entry> findRoot(UUID sessionId) {
+        return InMemoryTransaction.this.findRootEntry(sessionId);
+      }
+
+      @Override
+      public EntryPath loadPath(UUID headEntryId) {
+        return InMemoryTransaction.this.loadEntryPath(headEntryId);
+      }
+
+      @Override
+      public List<Entry> loadContributorCustom(UUID headEntryId, String contributorId) {
+        return InMemoryTransaction.this.loadContributorCustomEntriesOnPath(
+            headEntryId, contributorId);
+      }
+
+      @Override
+      public BranchSettings loadBranchSettings(UUID headEntryId) {
+        return InMemoryTransaction.this.loadBranchSettings(headEntryId);
+      }
+
+      @Override
+      public List<Entry> loadBySession(UUID sessionId) {
+        return InMemoryTransaction.this.loadEntriesBySessionId(sessionId);
+      }
+
+      @Override
+      public Optional<Entry> findToolResultByInvocationId(UUID sessionId, UUID invocationId) {
+        return InMemoryTransaction.this.findToolResultEntryByInvocationId(sessionId, invocationId);
+      }
+
+      @Override
+      public int delete(UUID sessionId) {
+        return InMemoryTransaction.this.deleteEntries(sessionId);
+      }
+    }
+
+    private final class Threads implements ThreadStore {
+
+      @Override
+      public void insert(ThreadState thread) {
+        InMemoryTransaction.this.insertThread(thread);
+      }
+
+      @Override
+      public Optional<ThreadState> find(UUID id) {
+        return InMemoryTransaction.this.findThread(id);
+      }
+
+      @Override
+      public Optional<ThreadState> lock(UUID id) {
+        return InMemoryTransaction.this.lockThread(id);
+      }
+
+      @Override
+      public void update(ThreadState thread) {
+        InMemoryTransaction.this.updateThread(thread);
+      }
+
+      @Override
+      public List<ThreadState> listBySession(UUID sessionId) {
+        return InMemoryTransaction.this.listThreadsBySession(sessionId);
+      }
+
+      @Override
+      public List<ThreadState> listChildren(UUID parentThreadId) {
+        return InMemoryTransaction.this.listChildren(parentThreadId);
+      }
+
+      @Override
+      public List<UUID> findAncestorChain(UUID threadId) {
+        return InMemoryTransaction.this.findAncestorChain(threadId);
+      }
+
+      @Override
+      public List<ThreadState> listByRoot(UUID rootThreadId) {
+        return InMemoryTransaction.this.listThreadsByRoot(rootThreadId);
+      }
+
+      @Override
+      public void lockTree(UUID rootThreadId) {
+        InMemoryTransaction.this.lockTree(rootThreadId);
+      }
+
+      @Override
+      public int delete(List<UUID> threadIds) {
+        return InMemoryTransaction.this.deleteThreads(threadIds);
+      }
+    }
+
+    private final class Commands implements CommandStore {
+
+      @Override
+      public Optional<ThreadCommand> findByIdempotencyKey(UUID threadId, UUID idempotencyKey) {
+        return InMemoryTransaction.this.findCommandByIdempotencyKey(threadId, idempotencyKey);
+      }
+
+      @Override
+      public Optional<ThreadCommand> find(UUID threadId, long sequence) {
+        return InMemoryTransaction.this.findCommand(threadId, sequence);
+      }
+
+      @Override
+      public List<ThreadCommand> loadQueued(UUID threadId) {
+        return InMemoryTransaction.this.loadQueuedCommands(threadId);
+      }
+
+      @Override
+      public boolean hasAppliedNotificationAfter(UUID threadId, long afterSequence) {
+        return InMemoryTransaction.this.hasAppliedNotificationAfter(threadId, afterSequence);
+      }
+
+      @Override
+      public List<ThreadCommand> loadCancelledByRequest(UUID threadId, UUID stopRequestId) {
+        return InMemoryTransaction.this.loadCancelledCommandsByRequest(threadId, stopRequestId);
+      }
+
+      @Override
+      public void insert(List<ThreadCommand> commands) {
+        InMemoryTransaction.this.insertCommands(commands);
+      }
+
+      @Override
+      public void update(List<ThreadCommand> commands) {
+        InMemoryTransaction.this.updateCommands(commands);
+      }
+    }
+
+    private final class Tools implements ToolStore {
+
+      @Override
+      public Optional<ToolInvocation> find(UUID id) {
+        return InMemoryTransaction.this.findToolInvocation(id);
+      }
+
+      @Override
+      public Optional<ToolInvocation> lock(UUID id) {
+        return InMemoryTransaction.this.lockToolInvocation(id);
+      }
+
+      @Override
+      public List<ToolInvocation> loadByAssistantEntry(UUID assistantEntryId) {
+        return InMemoryTransaction.this.loadToolInvocationsByAssistantEntryId(assistantEntryId);
+      }
+
+      @Override
+      public List<ToolInvocation> lockByAssistantEntry(UUID assistantEntryId) {
+        return InMemoryTransaction.this.lockToolInvocationsByAssistantEntryId(assistantEntryId);
+      }
+
+      @Override
+      public List<PendingToolInvocationRow> listPending(
+          Instant afterCreatedAt, UUID afterId, int limit) {
+        return InMemoryTransaction.this.listPendingToolInvocations(afterCreatedAt, afterId, limit);
+      }
+
+      @Override
+      public List<PendingEnvironmentWaitRow> listPendingEnvironmentWaits(
+          Instant afterRepresentativeCreatedAt, UUID afterRepresentativeInvocationId, int limit) {
+        return InMemoryTransaction.this.listPendingEnvironmentWaits(
+            afterRepresentativeCreatedAt, afterRepresentativeInvocationId, limit);
+      }
+
+      @Override
+      public List<EnvironmentToolWaitRow> listEnvironmentWaits(Collection<UUID> invocationIds) {
+        return InMemoryTransaction.this.listEnvironmentToolWaits(invocationIds);
+      }
+
+      @Override
+      public Optional<Instant> findNextEnvironmentWaitChange() {
+        return InMemoryTransaction.this.findNextEnvironmentWaitChange();
+      }
+
+      @Override
+      public void insert(List<ToolInvocation> invocations) {
+        InMemoryTransaction.this.insertToolInvocations(invocations);
+      }
+
+      @Override
+      public void update(List<ToolInvocation> invocations) {
+        InMemoryTransaction.this.updateToolInvocations(invocations);
+      }
+
+      @Override
+      public int deleteByIds(List<UUID> toolInvocationIds) {
+        return InMemoryTransaction.this.deleteToolInvocationsByIds(toolInvocationIds);
+      }
+    }
+
+    private final class WorkView implements WorkStore {
+
+      @Override
+      public Optional<Work> find(WorkTarget target) {
+        return InMemoryTransaction.this.findWork(target);
+      }
+
+      @Override
+      public Optional<Work> lock(WorkTarget target) {
+        return InMemoryTransaction.this.lockWork(target);
+      }
+
+      @Override
+      public Optional<Work> lockClaimed(ClaimedWork claim) {
+        return InMemoryTransaction.this.lockClaimedWork(claim);
+      }
+
+      @Override
+      public boolean delete(WorkTarget target) {
+        return InMemoryTransaction.this.deleteWork(target);
+      }
+
+      @Override
+      public void request(WorkTarget target) {
+        InMemoryTransaction.this.requestWork(target);
+      }
+
+      @Override
+      public void request(WorkTarget target, EnvironmentId requiredEnvironmentId) {
+        InMemoryTransaction.this.requestWork(target, requiredEnvironmentId);
+      }
+
+      @Override
+      public Optional<ClaimedWork> claimNext(
+          WorkTargetType targetType, String leaseToken, Duration leaseDuration) {
+        return InMemoryTransaction.this.claimNextWork(targetType, leaseToken, leaseDuration);
+      }
+
+      @Override
+      public Optional<ClaimedWork> claimNext(
+          WorkTargetType targetType,
+          String leaseToken,
+          Duration leaseDuration,
+          UUID nodeInstanceId) {
+        return InMemoryTransaction.this.claimNextWork(
+            targetType, leaseToken, leaseDuration, nodeInstanceId);
+      }
+
+      @Override
+      public boolean renew(ClaimedWork claim, Duration leaseDuration) {
+        return InMemoryTransaction.this.renewWork(claim, leaseDuration);
+      }
+
+      @Override
+      public Optional<Work> complete(ClaimedWork claim) {
+        return InMemoryTransaction.this.completeWork(claim);
+      }
+
+      @Override
+      public void reschedule(ClaimedWork claim, Duration delay) {
+        InMemoryTransaction.this.rescheduleWork(claim, delay);
+      }
+    }
+
+    private final class Joins implements JoinStore {
+
+      @Override
+      public void lockAdmission() {
+        InMemoryTransaction.this.lockJoinAdmission();
+      }
+
+      @Override
+      public void insert(ThreadJoin join) {
+        InMemoryTransaction.this.insertJoin(join);
+      }
+
+      @Override
+      public Optional<ThreadJoin> find(UUID invocationId) {
+        return InMemoryTransaction.this.findJoin(invocationId);
+      }
+
+      @Override
+      public List<ThreadJoin> loadIncomplete(UUID childThreadId) {
+        return InMemoryTransaction.this.loadIncompleteJoins(childThreadId);
+      }
+
+      @Override
+      public int countIncompleteChildren(UUID parentThreadId) {
+        return InMemoryTransaction.this.countIncompleteChildJoins(parentThreadId);
+      }
+
+      @Override
+      public boolean hasIncompleteOwnerChild(UUID parentThreadId) {
+        return InMemoryTransaction.this.hasIncompleteOwnerChildJoin(parentThreadId);
+      }
+
+      @Override
+      public int countIncompleteSubagent() {
+        return InMemoryTransaction.this.countIncompleteSubagentJoins();
+      }
+
+      @Override
+      public void update(ThreadJoin join) {
+        InMemoryTransaction.this.updateJoin(join);
+      }
+
+      @Override
+      public int deleteByChild(UUID childThreadId) {
+        return InMemoryTransaction.this.deleteJoinsByChild(childThreadId);
+      }
+
+      @Override
+      public int deleteForThreads(List<UUID> threadIds) {
+        return InMemoryTransaction.this.deleteJoinsForThreads(threadIds);
+      }
+    }
+
+    private final class Stops implements StopReceiptStore {
+
+      @Override
+      public void insertReceipts(
+          UUID rootThreadId, UUID rootStopRequestId, List<StoppedThreadReceipt> receipts) {
+        InMemoryTransaction.this.insertStopReceipts(rootThreadId, rootStopRequestId, receipts);
+      }
+
+      @Override
+      public Optional<StoppedThreadReceipt> findReceipt(UUID threadId, UUID stopRequestId) {
+        return InMemoryTransaction.this.findStopReceipt(threadId, stopRequestId);
+      }
+
+      @Override
+      public List<StoppedThreadReceipt> loadByThread(UUID threadId) {
+        return InMemoryTransaction.this.loadStopReceiptsByThread(threadId);
+      }
+
+      @Override
+      public List<StoppedThreadReceipt> loadByRootRequest(
+          UUID rootThreadId, UUID rootStopRequestId) {
+        return InMemoryTransaction.this.loadStopReceiptsByRootRequest(
+            rootThreadId, rootStopRequestId);
+      }
+    }
+
+    private final class Exits implements ExecutionExitStore {
+
+      @Override
+      public ExecutionExitFact register(ExecutionExitFact fact) {
+        return InMemoryTransaction.this.registerExecution(fact);
+      }
+
+      @Override
+      public Optional<ExecutionExitFact> confirm(
+          ExecutionExitFact expected, ExecutionExitState state, Instant confirmedAt) {
+        return InMemoryTransaction.this.confirmExecution(expected, state, confirmedAt);
+      }
+
+      @Override
+      public Optional<ExecutionExitFact> abandon(ExecutionExitFact expected, Instant abandonedAt) {
+        return InMemoryTransaction.this.abandonExecution(expected, abandonedAt);
+      }
+
+      @Override
+      public List<ExecutionExitFact> loadUnconfirmed(UUID threadId) {
+        return InMemoryTransaction.this.loadUnconfirmedExecutions(threadId);
+      }
+
+      @Override
+      public Optional<ExecutionExitFact> find(UUID executionId) {
+        return InMemoryTransaction.this.findExecution(executionId);
+      }
     }
 
     private Work lockedWork(WorkTarget target) {

@@ -403,7 +403,7 @@ class PostgresqlSubagentContinuationTest {
 
   private boolean hasThreadWork(UUID threadId) {
     return store.<Boolean>transaction(
-        tx -> tx.findWork(new WorkTarget(WorkTargetType.THREAD, threadId)).isPresent());
+        tx -> tx.work().find(new WorkTarget(WorkTargetType.THREAD, threadId)).isPresent());
   }
 
   private ClaimedWork processNext(UUID expectedThreadId) {
@@ -411,10 +411,11 @@ class PostgresqlSubagentContinuationTest {
         store
             .transaction(
                 tx ->
-                    tx.claimNextWork(
-                        WorkTargetType.THREAD,
-                        UUID.randomUUID().toString(),
-                        Duration.ofSeconds(30)))
+                    tx.work()
+                        .claimNext(
+                            WorkTargetType.THREAD,
+                            UUID.randomUUID().toString(),
+                            Duration.ofSeconds(30)))
             .orElseThrow();
     assertEquals(expectedThreadId, claim.target().id());
     assertEquals(ThreadProcessResult.COMPLETED, processor.process(claim));
@@ -425,7 +426,8 @@ class PostgresqlSubagentContinuationTest {
     store.transaction(
         tx -> {
           ThreadState thread = ThreadLifecycleCoordinator.lockThreadWithParent(tx, threadId);
-          UUID turn = tx.loadEntryPath(thread.headEntryId()).openTurnStart().orElseThrow().id();
+          UUID turn =
+              tx.entries().loadPath(thread.headEntryId()).openTurnStart().orElseThrow().id();
           ModelInvocation model =
               builtin(tx).findModelInvocationByTurn(threadId, turn).orElseThrow();
           assertEquals(ModelInvocationStatus.READY, model.status());
@@ -442,7 +444,8 @@ class PostgresqlSubagentContinuationTest {
     store.transaction(
         tx -> {
           ThreadState thread = ThreadLifecycleCoordinator.lockThreadWithParent(tx, threadId);
-          UUID turn = tx.loadEntryPath(thread.headEntryId()).openTurnStart().orElseThrow().id();
+          UUID turn =
+              tx.entries().loadPath(thread.headEntryId()).openTurnStart().orElseThrow().id();
           ModelInvocation model =
               builtin(tx).findModelInvocationByTurn(threadId, turn).orElseThrow();
           assertEquals(ModelInvocationStatus.RUNNING, model.status());
@@ -459,7 +462,7 @@ class PostgresqlSubagentContinuationTest {
                   template.serviceTier(),
                   template.rawUsageJson());
           builtin(tx).updateModelInvocation(model.succeed(response, T1));
-          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId));
+          tx.work().request(new WorkTarget(WorkTargetType.THREAD, threadId));
           return null;
         });
   }

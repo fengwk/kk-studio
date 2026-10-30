@@ -510,8 +510,8 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
     inTx(
         fixture,
         tx -> {
-          var current = tx.lockThread(baseline.threadId()).orElseThrow();
-          tx.updateThread(current.advanceHead(baseline.turnStartEntryId(), NOW));
+          var current = tx.threads().lock(baseline.threadId()).orElseThrow();
+          tx.threads().update(current.advanceHead(baseline.turnStartEntryId(), NOW));
           return null;
         });
     requestThreadWork(fixture.store, baseline.threadId());

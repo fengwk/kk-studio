@@ -195,7 +195,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
 
     // 父级状态完全不受影响
     ThreadState parentAfter =
-        store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
+        store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow());
     assertEquals(0L, parentAfter.version());
     assertEquals(1L, parentAfter.nextCommandSequence());
     assertEquals(baseline.rootEntryId(), parentAfter.headEntryId());
@@ -387,12 +387,13 @@ class PostgresqlJoinAcceptanceRollbackTest {
       // 验证在 PG 中两个子线程与 Join 均成功写入，且祖先链完全正确
       assertEquals(
           List.of(child1ThreadId, baseline.threadId()),
-          store.transaction(tx -> tx.findAncestorChain(child1ThreadId)));
+          store.transaction(tx -> tx.threads().findAncestorChain(child1ThreadId)));
       assertEquals(
           List.of(child2ThreadId, baseline.threadId()),
-          store.transaction(tx -> tx.findAncestorChain(child2ThreadId)));
+          store.transaction(tx -> tx.threads().findAncestorChain(child2ThreadId)));
 
-      List<ThreadState> children = store.transaction(tx -> tx.listChildren(baseline.threadId()));
+      List<ThreadState> children =
+          store.transaction(tx -> tx.threads().listChildren(baseline.threadId()));
       assertEquals(2, children.size());
       assertTrue(children.stream().anyMatch(c -> c.id().equals(child1ThreadId)));
       assertTrue(children.stream().anyMatch(c -> c.id().equals(child2ThreadId)));
@@ -420,26 +421,27 @@ class PostgresqlJoinAcceptanceRollbackTest {
 
     store.transaction(
         tx -> {
-          tx.insertSession(StoreTestSupport.session(parentSessionId));
-          tx.insertEntry(StoreTestSupport.rootEntry(parentRootEntryId, parentSessionId));
-          tx.insertThread(
-              new ThreadState(
-                  parentThreadId,
-                  parentSessionId,
-                  null,
-                  parentRootEntryId,
-                  HASH,
-                  "parent",
-                  parentThreadId,
-                  false,
-                  SpawnTrigger.USER,
-                  ThreadConstraints.NONE,
-                  ThreadExecutionControl.RUNNABLE,
-                  0L,
-                  1L,
-                  0L,
-                  T0,
-                  T0));
+          tx.sessions().insert(StoreTestSupport.session(parentSessionId));
+          tx.entries().insert(StoreTestSupport.rootEntry(parentRootEntryId, parentSessionId));
+          tx.threads()
+              .insert(
+                  new ThreadState(
+                      parentThreadId,
+                      parentSessionId,
+                      null,
+                      parentRootEntryId,
+                      HASH,
+                      "parent",
+                      parentThreadId,
+                      false,
+                      SpawnTrigger.USER,
+                      ThreadConstraints.NONE,
+                      ThreadExecutionControl.RUNNABLE,
+                      0L,
+                      1L,
+                      0L,
+                      T0,
+                      T0));
           return null;
         });
 
@@ -496,7 +498,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
     assertSingleRow("durable_work", "target_id", childThreadId);
     assertEquals(
         List.of(childThreadId, parentThreadId),
-        store.transaction(tx -> tx.findAncestorChain(childThreadId)));
+        store.transaction(tx -> tx.threads().findAncestorChain(childThreadId)));
   }
 
   @Test
@@ -663,8 +665,9 @@ class PostgresqlJoinAcceptanceRollbackTest {
           store
               .transaction(
                   tx ->
-                      tx.claimNextWork(
-                          WorkTargetType.THREAD, "child-claim-1", Duration.ofSeconds(30)))
+                      tx.work()
+                          .claimNext(
+                              WorkTargetType.THREAD, "child-claim-1", Duration.ofSeconds(30)))
               .orElseThrow();
       assertEquals(ThreadProcessResult.COMPLETED, processor.process(childWork1));
 
@@ -672,9 +675,10 @@ class PostgresqlJoinAcceptanceRollbackTest {
       UUID modelId =
           store.transaction(
               tx -> {
-                tx.lockThread(childThreadId).orElseThrow();
+                tx.threads().lock(childThreadId).orElseThrow();
                 var path =
-                    tx.loadEntryPath(tx.findThread(childThreadId).orElseThrow().headEntryId());
+                    tx.entries()
+                        .loadPath(tx.threads().find(childThreadId).orElseThrow().headEntryId());
                 UUID turnStartId = path.openTurnStart().orElseThrow().id();
                 ModelInvocation found =
                     builtin(tx).findModelInvocationByTurn(childThreadId, turnStartId).orElseThrow();
@@ -683,7 +687,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
                 model = builtin(tx).lockModelInvocation(found.id()).orElseThrow();
                 builtin(tx)
                     .updateModelInvocation(model.succeed(StoreTestSupport.assistantResponse(), T2));
-                tx.requestWork(new WorkTarget(WorkTargetType.THREAD, childThreadId));
+                tx.work().request(new WorkTarget(WorkTargetType.THREAD, childThreadId));
                 return found.id();
               });
 
@@ -692,18 +696,20 @@ class PostgresqlJoinAcceptanceRollbackTest {
           store
               .transaction(
                   tx ->
-                      tx.claimNextWork(
-                          WorkTargetType.THREAD, "child-claim-2", Duration.ofSeconds(30)))
+                      tx.work()
+                          .claimNext(
+                              WorkTargetType.THREAD, "child-claim-2", Duration.ofSeconds(30)))
               .orElseThrow();
       assertEquals(ThreadProcessResult.COMPLETED, processor.process(childWork2));
 
       // 4. 直接从 PG 数据库底层查询 harness_thread_join 表，确认各字段真实正确落库
-      ThreadJoin joinInPg = store.transaction(tx -> tx.findJoin(joinInvocationId).orElseThrow());
+      ThreadJoin joinInPg =
+          store.transaction(tx -> tx.joins().find(joinInvocationId).orElseThrow());
       assertTrue(joinInPg.matched(), "Join must be matched in PostgreSQL");
       assertNotNull(joinInPg.terminalEntryId(), "Join must freeze a terminal entry");
       // 子线程执行终止后持久执行控制保持 RUNNABLE（Join 配额按未完成 Join 计数，不再依赖递归 IDLE）
       ThreadState finalChildState =
-          store.transaction(tx -> tx.findThread(childThreadId).orElseThrow());
+          store.transaction(tx -> tx.threads().find(childThreadId).orElseThrow());
       assertEquals(ThreadExecutionControl.RUNNABLE, finalChildState.executionControl());
       assertEquals(1L, joinInPg.deliveryCommandSequence());
 
@@ -711,8 +717,8 @@ class PostgresqlJoinAcceptanceRollbackTest {
       List<ThreadCommand> parentQueued =
           store.transaction(
               tx -> {
-                tx.lockThread(baseline.threadId());
-                return tx.loadQueuedCommands(baseline.threadId());
+                tx.threads().lock(baseline.threadId());
+                return tx.commands().loadQueued(baseline.threadId());
               });
       assertEquals(1, parentQueued.size());
       ThreadCommand deliveredCmd = parentQueued.get(0);
@@ -725,15 +731,17 @@ class PostgresqlJoinAcceptanceRollbackTest {
           store
               .transaction(
                   tx ->
-                      tx.claimNextWork(
-                          WorkTargetType.THREAD, "parent-claim-1", Duration.ofSeconds(30)))
+                      tx.work()
+                          .claimNext(
+                              WorkTargetType.THREAD, "parent-claim-1", Duration.ofSeconds(30)))
               .orElseThrow();
       assertEquals(ThreadProcessResult.COMPLETED, processor.process(parentWork));
 
       // 父级 Turn 已开启，交付命令已成功从队列消费并绑定到新 Entry
       ThreadState parentAfterTurn =
-          store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
-      var parentPath = store.transaction(tx -> tx.loadEntryPath(parentAfterTurn.headEntryId()));
+          store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow());
+      var parentPath =
+          store.transaction(tx -> tx.entries().loadPath(parentAfterTurn.headEntryId()));
       assertTrue(parentPath.entries().size() > 1, "Parent path must advance past root");
     } finally {
       scheduler.shutdownNow();
@@ -821,9 +829,9 @@ class PostgresqlJoinAcceptanceRollbackTest {
     assertNoRow("durable_work", "target_id", childBThreadId);
 
     // 经真实 Stop 路径原子冻结结果并交付父通知，释放未完成 Join 的额度。
-    ThreadState child = store.transaction(tx -> tx.findThread(childAThreadId).orElseThrow());
+    ThreadState child = store.transaction(tx -> tx.threads().find(childAThreadId).orElseThrow());
     runtime.stop(new StopCommand(childAThreadId, UUID.randomUUID(), child.version()));
-    ThreadJoin settled = store.transaction(tx -> tx.findJoin(joinAInvocationId).orElseThrow());
+    ThreadJoin settled = store.transaction(tx -> tx.joins().find(joinAInvocationId).orElseThrow());
     assertTrue(settled.matched());
     assertNotNull(settled.deliveryCommandSequence());
     assertEquals(0, incompleteSubagentJoins());
@@ -849,26 +857,27 @@ class PostgresqlJoinAcceptanceRollbackTest {
   private void seedRootThread(UUID sessionId, UUID rootEntryId, UUID threadId) {
     store.transaction(
         tx -> {
-          tx.insertSession(StoreTestSupport.session(sessionId));
-          tx.insertEntry(StoreTestSupport.rootEntry(rootEntryId, sessionId));
-          tx.insertThread(
-              new ThreadState(
-                  threadId,
-                  sessionId,
-                  null,
-                  rootEntryId,
-                  HASH,
-                  "root",
-                  threadId,
-                  false,
-                  SpawnTrigger.USER,
-                  ThreadConstraints.NONE,
-                  ThreadExecutionControl.RUNNABLE,
-                  0L,
-                  1L,
-                  0L,
-                  T0,
-                  T0));
+          tx.sessions().insert(StoreTestSupport.session(sessionId));
+          tx.entries().insert(StoreTestSupport.rootEntry(rootEntryId, sessionId));
+          tx.threads()
+              .insert(
+                  new ThreadState(
+                      threadId,
+                      sessionId,
+                      null,
+                      rootEntryId,
+                      HASH,
+                      "root",
+                      threadId,
+                      false,
+                      SpawnTrigger.USER,
+                      ThreadConstraints.NONE,
+                      ThreadExecutionControl.RUNNABLE,
+                      0L,
+                      1L,
+                      0L,
+                      T0,
+                      T0));
           return null;
         });
   }
@@ -880,7 +889,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
   }
 
   private int incompleteSubagentJoins() {
-    return store.transaction(tx -> tx.countIncompleteSubagentJoins());
+    return store.transaction(tx -> tx.joins().countIncompleteSubagent());
   }
 
   private void assertNoRow(String table, String column, UUID id) {

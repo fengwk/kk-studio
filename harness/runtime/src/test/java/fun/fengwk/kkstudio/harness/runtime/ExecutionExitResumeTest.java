@@ -40,20 +40,21 @@ class ExecutionExitResumeTest {
     runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), version));
     store.transaction(
         tx -> {
-          tx.lockThread(baseline.threadId());
-          tx.registerExecution(
-              new ExecutionExitFact(
-                  TestIds.id(2),
-                  baseline.threadId(),
-                  TestIds.id(3),
-                  1,
-                  "lease-1",
-                  ExecutionExitKind.TOOL,
-                  null,
-                  ExecutionExitState.UNCONFIRMED,
-                  T0,
-                  null,
-                  null));
+          tx.threads().lock(baseline.threadId());
+          tx.exits()
+              .register(
+                  new ExecutionExitFact(
+                      TestIds.id(2),
+                      baseline.threadId(),
+                      TestIds.id(3),
+                      1,
+                      "lease-1",
+                      ExecutionExitKind.TOOL,
+                      null,
+                      ExecutionExitState.UNCONFIRMED,
+                      T0,
+                      null,
+                      null));
           return null;
         });
     AcceptCommandsCommand resume =
@@ -68,9 +69,9 @@ class ExecutionExitResumeTest {
 
     store.transaction(
         tx -> {
-          tx.lockThread(baseline.threadId());
-          ExecutionExitFact stored = tx.findExecution(TestIds.id(2)).orElseThrow();
-          tx.confirmExecution(stored, ExecutionExitState.STUDIO_EXITED, T0.plusMillis(1));
+          tx.threads().lock(baseline.threadId());
+          ExecutionExitFact stored = tx.exits().find(TestIds.id(2)).orElseThrow();
+          tx.exits().confirm(stored, ExecutionExitState.STUDIO_EXITED, T0.plusMillis(1));
           return null;
         });
     runtime.acceptCommands(resume, AcceptancePreflight.IDENTITY);
@@ -161,20 +162,21 @@ class ExecutionExitResumeTest {
       InMemoryHarnessStore store, UUID threadId, UUID executionId) {
     store.transaction(
         tx -> {
-          tx.lockThread(threadId);
-          tx.registerExecution(
-              new ExecutionExitFact(
-                  executionId,
-                  threadId,
-                  TestIds.id(3),
-                  1,
-                  "lease-1",
-                  ExecutionExitKind.TOOL,
-                  null,
-                  ExecutionExitState.UNCONFIRMED,
-                  T0,
-                  null,
-                  null));
+          tx.threads().lock(threadId);
+          tx.exits()
+              .register(
+                  new ExecutionExitFact(
+                      executionId,
+                      threadId,
+                      TestIds.id(3),
+                      1,
+                      "lease-1",
+                      ExecutionExitKind.TOOL,
+                      null,
+                      ExecutionExitState.UNCONFIRMED,
+                      T0,
+                      null,
+                      null));
           return null;
         });
   }
