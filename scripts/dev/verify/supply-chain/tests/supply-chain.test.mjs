@@ -401,7 +401,7 @@ test('locks tool versions, policy thresholds, and secret indirection', () => {
     assert.match(pom, /<jackson3\.version>3\.1\.7<\/jackson3\.version>/)
     assert.match(pom, /<log4j\.version>2\.26\.1<\/log4j\.version>/)
     assert.match(pom, /<postgresql\.version>42\.7\.13<\/postgresql\.version>/)
-    assert.match(pom, /<opennlp\.version>2\.5\.12<\/opennlp\.version>/)
+    assert.doesNotMatch(pom, /org\.apache\.opennlp|<opennlp\.version>/)
     assert.match(pom, /<kotlin\.version>2\.4\.20<\/kotlin\.version>/)
     assert.match(pom, /<httpclient5\.version>5\.6\.4<\/httpclient5\.version>/)
     assert.match(pom, /<httpcore5\.version>5\.4\.4<\/httpcore5\.version>/)

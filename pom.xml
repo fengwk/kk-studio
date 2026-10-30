@@ -36,7 +36,6 @@
         <kotlin.version>2.4.20</kotlin.version>
         <log4j.version>2.26.1</log4j.version>
         <postgresql.version>42.7.13</postgresql.version>
-        <opennlp.version>2.5.12</opennlp.version>
         <aws.sdk.version>2.29.52</aws.sdk.version>
         <json-path.version>2.9.0</json-path.version>
         <mcp-sdk.version>2.1.0</mcp-sdk.version>
@@ -108,11 +107,6 @@
                 <groupId>org.postgresql</groupId>
                 <artifactId>postgresql</artifactId>
                 <version>${postgresql.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>org.apache.opennlp</groupId>
-                <artifactId>opennlp-tools</artifactId>
-                <version>${opennlp.version}</version>
             </dependency>
             <dependency>
                 <groupId>com.fasterxml.jackson</groupId>
