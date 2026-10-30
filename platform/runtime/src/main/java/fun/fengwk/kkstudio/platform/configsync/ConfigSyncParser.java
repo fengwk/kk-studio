@@ -9,8 +9,8 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.McpConfigParser;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelService;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogService;
-import fun.fengwk.kkstudio.platform.environment.service.EnvironmentInstallConfigs;
-import fun.fengwk.kkstudio.platform.environment.service.EnvironmentServiceImpl;
+import fun.fengwk.kkstudio.platform.environment.EnvironmentInstallConfigs;
+import fun.fengwk.kkstudio.platform.environment.EnvironmentService;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
@@ -354,8 +354,8 @@ public final class ConfigSyncParser {
     declared.add(name);
     String tokenHash = entry.reqString("registrationTokenHash");
     // 与 register/update 共用静态校验：known 非法值必须硬拒绝，未知字段不能绕过。
-    EnvironmentServiceImpl.validateName(name);
-    EnvironmentServiceImpl.validateRegistrationTokenHash(tokenHash);
+    EnvironmentService.validateName(name);
+    EnvironmentService.validateRegistrationTokenHash(tokenHash);
     Object configNode = entry.node("installConfig");
     EnvironmentInstallConfigDTO config =
         configNode == null

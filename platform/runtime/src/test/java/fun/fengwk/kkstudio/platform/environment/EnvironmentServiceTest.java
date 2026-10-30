@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.environment.service;
+package fun.fengwk.kkstudio.platform.environment;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -19,7 +19,6 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
-import org.springframework.jdbc.core.JdbcTemplate;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
@@ -29,13 +28,10 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.environment.RegistrationTokens;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentEvent;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
-import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
-import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
@@ -63,7 +59,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-class EnvironmentServiceImplTest {
+class EnvironmentServiceTest {
 
   private static final UUID ENV_ID = UUID.fromString("11111111-1111-1111-1111-111111111111");
   private static final Instant NOW = Instant.parse("2026-07-26T00:00:00Z");
@@ -91,7 +87,6 @@ class EnvironmentServiceImplTest {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
     AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
-    JdbcTemplate jdbc = mock(JdbcTemplate.class);
     SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
     when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
 
@@ -111,8 +106,7 @@ class EnvironmentServiceImplTest {
             });
     when(registry.find(any())).thenReturn(Optional.empty());
 
-    EnvironmentServiceImpl service =
-        new EnvironmentServiceImpl(repo, registry, jdbc, snapshot, CLOCK);
+    EnvironmentService service = new EnvironmentService(repo, registry, snapshot, CLOCK);
 
     EnvironmentCreateDTO create = new EnvironmentCreateDTO();
     create.setName("local-env");
@@ -133,15 +127,13 @@ class EnvironmentServiceImplTest {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
     AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
-    JdbcTemplate jdbc = mock(JdbcTemplate.class);
     SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
     when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
 
     when(repo.existsByName("local-env")).thenReturn(false);
     when(repo.create(any())).thenReturn(false);
 
-    EnvironmentServiceImpl service =
-        new EnvironmentServiceImpl(repo, registry, jdbc, snapshot, CLOCK);
+    EnvironmentService service = new EnvironmentService(repo, registry, snapshot, CLOCK);
 
     EnvironmentCreateDTO create = new EnvironmentCreateDTO();
     create.setName("local-env");
@@ -155,7 +147,6 @@ class EnvironmentServiceImplTest {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
     AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
-    JdbcTemplate jdbc = mock(JdbcTemplate.class);
     SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
     when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
 
@@ -175,8 +166,7 @@ class EnvironmentServiceImplTest {
               return env;
             });
 
-    EnvironmentServiceImpl service =
-        new EnvironmentServiceImpl(repo, registry, jdbc, snapshot, CLOCK);
+    EnvironmentService service = new EnvironmentService(repo, registry, snapshot, CLOCK);
 
     EnvironmentCreateDTO create = new EnvironmentCreateDTO();
     create.setName("local-env");
@@ -195,7 +185,6 @@ class EnvironmentServiceImplTest {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
     AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
-    JdbcTemplate jdbc = mock(JdbcTemplate.class);
     SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
     when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
 
@@ -234,8 +223,7 @@ class EnvironmentServiceImplTest {
 
     when(registry.find(EnvironmentId.of(ENV_ID))).thenReturn(Optional.of(conn));
 
-    EnvironmentServiceImpl service =
-        new EnvironmentServiceImpl(repo, registry, jdbc, snapshot, CLOCK);
+    EnvironmentService service = new EnvironmentService(repo, registry, snapshot, CLOCK);
 
     EnvironmentCardDTO single = service.get(EnvironmentId.of(ENV_ID));
     assertNull(single.getRegistrationToken());
@@ -259,7 +247,6 @@ class EnvironmentServiceImplTest {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
     AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
-    JdbcTemplate jdbc = mock(JdbcTemplate.class);
     SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
     when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
 
@@ -274,8 +261,7 @@ class EnvironmentServiceImplTest {
     // 没有任何连接行：Environment 从未连接，无任何已保留事实。
     when(registry.find(EnvironmentId.of(ENV_ID))).thenReturn(Optional.empty());
 
-    EnvironmentServiceImpl service =
-        new EnvironmentServiceImpl(repo, registry, jdbc, snapshot, CLOCK);
+    EnvironmentService service = new EnvironmentService(repo, registry, snapshot, CLOCK);
 
     EnvironmentCardDTO card = service.get(EnvironmentId.of(ENV_ID));
 
@@ -299,7 +285,6 @@ class EnvironmentServiceImplTest {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
     AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
-    JdbcTemplate jdbc = mock(JdbcTemplate.class);
     SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
     when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
 
@@ -335,8 +320,7 @@ class EnvironmentServiceImplTest {
             NOW.plusSeconds(60));
     when(registry.find(EnvironmentId.of(ENV_ID))).thenReturn(Optional.of(conn));
 
-    EnvironmentServiceImpl service =
-        new EnvironmentServiceImpl(repo, registry, jdbc, snapshot, CLOCK);
+    EnvironmentService service = new EnvironmentService(repo, registry, snapshot, CLOCK);
 
     EnvironmentCardDTO card = service.get(EnvironmentId.of(ENV_ID));
 
@@ -353,7 +337,7 @@ class EnvironmentServiceImplTest {
   @Test
   void installationScriptIssuesAFreshTokenAndConsumesTheCode() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
-    EnvironmentServiceImpl service = service(repo);
+    EnvironmentService service = service(repo);
     Environment env = environment("secret-token", 4L);
     DaemonConfiguration daemon = new DaemonConfiguration();
     daemon.setStudioUrl("https://studio.example.com");
@@ -435,7 +419,7 @@ class EnvironmentServiceImplTest {
   @Test
   void installationScriptRejectsUnknownIdAndMissingConfig() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
-    EnvironmentServiceImpl service = service(repo);
+    EnvironmentService service = service(repo);
     when(repo.lockById(ENV_ID)).thenReturn(null);
     assertThrows(
         AiResourceNotFoundException.class,
@@ -453,20 +437,16 @@ class EnvironmentServiceImplTest {
   @Test
   void uninstallationScriptDoesNotTouchRepository() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
-    EnvironmentServiceImpl service = service(repo);
+    EnvironmentService service = service(repo);
 
     assertTrue(service.uninstallationScript("macos").contains("uninstall"));
     assertThrows(AiValidationException.class, () -> service.uninstallationScript("unknown"));
     verify(repo, never()).getByRegistrationTokenHash(any());
   }
 
-  private static EnvironmentServiceImpl service(EnvironmentRepository repo) {
-    return new EnvironmentServiceImpl(
-        repo,
-        mock(EnvironmentRegistry.class),
-        mock(JdbcTemplate.class),
-        mock(SystemSettingsSnapshot.class),
-        CLOCK);
+  private static EnvironmentService service(EnvironmentRepository repo) {
+    return new EnvironmentService(
+        repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK);
   }
 
   /** 测试意图：在线轮换必须被允许——不再查询/拒绝活跃 lease，既有连接不被主动断开；轮换只改变 token 并推进版本。 */
@@ -475,7 +455,6 @@ class EnvironmentServiceImplTest {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
     AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
-    JdbcTemplate jdbc = mock(JdbcTemplate.class);
     SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
     when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
 
@@ -493,8 +472,7 @@ class EnvironmentServiceImplTest {
     // 数据库中存在活跃租约：轮换成功且不得查询租约（在线轮换不要求离线）
     when(registry.hasActiveLease(EnvironmentId.of(ENV_ID))).thenReturn(true);
 
-    EnvironmentServiceImpl service =
-        new EnvironmentServiceImpl(repo, registry, jdbc, snapshot, CLOCK);
+    EnvironmentService service = new EnvironmentService(repo, registry, snapshot, CLOCK);
 
     EnvironmentCardDTO rotated = service.rotateToken(EnvironmentId.of(ENV_ID), "0");
 
@@ -510,7 +488,6 @@ class EnvironmentServiceImplTest {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
     AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
-    JdbcTemplate jdbc = mock(JdbcTemplate.class);
     SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
     when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
 
@@ -523,8 +500,7 @@ class EnvironmentServiceImplTest {
     when(repo.lockById(ENV_ID)).thenReturn(env);
     when(repo.deleteById(ENV_ID, 0L)).thenReturn(true);
 
-    EnvironmentServiceImpl service =
-        new EnvironmentServiceImpl(repo, registry, jdbc, snapshot, CLOCK);
+    EnvironmentService service = new EnvironmentService(repo, registry, snapshot, CLOCK);
 
     // 1. Active lease in DB -> rejects
     when(registry.hasActiveLease(EnvironmentId.of(ENV_ID))).thenReturn(true);
@@ -532,11 +508,11 @@ class EnvironmentServiceImplTest {
 
     // 2. Offline, but active work in durable_work -> rejects
     when(registry.hasActiveLease(EnvironmentId.of(ENV_ID))).thenReturn(false);
-    when(jdbc.queryForObject(any(String.class), eq(Integer.class), eq(ENV_ID))).thenReturn(1);
+    when(repo.hasActiveWork(ENV_ID)).thenReturn(true);
     assertThrows(AiInUseException.class, () -> service.delete(EnvironmentId.of(ENV_ID), "0"));
 
     // 3. All clear -> succeeds
-    when(jdbc.queryForObject(any(String.class), eq(Integer.class), eq(ENV_ID))).thenReturn(0);
+    when(repo.hasActiveWork(ENV_ID)).thenReturn(false);
     service.delete(EnvironmentId.of(ENV_ID), "0");
     verify(repo).deleteById(ENV_ID, 0L);
   }
@@ -549,7 +525,6 @@ class EnvironmentServiceImplTest {
   void cardExposesCurrentStatusOnlyWhileEventsRetainHistory() throws Exception {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
-    JdbcTemplate jdbc = mock(JdbcTemplate.class);
     SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
     when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
 
@@ -573,8 +548,7 @@ class EnvironmentServiceImplTest {
                 "environment ready"));
     when(registry.find(EnvironmentId.of(ENV_ID))).thenReturn(Optional.of(connection(history)));
 
-    EnvironmentServiceImpl service =
-        new EnvironmentServiceImpl(repo, registry, jdbc, snapshot, CLOCK);
+    EnvironmentService service = new EnvironmentService(repo, registry, snapshot, CLOCK);
 
     EnvironmentCardDTO card = service.get(EnvironmentId.of(ENV_ID));
     // 卡片只投影当前连接状态，且序列化后不含任何历史事件字段。
@@ -597,7 +571,6 @@ class EnvironmentServiceImplTest {
   void listEventsReturnsChronologicalWindow() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
-    JdbcTemplate jdbc = mock(JdbcTemplate.class);
     SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
     when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
 
@@ -623,8 +596,7 @@ class EnvironmentServiceImplTest {
                             EnvironmentEvent.TYPE_DISCONNECTED,
                             "daemon connection lost")))));
 
-    EnvironmentServiceImpl service =
-        new EnvironmentServiceImpl(repo, registry, jdbc, snapshot, CLOCK);
+    EnvironmentService service = new EnvironmentService(repo, registry, snapshot, CLOCK);
 
     List<EnvironmentEventDTO> events = service.listEvents(EnvironmentId.of(ENV_ID));
     assertEquals(2, events.size());
@@ -661,13 +633,9 @@ class EnvironmentServiceImplTest {
               env.setUpdateTime(NOW);
               return env;
             });
-    EnvironmentServiceImpl service =
-        new EnvironmentServiceImpl(
-            repo,
-            mock(EnvironmentRegistry.class),
-            mock(JdbcTemplate.class),
-            mock(SystemSettingsSnapshot.class),
-            CLOCK);
+    EnvironmentService service =
+        new EnvironmentService(
+            repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK);
 
     EnvironmentCardDTO card = service.importEnvironment("imported", h("token-1"), null);
 
@@ -681,13 +649,9 @@ class EnvironmentServiceImplTest {
   void importEnvironmentRejectsExistingName() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     when(repo.existsByName("dup")).thenReturn(true);
-    EnvironmentServiceImpl service =
-        new EnvironmentServiceImpl(
-            repo,
-            mock(EnvironmentRegistry.class),
-            mock(JdbcTemplate.class),
-            mock(SystemSettingsSnapshot.class),
-            CLOCK);
+    EnvironmentService service =
+        new EnvironmentService(
+            repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK);
 
     assertThrows(
         AiDuplicateException.class, () -> service.importEnvironment("dup", h("token"), null));
@@ -699,13 +663,9 @@ class EnvironmentServiceImplTest {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     when(repo.existsByName("fresh")).thenReturn(false);
     when(repo.getByRegistrationTokenHash(h("secret-token"))).thenReturn(new Environment());
-    EnvironmentServiceImpl service =
-        new EnvironmentServiceImpl(
-            repo,
-            mock(EnvironmentRegistry.class),
-            mock(JdbcTemplate.class),
-            mock(SystemSettingsSnapshot.class),
-            CLOCK);
+    EnvironmentService service =
+        new EnvironmentService(
+            repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK);
 
     AiDuplicateException error =
         assertThrows(
@@ -740,13 +700,9 @@ class EnvironmentServiceImplTest {
               updated.setUpdateTime(NOW);
               return updated;
             });
-    EnvironmentServiceImpl service =
-        new EnvironmentServiceImpl(
-            repo,
-            mock(EnvironmentRegistry.class),
-            mock(JdbcTemplate.class),
-            mock(SystemSettingsSnapshot.class),
-            CLOCK);
+    EnvironmentService service =
+        new EnvironmentService(
+            repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK);
 
     EnvironmentCardDTO card =
         service.updateImportedEnvironment(EnvironmentId.of(ENV_ID), h("new-token"), null, "0");
@@ -774,13 +730,9 @@ class EnvironmentServiceImplTest {
     when(repo.existsByName("imported")).thenReturn(false);
     when(repo.getByRegistrationTokenHash(h("token-1"))).thenReturn(null);
     when(repo.create(any())).thenReturn(false);
-    EnvironmentServiceImpl service =
-        new EnvironmentServiceImpl(
-            repo,
-            mock(EnvironmentRegistry.class),
-            mock(JdbcTemplate.class),
-            mock(SystemSettingsSnapshot.class),
-            CLOCK);
+    EnvironmentService service =
+        new EnvironmentService(
+            repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK);
 
     assertThrows(
         IllegalStateException.class,
@@ -794,13 +746,9 @@ class EnvironmentServiceImplTest {
     when(repo.existsByName("imported")).thenReturn(false);
     when(repo.getByRegistrationTokenHash(h("token-1"))).thenReturn(null);
     when(repo.create(any())).thenThrow(new DuplicateKeyException("dup"));
-    EnvironmentServiceImpl service =
-        new EnvironmentServiceImpl(
-            repo,
-            mock(EnvironmentRegistry.class),
-            mock(JdbcTemplate.class),
-            mock(SystemSettingsSnapshot.class),
-            CLOCK);
+    EnvironmentService service =
+        new EnvironmentService(
+            repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK);
 
     assertThrows(
         AiDuplicateException.class,
@@ -812,13 +760,9 @@ class EnvironmentServiceImplTest {
   void updateImportedEnvironmentRejectsMissingEnvironment() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     when(repo.lockById(ENV_ID)).thenReturn(null);
-    EnvironmentServiceImpl service =
-        new EnvironmentServiceImpl(
-            repo,
-            mock(EnvironmentRegistry.class),
-            mock(JdbcTemplate.class),
-            mock(SystemSettingsSnapshot.class),
-            CLOCK);
+    EnvironmentService service =
+        new EnvironmentService(
+            repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK);
 
     assertThrows(
         AiResourceNotFoundException.class,
@@ -831,13 +775,9 @@ class EnvironmentServiceImplTest {
   void updateImportedEnvironmentIsIdempotentWhenUnchanged() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     when(repo.lockById(ENV_ID)).thenReturn(environment("old-token", 0L));
-    EnvironmentServiceImpl service =
-        new EnvironmentServiceImpl(
-            repo,
-            mock(EnvironmentRegistry.class),
-            mock(JdbcTemplate.class),
-            mock(SystemSettingsSnapshot.class),
-            CLOCK);
+    EnvironmentService service =
+        new EnvironmentService(
+            repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK);
 
     EnvironmentCardDTO card =
         service.updateImportedEnvironment(EnvironmentId.of(ENV_ID), h("old-token"), null, "0");
@@ -854,13 +794,9 @@ class EnvironmentServiceImplTest {
     when(repo.lockById(ENV_ID)).thenReturn(env);
     when(repo.updateById(env, 0L)).thenReturn(false);
     when(repo.getById(ENV_ID)).thenReturn(null);
-    EnvironmentServiceImpl service =
-        new EnvironmentServiceImpl(
-            repo,
-            mock(EnvironmentRegistry.class),
-            mock(JdbcTemplate.class),
-            mock(SystemSettingsSnapshot.class),
-            CLOCK);
+    EnvironmentService service =
+        new EnvironmentService(
+            repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK);
 
     assertThrows(
         AiResourceNotFoundException.class,
@@ -876,13 +812,9 @@ class EnvironmentServiceImplTest {
     when(repo.lockById(ENV_ID)).thenReturn(env);
     when(repo.updateById(env, 0L)).thenReturn(false);
     when(repo.getById(ENV_ID)).thenReturn(environment("newer-token", 2L));
-    EnvironmentServiceImpl service =
-        new EnvironmentServiceImpl(
-            repo,
-            mock(EnvironmentRegistry.class),
-            mock(JdbcTemplate.class),
-            mock(SystemSettingsSnapshot.class),
-            CLOCK);
+    EnvironmentService service =
+        new EnvironmentService(
+            repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK);
 
     assertThrows(
         AiVersionConflictException.class,
@@ -897,13 +829,9 @@ class EnvironmentServiceImplTest {
     Environment env = environment("old-token", 0L);
     when(repo.lockById(ENV_ID)).thenReturn(env);
     when(repo.updateById(env, 0L)).thenThrow(new DuplicateKeyException("dup"));
-    EnvironmentServiceImpl service =
-        new EnvironmentServiceImpl(
-            repo,
-            mock(EnvironmentRegistry.class),
-            mock(JdbcTemplate.class),
-            mock(SystemSettingsSnapshot.class),
-            CLOCK);
+    EnvironmentService service =
+        new EnvironmentService(
+            repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK);
 
     assertThrows(
         AiDuplicateException.class,
@@ -915,15 +843,15 @@ class EnvironmentServiceImplTest {
   @Test
   void staticValidatorsRejectEveryInvalidShape() {
     for (String invalid : new String[] {null, "", "   ", " x", "x ", "a/b", "x".repeat(65)}) {
-      assertThrows(AiValidationException.class, () -> EnvironmentServiceImpl.validateName(invalid));
+      assertThrows(AiValidationException.class, () -> EnvironmentService.validateName(invalid));
     }
-    assertEquals("ok", EnvironmentServiceImpl.validateName("ok"));
+    assertEquals("ok", EnvironmentService.validateName("ok"));
     for (String invalid : new String[] {null, "", "token", "A".repeat(64), "a".repeat(63)}) {
       assertThrows(
           AiValidationException.class,
-          () -> EnvironmentServiceImpl.validateRegistrationTokenHash(invalid));
+          () -> EnvironmentService.validateRegistrationTokenHash(invalid));
     }
-    assertEquals(h("t"), EnvironmentServiceImpl.validateRegistrationTokenHash(h("t")));
+    assertEquals(h("t"), EnvironmentService.validateRegistrationTokenHash(h("t")));
   }
 
   /** 意图：create 拒绝 null 请求与重名，并把并发唯一约束竞争映射为重复错误。 */
@@ -932,9 +860,8 @@ class EnvironmentServiceImplTest {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
     when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
-    EnvironmentServiceImpl service =
-        new EnvironmentServiceImpl(
-            repo, mock(EnvironmentRegistry.class), mock(JdbcTemplate.class), snapshot, CLOCK);
+    EnvironmentService service =
+        new EnvironmentService(repo, mock(EnvironmentRegistry.class), snapshot, CLOCK);
 
     assertThrows(AiValidationException.class, () -> service.create(null));
 
@@ -954,13 +881,9 @@ class EnvironmentServiceImplTest {
   @Test
   void getUnknownEnvironmentThrowsNotFound() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
-    EnvironmentServiceImpl service =
-        new EnvironmentServiceImpl(
-            repo,
-            mock(EnvironmentRegistry.class),
-            mock(JdbcTemplate.class),
-            mock(SystemSettingsSnapshot.class),
-            CLOCK);
+    EnvironmentService service =
+        new EnvironmentService(
+            repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK);
 
     assertThrows(AiResourceNotFoundException.class, () -> service.get(EnvironmentId.of(ENV_ID)));
   }
@@ -969,13 +892,9 @@ class EnvironmentServiceImplTest {
   @Test
   void rotateTokenFailurePaths() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
-    EnvironmentServiceImpl service =
-        new EnvironmentServiceImpl(
-            repo,
-            mock(EnvironmentRegistry.class),
-            mock(JdbcTemplate.class),
-            mock(SystemSettingsSnapshot.class),
-            CLOCK);
+    EnvironmentService service =
+        new EnvironmentService(
+            repo, mock(EnvironmentRegistry.class), mock(SystemSettingsSnapshot.class), CLOCK);
 
     assertThrows(
         AiResourceNotFoundException.class,
@@ -1002,9 +921,8 @@ class EnvironmentServiceImplTest {
   void deleteFailurePaths() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
-    JdbcTemplate jdbc = mock(JdbcTemplate.class);
-    EnvironmentServiceImpl service =
-        new EnvironmentServiceImpl(repo, registry, jdbc, mock(SystemSettingsSnapshot.class), CLOCK);
+    EnvironmentService service =
+        new EnvironmentService(repo, registry, mock(SystemSettingsSnapshot.class), CLOCK);
 
     assertThrows(
         AiResourceNotFoundException.class, () -> service.delete(EnvironmentId.of(ENV_ID), "0"));
@@ -1015,7 +933,7 @@ class EnvironmentServiceImplTest {
 
     when(repo.lockById(ENV_ID)).thenReturn(environment("token", 0L));
     when(registry.hasActiveLease(EnvironmentId.of(ENV_ID))).thenReturn(false);
-    when(jdbc.queryForObject(any(String.class), eq(Integer.class), eq(ENV_ID))).thenReturn(0);
+    when(repo.hasActiveWork(ENV_ID)).thenReturn(false);
 
     when(repo.deleteById(ENV_ID, 0L)).thenReturn(false);
     when(repo.getById(ENV_ID)).thenReturn(null);
@@ -1035,7 +953,6 @@ class EnvironmentServiceImplTest {
   void expiredConnectionReadsAsOfflineWithoutUsableCapabilities() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
-    JdbcTemplate jdbc = mock(JdbcTemplate.class);
     SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
     when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
     when(repo.getById(ENV_ID)).thenReturn(environment("token", 0L));
@@ -1045,8 +962,7 @@ class EnvironmentServiceImplTest {
                 connectionAt(
                     LiveEnvironmentStatus.READY, NOW.minusSeconds(120), NOW.minusSeconds(60))));
 
-    EnvironmentServiceImpl service =
-        new EnvironmentServiceImpl(repo, registry, jdbc, snapshot, CLOCK);
+    EnvironmentService service = new EnvironmentService(repo, registry, snapshot, CLOCK);
 
     EnvironmentCardDTO card = service.get(EnvironmentId.of(ENV_ID));
 
@@ -1061,13 +977,11 @@ class EnvironmentServiceImplTest {
   void statusExpiresAtFollowsTheEarlierOfLeaseAndHeartbeatWindow() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
-    JdbcTemplate jdbc = mock(JdbcTemplate.class);
     SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
     when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
     when(repo.getById(ENV_ID)).thenReturn(environment("token", 0L));
 
-    EnvironmentServiceImpl service =
-        new EnvironmentServiceImpl(repo, registry, jdbc, snapshot, CLOCK);
+    EnvironmentService service = new EnvironmentService(repo, registry, snapshot, CLOCK);
 
     // 心跳窗口（默认 60s）先到：截止时间取 lastSeen + heartbeatTimeout，而不是更晚的租约。
     when(registry.find(EnvironmentId.of(ENV_ID)))

@@ -1,20 +1,16 @@
-package fun.fengwk.kkstudio.platform.environment.service;
+package fun.fengwk.kkstudio.platform.environment;
 
 import lombok.AllArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
-import fun.fengwk.kkstudio.platform.environment.RegistrationTokens;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentEvent;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
-import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
-import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
@@ -39,10 +35,10 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
-/** 稳定 Environment Card 业务实现。 */
+/** 稳定 Environment Card 业务服务。 */
 @AllArgsConstructor
 @Service
-public class EnvironmentServiceImpl implements EnvironmentService {
+public class EnvironmentService {
 
   private static final String RESOURCE = "environment";
 
@@ -51,11 +47,9 @@ public class EnvironmentServiceImpl implements EnvironmentService {
 
   private final EnvironmentRepository environmentRepository;
   private final EnvironmentRegistry environmentRegistry;
-  private final JdbcTemplate jdbcTemplate;
   private final SystemSettingsSnapshot snapshot;
   private final Clock clock;
 
-  @Override
   @Transactional
   public EnvironmentCardDTO create(EnvironmentCreateDTO dto) {
     if (dto == null) {
@@ -81,7 +75,6 @@ public class EnvironmentServiceImpl implements EnvironmentService {
     return toCardDto(created, token);
   }
 
-  @Override
   public EnvironmentCardDTO get(EnvironmentId id) {
     Objects.requireNonNull(id, "id");
     Environment env = environmentRepository.getById(id.value());
@@ -91,7 +84,6 @@ public class EnvironmentServiceImpl implements EnvironmentService {
     return toCardDto(env, null);
   }
 
-  @Override
   public List<EnvironmentCardDTO> list() {
     List<Environment> envs = environmentRepository.listNewestFirst();
     List<EnvironmentCardDTO> results = new ArrayList<>(envs.size());
@@ -101,7 +93,6 @@ public class EnvironmentServiceImpl implements EnvironmentService {
     return List.copyOf(results);
   }
 
-  @Override
   @Transactional
   public EnvironmentCardDTO importEnvironment(
       String name, String registrationTokenHash, EnvironmentInstallConfigDTO installConfig) {
@@ -132,7 +123,6 @@ public class EnvironmentServiceImpl implements EnvironmentService {
     return toCardDto(created, null);
   }
 
-  @Override
   @Transactional
   public EnvironmentCardDTO updateImportedEnvironment(
       EnvironmentId id,
@@ -175,7 +165,6 @@ public class EnvironmentServiceImpl implements EnvironmentService {
     return toCardDto(updated, null);
   }
 
-  @Override
   @Transactional
   public EnvironmentCardDTO updateInstallConfig(
       EnvironmentId id, EnvironmentInstallConfigUpdateDTO request) {
@@ -209,7 +198,6 @@ public class EnvironmentServiceImpl implements EnvironmentService {
     return toCardDto(environmentRepository.getById(id.value()), null);
   }
 
-  @Override
   public List<EnvironmentEventDTO> listEvents(EnvironmentId id) {
     Objects.requireNonNull(id, "id");
     if (environmentRepository.getById(id.value()) == null) {
@@ -227,7 +215,6 @@ public class EnvironmentServiceImpl implements EnvironmentService {
     return List.copyOf(events);
   }
 
-  @Override
   @Transactional
   public EnvironmentInstallCodeDTO issueInstallCode(EnvironmentId id, String expectedVersion) {
     Environment env = requireInstallable(id, expectedVersion);
@@ -248,7 +235,6 @@ public class EnvironmentServiceImpl implements EnvironmentService {
    *
    * <p>锁定环境后由仓库在数据库时间下原子校验并清空 code，同时轮换凭证、递增版本并生成脚本；任一步失败均回滚。旧凭证的 Daemon 下次握手被拒绝。
    */
-  @Override
   @Transactional
   public String installationScript(EnvironmentId id, String code) {
     Objects.requireNonNull(id, "id");
@@ -284,12 +270,10 @@ public class EnvironmentServiceImpl implements EnvironmentService {
     return env;
   }
 
-  @Override
   public String uninstallationScript(String operatingSystem) {
     return EnvironmentInstallScripts.uninstall(operatingSystem);
   }
 
-  @Override
   @Transactional
   public EnvironmentCardDTO rotateToken(EnvironmentId id, String expectedVersion) {
     Objects.requireNonNull(id, "id");
@@ -316,7 +300,6 @@ public class EnvironmentServiceImpl implements EnvironmentService {
     return toCardDto(updated, token);
   }
 
-  @Override
   @Transactional
   public void delete(EnvironmentId id, String expectedVersion) {
     Objects.requireNonNull(id, "id");
@@ -353,12 +336,7 @@ public class EnvironmentServiceImpl implements EnvironmentService {
   }
 
   private boolean hasActiveWork(EnvironmentId id) {
-    Integer count =
-        jdbcTemplate.queryForObject(
-            "select count(1) from durable_work where required_environment_id = ?",
-            Integer.class,
-            id.value());
-    return count != null && count > 0;
+    return environmentRepository.hasActiveWork(id.value());
   }
 
   private static EnvironmentEventDTO toEventDto(EnvironmentEvent event) {

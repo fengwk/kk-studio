@@ -14,6 +14,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
@@ -24,7 +25,6 @@ import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentEvent;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
-import fun.fengwk.kkstudio.platform.environment.repo.impl.PostgresqlEnvironmentChangeNotifier;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -179,14 +179,13 @@ class EnvironmentRegistryChangeNotificationIntegrationTest
       listener.assertNotification(DEV.toString());
       UUID token = acquired.leaseToken();
 
-      PostgresqlEnvironmentChangeNotifier failingNotifier =
-          mock(PostgresqlEnvironmentChangeNotifier.class);
+      EnvironmentChangeNotifier failingNotifier = mock(EnvironmentChangeNotifier.class);
       doThrow(new DataAccessResourceFailureException("environment notification unavailable"))
           .when(failingNotifier)
           .environmentChanged(any());
       EnvironmentRegistry failingRegistry =
           new EnvironmentRegistry(
-              jdbcTemplate,
+              JdbcClient.create(jdbcTemplate),
               environmentRegistry.ownerNodeId(),
               Clock.systemUTC(),
               transactionManager,

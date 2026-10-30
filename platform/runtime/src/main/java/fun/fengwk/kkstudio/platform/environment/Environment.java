@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.environment.service.model;
+package fun.fengwk.kkstudio.platform.environment;
 
 import lombok.Data;
 
