@@ -37,7 +37,12 @@ final class GeminiErrorMapper {
 
   private static final ProviderErrorHelper.FallbackMessages FALLBACK_MESSAGES =
       new ProviderErrorHelper.FallbackMessages(
-          MSG_AUTH, MSG_BILLING, null, MSG_INVALID_REQUEST, MSG_TRANSIENT, MSG_INVALID_RESPONSE);
+          MSG_AUTH,
+          MSG_BILLING,
+          MSG_INVALID_RESPONSE,
+          MSG_INVALID_REQUEST,
+          MSG_TRANSIENT,
+          MSG_INVALID_RESPONSE);
 
   private GeminiErrorMapper() {}
 
@@ -117,6 +122,10 @@ final class GeminiErrorMapper {
         || statusUpper.contains("NOT_FOUND")
         || statusUpper.contains("FAILED_PRECONDITION")) {
       return ProviderErrorKind.INVALID_REQUEST;
+    }
+    // Gemini 只把标准 5xx（500-599）视为可重试；范围外状态沿用原 fallback，避免未知状态被重试。
+    if (statusCode >= 600) {
+      return ProviderErrorKind.INVALID_RESPONSE;
     }
     return ProviderErrorHelper.classifyHttpStatus(statusCode);
   }
