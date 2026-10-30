@@ -3,7 +3,7 @@ import {
   mergeCancelledGoalTexts,
   prependCancelledMessages,
 } from '@/features/chat/runtime/cancelled-message-parts'
-import type { BoundPendingMessage } from '@/features/chat/runtime/agent-pane/pane-target'
+import type { BoundPendingMessage } from '@/features/chat/runtime/pending-request-store'
 import {
   applyStopReceipt,
   loadThreadDraft,
