@@ -139,7 +139,8 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
     assertNull(
         fixture
             .store
-            .transaction(tx -> builtin(tx).findModelInvocation(chain.modelInvocationId()))
+            .transaction(
+                tx -> builtin(fixture.store, tx).findModelInvocation(chain.modelInvocationId()))
             .orElse(null));
 
     // claim2：下一 claim 才创建 continuation Model 并请求 MODEL Work（consumed 本 claim，THREAD 行被清除）。
@@ -156,7 +157,7 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
         inTx(
                 fixture,
                 tx ->
-                    builtin(tx)
+                    builtin(fixture.store, tx)
                         .findModelInvocationByTurn(chain.turn().threadId(), entries.get(7).id()))
             .orElseThrow();
     assertNotNull(
@@ -313,7 +314,10 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
     assertInstanceOf(TurnEndPayload.class, entries.get(6).payload());
     assertTrue(toolsByAssistant(fixture.store, assistantId).isEmpty());
     assertNull(
-        fixture.store.transaction(tx -> builtin(tx).findModelInvocation(modelId)).orElse(null));
+        fixture
+            .store
+            .transaction(tx -> builtin(fixture.store, tx).findModelInvocation(modelId))
+            .orElse(null));
   }
 
   @Test
@@ -361,7 +365,8 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
     assertNull(
         fixture
             .store
-            .transaction(tx -> builtin(tx).findModelInvocation(chain.modelInvocationId()))
+            .transaction(
+                tx -> builtin(fixture.store, tx).findModelInvocation(chain.modelInvocationId()))
             .orElse(null));
     assertNotNull(
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, chain.turn().threadId())));
@@ -409,7 +414,8 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
     assertNull(
         fixture
             .store
-            .transaction(tx -> builtin(tx).findModelInvocation(chain.modelInvocationId()))
+            .transaction(
+                tx -> builtin(fixture.store, tx).findModelInvocation(chain.modelInvocationId()))
             .orElse(null));
 
     // claim2：continuation 使 branch 到达 10 条（TURN_START 追加在 TURN_END 后）。
@@ -490,7 +496,8 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
     assertTrue(
         fixture
             .store
-            .transaction(tx -> builtin(tx).findModelInvocation(chain.modelInvocationId()))
+            .transaction(
+                tx -> builtin(fixture.store, tx).findModelInvocation(chain.modelInvocationId()))
             .isEmpty());
 
     // claim2：下一 claim 才做 continuation。
@@ -518,7 +525,8 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
     assertNotNull(
         toolFixture
             .store
-            .transaction(tx -> builtin(tx).findModelInvocation(chain.modelInvocationId()))
+            .transaction(
+                tx -> builtin(toolFixture.store, tx).findModelInvocation(chain.modelInvocationId()))
             .orElse(null));
     assertEquals(4, path(toolFixture.store, chain.turn().threadId()).entries().size());
   }

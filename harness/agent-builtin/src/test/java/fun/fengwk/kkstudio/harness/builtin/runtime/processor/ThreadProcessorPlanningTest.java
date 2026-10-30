@@ -467,7 +467,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
         inTx(
                 fixture,
                 tx ->
-                    builtin(tx)
+                    builtin(fixture.store, tx)
                         .findModelInvocationByTurn(baseline.threadId(), path.entries().get(2).id()))
             .orElseThrow();
     assertEquals(path.entries().get(3).id(), invocation.requestHeadEntryId());
@@ -512,7 +512,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
         inTx(
                 fixture,
                 tx ->
-                    builtin(tx)
+                    builtin(fixture.store, tx)
                         .findModelInvocationByTurn(baseline.threadId(), path.entries().get(1).id()))
             .isEmpty());
     // 无 deferred message、闭合也未触发 compaction（ROOT 无历史）-> 不保留 THREAD Work。
@@ -673,7 +673,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
     ModelInvocation planned =
         fixture.store.transaction(
             tx ->
-                builtin(tx)
+                builtin(fixture.store, tx)
                     .findModelInvocationByTurn(
                         baseline.threadId(), afterPlan.openTurnStart().orElseThrow().id())
                     .orElseThrow());
@@ -742,7 +742,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
     assertTrue(
         fixture.store.<Boolean>transaction(
             tx ->
-                builtin(tx)
+                builtin(fixture.store, tx)
                     .findModelInvocationByTurn(forkedThreadId, notificationEntryId)
                     .isEmpty()));
   }

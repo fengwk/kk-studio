@@ -77,7 +77,7 @@ public abstract class HarnessStoreDeletionContract {
         tx -> {
           tx.threads().lock(baseline.threadId()).orElseThrow();
           tx.commands().insert(List.of(command(baseline.threadId(), 1L, id(90L))));
-          builtin(tx)
+          builtin(store, tx)
               .insertModelInvocation(
                   new ModelInvocation(
                       modelId,
@@ -94,12 +94,12 @@ public abstract class HarnessStoreDeletionContract {
                       List.of(),
                       T1,
                       T1));
-          ModelInvocation model = builtin(tx).lockModelInvocation(modelId).orElseThrow();
-          builtin(tx).updateModelInvocation(model.markRunning(T1));
-          model = builtin(tx).lockModelInvocation(modelId).orElseThrow();
-          builtin(tx).updateModelInvocation(model.succeed(response, T1));
-          model = builtin(tx).lockModelInvocation(modelId).orElseThrow();
-          builtin(tx).updateModelInvocation(model.attachResultEntry(assistantEntryId, T1));
+          ModelInvocation model = builtin(store, tx).lockModelInvocation(modelId).orElseThrow();
+          builtin(store, tx).updateModelInvocation(model.markRunning(T1));
+          model = builtin(store, tx).lockModelInvocation(modelId).orElseThrow();
+          builtin(store, tx).updateModelInvocation(model.succeed(response, T1));
+          model = builtin(store, tx).lockModelInvocation(modelId).orElseThrow();
+          builtin(store, tx).updateModelInvocation(model.attachResultEntry(assistantEntryId, T1));
           ToolInvocation tool =
               toolInvocation(
                   toolId,
@@ -127,7 +127,7 @@ public abstract class HarnessStoreDeletionContract {
 
     assertTrue(store.transaction(tx -> tx.threads().find(baseline.threadId())).isEmpty());
     assertTrue(store.transaction(tx -> loadCommandsByThread(tx, baseline.threadId())).isEmpty());
-    assertTrue(store.transaction(tx -> builtin(tx).findModelInvocation(modelId)).isEmpty());
+    assertTrue(store.transaction(tx -> builtin(store, tx).findModelInvocation(modelId)).isEmpty());
     assertTrue(store.transaction(tx -> tx.tools().find(toolId)).isEmpty());
     assertTrue(store.transaction(tx -> tx.work().find(threadWork)).isEmpty());
     assertTrue(store.transaction(tx -> tx.work().find(modelWork)).isEmpty());

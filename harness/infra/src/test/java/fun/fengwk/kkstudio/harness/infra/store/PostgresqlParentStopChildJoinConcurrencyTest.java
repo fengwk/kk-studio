@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.infra.store;
 
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtinDriver;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreCallProbe.wrap;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreTestSupport.succeededRequest;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.CREATION_REQUEST_HASH;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T1;
@@ -225,12 +226,12 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
                   List.of(),
                   now,
                   now);
-          builtin(tx).insertModelInvocation(model);
+          builtin(store, tx).insertModelInvocation(model);
           var running = model.markRunning(now);
-          builtin(tx).updateModelInvocation(running);
+          builtin(store, tx).updateModelInvocation(running);
           if (modelSucceeded) {
             var succeeded = running.succeed(response, now);
-            builtin(tx).updateModelInvocation(succeeded);
+            builtin(store, tx).updateModelInvocation(succeeded);
           }
 
           UUID joinInvocationId = tx.nextId();
@@ -302,18 +303,14 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
                     (Function<HarnessStore.Transaction, Object>) args[0];
                 return delegate.transaction(
                     tx -> {
-                      ((BuiltinStore) delegate).in(tx);
                       BuiltinStore.Transaction wrapped =
                           (BuiltinStore.Transaction)
-                              Proxy.newProxyInstance(
-                                  HarnessStore.Transaction.class.getClassLoader(),
-                                  new Class<?>[] {BuiltinStore.Transaction.class},
-                                  (txProxy, txMethod, txArgs) -> {
-                                    Object res = txMethod.invoke(tx, txArgs);
-                                    if (txMethod.getName().equals("lockTree")
-                                        && txArgs != null
-                                        && txArgs.length > 0
-                                        && targetRoot.equals(txArgs[0])) {
+                              wrap(
+                                  ((BuiltinStore) delegate).in(tx),
+                                  (call, next) -> {
+                                    Object res = next.invoke();
+                                    if ("threads.lockTree".equals(call.operation())
+                                        && targetRoot.equals(call.argument(0))) {
                                       treeLockedLatch.countDown();
                                       try {
                                         if (!canCommitLatch.await(10, TimeUnit.SECONDS)) {

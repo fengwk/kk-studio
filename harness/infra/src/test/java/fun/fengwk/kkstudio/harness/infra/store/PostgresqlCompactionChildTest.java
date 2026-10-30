@@ -594,7 +594,9 @@ class PostgresqlCompactionChildTest {
                       .openTurnStart()
                       .orElseThrow()
                       .id();
-              return builtin(tx).findModelInvocationByTurn(childThreadId, childTurn).orElseThrow();
+              return builtin(store, tx)
+                  .findModelInvocationByTurn(childThreadId, childTurn)
+                  .orElseThrow();
             });
     assertEquals(ModelInvocationStatus.READY, childModel.status());
 
@@ -1269,7 +1271,7 @@ class PostgresqlCompactionChildTest {
           UUID childTurn =
               tx.entries().loadPath(child.headEntryId()).openTurnStart().orElseThrow().id();
           ModelInvocation invocation =
-              builtin(tx).findModelInvocationByTurn(childThreadId, childTurn).orElseThrow();
+              builtin(store, tx).findModelInvocationByTurn(childThreadId, childTurn).orElseThrow();
           assertEquals(ModelInvocationStatus.READY, invocation.status());
           return invocation.id();
         });
@@ -1448,7 +1450,9 @@ class PostgresqlCompactionChildTest {
   }
 
   private ModelInvocation findModel(UUID invocationId) {
-    return store.transaction(tx -> builtin(tx).findModelInvocation(invocationId)).orElseThrow();
+    return store
+        .transaction(tx -> builtin(store, tx).findModelInvocation(invocationId))
+        .orElseThrow();
   }
 
   /** 压缩子在 OVERFLOW 后不得递归创建压缩子，也不得出现第二条压缩 TURN_START。 */
@@ -1798,10 +1802,10 @@ class PostgresqlCompactionChildTest {
           UUID turn =
               tx.entries().loadPath(thread.headEntryId()).openTurnStart().orElseThrow().id();
           ModelInvocation model =
-              builtin(tx).findModelInvocationByTurn(threadId, turn).orElseThrow();
+              builtin(store, tx).findModelInvocationByTurn(threadId, turn).orElseThrow();
           assertEquals(ModelInvocationStatus.READY, model.status());
-          builtin(tx).lockModelInvocation(model.id());
-          builtin(tx).updateModelInvocation(model.markRunning(T1));
+          builtin(store, tx).lockModelInvocation(model.id());
+          builtin(store, tx).updateModelInvocation(model.markRunning(T1));
           return null;
         });
   }
@@ -1817,9 +1821,9 @@ class PostgresqlCompactionChildTest {
           UUID turn =
               tx.entries().loadPath(thread.headEntryId()).openTurnStart().orElseThrow().id();
           ModelInvocation model =
-              builtin(tx).findModelInvocationByTurn(threadId, turn).orElseThrow();
+              builtin(store, tx).findModelInvocationByTurn(threadId, turn).orElseThrow();
           assertEquals(ModelInvocationStatus.RUNNING, model.status());
-          builtin(tx).lockModelInvocation(model.id());
+          builtin(store, tx).lockModelInvocation(model.id());
           ProviderResponse response =
               new ProviderResponse(
                   text,
@@ -1830,7 +1834,7 @@ class PostgresqlCompactionChildTest {
                   "req-compaction-child",
                   null,
                   "{}");
-          builtin(tx).updateModelInvocation(model.succeed(response, T1));
+          builtin(store, tx).updateModelInvocation(model.succeed(response, T1));
           tx.work().request(new WorkTarget(WorkTargetType.THREAD, threadId));
           return null;
         });
@@ -1866,7 +1870,8 @@ class PostgresqlCompactionChildTest {
   }
 
   private Optional<ModelInvocation> findModelInvocationByTurn(UUID threadId, UUID turnStartId) {
-    return store.transaction(tx -> builtin(tx).findModelInvocationByTurn(threadId, turnStartId));
+    return store.transaction(
+        tx -> builtin(store, tx).findModelInvocationByTurn(threadId, turnStartId));
   }
 
   private static ModelRequestSpec requestFor(BranchSettings settings) {

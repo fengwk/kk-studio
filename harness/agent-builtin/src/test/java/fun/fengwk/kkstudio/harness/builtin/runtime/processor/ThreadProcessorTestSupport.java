@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.builtin.runtime.processor;
 
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreCallProbe.wrap;
 import static org.junit.jupiter.api.Assertions.fail;
 
 import fun.fengwk.kkstudio.common.result.TextResultContent;
@@ -603,7 +604,7 @@ public final class ThreadProcessorTestSupport {
             tx -> {
               tx.threads().lock(threadId);
               UUID id = tx.nextId();
-              builtin(tx)
+              builtin(store, tx)
                   .insertModelInvocation(
                       new ModelInvocation(
                           id,
@@ -724,8 +725,8 @@ public final class ThreadProcessorTestSupport {
       Function<ModelInvocation, ModelInvocation> f) {
     store.transaction(
         tx -> {
-          ModelInvocation model = builtin(tx).lockModelInvocation(modelId).orElseThrow();
-          builtin(tx).updateModelInvocation(f.apply(model));
+          ModelInvocation model = builtin(store, tx).lockModelInvocation(modelId).orElseThrow();
+          builtin(store, tx).updateModelInvocation(f.apply(model));
           return null;
         });
   }
@@ -830,7 +831,7 @@ public final class ThreadProcessorTestSupport {
   }
 
   public static ModelInvocation model(InMemoryBuiltinHarnessStore store, UUID modelId) {
-    return store.transaction(tx -> builtin(tx).findModelInvocation(modelId)).orElseThrow();
+    return store.transaction(tx -> builtin(store, tx).findModelInvocation(modelId)).orElseThrow();
   }
 
   static ToolInvocation tool(InMemoryBuiltinHarnessStore store, UUID toolId) {
@@ -1394,17 +1395,15 @@ public final class ThreadProcessorTestSupport {
             return real.transaction(
                 tx -> {
                   HarnessStore.Transaction wrapped =
-                      (HarnessStore.Transaction)
-                          Proxy.newProxyInstance(
-                              HarnessStore.Transaction.class.getClassLoader(),
-                              new Class<?>[] {BuiltinStore.Transaction.class},
-                              (txProxy, txMethod, txArgs) -> {
-                                if (txMethod.getName().equals("lockClaimedWork")
-                                    && fenceCalls.incrementAndGet() >= loseAtFenceCall) {
-                                  return Optional.empty();
-                                }
-                                return txMethod.invoke(tx, txArgs);
-                              });
+                      wrap(
+                          tx,
+                          (call, next) -> {
+                            if (call.operation().equals("work.lockClaimed")
+                                && fenceCalls.incrementAndGet() >= loseAtFenceCall) {
+                              return Optional.empty();
+                            }
+                            return next.invoke();
+                          });
                   return callback.apply(wrapped);
                 });
           }

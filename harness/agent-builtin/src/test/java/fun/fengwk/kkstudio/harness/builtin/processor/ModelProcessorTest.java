@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.builtin.processor;
 
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreCallProbe.wrap;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.loadCommandsByThread;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertAll;
@@ -471,7 +472,10 @@ class ModelProcessorTest {
       runtime.stop(new StopCommand(basis.threadId(), id(71), before.thread().version()));
 
       assertTrue(
-          fixture.store.transaction(tx -> builtin(tx).findModelInvocation(invocationId)).isEmpty(),
+          fixture
+              .store
+              .transaction(tx -> builtin(fixture.store, tx).findModelInvocation(invocationId))
+              .isEmpty(),
           "Stop deletes the completed Model invocation");
       assertNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, invocationId)));
       UUID heldExecutionId = executionId;
@@ -3840,22 +3844,22 @@ class ModelProcessorTest {
           ops.stream()
               .anyMatch(
                   op ->
-                      op.startsWith("lockTree")
-                          || op.startsWith("findAncestorChain")
-                          || op.startsWith("lockSession")),
+                      op.startsWith("threads.lockTree")
+                          || op.startsWith("threads.findAncestorChain")
+                          || op.startsWith("sessions.lock")),
           "processor must not take tree/session/ancestor locks: " + ops);
-      assertEquals("lockThread:" + fixture.baseline.threadId(), ops.get(0));
+      assertEquals("threads.lock:" + fixture.baseline.threadId(), ops.get(0));
       assertTrue(
           ops.stream()
-              .filter(op -> op.startsWith("lockThread:"))
-              .allMatch(op -> op.equals("lockThread:" + fixture.baseline.threadId())));
+              .filter(op -> op.startsWith("threads.lock:"))
+              .allMatch(op -> op.equals("threads.lock:" + fixture.baseline.threadId())));
       int model = indexOfPrefix(ops, "lockModelInvocation:");
-      int work = indexOfPrefix(ops, "lockClaimedWork");
+      int work = indexOfPrefix(ops, "work.lockClaimed");
       assertTrue(model > 0, "own Thread must precede Model: " + ops);
       assertTrue(work > model, "Model must precede Work: " + ops);
     }
     assertTrue(
-        locked.get(1).stream().anyMatch(op -> op.startsWith("requestWork")),
+        locked.get(1).stream().anyMatch(op -> op.startsWith("work.request")),
         "rejected dispatch must request THREAD wake before terminal write");
   }
 
@@ -3883,7 +3887,7 @@ class ModelProcessorTest {
 
     private List<List<String>> threadLockTransactions() {
       return transactions.stream()
-          .filter(ops -> ops.stream().anyMatch(op -> op.startsWith("lockThread:")))
+          .filter(ops -> ops.stream().anyMatch(op -> op.startsWith("threads.lock:")))
           .toList();
     }
 
@@ -3909,22 +3913,33 @@ class ModelProcessorTest {
             List<String> ops = new CopyOnWriteArrayList<>();
             transactions.add(ops);
             HarnessStore.Transaction recording =
-                (HarnessStore.Transaction)
-                    Proxy.newProxyInstance(
-                        HarnessStore.Transaction.class.getClassLoader(),
-                        new Class<?>[] {BuiltinStore.Transaction.class},
-                        (proxy, method, args) -> {
-                          String name = method.getName();
-                          if (name.startsWith("lock")
-                              || name.equals("findAncestorChain")
-                              || name.equals("requestWork")
-                              || name.equals("completeWork")
-                              || name.equals("rescheduleWork")
-                              || name.startsWith("update")) {
-                            ops.add(args == null || args.length == 0 ? name : name + ":" + args[0]);
-                          }
-                          return invokeUnchecked(tx, method, args);
-                        });
+                wrap(
+                    tx,
+                    (call, next) -> {
+                      String name = call.operation();
+                      if (name.equals("threads.lock")
+                          || name.equals("threads.lockTree")
+                          || name.equals("threads.findAncestorChain")
+                          || name.equals("sessions.lockForKeyShare")
+                          || name.equals("sessions.lockForUpdate")
+                          || name.equals("tools.lock")
+                          || name.equals("tools.lockByAssistantEntry")
+                          || name.equals("work.lock")
+                          || name.equals("work.lockClaimed")
+                          || name.equals("work.request")
+                          || name.equals("work.complete")
+                          || name.equals("work.reschedule")
+                          || name.equals("threads.update")
+                          || name.equals("tools.update")
+                          || name.equals("lockModelInvocation")
+                          || name.startsWith("update")) {
+                        ops.add(
+                            call.arguments() == null || call.arguments().length == 0
+                                ? name
+                                : name + ":" + call.argument(0));
+                      }
+                      return next.invoke();
+                    });
             return callback.apply(recording);
           });
     }
@@ -3946,17 +3961,15 @@ class ModelProcessorTest {
                     delegate.transaction(
                         tx ->
                             callback.apply(
-                                (HarnessStore.Transaction)
-                                    Proxy.newProxyInstance(
-                                        HarnessStore.Transaction.class.getClassLoader(),
-                                        new Class<?>[] {BuiltinStore.Transaction.class},
-                                        (ignored, txMethod, txArgs) -> {
-                                          Object value = invokeUnchecked(tx, txMethod, txArgs);
-                                          if ("loadEntryPath".equals(txMethod.getName())) {
-                                            loaded.set(true);
-                                          }
-                                          return value;
-                                        })));
+                                wrap(
+                                    tx,
+                                    (call, next) -> {
+                                      Object value = next.invoke();
+                                      if ("entries.loadPath".equals(call.operation())) {
+                                        loaded.set(true);
+                                      }
+                                      return value;
+                                    })));
                 if (loaded.get()) {
                   afterLoad.run();
                 }
@@ -3988,19 +4001,17 @@ class ModelProcessorTest {
                     delegate.transaction(
                         tx ->
                             callback.apply(
-                                (HarnessStore.Transaction)
-                                    Proxy.newProxyInstance(
-                                        HarnessStore.Transaction.class.getClassLoader(),
-                                        new Class<?>[] {BuiltinStore.Transaction.class},
-                                        (ignored, txMethod, txArgs) -> {
-                                          Object value = invokeUnchecked(tx, txMethod, txArgs);
-                                          if ("lockClaimedWork".equals(txMethod.getName())
-                                              && value instanceof Optional<?> owned
-                                              && owned.isPresent()) {
-                                            ownedInTransaction.incrementAndGet();
-                                          }
-                                          return value;
-                                        })));
+                                wrap(
+                                    tx,
+                                    (call, next) -> {
+                                      Object value = next.invoke();
+                                      if ("work.lockClaimed".equals(call.operation())
+                                          && value instanceof Optional<?> owned
+                                          && owned.isPresent()) {
+                                        ownedInTransaction.incrementAndGet();
+                                      }
+                                      return value;
+                                    })));
                 if (ownedLocks.addAndGet(ownedInTransaction.get()) >= 2
                     && fired.compareAndSet(false, true)) {
                   afterAdmissionCheck.run();
@@ -4270,7 +4281,7 @@ class ModelProcessorTest {
                           .orElseThrow()
                           .advanceHead(assistantId, NOW));
               UUID id = tx.nextId();
-              builtin(tx)
+              builtin(store, tx)
                   .insertModelInvocation(
                       new ModelInvocation(
                           id,
@@ -4396,7 +4407,7 @@ class ModelProcessorTest {
         tx -> {
           tx.threads().lock(baseline.threadId());
           UUID id = tx.nextId();
-          builtin(tx)
+          builtin(store, tx)
               .insertModelInvocation(
                   new ModelInvocation(
                       id,
@@ -4535,7 +4546,7 @@ class ModelProcessorTest {
           tx.threads().lock(baseline.threadId());
           UUID id = tx.nextId();
           ModelGroupExecution group = requestSpec.groupExecution();
-          builtin(tx)
+          builtin(store, tx)
               .insertModelInvocation(
                   new ModelInvocation(
                       id,
@@ -4578,14 +4589,17 @@ class ModelProcessorTest {
       Function<ModelInvocation, ModelInvocation> transition) {
     store.transaction(
         tx -> {
-          ModelInvocation model = builtin(tx).lockModelInvocation(invocationId).orElseThrow();
-          builtin(tx).updateModelInvocation(transition.apply(model));
+          ModelInvocation model =
+              builtin(store, tx).lockModelInvocation(invocationId).orElseThrow();
+          builtin(store, tx).updateModelInvocation(transition.apply(model));
           return null;
         });
   }
 
   private static ModelInvocation model(HarnessStore store, UUID invocationId) {
-    return store.transaction(tx -> builtin(tx).findModelInvocation(invocationId)).orElseThrow();
+    return store
+        .transaction(tx -> builtin(store, tx).findModelInvocation(invocationId))
+        .orElseThrow();
   }
 
   private static ProviderRequest materialized(Fixture fixture) {
@@ -4763,7 +4777,7 @@ class ModelProcessorTest {
   private static void freezeGroupMember(Fixture fixture, String member, Instant until) {
     fixture.store.transaction(
         tx -> {
-          builtin(tx).freezeGroupMember("group", 7L, member, "v1", until);
+          builtin(fixture.store, tx).freezeGroupMember("group", 7L, member, "v1", until);
           return null;
         });
   }
@@ -4771,7 +4785,7 @@ class ModelProcessorTest {
   /** 在 fixture 当前时钟下该成员是否仍处于组冷却。 */
   private static boolean cooling(Fixture fixture, String member) {
     return fixture.store.transaction(
-        tx -> builtin(tx).isGroupMemberCooling("group", 7L, member, "v1"));
+        tx -> builtin(fixture.store, tx).isGroupMemberCooling("group", 7L, member, "v1"));
   }
 
   private static ModelGroupProgress groupProgress(ModelInvocation invocation) {

@@ -10,17 +10,19 @@ import java.util.Optional;
 import java.util.UUID;
 
 /** Session 聚合的 PostgreSQL 实现。 */
-final class PostgresqlSessionStore extends PostgresqlHarnessView implements SessionStore {
+final class PostgresqlSessionStore implements SessionStore {
+
+  private final PostgresqlHarnessTransaction tx;
 
   PostgresqlSessionStore(PostgresqlHarnessTransaction tx) {
-    super(tx);
+    this.tx = tx;
   }
 
   @Override
   public void insert(Session session) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(session, "session");
-    updateJdbc(
+    tx.updateJdbc(
         "insert into harness_session (id, name, created_at) values (?, ?, ?)",
         session.id(),
         session.name(),
@@ -29,16 +31,16 @@ final class PostgresqlSessionStore extends PostgresqlHarnessView implements Sess
 
   @Override
   public Optional<Session> find(UUID id) {
-    checkOpen();
-    return queryOne(
+    tx.checkOpen();
+    return tx.queryOne(
         "select * from harness_session where id = ?", PostgresqlHarnessRows.SESSION, id);
   }
 
   @Override
   public void update(Session session) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(session, "session");
-    requireLocked(LockKey.session(session.id()));
+    tx.requireLocked(LockKey.session(session.id()));
     Session stored =
         tx.sessions()
             .find(session.id())
@@ -46,48 +48,48 @@ final class PostgresqlSessionStore extends PostgresqlHarnessView implements Sess
                 () -> new IllegalArgumentException("session " + session.id() + " does not exist"));
     Session.validateTransition(stored, session);
     int updated =
-        updateJdbc(
+        tx.updateJdbc(
             "update harness_session set name = ? where id = ?", session.name(), session.id());
-    requireSingleUpdate(updated, "session", session.id());
+    tx.requireSingleUpdate(updated, "session", session.id());
   }
 
   @Override
   public Optional<Session> lockForKeyShare(UUID id) {
-    checkOpen();
+    tx.checkOpen();
     // 已持有的行锁重复获取不改变加锁顺序，因此不再做 rank 回退检查（幂等重锁）。
-    if (!isLocked(LockKey.session(id))) {
-      requireCanLockRank(LockRank.SESSION);
+    if (!tx.isLocked(LockKey.session(id))) {
+      tx.requireCanLockRank(LockRank.SESSION);
     }
     Optional<Session> session =
-        queryOne(
+        tx.queryOne(
             "select * from harness_session where id = ? for key share",
             PostgresqlHarnessRows.SESSION,
             id);
-    session.ifPresent(ignored -> lockResource(LockKey.session(id)));
+    session.ifPresent(ignored -> tx.lockResource(LockKey.session(id)));
     return session;
   }
 
   @Override
   public Optional<Session> lockForUpdate(UUID id) {
-    checkOpen();
-    if (!isLocked(LockKey.session(id))) {
-      requireCanLockRank(LockRank.SESSION);
+    tx.checkOpen();
+    if (!tx.isLocked(LockKey.session(id))) {
+      tx.requireCanLockRank(LockRank.SESSION);
     }
     Optional<Session> session =
-        queryOne(
+        tx.queryOne(
             "select * from harness_session where id = ? for update",
             PostgresqlHarnessRows.SESSION,
             id);
-    session.ifPresent(ignored -> lockResource(LockKey.session(id)));
+    session.ifPresent(ignored -> tx.lockResource(LockKey.session(id)));
     return session;
   }
 
   /** 删除指定 Session 并从事务局部缓存中驱逐该 Session 的全部 EntryPath。 */
   @Override
   public boolean delete(UUID sessionId) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(sessionId, "sessionId");
-    entryPathCache().values().removeIf(path -> path.root().sessionId().equals(sessionId));
-    return updateJdbc("delete from harness_session where id = ?", sessionId) == 1;
+    tx.entryPathCache().values().removeIf(path -> path.root().sessionId().equals(sessionId));
+    return tx.updateJdbc("delete from harness_session where id = ?", sessionId) == 1;
   }
 }

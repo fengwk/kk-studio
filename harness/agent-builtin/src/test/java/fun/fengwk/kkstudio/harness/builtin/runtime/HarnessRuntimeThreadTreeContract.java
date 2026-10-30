@@ -18,6 +18,7 @@ import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupp
 import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.userMessageCommand;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.HarnessRuntimeTestSupport.userMessageEntry;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreCallProbe.wrap;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -184,12 +185,12 @@ public abstract class HarnessRuntimeThreadTreeContract {
             recordingStore(store, locks), Clock.fixed(T3, ZoneOffset.UTC));
     recording.getThreadTree(tree.grandchildId());
 
-    assertEquals("lockTree:" + tree.rootId(), locks.get(0));
-    int rootThread = locks.indexOf("lockThread:" + tree.rootId());
-    int earlyThread = locks.indexOf("lockThread:" + tree.earlySiblingId());
-    int childThread = locks.indexOf("lockThread:" + tree.childId());
-    int grandchildThread = locks.indexOf("lockThread:" + tree.grandchildId());
-    int command = locks.indexOf("loadQueuedCommands:" + tree.earlySiblingId());
+    assertEquals("threads.lockTree:" + tree.rootId(), locks.get(0));
+    int rootThread = locks.indexOf("threads.lock:" + tree.rootId());
+    int earlyThread = locks.indexOf("threads.lock:" + tree.earlySiblingId());
+    int childThread = locks.indexOf("threads.lock:" + tree.childId());
+    int grandchildThread = locks.indexOf("threads.lock:" + tree.grandchildId());
+    int command = locks.indexOf("commands.loadQueued:" + tree.earlySiblingId());
     assertTrue(earlyThread < childThread && childThread < grandchildThread);
     assertTrue(grandchildThread < rootThread);
     assertTrue(rootThread < command);
@@ -208,7 +209,9 @@ public abstract class HarnessRuntimeThreadTreeContract {
     TreeFixture tree = seedCrossSessionTree(store);
     UUID secondThread = TestIds.id(60);
     store.transaction(
-        tx -> insertRunningModel(tx, TestIds.id(5), secondThread, tree.rootId(), tree.rootId()));
+        tx ->
+            insertRunningModel(
+                store, tx, TestIds.id(5), secondThread, tree.rootId(), tree.rootId()));
     List<String> locks = new ArrayList<>();
     HarnessRuntime recording =
         HarnessRuntimeTestSupport.runtime(
@@ -256,32 +259,34 @@ public abstract class HarnessRuntimeThreadTreeContract {
               return delegate.transaction(
                   tx -> {
                     HarnessStore.Transaction wrapped =
-                        (HarnessStore.Transaction)
-                            Proxy.newProxyInstance(
-                                HarnessStore.Transaction.class.getClassLoader(),
-                                new Class<?>[] {BuiltinStore.Transaction.class},
-                                (transactionProxy, transactionMethod, transactionArgs) -> {
-                                  String name = transactionMethod.getName();
-                                  if (name.equals("lockTree") || name.equals("lockThread")) {
-                                    locks.add(name + ":" + transactionArgs[0]);
-                                  }
-                                  if (name.equals("loadQueuedCommands")
-                                      || name.equals("findModelInvocationByTurn")) {
-                                    locks.add(name + ":" + transactionArgs[0]);
-                                  }
-                                  if (name.startsWith("lockModel") || name.startsWith("lockTool")) {
-                                    throw new AssertionError(
-                                        "tree query must probe invocations: " + name);
-                                  }
-                                  if (name.startsWith("insert")
-                                      || name.startsWith("update")
-                                      || name.startsWith("delete")
-                                      || name.equals("ensureWork")
-                                      || name.equals("nextId")) {
-                                    throw new AssertionError("tree query must not write: " + name);
-                                  }
-                                  return transactionMethod.invoke(tx, transactionArgs);
-                                });
+                        wrap(
+                            ((BuiltinStore) delegate).in(tx),
+                            (call, next) -> {
+                              String name = call.operation();
+                              Object[] transactionArgs = call.arguments();
+                              if (name.equals("threads.lockTree") || name.equals("threads.lock")) {
+                                locks.add(name + ":" + transactionArgs[0]);
+                              }
+                              if (name.equals("commands.loadQueued")
+                                  || name.equals("findModelInvocationByTurn")) {
+                                locks.add(name + ":" + transactionArgs[0]);
+                              }
+                              if (name.startsWith("lockModel") || name.startsWith("tools.lock")) {
+                                throw new AssertionError(
+                                    "tree query must probe invocations: " + name);
+                              }
+                              if (name.startsWith("insert")
+                                  || name.startsWith("update")
+                                  || name.startsWith("delete")
+                                  || name.endsWith(".insert")
+                                  || name.endsWith(".update")
+                                  || name.endsWith(".delete")
+                                  || name.equals("ensureWork")
+                                  || name.equals("nextId")) {
+                                throw new AssertionError("tree query must not write: " + name);
+                              }
+                              return next.invoke();
+                            });
                     active.set(new RecordingTransaction(tx, wrapped));
                     try {
                       return callback.apply(wrapped);
@@ -351,9 +356,9 @@ public abstract class HarnessRuntimeThreadTreeContract {
               return end;
             });
     // 每次种子事务只写一个后代，避免 Thread/Model/Tool 锁序跨节点倒退。
-    store.transaction(tx -> insertRunningModel(tx, childSession, childId, rootId, rootId));
+    store.transaction(tx -> insertRunningModel(store, tx, childSession, childId, rootId, rootId));
     store.transaction(
-        tx -> insertWaitingApproval(tx, grandchildSession, grandchildId, childId, rootId));
+        tx -> insertWaitingApproval(store, tx, grandchildSession, grandchildId, childId, rootId));
     return new TreeFixture(rootId, childId, grandchildId, earlySiblingId, unrelatedId, earlyEndId);
   }
 
@@ -390,6 +395,7 @@ public abstract class HarnessRuntimeThreadTreeContract {
   }
 
   private static UUID insertRunningModel(
+      HarnessStore store,
       HarnessStore.Transaction tx,
       UUID sessionId,
       UUID threadId,
@@ -411,12 +417,13 @@ public abstract class HarnessRuntimeThreadTreeContract {
                 rootThreadId));
     UUID modelId = tx.nextId();
     ModelInvocation model = modelInvocation(modelId, threadId, startId, startId, T1);
-    builtin(tx).insertModelInvocation(model);
-    builtin(tx).updateModelInvocation(model.markRunning(T2));
+    builtin(store, tx).insertModelInvocation(model);
+    builtin(store, tx).updateModelInvocation(model.markRunning(T2));
     return startId;
   }
 
   private static UUID insertWaitingApproval(
+      HarnessStore store,
       HarnessStore.Transaction tx,
       UUID sessionId,
       UUID threadId,
@@ -446,11 +453,11 @@ public abstract class HarnessRuntimeThreadTreeContract {
     UUID modelId = tx.nextId();
     ModelInvocation model =
         modelInvocationWithRequest(modelId, threadId, startId, startId, request, T1);
-    builtin(tx).insertModelInvocation(model);
+    builtin(store, tx).insertModelInvocation(model);
     ModelInvocation succeeded = model.markRunning(T2).succeed(response, T2);
-    builtin(tx).updateModelInvocation(model.markRunning(T2));
-    builtin(tx).updateModelInvocation(succeeded);
-    builtin(tx).updateModelInvocation(succeeded.attachResultEntry(assistantId, T2));
+    builtin(store, tx).updateModelInvocation(model.markRunning(T2));
+    builtin(store, tx).updateModelInvocation(succeeded);
+    builtin(store, tx).updateModelInvocation(succeeded.attachResultEntry(assistantId, T2));
     UUID toolId = tx.nextId();
     ToolInvocation ready = toolInvocation(toolId, threadId, startId, assistantId, 0, "call-1", T1);
     tx.tools().insert(List.of(ready));

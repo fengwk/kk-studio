@@ -162,7 +162,7 @@ public abstract class HarnessStoreWorkContract {
                       mappedAssistant(requestSpec, response, T1),
                       T1));
           tx.threads().lock(baseline.threadId()).orElseThrow();
-          builtin(tx)
+          builtin(store, tx)
               .insertModelInvocation(
                   new ModelInvocation(
                       modelId,
@@ -179,12 +179,12 @@ public abstract class HarnessStoreWorkContract {
                       List.of(),
                       T1,
                       T1));
-          ModelInvocation model = builtin(tx).lockModelInvocation(modelId).orElseThrow();
-          builtin(tx).updateModelInvocation(model.markRunning(T1));
-          model = builtin(tx).lockModelInvocation(modelId).orElseThrow();
-          builtin(tx).updateModelInvocation(model.succeed(response, T1));
-          model = builtin(tx).lockModelInvocation(modelId).orElseThrow();
-          builtin(tx).updateModelInvocation(model.attachResultEntry(assistantEntryId, T1));
+          ModelInvocation model = builtin(store, tx).lockModelInvocation(modelId).orElseThrow();
+          builtin(store, tx).updateModelInvocation(model.markRunning(T1));
+          model = builtin(store, tx).lockModelInvocation(modelId).orElseThrow();
+          builtin(store, tx).updateModelInvocation(model.succeed(response, T1));
+          model = builtin(store, tx).lockModelInvocation(modelId).orElseThrow();
+          builtin(store, tx).updateModelInvocation(model.attachResultEntry(assistantEntryId, T1));
           ToolInvocation tool =
               toolInvocation(
                   toolId,
@@ -208,11 +208,14 @@ public abstract class HarnessStoreWorkContract {
         });
   }
 
-  private static void lockWorkOwner(HarnessStore.Transaction tx, WorkTarget target) {
+  private void lockWorkOwner(HarnessStore.Transaction tx, WorkTarget target) {
     UUID threadId =
         switch (target.type()) {
           case THREAD -> target.id();
-          case MODEL -> builtin(tx).findModelInvocation(target.id()).orElseThrow().threadId();
+          case MODEL -> builtin(store, tx)
+              .findModelInvocation(target.id())
+              .orElseThrow()
+              .threadId();
           case TOOL -> tx.tools().find(target.id()).orElseThrow().threadId();
         };
     tx.threads().lock(threadId).orElseThrow();
@@ -247,7 +250,7 @@ public abstract class HarnessStoreWorkContract {
         store,
         tx -> {
           tx.threads().lock(baseline.threadId()).orElseThrow();
-          builtin(tx)
+          builtin(store, tx)
               .insertModelInvocation(
                   modelInvocation(
                       TestIds.id(1),
@@ -285,7 +288,7 @@ public abstract class HarnessStoreWorkContract {
         store,
         tx -> {
           tx.threads().lock(baseline.threadId()).orElseThrow();
-          builtin(tx)
+          builtin(store, tx)
               .insertModelInvocation(
                   modelInvocation(
                       TestIds.id(1),
@@ -301,7 +304,7 @@ public abstract class HarnessStoreWorkContract {
         () ->
             store.transaction(
                 tx -> {
-                  builtin(tx).lockModelInvocation(TestIds.id(1)).orElseThrow();
+                  builtin(store, tx).lockModelInvocation(TestIds.id(1)).orElseThrow();
                   tx.threads().lock(baseline.threadId());
                   return null;
                 }));
@@ -438,7 +441,7 @@ public abstract class HarnessStoreWorkContract {
         store,
         tx -> {
           tx.threads().lock(baseline.threadId());
-          builtin(tx)
+          builtin(store, tx)
               .insertModelInvocation(
                   modelInvocation(
                       TestIds.id(1),
@@ -973,7 +976,7 @@ public abstract class HarnessStoreWorkContract {
                       mappedAssistant(requestSpec, response, T1),
                       T1));
           tx.threads().lock(baseline.threadId()).orElseThrow();
-          builtin(tx)
+          builtin(store, tx)
               .insertModelInvocation(
                   new ModelInvocation(
                       modelId,
@@ -990,12 +993,12 @@ public abstract class HarnessStoreWorkContract {
                       List.of(),
                       T1,
                       T1));
-          ModelInvocation model = builtin(tx).lockModelInvocation(modelId).orElseThrow();
-          builtin(tx).updateModelInvocation(model.markRunning(T1));
-          model = builtin(tx).lockModelInvocation(modelId).orElseThrow();
-          builtin(tx).updateModelInvocation(model.succeed(response, T1));
-          model = builtin(tx).lockModelInvocation(modelId).orElseThrow();
-          builtin(tx).updateModelInvocation(model.attachResultEntry(assistantEntryId, T1));
+          ModelInvocation model = builtin(store, tx).lockModelInvocation(modelId).orElseThrow();
+          builtin(store, tx).updateModelInvocation(model.markRunning(T1));
+          model = builtin(store, tx).lockModelInvocation(modelId).orElseThrow();
+          builtin(store, tx).updateModelInvocation(model.succeed(response, T1));
+          model = builtin(store, tx).lockModelInvocation(modelId).orElseThrow();
+          builtin(store, tx).updateModelInvocation(model.attachResultEntry(assistantEntryId, T1));
           List<UUID> toolIds = new ArrayList<>();
           List<ToolInvocation> tools = new ArrayList<>();
           for (int index = 0; index < count; index++) {

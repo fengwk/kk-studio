@@ -114,7 +114,10 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
     assertNotNull(assistantPayload.assistantMetadata());
     // COMPLETE 无 calls 关闭 turn：Model 行被物理删除，Assistant Entry 仍存在于 path。
     assertNull(
-        fixture.store.transaction(tx -> builtin(tx).findModelInvocation(modelId)).orElse(null));
+        fixture
+            .store
+            .transaction(tx -> builtin(fixture.store, tx).findModelInvocation(modelId))
+            .orElse(null));
     TurnEndPayload end = (TurnEndPayload) path.entries().get(4).payload();
     assertEquals(baseline.turnStartEntryId(), end.turnStartEntryId());
     assertEquals(TurnEndOutcome.COMPLETED, end.outcome());
@@ -428,7 +431,10 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
       assertEquals(error.message(), errorPayload.error().message());
       // terminal failure / cancel / unknown 关闭 turn：Model 行被物理删除，error Entry 仍存在。
       assertNull(
-          fixture.store.transaction(tx -> builtin(tx).findModelInvocation(modelId)).orElse(null));
+          fixture
+              .store
+              .transaction(tx -> builtin(fixture.store, tx).findModelInvocation(modelId))
+              .orElse(null));
       TurnEndPayload end = (TurnEndPayload) path.entries().get(4).payload();
       assertEquals(TurnEndOutcome.FAILED, end.outcome());
       assertFalse(end.continueModel());
@@ -474,7 +480,10 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
     assertEquals(TurnEndOutcome.FAILED, end.outcome());
     assertEquals(TurnEndReason.TURN_FAILED, end.reason());
     assertNull(
-        fixture.store.transaction(tx -> builtin(tx).findModelInvocation(modelId)).orElse(null));
+        fixture
+            .store
+            .transaction(tx -> builtin(fixture.store, tx).findModelInvocation(modelId))
+            .orElse(null));
     // THREAD Work 完成且无残留 wake：失败 turn 收敛为单条 ASSISTANT_ERROR + TURN_END，不产生重复条目。
     assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
     assertEquals(5, path(fixture.store, baseline.threadId()).entries().size());
@@ -633,7 +642,10 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
     assertEquals(TurnEndOutcome.COMPLETED, end.outcome());
     assertTrue(end.continueModel());
     assertNull(
-        fixture.store.transaction(tx -> builtin(tx).findModelInvocation(modelId)).orElse(null));
+        fixture
+            .store
+            .transaction(tx -> builtin(fixture.store, tx).findModelInvocation(modelId))
+            .orElse(null));
     assertTrue(toolsByAssistant(fixture.store, assistant.id()).isEmpty());
     assertNotNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
 
@@ -647,7 +659,7 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
         inTx(
                 fixture,
                 tx ->
-                    builtin(tx)
+                    builtin(fixture.store, tx)
                         .findModelInvocationByTurn(baseline.threadId(), path.entries().get(6).id()))
             .orElseThrow();
     assertNotNull(
@@ -762,7 +774,10 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
     assertEquals(0, toolsByAssistant(fixture.store, path.entries().get(3).id()).size());
     // LENGTH 无 calls 关闭 turn：Model 行被物理删除。
     assertNull(
-        fixture.store.transaction(tx -> builtin(tx).findModelInvocation(modelId)).orElse(null));
+        fixture
+            .store
+            .transaction(tx -> builtin(fixture.store, tx).findModelInvocation(modelId))
+            .orElse(null));
   }
 
   /** FILTERED：failed turn，stable reason CONTENT_FILTERED，零 ToolInvocation。 */
@@ -794,7 +809,10 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
     assertEquals(0, toolsByAssistant(fixture.store, path.entries().get(3).id()).size());
     // FILTERED 关闭 turn：Model 行被物理删除。
     assertNull(
-        fixture.store.transaction(tx -> builtin(tx).findModelInvocation(modelId)).orElse(null));
+        fixture
+            .store
+            .transaction(tx -> builtin(fixture.store, tx).findModelInvocation(modelId))
+            .orElse(null));
   }
 
   /**
@@ -835,7 +853,10 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
     assertNull(end.reason());
     // 关闭 turn：Model 行被物理删除，续写义务只由 durable continueModel=true TURN_END 表达。
     assertNull(
-        fixture.store.transaction(tx -> builtin(tx).findModelInvocation(modelId)).orElse(null));
+        fixture
+            .store
+            .transaction(tx -> builtin(fixture.store, tx).findModelInvocation(modelId))
+            .orElse(null));
     Work threadWork =
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId()));
     assertNotNull(threadWork);
@@ -852,7 +873,7 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
         inTx(
                 fixture,
                 tx ->
-                    builtin(tx)
+                    builtin(fixture.store, tx)
                         .findModelInvocationByTurn(
                             baseline.threadId(), continued.entries().get(5).id()))
             .orElseThrow();

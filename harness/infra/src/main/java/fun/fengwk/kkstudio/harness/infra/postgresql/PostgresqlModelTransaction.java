@@ -27,11 +27,12 @@ import java.util.Optional;
 import java.util.UUID;
 
 /** Builtin 私有模型事务视图；与 Runtime transaction 共享同一连接、时钟、锁序与 poisoning 状态。 */
-final class PostgresqlModelTransaction extends PostgresqlHarnessView
-    implements BuiltinStore.Transaction {
+final class PostgresqlModelTransaction implements BuiltinStore.Transaction {
+
+  private final PostgresqlHarnessTransaction tx;
 
   PostgresqlModelTransaction(PostgresqlHarnessTransaction tx) {
-    super(tx);
+    this.tx = tx;
   }
 
   @Override
@@ -91,8 +92,8 @@ final class PostgresqlModelTransaction extends PostgresqlHarnessView
 
   @Override
   public Optional<ModelInvocation> findModelInvocation(UUID id) {
-    checkOpen();
-    return queryOne(
+    tx.checkOpen();
+    return tx.queryOne(
         "select * from harness_model_invocation where id = ?",
         PostgresqlHarnessRows.MODEL_INVOCATION,
         id);
@@ -100,22 +101,22 @@ final class PostgresqlModelTransaction extends PostgresqlHarnessView
 
   @Override
   public Optional<ModelInvocation> lockModelInvocation(UUID id) {
-    checkOpen();
+    tx.checkOpen();
     LockKey lockKey = LockKey.driver(id);
-    requireCanLock(lockKey);
+    tx.requireCanLock(lockKey);
     Optional<ModelInvocation> invocation =
-        queryOne(
+        tx.queryOne(
             "select * from harness_model_invocation where id = ? for update",
             PostgresqlHarnessRows.MODEL_INVOCATION,
             id);
-    invocation.ifPresent(ignored -> lockResource(lockKey));
+    invocation.ifPresent(ignored -> tx.lockResource(lockKey));
     return invocation;
   }
 
   @Override
   public Optional<ModelInvocation> findModelInvocationByTurn(UUID threadId, UUID turnStartEntryId) {
-    checkOpen();
-    return queryOne(
+    tx.checkOpen();
+    return tx.queryOne(
         """
         select *
         from harness_model_invocation
@@ -128,7 +129,7 @@ final class PostgresqlModelTransaction extends PostgresqlHarnessView
 
   @Override
   public void insertModelInvocation(ModelInvocation invocation) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(invocation, "invocation");
     if (findModelInvocation(invocation.id()).isPresent()) {
       throw new IllegalArgumentException("duplicate model invocation id " + invocation.id());
@@ -141,8 +142,8 @@ final class PostgresqlModelTransaction extends PostgresqlHarnessView
                 () ->
                     new IllegalArgumentException(
                         "thread " + invocation.threadId() + " does not exist"));
-    requireLocked(LockKey.thread(invocation.threadId()));
-    TurnStartPayload turnStartPayload = requireTurnStartPayload(invocation.turnStartEntryId());
+    tx.requireLocked(LockKey.thread(invocation.threadId()));
+    TurnStartPayload turnStartPayload = tx.requireTurnStartPayload(invocation.turnStartEntryId());
     if (!turnStartPayload.ownerThreadId().equals(invocation.threadId())) {
       throw new IllegalArgumentException(
           "turn start ownerThreadId must equal the model invocation threadId");
@@ -162,8 +163,8 @@ final class PostgresqlModelTransaction extends PostgresqlHarnessView
     requireValidModelBranch(invocation, thread);
     requireValidModelResultEntry(invocation);
     LockKey lockKey = LockKey.driver(invocation.id());
-    requireCanLock(lockKey);
-    updateJdbc(
+    tx.requireCanLock(lockKey);
+    tx.updateJdbc(
         """
         insert into harness_model_invocation (
             id, thread_id, turn_start_entry_id, request_head_entry_id, request_spec, status, attempt,
@@ -193,14 +194,14 @@ final class PostgresqlModelTransaction extends PostgresqlHarnessView
         invocation.status() == ModelInvocationStatus.READY
             ? null
             : PostgresqlHarnessRows.timestamp(invocation.createdAt()));
-    lockResource(lockKey);
+    tx.lockResource(lockKey);
   }
 
   @Override
   public void updateModelInvocation(ModelInvocation invocation) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(invocation, "invocation");
-    requireLocked(LockKey.driver(invocation.id()));
+    tx.requireLocked(LockKey.driver(invocation.id()));
     ModelInvocation stored =
         findModelInvocation(invocation.id())
             .orElseThrow(
@@ -214,7 +215,7 @@ final class PostgresqlModelTransaction extends PostgresqlHarnessView
           stored, invocation, tx.entries().loadPath(invocation.resultEntryId()));
     }
     int updated =
-        updateJdbc(
+        tx.updateJdbc(
             """
             update harness_model_invocation
             set status = ?,
@@ -244,7 +245,7 @@ final class PostgresqlModelTransaction extends PostgresqlHarnessView
                 ? null
                 : PostgresqlHarnessRows.timestamp(invocation.requestedAt()),
             invocation.id());
-    requireSingleUpdate(updated, "model invocation", invocation.id());
+    tx.requireSingleUpdate(updated, "model invocation", invocation.id());
   }
 
   private static String encodeModelProviderReplayState(ModelInvocation invocation) {
@@ -263,7 +264,7 @@ final class PostgresqlModelTransaction extends PostgresqlHarnessView
   public boolean isGroupMemberCooling(
       String groupName, long groupVersion, String memberModelName, String memberVariant) {
     Instant now = now();
-    return queryOne(
+    return tx.queryOne(
             """
             select exists (
                 select 1
@@ -297,7 +298,7 @@ final class PostgresqlModelTransaction extends PostgresqlHarnessView
     Instant now = now();
     // 与组配置写入共用 agent_model 行锁：先锁定当前版本，旧版本 callback 不得写入/延长新配置的冷却。
     Long currentVersion =
-        queryOne(
+        tx.queryOne(
                 "select version from agent_model where name = ? for share",
                 (rs, rowNumber) -> rs.getLong(1),
                 groupName)
@@ -305,7 +306,7 @@ final class PostgresqlModelTransaction extends PostgresqlHarnessView
     if (currentVersion == null || currentVersion != groupVersion) {
       return;
     }
-    updateJdbc(
+    tx.updateJdbc(
         """
         insert into agent_model_group_cooldown (
             group_name, member_model_name, member_variant, group_version, cooldown_until,
@@ -331,20 +332,20 @@ final class PostgresqlModelTransaction extends PostgresqlHarnessView
 
   @Override
   public boolean deleteModelInvocation(UUID modelInvocationId) {
-    checkOpen();
+    tx.checkOpen();
     Objects.requireNonNull(modelInvocationId, "modelInvocationId");
     if (findModelInvocation(modelInvocationId).isEmpty()) {
       throw new IllegalArgumentException(
           "model invocation " + modelInvocationId + " does not exist");
     }
-    requireLocked(LockKey.driver(modelInvocationId));
+    tx.requireLocked(LockKey.driver(modelInvocationId));
     if (hasToolInvocationChildren(modelInvocationId)) {
       throw new IllegalArgumentException(
           "model invocation " + modelInvocationId + " has tool invocation children");
     }
     int deleted =
-        updateJdbc("delete from harness_model_invocation where id = ?", modelInvocationId);
-    requireSingleUpdate(deleted, "model invocation", modelInvocationId);
+        tx.updateJdbc("delete from harness_model_invocation where id = ?", modelInvocationId);
+    tx.requireSingleUpdate(deleted, "model invocation", modelInvocationId);
     return true;
   }
 
@@ -356,7 +357,7 @@ final class PostgresqlModelTransaction extends PostgresqlHarnessView
                     new IllegalArgumentException(
                         "model invocation " + modelInvocationId + " does not exist"));
     Boolean exists =
-        queryForObject(
+        tx.queryForObject(
             """
             select exists (
                 select 1
@@ -372,7 +373,7 @@ final class PostgresqlModelTransaction extends PostgresqlHarnessView
 
   private void requireUniqueModelTurn(ModelInvocation invocation) {
     Boolean exists =
-        queryForObject(
+        tx.queryForObject(
             """
             select exists (
                 select 1
@@ -411,7 +412,7 @@ final class PostgresqlModelTransaction extends PostgresqlHarnessView
     if (resultEntryId == null) {
       return;
     }
-    Entry result = requireExistingEntry(resultEntryId);
+    Entry result = tx.requireExistingEntry(resultEntryId);
     if (!isModelResultEntry(result)) {
       throw new IllegalArgumentException(
           "model resultEntryId must reference an assistant, assistant-error or assistant-aborted"
@@ -433,7 +434,7 @@ final class PostgresqlModelTransaction extends PostgresqlHarnessView
           "model result entry must be on the basis path and in the same turn");
     }
     Boolean used =
-        queryForObject(
+        tx.queryForObject(
             """
             select exists (
                 select 1

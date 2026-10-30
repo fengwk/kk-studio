@@ -965,7 +965,7 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
           EntryPath path =
               tx.entries().loadPath(tx.threads().find(threadId).orElseThrow().headEntryId());
           UUID turnStartId = path.openTurnStart().orElseThrow().id();
-          return builtin(tx).findModelInvocationByTurn(threadId, turnStartId).orElseThrow();
+          return builtin(store, tx).findModelInvocationByTurn(threadId, turnStartId).orElseThrow();
         });
   }
 
@@ -974,11 +974,11 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
     ProviderResponse response = successResponse(List.of(callId), "bash");
     store.transaction(
         tx -> {
-          builtin(tx).lockModelInvocation(model.id());
+          builtin(store, tx).lockModelInvocation(model.id());
           ModelInvocation running = model.markRunning(NOW);
-          builtin(tx).updateModelInvocation(running);
+          builtin(store, tx).updateModelInvocation(running);
           ModelInvocation succeeded = running.succeed(response, null, null, NOW);
-          builtin(tx).updateModelInvocation(succeeded);
+          builtin(store, tx).updateModelInvocation(succeeded);
           return null;
         });
   }
@@ -988,11 +988,11 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
     ProviderResponse response = successResponse(text, List.of(), GenerationStopReason.COMPLETE);
     store.transaction(
         tx -> {
-          builtin(tx).lockModelInvocation(model.id());
+          builtin(store, tx).lockModelInvocation(model.id());
           ModelInvocation running = model.markRunning(NOW);
-          builtin(tx).updateModelInvocation(running);
+          builtin(store, tx).updateModelInvocation(running);
           ModelInvocation succeeded = running.succeed(response, null, null, NOW);
-          builtin(tx).updateModelInvocation(succeeded);
+          builtin(store, tx).updateModelInvocation(succeeded);
           return null;
         });
   }
@@ -1002,11 +1002,11 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
     ProviderResponse response = successResponse(text, List.of(), GenerationStopReason.CONTINUE);
     store.transaction(
         tx -> {
-          builtin(tx).lockModelInvocation(model.id());
+          builtin(store, tx).lockModelInvocation(model.id());
           ModelInvocation running = model.markRunning(NOW);
-          builtin(tx).updateModelInvocation(running);
+          builtin(store, tx).updateModelInvocation(running);
           ModelInvocation succeeded = running.succeed(response, null, null, NOW);
-          builtin(tx).updateModelInvocation(succeeded);
+          builtin(store, tx).updateModelInvocation(succeeded);
           return null;
         });
   }

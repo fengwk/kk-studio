@@ -181,7 +181,7 @@ class HarnessRuntimeForkTest {
 
   private boolean hasModelInvocation(UUID threadId, UUID turnStartEntryId) {
     return store.transaction(
-        tx -> builtin(tx).findModelInvocationByTurn(threadId, turnStartEntryId).isPresent());
+        tx -> builtin(store, tx).findModelInvocationByTurn(threadId, turnStartEntryId).isPresent());
   }
 
   private static Entry singleRole(List<Entry> entries, AgentMessageRole role) {
@@ -292,8 +292,8 @@ class HarnessRuntimeForkTest {
           ThreadState initialThread = thread(threadId, sessionId, u1);
           tx.threads().insert(initialThread);
           ModelInvocation model = modelInvocation(modelId, threadId, ts1, u1, T1);
-          builtin(tx).insertModelInvocation(model);
-          builtin(tx).updateModelInvocation(model.cancel(modelError(), T2));
+          builtin(store, tx).insertModelInvocation(model);
+          builtin(store, tx).updateModelInvocation(model.cancel(modelError(), T2));
           tx.threads().update(initialThread.advanceHead(te2, T2));
           return new HistorySeed(sessionId, threadId, root, ts1, a1, te1, te2);
         });

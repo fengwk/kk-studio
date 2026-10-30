@@ -210,7 +210,7 @@ class PostgresqlModelLeaseRecoveryTest {
         tx -> {
           tx.threads().lock(turn.threadId()).orElseThrow();
           UUID id = tx.nextId();
-          builtin(tx)
+          builtin(store, tx)
               .insertModelInvocation(
                   new ModelInvocation(
                       id,
@@ -236,9 +236,9 @@ class PostgresqlModelLeaseRecoveryTest {
     store.transaction(
         tx -> {
           tx.threads().lock(turn.threadId()).orElseThrow();
-          builtin(tx)
+          builtin(store, tx)
               .updateModelInvocation(
-                  builtin(tx).lockModelInvocation(modelId).orElseThrow().markRunning(T3));
+                  builtin(store, tx).lockModelInvocation(modelId).orElseThrow().markRunning(T3));
           return null;
         });
     return modelId;
@@ -251,12 +251,12 @@ class PostgresqlModelLeaseRecoveryTest {
         tx -> {
           var thread = tx.threads().lock(turn.threadId()).orElseThrow();
           var response = StoreTestSupport.assistantResponse();
-          builtin(tx)
+          builtin(store, tx)
               .updateModelInvocation(
-                  builtin(tx).lockModelInvocation(modelId).orElseThrow().markRunning(T3));
-          builtin(tx)
+                  builtin(store, tx).lockModelInvocation(modelId).orElseThrow().markRunning(T3));
+          builtin(store, tx)
               .updateModelInvocation(
-                  builtin(tx)
+                  builtin(store, tx)
                       .lockModelInvocation(modelId)
                       .orElseThrow()
                       .succeed(response, null, null, T3));
@@ -269,9 +269,9 @@ class PostgresqlModelLeaseRecoveryTest {
                       thread.headEntryId(),
                       mappedAssistant(modelRequest(), response, T3),
                       T3));
-          builtin(tx)
+          builtin(store, tx)
               .updateModelInvocation(
-                  builtin(tx)
+                  builtin(store, tx)
                       .lockModelInvocation(modelId)
                       .orElseThrow()
                       .attachResultEntry(assistantId, T3));
@@ -286,9 +286,9 @@ class PostgresqlModelLeaseRecoveryTest {
     store.transaction(
         tx -> {
           tx.threads().lock(turn.threadId()).orElseThrow();
-          builtin(tx)
+          builtin(store, tx)
               .updateModelInvocation(
-                  builtin(tx).lockModelInvocation(modelId).orElseThrow().markRunning(T4));
+                  builtin(store, tx).lockModelInvocation(modelId).orElseThrow().markRunning(T4));
           return null;
         });
   }
@@ -307,7 +307,7 @@ class PostgresqlModelLeaseRecoveryTest {
   }
 
   private ModelInvocation findModel(UUID modelId) {
-    return store.transaction(tx -> builtin(tx).findModelInvocation(modelId)).orElseThrow();
+    return store.transaction(tx -> builtin(store, tx).findModelInvocation(modelId)).orElseThrow();
   }
 
   private Optional<Work> findWork(WorkTarget target) {

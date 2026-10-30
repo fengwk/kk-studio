@@ -61,7 +61,9 @@ class HarnessRuntimeStopLocalCancellationTest {
               modelCalls.add(invocationId);
               // 本地取消回调在 Stop 事务提交后执行：Model 行已被 stopModel 物理删除。
               assertTrue(
-                  store.transaction(tx -> builtin(tx).findModelInvocation(invocationId)).isEmpty());
+                  store
+                      .transaction(tx -> builtin(store, tx).findModelInvocation(invocationId))
+                      .isEmpty());
               assertFalse(
                   store
                       .transaction(

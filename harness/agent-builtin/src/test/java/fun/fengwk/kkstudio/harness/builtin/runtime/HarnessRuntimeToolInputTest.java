@@ -929,11 +929,12 @@ class HarnessRuntimeToolInputTest {
           ModelInvocation model =
               modelInvocationWithRequest(
                   modelId, stale.threadId(), turnStartId, turnStartId, requestSpec, T3);
-          builtin(tx).insertModelInvocation(model);
-          builtin(tx).updateModelInvocation(model.markRunning(T3));
+          builtin(store, tx).insertModelInvocation(model);
+          builtin(store, tx).updateModelInvocation(model.markRunning(T3));
           ModelInvocation succeeded = model.markRunning(T3).succeed(response, T3);
-          builtin(tx).updateModelInvocation(succeeded);
-          builtin(tx).updateModelInvocation(succeeded.attachResultEntry(assistantEntryId, T3));
+          builtin(store, tx).updateModelInvocation(succeeded);
+          builtin(store, tx)
+              .updateModelInvocation(succeeded.attachResultEntry(assistantEntryId, T3));
           UUID liveToolId = tx.nextId();
           tx.tools()
               .insert(

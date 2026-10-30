@@ -137,8 +137,8 @@ class HarnessRuntimeStopReplayTest {
           // 新活跃 open Turn：head 停在 user2，Model 以 head（turned 2）为基础在跑。
           tx.threads().insert(thread(threadId, sessionId, user2));
           ModelInvocation model = modelInvocation(modelId, threadId, turnStart2, user2, T1);
-          builtin(tx).insertModelInvocation(model);
-          builtin(tx).updateModelInvocation(model.markRunning(T2));
+          builtin(store, tx).insertModelInvocation(model);
+          builtin(store, tx).updateModelInvocation(model.markRunning(T2));
         });
     // 该 STOP 边界已持久保存回执：replay 完全由 (threadId, stopRequestId) 回执驱动，不读当前 head。
     store.transaction(
@@ -162,7 +162,7 @@ class HarnessRuntimeStopReplayTest {
     assertEquals(user2, thread.headEntryId());
     assertEquals(0L, thread.version());
     ModelInvocation model =
-        store.transaction(tx -> builtin(tx).findModelInvocation(modelId).orElseThrow());
+        store.transaction(tx -> builtin(store, tx).findModelInvocation(modelId).orElseThrow());
     assertEquals(ModelInvocationStatus.RUNNING, model.status());
     assertTrue(
         Boolean.TRUE.equals(
