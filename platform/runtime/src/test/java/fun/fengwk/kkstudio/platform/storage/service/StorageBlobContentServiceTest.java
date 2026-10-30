@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.storage.service.impl;
+package fun.fengwk.kkstudio.platform.storage.service;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -40,14 +40,11 @@ import fun.fengwk.kkstudio.platform.storage.S3ObjectContent;
 import fun.fengwk.kkstudio.platform.storage.S3ObjectMetadata;
 import fun.fengwk.kkstudio.platform.storage.S3ObjectStream;
 import fun.fengwk.kkstudio.platform.storage.S3StorageService;
-import fun.fengwk.kkstudio.platform.storage.S3StorageServiceImpl;
 import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
 import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
 import fun.fengwk.kkstudio.platform.storage.error.StorageReadInterruptedException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageReadTimeoutException;
 import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
-import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobContent;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
@@ -59,7 +56,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * {@link StorageBlobContentServiceImpl} 单元测试。
+ * {@link StorageBlobContentService} 单元测试。
  *
  * <p>覆盖核心边界：
  *
@@ -73,12 +70,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  * @author fengwk
  */
-class StorageBlobContentServiceImplTest {
+class StorageBlobContentServiceTest {
 
   private StorageBlobManager blobManager;
   private S3StorageService s3StorageService;
   private PlatformTransactionManager transactionManager;
-  private StorageBlobContentServiceImpl contentService;
+  private StorageBlobContentService contentService;
 
   @BeforeEach
   void setUp() {
@@ -87,7 +84,7 @@ class StorageBlobContentServiceImplTest {
     transactionManager = new TestTransactionManager();
     when(blobManager.release(any())).thenReturn(true);
     contentService =
-        new StorageBlobContentServiceImpl(blobManager, s3StorageService, transactionManager);
+        new StorageBlobContentService(blobManager, s3StorageService, transactionManager);
   }
 
   /** 测试意图：验证成功路径下，方法严格按照 retain -> S3 download -> release 顺序执行， 且返回权威的 mediaType 与字节内容。 */
@@ -122,7 +119,7 @@ class StorageBlobContentServiceImplTest {
   /**
    * 测试意图：文档契约规定负数上限表示「不限大小」，实现必须走无上限对象读取。
    *
-   * <p>这里使用真实 {@link S3StorageServiceImpl} + 受控 S3Client（而不是 mock 掉
+   * <p>这里使用真实 {@link S3StorageService} + 受控 S3Client（而不是 mock 掉
    * S3StorageService），让「有界下载拒绝负上限」这条真实门禁生效： 有界路径先 HEAD 再按上限断言，负上限不可能通过；无上限路径不做 HEAD。
    */
   @Test
@@ -187,8 +184,8 @@ class StorageBlobContentServiceImplTest {
     properties.setEndpoint("http://minio.example.local:9000");
     properties.setRegion("us-east-1");
     properties.setBucket("test-bucket");
-    return new StorageBlobContentServiceImpl(
-        blobManager, new S3StorageServiceImpl(properties, s3Client), transactionManager);
+    return new StorageBlobContentService(
+        blobManager, new S3StorageService(properties, s3Client), transactionManager);
   }
 
   private static ResponseInputStream<GetObjectResponse> getObjectStream(

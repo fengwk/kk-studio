@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.storage.service.impl;
+package fun.fengwk.kkstudio.platform.storage.service;
 
 import static fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport.POSTGRES;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -13,7 +13,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.platform.storage.error.StorageConflictException;
-import fun.fengwk.kkstudio.platform.storage.service.StorageUploadOperationLock;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -28,20 +27,20 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.BiPredicate;
 
 /**
- * {@link PostgresqlStorageUploadOperationLock} 的真实 PostgreSQL 会话锁语义测试。
+ * {@link StorageUploadOperationLock} 的真实 PostgreSQL 会话锁语义测试。
  *
  * <p>不需要 Spring 上下文：直接连接共享测试容器，只验证锁本身的独占性、释放与泄漏语义、有界阻塞以及 UUID -> key 映射稳定性。锁的作用域是会话，因此这里 每次 acquire
  * 都是一条独立物理连接，与生产实现完全一致。
  */
-class PostgresqlStorageUploadOperationLockTest {
+class StorageUploadOperationLockTest {
 
   private static final Duration ACQUIRE_TIMEOUT = Duration.ofSeconds(5);
 
   /** 记录开出的全部会话：任何失败路径都不允许遗留 DriverManager 连接。 */
   private final List<Connection> opened = new CopyOnWriteArrayList<>();
 
-  private final PostgresqlStorageUploadOperationLock lock =
-      new PostgresqlStorageUploadOperationLock(this::openConnection, ACQUIRE_TIMEOUT);
+  private final StorageUploadOperationLock lock =
+      new StorageUploadOperationLock(this::openConnection, ACQUIRE_TIMEOUT);
 
   /** 测试意图：同一 upload 的锁是独占的；close 后必须能重新获取，其它 upload（不同 key）不受影响，且不遗留会话。 */
   @Test
@@ -80,8 +79,8 @@ class PostgresqlStorageUploadOperationLockTest {
   @Test
   void blockedAcquireFailsBoundedInsteadOfHanging() {
     UUID uploadId = UUID.randomUUID();
-    PostgresqlStorageUploadOperationLock shortTimeoutLock =
-        new PostgresqlStorageUploadOperationLock(this::openConnection, Duration.ofMillis(400));
+    StorageUploadOperationLock shortTimeoutLock =
+        new StorageUploadOperationLock(this::openConnection, Duration.ofMillis(400));
     try (StorageUploadOperationLock.Handle held = lock.acquire(uploadId)) {
       long startedAt = System.nanoTime();
       assertThrows(StorageConflictException.class, () -> shortTimeoutLock.acquire(uploadId));
@@ -96,8 +95,8 @@ class PostgresqlStorageUploadOperationLockTest {
   /** 测试意图：连接来源失败必须确定性上报为锁基础设施失败，而不是静默降级为「无锁」。 */
   @Test
   void connectionOpenFailureIsReportedWithoutLeaking() {
-    PostgresqlStorageUploadOperationLock brokenLock =
-        new PostgresqlStorageUploadOperationLock(
+    StorageUploadOperationLock brokenLock =
+        new StorageUploadOperationLock(
             () -> {
               throw new SQLException("lock connection unavailable");
             },
@@ -113,23 +112,23 @@ class PostgresqlStorageUploadOperationLockTest {
    */
   @Test
   void advisoryKeyIsStableAndNamespaced() {
-    assertEquals(0x53544C4B, PostgresqlStorageUploadOperationLock.NAMESPACE);
+    assertEquals(0x53544C4B, StorageUploadOperationLock.NAMESPACE);
     UUID fixed = UUID.fromString("00000000-1111-2222-3333-444444444444");
-    assertEquals(1_431_660_134, PostgresqlStorageUploadOperationLock.advisoryKey(fixed));
+    assertEquals(1_431_660_134, StorageUploadOperationLock.advisoryKey(fixed));
     assertEquals(
-        PostgresqlStorageUploadOperationLock.advisoryKey(fixed),
-        PostgresqlStorageUploadOperationLock.advisoryKey(UUID.fromString(fixed.toString())));
+        StorageUploadOperationLock.advisoryKey(fixed),
+        StorageUploadOperationLock.advisoryKey(UUID.fromString(fixed.toString())));
     assertNotEquals(
-        PostgresqlStorageUploadOperationLock.advisoryKey(fixed),
-        PostgresqlStorageUploadOperationLock.advisoryKey(
+        StorageUploadOperationLock.advisoryKey(fixed),
+        StorageUploadOperationLock.advisoryKey(
             UUID.fromString("00000000-1111-2222-3333-444444444445")));
   }
 
   /** 生成一个映射到不同 key 的 upload id，避免把「碰巧哈希碰撞」误当成锁失效。 */
   private static UUID differentKey(UUID uploadId) {
-    int key = PostgresqlStorageUploadOperationLock.advisoryKey(uploadId);
+    int key = StorageUploadOperationLock.advisoryKey(uploadId);
     UUID candidate = UUID.randomUUID();
-    while (PostgresqlStorageUploadOperationLock.advisoryKey(candidate) == key) {
+    while (StorageUploadOperationLock.advisoryKey(candidate) == key) {
       candidate = UUID.randomUUID();
     }
     return candidate;
@@ -139,15 +138,13 @@ class PostgresqlStorageUploadOperationLockTest {
   @Test
   void rejectsInvalidConstructionArguments() {
     assertThrows(
-        NullPointerException.class,
-        () -> new PostgresqlStorageUploadOperationLock(null, ACQUIRE_TIMEOUT));
+        NullPointerException.class, () -> new StorageUploadOperationLock(null, ACQUIRE_TIMEOUT));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new PostgresqlStorageUploadOperationLock(this::openConnection, Duration.ZERO));
+        () -> new StorageUploadOperationLock(this::openConnection, Duration.ZERO));
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            new PostgresqlStorageUploadOperationLock(this::openConnection, Duration.ofMillis(-1)));
+        () -> new StorageUploadOperationLock(this::openConnection, Duration.ofMillis(-1)));
   }
 
   /** 测试意图：会话上的 SQL 失败必须上报为锁基础设施失败，且失败的会话立刻关闭，不遗留 DriverManager 连接。 */
@@ -156,8 +153,8 @@ class PostgresqlStorageUploadOperationLockTest {
     Connection real = openConnection();
     Connection failing =
         intercept(real, "prepareStatement", new SQLException("lock statement failed"));
-    PostgresqlStorageUploadOperationLock failingLock =
-        new PostgresqlStorageUploadOperationLock(() -> failing, ACQUIRE_TIMEOUT);
+    StorageUploadOperationLock failingLock =
+        new StorageUploadOperationLock(() -> failing, ACQUIRE_TIMEOUT);
 
     assertThrows(IllegalStateException.class, () -> failingLock.tryAcquire(UUID.randomUUID()));
     assertTrue(real.isClosed(), "a failed acquisition must close its dedicated session");
@@ -169,8 +166,8 @@ class PostgresqlStorageUploadOperationLockTest {
     Connection real = openConnection();
     Connection failing =
         intercept(real, "setAutoCommit", new IllegalStateException("driver exploded"));
-    PostgresqlStorageUploadOperationLock failingLock =
-        new PostgresqlStorageUploadOperationLock(() -> failing, ACQUIRE_TIMEOUT);
+    StorageUploadOperationLock failingLock =
+        new StorageUploadOperationLock(() -> failing, ACQUIRE_TIMEOUT);
 
     IllegalStateException error =
         assertThrows(IllegalStateException.class, () -> failingLock.acquire(UUID.randomUUID()));
@@ -183,8 +180,8 @@ class PostgresqlStorageUploadOperationLockTest {
   void closeFailureIsTolerated() throws SQLException {
     Connection real = openConnection();
     Connection failingClose = intercept(real, "close", new SQLException("close failed"));
-    PostgresqlStorageUploadOperationLock failingLock =
-        new PostgresqlStorageUploadOperationLock(() -> failingClose, ACQUIRE_TIMEOUT);
+    StorageUploadOperationLock failingLock =
+        new StorageUploadOperationLock(() -> failingClose, ACQUIRE_TIMEOUT);
 
     StorageUploadOperationLock.Handle handle = failingLock.tryAcquire(UUID.randomUUID());
     assertNotNull(handle);
@@ -199,8 +196,8 @@ class PostgresqlStorageUploadOperationLockTest {
     UUID uploadId = UUID.randomUUID();
     Connection real = openConnection();
     Connection unlockFailing = interceptUnlock(real, new SQLException("unlock failed"));
-    PostgresqlStorageUploadOperationLock failingLock =
-        new PostgresqlStorageUploadOperationLock(() -> unlockFailing, ACQUIRE_TIMEOUT);
+    StorageUploadOperationLock failingLock =
+        new StorageUploadOperationLock(() -> unlockFailing, ACQUIRE_TIMEOUT);
 
     try (StorageUploadOperationLock.Handle handle = failingLock.tryAcquire(uploadId)) {
       assertNotNull(handle);
@@ -257,8 +254,7 @@ class PostgresqlStorageUploadOperationLockTest {
 
   private void assertAllSessionsClosed() {
     assertTrue(
-        opened.stream().allMatch(PostgresqlStorageUploadOperationLockTest::isClosed),
-        opened::toString);
+        opened.stream().allMatch(StorageUploadOperationLockTest::isClosed), opened::toString);
   }
 
   private static boolean isClosed(Connection connection) {

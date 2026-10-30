@@ -20,16 +20,15 @@ import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.storage.S3PresignService;
-import fun.fengwk.kkstudio.platform.storage.S3PresignServiceImpl;
 import fun.fengwk.kkstudio.platform.storage.S3ReadinessProbe;
 import fun.fengwk.kkstudio.platform.storage.S3StorageService;
-import fun.fengwk.kkstudio.platform.storage.S3StorageServiceImpl;
 import fun.fengwk.kkstudio.platform.storage.StorageMaintenance;
 import fun.fengwk.kkstudio.platform.storage.StorageMaintenanceWakeup;
 import fun.fengwk.kkstudio.platform.storage.persistence.SessionBlobRefRepository;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageObjectCleanupRepository;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageUploadRepository;
+import fun.fengwk.kkstudio.platform.storage.service.HeadOnlyStorageMediaProbe;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
@@ -38,13 +37,6 @@ import fun.fengwk.kkstudio.platform.storage.service.StorageMediaProbe;
 import fun.fengwk.kkstudio.platform.storage.service.StorageObjectCleanupService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadOperationLock;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
-import fun.fengwk.kkstudio.platform.storage.service.impl.HeadOnlyStorageMediaProbe;
-import fun.fengwk.kkstudio.platform.storage.service.impl.PostgresqlSessionBlobRefManager;
-import fun.fengwk.kkstudio.platform.storage.service.impl.PostgresqlStorageBlobManager;
-import fun.fengwk.kkstudio.platform.storage.service.impl.PostgresqlStorageObjectCleanupService;
-import fun.fengwk.kkstudio.platform.storage.service.impl.PostgresqlStorageUploadOperationLock;
-import fun.fengwk.kkstudio.platform.storage.service.impl.StorageBlobContentServiceImpl;
-import fun.fengwk.kkstudio.platform.storage.service.impl.StorageUploadServiceImpl;
 
 import java.net.ProxySelector;
 import java.net.URI;
@@ -126,13 +118,13 @@ public class S3StorageConfiguration {
 
   @Bean
   public S3StorageService s3StorageService(S3StorageProperties properties, S3Client s3Client) {
-    return new S3StorageServiceImpl(properties, s3Client);
+    return new S3StorageService(properties, s3Client);
   }
 
   @Bean
   public S3PresignService s3PresignService(
       S3StorageProperties properties, S3Presigner s3Presigner, SystemSettingsSnapshot snapshot) {
-    return new S3PresignServiceImpl(properties, s3Presigner, snapshot);
+    return new S3PresignService(properties, s3Presigner, snapshot);
   }
 
   /** 默认媒体事实探针：只记录 HEAD 元数据；后续 Canvas 媒体集成可替换为 Ffmpeg 实现。 */
@@ -150,7 +142,7 @@ public class S3StorageConfiguration {
       ObjectProvider<StorageMaintenanceWakeup> maintenanceWakeup,
       StorageObjectCleanupService storageObjectCleanupService,
       PlatformTransactionManager transactionManager) {
-    return new PostgresqlStorageBlobManager(
+    return new StorageBlobManager(
         blobRepository,
         s3StorageService,
         s3PresignService,
@@ -165,7 +157,7 @@ public class S3StorageConfiguration {
       StorageObjectCleanupRepository cleanupRepository,
       S3StorageService s3StorageService,
       StorageMaintenanceProperties maintenanceProperties) {
-    return new PostgresqlStorageObjectCleanupService(
+    return new StorageObjectCleanupService(
         cleanupRepository, s3StorageService, maintenanceProperties);
   }
 
@@ -187,7 +179,7 @@ public class S3StorageConfiguration {
     if (connectionDetails.getPassword() != null) {
       credentials.setProperty("password", connectionDetails.getPassword());
     }
-    return new PostgresqlStorageUploadOperationLock(
+    return new StorageUploadOperationLock(
         () -> DriverManager.getConnection(jdbcUrl, credentials), UPLOAD_LOCK_ACQUIRE_TIMEOUT);
   }
 
@@ -197,8 +189,7 @@ public class S3StorageConfiguration {
       StorageBlobManager storageBlobManager,
       S3StorageService s3StorageService,
       PlatformTransactionManager transactionManager) {
-    return new StorageBlobContentServiceImpl(
-        storageBlobManager, s3StorageService, transactionManager);
+    return new StorageBlobContentService(storageBlobManager, s3StorageService, transactionManager);
   }
 
   /** 上传契约服务：reserve/complete/delete 与 cleanup-lease 过期回收。 */
@@ -219,7 +210,7 @@ public class S3StorageConfiguration {
       SystemSettingsSnapshot snapshot,
       Clock clock,
       PlatformTransactionManager transactionManager) {
-    return new StorageUploadServiceImpl(
+    return new StorageUploadService(
         uploadRepository,
         blobRepository,
         blobManager,
@@ -252,7 +243,7 @@ public class S3StorageConfiguration {
   @Bean
   public SessionBlobRefManager sessionBlobRefManager(
       SessionBlobRefRepository refRepository, StorageBlobManager blobManager) {
-    return new PostgresqlSessionBlobRefManager(refRepository, blobManager);
+    return new SessionBlobRefManager(refRepository, blobManager);
   }
 
   private S3Configuration newS3Configuration() {

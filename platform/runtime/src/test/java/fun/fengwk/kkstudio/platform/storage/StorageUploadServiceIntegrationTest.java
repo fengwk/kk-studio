@@ -40,7 +40,6 @@ import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobPreviewService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadOperationLock;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
-import fun.fengwk.kkstudio.platform.storage.service.impl.PostgresqlStorageUploadOperationLock;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageUpload;
@@ -890,7 +889,7 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
    */
   @Test
   void uploadOperationLockIsWiredToRealPostgresSessions() {
-    assertInstanceOf(PostgresqlStorageUploadOperationLock.class, storageUploadOperationLock);
+    assertInstanceOf(StorageUploadOperationLock.class, storageUploadOperationLock);
     UUID uploadId = UUID.randomUUID();
     try (StorageUploadOperationLock.Handle held = storageUploadOperationLock.tryAcquire(uploadId)) {
       assertNotNull(held, "a free upload key must be acquired through the wired bean");

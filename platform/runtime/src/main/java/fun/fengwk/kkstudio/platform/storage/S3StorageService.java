@@ -1,59 +1,197 @@
 package fun.fengwk.kkstudio.platform.storage;
 
+import org.springframework.util.Assert;
+import org.springframework.util.StringUtils;
+import software.amazon.awssdk.awscore.AwsRequestOverrideConfiguration;
 import software.amazon.awssdk.awscore.exception.AwsServiceException;
+import software.amazon.awssdk.core.ResponseInputStream;
+import software.amazon.awssdk.core.sync.RequestBody;
+import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.ChecksumMode;
+import software.amazon.awssdk.services.s3.model.CopyObjectRequest;
+import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectResponse;
+import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
+import software.amazon.awssdk.services.s3.model.HeadObjectResponse;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
+import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectResponse;
 
+import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
+import fun.fengwk.kkstudio.platform.storage.error.StorageReadTimeoutException;
+
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
+import java.io.UncheckedIOException;
+import java.time.Duration;
+import java.util.Base64;
+import java.util.Objects;
 
 /**
  * S3 存储服务.
  *
+ * <p>固定单一 bucket 的对象读写：上传（可选预计算 SHA-256）、存在性/元数据 HEAD（含 checksum mode）、对象复制、带预算的读取与幂等删除。 所有 key
+ * 都先经过 {@link S3ObjectKeyNormalizer} 规范化，缺少非负 Content-Length 的响应直接失败。
+ *
  * @author fengwk
  */
-public interface S3StorageService {
+public class S3StorageService {
+
+  private final S3StorageProperties properties;
+  private final S3Client s3Client;
+
+  public S3StorageService(S3StorageProperties properties, S3Client s3Client) {
+    this.properties = Objects.requireNonNull(properties, "properties must not be null");
+    this.s3Client = Objects.requireNonNull(s3Client, "s3Client must not be null");
+  }
 
   /** 无预计算 checksum 的上传；不会要求 SDK 生成 SHA-256 trailer。 */
-  default PutObjectResponse putObject(
+  public PutObjectResponse putObject(
       String key, InputStream content, long contentLength, String contentType) {
     return putObject(key, content, contentLength, contentType, null);
   }
 
-  /** 上传时可提供预计算的 SHA-256（32 字节摘要的 Base64）；null 表示不提供 checksum。 */
-  PutObjectResponse putObject(
+  public PutObjectResponse putObject(
       String key,
       InputStream content,
       long contentLength,
       String contentType,
-      String checksumSHA256);
+      String checksumSHA256) {
+    Objects.requireNonNull(content, "content must not be null");
+    Assert.isTrue(contentLength >= 0L, "contentLength must be greater than or equal to 0");
+    String normalizedKey = S3ObjectKeyNormalizer.normalize(key);
+    PutObjectRequest.Builder builder =
+        PutObjectRequest.builder().bucket(properties.getBucket()).key(normalizedKey);
+    if (checksumSHA256 != null) {
+      byte[] digest;
+      try {
+        digest = Base64.getDecoder().decode(checksumSHA256);
+      } catch (IllegalArgumentException error) {
+        throw new IllegalArgumentException("checksumSHA256 must be a Base64 SHA-256 digest", error);
+      }
+      Assert.isTrue(
+          digest.length == 32 && Base64.getEncoder().encodeToString(digest).equals(checksumSHA256),
+          "checksumSHA256 must be a Base64 SHA-256 digest");
+      builder.checksumSHA256(checksumSHA256);
+    }
+    if (StringUtils.hasText(contentType)) {
+      builder.contentType(contentType);
+    }
+    return s3Client.putObject(builder.build(), RequestBody.fromInputStream(content, contentLength));
+  }
 
-  boolean exists(String key);
+  public boolean exists(String key) {
+    String normalizedKey = S3ObjectKeyNormalizer.normalize(key);
+    try {
+      s3Client.headObject(
+          HeadObjectRequest.builder().bucket(properties.getBucket()).key(normalizedKey).build());
+      return true;
+    } catch (NoSuchKeyException e) {
+      return false;
+    } catch (AwsServiceException e) {
+      if (e.statusCode() == 404) {
+        return false;
+      }
+      throw e;
+    }
+  }
 
-  S3ObjectMetadata headObject(String key);
+  public S3ObjectMetadata headObject(String key) {
+    String normalizedKey = S3ObjectKeyNormalizer.normalize(key);
+    HeadObjectResponse response =
+        s3Client.headObject(
+            HeadObjectRequest.builder().bucket(properties.getBucket()).key(normalizedKey).build());
+    Long contentLength = response.contentLength();
+    Assert.isTrue(
+        contentLength != null && contentLength >= 0L,
+        "S3 HEAD response must report a non-negative content length for key: " + normalizedKey);
+    return new S3ObjectMetadata(contentLength, response.contentType(), response.eTag());
+  }
 
-  S3ObjectStream readObject(String key);
+  public S3ObjectMetadata headObjectWithChecksum(String key) {
+    String normalizedKey = S3ObjectKeyNormalizer.normalize(key);
+    HeadObjectResponse response =
+        s3Client.headObject(
+            HeadObjectRequest.builder()
+                .bucket(properties.getBucket())
+                .key(normalizedKey)
+                .checksumMode(ChecksumMode.ENABLED)
+                .build());
+    Long contentLength = response.contentLength();
+    Assert.isTrue(
+        contentLength != null && contentLength >= 0L,
+        "S3 HEAD response must report a non-negative content length for key: " + normalizedKey);
+    return new S3ObjectMetadata(
+        contentLength, response.contentType(), response.eTag(), response.checksumSHA256());
+  }
 
-  /**
-   * 在冻结的绝对截止时间内读取对象。
-   *
-   * <p>实现应把剩余预算应用到 S3 请求的 {@code apiCallTimeout}（同步 getObject 的返回流不受 apiCallTimeout 约束，
-   * 只用于约束响应头握手），截止已过时必须在发起请求前失败。
-   *
-   * <p>握手阶段的超时表现为 SDK 的 {@code ApiCallTimeoutException}（apiCallTimeout 在响应头返回后即取消计时器），
-   * 读取边界会把它翻译为受管资源读取超时。响应体消费阶段的截止由读取边界负责。
-   *
-   * @throws fun.fengwk.kkstudio.platform.storage.error.StorageReadTimeoutException 截止时间已过、尚未发起请求
-   */
-  S3ObjectStream readObject(String key, ReadDeadline deadline);
+  public void copyObject(String sourceKey, String targetKey) {
+    String normalizedSource = S3ObjectKeyNormalizer.normalize(sourceKey);
+    String normalizedTarget = S3ObjectKeyNormalizer.normalize(targetKey);
+    s3Client.copyObject(
+        CopyObjectRequest.builder()
+            .sourceBucket(properties.getBucket())
+            .sourceKey(normalizedSource)
+            .destinationBucket(properties.getBucket())
+            .destinationKey(normalizedTarget)
+            .build());
+  }
 
-  void deleteObject(String key);
+  public S3ObjectStream readObject(String key) {
+    String normalizedKey = S3ObjectKeyNormalizer.normalize(key);
+    return readObject(
+        GetObjectRequest.builder().bucket(properties.getBucket()).key(normalizedKey).build(),
+        normalizedKey);
+  }
+
+  public S3ObjectStream readObject(String key, ReadDeadline deadline) {
+    Objects.requireNonNull(deadline, "deadline must not be null");
+    String normalizedKey = S3ObjectKeyNormalizer.normalize(key);
+    Duration remaining = deadline.remaining();
+    if (remaining.isZero()) {
+      throw new StorageReadTimeoutException(
+          "S3 GET deadline exceeded before request for key: " + normalizedKey);
+    }
+    // 同步 getObject 的 apiCallTimeout 只覆盖到响应头返回，因此这里只用于约束握手；
+    // 响应体的绝对截止由读取边界的看门狗在到点时 abort 响应流。
+    GetObjectRequest request =
+        GetObjectRequest.builder()
+            .bucket(properties.getBucket())
+            .key(normalizedKey)
+            .overrideConfiguration(
+                AwsRequestOverrideConfiguration.builder().apiCallTimeout(remaining).build())
+            .build();
+    return readObject(request, normalizedKey);
+  }
+
+  private S3ObjectStream readObject(GetObjectRequest request, String normalizedKey) {
+    ResponseInputStream<GetObjectResponse> response = s3Client.getObject(request);
+    Long contentLength = response.response().contentLength();
+    if (contentLength == null || contentLength < 0L) {
+      response.abort();
+      throw new IllegalArgumentException(
+          "S3 GET response must report a non-negative content length for key: " + normalizedKey);
+    }
+    return new S3ObjectStream(
+        response,
+        new S3ObjectMetadata(
+            contentLength, response.response().contentType(), response.response().eTag()));
+  }
+
+  public void deleteObject(String key) {
+    String normalizedKey = S3ObjectKeyNormalizer.normalize(key);
+    s3Client.deleteObject(
+        DeleteObjectRequest.builder().bucket(properties.getBucket()).key(normalizedKey).build());
+  }
 
   /**
    * 幂等删除：对象不存在（404）时静默成功，其它 S3 错误照常抛出。
    *
-   * <p>新存储基础依赖该语义清理临时对象与两阶段删除的 blob 对象； 未实现的实现会抛出 {@link UnsupportedOperationException}。
+   * <p>新存储基础依赖该语义清理临时对象与两阶段删除的 blob 对象。
    */
-  default void deleteObjectIfExists(String key) {
+  public void deleteObjectIfExists(String key) {
     try {
       deleteObject(key);
     } catch (NoSuchKeyException e) {
@@ -65,20 +203,32 @@ public interface S3StorageService {
     }
   }
 
-  /**
-   * 以 checksum mode（{@code x-amz-checksum-mode: ENABLED}）HEAD 对象，返回带 {@code checksumSha256}
-   * 的元数据，用于服务端校验浏览器直传内容的完整性。
-   */
-  S3ObjectMetadata headObjectWithChecksum(String key);
+  public byte[] download(String key) {
+    try (S3ObjectStream object = readObject(key)) {
+      return object.inputStream().readAllBytes();
+    } catch (IOException e) {
+      throw new UncheckedIOException("Failed to read S3 object: " + key, e);
+    }
+  }
 
-  /** 在同一固定 bucket 内复制对象（保留源对象元数据）。目标 key 已存在时按内容幂等覆盖。 */
-  void copyObject(String sourceKey, String targetKey);
-
-  byte[] download(String key);
-
-  /**
-   * 从固定 bucket 读取对象并强制大小上限。实现应先 HEAD 校验声明长度，再下载并复核实际字节数；任一阶段超过上限都抛出 {@link
-   * IllegalArgumentException}，避免把超大对象加载到 ComfyUI 等下游消费方。
-   */
-  S3ObjectContent download(String key, long maxSizeBytes);
+  public S3ObjectContent download(String key, long maxSizeBytes) {
+    Assert.isTrue(maxSizeBytes >= 0L, "maxSizeBytes must be greater than or equal to 0");
+    S3ObjectMetadata head = headObject(key);
+    Assert.isTrue(head.contentLength() <= maxSizeBytes, "S3 object exceeds max input file size");
+    try (S3ObjectStream object = readObject(key);
+        ByteArrayOutputStream output =
+            new ByteArrayOutputStream((int) Math.min(head.contentLength(), 8192L))) {
+      byte[] buffer = new byte[8192];
+      long total = 0L;
+      int read;
+      while ((read = object.inputStream().read(buffer)) != -1) {
+        total += read;
+        Assert.isTrue(total <= maxSizeBytes, "S3 object exceeds max input file size");
+        output.write(buffer, 0, read);
+      }
+      return new S3ObjectContent(output.toByteArray(), object.metadata().contentType());
+    } catch (IOException e) {
+      throw new UncheckedIOException("Failed to read S3 object: " + key, e);
+    }
+  }
 }
