@@ -1,0 +1,90 @@
+syntax = "proto3";
+
+package kkstudio.environment.control.v8;
+
+option java_package = "fun.fengwk.kkstudio.harness.environment.protocol";
+option java_multiple_files = true;
+option java_outer_classname = "ControlProto";
+
+// Daemon <-> Studio 控制协议 v8 的单一事实源。
+//
+// <p>当前检查点只冻结 INVOKE、COMPLETED 与 EXECUTION_EXITED；其它 v8 消息在各自切片加入，不在此
+// 伪造占位 payload。消息类型和 envelope payload 使用 v8 的最终字段号，后续增加消息不需要重编号。
+//
+// <p>wire 使用 protobuf binary，每条外层控制消息带 4 字节 big-endian 长度前缀（长度不含前缀）。
+// 任意 JSON 载荷始终以原始 JSON string 承载，不映射为 Struct；解码只校验文本，不重新序列化，
+// 因此指数、高精度小数和 -0 可以逐字保留。
+enum MessageType {
+  MESSAGE_TYPE_UNSPECIFIED = 0;
+
+  INVOKE = 5;
+  COMPLETED = 8;
+  EXECUTION_EXITED = 14;
+}
+
+message Envelope {
+  optional int32 protocol_version = 1;
+  MessageType message_type = 2;
+  optional string environment_id = 3;
+  optional string invocation_id = 4;
+
+  reserved 5 to 9;
+  reserved 100, 101;
+
+  oneof payload {
+    Invoke invoke = 14;
+    Completed completed = 17;
+    ExecutionExited execution_exited = 23;
+  }
+}
+
+message Invoke {
+  optional string capability_id = 1;
+  optional string capability_version = 2;
+  optional string arguments_json = 3;
+  optional int64 timeout_millis = 4;
+  optional ExpectedFile expected_file = 5;
+}
+
+message ExpectedFile {
+  optional string path = 1;
+  optional string sha256 = 2;
+}
+
+message Completed {
+  optional CapabilityResult result = 1;
+}
+
+message CapabilityResult {
+  optional string call_id = 1;
+  optional bool error = 2;
+  optional string details_json = 3;
+  repeated Content contents = 4;
+}
+
+message Content {
+  oneof body {
+    TextContent text = 1;
+    JsonContent json = 2;
+    ResourceContent resource = 3;
+  }
+}
+
+message TextContent {
+  optional string text = 1;
+}
+
+message JsonContent {
+  optional string json = 1;
+}
+
+message ResourceContent {
+  optional string upload_id = 1;
+  optional string media_type = 2;
+  optional string name = 3;
+  optional int64 size = 4;
+  optional string sha256 = 5;
+  optional string preview = 6;
+}
+
+message ExecutionExited {}

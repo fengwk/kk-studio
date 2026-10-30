@@ -1,0 +1,605 @@
+package fun.fengwk.kkstudio.harness.environment.protocol;
+
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+
+import com.google.protobuf.UnknownFieldSet;
+import org.junit.jupiter.api.Test;
+
+import java.io.IOException;
+
+/** v8 三条首批控制消息的 binary golden 与应用层边界测试。 */
+class ControlProtocolCodecTest {
+
+  /** 三条消息的 Java 构造结果必须与 TS 生成的共享 golden 逐字节一致。 */
+  @Test
+  void encodesFixtureMessagesToSharedGolden() throws IOException {
+    assertArrayEquals(
+        ControlProtocolFixtures.golden("invoke.bin"),
+        ControlProtocolCodec.encodeBinary(ControlProtocolFixtures.invokeEnvelope()));
+    assertArrayEquals(
+        ControlProtocolFixtures.golden("completed.bin"),
+        ControlProtocolCodec.encodeBinary(ControlProtocolFixtures.completedEnvelope()));
+    assertArrayEquals(
+        ControlProtocolFixtures.golden("execution-exited.bin"),
+        ControlProtocolCodec.encodeBinary(ControlProtocolFixtures.executionExitedEnvelope()));
+  }
+
+  /** 共享 golden 解码后重新编码必须逐字节相同，裸消息和帧路径都要覆盖。 */
+  @Test
+  void roundtripsSharedGoldenByteForByte() throws IOException {
+    for (String name : new String[] {"invoke.bin", "completed.bin", "execution-exited.bin"}) {
+      byte[] golden = ControlProtocolFixtures.golden(name);
+      assertArrayEquals(
+          golden, ControlProtocolCodec.encodeBinary(ControlProtocolCodec.decodeBinary(golden)));
+      byte[] framed = ControlProtocolCodec.encodeFrame(ControlProtocolCodec.decodeBinary(golden));
+      assertArrayEquals(
+          golden, ControlProtocolCodec.encodeBinary(ControlProtocolCodec.decodeFrame(framed)));
+    }
+  }
+
+  /** opaque JSON 只校验、不重序列化：指数、高精度小数和 -0 必须逐字保留。 */
+  @Test
+  void preservesOpaqueJsonText() throws IOException {
+    Envelope invoke =
+        ControlProtocolCodec.decodeBinary(ControlProtocolFixtures.golden("invoke.bin"));
+    assertEquals(ControlProtocolFixtures.ARGUMENTS_JSON, invoke.getInvoke().getArgumentsJson());
+
+    Envelope completed =
+        ControlProtocolCodec.decodeBinary(ControlProtocolFixtures.golden("completed.bin"));
+    CapabilityResult result = completed.getCompleted().getResult();
+    assertEquals(ControlProtocolFixtures.DETAILS_JSON, result.getDetailsJson());
+    assertEquals(ControlProtocolFixtures.JSON_CONTENT, result.getContents(1).getJson().getJson());
+  }
+
+  /** 空 text 是合法业务值；present 与内容非空不是同一个约束。 */
+  @Test
+  void allowsEmptyTextContent() {
+    ControlProtocolCodec.encodeBinary(ControlProtocolFixtures.completedEnvelopeWithText(""));
+  }
+
+  /** envelope、Invoke、Content 的未知 protobuf 字段都递归拒绝。 */
+  @Test
+  void rejectsUnknownFieldsRecursively() throws IOException {
+    UnknownFieldSet unknown =
+        UnknownFieldSet.newBuilder()
+            .addField(100, UnknownFieldSet.Field.newBuilder().addVarint(1).build())
+            .build();
+
+    Envelope envelopeUnknown =
+        ControlProtocolFixtures.executionExitedEnvelope().toBuilder()
+            .mergeUnknownFields(unknown)
+            .build();
+    assertThrows(
+        ControlProtocolException.class, () -> ControlProtocolCodec.encodeBinary(envelopeUnknown));
+
+    Envelope invokeUnknown =
+        ControlProtocolFixtures.invokeEnvelope().toBuilder()
+            .setInvoke(
+                ControlProtocolFixtures.invokeEnvelope().getInvoke().toBuilder()
+                    .mergeUnknownFields(unknown))
+            .build();
+    assertThrows(
+        ControlProtocolException.class, () -> ControlProtocolCodec.encodeBinary(invokeUnknown));
+
+    Envelope completed = ControlProtocolFixtures.completedEnvelope();
+    CapabilityResult result = completed.getCompleted().getResult();
+    Content contentWithUnknown =
+        result.getContents(0).toBuilder().mergeUnknownFields(unknown).build();
+    CapabilityResult resultWithUnknown =
+        result.toBuilder().setContents(0, contentWithUnknown).build();
+    Envelope completedUnknown =
+        completed.toBuilder()
+            .setCompleted(completed.getCompleted().toBuilder().setResult(resultWithUnknown))
+            .build();
+    assertThrows(
+        ControlProtocolException.class, () -> ControlProtocolCodec.encodeBinary(completedUnknown));
+
+    byte[] golden = ControlProtocolFixtures.golden("invoke.bin");
+    byte[] withUnknown = new byte[golden.length + 3];
+    System.arraycopy(golden, 0, withUnknown, 0, golden.length);
+    withUnknown[golden.length] = (byte) 0xa0;
+    withUnknown[golden.length + 1] = 0x06;
+    withUnknown[golden.length + 2] = 0x01;
+    assertThrows(
+        ControlProtocolException.class, () -> ControlProtocolCodec.decodeBinary(withUnknown));
+  }
+
+  /** 嵌入 JSON 的重复 key、非法 JSON 和缺失必填都必须拒绝。 */
+  @Test
+  void rejectsInvalidJsonAndMissingRequiredFields() {
+    Envelope duplicateKey =
+        ControlProtocolFixtures.invokeEnvelope().toBuilder()
+            .setInvoke(
+                ControlProtocolFixtures.invokeEnvelope().getInvoke().toBuilder()
+                    .setArgumentsJson("{\"a\":1,\"a\":2}"))
+            .build();
+    assertThrows(
+        ControlProtocolException.class, () -> ControlProtocolCodec.encodeBinary(duplicateKey));
+
+    Envelope invalidJson =
+        ControlProtocolFixtures.invokeEnvelope().toBuilder()
+            .setInvoke(
+                ControlProtocolFixtures.invokeEnvelope().getInvoke().toBuilder()
+                    .setArgumentsJson("{\"a\":}"))
+            .build();
+    assertThrows(
+        ControlProtocolException.class, () -> ControlProtocolCodec.encodeBinary(invalidJson));
+
+    Envelope missingCapabilityId =
+        ControlProtocolFixtures.invokeEnvelope().toBuilder()
+            .setInvoke(
+                Invoke.newBuilder()
+                    .setCapabilityVersion(ControlProtocolFixtures.CAPABILITY_VERSION)
+                    .setArgumentsJson("{}")
+                    .setTimeoutMillis(0))
+            .build();
+    assertThrows(
+        ControlProtocolException.class,
+        () -> ControlProtocolCodec.encodeBinary(missingCapabilityId));
+  }
+
+  /** 安全整数、UTF-8 字节上限、媒体类型、SHA 和 UUID 都在应用层拒绝。 */
+  @Test
+  void rejectsOutOfRangeAndInvalidText() {
+    Envelope unsafeTimeout =
+        ControlProtocolFixtures.invokeEnvelope().toBuilder()
+            .setInvoke(
+                ControlProtocolFixtures.invokeEnvelope().getInvoke().toBuilder()
+                    .setTimeoutMillis(ControlProtocolCodec.MAX_SAFE_INTEGER + 1))
+            .build();
+    assertThrows(
+        ControlProtocolException.class, () -> ControlProtocolCodec.encodeBinary(unsafeTimeout));
+
+    Envelope longName =
+        ControlProtocolFixtures.completedEnvelope().toBuilder()
+            .setCompleted(
+                Completed.newBuilder()
+                    .setResult(
+                        CapabilityResult.newBuilder()
+                            .setCallId(ControlProtocolFixtures.CALL_ID)
+                            .setError(false)
+                            .setDetailsJson("{}")
+                            .addContents(
+                                ControlProtocolFixtures.resource(
+                                    "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+                                    "text/plain",
+                                    "x".repeat(ControlProtocolCodec.MAX_NAME_UTF8_BYTES + 1),
+                                    0,
+                                    "b".repeat(64),
+                                    null))))
+            .build();
+    assertThrows(ControlProtocolException.class, () -> ControlProtocolCodec.encodeBinary(longName));
+
+    Envelope badResource =
+        ControlProtocolFixtures.completedEnvelope().toBuilder()
+            .setCompleted(
+                Completed.newBuilder()
+                    .setResult(
+                        CapabilityResult.newBuilder()
+                            .setCallId(ControlProtocolFixtures.CALL_ID)
+                            .setError(false)
+                            .setDetailsJson("{}")
+                            .addContents(
+                                ControlProtocolFixtures.resource(
+                                    "not-a-uuid", "TEXT/PLAIN", null, 0, "not-sha", null))))
+            .build();
+    assertThrows(
+        ControlProtocolException.class, () -> ControlProtocolCodec.encodeBinary(badResource));
+  }
+
+  /** messageType、payload 与 scope 必须相互匹配，且 envelope 必须是最新协议版本。 */
+  @Test
+  void rejectsProtocolAndScopeMismatches() {
+    Envelope payloadMismatch =
+        ControlProtocolFixtures.invokeEnvelope().toBuilder()
+            .setMessageType(MessageType.COMPLETED)
+            .build();
+    assertThrows(
+        ControlProtocolException.class, () -> ControlProtocolCodec.encodeBinary(payloadMismatch));
+
+    Envelope unspecified =
+        ControlProtocolFixtures.invokeEnvelope().toBuilder()
+            .setMessageType(MessageType.MESSAGE_TYPE_UNSPECIFIED)
+            .build();
+    assertThrows(
+        ControlProtocolException.class, () -> ControlProtocolCodec.encodeBinary(unspecified));
+
+    Envelope wrongVersion =
+        ControlProtocolFixtures.invokeEnvelope().toBuilder().setProtocolVersion(7).build();
+    assertThrows(
+        ControlProtocolException.class, () -> ControlProtocolCodec.encodeBinary(wrongVersion));
+
+    Envelope missingInvocation =
+        ControlProtocolFixtures.invokeEnvelope().toBuilder().clearInvocationId().build();
+    assertThrows(
+        ControlProtocolException.class, () -> ControlProtocolCodec.encodeBinary(missingInvocation));
+
+    Envelope invalidEnvironment =
+        ControlProtocolFixtures.invokeEnvelope().toBuilder().setEnvironmentId("not-a-uuid").build();
+    assertThrows(
+        ControlProtocolException.class,
+        () -> ControlProtocolCodec.encodeBinary(invalidEnvironment));
+  }
+
+  /** 非法 UTF-8 wire、超过内容条数和空裸消息都在解析/长度边界拒绝。 */
+  @Test
+  void rejectsMalformedWireAndContentOverflow() {
+    assertThrows(
+        ControlProtocolException.class,
+        () -> ControlProtocolCodec.decodeBinary(new byte[] {0x1a, 0x01, (byte) 0xff}));
+
+    CapabilityResult.Builder result =
+        CapabilityResult.newBuilder()
+            .setCallId(ControlProtocolFixtures.CALL_ID)
+            .setError(false)
+            .setDetailsJson("{}");
+    for (int index = 0; index <= ControlProtocolCodec.MAX_CONTENT_ITEMS; index++) {
+      result.addContents(ControlProtocolFixtures.text("x"));
+    }
+    Envelope tooManyContents =
+        ControlProtocolFixtures.completedEnvelope().toBuilder()
+            .setCompleted(Completed.newBuilder().setResult(result))
+            .build();
+    assertThrows(
+        ControlProtocolException.class, () -> ControlProtocolCodec.encodeBinary(tooManyContents));
+
+    assertThrows(
+        ControlProtocolException.class, () -> ControlProtocolCodec.decodeBinary(new byte[0]));
+    assertThrows(
+        ControlProtocolException.class,
+        () -> ControlProtocolCodec.decodeBinary(new byte[ControlFraming.MAX_MESSAGE_BYTES + 1]));
+  }
+
+  /** 结构缺字段、空 oneof body 和非法 capability/expectedFile 都必须拒绝。 */
+  @Test
+  void rejectsMissingStructureAndInvalidInvokeMetadata() {
+    assertThrows(ControlProtocolException.class, () -> ControlProtocolCodec.encodeBinary(null));
+    assertThrows(
+        ControlProtocolException.class,
+        () -> ControlProtocolCodec.decodeBinary(new byte[] {(byte) 0xff}));
+
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                ControlProtocolFixtures.envelope(
+                    MessageType.COMPLETED,
+                    Envelope.newBuilder().setCompleted(Completed.getDefaultInstance()))));
+
+    CapabilityResult noError =
+        CapabilityResult.newBuilder()
+            .setCallId(ControlProtocolFixtures.CALL_ID)
+            .setDetailsJson("{}")
+            .build();
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                ControlProtocolFixtures.envelope(
+                    MessageType.COMPLETED,
+                    Envelope.newBuilder()
+                        .setCompleted(Completed.newBuilder().setResult(noError)))));
+
+    CapabilityResult noBody =
+        CapabilityResult.newBuilder()
+            .setCallId(ControlProtocolFixtures.CALL_ID)
+            .setError(false)
+            .setDetailsJson("{}")
+            .addContents(Content.getDefaultInstance())
+            .build();
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                ControlProtocolFixtures.envelope(
+                    MessageType.COMPLETED,
+                    Envelope.newBuilder().setCompleted(Completed.newBuilder().setResult(noBody)))));
+
+    CapabilityResult missingJson =
+        CapabilityResult.newBuilder()
+            .setCallId(ControlProtocolFixtures.CALL_ID)
+            .setError(false)
+            .setDetailsJson("{}")
+            .addContents(Content.newBuilder().setJson(JsonContent.getDefaultInstance()))
+            .build();
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                ControlProtocolFixtures.envelope(
+                    MessageType.COMPLETED,
+                    Envelope.newBuilder()
+                        .setCompleted(Completed.newBuilder().setResult(missingJson)))));
+
+    Invoke missingArguments =
+        Invoke.newBuilder()
+            .setCapabilityId(ControlProtocolFixtures.CAPABILITY_ID)
+            .setCapabilityVersion(ControlProtocolFixtures.CAPABILITY_VERSION)
+            .setTimeoutMillis(0)
+            .build();
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                ControlProtocolFixtures.envelope(
+                    MessageType.INVOKE, Envelope.newBuilder().setInvoke(missingArguments))));
+
+    Invoke invalidCapability =
+        ControlProtocolFixtures.invokeEnvelope().getInvoke().toBuilder()
+            .setCapabilityId("FS.EDIT")
+            .build();
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                ControlProtocolFixtures.envelope(
+                    MessageType.INVOKE, Envelope.newBuilder().setInvoke(invalidCapability))));
+
+    Invoke expectedFileOnOtherCapability =
+        Invoke.newBuilder()
+            .setCapabilityId("fs.read")
+            .setCapabilityVersion(ControlProtocolFixtures.CAPABILITY_VERSION)
+            .setArgumentsJson("{}")
+            .setTimeoutMillis(0)
+            .setExpectedFile(
+                ExpectedFile.newBuilder()
+                    .setPath(ControlProtocolFixtures.EXPECTED_PATH)
+                    .setSha256(ControlProtocolFixtures.SHA_A))
+            .build();
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                ControlProtocolFixtures.envelope(
+                    MessageType.INVOKE,
+                    Envelope.newBuilder().setInvoke(expectedFileOnOtherCapability))));
+
+    Invoke missingExpectedSha =
+        ControlProtocolFixtures.invokeEnvelope().getInvoke().toBuilder()
+            .setExpectedFile(
+                ExpectedFile.newBuilder().setPath(ControlProtocolFixtures.EXPECTED_PATH))
+            .build();
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                ControlProtocolFixtures.envelope(
+                    MessageType.INVOKE, Envelope.newBuilder().setInvoke(missingExpectedSha))));
+
+    Invoke invalidExpectedSha =
+        ControlProtocolFixtures.invokeEnvelope().getInvoke().toBuilder()
+            .setExpectedFile(
+                ExpectedFile.newBuilder()
+                    .setPath(ControlProtocolFixtures.EXPECTED_PATH)
+                    .setSha256("A".repeat(64)))
+            .build();
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                ControlProtocolFixtures.envelope(
+                    MessageType.INVOKE, Envelope.newBuilder().setInvoke(invalidExpectedSha))));
+  }
+
+  /** 文本 blank、字符/UTF-8 上限、非法 Unicode 和非法资源元数据都必须拒绝。 */
+  @Test
+  void rejectsInvalidTextAndResourceMetadata() {
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                ControlProtocolFixtures.invokeEnvelope().toBuilder()
+                    .setInvocationId("   ")
+                    .build()));
+
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                ControlProtocolFixtures.invokeEnvelope().toBuilder()
+                    .setInvoke(
+                        ControlProtocolFixtures.invokeEnvelope().getInvoke().toBuilder()
+                            .setCapabilityVersion("x".repeat(129)))
+                    .build()));
+
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                ControlProtocolFixtures.invokeEnvelope().toBuilder()
+                    .setInvoke(
+                        ControlProtocolFixtures.invokeEnvelope().getInvoke().toBuilder()
+                            .setCapabilityVersion("\uD800"))
+                    .build()));
+
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                ControlProtocolFixtures.completedEnvelope().toBuilder()
+                    .setCompleted(
+                        Completed.newBuilder()
+                            .setResult(
+                                CapabilityResult.newBuilder()
+                                    .setCallId(ControlProtocolFixtures.CALL_ID)
+                                    .setError(false)
+                                    .setDetailsJson("{}")
+                                    .addContents(
+                                        ControlProtocolFixtures.resource(
+                                            "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+                                            "text/plain",
+                                            "a\u0000b",
+                                            0,
+                                            "b".repeat(64),
+                                            null))))
+                    .build()));
+
+    for (String invalidName : new String[] {"", "\uD800"}) {
+      assertThrows(
+          ControlProtocolException.class,
+          () ->
+              ControlProtocolCodec.encodeBinary(
+                  ControlProtocolFixtures.completedEnvelope().toBuilder()
+                      .setCompleted(
+                          Completed.newBuilder()
+                              .setResult(
+                                  CapabilityResult.newBuilder()
+                                      .setCallId(ControlProtocolFixtures.CALL_ID)
+                                      .setError(false)
+                                      .setDetailsJson("{}")
+                                      .addContents(
+                                          ControlProtocolFixtures.resource(
+                                              "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+                                              "text/plain",
+                                              invalidName,
+                                              0,
+                                              "b".repeat(64),
+                                              null))))
+                      .build()));
+    }
+
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                ControlProtocolFixtures.completedEnvelope().toBuilder()
+                    .setCompleted(
+                        Completed.newBuilder()
+                            .setResult(
+                                CapabilityResult.newBuilder()
+                                    .setCallId(ControlProtocolFixtures.CALL_ID)
+                                    .setError(false)
+                                    .setDetailsJson("{}")
+                                    .addContents(
+                                        ControlProtocolFixtures.resource(
+                                            "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+                                            "TEXT/PLAIN",
+                                            null,
+                                            0,
+                                            "b".repeat(64),
+                                            null))))
+                    .build()));
+
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                ControlProtocolFixtures.completedEnvelope().toBuilder()
+                    .setCompleted(
+                        Completed.newBuilder()
+                            .setResult(
+                                CapabilityResult.newBuilder()
+                                    .setCallId(ControlProtocolFixtures.CALL_ID)
+                                    .setError(false)
+                                    .setDetailsJson("{}")
+                                    .addContents(
+                                        Content.newBuilder()
+                                            .setResource(
+                                                ResourceContent.newBuilder()
+                                                    .setMediaType("text/plain")
+                                                    .setSize(0)
+                                                    .setSha256("b".repeat(64))))))
+                    .build()));
+
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                ControlProtocolFixtures.completedEnvelope().toBuilder()
+                    .setCompleted(
+                        Completed.newBuilder()
+                            .setResult(
+                                CapabilityResult.newBuilder()
+                                    .setCallId(ControlProtocolFixtures.CALL_ID)
+                                    .setError(false)
+                                    .setDetailsJson("{}")
+                                    .addContents(
+                                        ControlProtocolFixtures.resource(
+                                            "7C9E6679-7425-40DE-944B-E07FC1F90AE7",
+                                            "text/plain",
+                                            null,
+                                            0,
+                                            "b".repeat(64),
+                                            null))))
+                    .build()));
+  }
+
+  /** 应用层校验通过但 protobuf 序列化结果超过 16 MiB 时仍必须拒绝。 */
+  @Test
+  void rejectsOversizedSerializedEnvelope() {
+    String tooLarge = "x".repeat(ControlFraming.MAX_MESSAGE_BYTES);
+    Envelope envelope =
+        ControlProtocolFixtures.completedEnvelope().toBuilder()
+            .setCompleted(
+                Completed.newBuilder()
+                    .setResult(
+                        CapabilityResult.newBuilder()
+                            .setCallId(ControlProtocolFixtures.CALL_ID)
+                            .setError(false)
+                            .setDetailsJson("{}")
+                            .addContents(ControlProtocolFixtures.text(tooLarge))))
+            .build();
+    assertThrows(ControlProtocolException.class, () -> ControlProtocolCodec.encodeBinary(envelope));
+  }
+
+  /** opaque JSON 的 blank、非法 UTF-8、超限和非法 value 都只在边界拒绝，不做重序列化。 */
+  @Test
+  void rejectsOpaqueJsonBoundaries() {
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                ControlProtocolFixtures.invokeEnvelope().toBuilder()
+                    .setInvoke(
+                        ControlProtocolFixtures.invokeEnvelope().getInvoke().toBuilder()
+                            .setArgumentsJson("{\"a\":\"\uD800\"}"))
+                    .build()));
+
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                ControlProtocolFixtures.completedEnvelope().toBuilder()
+                    .setCompleted(
+                        Completed.newBuilder()
+                            .setResult(
+                                CapabilityResult.newBuilder()
+                                    .setCallId(ControlProtocolFixtures.CALL_ID)
+                                    .setError(false)
+                                    .setDetailsJson("   ")))
+                    .build()));
+
+    String oversizedDetails =
+        "{\"a\":\"" + "x".repeat(ControlProtocolCodec.MAX_DETAILS_JSON_UTF8_BYTES) + "\"}";
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                ControlProtocolFixtures.completedEnvelope().toBuilder()
+                    .setCompleted(
+                        Completed.newBuilder()
+                            .setResult(
+                                CapabilityResult.newBuilder()
+                                    .setCallId(ControlProtocolFixtures.CALL_ID)
+                                    .setError(false)
+                                    .setDetailsJson(oversizedDetails)))
+                    .build()));
+
+    assertThrows(
+        ControlProtocolException.class,
+        () ->
+            ControlProtocolCodec.encodeBinary(
+                ControlProtocolFixtures.completedEnvelope().toBuilder()
+                    .setCompleted(
+                        Completed.newBuilder()
+                            .setResult(
+                                CapabilityResult.newBuilder()
+                                    .setCallId(ControlProtocolFixtures.CALL_ID)
+                                    .setError(false)
+                                    .setDetailsJson("{}")
+                                    .addContents(ControlProtocolFixtures.json("{"))))
+                    .build()));
+  }
+}
