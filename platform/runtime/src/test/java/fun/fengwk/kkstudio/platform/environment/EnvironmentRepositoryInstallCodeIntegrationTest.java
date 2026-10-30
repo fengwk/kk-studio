@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.environment.repo.impl;
+package fun.fengwk.kkstudio.platform.environment;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -13,9 +13,6 @@ import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.SimpleDriverDataSource;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import fun.fengwk.kkstudio.platform.environment.RegistrationTokens;
-import fun.fengwk.kkstudio.platform.environment.repo.impl.store.EnvironmentJdbcStore;
-import fun.fengwk.kkstudio.platform.environment.service.EnvironmentInstallCodes;
 import fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport;
 
 import javax.sql.DataSource;
@@ -27,18 +24,18 @@ import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 
 /**
- * {@link PostgresqlEnvironmentRepository} 安装授权在真实 PostgreSQL 17 上的集成测试。
+ * {@link EnvironmentRepository} 安装授权在真实 PostgreSQL 17 上的集成测试。
  *
  * <p>验证目标包括：code 只落在 environment.install_code 且签发不推进版本、一次性原子兑换、数据库时间下的过期拒绝、摘要/版本不匹配安全性，以及兑换同时轮换
  * token 并递增版本。
  */
-class PostgresqlEnvironmentInstallCodeIntegrationTest {
+class EnvironmentRepositoryInstallCodeIntegrationTest {
 
   private static DataSource dataSource;
   private static JdbcClient jdbcClient;
   private static TransactionTemplate transaction;
 
-  private PostgresqlEnvironmentRepository repository;
+  private EnvironmentRepository repository;
 
   @BeforeAll
   static void beforeAll() {
@@ -58,9 +55,7 @@ class PostgresqlEnvironmentInstallCodeIntegrationTest {
       PostgresSchemaSupport.resetDatabase(conn);
       PostgresSchemaSupport.applyBaseline(conn);
     }
-    EnvironmentJdbcStore store = new EnvironmentJdbcStore(jdbcClient);
-    PostgresqlEnvironmentChangeNotifier notifier = mock(PostgresqlEnvironmentChangeNotifier.class);
-    repository = new PostgresqlEnvironmentRepository(store, notifier, jdbcClient);
+    repository = new EnvironmentRepository(jdbcClient, mock(EnvironmentChangeNotifier.class));
   }
 
   /** 测试意图：签发把严格对象写到 environment 行且不推进 CAS 版本；再次签发覆盖旧摘要。 */

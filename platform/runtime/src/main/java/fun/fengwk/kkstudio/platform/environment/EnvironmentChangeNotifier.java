@@ -1,6 +1,6 @@
-package fun.fengwk.kkstudio.platform.environment.repo.impl;
+package fun.fengwk.kkstudio.platform.environment;
 
-import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
@@ -17,20 +17,23 @@ import java.util.UUID;
  * autocommit 提前发出信号。
  */
 @Component
-public class PostgresqlEnvironmentChangeNotifier {
+public class EnvironmentChangeNotifier {
 
-  private final JdbcTemplate jdbcTemplate;
+  private final JdbcClient jdbcClient;
 
-  public PostgresqlEnvironmentChangeNotifier(JdbcTemplate jdbcTemplate) {
-    this.jdbcTemplate = Objects.requireNonNull(jdbcTemplate, "jdbcTemplate");
+  public EnvironmentChangeNotifier(JdbcClient jdbcClient) {
+    this.jdbcClient = Objects.requireNonNull(jdbcClient, "jdbcClient");
   }
 
   /** 发布指定 environment 的失效提示；调用方必须处于写事务中。 */
   public void environmentChanged(UUID environmentId) {
     Objects.requireNonNull(environmentId, "environmentId");
     requireTransaction();
-    jdbcTemplate.queryForObject(
-        "select pg_notify('environment_changed', ?)", String.class, environmentId.toString());
+    jdbcClient
+        .sql("select pg_notify('environment_changed', :environmentId)")
+        .param("environmentId", environmentId.toString())
+        .query(String.class)
+        .optional();
   }
 
   /** 校验当前线程处于真实写事务中；调用方必须在执行 SQL 之前检查，autocommit 下的写会被先行提交。 */

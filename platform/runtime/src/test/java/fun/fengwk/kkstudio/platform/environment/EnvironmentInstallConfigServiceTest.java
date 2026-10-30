@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.environment.service;
+package fun.fengwk.kkstudio.platform.environment;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -11,13 +11,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.jdbc.core.JdbcTemplate;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.platform.environment.RegistrationTokens;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
-import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
-import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
@@ -33,11 +29,10 @@ import java.util.UUID;
 class EnvironmentInstallConfigServiceTest {
   private final UUID id = UUID.randomUUID();
   private final EnvironmentRepository repo = mock(EnvironmentRepository.class);
-  private final EnvironmentServiceImpl service =
-      new EnvironmentServiceImpl(
+  private final EnvironmentService service =
+      new EnvironmentService(
           repo,
           mock(EnvironmentRegistry.class),
-          mock(JdbcTemplate.class),
           mock(SystemSettingsSnapshot.class),
           Clock.systemUTC());
 

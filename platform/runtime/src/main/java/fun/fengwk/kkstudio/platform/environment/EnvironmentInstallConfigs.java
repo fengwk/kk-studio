@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.environment.service;
+package fun.fengwk.kkstudio.platform.environment;
 
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;

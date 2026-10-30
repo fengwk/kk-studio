@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.environment.service;
+package fun.fengwk.kkstudio.platform.environment;
 
 import fun.fengwk.kkstudio.common.hash.Sha256;
 

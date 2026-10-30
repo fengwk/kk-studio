@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.environment.service;
+package fun.fengwk.kkstudio.platform.environment;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -10,16 +10,13 @@ import org.mockito.Mockito;
 import org.springframework.aop.framework.ProxyFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessResourceFailureException;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.AnnotationTransactionAttributeSource;
 import org.springframework.transaction.interceptor.TransactionInterceptor;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.platform.environment.RegistrationTokens;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
-import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
@@ -31,11 +28,11 @@ import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallCodeDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallConfigDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallConfigUpdateDTO;
 
-import java.lang.reflect.Proxy;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -49,12 +46,12 @@ import java.util.concurrent.atomic.AtomicInteger;
  * <p>验证覆盖：摘要伪造拒绝、错环境拒绝、重复兑换拒绝、新替旧 upsert 覆盖、凭据轮换 (rotate) 及配置导入 (import) 失效；
  * 跨真实服务实例共享、并发只一次原子兑换，以及脚本渲染或凭据写失败时的真实数据库事务回滚。
  */
-class PostgresqlEnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSupport {
+class EnvironmentServiceInstallCodeIntegrationTest extends PostgresSpringTestSupport {
 
   @Autowired private EnvironmentService environmentService;
   @Autowired private EnvironmentRepository environmentRepository;
+  @Autowired private EnvironmentChangeNotifier environmentChangeNotifier;
   @Autowired private EnvironmentRegistry environmentRegistry;
-  @Autowired private JdbcTemplate jdbcTemplate;
   @Autowired private JdbcClient jdbcClient;
   @Autowired private SystemSettingsSnapshot snapshot;
   @Autowired private PlatformTransactionManager transactionManager;
@@ -231,12 +228,8 @@ class PostgresqlEnvironmentServiceInstallCodeIntegrationTest extends PostgresSpr
     EnvironmentService serviceInstance1 = environmentService;
     EnvironmentService serviceInstance2 =
         transactional(
-            new EnvironmentServiceImpl(
-                environmentRepository,
-                environmentRegistry,
-                jdbcTemplate,
-                snapshot,
-                Clock.systemUTC()));
+            new EnvironmentService(
+                environmentRepository, environmentRegistry, snapshot, Clock.systemUTC()));
 
     EnvironmentInstallCodeDTO issued = serviceInstance1.issueInstallCode(envId, "1");
     assertThat(countInstallCodes(envId)).isEqualTo(1L);
@@ -344,25 +337,24 @@ class PostgresqlEnvironmentServiceInstallCodeIntegrationTest extends PostgresSpr
     EnvironmentInstallCodeDTO issued = environmentService.issueInstallCode(envId, "1");
     assertThat(countInstallCodes(envId)).isEqualTo(1L);
 
-    // 构造在 redeemInstallCode 成功写入后抛出异常的 Repository 代理
+    // 构造在 redeemInstallCode 真实写入后抛出异常的 Repository 代理
     EnvironmentRepository failingRepo =
-        (EnvironmentRepository)
-            Proxy.newProxyInstance(
-                EnvironmentRepository.class.getClassLoader(),
-                new Class<?>[] {EnvironmentRepository.class},
-                (proxy, method, args) -> {
-                  Object result = method.invoke(environmentRepository, args);
-                  if ("redeemInstallCode".equals(method.getName())) {
-                    throw new DataAccessResourceFailureException(
-                        "simulated database failure after redeem");
-                  }
-                  return result;
-                });
+        new EnvironmentRepository(jdbcClient, environmentChangeNotifier) {
+          @Override
+          public boolean redeemInstallCode(
+              UUID environmentId,
+              long expectedVersion,
+              String codeHash,
+              String registrationTokenHash) {
+            environmentRepository.redeemInstallCode(
+                environmentId, expectedVersion, codeHash, registrationTokenHash);
+            throw new DataAccessResourceFailureException("simulated database failure after redeem");
+          }
+        };
 
     EnvironmentService failingService =
         transactional(
-            new EnvironmentServiceImpl(
-                failingRepo, environmentRegistry, jdbcTemplate, snapshot, Clock.systemUTC()));
+            new EnvironmentService(failingRepo, environmentRegistry, snapshot, Clock.systemUTC()));
 
     assertThrows(
         DataAccessResourceFailureException.class,
@@ -409,7 +401,7 @@ class PostgresqlEnvironmentServiceInstallCodeIntegrationTest extends PostgresSpr
         .single();
   }
 
-  private EnvironmentService transactional(EnvironmentServiceImpl bean) {
+  private EnvironmentService transactional(EnvironmentService bean) {
     ProxyFactory proxy = new ProxyFactory(bean);
     proxy.setProxyTargetClass(true);
     proxy.addAdvice(
